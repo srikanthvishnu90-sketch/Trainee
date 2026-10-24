@@ -10,6 +10,8 @@
 //           event (updateFact merges the correction)                                       -> never trusted
 //   draft   read from the resume, never confirmed                                          -> never trusted
 //   legacy  a fact with no status, no confirmation and no provenance (a shape a reader meets) -> never trusted
+//   lost    a stored row that kept its provenance but lost its confirmation event (no chat writer leaves one; a copy or
+//           restore can)                                                                   -> never trusted
 // and each person's threads hold more than one profile: an older thread's, and a row claiming another owner.
 // What is checked is what prepareAhead hands on: the facts file the engine is given (judged by the engine's own
 // trustedManifest, as scripts/apply.ts does), the resume it prints (the renderer's own input, line by line with the facts
@@ -74,6 +76,9 @@ async function chatProfile() {
   (CareerProfile as any).confirmFact(p, country);
   // Legacy: no status, no confirmation, no provenance.
   p.facts.push({ id: "F-LEGACY", kind: "project", text: "Built the ZETAQUANT risk engine used by 300 traders" });
+  // Lost: confirmed, with the owner's provenance, but no confirmation event.
+  p.facts.push({ id: "F-NOEVENT", kind: "project", text: "Built the QUILLMARK pricing model for 30 clients", title: "", status: "confirmed",
+    needs_confirmation: false, provenance: "owner confirmed in chat (2026-09-01T00:00:00.000Z)" });
   return { p, ids: { ...ids, phone, country } };
 }
 
@@ -181,7 +186,9 @@ Deno.test({
       await t.step("the drafter: its model is given only trusted facts", () => {
         const sent = JSON.stringify(drafted[0]);
         assert(sent.includes("TEST Systems Inc"), "their confirmed work");
-        for (const w of ["Example Capital", "Investing Club", "MarketSim", "9 fictional companies", "ZETAQUANT", "OLDTHREAD"]) assert(!sent.includes(w), `the model was given ${w}`);
+        for (const w of ["Example Capital", "Investing Club", "MarketSim", "9 fictional companies", "ZETAQUANT", "QUILLMARK", "OLDTHREAD"]) {
+          assert(!sent.includes(w), `the model was given ${w}`);
+        }
       });
     } finally {
       await pg.stop();

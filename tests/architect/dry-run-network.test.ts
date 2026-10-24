@@ -7,7 +7,7 @@
 // resource from another origin before and after the form is filled. The employer logs every request it receives. What
 // the test records is what reached it; nothing beyond this page and these requests is claimed.
 import assertNode from "node:assert/strict";
-import { engineRunner, prepare } from "../../workers/career-browser/approve-first.ts";
+import { engineRunner } from "../../workers/career-browser/approve-first.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -111,37 +111,25 @@ Deno.test({
       await Deno.writeTextFile(factsPath, JSON.stringify(FACTS));
       await Deno.writeFile(resumePath, new TextEncoder().encode("%PDF-1.4\n% synthetic dry-run resume\n%%EOF\n"));
       const runEngine = engineRunner({ root: ROOT, extra: ["--state-dir", `${work}/engine-state`] });
-      const r = await prepare({ url: `${employer.base}/apply`, factsPath, resumePath, account: { epoch: 0, version: 0 }, now: Date.now(), runEngine });
-      assert(r.ready, `the dry run reached the card: ${JSON.stringify((r as any).result)}`);
-      // Let the page's own late requests (beacons, the image) arrive before reading the logs: wait until the page's four
-      // stopped writes and its one GET autosave have reported in (bounded; a fixed 500 ms was a guess on a loaded runner),
-      // then the same 500 ms more for anything that should not come.
-      const reported = () => employer.seen.filter((x) => x.path === "/stopped").length >= 4 && employer.seen.some((x) => x.path === "/went");
-      for (const end = Date.now() + 20_000; !reported() && Date.now() < end;) await new Promise((ok) => setTimeout(ok, 25));
+      // The dry run as prepare() runs it, read directly so the engine's own record of what it stopped can be checked.
+      const run = await runEngine(["--url", `${employer.base}/apply`, "--facts", factsPath, "--resume", resumePath]);
+      assert(run?.result?.reason === "dry_run", `the dry run reached the card: ${JSON.stringify(run?.result)}`);
+      // Let the page's own late requests (beacons, the image) arrive before reading the logs.
       await new Promise((ok) => setTimeout(ok, 500));
       const at = (s: Seen[]) => s.map((x) => `${x.method} ${x.path}${x.query}`);
       console.log(`employer received: ${JSON.stringify(at(employer.seen))}\nother origin received: ${JSON.stringify(at(third.seen))}`);
 
-      // 1. No write of any kind reached the employer: no submit, no autosave by POST or PUT, no beacon, no upload.
-      eq(employer.seen.filter((x) => !["GET", "HEAD"].includes(x.method)).map((x) => `${x.method} ${x.path}`), [],
-        "no POST, PUT or beacon reached the employer during a dry run");
-      eq(employer.seen.filter((x) => x.body > 0).length, 0, "no request with a body reached the employer");
-      // Each write was tried by the page and stopped by the engine (not merely never made): the resume upload too, so the
-      //    engine did put the file on the form.
-      const marks = (k: string) => employer.seen.filter((x) => x.path === `/${k}`).map((x) => new URLSearchParams(x.query).get("what")).sort();
-      eq(marks("stopped"), ["other-origin", "post-autosave", "put-autosave", "upload"], "every write the page tried was stopped");
-      eq(marks("went"), ["get-autosave"], "the only one that went is the GET");
-      // 2. What a dry run does send the employer: GETs. The page itself (one load here), and every same-origin GET the
-      //    page's own scripts make, including one that carries a typed value in its query string. The engine does not
-      //    stop a same-origin GET.
-      const gets = employer.seen.filter((x) => x.method === "GET");
-      eq(gets.filter((x) => x.path === "/apply").length, 1, "the page is loaded once");
-      eq([...new Set(gets.map((x) => x.path))].filter((p) => !["/apply", "/went", "/stopped"].includes(p)).sort(), ["/autosave-get"],
-        "apart from the page and the test's own marks, the employer saw only the page's GET autosave");
-      assert(gets.some((x) => x.path === "/autosave-get" && x.query.includes("first_name=Dryrun")),
-        "REAL GAP: a GET autosave carries the typed first name to the employer during a dry run");
-      // 3. Another origin: the image the page loads before anything is filled is fetched; once the form is filled, every
-      //    request to another origin is stopped (scripts/apply.ts: populated && !same), the typed email with it.
+      // 1. The employer received the page, and nothing else: no write, no request with a body, and (since the
+      //    discovery default deny, DISCOVERY-DEFAULT-DENY-2026-10-24.md) not the page's GET autosave either. The test's
+      //    own went/stopped marks are requests after the first value too, so they are stopped as well.
+      eq(at(employer.seen), ["GET /apply"], "the page, loaded once, is all the employer received");
+      // 2. Each write the page tried, and its GET autosave, was tried and stopped by the engine (not merely never made):
+      //    the resume upload too, so the engine did put the file on the form.
+      const stopped = (run?.evidence?.discovery?.stopped ?? []).map((x: any) => `${x.method} ${x.origin === employer.base ? "" : "other:"}${x.path}`);
+      for (const w of ["POST /autosave", "PUT /autosave", "POST /beacon", "GET /autosave-get", "POST /parse-resume", "GET other:/after-fill"]) {
+        assert(stopped.includes(w), `stopped: ${w} (${stopped.join(", ")})`);
+      }
+      // 3. Another origin: the image the page loads before anything is filled is fetched; after it, nothing.
       assert(third.seen.some((x) => x.path === "/before-fill.png"), "a resource from another origin, before the form is filled");
       eq(third.seen.filter((x) => x.path.startsWith("/after-fill")).length, 0, "after the form is filled, nothing reaches another origin");
     } finally {

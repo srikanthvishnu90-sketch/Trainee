@@ -428,6 +428,8 @@ export async function runApply(args: string[]) {
     denied = false,
     allowSubmit = false,
     populated = false,
+    stopCount = 0,
+    navigationStopped = false,
     mutations = 0,
     postStatus = 0,
     destination = "",
@@ -483,6 +485,17 @@ export async function runApply(args: string[]) {
       kind, file: path.basename(file), sha256: sha(fs.readFileSync(file)), seq, at: Date.now(),
       run_id: runId, application_id: o["application-id"] ?? null, ...extra,
     });
+  };
+  // Discovery: one stopped request, by kind, origin and path only (never its query, fragment or body).
+  const stopped = (req: any, kind: string) => {
+    stopCount++;
+    const list = evidence.discovery?.stopped;
+    if (!Array.isArray(list) || list.length >= 200) return;
+    let origin = "", p = "";
+    try { const x = new URL(req.url()); origin = x.origin; p = x.pathname.slice(0, 200); } catch { origin = "unparsed"; }
+    if (!list.some((s: any) => s.kind === kind && s.origin === origin && s.path === p && s.method === req.method())) {
+      list.push({ kind, method: req.method(), origin, path: p });
+    }
   };
   const write = (raw: any) => {
     const result = typedCode ? JSON.parse(redactCode(JSON.stringify(raw), typedCode)) : raw;
@@ -623,9 +636,48 @@ export async function runApply(args: string[]) {
   try {
     session = await helper.createSession();
     page = await session.page();
+    // Discovery (a run without --submit: preparing, and G4's prepare before the person asked) sends nothing of the person's
+    // to anyone before their approval. Default deny: from the moment the first of their values goes into the page
+    // (populated), nothing leaves the page, of any kind and to any origin: no fetch or XHR, no image, script or style, no
+    // beacon or ping, no navigation or redirect, no worker's request, no WebSocket message, nothing from a popup. Nothing
+    // is inspected for what it carries, so an encoded, shortened or transformed value is stopped the same as a plain one.
+    // Before it, the page holds nothing of theirs (a fresh browser context, service workers blocked), and reading it
+    // (loading the page, its resources, the employer's GraphQL read queries) goes on as before. What is stopped is kept in
+    // the evidence by kind, origin and path (never a query or body). An approved run (--submit) is not discovery: the
+    // person approved exactly what goes to this employer.
+    const discovery = !o.submit;
+    if (discovery) {
+      evidence.discovery = { stopped: [] };
+      // Any other page of this context (a popup, a new tab) is not this posting: nothing it asks for goes out.
+      await page.context().route("**/*", async (route: any) => {
+        try { stopped(route.request(), "popup"); } catch { /* the record is best effort */ }
+        await route.abort("blockedbyclient").catch(() => {});
+      });
+      // A socket opened before the first value stays open, but nothing the page sends on it after that goes out.
+      await page.routeWebSocket(/.*/, (ws: any) => {
+        const server = ws.connectToServer();
+        ws.onMessage((m: unknown) => {
+          if (populated) { stopped({ url: () => ws.url(), method: () => "WS", resourceType: () => "websocket" }, "websocket"); return; }
+          server.send(m);
+        });
+      });
+    }
     await page.route("**/*", async (route: any) => {
-      const req = route.request(),
-        url = new URL(req.url()),
+      const req = route.request();
+      // First, before anything that can throw: a request from a frame being torn down makes req.frame() throw, and a
+      // handler that throws does not stop its request (tests/architect/dry-run-deny.test.ts caught one going out). The
+      // page leaving the form while it holds the person's values (a script's navigation, a form sent by GET, a redirect)
+      // is not followed either: the browser then shows its own error page in place of the form, so the run ends, named
+      // (this posting cannot be prepared before the person approves it).
+      if (discovery && populated) {
+        let main = false;
+        try { main = req.isNavigationRequest() && req.frame() === page.mainFrame(); } catch { /* a detached frame */ }
+        try { stopped(req, main ? "navigation" : String(req.resourceType())); } catch { /* the record is best effort */ }
+        if (main) navigationStopped = true;
+        await route.abort("blockedbyclient").catch(() => {});
+        return;
+      }
+      const url = new URL(req.url()),
         main = req.isNavigationRequest() && req.frame() === page.mainFrame();
       const same = url.origin === u.origin;
       const sameTenant = target.local || url.pathname.split("/").filter(Boolean)[0] === target.tenant;
@@ -985,12 +1037,16 @@ export async function runApply(args: string[]) {
         }
         if (planned[f.name] && planned[f.name].label !== f.label) throw fail("FIELD_MEANING_CHANGED: " + f.name);
         const v = b.inputType === "file" ? artifact : b.inputType === "checkbox" ? yesish(f.value) : f.value;
+        const stopsBefore = stopCount;
         const filled = await send({
           type: "fill",
           binding: b,
           value: v,
           ...(b.inputType === "file" ? { filePath: o.resume } : {}),
         });
+        // A field the page completes by looking up what was typed (a location or school search) cannot be filled without
+        // sending that to the employer: before the person's approval it is not sent, and the field is theirs to approve.
+        if (filled.filled !== true && discovery && stopCount > stopsBefore) throw fail("LOOKUP_NEEDS_APPROVAL: " + f.label);
         if (filled.filled !== true) throw fail("FIELD_DID_NOT_PERSIST: " + f.label);
         planned[f.name] = f;
         values[f.name] = expected(f, b);
@@ -1400,7 +1456,8 @@ export async function runApply(args: string[]) {
     // Fenced and nothing left the browser (the one POST was refused or never made): not sent, and the posting may be
     // tried again. Fenced and the POST went out: unknown until the employer's record says otherwise; never resent.
     const sent = fenced && mutations > 0;
-    const notSentReason = evidence.transport_rejection || (denied ? "HOST_REDIRECT_REFUSED" : e.code || "DRIVER_ERROR");
+    const notSentReason = evidence.transport_rejection ||
+      (denied ? "HOST_REDIRECT_REFUSED" : navigationStopped ? "DISCOVERY_NAVIGATION_STOPPED" : e.code || "DRIVER_ERROR");
     const result = {
       state: sent ? "unknown_outcome" : "not_submitted",
       reason: sent ? "READBACK_REQUIRED" : notSentReason,
@@ -1417,6 +1474,16 @@ export async function runApply(args: string[]) {
     }
     return write(result);
   } finally {
+    // Discovery: the page is shut down before the session is. Closing a context resumes the requests its routes are still
+    // holding (found by tests/architect/dry-run-deny.test.ts: a page timer's request reached the employer ~150 ms before
+    // the run ended). So: leave the page (its scripts, timers, workers and frames stop), go offline, wait until every
+    // request already caught has been stopped, and only then close.
+    if (session && !o.submit && page) {
+      await page.goto("about:blank", { timeout: 5000 }).catch(() => {});
+      await page.context().setOffline(true).catch(() => {});
+      await page.unrouteAll({ behavior: "wait" }).catch(() => {});
+      await page.context().unrouteAll({ behavior: "wait" }).catch(() => {});
+    }
     if (session) await session.close().catch(() => {});
   }
 }

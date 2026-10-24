@@ -595,6 +595,20 @@ export async function runApply(args: string[]) {
     }
     return { ...bind(r.fields), raw: r.fields, observation: r.observation };
   }
+  // A lookup whose typed text is not its answer: a visible field with a hidden companion that only the employer's own
+  // suggestion fills (Lever: location-input -> selectedLocation). field name -> the companion's name.
+  async function lookupCompanions(names: string[]): Promise<Record<string, string>> {
+    return await page.evaluate((names: string[]) => {
+      const d = (globalThis as any).document, out: Record<string, string> = {};
+      const hidden = Array.from(d.querySelectorAll("input[type=hidden]")).map((e: any) => String(e.name || "")).filter(Boolean);
+      for (const n of names) {
+        const low = n.toLowerCase();
+        const c = hidden.find((h: string) => [`selected${low}`, `${low}_selected`, `selected_${low}`].includes(h.toLowerCase()));
+        if (c) out[n] = c;
+      }
+      return out;
+    }, names).catch(() => ({}));
+  }
   function expected(field: any, b: any) {
     if (b.inputType === "file") return artifact;
     if (b.inputType === "checkbox") return yesish(field.value);
@@ -1115,7 +1129,10 @@ export async function runApply(args: string[]) {
         // never values).
         const contract = p.needs.filter((n) => n.why).map((n) => ({ label: n.label, why: n.why }));
         evidence.trust = trustRecord(manifest);
-        return write({ state: "not_submitted", reason: "needs_answers", posting: target.key, company: target.employer, location, fields: p.needs.map((n: any) => n.label), questions, ...(contract.length ? { contract } : {}), ...(ai_policy.length ? { ai_policy } : {}) });
+        // A question that appeared only once the form was filled (a conditional one, or a later section): the
+        // application was incomplete as prepared, and the record says so.
+        const afterFill = populated ? { after_fill: true } : {};
+        return write({ state: "not_submitted", reason: "needs_answers", posting: target.key, company: target.employer, location, fields: p.needs.map((n: any) => n.label), questions, ...afterFill, ...(contract.length ? { contract } : {}), ...(ai_policy.length ? { ai_policy } : {}) });
       }
       const fields = p.fields, before = await hashApplyPayload(current.schema);
       if (readsOnly) {
@@ -1138,6 +1155,13 @@ export async function runApply(args: string[]) {
         // approved run reads it back before the click, and a difference stops it with nothing sent.
         evidence.readback = Object.fromEntries(fields.map((f: any) => [f.name, values[f.name]]));
         await unconfirmed(current, planned);
+        // What this preparation is, and is not: planned against the form as it first stands, never filled or checked
+        // on it. Whether the form asks more once filled is unknown until the approved run fills it.
+        const companions = await lookupCompanions(fields.filter((f: any) => current.bindings[f.name]?.inputType === "text").map((f: any) => f.name));
+        evidence.discovery.verification = "planned_not_fill_verified";
+        evidence.discovery.completeness = "unknown_until_filled";
+        evidence.discovery.lookups = fields.filter((f: any) => companions[f.name])
+          .map((f: any) => ({ field: f.name, label: f.label, companion: companions[f.name] }));
       } else {
         for (const f of fields) {
           // The first of the person's values goes into the page now. Discovery takes the whole context offline first, so
@@ -1303,6 +1327,16 @@ export async function runApply(args: string[]) {
       }
       const verified = await send({ type: "verify_payload", bindings: Object.values(history), payload: values });
       if (!verified.matches) throw fail("PAYLOAD_CHANGED_BEFORE_CLICK");
+      // A lookup whose typed text persisted while its hidden companion stayed empty was never resolved by the
+      // employer's own suggestion: it is not sent so.
+      const companions = await lookupCompanions(Object.keys(planned).filter((n) => history[n]?.inputType === "text"));
+      for (const [name, companion] of Object.entries(companions)) {
+        const set = await page.evaluate((c: string) => {
+          const e = (globalThis as any).document.querySelector(`input[type=hidden][name="${c.replace(/"/g, "")}"]`);
+          return !!e && String(e.value || "").trim() !== "";
+        }, companion).catch(() => false);
+        if (!set) throw fail("LOOKUP_UNRESOLVED: " + (planned[name]?.label || name));
+      }
       store.withLock(ownerLock, () => {
         const prior = store.get(id);
         if (prior && prior.state !== "not_sent") throw fail("duplicate_job");

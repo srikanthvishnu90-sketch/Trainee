@@ -80,6 +80,7 @@ const BY_DESIGN = new Set([
   "POSTING_CLOSED",
   // The discovery boundary (DISCOVERY-DEFAULT-DENY-2026-10-24.md): nothing of the person's was put into the page.
   "LOOKUP_NEEDS_APPROVAL", "MULTI_STEP_NEEDS_APPROVAL", "DISCOVERY_NAVIGATION_STOPPED", "DISCOVERY_FILL_LOCAL_ONLY",
+  "LOOKUP_UNRESOLVED",
 ]);
 const BOT_CHECK = (state: string, reason: string) =>
   (state === "needs_user" && reason === "captcha") || (state === "not_submitted" && reason === "CAPTCHA_AT_SUBMIT");

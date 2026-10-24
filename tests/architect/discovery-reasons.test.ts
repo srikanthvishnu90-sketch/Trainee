@@ -7,6 +7,7 @@ const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a,
 
 for (const reason of [
   "LOOKUP_NEEDS_APPROVAL: Location (City)", "MULTI_STEP_NEEDS_APPROVAL", "DISCOVERY_NAVIGATION_STOPPED", "DISCOVERY_FILL_LOCAL_ONLY",
+  "LOOKUP_UNRESOLVED: Location",
 ]) {
   Deno.test(`boundary reason is by design and names what stopped: ${reason}`, () => {
     const s = settle({ state: "not_submitted", reason });

@@ -18,10 +18,38 @@ approval, and reading the page must keep working.
   and the payload before the click. Any difference stops it with nothing sent (`APPROVED_APPLICATION_CHANGED`,
   `READBACK_MISMATCH`, `PAYLOAD_CHANGED_BEFORE_CLICK`, or `needs_answers` for a question it had not seen).
 
-This is sound by construction, not by measurement: the engine never issues a fill, type, select, attach or click
-command in discovery. That does not depend on how any Chromium version treats a document. What a read-only visit still
-gives the employer is said under "Before the first value" below: the visit, the address it came from, the browser's
-headers, and the employer's own analytics.
+What is claimed is narrow: **none of the person's answers is typed into the page or sent before their approval.** It
+holds by what the engine does, not by how any browser treats a document: in discovery it issues no fill, type, select,
+attach or click command.
+
+This is **not** a privacy claim about the visit itself:
+- The page loads, and so do its subresources (scripts, images, frames, other origins), as for any visitor.
+- The posting's URL goes to the employer, and it can carry data that already exists: a tracking or referral parameter
+  in the link the person was given.
+- The employer sees the visit, the address it came from, the browser's headers, and its own analytics. See "Before the
+  first value" below.
+
+**What a read-only preparation is, in the record and on the card.** It is planned, not fill-verified:
+- The stored payload carries `preparation: { verification: "planned_not_fill_verified", completeness:
+  "unknown_until_filled", lookups: [...] }`, and the engine's evidence `discovery` carries the same.
+- The card says it: "Planned from your answers; the form is not filled yet. It is filled and every answer checked on
+  the form only after you say yes. If the form then differs or asks something this card does not show, nothing is
+  sent and you are asked."
+- No card or record says the form was filled or checked before the approval. The approved run's readback, and its stop
+  before the click on any difference, are unchanged.
+- **A question that appears only once something is filled** is never assumed absent. The approved run stops with
+  nothing sent, and the queue's record says `incomplete: QUESTION_APPEARED_AFTER_FILL`, with the question
+  (`discovery-read-only.test.ts`, which reads the record and the card, not only what was sent).
+- **A lookup whose answer is a hidden companion** (Lever's `location-input` with `selectedLocation`, which only the
+  employer's suggestion fills) is flagged at preparation: `preparation.lookups`, and a card line for the field. At the
+  approved run:
+  - **Companion still empty:** `LOOKUP_UNRESOLVED`, nothing sent.
+  - **Companion filled by the page's suggestion after the yes:** `UNCONFIRMED_HIDDEN_FIELD`, nothing sent. The person
+    never approved that value.
+
+  So **the engine sends no hidden-companion lookup today**. Sending one needs the person's approval of the picked
+  value, at that stage, which is not built. Before this change, an unresolved one was sent. With the companion check
+  removed (mutation L1), the employer received `location=Oakvale, IL&selectedLocation=`.
 
 **Not chosen: filling before approval under per-class leak control** (the rest of this note). It stays in the engine
 only as `--discovery-fill`, which is refused for anything but the local test pages (`DISCOVERY_FILL_LOCAL_ONLY`), and
@@ -33,6 +61,26 @@ default for what cannot be assured is refusal. Shown here:
 - crash dumps on disk that hold the person's data (3 of 262);
 - what the browser does outside CDP: DNS, WebRTC, its own sends.
 
+### `--discovery-fill`: what "local test pages only" covers, exactly
+
+`DISCOVERY_FILL_LOCAL_ONLY` refuses the flag unless the posting is a local test page. That is decided by
+`packages/domain/150-career-portal-browser.js` `hostAllowed`, after module 149's own classification (both read, not
+changed here):
+- **Local means the posting URL's hostname is literally `127.0.0.1`.** It is an IP literal, so no name is resolved.
+- **`localhost` is not local.** Module 149 classes it, and every `*.test` host, as "sandbox". The engine refuses a
+  sandbox host over http (`DRIVER_HOST_REFUSED`), so no hosts-file entry for `localhost` comes into it. Nor do other
+  loopback addresses: `127.0.0.2` and `::1` are refused as unknown hosts. This bullet and the one before it are read
+  from the code, not tested.
+- **The main frame cannot leave the posting's origin**, in either mode. An HTTP redirect is answered by the engine's
+  own fetch with no redirect followed, and a redirect to another origin is refused. A script's navigation to another
+  origin is aborted at the route. Both end `HOST_REDIRECT_REFUSED`, and the other origin receives nothing.
+  `discovery-read-only.test.ts` checks HTTP and script redirects, in both modes.
+- **Not covered:**
+  - Subresources to other origins before the first value: scripts, images, frames. They load as on any page, from a
+    page the test itself serves.
+  - What a test page's own server does with what it receives.
+  - Anything outside the browser.
+
 ### What each choice keeps and loses
 
 | Capability | Read-only discovery (chosen) | Filled discovery (not offered for real employers) |
@@ -42,7 +90,7 @@ default for what cannot be assured is refusal. Shown here:
 | A field that does not keep its value, or reads back differently | found **after** the yes: not sent, and the person is told | found before the yes |
 | A question that appears only once something is filled (conditional) | **lost.** It is not seen before approval; the approved run stops `needs_answers` with nothing sent (`discovery-read-only.test.ts`, 141 and 156) | seen, if the fill reveals it |
 | A form with a step before its last page | **lost**: not prepared, `MULTI_STEP_NEEDS_APPROVAL` (`discovery-read-only.test.ts`) | in-page steps fillable; a navigation stops it |
-| Location or school lookups | planned text only; the approved run types it and picks a suggestion; a pick that reads back differently stops it unsent. **Not measured on a lookup fixture** | stopped at `LOOKUP_NEEDS_APPROVAL` (about 7 of 17 captured forms) |
+| Location or school lookups | a hidden-companion lookup (Lever) is flagged and **never sent** (unresolved, or picked by the page after the yes: both stop unsent, tested); a typeahead without a companion: planned text, the approved run types it, a readback difference stops it unsent (**not measured** on a typeahead fixture) | stopped at `LOOKUP_NEEDS_APPROVAL` (about 7 of 17 captured forms); the Lever pattern passed it unresolved (Muse) |
 | The 17 captured forms (`career-apply-real-forms`) | all stop at `needs_answers` before any fill with the test's facts, so they cannot show a difference: 74 of 74 engine tests pass on 156 | same |
 
 **Recommendation: read-only discovery**, as built here. It keeps prepare-ahead and costs:
@@ -70,19 +118,19 @@ next". That is a card and consent design for the owner and the coordinator, not 
 
   The filled mode is now refused for real employers, so this detector decides nothing in the product.
 
-  **The same pattern is open in the approved run:**
-  - Its readback checks the visible text, not the hidden companion. So a Lever location could be sent typed but
-    unselected.
-  - Not changed here; this is pre-existing behaviour.
-  - Proposed: treat a text field with a hidden lookup companion as a lookup, and require the companion set to the
-    chosen option before the click (a test pair on the Lever `forms-ci` fixtures).
+  **The same pattern was open in the approved run, and is now closed.** It was sent typed but unselected: mutation L1,
+  above. A flagged lookup's companion must be set before the click (`LOOKUP_UNRESOLVED`). A companion the page sets
+  after the yes is refused as unapproved. So none is sent until a stage-scoped approval exists.
 - **(c) Done.** The boundary's reasons are registered as by design in the cloud worker (`worker.ts` `BY_DESIGN`:
-  `LOOKUP_NEEDS_APPROVAL`, `MULTI_STEP_NEEDS_APPROVAL`, `DISCOVERY_NAVIGATION_STOPPED`, `DISCOVERY_FILL_LOCAL_ONLY`).
+  `LOOKUP_NEEDS_APPROVAL`, `MULTI_STEP_NEEDS_APPROVAL`, `DISCOVERY_NAVIGATION_STOPPED`, `DISCOVERY_FILL_LOCAL_ONLY`,
+  `LOOKUP_UNRESOLVED`).
   - `settle()` keeps the full reason with the field it names. It used to cut it at the colon; the class still
     decides the outcome.
   - The cloud prepare's refusal carries `stopped`, the engine's reason with its field, beside `PREPARATION_REFUSED`.
   - `prepareAhead` already records the engine's reason whole.
-  - Test: `tests/architect/discovery-reasons.test.ts`, fail-first: 4 red before, 5 green after.
+  - Test: `tests/architect/discovery-reasons.test.ts`, fail-first: red before, green after.
+  - Count correction: commit 06492962 says the cloud suites were 33/33. They were 31/31: 17 in the three cloud worker
+    files, and 14 in the two card-producer files.
 
 ## The rule (filled discovery, `--discovery-fill`, local test pages only)
 

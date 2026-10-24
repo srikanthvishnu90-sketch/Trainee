@@ -54,6 +54,36 @@ Each is lost safely: the approved run sends nothing when the page differs from w
 needs the person's approval scoped to a stage: "send these answers to this employer's own form, to see what it asks
 next". That is a card and consent design for the owner and the coordinator, not built here.
 
+### Muse's static review of fc7ac325, folded in
+
+- **(a) The filled mode stops all egress after the first value, not only navigations.** That includes same-origin
+  GraphQL reads. A form that loads a section or its options after the first answer then ends `FORM_DID_NOT_SETTLE`,
+  or is observed only in part. The read-only default has the same loss in another form: a section or option list
+  that appears only after an answer is never seen before approval. The approved run then finds the form changed and
+  stops with nothing sent (`needs_answers` or `APPROVED_APPLICATION_CHANGED`). Either way, **forms that build
+  themselves from the person's answers cannot be prepared before approval.**
+- **(b) `LOOKUP_NEEDS_APPROVAL` rests on a coincidence.** It fires only when a fill does not persist *and* a request
+  was stopped during it.
+  - A lookup whose typed text persists, while the real value sits in a hidden companion (Lever's `location-input`
+    with `selectedLocation`), passes the filled mode as prepared with the lookup unresolved.
+  - An unrelated stop can mislabel a plain failure.
+
+  The filled mode is now refused for real employers, so this detector decides nothing in the product.
+
+  **The same pattern is open in the approved run:**
+  - Its readback checks the visible text, not the hidden companion. So a Lever location could be sent typed but
+    unselected.
+  - Not changed here; this is pre-existing behaviour.
+  - Proposed: treat a text field with a hidden lookup companion as a lookup, and require the companion set to the
+    chosen option before the click (a test pair on the Lever `forms-ci` fixtures).
+- **(c) Done.** The boundary's reasons are registered as by design in the cloud worker (`worker.ts` `BY_DESIGN`:
+  `LOOKUP_NEEDS_APPROVAL`, `MULTI_STEP_NEEDS_APPROVAL`, `DISCOVERY_NAVIGATION_STOPPED`, `DISCOVERY_FILL_LOCAL_ONLY`).
+  - `settle()` keeps the full reason with the field it names. It used to cut it at the colon; the class still
+    decides the outcome.
+  - The cloud prepare's refusal carries `stopped`, the engine's reason with its field, beside `PREPARATION_REFUSED`.
+  - `prepareAhead` already records the engine's reason whole.
+  - Test: `tests/architect/discovery-reasons.test.ts`, fail-first: 4 red before, 5 green after.
+
 ## The rule (filled discovery, `--discovery-fill`, local test pages only)
 
 In `scripts/apply.ts`, **discovery** means a run without `--submit`: `approve-first.ts prepare()`, `prepare-batch`, and

@@ -41,10 +41,37 @@ first `fill`, the resume included).
 - **No shared workers.** A shared worker's requests are seen by neither request routing nor the offline switch (shown:
   one reached the employer with both in place). Discovery therefore removes `SharedWorker` from every frame before any
   page script runs (`addInitScript`). A page that needs one does not work in discovery.
-- **Teardown.** Closing a context resumes the requests its routes still hold: a page timer's request reached the
-  employer about 150 ms before a run ended. So discovery shuts the page down first, in this order: leave it for
-  `about:blank`, go offline, and wait until every request already caught has been stopped (`unrouteAll({behavior:
-  "wait"})`). Only then is the session closed.
+- **No unload handlers.** What a page sends while it is being unloaded passes the routes and the offline switch. Shown
+  on Chrome 156: the employer received the page's pagehide beacon and keepalive fetch at teardown (coordinator, at
+  1bd25593, locally and in the gate). On Chromium 141, a cross-site frame's did too. A page can also unload itself with no
+  request the routes would see (`location = "about:blank"`; shown on 156). So in every frame, before any page script,
+  discovery registers the first listener on the window for `beforeunload`, `pagehide`, `unload`, `visibilitychange`,
+  `freeze` and `pageswap`. It is capturing and stops the event there (`stopImmediatePropagation`), so none of the page's
+  own handlers runs, an `onpagehide` attribute's included. A page that needs these events does not get them in
+  discovery.
+- **No `fetchLater`.** The browser itself sends a deferred request when the page goes. It is removed from every frame,
+  as `SharedWorker` is. Seen escaping once in a standalone experiment on 156: a plain page close, routes and offline in
+  place.
+- **Scripts off, and the page closed where it is.** The engine turns script execution off in every frame of every page
+  (CDP `Emulation.setScriptExecutionDisabled`; a cross-site frame has its own session). It then waits until no stop is
+  in progress (two quiet checks, at most one second) and closes the page in place, with the routes and the offline
+  switch kept. This happens:
+  - at teardown, instead of the old order. The old order left the page for `about:blank` first, which ran the unload
+    handlers.
+  - when the page tries to leave the form after the first value. The navigation is not aborted: an aborted navigation
+    shows the browser's error page in its own process. The form, still unloading in the old process, is then out of
+    the engine's reach: its requests passed no route. Timestamps: scripts were off and no request was routed, then 10 ms
+    after the abort a timer's `GET /poll?v=…` and a frame's `GET /frame-leak?v=…` reached the employer. On Chromium 141
+    this happened in about 1 run in 15. The run ends there anyway, so the page is shut as at teardown, and the
+    navigation is never let through.
+  
+  What reached the employer in that window fits DevTools letting go of the old document once the error page commits
+  elsewhere. That is inferred from the timings, not from Chromium's source.
+
+- **Local fixtures only:** for a loopback posting the engine grants `local-network-access`. Every page the route serves
+  is answered by the engine, so Chrome 156 does not count it as local, and its local network checks refused the
+  fixture's own loopback socket (`net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS`). The socket class then went untested
+  there. A real employer is never loopback; nothing changes for it.
 
 ### Evidence (new)
 
@@ -56,14 +83,20 @@ query, a fragment or a body. `kind` is the Playwright resource type, or `navigat
 - `LOOKUP_NEEDS_APPROVAL: <field label>`: a field did not take its value during discovery, and a request was stopped
   while it was being filled. Its widget needs the employer's lookup of what was typed (a location or school search).
 - `DISCOVERY_NAVIGATION_STOPPED`: the page tried to leave the form while it held the person's values. The navigation is
-  stopped, and the browser then shows its own error page in place of the form, so the run ends. Answering the
-  navigation with 204 was tried; Playwright then waits on a navigation that never commits, and the next fill times out.
+  never let through: the page's scripts are turned off and the page is closed where it is, so the run ends.
+  - Aborting it was the first design. The browser then showed its own error page, and the form, unloading out of the
+    engine's reach, sent a timer's request (see the rule above).
+  - Answering it with 204 was also tried. Playwright then waits on a navigation that never commits, and the next fill
+    times out.
 
 Neither reason sends anything. A posting with either is not prepared before approval.
 
 ## Per class: what the employer's server received (the witness)
 
-From `tests/architect/dry-run-deny-classes.test.ts`, every case sending the person's value after the first fill.
+From `tests/architect/dry-run-deny-classes.test.ts`, every case sending the person's value after the first fill. Run
+on two browsers: Chromium 141.0.7390.37 (Playwright's chromium-1194) and Chrome for Testing 156.0.8078.4 (chromium-1248,
+the build Playwright 1.64.1 installs, and the one the coordinator and the gate run). Both as an unprivileged user, with
+a fresh HOME and the engine's own state directory per run.
 
 | Class | Old engine (8510e157) | Candidate | Guard that stops it (each shown by mutation) |
 |---|---|---|---|
@@ -77,7 +110,11 @@ From `tests/architect/dry-run-deny-classes.test.ts`, every case sending the pers
 | Redirect of a read started before the first value | (run refused for another reason) | nothing | offline switch (O1 red: the hop reached the employer) |
 | prefetch link | received | nothing | routing |
 | preconnect / dns-prefetch | nothing seen (no HTTP request; DNS not observable here) | nothing seen | not proven: DNS is not witnessed by this test |
-| pagehide beacon and keepalive fetch (teardown) | received | nothing | routing, kept until the page is shut |
+| pagehide, unload, visibilitychange senders, beacon and keepalive (teardown) | received | nothing | unload guard; scripts off at teardown (red only with both removed, G1+T2; the old about:blank teardown with no guard is red on 156) |
+| Each frame's pagehide sender, same-origin and cross-site (own process) | received (cross-site on 141 and 156) | nothing | unload guard in every frame; scripts off per frame session |
+| The page leaving for about:blank by itself, pagehide sender set | received on 156 | nothing (the run ends `DRIVER_ERROR`, not yet a named reason) | unload guard (G1 red on 156) |
+| fetchLater registered after the first value | sent at a plain page close once (standalone, 156) | the page has no fetchLater | removed (T4 red: the test sees `typeof fetchLater`) |
+| A timer firing while a stopped navigation unloads the form | (race: about 1 in 15 on 141 with the navigation aborted) | **still received, OPEN:** 3 of 40 runs on 141, 1 of 15 on 156 | closing the page in place did not close it (see Unresolved) |
 | Form sent by GET; a link's ping | refused for another reason | nothing; `DISCOVERY_NAVIGATION_STOPPED` | navigation guard |
 | Popup / new tab | (Chromium's popup blocker usually stops it) | nothing | `context.route`; proven only when the popup opens |
 
@@ -157,6 +194,35 @@ output needed by-hand correction, recorded here:
   after it is not covered. The HTTP request was admitted before any value existed.
 - **Popups:** the guard is built, but this test proves it only when Chromium's popup blocker lets the window open. In
   one run the popup was blocked before reaching the network; in another it opened and was stopped.
+- **OPEN: the page's last requests after a stopped navigation.** Scripts were off, and no request had been routed for
+  about 170 ms. Then, once the engine let go of the page (the error page committing, or now the in-place close), a
+  timer's request reached the employer unrouted: 3 in 40 runs on 141, 1 in 15 on 156.
+  - What fits the timings, inferred and not read in Chromium's source: when DevTools detaches from that document, its
+    overrides go with it (scripts-off, routes, offline), and a task it already had queued runs.
+  - Next, built separately: crash every frame's renderer (CDP `Page.crash`) before letting go. A dead renderer runs
+    nothing. In a standalone check on 156 (3 of 3), no unload sender and no 20 ms poll got out. Only the deferred
+    `fetchLater` was sent, which discovery already removes.
+- **What this does not cover** (residual, by design of what is here):
+  - A page script that ran before the init script, in a frame that was already open.
+  - A native form submission the routes do not see as a request of the page.
+  - A cross-process navigation the engine does not start.
+  - Anything the browser sends outside CDP interception: DNS, WebRTC, its own traffic, and deferred or keepalive
+    requests a document hands to the browser.
+
+  DOM listeners and scripts-off hold only where they were installed and while DevTools holds the document.
+- **The witness:** each test keeps the employer's server log open through the engine's exit and the context teardown,
+  plus 0.8 to 2.5 s after, and asserts on everything it received. It does not stop observing when the run reports.
+- **A document the engine does not unload itself.** A page that leaves for `about:blank` by itself runs no unload
+  handler (the guard), but nothing else is done for it. It ends `DRIVER_ERROR`, not a named reason. A frame that
+  navigates itself is stopped by the routes and shows an error page inside the form; whether its old document
+  lingers out of reach the way the main frame's did is not tested.
+- **The engine killed** (a timeout or SIGKILL before its `finally`): the browser shuts down on its own. The unload guard
+  is in the page, so it still holds. Scripts-off and the in-place close do not happen. Not tested.
+- **The wait for stops in progress** (at most one second) is not shown necessary by any test here. Its mutation stays
+  green.
+- **A page built to get around the guard** could create a frame before the init script runs in it and register its
+  handlers there. Not tested; the threat model here is ordinary analytics and autosave, not a page attacking the
+  engine.
 - **Status:** G4's real dry run stays unsafe to use until this is reviewed and merged. This branch is a candidate, not
   stand-alone readiness. Full CI at the exact head is owed with every push.
 - **The person's own browser** (extension path, D-017) is a different runtime with the person's own cookies. This
@@ -187,3 +253,30 @@ output needed by-hand correction, recorded here:
   pixel, the poll, the frame's and the Worker's requests, the location and school lookups and the WebSocket message,
   and the navigation reloaded the page with the email in its URL.
 - `tests/architect/dry-run-network.test.ts` (the claim check) now asserts that the GET autosave is stopped.
+- `tests/architect/dry-run-deny-classes.test.ts`, review round 2 (the coordinator's repro at 1bd25593):
+  - The fixture gained unload, visibilitychange and fetchLater senders, and each frame's pagehide sender. The
+    cross-site frame moved to `localhost`, so it is a separate site in its own process. The fixture also gained a
+    third run: the page leaving for `about:blank` by itself.
+  - **Fail-first** at 1bd25593:
+    - Chrome 156: the employer received the page's pagehide, unload and visibilitychange senders and the same-origin
+      frame's; the other origin received the cross-site frame's.
+    - Chromium 141: the cross-site frame's senders reached the other origin. The page's own were stopped, which is
+      why this passed on 141 before.
+    - About:blank run on 156, with the guard removed: received.
+  - **Mutations on 156**, each alone; red unless noted:
+    - G1 (no unload guard): red, the about:blank run.
+    - T2 (no scripts-off): green, masked by the guard.
+    - G1+T2: red.
+    - G1 with the old about:blank teardown: red.
+    - T4 (fetchLater kept): red, the page has fetchLater.
+    - S1 (SharedWorker kept): red, `/shared-leak`.
+    - L1 (no local-network grant): red, the socket from before the first value never opened.
+    - W1+O1 (frame guard and offline off): red, `WS-FRAME`.
+    - W2+O1 (connect guard and offline off): red, `WS-OPEN /ws-after`.
+  - **Navigation race (141):** with the navigation aborted into the error page, 3 runs in about 45 leaked a timer's
+    request after the navigation was stopped.
+  - With the page closed in place (this head), it still leaked: 3 of 40 runs on 141 and 1 of 15 on 156, each a
+    `GET /poll?v=Qzrina` in the navigation test.
+  - The full three-file set (classes, deny, network) was 5 of 5 green on each browser, and the classes test was green
+    in every run. So the race shows in the navigation test only, but it is real.
+  - **The gate can go red on it.**

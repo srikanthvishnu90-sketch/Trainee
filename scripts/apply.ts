@@ -486,6 +486,9 @@ export async function runApply(args: string[]) {
       run_id: runId, application_id: o["application-id"] ?? null, ...extra,
     });
   };
+  // Discovery: the stops still in progress (teardown waits for them before the page is closed).
+  const held = new Set<Promise<unknown>>();
+  const hold = (p: Promise<unknown>) => { held.add(p); return p.finally(() => held.delete(p)); };
   // Discovery: one stopped request, by kind, origin and path only (never its query, fragment or body).
   const stopped = (req: any, kind: string) => {
     stopCount++;
@@ -497,6 +500,35 @@ export async function runApply(args: string[]) {
       list.push({ kind, method: req.method(), origin, path: p });
     }
   };
+  // Discovery: the page's scripts are turned off in every frame of every page (a cross-site frame runs in its own
+  // process, with its own session), and the stops already in progress are waited for. Done before anything unloads the
+  // page: a document being unloaded runs its pagehide, unload and visibilitychange handlers and its last timers, and what
+  // it sends then passes the routes and the offline switch (dry-run-deny-classes, dry-run-deny). Returns the frames whose
+  // scripts could not be turned off.
+  let scriptsOff: Promise<number> | null = null;
+  const stopScripts = () => scriptsOff ??= (async () => {
+    const context = page.context();
+    let unshut = 0;
+    for (const p of context.pages()) {
+      for (const f of p.frames()) {
+        try {
+          const cdp = await context.newCDPSession(f === p.mainFrame() ? p : f);
+          await cdp.send("Emulation.setScriptExecutionDisabled", { value: true });
+        } catch (e: any) {
+          // A frame in its parent's process is covered by its parent's session.
+          if (!/part of the parent frame's session/.test(String(e?.message))) unshut++;
+        }
+      }
+    }
+    // Quiet for two checks in a row (no new stop, none in progress), at most one second.
+    for (let quiet = 0, seen = -1, i = 0; quiet < 2 && i < 20; i++) {
+      await new Promise((ok) => setTimeout(ok, 50));
+      await Promise.allSettled([...held]);
+      if (stopCount === seen && !held.size) quiet++;
+      else { quiet = 0; seen = stopCount; }
+    }
+    return unshut;
+  })();
   const write = (raw: any) => {
     const result = typedCode ? JSON.parse(redactCode(JSON.stringify(raw), typedCode)) : raw;
     evidence.result = result;
@@ -645,19 +677,34 @@ export async function runApply(args: string[]) {
     // (loading the page, its resources, the employer's GraphQL read queries) goes on as before. What is stopped is kept in
     // the evidence by kind, origin and path (never a query or body). An approved run (--submit) is not discovery: the
     // person approved exactly what goes to this employer.
+    // Local fixtures only (a loopback posting): every page the route serves is answered by the engine, so Chromium does
+    // not count it as local, and its local network checks (Chromium 156) refuse the page's own loopback socket. A real
+    // employer is never loopback; nothing changes for it.
+    if (target.local) await page.context().grantPermissions(["local-network-access"]).catch(() => {});
     const discovery = !o.submit;
     if (discovery) {
       evidence.discovery = { stopped: [] };
       // A shared worker's requests are seen by neither request routing nor the offline switch (dry-run-deny-classes caught
       // one going out), so a discovery page cannot make one: the constructor is gone from every frame before any of the
-      // page's own scripts run. (A page that needs one does not work in discovery.)
+      // page's own scripts run. (A page that needs one does not work in discovery.) The same for fetchLater: the browser
+      // itself sends a deferred request when the page goes, past the routes and the offline switch.
+      // What a page sends while it is being unloaded passes the routes and the offline switch too (Chromium 156), and a
+      // page can unload itself without a request the routes would see (location = "about:blank"). So none of the page's
+      // own unload handlers runs: in every frame, before any of its scripts, the first listener on the window for each of
+      // these events stops the event there (a capturing listener on the window runs before every other one, an
+      // onpagehide attribute's included).
       await page.context().addInitScript(() => {
-        try { Object.defineProperty(globalThis, "SharedWorker", { value: undefined, configurable: false, writable: false }); } catch { /* already gone */ }
+        for (const name of ["SharedWorker", "fetchLater"]) {
+          try { Object.defineProperty(globalThis, name, { value: undefined, configurable: false, writable: false }); } catch { /* already gone */ }
+        }
+        for (const type of ["beforeunload", "pagehide", "unload", "visibilitychange", "freeze", "pageswap"]) {
+          try { globalThis.addEventListener(type, (e: Event) => e.stopImmediatePropagation(), { capture: true }); } catch { /* not a window */ }
+        }
       });
       // Any other page of this context (a popup, a new tab) is not this posting: nothing it asks for goes out.
       await page.context().route("**/*", async (route: any) => {
         try { stopped(route.request(), "popup"); } catch { /* the record is best effort */ }
-        await route.abort("blockedbyclient").catch(() => {});
+        await hold(route.abort("blockedbyclient").catch(() => {}));
       });
       // A socket opened before the first value stays open, but nothing the page sends on it after that goes out; a
       // socket opened after it (its address can carry the value) is never connected.
@@ -685,8 +732,18 @@ export async function runApply(args: string[]) {
         let main = false;
         try { main = req.isNavigationRequest() && req.frame() === page.mainFrame(); } catch { /* a detached frame */ }
         try { stopped(req, main ? "navigation" : String(req.resourceType())); } catch { /* the record is best effort */ }
-        if (main) navigationStopped = true;
-        await route.abort("blockedbyclient").catch(() => {});
+        if (main) {
+          // Not aborted: an aborted navigation shows the browser's error page in its own process, and the form, unloading
+          // in the old one, is out of the engine's reach while it goes (its routes, the offline switch and scripts-off no
+          // longer hold there; a page timer's request reached the employer in that window, about 1 run in 15, on Chromium
+          // 141). The run ends here anyway, so the page is shut where it is, as at teardown: its scripts off, then closed,
+          // with the navigation never let through. The command in progress fails, and the run ends, named.
+          navigationStopped = true;
+          await stopScripts().catch(() => 0);
+          await page.close({ runBeforeUnload: false }).catch(() => {});
+          return;
+        }
+        await hold(route.abort("blockedbyclient").catch(() => {}));
         return;
       }
       const url = new URL(req.url()),
@@ -1490,15 +1547,19 @@ export async function runApply(args: string[]) {
     }
     return write(result);
   } finally {
-    // Discovery: the page is shut down before the session is. Closing a context resumes the requests its routes are still
-    // holding (found by tests/architect/dry-run-deny.test.ts: a page timer's request reached the employer ~150 ms before
-    // the run ended). So: leave the page (its scripts, timers, workers and frames stop), go offline, wait until every
-    // request already caught has been stopped, and only then close.
+    // Discovery: the page is shut down before the session is, and nothing of it runs while it goes. Leaving or closing a
+    // page runs its pagehide, unload and visibilitychange handlers, in the page and in every frame, and what they send
+    // then (a beacon, a keepalive fetch) passes the routes and the offline switch: the employer received them on Chromium
+    // 156 (coordinator, at 1bd25593), and a cross-site frame's on Chromium 141 too (dry-run-deny-classes). So, with the
+    // routes and the offline switch kept in place, the scripts are turned off (stopScripts; closing also resumes a
+    // request a route still holds, so the stops in progress are waited for), and the page is closed where it is, never
+    // navigated away.
     if (session && !o.submit && page) {
-      await page.goto("about:blank", { timeout: 5000 }).catch(() => {});
-      await page.context().setOffline(true).catch(() => {});
-      await page.unrouteAll({ behavior: "wait" }).catch(() => {});
-      await page.context().unrouteAll({ behavior: "wait" }).catch(() => {});
+      const context = page.context();
+      await context.setOffline(true).catch(() => {});
+      const unshut = await stopScripts().catch(() => 1);
+      if (unshut) console.error(`DISCOVERY_TEARDOWN: scripts not turned off in ${unshut} frame(s)`);
+      for (const p of context.pages()) await p.close({ runBeforeUnload: false }).catch(() => {});
     }
     if (session) await session.close().catch(() => {});
   }

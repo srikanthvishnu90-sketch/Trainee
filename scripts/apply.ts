@@ -500,20 +500,25 @@ export async function runApply(args: string[]) {
       list.push({ kind, method: req.method(), origin, path: p });
     }
   };
-  // Discovery: the page's scripts are turned off in every frame of every page (a cross-site frame runs in its own
-  // process, with its own session), and the stops already in progress are waited for. Done before anything unloads the
-  // page: a document being unloaded runs its pagehide, unload and visibilitychange handlers and its last timers, and what
-  // it sends then passes the routes and the offline switch (dry-run-deny-classes, dry-run-deny). Returns the frames whose
-  // scripts could not be turned off.
-  let scriptsOff: Promise<number> | null = null;
-  const stopScripts = () => scriptsOff ??= (async () => {
+  // Discovery: the page is shut where it is. Its scripts are turned off in every frame of every page (a cross-site frame
+  // runs in its own process, with its own session), the stops in progress are waited for, and then every frame's renderer
+  // is crashed (CDP Page.crash). A document the engine lets go of any other way runs on out of its reach for a moment: once
+  // DevTools leaves it (the page closing, or the browser's error page committing elsewhere), its routes, the offline
+  // switch and scripts-off go too, and what it sends then passes unrouted (dry-run-deny: a timer's request, 3 of 40 runs
+  // on 141 and 1 of 15 on 156, with scripts off and the page closed in place). A crashed renderer runs nothing: no timer,
+  // no unload handler. (The browser still sends a document's fetchLater when its renderer dies; discovery removes it.)
+  // Then the pages are closed. Returns the frames that could not be shut.
+  let shut: Promise<number> | null = null;
+  const shutPage = () => shut ??= (async () => {
     const context = page.context();
     let unshut = 0;
+    const sessions: any[] = [];
     for (const p of context.pages()) {
       for (const f of p.frames()) {
         try {
           const cdp = await context.newCDPSession(f === p.mainFrame() ? p : f);
           await cdp.send("Emulation.setScriptExecutionDisabled", { value: true });
+          sessions.push(cdp);
         } catch (e: any) {
           // A frame in its parent's process is covered by its parent's session.
           if (!/part of the parent frame's session/.test(String(e?.message))) unshut++;
@@ -526,6 +531,14 @@ export async function runApply(args: string[]) {
       await Promise.allSettled([...held]);
       if (stopCount === seen && !held.size) quiet++;
       else { quiet = 0; seen = stopCount; }
+    }
+    // The crash answers with the target gone, so its error is the expected reply.
+    await Promise.all(sessions.map((cdp) =>
+      Promise.race([cdp.send("Page.crash").catch(() => {}), new Promise((ok) => setTimeout(ok, 1000))])
+    ));
+    // Then closed: a command still waiting on a crashed page fails only when the page closes.
+    for (const p of context.pages()) {
+      await Promise.race([p.close({ runBeforeUnload: false }).catch(() => {}), new Promise((ok) => setTimeout(ok, 3000))]);
     }
     return unshut;
   })();
@@ -734,13 +747,11 @@ export async function runApply(args: string[]) {
         try { stopped(req, main ? "navigation" : String(req.resourceType())); } catch { /* the record is best effort */ }
         if (main) {
           // Not aborted: an aborted navigation shows the browser's error page in its own process, and the form, unloading
-          // in the old one, is out of the engine's reach while it goes (its routes, the offline switch and scripts-off no
-          // longer hold there; a page timer's request reached the employer in that window, about 1 run in 15, on Chromium
-          // 141). The run ends here anyway, so the page is shut where it is, as at teardown: its scripts off, then closed,
-          // with the navigation never let through. The command in progress fails, and the run ends, named.
+          // in the old one, is out of the engine's reach while it goes (a page timer's request reached the employer in
+          // that window, about 1 run in 15, on Chromium 141). The run ends here anyway, so the page is shut where it is,
+          // as at teardown, with the navigation never let through. The command in progress fails, and the run ends, named.
           navigationStopped = true;
-          await stopScripts().catch(() => 0);
-          await page.close({ runBeforeUnload: false }).catch(() => {});
+          await shutPage().catch(() => 0);
           return;
         }
         await hold(route.abort("blockedbyclient").catch(() => {}));
@@ -1551,15 +1562,13 @@ export async function runApply(args: string[]) {
     // page runs its pagehide, unload and visibilitychange handlers, in the page and in every frame, and what they send
     // then (a beacon, a keepalive fetch) passes the routes and the offline switch: the employer received them on Chromium
     // 156 (coordinator, at 1bd25593), and a cross-site frame's on Chromium 141 too (dry-run-deny-classes). So, with the
-    // routes and the offline switch kept in place, the scripts are turned off (stopScripts; closing also resumes a
-    // request a route still holds, so the stops in progress are waited for), and the page is closed where it is, never
-    // navigated away.
+    // routes and the offline switch kept in place, the page is shut (shutPage: scripts off, the stops in progress
+    // waited for, every renderer crashed, then closed), never navigated away.
     if (session && !o.submit && page) {
       const context = page.context();
       await context.setOffline(true).catch(() => {});
-      const unshut = await stopScripts().catch(() => 1);
+      const unshut = await shutPage().catch(() => 1);
       if (unshut) console.error(`DISCOVERY_TEARDOWN: scripts not turned off in ${unshut} frame(s)`);
-      for (const p of context.pages()) await p.close({ runBeforeUnload: false }).catch(() => {});
     }
     if (session) await session.close().catch(() => {});
   }

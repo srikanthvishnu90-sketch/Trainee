@@ -46,6 +46,7 @@ function server(pages: Record<string, (s: { base: string; other: string }) => st
       const { socket, response } = Deno.upgradeWebSocket(req);
       log.push(`WS-OPEN ${u.pathname}${u.search}`);
       socket.onmessage = (e) => log.push(`WS-FRAME ${u.pathname} ${String(e.data)}`);
+      socket.onclose = () => log.push(`WS-CLOSE ${u.pathname}`);
       return response;
     }
     const body = req.body ? new TextDecoder().decode(await req.arrayBuffer()) : "";
@@ -135,7 +136,9 @@ const blank = () => `${head("TEST role")}
   });
 </script>`;
 
-async function dryRun(run: "classes" | "leaving" | "blank") {
+// fill: discovery fills the form under its network guards (--discovery-fill, local pages only), what these tests witness;
+// read: the default, discovery only reads the page.
+async function dryRun(run: "classes" | "leaving" | "blank", mode: "fill" | "read" = "fill") {
   const other = server({ "/frame-cross": frameCross });
   const employer = server(run === "classes" ? { "/apply": classes, "/frame-same": frameSame } : { "/apply": run === "leaving" ? leaving : blank }, other.base);
   // The pages need each other's addresses; both servers exist before the page is asked for.
@@ -144,7 +147,7 @@ async function dryRun(run: "classes" | "leaving" | "blank") {
   try {
     await Deno.writeTextFile(`${work}/facts.json`, JSON.stringify(FACTS));
     await Deno.writeFile(`${work}/resume.pdf`, new TextEncoder().encode("%PDF-1.4\n% synthetic\n%%EOF\n"));
-    const runEngine = engineRunner({ root: ROOT, extra: ["--state-dir", `${work}/engine-state`] });
+    const runEngine = engineRunner({ root: ROOT, extra: ["--state-dir", `${work}/engine-state`, ...(mode === "fill" ? ["--discovery-fill"] : [])] });
     const result = await runEngine(["--url", `${employer.base}/apply`, "--facts", `${work}/facts.json`, "--resume", `${work}/resume.pdf`]);
     await new Promise((ok) => setTimeout(ok, 2500)); // the slow redirect, sockets, workers, unload senders
     console.log(`${run}: result ${JSON.stringify(result?.result)}\n employer: ${JSON.stringify(employer.log)}\n other: ${JSON.stringify(other.log)}`);
@@ -183,6 +186,10 @@ Deno.test({
     eq(r.employer.filter((l) => l.includes("redirect-landing")), [], "the redirect followed after the first value did not");
     // The cross-origin frame loaded (before any value): what it was passed after did not go out.
     assert(r.other.some((l) => l.startsWith("GET /frame-cross")), "the cross-origin frame loaded");
+    // At teardown the renderers are crashed: the socket from before the first value is closed by it, with no frame
+    // after the first value; and no service worker ever existed to outlive the page (none was even fetched).
+    assert(r.employer.includes("WS-CLOSE /ws-before"), "the socket from before the first value was closed");
+    eq(r.employer.filter((l) => l.startsWith("GET /sw.js")), [], "no service worker script was fetched");
     // fetchLater is gone from the discovery page (the browser itself would send its deferred request when the page goes).
     eq(r.employer.filter((l) => l.startsWith("GET /fetchlater-type")), ["GET /fetchlater-type?t=undefined"], "the page has no fetchLater");
     eq(r.result?.result?.reason, "dry_run", JSON.stringify(r.result?.result));
@@ -210,5 +217,22 @@ Deno.test({
     eq(carries(r.employer), [], "the employer received nothing carrying the person's value");
     // Not yet a named reason (the form is gone, so the run fails as a driver error); nothing was sent either way.
     eq(r.result?.result?.state, "not_submitted", JSON.stringify(r.result?.result));
+  },
+});
+
+Deno.test({
+  ...opts,
+  name: "the default boundary: discovery only reads the page; nothing of the person's is put into it, so none of it can leave",
+  async fn() {
+    if (!guard()) return;
+    const r = await dryRun("classes", "read");
+    eq(carries(r.employer), [], "the employer received nothing carrying the person's value");
+    eq(carries(r.other), [], "another origin received nothing carrying the person's value");
+    eq(r.result?.evidence?.discovery?.read_only, true, "this discovery only read the page");
+    // The page's own handlers for the person's input never ran: nothing was typed into it.
+    eq(r.employer.filter((l) => /leak|keepalive|WS-OPEN \/ws-after/.test(l)), [], "no handler of the person's input ran");
+    // Reading still works: the page, its frames and the read started before anything loaded, and the card is ready.
+    assert(r.employer.includes("GET /apply") && r.employer.includes("GET /frame-same"), "the page and its frame loaded");
+    eq(r.result?.result?.reason, "dry_run", JSON.stringify(r.result?.result));
   },
 });

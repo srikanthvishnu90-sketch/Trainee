@@ -158,6 +158,10 @@ function options(args: string[]) {
     else if (k === "--application-id" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(args[i + 1] || "")) {
       o["application-id"] = args[++i];
     }
+    // --discovery-fill: discovery fills the form, under its per-class network guards, before any approval. Local test
+    // pages only (they witness those guards). A real employer is never filled before the person approves: discovery
+    // there only reads the page (DISCOVERY-DEFAULT-DENY-2026-10-24.md, "The boundary").
+    else if (k === "--discovery-fill") o["discovery-fill"] = true;
     // --approved <hash>: the person already approved this exact application (the approval hash a dry run printed, or
     // a texted yes on its card). The run fills and reads back as always and submits without asking again only if the
     // application is still exactly the one approved; any difference stops it with nothing sent.
@@ -352,6 +356,7 @@ export async function runApply(args: string[]) {
       if (o["script-submit"] && !target.local && o["script-submit"] !== hostAllowed(u.href).atsFamily) {
         throw fail("SCRIPT_SUBMIT_FAMILY_MISMATCH");
       }
+      if (o["discovery-fill"] && (o.submit || !target.local)) throw fail("DISCOVERY_FILL_LOCAL_ONLY");
       // The loopback stand-in for Gmail is for the local test pages; a real employer's code comes from the real mailbox.
       if (o["email-code"] === "local-gmail" && !target.local) throw fail("LOCAL_GMAIL_LOCAL_ONLY");
     })(),
@@ -695,8 +700,12 @@ export async function runApply(args: string[]) {
     // employer is never loopback; nothing changes for it.
     if (target.local) await page.context().grantPermissions(["local-network-access"]).catch(() => {});
     const discovery = !o.submit;
+    // The boundary: before the person's approval nothing of theirs goes into the page. Discovery reads the form and
+    // plans every answer off the page; the approved run is the first to fill it. (Filled discovery is for the local
+    // test pages only, --discovery-fill.)
+    const readsOnly = discovery && !o["discovery-fill"];
     if (discovery) {
-      evidence.discovery = { stopped: [] };
+      evidence.discovery = { stopped: [], read_only: readsOnly };
       // A shared worker's requests are seen by neither request routing nor the offline switch (dry-run-deny-classes caught
       // one going out), so a discovery page cannot make one: the constructor is gone from every frame before any of the
       // page's own scripts run. (A page that needs one does not work in discovery.) The same for fetchLater: the browser
@@ -1109,65 +1118,87 @@ export async function runApply(args: string[]) {
         return write({ state: "not_submitted", reason: "needs_answers", posting: target.key, company: target.employer, location, fields: p.needs.map((n: any) => n.label), questions, ...(contract.length ? { contract } : {}), ...(ai_policy.length ? { ai_policy } : {}) });
       }
       const fields = p.fields, before = await hashApplyPayload(current.schema);
-      for (const f of fields) {
-        // The first of the person's values goes into the page now. Discovery takes the whole context offline first, so
-        // even what request routing does not see (a shared worker's requests, found by dry-run-deny-classes) has no
-        // network; the routes still stop and record everything they do see.
-        if (discovery && !populated) await page.context().setOffline(true);
-        populated = true;
-        const b = current.bindings[f.name];
-        if (b.inputType === "file" && classifyField(f.label, "file") !== "resume") {
-          throw fail("UNSUPPORTED_FILE_ARTIFACT: " + f.label);
+      if (readsOnly) {
+        // Read-only discovery: every answer is planned against the form as it stands, and nothing is typed, chosen,
+        // attached or clicked. A form that shows more only after something is filled or a step is taken cannot be read
+        // whole this way: it is not prepared before the person approves.
+        const controls = current.observation?.controls || [];
+        if (controls.some((c: any) => c.kind === "next")) throw fail("MULTI_STEP_NEEDS_APPROVAL");
+        if (!controls.some((c: any) => c.kind === "submit")) throw fail("FINAL_REVIEW_NOT_OBSERVED");
+        for (const f of fields) {
+          const b = current.bindings[f.name];
+          if (b.inputType === "file" && classifyField(f.label, "file") !== "resume") {
+            throw fail("UNSUPPORTED_FILE_ARTIFACT: " + f.label);
+          }
+          planned[f.name] = f;
+          values[f.name] = expected(f, b);
+          history[f.name] = b;
         }
-        if (planned[f.name] && planned[f.name].label !== f.label) throw fail("FIELD_MEANING_CHANGED: " + f.name);
-        const v = b.inputType === "file" ? artifact : b.inputType === "checkbox" ? yesish(f.value) : f.value;
-        const stopsBefore = stopCount;
-        const filled = await send({
-          type: "fill",
-          binding: b,
-          value: v,
-          ...(b.inputType === "file" ? { filePath: o.resume } : {}),
+        // What the card shows is what the answer will read as on this form (a select's own label), as planned: the
+        // approved run reads it back before the click, and a difference stops it with nothing sent.
+        evidence.readback = Object.fromEntries(fields.map((f: any) => [f.name, values[f.name]]));
+        await unconfirmed(current, planned);
+      } else {
+        for (const f of fields) {
+          // The first of the person's values goes into the page now. Discovery takes the whole context offline first, so
+          // even what request routing does not see (a shared worker's requests, found by dry-run-deny-classes) has no
+          // network; the routes still stop and record everything they do see.
+          if (discovery && !populated) await page.context().setOffline(true);
+          populated = true;
+          const b = current.bindings[f.name];
+          if (b.inputType === "file" && classifyField(f.label, "file") !== "resume") {
+            throw fail("UNSUPPORTED_FILE_ARTIFACT: " + f.label);
+          }
+          if (planned[f.name] && planned[f.name].label !== f.label) throw fail("FIELD_MEANING_CHANGED: " + f.name);
+          const v = b.inputType === "file" ? artifact : b.inputType === "checkbox" ? yesish(f.value) : f.value;
+          const stopsBefore = stopCount;
+          const filled = await send({
+            type: "fill",
+            binding: b,
+            value: v,
+            ...(b.inputType === "file" ? { filePath: o.resume } : {}),
+          });
+          // A field the page completes by looking up what was typed (a location or school search) cannot be filled without
+          // sending that to the employer: before the person's approval it is not sent, and the field is theirs to approve.
+          if (filled.filled !== true && discovery && stopCount > stopsBefore) throw fail("LOOKUP_NEEDS_APPROVAL: " + f.label);
+          if (filled.filled !== true) throw fail("FIELD_DID_NOT_PERSIST: " + f.label);
+          planned[f.name] = f;
+          values[f.name] = expected(f, b);
+          history[f.name] = b;
+          wire[f.name] = b.inputType === "file"
+            ? artifact
+            : b.inputType === "checkbox"
+            ? (v ? (current.raw.find((x: any) => (x.name || x.id) === f.name)?.optionValue || "on") : null)
+            : f.value;
+        }
+        current = await observe();
+        if (await hashApplyPayload(current.schema) !== before) continue;
+        for (const f of fields) history[f.name] = current.bindings[f.name];
+        const read = await send({ type: "readback", bindings: Object.values(history) });
+        evidence.readback = read.answers;
+        for (const [name, value] of Object.entries(values)) {
+          if (!matches(read.answers[name], value)) throw fail("READBACK_MISMATCH: " + name);
+        }
+        await unconfirmed(current, planned);
+        const review = await send({
+          type: "review",
+          // A field on the page now that was not there at this observation is new; an optional field the engine leaves
+          // alone on purpose (no name, id or field path) is not, or the run would loop on it until FORM_DID_NOT_SETTLE.
+          knownSelectors: [
+            ...Object.values(current.bindings).flatMap((b: any) =>
+              b.options?.length && ["radio_group", "checkbox_group"].includes(b.inputType)
+                ? b.options.map((x: any) => x.selector)
+                : [b.selector]
+            ),
+            ...current.raw.map((f: any) => f.selector),
+          ].filter(Boolean),
         });
-        // A field the page completes by looking up what was typed (a location or school search) cannot be filled without
-        // sending that to the employer: before the person's approval it is not sent, and the field is theirs to approve.
-        if (filled.filled !== true && discovery && stopCount > stopsBefore) throw fail("LOOKUP_NEEDS_APPROVAL: " + f.label);
-        if (filled.filled !== true) throw fail("FIELD_DID_NOT_PERSIST: " + f.label);
-        planned[f.name] = f;
-        values[f.name] = expected(f, b);
-        history[f.name] = b;
-        wire[f.name] = b.inputType === "file"
-          ? artifact
-          : b.inputType === "checkbox"
-          ? (v ? (current.raw.find((x: any) => (x.name || x.id) === f.name)?.optionValue || "on") : null)
-          : f.value;
+        if (denied || review.blockedNavigation) throw fail("HOST_REDIRECT_REFUSED");
+        if (review.captcha && !(o.handoff && await handOff())) return write({ state: "needs_user", reason: "captcha" });
+        if (review.code) throw fail(review.code);
+        if (review.advanced || review.needsFields) continue;
+        if (!review.atFinalReview) throw fail("FINAL_REVIEW_NOT_OBSERVED");
       }
-      current = await observe();
-      if (await hashApplyPayload(current.schema) !== before) continue;
-      for (const f of fields) history[f.name] = current.bindings[f.name];
-      const read = await send({ type: "readback", bindings: Object.values(history) });
-      evidence.readback = read.answers;
-      for (const [name, value] of Object.entries(values)) {
-        if (!matches(read.answers[name], value)) throw fail("READBACK_MISMATCH: " + name);
-      }
-      await unconfirmed(current, planned);
-      const review = await send({
-        type: "review",
-        // A field on the page now that was not there at this observation is new; an optional field the engine leaves
-        // alone on purpose (no name, id or field path) is not, or the run would loop on it until FORM_DID_NOT_SETTLE.
-        knownSelectors: [
-          ...Object.values(current.bindings).flatMap((b: any) =>
-            b.options?.length && ["radio_group", "checkbox_group"].includes(b.inputType)
-              ? b.options.map((x: any) => x.selector)
-              : [b.selector]
-          ),
-          ...current.raw.map((f: any) => f.selector),
-        ].filter(Boolean),
-      });
-      if (denied || review.blockedNavigation) throw fail("HOST_REDIRECT_REFUSED");
-      if (review.captcha && !(o.handoff && await handOff())) return write({ state: "needs_user", reason: "captcha" });
-      if (review.code) throw fail(review.code);
-      if (review.advanced || review.needsFields) continue;
-      if (!review.atFinalReview) throw fail("FINAL_REVIEW_NOT_OBSERVED");
       if (
         !Object.values(values).some((v: any) =>
           v && typeof v === "object" && v.filename === artifact.filename && v.sha256 === artifact.sha256
@@ -1564,7 +1595,8 @@ export async function runApply(args: string[]) {
     // 156 (coordinator, at 1bd25593), and a cross-site frame's on Chromium 141 too (dry-run-deny-classes). So, with the
     // routes and the offline switch kept in place, the page is shut (shutPage: scripts off, the stops in progress
     // waited for, every renderer crashed, then closed), never navigated away.
-    if (session && !o.submit && page) {
+    // (Read-only discovery put nothing of the person's into the page, so it closes as any session does.)
+    if (session && !o.submit && page && o["discovery-fill"]) {
       const context = page.context();
       await context.setOffline(true).catch(() => {});
       const unshut = await shutPage().catch(() => 1);

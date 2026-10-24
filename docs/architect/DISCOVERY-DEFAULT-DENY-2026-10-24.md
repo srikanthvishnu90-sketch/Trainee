@@ -7,7 +7,54 @@ run let the page's own same-origin GETs carry what the engine typed to the emplo
 The outcome required: a dry run must not send anything of the person's to an employer, or anyone else, before their
 approval, and reading the page must keep working.
 
-## The rule
+## The boundary (decision, coordinator review of fc7ac325)
+
+**Chosen, and the engine's default: nothing of the person's goes into the page before their approval.**
+
+- Discovery (every run without `--submit`) only reads the form. It opens the posting, reads the fields, the employer's
+  own options and hidden fields, the destination and the verification, and plans every answer off the page.
+- Nothing is typed, chosen, attached or clicked. The card is built from the plan.
+- The approved run is the first to fill the page. It reads back every answer and re-checks the form, the destination
+  and the payload before the click. Any difference stops it with nothing sent (`APPROVED_APPLICATION_CHANGED`,
+  `READBACK_MISMATCH`, `PAYLOAD_CHANGED_BEFORE_CLICK`, or `needs_answers` for a question it had not seen).
+
+This is sound by construction, not by measurement: the engine never issues a fill, type, select, attach or click
+command in discovery. That does not depend on how any Chromium version treats a document. What a read-only visit still
+gives the employer is said under "Before the first value" below: the visit, the address it came from, the browser's
+headers, and the employer's own analytics.
+
+**Not chosen: filling before approval under per-class leak control** (the rest of this note). It stays in the engine
+only as `--discovery-fill`, which is refused for anything but the local test pages (`DISCOVERY_FILL_LOCAL_ONLY`), and
+only so the tests below keep witnessing its guards. It cannot be assured to send nothing of the person's, and the
+default for what cannot be assured is refusal. Shown here:
+- the page's last timer requests after the engine let go of it (3 of 40 runs on 141, 1 of 15 on 156, before the
+  crash shutdown);
+- `fetchLater` flushed by a renderer crash (156);
+- crash dumps on disk that hold the person's data (3 of 262);
+- what the browser does outside CDP: DNS, WebRTC, its own sends.
+
+### What each choice keeps and loses
+
+| Capability | Read-only discovery (chosen) | Filled discovery (not offered for real employers) |
+|---|---|---|
+| Prepare before the person asks (G4) | **kept**: G4's flow, 8 steps, green with read-only prepares on 141 and 156; the approved run's hash matched the prepared one | kept |
+| Card shows what the page took (readback) | **lost before approval.** The card shows each planned answer in the form's own words (a select's own label). The approved run reads every answer back before the click; a difference stops it unsent | kept |
+| A field that does not keep its value, or reads back differently | found **after** the yes: not sent, and the person is told | found before the yes |
+| A question that appears only once something is filled (conditional) | **lost.** It is not seen before approval; the approved run stops `needs_answers` with nothing sent (`discovery-read-only.test.ts`, 141 and 156) | seen, if the fill reveals it |
+| A form with a step before its last page | **lost**: not prepared, `MULTI_STEP_NEEDS_APPROVAL` (`discovery-read-only.test.ts`) | in-page steps fillable; a navigation stops it |
+| Location or school lookups | planned text only; the approved run types it and picks a suggestion; a pick that reads back differently stops it unsent. **Not measured on a lookup fixture** | stopped at `LOOKUP_NEEDS_APPROVAL` (about 7 of 17 captured forms) |
+| The 17 captured forms (`career-apply-real-forms`) | all stop at `needs_answers` before any fill with the test's facts, so they cannot show a difference: 74 of 74 engine tests pass on 156 | same |
+
+**Recommendation: read-only discovery**, as built here. It keeps prepare-ahead and costs:
+- the readback-verified card;
+- conditional questions;
+- multi-step forms.
+
+Each is lost safely: the approved run sends nothing when the page differs from what was approved. Recovering them
+needs the person's approval scoped to a stage: "send these answers to this employer's own form, to see what it asks
+next". That is a card and consent design for the owner and the coordinator, not built here.
+
+## The rule (filled discovery, `--discovery-fill`, local test pages only)
 
 In `scripts/apply.ts`, **discovery** means a run without `--submit`: `approve-first.ts prepare()`, `prepare-batch`, and
 `prepareAhead`. Approved runs (`--submit --approved`) are unchanged. There the person approved exactly what goes to this
@@ -122,9 +169,44 @@ a fresh HOME and the engine's own state directory per run.
 | Each frame's pagehide sender, same-origin and cross-site (own process) | received (cross-site on 141 and 156) | nothing | unload guard in every frame; scripts off per frame session |
 | The page leaving for about:blank by itself, pagehide sender set | received on 156 | nothing (the run ends `DRIVER_ERROR`, not yet a named reason) | unload guard (G1 red on 156) |
 | fetchLater registered after the first value | sent at a plain page close once (standalone, 156) | the page has no fetchLater | removed (T4 red: the test sees `typeof fetchLater`) |
-| A timer firing while a stopped navigation unloads the form | (race: about 1 in 15 on 141 with the navigation aborted) | nothing in 40 runs on 141 and 15 on 156 (at d037a1a6, without the crash: received in 3 of 40 and 1 of 15) | renderers crashed before the page is let go (a race: shown by rate, not by one red run) |
+| A timer firing while a stopped navigation unloads the form | (race: about 1 in 15 on 141 with the navigation aborted) | **still received in 1 of 48 runs on 141** (0 of 23 on 156) with the crash; 3 of 40 and 1 of 15 without it | not closed: filled discovery is local-only, and the default fills nothing |
 | Form sent by GET; a link's ping | refused for another reason | nothing; `DISCOVERY_NAVIGATION_STOPPED` | navigation guard |
 | Popup / new tab | (Chromium's popup blocker usually stops it) | nothing | `context.route`; proven only when the popup opens |
+
+### Witness counts at this head (the employer's server, and another origin's, as the only witness)
+
+8 runs on each browser of `dry-run-deny-classes`, `dry-run-deny` and `discovery-read-only` (9 tests a run). Each run
+witnesses every class below. Chromium 141.0.7390.37 (chromium-1194); Chrome for Testing 156.0.8078.4 (chromium-1248).
+Unprivileged user, fresh HOME, the engine's own state directory per run.
+
+| Class | Mode | 141: runs with nothing of the person's received | 156 |
+|---|---|---|---|
+| The prepare puts nothing in the page; the approved run sends exactly the approved answers, once | read-only (default) | 8 of 8 | 8 of 8 |
+| A conditional question: not seen before approval; the approved run sends nothing | read-only | 8 of 8 | 8 of 8 |
+| A multi-step form: not prepared | read-only | 8 of 8 | 8 of 8 |
+| The classes page read only: no input handler ran | read-only | 8 of 8 | 8 of 8 |
+| Sockets, workers, frames, the late redirect, link hints, unload senders, fetchLater | filled | 8 of 8 | 8 of 8 |
+| A form sent by GET, a link's ping | filled | 8 of 8 | 8 of 8 |
+| The page leaving for about:blank by itself | filled | 8 of 8 | 8 of 8 |
+| 13 channels at once (dry-run-deny 1) | filled | 8 of 8 | 8 of 8 |
+| A navigation and a popup carrying the email (dry-run-deny 2) | filled | **7 of 8** (`GET /poll?v=Qzrina` once) | 8 of 8 |
+| After the crash: the socket closed with no frame, no service worker fetched | filled | 8 of 8 | 8 of 8 |
+
+### `Page.crash`: what it does (filled discovery only, local test pages)
+
+The read-only default never crashes anything: it puts nothing of the person's in the page and closes it as any
+session does. The crash is used only by `--discovery-fill`, where the page holds values. What it does, each with the
+employer's server as the witness:
+
+| Effect | What was seen |
+|---|---|
+| Requests in flight carrying a value | none can exist at the crash: every request after the first value was stopped by the routes while DevTools held the page (every classes and deny run; counts below) |
+| `fetchLater`, a browser-owned deferred send | **flushed by the crash.** With its removal disabled, the employer received `GET /fetchlater-leak?v=Wyxlene` on 156 (1 run); on 141 it was not received (1 run). Removed from every frame in discovery; a page that obtains it in a realm before the init script runs is not covered |
+| Beacons and keepalive fetches | while the page lives, stopped by the routes; at unload, the handlers are stopped by the guard, and a crashed renderer runs no unload |
+| A service worker from before | none can exist: a fresh context with `serviceWorkers: "block"`; the employer never received `GET /sw.js` (counts below) |
+| A socket opened before the first value | closed by the crash (the employer logs `WS-CLOSE /ws-before`), with no frame after the first value (counts below) |
+| The evidence and readback | the dry run's evidence is written before teardown. After a stopped navigation it is written after the crash, from the engine's memory: the deny test reads its reason and stopped list. Nothing reads the page after the crash |
+| **Crash dumps on disk** | Chromium's crash handler writes a minidump of each crashed renderer under the user's HOME (`.config/<browser>/Crash Reports/pending/`). **3 of 262 dumps from these local runs held a test person's value**: the URL of the page timer's request, `/poll?v=Qzrina`, in renderer memory. Whether they would be uploaded was not tested; they stay "pending". On its own, this rules the crash out for a real person's data |
 
 **What the browser cannot be made to stop here:**
 
@@ -202,13 +284,17 @@ output needed by-hand correction, recorded here:
   after it is not covered. The HTTP request was admitted before any value existed.
 - **Popups:** the guard is built, but this test proves it only when Chromium's popup blocker lets the window open. In
   one run the popup was blocked before reaching the network; in another it opened and was stopped.
-- **The page's last requests after a stopped navigation: closed by rate, not proven.**
-  - Before: with scripts off and the page closed in place (d037a1a6), a timer's request reached the employer unrouted
-    in 3 of 40 runs on 141 and 1 of 15 on 156.
-  - After: with every frame's renderer crashed first, 0 of 40 and 0 of 15 on the same test.
-  - At the old rates, 0 of 40 by chance is about 4%, and 0 of 15 about 35%. This is strong evidence, not proof.
-  - A crash still lets the browser send a document's `fetchLater` (removed in discovery), and anything already handed
-    to the browser's network service (see below).
+- **The page's last requests after a stopped navigation: NOT closed, in filled discovery.** A page timer's request
+  reached the employer unrouted, on the same test, under each teardown tried:
+
+  | Teardown | Chromium 141 | Chrome 156 |
+  |---|---|---|
+  | Navigation aborted into the error page | about 3 of 45 runs | (not run) |
+  | Scripts off, page closed in place (d037a1a6) | 3 of 40 | 1 of 15 |
+  | Renderers crashed first (fc7ac325 and this head) | **1 of 48** | 0 of 23 |
+
+  This is one of the reasons filled discovery is not offered for real employers. The read-only default puts no value in
+  the page, so there is nothing for such a request to carry.
 - **What this does not cover** (residual, by design of what is here):
   - A page script that ran before the init script, in a frame that was already open.
   - A native form submission the routes do not see as a request of the page.
@@ -230,7 +316,9 @@ output needed by-hand correction, recorded here:
 - **A page built to get around the guard** could create a frame before the init script runs in it and register its
   handlers there. Not tested; the threat model here is ordinary analytics and autosave, not a page attacking the
   engine.
-- **Status:** G4's real dry run stays unsafe to use until this is reviewed and merged. This branch is a candidate, not
+- **Status:** with the read-only default, G4's dry run puts nothing of the person's into an employer's page. It stays a
+  candidate until it is reviewed (Muse: the engine interface) and merged, and full CI at the exact head is owed with
+  every push. This branch is a candidate, not
   stand-alone readiness. Full CI at the exact head is owed with every push.
 - **The person's own browser** (extension path, D-017) is a different runtime with the person's own cookies. This
   change covers the engine (`scripts/apply.ts`) only, not the extension.
@@ -285,7 +373,8 @@ output needed by-hand correction, recorded here:
       navigation was stopped.
     - With the page closed in place (d037a1a6), it still leaked: 3 of 40 runs on 141 and 1 of 15 on 156, each a
       `GET /poll?v=Qzrina` in the navigation test.
-    - With every renderer crashed before the page is let go: 0 of 40 on 141 and 0 of 15 on 156.
+    - With every renderer crashed before the page is let go: 0 of 40 on 141 and 0 of 15 on 156 at first, then 1 of 8
+      on 141 at this head: 1 of 48 in all on 141, 0 of 23 on 156. Not closed.
   - The full three-file set (classes, deny, network) was 5 of 5 green on each browser at d037a1a6, and green on both
     with the crash shutdown. The engine suites (career-apply-script, real-forms, engine, completion) passed 74 of 74 on
     156.

@@ -110,7 +110,7 @@ Deno.test({
       const factsPath = `${work}/facts.json`, resumePath = `${work}/resume.pdf`;
       await Deno.writeTextFile(factsPath, JSON.stringify(FACTS));
       await Deno.writeFile(resumePath, new TextEncoder().encode("%PDF-1.4\n% synthetic dry-run resume\n%%EOF\n"));
-      const runEngine = engineRunner({ root: ROOT, extra: ["--state-dir", `${work}/engine-state`] });
+      const runEngine = engineRunner({ root: ROOT, extra: ["--state-dir", `${work}/engine-state`, "--discovery-fill"] });
       // The dry run as prepare() runs it, read directly so the engine's own record of what it stopped can be checked.
       const run = await runEngine(["--url", `${employer.base}/apply`, "--facts", factsPath, "--resume", resumePath]);
       assert(run?.result?.reason === "dry_run", `the dry run reached the card: ${JSON.stringify(run?.result)}`);

@@ -648,13 +648,25 @@ export async function runApply(args: string[]) {
     const discovery = !o.submit;
     if (discovery) {
       evidence.discovery = { stopped: [] };
+      // A shared worker's requests are seen by neither request routing nor the offline switch (dry-run-deny-classes caught
+      // one going out), so a discovery page cannot make one: the constructor is gone from every frame before any of the
+      // page's own scripts run. (A page that needs one does not work in discovery.)
+      await page.context().addInitScript(() => {
+        try { Object.defineProperty(globalThis, "SharedWorker", { value: undefined, configurable: false, writable: false }); } catch { /* already gone */ }
+      });
       // Any other page of this context (a popup, a new tab) is not this posting: nothing it asks for goes out.
       await page.context().route("**/*", async (route: any) => {
         try { stopped(route.request(), "popup"); } catch { /* the record is best effort */ }
         await route.abort("blockedbyclient").catch(() => {});
       });
-      // A socket opened before the first value stays open, but nothing the page sends on it after that goes out.
+      // A socket opened before the first value stays open, but nothing the page sends on it after that goes out; a
+      // socket opened after it (its address can carry the value) is never connected.
       await page.routeWebSocket(/.*/, (ws: any) => {
+        if (populated) {
+          stopped({ url: () => ws.url(), method: () => "WS", resourceType: () => "websocket" }, "websocket");
+          ws.close();
+          return;
+        }
         const server = ws.connectToServer();
         ws.onMessage((m: unknown) => {
           if (populated) { stopped({ url: () => ws.url(), method: () => "WS", resourceType: () => "websocket" }, "websocket"); return; }
@@ -1030,6 +1042,10 @@ export async function runApply(args: string[]) {
       }
       const fields = p.fields, before = await hashApplyPayload(current.schema);
       for (const f of fields) {
+        // The first of the person's values goes into the page now. Discovery takes the whole context offline first, so
+        // even what request routing does not see (a shared worker's requests, found by dry-run-deny-classes) has no
+        // network; the routes still stop and record everything they do see.
+        if (discovery && !populated) await page.context().setOffline(true);
         populated = true;
         const b = current.bindings[f.name];
         if (b.inputType === "file" && classifyField(f.label, "file") !== "resume") {

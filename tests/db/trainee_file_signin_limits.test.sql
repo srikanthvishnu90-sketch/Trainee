@@ -7,17 +7,17 @@ begin;
 reset role;
 insert into auth.users(id,email) values ('00000000-0000-4000-8000-0000000f5f01','tfl-a@example.test'),('00000000-0000-4000-8000-0000000f5f02','tfl-b@example.test');
 do $$
-declare sends int := 0; tries int := 0; j text; n int;
+declare n_sends int := 0; n_tries int := 0; j text; n int;
 begin
   -- six links of account A, a minute apart, the account's own number on each
   for i in 0..5 loop
     j := '00000000000f5f' || lpad(i::text, 2, '0');
     perform public.trainee_file_login_begin(j, '00000000-0000-4000-8000-0000000f5f01', '0123456789', now() + make_interval(mins => i), now() + make_interval(mins => i + 15));
     update public.trainee_file_logins set phone = '+15125550100', matched = true where jti = j;
-    for k in 1..5 loop if public.trainee_file_login_count(j, 'send', 3) then sends := sends + 1; end if; end loop;
-    for k in 1..9 loop if public.trainee_file_login_count(j, 'try', 5) then tries := tries + 1; end if; end loop;
+    for k in 1..5 loop if public.trainee_file_login_count(j, 'send', 3) then n_sends := n_sends + 1; end if; end loop;
+    for k in 1..9 loop if public.trainee_file_login_count(j, 'try', 5) then n_tries := n_tries + 1; end if; end loop;
   end loop;
-  if sends <> 10 or tries <> 15 then raise exception 'FAIL the account got % texts and % tries (want 10 and 15)', sends, tries; end if;
+  if n_sends <> 10 or n_tries <> 15 then raise exception 'FAIL the account got % texts and % tries (want 10 and 15)', n_sends, n_tries; end if;
   if exists (select 1 from public.trainee_file_logins where user_id = '00000000-0000-4000-8000-0000000f5f01' and (sends > 3 or tries > 5)) then raise exception 'FAIL a link passed its own cap'; end if;
   raise notice 'ok   six links of one account: 10 texts and 15 tries in all, no link past its own 3 and 5';
 

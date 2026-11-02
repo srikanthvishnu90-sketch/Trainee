@@ -58,6 +58,7 @@ function harness(o: { env?: Record<string, string>; tgFail?: (body: any) => Resp
     throw new Error(`unexpected fetch ${url}`);
   }) as unknown as typeof fetch;
   const vars: Record<string, string> = {
+    CAREER_TEXTING_NATIVE: "off", // the release config turns the voice on by itself (D-036); these shapes are the plain ones
     TRAINEE_INBOUND_SECRET: SECRET, LOOPMESSAGE_API_KEY: "fake-loop-key", TRAINEE_SIGNUP: "open",
     TELEGRAM_BOT_TOKEN: TG_TOKEN, TELEGRAM_WEBHOOK_SECRET: TG_SECRET, TELEGRAM_BOT_USERNAME: "TraineeTestBot",
     WHATSAPP_TOKEN: WA_TOKEN, WHATSAPP_PHONE_NUMBER_ID: PNID, WHATSAPP_APP_SECRET: WA_APP, WHATSAPP_VERIFY_TOKEN: WA_VERIFY, WHATSAPP_TEMPLATE_UPDATES: "trainee_updates",

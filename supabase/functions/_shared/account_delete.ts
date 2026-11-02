@@ -108,6 +108,18 @@ export async function deleteAccount(d: AccountDeleteDeps, uid: string): Promise<
 }
 
 export const GOOGLE_PERMISSIONS = "myaccount.google.com/permissions";
+// CONNECTORS ROUND 3 (2026-10-31): what a deletion keeps, said exactly (the person was told only about the opt-out hashes):
+// the opt-out and bounce hashes (no link to the person), the deletion's own record (when, and what Google answered, nothing
+// that names them, account_deletion_log) when it was written, and, when they had a Trainee plan, Stripe's own record of
+// their payments (Stripe keeps it for tax law; Trainee keeps nothing linking it to them).
+export const KEPT = {
+  hashes: "Hashed addresses of people who asked never to be emailed again, or whose address bounced, are kept with no link to you, so they stay protected.",
+  record: "A record that an account was deleted (when, and what Google answered to the revoke), with nothing that names you, is kept.",
+  stripe: "Stripe keeps its own record of your past payments, as tax law requires.",
+} as const;
+export function keptWords(r: Pick<AccountDeleteResult, "recorded" | "billing">): string {
+  return ["What is kept:", KEPT.hashes, r.recorded ? KEPT.record : "", r.billing === "cancelled" ? KEPT.stripe : ""].filter(Boolean).join(" ");
+}
 // What the person is told: only what the read-back and Google's answers show.
 export function deletionWords(r: AccountDeleteResult): string {
   const outcomes = Object.values(r.google);
@@ -135,7 +147,7 @@ export function deletionWords(r: AccountDeleteResult): string {
     plan,
     notes,
     rest.length ? `What I couldn't confirm: I wasn't able to ${rest.join(", or ")}. Email the privacy contact in the privacy policy and it will be finished by hand.` : "",
-    "Hashed addresses of people who asked never to be emailed again are kept with no link to you, so they stay protected.",
+    keptWords(r),
   ].filter(Boolean).join(" ");
 }
 

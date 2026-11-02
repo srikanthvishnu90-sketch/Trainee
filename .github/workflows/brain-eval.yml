@@ -27,6 +27,14 @@ on:
         type: choice
         options: [agent, staged]
         default: agent
+      # TASK COMPLETION (evals/career/tasks/): suite=tasks runs the state-judged task eval with the real model instead of
+      # the held-out passes (judged by rows, no judge model: brain spend only). Every brain on the same 44 tasks, each
+      # capped by TASKS_BUDGET_USD; a stopped run is not a score. The held-out steps below are skipped for it.
+      suite:
+        description: "heldout (the D-030 bar) or tasks (task completion, judged by end state)"
+        type: choice
+        options: [heldout, tasks]
+        default: heldout
 permissions:
   contents: write
 concurrency: { group: brain-eval, cancel-in-progress: false }
@@ -62,21 +70,28 @@ jobs:
       # Five full passes of the same build, in parallel (second judge's ruling, 2026-10-21: the pass-to-pass swing is
       # 16-18 points in one run, so three passes cannot resolve a change under about 5 points; keep decisions use five).
       # Each pass is logged; the bar is still one full pass at 95%.
+      - name: Task completion, router / staged / planner / agent, real model (suite=tasks only)
+        if: ${{ inputs.suite == 'tasks' }}
+        env: { TASKS_BUDGET_USD: "2.00" }
+        run: |
+          for b in router staged planner; do deno run -A --no-check --import-map=evals/career/tasks/import-map.json evals/career/tasks/run.ts --brain $b --model openai --budget-usd "$TASKS_BUDGET_USD" --label "tasks-$b-${{ github.run_id }}" || true; done
+          deno run -A --no-check --import-map=evals/career/tasks/agent-import-map.json evals/career/tasks/run.ts --brain agent --model openai --budget-usd "$TASKS_BUDGET_USD" --label "tasks-agent-${{ github.run_id }}" || true
       - name: Held-out set, ${{ env.EVAL_BRAIN }} brain (the bar), five passes
+        if: ${{ inputs.suite != 'tasks' }}
         run: |
           for p in 1 2 3 4 5; do deno run -A evals/career/run.ts --brain "${{ env.EVAL_BRAIN }}" --set heldout --label "heldout-${{ env.EVAL_BRAIN }}-${{ github.run_id }}-p$p" > "$RUNNER_TEMP/h-agent-$p.txt" 2>&1 & done
           wait; cat "$RUNNER_TEMP"/h-agent-*.txt
       # Re-scores of recorded runs listed in evals/career/rejudge.txt ("<label> <judge model>"), once each, judge only.
       - name: Re-score recorded runs (judge only)
-        if: always()
+        if: ${{ always() && inputs.suite != 'tasks' }}
         run: |
           [ -f evals/career/rejudge.txt ] || exit 0
           while read -r l m; do [ -n "$l" ] && deno run -A evals/career/rejudge.ts "$l" "$m"; done < evals/career/rejudge.txt
       - name: Held-out set, router (the comparison)
-        if: always()
+        if: ${{ always() && inputs.suite != 'tasks' }}
         run: deno run -A evals/career/run.ts --brain router --set heldout --label "heldout-router-${{ github.run_id }}" | tee "$RUNNER_TEMP/h-router.txt"
       - name: The score log and the verdict
-        if: always()
+        if: ${{ always() && inputs.suite != 'tasks' }}
         run: |
           deno run -A evals/career/score-log.ts evals/career/results/heldout-${{ env.EVAL_BRAIN }}-${{ github.run_id }}-p*.json evals/career/results/heldout-router-${{ github.run_id }}.json --run ${{ github.run_id }}
           deno eval '
@@ -92,6 +107,6 @@ jobs:
         run: |
           git config user.name "brain-eval[ci]"
           git config user.email "brain-eval@users.noreply.github.com"
-          git add evals/career/results/ evals/career/SCORE-LOG.md || true
+          git add evals/career/results/ evals/career/SCORE-LOG.md evals/career/tasks/results/ || true
           git commit -m "WO-061 data: held-out eval, run ${{ github.run_id }} ($(tail -1 "$RUNNER_TEMP/verdict.txt" 2>/dev/null))" || exit 0
           git push origin HEAD:ci/brain-eval

@@ -1,5 +1,11 @@
 // The system prompt for the agent brain (WO-002; text set by the architect, verbatim).
-export function careerSystemPrompt(today: string): string {
+// 1v1 (2026-11-01): on a texting channel (iMessage, SMS, WhatsApp, Telegram) the texting rules follow it (TEXTING_RULES);
+// on the web app, or with no channel named, the prompt is exactly what it was.
+export function careerSystemPrompt(today: string, o: { channel?: string | null; shape?: boolean } = {}): string {
+  const texting = textingRulesFor(o.channel, !!o.shape);
+  return careerCore(today) + (texting ? "\n\n" + texting : "");
+}
+function careerCore(today: string): string {
   return `You are Trainee, a career agent that helps one person get hired: find the right jobs, make their
 applications strong and truthful, prepare them for interviews, track every application, and tell them
 plainly where they stand. Today is ${today}.
@@ -139,3 +145,22 @@ export const SHAPE_RULES = `How to shape this reply (Telegram):
 // in a turn where the person asked for a file (attachAsked).
 export const NO_ATTACH_RULE = `- When there is more detail than fits (research on a company or role, a comparison, a full list of postings, drafted emails, a tailored resume summary), never attach a file: nobody should have to download anything. Call create_file with the kind research_brief (research), comparison or draft, and say in a few words what the page holds, only after the call succeeded. A file is sent only when the person asks for one.`;
 export const shapeRulesFor = (attach: boolean): string => attach ? SHAPE_RULES : SHAPE_RULES.split("\n").map((l) => l.includes("attach_document") ? NO_ATTACH_RULE : l).join("\n");
+
+// 1v1 (owner, 2026-11-01: "doesnt act the way an iMessage bot should"): how a reply looks on a phone. The owner's requirement
+// docs, by number: Q73/Q89 numbered options, Q74/Q581 no markdown, Q75/Q76/Q91 no openers, closers or banned phrases,
+// Q77/Q87/Q88 short bubbles and a page for anything longer, Q79 no emoji, Q94 no internal words, Q583-Q585/Q632 each link
+// alone on its own line right after the line that says what it is. Instructions, never wording: the reply is the model's.
+// With the Telegram reply shape on (SHAPE_RULES), the shape decides where links go, so the link line is left out here.
+const TEXTING_NAMES: Record<string, string> = { imessage: "iMessage", sms: "SMS", whatsapp: "WhatsApp", telegram: "Telegram" };
+export function textingRulesFor(channel: string | null | undefined, shape = false): string | null {
+  const name = channel ? TEXTING_NAMES[channel] : undefined;
+  if (!name) return null;
+  return [`HOW THIS TEXT LOOKS (${name})`,
+    "- It is read as text messages on a phone. Plain text only: no markdown, no bold or italics with asterisks, no # headings, no tables, no [label](link), no code blocks.",
+    "- Short bubbles: one to three sentences each (never more than three sentences in a bubble), a blank line between bubbles, three bubbles at most. Anything longer goes in a page (create_file) with one line saying what it holds.",
+    "- Short sentences in plain everyday words: about 15 to 20 words a sentence, never more than 25, one idea each; a reader at an 8th to 9th grade level reads it in one pass.",
+    ...(shape ? [] : ["- Links: first the line that says what the link is, then the full link alone on its own line, exactly as a tool gave it or the person sent it. Never a link inside a sentence or in brackets. At most three links."]),
+    "- Options or postings to pick from are numbered 1., 2., 3., one line each, so they can answer with a digit.",
+    "- One question at most, at the end. No opener (\"Great question\", \"Absolutely\", \"I'd be happy to\"), no closer (\"Let me know if you need anything else\", \"Hope this helps\"), no emoji.",
+    "- Dates the way a person writes them (Oct 19), never 2026-10-19. No words from inside the product (payload, record, row, intent, source class, null)."].join("\n");
+}

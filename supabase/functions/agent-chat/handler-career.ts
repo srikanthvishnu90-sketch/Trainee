@@ -968,6 +968,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           conversations: repliesStore,
           // REPLY SHAPE: Telegram with the reply writer on gets the shape rules and the attach_document tool.
           shape: replyWriterOn(Deno.env) && writerChannel((body as any)?.channel) === "telegram",
+          channel: writerChannel((body as any)?.channel), // 1v1: the texting rules for this channel (prompt.ts)
           files: createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now, records: { application: (u, id) => supabaseFileStore(admin).appRow(u, id) } }),
           verifier: hunterVerifier({ fetch, apiKey: Deno.env.get("HUNTER_API_KEY"), cache: supabaseCheckCache(admin), now: Date.now }),
           tailor: { posting: (id) => postingsDb.get(id), personas: supabasePersonaStore(admin), resumes: supabaseResumeStore(admin), render: edgeRenderer() },

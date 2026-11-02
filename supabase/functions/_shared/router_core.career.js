@@ -13446,11 +13446,12 @@ const CareerRouter = (() => {
     const c = [p && p.url, ...((p && Array.isArray(p.source_urls)) ? p.source_urls : [])].map(s).find((u) => /^https?:\/\/\S+$/i.test(u));
     return c || null;
   }
-  function roleSentence(item) {
+  function roleSentence(item, i, all) {
+    const n = Array.isArray(all) && all.length > 1 ? `${i + 1}) ` : "";
     const where = item.remote === "remote" ? "remote" : item.remote === "hybrid" ? `hybrid in ${s(item.location).split(",")[0]}` : s(item.location);
     const pay = item.posting.salary && item.posting.salary.raw ? `, ${item.posting.salary.raw}` : "";
     const url = item.url || postingUrlOf(item.posting);
-    return `${item.title} at ${item.company}${url ? ` (${url})` : ""} — ${where}${pay}: ${item.reason}${item.caveat ? `; heads-up: ${item.caveat}` : ""}.`;
+    return `${n}${item.title} at ${item.company}${url ? ` (${url})` : ""} — ${where}${pay}: ${item.reason}${item.caveat ? `; heads-up: ${item.caveat}` : ""}.`;
   }
 
   const FAMILY_LABELS = { PM: "product management (PM)", SWE: "software engineering", "Data/ML": "data and machine learning", Design: "design", Finance: "finance", Consulting: "consulting", Operations: "operations", Marketing: "marketing", Sales: "sales" };
@@ -13525,7 +13526,7 @@ const CareerRouter = (() => {
       return Object.assign({ intent: o.intent || "career_discovery", reply }, publicFacts);
     }
     const profiled = !!(profile && (profile.facts || []).length);
-    const reply = compose({ headline: o.headline || (profiled ? `Here are the ${top.length} roles most worth applying to, ranked by fit with your profile.` : `Here ${top.length === 1 ? "is 1 role" : `are ${top.length} roles`} that match your search.`), facts: top.map(roleSentence),
+    const reply = compose({ headline: o.headline || (profiled ? `Here are the ${top.length} roles most worth applying to, ranked by fit with your profile.` : `Here ${top.length === 1 ? "is 1 role that matches" : `are ${top.length} roles that match`} your search.`), facts: top.map(roleSentence),
       nextStep: o.nextStep || (profiled ? "Tell me one to tailor your resume for, and I will do that next." : "Want me to rank them against your resume? Paste it here or attach the file.") });
     return Object.assign({ intent: o.intent || "career_discovery", reply }, publicFacts);
   }

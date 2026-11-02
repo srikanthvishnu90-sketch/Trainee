@@ -37068,12 +37068,15 @@ const CareerRouter = (() => {
     const c = [p && p.url, ...((p && Array.isArray(p.source_urls)) ? p.source_urls : [])].map(s).find((u) => /^https?:\/\/\S+$/i.test(u));
     return c || null;
   }
-  function roleSentence(item) {
+  // 1v1 (2026-11-01, Q73/Q89): two or more roles are numbered "1)" "2)" so the person can answer with a digit (")" because the
+  // composer reads "1." as the end of a sentence).
+  function roleSentence(item, i, all) {
+    const n = Array.isArray(all) && all.length > 1 ? `${i + 1}) ` : "";
     const where = item.remote === "remote" ? "remote" : item.remote === "hybrid" ? `hybrid in ${s(item.location).split(",")[0]}` : s(item.location);
     const pay = item.posting.salary && item.posting.salary.raw ? `, ${item.posting.salary.raw}` : "";
     const url = item.url || postingUrlOf(item.posting);
     // The link rides inside the role's own sentence: the composer keeps one sentence per role.
-    return `${item.title} at ${item.company}${url ? ` (${url})` : ""} — ${where}${pay}: ${item.reason}${item.caveat ? `; heads-up: ${item.caveat}` : ""}.`;
+    return `${n}${item.title} at ${item.company}${url ? ` (${url})` : ""} — ${where}${pay}: ${item.reason}${item.caveat ? `; heads-up: ${item.caveat}` : ""}.`;
   }
 
   // The role families an ASK names. "Design / portfolio-first" is pinned to
@@ -37177,7 +37180,7 @@ const CareerRouter = (() => {
     }
     // PRODUCT AUDIT 2026-10-28 (#5): with nothing on the profile, the list is not "ranked by fit with your profile".
     const profiled = !!(profile && (profile.facts || []).length);
-    const reply = compose({ headline: o.headline || (profiled ? `Here are the ${top.length} roles most worth applying to, ranked by fit with your profile.` : `Here ${top.length === 1 ? "is 1 role" : `are ${top.length} roles`} that match your search.`), facts: top.map(roleSentence),
+    const reply = compose({ headline: o.headline || (profiled ? `Here are the ${top.length} roles most worth applying to, ranked by fit with your profile.` : `Here ${top.length === 1 ? "is 1 role that matches" : `are ${top.length} roles that match`} your search.`), facts: top.map(roleSentence),
       nextStep: o.nextStep || (profiled ? "Tell me one to tailor your resume for, and I will do that next." : "Want me to rank them against your resume? Paste it here or attach the file.") });
     return Object.assign({ intent: o.intent || "career_discovery", reply }, publicFacts);
   }

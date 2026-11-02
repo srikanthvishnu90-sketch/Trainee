@@ -25,3 +25,6 @@ tools/node_modules/
 
 # P0 proven loop receipts (scripts/career/prove-loop.cjs): synthetic TEST persona runs, local only
 /tmp/prove-loop/
+
+# 1v1 (review of #368): full per-scenario results are a CI artifact, not committed; the report is the summary.
+evals/career/one-v-one/results/

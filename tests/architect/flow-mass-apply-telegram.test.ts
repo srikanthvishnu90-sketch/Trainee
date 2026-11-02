@@ -151,6 +151,8 @@ Deno.test({
 
       setEnv("CAREER_PREPARE_AHEAD_URL", `${RUNNER}/prepare`);
       setEnv("CAREER_PREPARE_AHEAD_TOKEN", KICK);
+      // The gate pins the release flags off for tests (scripts/gate.sh); this flow measures them on, as released.
+      setEnv("UPMORE_SCRIPT_SUBMIT_LIVE", "1"); setEnv("CLOUD_RUNNER_ENABLED", "on"); setEnv("CLOUD_PREPARE_ENABLED", "on");
       setEnv("TELEGRAM_BOT_TOKEN", TOKEN);
       setEnv("TELEGRAM_WEBHOOK_SECRET", TG_SECRET);
       setEnv("TRAINEE_ALLOWED_CONTACTS", `telegram:${CHAT}`);
@@ -196,7 +198,7 @@ Deno.test({
       const waits: Promise<unknown>[] = [];
       const runnerEnv: Record<string, string> = {
         SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY: SERVICE_KEY, CLOUD_RUNNER_SECRET: SECRET, CLOUD_DISPATCH_SECRET: DISPATCH,
-        CAREER_PREPARE_AHEAD_TOKEN: KICK, CLOUD_PREPARE_ENABLED: "on", CLOUD_RUNNER_ENABLED: "on", CLOUD_BRIDGE_URL: RUNNER,
+        CAREER_PREPARE_AHEAD_TOKEN: KICK, UPMORE_SCRIPT_SUBMIT_LIVE: "1", CLOUD_PREPARE_ENABLED: "on", CLOUD_RUNNER_ENABLED: "on", CLOUD_BRIDGE_URL: RUNNER,
         CLOUD_PREPARE_MAX_CONCURRENT: "6", CLOUD_PREPARE_PER_PERSON_DAY: String(10 * N), CLOUD_PREPARE_PER_SITE_MINUTE: String(10 * N),
         // Mass settings (docs/architect/MASS-APPLY-COST-2026-11-01.md): 8 sandboxes at once, at most 3 on one ATS host, up to 8
         // started per tick. The defaults stay wave 1 (2, 1, 2: cloud_runner_http.ts LIMIT_DEFAULTS).

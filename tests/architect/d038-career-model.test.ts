@@ -42,7 +42,7 @@ Deno.test("D-038: every career call site reads the one default; no stray model i
   }
   const wf = read(".github/workflows/brain-eval.yml");
   eq((wf.match(/^\s*CAREER_MODEL:.*$/gm) ?? []).map((l) => l.trim()), ["CAREER_MODEL: ${{ inputs.model }}"], "brain-eval never pins a model; only the dispatch input names one");
-  assert(/ANTHROPIC_API_KEY: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/.test(wf) && /ANTHROPIC_BUDGET_USD: "25"/.test(wf), "the Anthropic key and its own cap reach the run");
+  assert(/ANTHROPIC_API_KEY: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/.test(wf) && /ANTHROPIC_EVAL_BUDGET_USD: "25"/.test(wf), "the Anthropic key and its own cap reach the run");
 });
 
 Deno.test("D-038: CAREER_MODEL rolls back to a priced model only; the provider and key follow the model name", () => {

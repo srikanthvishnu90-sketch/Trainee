@@ -56,7 +56,7 @@ jobs:
       CAREER_MODEL: ${{ inputs.model }}
       # OWNER'S RULING (2026-11-01 20:25 CT, in writing, relayed by the architect's main session): "$25" on the Anthropic key
       # for these tests, apart from the OpenAI eval budget. run.ts counts every result file's claude- brain spend against it.
-      ANTHROPIC_BUDGET_USD: "25"
+      ANTHROPIC_EVAL_BUDGET_USD: "25"
       # D-038: CAREER_MODEL is only the dispatch's model input above; empty, the brain runs the measured commit's committed
       # model (agent-chat/release_model.ts), so a push measures the model that commit serves.
       EVAL_JUDGE_MODEL: gpt-5-mini

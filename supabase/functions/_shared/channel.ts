@@ -4,6 +4,7 @@
 // `Send` function (LoopMessage in WO-013b); the store is memory here and Supabase in 013b.
 // WO-038: or one adapter per channel (channel_adapters.ts): iMessage, WhatsApp, Telegram.
 import { toBubbles } from "./conversation.ts";
+import { closingExpired } from "./career_closing.ts";
 import { addressOf, type Channel, channelOf, type DeliveryAdapter, type SendResult } from "./channel_adapters.ts";
 import { DEFAULT_PREFS, nextAwake, quietAt, zoneOr } from "./career_alerts.ts";
 
@@ -126,6 +127,7 @@ export const STOPPED_REPLY_NOTE = "not sent: the person texted STOP after the me
 // who connected WhatsApp days later got the whole backlog the moment they wrote to connect it (the window was open),
 // each alert still "first seen 20 min ago". A row the window held still goes out whole when they write (heldAt set).
 export const ALERT_STALE_MS = 48 * 3600000;
+const CLOSING_PAST_NOTE = "not sent: the role's closing day had come before it could go out";
 export const STALE_NOTE = "not sent: a job alert or report more than 48 hours past its time is no longer news";
 // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): what Trainee starts on a schedule waits out the person's quiet hours on their
 // clock as it is at delivery, not only as it was when it was planned: a person who moved zones (or changed their quiet
@@ -239,6 +241,10 @@ export async function deliverDue(o: {
     // account) is checked again now. Not wanted: not sent. A check that cannot be read leaves the row for the next run.
     if (/^(alert|report):/.test(m.key) && o.now - m.deliver_at > ALERT_STALE_MS && ((adapter.limits.windowMs ?? null) === null || m.heldAt === null)) {
       await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: STALE_NOTE }); r.skipped_opt_out++; continue;
+    }
+    // Reqs doc 2 (career_closing.ts): a closing-date text held past its day is not sent after the role closed.
+    if (closingExpired(m.key, o.now)) {
+      await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: CLOSING_PAST_NOTE }); r.skipped_opt_out++; continue;
     }
     if (/^(alert|report):/.test(m.key) && o.store.alertWanted) {
       let wanted: boolean | null;

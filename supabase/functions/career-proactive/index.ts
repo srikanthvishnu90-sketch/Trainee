@@ -10,6 +10,7 @@ import { supabaseEventStore } from "../_shared/agent/timeline.ts";
 import { supabaseDigestStore, supabaseInterviewStore } from "../_shared/career_brief_store.ts";
 import { supabaseConfirmStore } from "../_shared/career_apply_confirm.ts";
 import { handleProactive } from "./handler.ts";
+import { supabaseClosingRows } from "../_shared/career_closing.ts";
 import { runOutreachReplies, runOutreachSends, supabaseOutreachStore } from "../_shared/career_outreach.ts";
 import { peopleSink, supabasePeopleDeps } from "../_shared/career_people.ts";
 import { gmailSender, gmailThreadReader } from "../_shared/career_outreach_gmail.ts";
@@ -42,6 +43,7 @@ serve((req) => {
   return handleProactive(req, {
     env: Deno.env, now: Date.now, store: () => supabaseAlertStore(admin), events: () => supabaseEventStore(admin),
     recentPostings: (since) => postings.newSince(since), postingsById: (ids) => postings.getMany(ids),
+    closing: supabaseClosingRows(admin),
     finishedApplications: async (since) => {
       // An application emailed from the chat was already said there when it went (WO-032); it gets no second receipt.
       const { data, error } = await admin.from("career_apply_jobs").select("id,user_id,company,url,state,reason,confirmation_id,email_confirmed_at,evidence,source")

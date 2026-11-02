@@ -2578,6 +2578,12 @@ const CareerRouter = (() => {
   // person's own date is asked for once per thread, and only while none is on record; their answer is saved as said.
   function handleUnsavedGraduation(text, ctx) {
     if (!ctx._gradUnsavedThisTurn) return null;
+    // TRUNK FIX (#350 x #372): the person's own definite correction of the graduation date on their resume entry ("actually
+    // I graduated 2031": first person, past tense, nothing hedged or negated; fieldCorrectionOf reads only that anchored
+    // shape) is the entry correction's (handleResumeFieldCorrection), never "I haven't taken that". A third person, a hedge
+    // or a negation never matches it and stays here, unsaved.
+    const fc = ProfileMod && typeof ProfileMod.fieldCorrectionOf === "function" ? ProfileMod.fieldCorrectionOf(s(text).trim()) : null;
+    if (fc && fc.field === "graduation") { const rc = handleResumeFieldCorrection(text, ctx); if (rc) return rc; }
     const own = statedFactsOf(ctx).find((f) => f.kind === "graduation");
     const wm = threadMirrorForWrite(ctx);
     const ask = !own && !(wm && wm.gradAskedAt);

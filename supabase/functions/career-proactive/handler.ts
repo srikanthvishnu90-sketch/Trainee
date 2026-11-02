@@ -19,6 +19,7 @@ import type { EventStore } from "../_shared/agent/timeline.ts";
 import type { DigestStore, InterviewStore } from "../_shared/career_brief_store.ts";
 import { type IntroDueRow, runIntroReminders } from "../_shared/career_people_reminders.ts";
 import { runPeopleSweeps } from "../_shared/career_people_sweep.ts";
+import { type ClosingRow, runClosing } from "../_shared/career_closing.ts";
 
 export interface ProactiveDeps {
   env: { get(k: string): string | undefined };
@@ -56,6 +57,10 @@ export interface ProactiveDeps {
   // People finding: unfinished Gmail reads carried on in leased batches (career_people_sweep.ts runPeopleSweeps). Wired only
   // with CAREER_PEOPLE_SWEEP=on. Absent: a read goes on at the person's next ask.
   peopleSweeps?: Omit<Parameters<typeof runPeopleSweeps>[0], "awake">;
+  // Reqs doc 2 Q344/Q322/Q348/Q355: the roles on people's apply lists not sent yet, with their postings (career_closing.ts):
+  // one text the day before a stated closing date, one line once the posting is taken down. CAREER_CLOSING_NUDGE=off turns
+  // it off. Absent: none this run.
+  closing?: () => Promise<ClosingRow[]>;
   // WO-091c: who among these people is paused, opted out or erased (career_quiet_users). Absent: nobody is.
   quiet?: (userIds: string[]) => Promise<Set<string>>;
   // The watch records of people whose alerts were set by text (career_watch_kv, career:watch-profile:<user>), by user.
@@ -111,6 +116,10 @@ export async function handleProactive(req: Request, d: ProactiveDeps): Promise<R
   if (d.finishedApplications) {
     const finished = d.finishedApplications;
     await step("receipts", () => runReceipts({ outbox: store, now: started, finished: async (since) => awake(await finished(since), (r) => r.user_id), events: d.events ? d.events() : null }), (n) => { stats.receipts = n; });
+  }
+  if (d.closing && d.env.get("CAREER_CLOSING_NUDGE") !== "off") {
+    const closing = d.closing;
+    await step("closing", () => runClosing({ outbox: store, now: started, rows: async () => awake(await closing(), (r) => r.user_id) }), (n) => { stats.closing = n; });
   }
   if (d.readyApplications && d.pushCard) {
     const ready = d.readyApplications;

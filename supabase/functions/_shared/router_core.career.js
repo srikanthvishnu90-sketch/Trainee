@@ -14906,6 +14906,8 @@ const CareerRouter = (() => {
   }
   function handleUnsavedGraduation(text, ctx) {
     if (!ctx._gradUnsavedThisTurn) return null;
+    const fc = ProfileMod && typeof ProfileMod.fieldCorrectionOf === "function" ? ProfileMod.fieldCorrectionOf(s(text).trim()) : null;
+    if (fc && fc.field === "graduation") { const rc = handleResumeFieldCorrection(text, ctx); if (rc) return rc; }
     const own = statedFactsOf(ctx).find((f) => f.kind === "graduation");
     const wm = threadMirrorForWrite(ctx);
     const ask = !own && !(wm && wm.gradAskedAt);

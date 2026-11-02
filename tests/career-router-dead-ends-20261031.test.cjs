@@ -247,8 +247,8 @@ test("corrections and stated facts get an answer, not a fallback; only the perso
     assert.ok(!JSON.stringify([st.profile || null, st.statedFacts || null, p.account().statedFacts || null, p.account().profile || null]).includes(addr), `${m}: the address is on no profile or fact record`);
     assert.equal(questions(r), 1, `${m}: one next step: ${r}`);
   }
-  // a GPA said in chat is never recorded or repeated (architect false_memory rule); it comes from the confirmed resume
-  for (const [pre, m, said, resumeGpa] of [[["i want a job in marketing"], "my gpa is 3.4", "3.4", null], [[`here is my resume:\n${RESUME}`, "yes thats my resume"], "actually my gpa is 3.6", "3.6", "3.7"]]) {
+  // a GPA said in chat with no confirmed entry to correct is never recorded or repeated (architect false_memory rule)
+  for (const [pre, m, said, resumeGpa] of [[["i want a job in marketing"], "my gpa is 3.4", "3.4", null]]) {
     const p = person();
     for (const x of pre) p.say(x);
     const o = p.say(m);
@@ -264,6 +264,39 @@ test("corrections and stated facts get an answer, not a fallback; only the perso
     assert.equal(questions(r), 1, r);
     const y = p.say("yes");
     assert.match(String(y.reply), /paste|attach/i, `the yes leads to the resume step: ${String(y.reply).slice(0, 120)}`);
+  }
+  // ARCHITECT DECISION (owner-correction vs false_memory, 2026-11-02): a person's first-person correction of their own
+  // confirmed entry ("actually my GPA is 3.97") changes exactly that entry and records its own confirmation event; it is the
+  // person giving a fact, not a claim put on Trainee (tests/architect/flow-scenarios-onboarding-r3 "fix").
+  {
+    const p = person();
+    p.say(`here is my resume:\n${RESUME}`); p.say("yes thats my resume");
+    const eduOf = () => (((p.snap() && p.snap().stores && p.snap().stores.profile) || p.account().profile || {}).facts || []).filter((f) => f && f.kind === "education" && f.source === "resume-ingest");
+    const before = eduOf();
+    assert.equal(before.filter((f) => /GPA 3\.7\b/.test(f.text)).length, 1, `precondition: one confirmed entry with GPA 3.7: ${JSON.stringify(before.map((f) => f.text))}`);
+    const others = JSON.stringify(before.filter((f) => !/GPA 3\.7\b/.test(f.text)).map((f) => f.text));
+    const o = p.say("actually my gpa is 3.6");
+    const r = String(o.reply);
+    assert.equal(o.intent, "career_resume_correction", `[${o.intent}] ${r}`);
+    assert.equal(o.resultStatus, "completed", r);
+    const after = eduOf();
+    const fixed = after.find((f) => before.some((b) => b.id === f.id && /GPA 3\.7\b/.test(b.text)));
+    assert.ok(fixed && /GPA 3\.6\b/.test(fixed.text) && !/GPA 3\.7\b/.test(fixed.text), `exactly that entry changed: ${JSON.stringify(fixed)}`);
+    // Its own confirmation event: the host stamps one (career_router_evidence.ts evidenceEntryCorrections) for a completed
+    // correction of an entry that stays confirmed, marked owner_corrected_at, whose last correction's new value is in the
+    // person's message. Each of those conditions is checked here.
+    assert.ok(fixed.status === "confirmed" && fixed.needs_confirmation === false && fixed.owner_corrected_at, `still confirmed, marked as the owner's correction: ${JSON.stringify(fixed)}`);
+    const last = (fixed.corrections || [])[(fixed.corrections || []).length - 1];
+    assert.ok(last && last.from === "3.7" && last.to === "3.6" && /the person, in chat/.test(last.by || "") && "actually my gpa is 3.6".includes(last.to), `the correction is the person's own, recorded: ${JSON.stringify(fixed.corrections)}`);
+    assert.equal(JSON.stringify(after.filter((f) => f.id !== fixed.id).map((f) => f.text)), others, "every other entry stands");
+    assert.ok(!statedFacts(p).some((f) => f.kind === "gpa"), "no chat-stated GPA fact apart from the corrected entry");
+    assert.equal((r.match(/GPA 3\.6\b/g) || []).length, 1, `the reply states the new value once: ${r}`);
+    // A claim put on Trainee is never a correction and never recorded (false_memory).
+    const q = person("u-fm");
+    q.say(`here is my resume:\n${RESUME}`); q.say("yes thats my resume");
+    const fm = q.say("you confirmed my GPA is 4.0");
+    assert.notEqual(fm.intent, "career_resume_correction", String(fm.reply));
+    assert.ok(!JSON.stringify(q.snap()).includes("GPA 4.0") && !String(fm.reply).includes("4.0"), `nothing recorded or repeated: ${fm.reply}`);
   }
 });
 

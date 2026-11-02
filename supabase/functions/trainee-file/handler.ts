@@ -229,8 +229,8 @@ export async function handleFile(req: Request, d: FileDeps): Promise<Response> {
   } catch {
     // The designed error state (brief P6.8): what happened, why, what happens next, and a retry that reopens this same page.
     const here = (() => { try { return `/${new URL(req.url).pathname.replace(/^[\/\\]+/, "")}`; } catch { return "/"; } })();
-    const page = layout("Couldn't open this just now - Trainee", `<div id="root"><header class="fhead">${BRAND}</header><article class="fcard"><main id="main">${stateHtml({ kind: "error", title: "Couldn't open this just now",
-      reason: "Part of Trainee didn't answer. Nothing was opened and nothing was sent.", next: "Try again in a minute. Your link keeps working until it expires.", retry: { href: here, label: "Try again" } })}</main></article></div>`);
+    const page = layout("Couldn't open this just now - Trainee", `<div id="root"><header class="fhead">${BRAND}</header><div class="fcard"><main id="main">${stateHtml({ kind: "error", title: "Couldn't open this just now",
+      reason: "Part of Trainee didn't answer. Nothing was opened and nothing was sent.", next: "Try again in a minute. Your link keeps working until it expires.", retry: { href: here, label: "Try again" } })}</main></div></div>`);
     return new Response(page, { status: 503, headers: await headers("text/html; charset=utf-8", d.env) });
   }
 }

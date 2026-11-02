@@ -231,7 +231,7 @@ export function renderFeed(f: Feed): string {
   const all = f.setHash && f.setSize >= 2 ? `<form method="post" class="ajax all">${hidden(f.token, "applyall", `<input type="hidden" name="set" value="${f.setHash}">`)}<button type="submit">Apply to all ${f.setSize}</button></form>` : "";
   const top = f.top ? `<p class="top-note" role="alert">${esc(f.top)} ${refresh(f.token)}</p>` : "";
   // The File shell (file_design.ts): the wordmark and who it was made for above one card; the title, its freshness stamp, then the rows.
-  const inner = `<div id="root"><header class="fhead">${BRAND}${f.made ? `<p class="made">${esc(f.made)}</p>` : ""}</header><article class="fcard"><h1 class="ftitle">Your jobs</h1>${stampHtml(f.stamp ?? null)}${withLine}${more}${all}<main id="main">${top}<ul class="rows">${f.rows.map((r) => rowHtml(r, f.token)).join("")}</ul></main></article>${signOutFoot(f.token)}</div><p id="live" class="sr" role="status" aria-live="polite"></p>`;
+  const inner = `<div id="root"><header class="fhead">${BRAND}${f.made ? `<p class="made">${esc(f.made)}</p>` : ""}</header><div class="fcard"><h1 class="ftitle">Your jobs</h1>${stampHtml(f.stamp ?? null)}${withLine}${more}${all}<main id="main">${top}<ul class="rows">${f.rows.map((r) => rowHtml(r, f.token)).join("")}</ul></main></div>${signOutFoot(f.token)}</div><p id="live" class="sr" role="status" aria-live="polite"></p>`;
   return layout("Your jobs - Trainee", inner, { script: FEED_SCRIPT, tg: true, og: f.og });
 }
 // Sign out of this page here, or everywhere it is open (every session of the account ends; each needs a new sign-in).

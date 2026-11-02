@@ -4,6 +4,7 @@
 // Every step asserts the database, and that the reply says no more than the database holds. The model (OpenAI), Gmail
 // and one company website are scripted fakes at their real URLs; any other host fails the test. Nothing is sent: no
 // request to Gmail's send endpoint, no outreach row, no outbox row; nothing is fetched from LinkedIn, Indeed or Handshake.
+import { personalOpenAI, seedFactsSql, seedKeysSql } from "./personal-fixture.ts";
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, SERVICE_KEY, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
@@ -26,6 +27,9 @@ const sha = async (s: string) => [...new Uint8Array(await crypto.subtle.digest("
 // ------------------------------------------------------------------------------------------------ the fakes
 let modelCalls = 0;
 function fakeOpenAI(body: any): Response {
+  // PERSONALIZED OUTREACH (2026-10-31): a first email's payload is the engine's, answered from it (personal-fixture.ts).
+  const personal = personalOpenAI(body);
+  if (personal) { modelCalls++; return personal as any; }
   modelCalls++;
   const user = String((body.messages ?? []).find((m: any) => m.role === "user")?.content ?? "");
   const first = /- name: (\S+)/.exec(user)?.[1] ?? "there";
@@ -241,6 +245,9 @@ Deno.test({ name: "people finding and intros at the real handler: import, who, a
     let introOne: any;
     await t.step("intro through a mutual: drafted from confirmed facts with a forwardable note; double tap is one draft; nothing sent", async () => {
       const before = modelCalls;
+      // PERSONALIZED OUTREACH (2026-10-31): the people the notes are to each carry one sourced fact (what the person told
+      // Trainee), so the note is written for them; with nothing on record the person is asked one question instead.
+      await pg.sql(seedKeysSql(A, ["n:maya chen@ramp", "n:priya shah@ramp"]));
       const r = await say("can u get me an intro to maya chen at ramp about the data analyst role");
       eq([r.intent, r.resultStatus], ["career_intro_request", "drafted"], r.reply);
       eq(modelCalls - before, 2, "one request, one forwardable note");

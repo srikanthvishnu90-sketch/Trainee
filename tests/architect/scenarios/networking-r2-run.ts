@@ -183,7 +183,9 @@ export async function runDraft(s: DraftScenario) {
   const model = async (p: any) => { prompts.push(p); return { content: [{ type: "text", text: s.output }], stop_reason: "end_turn" }; };
   const lang = draftLangOf(s.message);
   if (s.lang === "en" ? lang !== null : lang !== s.lang) return { why: `the person's language was read as ${lang} [${s.message}]`, got: { lang } };
-  const d = await draftFor({ model, facts: s.facts, r: { ...s.recipient, source: "test" }, lang });
+  // PERSONALIZED OUTREACH (2026-10-31): this battery grades the fact-lock writer with fixed outputs (claims, languages); first
+  // emails go through the engine (outreach-personalize.test.ts). Was draftFor without personal: false, a generic first email.
+  const d = await draftFor({ model, facts: s.facts, r: { ...s.recipient, source: "test" }, lang, personal: false });
   const got = { ok: d.ok, why: d.ok ? null : d.detail.slice(0, 3), out: s.output.slice(0, 300) };
   if (s.lang !== "en" && !String(prompts[0]?.messages?.[0]?.content ?? "").includes(`in ${LANG_NAME[s.lang]}`)) return { why: "the writer is not told the person's language", got };
   if (d.ok !== s.ok) return { why: s.ok ? "an honest draft was refused" : "a draft that must be refused was accepted", got };

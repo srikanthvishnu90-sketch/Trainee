@@ -19,6 +19,7 @@
 //
 // Run: deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/telegram-acceptance.test.ts
 // (as an unprivileged user: initdb refuses root).
+import { personalOpenAI, seedFactsSql } from "./personal-fixture.ts";
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, SERVICE_KEY, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
@@ -66,6 +67,9 @@ const CONTACTS = "Name,Company,Title,Email\nMaya Chen,Acme TEST,Recruiter,maya.c
 let modelCalls = 0;
 function fakeOpenAI(body: any): Response {
   modelCalls++;
+  // PERSONALIZED OUTREACH (2026-10-31): a first email's payload is the engine's, answered from it (personal-fixture.ts).
+  const personal = personalOpenAI(body);
+  if (personal) return personal as any;
   const user = String((body.messages ?? []).find((m: any) => m.role === "user")?.content ?? "");
   const first = /- name: (\S+)/.exec(user)?.[1] ?? "there", topic = /ASK ABOUT[^\n]*\n- (.+)/.exec(user)?.[1];
   const text = `Subject: A quick question\n\nHi ${first},\n\nI'd be grateful for 15 minutes to ${topic ? `ask about ${topic}` : "hear how you got started"}. Would you be open to a short call?`;
@@ -340,6 +344,9 @@ Deno.test({
       await step("outreach-draft-not-sent-without-approval", async () => {
         const imported = await say(`and these\n${CONTACTS}`);
         ok(/imported 1\/1/.test(imported.reply), imported.reply);
+        // PERSONALIZED OUTREACH (2026-10-31): Maya carries one sourced fact (what the person told Trainee); with only a title
+        // and firm the person would be asked one question instead of being shown a generic draft.
+        await pg.sql(seedFactsSql(person, ["maya.chen@acme.example"]));
         const ask = await say("email Maya at Acme TEST about the software engineering intern role");
         let drafted = ask.reply;
         if (/sign/i.test(ask.reply) && !/Drafted/.test(ask.reply)) drafted = (await say("Alex Testcase\nTEST University")).reply;

@@ -17,6 +17,7 @@
 // IPs blocked. Hunter runs its own checks on its own servers; that is the one mailbox-level signal, and it is labeled.
 import { CareerProfile } from "./router_core.career.js";
 import { cleanCell, isFormula, readsAsInstruction } from "./career_people_import.ts";
+import type { RecipientFact } from "./career_outreach_personalize.ts";
 
 export const MAX_CONTACTS = 3000; // what the per-thread state keeps (the snapshot is at most 1 MB)
 export const NO_SMTP_PROBE = "Trainee never probes a mailbox over SMTP itself: it is abusive to mail servers and gets IPs blocked. Only Hunter's own check, where it ran, speaks to the mailbox.";
@@ -31,12 +32,18 @@ export interface ContactRow {
   name: string; email: string | null;
   firm: string; firm_raw: string; company: string; // firm normalized; company mirrors it for the older readers (142)
   title: string; school: string; connected_on: string | null;
+  // PERSONALIZED OUTREACH (2026-10-31): sourced facts about this person (career_outreach_personalize.ts), each with
+  // source_kind + retrieved_at. A contact with them is drafted by the personalization engine.
+  facts?: RecipientFact[];
   check?: Checks; verified?: boolean;
   vendor?: string; vendor_email_status?: string; // the list vendor's own claim (Apollo's "Email Status"), never a check
   // A person web discovery found (career_people source "provider"): their address was published on the page that names
   // them, or inferred from the company's email format. The draft card says which (2026-10-29).
   address?: "published" | "inferred";
   discovered?: true; // found by web discovery: someone a draft may reach, never someone the person "knows"
+  // #361 re-review (2026-11-01): a row Trainee read from somewhere (a public page, a Gmail correspondent) rather than one the
+  // person gave (their LinkedIn export, a CSV or a pasted list). Its address never makes a domain the firm's verified one.
+  unverified?: true;
 }
 export type SourceResult =
   | { status: "ok"; source: string; kind: "own_export" | "vendor"; vendor: string | null; rows: ContactRow[]; duplicates: number; skipped: { row: number; why: string }[]; cost_usd: number }

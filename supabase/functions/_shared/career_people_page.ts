@@ -18,7 +18,7 @@ import { isRoleAddress, isTeamName } from "./career_contacts.ts";
 export const PAGE_MAX_BYTES = 2_000_000, PAGE_TIMEOUT_MS = 8_000, MAX_REDIRECTS = 3; // what one fetch may hold; no count of people (the 2 MB bounds the work)
 export const UA = "TraineeBot/1.0 (reads one page a person sent; no crawling)";
 
-export type PageWhy = "bad_url" | "not_https" | "blocked_site" | "private_host" | "robots" | "too_large" | "not_html" | "http" | "timeout" | "network" | "redirects";
+export type PageWhy = "bad_url" | "not_https" | "blocked_site" | "private_host" | "robots" | "too_large" | "not_html" | "http" | "timeout" | "network" | "redirects" | "not_allowed";
 // former: the page itself says they no longer hold the role (a title "Former ...", "ex-...", "Previously ...", "until 2024",
 // "now at ..."; a worksFor role with an end date). NETWORKING R2 (2026-10-30).
 export interface PagePerson { name: string | null; title: string; company: string; school: string; email: string | null; how: "schema.org Person" | "mailto link"; former?: boolean }
@@ -264,6 +264,20 @@ export function robotsAllows(txt: string, path: string): boolean {
 }
 
 export async function readPage(get: PageGet, raw: string, resolve: Resolver = dnsResolver): Promise<PageRead> {
+  const r = await fetchHtml(get, raw, resolve);
+  if (!r.ok) return r;
+  const { people, org } = peopleOnPage(r.html);
+  return { ok: true, url: r.url, people, org };
+}
+// One public page read under every rule above (HTTPS, public host, never LinkedIn/Indeed/Handshake, robots.txt, pinned
+// address, 3 redirects, 2 MB, 8 s): its HTML. PERSONALIZED OUTREACH reads a contact's team page or filing through this.
+// `allow`: the caller's allowlist (career_networking.ts: the host the fact's source kind was judged on). It is checked on
+// the first URL and on every redirect hop before that hop is resolved, with the private-address block after it, at most
+// MAX_REDIRECTS hops: a firm page that redirects anywhere else is never read (#361 takeover, 2026-11-01).
+export async function fetchHtml(get: PageGet, raw: string, resolve: Resolver = dnsResolver, allow?: (url: URL) => boolean): Promise<{ ok: true; url: string; html: string } | { ok: false; why: PageWhy; detail?: string }> {
+  // An unparsable URL is left to checkHost, which refuses it as bad_url.
+  const offList = (u: string) => { if (!allow) return false; let x: URL; try { x = new URL(u); } catch { return false; } return !allow(x); };
+  if (offList(raw)) return { ok: false, why: "not_allowed" };
   const c = await checkHost(raw, resolve);
   if (!c.ok) return c.detail ? { ok: false, why: c.why, detail: c.detail } : { ok: false, why: c.why };
   let url = c.url, ip = c.ip;
@@ -276,7 +290,9 @@ export async function readPage(get: PageGet, raw: string, resolve: Resolver = dn
       if (r.status >= 300 && r.status < 400 && r.headers.get("location")) {
         await r.body?.cancel().catch(() => {});
         if (hop >= MAX_REDIRECTS) return { ok: false, why: "redirects" };
-        const next = await checkHost(new URL(r.headers.get("location")!, url).toString(), resolve);
+        const target = new URL(r.headers.get("location")!, url).toString();
+        if (offList(target)) return { ok: false, why: "not_allowed", detail: "it redirected to a site I don't read" };
+        const next = await checkHost(target, resolve);
         if (!next.ok) return next.detail ? { ok: false, why: next.why, detail: next.detail } : { ok: false, why: next.why };
         url = next.url; ip = next.ip;
         continue;
@@ -286,8 +302,7 @@ export async function readPage(get: PageGet, raw: string, resolve: Resolver = dn
       if (Number(r.headers.get("content-length") ?? 0) > PAGE_MAX_BYTES) { await r.body?.cancel().catch(() => {}); return { ok: false, why: "too_large" }; }
       const html = await capped(r, PAGE_MAX_BYTES);
       if (html === null) return { ok: false, why: "too_large" };
-      const { people, org } = peopleOnPage(html);
-      return { ok: true, url: url.toString(), people, org };
+      return { ok: true, url: url.toString(), html };
     }
   } catch (e) {
     const name = (e as Error)?.name;

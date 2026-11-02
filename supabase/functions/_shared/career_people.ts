@@ -24,11 +24,13 @@
 //   forget     "forget my LinkedIn contacts" (and Gmail contacts, job emails, intro requests): deleted and read back.
 import { contactsOf, type ContactRow, MX_NOT_WIRED, normalizeFirm, verifyRows } from "./career_contacts.ts";
 import { confirmed, draftFor, factText, type ModelFn, type OutreachStore, type Recipient } from "./career_outreach.ts";
-import { parseNetworkingAsk } from "./career_networking.ts";
+import { FACTS_INTENT, parseNetworkingAsk, personKey, setFactAsk } from "./career_networking.ts";
+import { factQuestion } from "./career_outreach_personalize.ts";
 import { CAREER_READ_SCOPE, careerTokenFor } from "./career_mail_gmail.ts";
 import { connectUrl } from "./agent/integrations.ts";
 import { chatAsk, cleanCell, companyKey, parseCsv, parseExport, type ParsedExport, peopleFileText, type PersonRow, sha256Hex } from "./career_people_import.ts";
 import { domainLabelOf, type GmailRead, heardFrom, isCompanyLabel, registrable } from "./career_people_gmail.ts";
+import { firmDomains } from "./career_outreach_personalize.ts";
 import { memorySweepStore, type SweepOutcome, type SweepSink, type SweepStore, supabaseSweepStore, sweepTurn } from "./career_people_sweep.ts";
 import { checkUrl, formerTitle, type PageGet, pinnedGet, readPage, type Resolver } from "./career_people_page.ts";
 import { findTargets, makeProvider, parseTargetAsk, providerConfig, supabaseProviderStore, type TargetAsk, type TargetDeps } from "./career_people_provider.ts";
@@ -705,22 +707,29 @@ async function pageTurn(o: PeopleTurnIn, d: PeopleDeps, a: Extract<Ask, { kind: 
   people = a.owner ? people.map((p) => (!p.name && p.email ? { ...p, name: a.owner } : p)) : people.filter((p) => p.name);
   // NETWORKING R2 (2026-10-30): on a company's page, an address on another domain is not that person's work address: a
   // look-alike (str1pe.com, stripe.com.evil.io) or a personal mailbox. Before, it was saved as their address and drafted
-  // to ("email Dana at Stripe" wrote to dana@str1pe.com). Only an address at the page's own domain or the company's name
-  // is kept; the person is kept without it. Someone the page says has left is not filed under the company.
+  // to ("email Dana at Stripe" wrote to dana@str1pe.com). Someone the page says has left is not filed under the company.
+  // #361 re-review (2026-11-01): a name-shaped domain is not proof either (stripe.xyz/team filed "maya@stripe.xyz" under
+  // Stripe). An address filed under a company is kept only at that company's VERIFIED domain, one a person the user gave
+  // (their export or list, never a page or a Gmail correspondent) has an address at; with none, the person is kept without
+  // an address. An address filed under no company is the person's own.
   let offDomain = 0, left = 0;
-  if (!a.owner) {
-    const labels = new Set([registrable(new URL(r.url).hostname).label, domainLabelOf(company)].filter((x) => x && x.length >= 2));
+  if (company) {
+    const given = (await d.store.atCompany(o.userId, companyKey(company)).catch(() => [] as PersonRec[]))
+      .filter((p) => p.source === "linkedin_export" || p.source === "thread_list").map((p) => p.email);
+    const verified = firmDomains(given);
     people = people.map((p) => {
-      if (!p.email || labels.has(registrable(p.email.split("@")[1] ?? "").label)) return p;
+      if (!p.email || verified.includes(registrable(p.email.split("@")[1] ?? "").full)) return p;
       offDomain++;
       return { ...p, email: null };
     });
+  }
+  if (!a.owner) {
     const before = people.length;
     people = people.filter((p) => !(p.former || formerTitle(p.title)));
     left = before - people.length;
   }
   const notes = [
-    ...(offDomain ? [`${plural(offDomain, "address")} on ${r.url} ${offDomain === 1 ? "is" : "are"} not at ${company || "the page's"} domain (a look-alike or a personal mailbox), so I didn't save ${offDomain === 1 ? "it" : "them"} as anyone's work address.`] : []),
+    ...(offDomain ? [`${plural(offDomain, "address")} on ${r.url} ${offDomain === 1 ? "is" : "are"} not at ${company}'s verified domain (one of your own contacts there has an address at; a look-alike or a personal mailbox otherwise), so I didn't save ${offDomain === 1 ? "it" : "them"} as anyone's work address.`] : []),
     ...(left ? [`${plural(left, "person")} the page lists as no longer there (former or ex-, or an end date) ${left === 1 ? "was" : "were"} not saved.`] : []),
   ];
   if (!people.length) return { reply: [`${r.url} doesn't mark anyone up as a current person there or publish an email link for one, so I took no names from it (I don't guess names from page text). Nothing was saved.`, ...notes].join(" "), intent: PAGE_INTENT, status: "no_people" };
@@ -872,6 +881,19 @@ async function introTurn(o: PeopleTurnIn, d: PeopleDeps, a: Extract<Ask, { kind:
   return await draftIntro(o, d, path, a.topic, null);
 }
 
+// PERSONALIZED OUTREACH (2026-10-31): what the person told Trainee about this recipient (career_networking.ts saveFacts),
+// by the same person key the contacts use.
+const keyOf = (r: Recipient) => personKey({ email: r.email || null, name: r.name, firm: r.firm } as any);
+async function withFacts(o: PeopleTurnIn, r: Recipient): Promise<Recipient> {
+  if (!o.store.recipientFacts) return r;
+  const got = (await o.store.recipientFacts(o.userId, [keyOf(r)]).catch(() => new Map())).get(keyOf(r)) ?? [];
+  return got.length ? { ...r, facts: [...(r.facts ?? []), ...got] } : r;
+}
+// Nothing specific about them: the one question; the person's answer is saved on them and this same ask runs again.
+async function askFirst(o: PeopleTurnIn, r: Recipient, topic: string | null): Promise<PeopleResult> {
+  await setFactAsk(o, { key: keyOf(r), name: r.name, firm: r.firm, email: r.email || null, topic, replay: o.message, at: new Date(o.now).toISOString() });
+  return { reply: factQuestion(r), intent: FACTS_INTENT, status: "needs_facts" };
+}
 async function draftIntro(o: PeopleTurnIn, d: PeopleDeps, path: Exclude<Path, { route: "none" }>, topic: string | null, previous: Intro | null): Promise<PeopleResult> {
   const facts = (((o.state.profile as any)?.facts) ?? []) as unknown[];
   const sig = (await o.store.prefs(o.userId).catch(() => ({ signature: null } as any)))?.signature as string | null;
@@ -879,21 +901,24 @@ async function draftIntro(o: PeopleTurnIn, d: PeopleDeps, path: Exclude<Path, { 
   let row: Parameters<PeopleStore["addIntro"]>[1];
   if (path.route === "mutual") {
     const via = recipientOf(path.via);
-    const target: Recipient = path.target.rec ? recipientOf(path.target.rec) : { name: path.target.name, firm: path.target.company, title: path.target.title, school: "", email: "", source: path.target.ref };
+    const target: Recipient = await withFacts(o, path.target.rec ? recipientOf(path.target.rec) : { name: path.target.name, firm: path.target.company, title: path.target.title, school: "", email: "", source: path.target.ref });
     const ask = `an introduction to ${path.target.name}${path.target.title ? `, ${path.target.title}` : ""}${path.target.company ? ` at ${path.target.company}` : ""}${topic ? `, to ask about ${topic}` : ""}; short, easy to say no to, and mention a note is below that they can forward`;
     const [req, blurb] = await Promise.all([
-      draftFor({ model: o.model!, facts, r: via, topic: ask, previous: previous?.body ?? null }),
+      // The request to someone they already know, carrying the note below: the note is the first email to the target.
+      draftFor({ model: o.model!, facts, r: via, topic: ask, previous: previous?.body ?? null, personal: false }),
       draftFor({ model: o.model!, facts, r: target, topic: topic ?? `a short conversation about their work${path.target.company ? ` at ${path.target.company}` : ""}`, previous: previous?.blurb ?? null }),
     ]);
     const bad = [!req.ok ? `the request to ${via.name}: ${req.why === "unverified" ? `it said something not on record (${req.detail.slice(0, 2).join("; ")})` : req.why === "model" ? "the writing model didn't answer" : req.detail.join("; ")}` : "",
       !blurb.ok ? `the note for ${target.name}: ${blurb.why === "unverified" ? `it said something not on record (${blurb.detail.slice(0, 2).join("; ")})` : blurb.why === "model" ? "the writing model didn't answer" : blurb.detail.join("; ")}` : ""].filter(Boolean);
+    if (!blurb.ok && blurb.why === "unsourced") return await askFirst(o, target, topic);
     if (!req.ok || !blurb.ok) return { reply: `Nothing was drafted: ${bad.join("; ")}.`, intent: INTRO_INTENT, status: "not_drafted" };
     row = { route: "mutual", target_name: path.target.name, target_company: path.target.company, target_title: path.target.title, target_ref: path.target.ref.slice(0, 600),
       via_name: path.via.name ?? path.via.email, via_ref: `${fromWhere(path.via)}`.slice(0, 600), to_name: (path.via.name ?? path.via.email)!, to_email: path.via.email,
       delivery: path.via.email ? "mailto" : "copy", subject: req.subject.slice(0, 200), body: signed(req.body).slice(0, 3000), blurb: blurb.body.trim().slice(0, 3000), payload_hash: "" };
   } else {
-    const to = recipientOf(path.to);
+    const to = await withFacts(o, recipientOf(path.to));
     const r = await draftFor({ model: o.model!, facts, r: to, topic, previous: previous?.body ?? null });
+    if (!r.ok && r.why === "unsourced") return await askFirst(o, to, topic);
     if (!r.ok) return { reply: `Nothing was drafted: ${r.why === "unverified" ? `it said something not on record (${r.detail.slice(0, 2).join("; ")})` : r.why === "model" ? "the writing model didn't answer" : r.detail.join("; ")}.`, intent: INTRO_INTENT, status: "not_drafted" };
     row = { route: "direct", target_name: (path.to.name ?? path.to.email)!, target_company: path.to.company, target_title: path.to.position, target_ref: fromWhere(path.to).slice(0, 600),
       via_name: null, via_ref: null, to_name: (path.to.name ?? path.to.email)!, to_email: path.to.email, delivery: path.to.email ? "mailto" : "copy",

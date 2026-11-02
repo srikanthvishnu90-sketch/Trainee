@@ -35,6 +35,8 @@ import { payFrom } from "../posting_pay.ts";
 import type { Limits } from "../career_apply.ts";
 import { type Situation, statusText } from "../career_situation.ts";
 import { researchCareerQuestion, type ResearchDeps } from "./research/index.ts";
+import { personKey } from "../career_networking.ts";
+import { factQuestion } from "../career_outreach_personalize.ts";
 
 const obj = (properties: Record<string, unknown> = {}, required: string[] = []) => ({ type: "object" as const, properties, required });
 const str = (description: string) => ({ type: "string", description });
@@ -814,16 +816,22 @@ export function careerTools(deps: {
         if (!pick.length) return { drafted: 0, held_out: held, note: "No one on their list fits; say why from held_out." };
         const recipientOf = (r: typeof rows[number]) => ({ name: r.name, firm: r.firm, title: r.title, school: r.school, email: r.email!, source: `${r.file}, row ${r.row}` });
         const results: Awaited<ReturnType<typeof draftFor>>[] = [];
-        for (let k = 0; k < pick.length; k += 5) results.push(...await Promise.all(pick.slice(k, k + 5).map((r) => draftFor({ model: o.model!, facts, r: recipientOf(r), lang: draftLangOf(c.turn?.message ?? "") }))));
+        // PERSONALIZED OUTREACH: what the person told Trainee about each of them (career_networking.ts saveFacts).
+        const keys = pick.map((r) => personKey(r as any));
+        const known = o.store.recipientFacts ? await o.store.recipientFacts(c.userId, keys).catch(() => new Map()) : new Map();
+        const withFacts = (r: typeof rows[number], k: number) => { const f = [...((r as any).facts ?? []), ...(known.get(keys[k]) ?? [])]; return f.length ? { ...recipientOf(r), facts: f } : recipientOf(r); };
+        for (let k = 0; k < pick.length; k += 5) results.push(...await Promise.all(pick.slice(k, k + 5).map((r, j) => draftFor({ model: o.model!, facts, r: withFacts(r, k + j), lang: draftLangOf(c.turn?.message ?? "") }))));
         const footer = footerOf(prefs.signature), ok: Omit<OutreachDraft, "id" | "batch_id" | "thread_id">[] = [], notDrafted: { name: string; why: string }[] = [];
         for (const [k, d] of results.entries()) {
           if (!d.ok) { notDrafted.push({ name: pick[k].name, why: `${d.why}: ${d.detail.slice(0, 3).join("; ")}` }); continue; }
-          const draft = { n: ok.length + 1, recipient: recipientOf(pick[k]), subject: d.subject, body: d.body, footer, shared: d.shared, status: "shown" as const, hash: "",
+          const draft = { n: ok.length + 1, recipient: { ...recipientOf(pick[k]), ...(d.personal ? { personal: d.personal } : {}) } as any, subject: d.subject, body: d.body, footer, shared: d.shared, status: "shown" as const, hash: "",
             approved_hash: null, approved_at: null, sent_at: null, gmail_id: null, gmail_thread: null, result: null, created_at: new Date(c.now).toISOString() };
           draft.hash = await payloadHash(messageOf(draft));
           ok.push(draft);
         }
-        if (!ok.length) return { drafted: 0, not_drafted: notDrafted, held_out: held };
+        const unsourced = pick.filter((_, k) => { const d = results[k]; return !d.ok && d.why === "unsourced"; });
+        const ask_first = unsourced.length ? { ask_the_person: factQuestion(unsourced[0]), why: "nothing sourced about them beyond title and firm; ask this ONE question and draft after they answer; never write a generic email" } : undefined;
+        if (!ok.length) return { drafted: 0, not_drafted: notDrafted, held_out: held, ...(ask_first ? { ask_first } : {}) };
         const saved = await o.store.saveBatch(c.userId, c.threadId, ok, c.now);
         for (const d of saved) await recordOutreach(deps.events, c.userId, "outreach_drafted", d, c.now);
         const left = notDrafted.length ? `\n\nNot drafted, because I couldn't write to them without making something up: ${notDrafted.map((x) => x.name).join(", ")}.` : "";

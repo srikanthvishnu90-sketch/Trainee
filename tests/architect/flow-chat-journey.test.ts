@@ -26,6 +26,7 @@
 // Steps marked PRODUCT GAP assert what the product should do and fail on trunk today; the assertion is kept as written
 // (never weakened) so the gap stays visible until the product closes it. Skipped steps: none (trunk has every feature;
 // where a phrasing has no handler the step asserts it and is marked PRODUCT GAP).
+import { personalOpenAI, seedFactsSql } from "./personal-fixture.ts";
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, SUPABASE_URL, supabaseParity, type Turn } from "../flow/handler.ts";
@@ -54,6 +55,9 @@ const byCompany = (c: string) => POSTINGS.find((p) => p.company === c)!;
 let modelCalls = 0;
 function fakeOpenAI(body: any): Response {
   modelCalls++;
+  // PERSONALIZED OUTREACH (2026-10-31): a first email's payload is the engine's, answered from it (personal-fixture.ts).
+  const personal = personalOpenAI(body);
+  if (personal) return personal as any;
   const user = String((body.messages ?? []).find((m: any) => m.role === "user")?.content ?? "");
   const first = /- name: (\S+)/.exec(user)?.[1] ?? "there";
   const text = `Subject: A quick question\n\nHi ${first},\n\nI'd be grateful for 15 minutes to hear how you got started. Would you be open to a short call?`;
@@ -312,6 +316,8 @@ Deno.test({
         assert(/imported 6\/8 rows/.test(up.reply) && /4\/6 have an email address/.test(up.reply), up.reply);
         const who = await say("who do I know at Stripe?");
         assert(/You have 4 contacts at Stripe, 3 with an email address/.test(who.reply), `the real count at the firm: ${who.reply}`);
+        // PERSONALIZED OUTREACH (2026-10-31): the people they will write to carry one sourced fact (what they told Trainee).
+        await pg.sql(seedFactsSql(PERSON, ["maya.chen@stripe.example", "sam.rivera@stripe.example", "priya.shah@ramp.example"]));
       });
 
       // PRODUCT GAP: "I want to reach people at Stripe" (4 Stripe contacts on file, 3 with an address). Expected: the people on

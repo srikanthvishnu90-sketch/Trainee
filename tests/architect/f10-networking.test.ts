@@ -3,6 +3,7 @@
 // drafts through draftFor onto the outreach batch, the drafting-off fallback, the signature answer, and never an address
 // that is not on the person's own row. Synthetic data, a scripted model, the in-memory outreach store.
 // Run: deno test -A --no-check tests/architect/f10-networking.test.ts
+import { engineAware, seedFacts } from "./personal-fixture.ts";
 import nodeAssert from "node:assert/strict";
 const assert = (v: unknown, m?: string) => nodeAssert.ok(v, m);
 const assertEquals = (a: unknown, b: unknown, m?: string) => nodeAssert.deepStrictEqual(a, b, m);
@@ -22,12 +23,14 @@ const FACTS = [
 ];
 // The scripted model: writes from the recipient row and the ask it was given; "Sam" gets a claim that is not on record.
 const said = (payload: any) => String(payload.messages?.[0]?.content ?? "");
-const model = async (payload: any) => {
+// PERSONALIZED OUTREACH (2026-10-31): a first email's payload is the engine's (personal-fixture.ts engineAware); Sam's
+// invented claim is kept there too.
+const model = engineAware(async (payload: any) => {
   const p = said(payload), first = /- name: (\S+)/.exec(p)![1], topic = /ASK ABOUT[^\n]*\n- (.+)/.exec(p)?.[1];
   const ask = topic ? `ask about ${topic}` : "hear how you got started";
   const extra = first === "Sam" ? " I worked at Google for two years." : "";
   return { content: [{ type: "text", text: `Subject: A quick question\n\nHi ${first},\n\nI'd be grateful for 15 minutes to ${ask}.${extra} Would you be open to a short call?` }], stop_reason: "end_turn" };
-};
+}, (first) => (first === "Sam" ? "I worked at Google for two years." : ""));
 
 Deno.test("F10 parse: the phrasings people type", () => {
   for (const m of ["who do I know at Stripe?", "find my connections at Stripe", "do I know anyone at Stripe", "find me someone at Stripe", "show me my contacts at Stripe", "Who in my network works at Stripe?"]) {
@@ -101,6 +104,8 @@ Deno.test("F10 who: from their own contacts, one person once; none says so and h
 Deno.test("F10 draft: onto the outreach batch; one approval per exact message; held and failed ones counted with reasons", async () => {
   const store = memoryOutreachStore(), events = memoryEventStore(), state: Record<string, unknown> = { profile: { facts: FACTS } };
   await networkingTurn({ message: "x", userId: U, threadId: T, now: NOW, state, store, model: null, attachments: [{ name: "Connections.csv", text: LINKEDIN }] });
+  // PERSONALIZED OUTREACH (2026-10-31): Maya and Sam each carry one sourced fact (what the person told Trainee).
+  await seedFacts(store, U, ["maya.chen@stripe.example", "sam.rivera@stripe.example"]);
   // Drafting off: who would be written to, nothing written, no model call.
   const off = await networkingTurn({ message: "email Maya at Stripe about the data analyst role", userId: U, threadId: T, now: NOW, state, store, model: null });
   assertEquals(off!.status, "drafting_off");
@@ -114,7 +119,9 @@ Deno.test("F10 draft: onto the outreach batch; one approval per exact message; h
   assertEquals([one!.intent, one!.status], [OUTREACH_INTENT, "drafted"]);
   assertMatch(one!.reply, /^Saved your signature\.\n\nDrafted 1\/1\./);
   assertMatch(one!.reply, /To: Maya Chen, Data Analyst, Stripe <maya\.chen@stripe\.example>/);
-  assertMatch(one!.reply, /to ask about the data analyst role/);
+  // PERSONALIZED OUTREACH (2026-10-31): was /to ask about the data analyst role/, the generic body; the email now names
+  // the sourced fact about Maya.
+  assertMatch(one!.reply, /TEST meetup talk about data pipelines/);
   assertMatch(one!.reply, /Alex Testcase\nTEST University/);
   const batch = await store.latestBatch(U);
   assertEquals(batch.length, 1);

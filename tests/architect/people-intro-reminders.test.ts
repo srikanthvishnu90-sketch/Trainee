@@ -10,6 +10,7 @@
 // link or copy-ready text (hash-bound approval itself is pinned in people-turn-unit.test.ts and, on real Postgres, in
 // flow-people-finding.test.ts). What was NOT pinned anywhere: that the whole lifecycle writes nothing to the outbox,
 // and that the only outbox row this feature ever writes is the reminder the person asked for — never the note itself.
+import { engineAware, everyoneKnown } from "./personal-fixture.ts";
 import nodeAssert from "node:assert/strict";
 import { type Intro, type PeopleDeps, type PeopleStore, peopleTurn, type PersonRec, type Prefs } from "../../supabase/functions/_shared/career_people.ts";
 import { runIntroReminders } from "../../supabase/functions/_shared/career_people_reminders.ts";
@@ -159,10 +160,12 @@ Deno.test("intro reminders: one person's failure does not stop another's, and th
 });
 
 // ------------------------------------------------------------------------------------------------ the turn's copy
-const model = async (p: any) => {
+// PERSONALIZED OUTREACH (2026-10-31): a first email is written from the engine's payload (personal-fixture.ts).
+const model = engineAware(async (p: any) => {
   const user = String(p.messages[0].content), first = /- name: (\S+)/.exec(user)?.[1] ?? "there";
   return { content: [{ type: "text", text: `Subject: A quick question\n\nHi ${first},\n\nWould you be open to a short call?` }], stop_reason: "end_turn" };
-};
+});
+
 const facts = [{ id: "F-001", kind: "experience", text: "Data analyst intern at Acme Corp", status: "confirmed" }];
 Deno.test("intro reminders: the remind reply says what the code now does — push on vs push off, and only a person with a texting channel is promised a text", async () => {
   const off = await driveToRemind(false, true);
@@ -181,7 +184,7 @@ async function driveToRemind(introPush: boolean, texting: boolean | undefined): 
   const store = memoryStore();
   const deps: PeopleDeps = { store, gmail: null, fetch: (async () => new Response("no", { status: 599 })) as typeof fetch, introPush,
     ...(texting === undefined ? {} : { canText: async (u: string) => texting && u === U }) };
-  const out = memoryOutreachStore();
+  const out = everyoneKnown(memoryOutreachStore()); // PERSONALIZED OUTREACH: each recipient carries one sourced fact
   const state: Record<string, unknown> = { profile: { facts } };
   const say = (message: string, extra: { attachments?: any[] } = {}) =>
     peopleTurn({ message, userId: U, threadId: T, now: NOW, state, attachments: extra.attachments, store: out, model, people: deps });
@@ -197,7 +200,7 @@ async function driveToRemind(introPush: boolean, texting: boolean | undefined): 
 Deno.test("never sends: the whole intro lifecycle writes no outbox row until a reminder is armed and due — and then only the reminder", async () => {
   const store = memoryStore(), outbox = memoryAlertStore();
   const deps: PeopleDeps = { store, gmail: null, fetch: (async () => new Response("no", { status: 599 })) as typeof fetch, introPush: true };
-  const out = memoryOutreachStore();
+  const out = everyoneKnown(memoryOutreachStore()); // PERSONALIZED OUTREACH: each recipient carries one sourced fact
   const state: Record<string, unknown> = { profile: { facts } };
   const say = (message: string, extra: { attachments?: any[]; now?: number } = {}) =>
     peopleTurn({ message, userId: U, threadId: T, now: extra.now ?? NOW, state, attachments: extra.attachments, store: out, model, people: deps });

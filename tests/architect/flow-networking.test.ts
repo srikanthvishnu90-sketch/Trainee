@@ -4,6 +4,7 @@
 // the outreach batch), approves exactly that message with "send 1", and the scheduled send run (runOutreachSends over the
 // same database, its claim RPC, a fake Gmail) sends exactly what was approved, once. The model is a scripted stand-in at
 // the OpenAI URL; nothing leaves the machine. Addresses come only from the person's own files; another person sees none.
+import { personalOpenAI, seedFactsSql, seedKeysSql } from "./personal-fixture.ts";
 import assertNode from "node:assert/strict";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
@@ -23,6 +24,9 @@ const PEOPLE: Record<string, string> = { "tok-n": "7b0f8f8e-6a43-4a49-9d2c-00000
 // claims a job that is not on record, so the fact-lock refuses it twice and it is never shown.
 let modelCalls = 0;
 function fakeOpenAI(body: any): Response {
+  // PERSONALIZED OUTREACH (2026-10-31): a first email's payload is the engine's, answered from it (personal-fixture.ts).
+  const personal = personalOpenAI(body, (first) => (first === "Sam" ? "I worked at Google for two years." : ""));
+  if (personal) { modelCalls++; return personal as any; }
   modelCalls++;
   const user = String((body.messages ?? []).find((m: any) => m.role === "user")?.content ?? "");
   const first = /- name: (\S+)/.exec(user)?.[1] ?? "there", topic = /ASK ABOUT[^\n]*\n- (.+)/.exec(user)?.[1];
@@ -84,6 +88,8 @@ Deno.test({ name: "F10: networking emails from chat at the real handler: import,
       assert(!JSON.stringify(stored).includes("linkedin.com/in/"), "no profile URL kept");
       const pasted = await say(chat, `and these\n${CONTACTS}`);
       assert(/imported 2\/2 rows/.test(pasted.reply), pasted.reply);
+      // PERSONALIZED OUTREACH (2026-10-31): each person they will write to carries one sourced fact (what they told Trainee).
+      await pg.sql(seedFactsSql(me, ["maya.chen@stripe.example", "lee.park@stripe.example", "sam.rivera@stripe.example"]));
     });
 
     await t.step("who: three phrasings, answered from their own contacts, one person once", async () => {
@@ -103,7 +109,7 @@ Deno.test({ name: "F10: networking emails from chat at the real handler: import,
       const sig = await say(chat, "Alex Testcase\nTEST University");
       eq([sig.intent, sig.resultStatus], ["career_outreach_batch", "drafted"], sig.reply);
       assert(/^Saved your signature\.\n\nDrafted 1\/1\./.test(sig.reply), sig.reply);
-      assert(/To: Maya Chen, Data Analyst, Stripe <maya\.chen@stripe\.example>/.test(sig.reply) && /ask about the data analyst role/.test(sig.reply), sig.reply);
+      assert(/To: Maya Chen, Data Analyst, Stripe <maya\.chen@stripe\.example>/.test(sig.reply) && /TEST meetup talk about data pipelines/.test(sig.reply), sig.reply); // was /ask about the data analyst role/ (the generic body)
       assert(/Reply "send all", "send 1-7,9"/.test(sig.reply), sig.reply);
       assert(Array.isArray(sig.body.parts) && sig.body.parts.length >= 2, "the batch rides as whole parts");
       const d = await drafts();

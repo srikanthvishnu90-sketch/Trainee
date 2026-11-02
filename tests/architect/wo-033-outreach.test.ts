@@ -1,6 +1,7 @@
 // WO-033: contact lists, outreach drafted per person from real facts, approved in batches of 10 by one reply, sent from
 // the person's own Gmail with no volume number of Trainee's own (NO LIMITS, owner 2026-10-27; only Gmail's refusal slows it), every step on the timeline, and the referral map from the
 // person's own exports. Synthetic data, a scripted model, fake Gmail and DNS. Run: deno test -A --no-check tests/architect/
+import { engineAware, seedFacts } from "./personal-fixture.ts";
 import {
   checkAddress, contactsOf, hunterPass, hunterVerifier, importContactsCsv, importContactsFile, listCost, listReport, mapHunter, memoryCheckCache,
   MX_NOT_WIRED, type MxResolver, normalizeFirm, vendorSource, verifyRows,
@@ -177,11 +178,11 @@ Deno.test("WO-033/F1 the fact-lock: an invented shared school is caught; claims 
 });
 
 Deno.test("WO-033/F2 a draft with an invented shared school is written again; if it stays invented it is not shown", async () => {
-  const fixed = await draftFor({ model: scripted("invent_once"), facts: FACTS, r: recipient({ school: "Wharton" }) });
+  const fixed = await draftFor({ model: scripted("invent_once"), facts: FACTS, r: recipient({ school: "Wharton" }), personal: false }); // the fact-lock writer (PERSONALIZED OUTREACH: first emails use the engine)
   assert(fixed.ok && !/Wharton/.test(fixed.body) && fixed.tries === 2, JSON.stringify(fixed));
-  const never = await draftFor({ model: scripted("invent"), facts: FACTS, r: recipient({ school: "Wharton" }) });
+  const never = await draftFor({ model: scripted("invent"), facts: FACTS, r: recipient({ school: "Wharton" }), personal: false });
   assert(!never.ok && never.why === "unverified" && never.detail.some((d) => /Wharton/.test(d)), JSON.stringify(never));
-  const thin = await draftFor({ model: scripted(), facts: [FACTS[2]], r: recipient() });
+  const thin = await draftFor({ model: scripted(), facts: [FACTS[2]], r: recipient(), personal: false });
   assert(!thin.ok && thin.why === "thin", "no confirmed fact, no draft");
 });
 
@@ -370,7 +371,10 @@ Deno.test("WO-033/X2 a 'stop' to any Trainee user stops every Trainee user's dra
 });
 
 Deno.test("WO-033/E1 'which bankers did I email in October?' end to end: import, draft, approve, send, recall", async () => {
-  const store = memoryOutreachStore(), events = memoryEventStore(), gmail = fakeGmail(), model = scripted();
+  // PERSONALIZED OUTREACH (2026-10-31): the two bankers each carry one sourced fact and the model writes from the engine's
+  // payload (personal-fixture.ts); was a generic email to bankers with nothing on record but a title and firm.
+  const store = memoryOutreachStore(), events = memoryEventStore(), gmail = fakeGmail(), model = engineAware(scripted());
+  await seedFacts(store, U, ["avery.synthetic@gs.example", "blake.fixture@jpm.example"]);
   const state: Record<string, any> = { profile: { facts: FACTS, connections: [] } };
   const imported = await importContactsFile(state, { name: "apollo-export.csv", text: APOLLO }, MX_OK);
   assert(imported.ok && /imported 4 contacts/.test(imported.note), imported.note);

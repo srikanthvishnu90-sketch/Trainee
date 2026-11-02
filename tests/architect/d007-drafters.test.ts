@@ -55,7 +55,10 @@ Deno.test("D-007 drafters: the cold email is never given a quarantined fact", as
   await draftFor({
     model: async (p: unknown) => { given.push(p); return { text: "Subject: TEST\n\nTEST body about Python at TEST Corp." }; },
     facts: structuredClone(all),
-    r: { name: "TEST Recipient", firm: "TEST Firm", title: "Analyst", school: "", email: "r@example.test", source: "TEST" },
+    // PERSONALIZED OUTREACH (2026-10-31): a first email is written only with something sourced about the recipient (with a
+    // title and firm alone the person is asked one question instead, and no model is called), so the recipient carries one.
+    r: { name: "TEST Recipient", firm: "TEST Firm", title: "Analyst", school: "", email: "r@example.test", source: "TEST",
+      facts: [{ id: "t1", kind: "work", work_kind: "talk", text: "Gave the TEST talk on Python tooling", anchor: "the TEST talk on Python tooling", source_kind: "talk", retrieved_at: "2026-10-20T00:00:00Z" }] },
   });
   assert(given.length > 0, "the fake model was asked");
   assert(!sawMark(given), "no quarantined fact reached the outreach model");

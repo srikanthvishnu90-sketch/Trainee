@@ -258,7 +258,9 @@ Deno.test(`${DRAFTS.length} draft sentences about partial rows: the fact-lock pa
     let payload = "";
     // the first call's payload: what the drafter offers the model (a retry also quotes the model's own words back to it)
     const model = async (p: any) => { payload ||= String(p.messages[0].content); return { content: [{ type: "text", text: `Subject: A quick question\n\nHi ${c.recipient.name.split(" ")[0]},\n\n${c.sentence} Would you be open to a short call?` }], stop_reason: "end_turn" }; };
-    const d = await draftFor({ model, facts: c.facts, r: c.recipient });
+    // PERSONALIZED OUTREACH (2026-10-31): this battery is the fact-lock writer (still the follow-up writer); first emails go
+    // through the engine (outreach-personalize.test.ts). Was draftFor without personal: false, a generic first email.
+    const d = await draftFor({ model, facts: c.facts, r: c.recipient, personal: false });
     if (d.ok !== c.onRecord) fail(f, `draftFor/${c.family}`, `${JSON.stringify(c.sentence)}: ${d.ok ? "drafted, but it is not on record" : `not drafted (${d.ok ? "" : d.detail.join("; ")}), but it is on record`}`);
     if (!c.recipient.school && !/- school: \(not given\)/.test(payload)) fail(f, "payload", "a missing school is not said to be missing");
     if (!c.recipient.title && !/- title: \(not given\)/.test(payload)) fail(f, "payload", "a missing title is not said to be missing");

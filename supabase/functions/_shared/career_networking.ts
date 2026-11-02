@@ -17,16 +17,19 @@ import { type ContactRow, contactsOf, firmKey, importContactsCsv, importContacts
 import { legacyRows } from "./career_referrals.ts";
 import { parsePeopleAsk, type PeopleDeps, type PersonRec, peopleTurn } from "./career_people.ts";
 import { chatAsk, companyKey } from "./career_people_import.ts";
-import { batchMessages, confirmed, draftFor, type Drafted, emailHash, footerOf, messageOf, type ModelFn, OUTREACH_INTENT, type OutreachDraft,
+import { batchMessages, confirmed, draftFor, parseBatchYes, parseOutreachReply, type Drafted, emailHash, footerOf, messageOf, type ModelFn, OUTREACH_INTENT, type OutreachDraft,
   type KeyedContact, type OutreachStore, payloadHash, type Recipient, recordOutreach, blockedAddresses, BLOCKED_WHY, draftLangOf } from "./career_outreach.ts";
 import type { EventStore } from "./agent/timeline.ts";
-import { siteAsk, trackTurn } from "./career_outreach_track.ts";
+import { siteAsk, siteOfLink, trackAsk, trackTurn } from "./career_outreach_track.ts";
+import { factHost, factQuestion, firmDomains, factsFromPage, factsFromPaste, factsFromStatement, isInstruction, type RecipientFact } from "./career_outreach_personalize.ts";
+import { fetchHtml, pinnedGet } from "./career_people_page.ts";
 
 export const IMPORT_INTENT = "career_contacts_import";
 export const AT_INTENT = "career_contacts_at";
 export const DRAFT_INTENT = "career_networking_draft";
 export const SIGNATURE_INTENT = "career_outreach_signature";
 export const FORGET_INTENT = "career_contacts_forget";
+export const FACTS_INTENT = "career_recipient_facts"; // PERSONALIZED OUTREACH: the one question, and facts saved about someone
 export const MAX_FILE_CHARS = 2_000_000, MAX_FILES = 3, LIST_MAX = 15;
 export const ADD_CONTACTS = "To add people, download your LinkedIn connections (LinkedIn: Settings, Data privacy, Get a copy of your data, Connections) and send me the CSV here, or paste rows under a header line like Name,Company,Title,Email.";
 export const NO_FINDER = "I don't have a people database or an email finder, and I won't guess names or addresses.";
@@ -148,7 +151,7 @@ async function heldWhy(r: ContactRow, contacted: Set<string>, dnc: Set<string>, 
   return null;
 }
 const recipientOf = (r: ContactRow): Recipient => ({ name: r.name, firm: r.firm, title: r.title, school: r.school, email: r.email!, source: r.row ? `${r.file}, row ${r.row}` : r.file,
-  ...(r.address ? { address: r.address } : {}) });
+  ...(r.address ? { address: r.address } : {}), ...(r.facts?.length ? { facts: r.facts } : {}) });
 
 // FAMILY NETWORKING: an address the person typed for the person they named ("email Maya Chen at Stripe about a coffee
 // chat, her email is maya@stripe.com"): taken out of the ask, and kept as their own contact row (never guessed, never
@@ -200,6 +203,8 @@ const rowKey = (r: ContactRow) => `${r.file}#${r.row}`;
 // Who a row is: the address, else the name at the firm. The forgotten list remembers this, so another list's row of the
 // same person can't bring them back either.
 export const personKey = (r: ContactRow) => (r.email ? `e:${r.email.trim().toLowerCase()}` : `n:${plain(r.name)}@${plain(r.firm)}`);
+// The address that may make a domain the firm's verified one: only one the person gave (#361 re-review, 2026-11-01).
+const givenEmail = (r: ContactRow): string | null => (r.discovered || r.unverified ? null : r.email ?? null);
 // A row with the keys the account table indexes: what any writer (this turn, people finding) hands putContacts.
 export const keyedContact = (r: ContactRow): KeyedContact => ({ row_key: rowKey(r), person_key: personKey(r), file: r.file, name_key: plain(r.name),
   email: r.email ? r.email.trim().toLowerCase() : null, firm_key: firmKey(r.firm), firm_raw_key: firmKey(r.firm_raw), data: r });
@@ -382,6 +387,9 @@ async function peopleWithBook(o: NetworkingDeps): Promise<NetworkingResult | nul
 }
 
 async function networkingTurnInner(o: NetworkingDeps): Promise<NetworkingResult | null> {
+  // PERSONALIZED OUTREACH: what the person tells Trainee about someone they write to (the answer to the one question, a
+  // pasted bio, a team page or filing link, "Maya spoke at ..."), before anything else reads the message.
+  const facts = await factIntakeTurn(o); if (facts) return facts;
   // PEOPLE FINDING (D-033): the LinkedIn export kept per person, Gmail correspondents, public pages, job emails, intros.
   const people = await peopleWithBook(o); if (people) return people;
   const files = (o.attachments ?? []).slice(0, MAX_FILES);
@@ -406,6 +414,114 @@ async function networkingTurnInner(o: NetworkingDeps): Promise<NetworkingResult 
   // The answer to "how do you sign your emails?": saved, then the ask that needed it runs.
   if ((await o.store.lastAssistantIntent(o.threadId).catch(() => null)) === SIGNATURE_INTENT) return await signatureTurn(o);
   return null;
+}
+
+// ------------------------------------------------------------------------------------------------ facts about a recipient
+const NAME = String.raw`(\p{Lu}[\p{L}'’.-]+(?:[ \t]+\p{Lu}[\p{L}'’.-]+){0,2})`;
+const ABOUT_RX = new RegExp(String.raw`^\s*(?:here(?:'s|’s| is)\s+)?(?:some\s+)?(?:(?:info|background|context|notes?)\s+)?(?:about|on|re:?)\s+${NAME}\s*[:\-–—]\s*([\s\S]+)$`, "u");
+const POSS_RX = new RegExp(String.raw`^\s*(?:here(?:'s|’s| is)\s+)?${NAME}(?:'s|’s)\s+(?:bio|background|profile|team page|page|talk|paper|post|article|filing|blog)\s*(?:is\s+)?[:\-–—]?\s*([\s\S]+)$`, "u");
+const SAID_RX = new RegExp(String.raw`^\s*${NAME}\s+((?:spoke at|spoke on|presented|wrote|published|worked on|works on|built|leads|led|launched|shipped|is from|grew up in|co-?founded|founded|advised on|gave (?:a|the) talk)\b[\s\S]{3,600})$`, "u");
+const DECLINE_RX = /^\s*(?:i\s+)?(?:don'?t|do not)\s+know\b|^\s*(?:no idea|nothing|not sure|skip|never ?mind|idk|none)\b/i;
+const URL_RX = /https?:\/\/[^\s<>"')]+/i;
+// replay: the ask to run again once the answer is saved (an intro ask); without it, the email to that one person.
+export interface FactAsk { key: string; name: string; firm: string; email: string | null; topic: string | null; at: string; replay?: string }
+const SOURCE_SAY: Record<string, string> = { user_pasted: "what you pasted", user_stated: "what you told me", company_page: "their firm's page", sec_edgar: "an SEC filing", paper: "the paper's page" };
+// The waiting question lives in the store (the chat state keeps only the router's keys); a store without it uses the state.
+async function getFactAsk(o: NetworkingDeps): Promise<FactAsk | null> {
+  if (o.store.factAsk) return (await o.store.factAsk(o.userId, o.threadId).catch(() => null)) as FactAsk | null;
+  return (o.state.fact_ask ?? null) as FactAsk | null;
+}
+export async function setFactAsk(o: { store: OutreachStore; userId: string; threadId: string; state: Record<string, unknown> }, v: FactAsk | null): Promise<void> {
+  if (o.store.setFactAsk) { await o.store.setFactAsk(o.userId, o.threadId, v as any).catch((e) => console.error("networking: the waiting question:", e instanceof Error ? e.message : e)); return; }
+  if (v) o.state.fact_ask = v; else delete o.state.fact_ask;
+}
+async function namedOnce(o: NetworkingDeps, name: string): Promise<ContactRow[]> {
+  const k = plain(name);
+  const rows = [...await bookOf(o).named(k).catch(() => []), ...await savedPeople(o, { name }).catch(() => [])];
+  const seen = new Set<string>();
+  return rows.filter((r) => { const p = personKey(r); if (seen.has(p)) return false; seen.add(p); return true; });
+}
+async function factIntakeTurn(o: NetworkingDeps): Promise<NetworkingResult | null> {
+  const msg = String(o.message ?? "").trim();
+  if (!msg || (o.attachments ?? []).length) return null;
+  const pending = await getFactAsk(o);
+  const answering = !!pending && (await o.store.lastAssistantIntent(o.threadId).catch(() => null)) === FACTS_INTENT;
+  if (answering) {
+    // Any other ask (an approval, an intro, a status, another email) is that ask: the question closes unanswered.
+    // #361 re-review (2026-11-01): a link on its own (or "her team page: <link>") while the question is open is the answer,
+    // read under the firm-site check below, never handed to the people-page reader (which would file whoever that page
+    // names under the firm). "People at Ramp on <link>" names a firm, and is that ask.
+    const pa = parsePeopleAsk(msg);
+    const nameWords0 = plain(pending!.name).split(" ").filter((w) => w.length > 1);
+    const linkAnswer = URL_RX.test(msg) && (!pa || (pa.kind === "page" && !pa.firm && (!pa.owner || nameWords0.some((w) => plain(pa.owner!).split(" ").includes(w)))));
+    if (parseNetworkingAsk(typedAddress(msg).text) || forgetAsk(msg) || (pa && !linkAnswer) || parseOutreachReply(msg) || parseBatchYes(msg) || trackAsk(msg) || (siteAsk(msg) && !linkAnswer)) { await setFactAsk(o, null); return null; }
+    // Only something about them is an answer: a pronoun, their name, a link, or a sentence about what they did. Anything
+    // else ("find me internships in Chicago") is another ask: the question closes and that ask runs.
+    const nameWords = plain(pending!.name).split(" ").filter((w) => w.length > 1);
+    const aboutThem = DECLINE_RX.test(msg) || URL_RX.test(msg) || /\b(?:she|he|they|her|his|their|him|them)\b/i.test(msg) || nameWords.some((w) => ` ${plain(msg)} `.includes(` ${w} `))
+      || /^\s*(?:spoke|wrote|works?|worked|leads?|led|built|builds|runs|ran|published|presented|went|studied|grew|gave|launched|founded|co-?founded|maintains|manages|is|was|has)\b/i.test(msg);
+    if (!aboutThem) { await setFactAsk(o, null); return null; }
+    if (DECLINE_RX.test(msg)) {
+      await setFactAsk(o, null);
+      return { reply: `Then I'll hold off on writing to ${pending!.name}: an email that could go to anyone rarely gets a reply, and I won't make something up. When you learn one thing about their work, tell me ("${pending!.name.split(" ")[0]} spoke at ...") and I'll write it.`, intent: FACTS_INTENT, status: "declined" };
+    }
+    // The contact asked about, looked up again: its address counts only if the person gave it (never pending.email, which
+    // may be one a page published).
+    const me = (await namedOnce(o, pending!.name).catch(() => [])).find((r) => personKey(r) === pending!.key);
+    return await saveFacts(o, { key: pending!.key, name: pending!.name, firm: pending!.firm, email: me ? givenEmail(me) : null }, msg, pending);
+  }
+  const m = ABOUT_RX.exec(msg) ?? POSS_RX.exec(msg), said = m ? null : SAID_RX.exec(msg);
+  const hit = m ?? said;
+  if (!hit) return null;
+  const who = await namedOnce(o, hit[1]);
+  if (!who.length) return null; // not someone in their contacts (a firm's page, a name they haven't sent): another turn's
+  if (who.length > 1) return { reply: `More than one ${hit[1]} is in your contacts (${who.slice(0, 5).map((r) => `${r.name}${r.firm ? ` at ${r.firm}` : ""}`).join("; ")}). Say it again with the full name.`, intent: FACTS_INTENT, status: "which" };
+  const r = who[0];
+  return await saveFacts(o, { key: personKey(r), name: r.name, firm: r.firm, email: givenEmail(r) }, said ? `${r.name.split(" ")[0]} ${hit[2]}` : hit[2], pending && pending.key === personKey(r) ? pending : null);
+}
+async function saveFacts(o: NetworkingDeps, who: { key: string; name: string; firm: string; email?: string | null }, text: string, pending: FactAsk | null): Promise<NetworkingResult> {
+  const at = new Date(o.now).toISOString(), ref = `${o.now.toString(36)}`, first = who.name.split(" ")[0];
+  const add: RecipientFact[] = [];
+  const notes: string[] = [];
+  const url = URL_RX.exec(text)?.[0]?.replace(/[.,;:!?]+$/, "") ?? null;
+  if (url) {
+    // The firm's verified domain: the contact's work email.
+    const known = [who.email ?? null];
+    const kind = factHost(url, who.firm, known);
+    if (siteOfLink(url)) notes.push(`I never open ${siteOfLink(url)}, so I didn't read that link; paste the text you want me to use instead.`);
+    else if (!kind) notes.push(firmDomains(known).length
+      ? `I read only ${who.firm ? `${who.firm}'s own site, ` : ""}SEC EDGAR and paper sites, so I didn't open that link; paste the part about ${first} instead.`
+      : `I read only SEC EDGAR and paper sites, and a firm's own site only at the domain of a work email I have for them (I have none for ${first}), so I didn't open that link; paste the part about ${first} instead.`);
+    else {
+      const page = await fetchHtml(o.people?.pageGet ?? pinnedGet(), url, o.people?.resolve, (u) => factHost(u.toString(), who.firm, known) === kind);
+      if (!page.ok) notes.push(`I couldn't read that page (${page.why === "robots" ? "the site asks not to be read by tools" : page.why === "blocked_site" ? "I never open that site" : page.detail ?? page.why}); paste the part about ${first} instead.`);
+      else {
+        const got = factsFromPage(page.html, { name: who.name, url: page.url, at, source_kind: kind });
+        if (got.length) add.push(...got); else notes.push(`That page doesn't mention ${who.name}, so I saved nothing from it.`);
+      }
+    }
+  }
+  const rest = text.replace(URL_RX, " ").replace(/\s+/g, " ").trim();
+  if (rest && rest.split(/\s+/).length >= 3 && !(url && rest.split(/\s+/).length < 6)) {
+    const long = rest.length > 160 || (rest.match(/[.!?](?:\s|$)/g) ?? []).length >= 2;
+    add.push(...(long ? factsFromPaste(rest, { at, ref }) : factsFromStatement(rest, { at, ref })));
+  }
+  if (!add.length) {
+    // still waiting for something usable (the question stays open)
+    return { reply: `${notes.join(" ") || `I couldn't use that as something about ${first}'s work.`} ${factQuestion({ name: who.name, firm: who.firm })}`.trim(), intent: FACTS_INTENT, status: "nothing_saved" };
+  }
+  if (!o.store.addRecipientFacts) return { reply: `I can't save notes about people here yet, so nothing was kept.`, intent: FACTS_INTENT, status: "not_saved" };
+  try { await o.store.addRecipientFacts(o.userId, who.key, add); }
+  catch (e) { console.error("networking: save recipient facts:", e instanceof Error ? e.message : e); return { reply: `I couldn't save that just now, so nothing was kept. Please send it again in a minute.`, intent: FACTS_INTENT, status: "not_saved" }; }
+  const kinds = [...new Set(add.map((f) => SOURCE_SAY[f.source_kind] ?? f.source_kind))].join(" and ");
+  const saved = `Saved ${add.length === 1 ? "one thing" : `${add.length} things`} about ${who.name} from ${kinds} (${at.slice(0, 10)}).${notes.length ? ` ${notes.join(" ")}` : ""}`;
+  if (pending) {
+    await setFactAsk(o, null);
+    const r = pending.replay ? (await networkingTurnInner({ ...o, message: pending.replay })) ?? { reply: `Say the ask again and I'll write it from that.`, intent: FACTS_INTENT, status: "saved" }
+      : await draftTurn(o, { kind: "draft", topic: pending.topic, target: { by: "name", name: who.name, firm: who.firm || null } }, null);
+    return { ...r, reply: `${saved}\n\n${r.reply}`, parts: r.parts ? [saved, ...r.parts] : undefined };
+  }
+  return { reply: `${saved} Say "email ${first}${who.firm ? ` at ${who.firm}` : ""} about <what you want to ask>" and I'll write it from that.`, intent: FACTS_INTENT, status: "saved" };
 }
 
 async function importTurn(o: NetworkingDeps, files: Attachment[], pasted: string | null): Promise<NetworkingResult> {
@@ -469,6 +585,7 @@ async function savedPeople(o: NetworkingDeps, want: { firm?: string | null; name
       name: r.name!, email: usable ? r.email : null,
       firm: normalizeFirm(r.company), firm_raw: r.company, company: normalizeFirm(r.company), title: r.position, school: r.school, connected_on: r.connected_on,
       ...(found ? { discovered: true as const } : {}),
+      ...(!found && r.source !== "linkedin_export" && r.source !== "thread_list" ? { unverified: true as const } : {}),
       ...(found && usable ? { address: r.email_status === "inferred" ? "inferred" as const : "published" as const } : {}),
     };
   });
@@ -557,14 +674,33 @@ async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>
   return await writeBatch(o, pick, held, considered, ask.topic, prefs.signature, facts, replace);
 }
 
-async function writeBatch(o: NetworkingDeps, pick: ContactRow[], held: { name: string; why: string }[], considered: number, topic: string | null, signature: string, facts: unknown[], replace: OutreachDraft[] = []): Promise<NetworkingResult> {
+// The role the person named in their ask ("about the data analyst role"): the only role a referral or a recruiter's
+// "consider me" may name.
+export const roleOf = (topic: string | null) => (topic ? /(?:^|\b(?:the|a|an|for)\s+)([\p{L}0-9 ,&/-]{2,60}?)\s+(?:role|position|internship|opening|job)\b/iu.exec(topic)?.[1]?.trim() ?? null : null);
+async function writeBatch(o: NetworkingDeps, pickIn: ContactRow[], held: { name: string; why: string }[], considered: number, topic: string | null, signature: string, facts: unknown[], replace: OutreachDraft[] = []): Promise<NetworkingResult> {
+  // PERSONALIZED OUTREACH (2026-10-31): every new draft goes through the personalization engine, with what the person told
+  // Trainee about each recipient (their words, a pasted bio, a page they sent) read from the account.
+  const keys = pickIn.map(personKey);
+  const known: Map<string, RecipientFact[]> = o.store.recipientFacts ? await o.store.recipientFacts(o.userId, keys).catch((e) => { console.error("networking: read recipient facts:", e instanceof Error ? e.message : e); return new Map(); }) : new Map();
+  const pick = pickIn.map((r, k) => ({ ...r, facts: [...(r.facts ?? []), ...(known.get(keys[k]) ?? [])] }));
   const results: Drafted[] = [];
-  for (let k = 0; k < pick.length; k += 5) results.push(...await Promise.all(pick.slice(k, k + 5).map((r) => draftFor({ model: o.model!, facts, r: recipientOf(r), topic, lang: draftLangOf(o.message) }))));
+  const role = roleOf(topic);
+  for (let k = 0; k < pick.length; k += 5) results.push(...await Promise.all(pick.slice(k, k + 5).map((r) => draftFor({ model: o.model!, facts, r: recipientOf(r), topic, lang: draftLangOf(o.message), personal: { role, now: o.now } }))));
+  // Nothing specific about anyone asked for: one question about the first of them, then the draft (never a generic email).
+  const unsourced = pick.filter((_, k) => { const d = results[k]; return !d.ok && d.why === "unsourced"; });
+  if (unsourced.length && !results.some((d) => d.ok)) {
+    const r = unsourced[0];
+    await setFactAsk(o, { key: personKey(r), name: r.name, firm: r.firm, email: r.email, topic, at: new Date(o.now).toISOString() });
+    const rest = unsourced.slice(1).map((x) => x.name);
+    return { reply: `${factQuestion(r)}${rest.length ? ` (I'll ask about ${rest.join(", ")} after.)` : ""}`, intent: FACTS_INTENT, status: "needs_facts" };
+  }
   const footer = footerOf(signature), ok: Omit<OutreachDraft, "id" | "batch_id" | "thread_id">[] = [];
   const failed: { name: string; why: string }[] = [];
   for (const [k, d] of results.entries()) {
-    if (!d.ok) { failed.push({ name: pick[k].name, why: d.why === "unverified" ? `I couldn't write it without saying something not on record (${d.detail.slice(0, 2).join("; ")})` : d.why === "model" ? "the writing model didn't answer" : d.detail.join("; ") }); continue; }
-    const draft = { n: ok.length + 1, recipient: recipientOf(pick[k]), subject: d.subject, body: d.body, footer, shared: d.shared, status: "shown" as const, hash: "",
+    if (!d.ok) { failed.push({ name: pick[k].name, why: d.why === "unsourced" ? `nothing specific about them yet; tell me one thing about their work ("${pick[k].name.split(" ")[0]} spoke at ...") and I'll write it` : d.why === "unverified" || d.why === "not_personal" ? `I couldn't write it without saying something not on record (${d.detail.slice(0, 2).join("; ")})` : d.why === "model" ? "the writing model didn't answer" : d.detail.join("; ") }); continue; }
+    // PERSONALIZED OUTREACH: what made it personal rides on the stored recipient and is shown on the card.
+    const { facts: _sourced, ...rec } = recipientOf(pick[k]);
+    const draft = { n: ok.length + 1, recipient: { ...rec, ...(d.personal ? { personal: d.personal } : {}) }, subject: d.subject, body: d.body, footer, shared: d.shared, status: "shown" as const, hash: "",
       approved_hash: null, approved_at: null, sent_at: null, gmail_id: null, gmail_thread: null, result: null, created_at: new Date(o.now).toISOString() };
     draft.hash = await payloadHash(messageOf(draft));
     ok.push(draft);

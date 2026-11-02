@@ -4,6 +4,7 @@
 // instance (runSendWorker, the career-send function's loop) sends it once from the person's Gmail (faked at the HTTP
 // boundary); "where are my emails" has a plain answer; another "send 1" never sends it again. The model is a scripted
 // stand-in at the OpenAI URL; nothing leaves the machine.
+import { personalOpenAI, seedFactsSql, seedKeysSql } from "./personal-fixture.ts";
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, supabaseParity } from "../flow/handler.ts";
@@ -20,6 +21,9 @@ const LINKEDIN = await Deno.readTextFile(`${ROOT}tests/fixtures/f10/Connections.
 const PEOPLE: Record<string, string> = { "tok-s": "7b0f8f8e-6a43-4a49-9d2c-0000000052f1" };
 
 function fakeOpenAI(body: any): Response {
+  // PERSONALIZED OUTREACH (2026-10-31): a first email's payload is the engine's, answered from it (personal-fixture.ts).
+  const personal = personalOpenAI(body);
+  if (personal) { return personal as any; }
   const user = String((body.messages ?? []).find((m: any) => m.role === "user")?.content ?? "");
   const first = /- name: (\S+)/.exec(user)?.[1] ?? "there";
   const text = `Subject: A quick question\n\nHi ${first},\n\nI'd be grateful for 15 minutes to hear how you got started. Would you be open to a short call?`;
@@ -54,6 +58,8 @@ Deno.test({ name: "M1 flow: chat approval -> send rail queue -> one send from th
       eq((await say(`here is my resume:\n${RESUME}`)).intent, "career_resume_ingest");
       eq((await say("yes, that's my resume")).resultStatus, "completed");
       eq((await say("here are my LinkedIn connections", { attachments: [{ name: "Connections.csv", mime: "text/csv", text: LINKEDIN }] })).resultStatus, "imported");
+      // PERSONALIZED OUTREACH (2026-10-31): Maya carries one sourced fact (what the person told Trainee).
+      await pg.sql(seedFactsSql(me, ["maya.chen@stripe.example"]));
       const ask = await say("email Maya at Stripe about the data analyst role");
       eq(ask.resultStatus, "needs_signature", ask.reply);
       const sig = await say("Alex Testcase\nTEST University");

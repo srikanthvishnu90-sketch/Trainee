@@ -375,9 +375,11 @@ async function followTurn(o: TrackDeps, name: string, rows: OutreachDraft[], fol
   if (!prefs.signature) return { reply: `How do you sign your emails? Send your name the way you want it at the bottom, then say "follow up with ${d.recipient.name.split(" ")[0]}" again.`, intent: "career_outreach_signature", status: "needs_signature" };
   const when = shortDay(Date.parse(d.sent_at ?? "") || o.now);
   const topic = `a short, polite follow-up to my email of ${when} ("${d.subject}"), since I haven't heard back`;
-  const x = await draftFor({ model: o.model, facts, r: d.recipient, topic });
+  // A follow-up on a thread already sent: not a first email, so the personalization engine's first-email rules don't apply.
+  const { personal: _first, facts: _f, ...recipient } = d.recipient;
+  const x = await draftFor({ model: o.model, facts, r: recipient, topic, personal: false });
   if (!x.ok) return { reply: `I couldn't write a follow-up to ${who(d)} that uses only what's on record (${x.why === "model" ? "the writing model didn't answer" : x.detail.slice(0, 2).join("; ")}). Nothing was drafted.`, intent: TRACK_INTENT, status: "not_drafted" };
-  const draft = { n: 1, recipient: d.recipient, subject: x.subject, body: x.body, footer: footerOf(prefs.signature), shared: x.shared, status: "shown" as const, hash: "",
+  const draft = { n: 1, recipient, subject: x.subject, body: x.body, footer: footerOf(prefs.signature), shared: x.shared, status: "shown" as const, hash: "",
     approved_hash: null, approved_at: null, sent_at: null, gmail_id: null, gmail_thread: null, result: null, created_at: new Date(o.now).toISOString() };
   draft.hash = await payloadHash(messageOf(draft));
   const [saved] = await o.store.saveBatch(o.userId, o.threadId, [draft], o.now);

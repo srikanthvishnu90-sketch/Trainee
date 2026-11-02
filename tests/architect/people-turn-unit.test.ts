@@ -1,6 +1,7 @@
 // PEOPLE FINDING (D-033), the turn's guards over an in-memory store (the database's rules mirrored: a file replaces the
 // export, a person once per source, the approval only of the exact stored text). Fast, so every guard's mutation can be
 // shown red here; tests/architect/flow-people-finding.test.ts proves the same chain on real Postgres at the real handler.
+import { engineAware, everyoneKnown } from "./personal-fixture.ts";
 import nodeAssert from "node:assert/strict";
 import { type Intro, type PeopleDeps, type PeopleStore, peopleTurn, type PersonRec, type Prefs, STORE_ERROR, supabasePeopleStore } from "../../supabase/functions/_shared/career_people.ts";
 import { zipOf } from "./people-finding-fixtures.ts";
@@ -75,19 +76,21 @@ function memoryStore(): PeopleStore & { rows: (PersonRec & { user_id: string })[
   };
 }
 let calls = 0;
-const model = async (p: any) => {
-  calls++;
+// PERSONALIZED OUTREACH (2026-10-31): a first email is written from the engine's payload (personal-fixture.ts).
+const inner = engineAware(async (p: any) => {
   const user = String(p.messages[0].content), first = /- name: (\S+)/.exec(user)?.[1] ?? "there";
   const topic = /ASK ABOUT[^\n]*\n- (.+)/.exec(user)?.[1] ?? "";
   const intro = /^an introduction to ([^,;]+)/.exec(topic);
   const text = intro ? `Subject: An introduction\n\nHi ${first},\n\nWould you be open to an introduction to ${intro[1]}? A short note you can forward is below.` : `Subject: A quick question\n\nHi ${first},\n\nWould you be open to a short call?`;
   return { content: [{ type: "text", text }], stop_reason: "end_turn" };
-};
+});const model = async (p: any) => { calls++; return await inner(p); };
+
+
 const facts = [{ id: "F-001", kind: "experience", text: "Data analyst intern at Acme Corp", status: "confirmed" }, { id: "F-002", kind: "education", text: "DePaul University, BS Finance", status: "confirmed" }];
 function setup(o: { gmailToken?: string | null } = {}) {
   const store = memoryStore();
   const deps: PeopleDeps = { store, gmail: { fetch: (async () => new Response("{}", { status: 500 })) as typeof fetch, token: async () => o.gmailToken ?? null }, fetch: (async () => new Response("no", { status: 599 })) as typeof fetch };
-  const out = memoryOutreachStore();
+  const out = everyoneKnown(memoryOutreachStore()); // PERSONALIZED OUTREACH: each recipient carries one sourced fact
   const state: Record<string, unknown> = { profile: { facts } };
   const say = (message: string, extra: { user?: string; now?: number; attachments?: any[]; state?: Record<string, unknown>; noModel?: boolean } = {}) =>
     peopleTurn({ message, userId: extra.user ?? U, threadId: T, now: extra.now ?? NOW, state: extra.state ?? state, attachments: extra.attachments, store: out, model: extra.noModel ? null : model, people: deps });
@@ -270,7 +273,7 @@ Deno.test("people turn: prompt injection: a page Person whose jobTitle is an ins
     fetch: (async () => new Response("", { status: 599 })) as typeof fetch,
     pageGet: async (u: URL) => u.pathname === "/robots.txt" ? new Response("", { status: 404 }) : new Response(page, { headers: { "content-type": "text/html" } }) };
   const state: Record<string, unknown> = { profile: { facts } };
-  const say = (message: string, attachments?: any[]) => peopleTurn({ message, userId: U, threadId: T, now: NOW, state, attachments, store: memoryOutreachStore(), model: spy, people: deps });
+  const say = (message: string, attachments?: any[]) => peopleTurn({ message, userId: U, threadId: T, now: NOW, state, attachments, store: everyoneKnown(memoryOutreachStore()), model: spy, people: deps });
   await say("here", [{ name: "Connections.csv", mime: "text/csv", text: FIXTURE }]);
   const r = await say("here's Ramp's team page https://rampfixture.com/team");
   eq(r!.status, "read", r!.reply);

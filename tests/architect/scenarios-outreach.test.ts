@@ -26,6 +26,7 @@ import { emailHash, footerOf, memoryOutreachStore, messageOf, type OutreachDraft
 import { encodedWord, queueApprovedOutreach, runReplyCheck, runSendWorker, type WorkerDeps } from "../../supabase/functions/_shared/career_send_rail.ts";
 import { ACTIONS_INTENT, memoryRepliesStore, type ReplyRail, recordMessage, repliesTurn, runFollowupDrafts, runOutreachActions } from "../../supabase/functions/_shared/career_outreach_replies.ts";
 import { networkingTurn } from "../../supabase/functions/_shared/career_networking.ts";
+import { engineAware, seedFacts } from "./personal-fixture.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 const ALL = generate({ seed: 20261030 });
@@ -504,10 +505,12 @@ Deno.test(`outreach at scale, what comes back on a sequence's threads, recorded 
 
 // ------------------------------------------------------------------------------------------------ draft
 const FACTS = [{ id: "f1", kind: "education", school: "TEST University", degree: "B.S. Computer Science", status: "confirmed" }];
-const draftModel = async (payload: any) => {
+// PERSONALIZED OUTREACH (2026-10-31): each contact carries one sourced fact and the model writes from the engine's payload
+// (personal-fixture.ts); was a generic "short call about your team" email to a contact with nothing on record.
+const draftModel = engineAware(async (payload: any) => {
   const p = String(payload.messages?.[0]?.content ?? ""), first = /- name: (\S+)/.exec(p)![1];
   return { content: [{ type: "text", text: `Subject: A quick question\n\nHi ${first},\n\nWould you be open to a short call about your team?` }], stop_reason: "end_turn" };
-};
+});
 async function runDraft(s: DraftScenario): Promise<{ why: string | null; got: unknown }> {
   const store = memoryOutreachStore();
   const U = "u-1", T = "chat-1";
@@ -516,6 +519,7 @@ async function runDraft(s: DraftScenario): Promise<{ why: string | null; got: un
   const imp = await networkingTurn({ message: "here are my contacts", userId: U, threadId: T, now: NOW, state, store, model: null, attachments: [{ name: "contacts.csv", mime: "text/csv", text: csv }] });
   if (imp?.status !== "imported") return { why: `the contacts did not import: ${imp?.status}`, got: imp?.reply };
   await store.setPrefs(U, { signature: SIGN });
+  await seedFacts(store, U, s.people.map((p) => p.email));
   for (const p of s.people) {
     if (p.block === "own_dnc") await store.addDnc(U, await emailHash(p.email), "recipient asked to stop", NOW);
     if (p.block === "other_dnc") await store.addDnc("u-someone-else", await emailHash(p.email), "recipient asked to stop", NOW);

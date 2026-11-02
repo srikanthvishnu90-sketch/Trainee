@@ -22,6 +22,7 @@
 // No real model and no network: web search answers with no pages (the shared cache, seeded through the same RPCs by an
 // in-process provider, answers the asks), the drafter is a scripted stand-in at the OpenAI URL, every other host is
 // refused and counted (asserted empty).
+import { personalOpenAI, seedFactsSql, statedFact } from "./personal-fixture.ts";
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, SUPABASE_URL, supabaseParity, type Turn } from "../flow/handler.ts";
@@ -92,6 +93,10 @@ function fakeOpenAI(path: string, body: any): Response {
   calls.draft++;
   const user = String((body.messages ?? []).find((m: any) => m.role === "user")?.content ?? "");
   calls.payloads.push(user);
+  // PERSONALIZED OUTREACH (2026-10-31): a first email's payload is the engine's, answered from it with the same invented
+  // claims as below (personal-fixture.ts).
+  const personal = personalOpenAI(body, (f) => (f === "Mia" ? "I saw you studied at Northwestern University." : f === "Ravi" && !/rejected for these reasons/.test(user) ? "As an Engineering Manager at Ramp, you must hire a lot." : ""));
+  if (personal) return personal as any;
   const name = /- name: (.+)/.exec(user)?.[1]?.trim() ?? "there", first = name.split(" ")[0];
   const retry = /Your last version broke these rules/.test(user);
   // Mia's row has no school: the writer always claims one (never drafted). Ravi's row has no title: the writer claims one
@@ -341,6 +346,10 @@ Deno.test({ name: "networking scenarios end to end: asks, hostile imports, the a
       await findTargets(P.seed, targetAskOf("find engineering managers at Stripe")!, { store, config: ON(), provider: seedProvider(), now: Date.now });
       const found = await say(chat, "find engineering managers at Stripe");
       eq(found.intent, "career_people_targets", found.reply);
+      // PERSONALIZED OUTREACH (2026-10-31): everyone they may write to carries one sourced fact (what they told Trainee).
+      await pg.sql(seedFactsSql(P.draft, ["mia.wong@ramp.example", "ravi.rao@ramp.example"]));
+      await pg.sql(`insert into public.career_watch_kv (user_id, key, value) select distinct user_id, 'career:rfacts:e:' || lower(email), '${JSON.stringify({ facts: statedFact() })}'::jsonb
+        from public.career_people where user_id = '${P.draft}' and email is not null on conflict (user_id, key) do nothing`);
       const drafts = async () => await json(`select coalesce(jsonb_agg(jsonb_build_object('n', n, 'to', recipient_email, 'status', status, 'hash', hash, 'approved_hash', approved_hash, 'body', body, 'subject', subject, 'recipient', recipient) order by created_at, n), '[]') from career_outreach_drafts where user_id = '${P.draft}'`);
       const sig = await say(chat, "email Ravi Rao at Ramp about data roles");
       eq([sig.intent, sig.resultStatus], ["career_outreach_signature", "needs_signature"], sig.reply);

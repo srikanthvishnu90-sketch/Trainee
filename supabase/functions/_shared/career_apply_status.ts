@@ -91,6 +91,7 @@ const CODE_WORDS: [RegExp, string][] = [
   [/^FACTS_ERASED$/, `your Trainee data was erased; ${NOTHING_SENT}`],
   [/^(FACT_OWNER_MISMATCH|CONFIRMED_FACT_OWNER_REQUIRED)$/, `an answer was not one of your own confirmed facts, so it was not sent; ${NOTHING_SENT}`],
   [/^(duplicate_job|duplicate_posting)$/, `you already applied to this exact posting; ${NOTHING_SENT}`],
+  [/^POSTING_CLOSED$/, `this posting closed before it could be submitted; ${NOTHING_SENT}`],
   [/^(daily_cap|daily_limit)$/, `you had reached the daily pace you set; ${NOTHING_SENT}`],
   [/^IDENTITY_NUMBER_REQUESTED$/, `the form asks for an identity number, which only you type; ${NOTHING_SENT}`],
   [/^(UNCONFIRMED_HIDDEN_FIELD|UNSUPPORTED_FILE_ARTIFACT|SUBMIT_DESTINATION_NOT_BOUND|SUBMIT_DESTINATION_UNEXPECTED|SUBMIT_DESTINATION_CHANGED|SCRIPT_SUBMIT_FAMILY_MISMATCH|HOST_REDIRECT_REFUSED|portal_not_cloud|person_submits)$/, `the employer's form works in a way Trainee does not submit for you; finish it at the link. ${NOTHING_SENT[0].toUpperCase()}${NOTHING_SENT.slice(1)}`],
@@ -176,7 +177,31 @@ export function statusReply(message: string, rows: AppRow[] | null, now: number)
   const recent = rows.filter((a) => Date.parse(a.updated_at) >= now - RECENT_DAYS * 86_400_000 || ["queued", "driving", "needs_user"].includes(a.state));
   if (!recent.length) return { reply: `No applications are on record from the last ${RECENT_DAYS} days: nothing was sent for you through Trainee.`, status: "none", intent: STATUS_INTENT };
   const more = recent.length > MAX_LISTED ? `\n…and ${recent.length - MAX_LISTED} more.` : "";
-  return { reply: `Your applications, newest first:\n${recent.slice(0, MAX_LISTED).map((a) => `- ${statusLine(a)}`).join("\n")}${more}`, status: "shown", intent: STATUS_INTENT };
+  // MASS APPLY (2026-11-01): a batch is summed up first, every application counted by what happened, and the ones waiting
+  // on the person listed first, so none of those is ever below the cut.
+  const head = recent.length > 1 ? `${countsLine(recent)}\n` : "";
+  const waiting = (a: AppRow) => (a.state === "needs_user" ? 0 : 1);
+  const listed = [...recent].sort((a, b) => waiting(a) - waiting(b));
+  return { reply: `${head}Your applications, ${recent.some((a) => a.state === "needs_user") ? "the ones waiting on you first, then " : ""}newest first:\n${listed.slice(0, MAX_LISTED).map((a) => `- ${statusLine(a)}`).join("\n")}${more}`, status: "shown", intent: STATUS_INTENT };
+}
+
+// "12 applications: 7 submitted, 1 waiting on you, 3 not sent, 1 approved and not sent yet." (states as recorded).
+export function countsLine(rows: AppRow[]): string {
+  const n = (f: (a: AppRow) => boolean) => rows.filter(f).length;
+  const parts: [number, string][] = [
+    [n((a) => a.state === "confirmed"), "confirmed by the employer"],
+    [n((a) => a.state === "submitted_unconfirmed"), "submitted"],
+    [n((a) => a.state === "unknown_outcome"), "may have gone (unknown)"],
+    [n((a) => a.state === "needs_user"), "waiting on you"],
+    [n((a) => a.state === "not_submitted"), "not sent"],
+    [n((a) => a.state === "queued" || a.state === "driving"), "approved and not sent yet"],
+    [n((a) => a.state === "failed"), "turned down by the employer's form"],
+  ];
+  // Every row is counted once: a state not named above is said as "other", so the counts always add up to the total.
+  const named = parts.reduce((k, [x]) => k + x, 0);
+  if (named < rows.length) parts.push([rows.length - named, "other"]);
+  const said = parts.filter(([k]) => k > 0).map(([k, w]) => `${k} ${w}`);
+  return `${rows.length} applications: ${said.join(", ")}.`;
 }
 
 // One chat turn: the read only for a status question; a read that fails is said, never guessed.

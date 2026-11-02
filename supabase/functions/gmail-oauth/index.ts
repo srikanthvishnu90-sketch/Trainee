@@ -54,7 +54,7 @@ import { disconnectGoogle, disconnectReply } from "../_shared/google_disconnect.
 // OAuth client's redirect URI does not change; after a career grant is stored, the person is told in the chat the link
 // came from and the tasks that waited for Gmail resume (_shared/connectors.ts).
 import { afterConnect, handleConnectorLink, refusedConnect } from "../_shared/connectors.ts";
-import { googleCallback, REPLAYED_WORDS, TAKEN_WORDS } from "../_shared/oauth_connect.ts";
+import { googleCallback, REPLAYED_WORDS, SEND_REFUSED_WORDS, TAKEN_WORDS } from "../_shared/oauth_connect.ts";
 import { chatThroughAgent, deliverer } from "../_shared/channel_runtime.ts";
 import { connectLanding, connectPageOn } from "../_shared/connect_landing.ts";
 
@@ -152,13 +152,16 @@ serve(async (req) => {
         if (vaultNameFor(userId, purpose) !== `oauth_${provider}_${userId}`) throw new Error("vault name");
         const fallbackScopes = !purpose ? "" : requestScopesFor(purpose, Deno.env.get("GOOGLE_APPROVED_EXTRA_SCOPES")).scopes.join(" ");
         const got = await googleCallback({ admin, fetch, now: Date.now, clientId, clientSecret, redirectUri: redirectUri(),
-          grantedFallback: () => fallbackScopes }, { code, state, userId, provider });
+          grantedFallback: () => fallbackScopes }, { code, state, userId, provider, ...(verified.bind ? { bind: verified.bind } : {}) });
         landEmail = got.email ?? null;
         if (!got.ok) {
           console.error("[gmail-oauth] callback refused:", got.why);
           if (got.why === "taken" && purpose === "career") {
             await refusedConnect({ admin, env: Deno.env, fetch, now: Date.now, deliver: deliverer(admin, Deno.env), log: (l) => console.log(l) }, userId, "gmail", TAKEN_WORDS("Gmail", got.email ?? null)).catch(() => {});
           }
+          // D-037: an "allow sending" consent from another account, without a connection, or without every permission: refused,
+          // the new grant revoked, the connection untouched, and the landing says which.
+          if (got.why === "send_no_connection" || got.why === "send_other_account" || got.why === "send_scopes") return careerLanding(false, SEND_REFUSED_WORDS(got.why, null));
           if (purpose === "career" && (got.why === "taken" || got.why === "replayed")) return careerLanding(false, got.why === "taken" ? TAKEN_WORDS("Gmail", got.email ?? null) : REPLAYED_WORDS);
           return done(false);
         }

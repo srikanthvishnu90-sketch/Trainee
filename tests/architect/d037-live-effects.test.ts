@@ -14,6 +14,10 @@ import { pgBinDir, startPg } from "../flow/pg.ts";
 import { RELEASE_PENDING } from "../../supabase/functions/agent-chat/release_config.ts";
 import { SEND_CONSENT_SCOPES, SUBMITTED_SCOPES } from "../../supabase/functions/_shared/google_scopes.ts";
 import { supabaseConnectDeps } from "../../supabase/functions/trainee-connect/store.ts";
+import { emailBind, issueState, verifyState } from "../../supabase/functions/gmail-oauth/career.ts";
+import { googleCallback, SEND_REFUSED_WORDS } from "../../supabase/functions/_shared/oauth_connect.ts";
+import { GOOGLE_REVOKE } from "../../supabase/functions/_shared/google_disconnect.ts";
+import { MemDb } from "./scenarios/connectors-r3-memdb.ts";
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -177,7 +181,10 @@ Deno.test("D-037/2d: incremental authorization: the normal connect never asks fo
   ok(!("GOOGLE_APPROVED_EXTRA_SCOPES" in RELEASE_FLAGS));
   eq([...SEND_CONSENT_SCOPES], ["openid", "email", GMAIL_SEND]);
   // The connect page's two consent URLs, from the code that builds them.
-  const admin = { rpc: async (n: string) => ({ data: n === "career_connector_link_issue" ? "nonce-1" : { ok: true }, error: null }) };
+  const held: Record<string, unknown> | null = { email: "alice@example.test" };
+  const q = (row: unknown) => { const c: any = { select: () => c, eq: () => c, maybeSingle: async () => ({ data: row, error: null }) }; return c; };
+  let connected: unknown = held;
+  const admin = { rpc: async (n: string) => ({ data: n === "career_connector_link_issue" ? "nonce-1" : { ok: true }, error: null }), from: () => q(connected) };
   const env = envOf({ GOOGLE_OAUTH_CLIENT_ID: "cid", OAUTH_STATE_SECRET: "s".repeat(40), GOOGLE_OAUTH_REDIRECT_URI: "https://x.example/cb" });
   const d = supabaseConnectDeps(admin, env, fetch, () => 1_800_000_000_000);
   const plain = new URL((await d.start("google", U, "telegram", "replies"))!), send = new URL((await d.start("google", U, "telegram", "send"))!);
@@ -186,10 +193,71 @@ Deno.test("D-037/2d: incremental authorization: the normal connect never asks fo
   eq(plain.searchParams.get("include_granted_scopes"), null);
   ok(scopes(send).includes(GMAIL_SEND), `send consent: ${scopes(send)}`);
   eq(send.searchParams.get("include_granted_scopes"), "true", "added to what the person already granted");
+  eq(send.searchParams.get("login_hint"), "alice@example.test", "Google is told which account: the connected one");
+  const st = await verifyState(send.searchParams.get("state")!, "s".repeat(40), 1_800_000_000_000);
+  eq(st.bind, await emailBind("alice@example.test"), "the state is bound to the connected account");
+  eq(plain.searchParams.get("login_hint"), null);
+  connected = null;
+  const none = new URL((await d.start("google", U, "telegram", "send"))!);
+  ok(!scopes(none).includes(GMAIL_SEND) && none.searchParams.get("include_granted_scopes") === null && !(await verifyState(none.searchParams.get("state")!, "s".repeat(40), 1_800_000_000_000)).bind,
+    "no Gmail connected: nothing to add sending to, the plain connect");
   const doc = await text("docs/architect/RELEASE-FLAGS-2026-11-01.md");
   ok(/test users/i.test(doc) && /Google Cloud console/.test(doc) && /owner/.test(doc), "the doc says the owner adds Google test users (Google has not verified gmail.send)");
   const src = await text("supabase/functions/_shared/career_outreach.ts");
   ok(/opted_out/.test(src) && /bounced/.test(src), "the outreach stop rules (opt-out, bounce) are still there");
+});
+
+// ------------------------------------------------------------------------------------------------ the send consent's callback
+const SECRET = "s".repeat(40), NOW = 1_800_000_000_000, ALICE = "alice@example.test";
+async function sendCallback(o: { connected: { email: string; scopes: string } | null; signedIn: string; granted: string; bindTo?: string }) {
+  const db = new MemDb();
+  db.users.add(U);
+  if (o.connected) {
+    db.rows("user_oauth_connections").push({ user_id: U, provider: "google_career", vault_name: `oauth_google_career_${U}`, email: o.connected.email, scopes: o.connected.scopes, connected_at: "2026-10-01T00:00:00Z" });
+    db.vault.set(`oauth_google_career_${U}`, JSON.stringify({ access_token: "OLD-AT", refresh_token: "OLD-RT" }));
+  }
+  const revoked: string[] = [];
+  const f = (async (input: any, init?: any) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.startsWith("https://oauth2.googleapis.com/token")) return Response.json({ access_token: "NEW-AT", refresh_token: "NEW-RT", expires_in: 3600, scope: o.granted });
+    if (url.startsWith("https://www.googleapis.com/oauth2/v2/userinfo")) return Response.json({ email: o.signedIn });
+    if (url.startsWith(GOOGLE_REVOKE)) { revoked.push(String(init?.body ?? url)); return new Response("", { status: 200 }); }
+    throw new Error(`unexpected ${url}`);
+  }) as typeof fetch;
+  const state = await issueState(U, "career", SECRET, NOW, await emailBind(o.bindTo ?? ALICE));
+  const v = await verifyState(state, SECRET, NOW);
+  const out = await googleCallback({ admin: db as any, fetch: f, now: () => NOW, clientId: "cid", clientSecret: "cs", redirectUri: "https://x.example/cb", grantedFallback: () => "", sleep: async () => {} },
+    { code: "c1", state, userId: U, provider: "google_career", bind: v.bind });
+  return { out, row: db.rows("user_oauth_connections").find((r) => r.user_id === U) ?? null, vault: db.vault.get(`oauth_google_career_${U}`) ?? null, revoked };
+}
+const READ = "https://www.googleapis.com/auth/gmail.readonly";
+
+Deno.test("D-037/2f: the send consent is bound to the connected account: the happy path adds gmail.send to it", async () => {
+  const r = await sendCallback({ connected: { email: ALICE, scopes: `openid email ${READ}` }, signedIn: "Alice@Example.test", granted: `openid email ${READ} ${GMAIL_SEND}` });
+  eq(r.out.ok, true, JSON.stringify(r.out));
+  ok(r.row?.scopes.includes(GMAIL_SEND) && r.row?.scopes.includes(READ) && r.row?.email.toLowerCase() === ALICE, `the same account, now with send: ${JSON.stringify(r.row)}`);
+  eq(r.revoked, [], "nothing revoked");
+});
+
+Deno.test("D-037/2g: a send consent from another account, without a connection, or dropping a permission stores nothing and revokes the new grant", async () => {
+  const cases = [
+    { name: "a different account (bob picked in Google's chooser, or a forwarded link)", o: { connected: { email: ALICE, scopes: `openid email ${READ}` }, signedIn: "bob@example.test", granted: `openid email ${READ} ${GMAIL_SEND}` }, why: "send_other_account" },
+    { name: "the state bound to another address than the connection", o: { connected: { email: ALICE, scopes: `openid email ${READ}` }, signedIn: ALICE, granted: `openid email ${READ} ${GMAIL_SEND}`, bindTo: "carol@example.test" }, why: "send_other_account" },
+    { name: "no connection", o: { connected: null, signedIn: ALICE, granted: `openid email ${READ} ${GMAIL_SEND}` }, why: "send_no_connection" },
+    { name: "the old read permission missing", o: { connected: { email: ALICE, scopes: `openid email ${READ}` }, signedIn: ALICE, granted: `openid email ${GMAIL_SEND}` }, why: "send_scopes" },
+    { name: "send not granted", o: { connected: { email: ALICE, scopes: `openid email ${READ}` }, signedIn: ALICE, granted: `openid email ${READ}` }, why: "send_scopes" },
+  ] as const;
+  for (const c of cases) {
+    const r = await sendCallback(c.o as any);
+    eq([r.out.ok, (r.out as any).why], [false, c.why], c.name);
+    eq(r.revoked.length > 0, true, `${c.name}: the grant Google just made is revoked`);
+    ok(r.revoked.every((b) => !/OLD-/.test(b)), `${c.name}: the person's own grant is not touched`);
+    if (c.o.connected) {
+      eq([r.row?.email, r.row?.scopes], [c.o.connected.email, c.o.connected.scopes], `${c.name}: the connection is unchanged`);
+      ok(/OLD-AT/.test(r.vault ?? ""), `${c.name}: the stored access is unchanged`);
+    } else eq([r.row, r.vault], [null, null], `${c.name}: nothing stored`);
+    ok(SEND_REFUSED_WORDS(c.why as any, ALICE).startsWith("Sending wasn't allowed"), "the landing says why");
+  }
 });
 
 Deno.test("D-037/2e: a send refused for want of gmail.send offers the person the 'allow sending' link, and sends nothing", async () => {
@@ -200,6 +268,9 @@ Deno.test("D-037/2e: a send refused for want of gmail.send offers the person the
   const h = await text("supabase/functions/agent-chat/handler-career.ts");
   eq(h.split("sendConsent: sendConsentFor").length - 1, 2, "both send paths get the link");
   ok(/connectUrlsFor\(Deno\.env, u, "send",/.test(h), "the link is a connect link with reason send (the incremental consent)");
+  const cb = await text("supabase/functions/gmail-oauth/index.ts");
+  ok(cb.includes("{ code, state, userId, provider, ...(verified.bind ? { bind: verified.bind } : {}) }"), "the callback hands the state's binding to googleCallback");
+  ok(/got\.why === "send_other_account"/.test(cb) && /SEND_REFUSED_WORDS\(got\.why/.test(cb), "and the landing says why a send consent was refused");
 });
 
 // ------------------------------------------------------------------------------------------------ 3. reply rewriters

@@ -56,6 +56,11 @@ export async function spendState(admin: Admin, state: string): Promise<boolean> 
 // What the person reads when a connect was refused (the chat it came from, and the landing page).
 export const TAKEN_WORDS = (label: "Gmail" | "Outlook", email: string | null) =>
   `${label} wasn't connected: ${email ?? "that account"} is already connected to another Trainee account, and one ${label === "Gmail" ? "Google" : "Microsoft"} account can be connected to only one Trainee account. Nothing was saved. Disconnect it from the other Trainee account first (text "disconnect ${label === "Gmail" ? "gmail" : "outlook"}" there), or connect a different account here.`;
+// D-037: what the person reads when an "allow sending" consent was refused. Nothing changed on their connection.
+export const SEND_REFUSED_WORDS = (why: SendRefusal, connected: string | null) =>
+  why === "send_other_account" ? `Sending wasn't allowed: you signed in to a different Google account${connected ? ` than ${connected}` : ""}, the one connected to Trainee. Nothing changed. Open the link again and choose that account.`
+  : why === "send_no_connection" ? "Sending wasn't allowed: no Gmail is connected to your Trainee account, so there was nothing to add sending to. Nothing changed. Text \"connect gmail\" first."
+  : "Sending wasn't allowed: Google didn't grant sending (or dropped a permission you had given before), so nothing changed. Open the link again and leave every box ticked.";
 export const REPLAYED_WORDS = 'This sign-in was already used, so nothing changed. Text "connect gmail" to Trainee for a new link if you need one.';
 
 // ------------------------------------------------------------------------------------------------ Gmail's callback
@@ -69,8 +74,31 @@ export interface GoogleCallbackDeps {
 }
 export type GoogleCallbackOut =
   | { ok: true; email: string | null; scopes: string }
-  | { ok: false; why: "replayed" | "exchange" | "gone" | "taken" | "store"; email?: string | null; revoke?: RevokeOutcome };
-export async function googleCallback(d: GoogleCallbackDeps, o: { code: string; state: string; userId: string; provider: "google_career" | "gmail" }): Promise<GoogleCallbackOut> {
+  | { ok: false; why: "replayed" | "exchange" | "gone" | "taken" | "store" | SendRefusal; email?: string | null; revoke?: RevokeOutcome };
+// D-037 (review of #407): why a send consent (a state bound to the connected account) was refused. Nothing is stored and
+// the grant Google just made is revoked; the connection the person had is untouched.
+export type SendRefusal = "send_no_connection" | "send_other_account" | "send_scopes";
+const IDENTITY = new Set(["openid", "email", "profile", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"]);
+async function sha256Hex(s: string): Promise<string> {
+  const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+// The send consent's checks, before anything is stored: the person has a connection of this provider; the account that
+// signed in is that connection's account and the one the state was bound to; the grant keeps every permission the
+// connection had and adds gmail.send. null: all hold.
+export async function sendConsentRefusal(admin: Admin, o: { userId: string; provider: string; bind: string; email: string | null; scopes: string }): Promise<SendRefusal | null> {
+  const r = await admin.from("user_oauth_connections").select("email,scopes").eq("user_id", o.userId).eq("provider", o.provider).maybeSingle();
+  if (r.error) throw new Error("read the connection");
+  const held = r.data;
+  if (!held || typeof held.email !== "string" || !held.email.trim()) return "send_no_connection";
+  const norm = (e: string) => e.trim().toLowerCase();
+  if (!o.email || norm(o.email) !== norm(held.email) || await sha256Hex(norm(o.email)) !== o.bind) return "send_other_account";
+  const granted = new Set(o.scopes.split(/\s+/).filter(Boolean));
+  const had = String(held.scopes ?? "").split(/[\s,]+/).filter((s: string) => s && !IDENTITY.has(s));
+  if (!granted.has(GMAIL_SEND) || had.some((s: string) => !granted.has(s))) return "send_scopes";
+  return null;
+}
+export async function googleCallback(d: GoogleCallbackDeps, o: { code: string; state: string; userId: string; provider: "google_career" | "gmail"; bind?: string }): Promise<GoogleCallbackOut> {
   // The state is spent before Google sees the code: a replay exchanges nothing.
   if (!(await spendState(d.admin, o.state))) return { ok: false, why: "replayed" };
   const tokRes = await d.fetch("https://oauth2.googleapis.com/token", {
@@ -86,6 +114,13 @@ export async function googleCallback(d: GoogleCallbackDeps, o: { code: string; s
   // Scopes actually granted (Google echoes them on the token response) win over scopes requested.
   const scopes = typeof tok.scope === "string" && tok.scope.trim() ? tok.scope.split(/\s+/).filter(Boolean).join(" ") : d.grantedFallback();
   const secret = JSON.stringify({ access_token: tok.access_token, refresh_token: tok.refresh_token || null, expires_at: d.now() + (Number(tok.expires_in) || 3600) * 1000, email, scopes });
+  // D-037: a send consent is bound to the connected account; any other account, no connection, or a grant that drops a
+  // permission or lacks gmail.send stores nothing and revokes what Google just granted.
+  if (o.bind) {
+    let why: SendRefusal | null;
+    try { why = await sendConsentRefusal(d.admin, { userId: o.userId, provider: o.provider, bind: o.bind, email, scopes }); } catch { why = "send_no_connection"; }
+    if (why) return { ok: false, why, email, revoke: await revokeAtGoogle({ fetch: d.fetch, sleep: d.sleep }, secret) };
+  }
   let c: CommitOutcome;
   try { c = await commitGrant(d.admin, { userId: o.userId, provider: o.provider, secret, email, scopes, now: d.now() }); } catch { return { ok: false, why: "store", email }; }
   // The account is gone: the grant Google just made is revoked, nothing is kept.

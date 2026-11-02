@@ -113,6 +113,7 @@ import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a paste
 import { supabaseFileStore } from "../trainee-file/store.ts";
 import { createFileService, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
 import { factsForTurn, replyWriterOn, writable, writeReply, writerChannel } from "../_shared/career_reply_writer.ts"; // V1 TEXTING VOICE
+import { procedureParts, shapeByProcedure } from "../_shared/agent/reply_procedure.ts"; // REPLY PROCEDURE
 import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
 import { reminderTurn, supabaseReminderStore } from "../_shared/career_reminders.ts"; // REQS DOC 2: reminders
 import { overviewTurn } from "../_shared/career_overview.ts"; // REQS DOC 2: "any update?", "what's waiting on me?"
@@ -1164,6 +1165,15 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           agentMeta = { ...(agentMeta || {}), reply_writer: { source: written.source, rejected: written.rejected.slice(0, 8) } };
         }
         await ledger.record(wMeter);
+      }
+      // REPLY PROCEDURE (owner, 2026-11-01): on Telegram with CAREER_TELEGRAM_BRIEF=on, the router's reply is held to the procedure's
+      // shape in code (no markdown; a link alone on its line; a paragraph of more than three sentences split, each paragraph its own
+      // message as a part). Words unchanged;
+      // a turn that shows an exact payload (a card) is untouched.
+      if (Deno.env.get("CAREER_TELEGRAM_BRIEF") === "on" && writerChannel((body as any)?.channel) === "telegram" && writable(out, agentMeta, { structured: !!(careerTask || careerBatch) })) {
+        const shaped = shapeByProcedure(out.reply), parts = out.parts ? null : procedureParts(out.reply);
+        if (shaped && shaped !== out.reply) out = { ...out, reply: shaped };
+        if (parts) out = { ...out, parts };
       }
       // REPLY SHAPE (_shared/channel_shape.ts): on Telegram with the writer on, the answer is one short paragraph, detail rides as
       // files and links as their own messages (the channel sends them in that order). A turn that shows an exact payload is untouched.

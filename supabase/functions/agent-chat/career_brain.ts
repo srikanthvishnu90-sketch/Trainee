@@ -13,6 +13,7 @@ import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/ind
 import { enforceResearchReply } from "../_shared/agent/research/reply.ts";
 import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.ts";
 import { styleBlock } from "../_shared/agent/style.ts";
+import { REPLY_PROCEDURE } from "../_shared/agent/reply_procedure.ts"; // REPLY PROCEDURE (owner, 2026-11-01)
 import type { AlertStore } from "../_shared/career_alert_store.ts";
 import type { HiredSource } from "../_shared/career_hired.ts";
 import type { WantStore } from "../_shared/career_apply_want.ts";
@@ -134,7 +135,7 @@ export async function agentTurn(o: {
     : null;
   const trace: { r?: Extract<ResearchResult, { status: "ok" }> } = {};
   let result = await runAgentTurn({
-    system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
+    system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + REPLY_PROCEDURE + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
     message: [o.message, ...notes].filter(Boolean).join("\n\n"),
     // ADVERSARIAL ROUND 2: an attached file's name and text are not the person's words: no tool reads them as said.

@@ -25,6 +25,7 @@
 // ---------------------------------------------------------------------------------------------------------------------
 // The flag and which turns are written.
 
+import { REPLY_PROCEDURE } from "./agent/reply_procedure.ts"; // REPLY PROCEDURE (owner, 2026-11-01)
 export const replyWriterOn = (env: { get(k: string): string | undefined }) => env.get("CAREER_REPLY_WRITER") === "on";
 
 // Intents whose reply carries an exact payload or a question whose exact words matter. The values are the modules'
@@ -303,7 +304,8 @@ export function writerPayload(f: TurnFacts, message: string, channel: WriterChan
   ].join("\n");
   const did = [f.effects.sent ? `${f.effects.sent} email(s) sent this turn` : "", f.effects.queued ? `${f.effects.queued} application(s) queued this turn` : ""].filter(Boolean).join("; ");
   return {
-    system: `${VOICE_RULES}\n${FORMAT[channel] ?? FORMAT.web}`,
+    // REPLY PROCEDURE: the router's reply is rewritten by the same steps the brain composes by (within the facts rule above).
+    system: `${VOICE_RULES}\n${FORMAT[channel] ?? FORMAT.web}\n\n${REPLY_PROCEDURE}`,
     messages: [{ role: "user", content: `THEY SAID:\n${String(message ?? "").slice(0, 1500)}\n\nREPLY (what Trainee's code wrote from their account this turn):\n${f.said.slice(0, 6000)}\n\nSITUATION:\n${situation || "- nothing else in flight"}${did ? `\n\nTHIS TURN DID: ${did}` : ""}` }],
     max_tokens: 400, temperature: 0.4,
   };

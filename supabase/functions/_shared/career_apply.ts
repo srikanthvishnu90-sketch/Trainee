@@ -7,6 +7,7 @@
 //                     the person's confirmed facts; anything missing is asked once for the whole batch and saved, so later
 //                     batches need nothing; the batch is admitted against the limits up front.
 // The worker (WO-009b) fills exactly the prepared fields by name, reads each back, and classifies the outcome here.
+import { overStatedLimit } from "./length_limit.ts";
 import { answerKey, AUTH_FACTS, FOREIGN, HONEYPOT, mapQuestion, NAMES_US, norm as normQuestion, RELATIVE_PLACE } from "./question_map.ts";
 import { rowAnswerKey } from "./row_answer.ts";
 import { chooseOption, levelOption, usCitizenChoice, yesNoFromFact, yesNoOf } from "./answer_options.ts";
@@ -348,6 +349,13 @@ export function factStaysHere(q: { label: string; type: string; options?: { labe
   return m.kind === "fact" && (otherCountry(m.fact, placeText(q), location, homeInUs(answers)) || beyondFact(m.fact, q));
 }
 const byNationalityList = (options: { label: string }[]) => options.some((o) => /nationality|citizen/i.test(o.label)) && options.some((o) => /permit|visa/i.test(o.label));
+const GPA_OTHER = /\b(major|in[- ]major|high[- ]school|secondary|graduate|grad school|master'?s|mba|law school|departmental|department|semester|term|weighted|unweighted|last (two|2|four|4) (years|semesters))\b[^?]{0,25}\b(gpa|grade point)|\b(gpa|grade point average)\b[^?]{0,30}\b(in|for|from) (your )?(major|high school|graduate|master'?s|the last)\b|\b(percentage|percent|%|cgpa)\b/i;
+const gpaScale = (label: string) => {
+  const m = /\b(?:out of|scale of|on an?|on the)\s*(\d+(?:\.\d+)?)|\/\s*(\d+(?:\.\d+)?)\b|\b(\d+(?:\.\d+)?)[- ]point scale/i.exec(label);
+  const n = m ? Number(m[1] ?? m[2] ?? m[3]) : null;
+  return n !== null && n !== 4;
+};
+const PAY_UNIT = /\bin thousands\b|\bthousands of\b|\(\s*(?:in\s+)?(?:k|000s|'000s?|thousands?)\s*\)|\bin k\b|\b000s\b/i;
 export function beyondFact(fact: string, f: { label: string; type: string; options?: { label: string }[] }): boolean {
   // A "select all that apply" list about where they live and would move is answered as a whole, by the person.
   if ((fact === "relocation" || fact === "job_relocation") && /multi_select|multiselect/.test(f.type)) return true;
@@ -356,6 +364,12 @@ export function beyondFact(fact: string, f: { label: string; type: string; optio
   // WO-057: a list that tells authorization by nationality from a work permit asks which, not only whether: never the
   // direct "yes" (byMeaning answers it for a US citizen at a US job).
   if (fact === "work_authorization" && byNationalityList(f.options ?? [])) return true;
+  // ROUND 3 (2026-11-02): the GPA the person stated is their overall one, on a 4.0 scale. A GPA on another scale ("out of
+  // 5.0", "/10", a percentage), or another GPA (in the major, in high school, in graduate school, the last two years) is
+  // a different number: asked, never their 4.0 GPA put there.
+  if (fact === "gpa" && (GPA_OTHER.test(f.label) || gpaScale(f.label))) return true;
+  // A pay box in thousands ("in thousands", "(k)", "000s") takes another number than the one they stated: asked.
+  if (PAY_FACTS.has(fact) && PAY_UNIT.test(f.label)) return true;
   return BEYOND_FACT.some(([facts, re]) => facts.includes(fact) && re.test(askedPart(f.label)));
 }
 
@@ -444,6 +458,14 @@ const GENERIC_NAME = new Set(["and", "the", "of", "group", "holdings", "holding"
   "technologies", "technology", "tech", "partners", "industries", "enterprises", "usa", "america", "americas", "national", "united", "worldwide"]);
 const nameWords = (n: string) => n.split(" ").filter((w) => w.length >= 3 && !GENERIC_NAME.has(w));
 const SPLIT = /\s*[;,\n]\s*/;
+// ROUND 3 (2026-11-02): a city stated alone ("Portland") onto a place list that names states ("Portland, Maine") is read
+// with the state the person's own location gives ("Portland, OR"): their Portland is never another state's.
+function placeFact(fact: string, value: string, answers: Record<string, Answer>): [string, string] {
+  if (fact !== "city" || value.includes(",")) return [fact, value];
+  const loc = String(answers.location?.value ?? "").trim();
+  const [city, st] = loc.split(/\s*,\s*/);
+  return st && city.toLowerCase() === value.trim().toLowerCase() ? ["location", loc] : [fact, value];
+}
 function byMeaning(f: FormField, company: string, answers: Record<string, Answer>, places: string[] = [], posting: PlacePart[] = [], location?: string): Answer | null {
   const m = mapQuestion({ label: f.label, type: f.type, options: f.options });
   if (m.kind === "essay" || m.kind === "file" || m.kind === "unknown") return null;
@@ -519,7 +541,7 @@ function byMeaning(f: FormField, company: string, answers: Record<string, Answer
     if (c !== null) return { value: c, factId: answers.citizenship.factId };
   }
   if (!a) return null;
-  const choice = f.options.length ? chooseOption(m.fact, String(a.value), f.options, f.label) : null;
+  const choice = f.options.length ? chooseOption(...placeFact(m.fact, String(a.value), answers), f.options, f.label) : null;
   if (f.options.length) return choice === null ? null : { value: choice, factId: a.factId };
   if (f.type === "checkbox") {
     const yn = yesNoFromFact(m.fact, String(a.value), f.label) ?? yesNoOf(a.value);
@@ -580,6 +602,9 @@ export function questionFieldType(f: TypedField): string {
 export function typedFieldProblem(f: TypedField, value: string): string | null {
   if (f.options.length || f.type === "checkbox" || /file/.test(f.type)) return null;
   const v = String(value).trim(), label = normQuestion(f.label);
+  // ROUND 3: an answer longer than the form's own stated limit is never filled to be cut off there; the person shortens it.
+  const long = overStatedLimit(f.label, v);
+  if (long) return long;
   if (f.type === "number" && (!/^-?\d+(?:\.\d+)?$/.test(v) || !Number.isFinite(Number(v)))) return "needs a finite number, written as digits";
   // Some forms split a date into separately labelled components. Those explicit non-native fields take only
   // their stated component; a native date/month input still requires its complete declared precision.
@@ -940,7 +965,7 @@ export function planBatch(o: { userId: string; postings: PlanPosting[]; answers:
         (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? o.answers[key] : undefined) ?? o.saved[normLabel(f.label)];
       let a: Answer | undefined = direct;
       let value: string | null = a ? String(a.value) : null;
-      if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === o.answers[key] ? chooseOption(key, value, f.options, f.label) : null);
+      if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === o.answers[key] ? chooseOption(...placeFact(key, value, o.answers), f.options, f.label) : null);
       if (value === null && !direct) {
         const e = educationEnd(f, p.fields, o.answers);
         if (e) { a = e; value = f.options.length ? matchOption(e.value, f.options) : e.value; }

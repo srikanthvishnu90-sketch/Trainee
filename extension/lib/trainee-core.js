@@ -297,6 +297,32 @@
     }
   });
 
+  // supabase/functions/_shared/length_limit.ts
+  function statedLimit(label) {
+    const t = String(label ?? "").toLowerCase().replace(/,(?=\d{3})/g, "");
+    const num = (re) => {
+      const m = re.exec(t);
+      return m ? Number(m[m.length - 1]) : null;
+    };
+    const words = num(/\b(?:in|under|within|max(?:imum)?|up to|no more than|less than|fewer than|at most|limit(?:ed)? to|(?:word )?limit:?)\s*(?:of\s*)?(\d{2,4})\s*words?\b/) ?? num(/\b(\d{2,4})\s*(?:-\s*)?words?\s*(?:or (?:less|fewer)|max(?:imum)?|limit|or under)\b/) ?? num(/\b(\d{2,4})-word\b/);
+    const chars = num(/\b(?:in|under|within|max(?:imum)?|up to|no more than|less than|fewer than|at most|limit(?:ed)? to|(?:character )?limit:?)\s*(?:of\s*)?(\d{2,5})\s*char(?:acter)?s?\b/) ?? num(/\b(\d{2,5})\s*char(?:acter)?s?\s*(?:or (?:less|fewer)|max(?:imum)?|limit)\b/);
+    const sentences2 = num(/\bin\s*(?:\d\s*-\s*)?(\d{1,2})\s*sentences?\b/) ?? num(/\b(?:no more than|at most|up to|max(?:imum)?)\s*(\d{1,2})\s*sentences?\b/);
+    return words !== null || chars !== null || sentences2 !== null ? {
+      words,
+      chars,
+      sentences: sentences2
+    } : null;
+  }
+  var countWords = (s) => s.split(/\s+/).filter(Boolean).length;
+  function overStatedLimit(label, value) {
+    const l = statedLimit(label);
+    if (!l) return null;
+    const v = String(value ?? "").trim();
+    if (l.chars !== null && v.length > l.chars) return `has ${v.length} characters and the form allows ${l.chars}; shorten it (I never cut an answer off)`;
+    if (l.words !== null && countWords(v) > l.words) return `has ${countWords(v)} words and the form allows ${l.words}; shorten it (I never cut an answer off)`;
+    return null;
+  }
+
   // supabase/functions/_shared/fact_schema.ts
   var FACT_SCHEMA = {
     "version": 1,
@@ -2223,8 +2249,17 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     const re = EDUCATION[v.replace(/'s|s$/g, "").replace(/ degree$/, "")] ?? EDUCATION[v];
     if (!re) return false;
     const t = low(label);
+    if (/\bmba\b|\bm\.b\.a\b|business administration/.test(t) && !/\bmba\b|\bm\.b\.a\b|business/.test(v)) return false;
     return re.test(t) && !/in progress|pursuing|currently enrolled|incomplete|candidate|expected/.test(t);
   }
+  function sameAnswerOption(value, label, comma = false) {
+    const v = low(value), l = low(label);
+    if (!v || !l.startsWith(v)) return false;
+    const rest = l.slice(v.length).trim();
+    if (QUALIFIER.test(rest)) return false;
+    return rest === "" || /^\([^()]*\)$/.test(rest) || /^or\b/.test(rest) || comma && /^,/.test(rest);
+  }
+  var QUALIFIER = /\b(interim|in progress|pending|expired|inactive|lapsed|former|previous|previously|incomplete|expected|pursuing|current|currently|not|non|no|partial|provisional|temporary)\b/;
   function chooseOption(fact, value, options, question = "") {
     if (!options.length) return null;
     const v = low(value);
@@ -2274,6 +2309,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         const re = EDUCATION[v.replace(/'s|s$/g, "").replace(/ degree$/, "")] ?? EDUCATION[v];
         if (!re) return null;
         if (options.some((o) => /\brelevant\b|\brelated\b|\bdiscipline\b|\bfield\b/.test(low(o.label)))) return null;
+        if (!/\bmba\b|business/.test(v) && options.some((o) => re.test(low(o.label)) && /\bmba\b|\bm\.b\.a\b|business administration/.test(low(o.label)))) return null;
         const hits = options.filter((o) => degreeOptionFor(value, o.label));
         const core = (l) => low(l).replace(/'s\b|\bdegree\b|[^a-z]/g, "").replace(/s$/, "");
         if (hits.length > 1 && hits.every((o) => core(o.label) === core(hits[0].label))) return (hits.find((o) => low(o.label) === v) ?? hits.find((o) => /\bdegree\b/.test(low(o.label))) ?? hits[0]).value;
@@ -2290,6 +2326,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       case "city": {
         const [city, st] = v.split(/\s*,\s*/);
         if (!city) return null;
+        if (fact === "city" && !st) return null;
         const full = st ? STATES[st] ?? st : null;
         return only(options.filter((o) => {
           const parts = low(o.label).split(/\s*,\s*/);
@@ -2305,7 +2342,11 @@ ${words}`)}`, wording = `label:${h16(words)}`;
           if (whole.length === 1 && options.filter((o) => /^united states\b/.test(low(o.label))).length > 1) return whole[0].value;
           return only(options.filter((o) => US.test(low(o.label)) || /^united states\b|u\.?s\.? citizen/.test(low(o.label)))) ?? usCitizenChoice(v, options);
         }
-        return only(options.filter((o) => low(o.label).startsWith(v)));
+        return only(options.filter((o) => sameAnswerOption(v, o.label, true)));
+      case "gpa": {
+        const g = /^\d(?:\.\d{1,2})?$/.test(v) ? v : null;
+        return g ? only(options.filter((o) => new RegExp(`^${g.replace(".", "\\.")}\\s*(?:/|out of)\\s*4(?:\\.0+)?$`).test(low(o.label)) || sameAnswerOption(g, o.label))) : null;
+      }
       case "notice_period":
       case "start_date":
         return bySpan(value, options, "weeks");
@@ -2319,11 +2360,11 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       }
       case "security_clearance":
         if (/^(none|no|n\/a)$/.test(v)) return only(options.filter((o) => /^none\b|do not.*(hold|have)|never held|not.*hold|^n\/a|^no\b/.test(low(o.label))));
-        return only(options.filter((o) => low(o.label).includes(v)));
+        return only(options.filter((o) => sameAnswerOption(v, o.label)));
     }
     const yn = yesNoOf(v);
     if (yn) return byYesNo(yn, options);
-    return only(options.filter((o) => low(o.label).includes(v) && v.length >= 3));
+    return only(options.filter((o) => v.length >= 2 && sameAnswerOption(v, o.label)));
   }
 
   // supabase/functions/_shared/posting_place.ts
@@ -3046,10 +3087,19 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     return m.kind === "fact" && (otherCountry(m.fact, placeText(q), location2, homeInUs(answers)) || beyondFact(m.fact, q));
   }
   var byNationalityList = (options) => options.some((o) => /nationality|citizen/i.test(o.label)) && options.some((o) => /permit|visa/i.test(o.label));
+  var GPA_OTHER = /\b(major|in[- ]major|high[- ]school|secondary|graduate|grad school|master'?s|mba|law school|departmental|department|semester|term|weighted|unweighted|last (two|2|four|4) (years|semesters))\b[^?]{0,25}\b(gpa|grade point)|\b(gpa|grade point average)\b[^?]{0,30}\b(in|for|from) (your )?(major|high school|graduate|master'?s|the last)\b|\b(percentage|percent|%|cgpa)\b/i;
+  var gpaScale = (label) => {
+    const m = /\b(?:out of|scale of|on an?|on the)\s*(\d+(?:\.\d+)?)|\/\s*(\d+(?:\.\d+)?)\b|\b(\d+(?:\.\d+)?)[- ]point scale/i.exec(label);
+    const n = m ? Number(m[1] ?? m[2] ?? m[3]) : null;
+    return n !== null && n !== 4;
+  };
+  var PAY_UNIT = /\bin thousands\b|\bthousands of\b|\(\s*(?:in\s+)?(?:k|000s|'000s?|thousands?)\s*\)|\bin k\b|\b000s\b/i;
   function beyondFact(fact, f) {
     if ((fact === "relocation" || fact === "job_relocation") && /multi_select|multiselect/.test(f.type)) return true;
     if (fact === "security_clearance" && (f.options ?? []).some((o) => /\b(expired|inactive|previously held|lapsed)\b/i.test(o.label))) return true;
     if (fact === "work_authorization" && byNationalityList(f.options ?? [])) return true;
+    if (fact === "gpa" && (GPA_OTHER.test(f.label) || gpaScale(f.label))) return true;
+    if (PAY_FACTS.has(fact) && PAY_UNIT.test(f.label)) return true;
     return BEYOND_FACT.some(([facts, re]) => facts.includes(fact) && re.test(askedPart(f.label)));
   }
   var STATE_CODE = /,\s*([A-Z]{2})\b/g;
@@ -3150,6 +3200,21 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   ]);
   var nameWords = (n) => n.split(" ").filter((w) => w.length >= 3 && !GENERIC_NAME.has(w));
   var SPLIT = /\s*[;,\n]\s*/;
+  function placeFact(fact, value, answers) {
+    if (fact !== "city" || value.includes(",")) return [
+      fact,
+      value
+    ];
+    const loc = String(answers.location?.value ?? "").trim();
+    const [city, st] = loc.split(/\s*,\s*/);
+    return st && city.toLowerCase() === value.trim().toLowerCase() ? [
+      "location",
+      loc
+    ] : [
+      fact,
+      value
+    ];
+  }
   function byMeaning(f, company, answers, places = [], posting = [], location2) {
     const m = mapQuestion({
       label: f.label,
@@ -3224,7 +3289,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       };
     }
     if (!a) return null;
-    const choice = f.options.length ? chooseOption(m.fact, String(a.value), f.options, f.label) : null;
+    const choice = f.options.length ? chooseOption(...placeFact(m.fact, String(a.value), answers), f.options, f.label) : null;
     if (f.options.length) return choice === null ? null : {
       value: choice,
       factId: a.factId
@@ -3309,6 +3374,8 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   function typedFieldProblem(f, value) {
     if (f.options.length || f.type === "checkbox" || /file/.test(f.type)) return null;
     const v = String(value).trim(), label = norm(f.label);
+    const long = overStatedLimit(f.label, v);
+    if (long) return long;
     if (f.type === "number" && (!/^-?\d+(?:\.\d+)?$/.test(v) || !Number.isFinite(Number(v)))) return "needs a finite number, written as digits";
     const component = ![
       "date",
@@ -3717,7 +3784,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         })] ?? (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? o.answers[key] : void 0) ?? o.saved[normLabel(f.label)];
         let a = direct;
         let value = a ? String(a.value) : null;
-        if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === o.answers[key] ? chooseOption(key, value, f.options, f.label) : null);
+        if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === o.answers[key] ? chooseOption(...placeFact(key, value, o.answers), f.options, f.label) : null);
         if (value === null && !direct) {
           const e = educationEnd(f, p.fields, o.answers);
           if (e) {

@@ -20,7 +20,7 @@ const FX = path.join(__dirname, "../../tests/fixtures/apply-dryrun");
 const CI = path.join(__dirname, "../../tests/fixtures/forms-ci");
 const strip = (h) => h.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<link\b[^>]*>/gi, "").replace(/\s(src|srcset)="https?:[^"]*"/gi, "");
 const HARD = /^(readback_mismatch|fill_error|still_empty_after_fill|upload_not_accepted|driver_error)/;
-const ASKABLE = ["options_not_readable", "agreement_needs_you", "no_matching_option", "ambiguous_option", "upload_needs_you", "eeo_needs_your_choice", "no_confirmed_answer", "not_agreed", "answer_not_a_number"];
+const ASKABLE = ["options_not_readable", "agreement_needs_you", "no_matching_option", "ambiguous_option", "upload_needs_you", "eeo_needs_your_choice", "no_confirmed_answer", "not_agreed", "answer_not_a_number", "label_on_form_twice"];
 const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 function loadPlaywright() {

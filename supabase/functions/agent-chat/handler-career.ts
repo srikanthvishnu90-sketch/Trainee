@@ -55,7 +55,7 @@ import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWi
 import { brainMode, STAGED_TOOL_POLICY, stagedRoute } from "./career_staged.ts";
 import { CRISIS_INTENT, crisisReply } from "./crisis.ts";
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
-import { CARD_ANSWER_INTENT, CARD_INTENT, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
+import { cardIntent, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
 import { billingTurn, PAY_BY_CHECKOUT, stripeFromEnv, supabaseBillingStore } from "../_shared/career_billing.ts";
 import { mockTurn, supabaseMockStore as supabaseMockStoreUncapped } from "../_shared/career_mock.ts";
 import { hiredSourceFromEnv } from "../_shared/career_hired.ts";
@@ -907,7 +907,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         // A card still waiting for its answer stays this thread's last word (D-MS-1: also after "wait", an unclear reply
         // or a number not on it); an answered one does not.
         const waiting = cardWaiting(card);
-        out = { reply: card.reply, intent: waiting ? CARD_INTENT : CARD_ANSWER_INTENT, resultStatus: card.status, contained: false, handler: "cards", ...(card.parts ? { parts: card.parts } : {}) };
+        out = { reply: card.reply, intent: cardIntent(card), resultStatus: card.status, contained: false, handler: "cards", ...(card.parts ? { parts: card.parts } : {}) };
         // SERIAL-1451: the waiting card's id rides the reply, so the next yes in this thread answers this card and no other.
         if (waiting && card.card_id) agentMeta = { card_id: card.card_id };
       } else if (mock) {

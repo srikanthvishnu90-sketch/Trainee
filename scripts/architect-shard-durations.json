@@ -211,8 +211,10 @@
     "tests/architect/outreach-lapse.test.ts": 0.1,
     "tests/architect/outreach-no-question-approval.test.ts": 0.1,
     "tests/architect/outreach-pages.test.ts": 0.1,
-    "tests/architect/outreach-shown-batch-clock-pg.test.ts": 8, "tests/architect/outreach-r3-pg.test.ts": 10,
-    "tests/architect/flow-scenarios-people-drafts-r3.test.ts": 25, "tests/architect/scenarios-people-drafts-r3.test.ts": 25,
+    "tests/architect/outreach-shown-batch-clock-pg.test.ts": 8,
+    "tests/architect/outreach-r3-pg.test.ts": 10,
+    "tests/architect/flow-scenarios-people-drafts-r3.test.ts": 25,
+    "tests/architect/scenarios-people-drafts-r3.test.ts": 25,
     "tests/architect/pace-parse.test.ts": 0.1,
     "tests/architect/people-drafter-no-ceiling.test.ts": 0.1,
     "tests/architect/people-finding-unit.test.ts": 0.7,
@@ -408,6 +410,15 @@
     "tests/architect/wo-102-paths.test.ts": 0.1,
     "tests/architect/wo-102-submission-quality.test.ts": 0.1,
     "tests/architect/wo-106-agent-slice.test.ts": 0.1,
-    "tests/architect/wo-107-standing.test.ts": 0.1
+    "tests/architect/wo-107-standing.test.ts": 0.1,
+    "tests/architect/journeys-r2-a.test.ts": 150,
+    "tests/architect/journeys-r2-b.test.ts": 150,
+    "tests/architect/journeys-r2-c.test.ts": 150,
+    "tests/architect/journeys-r2-d.test.ts": 150,
+    "tests/architect/journeys-r2-e.test.ts": 150,
+    "tests/architect/journeys-r2-f.test.ts": 150,
+    "tests/architect/journeys-r2-g.test.ts": 150,
+    "tests/architect/journeys-r2-h.test.ts": 150,
+    "tests/architect/journeys-r2-regressions.test.ts": 20
   }
 }

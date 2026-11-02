@@ -207,6 +207,19 @@ export function adviceQuestion(message: string, intent: string | null, result: u
   return !/mock|drill|answer_score|session/i.test(kind);
 }
 
+// ACTION-SHAPED DEAD ENDS (2026-11-01): a message that tells Trainee to DO something with an effect ("apply to brex", "send the
+// jordan email", "submit figma", "withdraw my stripe application", "delete my data") belongs to code's path, where every
+// external effect waits for the person's approval of the exact payload. When no code turn and no router route claims it (a
+// dead end), it still never goes to the brain: the brain could only talk about the action, and a model's words about an
+// apply or a send are the wrong owner for it. The router's own reply stands. A question about an action ("how do I apply?",
+// "should I send it?") is a question, and the brain still takes it.
+const ACTION_LEAD = /^\s*(?:(?:ok|okay|yes|yeah|so|now|then)[,]?\s+)?(?:please\s+|pls\s+|plz\s+|just\s+|go ahead and\s+|(?:can|could|would|will)\s+(?:you|u)\s+(?:please\s+)?)?(?:apply|submit|send|resend|email|e-mail|message|text|dm|queue|withdraw|cancel|stop|pause|unpause|resume|delete|erase|remove|approve|accept|decline|reject|sign|book|schedule|unsubscribe|connect|disconnect|retry|redo)\b/i;
+export function actionShaped(message: string): boolean {
+  const m = String(message ?? "").replace(/[’`]/g, "'").trim();
+  return ACTION_LEAD.test(m) && !/^\s*(?:can|could|would|will)\s+(?:you|u)\b[^?]*\b(?:how|what|why|when)\b/i.test(m);
+}
+const DEAD_END_INTENTS = new Set([UNCLAIMED, "career_catchall", "career_fallback"]);
+
 export type StagedDecision = { brain: boolean; mode: BrainMode; intent: string | null; reason: string };
 
 // Whether this turn goes to the brain in staged mode. Called only after every code-first turn has passed on it.
@@ -229,6 +242,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   } else intent = probe.intent ?? null;
   if (!intent) return { brain: false, mode, intent: null, reason: "router_claimed" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
+  if (DEAD_END_INTENTS.has(intent) && actionShaped(o.message)) return { brain: false, mode, intent, reason: "action_dead_end" };
   if (openCareerQuestion(o.env, o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "open_career_question" };
   if (adviceQuestion(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "advice_question" };
   if (!STAGED_BRAIN_INTENTS.includes(intent)) return { brain: false, mode, intent, reason: "action" };

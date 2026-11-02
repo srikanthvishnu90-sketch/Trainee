@@ -132,6 +132,9 @@ Deno.test({ name: "FAMILY EMAIL: job mail read, classified, tracked and reminded
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   try {
     for (const f of flags) Deno.env.delete(f);
+    // D-036/D-037: CAREER_MAIL_TRACKING and CAREER_EMAIL_SEND are release flags (on when unset); the off steps run them
+    // rolled back ("off"), the on steps set "on".
+    Deno.env.set("CAREER_MAIL_TRACKING", "off"); Deno.env.set("CAREER_EMAIL_SEND", "off");
     await supabaseParity(pg);
     for (const id of Object.values(PEOPLE)) {
       await pg.sql(`insert into auth.users (id, email) values ('${id}', '${id}@example.test'); insert into public.profiles (id) values ('${id}');
@@ -285,7 +288,7 @@ Deno.test({ name: "FAMILY EMAIL: job mail read, classified, tracked and reminded
       eq(yes2.resultStatus, "NOT_WIRED", yes2.reply);
       assert(/Not sent: your Google connection lets Trainee read your mail, not send it, so nothing went to Hooli/.test(yes2.reply) && yes2.reply.includes(link), yes2.reply);
       assert(!/asks to send on your behalf|Connect Gmail in the Trainee app/.test(yes2.reply), `no promise of a connection that does not exist:\n${yes2.reply}`);
-      Deno.env.delete("CAREER_EMAIL_SEND");
+      Deno.env.set("CAREER_EMAIL_SEND", "off");
       eq(await q(`select string_agg(status, ',') from public.career_outreach_drafts where user_id = '${me}'`), "shown", "the card waits; nothing was approved into a send");
       eq(writes(), [], "no send, draft, label or modify request ever reached Gmail");
       const no = await say(chat, "no");

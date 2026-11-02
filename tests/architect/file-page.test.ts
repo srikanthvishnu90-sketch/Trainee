@@ -241,7 +241,7 @@ Deno.test("link states: an expired session, an invalid one and an unconfigured p
   eq(late.status, 401);
   const h = await late.text();
   assert(/signed out/i.test(plain(h)) && !h.includes("Acme") && !/<form/.test(h) && /href="https:\/\/t\.me\/TraineeBot"[^>]*>Get a new link</.test(h));
-  eq((await get(deps(m), t.slice(0, -3) + "aaa")).status, 403);
+  eq((await get(deps(m), t.slice(0, -1) + (t.endsWith("a") ? "b" : "a"))).status, 403);
   // The page's forms carry a page token made with the link secret (file_session.ts PAGE_TOKEN), so with no secret nothing opens.
   eq((await get(deps(m, { env: { TRAINEE_FILE_LINK_SECRET: undefined } }), t)).status, 503, "no page is drawn without the secret its page token needs");
   eq((await handleFile(new Request("https://x.example/f"), deps(m))).status, 403);

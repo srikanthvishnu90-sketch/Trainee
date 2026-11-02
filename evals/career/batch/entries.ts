@@ -189,6 +189,8 @@ export async function handlerEntry(scns: Scenario[], guard: (inner: typeof fetch
   }
   // Nothing may be sent: the send rail and every mail path stay off (as in tests/architect/flow-chat-journey.test.ts).
   for (const k of ["CAREER_SEND_RAIL", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN"]) Deno.env.delete(k);
+  // D-036: CAREER_MAIL_TRACKING is a release flag (on when unset): "off" keeps every mail path off.
+  Deno.env.set("CAREER_MAIL_TRACKING", "off");
   const h = await careerHandler(pg, Object.fromEntries(scns.map((s) => [`tok-${s.uuid}`, s.uuid])));
   guard(globalThis.fetch, [new URL(SUPABASE_URL).origin]);
   return {

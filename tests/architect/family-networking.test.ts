@@ -69,7 +69,8 @@ Deno.test({ name: "FAMILY networking and outreach: a new person, end to end, on 
   if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
   const pg: Pg = await startPg();
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
-  const env = { CAREER_NETWORKING_DRAFT: "on", OPENAI_API_KEY: "sk-test-not-real", CAREER_MODEL: "gpt-5-mini" };
+  // D-036: CAREER_OUTREACH_FOLLOWUPS is a release flag (on when unset); this file's off steps run it rolled back ("off").
+  const env = { CAREER_NETWORKING_DRAFT: "on", OPENAI_API_KEY: "sk-test-not-real", CAREER_MODEL: "gpt-5-mini", CAREER_OUTREACH_FOLLOWUPS: "off" };
   for (const [k, v] of Object.entries(env)) Deno.env.set(k, v);
   const outside = { google: 0, linkedin: 0 };
   try {
@@ -116,7 +117,7 @@ Deno.test({ name: "FAMILY networking and outreach: a new person, end to end, on 
     const followups = async (u = ME) => JSON.parse(await pg.sql(`select coalesce((select value->'items' from public.career_watch_kv where user_id = '${u}' and key = 'career:outreach:followups'), '[]'::jsonb)`));
     const outbox = async (u = ME) => JSON.parse(await pg.sql(`select coalesce(jsonb_agg(jsonb_build_object('key', key, 'kind', kind, 'text', text) order by created_at), '[]'::jsonb) from public.career_outbox where user_id = '${u}'`));
     const events = async (kind: string) => Number(await pg.sql(`select count(*) from public.career_events where user_id = '${ME}' and kind = '${kind}'`));
-    const costs = async () => JSON.parse(await pg.sql(`select jsonb_build_object('calls', coalesce(sum(calls), 0), 'in', coalesce(sum(input_tokens), 0), 'out', coalesce(sum(output_tokens), 0)) from public.agent_turn_costs where user_id = '${ME}'`));
+    const costs = async () => JSON.parse(await pg.sql(`select jsonb_build_object('calls', coalesce(sum(calls), 0), 'in', coalesce(sum(input_tokens), 0), 'out', coalesce(sum(output_tokens), 0)) from public.agent_turn_costs where user_id in ('${ME}', '${OTHER}')`));
 
     await t.step("1. nothing on file: who and email are answered plainly with how to add people; nothing drafted, no model call", async () => {
       task = "nothing on file";
@@ -234,7 +235,7 @@ Deno.test({ name: "FAMILY networking and outreach: a new person, end to end, on 
       const sent = await say(web, "ok i sent 1 from my gmail");
       eq([sent.intent, sent.resultStatus], ["career_outreach_track", "marked_sent"], sent.reply);
       assert(/^Marked sent by you: 1 Maya Chen \(Stripe\), today\. Trainee sent nothing itself and will never send it again\./.test(sent.reply), sent.reply);
-      // R2, flag off (CAREER_OUTREACH_FOLLOWUPS unset here): no reminder is promised; where the follow-up shows is said.
+      // R2, flag off (CAREER_OUTREACH_FOLLOWUPS=off here): no reminder is promised; where the follow-up shows is said.
       assert(/I won't message you a reminder: follow-up reminders aren't switched on yet\. From \w{3}, \w{3} \d{1,2}, "who have I reached out to" shows this follow-up as due\./.test(sent.reply), sent.reply);
       assert(!/I'll (?:text you|remind you)/.test(sent.reply), sent.reply);
       const r = (await rows()).find((x: any) => x.id === maya.id);
@@ -263,7 +264,7 @@ Deno.test({ name: "FAMILY networking and outreach: a new person, end to end, on 
       const r = await say(web, "remind me to follow up with maya in 3 days");
       eq([r.intent, r.resultStatus], ["career_outreach_track", "reminder_set"], r.reply);
       assert(/^I'll text you a reminder on \w{3}, \w{3} \d{1,2} to follow up with Maya Chen \(Stripe\), unless you tell me Maya replied first\./.test(r.reply), r.reply);
-      Deno.env.delete("CAREER_OUTREACH_FOLLOWUPS");
+      Deno.env.set("CAREER_OUTREACH_FOLLOWUPS", "off");
       const f = await followups();
       eq(f.length, 1);
       const due = Date.parse(f[0].due_at);

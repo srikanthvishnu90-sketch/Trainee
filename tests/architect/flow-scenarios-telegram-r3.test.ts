@@ -244,7 +244,7 @@ Deno.test({
           await post(text(mine, `/start ${code}`));
           if (!said(mine, 0).includes(IN.TELEGRAM_LINK_CONFIRM_REPLY)) fail(who, `the owner's new chat was answered ${JSON.stringify(said(mine, 0)).slice(0, 160)}`);
           const y = B.to(mine).length;
-          await post(text(c, "yes"));
+          await post(text(c, `LINK ${/reply LINK ([0-9]{4}) /.exec(said(c, 0).filter((t) => /^Someone wants to link Telegram /.test(t)).at(-1) ?? "")?.[1] ?? "none"}`));
           const linked = await sql(`select coalesce((select user_id::text from public.channel_contacts where contact = 'tg:${mine}'), '')`);
           if (linked !== owner) fail(who, "the owner's own chat could not use their link after another account's chat opened it");
           if (!said(mine, y).includes(IN.LINKED_HERE_REPLY)) fail(who, `after the YES the owner's chat was answered ${JSON.stringify(said(mine, y)).slice(0, 160)}`);

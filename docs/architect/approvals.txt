@@ -50,3 +50,14 @@
 335 3c6766bdaf23bc8452e5e37d1bcdb14f88cfd713 independent-review-agent-batch-20261031 risk=low
 336 0120f5db45f4b20519e16a13d262aa4e8853fda2 independent-review-agent-batch-20261031 risk=high
 339 c4aeed0ed8ee2b3becdd0d18437aafc767020439 independent-review-agent-batch-20261031 risk=high
+352 d1fc567048e400b45fd1b6b5826bc0ecf8a229b6 independent-review-agent-rv352 risk=high
+351 0b5fabea4736ae9fd05005f64a95ccdb129f6f0f independent-review-agent-rv351 risk=high
+356 f2806a8fdfde500e2d71d6cb67b37beea2c0be95 independent-review-agent-rv7 risk=low
+353 209452f83d1e761dbaf745dc6fe2c3390a3c793a independent-review-agent-rv11 risk=high
+360 687a9c909fcfc963c645eda89648421c3f03ecbe independent-review-agent-rv20 risk=high
+359 1f13b08c7b6288d991ca551b3f7299187b2f0c0c independent-review-agent-rv24 risk=high
+350 9c1e84db5faece146a22264760805f0b6c9aea3c independent-review-agent-rv13 risk=high
+369 1449a110ed607bdcecadd5484af938f84cefcb0a independent-review-agent-rv17 risk=low
+355 e7256358f761c639a65515f7dc964ca7da2cc154 independent-review-agent-rv19 risk=high
+362 6fe093be955b4f1d026d1e33dcbd720aab3f6a94 independent-review-agent-rv21 risk=high
+386 34b6661d28cc05d08c4bc04b8d43824cc8a80867 independent-review-agent-rv32 risk=low note=merged-before-CI-to-unbreak-trunk

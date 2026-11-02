@@ -38,6 +38,12 @@ export async function prepareAfterAnswers(asked: { reply: string; status?: strin
   return k;
 }
 
+// The results page (trainee-file) answers the employer's questions itself; when the last one for a role is saved it prepares the
+// person's queued applications again through this same door. Nothing is approved, queued for sending or sent by it.
+// deno-lint-ignore no-explicit-any
+export const reprepareQueued = (o: { admin: any; userId: string; env: { get(k: string): string | undefined }; fetch: typeof fetch }) =>
+  prepareAfterAnswers({ reply: "They go on the forms the next time you prepare applications on your computer.", status: "answered" }, o);
+
 // ------------------------------------------------------------------------------------------------ follow-through
 // Where a posting they asked for stands before it is on the queue (career_apply_pending_for), in their words.
 export interface PendingRow { posting_key: string; company: string; title: string; url: string; stage: string; detail: string | null; open_questions: number; at: string }

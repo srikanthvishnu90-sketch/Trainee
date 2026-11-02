@@ -46,7 +46,7 @@ const CONFIRM = (X.TELEGRAM_LINK_CONFIRM_REPLY as string) ?? "<TELEGRAM_LINK_CON
 const WAITING = (X.TELEGRAM_LINK_WAITING_REPLY as string) ?? "<TELEGRAM_LINK_WAITING_REPLY>";
 const CANT_ASK = (X.TELEGRAM_LINK_CANT_ASK_REPLY as string) ?? "<TELEGRAM_LINK_CANT_ASK_REPLY>";
 const AMBIGUOUS = (X.LINK_AMBIGUOUS_REPLY as string) ?? "<LINK_AMBIGUOUS_REPLY>";
-const ASK = /^Someone wants to link Telegram (@[A-Za-z0-9_]{5,32}|\(an account with no username\)) to your Trainee\. Reply YES to allow; ignore if this wasn't you\./;
+const ASK = /^Someone wants to link Telegram (@[A-Za-z0-9_]{5,32}|\(no username; Telegram id [0-9]{1,20}\)|\(an account with no username\)) to your Trainee\. To allow it, reply LINK ([0-9]{4}|\{code\}) here within 15 minutes\. A plain yes does not link it; ignore this if it wasn't you\./;
 // Secrets made at run time (no key-shaped string in a tracked file).
 const mk = (p: string, n: number) => `${p}${"x".repeat(n)}`;
 const TG_TOKEN = `${7000 + 3}:${mk("TeSt", 31)}`, TG_SECRET = mk("tgsecret_", 32), WA_APP = mk("app", 32), WA_VERIFY = mk("verify", 32);
@@ -185,7 +185,7 @@ async function scenario(kind: Kind, id: number, r: ReturnType<typeof rng>): Prom
   if (!code) return ["setup: no link was issued"];
   const asks = (since = 0) => w.read(homeKey, since).filter((t) => ASK.test(t));
   const open = async (c: number, k = code) => { const m = w.mark(); await w.tg(c, `/start ${k}`); return w.read(`tg:${c}`, m); };
-  const yes = async (c: number) => { confirmed.add(`tg:${c}`); await w.from(homeKey, r.pick(["yes", "YES", "Yes!"])); };
+  const yes = async (c: number) => { confirmed.add(`tg:${c}`); const q = asks().filter((t) => t.includes(w.handles.has(c) ? `@${w.handles.get(c)} ` : `Telegram id ${c})`)); await w.from(homeKey, `${r.pick(["LINK", "link", "Link"])} ${ASK.exec(q.at(-1) ?? "")?.[2] ?? "none"}`); };
   // What a chat the account did not confirm may try: none of it reads or does anything of the account's.
   const probe = async (c: number) => {
     await w.tg(c, r.pick(["what do you know about me", "show my applications", "yes", "approve", "/start", "help"]));
@@ -288,9 +288,9 @@ async function scenario(kind: Kind, id: number, r: ReturnType<typeof rng>): Prom
     await open(mine);
     await open(S1, code2);
     if (asks().length !== 2) whys.push(`two links opened, asked ${asks().length} times`);
-    const m = w.mark();
+    const m = w.mark(), t0 = w.turns.length;
     await w.from(homeKey, "yes");
-    if (!w.read(homeKey, m).some((t) => t === AMBIGUOUS)) whys.push(`a yes with two questions open was answered ${JSON.stringify(w.read(homeKey, m))}`);
+    if (w.turns.length === t0 || w.read(homeKey, m).some((t) => t === AMBIGUOUS)) whys.push(`a plain yes with two questions open did not go on to the turn: ${JSON.stringify(w.read(homeKey, m))}`);
   } else if (kind === "no_channel") {
     const s = await open(r.chance(0.5) ? mine : S1);
     if (!s.includes(CANT_ASK)) whys.push(`a link with no channel to ask was answered ${JSON.stringify(s)}`);

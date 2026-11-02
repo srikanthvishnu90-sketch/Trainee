@@ -138,7 +138,7 @@ export function resetLocalBudgetGate(g: BudgetGate | null = null) { localGate = 
 // ---- worst-case cost -------------------------------------------------------------------------------------------------
 // call_fee: a per-call charge in micro-USD (a hosted tool call, for example); absent = none. The gateway sends only function tools
 // (no web search, no file search) and calls no embeddings endpoint, so every row's fee is 0 today; the arithmetic still includes it.
-export interface PriceRow { input: number; cached: number; cache_write: number; output: number; call_fee?: number }
+export interface PriceRow { input: number; cached: number; cache_write: number; output: number; call_fee?: number; long_context?: { over_tokens: number; multiplier: number } }
 // Highest per-token rates in the table: what a model with no price is charged at.
 export function highestPrice(prices: Record<string, PriceRow>): { input: number; output: number; call_fee: number } {
   let input = 0, output = 0, call_fee = 0;
@@ -155,7 +155,9 @@ export function worstCaseMicros(model: string, prices: Record<string, PriceRow>,
   const known = prices[model];
   const rate = known ? { input: Math.max(known.input, known.cached, known.cache_write), output: known.output, call_fee: known.call_fee ?? 0 } : highestPrice(prices);
   const tokensIn = Math.max(0, body.bytes) + Math.max(0, body.images) * IMAGE_TOKENS_UPPER;
-  return Math.max(1, Math.ceil(tokensIn * rate.input + Math.max(0, body.maxOutputTokens) * rate.output + rate.call_fee));
+  // D-038: a long-context surcharge is reserved whenever the request could pass its threshold (bytes over-count tokens).
+  const x = known?.long_context && tokensIn > known.long_context.over_tokens ? known.long_context.multiplier : 1;
+  return Math.max(1, Math.ceil(x * (tokensIn * rate.input + Math.max(0, body.maxOutputTokens) * rate.output) + rate.call_fee));
 }
 // A usage block counts as proven only when it carries real, finite, non-negative token counts for the input and the output.
 // (A reply with no usage must never be read as zero tokens.)

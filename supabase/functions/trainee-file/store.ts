@@ -12,10 +12,11 @@ export function supabaseFileStore(admin: any): FileStore {
   return {
     ...base,
     // By the posting's id, else by its link: the same posting found under another id is already in the applications (each posting
-    // goes at most once), and the row says where it stands instead of offering Apply again.
+    // goes at most once), and the row says where it stands instead of offering Apply again. Newest first: a posting re-prepared
+    // after needs_answers (20261101130000) has a history row and a live row, and the live (newer) one is what the page says.
     async appRow(u, jobId, url) {
       const cols = "id,state,reason,confirmation_id,created_at,updated_at,email_confirmed_at,payload,company,url";
-      const rows = must(await admin.from("career_apply_jobs").select(cols).eq("user_id", u).eq("job_id", jobId).limit(1), "read the application");
+      const rows = must(await admin.from("career_apply_jobs").select(cols).eq("user_id", u).eq("job_id", jobId).order("created_at", { ascending: false }).limit(1), "read the application");
       if (rows?.[0] || !url) return rows?.[0] ?? null;
       const byLink = must(await admin.from("career_apply_jobs").select(cols).eq("user_id", u).eq("url", url).order("created_at", { ascending: false }).limit(1), "read the application");
       return byLink?.[0] ?? null;

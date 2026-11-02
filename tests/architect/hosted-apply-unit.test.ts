@@ -218,13 +218,16 @@ Deno.test("F17 runner routes: each door checks its own secret; preparation off a
     fn(new Request(`https://x/functions/v1/career-cloud-runner${path}`, { method: "POST", headers, body: JSON.stringify(body) }));
   const kick = { user_id: U, job_ids: ["ashby:ramp:1"] };
   eq((await post(h(env), "/prepare", { authorization: "Bearer wrong" }, kick)).status, 401);
-  eq((await post(h(env), "/prepare", { authorization: `Bearer ${"K".repeat(40)}` }, kick)).status, 503, "preparation off: the kick is not taken");
+  // D-037: CLOUD_PREPARE_ENABLED is a release flag (on when unset); "off" is its rollback.
+  eq((await post(h({ ...env, CLOUD_PREPARE_ENABLED: "off" }), "/prepare", { authorization: `Bearer ${"K".repeat(40)}` }, kick)).status, 503, "preparation off: the kick is not taken");
   const on = { ...env, CLOUD_PREPARE_ENABLED: "on" };
   eq((await post(h(on), "/prepare", { authorization: `Bearer ${"K".repeat(40)}` }, kick)).status, 202);
   eq((await post(h(on), "/prepare-dispatch", { "x-cloud-dispatch-secret": "wrong" })).status, 401);
   eq((await post(h(on), "/prepare-dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) })).status, 200);
-  eq((await post(h(env), "/dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) })).status, 200);
-  eq(await (await post(h(env), "/dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) })).json(), { skipped: "CLOUD_RUNNER_ENABLED is not on" });
+  // D-037: CLOUD_RUNNER_ENABLED is a release flag (on when unset); "off" is its rollback.
+  const sendOff = { ...env, CLOUD_RUNNER_ENABLED: "off" };
+  eq((await post(h(sendOff), "/dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) })).status, 200);
+  eq(await (await post(h(sendOff), "/dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) })).json(), { skipped: "CLOUD_RUNNER_ENABLED is not on" });
   await post(h({ ...env, CLOUD_RUNNER_ENABLED: "on", CLOUD_MAX_PER_PERSON_DAY: "3", CLOUD_MAX_PER_SITE_MINUTE: "1" }), "/dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) });
   eq(JSON.parse(seen.at(-1)!), { p_want: 2, p_global: 2, p_per_portal: 1, p_per_person_day: 3, p_per_site_minute: 1 }, "the send numbers from the env, the runner's sizing defaults for the rest");
   // NO LIMITS (owner, 2026-10-27): with no per-person or per-site number given, none is sent (null), never a default.

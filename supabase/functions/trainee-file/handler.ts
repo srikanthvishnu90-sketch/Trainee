@@ -660,7 +660,11 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
       if (tag !== "none") return { note: CHANGED };
       if (asking.length) return { things: row, qs: asking };
       const w = await d.store.want(u, row.job, d.now()).catch(() => ({ result: "refused" as const, reason: "I couldn't save that just now." }));
-      return { note: w.result === "refused" ? `Not queued: ${w.reason ?? "I can't open that posting's application form yet."}` : "Getting your application ready. Nothing is sent until you check it here and tap Apply. Refresh in a minute." };
+      if (w.result === "refused") return { note: `Not queued: ${w.reason ?? "I can't open that posting's application form yet."}` };
+      // The tap IS the person's ask to get this one ready: start preparing now (the queue holds only what they asked for). Preparing
+      // sends nothing; the Apply that sends comes after they see "What will be sent".
+      const k = d.reprepare ? await d.reprepare(u).catch(() => "failed" as const) : "off";
+      return { note: k === "failed" ? "Saved, but getting it ready didn't start. Tap Apply again in a minute. Nothing was sent." : "Getting your application ready. Nothing is sent until you check it here and tap Apply. Refresh in a minute." };
     }
     if (!/^[0-9a-f]{16}$/.test(tag) || tag !== row.tag) return { note: CHANGED };
     return { row };

@@ -137,6 +137,21 @@ export function printReport(name: string, r: Report): number {
   return failed;
 }
 
+// The enum oracle: did the answer come while the text it started is still held by the provider? With W.hang the fake provider
+// holds every text until `release` runs, and nothing runs it before the answer is in (or the deadline passes): an answer that
+// waits for its text can never arrive, however fast the store. So this is not a stopwatch on the store. It used to be one (an
+// answer within 25 ms), which a real Postgres store on a loaded CI runner missed without waiting for anything: the account's
+// own number does one more store round trip (countSend) than any other number, and the 1.5 s pacing floor (deps.ts), not the
+// test's 25 ms, is what hides that from the person typing. The deadline only ends a scenario whose answer never came.
+export const ANSWER_DEADLINE_MS = 5_000;
+export async function answeredWhileHeld<T>(pr: Promise<T>, release: () => void, deadlineMs = ANSWER_DEADLINE_MS): Promise<{ answered: boolean; value: T }> {
+  let timer = 0;
+  const won = await Promise.race([pr.then(() => "answer"), new Promise<string>((res) => { timer = setTimeout(() => res("deadline"), deadlineMs); })]);
+  clearTimeout(timer);
+  if (won !== "answer") release(); // let a waiting answer finish, so the scenario ends and the rest of it still runs
+  return { answered: won === "answer", value: await pr };
+}
+
 // ---------------------------------------------------------------- one world
 export interface Env {
   ids: Record<Who, string>;
@@ -679,11 +694,10 @@ export async function runScenario(s: Scenario, env: Env, rep: Report): Promise<v
       await open(own, await mint("u")); await open(other, await mint("u"));
       const p0 = W.paced.length;
       const settle = async (pr: Promise<Res>, what: string) => {
-        let timer = 0;
-        const won = await Promise.race([pr.then(() => "answer"), new Promise<string>((res) => { timer = setTimeout(() => res("timeout"), 25); })]);
-        clearTimeout(timer);
-        if (won !== "answer") { violate("the answer waited for the text to go out (time tells the account's number)", what); for (const f of W.releases.splice(0)) f(); }
-        return await pr;
+        const x = await answeredWhileHeld(pr, () => { for (const f of W.releases.splice(0)) f(); });
+        if (!x.answered) violate("the answer waited for the text to go out (time tells the account's number)", `${what}: no answer in ${ANSWER_DEADLINE_MS} ms while its text was held (hang=${W.hang})`);
+        else if (what === "own" && W.hang && W.releases.length) live("enum: answered while the text was held");
+        return x.value;
       };
       const hdr = pick(r, SAME);
       const [a, b] = r() < 0.5

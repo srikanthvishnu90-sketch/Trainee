@@ -215,3 +215,13 @@ Deno.test("judge: strict JSON; a parse failure, a bad field, a pass that is not 
   const body = toOpenAI({ ...seen }, { provider: "openai", model: "gpt-4.1-mini", apiKey: "k", reasoningEffort: null } as any);
   assert(body.temperature === 0 && body.seed === seen.seed && body.response_format?.type === "json_schema", `the request carries them: ${JSON.stringify({ t: body.temperature, s: body.seed })}`);
 });
+
+Deno.test("the voice-off arm sets CAREER_TEXTING_NATIVE=off explicitly (an unset flag may mean on once the voice is the default)", async () => {
+  const { renderers } = await import("../../evals/career/one-v-one/run.ts");
+  const off = await renderers(false), on = await renderers(true);
+  const md = "**Brex** Data Analyst";
+  assert(off("imessage", md).join("").includes("**"), "off renders as before (raw)");
+  assert(!on("imessage", md).join("").includes("**"), "on strips markdown");
+  const src = Deno.readTextFileSync(new URL("../../evals/career/one-v-one/run.ts", import.meta.url));
+  assert(/CAREER_TEXTING_NATIVE: native \? "on" : "off"/.test(src), "both arms name the flag");
+});

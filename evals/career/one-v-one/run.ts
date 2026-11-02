@@ -34,7 +34,8 @@ export function seed(state: State) {
 export async function renderers(native: boolean) {
   const { adaptersFromEnv } = await import("../../../supabase/functions/_shared/channel_registry.ts");
   const refuse = (async () => { throw new TypeError("no network in the 1v1 run"); }) as unknown as typeof fetch;
-  const env: Record<string, string> = { LOOPMESSAGE_API_KEY: "k", TELEGRAM_BOT_TOKEN: "t", WHATSAPP_TOKEN: "w", WHATSAPP_PHONE_NUMBER_ID: "1", ...(native ? { CAREER_TEXTING_NATIVE: "on" } : {}) };
+  // Both arms set the flag explicitly: once the voice ships on by default (#390, D-036), an unset flag would mean on.
+  const env: Record<string, string> = { LOOPMESSAGE_API_KEY: "k", TELEGRAM_BOT_TOKEN: "t", WHATSAPP_TOKEN: "w", WHATSAPP_PHONE_NUMBER_ID: "1", CAREER_TEXTING_NATIVE: native ? "on" : "off" };
   const a = adaptersFromEnv({ get: (k: string) => env[k] }, { fetch: refuse, clock: () => 0, sleep: async () => {} });
   return (ch: Channel, reply: string): string[] => ch === "web" ? [reply] : a[ch === "sms" ? "imessage" : ch]!.render(reply);
 }

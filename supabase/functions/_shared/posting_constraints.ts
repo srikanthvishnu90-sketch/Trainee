@@ -87,6 +87,9 @@ export function searchTextOf(message: string): SearchText {
   const remote = /\bremote(?:ly)?\b|\bwork from home\b|\bwfh\b/.test(t);
   // The role: what is left when everything that is a parameter is taken out.
   t = t.replace(CUE, "").replace(CUE, "");
+  // KNOWN GAPS (2026-10-30, #317): the ask to apply is not part of the role. "apply to jobs for me" was searched as the role
+  // "apply", and "apply to data analyst jobs" as "apply data analyst". ("applied scientist" is a role: only the verb goes.)
+  t = t.replace(/\b(?:and\s+)?(?:please\s+)?(?:apply|applying|submit(?:ting)? (?:my )?applications?)(?:\s+me)?(?:\s+(?:to|for|on|at))?(?:\s+(?:them|these|those|it|all of them|each))?\b/g, " ");
   t = t.replace(/\b\d{2,3}k\b\+?(?:\s*(?:or more|and up))?/g, " ").replace(/\$\s?\d[\d,]*(?:\.\d+)?\s?k?\+?(?:\s*(?:\/|per\s+|an?\s+)(?:hr|hour|yr|year|annum))?(?:\s*(?:or more|and up|and above|plus|minimum))?/g, " ")
     .replace(new RegExp(`\\b(?:for\\s+)?(?:${SEASON})\\s*(?:of\\s+)?20\\d\\d\\b`, "g"), " ")
     .replace(/\b(?:i(?:'ll| will| would)?|we)\s+(?:need|require)\b[^,.;]*/g, " ").replace(/\b(?:no|without|don'?t need|do not need)\b[^,.;]*?(?:sponsorship|visa)\b[^,.;]*?(?:needed|necessary|required)?/g, " ")

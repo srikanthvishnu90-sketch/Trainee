@@ -13,7 +13,7 @@
 //      failure says so and leaves the question open. Nothing here throws out of the turn.
 import { CareerProfile, CareerWriting } from "./router_core.career.js";
 import { type AiPolicy, readAiPolicy } from "./ai_policy.ts";
-import { claimProblems } from "./person_claims.ts";
+import { claimProblems, selfRole } from "./person_claims.ts";
 import { redactIdentity } from "./identity_redact.ts";
 
 export type ModelFn = (payload: any) => Promise<any>;
@@ -43,7 +43,13 @@ export function confirmedFacts(facts: unknown[]): any[] {
     f && typeof f === "object" && !f.needs_confirmation && (!f.status || f.status === "confirmed") && !unproven(f) && !CareerProfile.quarantinedFact(f)
   );
 }
-const SKIP_KEYS = new Set(["id", "kind", "status", "source", "needs_confirmation", "unproven", "fact_id"]);
+// TAILORING ROUND 2: how a fact was confirmed is not what it says. Its provenance ("owner confirmed in chat the resume entry
+// shown to them (2026-10-29T15:04:00Z)"), its confirmation event's id (a UUID), when it was confirmed and the ids of the
+// facts that evidence it were sources of claims: "I was the owner of the data team" traced to "owner confirmed", "I
+// supported 29 clinics" to the 29th of the month the fact was confirmed, "4000 customers" to a UUID's digits.
+const SKIP_KEYS = new Set(["id", "kind", "status", "source", "needs_confirmation", "unproven", "fact_id", "provenance", "confirmation_event_id", "confirmed_at",
+  "created_at", "updated_at", "added_at", "stated_at", "evidence", "derived_from", "message_sha256", "shown_sha256", "shown_message_ids", "quarantined",
+  "source_key", "source_table", "event_id"]);
 function strings(v: unknown, out: string[] = [], depth = 0): string[] {
   if (depth > 3 || v == null) return out;
   if (typeof v === "string" || typeof v === "number") out.push(String(v));
@@ -152,6 +158,13 @@ export function factLock(text: string, sources: string[]): Lock {
   for (const c of W.extractCheckables(text) as { type: string; value: string; numeric?: number; sentence: string }[]) {
     if (c.type === "entity" && !c.value.includes(" ") && STARTERS.has(c.value.toLowerCase()) && c.sentence.trim().startsWith(c.value)) continue;
     if (c.type === "number") {
+      // TAILORING ROUND 2: 154 reads "thirty-three percent" as "three percent"; the number said is the whole compound.
+      const tens = c.numeric != null && c.numeric < 10 ? new RegExp(`\\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)-${esc(c.value.toLowerCase())}\\b`).exec(c.sentence.toLowerCase()) : null;
+      if (tens) {
+        const whole = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 }[tens[1]]! + c.numeric!;
+        if (!nums.has(String(whole)) && !hasWords(corpus, tens[0])) miss(tens[0]);
+        continue;
+      }
       const ok = c.numeric != null ? nums.has(String(c.numeric)) || hasWords(corpus, c.value) : nums.has(c.value.replace(/[$,%]/g, ""));
       if (!ok) miss(c.value);
     } else if (!hasWords(corpus, c.value)) {
@@ -173,7 +186,9 @@ export function factLock(text: string, sources: string[]): Lock {
   }
   const low = ` ${norm(text)} `;
   for (const list of [TOOLS, TITLES, DEGREES, SCALE]) {
-    for (const w of list) if (low.includes(` ${norm(w)} `) && !hasWords(corpus, w)) miss(w);
+    // TAILORING ROUND 2: a title said of someone else ("my manager said", "reported to the head of sales", "your Google
+    // Cloud Engineer role") is no claim about the person (person_claims.ts roleFraming); said of them, it must be traced.
+    for (const w of list) if (low.includes(` ${norm(w)} `) && !hasWords(corpus, w) && (list !== TITLES || selfRole(text, w))) miss(w);
   }
   const corpusScaled = new Set(scaled(raw)), corpusPct = new Set(percents(raw));
   for (const v of scaled(text)) if (!corpusScaled.has(v)) miss(v);

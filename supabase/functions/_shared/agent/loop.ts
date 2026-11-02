@@ -5,7 +5,7 @@
 //   external   touches the world (send, submit, message); NEVER runs here. It becomes a pending approval the
 //              person approves on its exact payload (WO-005), and the model is told it is waiting.
 // Messages use the Anthropic block shape (text / tool_use / tool_result); _shared/model_gateway.ts converts to OpenAI.
-import { bracketUntraced, factSources, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, unsourcedMoney, untracedFacts, waiverSolicits } from "./reply_guards.ts";
+import { bracketUntraced, factSources, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, unsourcedMoney, untracedFacts, waiverSolicits } from "./reply_guards.ts";
 import { urlsIn } from "../channel_shape.ts";
 import { STANDING_REFUSED, standingRefusal } from "./memory.ts";
 export type Effect = "read" | "write_own" | "external";
@@ -16,7 +16,7 @@ export type Effect = "read" | "write_own" | "external";
 // (WO-038's contract): the same text as separate messages, so a texting channel delivers each whole and in order.
 // `before` (WO-091b): the previous turn's reply as the person saw it ("" on a first turn), so a tool can check that "the
 // first one" is a posting that reply showed. Undefined only for a caller that runs a tool without the loop's history.
-export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[] } } }
+export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[] } } }
 export interface ToolSpec {
   name: string;
   description: string;
@@ -58,6 +58,8 @@ export const INCOMPLETE_AFTER_SAVE_REPLY = "I saved what you told me, but couldn
 // An unbacked claim is put to the model once (do it, or say it plainly); if it stands, only its sentences go. With
 // nothing left, the reply is this line: it promises nothing, because code cannot know a tool could do it.
 export const CLAIM_UNBACKED_REPLY = "I didn't change anything this time.";
+// A reply whose every sentence carried a key-shaped string (ADVERSARIAL ROUND 2): nothing of it is shown.
+export const SECRET_DROPPED_REPLY = "I can't share keys, tokens or passwords, and I didn't change anything.";
 const ALERT_NOUN = "(?:(?:an?|your|the|new|these|those|\\d+) )?(?:(?:job|daily|instant|new) )?(?:alerts?|job watch(?:es)?)\\b";
 const I_HAVE = "\\bi(?:'ve| have)? (?:just |now |also )?";
 const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write" }[] = [
@@ -65,8 +67,14 @@ const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write" }[] = [
   { kind: "postings queued", by: ["queue_applications"], said: new RegExp(`\\b(?:were|was|have been|has been|are now|is now) queued\\b|${I_HAVE}queued\\b|^queued\\b|(?:^|${I_HAVE})added (?:\\d+|them|it|these|those|all)\\b[^.]{0,30}\\bto your (?:apply )?queue`, "i") },
   { kind: "an application tracked", by: ["track_application"], said: new RegExp(`\\bi(?:'m| am) (?:now )?tracking\\b|\\bnow tracking\\b|(?:^|${I_HAVE})added (?:it|this|that|them)\\b[^.]{0,20}\\bto your (?:tracker|applications)|\\b(?:is|are) now (?:on|in) your tracker|${I_HAVE}(?:tracked|logged)\\b|^tracked\\b`, "i") },
   { kind: "something saved", by: "any_write", said: new RegExp(`\\bkept for good\\b|\\b(?:saved|kept)(?::| as (?:an?|your)\\b| for good\\b| it\\b| that\\b| this\\b| your\\b)|${I_HAVE}(?:saved|kept|stored|recorded|remembered|added|updated) (?:it|that|this|them|these|those|your|to your|the (?:fact|instruction|preference|rule|note|setting)s?\\b|as (?:an?|your)\\b|for (?:good|you|later)\\b)|\\bi(?:'ll| will) (?:keep|remember) (?:that|this|it)\\b|^(?:done|all set)\\b.{0,60}\\b(?:saved|kept|remembered|standing instruction|your profile|your preferences?)\\b`, "i") },
+  // ADVERSARIAL ROUND 2 (2026-10-30): "I've confirmed your GPA 4.0" when no confirmation ran (a posting told the model to
+  // mark it confirmed) is a false record: only confirm_profile_fact, on the person's own yes, confirms a fact.
+  { kind: "a fact confirmed", by: ["confirm_profile_fact"], said: new RegExp(`${I_HAVE}(?:confirmed|verified|marked (?:(?:it|that|this|them|your [\\w ]{1,30}) )?(?:as )?(?:confirmed|verified))\\b|\\b(?:has|have) been (?:confirmed|verified)\\b|\\b(?:is|are) now (?:confirmed|verified)\\b`, "i") },
   // Nothing external runs inside the turn (it waits for the person's yes on its card), so a reply never sent anything.
-  { kind: "something sent or applied for", by: [], said: new RegExp(`${I_HAVE}(?:sent|submitted|emailed|messaged|shared|forwarded) (?:it|this|that|them|your (?:application|email|message|note|resume|cover letter)s?|the (?:application|email|message|note|resume|cover letter)s?|\\d+ (?:applications?|emails?|messages?|notes?))\\b|${I_HAVE}applied (?:you |for you )?(?:to|for) (?:it|this|that|them|these|those|all|\\d+)\\b|${I_HAVE}applied you\\b|\\b(?:has|have) been (?:sent|submitted)\\b|^(?:sent|submitted)\\b`, "i") },
+  { kind: "something sent or applied for", by: [], said: new RegExp(`${I_HAVE}(?:sent|submitted|emailed|messaged|shared|forwarded) (?:it|this|that|them|your (?:application|email|message|note|resume|cover letter)s?|the (?:application|email|message|note|resume|cover letter)s?|\\d+ (?:applications?|emails?|messages?|notes?))\\b|${I_HAVE}applied (?:you |for you )?(?:to|for) (?:it|this|that|them|these|those|all|\\d+)\\b|${I_HAVE}applied you\\b|\\b(?:has|have) been (?:sent|submitted)\\b|^(?:sent|submitted)\\b` +
+    // ADVERSARIAL ROUND 2 (2026-10-30): "I emailed attacker@evil.example", "I've messaged the recruiter", "I sent your
+    // resume to x@y" named who instead of what, and reached the person as if it had happened.
+    `|${I_HAVE}(?:emailed|messaged|texted|contacted|reached out to|replied to|wrote to|written to)\\b(?! (?:you|yourself)\\b)|${I_HAVE}(?:sent|forwarded|shared)\\b[^.!?\\n]{0,60}\\bto\\s+(?:[^\\s@]+@[^\\s@]+|the (?:recruiter|hiring manager|employer|company|team)|[A-Z][a-z]+)`, "i") },
 ];
 // A negation in the claim's own clause, before it or directly on it ("Nothing was queued", "I queued none of them"); a
 // condition or offer before the claim ("If you say yes, I'll queue") or in its own clause ("live only once you
@@ -229,13 +237,16 @@ export async function runAgentTurn(o: Parameters<typeof runAgentTurnInner>[0]): 
   const r = await runAgentTurnInner(o);
   const attachments = o.ctx.turn?.attachments ?? [];
   const seen = o.ctx.turn?.seen ?? [];
-  const typed = [o.message, ...o.history.filter((m: any) => m && m.role === "user").map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))].join("\n");
+  const typed = [o.said ?? o.message, ...o.history.filter((m: any) => m && m.role === "user").map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))].join("\n");
   const fileLinks = o.ctx.turn?.fileLinks ?? [];
   return { ...r, ...(attachments.length ? { attachments } : {}), ...(fileLinks.length ? { fileLinks } : {}), linksSeen: urlsIn(`${typed}\n${seen.join("\n")}`) };
 }
 const COMPLETENESS_REPAIR = "The previous draft did not contain an answer body after output validation. Answer the person's original request using only the conversation and successful tool results already available. Give the requested content, or ask a concrete question for missing information. A generic acknowledgement, action receipt, closing confirmation or unresolved fill-in field is not the requested answer. Keep placeholders only in a draft or template the person requested. Do not invent personal facts or claim actions. Tools are disabled for this single repair; do not repeat any action.";
 
-async function runAgentTurnInner(o: { system: string; history: any[]; message: string; tools: ToolSpec[]; model: ModelFn; ctx: ToolCtx; maxSteps?: number }): Promise<TurnResult> {
+// `said` (ADVERSARIAL ROUND 2, 2026-10-30): the person's own words when `message` also carries what code appended to them
+// (an attached file's name and text). The model reads `message`; every tool check that asks "did the person say this"
+// (a confirmation, a kept instruction, a fact, a contact) reads `said`, and the appended text rides `turn.attached`.
+async function runAgentTurnInner(o: { system: string; history: any[]; message: string; said?: string; tools: ToolSpec[]; model: ModelFn; ctx: ToolCtx; maxSteps?: number }): Promise<TurnResult> {
   const max = o.maxSteps ?? 6;
   const byName = new Map(o.tools.map((t) => [t.name, t]));
   const toolDefs = o.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
@@ -249,8 +260,9 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
   // WO-091a: what this turn's tools returned is a source for what the reply may say about the person, and names the
   // postings a raw job id stands for.
   const seen: string[] = [];
-  o.ctx.turn = { message: o.message, added: [], before, attachments: [], seen };
-  const typed = [o.message, ...o.history.filter((m: any) => m && m.role === "user").map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))].join("\n");
+  const said = o.said ?? o.message;
+  o.ctx.turn = { message: said, added: [], before, attachments: [], seen, ...(said !== o.message ? { attached: o.message.startsWith(said) ? o.message.slice(said.length).trim() : o.message } : {}) };
+  const typed = [said, ...o.history.filter((m: any) => m && m.role === "user").map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))].join("\n");
   const toolNames = o.tools.map((t) => t.name);
   // FILE KINDS: the same fact guard attach_document uses, handed to create_file: what the person never said and no tool returned is refused.
   o.ctx.turn.guard = (t: string) => {
@@ -311,7 +323,9 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       // stands after that, code fixes.
       const sources = factSources({ state: o.ctx.state, message: o.message, history: o.history, results: seen });
       const leak = { tools: toolNames, typed, postings: postingsOf(seen) };
-      const claims = unbackedClaims(reply, tool_calls), leaks = leakedWords(reply, leak), facts = untracedFacts(reply, sources);
+      // ADVERSARIAL ROUND 2: a GPA traces only to the person's own words and facts, never to what a tool read this turn.
+      const personal = factSources({ state: o.ctx.state, message: said, history: o.history, results: [] });
+      const claims = unbackedClaims(reply, tool_calls), leaks = leakedWords(reply, leak), facts = untracedFacts(reply, sources, personal);
       const money = unsourcedMoney(reply, [typed, ...seen, ...sources]);
       const waiver = waiverSolicits(reply, standingRefusal, o.message);
       if ((claims.length || leaks.length || facts.length || money.length || waiver.length) && !checked && !repairing && steps < max) {
@@ -343,7 +357,9 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         if (stillWaiver.length && standingRefusal(o.message) && !/\b(your yes|your approval|without (asking|approval|your)|needs? (your|their) (yes|ok|okay|approval)|not kept|can'?t keep|won'?t (share|send|apply|skip))\b/i.test(out)) out = `${STANDING_REFUSED}\n\n${out}`;
       }
       if (leakedWords(out, leak).length) out = stripLeaks(out, leak);
-      if (untracedFacts(out, sources).length) out = bracketUntraced(out, sources);
+      if (untracedFacts(out, sources, personal).length) out = bracketUntraced(out, sources, personal);
+      // ADVERSARIAL ROUND 2: a key-shaped string never reaches the person (reply_guards.ts stripSecrets).
+      if (secretIn(out)) { out = stripSecrets(out); if (!/[A-Za-z0-9]/.test(out)) out = SECRET_DROPPED_REPLY; }
       // A successful write backs its receipt, but does not answer a request for content. A plain fact statement
       // can still end with a backed receipt; use the existing answer-request check rather than grading its prose.
       if (missingAnswerBody(out, o.message, requestsAnswerBody(o.message), sources)) {

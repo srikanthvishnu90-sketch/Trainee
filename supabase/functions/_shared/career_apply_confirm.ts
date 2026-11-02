@@ -21,7 +21,10 @@ export const CONFIRM_WINDOW_DAYS = 14;
 export const CONFIRM_INTENT = "career_apply_confirm_which";
 const DAY = 86400000;
 // What may be confirmed: sent and not yet confirmed by an email (a row confirmed before WO-032 by a page alone included).
-const OPEN = new Set(["submitted_unconfirmed", "unknown_outcome", "confirmed"]);
+// "driving" too (submit worker round, 2026-10-31): a worker that died after the employer accepted the application and before it
+// wrote the outcome leaves it recorded as being driven; the employer's email in that time is its proof, read once (the database
+// checks the email came after the claim: career_apply_confirm_as, 20261030140000).
+const OPEN = new Set(["submitted_unconfirmed", "unknown_outcome", "confirmed", "driving"]);
 
 export interface QueueRow {
   id: string; company: string; title?: string | null; url?: string | null; state: string;

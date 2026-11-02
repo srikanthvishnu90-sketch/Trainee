@@ -2,7 +2,7 @@
 // provider), channel_contacts (a person's contacts, one per channel, sharing one thread; STOPs and closed-signup refusals
 // kept by contact), career_outbox (the reply, bound to the channel it answers), and the linking functions of
 // 20261021070000_channel_parity.sql.
-import type { InboundStore, Person } from "../_shared/channel_inbound.ts";
+import { type InboundStore, type Person, PhoneTakenError } from "../_shared/channel_inbound.ts";
 
 const iso = (t: number) => new Date(t).toISOString();
 const duplicate = (e: { code?: string; message: string } | null) => !!e && (e.code === "23505" || /duplicate key/i.test(e.message));
@@ -29,14 +29,15 @@ export function supabaseInboundStore(admin: any): InboundStore {
     async person(contact) {
       // A WhatsApp sender may be known by its other id (the alias); both values are quoted for PostgREST (ids carry dots).
       const by = contact.startsWith("wa:") && /^wa:[A-Za-z0-9._-]{1,128}$/.test(contact) ? `contact.eq."${contact}",alias.eq."${contact.slice(3)}"` : null;
-      const q = admin.from("channel_contacts").select("contact,user_id,thread_id");
+      const q = admin.from("channel_contacts").select("contact,user_id,thread_id,alias");
       const rows = must<any[]>(await (by ? q.or(by) : q.eq("contact", contact)).limit(2), "read the contact") || [];
-      const r = rows.find((x) => x.user_id) ?? null;
-      return r ? { userId: r.user_id, threadId: r.thread_id ?? null, contact: r.contact } : null;
+      const r = rows.find((x) => x.user_id && x.contact === contact) ?? rows.find((x) => x.user_id) ?? null;
+      return r ? { userId: r.user_id, threadId: r.thread_id ?? null, contact: r.contact, alias: r.alias ?? null } : null;
     },
     async refusedBefore(contact, at) {
-      const r = must<any[]>(await admin.from("channel_contacts").upsert({ contact, created_at: iso(at), updated_at: iso(at) }, { onConflict: "contact", ignoreDuplicates: true }).select("contact"), "record the refusal") || [];
-      return r.length === 0; // nothing inserted: this contact was seen before
+      // IDENTITY SCENARIOS (2026-10-30): the refusal itself is recorded (refused_at, 20261030120000_channel_identity.sql); a
+      // row some other step left (an unlinked chat, a question never answered) is not a refusal already said.
+      return must<boolean>(await admin.rpc("channel_refused_before", { p_contact: contact, p_at: iso(at) }), "record the refusal") === true;
     },
     async createPerson(contact, at, phone): Promise<Person> {
       // An account with the number when the platform gives one (iMessage, WhatsApp), the email for an iMessage email, and
@@ -58,9 +59,14 @@ export function supabaseInboundStore(admin: any): InboundStore {
         const back = await admin.rpc("channel_telegram_reattach_as", { p_contact: contact, p_now: iso(at) });
         if (!back.error && typeof back.data === "string" && back.data) return { userId: back.data, threadId: null, contact };
       }
+      // IDENTITY SCENARIOS (2026-10-30): Auth keeps one account per phone (GoTrue phone_exists, 422). The number is another
+      // account's sign-in phone: said as such (channel_inbound.ts), never "I couldn't answer that" on every message.
+      if (created.error && tel && /phone_exists|phone number already registered/i.test(`${(created.error as { code?: string }).code ?? ""} ${created.error.message ?? ""}`)) throw new PhoneTakenError();
       if (created.error || !created.data?.user?.id) throw new Error(`create an account for a new contact: ${created.error?.message ?? "no user returned"}`);
       const userId = created.data.user.id as string;
-      must(await admin.from("channel_contacts").upsert({ contact, user_id: userId, updated_at: iso(at), ...(phone && contact.startsWith("wa:") ? { phone } : {}) }, { onConflict: "contact" }), "link the contact");
+      // A Telegram contact keeps the number it signed up with (the person's own share, verified by Telegram), so the same
+      // number on iMessage or WhatsApp later asks this chat instead of signing up a second time.
+      must(await admin.from("channel_contacts").upsert({ contact, user_id: userId, updated_at: iso(at), ...(phone && (contact.startsWith("wa:") || contact.startsWith("tg:")) ? { phone } : {}) }, { onConflict: "contact" }), "link the contact");
       return { userId, threadId: null, contact };
     },
     async setThread(contact, threadId, userId) {
@@ -81,14 +87,20 @@ export function supabaseInboundStore(admin: any): InboundStore {
       must(await admin.rpc("channel_inbound_seen", { p_contact: contact, p_at: iso(at), p_alias: o.alias ?? null, p_phone: o.phone ?? null }), "record the message time");
     },
     async linkCandidate(phone, except) {
-      const rows = must<any[]>(await admin.rpc("channel_link_candidate", { p_phone: phone, p_except: except }), "look for the same number") || [];
-      return rows[0]?.user_id ? { userId: rows[0].user_id, contact: rows[0].contact } : null;
+      // IDENTITY SCENARIOS (2026-10-30): channel_link_candidate_of (20261030120000) also returns a stopped account, marked.
+      const rows = must<any[]>(await admin.rpc("channel_link_candidate_of", { p_phone: phone, p_except: except }), "look for the same number") || [];
+      return rows[0]?.user_id ? { userId: rows[0].user_id, contact: rows[0].contact, optedOut: rows[0].opted_out === true } : null;
+    },
+    async pendingLink(contact, at) {
+      const r = must<string | null>(await admin.rpc("channel_link_pending", { p_contact: contact, p_now: iso(at) }), "read the open question");
+      return typeof r === "string" && r ? r : null;
     },
     async askToLink(a) {
       return must<string | null>(await admin.rpc("channel_link_ask", { p_user: a.userId, p_contact: a.contact, p_phone: a.phone, p_asked_on: a.askedOn, p_text: a.text, p_now: iso(a.at) }), "ask to link") ?? null;
     },
     async confirmLink(a) {
       const r = must<any>(await admin.rpc("channel_link_confirm", { p_user: a.userId, p_asked_on: a.askedOn, p_notice: a.notice, p_now: iso(a.at) }), "link the contact");
+      if (r?.error === "ambiguous") return { ambiguous: true as const }; // TELEGRAM LINK OWNERSHIP: two chats asked; neither linked
       return r && typeof r.contact === "string" ? { contact: r.contact, key: typeof r.key === "string" ? r.key : null } : null;
     },
     async issueLinkNonce(userId, at) {
@@ -96,13 +108,29 @@ export function supabaseInboundStore(admin: any): InboundStore {
       if (typeof n !== "string" || !/^[A-Za-z0-9_-]{32}$/.test(n)) throw new Error("make a link: no link returned");
       return n;
     },
-    async redeemLinkNonce(nonce, contact, at) {
-      const r = must<any>(await admin.rpc("channel_link_nonce_redeem", { p_nonce: nonce, p_contact: contact, p_now: iso(at) }), "use a link");
-      if (r?.user_id) return { ok: true, userId: r.user_id, threadId: r.thread_id ?? null };
-      return { ok: false, why: r?.error === "linked_elsewhere" ? "linked_elsewhere" : "invalid" };
+    // TELEGRAM LINK OWNERSHIP (2026-10-31): 20261031040000_telegram_link_confirm.sql. Opening a code asks the account's own
+    // channel (the question queued under key); only a chat already the account's comes back linked.
+    async redeemLinkNonce(nonce, contact, at, askText) {
+      const r = must<any>(await admin.rpc("channel_link_nonce_ask", { p_nonce: nonce, p_contact: contact, p_text: askText, p_now: iso(at) }), "use a link");
+      if (r?.asked === true && typeof r.user_id === "string" && typeof r.key === "string") return { ok: false, why: "asked", userId: r.user_id, key: r.key };
+      if (r?.linked === true && typeof r.user_id === "string") return { ok: true, userId: r.user_id, threadId: r.thread_id ?? null };
+      return { ok: false, why: r?.error === "linked_elsewhere" ? "linked_elsewhere" : r?.error === "no_channel" || r?.error === "stopped" ? "cant_ask" : "invalid" };
+    },
+    async pendingCodeLink(contact, at) {
+      return must<boolean>(await admin.rpc("channel_link_code_pending", { p_contact: contact, p_now: iso(at) }), "read the link question") === true;
     },
     async unlinkTelegram(userId, at) {
       return Number(must<number>(await admin.rpc("channel_telegram_unlink_as", { p_user: userId, p_now: iso(at) }), "unlink Telegram")) || 0;
+    },
+    // CHANNEL DELIVERY ROUND 2 (2026-10-30): 20261030100000_channel_delivery_r2.sql.
+    async failSent(providerMessageId, at, error, retry) {
+      return Number(must<number>(await admin.rpc("career_outbox_fail_sent", { p_provider_id: providerMessageId, p_at: iso(at), p_error: error, p_retry: retry }), "record a failed message")) || 0;
+    },
+    async releaseContact(contact, at) {
+      must(await admin.rpc("channel_contact_release", { p_contact: contact, p_at: iso(at) }), "let a number go");
+    },
+    async movedNumber(from, to, at) {
+      return must<boolean>(await admin.rpc("channel_wa_number_moved", { p_old: from, p_new: to, p_at: iso(at) }), "move a number") === true;
     },
     async reholdSent(providerMessageId, at, error) {
       return Number(must<number>(await admin.rpc("career_outbox_rehold", { p_provider_id: providerMessageId, p_at: iso(at), p_error: error }), "hold a failed message")) || 0;

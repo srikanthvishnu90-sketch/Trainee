@@ -617,7 +617,11 @@ export async function offerApproval(
       thread_id: args.threadId,
       run_id: args.runId,
       card_sha256: cardSha256,
-      created_at: now.toISOString(),
+      // 2026-10-31 (clock sweep): created_at is the database's clock at the insert (the column's default), never this
+      // worker's. peekApproval resolves a numbered reply ("1", "yes") against the newest live offer by created_at, and the
+      // offer inserted last is the card shown last; two offers racing past each other's supersede on two workers whose clocks
+      // differ (±2 s) were ordered by those clocks, so the reply resolved the card shown before. The text-yes window
+      // (10 minutes) reads it against this worker's clock: seconds do not matter.
       expires_at: new Date(now.getTime() + approvalTtlMs(deps.env)).toISOString(),
       consumed_at: null,
     });

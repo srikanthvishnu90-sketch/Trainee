@@ -1388,10 +1388,21 @@ const CareerProfile = (() => {
   ];
   const SKIP_NOUNS = /\b(?:summary|objective|profile|interests|hobbies|references|coursework|highlights|qualifications|information|about me|overview|contact)\b/;
   const HEADER_WORDS = new Set(["professional", "relevant", "work", "technical", "academic", "selected", "select", "personal", "additional", "other", "core", "key", "research", "teaching", "military", "volunteer", "volunteering", "community", "campus", "leadership", "and", "related", "career", "honors", "honours", "awards", "experience", "experiences", "employment", "history", "internship", "internships", "projects", "project", "skills", "education", "activities", "involvement", "extracurricular", "extracurriculars", "certifications", "certificates", "licenses", "publications", "languages", "summary", "objective", "profile", "interests", "hobbies", "references", "coursework", "highlights", "qualifications", "achievements", "accomplishments", "affiliations", "memberships", "service", "information", "overview", "tools", "technologies", "background", "of"]);
+  const FOREIGN_HEADINGS = [
+    [/^(?:experiencia(?: laboral| profesional)?|experiencia de trabajo|experience professionnelle|experiences professionnelles|berufserfahrung|praktische erfahrung|praktika|experiencia profissional|experiencias profissionais)$/, "experience"],
+    [/^(?:educacion|formacion(?: academica)?|estudios|formation|etudes|ausbildung|studium|bildungsweg|formacao(?: academica)?|educacao)$/, "education"],
+    [/^(?:habilidades|competencias(?: tecnicas)?|aptitudes|conocimientos|competences(?: techniques)?|kenntnisse|fahigkeiten|fertigkeiten)$/, "skill"],
+    [/^(?:proyectos|projets|projekte|projetos)$/, "project"],
+    [/^(?:voluntariado|liderazgo|benevolat|ehrenamt|lideranca)$/, "leadership"],
+    [/^(?:premios|distinciones|prix|distinctions|auszeichnungen)$/, "award"],
+    [/^(?:certificaciones|zertifikate|certificacoes)$/, "certification"],
+  ];
   function sectionOf(line) {
     const raw = String(line || "").trim();
     const h = raw.replace(/:\s*$/, "").trim();
     if (!h || h.length > 40 || /\d/.test(h)) return null;
+    const plain = h.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ");
+    for (const [re, kind] of FOREIGN_HEADINGS) if (re.test(plain)) return { kind };
     const k = h.toLowerCase().replace(/&/g, "and").replace(/\s+/g, " ");
     const known = SECTION_KIND[k] || SECTION_KIND[k.replace(/ and /g, " & ")];
     if (known) return { kind: known };
@@ -1402,6 +1413,27 @@ const CareerProfile = (() => {
     if (SKIP_NOUNS.test(k)) return { skip: true, label: h };
     return null;
   }
+  const AI_DIRECTED = /\b(?:ignore|disregard|forget|override)\b[^.]{0,40}\b(?:previous|prior|above|earlier|all|any|your)\b[^.]{0,30}\b(?:instructions?|prompts?|rules|directions|guidelines)\b|\bsystem prompt\b|\byou are (?:now )?(?:chatgpt|gpt|claude|an? (?:ai|assistant|language model|llm))\b|\b(?:dear|attention|note to|instructions? (?:for|to)) (?:the )?(?:ai|chatgpt|gpt|llm|assistant|bot|model|screener|ats)\b|\bmark (?:them|it|all|every(?:thing| entry| fact)?|these|the entries)\b[^.]{0,30}\b(?:confirmed|verified|approved)\b|\bthe (?:user|candidate|person) (?:has )?(?:already )?(?:confirmed|approved|verified)\b|\[\s*(?:system|assistant|inst)\s*\]|<\/?\s*(?:system|assistant|instructions?)\s*>|\b(?:apply|submit) to (?:every|all) (?:jobs?|postings?|roles?)\b/i;
+  const AI_DIRECTED_MORE = new RegExp([
+    String.raw`<!--|-->`,
+    String.raw`^\s*(?:[-•*]\s*)?(?:(?:hey|hi|hello|dear|ok(?:ay)?|attention)[,\s]+)?(?:chat\s?gpt|gpt(?:-?\d\w*)?|claude|gemini|copilot|llama|the ai|ai|bot|llm|assistant|system|model)\s*[,:]\s*(?:please\s+)?(?:confirm|ignore|disregard|mark|approve|apply|submit|rank|say|treat|consider|accept|skip|you|the user|the candidate|this candidate)\b`,
+    String.raw`^\s*(?:[-•*]\s*)?(?:hey|hi|hello|dear)\s+(?:chat\s?gpt|gpt|claude|gemini|copilot|ai|bot|llm|assistant|model)\b`,
+    String.raw`\bconfirm\s+(?:all|every|each|these|my)\s+(?:of\s+(?:the|my|these)\s+)?(?:facts?|entr(?:y|ies))\b`,
+    String.raw`\bthe (?:user|candidate|person|applicant) (?:has )?(?:said|says|replied|answered) (?:yes|they confirm)`,
+    String.raw`^\s*(?:[-•*]\s*)?yes,? (?:that'?s|this is|it'?s) my (?:resume|cv)\b`,
+    String.raw`\b(?:ignora|ignore|ignorar|ignorez|ignorer|ignoriere|ignorieren|olvida|esquece|dimentica|oublie)[sz]?\b[^.]{0,40}\b(?:instrucciones|instru[cç][oõ]es|istruzioni|instructions|anweisungen|regeln|reglas|regole|r[eè]gles)\b`,
+  ].join("|"), "i");
+  const INVISIBLE = /[­᠎​-‏‪-‮⁠-⁤﻿]/g;
+  const aiDirected = (line) => { const t = String(line || "").normalize("NFKC").replace(INVISIBLE, ""); return AI_DIRECTED.test(t) || AI_DIRECTED_MORE.test(t); };
+  const AI_DIRECTED_LABEL = "lines addressed to an AI, not to a reader of your resume";
+  const MON = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|autumn|winter)\\.?";
+  const DATE_PART = `(?:${MON}\\s+)?(?:\\d{1,2}/){0,2}(?:19|20)\\d{2}`;
+  const DATE_ONLY = new RegExp(`^${DATE_PART}(?:\\s*(?:[-–—]|to)\\s*(?:${DATE_PART}|present|current|now|today))?(?:\\s*·\\s*[\\w ]{1,20})?$`, "i");
+  const HAS_DATE = /\b(?:19|20)\d{2}\b|\bpresent\b/i;
+  const CONT_KIND = /\s·\s*(?:full[- ]time|part[- ]time|internship|contract|self[- ]employed|freelance|seasonal|apprenticeship|temporary)\s*$/i;
+  const PLACE_ONLY = /^(?:[A-Z][\w.'-]*(?: [A-Z][\w.'-]*)*,\s*[A-Z][\w.'-]*(?: [A-Z][\w.'-]*)*(?:,\s*[A-Z][\w.'-]*(?: [A-Z][\w.'-]*)*)?(?:\s*·\s*(?:On-site|Remote|Hybrid|on-site|remote|hybrid))?|Remote|On-site|Hybrid)$/;
+  const DEGREE_ANY = /\b(?:bachelor|master|associate|doctor|degree|diploma|ph\.?\s?d|mba|bba|b\.?sc|m\.?sc)\b|\b[bm]\.\s?[as]\./i;
+  const DEGREE_LINE = /^(?:(?:bachelor|master|associate|doctor|b\.?sc|m\.?sc|ph\.?\s?d|mba|bba)\b|(?:[bm]\.?\s?[as]\.?|[bm]\.?\s?b\.?\s?a\.?)(?=\s|,|$))/i;
   function parseResumeText(text) { return parseResumeSections(text).drafts; }
   function parseResumeSections(text) {
     const markerKeys = [...Object.keys(SECTION_KIND), "summary", "objective"].sort((a, b) => b.length - a.length).map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
@@ -1430,30 +1462,43 @@ const CareerProfile = (() => {
       }
     }
     const drafts = [], unread = [];
-    let section = null, current = null;
-    const flush = () => { if (current) { drafts.push(current); current = null; } };
+    let section = null, current = null, lastWasMore = false, leadDate = null;
+    const flush = () => {
+      if (current) { drafts.push(current); current = null; }
+      if (leadDate) { drafts.push({ kind: section || "experience", title: leadDate, text: leadDate, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" }); leadDate = null; }
+    };
+    const more = (line) => { current.title += ` ${line}`; current.text = current.title; };
     for (const raw of lines) {
       const line = raw.trim();
       if (!line) continue;
       if (/^test resume/i.test(line)) continue;
+      if (aiDirected(line)) { if (!unread.includes(AI_DIRECTED_LABEL)) unread.push(AI_DIRECTED_LABEL); continue; }
       const head = sectionOf(line);
       if (head) {
         flush();
+        lastWasMore = false;
         if (head.skip) { section = null; if (!unread.includes(head.label)) unread.push(head.label); } else section = head.kind;
         continue;
       }
       if (!section) continue;
       if (section === "skill") {
-        for (const name of line.split(/[,;•|]/).map((x) => x.trim()).filter(Boolean)) {
+        for (const name of line.split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
           drafts.push({ kind: "skill", name, title: name, text: `Skill: ${name}`, skills: [name], evidence: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
         }
         continue;
       }
       const bullet = line.match(/^[-•*]\s+(.*)$/);
-      if (bullet && current) { current.bullets.push(bullet[1]); current.text += ` ${bullet[1]}`; continue; }
+      if (bullet && current) { current.bullets.push(bullet[1]); current.text += ` ${bullet[1]}`; lastWasMore = false; continue; }
       if (bullet && !current) { current = { kind: section, title: bullet[1], text: bullet[1], bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" }; continue; }
+      if (current && !current.bullets.length && (CONT_KIND.test(line) || (DATE_ONLY.test(line) && !HAS_DATE.test(current.title))
+        || (lastWasMore && PLACE_ONLY.test(line)) || (section === "education" && DEGREE_LINE.test(line) && !DEGREE_ANY.test(current.title)))) { more(line); lastWasMore = true; continue; }
+      if (DATE_ONLY.test(line) && (!current || current.bullets.length || HAS_DATE.test(current.title))) { flush(); leadDate = line; continue; }
+      const lead = leadDate;
+      leadDate = null;
       flush();
-      current = { kind: section, title: line, text: line, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" };
+      lastWasMore = false;
+      const title = lead ? `${lead} ${line}` : line;
+      current = { kind: section, title, text: title, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" };
     }
     flush();
     return { drafts, unread };
@@ -1577,13 +1622,38 @@ const CareerProfile = (() => {
       /^(?:please\s+)?(?:change|replace|swap|switch|update|correct|fix|make)\s+(?<from>.+?)\s+(?:to|with|for|into|->|→)\s+(?<to>.+)$/i,
       /^(?<from>.+?)\s+should (?:be|say|read)\s+(?<to>.+)$/i,
       /^(?<to>[^,]+?),\s*not\s+(?<from>[^,]+)$/i,
+      /^(?<to>\S*\d\S*)\s+(?:not|instead of|rather than)\s+(?<from>\S*\d\S*)$/i,
     ];
+    const KEEP = "\u0001";
+    t = t.replace(/(\d),(?=\d{3}(?!\d))/g, `$1${KEEP}`);
+    const back = (v) => v.split(KEEP).join(",");
     for (const re of pats) {
       const m = re.exec(t);
       if (!m || !m.groups) continue;
-      const from = clean(m.groups.from), to = clean(m.groups.to);
+      const from = back(clean(m.groups.from)), to = back(clean(m.groups.to));
+      if (/^(?:i|i'm|i am|i was|i'll|my|we)\s/i.test(to)) continue;
       if (!from || !to || from.length > 80 || to.length > 80 || from.toLowerCase() === to.toLowerCase() || VAGUE.test(from) || VAGUE.test(to)) continue;
       return { from, to };
+    }
+    return null;
+  }
+  const GRAD_DATE = String.raw`(?:(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|autumn|winter)\.?\s+|\d{1,2}\/)?(?:19|20)\d\d`;
+  const GPA_VAL = String.raw`[0-4]\.\d{1,2}`;
+  function fieldCorrectionOf(text) {
+    const raw = String(text == null ? "" : text).trim();
+    if (!raw || raw.length > 120 || /\?/.test(raw) || /\n/.test(raw)) return null;
+    const t = raw.replace(/[’`]/g, "'").replace(/[.!]+$/, "").replace(CORR_LEAD, "").trim();
+    const not = (v) => String.raw`(?:\s*,?\s*(?:not|instead of|rather than)\s+(?<from>${v}))?`;
+    const pats = [
+      ["graduation", new RegExp(String.raw`^i(?:'m|'ll|\s+am|\s+will)?\s+(?:actually\s+|really\s+)?(?:graduated|graduate|graduating|finished(?: school| college)?)\s+(?:in\s+|on\s+)?(?<to>${GRAD_DATE})${not(GRAD_DATE)}$`, "i")],
+      ["graduation", new RegExp(String.raw`^(?:my\s+)?(?:graduation|grad)(?:\s+(?:date|year))?\s+(?:is|was|should be|=|:)\s*(?<to>${GRAD_DATE})${not(GRAD_DATE)}$`, "i")],
+      ["graduation", new RegExp(String.raw`^(?:i'?m\s+|i am\s+)?class of\s+(?<to>(?:19|20)\d\d)${not(String.raw`(?:19|20)\d\d`)}$`, "i")],
+      ["gpa", new RegExp(String.raw`^(?:my\s+)?(?:gpa|grade point average)(?:\s+(?:is|was|should be|=|:))?\s*(?<to>${GPA_VAL})${not(GPA_VAL)}$`, "i")],
+      ["gpa", new RegExp(String.raw`^i\s+(?:had|have|got|graduated with)\s+an?\s+(?<to>${GPA_VAL})(?:\s+gpa)?${not(GPA_VAL)}$`, "i")],
+    ];
+    for (const [field, re] of pats) {
+      const m = re.exec(t);
+      if (m && m.groups) return { field, to: m.groups.to.trim(), from: m.groups.from ? m.groups.from.trim() : null };
     }
     return null;
   }
@@ -1653,7 +1723,7 @@ const CareerProfile = (() => {
     return receipt;
   }
 
-  return { KINDS, createProfile, profileFromData, addFact, updateFact, getFact, listFacts, confirmFact, confirmedFacts, quarantinedFact, QUARANTINE_VERSION, unprovenSkills, skillEvidence, factMiningQuestions, isThin, parseCsv, parseLinkedInConnections, parseLinkedInProfile, ingestLinkedIn, parseResumeText, parseResumeSections, ingestResume, supersedeResume, confirmationReply, classifyResumeIngest, SUPPORTED_RESUME_FORMATS, refreshSkillFlags, RETENTION_DECLARATION, retentionDeclaration, previewProfileDeletion, deleteProfileData };
+  return { KINDS, createProfile, profileFromData, addFact, updateFact, getFact, listFacts, confirmFact, confirmedFacts, quarantinedFact, QUARANTINE_VERSION, unprovenSkills, skillEvidence, factMiningQuestions, isThin, parseCsv, parseLinkedInConnections, parseLinkedInProfile, ingestLinkedIn, parseResumeText, parseResumeSections, ingestResume, supersedeResume, confirmationReply, fieldCorrectionOf, classifyResumeIngest, SUPPORTED_RESUME_FORMATS, refreshSkillFlags, RETENTION_DECLARATION, retentionDeclaration, previewProfileDeletion, deleteProfileData };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerProfile;
 
@@ -2523,7 +2593,7 @@ const CareerOutreach = (() => {
   const CAPS = Object.freeze({
     channel: "gmail_oauth_only", startPerDay: 12, startRange: [10, 15], rampStep: 5, rampEveryDays: 3,
     ceilingPerDay: 30, userCanRaise: false, perDomainPerDay: 4, perDomainRange: [3, 5],
-    perFirmPer30Days: 15, perPersonInitial: 1, perPersonMaxFollowUps: 2, perPersonWindowDays: 183,
+    perPersonInitial: 1, perPersonMaxFollowUps: 2, perPersonWindowDays: 183,
     riskyMaxFraction: 0.10, gapMinutes: [2, 8], bounceBreakerRate: 0.03, hostileBreakerCount: 2,
     wave1Size: 40, maxWords: 120, maxLinks: 1,
   });
@@ -2554,7 +2624,7 @@ const CareerOutreach = (() => {
     ["real_estate_pe", /\breal[- ]estate (pe|private equity)\b/],
   ];
   const FIRM_TOKEN_STOP = new Set(["bank", "capital", "partners", "group", "global", "financial", "first", "national", "american", "united", "new", "city", "general", "white", "black", "real", "estate", "property", "securities", "management", "international", "holdings", "company", "fund", "funds", "chicago", "boston", "austin", "dallas", "houston", "seattle", "denver", "atlanta", "miami", "phoenix", "portland", "london", "toronto", "york"]);
-  const FIRM_ABBREV = { bcg: "Boston Consulting Group" };
+  const FIRM_ABBREV = { bcg: "Boston Consulting Group", "jp morgan": "JPMorgan", "j p morgan": "JPMorgan", "jpmorgan chase": "JPMorgan", "jp morgan chase": "JPMorgan" };
   const firmLexicon = () => { const names = []; for (const set of Object.values(firmSets().sets || {})) for (const f of set.firms || []) if (f && f.name && !names.includes(f.name)) names.push(f.name); return names; };
   function extractNamedFirms(raw, w) {
     const _firmLexicon = firmLexicon();
@@ -2586,7 +2656,8 @@ const CareerOutreach = (() => {
         const tok = nn.split(" ")[0];
         if (tok && tok.length >= 4 && firstTokenCount[tok] === 1 && !FIRM_TOKEN_STOP.has(tok)) {
           const rawTok = name.split(" ")[0].replace(/[^A-Za-z]/g, "");
-          if (rawTok && new RegExp("\\b" + rawTok + "\\b").test(raw)) idx = w.indexOf(" " + tok + " ");
+          const standsAlone = rawTok && [...raw.matchAll(new RegExp("\\b" + rawTok + "\\b", "g"))].some((m) => !/(?:\b[A-Z][A-Za-z]*\.?|\b[A-Z]\.)\s*$/.test(raw.slice(0, m.index)));
+          if (standsAlone) idx = w.indexOf(" " + tok + " ");
         }
       }
       if (idx >= 0) hits.push({ name, idx, nn });
@@ -2864,7 +2935,6 @@ const CareerOutreach = (() => {
     for (const c of kept) {
       const fk = norm(c.current_firm);
       if (selected.length < want) {
-        if ((firmCount[fk] || 0) >= CAPS.perFirmPer30Days) { reserve.push(c); continue; }
         firmCount[fk] = (firmCount[fk] || 0) + 1; selected.push(c);
       } else reserve.push(c);
     }
@@ -3388,9 +3458,6 @@ const CareerOutreach = (() => {
       if (touch > CAPS.perPersonMaxFollowUps) { reject("per_person_cap"); continue; }
       if (touch > 0 && !opts.isFollowUp) {   }
       if ((e.touch || 0) > 0 && !campaign.followups_continue_tap && !opts.continueTap) { reject("followup_needs_continue_tap"); continue; }
-      const firmRecent = (campaign.firmWindow || []).filter((f) => f.firm === norm(c.current_firm)).length;
-      const firmQueued = campaign.items.filter((i) => i.status === "queued" && norm(i.candidate.current_firm) === norm(c.current_firm)).length;
-      if (firmRecent + firmQueued >= CAPS.perFirmPer30Days) { reject("per_firm_cap_15_per_30d"); continue; }
       const item = Object.assign({}, base, { id: `item-${campaign.items.length + results.length + 1}`, touch, status: "queued",
         idempotencyKey: `${campaign.id}:${base.person_id || base.email}:${touch}`, domain: emailDomain(base.email), scheduledAt: null });
       campaign.items.push(item); results.push(item);
@@ -3838,7 +3905,7 @@ const CareerOutreach = (() => {
     opts = opts || {}; const start = opts.startDateIso ? Date.parse(opts.startDateIso) : Date.now();
     const days = plan && plan.days ? plan.days : 0; const finish = new Date(start + Math.max(0, days - 1) * 86400000).toISOString().slice(0, 10);
     return { channel: CAPS.channel, daily_cap_start: dailyCapForDay(0), daily_cap_ceiling: CAPS.ceilingPerDay, ramp: `+${CAPS.rampStep} every ${CAPS.rampEveryDays} days, never above ${CAPS.ceilingPerDay}`,
-      per_domain_per_day: CAPS.perDomainPerDay, per_firm_per_30_days: CAPS.perFirmPer30Days, per_person: `${CAPS.perPersonInitial} initial + max ${CAPS.perPersonMaxFollowUps} follow-ups per ${CAPS.perPersonWindowDays} days`,
+      per_domain_per_day: CAPS.perDomainPerDay, per_firm_per_30_days: null, per_person: `${CAPS.perPersonInitial} initial + max ${CAPS.perPersonMaxFollowUps} follow-ups per ${CAPS.perPersonWindowDays} days`,
       scheduled: plan ? plan.scheduled : 0, deferred: plan ? plan.deferred.length : 0, days, start_date: new Date(start).toISOString().slice(0, 10), finish_date: finish,
       stop_rules: [`Bounce rate over ${CAPS.bounceBreakerRate * 100}% pauses the campaign`, `${CAPS.hostileBreakerCount} hostile/spam signals pause the campaign`, "Any provider warning pauses the campaign", "Any opt-out suppresses that person instantly, everywhere, forever", "Follow-up waves send only after your continue tap"],
       approval: "an approval covers only the exact messages you reviewed, within the scope you approved, until it lapses after 7 days; never general permission for the campaign, never messages you have not seen" };
@@ -8079,7 +8146,7 @@ const CareerGraph = (() => {
     const cold = (store.people || []).filter((p) => normCo(p.current_firm) === normCo(company) && !paths.some((x) => x.person_id === p.person_id) && !excluded.some((x) => x.person_id === p.person_id) && p.at_company !== false);
     const seq = paths.slice(0, n).map((p, i) => ({ order: i + 1, name: p.name, warmth: p.score, why: p.why, ask: "coffee chat first — referral ask never in email one", status: "queued_not_sent" }));
     for (const c of cold) { if (seq.length >= n) break; const w = rankWarmth(c, profile, opts); seq.push({ order: seq.length + 1, name: c.full_name, warmth: w.score, why: w.why.length ? w.why : ["cold — no shared fact on file"], ask: "coffee chat first — referral ask never in email one", status: "queued_not_sent" }); }
-    return { company, count: seq.length, requested: n, sequence: seq, excluded, rule: `Sequenced warm to cold; one person at a time, replies re-rank the rest; the per-firm cap — 15 sends to one firm in 30 days — is never approached by ${n === 8 ? "an" : "a"} ${n}-person sequence.` };
+    return { company, count: seq.length, requested: n, sequence: seq, excluded, rule: `Sequenced warm to cold; one person at a time, replies re-rank the rest; no per-firm send cap applies to it — every email you approve can go.` };
   }
 
   function referralBonusIntel(cirs, companies) {
@@ -8386,7 +8453,12 @@ const CareerOnboarding = (() => {
     const p = profile || {}, cons = p.constraints || {}, prefs = p.preferences || {}, basics = p.basics || {};
     const hit = (answer, source) => ({ found: true, answer, source, reasked: false });
     const miss = (what) => ({ found: false, answer: null, reasked: true, ask: `I do not have your ${what} stored yet — what is it? I will save it and never ask again.` });
-    if (/graduat/.test(q)) return cons.graduationDate ? hit(`Your graduation date is ${cons.graduationDate}.`, "profile constraints.graduationDate (stored, ask-once)") : miss("graduation date");
+    if (/graduat/.test(q)) {
+      if (cons.graduationDate) return hit(`Your graduation date is ${cons.graduationDate}.`, "profile constraints.graduationDate (stored, ask-once)");
+      const dated = confirmedEducation(p).map((f) => { const line = eduLine(f), ds = /\b(?:present|current|now|ongoing)\b/i.test(line) ? null : line.match(GRAD_DATE_G); return ds && { date: ds[ds.length - 1], school: eduSchool(f) }; }).filter(Boolean);
+      if (dated.length) return hit(`On your confirmed resume: ${dated.map((d) => `${d.date}${d.school ? ` (${d.school})` : ""}`).join("; ")}.`, "confirmed resume fact: education");
+      return miss("graduation date");
+    }
     if (/work authorization|authorised|authorized to work|sponsorship/.test(q)) return cons.workAuthorization ? hit(`Your saved work authorization: ${cons.workAuthorization}.`, "profile constraints.workAuthorization (stored, ask-once)") : miss("work authorization");
     if (/target companies|companies.*target/.test(q)) return (prefs.targetCompanies || []).length ? hit(`Your target companies: ${prefs.targetCompanies.join(", ")}.`, "profile preferences.targetCompanies (stored)") : miss("target companies");
     if (/what roles|roles?.*(?:looking|want|target)|looking for|what (?:jobs?|positions?|kind of)/.test(q)) return (prefs.roles || []).length ? hit(`You are looking for: ${prefs.roles.join(", ")}.`, "profile preferences.roles (stored)") : miss("target roles");
@@ -8396,6 +8468,22 @@ const CareerOnboarding = (() => {
       if (p.defaults && p.defaults.gpa) return hit(`Your GPA on file: ${p.defaults.gpa}.`, "profile defaults.gpa (stored)");
       const g = confirmedEducation(p).map((f) => { const m = /\bGPA\b[:\s]*([0-4]\.\d{1,2})\b/i.exec(eduLine(f)); return m && { gpa: m[1], school: eduSchool(f) }; }).find(Boolean);
       return g ? hit(`Your GPA on your confirmed resume: ${g.gpa}${g.school ? ` (${g.school})` : ""}.`, "confirmed resume fact: education") : miss("GPA");
+    }
+    if (EMPLOYER_ASK.test(q)) {
+      const exp = confirmedEntries(p, ["experience"]);
+      if (!exp.length) return { found: false, answer: null, reasked: false, ask: null };
+      return hit(`From your confirmed resume: ${exp.map(eduLine).join("; ")}.`, "confirmed resume fact: experience");
+    }
+    if (RESUME_ASK.test(q)) {
+      const all = confirmedEntries(p, ["experience", "education", "project", "leadership", "award", "certification", "skill"]);
+      if (!all.length) {
+        const drafts = ((p && p.facts) || []).some((f) => f && f.source === "resume-ingest" && f.needs_confirmation === true);
+        return { found: false, answer: null, reasked: true, ask: drafts ? "Nothing from your resume is confirmed yet: its entries are drafts waiting for your yes, and nothing uses a draft. Reply \"yes, that's my resume\" if the entries I showed you are right, or tell me what to fix."
+          : "No resume of yours is confirmed yet, so nothing from one is on your record. Paste it or send the file and I'll show you each entry for your yes." };
+      }
+      const skills = all.filter((f) => f.kind === "skill").map((f) => String(f.name || f.title));
+      const rest = all.filter((f) => f.kind !== "skill").map(eduLine);
+      return hit(`From your confirmed resume: ${[...rest, ...(skills.length ? [`skills: ${skills.join(", ")}`] : [])].join("; ")}.`, "confirmed resume facts");
     }
     if (SCHOOL_ASK.test(q)) {
       const edu = confirmedEducation(p);
@@ -8407,9 +8495,16 @@ const CareerOnboarding = (() => {
   const RECALL_ASK = /\bwhere (?:do|did) i (?:live|stay)\b|\bwhere am i (?:based|located|living)\b|\bwhat (?:city|town) (?:do i live in|am i (?:in|based in))\b|\bwhat (?:roles?|jobs?|positions?|kind of (?:roles?|jobs?)) (?:am i (?:looking for|targeting|after|going for)|do i want)\b|\bwhat am i looking for\b|\bwhat gpa do i have\b|^my gpa\W*$/;
   const recallText = (t) => t.replace(/\bwher\b/g, "where").replace(/\b(?:waht|wht|wat|whta)\b/g, "what").replace(/\bwhats\b/g, "what's").replace(/\b(?:schol|shcool|scool)\b/g, "school");
   const SCHOOL_ASK = /\bwhere (?:did|do) i (?:go to |attend )?(?:school|college|university|study)\b|\bwhat (?:school|college|university) (?:did|do) i (?:go to|attend)\b|\bwhat(?:'?s| is) my (?:school|college|university|alma mater|degree)\b/;
+  const EMPLOYER_ASK = /\bwhere (?:have|did) i (?:ever )?(?:worked|work|interned|intern)\b|\bwhere i(?:'ve| have) worked\b|\bwhat (?:jobs?|companies|internships?|roles|positions|work experience|experience) (?:have i (?:had|done|held)|did i (?:have|do|hold)|do i have)\b|\bwho (?:have|did) i (?:ever )?work(?:ed)? for\b|\bwhat(?:'?s| is) my (?:work )?experience\b|\b(?:list|show me) my (?:jobs|work experience|experience)\b/;
+  const RESUME_ASK = /\bwhat(?:'?s| is) (?:on|in) my (?:resume|cv|record|profile)\b|\bwhat do you have (?:on|about) me\b|\bshow (?:me )?my (?:resume|cv|entries|confirmed entries)\b|\bread (?:me )?(?:back )?my (?:resume|cv|entries)\b|\bwhat (?:did|have) i confirm(?:ed)?\b/;
+  function confirmedEntries(p, kinds) {
+    if (!p || p._fromStatedFacts) return [];
+    return (p.facts || []).filter((f) => f && kinds.includes(f.kind) && !String(f.id || "").startsWith("stated-") && f.needs_confirmation !== true && (f.status == null || f.status === "confirmed"));
+  }
   function confirmedEducation(p) {
     return ((p && p.facts) || []).filter((f) => f && f.kind === "education" && f.needs_confirmation !== true && (f.status == null || f.status === "confirmed"));
   }
+  const GRAD_DATE_G = /\b(?:(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|autumn|winter)\.?\s+)?(?:\d{1,2}\/)?(?:19|20)\d\d\b/gi;
   const eduLine = (f) => String(f.title || f.text || "").split("\n")[0].replace(/\s+/g, " ").trim();
   const eduSchool = (f) => (eduLine(f).split(/\s+[-–—]\s+|,/)[0] || "").trim();
 
@@ -8739,7 +8834,7 @@ const CareerOnboarding = (() => {
       return { intent: "onboarding_answer", done: r.done, answered: r.answered, pending: r.pending || null, reply: r.text };
     }
     const tq = recallText(t);
-    if (/^(what'?s|what is) my\b/.test(tq) || SCHOOL_ASK.test(tq) || RECALL_ASK.test(tq)) {
+    if (/^(what'?s|what is) my\b/.test(tq) || SCHOOL_ASK.test(tq) || RECALL_ASK.test(tq) || EMPLOYER_ASK.test(tq) || RESUME_ASK.test(tq)) {
       const r = answerFromProfile(c.profile || {}, tq);
       const stated = ((c.statedFacts && Array.isArray(c.statedFacts.facts)) ? c.statedFacts.facts : []).map((f) => f && f.kind);
       const elsewhere = !r.found && (/work authorization|authorised|authorized to work|sponsorship/.test(tq)
@@ -13104,6 +13199,20 @@ const CareerRouter = (() => {
       return /^[A-Z]/.test(w) ? hit.charAt(0).toUpperCase() + hit.slice(1) : hit;
     });
   }
+  function expandShorthand(text) {
+    return s(text)
+      .replace(/\bwat\b/gi, "what")
+      .replace(/\b(can|could|will|would|do|did|are|thank)\s+u\b/gi, "$1 you")
+      .replace(/(^|\s)u(?=\s+(?:apply|help|find|get|send|do|make|have|know|need|want|track|set|show|give|tell)\b)/gi, "$1you")
+      .replace(/\bur\b/g, "your")
+      .replace(/\b(what|which|where|how|who|there|they|you|jobs|roles)\s+r\b/gi, "$1 are")
+      .replace(/\bw\/?\s+(?=(?:my|the|a|an|your|this|that)\b)/gi, "with ")
+      .replace(/\b(my|the|all my|any)\s+apps\b/gi, "$1 applications")
+      .replace(/\bavg\b/gi, "average")
+      .replace(/\bib\b(?=\s+(?:or|vs\.?|versus)\b)|(?<=\b(?:or|vs\.?|versus)\s+)ib\b/gi, "investment banking")
+      .replace(/^\s*remote\s+only\b/i, "only remote jobs")
+      .replace(/[\s,]+(?:pls|plz|please)\s*([.!?]*)\s*$/i, "$1");
+  }
   const nowOf = (ctx) => { const n = ctx && ctx.now; const ms = n == null ? Date.now() : (typeof n === "number" ? n : Date.parse(n)); return Number.isFinite(ms) ? ms : Date.now(); };
   const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const asOfMonthYear = (ctx) => { const d = new Date(nowOf(ctx || {})); return `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`; };
@@ -13377,7 +13486,8 @@ const CareerRouter = (() => {
     } catch {   }
     const top = ranked.slice(0, limit);
     try {
-      ctx.discovery = Object.assign({}, ctx.discovery || {}, { lastShortlist: top.map((r) => ({ id: r.id || null, title: r.title, company: r.company, location: r.location || null, url: r.url || postingUrlOf(r.posting) || null })) });
+      const keep = (r) => ({ id: r.id || null, title: r.title, company: r.company, location: r.location || null, url: r.url || postingUrlOf(r.posting) || null });
+      ctx.discovery = Object.assign({}, ctx.discovery || {}, { lastShortlist: top.map(keep), lastMore: ranked.slice(limit, limit + 10).map(keep) });
     } catch {   }
     const publicFacts = {
       shortlist: top.map((r) => ({ id: r.id, title: r.title, company: r.company, location: r.location, url: r.url || null, score: r.score, bucket: r.bucket, reason: r.reason, caveat: r.caveat })),
@@ -14097,7 +14207,7 @@ const CareerRouter = (() => {
     const q = Outreach && Outreach.parseTarget ? Outreach.parseTarget(text, ctx.profile || {}) : null;
     if (q) {
       const facts = statedFactsOf(ctx);
-      const firmF = facts.find((f) => f.kind === "target_firm");
+      const firmF = facts.find((f) => f.kind === "target_firm" && (() => { const at = Date.parse(f.at); return !Number.isFinite(at) || nowOf(ctx) - at <= 6 * 3600 * 1000; })());
       const askedUniverse = (q.firms_named && q.firms.length) || q.firms_source === "set" || (q.proposed_default && q.proposed_default.kind === "category");
       const prior = ctx.plan && ctx.plan.kind === "campaign_plan" ? ctx.plan : null;
       const pointsBack = !!prior && /\b(?:there|that firm|same firm|same place)\b/i.test(s(text));
@@ -14110,9 +14220,10 @@ const CareerRouter = (() => {
       if (firmF && !askedUniverse && !anchored) {
         q.firms = [firmF.value]; q.firms_named = true; q.firms_source = "named"; q.firm_set = null; q.proposed_default = null; q.vague = false;
       }
-      const geoF = facts.find((f) => f.kind === "geography");
+      const fresh = (f) => { const at = Date.parse(f && f.at); return !Number.isFinite(at) || nowOf(ctx) - at <= 6 * 3600 * 1000; };
+      const geoF = facts.find((f) => f.kind === "geography" && fresh(f));
       if (geoF && !q.geography) q.geography = geoF.value;
-      const lvlF = facts.find((f) => f.kind === "level");
+      const lvlF = facts.find((f) => f.kind === "level" && fresh(f));
       if (lvlF && !q.seniority_band) {
         if (/analyst/i.test(lvlF.value)) q.seniority_band = "analyst";
         else if (/associate/i.test(lvlF.value)) q.seniority_band = "associate";
@@ -14356,13 +14467,13 @@ const CareerRouter = (() => {
     });
     return { intent: "career_document_delivery", reply, resultStatus: "prepared", sends: 0, documents: [doc] };
   }
-  function resumePasteDraftsOf(raw) {
+  function resumePasteDraftsOf(raw, framed) {
     if (!ProfileMod || !ProfileMod.parseResumeText) return null;
     let drafts = null;
     try { drafts = ProfileMod.parseResumeText(raw); } catch { return null; }
-    if (!Array.isArray(drafts) || drafts.length < 3) return null;
+    if (!Array.isArray(drafts) || drafts.length < (framed ? 2 : 3)) return null;
     const kinds = new Set(drafts.map((d) => d && d.kind).filter(Boolean));
-    if (kinds.size < 2 || !(kinds.has("experience") || kinds.has("education"))) return null;
+    if ((!framed && kinds.size < 2) || !(kinds.has("experience") || kinds.has("education"))) return null;
     return drafts;
   }
   function entriesReply(head, facts, listTitle, lines, nextStep) {
@@ -14375,16 +14486,25 @@ const CareerRouter = (() => {
   function handleResumePasteIngest(text, ctx) {
     const raw = s(text);
     const framedPaste = /^\s*(here'?s|here is|this is)\s+my\s+(resume|cv)\b/i.test(raw) || /^\s*my\s+(resume|cv)\s*:/i.test(raw);
-    const markerPaste = (raw.match(/\b(?:skills|education|experience|work history|summary|certifications|projects)\s*:/gi) || []).length >= 2;
+    const capsHeaders = new Set(raw.match(/\b(?:EDUCATION|EXPERIENCE|SKILLS|PROJECTS|LEADERSHIP|WORK HISTORY|CERTIFICATIONS)\b/g) || []).size >= 3;
+    const markerPaste = (raw.match(/\b(?:skills|education|experience|work history|summary|certifications|projects)\s*:/gi) || []).length >= 2 || capsHeaders;
     if ((raw.length < 300 || raw.split(/\r?\n/).length < 6) && !framedPaste && !markerPaste) return null;
     if (ctx.pastedText) return null;
-    if (/\b(responsibilities|qualifications|about the role|what you'?ll do|what you will do)\s*:/i.test(raw)) return null;
-    if (/^\s*(from|subject|date|to)\s*:/im.test(raw)) return null;
+    if (!framedPaste && /\b(responsibilities|qualifications|about the role|what you'?ll do|what you will do)\s*:/i.test(raw)) return null;
+    if (!framedPaste && /^\s*(from|subject|date|to)\s*:/im.test(raw)) return null;
     if (!ProfileMod || !ProfileMod.classifyResumeIngest || !ProfileMod.ingestResume || !ProfileMod.createProfile) return null;
     let cls = null;
     try { cls = ProfileMod.classifyResumeIngest(raw); } catch { return null; }
     if (!cls || !cls.ok) return null;
-    if (!resumePasteDraftsOf(raw)) return null;
+    if (!resumePasteDraftsOf(raw, framedPaste)) {
+      if (capsHeaders && raw.split(/\r?\n/).filter((l) => l.trim()).length < 4) {
+        return { intent: "career_resume_ingest", resultStatus: "awaiting_user", sends: 0, resume_ingest: { drafts: 0, one_paragraph: true }, reply: compose({
+          headline: "That looks like your resume, but it came through as one paragraph, so I can't tell where each entry starts without guessing.",
+          facts: ["Nothing from it is on your record."],
+          nextStep: "Can you paste it again with its line breaks, or attach the PDF or Word file?" }) };
+      }
+      return null;
+    }
     const standingProfile = (ctx.profile && typeof ctx.profile === "object") ? ctx.profile : null;
     const profile = (standingProfile && !standingProfile._fromStatedFacts) ? standingProfile : ProfileMod.createProfile({});
     let res = null;
@@ -14412,12 +14532,29 @@ const CareerRouter = (() => {
     const target = mir && mir.tailorTarget && mir.tailorTarget.company ? mir.tailorTarget : null;
     const facts = [`I read it as ${total} facts${counts ? ` (${counts})` : ""} — every one is held as a DRAFT on your profile, not yet confirmed, and nothing is tailored or submitted from a draft.`];
     if (Array.isArray(res.unread_sections) && res.unread_sections.length) facts.push(`I did not read these sections into your record: ${res.unread_sections.slice(0, 8).join(", ")}. Nothing from them is used.`);
+    const nameCheck = resumeNameMismatch(raw, ctx);
+    if (nameCheck && mir && mir.resumeIngest) mir.resumeIngest.nameCheck = nameCheck;
+    if (nameCheck) facts.push(nameMismatchLine(nameCheck));
     if (Array.isArray(res.replaced_drafts) && res.replaced_drafts.length) facts.push("This replaces the resume you pasted before it, which you had not confirmed.");
     if ((profile.facts || []).some((f) => f && f.source === "resume-ingest" && !f.needs_confirmation)) facts.push("Your confirmed resume stays in use until you confirm this one; then this one replaces it.");
     const reply = entriesReply("Your resume is on record — as drafts, awaiting your word.", facts, "Here is what I read from it, word for word:", presented.map((f, i) => `${i + 1}. ${f.text}`),
       target ? `Say "yes, that's my resume" and I confirm them and tailor for ${target.label} in the same turn.` : "Say \"yes, that's my resume\" and I confirm them as your facts — then name a role and the tailoring runs on them.");
     return { intent: "career_resume_ingest", reply, resultStatus: "awaiting_user", sends: 0, resume_ingest: { drafts: total, byKind } };
   }
+  const NAME_LINE = /^[A-ZÀ-ɏ][\p{L}'’.-]+(?:\s+[A-ZÀ-ɏ][\p{L}'’.-]+){1,3}(?:\s+\(TEST\))?$/u;
+  const nameTokens = (v) => s(v).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\(test\)/g, " ").split(/[^\p{L}'’-]+/u).map((x) => x.replace(/^['’-]+|['’-]+$/g, "")).filter((x) => x.length >= 2);
+  function resumeNameMismatch(raw, ctx) {
+    const given = statedFactsOf(ctx).find((f) => f && f.kind === "name" && s(f.value).trim());
+    if (!given) return null;
+    const body = s(raw).replace(/^\s*(?:(?:here'?s|here is|this is|attached is|sending)\s+my\s+(?:updated\s+|new\s+|current\s+)?(?:resume|cv|r[ée]sum[ée])|my\s+(?:resume|cv))\s*:?\s*/i, "");
+    const first = (body.split(/\r?\n/).map((l) => l.trim()).find(Boolean) || "").replace(/\s*[|·•,].*$/, "").trim();
+    if (!first || first.length > 60 || !NAME_LINE.test(first)) return null;
+    const a = nameTokens(first), b = new Set(nameTokens(given.value));
+    if (!a.length || !b.size || a.some((x) => b.has(x))) return null;
+    return { resume: first, given: s(given.value).trim() };
+  }
+  const nameMismatchLine = (n) => `The name at the top of this resume is “${n.resume}”, not ${n.given}, the name you gave me. If it is someone else's resume, don't confirm it: nothing from it is yours until you say it is. If it is yours, reply "yes, that's my resume".`;
+  const OWN_YES = /\b(?:(?:that|this|it)(?:'?s| is) (?:my|mine)\b|\bmy (?:resume|cv)\b|\b(?:it'?s|that'?s|this is) (?:me|mine)\b|\bmine\b)/i;
   function resumeAskReply(head, extra, lines) {
     return entriesReply(head, [...(extra || []), "Every entry is still a draft: nothing is tailored, put on a form or sent from a draft."], "Now it reads, word for word:", lines || [],
       "If every entry I showed you is right, reply \"yes, that's my resume\"; to fix one, tell me what it should say (for example \"my title was X, not Y\").");
@@ -14469,6 +14606,7 @@ const CareerRouter = (() => {
       return ask("I haven't confirmed anything yet.", []);
     }
     if (stale && !/\b(?:resume|cv|r[eé]sum[eé]|entries)\b/i.test(raw)) return ask("I didn't take that yes as confirming your resume — it came after another question.", []);
+    if (mir.resumeIngest.nameCheck && !OWN_YES.test(raw)) return ask("I haven't confirmed anything yet.", [nameMismatchLine(mir.resumeIngest.nameCheck)]);
     const presentedIds = Array.isArray(mir.resumeIngest.factIds) ? new Set(mir.resumeIngest.factIds) : null;
     const presentedEntries = Array.isArray(mir.resumeIngest.entries) && mir.resumeIngest.entries.length ? mir.resumeIngest.entries : null;
     if (presentedEntries) {
@@ -14515,6 +14653,198 @@ const CareerRouter = (() => {
     const reply = compose({ headline: "Confirmed — your resume facts are on your record.", facts: [`${confirmed} fact${confirmed === 1 ? "" : "s"} from the resume you pasted are confirmed, in your own words — tailoring, packets, and answers now run on them.`, ...(superseded.length ? ["It replaces your earlier resume: nothing from that one is used any more."] : [])], nextStep: "Name a role (or paste a posting) and the tailoring runs on them." });
     return { intent: "career_resume_ingest", reply, resultStatus: "completed", sends: 0, resume_ingest: { confirmed, ...(superseded.length ? { superseded: superseded.length } : {}) } };
   }
+  const RESUME_FRAME = /^\s*(?:(?:here'?s|here is|this is|attached is|sending)\s+my\s+(?:updated\s+|new\s+|current\s+)?(?:resume|cv|r[ée]sum[ée])|my\s+(?:resume|cv)\s*:)/i;
+  function handleFramedDocument(text, ctx) {
+    const raw = s(text);
+    if (!RESUME_FRAME.test(raw)) return null;
+    const body = raw.replace(/^[^\n]*?(?::|\n)/, "");
+    if (body.split(/\r?\n/).filter((l) => l.trim()).length < 4 || body.trim().length < 120) return null;
+    const read = handleResumePasteIngest(text, ctx);
+    if (read) return read;
+    if (ctx.pastedText) return null;
+    const t = lc(body);
+    const looks = /^\s*(?:dear|to whom|hello|hi)\b/m.test(t) && /\b(?:sincerely|regards|best|thank you)\b/.test(t) ? "It reads like a cover letter, not a resume."
+      : /\btranscript\b|\b(?:cumulative|term|semester) gpa\b|\bcredits?\b/.test(t) ? "It reads like a transcript, not a resume."
+      : "I found no section I read entries from (Experience, Education, Skills, Projects).";
+    const pending = resumeDraftsPending(ctx).length, confirmed = resumeOnRecord(ctx);
+    const reply = compose({ headline: "I couldn't read that as a resume, so nothing from it was saved.", facts: [looks, "Nothing from it is on your record, and nothing is tailored, applied for or sent from it.",
+      ...(pending ? ["The resume you sent before it is still waiting for your word."] : confirmed ? ["Your confirmed resume stays as it is."] : [])],
+      nextStep: "Send your resume as a PDF or Word file, or paste its text with its section headings, and I'll show you every entry I read for your yes." });
+    return { intent: "career_resume_not_read", reply, resultStatus: "blocked", sends: 0 };
+  }
+  function resumeDraftsPending(ctx) {
+    const mir = threadMirrorOf(ctx);
+    const profile = ctx && ctx.profile && typeof ctx.profile === "object" ? ctx.profile : null;
+    if (!mir || !mir.resumeIngest || !profile || !Array.isArray(mir.resumeIngest.factIds)) return [];
+    return mir.resumeIngest.factIds.map((id) => (profile.facts || []).find((f) => f && f.id === id && f.needs_confirmation && f.source === "resume-ingest")).filter(Boolean);
+  }
+  function resumePendingGreeting(ctx) {
+    const shown = resumeDraftsPending(ctx);
+    if (!shown.length) return null;
+    const wm = threadMirrorForWrite(ctx);
+    if (wm && wm.resumeIngest) delete wm.resumeIngest.stale;
+    return { intent: "career_resume_ingest", resultStatus: "awaiting_user", sends: 0, resume_ingest: { confirmed: 0 },
+      reply: resumeAskReply("Welcome back — your resume is waiting for your word.", [], shown.map((f, i) => `${i + 1}. ${f.text}`)) };
+  }
+  const RESUME_ENTRY_KINDS = new Set(["experience", "education", "project", "leadership", "award", "certification", "skill", "publication", "language"]);
+  function disputedName(text) {
+    const t = s(text).trim().replace(/[’`]/g, "'").replace(/[.!]+$/, "");
+    const lead = /^(?:(?:actually|oh|oops|sorry|wait|hmm|no|nope|hold on|um|so|also|and|but|just so you know|fyi)[\s,:;—–-]+)*/i;
+    const u = t.replace(lead, "");
+    const pats = [
+      /^i\s+(?:have\s+)?(?:never|didn'?t|did not|haven'?t|have not)\s+(?:actually\s+|really\s+|ever\s+)?(?:work(?:ed)?|intern(?:ed)?|go(?:ne)?|went|stud(?:y|ied)|attend(?:ed)?|graduate(?:d)?|use(?:d)?|know|knew|lead|led|w[io]n|earn(?:ed)?|receive(?:d)?|get|got|hold|held|do|did|build|built|make|made)\b(?:\s+(?:at|for|to|in|from|on|with|as))?\s+(.+?)(?:\s*[,;—–-]\s*(?:remove|delete|take|drop|that'?s|it'?s|so)\b.*)?$/i,
+      /^(?:please\s+)?(?:remove|delete|drop|erase|strike|take\s+(?:out|off)|get\s+rid\s+of)\s+(?:the\s+|my\s+)?(.+?)(?:\s+(?:entry|line|job|role|one|item|fact|skill|school))?(?:\s+(?:from|off|on)\s+(?:my\s+|the\s+)?(?:resume|cv|profile|record|list|skills|entries))?(?:\s*[,;—–-]\s*(?:i\s+)?(?:never|didn'?t|it'?s|that'?s|not)\b.*)?$/i,
+      /^(?:the\s+)?(.+?)\s+(?:entry|one|job|line)?\s*(?:is|was|isn'?t|wasn'?t)\s+(?:not\s+(?:mine|me|true|real)|never\s+(?:mine|true)|made\s+up|fake|someone\s+else'?s|not\s+my\s+(?:job|school|degree))$/i,
+      /^(?:that'?s|it'?s|this\s+is)\s+not\s+my\s+(?:job|school|degree|project|award|role)\s+(?:at|from|in)\s+(.+)$/i,
+    ];
+    for (const re of pats) {
+      const m = re.exec(u);
+      if (!m) continue;
+      const x = m[1].replace(/^["'“‘]+|["'”’.,;:!]+$/g, "").replace(/\s+(?:entry|line|job|role|one|item|there|anymore|any more)$/i, "").trim();
+      if (x.length >= 1 && x.length <= 80 && !/^(?:it|that|this|them|those|these|anything|everything|all|my data|my account)$/i.test(x)) return x;
+    }
+    return null;
+  }
+  function handleResumeDispute(text, ctx) {
+    const raw = s(text).trim();
+    if (!raw || raw.length > 240 || /\n/.test(raw)) return null;
+    const profile = ctx.profile && typeof ctx.profile === "object" && !ctx.profile._fromStatedFacts ? ctx.profile : null;
+    if (!profile || !Array.isArray(profile.facts)) return null;
+    const x = disputedName(raw);
+    if (!x) return null;
+    const esc = x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`${/^\w/.test(x) ? "\\b" : ""}${esc}${/\w$/.test(x) ? "\\b" : ""}`, "i");
+    const pending = resumeDraftsPending(ctx);
+    const live = (profile.facts || []).filter((f) => f && RESUME_ENTRY_KINDS.has(f.kind) && (!f.needs_confirmation || pending.includes(f)) && !(ProfileMod && ProfileMod.quarantinedFact && ProfileMod.quarantinedFact(f)));
+    const hits = x.length < 2 ? live.filter((f) => f.kind === "skill" && s(f.name || f.title) === x) : live.filter((f) => [f.title, f.name, f.text].some((v) => typeof v === "string" && re.test(v)));
+    if (!hits.length) return null;
+    const label = (f) => s(f.kind === "skill" ? (f.name || f.title) : f.title).slice(0, 160);
+    const verbatim = (head, lines, rest) => [Reply ? Reply.composeResult({ headline: head }).bubbles.join("\n") : head, lines.join("\n"), compose(rest)].join("\n\n");
+    if (hits.length > 1) {
+      const reply = verbatim(`I changed nothing — “${x}” is in ${hits.length} entries on your record.`, hits.slice(0, 5).map((f, i) => `${i + 1}. ${label(f)}`), { headline: "Tell me which one to take off, word for word as it reads." });
+      return { intent: "career_resume_dispute", reply, resultStatus: "awaiting_user", sends: 0 };
+    }
+    const f = hits[0];
+    const wasDraft = !!f.needs_confirmation;
+    profile.facts = profile.facts.filter((g) => g !== f);
+    if (ProfileMod && ProfileMod.refreshSkillFlags) { try { ProfileMod.refreshSkillFlags(profile); } catch {   } }
+    profile.fact_version = (Number.isFinite(profile.fact_version) ? profile.fact_version : 0) + 1;
+    profile.profile_ingest_audit = [...(profile.profile_ingest_audit || []), { at: nowOf(ctx), outcome: wasDraft ? "draft_disowned_before_confirmation" : "confirmed_entry_disowned", removed_fact_ids: [f.id], removed: [{ id: f.id, kind: f.kind, title: label(f).slice(0, 120) }], said: raw.slice(0, 200) }];
+    if (wasDraft) {
+      const wm = threadMirrorForWrite(ctx);
+      if (wm && wm.resumeIngest) {
+        wm.resumeIngest.factIds = (wm.resumeIngest.factIds || []).filter((id) => id !== f.id);
+        if (Array.isArray(wm.resumeIngest.entries)) wm.resumeIngest.entries = wm.resumeIngest.entries.filter((e) => e && e.id !== f.id);
+        delete wm.resumeIngest.stale;
+      }
+      const rest = resumeDraftsPending(ctx);
+      if (!rest.length) {
+        if (wm) delete wm.resumeIngest;
+        const reply = verbatim("I took this entry out, and nothing from that resume is left to confirm:", [label(f)], { headline: "Nothing from it is on your record or used anywhere.", nextStep: "Send your resume again (a file or pasted text) and I'll show you what I read for your yes." });
+        return { intent: "career_resume_dispute", reply, resultStatus: "completed", sends: 0 };
+      }
+      return { intent: "career_resume_ingest", resultStatus: "awaiting_user", sends: 0, resume_ingest: { confirmed: 0 },
+        reply: resumeAskReply("I took that entry out: it is not on your record, and nothing is confirmed yet.", [`Taken out: ${label(f)}`], rest.map((g, i) => `${i + 1}. ${g.text}`)) };
+    }
+    const left = (profile.facts || []).filter((g) => g && RESUME_ENTRY_KINDS.has(g.kind) && !g.needs_confirmation).length;
+    const reply = verbatim("I took this entry off your record:", [label(f)], { headline: "Nothing uses it any more: no application, letter, answer or alert.", facts: [`Your other ${left} confirmed entr${left === 1 ? "y stands" : "ies stand"} as you confirmed ${left === 1 ? "it" : "them"}.`], nextStep: "If something else on it is wrong, tell me what it should say." });
+    return { intent: "career_resume_dispute", reply, resultStatus: "completed", sends: 0 };
+  }
+  const GRAD_TOKEN = /\b(?:(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|autumn|winter)\.?\s+)?(?:\d{1,2}\/)?(?:19|20)\d\d\b/gi;
+  const GPA_TOKEN = /(\bGPA\b\s*(?:of\s+)?[:=]?\s*)([0-4]\.\d{1,2})\b|\b([0-4]\.\d{1,2})(\s*(?:\/\s*4(?:\.0+)?\s*)?GPA\b)/i;
+  const GENERIC_FIX = /^(?:(?:actually|oh|oops|sorry|wait|no|correction|small fix|quick fix|one thing)[\s,:;.!—–-]+)*(?:please\s+)?(?:change|replace|update|correct|fix|swap)\s|\b(?:my|the)\b[^,]{0,40}\b(?:was|is|should be)\b.+\b(?:not|instead of|rather than)\b|\bshould (?:be|say|read)\b/i;
+  function entryLine(f) { return s(f && (f.title || f.text) || ""); }
+  function fieldSpanOf(f, field, from) {
+    const line = entryLine(f);
+    if (field === "gpa") {
+      const m = GPA_TOKEN.exec(line);
+      if (!m) return null;
+      const value = m[2] || m[3];
+      if (from && value !== from) return null;
+      return { value };
+    }
+    if (!from && /\b(?:present|current|now|ongoing)\b/i.test(line)) return null;
+    const all = [...line.matchAll(GRAD_TOKEN)].map((m) => m[0]);
+    if (!all.length) return null;
+    if (from) { const hit = all.find((d) => lc(d) === lc(from) || lc(d).endsWith(` ${lc(from)}`) || lc(d).endsWith(`/${lc(from)}`)); return hit ? { value: hit } : null; }
+    return { value: all[all.length - 1] };
+  }
+  function swapIn(f, from, to) {
+    const esc = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`${/^\w/.test(from) ? "\\b" : ""}${esc}${/\w$/.test(from) ? "\\b" : ""}`, "gi");
+    const swap = (x) => (typeof x === "string" ? x.replace(re, to) : x);
+    f.title = swap(f.title); f.text = swap(f.text); if (f.name) f.name = swap(f.name);
+    if (Array.isArray(f.bullets)) f.bullets = f.bullets.map(swap);
+    if (Array.isArray(f.skills)) f.skills = f.skills.map(swap);
+  }
+  function handleResumeFieldCorrection(text, ctx) {
+    const raw = s(text).trim();
+    if (!raw || raw.length > 200 || /\n/.test(raw) || /\?/.test(raw)) return null;
+    const profile = ctx.profile && typeof ctx.profile === "object" && !ctx.profile._fromStatedFacts ? ctx.profile : null;
+    if (!profile || !Array.isArray(profile.facts) || !ProfileMod) return null;
+    const field = typeof ProfileMod.fieldCorrectionOf === "function" ? ProfileMod.fieldCorrectionOf(raw) : null;
+    const pending = resumeDraftsPending(ctx);
+    const confirmed = (profile.facts || []).filter((f) => f && f.source === "resume-ingest" && RESUME_ENTRY_KINDS.has(f.kind) && f.needs_confirmation === false && f.status === "confirmed"
+      && !(ProfileMod.quarantinedFact && ProfileMod.quarantinedFact(f)));
+    const pool = pending.length ? pending : confirmed;
+    if (!pool.length) return null;
+    let change = null;
+    const label = (f) => entryLine(f).slice(0, 160);
+    const verbatim = (head, lines, rest) => [Reply ? Reply.composeResult({ headline: head }).bubbles.join("\n") : head, lines.join("\n"), compose(rest)].join("\n\n");
+    const what = field ? (field.field === "gpa" ? "GPA" : "graduation date") : null;
+    if (field) {
+      const edu = pool.filter((f) => f.kind === "education");
+      const holding = edu.map((f) => ({ f, span: fieldSpanOf(f, field.field, field.from) })).filter((x) => x.span);
+      if (!holding.length) {
+        const reply = verbatim(`I changed nothing — ${edu.length ? `your ${pending.length ? "" : "confirmed "}education entry doesn't show a ${field.from ? `${what} of ${field.from}` : what}` : `there is no education entry on your ${pending.length ? "resume" : "record"}`}, and I don't add a value to an entry that doesn't carry it.`,
+          edu.map((f, i) => `${i + 1}. ${label(f)}`), { headline: "Nothing on your record moved.", nextStep: edu.length ? `To change it, tell me the line as it should read (for example "change ${label(edu[0]).slice(0, 40)} to ...").` : "Send your resume with its education section and I'll show you each entry for your yes." });
+        return { intent: "career_resume_correction", reply, resultStatus: "awaiting_user", sends: 0 };
+      }
+      if (holding.length > 1) {
+        const reply = verbatim(`I changed nothing — ${holding.length} of your education entries carry a ${what}.`, holding.map((x, i) => `${i + 1}. ${label(x.f)}`), { headline: `Tell me which one, for example "change ${holding[0].span.value} to ${field.to}".` });
+        return { intent: "career_resume_correction", reply, resultStatus: "awaiting_user", sends: 0 };
+      }
+      const { f, span } = holding[0];
+      if (lc(span.value) === lc(field.to)) {
+        const reply = verbatim(`That is what it already says — nothing changed.`, [label(f)], { headline: pending.length ? "It is still a draft, waiting for your yes." : "It stands as you confirmed it." });
+        return { intent: "career_resume_correction", reply, resultStatus: "unchanged", sends: 0 };
+      }
+      change = { f, from: span.value, to: field.to };
+    } else {
+      if (pending.length || !GENERIC_FIX.test(raw)) return null;
+      const corr = ProfileMod.confirmationReply ? ProfileMod.confirmationReply(raw) : null;
+      if (!corr || corr.kind !== "correction" || s(corr.from).length < 2) return null;
+      const esc = corr.from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`${/^\w/.test(corr.from) ? "\\b" : ""}${esc}${/\w$/.test(corr.from) ? "\\b" : ""}`, "i");
+      const hits = pool.filter((f) => [f.title, f.text, f.name, ...(f.bullets || [])].some((x) => typeof x === "string" && re.test(x)));
+      if (!hits.length) return null;
+      if (hits.length > 1) {
+        const reply = verbatim(`I changed nothing — “${corr.from}” is in ${hits.length} entries on your record.`, hits.slice(0, 5).map((g, i) => `${i + 1}. ${label(g)}`), { headline: "Tell me which one to change, with the words around it (for example the whole line as it should read)." });
+        return { intent: "career_resume_correction", reply, resultStatus: "awaiting_user", sends: 0 };
+      }
+      change = { f: hits[0], from: corr.from, to: corr.to };
+    }
+    const f = change.f, before = label(f), at = nowOf(ctx);
+    swapIn(f, change.from, change.to);
+    f.corrections = [...(Array.isArray(f.corrections) ? f.corrections : []), { from: change.from, to: change.to, ...(pending.length ? {} : { at, said: raw.slice(0, 200), by: "the person, in chat, after confirming" }) }];
+    profile.fact_version = (Number.isFinite(profile.fact_version) ? profile.fact_version : 0) + 1;
+    profile.profile_ingest_audit = [...(profile.profile_ingest_audit || []), { at, outcome: pending.length ? "draft_corrected_before_confirmation" : "confirmed_entry_corrected_by_owner", fact_id: f.id, from: change.from, to: change.to, said: raw.slice(0, 200) }];
+    if (pending.length) {
+      f.needs_confirmation = true; f.status = "draft";
+      const wm = threadMirrorForWrite(ctx);
+      if (wm && wm.resumeIngest && Array.isArray(wm.resumeIngest.entries)) for (const e of wm.resumeIngest.entries) if (e && e.id === f.id) e.sha256 = sha256(s(f.text || ""));
+      if (wm && wm.resumeIngest) delete wm.resumeIngest.stale;
+      const order = (wm && wm.resumeIngest && wm.resumeIngest.factIds || []).indexOf(f.id) + 1;
+      return { intent: "career_resume_ingest", resultStatus: "awaiting_user", sends: 0, resume_ingest: { confirmed: 0 },
+        reply: resumeAskReply(`Changed entry ${order} — nothing is confirmed yet.`, [], [`${order}. ${f.text}`]) };
+    }
+    f.needs_confirmation = false; f.status = "confirmed";
+    f.owner_corrected_at = at;
+    const reply = verbatim(`Changed — your ${what || "entry"} is corrected on your record, as you said it:`, [`Was: ${before}`, `Now: ${label(f)}`],
+      { headline: "Only that changed: every other entry stands as you confirmed it, and from now on everything I prepare uses the corrected words.",
+        facts: [`The resume you sent me still reads “${change.from}”; to change the file itself, send me the updated file and confirm it.`] });
+    return { intent: "career_resume_correction", reply, resultStatus: "completed", sends: 0, resume_correction: { fact_id: f.id, from: change.from, to: change.to } };
+  }
   function frameMarksOf(ctx) {
     const m = threadMirrorOf(ctx);
     return (m && m.frames && typeof m.frames === "object" && !Array.isArray(m.frames)) ? m.frames : {};
@@ -14558,6 +14888,32 @@ const CareerRouter = (() => {
   function lastSentenceIsQuestion(reply) {
     const parts = s(reply).split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter(Boolean);
     return parts.length ? /\?$/.test(parts[parts.length - 1]) : false;
+  }
+  function offerNext(ctx, run) {
+    const wm = threadMirrorForWrite(ctx);
+    if (wm && run) wm.offeredStep = { run: s(run).slice(0, 200), at: nowOf(ctx) };
+  }
+  function takeOffer(text, ctx) {
+    const mir = threadMirrorOf(ctx);
+    const off = mir && mir.offeredStep && typeof mir.offeredStep === "object" ? mir.offeredStep : null;
+    if (!off) return null;
+    const wm = threadMirrorForWrite(ctx);
+    if (wm) delete wm.offeredStep;
+    if (!/^(?:yes|yeah|yep|yup|ya|sure|ok|okay|go|go ahead|do it|please|pls|plz|sounds good|let'?s do it|lets do it|bet)(?:[,!. ]+(?:please|pls|plz|do it|go ahead|thanks|thx|sure))*[.!]*$/i.test(s(text).trim())) return null;
+    const at = typeof off.at === "number" ? off.at : Date.parse(off.at || "");
+    if (!Number.isFinite(at) || nowOf(ctx) - at > 30 * 60 * 1000 || nowOf(ctx) < at - 60 * 1000 || !off.run) return null;
+    return dispatchChat(off.run, ctx);
+  }
+  function handleUnsavedGraduation(text, ctx) {
+    if (!ctx._gradUnsavedThisTurn) return null;
+    const own = statedFactsOf(ctx).find((f) => f.kind === "graduation");
+    const wm = threadMirrorForWrite(ctx);
+    const ask = !own && !(wm && wm.gradAskedAt);
+    if (ask && wm) wm.gradAskedAt = nowOf(ctx);
+    return { intent: "profile_correction", resultStatus: "awaiting_user", sends: 0, reply: compose({
+      headline: own ? `Got it — I haven't changed your graduation date, which is ${own.value}.` : "Got it — I haven't taken that as your graduation date.",
+      facts: [],
+      nextStep: ask ? "When do you graduate?" : "Tell me what to work on next." }) };
   }
   function bareReplyFamilyOf(text) {
     const t = lc(s(text).trim());
@@ -14957,7 +15313,7 @@ const CareerRouter = (() => {
       }
       return null;
     }
-    if (/\b(delete|erase|forget|wipe|remove)\b[^.]*\b(everything|all of it|all my|my (data|info|information|profile|record|details))\b/.test(t) || /^(delete|erase|forget) (everything|it all)[.!]*$/.test(t)) {
+    if (/\b(delete|erase|forget|wipe|remove)\b[^.]*\b(everything|all of it|all my|my (data|info|information|profile|record|details|account))\b/.test(t) || /^(delete|erase|forget) (everything|it all)[.!]*$/.test(t)) {
       const wmir = threadMirrorForWrite(ctx);
       if (wmir) wmir.eraseConfirm = { at: new Date(nowOf(ctx)).toISOString() };
       if (/\b(stop|unsubscribe|opt ?out|pause|quiet|no more)\b[^.]*\b(messages?|texts?|alerts?|notifications?|texting|contact)\b|\bstop (?:messaging|texting)\b/.test(t)) {
@@ -15020,6 +15376,21 @@ const CareerRouter = (() => {
       return { intent: "honest_unavailable", resultStatus: "awaiting_user", reply: compose({ headline: "Fair question — here is the real list.", facts: [CAPABILITY_LINE], nextStep: "Name one and it starts now." }) };
     }
     let label = null, headline = null;
+    const remindM = raw.match(/\bremind\s+me\s+(?!(?:what|of|about|who|which|how|where|why)\b)(?:(.{0,40}?)\s+)?to\s+(.{2,120}?)\s*[.!?]*$/i);
+    if (remindM && !/\bset (a |me a )?reminder\b/.test(t)) {
+      const task = remindM[2].replace(/\s+(?:tomorrow|tonight|today|later|next week|on \w+day|\w+day)$/i, "");
+      const whenM = raw.match(/\b(tomorrow|tonight|today|later today|next week|this week(?:end)?|(?:on |next )?(?:mon|tues|wednes|thurs|fri|satur|sun)day|in \d+ (?:hours?|days?|weeks?))\b/i);
+      const coM = task.match(/\bapply\s+(?:to|at|for)\s+([a-z0-9&.' -]{2,30}?)\s*$/i);
+      const listRef = coM && /^(?:the|my|those|these|them|that|this|all|some|a few|\d|one|two|three|four|five)\b|\b(?:top|first|second|third|last|best|ones?|jobs?|roles?|positions?|internships?|postings?)\b/i.test(coM[1].trim());
+      const co = coM && !listRef ? coM[1].trim().replace(/\b[a-z]/g, (c) => c.toUpperCase()) : null;
+      const [nextStep, run] = /\bfollow(?:\s|-)?up\b|\bcheck in\b|\bnudge\b/i.test(task) ? ["Want me to draft the follow-up now so it's ready when you are?", "draft a nudge to the recruiter"]
+        : /\bapply\b/i.test(task) ? [`Want me to look for roles${co ? ` you could apply to instead of waiting on ${co}` : " to apply to"} now?`, "find jobs"]
+        : /\b(prep|practice|interview)\b/i.test(task) ? ["Want to start the prep now instead?", "give me a practice question"]
+        : ["Want me to find roles for you in the meantime?", "find jobs"];
+      markFrame(ctx, "declined", { label: "reminder", ask: raw.slice(0, 140) });
+      offerNext(ctx, run);
+      return { intent: "honest_unavailable", resultStatus: "awaiting_user", reply: compose({ headline: `I can't do that yet — I can't set reminders, so nothing is scheduled${whenM ? ` for ${whenM[1].toLowerCase()}` : ""}.`, facts: [], nextStep }) };
+    }
     if (/\bremind me to\b|\bset (a |me a )?reminder\b|\breminder\b/.test(t)) { label = "reminder"; headline = "I can't do that yet — I don't run reminders."; }
     else if (/\bheadline\b/.test(t) || /\blinkedin\b[^.]*\b(profile|summary|boring|weak|bland)\b/.test(t) || /\bmy (linkedin|profile) (is|sounds|looks) (boring|bad|weak|bland|generic)\b/.test(t)) { label = "LinkedIn headline"; headline = "I can't do that yet — I don't rewrite LinkedIn headlines."; }
     else if (/^(schedule|book|reserve|order|buy)\b/.test(t) || /\b(schedule|book) (a|me|the)\b/.test(t)) { label = "scheduling request"; headline = "I can't do that yet — I don't book or schedule things."; }
@@ -15055,7 +15426,7 @@ const CareerRouter = (() => {
     if (!raw) return null;
     const t = lc(raw);
     try { const ps = intentPartsOf(raw); if (ps.length && ps.every((p) => p.key === "finance")) return null; } catch {   }
-    const LEXICON = /\b(jobs?|career|work|working|employment|employer|employee|boss|manager|workplace|salary|wages?|pay|compensation|benefits?|unemployment|probation|probationary|notice|contract|offer|promot\w*|raise|references?|resign|interview|applications?|apply|applying|postings?|resume|cv|cover letter|linkedin|networking|recruiter|recruiting|hiring|hired|profession|occupation|roles?|positions?|vesting|severance|start date|onboarding|interns?|internships?|final round|performance (plan|review|improvement))\b/;
+    const LEXICON = /\b(jobs?|career|work|working|employment|employer|employee|boss|manager|workplace|salary|wages?|pay|compensation|benefits?|unemployment|probation|probationary|notice|contract|offer|promot\w*|raise|references?|resign|interview|applications?|apply|applying|postings?|resume|gpa|cv|cover letter|linkedin|networking|recruiter|recruiting|hiring|hired|profession|occupation|roles?|positions?|vesting|severance|start date|onboarding|interns?|internships?|final round|performance (plan|review|improvement))\b/;
     let related = LEXICON.test(t);
     if (!related) {
       const frames = frameMarksOf(ctx);
@@ -15111,11 +15482,35 @@ const CareerRouter = (() => {
     if (/^(yes|yeah|yep|yup|sure|no|nope|nah|idk|i don'?t know|not sure|maybe)\b/.test(t)) {
       return say("No problem — there's nothing waiting on your answer right now.", next);
     }
+    if (/\b(?:my|ur|your)\s+(?:\w+\s+)?gpa\b|\bgpa\s+(?:is|was|of)\b/.test(t) && !/\?\s*$/.test(raw)) {
+      let onResume = null;
+      try { const conf = ProfileMod && ProfileMod.confirmedFacts ? ProfileMod.confirmedFacts(ctx.profile) : []; const gm = conf.filter((f) => f && f.source === "resume-ingest").map((f) => s(f.text)).join(" ").match(/\bGPA[:\s]*([0-4]\.\d{1,2})/i); onResume = gm ? gm[1] : null; } catch { onResume = null; }
+      offerNext(ctx, "upload resume");
+      return onResume
+        ? say(`Your GPA comes from the resume you confirmed, which says ${onResume}; a number said in chat doesn't change it.`, "Want to paste the corrected resume? Once you confirm it, it replaces this one.")
+        : say("I take your GPA from your resume once you confirm it, so I don't record a number from chat.", "Want to send your resume now?");
+    }
+    if (/\b(salary|salaries|wages?|compensation|starting pay|pay range|pay band)\b|\bhow much (?:do|does|would|will|can)\b[^.]*\b(make|earn|paid)\b|\bwhat (?:do|does) [^.]*\b(make|earn)\b/.test(t)) {
+      const rm = t.match(/\b(?:for|of)\s+(?:an?\s+|the\s+)?([a-z][a-z /&-]{2,40}?)(?:\s+(?:role|job|position)s?)?(?:\s+in\s+([a-z][a-z .'-]{1,30}))?$/) || t.match(/^(?:what (?:do|does)\s+|how much (?:do|does)\s+)(?:an?\s+)?([a-z][a-z /&-]{2,40}?)s?\s+(?:make|earn|get paid)(?:\s+in\s+([a-z][a-z .'-]{1,30}))?$/);
+      const role = rm && !/\b(it|this|that|me|you|them)\b/.test(rm[1]) ? rm[1].trim().replace(/s$/, "") : null, city = rm && rm[2] ? rm[2].trim() : null;
+      if (role) offerNext(ctx, `find ${role} jobs${city ? ` in ${city}` : ""}`);
+      return say("I don't keep a salary table, so I won't guess a number — the pay range a posting states is the real figure.", role ? `Want me to search ${role} roles${city ? ` in ${city.replace(/\b[a-z]/g, (x) => x.toUpperCase())}` : ""} so you can see the ranges they list?` : "Which role and city should I search, so you can see the ranges those postings list?");
+    }
     if (/\b(cost|price|pricing|free|pay for|subscription|charge|billing)\b/.test(t)) {
       return say("I can't see pricing or billing from this chat, so I won't guess at it.", next);
     }
-    if (/\b(don'?t|do not|dont) have (a |an )?(resume|cv)\b|\bno (resume|cv)\b/.test(t)) {
+    if (/\b(don'?t|do not|dont) have (a |an )?(resume|cv)\b|\bno (resume|cv)\b/.test(t)
+      || (!hasResume && /\b(make|build|write|create|start|draft|put together)\b[^.]{0,24}\b(resume|cv)\b/.test(t) && !/\btailor\b/.test(t))) {
       return say("That's fine — we can build one together.", "What was your most recent job or school, and what kind of role do you want next?");
+    }
+    if (/\b(resume|cv)\b[^.]{0,30}\b(bad|weak|trash|sucks|terrible|mid|not good|not great|ugly|boring|rough|meh)\b/.test(t)) {
+      return hasResume
+        ? say("I can go through the one you confirmed against a real posting — that shows exactly what it is missing.", "Which role should I check it against?")
+        : (offerNext(ctx, "upload resume"), say("Send it over and I'll go through it with you — nothing is used until you confirm it.", "Want to paste the text or attach the file now?"));
+    }
+    if (/\blinked ?in\b/.test(t)) {
+      if (!hasResume) offerNext(ctx, "upload resume");
+      return say("I don't edit or log into LinkedIn for you, but I can tailor your resume and draft messages to people at the firms you want.", hasResume ? "Which company should we start with?" : "Want to start with your resume?");
     }
     if (/\b(upload|send|attach|add|share)\b.*\b(resume|cv)\b|^(resume|cv)$/.test(t)) {
       return say("Paste your resume text right here, or attach the PDF or Word file. I'll read it back to you before anything is used.", "Want to send it now?");
@@ -15128,6 +15523,10 @@ const CareerRouter = (() => {
     }
     if (/\b(network|networking|reach out|outreach|recruiter|referral)\b/.test(t)) {
       return say("I can help you reach people at the companies you want.", "Which company should we start with?");
+    }
+    if (/^(?:please\s+)?(?:(?:can|could|will|would) you\s+)?(?:just\s+|go\s+|start\s+)?(?:apply|applying|submit (?:my )?applications?)(?:\s+(?:to|for|on))?(?:\s+(?:some|any|a few|more|a bunch of|lots of|all the|the|my))?(?:\s+(?:jobs?|roles?|positions?|internships?|openings?|postings?))?(?:\s+(?:for me|on my behalf))?(?:\s+please)?$/.test(t)
+      && /\b(?:jobs?|roles?|positions?|internships?|openings?|postings?|for me|on my behalf)\b/.test(t)) {
+      return say("I'll put the roles you pick on your apply list, and each application goes only after you approve its card.", "What role are you after, and which city or remote?");
     }
     if (/^(jobs?|apply|applying|roles?|work|positions?|find jobs?|search)$/.test(t)) {
       return say(hasResume ? "Sure." : "Sure — I'll search as soon as I know what you're after.", "What role, and which city or remote?");
@@ -15587,6 +15986,39 @@ const CareerRouter = (() => {
     return { intent: "outreach_clarification", reply, resultStatus: "awaiting_user", sends: 0, payload: cap, artifact: cap };
   }
 
+  const COLD_OPENER = /^(?:(?:so|ok|okay|hey|hi|and|now|also|please|pls)[, ]+)*(?:(?:who|which people)\s+(?:should|shall|can|could|do|would|might|ought)\s+i\s+(?:be\s+)?(?:network(?:ing)?|reach(?:ing)?\s+out|connect(?:ing)?|talk(?:ing)?|speak(?:ing)?|get(?:ting)?\s+in\s+touch)(?:\s+(?:with|to))?|(?:i\s+(?:want|need|would\s+like|'d\s+like|wanna)\s+to\s+|help\s+me\s+|can\s+you\s+help\s+me\s+|let'?s\s+)(?:start\s+)?network(?:ing)?(?:\s+(?:with|to))?|find\s+(?:me\s+)?(?:people|someone|contacts)\s+to\s+network\s+with|(?:i\s+(?:want|need|would\s+like|'d\s+like|wanna)\s+to\s+)?(?:reach|contact|connect\s+with|find|get|show)\s+(?:me\s+)?(?:some\s+)?(?=(?:people|someone|somebody|anyone|contacts|connections)\b)|(?:build|make|give)\s+me\s+a\s+networking\s+list)\b(.*)$/i;
+  const COLD_PEOPLE = /^(?:people|persons?|someone|somebody|anyone|anybody|folks|contacts|connections)\s+/i;
+  const COLD_EXTRA = /\d|\b(?:analysts?|associates?|bankers?|engineers?|recruiters?|founders?|alumni|alums|managers?|directors?|partners?|vps?|interns?|first|warm|cold|who|that|which|share|from my|as a|as an|because|so that|before|after|this|next|week|month|summer|fall|spring|winter)\b/i;
+  function handleColdNetworkingAsk(text, ctx) {
+    const raw = s(text).replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, " ").trim().replace(/[?!.]+$/, "");
+    const m = COLD_OPENER.exec(raw);
+    if (!m) return null;
+    let rest = s(m[1]).trim();
+    rest = rest.replace(COLD_PEOPLE, "");
+    let firm = null, field = null;
+    if (rest) {
+      const at = /^(?:at|into|from)\s+(?:the\s+)?(.+)$/i.exec(rest);
+      const fld = /^(?:in|for|about|into)\s+(?:an?\s+|the\s+|my\s+)?(.+)$/i.exec(rest);
+      if (at && (/^at$/i.test(rest.split(" ")[0]) || /^[A-Z0-9]/.test(at[1]))) firm = at[1].trim();
+      else if (fld && /^into\b/i.test(rest)) return null;
+      else if (fld) field = fld[1].trim().replace(/\s+(?:jobs?|roles?|work|careers?|field|industry|internships?)$/i, "").trim();
+      else return null;
+      const target = firm || field;
+      if (!target || target.split(" ").length > 5 || /[,;:@/\\]/.test(target) || COLD_EXTRA.test(target) || /\b(?:in|near|around)\s+[A-Z]/.test(target)) return null;
+      if (field && /\b(?:sf|nyc|la|dc|london|remote)\b/i.test(field)) return null;
+    }
+    const where = firm ? ` at ${firm}` : field ? ` in ${field}` : "";
+    const headline = `I can build that from people you can actually reach${where}: your own LinkedIn export, names you paste, your school's alumni directory${firm ? `, or ${firm}'s team pages` : ", or firms' team pages"}.`;
+    const facts = ["Every name keeps its source, nobody is emailed on a guessed address, and each message waits for your approval before it goes."];
+    const nextStep = firm || field
+      ? "Easiest start: paste a few names you already know, upload your LinkedIn export, or tell me your school."
+      : "Easiest start: tell me a firm or field, paste a few names you already know, or upload your LinkedIn export.";
+    const reply = compose({ headline, facts, nextStep });
+    try { const q = Outreach && Outreach.parseTarget ? Outreach.parseTarget(text, {}) : null; if (q) persistPlan(ctx, text, q, q.count); } catch {   }
+    const rec = { kind: "networking_opener", firm, field, sources: ["linkedin_export", "pasted_names", "school_alumni_directory", "firm_team_pages"], asked_next: "names_or_export_or_school", sends: 0, committed: false };
+    return { intent: "outreach_clarification", reply, resultStatus: "awaiting_user", sends: 0, payload: rec, artifact: rec };
+  }
+
   function handleFollowUpWave(text, ctx) {
     const t = lc(text);
     const fin = /\bfinal\b|\bday[- ]?15\b|\bclose\b/.test(t) && !/\bday[- ]?6\b/.test(t);
@@ -15874,14 +16306,17 @@ const CareerRouter = (() => {
     const named = s(text).match(/\b(?:firm|company|bank|employer) is\s+([A-Z][A-Za-z0-9&.'-]+(?:\s+(?:[A-Z][A-Za-z0-9&.'-]+|Capital|Partners|Securities|Bank|Group))+)/);
     if (named) return named[1].replace(/[?.!,]+$/, "");
     const m = s(text).match(/\bat\s+([A-Z][A-Za-z0-9&.'-]+(?:\s+(?:[A-Z][A-Za-z0-9&.'-]+|Capital|Partners|Securities|Bank|Group))?)/);
-    if (m && !FACT_CITIES.some((ct) => lc(ct) === lc(m[1].trim()))) return m[1].replace(/[?.!,]+$/, "");
+    const atName = m ? m[1].replace(/[?.!,]+$/, "") : "";
+    const atRest = atName.split(/\s+/).slice(1).join(" ");
+    if (m && !FACT_CITIES.some((ct) => lc(ct) === lc(m[1].trim())) && !ltIsPlace(atName) && !ltIsSchool(atName) && !/^\s+(?:university|college|institute|school|academy)\b/i.test(s(text).slice(m.index + m[0].length)) && !(atRest && LT_PRODUCT_AFTER.test(` ${atRest}`))) return atName;
     const pm = s(text).match(/\bmy\s+([A-Z][A-Za-z0-9&.'-]+(?:\s+(?:[A-Z][A-Za-z0-9&.'-]+|Capital|Partners|Securities|Bank|Group))?)\s+(?:application|interview|offer)\b/);
     if (pm && !FACT_CITIES.some((ct) => lc(ct) === lc(pm[1].trim()))) return pm[1].replace(/[?.!,]+$/, "");
     const t = lc(text);
-    const known = new Set();
-    for (const p of postingsFromCtx(ctx || {})) if (p.company) known.add(p.company);
-    try { for (const x of cirListOf(ctx) || []) { const n = cirShortName(x); if (n) known.add(n); } } catch {   }
-    for (const name of known) if (name && t.includes(lc(name))) return name;
+    try {
+      const h = namedCompaniesOf(text, ctx)[0];
+      if (h && h.cir) return cirShortName(h.cir);
+      if (h) { const p = postingsFromCtx(ctx || {}).find((x) => x.company && ltPlain(ltClean(s(x.company).replace(/\s*\(fictional\)\s*/gi, " "))) === ltPlain(h.name)); return p ? p.company : h.name; }
+    } catch {   }
     const loose = /\bwho\b|\banyone\b|\bknow at\b|\bpath (into|to|in)\b|\bintro\b|\breferr|\bcontact/.test(t) ? t.match(/\bat\s+([a-z][a-z0-9&.'-]{2,})/) : null;
     if (loose && !/^(my|the|a|an|least|most|work|school|home|once|first|that|this|it)$/.test(loose[1]) && !FACT_CITIES.some((ct) => lc(ct) === loose[1] || lc(ct).split(" ")[0] === loose[1]) && !/^(nyc|sf|la)$/.test(loose[1])) return loose[1].replace(/[?.!,]+$/, "");
     return null;
@@ -16145,6 +16580,68 @@ const CareerRouter = (() => {
     const h = hits[0];
     return h ? { company: h.name, cir: h.cir, typed: h.typed } : null;
   }
+  const RS_FRAME_BEFORE = /(?:\b(?:about|at|for|on|to|towards?|into|re|with|join|joining|research|researching|compare|comparing|vs\.?|versus|and|or|is|like)|\b(?:apply|applying|applied|interview|interviewing|prep|prepare|preparing)\s+(?:to|at|for|with)|\b(?:company|firm|employer|bank|fund) is)\s+(?:the\s+|a\s+|an\s+|my\s+)?$/i;
+  const RS_FRAME_AFTER = /^(?:['’]s\b|\s+(?:interviews?|culture|comp|compensation|pay|salary|salaries|process|hiring|recruiting|recruiters?|internships?|interns?|roles?|jobs?|file|headcount|revenue|employees|offices?|teams?|offers?|superday|careers?|application|deadline|timeline|odds|bar|values|analysts?|summer|swe|ibd|program|programme|look|hire|hires|want|pays?)\b|,?\s+(?:vs\.?|versus|or)\s+(?=[A-Z]))/i;
+  const RS_EXCLUDE_BEFORE = /(?:\b(?:live|lives|living|lived|based|located|reside|resides|residing|grew up|raised|born|moving|move|moved|relocating|relocate|relocated|commute|from|near|outside|around|visit|visiting|visited|studied|study|studies|studying|graduated|graduating|graduate|attend|attends|attended|attending|enrolled|student|students|alum|alumni|alumnus|alumna|major|majored|majoring|degree|know|knows|knew|proficient|experience|experienced|skilled|familiar|fluent|certified|certification|using|use|uses|skills?|tools?|trained|good|great|expert|comfortable|not|except|excluding|besides|than|instead|never|no|nor|avoid|skip|hate|hated|left|quit|fired|laid off|anything but|everything but|all but)\b|n['’]t)(?:\s+(?:in|at|to|from|of|with|on|for|near|by|a|an|the|my|our|up|out|off|about|over|currently|still|now|right now|full[- ]time|part[- ]time|as an? [a-z]+))*:?\s+(?:[A-Za-z0-9.&'’-]+(?:\s+[A-Za-z0-9.&'’-]+){0,2}\s*(?:,|\band\b|\bor\b|&|\/)\s*){0,4}$/i;
+  const RS_PEOPLE_AT = /\b(?:know|knows|anyone|anybody|someone|somebody|people|contacts?|connections?|alumni|works?|working)\s+(?:at|from|in|with)\s+(?:the\s+)?$/i;
+  const RS_PERSON_BEFORE = /\b(?:dr|mr|mrs|ms|mx|prof|professor|friend|friends|sister|brother|mom|dad|mother|father|cousin|aunt|uncle|roommate|teacher|coach|boss|neighbor|neighbour|classmate|buddy|named|called)\.?,?\s+$/i;
+  const RS_MINE_BEFORE = /(?<!\b(?:should|could|would|can|do|will|shall|might|must)\s+)\b(?:i|i've|i’ve|i have|i had)\s+(?:currently\s+|still\s+|previously\s+|formerly\s+|once\s+|already\s+)?(?:work|works|worked|working|intern|interned|interning|was|am|used to work|used to intern|been)\s+(?:(?:as\s+an?\s+[a-z]+\s+)?(?:at|for|with)\s+)(?:the\s+)?$|\b(?:i['’]m|i am|i was)\s+(?:currently\s+|still\s+|now\s+)?(?:at|with)\s+(?:the\s+)?$|\b(?:used to|previously|formerly)\s+(?:work|intern)\s+(?:at|for|with)\s+(?:the\s+)?$/i;
+  function rsOccurrenceOk(raw, i, j) {
+    const typed = raw.slice(i, j);
+    const before = raw.slice(0, i), after = raw.slice(j);
+    if (/[A-Za-z0-9&]$/.test(before) || /^[A-Za-z0-9]/.test(after)) return false;
+    const RS_AFTER_WORD = /^(?:IBD|Data|Software|Summer|Product|Analyst|Engineering|Investment|Consulting|Marketing|Finance|Sales|Research|Strategy|Operations|Design|Intern|Internship|Interview|Interviews|Associate|Role|Job|Position|Posting|Culture|Comp|Pay|Salary|Hiring|Recruiting|Process|Superday|Offer|Application|Team|Program|SWE|PM|FDE|Inc|Corp|Co|Ltd|Please|Thanks|Thank|I|What|How|Can|Could|Also|And|Or|Is|Are|Do|Does|Tell|Give|Prep|Help|Look|Looks|Hire|Hires|Want|Wants|Pay|Pays|Have|Has|Like)$/;
+    const capsAfter = (/^((?:[ \t]+[A-Z][A-Za-z0-9&'’-]*){1,3})/.exec(after) || ["", ""])[1].trim().split(/\s+/).filter(Boolean);
+    const w0 = (capsAfter[0] || "").replace(/['’]s$/, ""), w1 = (capsAfter[1] || "").replace(/['’]s$/, "");
+    if (w0 && /^[A-Z][a-z]/.test(w0) && !RS_AFTER_WORD.test(w0)) return false;
+    if (w1 && /^(?:Research|Data|Software|Product|Investment|Engineering|Design|Strategy|Sales|Finance|Marketing|Consulting|Operations)$/.test(w0) && /^[A-Z][a-z]/.test(w1) && !RS_AFTER_WORD.test(w1)) return false;
+    if (/^\s+(?:university|college|institute|school|academy)\b/i.test(after)) return false;
+    if (/\b(?:university|college|school|institute)\s+of\s+(?:the\s+)?$/i.test(before)) return false;
+    const firmOffice = /^\s+offices?\s+(?:in|at|like|look|culture)\b/.test(after) || (/^\s+offices?\b(?!\s*(?:365|suite|skills?|apps?|software|programs?))/.test(after) && /\b(?:the|their|its)\s+$/i.test(before));
+    if (!firmOffice && LT_PRODUCT_AFTER.test(after) && !(/\b(?:does|do|did|will|would)\s+$/i.test(before) && /^\s+pays?\b/i.test(after))) return false;
+    const plain = ltPlain(typed).replace(/[.,]/g, "");
+    if (LT_CITIES.has(plain) || LT_SCHOOLS.has(plain)) return false;
+    if (RS_PERSON_BEFORE.test(before) || RS_MINE_BEFORE.test(before)) return false;
+    const aspire = LT_ASPIRE_BEFORE.test(before) || RS_PEOPLE_AT.test(before);
+    if (!aspire && RS_EXCLUDE_BEFORE.test(before) && !/\b(?:role|job|position|internship|opening|posting|program|interview|offer)\s+(?:at|with|for)\s+(?:the\s+)?$/i.test(before)) return false;
+    const frameBefore = aspire || RS_FRAME_BEFORE.test(before);
+    const frameAfter = RS_FRAME_AFTER.test(after);
+    const words = plain.split(" ");
+    const common = words.length === 1 && LT_COMMON.has(plain.replace(/[^a-z0-9]/g, ""));
+    if (!common) return true;
+    const sentenceStart = before === "" || /[.!?\n]\s*["“(]?\s*$/.test(before) || /^\s*["“(]?\s*$/.test(before);
+    const capital = /^[A-Z]/.test(typed);
+    if (frameAfter) return capital || frameBefore || sentenceStart;
+    if (capital && !sentenceStart) return true;
+    if (!frameBefore) return false;
+    return /^\s*(?:$|[.!?,;:)]|(?:please|pls|plz|thanks|thank you|thx|ty|and|or|vs\.?|versus|for|in|this|next|now|today)\b)/i.test(after);
+  }
+  function namedCompaniesOf(text, ctx) {
+    const raw = s(text);
+    const hits = [];
+    for (const e of ltLexicon(ctx || {})) {
+      for (const form of e.forms) {
+        const re = new RegExp(`(?<![A-Za-z0-9])${ltEsc(form).replace(/&/g, "(?:&|and)")}(?![A-Za-z0-9])`, "gi");
+        let found = false;
+        for (const m of raw.matchAll(re)) {
+          if (rsOccurrenceOk(raw, m.index, m.index + m[0].length)) { hits.push({ name: e.name, cir: e.cir, idx: m.index, typed: m[0] }); found = true; break; }
+        }
+        if (found) break;
+      }
+    }
+    hits.sort((a, b) => a.idx - b.idx || b.typed.length - a.typed.length || (b.cir ? 1 : 0) - (a.cir ? 1 : 0));
+    return hits.filter((h, k) => !hits.slice(0, k).some((g) => h.idx >= g.idx && h.idx < g.idx + g.typed.length));
+  }
+  function namedCompanyOf(text, ctx) {
+    const h = namedCompaniesOf(text, ctx)[0];
+    return h ? { company: h.name, cir: h.cir, typed: h.typed } : null;
+  }
+  function cirByName(name, ctx) {
+    const n = ltPlain(ltClean(s(name)));
+    if (!n) return null;
+    const e = ltLexicon(ctx || {}).find((x) => x.cir && (ltPlain(x.name) === n || x.forms.some((f) => ltPlain(f) === n)));
+    return e ? e.cir : null;
+  }
   function tailorTargetOf(text, ctx) {
     const p = ctx.posting || null;
     if (p && (p.company || p.title)) return { label: `${p.title || "the role"} at ${p.company || "the company you pasted"}`.trim(), cir: null, company: p.company || null };
@@ -16167,6 +16664,106 @@ const CareerRouter = (() => {
       ? compose({ headline: `The target is set — ${target.label}. One input is missing: your resume.`, facts, nextStep: "Paste your resume (or its facts: school, year, experience), and the tailored version for this exact target is produced in this conversation." })
       : compose({ headline: "Tailoring needs two inputs: your resume and the role it is for.", facts, nextStep: "Paste your resume (or its facts: school, year, experience) and name the role or paste the posting, and the tailored version is produced in this conversation." });
     return { intent: "career_tailor", reply, resultStatus: "awaiting_user", sends: 0, artifact: null };
+  }
+  function handleActAsMe(text, ctx) {
+    const t = lc(s(text)).replace(/[’]/g, "'");
+    if (/\b(?:same|similar|such|as well|just like)\b[^.?!]{0,30}\bas me\b/.test(t)) return null;
+    const asMe = /\b(?:pretend|pose|act|masquerade)\s+(?:to be|as|like|(?:that )?(?:you'?re|you are))\s+me\b|\bimpersonat\w*\s+me\b|\bas if (?:you were|you're|you are|it was|it's)\s+me\b|\bpass (?:yourself )?off as me\b|\bsign (?:it |them |this |that )?(?:with |in |using )?my name\b/.test(t)
+      || /\b(?:email|e-mail|message|text|write|reply|respond|answer|call|dm|tell|sign|accept|decline|withdraw)\w*\b[^.?!]{0,60}\bas me\b/.test(t);
+    if (!asMe) return null;
+    const facts = ["Nothing was drafted, sent, signed or accepted, and nothing is waiting for a yes."];
+    if (/\b(?:offer|accept|decline|withdraw|interview|recruiter|hiring manager)\b/.test(t)) facts.push("Accepting an offer, or answering a recruiter or an employer, is yours to send from your own email or phone.");
+    return { intent: "impersonation_refused", reply: compose({ headline: "I won't pretend to be you or write to anyone as you.", facts, nextStep: "Anything else in your search I can help with?" }), resultStatus: "blocked", sends: 0 };
+  }
+  function handleRecruiterEmailAsk(text, ctx) {
+    const raw = s(text).trim();
+    const t = lc(raw).replace(/[’]/g, "'");
+    if (/\blinked ?in\b|\binmail\b|\bas me\b|\bpretend\b/.test(t)) return null;
+    const m = t.match(/\b(?:e-?mail|message|msg|dm|text|write to|reach out to|contact|ping|(?:send|write|draft|shoot)(?: me)?(?: an?)? (?:e-?mail|message|note|msg)(?: to)?)\s+(?:the|a|my|their)\s+recruiter\s+(?:at|from|for)\s+(.+)$/);
+    if (!m) return null;
+    let firm = m[1].replace(/[?.!]+$/, "").replace(/\s+(?:for me|please|pls|plz|asap|now|today|tomorrow)\b.*$/, "");
+    const topicM = firm.match(/\s+(?:about|regarding|re|saying|asking|to (?:ask|say|follow|thank|check))\b\s*(.*)$/);
+    const topic = topicM ? topicM[1].trim() : "";
+    if (topicM) firm = firm.slice(0, topicM.index);
+    firm = firm.trim();
+    if (!firm || firm.split(/\s+/).length > 4 || !/^[a-z0-9][a-z0-9&.' -]*$/.test(firm)) return null;
+    const at = raw.toLowerCase().lastIndexOf(firm);
+    let shown = at >= 0 ? raw.slice(at, at + firm.length) : firm;
+    if (shown === shown.toLowerCase()) shown = shown.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+    markFrame(ctx, "recruiter_email", { company: shown, topic: topic || null });
+    return { intent: "outreach_clarification", resultStatus: "awaiting_user", sends: 0, reply: compose({
+      headline: `Nothing goes to the recruiter at ${shown} without your OK on the exact email.`,
+      facts: [],
+      nextStep: topic ? `Who is the recruiter there — name and email, if you have them?` : "What's it for — following up on an application, asking about a role, or a thank-you?",
+    }) };
+  }
+  function handleListReference(text, ctx) {
+    const t = lc(s(text)).replace(/[!?.]+$/, "").trim();
+    if (t.length > 80) return null;
+    const ORD = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, "1st": 1, "2nd": 2, "3rd": 3, "4th": 4, "5th": 5 };
+    const WN = { one: 1, two: 2, three: 3, four: 4, five: 5 };
+    const ordM = t.match(/(?:^|\bthe\s+)(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th|last)\s+(?:one|job|role|posting|listing)\b/) || t.match(/\bapply to (?:#|number\s*)?([1-5])\b/);
+    const topM = t.match(/\b(?:top|best|first)\s+(\d|two|three|four|five)\b/) || t.match(/\btop\s+(one)\b/);
+    const moreAsk = /^(?:(?:can you |could you )?(?:show|send|give|find|get)(?: me)?\s+)?(?:some |any |a few )?more(?:\s+(?:jobs|roles|options|results|postings|openings|of them|like (?:that|those|these|them)))?$|^(?:any )?others$|^next (?:page|few|batch|ones)$/.test(t);
+    if (!ordM && !topM && !moreAsk) return null;
+    const disc = ctx.discovery || {};
+    const list = Array.isArray(disc.lastShortlist) ? disc.lastShortlist.filter((r) => r && r.title) : [];
+    const hasResume = resumeOnRecord(ctx);
+    const roleLine = (r) => `${r.title} at ${r.company}${r.url ? ` (${r.url})` : ""}${r.location ? ` — ${r.location}` : ""}`;
+    const done = (headline, facts, nextStep, extra) => Object.assign({ intent: "career_list_reference", resultStatus: "awaiting_user", sends: 0, reply: compose({ headline, facts, nextStep }) }, extra || {});
+    if (!list.length) {
+      const goal = statedFactsOf(ctx).find((f) => f.kind === "goal");
+      if (goal) offerNext(ctx, `find ${goal.value}`);
+      return done("I haven't shown you a list of roles yet, so there's nothing to pick from.", [], goal ? `Want me to search for ${goal.value} now?` : "What role should I search for, and which city or remote?");
+    }
+    if (moreAsk) {
+      const more = Array.isArray(disc.lastMore) ? disc.lastMore.filter((r) => r && r.title) : [];
+      if (!more.length) return done(`That's every match from your last search — the ${list.length} I showed you.`, [], "Want me to widen it — another city, remote, or a nearby role?");
+      const served = more.slice(0, 3);
+      ctx.discovery = Object.assign({}, disc, { lastShortlist: list.concat(served), lastMore: more.slice(served.length) });
+      if (!hasResume) offerNext(ctx, "upload resume");
+      return done(`${served.length} more from the same search:`, served.map(roleLine), hasResume ? "Which one should I tailor your resume for?" : "Want to send your resume so I can tailor it for one of them?");
+    }
+    let slice;
+    if (ordM) { const k = ordM[1]; const idx = k === "last" ? list.length : (ORD[k] || Number(k)); slice = idx >= 1 && idx <= list.length ? [list[idx - 1]] : []; if (!slice.length) return done(`Your last search showed ${list.length} role${list.length === 1 ? "" : "s"}, so there's no ${k} one.`, [], `Which of the ${list.length} do you mean?`); }
+    else { const n = /^\d$/.test(topM[1]) ? Number(topM[1]) : WN[topM[1]]; slice = list.slice(0, n); }
+    const applyAsk = /\bapply\b|\bsubmit\b/.test(t);
+    if (applyAsk && hasResume) {
+      const pool = (ctx.batchDeps || {}).postings || ctx.postings || [];
+      const open = (r) => pool.some((p) => p && ((r.id && p.id === r.id) || (r.url && (p.url === r.url || (Array.isArray(p.source_urls) && p.source_urls.includes(r.url)))) || (lc(p.title || p.role) === lc(r.title) && lc(p.company) === lc(r.company))));
+      const gone = slice.filter((r) => !open(r));
+      if (!gone.length) {
+        const WORD = ["", "first", "second", "third", "fourth", "fifth"];
+        const at = list.indexOf(slice[0]) + 1;
+        const canon = slice.length === 1 && WORD[at] ? `apply to the ${WORD[at]} one` : `apply to the top ${slice.length}`;
+        const ran = handleShortlistApply(canon, ctx);
+        if (ran) return ran;
+      }
+      const again = disc.lastParams && disc.lastParams.ask ? s(disc.lastParams.ask) : "find jobs";
+      offerNext(ctx, again);
+      const named = (gone.length ? gone : slice).map((r) => `${r.title} at ${r.company}`);
+      return done(gone.length
+        ? `${named.join("; ")} ${gone.length === 1 ? "isn't" : "aren't"} in the open postings I can see right now, so I haven't started anything.`
+        : `I couldn't start the application for ${named.join("; ")} just now, so nothing has started.`, [], "Want me to run that search again?");
+    }
+    const pick = slice[0];
+    const wmir = threadMirrorForWrite(ctx);
+    if (wmir && pick && pick.company && !hasResume) wmir.tailorTarget = { company: pick.company, label: `${pick.title} at ${pick.company}`, askText: `tailor my resume for the ${pick.title} role at ${pick.company}` };
+    offerNext(ctx, hasResume && pick ? `tailor my resume for the ${pick.title} role at ${pick.company}` : "upload resume");
+    if (applyAsk) {
+      return done(`To apply to ${slice.map((r) => `${r.title} at ${r.company}`).join("; ")}, I need your resume first — nothing is filled or sent without your OK.`, [],
+        "Want to send it now? Paste the text or attach the file, and once you confirm it I'll tailor it for that role first.");
+    }
+    return done(slice.length === 1 ? roleLine(pick) : `From your last search: ${slice.map((r) => `${r.title} at ${r.company}`).join("; ")}.`, [],
+      hasResume ? "Want me to tailor your resume for it?" : "Want to send your resume so I can tailor it for this one?");
+  }
+  function handleAuthorityClaim(text, ctx) {
+    const t = lc(s(text)).replace(/[’]/g, "'").trim();
+    const claim = /^(?:(?:hi|hey|ok|okay)[,!.]?\s+)?(?:i'?m|i am|this is|as)\s+(?:the |an |a |your |trainee'?s |upmore'?s )?(?:admin(?:istrator)?|owner(?: of trainee)?|developer|dev|founder|operator|support(?: team)?|staff|sysadmin)\b|\b(?:admin|developer|god|debug|maintenance) mode\b|^sudo\b/.test(t);
+    if (!claim) return null;
+    const control = /\b(?:disable|turn off|switch off|shut off|remove|lift|raise|increase|bypass|skip|override|unlock|ignore|drop|kill|reset|stop)\b[^.?!]{0,60}\b(?:budget|spend(?:ing)? (?:cap|limit)|limits|every limit|all (?:the )?limits|approvals?|approval cards?|safety|guardrails?|restrictions?|rules)\b|\bunrestricted\b|\bautopilot\b/.test(t);
+    if (!control) return null;
+    return { intent: "authority_refused", reply: compose({ headline: "I can't change that from a chat, whoever is asking.", facts: ["The budget, the limits and your approval of each application are not set in a conversation, so saying you're an admin here doesn't change them, and nothing changed."], nextStep: "Anything in your job search I can help with?" }), resultStatus: "blocked", sends: 0 };
   }
   function handleCoverLetterNeedsFacts(text, ctx) {
     const target = tailorTargetOf(text, ctx);
@@ -16213,16 +16810,26 @@ const CareerRouter = (() => {
     const reply = compose({ headline: `Here is your question: ${q}`, facts, nextStep: "Give me your answer and I will score it." });
     return { intent: "prep_brief", reply, resultStatus: "running", sends: 0, question: { kind: "bank_question", q } };
   }
-  function prepSectorOf(tn) {
+  function prepSectorOf(tn, raw, ctx) {
     if (/\bthree (financial )?statements\b|\bdcf\b|\blbo\b|\bcomps\b|\bmerger model\b|\baccretion\b/.test(tn)) return "finance";
     if (/\bquant\b|\bmarket[- ]making\b|\bprobability\b|\bexpected value\b|\bcoin flips?\b|\bdice\b/.test(tn)) return "quant";
     if (/\bsql\b|\bdata analyst\b|\bdata science\b|\bdata interview\b/.test(tn)) return "data";
-    if (/\bconsulting\b|\bcase interview\b|\bcase question\b|\bcase practice\b|\bpractice cases\b|\bprofitability\b|\bmarket entry\b|\bmarket sizing\b|\bmckinsey\b|\bbain\b|\bbcg\b|\bmbb\b/.test(tn)) return "consulting";
+    if (/\bconsulting\b|\bcase interview\b|\bcase question\b|\bcase practice\b|\bpractice cases\b|\bprofitability\b|\bmarket entry\b|\bmarket sizing\b|\bmbb\b/.test(tn)) return "consulting";
+    if (/\bmckinsey\b|\bbain\b|\bbcg\b/.test(tn) && (raw === undefined || namedCompaniesOf(raw, ctx).some((h) => h.cir && /^(?:mckinsey|bain|bcg)$/.test(s(h.cir.company_id))))) return "consulting";
     if (/\bmedical school\b|\bmed school\b|\bmmi\b|\bmedicine\b|\bmedical interview\b/.test(tn)) return "medicine";
     if (/\blaw firm\b|\blaw school\b|\blaw interview\b|\blegal interview\b|\battorney\b/.test(tn)) return "law";
     if (/\bproduct management\b|\bproduct sense\b|\bpm interview\b|\bproduct manager interview\b/.test(tn)) return "pm";
     if (/\bswe\b|\bsoftware engineer|\bcoding\b|\bsystem design\b|\bdata structures\b/.test(tn)) return "swe";
-    if (/\bbanking\b|\bfinance interview\b|\binvestment banking\b|\btechnicals?\b/.test(tn)) return "finance";
+    if (/\bbanking\b|\bfinance interview\b|\binvestment banking\b|\btechnicals\b/.test(tn)) return "finance";
+    if (/\btechnical\b/.test(tn)) {
+      const h = raw === undefined ? null : namedCompaniesOf(raw, ctx).find((x) => x.cir);
+      const rf = h ? lc(`${s(h.cir.company_name)} ${s((h.cir.cohort || {}).role_family)} ${s(h.cir.industry)} ${s(h.cir.sector)}`) : "";
+      if (/\bquant|trading|trader\b/.test(rf)) return "quant";
+      if (/software|engineer|\bswe\b|developer|computer science/.test(rf)) return "swe";
+      if (/bank|financ|invest|private equity|markets|advisory/.test(rf)) return "finance";
+      if (/consult/.test(rf)) return "consulting";
+      return null;
+    }
     return null;
   }
   const PREP_SECTOR_LABEL = { finance: "finance", quant: "quant", data: "data", consulting: "consulting", medicine: "medicine", law: "law", pm: "product management", swe: "software engineering" };
@@ -16230,6 +16837,7 @@ const CareerRouter = (() => {
     if (!thread || !thread.lastQ || !thread.lastServedAt) return false;
     const raw = s(text).trim(), tn = lc(raw);
     if (raw.length <= 40 || /\?\s*$/.test(raw) || nowOf(ctx) - thread.lastServedAt > 30 * 60000) return false;
+    if (RS2_ASK_THEM.test(tn)) return false;
     if (/^(?:give me|another|next|one more|hit me|ask me|can we|could you|let'?s|ok(?:ay)? (?:next|another)|what|how|why|which|where|when|walk me|explain|teach me|back to)\b|\b(?:another|one more|next|different|harder) question\b/.test(tn)) return false;
     if (/\b(?:give me|hit me|drill me|one more|harder|tougher|weakest|focus on|can (?:we|i|you)|help me|walk me|explain|teach me|back to|model answer|switch to)\b/.test(tn)) return false;
     return !/\b(?:jobs?|apply|applying|applications?|search|find|look(?:ing)? for|stop|later|instead|cancel|never ?mind|tailor|resume|remind|watch)\b/.test(tn);
@@ -16237,11 +16845,12 @@ const CareerRouter = (() => {
   function handlePrepSession(text, ctx) {
     if (!Prep || !Prep.questionBank) return null;
     const tn = typoNorm(text);
+    if (RS2_ASK_THEM.test(tn)) return null;
     if (/\bnight[ -]before\b|\btomorrow\b[^.]*\bnervous\b|\bstar\b|\bstories\b|\bstory\b|\binterview brief\b|\bbrief me\b|\bprep pack\b|\btake[ -]home\b|\bquestions[ -]to[ -]ask\b|\bsuperday\b|\bday[ -]of checklist\b|\binterviewer research\b|\bfailure story\b|\bset\b|\bquestion bank\b|\bprep\s*:/.test(tn)) return null;
     if ((tn.match(/\bdcf\b|\blbo\b|\bcomps\b|three (financial )?statements/g) || []).length >= 2) return null;
     if (/\bmarket sizing\b|\bsizing (case|question)\b|\bestimation question\b|\bfermi\b/.test(tn)) return handlePrepQuestion(text, ctx);
     const thread = prepThreadOf(ctx);
-    const askSector = prepSectorOf(tn);
+    const askSector = prepSectorOf(tn, text, ctx);
     const sectorSwitch = !!(askSector && thread.sector && askSector !== thread.sector);
     const sector = askSector || thread.sector || null;
     let focus = thread.focus || null;
@@ -16308,9 +16917,15 @@ const CareerRouter = (() => {
     };
     let candidates = qs.filter(inSector);
     if (!candidates.length) candidates = qs.filter((row) => !/^generic_behavioral/.test(s(row && row.source && row.source.type)));
+    candidates = candidates.filter((row) => !/^(?:book canon|bookshelf|reading list|canon|skill clusters?|scored skills?|competencies|resources?|further reading)\b/i.test(s(row && row.q).trim()));
     const rowSectionOf = (row) => lc((row && row.source && row.source.section) || (row && row.round) || (row && row.section) || "");
     if (sector === "consulting" && (/\bcases?\b/.test(tn) || !/\b(?:framework|structur\w*|method|issue tree|behaviou?ral|fit)\b/.test(tn))) {
-      const casePool = candidates.filter((row) => /canonical case types|official sample cases/.test(rowSectionOf(row)));
+      let casePool = candidates.filter((row) => /canonical case types|official sample cases/.test(rowSectionOf(row)));
+      const namedFirm = (namedCompaniesOf(text, ctx).find((h) => h.cir) || {}).name || null;
+      if (namedFirm) {
+        const own = casePool.filter((row) => { const by = /\(([^)]+)\)\s*$/.exec(s(row.q)); return !by || namedCompaniesOf(by[1], ctx).some((h) => h.name === namedFirm); });
+        if (own.length) casePool = own;
+      }
       if (casePool.length) candidates = casePool;
     } else if (/\bbehavioral\b|\bbehavioural\b/.test(tn)) {
       const behPool = candidates.filter((row) => /behavioural|behavioral/.test(rowSectionOf(row)) || (row.source && row.source.type === "generic_behavioral_bank") || row.round === "behavioral");
@@ -16403,11 +17018,16 @@ const CareerRouter = (() => {
   function handlePrepEve(text, ctx) {
     const t = lc(text);
     if (!/\binterview\b/.test(t) || !/\b(tomorrow|tonight|nervous|anxious|can'?t sleep|cant sleep|scared|worried|freaking out)\b/.test(t)) return null;
+    const namedFirm = namedCompanyOf(text, ctx);
+    const unknown = namedFirm ? null : (() => { const lt = letterTargetOf(text, ctx); return lt && !lt.cir ? lt.company : null; })();
+    const firmCir = namedFirm && namedFirm.cir ? namedFirm.cir : null;
+    const firmName = namedFirm ? (firmCir ? cirShortName(firmCir) : namedFirm.company) : unknown;
     let items = [];
-    try { const ck = Prep && Prep.dayOfChecklist ? Prep.dayOfChecklist(ctx.profile || {}, {}) : null; const rawItems = (ck && (ck.items || ck.checklist || ck.steps)) || []; items = rawItems.map((i) => s(typeof i === "string" ? i : (i && (i.text || i.label || i.item)) || "")).filter(Boolean); } catch { items = []; }
+    try { const ck = Prep && Prep.dayOfChecklist ? (firmName ? Prep.dayOfChecklist({ company: firmName, cir: firmCir || undefined }, {}) : Prep.dayOfChecklist(ctx.profile || {}, {})) : null; const rawItems = (ck && (ck.items || ck.checklist || ck.steps)) || []; items = rawItems.map((i) => s(typeof i === "string" ? i : (i && (i.text || i.label || i.item)) || "")).filter(Boolean); } catch { items = []; }
     let q = null;
-    try { const bank = Prep.questionBank({ roleFamily: /\bfinance|banking|dcf\b/.test(t) ? "finance" : null, cir: cirFor(text, ctx) }); const qs = (bank && (bank.questions || bank.items)) || []; if (qs.length) q = s(qs[0].q || qs[0].question || qs[0].text); } catch { q = null; }
+    try { const bank = Prep.questionBank({ roleFamily: /\bfinance|banking|dcf\b/.test(t) ? "finance" : null, cir: firmCir || undefined }); const qs = (bank && (bank.questions || bank.items)) || []; if (qs.length) q = s(qs[0].q || qs[0].question || qs[0].text); } catch { q = null; }
     const facts = ["Tonight is for light reps, not cramming: one pass over your story, one question out loud, then stop — sleep is a scored input tomorrow, and a tired brain drops more points than one un-drilled question ever would."];
+    if (firmName && !firmCir) facts.push(`${firmName} has no company file here, so nothing in this plan is about how ${firmName} interviews.`);
     if (items.length) facts.push(`The logistics, settled tonight so tomorrow is only the interview: ${items.slice(0, 3).join("; ")}.`);
     if (q) facts.push(`Your one out-loud rep: ${q}`);
     const reply = compose({ headline: "You have a plan for tonight — and it ends early, on purpose.", facts, nextStep: q ? "Answer that one question out loud now; I will score it, and then we stop for the night." : "Tell me the company and round, and I will pick the one question worth rehearsing tonight." });
@@ -16577,7 +17197,7 @@ const CareerRouter = (() => {
       role = roleM ? roleM[1].replace(/^(?:an?\s+|the\s+)/, "").replace(/\s+(?:coming up|soon|next week).*$/, "").trim() : "";
     }
     if (!role) return null;
-    const sector = prepSectorOf(t) || prepSectorOf(role);
+    const sector = prepSectorOf(t, text, ctx) || prepSectorOf(role);
     let bank = null;
     try { bank = Prep.questionBank({ sector: sector || undefined, role, roleFamily: sector || role, cir: cirFor(text, ctx), stories: [] }); } catch { bank = null; }
     const qs = ((bank && bank.questions) || []).filter((x) => x && s(x.q));
@@ -16707,7 +17327,7 @@ const CareerRouter = (() => {
       const reply = compose({ headline: "A STAR bank is mined from your real experiences — and none are on file yet.", facts: ["Stories here are never written from templates or borrowed from other candidates; each one is a confirmed experience of yours, structured situation, task, action, result.", "The moment your experience is on record — a resume paste, or you telling me the internships and projects yourself — the bank builds from it, at whatever count the material honestly supports."], nextStep: "Tell me two or three real experiences — role, what you did, how it ended — and I will bank the first stories now." });
       return { intent: "prep_brief", reply, resultStatus: "awaiting_user", sends: 0, payload: { kind: "star_bank", stories: 0, total: 0 }, artifact: { kind: "star_bank", stories: 0, total: 0 } };
     }
-    const briefPayload = () => { try { return Prep.composeBrief ? Prep.composeBrief(profile, { company: company || null }, cirFor(text, ctx)) : null; } catch { return null; } };
+    const briefPayload = () => { try { return Prep.composeBrief ? Prep.composeBrief(profile || { facts: [] }, { company: company || null }, cirFor(text, ctx)) : null; } catch { return null; } };
     const bankArgs = () => {
       const roleFamily = /\btechnicals?\b|\bdcf\b|\blbo\b|\bcomps\b|three statements|\bquant\b|\bprobability\b|market[- ]making/.test(t) ? "finance"
         : /\bpm prep\b|\bproduct sense\b|\bproduct management\b/.test(t) ? "product"
@@ -16934,7 +17554,7 @@ const CareerRouter = (() => {
         [/\btake[ -]home\b/, "takeHomePlan", "Your take-home plan — the shape now, the hours when the blocks are named."],
         [/\bsuperday\b/, "superdayPlan", "Your superday plan."],
         [/\bfinal[ -]round\b|\bfinal round\b/, "finalRoundDelta", "The final-round delta: what changes at this stage."],
-        [/\bquestions[ -]to[ -]ask\b|\bquestions i should ask\b|\bask the (panel|interviewer)\b/, "questionsToAsk", "Your questions to ask, matched to this panel."],
+        [RS2_ASK_THEM, "questionsToAsk", "Your questions to ask, matched to this panel."],
         [/\bdebriefs?\b|\bretro\b/, "debriefRetro", "The debrief, mined for the pattern."],
         [/\bcoffee[ -]chat\b/, "coffeeChatPrep", "Your coffee-chat brief."],
         [/\bdeflect|\bsalary\b[^.]*\b(script|deflect|say)\b|\bwhat do i say\b[^.]*\bsalary\b/, "salaryDeflectionScripts", "Your salary-deflection scripts, word for word."],
@@ -16987,7 +17607,7 @@ const CareerRouter = (() => {
       }
       if (Prep.composeBrief) {
         const posting = ctx.posting || (company ? (rankedShortlist(profile, ctx, { company: lc(company) }).ranked[0] || {}).posting : null);
-        const brief = Prep.composeBrief(profile, posting ? { title: posting.title, company: posting.company } : { company: company || null }, cirFor(text, ctx));
+        const brief = Prep.composeBrief(profile || { facts: [] }, posting ? { title: posting.title, company: posting.company } : { company: company || null }, cirFor(text, ctx));
         let facts = briefFacts(brief);
         const fam = !company && !posting ? interviewFamilyOf(t) : null;
         if (fam) facts = [
@@ -17089,6 +17709,27 @@ const CareerRouter = (() => {
     return { board, match };
   }
 
+  const RS_FIGURE_ASKS = [
+    { key: "headcount", what: "headcount figure", ask: /\bhead ?count\b|\bhow many (?:people|employees|staff|workers)\b|\bnumber of (?:employees|staff|people)\b|\bemployees\b(?! (?:say|said|think|thought|rate|like|love|hate|feel|review))|\bcompany size\b|\bhow big is\b/, held: /\bheadcount\b|\b(?:employees|people) (?:firm-wide|worldwide|globally|in total)\b|\bemployees\b/ },
+    { key: "financials", what: "revenue, valuation or funding figure", ask: /\brevenues?\b|\bvaluation\b|\bvalued at\b|\bmarket cap\b|\bprofits?\b|\bfunding\b|\bhow much (?:money )?(?:has it|did it|have they|did they) raise/, held: /\brevenues? (?:of|was|were|is|reached)\b|\bvalued at\b|\bvaluation of\b|\bmarket cap(?:italization)? of\b/ },
+    { key: "acceptance", what: "acceptance rate or class size", ask: /\bacceptance rate\b|\badmit rate\b|\bacceptance rates\b|\bhow selective\b|\bclass size\b|\bhow many (?:analysts|interns|hires|people do they hire|applicants|people apply)\b|\bwhat percent(?:age)? (?:of applicants|get)\b/, held: /\bacceptance rate\b|\badmit rate\b|\bclass size (?:of|is|was)\b|\bconversion rate (?:of|is|was)\b/ },
+    { key: "odds", what: "odds", ask: /\b(?:my|the) (?:odds|chances?)\b|\bwhat are (?:the )?(?:odds|chances)\b|\bprobability\b|\bhow likely (?:am i|is it|are you)\b|\bodds of\b/, held: null },
+  ];
+  const RS_TIMELINE_ASK = /\btimeline\b|\bdeadlines?\b|\bwhen (?:does|do|is|are|will)\b[^.?!]*\b(?:recruiting|applications?|hiring|open|close|deadline)\b|\brecruiting (?:season|cycle|window)\b/;
+  const RS2_PAY_ASK = /\bcomp\b|\bpay\b|\bsalary\b|\bsalaries\b|\bcompensation\b|\bhow much (?:do|does|did|will|would|can|could)\b[^?!\n]*\b(?:make|makes|earn|earns|get paid|paid|start at)\b|\bhow much (?:is|are) [^?!\n]*\bpaid\b|\bwhat (?:do|does) [^?!\n]*\b(?:make|earn)\b|\bbase pay\b|\bstarting (?:pay|salary)\b|\bget paid\b/;
+  const RS2_TOPIC_ASKS = [
+    { key: "news", what: "news", ask: /\blay ?offs?\b|\blaid (?:people )?off\b|\bjob cuts?\b|\bcutting jobs\b|\bhiring freeze\b|\bnews\b|\bin the headlines\b|\bscandals?\b|\blawsuits?\b|\bwhat(?:'s| is| has been) (?:happening|going on) (?:at|with)\b|\brecently\b[^.?!]*\b(?:happen|announce|cut|fire|layoff)\w*|\bfiring\b|\breorg(?:anization)?\b|\brestructur\w+/,
+      line: (n) => `The ${n} file holds no news: nothing here searched for layoffs or recent events, so I can't say whether there have been any, and I won't guess.` },
+    { key: "people", what: "names of people", ask: /\bceo\b|\bcfo\b|\bcto\b|\bfounders?\b|\bfounded by\b|\bwho (?:is|are|runs|leads|heads|owns|started)\b|\bwho(?:'s| is) (?:the |their )?(?:head|boss|recruiter|hiring manager|manager|lead|president|chair)\b|\bhead of\b|\bhiring managers?\b|\brecruiters?\b|\b(?:name|email|e-mail|contact) (?:of|for) (?:the |their |a )?(?:recruiter|hiring manager|ceo|founder|interviewer)\b|\binterviewers?\b(?:'s)? names?\b/,
+      line: (n) => `The ${n} file names no people: no executive, recruiter, hiring manager or interviewer is on record for it, and I don't name anyone a record doesn't hold.` },
+    { key: "office", what: "office details", ask: /\boffices?\b|\bheadquarter(?:s|ed)\b|\bhq\b|\bwhere (?:is|are) (?:it|they|\w+) (?:based|located)\b|\blocations?\b|\bcampus(?:es)?\b/,
+      line: (n, place) => `The ${n} file holds nothing on ${place ? `a ${place} office` : "its offices or locations"}, so I won't describe one.` },
+    { key: "rating", what: "rating", ask: /\bgood (?:company|place|employer|firm)\b|\b(?:good|great|bad|nice|decent) (?:place )?to work\b|\bworth (?:joining|working)\b|\breputation\b|\bglassdoor\b|\bemployee (?:ratings?|reviews)\b|\bwork[- ]life balance\b|\bwhat do (?:people|employees) (?:say|think)\b|\bshould i (?:work at|join)\b/,
+      line: (n) => `Whether ${n} is a good place for you is a judgment, not a fact on file: the file holds no rating or employee reviews, so I give none. Here is what it does hold.` },
+  ];
+  const RS2_TOPIC_ANY = new RegExp(RS2_TOPIC_ASKS.map((x) => x.ask.source).join("|"));
+  const RS2_ASK_THEM = /\bquestions[ -]to[ -]ask\b|\bquestions i should ask\b|\bask the (panel|interviewer)\b|\bwhat (?:should|do|can|could) i ask (?:them|him|her|at the end|the (?:interviewers?|panel|recruiter|hiring manager|team)|my interviewers?)\b|\bwhat (?:should|do|can|could) i ask\b[^.?!]*\b(?:end|interview|interviewer|panel)\b|\bwhat to ask (?:them|at the end|the interviewers?|in (?:the|my) interview)\b|\bquestions? (?:should i|do i|can i|to) ask (?:them|at the end|the interviewers?|in the interview)\b|\bask at the end\b|\b(?:what|which) questions? (?:should|do|can|could) i ask\b|\bwhat (?:should|do|can|could) i ask my\b/;
+  const RS2_COMPARE = /\bcompare\b|\bcomparing\b|\bcompared\b|\bvs\.?(?=\s|$)|\bversus\b|\bor\b|\bbetter\b|\bbetween\b|\bwhich (?:one|firm|company|is)\b|\bdifference\b/;
   function handleIntel(text, ctx) {
     if (!Intel) return null;
     const sentsOf = (t) => String(t || "").replace(/\b(Inc|Corp|Ltd|Sr|Jr|Dr|Mr|Mrs|Ms|St|vs|U\.S|D\.C|e\.g|i\.e)\./g, "$1\u0001").split(/(?<=[.!?])\s+/).map((x) => x.trim().split("\u0001").join(".")).filter(Boolean);
@@ -17097,8 +17738,9 @@ const CareerRouter = (() => {
     const fullRoleAsk = !cir && s(text).length > 60 && roleShape.test(s(text));
     if (!cir) {
       const stored = ctx.discovery && ctx.discovery.lastIntelCompany;
-      if (stored && !fullRoleAsk && /\b(their|its|they|them|the firm|the company)\b/i.test(s(text))) cir = cirFor(stored, ctx);
-      if (!cir && stored && s(text).length <= 60 && /^\s*(and\s+)?(what about\s+)?for\b/i.test(s(text))) cir = cirFor(stored, ctx);
+      if (stored && !fullRoleAsk && /\b(their|its|they|them|the firm|the company)\b/i.test(s(text))) cir = cirByName(stored, ctx) || cirFor(stored, ctx);
+      if (!cir && stored && !fullRoleAsk && s(text).length <= 80 && /\b(it|there)\b/i.test(s(text)) && (RS2_TOPIC_ANY.test(lc(text)) || RS2_PAY_ASK.test(lc(text)) || /\b(culture|interview process|hiring bar|look for)\b/i.test(s(text)))) cir = cirByName(stored, ctx);
+      if (!cir && stored && s(text).length <= 60 && /^\s*(and\s+)?(what about\s+)?for\b/i.test(s(text))) cir = cirByName(stored, ctx) || cirFor(stored, ctx);
     }
     if (!cir) {
       const comp0 = companyFromText(text, ctx);
@@ -17106,7 +17748,9 @@ const CareerRouter = (() => {
       if (!comp) { const am = s(text).match(/\babout\s+([A-Z][A-Za-z0-9&.'-]+(?:\s+(?:[A-Z][A-Za-z0-9&.'-]+|Capital|Partners|Securities|Bank|Group|International|Labs|Technologies))?)/); if (am) comp = am[1].replace(/[?.!,]+$/, ""); }
       if (!comp) { const om = s(text).match(/\bon\s+([A-Z][A-Za-z0-9&.'-]+(?:\s+(?:[A-Z][A-Za-z0-9&.'-]+|Capital|Partners|Securities|Bank|Group|International|Labs|Technologies))?)/); if (om && !/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|January|February|March|April|May|June|July|August|September|October|November|December)$/.test(om[1])) comp = om[1].replace(/[?.!,]+$/, ""); }
       if (!comp) { const hm = s(text).match(/\bhave on\s+([a-z][a-z0-9&.'-]{2,})\b/i); if (hm && !/^(file|files|record|records|me|this|that|today|tomorrow|average|hand|him|her|them|it|my|your|tap|deck|deck,|it,)$/i.test(hm[1])) comp = hm[1].replace(/[?.!,]+$/, ""); }
-      if (!comp) { const dm = s(text).match(/\b(?:does|do|did)\s+([A-Z][A-Za-z0-9&.'-]{2,}(?:\s+(?:[A-Z][A-Za-z0-9&.'-]+|Capital|Partners|Securities|Bank|Group|International|Labs|Technologies))?)\s+(?:look|hire|want|need|post|seek)\b/); if (dm) comp = dm[1].replace(/[?.!,]+$/, ""); }
+      if (!comp) { const dm = s(text).match(/\b(?:does|do|did)\s+([A-Z][A-Za-z0-9&.'-]{2,}(?:\s+(?:[A-Z][A-Za-z0-9&.'-]+|Capital|Partners|Securities|Bank|Group|International|Labs|Technologies)){0,3})\s+(?:look|hire|want|need|post|seek|pay|pays)\b/); if (dm) comp = dm[1].replace(/[?.!,]+$/, ""); }
+      if (!comp) { const am2 = s(text).match(/\b(?:process|culture|hiring|bar|comp|pay|salary|salaries|interviews?|internships?|recruiting|timeline|deadline|values|offices?)\s+(?:at|for|with)\s+([A-Z][A-Za-z0-9&.'’-]*(?:\s+(?:[A-Z][A-Za-z0-9&.'’-]*|&|of)){0,3})/); if (am2) comp = am2[1].replace(/[?.!,]+$/, ""); }
+      if (!comp) { const pm = s(text).match(/\b([A-Z][A-Za-z0-9&.'-]{1,}(?:\s+(?:[A-Z][A-Za-z0-9&.'-]+|&)){0,3})['’]s\s+(?:culture|interviews?|interview process|hiring|comp|compensation|pay|salaries|salary|values|bar|revenue|headcount|recruiting|timeline|deadline|offices?|internships?|process)\b/); if (pm && !/^(?:What|How|Who|Where|When|Why|Tell|It|That|This|There|Here|Let|My|Your)$/.test(pm[1].split(/\s+/)[0])) comp = pm[1].replace(/^(?:What|How)\s+/, ""); }
       if (!comp && !fullRoleAsk && /\b(their|its|they|them|the firm|the company)\b/i.test(s(text))) comp = (ctx.discovery && ctx.discovery.lastIntelCompany) || null;
       if (!comp) {
         if (roleShape.test(s(text)) && Intel.roleKbStats && Intel.kbStatsText) {
@@ -17139,6 +17783,13 @@ const CareerRouter = (() => {
         }
         return null;
       }
+      {
+        const at = s(text).indexOf(comp);
+        if (at >= 0) {
+          const more = s(text).slice(at + comp.length).match(/^(?:\s+(?:&\s+)?(?!(?:Interview|Interviews|Culture|Comp|Pay|Salary|Hiring|Recruiting|Process|Internship|Intern|Role|Job|Office|Team|Offer|Please|Thanks|I|What|How|Is|Are|Do|Does)\b)[A-Z][A-Za-z0-9&.'’-]*){1,3}/);
+          if (more) comp = (comp + more[0]).replace(/[?.!,]+$/, "").replace(/\s+/g, " ").trim();
+        }
+      }
       try { ctx.discovery = Object.assign({}, ctx.discovery || {}, { lastIntelCompany: comp }); } catch {   }
       const facts = [`The company-file library holds dossiers built from public sources — hiring bar, entry routes, cadence, interview process, comp notes. ${comp} is not one of them, so none of that exists on record for this firm.`];
       if (/\bgpa\b|\bcutoff\b|\bcut-off\b/i.test(s(text))) facts.push(`On the cutoff question specifically: no verified GPA cutoff for ${comp} is on record. Firms rarely publish one, and a number I cannot source will not be quoted at you as fact.`);
@@ -17155,6 +17806,29 @@ const CareerRouter = (() => {
     }
     const name = cirShortName(cir);
     try { ctx.discovery = Object.assign({}, ctx.discovery || {}, { lastIntelCompany: name }); } catch {   }
+    {
+      const filed = [];
+      for (const h of namedCompaniesOf(text, ctx)) if (h.cir && !filed.some((x) => x.cir === h.cir)) filed.push(h);
+      if (filed.length >= 2 && RS2_COMPARE.test(lc(text))) {
+        const sides = filed.slice(0, 3);
+        const third = (v) => v ? v.replace(/\byou must\b/gi, "candidates must").replace(/\byou need to\b/gi, "candidates need to").replace(/\byou have to\b/gi, "candidates have to").replace(/\byou should\b/gi, "candidates should").replace(/\byou are expected to\b/gi, "candidates are expected to").replace(/\byour\b/gi, "their") : v;
+        const firstOf = (v) => { const tx = cirFieldText(v); return tx ? third(tx.split(/(?<=[.!?])\s/)[0]) : null; };
+        const names = sides.map((h) => cirShortName(h.cir));
+        const facts = [];
+        for (const [k, h] of sides.entries()) {
+          const bar = firstOf(h.cir.hiring_bar_summary);
+          facts.push(bar ? `${names[k]}'s bar, from its file: ${bar}` : `${names[k]}'s file states no hiring bar.`);
+        }
+        if (sides.length === 2) for (const [k, h] of sides.entries()) { const cu = firstOf(h.cir.values_culture_signals || h.cir.culture_notes); if (cu) facts.push(`${names[k]} on culture, from its file: ${cu}`); }
+        facts.push("Which one is better for you is your call: the files hold no ranking, and I give none.");
+        const asOf = sides.map((h, k) => (h.cir.as_of ? `${names[k]} as of ${h.cir.as_of}` : `${names[k]} with no as-of date`)).join("; ");
+        facts.push(`Source: the ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]} company files (public sources): ${asOf}.`);
+        try { ctx.discovery = Object.assign({}, ctx.discovery || {}, { lastIntelCompany: names[0] }); } catch {   }
+        const reply = compose({ headline: `${names.slice(0, -1).join(", ")} versus ${names[names.length - 1]}: what each file supports.`, facts, nextStep: "Want one side's entry routes or interview process next?" });
+        const comparison = { kind: "company_compare", firms: names };
+        return { intent: "company_intel", reply, resultStatus: "prepared", sends: 0, company: names[0], comparison, payload: comparison, artifact: comparison };
+      }
+    }
     {
       const cmpM = s(text).match(/\bcompare\s+([A-Z][A-Za-z&. ]{3,40}?)\s+(?:and|with|vs\.?|versus)\s+([A-Z][A-Za-z&. ]{3,40}?)(?=[\s—–-]|$)/i) || s(text).match(/\b([A-Z][A-Za-z&. ]{3,40}?)\s+(?:vs\.?|versus)\s+([A-Z][A-Za-z&. ]{3,40}?)(?=[\s—–-]|$)/i);
       if (cmpM) {
@@ -17214,7 +17888,7 @@ const CareerRouter = (() => {
           const framed = [...frameToks].filter(Boolean).some((f) => low.includes(`for ${f}`) || low.includes(`for a ${f}`) || low.includes(`for an ${f}`) || low.includes(`${f} at`) || low.includes(`${f} role`) || low.includes(`as a ${f}`) || low.includes(`as an ${f}`))
             || (/\b(hiring bar|the bar|bar for|look for in|hiring for)\b/.test(low) && (lab ? low.includes(lab.split(" ")[0]) : false))
             || (/\b(stats|statistics|library|percentages?|postings data)\b/.test(low) && !!lab);
-          const otherFiled = /\b(compare|vs\.?|versus)\b/.test(low) && !!(cirListOf(ctx).find((x) => x && x !== cir && cirMatches(x, low)));
+          const otherFiled = /\b(compare|vs\.?|versus)\b/.test(low) && !!namedCompaniesOf(text, ctx).find((h) => h.cir && h.cir !== cir);
           if (framed && !otherFiled) {
             lens = Intel.barForRole(cir, askedRole);
             if (lens && (lens.status === "role-bar" || lens.status === "no-role-bar")) roleAns = Intel.answerRoleIntel(cir, text, { role: askedRole });
@@ -17305,7 +17979,7 @@ const CareerRouter = (() => {
     const pick = (keys) => keys.map((k) => byKey[k]).filter(Boolean);
     let chosen = null, headline = null;
     if (/\bvs\.?\b|\bversus\b/.test(t)) {
-      const other = cirListOf(ctx).find((x) => x && x !== cir && cirMatches(x, t)) || null;
+      const other = (namedCompaniesOf(text, ctx).find((h) => h.cir && h.cir !== cir) || {}).cir || null;
       const facts = [];
       if (byKey.bar) facts.push(`The bar: ${byKey.bar.text}`);
       if (other) {
@@ -17325,10 +17999,11 @@ const CareerRouter = (() => {
       return { intent: "company_intel", reply, resultStatus: "prepared", sends: 0, company: name, payload: cir, artifact: cir };
     }
     if (/\bhow do i get\b|\bget a job\b|\bthesis\b/.test(t)) { chosen = pick(["thesis", "routes", "bar"]); headline = `How hiring at ${name} works, from its file.`; }
-    else if (/\bcomp\b|\bpay\b|\bsalary\b|\bcompensation\b/.test(t)) { chosen = pick(["comp", "bar", "cadence"]); headline = `${name} comp, from the file.`; }
+    else if (RS2_PAY_ASK.test(t)) { chosen = pick(["comp", "bar", "cadence"]); headline = `${name} comp, from the file.`; }
     else if (/\binterview\b/.test(t)) { chosen = pick(["interview", "bar", "cadence"]); headline = `${name} interviews, from the file.`; }
     else if (/\bculture\b|\bvalues\b/.test(t)) { chosen = pick(["culture", "bar", "comp"]); headline = `${name} culture, from the file.`; }
     else if (/\blook(s|ing)? for\b|\bwants in\b|\bhires for\b/.test(t)) { chosen = pick(["bar", "routes", "cadence"]); headline = `What ${name} looks for, from its file.`; }
+    else if (RS_TIMELINE_ASK.test(t)) { chosen = pick(["cadence", "routes", "bar"]); headline = `${name}'s hiring cadence, from the file.`; }
     if (!chosen || !chosen.length) {
       chosen = pick(["bar", "routes", "cadence"]);
       const cohort = cir.cohort || {};
@@ -17336,6 +18011,43 @@ const CareerRouter = (() => {
     }
     if (!chosen.length) chosen = [{ key: "thin", label: "", offerName: "", text: "The file is thin right now — status and sourcing only, no invented detail." }];
     const facts = chosen.map((x) => (x.label ? `${x.label}: ${x.text}` : x.text));
+    {
+      const asked = RS_FIGURE_ASKS.find((f) => f.ask.test(t));
+      if (asked) {
+        const strings = [];
+        const walk = (v, k) => { if (typeof v === "string") { if (!/^(?:source_url|url|source|as_of|last_verified_at|company_id)$/.test(k || "")) strings.push(v); } else if (Array.isArray(v)) v.forEach((x) => walk(x, k)); else if (v && typeof v === "object") for (const [kk, x] of Object.entries(v)) walk(x, kk); };
+        walk(cir, "");
+        const held = asked.held ? strings.flatMap((x) => x.split(/(?<=[.!?])\s+/)).find((x) => asked.held.test(lc(x)) && /\d/.test(x)) : null;
+        if (held) facts.unshift(`On the ${asked.what}, the file says: ${voiceText(held).trim()}`);
+        else facts.unshift(asked.key === "odds"
+          ? `No source on record gives your odds at ${name}, so I give no number; an estimate would need your own record read against the bar below, and it would be labelled as one.`
+          : `The ${name} file holds no ${asked.what}, and no other source on record does, so I am not giving one.`);
+        headline = held ? `${name}: the ${asked.what} the file holds, and what else it says.` : `${name}: no ${asked.key === "odds" ? "odds" : asked.what} on record — here is what the file does hold.`;
+      }
+    }
+    if (!RS_FIGURE_ASKS.some((f) => f.ask.test(t))) {
+      const topic = RS2_TOPIC_ASKS.find((x) => x.ask.test(t));
+      if (topic) {
+        let place = null;
+        if (topic.key === "office") {
+          const words = t.replace(/[^a-z ]+/g, " ").split(/\s+/).filter(Boolean);
+          for (let k = 0; k < words.length && !place; k++) for (const len of [3, 2, 1]) { const w = words.slice(k, k + len).join(" "); if (len <= words.length - k && LT_CITIES.has(w) && w !== "us" && w !== "remote") { place = w.replace(/\b[a-z]/g, (m) => m.toUpperCase()); break; } }
+        }
+        const strings = [];
+        const walk = (v, k) => { if (typeof v === "string") { if (!/^(?:source_url|url|source|as_of|last_verified_at|company_id)$/.test(k || "")) strings.push(v); } else if (Array.isArray(v)) v.forEach((x) => walk(x, k)); else if (v && typeof v === "object") for (const [kk, x] of Object.entries(v)) walk(x, kk); };
+        walk(cir, "");
+        const said = topic.key === "office" && place ? strings.flatMap((x) => x.split(/(?<=[.!?])\s+/)).find((x) => new RegExp(`\\b${place}\\b`, "i").test(x)) : null;
+        if (said) {
+          facts.unshift(`On ${place}, the file says: ${voiceText(said).trim()}`);
+          headline = `${name}: what the file says on ${place}.`;
+        } else {
+          if (topic.key === "rating" && byKey.culture && !chosen.includes(byKey.culture)) chosen = [byKey.culture, ...chosen.filter((x) => x !== byKey.culture)].slice(0, 3);
+          facts.length = 0;
+          facts.push(topic.line(name, place), ...chosen.map((x) => (x.label ? `${x.label}: ${x.text}` : x.text)));
+          headline = topic.key === "rating" ? `${name}: no rating on record — here is what the file does hold.` : `${name}: no ${topic.key === "office" && place ? `${place} office details` : topic.what} on record — here is what the file does hold.`;
+        }
+      }
+    }
     if (/\bsample size\b/.test(t) && cir.sample_size == null) {
       const bias = cirFieldText(cir.known_biases_of_data);
       if (bias) facts.push(`On sample size, the file states its own limit: ${bias.split(/(?<=[.!?])\s/)[0]}`);
@@ -18478,8 +19190,11 @@ const CareerRouter = (() => {
   }
   function cirFor(text, ctx) {
     if (!Intel) return null;
+    const named = namedCompaniesOf(text, ctx).find((h) => h.cir);
+    if (named) return named.cir;
     const t = lc(text);
-    return cirListOf(ctx).find((x) => x && cirMatches(x, t)) || null;
+    if (!/\barchetype\b/.test(t)) return null;
+    return cirListOf(ctx).find((x) => x && String(x.company_id || "").startsWith("archetype-") && cirMatches(x, t)) || null;
   }
   function cirFieldText(v) {
     if (!v) return "";
@@ -20498,9 +21213,10 @@ const CareerRouter = (() => {
     if (/\bpdf\b/.test(t) && deliveryVerb) return null;
     const ownApplications = /\bmy\s+(?:[\w'-]+\s+){0,4}?(?:applications?|apps)\b|\bapplication status\b|\bstatus of (?:my|the) (?:[\w'-]+\s+){0,3}?applications?\b|\bmy (?:job )?tracker\b|\bwhere (?:i|things) stand\b/.test(t);
     if (ownApplications && !/\b(alerts?|watch(?:es|ing)?|notify|opens? up|goes up|comes up|gets? posted|is posted|new (?:jobs?|roles?|openings?|positions?|postings?|internships?))\b/.test(t)) return null;
-    const tellQuestionOnly = /\btell me (what|how|whether|if|why|which|who|whose)\b/.test(t)
+    const tellQuestionOnly = /\btell me (what|how|whether|if|why|which|who|whose|about|more)\b/.test(t)
       && !/\b(text|message|ping|notify|send|dm)\s+me\b/.test(t)
-      && !/\btell me when\b/.test(t);
+      && !/\btell me when\b/.test(t)
+      && (!/\btell me (about|more)\b/.test(t) || !/\b(opens? up|goes up|comes up|gets? posted|is posted|when|whenever|as soon as|the moment|the minute|new)\b/.test(t));
     const JOB_NOUN_RE = /\b(jobs?|roles?|openings?|positions?|postings?|internships?)\b/;
     const jobAfterDelivery = deliveryM ? JOB_NOUN_RE.test(t.slice(deliveryM.index + deliveryM[0].length)) : false;
     const futureTrigger = /\b(opens? up|goes up|comes up|gets? posted|is posted|when|whenever|as soon as|the moment|the minute)\b/.test(t);
@@ -20960,7 +21676,7 @@ const CareerRouter = (() => {
     const isStart = /^\/start(\s+\S+)?[.!]?$/i.test(raw);
     const isGreeting = /^(hi|hello|hey|hiya|howdy|yo|sup|heya|hii+|hey+|greetings|good\s+(morning|afternoon|evening))(\s+(there|trainee))?[\s!.]*$/i.test(raw);
     if (!isStart && !isGreeting) return null;
-    return greetingResult(ctx);
+    return resumePendingGreeting(ctx) || greetingResult(ctx);
   }
   function greetingResult(ctx) {
     const hasResume = resumeOnRecord(ctx);
@@ -20996,7 +21712,7 @@ const CareerRouter = (() => {
     const target = namedRoleTargetOf(text, ctx);
     const applyVerb = /\bapply\b|\bsubmit\b|\bhandle the application\b|\bprepare my application\b|\bstart the batch\b/.test(t);
     const stagedRef = /\b(that|this|the)\s+(exact\s+)?role\b|\bthe posting i (just )?(pasted|gave|shared|linked)\b|\bposting i just pasted\b/.test(t);
-    if (/\bcan you (actually |really )?(submit|apply)\b/.test(t) || (/\bwhat (exactly )?can you do\b/.test(t) && /\b(apply|submit|application)\b/.test(t))) {
+    if (/\bcan you (actually |really )?(submit|apply)\b/.test(t) || /^do you (actually |really )?apply (?:for|on behalf of) me\b/.test(t) || (/\bwhat (exactly )?can you do\b/.test(t) && /\b(apply|submit|application)\b/.test(t))) {
       const aboutCo = raw.match(/\babout the ([A-Z][A-Za-z0-9&.'-]+(?:\s+(?:[A-Z][A-Za-z0-9&.'-]+|\d+)){0,2})\s+(?:role|posting|job)\b/);
       const nctx = namedApplyContextOf(ctx);
       const co = (target && target.company) || (aboutCo && namedRoleCompanyOf(aboutCo[1])) || (nctx && nctx.company) || (ctx.posting && ctx.posting.company) || null;
@@ -21375,7 +22091,7 @@ const CareerRouter = (() => {
   function dispatchChat(text, ctx) {
     const c = ctx || {};
     const rawText = text;
-    text = detypo(text);
+    text = expandShorthand(detypo(text));
     const t = lc(text);
     if (!t) return null;
     const profile = c.profile || null;
@@ -21383,7 +22099,15 @@ const CareerRouter = (() => {
     capturePastedPosting(text, c);
     captureStatedFacts(rawText, c);
     { const bp = profileFromStatedFacts(c); if (bp) { if (!c.profile || c.profile._fromStatedFacts) c.profile = bp; } else if (c.profile && c.profile._fromStatedFacts) c.profile = null; }
+    { const ob = takeOffer(rawText, c); if (ob) return ob; }
+    { const ug = handleUnsavedGraduation(text, c); if (ug) return ug; }
     { const gr = handleGreeting(text, c); if (gr) return gr; }
+    { const fd = handleFramedDocument(text, c); if (fd) return fd; }
+    { const rd = handleResumeDispute(text, c); if (rd) return rd; }
+    { const rc = handleResumeFieldCorrection(text, c); if (rc) return rc; }
+    { const am = handleActAsMe(text, c); if (am) return am; }
+    { const re = handleRecruiterEmailAsk(text, c); if (re) return re; }
+    { const ac = handleAuthorityClaim(text, c); if (ac) return ac; }
     { const mg = handleFactGroundedDraft(text, c); if (mg) return mg; }
     const replyFramed = /^\s*reply handling:/i.test(s(text)) || /\brelayed reply\b|\ba reply (came|arrived|landed)\b/.test(t);
     if (replyFramed) {
@@ -21542,6 +22266,10 @@ const CareerRouter = (() => {
       const gr = handleGraphReferral(text, c);
       if (gr) return gr;
     }
+    {
+      const cold = handleColdNetworkingAsk(text, c);
+      if (cold) return cold;
+    }
     if (/\bdream (50|companies)\b|\bnetwork into\b/.test(t)) {
       const cp = handleCampaignPlan(text, c);
       if (cp) return cp;
@@ -21667,6 +22395,7 @@ const CareerRouter = (() => {
       && !/\bwhat does it take\b|\bget hired as\b|\bhiring bar\b|\bwhat (do|does) (postings|employers|companies|firms) (require|look for|want|expect)\b|\bpostings (name|ask|require|usually|emphasize)\b/.test(t)
       && !/\binterviews?\b[^.]*\b(prepar\w*|get ready|getting ready|prep)\b|\b(prepar\w*|get ready|getting ready)\b[^.]*\binterviews?\b/.test(t)
       && !/\b(roles?|jobs?|internships?|positions?|openings?)\b/.test(t)
+      && !(RS2_PAY_ASK.test(t) && /\bhow much\b|\bget paid\b|\bwhat (?:do|does)\b/.test(t))
       && !/\bcover[ -]?lett?e?rs?\b|\bcovr letters?\b|\btailor\w*\b[^.]*\b(?:resume|cv)\b/.test(t)
       && !(/\bone company\b/.test(t) && /\b\d{1,3}\s+(?:people|person)\b/.test(text) && /\bwarm/.test(t))) {
       const cp = handleCampaignPlan(text, c);
@@ -21692,7 +22421,11 @@ const CareerRouter = (() => {
       let letter = null;
       try { letter = Tailor.generateCoverLetter ? Tailor.generateCoverLetter(profile, ctx.posting || null, {}) : null; } catch { letter = null; }
       const body = digText(letter, ["text", "body"], ["paragraphs", "lines"]);
-      const reply = compose({ headline: "Cover letters only where the portal actually asks — in that company's own voice.", facts: [body ? body.split(/(?<=[.!?])\s/).slice(0, 2).join(" ") : "A startup gets the builder's voice, a bank gets the formal one; the facts are the same, the register follows the company.", "No letter is generated for a portal that does not ask for one — an unrequested letter is noise, not effort."], nextStep: "Name the company and I will draft its letter first." });
+      const named = !ctx.posting ? tailorTargetOf(text, c) : null;
+      const nextStep = named && named.company
+        ? `For ${named.label}: paste the posting or its link, then ask for the letter again, and I will draft it from your confirmed facts.`
+        : "Name the company and I will draft its letter first.";
+      const reply = compose({ headline: "Cover letters only where the portal actually asks — in that company's own voice.", facts: [body ? body.split(/(?<=[.!?])\s/).slice(0, 2).join(" ") : "A startup gets the builder's voice, a bank gets the formal one; the facts are the same, the register follows the company.", "No letter is generated for a portal that does not ask for one — an unrequested letter is noise, not effort."], nextStep });
       const clRec = { kind: "cover_letter", ok: !!(letter && letter.ok), reason: (letter && letter.reason) || null, text_present: !!(letter && letter.text), rule: "only_where_portal_asks", registers: ["startup_builder_voice", "bank_formal_voice"] };
       return { intent: "career_tailor", reply, resultStatus: "prepared", sends: 0, cover_letter: letter || undefined, payload: clRec, artifact: clRec };
     }
@@ -21878,7 +22611,7 @@ const CareerRouter = (() => {
       const tnB = typoNorm(text);
       const sessionShape =
         /\b(can we|let'?s|start)\b[^.]*\b(practi[cs]e|practise|drill|prep)\b|\b(practice|practise|drill)\b[^.]*\b(cases?|questions?|technicals?|sql|probability|interviews?)\b|\bprep( me| us)?\b[^.]*\b(interview|technicals?|banking|consulting|data|law|medicine|quant|product)\b|\bdrill me\b|\bhelp me prep\b|\bpractice cases\b|\bcase practice\b|\bwhat do they ask\b/.test(tnB)
-        || (/\bprep me\b/.test(tnB) && !!prepSectorOf(tnB))
+        || (/\bprep me\b/.test(tnB) && !!prepSectorOf(tnB, text, c))
         || (pthB.lastQ && /\banother\b|\bnext\b|\bharder\b|\bmodel answer\b|\bone more\b|\bhit me\b|\bgive me\b|\bagain\b/.test(tnB))
         || ((pthB.sector || pthB.lastQ) && /\bthree (financial )?statements\b|\bdcf\b|\blbo\b/.test(tnB))
         || ((pthB.sector || pthB.lastQ) && s(text).length < 70 && /\bone\b|\bfocus\b|\bweakest\b|\bsql\b|\bethics\b|\bmarket[- ]making\b|\bprobability\b|\bcomps\b/.test(tnB))
@@ -21889,7 +22622,7 @@ const CareerRouter = (() => {
       if (sessionShape) { const ps = handlePrepSession(text, c); if (ps) return ps; }
     }
     const practiceAsk = /\b(?:can|could|may|shall)\s+(?:we|i|you)\b[^.?]*\bpractic(?:e|ing)\b(?!\s+(?:law|medicine|nursing|dentistry|in)\b)|\blet'?s\s+(?:do\s+(?:a|some)\s+)?practic(?:e|ing)\b|\bwhat (?:else )?should i (?:practice|work on|drill)\b|\bpractice question\b|\b(?:another|one more|next|different|new)\s+(?:practice\s+)?question\b|\b(?:harder|tougher|different) (?:one|question)\b|\bweakest on\b/.test(t);
-    if (practiceAsk || /\bhit me with\b|\bgive me\b[^.]*\bquestion\b|\bask me\b[^.]*\bquestion\b|\bquiz me\b|\bdrill me\b/.test(t)) {
+    if (practiceAsk || /^(?:some |more |a few )?(?:behaviou?ral|technical|case|practice|mock)(?: interview)? questions\b|^interview questions (?:for|about)\b/.test(t) || /\bhit me with\b|\bgive me\b[^.]*\bquestions?\b|\bask me\b[^.]*\bquestion\b|\bquiz me\b|\bdrill me\b/.test(t)) {
       const ps = handlePrepSession(text, c);
       if (ps) return ps;
       const pq = handlePrepQuestion(text, c);
@@ -21908,7 +22641,7 @@ const CareerRouter = (() => {
       const pp = handlePrepPlan(text, c);
       if (pp) return pp;
     }
-    if (/\binterview brief\b|\bbrief me\b|\bprepare me for\b|\bfailure story\b|\bstory for\b|\bdrill me\b|\bquestion bank\b|\b(what|which) questions\b[^.]*\bask(s|ed)?\b|\bstar bank\b|\bstar\b[^.]*\bstories\b|\bstories\b[^.]*\bstar\b|\bnight[ -]before\b|\btwo interviews\b|\bhiring[ -]manager round\b|\bportfolio walkthrough\b|\bprep pack\b|\binterviewer research\b|\bcoffee[ -]chat\b|\bprep set\b|\bsystem[ -]design prep\b|\bcase prep\b|\bquant prep\b|\btechnicals drill\b|\bpm prep\b|\bday[ -]of checklist\b|\bpost[ -]rejection retro\b|\bdebriefs say\b|\bmock scored\b|\bre[ -]?mock\b|\bfinal[ -]round prep\b|\bsuperday\b|\bvideo[ -]interview\b|\bvideo practice\b|\btake[ -]home\b|\bquestions[ -]to[ -]ask\b|\bbar[ -]raiser\b|\bteaching[ -]demo\b|\bresearch[ -]talk\b|\bdebrief\b|\bdeflection scripts\b|\bsalary\b[^.]*\bdeflect|\binterview\b[^.]*\b(thursday|friday|tuesday|wednesday|monday|tomorrow)\b/.test(t)) {
+    if (RS2_ASK_THEM.test(t) || /\binterview brief\b|\bbrief me\b|\bprepare me for\b|\bfailure story\b|\bstory for\b|\bdrill me\b|\bquestion bank\b|\b(what|which) questions\b[^.]*\bask(s|ed)?\b|\bstar bank\b|\bstar\b[^.]*\bstories\b|\bstories\b[^.]*\bstar\b|\bnight[ -]before\b|\btwo interviews\b|\bhiring[ -]manager round\b|\bportfolio walkthrough\b|\bprep pack\b|\binterviewer research\b|\bcoffee[ -]chat\b|\bprep set\b|\bsystem[ -]design prep\b|\bcase prep\b|\bquant prep\b|\btechnicals drill\b|\bpm prep\b|\bday[ -]of checklist\b|\bpost[ -]rejection retro\b|\bdebriefs say\b|\bmock scored\b|\bre[ -]?mock\b|\bfinal[ -]round prep\b|\bsuperday\b|\bvideo[ -]interview\b|\bvideo practice\b|\btake[ -]home\b|\bquestions[ -]to[ -]ask\b|\bbar[ -]raiser\b|\bteaching[ -]demo\b|\bresearch[ -]talk\b|\bdebrief\b|\bdeflection scripts\b|\bsalary\b[^.]*\bdeflect|\binterview\b[^.]*\b(thursday|friday|tuesday|wednesday|monday|tomorrow)\b/.test(t)) {
       let px = null;
       try { px = handlePrepExtras(text, c); } catch { px = null; }
       if (px) return px;
@@ -21953,7 +22686,7 @@ const CareerRouter = (() => {
       if (frc) return frc;
       { const fd = routeFieldDecision(text, c); if (fd) return fd; }
       { const od = routeOfferDecision(text, c); if (od) return od; }
-      const iq = (/\?/.test(s(text)) || /\b(tell me|what|how|look for|hiring|comp|culture|interview process|file built|compare|pay|stats|statistics|library)\b/.test(t)) ? handleIntel(text, c) : null;
+      const iq = (/\?/.test(s(text)) || /\b(tell me|what|how|look for|hiring|comp|culture|interview process|file built|compare|pay|stats|statistics|library|headcount|revenue|valuation|acceptance rate|recruiting timeline)\b/.test(t) || ((RS_TIMELINE_ASK.test(t) || RS2_TOPIC_ANY.test(t) || /\bresearch\b/.test(t)) && !!cirFor(text, c)) || (RS2_COMPARE.test(t) && namedCompaniesOf(text, c).filter((h) => h.cir).length >= 2)) ? handleIntel(text, c) : null;
       if (iq) return iq;
       { const ob = routeOnboardingNeeds(text, c); if (ob) return ob; }
       if (/\bhow do i get\b|\bwhat does it take\b[^.]*\b(get into|land|break into|get in)\b|\beven realistic\b|\bis .* realistic\b|\bfatal for\b|\bhonest odds\b|\bwhich fits me\b|\bstraight out of college\b|\bgrad school\b|\bwhich major\b|\bcareer switcher\b|\bany hope\b|\btake my job\b|\bactually require\b|\bactually help for\b|\boffsets the brand gap\b|\bcan i get faang\b|\bmarket bad\b|\bquant path\b|\bbig law\b|\bfrom undergrad\b|\bhow few\b|\bvc seats\b|\bdata science entry\b|\bstartup entry\b|\binternational student\b|\bprereqs\b|\bmcat\b|\bclearance timelines\b|\bh-1b\b|\bthe real ladder\b|\bno sugarcoating\b|\bcompany file built\b|\bvs\.?\b[^.]*\bfor me\b|\bmbb path\b|\bgoes stale\b|\badvice\b[^.]*\b(wrong|outdated)\b/.test(t)) {
@@ -22131,6 +22864,7 @@ const CareerRouter = (() => {
     { const fam = routeFamily(text, c); if (fam) return fam; }
     { const hua = handleHonestUnavailableAction(text, c); if (hua) return hua; }
     { const brp = handleBareReply(text, c); if (brp) return brp; }
+    { const lr = handleListReference(text, c); if (lr) return lr; }
     { const ca = handleCareerCatchAll(text, c); if (ca) return ca; }
     if (/\b(job|career|resume|interview|application|internship|intern)\b/.test(t)) {
       return { intent: "career_fallback", reply: Reply ? Reply.fallback("unmatched") : "I didn't catch that.", resultStatus: "awaiting_user" };
@@ -22139,7 +22873,7 @@ const CareerRouter = (() => {
   }
 
   const FACT_CITIES = ["New York", "Chicago", "San Francisco", "Boston", "Houston", "Dallas", "Los Angeles", "Seattle", "Austin", "Miami", "Charlotte", "Denver"];
-  const FACT_SINGLE_KINDS = new Set(["name", "year", "geography", "target_firm", "level", "tone", "school", "majors", "target_role", "sponsorship", "citizenship"]);
+  const FACT_SINGLE_KINDS = new Set(["name", "year", "geography", "target_firm", "level", "tone", "school", "majors", "target_role", "sponsorship", "citizenship", "graduation"]);
   function recordKeyedFact(ctx, kind, key, value, evidence) {
     if (!value) return false;
     const clean = s(value).replace(/\s+/g, " ").replace(/[,;.]+$/, "").trim();
@@ -22494,6 +23228,32 @@ const CareerRouter = (() => {
     }
     const attestVeto = /\b(put|write|add|say|state|claim|list|mark|check)\b[^.]*\b(on|in|into)\b[^.]*\b(application|resume|cv|form|cover letter)\b/i.test(raw)
       && /\b(i'?m|i am)\s+not\b|\bnot true\b|\bdon'?t actually\b|\bisn'?t true\b/i.test(raw);
+    {
+      const u = unquotedText(raw);
+      const materialsAsk = /\b(put|write|add|say|state|claim|list|mark|include|change|make)\b[^.]*\b(resume|cv|cover letter|application|form|letter|profile)\b/i.test(u);
+      if (u.length <= 200 && u.split(/\n/).length <= 2 && !materialsAsk && !/\?/.test(u)) {
+        const LEAD = "^(?:(?:so|and|also|btw|oh|well|yeah|yes|ok|okay|actually|correction|sorry|wait|no|hi|hey)[\\s,:!-]+)*";
+        const sentences = u.split(/[.!;]+(?=\s|$)|\n|\s+[—–-]\s+/).map((x) => x.trim()).filter(Boolean);
+        const MON = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|winter)";
+        const HEDGE = /\b(?:i think|i thought|i believe|i guess|i suppose|i assume|i reckon|idk|i dont know|i don'?t know|dunno|not sure|unsure|prob|probs|prolly|probably|tentative(?:ly)?|maybe|possibly|likely|roughly|around|approximately|about|ish|tbd|or so|or later|or earlier|or thereabouts|give or take)\b/i;
+        const ALTERNATIVES = new RegExp(`\\b(?:${MON}\\s+)?20\\d\\d\\s*(?:\\bor\\b|/)\\s*(?:${MON}\\s+)?(?:20\\d\\d|later|earlier|after|before)|\\b${MON}\\s*(?:\\bor\\b|/)\\s*${MON}\\b|\\b(?:or|/)\\s*${MON}(?:\\s+'?\\d\\d(?:\\d\\d)?)?\\b`, "i");
+        const definiteSentence = (x) => !/\b(?:not|never|no longer|don'?t|dont|doesn'?t|won'?t|wont|didn'?t|can'?t|cant|isn'?t|aren'?t)\b|n't\b/i.test(x) && !/\b(?:if|unless|might|could|would|maybe|perhaps|probably|hope|hoping|hopefully|ideally|assuming|supposedly|wish|plan(?:ning)? to|trying to|supposed to|should)\b/i.test(x) && !HEDGE.test(x) && !ALTERNATIVES.test(x);
+        const wholeDefinite = definiteSentence(u.replace(/[.!?;:\n\u2014\u2013-]+/g, " "));
+        const definite = (x) => wholeDefinite && definiteSentence(x);
+        let m2;
+        if ((m2 = sentences.map((x) => x.match(new RegExp(`${LEAD}my\\s+(?:e-?mail(?:\\s+address)?)\\s+is\\s+(?:actually\\s+|now\\s+)?([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})\\b`, "i"))).find(Boolean))) ctx._contactStatedThisTurn = { kind: "email", value: m2[1] };
+        const GRAD = new RegExp(`${LEAD}(?:i(?:'?ll| will|'?m| am)?|im|ill)\\s+(?:(?:be\\s+)?(?:graduate|graduating|grad(?:uating)?)|(?:in\\s+)?(?:the\\s+)?class\\s+of)\\s+(?:in\\s+|on\\s+)?(${MON}\\s+20\\d\\d|20\\d\\d)\\b`, "i");
+        const gm = threadMirrorOf(ctx), askedAt = gm && typeof gm.gradAskedAt === "number" ? gm.gradAskedAt : null;
+        const bare = askedAt != null && nowOf(ctx) - askedAt <= 30 * 60 * 1000 && nowOf(ctx) >= askedAt - 60 * 1000 && !statedFactsOf(ctx).some((f) => f.kind === "graduation")
+          ? u.trim().match(new RegExp(`^(?:(?:in|it'?s|its|i graduate(?:\\s+in)?|graduating(?:\\s+in)?)\\s+)?(${MON}\\s+20\\d\\d|20\\d\\d)[.!]*$`, "i")) : null;
+        if (bare) push("graduation", bare[1].replace(/\b[a-z]/g, (c) => c.toUpperCase()), bare[0]);
+        else if ((m2 = sentences.filter(definite).map((x) => x.match(GRAD)).find(Boolean))) {
+          push("graduation", m2[1].replace(/\b[a-z]/g, (c) => c.toUpperCase()), m2[0]);
+        } else if (sentences.some((x) => /\bgraduat\w*\b.*\b20\d\d\b|\bclass\s+of\s+20\d\d\b/i.test(x))) {
+          ctx._gradUnsavedThisTurn = true;
+        }
+      }
+    }
     for (const cl of gatedFactClausesOf(raw)) {
       if (!clauseIsAssertion(cl)) continue;
       if (/^\s*(?:my|the|his|her|their)\s+(roommate|friend|friends|brother|sister|classmate|coworker|co-worker|colleague|cousin|partner|boyfriend|girlfriend|wife|husband|mom|dad|mother|father|teammate|mentor|professor|boss|manager|uncle|aunt|nephew|niece|son|daughter)\b/i.test(cl)) continue;
@@ -22671,7 +23431,7 @@ const CareerRouter = (() => {
     return { intent: "conversation_recall", reply, resultStatus: status, sends: 0 };
   }
   function factLine(f) {
-    return { name: `your name is ${f.value}`, year: `you're a ${f.value}`, majors: `you study ${f.value}`, geography: `you're targeting ${f.value}`, experience: experienceLine(f), school: `you go to ${f.value}`, target_firm: `your target firm is ${f.value}`, level: `you want ${f.value} first`, excluded_level: `not ${f.value}`, tone: `the tone is ${f.value} from here`, target_role: `your dream role is ${f.value}`, recruiter_contact: `your recruiter contact${f.key ? ` at ${f.key}` : ""} is ${f.value}`, hiring_manager: `the hiring manager${f.key ? ` at ${f.key}` : ""} is ${f.value}`, interview_day: `your interview${f.key ? ` at ${f.key}` : ""} is on ${f.value}`, company_preference: `for ${f.key || "that company"} you only want ${f.value}`, sponsorship: f.value === "does not need sponsorship" ? "you do not need sponsorship" : "you need sponsorship", citizenship: f.value === "not a US citizen" ? "you're not a US citizen" : "you're a US citizen", interview_company: `you have an interview at ${f.value}`, goal: `your career goal is ${f.value}` }[f.kind] || `${f.kind}: ${f.value}`;
+    return { name: `your name is ${f.value}`, year: `you're a ${f.value}`, majors: `you study ${f.value}`, geography: `you're targeting ${f.value}`, experience: experienceLine(f), school: `you go to ${f.value}`, target_firm: `your target firm is ${f.value}`, level: `you want ${f.value} first`, excluded_level: `not ${f.value}`, tone: `the tone is ${f.value} from here`, target_role: `your dream role is ${f.value}`, recruiter_contact: `your recruiter contact${f.key ? ` at ${f.key}` : ""} is ${f.value}`, hiring_manager: `the hiring manager${f.key ? ` at ${f.key}` : ""} is ${f.value}`, interview_day: `your interview${f.key ? ` at ${f.key}` : ""} is on ${f.value}`, company_preference: `for ${f.key || "that company"} you only want ${f.value}`, sponsorship: f.value === "does not need sponsorship" ? "you do not need sponsorship" : "you need sponsorship", citizenship: f.value === "not a US citizen" ? "you're not a US citizen" : "you're a US citizen", interview_company: `you have an interview at ${f.value}`, goal: `your career goal is ${f.value}`, graduation: `you graduate ${f.value}` }[f.kind] || `${f.kind}: ${f.value}`;
   }
   function profileFromStatedFacts(ctx) {
     const facts = statedFactsOf(ctx);
@@ -22705,6 +23465,14 @@ const CareerRouter = (() => {
     return { intent: "career_goal_record", reply, resultStatus: "completed", sends: 0, stated_facts: all };
   }
   function handleStatedFactsReply(text, ctx) {
+    if (!/\?/.test(s(text)) && !(ctx._factsAddedThisTurn && ctx._factsAddedThisTurn.length)) {
+      const hasResume = resumeOnRecord(ctx);
+      const said = ctx._contactStatedThisTurn;
+      if (said && said.kind === "email") return { intent: "profile_correction", resultStatus: "awaiting_user", sends: 0, reply: compose({
+        headline: `Got it — ${said.value}.`,
+        facts: ["I don't keep contact details from chat, so nothing was kept from that message, and nothing goes on a form without your OK."],
+        nextStep: hasResume ? "What role should I look for?" : (offerNext(ctx, "upload resume"), "Want to send me your resume next?") }) };
+    }
     const added = ctx._factsAddedThisTurn;
     if (!added || !added.length) {
       const restated = ctx._factsRestatedThisTurn;
@@ -23654,6 +24422,14 @@ const CareerRouter = (() => {
       }
       if (additions.length) res.reply = `${res.reply}\n\n${additions.join("\n")}`;
     }
+    if (res && typeof res.reply === "string" && res.reply && res.intent !== "career_fallback" && res.intent !== "honest_unavailable" && !/\bresume\b/i.test(res.reply) && !resumeOnRecord(c)) {
+      const ask = lc(s(text)).replace(/[’]/g, "'");
+      if (!/\?\s*$/.test(ask) && /\bapply\s+(?:to|for|at|me|on|now)\b|\bapply\b[^.?!]{0,40}\b(?:jobs?|roles?|postings?|positions?|internships?|openings?)\b|\bsubmit (?:my|an?) applications?\b/.test(ask)) {
+        res.reply = `${res.reply}\n\n${resumeDraftsPending(c).length
+          ? "And nothing is sent anywhere before your resume is confirmed: its entries are waiting for your word (reply \"yes, that's my resume\" if they're right)."
+          : "And nothing is sent anywhere before your resume is confirmed: paste or attach it, confirm it, then ask again."}`;
+      }
+    }
     if (res && typeof res.reply === "string" && res.reply && res.intent !== "career_fallback" && res.intent !== "honest_unavailable") res.reply = ensureNextStepText(res.reply);
     syncThreadOut(c);
     return res;
@@ -23664,7 +24440,7 @@ const CareerRouter = (() => {
       if (m && m.resumeIngest && typeof m.resumeIngest === "object" && intent !== "career_resume_ingest") m.resumeIngest.stale = true;
     } catch {   }
   }
-  return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf };
+  return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerRouter;
 
@@ -24666,6 +25442,108 @@ const CareerRender = (() => {
     return streams;
   }
   function readPdfLiteral(s, i) {
+    const [bytes, ni] = readPdfLiteralBytes(s, i);
+    return [decodeWinAnsi(Bytes.from(bytes)), ni];
+  }
+  function readPdfHexBytes(s, i) {
+    const end = s.indexOf(">", i + 1);
+    if (end < 0 || end - i > 32768) return null;
+    const h = s.slice(i + 1, end);
+    if (!/^[0-9A-Fa-f\s]*$/.test(h)) return null;
+    const hex = h.replace(/\s+/g, "");
+    const even = hex.length % 2 ? `${hex}0` : hex;
+    const bytes = [];
+    for (let k = 0; k < even.length; k += 2) bytes.push(parseInt(even.slice(k, k + 2), 16));
+    return [bytes, end + 1];
+  }
+  function parseToUnicode(t) {
+    const map = new Map();
+    let width = 0;
+    const cs = String(t || "").match(/begincodespacerange\s*<([0-9A-Fa-f]+)>/);
+    if (cs) width = Math.max(1, Math.min(4, Math.floor(cs[1].length / 2)));
+    const utf16 = (hex) => {
+      const h = String(hex).replace(/\s+/g, "");
+      let out = "";
+      for (let k = 0; k + 4 <= h.length; k += 4) out += String.fromCharCode(parseInt(h.slice(k, k + 4), 16));
+      if (h.length % 4 === 2) out += String.fromCharCode(parseInt(h.slice(-2), 16));
+      return out;
+    };
+    for (const blk of String(t || "").matchAll(/beginbfchar([\s\S]*?)endbfchar/g)) {
+      for (const e of blk[1].matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]*)>/g)) { if (!width) width = Math.max(1, Math.floor(e[1].length / 2)); if (map.size < 200000) map.set(parseInt(e[1], 16), utf16(e[2])); }
+    }
+    for (const blk of String(t || "").matchAll(/beginbfrange([\s\S]*?)endbfrange/g)) {
+      for (const e of blk[1].matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(?:<([0-9A-Fa-f]*)>|\[([^\]]*)\])/g)) {
+        const lo = parseInt(e[1], 16), hi = parseInt(e[2], 16);
+        if (!width) width = Math.max(1, Math.floor(e[1].length / 2));
+        if (!(hi >= lo) || hi - lo > 65535 || map.size > 200000) continue;
+        if (e[3] !== undefined) {
+          const base = utf16(e[3]);
+          if (!base) continue;
+          const head = base.slice(0, -1), last = base.charCodeAt(base.length - 1);
+          for (let c = lo; c <= hi; c++) map.set(c, head + String.fromCharCode(last + (c - lo)));
+        } else {
+          const each = [...e[4].matchAll(/<([0-9A-Fa-f]*)>/g)].map((x) => utf16(x[1]));
+          for (let c = lo; c <= hi && c - lo < each.length; c++) map.set(c, each[c - lo]);
+        }
+      }
+    }
+    return { map, width };
+  }
+  function pdfFontMaps(buf) {
+    const out = new Map();
+    let s;
+    try { s = buf.toString("latin1"); } catch { return out; }
+    if (s.indexOf("/ToUnicode") < 0 && s.indexOf("/Type0") < 0) return out;
+    const objAt = new Map();
+    const objRe = /(\d+)\s+(\d+)\s+obj\b/g;
+    let m;
+    while ((m = objRe.exec(s)) && objAt.size < 20000) objAt.set(m[1], m.index + m[0].length);
+    const bodyOf = (n) => { const at = objAt.get(String(n)); if (at === undefined) return ""; const end = s.indexOf("endobj", at); return s.slice(at, end < 0 ? Math.min(s.length, at + 65536) : end); };
+    const streamOf = (n) => {
+      const at = objAt.get(String(n));
+      if (at === undefined || !zlib) return "";
+      const end = s.indexOf("endobj", at), st = s.indexOf("stream", at);
+      if (st < 0 || (end >= 0 && st > end)) return "";
+      let start = st + 6;
+      if (s[start] === "\r" && s[start + 1] === "\n") start += 2; else if (s[start] === "\n") start += 1;
+      const en = s.indexOf("endstream", start);
+      if (en < 0) return "";
+      const raw = buf.subarray(start, en);
+      try { return /\/FlateDecode/.test(s.slice(at, st)) ? zlib.inflateSync(raw, { maxOutputLength: PART_MAX }).toString("latin1") : raw.toString("latin1"); } catch { return ""; }
+    };
+    const entries = [];
+    const fontRe = /\/Font\s*(?:<<([\s\S]*?)>>|(\d+)\s+\d+\s+R)/g;
+    while ((m = fontRe.exec(s)) && entries.length < 2000) {
+      const dict = m[1] !== undefined ? m[1] : bodyOf(m[2]);
+      for (const e of dict.matchAll(/\/([^\s/<>[\]()]+)\s+(\d+)\s+\d+\s+R/g)) entries.push([e[1], e[2]]);
+    }
+    const cmaps = new Map();
+    for (const [name, n] of entries) {
+      if (out.has(name)) continue;
+      const body = bodyOf(n);
+      if (!/\/Type\s*\/Font\b/.test(body)) continue;
+      const type0 = /\/Subtype\s*\/Type0\b/.test(body);
+      const tu = body.match(/\/ToUnicode\s+(\d+)\s+\d+\s+R/);
+      let cmap = null;
+      if (tu) { if (!cmaps.has(tu[1])) cmaps.set(tu[1], parseToUnicode(streamOf(tu[1]))); cmap = cmaps.get(tu[1]); }
+      const map = cmap && cmap.map.size ? cmap.map : null;
+      out.set(name, { width: map && cmap.width ? cmap.width : (type0 ? 2 : 1), map });
+    }
+    return out;
+  }
+  function decodeInFont(bytes, f) {
+    if (!f) return decodeWinAnsi(Bytes.from(bytes));
+    if (!f.map) return f.width === 1 ? decodeWinAnsi(Bytes.from(bytes)) : "";
+    let out = "";
+    for (let k = 0; k + f.width <= bytes.length; k += f.width) {
+      let code = 0;
+      for (let j = 0; j < f.width; j++) code = code * 256 + bytes[k + j];
+      const u = f.map.get(code);
+      out += u !== undefined ? u : f.width === 1 ? decodeWinAnsi(Bytes.from([code])) : "";
+    }
+    return out;
+  }
+  function readPdfLiteralBytes(s, i) {
     const bytes = [];
     let depth = 1; i++;
     while (i < s.length && depth > 0) {
@@ -24682,27 +25560,48 @@ const CareerRender = (() => {
       else if (c === ")") { depth--; if (depth > 0) bytes.push(41); i++; }
       else { bytes.push(s.charCodeAt(i) & 0xff); i++; }
     }
-    return [decodeWinAnsi(Bytes.from(bytes)), i];
+    return [bytes, i];
   }
   function extractPdfRuns(buf) {
     const runs = [];
     if (!Bytes.isBuffer(buf) || !zlib) return runs;
     const streams = pdfStreams(buf);
+    const fonts = pdfFontMaps(buf);
     streams.forEach((streamBuf, page) => {
       const s = streamBuf.toString("latin1");
       let font = null, size = 0, x = 0, y = 0, pendingText = null;
+      let inArray = false, ma = 1, md = 1, lineX = 0, lineY = 0, lead = 0;
       let i = 0;
       const numBefore = (pos) => { const m = s.slice(Math.max(0, pos - 40), pos).match(/(-?[\d.]+)\s*(-?[\d.]+)\s*$/); return m ? [parseFloat(m[1]), parseFloat(m[2])] : null; };
+      const opAt = (k, op) => s.startsWith(op, k) && !/[A-Za-z0-9*]/.test(s[k + op.length] || " ") && !/[A-Za-z0-9]/.test(s[k - 1] || " ");
+      const nextLine = () => { lineY -= (lead || size * 1.2) * md; x = lineX; y = lineY; };
       while (i < s.length) {
         const c = s[i];
-        if (c === "(") { const [txt, ni] = readPdfLiteral(s, i); pendingText = txt; i = ni; continue; }
-        if (c === "/" ) { const m = s.slice(i).match(/^\/(\S+)\s+([\d.]+)\s+Tf/); if (m) { font = m[1]; size = parseFloat(m[2]); i += m[0].length; continue; } i++; continue; }
-        if (s.startsWith("Tj", i) || s.startsWith("TJ", i) || s.startsWith("'", i) || s.startsWith('"', i)) {
-          if (pendingText !== null && pendingText !== "") runs.push({ text: pendingText, x, y, size, font, page });
-          pendingText = null; i += 2; continue;
+        if (c === "<" && s[i + 1] === "<") { i += 2; continue; }
+        const got = c === "(" ? readPdfLiteralBytes(s, i) : c === "<" ? readPdfHexBytes(s, i) : null;
+        if (got) {
+          const [bytes, ni] = got;
+          const txt = decodeInFont(bytes, font ? fonts.get(font) : null);
+          if (inArray && pendingText !== null) {
+            const gap = s.slice(i - 30 < 0 ? 0 : i - 30, i).match(/[)>]\s*(-?[\d.]+)\s*$/);
+            const space = gap && parseFloat(gap[1]) <= -180 && !/\s$/.test(pendingText) && !/^\s/.test(txt);
+            pendingText += (space ? " " : "") + txt;
+          } else pendingText = txt;
+          i = ni; continue;
         }
-        if (s.startsWith("Tm", i)) { const nums = s.slice(Math.max(0, i - 60), i).match(/(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s*$/); if (nums) { x = parseFloat(nums[5]); y = parseFloat(nums[6]); } i += 2; continue; }
-        if (s.startsWith("Td", i) || s.startsWith("TD", i)) { const pair = numBefore(i); if (pair) { x += pair[0]; y += pair[1]; } i += 2; continue; }
+        if (c === "[") { inArray = true; pendingText = null; i++; continue; }
+        if (c === "]") { inArray = false; i++; continue; }
+        if (c === "/" ) { const m = s.slice(i).match(/^\/(\S+)\s+([\d.]+)\s+Tf/); if (m) { font = m[1]; size = parseFloat(m[2]); i += m[0].length; continue; } i++; continue; }
+        if (opAt(i, "BT")) { x = y = lineX = lineY = 0; ma = md = 1; i += 2; continue; }
+        if (opAt(i, "TL")) { const m = s.slice(Math.max(0, i - 20), i).match(/(-?[\d.]+)\s*$/); if (m) lead = parseFloat(m[1]); i += 2; continue; }
+        if (opAt(i, "T*")) { nextLine(); i += 2; continue; }
+        if (s.startsWith("Tj", i) || s.startsWith("TJ", i) || s.startsWith("'", i) || s.startsWith('"', i)) {
+          if (c === "'" || c === '"') nextLine();
+          if (pendingText !== null && pendingText !== "") runs.push({ text: pendingText, x, y, size: size * Math.abs(ma || 1), font, page });
+          pendingText = null; inArray = false; i += c === "'" || c === '"' ? 1 : 2; continue;
+        }
+        if (s.startsWith("Tm", i)) { const nums = s.slice(Math.max(0, i - 60), i).match(/(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s*$/); if (nums) { ma = parseFloat(nums[1]) || 1; md = parseFloat(nums[4]) || 1; x = lineX = parseFloat(nums[5]); y = lineY = parseFloat(nums[6]); } i += 2; continue; }
+        if (s.startsWith("Td", i) || s.startsWith("TD", i)) { const pair = numBefore(i); if (pair) { lineX += pair[0] * ma; lineY += pair[1] * md; x = lineX; y = lineY; if (s[i + 1] === "D") lead = -pair[1]; } i += 2; continue; }
         i++;
       }
     });

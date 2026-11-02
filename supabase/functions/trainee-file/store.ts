@@ -107,3 +107,18 @@ export function supabasePhoneAuth(admin: any, o: { url: string; anon: string | u
     },
   };
 }
+
+// The person's own time zone, for the days the page shows: the one they set for their weekly digest, else the one on their job
+// alerts (both are the person's settings, career_digest_prefs.tz and career_alert_prefs.tz). Null when neither is set or readable;
+// the page then reads days in Chicago and says so (file_page.ts postedLine).
+// deno-lint-ignore no-explicit-any
+export function supabaseTimeZone(admin: any): (userId: string) => Promise<string | null> {
+  return async (userId: string) => {
+    for (const table of ["career_digest_prefs", "career_alert_prefs"]) {
+      let tz: unknown = null;
+      try { const r = await admin.from(table).select("tz").eq("user_id", userId).maybeSingle(); tz = r?.error ? null : r?.data?.tz; } catch { tz = null; }
+      if (typeof tz === "string" && tz.trim()) return tz.trim();
+    }
+    return null;
+  };
+}

@@ -1,9 +1,7 @@
 {
- "note": "deploy standard S3 (scripts/launch/measure-reply.sh): measure the second parent",
+ "note": "D-036 review: task eval (router, staged, planner, agent) on #395 head 752721ada, $2 cap per brain, owner budget $20",
  "action": "eval",
  "set": "dev",
- "brains": [
-  "router"
- ],
+ "suite": "tasks",
  "passes": 5
 }

@@ -31,11 +31,14 @@ import { tapCard, type TapStore } from "./channel_card_tap.ts";
 import { cardDigest } from "./channel_card_tap.ts";
 import { type Button } from "./channel_adapters.ts";
 import { neverOpen } from "./career_people_sites.ts";
+import { safeCut, safeSlice } from "./channel_text.ts";
+import { type AccountStamp, stampOf, unsendableWhy } from "./apply_trust.ts";
 
 export const TG_CAPTION_MAX = 1024;
 export const PAGE_SIZE = 5;
 export const MASS_FROM = 3; // more than this many postings go as one link to the list page, not one card each
 export const DETAILS_MAX = 3600;
+export const FEED_ROWS = 30; // the hosted list page shows at most this many rows of a list (trainee-file/handler.ts MAX_ROWS)
 
 export interface JobView {
   job_id: string; company: string; title: string; location: string; url: string;
@@ -61,6 +64,10 @@ export interface JobStore {
   prepared(userId: string, jobId: string): Promise<PreparedRow | null>; // the person's newest ready or shown application for this posting
   applied(userId: string, jobId: string): Promise<boolean>; // an exact duplicate: this person already has this posting in the queue
   want(userId: string, job: JobView, at: number): Promise<{ result: "queued" | "already" | "refused"; reason?: string }>; // to be prepared
+  // The same posting already sent or on its way by ANY path (career_apply_posting_sent, the rule the queue refuses a second
+  // application by): this posting's own application, one under another id whose link is the same posting, the browser extension's
+  // report, a batch ledger. Absent: not checked here (the queue still refuses it).
+  elsewhere?(userId: string, job: JobView): Promise<boolean>;
 }
 
 export interface JobDeps {
@@ -73,6 +80,15 @@ export interface JobDeps {
   // The hosted feed for a list: a Telegram Mini App URL and a signed-link fallback (either null when not configured).
   feedLinks?: (userId: string, listId: string) => Promise<{ webApp: string | null; url: string | null }>;
   facts?: (userId: string) => Promise<any[]>; // the person's CONFIRMED facts, for the posting screen's knock-outs; none known = none confirmed
+  // The account record's stamp (apply_trust.ts): an application prepared under another epoch or version, or while paused, is not
+  // offered for approval (the queue would refuse it). Absent: only the payload's own rules (expiry, answers) are judged.
+  account?: (userId: string) => Promise<AccountStamp | null>;
+}
+
+// Whether the prepared application can still go as approved (apply_trust.ts unsendableWhy): null when it can.
+export async function unsendable(userId: string, p: PreparedRow, deps: Pick<JobDeps, "account" | "now">, account?: AccountStamp | null | "unreadable"): Promise<string | null> {
+  const a = account !== undefined ? account : deps.account ? await deps.account(userId).catch(() => "unreadable" as const) : undefined;
+  return unsendableWhy(p.payload, { now: deps.now(), account: a });
 }
 
 // ---------------------------------------------------------------- refs and buttons
@@ -110,19 +126,34 @@ export const sourceOf = (jobId: string, provider?: string | null) => {
 // employer's only when its name is the employer's name (careers.acme.com for Acme): a list of every applicant-tracking and
 // job-board host can never be complete (tests/architect/scenarios-file-apply.test.ts: acme.bamboohr.com showed BambooHR's logo
 // as Acme's; LinkedIn's short-link host and Indeed's UK host showed theirs).
+// TELEGRAM SCENARIOS (2026-10-30): a host counts only when its name IS the employer's name, whole words of it from the start
+// ("meta" for Meta Platforms, "capitalone" for Capital One), or that name with a careers word around it ("acmecareers",
+// "joinacme"). A host that merely starts with or contains the name is another company's: metaview.ai and metabase.com are not
+// Meta, datadoghq.com is not Data Corp, globalstaffing.com is not Global Payments, unitedhealthgroup.com is not United Airlines,
+// stripes.com is not Stripe (each showed that company's logo as the employer's).
 const SECOND_LEVEL = /^(co|com|ac|org|net|gov|edu|ne|or)$/;
 const registrableLabel = (h: string) => { const l = h.split("."); return l.length >= 3 && SECOND_LEVEL.test(l[l.length - 2]) && l[l.length - 1].length === 2 ? l[l.length - 3] : l[l.length - 2] ?? ""; };
 const companySlug = (c: string) => String(c ?? "").toLowerCase().replace(/&/g, "and").replace(/\b(inc|llc|ltd|corp|corporation|co|company|gmbh|the)\b\.?/g, "").replace(/[^a-z0-9]/g, "");
+const CAREER_WORD = /^(?:careers?|jobs?|hiring|talent|team|work|join|apply|people|corp|inc|co|hq|group|labs?|global|usa|us)?$/;
 export function hostIsEmployers(h: string, company: string): boolean {
   const label = registrableLabel(h).replace(/[^a-z0-9]/g, ""), slug = companySlug(company);
   if (!label || !slug) return false;
-  if (label === slug) return true;
-  const first = String(company ?? "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)[0] ?? "";
-  return (Math.min(label.length, slug.length) >= 4 && (label.includes(slug) || slug.includes(label))) || (first.length >= 4 && label.startsWith(first));
+  const words = String(company ?? "").toLowerCase().replace(/&/g, " and ").split(/[^a-z0-9]+/).filter(Boolean);
+  const names = new Set<string>([slug]);
+  for (let i = 1; i <= words.length; i++) { const n = words.slice(0, i).join(""); if (n.length >= 4 || i === words.length) names.add(n); }
+  for (const n of names) {
+    if (!n) continue;
+    if (label === n) return true;
+    if (label.startsWith(n) && CAREER_WORD.test(label.slice(n.length))) return true;
+    if (label.endsWith(n) && CAREER_WORD.test(label.slice(0, label.length - n.length))) return true;
+  }
+  return false;
 }
 export function logoDomain(job: Pick<JobView, "company_domain" | "url" | "company">, env: { get(k: string): string | undefined }): string | null {
   const given = String(job.company_domain ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
-  if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(given)) return given;
+  // A stated domain that is an applicant-tracking host, a job board or a never-opened site is not the employer's (it showed
+  // LinkedIn's, Lever's or Greenhouse's logo as the employer's).
+  if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(given) && !AGGREGATOR.test(given) && !neverOpen(given)) return given;
   const h = host(job.url);
   if (h && !AGGREGATOR.test(h) && !neverOpen(h)) {
     const bare = h.replace(/^(www|careers|jobs|job|apply|boards|hiring)\./, "");
@@ -149,11 +180,14 @@ const dayOf = (iso: string) => { const t = Date.parse(iso); if (Number.isNaN(t))
 export function agoOf(iso: string | null, now: number): string | null {
   const t = iso ? Date.parse(iso) : NaN;
   if (Number.isNaN(t)) return null;
+  // TELEGRAM SCENARIOS: a date after now (a posting stamped ahead, another time zone) is its day, never "0 min ago".
+  if (t > now + 60000) return dayOf(iso!);
   const mins = Math.max(0, Math.floor((now - t) / 60000));
   const rel = mins < 60 ? `${mins} min ago` : mins < 1440 ? `${Math.floor(mins / 60)} h ago` : `${Math.floor(mins / 1440)} d ago`;
   return `${rel} (${dayOf(iso!)})`;
 }
-const clean = (s: unknown, n: number) => String(s ?? "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim().slice(0, n);
+// Cut on a whole character (TELEGRAM SCENARIOS: a 160-character title cut inside an emoji made the card invalid UTF-8, refused).
+const clean = (s: unknown, n: number) => safeSlice(String(s ?? "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim(), n);
 
 // The posting as the tools found it, joined with the stored posting row for what the search result does not carry.
 export function jobViewOf(hit: any, row: PostingRow | null | undefined): JobView {
@@ -188,7 +222,8 @@ export function captionOf(job: JobView, now: number): string {
     ...(job.gaps.length ? ["Gaps:", ...job.gaps.slice(0, 2).map((r) => `• ${r}`)] : []),
   ];
   const text = lines.join("\n").replace(/\n{3,}/g, "\n\n");
-  return text.length <= TG_CAPTION_MAX ? text : `${text.slice(0, TG_CAPTION_MAX - 1)}…`;
+  // Cut on a whole character: half an emoji is not valid UTF-8, and Telegram refuses the whole card (photo and text both).
+  return text.length <= TG_CAPTION_MAX ? text : `${safeSlice(text, TG_CAPTION_MAX - 1)}…`;
 }
 
 // The requirements section of the posting's own text when it has one; otherwise the start of the text, said so.
@@ -210,7 +245,7 @@ export function detailsOf(job: JobView, row: PostingRow | null | undefined, now:
   while (rest.length > DETAILS_MAX) {
     let cut = rest.lastIndexOf("\n", DETAILS_MAX);
     if (cut < DETAILS_MAX / 2) cut = rest.lastIndexOf(" ", DETAILS_MAX);
-    if (cut < 1) cut = DETAILS_MAX;
+    if (cut < 1) cut = safeCut(rest, DETAILS_MAX);
     out.push(rest.slice(0, cut).trim());
     rest = rest.slice(cut).trim();
   }
@@ -240,7 +275,7 @@ export async function sendJobPage(o: { userId: string; jobs: JobView[]; page: nu
     let shownAs: "photo" | "text" = "text";
     if (logo) { const r = await send.photo({ photoUrl: logo, caption, buttons }).catch(() => ({ ok: false })); if (r.ok) { shownAs = "photo"; photo++; } }
     if (shownAs === "text") {
-      const r = await send.text({ text: `${caption}${job.url ? `\n\n${job.url}` : ""}`.slice(0, 4000), buttons });
+      const r = await send.text({ text: safeSlice(`${caption}${job.url ? `\n\n${job.url}` : ""}`, 4000), buttons });
       if (r.ok) text++;
       else continue; // not delivered: no card is remembered for a button nobody can tap
     }
@@ -268,7 +303,8 @@ export async function sendJobCards(o: { userId: string; hits: any[]; deps: JobDe
   if (jobs.length > MASS_FROM && o.deps.feedLinks) {
     const links = await o.deps.feedLinks(o.userId, listId).catch(() => null);
     if (links?.url || links?.webApp) {
-      const line = `${jobs.length} jobs for you.${links.url ? ` Open the list: ${links.url}` : ""}`;
+      // The count is what the page will show (file journey round 2: "45 jobs for you" opened a page of 30 that never said so).
+      const line = `${jobs.length} jobs for you.${jobs.length > FEED_ROWS ? ` The list shows the first ${FEED_ROWS}.` : ""}${links.url ? ` Open the list: ${links.url}` : ""}`;
       const r = await o.send.text({ text: line, buttons: links.webApp ? [[{ text: "Open the list", webApp: links.webApp }]] : undefined });
       if (r.ok) return { sent: 1, total: jobs.length };
     }
@@ -298,6 +334,12 @@ export async function sendApplyHere(o: { userId: string; jobs: JobView[]; refs: 
     const nc = o.notChecked[i]?.length ? `Not checked: ${o.notChecked[i].join(", ")}.` : "";
     if (prep && secretFields(prep).length) {
       const r = await send.text({ text: `${job.title ? `${job.title} at ` : ""}${job.company}: this one has a field that needs you (a password, code or similar), and those never go through chat. Finish it yourself:\n${prep.url}` });
+      if (r.ok) sent++;
+      continue;
+    }
+    const why = prep ? await unsendable(o.userId, prep, deps) : null;
+    if (why) {
+      const r = await send.text({ text: `${job.title ? `${job.title} at ` : ""}${job.company}: nothing to approve yet: ${why}.` });
       if (r.ok) sent++;
       continue;
     }
@@ -368,6 +410,10 @@ export function secretFields(p: PreparedRow): string[] {
   (Array.isArray(p.card_lines) ? p.card_lines : []).forEach((l, i) => { if (secretLine(String(l ?? ""))) out.push(`card line ${i + 1}`); });
   return out;
 }
+// An answer carrying ANOTHER account's fact (its user_id is not the payload's): its value is never printed to this person
+// (apply round 3: the page's "What we send" and this card printed it). apply_trust.ts makes such an application unapprovable.
+export const foreignFact = (f: any, pl: any) => f?.user_id !== undefined && f.user_id !== pl?.user_id;
+export const NOT_YOURS = "(not shown: not one of your own facts)";
 export function payloadLines(p: PreparedRow, job: JobView | null): string[] {
   const pl = p.payload ?? {};
   const fields: any[] = Array.isArray(pl.fields) ? pl.fields : [];
@@ -398,7 +444,7 @@ export function payloadLines(p: PreparedRow, job: JobView | null): string[] {
     `Resume: ${resumeName ? `${resumeName} ` : ""}${sha ? `(sha256 ${sha.slice(0, 12)}...) , the one resume this was prepared with` : "none attached"}`,
     `Cover note: ${cover ? String(cover.value).trim() : "none"}`,
     answers.length ? "Answers:" : "Answers: none",
-    ...answers.map((f) => (isFile(f) ? `• ${name(f)}: file ${String(f.value).trim()}` : `• ${name(f)}: ${String(f.value).trim()}`)),
+    ...answers.map((f) => (foreignFact(f, pl) ? `• ${name(f)}: ${NOT_YOURS}` : isFile(f) ? `• ${name(f)}: file ${String(f.value).trim()}` : `• ${name(f)}: ${String(f.value).trim()}`)),
     ...(blank.length ? [`Left blank: ${blank.map(name).join("; ")}`] : []),
     ...(needsYou.length ? ["Needs you (I never type or send these; fill them in yourself on the employer's form):", ...needsYou.map((x) => `• ${x}`)] : []),
     ...(extra.length ? ["Also in this application:", ...extra.map(([k, v]) => `• ${clean(k, 80)}: ${val(v)}`)] : []),
@@ -411,10 +457,10 @@ function pageLines(lines: string[], max = 3800): string[] {
   let buf = "";
   for (const raw of lines) {
     for (let line = raw; ; ) {
-      const piece = line.slice(0, max);
+      const piece = line.slice(0, safeCut(line, max));
       if (buf && buf.length + 1 + piece.length > max) { out.push(buf); buf = ""; }
       buf = buf ? `${buf}\n${piece}` : piece;
-      line = line.slice(max);
+      line = line.slice(piece.length);
       if (!line) break;
     }
   }
@@ -424,6 +470,9 @@ function pageLines(lines: string[], max = 3800): string[] {
 
 // ---------------------------------------------------------------- taps
 export interface JobTapResult { toast: string; status: string }
+// A posting already in the applications is "in your applications", never "applied": it may be queued and not sent yet (file journey
+// round 2: the Telegram button's toast said "Already applied." for an application that was only queued).
+export const ALREADY_TOAST = "Already in your applications.";
 export const BLOCKED_HOST = /(^|\.)(linkedin\.com|indeed\.com|joinhandshake\.com)$/i;
 export const GONE_REPLY = "That card is too old for me to open. Ask me for the postings again and I'll send fresh ones.";
 export const NO_WORKER_REPLY = (company: string, title: string) =>
@@ -444,6 +493,10 @@ export async function screenedOut(userId: string, job: JobView, deps: JobDeps): 
 }
 // The same screen as a pure verdict over a posting row already read (the list page screens every row it offers with one read).
 export function postingVerdict(job: JobView, row: PostingRow, facts: any[], factsWired: boolean, now: number): string | null {
+  // TELEGRAM SCENARIOS (2026-10-30): a posting whose own deadline has passed is expired: never queued, never approvable (its card
+  // said "Apply by: <day>", and Confirm approved it days after).
+  const deadline = Date.parse(String(row.deadline ?? job.deadline ?? ""));
+  if (!Number.isNaN(deadline) && deadline < now) return `its deadline to apply (${dayOf(new Date(deadline).toISOString())}) has passed`;
   const content = contentOf(row);
   const r = screenPicks([{ job_id: job.job_id, url: job.url, company: job.company, title: job.title, location: job.location, content }], { apps: [], facts, now });
   if (r.ok.length) return null;
@@ -476,6 +529,16 @@ export async function tapJob(o: { userId: string; data: string; messageId: strin
   const got = await deps.store.recall(userId, t.ref).catch(() => null);
   if (!got) { await say(GONE_REPLY); return { toast: "Too old.", status: "gone" }; }
   const { job, shownAs } = got;
+  // The exact prepared application, whole, with Confirm bound to its hash (none when it cannot be approved here, and why).
+  const showPayload = async (prep: PreparedRow): Promise<JobTapResult> => {
+    const lines = pageLines(payloadLines(prep, job));
+    const needsYou = secretFields(prep).length > 0; // a secret-looking field with a value: shown as "needs you", never approvable here
+    const why = needsYou ? null : await unsendable(userId, prep, deps);
+    for (let i = 0; i < lines.length; i++) await send.text({ text: lines[i], buttons: i === lines.length - 1 && !needsYou && !why ? confirmButtons(t.ref, hashTag(prep.payload_hash)) : undefined });
+    if (why) { await say(`I can't offer this one for approval: ${why}.`); return { toast: "Not approvable.", status: "unsendable" }; }
+    if (needsYou) { await say(`I can't send this one from here: it has a field that needs you (a password, code or similar), and those never go through chat. Open the link and finish that part yourself:\n${prep.url}`); return { toast: "Needs you.", status: "needs_you" }; }
+    return { toast: "Check it, then Confirm.", status: "shown" };
+  };
 
   if (t.op === "details") {
     const rows = await deps.store.postings([job.job_id]).catch(() => [] as PostingRow[]);
@@ -507,9 +570,9 @@ export async function tapJob(o: { userId: string; data: string; messageId: strin
       await say(`I don't apply on LinkedIn, Indeed or Handshake for you. Open it and apply there yourself:\n${job.url}`);
       return { toast: "Apply there yourself.", status: "never_automated" };
     }
-    if (await deps.store.applied(userId, job.job_id).catch(() => false)) {
+    if (await deps.store.applied(userId, job.job_id).catch(() => false) || (deps.store.elsewhere && await deps.store.elsewhere(userId, job).catch(() => false))) {
       await say(`You already have ${job.title ? `${job.title} at ` : ""}${job.company} in your applications, so I won't queue it twice. Say "show my applications" for where it stands.`);
-      return { toast: "Already applied.", status: "duplicate" };
+      return { toast: ALREADY_TOAST, status: "duplicate" };
     }
     const screened = await screenedOut(userId, job, deps);
     if (screened) { await say(`Not queued: ${screened}`); return { toast: "Not queued.", status: "screened" }; }
@@ -520,11 +583,7 @@ export async function tapJob(o: { userId: string; data: string; messageId: strin
       await say(w.result === "already" ? `${NO_WORKER_REPLY(job.company, job.title)} (It was already waiting.)` : NO_WORKER_REPLY(job.company, job.title));
       return { toast: "Queued, not applied.", status: "queued_unprepared" };
     }
-    const lines = pageLines(payloadLines(prep, job));
-    const needsYou = secretFields(prep).length > 0; // a secret-looking field with a value: shown as "needs you", never approvable here
-    for (let i = 0; i < lines.length; i++) await send.text({ text: lines[i], buttons: i === lines.length - 1 && !needsYou ? confirmButtons(t.ref, hashTag(prep.payload_hash)) : undefined });
-    if (needsYou) { await say(`I can't send this one from here: it has a field that needs you (a password, code or similar), and those never go through chat. Open the link and finish that part yourself:\n${prep.url}`); return { toast: "Needs you.", status: "needs_you" }; }
-    return { toast: "Check it, then Confirm.", status: "shown" };
+    return await showPayload(prep);
   }
 
   // Confirm: the hash-bound approval. The payload is read again now; the tag on the button must be the tag of what is on file.
@@ -532,15 +591,27 @@ export async function tapJob(o: { userId: string; data: string; messageId: strin
     // Already in the applications (approved by another tap at the same moment, on another device, or sent elsewhere): that is
     // what is said, never "changed" or "could not open": the payload it approved is no longer a ready one, so check this first,
     // and again whenever the approval below finds the prepared application gone.
-    const applied = () => deps.store.applied(userId, job.job_id).catch(() => false);
+    // Sent another way counts too (the extension, the same posting under another id): apply round 3.
+    const applied = async () => await deps.store.applied(userId, job.job_id).catch(() => false) || (!!deps.store.elsewhere && await deps.store.elsewhere(userId, job).catch(() => false));
     const duplicate = async (): Promise<JobTapResult> => {
       await say(`You already have ${job.company} in your applications, so I won't queue it twice.`);
-      return { toast: "Already applied.", status: "duplicate" };
+      return { toast: ALREADY_TOAST, status: "duplicate" };
     };
     if (await applied()) return duplicate();
     const prep = await deps.store.prepared(userId, job.job_id).catch(() => null);
     if (!prep || hashTag(prep.payload_hash) !== t.tag) {
       if (!prep && await applied()) return duplicate();
+      // TELEGRAM ROUND 3 (2026-10-31): a Confirm whose application changed since it was shown (an answer edited, the resume
+      // replaced) approved nothing and said "tap Apply on the card again", an extra round trip to see what changed (and the card
+      // may be far up the chat). The refusal stands; the current application is shown right under it, whole, with a Confirm
+      // bound to ITS hash (after the posting screen: a closed posting is said, never offered). Nothing is approved by this tap.
+      if (prep && !byHandUrl(job.url)) {
+        const screened = await screenedOut(userId, job, deps);
+        if (screened) { await say(`That application changed after I showed it, and nothing was approved: ${screened}`); return { toast: "Not approved.", status: "screened" }; }
+        await say(`That application changed after I showed it, so nothing was approved. Here is the current one: check it, then tap its Confirm.`);
+        const shown = await showPayload(prep);
+        return { toast: "Changed. Nothing approved.", status: shown.status === "shown" ? "changed" : shown.status };
+      }
       await say(`That application changed after I showed it, so nothing was approved. Tap Apply on the card again to see the current one.`);
       return { toast: "Changed. Nothing approved.", status: "changed" };
     }
@@ -548,7 +619,17 @@ export async function tapJob(o: { userId: string; data: string; messageId: strin
       await say(`I don't apply on LinkedIn, Indeed or Handshake for you, so nothing was approved. Open it and apply there yourself:\n${job.url}`);
       return { toast: "Apply there yourself.", status: "never_automated" };
     }
+    // A destination that is not a web address is nowhere an application can go: nothing is approved (file journey round 2).
+    const dest = (prep.payload as Record<string, unknown>)?.destination;
+    if (dest !== undefined && dest !== null && dest !== "" && !/^https?:\/\/\S+$/i.test(String(dest))) {
+      await say(`That application doesn't go to a web address, so nothing was approved. Ask me to prepare ${job.company} again.`);
+      return { toast: "Nothing approved.", status: "bad_destination" };
+    }
     if (secretFields(prep).length) { await say(`That application has a field that needs you (a password, code or similar), so nothing was approved. Finish it yourself on the employer's form:\n${prep.url}`); return { toast: "Needs you.", status: "needs_you" }; }
+    // Expired, prepared under another account state, or carrying an answer the contract never sends: the queue or the worker
+    // would refuse it after the yes, so the yes approves nothing (apply_trust.ts; scenarios-apply-r3.test.ts).
+    const why = await unsendable(userId, prep, deps);
+    if (why) { await say(`Nothing was approved: ${why}.`); return { toast: "Not approved.", status: "unsendable" }; }
     const screened = await screenedOut(userId, job, deps);
     if (screened) { await say(`Nothing was approved: ${screened}`); return { toast: "Not approved.", status: "screened" }; }
     if (deps.cards.confirm) {
@@ -606,6 +687,17 @@ export function supabaseConfirmedFacts(admin: any): (userId: string) => Promise<
   };
 }
 
+// The account record's stamp for apply_trust.ts (the same record career_apply_current reads). An unreadable record throws: the
+// page and Confirm then approve nothing ("couldn't check your account").
+// deno-lint-ignore no-explicit-any
+export function supabaseAccountStamp(admin: any): (userId: string) => Promise<AccountStamp | null> {
+  return async (userId) => {
+    const r = await admin.from("career_watch_kv").select("value").eq("user_id", userId).eq("key", "career:account").maybeSingle();
+    if (r.error) throw new Error(`read the account: ${r.error.message}`);
+    return stampOf(r.data?.value ?? null);
+  };
+}
+
 // ---------------------------------------------------------------- the store over Supabase
 // Remembered cards and saves live in career_watch_kv (a per-person key/value the service role writes): no new table.
 // deno-lint-ignore no-explicit-any
@@ -636,6 +728,9 @@ export function supabaseJobStore(admin: any): JobStore {
     async applied(userId, jobId) {
       const rows = must(await admin.from("career_apply_jobs").select("job_id").eq("user_id", userId).eq("job_id", jobId).limit(1), "read the queue");
       return !!rows?.length;
+    },
+    async elsewhere(userId, job) {
+      return must(await admin.rpc("career_apply_posting_sent", { p_user: userId, p_job_id: job.job_id, p_url: job.url, p_except: null, p_queued: true }), "read the applications") === true;
     },
     async want(userId, job, at) {
       const { wantsFrom, supabaseWantStore } = await import("./career_apply_want.ts");

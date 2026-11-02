@@ -11,6 +11,7 @@
 import { PLAYBOOKS } from "../knowledge/playbooks.generated.ts";
 import { FIELDS, GK_PHRASES, GK_TERMS, OVERLAYS } from "./fields.ts";
 import type { Fact } from "./ground.ts";
+import { readsAsInstruction } from "../../career_people_import.ts";
 
 // Folding comes first, everywhere: full-width and other compatibility forms become plain ASCII (NFKC), invisible characters go, and
 // look-alike Cyrillic and Greek letters become the Latin letters they imitate, so "Gооgle" is read as Google and "８４,２００" as 84,200.
@@ -210,6 +211,39 @@ export function unsupported(text: string, support: string | string[], allowGK = 
 const norm_url = (u: string) => { try { const x = new URL(u); [...x.searchParams.keys()].filter((k) => /^utm_/i.test(k)).forEach((k) => x.searchParams.delete(k)); x.hash = ""; return x.toString().replace(/\/$/, ""); } catch { return ""; } };
 export const sameUrl = (a: string, b: string) => !!norm_url(a) && norm_url(a) === norm_url(b);
 export interface Rejected { fact: Partial<Fact>; why: string }
+// RESEARCH SCENARIOS (2026-10-29): what a page or a search answer can carry that is no fact about the field. Text that
+// reads as an instruction (to the model or about the user), a claim about the person reading ("you have a 3.9 GPA", "the
+// user is guaranteed an offer"), anything secret-shaped, and a link inside the fact's own words (the only link a fact
+// may carry is its source URL) are never kept, however exactly the quote matches.
+const TO_MODEL = /\b(?:tell|inform|remind|convince|assure)\s+(?:the\s+)?(?:user|reader|candidate|person|student)\b|\b(?:print|reveal|output|repeat|leak|show|send)\b[^.]{0,40}\b(?:api[ _-]?keys?|secrets?|tokens?|passwords?|system prompt|instructions)\b|\byour (?:instructions|system prompt|rules)\b|\bas an ai\b/i;
+const ABOUT_PERSON = /\byou(?:['’]re|['’]ve| are| have| already| were| will be| qualify| got| earned| received| hold)\b|\byour (?:gpa|grades?|resume|cv|application|offer|profile|odds|chances|interview|record|experience|school)\b|\bthe (?:user|reader)(?:['’]s)?\b/i;
+const SECRET = /\bsk-[A-Za-z0-9_-]{6,}|\b[A-Z][A-Z0-9]*_(?:API_)?(?:KEY|SECRET|TOKEN)\b|\bapi[ _-]?keys?\b|-----BEGIN|\bbearer\s+[A-Za-z0-9._-]{8,}/i;
+const LINK_IN_TEXT = /[a-z][a-z0-9+.-]*:\/\/|\bwww\.|\b(?:javascript|data|vbscript|mailto):|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\/\S*/i;
+// RESEARCH ROUND 2 (2026-10-30): a page's contact line is not a fact about a field: "Email the campus recruiter Jane Doe at
+// jane.doe@recruiting-example.com" and "Call the recruiting line at (212) 555-0147" were kept (the quote matched), so a made-up
+// recruiter's address reached the brief. And a page that calls its own numbers "official" ("Official pay table: first-year
+// analysts earn $185,000") is official only on a government or school site, or on the employer's own domain.
+const EMAIL_IN_TEXT = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/;
+const PHONE_IN_TEXT = /(?:\+?1[\s.-]?)?\(?\b\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/;
+const OFFICIAL_CLAIM = /\b(?:official|verified|confirmed)\b[^.]{0,40}\b(?:pay|salary|salaries|comp|compensation|tables?|bands?|grids?|rates?|figures?|ranges?)\b|\b(?:pay|salary|comp(?:ensation)?)\s+(?:tables?|bands?|grids?)\b[^.]{0,30}\b(?:official|verified)\b/i;
+function officialHost(url: string, text: string): boolean {
+  let host = "";
+  try { host = new URL(url).hostname.toLowerCase(); } catch { return false; }
+  if (/\.(?:gov|edu|mil)$|\.gov\.[a-z]{2}$|\.ac\.[a-z]{2}$/.test(host)) return true;
+  // The employer's own site: a firm the fact names whose name is the site's registered name (stripe.com, not stripe-salaries.example.net).
+  const site = host.replace(/^www\./, "").split(".").slice(-2)[0] ?? "";
+  return (text.match(GAZ_RX) ?? []).some((n) => n.toLowerCase().replace(/[^a-z0-9]/g, "") === site);
+}
+export function notAFact(f: { text?: string; quote?: string; url?: string }): string | null {
+  const text = fold(String(f.text ?? "")), quote = fold(String(f.quote ?? ""));
+  if (readsAsInstruction(text) || readsAsInstruction(quote) || TO_MODEL.test(text) || TO_MODEL.test(quote)) return "reads as an instruction, not a fact";
+  if (SECRET.test(text) || SECRET.test(quote)) return "carries something secret-shaped";
+  if (ABOUT_PERSON.test(text)) return "a claim about the person, not the field";
+  if (LINK_IN_TEXT.test(text)) return "a link inside the fact's words";
+  if (EMAIL_IN_TEXT.test(text) || PHONE_IN_TEXT.test(text)) return "a contact address or number, not a fact";
+  if ((OFFICIAL_CLAIM.test(text) || OFFICIAL_CLAIM.test(quote)) && !officialHost(String(f.url ?? ""), `${text} ${quote}`)) return "says it is official, but its source is not a government, school or employer page";
+  return null;
+}
 // A retrieved fact stays only if: its URL is one the search returned; it carries a verbatim quote; and every number in the fact's
 // text is in a quote passage that shares the claim's subject words, and every name is in the quote. The model's paraphrase can
 // drop words but cannot add a figure, change a number's subject, or introduce an employer.
@@ -219,12 +253,17 @@ export function acceptFacts(facts: Fact[], returnedUrls: string[]): { kept: Fact
     const bad = (why: string) => rejected.push({ fact: f, why });
     if (!f || typeof f.text !== "string" || !f.text.trim()) { bad("empty"); continue; }
     if (!/^https:\/\//i.test(String(f.url ?? ""))) { bad("no https source URL"); continue; }
-    if (!returnedUrls.some((u) => sameUrl(u, f.url))) { bad("URL not among the sources the search returned"); continue; }
+    const source = returnedUrls.find((u) => sameUrl(u, f.url));
+    if (!source) { bad("URL not among the sources the search returned"); continue; }
+    if (!/^https:\/\//i.test(source)) { bad("no https source URL"); continue; }
     if (!f.quote || f.quote.trim().length < 8) { bad("no quote from the source"); continue; }
     if (f.text.length > 320) { bad("too long to verify"); continue; }
+    const not = notAFact(f);
+    if (not) { bad(not); continue; }
     const extra = unsupported(f.text, [f.quote], false);
     if (extra.length) { bad(`not in the quote: ${extra.join(", ")}`); continue; }
-    kept.push({ ...f, url: norm_url(f.url) || f.url });
+    // The link shown is the source's own URL, exactly as the search returned it (never the model's copy, never rewritten).
+    kept.push({ ...f, url: source });
   }
   return { kept, rejected };
 }

@@ -9,7 +9,10 @@
 # A measurement commit on ci/brain-eval merges the branch measured as its second parent; that is the brain commit logged.
 # 2026-10-26 (sealed held-out set): what a run measures is read from evals/career/eval-request.json (a push) or the
 # dispatch inputs: the set (dev: the 38 the builder has seen; sealed: the bar), the brains (router, staged, agent) and the
-# passes. The verdict (evals/career/verdict.ts) fails the job when any pass is not a score (stopped, a brain error, or a
+# passes; and (D-036 review, 2026-11-01) the suite: heldout (default; everything below as before) or tasks (the
+# state-judged task eval, evals/career/tasks/run.ts, through the real handler: router, staged, planner and agent, each capped
+# at $2, the owner's written budget "you can use about 20$ worth of credits"; a failed or stopped brain fails the job).
+# The verdict (evals/career/verdict.ts) fails the job when any pass is not a score (stopped, a brain error, or a
 # CI judge that did not score every item) and, on the sealed set, when no brain clears 95% on every one of its five
 # passes. The sealed set is opened only here, into the runner's temp directory, and its results keep no item text.
 name: brain-eval
@@ -81,11 +84,13 @@ jobs:
             const brains = (ev ? (Deno.env.get("IN_BRAINS") || "router,staged,agent").split(",") : (f.brains ?? ["agent"])).map((b) => b.trim()).filter(Boolean);
             const action = ev ? "eval" : (f.action ?? "eval");
             const passes = Number(f.passes ?? 5);
+            const suite = ev ? "heldout" : (f.suite ?? "heldout");
+            if (!["heldout", "tasks"].includes(suite) || (suite === "tasks" && (action !== "eval" || set !== "dev"))) { console.log(`NOT RUN: bad suite ${suite} (heldout, or tasks with action eval on the dev set)`); Deno.exit(2); }
             if (!["dev", "sealed"].includes(set) || !brains.length || brains.some((b) => !["router", "staged", "agent"].includes(b)) || !["eval", "pubkey"].includes(action) || passes !== 5) {
               console.log(`NOT RUN: bad request (set ${set}, brains ${brains}, action ${action}, passes ${passes}; the owner requires five passes)`); Deno.exit(2);
             }
-            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `set=${set}\nbrains=${brains.join(" ")}\nbrains_csv=${brains.join(",")}\naction=${action}\npasses=${passes}\n`, { append: true });
-            console.log(`measuring: action ${action}, set ${set}, brains ${brains.join(", ")}, ${passes} passes`);
+            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `set=${set}\nbrains=${brains.join(" ")}\nbrains_csv=${brains.join(",")}\naction=${action}\npasses=${passes}\nsuite=${suite}\n`, { append: true });
+            console.log(suite === "tasks" ? "measuring: the task eval (router, staged, planner, agent; $2 each)" : `measuring: action ${action}, set ${set}, brains ${brains.join(", ")}, ${passes} passes`);
           '
         env:
           IN_SET: ${{ inputs.set }}
@@ -96,7 +101,7 @@ jobs:
         if: steps.req.outputs.action == 'pubkey'
         run: deno run -A evals/career/sealed/seal.ts pubkey --secret-env OPENAI_API_KEY > evals/career/sealed/recipient.json && cat evals/career/sealed/recipient.json
       - name: Open the sealed set
-        if: steps.req.outputs.action == 'eval' && steps.req.outputs.set == 'sealed'
+        if: steps.req.outputs.action == 'eval' && steps.req.outputs.suite == 'heldout' && steps.req.outputs.set == 'sealed'
         run: |
           deno run -A evals/career/sealed/seal.ts meta evals/career/sealed/heldout-sealed.v1.json
           sha=$(deno eval 'console.log(JSON.parse(Deno.readTextFileSync("evals/career/sealed/heldout-sealed.v1.json")).sha256)')
@@ -109,7 +114,7 @@ jobs:
       # Five full passes of each brain on the same build, in parallel per brain (second judge's ruling, 2026-10-21: the
       # pass-to-pass swing is too large for fewer). Each pass is logged.
       - name: Five passes per brain
-        if: steps.req.outputs.action == 'eval'
+        if: steps.req.outputs.action == 'eval' && steps.req.outputs.suite == 'heldout'
         run: |
           # --set heldout is the sealed held-out set (the bar); --set dev is the 38 in heldout-live.json.
           if [ "${{ steps.req.outputs.set }}" = "sealed" ]; then S="--set heldout"; else S="--set dev"; fi
@@ -118,14 +123,24 @@ jobs:
             wait
             cat "$RUNNER_TEMP"/$b-*.txt
           done
+      # The task eval (suite=tasks): each brain on the same 44 tasks, real model, $2 cap per brain; no `|| true`, so a failed or
+      # stopped brain fails the job (a stopped run is not a score). Needs Postgres 16 (the real handler) as the runner has it.
+      - name: Task completion, router / staged / planner / agent (suite=tasks)
+        if: steps.req.outputs.action == 'eval' && steps.req.outputs.suite == 'tasks'
+        env: { TASKS_BUDGET_USD: "2.00" }
+        run: |
+          set -euo pipefail
+          export PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH
+          for b in router staged planner; do deno run -A --no-check --import-map=evals/career/tasks/import-map.json evals/career/tasks/run.ts --brain $b --model openai --budget-usd "$TASKS_BUDGET_USD" --label "tasks-$b-${{ github.run_id }}"; done
+          deno run -A --no-check --import-map=evals/career/tasks/agent-import-map.json evals/career/tasks/run.ts --brain agent --model openai --budget-usd "$TASKS_BUDGET_USD" --label "tasks-agent-${{ github.run_id }}"
       - name: Re-score recorded runs (judge only)
-        if: steps.req.outputs.action == 'eval'
+        if: steps.req.outputs.action == 'eval' && steps.req.outputs.suite == 'heldout'
         run: |
           [ -f evals/career/rejudge.txt ] || exit 0
           grep -v '^[[:space:]]*#' evals/career/rejudge.txt | while read -r l m; do [ -n "$l" ] && deno run -A evals/career/rejudge.ts "$l" "$m"; done
       - name: The score log and the verdict
         id: verdict
-        if: always() && steps.req.outputs.action == 'eval'
+        if: always() && steps.req.outputs.action == 'eval' && steps.req.outputs.suite == 'heldout'
         run: |
           ls evals/career/results/${{ steps.req.outputs.set }}-*-${{ github.run_id }}-p*.json >/dev/null 2>&1 && deno run -A evals/career/score-log.ts evals/career/results/${{ steps.req.outputs.set }}-*-${{ github.run_id }}-p*.json --run ${{ github.run_id }}
           set +e
@@ -142,11 +157,11 @@ jobs:
           rm -f "$RUNNER_TEMP/sealed.json"
           git config user.name "brain-eval[ci]"
           git config user.email "brain-eval@users.noreply.github.com"
-          git add evals/career/results/ evals/career/SCORE-LOG.md evals/career/sealed/RUNS.json evals/career/sealed/recipient.json || true
+          git add evals/career/results/ evals/career/SCORE-LOG.md evals/career/sealed/RUNS.json evals/career/sealed/recipient.json evals/career/tasks/results/ || true
           git commit -m "brain-eval data: run ${{ github.run_id }} ($(head -1 "$RUNNER_TEMP/verdict.txt" 2>/dev/null || echo "${{ steps.req.outputs.action }}"))" || exit 0
           git push origin HEAD:ci/brain-eval
       - name: The verdict decides the job
-        if: always() && steps.req.outputs.action == 'eval'
+        if: always() && steps.req.outputs.action == 'eval' && steps.req.outputs.suite == 'heldout'
         run: |
           cat "$RUNNER_TEMP/verdict.txt" 2>/dev/null || echo "NOT A SCORE: no verdict was written"
           # A second, independent reading of the raw pass files: a claimed bar must hold on every pass (finished, no judge

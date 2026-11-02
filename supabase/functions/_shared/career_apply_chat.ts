@@ -25,6 +25,7 @@ import { checkListed, coverageLine, NO_RESUME_NEXT, NO_RESUME_REASON, NO_RESUME_
 export const APPLY_QUEUE_INTENT = "career_apply_queue";
 const CO = "([A-Z][A-Za-z0-9&.'’-]*(?:\\s+(?:[A-Z][A-Za-z0-9&.'’-]*|\\d+|of|and|&))*)";
 const QUESTION = /^\s*(how|what|where|when|should|can|could|would|do|does|did|is|are|am|why|which)\b/i;
+const GENERIC_EMPLOYER = /^(?:jobs?|roles?|positions?|internships?|openings?|postings?|work|me|us|them|it|this|that|some|any|all|every\w*|any\w*|more|a few|lots|companies|employers)\b/i;
 const BATCH = /\b(these|those|them|all of|the ones|each of|every|\d+\s+(roles?|jobs?|postings?|internships?|positions?))\b/i;
 
 // The ask: a role at a named employer, or a named employer alone. Questions ("how do I apply to X?") and batch shapes
@@ -35,6 +36,9 @@ export function applyAsk(message: string): { company: string; role: string | nul
   let m = raw.match(new RegExp(`\\bapply\\s+(?:me\\s+)?(?:to|for)\\s+(?:the\\s+|that\\s+|this\\s+)?(.+?)\\s+(?:role|position|job|internship|opening)\\s+at\\s+${CO}\\s*[.!]?\\s*$`, "i"));
   if (m) return { role: m[1].trim(), company: m[2].trim() };
   m = raw.match(new RegExp(`\\bapply\\s+(?:me\\s+)?(?:to|at|for)\\s+${CO}\\s*[.!]?\\s*$`, "i"));
+  // KNOWN GAPS (2026-10-30, #317): the employer grammar is case-blind, so "apply to jobs for me" named the employer "jobs for
+  // me". A name that opens with a job word, a pronoun or a quantity names no employer.
+  if (m && GENERIC_EMPLOYER.test(m[1].trim())) return null;
   if (m) return { role: null, company: m[1].trim() };
   return null;
 }

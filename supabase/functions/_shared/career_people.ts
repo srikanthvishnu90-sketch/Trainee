@@ -28,9 +28,9 @@ import { parseNetworkingAsk } from "./career_networking.ts";
 import { CAREER_READ_SCOPE, careerTokenFor } from "./career_mail_gmail.ts";
 import { connectUrl } from "./agent/integrations.ts";
 import { chatAsk, cleanCell, companyKey, parseCsv, parseExport, type ParsedExport, peopleFileText, type PersonRow, sha256Hex } from "./career_people_import.ts";
-import { domainLabelOf, type GmailRead, heardFrom, isCompanyLabel } from "./career_people_gmail.ts";
+import { domainLabelOf, type GmailRead, heardFrom, isCompanyLabel, registrable } from "./career_people_gmail.ts";
 import { memorySweepStore, type SweepOutcome, type SweepSink, type SweepStore, supabaseSweepStore, sweepTurn } from "./career_people_sweep.ts";
-import { checkUrl, type PageGet, pinnedGet, readPage, type Resolver } from "./career_people_page.ts";
+import { checkUrl, formerTitle, type PageGet, pinnedGet, readPage, type Resolver } from "./career_people_page.ts";
 import { findTargets, makeProvider, parseTargetAsk, providerConfig, supabaseProviderStore, type TargetAsk, type TargetDeps } from "./career_people_provider.ts";
 
 export const IMPORT_INTENT = "career_contacts_import", AT_INTENT = "career_contacts_at", ALUMNI_INTENT = "career_people_alumni";
@@ -703,7 +703,27 @@ async function pageTurn(o: PeopleTurnIn, d: PeopleDeps, a: Extract<Ask, { kind: 
   // Someone's own site: an address it publishes with no name beside it is theirs (the person said whose site it is).
   // A company page: only named people; an unnamed address there (careers@, press@) is an inbox, not a person.
   people = a.owner ? people.map((p) => (!p.name && p.email ? { ...p, name: a.owner } : p)) : people.filter((p) => p.name);
-  if (!people.length) return { reply: `${r.url} doesn't mark anyone up as a person or publish an email link, so I took no names from it (I don't guess names from page text). Nothing was saved.`, intent: PAGE_INTENT, status: "no_people" };
+  // NETWORKING R2 (2026-10-30): on a company's page, an address on another domain is not that person's work address: a
+  // look-alike (str1pe.com, stripe.com.evil.io) or a personal mailbox. Before, it was saved as their address and drafted
+  // to ("email Dana at Stripe" wrote to dana@str1pe.com). Only an address at the page's own domain or the company's name
+  // is kept; the person is kept without it. Someone the page says has left is not filed under the company.
+  let offDomain = 0, left = 0;
+  if (!a.owner) {
+    const labels = new Set([registrable(new URL(r.url).hostname).label, domainLabelOf(company)].filter((x) => x && x.length >= 2));
+    people = people.map((p) => {
+      if (!p.email || labels.has(registrable(p.email.split("@")[1] ?? "").label)) return p;
+      offDomain++;
+      return { ...p, email: null };
+    });
+    const before = people.length;
+    people = people.filter((p) => !(p.former || formerTitle(p.title)));
+    left = before - people.length;
+  }
+  const notes = [
+    ...(offDomain ? [`${plural(offDomain, "address")} on ${r.url} ${offDomain === 1 ? "is" : "are"} not at ${company || "the page's"} domain (a look-alike or a personal mailbox), so I didn't save ${offDomain === 1 ? "it" : "them"} as anyone's work address.`] : []),
+    ...(left ? [`${plural(left, "person")} the page lists as no longer there (former or ex-, or an end date) ${left === 1 ? "was" : "were"} not saved.`] : []),
+  ];
+  if (!people.length) return { reply: [`${r.url} doesn't mark anyone up as a current person there or publish an email link for one, so I took no names from it (I don't guess names from page text). Nothing was saved.`, ...notes].join(" "), intent: PAGE_INTENT, status: "no_people" };
   const at = new Date(o.now).toISOString();
   const rows = people.map((p) => ({
     name: p.name, email: p.email, company: p.company || company, company_key: companyKey(p.company || company), position: p.title, school: p.school,
@@ -715,7 +735,7 @@ async function pageTurn(o: PeopleTurnIn, d: PeopleDeps, a: Extract<Ask, { kind: 
   const shown = people.slice(0, LIST_MAX).map((p) => `- ${p.name ?? "(no name given)"}${p.title ? `, ${p.title}` : ""}${p.email ? ` (${p.email})` : ""}`);
   return {
     reply: [`${r.url} publishes ${plural(named.length, "named person")}${mailed.length ? ` and ${plural(mailed.length, "email address")}` : ""}; saved ${fmtN(saved.inserted)} new${company ? ` under ${company}` : ""}:`, ...shown,
-      `I take only names a page marks up as people and addresses it publishes, and I never guess an email.${company ? "" : ` I couldn't tell which company this is; say "people at <company> on ${r.url}" to file them under it.`}`].join("\n"),
+      `I take only names a page marks up as people and addresses it publishes, and I never guess an email.${company ? "" : ` I couldn't tell which company this is; say "people at <company> on ${r.url}" to file them under it.`}`, ...notes].join("\n"),
     intent: PAGE_INTENT, status: "read",
   };
 }

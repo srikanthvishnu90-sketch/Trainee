@@ -179,7 +179,9 @@ function tenantAgrees(local: string, name: string): boolean {
   return !!l && (l === t.map((w) => w[0]).join("") || (l.length >= 3 && (c.startsWith(l) || l.startsWith(c))));
 }
 
-const CO = "([A-Z][A-Za-z0-9&.'’-]*(?:\\s+(?:[A-Z][A-Za-z0-9&.'’-]*|&|of)){0,3})";
+// RESEARCH ROUND 2 (2026-10-30): a name that opens with initials ("D. E. Shaw & Co. would like to invite you") was read as
+// "Shaw & Co": the sentence split at "D. " and "E. ", and the name took no initials.
+const CO = "((?:[A-Z]\\.\\s?){0,3}[A-Z][A-Za-z0-9&.'’-]*(?:\\s+(?:[A-Z][A-Za-z0-9&.'’-]*|&|of)){0,3})";
 const TEXT_COMPANY = [
   new RegExp(`\\b${CO}\\s+(?:has\\s+)?(?:invited|invites|requested|sent|has sent)\\b`, "g"),
   new RegExp(`\\b(?:invited by|application (?:was )?(?:sent|submitted) to|has been submitted to|application to|applying to|applied to [^.]{0,60}? at|offer from|test from|invitation from|from)\\s+${CO}`, "g"),
@@ -215,7 +217,7 @@ const NOT_COMPANY = /^(i|you|your|we|our|the|this|that|hi|hello|dear|thank|thank
 // The employer a sentence names, read sentence by sentence; leading words that are not a name are dropped.
 export function companyFromText(text: string): string | undefined {
   // "Gap Inc. has invited you": the period of an abbreviation does not end the sentence.
-  const sentences = text.split(/(?<!\b(?:Inc|Co|Corp|Ltd|Jr|Sr|St|Mr|Ms|Mrs|Dr)\.)(?<=[.!?])\s+|\n+/);
+  const sentences = text.split(/(?<!\b(?:Inc|Co|Corp|Ltd|Jr|Sr|St|Mr|Ms|Mrs|Dr)\.)(?<!\b[A-Z]\.)(?<=[.!?])\s+|\n+/);
   for (const re of TEXT_COMPANY) for (const sentence of sentences) for (const m of sentence.matchAll(re)) {
     const words = m[1].replace(/[.,!?:;'’]+$/, "").replace(/'s$/, "").trim().split(/\s+/);
     while (words.length && (NOT_COMPANY.test(words[0].replace(/[^A-Za-z]/g, "")) || words[0] === "&")) words.shift();

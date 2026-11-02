@@ -4,7 +4,7 @@
 //              identical misses share one in-flight run;
 //   per answer at most MAX_SEARCHES searches and ANSWER_COST_CAP_USD counted at the worst case per search;
 //   daily      the gateway's reserve refuses a search when the day's cap is used up (the answer then says what it could not verify).
-import { costMicros, responsesCall, WEB_SEARCH_FEE_MICROS } from "../../model_gateway.ts";
+import { responsesCall, responsesSettle } from "../../model_gateway.ts";
 import { ModelBudgetBlockedError } from "../../model_calls.ts";
 import type { BudgetGate } from "../../model_budget.ts";
 import { BLOCKED_SEARCH_DOMAINS } from "../../career_people_provider.ts";
@@ -102,7 +102,9 @@ export function openAiGroundSearch(o: { fetch?: typeof fetch; apiKey: string; mo
     const facts: Fact[] = (Array.isArray(parsed?.facts) ? parsed.facts : []).slice(0, 6)
       .filter((f: any) => f && plan.kinds.includes(f.kind))
       .map((f: any) => ({ id: "", kind: f.kind, text: String(f.text ?? ""), quote: String(f.quote ?? ""), url: String(f.url ?? ""), label: labelOf(String(f.url ?? "")) }));
-    const micros = costMicros(o.model, j?.usage);
-    return { status: "ok", facts, urls, cost_usd: micros === null ? null : (micros + WEB_SEARCH_FEE_MICROS) / 1e6 };
+    // The answer's cost is what the day's budget settled to (responsesSettle: tokens plus a fee per search the answer
+    // really made), not tokens plus one fee whatever was searched; unproven usage stays unknown.
+    const micros = responsesSettle(o.model, j);
+    return { status: "ok", facts, urls, cost_usd: micros === null ? null : micros / 1e6 };
   };
 }

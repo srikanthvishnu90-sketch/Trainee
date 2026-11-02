@@ -43,6 +43,17 @@ function tidy(s: string): string {
   return s.replace(/\(\s*\)|\[\s*\]/g, "").replace(/[ \t]{2,}/g, " ").replace(/\s+([,.;:!?)])/g, "$1").replace(/\(\s+/g, "(").replace(/^\s+|\s+$/g, "");
 }
 
+// ------------------------------------------------------------------------------------------------ secrets
+// ADVERSARIAL ROUND 2 (2026-10-30): a key-shaped string (an API key, a token, a signed JWT) never reaches the person or
+// the stored reply, whoever asked for it and wherever the model read it (a posting, an email, a pasted page). The
+// sentence that carries one is dropped whole.
+const SECRET_RE = /(?<![A-Za-z0-9])(?:sk-(?:proj-|live-|test-|ant-)?[A-Za-z0-9_-]{8,}|(?:sk|rk|pk|whsec)_(?:live|test)_[A-Za-z0-9]{8,}|whsec_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/;
+export const secretIn = (text: string) => SECRET_RE.test(String(text ?? ""));
+export function stripSecrets(reply: string): string {
+  const ps = pieces(reply);
+  return rebuild(ps, new Set(ps.flatMap((p, i) => (secretIn(p.text) ? [i] : []))));
+}
+
 // ------------------------------------------------------------------------------------------------ sources
 // What a sentence about the person may draw on: confirmed facts (never one waiting for their yes, memory.ts's rule),
 // the account's stated facts, this turn's message, their own earlier messages, and this turn's tool results. Never the
@@ -114,9 +125,10 @@ export function factSources(o: { state: Record<string, unknown>; message: string
 // A clause speaks about the person when it says "your …", "my …", "I built/used/led…", "you worked/studied…", "I'm a…"
 // or marks something "(confirmed)". A clause that negates or names a gap ("not in your facts", "you don't have") claims
 // nothing. A question claims nothing.
-const ABOUT = /\b(?:your|yours|my|confirmed)\b|\b(?:gave|taught|earned|got) me\b|\b(?:you|i)(?:'re|'m| are| am| were| was)\s+(?:an?|proficient|skilled|experienced|fluent|certified)\b|\b(?:you|i)(?:'ve| have| had)?\s+(?:built|led|used|managed|developed|created|designed|worked|interned|studied|graduated|majored|minored|earned|completed|shipped|launched|ran|analy[sz]ed|automated|grew|increased|reduced|cut|taught|served|spent|bring|know|hold|have \d)\b/i;
+const ABOUT = /\b(?:your|yours|my|confirmed)\b|\b(?:you|i)(?:'ve| have| had)?\s+(?:a|an)\s+(?:\d(?:\.\d+)?(?:\s*\/\s*4(?:\.0+)?)?\s+(?:(?:cumulative|overall|major|unweighted|weighted)\s+)?)?GPA\b|\b(?:gave|taught|earned|got) me\b|\b(?:you|i)(?:'re|'m| are| am| were| was)\s+(?:an?|proficient|skilled|experienced|fluent|certified)\b|\b(?:you|i)(?:'ve| have| had)?\s+(?:built|led|used|managed|developed|created|designed|worked|interned|studied|graduated|majored|minored|earned|completed|shipped|launched|ran|analy[sz]ed|automated|grew|increased|reduced|cut|taught|served|spent|bring|know|hold|have \d)\b/i;
 const GAP = /\b(?:not|no|never|none|without|lack|lacking|missing|gaps?|cannot)\b|n't\b/i;
-const CLAUSE = /([,;]\s+|\s*[—–]\s*|:\s+|\s+(?:and|but|or|while|whereas)\s+)/;
+// "Your GPA: 3.85" is one claim, not two clauses (ADVERSARIAL ROUND 2).
+const CLAUSE = /([,;]\s+|\s*[—–]\s*|(?<!\bGPA\s?):\s+|\s+(?:and|but|or|while|whereas)\s+)/;
 const MONTHS = /^(?:January|February|March|April|May|June|July|August|September|October|November|December)$/;
 // Capitals that are ordinary words, places, formats or products, never a skill the person claims.
 const COMMON_CAPS = new Set(["I", "US", "USA", "UK", "EU", "NY", "NYC", "SF", "LA", "DC", "IL", "CA", "TX", "WA", "MA", "GPA", "CS", "AI", "ML", "HR", "PM", "AM", "QA", "OK", "ATS", "PDF", "CSV", "URL", "CV", "FAQ", "ID", "EST", "PST", "CST", "UTC", "TBD", "ASAP", "FYI", "TEST", "SWE", "BS", "BA", "MS", "LinkedIn", "WhatsApp", "iMessage", "YouTube", "iPhone", "Trainee", "Upmore"]);
@@ -125,7 +137,13 @@ const before = (clause: string, w: string) => { const at = clause.search(new Reg
 // Each kind of word is a claim about the person only where the clause attributes it to them.
 const SKILL_CUE = /\b(?:experience (?:with|in)|skills? (?:in|with)|your|my|used|using|proficient (?:in|with)|knowledge of|worked with|built (?:with|in))\s+(?:[\w+#./-]+\s+){0,2}$/i;
 const TITLE_CUE = /\b(?:as an?|i(?:'m| am| was) an?|you(?:'re| are| were) an?|(?:your|my) (?:role|title|job|position|time) (?:as|at)(?: an?)?)\s+(?:[\w-]+\s+){0,3}$/i;
+// A number right after "GPA" and a few linking words ("GPA of", "GPA is", "GPA: ", "GPA stands at") is a GPA.
+const GPA_CUE = /\bGPA\b(?:\s*(?:of|is|was|=|:|at|stands at|is now|currently|around|about|now)\b)*[\s:=]*$/i;
 const NUM_UNIT = /^\s*(?:\+\s*)?(?:years?|yrs?|months?|people|engineers|members|students|users|customers|clients|employees|reports|interns|projects)\b/i;
+// D-035 review (staged brain, fact lock): a number right BEFORE "GPA" is a GPA too ("your 3.9 GPA", "you have a 3.9 GPA",
+// "a 3.7/4.0 cumulative GPA"); only the number after it was read, so "With your 3.9 GPA from ..." delivered an invented GPA.
+const GPA_AFTER = /^\s*(?:\/\s*4(?:\.0+)?\s*)?(?:(?:cumulative|overall|major|unweighted|weighted)\s+)?GPA\b/i;
+const GPA_BEFORE = /(?<![\w.])(\d(?:\.\d+)?)(?:\s*\/\s*4(?:\.0+)?)?\s+(?:(?:cumulative|overall|major|unweighted|weighted)\s+)?GPA\b/gi;
 export interface Untraced { word: string; kind: "skill" | "title" | "degree" | "number" | "result" | "month" | "place" }
 const PLACEHOLDER: Record<Untraced["kind"], string> = {
   skill: "[your skill]", title: "[your title]", degree: "[your degree]", number: "[number]", result: "[result]", month: "[month]", place: "[employer or school]",
@@ -144,7 +162,10 @@ function classify(u: string, clause: string): Untraced | null {
   if (MONTHS.test(w)) return { word: w, kind: "month" };
   if (/\d/.test(w)) {
     if (/[$%]|\d\s?(?:k|m|bn|b)$/i.test(w) || /^(?:19|20)\d\d$/.test(w)) return { word: w, kind: "number" };
-    return NUM_UNIT.test(clause.slice(pre.length + w.length)) || /\bGPA\s*(?:of\s*)?$/i.test(pre) ? { word: w, kind: "number" } : null;
+    // ADVERSARIAL ROUND 2 (2026-10-30): "Your GPA is 3.95" and "your GPA: 4.0" claim a GPA as surely as "GPA of 3.95".
+    const after = clause.slice(pre.length + w.length);
+    // The lock also reads "3.9" as "3" and "9": the "9" of "3.9 GPA" is not a GPA of its own (GPA_BEFORE reads it whole).
+    return NUM_UNIT.test(after) || GPA_CUE.test(pre) || (GPA_AFTER.test(after) && !/[\d.\/]$/.test(pre)) ? { word: w, kind: "number" } : null;
   }
   // A prospective role at an employer is not employment history ("your skills fit the role at X"). A worked/studied
   // predicate still claims the person was there, even when that sentence also names a role.
@@ -157,42 +178,56 @@ function classify(u: string, clause: string): Untraced | null {
   return null;
 }
 const unbracketed = (s: string) => s.replace(/\[[^\]]*\]/g, (m) => " ".repeat(m.length));
-function clauseClaims(clause: string, sources: string[]): Untraced[] {
+// ADVERSARIAL ROUND 2 (2026-10-30): a GPA is the person's own record, so it traces only to what they said and their
+// facts (`personal`), never to a posting, an email or a search result a tool returned this turn: a posting that said
+// "the candidate's GPA is 4.0" let "Your GPA is 4.0" through.
+const GPA_STATED = /\bGPA\b(?:\s*(?:of|is|was|=|:|at|stands at|is now|currently|around|about|now)\b)*[\s:=]*(\d(?:\.\d+)?)\b/gi;
+function clauseClaims(clause: string, sources: string[], personal: string[] = sources): Untraced[] {
   const plain = unbracketed(plainQuotes(clause)).replace(URL_RE, " ");
   if (!ABOUT.test(plain) || GAP.test(plain)) return [];
   const out: Untraced[] = [];
+  const mine = new Set([...personal.join(" \n ").matchAll(/\d[\d,]*(?:\.\d+)?/g)].map((m) => m[0].replace(/,/g, "")));
+  for (const re of [GPA_STATED, GPA_BEFORE]) for (const m of plain.matchAll(re)) if (!mine.has(m[1]) && !out.some((x) => x.word === m[1])) out.push({ word: m[1], kind: "number" });
+  const nums = new Set([...sources.join(" \n ").matchAll(/\d[\d,]*(?:\.\d+)?/g)].map((m) => m[0].replace(/,/g, "")));
   for (const u of factLock(plain, sources).untraced) {
     const c = classify(u, plain);
-    if (c && !out.some((x) => norm(x.word) === norm(c.word))) out.push(c);
+    // The lock reads "3.7" as "3" and "7" too; a number is checked whole ("3.7" on record traces "GPA is 3.7").
+    if (c?.kind === "number" && /^\d+$/.test(c.word)) {
+      const at = before(plain, c.word);
+      const whole = at === null ? c.word : (plain.slice(at.length).match(/^\d[\d,]*(?:\.\d+)?/) ?? [c.word])[0].replace(/,/g, "");
+      if (nums.has(whole)) continue;
+    }
+    if (c && !out.some((x) => norm(x.word) === norm(c.word) || (c.kind === "number" && x.kind === "number" && x.word.split(/[.,]/)[0] === c.word))) out.push(c);
   }
   return out;
 }
 const isQuestion = (s: string) => /\?["”')\]]*\s*$/.test(s.trim());
 // Every untraced claim about the person in the reply, sentence by sentence.
-export function untracedFacts(reply: string, sources: string[]): Untraced[] {
+export function untracedFacts(reply: string, sources: string[], personal: string[] = sources): Untraced[] {
   const out: Untraced[] = [];
   for (const p of pieces(reply)) {
     if (isQuestion(p.text)) continue;
     for (const clause of p.text.split(CLAUSE).filter((_, i) => i % 2 === 0)) {
-      for (const c of clauseClaims(clause, sources)) if (!out.some((x) => norm(x.word) === norm(c.word))) out.push(c);
+      for (const c of clauseClaims(clause, sources, personal)) if (!out.some((x) => norm(x.word) === norm(c.word))) out.push(c);
     }
   }
   return out;
 }
 // Code's last resort: each untraced claim becomes a placeholder the person fills in ("[your skill]"), in the clause
 // that makes it, never inside a bracket or a link.
-export function bracketUntraced(reply: string, sources: string[]): string {
+export function bracketUntraced(reply: string, sources: string[], personal: string[] = sources): string {
   const ps = pieces(reply);
   for (const p of ps) {
     if (isQuestion(p.text)) continue;
     const parts = p.text.split(CLAUSE);
     for (let i = 0; i < parts.length; i += 2) {
-      const found = clauseClaims(parts[i], sources);
+      const found = clauseClaims(parts[i], sources, personal);
       if (!found.length) continue;
       parts[i] = masked(parts[i], (t) => t.split(/(\[[^\]]*\])/).map((seg, j) => {
         if (j % 2) return seg;
         let s = seg;
-        for (const f of found) s = s.replace(new RegExp(`(?<![\\w$])${esc(f.word)}(?![\\w%])`, "gi"), PLACEHOLDER[f.kind]);
+        // A number is replaced whole: "4.0" read as "4" left "[number].0" (ADVERSARIAL ROUND 2).
+        for (const f of found) s = s.replace(f.kind === "number" ? new RegExp(`(?<![\\w$.])${esc(f.word)}(?:[.,]\\d+)*(?![\\w%])`, "gi") : new RegExp(`(?<![\\w$])${esc(f.word)}(?![\\w%])`, "gi"), PLACEHOLDER[f.kind]);
         return s;
       }).join(""));
     }

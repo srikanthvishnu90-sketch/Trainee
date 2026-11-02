@@ -20,7 +20,7 @@
 // everyone inside the cache window. Docs: docs/architect/PEOPLE-PROVIDER-2026-10-27.md.
 import { chatAsk, cleanCell, cleanEmail, companyKey, isFormula, readsAsInstruction } from "./career_people_import.ts";
 import { neverOpen } from "./career_people_sites.ts";
-import { type PageRead, readPage, type Resolver } from "./career_people_page.ts";
+import { formerTitle, type PageRead, readPage, type Resolver } from "./career_people_page.ts";
 import { domainLabelOf, registrable } from "./career_people_gmail.ts";
 import { dohMx, isRoleAddress, isTeamName, type MxResolver } from "./career_contacts.ts";
 import { costMicros, modelConfig, responsesCall } from "./model_gateway.ts";
@@ -186,11 +186,20 @@ export function webProvider(o: { search: SearchFn; fetch: typeof fetch; resolve?
           // Their own worksFor decides when they have one (a speakers page lists several companies); else the page's.
           const employer = x.company ? companyKey(x.company) === key : (onDomain || orgIs);
           if (!employer) continue;
+          // NETWORKING R2 (2026-10-30): someone the page says has left ("Former Recruiter", "ex-Stripe, now at Ramp",
+          // "Recruiter (until 2024)", a worksFor role with an end date, the company as their alumniOf) is not someone who
+          // works there now. Before, they were listed and drafted to as a current employee.
+          if (x.former || formerTitle(x.title) || (x.school && companyKey(x.school) === key)) continue;
           let email = cleanEmail(x.email);
           if (email && isRoleAddress(email)) {
             if (x.how === "mailto link") continue; // "Careers Team" <careers@>: an inbox, not a person
             email = null;
           }
+          // NETWORKING R2 (2026-10-30): an address on another domain than the company's is not their work address: a
+          // look-alike (str1pe.com, stripe.com.evil.io, stripe-careers.com) or a personal mailbox (gmail.com). It was kept as
+          // "published", could never be sent to (the database checks the domain), and won over the same person's real
+          // address published on another page. It is dropped here, so the on-domain one (or the domain's format) is used.
+          if (email && domain && registrable(email.split("@")[1] ?? "").full !== domain) email = null;
           const pid = `${domain || key}:${nameKey(name)}`.slice(0, 300);
           const prev = byId.get(pid);
           if (prev && (prev.email || !email)) continue;
@@ -219,6 +228,8 @@ export interface Candidate {
   source_ref: string; source_url: string | null; provider: ProviderName | null; provider_id: string | null; domain: string | null; email_status: string | null;
   email_evidence: number | null; email_confidence: number | null; mx: string | null; sendable: boolean; fetched_at: string | null; same_as: number | null;
   connected_on: string | null; profile_text: string | null;
+  // NETWORKING R2 (2026-10-30, 20261030090000): the address opted out with anyone, or bounced for anyone.
+  blocked?: boolean;
 }
 export interface ProviderStore {
   request(userId: string, provider: ProviderName, key: string, query: FindQuery, cacheSeconds: number): Promise<{ state: "cached" | "queued"; job_id?: number; inserted?: number; already_known?: number }>;
@@ -344,7 +355,7 @@ export function parseTargetAsk(message: string): TargetAsk | null {
 export type AddressLabel = "published" | "known" | "inferred" | null;
 export interface Target {
   id: number; name: string; title: string; company: string; email: string | null; address: AddressLabel; evidence: number | null;
-  sendable: boolean; source: string; source_url: string | null; reason: string;
+  sendable: boolean; source: string; source_url: string | null; reason: string; blocked?: boolean;
 }
 export interface TargetsResult {
   status: "ok" | "NOT_WIRED" | "waiting" | "refused" | "none" | "no_companies";
@@ -364,7 +375,8 @@ function titleMatch(title: string, ask: { titles: string[] }): string | null {
 }
 const labelOf = (c: Candidate): AddressLabel => !c.email ? null : c.source !== "provider" ? "known" : c.email_status === "inferred" ? "inferred" : c.email_status === "published" ? "published" : null;
 const addressLine = (c: Candidate, l: AddressLabel) =>
-  l === "published" ? `email published on that page${c.sendable ? "" : c.mx === "fail" ? " (its domain has no mail server: not used)" : ""}`
+  c.blocked && c.email ? "they asked not to be contacted, or their address bounced: not used"
+  : l === "published" ? `email published on that page${c.sendable ? "" : c.mx === "fail" ? " (its domain has no mail server: not used)" : ""}`
   : l === "inferred" ? `email inferred from ${c.domain}'s format (${c.email_evidence} addresses seen there)${c.sendable ? ", sent only if you approve it" : c.mx === "fail" ? " (its domain has no mail server: not used)" : ""}`
   : l === "known" ? "email from your own contacts"
   : c.email_status === "bounced" ? "their address bounced before: not used" : "no email address";
@@ -413,14 +425,14 @@ export async function findTargets(userId: string, ask: TargetAsk, d: TargetDeps)
       if (own) {
         if (!own.email && c.email) {
           const l = labelOf(c);
-          Object.assign(own, { email: c.email, address: l, evidence: c.email_evidence, sendable: c.sendable, source_url: c.source_url, reason: `${own.reason.replace(/\.$/, "")}; ${addressLine(c, l)}, ${fromLine(c)}.` });
+          Object.assign(own, { email: c.email, address: l, evidence: c.email_evidence, sendable: c.sendable && !c.blocked, source_url: c.source_url, reason: `${own.reason.replace(/\.$/, "")}; ${addressLine(c, l)}, ${fromLine(c)}.` });
         }
         continue;
       }
       if (!why) continue;
       const l = labelOf(c);
       const t: Target = { id: c.id, name: c.name ?? c.email ?? "", title: c.position, company: c.company, email: c.email, address: l, evidence: c.email_evidence,
-        sendable: c.sendable, source: c.source, source_url: c.source_url,
+        sendable: c.sendable && !c.blocked, ...(c.blocked ? { blocked: true } : {}), source: c.source, source_url: c.source_url,
         reason: `${c.position ? `${c.position} at ${c.company}` : `at ${c.company}`}; ${why}; ${fromLine(c)}; ${addressLine(c, l)}.` };
       byId.set(c.id, t);
       out.push(t);
@@ -435,7 +447,7 @@ export async function findTargets(userId: string, ask: TargetAsk, d: TargetDeps)
     else if (s.waiting) notes.push(`${s.waiting} ${s.waiting === 1 ? "search is" : "searches are"} still running; ask again shortly for the rest.`);
     if (s.failed.length) notes.push(`${s.failed.length} ${s.failed.length === 1 ? "search" : "searches"} couldn't be done.`);
   }
-  const sendable = out.filter((x) => x.sendable || x.address === "known").length;
+  const sendable = out.filter((x) => !x.blocked && (x.sendable || x.address === "known")).length;
   const head = out.length
     ? `${out.length} ${out.length === 1 ? "person" : "people"} at ${companies.length === 1 ? companies[0] : `${companies.length} companies`}, ${sendable} with an address I could use (each one labeled published, known or inferred).`
     : `No one matching at ${companies.length === 1 ? companies[0] : `${companies.length} companies`} yet.`;

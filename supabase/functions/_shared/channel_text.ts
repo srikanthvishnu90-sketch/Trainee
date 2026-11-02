@@ -55,11 +55,32 @@ export const isBareUrl = (s: string): boolean => {
 
 // The largest index <= n that does not fall between the two halves of a surrogate pair (an emoji, most CJK extensions):
 // cutting there never leaves half a character on either side.
+// TELEGRAM ROUND 3 (2026-10-31): nor inside one character as a person sees it (a grapheme: a flag is two code points, a
+// family emoji several joined by U+200D, a thumbs-up with its skin tone, a letter with its combining accent, a Devanagari
+// syllable): a cut there sent half a flag (a lone letter box), a family split into its members, an accent alone at the start of
+// the next message. The cut moves back to where that character starts; a character that begins more than 64 units back (never
+// in text people write), or at the very start, is still cut between code points, never inside one.
+const GRAPHEMES = typeof Intl !== "undefined" && "Segmenter" in Intl ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
 export function safeCut(s: string, n: number): number {
   if (n <= 0) return 0;
   if (n >= s.length) return s.length;
   const c = s.charCodeAt(n - 1);
-  return c >= 0xd800 && c <= 0xdbff ? n - 1 : n;
+  const atCodePoint = c >= 0xd800 && c <= 0xdbff ? n - 1 : n;
+  if (!GRAPHEMES) return atCodePoint;
+  // The window starts on a code point; a run of flags pairs its regional indicators from the run's start, so it starts there.
+  let from = Math.max(0, n - 64);
+  if (from > 0 && /[\uDC00-\uDFFF]/.test(s[from])) from--;
+  let runStart = false;
+  while (from >= 2 && s.charCodeAt(from - 2) === 0xd83c && s.charCodeAt(from - 1) >= 0xdde6 && s.charCodeAt(from - 1) <= 0xddff) { from -= 2; runStart = true; }
+  const trusted = from === 0 || runStart || /[ \t\n]/.test(s[from - 1]); // a grapheme starting at `from` really starts there
+  for (const g of GRAPHEMES.segment(s.slice(from, Math.min(s.length, n + 64)))) {
+    const start = from + g.index, end = start + g.segment.length;
+    if (end <= n) { if (end === n) return n; continue; }
+    if (start >= n) return n;
+    // n falls inside this grapheme: cut where it starts (when that start is known and is not the very start of the text)
+    return start > 0 && (start > from || trusted) ? start : atCodePoint;
+  }
+  return atCodePoint;
 }
 // s.slice(0, n) that never ends in half a character.
 export const safeSlice = (s: string, n: number): string => String(s ?? "").slice(0, safeCut(String(s ?? ""), n));

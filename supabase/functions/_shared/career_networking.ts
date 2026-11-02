@@ -18,7 +18,7 @@ import { legacyRows } from "./career_referrals.ts";
 import { parsePeopleAsk, type PeopleDeps, type PersonRec, peopleTurn } from "./career_people.ts";
 import { chatAsk, companyKey } from "./career_people_import.ts";
 import { batchMessages, confirmed, draftFor, type Drafted, emailHash, footerOf, messageOf, type ModelFn, OUTREACH_INTENT, type OutreachDraft,
-  type KeyedContact, type OutreachStore, payloadHash, type Recipient, recordOutreach } from "./career_outreach.ts";
+  type KeyedContact, type OutreachStore, payloadHash, type Recipient, recordOutreach, blockedAddresses, BLOCKED_WHY, draftLangOf } from "./career_outreach.ts";
 import type { EventStore } from "./agent/timeline.ts";
 import { siteAsk, trackTurn } from "./career_outreach_track.ts";
 
@@ -135,7 +135,7 @@ const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const CONTACTED = "you already have a draft or email to them";
 // Why a row can't be written to, or null when it can (draft_outreach's rule: an address that passed every check that ran,
 // never anyone already written to, never the do-not-contact list).
-async function heldWhy(r: ContactRow, contacted: Set<string>, dnc: Set<string>): Promise<string | null> {
+async function heldWhy(r: ContactRow, contacted: Set<string>, dnc: Set<string>, blocked: Map<string, "opted_out" | "bounced"> = new Map()): Promise<string | null> {
   if (!r.email) return "no email address in your contacts, and I never guess one";
   if (!r.verified) {
     const c = r.check;
@@ -143,6 +143,8 @@ async function heldWhy(r: ContactRow, contacted: Set<string>, dnc: Set<string>):
   }
   if (contacted.has(r.email.toLowerCase())) return CONTACTED;
   if (dnc.has(await emailHash(r.email))) return "they asked not to be contacted";
+  const b = blocked.get(r.email.toLowerCase());
+  if (b) return BLOCKED_WHY[b];
   return null;
 }
 const recipientOf = (r: ContactRow): Recipient => ({ name: r.name, firm: r.firm, title: r.title, school: r.school, email: r.email!, source: r.row ? `${r.file}, row ${r.row}` : r.file,
@@ -527,6 +529,8 @@ async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>
   // NO LIMITS: a group draft covers everyone asked for (or everyone matching), not a batch of Trainee's size.
   const want = Math.max(1, t.by === "group" && t.count ? t.count : pool.length);
   const [dnc, contacted] = await Promise.all([o.store.dnc(o.userId), o.store.contacted(o.userId)]);
+  // OUTREACH SCENARIOS (2026-10-30): an address that said "stop" to anyone, or bounced for anyone, is never drafted to.
+  const blocked = await blockedAddresses(o.store, o.userId, pool.map((r) => r.email ?? "").filter(Boolean));
   // FAMILY NETWORKING: who was already written to, and how far it went. A by-name ask for someone whose only draft is
   // still waiting (never approved or sent) replaces that draft: the person changed their mind about what to say.
   const hist = o.store.history ? await o.store.history(o.userId, 500).catch(() => []) : [];
@@ -535,7 +539,7 @@ async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>
   const pick: ContactRow[] = [], held: { name: string; why: string }[] = [];
   for (const r of pool) {
     if (pick.length >= want) break;
-    let why = await heldWhy(r, contacted, dnc);
+    let why = await heldWhy(r, contacted, dnc, blocked);
     const mine = r.email ? live(r.email.toLowerCase()) : [];
     if (why === CONTACTED && t.by === "name" && mine.length && mine.every((d) => d.status === "shown")) { replace.push(...mine); why = null; }
     else if (why === CONTACTED && mine.some((d) => d.status === "approved")) why = `you approved an email to them that isn't sent yet (draft ${mine.find((d) => d.status === "approved")!.n}; say "cancel ${mine.find((d) => d.status === "approved")!.n}" to write a new one)`;
@@ -555,7 +559,7 @@ async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>
 
 async function writeBatch(o: NetworkingDeps, pick: ContactRow[], held: { name: string; why: string }[], considered: number, topic: string | null, signature: string, facts: unknown[], replace: OutreachDraft[] = []): Promise<NetworkingResult> {
   const results: Drafted[] = [];
-  for (let k = 0; k < pick.length; k += 5) results.push(...await Promise.all(pick.slice(k, k + 5).map((r) => draftFor({ model: o.model!, facts, r: recipientOf(r), topic }))));
+  for (let k = 0; k < pick.length; k += 5) results.push(...await Promise.all(pick.slice(k, k + 5).map((r) => draftFor({ model: o.model!, facts, r: recipientOf(r), topic, lang: draftLangOf(o.message) }))));
   const footer = footerOf(signature), ok: Omit<OutreachDraft, "id" | "batch_id" | "thread_id">[] = [];
   const failed: { name: string; why: string }[] = [];
   for (const [k, d] of results.entries()) {

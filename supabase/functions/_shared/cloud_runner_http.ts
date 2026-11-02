@@ -45,6 +45,18 @@ function same(a: string, b: string) {
   return d === 0;
 }
 
+// The Vercel sandbox host as this function's secrets configure it (docs/launch/CLOUD-RUNNER.md). UPMORE_SCRIPT_SUBMIT_LIVE=1
+// is the owner's switch for scripted Submits (every Ashby form): it reaches the preparation and the send sandboxes alike,
+// so the destination a card was prepared with is the one the send binds.
+export function sandboxHostOptions(env: (k: string) => string, f: typeof fetch): Parameters<typeof vercelSandboxHost>[0] {
+  return {
+    token: env("VERCEL_TOKEN"), teamId: env("VERCEL_TEAM_ID"), projectId: env("VERCEL_PROJECT_ID"),
+    snapshotId: env("CLOUD_SANDBOX_SNAPSHOT_ID"), region: env("CLOUD_SANDBOX_REGION") || "iad1",
+    vcpus: Number(env("CLOUD_SANDBOX_VCPUS")) >= 1 ? Math.floor(Number(env("CLOUD_SANDBOX_VCPUS"))) : 2,
+    scriptSubmitLive: env("UPMORE_SCRIPT_SUBMIT_LIVE") === "1", fetch: f,
+  };
+}
+
 export function createRunnerHandler(o: {
   env: RunnerEnv; fetch?: typeof fetch; host?: SandboxHost; waitUntil?: (p: Promise<unknown>) => void; now?: () => number;
 }): (req: Request) => Promise<Response> {
@@ -67,11 +79,7 @@ export function createRunnerHandler(o: {
       return text ? JSON.parse(text) : null;
     };
     const limits = runnerLimits(o.env);
-    const host = () => o.host ?? vercelSandboxHost({
-      token: env("VERCEL_TOKEN"), teamId: env("VERCEL_TEAM_ID"), projectId: env("VERCEL_PROJECT_ID"),
-      snapshotId: env("CLOUD_SANDBOX_SNAPSHOT_ID"), region: env("CLOUD_SANDBOX_REGION") || "iad1",
-      vcpus: Number(env("CLOUD_SANDBOX_VCPUS")) >= 1 ? Math.floor(Number(env("CLOUD_SANDBOX_VCPUS"))) : 2, fetch: f,
-    });
+    const host = () => o.host ?? vercelSandboxHost(sandboxHostOptions(env, f));
     const hostReady = () => {
       if (o.host) return null;
       for (const k of ["VERCEL_TOKEN", "VERCEL_TEAM_ID", "VERCEL_PROJECT_ID", "CLOUD_SANDBOX_SNAPSHOT_ID", "CLOUD_BRIDGE_URL"]) if (!env(k)) return k;

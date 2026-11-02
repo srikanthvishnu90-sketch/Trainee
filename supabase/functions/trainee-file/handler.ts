@@ -16,11 +16,11 @@
 import { FILE_TTL_MS, verifyFileToken, type FileClaims } from "../_shared/file_link.ts";
 import { checkSession, CLEAR_LOGIN, CLEAR_SESSION, codeOf, LOGIN_TTL_MS, loginCookie, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, SESSION_ID, sessionCookie, startSession, type PhoneAuth, type SessionStore } from "../_shared/file_session.ts";
 import { verifyInitData } from "../_shared/telegram_webapp.ts";
-import { BOOT_SCRIPT, FEED_SCRIPT, fullOf, hostOf, renderBootstrap, renderFeed, renderLinkState, renderPhoneLogin, renderPreview, renderText, signOutFoot, snippetOf, statusOf, type AppRow, type Feed, type Row } from "../_shared/file_page.ts";
-import { dayOf, BRAND, esc, layout } from "../_shared/file_page.ts";
+import { BOOT_SCRIPT, cut, FEED_SCRIPT, fullOf, hostOf, renderBootstrap, renderFeed, renderLinkState, renderPhoneLogin, renderPreview, renderText, signOutFoot, snippetOf, statusOf, type AppRow, type Feed, type Row } from "../_shared/file_page.ts";
+import { dayOf, BRAND, esc, layout, postedLine } from "../_shared/file_page.ts";
 import { actOn, bodyHtml, COPY_SCRIPT, KIND_CSS, KIND_LABEL, textOf, type Effects, type FileRecord } from "../_shared/file_kinds.ts";
 import type { FileService } from "../_shared/file_service.ts";
-import { byHandUrl, hashTag, isSecretField, logoDomain, logoUrl, postingVerdict, secretFields, secretKey, tapJob, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
+import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, logoUrl, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
 
 export type { AppRow } from "../_shared/file_page.ts";
 export interface FileStore extends JobStore {
@@ -30,6 +30,7 @@ export interface FileStore extends JobStore {
   // Queued to be prepared (career_apply_wanted): by the posting's key, as the queue stores it (its board form's link, not always the
   // link shown), else by the link.
   wanted(userId: string, url: string, job?: JobView): Promise<boolean>;
+  // elsewhere (JobStore): asked only when this posting has no application row of its own, so a yes means another path.
 }
 export interface FileDeps extends Omit<JobDeps, "store"> {
   store: FileStore;
@@ -38,8 +39,9 @@ export interface FileDeps extends Omit<JobDeps, "store"> {
   phone?: PhoneAuth; // the account's confirmed phone and the texted code; absent, phone sign-in is off
   files?: FileService; // the other file kinds (introduction, proof, plan, comparison, draft, brief); an id not found there is a jobs list
   fileEffects?: Effects; // what Introduce really does (send); absent, an approved introduction says it was not sent
+  timeZone?: (userId: string) => Promise<string | null>; // the person's own zone (dates on the page are their day); absent or unknown, Chicago, said
 }
-export const MAX_ROWS = 30;
+export const MAX_ROWS = FEED_ROWS;
 
 const sha = async (s: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, "0")).join("");
 const b64 = (h: string) => btoa(h.match(/../g)!.map((x) => String.fromCharCode(parseInt(x, 16))).join(""));
@@ -102,6 +104,7 @@ function sendOf(p: PreparedRow): { items: { label: string; value: string; needs?
   for (const f of (Array.isArray(pl.fields) ? pl.fields : []) as any[]) {
     const label = String(f?.label ?? f?.name ?? "").replace(/\s+/g, " ").trim().slice(0, 120) || "Field";
     if (isSecretField(f)) { items.push({ label, value: "", needs: true }); secret ??= label; continue; }
+    if (foreignFact(f, pl)) { items.push({ label, value: NOT_YOURS }); continue; }
     const v = f?.value, file = /file/i.test(String(f?.type ?? ""));
     if ((sha && v === sha) || (file && ((resumeName && v === resumeName) || (resumeFile && v === resumeFile)))) continue; // the resume line above
     if (shownValue(v) !== "(empty)") answers = true;
@@ -133,7 +136,8 @@ function rowLogo(job: JobView, env: { get(k: string): string | undefined }): str
 }
 
 async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: Record<string, string> = {}, top?: string): Promise<Feed | null> {
-  const refs = ((await d.store.recallList(claims.u, claims.r).catch(() => null)) ?? []).slice(0, MAX_ROWS);
+  const all = (await d.store.recallList(claims.u, claims.r).catch(() => null)) ?? [];
+  const refs = all.slice(0, MAX_ROWS);
   const got = (await Promise.all(refs.map(async (ref) => ({ ref, c: await d.store.recall(claims.u, ref).catch(() => null) })))).filter((x) => x.c);
   if (!got.length) return null;
   const postings = await d.store.postings(got.map((x) => x.c!.job.job_id)).catch(() => [] as PostingRow[]);
@@ -141,18 +145,30 @@ async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: R
   // with one read of the facts: a row that cannot pass it offers no Apply and says why, so neither Apply nor "Apply to all" offers
   // what the tap would then refuse (scenarios-file-apply.test.ts: a closed posting showed Apply and sat in the "Apply to all" set).
   const facts = d.facts ? await d.facts(claims.u).then((f) => f ?? [], () => []) : [];
+  // The account's stamp, once (apply_trust.ts): a payload prepared under another account state is not offered.
+  const account = d.account ? await d.account(claims.u).catch(() => "unreadable" as const) : undefined;
+  const tz = d.timeZone ? await d.timeZone(claims.u).catch(() => null) : null;
   const rows: Row[] = await Promise.all(got.map(async ({ ref, c }) => {
     const job = { ...c!.job }, post = postings.find((p) => p.job_id === job.job_id) ?? null;
     job.company_domain = job.company_domain ?? post?.company_domain ?? null;
     const [app, prep] = await Promise.all([d.store.appRow(claims.u, job.job_id, job.url).catch(() => null), d.store.prepared(claims.u, job.job_id).catch(() => null)]);
-    const wanted = app || prep ? false : await d.store.wanted(claims.u, job.url, job).catch(() => false);
+    // Sent or on its way by another path (the extension, a batch, the same posting under another id): the row says so and offers
+    // nothing (apply round 3: such a row offered Apply, and the tap could only be refused as a duplicate).
+    const away = !app && d.store.elsewhere ? await d.store.elsewhere(claims.u, job).catch(() => false) : false;
+    const wanted = app || prep || away ? false : await d.store.wanted(claims.u, job.url, job).catch(() => false);
     // An application already in motion is described by its status; the prepared payload is not what it sends.
-    const sd = prep && !app ? sendOf(prep) : null;
-    const status = statusOf({ app, wanted }) ?? (sd?.secret ? { word: "needs you" as const, detail: `"${sd.secret}" needs you. I never send a password, code or ID number from here; tell Trainee in Telegram.` } : null);
+    const sd = prep && !app && !away ? sendOf(prep) : null;
+    const status = statusOf({ app, wanted }) ?? (away ? ELSEWHERE : null) ?? (sd?.secret ? { word: "needs you" as const, detail: `"${sd.secret}" needs you. I never send a password, code or ID number from here; tell Trainee in Telegram.` } : null);
     const byHand = byHandOf(job.url);
     let blocked: string | null = null;
     if (!status && !byHand) {
       if (prep && byHandOf(String((prep.payload as Record<string, unknown>)?.destination ?? prep.url ?? ""))) blocked = "it would be sent to LinkedIn, Indeed or Handshake, which Trainee never applies on for you.";
+      // A destination that is not a web address (javascript:, data:, a bare word) is not somewhere an application can go (file journey
+      // round 2: a payload sending to "javascript:..." was offered for one-tap approval).
+      else if (prep && !webDestination(prep)) blocked = "its application doesn't go to a web address, so it can't be sent. Tell Trainee in Telegram to prepare it again.";
+      // Expired, prepared under another account state, or an answer the contract never sends (apply_trust.ts): the queue or the
+      // worker would refuse it after the yes, so the page offers no Apply (apply round 3).
+      else if (prep && (blocked = await unsendable(claims.u, prep, d, account))) blocked = `${blocked}.`;
       else if (!post) blocked = "I couldn't check this posting just now (it may have closed). Refresh in a minute.";
       else blocked = postingVerdict(job, post, facts, !!d.facts, d.now());
     }
@@ -160,7 +176,7 @@ async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: R
     // The short description and the key details: the stored posting's own words; a search-only detail only in the labelled line.
     const stated = { ...job, location: post?.location ?? "", remote: post ? job.remote : null };
     return { ref, job, logo: rowLogo(job, d.env), snippet: snippetOf(stated, post?.description), full: fullOf(post?.description),
-      status, tag, resume: app ? null : resumeOf(prep), byHand, blocked, note: notes[ref], ...metaOf(job, post), why: job.reasons.slice(0, 2),
+      status, inApps: !!app || away, tag, resume: app || away ? null : resumeOf(prep), byHand, blocked, note: notes[ref], ...metaOf(job, post), posted: postedLine({ posted_at: post?.posted_at ?? job.posted_at, first_seen_at: post?.first_seen_at ?? job.first_seen_at }, d.now(), tz), why: job.reasons.slice(0, 2),
       sends: sd && !sd.secret ? `Sends: ${[resumeOf(prep) ?? "no resume", sd.answers ? "your saved answers" : "", sd.cover ? "a cover note" : ""].filter(Boolean).join(" + ")}` : undefined, send: sd?.items };
   }));
   // The same posting twice on one list (the same link under two ids): only the first row offers Apply.
@@ -175,10 +191,12 @@ async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: R
   const n = rows.length;
   // The preview card is the brand card (static, nothing about the person in a public image) plus counts the page itself shows.
   const og = { title: `${n} match${n === 1 ? "" : "es"} for you`, description: "Tap Apply on any job. Opens in Trainee.", image: ogImage(d.env) };
-  return { token, rows, setHash, setSize: set.length, top, og };
+  return { token, rows, setHash, setSize: set.length, top, og, total: all.length };
 }
 
 // One Apply = one hash-bound approval through the Telegram Confirm path. Returns a note for the row when it did not go.
+// The page's own words where Telegram's would name a button the page does not have (file journey round 2: "Tap Confirm again" on a
+// page whose button is Apply), and a reason in full, never cut mid-word or mid-link.
 async function approveOne(u: string, ref: string, tag: string, d: FileDeps): Promise<string | null> {
   const said: string[] = [];
   const send: JobSender = { photo: async () => ({ ok: true }), text: async (a) => { said.push(a.text); return { ok: true, id: null }; } };
@@ -186,8 +204,11 @@ async function approveOne(u: string, ref: string, tag: string, d: FileDeps): Pro
   if (res.status === "confirmed") return null;
   if (res.status === "changed") return "Changed since you opened this page, so nothing was sent.";
   if (res.status === "duplicate") return "Already in your applications.";
-  return (said[0] ?? "Nothing was approved.").slice(0, 160);
+  if (res.status === "failed") return "I couldn't open the approval just now, so nothing was approved. Tap Apply again in a minute.";
+  return cut((said[0] ?? "Nothing was approved.").replace(/\s+/g, " ").trim(), 600);
 }
+const ELSEWHERE = { word: "in applications" as const, detail: "Already sent or on its way another way (your computer, the browser extension, or the same posting under another link). Each posting goes once." };
+const webDestination = (p: PreparedRow) => { const dest = (p.payload as Record<string, unknown>)?.destination; return dest === undefined || dest === null || dest === "" || /^https?:\/\/\S+$/i.test(String(dest)); };
 
 const CRAWLER = /TelegramBot|Twitterbot|facebookexternalhit|Slackbot|WhatsApp|Discordbot|LinkedInBot/i;
 const cookieOf = (req: Request, name: string) => {
@@ -210,6 +231,9 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   const text = async (body: string, status = 200) => new Response(body, { status, headers: await headers("text/plain; charset=utf-8", d.env) });
   if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "POST") return html(renderLinkState("Not supported", ["This page only opens and answers."]), 405);
   const url = new URL(req.url);
+  // Every redirect goes to this page's own path on this host: a path that starts with two slashes (or a backslash a browser reads as
+  // one) would be a link to another host (file journey round 2: "//evil.example/?t=..." redirected there after the sign-in).
+  const here = `/${url.pathname.replace(/^[\/\\]+/, "")}`;
   let fields: URLSearchParams = url.searchParams;
   if (req.method === "POST") { try { fields = new URLSearchParams(await req.text()); } catch { fields = new URLSearchParams(); } }
   const botUrl = (d.env.get("TRAINEE_BOT_URL") || "").trim();
@@ -223,11 +247,14 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   const sessions = d.sessions;
   if (!sessions) return state("Sign-in isn't set up yet", ["The jobs page isn't switched on yet, so nothing can be opened. Nothing was sent."], 503);
   const check = (id: string) => checkSession(id, { sessions, phone: d.phone, userOfTelegram: d.userOfTelegram, now: d.now() });
-  const signedOut = (why: string) => why === "error" ? state("Couldn't open this just now", ["Nothing was sent. Try again in a minute."], 503)
-    : why === "expired" ? state("You were signed out", ["Sign-ins last two hours. " + NEW_LINK], 401)
-    : why === "revoked" || why === "unbound" ? state("You were signed out", ["This sign-in was ended. " + NEW_LINK], 401)
-    : state("This link isn't valid", ["It may be cut short or changed. " + NEW_LINK], 403);
   const action = req.method === "POST" ? (fields.get("action") ?? "") : "";
+  // A tap that reaches an ended sign-in says what became of it: nothing was approved (file journey round 2: an Apply after the session
+  // expired or was signed out elsewhere only said "You were signed out", leaving whether it went unsaid).
+  const tapped = action === "apply" || action === "applyall" ? ["Nothing was approved or sent from this tap."] : [];
+  const signedOut = (why: string) => why === "error" ? state("Couldn't open this just now", ["Nothing was sent. Try again in a minute."], 503)
+    : why === "expired" ? state("You were signed out", [...tapped, "Sign-ins last two hours. " + NEW_LINK], 401)
+    : why === "revoked" || why === "unbound" ? state("You were signed out", [...tapped, "This sign-in was ended. " + NEW_LINK], 401)
+    : state("This link isn't valid", [...tapped, "It may be cut short or changed. " + NEW_LINK], 403);
   const given = req.method === "GET" || req.method === "HEAD" ? (url.searchParams.get("t") ?? "") : "";
 
   // ---- the link from the bot: says WHICH list, never WHO opened it. It opens a phone sign-in, never the list itself.
@@ -253,10 +280,10 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
       // Already signed in on this browser as the same account (by phone or Telegram): the link only picks the list.
       await sessions.finishLogin(c.claims.j, d.now()).catch(() => false);
       await sessions.setList(cur.idHash, c.claims.r).catch(() => {});
-      return html("", 303, { location: url.pathname });
+      return html("", 303, { location: here });
     }
     if (row.done_at) return state("This link was already used", ["A link opens a sign-in once. " + NEW_LINK], 410);
-    return html("", 303, { location: url.pathname, "set-cookie": loginCookie(given) });
+    return html("", 303, { location: here, "set-cookie": loginCookie(given) });
   }
 
   const locked = () => state("Too many wrong codes", ["This link is locked so nobody can guess the code. " + NEW_LINK], 429);
@@ -311,7 +338,7 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
     if (!finished) return state("This link was already used", ["A link opens a sign-in once. " + NEW_LINK], 410);
     const id = await startSession(sessions!, { userId: row.user_id, via: "phone", phone: row.phone, telegramId: null, list: row.list, now: d.now() }).catch(() => "");
     if (!id) return state("Couldn't open this just now", ["Nothing was opened. This link is used up, so " + NEW_LINK.charAt(0).toLowerCase() + NEW_LINK.slice(1)], 503);
-    return new Response("", { status: 303, headers: [...Object.entries(await headers("text/html; charset=utf-8", d.env)), ["location", url.pathname], ["set-cookie", sessionCookie(id)], ["set-cookie", CLEAR_LOGIN]] });
+    return new Response("", { status: 303, headers: [...Object.entries(await headers("text/html; charset=utf-8", d.env)), ["location", here], ["set-cookie", sessionCookie(id)], ["set-cookie", CLEAR_LOGIN]] });
   }
 
   let token = "";
@@ -381,8 +408,11 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
       if (!refs.includes(ref)) return state("This job isn't on your list", ["It is no longer on your list. " + NEW_LINK], 404);
       const cur = await loadFeed(claims, token, d);
       const row = cur?.rows.find((r) => r.ref === ref);
+      if (!row && refs.indexOf(ref) >= MAX_ROWS) return state("This job isn't on this page", [`The page shows the first ${MAX_ROWS} postings of your list and this one is past them. Nothing was sent. ` + NEW_LINK], 404);
       if (!row) return state("This job isn't on your list", [NEW_LINK], 404);
-      if (row.status) { /* already in motion: the row shows its word, nothing more to do */ }
+      // Already in motion (approved from Telegram, another device, or before): nothing more is approved, and the row says so rather
+      // than the tap silently turning into the status word as if this tap had queued it (file journey round 2).
+      if (row.status) notes[ref] = row.inApps ? `Already in your applications, so nothing more was sent. ${row.status.detail}` : `Nothing was approved: ${row.status.detail}`;
       else if (row.byHand) notes[ref] = "Not applied for automatically on this site. Open it and apply there yourself.";
       // The posting screen ran when the row was read (closed, stale, scam-looking, knock-out, the same posting twice): nothing goes.
       else if (row.blocked) notes[ref] = `${tag === "none" ? "Not queued" : "Nothing was approved"}: ${row.blocked}`;

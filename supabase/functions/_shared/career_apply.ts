@@ -7,7 +7,7 @@
 //                     the person's confirmed facts; anything missing is asked once for the whole batch and saved, so later
 //                     batches need nothing; the batch is admitted against the limits up front.
 // The worker (WO-009b) fills exactly the prepared fields by name, reads each back, and classifies the outcome here.
-import { answerKey, AUTH_FACTS, FOREIGN, mapQuestion, NAMES_US, norm as normQuestion, RELATIVE_PLACE } from "./question_map.ts";
+import { answerKey, AUTH_FACTS, FOREIGN, HONEYPOT, mapQuestion, NAMES_US, norm as normQuestion, RELATIVE_PLACE } from "./question_map.ts";
 import { rowAnswerKey } from "./row_answer.ts";
 import { chooseOption, levelOption, usCitizenChoice, yesNoFromFact, yesNoOf } from "./answer_options.ts";
 import { type PlacePart, postingAtHome, postingCountry, postingPlaces, STATE_NAMES } from "./posting_place.ts";
@@ -24,6 +24,12 @@ export interface Outcome { state: OutcomeState; reason: string; confirmation_id:
 
 // Employer confirmation wording. Only counted when the form is gone from the page.
 const SUCCESS = /(application (?:has been |was )?(?:submitted|received)|thank you for (?:applying|your application)|we(?:'ve| have) received your application|successfully submitted|application is complete|your application was sent)/i;
+// The employer saying the application is a duplicate of one it already has, or that it failed, in thank-you words
+// (round 2 of the apply scenarios, 2026-10-30: "You have already applied to this job. We have received your application."
+// and "Thank you for applying. Unfortunately an error occurred and your application could not be submitted." were both
+// read as the employer's confirmation). Neither is a confirmation: what the employer holds is not known from the page.
+const ALREADY = /\b(already (applied|submitted|received|have an application|on file)|(previously|before) applied|applied (to|for) this (job|position|role|posting) before|duplicate (application|submission)|an application (with this [a-z ]+ )?already exists)\b/i;
+const FAILED = /\b(an? (error|problem) (has )?occurred|something went wrong|could not be (submitted|sent|processed|received|completed)|couldn'?t (submit|send|process)|unable to (submit|send|process|complete)|(was|has) not been (submitted|sent|received)|was not (submitted|sent|received)|(submission|application) (has )?failed|failed to (submit|send)|please try again|server error)\b/i;
 // An id needs an id label and a token with a digit: a word is never an id (BUG-208: "security").
 const ID = /(?:application|confirmation|reference|submission|tracking)\s*(?:(?:id|number|no\.?)\s*[:#]?|#)\s*([A-Z0-9][A-Z0-9-]{4,})\b/i;
 
@@ -34,9 +40,29 @@ export function classifyOutcome(o: Observation): Outcome {
   if (o.form_present_after) return { state: "not_submitted", reason: o.required_empty_after ? `${o.required_empty_after} required field(s) still empty` : "the form is still open", confirmation_id: null };
   const m = ID.exec(o.page_text || "");
   const id = m && /\d/.test(m[1]) ? m[1] : null;
+  if (ALREADY.test(o.page_text || "")) return { state: "not_submitted", reason: "the employer's page says an application is already on file; whether this one was taken is not known", confirmation_id: null };
+  if (FAILED.test(o.page_text || "")) return { state: "not_submitted", reason: "the employer's page reports an error; whether the application was taken is not known", confirmation_id: null };
   if (SUCCESS.test(o.page_text || "")) return { state: "confirmed", reason: "employer confirmation on the page", confirmation_id: id };
   if (o.url_after !== o.url_before) return { state: "submitted_unconfirmed", reason: "the page moved and the form is gone, but the employer said nothing yet", confirmation_id: null };
   return { state: "not_submitted", reason: "nothing changed on the page", confirmation_id: null };
+}
+
+// After the one application request went out and the employer answered it (scripts/apply.ts, a single acknowledged
+// POST): what the page shows can no longer mean "not submitted", which may be sent again (round 2 of the apply scenarios,
+// 2026-10-30: a page that stayed the same, showed the form again, a thank-you in another language on the same address,
+// "you already applied" or an error were each recorded not_submitted after the employer had the application). An end the
+// page does not make clear is unknown_outcome: counted as applied, never sent again, and said as unknown. A verification
+// check after the send is not one the person can finish at the link (that would send it a second time): unknown too. An
+// emailed code the employer asks for to finish stays the person's (needs_user); validation errors on the form stay failed.
+// The same rule as the extension's outcomeAfterClick (extension/src/apply_core.ts).
+export type SentOutcome = { state: OutcomeState | "unknown_outcome"; reason: string; confirmation_id: string | null };
+export function outcomeAfterSend(o: Observation): SentOutcome {
+  if (o.captcha && !o.email_code_prompt) {
+    return { state: "unknown_outcome", reason: "a verification check showed after the application was sent; whether the employer took it is not known; never sent again", confirmation_id: null };
+  }
+  const r = classifyOutcome({ ...o, captcha: false });
+  if (r.state === "not_submitted") return { state: "unknown_outcome", reason: `after the application was sent, ${r.reason}; counted as applied, never sent again`, confirmation_id: null };
+  return r;
 }
 
 // ------------------------------------------------------------------------------------------------ admission
@@ -166,6 +192,8 @@ const KEYS: [RegExp, string][] = [
   [/salary|compensation\s*expectation|desired\s*pay/i, "salary_expectation"],
   [/gender|race|ethnicity|veteran|disability|hispanic|latino/i, "eeo"],
 ];
+// What a person was paid before, which only their own answer to that question may fill.
+export const PAY_HISTORY = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
 // A wrong mapping sends a wrong answer; an unknown only asks. So the person's own contact facts go only into a free-text
 // box (never a checkbox, radio or select, where "Do you own a smartphone?" or "Email me about other openings" would take
 // the person's number or address), and never into a question about someone else (a reference, a manager, an emergency
@@ -175,6 +203,8 @@ const FREE_TEXT = /^(input_text|text|email|tel|url|textarea|input|search|number|
 const SOMEONE_ELSE = /\breferr|\breferen|\bteam member|\breferee|\bemergency|\bmanager|\bsupervisor|\brecruiter|\bspouse|\bparent|\bguardian|\bemployee who/i;
 export function classifyField(label: string, type: string): string {
   const l = String(label || "");
+  // A honeypot that says what it is ("Website (leave blank)", "If you are human, leave this empty"): never anything to fill.
+  if (HONEYPOT.test(l)) return "unknown";
   if (/file/.test(type) && /resume|cv/i.test(l)) return "resume";
   // One checkbox carrying a long statement (no question in it) is an acknowledgement for the person to read, never a
   // fact. A long question rendered as checkboxes ("Will you ... require sponsorship ...?") is still a question.
@@ -196,7 +226,9 @@ export function classifyField(label: string, type: string): string {
     if (key === "website" && /\b(academic|program|department|school|university|college|company|employer|organi[sz]ation)\b/i.test(l)) continue;
     if ((key === "email" || key === "phone") && /e-?mail/i.test(l) && /phone|mobile|number/i.test(l)) continue;
     if (key === "phone" && /\b(sms|text messages?|texts)\b/i.test(l)) continue;
-    if (key === "salary_expectation" && (/current|present|monthly|per month|hourly|per hour|range|bracket|band|format|\$00/i.test(l) || VARIABLE_PAY.test(l))) continue;
+    // Round 2 (2026-10-30): a salary history ("Salary history", "Previous salary", "What was your salary at your last job?")
+    // asks what the person was paid, not what they expect: never answered with the expectation.
+    if (key === "salary_expectation" && (/current|present|monthly|per month|hourly|per hour|range|bracket|band|format|\$00/i.test(l) || PAY_HISTORY.test(l) || VARIABLE_PAY.test(l))) continue;
     // The resume answer is the approved file itself: it goes into an upload, never typed into a box as text.
     if ((key === "resume" || key === "cover_letter") && !/file/.test(type)) continue;
     // "a visa that does NOT require sponsorship" asks the opposite of the sponsorship fact: ask the person. Only the

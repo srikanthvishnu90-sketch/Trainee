@@ -21,6 +21,9 @@ import { MAX_CONTACTS, normalizeFirm, sameFirm, type ContactRow } from "./career
 import { factLock } from "./essay_draft.ts";
 import { CareerProfile } from "./router_core.career.js";
 import { approvalWords } from "./approval_words.ts";
+import { secretIn } from "./agent/reply_guards.ts";
+import { redactIdentity } from "./identity_redact.ts";
+import { langOf } from "./career_mail_langs.ts";
 
 export type ModelFn = (payload: any) => Promise<any>;
 export interface Recipient { name: string; firm: string; title: string; school: string; email: string; source: string; prior_firms?: string[]; address?: "published" | "inferred" }
@@ -77,7 +80,25 @@ export interface OutreachStore {
   putContacts?(userId: string, epoch: number, rows: KeyedContact[], o?: { replaceFile?: string; unlessForgotten?: boolean }): Promise<number | null>;
   forgetContacts?(userId: string, epoch: number, sel: { all?: boolean; linkedin?: boolean; rowKeys?: string[] }): Promise<number | null>;
   accountEpoch?(userId: string): Promise<number>;
+  // OUTREACH SCENARIOS (2026-10-30): which of these addresses no one may email: one that said "stop" to ANY Trainee user
+  // (career_outreach_dnc is read by address, across everyone) or that bounced for anyone (career_send_bad_addresses).
+  // dnc(userId) above is the person's own list only; drafting read only that, so someone who told another person "stop"
+  // was drafted to, approved, and then refused by the rail while the person was told it was going.
+  blocked?(emails: string[]): Promise<Map<string, "opted_out" | "bounced">>;
+  // A batch shown again in another chat moves to that chat: only the chat that shows a batch last can approve it.
+  moveBatch?(userId: string, batchId: string, threadId: string): Promise<void>;
 }
+// Every address of these that may not be emailed (lowercase -> why), the person's own list and everyone's.
+export async function blockedAddresses(store: OutreachStore, userId: string, emails: string[]): Promise<Map<string, "opted_out" | "bounced">> {
+  const list = [...new Set(emails.filter(Boolean).map((e) => String(e).trim().toLowerCase()))];
+  const out = new Map<string, "opted_out" | "bounced">();
+  if (!list.length) return out;
+  const own = await store.dnc(userId);
+  for (const e of list) if (own.has(await emailHash(e))) out.set(e, "opted_out");
+  if (store.blocked) for (const [e, why] of await store.blocked(list)) if (!out.has(e)) out.set(e, why);
+  return out;
+}
+export const BLOCKED_WHY = { opted_out: "they asked not to be contacted", bounced: "that address bounced before, so no one emails it again" } as const;
 export interface KeyedContact { row_key: string; person_key: string; file: string; name_key: string; email: string | null; firm_key: string; firm_raw_key: string; data: ContactRow }
 // One follow-up reminder: on the draft the person sent (from Trainee or themselves), due on a day, fired at most once.
 export interface Followup {
@@ -105,7 +126,9 @@ export const APPROVAL_TTL_MS = 7 * 86400_000;
 export const OPT_OUT_LINE = "If you'd rather not hear from me, reply stop and I won't write again.";
 export const SIGNATURE_ASK = "How do you sign your emails? Send your name the way you want it at the bottom (and a phone or school line if you like).";
 
-const plain = (s: unknown) => String(s ?? "").toLowerCase().replace(/[’']/g, "").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
+// NETWORKING R2 (2026-10-30): letters of any script are letters. Before, everything outside a-z was a word break, so
+// "Amélie" read as "am lie" and "Ørsted" as "rsted": a name could be misspelled ("Hi Émilie" to Amélie) and still trace.
+const plain = (s: unknown) => String(s ?? "").normalize("NFC").toLowerCase().replace(/[’']/g, "").replace(/&/g, " and ").replace(/[^\p{L}\p{M}\p{N}]+/gu, " ").trim();
 const hasWords = (hay: string, needle: string) => { const n = plain(needle); return !!n && ` ${plain(hay)} `.includes(` ${n} `); };
 export async function sha256(s: string): Promise<string> {
   const b = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
@@ -171,19 +194,82 @@ const COMMON = new Set(("i im ive id ill hi hello hey dear thanks thank best reg
 const GENERIC_CAPS = new Set(["I", "M&A", "IB", "ECM", "DCM", "LevFin", "PE", "VC", "MBA", "CFA", "Zoom", "LinkedIn"]);
 const MONTH = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\b/g;
 const SHARED_CUE = /\b(we both|both of us|you and i|fellow|like you|like yourself|as you did|same (?:school|college|university|program|firm|bank|team|alma mater|class|group)|our (?:school|alma mater|college|university|time at|shared|firm)|both (?:went|studied|attended|worked|interned|graduated|at|from)|also (?:went|studied|attended|graduated|an? alum))\b/i;
-const ENTITY = "((?:[A-Z][\\w&.'’-]*|of|the|and|&)(?:[ \\t]+(?:[A-Z][\\w&.'’-]*|of|and|&))*)";
+// A name starts with a capital letter of any script ("École", "Ørsted", "Łódź"), or is a run of letters of a script without
+// capitals (Chinese, Japanese, Korean, Arabic, Hebrew ...): NETWORKING R2 (2026-10-30), before only A-Z started a name,
+// so "I worked at Ørsted" and "you studied at École" were never checked against anything.
+const CAP = "(?:\\p{Lu}|\\p{Lt}|\\p{Lo})";
+const ENTITY = `((?:${CAP}[\\p{L}\\p{M}\\p{N}_&.'’-]*|of|the|and|&)(?:[ \\t]+(?:${CAP}[\\p{L}\\p{M}\\p{N}_&.'’-]*|of|and|&))*)`;
 const MEMBER = "(?:studied at|study at|studying at|went to|go to|graduated from|graduate of|attended|attend|attending|interned at|intern at|interning at|internship at|worked at|work at|working at|am at|'m at|’m at|alum(?:nus|na|ni)? of|student at|junior at|senior at|sophomore at|freshman at|analyst at|associate at|class at|spent the summer at|summer at)";
 // Between the pronoun and the verb, no pronoun of the other side: "I saw you worked at X" is about them, not the person.
-const FIRST = new RegExp(`\\b(?:I|I'm|I’m|I am|I've|I’ve|I have|I was|my)\\b(?:(?!\\byou)[^.!?\\n]){0,40}?\\b${MEMBER}\\s+(?:the\\s+)?${ENTITY}`, "g");
-const SECOND = new RegExp(`\\b(?:you|you're|you’re|you are|you've|you’ve|your)\\b(?:(?!\\b(?:I|my|me)\\b)[^.!?\\n]){0,40}?\\b(?:${MEMBER.slice(3, -1)}|at)\\s+(?:the\\s+)?${ENTITY}`, "g");
+const FIRST = new RegExp(`\\b(?:I|I'm|I’m|I am|I've|I’ve|I have|I was|my)\\b(?:(?!\\byou)[^.!?\\n]){0,40}?\\b${MEMBER}\\s+(?:the\\s+)?${ENTITY}`, "gu");
+const SECOND = new RegExp(`\\b(?:you|you're|you’re|you are|you've|you’ve|your)\\b(?:(?!\\b(?:I|my|me)\\b)[^.!?\\n]){0,40}?\\b(?:${MEMBER.slice(3, -1)}|at)\\s+(?:the\\s+)?${ENTITY}`, "gu");
 
 // `topic` (F10): what the person asked to write about, in their own words this turn ("the data analyst role"). Its words
 // may be named, but it is never a source for a claim about either side: "I ... at X" still needs X in the facts.
-export interface LockSources { facts: string[]; recipient: Recipient; shared: Shared[]; topic?: string }
+export interface LockSources { facts: string[]; recipient: Recipient; shared: Shared[]; topic?: string; lang?: DraftLang | null }
+// NETWORKING R2 (2026-10-30): a draft in the language the person writes in (Spanish, French, German, Italian, Portuguese,
+// Dutch: the languages Trainee reads mail in, career_mail_langs.ts). Before, the writer was never told the language and
+// the lock knew only English: every honest draft in another language was refused ("Hola", "Ich", "Sie", "15 minutos" read
+// as claims), and a claim in that language ("Trabajé en Acme" when only the recipient works at Acme) was not checked.
+// Per language: the words that open a sentence or a greeting, German's capitalized everyday nouns, the word for minutes,
+// the words that claim something in common, and who a claim is about (I studied/worked at X; you studied/work at X).
+export type DraftLang = "es" | "fr" | "de" | "it" | "pt" | "nl";
+export const LANG_NAME: Record<DraftLang, string> = { es: "Spanish", fr: "French", de: "German", it: "Italian", pt: "Portuguese", nl: "Dutch" };
+// The language the person writes in, from their own message (career_mail_langs.ts langOf), or null for English.
+export function draftLangOf(message: unknown): DraftLang | null {
+  const l = langOf(String(message ?? "").toLowerCase().replace(/[’‘`]/g, "'").replace(/\s+/g, " ").trim());
+  return l && l in LANG_NAME ? (l as DraftLang) : null;
+}
+const words = (x: string) => new Set(x.split(/\s+/).filter(Boolean));
+const LANG_COMMON: Record<DraftLang, Set<string>> = {
+  es: words("hola estimado estimada estimados querido querida buenos buenas buen gracias muchas saludos un una unos unas el la los las lo me mi mis soy estoy estudio estudié trabajo trabajé quería quisiera querría escribo le te su sus tu usted ustedes nos nuestro y o pero si en de del con por para que qué cómo como tendría tendrías podría podrías sería sé vi he es son espero cordialmente atentamente un ya hoy esta este ese esa también gracias aunque cuando donde sobre ante ambos ambas nosotros nosotras vi que estudiamos trabajamos fuimos"),
+  fr: words("bonjour bonsoir salut madame monsieur cher chère chers merci bien cordialement je j je suis j'ai jai me mon ma mes vous votre vos tu ton ta nous notre et ou mais si en de du des le la les un une au aux pour par avec sur que qui quoi comment comme auriez pourriez seriez serait aurait est sont ai serais aimerais souhaiterais écris vois espère aussi actuellement également ce cette ces étudie travaille étudié travaillé fait avez auriez-vous pourriez-vous seriez-vous"),
+  de: words("hallo guten liebe lieber sehr geehrte geehrter grüß gruß grüße viele beste freundlichen ich mich mir mein meine meinen meinem wir uns unser sie ihnen ihr ihre ihrem ihren ihrer du dich dir dein deine und oder aber wenn in im an am bei von vom zu zum zur mit für auf über als wie dass ob hätten hätte könnten könnte würden würde wäre bin ist sind habe haben schreibe danke vielen herzlichen gerne auch derzeit aktuell gerade diese dieser dieses der die das ein eine einen einem beide studiere arbeite studiert gearbeitet"),
+  it: words("ciao buongiorno buonasera gentile gentilissimo gentilissima caro cara grazie mille cordiali saluti io mi mio mia miei sono studio lavoro ho le la lo gli il i un una uno suo sua lei voi vostro noi nostro e o ma se in di del della con per su che come avrebbe potrebbe sarebbe vorrei scrivo spero anche attualmente questo questa entrambi avrei avreste potreste"),
+  pt: words("olá ola oi prezado prezada caro cara bom boa dia tarde obrigado obrigada muito atenciosamente cumprimentos eu me meu minha sou estou estudo trabalho tenho o a os as um uma seu sua você vocês senhor senhora nós nosso e ou mas se em de do da no na com por para que como teria poderia seria gostaria escrevo espero também atualmente este esta ambos teríamos"),
+  nl: words("hallo hoi beste geachte goedemorgen goedemiddag dag dank bedankt groeten vriendelijke met ik mij me mijn ben heb studeer werk u uw jij je jouw wij we ons onze en of maar als in op aan bij van voor met over dat hoe zou zoudt kunt kun zijn is schrijf hoop ook momenteel deze dit de het een heeft hebt kunt wilt mag zoudt allebei"),
+};
+// German capitalizes every noun: the everyday ones an outreach note uses are not names.
+const DE_NOUNS = words("sie ihnen ihr ihre ihrem ihren ihrer herr frau minuten minute zeit gespräch gespräche telefonat anruf call kaffee frage fragen rat tipps tipp erfahrung erfahrungen einblick einblicke austausch woche wochen tag tage monat nachricht e-mail email team rolle stelle position bereich branche karriere weg einstieg berufseinstieg praktikum studium interesse dank grüße grüßen gruß unternehmen firma arbeit aufgaben alltag möglichkeit möglichkeiten perspektive perspektiven meinung hilfe zukunft ziel ziele bewerbung lebenslauf abschluss semester");
+const MINUTES = String.raw`(?:min|mins|minutes?|minutos?|minuti|minuten|minuut|minuto)`;
+const LANG_SHARED: Record<DraftLang, RegExp> = {
+  es: /\b(?:ambos|ambas|los dos|las dos|igual que (?:tú|usted)|como (?:tú|usted)|también (?:estudi|fui|trabaj|me gradu)|compañer[oa]s? de|nuestra (?:universidad|escuela|alma mater|empresa))/iu,
+  fr: /(?:tous les deux|toutes les deux|nous deux|comme vous|comme toi|vous aussi|notre (?:école|université|alma mater|entreprise)|moi aussi|également (?:étudié|été|travaillé))/iu,
+  de: /(?:wir beide|beide|wie sie|wie du|ebenfalls|sie auch|ich auch|unsere(?:r|n)? (?:uni|universität|hochschule|firma))/iu,
+  it: /(?:entrambi|entrambe|tutti e due|come lei|come te|anch'io|anche io|nostra (?:università|scuola|azienda))/iu,
+  pt: /(?:ambos|ambas|nós dois|como você|como o senhor|como a senhora|também (?:estud|trabalh|fui)|nossa (?:universidade|escola|empresa))/iu,
+  nl: /(?:allebei|wij beiden|we beiden|net als u|net als jij|ook (?:gestudeerd|gewerkt)|onze (?:universiteit|school|hogeschool))/iu,
+};
+// First person: "Estudié en X", "J'ai travaillé chez X", "Ich habe an der X studiert" (the place before the verb in German
+// and Dutch, read by its preposition), "Ho lavorato presso X", "Estudei na X", "Ik heb bij X gewerkt".
+const LANG_FIRST: Record<DraftLang, string> = {
+  es: String.raw`(?:estudi[ée]|estudio|estoy estudiando|trabaj[ée]|trabajo|hice (?:unas |mis )?pr[áa]cticas|me gradu[ée]|soy (?:estudiante|egresad[oa]|alumn[oa]))\s+(?:en|de|a|para)\s+(?:la |el |los |las )?`,
+  fr: String.raw`(?:j'ai (?:étudié|travaillé|fait (?:un |mon )?stage)|j’ai (?:étudié|travaillé|fait (?:un |mon )?stage)|j'étudie|j’étudie|je travaille|je suis (?:étudiante?|diplômée?|stagiaire))\s+(?:à|chez|en|au|aux|de|à la|pour)\s+(?:la |le |l'|les )?`,
+  de: String.raw`(?:[Ii]ch (?:habe|hab|bin|studiere|arbeite|arbeitete|studierte)\b[^.!?\n]{0,30}?)\b(?:an der|an dem|am|bei|in der|auf der|an)\s+(?:der |dem |den )?`,
+  it: String.raw`(?:ho (?:studiato|lavorato|fatto (?:uno |il mio )?stage)|studio|lavoro|sono (?:studente|studentessa|laureat[oa]))\s+(?:presso|a|in|da|alla|al|all'|per)\s+(?:la |il |lo |l')?`,
+  pt: String.raw`(?:estudei|estudo|trabalhei|trabalho|fiz (?:um |meu )?est[áa]gio|me formei|sou (?:estudante|formad[oa]|alun[oa]))\s+(?:na|no|em|de|da|do|para)\s+(?:a |o )?`,
+  nl: String.raw`(?:ik (?:heb|ben|studeer|werk|werkte|studeerde)\b[^.!?\n]{0,30}?)\b(?:bij|aan de|aan het|op de|in|aan)\s+(?:de |het )?`,
+};
+const LANG_SECOND: Record<DraftLang, string> = {
+  es: String.raw`(?:usted|tú|vos)?\s*(?:estudió|estudiaste|trabajó|trabajaste|trabaja|trabajas|est[áa]s? en)\s+(?:en|de|a|para)?\s*(?:la |el )?`,
+  fr: String.raw`(?:vous (?:avez (?:étudié|travaillé)|travaillez|étudiez|êtes)|tu (?:as (?:étudié|travaillé)|travailles))\s+(?:à|chez|en|au|aux|de|pour)\s+(?:la |le |l'|les )?`,
+  de: String.raw`(?:[Ss]ie|[Dd]u)\s+(?:haben|hast|sind|bist|arbeiten|arbeitest|studierten|studiert(?:en)?)\b[^.!?\n]{0,30}?\b(?:an der|an dem|am|bei|in der|an)\s+(?:der |dem |den )?`,
+  it: String.raw`(?:lei|tu)?\s*(?:ha (?:studiato|lavorato)|hai (?:studiato|lavorato)|lavora|lavori)\s+(?:presso|a|in|da|alla|al|per)\s+(?:la |il |lo |l')?`,
+  pt: String.raw`(?:você|o senhor|a senhora)?\s*(?:estudou|trabalhou|trabalha)\s+(?:na|no|em|de|da|do|para)\s+(?:a |o )?`,
+  nl: String.raw`(?:u|jij|je)\s+(?:hebt|heeft|bent|werkt|studeert|werkte|studeerde)\b[^.!?\n]{0,30}?\b(?:bij|aan de|aan het|op de|in|aan)\s+(?:de |het )?`,
+};
+// Case-sensitive (a name must start with a capital); a sentence is read with its first letter lowered, so "Estudié en X"
+// and "estudié en X" read the same.
+const langRx = (lang: DraftLang, side: "first" | "second") => new RegExp(`(?<![\\p{L}])${(side === "first" ? LANG_FIRST : LANG_SECOND)[lang]}${ENTITY}`, "gu");
 export interface Lock { pass: boolean; untraced: string[]; misattributed: string[] }
 const sentencesOf = (t: string) => t.split(/(?<=[.!?])\s+|\n+/).map((s) => s.trim()).filter(Boolean);
 const trimEntity = (e: string) => e.replace(/^(?:the|of|and|&)\s+/i, "").replace(/\s+(?:of|the|and|&)$/i, "").replace(/['’]s$/, "").replace(/[.]+$/, "").trim();
 
+// OUTREACH R3 (D-007): titles written in lower case, events in someone's career, and what they lead or run.
+const RECIPIENT_TITLE = /(?<![\p{L}-])(partner|principal|founder|co-?founder|owner|chair(?:man|woman|person)?|president|recruiter|professor|dean)s?(?![\p{L}-])/giu;
+const RECIPIENT_EVENT = /\b(?:congrat\w*|congratulations)\s+on\s+(?:your|the)\s+(?:new\s+|recent\s+)?(promotion|appointment|new role|role|position|move|raise|funding round|award|book|launch)\b|\byour\s+(?:recent\s+)?(promotion|appointment|new role|new position|move to|move from)\b|\byou\s+(?:were|got|just got|recently got)\s+(promoted|appointed|hired)\b/giu;
+const RECIPIENT_DOES = /\byou(?:'re| are)?\s+(?:now\s+)?(lead|leading|run|running|manage|managing|head|heading|oversee|overseeing|built|founded|co-?founded|started)\s+([^.,;!?\n]{1,60})/giu;
+const DOES_FILLER = new Set(["team", "group", "desk", "teams", "groups", "there", "firm", "company", "office", "work", "now", "currently", "whole", "entire"]);
 export function outreachLock(text: string, s: LockSources): Lock {
   const r = s.recipient;
   const personCorpus = s.facts.join(" \n ");
@@ -194,21 +280,29 @@ export function outreachLock(text: string, s: LockSources): Lock {
   const untraced: string[] = [], misattributed: string[] = [];
   const miss = (v: string) => { if (!untraced.some((u) => plain(u) === plain(v))) untraced.push(v); };
   const wrong = (v: string) => { if (!misattributed.includes(v)) misattributed.push(v); };
+  // A word of the draft's language that is no claim: every part of it ("Auriez-vous", "J'étudie") is a common word.
+  const langWord = (w: string) => {
+    if (!s.lang) return false;
+    const parts = w.toLowerCase().split(/[-'’\s]+/).filter((x) => x.length > 1);
+    return parts.length > 0 && parts.every((x) => COMMON.has(x) || LANG_COMMON[s.lang!].has(x) || (s.lang === "de" && DE_NOUNS.has(x)));
+  };
   // 1. Every capitalized name, number and month traces to a source. A number of minutes is a request, not a claim.
   for (const sent of sentencesOf(text)) {
-    const toks = [...sent.matchAll(/(?<![\w&.'’-])([A-Z][A-Za-z&.'’-]*[A-Za-z]|[A-Z])(?![\w&'’-])/g)];
+    const toks = [...sent.matchAll(/(?<![\p{L}\p{M}\p{N}_&.'’-])([\p{Lu}\p{Lt}][\p{L}\p{M}&.'’-]*[\p{L}\p{M}]|[\p{Lu}\p{Lt}]|\p{Lo}[\p{Lo}\p{M}]*)(?![\p{L}\p{M}\p{N}_&'’-])/gu)];
     for (const [i, m] of toks.entries()) {
       const w = m[1].replace(/['’]s$/, "");
       if (GENERIC_CAPS.has(w) || /^I['’](?:m|ve|d|ll)$/.test(w)) continue;
-      const atStart = i === 0 && /^[\s"'“(]*$/.test(sent.slice(0, m.index));
-      if (atStart && COMMON.has(w.toLowerCase().replace(/['’]/g, ""))) continue;
+      const atStart = i === 0 && /^[\s"'“(¿¡«]*$/.test(sent.slice(0, m.index));
+      const lw = w.toLowerCase().replace(/['’]/g, "");
+      if (atStart && (COMMON.has(lw) || langWord(w))) continue;
+      if (s.lang === "de" && (DE_NOUNS.has(lw) || LANG_COMMON.de.has(lw))) continue;
       if (!inAny(w)) miss(w);
     }
   }
   const nums = new Set([...all.matchAll(/\d[\d,]*(?:\.\d+)?/g)].map((m) => m[0].replace(/,/g, "")));
   for (const m of text.matchAll(/\$?\d[\d,]*(?:\.\d+)?(?:\s?(?:%|k|m|bn|b)\b)?/gi)) {
     const after = text.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 12);
-    if (/^\s*(?:-|to)?\s*\d*\s*(?:min|minute)/i.test(after)) continue;
+    if (new RegExp(`^\\s*(?:-|to|a|à|bis|-)?\\s*\\d*\\s*${MINUTES}`, "i").test(after)) continue;
     if (!nums.has(m[0].replace(/[$,%a-z\s]/gi, ""))) miss(m[0].trim());
   }
   for (const m of text.matchAll(MONTH)) {
@@ -217,10 +311,17 @@ export function outreachLock(text: string, s: LockSources): Lock {
   }
   // WO-030's fact-lock (essay_draft.ts) on top: titles, degrees, tools, scale words and units must trace too ("a junior"
   // is a claim when the facts say "Class of 2027"). A number of minutes is a request, and an opening word is no claim.
-  const asked = text.replace(/\b\d{1,2}(?:\s*(?:-|to)\s*\d{1,2})?\s*(?:min|mins|minutes?)\b/gi, "a few minutes");
+  const asked = text.replace(new RegExp(String.raw`\b\d{1,2}(?:\s*(?:-|to|a|à|bis)\s*\d{1,2})?\s*${MINUTES}\b`, "giu"), "a few minutes");
   for (const u of factLock(asked, [all]).untraced) {
     const w = u.replace(/['’]s$/, "");
-    if (GENERIC_CAPS.has(w) || COMMON.has(w.toLowerCase().replace(/['’]/g, "")) || inAny(w)) continue;
+    const lw = w.toLowerCase().replace(/['’]/g, "");
+    if (GENERIC_CAPS.has(w) || COMMON.has(lw) || inAny(w)) continue;
+    if (s.lang) {
+      // The essay lock reads A-Z only: a word with an accent comes back cut ("Trabaj" of "Trabajé", "Gespr" of "Gespräch");
+      // the whole word is checked above. A greeting with a name ("Hola Ana") is common words and a traced name.
+      if (new RegExp(`${u.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\p{L}\\p{M}]`, "u").test(text)) continue;
+      if (u.split(/\s+/).every((p) => langWord(p) || inAny(p))) continue;
+    }
     miss(u);
   }
   // 2. Who a claim is about. "I ... at X" is about the person: X must be in their confirmed facts. Read sentence by sentence
@@ -236,15 +337,51 @@ export function outreachLock(text: string, s: LockSources): Lock {
     const e = trimEntity(m[1]);
     if (e && !GENERIC_CAPS.has(e) && !(hasWords(rowCorpus, e) || sameFirmIn(rowCorpus, e))) wrong(`"${m[0].trim()}" says this about them, but ${e} is not on their row`);
   }
+  if (s.lang) {
+    const bySentenceLow = (rx: RegExp) => sentencesOf(text).map((x) => x.replace(/^([¿¡«"'“(\s]*)(\p{L})/u, (_a, p, c) => p + c.toLowerCase())).flatMap((x) => [...x.matchAll(rx)]);
+    for (const m of bySentenceLow(langRx(s.lang, "first"))) {
+      const e = trimEntity(m[m.length - 1] ?? "");
+      if (e && !GENERIC_CAPS.has(e) && !(hasWords(personCorpus, e) || sameFirmIn(personCorpus, e))) wrong(`"${m[0].trim()}" says this about you, but ${e} is not in your confirmed facts`);
+    }
+    for (const m of bySentenceLow(langRx(s.lang, "second"))) {
+      const e = trimEntity(m[m.length - 1] ?? "");
+      if (e && !GENERIC_CAPS.has(e) && !(hasWords(rowCorpus, e) || sameFirmIn(rowCorpus, e))) wrong(`"${m[0].trim()}" says this about them, but ${e} is not on their row`);
+    }
+  }
+  // OUTREACH R3 (2026-10-31, D-007): what the email says about the recipient that no capital letter gives away. "Congrats
+  // on your promotion to partner", "You lead the healthcare coverage group" passed: a title in lower case, an event and a
+  // team are claims, and none of them was on the row. A title word must be on the row (or in the person's facts); a
+  // promotion, appointment, new role or recent move must be in what the draft was given; "you lead / run / manage / built
+  // X" must name only what is on their row.
+  const lowText = text.replace(/[’]/g, "'");
+  for (const m of lowText.matchAll(RECIPIENT_TITLE)) {
+    if (/^\p{Lu}/u.test(m[0])) continue; // capitalized: a name ("Blue Harbor Partners"), traced in 1 above
+    const w = m[1].toLowerCase();
+    if (!hasWords(rowCorpus, w) && !hasWords(personCorpus, w) && !hasWords(s.topic ?? "", w)) wrong(`"${m[0].trim()}" gives them a title (${w}) that is not on their row`);
+  }
+  for (const m of lowText.matchAll(RECIPIENT_EVENT)) {
+    const w = String(m[1] ?? m[2] ?? m[3]).toLowerCase().replace(/\s+/g, " ");
+    if (!hasWords(all, w)) wrong(`"${m[0].trim()}" says something happened to them (${w}) that nothing on record says`);
+  }
+  for (const sent of sentencesOf(lowText)) for (const m of sent.matchAll(RECIPIENT_DOES)) {
+    const words = plain(m[2]).split(" ").filter((x) => x.length > 2 && !COMMON.has(x) && !DOES_FILLER.has(x));
+    const off = words.filter((x) => !hasWords(rowCorpus, x) && !hasWords(s.topic ?? "", x));
+    if (off.length) wrong(`"${m[0].trim()}" says what they do (${off.join(", ")}), but that is not on their row`);
+  }
   // 3. Anything claimed in common must be on both sides: every name in the clause that says so.
   for (const sent of sentencesOf(text).flatMap((x) => x.split(/[,;:]\s+|\s+(?:but|while|and so)\s+/))) {
-    if (!SHARED_CUE.test(sent)) continue;
-    const names = [...sent.matchAll(/(?<![\w&.'’-])([A-Z][A-Za-z&.'’-]*[A-Za-z](?:[ \t]+(?:of[ \t]+)?[A-Z][A-Za-z&.'’-]*[A-Za-z])*)/g)]
-      .map((m) => trimEntity(m[1])).filter((e) => e && !GENERIC_CAPS.has(e) && !COMMON.has(e.toLowerCase()) && plain(e) !== plain(r.name) && !plain(r.name).split(" ").includes(plain(e)));
+    if (!SHARED_CUE.test(sent) && !(s.lang && LANG_SHARED[s.lang].test(sent))) continue;
+    const names = [...sent.matchAll(/(?<![\p{L}\p{M}\p{N}_&.'’-])((?:[\p{Lu}\p{Lt}][\p{L}\p{M}&.'’-]*[\p{L}\p{M}]|\p{Lo}[\p{Lo}\p{M}]*)(?:[ \t]+(?:of[ \t]+)?(?:[\p{Lu}\p{Lt}][\p{L}\p{M}&.'’-]*[\p{L}\p{M}]|\p{Lo}[\p{Lo}\p{M}]*))*)/gu)]
+      .map((m) => trimEntity(m[1])).map((e) => (s.lang ? e.split(/\s+/).filter((p) => !langWord(p)).join(" ") : e)).filter((e) => e && !GENERIC_CAPS.has(e) && !COMMON.has(e.toLowerCase()) && plain(e) !== plain(r.name) && !plain(r.name).split(" ").includes(plain(e)));
     const bad = names.filter((e) => !s.shared.some((x) => hasWords(x.value, e) || hasWords(e, x.value) || sameFirm(x.value, e)));
     if (bad.length) wrong(`"${sent}" claims ${bad.join(", ")} in common, but that is not on both sides`);
     else if (!names.length && !s.shared.length) wrong(`"${sent}" claims something in common, but nothing on record is on both sides`);
   }
+  // 4. NETWORKING R2 (2026-10-30): never a secret in an email, wherever the words came from (a fact, a contact's row, a
+  // page): an API key or token, a password or one-time code, a card, account or Social Security number. Before, a key or
+  // an SSN that sat in a confirmed fact or a row field traced like any other word and could be written into the email.
+  const red = redactIdentity(text);
+  if (secretIn(text) || red.removed.length) wrong(`it carries a secret (${[...new Set(red.removed.length ? red.removed : ["key"])].join(", ")}); an email never does`);
   return { pass: !untraced.length && !misattributed.length, untraced, misattributed };
 }
 function sameFirmIn(corpus: string, e: string): boolean {
@@ -262,8 +399,9 @@ const SYSTEM = [
   "3. Output exactly: a first line 'Subject: <subject>', a blank line, then the body starting with a greeting. No sign-off and no name at the end: the seeker's own signature is added after it.",
   "4. Never mention AI, Upmore or Trainee. No stock phrases (\"I hope this email finds you well\", \"pick your brain\", \"I came across your profile\").",
 ].join("\n");
-export function draftPayload(o: { facts: any[]; r: Recipient; shared: Shared[]; previous?: string | null; fix?: string[]; topic?: string | null }) {
+export function draftPayload(o: { facts: any[]; r: Recipient; shared: Shared[]; previous?: string | null; fix?: string[]; topic?: string | null; lang?: DraftLang | null }) {
   const lines = [
+    o.lang ? `Write the subject and the body in ${LANG_NAME[o.lang]}: the seeker writes in ${LANG_NAME[o.lang]}. Every name stays exactly as written below.` : "",
     "THE SEEKER'S CONFIRMED FACTS (the only things you may say about them):",
     ...(o.facts.length ? o.facts.map((f) => `- [${[f.id, f.kind].filter(Boolean).join(", ")}] ${factText(f)}`) : ["- (none)"]),
     "THE RECIPIENT'S ROW (the only things you may say about them):",
@@ -284,16 +422,17 @@ function parseDraft(msg: any): { subject: string; body: string; cut: boolean } {
   return { subject, body, cut: msg?.stop_reason === "max_tokens" || !/[.!?)"”]$/.test(body) };
 }
 export type Drafted = { ok: true; subject: string; body: string; shared: Shared[]; tries: number } | { ok: false; why: string; detail: string[]; tries: number };
-export async function draftFor(o: { model: ModelFn; facts: unknown[]; r: Recipient; previous?: string | null; topic?: string | null }): Promise<Drafted> {
+export async function draftFor(o: { model: ModelFn; facts: unknown[]; r: Recipient; previous?: string | null; topic?: string | null; lang?: DraftLang | null }): Promise<Drafted> {
   const facts = confirmed(o.facts);
   if (!facts.length) return { ok: false, why: "thin", detail: ["no confirmed facts to write from"], tries: 0 };
   const shared = sharedFacts(facts, o.r);
   const topic = o.topic ? String(o.topic).replace(/\s+/g, " ").trim().slice(0, 200) : "";
-  const sources: LockSources = { facts: facts.map(factText), recipient: o.r, shared, ...(topic ? { topic } : {}) };
+  const lang = o.lang && LANG_NAME[o.lang] ? o.lang : null;
+  const sources: LockSources = { facts: facts.map(factText), recipient: o.r, shared, ...(topic ? { topic } : {}), ...(lang ? { lang } : {}) };
   let fix: string[] = [], last: string[] = [];
   for (let tries = 1; tries <= 2; tries++) {
     let msg: any;
-    try { msg = await o.model(draftPayload({ facts, r: o.r, shared, previous: o.previous, fix, topic: topic || null })); }
+    try { msg = await o.model(draftPayload({ facts, r: o.r, shared, previous: o.previous, fix, topic: topic || null, lang })); }
     catch (e) { return { ok: false, why: "model", detail: [e instanceof Error ? e.message : String(e)], tries }; }
     const d = parseDraft(msg);
     if (!d.subject || !d.body) { last = ["it did not write a subject and a body"]; fix = ["Write 'Subject: ...', a blank line, then the body."]; continue; }
@@ -481,7 +620,9 @@ export async function outreachTurn(o: {
   // against (career_outreach_drafts.approved_hash). The Gmail sending rail (queueApprovedOutreach, built separately)
   // plugs in here. A failure is logged and changes nothing that was approved: the scheduled send run re-checks every
   // draft's hash at claim (admitSend "changed").
-  onApproved?: (userId: string, items: ApprovedItem[]) => Promise<void>;
+  // OUTREACH R3 (2026-10-31): the hand-off may answer which approved drafts the rail would not take ({draftId, reason}:
+  // opted_out, bad_address, already_emailed ...); the reply says so instead of promising they go.
+  onApproved?: (userId: string, items: ApprovedItem[]) => Promise<void | { draftId: string; reason: string }[]>;
 }): Promise<{ reply: string; status: string; intent: string; parts?: string[]; approved?: ApprovedItem[] } | null> {
   // A batch yes (D-MN-2) counts only while the batch is the thread's last word: the check just below, as for "send all".
   const r: OutreachReply | null = parseOutreachReply(o.message) ?? parseBatchYes(o.message);
@@ -513,7 +654,16 @@ export async function outreachTurn(o: {
   const note = lapsed.length ? `${lapsedLine(lapsed.length)}\n\n` : "";
   if (!batch.length) return r.kind === "show" ? { reply: `${note}There are no outreach drafts yet. Ask me to draft emails to people on your list.`, status: lapsed.length ? "empty_lapsed" : "empty", intent: "career_outreach_answer" } : null;
   const open = (s: string, status: string) => ({ reply: s, status, intent: OUTREACH_INTENT });
-  if (r.kind === "show") return { ...open(note + batchText(batch), lapsed.length ? "shown_lapsed" : "shown"), parts: [...(lapsed.length ? [lapsedLine(lapsed.length)] : []), ...batchMessages(batch)] };
+  // OUTREACH SCENARIOS (2026-10-30): an answer approves only the batch this chat showed. The newest batch was read for
+  // the person, whichever chat drafted it, so "yes" here approved a batch drafted and shown in another chat (never shown
+  // here). Showing it here moves it here; answering in a chat that did not show it approves nothing.
+  if (r.kind === "show") {
+    if (batch[0].thread_id && batch[0].thread_id !== o.threadId && o.store.moveBatch) await o.store.moveBatch(o.userId, batch[0].batch_id, o.threadId);
+    return { ...open(note + batchText(batch), lapsed.length ? "shown_lapsed" : "shown"), parts: [...(lapsed.length ? [lapsedLine(lapsed.length)] : []), ...batchMessages(batch)] };
+  }
+  if (!anytime && batch[0].thread_id && batch[0].thread_id !== o.threadId) {
+    return { reply: `Nothing was approved or changed: your newest drafts were shown in another chat, not this one. Say "show drafts" to see them here.`, status: "other_chat", intent: "career_outreach_answer" };
+  }
   const byN = new Map(batch.map((d) => [d.n, d]));
   const numbers = batch.map((d) => d.n);
   const range = numbers.length === 1 ? "only number 1" : `numbers 1 to ${Math.max(...numbers)}`;
@@ -572,13 +722,17 @@ export async function outreachTurn(o: {
     } else not.push(`${n} (changed since it was shown)`);
   }
   const items: ApprovedItem[] = approved.map((d) => ({ draftId: d.id, approvalHash: d.hash, n: d.n, batchId: d.batch_id, to: d.recipient.email }));
-  if (items.length && o.onApproved) await o.onApproved(o.userId, items).catch((e) => console.error("outreach: hand-off of approved drafts:", e instanceof Error ? e.message : e));
+  const notTaken = items.length && o.onApproved ? (await o.onApproved(o.userId, items).catch((e) => { console.error("outreach: hand-off of approved drafts:", e instanceof Error ? e.message : e); })) || [] : [];
   const left = numbers.filter((n) => !want.includes(n) && byN.get(n)!.status === "shown");
   const prefs = await o.store.prefs(o.userId).catch(() => ({ daily_cap: null, signature: null }));
   const lines = [approved.length ? `Approved ${approved.length}, exactly as shown: ${listOf(approved)}.` : "Nothing new was approved."];
   if (not.length) lines.push(`Not approved: ${not.join(", ")}.`);
+  // OUTREACH R3: an approved draft the sending rail refused for good is never said to be going (the database marks the
+  // draft skipped with that reason, 20261031020000 career_send_enqueue).
+  const wont = notTaken.map((x) => ({ d: approved.find((a) => a.id === x.draftId), why: RAIL_REFUSED[x.reason] })).filter((x) => x.d && x.why);
+  if (wont.length) lines.push(`Won't be sent: ${wont.map((x) => `${x.d!.n} (${x.d!.recipient.name}: ${x.why})`).join(", ")}.`);
   if (left.length) lines.push(`Not sent: ${left.join(", ")}.`);
-  if (approved.length) {
+  if (approved.length > wont.length) {
     const connected = o.gmailConnected ? await o.gmailConnected().catch(() => false) : false;
     // NO LIMITS: no pacing or daily number of Trainee's own is promised; only Gmail's own refusal slows sending.
     if (connected) lines.push(`They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. ${LAPSE_NOTE}`);
@@ -588,6 +742,11 @@ export async function outreachTurn(o: {
   }
   return { reply: lines.join(" ").replace(/ \n\n/, "\n\n"), status: approved.length ? "approved" : "none_approved", intent: left.length ? OUTREACH_INTENT : "career_outreach_answer", ...(items.length ? { approved: items } : {}) };
 }
+// Why the sending rail refused an approved draft for good, in the person's words (the reasons career_send_enqueue gives).
+export const RAIL_REFUSED: Record<string, string> = {
+  opted_out: "they asked not to be contacted", bad_address: "that address bounced before, so no one emails it again",
+  already_emailed: "you already emailed them; Trainee never sends a second first email to the same person",
+};
 // One draft an answer approved: what the sending rail needs to queue it (D-MN-2: each bound to its own hash).
 export interface ApprovedItem { draftId: string; approvalHash: string; n: number; batchId: string; to: string }
 // The person's drafts approved and not yet sent, each with the hash it was approved against: the read the sending rail
@@ -754,12 +913,13 @@ const mergeRows = (a: { row_key: string; data: ContactRow }[], b: { row_key: str
   for (const r of [...a, ...b]) m.set(r.row_key, r.data);
   return [...m.entries()].sort(([x], [y]) => x.localeCompare(y)).map(([, d]) => d);
 };
-export function memoryOutreachStore(): OutreachStore & { dump(): { drafts: (OutreachDraft & { user_id: string })[]; dnc: Record<string, string[]>; prefs: Record<string, Prefs> }; setIntent(threadId: string, intent: string | null): void; setQuiet(userId: string, on: boolean): void; setEpoch(userId: string, epoch: number): void; allContacts(userId: string): ContactRow[]; forgotten(userId: string): string[] } {
+export function memoryOutreachStore(): OutreachStore & { dump(): { drafts: (OutreachDraft & { user_id: string })[]; dnc: Record<string, string[]>; prefs: Record<string, Prefs> }; setIntent(threadId: string, intent: string | null): void; setQuiet(userId: string, on: boolean): void; setEpoch(userId: string, epoch: number): void; allContacts(userId: string): ContactRow[]; forgotten(userId: string): string[]; markBounced(email: string): void } {
   const drafts: (OutreachDraft & { user_id: string })[] = [], dnc: Record<string, Set<string>> = {}, prefs: Record<string, Prefs> = {}, intents: Record<string, string | null> = {};
   const follow: Record<string, Followup[]> = {}, leases: Record<string, number> = {};
   const book: Record<string, Map<string, KeyedContact>> = {}, forgottenByUser: Record<string, Set<string>> = {}, epochByUser: Record<string, number> = {};
   const rowsOf = (u: string) => [...(book[u]?.values() ?? [])].sort((a, z) => a.row_key.localeCompare(z.row_key));
   const quiet = new Set<string>(); // paused, opted out or erased (career_user_quiet in the database)
+  const bad = new Set<string>(); // bounced for anyone (career_send_bad_addresses)
   let seq = 0;
   const copy = <T>(x: T): T => JSON.parse(JSON.stringify(x));
   const self: any = {
@@ -848,6 +1008,17 @@ export function memoryOutreachStore(): OutreachStore & { dump(): { drafts: (Outr
       return n;
     },
     async accountEpoch(u: string) { return epochByUser[u] ?? 0; },
+    async blocked(emails: string[]) {
+      const out = new Map<string, "opted_out" | "bounced">();
+      for (const e of emails) {
+        const k = e.trim().toLowerCase(), h = await emailHash(k);
+        if (bad.has(k)) out.set(k, "bounced"); else if (Object.values(dnc).some((set) => set.has(h))) out.set(k, "opted_out");
+      }
+      return out;
+    },
+    async moveBatch(u: string, b: string, t: string) { for (const d of drafts) if (d.user_id === u && d.batch_id === b) d.thread_id = t; },
+    // Test seam: an address that bounced for anyone (career_send_bad_addresses).
+    markBounced(email: string) { bad.add(email.trim().toLowerCase()); },
     // Test seams: the account's privacy epoch (an erase bumps it), and a write by "another thread" between a read and a save.
     setEpoch(u: string, e: number) { epochByUser[u] = e; },
     allContacts(u: string) { return copy(rowsOf(u).map((r) => r.data)); },
@@ -867,9 +1038,15 @@ const fromRow = (x: any): OutreachDraft => ({ ...x, shared: Array.isArray(x.shar
 export function supabaseOutreachStore(admin: any): OutreachStore {
   const must = (r: any, what: string) => { if (r.error) throw new Error(`${what}: ${r.error.message}`); return r.data; };
   return {
-    async saveBatch(u, threadId, ds, at) {
+    // 2026-10-31 (clock sweep): created_at is the database's own clock at the insert (the column's default), never the
+    // caller's `at`. latestBatch below takes the newest batch by created_at, and that is the batch an answer ("send all",
+    // "send 2") approves. With the caller's time, a batch drafted by a turn or run that started earlier but saved later (its
+    // `at` is its start; drafting takes the model's seconds) read as older than the batch saved and shown before it, so the
+    // answer approved a batch other than the one shown last; two workers' clocks (±2 s) reordered them the same way. As
+    // supabaseRepliesStore.saveActions (PR #341). The 3-day check reads it against the turn's clock: seconds do not matter.
+    async saveBatch(u, threadId, ds, _at) {
       const batch_id = crypto.randomUUID();
-      const rows = ds.map((d) => ({ user_id: u, batch_id, thread_id: threadId, n: d.n, recipient: d.recipient, recipient_email: d.recipient.email.toLowerCase(), subject: d.subject, body: d.body, footer: d.footer, hash: d.hash, status: d.status, shared: d.shared ?? [], created_at: new Date(at).toISOString() }));
+      const rows = ds.map((d) => ({ user_id: u, batch_id, thread_id: threadId, n: d.n, recipient: d.recipient, recipient_email: d.recipient.email.toLowerCase(), subject: d.subject, body: d.body, footer: d.footer, hash: d.hash, status: d.status, shared: d.shared ?? [] }));
       return (must(await admin.from("career_outreach_drafts").insert(rows).select(COLS), "save the drafts") ?? []).map(fromRow);
     },
     async latestBatch(u) {
@@ -977,6 +1154,21 @@ export function supabaseOutreachStore(admin: any): OutreachStore {
     async dnc(u) {
       const rows = must(await admin.from("career_outreach_dnc").select("email_hash").eq("user_id", u).limit(10000), "read the do-not-contact list");
       return new Set((rows ?? []).map((r: any) => String(r.email_hash)));
+    },
+    async blocked(emails) {
+      const out = new Map<string, "opted_out" | "bounced">();
+      const byHash = new Map<string, string>();
+      for (const e of emails) byHash.set(await emailHash(e), e.trim().toLowerCase());
+      const hashes = [...byHash.keys()];
+      for (let k = 0; k < hashes.length; k += 100) {
+        const part = hashes.slice(k, k + 100);
+        for (const r of must(await admin.from("career_send_bad_addresses").select("email_hash").in("email_hash", part), "read the bounced addresses") ?? []) out.set(byHash.get(String(r.email_hash))!, "bounced");
+        for (const r of must(await admin.from("career_outreach_dnc").select("email_hash").in("email_hash", part), "read the do-not-contact list") ?? []) if (!out.has(byHash.get(String(r.email_hash))!)) out.set(byHash.get(String(r.email_hash))!, "opted_out");
+      }
+      return out;
+    },
+    async moveBatch(u, b, t) {
+      must(await admin.from("career_outreach_drafts").update({ thread_id: t }).eq("user_id", u).eq("batch_id", b), "move the batch to this chat");
     },
     async addDnc(u, h, reason, at) {
       must(await admin.from("career_outreach_dnc").upsert({ user_id: u, email_hash: h, reason: reason.slice(0, 120), at: new Date(at).toISOString() }, { onConflict: "user_id,email_hash", ignoreDuplicates: true }), "add to the do-not-contact list");

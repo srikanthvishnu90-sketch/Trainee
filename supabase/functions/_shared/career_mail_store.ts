@@ -98,12 +98,27 @@ function must<T>(r: { data: T | null; error: { message: string } | null }, what:
   return r.data as T;
 }
 // deno-lint-ignore no-explicit-any
+// CONNECTORS ROUND 3 (2026-10-31): what a run read from someone's Gmail is written only while their grant is there and no
+// "forget everything" came after the run started (career_mail_record_events, career_mail_save_draft, career_mail_save_cursor,
+// 20261031060000). Before, a disconnect between stillConnected and the write re-created what the disconnect had erased, and
+// an erase was never checked. The erase epoch is read with the people, before their mail is read. A project without the
+// functions gets the old writes.
+const missingFn = (e: any, fn: string) => { const s = `${e?.code ?? ""} ${e?.message ?? ""}`; return (s.includes(fn) || /PGRST202/.test(s)) && /exist|find|no function|PGRST202/i.test(s); };
 export function supabaseMailStore(admin: any): MailStore {
+  const epochs = new Map<string, number>();
+  // People whose mail this store recorded: their drafts come from that mail. An interview's thank-you (runInterviewDrafts)
+  // is made for anyone, mail grant or not, and is written as before.
+  const fromMail = new Set<string>();
   return {
     async people(limit) {
       const conns = must<any[]>(await admin.from("user_oauth_connections").select("user_id").eq("provider", "google_career").limit(5000), "read career grants") ?? [];
       const ids = [...new Set(conns.map((c) => c.user_id))];
       if (!ids.length) return [];
+      const acct = await admin.from("career_watch_kv").select("user_id,value").eq("key", "career:account").in("user_id", ids);
+      if (!acct.error) {
+        for (const u of ids) epochs.set(u, 0);
+        for (const a of acct.data ?? []) { const e = Number(a?.value?.epoch ?? 0); if (Number.isFinite(e)) epochs.set(a.user_id, e); }
+      }
       const cur = must<any[]>(await admin.from("career_mail_cursors").select("user_id,read_through").in("user_id", ids), "read mail cursors") ?? [];
       const prefs = must<any[]>(await admin.from("career_alert_prefs").select("user_id,tz,prefs").in("user_id", ids), "read quiet hours") ?? [];
       const at = new Map(cur.map((c) => [c.user_id, c.read_through])), pref = new Map(prefs.map((p) => [p.user_id, p]));
@@ -125,23 +140,42 @@ export function supabaseMailStore(admin: any): MailStore {
       return rows.map((r) => ({ hash: r.message_hash, ref: r.application_ref, kind: r.kind, company: r.company, role: r.role ?? undefined, stage: r.stage, flagged: r.flagged, evidence: r.evidence, at: r.mail_at, new_app: false }));
     },
     async record(u, evs) {
+      fromMail.add(u);
       if (!evs.length) return new Set();
       const rows = evs.map((e) => ({ user_id: u, application_ref: e.ref, kind: e.kind, company: e.company.slice(0, 200), role: e.role?.slice(0, 200) ?? null, stage: e.stage, flagged: e.flagged, evidence: e.evidence, message_hash: e.hash, mail_at: e.at }));
-      const got = must<any[]>(await admin.from("career_mail_events").upsert(rows, { onConflict: "user_id,message_hash", ignoreDuplicates: true }).select("message_hash"), "record status events") ?? [];
-      return new Set(got.map((r) => r.message_hash));
+      const g = await admin.rpc("career_mail_record_events", { p_user: u, p_rows: rows.map(({ user_id: _u, ...r }) => r), p_epoch: epochs.get(u) ?? null });
+      if (g.error && missingFn(g.error, "career_mail_record_events")) {
+        const got = must<any[]>(await admin.from("career_mail_events").upsert(rows, { onConflict: "user_id,message_hash", ignoreDuplicates: true }).select("message_hash"), "record status events") ?? [];
+        return new Set(got.map((r) => r.message_hash));
+      }
+      const out = must<any>(g, "record status events");
+      if (out?.ok !== true) { epochs.set(u, Number.POSITIVE_INFINITY); return new Set(); } // withdrawn: stillConnected says so
+      return new Set((Array.isArray(out.stored) ? out.stored : []).map(String));
     },
     async saveDraft(u, d) {
+      const g = !fromMail.has(u) ? null : await admin.rpc("career_mail_save_draft", { p_user: u, p_row: { draft_key: d.key, application_ref: d.ref, kind: d.kind, company: d.company.slice(0, 200), role: d.role?.slice(0, 200) ?? null, text: d.text, basis: d.basis },
+        p_epoch: epochs.has(u) && Number.isFinite(epochs.get(u)!) ? epochs.get(u) : null });
+      if (g && !(g.error && missingFn(g.error, "career_mail_save_draft"))) return must<string>(g, "save a draft") === "saved";
       const r = await admin.from("career_mail_drafts").insert({ user_id: u, draft_key: d.key, application_ref: d.ref, kind: d.kind, company: d.company.slice(0, 200), role: d.role?.slice(0, 200) ?? null, text: d.text, basis: d.basis });
       if (r.error && (r.error.code === "23505" || /duplicate key/i.test(r.error.message))) return false;
       must(r, "save a draft");
       return true;
     },
     async saveCursor(u, at) {
+      const g = await admin.rpc("career_mail_save_cursor", { p_user: u, p_read_through: new Date(at).toISOString() });
+      if (!(g.error && missingFn(g.error, "career_mail_save_cursor"))) { must(g, "save the mail cursor"); return; }
       must(await admin.from("career_mail_cursors").upsert({ user_id: u, read_through: new Date(at).toISOString(), updated_at: new Date().toISOString() }, { onConflict: "user_id" }), "save the mail cursor");
     },
     async stillConnected(u) {
+      // A write the database refused (disconnected or erased since the run began): nothing more of this run is kept or said.
+      if (epochs.get(u) === Number.POSITIVE_INFINITY) return false;
       const r = must<any[]>(await admin.from("user_oauth_connections").select("provider").eq("user_id", u).eq("provider", "google_career").limit(1), "read the career grant") ?? [];
-      return r.length > 0;
+      if (!r.length) return false;
+      if (epochs.has(u)) {
+        const a = await admin.from("career_watch_kv").select("value").eq("user_id", u).eq("key", "career:account").maybeSingle();
+        if (!a.error && Number(a.data?.value?.epoch ?? 0) > (epochs.get(u) ?? 0)) return false;
+      }
+      return true;
     },
     // The database's own day and count (20261021130000_career_mail_model_calls.sql); the run's clock is not trusted here.
     async claimModelCalls(u, want, cap) {

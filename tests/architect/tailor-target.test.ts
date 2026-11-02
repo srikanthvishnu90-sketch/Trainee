@@ -76,3 +76,33 @@ Deno.test("an ask that names no posting is asked which, and nothing is tailored 
     assert(questions(r.reply) === 1, `${state}: one question: ${r.reply}`);
   }
 });
+
+// Review of #382 (2026-11-02).
+Deno.test("the only posting at the named company is a different role: said and asked, nothing tailored; a 1 tailors it", async () => {
+  const [ask, yes] = await talk("profile", ["tailor my resume for the data analyst job at plaid", "1"]);
+  assert(ask.intent === "tailor_needs_posting" && !/\btailored for\b/.test(ask.reply), `asked, not tailored: ${ask.reply}`);
+  assert(/Business Analyst/.test(ask.reply) && /data analyst/i.test(ask.reply), `names both roles: ${ask.reply}`);
+  assert(questions(ask.reply) === 1 && !others(ask.reply, ["Plaid"]).length, `one question, only Plaid: ${ask.reply}`);
+  assert(tailored(yes)[1] === "Plaid" && tailored(yes)[0] === "Business Analyst", `"1" tailored ${tailored(yes).join(" at ") || "nothing"}: ${yes.reply.slice(0, 200)}`);
+  // The same company with the role words matching its title is tailored at once.
+  const [ok] = await talk("profile", ["tailor my resume for the business analyst job at plaid"]);
+  assert(tailored(ok)[1] === "Plaid", `matching role tailored at once: ${ok.reply.slice(0, 200)}`);
+});
+
+Deno.test("an employer with no posting in hand is never tailored as another company's role; the person's lead is kept", async () => {
+  // With a profile the ask reaches the tailor's chain (with none on file it is asked for the posting earlier, as before).
+  for (const state of ["profile", "inflight"] as const) {
+    const [r] = await talk(state, ["Tailor my resume to Acme Robotics, lead with Python and ROS"]);
+    assert(r.intent === "tailor_needs_posting" && !/\btailored for\b/.test(r.reply), `${state}: asked, not tailored: ${r.reply}`);
+    assert(/don't have a Acme Robotics posting/.test(r.reply) && /leading with Python and ROS/.test(r.reply), `${state}: names the firm and keeps the lead: ${r.reply}`);
+    assert(!others(r.reply, []).length, `${state}: no other company offered: ${r.reply}`);
+  }
+  const [g] = await talk("profile", ["tailor my resume for Google"]);
+  assert(!/\btailored for\b/.test(g.reply) && !others(g.reply, []).length, `Google: nothing tailored, no other company: ${g.reply}`);
+});
+
+Deno.test("\"ramp up\" is a phrasal verb, never the company Ramp", async () => {
+  const [r] = await talk("profile", ["tailor my resume so I get to ramp up for the brex job"]);
+  assert(tailored(r)[1] === "Brex", `tailored ${tailored(r).join(" at ") || "nothing"}, want Brex: ${r.reply.slice(0, 200)}`);
+  assert(!/\bRamp\b/.test(r.reply), `Ramp is not offered: ${r.reply.slice(0, 200)}`);
+});

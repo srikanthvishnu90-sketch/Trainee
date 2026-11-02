@@ -5043,6 +5043,15 @@ const CareerRouter = (() => {
     }
     return false;
   }
+  // The role words of an ask or a title, in one vocabulary ("swe" is software engineer, "pm" product manager, "ib" investment
+  // banking), so a role named in the ask can be checked against a posting's title.
+  const TP_ROLE_WORDS = new Set(["data", "analyst", "analytics", "business", "software", "engineer", "engineering", "developer", "designer", "design", "product", "manager", "marketing", "coordinator", "sales", "finance", "financial", "investment", "banking", "consultant", "consulting", "recruiter", "operations", "scientist", "science", "intern", "internship", "associate", "growth", "research", "security", "frontend", "backend", "fullstack"]);
+  const TP_ROLE_ALIAS = { swe: ["software", "engineer"], pm: ["product", "manager"], ib: ["investment", "banking"], ds: ["data", "scientist"], ux: ["designer"], analytics: ["analyst"], engineering: ["engineer"], internship: ["intern"] };
+  function tpRoleWords(text) {
+    const out = [];
+    for (const w of lc(text).split(/[^a-z0-9]+/)) for (const x of (TP_ROLE_ALIAS[w] || [w])) if (TP_ROLE_WORDS.has(x) && !out.includes(x)) out.push(x);
+    return out;
+  }
   function tpTitleScore(p, raw, companies) {
     const coWords = new Set(companies.flatMap((c) => lc(c).split(/[^a-z0-9]+/)));
     const words = new Set(lc(raw).split(/[^a-z0-9]+/).filter((w) => w.length >= 2 && !TP_STOP.has(w) && !coWords.has(w)));
@@ -5086,6 +5095,12 @@ const CareerRouter = (() => {
       if (best > 0) cands = scored.filter((x) => x.sc === best).map((x) => x.p);
       else if (!named.length) return { kind: "none" };
     }
+    // Review of #382: the only posting at the named company is not the role asked for ("data analyst job at plaid" when Plaid's
+    // posting is Business Analyst): said and asked, never tailored in its place.
+    if (cands.length === 1 && named.length) {
+      const asked = tpRoleWords(raw), title = new Set(tpRoleWords(cands[0].title));
+      if (asked.length && asked.some((w) => !title.has(w))) return { kind: "mismatch", posting: cands[0], asked: asked.join(" ") };
+    }
     if (cands.length === 1) return { kind: "posting", posting: cands[0], by: named.length ? "company" : "title" };
     return { kind: "ambiguous", options: cands.slice(0, 5), why: named.length > 1 ? "companies" : "company" };
   }
@@ -5099,7 +5114,7 @@ const CareerRouter = (() => {
     const lines = [head, ...items.map((p, i) => `${i + 1}) ${p.title} at ${p.company}`)];
     if (o.noResume) lines.push("I don't have your resume yet, so paste it or send the PDF with your answer.");
     // The question last: the reply's own next step (a closing question is never stamped over).
-    lines.push("Which one should I tailor your resume to?");
+    lines.push(o.question || "Which one should I tailor your resume to?");
     return { intent: "tailor_needs_posting", reply: lines.join("\n"), resultStatus: "awaiting_user", artifact: null, sends: 0, options: items.map(tpEntry) };
   }
   // The answer to the ask-which reply ("2", "the stripe one", "the data analyst one"): that posting is tailored.
@@ -13565,6 +13580,7 @@ const CareerRouter = (() => {
           if (chained) { chained.chained_from = "named_posting"; return chained; }
         }
         if (tgt.kind === "ambiguous" && tgt.options.length > 1) return tailorWhichReply(c, tgt.options);
+        if (tgt.kind === "mismatch") return tailorWhichReply(c, [tgt.posting], { head: `The only ${tgt.posting.company} posting I have is ${tgt.posting.title}, not the ${tgt.asked} role you named.`, question: `Should I tailor your resume to ${tgt.posting.company}'s ${tgt.posting.title} role? Reply 1 for yes.` });
       }
       const stagedUsable = c.posting && (c.posting.jd_text || c.posting.title || (Array.isArray(c.posting.requirements) && c.posting.requirements.length));
       if (stagedUsable || c.jdText || c.jd) return handleTailor(text, c);

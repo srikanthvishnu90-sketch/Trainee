@@ -23,7 +23,7 @@ import { DAY_NAMES, DEFAULT_DIGEST, validDigest } from "../career_digest.ts";
 import { contactsOf, hunterPass, knownFirm, LIST_TARGET_USD, listCost, listReport, sameFirm, type Verifier, vendorSource } from "../career_contacts.ts";
 import {
   batchMessages, batchText, blockedAddresses, confirmed, draftFor, draftLangOf, emailHash, footerOf, messageOf, type ModelFn, OUTREACH_INTENT, type OutreachDraft,
-  type OutreachStore, payloadHash, recordOutreach, SIGNATURE_ASK,
+  type OutreachStore, payloadHash, recordOutreach, SIGNATURE_ASK, guardRecipient,
 } from "../career_outreach.ts";
 import { legacyRows, REFERRAL_ASK, referralMap, targetFirms } from "../career_referrals.ts";
 import { CONTACT_QUESTION, contactFromMessage, namedIn, type PersonaStore, type ResumeRenderer, type ResumeStore, restatePersona, savePersona, tailorForPosting, validPersonaName } from "../career_tailor.ts";
@@ -817,7 +817,7 @@ export function careerTools(deps: {
         const blocked = await blockedAddresses(o.store, c.userId, pick.map((r) => r.email!));
         if (blocked.size) for (let k = pick.length - 1; k >= 0; k--) if (blocked.has(pick[k].email!.toLowerCase())) { held.do_not_contact++; pick.splice(k, 1); }
         if (!pick.length) return { drafted: 0, held_out: held, note: "No one on their list fits; say why from held_out." };
-        const recipientOf = (r: typeof rows[number]) => ({ name: r.name, firm: r.firm, title: r.title, school: r.school, email: r.email!, source: `${r.file}, row ${r.row}` });
+        const recipientOf = (r: typeof rows[number]) => guardRecipient({ name: r.name, firm: r.firm, title: r.title, school: r.school, email: r.email!, source: `${r.file}, row ${r.row}` });
         const results: Awaited<ReturnType<typeof draftFor>>[] = [];
         for (let k = 0; k < pick.length; k += 5) results.push(...await Promise.all(pick.slice(k, k + 5).map((r) => draftFor({ model: o.model!, facts, r: recipientOf(r), lang: draftLangOf(c.turn?.message ?? "") }))));
         const footer = footerOf(prefs.signature), ok: Omit<OutreachDraft, "id" | "batch_id" | "thread_id">[] = [], notDrafted: { name: string; why: string }[] = [];

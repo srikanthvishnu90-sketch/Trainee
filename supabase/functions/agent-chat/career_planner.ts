@@ -12,15 +12,18 @@
 //                                                                fact-lock, drafts that wait for "send 1"
 //   tracker.update, instruction.remember                      -> the agent tools track_application / remember_instruction
 //                                                                (their own words-only checks)
-//   reminder.set                                              -> the reminder store (_shared/task/reminders.ts): kept,
-//                                                                never sent on its own
+//   reminder.set                                              -> the chat reminder turn (_shared/career_reminders.ts
+//                                                                reminderTurn, PR #355): one career_outbox row delivered
+//                                                                by the texting channel at the time asked, in their zone,
+//                                                                held by quiet hours, never saved while paused or STOPped
+//                                                                or with no texting channel; listed by "my reminders"
 // A turn the planner does not claim (a single ask, a question, a code-first prompt waiting for its answer, a model outage,
 // a plan of one step) falls through to today's chain unchanged. Every part of the message is accounted for: a step
 // refused by code, a step its path did not do, and an action no step took are each named in the reply. The reply is
 // each path's own reply, in order; this module writes no claim of its own.
 // deno-lint-ignore-file no-explicit-any
 import { actionsIn, capability, checkPlan, compoundAsk, dueDate, MAX_PICKS, MAX_REMINDERS, MAX_STEPS, PLAN_INTENT, PLAN_TOOL, planSystem, type Refused, type Step, uncovered, unsaidWords } from "../_shared/task/plan.ts";
-import type { ReminderStore } from "../_shared/task/reminders.ts";
+import { REMINDER_SET_INTENT, type ReminderStore, setReminder } from "../_shared/career_reminders.ts";
 import type { ToolCtx, ToolSpec } from "../_shared/agent/loop.ts";
 import { whenSaid } from "../_shared/agent/career_tools.ts";
 import { documentsOf } from "../_shared/channel_artifacts.ts";
@@ -213,13 +216,36 @@ async function runStep(io: PlannerIO, s: Step, message: string): Promise<{ res: 
       : `Kept for every chat: ${out.kept?.text ?? input.instruction}.`;
     return { res: res("done", name), turn: { reply, intent: name } };
   }
-  // reminder.set: the day only from the person's own words, counted in their time zone (UTC when none is on file).
+  // reminder.set: the day only from the person's own words (never the model's args), then PR #355's setReminder sets it
+  // exactly as "remind me <when> to <what>" typed alone would: delivered at that time in their zone, held by
+  // quiet hours, refused while paused, after STOP or with no texting channel; its reply says which, in its own words.
   const when = String(s.args.when ?? "").trim() || s.text;
   const said = whenSaid(message, when);
   const due = said ? dueDate(said, io.now(), io.tz) : null;
   if (!said || !due) return { res: res("not_done", null, "I couldn't tell which day you meant"), turn: null };
-  const what = String(s.args.what ?? "").trim();
-  const text = what && !unsaidWords(message, what).length ? what : s.text;
-  const r = await io.reminders.add(io.userId, { id: crypto.randomUUID(), what: text.slice(0, 200), when: said, due_date: due, tz: io.tz, created_at: new Date(io.now()).toISOString(), source: "plan" });
-  return { res: res("done", "reminder_set"), turn: { reply: `${r.added ? "Reminder kept" : "That reminder was already kept"} for ${said} (${due}): ${text.slice(0, 200)}. It's kept on your account; I don't send reminder texts on my own yet.`, intent: "reminder_set" } };
+  const argWhat = String(s.args.what ?? "").trim();
+  // What the reminder says: the model's "what" only in their words, else the step's own words without "remind me" and
+  // the day, else the whole message (their words, cut short): never words they did not write.
+  const stepWhat = s.text.replace(/\bremind(?:\s+me)?\b/i, "").replace(said, "").replace(/^\s*(?:to|about|on|at|,)\s+/i, "").replace(/\s+/g, " ").trim();
+  const what = (argWhat && !unsaidWords(message, argWhat).length ? argWhat : stepWhat.split(/\s+/).length >= 2 ? stepWhat : message).replace(/[.!?\s]+$/, "").slice(0, 200);
+  // One reminder per (person, words, day): the same plan sent again finds its row and sets nothing new.
+  const id = await keyOf(`${io.userId}|${what.toLowerCase()}|${due}`);
+  // Also one already set in chat (PR #355's own turn, its own key) with the same words for the same day.
+  const sameWords = (text: string) => (/^Reminder: (.*)\. You asked me on /.exec(text)?.[1] ?? "").toLowerCase() === what.toLowerCase();
+  const already = (await io.reminders.pending(io.userId)).find((r) => r.key.includes(`:${id}:`) || (sameWords(r.text) && new Date(r.at).toISOString().slice(0, 10) === due));
+  if (already) return { res: res("done", REMINDER_SET_INTENT), turn: { reply: `That reminder is already set: "${already.text}"`, intent: REMINDER_SET_INTENT, status: "already" } };
+  let t = await setReminder({ what, when: said, userId: io.userId, now: io.now(), store: io.reminders, newKey: () => id });
+  // "Friday" said on a Friday after its hour: the planner's day (dueDate: the next one) is the day meant, said as a date.
+  if (t.status === "past") {
+    const [y, m, d] = due.split("-").map(Number);
+    const day = `${["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][m - 1]} ${d}`;
+    if (y && m && d) t = await setReminder({ what, when: day, userId: io.userId, now: io.now(), store: io.reminders, newKey: () => id });
+  }
+  // Not set (paused, STOPped, no texting channel, a time past): the reminder turn's own words say why, in the reply.
+  if (t.status !== "set") return { res: { ...res("not_done", t.intent, t.reply.replace(/[.\s]+$/, "")), detail: { status: t.status } }, turn: null };
+  return { res: res("done", t.intent), turn: { reply: t.reply, intent: t.intent, status: t.status } };
+}
+async function keyOf(s: string): Promise<string> {
+  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
+  return `plan${[...d.slice(0, 12)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 }

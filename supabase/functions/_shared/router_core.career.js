@@ -4616,7 +4616,7 @@ const CareerIntel = (() => {
     const t = String(text || "");
     const Safety = typeof CareerSafety !== "undefined" ? CareerSafety : require("./139-career-safety.js");
     if (Safety.isDistress(t)) {
-      return { action: "support", text: "I hear you, and the career stuff can wait. Please reach out now: in the US you can call or text 988 (Suicide and Crisis Lifeline) any time, or text HOME to 741741. If you might act on this, call 911. You matter more than any application. When you're ready, I'm here — no grilling, at your pace." };
+      return { action: "support", text: "I want to check in, because what you wrote sounded really heavy. If you're thinking about hurting yourself, you can call or text 988 any time (US), or text HOME to 741741, and if you're in danger right now, call 911. I'm here and glad to keep talking. If I read that wrong, just tell me and we'll pick up where you left off." };
     }
     if (/(i'?m a failure|i feel like a failure|everyone is ahead of me|i'?ll never get in|hopeless about)/i.test(t)) {
       return { action: "support", text: "You're not a failure — you're early in a process whose timelines are genuinely brutal and mostly hidden. Honest version: your current position is a starting point, not a verdict, and there are routes from it. So the plan shrinks to one doable step, and here it is, picked: today, write down the one role you want next and the one person who could open a door to it. That is the whole task for today — small, real, and it counts." };
@@ -9476,6 +9476,11 @@ const CareerSafety = (() => {
   const NON_LATIN = [/умер(?:еть|ти)/, /покончить с собой/, /самоубийств/, /не хочу (?:больше )?жить/, /убить себя/,
     /死にたい/, /自殺/, /生きていたくない/, /消えたい/, /죽고 ?싶/, /자살/, /살고 ?싶지 ?않/, /想死/, /自杀/, /不想活/,
     /أموت/, /انتحار/, /أقتل نفسي/, /لا أريد أن أعيش/];
+  function withoutDistress(text) {
+    return String(text == null ? "" : text).split(/[.!?;\n]+|,\s*/).map((c) => c.trim()).filter((c) => c && !isDistress(c)).join(". ");
+  }
+  const FINE_RE = /^(?:(?:no|nah|nope|haha|lol|oh|sorry|honestly)[,! ]+)*(?:(?:i'?m|im|i am)\s+(?:fine|ok(?:ay)?|good|alright|all right|safe|not suicidal|okay now)|(?:you )?misread(?: me)?|false alarm|(?:i was |i'?m |im )?(?:just )?(?:venting|joking|kidding|exaggerating)|not like that|all good|i didn'?t mean it like that|it was (?:a )?(?:joke|figure of speech))\b/i;
+  const isFineReply = (text) => FINE_RE.test(String(text == null ? "" : text).trim().replace(/[’‘]/g, "'"));
   function isDistress(text) {
     const raw = String(text == null ? "" : text).normalize("NFC").toLowerCase();
     if (NON_LATIN.some((p) => p.test(raw))) return true;
@@ -9491,7 +9496,7 @@ const CareerSafety = (() => {
       protocol: "distress", crisis,
       warmth_first: true, honesty_kept: true,
       text: crisis
-        ? `I'm really glad you told me. Please reach out right now to someone who can help in person — in the US you can call or text 988 (Suicide and Crisis Lifeline) any time, or text HOME to 741741. You matter more than any job search; everything here can wait. ${grounding}`
+        ? `I'm really glad you told me. If you're thinking about hurting yourself, you can call or text 988 (Suicide and Crisis Lifeline) any time in the US, or text HOME to 741741. I'm here, and everything else can wait. ${grounding}`
         : `That sounds genuinely rough, and I'm not going to pretend a pep talk fixes it. ${grounding} Not everything is working — some of it is a brutal market for interns right now, and that's real, not a character flaw. Let's make today tiny: one step, then stop.`,
       one_step: o.oneStep || "Send the one follow-up email that's already drafted — two minutes, then you're done for today.",
       resources: crisis ? ["988 Suicide and Crisis Lifeline (US): call or text 988", "Crisis Text Line: text HOME to 741741"] : [],
@@ -9522,7 +9527,7 @@ const CareerSafety = (() => {
       text: `Stopped everything. ${report.sent_confirmed} already-sent item(s) stay sent (they were provider-confirmed). ${report.aborted_not_sent} in-flight item(s) had no confirmation and are marked NOT sent — nothing is half-sent. ${report.queued_halted} queued item(s) are halted and will not move until you say resume.` };
   }
 
-  return { DAILY_START, DAILY_CEILING, keyOf, createSuppressionStore, suppress, isSuppressed, applySuppression, forceOptOut, sendSchedule, planSendRequest, referralClaimCheck, assessmentRequest, aiUseAnswer, isDistress, distressResponse, createQueueState, stopEverything };
+  return { DAILY_START, DAILY_CEILING, keyOf, createSuppressionStore, suppress, isSuppressed, applySuppression, forceOptOut, sendSchedule, planSendRequest, referralClaimCheck, assessmentRequest, aiUseAnswer, isDistress, withoutDistress, isFineReply, distressResponse, createQueueState, stopEverything };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerSafety;
 
@@ -22206,8 +22211,25 @@ const CareerRouter = (() => {
       reply: `You don't have a batch in flight right now — no application batch has been queued on this account that I can read back. Say "apply to N <role> roles" and I'll start one.` };
   }
 
-  function distressFirst(rawText) {
+  function noteCrisisCheckin(ctx, rawText) {
+    const m = threadMirrorForWrite(ctx);
+    if (m) m.crisisCheckin = { ask: s(rawText).slice(0, 600), at: nowOf(ctx) };
+  }
+  function resumeAfterCheckin(rawText, c) {
+    const m = threadMirrorOf(c), ck = m && m.crisisCheckin;
+    if (!ck) return null;
+    delete threadMirrorForWrite(c).crisisCheckin;
+    if (!(Safety && Safety.isFineReply && Safety.isFineReply(rawText)) || Safety.isDistress(s(rawText)) || nowOf(c) - Number(ck.at || 0) > 2 * 3600 * 1000) return null;
+    const rest = Safety.withoutDistress ? Safety.withoutDistress(ck.ask) : "";
+    if (rest && rest.trim()) {
+      const r = dispatchChat(rest, c);
+      if (r && r.intent !== "career_fallback") return r;
+    }
+    return { intent: "conversation_ack", reply: "Thanks for telling me. I'm here whenever you need me. What should we work on?", resultStatus: "completed", sends: 0 };
+  }
+  function distressFirst(rawText, ctx) {
     if (!(Safety && Safety.isDistress && Safety.isDistress(s(rawText)))) return null;
+    if (ctx) noteCrisisCheckin(ctx, rawText);
     const r = Intel && Intel.respondToRequest ? Intel.respondToRequest(s(rawText)) : null;
     let support = null;
     try { support = Safety.distressResponse ? Safety.distressResponse({ text: s(rawText), profileFacts: [] }) : null; } catch { support = null; }
@@ -22216,7 +22238,7 @@ const CareerRouter = (() => {
   function dispatchChat(text, ctx) {
     const c = ctx || {};
     const rawText = text;
-    { const d = distressFirst(rawText); if (d) return d; }
+    { const d = distressFirst(rawText, c); if (d) return d; }
     text = expandShorthand(detypo(text));
     const t = lc(text);
     if (!t) return null;
@@ -24506,7 +24528,8 @@ const CareerRouter = (() => {
   }
   function handleChat(text, ctx) {
     const c = ctx || {};
-    { const d = distressFirst(text); if (d) return d; }
+    { const d = distressFirst(text, c); if (d) return d; }
+    { const back = resumeAfterCheckin(text, c); if (back) { try { syncThreadOut(c); } catch {   } return back; } }
     const parts = intentPartsOf(text);
     const multi = parts.length >= 2 && (multiMarkerOf(text) || parts.length >= 3 || /\band\b|;/.test(lc(text)));
     const res = dispatchChat(text, c);
@@ -24567,7 +24590,7 @@ const CareerRouter = (() => {
       if (m && m.resumeIngest && typeof m.resumeIngest === "object" && intent !== "career_resume_ingest") m.resumeIngest.stale = true;
     } catch {   }
   }
-  return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf };
+  return { handleChat, noteCrisisCheckin, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerRouter;
 

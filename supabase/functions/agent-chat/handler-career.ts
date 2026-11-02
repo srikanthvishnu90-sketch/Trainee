@@ -115,7 +115,7 @@ import { createFileService, supabaseFileKindStore } from "../_shared/file_servic
 import { factsForTurn, replyWriterOn, writable, writeReply, writerChannel } from "../_shared/career_reply_writer.ts"; // V1 TEXTING VOICE
 import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
 import { trustTurn } from "../_shared/career_trust_turn.ts";
-import { crisisScreen, moderationFromEnv } from "../_shared/career_crisis_screen.ts"; // #354: the two-layer crisis screen // REQS DOC 1: what Trainee is, privacy, what it sees, referrals, thanks
+import { classifierFromEnv, crisisScreen, moderationFromEnv } from "../_shared/career_crisis_screen.ts"; // #354: the two-layer crisis screen // REQS DOC 1: what Trainee is, privacy, what it sees, referrals, thanks
 import { readConnections } from "../_shared/career_capabilities.ts"; // REQS DOC 1: every connection on the account
 
 // REQS DOC 1: what holds the card's place for a message in distress (see `distress` below); never shown or saved as a card.
@@ -292,7 +292,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // moderation client with a 1.5 s cap. It never rejects; it is awaited where `distress` is decided below, and a
     // moderation error or timeout leaves the list's verdict (career_crisis_screen.ts). The client is model_gateway.ts's
     // moderation door, on with CAREER_CRISIS_MODERATION=on (set by trainee-go-live.sh on every deploy).
-    const crisisPending = crisisScreen(message, moderationFromEnv(Deno.env));
+    // Three layers (#354 re-review 2): the list, OpenAI moderation (primary) and the crisis classifier through callModel.
+    const crisisPending = crisisScreen(message, { moderation: moderationFromEnv(Deno.env), classifier: classifierFromEnv(Deno.env) });
 
     // GO-LIVE FLIP (2026-10-13, owner ruling: "the career version is the
     // final switch" — the money version is gone from live). Career is the
@@ -485,7 +486,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // the connector, site-refusal and Outlook turns too, which stand down for it (no disconnect or link runs on such a
       // message), and its branch is the first in the answer chain below.
       const crisis = await crisisPending;
-      if (crisis.moderation === "flagged" && !crisis.rules) console.log(`crisis screen: moderation flagged (${crisis.categories.join(", ")}) what the list missed`);
+      if (crisis.distress && !crisis.rules) console.log(`crisis screen: ${[crisis.moderation === "flagged" ? "moderation" : "", crisis.classifier === "flagged" ? "classifier" : ""].filter(Boolean).join(" and ")} flagged what the list missed`);
       const distress = !tapIn && !careerTask && !careerBatch && crisis.distress;
       // M4: Outlook (Microsoft Graph) as a peer of Gmail, from any channel: "connect my outlook" / "use my work email" makes a
       // one-time link bound to this person, channel and thread; "disconnect outlook" deletes the access and what was read
@@ -888,6 +889,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // read back, and now pending sends cancelled. Before any other turn, on every channel.
       if (distress && trustAns) {
         out = { reply: trustAns.reply, intent: trustAns.intent, resultStatus: trustAns.status, contained: false, handler: "trust" };
+        try { (CareerRouter as any).noteCrisisCheckin?.(ctx, message); } catch { /* the check-in still stands; "i'm fine" then reads as a new message */ }
         if (trustAns.meta) agentMeta = { ...(agentMeta || {}), ...trustAns.meta };
       } else if (connAns) {
         out = { reply: connAns.reply, intent: connAns.intent, resultStatus: connAns.resultStatus, contained: false, handler: connAns.handler };

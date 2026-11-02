@@ -6,6 +6,7 @@ import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, supabaseParity } from "../flow/handler.ts";
 import { SAFETY_REPLY } from "../../supabase/functions/_shared/career_trust_turn.ts";
+import { CRISIS_SCREEN_MARKER } from "../../supabase/functions/_shared/career_crisis_screen.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -66,10 +67,17 @@ Deno.test({ name: "#354 safety: moderation flags what the list misses at the rea
   for (const k of ["OPENAI_API_KEY", "CAREER_CRISIS_MODERATION", "MODEL_BUDGET_PAUSED"]) saved[k] = Deno.env.get(k);
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   const seen: string[] = [];
+  const modelCalls: string[] = [];
   let behaviour: "answer" | "hang" | "fail" = "answer";
   const fake = async (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
     const req = input instanceof Request && !init ? input : new Request(input as any, init);
     const url = new URL(req.url);
+    // Every model call is answered like any other (NO marker special-casing): the crisis classifier's call must show up here.
+    if (url.hostname === "api.openai.com" && url.pathname === "/v1/chat/completions") {
+      const body = await req.json();
+      modelCalls.push(JSON.stringify(body));
+      return Response.json({ id: "fake", model: body.model, choices: [{ index: 0, message: { role: "assistant", content: "NO" }, finish_reason: "stop" }], usage: { prompt_tokens: 50, completion_tokens: 1 } });
+    }
     if (url.hostname !== "api.openai.com" || url.pathname !== "/v1/moderations") return new Response("not reachable in this test", { status: 404 });
     const text = String((await req.json()).input ?? "");
     seen.push(text);
@@ -98,9 +106,13 @@ Deno.test({ name: "#354 safety: moderation flags what the list misses at the rea
       eq(r.reply, SAFETY_REPLY);
       assert(seen.includes(OBLIQUE), "moderation read it");
     });
-    await t.step("a clear career message is answered as career talk", async () => {
+    await t.step("a clear career message is answered as career talk, and the crisis classifier really read it", async () => {
+      const n = modelCalls.length;
       const r = await say("find me data analyst jobs in chicago");
       assert(r.intent !== "safety_support" && !/\b988\b/.test(r.reply), `${r.intent}: ${r.reply}`);
+      const mine = modelCalls.slice(n).filter((b) => b.includes(CRISIS_SCREEN_MARKER));
+      eq(mine.length, 1, "the classifier's call happened: the layer cannot silently vanish");
+      assert(mine[0].includes("find me data analyst jobs in chicago"), "it read this message");
     });
     await t.step("a list hit answers without waiting for moderation", async () => {
       behaviour = "hang";

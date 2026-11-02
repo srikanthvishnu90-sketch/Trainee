@@ -76,10 +76,10 @@ function proofPage(): string {
     stamp: "Application record read Nov 1, 2026, 3:30 PM CT", body: bodyHtml(rec, "fs1." + "a".repeat(64), { tz: "America/Chicago" }) })}</div>`, { css: KIND_CSS });
 }
 function cardsPage(): string {
-  const rows = rowsHtml([{ name: "Acme", detail: "Data Analyst Intern · Chicago", value: verified("$32/hr") }, { name: "Globex", detail: "Software Engineer Intern · Remote", value: unknown(UNKNOWN.payNotListed) },
-    { name: "Initech", detail: "Analyst Intern", value: unknown(UNKNOWN.closed) }, { name: "Umbrella", detail: "SWE Intern", value: stated("$30/hr") }]);
+  const rows = rowsHtml([{ name: "Acme", detail: "Data Analyst Intern · Chicago", value: verified("$32/hr", "From the posting") }, { name: "Globex", detail: "Software Engineer Intern · Remote", value: unknown(UNKNOWN.payNotListed) },
+    { name: "Initech", detail: "Analyst Intern", value: unknown(UNKNOWN.closed) }, { name: "Umbrella", detail: "SWE Intern", value: stated("$30/hr", "From the posting") }]);
   const apply = (href: string) => ({ href, label: "Apply" });
-  const cards = jobCardHtml({ company: "Acme Analytics", title: "Data Analyst Intern, Summer 2027", logo: null, pay: verified("$32/hr"), location: stated("Chicago, IL"), posted: stated("Oct 30"), fit: "SQL-heavy, in Chicago, above your $30/hr floor.", action: apply("https://boards.greenhouse.io/acme/jobs/1") })
+  const cards = jobCardHtml({ company: "Acme Analytics", title: "Data Analyst Intern, Summer 2027", logo: null, pay: verified("$32/hr", "From the posting"), location: stated("Chicago, IL", "From the posting"), posted: stated("Oct 30", "From the posting"), fit: "SQL-heavy, in Chicago, above your $30/hr floor.", action: apply("https://boards.greenhouse.io/acme/jobs/1") })
     + jobCardHtml({ company: "Globex", title: "Software Engineer Intern", logo: null, pay: unknown(UNKNOWN.payNotListed), location: unknown(UNKNOWN.locationNotListed), posted: unknown(UNKNOWN.postedNotGiven), fit: null, action: apply("https://jobs.lever.co/globex/2") });
   const body = sectionHtml("Pay at a glance", rows, { caveat: { title: "Two of these aren't verified.", text: "Globex lists no pay and Initech's posting has closed." } }) + sectionHtml("Roles", cards);
   return layout("Your roles - Trainee", `<div id="root">${fileShellHtml({ made: "Made for Ada · Nov 1, 2026", title: "SWE internships in Chicago", stamp: "Postings checked Nov 1, 2026, 3:08–3:25 PM CT", intro: "Found 4 roles; 1 posted this week.", body })}</div>`);
@@ -115,7 +115,7 @@ const MEASURE = `(() => {
   const card = document.querySelector(".fcard"), title = document.querySelector("h1");
   const sections = [...document.querySelectorAll(".fsec")].map((s) => { const c = s.querySelector(":scope > .caveat"), r = s.querySelector(":scope > ol.nrows, :scope > .jcard"); return { caveat: c ? { ...box(c), bg: rgb(getComputedStyle(c).backgroundColor).c } : null, rowsTop: r ? box(r).y : null }; });
   const jcards = [...document.querySelectorAll(".jcard")].map((c) => { const a = c.querySelector(".jact"), last = c.lastElementChild; const btn = a ? a.querySelector(".apply") : null; return { last: last ? last.className : "", act: a ? box(a) : null, card: box(c), btn: btn ? { ...box(btn), bg: rgb(getComputedStyle(btn).backgroundColor).c } : null }; });
-  const verifiedValues = [...document.querySelectorAll(".v-verified")].map((v) => ({ text: v.textContent, color: rgb(getComputedStyle(v).color).c }));
+  const verifiedValues = [...document.querySelectorAll(".v-verified")].map((v) => { const t = v.querySelector(".vtag"); return { text: v.textContent, color: rgb(getComputedStyle(v).color).c, tag: t ? t.textContent.trim() : "", tagColor: t ? rgb(getComputedStyle(t).color).c : null, source: (v.querySelector(".fsrc")?.textContent ?? "").trim() }; });
   const unknownValues = [...document.querySelectorAll(".v-unknown")].map((v) => ({ text: v.textContent.trim(), color: rgb(getComputedStyle(v).color).c }));
   return { scrollW: document.documentElement.scrollWidth, innerW: window.innerWidth, texts, taps, body: ground(document.body), card: card ? { ...box(card), bg: rgb(getComputedStyle(card).backgroundColor).c } : null,
     titleFont: title ? getComputedStyle(title).fontFamily : "", bodyFont: getComputedStyle(document.body).fontFamily, sections, jcards, verifiedValues, unknownValues };
@@ -136,7 +136,7 @@ export function judge(m: any, tok: Tokens): string[] {
   check(/Inter/.test(m.bodyFont) && !/Brygada/.test(m.bodyFont), `body is not the plain sans: ${m.bodyFont}`);
   // The verified shade: only on a verified value; every verified value says so in words.
   for (const x of m.texts.filter((x: any) => near(x.color, rgbOf(tok.verified)) && !x.verifiedValue)) bad.push(`verified shade outside a verified value: ${x.el}`);
-  for (const v of m.verifiedValues) { check(near(v.color, rgbOf(tok.verified)), `verified value not in the verified shade: ${v.text}`); check(/\bVerified$/.test(v.text.trim()), `verified value without the word: ${v.text}`); }
+  for (const v of m.verifiedValues) { check(near(v.color, rgbOf(tok.verified)), `verified value not in the verified shade: ${v.text}`); check(v.tag === "Verified", `verified value without the word: ${v.text}`); check(!!v.source, `verified value without a source chip: ${v.text}`); }
   for (const v of m.unknownValues) { check(near(v.color, rgbOf(tok.mute)), `unknown value "${v.text}" not in the metadata colour`); check(!!v.text, "an unknown value with no words"); }
   for (const x of m.texts.filter((x: any) => near(x.color, rgbOf(tok.accent)) && !x.inAction)) bad.push(`plum text outside a link or button: ${x.el}`);
   for (const s of m.sections.filter((s: any) => s.caveat)) {
@@ -212,13 +212,13 @@ Deno.test("File design judge: mutations of a good page are each caught", () => {
     texts: [{ el: "span.v", color: rgbOf(LIGHT.verified), ground: rgbOf(LIGHT.card), verifiedValue: true, unknownValue: false, inAction: false }, { el: "p", color: rgbOf(LIGHT.ink), ground: rgbOf(LIGHT.card), verifiedValue: false, unknownValue: false, inAction: false }],
     taps: [{ el: "a.apply", h: 48 }], sections: [{ caveat: { x: 40, y: 100, w: 300, h: 50, bg: rgbOf(LIGHT.tint) }, rowsTop: 162 }],
     jcards: [{ last: "jact", act: { x: 40, y: 500, w: 300, h: 48 }, card: { x: 30, y: 300, w: 320, h: 266 }, btn: { x: 40, y: 500, w: 300, h: 48, bg: rgbOf(LIGHT.accent) } }],
-    verifiedValues: [{ text: "$32/hr Verified", color: rgbOf(LIGHT.verified) }], unknownValues: [{ text: "Pay not listed", color: rgbOf(LIGHT.mute) }] };
+    verifiedValues: [{ text: "$32/hr VerifiedFrom the posting", color: rgbOf(LIGHT.verified), tag: "Verified", source: "From the posting" }], unknownValues: [{ text: "Pay not listed", color: rgbOf(LIGHT.mute) }] };
   assertNode.deepStrictEqual(judge(good, LIGHT), []);
   const mut = (f: (m: any) => void) => { const m = structuredClone(good); f(m); return judge(m, LIGHT).length; };
   const cases: [string, (m: any) => void][] = [
     ["sideways scroll", (m) => m.scrollW = 420], ["small tap", (m) => m.taps[0].h = 40], ["low contrast", (m) => m.texts[1].color = [200, 200, 200]],
     ["wrong ground", (m) => m.body = [255, 255, 255]], ["no card", (m) => m.card = null], ["sans title", (m) => m.titleFont = "Inter, sans-serif"],
-    ["verified shade off a value", (m) => m.texts[1].color = rgbOf(LIGHT.verified)], ["verified without the word", (m) => m.verifiedValues[0].text = "$32/hr"],
+    ["verified shade off a value", (m) => m.texts[1].color = rgbOf(LIGHT.verified)], ["verified without the word", (m) => m.verifiedValues[0].tag = ""], ["verified without a source", (m) => m.verifiedValues[0].source = ""],
     ["unknown drawn as verified", (m) => m.unknownValues[0].color = rgbOf(LIGHT.verified)], ["plum text", (m) => m.texts[1].color = rgbOf(LIGHT.accent)],
     ["caveat not tinted", (m) => m.sections[0].caveat.bg = rgbOf(LIGHT.card)], ["caveat below its rows", (m) => m.sections[0].rowsTop = 60], ["caveat far from its rows", (m) => m.sections[0].rowsTop = 400],
     ["action not last", (m) => m.jcards[0].last = "jfit"], ["action not at the bottom", (m) => m.jcards[0].card.h = 400], ["small action", (m) => m.jcards[0].btn.h = 40],

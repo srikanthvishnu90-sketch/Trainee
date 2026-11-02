@@ -263,13 +263,17 @@ const STATE_WORD = { available: "available", done: "done", unavailable: "not ava
 function actionsHtml(rec: FileRecord, token: string): string {
   const vs = actionsOf(rec);
   if (!vs.length) return "";
+  // One primary action per File (audit D06): the first available action is the plum button; every other one is drawn as a secondary
+  // (outlined) button, so the page never offers two plum choices.
+  let primary = false;
+  const kind = (ghost = false) => { if (ghost || primary) return "btn ghost"; primary = true; return "btn"; };
   const out = vs.map((a) => {
     const note = a.note ? `<p class="anote">${esc(a.note)}</p>` : "";
-    if (a.id === "copy") return `<div class="act1"><button type="button" class="btn" data-copy>Copy</button><span id="copy-status" role="status"></span>${note}</div>`;
+    if (a.id === "copy") return `<div class="act1"><button type="button" class="${kind()}" data-copy>Copy</button><span id="copy-status" role="status"></span>${note}</div>`;
     if (a.state !== "available") return `<div class="act1"><span class="btn off" role="status">${esc(a.label)}: ${STATE_WORD[a.state]}</span>${note}</div>`;
-    if (a.id === "flag") return `<form method="post" class="ajax act1">${hidden(token, "flag")}<label for="flag-note">What looks wrong</label><textarea id="flag-note" name="note" rows="3" maxlength="500"></textarea><button type="submit" class="btn">Flag a problem</button>${note}</form>`;
+    if (a.id === "flag") return `<form method="post" class="ajax act1">${hidden(token, "flag")}<label for="flag-note">What looks wrong</label><textarea id="flag-note" name="note" rows="3" maxlength="500"></textarea><button type="submit" class="${kind()}">Flag a problem</button>${note}</form>`;
     const extra = a.id === "introduce" ? `<input type="hidden" name="tag" value="${esc(rec.tag ?? "")}">` : "";
-    return `<form method="post" class="ajax act1">${hidden(token, a.id, extra)}<button type="submit" class="btn${a.id === "pass" ? " ghost" : ""}">${esc(a.label)}</button>${note}</form>`;
+    return `<form method="post" class="ajax act1">${hidden(token, a.id, extra)}<button type="submit" class="${kind(a.id === "pass")}">${esc(a.label)}</button>${note}</form>`;
   }).join("");
   return `<section class="blk" aria-label="Actions"><h2>Actions</h2>${out}</section>`;
 }
@@ -298,7 +302,7 @@ export function bodyHtml(rec: FileRecord, token: string, o: { tz?: string | null
           ? evidenceHtml({ quote: c.id ? `Confirmation ID: ${c.id}` : "The employer's confirmation page", source: RECORDS, at: d.submitted_at ?? d.as_of ?? null, href: c.url, hrefLabel: "Open the confirmation",
             image: o.evidenceImage?.(c.screenshot_url) ? c.screenshot_url : null, imageAlt: `${d.company ?? "The employer"}'s confirmation screen` }, o.tz)
             + (c.screenshot_url && !o.evidenceImage?.(c.screenshot_url) ? `<p>${linkHtml(c.screenshot_url, "Open the screenshot")}</p>` : "")
-          : d.status === "submitted" || d.status === "confirmed" ? `<p class="meta">${valueHtml(unknown(UNKNOWN.notConfirmed))} The employer hasn't sent a confirmation Trainee can show.</p>` : "")
+          : d.status === "submitted" || d.status === "confirmed" ? `<p class="unconf">${valueHtml(unknown(UNKNOWN.notConfirmed))} The employer hasn't sent a confirmation Trainee can show.</p>` : "")
         + sec("Answers given", dl(Fs(d.answers, true).map((a) => factHtml(a, a.question)).join("")))
         + sec("Not done", `<ul class="why">${(d.problems ?? []).filter((p: any) => p?.reason).map((p: any) => `<li><strong>${esc(cap1(p.outcome))}:</strong> ${esc(p.item)}. ${esc(p.reason)} ${src(RECORDS)}</li>`).join("")}</ul>`.replace(/^<ul class="why"><\/ul>$/, ""))
 
@@ -380,10 +384,10 @@ export const KIND_CSS = `
 .eyebrow{margin:0 0 4px;font-size:14px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--mute)}
 .blk{padding:18px 0;border-top:1px solid var(--line)}.blk h2{margin:0 0 8px;font-size:17px;font-weight:600}
 dl.facts{margin:0}.fact{margin:0 0 10px}.fact dt{font-size:15px;color:var(--mute)}.fact dd{margin:0;overflow-wrap:anywhere}
-.src{display:inline-block;margin-left:4px;padding:1px 8px;border:1px solid var(--line);border-radius:999px;font-size:13px;color:var(--mute);white-space:nowrap}
+.src{display:inline-block;margin-left:4px;padding:1px 8px;border:1px solid var(--line);border-radius:999px;font-size:14px;color:var(--mute);white-space:nowrap}
 ul.why{margin:0;padding-left:20px}ul.why li{margin:0 0 8px;overflow-wrap:anywhere}
 .msg{margin:8px 0;padding:12px 14px;border-left:3px solid var(--accent);background:transparent;white-space:pre-wrap;overflow-wrap:anywhere}
-.meta{margin:2px 0;font-size:15px;color:var(--mute)}.state{margin:0 0 8px;font-size:18px}.state.failed{color:var(--bad)}.state.confirmed,.state.submitted{color:var(--good)}
+.meta{margin:2px 0;font-size:15px;color:var(--mute)}.unconf{font-size:16px}.unconf .v{display:inline;max-width:none}.state{margin:0 0 8px;font-size:18px}.state.failed{color:var(--bad)}.state.confirmed,.state.submitted{color:var(--good)}
 .note-top{margin:8px 0 14px;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
 .tbl{overflow-x:auto}.tbl:focus-visible{outline:3px solid var(--accent)}table{border-collapse:collapse;width:100%;font-size:16px}th,td{padding:10px 8px;border-top:1px solid var(--line);text-align:left;vertical-align:top}thead th{border-top:0;font-weight:600}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}

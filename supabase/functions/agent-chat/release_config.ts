@@ -45,3 +45,89 @@ export function parseProductionBrain(text: string): ServedBrain {
   return m[1] as ServedBrain;
 }
 export const RELEASE_CONFIG_PATH = "supabase/functions/agent-chat/release_config.ts";
+
+// ------------------------------------------------------------------------------------------------ release flags (D-036)
+// RELEASE FLAGS (D-036, owner 2026-11-01 18:42 CT: "turn everything on that u believe is needed, to test everything end to
+// end"). The feature switches this commit serves ON in production, as part of the deployed SHA (like PRODUCTION_BRAIN),
+// not as hand-set secrets. Every one of them keeps the person's approval of the exact payload in front of any external
+// effect (a send, a submit, a message to anyone but the person), and none needs a secret production lacks. The full
+// inventory, with what stays OFF and why, is docs/architect/RELEASE-FLAGS-2026-11-01.md.
+//
+//   CAREER_TEXTING_NATIVE     channel-native delivery: split like a person texts, typing indicator, the "on it" interim
+//   CAREER_NETWORKING_DRAFT   the model drafts outreach under the fact-lock; approved by hash, delivered by the person
+//   CAREER_TAILOR_REWRITE     truthful bullet rewrite toward a posting, each bullet audited against its one confirmed fact
+//   CAREER_MOCK_JUDGE         the model grades the person's own mock-interview answers
+//   CAREER_MAIL_TRACKING      application status from the person's Gmail (gmail.readonly), read only
+//   CAREER_BRIEF_DIGEST       interview briefs, interview drafts and the weekly digest, to the person
+//   CAREER_OUTREACH_FOLLOWUPS follow-up reminders on mail the person sent, to the person's own outbox
+//   CAREER_INTRO_REMINDERS    introduction reminders the person asked for, to the person's own outbox
+//
+// The environment can only turn a release flag OFF (the rollback, no deploy):
+//
+//   supabase secrets set CAREER_MAIL_TRACKING=off --project-ref <ref>   that one feature off at once
+//   supabase secrets unset CAREER_MAIL_TRACKING --project-ref <ref>     back to the release value
+//
+// As with CAREER_BRAIN: unset, or set to the release value ("on"), serves the release value; any other value (off, 0, a
+// typo) serves "off", so a mistyped rollback still rolls back. A switch that is not in this table is read from the
+// environment exactly as before (default off): the real-submit and send-as-the-person switches are never in it
+// (RELEASE_NEVER_ON below; the owner turns those on himself, at his first live application).
+export const RELEASE_FLAGS: Readonly<Record<string, "on">> = Object.freeze({
+  CAREER_TEXTING_NATIVE: "on",
+  CAREER_NETWORKING_DRAFT: "on",
+  CAREER_TAILOR_REWRITE: "on",
+  CAREER_MOCK_JUDGE: "on",
+  CAREER_MAIL_TRACKING: "on",
+  CAREER_BRIEF_DIGEST: "on",
+  CAREER_OUTREACH_FOLLOWUPS: "on",
+  CAREER_INTRO_REMINDERS: "on",
+});
+
+// D-036 review (2026-11-01): ON once its condition is met, not before; until then each is read from the environment as
+// before (default off) and every report names it as pending, never as live. Moving one into RELEASE_FLAGS is its own commit.
+export const RELEASE_PENDING: Readonly<Record<string, string>> = Object.freeze({
+  CAREER_PLANNER: "measured first: the task eval (brain-eval suite=tasks), planner on against off, and #371's fix (a crisis message with two asks reaches the 988 reply before the planner; planner reminders are delivered) landed",
+  CAREER_CRISIS_MODERATION: "reader pending #354: no code at this SHA reads it, so it is not reported as a live safety layer",
+});
+
+// Switches the release config never turns on: each submits to an employer, sends as the person, changes reply words no
+// measurement covers, or needs what production does not have (docs/architect/RELEASE-FLAGS-2026-11-01.md, "why off").
+// tests/architect/release-flags.test.ts fails if one of them enters RELEASE_FLAGS. The environment reads them as before.
+export const RELEASE_NEVER_ON: readonly string[] = Object.freeze([
+  "UPMORE_SCRIPT_SUBMIT_LIVE", "CLOUD_RUNNER_ENABLED", "CLOUD_PREPARE_ENABLED", "CAREER_BATCH_EXECUTOR",
+  "CAREER_EMAIL_SEND", "CAREER_OUTREACH_SEND", "CAREER_SEND_RAIL", "CAREER_OUTREACH_REPLIES", "CAREER_OUTREACH_REPLIES_MODEL",
+  "GOOGLE_APPROVED_EXTRA_SCOPES", "CAREER_REPLY_WRITER", "CAREER_KNOWLEDGE", "CAREER_JUDGE", "CAREER_MAIL_MODEL",
+  "CAREER_PEOPLE_SEARCH", "CAREER_PEOPLE_SWEEP", "CAREER_PDL", "CAREER_VOICE", "CAREER_PREPARE_AHEAD", "CAREER_PREPARE_AHEAD_COVER",
+  "CAREER_RESEARCH_REPLY", "CAREER_RESEARCH_BRIEF", "TRAINEE_LOGO_GUESS", "CHANNEL_UNKNOWN_REPLY", "TRAINEE_SIGNUP",
+  "WHATSAPP_TEMPLATE_UPDATES", "UPMORE_LEGACY_GMAIL_CONNECT",
+]);
+
+export const FLAG_ROLLBACK_VALUE = "off";
+
+// The value a switch has in this environment: a release flag's release value unless the environment rolls it back; any
+// other name exactly as the environment holds it.
+export function releaseValue(env: Env, name: string): string | undefined {
+  const release = Object.prototype.hasOwnProperty.call(RELEASE_FLAGS, name) ? RELEASE_FLAGS[name] : undefined;
+  const v = env.get(name);
+  if (release === undefined) return v;
+  const t = (v ?? "").trim().toLowerCase();
+  return !t || t === release ? release : FLAG_ROLLBACK_VALUE;
+}
+
+// Whether a switch is "on" in this environment, release flags included.
+export function releaseFlagOn(env: Env, name: string): boolean {
+  return releaseValue(env, name) === "on";
+}
+
+// The environment as the release serves it: release flags at their release value (unless rolled back), everything else
+// passed through, read at call time (a rollback or a test that changes the environment is seen on the next read).
+export function releaseEnv(env: Env): Env {
+  return { get: (k: string) => releaseValue(env, k) };
+}
+
+// RELEASE_FLAGS as written in a copy of this file (deploy-standard.ts reads it at a SHA with git show, as PRODUCTION_BRAIN):
+// the sorted flag names; [] for a SHA without the table (it predates D-036 and turned none on by config).
+export function parseReleaseFlags(text: string): string[] {
+  const m = /export const RELEASE_FLAGS[^=]*=\s*Object\.freeze\(\{([\s\S]*?)\}\)/.exec(text);
+  if (!m) return [];
+  return [...m[1].matchAll(/^\s*([A-Z][A-Z0-9_]*)\s*:\s*"on"\s*,?\s*$/gm)].map((x) => x[1]).sort();
+}

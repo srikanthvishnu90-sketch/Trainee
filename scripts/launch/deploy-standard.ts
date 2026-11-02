@@ -21,7 +21,9 @@
 //      candidate SHA serves, measured for the candidate, >= the pass rate of the brain the deployed SHA serves, measured for
 //      the deployed SHA, on the same set and set size (same harness and judges: both are rows of that log). The brain a SHA
 //      serves is its committed release config (supabase/functions/agent-chat/release_config.ts PRODUCTION_BRAIN, D-035),
-//      read at that SHA; a SHA without the file predates D-035 and served the router. A config that cannot be read is a
+//      read at that SHA; a SHA without the file predates D-035 and served the router. Its release flags (RELEASE_FLAGS, D-036) are read
+//      and printed beside the brain; every module an ON flag switches on is reply code (reply-code.ts RELEASE_FLAG_PATHS), so
+//      a flag flipped or a flagged module changed needs a fresh measurement. A config that cannot be read is a
 //      FAIL, never a guess. "Reply code" is the one list in scripts/launch/reply-code.ts (the router bundle and packages/domain,
 //      agent-chat, the brain under _shared/agent, and the _shared modules the reply path imports). A measurement counts for
 //      a SHA when its brain commit is that SHA, or a first-parent ancestor within 10 commits with no reply-code change
@@ -52,7 +54,7 @@
 // It changes nothing anywhere. Exit 0: the SHA meets the standard; 1: it does not; 2: usage.
 import { parse as parseYaml } from "npm:yaml@2.9.1";
 import { REPLY_CODE as REPLY_CODE_PATHS } from "./reply-code.ts";
-import { parseProductionBrain, RELEASE_CONFIG_PATH } from "../../supabase/functions/agent-chat/release_config.ts";
+import { parseProductionBrain, parseReleaseFlags, RELEASE_CONFIG_PATH } from "../../supabase/functions/agent-chat/release_config.ts";
 
 export type CheckId = "S1" | "S2" | "S3" | "S4" | "S5";
 export const ALL_CHECKS: CheckId[] = ["S1", "S2", "S3", "S4", "S5"];
@@ -328,6 +330,13 @@ export async function servedBrainAt(src: Sources, sha: string): Promise<string> 
   return text === null ? "router" : parseProductionBrain(text);
 }
 
+// The release flags a SHA serves ON (D-036): RELEASE_FLAGS in its committed release config; [] for a SHA without the
+// table. S3 prints both sides with the served brains, so the evidence names the whole served configuration it judged.
+export async function servedFlagsAt(src: Sources, sha: string): Promise<string[]> {
+  const text = await src.fileAt(sha, RELEASE_CONFIG_PATH);
+  return text === null ? [] : parseReleaseFlags(text);
+}
+
 export async function s3(src: Sources, sha: string, deployed: string | null): Promise<Result> {
   const evidence: string[] = [];
   if (!deployed) return { id: "S3", pass: false, summary: "no successful production deploy found: nothing to compare with", evidence };
@@ -335,7 +344,8 @@ export async function s3(src: Sources, sha: string, deployed: string | null): Pr
   if (log === null) return { id: "S3", pass: false, summary: "evals/career/SCORE-LOG.md on ci/brain-eval cannot be read", evidence };
   const rows = parseScoreLog(log);
   const cb = await servedBrainAt(src, sha), db = await servedBrainAt(src, deployed);
-  const served = `served brains (${RELEASE_CONFIG_PATH}): candidate ${short(sha)} ${cb}, deployed ${short(deployed)} ${db}`;
+  const cf = await servedFlagsAt(src, sha), df = await servedFlagsAt(src, deployed);
+  const served = `served brains (${RELEASE_CONFIG_PATH}): candidate ${short(sha)} ${cb}, deployed ${short(deployed)} ${db}; release flags on: candidate [${cf.join(", ")}], deployed [${df.join(", ")}]`;
   const cand = await measurementOf(src, sha, rows, cb);
   if (!cand.m) return { id: "S3", pass: false, summary: `candidate: ${cand.why}`, evidence: [served] };
   evidence.push(`candidate ${short(sha)}: ${(cand.m.rate * 100).toFixed(1)}% (${cb}, ${cand.m.set}/${cand.m.size}, mean of ${cand.m.passes} passes of CI run ${cand.m.run}, brain commit ${cand.m.commit})`);

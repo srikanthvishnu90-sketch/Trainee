@@ -69,7 +69,8 @@ Deno.test({ name: "people finding and intros at the real handler: import, who, a
   if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
   const pg: Pg = await startPg();
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
-  const env = { CAREER_NETWORKING_DRAFT: "on", OPENAI_API_KEY: "sk-test-not-real", CAREER_MODEL: "gpt-5-mini" };
+  // D-036: CAREER_INTRO_REMINDERS is a release flag (on when unset); this file's off steps run it rolled back ("off").
+  const env = { CAREER_NETWORKING_DRAFT: "on", OPENAI_API_KEY: "sk-test-not-real", CAREER_MODEL: "gpt-5-mini", CAREER_INTRO_REMINDERS: "off" };
   for (const [k, v] of Object.entries(env)) Deno.env.set(k, v);
   const outside: string[] = [];
   let restoreDns = () => {};
@@ -354,7 +355,7 @@ Deno.test({ name: "people finding and intros at the real handler: import, who, a
         const t2 = await say(`remind me about intro ${n} in 5 days`);
         assert(/I'll text you a reminder then/.test(t2.reply), t2.reply);
         await pg.sql(`delete from public.channel_contacts where user_id = '${A}'; update public.career_intro_requests set follow_up_at = null, follow_up_days = null where user_id = '${A}' and n = ${n}`);
-      } finally { Deno.env.delete("CAREER_INTRO_REMINDERS"); }
+      } finally { Deno.env.set("CAREER_INTRO_REMINDERS", "off"); }
     });
 
     await t.step("forget: LinkedIn contacts (every copy, in every chat of theirs), job emails, intro requests; Gmail disconnect; forget everything", async () => {

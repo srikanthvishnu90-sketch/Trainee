@@ -411,6 +411,9 @@ export async function runMail(o: {
     const gone = async () => o.store.stillConnected ? !(await o.store.stillConnected(p.user_id)) : false;
     if (await gone()) { stats.disconnected = (stats.disconnected ?? 0) + 1; return; }
     const fresh = await o.store.record(p.user_id, plan.events);
+    // CONNECTORS ROUND 3 (2026-10-31): the write itself is refused once the grant is gone or the person erased everything
+    // since the run began (career_mail_record_events); then nothing read is said either (an interview brief included).
+    if (await gone()) { stats.disconnected = (stats.disconnected ?? 0) + 1; return; }
     const at = awake(o.now, p.tz, p);
     // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): an employer's email that cancels an interview on file. It was read as
     // nothing ("other"), so the person was never told, and the thank-you for the interview that never happened was still

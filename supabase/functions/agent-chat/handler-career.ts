@@ -49,7 +49,7 @@ import { memoryGroundCache, openAiGroundSearch } from "../_shared/agent/research
 import { DEFAULT_SEARCH_MODEL } from "../_shared/career_people_provider.ts";
 const researchCache = memoryGroundCache();
 import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWindow, summaryFor } from "./career_brain.ts";
-import { STAGED_TOOL_POLICY, stagedRoute } from "./career_staged.ts";
+import { brainMode, STAGED_TOOL_POLICY, stagedRoute } from "./career_staged.ts";
 import { CRISIS_INTENT, crisisReply } from "./crisis.ts";
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
 import { CARD_ANSWER_INTENT, CARD_INTENT, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
@@ -507,7 +507,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // this turn's state; every turn below is then skipped. A turn it does not claim falls through to them unchanged. It
       // runs after the card and the mock: their own commands and their prompts waiting for an answer are theirs (WO-025/14).
       let planned: Extract<PlannerTurn, { claimed: true }> | null = null;
-      if (!tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && plannerOn(Deno.env, user.id) && !host.isHostControlled(message, ctx)) {
+      // D-035: under the staged release, crisis text is code's before the planner and every action turn below: the core's
+      // own 988 reply (crisis.ts) answers it, whatever else the message asks ("I don't want to live anymore. Apply to the
+      // Stripe role and remind me Friday" is not a compound ask to plan). It rides the planner's slot, so every turn
+      // guarded by !planned is skipped and nothing is queued, drafted or set on this turn. The rollback (router) is as before.
+      const crisisText = brainMode(Deno.env) === "staged" && !tapIn && !careerTask && !careerBatch && !host.isHostControlled(message, ctx) ? crisisReply(message) : null;
+      if (crisisText) planned = { claimed: true, reply: crisisText, intent: CRISIS_INTENT, resultStatus: "completed", parts: undefined, documents: [], meta: null } as unknown as Extract<PlannerTurn, { claimed: true }>;
+      // The planner calls the model: without a model key it is never tried (no failing call, no cost row), as the brain.
+      if (!crisisText && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && plannerOn(Deno.env, user.id) && !!modelConfig(Deno.env, "chat").apiKey && !host.isHostControlled(message, ctx)) {
         const pMeter = ledger.track(newMeter()), pCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
         const pModel = (payload: any) => callModel(pCfg, payload, { meter: pMeter, role: "chat" });
         try {
@@ -867,7 +874,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         out = { reply: outlookAns.reply, intent: outlookAns.intent, resultStatus: outlookAns.resultStatus, contained: false, handler: outlookAns.handler };
         if (outlookAns.meta) agentMeta = { ...(agentMeta || {}), ...outlookAns.meta };
       } else if (planned) { // TASK PLANNER: each step's own reply, in order; a waiting prompt a step left is the thread's last word
-        out = { reply: planned.reply, intent: planned.intent, resultStatus: planned.resultStatus, contained: false, handler: "planner", parts: planned.parts,
+        out = { reply: planned.reply, intent: planned.intent, resultStatus: planned.resultStatus, contained: false, handler: crisisText ? "crisis" : "planner", parts: planned.parts,
           ...(planned.documents.length ? { result: { documents: planned.documents } } : {}) };
         agentMeta = planned.meta;
       } else if (card) {

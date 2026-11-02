@@ -82,7 +82,9 @@ test('R18 control: a stated target is still recorded as the goal', async () => {
 
 test('R18 control: the alert asks still create a watch', async () => {
   await setup();
-  for (const ask of ['text me when new data analyst roles open up', 'send me new data analyst internships every day', 'alert me for swe internships in chicago', 'notify me about finance roles', 'send me new grad roles as they get posted']) {
+  for (const ask of ['text me when new data analyst roles open up', 'send me new data analyst internships every day', 'alert me for swe internships in chicago', 'notify me about finance roles', 'send me new grad roles as they get posted',
+    // Review of #396: a time or a condition makes a send-me ask an alert.
+    'send me data analyst roles at 9am', 'send me data analyst roles tomorrow morning', 'send me analyst jobs once they open']) {
     const out = person(`u-r18-c-${ask.length}`).say(ask);
     assert.equal(out.intent, 'career_watch_create', `${ask} -> ${out.intent}: ${out.reply}`);
   }
@@ -112,4 +114,12 @@ test('R18: with a goal on record, a request for postings that names no role offe
   assert.match(String(out.reply), /software engineering internship in chicago/i, out.reply);
   assert.match(String(out.reply), /\?/, `asks before searching: ${out.reply}`);
   assert.equal(p.interests().length, 0, 'and saves no watch');
+});
+
+test('R18 (review #396): a send-me ask that names its role is never answered by asking for the role', async () => {
+  await setup();
+  for (const ask of ['send me data analyst roles at 9am', 'send me analyst jobs once they open', 'send me some barista jobs']) {
+    const out = person(`u-r18-named-${ask.length}`).say(ask);
+    assert.doesNotMatch(String(out.reply), /Which role should I look for/i, `${ask} -> ${out.intent}: ${out.reply}`);
+  }
 });

@@ -15531,7 +15531,8 @@ const CareerRouter = (() => {
     if (/^(jobs?|apply|applying|roles?|work|positions?|find jobs?|search)$/.test(t)) {
       return say(hasResume ? "Sure." : "Sure — I'll search as soon as I know what you're after.", "What role, and which city or remote?");
     }
-    if (/\b(?:send|show|give|get|find|want|need|list|dm|pull up)\b/.test(t) && /\b(?:postings?|listings|links?|jobs?|roles?|openings?|internships?|positions?)\b/.test(t)) {
+    const roleWords = t.split(/[^a-z0-9+#-]+/).filter((w) => w && !POSTINGS_ASK_WORDS.has(w));
+    if (!roleWords.length && /\b(?:send|show|give|get|find|want|need|list|dm|pull up)\b/.test(t) && /\b(?:postings?|listings|links?|jobs?|roles?|openings?|internships?|positions?)\b/.test(t)) {
       const goal = statedFactsOf(ctx).find((f) => f && f.kind === "goal" && s(f.value).trim());
       if (goal) { offerNext(ctx, `find ${s(goal.value).trim()}`); return say(`Your goal on record is ${s(goal.value).trim()}.`, "Want me to search live postings for that now, or a different role or city?"); }
       return say("I'll search live postings as soon as I know what for.", "Which role should I look for, and in which city or remote?");
@@ -15541,6 +15542,7 @@ const CareerRouter = (() => {
       : "Which of those should we do, or do you want to send me your resume first?");
   }
 
+  const POSTINGS_ASK_WORDS = new Set(["send", "show", "give", "get", "find", "want", "need", "list", "dm", "pull", "up", "me", "us", "some", "any", "a", "an", "the", "few", "more", "all", "of", "to", "for", "with", "and", "please", "pls", "i", "can", "could", "you", "u", "would", "real", "actual", "live", "current", "open", "postings", "posting", "listings", "links", "link", "url", "urls", "jobs", "job", "roles", "role", "openings", "opening", "internships", "internship", "positions", "position", "them", "those", "these", "now", "here", "just"]);
   function handlePendingAffirmation(text, ctx) {
     const raw = s(text).trim();
     if (!raw || raw.split(/\s+/).length > 8) return null;
@@ -21225,7 +21227,8 @@ const CareerRouter = (() => {
     const JOB_NOUN_RE = /\b(jobs?|roles?|openings?|positions?|postings?|internships?)\b/;
     const jobAfterDelivery = deliveryM ? JOB_NOUN_RE.test(t.slice(deliveryM.index + deliveryM[0].length)) : false;
     const futureTrigger = /\b(opens? up|goes up|comes up|gets? posted|is posted|when|whenever|as soon as|the moment|the minute)\b/.test(t);
-    const sendNow = deliveryM && /^(?:send|dm)\b/.test(deliveryM[0]) && !futureTrigger
+    const timedOrConditional = /\b(?:once|tomorrow|tonight|morning|mornings|evening|evenings|afternoon|noon|midnight|if (?:any|there)|later|weekdays?|mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?)\b|\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?\b|\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/.test(t);
+    const sendNow = deliveryM && /^(?:send|dm)\b/.test(deliveryM[0]) && !futureTrigger && !timedOrConditional
       && !/\bnew\b(?![ -]?grads?\b)|\b(?:daily|every|each|weekly|going forward|from now on|regularly|as (?:they|soon as))\b|\b(?:alerts?|watch(?:es|ing)?|notif(?:y|ications?))\b/.test(t);
     if (!classicCreate && sendNow) return null;
     if (classicCreate || (deliveryVerb && !tellQuestionOnly && jobObject && (jobAfterDelivery || futureTrigger))) return { op: "create" };

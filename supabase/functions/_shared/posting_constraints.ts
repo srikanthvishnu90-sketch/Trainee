@@ -85,7 +85,10 @@ function dropRequestPhrases(t: string): string {
   return t
     .replace(/\b(?:with|and|plus|including|incl)\s+(?:the\s+|their\s+)?(?:apply\s+|application\s+|working\s+)?(?:links?|urls?)\b/g, " ")
     .replace(/\b(?:the\s+)?(?:links?|urls?)\s+(?:to|for|of)\b/g, " ")
-    .replace(/\b(?:real|actual|live|current)\b(?!\s+estate)/g, " ")
+    // "real" and "actual" describe the postings ("real estate" is a field); "live" and "current" only right before a job noun
+    // ("live postings"), never in a role ("live sound engineer", "current events reporter").
+    .replace(/\b(?:real|actual)\b(?!\s+estate)/g, " ")
+    .replace(/\b(?:live|current)\s+(?=(?:job\s+)?(?:postings?|listings|links?|openings?|jobs?|roles?)\b)/g, " ")
     .replace(/\b(?:job\s+)?(?:postings?|listings)\b(?:\s+(?:for|of)\b)?/g, " ");
 }
 const EXPAND: Record<string, string> = { swe: "software engineer", sde: "software engineer", pm: "product manager", ml: "machine learning", ds: "data science" };

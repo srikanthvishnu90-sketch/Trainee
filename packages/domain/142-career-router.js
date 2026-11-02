@@ -3427,7 +3427,9 @@ const CareerRouter = (() => {
     // PARITY R18 (F1): a request for postings that names no role ("send me real postings with links") gets the one thing that
     // is missing, never the generic fallback; with a goal on record, the offer is to search that goal, in the person's words,
     // asked first (nothing is searched or saved on a guess).
-    if (/\b(?:send|show|give|get|find|want|need|list|dm|pull up)\b/.test(t) && /\b(?:postings?|listings|links?|jobs?|roles?|openings?|internships?|positions?)\b/.test(t)) {
+    // Review of #396: only when no role can be read from the ask (a named role is never asked for again).
+    const roleWords = t.split(/[^a-z0-9+#-]+/).filter((w) => w && !POSTINGS_ASK_WORDS.has(w));
+    if (!roleWords.length && /\b(?:send|show|give|get|find|want|need|list|dm|pull up)\b/.test(t) && /\b(?:postings?|listings|links?|jobs?|roles?|openings?|internships?|positions?)\b/.test(t)) {
       const goal = statedFactsOf(ctx).find((f) => f && f.kind === "goal" && s(f.value).trim());
       if (goal) { offerNext(ctx, `find ${s(goal.value).trim()}`); return say(`Your goal on record is ${s(goal.value).trim()}.`, "Want me to search live postings for that now, or a different role or city?"); }
       return say("I'll search live postings as soon as I know what for.", "Which role should I look for, and in which city or remote?");
@@ -3437,6 +3439,8 @@ const CareerRouter = (() => {
       : "Which of those should we do, or do you want to send me your resume first?");
   }
 
+  // PARITY R18: the words of a request for postings that are not a role (what is left, if anything, is the role).
+  const POSTINGS_ASK_WORDS = new Set(["send", "show", "give", "get", "find", "want", "need", "list", "dm", "pull", "up", "me", "us", "some", "any", "a", "an", "the", "few", "more", "all", "of", "to", "for", "with", "and", "please", "pls", "i", "can", "could", "you", "u", "would", "real", "actual", "live", "current", "open", "postings", "posting", "listings", "links", "link", "url", "urls", "jobs", "job", "roles", "role", "openings", "opening", "internships", "internship", "positions", "position", "them", "those", "these", "now", "here", "just"]);
   function handlePendingAffirmation(text, ctx) {
     const raw = s(text).trim();
     if (!raw || raw.split(/\s+/).length > 8) return null;
@@ -11560,7 +11564,9 @@ const CareerRouter = (() => {
     // PARITY R18 (F1): "send me real postings with links" / "dm me some marketing jobs" asks to SEE postings now: a search, not
     // an alert. It saved a job watch named "real postings with links" the person never asked for. A send/dm ask is an alert
     // only with a trigger, "new" postings, a recurrence or an alert word ("send me new grad roles as they get posted").
-    const sendNow = deliveryM && /^(?:send|dm)\b/.test(deliveryM[0]) && !futureTrigger
+    // Review of #396: a time or a condition is a trigger too ("at 9am", "tomorrow morning", "once they open", "if any").
+    const timedOrConditional = /\b(?:once|tomorrow|tonight|morning|mornings|evening|evenings|afternoon|noon|midnight|if (?:any|there)|later|weekdays?|mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?)\b|\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?\b|\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/.test(t);
+    const sendNow = deliveryM && /^(?:send|dm)\b/.test(deliveryM[0]) && !futureTrigger && !timedOrConditional
       && !/\bnew\b(?![ -]?grads?\b)|\b(?:daily|every|each|weekly|going forward|from now on|regularly|as (?:they|soon as))\b|\b(?:alerts?|watch(?:es|ing)?|notif(?:y|ications?))\b/.test(t);
     if (!classicCreate && sendNow) return null;
     if (classicCreate || (deliveryVerb && !tellQuestionOnly && jobObject && (jobAfterDelivery || futureTrigger))) return { op: "create" };

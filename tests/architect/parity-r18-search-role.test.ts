@@ -22,4 +22,8 @@ for (const [ask, role, place] of [
 Deno.test("R18 control: a role that is the word itself is kept (a link technician, a listing coordinator)", () => {
   nodeAssert.equal(searchTextOf("find link technician jobs").role, "link technician");
   nodeAssert.equal(searchTextOf("find listing coordinator roles in miami").role, "listing coordinator");
+  // Review of #396: "live" and "current" are part of a role when they are not describing the postings.
+  nodeAssert.equal(searchTextOf("send me live sound engineer job postings").role, "live sound engineer");
+  nodeAssert.equal(searchTextOf("find current events reporter roles with links").role, "current events reporter");
+  nodeAssert.equal(searchTextOf("send me live postings for nurse jobs").role, "nurse");
 });

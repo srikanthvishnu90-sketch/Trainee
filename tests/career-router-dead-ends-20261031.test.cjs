@@ -247,8 +247,9 @@ test("corrections and stated facts get an answer, not a fallback; only the perso
     assert.ok(!JSON.stringify([st.profile || null, st.statedFacts || null, p.account().statedFacts || null, p.account().profile || null]).includes(addr), `${m}: the address is on no profile or fact record`);
     assert.equal(questions(r), 1, `${m}: one next step: ${r}`);
   }
-  // a GPA said in chat is never recorded or repeated (architect false_memory rule); it comes from the confirmed resume
-  for (const [pre, m, said, resumeGpa] of [[["i want a job in marketing"], "my gpa is 3.4", "3.4", null], [[`here is my resume:\n${RESUME}`, "yes thats my resume"], "actually my gpa is 3.6", "3.6", "3.7"]]) {
+  // a GPA said in chat with no resume on record is never recorded or repeated (architect false_memory rule); it comes
+  // from the confirmed resume
+  for (const [pre, m, said] of [[["i want a job in marketing"], "my gpa is 3.4", "3.4"]]) {
     const p = person();
     for (const x of pre) p.say(x);
     const o = p.say(m);
@@ -256,14 +257,26 @@ test("corrections and stated facts get an answer, not a fallback; only the perso
     assert.ok(!isDeadEnd(o), `${m}: [${o.intent}] ${r}`);
     assert.ok(!r.includes(said), `${m}: the chat figure is not read back: ${r}`);
     assert.ok(!statedFacts(p).some((f) => f.kind === "gpa"), `${m}: nothing written`);
-    if (resumeGpa) {
-      assert.ok(r.includes(resumeGpa), `${m}: the confirmed resume's figure is named: ${r}`);
-      assert.ok(JSON.stringify(p.snap()).includes(`GPA ${resumeGpa}`), "the confirmed resume entry is unchanged");
-    }
     assert.match(r, /resume/i, r);
     assert.equal(questions(r), 1, r);
     const y = p.say("yes");
     assert.match(String(y.reply), /paste|attach/i, `the yes leads to the resume step: ${String(y.reply).slice(0, 120)}`);
+  }
+  // TRUNK FIX (#350 x #372, 2026-11-02): after the person confirmed their resume, "actually my gpa is 3.6" is THEIR
+  // correction of THEIR confirmed education entry (tests/architect/scenarios-onboarding-r3.test.ts "fixes", D-007): exactly
+  // that value changes on the entry, as the owner's correction, shown before and after. It is never a separate chat fact.
+  {
+    const p = person();
+    p.say(`here is my resume:\n${RESUME}`);
+    p.say("yes thats my resume");
+    const o = p.say("actually my gpa is 3.6");
+    const r = String(o.reply);
+    assert.ok(!isDeadEnd(o), `[${o.intent}] ${r}`);
+    assert.equal(o.intent, "career_resume_correction", r);
+    assert.ok(r.includes("GPA 3.7") && r.includes("GPA 3.6"), `the entry is shown before and after: ${r}`);
+    assert.ok(!statedFacts(p).some((f) => f.kind === "gpa"), "no chat GPA fact is written");
+    const snap = JSON.stringify(p.snap());
+    assert.ok(snap.includes("GPA 3.6") && snap.includes("owner_corrected_at"), "the confirmed entry carries the person's own correction");
   }
 });
 

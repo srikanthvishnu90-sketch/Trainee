@@ -2386,6 +2386,22 @@ const CareerRouter = (() => {
     if (Array.isArray(f.bullets)) f.bullets = f.bullets.map(swap);
     if (Array.isArray(f.skills)) f.skills = f.skills.map(swap);
   }
+  // TRUNK FIX (#350 x #372, 2026-11-02): whether this turn is a graduation-date correction of the person's OWN resume
+  // entries (shown drafts, or confirmed entries) that handleResumeFieldCorrection answers. #350's chat graduation fact
+  // (captureStatedFacts) and its unsaved-graduation reply (handleUnsavedGraduation) stand down for it: "actually I
+  // graduated 2022" with an education entry on the resume changes that entry (or says it changed nothing), and is not
+  // also written as a separate chat fact or answered "I haven't taken that as your graduation date".
+  function resumeGraduationCorrection(text, ctx) {
+    const raw = s(text).trim();
+    if (!raw || raw.length > 200 || /\n/.test(raw) || /\?/.test(raw) || !ProfileMod || typeof ProfileMod.fieldCorrectionOf !== "function") return false;
+    const profile = ctx && ctx.profile && typeof ctx.profile === "object" && !ctx.profile._fromStatedFacts ? ctx.profile : null;
+    if (!profile || !Array.isArray(profile.facts)) return false;
+    const field = ProfileMod.fieldCorrectionOf(raw);
+    if (!field || field.field !== "graduation") return false;
+    if (resumeDraftsPending(ctx).length) return true;
+    return profile.facts.some((f) => f && f.source === "resume-ingest" && RESUME_ENTRY_KINDS.has(f.kind) && f.needs_confirmation === false && f.status === "confirmed"
+      && !(ProfileMod.quarantinedFact && ProfileMod.quarantinedFact(f)));
+  }
   function handleResumeFieldCorrection(text, ctx) {
     const raw = s(text).trim();
     if (!raw || raw.length > 200 || /\n/.test(raw) || /\?/.test(raw)) return null;
@@ -2577,7 +2593,7 @@ const CareerRouter = (() => {
   // the reply says so on topic (it was answered as an eligibility question, "your graduation date is not stated"). The
   // person's own date is asked for once per thread, and only while none is on record; their answer is saved as said.
   function handleUnsavedGraduation(text, ctx) {
-    if (!ctx._gradUnsavedThisTurn) return null;
+    if (!ctx._gradUnsavedThisTurn || resumeGraduationCorrection(text, ctx)) return null;
     const own = statedFactsOf(ctx).find((f) => f.kind === "graduation");
     const wm = threadMirrorForWrite(ctx);
     const ask = !own && !(wm && wm.gradAskedAt);
@@ -14662,7 +14678,7 @@ const CareerRouter = (() => {
       // a materials instruction ("put on my cover letter that my GPA is 3.9") is not the person stating a fact (BUG-177)
       const materialsAsk = /\b(put|write|add|say|state|claim|list|mark|include|change|make)\b[^.]*\b(resume|cv|cover letter|application|form|letter|profile)\b/i.test(u);
       // a short chat line only: a pasted resume's "graduating May 2028" is a document entry, read by resume intake
-      if (u.length <= 200 && u.split(/\n/).length <= 2 && !materialsAsk && !/\?/.test(u)) {
+      if (u.length <= 200 && u.split(/\n/).length <= 2 && !materialsAsk && !/\?/.test(u) && !resumeGraduationCorrection(raw, ctx)) {
         // REVIEW #350 (D-007): a fact is the PERSON's only when they are the subject of its own sentence ("my brother will
         // graduate in may 2027", "my friend said i graduate ..." are not), and only when definite: a negation ("i dont
         // graduate in 2027") or a hypothetical ("if i graduate", "i might graduate") records nothing.

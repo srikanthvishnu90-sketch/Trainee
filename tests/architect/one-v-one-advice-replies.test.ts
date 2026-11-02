@@ -12,7 +12,9 @@ import { openWorld, worldTurn } from "../../evals/career/world.ts";
 import { seed } from "../../evals/career/one-v-one/run.ts";
 
 const assert = (c: unknown, m: string) => { if (!c) throw new Error(m); };
-const ADVICE = ["V029", "V032", "V033", "V074", "V075", "V077", "V078", "V079", "V080", "V081", "V083", "V084", "V086", "V087", "V088", "V089", "V090", "V093"];
+// V084 and V086 (offers) and V093 (a reminder) are answered by code turns that run before the router in production (the
+// offer turn and the reminder turn; #368's harness runs the handler's order), so they are not the router's advice to judge.
+const ADVICE = ["V029", "V032", "V033", "V074", "V075", "V077", "V078", "V079", "V080", "V081", "V083", "V087", "V088", "V089", "V090"];
 const JARGON = /\bsource class\b|\bcompany[- ]file\b|\bheld for your approval\b|\bnull\b|\brouter\b|\bpayload\b/i;
 
 async function say(state: "new" | "profile" | "inflight", msg: string) {
@@ -64,4 +66,14 @@ Deno.test("C. no reminder is claimed, no live help is offered, and a banking moc
   assert(/^Not during it/.test(live) && /won't feed you answers/.test(live), `live help: ${live}`);
   const mock = await say("new", "mock interview for investment banking");
   assert(/First question: "Walk me through a DCF\."/.test(mock), `banking mock: ${mock}`);
+});
+
+// Review of #389 (2026-11-02, D-007): a posting whose skills the fixed list does not know is never said to "list no skills".
+Deno.test("prep never claims a posting lists no skills; it says only what it could not read", async () => {
+  const { openWorld, worldTurn } = await import("../../evals/career/world.ts");
+  const posting = { job_id: "greenhouse:kestrel:7999001", company: "Kestrel", title: "Platform Engineer", location: "Chicago, IL", url: "https://job-boards.greenhouse.io/kestrel/jobs/7999001",
+    description: "Kestrel Platform Engineer. Kubernetes, Rust and gRPC; on-call rotation.", posted_at: "2026-10-18T14:00:00Z", first_seen_at: "2026-10-18T15:00:00Z" };
+  const w = await openWorld({ now: "2026-10-20T15:00:00Z", postings: [posting] });
+  const r = await worldTurn(w, { brain: "router", threadId: "A", message: "prep me for my kestrel interview", now: w.now });
+  if (/doesn'?t list skills|lists no skills|no skills (are )?listed/i.test(r.reply)) throw new Error(`claims the posting lists no skills: ${r.reply}`);
 });

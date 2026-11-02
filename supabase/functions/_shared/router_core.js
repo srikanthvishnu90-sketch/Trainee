@@ -42662,7 +42662,8 @@ const CareerRouter = (() => {
       const title = posting && posting.title ? ` ${posting.title}` : "";
       const lead = skills.length
         ? `${co}'s${title} posting leads with ${skills.slice(0, 3).join(", ")}, so prep those first, then one project story with a number and why ${co}.`
-        : posting ? `${co}'s${title} posting doesn't list skills, so I'll prep the core: the main tool of the role, one project story with a number, and why ${co}.`
+        // Review of #389 (D-007): the fixed skill list missing is not the posting listing none; say only what is known.
+        : posting ? `I couldn't pull skills from ${co}'s${title} posting, so I'll prep the core: the main tool of the role, one project story with a number, and why ${co}.`
         : `I'll prep the core for ${co}: the main tool of the role, one project story with a number, and why ${co}.`;
       return ensureNextStepText([lead, `First question: "${q0}" Tell me your answer as you'd say it out loud, and I'll score it.`].join("\n"));
     }

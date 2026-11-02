@@ -122,6 +122,9 @@ export async function agentTurn(o: {
   shape?: boolean;
   // FILE KINDS: create_file (a page of one of the file kinds); present only with the shape on.
   files?: FileService | null;
+  // 1v1 (2026-11-01): the channel the reply goes out on (writerChannel: imessage, sms, whatsapp, telegram or web). A texting
+  // channel adds the texting rules to the system prompt (prompt.ts textingRulesFor); web or absent, the prompt is unchanged.
+  channel?: string | null;
 }): Promise<TurnResult & { knowledge?: { playbooks: string[]; unknown: string[]; stage: string | null } }> {
   const block = o.known ? personBlock({ profile: o.stores.profile, ...o.known }) : null;
   const notes: string[] = [];
@@ -134,7 +137,7 @@ export async function agentTurn(o: {
     : null;
   const trace: { r?: Extract<ResearchResult, { status: "ok" }> } = {};
   let result = await runAgentTurn({
-    system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
+    system: careerSystemPrompt(localDay(o.now, o.tz), { channel: o.channel, shape: o.shape }) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
     message: [o.message, ...notes].filter(Boolean).join("\n\n"),
     // ADVERSARIAL ROUND 2: an attached file's name and text are not the person's words: no tool reads them as said.

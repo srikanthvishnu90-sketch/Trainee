@@ -94,11 +94,13 @@ test("(d) control: 'practice' as a noun is not a practice request", () => {
 });
 
 // (e) Coordinator probe on b3307448: resume-guidance and two-field decision asks had no owner. Synthetic cases only.
-for (const q of ["what are best practices for resumes?", "how should I format my resume?", "what makes a good resume", "give me resume tips", "how long should my resume be?"]) {
+// 1v1 (2026-11-01): each ask gets its own short answer (format: the layout; length: one page); the general asks still
+// name results with numbers and tailoring. Wording pins only; the owner and the lint are unchanged.
+for (const [q, want] of [["what are best practices for resumes?", [/result|number/i, /tailor/i]], ["how should I format my resume?", [/headings|tables/i]], ["what makes a good resume", [/result|number/i, /tailor/i]], ["give me resume tips", [/result|number/i, /tailor/i]], ["how long should my resume be?", [/one page/i]]]) {
   test(`(e) resume guidance: "${q}" is answered as guidance`, () => {
     const o = ask(q), r = String(o.reply);
     assert.equal(o.intent, "career_resume_guidance", `${o.intent}: ${r.slice(0, 160)}`);
-    assert.match(r, /result|number/i); assert.match(r, /tailor/i);
+    for (const re of want) assert.match(r, re);
     for (const b of Reply.splitBubbles(r)) assert.ok(Reply.lint(b).ok, `${b} -> ${Reply.lint(b).violations}`);
   });
 }

@@ -451,12 +451,15 @@ const CareerRouter = (() => {
     const c = [p && p.url, ...((p && Array.isArray(p.source_urls)) ? p.source_urls : [])].map(s).find((u) => /^https?:\/\/\S+$/i.test(u));
     return c || null;
   }
-  function roleSentence(item) {
+  // 1v1 (2026-11-01, Q73/Q89): two or more roles are numbered "1)" "2)" so the person can answer with a digit (")" because the
+  // composer reads "1." as the end of a sentence).
+  function roleSentence(item, i, all) {
+    const n = Array.isArray(all) && all.length > 1 ? `${i + 1}) ` : "";
     const where = item.remote === "remote" ? "remote" : item.remote === "hybrid" ? `hybrid in ${s(item.location).split(",")[0]}` : s(item.location);
     const pay = item.posting.salary && item.posting.salary.raw ? `, ${item.posting.salary.raw}` : "";
     const url = item.url || postingUrlOf(item.posting);
     // The link rides inside the role's own sentence: the composer keeps one sentence per role.
-    return `${item.title} at ${item.company}${url ? ` (${url})` : ""} — ${where}${pay}: ${item.reason}${item.caveat ? `; heads-up: ${item.caveat}` : ""}.`;
+    return `${n}${item.title} at ${item.company}${url ? ` (${url})` : ""} — ${where}${pay}: ${item.reason}${item.caveat ? `; heads-up: ${item.caveat}` : ""}.`;
   }
 
   // The role families an ASK names. "Design / portfolio-first" is pinned to
@@ -560,7 +563,7 @@ const CareerRouter = (() => {
     }
     // PRODUCT AUDIT 2026-10-28 (#5): with nothing on the profile, the list is not "ranked by fit with your profile".
     const profiled = !!(profile && (profile.facts || []).length);
-    const reply = compose({ headline: o.headline || (profiled ? `Here are the ${top.length} roles most worth applying to, ranked by fit with your profile.` : `Here ${top.length === 1 ? "is 1 role" : `are ${top.length} roles`} that match your search.`), facts: top.map(roleSentence),
+    const reply = compose({ headline: o.headline || (profiled ? `Here are the ${top.length} roles most worth applying to, ranked by fit with your profile.` : `Here ${top.length === 1 ? "is 1 role that matches" : `are ${top.length} roles that match`} your search.`), facts: top.map(roleSentence),
       nextStep: o.nextStep || (profiled ? "Tell me one to tailor your resume for, and I will do that next." : "Want me to rank them against your resume? Paste it here or attach the file.") });
     return Object.assign({ intent: o.intent || "career_discovery", reply }, publicFacts);
   }
@@ -5010,6 +5013,152 @@ const CareerRouter = (() => {
     if (rm) return { label: `the ${rm[1].trim()} ${rm[2]}`, cir: null, company: null };
     return { label: null, cir: null, company: null };
   }
+  // TAILOR TARGET (2026-11-01, 1v1 V039): the posting tailored is the one the person named, never another. "tailor my
+  // resume for the stripe data analyst job" tailored Figma's role: "stripe" written in lower case is a common word to the
+  // letter rules (letterTargetOf), so no firm was read and the discovery chain tailored its top match under the ask. Here
+  // the postings in hand are the lexicon: a link to one of them, a number from the list last shown ("#2", "the second
+  // one", "the top one"), or a company in the pool named in a target frame, in any case. When several postings fit (two at
+  // that company, two companies named) the person is asked which; none is picked for them.
+  const TP_ORD = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, "1st": 1, "2nd": 2, "3rd": 3, "4th": 4, "5th": 5 };
+  const TP_STOP = new Set(["the", "for", "and", "job", "jobs", "role", "roles", "resume", "cv", "tailor", "tailored", "my", "your", "position", "posting", "opening", "one", "with", "that", "this", "can", "you", "please", "make", "fit", "version", "application", "apply", "about", "from", "into", "it", "to", "at", "me", "a", "an", "of", "in"]);
+  function tpNormUrl(u) { return lc(u).replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/[?#].*$/, "").replace(/[).,;!]+$/, "").replace(/\/+$/, ""); }
+  function tpEntry(p) { return { id: p.id || p.corpus_id || null, title: s(p.title), company: s(p.company), url: postingUrlOf(p) }; }
+  function tpResolve(entry, pool) {
+    if (!entry) return null;
+    return pool.find((p) => entry.id && (p.id === entry.id || p.corpus_id === entry.id))
+      || pool.find((p) => entry.url && postingUrlOf(p) && tpNormUrl(postingUrlOf(p)) === tpNormUrl(entry.url))
+      || pool.find((p) => lc(p.title) === lc(entry.title) && lc(p.company) === lc(entry.company)) || null;
+  }
+  // Is `company` named in the ask as the target? Any case, in a target frame ("for stripe", "the stripe data analyst job",
+  // "Stripe's"), or capitalized; never negated ("not Stripe") and never a phrasal verb ("ramp up").
+  function tpCompanyNamed(raw, company) {
+    const name = ltClean(s(company).replace(/\s*\(fictional\)\s*/gi, " "));
+    if (!name || name.length < 2) return false;
+    const re = new RegExp(`(?<![A-Za-z0-9])${ltEsc(name).replace(/&/g, "(?:&|and)")}(?![A-Za-z0-9])`, "gi");
+    for (const m of raw.matchAll(re)) {
+      const before = raw.slice(0, m.index), after = raw.slice(m.index + m[0].length);
+      if (/\b(?:not|except|besides|other than|instead of|than|no|skip|without)\s+(?:the\s+)?$/i.test(before)) continue;
+      if (/^\s+(?:up|down|out|off)\b/i.test(after)) continue;
+      if (/\b(?:for|to|at|with|from|the|my|our)\s+$/i.test(before) || /^(?:['’]s\b|\s*$|\s*[.!?,;]|\s+(?:role|job|posting|position|internship|opening|one|version|application|team|offer|analyst|engineer|intern|associate|data|software|marketing|investment|product|design|finance|sales|operations)\b)/i.test(after) || /^[A-Z]/.test(m[0])) return true;
+    }
+    return false;
+  }
+  // The role words of an ask or a title, in one vocabulary ("swe" is software engineer, "pm" product manager, "ib" investment
+  // banking), so a role named in the ask can be checked against a posting's title.
+  const TP_ROLE_WORDS = new Set(["data", "analyst", "analytics", "business", "software", "engineer", "engineering", "developer", "designer", "design", "product", "manager", "marketing", "coordinator", "sales", "finance", "financial", "investment", "banking", "consultant", "consulting", "recruiter", "operations", "scientist", "science", "intern", "internship", "associate", "growth", "research", "security", "frontend", "backend", "fullstack"]);
+  const TP_ROLE_ALIAS = { swe: ["software", "engineer"], pm: ["product", "manager"], ib: ["investment", "banking"], ds: ["data", "scientist"], ux: ["designer"], analytics: ["analyst"], engineering: ["engineer"], internship: ["intern"] };
+  function tpRoleWords(text) {
+    const out = [];
+    for (const w of lc(text).split(/[^a-z0-9]+/)) for (const x of (TP_ROLE_ALIAS[w] || [w])) if (TP_ROLE_WORDS.has(x) && !out.includes(x)) out.push(x);
+    return out;
+  }
+  function tpTitleScore(p, raw, companies) {
+    const coWords = new Set(companies.flatMap((c) => lc(c).split(/[^a-z0-9]+/)));
+    const words = new Set(lc(raw).split(/[^a-z0-9]+/).filter((w) => w.length >= 2 && !TP_STOP.has(w) && !coWords.has(w)));
+    return [...new Set(lc(p.title).split(/[^a-z0-9]+/))].filter((w) => words.has(w)).length;
+  }
+  // { kind: "posting", posting } | { kind: "ambiguous", options } | { kind: "none" }. `list` is the list the person is
+  // answering (the ask-which options), else the shortlist last shown; `pool` defaults to the turn's postings.
+  function tailorPostingNamed(text, ctx, list, poolIn) {
+    const raw = s(text);
+    const pool = poolIn || postingsFromCtx(ctx);
+    if (!pool.length) return { kind: "none" };
+    for (const u of raw.match(/https?:\/\/[^\s<>"']+/gi) || []) {
+      const hit = pool.find((p) => postingUrlOf(p) && tpNormUrl(postingUrlOf(p)) === tpNormUrl(u));
+      if (hit) return { kind: "posting", posting: hit, by: "link" };
+    }
+    const answering = Array.isArray(list) && list.length > 0;
+    const shown = answering ? list : (ctx.discovery && Array.isArray(ctx.discovery.lastShortlist) ? ctx.discovery.lastShortlist : []);
+    if (shown.length) {
+      const t = lc(raw);
+      let n = null;
+      const m1 = t.match(/(?:^|\s)#\s*(\d{1,2})\b/) || t.match(/\b(?:number|no\.|option|role|job|posting)\s*#?\s*(\d{1,2})\b/) || (answering ? t.match(/^\s*(\d{1,2})\s*[.)!]?\s*$/) : null);
+      const m2 = t.match(/\b(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\s+(?:one|role|job|posting|option)\b/);
+      if (m1) n = Number(m1[1]);
+      else if (m2) n = TP_ORD[m2[1]];
+      else if (/\b(?:top|best)\s+(?:one|match|role|job|posting)\b/.test(t)) n = 1;
+      if (n != null) {
+        const hit = n >= 1 && n <= shown.length ? tpResolve(shown[n - 1], pool) : null;
+        if (hit) return { kind: "posting", posting: hit, by: "number" };
+        return { kind: "ambiguous", options: shown.map((e) => tpResolve(e, pool)).filter(Boolean).slice(0, 5), why: "number" };
+      }
+    }
+    const companies = [...new Set(pool.map((p) => s(p.company)).filter(Boolean))];
+    const named = companies.filter((co) => tpCompanyNamed(raw, co));
+    // Answering the ask-which with no company and no number: a short pick by the role's words ("the data analyst one").
+    const pickByTitle = answering && (raw.trim().split(/\s+/).length <= 4 || /\b(?:one|that|this)\b/i.test(raw));
+    let cands = named.length ? pool.filter((p) => named.includes(s(p.company))) : (pickByTitle ? pool.slice() : []);
+    if (!cands.length) return { kind: "none" };
+    if (cands.length > 1) {
+      const scored = cands.map((p) => ({ p, sc: tpTitleScore(p, raw, named) }));
+      const best = Math.max(...scored.map((x) => x.sc));
+      if (best > 0) cands = scored.filter((x) => x.sc === best).map((x) => x.p);
+      else if (!named.length) return { kind: "none" };
+    }
+    // Review of #382: the only posting at the named company is not the role asked for ("data analyst job at plaid" when Plaid's
+    // posting is Business Analyst): said and asked, never tailored in its place.
+    if (cands.length === 1 && named.length) {
+      const asked = tpRoleWords(raw), title = new Set(tpRoleWords(cands[0].title));
+      if (asked.length && asked.some((w) => !title.has(w))) return { kind: "mismatch", posting: cands[0], asked: asked.join(" ") };
+    }
+    if (cands.length === 1) return { kind: "posting", posting: cands[0], by: named.length ? "company" : "title" };
+    return { kind: "ambiguous", options: cands.slice(0, 5), why: named.length > 1 ? "companies" : "company" };
+  }
+  // The ask-which reply: one question, the options numbered so a digit answers it. Nothing is tailored.
+  function tailorWhichReply(ctx, options, opts) {
+    const o = opts || {};
+    const items = (options || []).slice(0, 5);
+    markFrame(ctx, "tailor_pick", { options: items.map(tpEntry) });
+    const cos = [...new Set(items.map((p) => s(p.company)))];
+    const head = o.head || (cos.length === 1 ? `${cos[0]} has ${items.length} postings here:` : "These postings fit:");
+    const lines = [head, ...items.map((p, i) => `${i + 1}) ${p.title} at ${p.company}`)];
+    if (o.noResume) lines.push("I don't have your resume yet, so paste it or send the PDF with your answer.");
+    // The question last: the reply's own next step (a closing question is never stamped over).
+    lines.push(o.question || "Which one should I tailor your resume to?");
+    return { intent: "tailor_needs_posting", reply: lines.join("\n"), resultStatus: "awaiting_user", artifact: null, sends: 0, options: items.map(tpEntry) };
+  }
+  // The answer to the ask-which reply ("2", "the stripe one", "the data analyst one"): that posting is tailored.
+  function handleTailorPick(text, ctx) {
+    const fr = frameMarksOf(ctx).tailor_pick;
+    if (!fr || !Array.isArray(fr.options) || !fr.options.length || !ctx.profile) return null;
+    // The question stands for 30 minutes; a pick after that is a new conversation.
+    const askedAt = Date.parse(fr.at || "");
+    if (!Number.isFinite(askedAt) || nowOf(ctx) - askedAt > 30 * 60 * 1000) return null;
+    const raw = s(text).trim();
+    if (!raw || raw.split(/\s+/).length > 12) return null;
+    const pool = postingsFromCtx(ctx);
+    const offered = fr.options.map((e) => tpResolve(e, pool)).filter(Boolean);
+    if (!offered.length) return null;
+    const pick = tailorPostingNamed(raw, ctx, fr.options, offered);
+    if (pick.kind !== "posting") return null;
+    const wmir = threadMirrorForWrite(ctx);
+    if (wmir && wmir.frames) delete wmir.frames.tailor_pick;
+    const chained = handleTailor(raw, Object.assign({}, ctx, { posting: pick.posting }));
+    if (chained) chained.chained_from = "tailor_pick";
+    return chained;
+  }
+  // 1v1 (2026-11-01, V077): an interview answer the person grades on their own ("Q was tell me about yourself. my answer:
+  // ...") is scored by the prep rubric (127 scoreAnswer) and answered with the score, the one thing missing, and a shape to
+  // try; it was read as a career-path ask ("The path from data analyst i like data to null").
+  function handleSelfGradedAnswer(text, ctx) {
+    const raw = s(text).trim();
+    const m = raw.match(/^\s*(?:the\s+)?(?:q|question|prompt)\s*(?:was|is|:|-)\s*:?\s*(.+?)[.?!]?\s+(?:and\s+)?(?:my|the)\s+answer\s*(?:was|is|:|-)\s*:?\s*([\s\S]{3,})$/i)
+      || raw.match(/^\s*(?:they|the interviewer)\s+asked\s+(.+?)[.?!,]?\s+(?:and\s+)?i\s+(?:said|answered)\s*:?\s*([\s\S]{3,})$/i);
+    if (!m || !Prep || !Prep.scoreAnswer) return null;
+    const q = m[1].replace(/^["“']|["”']$/g, "").trim(), answer = m[2].trim();
+    let sc = null;
+    try { sc = Prep.scoreAnswer(answer, {}); } catch { sc = null; }
+    if (!sc || !sc.scores) return null;
+    const n = Math.max(1, Math.min(5, Math.round(sc.scores.total / 3)));
+    const did = /\b(?:i|we)\s+(?:built|wrote|led|designed|created|ran|shipped|made|launched|analy[sz]ed|cut|grew|saved|found|managed|automated)\b/i.test(answer);
+    const why = !did ? "it says what you are but not what you did" : sc.missing_result_metric ? "it says what you did but not the result, with a number" : sc.fix_first === "specificity" ? "it needs the tool and your exact part in it" : "it needs a clearer order: the situation, what you did, then the result";
+    const tmay = /\btell me about yourself\b|\bwalk me through your (?:resume|background)\b|\bintroduce yourself\b/i.test(q);
+    const shape = tmay
+      ? `Try: "I'm a [role] at [company]. I built [thing] that [result with a number]. I want this role because [one reason tied to them]."`
+      : `Try: "At [company], [the situation]. I [what you did]. The result was [a number]."`;
+    const reply = ensureNextStepText([`That's a ${n} out of 5: ${why}.`, shape, "Tell me the new version and I'll score it again."].join("\n"));
+    return { intent: "prep_brief", reply, resultStatus: "awaiting_user", sends: 0, payload: { kind: "answer_score", question: q.slice(0, 200), score_0_5: n, scores: sc.scores, fix_first: sc.fix_first } };
+  }
   function handleTailorNeedsFacts(text, ctx) {
     const target = tailorTargetOf(text, ctx);
     // V240 LIVE-FIX (probe j): the reply below says "The target is
@@ -5505,6 +5654,10 @@ const CareerRouter = (() => {
   function handlePrepEve(text, ctx) {
     const t = lc(text);
     if (!/\binterview\b/.test(t) || !/\b(tomorrow|tonight|nervous|anxious|can'?t sleep|cant sleep|scared|worried|freaking out)\b/.test(t)) return null;
+    // 1v1 (2026-11-01, V080): help DURING the interview (answers fed live) is refused plainly, and the honest help offered.
+    if (/\b(?:during|in the middle of|while i'?m in|live (?:in|during))\b[^.?]*\binterview\b|\binterview\b[^.?]*\b(?:live|in real time|feed me|whisper)\b/.test(t)) {
+      return { intent: "prep_brief", reply: ensureNextStepText(["Not during it. I won't feed you answers live.", "I can run a full mock today and debrief with you after. Want the first question now?"].join("\n")), resultStatus: "awaiting_user", sends: 0 };
+    }
     // RESEARCH ROUND 2 (2026-10-30): "prep me for my interview at Acme Robotics tomorrow" and "I have an interview at
     // Microsoft Research Asia tomorrow" were answered "Company: not supplied yet — flagged, not invented" (the checklist was
     // never given the firm the person named), with no word that the firm has no file. The firm named (whole name) goes in;
@@ -5517,11 +5670,11 @@ const CareerRouter = (() => {
     try { const ck = Prep && Prep.dayOfChecklist ? (firmName ? Prep.dayOfChecklist({ company: firmName, cir: firmCir || undefined }, {}) : Prep.dayOfChecklist(ctx.profile || {}, {})) : null; const rawItems = (ck && (ck.items || ck.checklist || ck.steps)) || []; items = rawItems.map((i) => s(typeof i === "string" ? i : (i && (i.text || i.label || i.item)) || "")).filter(Boolean); } catch { items = []; }
     let q = null;
     try { const bank = Prep.questionBank({ roleFamily: /\bfinance|banking|dcf\b/.test(t) ? "finance" : null, cir: firmCir || undefined }); const qs = (bank && (bank.questions || bank.items)) || []; if (qs.length) q = s(qs[0].q || qs[0].question || qs[0].text); } catch { q = null; }
-    const facts = ["Tonight is for light reps, not cramming: one pass over your story, one question out loud, then stop — sleep is a scored input tomorrow, and a tired brain drops more points than one un-drilled question ever would."];
-    if (firmName && !firmCir) facts.push(`${firmName} has no company file here, so nothing in this plan is about how ${firmName} interviews.`);
-    if (items.length) facts.push(`The logistics, settled tonight so tomorrow is only the interview: ${items.slice(0, 3).join("; ")}.`);
-    if (q) facts.push(`Your one out-loud rep: ${q}`);
-    const reply = compose({ headline: "You have a plan for tonight — and it ends early, on purpose.", facts, nextStep: q ? "Answer that one question out loud now; I will score it, and then we stop for the night." : "Tell me the company and round, and I will pick the one question worth rehearsing tonight." });
+    // 1v1 (2026-11-01, Q87/Q88): the plan in two or three short texts: keep it light, settle the logistics, one rep.
+    const lines = ["Keep tonight light: run your story once, answer one question out loud, then stop and sleep."];
+    if (firmName && !firmCir) lines.push(`I don't have details on ${firmName}, so nothing here is about how ${firmName} interviews.`);
+    if (items.length) lines.push(`Settle tonight: ${items.slice(0, 3).map((x) => s(x).replace(/[.;]+$/, "").replace(/\s*—.*$/, "")).join("; ")}.`);
+    const reply = ensureNextStepText([...lines, q ? `Your one rep: "${s(q).replace(/^\[[^\]]*\]\s*/, "")}" Tell me your answer out loud, and I'll score it.` : "Tell me the company and the round, and I'll pick the one question worth rehearsing tonight."].join("\n"));
     return { intent: "prep_brief", reply, resultStatus: "running", sends: 0 };
   }
   // COMPLEXITY WAVE (BUG-173): the honest profile-less prep answer —
@@ -5873,11 +6026,52 @@ const CareerRouter = (() => {
     for (const f of INTERVIEW_FAMILIES) if (f.re.test(t)) return f;
     return null;
   }
+  // 1v1 (2026-11-01): the skills a posting's own text names, in its order, from a fixed list of tools and methods; none
+  // named, none claimed.
+  const PREP_SKILLS = ["SQL", "Python", "R", "Excel", "Tableau", "Looker", "Power BI", "dbt", "experimentation", "A/B testing", "statistics", "Java", "Go", "JavaScript", "TypeScript", "React", "distributed systems", "financial modeling", "valuation", "accounting", "campaigns", "social"];
+  function postingSkills(posting) {
+    const jd = s(posting && (posting.jd_text || posting.description));
+    const hits = PREP_SKILLS.map((k) => ({ k, i: jd.search(new RegExp(`(?<![A-Za-z])${k.replace(/[/+.]/g, (c) => "\\" + c)}(?![A-Za-z])`, k === "R" || k === "Go" ? "" : "i")) })).filter((x) => x.i >= 0);
+    return hits.sort((a, b) => a.i - b.i).map((x) => x.k);
+  }
+  function plainPrepReply(brief, posting, company, fam, ctx) {
+    const qs = (brief && (brief.questions || brief.likely_questions)) || [];
+    const q0 = qs.map((x) => s(x && (x.q || x.question || x.text || x))).find((x) => x && !/^\[/.test(x) && !/^Evidence check|^Style drill/.test(x)) || "Tell me about yourself and why this role.";
+    const coShort = (x) => s(x).replace(/\s*\([^)]*\)\s*$/, "").trim();
+    if (!posting && company && ctx) { const at = postingsFromCtx(ctx).filter((p) => lc(coShort(p.company)) === lc(coShort(company))); if (at.length === 1) posting = at[0]; }
+    const co = coShort((posting && posting.company) || company || "") || null;
+    if (co) {
+      const skills = postingSkills(posting);
+      const title = posting && posting.title ? ` ${posting.title}` : "";
+      const lead = skills.length
+        ? `${co}'s${title} posting leads with ${skills.slice(0, 3).join(", ")}, so prep those first, then one project story with a number and why ${co}.`
+        // Review of #389 (D-007): the fixed skill list missing is not the posting listing none; say only what is known.
+        : posting ? `I couldn't pull skills from ${co}'s${title} posting, so I'll prep the core: the main tool of the role, one project story with a number, and why ${co}.`
+        : `I'll prep the core for ${co}: the main tool of the role, one project story with a number, and why ${co}.`;
+      return ensureNextStepText([lead, `First question: "${q0}" Tell me your answer as you'd say it out loud, and I'll score it.`].join("\n"));
+    }
+    if (fam) return ensureNextStepText([`Prep first: ${s(fam.prep).replace(/\.$/, "")}. ${fam.label[0].toUpperCase() + fam.label.slice(1)} interviews usually test ${s(fam.tests).replace(/\.$/, "")}.`, fam.questions && fam.questions[0] ? `A practice question: "${s(fam.questions[0])}" Tell me your answer and I'll score it.` : "Want a practice question now?"].join("\n"));
+    return ensureNextStepText([`Start with your 60-second story: "${q0}"`, "Tell me the company and the role, and I'll prep you for that loop."].join("\n"));
+  }
+  function plainProducerReply(fn, out, company) {
+    if (fn === "superdayPlan") {
+      const topics = [...new Set(((out && out.drill_topics) || []).map((x) => s(x && (x.topic || x.name || x)).split(":")[0].trim()).filter((x) => x && x.length <= 30).map((x) => /^(?:dcf|lbo|m&a|ev|wacc)$/i.test(x) ? x.toUpperCase() : x))].slice(0, 3);
+      const tech = topics.length ? topics.join(", ") : "DCF, valuation, accounting";
+      return ensureNextStepText([`A superday is back-to-back interviews, usually 3 to 5 in one day. Expect technicals (${tech}) and why ${company || "the firm"}.`, /dcf/i.test(tech) ? "Want to start with a DCF walk-through?" : "Want to start with the first technical?"].join("\n"));
+    }
+    const qs = ((out && out.questions) || []).map((x) => s(x && (x.text || x.q || x))).filter(Boolean);
+    const two = out && !out.team_unknown && qs.length >= 2 ? qs.slice(0, 2) : ["What does success look like in the first 90 days?", "What's the hardest part of the role right now?"];
+    return ensureNextStepText([`Your questions to ask: "${two[0]}" and "${two[1]}"`, "Ask both near the end; they show you're thinking about the work, not just the offer."].join("\n"));
+  }
   function handlePrepExtras(text, ctx) {
     if (!Prep) return null;
     const profile = ctx.profile;
     const t = lc(text);
     const company = companyFromText(text, ctx);
+    // 1v1 (2026-11-01, V093): a reminder about an interview is not a prep brief; the router sets no reminder, and says so.
+    if (/\bremind me\b[^.?]*\binterview\b|\binterview\b[^.?]*\bremind me\b/.test(t)) {
+      return { intent: "prep_brief", reply: ensureNextStepText(["I can't set reminders from here yet. Put it in your calendar now so it doesn't slip.", "Want to prep for it today?"].join("\n")), resultStatus: "awaiting_user", sends: 0 };
+    }
     // COMPLEXITY WAVE (SC-180): the STAR-bank ask in dialect shapes
     // ("turn my experiences into STAR stories") — the canonical
     // shapes ("STAR bank", "reusable stories") belong to the
@@ -6307,7 +6501,9 @@ const CareerRouter = (() => {
                 // re-orders to — not a rehearsal offer.
                 nextStep = "Tell me the team or the panel, and the set re-orders to theirs.";
               }
-              const reply = compose({ headline: head, facts: facts.length ? facts : ["Built from the prep bank for this round and the facts on your profile — nothing rehearsed that you cannot defend."], nextStep });
+              let reply = compose({ headline: head, facts: facts.length ? facts : ["Built from the prep bank for this round and the facts on your profile — nothing rehearsed that you cannot defend."], nextStep });
+              // 1v1 (2026-11-01, Q87/Q88/Q94): the superday and questions-to-ask answers in two short texts.
+              if (fn === "superdayPlan" || fn === "questionsToAsk") reply = plainProducerReply(fn, out, company);
               return { intent: "prep_brief", reply, resultStatus: "prepared", sends: 0, brief: out, payload: out };
             }
           } catch { /* fall through to the brief */ }
@@ -6394,7 +6590,11 @@ const CareerRouter = (() => {
           : apptM ? `Your interview brief for ${apptM[1][0].toUpperCase() + apptM[1].slice(1).toLowerCase()} at ${Number(apptM[2])}:${apptM[3] || "00"} ${apptM[4].toUpperCase()}.`
           : fam ? `Your ${fam.label} interview brief.`
           : `Your interview brief${company ? ` for ${company}` : ""}.`;
-        const reply = compose({ headline, facts: facts.length ? facts : ["Every answer gets built from facts on your profile — nothing rehearsed that you cannot defend."], nextStep: /\bnight[ -]before\b/.test(t) ? "Want me to walk the pack once tonight, question by question?" : /\bportfolio walkthrough\b/.test(t) ? "Want to run the walkthrough now, project by project, the way the round will?" : /\bhiring[ -]manager\b/.test(t) ? "Want the first-month plan run as the mock — you pitch it, I push on the calls you would make?" : "Want to run it as a mock, one question at a time?" });
+        let reply = compose({ headline, facts: facts.length ? facts : ["Every answer gets built from facts on your profile — nothing rehearsed that you cannot defend."], nextStep: /\bnight[ -]before\b/.test(t) ? "Want me to walk the pack once tonight, question by question?" : /\bportfolio walkthrough\b/.test(t) ? "Want to run the walkthrough now, project by project, the way the round will?" : /\bhiring[ -]manager\b/.test(t) ? "Want the first-month plan run as the mock — you pitch it, I push on the calls you would make?" : "Want to run it as a mock, one question at a time?" });
+        // 1v1 (2026-11-01, Q87/Q88/Q94): a plain prep ask (no night-before, hiring-manager, walkthrough, two-interview or dated
+        // shape) is answered in two short texts: what to prep, from the posting's own words when one is in hand, then the first
+        // question. The brief itself stays the payload.
+        if (!/\bnight[ -]before\b|\bhiring[ -]manager\b|\bportfolio walkthrough\b|\btwo interviews\b|\bsame day\b|\binterviewer brief\b/.test(t) && !apptM) reply = plainPrepReply(brief, posting, company, fam, ctx);
         return { intent: "prep_brief", reply, resultStatus: "prepared", sends: 0, brief, payload: brief };
       }
     } catch { return null; }
@@ -7667,6 +7867,25 @@ const CareerRouter = (() => {
     return { intent: "negotiation_advice", reply, resultStatus: "awaiting_user", sends: 0 };
   }
 
+  // 1v1 (2026-11-01, V084): the pay range the posting itself states, for an offer at a company in the pool ("an offer from
+  // stripe for the data analyst job"): the posting is the one the person names (tailorPostingNamed), and the range is read
+  // from its own text. No posting, or none that states a range: null, and nothing is claimed.
+  function offerPostingRange(text, ctx, firm) {
+    let p = null;
+    try {
+      const named = tailorPostingNamed(text, ctx);
+      if (named.kind === "posting") p = named.posting;
+      else if (firm) { const at = postingsFromCtx(ctx).filter((x) => lc(x.company) === lc(firm)); if (at.length === 1) p = at[0]; }
+    } catch { p = null; }
+    if (!p) return null;
+    const jd = s(p.jd_text || p.description || "") + " " + s(p.salary && p.salary.raw);
+    const m = jd.match(/\$\s?(\d{2,3}(?:,\d{3})|\d{2,3}\s?k)\s*(?:-|–|—|to)\s*\$?\s?(\d{2,3}(?:,\d{3})|\d{2,3}\s?k)\b/i);
+    if (!m) return null;
+    const n = (v) => /k/i.test(v) ? Number(v.replace(/\s?k/i, "")) * 1000 : Number(v.replace(/,/g, ""));
+    const lo = n(m[1]), hi = n(m[2]);
+    if (!(lo >= 10000 && hi >= lo)) return null;
+    return { lo, hi, company: s(p.company), title: s(p.title) };
+  }
   function handleNegotiation(text, ctx) {
     const provGate = inheritedOfferGate(text, ctx);
     if (provGate) return provGate;
@@ -7767,7 +7986,18 @@ const CareerRouter = (() => {
         if (!extensionContext && Negotiation.counterStrategy) {
           try {
             const strat = Negotiation.counterStrategy(offerObj, bench, {});
-            const email = strat && strat.scripts && strat.scripts.email;
+            let email = strat && strat.scripts && strat.scripts.email;
+            // 1v1 (2026-11-01, V089): the counter the person asks for is written short, at the figure they named ("offer is
+            // 80k i want 90k"), with brackets for what only they can fill; it is theirs to send. The card carries exactly
+            // the text shown.
+            const wantM = tt.match(/\b(?:i want|want|asking for|ask for|counter (?:at|to|with)|target(?: is)?|aiming for|hoping for)\s+\$?\s?(\d{2,3}(?:,\d{3})|\d{2,3}(?:\.\d)?\s?k)\b/);
+            if (email && wantM) {
+              const wv = /k/i.test(wantM[1]) ? Math.round(Number(wantM[1].replace(/\s?k/i, "")) * 1000) : Number(wantM[1].replace(/,/g, ""));
+              const body = `Hi [name], thank you for the offer${offerObj.role ? ` for the ${offerObj.role} role` : ""}. I'm excited about the role. Based on [the posted range or my experience], I'd like to ask for $${wv.toLocaleString()}. Is there flexibility there? [Your name]`;
+              try { const thw = negotiationThreadForWrite(ctx); const pc = (thw.counter && typeof thw.counter === "object") ? thw.counter : {}; thw.counter = Object.assign({}, pc, { amount: wv }); thw.topic = "counter"; } catch { /* the draft stands */ }
+              const reply = [body, "Yours to send. Fill the bracket with your one reason."].join("\n");
+              return { intent: "negotiation_draft", reply, resultStatus: "awaiting_user", sends: 0, draft: Object.assign({}, strat.scripts, { email: body }), strategy: strat, offer: offerObj, payload: offerObj };
+            }
             if (email) {
               const facts = [amtLine || "The counter email itself, composed from your offer record — held on its card, nothing sent:", email];
               if (amtLine) facts.splice(1, 0, "The actual email, verbatim — held on its card, nothing sent:");
@@ -7848,12 +8078,20 @@ const CareerRouter = (() => {
         try {
           const offerObj = { company: thread.firm || null, descriptor: thread.descriptor || null, role: thread.role || null, base_salary: thread.amount, signing_bonus: thread.signing || null };
           const strat = Negotiation.counterStrategy(offerObj, bench, {});
-          const facts = [];
-          facts.push(`On the record from your words: an offer${offerObj.company ? ` from ${offerObj.company}` : offerObj.descriptor ? ` from ${offerObj.descriptor}` : ""} at $${Number(thread.amount).toLocaleString()} base${thread.deadline ? `, with an answer wanted by ${thread.deadline}` : ""}${thread.signing ? `, plus a $${Number(thread.signing).toLocaleString()} signing bonus` : ""}.`);
-          facts.push(bench && bench.text ? s(bench.text).split(/(?<=[.!?])\s/)[0] : benchSentence);
-          if (strat && strat.text) facts.push(s(strat.text).split(/(?<=[.!?])\s/)[0]);
-          facts.push("The sequence from here: the extension first if the deadline is tight, one written counter second, and no bridges burned with your other processes until you sign.");
-          const reply = compose({ headline: "Your offer, parsed from your words — here is the plan.", facts, nextStep: thread.deadline ? "Want the extension drafted first, or the counter?" : "Tell me the decision deadline and I will sequence the extension and the counter around it." });
+          // 1v1 (2026-11-01, V084): the offer is read against the range the posting itself states (a posting in hand
+          // at the company named), never a benchmark from elsewhere; with none, the one rule and the one input that
+          // makes it a counter. Two texts at most, one question.
+          const amt = Number(thread.amount), k = (n) => `${Math.round(n / 1000)}k`;
+          const range = offerPostingRange(text, ctx, thread.firm);
+          const who = thread.firm || thread.descriptor || null;
+          let lead;
+          if (range && amt >= range.lo && amt <= range.hi) lead = `Congrats. ${k(amt)} sits in ${range.company}'s posted range of $${range.lo.toLocaleString()}-$${range.hi.toLocaleString()}, so counter once toward $${(Math.round((range.hi - (range.hi - range.lo) / 5) / 1000) * 1000).toLocaleString()} before you accept.`;
+          else if (range && amt < range.lo) lead = `${k(amt)} is below ${range.company}'s posted range of $${range.lo.toLocaleString()}-$${range.hi.toLocaleString()}, so counter to at least $${range.lo.toLocaleString()}, with the posted range as your reason.`;
+          else if (range) lead = `Congrats. ${k(amt)} is above ${range.company}'s posted range of $${range.lo.toLocaleString()}-$${range.hi.toLocaleString()}, so it's a strong offer; one light counter is still fine.`;
+          else lead = `Congrats on the ${k(amt)} offer${who ? ` from ${who}` : ""}. Before you accept, counter once, in writing, with one reason: a posted range, a competing offer, or your experience.`;
+          const lines = [lead];
+          if (thread.deadline) lines.push(`They want an answer by ${thread.deadline}; if that's tight, ask for a few more days first.`);
+          const reply = ensureNextStepText([...lines, "Want me to draft the counter?"].join("\n"));
           return { intent: "negotiation_plan", reply, resultStatus: "prepared", sends: 0, offer: offerObj, strategy: strat, bench, payload: offerObj };
         } catch { /* fall through to the advice answer */ }
       }
@@ -8086,6 +8324,10 @@ const CareerRouter = (() => {
       facts.push(srcLine("the counter-strategy product and your internship record"));
       return { headline: "Return offer: the conversion asks happen before you sign, not after.", facts, nextStep: "Paste the return offer and I will check its review, level, and start terms against that list." };
     }
+    // 1v1 (2026-11-01): "what is a signing bonus" asks what it is, not for a script.
+    if (/\bwhat(?:'s| is| are|s)\b[^.?]*\bsign(?:ing|-on| on)[- ]bonus(?:es)?\b|\bsign(?:ing|-on| on)[- ]bonus(?:es)?\b[^.?]*\b(?:mean|means|work)\b/.test(t) && !/\b(?:script|draft|write|ask for|counter)\b/.test(t)) {
+      return { headline: "A signing bonus is a one-time payment for joining, usually in your first paycheck.", facts: ["Some must be repaid if you leave within a year."], nextStep: "Ask for one when base pay won't move." };
+    }
     if (/\bsigning[- ]bonus\b/.test(t)) {
       const facts = [];
       if (lever(1)) facts.push(lever(1) + " — that lever is the whole script when base is truly fixed.");
@@ -8118,22 +8360,35 @@ const CareerRouter = (() => {
       facts.push(srcLine("the counter-strategy product and your stated floor"));
       return { headline: "Below your floor: counter only if the math can reach it.", facts, nextStep: "Tell me your floor and paste the offer — the call comes from those two numbers, not from hope." };
     }
-    // Generic negotiation ask: the method answer — it now serves
-    // only asks that match no specific shape above. DEPTH WAVE: on
-    // an offer thread it evaluates the thread's OWN number (never an
-    // invented benchmark): the decision is read against the sourced
-    // range where a file exists, and against the user's floor and
-    // the deadline where it does not.
+    // Generic negotiation ask. 1v1 (2026-11-01, Q87/Q88/Q94): the answer to the question asked, in a text or two, then one
+    // next step; no method paragraph and no internal words. The common questions are answered as asked (accepting on
+    // the call, a rescinded offer, two offers side by side); the rest get the one rule that matters and the one input
+    // that turns it into a counter. An offer on the thread is read in the person's own units (MI-123).
     {
       const thread = (ctx && ctx.negotiationThread && typeof ctx.negotiationThread === "object") ? ctx.negotiationThread : null;
-      const facts = ["The method: anchor on the sourced range for the role, counter once in writing, and trade across salary, start date, and return terms instead of haggling line by line.", benchSentence];
-      // MI-123 (mechanism 2): the number on the table is the record's
-      // own figure in the user's units — an hourly offer is judged on
-      // its rate (plus its bonus), never on an annual figure.
       const figT = offerFigureText(thread, ctx && ctx.offer);
-      const signT = (thread && thread.signing) || (ctx && ctx.offer && ctx.offer.signing_bonus) || null;
-      if (figT) facts.unshift(`The number on the table is ${figT}${signT ? `, plus a $${Number(signT).toLocaleString()} signing bonus` : ""}${thread.firm ? ` from ${thread.firm}` : ""}${thread.deadline ? `, with a decision due by ${thread.deadline}` : ""} — so the take-it-or-push question is decided by the sourced range above and by whether the deadline leaves room to run a counter, not by the headline figure alone.`);
-      return { headline: "Negotiation runs on sourced numbers, one written counter, and no bluffing.", facts, nextStep: "Tell me which piece you are holding — an offer, a deadline, or a second offer — and the plan narrows to it." };
+      if (/\baccept\w*\b[^.?]*\b(?:on the (?:phone|call|spot)|over the phone|verbally|right away|immediately|on the call)\b|\b(?:say yes|agree)\b[^.?]*\b(?:on the (?:phone|call)|right away|on the spot)\b/.test(t)) {
+        return { headline: "No. Thank them, say you're excited, and ask for the offer in writing before you accept.", facts: ["That also gives you room to counter once it's in writing."], nextStep: "Ask for the written offer and the date they need an answer by." };
+      }
+      if (/\brescind\w*\b|\b(?:pull|take back|withdraw|revoke)\b[^.?]*\boffer\b|\blose (?:the|my) offer\b/.test(t)) {
+        return { headline: "Rarely, if you're polite and ask once with a reason.", facts: ["Rescinds usually follow ultimatums or repeated pushing."], nextStep: "Want a counter that's firm but safe?" };
+      }
+      const amounts = [...s(text).matchAll(/\$?\s?(\d{2,3})(?:\.\d)?\s?k\b|\$\s?(\d{2,3},\d{3})\b/gi)].map((m) => m[1] ? Number(m[1]) * 1000 : Number(m[2].replace(/,/g, "")));
+      if (amounts.length >= 2 && /\boffers?\b|\bwhich\b|\bvs\.?\b|\bor\b/.test(t)) {
+        const [x, y] = amounts;
+        const k = (n) => `${Math.round(n / 1000)}k`;
+        const hi = Math.max(x, y), lo = Math.min(x, y), gap = hi - lo;
+        const remote = /\bremote\b/.test(t), office = /\b(?:in[- ]office|in office|onsite|on-site|office|commute)\b/.test(t);
+        const lead = remote && office
+          ? `It comes down to the commute and what remote is worth to you. ${k(gap)} more is real, but a daily commute costs time and money.`
+          : `${k(hi)} is ${k(gap)} more than ${k(lo)}. Compare what's left after the rest: bonus, benefits, the commute and what the work leads to.`;
+        const [h1, ...hr] = lead.split(/(?<=[.!?])\s+/);
+        return { headline: h1, facts: [hr.join(" ")].filter(Boolean), nextStep: remote && office ? `Which matters more to you: the ${k(gap)}, or working remote?` : "Which matters more to you besides the money?" };
+      }
+      const said = (s(text).match(/\$?\s?\d{2,3}\s?k\b|\$\s?\d{2,3},\d{3}\b/i) || [])[0];
+      const fig = figT || (said ? said.replace(/^\$?\s?/, "").replace(/\s+/g, "") : null);
+      if (fig) return { headline: "Counter once, in writing.", facts: [`If the posting's range or similar postings sit above ${fig}, ask for the top of that range with one reason.`], nextStep: `What role and city is it${thread && thread.firm ? ` at ${thread.firm}` : ""}? I'll check the postings and draft the counter.` };
+      return { headline: "Counter once, in writing, with one reason: a posted range, a competing offer, or your experience.", facts: [], nextStep: "What's the offer, and for what role? I'll draft the counter." };
     }
   }
 
@@ -9816,7 +10071,9 @@ const CareerRouter = (() => {
     // is translated to its family here, at the one caller that
     // holds the ask's own words.
     const namedFamily = (() => {
-      const tt = lc(namedRole ? namedRole.title || "" : "");
+      // 1v1 (2026-11-01, V075): a field named in the ask itself ("mock interview for investment banking") is the family
+      // when no role title is.
+      const tt = lc(namedRole && namedRole.title ? namedRole.title : s(text));
       if (!tt) return null;
       if (/\bquant|trading|banking|finance|investment|accounting\b/.test(tt)) return "finance";
       if (/\bproduct\b/.test(tt)) return "product";
@@ -9825,6 +10082,14 @@ const CareerRouter = (() => {
       return null;
     })();
     const bank = Prep.questionBank({ company: namedRole ? namedRole.company : null, role: namedRole ? namedRole.title : null, roleFamily: namedFamily });
+    // 1v1 (2026-11-01, V075): a mock for a named field opens on that field's own first technical (a banking mock on the
+    // DCF), not the generic behavioral opener; the bank's own questions are reordered, nothing invented.
+    if (namedFamily && bank && Array.isArray(bank.questions) && bank.questions.length > 1 && !/\bstart with\s+['"]/i.test(s(text))) {
+      const want = namedFamily === "finance" && /\bbank|\bib\b|investment/.test(lc(text)) ? /\bdcf\b/i : null;
+      let idx = bank.questions.findIndex((q) => q && q.round === "technical" && (!want || want.test(s(q.q))));
+      if (idx < 0) idx = bank.questions.findIndex((q) => q && q.round === "technical");
+      if (idx > 0) { const [qq] = bank.questions.splice(idx, 1); bank.questions.unshift(qq); }
+    }
     const store = Prep.makePrepStore();
     const mock = Prep.startMock(store, { bank, count: 5 });
     // PREP-KB ROUTING (LF-07, custom battery 2026-10-18, Block 2 t6):
@@ -9866,7 +10131,9 @@ const CareerRouter = (() => {
     // WORDING-BACKLOG (BUG-135): the posed question CLOSES the reply
     // (as the next step) — a mock whose last line is a grounding
     // sentence collects the generic closer behind it.
-    const reply = compose({ headline: "Your mock starts now — one question at a time, scored feedback at the end.", facts, nextStep: state.currentQ });
+    // 1v1 (2026-11-01, Q87/Q88): the mock opens on its first question, in a text or two; the grounding stays on the record.
+    const forWhat = state.role && state.role.company ? ` for ${state.role.title ? `${state.role.title} at ` : ""}${state.role.company}` : "";
+    const reply = ensureNextStepText([...(profile && typeof profile === "object" ? [] : ["No profile is on file, so I'll score how you answer, not your history."]), `Mock interview${forWhat}. First question: "${s(state.currentQ).replace(/^\[[^\]]*\]\s*/, "")}"`, "Tell me your answer as you'd say it in the room, and I'll score it before the next one."].join("\n"));
     return { intent: "prep_mock_start", reply, resultStatus: "running", mock: { id: state.mockId, question: state.currentQ, role: state.role } };
   }
   function handlePrepAnswer(text, ctx) {
@@ -11842,16 +12109,16 @@ const CareerRouter = (() => {
     if (!review && !/\b(?:tips?|advice|pointers|best practices?|format|formatting|structure|layout|look like|length|how long|one page|stand out|mistakes?|improve|better|good|great|strong)\b|\bhow (?:should|do|can) i (?:write|format|structure|make|improve)\b/.test(t)) return null;
     const profile = ctx.profile || {};
     const onFile = !!(profile.resume && (profile.resume.filename || profile.resume.sha256)) || (profile.facts || []).some((f) => f && f.source === "resume-ingest");
-    // A review ask is told plainly what can be judged: with no resume on file there is nothing of theirs to judge yet;
-    // with one, a judgment means something only against a target, which tailoring does.
-    const head = review ? (onFile ? "Here is what I check your resume against; it is judged best against a real posting, which tailoring does." : "No resume of yours is on file yet, so I can't judge yours; here is what I check one against.") : "What makes a resume work.";
-    const reply = compose({ headline: head, facts: [
-      "Keep it to one page unless you have many years of relevant work; readers skim, so the top third carries the most weight.",
-      "Each bullet says what you did and the result, with a number where you have one: time saved, money, users, accuracy.",
-      "Tailor it to each posting: lead with the experience and skills that posting asks for, in its words where they are true for you.",
-      "Keep the format plain, with clear headings, one font, and no tables or graphics, so application systems can read it.",
-      "List nothing you can't back up; I build tailored versions only from facts you have confirmed.",
-    ], nextStep: onFile ? "Want me to tailor yours to a role?" : "Want to paste yours so I can tailor it to a role?" });
+    // 1v1 (2026-11-01, Q87/Q88/Q94): the answer to the ask in a text or two, then one next step. A review ask with no resume
+    // on file asks for it (nothing of theirs is judged before it is read); with one, it asks the role it is for.
+    let lines;
+    if (review) lines = onFile
+      ? ["I have your resume on file. Which role is it for? I'll name the two or three changes that matter most for that posting."]
+      : ["No resume of yours is on file yet, so I haven't read anything.", "Paste it here or send the PDF, and I'll tell you what I saw and the two or three changes that matter most."];
+    else if (/\b(?:length|how long|one page|two pages?|pages?)\b/.test(t)) lines = ["One page. With under 10 years of experience, a second page mostly gets skipped.", onFile ? "Want me to check yours against a posting?" : "Want me to look at yours?"];
+    else if (/\b(?:format|formatting|structure|layout|look like|template)\b/.test(t)) lines = ["Plain wins: clear headings, one font, no tables, columns or graphics, so application systems can read it.", "Experience first, then projects, skills and education.", onFile ? "Want me to check yours?" : "Want me to look at yours?"];
+    else lines = ["Three things matter most: one page, bullets that say what you did with a number for the result, and a version tailored to each posting.", onFile ? "Want me to tailor yours to a role?" : "Want me to look at yours?"];
+    const reply = ensureNextStepText(lines.join("\n"));
     return { intent: "career_resume_guidance", reply, resultStatus: "awaiting_user", sends: 0 };
   }
   // 2026-10-23 (coordinator probe): a choice between two named fields ("should I go into law or medicine?") had no
@@ -11937,17 +12204,19 @@ const CareerRouter = (() => {
   }
   // 2026-10-23 (freeze gaps): single-item resume questions (GPA, photo, references, objective) fell back. Authored
   // general guidance (US norms unless noted); the GPA answer never suggests misstating it.
+  // 1v1 (2026-11-01, Q87/Q88/Q94): each answer is the answer first, in a text or two, then one concrete next step. A GPA
+  // the person states decides the answer ("its a 3.1": leave it off).
   const RESUME_ITEMS = [
-    { re: /\bgpa\b|\bgrade point\b|\bgrades\b/, head: "Your GPA: include it while it helps, and always give the true number when asked.",
-      facts: ["A common rule of thumb: list it while you are a student or recent graduate if it is 3.5 or higher, and drop it after your first job or two.", "Some employers, often in finance and consulting, ask for it on the application; then the true number goes there whether or not it is on the resume."] },
-    { re: /\bphotos?\b|\bpicture\b|\bheadshot\b/, head: "A photo: leave it off in the US, UK and Canada.",
-      facts: ["Most employers there expect no photo, and some screen resumes with photos out to avoid bias.", "In parts of Europe and Asia a photo is still common, so follow the norm of the country where you apply."] },
-    { re: /\breferences?\b/, head: "References: leave them off the resume.",
-      facts: ["Employers ask for references near the end of the process, and you send them then.", "Skip the line that says references are available on request; it takes space and says nothing."] },
-    { re: /\bobjective\b/, head: "An objective line: mostly dropped now.",
-      facts: ["A two-line summary that says what you do and what you want next works better, if it is specific to the roles you apply for.", "If you cannot make it specific, leave it out and let the experience section speak."] },
-    { re: /\bhobbies\b|\binterests\b/, head: "Hobbies and interests: optional, one line at most.",
-      facts: ["A specific interest can start a conversation, but it never replaces work, projects or results."] },
+    { re: /\bgpa\b|\bgrade point\b|\bgrades\b/, say: (t) => {
+      const g = Number((t.match(/\b([0-4]\.\d{1,2})\b/) || [])[1]);
+      if (Number.isFinite(g) && g < 3.5) return ["Leave it off. Below a 3.5 a GPA rarely helps, and applications that require it ask on the form, where the true number goes.", "Add a project with a number in it to that space instead."];
+      if (Number.isFinite(g)) return [`Put your GPA on. A ${g} helps while you're a student or recent grad; drop it after your first job or two.`, "Give the true number whenever an application asks."];
+      return ["Put your GPA on if it's 3.5 or higher, and leave it off below that. Drop it after your first job or two.", "Give the true number whenever an application asks for it."];
+    } },
+    { re: /\bphotos?\b|\bpicture\b|\bheadshot\b/, say: () => ["Leave it off in the US, UK and Canada. Some employers screen out resumes with photos to avoid bias.", "Follow the local norm if you apply in parts of Europe or Asia, where a photo is still common."] },
+    { re: /\breferences?\b/, say: () => ["Leave them off. Employers ask for references near the end, and you send them then.", "Skip the \"available on request\" line too; it takes space and says nothing."] },
+    { re: /\bobjective\b/, say: () => ["Mostly no. A two-line summary of what you do and what you want next works better, if it's specific to the roles you apply for.", "Keep it off if you can't make it specific."] },
+    { re: /\bhobbies\b|\binterests\b/, say: () => ["Optional, one line at most. A specific interest can start a conversation, but it never replaces work or results.", "Keep the space for projects with numbers first."] },
   ];
   function routeResumeItem(text, ctx) {
     const t = lc(s(text)).replace(/[’]/g, "'");
@@ -11955,7 +12224,7 @@ const CareerRouter = (() => {
     const item = RESUME_ITEMS.find((r) => r.re.test(t));
     if (!item) return null;
     if (!/\b(?:resume|resumes|cv|résumé)\b/.test(t) && !/\bgpa\b/.test(t)) return null;
-    const reply = compose({ headline: item.head, facts: item.facts, nextStep: "Want the rest of what makes a resume work, or to paste yours so I can tailor it to a role?" });
+    const reply = ensureNextStepText(item.say(t).join("\n"));
     return { intent: "career_resume_guidance", reply, resultStatus: "awaiting_user", sends: 0 };
   }
   // 2026-10-23 (freeze gaps): "update my resume" fell back, and "update my resume with my new job" reached internship
@@ -12773,6 +13042,12 @@ const CareerRouter = (() => {
     // to the discovery's retained list, never to a family parse.
     const shortlistRes = handleShortlistApply(text, c);
     if (shortlistRes) return shortlistRes;
+    // TAILOR TARGET (2026-11-01): the answer to "Which posting should I tailor it to?".
+    const tailorPick = handleTailorPick(text, c);
+    if (tailorPick) return tailorPick;
+    // 1v1 (2026-11-01, V077): "Q was ... my answer: ..." is graded.
+    const selfGraded = handleSelfGradedAnswer(text, c);
+    if (selfGraded) return selfGraded;
     const batchRes = handleBatchApply(text, c);
     if (batchRes) return batchRes;
     // MUSE-F-002: a plain-words batch status ask ("what's the batch status", "where is my batch") is answered from the
@@ -12911,7 +13186,10 @@ const CareerRouter = (() => {
     // falls back to the filesystem corpus or touches alert/browser state.
     const recommendations = typeof CareerRecommendations !== "undefined" ? CareerRecommendations : req("./154-career-recommendations.js");
     const recommendationIntent = recommendations && recommendations.intentFor(text);
-    if (recommendationIntent) {
+    // TAILOR TARGET (2026-11-01, 1v1 V041): "make my resume fit the brex role" names a posting to tailor to; it is the
+    // tailor's, not a role recommendation.
+    const tailorsNamed = /\btailor\b|\bmake my (?:resume|cv)\b|\b(?:customi[sz]e|adjust)\b[^.]*\b(?:resume|cv)\b/.test(t) && tailorPostingNamed(text, c).kind !== "none";
+    if (recommendationIntent && !tailorsNamed) {
       const rec = recommendations.recommend(Object.assign({}, c, { recommendationIntent, text: s(text) }));
       return { intent: "career_recommendations", reply: rec.text, resultStatus: "prepared", sends: 0, guidance: rec, payload: rec, artifact: rec };
     }
@@ -13438,6 +13716,17 @@ const CareerRouter = (() => {
       // FEATURE 4: a posting staged from a bare link (no title, no text: the GitHub or portfolio link inside a pasted
       // resume stages one) is not a posting to tailor against; tailoring against it printed "tailored for null at null"
       // and cut the resume against no posting at all. A named company resolves its own posting below.
+      // TAILOR TARGET (2026-11-01): the posting the person names (a link, a number from the list shown, a company in the
+      // pool) is the one tailored, ahead of a staged posting and the discovery chain; several fit, they are asked which.
+      if (!c.jdText && !c.jd) {
+        const tgt = tailorPostingNamed(text, c);
+        if (tgt.kind === "posting") {
+          const chained = handleTailor(text, Object.assign({}, c, { posting: tgt.posting }));
+          if (chained) { chained.chained_from = "named_posting"; return chained; }
+        }
+        if (tgt.kind === "ambiguous" && tgt.options.length > 1) return tailorWhichReply(c, tgt.options);
+        if (tgt.kind === "mismatch") return tailorWhichReply(c, [tgt.posting], { head: `The only ${tgt.posting.company} posting I have is ${tgt.posting.title}, not the ${tgt.asked} role you named.`, question: `Should I tailor your resume to ${tgt.posting.company}'s ${tgt.posting.title} role? Reply 1 for yes.` });
+      }
       const stagedUsable = c.posting && (c.posting.jd_text || c.posting.title || (Array.isArray(c.posting.requirements) && c.posting.requirements.length));
       if (stagedUsable || c.jdText || c.jd) return handleTailor(text, c);
       // A company-targeted tailor: resolve that company's posting first.
@@ -13508,6 +13797,25 @@ const CareerRouter = (() => {
       // A6 chaining: no posting in hand — discover inside the ask's
       // families and tailor the top role in the same turn.
       const disc = handleDiscovery(text, c, {});
+      // TAILOR TARGET (2026-11-01, 1v1 V040): an ask that names no posting, company or kind of role ("tailor my resume")
+      // is asked which posting; the top match is not tailored in its place.
+      // An employer named in a target frame that has no posting here ("Tailor for Ramp full-stack — ... forward" with no
+      // Ramp posting in hand) is not tailored as another company's role: its posting is asked for, the person's lead kept.
+      {
+        const capM = s(text).match(/\b(?:for|to|at)\s+(?:the\s+)?([A-Z][A-Za-z0-9&.'’-]+(?:\s+[A-Z][A-Za-z0-9&.'’-]+){0,2})/);
+        const firm = capM ? capM[1].split(/\s+/).filter((w, i, a) => !(i > 0 && LT_ROLE_TRAIL.test(w))).join(" ") : null;
+        if (firm && !LT_ROLE_LEAD.test(firm.split(/\s+/)[0]) && !ltIsPlace(firm) && !ltIsSchool(firm) && !postingsFromCtx(c).some((p) => lc(p.company).includes(lc(firm)))) {
+          const leadM = s(text).match(/lead with\s+(.+?)(?:[.!?]|$)/i) || s(text).match(/(?:\s[—–-]\s*|:\s*)(.+?)\s+forward\b/i);
+          const lead = leadM ? leadM[1].replace(/\s+/g, " ").replace(/[,;.\s]+$/, "").trim() : null;
+          const reply = ensureNextStepText([`I don't have a ${firm} posting here, so I won't tailor to a different company's role.`, `Paste the ${firm} posting or its link and I'll tailor to it${lead && lead.length <= 90 ? `, leading with ${lead}` : ""}.`].join("\n"));
+          return { intent: "tailor_needs_posting", reply, resultStatus: "awaiting_user", artifact: null, sends: 0, company: firm };
+        }
+      }
+      if (disc.shortlist && disc.shortlist.length > 1 && !discoveryFamilies(text).length && !tailorTargetOf(text, c).label) {
+        const pool = postingsFromCtx(c);
+        const opts = disc.shortlist.slice(0, 3).map((x) => pool.find((p) => p.corpus_id === x.id)).filter(Boolean);
+        if (opts.length > 1) return tailorWhichReply(c, opts, { noResume: !resumeOnRecord(c) });
+      }
       if (disc.shortlist && disc.shortlist.length) {
         const topAdapted = postingsFromCtx(c).find((p) => p.corpus_id === disc.shortlist[0].id) || null;
         if (topAdapted) {

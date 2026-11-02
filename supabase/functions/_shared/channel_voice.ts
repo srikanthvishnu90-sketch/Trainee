@@ -22,6 +22,9 @@ const MD_LINK = /!?\[([^\]\n]+)\]\((https?:\/\/[^\s()]*(?:\([^\s()]*\)[^\s()]*)*
 // "Data Analyst at Acme (https://x/1) — Chicago" becomes "Data Analyst at Acme — Chicago" then the link on its own line,
 // so it previews and taps cleanly; a markdown link [label](url) becomes the label, then the link (once, even when the
 // label is the link itself).
+// 1v1 (2026-11-01, Q584/Q585/Q632): a line of several sentences is read sentence by sentence, so each link lands right
+// after the sentence that says what it is ("Data Analyst at Brex (link1) — Chicago. Data Analyst at Notion (link2)." was
+// both sentences, then both links, so neither link sat under its own posting). A line of one sentence is as before.
 export function linksOnOwnLine(text: string): string {
   const out: string[] = [];
   for (const raw of String(text ?? "").split("\n")) {
@@ -29,20 +32,69 @@ export function linksOnOwnLine(text: string): string {
       const l = label.trim();
       return l === url || urlsOf(l)[0] === url ? url : `${l} ${url}`;
     });
-    const spans = findUrls(line);
-    if (!spans.length) { out.push(raw); continue; }
-    let rest = "", at = 0;
-    for (const sp of spans) { rest += `${line.slice(at, sp.start)} `; at = sp.end; }
-    rest += line.slice(at);
-    rest = rest.replace(/\(\s*\)|<\s*>|\[\s*\]/g, "").replace(/(\*\*|__|~~|\*|_|`)\s*\1/g, "").replace(/[ \t]+([,.;:!?])(?=\s|$)/g, "$1")
-      .replace(/\s{2,}/g, " ").replace(/\s*[:—–-]\s*$/, "").trim();
-    // Only a list marker left ("-", "•", "2.") goes with the line; a number that is content ("15.49: <link>") stays.
-    const bare = !rest || /^(?:[-*•]|\d{1,3}[.)])?$/.test(rest);
-    if (!bare) out.push(rest);
-    const seen = new Set<string>();
-    for (const sp of spans) if (!seen.has(sp.url)) { seen.add(sp.url); out.push(sp.url); }
+    if (!findUrls(line).length) { out.push(raw); continue; }
+    const parts = closedSentences(line);
+    if (parts.length < 2) { linkLine(line, out); continue; }
+    let plain = "";
+    for (const p of parts) {
+      if (!findUrls(p).length) { plain = plain ? `${plain} ${p}` : p; continue; }
+      if (plain) { out.push(plain); plain = ""; }
+      linkLine(p, out);
+    }
+    if (plain) out.push(plain);
   }
   return out.join("\n");
+}
+// Sentences whose emphasis and code marks are closed: a sentence that leaves **, __, ~~, a lone * or _, or a backtick
+// open is joined with the next until they close (review of #368: "**Bold. Two** sentences" was split open, and the
+// unmatched ** reached iMessage raw). Marks inside a link do not count.
+function openMarks(s: string): boolean {
+  let t = "", at = 0;
+  for (const u of findUrls(s)) { t += s.slice(at, u.start) + " "; at = u.end; }
+  t += s.slice(at);
+  const ticks = (t.match(/`/g) || []).length;
+  t = t.replace(/`[^`]*`/g, " ");
+  const odd = (re: RegExp) => ((t.match(re) || []).length % 2) === 1;
+  return ticks % 2 === 1 || odd(/\*\*/g) || odd(/__/g) || odd(/~~/g) ||
+    odd(/(?<![\p{L}\p{N}*])\*(?!\*)|(?<!\*)\*(?![\p{L}\p{N}*])/gu) || odd(/(?<![\p{L}\p{N}_])_(?!_)|(?<!_)_(?![\p{L}\p{N}_])/gu);
+}
+function closedSentences(line: string): string[] {
+  const out: string[] = [];
+  let buf = "";
+  for (const p of sentences(line)) {
+    buf = buf ? `${buf} ${p}` : p;
+    if (!openMarks(buf)) { out.push(buf); buf = ""; }
+  }
+  if (buf) out.push(buf);
+  return out;
+}
+function linkLine(line: string, out: string[]) {
+  const spans = findUrls(line);
+  let rest = "", at = 0;
+  for (const sp of spans) { rest += `${line.slice(at, sp.start)} `; at = sp.end; }
+  rest += line.slice(at);
+  rest = rest.replace(/\(\s*\)|<\s*>|\[\s*\]/g, "").replace(/(\*\*|__|~~|\*|_|`)\s*\1/g, "").replace(/[ \t]+([,.;:!?])(?=\s|$)/g, "$1")
+    .replace(/\s{2,}/g, " ").replace(/\s*[:—–-]\s*$/, "").trim();
+  // Only a list marker left ("-", "•", "2.") goes with the line; a number that is content ("15.49: <link>") stays.
+  const bare = !rest || /^(?:[-*•]|\d{1,3}[.)])?$/.test(rest);
+  if (!bare) out.push(rest);
+  const seen = new Set<string>();
+  for (const sp of spans) if (!seen.has(sp.url)) { seen.add(sp.url); out.push(sp.url); }
+}
+
+// 1v1 (Q94): a date in a text reads the way a person writes it ("Oct 19, 2026"), never the database's 2026-10-19. Links are
+// never touched.
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// Review of #368: code (a `span` or a ``` block) is never touched either.
+export function humanDates(text: string): string {
+  const day = (t: string) => t.replace(/\b(20\d\d)-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])\b(?![T:\d])/g, (_m, y: string, m: string, d: string) => `${MONTHS[Number(m) - 1]} ${Number(d)}, ${y}`);
+  const prose = (t: string) => { let o = "", at = 0; for (const u of findUrls(t)) { o += day(t.slice(at, u.start)) + u.url; at = u.end; } return o + day(t.slice(at)); };
+  let fenced = false;
+  return String(text ?? "").split("\n").map((line) => {
+    if (/^\s*```/.test(line)) { fenced = !fenced; return line; }
+    if (fenced) return line;
+    return line.split(/(`[^`\n]*`)/).map((part) => /^`[^`]*`$/.test(part) ? part : prose(part)).join("");
+  }).join("\n");
 }
 
 // A part counter ("(1/3)", "1/3) ") the model wrote at the start or end of its lines is never sent. Only a real count is
@@ -209,11 +261,12 @@ function whatsappMarks(text: string): string {
 }
 
 export function formatForChannel(text: string, channel: VoiceChannel): string {
-  const base = stripCounters(linksOnOwnLine(String(text ?? "").replace(/<!--[\s\S]*?-->/g, ""))).replace(/\n{3,}/g, "\n\n").trim();
+  const linked = (stripCounters(linksOnOwnLine(String(text ?? "").replace(/<!--[\s\S]*?-->/g, "")))).replace(/\n{3,}/g, "\n\n").trim();
+  if (channel === "web") return linked.replace(/^\s{0,3}#{1,6}\s+(.+)$/gm, "**$1**");
+  const base = humanDates(linked);
   if (channel === "sms" || channel === "imessage") return stripMarkdown(base);
   if (channel === "whatsapp") return whatsappMarks(base);
-  if (channel === "telegram") return telegramHtml(base);
-  return base.replace(/^\s{0,3}#{1,6}\s+(.+)$/gm, "**$1**");
+  return telegramHtml(base);
 }
 
 // Sentences of one line: split after . ! ? (not inside a link, an abbreviation like "e.g." or a number like 2.5).
@@ -273,12 +326,42 @@ function cutAtSpaces(s: string, max: number): string[] {
 // What an adapter renders when CAREER_TEXTING_NATIVE is on: split on the reply's own words, then each message formatted
 // for its channel (formatting after splitting, so no bold or tag ever spans two messages).
 export function nativeRender(channel: VoiceChannel, max: number): (text: string) => string[] {
-  return (text: string) => splitNatural(linksOnOwnLine(String(text ?? "").replace(/<!--[\s\S]*?-->/g, "")), max).map((b) => formatForChannel(b, channel)).filter((b) => b.trim());
+  return (text: string) => splitNatural(linksOnOwnLine(String(text ?? "").replace(/<!--[\s\S]*?-->/g, "")), max)
+    .map((b) => formatForChannel(b, channel)).filter((b) => b.trim());
 }
 // iMessage (CHANNEL DELIVERY SCENARIOS, 2026-10-29): the texting voice applies there too (no markdown on SMS and iMessage),
 // and the bubbles stay the ones WO-013 shipped: texting-sized, each bare link alone in its bubble for its preview card.
+// 1v1 (2026-11-01, Q77): one to three short sentences a bubble. A reply is first cut between paragraphs, lines and sentences
+// into texts of at most IMESSAGE_BUBBLE_CHARS (a link never cut), then each goes through the same bubbles.
+export const IMESSAGE_BUBBLE_CHARS = 320;
+// Only between sentences: a single sentence longer than that is left whole for toBubbles (its 700-char bubbles, as before).
 export function imessageNativeRender(text: string): string[] {
-  return toBubbles(formatForChannel(String(text ?? ""), "imessage"));
+  return sentenceTexts(formatForChannel(String(text ?? ""), "imessage"), IMESSAGE_BUBBLE_CHARS).flatMap((t) => toBubbles(t));
+}
+// Style targets (evals/career/one-v-one/style-targets.json, from the owner's brief, observed): a bubble also carries at most
+// TEXT_MAX_SENTENCES sentences. Units are paragraphs, lines and sentences (closed marks only); a unit longer than max stays whole.
+export const TEXT_MAX_SENTENCES = 3;
+const isSentence = (u: string) => /[\p{L}\p{N}]/u.test(u) && !/^https?:\/\/\S+$/.test(u.trim());
+function sentenceTexts(text: string, max: number, maxSentences = TEXT_MAX_SENTENCES): string[] {
+  const clean = String(text ?? "").trim();
+  if (!clean) return [];
+  const units: { s: string; sep: string; n: number }[] = [];
+  clean.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).forEach((p, pi) => {
+    const paraSep = pi === 0 ? "" : "\n\n";
+    p.split("\n").map((l) => l.trim()).filter(Boolean).forEach((l, li) => {
+      const lineSep = li === 0 ? paraSep : "\n";
+      closedSentences(l).forEach((x, si) => units.push({ s: x, sep: si === 0 ? lineSep : " ", n: isSentence(x) ? 1 : 0 }));
+    });
+  });
+  if (clean.length <= max && units.reduce((k, u) => k + u.n, 0) <= maxSentences) return [clean];
+  const out: string[] = [];
+  let buf = "", count = 0;
+  for (const u of units) {
+    if (buf && buf.length + u.sep.length + u.s.length <= max && count + u.n <= maxSentences) { buf += u.sep + u.s; count += u.n; }
+    else { if (buf) out.push(buf); buf = u.s; count = u.n; }
+  }
+  if (buf) out.push(buf);
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

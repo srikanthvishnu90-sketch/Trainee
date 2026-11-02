@@ -116,7 +116,8 @@ Deno.test("the reported thread bugs (input → expected → actual on trunk)", (
   for (const [ask, firm] of [["prep me for my interview at Acme Robotics tomorrow", "Acme Robotics"], ["I have an interview at Microsoft Research Asia tomorrow, prep me", "Microsoft Research Asia"]]) {
     const r = conv([ask])[0];
     assertNode.doesNotMatch(r, /Company: not supplied yet/, ask);
-    assertNode.match(r, new RegExp(`${firm} has no company file here`), ask);
+    // 1v1 (2026-11-01): the missing details are said in plain words (Q94); the oracle's nofile-said forms.
+    assertNode.match(r, new RegExp(`${firm} has no company file|nothing (?:in this plan |here )?is about how ${firm}`), ask);
   }
   // trunk: "Your finance question: Walk me through the three financial statements" for a tech firm's technical round
   for (const ask of ["prep me for a technical interview at Google", "prep me for a technical interview at Palantir"]) assertNode.doesNotMatch(conv([ask])[0], /finance question|three financial statements/, ask);

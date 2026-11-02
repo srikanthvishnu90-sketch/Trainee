@@ -56,7 +56,7 @@ const NUM_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, f
 export function overclaims(text: string, s: ApplySummary): string[] {
   const out: string[] = [];
   const t = String(text ?? "");
-  const claimsApplied = t.split(/[.!?\n]+/).some((c) => /\b(?:applied|have applied|has applied|i applied|were applied|got applied)\b/i.test(c) && !/\b(not|n't|never|nothing|none|yet|until|if|once|haven't|hasn't)\b/i.test(c));
+  const claimsApplied = t.split(/[.!?\n]+/).some((c) => /\b(?:applied|have applied|has applied|i applied|were applied|got applied|went in|went through|are in|done and in)\b/i.test(c) && !/\b(?:not|n't|never|nothing|until|if|once|haven't|hasn't|yet)\s+(?:\w+\s+){0,2}(?:applied|in|through|sent)\b|\b(?:haven't|hasn't|not|never)\b/i.test(c));
   if (claimsApplied && s.applied_ok === 0) out.push('says "applied" but no row is submitted and confirmed');
   const CONF = "(?:applications?\\s+|roles?\\s+|of them\\s+)?(?:(?:were |was |are |have been |is )?(?:submitted and confirmed|confirmed|applied)\\b)";
   for (const m of t.matchAll(new RegExp(`\\b(\\d+|${Object.keys(NUM_WORDS).join("|")})\\s+${CONF}`, "gi"))) {

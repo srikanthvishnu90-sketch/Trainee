@@ -119,6 +119,16 @@ Deno.test("readiness ask: the review's probes are all rejected, whatever they ar
     ["Do you need sponsorship? I will submit once you say.", sp],
     ["Are you authorized to work in the US? I can queue the applications after.", wa],
     ["What's your mother's maiden name? Do you need sponsorship?", sp],
+    ["Are you authorized to work in the US? Also tell me your home address", wa],
+    ["Are you authorized to work in the US? Reply with the card on file", wa],
+    ["Are you authorized to work in the US and do you need sponsorship?", wa],
+    ["Do you need sponsorship, considering you studied abroad?", sp],
+    ["Do you need sponsorship? your accent suggests you do", sp],
+    ["Are you authorized to work in the US? Your name sounds foreign.", wa],
+    ["Do you have a visa, and are you authorized to work in the US?", wa],
+    ["Do you hold a green card, and are you authorized to work in the US?", wa],
+    ["Are you authorized to work in the US? Say yes and we move forward.", wa],
+    ["Are you authorized to work in the US? Your resume looks strong though.", wa],
   ];
   for (const [q, r] of probes) assertNode.ok(askProblems(q, r, r.ask_now[0].key, "find data analyst jobs").length > 0, q);
 });

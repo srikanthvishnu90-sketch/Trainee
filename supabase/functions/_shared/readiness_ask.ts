@@ -23,7 +23,15 @@ export const KEY_WORDS: Record<NeedKey, RegExp> = {
   full_name: /\b(?:full name|legal name|name on your|your name)\b/i,
   salary_floor: /\b(?:pay|salary|compensation|floor|minimum|at least|base)\b/i,
 };
-const DENY = /citizen|birth|\bborn\b|gender|\brace\b|ethnic|veteran|disab|log[- ]?in\b|username|credential|pass[- ]?code|\bcode\b|social[- ]?security|\bssn\b|maiden|www\.|\.com\b|\.org\b|\.net\b|\bdob\b|religio|orientation|marital|pregnan|\bage\b|criminal|convict|\bvisa (?:number|status)\b/i;
+const DENY = /citizen|birth|\bborn\b|gender|\brace\b|ethnic|veteran|disab|log[- ]?in\b|username|credential|pass[- ]?code|\bcode\b|social[- ]?security|\bssn\b|maiden|www\.|\.com\b|\.org\b|\.net\b|\bdob\b|religio|orientation|marital|pregnan|\bage\b|criminal|convict|\bvisa (?:number|status|type|category)\b|\bcard\b|\baddress\b|\bid\b|green card|passport|\bscan\b|photo|upload|attach|\bnational\b/i;
+// Shape: exactly one plain sentence, ending in the one "?", no second interrogative, no clause that reasons from who the person is, no imperative.
+const SHAPE_BAD: Array<[RegExp, string]> = [
+  [/\?\s*\S/, "text after the question"],
+  [/\b(?:and|or)\s+(?:do|does|are|is|will|would|can|could|have|what|which|where|how|when)\b/i, "a second question joined to the first"],
+  [/\b(?:considering|given|knowing|seeing|now that|with your|for someone|someone who|people like)\b/i, "reasons from who the person is"],
+  [/\byour (?:accent|name|background|school|family|country|english|resume|studies|degree|experience)\b|\bsounds?\b|\bsuggests?\b|\blooks? (?:strong|good|great)\b/i, "comments on the person"],
+  [/(?:^|[.!?]\s+)(?:tell|send|give|reply|say|text|attach|confirm|just|please|let)\b/i, "an instruction, not a question"],
+];
 // Assertions about the person ("since you...", "you're a ...", "as a ...") and anything that promises or does an action.
 const ASSERT = /\bsince you\b|\bbecause you\b|\bas (?:an?|the) \w+|\byou(?:'re|’re| are|'ve|’ve| have been| must be| seem)\b(?! (?:able|authori|open|looking|interested|willing|hoping|aiming|targeting|comfortable|ok|okay)\b)|\bI (?:see|noticed|saw|know|assume|take it)\b/i;
 const PROMISE = /\b(?:appl(?:y|ies|ying|ied)|submit\w*|send(?:ing)?|sent|queue\w*|enrol\w*|register\w*|book(?:ing)?|schedul\w+|start(?:ing)? (?:now|right|on)|right away|go ahead|I(?:'ll|’ll| will| am going to|'m going to|'m gonna))\b/i;
@@ -44,6 +52,7 @@ export function askProblems(text: string, r: Readiness, key?: string | null, mes
   if (URL_OR_ADDRESS.test(t)) out.push("carries a link or address");
   if (/\d/.test(t)) out.push("carries a number");
   if (SECRET_FIELD.test(t)) out.push("asks for or names a secret field");
+  for (const [re, why] of SHAPE_BAD) if (re.test(t)) out.push(why);
   if (DENY.test(t)) out.push("asks for or names something outside the need (identity, protected trait, credential)");
   if (ASSERT.test(t)) out.push("asserts something about the person");
   if (PROMISE.test(t)) out.push("promises or names an action");

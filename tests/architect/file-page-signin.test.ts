@@ -123,7 +123,8 @@ Deno.test("flow: link -> phone number -> code texted to the account's own phone 
   const html = await feed.text();
   for (const c of ["Acme", "Ramp", "Figma"]) assert(html.includes(c), `${c} is listed`);
   assert(/Data Analyst 1/.test(html) && /Austin, TX/.test(html) && /Build dashboards/.test(html) && /3 years of SQL/.test(html), "roles and details");
-  assert(/s2\/favicons\?sz=128&amp;domain=acme\.com/.test(html), "the employer's logo from its own domain");
+  // R16: employer-domain default. The employer's own domain, through this page's own origin; no third-party favicon service.
+  assert(html.includes(`<img src="?logo=acme.com"`) && !/s2\/favicons/.test(html), "the employer's logo from its own domain");
   assert(/Sign out everywhere/.test(html));
   // Apply: the hash the row shows, the session's own id in the form
   const t = fieldT(html), tag = tagOf(html, "Acme"), ref = refIn(html, "Acme");

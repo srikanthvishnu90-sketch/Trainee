@@ -207,3 +207,26 @@ Deno.test("R06/D07 + D09: every hosted File kind has exactly one page-level chec
     eq(r.headers.get("referrer-policy"), "no-referrer"); ok(/noindex/.test(r.headers.get("x-robots-tag")!));
   }
 });
+
+Deno.test("R16: employer-domain default. With no logo setting, no File's HTML or CSP references Google's favicon service or any third-party image host", async () => {
+  const w = await jobsWorld({ TRAINEE_FILE_LINK_SECRET: SECRET, TRAINEE_FILE_BASE_URL: "https://trainee.example/file" });
+  const r = await handleFile(new Request("https://trainee.example/file", { headers: { cookie: `tf_s=${w.tok}` } }), w.d);
+  const h = await r.text(), csp = r.headers.get("content-security-policy")!;
+  ok(!/google\.com\/s2|s2\/favicons|[a-z0-9-]+\.gstatic\.com\/favicon/.test(h) && !/<img src="https?:/.test(h), "the jobs File references no Google favicon");
+  eq(/img-src ([^;]+)/.exec(csp)![1], "'self'");
+  ok(h.includes(`<img src="?logo=acme.com"`) && !/<img src="https?:/.test(h), "the employer's own domain, through the page's own origin");
+  eq((await handleFile(new Request("https://trainee.example/file?logo=acme.com", { headers: { cookie: `tf_s=${w.tok}` } }), w.d)).status, 200);
+  eq(w.seen, ["https://acme.com/apple-touch-icon.png"], "fetched from the employer, by the server");
+  // Every other File kind too.
+  const A = signedIn(), env: Record<string, string | undefined> = { TRAINEE_FILE_LINK_SECRET: SECRET, TRAINEE_FILE_BASE_URL: "https://trainee.example/file" };
+  const store = memoryFileStore(), svc = createFileService({ store, env: { get: (k) => env[k] }, now: () => NOW });
+  const d = { ...A.deps, store: { async recallList() { return null; }, async recall() { return null; } } as unknown as FileStore, now: () => NOW, env: { get: (k: string) => env[k] }, cards: { async open() { return null; } }, tap: {} as never, files: svc } as unknown as FileDeps;
+  for (const [kind, sample] of Object.entries(SAMPLES)) {
+    const m = await svc.create(U, kind, structuredClone(sample)) as { id: string };
+    const kr = await handleFile(new Request("https://x.example/f", { headers: { cookie: `tf_s=${await A.tok(U, m.id, NOW)}` } }), d);
+    ok(!/google\.com\/s2|s2\/favicons/.test(await kr.text()) && !/img-src[^;]*google/.test(kr.headers.get("content-security-policy")!), kind);
+  }
+  // Opt-in only: TRAINEE_LOGO_URL=google.
+  const g = await jobsWorld({ TRAINEE_FILE_LINK_SECRET: SECRET, TRAINEE_FILE_BASE_URL: "https://trainee.example/file", TRAINEE_LOGO_URL: "google" });
+  ok((await (await handleFile(new Request("https://trainee.example/file", { headers: { cookie: `tf_s=${g.tok}` } }), g.d)).text()).includes("https://www.google.com/s2/favicons?sz=128&amp;domain=acme.com"));
+});

@@ -420,7 +420,8 @@ function printReport(label: string, rep: Report): number {
   return failed;
 }
 
-const LOGO_SRC = (tpl: string, dom: string) => (tpl || "https://www.google.com/s2/favicons?sz=128&domain={domain}").split("{domain}").join(encodeURIComponent(dom));
+// R16: employer-domain default. With no provider configured the logo is the employer's own domain through the page's own origin.
+const LOGO_SRC = (tpl: string, dom: string) => tpl ? tpl.split("{domain}").join(encodeURIComponent(dom)) : `?logo=${encodeURIComponent(dom)}`;
 const ALLOWED_TAGS = new Set(["html", "head", "meta", "link", "title", "style", "body", "div", "header", "svg", "rect", "text", "span", "h1", "p", "form", "input", "button", "main", "ul", "li", "img", "details", "summary", "a", "strong", "footer", "script"]);
 const CODES = /\b(duplicate_job|daily_cap|no_resume|pace_unreadable|company_cooldown|not_submitted|needs_user|unknown_outcome|submitted_unconfirmed|invalid card)\b/;
 

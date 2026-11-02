@@ -503,8 +503,12 @@ Deno.test("headers: Mini App framing is allowed for Telegram's web clients only;
   eq(fa, "https://web.telegram.org https://*.telegram.org");
   assert(!/'none'|(^| )\*( |$)|https:( |$)|http:/.test(fa));
   const img = csp.match(/img-src ([^;]+)/)![1];
-  eq(img, "https://www.google.com https://*.gstatic.com");
+  // R16: employer-domain default. Logos come from the employer's own domain through this page's origin, never a third party.
+  eq(img, "'self'");
   assert(!/(^| )https:( |$)|data:/.test(img));
+  // R16: employer-domain default. Google's favicon service only by explicit opt-in.
+  const g = (await get(deps(m, { env: { TRAINEE_LOGO_URL: "google" } }), await tok())).headers.get("content-security-policy")!;
+  eq(g.match(/img-src ([^;]+)/)![1], "https://www.google.com https://*.gstatic.com");
   const own = (await get(deps(m, { env: { TRAINEE_LOGO_URL: "https://logos.example/{domain}.png" } }), await tok())).headers.get("content-security-policy")!;
   eq(own.match(/img-src ([^;]+)/)![1], "https://logos.example");
   const none = (await get(deps(m, { env: { TRAINEE_LOGO_URL: "http://logos.example/{domain}.png" } }), await tok()));
@@ -524,7 +528,9 @@ Deno.test("escaping and logo allowlist: a hostile ref and a hostile company doma
   const ok = mem(1); await ok.ready;
   const h2 = await (await get(deps(ok), await tok())).text();
   const src = h2.match(/<img src="([^"]+)"/)![1].replace(/&amp;/g, "&");
-  assert(new URL(src).origin === "https://www.google.com" && src.includes("domain=acme.com"));
+  // R16: employer-domain default. The employer's own domain, served from this page's origin.
+  eq(src, "?logo=acme.com");
+  assert(!h2.includes("google.com/s2"));
 });
 
 // ================================================================== the approval covers only what is shown

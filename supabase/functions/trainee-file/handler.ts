@@ -22,7 +22,7 @@ import { actOn, bodyHtml, COPY_SCRIPT, KIND_CSS, KIND_LABEL, textOf, type Effect
 import type { FileService } from "../_shared/file_service.ts";
 import { fetchLogo, memoryLogoCache, validDomain, type LogoCache } from "../_shared/logo_cache.ts";
 import { fileShellHtml, firstNameOf, freshnessStamp, madeForLine, stateHtml } from "../_shared/file_design.ts";
-import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, logoUrl, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
+import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
 
 export type { AppRow } from "../_shared/file_page.ts";
 export interface FileStore extends JobStore {
@@ -56,13 +56,17 @@ const kindScriptHash = (async () => `'sha256-${b64(await sha(KIND_SCRIPT))}'`)()
 // frame-ancestors: Telegram's own web clients only (the Mini App is a frame inside web.telegram.org); nothing else may frame the page.
 // img-src: the logo provider's origin only (computed from config), never every https host.
 const FRAMES = "https://web.telegram.org https://*.telegram.org";
-// TRAINEE_LOGO_URL=self (audit R16): logos come from the employer's own domain through this page's own origin (logo_cache.ts), so
-// img-src is 'self' and the reader's browser contacts no third party.
-const selfLogos = (env: { get(k: string): string | undefined }) => (env.get("TRAINEE_LOGO_URL") || "").trim() === "self";
+// Logos (audit R16, architect decision 2026-11-01): by DEFAULT from the employer's own domain, fetched by the server and served from
+// this page's own origin (logo_cache.ts), so img-src is 'self' and the reader's browser contacts no third party; no own domain, the
+// lettermark. A third-party logo service is never the default (Google's s2 favicons would tell Google which companies a person is
+// looking at): TRAINEE_LOGO_URL=google, or an explicit https template with {domain}, opts in; a non-https template means no logos.
+const S2 = "https://www.google.com/s2/favicons?sz=128&domain={domain}";
+const logoMode = (env: { get(k: string): string | undefined }): string => { const v = (env.get("TRAINEE_LOGO_URL") || "").trim(); return !v || v === "self" ? "self" : v === "google" ? S2 : v; };
+const selfLogos = (env: { get(k: string): string | undefined }) => logoMode(env) === "self";
 const LOGOS = memoryLogoCache();
 function logoOrigins(env: { get(k: string): string | undefined }): string {
   if (selfLogos(env)) return "'self'";
-  const tpl = (env.get("TRAINEE_LOGO_URL") || "").trim() || "https://www.google.com/s2/favicons?sz=128&domain={domain}";
+  const tpl = logoMode(env);
   let origin = "";
   try { const u = new URL(tpl.split("{domain}").join("example.com")); if (u.protocol === "https:") origin = u.origin; } catch { /* no logo provider */ }
   return [origin, origin.includes("google.com") ? "https://*.gstatic.com" : ""].filter(Boolean).join(" ");
@@ -137,8 +141,8 @@ function sendOf(p: PreparedRow): { items: { label: string; value: string; needs?
 // The logo only from the employer's own domain, through the configured provider, https only; the CSP allows that provider's origin only.
 function rowLogo(job: JobView, env: { get(k: string): string | undefined }): string | null {
   if (selfLogos(env)) { const dom = logoDomain(job, env); return dom && validDomain(dom) ? `?logo=${encodeURIComponent(dom)}` : null; }
-  const dom = logoDomain(job, env), u = logoUrl(job, env);
-  if (!dom || !u) return null;
+  const dom = logoDomain(job, env), tpl = logoMode(env), u = dom ? tpl.split("{domain}").join(encodeURIComponent(dom)) : null;
+  if (!dom || !u || !/^https:\/\//.test(u)) return null;
   try {
     const x = new URL(u), allowed = logoOrigins(env).split(" ").filter(Boolean)[0];
     return x.protocol === "https:" && x.origin === allowed && u.includes(encodeURIComponent(dom)) ? u : null;

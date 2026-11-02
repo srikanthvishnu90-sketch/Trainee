@@ -15,7 +15,7 @@ import { RELEASE_PENDING } from "../../supabase/functions/agent-chat/release_con
 import { SEND_CONSENT_SCOPES, SUBMITTED_SCOPES } from "../../supabase/functions/_shared/google_scopes.ts";
 import { supabaseConnectDeps } from "../../supabase/functions/trainee-connect/store.ts";
 import { emailBind, issueState, verifyState } from "../../supabase/functions/gmail-oauth/career.ts";
-import { googleCallback, SEND_REFUSED_WORDS } from "../../supabase/functions/_shared/oauth_connect.ts";
+import { googleCallback, SEND_REFUSED_WORDS, sendRevokeAllowed } from "../../supabase/functions/_shared/oauth_connect.ts";
 import { GOOGLE_REVOKE } from "../../supabase/functions/_shared/google_disconnect.ts";
 import { MemDb } from "./scenarios/connectors-r3-memdb.ts";
 
@@ -317,6 +317,24 @@ Deno.test("D-037/2g: a refused send consent stores nothing, leaves the connectio
     keep(r, conn, "bound elsewhere");
   }
   for (const why of ["send_no_connection", "send_other_account", "send_scopes"] as const) ok(SEND_REFUSED_WORDS(why, ALICE).startsWith("Sending wasn't allowed"), "the landing says why");
+});
+
+Deno.test("D-037/2i: the revoke check fails closed: no revoke on any doubt, on a legacy or mixed-case row, or while any Google row has no address", async () => {
+  const db = (rows: Record<string, unknown>[]) => { const d = new MemDb(); for (const x of rows) d.rows("user_oauth_connections").push(x); return d as any; };
+  const row = (provider: string, email: string | null, user = "u2") => ({ user_id: user, provider, vault_name: `oauth_${provider}_${user}`, email, scopes: "openid email" });
+  eq(await sendRevokeAllowed(db([]), "bob@example.test"), true, "connected nowhere: the unused grant may be revoked");
+  eq(await sendRevokeAllowed(db([]), null), false, "missing address");
+  eq(await sendRevokeAllowed(db([]), "  "), false, "blank address");
+  const q = (res: any) => { const c: any = { select: () => c, in: () => c, is: () => c, ilike: () => c, limit: () => c, then: (ok: any, no: any) => Promise.resolve(res).then(ok, no) }; return c; };
+  eq(await sendRevokeAllowed({ from: () => q({ data: null, error: { message: "boom" } }) } as any, "bob@example.test"), false, "a read error");
+  let n = 0;
+  eq(await sendRevokeAllowed({ from: () => q(n++ === 0 ? { data: [], error: null } : { data: null, error: { message: "boom" } }) } as any, "bob@example.test"), false, "a read error on the address lookup");
+  eq(await sendRevokeAllowed({ from: () => { throw new Error("down"); } } as any, "bob@example.test"), false, "a thrown query");
+  eq(await sendRevokeAllowed(db([row("gmail", "bob@example.test")]), "bob@example.test"), false, "the legacy gmail provider row protects bob@");
+  eq(await sendRevokeAllowed(db([row("google_career", "Bob@Example.TEST")]), "bob@example.test"), false, "a mixed-case stored address matches");
+  eq(await sendRevokeAllowed(db([row("google_career", "bob@example.test")]), "BOB@example.test"), false, "a mixed-case signed-in address matches");
+  eq(await sendRevokeAllowed(db([row("google_career", null, "u3")]), "bob@example.test"), false, "a Google row with no stored address could be bob@: no revoke");
+  eq(await sendRevokeAllowed(db([row("microsoft", "bob@example.test")]), "bob@example.test"), true, "an Outlook row is another provider's grant");
 });
 
 Deno.test("D-037/2h: an old send link used after the person reconnected another account cannot put the previous account back", async () => {

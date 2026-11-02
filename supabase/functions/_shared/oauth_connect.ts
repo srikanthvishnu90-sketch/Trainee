@@ -84,14 +84,18 @@ async function sha256Hex(s: string): Promise<string> {
   return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 // Whether a refused send consent's grant may be revoked at Google: only when the signed-in address is in NO
-// user_oauth_connections row (google_career or gmail) of any person, this person's own included. Revoking ends the whole
-// grant of that account for Trainee, so an account anyone has connected keeps its grant. Any doubt (no address, a read
-// error) is a no: never revoke on a guess.
+// user_oauth_connections row (google_career or gmail) of any person, this person's own included, compared without case
+// (ilike: an underscore in an address also matches any one character, which can only make a match, so only fewer revokes).
+// Revoking ends the whole grant of that account for Trainee, so an account anyone has connected keeps its grant. A Google
+// row stored with no address (oauth_connect_commit keeps a null email when Google's userinfo failed) could be any account,
+// so while any exists nothing is revoked. Any doubt (no address, a read error, a thrown query) is a no.
+const GOOGLE_PROVIDERS = ["google_career", "gmail"];
 export async function sendRevokeAllowed(admin: Admin, email: string | null): Promise<boolean> {
   if (!email || !email.trim()) return false;
-  const forms = [...new Set([email, email.trim(), email.trim().toLowerCase()])];
   try {
-    const r = await admin.from("user_oauth_connections").select("user_id,provider,email").in("provider", ["google_career", "gmail"]).in("email", forms);
+    const unknown = await admin.from("user_oauth_connections").select("user_id").in("provider", GOOGLE_PROVIDERS).is("email", null).limit(1);
+    if (unknown.error || !Array.isArray(unknown.data) || unknown.data.length) return false;
+    const r = await admin.from("user_oauth_connections").select("user_id").in("provider", GOOGLE_PROVIDERS).ilike("email", email.trim()).limit(1);
     if (r.error || !Array.isArray(r.data)) return false;
     return r.data.length === 0;
   } catch { return false; }

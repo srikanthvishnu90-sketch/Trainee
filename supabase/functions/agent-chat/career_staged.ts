@@ -184,6 +184,33 @@ export function openCareerQuestion(env: Env, message: string, intent: string, re
   return OPEN_ENTRY_KINDS.has(String(r.payload?.kind ?? r.artifact?.kind ?? ""));
 }
 
+// ADVICE QUESTIONS (2026-11-01, the 1v1's outreach and prep turns): a QUESTION about networking or interviews ("how do I
+// network into banking with no connections", "what's a good subject line for a cold email", "what should I ask at the end of
+// an interview") is advice, but the router reads it as work: outreach_clarification starts a campaign plan for a list nobody
+// asked for, and prep_brief answers with a template brief. Neither carries anything the person approved or that sends. These
+// go to the brain, which answers the question asked. Instructions stay code's: building a list ("find me engineers at X to
+// reach out to"), drafting or sending to someone, a prep brief for a company or posting the person named, and a mock or
+// drill that is running. The brain cannot send, apply or save on its own (STAGED_WITHHELD_TOOLS; every external effect needs
+// the person's approval of the exact payload on code's path).
+const ADVICE_INTENTS = new Set(["outreach_clarification", "prep_brief"]);
+const QUESTION_LEAD = /^\s*(?:(?:so|ok|okay|hey|also|and|but|quick question)[,:]?\s+)?(?:how|what|whats|what's|which|when|why|where|who|should|is|are|do|does|did|would|could|any|tips?\b|advice\b|best way)\b/i;
+const ASK_TO_ACT = /^\s*(?:can|could|would|will)\s+(?:you|u)\s+(?:please\s+)?(?:send|email|message|text|dm|reach|contact|find|build|make|get|pull|list|draft|write|apply|submit|queue|save|set|start|run|mock|quiz|drill)\b/i;
+const LIST_OR_SEND = /\b(?:find|build|pull|get|make|compile)\b[^?.!]*\b(?:list|people|contacts?|names|engineers|analysts|bankers|associates|recruiters|alumni|alums|managers)\b|^\s*(?:please\s+)?(?:send|email|message|text|dm|reach out|contact|apply|submit|queue)\b/i;
+export function adviceQuestion(message: string, intent: string | null, result: unknown): boolean {
+  if (!intent || !ADVICE_INTENTS.has(intent)) return false;
+  const m = String(message ?? "").replace(/[’`]/g, "'").trim();
+  if (!(QUESTION_LEAD.test(m) || /\?\s*$/.test(m)) || ASK_TO_ACT.test(m) || LIST_OR_SEND.test(m)) return false;
+  // A company or a posting the person named gets code's product for it (the firm's file, the posting's brief).
+  if (namesSomeone(m)) return false;
+  const r = (result && typeof result === "object" ? result : {}) as Record<string, any>;
+  if (has(r, "draft") || has(r, "documents") || has(r, "document") || has(r, "offer") || has(r, "company") || (r.sends ?? 0) > 0) return false;
+  // A mock, drill or answer score in progress is code's session.
+  if (r.resultStatus === "running" || has(r, "question")) return false;
+  const kind = String(r.payload?.kind ?? r.artifact?.kind ?? "");
+  if (intent === "outreach_clarification") return !kind || kind === "campaign_plan";
+  return !/mock|drill|answer_score|session/i.test(kind);
+}
+
 export type StagedDecision = { brain: boolean; mode: BrainMode; intent: string | null; reason: string };
 
 // Whether this turn goes to the brain in staged mode. Called only after every code-first turn has passed on it.
@@ -207,6 +234,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (!intent) return { brain: false, mode, intent: null, reason: "router_claimed" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
   if (openCareerQuestion(o.env, o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "open_career_question" };
+  if (adviceQuestion(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "advice_question" };
   if (!STAGED_BRAIN_INTENTS.includes(intent)) return { brain: false, mode, intent, reason: "action" };
   if (codeProduct(intent, probe.result)) return { brain: false, mode, intent, reason: "code_product" };
   return { brain: true, mode, intent, reason: "question" };

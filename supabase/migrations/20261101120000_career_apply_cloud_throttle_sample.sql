@@ -21,9 +21,14 @@ begin
    from (select outcome from public.career_apply_cloud_events where portal = p_portal and outcome <> 'confirmed' and at > since
          order by id desc limit 20) w;
   if bots20 >= 2 then why := format('bot_check_spike: %s bot checks in the last 20 attempts', bots20);
-  -- A site that is really down: its last 3 attempts in this window all failed (whatever the sample size).
+  -- A site that is really down: its last 3 attempts in this window all failed (whatever the sample size). Only failures the
+  -- site can cause count: our own browser crashing (DRIVER_ERROR, DRIVER_ERROR_AT_SUBMIT) or giving no result
+  -- (ENGINE_NO_RESULT) says nothing about the site, so those attempts are left out of the last 3 (they neither pause it
+  -- nor break a run of the site's own failures).
   elsif (select count(*) = 3 and bool_and(outcome = 'error') from (select outcome from public.career_apply_cloud_events
-     where portal = p_portal and outcome <> 'confirmed' and at > since order by id desc limit 3) l3) then
+     where portal = p_portal and outcome <> 'confirmed' and at > since
+      and coalesce(error_kind, '') not in ('DRIVER_ERROR', 'DRIVER_ERROR_AT_SUBMIT', 'ENGINE_NO_RESULT')
+     order by id desc limit 3) l3) then
    why := 'consecutive_errors: the last 3 attempts failed';
   elsif tries >= 20 and fails * 100 >= 2 * tries then why := format('failure_rate: %s of the last %s attempts failed', fails, tries); end if;
   if why is not null then

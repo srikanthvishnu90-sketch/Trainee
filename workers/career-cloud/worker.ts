@@ -216,15 +216,14 @@ export async function runCloudJob(job: CloudJob, d: {
     // Submit authorization (beforeEffect, asked right before the one click) was never requested, and the engine says
     // nothing left the browser (not_submitted). Its own exactly-once store refuses a resend of anything it recorded as
     // sent. Authorized again before the second run. Reached Submit and then failed: recorded unknown, never resent.
-    if (run?.result?.state === "not_submitted" && run?.result?.reason === "DRIVER_ERROR") {
-      if (!effectRequested) {
-        log(`${job.id}: the browser failed before Submit (DRIVER_ERROR); driven once more`);
-        await authorize("before_engine");
-        run = await drive();
-      } else {
-        run = { ...run, result: { ...run.result, state: "unknown_outcome", reason: "DRIVER_ERROR_AT_SUBMIT" } };
-      }
+    const crashed = () => run?.result?.state === "not_submitted" && run?.result?.reason === "DRIVER_ERROR";
+    if (crashed() && !effectRequested) {
+      log(`${job.id}: the browser failed before Submit (DRIVER_ERROR); driven once more`);
+      await authorize("before_engine");
+      run = await drive();
     }
+    // Whichever run was last: once ANY run reached Submit (the authorization was asked), a crash is never "not sent".
+    if (crashed() && effectRequested) run = { ...run, result: { ...run.result, state: "unknown_outcome", reason: "DRIVER_ERROR_AT_SUBMIT" } };
     if (["confirmed", "submitted_unconfirmed"].includes(run?.result?.state || "") && !effectAuthorized) throw Error("CARD_CLOUD_AUTH_REQUIRED");
     // Refused at the page's open, before anything was filled, and no effect was ever asked for: nothing was sent.
     putBack = !!d.requeueRefusal && !effectRequested && sentNothingRefusal(run?.result) !== null;

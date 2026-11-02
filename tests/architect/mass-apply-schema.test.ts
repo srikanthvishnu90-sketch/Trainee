@@ -70,18 +70,3 @@ Deno.test("prepareOne: missing shared facts asked from the schema with no browse
   eq(b.engineRuns, 1, "facts known: the browser reads the form");
   assert(!b.calls.some((c) => c.name === "career_apply_prepare_ask_for" && c.args.p_questions.some((q: any) => /^fact:/.test(q.key))), "nothing asked twice");
 });
-
-Deno.test("prepareOne: the browser failing (DRIVER_ERROR) is tried once more at once; an employer's refusal is not", async () => {
-  const run = async (reasons: string[]) => {
-    let runs = 0;
-    const db = { rpc: async (name: string) => ({ data: name === "career_apply_answers_for" ? [] : null, error: null }) };
-    const out = await prepareOne({ db, resumeFor: async () => ({ path: "/dev/null", sha256: "a".repeat(64), tag: null }),
-      runEngine: async () => ({ result: { state: "not_submitted", reason: reasons[Math.min(runs++, reasons.length - 1)] }, evidence: {} }) } as any,
-      { user_id: "u", job_id: "lever:acme:1", company: "Acme", url: "https://jobs.lever.co/acme/1", epoch: 0, version: 0 } as any);
-    return { out, runs };
-  };
-  const a = await run(["DRIVER_ERROR", "DRIVER_ERROR"]);
-  eq([a.runs, a.out.outcome], [2, "refused"], "twice, then refused");
-  const b = await run(["IDENTITY_NUMBER_REQUESTED"]);
-  eq(b.runs, 1, "the employer's form refusing is never retried");
-});

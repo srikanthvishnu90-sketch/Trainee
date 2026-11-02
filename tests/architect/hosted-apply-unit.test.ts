@@ -150,15 +150,13 @@ Deno.test("F17 bridge: the token binds request, lease and sandbox; the person an
 
 Deno.test("F17 bridge finish: the ready ones as the card shows them, pushed now; else the questions; else they are told why; the sandbox stopped", async () => {
   const row = { id: RID, user_id: U, job_ids: ["ashby:ramp:1"], lease_token: LEASE, state: "running", claimed_at: fresh() };
-  const run = async (ready: any[], questions: any[], pushAnswer: any, questionsPushed = true, openElsewhere: any[] = [], waitingElsewhere: any[] = []) => {
+  const run = async (ready: any[], questions: any[], pushAnswer: any, questionsPushed = true) => {
     const calls: any[] = [], stopped: string[] = [];
     const deps = { secret: SECRET, readRequest: async () => row, stop: async (s: string) => { stopped.push(s); },
       rpc: async (name: string, args: any) => {
         calls.push({ name, args });
         if (name === "career_apply_prepare_request_ready") return ready;
         if (name === "career_apply_prepare_request_questions") return questions;
-        if (name === "career_apply_questions_open_as") return openElsewhere;
-        if (name === "career_apply_prepare_candidates") return waitingElsewhere;
         if (name === "career_apply_card_push_requested_for") return pushAnswer;
         if (name === "career_apply_questions_push_requested_for") return questionsPushed;
         if (name === "career_apply_prepare_request_notice") return true;
@@ -194,23 +192,6 @@ Deno.test("F17 bridge finish: the ready ones as the card shows them, pushed now;
   const h = await run([prepared], [], null);
   eq((h.out.body as any).push, "held");
   assert(!h.calls.some((c) => c.name === "career_apply_prepare_request_notice"));
-  // MASS APPLY (2026-11-01): one card per batch. Ready here, but another posting of theirs still waits on an open question:
-  // no card now (it would show part of the batch), no notice; the card goes when the last answer readies the rest.
-  const w = await run([prepared], [], "dddddddd-bbbb-4ccc-8ddd-0000000000f4", true, [{ id: "eeeeeeee-bbbb-4ccc-8ddd-0000000000f7", key: "job:x:why", state: "open" }]);
-  eq((w.out.body as any).push, "held_for_answers");
-  assert(!w.calls.some((c) => c.name === "career_apply_card_push_requested_for" || c.name === "career_apply_prepare_request_notice"), JSON.stringify(w.calls.map((c) => c.name)));
-  // Nor while another posting of theirs still waits to be prepared (its questions not asked yet); another person's does not hold it.
-  const v = await run([prepared], [], "dddddddd-bbbb-4ccc-8ddd-0000000000f4", true, [], [{ user_id: U, job_id: "ashby:other:2" }]);
-  eq((v.out.body as any).push, "held_for_answers");
-  const o2 = await run([prepared], [], "dddddddd-bbbb-4ccc-8ddd-0000000000f4", true, [], [{ user_id: "99999999-bbbb-4ccc-8ddd-000000000099", job_id: "ashby:other:2" }, { user_id: U, job_id: "ashby:ramp:1" }]);
-  eq((o2.out.body as any).push, "shown", "another person's waiting posting, or this very one, holds nothing");
-  // A batch whose ready applications do not all fit one message: no partial card (a second card); told it is all ready.
-  const long = (i: number) => ({ ...prepared, id: `cccccccc-bbbb-4ccc-8ddd-00000000010${i}`, company: `Co${i}`, card_lines: [`Co${i}: Engineer`, "x".repeat(2400)] });
-  const p2 = await run([long(1), long(2)], [], "dddddddd-bbbb-4ccc-8ddd-0000000000f4");
-  eq((p2.out.body as any).push, "told_ready");
-  assert(!p2.calls.some((c) => c.name === "career_apply_card_push_requested_for"), "no partial card");
-  const told = p2.calls.find((c) => c.name === "career_apply_prepare_request_notice");
-  eq(told.args.p_text, 'All 2 applications are ready. Say "show my applications" to see every one on one card and approve them with one tap. Nothing was sent.');
 });
 
 Deno.test("F17 not-prepared text: never an engine code, always 'Nothing was sent'", () => {

@@ -1,7 +1,8 @@
 -- MASS APPLY (2026-11-01): the cloud throttle's failure-rate rule waits for a real sample. As written (20261021080000) a
 -- portal's window starts empty after each pause, so ONE error in its first few attempts was "2% of the window" and paused
 -- that ATS (Greenhouse, Lever or Ashby) for 6 hours for every person: one batch's single failure stopped everyone's
--- batches. Now the failure-rate rule needs at least 20 attempts in the window (2% of 50 still pauses, as before); the
+-- batches. Now the failure-rate rule needs at least 20 attempts in the window (2% of 50 still pauses, as before), and a
+-- site that is really down pauses after its last 3 attempts all failed (review of #384: never 19 failures first); the
 -- bot-check rule (2 verification checks in the last 20 attempts) and the person's own pause (2 checks in a day) are
 -- unchanged, and a posting closed after the approval is recorded not_sent (workers/career-cloud/worker.ts POSTING_CLOSED),
 -- never an error. Every other line is 20261021080000's. Idempotent; not applied to any database by this change.
@@ -20,6 +21,10 @@ begin
    from (select outcome from public.career_apply_cloud_events where portal = p_portal and outcome <> 'confirmed' and at > since
          order by id desc limit 20) w;
   if bots20 >= 2 then why := format('bot_check_spike: %s bot checks in the last 20 attempts', bots20);
+  -- A site that is really down: its last 3 attempts in this window all failed (whatever the sample size).
+  elsif (select count(*) = 3 and bool_and(outcome = 'error') from (select outcome from public.career_apply_cloud_events
+     where portal = p_portal and outcome <> 'confirmed' and at > since order by id desc limit 3) l3) then
+   why := 'consecutive_errors: the last 3 attempts failed';
   elsif tries >= 20 and fails * 100 >= 2 * tries then why := format('failure_rate: %s of the last %s attempts failed', fails, tries); end if;
   if why is not null then
    insert into public.career_apply_cloud_pauses (scope, portal, reason, until, created_at)

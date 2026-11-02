@@ -211,6 +211,9 @@ export async function prepareOne(d: AheadDeps, c: Candidate): Promise<AheadOutco
           detail: `${n} question(s) asked${letters ? `; ${letters} cover letter${letters === 1 ? "" : "s"} drafted for them to read` : ""}`,
         };
       }
+      // The browser itself failing twice is our error, not the employer's form refusing: recorded as such (it is tried
+      // again within the hour: prepare_candidates' wait after an error), never told as "the form could not be filled".
+      if (/^DRIVER_ERROR/.test(String(result.reason ?? ""))) return await record("error", "the browser failed while reading the form (DRIVER_ERROR); tried twice", undefined, result.posting);
       return await record("refused", String(result.reason ?? result.state ?? "not ready"), undefined, result.posting);
     }
     if (r.payload.resume_sha256 !== resume.sha256) return await record("error", "the engine sent another resume than the tailored one");

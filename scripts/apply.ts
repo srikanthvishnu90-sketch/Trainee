@@ -1404,6 +1404,9 @@ export async function runApply(args: string[]) {
     const result = {
       state: sent ? "unknown_outcome" : "not_submitted",
       reason: sent ? "READBACK_REQUIRED" : notSentReason,
+      // MASS APPLY (2026-11-01): what the browser itself said when it failed (a crash, a timeout, out of memory), so a
+      // DRIVER_ERROR can be told apart and its cause found. The browser's own words only: no field value, no page text.
+      ...(notSentReason === "DRIVER_ERROR" ? { driver_error: String(e?.name || "Error").slice(0, 40) + ": " + String(e?.message || "").split("\n")[0].replace(/https?:\/\/\S+/g, "<url>").slice(0, 160) } : {}),
       ...(evidence.proof ? { proof: evidence.proof } : {}),
     };
     if (fenced) {

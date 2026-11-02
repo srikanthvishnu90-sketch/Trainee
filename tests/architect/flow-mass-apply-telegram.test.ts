@@ -483,9 +483,13 @@ Deno.test({
         assert(receipts.includes(`Not sent to ${extra.company}: the form has questions you have not answered yet. Nothing reached the employer.`), `the added question's receipt: ${receipts.slice(0, 1600)}`);
         await deliverAll();
         const all = await text("where are my applications");
-        const { countsLine } = await import("../../supabase/functions/_shared/career_apply_status.ts");
-        const rowsNow = await json(`select state from public.career_apply_jobs where user_id = '${person}'`);
-        eq(all.split("\n")[0], countsLine(rowsNow as any), "the summary's counts are the database's, row for row");
+        // The counts, read independently from the database (never through the code that wrote the reply).
+        const byState = Object.fromEntries((await json(`select state, count(*)::int n from public.career_apply_jobs where user_id = '${person}' group by state`)).map((r: any) => [r.state, r.n]));
+        const said = (words: string) => Number(new RegExp(`(\\d+) ${words}`).exec(all.split("\n")[0])?.[1] ?? 0);
+        eq([said("submitted"), said("waiting on you"), said("not sent"), said("approved and not sent yet"), said("confirmed by the employer")],
+          [byState.submitted_unconfirmed ?? 0, byState.needs_user ?? 0, byState.not_submitted ?? 0, (byState.queued ?? 0) + (byState.driving ?? 0), byState.confirmed ?? 0],
+          `the summary's counts are the database's: ${all.split("\n")[0]} vs ${JSON.stringify(byState)}`);
+        eq(Number(/^(\d+) applications:/.exec(all)?.[1]), N, "every application counted");
         const nums = [...all.split("\n")[0].matchAll(/(\d+) [a-z]/g)].map((m) => Number(m[1]));
         eq(nums.slice(1).reduce((a, b) => a + b, 0), N, "the counts add up to every application");
         assert(new RegExp(`first, then newest first:\\n- ${captcha.company}:`).test(all), `the one waiting on them first: ${all.slice(0, 400)}`);

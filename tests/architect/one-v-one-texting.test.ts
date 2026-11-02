@@ -1,5 +1,4 @@
-// 1v1 (owner, 2026-11-01: "doesnt act the way an iMessage bot should ... try to get trainee to respond the same as you while
-// providing links the same way as Instinct"). The 120-scenario 1v1 (evals/career/one-v-one) and the fixes it ranked first,
+// 1v1 (owner request, 2026-11-01: reply like a texting-native agent, with links given the way Instinct gives them). The 120-scenario 1v1 (evals/career/one-v-one) and the fixes it ranked first,
 // each written failing first:
 //   1. links: a link inside a sentence goes on its own line right after the sentence that says what it is (Q584, Q585,
 //      Q632), and the router numbers the roles it lists so the person can answer with a digit (Q89);
@@ -8,8 +7,12 @@
 //   4. the staged brain's system prompt carries the texting rules on a texting channel (plain text, one link alone on its
 //      own line, short bubbles, one question), and the channel reaches it;
 // Text the person approves word for word is never reshaped (career_reply_writer.ts writable(); not this layer).
-import { SCENARIOS } from "../../evals/career/one-v-one/scenarios.ts";
+import { ctxOf, SCENARIOS } from "../../evals/career/one-v-one/scenarios.ts";
 import { grade } from "../../evals/career/one-v-one/score.ts";
+import { probeCounts } from "../../evals/career/one-v-one/probes.ts";
+import { judgeReply, parseVerdict } from "../../evals/career/one-v-one/judge.ts";
+import { CODE_TURN_ORDER } from "../../evals/career/world.ts";
+import { toOpenAI } from "../../supabase/functions/_shared/model_gateway.ts";
 import { formatForChannel, imessageNativeRender, linksOnOwnLine, nativeRender } from "../../supabase/functions/_shared/channel_voice.ts";
 import { careerSystemPrompt } from "../../supabase/functions/_shared/agent/prompt.ts";
 import { findUrls } from "../../supabase/functions/_shared/channel_text.ts";
@@ -26,7 +29,7 @@ Deno.test("the 1v1 set: 120 scenarios over every channel and state, and every go
   eq(new Set(SCENARIOS.map((s) => s.id)).size, 120, "ids are unique");
   for (const ch of ["imessage", "sms", "whatsapp", "telegram", "web"]) assert(SCENARIOS.filter((s) => s.channel === ch).length >= 10, `${ch} has at least 10`);
   for (const st of ["new", "profile", "inflight"]) assert(SCENARIOS.some((s) => s.state === st), `state ${st}`);
-  const bad = SCENARIOS.map((s) => ({ id: s.id, g: grade(s.gold, s.channel, s.r, s.msg) })).filter((x) => !x.g.pass);
+  const bad = SCENARIOS.map((s) => ({ id: s.id, g: grade(s.gold, s.channel, s.r, ctxOf(s)) })).filter((x) => !x.g.pass);
   eq(bad.map((b) => `${b.id}:${b.g.failed.join("+")}`), [], "gold fails its own rubric");
 });
 
@@ -35,7 +38,7 @@ Deno.test("the rubric catches what the owner named: a link inside a sentence, ma
   assert(grade([`Data Analyst at Brex (${B}) is in Chicago.`], "imessage", r).failed.includes("link_format"), "link inside a sentence");
   assert(grade([`**Brex** Data Analyst:\n${B}`], "imessage", r).failed.includes("markdown"), "markdown on iMessage");
   assert(grade(["word ".repeat(120)], "imessage", {}).failed.includes("bubble_len"), "a wall of text");
-  assert(grade([`Data Analyst at Brex:\n${B}`], "imessage", r).pass, "the Instinct way passes");
+  assert(grade([`Data Analyst at Brex:\n${B}`], "imessage", r, { links: [B] }).pass, "the Instinct way passes");
 });
 
 Deno.test("fix 1: each link alone on its own line, right after the sentence that names it", () => {
@@ -62,7 +65,7 @@ Deno.test("fix 1: each link alone on its own line, right after the sentence that
 Deno.test("fix 1 on the wire: the router's search reply grades clean for links on iMessage, SMS, WhatsApp and Telegram", () => {
   for (const ch of ["imessage", "whatsapp", "telegram"] as const) {
     const bubbles = ch === "imessage" ? imessageNativeRender(SEARCH) : nativeRender(ch, ch === "telegram" ? 4000 : 1500)(SEARCH);
-    const g = grade(bubbles, ch, { links: 3, maxBubbles: 6, maxChars: 2000 });
+    const g = grade(bubbles, ch, { links: 3, maxBubbles: 6, maxChars: 2000 }, { links: [F, B, N] });
     for (const c of ["link_format", "links_present", "markdown"] as const) assert(!g.failed.includes(c), `${ch}: ${c} ${g.why[c]}\n${JSON.stringify(bubbles)}`);
   }
 });
@@ -141,4 +144,74 @@ Deno.test("style: no iMessage or SMS bubble carries more than 3 sentences; split
 Deno.test("style: the texting rules give the brain the numbers (3 sentences a bubble, short sentences, plain words)", () => {
   const p = careerSystemPrompt("2026-11-01", { channel: "imessage" });
   assert(/three sentences/i.test(p) && /20 words/i.test(p) && /grade/i.test(p), p.slice(-900));
+});
+
+// ------------------------------------------------------------------------------------------------ review of #368: hardening
+const byId = (id: string) => SCENARIOS.find((x) => x.id === id)!;
+const g = (id: string, reply: string[]) => { const s = byId(id); return grade(reply, s.channel, s.r, ctxOf(s)); };
+
+Deno.test("hardening: replies that game the rubric pass about none of the 120 (Ok., empty, echo, keyword stuffing, invented)", () => {
+  const p = probeCounts();
+  for (const k of ["ok", "empty", "echo", "invented", "link"]) eq(p[k], 0, `${k} probe passes`);
+  assert(p.stuffing <= 2, `keyword stuffing passes ${p.stuffing}`);
+  assert(p.fixed <= 5, `one fixed reply passes ${p.fixed} (only asks whose right answer is "what role and city?")`);
+});
+
+Deno.test("hardening: every scenario requires content the person's own message does not already carry", () => {
+  for (const s of SCENARIOS) {
+    const own = (s.r.must ?? []).filter((m) => !new RegExp(m, "i").test([...(s.prior ?? []), s.msg].join(" ")));
+    assert(own.length, `${s.id} has no required content beyond the message`);
+  }
+});
+
+Deno.test("hardening: each check catches its own mutation of a passing gold reply", () => {
+  const v009 = byId("V009").gold;
+  assert(g("V009", v009).pass, "the gold passes");
+  const fails = (id: string, reply: string[], check: string) => { const r = g(id, reply); assert(r.failed.includes(check as any), `${id} ${check}: ${JSON.stringify(r.why)}`); };
+  fails("V009", [...v009.slice(0, -1), "More here:\nhttps://jobs.example.test/x/1", v009.at(-1)!], "links_valid");
+  fails("V046", [...byId("V046").gold, "I submitted it already."], "claims");
+  fails("V009", v009.map((b) => b.replace(/Stripe|Brex|Notion/g, "Acme")), "facts");
+  fails("V009", v009.map((b) => b.replace(/^\d\. /gm, "")), "numbered");
+  fails("V033", ["One page. Why? Who knows? Want me to look at yours?"], "questions");
+  fails("V033", ["Great question! One page, since a second page mostly gets skipped.", "Want me to look at yours?"], "voice");
+  fails("V017", ["Kaiser in Denver lists $98,000 for an RN; contact Dana Smith there.", "Want me to watch for more?"], "invented");
+  fails("V024", ["Brex sponsors visas for this role, so you're fine.", "Ask their recruiter if you want it in writing."], "invented");
+  fails("V009", [byId("V009").msg], "substance");
+  fails("V009", ["stripe brex notion chicago data analyst roles watch"], "substance");
+});
+
+Deno.test("hardening: links are allowed per scenario, never from one global list", () => {
+  // A real posting link, but V033 (resume length) has no posting in its answer: not allowed there.
+  const r = g("V033", ["One page. With under 10 years of experience, a second page mostly gets skipped.", "An example:\nhttps://job-boards.greenhouse.io/brex/jobs/7005005", "Want me to look at yours?"]);
+  assert(r.failed.includes("links_valid"), JSON.stringify(r.why));
+});
+
+Deno.test("hardening: the harness runs the handler's code turns in the handler's order", () => {
+  const src = Deno.readTextFileSync(new URL("../../supabase/functions/agent-chat/handler-career.ts", import.meta.url));
+  const a = src.indexOf("async function handleChatInner"), b = src.indexOf("const turn = await agentTurn(", a);
+  assert(a > 0 && b > a, "the handler's turn section is found");
+  const order: string[] = [];
+  for (const m of src.slice(a, b).matchAll(/(?:await|\?\?)\s+\(?(?:await\s+)?([a-zA-Z]+Turn)\(/g)) if (!order.includes(m[1])) order.push(m[1]);
+  eq(CODE_TURN_ORDER.map((t) => t.name), order, "evals/career/world.ts CODE_TURN_ORDER must match handler-career.ts");
+  for (const t of CODE_TURN_ORDER) assert(t.harness === "runs" || t.harness.length > 10, `${t.name}: runs, or says why not`);
+  for (const n of ["cardTurn", "questionsTurn", "outreachTurn", "applyTurn", "followupTurn", "standingTurn", "reminderTurn", "overviewTurn", "applicationsTurn", "networkingTurn", "offerChatTurn"])
+    eq(CODE_TURN_ORDER.find((t) => t.name === n)?.harness, "runs", `${n} runs in the harness`);
+});
+
+Deno.test("judge: strict JSON; a parse failure, a bad field, a pass that is not the AND, an error or a disagreement is a FAIL", async () => {
+  const ok = { answers: true, facts: true, style: true, links: true, pass: true, note: "" };
+  eq(parseVerdict(JSON.stringify(ok)).pass, true);
+  for (const bad of ["", "not json", "{\"pass\": true}", JSON.stringify({ ...ok, facts: "yes" }), JSON.stringify({ ...ok, facts: false }), "Sure: " + JSON.stringify(ok)]) {
+    let threw = false; try { parseVerdict(bad); } catch { threw = true; } assert(threw, `accepted: ${bad}`);
+  }
+  const say = (texts: string[]) => { let i = 0; return async (_p: any) => ({ content: [{ type: "text", text: texts[i++] }] }); };
+  eq((await judgeReply(say([JSON.stringify(ok), JSON.stringify(ok)]), "p")).pass, true, "two passes agree");
+  eq((await judgeReply(say([JSON.stringify(ok), "oops"]), "p")).pass, false, "a parse failure fails");
+  eq((await judgeReply(say([JSON.stringify(ok), JSON.stringify({ ...ok, style: false, pass: false })]), "p")).pass, false, "a disagreement fails");
+  eq((await judgeReply(async () => { throw new Error("429"); }, "p")).pass, false, "a model error fails");
+  let seen: any = null;
+  await judgeReply(async (p) => { seen = p; return { content: [{ type: "text", text: JSON.stringify(ok) }] }; }, "p");
+  assert(seen.temperature === 0 && Number.isInteger(seen.seed) && seen.response_format?.json_schema?.strict === true, "temperature 0, fixed seed, strict schema");
+  const body = toOpenAI({ ...seen }, { provider: "openai", model: "gpt-4.1-mini", apiKey: "k", reasoningEffort: null } as any);
+  assert(body.temperature === 0 && body.seed === seen.seed && body.response_format?.type === "json_schema", `the request carries them: ${JSON.stringify({ t: body.temperature, s: body.seed })}`);
 });

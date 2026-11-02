@@ -14,10 +14,11 @@
 //
 //   deno run -A --no-check evals/career/one-v-one/run.ts --label <label> [--only V001,V009]
 //   deno run -A --no-check evals/career/one-v-one/run.ts --report <before-label> <after-label>   writes docs/architect/ONE-V-ONE-2026-11-01.md
-import { SCENARIOS, type Scenario, type State } from "./scenarios.ts";
+import { ctxOf, SCENARIOS, type Scenario, type State } from "./scenarios.ts";
 import { CHECKS, CHECK_WHAT, type Channel, type Check, grade, type Graded } from "./score.ts";
 import { EXTRA_POSTINGS } from "./postings.ts";
 import { FIX, STYLE_CHECKS, styleOf, type StyleRow, TARGETS } from "./style.ts";
+import { judgePrompt, judgeReply, type JudgeResult, type ModelCall } from "./judge.ts";
 
 const here = new URL(".", import.meta.url);
 const WORLD = JSON.parse(Deno.readTextFileSync(new URL("../worlds/in-flight.json", here)));
@@ -43,9 +44,13 @@ export interface Row {
   handler: string; reply: string; off: { bubbles: string[]; g: Graded }; on: { bubbles: string[]; g: Graded };
   style: { gold: StyleRow; off: StyleRow; on: StyleRow };
   staged: { brain: boolean; reason: string; intent: string | null }; brainEcho: { bubbles: string[]; g: Graded } | null; promptRules: boolean | null;
+  judge?: JudgeResult; final?: boolean; // final: the regex rubric (voice on) AND the judge
 }
 
-export async function runAll(list: Scenario[]): Promise<Row[]> {
+// o.brainModel: the REAL staged brain (CAREER_BRAIN=staged): the turns the staged decision gives the brain are answered by
+// this model through agentTurn; the rest by code and the router, as live. Without it the brain's side is only the fake-model
+// echo below, which measures the delivery path, NOT the brain. o.judgeCall: the OpenAI judge (judge.ts). o.stop: the budget.
+export async function runAll(list: Scenario[], o: { brainModel?: ModelCall | null; judgeCall?: ModelCall | null; stop?: () => string | null } = {}): Promise<Row[] & { stopped?: string }> {
   const { openWorld, worldTurn, USER } = await import("../world.ts");
   const { stagedDecision } = await import("../../../supabase/functions/agent-chat/career_staged.ts");
   const off = await renderers(false), on = await renderers(true);
@@ -53,35 +58,47 @@ export async function runAll(list: Scenario[]): Promise<Row[]> {
   for (const s of list) {
     const w = await openWorld(seed(s.state));
     let now = w.now;
-    for (const p of s.prior ?? []) { await worldTurn(w, { brain: "router", threadId: "A", message: p, now }); now += 90000; }
+    for (const p of s.prior ?? []) { await worldTurn(w, { brain: "router", threadId: "A", message: p, now, production: true }); now += 90000; }
     // The staged decision on the real state, before the graded turn (the probe works on a copy).
     const t = w.th("A");
     const ctx: any = w.H.createTurnCtx({ userId: USER, threadId: "A", now, accountPersistence: true, snapshot: t.snapshot, account: w.account, postings: w.kb });
     const d = stagedDecision({ env: { get: (k: string) => ({ CAREER_BRAIN: "staged" } as Record<string, string>)[k] }, message: s.msg, ctx, host: w.H, structured: false });
+    const stop = o.stop?.();
+    if (stop) { (rows as any).stopped = stop; break; }
+    const real = !!(o.brainModel && d.brain);
+    const r = await worldTurn(w, { brain: real ? "agent" : "router", threadId: "A", message: s.msg, now, production: true, ...(real ? { model: o.brainModel, channel: s.channel } : {}) } as any);
+    // A code turn answers first in production (CODE_TURN_ORDER); the brain is reached only when none did.
+    const taken = d.brain && !r.handler.startsWith("code:");
     // The brain's path with a model that answers with the gold text: does the reply survive the path and the render?
+    // FAKE MODEL: this does NOT measure the brain. A model that answers with the gold text shows only whether a good reply
+    // survives the brain's delivery path and the render. The brain's real score is --brain staged-real (OpenAI, paid).
     let brainEcho: Row["brainEcho"] = null, promptRules: boolean | null = null;
-    if (d.brain) {
+    if (taken) {
       const w2 = await openWorld(seed(s.state));
       let n2 = w2.now;
-      for (const p of s.prior ?? []) { await worldTurn(w2, { brain: "router", threadId: "A", message: p, now: n2 }); n2 += 90000; }
+      for (const p of s.prior ?? []) { await worldTurn(w2, { brain: "router", threadId: "A", message: p, now: n2, production: true }); n2 += 90000; }
       let system = "";
       const model = async (p: any) => { system ||= p.system; return { content: [{ type: "text", text: s.gold.join("\n\n") }], stop_reason: "end_turn" }; };
-      const r2 = await worldTurn(w2, { brain: "agent", threadId: "A", message: s.msg, now: n2, model, channel: s.channel } as any);
+      const r2 = await worldTurn(w2, { brain: "agent", threadId: "A", message: s.msg, now: n2, model, channel: s.channel, production: true } as any);
       const b = on(s.channel, r2.reply);
-      brainEcho = { bubbles: b, g: grade(b, s.channel, s.r, s.msg) };
+      brainEcho = { bubbles: b, g: grade(b, s.channel, s.r, ctxOf(s)) };
       promptRules = /alone on its own line/i.test(system) && /no markdown|never markdown|plain text/i.test(system);
     }
-    const r = await worldTurn(w, { brain: "router", threadId: "A", message: s.msg, now });
     const bOff = off(s.channel, r.reply), bOn = on(s.channel, r.reply);
     rows.push({ id: s.id, feature: s.feature, channel: s.channel, state: s.state, msg: s.msg, gold: s.gold, handler: r.handler, reply: r.reply,
-      off: { bubbles: bOff, g: grade(bOff, s.channel, s.r, s.msg) }, on: { bubbles: bOn, g: grade(bOn, s.channel, s.r, s.msg) },
+      off: { bubbles: bOff, g: grade(bOff, s.channel, s.r, ctxOf(s)) }, on: { bubbles: bOn, g: grade(bOn, s.channel, s.r, ctxOf(s)) },
       style: { gold: styleOf(s.gold, s.channel), off: styleOf(bOff, s.channel), on: styleOf(bOn, s.channel) },
-      staged: { brain: d.brain, reason: d.reason, intent: d.intent }, brainEcho, promptRules });
+      staged: { brain: taken, reason: taken || !d.brain ? d.reason : "code_turn", intent: d.intent }, brainEcho, promptRules });
+    if (o.judgeCall) {
+      const row = rows[rows.length - 1];
+      row.judge = await judgeReply(o.judgeCall, judgePrompt(s, bOn, POSTINGS));
+      row.final = row.on.g.pass && row.judge.pass;
+    }
   }
-  return rows;
+  return rows as Row[] & { stopped?: string };
 }
 
-export function goldGrades(list: Scenario[]) { return list.map((s) => ({ id: s.id, g: grade(s.gold, s.channel, s.r, s.msg) })); }
+export function goldGrades(list: Scenario[]) { return list.map((s) => ({ id: s.id, g: grade(s.gold, s.channel, s.r, ctxOf(s)) })); }
 
 export function tally(rows: Row[], key: "off" | "on") {
   const by: Record<string, number> = Object.fromEntries(CHECKS.map((c) => [c, 0]));
@@ -108,7 +125,7 @@ function sideBySide(r: Row, key: "off" | "on"): string {
   return `| ${r.id} | ${r.feature} | ${r.channel} | ${r.state} | ${cell(r.msg)} | ${cell(r.gold.join(" ‖ "))} | ${cell(r[key].bubbles.join(" ‖ ").slice(0, 400))} | ${r.handler} | ${marks} |`;
 }
 
-export function report(before: Row[], after: Row[], meta: { before: string; after: string }): string {
+export async function report(before: Row[], after: Row[], meta: { before: string; after: string; paid?: any[] }): Promise<string> {
   const tb = tally(before, "off"), tbn = tally(before, "on"), ta = tally(after, "off"), tan = tally(after, "on");
   const gold = goldGrades(SCENARIOS);
   const ranked = (t: ReturnType<typeof tally>) => CHECKS.map((c) => [c, t.by[c]] as const).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
@@ -118,17 +135,28 @@ export function report(before: Row[], after: Row[], meta: { before: string; afte
   const rulesB = textingStaged(before).filter((r) => r.promptRules).length, rulesA = textingStaged(after).filter((r) => r.promptRules).length;
   const echoFails = staged.filter((r) => r.brainEcho && !r.brainEcho.g.pass).map((r) => r.id);
   const L: string[] = [];
-  L.push("# 1v1: Trainee vs the architect's gold replies (2026-11-01)", "");
-  L.push("Owner, 2026-11-01: \"theres alot wrong with the way it outputs info, sends poor information, doesnt act the way an iMessage bot should in terms of response, design... generate a 1v1 comparison between yourself and trainee, and try to get trainee to respond the same as you while providing links the same way as Instinct.\"", "");
+  L.push("# 1v1: Trainee vs the architect's gold replies (2026-11-01, hardened 2026-11-02)", "");
+  L.push("Owner request, 2026-11-01: compare the architect and Trainee one on one, and get Trainee to reply the same way, with links given the way Instinct gives them.", "");
   L.push("120 first-week scenarios (`evals/career/one-v-one/scenarios.ts`) across every feature, each with a channel (iMessage, SMS, WhatsApp, Telegram, web) and an account state (new, profile on file, tasks in flight). The gold reply for each was written by hand by the architect (Claude, in session; no model call, no Anthropic API spend). Every scenario carries a rubric a script checks (`score.ts`): bubble count and length, markdown, links present / alone on their own line after the line that says what they are / only real links, question count, numbered options, required facts, forbidden claims, and voice (filler, banned phrases, emoji, internal jargon). The link and formatting rules follow the owner's requirement docs Q73-Q95, Q581-Q587 and Q632-Q633 (cited by number only).", "");
-  L.push("Trainee's side: trunk's live path in-process (`run.ts`): the scenario's state seeded, prior turns run, then the turn through the handler's code-first turns and the router (`evals/career/world.ts`), rendered by each channel's own adapter (`channel_registry.ts`). `CAREER_TEXTING_NATIVE` off is what ships by default; on is the texting voice the owner can switch on. Free, deterministic: `deno run -A --no-check evals/career/one-v-one/run.ts --label <label>`.", "");
-  L.push("## Pass rates", "");
+  L.push("Trainee's side: trunk's live path in-process (`run.ts`): the scenario's state seeded, prior turns run, then the turn through the handler's code turns in the handler's own order (`evals/career/world.ts` CODE_TURN_ORDER, checked against handler-career.ts by test; the turns that need a live service are listed with the reason) and the router, rendered by each channel's own adapter (`channel_registry.ts`). `CAREER_TEXTING_NATIVE` off is what ships by default; on is the texting voice the owner can switch on. Free, deterministic: `deno run -A --no-check evals/career/one-v-one/run.ts --label <label>`.", "");
+  L.push("## Pass rates (regex rubric only: a floor check, not the score; the score is regex AND judge, below)", "");
   L.push(`Gold passes its own rubric: ${gold.filter((g) => g.g.pass).length}/${gold.length}.`, "");
   L.push("| | scenarios passing every check | checks passing |", "|---|---|---|");
   L.push(`| before (trunk 321708d2e), texting voice off (default) | ${tb.pass}/${tb.total} (${pct(tb.pass, tb.total)}) | ${tb.checksPassed}/${tb.checks} (${pct(tb.checksPassed, tb.checks)}) |`);
   L.push(`| before (trunk 321708d2e), texting voice on | ${tbn.pass}/${tbn.total} (${pct(tbn.pass, tbn.total)}) | ${tbn.checksPassed}/${tbn.checks} (${pct(tbn.checksPassed, tbn.checks)}) |`);
   L.push(`| after (this branch), texting voice off (default) | ${ta.pass}/${ta.total} (${pct(ta.pass, ta.total)}) | ${ta.checksPassed}/${ta.checks} (${pct(ta.checksPassed, ta.checks)}) |`);
   L.push(`| after (this branch), texting voice on | ${tan.pass}/${tan.total} (${pct(tan.pass, tan.total)}) | ${tan.checksPassed}/${tan.checks} (${pct(tan.checksPassed, tan.checks)}) |`, "");
+  {
+    const { probeCounts } = await import("./probes.ts");
+    const pc = probeCounts();
+    L.push(`Probes (replies built to game the rubric, regex rubric only; each should pass about 0 of 120): "Ok." ${pc.ok}, empty ${pc.empty}, an echo of the message ${pc.echo}, one fixed generic reply ${pc.fixed} (the asks whose right answer is "what role and city?"), keyword stuffing ${pc.stuffing}, the gold plus an invented pay figure and contact ${pc.invented}, the gold plus an invented link ${pc.link}.`, "");
+  }
+  L.push("## Judge and real brain (the numbers that count)", "");
+  L.push("A scenario counts as passed only when the regex rubric AND an OpenAI judge pass it (`judge.ts`: gpt-4.1-mini, temperature 0, fixed seed, strict JSON schema, judged twice; a parse failure, an error or a disagreement is a FAIL). The real-brain mode (`--brain staged-real`) answers the turns the staged brain takes with the real model (gpt-5-mini) through agentTurn, the rest by code and the router, as live. Estimated spend per run: judge about $0.20, real brain about $0.25; the recorded spend is the meter's, written to `evals/career/results/1v1-<label>.json`, where the brain-eval budget counts it.", "");
+  if (meta.paid?.length) for (const p of meta.paid) L.push(`- ${p.label}: ${p.brain}, regex ${p.regex_pass_voice_on}/${p.scenarios}, judge ${p.judge_pass}/${p.scenarios}, both ${p.final_pass}/${p.scenarios}, spend $${(p.cost_usd.brain + p.cost_usd.judge).toFixed(3)}${p.stopped ? ` (STOPPED: ${p.stopped}, not a score)` : ""}`);
+  else L.push("NOT RUN in this PR: the architect does not start paid runs from a session. They run in the brain-eval workflow (`.github/workflows/brain-eval.yml`, step \"1v1\"), under its EVAL_BUDGET_USD cap, when the owner dispatches it. Until then the regex numbers above are a floor check, not a score.");
+  L.push("");
+  L.push(`Staged brain (\`CAREER_BRAIN=staged\`), FAKE MODEL, no spend. This does NOT measure the brain: a model that answers with the gold text shows only whether a good reply survives the brain's delivery path and the render.`, "");
   L.push(`Staged brain (\`CAREER_BRAIN=staged\`, fake model, no spend): it would take ${staged.length}/120 of these turns (the rest stay with code and the router). With a model that answers with the gold text, the delivered reply still passes its rubric in ${echoPass}/${staged.length}. The ${echoFails.length} that do not (${echoFails.join(", ")}) lose a pay figure or a posting the fake model stated without calling a tool: the fact guard dropping an unsourced number, as it should (a real turn calls search_jobs first). On the ${textingStaged(after).length} of those turns that go out on a texting channel, the system prompt carries the texting rules (plain text, each link alone on its own line, short bubbles, one question) in ${rulesB}/${textingStaged(before).length} before and ${rulesA}/${textingStaged(after).length} after.`, "");
   if (before[0]?.style && after[0]?.style) {
     const sg = styleTally(after, "gold"), sb = styleTally(before, "off"), sbn = styleTally(before, "on"), sa = styleTally(after, "off"), san = styleTally(after, "on");
@@ -196,12 +224,38 @@ if (import.meta.main) {
   if (args[0] === "--report") {
     const [b, a] = [args[1], args[2]];
     const before = JSON.parse(Deno.readTextFileSync(new URL(`${b}.json`, out))), after = JSON.parse(Deno.readTextFileSync(new URL(`${a}.json`, out)));
-    Deno.writeTextFileSync(new URL("../../../docs/architect/ONE-V-ONE-2026-11-01.md", here), report(before, after, { before: b, after: a }));
+    const paid: any[] = [];
+    try { for await (const e of Deno.readDir(new URL("../results/", here))) if (e.name.startsWith("1v1-") && e.name.endsWith(".json")) paid.push(JSON.parse(Deno.readTextFileSync(new URL(`../results/${e.name}`, here)))); } catch { /* none */ }
+    Deno.writeTextFileSync(new URL("../../../docs/architect/ONE-V-ONE-2026-11-01.md", here), await report(before, after, { before: b, after: a, paid }));
     console.log("wrote docs/architect/ONE-V-ONE-2026-11-01.md");
   } else {
     const label = opt("--label") ?? "run";
     const only = opt("--only")?.split(",");
-    const rows = await runAll(only ? SCENARIOS.filter((s) => only.includes(s.id)) : SCENARIOS);
+    // Paid modes (never run by the architect in a session; the brain-eval workflow runs them under its budget):
+    //   --judge               the OpenAI judge on every reply (about $0.20 a run)
+    //   --brain staged-real   the real staged brain (gpt-5-mini) on the turns it takes (about $0.25 a run), judged too
+    const judging = args.includes("--judge"), realBrain = opt("--brain") === "staged-real";
+    let brainModel: ModelCall | null = null, judgeCall: ModelCall | null = null, stop: (() => string | null) | undefined, meters: any = null;
+    if (judging || realBrain) {
+      if (!Deno.env.get("OPENAI_API_KEY")) { console.log("NOT RUN: no OPENAI_API_KEY (the judge and the real brain need it). A score is never estimated."); Deno.exit(2); }
+      const { callModel, modelConfig, newMeter, PRICES } = await import("../../../supabase/functions/_shared/model_gateway.ts");
+      const { spentUsd, budgetStop } = await import("../run.ts");
+      const { JUDGE_MODEL } = await import("./judge.ts");
+      const jm = newMeter(), bm = newMeter();
+      meters = { jm, bm };
+      const jcfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("EVAL_1V1_JUDGE_MODEL") || JUDGE_MODEL };
+      const bcfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+      const budget = Deno.env.get("EVAL_BUDGET_USD") ? Number(Deno.env.get("EVAL_BUDGET_USD")) : null;
+      if (budget === null || !(budget > 0) || !PRICES[jcfg.model] || (realBrain && !PRICES[bcfg.model])) { console.log("NOT RUN: a paid 1v1 run needs EVAL_BUDGET_USD and priced models; an uncapped run is never started."); Deno.exit(2); }
+      const prior: any[] = [];
+      try { for await (const e of Deno.readDir(new URL("../results/", here))) if (e.name.endsWith(".json")) prior.push(JSON.parse(Deno.readTextFileSync(new URL(`../results/${e.name}`, here)))); } catch { /* none */ }
+      const spentBefore = spentUsd(prior, `1v1-${label}`);
+      stop = budgetStop(budget, () => spentBefore + (jm.usd_micros + bm.usd_micros) / 1e6, 0.05);
+      console.log(`budget $${budget.toFixed(2)} · already spent $${spentBefore.toFixed(3)}`);
+      judgeCall = judging ? (p) => callModel(jcfg, p, { meter: jm, role: "chat" }) : null;
+      brainModel = realBrain ? (p) => callModel(bcfg, p, { meter: bm, role: "chat" }) : null;
+    }
+    const rows = await runAll(only ? SCENARIOS.filter((s) => only.includes(s.id)) : SCENARIOS, { brainModel, judgeCall, stop });
     Deno.mkdirSync(out, { recursive: true });
     Deno.writeTextFileSync(new URL(`${label}.json`, out), JSON.stringify(rows, null, 1) + "\n");
     const off = tally(rows, "off"), on = tally(rows, "on");
@@ -212,5 +266,20 @@ if (import.meta.main) {
     for (const k of ["gold", "off", "on"] as const) { const t = styleTally(rows, k); console.log(`style ${k}: ${t.meets}/${t.total} meet; medians ${JSON.stringify(t.median)}; by ${JSON.stringify(t.by)}`); }
     const st = rows.filter((r) => r.staged.brain);
     console.log(`staged brain takes ${st.length}; echo passes ${st.filter((r) => r.brainEcho?.g.pass).length}; prompt rules ${st.filter((r) => r.promptRules).length}`);
+    const { probeCounts } = await import("./probes.ts");
+    console.log(`probes (regex rubric; each should pass about 0 of 120): ${JSON.stringify(probeCounts())}`);
+    if (meters) {
+      const judged = rows.filter((r) => r.judge);
+      const cost = { brain: meters.bm.usd_micros / 1e6, judge: meters.jm.usd_micros / 1e6 };
+      const summary = { label: `1v1-${label}`, set: "one-v-one", brain: realBrain ? "staged-real" : "router", judge: judging, run_at: new Date().toISOString(), cost_usd: cost,
+        scenarios: rows.length, stopped: (rows as any).stopped ?? null, regex_pass_voice_on: rows.filter((r) => r.on.g.pass).length,
+        judge_pass: judged.filter((r) => r.judge!.pass).length, final_pass: judged.filter((r) => r.final).length,
+        items: rows.map((r) => ({ id: r.id, handler: r.handler, regex: r.on.g.pass, judge: r.judge?.pass ?? null, why: r.judge?.why ?? "" })) };
+      // The ledger the brain-eval budget reads (evals/career/results/*.json cost_usd): this run's spend is counted there.
+      Deno.mkdirSync(new URL("../results/", here), { recursive: true });
+      Deno.writeTextFileSync(new URL(`../results/1v1-${label}.json`, here), JSON.stringify(summary, null, 1) + "\n");
+      console.log(`1v1 ${summary.brain}: regex ${summary.regex_pass_voice_on}/${rows.length}, judge ${summary.judge_pass}/${judged.length}, both ${summary.final_pass}/${judged.length} · spend brain $${cost.brain.toFixed(3)} judge $${cost.judge.toFixed(3)}${summary.stopped ? ` · STOPPED (${summary.stopped}): not a score` : ""}`);
+      if (summary.stopped) Deno.exit(3);
+    }
   }
 }

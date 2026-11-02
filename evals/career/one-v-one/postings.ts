@@ -28,3 +28,10 @@ export const EXTRA_POSTINGS = [
     description: "Notion Marketing Coordinator, remote in the US. Campaigns, social, 1+ years. $60,000-$70,000.", posted_at: at, first_seen_at: seen },
 ];
 export const ALLOWED_LINKS = new Set<string>(Object.values(URL));
+
+// What the world states: every company with a posting in it, and every posting's text (the source of any pay figure).
+import WORLD_FILE from "../worlds/in-flight.json" with { type: "json" };
+const ALL = [...(WORLD_FILE as any).postings, ...EXTRA_POSTINGS];
+export const WORLD_COMPANIES: string[] = [...new Set(ALL.map((p: any) => String(p.company)))];
+export const WORLD_PAY_TEXT: string = ALL.map((p: any) => p.description).join("\n");
+export const WORLD_LINKS: string[] = ALL.map((p: any) => String(p.url));

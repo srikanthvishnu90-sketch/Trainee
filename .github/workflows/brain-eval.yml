@@ -102,6 +102,19 @@ jobs:
             const best = Math.max(...ok.map((a) => a.pass_rate));
             console.log(`WO-061: held-out ${{ env.EVAL_BRAIN }} passes ${ps.map((a) => bad(a) ? "void" : a.passed).join(", ")} of ${ok[0].total} both-pass of gpt-5-mini and gpt-4.1-mini, brain ${ok[0].source_commit}: ${best >= 0.95 ? "a pass at 95% on the two CI judges; the score also needs Instinct, on the live build" : "BELOW THE BAR (95%) on the two CI judges"}`);
           ' | tee "$RUNNER_TEMP/verdict.txt"
+      # 1v1 (review of #368): the 120 texting scenarios, each passing only when the regex rubric AND the OpenAI judge pass
+      # (evals/career/one-v-one/judge.ts: gpt-4.1-mini, temperature 0, fixed seed, judged twice). The router (code and the
+      # router, as live) and the real staged brain (gpt-5-mini on the turns CAREER_BRAIN=staged gives it). About $0.65 for
+      # both, inside EVAL_BUDGET_USD: each run's meter is written to evals/career/results/1v1-<label>.json, counted above.
+      - name: 1v1, router and real staged brain, regex and judge
+        if: ${{ always() && inputs.suite != 'tasks' }}
+        run: |
+          deno run -A evals/career/one-v-one/run.ts --judge --label "router-${{ github.run_id }}" || true
+          deno run -A evals/career/one-v-one/run.ts --judge --brain staged-real --label "staged-real-${{ github.run_id }}" || true
+      - name: 1v1 full results (artifact)
+        if: ${{ always() && inputs.suite != 'tasks' }}
+        uses: actions/upload-artifact@v4
+        with: { name: "one-v-one-${{ github.run_id }}", path: evals/career/one-v-one/results/, if-no-files-found: ignore, retention-days: 30 }
       - name: Commit the results to ci/brain-eval
         if: always()
         run: |

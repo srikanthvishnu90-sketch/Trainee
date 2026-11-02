@@ -68,6 +68,8 @@ export function toOpenAI(payload: any, cfg: ModelConfig): any {
   const body: any = { model: cfg.model, messages, max_completion_tokens: (payload.max_tokens || 1024) + (effort ? REASONING_HEADROOM : 0) };
   if (effort) body.reasoning_effort = effort;
   else if (typeof payload.temperature === "number") body.temperature = payload.temperature;
+  // 1v1 judge (2026-11-02): a caller that needs a repeatable answer passes a seed (OpenAI's best-effort determinism).
+  if (Number.isInteger(payload.seed)) body.seed = payload.seed;
   if (Array.isArray(payload.tools) && payload.tools.length) {
     body.tools = payload.tools.map((t: any) => ({ type: "function", function: { name: t.name, description: t.description || "", parameters: t.input_schema || { type: "object", properties: {} } } }));
     const tc = payload.tool_choice;

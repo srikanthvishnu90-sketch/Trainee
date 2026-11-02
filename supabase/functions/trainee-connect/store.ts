@@ -3,6 +3,7 @@
 // chat's own link does), and the single-use take of a link token id.
 // deno-lint-ignore-file no-explicit-any
 import { CONNECTORS, disconnectConnector, statuses, type ConnectorId, type Deps } from "../_shared/connectors.ts";
+import { servedExtraScopes } from "../_shared/google_scopes.ts"; // D-037: gmail.send asked for unless rolled back
 import { outlookConsentFor } from "../_shared/outlook_connector.ts";
 import { SCOPES as MS_SCOPES } from "../_shared/outlook_graph.ts";
 import { googleConsentUrl, issueState, redirectUriFrom, requestScopesFor } from "../gmail-oauth/career.ts";
@@ -15,7 +16,7 @@ const must = (r: any, what: string) => { if (r?.error) throw new Error(`${what}:
 export function supabaseConnectDeps(admin: any, env: { get(k: string): string | undefined }, f: typeof fetch = fetch, now: () => number = Date.now): ConnectDeps {
   const base: Deps = { admin, env, fetch: f, now };
   // The scopes each consent URL asks for, from the code that builds it (never copy written on the page).
-  const googleScopes = () => requestScopesFor("career", env.get("GOOGLE_APPROVED_EXTRA_SCOPES")).scopes;
+  const googleScopes = () => requestScopesFor("career", servedExtraScopes(env)).scopes;
   return {
     env, now,
     providers: () => ({

@@ -41,25 +41,38 @@ Columns: default before D-036 → served now; what it enables; what it needs; ri
 | `CAREER_PLANNER` | compound asks ("find 5, tailor 2, apply, remind me Friday") planned into steps over existing code paths | the task eval (`brain-eval` suite=tasks), planner on against off, no worse; and #371's fix (a crisis message with two asks gets the 988 reply before the planner; planner reminders are delivered) |
 | `CAREER_CRISIS_MODERATION` | the gateway's moderation screen on each turn (second crisis layer; code's `agent-chat/crisis.ts` is always on) | its reader, which lands with #354 (no code reads it at this SHA) |
 
+## (a2) ON by D-037 (owner, 2026-11-01 20:04 CT: "turn these on: Real submissions … Sending email as the person … Reply rewriters")
+
+Every guard is unchanged and still decides each item: the person's approval of the exact payload, the cloud gate and its
+waiver, the opt-in and pauses, any per-person or per-site number the owner sets (Trainee has none of its own, D-MS-2),
+captchas handed to the person, LinkedIn/Indeed/Handshake never opened. Each env flag rolls back with `=off`.
+
+| Switch | Before → now | Enables | Needs | Fails closed how |
+|---|---|---|---|---|
+| `CAREER_BATCH_EXECUTOR` | off → on | batch asks handed to the worker's executor | `workers/career-browser/batch-executor.cjs` running on the owner's host | nothing drains the intents until it runs; each item still needs its approval |
+| `UPMORE_SCRIPT_SUBMIT_LIVE` | unset → `1` | the cloud sandbox presses Submit on an approved application | the cloud runner (below) | `=0`/`off` makes every sandbox a dry run |
+| `CLOUD_RUNNER_ENABLED`, `CLOUD_PREPARE_ENABLED` | off → on | the cloud runner's send and preparation ticks | `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`, `CLOUD_SANDBOX_SNAPSHOT_ID`, `CLOUD_BRIDGE_URL` (the owner's credentials) | 503 "needs setup: <secret> is not set"; no sandbox started |
+| `CAREER_AGENT_SUBMIT` (DB) | off → on (go-live) | the agent finishes an approved application | `release-db-switches.sql` after `verify-claim-guards.sql` | row ≠ `on` stops every claim at once; `trainee-go-live.sh --real-submit off` keeps it off |
+| `CAREER_CLOUD_APPLY` (DB) | off → on (go-live) | cloud applying | same | same |
+| `APPLY_VM` (DB) | off → on (go-live) | the VM worker | same, plus `APPLY_VM_USER_IDS` (nobody until the owner names people or `*`) | same |
+| `CAREER_EMAIL_SEND` | off → on | an approved apply-by-email or follow-up email | the person's grant with gmail.send | no gmail.send on the grant: no token, nothing sent, the person told to reconnect |
+| `CAREER_OUTREACH_SEND` | off → on | the scheduled send of approved outreach | same | same |
+| `CAREER_SEND_RAIL` | off → on | the sending rail for every approved email | same | same; a changed message (to, subject or body) is refused against its approval hash |
+| `GOOGLE_APPROVED_EXTRA_SCOPES` | unset → gmail.send | gmail.send asked for at connect | **Google has not verified gmail.send: until it does, only Google test users can grant it. The owner adds them in the Google Cloud console (APIs & Services → OAuth consent screen → Test users); that is his step.** | a person not on the test-user list cannot grant it, and sending stays closed for them |
+
+Mail leaves only from the person's own Google account (Gmail sets From; Trainee writes none), one recipient, no Cc or Bcc.
+Nothing sends from Trainee's own identity and there is no switch that could. `verify-apply-schema.sql` reports
+`switches at rest | f` once go-live has written the database switches: that is the released state, not a fault.
+
 ## (b) Stays OFF
 
 | Switch | Enables | Why off | Who turns it on |
 |---|---|---|---|
-| `UPMORE_SCRIPT_SUBMIT_LIVE` | the cloud sandbox presses Submit | real submit to employers | owner, at his first live application |
-| `CAREER_AGENT_SUBMIT` (DB, `career_cloud_settings`) | the agent submits an approved application | real submit | owner, at his first live application |
-| `CAREER_CLOUD_APPLY`, `CAREER_CLOUD_TEXT_CARDS`, `APPLY_VM`, `APPLY_VM_USER_IDS` (DB) | cloud and VM applying | real submit | owner |
-| `CLOUD_RUNNER_ENABLED` | cloud runner dispatch (send) | real submit; needs `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`, `CLOUD_SANDBOX_SNAPSHOT_ID` | owner |
-| `CLOUD_PREPARE_ENABLED` | cloud preparation | needs the same Vercel sandbox secrets | owner |
-| `CAREER_BATCH_EXECUTOR` | batch asks handed to the worker's executor | drives employer boards; needs `batch-executor.cjs` running on a host | owner |
-| `CAREER_EMAIL_SEND` | apply-by-email sends from the person's Gmail | sends as the person; needs `gmail.send`, not approved by Google | owner, after Google approves |
-| `CAREER_OUTREACH_SEND` | scheduled outreach sends | sends as the person; `gmail.send` | owner, after Google approves |
-| `CAREER_SEND_RAIL` | the Gmail sending rail | sends as the person; `gmail.send` | owner, after Google approves |
-| `GOOGLE_APPROVED_EXTRA_SCOPES` | asks for `gmail.send` at consent | not approved by Google | owner, after Google approves |
-| `CAREER_OUTREACH_REPLIES`, `CAREER_OUTREACH_REPLIES_MODEL` | reads replies on rail-sent outreach | depends on the send rail (off): nothing to read | with the send rail |
+| `CAREER_OUTREACH_REPLIES`, `CAREER_OUTREACH_REPLIES_MODEL` | reads replies on rail-sent outreach (the model drafts answers) | not in the D-037 ruling; the owner's call now that the rail is on | owner |
 | `CAREER_BRAIN=agent` | the full agent brain | not measured; pinned off in code (`AGENT_BRAIN_RELEASED = false`) | owner, after it passes D-030 |
-| `CAREER_REPLY_WRITER` | the model rewrites every final reply | not eval-safe: no measurement covers it (the S3 eval does not run the final-reply boundary) | after a measurement |
-| `CAREER_KNOWLEDGE` | knowledge library and grounded web research in the brain | changes brain replies; the S3 eval passes no library, so it would go unmeasured | after the eval harness passes it |
-| `CAREER_JUDGE` | model-judged search ranking | changes search replies; unmeasured | after a measurement |
+| `CAREER_REPLY_WRITER` | the model rewrites every final reply | D-037 (3): on only after `evals/career/rewriters/run.ts` shows no lower pass rate and no added invented-fact failure; not run yet (brain-eval suite=rewriters, $5 cap, inside the owner's $20 eval budget) | the measurement |
+| `CAREER_KNOWLEDGE` | knowledge library and grounded web research in the brain | D-037 (3): same rule; not measured yet | the measurement |
+| `CAREER_JUDGE` | model-judged search ranking | D-037 (3): same rule; not measured yet | the measurement |
 | `CAREER_MAIL_MODEL` | the model reads ambiguous mail | sends mail bodies to the model; the Google verification data-use statement (#196) must name it first | owner |
 | `CAREER_PEOPLE_SEARCH` | model web search for people | D-033: Trainee does no web search for people | owner |
 | `CAREER_PEOPLE_SWEEP` | scheduled Gmail people sweeps | the chat never arms a sweep (handler passes no `sweepPush`): half-wired | after the chat side is wired |

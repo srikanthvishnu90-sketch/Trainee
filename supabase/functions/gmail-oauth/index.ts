@@ -31,6 +31,7 @@
 // so they are unit-tested without starting the server (tests/edge/gmail-oauth-career.test.ts).
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
+import { servedExtraScopes } from "../_shared/google_scopes.ts"; // D-037: gmail.send asked for unless rolled back
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/+esm";
 import {
   buildStatus,
@@ -65,7 +66,7 @@ const later = (p: Promise<unknown>) => { const rt = (globalThis as any).EdgeRunt
 // verification submission allows (requestScopesFor).
 async function consentUrlFor(userId: string, purpose: "gmail" | "career", clientId: string, stateSecret: string): Promise<string> {
   const state = await issueState(userId, purpose, stateSecret);
-  const asked = requestScopesFor(purpose, Deno.env.get("GOOGLE_APPROVED_EXTRA_SCOPES"));
+  const asked = requestScopesFor(purpose, servedExtraScopes(Deno.env));
   return googleConsentUrl({ clientId, redirectUri: redirectUri(), state, scopes: asked.scopes });
 }
 
@@ -150,7 +151,7 @@ serve(async (req) => {
         // The Vault entry follows the state's purpose (oauth_connect_commit derives the same name from the provider).
         const provider = providerForPurpose(purpose) as "google_career" | "gmail";
         if (vaultNameFor(userId, purpose) !== `oauth_${provider}_${userId}`) throw new Error("vault name");
-        const fallbackScopes = !purpose ? "" : requestScopesFor(purpose, Deno.env.get("GOOGLE_APPROVED_EXTRA_SCOPES")).scopes.join(" ");
+        const fallbackScopes = !purpose ? "" : requestScopesFor(purpose, servedExtraScopes(Deno.env)).scopes.join(" ");
         const got = await googleCallback({ admin, fetch, now: Date.now, clientId, clientSecret, redirectUri: redirectUri(),
           grantedFallback: () => fallbackScopes }, { code, state, userId, provider });
         landEmail = got.email ?? null;
@@ -199,7 +200,7 @@ serve(async (req) => {
       // Only scopes in the Google verification submission (or approved since): never calendar, and gmail.send only once
       // the owner sets GOOGLE_APPROVED_EXTRA_SCOPES (career.ts requestScopesFor, in lockstep with _shared/google_scopes.ts);
       // openid + email so the userinfo call below can name the address.
-      const asked = requestScopesFor(startPurpose, Deno.env.get("GOOGLE_APPROVED_EXTRA_SCOPES"));
+      const asked = requestScopesFor(startPurpose, servedExtraScopes(Deno.env));
       const q = new URLSearchParams({
         client_id: clientId,
         redirect_uri: redirectUri(),

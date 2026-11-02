@@ -62,6 +62,9 @@ Deno.test({ name: "FEATURE 8: check my email now, the employer's email everywher
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   try {
     for (const f of flags) Deno.env.delete(f);
+    // D-036/D-037: CAREER_MAIL_TRACKING and CAREER_EMAIL_SEND are release flags (on when unset); the off steps run them
+    // rolled back ("off"), the on steps set "on".
+    Deno.env.set("CAREER_MAIL_TRACKING", "off"); Deno.env.set("CAREER_EMAIL_SEND", "off");
     await supabaseParity(pg);
     for (const id of Object.values(PEOPLE)) {
       await pg.sql(`insert into auth.users (id, email) values ('${id}', '${id}@example.test'); insert into public.profiles (id) values ('${id}');

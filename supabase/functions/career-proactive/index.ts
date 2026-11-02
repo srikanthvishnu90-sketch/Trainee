@@ -94,7 +94,7 @@ serve((req) => {
     // one approved send per person per run, then the replies on threads already sent ("stop", bounces, answers).
     // FAMILY NETWORKING: follow-up reminders on networking mail the person sent (career_outreach_track.ts), once each, to
     // their outbox; they need no Gmail, so they run with CAREER_OUTREACH_FOLLOWUPS=on even while sending is off.
-    outreach: Deno.env.get("CAREER_OUTREACH_SEND") === "on" || proactiveSwitches(Deno.env).outreachFollowups ? async (now) => {
+    outreach: proactiveSwitches(Deno.env).outreachSend || proactiveSwitches(Deno.env).outreachFollowups ? async (now) => {
       const store = supabaseOutreachStore(admin);
       const quiet = async (ids: string[]) => {
         const { data, error } = await admin.rpc("career_quiet_users", { p_users: ids });
@@ -102,7 +102,7 @@ serve((req) => {
         return new Set<string>((data ?? []).map((r: any) => String(r.user_id ?? r)));
       };
       const followups = await runOutreachFollowupsGated(Deno.env, { store, outbox: supabaseAlertStore(admin), now, quiet }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
-      if (Deno.env.get("CAREER_OUTREACH_SEND") !== "on") return { followups };
+      if (!proactiveSwitches(Deno.env).outreachSend) return { followups };
       const events = supabaseEventStore(admin), deps = grant(admin);
       const token = (u: string, scope: string) => careerTokenFor(deps, scope)(u);
       const tz = async (u: string) => { const { data } = await admin.from("career_alert_prefs").select("tz").eq("user_id", u).maybeSingle(); return data?.tz ?? undefined; };

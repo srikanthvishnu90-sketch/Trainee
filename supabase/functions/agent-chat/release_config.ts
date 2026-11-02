@@ -69,9 +69,28 @@ export const RELEASE_CONFIG_PATH = "supabase/functions/agent-chat/release_config
 //
 // As with CAREER_BRAIN: unset, or set to the release value ("on"), serves the release value; any other value (off, 0, a
 // typo) serves "off", so a mistyped rollback still rolls back. A switch that is not in this table is read from the
-// environment exactly as before (default off): the real-submit and send-as-the-person switches are never in it
-// (RELEASE_NEVER_ON below; the owner turns those on himself, at his first live application).
-export const RELEASE_FLAGS: Readonly<Record<string, "on">> = Object.freeze({
+// environment exactly as before (default off; RELEASE_NEVER_ON below).
+//
+// D-037 (owner, in writing, 2026-11-01 20:04 CT: "turn these on: Real submissions … Sending email as the person … Reply
+// rewriters"): real submissions and sending email as the person are release flags too. Every guard in front of them is
+// unchanged and still decides each item: the person's approval of the exact payload (an application's payload hash; an
+// email's to, subject and body by hash), the database's own switches (RELEASE_DB_SWITCHES, written by trainee-go-live.sh),
+// the cloud gate and its waiver, the opt-in, the pauses, any per-person or per-site number the owner sets, captchas handed to
+// the person, LinkedIn and Indeed never opened. Mail leaves only from the person's own Google account, and only when that
+// person's own grant carries gmail.send (careerTokenFor: no gmail.send, no token, nothing sent, the person told to
+// reconnect); nothing ever sends from Trainee's identity. The cloud runner's switches can be on while its Vercel sandbox
+// secrets are missing: it then answers "needs setup" and starts nothing (cloud_runner_http.ts). The three reply rewriters
+// stay off until each is measured (D-037 condition 3; docs/architect/RELEASE-FLAGS-2026-11-01.md).
+//
+//   CAREER_BATCH_EXECUTOR       batch asks handed to the worker's executor (which submits only what the person approved)
+//   UPMORE_SCRIPT_SUBMIT_LIVE   the cloud sandbox presses Submit on an approved application (release value "1")
+//   CLOUD_RUNNER_ENABLED        the cloud runner's send tick; CLOUD_PREPARE_ENABLED its preparation tick
+//   CAREER_EMAIL_SEND           an approved apply-by-email or follow-up email from the person's Gmail
+//   CAREER_OUTREACH_SEND        the scheduled send of approved outreach from the person's Gmail
+//   CAREER_SEND_RAIL            the sending rail for every approved email (one recipient, the person's own account)
+//   GOOGLE_APPROVED_EXTRA_SCOPES  gmail.send asked for at connect. Google has not verified the scope: until it does, only the
+//                               Google test users the owner adds in the Google Cloud console can grant it (his step).
+export const RELEASE_FLAGS: Readonly<Record<string, string>> = Object.freeze({
   CAREER_TEXTING_NATIVE: "on",
   CAREER_NETWORKING_DRAFT: "on",
   CAREER_TAILOR_REWRITE: "on",
@@ -80,6 +99,24 @@ export const RELEASE_FLAGS: Readonly<Record<string, "on">> = Object.freeze({
   CAREER_BRIEF_DIGEST: "on",
   CAREER_OUTREACH_FOLLOWUPS: "on",
   CAREER_INTRO_REMINDERS: "on",
+  CAREER_BATCH_EXECUTOR: "on",
+  UPMORE_SCRIPT_SUBMIT_LIVE: "1",
+  CLOUD_RUNNER_ENABLED: "on",
+  CLOUD_PREPARE_ENABLED: "on",
+  CAREER_EMAIL_SEND: "on",
+  CAREER_OUTREACH_SEND: "on",
+  CAREER_SEND_RAIL: "on",
+  GOOGLE_APPROVED_EXTRA_SCOPES: "https://www.googleapis.com/auth/gmail.send",
+});
+
+// D-037: the database switches the release serves on (public.career_cloud_settings; the database reads anything but 'on' as
+// off). trainee-go-live.sh writes them on every go-live from scripts/launch/release-db-switches.sql, which
+// tests/architect/release-flags.test.ts holds to this table. Their kill switch is the row: set it to 'off' and every claim
+// stops at once; `trainee-go-live.sh --real-submit off` writes 'off' instead, so a later go-live does not undo it.
+export const RELEASE_DB_SWITCHES: Readonly<Record<string, "on">> = Object.freeze({
+  CAREER_AGENT_SUBMIT: "on",
+  CAREER_CLOUD_APPLY: "on",
+  APPLY_VM: "on",
 });
 
 // D-036 review (2026-11-01): ON once its condition is met, not before; until then each is read from the environment as
@@ -89,13 +126,14 @@ export const RELEASE_PENDING: Readonly<Record<string, string>> = Object.freeze({
   CAREER_CRISIS_MODERATION: "reader pending #354: no code at this SHA reads it, so it is not reported as a live safety layer",
 });
 
-// Switches the release config never turns on: each submits to an employer, sends as the person, changes reply words no
-// measurement covers, or needs what production does not have (docs/architect/RELEASE-FLAGS-2026-11-01.md, "why off").
-// tests/architect/release-flags.test.ts fails if one of them enters RELEASE_FLAGS. The environment reads them as before.
+// Switches the release config does not turn on: reply words no measurement covers yet (D-037 condition 3: each rewriter goes
+// on only after its measurement), or what production does not have or the owner has not decided
+// (docs/architect/RELEASE-FLAGS-2026-11-01.md, "why off"). tests/architect/release-flags.test.ts fails if one of them
+// enters RELEASE_FLAGS. The environment reads them as before. LinkedIn and Indeed automation and any send from Trainee's own
+// identity have no switch at all: there is no code path to turn on (CLAUDE.md; D-033).
 export const RELEASE_NEVER_ON: readonly string[] = Object.freeze([
-  "UPMORE_SCRIPT_SUBMIT_LIVE", "CLOUD_RUNNER_ENABLED", "CLOUD_PREPARE_ENABLED", "CAREER_BATCH_EXECUTOR",
-  "CAREER_EMAIL_SEND", "CAREER_OUTREACH_SEND", "CAREER_SEND_RAIL", "CAREER_OUTREACH_REPLIES", "CAREER_OUTREACH_REPLIES_MODEL",
-  "GOOGLE_APPROVED_EXTRA_SCOPES", "CAREER_REPLY_WRITER", "CAREER_KNOWLEDGE", "CAREER_JUDGE", "CAREER_MAIL_MODEL",
+  "CAREER_OUTREACH_REPLIES", "CAREER_OUTREACH_REPLIES_MODEL",
+  "CAREER_REPLY_WRITER", "CAREER_KNOWLEDGE", "CAREER_JUDGE", "CAREER_MAIL_MODEL",
   "CAREER_PEOPLE_SEARCH", "CAREER_PEOPLE_SWEEP", "CAREER_PDL", "CAREER_VOICE", "CAREER_PREPARE_AHEAD", "CAREER_PREPARE_AHEAD_COVER",
   "CAREER_RESEARCH_REPLY", "CAREER_RESEARCH_BRIEF", "TRAINEE_LOGO_GUESS", "CHANNEL_UNKNOWN_REPLY", "TRAINEE_SIGNUP",
   "WHATSAPP_TEMPLATE_UPDATES", "UPMORE_LEGACY_GMAIL_CONNECT",
@@ -113,7 +151,8 @@ export function releaseValue(env: Env, name: string): string | undefined {
   return !t || t === release ? release : FLAG_ROLLBACK_VALUE;
 }
 
-// Whether a switch is "on" in this environment, release flags included.
+// Whether a switch is "on" in this environment, release flags included (UPMORE_SCRIPT_SUBMIT_LIVE's on is "1": read it with
+// releaseValue(env, name) === "1").
 export function releaseFlagOn(env: Env, name: string): boolean {
   return releaseValue(env, name) === "on";
 }
@@ -129,5 +168,5 @@ export function releaseEnv(env: Env): Env {
 export function parseReleaseFlags(text: string): string[] {
   const m = /export const RELEASE_FLAGS[^=]*=\s*Object\.freeze\(\{([\s\S]*?)\}\)/.exec(text);
   if (!m) return [];
-  return [...m[1].matchAll(/^\s*([A-Z][A-Z0-9_]*)\s*:\s*"on"\s*,?\s*$/gm)].map((x) => x[1]).sort();
+  return [...m[1].matchAll(/^\s*([A-Z][A-Z0-9_]*)\s*:\s*"[^"\n]+"\s*,?\s*$/gm)].map((x) => x[1]).sort();
 }

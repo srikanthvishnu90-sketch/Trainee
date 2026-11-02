@@ -82,6 +82,9 @@ REPO="$(pwd)"
 DRY=""; SKIP_MIG=""; SKIP_DEPLOY=""; ONLY_SMOKE=""; BRAIN=""; ALLOW_SEND=""; NOWAIT=""; WANT_SHA=""; VERIFY=""; VERIFY_MODE=""; BUILD_SNAPSHOT=""
 NONINT=""; [[ "${TRAINEE_NON_INTERACTIVE:-}" == 1 ]] && NONINT=1
 UNSCHEDULE_CRON=""
+# D-037: the database switches of real submission (release_config.ts RELEASE_DB_SWITCHES), written after the claim guards:
+# on by default; --real-submit off writes the kill switch instead, so a go-live never undoes it.
+REAL_SUBMIT="on"
 DEPLOY_LABEL="${TRAINEE_DEPLOY_LABEL:-owner}"
 while (( $# )); do
   case "$1" in
@@ -92,6 +95,8 @@ while (( $# )); do
     --brain) shift; BRAIN="${1:-}" ;;
     --brain=*) BRAIN="${1#--brain=}" ;;
     --allow-send) ALLOW_SEND=1 ;;
+    --real-submit) shift; REAL_SUBMIT="${1:-}" ;;
+    --real-submit=*) REAL_SUBMIT="${1#--real-submit=}" ;;
     --no-wait) NOWAIT=1 ;;
     --build-snapshot) BUILD_SNAPSHOT=1 ;;
     --non-interactive) NONINT=1 ;;
@@ -922,6 +927,14 @@ else
     echo "DRY: psql *** -X -q -v ON_ERROR_STOP=1 -f scripts/launch/verify-claim-guards.sql (reconcile the bridge and the one ledger; any missing claim guard fails the run, each named)"
   else
     run "psql *** -X -q -v ON_ERROR_STOP=1 -f scripts/launch/verify-claim-guards.sql" "${P[@]}" -f scripts/launch/verify-claim-guards.sql
+  fi
+  # D-037: real submission's database switches, after every claim guard is verified in place (each claim still needs the
+  # person's approval of the exact payload). --real-submit off writes the kill switch.
+  [[ "$REAL_SUBMIT" == on || "$REAL_SUBMIT" == off ]] || fail "--real-submit takes on or off (got: $REAL_SUBMIT)"
+  if [[ -n "$DRY" ]]; then
+    echo "DRY: psql *** -X -q -v ON_ERROR_STOP=1 -v v=$REAL_SUBMIT -f scripts/launch/release-db-switches.sql (CAREER_AGENT_SUBMIT, CAREER_CLOUD_APPLY, APPLY_VM = $REAL_SUBMIT)"
+  else
+    run "psql *** -X -q -v ON_ERROR_STOP=1 -v v=$REAL_SUBMIT -f scripts/launch/release-db-switches.sql" "${P[@]}" -v "v=$REAL_SUBMIT" -f scripts/launch/release-db-switches.sql
   fi
   if [[ -n "$DRY" ]]; then
     echo "DRY: psql *** -tA: every migration mark (${#EARLIER[@]} earlier + ${#MIGRATIONS[@]}) read again on the live schema; any missing one fails the run, each named"

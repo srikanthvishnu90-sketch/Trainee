@@ -37,12 +37,20 @@ const ON = ["CAREER_BRIEF_DIGEST", "CAREER_INTRO_REMINDERS", "CAREER_MAIL_TRACKI
 // On only once its condition is met (RELEASE_PENDING says which): the planner after its measurement and #371's fix; crisis
 // moderation once #354's reader lands. Until then off, and never reported as live.
 const PENDING = ["CAREER_CRISIS_MODERATION", "CAREER_PLANNER"];
-// The real-submit and send-as-the-person switches (the owner turns these on himself, at his first live application).
-const REAL_EFFECT = ["UPMORE_SCRIPT_SUBMIT_LIVE", "CLOUD_RUNNER_ENABLED", "CLOUD_PREPARE_ENABLED", "CAREER_BATCH_EXECUTOR",
-  "CAREER_EMAIL_SEND", "CAREER_OUTREACH_SEND", "CAREER_SEND_RAIL", "GOOGLE_APPROVED_EXTRA_SCOPES"];
+// D-037 (owner, 2026-11-01 20:04 CT: "turn these on: Real submissions … Sending email as the person … Reply rewriters"):
+// real submission and sending as the person, with their release values. The reply rewriters stay off until measured.
+const REAL_SUBMIT = { CAREER_BATCH_EXECUTOR: "on", UPMORE_SCRIPT_SUBMIT_LIVE: "1", CLOUD_RUNNER_ENABLED: "on", CLOUD_PREPARE_ENABLED: "on" };
+const SEND_AS_PERSON = { CAREER_EMAIL_SEND: "on", CAREER_OUTREACH_SEND: "on", CAREER_SEND_RAIL: "on",
+  GOOGLE_APPROVED_EXTRA_SCOPES: "https://www.googleapis.com/auth/gmail.send" };
+const D037: Record<string, string> = { ...REAL_SUBMIT, ...SEND_AS_PERSON };
+const ALL = [...ON, ...Object.keys(D037)].sort();
+const UNMEASURED = ["CAREER_REPLY_WRITER", "CAREER_KNOWLEDGE", "CAREER_JUDGE"];
 
 Deno.test("D-036: production serves exactly the release flags on, with the staged brain", () => {
-  eq(Object.keys(RELEASE_FLAGS).sort(), ON);
+  eq(Object.keys(RELEASE_FLAGS).sort(), ALL);
+  for (const [f, v] of Object.entries(D037)) eq(releaseValue(PROD, f), v, `D-037: ${f} is served ${v} in production`);
+  ok(sendRailOn(PROD), "D-037: the sending rail is on");
+  eq(sandboxHostOptions((k) => releaseValue(PROD, k) ?? "", fetch).scriptSubmitLive, true, "D-037: the cloud sandbox submits approved applications");
   for (const f of ON) {
     eq(releaseValue(PROD, f), "on", `${f} is on in production`);
     ok(releaseFlagOn(PROD, f));
@@ -70,8 +78,10 @@ Deno.test("D-036 review: a pending switch is off in production and named as pend
 
 Deno.test("D-036 review: each chat and scheduled switch is on in production and off under its own rollback", () => {
   // Each switch is pinned to its own flag, so the rollback below rolls back the right thing.
-  eq({ ...CHAT_SWITCHES }, { networkingDraft: "CAREER_NETWORKING_DRAFT", followupReminders: "CAREER_OUTREACH_FOLLOWUPS", introPush: "CAREER_INTRO_REMINDERS", mailTracking: "CAREER_MAIL_TRACKING" });
-  eq({ ...PROACTIVE_SWITCHES }, { mail: "CAREER_MAIL_TRACKING", outreachFollowups: "CAREER_OUTREACH_FOLLOWUPS", introReminders: "CAREER_INTRO_REMINDERS", briefs: "CAREER_BRIEF_DIGEST" });
+  eq({ ...CHAT_SWITCHES }, { networkingDraft: "CAREER_NETWORKING_DRAFT", followupReminders: "CAREER_OUTREACH_FOLLOWUPS", introPush: "CAREER_INTRO_REMINDERS", mailTracking: "CAREER_MAIL_TRACKING",
+    emailSend: "CAREER_EMAIL_SEND", batchExecutor: "CAREER_BATCH_EXECUTOR" });
+  eq({ ...PROACTIVE_SWITCHES }, { mail: "CAREER_MAIL_TRACKING", outreachFollowups: "CAREER_OUTREACH_FOLLOWUPS", introReminders: "CAREER_INTRO_REMINDERS", briefs: "CAREER_BRIEF_DIGEST",
+    outreachSend: "CAREER_OUTREACH_SEND" });
   const on = chatSwitches(PROD), pon = proactiveSwitches(PROD);
   for (const [k, flag] of Object.entries(CHAT_SWITCHES)) {
     eq((on as any)[k], true, `${k} (${flag}) on in production`);
@@ -91,6 +101,10 @@ export const GATES: { file: string; expr: string; n: number }[] = [
   { file: "supabase/functions/agent-chat/handler-career.ts", expr: "reminderPush: chatSwitches(Deno.env).followupReminders,", n: 2 },
   { file: "supabase/functions/agent-chat/handler-career.ts", expr: "introPush: chatSwitches(Deno.env).introPush,", n: 2 },
   { file: "supabase/functions/agent-chat/handler-career.ts", expr: "mailOn: chatSwitches(Deno.env).mailTracking,", n: 1 },
+  { file: "supabase/functions/agent-chat/handler-career.ts", expr: "sendOn: chatSwitches(Deno.env).emailSend,", n: 2 },
+  { file: "supabase/functions/agent-chat/handler-career.ts", expr: "const batchExecutorLive = chatSwitches(Deno.env).batchExecutor;", n: 1 },
+  { file: "supabase/functions/career-proactive/index.ts", expr: "outreach: proactiveSwitches(Deno.env).outreachSend || proactiveSwitches(Deno.env).outreachFollowups ?", n: 1 },
+  { file: "supabase/functions/career-proactive/index.ts", expr: "if (!proactiveSwitches(Deno.env).outreachSend) return { followups };", n: 1 },
   { file: "supabase/functions/career-proactive/index.ts", expr: "mail: proactiveSwitches(Deno.env).mail ?", n: 1 },
   { file: "supabase/functions/career-proactive/index.ts", expr: "|| proactiveSwitches(Deno.env).outreachFollowups ?", n: 1 },
   { file: "supabase/functions/career-proactive/index.ts", expr: "introReminders: proactiveSwitches(Deno.env).introReminders ?", n: 1 },
@@ -126,17 +140,21 @@ Deno.test("D-036: every switch that stays off is off in production, and none can
     ok(!releaseFlagOn(PROD, f), `${f} is off in production`);
     eq(releaseValue(PROD, f), undefined, `${f} is read from the environment as before (unset)`);
   }
-  for (const f of REAL_EFFECT) ok(RELEASE_NEVER_ON.includes(f), `${f} (a real submit or a send as the person) is on the never-on list`);
-  for (const f of ["CAREER_REPLY_WRITER", "CAREER_KNOWLEDGE", "CAREER_JUDGE"]) ok(RELEASE_NEVER_ON.includes(f), `${f} changes reply words no measurement covers: off`);
+  for (const f of UNMEASURED) ok(RELEASE_NEVER_ON.includes(f), `${f} changes reply words and is not measured yet (D-037 condition 3): off`);
   ok(!replyWriterOn(releaseEnv(PROD)), "the reply writer stays off");
   ok(!knowledgeOn(releaseEnv(PROD)), "the knowledge library stays off");
-  ok(!sendRailOn(releaseEnv(PROD)), "the Gmail send rail stays off");
-  eq(sandboxHostOptions((k) => releaseValue(PROD, k) ?? "", fetch).scriptSubmitLive, false, "the cloud runner never submits live");
   eq(AGENT_BRAIN_RELEASED, false, "the full agent brain stays pinned off");
   eq(servedBrain(envOf({ CAREER_BRAIN: "agent" })), "router", "CAREER_BRAIN=agent cannot turn the agent brain on");
 });
 
 Deno.test("D-036: the environment only rolls a release flag back", () => {
+  for (const [f, v] of Object.entries(D037)) {
+    eq(releaseValue(envOf({ [f]: "off" }), f), FLAG_ROLLBACK_VALUE, `D-037 kill switch: ${f}=off rolls it back`);
+    eq(releaseValue(envOf({ [f]: "0" }), f), "off");
+    eq(releaseValue(envOf({ [f]: v }), f), v);
+  }
+  ok(!sendRailOn(envOf({ CAREER_SEND_RAIL: "off" })), "the send rail's kill switch");
+  eq(sandboxHostOptions((k) => releaseValue(envOf({ UPMORE_SCRIPT_SUBMIT_LIVE: "0" }), k) ?? "", fetch).scriptSubmitLive, false, "the live-submit kill switch");
   for (const f of ON) {
     eq(releaseValue(envOf({ [f]: "off" }), f), FLAG_ROLLBACK_VALUE, `${f}=off rolls it back`);
     eq(releaseValue(envOf({ [f]: " OFF " }), f), "off");
@@ -148,7 +166,7 @@ Deno.test("D-036: the environment only rolls a release flag back", () => {
   }
   // A switch outside the table cannot be turned on by the config, and the environment still turns it on as before.
   eq(releaseValue(envOf({ CAREER_REPLY_WRITER: "on" }), "CAREER_REPLY_WRITER"), "on");
-  eq(releaseValue(envOf({ UPMORE_SCRIPT_SUBMIT_LIVE: "1" }), "UPMORE_SCRIPT_SUBMIT_LIVE"), "1");
+  eq(releaseValue(envOf({ CAREER_JUDGE: "on" }), "CAREER_JUDGE"), "on");
   // Each feature's own reader follows its rollback.
   ok(!plannerOn(envOf({ CAREER_PLANNER: "off" }), "u1"));
   ok(!plannerOn(envOf({ CAREER_BRAIN: "router" }), "u1"), "the brain rollback turns the planner off too");
@@ -235,12 +253,12 @@ Deno.test("D-036: every module a release flag switches on is reply code, so S3 r
 
 Deno.test("D-036: the deploy standard reads the release flags at a SHA", async () => {
   const text = await Deno.readTextFile(`${ROOT}/${RELEASE_CONFIG_PATH}`);
-  eq(parseReleaseFlags(text), ON);
-  eq(parseReleaseFlags(text.replace(/^\s*CAREER_MAIL_TRACKING: "on",\n/m, "")), ON.filter((f) => f !== "CAREER_MAIL_TRACKING"), "a flag taken out is read as out");
+  eq(parseReleaseFlags(text), ALL);
+  eq(parseReleaseFlags(text.replace(/^\s*CAREER_MAIL_TRACKING: "on",\n/m, "")), ALL.filter((f) => f !== "CAREER_MAIL_TRACKING"), "a flag taken out is read as out");
   eq(parseReleaseFlags("export const PRODUCTION_BRAIN: ServedBrain = \"staged\";\n"), [], "a SHA before D-036: none on by config");
   const { servedFlagsAt } = await import("../../scripts/launch/deploy-standard.ts");
   const src = { fileAt: async (sha: string, _p: string) => sha === "new" ? text : null } as any;
-  eq(await servedFlagsAt(src, "new"), ON);
+  eq(await servedFlagsAt(src, "new"), ALL);
   eq(await servedFlagsAt(src, "old"), []);
 });
 
@@ -249,5 +267,5 @@ Deno.test("D-036: the decision and its table are written down", async () => {
   ok(decisions.includes("| D-036 |"), "DECISIONS.md records D-036");
   ok(decisions.includes("turn everything on that u believe is needed, to test everything end to end"), "it quotes the ruling");
   const table = await Deno.readTextFile(`${ROOT}/docs/architect/RELEASE-FLAGS-2026-11-01.md`);
-  for (const f of [...ON, ...RELEASE_NEVER_ON, "CAREER_AGENT_SUBMIT", "CAREER_CLOUD_APPLY", "CAREER_BRAIN"]) ok(table.includes(`\`${f}\``), `the table lists ${f}`);
+  for (const f of [...ALL, ...RELEASE_NEVER_ON, "CAREER_AGENT_SUBMIT", "CAREER_CLOUD_APPLY", "APPLY_VM", "CAREER_BRAIN"]) ok(table.includes(`\`${f}\``), `the table lists ${f}`);
 });

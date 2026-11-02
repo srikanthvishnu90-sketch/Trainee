@@ -5,6 +5,7 @@
 import { createRequire } from "node:module";
 import {
   approvedExtras, consentNotice, EMAIL, GMAIL_READONLY, GMAIL_SEND, OPENID, permissionScopes, requestableScopes, SUBMITTED_SCOPES,
+  servedExtraScopes,
 } from "../../supabase/functions/_shared/google_scopes.ts";
 import { careerLanding, LEGACY_OFF_MESSAGE, redirectUriFrom, requestScopesFor, scopeSet, startAllowed } from "../../supabase/functions/gmail-oauth/career.ts";
 import { disconnectGoogle, disconnectReply, GOOGLE_REVOKE, isGoogleDisconnect, revokeAtGoogle, REVOKE_TIMEOUT_MS } from "../../supabase/functions/_shared/google_disconnect.ts";
@@ -29,7 +30,10 @@ const FULL_MAIL = "https://mail.google.com/";
 
 Deno.test("GV/1 the submission is openid, email and gmail.readonly; send and Calendar are never asked for by default", () => {
   eq(SUBMITTED_SCOPES, [OPENID, EMAIL, GMAIL_READONLY], "the scopes submitted on 2026-10-26");
-  const r = requestableScopes([GMAIL_READONLY, GMAIL_SEND, CAL_FB, CAL_EV], env());
+  // D-037 (owner, 2026-11-01: "turn these on: … Sending email as the person"): gmail.send is asked for by the release
+  // (GOOGLE_APPROVED_EXTRA_SCOPES is a release flag); rolled back ("off"), the request is the submission again.
+  eq(requestableScopes([GMAIL_READONLY, GMAIL_SEND, CAL_FB, CAL_EV], env()).scopes, [OPENID, EMAIL, GMAIL_READONLY, GMAIL_SEND], "D-037: send is asked for");
+  const r = requestableScopes([GMAIL_READONLY, GMAIL_SEND, CAL_FB, CAL_EV], env({ GOOGLE_APPROVED_EXTRA_SCOPES: "off" }));
   eq(r.scopes, [OPENID, EMAIL, GMAIL_READONLY], "only the submitted ones reach the consent URL");
   eq(r.dropped, [GMAIL_SEND, CAL_FB, CAL_EV], "and what was refused is named");
   eq(requestableScopes([], env()).scopes, [OPENID, EMAIL], "an empty ask still only names the account");
@@ -42,16 +46,18 @@ Deno.test("GV/2 gmail.send comes back only when the owner says Google approved i
   eq(requestableScopes([GMAIL_READONLY, GMAIL_SEND, CAL_FB], on).dropped, [CAL_FB], "Calendar stays out");
   // A bare word, a full-mail URL on another host, a header break and a list with spaces: none is a scope this accepts.
   const junk = env({ GOOGLE_APPROVED_EXTRA_SCOPES: `gmail.send ${FULL_MAIL} https://www.googleapis.com/auth/gmail.modify\r\nX: y ,` });
-  eq(approvedExtras(junk), ["https://www.googleapis.com/auth/gmail.modify"], "only a googleapis scope URL is read from the switch");
+  eq(approvedExtras(junk), [], "D-037: any value but the release value rolls the switch back; junk widens nothing");
   eq(requestableScopes([FULL_MAIL, GMAIL_SEND], junk).scopes, [OPENID, EMAIL], "full mail access and unapproved send are refused");
   eq(requestableScopes([GMAIL_READONLY], env({ GOOGLE_APPROVED_EXTRA_SCOPES: "" })).scopes, [OPENID, EMAIL, GMAIL_READONLY], "empty switch");
+  eq(requestableScopes([GMAIL_SEND], env({ GOOGLE_APPROVED_EXTRA_SCOPES: "" })).scopes, [OPENID, EMAIL, GMAIL_SEND], "D-037: an empty switch is unset: the release value");
 });
 
 Deno.test("GV/3 gmail-oauth asks Google exactly what the shared module allows, for both grants", () => {
   for (const extras of [undefined, "", GMAIL_SEND, `${GMAIL_SEND} ${CAL_FB}`, "nonsense"]) {
     const e = env(extras === undefined ? {} : { GOOGLE_APPROVED_EXTRA_SCOPES: extras });
-    eq(requestScopesFor("career", extras), requestableScopes([GMAIL_READONLY, GMAIL_SEND, CAL_FB, CAL_EV], e), `career grant, extras ${extras}`);
-    eq(requestScopesFor("gmail", extras), requestableScopes([GMAIL_READONLY], e), `legacy grant, extras ${extras}`);
+    // D-037: gmail-oauth passes the served value (servedExtraScopes), so compare with that.
+    eq(requestScopesFor("career", servedExtraScopes(e)), requestableScopes([GMAIL_READONLY, GMAIL_SEND, CAL_FB, CAL_EV], e), `career grant, extras ${extras}`);
+    eq(requestScopesFor("gmail", servedExtraScopes(e)), requestableScopes([GMAIL_READONLY], e), `legacy grant, extras ${extras}`);
   }
   eq(requestScopesFor("career").scopes, [OPENID, EMAIL, GMAIL_READONLY], "the career consent today");
 });
@@ -82,9 +88,9 @@ Deno.test("GV/8 the disconnect erase migration is applied by go-live and tested 
 Deno.test("GV/4 the handler: filtered consent URL, legacy consent off, its own landing and redirect, one disconnect", () => {
   const start = OAUTH_SRC.slice(OAUTH_SRC.indexOf("const startPurpose = purposeForAction(action);"), OAUTH_SRC.indexOf('if (action === "status")'));
   assert(/if \(!startAllowed\(startPurpose, Deno\.env\)\) return json\(\{ error: LEGACY_OFF_MESSAGE \}, 410\);/.test(start), "the legacy start is refused first");
-  assert(/requestScopesFor\(startPurpose, Deno\.env\.get\("GOOGLE_APPROVED_EXTRA_SCOPES"\)\)/.test(start) && /scope: asked\.scopes\.join\(" "\)/.test(start), "the URL carries only filtered scopes");
+  assert(/requestScopesFor\(startPurpose, servedExtraScopes\(Deno\.env\)\)/.test(start) && /scope: asked\.scopes\.join\(" "\)/.test(start), "the URL carries only filtered scopes");
   assert(!/scopesForPurpose/.test(OAUTH_SRC), "nothing in the handler asks for the raw career set");
-  assert(/: requestScopesFor\(purpose, Deno\.env\.get\("GOOGLE_APPROVED_EXTRA_SCOPES"\)\)\.scopes\.join\(" "\);/.test(OAUTH_SRC), "the fallback granted list is the filtered one");
+  assert(/: requestScopesFor\(purpose, servedExtraScopes\(Deno\.env\)\)\.scopes\.join\(" "\);/.test(OAUTH_SRC), "the fallback granted list is the filtered one");
   assert(/if \(!startAllowed\(purpose, Deno\.env\)\) throw new Error/.test(OAUTH_SRC), "a legacy callback is not stored either");
   assert(/purpose === "career" \? careerLanding\(ok\)/.test(OAUTH_SRC), "the career grant never lands on the Upmore app");
   assert(/return redirectUriFrom\(Deno\.env\);/.test(OAUTH_SRC), "the redirect URI can move to Trainee's domain");

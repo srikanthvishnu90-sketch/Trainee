@@ -152,7 +152,7 @@ Deno.test({ name: "real handler: zero-call, one-call and sink-failure turns leav
     const rows = async (pid: string) => JSON.parse((await pg.sql(`select coalesce(json_agg(json_build_array(meter_state, calls, models) order by id), '[]'::json) from public.agent_turn_costs where user_id = '${pid}'`)) || "[]");
 
     await t.step("a zero-call turn (the router answers, no model asked) leaves one row that says 0 calls", async () => {
-      Deno.env.delete("CAREER_BRAIN");
+      Deno.env.set("CAREER_BRAIN", "router"); // D-035: unset now serves the release brain (staged); the router path is the rollback
       const n = modelRequests;
       await say(handler!.chat("tok-tc1"), "hi");
       eq(modelRequests - n, 0, "no model request was made");
@@ -174,7 +174,7 @@ Deno.test({ name: "real handler: zero-call, one-call and sink-failure turns leav
     });
 
     await t.step("the same turn key sent twice is one turn: one row", async () => {
-      Deno.env.delete("CAREER_BRAIN");
+      Deno.env.set("CAREER_BRAIN", "router"); // D-035: unset now serves the release brain (staged); the router path is the rollback
       const c = handler!.chat("tok-tc3");
       await say(c, "hi", { turn_key: "tc-replay-1" });
       await say(c, "hi", { turn_key: "tc-replay-1" });
@@ -195,7 +195,7 @@ Deno.test({ name: "real handler: zero-call, one-call and sink-failure turns leav
       eq(modelRequests - n, 1, "the model was called");
       eq(await rows(P(4)), [["unrecorded", null, []]], "unrecorded, calls NULL: the spend of this turn is unknown, not zero");
       // A zero-call turn whose zero row is refused is unrecorded too.
-      Deno.env.delete("CAREER_BRAIN");
+      Deno.env.set("CAREER_BRAIN", "router"); // D-035: unset now serves the release brain (staged); the router path is the rollback
       await say(handler!.chat("tok-tc5"), "hi");
       eq(await rows(P(5)), [["unrecorded", null, []]]);
       // Another person's zero-call turn is unaffected.

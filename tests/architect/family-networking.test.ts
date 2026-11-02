@@ -116,7 +116,7 @@ Deno.test({ name: "FAMILY networking and outreach: a new person, end to end, on 
     const followups = async (u = ME) => JSON.parse(await pg.sql(`select coalesce((select value->'items' from public.career_watch_kv where user_id = '${u}' and key = 'career:outreach:followups'), '[]'::jsonb)`));
     const outbox = async (u = ME) => JSON.parse(await pg.sql(`select coalesce(jsonb_agg(jsonb_build_object('key', key, 'kind', kind, 'text', text) order by created_at), '[]'::jsonb) from public.career_outbox where user_id = '${u}'`));
     const events = async (kind: string) => Number(await pg.sql(`select count(*) from public.career_events where user_id = '${ME}' and kind = '${kind}'`));
-    const costs = async () => JSON.parse(await pg.sql(`select jsonb_build_object('calls', coalesce(sum(calls), 0), 'in', coalesce(sum(input_tokens), 0), 'out', coalesce(sum(output_tokens), 0)) from public.agent_turn_costs where user_id = '${ME}'`));
+    const costs = async () => JSON.parse(await pg.sql(`select jsonb_build_object('calls', coalesce(sum(calls), 0), 'in', coalesce(sum(input_tokens), 0), 'out', coalesce(sum(output_tokens), 0)) from public.agent_turn_costs where user_id in ('${ME}', '${OTHER}')`));
 
     await t.step("1. nothing on file: who and email are answered plainly with how to add people; nothing drafted, no model call", async () => {
       task = "nothing on file";

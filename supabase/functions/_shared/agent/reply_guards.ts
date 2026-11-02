@@ -125,7 +125,7 @@ export function factSources(o: { state: Record<string, unknown>; message: string
 // A clause speaks about the person when it says "your …", "my …", "I built/used/led…", "you worked/studied…", "I'm a…"
 // or marks something "(confirmed)". A clause that negates or names a gap ("not in your facts", "you don't have") claims
 // nothing. A question claims nothing.
-const ABOUT = /\b(?:your|yours|my|confirmed)\b|\b(?:you|i)(?:'ve| have| had)?\s+(?:a|an)\s+GPA\b|\b(?:gave|taught|earned|got) me\b|\b(?:you|i)(?:'re|'m| are| am| were| was)\s+(?:an?|proficient|skilled|experienced|fluent|certified)\b|\b(?:you|i)(?:'ve| have| had)?\s+(?:built|led|used|managed|developed|created|designed|worked|interned|studied|graduated|majored|minored|earned|completed|shipped|launched|ran|analy[sz]ed|automated|grew|increased|reduced|cut|taught|served|spent|bring|know|hold|have \d)\b/i;
+const ABOUT = /\b(?:your|yours|my|confirmed)\b|\b(?:you|i)(?:'ve| have| had)?\s+(?:a|an)\s+(?:\d(?:\.\d+)?(?:\s*\/\s*4(?:\.0+)?)?\s+(?:(?:cumulative|overall|major|unweighted|weighted)\s+)?)?GPA\b|\b(?:gave|taught|earned|got) me\b|\b(?:you|i)(?:'re|'m| are| am| were| was)\s+(?:an?|proficient|skilled|experienced|fluent|certified)\b|\b(?:you|i)(?:'ve| have| had)?\s+(?:built|led|used|managed|developed|created|designed|worked|interned|studied|graduated|majored|minored|earned|completed|shipped|launched|ran|analy[sz]ed|automated|grew|increased|reduced|cut|taught|served|spent|bring|know|hold|have \d)\b/i;
 const GAP = /\b(?:not|no|never|none|without|lack|lacking|missing|gaps?|cannot)\b|n't\b/i;
 // "Your GPA: 3.85" is one claim, not two clauses (ADVERSARIAL ROUND 2).
 const CLAUSE = /([,;]\s+|\s*[—–]\s*|(?<!\bGPA\s?):\s+|\s+(?:and|but|or|while|whereas)\s+)/;
@@ -140,6 +140,10 @@ const TITLE_CUE = /\b(?:as an?|i(?:'m| am| was) an?|you(?:'re| are| were) an?|(?
 // A number right after "GPA" and a few linking words ("GPA of", "GPA is", "GPA: ", "GPA stands at") is a GPA.
 const GPA_CUE = /\bGPA\b(?:\s*(?:of|is|was|=|:|at|stands at|is now|currently|around|about|now)\b)*[\s:=]*$/i;
 const NUM_UNIT = /^\s*(?:\+\s*)?(?:years?|yrs?|months?|people|engineers|members|students|users|customers|clients|employees|reports|interns|projects)\b/i;
+// D-035 review (staged brain, fact lock): a number right BEFORE "GPA" is a GPA too ("your 3.9 GPA", "you have a 3.9 GPA",
+// "a 3.7/4.0 cumulative GPA"); only the number after it was read, so "With your 3.9 GPA from ..." delivered an invented GPA.
+const GPA_AFTER = /^\s*(?:\/\s*4(?:\.0+)?\s*)?(?:(?:cumulative|overall|major|unweighted|weighted)\s+)?GPA\b/i;
+const GPA_BEFORE = /(?<![\w.])(\d(?:\.\d+)?)(?:\s*\/\s*4(?:\.0+)?)?\s+(?:(?:cumulative|overall|major|unweighted|weighted)\s+)?GPA\b/gi;
 export interface Untraced { word: string; kind: "skill" | "title" | "degree" | "number" | "result" | "month" | "place" }
 const PLACEHOLDER: Record<Untraced["kind"], string> = {
   skill: "[your skill]", title: "[your title]", degree: "[your degree]", number: "[number]", result: "[result]", month: "[month]", place: "[employer or school]",
@@ -159,7 +163,9 @@ function classify(u: string, clause: string): Untraced | null {
   if (/\d/.test(w)) {
     if (/[$%]|\d\s?(?:k|m|bn|b)$/i.test(w) || /^(?:19|20)\d\d$/.test(w)) return { word: w, kind: "number" };
     // ADVERSARIAL ROUND 2 (2026-10-30): "Your GPA is 3.95" and "your GPA: 4.0" claim a GPA as surely as "GPA of 3.95".
-    return NUM_UNIT.test(clause.slice(pre.length + w.length)) || GPA_CUE.test(pre) ? { word: w, kind: "number" } : null;
+    const after = clause.slice(pre.length + w.length);
+    // The lock also reads "3.9" as "3" and "9": the "9" of "3.9 GPA" is not a GPA of its own (GPA_BEFORE reads it whole).
+    return NUM_UNIT.test(after) || GPA_CUE.test(pre) || (GPA_AFTER.test(after) && !/[\d.\/]$/.test(pre)) ? { word: w, kind: "number" } : null;
   }
   // A prospective role at an employer is not employment history ("your skills fit the role at X"). A worked/studied
   // predicate still claims the person was there, even when that sentence also names a role.
@@ -181,7 +187,7 @@ function clauseClaims(clause: string, sources: string[], personal: string[] = so
   if (!ABOUT.test(plain) || GAP.test(plain)) return [];
   const out: Untraced[] = [];
   const mine = new Set([...personal.join(" \n ").matchAll(/\d[\d,]*(?:\.\d+)?/g)].map((m) => m[0].replace(/,/g, "")));
-  for (const m of plain.matchAll(GPA_STATED)) if (!mine.has(m[1]) && !out.some((x) => x.word === m[1])) out.push({ word: m[1], kind: "number" });
+  for (const re of [GPA_STATED, GPA_BEFORE]) for (const m of plain.matchAll(re)) if (!mine.has(m[1]) && !out.some((x) => x.word === m[1])) out.push({ word: m[1], kind: "number" });
   const nums = new Set([...sources.join(" \n ").matchAll(/\d[\d,]*(?:\.\d+)?/g)].map((m) => m[0].replace(/,/g, "")));
   for (const u of factLock(plain, sources).untraced) {
     const c = classify(u, plain);

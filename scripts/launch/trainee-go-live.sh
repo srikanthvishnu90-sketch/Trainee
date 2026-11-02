@@ -49,8 +49,10 @@
 #                 to replay), and one missing live stops the run before anything is deployed on top of it; then every
 #                 mark is read again and any missing one fails the run (a ledger row never stands in for the schema)
 #   3 secrets     one `supabase secrets set --env-file` from a 0600 temp file removed at once; CAREER_BRAIN=agent only
-#                 with --brain agent, CAREER_BRAIN=staged only with --brain staged (--brain router unsets it; without
-#                 --brain it is not touched)
+#                 with --brain agent, CAREER_BRAIN=staged only with --brain staged, CAREER_BRAIN=router (the emergency
+#                 rollback) only with --brain router; without --brain it is not touched. D-035: the brain served is the
+#                 committed release config (supabase/functions/agent-chat/release_config.ts PRODUCTION_BRAIN, "staged");
+#                 CAREER_BRAIN can only roll it back to the router, never turn on a brain the commit did not ship
 #   4 deploy      agent-chat from the staged career-only tree (index-career.ts as agent-chat/index.ts, JWT on), then
 #                 career-ingest, career-proactive, trainee-deliver, trainee-inbound, trainee-telegram, trainee-whatsapp
 #                 with --no-verify-jwt (pg_cron, LoopMessage, Telegram and Meta carry no JWT; each checks its own secret),
@@ -993,10 +995,13 @@ else
   # no texting channel is told plainly that no message comes (career_outreach_track.ts reminderWords). Before the brain
   # lines: CAREER_BRAIN stays the env file's last name, as F13-10 reads it.
   add CAREER_OUTREACH_FOLLOWUPS on on
-  # The router answers unless the owner asks for the agent brain on this run (D-008); the environment never decides it.
+  # D-035: the committed release config decides the brain (release_config.ts); these only write the rollback switch.
+  # CAREER_BRAIN=agent stays pinned off in code (AGENT_BRAIN_RELEASED) and so serves the router.
   if [[ "$BRAIN" == agent ]]; then add CAREER_BRAIN agent agent; fi
   # FEATURE 13: the staged release (question and advice turns to the brain, every action to code) only with --brain staged.
   if [[ "$BRAIN" == staged ]]; then add CAREER_BRAIN staged staged; fi
+  # D-035: the emergency rollback is SET, not unset: unset serves the committed release brain (staged).
+  if [[ "$BRAIN" == router ]]; then add CAREER_BRAIN router router; fi
   if [[ -n "$DRY" ]]; then echo "DRY: supabase secrets set --project-ref $REF --env-file <0600 temp file: ${NAMES[*]}>"
   else
     ENVF="$(umask 077; mktemp "${TMPDIR:-/tmp}/trainee-secrets.XXXXXX")"; chmod 600 "$ENVF"
@@ -1009,8 +1014,8 @@ else
   case "$BRAIN" in
     agent) echo "  CAREER_BRAIN=agent: the agent brain answers career turns (the router still takes structured tasks and model outages)" ;;
     staged) echo "  CAREER_BRAIN=staged: the brain answers question and advice turns; every action, a model outage and any class in CAREER_BRAIN_ROUTER_INTENTS stay with code and the router (--brain router turns it off)" ;;
-    router) run "supabase secrets unset CAREER_BRAIN --project-ref $REF" supabase secrets unset CAREER_BRAIN --project-ref "$REF" ;;
-    *) echo "  CAREER_BRAIN not touched (the router answers unless it was set to agent before; --brain agent|router changes it)" ;;
+    router) echo "  CAREER_BRAIN=router: the emergency rollback; the router answers every turn whatever the release config says (removing the CAREER_BRAIN secret returns to the release brain)" ;;
+    *) echo "  CAREER_BRAIN not touched (the committed release config, supabase/functions/agent-chat/release_config.ts, decides the brain; CAREER_BRAIN=router rolls it back; --brain router sets that)" ;;
   esac
   if (( ${#GENERATED[@]} )); then
     echo "  generated: ${GENERATED[*]} (48 characters each; kept only in this process$([[ -n "$NONINT" ]] && echo '; --non-interactive never shows them: the function and its Vault schedule hold each'))"

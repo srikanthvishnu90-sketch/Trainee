@@ -1,7 +1,7 @@
 // Review probes for #280 (written first; each failed against 9b7d344). Placeholders, label spoofing, the records label, approval order,
 // the fail-closed fact guard, and Remove's honesty.
 import assertNode from "node:assert/strict";
-import { signedIn } from "./file-session-fakes.ts";
+import { signedIn, phonePost } from "./file-session-fakes.ts";
 const A = signedIn();
 import { actionsOf, textOf, validateKind, type FileRecord } from "../../supabase/functions/_shared/file_kinds.ts";
 import { createFileService, memoryFileStore, type FileKindStore } from "../../supabase/functions/_shared/file_service.ts";
@@ -66,7 +66,7 @@ Deno.test("probe 4b: the approval is recorded BEFORE any send attempt", async ()
     fileEffects: { async introduce(u: string) { seen.push((await store.get(u, made.id))?.state.choice); return { ok: false, reason: "mail down" }; } } };
   const t = await A.tok(U, made.id, NOW);
   const tag = (await store.get(U, made.id))!.tag!;
-  const r = await handleFile(new Request("https://x.example/f", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ t, action: "introduce", tag }).toString() }), d);
+  const r = await handleFile(new Request("https://x.example/f", await phonePost({ t, action: "introduce", tag }, SECRET)), d);
   eq(seen, ["approved"], "at send time the approval was already stored");
   assert(/not sent/i.test(await r.text()));
   eq((await store.get(U, made.id))?.state.choice, "approved");
@@ -88,7 +88,7 @@ Deno.test("probe 6: Remove reports failure when the revoke did nothing", async (
   const stub = { async recallList() { return null; } } as unknown as FileStore;
   const d: FileDeps = { ...A.deps, store: stub, now: () => NOW, env: { get: (k) => ENV[k] }, cards: {} as never, tap: {} as never, files: svc };
   const t = await A.tok(U, made.id, NOW);
-  const r = await handleFile(new Request("https://x.example/f", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ t, action: "remove" }).toString() }), d);
+  const r = await handleFile(new Request("https://x.example/f", await phonePost({ t, action: "remove" }, SECRET)), d);
   const body = await r.text();
   assert(r.status >= 500 || r.status === 409, `status ${r.status}`);
   assert(!/is removed|File removed/i.test(body) && /couldn.t remove|not removed/i.test(body), body.slice(0, 300));
@@ -160,7 +160,7 @@ Deno.test("probe r3-2: two simultaneous Introduce taps attempt exactly one send"
     fileEffects: { async introduce() { sends++; await new Promise((r) => setTimeout(r, 15)); return { ok: true }; } } };
   const t = await A.tok(U, made.id, NOW);
   const tag = (await store.get(U, made.id))!.tag!;
-  const tap = (action: string) => handleFile(new Request("https://x.example/f", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ t, action, tag }).toString() }), d);
+  const tap = async (action: string) => handleFile(new Request("https://x.example/f", await phonePost({ t, action, tag }, SECRET)), d);
   await Promise.all([tap("introduce"), tap("introduce"), tap("introduce"), tap("pass")]);
   const choice = (await store.get(U, made.id))?.state.choice;
   eq(sends, choice === "passed" ? 0 : 1, `${sends} sends attempted, choice ${choice}: exactly one decision wins, and Pass and Introduce exclude each other`);

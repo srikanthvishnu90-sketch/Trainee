@@ -102,6 +102,31 @@ export async function checkSession(id: string, d: { sessions: SessionStore; phon
   return { ok: true, userId: row.user_id, list: row.list, idHash, row };
 }
 
+// WHERE a session may be presented (owner, 2026-10-29: "an unused, forwarded or copied link must not let another person read my
+// private data or apply as me"; follow-up 2026-11-02). A page is copied, saved, cached, shared or screenshotted with its HTML, so
+// nothing in the HTML may work as the session by itself:
+//   phone    the id lives ONLY in the HttpOnly tf_s cookie, and every request needs it. The page's forms carry a page token (below),
+//            an HMAC of the session's hash under TRAINEE_FILE_LINK_SECRET: it proves a post came from a page drawn for that
+//            session (a cross-site form cannot read it), and it is worth nothing without the cookie (the token never yields the id).
+//   telegram the Mini App runs inside Telegram's webview, where this site's cookies may not be kept (a third-party frame on
+//            web.telegram.org), so its forms carry the session id; but every request must also carry Telegram's signed initData,
+//            still fresh (telegram_webapp.ts INITDATA_MAX_AGE_S) and for the very Telegram user the session is bound to. The
+//            initData is never in the HTML (Telegram hands it to the page's script), so a copied Mini App page opens nothing.
+// A phone session's id in a form, or a Telegram session's id in a cookie, opens nothing.
+export const PAGE_TOKEN = /^fp1\.[0-9a-f]{64}$/;
+export async function pageTokenOf(idHash: string, secret: string | undefined): Promise<string | null> {
+  if (!secret || !/^[0-9a-f]{64}$/.test(idHash)) return null;
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return `fp1.${hex(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(`trainee-file/page-token/v1|${idHash}`)))}`;
+}
+// Constant time over equal lengths.
+export function sameToken(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+
 export const sessionCookie = (id: string) => `tf_s=${id}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`;
 export const loginCookie = (link: string) => `tf_l=${link}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${Math.floor(LOGIN_TTL_MS / 1000)}`;
 export const CLEAR_SESSION = "tf_s=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0";

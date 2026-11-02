@@ -32,7 +32,7 @@ import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { postgrestDouble } from "../flow/postgrest.ts";
 import { PgConn } from "../flow/pgwire.ts";
 import { confirmedResumeSql } from "../flow/resume-seed.ts";
-import { signedIn } from "./file-session-fakes.ts";
+import { phonePost, signedIn } from "./file-session-fakes.ts";
 import { BY_HAND, descText, generate, HIT_LOCS, HIT_PAYS, type PayloadSpec, type PostingSpec, rng, ROW_LOCS, ROW_PAYS, sample, type Scenario, SECRET_MARK,
   type Step } from "./scenarios/file-apply-generator.ts";
 
@@ -547,7 +547,7 @@ async function runScenario(s: Scenario, w: World, rep: Report, tok: string, o: {
     rep.requests++; const t0 = performance.now();
     let res: Response;
     try {
-      res = f ? await handleFile(new Request("https://x.example/f", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", cookie: `tf_s=${tok}` }, body: new URLSearchParams({ t: tok, ...f }).toString() }), w.deps)
+      res = f ? await handleFile(new Request("https://x.example/f", await phonePost({ t: tok, ...f }, w.deps.env.get("TRAINEE_FILE_LINK_SECRET") ?? "")), w.deps)
         : await handleFile(new Request(`https://x.example/f${text ? "?format=text" : ""}`, { headers: { cookie: `tf_s=${tok}` } }), w.deps);
     } catch (e) { fail("handler: threw", `#${s.id}: ${String(e).slice(0, 120)}`); return { status: 0, html: "" }; }
     rep.statuses[res.status] = (rep.statuses[res.status] ?? 0) + 1;

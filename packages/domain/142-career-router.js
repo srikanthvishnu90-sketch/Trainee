@@ -12693,16 +12693,18 @@ const CareerRouter = (() => {
   // or "i took too many pills" reached the fallback. The reply is 125's crisis answer, word for word.
   // #354 re-review 2: the check-in remembers what else the person asked; "i'm fine" (or "you misread me") within two hours
   // resumes it (resumeAfterCheckin). The handler notes it too when its trust turn answers first (noteCrisisCheckin).
-  function noteCrisisCheckin(ctx, rawText) {
+  // rest: what else was asked, when the caller judged it with the full screen (agent-chat: list, moderation, classifier,
+  // clause by clause); absent, the list's own reading (withoutDistress) is used at resume time.
+  function noteCrisisCheckin(ctx, rawText, rest) {
     const m = threadMirrorForWrite(ctx);
-    if (m) m.crisisCheckin = { ask: s(rawText).slice(0, 600), at: nowOf(ctx) };
+    if (m) m.crisisCheckin = Object.assign({ ask: s(rawText).slice(0, 600), at: nowOf(ctx) }, typeof rest === "string" ? { rest: rest.slice(0, 600) } : {});
   }
   function resumeAfterCheckin(rawText, c) {
     const m = threadMirrorOf(c), ck = m && m.crisisCheckin;
     if (!ck) return null;
     delete threadMirrorForWrite(c).crisisCheckin; // one answer only: anything else said next simply goes on
     if (!(Safety && Safety.isFineReply && Safety.isFineReply(rawText)) || Safety.isDistress(s(rawText)) || nowOf(c) - Number(ck.at || 0) > 2 * 3600 * 1000) return null;
-    const rest = Safety.withoutDistress ? Safety.withoutDistress(ck.ask) : "";
+    const rest = typeof ck.rest === "string" ? ck.rest : Safety.withoutDistress ? Safety.withoutDistress(ck.ask) : "";
     if (rest && rest.trim()) {
       const r = dispatchChat(rest, c);
       if (r && r.intent !== "career_fallback") return r;

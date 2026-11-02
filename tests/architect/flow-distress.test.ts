@@ -64,7 +64,7 @@ Deno.test({ name: "#354 safety: moderation flags what the list misses at the rea
   const pg: Pg = await startPg();
   const realFetch = globalThis.fetch;
   const saved: Record<string, string | undefined> = {};
-  for (const k of ["OPENAI_API_KEY", "CAREER_CRISIS_MODERATION", "MODEL_BUDGET_PAUSED"]) saved[k] = Deno.env.get(k);
+  for (const k of ["OPENAI_API_KEY", "CAREER_CRISIS_MODERATION", "MODEL_BUDGET_PAUSED", "CAREER_REPLY_WRITER"]) saved[k] = Deno.env.get(k);
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   const seen: string[] = [];
   const modelCalls: string[] = [];
@@ -83,7 +83,7 @@ Deno.test({ name: "#354 safety: moderation flags what the list misses at the rea
     seen.push(text);
     if (behaviour === "hang") return await new Promise<Response>((_res, rej) => req.signal.addEventListener("abort", () => rej(req.signal.reason)));
     if (behaviour === "fail") return new Response("{}", { status: 500 });
-    const harm = text === OBLIQUE;
+    const harm = text === OBLIQUE || /wrote the letters|gave away my things/.test(text);
     return Response.json({ results: [{ flagged: harm, categories: { "self-harm": harm, "self-harm/intent": harm, "self-harm/instructions": false } }] });
   };
   try {
@@ -113,6 +113,21 @@ Deno.test({ name: "#354 safety: moderation flags what the list misses at the rea
       const mine = modelCalls.slice(n).filter((b) => b.includes(CRISIS_SCREEN_MARKER));
       eq(mine.length, 1, "the classifier's call happened: the layer cannot silently vanish");
       assert(mine[0].includes("find me data analyst jobs in chicago"), "it read this message");
+    });
+    await t.step("at the real handler, 'i'm fine' after the check-in resumes the career ask the full screen kept", async () => {
+      const d = await say("find me data analyst jobs in chicago. i gave away my things and wrote the letters");
+      eq(d.intent, "safety_support", `${d.intent}: ${d.reply}`);
+      const back = await say("im fine, just venting");
+      assert(back.intent !== "safety_support" && !/may have missed what you meant/i.test(back.reply), `${back.intent}: ${back.reply}`);
+      assert(/analyst|chicago|role|job/i.test(back.reply) && !/letters/i.test(back.reply), back.reply);
+    });
+    await t.step("the crisis check-in survives the reply writer word for word (CAREER_REPLY_WRITER=on)", async () => {
+      Deno.env.set("CAREER_REPLY_WRITER", "on");
+      try {
+        const r = await say("kms");
+        eq(r.reply, SAFETY_REPLY);
+        assert(/\b988\b/.test(r.reply) && /\b741741\b/.test(r.reply));
+      } finally { Deno.env.delete("CAREER_REPLY_WRITER"); }
     });
     await t.step("a list hit answers without waiting for moderation", async () => {
       behaviour = "hang";

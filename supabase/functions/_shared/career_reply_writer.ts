@@ -46,6 +46,8 @@ export function writable(out: { intent?: string | null; reply?: string; parts?: 
   if (meta && PAYLOAD_META.some((k) => meta[k] !== undefined && meta[k] !== null)) return false;
   const text = String(out.reply ?? "");
   if (!text.trim()) return false;
+  // #354 review item 10: the crisis check-in is code's, word for word (988, 741741, 911): never rewritten.
+  if (out.intent === "safety_support" || meta?.safety === true || (/\b988\b/.test(text) && /\b741741\b/.test(text))) return false;
   // A draft shown in any turn (its subject line) is its exact words.
   if (/^\s*Subject:/im.test(text)) return false;
   return true;

@@ -30,10 +30,14 @@ export const rulesDistress = (message: string): boolean => (CareerSafety as { is
 
 // A moderation response body (OpenAI's shape: results[0].categories) read for the three self-harm categories only; any
 // other category is not this screen's business. Throws on a body with no result, so the caller falls back to the list.
-export function readModeration(body: unknown): ModerationResult {
-  const r = (body as { results?: { categories?: Record<string, unknown> }[] } | null)?.results?.[0];
+// The category_scores threshold (review item 4): a self-harm score at or above it flags even when OpenAI's own boolean cut
+// does not. CHOSEN ON DEV ONLY from evals/crisis/run.ts's curve (the lowest T whose dev combined false-positive rate stays
+// at or under 2%). null = OpenAI's booleans alone, until a completed CI run gives the dev curve; then it is set here.
+export const MODERATION_SCORE_THRESHOLD: number | null = null;
+export function readModeration(body: unknown, threshold: number | null = MODERATION_SCORE_THRESHOLD): ModerationResult {
+  const r = (body as { results?: { categories?: Record<string, unknown>; category_scores?: Record<string, unknown> }[] } | null)?.results?.[0];
   if (!r || typeof r.categories !== "object" || r.categories === null) throw new Error("moderation: no result");
-  const categories = SELF_HARM_CATEGORIES.filter((c) => r.categories![c] === true);
+  const categories = SELF_HARM_CATEGORIES.filter((c) => r.categories![c] === true || (threshold !== null && Number(r.category_scores?.[c]) >= threshold));
   return { flagged: categories.length > 0, categories };
 }
 
@@ -76,6 +80,7 @@ export function moderationFromEnv(env: Env, door?: ModerateDoor, o: { release?: 
 // indirect and contextual signals the list and moderation miss. Prompt TUNED ON evals/crisis/corpus.dev.json ONLY. The
 // fixed marker lets test fakes recognise this call. Cost: the global daily budget reserves and settles every call; it is
 // NOT yet in the per-turn agent_turn_costs row (a known gap with a follow-up: that needs a row kind, i.e. a migration).
+// Its budget reservations carry role "crisis_screen".
 export const CRISIS_SCREEN_MARKER = "TRAINEE_CRISIS_SCREEN";
 export const PRODUCTION_CRISIS_CLASSIFIER: "on" | "off" = "on";
 export const CRISIS_CLASSIFIER_DISABLE_ENV = "CAREER_CRISIS_CLASSIFIER";
@@ -90,7 +95,14 @@ You screen ONE chat message sent to a career assistant. Reply with exactly one w
 YES if the message suggests the writer may be at risk of suicide or self-harm, now or soon, said directly or indirectly, in any language, slang, typos or leetspeak. Signals: wanting to die, not exist or not wake up; feeling like a burden or that others are better off without them; a plan, a method or the means (pills, rope, a gun, a knife or razor, a bridge, a roof, the tracks, traffic, a car running in a garage); a time ("tonight", "this weekend"); goodbyes or a last message; a note or letters written; giving belongings away; saying they won't be around or won't need things; self-harm such as cutting or burning; asking how to die or how much of something is lethal.
 NO for frustration or hyperbole about work, school or the job search ("this job is killing me", "kill it in the interview", "i'm going to burn myself out applying"), someone else's death, jobs in health care or crisis work, and idioms.
 If you are unsure whether the writer is at risk, answer YES.`;
-export type ModelCall = (cfg: ModelConfig, payload: unknown, o: { role?: "router"; timeoutMs?: number }) => Promise<any>;
+export type ModelCall = (cfg: ModelConfig, payload: unknown, o: { role?: "crisis_screen"; timeoutMs?: number }) => Promise<any>;
+// What the classifier reads (review item 6): a long message (a pasted resume, then "i've written my note") is read at both
+// ends, the first and the last 1,000 characters, so a line at the end is never cut off.
+export const CLASSIFIER_VIEW_CHARS = 1000;
+export function classifierView(text: string): string {
+  const t = String(text ?? "");
+  return t.length <= 2 * CLASSIFIER_VIEW_CHARS ? t : `${t.slice(0, CLASSIFIER_VIEW_CHARS)}\n[...]\n${t.slice(-CLASSIFIER_VIEW_CHARS)}`;
+}
 export function classifierReleaseOn(env: Env, release: "on" | "off" = PRODUCTION_CRISIS_CLASSIFIER): boolean {
   return release === "on" && (env.get(CRISIS_CLASSIFIER_DISABLE_ENV) || "").trim().toLowerCase() !== "off";
 }
@@ -103,7 +115,7 @@ export function classifierFromEnv(env: Env, call: ModelCall = callModel, o: { re
   const cfg = modelConfig({ get: (k: string) => (k === "OPENAI_MODEL" ? model : env.get(k)) }, "chat");
   if (!cfg.apiKey) { warn("no model key"); return null; }
   return async (text) => {
-    const r = await call(cfg, { system: CLASSIFIER_PROMPT, messages: [{ role: "user", content: String(text ?? "").slice(0, 2000) }], max_tokens: 4 }, { role: "router", timeoutMs: CLASSIFIER_TIMEOUT_MS });
+    const r = await call(cfg, { system: CLASSIFIER_PROMPT, messages: [{ role: "user", content: classifierView(text) }], max_tokens: 4 }, { role: "crisis_screen", timeoutMs: CLASSIFIER_TIMEOUT_MS });
     const said = (Array.isArray(r?.content) ? r.content : []).filter((b: any) => b && b.type === "text").map((b: any) => String(b.text)).join(" ").trim();
     if (/^\W*yes\b/i.test(said)) return { flagged: true, categories: ["classifier"] };
     if (/^\W*no\b/i.test(said)) return { flagged: false, categories: [] };
@@ -117,8 +129,8 @@ export type LayerState = ModerationState;
 export interface ScreenVerdict extends CrisisVerdict { classifier: LayerState }
 
 // Start the screen for one message. Every layer runs at once; the promise resolves as soon as ANY layer flags, or when
-// every layer has answered, failed or timed out. It never rejects. A moderation failure is logged (never the text); a
-// classifier failure is not logged (the architect's rule); neither ever suppresses another layer's yes.
+// every layer has answered, failed or timed out. It never rejects. A failure or timeout of either model layer is logged
+// with its state, never the text (review item 7: a dead layer must be visible); neither ever suppresses another's yes.
 export function crisisScreen(message: string, layers: Moderate | null | ScreenLayers, opts: { timeoutMs?: number; classifierTimeoutMs?: number; log?: (line: string) => void } = {}): Promise<ScreenVerdict> {
   const log = opts.log ?? ((line: string) => console.error(line));
   const L: ScreenLayers = typeof layers === "function" || layers === null ? { moderation: layers } : layers;
@@ -149,7 +161,19 @@ export function crisisScreen(message: string, layers: Moderate | null | ScreenLa
       p.then((r) => { st[key] = r.state; st.categories = [...st.categories, ...r.categories]; pending--; check(); });
     };
     if (L.moderation) run("moderation", one(L.moderation, opts.timeoutMs ?? MODERATION_TIMEOUT_MS, "moderation", true));
-    if (L.classifier) run("classifier", one(L.classifier, opts.classifierTimeoutMs ?? CLASSIFIER_TIMEOUT_MS, "classifier", false));
+    if (L.classifier) run("classifier", one(L.classifier, opts.classifierTimeoutMs ?? CLASSIFIER_TIMEOUT_MS, "classifier", true));
     if (pending === 0) { settled = true; resolve({ distress: false, rules, moderation: "off", classifier: "off", categories: [] }); }
   });
+}
+
+// What else a crisis message asked, judged by the FULL screen (review item 11), for the check-in's "i'm fine" resume: each
+// clause is screened on its own (list, moderation, classifier) and only the clauses no layer flags are kept. When the
+// message was flagged as a whole but no single clause is, nothing is kept: the screen cannot tell the ask from the
+// distress, so the person is asked what to work on instead. Runs only for a message already judged a crisis.
+export async function screenRest(message: string, layers: ScreenLayers, opts: { timeoutMs?: number; classifierTimeoutMs?: number; log?: (line: string) => void } = {}): Promise<string> {
+  const clauses = String(message ?? "").split(/[.!?;\n]+|,\s*/).map((c) => c.trim()).filter(Boolean);
+  if (clauses.length < 2) return "";
+  const verdicts = await Promise.all(clauses.map((c) => crisisScreen(c, layers, opts)));
+  if (!verdicts.some((v) => v.distress)) return "";
+  return clauses.filter((_, i) => !verdicts[i].distress).join(". ");
 }

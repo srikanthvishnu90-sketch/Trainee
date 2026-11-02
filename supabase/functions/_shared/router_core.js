@@ -31998,7 +31998,8 @@ const CareerSafety = (() => {
     /\b(?:i|ive|i have|im|i am|been|started|start|keep|kept|back to|relapsed)(?: been| started)? (?:cutting|self harming|burning)(?: again)?(?: (?:lately|recently|tonight|today))?$/,
     /\bcutting (?:my )?(?:arms?|legs?|thighs?|skin|wrists?)\b/, /\brelapsed\b.{0,20}\b(?:cutting|self harm)/,
     /\bself ?(?:harm|injur|hurt)\w*/, /\b(?:slit|slitting|cut|cutting|slash\w*) (?:my )?wrists?\b/,
-    new RegExp(String.raw`\b(?:end|ending|take|taking|took) my (?:own )?(?:life|lyfe|lyf)${AFTER}`),
+    /\bend(?:ing)? my (?:own )?(?:life|lyfe|lyf)\b/,                                 // always (trunk caught it anywhere)
+    new RegExp(String.raw`\b(?:take|taking|took) my (?:own )?(?:life|lyfe|lyf)${AFTER}`), // "take my life in a new direction" is work
     /\bend(?:ing)? (?:it all|everything|all of it)\b/, /\btime to end it(?: all)?$/,
     // "end it" as a plan; "end it with a closing line", "end it here" are an email's or a call's end.
     /\b(?:want|wanna|going|gonna|plan|planning|ready|thinking about|thought about|decided|deciding|try|trying|need|about|how) (?:to )?end(?:ing)? it(?: (?:all|tonight|today|now|soon|for good|already|forever))?$/,
@@ -32026,14 +32027,14 @@ const CareerSafety = (() => {
     /\bbetter off (?:dead|without me|if i (?:was|were) (?:gone|dead)|if i (?:wasnt|werent) here)\b/,
     /\b(?:no ?one|nobody) would (?:miss me|notice if i (?:died|was gone|were gone)|care if i (?:died|was gone|were gone|disappeared|wasnt here))\b/,
     /\b(?:dont|do not|dnt|never) (?:want|wanna) (?:to )?(?:live|be alive|exist|wake up|be around anymore|go on|keep living)\b/,
-    /\b(?:dont|do not|dnt) (?:want|wanna) (?:to )?be here(?: anymore)?$/,
+    /\b(?:dont|do not|dnt) (?:want|wanna) (?:to )?be here\b/,                         // anywhere (trunk caught it anywhere)
     /\b(?:want|wanna|wish|need)(?: to)? (?:just )?not be (?:here|around)(?: anymore)?$/, /\b(?:want|wanna|wish|need)(?: to)? (?:just )?not be alive\b/,
-    /\b(?:no|zero) (?:reason|point) (?:to|in|of) (?:live|living|going on|being alive|be alive|life)\b/, /\bnothing (?:left )?to live for\b/,
+    /\b(?:no|zero) (?:reason|point) (?:to|in|of) (?:live|living|go on|going on|being alive|be alive|life)\b/, /\bnothing (?:left )?to live for\b/,
     /\bcant (?:keep living|live like this)\b/, /\bcant go on(?: (?:anymore|like this|living))?$/,
     /\b(?:tired|sick) of (?:living|being alive|life|existing)\b/, /\bdone (?:with life|living)\b/, /\bgive up on life\b/,
     /\b(?:sleep|go to sleep|fall asleep) and (?:never|not) wake up\b/, /\bnever wake up\b/, /\bhope i (?:dont|never|do not) wake up\b/,
     /\b(?:jump|jumping|jumped|throw myself|throwing myself|step|stepping|walk|walking|drive|driving) (?:off|off of|from|in front of|into) (?:a |the |some |my |our |this |that )?(?:\w+ )?(?:bridge|building|roof|rooftop|cliff|balcony|ledge|train|bus|car|traffic|truck|window|tower|overpass|parking garage)\b/,
-    new RegExp(String.raw`\b(?:took|take|taken|taking|swallowed|swallow|swallowing|downed|down|ate|chugged|popped|pop|popping) ${MANY} (?:(?:my|his|her|their|the) (?:\w+ )?)?${DRUG}\b`),
+    new RegExp(String.raw`\b(?:took|take|taken|taking|swallowed|swallow|swallowing|downed|down|ate|chugged|popped|pop|popping) ${MANY} (?:(?:my|his|her|their|the) (?:\w+ )?)?${DRUG}\b(?! (?:course|courses|class|classes|exam|exams|school|student|program|rotation|degree|major|lecture)\b)`),
     new RegExp(String.raw`\b(?:how many|how much)\b.{0,40}\b(?:to (?:die|kill (?:me|myself|someone|a person)|overdose|od)|(?:is|are|would be) (?:lethal|fatal|deadly|enough to die)|(?:would|will|does it take to|it takes to|to) (?:kill (?:me|you|someone|a person)|die))\b`),
     /\b(?:lethal|fatal|deadly) (?:dose|amount|overdose|combination|mix)\b/,
     /\b(?:painless|easiest|easy|quickest|quick|fastest|best|surest|least painful|most painless|simplest) (?:way|ways|method|methods) (?:to|of) (?:die|dying|kill myself|killing myself|end it|end my life|commit suicide)\b/,
@@ -32055,7 +32056,7 @@ const CareerSafety = (() => {
     /\bhope i (?:die|dont wake up|never wake up|just die)\b(?! laughing| of laughter)/, /\bi (?:want|wanna) (?:to )?be dead\b/, /\b(?:just )?let me die\b/,
     /\b(?:pills?|meds|tablets) to end it\b/, /\bbought (?:pills|a gun|rope|a rope|a razor|razor blades) (?:to|so i can) (?:end|die|kill)/,
     /\b(?:bath|bathtub|tub|shower)\b.{0,30}\b(?:razor|blade|knife)\b/, /\b(?:razor|blade|knife)\b.{0,30}\b(?:bath|bathtub|tub|wrists?)\b/,
-    /\bkills? (?:you|me|a person|someone|people)$/,
+    /\b(?:how (?:many|much)|what dose|what amount|enough)\b.{0,40}\bkills? (?:you|me|a person|someone|people)\b/, // never "this commute kills me"
     // Italian, Portuguese, Dutch, Polish, Turkish, Indonesian, Tagalog, Hindi (romanized), Vietnamese, Swedish (Latin script, accents dropped).
     /\b(?:voglio|vorrei) (?:morire|uccidermi|ammazzarmi|farla finita)\b/, /\bmi voglio (?:uccidere|ammazzare)\b/, /\bnon voglio piu vivere\b/, /\bla faccio finita\b/,
     /\bquero (?:morrer|me matar|me suicidar|sumir para sempre)\b/, /\bnao quero mais viver\b/, /\bvou me (?:matar|suicidar)\b/,
@@ -32083,7 +32084,9 @@ const CareerSafety = (() => {
   const LEET = { 0: "o", 1: "i", 3: "e", 4: "a", 5: "s", 7: "t", 8: "b", 9: "g" };
   const FILLER = /\b(?:fucking|fuckin|fking|fkn|fcking|freaking|frickin|effing|f+ing|goddamn|damn|bloody|literally|honestly|lowkey|highkey|ngl|fr|tbh|deadass|on god|ong|rn|lol|lmao)\b/g;
   function distressClauses(text) {
-    const t = String(text == null ? "" : text).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\u00df/g, "ss").toLowerCase()
+    // Letter look-alikes inside a word before anything else: "kiII" (capital i for l), "k!ll", "ki11", "k1ll".
+    const look = String(text == null ? "" : text).replace(/([a-z])II/g, "$1ll").replace(/(?<=[a-zA-Z])!(?=[a-zA-Z])/g, "i").replace(/(?<=[a-zA-Z])11(?=\b|[a-zA-Z])/g, "ll").replace(/(?<=[a-zA-Z])\|\|/g, "ll");
+    const t = look.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\u00df/g, "ss").toLowerCase()
       .replace(/[‘’ʼ`´]/g, "'").replace(/'/g, "")
       .replace(/(\w)-(\w)/g, "$1 $2")
       .replace(/\b(?=[a-z0-9@$*]*[a-z])(?=[a-z0-9@$*]*[0-9@$])[a-z0-9@$*]+\b/g, (w) => w.replace(/[0-9]/g, (d) => LEET[d] ?? d).replace(/@/g, "a").replace(/\$/g, "s"))
@@ -32100,7 +32103,8 @@ const CareerSafety = (() => {
   // Scripts the normalizer cannot keep (Cyrillic, Japanese, Korean, Chinese, Arabic): read on the raw text.
   const NON_LATIN = [/умер(?:еть|ти)/, /покончить с собой/, /самоубийств/, /не хочу (?:больше )?жить/, /убить себя/,
     /死にたい/, /自殺/, /生きていたくない/, /消えたい/, /죽고 ?싶/, /자살/, /살고 ?싶지 ?않/, /想死/, /自杀/, /不想活/,
-    /أموت/, /انتحار/, /أقتل نفسي/, /لا أريد أن أعيش/];
+    /أموت/, /انتحار/, /أقتل نفسي/, /لا أريد أن أعيش/,
+    /मरना चाह/, /मर जाना चाह/, /आत्महत्या/, /ख़ुदकुशी/, /खुदकुशी/, /जीना नहीं चाह/, /मुझे मरना है/, /ज़िंदा नहीं रहना/];
   // The message with its distress clauses taken out: what else the person asked, resumed after a check-in they answer
   // with "i'm fine" (142 resumeAfterCheckin). Empty when the whole message was the distress.
   function withoutDistress(text) {
@@ -49481,16 +49485,18 @@ const CareerRouter = (() => {
   // or "i took too many pills" reached the fallback. The reply is 125's crisis answer, word for word.
   // #354 re-review 2: the check-in remembers what else the person asked; "i'm fine" (or "you misread me") within two hours
   // resumes it (resumeAfterCheckin). The handler notes it too when its trust turn answers first (noteCrisisCheckin).
-  function noteCrisisCheckin(ctx, rawText) {
+  // rest: what else was asked, when the caller judged it with the full screen (agent-chat: list, moderation, classifier,
+  // clause by clause); absent, the list's own reading (withoutDistress) is used at resume time.
+  function noteCrisisCheckin(ctx, rawText, rest) {
     const m = threadMirrorForWrite(ctx);
-    if (m) m.crisisCheckin = { ask: s(rawText).slice(0, 600), at: nowOf(ctx) };
+    if (m) m.crisisCheckin = Object.assign({ ask: s(rawText).slice(0, 600), at: nowOf(ctx) }, typeof rest === "string" ? { rest: rest.slice(0, 600) } : {});
   }
   function resumeAfterCheckin(rawText, c) {
     const m = threadMirrorOf(c), ck = m && m.crisisCheckin;
     if (!ck) return null;
     delete threadMirrorForWrite(c).crisisCheckin; // one answer only: anything else said next simply goes on
     if (!(Safety && Safety.isFineReply && Safety.isFineReply(rawText)) || Safety.isDistress(s(rawText)) || nowOf(c) - Number(ck.at || 0) > 2 * 3600 * 1000) return null;
-    const rest = Safety.withoutDistress ? Safety.withoutDistress(ck.ask) : "";
+    const rest = typeof ck.rest === "string" ? ck.rest : Safety.withoutDistress ? Safety.withoutDistress(ck.ask) : "";
     if (rest && rest.trim()) {
       const r = dispatchChat(rest, c);
       if (r && r.intent !== "career_fallback") return r;

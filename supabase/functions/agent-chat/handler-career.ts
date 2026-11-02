@@ -115,7 +115,7 @@ import { createFileService, supabaseFileKindStore } from "../_shared/file_servic
 import { factsForTurn, replyWriterOn, writable, writeReply, writerChannel } from "../_shared/career_reply_writer.ts"; // V1 TEXTING VOICE
 import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
 import { trustTurn } from "../_shared/career_trust_turn.ts";
-import { classifierFromEnv, crisisScreen, moderationFromEnv } from "../_shared/career_crisis_screen.ts"; // #354: the two-layer crisis screen // REQS DOC 1: what Trainee is, privacy, what it sees, referrals, thanks
+import { classifierFromEnv, crisisScreen, moderationFromEnv, screenRest } from "../_shared/career_crisis_screen.ts"; // #354: the two-layer crisis screen // REQS DOC 1: what Trainee is, privacy, what it sees, referrals, thanks
 import { readConnections } from "../_shared/career_capabilities.ts"; // REQS DOC 1: every connection on the account
 
 // REQS DOC 1: what holds the card's place for a message in distress (see `distress` below); never shown or saved as a card.
@@ -293,7 +293,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // moderation error or timeout leaves the list's verdict (career_crisis_screen.ts). The client is model_gateway.ts's
     // moderation door, on with CAREER_CRISIS_MODERATION=on (set by trainee-go-live.sh on every deploy).
     // Three layers (#354 re-review 2): the list, OpenAI moderation (primary) and the crisis classifier through callModel.
-    const crisisPending = crisisScreen(message, { moderation: moderationFromEnv(Deno.env), classifier: classifierFromEnv(Deno.env) });
+    const crisisLayers = { moderation: moderationFromEnv(Deno.env), classifier: classifierFromEnv(Deno.env) };
+    const crisisPending = crisisScreen(message, crisisLayers);
 
     // GO-LIVE FLIP (2026-10-13, owner ruling: "the career version is the
     // final switch" — the money version is gone from live). Career is the
@@ -889,7 +890,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // read back, and now pending sends cancelled. Before any other turn, on every channel.
       if (distress && trustAns) {
         out = { reply: trustAns.reply, intent: trustAns.intent, resultStatus: trustAns.status, contained: false, handler: "trust" };
-        try { (CareerRouter as any).noteCrisisCheckin?.(ctx, message); } catch { /* the check-in still stands; "i'm fine" then reads as a new message */ }
+        // What else they asked, judged by the full screen clause by clause, waits for an "i'm fine" (142 resumeAfterCheckin).
+        const rest = await screenRest(message, crisisLayers).catch(() => "");
+        try { (CareerRouter as any).noteCrisisCheckin?.(ctx, message, rest); } catch { /* the check-in still stands; "i'm fine" then reads as a new message */ }
         if (trustAns.meta) agentMeta = { ...(agentMeta || {}), ...trustAns.meta };
       } else if (connAns) {
         out = { reply: connAns.reply, intent: connAns.intent, resultStatus: connAns.resultStatus, contained: false, handler: connAns.handler };

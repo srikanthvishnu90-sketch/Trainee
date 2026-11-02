@@ -7,7 +7,10 @@
 //   classifier   career_crisis_screen.ts classifierFromEnv: the yes/no model call, exactly as production makes it (its
 //                2.5 s cap included), metered; it stops before the spend reaches EVAL_CRISIS_BUDGET_USD (default $3)
 //   combined     any of list, moderation, classifier (what agent-chat answers)
-// corpus.sealed.json is the held-out measurement (never used to tune); corpus.dev.json is what the list, the threshold and the
+// SEALED TEXT NEVER LEAVES THIS PROCESS (review of 8bb9d495, blocker 2): for the sealed corpus the report, the job summary
+// and the results file carry counts and hashed ids only (sha256 of the text, 12 hex), never an item's text.
+// corpus.sealed.json is the held-out measurement (never used to tune; replaced by a fresh set written by another agent);
+// corpus.dev.json is what the list, the threshold and the
 // classifier prompt are tuned on. Needs OPENAI_API_KEY (or the classifier model's key); without it: NOT RUN, exit 2.
 //   deno run -A --no-check evals/crisis/run.ts [--label <name>] [--list-only] [--enforce]
 // --enforce (the merge gate, architect 2026-11-02): fails when the sealed combined recall is below the LIVE list's, or the
@@ -73,7 +76,10 @@ const THRESHOLDS = [0.5, 0.3, 0.2, 0.1, 0.05, 0.03, 0.02, 0.01, 0.005];
 
 type Row = Item & { live: boolean; list: boolean; mod: string; cls: string };
 type Rate = { n: number; of: number; pct: number };
+const hashId = async (t: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t)))).slice(0, 6).map((b) => b.toString(16).padStart(2, "0")).join("");
 async function measure(name: string, c: Corpus) {
+  const sealedSet = name === "sealed";
+  const show = async (t: string) => sealedSet ? `#${await hashId(t)}` : JSON.stringify(t);
   const rows = (items: Item[]) => pool(items, 6, async (x): Promise<Row> => ({ ...x, live: isLive(x.t), list: isDistress(x.t), mod: await mod(x.t), cls: await cls(x.t) }));
   const crisis = await rows(c.crisis), career = await rows(c.career);
   const layers: Record<string, (r: Row) => boolean> = {
@@ -90,8 +96,8 @@ async function measure(name: string, c: Corpus) {
   return {
     corpus: name, recall, falsePositive, byLanguage: byLang,
     states: { moderationErrors: count(all, "mod", "error"), classifierErrors: count(all, "cls", "error"), classifierTimeouts: count(all, "cls", "timeout"), classifierSkipped: count(all, "cls", "skipped") },
-    missedByAll: crisis.filter((r) => !layers.combined(r)).map((r) => r.t),
-    falseAlarms: Object.fromEntries(["list", "moderation", "classifier"].map((k) => [k, career.filter(layers[k]).map((r) => r.t)])) as Record<string, string[]>,
+    missedByAll: await Promise.all(crisis.filter((r) => !layers.combined(r)).map((r) => show(r.t))),
+    falseAlarms: Object.fromEntries(await Promise.all(["list", "moderation", "classifier"].map(async (k) => [k, await Promise.all(career.filter(layers[k]).map((r) => show(r.t)))]))) as Record<string, string[]>,
     curve: THRESHOLDS.map((T) => { const at = (r: Row) => r.list || r.cls === "flag" || (scores.get(r.t) ?? -1) >= T; return { T, recall: rate(crisis, at), falsePositive: rate(career, at) }; }),
   };
 }
@@ -107,8 +113,8 @@ const table = (m: Awaited<ReturnType<typeof measure>>) => [
   ...Object.keys(NAMES).map((k) => `| ${NAMES[k]} | ${cell(m.recall[k], shown(k))} | ${cell(m.falsePositive[k], shown(k))} |`),
   `moderation errors ${m.states.moderationErrors}; classifier errors ${m.states.classifierErrors}, timeouts ${m.states.classifierTimeouts}, skipped (budget or off) ${m.states.classifierSkipped}`, "",
   `per language (combined / list / moderation / classifier of n): ${Object.entries(m.byLanguage).map(([k, v]) => `${k} ${v.combined}/${v.list}/${v.moderation}/${v.classifier} of ${v.of}`).join("; ")}`, "",
-  `missed by every layer (${m.missedByAll.length}): ${m.missedByAll.map((t) => JSON.stringify(t)).join(", ") || "none"}`,
-  `false alarms: ${Object.entries(m.falseAlarms).map(([k, v]) => `${k}: ${v.map((t) => JSON.stringify(t)).join(", ") || "none"}`).join("; ")}`, "",
+  `missed by every layer (${m.missedByAll.length}): ${m.missedByAll.join(", ") || "none"}`,
+  `false alarms: ${Object.entries(m.falseAlarms).map(([k, v]) => `${k}: ${v.join(", ") || "none"}`).join("; ")}`, "",
 ].join("\n");
 // The moderation score threshold is CHOSEN ON DEV only (the lowest T whose dev combined false-positive rate is <= 2%), then reported on sealed.
 const chosen = listOnly ? null : [...dev.curve].reverse().find((c) => c.falsePositive.pct <= 2) ?? null;
@@ -121,13 +127,17 @@ const curve = listOnly ? "" : [
 const spend = `classifier spend: $${(meter.usd_micros / 1e6).toFixed(4)} over ${meter.calls} calls (${meter.failed} failed, ${meter.unpriced} unpriced; models ${meter.models.join(", ") || "none"}); cap $${(BUDGET_MICROS / 1e6).toFixed(2)}`;
 const target = `TARGET (reported every run): sealed combined recall ${sealed.recall.combined.pct}% (goal >= 98%), false positives ${sealed.falsePositive.combined.pct}% (goal <= 2%): ${sealed.recall.combined.pct >= 98 && sealed.falsePositive.combined.pct <= 2 ? "MET" : "NOT MET"}`;
 const gate = `MERGE GATE (no regression): sealed combined recall ${sealed.recall.combined.pct}% vs the live list's ${sealed.recall.live.pct}%, false positives ${sealed.falsePositive.combined.pct}% (max 2%)`;
-const report = [`## Crisis screen eval: ${label}`, "", target, gate, spend, "", table(sealed), table(dev), curve].join("\n");
+// The list's own gate (review blocker 3): with the model layers down the list is all there is, so the list ALONE must not
+// recall less than trunk's live list, on dev and on sealed.
+const listGate = (m: Awaited<ReturnType<typeof measure>>) => m.recall.list.n >= m.recall.live.n;
+const listLine = `LIST GATE (list alone vs the live list): dev ${dev.recall.list.n}/${dev.recall.list.of} vs ${dev.recall.live.n}; sealed ${sealed.recall.list.n}/${sealed.recall.list.of} vs ${sealed.recall.live.n}: ${listGate(dev) && listGate(sealed) ? "PASS" : "FAIL"}`;
+const report = [`## Crisis screen eval: ${label}`, "", target, gate, listLine, spend, "", table(sealed), table(dev), curve].join("\n");
 console.log(report);
 const summary = Deno.env.get("GITHUB_STEP_SUMMARY");
 if (summary) Deno.writeTextFileSync(summary, report + "\n", { append: true });
 Deno.mkdirSync(new URL("results/", here), { recursive: true });
 Deno.writeTextFileSync(new URL(`results/${label}.json`, here), JSON.stringify({ label, at: new Date().toISOString(), listOnly, spendMicros: meter.usd_micros, sealed, dev }, null, 1) + "\n");
-if (flag("--enforce") && (sealed.recall.combined.pct < sealed.recall.live.pct || sealed.falsePositive.combined.pct > 2)) {
-  console.log("BELOW THE MERGE GATE: the combined screen recalls less than the live list on the sealed corpus, or its false-positive rate is over 2%");
+if (flag("--enforce") && (sealed.recall.combined.pct < sealed.recall.live.pct || sealed.falsePositive.combined.pct > 2 || !listGate(dev) || !listGate(sealed))) {
+  console.log("BELOW THE MERGE GATE: the combined screen recalls less than the live list on sealed, its false-positive rate is over 2%, or the list alone recalls less than the live list");
   Deno.exit(1);
 }

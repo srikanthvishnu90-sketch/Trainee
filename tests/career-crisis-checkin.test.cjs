@@ -25,7 +25,7 @@ function person(userId) {
     acct = { ...acct, ...copy(ctx._hostPatch || {}), version: acct.version + 1 };
     return out;
   };
-  return { say: (t) => turn(t), handlerAnswersDistress: (t) => turn(t, (ctx) => B.CareerRouter.noteCrisisCheckin(ctx, t)), wait: (m) => { minutes += m; } };
+  return { say: (t) => turn(t), handlerAnswersDistress: (t, rest) => turn(t, (ctx) => B.CareerRouter.noteCrisisCheckin(ctx, t, rest)), wait: (m) => { minutes += m; } };
 }
 const ALARM = /please reach out now|right now to someone|emergency|immediately/i;
 
@@ -75,4 +75,18 @@ test("a check-in with nothing else asked gets a short, open reply; anything othe
   const d = person("u-still");
   d.say("find me data analyst jobs in chicago. kms");
   assert.equal(d.say("i'm fine. actually no, i want to die").intent, "safety_support", "a 'fine' that is still distress is distress");
+});
+
+test("the handler's full-screen remainder is what resumes (not the list's reading)", async () => {
+  await setup();
+  const p = person("u-rest");
+  // the models flagged the second clause, which the list cannot see; the handler stored the remainder it judged
+  p.handlerAnswersDistress("find me product manager internships in new york. i gave away my things", "find me product manager internships in new york");
+  const back = p.say("im fine");
+  assert.notEqual(back.intent, "career_fallback", back.reply);
+  assert.match(String(back.reply), /product|intern|new york/i, back.reply);
+  assert.doesNotMatch(String(back.reply), /gave away/i);
+  const q = person("u-rest-empty");
+  q.handlerAnswersDistress("find me jobs. tonight is the night", "");
+  assert.equal(q.say("im fine").intent, "conversation_ack", "an empty remainder asks what to work on");
 });

@@ -14,7 +14,7 @@ import { ModelBudgetBlockedError, ModelUnavailableError, providerError, recordMo
 import { type BudgetGate, budgetBlockOfType, budgetPausedByEnv, budgetReply, denoEnvGet, REFUSED_BEFORE_GENERATION, resolveBudgetGate, usageProven, worstCaseMicros } from "./model_budget.ts";
 
 export type Provider = "openai" | "anthropic";
-export type ModelRole = "chat" | "router" | "planner" | "probe";
+export type ModelRole = "chat" | "router" | "planner" | "probe" | "crisis_screen"; // crisis_screen: career_crisis_screen.ts classifier
 export interface ModelConfig { provider: Provider; model: string; apiKey: string; reasoningEffort: string | null }
 type Env = { get(name: string): string | undefined };
 

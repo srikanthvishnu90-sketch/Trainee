@@ -29,7 +29,7 @@ import { fakeBot, plainOf } from "./scenarios/telegram-bot-api.ts";
 import { handleTelegram } from "../../supabase/functions/trainee-telegram/handler.ts";
 import { chatThroughAgent, deliverer } from "../../supabase/functions/_shared/channel_runtime.ts";
 import { supabaseInboundStore } from "../../supabase/functions/trainee-inbound/store.ts";
-import { RELEASE_FLAGS, RELEASE_NEVER_ON, RELEASE_PENDING, releaseFlagOn } from "../../supabase/functions/agent-chat/release_config.ts";
+import { RELEASE_FLAGS, RELEASE_NEVER_ON, RELEASE_PENDING, releaseFlagOn, releaseValue } from "../../supabase/functions/agent-chat/release_config.ts";
 
 // Steps the code cannot pass yet (shrink-only; each names what fails today).
 export const KNOWN_GAP: readonly string[] = [
@@ -123,7 +123,7 @@ Deno.test({
         TRAINEE_ALLOWED_CONTACTS: `telegram:${CHAT}`, TRAINEE_DELIVER_SECRET: "TEST-deliver-secret-0123456789-abcdefgh", OPENAI_API_KEY: "sk-test-not-real",
         CAREER_MODEL: "gpt-5-mini" })) Deno.env.set(k, v);
       // D-036: the release config as served: every release flag on, every never-on switch off (none of them set here).
-      for (const f of Object.keys(RELEASE_FLAGS)) ok(releaseFlagOn(Deno.env, f), `release flag ${f} is served on`);
+      for (const [f, v] of Object.entries(RELEASE_FLAGS)) ok(releaseValue(Deno.env, f) === v, `release flag ${f} is served ${v}`);
       for (const f of Object.keys(RELEASE_PENDING)) ok(!releaseFlagOn(Deno.env, f), `${f} is pending, served off`);
       for (const f of RELEASE_NEVER_ON) ok(!["on", "1", "open"].includes(String(Deno.env.get(f) ?? "").trim().toLowerCase()), `${f} is off (TRAINEE_SIGNUP stays "closed")`);
 

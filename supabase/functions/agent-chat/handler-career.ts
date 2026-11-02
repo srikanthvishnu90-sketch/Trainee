@@ -27,6 +27,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { chatSwitches } from "./chat_switches.ts"; // D-036 release flags (each gate below reads one switch)
+import { connectUrlsFor } from "../_shared/connect_link.ts"; // D-037: the send consent link
 import { looksLikePendingSecret, redactionNote, redactPending, secretLeadIn } from "../_shared/identity_redact.ts";
 import { corsFor } from "./_shared/chat_cors.ts";
 import { chatInput } from "./_shared/chat_input.ts";
@@ -329,7 +330,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     const boardFor = createCareerBoardFor(createWorkerBoardProvider({ workerUrl, secret: workerSecret, userId: user.id }));
     const delegateBatch = workerUrl !== "" && workerSecret !== "";
     // WO-106 (F5): set only where a batch executor runs and drains career_batch_intent; unset, a batch ask is never "handed".
-    const batchExecutorLive = Deno.env.get("CAREER_BATCH_EXECUTOR") === "on";
+    const batchExecutorLive = chatSwitches(Deno.env).batchExecutor;
     const host = CareerHost.createCareerHost({ CareerAccess, CareerOnboarding, CareerRouter, CareerDoorstep, CareerReply, CareerContainment, boardFor, delegateBatch });
     let careerTask;
     try { careerTask = normalizeCareerTaskRequest(body.career_task); }
@@ -559,6 +560,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // brain uses (the model only writes; code checks the employer's AI policy, every fact and the length), and only
       // "use 2" saves it.
       const draftMeter = ledger.track(newMeter());
+      // D-037: the "allow sending" link (incremental gmail.send consent), offered only when a send was refused for want of it.
+      const sendConsentFor = async (u: string) => (await connectUrlsFor(Deno.env, u, "send", Date.now(), writerChannel((body as any)?.channel))).url;
       const draftCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
       const asked = !tapIn && !card && !mock && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await questionsTurn({ message, userId: user.id, threadId: tid, now: Date.now(), store: supabaseQuestionStore(admin), situation,
@@ -596,8 +599,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           store: supabaseEmailStore(admin), profile: () => ((ctx as any).profile ?? {}), resume: resumes.resume, attachment: resumes.attachment,
           draft: { model: (payload) => callModel(draftCfg, payload, { meter: draftMeter, role: "chat" }), facts: () => ((ctx as any).profile?.facts ?? []) },
           canSend: async (u) => !!(await sendToken(u)), send: countSend(turnEffects, (u: string, m: any) => sendMail({ fetch, token: sendToken }, u, m)),
+          sendConsent: sendConsentFor,
           // WO-091c: email goes from people's own Gmail only once the owner turns it on, like outreach.
-          sendOn: Deno.env.get("CAREER_EMAIL_SEND") === "on",
+          sendOn: chatSwitches(Deno.env).emailSend,
           // OWNER RULE: the same fail-closed resume check as the chat's apply turn and the card.
           resumeOnFile: resumeOnFileReader(admin, user.id),
         } })
@@ -775,7 +779,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             name: () => ((ctx as any).profile?.basics?.name ?? null), markSent: f08Stores.markSent,
             mailOn: chatSwitches(Deno.env).mailTracking,
             readNow: (u) => mailNow({ userId: u, now: Date.now(), store: supabaseMailStore(admin), cursor: f08Stores.cursor, read: gmailReadNow(f08Grant, fetch), confirm: supabaseConfirmStore(admin) }),
-            sendOn: Deno.env.get("CAREER_EMAIL_SEND") === "on", canSend: async (u) => !!(await sendToken(u)),
+            sendOn: chatSwitches(Deno.env).emailSend, canSend: async (u) => !!(await sendToken(u)), sendConsent: sendConsentFor,
             send: countSend(turnEffects, (u: string, m: any) => gmailSender({ fetch, token: (uu: string) => sendToken(uu) }).send(u, m)), connectAsk: missingIntegration("gmail"), readGrant: gmailReadGrant(admin),
           } }).catch((e) => { console.error("follow-up turn:", e?.message ?? e); return null; })
         : null;

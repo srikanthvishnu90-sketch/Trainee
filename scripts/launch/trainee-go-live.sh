@@ -82,6 +82,10 @@ REPO="$(pwd)"
 DRY=""; SKIP_MIG=""; SKIP_DEPLOY=""; ONLY_SMOKE=""; BRAIN=""; ALLOW_SEND=""; NOWAIT=""; WANT_SHA=""; VERIFY=""; VERIFY_MODE=""; BUILD_SNAPSHOT=""
 NONINT=""; [[ "${TRAINEE_NON_INTERACTIVE:-}" == 1 ]] && NONINT=1
 UNSCHEDULE_CRON=""
+# D-037: the database switches of real submission (release_config.ts RELEASE_DB_SWITCHES), written after the claim guards.
+# Unset (a plain go-live, or --brain router): only missing rows are written 'on'; a row already there, such as the owner's
+# 'off', is never changed. --real-submit on|off overwrites existing rows on purpose.
+REAL_SUBMIT=""
 DEPLOY_LABEL="${TRAINEE_DEPLOY_LABEL:-owner}"
 while (( $# )); do
   case "$1" in
@@ -92,6 +96,8 @@ while (( $# )); do
     --brain) shift; BRAIN="${1:-}" ;;
     --brain=*) BRAIN="${1#--brain=}" ;;
     --allow-send) ALLOW_SEND=1 ;;
+    --real-submit) shift; REAL_SUBMIT="${1:-}" ;;
+    --real-submit=*) REAL_SUBMIT="${1#--real-submit=}" ;;
     --no-wait) NOWAIT=1 ;;
     --build-snapshot) BUILD_SNAPSHOT=1 ;;
     --non-interactive) NONINT=1 ;;
@@ -926,6 +932,15 @@ else
     echo "DRY: psql *** -X -q -v ON_ERROR_STOP=1 -f scripts/launch/verify-claim-guards.sql (reconcile the bridge and the one ledger; any missing claim guard fails the run, each named)"
   else
     run "psql *** -X -q -v ON_ERROR_STOP=1 -f scripts/launch/verify-claim-guards.sql" "${P[@]}" -f scripts/launch/verify-claim-guards.sql
+  fi
+  # D-037: real submission's database switches, after every claim guard is verified in place (each claim still needs the
+  # person's approval of the exact payload). --real-submit off writes the kill switch.
+  [[ -z "$REAL_SUBMIT" || "$REAL_SUBMIT" == on || "$REAL_SUBMIT" == off ]] || fail "--real-submit takes on or off (got: $REAL_SUBMIT)"
+  if [[ -z "$REAL_SUBMIT" ]]; then RS_V=on; RS_OVER=false; else RS_V="$REAL_SUBMIT"; RS_OVER=true; fi
+  if [[ -n "$DRY" ]]; then
+    echo "DRY: psql *** -X -q -v ON_ERROR_STOP=1 -v v=$RS_V -v overwrite=$RS_OVER -f scripts/launch/release-db-switches.sql (CAREER_AGENT_SUBMIT, CAREER_CLOUD_APPLY, APPLY_VM: $([[ $RS_OVER == true ]] && echo "set to $RS_V" || echo "missing rows on; existing rows, the owner's off included, kept"))"
+  else
+    run "psql *** -X -q -v ON_ERROR_STOP=1 -v v=$RS_V -v overwrite=$RS_OVER -f scripts/launch/release-db-switches.sql" "${P[@]}" -v "v=$RS_V" -v "overwrite=$RS_OVER" -f scripts/launch/release-db-switches.sql
   fi
   if [[ -n "$DRY" ]]; then
     echo "DRY: psql *** -tA: every migration mark (${#EARLIER[@]} earlier + ${#MIGRATIONS[@]}) read again on the live schema; any missing one fails the run, each named"

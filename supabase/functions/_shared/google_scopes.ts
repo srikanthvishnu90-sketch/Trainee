@@ -27,6 +27,11 @@ export const IDENTITY_SCOPES: readonly string[] = Object.freeze([OPENID, EMAIL, 
 
 const SCOPE_WORD = /^(?:openid|email|profile|https:\/\/www\.googleapis\.com\/auth\/[a-z0-9._-]+)$/;
 
+// D-037 (incremental authorization): what the send consent asks for, only when the person approves their first send:
+// gmail.send (with openid and email to name the account), on top of what they already granted (include_granted_scopes=true
+// in the consent URL). Never part of the normal connect, which asks only for the submission plus the owner's approved list.
+export const SEND_CONSENT_SCOPES: readonly string[] = Object.freeze([OPENID, EMAIL, GMAIL_SEND]);
+
 // The extra scopes the owner says Google has approved since (GOOGLE_APPROVED_EXTRA_SCOPES, space or comma separated).
 // Anything that is not a scope word is ignored, so a typo can never widen a request to something odd.
 export function approvedExtras(env: { get(k: string): string | undefined }): string[] {

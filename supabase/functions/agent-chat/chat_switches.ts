@@ -10,6 +10,8 @@ export const CHAT_SWITCHES = {
   followupReminders: "CAREER_OUTREACH_FOLLOWUPS", // follow-up reminders promised and pushed to the person's outbox
   introPush: "CAREER_INTRO_REMINDERS",          // introduction reminders pushed at their date (else said at the next message)
   mailTracking: "CAREER_MAIL_TRACKING",         // "check my email now" runs the person's mail read
+  emailSend: "CAREER_EMAIL_SEND",               // D-037: an approved email leaves from the person's own Gmail (gmail.send)
+  batchExecutor: "CAREER_BATCH_EXECUTOR",       // D-037: an approved batch is handed to the worker's executor
 } as const;
 export type ChatSwitches = { -readonly [K in keyof typeof CHAT_SWITCHES]: boolean };
 

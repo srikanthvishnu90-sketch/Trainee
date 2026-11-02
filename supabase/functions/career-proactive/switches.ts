@@ -10,6 +10,7 @@ export const PROACTIVE_SWITCHES = {
   outreachFollowups: "CAREER_OUTREACH_FOLLOWUPS", // follow-up reminders queued to the person's outbox
   introReminders: "CAREER_INTRO_REMINDERS",   // introduction reminders queued to the person's outbox
   briefs: "CAREER_BRIEF_DIGEST",              // interview briefs, drafts and the weekly digest
+  outreachSend: "CAREER_OUTREACH_SEND",       // D-037: approved outreach sent from the person's own Gmail
 } as const;
 export type ProactiveSwitches = { -readonly [K in keyof typeof PROACTIVE_SWITCHES]: boolean };
 

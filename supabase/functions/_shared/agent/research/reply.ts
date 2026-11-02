@@ -37,7 +37,19 @@ export function clip(text: string, max: number): string {
   let cut = words.slice(0, max).join(" ");
   const i = Math.max(cut.lastIndexOf(", and "), cut.lastIndexOf(", "));
   if (i > 30) cut = cut.slice(0, i);
-  return cut.replace(/[,\s]+(?:and|or|but|with|of|to|the|a|an)?$/i, "");
+  return dropHalfRange(cut, t).replace(/[,\s]+(?:and|or|but|with|of|to|the|a|an)?$/i, "");
+}
+// RESEARCH ROUND 3 (2026-11-02): a cut never leaves half a range. "pay runs from $80,000 to $95,000" cut after "to" read
+// "pay runs from $80,000" (one end, said as if it were the pay). The figure whose range was cut goes with it.
+const RANGE_CONN = /\s*(?:-|–|—|\bto|\band|\bthrough)$/i;
+const NUM_TAIL = /(?:\s+(?:from|between|of|is|was|at|around|about))?\s*(?:[A-Z]{0,2}[$€£¥₹])?\d[\d,.]*(?:\s?(?:k|m|bn|thousand|million|billion))?(?:\s?%)?$/i;
+export function dropHalfRange(cut: string, full: string): string {
+  let c = cut.replace(/[\s,;:]+$/, "");
+  if (RANGE_CONN.test(c)) {
+    const before = c.replace(RANGE_CONN, "");
+    if (NUM_TAIL.test(before)) c = before.replace(NUM_TAIL, "");
+  } else if (NUM_TAIL.test(c) && full.startsWith(c) && /^\s*(?:-|–|—|to|and|through)\s*(?:[A-Z]{0,2}[$€£¥₹])?\d/i.test(full.slice(c.length))) c = c.replace(NUM_TAIL, "");
+  return c.trimEnd();
 }
 export function fallbackVerdict(r: Ok): string {
   const name = r.name ?? "";

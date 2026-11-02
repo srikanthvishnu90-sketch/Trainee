@@ -127,7 +127,10 @@ const FACTS3: [string, string, boolean][] = [
   ["Nurses train for 6 months.", "Nurses train for 6 percent of their shifts on call.", false],
   ["Nurses train for 6 months.", "Nurses train for six months before they start.", true],
   ["Pay ranges from 5 to 10 percent above the base.", "Pay ranges from 5% to 10% above the base.", true],
-  ["The median wage was €50,000.", "The median wage was $50,000.", true],
+  // RESEARCH ROUND 3 (2026-11-02): a figure keeps its currency; euros are not the dollars the quote says (D-007).
+  ["The median wage was €50,000.", "The median wage was $50,000.", false],
+  ["The median wage was €50,000.", "The median wage was €50,000.", true],
+  ["The median wage was 50,000 euros.", "The median wage was €50,000.", true],
 ];
 for (const [i, [text, quote, want]] of FACTS3.entries()) Deno.test(`round 3 fact probe ${i + 1}: ${want ? "accepts" : "rejects"} "${text.slice(0, 44)}"`, () => { ok(accepts(text, quote) === want); });
 const LINES3: [string, string[], string[], string, boolean][] = [

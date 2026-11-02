@@ -451,12 +451,29 @@ const CareerRouter = (() => {
     const c = [p && p.url, ...((p && Array.isArray(p.source_urls)) ? p.source_urls : [])].map(s).find((u) => /^https?:\/\/\S+$/i.test(u));
     return c || null;
   }
-  function roleSentence(item) {
-    const where = item.remote === "remote" ? "remote" : item.remote === "hybrid" ? `hybrid in ${s(item.location).split(",")[0]}` : s(item.location);
-    const pay = item.posting.salary && item.posting.salary.raw ? `, ${item.posting.salary.raw}` : "";
+
+
+  // SEARCH LISTS (2026-11-01, texting): a found list is texted as the summary with its next step first, then one short line per
+  // role (title at company, where, the pay the posting states) with the role's own link alone on the next line, and nothing
+  // after the last link. On iMessage each link is its own message (its preview card), so a closing line after the links
+  // was one more text bubble; in the summary it is not. The fit reason and the skills heads-up stay on the shortlist record
+  // (publicFacts), not in the text. Pay is the posting's own figure (its salary field, or a range its own text states), never
+  // a guess. Roles are numbered when there are two or more, so the person can answer with a digit.
+  function postingPayText(posting) {
+    if (posting && posting.salary && posting.salary.raw) return s(posting.salary.raw);
+    const m = s(posting && (posting.jd_text || posting.description)).match(/\$\s?\d[\d,]*(?:\.\d+)?\s?[kK]?\s*(?:-|–|—|to)\s*\$\s?\d[\d,]*(?:\.\d+)?\s?[kK]?(?:\s*(?:\/|per|an?)\s*(?:hour|hr|year|yr))?/);
+    return m ? m[0].replace(/\s*(?:-|–|—|to)\s*/, "-").replace(/\s+/g, " ").replace(/\s*\/\s*/, "/") : "";
+  }
+  function roleListLine(item, i, all) {
+    const n = all.length > 1 ? `${i + 1}) ` : "";
+    const where = item.remote === "remote" ? "remote" : item.remote === "hybrid" ? `hybrid in ${s(item.location).split(",")[0]}` : s(item.location).split(",")[0];
+    const pay = postingPayText(item.posting);
     const url = item.url || postingUrlOf(item.posting);
-    // The link rides inside the role's own sentence: the composer keeps one sentence per role.
-    return `${item.title} at ${item.company}${url ? ` (${url})` : ""} — ${where}${pay}: ${item.reason}${item.caveat ? `; heads-up: ${item.caveat}` : ""}.`;
+    return `${n}${[`${item.title} at ${item.company}`, where, pay].filter((x) => s(x).trim()).join(", ")}${url ? `\n${url}` : ""}`;
+  }
+  function roleListReply(summary, items, nextStep) {
+    const head = [s(summary).trim(), s(nextStep).trim()].filter(Boolean).join(" ");
+    return [head, ...items.map((it, i, all) => roleListLine(it, i, all))].join("\n");
   }
 
   // The role families an ASK names. "Design / portfolio-first" is pinned to
@@ -480,7 +497,8 @@ const CareerRouter = (() => {
     const profile = ctx.profile;
     const t = lc(text);
     const countM = t.match(/(\d+)\s*(?:roles|jobs|internships)/);
-    const limit = o.limit || (countM ? Number(countM[1]) : 5);
+    // SEARCH LISTS (2026-11-01): three roles unless the person asked for a number (a text, not a page).
+    const limit = o.limit || (countM ? Number(countM[1]) : 3);
     const fams = o.families !== undefined ? o.families : discoveryFamilies(text);
     const { ranked, excluded, dedupedTo, family } = rankedShortlist(profile, ctx, Object.assign({}, o, { askFamilies: fams && fams.length ? fams : null }));
     // COMPLEXITY WAVE (BUG-173): remember the search's parameters —
@@ -560,8 +578,9 @@ const CareerRouter = (() => {
     }
     // PRODUCT AUDIT 2026-10-28 (#5): with nothing on the profile, the list is not "ranked by fit with your profile".
     const profiled = !!(profile && (profile.facts || []).length);
-    const reply = compose({ headline: o.headline || (profiled ? `Here are the ${top.length} roles most worth applying to, ranked by fit with your profile.` : `Here ${top.length === 1 ? "is 1 role" : `are ${top.length} roles`} that match your search.`), facts: top.map(roleSentence),
-      nextStep: o.nextStep || (profiled ? "Tell me one to tailor your resume for, and I will do that next." : "Want me to rank them against your resume? Paste it here or attach the file.") });
+    const pl = top.length === 1 ? "role" : "roles";
+    const reply = roleListReply(o.headline || (profiled ? `${top.length} ${pl} that fit your profile best.` : `${top.length} ${pl} that match your search.`), top,
+      o.nextStep || (profiled ? (top.length > 1 ? "Reply with a number and I'll tailor your resume for it." : "Want me to tailor your resume for it?") : "Want me to rank them against your resume?"));
     return Object.assign({ intent: o.intent || "career_discovery", reply }, publicFacts);
   }
 
@@ -590,7 +609,7 @@ const CareerRouter = (() => {
     const headline = ctx.profile
       ? `For Summer ${summerYear}, using the profile you already gave me${gy ? ` (graduating ${gy}${skills ? `, ${skills}` : ""})` : ""}, these are the internship and new-grad roles that fit best.`
       : `For Summer ${summerYear}, these are the internship and new-grad roles that fit best — searched with no profile on file yet, so nothing about you is assumed.`;
-    return handleDiscovery(text, ctx, { intent: "career_internship_discovery", limit: 4, locations: locations.size ? locations : null, bands, headline, nextStep: "Want me to tailor your resume for the first one?" });
+    return handleDiscovery(text, ctx, { intent: "career_internship_discovery", limit: 3, locations: locations.size ? locations : null, bands, headline, nextStep: "Want me to tailor your resume for the first one?" });
   }
 
   // COMPLEXITY WAVE (BUG-173): discovery follow-ups. A search's

@@ -120,9 +120,9 @@ Deno.test({
             eq(w.queue.length, 0, "nothing queued by looking");
             // One tap.
             await acmeCard.getByRole("button", { name: /^Apply to/ }).click();
-            await pg.waitForSelector("li.card >> text=Approved");
+            await pg.waitForSelector("li.card .chip.queued");
             const acme = await acmeCard.textContent() ?? "";
-            assert(/Approved/.test(acme) && /Approved\. It's queued to be sent exactly as its card showed/.test(acme), acme);
+            assert(/^Approved$/.test((await acmeCard.locator(".chip.queued").textContent())?.trim() ?? "") && /Approved\. It's queued to be sent exactly as its card showed/.test(acme), acme);
             await check("the list after Apply");
             eq(w.queue.length, 1);
             eq(w.queue[0].payload_hash, HASH(1));

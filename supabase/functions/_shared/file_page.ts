@@ -10,7 +10,7 @@ import { reasonWords } from "./career_apply_status.ts";
 import { BODY_FONT, BRAND, DISABLED_CSS, FAVICON, FONT_LINKS, PLUM, TOKENS_CSS } from "./brand.ts";
 
 export type Word = "queued" | "preparing" | "sending" | "submitted" | "confirmed" | "failed" | "not submitted" | "needs you" | "unknown" | "in applications";
-export interface Status { word: Word; detail: string; evidence?: string | null } // evidence: what the row holds that shows the outcome (an employer reference, a confirmation email); null/absent: none on file
+export interface Status { word: Word; detail: string; sent?: boolean; evidence?: string | null } // evidence: what the row holds that shows the outcome (an employer reference, a confirmation email); null/absent: none on file
 export interface AppRow {
   id: string; state: string; reason: string | null; confirmation_id: string | null; created_at: string; updated_at: string;
   email_confirmed_at: string | null; payload: Record<string, unknown>; company: string; url: string;
@@ -108,7 +108,7 @@ export function statusOf(o: { app: AppRow | null; wanted: boolean }): Status | n
       case "driving": return { word: "sending", detail: "Being sent now; not submitted yet." };
       // An emailed code is asked after the application went; the other stops are before it (round 2, 2026-10-30: the
       // detail was the queue's own code, "email_code" or "bot_check").
-      case "needs_user": return { word: "needs you", detail: a.reason === "email_code" ? `Sent, but not finished: ${who} emailed you a code to finish it. Type it on their page yourself.`
+      case "needs_user": return { word: "needs you", sent: a.reason === "email_code", detail: a.reason === "email_code" ? `Sent, but not finished: ${who} emailed you a code to finish it. Type it on their page yourself.`
         : a.reason === "captcha" || a.reason === "bot_check" ? `Stopped before it was sent: a verification check on ${who}'s page. Trainee never solves one; finish it yourself at the link.`
         : a.reason === "login_required" ? `Stopped before it was sent: ${who}'s site asks you to sign in first. Trainee never signs in for you.`
         : a.reason ? `Stopped before it was sent: ${reasonWords(a.state, a.reason)}.` : "It stopped and needs you." };

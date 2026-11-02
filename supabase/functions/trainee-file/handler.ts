@@ -27,7 +27,7 @@ import { type PendingRow, pendingLine } from "../_shared/career_hosted_prepare.t
 import { factType, NEVER_BY_TEXT } from "../_shared/question_map.ts";
 import { decodeRowQuestionType } from "../_shared/row_answer.ts";
 import { freshnessStamp } from "../_shared/results_stamp.ts";
-import { coverage, countsOf, NOT_LISTED, renderExport, reqIdOf, roleIds, specOf } from "../_shared/results_spec.ts";
+import { coverage, countsOf, NOTHING_SENT, NOT_LISTED, renderExport, reqIdOf, roleIds, specOf } from "../_shared/results_spec.ts";
 import type { ListMeta } from "../_shared/telegram_jobs.ts";
 import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, logoUrl, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
 
@@ -327,7 +327,7 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   const action = req.method === "POST" ? (fields.get("action") ?? "") : "";
   // A tap that reaches an ended sign-in says what became of it: nothing was approved (file journey round 2: an Apply after the session
   // expired or was signed out elsewhere only said "You were signed out", leaving whether it went unsaid).
-  const tapped = action === "apply" || action === "applyall" || action === "applysel" || action === "answer" ? ["Nothing was approved or sent from this tap."] : [];
+  const tapped = action === "apply" || action === "applyall" || action === "applysel" || action === "answer" || action === "dismiss" || action === "restore" || action === "pause" || action === "resume" ? ["Nothing was approved or sent from this tap."] : [];
   const signedOut = (why: string) => why === "error" ? state("Couldn't open this just now", ["Nothing was sent. Try again in a minute."], 503)
     : why === "expired" ? state("You were signed out", [...tapped, "Sign-ins last two hours. " + NEW_LINK], 401)
     : why === "revoked" || why === "unbound" ? state("You were signed out", [...tapped, "This sign-in was ended. " + NEW_LINK], 401)
@@ -631,7 +631,8 @@ const qsFor = (all: OpenQuestion[] | null, r: Row) => (all ?? []).filter((q) => 
 
 async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaims; token: string; action: string; fields: URLSearchParams; url: URL; req: Request;
   html: (b: string, s?: number, e?: Record<string, string>) => Promise<Response>; text: (b: string, s?: number) => Promise<Response>; state: (t: string, p: string[], s: number) => Promise<Response> }): Promise<Response> {
-  const { meta, d, claims, token, action, fields } = o, u = claims.u;
+  const { d, claims, token, action, fields } = o, u = claims.u;
+  let meta = o.meta;
   const floor = meta.floor ? { amount: meta.floor.amount, period: meta.floor.period } : null;
   const notes: Record<string, string> = {};
   let top: string | undefined;
@@ -684,25 +685,29 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
 
   if (action) {
     if (!["apply", "applysel", "answer", "refresh", "dismiss", "restore", "pause", "resume"].includes(action)) return o.state("Not done", ["That is not something this page can do. Nothing was sent."], 400);
-    const saveMeta = async () => { try { await d.store.rememberListMeta?.(u, claims.r, meta); return true; } catch { return false; } };
+    // Re-read the stored meta right before writing and change only this field, so two taps cannot overwrite each other.
+    const saveMeta = async (patch: (m: ListMeta) => void) => {
+      try {
+        const fresh = (await d.store.recallListMeta?.(u, claims.r).catch(() => null)) ?? meta;
+        patch(fresh); await d.store.rememberListMeta?.(u, claims.r, fresh); meta = fresh; return true;
+      } catch { return false; }
+    };
     const paused = !!meta.paused, marked = new Set(meta.dismissed ?? []);
     if (action === "refresh") { /* a fresh read below */ }
     else if (action === "pause" || action === "resume") {
       // Pause remaining (PRD 5, 7.10): this page only. It stops this page from approving or starting anything new; it cancels nothing
       // already approved or in progress, and says so.
-      const before = meta.paused;
-      meta.paused = action === "pause" ? { at: d.now() } : null;
-      if (!(await saveMeta())) { meta.paused = before; top = "I couldn't save that just now. Nothing changed and nothing was sent."; }
-      else top = action === "pause" ? "Paused. This page will not approve or start anything new. Applications already approved or in progress are not cancelled and may still finish. Nothing else will start from here." : "Resumed. Nothing was sent by resuming; each Apply still needs your tap.";
+      if (!(await saveMeta((m) => { m.paused = action === "pause" ? { at: d.now() } : null; }))) { top = "I couldn't save that just now. Nothing changed and nothing was sent."; }
+      else top = action === "pause" ? "Paused on this page. It will not approve or start anything new. Telegram buttons still work. Applications already approved or in progress are not cancelled and may still finish. Nothing else will start from here." : "Resumed. Nothing was sent by resuming; each Apply still needs your tap.";
     } else if (action === "dismiss" || action === "restore") {
       const ref = fields.get("ref") ?? "";
       const on = (await d.store.recallList(u, claims.r).catch(() => null)) ?? [];
+      const rowNow = action === "dismiss" ? await loadFeed(claims, token, d) : null;
       if (!on.includes(ref)) top = "That role isn't on this list. Nothing changed.";
       else {
-        const before = meta.dismissed;
-        if (action === "dismiss") marked.add(ref); else marked.delete(ref);
-        meta.dismissed = [...marked];
-        if (!(await saveMeta())) { meta.dismissed = before; top = "I couldn't save that just now. Nothing changed."; }
+        const sp = action === "dismiss" ? (() => { const r0 = rowNow?.rows.find((x) => x.ref === ref); return r0 ? specOf(r0) : null; })() : null;
+        if (sp && (sp.sent || sp.bucket === "progress" || sp.bucket === "done")) notes[ref] = "Not dismissed: this application is already approved, started or submitted, so it stays on your list. Nothing was changed.";
+        else if (!(await saveMeta((m) => { const s2 = new Set(m.dismissed ?? []); if (action === "dismiss") s2.add(ref); else s2.delete(ref); m.dismissed = [...s2]; }))) top = "I couldn't save that just now. Nothing changed.";
         else notes[ref] = action === "dismiss" ? "Dismissed. Private to you; no application was touched. You can restore it at the bottom of the page." : "Restored to your list. No application was touched.";
       }
     } else if ((action === "apply" || action === "applysel") && paused) {
@@ -717,7 +722,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
       else notes[ref] = (await approveOne(u, ref, tag, d)) ?? SENT;
     } else if (action === "applysel") {
       const want = picks().filter((p) => !marked.has(p.ref));
-      if (!want.length) top = "Tick at least one role first. Nothing was sent.";
+      if (!want.length) top = picks().length ? "Those roles are dismissed. Restore them first. Nothing was sent." : "Tick at least one role first. Nothing was sent.";
       else {
         // Every ticked role is judged against the page as it is now; the ones that are ready go together, each bound to the exact
         // payload tag its card showed. A role that isn't ready, or changed since, is skipped and says why.
@@ -777,7 +782,8 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   const pf = o.url.searchParams.get("pay") as PayFilter, filters = { pay: PAY_FILTERS.has(pf) ? pf : "any" as PayFilter, where: (o.url.searchParams.get("where") ?? "").trim().slice(0, 80) };
   const openNow = await readQs(), pend = d.pending ? await d.pending(u).catch(() => null) : null;
   // Stable ids over the WHOLE list (not the filter, not the sort, not what is dismissed).
-  const ids = roleIds(feed.rows.map((r) => r.ref));
+  const rawRefs = (await d.store.recallList(u, claims.r).catch(() => null)) ?? feed.rows.map((r) => r.ref);
+  const ids = roleIds(rawRefs);
   const seenAt = new Map((await d.store.postings(feed.rows.map((r) => r.job.job_id)).catch(() => [] as PostingRow[])).map((p) => [p.job_id, p.last_seen_at]));
   const checkedOf = (id: string) => freshnessStamp("Checked", [seenAt.get(id)], { now: d.now(), tz: ztz });
   const ztz = await tzOf();
@@ -805,8 +811,8 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   if (o.req.method === "GET" && o.url.searchParams.get("export") === "txt") {
     const roles = [...all].sort((a, b) => (a.rid ?? "") < (b.rid ?? "") ? -1 : 1).map((r) => ({ id: r.rid ?? "R-??", employer: r.job.company, title: r.job.title, reqId: r.reqId ?? null, place: r.place,
       pay: r.payShown ? `${r.payShown} (as the posting lists it)` : "Pay not listed", source: r.job.source ?? "", url: r.job.url ?? null, checked: r.checked ?? null, spec: specOf(r), byHand: r.byHand, dismissed: dismissedSet.has(r.ref) }));
-    const act = all.filter((r) => !dismissedSet.has(r.ref));
-    return o.text(renderExport({ title: `${meta.what}${floor ? `, ${floorText(floor)} or more` : ""}`, updated, counts: countsOf(act), coverageLine: coverage(act), paused: !!meta.paused, roles }));
+    const act = keep;
+    return o.text(renderExport({ title: `${meta.what}${floor ? `, ${floorText(floor)} or more` : ""}`, updated, counts: countsOf(act), coverageLine: coverage(all), paused: !!meta.paused, roles }));
   }
   const rows = keep.filter((r) => (filters.pay === "meets" ? r.payGroup === "meets" : filters.pay === "listed" ? !!r.payShown : true)
     && (!filters.where ? true : filters.where === "remote" ? r.job.remote === "remote" || /\bremote\b/i.test(r.job.location) : r.job.location.toLowerCase().includes(filters.where.toLowerCase())));
@@ -824,8 +830,8 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   const fromWhere = meta.source === "snapshot"
     ? `From a saved snapshot of job boards${meta.read ? ` read ${fmt(Date.parse(meta.read), { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}` : ""}, not the live board, so some may have closed; ${srcWord}.`
     : `From ${srcWord} on the live board.`;
-  const nMeets = all.filter((r) => r.payGroup === "meets").length, nUnlisted = all.filter((r) => r.payGroup === "unlisted").length;
-  const nOther = all.filter((r) => r.payGroup === "unchecked").length, nBelow = all.filter((r) => r.payGroup === "below").length;
+  const nMeets = keep.filter((r) => r.payGroup === "meets").length, nUnlisted = keep.filter((r) => r.payGroup === "unlisted").length;
+  const nOther = keep.filter((r) => r.payGroup === "unchecked").length, nBelow = keep.filter((r) => r.payGroup === "below").length;
   const fl = floor ? floorText(floor) : null;
   const caveat = [
     fromWhere,
@@ -833,13 +839,13 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
     nOther ? `${nOther} ${nOther === 1 ? "lists" : "list"} pay in another currency or without a period, so ${nOther === 1 ? "it wasn't" : "they weren't"} compared${fl ? ` with ${fl}` : ""}.` : "",
     "Fit is judged only on what you've confirmed.",
   ].filter(Boolean).join(" ");
-  const best = all.filter((r) => r.payGroup === "meets").slice(0, 2).map((r) => `${r.job.title} at ${r.job.company}`);
+  const best = keep.filter((r) => r.payGroup === "meets").slice(0, 2).map((r) => `${r.job.title} at ${r.job.company}`);
   const quick = [
-    best.length ? `Best ${best.length === 1 ? "match" : "matches"}: ${best.join("; ")}.` : all.length ? `Closest by fit: ${all[0].job.title} at ${all[0].job.company}.` : "",
-    fl ? `${nMeets} of ${all.length} list ${fl} or more${nUnlisted ? `; ${nUnlisted} ${nUnlisted === 1 ? "doesn't" : "don't"} list pay` : ""}${nOther ? `; ${nOther} can't be compared` : ""}${nBelow ? `; ${nBelow} now list less` : ""}.` : `${all.length} ${all.length === 1 ? "role" : "roles"}, sorted by fit.`,
-    "Next: tap Apply on a role. A ready one is sent exactly as its What will be sent shows; one that isn't ready asks for what it needs first. Nothing is sent until you tap Apply.",
+    best.length ? `Best ${best.length === 1 ? "match" : "matches"}: ${best.join("; ")}.` : keep.length ? `Closest by fit: ${keep[0].job.title} at ${keep[0].job.company}.` : "",
+    fl ? `${nMeets} of ${keep.length} list ${fl} or more${nUnlisted ? `; ${nUnlisted} ${nUnlisted === 1 ? "doesn't" : "don't"} list pay` : ""}${nOther ? `; ${nOther} can't be compared` : ""}${nBelow ? `; ${nBelow} now list less` : ""}.` : `${keep.length} ${keep.length === 1 ? "role" : "roles"}, sorted by fit.`,
+    `Next: tap Apply on a role. A ready one is sent exactly as its What will be sent shows; one that isn't ready asks for what it needs first. ${coverage(all) === NOTHING_SENT ? "Nothing is sent until you tap Apply." : "Each new send needs your tap on Apply."}`,
   ].filter(Boolean);
-  return o.html(renderResults({ token, title, floor: fl, rows, countRows: keep, total: all.length, filters, places, top, notes,
+  return o.html(renderResults({ token, title, floor: fl, rows, coverRows: all, countRows: keep, total: all.length, filters, places, top, notes,
     madeFor: `Made for ${meta.name ?? "you"} · ${day}`, stamp: await stampOf(rows), caveat, quick,
     paused: !!meta.paused, updated, dismissed: gone }));
 }

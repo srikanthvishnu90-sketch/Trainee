@@ -31,6 +31,7 @@ export interface ResultsFeed {
   filters: { pay: PayFilter; where: string }; places: string[]; top?: string; notes?: Record<string, string>;
   // The header: who and when, what was read and when, what is not confirmed, and a 2-3 line quick read.
   // stamp: "Postings checked ..." from the shown postings' own last_seen_at (results_stamp.ts); null: "Check time unknown".
+  coverRows?: ResultRow[]; // every role including dismissed: what has been sent is told over these
   countRows?: ResultRow[]; // every active (not dismissed) role, before the pay/place filter: the top counts are over these
   paused?: boolean; updated?: string; dismissed?: ResultRow[]; // the person's own marks (private); updated: when this page was drawn
   madeFor?: string; stamp?: string | null; caveat?: string; quick?: string[];
@@ -155,10 +156,10 @@ export function renderResults(f: ResultsFeed): string {
   const open = cr.some((r) => ["ready", "notprep", "needs"].includes(specOf(r).bucket));
   const topBlock = `<section class="top" aria-label="Where things stand"><h2>Where things stand</h2><ul class="counts">${counts.filter((c) => c.n).map((c) => `<li><b>${c.n}</b> ${esc(c.label)}</li>`).join("") || "<li>No active roles</li>"}</ul>`
     + (f.dismissed?.length ? `<p class="upd">${f.dismissed.length} dismissed by you, listed at the bottom (not counted above).</p>` : "")
-    + `<p class="cover">${esc(coverage(cr))}</p>${f.updated ? `<p class="upd">Page updated ${esc(f.updated)}. Counts come from each role's current state.</p>` : ""}`
+    + `<p class="cover">${esc(coverage(f.coverRows ?? cr))}</p>${f.updated ? `<p class="upd">Page updated ${esc(f.updated)}. Counts come from each role's current state.</p>` : ""}`
     + (f.paused
-      ? `<div class="pausebar"><p><b>Paused.</b> This page is not starting new applications. Anything already approved or in progress is not changed by this and may still finish.</p><form method="post">${hidden(f.token, "resume")}<button type="submit" class="ghost">Resume</button></form></div>`
-      : open ? `<div class="pausebar"><form method="post">${hidden(f.token, "pause")}<button type="submit" class="ghost">Pause remaining</button></form><p>Stops new, not-yet-approved work from this page only. Applications already approved or in progress are not cancelled and may still finish.</p></div>` : "")
+      ? `<div class="pausebar"><p><b>Paused on this page.</b> This page is not starting new applications; Telegram buttons still work. Anything already approved or in progress is not changed by this and may still finish.</p><form method="post">${hidden(f.token, "resume")}<button type="submit" class="ghost">Resume</button></form></div>`
+      : open ? `<div class="pausebar"><form method="post">${hidden(f.token, "pause")}<button type="submit" class="ghost">Pause on this page</button></form><p>Stops this page from approving or starting anything new. It does not stop Telegram: the buttons there still work. Applications already approved or in progress are not cancelled and may still finish.</p></div>` : "")
     + `</section>`;
   const gone = f.dismissed?.length ? `<details class="gone"><summary>Dismissed (${f.dismissed.length})</summary><ul class="cards">${f.dismissed.map((r) => `<li class="card" id="r-${esc(r.ref)}"><div class="head">${logoOf(r)}<div class="ttl"><h3 class="title">${esc(r.job.title)}</h3><p class="co">${esc(r.job.company)}</p></div></div><p class="state">${r.rid ? `<span class="rid">${esc(r.rid)}</span>` : ""}<span class="chip" role="status">Dismissed by you</span></p><p class="markhelp">Private and reversible. No application was touched. Current state: ${esc(specOf(r).label)}.</p>${markForm(r, f, "restore")}</li>`).join("")}</ul></details>` : "";
   const inner = `<div id="root" class="results"><header>${BRAND}${head}${topBlock}${filters}${shown}${selbar}</header><main id="main">${top}${body}${gone}</main></div>`;

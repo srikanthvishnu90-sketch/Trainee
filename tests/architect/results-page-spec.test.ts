@@ -56,7 +56,7 @@ Deno.test("top: counts by primary state from the rows, the coverage line, the up
   assert(/3 Ready to apply/.test(t), t);
   assert(t.includes("Nothing has been sent. Apply sends only the application shown under What will be sent."), t);
   assert(/Page updated .*20\d\d/.test(t), t);
-  assert(/Pause remaining/.test(t) && /not cancelled/.test(t), "pause says in-flight stays");
+  assert(/Pause on this page/.test(t) && /not cancelled/.test(t), "pause says in-flight stays");
 });
 Deno.test("top: counts follow row states, not clicks: a queued row moves out of Ready and the line stops saying nothing was sent", async () => {
   const { w, s } = await open();
@@ -121,12 +121,12 @@ Deno.test("pause: no new approvals from the page, says in-flight stays, resume r
   const { w, s, html } = await open();
   const ref = refIn(html, "Frontend Engineering Intern", "Acme Web");
   const p = await (await post(w, s, { action: "pause" })).text();
-  assert(/Paused\./.test(plain(p)) && /already approved or in progress are not cancelled/.test(plain(p)));
+  assert(/Paused on this page\./.test(plain(p)) && /already approved or in progress are not cancelled/.test(plain(p)));
   assert(!/class="apply"/.test(p.split('<ul class="cards">')[1] ?? ""), "no Apply while paused");
   const tap = plain(await (await post(w, s, { action: "apply", ref, tag: tagOf(1) })).text());
   assert(/Paused/.test(tap)); eq(w.queue.length, 0);
   const r = await (await post(w, s, { action: "resume" })).text();
-  assert(/class="apply"/.test(r) && !/<b>Paused\.<\/b>/.test(r));
+  assert(/class="apply"/.test(r) && !/<b>Paused on this page\.<\/b>/.test(r));
 });
 Deno.test("export: ?export=txt is text/plain, every role with state, source URL and a real or honest action line; signed-out gets no list", async () => {
   const { w, s } = await open();
@@ -140,4 +140,77 @@ Deno.test("export: ?export=txt is text/plain, every role with state, source URL 
   assert(t.includes("Status: Prepared") && t.includes("Nothing has been sent."));
   const anon = await get(w, "not-a-session", "export=txt");
   assert(!(await anon.text()).includes("Source URL:"), "same auth as the page");
+});
+
+// ---------------------------------------------------------------- review fixes (F1-F8)
+Deno.test("F1: a dismissed role that was already sent still stops the page saying nothing was sent; Dismiss is refused on a sent row", async () => {
+  const w = world(); const r = await made(w); const s = await w.A.tok(U, r.listId, NOW);
+  const html0 = await (await get(w, s)).text(), ref = refIn(html0, "Frontend Engineering Intern", "Acme Web");
+  await post(w, s, { action: "apply", ref, tag: tagOf(1) }); // now queued
+  const refused = plain(await (await post(w, s, { action: "dismiss", ref })).text());
+  assert(/Not dismissed: this application is already approved/.test(refused), refused);
+  // force the stored mark (an older dismissal, then the role was sent): header and export still tell the truth
+  const meta = await w.store.recallListMeta!(U, r.listId); await w.store.rememberListMeta!(U, r.listId, { ...meta!, dismissed: [ref] });
+  const html = await (await get(w, s)).text();
+  assert(!top(html).includes("Nothing has been sent."), top(html));
+  assert(/already approved, started or submitted/.test(top(html)));
+  const ex = await (await get(w, s, "export=txt")).text();
+  const lead = ex.split("\nWhere things stand")[0];
+  assert(!lead.includes("Nothing has been sent.") && /already approved, started or submitted/.test(lead) && /Dismissed by you/.test(ex), ex);
+});
+Deno.test("F2: needs_user with an emailed code counts as sent", async () => {
+  const w = world(); const r = await made(w); const s = await w.A.tok(U, r.listId, NOW);
+  const orig = w.store.appRow; w.store.appRow = async (u, id, url) => id === POSTINGS[0].job_id ? app("needs_user", { reason: "email_code" }) : orig(u, id, url);
+  const html = await (await get(w, s)).text();
+  assert(!top(html).includes("Nothing has been sent."), top(html));
+  assert(!(await (await get(w, s, "export=txt")).text()).split("\nWhere things stand")[0].includes("Nothing has been sent."));
+  assert(/already approved, started or submitted/.test(top(html)));
+});
+Deno.test("F3: the pause control says it covers this page and that Telegram still works", async () => {
+  const { html } = await open();
+  assert(/Pause on this page/.test(html) && /Telegram: the buttons there still work/.test(plain(html)));
+  assert(!/>Pause remaining</.test(html));
+});
+Deno.test("F4: ids come from the raw list; a role's id does not move when other roles are dismissed", async () => {
+  const { w, s, html } = await open();
+  const ref = refIn(html, "Frontend Intern", "Globex"), id = /R-\d+/.exec(plain(cardOf(html, ref)))![0];
+  const other = refIn(html, "Frontend Engineering Intern", "Acme Web");
+  const after = await (await post(w, s, { action: "dismiss", ref: other })).text();
+  eq(/R-\d+/.exec(plain(cardOf(after, ref)))![0], id);
+});
+Deno.test("F5: no requisition id from prose or without a digit or label", () => {
+  eq(reqIdOf("Requisition: Engineering team"), null);
+  eq(reqIdOf("Req: Platform"), null);
+  eq(reqIdOf("requisition for a senior role"), null);
+  eq(reqIdOf("Requisition ID: ENG"), null);
+  eq(reqIdOf("Req # 4471"), "4471");
+  eq(reqIdOf("Requisition number: JR-2231"), "JR-2231");
+});
+Deno.test("F6: totals and the quick read count the kept (non-dismissed) roles", async () => {
+  const { w, s, html } = await open();
+  const ref = refIn(html, "Frontend Intern", "Globex");
+  const after = plain(await (await post(w, s, { action: "dismiss", ref })).text());
+  assert(/\b2 roles, sorted by fit|2 of 2 list/.test(after), after.slice(0, 600));
+});
+Deno.test("F7: dismiss merges into the freshly stored meta (a pause saved meanwhile is kept)", async () => {
+  const { w, s, html } = await open();
+  const ref = refIn(html, "Frontend Intern", "Globex");
+  await post(w, s, { action: "pause" });
+  await post(w, s, { action: "dismiss", ref });
+  const page = await (await get(w, s)).text();
+  assert(/Paused on this page/.test(page) && /Dismissed \(1\)/.test(page), "both marks survive");
+});
+Deno.test("F8: all picks dismissed says so; signed-out dismiss says nothing changed; the quick read follows coverage", async () => {
+  const { w, s, html } = await open();
+  const ref = refIn(html, "Frontend Intern", "Globex");
+  await post(w, s, { action: "dismiss", ref });
+  const t = plain(await (await post(w, s, { action: "applysel" }, { pick: [`${ref}:${tagOf(2)}`] })).text());
+  assert(/Those roles are dismissed/.test(t) && !/Tick at least one role/.test(t), t);
+  const out = plain(await (await post(w, "not-a-session", { action: "dismiss", ref })).text());
+  assert(/Nothing was approved or sent from this tap/.test(out), out);
+  const one = await open();
+  const r1 = refIn(one.html, "Frontend Engineering Intern", "Acme Web");
+  await post(one.w, one.s, { action: "apply", ref: r1, tag: tagOf(1) });
+  const q = plain(await (await get(one.w, one.s)).text());
+  assert(/Each new send needs your tap on Apply/.test(q) && !/Next:[^.]*\. [^.]*\. Nothing is sent until you tap Apply/.test(q), q.slice(0, 900));
 });

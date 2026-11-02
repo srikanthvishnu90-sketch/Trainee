@@ -84,7 +84,7 @@ Deno.test({ name: "FEATURE 4: tailor my resume for the X role at Y -> bullets re
     };
 
     await t.step("flag off: today's select-and-reorder resume, no model call", async () => {
-      Deno.env.delete("CAREER_TAILOR_REWRITE");
+      Deno.env.set("CAREER_TAILOR_REWRITE", "off"); // D-036: a release flag (on when unset); "off" is its rollback
       const chat = handler!.chat("tok-b");
       await onboard(chat);
       const n = calls.length;

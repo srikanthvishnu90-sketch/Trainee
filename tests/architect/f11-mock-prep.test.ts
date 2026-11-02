@@ -75,8 +75,9 @@ Deno.test("F11/5 the judge: rubric-anchored prompt, OpenAI only, metered with on
   eq([rows[0].t, rows[0].r.user_id, rows[0].r.calls, rows[0].r.provider], ["agent_turn_costs", "u1", 1, "openai"]);
   const broken = modelJudge(admin, { get: () => undefined }, { call: () => Promise.reject(new Error("down")) });
   eq(await broken({ question: "Q", requirement: null, keys: [], answer: "a" }), null, "a failed judge leaves the code check standing");
-  // Off by default: no CAREER_MOCK_JUDGE, no judge.
-  eq(supabaseMockPrep({}, { get: () => undefined }).judge, null);
+  // D-036: CAREER_MOCK_JUDGE is a release flag: on when unset, and CAREER_MOCK_JUDGE=off (its rollback) means no judge.
+  eq(supabaseMockPrep({}, { get: (k) => (k === "CAREER_MOCK_JUDGE" ? "off" : undefined) }).judge, null);
+  assert(typeof supabaseMockPrep({}, { get: () => undefined }).judge === "function");
   assert(typeof supabaseMockPrep({}, { get: (k) => (k === "CAREER_MOCK_JUDGE" ? "on" : undefined) }).judge === "function");
 });
 

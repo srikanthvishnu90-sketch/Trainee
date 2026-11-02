@@ -15,6 +15,7 @@
 //
 // Code picks the questions and grades; a model never writes a question, a score, or anything about the person.
 import { CareerPrep } from "./router_core.career.js";
+import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 release flags
 import type { Debrief, MockAnswer, MockQuestion, MockState } from "./career_mock.ts";
 import { callModel, modelConfig, newMeter } from "./model_gateway.ts";
 
@@ -501,7 +502,7 @@ export function supabaseMockPrep(admin: any, env: { get(k: string): string | und
         if (r.error) console.error("mock prep: mock_done not recorded:", r.error.message);
       } catch (err) { console.error("mock prep: mock_done not recorded:", (err as Error)?.message ?? err); }
     },
-    judge: deps?.judge !== undefined ? deps.judge : (env.get("CAREER_MOCK_JUDGE") === "on" ? modelJudge(admin, env, deps?.callModel ? { callModel: deps.callModel } : undefined) : null),
+    judge: deps?.judge !== undefined ? deps.judge : (releaseFlagOn(env, "CAREER_MOCK_JUDGE") ? modelJudge(admin, env, deps?.callModel ? { callModel: deps.callModel } : undefined) : null),
   };
 }
 

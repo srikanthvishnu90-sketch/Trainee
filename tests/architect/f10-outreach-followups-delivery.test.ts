@@ -28,7 +28,8 @@ async function accountWithDueReminder() {
   await store.saveFollowups!(U, [{ draft_id: saved.id, name: "Maya Chen", firm: "Stripe", email: "maya@stripe.example", subject: "Intro and a question", sent_at: new Date(T0).toISOString(), due_at: new Date(DUE).toISOString(), set_at: new Date(T0).toISOString(), fired_at: null, asked: false }]);
   return { store, id: saved.id };
 }
-const env = (on: boolean) => ({ get: (k: string) => (on && k === "CAREER_OUTREACH_FOLLOWUPS" ? "on" : undefined) });
+// D-036: CAREER_OUTREACH_FOLLOWUPS is a release flag (on when unset); "off" is its rollback.
+const env = (on: boolean) => ({ get: (k: string) => (k === "CAREER_OUTREACH_FOLLOWUPS" ? (on ? "on" : "off") : undefined) });
 
 Deno.test("followup gate: off queues nothing however much is due; on queues one row of the right key, kind and text", async () => {
   const { store, id } = await accountWithDueReminder();

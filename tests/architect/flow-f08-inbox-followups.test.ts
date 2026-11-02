@@ -87,6 +87,7 @@ Deno.test({ name: "FEATURE 8: check my email now, the employer's email everywher
     const q = (sql: string) => pg.sql(sql);
 
     await t.step("switch off: 'check my email now' says nothing was read, and reads nothing", async () => {
+      Deno.env.set("CAREER_MAIL_TRACKING", "off"); // D-036: a release flag (on when unset); "off" is its rollback
       const r = await say(chat, "check my email now");
       eq(r.intent, "career_inbox_check", r.reply);
       eq(r.resultStatus, "MAIL_OFF", r.reply);

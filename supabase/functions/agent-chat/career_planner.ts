@@ -25,6 +25,7 @@ import type { ToolCtx, ToolSpec } from "../_shared/agent/loop.ts";
 import { whenSaid } from "../_shared/agent/career_tools.ts";
 import { documentsOf } from "../_shared/channel_artifacts.ts";
 import { brainMode } from "./career_staged.ts";
+import { releaseFlagOn } from "./release_config.ts";
 import { CARD_INTENT } from "../_shared/career_apply_cards.ts";
 import { MOCK_INTENT } from "../_shared/career_mock.ts";
 import { QUESTIONS_INTENT } from "../_shared/career_apply_questions.ts";
@@ -43,7 +44,8 @@ type Env = { get(k: string): string | undefined };
 // The switch: per person and reversible, and off whenever the served brain is the router (brainMode decides what is
 // served: CAREER_BRAIN, or the release config when it is unset; CAREER_BRAIN=router always rolls back).
 export function plannerOn(env: Env, userId: string): boolean {
-  if (String(env.get("CAREER_PLANNER") ?? "").trim().toLowerCase() !== "on") return false;
+  // D-036: a release flag (release_config.ts RELEASE_FLAGS): on unless the environment rolls it back (CAREER_PLANNER=off).
+  if (!releaseFlagOn(env, "CAREER_PLANNER")) return false;
   if (brainMode(env) === "router") return false;
   const allow = String(env.get("CAREER_PLANNER_USERS") ?? "").split(/[\s,]+/).filter(Boolean);
   return !allow.length || allow.includes(userId);

@@ -156,7 +156,7 @@ Deno.test({ name: "materials (1)(2): a messy new user tailors for Ramp, changes 
   if (skip()) return;
   const { handler } = await world();
   const person = PEOPLE["tok-m1"], other = PEOPLE["tok-m2"], chat = handler.chat("tok-m1");
-  Deno.env.delete("CAREER_TAILOR_REWRITE");
+  Deno.env.set("CAREER_TAILOR_REWRITE", "off"); // D-036: a release flag (on when unset); "off" is its rollback
   const before = calls.length;
   await onboard(chat);
   let ramp: Turn;

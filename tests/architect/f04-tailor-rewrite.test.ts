@@ -108,7 +108,8 @@ Deno.test("F04/3 no model, model error, unreadable answer: the select-and-reorde
 });
 
 Deno.test("F04/4 the flag and the live turn: off by default; on, the router's career_tailor result gets the rewritten PDF in place", async () => {
-  eq(rewriteOn({ get: () => undefined }), false);
+  eq(rewriteOn({ get: () => undefined }), true, "D-036: a release flag, on when unset");
+  eq(rewriteOn({ get: (k: string) => (k === "CAREER_TAILOR_REWRITE" ? "off" : undefined) }), false, "off is its rollback");
   eq(rewriteOn({ get: (k: string) => (k === "CAREER_TAILOR_REWRITE" ? "on" : undefined) }), true);
   const p = person(), t = tailored(p);
   const artifact = { kind: "tailored_resume", format: "text", text: t.rendered.text, pdf: t.rendered.pdf, sha256: "x", company: "Quillstone Analytics (TEST)" };

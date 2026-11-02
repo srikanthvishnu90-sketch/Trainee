@@ -148,6 +148,7 @@ if (import.meta.main) {
   const brainName = opt("--brain") || "router", label = opt("--label") || `${brainName}-${new Date().toISOString().slice(0, 10)}`;
   if (!Deno.env.get("OPENAI_API_KEY")) { console.log("NOT RUN: no OPENAI_API_KEY (the judge needs it)."); Deno.exit(2); }
   const { callModel, modelConfig, newMeter } = await import("../../supabase/functions/_shared/model_gateway.ts");
+  const { careerModelConfig } = await import("../../supabase/functions/agent-chat/release_model.ts");
   // --set in-flight | in-flight-heldout (WO-100): the seeded world's items, or their held-out paraphrases.
   const setName = opt("--set") ?? "", inFlight = setName.startsWith("in-flight");
   const base = JSON.parse(await Deno.readTextFile(new URL("./conversations.json", import.meta.url)));
@@ -155,7 +156,7 @@ if (import.meta.main) {
   const world = flight ? JSON.parse(await Deno.readTextFile(new URL(flight.world, new URL("./in-flight.json", import.meta.url)))) : null;
   const set = flight ? { postings: [...base.postings, ...world.postings], items: setName === "in-flight-heldout" ? flight.heldout : flight.items } : base;
   const meter = newMeter(), judgeMeter = newMeter();
-  const brainCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+  const brainCfg = careerModelConfig(Deno.env);
   const judgeCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("EVAL_JUDGE_MODEL") || "gpt-5-mini" };
   const kind = brainName === "agent" ? "agent" : "router", model = (p: any) => callModel(brainCfg, p, { meter, role: "chat" });
   const brain = flight ? await worldBrain({ kind, world, postings: base.postings, items: set.items, model }) : await traineeBrain({ kind, postings: set.postings, model });

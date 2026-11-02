@@ -13,6 +13,7 @@ import { telegramAdapter } from "../../supabase/functions/_shared/telegram.ts";
 import { mockTurn, type MockState, type MockStore } from "../../supabase/functions/_shared/career_mock.ts";
 import { agentTurn } from "../../supabase/functions/agent-chat/career_brain.ts";
 import { callModel, modelConfig, newMeter } from "../../supabase/functions/_shared/model_gateway.ts";
+import { careerModelConfig } from "../../supabase/functions/agent-chat/release_model.ts";
 import { memoryAlertStore } from "../../supabase/functions/_shared/career_alert_store.ts";
 import { memoryWantStore } from "../../supabase/functions/_shared/career_apply_want.ts";
 import { linkChecker } from "../../supabase/functions/_shared/link_check.ts";
@@ -36,7 +37,7 @@ const linkCheck = linkChecker(fetch, { userAgent: `Trainee job link check (conta
 
 // 2. The pieces agent-chat passes, in memory.
 const host = CareerHost.createCareerHost({ CareerAccess: core.CareerAccess, CareerOnboarding: core.CareerOnboarding, CareerRouter: core.CareerRouter, CareerDoorstep: core.CareerDoorstep, CareerReply: core.CareerReply, CareerContainment: core.CareerContainment });
-const cfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+const cfg = careerModelConfig(Deno.env);
 const meter = newMeter();
 const wants = memoryWantStore(), alerts = memoryAlertStore();
 interface Person { snapshot: any; history: { role: "user" | "assistant"; content: string }[]; last: string | null; mock: Map<string, MockState>; tools: string[] }

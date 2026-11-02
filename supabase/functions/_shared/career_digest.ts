@@ -64,7 +64,8 @@ export interface DigestRows {
   events: { at: string; kind: string; subject: string; detail: Record<string, unknown> }[]; // career_events in the week
 }
 
-const clip = (s: unknown, n: number) => { const t = String(s ?? "").replace(/\s+/g, " ").trim(); return t.length <= n ? t : `${t.slice(0, n - 3)}...`; };
+// PROACTIVE SCENARIOS ROUND 3 (2026-11-01): cut between whole characters (an emoji at the edge left half of one).
+const clip = (s: unknown, n: number) => { const t = String(s ?? "").replace(/\s+/g, " ").trim(); if (t.length <= n) return t; let out = ""; for (const ch of t) { if (out.length + ch.length > n - 3) break; out += ch; } return `${out}...`; };
 const httpsUrl = (u: unknown) => (/^https:\/\/\S+$/.test(String(u ?? "")) ? String(u) : null);
 const ms = (t: unknown) => { const n = Date.parse(String(t ?? "")); return Number.isFinite(n) ? n : NaN; };
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -111,7 +112,10 @@ export function buildDigest(rows: DigestRows, o: { now: number; tz: string }): D
   // Interviews coming up: a stated date from today on, soonest first; an invite this week with no date says so.
   const today = localAt(o.now, o.tz).date;
   const urlOf = (r: InterviewRow) => httpsUrl(apps.find((a) => a.ref === r.ref)?.url);
-  const upcoming = rows.interviews.filter((r) => (r.starts_at ? ms(r.starts_at) > o.now : r.date && r.date >= today))
+  // PROACTIVE SCENARIOS ROUND 3 (2026-11-01): an interview a later email cancelled or moved away from is not coming up (it
+  // was listed with its old date as if it would happen). The moved one is listed at its new time, from its own invite.
+  const live = rows.interviews.filter((r) => !r.cancelled_at && !r.moved_at);
+  const upcoming = live.filter((r) => (r.starts_at ? ms(r.starts_at) > o.now : r.date && r.date >= today))
     .sort((a, b) => String(a.starts_at ?? a.date).localeCompare(String(b.starts_at ?? b.date)))
     .map((r) => {
       const when = r.starts_at
@@ -120,7 +124,7 @@ export function buildDigest(rows: DigestRows, o: { now: number; tz: string }): D
       const u = urlOf(r);
       return `- ${clip(r.company ?? "Company not named", 60)}${r.role ? ` (${clip(r.role, 50)})` : ""}: ${when}${u ? `\n${u}` : ""}`;
     });
-  const undated = rows.interviews.filter((r) => !r.date && inWeek(r.seen_at)).map((r) => `- ${clip(r.company ?? "Company not named", 60)}${r.role ? ` (${clip(r.role, 50)})` : ""}: the invite gives no date`);
+  const undated = live.filter((r) => !r.date && inWeek(r.seen_at)).map((r) => `- ${clip(r.company ?? "Company not named", 60)}${r.role ? ` (${clip(r.role, 50)})` : ""}: the invite gives no date`);
   const interviews = [...upcoming, ...undated];
   const waiting = rows.drafts.filter((d) => d.state === "drafted" && o.now - ms(d.created_at) <= 30 * DAY)
     .sort((a, b) => ms(b.created_at) - ms(a.created_at))

@@ -99,7 +99,7 @@ import { connectorAsk, connectorChatTurn, connectorFailure } from "../_shared/co
 import { networkingTurn, siteRefusedTurn } from "../_shared/career_networking.ts"; // FEATURE 10
 import { plannerOn, plannerTurn, type PlannerTurn } from "./career_planner.ts"; // TASK PLANNER
 import { careerTools } from "../_shared/agent/career_tools.ts"; // TASK PLANNER: track_application, remember_instruction
-import { supabaseReminderStore } from "../_shared/task/reminders.ts"; // TASK PLANNER
+import { supabaseReminderStore as supabaseTaskReminderStore } from "../_shared/task/reminders.ts"; // TASK PLANNER
 import { CAREER_READ_SCOPE as PEOPLE_READ_SCOPE, supabasePeopleDeps } from "../_shared/career_people.ts"; // D-033
 import { CareerWriting } from "../_shared/router_core.career.js"; // FEATURE 4
 import { rewriteOn, tailorRewriteTurn } from "../_shared/career_tailor_rewrite.ts"; // FEATURE 4
@@ -535,7 +535,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
               },
               people: supabasePeopleDeps(admin, { fetch, token: careerTokenFor(careerGrant(admin, Deno.env, fetch), PEOPLE_READ_SCOPE), introPush: Deno.env.get("CAREER_INTRO_REMINDERS") === "on", env: (k) => Deno.env.get(k) }) }) as any,
             tools: careerTools({ postings: (q) => pPostings.search(searchWords(q), 150), memory: supabaseMemoryStore(admin), events }),
-            reminders: supabaseReminderStore(admin),
+            reminders: supabaseTaskReminderStore(admin),
           }, message);
           if (p.claimed) planned = p;
           else if (p.why !== "single_ask") console.log(`planner: not claimed (${p.why}); today's chain answers`);

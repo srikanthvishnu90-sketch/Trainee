@@ -741,6 +741,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           shortlist: (loaded.snapshot as any)?.stores?.discovery?.lastShortlist ?? null,
           limits: paceReader(admin, user.id),
           employerAnswers: () => employerAsk.answers(tid),
+          // Q395: the date of an earlier application on the person's own clock.
+          zone: async () => { const z = await admin.from("career_alert_prefs").select("tz").eq("user_id", user.id).maybeSingle(); if (z.error) throw new Error(z.error.message); return z.data?.tz ?? null; },
         })
         : null;
       // FEATURE 14: receipts (D-024, G6). "show me the receipt for Stripe", "what did you send to Acme": the receipt the

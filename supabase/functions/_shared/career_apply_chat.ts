@@ -12,8 +12,9 @@
 // through the same screens on its own; the reply lists what was queued and what was not, with the reason for each. With
 // no list on the thread the batch ask is not this turn's.
 import { INT4_MAX, type Limits, PACE_RE } from "./career_apply.ts";
-import { type EmployerAnswer, employerQuestion, type Pick, queueWants, screenPicks, type WantStore } from "./career_apply_want.ts";
-import type { AppRow } from "./career_apply_status.ts";
+import { type EmployerAnswer, employerQuestion, type Pick, queueWants, type Refusal, samePosting, screenPicks, type WantStore } from "./career_apply_want.ts";
+import { type AppRow, statusLine } from "./career_apply_status.ts";
+import { formUrlFor, postingKey } from "./posting_key.ts";
 import { type FetchFeed, type PostingsDb, searchWords } from "./career_ingest.ts";
 import { applyText, linkAsk, possessiveAsk, postingForLink, postingsForRole } from "./career_apply_link.ts";
 import { sameCompany, type TrackedApp } from "./career_mail.ts";
@@ -139,6 +140,8 @@ export interface ApplyChatDeps {
   // reader that throws is retried once; still failing, the turn queues nothing and says the pace could not be read.
   limits?: () => Promise<Limits | undefined>;
   tz?: string;
+  // The person's saved zone (career_alert_prefs.tz), read only when a reply shows a date. Absent or failing: UTC, said.
+  zone?: () => Promise<string | null>;
   // SERIAL-1491: the person's answers on this thread to "is X where you work now?" (the employer-ask store); absent, none.
   employerAnswers?: () => Promise<EmployerAnswer[]>;
   // FEATURE 1: a listed posting by its id on file (career_postings), to refuse a closed one or one not found; absent, the
@@ -171,6 +174,8 @@ export type ApplyChatResult = {
   ask?: EmployerQuestion[];
   // The posting screen (career_apply_gate.ts): what was screened out and why, and the facts asked once.
   screen?: GateResult;
+  // Q395: the earlier application that refused this one (career_apply_jobs), as said in the reply.
+  prior?: { id: string; state: string; applied_at: string };
 };
 
 // SERIAL-1420 (b) / SERIAL-1430: the person's pace from the database, in its three states (career_apply_pace_state): none
@@ -283,13 +288,14 @@ export async function applyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | nul
 export async function applyPicked(o: ApplyChatDeps, p: any): Promise<ApplyChatResult> {
   const intent = APPLY_QUEUE_INTENT;
   const pick: Pick = { job_id: p.job_id, url: p.url, company: p.company, title: p.title, location: p.location, content: contentOf(p) };
-  let apps: TrackedApp[];
-  try { apps = trackedFromRows(await o.apps()); }
+  let apps: TrackedApp[], rows: AppRow[];
+  try { rows = await o.apps(); apps = trackedFromRows(rows); }
   catch { return { reply: "I couldn't read your applications just now, so I couldn't rule out one already sent there; nothing was queued. Ask again in a minute.", status: "unreadable", intent }; }
   const resolved = await answersOf(o);
   const screened = screenPicks([pick], { apps, facts: o.facts ?? [], now: o.now, resolved });
   if (!screened.ok.length) {
     const first = screened.refused[0];
+    if (first?.prior) return priorReply(rows, p, first, await zoneFor(o));
     if (first?.ask === "employer") {
       return { reply: askText([first.posting], o.facts ?? []), status: "asking_employer", intent, posting: { job_id: p.job_id, company: p.company, title: p.title },
         ask: [{ job_id: p.job_id ?? null, url: String(p.url ?? ""), company: p.company, title: p.title }] };
@@ -319,8 +325,51 @@ export async function applyPicked(o: ApplyChatDeps, p: any): Promise<ApplyChatRe
       coverage: { queued: 1, total: 1 }, ...(kick ? { prepare: kick } : {}) };
   }
   if (r.already) return { reply: `${coverageLine(0, 1, 1)} ${p.title} at ${p.company} is already in your queue, so nothing changed. ${NOTHING_SENT(p.company, prepareRunsNow(o))}`, status: "already", intent, posting, coverage: { queued: 0, total: 1 } };
+  if (r.refused[0]?.prior) return priorReply(rows, p, r.refused[0], await zoneFor(o));
   const why = r.refused[0]?.said ?? r.refused[0]?.reason ?? "it could not be queued";
   return { reply: `${coverageLine(0, 1)} Not queued: ${why}.`, status: "refused", intent, posting, coverage: { queued: 0, total: 1 } };
+}
+
+// Reqs doc 2 Q395: "apply to Acme" when Acme was already applied to. The earlier application is said from the record
+// (career_apply_jobs): the day it was made and where it stands now (statusLine: confirmed only when the employer confirmed
+// it). Nothing is queued, and the person is asked whether this is a new role or a re-apply. The record that refused it is
+// the one shown: this exact posting first, else the newest counted application to that employer.
+// The day on the person's own clock (career_alert_prefs.tz); UTC, said, when no zone is on file.
+const zoneOk = (tz: string | null | undefined): tz is string => {
+  if (!tz || tz.length > 64) return false;
+  try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return true; } catch { return false; }
+};
+const dayOf = (iso: string | null | undefined, tz?: string | null) => !(iso && Number.isFinite(Date.parse(iso))) ? null
+  : new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: zoneOk(tz) ? tz : "UTC" }) + (zoneOk(tz) ? "" : " (UTC)");
+// deno-lint-ignore no-explicit-any
+export function priorReply(rows: AppRow[], p: any, why: Refusal, tz?: string | null): ApplyChatResult {
+  const posting = { job_id: p.job_id, company: p.company, title: p.title };
+  // Only an application that went out or is on its way is an earlier application; a failed or never-sent one is not.
+  const counted = rows.filter((r) => COUNTED.has(r.state));
+  const link = String(formUrlFor(String(p.job_id ?? "")) ?? p.url ?? "");
+  const key = samePosting(postingKey(link));
+  const exact = key ? counted.filter((r) => r.url && samePosting(postingKey(r.url)) === key) : [];
+  const same = exact.length ? exact : counted.filter((r) => sameCompany(r.company, String(p.company ?? "")));
+  const newest = [...same].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
+  const what = `${p.title || "this posting"} at ${p.company || "this employer"}`;
+  if (!newest) return { reply: `${coverageLine(0, 1)} Not queued: ${why.said}.`, status: "refused", intent: APPLY_QUEUE_INTENT, posting, coverage: { queued: 0, total: 1 } };
+  const on = dayOf(newest.created_at, tz);
+  // The refusal's own words first (status "refused", as every refusal), then the earlier application from the record.
+  const earlier = `${exact.length ? "You applied" : `You applied to ${newest.company}${newest.title ? ` (${newest.title})` : ""}`}${on ? ` on ${on}` : ""}. Where it stands: ${statusLine(newest)}`;
+  const co = p.company || "the employer";
+  // Q395: a new role, or a re-apply to the same one. Trainee never sends the same posting twice; a re-apply is the person's.
+  const ask = exact.length
+    ? `Is this a new role at ${co}, or do you want to re-apply to this same posting? For a new role, send me its link. A re-apply to the same posting can look careless to ${co}, so Trainee won't send it twice; if you still want to, apply yourself at ${oneLine(newest.url || link)}.`
+    : `Is ${what} a new role you want to apply to as well, or the same one?`;
+  return { reply: `${coverageLine(0, 1)} Not queued: ${why.said}. ${earlier} ${ask}`, status: "refused", intent: APPLY_QUEUE_INTENT, posting, coverage: { queued: 0, total: 1 },
+    prior: { id: newest.id, state: newest.state, applied_at: newest.created_at } };
+}
+const oneLine = (s: string) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, 500);
+
+async function zoneFor(o: { tz?: string; zone?: () => Promise<string | null> }): Promise<string | null> {
+  if (o.tz) return o.tz;
+  if (!o.zone) return null;
+  try { return await o.zone(); } catch { return null; }
 }
 
 // FEATURE 1: no confirmed resume on file means nothing can be prepared; unknown (null, or a reader that throws) decides

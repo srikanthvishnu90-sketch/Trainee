@@ -29,7 +29,9 @@ export interface Pick { url?: string; job_id?: string; company?: string; title?:
 // is not queued until they answer it, and the chat asks it once.
 // `reason` is for the model (it may tell it what to do next, about "they"); `said` is the same refusal in words to the person
 // ("you", "your"), what a chat reply shows them. Without its own wording, `said` is the reason.
-export interface Refusal { posting: { job_id: string | null; company: string; title: string; url: string }; reason: string; said: string; url: string; why: string; ask?: "employer" | "fact" }
+// Reqs doc 2 Q395: `prior` marks a refusal because of an earlier application (this exact posting, or this employer inside
+// the cooldown), so the chat can say that application's date and outcome from the record.
+export interface Refusal { posting: { job_id: string | null; company: string; title: string; url: string }; reason: string; said: string; url: string; why: string; ask?: "employer" | "fact"; prior?: "posting" | "company" }
 export function refusal(p: Pick, reason: string, said = reason): Refusal {
   const url = String(p?.url ?? "").trim();
   return { posting: { job_id: p?.job_id ? String(p.job_id) : null, company: String(p?.company ?? ""), title: String(p?.title ?? ""), url }, reason, said, url, why: reason };
@@ -96,12 +98,12 @@ export async function queueWants(store: WantStore, userId: string, picks: Pick[]
     if (!w) continue;
     const pace = Number.isFinite(cap) ? ` (${cap} a day)` : "";
     refused.push(x.reason === "company_cooldown"
-      ? refusal({ ...w, job_id: w.posting_key }, `they already applied to ${w.company || "this employer"} in the last ${COMPANY_COOLDOWN_DAYS} days (the queue's own record); Trainee applies once per company every ${COMPANY_COOLDOWN_DAYS} days; nothing was queued`,
-        `you already applied to ${w.company || "this employer"} in the last ${COMPANY_COOLDOWN_DAYS} days; Trainee applies once per company every ${COMPANY_COOLDOWN_DAYS} days, so nothing was queued`)
+      ? { ...refusal({ ...w, job_id: w.posting_key }, `they already applied to ${w.company || "this employer"} in the last ${COMPANY_COOLDOWN_DAYS} days (the queue's own record); Trainee applies once per company every ${COMPANY_COOLDOWN_DAYS} days; nothing was queued`,
+        `you already applied to ${w.company || "this employer"} in the last ${COMPANY_COOLDOWN_DAYS} days; Trainee applies once per company every ${COMPANY_COOLDOWN_DAYS} days, so nothing was queued`), prior: "company" as const }
       : x.reason === "daily_cap" ? refusal({ ...w, job_id: w.posting_key }, `over the daily pace they set themselves${pace}`, `over the daily pace you set${pace}`)
       // D-MS-3: the queue's own record has this exact posting already sent or in flight (any path, any link to it).
-      : x.reason === "duplicate_job" ? refusal({ ...w, job_id: w.posting_key }, `${w.title || "this posting"} at ${w.company || "this employer"} is already in their applications as the same posting; nothing was queued`,
-        `${w.title || "this posting"} at ${w.company || "this employer"} is already in your applications as the same posting; nothing was queued`)
+      : x.reason === "duplicate_job" ? { ...refusal({ ...w, job_id: w.posting_key }, `${w.title || "this posting"} at ${w.company || "this employer"} is already in their applications as the same posting; nothing was queued`,
+        `${w.title || "this posting"} at ${w.company || "this employer"} is already in your applications as the same posting; nothing was queued`), prior: "posting" as const }
       : refusal({ ...w, job_id: w.posting_key }, `the queue refused it (${x.reason})`));
   }
   return { queued: r.added.length, already: ok.length - fresh.length + r.already.length, items: r.added, refused, limit: Number.isFinite(cap) ? cap : null };
@@ -296,7 +298,7 @@ export function screenPicks(picks: Pick[], o: { message?: string; before?: strin
     const key = samePosting(postingKey(pickLink(p)));
     const prior = key && (o.apps ?? []).find((a) => a.stage !== "Saved" && a.url && samePosting(postingKey(a.url)) === key);
     if (prior) {
-      refused.push(refusal(p, `${what} is already in their applications as the same posting; nothing was queued`, `${what} is already in your applications as the same posting; nothing was queued`));
+      refused.push({ ...refusal(p, `${what} is already in their applications as the same posting; nothing was queued`, `${what} is already in your applications as the same posting; nothing was queued`), prior: "posting" });
       continue;
     }
     passed.push(p);

@@ -23,7 +23,7 @@
 //              any case shown at their next message if it has not been pushed by then.
 //   forget     "forget my LinkedIn contacts" (and Gmail contacts, job emails, intro requests): deleted and read back.
 import { contactsOf, type ContactRow, MX_NOT_WIRED, normalizeFirm, verifyRows } from "./career_contacts.ts";
-import { confirmed, draftFor, factText, type ModelFn, type OutreachStore, type Recipient } from "./career_outreach.ts";
+import { blockedAddresses, BLOCKED_WHY, confirmed, draftFor, factText, guardRecipient, type ModelFn, type OutreachStore, type Recipient } from "./career_outreach.ts";
 import { parseNetworkingAsk } from "./career_networking.ts";
 import { CAREER_READ_SCOPE, careerTokenFor } from "./career_mail_gmail.ts";
 import { connectUrl } from "./agent/integrations.ts";
@@ -555,22 +555,39 @@ function stateRows(o: PeopleTurnIn): PersonRec[] {
     position: r.title, school: r.school, connected_on: r.connected_on, last_seen_at: null, source_ref: `${r.file}, row ${r.row}`, source_url: null, retrieved_at: String((r as any).retrieved_at ?? "") }));
 }
 // One person once: same address, or same name at the same firm; the row with an address (then the export's) wins.
-function uniq(rows: PersonRec[]): PersonRec[] {
+// PEOPLE DRAFTS R3 (2026-11-02): two rows with one name at one firm but different addresses are two people, never one
+// (before, the second took the first's school and title, and an intro or alumni line could carry another person's facts);
+// and the same person's title or school on two rows is the newest one read (retrieved_at / last_seen_at), or none when
+// two differ and which is newer can't be told.
+const readAt = (p: PersonRec) => Math.max(Date.parse(String(p.last_seen_at ?? "")) || 0, Date.parse(String(p.retrieved_at ?? "")) || 0);
+function newest(a: string, at: number, b: string, bt: number): string {
+  if (!a) return b ?? "";
+  if (!b) return a;
+  if (plain(a) === plain(b)) return at >= bt ? a : b;
+  return at && bt && at !== bt ? (at > bt ? a : b) : "";
+}
+export function uniq(rows: PersonRec[]): PersonRec[] {
   const out: PersonRec[] = [];
-  const byEmail = new Map<string, number>(), byName = new Map<string, number>();
+  const byEmail = new Map<string, number>(), byName = new Map<string, number[]>();
   const rank = (p: PersonRec) => (p.email ? 2 : 0) + (p.source === "linkedin_export" ? 1 : 0);
+  const em = (p: PersonRec) => (p.email ?? "").trim().toLowerCase();
+  // How many different addresses each name at each firm has: with two or more, a row without one belongs to no one of them.
+  const addrs = new Map<string, Set<string>>();
+  for (const p of rows) if (p.name && em(p)) { const k = `${nameKeyOf(p.name)}|${p.company_key}`; addrs.set(k, (addrs.get(k) ?? new Set()).add(em(p))); }
   for (const p of rows) {
-    const nk = p.name ? `${plain(p.name)}|${p.company_key}` : null;
-    const i = (p.email ? byEmail.get(p.email) : undefined) ?? (nk ? byName.get(nk) : undefined);
-    if (i === undefined) { out.push(p); if (p.email) byEmail.set(p.email, out.length - 1); if (nk) byName.set(nk, out.length - 1); continue; }
-    const x = out[i];
-    const keep = rank(p) > rank(x) ? { ...p, school: p.school || x.school, position: p.position || x.position } : { ...x, email: x.email ?? p.email, school: x.school || p.school, position: x.position || p.position };
+    const nk = p.name ? `${nameKeyOf(p.name)}|${p.company_key}` : null;
+    let i = em(p) ? byEmail.get(em(p)) : undefined;
+    if (i === undefined && nk && (addrs.get(nk)?.size ?? 0) <= 1) i = (byName.get(nk) ?? []).find((j) => !em(out[j]) || !em(p) || em(out[j]) === em(p));
+    if (i === undefined) { out.push(p); if (em(p)) byEmail.set(em(p), out.length - 1); if (nk) byName.set(nk, [...(byName.get(nk) ?? []), out.length - 1]); continue; }
+    const x = out[i], base = rank(p) > rank(x) ? p : x;
+    const keep = { ...base, email: base.email ?? x.email ?? p.email, school: newest(x.school, readAt(x), p.school, readAt(p)), position: newest(x.position, readAt(x), p.position, readAt(p)),
+      retrieved_at: readAt(p) > readAt(x) ? p.retrieved_at : x.retrieved_at, last_seen_at: readAt(p) > readAt(x) ? p.last_seen_at : x.last_seen_at };
     out[i] = keep;
-    if (keep.email) byEmail.set(keep.email, i);
-    if (nk) byName.set(nk, i);
+    if (em(keep)) byEmail.set(em(keep), i);
   }
   return out;
 }
+const nameKeyOf = (s: unknown) => String(s ?? "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[’']/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 // Where a sweep keeps what it read: people from Gmail headers (career_people, source gmail; one row per address) and
 // postings from alert emails (career_job_emails, once per link). Used by the turn and by the scheduled run alike.
 export function peopleSink(store: PeopleStore): SweepSink {
@@ -661,7 +678,15 @@ async function whoTurn(o: PeopleTurnIn, d: PeopleDeps, firmAsked: string): Promi
   return { reply: lines.filter(Boolean).join("\n"), intent: AT_INTENT, status: "listed" };
 }
 const factSchools = (o: PeopleTurnIn) => confirmed((((o.state.profile as any)?.facts) ?? []) as unknown[]).filter((f: any) => f.kind === "education").map((f: any) => factText(f));
-const schoolMatch = (contactSchool: string, want: string) => { const a = plain(contactSchool), b = plain(want); return !!a && !!b && (a.includes(b) || b.includes(a)); };
+// PEOPLE DRAFTS R3 (2026-11-02): a school matches on whole words, one name inside the other ("DePaul" is "DePaul
+// University"), never letters inside a word: "UT" read as a substring matched Rutgers, Dartmouth, Butler and Utah. And
+// the shorter must name a school of its own, not only "University" or "College".
+const GENERIC_SCHOOL = new Set(["university", "college", "school", "institute", "of", "the", "state", "community", "academy", "and", "at"]);
+export const schoolMatch = (contactSchool: string, want: string) => {
+  const a = plain(contactSchool), b = plain(want);
+  if (!a || !b || !(` ${a} `.includes(` ${b} `) || ` ${b} `.includes(` ${a} `))) return false;
+  return (a.length <= b.length ? a : b).split(" ").some((w) => !GENERIC_SCHOOL.has(w));
+};
 async function alumniTurn(o: PeopleTurnIn, d: PeopleDeps, firmAsked: string, school: string | null): Promise<PeopleResult> {
   const firm = cleanCell(firmAsked, 60);
   const mine = factSchools(o);
@@ -673,11 +698,15 @@ async function alumniTurn(o: PeopleTurnIn, d: PeopleDeps, firmAsked: string, sch
     return { reply: `You have no contacts at ${firm} yet, so I can't say which are alumni. ${NO_FINDER} ${ask}`, intent: ALUMNI_INTENT, status: "no_contacts" };
   }
   const label = school ? cleanCell(school, 80) : "your school";
-  const alumni = people.filter((p) => schools.some((s) => school ? schoolMatch(p.school, s) : !!p.school && plain(s).includes(plain(p.school))));
+  // Their own school: the contact's school, as whole words, inside a confirmed education fact of theirs.
+  const alumni = people.filter((p) => schools.some((s) => school ? schoolMatch(p.school, s) : !!p.school && schoolMatch(p.school, s) && ` ${plain(s)} `.includes(` ${plain(p.school)} `)));
   const noSchool = people.filter((p) => !p.school).length;
   const gap = noSchool ? ` ${fmtN(noSchool)} of your ${plural(people.length, "contact")} there have no school on file: LinkedIn's Connections file has no school column. If you know where one studied, say "<name> went to <school>" and I'll keep it.` : "";
   if (!alumni.length) return { reply: `None of your contacts at ${firm} is on file as a ${label} alum.${gap}`, intent: ALUMNI_INTENT, status: "none" };
-  return { reply: [`${plural(alumni.length, "contact")} at ${firm} on file as ${label} alumni:`, ...alumni.slice(0, LIST_MAX).map((p) => `${lineOf(p)}, school: ${p.school}`), gap.trim()].filter(Boolean).join("\n"), intent: ALUMNI_INTENT, status: "listed" };
+  // A one-word name ("UT", "USC") that matches more than one school on file is said, never taken for one of them.
+  const distinct = [...new Map(alumni.map((p) => [plain(p.school), p.school])).values()];
+  const which = school && distinct.length > 1 && plain(school).split(" ").length === 1 ? `"${cleanCell(school, 80)}" matches more than one school on file (${distinct.slice(0, 5).join("; ")}); say the full name to narrow it.` : "";
+  return { reply: [`${plural(alumni.length, "contact")} at ${firm} on file as ${label} alumni:`, ...alumni.slice(0, LIST_MAX).map((p) => `${lineOf(p)}, school: ${p.school}`), which, gap.trim()].filter(Boolean).join("\n"), intent: ALUMNI_INTENT, status: which ? "ambiguous_school" : "listed" };
 }
 async function schoolTurn(o: PeopleTurnIn, d: PeopleDeps, name: string, school: string): Promise<PeopleResult | null> {
   const hits = (await d.store.named(o.userId, name)).filter((p) => p.id !== null && p.source !== "company_page");
@@ -791,7 +820,7 @@ async function forgetTurn(o: PeopleTurnIn, d: PeopleDeps, what: Extract<Ask, { k
 }
 
 // ------------------------------------------------------------------------------------------------ introductions
-const recipientOf = (p: PersonRec): Recipient => ({
+const recipientOf = (p: PersonRec): Recipient => guardRecipient({
   name: p.name ?? "", firm: p.company, title: p.position, school: p.school, email: p.email ?? "", source: p.source_ref,
   // the source of the row, for the certifier's recipientSourced (arch/networking-real-people)
   ...({ source_kind: kindOf(p.source), retrieved_at: p.retrieved_at || null, source_url: p.source_url } as Record<string, unknown>),
@@ -799,7 +828,8 @@ const recipientOf = (p: PersonRec): Recipient => ({
 export type Path =
   | { route: "direct"; to: PersonRec }
   | { route: "mutual"; target: { name: string; company: string; title: string; ref: string; rec: PersonRec | null }; via: PersonRec; others: PersonRec[]; why: string }
-  | { route: "none"; target: { name: string | null; company: string }; why: string };
+  | { route: "none"; target: { name: string | null; company: string }; why: string }
+  | { route: "which"; options: PersonRec[] };
 // Pure: the way to someone. A direct contact first; else someone they know at the same firm (or, when the target's
 // school is on file, the same school); else a route the target published (their address on a page they sent); else none.
 export function pathTo(target: { name: string | null; firm: string | null }, everyone: PersonRec[]): Path {
@@ -808,6 +838,10 @@ export function pathTo(target: { name: string | null; firm: string | null }, eve
   const isTarget = (p: PersonRec) => !!want && !!p.name && (plain(p.name) === want || (!want.includes(" ") && plain(p.name).split(" ")[0] === want)) && (!firmKey || p.company_key === firmKey);
   const published = everyone.filter((p) => isTarget(p) && p.source === "company_page");
   const known = everyone.filter((p) => isTarget(p) && p.source !== "company_page");
+  // PEOPLE DRAFTS R3 (2026-11-02): two people answer to the name (another firm, or another address at the same firm):
+  // say which, never pick one. Before, "intro to Maya Chen" wrote to whichever Maya Chen came first.
+  const people = uniq([...known, ...published]);
+  if (want && people.length > 1) return { route: "which", options: people };
   if (known.length) return { route: "direct", to: known.find((p) => p.email) ?? known[0] };
   if (!target.name) {
     const atFirm = everyone.filter((p) => p.company_key === firmKey && p.source !== "company_page");
@@ -851,12 +885,26 @@ async function introTurn(o: PeopleTurnIn, d: PeopleDeps, a: Extract<Ask, { kind:
   // the target's colleagues, when we learn the target's firm from a page they published
   const pub = pool.find((p) => p.source === "company_page" && a.name && p.name && plain(p.name) === plain(a.name));
   if (pub && !firm && pub.company_key) pool.push(...await d.store.atCompany(o.userId, pub.company_key), ...stateRows(o).filter((p) => p.company_key === pub.company_key));
-  const everyone = uniq(pool);
+  let everyone = uniq(pool);
+  // PEOPLE DRAFTS R3 (2026-11-02): someone who asked not to be contacted (by anyone using Trainee) or whose address
+  // bounced is never written to, as the one to introduce you or as the one you write to directly. Before, an intro was
+  // drafted to them with a link that opened it addressed to them.
+  const blocked = await blockedAddresses(o.store, o.userId, everyone.map((p) => p.email ?? "").filter(Boolean)).catch(() => new Map<string, "opted_out" | "bounced">());
+  const isBlocked = (p: PersonRec) => !!p.email && blocked.has(p.email.trim().toLowerCase());
+  const off = everyone.filter(isBlocked);
+  everyone = everyone.filter((p) => !isBlocked(p));
+  if (a.name && off.some((p) => p.name && (plain(p.name) === plain(a.name!) || plain(p.name).split(" ")[0] === plain(a.name!))) && !everyone.some((p) => p.name && plain(p.name) === plain(a.name!))) {
+    const p = off.find((x) => x.name && (plain(x.name) === plain(a.name!) || plain(x.name).split(" ")[0] === plain(a.name!)))!;
+    return { reply: `I won't write to ${p.name}: ${BLOCKED_WHY[blocked.get(p.email!.trim().toLowerCase())!]}. Nothing was drafted.`, intent: INTRO_INTENT, status: "held" };
+  }
   const counts = await d.store.counts(o.userId);
   if (!everyone.length && !Object.values(counts).some(Boolean) && !stateRows(o).length) {
     return { reply: `I can't find a path to ${a.name ?? `someone at ${firm}`} yet: you haven't sent me any contacts. ${NO_FINDER} ${await askForExport(o, d)}`, intent: INTRO_INTENT, status: "no_contacts" };
   }
   const path = pathTo({ name: a.name, firm }, everyone);
+  if (path.route === "which") {
+    return { reply: `More than one ${a.name} is on file, so I didn't pick one:\n${path.options.slice(0, LIST_MAX).map((p) => `${lineOf(p)}${p.company ? `, at ${p.company}` : ""}`).join("\n")}\nSay which: "intro to ${path.options[0].name} at ${path.options[0].company || "<firm>"}".`, intent: INTRO_INTENT, status: "which" };
+  }
   if (path.route === "none") return { reply: `No path to ${path.target.name ?? `someone at ${path.target.company}`} yet: ${path.why}. ${NO_FINDER} ${NO_SEARCH} If ${path.target.company || "their company"} or ${path.target.name ?? "they"} publish a team page or a personal site, send me the link and I'll read who it names and how to reach them.`, intent: INTRO_INTENT, status: "no_path" };
   const facts = confirmed((((o.state.profile as any)?.facts) ?? []) as unknown[]);
   const plan = path.route === "mutual"
@@ -872,7 +920,7 @@ async function introTurn(o: PeopleTurnIn, d: PeopleDeps, a: Extract<Ask, { kind:
   return await draftIntro(o, d, path, a.topic, null);
 }
 
-async function draftIntro(o: PeopleTurnIn, d: PeopleDeps, path: Exclude<Path, { route: "none" }>, topic: string | null, previous: Intro | null): Promise<PeopleResult> {
+async function draftIntro(o: PeopleTurnIn, d: PeopleDeps, path: Exclude<Path, { route: "none" } | { route: "which" }>, topic: string | null, previous: Intro | null): Promise<PeopleResult> {
   const facts = (((o.state.profile as any)?.facts) ?? []) as unknown[];
   const sig = (await o.store.prefs(o.userId).catch(() => ({ signature: null } as any)))?.signature as string | null;
   const signed = (b: string) => sig ? `${b.trim()}\n\n${sig.trim()}` : b.trim();
@@ -924,6 +972,7 @@ async function introCmd(o: PeopleTurnIn, d: PeopleDeps, a: Extract<Ask, { kind: 
   switch (a.verb) {
     case "approve": {
       if (["sent", "replied", "no_reply"].includes(i.status)) return R(`Intro ${i.n} is already marked ${i.status.replace("_", " ")}.`, "refused");
+      if (i.to_email && (await blockedAddresses(o.store, o.userId, [i.to_email])).size) return R(`I won't approve intro ${i.n}: ${i.to_name} asked not to be contacted, or their address bounced. Nothing was approved.`, "refused");
       // The exact text: what is stored must still hash to what was shown, or nothing is approved.
       if ((await introHash(i)) !== i.payload_hash) return R(`Intro ${i.n} doesn't match what I showed you, so I didn't approve it. Say "redo intro ${i.n}" for a fresh version.`, "refused");
       const u = i.status === "approved" ? i : await d.store.updateIntro(o.userId, i.n, { status: "approved", approved_hash: i.payload_hash, approved_at: iso }, { status: ["drafted"], payload_hash: i.payload_hash });
@@ -938,7 +987,8 @@ async function introCmd(o: PeopleTurnIn, d: PeopleDeps, a: Extract<Ask, { kind: 
       const toRec = everyone.find((p) => p.name === i.to_name && (!i.to_email || p.email === i.to_email));
       if (!toRec) return R(`${i.to_name} is no longer in your contacts, so I can't rewrite intro ${i.n}.`, "refused");
       const tRec = everyone.find((p) => p.name === i.target_name && p.source === "company_page") ?? null;
-      const path: Exclude<Path, { route: "none" }> = i.route === "mutual"
+      if (toRec.email && (await blockedAddresses(o.store, o.userId, [toRec.email])).size) return R(`I won't rewrite intro ${i.n}: ${i.to_name} asked not to be contacted, or their address bounced.`, "refused");
+      const path: Exclude<Path, { route: "none" } | { route: "which" }> = i.route === "mutual"
         ? { route: "mutual", target: { name: i.target_name, company: i.target_company, title: i.target_title, ref: i.target_ref, rec: tRec }, via: toRec, others: [], why: "" }
         : { route: "direct", to: toRec };
       return await draftIntro(o, d, path, null, i);

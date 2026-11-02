@@ -96,7 +96,7 @@ import { documentsOf, materializeArtifacts } from "../_shared/channel_artifacts.
 import { askFor, judgePromptTurn, searchJudgeTurn, supabaseJudgeCache, supabaseSearchSources } from "../_shared/career_search_judge.ts"; // FEATURE 5
 import { offerChatTurn } from "../_shared/career_offer_chat.ts"; // FEATURE 12
 import { connectorAsk, connectorChatTurn, connectorFailure } from "../_shared/connectors.ts"; // Task 3 (FEATURE GV's disconnect included)
-import { networkingTurn, siteRefusedTurn } from "../_shared/career_networking.ts"; // FEATURE 10
+import { networkingTurn, siteRefusedTurn, supabaseReferralPostings } from "../_shared/career_networking.ts"; // FEATURE 10
 import { plannerOn, plannerTurn, type PlannerTurn } from "./career_planner.ts"; // TASK PLANNER
 import { careerTools } from "../_shared/agent/career_tools.ts"; // TASK PLANNER: track_application, remember_instruction
 import { supabaseReminderStore as supabaseTaskReminderStore } from "../_shared/task/reminders.ts"; // TASK PLANNER
@@ -524,7 +524,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             apply: (text, shortlist) => applyTurn({ ...pF1.apply, message: text, userId: user.id, now: Date.now(), postings: pPostings, wants: supabaseWantStore(admin),
               apps: () => supabaseApplications(admin)(user.id), facts: chatScreenFacts(CareerProfile.confirmedFacts((ctx as any).profile ?? {}), ((ctx as any).statedFacts?.facts ?? []) as any[]),
               shortlist: shortlist as any, limits: paceReader(admin, user.id), employerAnswers: () => pAsk.answers(tid) }) as any,
-            networking: (text) => networkingTurn({ message: text, userId: user.id, threadId: tid, now: Date.now(), state: ctx as unknown as Record<string, unknown>, store: pOutreach, events, attachments: [],
+            networking: (text) => networkingTurn({ message: text, userId: user.id, threadId: tid, now: Date.now(), state: ctx as unknown as Record<string, unknown>, store: pOutreach, events, attachments: [], postings: supabaseReferralPostings(admin),
               model: Deno.env.get("CAREER_NETWORKING_DRAFT") === "on" ? pModel : null,
               previousAsk: async () => null,
               reminderPush: Deno.env.get("CAREER_OUTREACH_FOLLOWUPS") === "on",
@@ -794,7 +794,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // Nothing is sent here: sending stays career-proactive's, behind CAREER_OUTREACH_SEND.
       const netMeter = ledger.track(newMeter());
       const networking = !emailAsk && !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !queued && !f08 && !stood && !status && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
-        ? await networkingTurn({ message, userId: user.id, threadId: tid, now: Date.now(), state: ctx as unknown as Record<string, unknown>, store: outreachStore, events,
+        ? await networkingTurn({ message, userId: user.id, threadId: tid, now: Date.now(), state: ctx as unknown as Record<string, unknown>, store: outreachStore, events, postings: supabaseReferralPostings(admin),
             attachments: Array.isArray(body.attachments) ? (body.attachments as any[]).filter((a) => a && typeof a === "object").map((a) => ({ name: String(a.name ?? "contacts.csv"), mime: typeof a.mime === "string" ? a.mime : "", text: typeof a.text === "string" ? a.text : null })) : [],
             model: Deno.env.get("CAREER_NETWORKING_DRAFT") === "on" ? (payload: any) => callModel({ ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" }, payload, { meter: netMeter, role: "chat" }) : null,
             previousAsk: async () => {

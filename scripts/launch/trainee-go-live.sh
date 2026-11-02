@@ -252,6 +252,7 @@ MIGRATIONS=(
   20261031070000_career_resume_upload_resend.sql
   20261031090000_career_thread_facts_authority.sql
   20261031100000_trainee_file_signin_limits.sql
+  20261031110000_career_outreach_batch_unbounded.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -383,6 +384,7 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'career_resume_upload_record_as' and prosrc like '%greatest(now(), public.career_resume_uploads.created_at)%')"
   "exists (select 1 from pg_trigger where tgname = 'career_thread_facts_authority' and tgrelid = 'public.agent_flow_state'::regclass) and exists (select 1 from pg_proc where proname = 'career_thread_facts_changed') and exists (select 1 from pg_proc where proname = 'career_account_authority_mark' and prosrc like '%thread_facts%')"
   "exists (select 1 from pg_proc where proname = 'trainee_file_login_count' and prosrc like '%trainee_file_login_account:%') and to_regclass('public.trainee_file_logins_user_created') is not null"
+  "exists (select 1 from pg_constraint where conrelid = 'public.career_outreach_drafts'::regclass and conname = 'career_outreach_drafts_n_check' and convalidated and pg_get_constraintdef(oid) not like '%<= 10%') and exists (select 1 from pg_constraint where conrelid = 'public.agent_turn_costs'::regclass and conname = 'agent_turn_costs_calls_check' and convalidated and pg_get_constraintdef(oid) not like '%<= 100%')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql

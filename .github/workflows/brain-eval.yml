@@ -49,7 +49,14 @@ jobs:
     timeout-minutes: 90
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      CAREER_MODEL: gpt-5-mini
+      # D-038: no CAREER_MODEL pin. The brain runs the measured commit's committed model (agent-chat/release_model.ts; a
+      # commit before D-038 falls back to gpt-5-mini in run.ts), or the request's "model" (allowlisted below) for a
+      # comparison run, logged under its own brain name (e.g. staged:claude-haiku-5-5) so S3 never counts it.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # OWNER'S RULING (2026-11-01 20:25 CT, in writing, relayed by the architect's main session): "$25" on the Anthropic key
+      # for these tests, apart from the OpenAI eval budget. run.ts stops a claude- brain before the item that would cross it,
+      # counting every result file's claude- brain spend.
+      ANTHROPIC_EVAL_BUDGET_USD: "25"
       EVAL_JUDGE_MODEL: gpt-5-mini
       # Owner, 2026-10-21: "gpt-4.1-mini judges every run from now on ... A judge that runs only sometimes makes runs
       # incomparable." In CI an item passes only when both pass it; Instinct scores every run beside them.
@@ -85,12 +92,16 @@ jobs:
             const action = ev ? "eval" : (f.action ?? "eval");
             const passes = Number(f.passes ?? 5);
             const suite = ev ? "heldout" : (f.suite ?? "heldout");
+            // D-038: an optional reply model from an allowlist (a push's request "model"); empty = the committed default.
+            const MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5", "gpt-5-mini"]; // = release_model.ts ROLLBACK_MODELS
+            const model = String((ev ? "" : f.model) ?? "").trim();
+            if (model && (!MODELS.includes(model) || suite !== "heldout" || set === "sealed")) { console.log(`NOT RUN: model ${model} needs the allowlist (${MODELS.join(", ")}), the heldout suite and a set other than sealed`); Deno.exit(2); }
             if (!["heldout", "tasks"].includes(suite) || (suite === "tasks" && (action !== "eval" || set !== "dev"))) { console.log(`NOT RUN: bad suite ${suite} (heldout, or tasks with action eval on the dev set)`); Deno.exit(2); }
-            if (!["dev", "sealed"].includes(set) || !brains.length || brains.some((b) => !["router", "staged", "agent"].includes(b)) || !["eval", "pubkey"].includes(action) || passes !== 5) {
+            if (!["dev", "sealed", "fresh"].includes(set) || !brains.length || brains.some((b) => !["router", "staged", "agent"].includes(b)) || !["eval", "pubkey"].includes(action) || passes !== 5) {
               console.log(`NOT RUN: bad request (set ${set}, brains ${brains}, action ${action}, passes ${passes}; the owner requires five passes)`); Deno.exit(2);
             }
-            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `set=${set}\nbrains=${brains.join(" ")}\nbrains_csv=${brains.join(",")}\naction=${action}\npasses=${passes}\nsuite=${suite}\n`, { append: true });
-            console.log(suite === "tasks" ? "measuring: the task eval (router, staged, planner, agent; $2 each)" : `measuring: action ${action}, set ${set}, brains ${brains.join(", ")}, ${passes} passes`);
+            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `set=${set}\nbrains=${brains.join(" ")}\nbrains_csv=${brains.join(",")}\naction=${action}\npasses=${passes}\nsuite=${suite}\nmodel=${model}\n`, { append: true });
+            console.log(suite === "tasks" ? "measuring: the task eval (router, staged, planner, agent; $2 each)" : `measuring: action ${action}, set ${set}, brains ${brains.join(", ")}, ${passes} passes, model ${model || "the committed default"}`);
           '
         env:
           IN_SET: ${{ inputs.set }}
@@ -115,9 +126,12 @@ jobs:
       # pass-to-pass swing is too large for fewer). Each pass is logged.
       - name: Five passes per brain
         if: steps.req.outputs.action == 'eval' && steps.req.outputs.suite == 'heldout'
+        env:
+          CAREER_REPLY_MODEL: ${{ steps.req.outputs.model }}
         run: |
           # --set heldout is the sealed held-out set (the bar); --set dev is the 38 in heldout-live.json.
-          if [ "${{ steps.req.outputs.set }}" = "sealed" ]; then S="--set heldout"; else S="--set dev"; fi
+          # D-038: fresh is an unsealed held-out set (evals/career/fresh-heldout.json), its results redacted like the sealed set's.
+          case "${{ steps.req.outputs.set }}" in sealed) S="--set heldout" ;; fresh) S="--set fresh" ;; *) S="--set dev" ;; esac
           for b in ${{ steps.req.outputs.brains }}; do
             for p in 1 2 3 4 5; do deno run -A evals/career/run.ts --brain "$b" $S --label "${{ steps.req.outputs.set }}-$b-${{ github.run_id }}-p$p" > "$RUNNER_TEMP/$b-$p.txt" 2>&1 & done
             wait

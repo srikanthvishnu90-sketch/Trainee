@@ -1,7 +1,8 @@
 {
- "note": "D-036 review: task eval (router, staged, planner, agent) on #395 head 752721ada, $2 cap per brain, owner budget $20",
+ "note": "D-038: staged brain on claude-haiku-5-5, dev set, five passes; judges unchanged. Reply code of 725fa19bf (second parent). Logged as staged:claude-haiku-5-5 so S3 never counts it. Anthropic cap $25.",
  "action": "eval",
  "set": "dev",
- "suite": "tasks",
+ "brains": ["staged"],
+ "model": "claude-haiku-5-5",
  "passes": 5
 }

@@ -21,6 +21,7 @@
 // Nothing here sends, applies or writes anywhere but the person's own cache and standing instructions.
 import { searchPostings, type SearchHit } from "./career_search.ts";
 import { searchWords, wordStem } from "./career_ingest.ts";
+import { correctedAsk } from "./search_correction.ts";
 import { hasLimits, type Limits, limitsLine, outsideLimits, REASON_WORDS, type Reason, searchTextOf, statedBand, statedPay } from "./posting_constraints.ts";
 import { CareerPool } from "./career_pool.js";
 import { CareerProfile } from "./router_core.career.js";
@@ -514,6 +515,10 @@ export async function searchJudgeTurn(o: {
 // role for ("SWE internship Chicago summer 2027"); or a search the router did not run (searchAskFromMessage). `append`: the
 // router's own reply stays and the search follows it.
 export function askFor(message: string, routerOut: { intent?: string; resultStatus?: string } | null, discovery: any): { ask: SearchAsk; append: boolean } | null {
+  // Spec 2.3: a correction ("remote only", "only individual-contributor roles") replaces the constraint of the last search;
+  // the router's own reading of it (a search for the role "remote only") is not used.
+  const fixed = correctedAsk(message, discovery);
+  if (fixed) return { ask: fixed.ask, append: false };
   const router = askFromRouter(message, routerOut, discovery);
   if (router) return { ask: enrich(message, router) ?? router, append: false };
   const p = discovery?.lastParams;

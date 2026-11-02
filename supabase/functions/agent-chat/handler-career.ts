@@ -118,6 +118,10 @@ import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a paste
 import { supabaseFileStore } from "../trainee-file/store.ts";
 import { createFileService, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
 import { factsForTurn, replyWriterOn, writable, writeReply, writerChannel } from "../_shared/career_reply_writer.ts"; // V1 TEXTING VOICE
+import { correctedAsk } from "../_shared/search_correction.ts"; // SPEC 2.3
+import { applyReadiness } from "../_shared/apply_readiness.ts"; // SPEC 2.2
+import { writeReadinessAsk } from "../_shared/readiness_ask.ts";
+import { summaryFacts } from "../_shared/apply_status_summary.ts"; // SPEC 6.5
 import { resultsFile, whatOf } from "../_shared/role_results.ts"; // ROLE + PAY RESULTS PAGE
 import { supabaseJobStore } from "../_shared/telegram_jobs.ts";
 import { feedUrlsFor } from "../_shared/file_link.ts";
@@ -967,8 +971,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (f08.meta) agentMeta = f08.meta;
       } else if (stood) {
         out = { reply: stood.reply, intent: stood.intent, resultStatus: stood.status, contained: false, handler: "standing" };
+        if ((stood as any).summary) agentMeta = { ...(agentMeta || {}), apply_summary: (stood as any).summary }; // spec 6.5: counts from row states
       } else if (status) {
         out = { reply: status.reply, intent: status.intent, resultStatus: status.status, contained: false, handler: "status" };
+        if ((status as any).summary) agentMeta = { ...(agentMeta || {}), apply_summary: (status as any).summary }; // spec 6.5: counts from row states
       } else if (networking) {
         // FEATURE 10: a batch shown is the thread's last word (OUTREACH_INTENT), so "send 1" answers it.
         out = { reply: networking.reply, intent: networking.intent, resultStatus: networking.status, contained: false, handler: "networking", ...(networking.parts ? { parts: networking.parts } : {}) };
@@ -1077,7 +1083,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                 ? "\n\nAnd nothing is sent anywhere before your resume is confirmed: its entries are waiting for your word (reply \"yes, that's my resume\" if they're right)."
                 : "\n\nAnd nothing is sent anywhere before your resume is confirmed: paste or attach it, confirm it, then ask again.";
               out = { ...out, reply: (f5Said?.append ? `${out.reply}\n\n${found.reply}` : found.reply) + resumeLine, resultStatus: found.status, handler: "search_judge" };
-              (ctx as any).discovery = { ...((ctx as any).discovery ?? {}), lastShortlist: found.shortlist, lastSource: found.source };
+              const f5Prior = (ctx as any).discovery ?? {};
+              // Spec 2.3: the ask this list was made for is kept on the thread (a later correction starts from it), and after a
+              // correction the router's own record of the search (it read "remote only" as a role) is replaced by the corrected one.
+              (ctx as any).discovery = { ...f5Prior, lastShortlist: found.shortlist, lastSource: found.source, lastAsk: f5Ask,
+                ...(correctedAsk(message, f5Prior) ? { lastParams: { ...(f5Prior.lastParams ?? {}), ask: String(message).slice(0, 200), roleText: f5Ask.role, whereText: f5Ask.place, remote: f5Ask.remote } } : {}) };
               // ROLE RESULTS PAGE (owner, 2026-11-01 and 11-02): a role ask ("I want X roles that pay $Y", "find me 10 SWE intern roles")
               // on EVERY channel gets one or two plain sentences and then the results page's link ALONE as its own message
               // (role_results.ts); the list itself, with a black Apply on each role, is the hosted page. Without the page (links not
@@ -1092,6 +1102,25 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                 if (made) {
                   out = { ...out, reply: made.reply + resumeLine, parts: [made.parts[0], ...(resumeLine ? [resumeLine.trim()] : []), made.parts[1]] };
                   agentMeta = { ...(agentMeta || {}), results_file: made.listId };
+                }
+              }
+              // SPEC 2.2 (apply_readiness.ts): what an application still needs, from CONFIRMED facts only, handed to the model as data.
+              // The link above went out in this same turn; the reply carries at most the first blocking question, written by the model
+              // (readiness_ask.ts; only with the reply writer on, and a question that fails its checks is dropped, not replaced).
+              // A search applies to nothing: this queues nothing and writes no fact.
+              {
+                const rd = applyReadiness({ profile: prof, ask: f5Ask });
+                agentMeta = { ...(agentMeta || {}), readiness: { ready: rd.ready, ask_now: rd.ask_now.map((n) => ({ key: n.key, chat: n.chat })), missing: rd.missing.map((n) => ({ key: n.key, chat: n.chat, blocks: n.blocks })), secure_only: rd.secure_only.length } };
+                if (replyWriterOn(Deno.env) && rd.ask_now.length) {
+                  const aMeter = ledger.track(newMeter());
+                  const aCfg = careerModelConfig(Deno.env);
+                  const asked = await writeReadinessAsk({ readiness: rd, message, channel: writerChannel((body as any)?.channel), model: (payload) => callModel(aCfg, payload, { meter: aMeter, role: "chat" }) })
+                    .catch((e) => { console.error("readiness ask: no question this turn:", (e as Error)?.message ?? e); return null; });
+                  await ledger.record(aMeter);
+                  if (asked?.text) {
+                    out = { ...out, reply: `${out.reply}\n\n${asked.text}`, ...(Array.isArray((out as any).parts) ? { parts: [...(out as any).parts, asked.text] } : {}) };
+                    agentMeta = { ...(agentMeta || {}), readiness_ask: { key: rd.ask_now[0].key } };
+                  } else if (asked) agentMeta = { ...(agentMeta || {}), readiness_ask_dropped: asked.rejected.slice(0, 4) };
                 }
               }
             }
@@ -1222,7 +1251,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const wMeter = ledger.track(newMeter());
         const wCfg = careerModelConfig(Deno.env);
         const written = await writeReply({ on: true, message, channel: writerChannel((body as any)?.channel),
-          facts: factsForTurn({ reply: out.reply, intent: out.intent, resultStatus: out.resultStatus ?? null, effects: turnEffects, situation }),
+          facts: factsForTurn({ reply: out.reply, intent: out.intent, resultStatus: out.resultStatus ?? null, effects: turnEffects, situation,
+            counts: (agentMeta as any)?.apply_summary ? summaryFacts((agentMeta as any).apply_summary) : null,
+            appliedOk: (agentMeta as any)?.apply_summary ? (agentMeta as any).apply_summary.applied_ok : null }),
           model: (payload) => callModel(wCfg, payload, { meter: wMeter, role: "chat" }) })
           .catch((e) => { console.error("reply writer: today's reply stands:", e?.message ?? e); return null; });
         if (written && written.text.trim()) {

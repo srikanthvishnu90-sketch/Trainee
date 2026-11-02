@@ -1958,6 +1958,237 @@
      }
     ]
    }
+  },
+  {
+   "id": "T45",
+   "family": "correction: remote only",
+   "setup": [
+    "resume"
+   ],
+   "turns": [
+    "find data analyst jobs in Chicago",
+    "only remote roles"
+   ],
+   "oracle": {},
+   "expect": {
+    "queued": {
+     "max": 0
+    },
+    "search": {
+     "remote": true,
+     "place": null,
+     "role_has": "data analyst"
+    }
+   },
+   "note": "spec 2.3: the earlier place is replaced, not kept; the role stays; a search applies to nothing"
+  },
+  {
+   "id": "T46",
+   "family": "correction: individual contributor only",
+   "setup": [
+    "resume"
+   ],
+   "turns": [
+    "find senior data analyst jobs in Chicago",
+    "only individual contributor roles, no manager roles"
+   ],
+   "oracle": {},
+   "expect": {
+    "searched": true,
+    "queued": {
+     "max": 0
+    },
+    "search": {
+     "bands_include": [
+      "senior"
+     ],
+     "not_bands": [
+      "manager",
+      "director"
+     ],
+     "role_has": "data analyst",
+     "place": "Chicago"
+    }
+   },
+   "note": "spec 2.3: manager levels ruled out; the level and place the correction did not touch stay"
+  },
+  {
+   "id": "T47",
+   "family": "correction: two in a row",
+   "setup": [
+    "resume"
+   ],
+   "turns": [
+    "find senior data analyst jobs in Chicago",
+    "remote only",
+    "no managers"
+   ],
+   "oracle": {},
+   "expect": {
+    "queued": {
+     "max": 0
+    },
+    "search": {
+     "remote": true,
+     "place": null,
+     "not_bands": [
+      "manager"
+     ],
+     "bands_include": [
+      "senior"
+     ]
+    }
+   },
+   "note": "both corrections are in force; neither replaced the other"
+  },
+  {
+   "id": "T48",
+   "family": "readiness: no resume, role ask",
+   "setup": [],
+   "turns": [
+    "find data analyst jobs in Chicago"
+   ],
+   "oracle": {},
+   "expect": {
+    "searched": true,
+    "queued": {
+     "max": 0
+    },
+    "readiness": {
+     "first": "resume",
+     "max_ask": 2,
+     "present": [
+      "resume",
+      "work_authorization"
+     ],
+     "never_in_chat": [
+      "password",
+      "ssn"
+     ]
+    }
+   },
+   "note": "nothing confirmed: the resume is the most consequential gap; the search still ran and queued nothing"
+  },
+  {
+   "id": "T49",
+   "family": "readiness: confirmed resume, authorization unknown",
+   "setup": [
+    "resume"
+   ],
+   "turns": [
+    "find data analyst jobs in Chicago"
+   ],
+   "oracle": {},
+   "expect": {
+    "searched": true,
+    "queued": {
+     "max": 0
+    },
+    "readiness": {
+     "first": "work_authorization",
+     "max_ask": 2,
+     "absent": [
+      "resume"
+     ]
+    }
+   },
+   "note": "a confirmed resume is not work authorization; authorization is never inferred"
+  },
+  {
+   "id": "T50",
+   "family": "readiness: remote scope",
+   "setup": [
+    "resume"
+   ],
+   "turns": [
+    "find remote data analyst jobs"
+   ],
+   "oracle": {},
+   "expect": {
+    "queued": {
+     "max": 0
+    },
+    "readiness": {
+     "present": [
+      "remote_scope"
+     ],
+     "max_ask": 2
+    }
+   },
+   "note": "remote wanted with no scope: asked before eligibility is claimed"
+  },
+  {
+   "id": "T51",
+   "family": "readiness: level stated is not asked",
+   "setup": [
+    "resume"
+   ],
+   "turns": [
+    "find frontend internships in Chicago"
+   ],
+   "oracle": {},
+   "expect": {
+    "searched": true,
+    "queued": {
+     "max": 0
+    },
+    "readiness": {
+     "absent": [
+      "seniority",
+      "resume",
+      "location",
+      "remote_scope"
+     ],
+     "first": "work_authorization"
+    }
+   },
+   "note": "an internship ask states its level; a stated place is known; remote was not asked for"
+  },
+  {
+   "id": "T52",
+   "family": "status: nothing applied, counts from rows",
+   "setup": [
+    "resume"
+   ],
+   "turns": [
+    "where are my applications"
+   ],
+   "oracle": {},
+   "expect": {
+    "queued": {
+     "max": 0
+    },
+    "apply_summary": {
+     "total": 0,
+     "applied_ok": 0
+    }
+   },
+   "note": "spec 6.5: no rows, no counts, nothing may be called applied"
+  },
+  {
+   "id": "T53",
+   "family": "status: queued is not applied",
+   "setup": [
+    "resume"
+   ],
+   "turns": [
+    "apply to the Data Analyst role at Stripe",
+    "where are my applications"
+   ],
+   "oracle": {},
+   "expect": {
+    "queued": {
+     "companies": [
+      "Stripe"
+     ],
+     "max": 1
+    },
+    "apply_summary": {
+     "total": 0,
+     "applied_ok": 0
+    }
+   },
+   "note": "a queued application is approved at most: the counts come from the application rows, never from the queue or the press of Apply"
   }
  ]
 }

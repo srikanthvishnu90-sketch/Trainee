@@ -17,6 +17,12 @@ export interface EndState {
   tailored: number; // tailored resume documents stored for the person (channel_artifacts, PDF)
   prep: boolean; // an interview brief was made (the router's prep turn, a planned prep step, or the brain's tool)
   searched: boolean; // a list of postings was made (a shortlist on a thread, or the brain's search tool)
+  // The constraints the latest search ran with (the thread's discovery.lastParams): spec 2.3, a correction replaces them.
+  search_params?: { role?: string; remote?: boolean; remoteOnly?: boolean; whereText?: string | null; limits?: { bands?: string[] | null; notBands?: string[] | null } | null; place?: string | null } | null;
+  // What the brain was handed as data about an application's needs (assistant meta.readiness), newest turn that has one.
+  readiness?: { ask_now: { key: string }[]; missing: { key: string; chat: boolean }[] } | null;
+  // The status counts the reply is written from (assistant meta.apply_summary), newest turn that has one.
+  apply_summary?: { total: number; counts: Record<string, number>; applied_ok: number } | null;
 }
 export interface Expect {
   queued?: { min?: number; max?: number; companies?: string[]; within?: string[] };
@@ -29,6 +35,12 @@ export interface Expect {
   tailored?: { min: number };
   prep?: boolean;
   searched?: boolean;
+  // Spec 2.3: after a correction the search runs on the new constraint and the old one is not kept.
+  search?: { remote?: boolean; place?: string | null; bands_include?: string[]; bands_exclude?: string[]; not_bands?: string[]; role_has?: string };
+  // Spec 2.2: the structured needs handed to the brain: the first thing asked, how many, and what is never asked in chat.
+  readiness?: { first?: string; max_ask?: number; present?: string[]; absent?: string[]; never_in_chat?: string[] };
+  // Spec 6.5: every count derives from row states; "applied" only for an evidenced submission.
+  apply_summary?: { total?: number; counts?: Record<string, number>; applied_ok?: number };
 }
 const low = (s: unknown) => String(s ?? "").toLowerCase();
 
@@ -73,6 +85,41 @@ export function judge(e: Expect, s: EndState, now: number): { pass: boolean; fai
   if (e.standing && !s.standing.some((x) => low(x).includes(low(e.standing!.has)))) failed.push(`standing: no rule about "${e.standing.has}"`);
   if (e.tailored && s.tailored < e.tailored.min) failed.push(`tailored: ${s.tailored} < ${e.tailored.min}`);
   if (e.prep && !s.prep) failed.push("prep: no interview brief");
+  if (e.search) {
+    const p = s.search_params ?? null;
+    if (!p) failed.push("search: no constraints kept for the latest search");
+    else {
+      if (e.search.remote !== undefined && !!p.remote !== e.search.remote) failed.push(`search: remote is ${!!p.remote}, not ${e.search.remote}`);
+      const bands = (p.limits?.bands ?? []).map(low);
+      if (e.search.place !== undefined && (p.place ?? p.whereText ?? null) !== e.search.place) failed.push(`search: place is ${p.place ?? p.whereText ?? null}, not ${e.search.place}`);
+      if (e.search.role_has && !low(p.role).includes(low(e.search.role_has))) failed.push(`search: the role "${p.role}" lost "${e.search.role_has}"`);
+      const notBands = (p.limits?.notBands ?? []).map(low);
+      for (const b of e.search.not_bands ?? []) if (!notBands.includes(low(b))) failed.push(`search: level ${b} is not ruled out`);
+      for (const b of e.search.bands_include ?? []) if (!bands.includes(low(b))) failed.push(`search: level ${b} is not in the constraints`);
+      for (const b of e.search.bands_exclude ?? []) if (bands.includes(low(b))) failed.push(`search: the old level ${b} was kept`);
+    }
+  }
+  if (e.readiness) {
+    const r = s.readiness ?? null, x = e.readiness;
+    if (!r) failed.push("readiness: nothing handed to the brain");
+    else {
+      if (x.first && r.ask_now[0]?.key !== x.first) failed.push(`readiness: first ask is ${r.ask_now[0]?.key ?? "none"}, not ${x.first}`);
+      if (x.max_ask !== undefined && r.ask_now.length > x.max_ask) failed.push(`readiness: ${r.ask_now.length} asked, at most ${x.max_ask}`);
+      for (const k of x.present ?? []) if (!r.missing.some((m) => m.key === k)) failed.push(`readiness: ${k} should be missing`);
+      for (const k of x.absent ?? []) if (r.missing.some((m) => m.key === k)) failed.push(`readiness: ${k} should not be missing`);
+      for (const k of x.never_in_chat ?? []) if (r.ask_now.some((m) => m.key === k) || r.missing.some((m) => m.key === k && m.chat)) failed.push(`readiness: ${k} would be asked in chat`);
+    }
+  }
+  if (e.apply_summary) {
+    const a = s.apply_summary ?? null, x = e.apply_summary;
+    if (!a) failed.push("apply_summary: nothing handed to the brain");
+    else {
+      if (x.total !== undefined && a.total !== x.total) failed.push(`apply_summary: total ${a.total}, not ${x.total}`);
+      for (const [k, v] of Object.entries(x.counts ?? {})) if ((a.counts[k] ?? 0) !== v) failed.push(`apply_summary: ${k} is ${a.counts[k] ?? 0}, not ${v}`);
+      if (x.applied_ok !== undefined && a.applied_ok !== x.applied_ok) failed.push(`apply_summary: ${a.applied_ok} may be called applied, not ${x.applied_ok}`);
+      if (Object.values(a.counts).reduce((n, v) => n + v, 0) !== a.total) failed.push("apply_summary: the counts do not add up to the total");
+    }
+  }
   if (e.searched && !s.searched) failed.push("searched: no list of postings");
   return { pass: failed.length === 0, failed };
 }

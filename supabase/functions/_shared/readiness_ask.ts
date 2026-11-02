@@ -29,7 +29,7 @@ const SHAPE_BAD: Array<[RegExp, string]> = [
   [/\?\s*\S/, "text after the question"],
   [/\b(?:and|or)\s+(?:do|does|are|is|will|would|can|could|have|what|which|where|how|when)\b/i, "a second question joined to the first"],
   [/\b(?:considering|given|knowing|seeing|now that|with your|for someone|someone who|people like)\b/i, "reasons from who the person is"],
-  [/\byour (?:accent|name|background|school|family|country|english|resume|studies|degree|experience)\b|\bsounds?\b|\bsuggests?\b|\blooks? (?:strong|good|great)\b/i, "comments on the person"],
+  [/\byour (?:accent|name|background|school|family|english|studies|degree|experience)\b|\bsounds?\b|\bsuggests?\b|\blooks? (?:strong|good|great)\b/i, "comments on the person"],
   [/(?:^|[.!?]\s+)(?:tell|send|give|reply|say|text|attach|confirm|just|please|let)\b/i, "an instruction, not a question"],
 ];
 // Assertions about the person ("since you...", "you're a ...", "as a ...") and anything that promises or does an action.

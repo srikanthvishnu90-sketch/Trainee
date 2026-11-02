@@ -83,7 +83,8 @@ dl.facts dt{color:var(--mute)}dl.facts dd{margin:0;overflow-wrap:anywhere}dd.pai
 .empty{margin:18px 0;padding:18px;border-radius:14px;background:var(--panel)}
 .results .apply,.things .apply{display:inline-flex;align-items:center;justify-content:center;min-width:120px;min-height:48px;padding:6px 26px;border-radius:999px;border:2px solid #000;background:#000;color:#fff;font:inherit;font-size:17px;font-weight:600;cursor:pointer;text-decoration:none}
 .results .apply:hover,.things .apply:hover{background:#000;border-color:#000;opacity:.88}.results .apply:focus-visible,.things .apply:focus-visible,.ghost:focus-visible{outline:3px solid var(--link);outline-offset:2px}
-@media (prefers-color-scheme:dark){.rid,.top h2{color:var(--ink)}.results .apply,.things .apply{border-color:var(--ink)}.results .apply:hover,.things .apply:hover{border-color:var(--ink)}}
+@media (prefers-color-scheme:dark){.results .apply,.things .apply{border-color:var(--ink)}.results .apply:hover,.things .apply:hover{border-color:var(--ink)}}
+@media (prefers-color-scheme:dark){.rid,.top h2{color:var(--ink)}}
 .card details.send dl.facts{grid-template-columns:minmax(0,38%) 1fr;margin:6px 0 4px}.card .guide{margin:10px 0 0;font-size:16px;color:var(--ink)}
 .things fieldset{margin:0 0 16px;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--card)}.things legend{padding:0 6px;font-weight:600;font-size:17px;overflow-wrap:anywhere}
 .things .opt{display:flex;align-items:center;gap:10px;min-height:44px;font-size:17px}.things .opt input{width:22px;height:22px;accent-color:var(--ink)}

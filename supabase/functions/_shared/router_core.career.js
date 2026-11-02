@@ -9786,6 +9786,10 @@ const CareerReply = (() => {
       return trimmed;
     }
     if (endsWithNextStep(trimmed)) return raw;
+    {
+      const lines = trimmed.split("\n").map((l) => l.trim()).filter(Boolean);
+      if (lines.length > 1 && /^https?:\/\/\S+$/i.test(lines[lines.length - 1]) && endsWithNextStep(lines[0])) return raw;
+    }
     if (specific) return `${trimmed} ${specific}`;
     return `${trimmed} ${GENERIC_CLOSER}`;
   }
@@ -13446,11 +13450,23 @@ const CareerRouter = (() => {
     const c = [p && p.url, ...((p && Array.isArray(p.source_urls)) ? p.source_urls : [])].map(s).find((u) => /^https?:\/\/\S+$/i.test(u));
     return c || null;
   }
-  function roleSentence(item) {
-    const where = item.remote === "remote" ? "remote" : item.remote === "hybrid" ? `hybrid in ${s(item.location).split(",")[0]}` : s(item.location);
-    const pay = item.posting.salary && item.posting.salary.raw ? `, ${item.posting.salary.raw}` : "";
+
+
+  function postingPayText(posting) {
+    if (posting && posting.salary && posting.salary.raw) return s(posting.salary.raw);
+    const m = s(posting && (posting.jd_text || posting.description)).match(/\$\s?\d[\d,]*(?:\.\d+)?\s?[kK]?\s*(?:-|–|—|to)\s*\$\s?\d[\d,]*(?:\.\d+)?\s?[kK]?(?:\s*(?:\/|per|an?)\s*(?:hour|hr|year|yr))?/);
+    return m ? m[0].replace(/\s*(?:-|–|—|to)\s*/, "-").replace(/\s+/g, " ").replace(/\s*\/\s*/, "/") : "";
+  }
+  function roleListLine(item, i, all) {
+    const n = all.length > 1 ? `${i + 1}) ` : "";
+    const where = item.remote === "remote" ? "remote" : item.remote === "hybrid" ? `hybrid in ${s(item.location).split(",")[0]}` : s(item.location).split(",")[0];
+    const pay = postingPayText(item.posting);
     const url = item.url || postingUrlOf(item.posting);
-    return `${item.title} at ${item.company}${url ? ` (${url})` : ""} — ${where}${pay}: ${item.reason}${item.caveat ? `; heads-up: ${item.caveat}` : ""}.`;
+    return `${n}${[`${item.title} at ${item.company}`, where, pay].filter((x) => s(x).trim()).join(", ")}${url ? `\n${url}` : ""}`;
+  }
+  function roleListReply(summary, items, nextStep) {
+    const head = [s(summary).trim(), s(nextStep).trim()].filter(Boolean).join(" ");
+    return [head, ...items.map((it, i, all) => roleListLine(it, i, all))].join("\n");
   }
 
   const FAMILY_LABELS = { PM: "product management (PM)", SWE: "software engineering", "Data/ML": "data and machine learning", Design: "design", Finance: "finance", Consulting: "consulting", Operations: "operations", Marketing: "marketing", Sales: "sales" };
@@ -13466,7 +13482,7 @@ const CareerRouter = (() => {
     const profile = ctx.profile;
     const t = lc(text);
     const countM = t.match(/(\d+)\s*(?:roles|jobs|internships)/);
-    const limit = o.limit || (countM ? Number(countM[1]) : 5);
+    const limit = o.limit || (countM ? Number(countM[1]) : 3);
     const fams = o.families !== undefined ? o.families : discoveryFamilies(text);
     const { ranked, excluded, dedupedTo, family } = rankedShortlist(profile, ctx, Object.assign({}, o, { askFamilies: fams && fams.length ? fams : null }));
     try {
@@ -13525,8 +13541,9 @@ const CareerRouter = (() => {
       return Object.assign({ intent: o.intent || "career_discovery", reply }, publicFacts);
     }
     const profiled = !!(profile && (profile.facts || []).length);
-    const reply = compose({ headline: o.headline || (profiled ? `Here are the ${top.length} roles most worth applying to, ranked by fit with your profile.` : `Here ${top.length === 1 ? "is 1 role" : `are ${top.length} roles`} that match your search.`), facts: top.map(roleSentence),
-      nextStep: o.nextStep || (profiled ? "Tell me one to tailor your resume for, and I will do that next." : "Want me to rank them against your resume? Paste it here or attach the file.") });
+    const pl = top.length === 1 ? "role" : "roles";
+    const reply = roleListReply(o.headline || (profiled ? `${top.length} ${pl} that fit your profile best.` : `${top.length} ${pl} that match your search.`), top,
+      o.nextStep || (profiled ? (top.length > 1 ? "Reply with a number and I'll tailor your resume for it." : "Want me to tailor your resume for it?") : "Want me to rank them against your resume?"));
     return Object.assign({ intent: o.intent || "career_discovery", reply }, publicFacts);
   }
 
@@ -13549,7 +13566,7 @@ const CareerRouter = (() => {
     const headline = ctx.profile
       ? `For Summer ${summerYear}, using the profile you already gave me${gy ? ` (graduating ${gy}${skills ? `, ${skills}` : ""})` : ""}, these are the internship and new-grad roles that fit best.`
       : `For Summer ${summerYear}, these are the internship and new-grad roles that fit best — searched with no profile on file yet, so nothing about you is assumed.`;
-    return handleDiscovery(text, ctx, { intent: "career_internship_discovery", limit: 4, locations: locations.size ? locations : null, bands, headline, nextStep: "Want me to tailor your resume for the first one?" });
+    return handleDiscovery(text, ctx, { intent: "career_internship_discovery", limit: 3, locations: locations.size ? locations : null, bands, headline, nextStep: "Want me to tailor your resume for the first one?" });
   }
 
   function handleDiscoveryDelta(text, ctx) {

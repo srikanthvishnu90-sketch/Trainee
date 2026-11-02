@@ -390,6 +390,13 @@ const CareerReply = (() => {
       return trimmed;
     }
     if (endsWithNextStep(trimmed)) return raw;
+    // SEARCH LISTS (2026-11-01, texting): a list that ends on a bare link (each role's link alone on the line under it) and
+    // whose first line, the summary, already ends with the next step carries its next step there. A closer after the last
+    // link would be one more message on iMessage, where every link is its own.
+    {
+      const lines = trimmed.split("\n").map((l) => l.trim()).filter(Boolean);
+      if (lines.length > 1 && /^https?:\/\/\S+$/i.test(lines[lines.length - 1]) && endsWithNextStep(lines[0])) return raw;
+    }
     if (specific) return `${trimmed} ${specific}`;
     return `${trimmed} ${GENERIC_CLOSER}`;
   }

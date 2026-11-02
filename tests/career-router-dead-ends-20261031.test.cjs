@@ -93,7 +93,8 @@ test("'apply to the first one' with no resume: names the bound role from the lis
   await setup();
   const p = person();
   const s = String(p.say("find data analyst jobs in chicago").reply);
-  const first = s.match(/([A-Z][A-Za-z ]+ at [A-Z][A-Za-z]+) \(https?:/);
+  // The link sits under its role's line (search lists, 2026-11-01) or inside it (before).
+  const first = s.match(/([A-Z][A-Za-z ]+ at [A-Z][A-Za-z]+)(?: \(|,[^\n]*\n)https?:/);
   assert.ok(first, s);
   const o = p.say("apply to the first one");
   const r = String(o.reply);
@@ -108,7 +109,7 @@ test("'tell me about the second one' reads the second role from the list shown, 
   await setup();
   const p = person();
   const s = String(p.say("find data analyst jobs in chicago").reply);
-  const shown = [...s.matchAll(/([A-Z][A-Za-z ]+ at [A-Z][A-Za-z]+) \((https?:[^)]+)\)/g)];
+  const shown = [...s.matchAll(/([A-Z][A-Za-z ]+ at [A-Z][A-Za-z]+)(?: \(|,[^\n]*\n)(https?:[^)\s]+)\)?/g)];
   assert.ok(shown.length >= 2, s);
   const r = String(p.say("tell me about the second one").reply);
   assert.ok(r.includes(shown[1][1]) && r.includes(shown[1][2]), `second role + link: ${r}`);

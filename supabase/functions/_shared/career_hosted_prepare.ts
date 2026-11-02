@@ -9,12 +9,15 @@ import { kickPrepare, prepareConfigured } from "./career_apply_from_chat.ts";
 const ON_COMPUTER = /(They go on the forms|It goes on the form) the next time you prepare applications on your computer\./;
 
 // deno-lint-ignore no-explicit-any
-export async function prepareAfterAnswers(asked: { reply: string; status?: string } | null, o: { admin: any; userId: string; env: { get(k: string): string | undefined }; fetch: typeof fetch }): Promise<"started" | "failed" | "off" | "skipped"> {
+export async function prepareAfterAnswers(asked: { reply: string; status?: string } | null, o: { admin: any; userId: string; env: { get(k: string): string | undefined }; fetch: typeof fetch;
+  // The results page answers one role at a time: that role is prepared again when ITS questions are done, whatever other roles still ask.
+  // The preparation leaves a posting alone while a question of its own is open (career_apply_prepare_candidates*: an "asked" try stands).
+  roleDone?: boolean }): Promise<"started" | "failed" | "off" | "skipped"> {
   if (!asked || asked.status !== "answered" || !ON_COMPUTER.test(asked.reply)) return "skipped";
   if (!prepareConfigured(o.env)) return "off";
   const open = await o.admin.rpc("career_apply_questions_open_as", { p_user: o.userId, p_limit: 1 });
   if (open.error) return "skipped";
-  if ((open.data ?? []).length) {
+  if ((open.data ?? []).length && !o.roleDone) {
     // More are waiting: the application is prepared again here once those are answered, not "on your computer".
     asked.reply = asked.reply.replace(ON_COMPUTER, "Once the rest are answered, I'll prepare your application again here.");
     return "skipped";
@@ -42,7 +45,7 @@ export async function prepareAfterAnswers(asked: { reply: string; status?: strin
 // person's queued applications again through this same door. Nothing is approved, queued for sending or sent by it.
 // deno-lint-ignore no-explicit-any
 export const reprepareQueued = (o: { admin: any; userId: string; env: { get(k: string): string | undefined }; fetch: typeof fetch }) =>
-  prepareAfterAnswers({ reply: "They go on the forms the next time you prepare applications on your computer.", status: "answered" }, o);
+  prepareAfterAnswers({ reply: "They go on the forms the next time you prepare applications on your computer.", status: "answered" }, { ...o, roleDone: true });
 
 // ------------------------------------------------------------------------------------------------ follow-through
 // Where a posting they asked for stands before it is on the queue (career_apply_pending_for), in their words.

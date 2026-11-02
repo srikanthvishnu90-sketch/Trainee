@@ -1,4 +1,4 @@
-// TELEGRAM LINK REPLY CODE (review #348; 20261031060000_telegram_link_reply_code.sql), through the real webhooks (iMessage's
+// TELEGRAM LINK REPLY CODE (review #348; 20261031063000_telegram_link_reply_code.sql), through the real webhooks (iMessage's
 // trainee-inbound, trainee-telegram), the real inbound core and deliverer, over the memory database (channel_memory.ts, the
 // rules of the SQL), fake provider HTTP. No network, no model.
 // The hijack: a stranger opens a leaked "connect telegram" link; the owner then says a plain "yes" on iMessage, meant for

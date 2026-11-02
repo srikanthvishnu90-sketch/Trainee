@@ -57,7 +57,7 @@ export const TELEGRAM_LINKED_ELSEWHERE_REPLY = "This Telegram account is already
 // TELEGRAM LINK OWNERSHIP (2026-10-31; owner rule of 2026-10-29: a forwarded or copied link must not let another person read
 // the account or act as it). Opening the link asks the account's own channel; this chat is linked only on the YES there.
 // Neither reply names that channel, a number or an email: whoever opened the link may not be the account's person.
-// TELEGRAM LINK REPLY CODE (review #348; 20261031060000_telegram_link_reply_code.sql): a plain yes never answers this question
+// TELEGRAM LINK REPLY CODE (review #348; 20261031063000_telegram_link_reply_code.sql): a plain yes never answers this question
 // (it was taken from a yes meant for an application card, linking a stranger who held a leaked code). The question carries a
 // 4-digit reply code made in the database for that one request ({code}, filled there), shown only on the owner's own channel;
 // only "LINK <code>" from that channel links the chat, once, within 15 minutes. Who asked is named by Telegram username, or

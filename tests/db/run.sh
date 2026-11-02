@@ -256,8 +256,8 @@ if [[ -f "$BRIDGE_PATH" ]]; then
     # 20261031040000 redefines channel_link_nonce_redeem and channel_link_confirm (20261021070000, 20261030120000, 20261031030000),
     # which the channel phases below re-create and test as they were: applied last, below.
     [[ "$(basename "$file")" == 20261031040000_* ]] && continue
-    # 20261031060000 builds on 20261031040000 (by_code) and redefines its link functions: applied last, below, after it.
-    [[ "$(basename "$file")" == 20261031060000_* ]] && continue
+    # 20261031063000 builds on 20261031040000 (by_code) and redefines its link functions: applied last, below, after it.
+    [[ "$(basename "$file")" == 20261031063000_* ]] && continue
     # 20261031070000 redefines career_resume_upload_record_as (20261026210016, itself applied below): applied last, below.
     [[ "$(basename "$file")" == 20261031070000_* ]] && continue
     cp "$file" "$PENDING_ROOT/supabase/migrations/"
@@ -863,10 +863,10 @@ echo "== telegram_link_code_kept.test.sql (another account's chat links nothing 
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261031040000_telegram_link_confirm.sql"
 echo "== telegram_link_confirm.test.sql (a code asks the account's own channel; only its YES links, once; strangers, races, STOP, deletion, expiry: nothing; service only)"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/telegram_link_confirm.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
-# TELEGRAM LINK REPLY CODE (20261031060000; review #348): a plain yes never answers a link code's question; only
+# TELEGRAM LINK REPLY CODE (20261031063000; review #348): a plain yes never answers a link code's question; only
 # "LINK <the request's 4-digit code>" from the asked contact links, once, within 15 minutes; 3 open per account. Twice, then its test.
-"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261031060000_telegram_link_reply_code.sql"
-"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261031060000_telegram_link_reply_code.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261031063000_telegram_link_reply_code.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261031063000_telegram_link_reply_code.sql"
 echo "== telegram_link_reply_code.test.sql (the plain-yes hijack closed; LINK <code> bound to its request, once, 15 minutes; wrong, late, reused, other: nothing; cap 3; service only)"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/telegram_link_reply_code.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 # ONBOARDING ROUND 3 (20261031070000): a resume file sent again is the latest upload (the yes binds to the file that showed the

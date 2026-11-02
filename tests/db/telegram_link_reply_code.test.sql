@@ -1,4 +1,4 @@
--- TELEGRAM LINK REPLY CODE (20261031060000_telegram_link_reply_code.sql; review #348), in the database alone, every instant
+-- TELEGRAM LINK REPLY CODE (20261031063000_telegram_link_reply_code.sql; review #348), in the database alone, every instant
 -- passed in. The hijack first: a stranger opens a leaked code, the owner's plain yes (meant for something else) must not link
 -- the stranger's chat. Then: only "LINK <the request's own code>" from the asked contact links, once, within 15 minutes; a
 -- wrong, reused, late or other request's code links nothing; five wrong codes close the questions; at most 3 code questions

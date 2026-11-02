@@ -248,7 +248,7 @@ MIGRATIONS=(
   20261031030000_telegram_link_code_kept.sql
   20261031040000_telegram_link_confirm.sql
   20261031050000_career_account_memory_one_copy.sql
-  20261031060000_telegram_link_reply_code.sql
+  20261031063000_telegram_link_reply_code.sql
   20261031070000_career_resume_upload_resend.sql
 )
 MIGRATION_MARK=(

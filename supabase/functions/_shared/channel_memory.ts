@@ -138,7 +138,7 @@ export function memoryChannelWorld() {
       enqueue(a.userId, { key: `link:${id}`, kind: "link", text: a.text, at: a.at, channel: channelOf(a.askedOn) });
       return `link:${id}`;
     },
-    // TELEGRAM LINK REPLY CODE (review #348; 20261031060000): the plain yes never answers a link code's question.
+    // TELEGRAM LINK REPLY CODE (review #348; 20261031063000): the plain yes never answers a link code's question.
     async confirmLink(a) {
       const open = asks.filter((x) => !x.byCode && x.userId === a.userId && x.askedOn === a.askedOn && x.answeredAt === null && x.expiresAt > a.at).sort((x, y) => y.createdAt - x.createdAt || y.id - x.id);
       const r = open[0];
@@ -156,7 +156,7 @@ export function memoryChannelWorld() {
       enqueue(a.userId, { key: `link:${r.id}:done`, kind: "link", text: a.notice, at: a.at, channel: channelOf(r.contact) });
       return { contact: r.contact, key: `link:${r.id}:done` };
     },
-    // TELEGRAM LINK REPLY CODE (review #348), as 20261031060000 channel_link_confirm_code: "LINK <code>" from the asked contact
+    // TELEGRAM LINK REPLY CODE (review #348), as 20261031063000 channel_link_confirm_code: "LINK <code>" from the asked contact
     // links the one request that code was made for, once, within its 15 minutes; five wrong codes close the contact's questions.
     async confirmLinkCode(a) {
       const open = asks.filter((x) => x.byCode && x.userId === a.userId && x.askedOn === a.askedOn && x.answeredAt === null && x.expiresAt > a.at);
@@ -195,7 +195,7 @@ export function memoryChannelWorld() {
       const on = ofUser(row.userId).filter((c) => c.contact !== contact)
         .sort((a, b) => Number(optedOut(a.contact)) - Number(optedOut(b.contact)) || (b.lastInboundAt ?? -Infinity) - (a.lastInboundAt ?? -Infinity) || a.createdAt - b.createdAt || a.contact.localeCompare(b.contact))[0];
       if (!on || optedOut(on.contact)) return { ok: false, why: "cant_ask" };
-      // TELEGRAM LINK REPLY CODE (review #348; 20261031060000): the question must have a place for its reply code; at most 3
+      // TELEGRAM LINK REPLY CODE (review #348; 20261031063000): the question must have a place for its reply code; at most 3
       // code questions open per account; the code is 4 random digits not already open on that contact.
       if (askText.split(LINK_CODE_SLOT).length !== 2) return { ok: false, why: "invalid" };
       const openCode = asks.filter((x) => x.byCode && x.userId === row.userId && x.answeredAt === null && x.expiresAt > at);

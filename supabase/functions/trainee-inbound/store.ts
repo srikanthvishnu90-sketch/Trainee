@@ -103,7 +103,7 @@ export function supabaseInboundStore(admin: any): InboundStore {
       if (r?.error === "ambiguous") return { ambiguous: true as const }; // TELEGRAM LINK OWNERSHIP: two chats asked; neither linked
       return r && typeof r.contact === "string" ? { contact: r.contact, key: typeof r.key === "string" ? r.key : null } : null;
     },
-    // TELEGRAM LINK REPLY CODE (review #348): 20261031060000_telegram_link_reply_code.sql.
+    // TELEGRAM LINK REPLY CODE (review #348): 20261031063000_telegram_link_reply_code.sql.
     async confirmLinkCode(a) {
       const r = must<any>(await admin.rpc("channel_link_confirm_code", { p_user: a.userId, p_asked_on: a.askedOn, p_code: a.code, p_notice: a.notice, p_now: iso(a.at) }), "link the chat");
       return r && typeof r.contact === "string" ? { contact: r.contact, key: typeof r.key === "string" ? r.key : null } : null;

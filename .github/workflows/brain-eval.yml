@@ -74,8 +74,11 @@ jobs:
         if: ${{ inputs.suite == 'tasks' }}
         env: { TASKS_BUDGET_USD: "2.00" }
         run: |
-          for b in router staged planner; do deno run -A --no-check --import-map=evals/career/tasks/import-map.json evals/career/tasks/run.ts --brain $b --model openai --budget-usd "$TASKS_BUDGET_USD" --label "tasks-$b-${{ github.run_id }}" || true; done
-          deno run -A --no-check --import-map=evals/career/tasks/agent-import-map.json evals/career/tasks/run.ts --brain agent --model openai --budget-usd "$TASKS_BUDGET_USD" --label "tasks-agent-${{ github.run_id }}" || true
+          # D-036 review: no `|| true`: the planner goes ON only on this measurement (planner against staged), so a run that
+          # fails fails the job instead of leaving a missing number. set -e stops at the first failed brain.
+          set -euo pipefail
+          for b in router staged planner; do deno run -A --no-check --import-map=evals/career/tasks/import-map.json evals/career/tasks/run.ts --brain $b --model openai --budget-usd "$TASKS_BUDGET_USD" --label "tasks-$b-${{ github.run_id }}"; done
+          deno run -A --no-check --import-map=evals/career/tasks/agent-import-map.json evals/career/tasks/run.ts --brain agent --model openai --budget-usd "$TASKS_BUDGET_USD" --label "tasks-agent-${{ github.run_id }}"
       - name: Held-out set, ${{ env.EVAL_BRAIN }} brain (the bar), five passes
         if: ${{ inputs.suite != 'tasks' }}
         run: |

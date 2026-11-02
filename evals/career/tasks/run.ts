@@ -86,7 +86,8 @@ function brainEnv(brain: BrainName | "setup") {
   for (const k of ["CAREER_BRAIN", "CAREER_PLANNER"]) Deno.env.delete(k);
   if (brain === "router" || brain === "setup") Deno.env.set("CAREER_BRAIN", "router");
   if (brain === "staged" || brain === "planner") Deno.env.set("CAREER_BRAIN", "staged");
-  if (brain === "planner") Deno.env.set("CAREER_PLANNER", "on");
+  // D-036: CAREER_PLANNER is a release flag (on when unset), so every brain but "planner" rolls it back by name.
+  Deno.env.set("CAREER_PLANNER", brain === "planner" ? "on" : "off");
   if (brain === "agent") Deno.env.set("CAREER_BRAIN", "agent");
 }
 

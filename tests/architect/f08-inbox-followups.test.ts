@@ -126,5 +126,5 @@ Deno.test("F8/5 agent-chat: the turn runs before the read model's turn, the rout
   const src = await Deno.readTextFile(`${ROOT}/supabase/functions/agent-chat/handler-career.ts`);
   const at = src.indexOf("followupTurn(");
   assert(at > 0 && at < src.indexOf("standingTurn(") && at < src.indexOf("AGENT_BRAIN_RELEASED && chooseBrain"));
-  assert(/mailOn: Deno\.env\.get\("CAREER_MAIL_TRACKING"\) === "on"/.test(src) && /sendOn: Deno\.env\.get\("CAREER_EMAIL_SEND"\) === "on"/.test(src));
+  assert(/mailOn: chatSwitches\(Deno\.env\)\.mailTracking,/.test(src) /* D-036: a release flag, read through chat_switches.ts */ && /sendOn: Deno\.env\.get\("CAREER_EMAIL_SEND"\) === "on"/.test(src));
 });

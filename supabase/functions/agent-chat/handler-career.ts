@@ -26,6 +26,7 @@
 // "unrecorded" when the sink failed. A missing row is never a zero.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
+import { chatSwitches } from "./chat_switches.ts"; // D-036 release flags (each gate below reads one switch)
 import { looksLikePendingSecret, redactionNote, redactPending, secretLeadIn } from "../_shared/identity_redact.ts";
 import { corsFor } from "./_shared/chat_cors.ts";
 import { chatInput } from "./_shared/chat_input.ts";
@@ -533,15 +534,15 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
               apps: () => supabaseApplications(admin)(user.id), facts: chatScreenFacts(CareerProfile.confirmedFacts((ctx as any).profile ?? {}), ((ctx as any).statedFacts?.facts ?? []) as any[]),
               shortlist: shortlist as any, limits: paceReader(admin, user.id), employerAnswers: () => pAsk.answers(tid) }) as any,
             networking: (text) => networkingTurn({ message: text, userId: user.id, threadId: tid, now: Date.now(), state: ctx as unknown as Record<string, unknown>, store: pOutreach, events, attachments: [],
-              model: Deno.env.get("CAREER_NETWORKING_DRAFT") === "on" ? pModel : null,
+              model: chatSwitches(Deno.env).networkingDraft ? pModel : null,
               previousAsk: async () => null,
-              reminderPush: Deno.env.get("CAREER_OUTREACH_FOLLOWUPS") === "on",
+              reminderPush: chatSwitches(Deno.env).followupReminders,
               textingChannel: async () => {
                 const r = await admin.from("channel_contacts").select("channel").eq("user_id", user.id).eq("opted_out", false).order("home", { ascending: false }).limit(1);
                 if (r.error) throw new Error(`read your texting channel: ${r.error.message}`);
                 return r.data?.[0]?.channel ?? null;
               },
-              people: supabasePeopleDeps(admin, { fetch, token: careerTokenFor(careerGrant(admin, Deno.env, fetch), PEOPLE_READ_SCOPE), introPush: Deno.env.get("CAREER_INTRO_REMINDERS") === "on", env: (k) => Deno.env.get(k) }) }) as any,
+              people: supabasePeopleDeps(admin, { fetch, token: careerTokenFor(careerGrant(admin, Deno.env, fetch), PEOPLE_READ_SCOPE), introPush: chatSwitches(Deno.env).introPush, env: (k) => Deno.env.get(k) }) }) as any,
             tools: careerTools({ postings: (q) => pPostings.search(searchWords(q), 150), memory: supabaseMemoryStore(admin), events }),
             reminders: supabaseTaskReminderStore(admin),
           }, message);
@@ -772,7 +773,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         ? await followupTurn({ message, userId: user.id, threadId: tid, now: Date.now(), deps: {
             read: supabaseStanding(admin), outreach: outreachStore, events, lastAssistant: f08Stores.lastAssistant, addressOnRecord: f08Stores.addressOnRecord,
             name: () => ((ctx as any).profile?.basics?.name ?? null), markSent: f08Stores.markSent,
-            mailOn: Deno.env.get("CAREER_MAIL_TRACKING") === "on",
+            mailOn: chatSwitches(Deno.env).mailTracking,
             readNow: (u) => mailNow({ userId: u, now: Date.now(), store: supabaseMailStore(admin), cursor: f08Stores.cursor, read: gmailReadNow(f08Grant, fetch), confirm: supabaseConfirmStore(admin) }),
             sendOn: Deno.env.get("CAREER_EMAIL_SEND") === "on", canSend: async (u) => !!(await sendToken(u)),
             send: countSend(turnEffects, (u: string, m: any) => gmailSender({ fetch, token: (uu: string) => sendToken(uu) }).send(u, m)), connectAsk: missingIntegration("gmail"), readGrant: gmailReadGrant(admin),
@@ -804,14 +805,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const networking = !emailAsk && !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !queued && !f08 && !stood && !status && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await networkingTurn({ message, userId: user.id, threadId: tid, now: Date.now(), state: ctx as unknown as Record<string, unknown>, store: outreachStore, events,
             attachments: Array.isArray(body.attachments) ? (body.attachments as any[]).filter((a) => a && typeof a === "object").map((a) => ({ name: String(a.name ?? "contacts.csv"), mime: typeof a.mime === "string" ? a.mime : "", text: typeof a.text === "string" ? a.text : null })) : [],
-            model: Deno.env.get("CAREER_NETWORKING_DRAFT") === "on" ? (payload: any) => callModel({ ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" }, payload, { meter: netMeter, role: "chat" }) : null,
+            model: chatSwitches(Deno.env).networkingDraft ? (payload: any) => callModel({ ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" }, payload, { meter: netMeter, role: "chat" }) : null,
             previousAsk: async () => {
               const r = await admin.from("agent_messages").select("content").eq("thread_id", tid).eq("role", "user").order("id", { ascending: false }).limit(1);
               return r.error ? null : (r.data?.[0]?.content ?? null);
             },
             // R2: a follow-up reminder is promised as a text only when the scheduled push is on AND the person has a
             // channel it can reach (career_outbox_claim delivers only through channel_target).
-            reminderPush: Deno.env.get("CAREER_OUTREACH_FOLLOWUPS") === "on",
+            reminderPush: chatSwitches(Deno.env).followupReminders,
             textingChannel: async () => {
               const r = await admin.from("channel_contacts").select("channel").eq("user_id", user.id).eq("opted_out", false).order("home", { ascending: false }).limit(1);
               if (r.error) throw new Error(`read your texting channel: ${r.error.message}`);
@@ -819,7 +820,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             },
             // D-033 people finding: the LinkedIn export, Gmail correspondents (the career grant's read scope), pages, intros.
             // D-MN-3 people discovery: web search + public pages when CAREER_PEOPLE_SEARCH=on; off, the reply says so.
-            people: supabasePeopleDeps(admin, { fetch, token: careerTokenFor(f08Grant, PEOPLE_READ_SCOPE), introPush: Deno.env.get("CAREER_INTRO_REMINDERS") === "on", env: (k) => Deno.env.get(k) }) })
+            people: supabasePeopleDeps(admin, { fetch, token: careerTokenFor(f08Grant, PEOPLE_READ_SCOPE), introPush: chatSwitches(Deno.env).introPush, env: (k) => Deno.env.get(k) }) })
           .catch((e) => { console.error("networking turn:", e?.message ?? e); return null; })
         : null;
       await ledger.record(netMeter);

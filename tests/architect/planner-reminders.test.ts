@@ -146,3 +146,21 @@ Deno.test("words: the reminder says the person's words, never the model's wordin
   ok(/^Reminder: prep for the call\./.test(rows[0].text), rows[0].text);
   ok(!/thoroughly|interview/.test(rows[0].text), rows[0].text);
 });
+
+Deno.test("replay: a relative time ('in a week') replayed across a minute boundary is the same reminder, not a second row", async () => {
+  const at = (sec: number) => Date.UTC(2026, 9, 29, 15, 0, sec);
+  const plan = planAt("in a week");
+  const first = fake(plan, {}, at(40)); // 10:00:40 AM in Chicago
+  claimed(await plannerTurn(first.io, msgAt("in a week")));
+  const replay = fake(plan, {}, at(110)); // 10:01:50 AM: 70 seconds later, past the minute
+  (replay.io as any).reminders = first.reminders;
+  const r = claimed(await plannerTurn(replay.io, msgAt("in a week")));
+  const rows = await first.reminders.pending(U);
+  eq(rows.length, 1, r.reply);
+  ok(/already set/.test(r.reply), r.reply);
+  // A fixed time is still keyed on its instant: the same words "in a week" and "Thursday at 10am" the same day are two.
+  const fixed = fake(planAt("Thursday at 10am"), {}, at(110));
+  (fixed.io as any).reminders = first.reminders;
+  claimed(await plannerTurn(fixed.io, msgAt("Thursday at 10am")));
+  eq((await first.reminders.pending(U)).length, 2);
+});

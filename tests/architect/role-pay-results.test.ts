@@ -106,7 +106,6 @@ Deno.test("GET-safety: link previews and any GET (with action words in the query
   const s = await w.A.tok(U, r.listId, NOW);
   const ref = refIn(await (await req(w, { cookie: s })).text(), "Frontend Engineering Intern");
   const q = `action=apply&ref=${ref}&tag=${tagOf(1)}&t=${encodeURIComponent(s)}`;
-  w.wants.length = 0; // making the list queued its roles to be prepared on purpose (role_results.ts); what counts here is what a GET queues
   for (const ua of ["facebookexternalhit/1.1 Facebot Twitterbot/1.0", "WhatsApp/2.23", "TelegramBot (like TwitterBot)", "Mozilla/5.0 (iPhone) AppleWebKit Safari", "curl/8"]) {
     for (const method of ["GET", "HEAD"]) {
       await req(w, { method, query: `t=${encodeURIComponent(link)}`, ua });

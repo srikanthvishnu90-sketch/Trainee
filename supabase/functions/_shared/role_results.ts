@@ -6,7 +6,7 @@
 // The list is written here, by code, from the search's own rows: ordered by fit (career_search.ts ranks by fit to CONFIRMED
 // facts), roles whose listed pay reaches the floor first, then the roles that list no pay (a separate group, never counted as
 // meeting it). A role whose listed pay is below the floor is not on the list. Nothing about pay is invented.
-import { type JobView, jobViewOf, refOf, type JobStore, type ListMeta, type PostingRow } from "./telegram_jobs.ts";
+import { jobViewOf, refOf, type JobStore, type ListMeta, type PostingRow } from "./telegram_jobs.ts";
 import { type Floor, parsePay, type Pay, payGroup, payText, resultsParts, type What } from "./role_pay.ts";
 import type { SearchHit } from "./career_search.ts";
 import type { SourcePosting } from "./career_search_judge.ts";
@@ -44,7 +44,7 @@ export async function resultsFile(o: {
   }
   const ordered = [...meets, ...unchecked, ...unlisted].slice(0, RESULTS_MAX);
   if (!ordered.length) return null;
-  const refs: string[] = [], boards = new Set<string>(), views: JobView[] = [];
+  const refs: string[] = [], boards = new Set<string>();
   for (const p of ordered) {
     // A live-board posting is a whole career_postings row (remote, level, provider, its own posted date); a snapshot one is not.
     const live = (p.posting ?? {}) as Partial<PostingRow>;
@@ -55,17 +55,11 @@ export async function resultsFile(o: {
     const view = { ...jobViewOf(p.hit, row), pay: pay ? payText(pay) : null, pay_parsed: pay };
     const ref = await refOf(o.userId, view.job_id);
     await o.store.remember(o.userId, ref, view, "text");
-    views.push(view);
     boards.add(String(view.source ?? row.provider ?? view.job_id.split(":")[0]).toLowerCase());
     refs.push(ref);
   }
   const listId = (await hex(`${o.userId}|results|${refs.join(",")}|${o.now}`)).slice(0, 10);
   await o.store.rememberList(o.userId, listId, refs);
-  // Trainee finds out what each application needs BEFORE the person taps Apply (owner, 2026-11-02): every shown role is queued to be
-  // prepared (nothing is sent by that; the person's approval is still the tap on the exact application), so its form's own required
-  // questions are known and asked in chat, one at a time, and the page shows each card ready or "a few things first". Best effort:
-  // a refused or failed queue only means that role is prepared when its Apply is tapped.
-  await Promise.all(views.map((v) => o.store.want(o.userId, v, o.now).catch(() => null)));
   const name = String(o.name ?? "").trim().split(/\s+/)[0]?.replace(/[^\p{L}'-]/gu, "").slice(0, 40) || null;
   const meta: ListMeta = { kind: "results", what: o.what.many, floor: o.floor, at: o.now, name, source: o.source ?? null, read: o.read ?? null, sources: boards.size };
   await o.store.rememberListMeta(o.userId, listId, meta);

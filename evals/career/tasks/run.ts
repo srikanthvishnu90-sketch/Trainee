@@ -49,7 +49,8 @@ async function seed(pg: Pg, ids: string[]) {
     ${P.map((p, i) => `('${p.job_id}', 'greenhouse', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', now() - interval '${i} hours', '${q(p.description)}', 'k${i}')`).join(",\n")};`);
   for (const id of ids) {
     await pg.sql(`insert into auth.users (id, email) values ('${id}', '${id}@example.test'); insert into public.profiles (id) values ('${id}');
-      insert into public.career_watch_kv (user_id, key, value) values ('${id}', 'career:account', '{"epoch":0,"version":0,"paused":false}');`);
+      insert into public.career_watch_kv (user_id, key, value) values ('${id}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
+      insert into public.channel_contacts (contact, user_id) values ('+1555' || lpad((abs(hashtext('${id}')) % 10000000)::text, 7, '0'), '${id}');`);
   }
 }
 
@@ -68,9 +69,12 @@ export async function endState(pg: Pg, u: string): Promise<EndState & { metas: a
     drafts: (await json(pg, `select json_agg(json_build_object('email', recipient_email, 'status', status)) from public.career_outreach_drafts where user_id = '${u}'`)) ?? [],
     send_queue: Number(await json(pg, `select count(*) from public.career_send_queue where user_id = '${u}'`)),
     apply_jobs: Number(await json(pg, `select count(*) from public.career_apply_jobs where user_id = '${u}'`)),
-    outbox: Number(await json(pg, `select count(*) from public.career_outbox where user_id = '${u}'`)),
+    outbox: Number(await json(pg, `select count(*) from public.career_outbox where user_id = '${u}' and key not like 'status:reminder:%'`)),
     tracker: stores.flatMap((s) => Array.isArray(s?.trackStore?.rows) ? s.trackStore.rows : []).map((r: any) => ({ company: String(r.company ?? ""), stage: String(r.stage ?? ""), next_when: r.next_when ?? null })),
-    reminders: ((await kv("career:reminders"))?.items ?? []).map((r: any) => ({ what: r.what, when: r.when, due_date: r.due_date })),
+    // A reminder is asked for by name, so it is not a message sent on its own: kept in the outbox (PR #355) for the texting channel at the time asked.
+    reminders: [...((await kv("career:reminders"))?.items ?? []).map((r: any) => ({ what: r.what, when: r.when, due_date: r.due_date })),
+      ...((await json(pg, `select json_agg(json_build_object('what', text, 'when', '', 'due_date', (deliver_at at time zone 'UTC')::date::text, 'local', (deliver_at at time zone 'America/Chicago')::date::text)) from public.career_outbox where user_id = '${u}' and key like 'status:reminder:%'`)) ?? [])
+        .flatMap((r: any) => [{ what: r.what, when: r.when, due_date: r.due_date }, { what: r.what, when: r.when, due_date: r.local }])],
     watch: JSON.stringify([watchKv, prefs]),
     standing: ((await kv("career:standing"))?.items ?? []).map((x: any) => String(x?.text ?? "")),
     // Two tailored resumes can be the same bytes (the store keeps one copy): the postings a planned step tailored count too.

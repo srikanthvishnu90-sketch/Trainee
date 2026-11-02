@@ -223,6 +223,13 @@ export function whenOf(phrase: string, now: number, saved: string | null): When 
   let tonight = false, part: string | null = null;
   take(/\b(today|tonight)\b/, (m) => { day = plus(0); dayNamed = true; tonight = m[1] === "tonight"; });
   take(/\b(tomorrow|tmrw|tmr)\b/, () => { day = plus(1); dayNamed = true; });
+  // "next week" with no day: the coming Monday, said with its date so the person can move it.
+  take(/\bnext week\b/, () => {
+    const n = (DAYS.indexOf("mon") - today.wd + 7) % 7 || 7;
+    const d = plus(n);
+    assumed.push(`next week as ${new Date(Date.UTC(d.y, d.m - 1, d.d)).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" })}, the Monday`);
+    day = d; dayNamed = true;
+  });
   take(new RegExp(String.raw`\b(?:on |this |(next) )?(${WEEKDAY})\b`), (m) => {
     const wd = DAYS.indexOf(m[2].slice(0, 3));
     let n = (wd - today.wd + 7) % 7;

@@ -41,13 +41,17 @@ export const STAGED_BRAIN_INTENTS: readonly string[] = [
 // a company come only from a sourced record. Two intents are judged by what they carry: company_intel is the brain's
 // only when no company is named and no file or library figure stands behind it (a general question the router took
 // for a company ask: grad school, a certificate, a role it has no figures for); negotiation_advice only when no offer
-// is on record and the benchmark found no figures.
+// is on record and the benchmark found no figures. A pay question at a firm with no file is the brain's too (below).
 const PRODUCT_KEYS = ["payload", "artifact", "bench", "offer", "draft", "ai_answer", "comparison", "documents", "document", "company"];
 const has = (r: Record<string, unknown>, k: string) => r[k] !== undefined && r[k] !== null;
 export function codeProduct(intent: string, result: unknown): boolean {
   if (!result || typeof result !== "object") return false;
   const r = result as Record<string, any>;
   if (intent === "company_intel") {
+    // ROUTER ROUTING ROUND (2026-11-02): a pay question at a firm with no file. The router's answer is "X has no company
+    // file yet", with no figure in it; the brain reads the firm's postings (get_posting, search_jobs) and sources under the
+    // figure checks, so the question gets an answer instead of stopping there. Any other no-file question stays the router's.
+    if (r.payload?.kind === "company_file_absent" && r.payload?.topic === "pay") return false;
     if (has(r, "company") || has(r, "comparison")) return true;
     const kind = String(r.payload?.kind ?? "");
     return !(has(r, "guidance") || /_absent$/.test(kind));

@@ -276,7 +276,7 @@ export interface PeopleResult { reply: string; intent: string; status: string }
 // ------------------------------------------------------------------------------------------------ what was asked
 const NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fourteen: 14, a: 1 };
 const plain = (s: unknown) => String(s ?? "").toLowerCase().replace(/[’']/g, "").replace(/&/g, " and ").replace(/[^\p{L}\p{N}@.]+/gu, " ").trim();
-const FILLER = /^(?:(?:so|ok|okay|hey|hi|yo|and|now|also|please|pls|plz|can you|can u|could you|could u|would you|will you|help me|actually|wait|oh|hmm|um)[, ]+)+/i;
+const FILLER = /^(?:(?:so|ok|okay|hey|hi|yo|and|now|also|please|pls|plz|can you|can u|could you|could u|would you|will you|help me|actually|wait|oh|hmm|um|quick\s+q(?:uestion)?:?)[, ]+)+/i;
 const tidy = (m: string) => chatAsk(m).replace(FILLER, "").replace(/[?!.]+$/, "").replace(/[, ]+(?:pls|plz|please|thanks|thx|ty)[?!.]*$/i, "").replace(/[?!.]+$/, "").trim();
 const firmText = (raw: string): string | null => {
   const f = raw.replace(/\s+(?:about|regarding|re|for|who|that|to|and ask|asking|please|on|from my|in my)\b.*$/i, "").replace(/[?.!,;:]+$/, "").replace(/^the\s+/i, "").trim();

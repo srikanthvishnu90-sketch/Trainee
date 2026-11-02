@@ -152,6 +152,23 @@ export function withoutLinks(text: string): string {
   }).join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+// LINK SAFETY (reqs Q632, Q633): no shortened or opaque URL is sent. A shortener hides where a tap goes (a posting, a phishing page,
+// anything), and Trainee cannot show the destination it names, so the link is never sent and the words say one was removed. Only
+// the exact hosts of public URL shorteners: a company's own domain ("bitly.com", "acme.co") is a named site and stays.
+export const SHORTENER_HOSTS = new Set(["bit.ly", "bitly.ws", "t.co", "tinyurl.com", "goo.gl", "ow.ly", "buff.ly", "is.gd", "v.gd", "rebrand.ly", "cutt.ly", "shorturl.at",
+  "t.ly", "rb.gy", "lnkd.in", "tiny.cc", "bl.ink", "s.id", "shorte.st", "adf.ly", "clck.ru", "qr.ae", "trib.al", "dlvr.it", "soo.gd", "tr.im", "x.co", "u.to", "y2u.be"]);
+export function isShortLink(url: string): boolean {
+  try { return SHORTENER_HOSTS.has(new URL(url).hostname.toLowerCase().replace(/^www\./, "")); } catch { return false; }
+}
+export const SHORT_LINK_REMOVED = "[shortened link removed]";
+// The text with every shortened link replaced by SHORT_LINK_REMOVED (said, never silently dropped), and how many there were.
+export function withoutShortLinks(text: string): { text: string; removed: string[] } {
+  const s = String(text ?? ""), removed: string[] = [];
+  let out = "", at = 0;
+  for (const u of findUrls(s)) { if (!isShortLink(u.url)) continue; out += s.slice(at, u.start) + SHORT_LINK_REMOVED; at = u.end; removed.push(u.url); }
+  return { text: removed.length ? out + s.slice(at) : s, removed };
+}
+
 // The shape of one reply. `allowedLinks`: the URLs the turn may show (those a tool returned or the person typed); null: the
 // caller vouches for every link (the code-written replies). A link that is not allowed is dropped from links and answer.
 export function shapeReply(raw: RawShape, o: { allowedLinks?: Iterable<string> | null; overflowLink?: string | null } = {}): ShapedReply {
@@ -165,6 +182,7 @@ export function shapeReply(raw: RawShape, o: { allowedLinks?: Iterable<string> |
   for (const u of wanted) {
     if (!/^https?:\/\/[^\s/]+\.[^\s/]+/i.test(u)) { notes.push(`link dropped (not a web address): ${u.slice(0, 80)}`); continue; }
     if (allowed && !allowed.has(u)) { notes.push(`link dropped (no tool returned it): ${u.slice(0, 120)}`); continue; }
+    if (isShortLink(u)) { notes.push(`link dropped (shortened, hides its destination): ${u.slice(0, 120)}`); continue; }
     if (links.includes(u)) continue;
     if (links.length >= MAX_LINKS) { notes.push(`link dropped (over ${MAX_LINKS}): ${u.slice(0, 120)}`); continue; }
     links.push(u);
@@ -229,11 +247,17 @@ export async function deliverShaped(s: ShapedReply, io: ShapeIO, o: { includeAns
 }
 
 // The turn's decision (agent-chat): shape only a Telegram turn, only with CAREER_REPLY_WRITER on, only a turn whose words are
-// not an exact payload the person approves. Anything else is returned untouched and carries no shape.
+// not an exact payload the person approves. Anything else carries no shape; its words are untouched except that a shortened link
+// is removed (said) on every channel, and an exact payload is never changed at all.
 export function shapeForTurn(o: { on: boolean; channel: string; writable: boolean; reply: string; attachments?: unknown; allowedLinks?: Iterable<string> | null; overflowLink?: string | null }):
   { reply: string; shape: { attachments: { filename: string; content: string }[]; links: string[]; more?: string[] } | null; notes: string[] } {
-  if (!o.on || o.channel !== "telegram" || !o.writable) return { reply: o.reply, shape: null, notes: [] };
-  const s = shapeReply({ answer: o.reply, attachments: o.attachments }, { allowedLinks: o.allowedLinks, overflowLink: o.overflowLink });
-  if (!s.answer && !s.attachments.length) return { reply: o.reply, shape: null, notes: s.notes }; // nothing left to say: today's reply stands
-  return { reply: s.answer || o.reply, shape: s.attachments.length || s.links.length || s.more?.length ? { attachments: s.attachments.map((f) => ({ filename: f.filename, content: f.content })), links: s.links, ...(s.more?.length ? { more: s.more } : {}) } : null, notes: s.notes };
+  if (!o.writable) return { reply: o.reply, shape: null, notes: [] };
+  // Q632/Q633 on every channel, shaped or not: a shortened link never reaches the person (an exact payload above is never changed).
+  const short = withoutShortLinks(o.reply);
+  const reply = short.text, shortNotes = short.removed.map((u) => `link removed (shortened, hides its destination): ${u.slice(0, 120)}`);
+  if (!o.on || o.channel !== "telegram") return { reply, shape: null, notes: shortNotes };
+  const s = shapeReply({ answer: reply, attachments: o.attachments }, { allowedLinks: o.allowedLinks, overflowLink: o.overflowLink });
+  s.notes.unshift(...shortNotes);
+  if (!s.answer && !s.attachments.length) return { reply, shape: null, notes: s.notes }; // nothing left to say: today's reply stands
+  return { reply: s.answer || reply, shape: s.attachments.length || s.links.length || s.more?.length ? { attachments: s.attachments.map((f) => ({ filename: f.filename, content: f.content })), links: s.links, ...(s.more?.length ? { more: s.more } : {}) } : null, notes: s.notes };
 }

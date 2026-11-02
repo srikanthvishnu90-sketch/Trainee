@@ -33,6 +33,7 @@ import { type Button } from "./channel_adapters.ts";
 import { neverOpen } from "./career_people_sites.ts";
 import { safeCut, safeSlice } from "./channel_text.ts";
 import { type AccountStamp, stampOf, unsendableWhy } from "./apply_trust.ts";
+import { deadlinePassed, deadlineWords } from "./date_words.ts";
 
 export const TG_CAPTION_MAX = 1024;
 export const PAGE_SIZE = 5;
@@ -216,7 +217,8 @@ export function captionOf(job: JobView, now: number): string {
     ...(job.pay ? [`Pay: ${job.pay}`] : []),
     ...(job.level ? [`Level: ${job.level}`] : []),
     ...(posted ? [`Posted: ${posted}`] : seen ? [`First seen: ${seen}`] : []),
-    ...(job.deadline && dayOf(job.deadline) ? [`Apply by: ${dayOf(job.deadline)}`] : []),
+    // Q588-Q590: the weekday, and a moment's own time and zone (date_words.ts), never the UTC calendar day of a moment.
+    ...(deadlineWords(job.deadline, now) ? [`Apply by: ${deadlineWords(job.deadline, now)}`] : []),
     ...(job.source ? [`Source: ${job.source}`] : []),
     ...(job.reasons.length ? ["", "Why it fits you:", ...job.reasons.slice(0, 3).map((r) => `• ${r}`)] : []),
     ...(job.gaps.length ? ["Gaps:", ...job.gaps.slice(0, 2).map((r) => `• ${r}`)] : []),
@@ -495,8 +497,10 @@ export async function screenedOut(userId: string, job: JobView, deps: JobDeps): 
 export function postingVerdict(job: JobView, row: PostingRow, facts: any[], factsWired: boolean, now: number): string | null {
   // TELEGRAM SCENARIOS (2026-10-30): a posting whose own deadline has passed is expired: never queued, never approvable (its card
   // said "Apply by: <day>", and Confirm approved it days after).
-  const deadline = Date.parse(String(row.deadline ?? job.deadline ?? ""));
-  if (!Number.isNaN(deadline) && deadline < now) return `its deadline to apply (${dayOf(new Date(deadline).toISOString())}) has passed`;
+  // A date-only deadline is open all of its last day, wherever the employer is (date_words.ts): "2026-11-06" read as midnight UTC
+  // refused the posting from 6 PM Chicago time on Nov 5.
+  const dl = row.deadline ?? job.deadline ?? null;
+  if (deadlinePassed(dl, now)) return `its deadline to apply (${deadlineWords(dl, now)}) has passed`;
   const content = contentOf(row);
   const r = screenPicks([{ job_id: job.job_id, url: job.url, company: job.company, title: job.title, location: job.location, content }], { apps: [], facts, now });
   if (r.ok.length) return null;

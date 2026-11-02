@@ -14,7 +14,7 @@
 //             time kept; a chat reminder for the same evening time (another UTC day) is not set twice
 //   deno test -A --no-check tests/architect/planner-reminders.test.ts
 import assertNode from "node:assert/strict";
-import { planReminderId, plannerTurn, type PlannerIO } from "../../supabase/functions/agent-chat/career_planner.ts";
+import { planReminderId, plannerTurn, type PlannerIO, relativeBasis, REPLAY_WINDOW_MS } from "../../supabase/functions/agent-chat/career_planner.ts";
 import { memoryReminderStore, type MemoryReminders, reminderTurn } from "../../supabase/functions/_shared/career_reminders.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -163,4 +163,49 @@ Deno.test("replay: a relative time ('in a week') replayed across a minute bounda
   (fixed.io as any).reminders = first.reminders;
   claimed(await plannerTurn(fixed.io, msgAt("Thursday at 10am")));
   eq((await first.reminders.pending(U)).length, 2);
+});
+
+Deno.test("relative after fixed: 'Sunday at 5pm', then 'in 3 days' (sent Sunday 10am), same words: both are set", async () => {
+  const SUN_10AM = Date.UTC(2026, 10, 1, 16); // Sunday 2026-11-01, 10:00 AM in Chicago (CST)
+  const sun = fake(planAt("Sunday at 5pm"), {}, SUN_10AM);
+  claimed(await plannerTurn(sun.io, msgAt("Sunday at 5pm")));
+  const rel = fake(planAt("in 3 days"), {}, SUN_10AM);
+  (rel.io as any).reminders = sun.reminders;
+  const r = claimed(await plannerTurn(rel.io, msgAt("in 3 days")));
+  const rows = (await sun.reminders.pending(U)).sort((a, b) => a.at - b.at);
+  eq(rows.map((x) => chicago(x.at)), ["Sun 5:00 PM", "Wed 10:00 AM"], r.reply);
+  ok(!/already set/.test(r.reply), r.reply);
+});
+
+Deno.test("relative key: two sends inside one 10-minute bucket get the one key (relativeBasis), so the row is found by its key", async () => {
+  const at = (sec: number) => Date.UTC(2026, 9, 29, 15, 0, sec); // 10:00:xx AM Chicago: one bucket
+  const a = fake(planAt("in a week"), {}, at(5));
+  claimed(await plannerTurn(a.io, msgAt("in a week")));
+  const [row] = await a.reminders.pending(U);
+  eq(row.key, `status:reminder:${await planReminderId(U, "prep for the call", relativeBasis(row.at))}:America/Chicago`);
+  eq(relativeBasis(at(5) + 7 * 86_400_000), relativeBasis(at(65) + 7 * 86_400_000), "one bucket");
+  // The key alone finds it: change the stored text so the words check cannot, and replay within the bucket.
+  (a.reminders as any).dump().rows[0].text = "Reminder: something else. You asked me on x";
+  const b = fake(planAt("in a week"), {}, at(65));
+  (b.io as any).reminders = a.reminders;
+  const r = claimed(await plannerTurn(b.io, msgAt("in a week")));
+  eq((await a.reminders.pending(U)).length, 1, r.reply);
+});
+
+Deno.test("relative duplicate check: a replay across a bucket boundary (another key) within 10 minutes is still one row; 11 minutes later is two", async () => {
+  const at = (min: number, sec: number) => Date.UTC(2026, 9, 29, 15, min, sec);
+  const a = fake(planAt("in a week"), {}, at(8, 30)); // 10:08:30: due a week on at 10:09 (minutes rounded up)
+  claimed(await plannerTurn(a.io, msgAt("in a week")));
+  const due1 = (await a.reminders.pending(U))[0].at;
+  const b = fake(planAt("in a week"), {}, at(9, 40)); // 10:09:40, 70 s later: due at 10:10, the next bucket
+  (b.io as any).reminders = a.reminders;
+  const r = claimed(await plannerTurn(b.io, msgAt("in a week")));
+  const due2 = due1 + 60_000;
+  ok(relativeBasis(due1) !== relativeBasis(due2), "the two due times sit in different buckets, so their keys differ");
+  eq((await a.reminders.pending(U)).length, 1, r.reply);
+  ok(/already set/.test(r.reply), r.reply);
+  const c = fake(planAt("in a week"), {}, at(8, 30) + REPLAY_WINDOW_MS + 60_000);
+  (c.io as any).reminders = a.reminders;
+  claimed(await plannerTurn(c.io, msgAt("in a week")));
+  eq((await a.reminders.pending(U)).length, 2, "11 minutes later is another reminder");
 });

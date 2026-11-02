@@ -244,12 +244,14 @@ async function runStep(io: PlannerIO, s: Step, message: string): Promise<{ res: 
   // is not set twice either.
   const w = whenOf(phrase, io.now(), zoneTz);
   // A relative time ("in a week", "in 2 hours") moves with the clock: the same message replayed a minute later names an
-  // instant a minute later. For those, the same words due the same local day are the same reminder.
+  // instant a minute later. For those the key is the time in its 10-minute bucket, and the same words due within 10
+  // minutes of it (the bucket either side included) are the same reminder; anything further apart, the same day or not,
+  // is another reminder ("Sunday at 5pm", then "in 3 days", are two).
   const relative = RELATIVE_WHEN.test(phrase);
-  const basis = "error" in w ? phrase : relative ? `day:${localDay(w.at, w.zone)}` : w.at;
+  const basis = "error" in w ? phrase : relative ? relativeBasis(w.at) : w.at;
   const id = await planReminderId(io.userId, what, basis);
   const sameWords = (text: string) => (/^Reminder: (.*)\. You asked me on /.exec(text)?.[1] ?? "").toLowerCase() === what.toLowerCase();
-  const sameTime = (at: number) => !("error" in w) && (relative ? localDay(at, w.zone) === localDay(w.at, w.zone) : at === w.at);
+  const sameTime = (at: number) => !("error" in w) && (relative ? Math.abs(at - w.at) <= REPLAY_WINDOW_MS : at === w.at);
   const already = (await io.reminders.pending(io.userId)).find((r) => r.key.includes(`:${id}:`) || (sameWords(r.text) && sameTime(r.at)));
   if (already) return { res: res("done", REMINDER_SET_INTENT), turn: { reply: `That reminder is already set: "${already.text}"`, intent: REMINDER_SET_INTENT, status: "already" } };
   const t = await setReminder({ what, when: phrase, userId: io.userId, now: io.now(), store: io.reminders, newKey: () => id });
@@ -258,11 +260,13 @@ async function runStep(io: PlannerIO, s: Step, message: string): Promise<{ res: 
   return { res: res("done", t.intent), turn: { reply: t.reply, intent: t.intent, status: t.status } };
 }
 const RELATIVE_WHEN = /\b(?:in\s+(?:a|an|a few|a couple(?: of)?|one|two|three|four|five|six|seven|eight|nine|ten|\d+(?:\.\d+)?)\s+(?:min(?:ute)?s?|hours?|hrs?|days?|weeks?|months?)|from now|later today|tonight)\b/i;
-const localDay = (at: number, zone: string) => new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(at));
+// A relative reminder's replay window: the same words due within 10 minutes are the same reminder; its key's bucket.
+export const REPLAY_WINDOW_MS = 10 * 60_000;
+export const relativeBasis = (at: number) => `b10:${Math.floor(at / REPLAY_WINDOW_MS)}`;
 const WEEKDAY_WORD = /\b(?:mon|tues?|wed(?:nes)?|thu(?:rs?)?|fri|sat(?:ur)?|sun)(?:day)?\b/i;
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 // The id of a planner reminder's key (status:reminder:<id>:<zone>): the person, the words (case aside) and the exact
-// instant it is due (for a relative time, "day:" and its local day). Same three, same id; any one different, another.
+// instant it is due (for a relative time, relativeBasis: its 10-minute bucket). Same three, same id; any one different, another.
 export async function planReminderId(userId: string, what: string, at: number | string): Promise<string> {
   const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}|${what.toLowerCase()}|${at}`)));
   return `plan${[...d.slice(0, 12)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;

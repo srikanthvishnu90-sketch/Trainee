@@ -9399,7 +9399,7 @@ const CareerSafety = (() => {
     /\bshould(?:nt| not) (?:be alive|exist|be here anymore|have been born)\b/, /\bshould(?:nt| not) be here$/,
     /\b(?:whats|what is|wheres|where is|is there|theres|there is) (?:the |even a |any |no )?point (?:of|in|to) (?:living|life|being alive|going on|existing|anything|any of (?:it|this))\b/,
     /\brather (?:be dead|not be alive|not exist|not wake up)\b/,
-    /\brather die\b(?! than (?!(?:keep|go on|going on|live|living|be alive|be here|continue|wake up|face)\b))/,
+    /\brather die than (?:keep|go on|going on|live|living|be alive|be here|continue|wake up|face (?:another|tomorrow|life))\b/,
     /\bstop (?:existing|being alive)\b/, /\bstop living\b(?! (?:paycheck|like|in|with|at|for|on|off|under|out|from))/, /\bcease to exist\b/, /\b(?:want|wish|need)(?:ed)? (?:to )?(?:not exist|cease to exist|vanish forever|not be alive)\b/,
     /\b(?:hope|hopefully|wish|praying|pray) (?:that )?i (?:dont|never|do not|wont|will not) wake up\b/,
     /\b(?:life|living) (?:is|isnt|is not|aint) (?:not )?worth (?:it|living)\b/, /\bnot worth living\b/,
@@ -9483,10 +9483,14 @@ const CareerSafety = (() => {
   }
   const FINE_RE = /^(?:(?:no|nah|nope|haha|lol|oh|sorry|honestly)[,! ]+)*(?:(?:i'?m|im|i am)\s+(?:fine|ok(?:ay)?|good|alright|all right|safe|not suicidal|okay now)|(?:you )?misread(?: me)?|false alarm|(?:i was |i'?m |im )?(?:just )?(?:venting|joking|kidding|exaggerating)|not like that|all good|i didn'?t mean it like that|it was (?:a )?(?:joke|figure of speech))\b/i;
   const isFineReply = (text) => FINE_RE.test(String(text == null ? "" : text).trim().replace(/[’‘]/g, "'"));
+  const RATHER_DIE = /\brather die\b(?! than (?:miss(?:ing)? (?:this|the|my|out on|it)|lose (?:this|the) (?:offer|job|chance|opportunity)|not get(?:ting)? (?:this|the) (?:job|offer|role|internship)|pass(?:ing)? (?:this|it) up)\b)/;
+  const JOKE = /\b(?:lol+|lmao+|lmfao|haha+|hehe+|jk|jkjk)\b|\u{1F602}|\u{1F923}/u;
   function isDistress(text) {
     const raw = String(text == null ? "" : text).normalize("NFC").toLowerCase();
     if (NON_LATIN.some((p) => p.test(raw))) return true;
-    return distressClauses(text).some((c) => DISTRESS_PATTERNS.some((p) => p.test(c)));
+    const clauses = distressClauses(text);
+    if (clauses.some((c) => DISTRESS_PATTERNS.some((p) => p.test(c)))) return true;
+    return !JOKE.test(raw) && clauses.some((c) => RATHER_DIE.test(c));
   }
 
   function distressResponse(input) {

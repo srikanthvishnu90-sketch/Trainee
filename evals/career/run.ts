@@ -118,6 +118,8 @@ export function parseJudge(text: string): { pass: boolean; failed: string[]; sco
 // The brains, as agent-chat runs them, over in-memory stores for one synthetic person (see harness.ts for what is and is
 // not production parity).
 const arr = (x: unknown): any[] => Array.isArray(x) ? x : [];
+// D-038 measurement: wall time of every brain turn (the agent loop: model calls and tools), for p50/p95 latency per turn.
+export const BRAIN_TURN_MS: number[] = [];
 export async function makeBrain(o: { name: BrainName; model: ModelFn | null; env: { get(k: string): string | undefined } }) {
   const { handleInbound, memoryStore } = await import("../../supabase/functions/_shared/conversation.ts");
   const core = await import("../../supabase/functions/_shared/router_core.career.js");
@@ -169,11 +171,13 @@ export async function makeBrain(o: { name: BrainName; model: ModelFn | null; env
           connections: [], cloud: null, channel: null, last_search: null, unreadable: [] } as any, now);
         const errors: string[] = [];
         const model = async (p: any) => { try { return await o.model!(p); } catch (e) { errors.push(String((e as any)?.summary?.() ?? e).slice(0, 300)); throw e; } };
+        const t0 = performance.now();
         const t = await agentTurn({ message: a.message, history: a.history, stores: ctx, userId: a.userId, threadId: a.userId, now, alerts, interviews, model,
           memory, wants, posting: (id: string) => board.get(id), postings: (q: string) => board.search(searchWords(q), 150),
           outreach: { store: outreach, model } as any,
           known: { standing: await memory.standing(a.userId), alerts: row ? { prefs: row.prefs, tz: row.tz } : null, pipeline: null, situation },
           ...(stagedPick ? { toolPolicy: STAGED_TOOL_POLICY } : {}) });
+        BRAIN_TURN_MS.push(Math.round(performance.now() - t0));
         trace.push({ stopped: String(t.stopped), steps: Number(t.steps ?? 0), tools: (t.tool_calls ?? []).map((c: any) => ({ name: c.name, ok: !!c.ok, ...(c.error ? { error: String(c.error).slice(0, 200) } : {}) })), ...(errors.length ? { errors } : {}),
           ...(stagedPick ? { route: "brain", intent: stagedPick.intent } : {}) });
         if (t.stopped === "model_error" && stagedPick && !(t.tool_calls ?? []).some((c: any) => c.ok && c.effect === "write_own")) {
@@ -224,7 +228,14 @@ if (import.meta.main) {
   if (!Deno.env.get("OPENAI_API_KEY")) { console.log("NOT RUN: no OPENAI_API_KEY (the judge needs it)."); Deno.exit(2); }
   const { callModel, modelConfig, newMeter, PRICES } = await import("../../supabase/functions/_shared/model_gateway.ts");
   const meter = newMeter(), judgeMeter = newMeter();
-  const brainCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+  // D-038: the measured commit's committed reply model (agent-chat/release_model.ts) or the request's model; a commit from
+  // before D-038 has no release_model.ts and is measured as it served, on CAREER_MODEL or gpt-5-mini.
+  const rm: any = await import("../../supabase/functions/agent-chat/release_model.ts").catch(() => null);
+  const brainCfg = rm ? rm.careerModelConfig(Deno.env) : { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+  const committedModel: string = rm ? rm.CAREER_MODEL_DEFAULT : "gpt-5-mini";
+  // A comparison run (a model other than the committed one) is logged under its own brain name, so S3 never reads it as
+  // the served brain's score.
+  const brainLabel = usesModel && brainCfg.model !== committedModel ? `${brainName}:${brainCfg.model}` : brainName;
   const judgeCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("EVAL_JUDGE_MODEL") || "gpt-5-mini" };
   const judge2Model = Deno.env.get("EVAL_JUDGE_MODEL_2") || null;
   const judge2Cfg = judge2Model ? { ...modelConfig(Deno.env, "chat"), model: judge2Model } : null;
@@ -254,6 +265,8 @@ if (import.meta.main) {
     setPath = p;
   } else if (setName === "dev") setPath = new URL("./heldout-live.json", import.meta.url);
   else if (setName === "official") setPath = new URL("./messages.json", import.meta.url);
+  // D-038: a fresh, unsealed held-out set written by another agent; its results are redacted like the sealed set's.
+  else if (setName === "fresh") setPath = new URL("./fresh-heldout.json", import.meta.url);
   else { console.log(`NOT RUN: --set must be dev, heldout, official or sealed (got ${setName}).`); Deno.exit(2); }
   const set = JSON.parse(await Deno.readTextFile(setPath));
   const only = opt("--only");
@@ -275,16 +288,26 @@ if (import.meta.main) {
   const before = spentUsd(prior, label, ledger);
   const now$ = () => before + (meter.usd_micros + judgeMeter.usd_micros) / 1e6;
   if (budget !== null) console.log(`budget $${budget.toFixed(2)} · already spent $${before.toFixed(3)} (ledger baseline $${ledger.baseline_usd.toFixed(3)} + ${prior.length} result files)`);
-  const raw = await runEval(items, brain, judge, budgetStop(budget, now$));
-  const sealedSet = setName === "sealed" || setName === "heldout";
+  // D-038 (owner, 2026-11-01: "$25" on the Anthropic key for these tests, apart from the OpenAI eval budget).
+  const asked = (Deno.env.get("CAREER_REPLY_MODEL") ?? "").trim();
+  if (usesModel && asked && brainCfg.model !== asked) { console.log(`NOT RUN: CAREER_REPLY_MODEL=${asked} was refused (not on the rollback list, or its provider has no key); the default would be measured instead.`); Deno.exit(2); }
+  const anthropicBrain = usesModel && brainCfg.provider === "anthropic";
+  const aBudget = anthropicBrain ? Number(Deno.env.get("ANTHROPIC_EVAL_BUDGET_USD") ?? NaN) : null;
+  if (anthropicBrain && !(aBudget! > 0)) { console.log("NOT RUN: a claude- brain needs ANTHROPIC_EVAL_BUDGET_USD (the Anthropic spend cap)."); Deno.exit(2); }
+  const aBefore = prior.filter((x) => x.label !== label && /^claude-/i.test(String(x.model ?? ""))).reduce((a, x) => a + (Number(x.cost_usd?.brain) || 0), 0);
+  if (anthropicBrain) console.log(`anthropic budget $${aBudget!.toFixed(2)} · already spent $${aBefore.toFixed(3)}`);
+  const evalStop = budgetStop(budget, now$), aStop = budgetStop(aBudget, () => aBefore + meter.usd_micros / 1e6, 0.05);
+  const raw = await runEval(items, brain, judge, () => evalStop() ?? (anthropicBrain ? aStop() : null));
+  const sealedSet = setName === "sealed" || setName === "heldout" || setName === "fresh";
   const r = sealedSet ? redactSealed(raw) : raw;
   let source = "unknown";
   try { const o = await new Deno.Command("git", { args: ["rev-parse", "--short", "HEAD^2"] }).output(); if (o.success) source = new TextDecoder().decode(o.stdout).trim(); } catch { /* no second parent */ }
   let commit = "unknown";
   try { commit = new TextDecoder().decode((await new Deno.Command("git", { args: ["rev-parse", "--short", "HEAD"] }).output()).stdout).trim(); } catch { /* not a git checkout */ }
-  const result = { label, harness: HARNESS, set: sealedSet ? "sealed" : setName, ...(set.sha256 ? { set_sha256: set.sha256 } : {}), brain: brainName, model: usesModel ? brainCfg.model : null, judge_model: judgeCfg.model, judge_model_2: judge2Cfg?.model ?? null, commit, source_commit: source === "unknown" ? commit : source, run_at: new Date().toISOString(),
+  const result = { label, harness: HARNESS, set: setName === "fresh" ? "fresh" : sealedSet ? "sealed" : setName, ...(set.sha256 ? { set_sha256: set.sha256 } : {}), brain: brainLabel, model: usesModel ? brainCfg.model : null, judge_model: judgeCfg.model, judge_model_2: judge2Cfg?.model ?? null, commit, source_commit: source === "unknown" ? commit : source, run_at: new Date().toISOString(),
     cost_usd: { brain: meter.usd_micros / 1e6, judge: judgeMeter.usd_micros / 1e6 }, unpriced_calls: meter.unpriced + judgeMeter.unpriced,
-    budget_usd: budget, spent_before_usd: before, ...r };
+    budget_usd: budget, spent_before_usd: before, brain_turn_ms: BRAIN_TURN_MS, brain_calls: meter.calls, brain_failed_calls: meter.failed,
+    ...(anthropicBrain ? { anthropic_budget_usd: aBudget, anthropic_spent_before_usd: aBefore } : {}), ...r };
   await Deno.mkdir(new URL("./results/", import.meta.url), { recursive: true });
   await Deno.writeTextFile(new URL(`./results/${label}.json`, import.meta.url), JSON.stringify(result, null, 1));
   console.log(`${label}: ${r.passed}/${r.total} passed (${Math.round(r.pass_rate * 100)}%) · brain ${brainName} · judges ${judgeCfg.model}${judge2Cfg ? ` + ${judge2Cfg.model}` : ""} · cost $${(result.cost_usd.brain + result.cost_usd.judge).toFixed(3)}`);

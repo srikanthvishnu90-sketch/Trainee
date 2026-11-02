@@ -4,26 +4,20 @@
 // catch-all reply). Every action stays code's: the code-first turns, the host's controls, structured task and batch
 // requests, and every router turn that is not on the list below. The router still answers when the model fails, and the
 // owner keeps any turn class on the router by naming it in CAREER_BRAIN_ROUTER_INTENTS (comma separated; "unclaimed"
-// is the class of turns no module claimed). D-035 (owner, 2026-11-01: "Ship staged brain"): which brain is served is the
-// committed release config (release_config.ts PRODUCTION_BRAIN, now "staged"), so CAREER_BRAIN unset serves it; the
-// environment only rolls back: CAREER_BRAIN=router (the kill switch, or any value but the release brain) makes nothing
-// here true, and the router answers every turn exactly as before. CAREER_BRAIN=agent stays pinned off by AGENT_BRAIN_RELEASED.
+// is the class of turns no module claimed). Unset, or CAREER_BRAIN=router (the kill switch), nothing here is true and
+// the router answers every turn exactly as before. CAREER_BRAIN=agent stays pinned off by AGENT_BRAIN_RELEASED.
 //
 // How a turn is classed: the router runs once on a disposable copy of the turn's state (no I/O; the real state is not
 // touched), and its intent decides. A turn the brain does not take runs through the router again on the real state, as
 // it does today, so what the router saves is exactly what it saved before.
 
-import { servedBrain } from "./release_config.ts";
-import { crisisReply } from "./crisis.ts";
-
 type Env = { get(k: string): string | undefined };
 type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler: string | null; contained?: boolean; result?: any }; isHostControlled(text: string, ctx: any): boolean };
 
 export type BrainMode = "router" | "agent" | "staged";
-// The served brain (release_config.ts): the committed PRODUCTION_BRAIN unless CAREER_BRAIN rolls it back to the router.
-// "agent" is never served from here (the full brain stays pinned off in career_brain.ts).
 export function brainMode(env: Env): BrainMode {
-  return servedBrain(env);
+  const v = (env.get("CAREER_BRAIN") ?? "").trim().toLowerCase();
+  return v === "staged" ? "staged" : v === "agent" ? "agent" : "router";
 }
 
 // The pseudo-intent of a turn that no module claimed (the router's "I didn't catch that").
@@ -188,8 +182,6 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (mode !== "staged") return { brain: false, mode, intent: null, reason: "not_staged" };
   if (o.structured) return { brain: false, mode, intent: null, reason: "structured_request" };
   if (o.host.isHostControlled(o.message, o.ctx)) return { brain: false, mode, intent: null, reason: "host_control" };
-  // Crisis text is code's (crisis.ts): never the brain's, whatever the router would class it as.
-  if (crisisReply(o.message) !== null) return { brain: false, mode, intent: null, reason: "crisis" };
   let probe, records: any[] = [];
   try { const copy = probeCtx(o.ctx); probe = o.host.runTurn(o.message, copy); records = Array.isArray(copy.containmentRecords) ? copy.containmentRecords as any[] : []; }
   catch { return { brain: false, mode, intent: null, reason: "probe_failed" }; }

@@ -15,9 +15,8 @@
 //
 // Code picks the questions and grades; a model never writes a question, a score, or anything about the person.
 import { CareerPrep } from "./router_core.career.js";
-import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 release flags
 import type { Debrief, MockAnswer, MockQuestion, MockState } from "./career_mock.ts";
-import { callModel, modelConfig, newMeter } from "./model_gateway.ts";
+import { callModel, modelConfig, newMeter, openaiCareerModel } from "./model_gateway.ts";
 
 export const DRILL_MAX = 4;
 // 127's rubric is strict (a full situation-action-result story with a number scores about 8 of 15): a story answer under 6
@@ -502,7 +501,7 @@ export function supabaseMockPrep(admin: any, env: { get(k: string): string | und
         if (r.error) console.error("mock prep: mock_done not recorded:", r.error.message);
       } catch (err) { console.error("mock prep: mock_done not recorded:", (err as Error)?.message ?? err); }
     },
-    judge: deps?.judge !== undefined ? deps.judge : (releaseFlagOn(env, "CAREER_MOCK_JUDGE") ? modelJudge(admin, env, deps?.callModel ? { callModel: deps.callModel } : undefined) : null),
+    judge: deps?.judge !== undefined ? deps.judge : (env.get("CAREER_MOCK_JUDGE") === "on" ? modelJudge(admin, env, deps?.callModel ? { callModel: deps.callModel } : undefined) : null),
   };
 }
 
@@ -521,7 +520,7 @@ export const JUDGE_SYSTEM = [
 export function modelJudge(admin: any, env: { get(k: string): string | undefined }, o?: { call?: (payload: any, meter: any) => Promise<any>; callModel?: ModelCall }): Judge {
   return async ({ question, requirement, keys, answer, userId, threadId }) => {
     const meter = newMeter();
-    const cfg = { ...modelConfig({ get: (k: string) => (k === "MODEL_PROVIDER" ? "openai" : env.get(k)) }, "chat"), model: env.get("CAREER_MODEL") || "gpt-5-mini" };
+    const cfg = { ...modelConfig({ get: (k: string) => (k === "MODEL_PROVIDER" ? "openai" : env.get(k)) }, "chat"), model: openaiCareerModel(env) };
     const payload = {
       system: JUDGE_SYSTEM,
       messages: [{ role: "user", content: JSON.stringify({ question, requirement, key_points: keys, answer: answer.slice(0, 2000) }) }],

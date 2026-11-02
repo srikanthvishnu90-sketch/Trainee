@@ -9,11 +9,10 @@
 // CAREER_TEXTING_NATIVE=on; off, every adapter renders exactly as before.
 
 import { findUrls, safeCut, type UrlSpan, urlsOf } from "./channel_text.ts";
-import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 release flags
 import { toBubbles } from "./conversation.ts";
 
 export type VoiceChannel = "imessage" | "sms" | "whatsapp" | "telegram" | "web";
-export const textingNativeOn = (env: { get(k: string): string | undefined }) => releaseFlagOn(env, "CAREER_TEXTING_NATIVE");
+export const textingNativeOn = (env: { get(k: string): string | undefined }) => env.get("CAREER_TEXTING_NATIVE") === "on";
 
 // CHANNEL DELIVERY SCENARIOS (2026-10-29): links are found by channel_text.ts findUrls (a link's own brackets kept, the
 // sentence's punctuation and brackets left out), each link once per line, and removed from the line by its position, so a

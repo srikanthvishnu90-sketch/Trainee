@@ -26,7 +26,6 @@
 // "unrecorded" when the sink failed. A missing row is never a zero.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
-import { chatSwitches } from "./chat_switches.ts"; // D-036 release flags (each gate below reads one switch)
 import { looksLikePendingSecret, redactionNote, redactPending, secretLeadIn } from "../_shared/identity_redact.ts";
 import { corsFor } from "./_shared/chat_cors.ts";
 import { chatInput } from "./_shared/chat_input.ts";
@@ -36,7 +35,8 @@ import { planCareerTaskIntent, normalizeCareerTaskRequest, createCareerBoardFor,
 import { CareerHost } from "../_shared/career_host.js";
 import { CareerPool } from "../_shared/career_pool.js";
 import { createCareerPersistence, careerRequestHash } from "../_shared/career_persistence.js";
-import { callModel as callModelUncapped, modelConfig, newMeter, turnLedger } from "../_shared/model_gateway.ts";
+import { callModel as callModelUncapped, newMeter, turnLedger } from "../_shared/model_gateway.ts";
+import { careerModelConfig } from "./release_model.ts";
 // LAUNCH READINESS (2026-10-26): the daily model ceiling, the per-person turn order, the pool read only when used.
 import { spendCap, spendLimitsFromEnv, supabaseDailySpend } from "../_shared/career_spend_cap.ts";
 import { enterTurnGate, type TurnGate } from "../_shared/career_turn_gate.ts";
@@ -51,7 +51,6 @@ import { DEFAULT_SEARCH_MODEL } from "../_shared/career_people_provider.ts";
 const researchCache = memoryGroundCache();
 import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWindow, summaryFor } from "./career_brain.ts";
 import { STAGED_TOOL_POLICY, stagedRoute } from "./career_staged.ts";
-import { CRISIS_INTENT, crisisReply } from "./crisis.ts";
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
 import { CARD_ANSWER_INTENT, CARD_INTENT, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
 import { billingTurn, PAY_BY_CHECKOUT, stripeFromEnv, supabaseBillingStore } from "../_shared/career_billing.ts";
@@ -95,7 +94,7 @@ import { hunterVerifier, supabaseCheckCache } from "../_shared/career_contacts.t
 import { GMAIL_SEND_SCOPE } from "../_shared/career_outreach_gmail.ts";
 import { missingIntegration } from "../_shared/agent/integrations.ts";
 import { documentsOf, materializeArtifacts } from "../_shared/channel_artifacts.ts";
-import { askFor, isJudgePromptAsk, judgePromptTurn, searchJudgeTurn, supabaseJudgeCache, supabaseSearchSources } from "../_shared/career_search_judge.ts"; // FEATURE 5
+import { askFor, judgePromptTurn, searchJudgeTurn, supabaseJudgeCache, supabaseSearchSources } from "../_shared/career_search_judge.ts"; // FEATURE 5
 import { offerChatTurn } from "../_shared/career_offer_chat.ts"; // FEATURE 12
 import { connectorAsk, connectorChatTurn, connectorFailure } from "../_shared/connectors.ts"; // Task 3 (FEATURE GV's disconnect included)
 import { networkingTurn, siteRefusedTurn } from "../_shared/career_networking.ts"; // FEATURE 10
@@ -509,7 +508,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // runs after the card and the mock: their own commands and their prompts waiting for an answer are theirs (WO-025/14).
       let planned: Extract<PlannerTurn, { claimed: true }> | null = null;
       if (!tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && plannerOn(Deno.env, user.id) && !host.isHostControlled(message, ctx)) {
-        const pMeter = ledger.track(newMeter()), pCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+        const pMeter = ledger.track(newMeter()), pCfg = careerModelConfig(Deno.env);
         const pModel = (payload: any) => callModel(pCfg, payload, { meter: pMeter, role: "chat" });
         try {
           const pPostings = supabasePostingsDb(admin), pOutreach = supabaseOutreachStore(admin);
@@ -527,15 +526,15 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
               apps: () => supabaseApplications(admin)(user.id), facts: chatScreenFacts(CareerProfile.confirmedFacts((ctx as any).profile ?? {}), ((ctx as any).statedFacts?.facts ?? []) as any[]),
               shortlist: shortlist as any, limits: paceReader(admin, user.id), employerAnswers: () => pAsk.answers(tid) }) as any,
             networking: (text) => networkingTurn({ message: text, userId: user.id, threadId: tid, now: Date.now(), state: ctx as unknown as Record<string, unknown>, store: pOutreach, events, attachments: [],
-              model: chatSwitches(Deno.env).networkingDraft ? pModel : null,
+              model: Deno.env.get("CAREER_NETWORKING_DRAFT") === "on" ? pModel : null,
               previousAsk: async () => null,
-              reminderPush: chatSwitches(Deno.env).followupReminders,
+              reminderPush: Deno.env.get("CAREER_OUTREACH_FOLLOWUPS") === "on",
               textingChannel: async () => {
                 const r = await admin.from("channel_contacts").select("channel").eq("user_id", user.id).eq("opted_out", false).order("home", { ascending: false }).limit(1);
                 if (r.error) throw new Error(`read your texting channel: ${r.error.message}`);
                 return r.data?.[0]?.channel ?? null;
               },
-              people: supabasePeopleDeps(admin, { fetch, token: careerTokenFor(careerGrant(admin, Deno.env, fetch), PEOPLE_READ_SCOPE), introPush: chatSwitches(Deno.env).introPush, env: (k) => Deno.env.get(k) }) }) as any,
+              people: supabasePeopleDeps(admin, { fetch, token: careerTokenFor(careerGrant(admin, Deno.env, fetch), PEOPLE_READ_SCOPE), introPush: Deno.env.get("CAREER_INTRO_REMINDERS") === "on", env: (k) => Deno.env.get(k) }) }) as any,
             tools: careerTools({ postings: (q) => pPostings.search(searchWords(q), 150), memory: supabaseMemoryStore(admin), events }),
             reminders: supabaseTaskReminderStore(admin),
           }, message);
@@ -552,7 +551,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // brain uses (the model only writes; code checks the employer's AI policy, every fact and the length), and only
       // "use 2" saves it.
       const draftMeter = ledger.track(newMeter());
-      const draftCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+      const draftCfg = careerModelConfig(Deno.env);
       const asked = !tapIn && !card && !mock && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await questionsTurn({ message, userId: user.id, threadId: tid, now: Date.now(), store: supabaseQuestionStore(admin), situation,
           draft: { model: (payload) => callModel(draftCfg, payload, { meter: draftMeter, role: "chat" }), facts: () => ((ctx as any).profile?.facts ?? []) } })
@@ -600,7 +599,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // ..."), code's like the card, only while the batch is this thread's last word. The approval binds each exact
       // message; sending is the scheduled run's. A store that cannot be read sends the text on to the brain, never a guess.
       const outreachStore = supabaseOutreachStore(admin), outreachMeter = ledger.track(newMeter());
-      const outreachModel = (payload: any) => callModel({ ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" }, payload, { meter: outreachMeter, role: "chat" });
+      const outreachModel = (payload: any) => callModel(careerModelConfig(Deno.env), payload, { meter: outreachMeter, role: "chat" });
       const outreachAns = !tapIn && !card && !mock && !asked && !which && !emailed && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await outreachTurn({ message, userId: user.id, threadId: tid, now: Date.now(), store: outreachStore, events, tz: undefined,
             redraft: (d) => draftFor({ model: outreachModel, facts: ((ctx as any).profile?.facts ?? []), r: d.recipient, previous: d.body }),
@@ -766,7 +765,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         ? await followupTurn({ message, userId: user.id, threadId: tid, now: Date.now(), deps: {
             read: supabaseStanding(admin), outreach: outreachStore, events, lastAssistant: f08Stores.lastAssistant, addressOnRecord: f08Stores.addressOnRecord,
             name: () => ((ctx as any).profile?.basics?.name ?? null), markSent: f08Stores.markSent,
-            mailOn: chatSwitches(Deno.env).mailTracking,
+            mailOn: Deno.env.get("CAREER_MAIL_TRACKING") === "on",
             readNow: (u) => mailNow({ userId: u, now: Date.now(), store: supabaseMailStore(admin), cursor: f08Stores.cursor, read: gmailReadNow(f08Grant, fetch), confirm: supabaseConfirmStore(admin) }),
             sendOn: Deno.env.get("CAREER_EMAIL_SEND") === "on", canSend: async (u) => !!(await sendToken(u)),
             send: countSend(turnEffects, (u: string, m: any) => gmailSender({ fetch, token: (uu: string) => sendToken(uu) }).send(u, m)), connectAsk: missingIntegration("gmail"), readGrant: gmailReadGrant(admin),
@@ -798,14 +797,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const networking = !emailAsk && !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !queued && !f08 && !stood && !status && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await networkingTurn({ message, userId: user.id, threadId: tid, now: Date.now(), state: ctx as unknown as Record<string, unknown>, store: outreachStore, events,
             attachments: Array.isArray(body.attachments) ? (body.attachments as any[]).filter((a) => a && typeof a === "object").map((a) => ({ name: String(a.name ?? "contacts.csv"), mime: typeof a.mime === "string" ? a.mime : "", text: typeof a.text === "string" ? a.text : null })) : [],
-            model: chatSwitches(Deno.env).networkingDraft ? (payload: any) => callModel({ ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" }, payload, { meter: netMeter, role: "chat" }) : null,
+            model: Deno.env.get("CAREER_NETWORKING_DRAFT") === "on" ? (payload: any) => callModel(careerModelConfig(Deno.env), payload, { meter: netMeter, role: "chat" }) : null,
             previousAsk: async () => {
               const r = await admin.from("agent_messages").select("content").eq("thread_id", tid).eq("role", "user").order("id", { ascending: false }).limit(1);
               return r.error ? null : (r.data?.[0]?.content ?? null);
             },
             // R2: a follow-up reminder is promised as a text only when the scheduled push is on AND the person has a
             // channel it can reach (career_outbox_claim delivers only through channel_target).
-            reminderPush: chatSwitches(Deno.env).followupReminders,
+            reminderPush: Deno.env.get("CAREER_OUTREACH_FOLLOWUPS") === "on",
             textingChannel: async () => {
               const r = await admin.from("channel_contacts").select("channel").eq("user_id", user.id).eq("opted_out", false).order("home", { ascending: false }).limit(1);
               if (r.error) throw new Error(`read your texting channel: ${r.error.message}`);
@@ -813,7 +812,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             },
             // D-033 people finding: the LinkedIn export, Gmail correspondents (the career grant's read scope), pages, intros.
             // D-MN-3 people discovery: web search + public pages when CAREER_PEOPLE_SEARCH=on; off, the reply says so.
-            people: supabasePeopleDeps(admin, { fetch, token: careerTokenFor(f08Grant, PEOPLE_READ_SCOPE), introPush: chatSwitches(Deno.env).introPush, env: (k) => Deno.env.get(k) }) })
+            people: supabasePeopleDeps(admin, { fetch, token: careerTokenFor(f08Grant, PEOPLE_READ_SCOPE), introPush: Deno.env.get("CAREER_INTRO_REMINDERS") === "on", env: (k) => Deno.env.get(k) }) })
           .catch((e) => { console.error("networking turn:", e?.message ?? e); return null; })
         : null;
       await ledger.record(netMeter);
@@ -848,14 +847,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         : null;
       // FEATURE 13: staged brain release. With CAREER_BRAIN=staged, a turn that every code-first turn above passed on, and
       // that the router itself would answer only with advice or conversation, goes to the brain (career_staged.ts); every
-      // action stays code's and the router still answers a model failure. D-035: staged is the committed release
-      // (release_config.ts PRODUCTION_BRAIN), so CAREER_BRAIN unset serves it; CAREER_BRAIN=router is the emergency
-      // rollback, and then it is never taken and the router answers exactly as before. Read lazily, only when the brain
-      // test below is reached. With no model key configured the staged brain is never tried: the router answers, as it
-      // does when the model fails (D-035).
+      // action stays code's and the router still answers a model failure. Unset or CAREER_BRAIN=router, it is never
+      // taken and the router answers exactly as before. Read lazily, only when the brain test below is reached.
       const staged = stagedRoute({ env: Deno.env, message, ctx: ctx as unknown as Record<string, unknown>, host, structured: !!(careerTask || careerBatch) });
-      // A "judge prompt: ..." instruction is code's (judgePromptTurn), and without a model key the brain is never tried.
-      const stagedReady = !isJudgePromptAsk(message) && !!modelConfig(Deno.env, "chat").apiKey;
       // FEATURE GV (Google verification, 2026-10-26): "disconnect gmail" is answered by the connector framework above
       // (connAns), through the same _shared/google_disconnect.ts: revoked at Google, tokens, rows and mail rows deleted,
       // read back, and now pending sends cancelled. Before any other turn, on every channel.
@@ -945,9 +939,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (offerAns.card) agentMeta = { offer_card: offerAns.card };
       } else if (outreachStatus) {
         out = { reply: outreachStatus.reply, intent: outreachStatus.intent, resultStatus: outreachStatus.status, contained: false, handler: "outreach_status" };
-      } else if (!careerTask && !careerBatch && ((AGENT_BRAIN_RELEASED && chooseBrain(Deno.env) === "agent") || (stagedReady && staged.toBrain())) && !host.isHostControlled(message, ctx)) {
+      } else if (!careerTask && !careerBatch && ((AGENT_BRAIN_RELEASED && chooseBrain(Deno.env) === "agent") || staged.toBrain()) && !host.isHostControlled(message, ctx)) {
         const meter = ledger.track(newMeter());
-        const cfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+        const cfg = careerModelConfig(Deno.env);
         // WO-027 (B5): the last 40 messages after the latest erase; one more row says whether the thread is longer.
         const hist = await admin.from("agent_messages").select("role,content,meta").eq("thread_id", tid).order("id", { ascending: false }).limit(HISTORY_WINDOW + 1);
         if (hist.error) throw new Error(`agent history: ${hist.error.message}`);
@@ -1023,7 +1017,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const f5Ask = f5Said?.ask ?? null;
         if (f5Ask) {
           const f5Meter = ledger.track(newMeter());
-          const f5Cfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+          const f5Cfg = careerModelConfig(Deno.env);
           try {
             const found = await searchJudgeTurn({ message, ask: f5Ask, userId: user.id, now: Date.now(), profile: (ctx as any).profile ?? null,
               sources: supabaseSearchSources(admin, { window: postings, jobs: { roleFamily: CareerJobs.roleFamily, seniorityBand: CareerJobs.seniorityBand, stripHtml: CareerJobs.stripHtml } }),
@@ -1047,13 +1041,6 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           await ledger.record(f5Meter);
         }
         // FEATURE 5 (end)
-        // D-035: a crisis message the staged route kept off the brain gets code's crisis reply (crisis.ts: the core's own
-        // 988 text) when the router did not answer it with one. Under the rollback (CAREER_BRAIN=router) the staged
-        // decision is never "crisis", so the router's turn stands exactly as before.
-        if (staged.decision?.reason === "crisis" && out.intent !== CRISIS_INTENT) {
-          const crisisText = crisisReply(message);
-          if (crisisText) out = { reply: crisisText, intent: CRISIS_INTENT, resultStatus: "completed", contained: false, handler: "crisis" };
-        }
       }
       // SUBMIT-STEER-1130: the router's confirm of a pasted resume carries no confirmation event, so no application could
       // ever use it. Each fact this turn confirmed whose words Trainee showed the person, and that is in their own upload,
@@ -1109,7 +1096,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // off, or a model failure, leaves today's resume. One metered call.
       if (out.handler !== "agent" && out.intent === "career_tailor" && (out as any).result?.tailorDoc) {
         const rwMeter = ledger.track(newMeter());
-        const rwCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+        const rwCfg = careerModelConfig(Deno.env);
         const voiceSamples = (ctx as any).outreach?.voiceSamples ?? null;
         const rw = await tailorRewriteTurn({ out: out as any, profile: (ctx as any).profile ?? null, on: rewriteOn(Deno.env),
           model: (payload) => callModel(rwCfg, payload, { meter: rwMeter, role: "chat" }),
@@ -1168,7 +1155,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // payload the person approves are never rewritten. Nothing upstream changes.
       if (replyWriterOn(Deno.env) && writable(out, agentMeta, { structured: !!(careerTask || careerBatch) })) {
         const wMeter = ledger.track(newMeter());
-        const wCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+        const wCfg = careerModelConfig(Deno.env);
         const written = await writeReply({ on: true, message, channel: writerChannel((body as any)?.channel),
           facts: factsForTurn({ reply: out.reply, intent: out.intent, resultStatus: out.resultStatus ?? null, effects: turnEffects, situation }),
           model: (payload) => callModel(wCfg, payload, { meter: wMeter, role: "chat" }) })

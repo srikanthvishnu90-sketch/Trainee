@@ -36,7 +36,7 @@
 // per day, counted in the database (career_mail_model_claim) before any call. OpenAI only, through the model gateway with
 // CAREER_MODEL; every call is metered into agent_turn_costs.
 import { APP_REF, candidates, classifyMail, type Classified, decidedAs, forwardedPart, fromEmployer, lookAlike, type MailIn, type MailKind, type MailMeta, MAIL_KINDS, mailFeatures, mailGuards, mailScores, parseFrom, STATUS_KINDS, type TrackedApp } from "./career_mail.ts";
-import { callModel, type ModelConfig, modelConfig, type TurnMeter } from "./model_gateway.ts";
+import { callModel, type ModelConfig, modelConfig, openaiCareerModel, type TurnMeter } from "./model_gateway.ts";
 
 export const MAIL_MODEL_MIN_CONFIDENCE = 0.85;
 // At most this many second looks per person per run, and per run for everyone.
@@ -51,7 +51,7 @@ export type MailModel = (payload: unknown) => Promise<any>;
 
 // The gateway's config, on OpenAI whatever MODEL_PROVIDER says, with the career model (CAREER_MODEL).
 export function mailModelConfig(env: { get(k: string): string | undefined }): ModelConfig {
-  const model = env.get("CAREER_MODEL") || "gpt-5-mini";
+  const model = openaiCareerModel(env);
   return modelConfig({ get: (k) => (k === "MODEL_PROVIDER" ? "openai" : k === "OPENAI_MODEL" ? model : env.get(k)) }, "chat");
 }
 

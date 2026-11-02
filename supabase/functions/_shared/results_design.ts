@@ -67,14 +67,14 @@ export const DESIGN_CSS = `
 .filehead .made{margin:0 0 6px}.filehead .stamp{margin:8px 0 0}.filehead .caveat{margin:10px 0 0;font-size:16px}.filehead .lede{margin:8px 0 0;font-size:16px}
 .filehead a{color:#fff}
 .filehead .top{margin:14px 0 0;padding:12px 0 0;border:0;border-top:1px solid rgba(255,255,255,.28);border-radius:0;background:none}
-.filehead .top h2{margin:0 0 8px;font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#E9D9F0}
+.filehead .top h2{margin:0 0 8px;font-size:14px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#E9D9F0}
 .filehead .counts{gap:6px}
 .filehead .counts li{padding:4px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);color:#fff;font-size:14px}
 .filehead .top .cover{margin:10px 0 0}.filehead .top .upd{margin:6px 0 0}
 .filehead .pausebar{margin:10px 0 0}.filehead .pausebar p{color:#F1E8F5;font-size:14px}
 .filehead .ghost{border-color:#fff;color:#fff}
 .quick{border-radius:14px;padding:12px;border:1px solid var(--hair);background:var(--card);margin:0 0 10px}
-.quick h2{font-size:11px;letter-spacing:.14em}.quick p{font-size:16px}
+.quick h2{font-size:14px;letter-spacing:.14em}.quick p{font-size:16px}
 .filters{margin:0 0 10px;padding:12px;border-radius:14px;background:var(--card);border:1px solid var(--hair)}
 .filters select,.things input[type=text],.things select,.things textarea{border-radius:11px;font-size:16px}
 /* Buttons: ghost/secondary plum, danger red, Apply stays solid black (owner override) */

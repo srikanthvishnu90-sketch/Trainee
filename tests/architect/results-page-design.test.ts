@@ -148,3 +148,15 @@ Deno.test("design: phone layout at class level (360px): one column, 14px page pa
   ok(!/grid-template-columns:[^;}]*\d{3,}px/.test(css.replace(/minmax\(0,38%\)/g, "")), "no wide fixed grid column");
   ok(/ul\.cards\{[^}]*flex-direction:column/.test(css), "one column");
 });
+
+Deno.test("design: only true kickers, ids and chips go under 14px; every heading and label is at least 14px and the dark scheme never uses plum #5C2751 as text", () => {
+  const html = renderResults(feed([row(1, { tag: "a".repeat(16) })], { madeFor: "Made for Ada", quick: ["a", "b"] }));
+  const css = /<style>([\s\S]*?)<\/style>/.exec(html)![1];
+  const small = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^}]*)\}/g)].filter((m) => { const f = /(?:^|;)font-size:(\d+(?:\.\d+)?)px/.exec(m[2]); return f && Number(f[1]) < 14; }).map((m) => m[1].trim());
+  for (const sel of small) ok(/^(\.filehead \.kicker,\.eyebrow|\.rid|\.chip)\b/.test(sel) || /^\.(rid|chip)/.test(sel), `under 14px: ${sel}`);
+  ok(/h2[^{]*\{[^}]*font-size:14px/.test(css.split(".quick{")[1] ?? "") && /\.filehead \.top h2\{[^}]*font-size:14px/.test(css), "section headings are 14px");
+  ok(!/\.rid,\.top h2\{color:var\(--ink\)\}/.test(css), "the superseded dark rule is gone (it would put dark ink on the plum header)");
+  ok(!/#5C2751/i.test(DESIGN_CSS), "the dark text colours are the tokens, never the old plum");
+  // Every text colour the design sets on a card or paper ground meets AA in dark (and light): plum-text for .rid, ink-2 for labels.
+  for (const t of [LIGHT_T, DARK_T]) for (const g of [t.paper, t.card, t.p50]) for (const fg of [t.ptext, t.ink, t.ink2]) ok(contrast(fg, g) >= 4.5, `${fg} on ${g}`);
+});

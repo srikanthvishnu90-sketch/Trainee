@@ -86,7 +86,7 @@ Deno.test({
               const m = await pg.evaluate(MEASURE), bad: string[] = [];
               if (m.scrollW > m.innerW) bad.push(`scrolls sideways (${m.scrollW} > ${m.innerW})`);
               for (const x of m.taps.filter((x: any) => x.h < 44)) bad.push(`tap target under 44 px: ${x.el} ${x.h}px`);
-              for (const x of m.texts.filter((x: any) => x.size < 14 && !/\.(chip|kicker|eyebrow|rid)\b/.test(x.el))) bad.push(`text under 14 px: ${x.el}`);
+              for (const x of m.texts.filter((x: any) => x.size < 14 && !/\.(chip|kicker|rid)\b/.test(x.el))) bad.push(`text under 14 px: ${x.el}`);
               for (const x of m.texts.filter((x: any) => ratio(x.color, x.ground) < 4.5)) bad.push(`text under AA: ${x.el} ${ratio(x.color, x.ground).toFixed(2)}:1`);
               if (!near(m.body, rgbOf(tok.bg))) bad.push(`ground ${m.body} is not ${tok.bg}`);
               if (!near(m.ink, rgbOf(tok.ink))) bad.push(`ink ${m.ink} is not ${tok.ink}`);

@@ -7,7 +7,8 @@
 // person's across channels.
 import type { ChannelStore, DeliveryMark, OutboxRow } from "./channel.ts";
 import type { Channel } from "./channel_adapters.ts";
-import { alertStillWanted, alertWithinLimits } from "./career_watch_alerts.ts";
+import { alertStillWanted, alertWithinLimits, freshAlertText } from "./career_watch_alerts.ts";
+import { briefStillTrue } from "./channel.ts";
 import { localDayStart, zoneOr } from "./career_alerts.ts";
 import { buttonsForRows } from "./channel_card_tap.ts"; // FEATURE 16
 
@@ -123,6 +124,39 @@ export function supabaseChannelStore(admin: any, o: { only?: { userId: string; k
         : null;
       return alertStillWanted(m.key, { row: prefs ? { prefs: prefs.prefs } : null, record, posting });
     },
+    // PROACTIVE SCENARIOS ROUND 3 (2026-11-01): the alert's or report's words as they are true now (freshAlertText), from the
+    // person's settings, the watch record and the postings (an alert's by its job id, a report's by its links) read now.
+    async freshText(m, now) {
+      const prefs = must<any>(await admin.from("career_alert_prefs").select("prefs").eq("user_id", m.userId).maybeSingle(), "read alert settings");
+      if (!prefs) return null;
+      const record = prefs.prefs?.interests?.length
+        ? must<any>(await admin.from("career_watch_kv").select("value").eq("user_id", m.userId).eq("key", `career:watch-profile:${m.userId}`).maybeSingle(), "read the watch record")?.value ?? null
+        : null;
+      const postings = new Map<string, any>();
+      if (m.key.startsWith("alert:")) {
+        const p = must<any>(await admin.from("career_postings").select("*").eq("job_id", m.key.slice("alert:".length)).maybeSingle(), "read the posting");
+        if (p) postings.set(String(p.job_id), p);
+      } else {
+        const urls = [...new Set([...String(m.text).matchAll(/^ {2}(https:\/\/\S+)$/gm)].map((x) => x[1]))].slice(0, 50);
+        const got = urls.length ? must<any[]>(await admin.from("career_postings").select("*").in("url", urls), "read the report's postings") || [] : [];
+        // The same link on two rows: the open one is the posting the line names.
+        for (const p of got.sort((a, b) => Number(!a.closed_at) - Number(!b.closed_at))) postings.set(String(p.url), p);
+      }
+      return freshAlertText(m.key, m.text, { row: { prefs: prefs.prefs }, record, postings, at: now });
+    },
+    // PROACTIVE SCENARIOS ROUND 3 (2026-11-01): a queued interview brief whose interview a later email cancelled or moved
+    // (career_interviews.cancelled_at / moved_at, 20261030070000_proactive_r2.sql). brief:<invite>:<n>; the ":moved" brief
+    // is the new time's and goes unless that one was cancelled too. A project without the columns sends it, as before.
+    async briefWanted(m) {
+      const k = /^brief:([^:]+):(.+)$/.exec(m.key);
+      if (!k) return true;
+      const r = await admin.from("career_interviews").select("moved_at,cancelled_at").eq("user_id", m.userId).eq("invite_key", k[1]).limit(1);
+      if (r.error) {
+        if (/moved_at|cancelled_at/.test(r.error.message ?? "") && /exist/i.test(r.error.message ?? "")) return true;
+        throw new Error(`read the interview: ${r.error.message}`);
+      }
+      return briefStillTrue(m.key, (r.data ?? [])[0] ?? null);
+    },
     // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): a job alert against the person's fit floor and daily cap now: the fit it was
     // queued with (alert_fit, 20261030070000_proactive_r2.sql; without the column the fit is not known and never holds an
     // alert back) and the alerts already delivered today on their clock. A read that fails throws: the row waits.
@@ -176,7 +210,8 @@ export function supabaseChannelStore(admin: any, o: { only?: { userId: string; k
       // that stopped part way; a delivered row's sent_parts goes back to 0.
       const ids = (m.providerIds ?? []).slice(0, 10).map((x) => x.slice(0, 200));
       const progress = m.sentParts !== undefined ? { sent_parts: m.sentParts, provider_ids: ids.length ? ids : null } : {};
-      const patch = m.status === "delivered" ? { ...base, delivered_at: iso(m.at), provider_id: m.providerId ? m.providerId.slice(0, 200) : null, retry_at: null,
+      // PROACTIVE SCENARIOS ROUND 3: a row delivery wrote anew keeps the words that went.
+      const patch = m.status === "delivered" ? { ...base, ...(m.text !== undefined ? { text: m.text } : {}), delivered_at: iso(m.at), provider_id: m.providerId ? m.providerId.slice(0, 200) : null, retry_at: null,
           ...(ids.length ? { provider_ids: ids } : { provider_ids: null }), ...(m.sentParts !== undefined || (c?.parts ?? 0) > 0 ? { sent_parts: 0 } : {}) }
         : m.status === "failed" ? { ...base, attempts: (c?.attempts ?? 0) + 1, retry_at: m.retryAt ? iso(m.retryAt) : null, ...progress }
         // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): put back for later (quiet hours on the person's clock now).

@@ -45,7 +45,7 @@ const NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5
 const numberOf = (w: string | undefined) => (w ? (/^\d+$/.test(w) ? Number(w) : NUM[w.toLowerCase()] ?? null) : null);
 const NUMW = "(\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)";
 const GROUP = "(?:contacts|connections|people|friends|folks|alums|alumni)";
-const FILLER = /^(?:(?:so|ok|okay|hey|hi|and|now|also|please|pls|can you|could you|would you|will you|help me|actually|wait|oh|oops|no)[, ]+)+/i;
+const FILLER = /^(?:(?:so|ok|okay|hey|hi|and|now|also|please|pls|can you|could you|would you|will you|help me|actually|wait|oh|oops|no|yo|plz|quick\s+q(?:uestion)?:?)[, ]+)+/i;
 // A firm as typed: the words after "at"/"from", up to the topic or the end.
 function firmOf(raw: string): string | null {
   // ROUTING SCENARIOS (2026-10-29): a second ask after the firm ("... at Stripe and apply to Stripe") is not part of it.

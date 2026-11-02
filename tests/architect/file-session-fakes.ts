@@ -1,23 +1,28 @@
 // Memory twins of the trainee-file session store (20261029230000_trainee_file_sessions.sql) and of Supabase Auth's SMS code,
 // for the file page tests. No network, no database, no real text message.
 import type { LoginRow, PhoneAuth, SessionRow, SessionStore } from "../../supabase/functions/_shared/file_session.ts";
-import { sha256, startSession } from "../../supabase/functions/_shared/file_session.ts";
+import { ACCOUNT_MAX_SENDS, ACCOUNT_MAX_TRIES, ACCOUNT_WINDOW_MS, pageTokenOf, SESSION_ID, sha256, startSession } from "../../supabase/functions/_shared/file_session.ts";
 
 export function memSessions() {
   const sessions = new Map<string, SessionRow>();
   const logins = new Map<string, LoginRow>();
   const iso = (t: number) => new Date(t).toISOString();
+  // The per-account caps, as the database counts them (20261031100000_trainee_file_signin_limits.sql): the texts or tries of the
+  // account's sign-ins whose number is the account's, begun within ACCOUNT_WINDOW_MS of this one.
+  const born = new Map<string, number>();
+  const account = (r: LoginRow, k: "sends" | "tries") => [...logins.values()]
+    .filter((x) => x.user_id === r.user_id && x.matched && Math.abs((born.get(x.jti) ?? 0) - (born.get(r.jti) ?? 0)) < ACCOUNT_WINDOW_MS).reduce((a, x) => a + x[k], 0);
   const store: SessionStore = {
     async createSession(x) { sessions.set(x.idHash, { user_id: x.userId, via: x.via, phone: x.phone, telegram_id: x.telegramId, list: x.list, expires_at: iso(x.expiresAt), revoked_at: null }); },
     async session(h) { const r = sessions.get(h); return r ? { ...r } : null; },
     async setList(h, list) { const r = sessions.get(h); if (r && !r.revoked_at) r.list = list; },
     async revoke(h, at) { const r = sessions.get(h); if (r && !r.revoked_at) r.revoked_at = iso(at); },
     async revokeAll(u, at) { let n = 0; for (const r of sessions.values()) if (r.user_id === u && !r.revoked_at) { r.revoked_at = iso(at); n++; } return n; },
-    async beginLogin(l) { if (!logins.has(l.jti)) logins.set(l.jti, { jti: l.jti, user_id: l.userId, list: l.list, phone: null, matched: false, sends: 0, tries: 0, expires_at: iso(l.expiresAt), done_at: null }); return { ...logins.get(l.jti)! }; },
+    async beginLogin(l) { if (!logins.has(l.jti)) { logins.set(l.jti, { jti: l.jti, user_id: l.userId, list: l.list, phone: null, matched: false, sends: 0, tries: 0, expires_at: iso(l.expiresAt), done_at: null }); born.set(l.jti, l.at); } return { ...logins.get(l.jti)! }; },
     async login(j) { const r = logins.get(j); return r ? { ...r } : null; },
     async setPhone(j, phone, matched) { const r = logins.get(j); if (r && !r.done_at) { r.phone = phone; r.matched = matched; } },
-    async countSend(j, max) { const r = logins.get(j); if (!r || r.done_at || r.sends >= max) return false; r.sends++; return true; },
-    async countTry(j, max) { const r = logins.get(j); if (!r || r.done_at || r.tries >= max) return false; r.tries++; return true; },
+    async countSend(j, max) { const r = logins.get(j); if (!r || r.done_at || r.sends >= max || (r.matched && account(r, "sends") >= ACCOUNT_MAX_SENDS)) return false; r.sends++; return true; },
+    async countTry(j, max) { const r = logins.get(j); if (!r || r.done_at || r.tries >= max || (r.matched && account(r, "tries") >= ACCOUNT_MAX_TRIES)) return false; r.tries++; return true; },
     async finishLogin(j, at) { const r = logins.get(j); if (!r || r.done_at) return false; r.done_at = iso(at); return true; },
   };
   return { store, sessions, logins };
@@ -61,4 +66,28 @@ export function signedIn() {
   const phoneOf = (u: string) => (accounts[u] ??= `+1512555${String(1000 + Object.keys(accounts).length).slice(-4)}`);
   const tok = async (userId: string, list: string, now: number) => await sessionFor(s.store, { userId, list, now, phone: phoneOf(userId) });
   return { store: s.store, sessions: s.sessions, logins: s.logins, phone, accounts, phoneOf, tok, deps: { sessions: s.store, phone: phone.auth } };
+}
+
+// A post the way a signed-in phone browser sends it (file_session.ts PAGE_TOKEN): the session id only in the HttpOnly tf_s cookie,
+// the page's token (drawn for that session) in the form. A test hands the fields with `t` = the session id it opened; a Mini App
+// post (one with `init`) or one whose `t` is not a session id goes as it is, with no cookie. `cookie` adds other cookies.
+export async function phonePost(f: Record<string, string>, secret: string, o: { cookie?: string; headers?: Record<string, string> } = {}): Promise<RequestInit> {
+  const headers: Record<string, string> = { "content-type": "application/x-www-form-urlencoded", ...(o.headers ?? {}) };
+  const jar = o.cookie ? [o.cookie] : [];
+  const fields = { ...f };
+  if (!fields.init && SESSION_ID.test(fields.t ?? "")) {
+    jar.push(`tf_s=${fields.t}`);
+    fields.t = (await pageTokenOf(await sha256(fields.t), secret)) ?? "";
+  }
+  if (jar.length) headers.cookie = jar.join("; ");
+  return { method: "POST", headers, body: new URLSearchParams(fields).toString() };
+}
+// Telegram's own signing of Mini App data (the documented algorithm; an independent implementation), for a Mini App post.
+export async function signedInit(telegramId: string, authDate: number, botToken: string): Promise<string> {
+  const p = new URLSearchParams({ auth_date: String(Math.floor(authDate)), query_id: "AAH", user: JSON.stringify({ id: Number(telegramId), first_name: "Ada" }) });
+  const enc = new TextEncoder();
+  const hmac = async (k: BufferSource, m: string) => await crypto.subtle.sign("HMAC", await crypto.subtle.importKey("raw", k, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]), enc.encode(m));
+  const check = [...p.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${k}=${v}`).join("\n");
+  p.set("hash", [...new Uint8Array(await hmac(await hmac(enc.encode("WebAppData"), botToken), check))].map((b) => b.toString(16).padStart(2, "0")).join(""));
+  return p.toString();
 }

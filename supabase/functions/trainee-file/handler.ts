@@ -14,7 +14,7 @@
 // (the Apply to all then approves nothing and says so); an Apply to all that ran first leaves that Apply "Already in your
 // applications". Either way each posting is approved once.
 import { FILE_TTL_MS, verifyFileToken, type FileClaims } from "../_shared/file_link.ts";
-import { checkSession, CLEAR_LOGIN, CLEAR_SESSION, codeOf, LOGIN_TTL_MS, loginCookie, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, SESSION_ID, sessionCookie, startSession, type PhoneAuth, type SessionStore } from "../_shared/file_session.ts";
+import { checkSession, CLEAR_LOGIN, CLEAR_SESSION, codeOf, LOGIN_TTL_MS, loginCookie, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, PAGE_TOKEN, pageTokenOf, sameToken, SESSION_ID, sessionCookie, sha256, startSession, type PhoneAuth, type SessionCheck, type SessionStore } from "../_shared/file_session.ts";
 import { verifyInitData } from "../_shared/telegram_webapp.ts";
 import { BOOT_SCRIPT, cut, FEED_SCRIPT, fullOf, hostOf, renderBootstrap, renderFeed, renderLinkState, renderPhoneLogin, renderPreview, renderText, signOutFoot, snippetOf, statusOf, type AppRow, type Feed, type Row } from "../_shared/file_page.ts";
 import { dayOf, BRAND, esc, layout, postedLine } from "../_shared/file_page.ts";
@@ -48,6 +48,53 @@ export interface FileDeps extends Omit<JobDeps, "store"> {
   // The approval code sent to the person's own chat (approval_code.ts): a results list approves only with it. Absent: a results
   // list shows the exact application and approves nothing.
   codes?: ApprovalCodes;
+  // Every phone step (number, code) answers only after this resolves, given how long the step took: deps.ts pads to a floor
+  // (file_session.ts PHONE_STEP_FLOOR_MS) so time cannot tell whether the typed number is the account's. Absent: no padding.
+  pace?: (step: "phone_start" | "phone_verify", elapsedMs: number) => Promise<void>;
+  // Work that outlives the answer (the sign-in text): the edge runtime keeps it alive (EdgeRuntime.waitUntil). Absent: it runs on.
+  background?: (work: Promise<unknown>) => void;
+}
+// A form post is never bigger than this (a typed number or code, the Mini App's signed data, a short note): a bigger body is
+// refused without being read past it.
+export const MAX_BODY_BYTES = 64 * 1024;
+export const ALLOWED_METHODS = "GET, HEAD, POST";
+
+// A post that another site made the browser send (a cross-site form, with the person's cookies; SameSite stops neither a sibling
+// subdomain nor a browser that ignores it) changes nothing. The browser's own Sec-Fetch-Site decides when it is there; else the
+// Origin (this page's own origin, or the site's address in TRAINEE_FILE_BASE_URL, which the /file proxy serves it at); else the
+// Referer. A "null" origin passes only when the browser itself says the post is same-origin (a page under a no-referrer policy).
+// A request with none of them is not from a browser that sends cross-site forms (every current one sends Origin on a POST).
+export function crossSite(req: Request, env: { get(k: string): string | undefined }): boolean {
+  const own = new Set<string>();
+  try { own.add(new URL(req.url).origin); } catch { /* no own origin */ }
+  try { const b = new URL((env.get("TRAINEE_FILE_BASE_URL") || "").trim()); if (b.protocol === "https:") own.add(b.origin); } catch { /* not set */ }
+  const site = (req.headers.get("sec-fetch-site") ?? "").trim().toLowerCase();
+  if (site && site !== "same-origin" && site !== "none") return true;
+  const origin = req.headers.get("origin");
+  if (origin !== null) return origin.trim() === "null" ? !site : !own.has(origin.trim());
+  if (site) return false;
+  const ref = req.headers.get("referer");
+  if (ref) { try { return !own.has(new URL(ref).origin); } catch { return true; } }
+  return false;
+}
+// The body, read no further than `cap` bytes: null when it is bigger (an honest or a lying Content-Length alike).
+async function readCapped(req: Request, cap: number): Promise<string | null> {
+  const said = Number(req.headers.get("content-length") ?? "");
+  if (Number.isFinite(said) && said > cap) { await req.body?.cancel().catch(() => {}); return null; }
+  if (!req.body) return "";
+  const reader = req.body.getReader(), parts: Uint8Array[] = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.byteLength;
+    if (n > cap) { await reader.cancel().catch(() => {}); return null; }
+    parts.push(value);
+  }
+  const all = new Uint8Array(n);
+  let at = 0;
+  for (const p of parts) { all.set(p, at); at += p.byteLength; }
+  return new TextDecoder().decode(all);
 }
 export const MAX_ROWS = FEED_ROWS;
 
@@ -67,7 +114,9 @@ function logoOrigins(env: { get(k: string): string | undefined }): string {
   return [origin, origin.includes("google.com") ? "https://*.gstatic.com" : ""].filter(Boolean).join(" ");
 }
 async function headers(type: string, env: { get(k: string): string | undefined }): Promise<Record<string, string>> {
-  return { "cache-control": "no-store", "referrer-policy": "no-referrer", "x-robots-tag": "noindex, nofollow", "x-content-type-options": "nosniff", "content-type": type,
+  // same-origin, not no-referrer: the page's own posts then carry its Origin (which the cross-site check reads; under no-referrer a
+  // browser sends "Origin: null"), and nothing is ever sent to another site.
+  return { "cache-control": "no-store", "referrer-policy": "same-origin", "x-robots-tag": "noindex, nofollow", "x-content-type-options": "nosniff", "content-type": type,
     "content-security-policy": `default-src 'none'; script-src ${await scriptHashes} https://telegram.org; connect-src 'self'; img-src ${logoOrigins(env) || "'none'"}; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors ${FRAMES}` };
 }
 const NEW_LINK = "Ask Trainee in Telegram for your jobs again and open the new link.";
@@ -237,13 +286,24 @@ export async function handleFile(req: Request, d: FileDeps): Promise<Response> {
 async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   const html = async (body: string, status = 200, extra: Record<string, string> = {}) => new Response(body, { status, headers: { ...(await headers("text/html; charset=utf-8", d.env)), ...extra } });
   const text = async (body: string, status = 200) => new Response(body, { status, headers: await headers("text/plain; charset=utf-8", d.env) });
-  if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "POST") return html(renderLinkState("Not supported", ["This page only opens and answers."]), 405);
+  if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "POST") return html(renderLinkState("Not supported", ["This page only opens and answers."]), 405, { allow: ALLOWED_METHODS });
+  // A HEAD (a link scanner, a preview, a prefetch) reads nothing and changes nothing: it never begins a link's sign-in (whose
+  // 15 minutes would then run out before the person opens it) and never uses a link up (file page web-security round).
+  if (req.method === "HEAD") return html("", 200);
   const url = new URL(req.url);
   // Every redirect goes to this page's own path on this host: a path that starts with two slashes (or a backslash a browser reads as
   // one) would be a link to another host (file journey round 2: "//evil.example/?t=..." redirected there after the sign-in).
   const here = `/${url.pathname.replace(/^[\/\\]+/, "")}`;
   let fields: URLSearchParams = url.searchParams;
-  if (req.method === "POST") { try { fields = new URLSearchParams(await req.text()); } catch { fields = new URLSearchParams(); } }
+  if (req.method === "POST") {
+    // Another site's form changes nothing here (file page web-security round: a cross-site post with the person's cookies texted
+    // codes, checked guesses, reset the sign-in, and with the page's form value approved and signed out).
+    if (crossSite(req, d.env)) { await req.body?.cancel().catch(() => {}); return html(renderLinkState("This came from another site", ["Nothing was done and nothing was sent. Open the page itself and try again."]), 403); }
+    let body: string | null = "";
+    try { body = await readCapped(req, MAX_BODY_BYTES); } catch { body = ""; }
+    if (body === null) return html(renderLinkState("That was too large", ["Nothing was done and nothing was sent."]), 413);
+    fields = new URLSearchParams(body);
+  }
   const botUrl = (d.env.get("TRAINEE_BOT_URL") || "").trim();
   const bot = /^https:\/\//.test(botUrl) ? botUrl : null;
   const secret = d.env.get("TRAINEE_FILE_LINK_SECRET");
@@ -263,7 +323,17 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
     : why === "expired" ? state("You were signed out", [...tapped, "Sign-ins last two hours. " + NEW_LINK], 401)
     : why === "revoked" || why === "unbound" ? state("You were signed out", [...tapped, "This sign-in was ended. " + NEW_LINK], 401)
     : state("This link isn't valid", [...tapped, "It may be cut short or changed. " + NEW_LINK], 403);
-  const given = req.method === "GET" || req.method === "HEAD" ? (url.searchParams.get("t") ?? "") : "";
+  const given = req.method === "GET" ? (url.searchParams.get("t") ?? "") : "";
+  // The browser's own session: the tf_s cookie, and only ever a phone session (a Telegram session never lives in a cookie, so an id
+  // copied out of a Mini App page and planted as a cookie opens nothing).
+  const cookieSession = async (): Promise<SessionCheck> => {
+    const sc = await check(cookieOf(req, "tf_s"));
+    return sc.ok && sc.row.via !== "phone" ? { ok: false, why: "none" } : sc;
+  };
+  // A post whose form value is not backed by what only the session's own holder has (the cookie; for the Mini App, Telegram's fresh
+  // signed data for that Telegram user): a saved, copied, cached or shared page. Nothing is read, approved or changed.
+  const notHere = () => state("Sign in on this device", [...tapped, "This page works only in the browser or Telegram screen where you signed in, so nothing was opened, approved or changed.",
+    "If that is here, reload the page. Otherwise: " + NEW_LINK], 401);
 
   // ---- the link from the bot: says WHICH list, never WHO opened it. It opens a phone sign-in, never the list itself.
   if (given) {
@@ -277,9 +347,9 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
       if (g && g.state !== "missing") return html(layout("Trainee", `<header>${BRAND}<h1>A file from Trainee</h1></header><main id="main"><p>Open this link in your browser, or from Telegram.</p></main>`, { og: { title: `${KIND_LABEL[g.rec.kind]} from Trainee`, description: "Sign in to open it.", image: ogImage(d.env) } }));
       return html(renderPreview({ title: "Your jobs from Trainee", description: "Sign in with your phone number to see them.", image: ogImage(d.env) }));
     }
-    const cur = await check(cookieOf(req, "tf_s"));
+    const cur = await cookieSession();
     if (cur.ok && cur.userId !== c.claims.u) {
-      return html(layout("A different account - Trainee", `<header>${BRAND}<h1>This link is for a different Trainee account</h1></header><main id="main"><p>You are signed in as someone else here, so nothing from this link was opened. Sign out first, then open the link again.</p>${signOutFoot(cookieOf(req, "tf_s"))}</main>`), 403);
+      return html(layout("A different account - Trainee", `<header>${BRAND}<h1>This link is for a different Trainee account</h1></header><main id="main"><p>You are signed in as someone else here, so nothing from this link was opened. Sign out first, then open the link again.</p>${signOutFoot((await pageTokenOf(cur.idHash, secret)) ?? "")}</main>`), 403);
     }
     const row = await sessions.beginLogin({ jti: c.claims.j, userId: c.claims.u, list: c.claims.r, at: d.now(), expiresAt: Math.min(d.now() + LOGIN_TTL_MS, c.claims.e) }).catch(() => null);
     if (!row) return state("Couldn't open this just now", ["Nothing was used up. Try the link again in a minute."], 503);
@@ -296,7 +366,15 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
 
   const locked = () => state("Too many wrong codes", ["This link is locked so nobody can guess the code. " + NEW_LINK], 429);
   // ---- phone sign-in steps (the pending link is in the HttpOnly tf_l cookie)
-  if (action === "phone_start" || action === "phone_verify" || action === "phone_reset") return phoneStep(action);
+  if (action === "phone_reset") return phoneStep(action);
+  if (action === "phone_start" || action === "phone_verify") {
+    // Every answer of these two steps is paced to the same floor, whatever the number and whatever was refused, so the time an
+    // answer takes cannot say whether the typed number is the account's (only then is a code texted or checked).
+    const began = performance.now();
+    const res = await phoneStep(action);
+    if (d.pace) await d.pace(action, performance.now() - began).catch(() => {});
+    return res;
+  }
   async function phoneStep(step: string): Promise<Response> {
     const lt = await verifyFileToken(cookieOf(req, "tf_l"), secret, d.now());
     if (!lt.ok) return lt.why === "expired" ? bad("expired") : state("Open your link again", ["This sign-in isn't open any more. " + NEW_LINK], 403);
@@ -326,8 +404,13 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
         const counted = await sessions!.countSend(row.jti, MAX_CODE_SENDS).catch(() => null);
         if (counted === null) return down();
         if (counted) {
-          const sent = await d.phone.send(phone).catch(() => ({ ok: false as const, why: "refused" as const }));
-          if (!sent.ok) console.error(`trainee-file: the sign-in code was not texted (${sent.why})`);
+          // Sent in the background: the answer never waits for the provider, so its time is the same for any number.
+          let sending: Promise<void>;
+          try {
+            sending = d.phone.send(phone).then((sent) => { if (!sent.ok) console.error(`trainee-file: the sign-in code was not texted (${sent.why})`); },
+              () => console.error("trainee-file: the sign-in code was not texted (refused)"));
+          } catch { sending = Promise.resolve(); console.error("trainee-file: the sign-in code was not texted (refused)"); }
+          if (d.background) d.background(sending);
         }
       }
       return page("code");
@@ -349,8 +432,9 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
     return new Response("", { status: 303, headers: [...Object.entries(await headers("text/html; charset=utf-8", d.env)), ["location", here], ["set-cookie", sessionCookie(id)], ["set-cookie", CLEAR_LOGIN]] });
   }
 
+  // token: what this session's pages carry in their forms (a phone session's page token; a Mini App session's id, see file_session.ts).
   let token = "";
-  let checked: Awaited<ReturnType<typeof check>> | null = null;
+  let s: SessionCheck;
   if (req.method === "POST" && !fields.get("t")) {
     const list = fields.get("list") ?? "";
     if (!/^[0-9a-f]{10}$/.test(list) || !fields.get("init")) return state("This link isn't valid", ["It may be cut short or changed. " + NEW_LINK], 403);
@@ -365,12 +449,35 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
     if (!user) return state("This Telegram account isn't linked", ["Share your phone number with Trainee in the Telegram chat first, then open the list again."], 403);
     token = await startSession(sessions, { userId: user, via: "telegram", phone: null, telegramId: init.telegramId, list, now: d.now() }).catch(() => "");
     if (!token) return state("Couldn't open this just now", ["Nothing was sent. Try again in a minute."], 503);
+    s = await check(token);
   } else if (req.method === "POST") {
-    token = fields.get("t") ?? ""; // an action: the session's own value in the form (a cookie alone approves nothing)
+    const t = fields.get("t") ?? "";
+    if (PAGE_TOKEN.test(t)) {
+      // A phone session's page: the cookie is the session; the form's page token must be the one drawn for that very cookie.
+      const cookie = cookieOf(req, "tf_s");
+      if (!SESSION_ID.test(cookie)) return notHere();
+      const want = await pageTokenOf(await sha256(cookie), secret);
+      if (!want || !sameToken(t, want)) return notHere();
+      s = await check(cookie);
+      if (s.ok && s.row.via !== "phone") return notHere();
+    } else if (SESSION_ID.test(t)) {
+      // A Mini App session's page: the id in the form opens it only with Telegram's signed data, fresh, for the session's own
+      // Telegram user (the Mini App's script adds it to every post; it is never in the page).
+      if (!fields.get("init")) return notHere();
+      const init = await verifyInitData(fields.get("init"), d.env.get("TELEGRAM_BOT_TOKEN"), d.now());
+      if (!init.ok) {
+        if (init.why === "not_configured") return state("Sign-in isn't set up yet", ["Telegram sign-in isn't switched on yet, so nothing can be opened. Nothing was sent."], 503);
+        if (init.why === "stale") return state("This sign-in has expired", [...tapped, "Close this screen and open the list again from Telegram."], 410);
+        return state("Telegram couldn't verify this sign-in", [...tapped, "Nothing was opened. Open the list again from the button in Telegram."], 403);
+      }
+      s = await check(t);
+      if (s.ok && (s.row.via !== "telegram" || s.row.telegram_id !== init.telegramId)) return notHere();
+      token = t;
+    } else return notHere();
   } else {
     const list = url.searchParams.get("list") ?? "";
     if (/^[0-9a-f]{10}$/.test(list)) return html(renderBootstrap(list)); // the Mini App page: reads Telegram's signed data and posts it back
-    token = cookieOf(req, "tf_s");
+    const cookie = cookieOf(req, "tf_s");
     // A link opened on this browser that is waiting for the phone sign-in.
     const pending = async (): Promise<Response | null> => {
       const lt = await verifyFileToken(cookieOf(req, "tf_l"), secret, d.now());
@@ -379,20 +486,22 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
       if (row && !row.done_at && row.user_id === lt.claims.u && d.now() < Date.parse(row.expires_at)) return row.tries >= MAX_CODE_TRIES ? locked() : html(renderPhoneLogin({ step: row.phone ? "code" : "phone", botUrl: bot }));
       return null;
     };
-    if (!SESSION_ID.test(token)) return (await pending()) ?? state("This link isn't valid", ["It may be cut short or changed. " + NEW_LINK], 403);
+    if (!SESSION_ID.test(cookie)) return (await pending()) ?? state("This link isn't valid", ["It may be cut short or changed. " + NEW_LINK], 403);
     // An ended session's cookie (signed out elsewhere, expired, phone changed) must not hide the sign-in a NEW link opened:
     // the browser keeps tf_s until its Max-Age, and every read would say "signed out, open a new link" in a loop
     // (scenarios-file-signin.test.ts). The pending sign-in wins and the dead cookie is cleared.
-    checked = await check(token);
-    if (!checked.ok && checked.why !== "error") {
+    s = await cookieSession();
+    if (!s.ok && s.why !== "error") {
       const p = await pending();
       if (p) { p.headers.append("set-cookie", CLEAR_SESSION); return p; }
     }
   }
 
   // ---- every private read and action: the session again, checked against the account right now
-  const s = checked ?? await check(token);
   if (!s.ok) return signedOut(s.why);
+  // A phone session's pages carry its page token, never its id (the id is in the HttpOnly cookie only).
+  if (!token) token = (await pageTokenOf(s.idHash, secret)) ?? "";
+  if (!token) return state("Sign-in isn't set up yet", ["The jobs page isn't switched on yet, so nothing can be opened. Nothing was sent."], 503);
   if (action === "signout" || action === "signout_all") {
     const ok = await (action === "signout" ? sessions.revoke(s.idHash, d.now()) : sessions.revokeAll(s.userId, d.now())).then(() => true, () => false);
     if (!ok) return state("Couldn't sign out just now", ["You are still signed in. Try again in a minute."], 503);

@@ -256,7 +256,7 @@ export function memoryChannelWorld() {
         if (!o || o.status !== "sending") return;
         o.status = m.status; o.error = m.error ?? null; claimedIds.delete(id); mine.delete(id);
         if (m.sentParts !== undefined) { o.sentParts = m.sentParts; o.providerIds = m.providerIds?.length ? m.providerIds.slice(0, 10) : null; }
-        if (m.status === "delivered") { o.deliveredAt = m.at; o.providerId = m.providerId ?? null; o.providerIds = m.providerIds ?? (m.providerId ? [m.providerId] : null); o.retryAt = null; o.sentParts = 0; }
+        if (m.status === "delivered") { if (m.text !== undefined) o.text = m.text; o.deliveredAt = m.at; o.providerId = m.providerId ?? null; o.providerIds = m.providerIds ?? (m.providerId ? [m.providerId] : null); o.retryAt = null; o.sentParts = 0; }
         else if (m.status === "queued") { o.contact = null; o.retryAt = null; if (m.deliverAt !== undefined) o.deliverAt = m.deliverAt; }
         else if (m.status === "failed") { o.attempts++; o.retryAt = m.retryAt ?? null; }
         else o.retryAt = null;

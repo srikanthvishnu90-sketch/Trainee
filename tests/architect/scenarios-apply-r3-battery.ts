@@ -29,7 +29,7 @@ import assertNode from "node:assert/strict";
 import { handleFile, type FileDeps, type FileStore, MAX_ROWS } from "../../supabase/functions/trainee-file/handler.ts";
 import { hashTag, type JobView, jobViewOf, type PostingRow, type PreparedRow, refOf, tapJob } from "../../supabase/functions/_shared/telegram_jobs.ts";
 import { mintFileToken } from "../../supabase/functions/_shared/file_link.ts";
-import { SESSION_TTL_MS, startSession, type SessionStore } from "../../supabase/functions/_shared/file_session.ts";
+import { pageTokenOf, SESSION_TTL_MS, sha256, startSession, type SessionStore } from "../../supabase/functions/_shared/file_session.ts";
 import { COUNTED_STATES, postingKey } from "../../supabase/functions/_shared/career_apply.ts";
 import { hashApplyPayload } from "../../supabase/functions/_shared/career_apply_store.ts";
 import { stampOf, type AccountStamp, QUARANTINE_RULES } from "../../supabase/functions/_shared/apply_trust.ts";
@@ -269,8 +269,9 @@ export function parsePage(html: string): { rows: DrawnRow[]; set: string | null 
   }
   return { rows, set: /name="set" value="([0-9a-f]{16})"/.exec(html)?.[1] ?? null };
 }
-const req = (w: World, dev: "A" | "B", form?: Record<string, string>) => form
-  ? new Request("https://trainee.example/file", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", cookie: `tf_s=${w.tokens[dev]}` }, body: new URLSearchParams({ t: w.tokens[dev], ...form }).toString() })
+// A device's request: its session cookie; a post also carries the page token its page was drawn with (file_session.ts PAGE_TOKEN).
+const req = async (w: World, dev: "A" | "B", form?: Record<string, string>) => form
+  ? new Request("https://trainee.example/file", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", cookie: `tf_s=${w.tokens[dev]}` }, body: new URLSearchParams({ t: (await pageTokenOf(await sha256(w.tokens[dev]), SECRET_LINK)) ?? "", ...form }).toString() })
   : new Request("https://trainee.example/file", { headers: { cookie: `tf_s=${w.tokens[dev]}` } });
 
 // ---------------------------------------------------------------- the run and the checks
@@ -306,7 +307,7 @@ export async function runScenario(s: Scenario, w: World, rep: Report): Promise<v
     let live = false;
     const devLive = (dev: "A" | "B") => !ended[dev] && w.clock.now < w.expiry[dev] && !before.erased;
     if (st.k === "draw") {
-      res = await handleFile(req(w, st.dev), w.deps); body = await res.text(); rep.requests++;
+      res = await handleFile(await req(w, st.dev), w.deps); body = await res.text(); rep.requests++;
       if (res.status === 200 && devLive(st.dev)) {
         const pg = parsePage(body);
         const d = drawn[st.dev];
@@ -339,13 +340,13 @@ export async function runScenario(s: Scenario, w: World, rep: Report): Promise<v
       const tag = (st.stale ? d.first.get(p.ref) : d.tags.get(p.ref)) ?? "none";
       live = devLive(st.dev);
       allowed = live && tag !== "none" && st.i % w.posts.length < MAX_ROWS ? new Map([[p.jobId, tag]]) : new Map();
-      res = await handleFile(req(w, st.dev, { action: "apply", ref: p.ref, tag }), w.deps); body = await res.text(); rep.requests++;
+      res = await handleFile(await req(w, st.dev, { action: "apply", ref: p.ref, tag }), w.deps); body = await res.text(); rep.requests++;
       if (st.i % w.posts.length >= MAX_ROWS) { count(rep, "apply past the first 30"); if (res.status !== 404) fail(rep, "page: Apply past the first 30 approves nothing and says so", `${name(k)} -> ${res.status}`); }
     } else if (st.k === "applyall") {
       const d = drawn[st.dev];
       live = devLive(st.dev);
       allowed = live && d.set ? new Map([...d.setTags].map(([ref, tag]) => [w.posts.find((p) => p.ref === ref)!.jobId, tag])) : new Map();
-      res = await handleFile(req(w, st.dev, { action: "applyall", set: d.set ?? "0000000000000000" }), w.deps); body = await res.text(); rep.requests++;
+      res = await handleFile(await req(w, st.dev, { action: "applyall", set: d.set ?? "0000000000000000" }), w.deps); body = await res.text(); rep.requests++;
     } else if (st.k === "tg_confirm") {
       // Telegram: Apply on the card, then the Confirm it offers (if any): Telegram's own identity, no page session.
       const p = w.posts[st.i % w.posts.length];
@@ -371,13 +372,13 @@ export async function runScenario(s: Scenario, w: World, rep: Report): Promise<v
     } else if (st.k === "advance") {
       w.clock.now += st.ms; allowed = new Map();
     } else if (st.k === "signout_all") {
-      res = await handleFile(req(w, st.dev, { action: "signout_all" }), w.deps); body = await res.text(); rep.requests++;
+      res = await handleFile(await req(w, st.dev, { action: "signout_all" }), w.deps); body = await res.text(); rep.requests++;
       if (res.status === 200) { ended.A = true; ended.B = true; }
       allowed = new Map();
     } else if (st.k === "at_session_end") {
       w.clock.now = w.expiry.A + st.delta; allowed = new Map();
     } else if (st.k === "cross") {
-      res = await handleFile(req(w, st.dev, { action: "apply", ref: w.vRef, tag: w.vTag }), w.deps); body = await res.text(); rep.requests++;
+      res = await handleFile(await req(w, st.dev, { action: "apply", ref: w.vRef, tag: w.vTag }), w.deps); body = await res.text(); rep.requests++;
       count(rep, "another account's ref posted");
       if (res.status !== 404) fail(rep, "nobody else: another account's ref is not on this list", `${name(k)} -> ${res.status}`);
       if (body.includes(V_MARK)) fail(rep, "nobody else: another account's data in the answer", name(k));

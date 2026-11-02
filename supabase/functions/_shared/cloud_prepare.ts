@@ -141,7 +141,8 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
       case "rpc": {
         const name = String(body?.name ?? ""), args = body?.args && typeof body.args === "object" && !Array.isArray(body.args) ? body.args : {};
         if (name === "career_apply_prepare_candidates") {
-          const rows = await d.rpc(name, { p_now: new Date(now).toISOString(), p_per_person: 25, p_limit: 500 });
+          // Read for THIS person only (the limit counts their rows, never other people's); the filter below is defence in depth.
+          const rows = await d.rpc("career_apply_prepare_candidates_for", { p_user: user, p_now: new Date(now).toISOString(), p_per_person: 25, p_limit: 500 });
           return { status: 200, body: (Array.isArray(rows) ? rows : []).filter((c: any) => c?.user_id === user && postings.has(String(c?.job_id))) };
         }
         if (PERSON_RPCS.has(name)) return { status: 200, body: await d.rpc(name, { p_user: user }) };
@@ -187,7 +188,7 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
         const stillAsking = c && "take" in c ? await (async () => {
           const q = await d.rpc("career_apply_questions_open_as", { p_user: user, p_limit: 1 });
           if (Array.isArray(q) && q.length) return true;
-          const more = await d.rpc("career_apply_prepare_candidates", { p_now: new Date(now).toISOString(), p_per_person: 25, p_limit: 500 });
+          const more = await d.rpc("career_apply_prepare_candidates_for", { p_user: user, p_now: new Date(now).toISOString(), p_per_person: 25, p_limit: 500 });
           return Array.isArray(more) && more.some((x: any) => x?.user_id === user && !readyNow.has(String(x?.job_id)));
         })().catch(() => false) : false; // unreadable: pushed as before (never hold a card on a read that failed)
         // A card is one message (4,000 characters): when the batch's ready applications do not all fit, a card of the first

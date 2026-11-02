@@ -140,6 +140,8 @@ export async function evidenceOf(job: CloudJob, run: any, s: ReturnType<typeof s
     // WO-102: a question the engine stopped on (needs_answers) goes back with the job in the form's own terms, so it is
     // asked of the person rather than lost. Never an answer.
     ...(s.reason === "needs_answers" ? { questions } : {}),
+    // MASS APPLY: the browser's own failure (scripts/apply.ts driver_error), kept so a DRIVER_ERROR's cause can be found.
+    ...(typeof run?.result?.driver_error === "string" ? { driver_error: clip(run.result.driver_error, 200) } : {}),
   };
   if (JSON.stringify(out).length > 60000) out.answers = answers.map((a: any) => ({ ...a, value: a.value.slice(0, 200) }));
   if (JSON.stringify(out).length > 60000 && out.questions) out.questions = questions.map((q: any) => ({ ...q, options: [] }));
@@ -200,7 +202,7 @@ export async function runCloudJob(job: CloudJob, d: {
     if (d.beforeEngine) await d.beforeEngine();
     let effectRequested = false, effectAuthorized = false;
     began = true;
-    run = await d.runEngine(["--url", job.url, "--facts", factsPath, "--resume", resumePath, "--submit", "--approved", p.engine_approval], undefined, {
+    const drive = () => d.runEngine(["--url", job.url, "--facts", factsPath, "--resume", resumePath, "--submit", "--approved", p.engine_approval], undefined, {
       beforeEffect: async () => {
         if (effectRequested) throw Error("CARD_CLOUD_AUTH_PROTOCOL");
         effectRequested = true;
@@ -208,6 +210,21 @@ export async function runCloudJob(job: CloudJob, d: {
         effectAuthorized = true;
       },
     });
+    run = await drive();
+    // MASS APPLY (2026-11-01): the engine's browser itself failed (DRIVER_ERROR: a crash or a timeout under load, not the
+    // employer's page). Driven once more, under the same lease, ONLY when the run provably never reached Submit: the
+    // Submit authorization (beforeEffect, asked right before the one click) was never requested, and the engine says
+    // nothing left the browser (not_submitted). Its own exactly-once store refuses a resend of anything it recorded as
+    // sent. Authorized again before the second run. Reached Submit and then failed: recorded unknown, never resent.
+    if (run?.result?.state === "not_submitted" && run?.result?.reason === "DRIVER_ERROR") {
+      if (!effectRequested) {
+        log(`${job.id}: the browser failed before Submit (DRIVER_ERROR); driven once more`);
+        await authorize("before_engine");
+        run = await drive();
+      } else {
+        run = { ...run, result: { ...run.result, state: "unknown_outcome", reason: "DRIVER_ERROR_AT_SUBMIT" } };
+      }
+    }
     if (["confirmed", "submitted_unconfirmed"].includes(run?.result?.state || "") && !effectAuthorized) throw Error("CARD_CLOUD_AUTH_REQUIRED");
     // Refused at the page's open, before anything was filled, and no effect was ever asked for: nothing was sent.
     putBack = !!d.requeueRefusal && !effectRequested && sentNothingRefusal(run?.result) !== null;

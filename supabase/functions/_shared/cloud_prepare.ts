@@ -189,7 +189,7 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
           if (Array.isArray(q) && q.length) return true;
           const more = await d.rpc("career_apply_prepare_candidates", { p_now: new Date(now).toISOString(), p_per_person: 25, p_limit: 500 });
           return Array.isArray(more) && more.some((x: any) => x?.user_id === user && !readyNow.has(String(x?.job_id)));
-        })().catch(() => true) : false;
+        })().catch(() => false) : false; // unreadable: pushed as before (never hold a card on a read that failed)
         // A card is one message (4,000 characters): when the batch's ready applications do not all fit, a card of the first
         // few would be a second, partial card. They are told the batch is ready instead; "show my applications" shows all of
         // them on one card, in pages, with one Approve.

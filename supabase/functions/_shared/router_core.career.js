@@ -14777,6 +14777,17 @@ const CareerRouter = (() => {
     if (Array.isArray(f.bullets)) f.bullets = f.bullets.map(swap);
     if (Array.isArray(f.skills)) f.skills = f.skills.map(swap);
   }
+  function resumeGraduationCorrection(text, ctx) {
+    const raw = s(text).trim();
+    if (!raw || raw.length > 200 || /\n/.test(raw) || /\?/.test(raw) || !ProfileMod || typeof ProfileMod.fieldCorrectionOf !== "function") return false;
+    const profile = ctx && ctx.profile && typeof ctx.profile === "object" && !ctx.profile._fromStatedFacts ? ctx.profile : null;
+    if (!profile || !Array.isArray(profile.facts)) return false;
+    const field = ProfileMod.fieldCorrectionOf(raw);
+    if (!field || field.field !== "graduation") return false;
+    if (resumeDraftsPending(ctx).length) return true;
+    return profile.facts.some((f) => f && f.source === "resume-ingest" && RESUME_ENTRY_KINDS.has(f.kind) && f.needs_confirmation === false && f.status === "confirmed"
+      && !(ProfileMod.quarantinedFact && ProfileMod.quarantinedFact(f)));
+  }
   function handleResumeFieldCorrection(text, ctx) {
     const raw = s(text).trim();
     if (!raw || raw.length > 200 || /\n/.test(raw) || /\?/.test(raw)) return null;
@@ -14905,7 +14916,7 @@ const CareerRouter = (() => {
     return dispatchChat(off.run, ctx);
   }
   function handleUnsavedGraduation(text, ctx) {
-    if (!ctx._gradUnsavedThisTurn) return null;
+    if (!ctx._gradUnsavedThisTurn || resumeGraduationCorrection(text, ctx)) return null;
     const own = statedFactsOf(ctx).find((f) => f.kind === "graduation");
     const wm = threadMirrorForWrite(ctx);
     const ask = !own && !(wm && wm.gradAskedAt);
@@ -23231,7 +23242,7 @@ const CareerRouter = (() => {
     {
       const u = unquotedText(raw);
       const materialsAsk = /\b(put|write|add|say|state|claim|list|mark|include|change|make)\b[^.]*\b(resume|cv|cover letter|application|form|letter|profile)\b/i.test(u);
-      if (u.length <= 200 && u.split(/\n/).length <= 2 && !materialsAsk && !/\?/.test(u)) {
+      if (u.length <= 200 && u.split(/\n/).length <= 2 && !materialsAsk && !/\?/.test(u) && !resumeGraduationCorrection(raw, ctx)) {
         const LEAD = "^(?:(?:so|and|also|btw|oh|well|yeah|yes|ok|okay|actually|correction|sorry|wait|no|hi|hey)[\\s,:!-]+)*";
         const sentences = u.split(/[.!;]+(?=\s|$)|\n|\s+[—–-]\s+/).map((x) => x.trim()).filter(Boolean);
         const MON = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|winter)";

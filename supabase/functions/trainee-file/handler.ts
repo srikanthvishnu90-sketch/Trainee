@@ -23,6 +23,7 @@ import type { FileService } from "../_shared/file_service.ts";
 import { renderResults, renderReview, type PayFilter, type ResultRow, type ReviewItem } from "../_shared/results_page.ts";
 import { conversionNote, floorText, type Pay, payGroup, payText, startsBelow } from "../_shared/role_pay.ts";
 import type { ApprovalCodes } from "../_shared/approval_code.ts";
+import { freshnessStamp } from "../_shared/results_stamp.ts";
 import type { ListMeta } from "../_shared/telegram_jobs.ts";
 import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, logoUrl, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
 
@@ -514,8 +515,16 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   const notes: Record<string, string> = {};
   let top: string | undefined;
   const reviewItem = (r: Row): ReviewItem => ({ ref: r.ref, tag: r.tag!, title: r.job.title, company: r.job.company, send: r.send ?? [] });
+  // The one checked-at line under each page's title: when the postings shown were last seen live on their boards (career_postings
+  // .last_seen_at), in the person's zone; none known (or unreadable): "Check time unknown", never an invented time.
+  const tzOf = async () => d.timeZone ? await d.timeZone(u).catch(() => null) : null;
+  const stampOf = async (rows: Row[]) => {
+    const ids = rows.map((r) => r.job.job_id);
+    const seen = ids.length ? await d.store.postings(ids).catch(() => [] as PostingRow[]) : [];
+    return freshnessStamp("Postings checked", seen.filter((p) => ids.includes(p.job_id)).map((p) => p.last_seen_at), { now: d.now(), tz: await tzOf() });
+  };
   const review = async (rows: Row[], note?: string, codeSent?: boolean) =>
-    o.html(renderReview({ token, items: rows.map(reviewItem), set: rows.length > 1 ? await selHash(rows.map((r) => ({ ref: r.ref, tag: r.tag! }))) : null, note, codeSent, canApprove: !!d.codes }));
+    o.html(renderReview({ token, items: rows.map(reviewItem), set: rows.length > 1 ? await selHash(rows.map((r) => ({ ref: r.ref, tag: r.tag! }))) : null, note, codeSent, canApprove: !!d.codes, stamp: await stampOf(rows) }));
   // One row, judged now against the page as it is (the same screen the list ran): the row, or why nothing goes for it. An
   // unprepared row is queued to be prepared (nothing is sent by that), and says so.
   const gate = async (feed: Feed | null, ref: string, tag: string): Promise<{ row: Row } | { note: string }> => {
@@ -599,20 +608,21 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   const title = `${meta.what}${floor ? `, ${floorText(floor)} or more` : ""}`;
   // The file's header (Instinct-style, owner 2026-11-01): who it was made for and when, exactly what was read and when, what is not
   // confirmed, and a quick read. Every number here is counted from the rows; the person's day and zone (else Chicago, said).
-  const tz = await (d.timeZone ? d.timeZone(u).catch(() => null) : Promise.resolve(null));
+  const tz = await tzOf();
   const zone = tz && (() => { try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return true; } catch { return false; } })() ? tz : "America/Chicago";
   const fmt = (ms: number, o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-US", { timeZone: zone, ...o }).format(new Date(ms));
   const day = fmt(meta.at, { month: "short", day: "numeric", year: "numeric" });
-  const clock = fmt(meta.at, { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
   const nSources = meta.sources ?? new Set(all.map((r) => r.job.source).filter(Boolean)).size;
   const srcWord = `${nSources} ${nSources === 1 ? "source" : "sources"}`;
-  const provenance = meta.source === "snapshot"
-    ? `From a saved snapshot of job boards${meta.read ? ` read ${fmt(Date.parse(meta.read), { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}` : ""}, not the live board; some may have closed · ${srcWord}`
-    : `Postings checked ${day}, ${clock} · ${srcWord}`;
+  // Where the postings came from (the checked-at time itself is the stamp line, from the postings' own last_seen_at).
+  const fromWhere = meta.source === "snapshot"
+    ? `From a saved snapshot of job boards${meta.read ? ` read ${fmt(Date.parse(meta.read), { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}` : ""}, not the live board, so some may have closed; ${srcWord}.`
+    : `From ${srcWord} on the live board.`;
   const nMeets = all.filter((r) => r.payGroup === "meets").length, nUnlisted = all.filter((r) => r.payGroup === "unlisted").length;
   const nOther = all.filter((r) => r.payGroup === "unchecked").length, nBelow = all.filter((r) => r.payGroup === "below").length;
   const fl = floor ? floorText(floor) : null;
   const caveat = [
+    fromWhere,
     `Pay is shown only where the posting lists it${nUnlisted ? `; ${nUnlisted} ${nUnlisted === 1 ? "role doesn't" : "roles don't"} list pay, so ${nUnlisted === 1 ? "it's" : "they're"} grouped separately` : ", and nothing is estimated"}.`,
     nOther ? `${nOther} ${nOther === 1 ? "lists" : "list"} pay in another currency or without a period, so ${nOther === 1 ? "it wasn't" : "they weren't"} compared${fl ? ` with ${fl}` : ""}.` : "",
     "Fit is judged only on what you've confirmed.",
@@ -624,5 +634,5 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
     "Next: tap Apply to check a role's exact application, or tick several and use Apply to selected. Nothing is sent until you approve it with the code from your chat.",
   ].filter(Boolean);
   return o.html(renderResults({ token, title, floor: fl, rows, total: all.length, filters, places, top, notes,
-    madeFor: `Made for ${meta.name ?? "you"} · ${day}`, provenance, caveat, quick }));
+    madeFor: `Made for ${meta.name ?? "you"} · ${day}`, stamp: await stampOf(rows), caveat, quick }));
 }

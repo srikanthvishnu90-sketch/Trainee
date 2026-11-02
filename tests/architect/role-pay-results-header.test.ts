@@ -18,10 +18,10 @@ Deno.test("header: made for the person's first name and day, the title, what was
   const s = await w.A.tok(U, r.listId, NOW);
   const html = await open(w, s), t = plain(html);
   assert(/Made for Ada · Nov 1, 2026/.test(t), t);
-  assert(/Frontend internships, \$30\/hr or more Postings checked Nov 1, 2026, 9:00 AM CST · 2 sources/.test(t), "what was read and when, directly under the title");
+  assert(/Frontend internships, \$30\/hr or more Check time unknown From 2 sources on the live board\./.test(t), "the checked-at line (no time on file here), then where they came from");
   assert(/Pay is shown only where the posting lists it; 1 role doesn't list pay, so it's grouped separately\. Fit is judged only on what you've confirmed\./.test(t), t);
   assert(/Quick read Best matches: Frontend Engineering Intern at Acme Web; UI Engineer Intern at Initech\. 2 of 3 list \$30\/hr or more; 1 doesn't list pay\. Next: tap Apply/.test(t), t);
-  for (const [a, b] of [['class="made"', "<h1>"], ["<h1>", 'class="prov"'], ['class="prov"', 'class="caveat"'], ['class="caveat"', 'class="quick"'], ['class="quick"', '<li class="card"']]) assert(between(html, a, b), `${a} before ${b}`);
+  for (const [a, b] of [['class="made"', "<h1>"], ["<h1>", 'class="stamp"'], ['class="stamp"', 'class="caveat"'], ['class="caveat"', 'class="quick"'], ['class="quick"', '<li class="card"']]) assert(between(html, a, b), `${a} before ${b}`);
   const quickLines = /<section class="quick"[\s\S]*?<\/section>/.exec(html)![0].match(/<p>/g)!.length;
   assert(quickLines >= 2 && quickLines <= 3, `the quick read is 2-3 lines (${quickLines})`);
 });
@@ -32,7 +32,7 @@ Deno.test("header: no name on file says 'you'; no zone on file is Chicago's; a s
   const s = await w.A.tok(U, r.listId, NOW);
   const t = plain(await open(w, s));
   assert(/Made for you · Nov 1, 2026/.test(t), t);
-  assert(/From a saved snapshot of job boards read Oct 15, 2026, not the live board; some may have closed · 2 sources/.test(t), t);
+  assert(/From a saved snapshot of job boards read Oct 15, 2026, not the live board, so some may have closed; 2 sources\./.test(t), t);
   assert(!/Postings checked/.test(t), "a snapshot is never called a check of the postings");
   // A name is only letters: markup or a sentence in the name field becomes no name at all, never markup.
   const w2 = world();

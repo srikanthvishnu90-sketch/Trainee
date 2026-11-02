@@ -9,6 +9,7 @@
 // is the same review for the ticked roles, approved once, as one set.
 import { cap1, esc, hostOf, layout, webUrl, initialOf, type Row, type Status } from "./file_page.ts";
 import { BRAND } from "./brand.ts";
+import { stampHtml } from "./results_stamp.ts";
 
 export type PayFilter = "any" | "meets" | "listed";
 export interface ResultRow extends Row {
@@ -22,7 +23,8 @@ export interface ResultsFeed {
   token: string; title: string; floor: string | null; rows: ResultRow[]; total: number;
   filters: { pay: PayFilter; where: string }; places: string[]; top?: string; notes?: Record<string, string>;
   // The header: who and when, what was read and when, what is not confirmed, and a 2-3 line quick read.
-  madeFor?: string; provenance?: string; caveat?: string; quick?: string[];
+  // stamp: "Postings checked ..." from the shown postings' own last_seen_at (results_stamp.ts); null: "Check time unknown".
+  madeFor?: string; stamp?: string | null; caveat?: string; quick?: string[];
 }
 
 const CSS = `
@@ -30,7 +32,7 @@ const CSS = `
 .eyebrow{margin:0 0 6px;font-size:14px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--mute)}
 .made{margin:0 0 10px;font-size:15px;color:var(--mute)}
 .results h1{font-size:32px;line-height:1.15;margin:0}
-.prov{margin:12px 0 0;font-size:15px;color:var(--mute)}
+.stamp{margin:12px 0 0;font-size:15px;color:var(--mute)}
 .caveat{margin:14px 0 0;font-size:16px;line-height:1.55}
 .quick{margin:22px 0 4px;padding:16px 18px;border-radius:14px;background:var(--card);border:1px solid var(--line)}
 .quick h2{margin:0 0 6px;font-size:15px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--mute)}
@@ -116,16 +118,16 @@ export function renderResults(f: ResultsFeed): string {
   const shown = f.rows.length < f.total ? `<p class="lede">Showing ${f.rows.length} of ${f.total}. <a class="back" href="?">Show all</a></p>` : "";
   const top = f.top ? `<p class="top-note" role="alert">${esc(f.top)}</p>` : "";
   const head = f.madeFor
-    ? `<p class="made">${esc(f.madeFor)}</p><h1>${esc(cap1(f.title))}</h1>${f.provenance ? `<p class="prov">${esc(f.provenance)}</p>` : ""}${f.caveat ? `<p class="caveat">${esc(f.caveat)}</p>` : ""}`
+    ? `<p class="made">${esc(f.madeFor)}</p><h1>${esc(cap1(f.title))}</h1>${stampHtml(f.stamp ?? null)}${f.caveat ? `<p class="caveat">${esc(f.caveat)}</p>` : ""}`
       + (f.quick?.length ? `<section class="quick" aria-label="Quick read"><h2>Quick read</h2>${f.quick.map((q) => `<p>${esc(q)}</p>`).join("")}</section>` : "")
-    : `<p class="eyebrow">Your results</p><h1>${esc(cap1(f.title))}</h1><p class="lede">Sorted by fit to what you've confirmed. Pay is only what each posting lists. Nothing is sent until you approve it.</p>`;
+    : `<p class="eyebrow">Your results</p><h1>${esc(cap1(f.title))}</h1>${stampHtml(f.stamp ?? null)}<p class="lede">Sorted by fit to what you've confirmed. Pay is only what each posting lists. Nothing is sent until you approve it.</p>`;
   const inner = `<div id="root" class="results"><header>${BRAND}${head}${filters}${shown}${selbar}</header><main id="main">${top}${body}</main></div>`;
   return layout(`${cap1(f.title)} - Trainee`, inner, { css: CSS });
 }
 
 // ---------------------------------------------------------------- the review: the exact application(s), then Approve with the code
 export interface ReviewItem { ref: string; tag: string; title: string; company: string; send: { label: string; value: string; needs?: boolean }[] }
-export function renderReview(o: { token: string; items: ReviewItem[]; set: string | null; note?: string; codeSent?: boolean; canApprove: boolean }): string {
+export function renderReview(o: { token: string; items: ReviewItem[]; set: string | null; note?: string; codeSent?: boolean; canApprove: boolean; stamp?: string | null }): string {
   const many = o.items.length > 1;
   const carry = many ? o.items.map((i) => `<input type="hidden" name="pick" value="${esc(`${i.ref}:${i.tag}`)}">`).join("") + `<input type="hidden" name="set" value="${esc(o.set ?? "")}">`
     : `<input type="hidden" name="ref" value="${esc(o.items[0].ref)}"><input type="hidden" name="tag" value="${esc(o.items[0].tag)}">`;
@@ -134,6 +136,6 @@ export function renderReview(o: { token: string; items: ReviewItem[]; set: strin
   const code = o.canApprove ? `<div class="codebox"><form method="post">${hidden(o.token, "code_send", carry)}<p>${o.codeSent ? "We sent a 6-digit code to your Trainee chat." : "To approve, we send a 6-digit code to your Trainee chat (where you text Trainee)."}</p><button type="submit" class="ghost">${o.codeSent ? "Send a new code" : "Text me a code"}</button></form>`
     + `<form method="post">${hidden(o.token, many ? "approve_sel" : "approve", carry)}<label for="code">Code from your chat</label><input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 -]{6,9}" maxlength="9" required><br><button type="submit" class="apply">${many ? `Approve and send all ${o.items.length}` : "Approve and send"}</button><p class="hint">Trainee never asks for a password, and never asks for this code in chat.</p></form></div>`
     : `<p class="top-note">Approving here isn't switched on yet, so nothing can be sent from this page. Nothing was sent.</p>`;
-  const inner = `<div id="root" class="review"><header>${BRAND}<p class="eyebrow">Check before it goes</p><h1>${many ? `Check ${o.items.length} applications` : "Check your application"}</h1><p class="lede">This is exactly what will be sent${many ? " for each" : ""}. If anything changes before you approve, nothing is sent and you'll see it again.</p></header><main id="main">${note}<ul class="cards">${cards}</ul>${code}<p><a class="back" href="?">Back to the list</a></p></main></div>`;
+  const inner = `<div id="root" class="review"><header>${BRAND}<p class="eyebrow">Check before it goes</p><h1>${many ? `Check ${o.items.length} applications` : "Check your application"}</h1>${stampHtml(o.stamp ?? null)}<p class="lede">This is exactly what will be sent${many ? " for each" : ""}. If anything changes before you approve, nothing is sent and you'll see it again.</p></header><main id="main">${note}<ul class="cards">${cards}</ul>${code}<p><a class="back" href="?">Back to the list</a></p></main></div>`;
   return layout(many ? "Check your applications - Trainee" : "Check your application - Trainee", inner, { css: CSS });
 }

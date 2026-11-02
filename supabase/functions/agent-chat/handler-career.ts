@@ -884,7 +884,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // does when the model fails (D-035).
       const staged = stagedRoute({ env: Deno.env, message, ctx: ctx as unknown as Record<string, unknown>, host, structured: !!(careerTask || careerBatch) });
       // A "judge prompt: ..." instruction is code's (judgePromptTurn), and without a model key the brain is never tried.
-      const stagedReady = !isJudgePromptAsk(message) && !!modelConfig(Deno.env, "chat").apiKey;
+      const stagedReady = !isJudgePromptAsk(message) && !!careerModelConfig(Deno.env).apiKey;
       // FEATURE GV (Google verification, 2026-10-26): "disconnect gmail" is answered by the connector framework above
       // (connAns), through the same _shared/google_disconnect.ts: revoked at Google, tokens, rows and mail rows deleted,
       // read back, and now pending sends cancelled. Before any other turn, on every channel.

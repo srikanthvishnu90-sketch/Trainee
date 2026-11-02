@@ -190,6 +190,7 @@ function answerFor(label, answers) {
 }
 const DECLINE = /decline|prefer not|do(?: not|n t) wish|choose not|not to (?:answer|disclose|say|identify|specify)|i do(?: not|n t) want/;
 const YES = /^(yes|y|true)$/; // an agreement checkbox only
+const NO = /^(no|n|false)$/;
 const blank = (v) => v === undefined || v === null || String(v).trim() === "";
 
 // Pick the option an answer means. One clear match or an error: no_matching_option / ambiguous_option. Never "closest".

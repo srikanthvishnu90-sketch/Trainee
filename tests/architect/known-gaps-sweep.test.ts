@@ -199,7 +199,7 @@ Deno.test("gap 7: the Telegram webhook's own replies get the texting voice with 
       const clock = { t: NOW };
       const bot = fakeBot({ token: TOKEN, now: () => clock.t });
       globalThis.fetch = bot.fetch;
-      const vars: Record<string, string> = { TELEGRAM_BOT_TOKEN: TOKEN, TELEGRAM_WEBHOOK_SECRET: SECRET, TRAINEE_SIGNUP: "open", ...(native ? { CAREER_TEXTING_NATIVE: "on" } : {}) };
+      const vars: Record<string, string> = { TELEGRAM_BOT_TOKEN: TOKEN, TELEGRAM_WEBHOOK_SECRET: SECRET, TRAINEE_SIGNUP: "open", CAREER_TEXTING_NATIVE: native ? "on" : "off" }; // the release config turns the voice on by itself (D-036); only "off" rolls it back
       const env = { get: (k: string) => vars[k] };
       const chat = 555001;
       const u = W.newUser();

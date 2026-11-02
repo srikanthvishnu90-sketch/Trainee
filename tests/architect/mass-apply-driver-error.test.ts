@@ -52,6 +52,12 @@ Deno.test("send: a crash AFTER Submit was reached is unknown, never resent", asy
   eq(r.finished.map((f) => f.state), ["unknown_outcome"]);
 });
 
+Deno.test("send: a crash before Submit, then the retry crashes AFTER Submit: unknown (never 'not sent', so never sent twice)", async () => {
+  const r = await send(["crash_before_submit", "crash_after_submit", "ok"]);
+  eq(r.runs, 2, "no third run");
+  eq(r.finished, [{ state: "unknown_outcome", reason: "DRIVER_ERROR_AT_SUBMIT" }]);
+});
+
 Deno.test("prepare: twice DRIVER_ERROR is recorded as our error (not 'refused'); an employer's refusal stays refused, not retried", async () => {
   const run = async (reasons: string[]) => {
     let runs = 0;

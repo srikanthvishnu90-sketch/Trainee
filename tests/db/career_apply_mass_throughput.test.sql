@@ -28,6 +28,25 @@ insert into career_apply_cloud_events(user_id,portal,outcome,error_kind,at) valu
  ('00000000-0000-4000-8000-0000011a0001','greenhouse','error','X',now());
 select career_apply_cloud_throttle('greenhouse',null,clock_timestamp());
 select t.ok(not exists(select from career_apply_cloud_pauses where portal='greenhouse'),'errors broken by a success do not pause; a closed posting is not a failure');
+-- 3b. Our own browser crashing is not the site failing: 3 DRIVER_ERRORs in a row (one at Submit, and one engine with no
+--     result) do not pause; between them, they do not break a run of the site's own failures either.
+delete from career_apply_cloud_pauses; delete from career_apply_cloud_events;
+insert into career_apply_cloud_events(user_id,portal,outcome,error_kind,at) values
+ ('00000000-0000-4000-8000-0000011a0001','greenhouse','submitted',null,now()-interval '5 minute'),
+ ('00000000-0000-4000-8000-0000011a0001','greenhouse','error','DRIVER_ERROR',now()-interval '4 minute'),
+ ('00000000-0000-4000-8000-0000011a0001','greenhouse','error','DRIVER_ERROR_AT_SUBMIT',now()-interval '3 minute'),
+ ('00000000-0000-4000-8000-0000011a0001','greenhouse','error','ENGINE_NO_RESULT',now()-interval '2 minute'),
+ ('00000000-0000-4000-8000-0000011a0001','greenhouse','error','DRIVER_ERROR',now()-interval '1 minute');
+select career_apply_cloud_throttle('greenhouse',null,clock_timestamp());
+select t.ok(not exists(select from career_apply_cloud_pauses where portal='greenhouse'),'our own browser crashing 4 times in a row does not pause the ATS for everyone');
+insert into career_apply_cloud_events(user_id,portal,outcome,error_kind,at) values
+ ('00000000-0000-4000-8000-0000011a0001','greenhouse','error','FORM_DID_NOT_SETTLE',now()-interval '50 second'),
+ ('00000000-0000-4000-8000-0000011a0001','greenhouse','error','DRIVER_ERROR',now()-interval '40 second'),
+ ('00000000-0000-4000-8000-0000011a0001','greenhouse','error','FORM_DID_NOT_SETTLE',now()-interval '30 second'),
+ ('00000000-0000-4000-8000-0000011a0001','greenhouse','error','DRIVER_ERROR',now()-interval '20 second'),
+ ('00000000-0000-4000-8000-0000011a0001','greenhouse','error','FORM_DID_NOT_SETTLE',now());
+select career_apply_cloud_throttle('greenhouse',null,clock_timestamp());
+select t.ok((select count(*)=1 and bool_and(reason like 'consecutive_errors%') from career_apply_cloud_pauses where portal='greenhouse'),'3 site failures in a row pause, with our crashes between them left out');
 -- 4. The 2% rule at a real sample, as before: 1 error in the last 50.
 delete from career_apply_cloud_pauses; delete from career_apply_cloud_events;
 insert into career_apply_cloud_events(user_id,portal,outcome,at) select '00000000-0000-4000-8000-0000011a0001','ashby','submitted',now()-interval '1 minute' from generate_series(1,49);

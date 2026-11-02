@@ -81,6 +81,10 @@ export async function endState(pg: Pg, u: string): Promise<EndState & { metas: a
     tailored: Math.max(Number(await json(pg, `select count(*) from public.channel_artifacts where user_id = '${u}' and mime = 'application/pdf'`)),
       new Set(metas.flatMap((m) => (m?.planner?.steps ?? []).flatMap((s: any) => s?.detail?.tailored ?? []))).size),
     prep: metas.some((m) => /prep|interview_brief/.test(String(m?.intent ?? ""))) || planned("interview.prep") || tool("interview_brief"),
+    // The constraints the person's latest search ran with (the thread's discovery.lastParams), for corrections (spec 2.3).
+    search_params: [...stores].reverse().map((s) => s?.discovery?.lastAsk ?? s?.discovery?.lastParams).find((p) => p && typeof p === "object") ?? null,
+    readiness: [...metas].reverse().map((m) => m?.readiness).find((r) => r && typeof r === "object") ?? null,
+    apply_summary: [...metas].reverse().map((m) => m?.apply_summary).find((r) => r && typeof r === "object") ?? null,
     searched: stores.some((s) => Array.isArray(s?.discovery?.lastShortlist) && s.discovery.lastShortlist.length > 0) || tool("search_jobs"),
     metas,
   };

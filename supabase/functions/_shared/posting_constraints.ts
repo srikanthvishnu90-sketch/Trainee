@@ -17,6 +17,7 @@ export interface Limits {
   company: string | null;
   term: string | null;                // "summer 2027"
   needsSponsor: boolean;              // "I need visa sponsorship"
+  notBands?: BandName[];              // levels ruled out by a correction ("only individual-contributor roles": manager, director)
 }
 export interface SearchText { role: string; place: string | null; remote: boolean; limits: Limits }
 export const NO_LIMITS: Limits = { bands: null, pay: null, company: null, term: null, needsSponsor: false };
@@ -112,9 +113,10 @@ export function limitsLine(l: Limits): string {
   if (l.pay) bits.push(`$${l.pay.amount.toLocaleString("en-US")}+/${l.pay.period === "hour" ? "hr" : "yr"}`);
   if (l.company) bits.push(`at ${l.company}`);
   if (l.needsSponsor) bits.push("sponsorship available");
+  if (l.notBands?.length) bits.push("individual-contributor roles");
   return bits.join(", ");
 }
-export const hasLimits = (l: Limits) => !!(l.bands || l.pay || l.company || l.term || l.needsSponsor);
+export const hasLimits = (l: Limits) => !!(l.bands || l.pay || l.company || l.term || l.needsSponsor || l.notBands?.length);
 
 // ------------------------------------------------------------------------------------------------ reading a posting
 const SPONSOR_NO = /\b(?:unable|not able|cannot|can'?t|won'?t|will not|do(?:es)? not|don'?t|not (?:currently )?(?:able|willing|eligible|offering|providing))\b[^.]{0,40}\bsponsor|\bno\s+(?:visa\s+)?sponsorship\b|\bsponsorship\s+(?:is\s+)?(?:not|unavailable)\b|\bwithout (?:the need for )?(?:visa |employer )?sponsorship\b|\bnot (?:eligible|available) for (?:visa )?sponsorship\b/i;
@@ -164,9 +166,10 @@ export type Reason = "level" | "pay" | "company" | "term" | "sponsor";
 export function outsideLimits(p: { title?: string; company?: string; location?: string; description?: string | null; pay?: string | null }, l: Limits): Reason | null {
   const title = String(p.title ?? ""), text = String(p.description ?? "");
   if (l.company && !sameEmployerName(p.company, l.company)) return "company";
-  if (l.bands) {
+  if (l.bands || l.notBands?.length) {
     const band = statedBand(title, text);
-    if (band !== "unstated" && !l.bands.includes(band)) return "level";
+    if (band !== "unstated" && l.bands && !l.bands.includes(band)) return "level";
+    if (band !== "unstated" && l.notBands?.includes(band)) return "level";
   }
   if (l.term) {
     const stated = [...new Set(termsIn(`${title} ${text.slice(0, 800)}`))];

@@ -10,11 +10,11 @@ checked against trunk `8dee444db`.
 | Rung | When | Cost per run | What runs | Status |
 |---|---|---|---|---|
 | R0 | every PR | $0 (runner minutes) | the gate: unit tests, real-Postgres handler flows with the fake model, fixture servers, the Telegram acceptance suite | in CI |
-| R1 | every PR touching reply code | $0 | task-completion eval, fake model, judged by DB state | **blocked: PR #362 open** |
+| R1 | every PR | $0 | task-completion eval, fake model, judged by DB state | in CI (`gate (architect)`, since #362) |
 | R2 | every deploy candidate | ~$0.6-0.75 *(estimate)* | 38-item held-out set, 5 passes, served brain vs deployed (D-034 S3) | in CI, manual trigger |
 | R3 | after every deploy | ~$0 | live synthetic Telegram journeys against production | **new: this PR** |
 | R4 | daily | $0 (runner minutes) | live-form dry run on 3 real postings, never submits | **new: this PR** |
-| R5 | weekly or on brain changes | ~$1-3 | sealed held-out eval; paid task-completion eval | partly (task suite blocked on #362) |
+| R5 | weekly or on brain changes | ~$1-3 + up to $8 | sealed held-out eval; paid task-completion eval | manual trigger |
 | R6 | major releases | owner time | 10 journeys in Telegram Web; real outcomes | manual |
 
 ## R0: every PR, $0
@@ -59,15 +59,17 @@ counted by test files that fake the host:
 3. **The cloud preparation worker is never exercised against its real dependency** (a Vercel Sandbox starting the
    engine). R0 uses a stand-in, and R3 seeds the worker's output (see R3).
 
-## R1: every PR touching reply code, $0 (blocked)
+## R1: every PR, $0 (in CI since #362)
 
-The design is a state-judged task-completion eval (`evals/career/tasks`) with the fake model, gated like S4. **It is
-not on trunk.** It lives in PR #362, which is open and not merged. Until #362 lands, R1 does not exist and reply-code
-PRs rely on R0 alone.
+The state-judged task-completion eval landed with #362. It runs the tasks in `evals/career/tasks/tasks.json` (44 today)
+through the real `agent-chat` handler on a throwaway Postgres and judges each by the person's rows (`judge.ts`), never by
+the reply's wording. `tests/architect/task-completion-eval.test.ts` runs it with the fake model (`fake_model.ts`) for every
+brain inside `gate (architect)`, so it gates **every** PR rather than only those touching reply code. That is free and
+simpler than a path filter, and the shard balancing absorbs the time.
 
-*When #362 merges:* add a `tasks (fake model)` job to `ci.yml`, filtered to changes under
-`supabase/functions/_shared/**` and `supabase/functions/agent-chat/**`. It costs $0 and about 2-5 runner minutes
-*(estimate)*.
+**What it proves:** compound asks reach the right end state on the code paths when the model plans right.
+
+**What it cannot prove:** that the real model plans right (R5's paid run does that).
 
 ## R2: every deploy candidate, ~$0.6-0.75 per measurement (estimate)
 
@@ -229,8 +231,10 @@ scheduled run.
 ## R5: weekly or on brain changes, ~$1-3
 
 - **Sealed held-out set:** `sealed-set-rewrap.yml` and PR #269.
-- **Paid task-completion eval:** `brain-eval.yml -f suite=tasks`, capped at $2 per brain. **This input does not exist on
-  trunk:** `brain-eval.yml` takes only a `brain` input today, and the `suite` input arrives with #362.
+- **Paid task-completion eval:** `brain-eval.yml -f suite=tasks` (on trunk since #362) runs the router, staged, planner
+  and agent brains on the real model. Each brain is capped by `TASKS_BUDGET_USD` (`"2.00"`), so one run costs up to $8.
+  Each brain's command ends in `|| true`, so a brain that stops at its cap or errors does not fail the workflow. Its
+  result file says so; a stopped run is not a score, and the result files must be read.
 
 **What it proves:** the brain on unseen sentences, and real task completion on the real model.
 
@@ -252,10 +256,11 @@ Assumptions: about 60 PRs, 10 deploys, 30 days and 4 weeks a month.
 | R2 | ~$0.72 | ~$7 |
 | R3 | <$0.01 model + negligible function invocations | <$0.10 |
 | R4 | ~3-5 runner-min | ~100-150 runner-min, $0 inside the included minutes |
-| R5 | ~$1-3 | ~$4-12 |
+| R5 | ~$1-3 held-out + up to $8 tasks | ~$4-12 + up to $32 |
 | R6 | owner and architect time | $0 money |
 
-**Total:** roughly **$11-20 a month of model spend**, plus runner minutes.
+**Total:** roughly **$11-20 a month of model spend** without the weekly paid task eval, and up to about **$52** with it,
+plus runner minutes.
 
 ## Owner inputs needed
 
@@ -271,5 +276,4 @@ Assumptions: about 60 PRs, 10 deploys, 30 days and 4 weeks a month.
    `TRAINEE_ALLOWED_CONTACTS`. Without it R3 runs with delivery UNVERIFIED.
 3. **No other new secret.** R3 also reuses `SUPABASE_PROJECT_REF`, `TELEGRAM_WEBHOOK_SECRET` and `SUPABASE_DB_URL`. R4
    needs no secret.
-4. **Merge #362** to unlock R1 and the paid task eval in R5.
-5. **R6:** your time on major releases.
+4. **R6:** your time on major releases.

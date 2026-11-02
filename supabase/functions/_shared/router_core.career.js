@@ -9411,6 +9411,7 @@ const CareerSafety = (() => {
     /\b(?:no ?one|nobody) would (?:miss me|notice if i (?:died|was gone|were gone)|care if i (?:died|was gone|were gone|disappeared|wasnt here))\b/,
     /\b(?:dont|do not|dnt|never) (?:want|wanna) (?:to )?(?:live|be alive|exist|wake up|be around anymore|go on|keep living)\b/,
     /\b(?:dont|do not|dnt) (?:want|wanna) (?:to )?be here(?: anymore)?$/,
+    /\b(?:want|wanna|wish|need)(?: to)? (?:just )?not be (?:here|around)(?: anymore)?$/, /\b(?:want|wanna|wish|need)(?: to)? (?:just )?not be alive\b/,
     /\b(?:no|zero) (?:reason|point) (?:to|in|of) (?:live|living|going on|being alive|be alive|life)\b/, /\bnothing (?:left )?to live for\b/,
     /\bcant (?:keep living|live like this)\b/, /\bcant go on(?: (?:anymore|like this|living))?$/,
     /\b(?:tired|sick) of (?:living|being alive|life|existing)\b/, /\bdone (?:with life|living)\b/, /\bgive up on life\b/,

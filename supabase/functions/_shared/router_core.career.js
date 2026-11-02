@@ -13291,13 +13291,13 @@ const CareerRouter = (() => {
     return m ? Number(m[1]) : null;
   }
   function experienceYearsOf(profile) {
-    let months = 0;
+    let months = 0, dated = 0;
     for (const f of ((profile && profile.facts) || [])) {
       if (f.kind !== "experience" || !f.start) continue;
       const a = Date.parse(`${f.start}-01T00:00:00Z`), b = f.end ? Date.parse(`${f.end}-01T00:00:00Z`) : a;
-      if (Number.isFinite(a) && Number.isFinite(b) && b >= a) months += Math.round((b - a) / 2592000000) + 1;
+      if (Number.isFinite(a) && Number.isFinite(b) && b >= a) { months += Math.round((b - a) / 2592000000) + 1; dated += 1; }
     }
-    return Math.floor(months / 12);
+    return dated ? Math.floor(months / 12) : null;
   }
   function scoringProfile(profile) {
     const p = profile || {};
@@ -13363,7 +13363,7 @@ const CareerRouter = (() => {
     if (deadlineDate && Date.parse(`${deadlineDate}T23:59:59Z`) < now) reasons.push(`closed: the deadline ${deadlineDate} has passed`);
     const yearsReq = [...allText.matchAll(/\b(\d+)\+?\s*years?\b/gi)].map((m) => Number(m[1])).filter((n) => n >= 2);
     const myYears = experienceYearsOf(profile);
-    if (yearsReq.length && myYears + 1 < Math.max(...yearsReq)) reasons.push(`experience: the posting asks ${Math.max(...yearsReq)}+ years; your profile shows about ${myYears}`);
+    if (yearsReq.length && myYears != null && myYears + 1 < Math.max(...yearsReq)) reasons.push(`experience: the posting asks ${Math.max(...yearsReq)}+ years; your profile shows about ${myYears}`);
     const gy = gradYearOf(profile);
     if (gy) {
       const range = allText.match(/graduat\w*[^0-9]{0,24}(20\d\d)\s*[–—-]\s*(?:[A-Za-z]+\s+)?(20\d\d)/i);

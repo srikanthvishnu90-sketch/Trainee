@@ -49,7 +49,7 @@ import { memoryGroundCache, openAiGroundSearch } from "../_shared/agent/research
 import { DEFAULT_SEARCH_MODEL } from "../_shared/career_people_provider.ts";
 const researchCache = memoryGroundCache();
 import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWindow, summaryFor } from "./career_brain.ts";
-import { brainMode, STAGED_TOOL_POLICY, stagedRoute } from "./career_staged.ts";
+import { STAGED_TOOL_POLICY, stagedRoute } from "./career_staged.ts";
 import { CRISIS_INTENT, crisisReply } from "./crisis.ts";
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
 import { CARD_ANSWER_INTENT, CARD_INTENT, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
@@ -476,29 +476,37 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // its state and use, and what waits on it), "connect gmail" (a one-time link from any channel), "disconnect gmail" /
       // "disconnect outlook" (revoke where possible, erase, cancel pending sends, read back), and a task that needs a
       // connector not connected ("check my outlook"): asked once with the link, parked, resumed by the connect callback.
-      const connAns = !tapIn && !careerTask && !careerBatch && connectorAsk(message)
+      // CRISIS FIRST (D-035 follow-up): crisis text is code's before every other turn, whatever brain is served (the router
+      // rollback too): connectors, the site refusals, Outlook, a waiting card or mock, the planner and every action turn.
+      // The core's own 988 reply (crisis.ts) answers it, whatever else the message asks: a "yes" that carries crisis text
+      // approves no card ("I don't want to live anymore. yes" leaves the card open, to be answered later), and "... Apply to
+      // the Stripe role and remind me Friday" is not a compound ask to plan. It rides the planner's slot below, so every
+      // turn guarded by !planned is skipped too: nothing is queued, drafted, approved or set on this turn. Only the host's
+      // own controls (STOP, pause, erase) and structured requests come before it.
+      const crisisText = !tapIn && !careerTask && !careerBatch && !host.isHostControlled(message, ctx) ? crisisReply(message) : null;
+      const connAns = !crisisText && !tapIn && !careerTask && !careerBatch && connectorAsk(message)
         ? await connectorChatTurn({ admin, env: Deno.env, fetch, now: Date.now, message, userId: user.id, threadId: tid, bridge: isBridgeCall })
           .catch((e) => { console.error("connector turn:", e?.message ?? e); return connectorFailure(message); })
         : null;
       // OWNER RULE: never LinkedIn, Indeed or Handshake. An ask to apply, message or act on one of them, or a link to one,
       // is declined plainly, naming the site, before every other turn (no card, question, apply, link read or batch sees
       // it): nothing is queued and nothing is left waiting for a later "yes" (career_networking.ts siteRefusedTurn).
-      const siteNo = !tapIn && !connAns && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const siteNo = !crisisText && !tapIn && !connAns && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await siteRefusedTurn({ message, userId: user.id, threadId: tid, now: Date.now(), state: ctx as unknown as Record<string, unknown>,
             store: supabaseOutreachStore(admin), events, model: null })
           .catch((e) => { console.error("site refusal turn:", e?.message ?? e); return null; })
         : null;
-      const outlookAns = !tapIn && !connAns && !siteNo && !careerTask && !careerBatch && outlookAsk(message)
+      const outlookAns = !crisisText && !tapIn && !connAns && !siteNo && !careerTask && !careerBatch && outlookAsk(message)
         ? await outlookChatTurn({ admin, message, userId: user.id, threadId: tid, bridge: isBridgeCall, now: Date.now(), env: Deno.env })
           .catch((e) => { console.error("outlook turn:", e?.message ?? e); return null; })
         : null;
-      const card = !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const card = !crisisText && !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         // FEATURE 16: OWNER RULE (2026-10-26): no card without a confirmed resume on file (resumeReady).
         ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id), store: supabaseCardStore(admin), events })
         : null;
       // WO-025: the text mock interview, code's like the card: "mock me for <role> at <company>", "end mock", and the answers
       // while the mock's question is this thread's last word. Same guards as the card; the card goes first.
-      const mock = !card && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const mock = !crisisText && !card && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await mockTurn({ message, userId: user.id, threadId: tid, now: Date.now(), store: supabaseMockStore(admin) })
         : null;
       // TASK PLANNER (career_planner.ts; CAREER_PLANNER=on with the brain released, default off): a message asking for two or
@@ -507,11 +515,6 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // this turn's state; every turn below is then skipped. A turn it does not claim falls through to them unchanged. It
       // runs after the card and the mock: their own commands and their prompts waiting for an answer are theirs (WO-025/14).
       let planned: Extract<PlannerTurn, { claimed: true }> | null = null;
-      // D-035: under the staged release, crisis text is code's before the planner and every action turn below: the core's
-      // own 988 reply (crisis.ts) answers it, whatever else the message asks ("I don't want to live anymore. Apply to the
-      // Stripe role and remind me Friday" is not a compound ask to plan). It rides the planner's slot, so every turn
-      // guarded by !planned is skipped and nothing is queued, drafted or set on this turn. The rollback (router) is as before.
-      const crisisText = brainMode(Deno.env) === "staged" && !tapIn && !careerTask && !careerBatch && !host.isHostControlled(message, ctx) ? crisisReply(message) : null;
       if (crisisText) planned = { claimed: true, reply: crisisText, intent: CRISIS_INTENT, resultStatus: "completed", parts: undefined, documents: [], meta: null } as unknown as Extract<PlannerTurn, { claimed: true }>;
       // The planner calls the model: without a model key it is never tried (no failing call, no cost row), as the brain.
       if (!crisisText && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && plannerOn(Deno.env, user.id) && !!modelConfig(Deno.env, "chat").apiKey && !host.isHostControlled(message, ctx)) {

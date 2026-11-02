@@ -8,6 +8,9 @@
 //      card showed; the brain is never asked.
 //   P  CAREER_PLANNER=on: crisis text with two asks gets code's 988 reply before the planner (no model call, nothing queued,
 //      no reminder kept); with no model key the planner is never tried (no request, no cost row, no planner log).
+//   X  CRISIS FIRST: a "yes" that carries crisis text, with a prepared-applications card open, gets the 988 reply and the
+//      card stays open (nothing approved); the same holds under the router rollback (CAREER_BRAIN=router), which also
+//      answers bare crisis text with the 988 reply. No model call.
 //   A control: an advice question with the key set does reach the brain (so the zero counts above mean something).
 //   deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/staged-release-handler.test.ts
 import assertNode from "node:assert/strict";
@@ -27,7 +30,8 @@ const PEOPLE: Record<string, string> = {
   "tok-d35j": "7b0f8f8e-6a43-4a49-9d2c-0000000d3501", "tok-d35k": "7b0f8f8e-6a43-4a49-9d2c-0000000d3502",
   "tok-d35s": "7b0f8f8e-6a43-4a49-9d2c-0000000d3503", "tok-d35c": "7b0f8f8e-6a43-4a49-9d2c-0000000d3504",
   "tok-d35a": "7b0f8f8e-6a43-4a49-9d2c-0000000d3505", "tok-d35p": "7b0f8f8e-6a43-4a49-9d2c-0000000d3506",
-  "tok-d35q": "7b0f8f8e-6a43-4a49-9d2c-0000000d3507",
+  "tok-d35q": "7b0f8f8e-6a43-4a49-9d2c-0000000d3507", "tok-d35x": "7b0f8f8e-6a43-4a49-9d2c-0000000d3508",
+  "tok-d35r": "7b0f8f8e-6a43-4a49-9d2c-0000000d3509",
 };
 const P = (t: string) => PEOPLE[t];
 const ADVICE = "how should I follow up after an interview?";
@@ -119,6 +123,54 @@ Deno.test({ name: "D-035: with CAREER_BRAIN unset (staged), code keeps judge pro
       eq(brainCalls, b, "the brain was never asked");
       eq(await pg.sql(`select count(*) from public.career_apply_wanted where user_id = '${P("tok-d35s")}'`), "0", "nothing queued");
       eq(await pg.sql(`select count(*) from public.career_apply_jobs where user_id = '${P("tok-d35s")}'`), "0", "nothing approved");
+    });
+
+    // A person with a confirmed resume, the two postings queued and prepared, and the card shown, open and waiting.
+    const openCard = async (tok: string) => {
+      const id = P(tok), say = sayAs(h!.chat(tok), id);
+      eq((await say(`here is my resume:\n${RESUME}`)).intent, "career_resume_ingest");
+      eq((await say("yes, that's my resume")).resultStatus, "completed");
+      await pg.sql(confirmedResumeSql(id, RESUME_FILE));
+      eq((await say("find data analyst jobs in Chicago")).intent, "career_discovery");
+      eq((await say("apply to these")).resultStatus, "queued");
+      for (const p of POSTINGS) {
+        const payload = { version: 1, user_id: id, job_id: p.key, company: p.company, url: p.url,
+          fields: [{ name: "email", label: "Email", value: "alex.testcase@example.test", factId: "TEST-D035-1" }], privacy_epoch: 0, account_version: 0,
+          expires_at: new Date(Date.now() + 3600_000).toISOString(), resume_sha256: RESUME_SHA };
+        const r = await pg.asPerson(id).rpc("career_apply_prepare_own", { p_payload: payload, p_card_lines: [`${p.company}: Data Analyst`, "Email: alex.testcase@example.test"] });
+        eq(r.error, null, `setup: prepare ${p.company}: ${JSON.stringify(r.error)}`);
+      }
+      const card = await say("show my applications");
+      eq([card.intent, card.resultStatus], ["career_apply_card", "shown"], card.reply);
+      return { id, say, cardId: String(card.body?.meta?.card_id ?? "") };
+    };
+
+    await t.step("X: crisis text with 'yes' on an open card: the 988 reply, the card stays open, nothing approved, no model call", async () => {
+      withKey();
+      const { id, say, cardId } = await openCard("tok-d35x");
+      assert(cardId, "the card's id rides the reply");
+      const n = modelCalls, m = "I don't want to live anymore. yes";
+      const r = await say(m);
+      eq([r.reply, r.intent], [crisisReply(m), "safety_support"], r.reply);
+      eq(await pg.sql(`select state from public.career_apply_cards where id = '${cardId}'`), "open", "the card is still open, unanswered");
+      eq(await pg.sql(`select count(*) from public.career_apply_jobs where user_id = '${id}'`), "0", "nothing approved");
+      eq(modelCalls, n, "no model call");
+    });
+
+    await t.step("X: under the router rollback (CAREER_BRAIN=router) crisis text still gets the 988 reply, before the card; no model call", async () => {
+      withKey(); Deno.env.set("CAREER_BRAIN", "router");
+      try {
+        const { id, say, cardId } = await openCard("tok-d35r");
+        const n = modelCalls;
+        for (const m of ["I'm thinking about suicide", "i want to end it all. yes"]) {
+          const r = await say(m);
+          eq([r.reply, r.intent, r.body.meta.brain], [crisisReply(m), "safety_support", undefined], `${m}: ${r.reply}`);
+          assert(/\b988\b/.test(r.reply), r.reply);
+        }
+        eq(await pg.sql(`select state from public.career_apply_cards where id = '${cardId}'`), "open", "the card is still open");
+        eq(await pg.sql(`select count(*) from public.career_apply_jobs where user_id = '${id}'`), "0", "nothing approved");
+        eq(modelCalls, n, "no model call");
+      } finally { Deno.env.delete("CAREER_BRAIN"); }
     });
 
     await t.step("C: 'yes' on the prepared-applications card approves through code, by the exact payload hash; never the brain", async () => {

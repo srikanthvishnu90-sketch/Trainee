@@ -73,7 +73,8 @@ export function deliverer(admin: any, env: { get(k: string): string | undefined 
   let adapters: ReturnType<typeof adaptersFromEnv> | null = null;
   return async (a: { userId: string; key?: string; now: number; wholeUser?: boolean }) => {
     adapters ??= adaptersFromEnv(env);
-    const store = supabaseChannelStore(admin, a.wholeUser ? { user: a.userId } : { only: { userId: a.userId, key: a.key! } });
+    // PARITY R10: the answer to the person's message is usually the next message they get, so it carries any miss owed to them.
+    const store = supabaseChannelStore(admin, a.wholeUser ? { user: a.userId, promises: true } : { only: { userId: a.userId, key: a.key! }, promises: true });
     const r = await deliverDue({ store, adapters, now: a.now, limit: a.wholeUser ? 40 : 1 });
     await store.release();
     return r; // what went (the inbound core sends a long answer's rest only after its head went: #301)

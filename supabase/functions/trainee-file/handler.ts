@@ -785,7 +785,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   const quick = [
     best.length ? `Best ${best.length === 1 ? "match" : "matches"}: ${best.join("; ")}.` : all.length ? `Closest by fit: ${all[0].job.title} at ${all[0].job.company}.` : "",
     fl ? `${nMeets} of ${all.length} list ${fl} or more${nUnlisted ? `; ${nUnlisted} ${nUnlisted === 1 ? "doesn't" : "don't"} list pay` : ""}${nOther ? `; ${nOther} can't be compared` : ""}${nBelow ? `; ${nBelow} now list less` : ""}.` : `${all.length} ${all.length === 1 ? "role" : "roles"}, sorted by fit.`,
-    "Next: open What will be sent on a role, then tap Apply. A role that isn't ready asks for what it needs first. Nothing is sent until you tap Apply.",
+    "Next: tap Apply on a role. A ready one is sent exactly as its What will be sent shows; one that isn't ready asks for what it needs first. Nothing is sent until you tap Apply.",
   ].filter(Boolean);
   return o.html(renderResults({ token, title, floor: fl, rows, total: all.length, filters, places, top, notes,
     madeFor: `Made for ${meta.name ?? "you"} · ${day}`, stamp: await stampOf(rows), caveat, quick }));

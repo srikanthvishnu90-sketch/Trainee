@@ -1,6 +1,7 @@
-// The results page in a real Chromium at phone width, light and dark (reqs Q551, Q553, Q557, Q567, Q568, Q718): the list, a
-// card's Apply opening the exact application, the code from the person's chat typed in, Approve, the card turning into its
-// status, and the queue row carrying exactly the payload that was shown. Then "Apply to selected" for two roles. The page is
+// The results page in a real Chromium at phone width, light and dark (reqs Q551, Q553, Q557, Q567, Q568, Q718; owner 2026-11-02):
+// the list with a black Apply on every card, What will be sent opened on a card, one tap on Apply, the card turning into its
+// status, and the queue row carrying exactly the payload that was shown. Then "Apply to selected" for two roles, and a role that
+// isn't ready: Apply opens "A few things first", the answers are saved and the card comes back with its Apply. The page is
 // served by trainee-file's handler over the memory world (tests/helpers/results_world.ts) on 127.0.0.1; every other request
 // (web fonts, logos) is aborted. Nothing reaches an employer.
 import assertNode from "node:assert/strict";
@@ -31,7 +32,7 @@ const MEASURE = `(() => {
   const ground = (el) => { for (let e = el; e; e = e.parentElement) { const b = rgb(getComputedStyle(e).backgroundColor); if (b && b.a > 0.5) return b.c; } return [255,255,255]; };
   const visible = (el) => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none" && !el.closest(".sr,[hidden]"); };
   const name = (el) => el.tagName.toLowerCase() + (typeof el.className === "string" && el.className ? "." + el.className.trim().split(/\\s+/).join(".") : "") + " '" + (el.textContent || el.value || "").trim().slice(0, 40) + "'";
-  const taps = [...document.querySelectorAll("a[href],button,summary,select,input:not([type=hidden]):not([type=checkbox]),label.pick")].filter(visible).map((el) => ({ el: name(el), h: el.getBoundingClientRect().height }));
+  const taps = [...document.querySelectorAll("a[href],button,summary,select,input:not([type=hidden]):not([type=checkbox]):not([type=radio]),label.pick,label.opt")].filter(visible).map((el) => ({ el: name(el), h: el.getBoundingClientRect().height }));
   const texts = [];
   for (const el of document.querySelectorAll("body *")) {
     if (!visible(el) || ["SCRIPT","STYLE","OPTION"].includes(el.tagName) || el.closest("svg")) continue;
@@ -40,12 +41,12 @@ const MEASURE = `(() => {
     texts.push({ el: name(el), size: parseFloat(s.fontSize), color: rgb(s.color).c, ground: ground(el) });
   }
   const applies = [...document.querySelectorAll(".apply")].filter(visible).map((el) => ({ el: name(el), bg: rgb(getComputedStyle(el).backgroundColor).c, w: el.getBoundingClientRect().width }));
-  const goes = [...document.querySelectorAll("button.ghost.go")].filter(visible).map((el) => ({ el: name(el), bg: rgb(getComputedStyle(el).backgroundColor), w: el.getBoundingClientRect().width }));
+  const goes = [...document.querySelectorAll("li.card button.apply")].filter(visible).map((el) => ({ el: name(el), bg: rgb(getComputedStyle(el).backgroundColor), fg: rgb(getComputedStyle(el).color), h: el.getBoundingClientRect().height, w: el.getBoundingClientRect().width }));
   return { scrollW: document.documentElement.scrollWidth, innerW: window.innerWidth, taps, texts, applies, goes, body: ground(document.body), ink: rgb(getComputedStyle(document.body).color).c };
 })()`;
 
 Deno.test({
-  name: "results page in Chromium (phone width, light and dark): list, Apply -> the exact application -> code from chat -> Approve -> queued with that payload; Apply to selected",
+  name: "results page in Chromium (phone width, light and dark): list, black Apply on every card, What will be sent, one tap -> queued with that payload; Apply to selected; A few things first",
   sanitizeResources: false,
   sanitizeOps: false,
   async fn(t) {
@@ -76,7 +77,7 @@ Deno.test({
           const ac = new AbortController();
           const server = Deno.serve({ hostname: "127.0.0.1", port: 0, signal: ac.signal, onListen() {} }, (req) => handleFile(req, w.deps));
           const origin = `http://127.0.0.1:${server.addr.port}`;
-          const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: scheme, deviceScaleFactor: 1 });
+          const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, colorScheme: scheme, deviceScaleFactor: 1 });
           await ctx.route("**/*", (route: any) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
           await ctx.addCookies([{ name: "tf_s", value: session, url: origin }]);
           const pg = await ctx.newPage();
@@ -89,7 +90,7 @@ Deno.test({
               for (const x of m.texts.filter((x: any) => ratio(x.color, x.ground) < 4.5)) bad.push(`text under AA: ${x.el} ${ratio(x.color, x.ground).toFixed(2)}:1`);
               if (!near(m.body, rgbOf(tok.bg))) bad.push(`ground ${m.body} is not ${tok.bg}`);
               if (!near(m.ink, rgbOf(tok.ink))) bad.push(`ink ${m.ink} is not ${tok.ink}`);
-              for (const a of m.applies) if (!near(a.bg, rgbOf(tok.accent))) bad.push(`the action ${a.el} is ${a.bg}, not the plum ${tok.accent}`);
+              for (const a of m.applies) if (!near(a.bg, [0, 0, 0], 2)) bad.push(`the action ${a.el} is ${a.bg}, not black`);
               eq(bad, [], `${where} (${scheme})`);
               return m;
             };
@@ -104,46 +105,61 @@ Deno.test({
             const sizes = await pg.evaluate(`[".made","h1",".stamp",".caveat",".quick p"].map((q) => parseFloat(getComputedStyle(document.querySelector(q)).fontSize))`);
             assert(sizes[1] >= 28 && sizes[0] < sizes[1] && sizes[2] < sizes[1], `a large title over small lines: ${sizes}`);
             assert(/^Made for Ada · Nov 1, 2026$/.test((await pg.textContent(".made"))!.trim()));
-            // Plum only on the one primary action (owner, 2026-11-01): Apply to selected; each card's Apply is the secondary button.
-            eq(list.applies.map((a: any) => a.el), ["button.apply 'Apply to selected'"], "one primary action on the list");
+            // A solid black Apply on every card (owner, 2026-11-02), white text, 48px+, full width on a phone; Apply to selected is black too.
             eq(list.goes.length, 3, "an Apply on each card");
-            assert(list.goes.every((a: any) => a.w >= 390 - 2 * 20 - 2 * 18 - 4), "each card's Apply is full width on a phone");
-            assert(list.goes.every((a: any) => !a.bg || a.bg.a < 0.5 || !near(a.bg.c, rgbOf(tok.accent))), "card Apply is not plum");
+            eq(list.applies.length, 4, "three card Applys and Apply to selected, all black");
+            assert(list.goes.every((a: any) => a.h >= 48 && near(a.bg.c, [0, 0, 0], 2) && near(a.fg.c, [255, 255, 255], 2)), "black pill, white text, 48px");
+            assert(list.goes.every((a: any) => a.w >= 360 - 2 * 20 - 2 * 18 - 4), "each card's Apply is full width on a phone");
             assert(/Pay not listed/.test(await pg.textContent("main") ?? ""));
-            // Apply on Acme's card: the exact application.
-            await pg.locator("li.card", { hasText: "Acme Web" }).getByRole("button", { name: /^Apply to/ }).click();
-            await pg.waitForSelector("text=Check your application");
-            const review = await pg.textContent("main") ?? "";
-            for (const x of ["ada-resume.pdf", "Ada", "ada@example.test", "Are you authorized to work in the US?", "I'd love to build at Acme Web.", "boards.greenhouse.io"]) assert(review.includes(x), `${x} shown before approval`);
-            await check("the review");
+            // What will be sent, on the card, before the tap.
+            const acmeCard = pg.locator("li.card", { hasText: "Acme Web" });
+            await acmeCard.getByText("What will be sent").click();
+            const sent = await acmeCard.locator("details.send").textContent() ?? "";
+            for (const x of ["ada-resume.pdf", "Ada", "ada@example.test", "Are you authorized to work in the US?", "I'd love to build at Acme Web.", "boards.greenhouse.io"]) assert(sent.includes(x), `${x} shown before the tap`);
+            await check("the card with What will be sent open");
             eq(w.queue.length, 0, "nothing queued by looking");
-            // The code goes to the person's chat; typed here; Approve.
-            await pg.getByRole("button", { name: "Text me a code" }).click();
-            await pg.waitForSelector("text=We sent a 6-digit code to your Trainee chat");
-            eq(w.outbox.length, 1);
-            const code = /code is (\d{6})/.exec(w.outbox[0].text)![1];
-            await pg.fill("#code", code);
-            await pg.getByRole("button", { name: "Approve and send" }).click();
+            // One tap.
+            await acmeCard.getByRole("button", { name: /^Apply to/ }).click();
             await pg.waitForSelector("li.card >> text=Queued");
-            const acme = await pg.locator("li.card", { hasText: "Acme Web" }).textContent() ?? "";
-            assert(/Queued/.test(acme) && /Approved\. It's queued to be sent exactly as you checked it/.test(acme), acme);
-            await check("the list after Approve");
+            const acme = await acmeCard.textContent() ?? "";
+            assert(/Queued/.test(acme) && /Approved\. It's queued to be sent exactly as its card showed/.test(acme), acme);
+            await check("the list after Apply");
             eq(w.queue.length, 1);
             eq(w.queue[0].payload_hash, HASH(1));
             eq(w.queue[0].payload, w.preps.get("greenhouse:acme:1")!.payload, "the queue row carries exactly the payload shown");
-            // Apply to selected: tick two, review both, one code, approve both.
+            // Apply to selected: tick two, one tap.
             await pg.locator("li.card", { hasText: "Globex" }).getByRole("checkbox").check();
             await pg.locator("li.card", { hasText: "Initech" }).getByRole("checkbox").check();
             await pg.getByRole("button", { name: "Apply to selected" }).click();
-            await pg.waitForSelector("text=Check 2 applications");
-            await check("the batch review");
-            await pg.getByRole("button", { name: "Text me a code" }).click();
-            await pg.waitForSelector("text=We sent a 6-digit code to your Trainee chat");
-            await pg.fill("#code", /code is (\d{6})/.exec(w.outbox.at(-1)!.text)![1]);
-            await pg.getByRole("button", { name: "Approve and send all 2" }).click();
-            await pg.waitForSelector("text=All 2 approved and queued");
+            await pg.waitForSelector("text=2 of 2 approved and queued");
             eq(w.queue.map((q) => q.job_id).sort(), ["greenhouse:acme:1", "greenhouse:initech:3", "lever:globex:2"]);
             eq(w.queue.find((q) => q.job_id === "lever:globex:2")!.payload, w.preps.get("lever:globex:2")!.payload);
+            // A role that isn't ready: Apply asks the employer's question first; the answer is saved; the card comes back with its Apply.
+            const w2 = world({ unprepared: ["greenhouse:acme:1"] });
+            w2.qs.push({ id: "11111111-aaaa-4aaa-8aaa-000000000001", key: "job:q1", kind: "text", label: "Will you now or in the future require sponsorship?", type: "select", options: ["Yes", "No"], company: null, job_ids: ["greenhouse:acme:1"], misfit: false, answer: null });
+            const r2 = await made(w2, U, undefined, { name: "Ada", source: "live" });
+            const s2 = await w2.A.tok(U, r2.listId, NOW);
+            const ac2 = new AbortController();
+            const server2 = Deno.serve({ hostname: "127.0.0.1", port: 0, signal: ac2.signal, onListen() {} }, (req) => handleFile(req, w2.deps));
+            const origin2 = `http://127.0.0.1:${server2.addr.port}`;
+            await ctx.route("**/*", (route: any) => route.request().url().startsWith(origin) || route.request().url().startsWith(origin2) ? route.continue() : route.abort());
+            await ctx.addCookies([{ name: "tf_s", value: s2, url: origin2 }]);
+            try {
+              await pg.goto(`${origin2}/file`);
+              await pg.locator("li.card", { hasText: "Acme Web" }).getByRole("button", { name: /^Apply to/ }).click();
+              await pg.waitForSelector("text=A few things first");
+              await check("the questions page");
+              eq(w2.queue.length, 0, "asking sends nothing");
+              await pg.getByLabel("No", { exact: true }).check();
+              await pg.getByRole("button", { name: "Save answers" }).click();
+              await pg.waitForSelector("li.card >> text=What will be sent");
+              eq(w2.saved, [{ id: "11111111-aaaa-4aaa-8aaa-000000000001", answer: "No" }]);
+              eq(w2.queue.length, 0, "answering sends nothing");
+              await check("the list with the fresh card");
+            } finally {
+              ac2.abort();
+              await server2.finished;
+            }
             steps++;
           } finally {
             await ctx.close();

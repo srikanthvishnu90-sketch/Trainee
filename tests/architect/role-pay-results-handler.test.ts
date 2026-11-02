@@ -1,9 +1,10 @@
 // "I want frontend internships that pay $30/hr" sent over iMessage, through the production chat handler (agent-chat
 // handler-career.ts handleChat) on a real Postgres with the real supabase-js client (tests/flow): the reply is one or two plain
-// sentences and the results page's link alone on its own line; the link opens (signed, one sign-in) a page built from the same
-// database rows: roles listing $30/hr or more first, then "pay not listed", the $25/hr role left out, Apply on every card.
+// sentences and the results page's link ALONE as its own message; the link opens (signed, one sign-in) a page built from the same
+// database rows: roles listing $30/hr or more first, then "pay not listed", the $25/hr role left out, a black Apply on every card.
 // Apply on a role with no prepared application queues it to be prepared (career_apply_wanted) and sends nothing.
-// The same ask on Telegram or the web keeps today's list reply. No model call, no network beyond the local double.
+// The same ask on Telegram or the web, and an ask with no pay floor, get the page too (owner, 2026-11-02: every channel).
+// No model call, no network beyond the local double.
 //
 // Run: CI=true deno test -A --no-check [--import-map=tests/flow/supabase-npm.json] tests/architect/role-pay-results-handler.test.ts
 import assertNode from "node:assert/strict";
@@ -14,7 +15,7 @@ import { buildFileDeps } from "../../supabase/functions/trainee-file/deps.ts";
 import { handleFile } from "../../supabase/functions/trainee-file/handler.ts";
 import { verifyFileToken } from "../../supabase/functions/_shared/file_link.ts";
 import { MARKDOWN } from "../../supabase/functions/_shared/role_pay.ts";
-import { signedIn } from "./file-session-fakes.ts";
+import { phonePost, signedIn } from "./file-session-fakes.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -77,7 +78,8 @@ Deno.test({ name: "results (handler): iMessage 'frontend internships that pay $3
   // The reply shape.
   const lines = t.reply.split("\n");
   eq(lines.length, 2, t.reply);
-  eq(lines[0], "I found 2 frontend internships that list pay of $30/hr or more, plus 1 that doesn't list pay, so I couldn't check it. Here they are by fit, with Apply on each:");
+  eq(lines[0], "I found 2 frontend internships that list pay of $30/hr or more, plus 1 that doesn't list pay, so I couldn't check it. Here they are by fit, with Apply on each.");
+  eq(t.body.parts, lines, "sent as two messages: the sentences, then the link alone");
   assert(/^https:\/\/trainee\.example\/file\?t=v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/.test(lines[1]), `the link alone on its own line: ${lines[1]}`);
   assert(!MARKDOWN.test(t.reply), "no markdown on iMessage");
   assert(!/TEST Pay/.test(t.reply), "no wall of postings in the chat");
@@ -99,25 +101,28 @@ Deno.test({ name: "results (handler): iMessage 'frontend internships that pay $3
   assert(/Pay \$35-40\/hr · listed on the posting/.test(p) && /Pay \$30\/hr · listed on the posting/.test(p), p);
   assert(/TEST Pay Quiet Pay Pay not listed/.test(p), "no pay invented");
   assert(!/TEST Pay Low/.test(p), "the $25/hr role is left out");
-  eq((html.match(/class="ghost go" aria-label="Apply to /g) ?? []).length, 3);
+  eq((html.match(/class="apply" aria-label="Apply to /g) ?? []).length, 3);
   // Apply on a role with no prepared application: queued to be prepared, nothing to send, nothing approved.
   const ref = html.split('<li class="card" id="r-').slice(1).find((c) => c.includes("TEST Pay Quiet"))!.slice(0, 12);
-  const r = await handleFile(new Request(BASE, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ t: s, action: "review", ref, tag: "none" }).toString() }), d);
-  assert(/Getting your application ready\. Nothing is sent until you check it and approve it here/.test(plain(await r.text())));
+  const r = await handleFile(new Request(BASE, await phonePost({ t: s, action: "apply", ref, tag: "none" }, SECRET)), d);
+  assert(/Getting your application ready\. Nothing is sent until you check it here and tap Apply/.test(plain(await r.text())));
   eq(await pg!.sql(`select count(*) from public.career_apply_wanted where user_id = '${person}'`), "1");
   eq(await pg!.sql(`select count(*) from public.career_apply_jobs where user_id = '${person}'`), "0", "nothing approved, nothing queued to send");
   });
 } });
 
-Deno.test({ name: "results (handler): the same ask on Telegram or the web keeps the list reply (no results page)", ...T, async fn() {
+Deno.test({ name: "results (handler): the same ask on Telegram or the web, and an ask with no pay floor, get the page link alone as its own message", ...T, async fn() {
   if (skip()) return;
   await worldOnce();
   await withEnv(async () => {
   const chat = handler!.chat("rp-2");
-  for (const channel of ["telegram", undefined]) {
-    const t = await chat.say("I want frontend internships that pay $30/hr", channel ? { channel } : {});
+  for (const [said, channel] of [["I want frontend internships that pay $30/hr", "telegram"], ["I want frontend internships that pay $30/hr", undefined], ["find me 10 frontend internship roles", "imessage"]] as const) {
+    const t = await chat.say(said, channel ? { channel } : {});
     eq(t.status, 200);
-    assert(!/trainee\.example\/file/.test(t.reply) && /TEST Pay/.test(t.reply), `${channel ?? "web"}: ${t.reply}`);
+    const parts = t.body.parts as string[];
+    assert(Array.isArray(parts) && parts.length === 2, `${channel ?? "web"}: ${t.reply}`);
+    assert(/^https:\/\/trainee\.example\/file\?t=v1\./.test(parts[1]) && !/https?:/.test(parts[0]), `${channel ?? "web"}: the link is its own message`);
+    assert(!/TEST Pay/.test(t.reply) && !MARKDOWN.test(t.reply), `${channel ?? "web"}: no wall of postings, no markdown: ${t.reply}`);
   }
   });
 } });

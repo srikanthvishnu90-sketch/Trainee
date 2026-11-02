@@ -1,12 +1,12 @@
 // The results-page world shared by role-pay-results*.test.ts: four synthetic postings, a memory job store, the queue the
 // hash-bound Confirm writes, the person's chat outbox, sign-in fakes. No network, no database.
-import { type AppRow, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
+import { type AppRow, type FileDeps, type FileStore, handleFile } from "../../supabase/functions/trainee-file/handler.ts";
 import { type ListMeta, type PostingRow, type PreparedRow } from "../../supabase/functions/_shared/telegram_jobs.ts";
 import { feedUrlsFor } from "../../supabase/functions/_shared/file_link.ts";
 import { resultsFile, whatOf, type Picked } from "../../supabase/functions/_shared/role_results.ts";
-import { approvalCodes, memoryCodeStore } from "../../supabase/functions/_shared/approval_code.ts";
+import type { OpenQuestion, QuestionStore } from "../../supabase/functions/_shared/career_apply_questions.ts";
 import { searchTextOf } from "../../supabase/functions/_shared/posting_constraints.ts";
-import { signedIn } from "../architect/file-session-fakes.ts";
+import { phonePost, signedIn } from "../architect/file-session-fakes.ts";
 
 export const SECRET = "results-link-secret-0123456789-abcdef", BASE = "https://trainee.example/file";
 export const U = "11111111-1111-4111-8111-111111111111", V = "22222222-2222-4222-8222-222222222222";
@@ -54,6 +54,8 @@ export function world(o: { unprepared?: string[]; postings?: Posting[]; fields?:
   const queue: { user: string; prepared_id: string; payload_hash: string; payload: Record<string, unknown>; job_id: string }[] = [];
   const outbox: { user: string; key: string; text: string }[] = [];
   const wants: string[] = [];
+  // The employer's open questions (career_apply_questions) and the saves the page made.
+  const qs: OpenQuestion[] = [], saved: { id: string; answer: string }[] = [], prepared: string[] = [];
   const store: FileStore = {
     async remember(u, ref, job, shownAs) { kv.set(`${u}|job|${ref}`, { job, shownAs }); },
     async recall(u, ref) { return kv.get(`${u}|job|${ref}`) ?? null; },
@@ -73,8 +75,16 @@ export function world(o: { unprepared?: string[]; postings?: Posting[]; fields?:
     async wanted(u, url) { return u === U && wants.some((w) => postings.find((p) => p.job_id === w)?.url === url); },
   };
   const A = signedIn();
-  const codes = approvalCodes(memoryCodeStore(), async (user, m) => { outbox.push({ user, key: m.key, text: m.text }); return true; });
-  const deps: FileDeps = { ...A.deps, store, now: () => clock.t, env, codes,
+  const questions: QuestionStore = {
+    async open(u) { return u === U ? qs.filter((q) => q.answer === null).map((q) => ({ ...q })) : []; },
+    async countOpen(u) { return u === U ? qs.filter((q) => q.answer === null).length : 0; },
+    async get(_u, ids) { return qs.filter((q) => ids.includes(q.id)); },
+    async answer(u, id, answer) { if (u !== U) throw new Error("not yours"); const q = qs.find((x) => x.id === id); if (q) q.answer = answer; saved.push({ id, answer }); },
+    async shown() { return null; }, async setShown() {}, async lastAssistantIntent() { return null; },
+  };
+  const deps: FileDeps = { ...A.deps, store, now: () => clock.t, env, questions,
+    // Preparing again once the questions are answered: the computer finishes at once here, so the job has a NEW prepared row.
+    reprepare: async () => { for (const [i, p] of postings.entries()) if (wants.includes(p.job_id) && !preps.has(p.job_id)) { preps.set(p.job_id, prep(p.job_id, i + 1, postings, o.fields)); prepared.push(p.job_id); } return "started" as const; },
     tap: { async card() { return null as any; }, async prepared() { return []; }, async answer() { return []; } },
     // The hash-bound approval (production: career_apply_card_confirm, one transaction bound to exactly this hash): the queue row
     // carries the prepared application whose hash was approved.
@@ -88,7 +98,7 @@ export function world(o: { unprepared?: string[]; postings?: Posting[]; fields?:
       },
     } as any,
   };
-  return { store, preps, queue, outbox, wants, A, deps, postings, clock, closed };
+  return { store, preps, queue, outbox, wants, A, deps, postings, clock, closed, qs, saved, prepared };
 }
 export type W = ReturnType<typeof world>;
 export async function made(w: W, user = U, said = "I want frontend internships that pay $30/hr", extra: { name?: string | null; source?: "live" | "snapshot"; read?: string | null } = {}) {
@@ -98,3 +108,21 @@ export async function made(w: W, user = U, said = "I want frontend internships t
   if (!r) throw new Error("the results page was not made");
   return r!;
 }
+
+// ---------------------------------------------------------------- requests the way a signed-in phone browser sends them
+export const get = (w: W, s: string, query = "", init: RequestInit = {}) => handleFile(new Request(`${BASE}${query ? `?${query}` : ""}`, { ...init, headers: { cookie: `tf_s=${s}`, ...(init.headers as Record<string, string> ?? {}) } }), w.deps);
+// A post with the session cookie and the page token drawn for it (file_session.ts PAGE_TOKEN). pick: the ticked "ref:tag" values.
+export async function post(w: W, s: string, f: Record<string, string>, o: { pick?: string[]; headers?: Record<string, string> } = {}) {
+  const init = await phonePost({ ...f, t: s }, SECRET, { headers: o.headers });
+  if (o.pick?.length) init.body = String(init.body) + o.pick.map((p) => `&pick=${encodeURIComponent(p)}`).join("");
+  return handleFile(new Request(BASE, init), w.deps);
+}
+export const textOf = async (r: Response) => plain(await r.text());
+// The ref of a card by its title (and company), read from the page.
+export function refIn(html: string, title: string, company?: string) {
+  const card = html.split('<li class="card" id="r-').slice(1).find((c) => c.includes(`<h3 class="title">${title}</h3>`) && (!company || c.includes(`<p class="co">${company}</p>`)));
+  if (!card) throw new Error(`no card for ${title}`);
+  return card.slice(0, 12);
+}
+// One card's html.
+export const cardOf = (html: string, ref: string) => html.split(`<li class="card" id="r-${ref}">`)[1]?.split("</li>")[0] ?? "";

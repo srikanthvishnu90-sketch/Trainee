@@ -1,23 +1,22 @@
 // Review of #370 (2026-11-01): pay is stored as numbers (never re-read from its own display text), every converted figure says
 // it was converted and how, other currencies are shown as such and never silently compared with a dollar floor; and the
-// approve paths hold against hostile posting text, a missing or stale code, too many wrong codes, a paused account (the
-// person's kill switch) and a posting that closed after it was shown. Memory world (tests/helpers/results_world.ts).
+// approve paths hold against hostile posting text, a paused account (the person's kill switch) and a posting that closed
+// after it was shown (the chat code is gone: owner, 2026-11-02; apply-page.test.ts has the Apply flows). Memory world (tests/helpers/results_world.ts).
 import assertNode from "node:assert/strict";
 import { handleFile } from "../../supabase/functions/trainee-file/handler.ts";
 import { hashTag } from "../../supabase/functions/_shared/telegram_jobs.ts";
 import { conversionNote, parsePay, payGroup, payText } from "../../supabase/functions/_shared/role_pay.ts";
-import { DAY, HASH, made, NOW, plain, POSTINGS, U, world, type Posting, type W } from "../helpers/results_world.ts";
+import { DAY, HASH, made, NOW, plain, POSTINGS, post, U, world, type Posting, type W } from "../helpers/results_world.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 const HOURLY30 = { amount: 30, period: "hour" as const };
-const req = (w: W, o: { cookie?: string; body?: Record<string, string | string[]> }) => {
-  const body = o.body ? new URLSearchParams(Object.entries(o.body).flatMap(([k, v]) => (Array.isArray(v) ? v : [v]).map((x) => [k, x]))).toString() : undefined;
-  return handleFile(new Request("https://x.example/f", { method: body ? "POST" : "GET", headers: { ...(o.cookie ? { cookie: `tf_s=${o.cookie}` } : {}), ...(body ? { "content-type": "application/x-www-form-urlencoded" } : {}) }, body }), w.deps);
+const req = async (w: W, o: { cookie?: string; body?: Record<string, string | string[]> }) => {
+  if (o.body) { const { t, pick, ...f } = o.body as Record<string, string>; return post(w, t, f, { pick: pick as unknown as string[] | undefined }); }
+  return handleFile(new Request("https://x.example/f", { headers: o.cookie ? { cookie: `tf_s=${o.cookie}` } : {} }), w.deps);
 };
 const page = async (w: W, s: string) => await (await req(w, { cookie: s })).text();
 const refIn = (html: string, company: string) => { const c = html.split('<li class="card" id="r-').slice(1).find((x) => x.includes(`<p class="co">${company}</p>`)); assert(c, `a card for ${company}`); return c!.slice(0, 12); };
-const codeIn = (t: string) => /code is (\d{6})/.exec(t)?.[1] ?? "";
 const tag = (n: number) => hashTag(HASH(n));
 const posting = (n: number, company: string, pay: string | null, description = "<p>Build our web app.</p>", title = "Frontend Intern"): Posting => ({
   job_id: `greenhouse:p${n}:${n}`, provider: "greenhouse", company, title, location: "Remote", url: `https://boards.greenhouse.io/p${n}/jobs/${n}`, description, remote: "remote",
@@ -94,14 +93,14 @@ Deno.test("results file: the parsed pay is stored with each role and the page re
 });
 
 // ================================================================== hostile posting text and answers are text, never markup
-Deno.test("XSS: hostile titles, companies, descriptions and application answers are escaped on the list and on the review", async () => {
+Deno.test("XSS: hostile titles, companies, descriptions and application answers are escaped on the card and in What will be sent", async () => {
   const evil = `<script>alert(1)</script><img src=x onerror=alert(2)>`;
   const board = [posting(1, `Evil"><img src=x onerror=alert(3)> Inc`, "$40/hr", `<p>Hi</p><script>alert(4)</script><img src=x onerror=alert(5)>`, `Intern ${evil}`)];
   const { w, s } = await signedWorld({ postings: board, fields: [{ label: `Why? ${evil}`, value: `Because "><script>alert(6)</script>` }] });
   const list = await page(w, s);
   const ref = list.split('<li class="card" id="r-')[1].slice(0, 12);
-  const review = await (await req(w, { body: { t: s, action: "review", ref, tag: tag(1) } })).text();
-  for (const [name, html] of [["list", list], ["review", review]] as const) {
+  void ref;
+  for (const [name, html] of [["list", list], ["what will be sent", list]] as const) {
     const body = html.replace(/<style[\s\S]*?<\/style>/, "");
     assert(!/<script>alert|<img src=x|onerror=alert\(\d\)>/.test(body.replace(/&lt;[^&]*&gt;/g, "")), `${name}: no live markup from posting or answers`);
     assert(!/<script(?![^>]*telegram)/i.test(body), `${name}: no script element at all`);
@@ -109,61 +108,25 @@ Deno.test("XSS: hostile titles, companies, descriptions and application answers 
   }
   // The job store keeps posting text as plain text (telegram_jobs.ts clean: tags dropped); either way it is never markup.
   assert(/<h3 class="title">Intern (?:alert\(1\)|&lt;script&gt;alert\(1\)&lt;\/script&gt;)/.test(list), "the title shown as text");
-  assert(review.includes("Because &quot;&gt;&lt;script&gt;alert(6)&lt;/script&gt;"), "an answer shown as text");
+  assert(list.includes("Because &quot;&gt;&lt;script&gt;alert(6)&lt;/script&gt;"), "an answer shown as text, on the card");
 });
 
 // ================================================================== the approve paths
-Deno.test("approve selected: without a code, or with a wrong one, nothing is queued", async () => {
-  const { w, s } = await signedWorld();
-  const html = await page(w, s);
-  const picks = [`${refIn(html, "Acme Web")}:${tag(1)}`, `${refIn(html, "Globex")}:${tag(2)}`];
-  const rv = await (await req(w, { body: { t: s, action: "review_sel", pick: picks } })).text();
-  const set = /name="set" value="([0-9a-f]{16})"/.exec(rv)![1];
-  for (const code of ["", "000000", "12345", "abcdef"]) {
-    const t = plain(await (await req(w, { body: { t: s, action: "approve_sel", pick: picks, set, code } })).text());
-    assert(!/approved and queued/.test(t), `code ${JSON.stringify(code)}: ${t}`);
-  }
-  eq(w.queue.length, 0);
-  await req(w, { body: { t: s, action: "code_send", pick: picks, set } });
-  const wrong = String((Number(codeIn(w.outbox[0].text)) + 1) % 1000000).padStart(6, "0");
-  assert(/That code didn't work/.test(plain(await (await req(w, { body: { t: s, action: "approve_sel", pick: picks, set, code: wrong } })).text())));
-  eq(w.queue.length, 0);
-});
-
-Deno.test("code: it expires after 10 minutes; five wrong tries lock it, and then even the right code approves nothing", async () => {
+Deno.test("kill switch: a person who paused Trainee after the page was drawn gets nothing approved, and the list offers no Apply", async () => {
   const { w, s } = await signedWorld();
   const ref = refIn(await page(w, s), "Acme Web");
-  await req(w, { body: { t: s, action: "code_send", ref, tag: tag(1) } });
-  const code = codeIn(w.outbox[0].text);
-  w.clock.t = NOW + 10 * 60_000 + 1000;
-  assert(/That code has expired, so nothing was sent/.test(plain(await (await req(w, { body: { t: s, action: "approve", ref, tag: tag(1), code } })).text())));
-  eq(w.queue.length, 0);
-  await req(w, { body: { t: s, action: "code_send", ref, tag: tag(1) } });
-  const fresh = codeIn(w.outbox.at(-1)!.text), wrong = String((Number(fresh) + 1) % 1000000).padStart(6, "0");
-  for (let i = 0; i < 5; i++) await req(w, { body: { t: s, action: "approve", ref, tag: tag(1), code: wrong } });
-  assert(/Too many wrong codes, so nothing was sent/.test(plain(await (await req(w, { body: { t: s, action: "approve", ref, tag: tag(1), code: fresh } })).text())));
-  eq(w.queue.length, 0);
-});
-
-Deno.test("kill switch: a person who paused Trainee after the code was sent gets nothing approved, and the list offers no Apply", async () => {
-  const { w, s } = await signedWorld();
-  const ref = refIn(await page(w, s), "Acme Web");
-  await req(w, { body: { t: s, action: "code_send", ref, tag: tag(1) } });
-  const code = codeIn(w.outbox[0].text);
   w.deps.account = async () => ({ epoch: 0, version: 0, authority_version: 0, paused: true });
-  const t = plain(await (await req(w, { body: { t: s, action: "approve", ref, tag: tag(1), code } })).text());
+  const t = plain(await (await req(w, { body: { t: s, action: "apply", ref, tag: tag(1) } })).text());
   assert(/Trainee is paused for you/.test(t), t);
   eq(w.queue.length, 0);
   assert(!/aria-label="Apply to /.test(await page(w, s)), "no Apply while paused");
 });
 
-Deno.test("closed posting: a role that closed after it was shown approves nothing, even with a good code", async () => {
+Deno.test("closed posting: a role that closed after it was shown approves nothing", async () => {
   const { w, s } = await signedWorld();
   const ref = refIn(await page(w, s), "Acme Web");
-  await req(w, { body: { t: s, action: "review", ref, tag: tag(1) } });
-  await req(w, { body: { t: s, action: "code_send", ref, tag: tag(1) } });
   w.closed.add(POSTINGS[0].job_id);
-  const t = plain(await (await req(w, { body: { t: s, action: "approve", ref, tag: tag(1), code: codeIn(w.outbox[0].text) } })).text());
+  const t = plain(await (await req(w, { body: { t: s, action: "apply", ref, tag: tag(1) } })).text());
   assert(/Nothing was approved: .*closed/i.test(t), t);
   eq(w.queue.length, 0);
 });

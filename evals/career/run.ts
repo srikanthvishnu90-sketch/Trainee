@@ -63,6 +63,12 @@ export function spentUsd(results: { label?: string; cost_usd?: { brain?: number;
   return results.filter((r) => r.label !== label).reduce((a, r) => a + (Number(r.cost_usd?.brain) || 0) + (Number(r.cost_usd?.judge) || 0), 0);
 }
 
+// D-038 (owner, 2026-11-01: "$25 budget" on the Anthropic key for these tests, kept apart from the OpenAI eval budget): the
+// Anthropic brain spend already recorded (result files whose brain model is a claude- id), except the label being written.
+export function anthropicSpentUsd(results: { label?: string; model?: string | null; cost_usd?: { brain?: number } }[], label: string): number {
+  return results.filter((r) => r.label !== label && /^claude-/i.test(String(r.model ?? ""))).reduce((a, r) => a + (Number(r.cost_usd?.brain) || 0), 0);
+}
+
 // The cap: stop when what is spent, plus a reserve for one more item, reaches the budget.
 export function budgetStop(budget: number | null, spent: () => number, reserve = 0.25): () => string | null {
   return () => budget !== null && spent() + reserve >= budget ? `budget: $${spent().toFixed(3)} spent of $${budget.toFixed(2)}` : null;
@@ -109,12 +115,13 @@ if (import.meta.main) {
   const { agentTurn } = await import("../../supabase/functions/agent-chat/career_brain.ts");
   const { stagedDecision, STAGED_TOOL_POLICY } = await import("../../supabase/functions/agent-chat/career_staged.ts");
   const { callModel, modelConfig, newMeter, PRICES } = await import("../../supabase/functions/_shared/model_gateway.ts");
+  const { careerModelConfig } = await import("../../supabase/functions/agent-chat/release_model.ts");
   const { memoryAlertStore } = await import("../../supabase/functions/_shared/career_alert_store.ts");
   const { situationFrom } = await import("../../supabase/functions/_shared/career_situation.ts");
   const { memoryBriefStores } = await import("../../supabase/functions/_shared/career_brief_store.ts");
   const meter = newMeter(), judgeMeter = newMeter();
   const host = CareerHost.createCareerHost({ CareerAccess: core.CareerAccess, CareerOnboarding: core.CareerOnboarding, CareerRouter: core.CareerRouter, CareerDoorstep: core.CareerDoorstep, CareerReply: core.CareerReply, CareerContainment: core.CareerContainment });
-  const brainCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+  const brainCfg = careerModelConfig(Deno.env);
   const judgeCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("EVAL_JUDGE_MODEL") || "gpt-5-mini" };
   const judge2Model = Deno.env.get("EVAL_JUDGE_MODEL_2") || null;
   const judge2Cfg = judge2Model ? { ...modelConfig(Deno.env, "chat"), model: judge2Model } : null;
@@ -216,7 +223,16 @@ if (import.meta.main) {
   const before = spentUsd(prior, label);
   const now$ = () => before + (meter.usd_micros + judgeMeter.usd_micros) / 1e6;
   if (budget !== null) console.log(`budget $${budget.toFixed(2)} · already spent $${before.toFixed(3)} (${prior.length} result files)`);
-  const r = await runEval(items, brain, judge, budgetStop(budget, now$));
+  // D-038: a Claude brain runs only under its own cap (ANTHROPIC_EVAL_BUDGET_USD), checked before every item beside the eval cap.
+  const asked = (Deno.env.get("CAREER_REPLY_MODEL") ?? "").trim();
+  if (usesModel && asked && brainCfg.model !== asked) { console.log(`NOT RUN: CAREER_REPLY_MODEL=${asked} was refused (not on the rollback list, or its provider has no key); the default would be measured instead.`); Deno.exit(2); }
+  const anthropicBrain = usesModel && brainCfg.provider === "anthropic";
+  const aBudget = anthropicBrain ? Number(Deno.env.get("ANTHROPIC_EVAL_BUDGET_USD") ?? NaN) : null;
+  if (anthropicBrain && !(aBudget! > 0)) { console.log("NOT RUN: a claude- brain needs ANTHROPIC_EVAL_BUDGET_USD (the Anthropic spend cap)."); Deno.exit(2); }
+  const aBefore = anthropicSpentUsd(prior, label);
+  if (anthropicBrain) console.log(`anthropic budget $${aBudget!.toFixed(2)} · already spent $${aBefore.toFixed(3)}`);
+  const evalStop = budgetStop(budget, now$), aStop = budgetStop(aBudget, () => aBefore + meter.usd_micros / 1e6, 0.05);
+  const r = await runEval(items, brain, judge, () => evalStop() ?? (anthropicBrain ? aStop() : null));
   // The brain's own commit: a measurement commit on ci/brain-eval merges the branch measured as its second parent.
   let source = "unknown";
   try { const o = await new Deno.Command("git", { args: ["rev-parse", "--short", "HEAD^2"] }).output(); if (o.success) source = new TextDecoder().decode(o.stdout).trim(); } catch { /* no second parent */ }

@@ -31,6 +31,7 @@ const WHO = "(?:you|u|we|trainee)";
 const ASKS = [
   new RegExp(`^ (?:what|how much|what all|what else) (?:did|have|has) ${WHO} (?:do|done|get done|gotten done|got done|accomplish|accomplished|work on|worked on|send|sent|been up to|been doing|handle|handled)(?: for me)?(?: ${SPAN})? $`),
   new RegExp(`^ (?:what|how much) (?:got|has gotten|has been|was|did we get) (?:done|sent|accomplished)(?: for me)?(?: ${SPAN})? $`),
+  new RegExp(`^ what (?:emails?|applications?|apps|messages|jobs) (?:did|have|has) ${WHO} (?:send|sent|submit|submitted|apply to|applied to|apply for|applied for)(?: for me)?(?: ${SPAN})? $`),
   new RegExp(`^ how many (?:applications?|apps|emails?|jobs|things|messages) (?:did|have|has) ${WHO} (?:send|sent|submit|submitted|apply to|applied to|apply for|applied for|do|done|queue|queued)(?: for me)?(?: ${SPAN})? $`),
   new RegExp(`^ (?:(?:give|send|show) me )?(?:a |an |my |the )?(?:recap|activity|activity report|work log|log)(?: of| for)? (?:what you did )?${SPAN} $`),
   new RegExp(`^ (?:(?:give|send|show) me )?(?:a |an |my |the )?(?:daily|weekly|today'?s|this week'?s|yesterday'?s) (?:recap|activity|activity report|summary|report|work log)(?: please)? $`),
@@ -124,7 +125,8 @@ export function activityText(rows: ActivityRows, w: ActivityWindow, ask: Activit
     parts.push(`${plural(confirmations.length, "employer confirmation")} received`);
   }
   if (rows.emails !== null) parts.push(`${plural(mailed.length, "email")} sent from your account`);
-  const nothing = rows.apps !== null && rows.emails !== null && !queued.length && !changed.length && !mailed.length;
+  // Nothing only when every bucket is empty: a send or a confirmation in the window is work even when the row changed later.
+  const nothing = rows.apps !== null && rows.emails !== null && !queued.length && !sent.length && !confirmations.length && !undated.length && !changed.length && !mailed.length;
   if (!parts.length) {
     L.push(`${w.label}: I couldn't read your application queue or your email log just now, so I can't count anything. Ask me again in a minute.`);
     return { reply: L.join("\n"), status: "unreadable" };

@@ -32,7 +32,9 @@ Deno.test("ACT/1 the asks: today, yesterday and the week; a receipt, a status or
   eq(activityAsk("daily recap"), { span: "today", said: true });
   eq(activityAsk("what did you send"), { span: "week", said: false });
   eq(activityAsk("what have you been up to lately"), { span: "week", said: true });
-  for (const m of ["what did you send to Acme", "what did you send Acme exactly", "where are my applications", "any update?", "find me data analyst jobs today",
+  eq(activityAsk("what emails did you send today"), { span: "today", said: true });
+  eq(activityAsk("what applications have you submitted this week?"), { span: "week", said: true });
+  for (const m of ["what did you send to Acme", "what did you send Acme exactly", "what emails did you send to Acme", "what applications did you send to Stripe", "where are my applications", "any update?", "find me data analyst jobs today",
     "what did you do with my resume", "what should I do today", "recap", "summary", "what did I apply to", "show me the receipt for Stripe"]) eq(activityAsk(m), null, m);
   // Before: the receipt ask read "today" as a company. The handler now asks the activity turn first (ACT/5).
   assert(receiptAsk("what did you send today"), "the receipt ask still matches it on its own, so the handler's order is what fixes it");
@@ -102,6 +104,16 @@ Deno.test("ACT/3 the text: a send counted on its receipt's day, a confirmation o
   assert(/^You didn't say when, so this is the last 7 days\.\nThe last 7 days/.test(wk.reply), wk.reply);
   assert(/: 11 applications approved and queued, 6 sent to the employer \(4 confirmed by the employer so far, 2 not confirmed yet\), 4 employer confirmations received and 3 emails sent/.test(wk.reply), wk.reply);
   assert(/Days with work: 4 of 7\./.test(wk.reply), `Oct 30, Oct 31, Nov 2, Nov 3 (Chicago); Oct 29 (only a failure) and Nov 1 (only a queue) are not: ${wk.reply}`);
+  // Review: a send that finished yesterday and was confirmed today is yesterday's work, never "nothing happened".
+  const yApps: ActivityRows = { tz: CHI, receipts: true, emails: [], apps: [app("Yesterco", "confirmed", { created: start - DAY - 3 * HOUR, sent: start - DAY + 2 * HOUR, confirmed: start + HOUR })] };
+  const yest = activityText(yApps, windowOf("yesterday", T0, CHI), { span: "yesterday", said: true });
+  eq(yest.status, "shown", yest.reply);
+  assert(!/nothing happened/.test(yest.reply), yest.reply);
+  eq(yest.reply.split("\n")[0], "Yesterday (Nov 2, America/Chicago): 0 applications approved and queued, 1 sent to the employer (1 confirmed by the employer so far, 0 not confirmed yet), 0 employer confirmations received and 0 emails sent from your account.");
+  // A confirmation alone (sent before the window, row last changed after it) is work in its window too.
+  const cOnly: ActivityRows = { tz: CHI, receipts: true, emails: [], apps: [app("Confco", "confirmed", { created: start - 5 * DAY, sent: start - 5 * DAY, confirmed: start - DAY + HOUR, updated: start + HOUR })] };
+  const conf = activityText(cOnly, windowOf("yesterday", T0, CHI), { span: "yesterday", said: true });
+  assert(conf.status === "shown" && /1 employer confirmation received/.test(conf.reply) && !/nothing happened/.test(conf.reply), conf.reply);
   // Nothing on record: said, never padded.
   const none = activityText({ tz: CHI, apps: [], emails: [], receipts: true }, windowOf("today", T0, CHI), { span: "today", said: true });
   eq(none.status, "none");

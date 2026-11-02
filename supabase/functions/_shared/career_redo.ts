@@ -41,7 +41,7 @@ export function lastAnswerAs(lastIntent: string | null | undefined, discovery: a
   }
   if (/apply_status|overview|waiting_on_you|standing|activity/.test(i)) return "a status check on your applications";
   if (/resume|tailor/.test(i)) return "a resume request";
-  if (/prep|interview|mock/.test(i)) return "interview prep";
+  if (/^prep_|mock/.test(i)) return "interview prep"; // prep_* and the mock turns; packet_prep is an application packet, not prep
   if (/outreach|networking|email/.test(i)) return "an email or networking request";
   if (/offer|negotiat|salary|pay/.test(i)) return "an offer or pay question";
   if (/catchall|fallback/.test(i)) return "something I couldn't place";

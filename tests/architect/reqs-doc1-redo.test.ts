@@ -33,6 +33,10 @@ Deno.test("REDO/2 the reply: the miss owned, the last answer named from the reco
   eq(lastAnswerAs("career_discovery", null), "a job search", "no search on record: the role is never guessed");
   eq(lastAnswerAs("career_catchall", null), "something I couldn't place");
   eq(lastAnswerAs("some_new_intent", null), null);
+  eq(lastAnswerAs("prep_brief", null), "interview prep");
+  eq(lastAnswerAs("career_mock", null), "interview prep");
+  assert(lastAnswerAs("packet_prep", null) !== "interview prep", "an application packet is not interview prep");
+  assert(lastAnswerAs("career_apply_prepared", null) !== "interview prep", "a prepared application is not interview prep");
   const u = redoTurn({ message: "you're not listening", lastIntent: null })!;
   eq(u.status, "asked_unknown");
   assert(!/I took your last message as/.test(u.reply), `nothing said about an answer not on record: ${u.reply}`);

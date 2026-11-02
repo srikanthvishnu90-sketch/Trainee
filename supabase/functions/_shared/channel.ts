@@ -131,6 +131,8 @@ export const STALE_NOTE = "not sent: a job alert or report more than 48 hours pa
 // clock as it is at delivery, not only as it was when it was planned: a person who moved zones (or changed their quiet
 // hours) after a row was queued got it in the middle of their night.
 const QUIET_AWARE = /^(alert|report|receipt|status|followup|brief|digest):/;
+// The zone on a chat reminder's key, status:reminder:<id>:<zone> (career_reminders.ts reminderKey); null for any other row.
+const reminderZoneOf = (key: string) => { const z = /^status:reminder:[^:]+:([A-Za-z0-9_+\-\/]+)$/.exec(key)?.[1]; return z ? zoneOr(z, "") || null : null; };
 export const LIMITS_NOTE = "not sent: under the fit floor the person set, or past the alerts a day they asked for, since it was queued";
 export const CLOSED_SINCE =" (this posting has closed since this report was written)";
 // CHANNEL DELIVERY ROUND 2 (2026-10-30): a row bound to a channel the person no longer has, and no other channel to send it on.
@@ -256,8 +258,12 @@ export async function deliverDue(o: {
     if (QUIET_AWARE.test(m.key) && o.store.quietHours) {
       const q = await quietHoursOf(m.userId);
       if (q === undefined) { r.deferred++; continue; }
-      if (q) {
-        const tz = zoneOr(q.tz), hours = { quiet_start: q.quiet_start ?? DEFAULT_PREFS.quiet_start, quiet_end: q.quiet_end ?? DEFAULT_PREFS.quiet_end };
+      // REVIEW (PR #355): a reminder set in chat carries the zone the person named on its key (career_reminders.ts
+      // reminderKey); its quiet hours are on that clock, with the default hours when none are saved, as its reply said.
+      // Held on the saved zone (or Eastern), "9am London time" from a Chicago account waited until 7 AM Chicago.
+      const own = reminderZoneOf(m.key);
+      if (q || own) {
+        const tz = own ?? zoneOr(q!.tz), hours = { quiet_start: q?.quiet_start ?? DEFAULT_PREFS.quiet_start, quiet_end: q?.quiet_end ?? DEFAULT_PREFS.quiet_end };
         if (quietAt(o.now, tz, hours)) { await o.store.mark(m.id, { status: "queued", at: o.now, deliverAt: Math.max(o.now + 60000, nextAwake(o.now, tz, hours)) }); r.deferred++; continue; }
       }
     }

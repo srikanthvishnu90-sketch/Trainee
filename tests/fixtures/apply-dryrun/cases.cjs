@@ -7,7 +7,7 @@ module.exports = {
   facts,
   interactive: [
     { id: "greenhouse-acme", ats: "greenhouse", file: "greenhouse-acme.html",
-      answers: { Country: "United States", "Why do you want to work at Acme?": "Synthetic: I like robots.", "Are you legally authorized to work in the United States?": "Yes", "How did you hear about this job?": "Referral", "Which languages do you use at work? (select all that apply)": "Python; Go", "I acknowledge the privacy notice": "yes" },
+      answers: { Country: "United States", "Why do you want to work at Acme?": "Synthetic: I like robots.", "Are you legally authorized to work in the United States?": "Yes, I am authorized to work", "How did you hear about this job?": "Referral", "Which languages do you use at work? (select all that apply)": "Python; Go", "I acknowledge the privacy notice": "yes" },
       must_fill: ["First Name", "Last Name", "Email", "Phone", "Country", "Resume/CV", "Why do you want to work at Acme?", "Are you legally authorized to work in the United States?", "I acknowledge the privacy notice", "Which languages do you use at work? (select all that apply)"],
       expect_selected: { "Country": ["United States"], "Are you legally authorized to work in the United States?": ["Yes, I am authorized to work"], "How did you hear about this job?": ["Referral"], "Which languages do you use at work? (select all that apply)": ["Python", "Go"] },
       expect_eeo_decline: { "Gender": ["Decline to self-identify"], "Veteran Status": ["I do not wish to answer"], "Disability Status": ["I do not want to answer"] },

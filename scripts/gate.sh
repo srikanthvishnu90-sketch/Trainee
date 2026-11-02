@@ -118,6 +118,7 @@ edge_tests=(
   tests/edge/channel.test.ts
   tests/edge/channel-delivery.test.ts tests/edge/channel-integrity.test.ts
   tests/edge/channel-inbound.test.ts
+  tests/edge/telegram-link-reply-code.test.ts
   tests/edge/capability-journey.test.ts
   tests/edge/eval-judge.test.ts
   tests/edge/career-apply-store.test.ts
@@ -166,6 +167,7 @@ PY
 # as above: the steps and their commands are unchanged, and the union of core and architect is the old core.
 browser_node_tests=(
   tests/career-apply-dryrun.test.cjs
+  tests/career-apply-exact-option.test.cjs
   tests/career-approval-card-browser.test.cjs
   tests/career-dashboard-browser.test.cjs
   tests/career-extension-agent-submits.test.cjs

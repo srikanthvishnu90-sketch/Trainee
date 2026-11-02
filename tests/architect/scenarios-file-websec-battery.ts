@@ -42,7 +42,7 @@
 import assertNode from "node:assert/strict";
 import { handleFile, type AppRow, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
 import { jobViewOf, refOf, type JobView, type PreparedRow } from "../../supabase/functions/_shared/telegram_jobs.ts";
-import { LOGIN_TTL_MS, SESSION_TTL_MS, sha256, type PhoneAuth, type SessionStore } from "../../supabase/functions/_shared/file_session.ts";
+import { LOGIN_TTL_MS, pageTokenOf, SESSION_TTL_MS, sha256, type PhoneAuth, type SessionStore } from "../../supabase/functions/_shared/file_session.ts";
 import { renderPhoneLogin } from "../../supabase/functions/_shared/file_page.ts";
 import { memSessions } from "./file-session-fakes.ts";
 
@@ -363,6 +363,9 @@ export async function runScenario(s: Scenario, env: Env, rep: Report): Promise<v
     W.ids.set(id, who); rep.sessions++;
     return id;
   }
+  // The page's own Sign out, from the browser that holds the session (its cookie, and the page token its page carries; a session id
+  // alone in a form signs nothing out since the page-token round, file_session.ts PAGE_TOKEN).
+  const signOutAs = async (id: string, jar = new Map([["tf_s", id]])) => await post(jar, { t: (await pageTokenOf(await sha256(id), SECRET))!, action: "signout" });
   const pageOf = (body: string) => ({ t: /name="t" value="([^"]+)"/.exec(body)?.[1] ?? "", rows: [...body.matchAll(/name="ref" value="([0-9a-f]{12})"><input type="hidden" name="tag" value="([0-9a-f]{16}|none)"/g)].map((m) => ({ ref: m[1], tag: m[2] })), set: /name="set" value="([0-9a-f]{16})"/.exec(body)?.[1] ?? null });
   const readable = async (jar: Map<string, string>) => { const x = await call({ jar, headers: { "sec-fetch-site": "same-origin" } }); return x.status === 200 && PRIV.u.some((p) => x.body.toLowerCase().includes(p)) ? x : null; };
   const unchanged = async (before: string, what: string, extra = "") => { const after = await env.snapshot(); if (after !== before) violate(`${what} changed the session store`, extra); };
@@ -561,7 +564,7 @@ export async function runScenario(s: Scenario, env: Env, rep: Report): Promise<v
       const vJar = new Map<string, string>();
       const vid = r() < 0.4 ? await signIn("v", vJar) : null;
       const dead = r() < 0.5 ? (await signIn("u", new Map())) : null;
-      if (dead) { await post(new Map(), { t: dead, action: "signout" }); W.ids.delete(dead); }
+      if (dead) { await signOutAs(dead); W.ids.delete(dead); }
       for (let k = 1 + Math.floor(r() * 3); k > 0; k--) {
         const variant = pick(r, ["truncated", "upper", "extra", "spaces", "quoted", "encoded", "oversize", "name_case", "dup_dead_first", "dup_live_first", "dup_other_first", "empty_then_live", "many", "tf_l_tamper", "nul"] as const);
         let cookie = "";
@@ -599,7 +602,7 @@ export async function runScenario(s: Scenario, env: Env, rep: Report): Promise<v
       let planted = "";
       if (plant === "v_live") planted = (await signIn("v", new Map())) ?? "";
       else if (plant === "never_issued") planted = `fs1.${[...Array(64)].map(() => "0123456789abcdef"[Math.floor(r() * 16)]).join("")}`;
-      else if (plant === "u_revoked") { planted = (await signIn("u", new Map())) ?? ""; await post(new Map(), { t: planted, action: "signout" }); W.ids.delete(planted); }
+      else if (plant === "u_revoked") { planted = (await signIn("u", new Map())) ?? ""; await signOutAs(planted); W.ids.delete(planted); }
       else if (plant === "u_expired") { planted = (await signIn("u", new Map())) ?? ""; W.now += SESSION_TTL_MS + MIN; W.ids.delete(planted); }
       else planted = "planted-by-attacker";
       jar.set("tf_s", planted);
@@ -608,7 +611,7 @@ export async function runScenario(s: Scenario, env: Env, rep: Report): Promise<v
       if (plant === "v_live") {
         if (a.status !== 403) violate("another account's planted session was not stopped at the link", String(a.status));
         // the page's own Sign out (same origin) ends the planted session; then the link signs in
-        await post(jar, { t: planted, action: "signout" });
+        await signOutAs(planted, jar);
         W.ids.delete(planted);
       }
       const id = await signIn("u", jar, { link });

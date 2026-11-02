@@ -8,7 +8,7 @@ import { handleFile, type AppRow, type FileDeps, type FileStore } from "../../su
 import { hashTag, jobViewOf, refOf, sendJobCards, type PreparedRow } from "../../supabase/functions/_shared/telegram_jobs.ts";
 import type { TapStore } from "../../supabase/functions/_shared/channel_card_tap.ts";
 import { SESSION_ID, SESSION_TTL_MS as SESSION_MS, sha256 } from "../../supabase/functions/_shared/file_session.ts";
-import { signedIn } from "./file-session-fakes.ts";
+import { signedIn, phonePost } from "./file-session-fakes.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -79,7 +79,7 @@ const signed = async (user = U, list = LIST, now = NOW) => (await mintFileToken(
 const linkTok = async (user = U, list = LIST) => (await mintFileToken({ secret: SECRET, userId: user, list, now: NOW, kind: "l" }))!;
 // A signed-in page read: the session cookie (the link itself is exchanged once, see the link tests).
 const get = (d: FileDeps, t: string, extra = "") => handleFile(new Request(`https://x.example/f${extra ? "?" + extra.replace(/^&/, "") : ""}`, { headers: { cookie: `tf_s=${t}` } }), d);
-const post = (d: FileDeps, f: Record<string, string>) => handleFile(new Request("https://x.example/f", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(f).toString() }), d);
+const post = async (d: FileDeps, f: Record<string, string>) => handleFile(new Request("https://x.example/f", await phonePost(f, SECRET)), d);
 const plain = (h: string) => h.replace(/<style[\s\S]*?<\/style>/g, " ").replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/\s+/g, " ");
 async function ref(n: number) { return await refOf(U, `greenhouse:acme:${n}`); }
 
@@ -242,7 +242,8 @@ Deno.test("link states: an expired session, an invalid one and an unconfigured p
   const h = await late.text();
   assert(/signed out/i.test(plain(h)) && !h.includes("Acme") && !/<form/.test(h) && /href="https:\/\/t\.me\/TraineeBot"[^>]*>Get a new link</.test(h));
   eq((await get(deps(m), t.slice(0, -3) + "aaa")).status, 403);
-  eq((await get(deps(m, { env: { TRAINEE_FILE_LINK_SECRET: undefined } }), t)).status, 200, "a signed-in session does not need the link secret");
+  // The page's forms carry a page token made with the link secret (file_session.ts PAGE_TOKEN), so with no secret nothing opens.
+  eq((await get(deps(m, { env: { TRAINEE_FILE_LINK_SECRET: undefined } }), t)).status, 503, "no page is drawn without the secret its page token needs");
   eq((await handleFile(new Request("https://x.example/f"), deps(m))).status, 403);
   eq((await post(deps(m, { now: NOW + SESSION_MS + 5 }), { t, action: "apply", ref: await ref(1), tag: hashTag(H) })).status, 401);
   eq(m.log.answered, []);
@@ -474,7 +475,7 @@ Deno.test("link: the bot's link opens a phone sign-in, never the list; the pendi
   for (const secret of ["Acme", "Data Analyst", "Co2", "ada-resume", ">Apply<", 'value="apply"', "+1512555"]) assert(!html.includes(secret), `the sign-in page shows no ${secret}`);
   assert(!/name="t"/.test(html), "no session on the sign-in page");
   // a link token is never a session: not for actions, not as a cookie
-  eq((await post(d, { t: link, action: "apply", ref: await ref(1), tag: hashTag(H) })).status, 403);
+  eq((await post(d, { t: link, action: "apply", ref: await ref(1), tag: hashTag(H) })).status, 401);
   eq((await handleFile(new Request("https://x.example/file", { headers: { cookie: `tf_s=${link}` } }), d)).status, 403);
   eq(m.log.answered, []);
 });

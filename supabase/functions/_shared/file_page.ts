@@ -10,7 +10,7 @@ import { reasonWords } from "./career_apply_status.ts";
 import { BODY_FONT, BRAND, DISABLED_CSS, FAVICON, FONT_LINKS, PLUM, TOKENS_CSS } from "./brand.ts";
 
 export type Word = "queued" | "preparing" | "sending" | "submitted" | "confirmed" | "failed" | "not submitted" | "needs you" | "unknown" | "in applications";
-export interface Status { word: Word; detail: string }
+export interface Status { word: Word; detail: string; evidence?: string | null } // evidence: what the row holds that shows the outcome (an employer reference, a confirmation email); null/absent: none on file
 export interface AppRow {
   id: string; state: string; reason: string | null; confirmation_id: string | null; created_at: string; updated_at: string;
   email_confirmed_at: string | null; payload: Record<string, unknown>; company: string; url: string;
@@ -101,7 +101,8 @@ export function statusOf(o: { app: AppRow | null; wanted: boolean }): Status | n
   const a = o.app, who = a?.company || "The employer";
   if (a) {
     switch (a.state) {
-      case "confirmed": return { word: "confirmed", detail: `${who} confirmed it${a.confirmation_id ? ` (${a.confirmation_id})` : ""}.` };
+      case "confirmed": return { word: "confirmed", detail: `${who} confirmed it${a.confirmation_id ? ` (${a.confirmation_id})` : ""}.`,
+        evidence: a.confirmation_id ? `Employer reference ${a.confirmation_id}` : a.email_confirmed_at ? `Confirmation email received ${String(a.email_confirmed_at).slice(0, 10)} (UTC date)` : null };
       case "submitted_unconfirmed": return { word: "submitted", detail: `${who} hasn't confirmed it yet.` };
       case "queued": return { word: "queued", detail: "We haven't started it yet." };
       case "driving": return { word: "sending", detail: "Being sent now; not submitted yet." };

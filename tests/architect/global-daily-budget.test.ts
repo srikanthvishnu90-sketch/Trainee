@@ -234,11 +234,15 @@ Deno.test("every paid call goes through the gateway: no direct provider URL, key
 Deno.test("gateway source: the only sends are in callModel and responsesCall, each after its reservation, and the kill switch and fail-closed checks come first", async () => {
   const g = await Deno.readTextFile(new URL("model_gateway.ts", SHARED));
   const sends = [...g.matchAll(/await (?:request|send)\(/g)].map((m) => m.index!);
-  eq(sends.length, 3, "exactly three sends: OpenAI and Anthropic in callModel, OpenAI's web search in responsesCall");
-  const fn = g.indexOf("export async function callModel"), ws = g.indexOf("export async function responsesCall"), end = g.length;
-  assert(fn > 0 && ws > fn, "callModel, then responsesCall");
+  eq(sends.length, 4, "exactly four sends: OpenAI and Anthropic in callModel, OpenAI's web search in responsesCall, and the free moderation door");
+  const fn = g.indexOf("export async function callModel"), ws = g.indexOf("export async function responsesCall"), mod = g.indexOf("export async function moderate"), end = g.length;
+  assert(fn > 0 && ws > fn && mod > ws, "callModel, then responsesCall, then moderate");
+  // #354 (architect's written OK, 2026-11-01): moderate's one send is the only unreserved send, and it reaches /v1/moderations only.
+  const modSends = sends.filter((i) => i > mod);
+  eq(modSends.length, 1, "moderate sends once");
+  assert(/^await send\(MODERATIONS_URL,/.test(g.slice(modSends[0])) && /const MODERATIONS_URL = "https:\/\/api\.openai\.com\/v1\/moderations";/.test(g), "the unreserved send targets /v1/moderations only");
   // Each door, in its own text: pause check, reserve, refusal check, then its sends.
-  for (const [name, from, to] of [["callModel", fn, g.indexOf("// What a person reads when the provider is down", fn)], ["responsesCall", ws, end]] as const) {
+  for (const [name, from, to] of [["callModel", fn, g.indexOf("// What a person reads when the provider is down", fn)], ["responsesCall", ws, mod]] as const) {
     const body = g.slice(from, to), mine = sends.filter((i) => i > from && i < to).map((i) => i - from);
     assert(mine.length >= 1, `${name} sends`);
     const paused = body.indexOf("budgetPausedByEnv("), reserve = body.indexOf("await gate.reserve("), closed = body.indexOf("if (!got.ok)");

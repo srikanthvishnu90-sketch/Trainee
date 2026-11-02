@@ -91,6 +91,7 @@ Deno.test({
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
         const u = new URL(req.url);
+        if (u.pathname === "/v1/moderations" || (await req.clone().text()).includes("TRAINEE_CRISIS_SCREEN")) return Response.json({ id: "screen", model: "screen", results: [{ flagged: false, categories: {} }], choices: [{ index: 0, message: { role: "assistant", content: "NO" }, finish_reason: "stop" }], content: [{ type: "text", text: "NO" }], stop_reason: "end_turn", usage: { prompt_tokens: 1, completion_tokens: 1, input_tokens: 1, output_tokens: 1 } }); // #354: the crisis screen's moderation and classifier calls, not counted (architect OK 2026-11-02)
         if (u.host === "api.openai.com") {
           wire.reservedAtCall.push(Number((await pg.sql(`select coalesce(sum(reserved_micros), 0) from public.model_budget_days`)).trim()));
           return adversary(await req.json().catch(() => ({})));

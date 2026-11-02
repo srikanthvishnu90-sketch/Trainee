@@ -25,3 +25,4 @@ tools/node_modules/
 
 # P0 proven loop receipts (scripts/career/prove-loop.cjs): synthetic TEST persona runs, local only
 /tmp/prove-loop/
+evals/crisis/results/

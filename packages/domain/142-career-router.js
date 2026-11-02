@@ -12687,9 +12687,42 @@ const CareerRouter = (() => {
       reply: `You don't have a batch in flight right now — no application batch has been queued on this account that I can read back. Say "apply to N <role> roles" and I'll start one.` };
   }
 
+  // #354 SAFETY (2026-11-01): the router's crisis check is its FIRST check, on the person's own words (before detypo
+  // can rewrite one), through the one shared detector (139 CareerSafety.isDistress, which the trust turn and 125's
+  // screen also read). Before, it sat in handleAppendixSafety behind dozens of routes and its own short list, so "kms"
+  // or "i took too many pills" reached the fallback. The reply is 125's crisis answer, word for word.
+  // #354 re-review 2: the check-in remembers what else the person asked; "i'm fine" (or "you misread me") within two hours
+  // resumes it (resumeAfterCheckin). The handler notes it too when its trust turn answers first (noteCrisisCheckin).
+  // rest: what else was asked, when the caller judged it with the full screen (agent-chat: list, moderation, classifier,
+  // clause by clause); absent, the list's own reading (withoutDistress) is used at resume time.
+  function noteCrisisCheckin(ctx, rawText, rest) {
+    const m = threadMirrorForWrite(ctx);
+    if (m) m.crisisCheckin = Object.assign({ ask: s(rawText).slice(0, 600), at: nowOf(ctx) }, typeof rest === "string" ? { rest: rest.slice(0, 600) } : {});
+  }
+  function resumeAfterCheckin(rawText, c) {
+    const m = threadMirrorOf(c), ck = m && m.crisisCheckin;
+    if (!ck) return null;
+    delete threadMirrorForWrite(c).crisisCheckin; // one answer only: anything else said next simply goes on
+    if (!(Safety && Safety.isFineReply && Safety.isFineReply(rawText)) || Safety.isDistress(s(rawText)) || nowOf(c) - Number(ck.at || 0) > 2 * 3600 * 1000) return null;
+    const rest = typeof ck.rest === "string" ? ck.rest : Safety.withoutDistress ? Safety.withoutDistress(ck.ask) : "";
+    if (rest && rest.trim()) {
+      const r = dispatchChat(rest, c);
+      if (r && r.intent !== "career_fallback") return r;
+    }
+    return { intent: "conversation_ack", reply: "Thanks for telling me. I'm here whenever you need me. What should we work on?", resultStatus: "completed", sends: 0 };
+  }
+  function distressFirst(rawText, ctx) {
+    if (!(Safety && Safety.isDistress && Safety.isDistress(s(rawText)))) return null;
+    if (ctx) noteCrisisCheckin(ctx, rawText);
+    const r = Intel && Intel.respondToRequest ? Intel.respondToRequest(s(rawText)) : null;
+    let support = null;
+    try { support = Safety.distressResponse ? Safety.distressResponse({ text: s(rawText), profileFacts: [] }) : null; } catch { support = null; }
+    return { intent: "safety_support", reply: r && r.action === "support" ? r.text : support.text, resultStatus: "completed", sends: 0, support };
+  }
   function dispatchChat(text, ctx) {
     const c = ctx || {};
     const rawText = text;
+    { const d = distressFirst(rawText, c); if (d) return d; }
     text = expandShorthand(detypo(text)); // routing copy only — records keep the original (ROUTER DEAD ENDS 2026-10-31: shorthand too)
     const t = lc(text);
     if (!t) return null;
@@ -16482,6 +16515,9 @@ const CareerRouter = (() => {
   }
   function handleChat(text, ctx) {
     const c = ctx || {};
+    // #354 SAFETY: distress is answered before anything else reads the message (no part queued, no nudge appended).
+    { const d = distressFirst(text, c); if (d) return d; }
+    { const back = resumeAfterCheckin(text, c); if (back) { try { syncThreadOut(c); } catch { /* the resumed turn stands */ } return back; } }
     // COMPLEXITY WAVE (BUG-179): multi-intent accounting wraps the
     // dispatch — the parts are detected from the ORIGINAL text, the
     // dispatch serves what it serves, and whatever it did not serve
@@ -16586,6 +16622,6 @@ const CareerRouter = (() => {
       if (m && m.resumeIngest && typeof m.resumeIngest === "object" && intent !== "career_resume_ingest") m.resumeIngest.stale = true;
     } catch { /* a mark never breaks a turn */ }
   }
-  return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf };
+  return { handleChat, noteCrisisCheckin, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerRouter;

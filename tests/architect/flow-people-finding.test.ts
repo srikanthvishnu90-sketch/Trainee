@@ -86,6 +86,7 @@ Deno.test({ name: "people finding and intros at the real handler: import, who, a
       const u = new URL(req.url);
       if (u.origin === new URL(SUPABASE_URL).origin) return await viaDouble(req);
       outside.push(`${req.method} ${u.host}${u.pathname}${u.search}`);
+      if (u.pathname === "/v1/moderations" || (await req.clone().text()).includes("TRAINEE_CRISIS_SCREEN")) return Response.json({ id: "screen", model: "screen", results: [{ flagged: false, categories: {} }], choices: [{ index: 0, message: { role: "assistant", content: "NO" }, finish_reason: "stop" }], content: [{ type: "text", text: "NO" }], stop_reason: "end_turn", usage: { prompt_tokens: 1, completion_tokens: 1, input_tokens: 1, output_tokens: 1 } }); // #354: the crisis screen's moderation and classifier calls, not counted (architect OK 2026-11-02)
       if (u.host === "api.openai.com") return fakeOpenAI(await req.json());
       if (u.host === "gmail.googleapis.com") return fakeGmail(u);
       return new Response("not faked", { status: 599 });

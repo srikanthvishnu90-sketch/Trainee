@@ -488,6 +488,42 @@ jobs:
         with: { deno-version: "v2.9.6" }
       - name: The sending rail under load
         run: PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH deno test -A --no-check tests/load/send-rail-load.test.ts
+  crisis-eval:
+    name: crisis screen eval
+    runs-on: ubuntu-24.04
+    # #354 (architect, 2026-11-02): the crisis screen measured on every change that can move it, as a REQUIRED check
+    # (scripts/launch/deploy-standard.ts S1 reads every job here). Both model layers are real (OpenAI moderation, free;
+    # the classifier through callModel, capped at $3 a run by EVAL_CRISIS_BUDGET_USD). It fails below the merge gate (no
+    # regression against trunk's live list for the combined screen and for the list alone, false positives at most 2%) and
+    # reports the 98% recall goal every run. Sealed items appear only as counts and hashed ids. A change that touches none
+    # of the paths below passes without spending: "not affected". Needs the repository secret OPENAI_API_KEY.
+    timeout-minutes: 20
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: Does this change touch the crisis screen?
+        id: touched
+        run: |
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$base" ] || ! git cat-file -e "$base" 2>/dev/null; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if git diff --name-only "$base" HEAD | grep -qE '^(\.github/workflows/ci\.yml|evals/crisis/|packages/domain/(125-career-intel|139-career-safety|142-career-router)\.js|supabase/functions/_shared/(router_core\.career\.js|career_trust_turn\.ts|career_crisis_screen\.ts|model_gateway\.ts)|supabase/functions/agent-chat/handler-career\.ts)'; then echo "run=true" >> "$GITHUB_OUTPUT"; else echo "run=false" >> "$GITHUB_OUTPUT"; echo "not affected: no crisis-screen path changed"; fi
+      - name: The key is present
+        if: steps.touched.outputs.run == 'true'
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then echo "NOT RUN: the OPENAI_API_KEY secret is not set"; exit 2; fi
+      - name: Every layer over the sealed and dev corpora (the merge gate)
+        if: steps.touched.outputs.run == 'true'
+        run: deno run -A --no-check evals/crisis/run.ts --label "ci-${{ github.run_id }}" --enforce
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.touched.outputs.run == 'true'
+        with:
+          name: crisis-eval
+          path: evals/crisis/results/
+          retention-days: 30
   acceptance-telegram:
     name: acceptance (telegram)
     runs-on: ubuntu-24.04

@@ -26124,8 +26124,10 @@ const CareerIntel = (() => {
   // ---------- INTL-004 / Q30: fabrication & cheating refusal, distress protocol ----------
   function respondToRequest(text) {
     const t = String(text || "");
-    if (/(kill myself|end my life|self[- ]?harm|suicidal|don't want to (be alive|live))/.test(t.toLowerCase())) {
-      return { action: "support", text: "I hear you, and the career stuff can wait. Please reach out now: in the US you can call or text 988 (Suicide and Crisis Lifeline) any time, or text HOME to 741741. If you might act on this, call 911. You matter more than any application. When you're ready, I'm here — no grilling, at your pace." };
+    // The one distress detector (139 CareerSafety.isDistress; its policy is written there), never a list of our own.
+    const Safety = typeof CareerSafety !== "undefined" ? CareerSafety : require("./139-career-safety.js");
+    if (Safety.isDistress(t)) {
+      return { action: "support", text: "I want to check in, because what you wrote sounded really heavy. If you're thinking about hurting yourself, you can call or text 988 any time (US), or text HOME to 741741, and if you're in danger right now, call 911. I'm here and glad to keep talking. If I read that wrong, just tell me and we'll pick up where you left off." };
     }
     if (/(i'?m a failure|i feel like a failure|everyone is ahead of me|i'?ll never get in|hopeless about)/i.test(t)) {
       return { action: "support", text: "You're not a failure — you're early in a process whose timelines are genuinely brutal and mostly hidden. Honest version: your current position is a starting point, not a verdict, and there are routes from it. So the plan shrinks to one doable step, and here it is, picked: today, write down the one role you want next and the one person who could open a door to it. That is the whole task for today — small, real, and it counts." };
@@ -31947,18 +31949,191 @@ const CareerSafety = (() => {
       note: "The answer discloses the AI help that actually happened (tailoring/proofreading) and claims nothing that did not." };
   }
 
+  // ---------- Distress detector: THE one list (#354 safety follow-up, 2026-11-01) ----------
+  // Every path reads this: the trust turn (supabase/functions/_shared/career_trust_turn.ts), 125's request screen
+  // (respondToRequest), this module's distress protocol and the router's first check (142 handleChat / dispatchChat).
+  // Four separate lists each missed what another caught ("kms", "i took too many pills", "i have a plan to end it").
+  //
+  // POLICY. A false alarm costs one kind check-in; a miss can cost a life. So a message that MIGHT be about ending one's
+  // life or self-harm gets the check-in, hyperbole included ("i'd kill myself if i bombed it", "i'm not suicidal, just
+  // tired"). Only idioms that are plainly about work or about something else stay with the router, and each is named
+  // below (BENIGN, or a pattern's own guard): "this job is killing me", "kill it in the interview", "career suicide",
+  // "my career is dead in the water", "i'll die on this hill", "12 kms from the office", "end it with a strong closing
+  // line", "take my life in a new direction". Frustration without self-harm words ("this market is brutal", "i'm a
+  // failure") is not a crisis here: 125's own support line answers the second.
+  //
+  // This list is the deterministic layer. In agent-chat a second layer runs beside it on every inbound message: OpenAI's
+  // moderation endpoint (self-harm, self-harm/intent, self-harm/instructions; supabase/functions/_shared/career_crisis_screen.ts).
+  // Either layer flagging gives the crisis reply; a moderation error or timeout leaves this list's answer, never a block.
+  // Re-review of #354 (2026-11-01) widened it: method and lethality questions, any overdose or count of pills (named
+  // drugs too), "off my balcony", rope and noose, a weapon on oneself, cutting and burning, worthlessness ("don't deserve
+  // to live"), not existing or not waking up, "time to end it", and core Spanish, French and German phrases.
+  //
+  // How it reads: lower case, curly quotes straightened, apostrophes dropped (dont / don't, im / i'm read the same),
+  // "2" between words read as "to"; the message is split into clauses at . ! ? , ; : and new lines, the benign idioms
+  // are cut out of each clause, and each clause is tested on its own (so "$" below means the end of a clause).
+  const BENIGN = [
+    /\b(?:career|professional|social|political|commercial|financial|resume) suicide\b/g,
+    /\bsuicide (?:prevention|squad)\b/g,
+    /\b\d+(?:\.\d+)? ?kms\b/g,                                        // a distance
+    /\bdie on (?:this|that|the) hill\b/g,
+    /\b(?:if you |if someone |if somebody )?(?:put|had|held) a gun to my head\b/g,   // "gun to my head, i'd pick stripe"
+    /\bgun to my head i(?:d| would)\b/g,
+    /\blearn(?:ing|ed)? the ropes\b/g, /\bpoint of life insurance\b/g,
+  ];
+  // Pills and drugs as a person names them (a count of three or more of any of them, or a bottle, is an overdose's words).
+  const DRUG = String.raw`(?:sleeping |sleep |pain )?(?:pills?|tablets?|meds|medication|medicine|painkillers?|tylenol|acetaminophen|paracetamol|advil|ibuprofen|aspirin|aleve|motrin|xanax|valium|klonopin|benadryl|ambien|melatonin|oxy\w*|percocet|vicodin|codeine|morphine|fentanyl|insulin|antidepressants?|sertraline|zoloft|prozac|lexapro|lithium|adderall|heroin)`;
+  const MANY = String.raw`(?:(?:like|about|around|maybe|over|almost|at least|nearly|roughly|probably) )?(?:too many|too much|a bunch of|a lot of|all (?:of )?(?:my|the)|a whole (?:bottle|pack|box|strip) of|the whole (?:bottle|pack|box|strip) of|a (?:bottle|handful|fistful) of|(?:my|the) (?:whole )?bottle of|so many|lots of|extra|[3-9]|\d{2,}|three|four|five|six|seven|eight|nine|ten|twenty|thirty|fifty|a hundred)`;
+  const SELF = String.raw`(?:my ?self|my ?slef|myslef|mself)`;
+  // What may follow "take my life" / "end my life" in a crisis: nothing, a time, or the next clause's start.
+  const AFTER = String.raw`(?=$| (?:tonight|today|now|soon|anymore|already|someday|eventually|and|because|cause|cuz|bc|lol|i|if|tbh|honestly|so|but|when|after|before)\b)`;
+  const DISTRESS_PATTERNS = [
+    /\bsu[iy]?c[iy]?d\w*/, /\bsuis?id\w*/,                              // suicide, suicidal, sucide, suicde, suiside
+    /\bsewer ?slide\b/, /\bself ?delet\w*/, /\bun ?aliv\w*/,             // slang
+    /\bkms+\b/, /\bk m s\b/,
+    new RegExp(String.raw`\bkil+(?:l?ing|l?ed|s)? ?${SELF}`),           // kill myself, killing myself, kil my self, killmyself
+    /(?:^|\b(?:just|please|pls|plz|someone|somebody|want (?:someone )?to|wish (?:someone|something) would|could someone)) kill me\b/,
+    new RegExp(String.raw`\b(?:hurt|harm|cut|hang|shoot|drown|poison|starve|stab|suffocate|strangle)(?:t?ing|ed|s)? ${SELF}`),
+    new RegExp(String.raw`\bburn(?:s|ed|t|ing)? ${SELF}(?! out\b)`),                   // "burn myself out" is work
+    /\b(?:i|ive|i have|im|i am|been|started|start|keep|kept|back to|relapsed)(?: been| started)? (?:cutting|self harming|burning)(?: again)?(?: (?:lately|recently|tonight|today))?$/,
+    /\bcutting (?:my )?(?:arms?|legs?|thighs?|skin|wrists?)\b/, /\brelapsed\b.{0,20}\b(?:cutting|self harm)/,
+    /\bself ?(?:harm|injur|hurt)\w*/, /\b(?:slit|slitting|cut|cutting|slash\w*) (?:my )?wrists?\b/,
+    /\bend(?:ing)? my (?:own )?(?:life|lyfe|lyf)\b/,                                 // always (trunk caught it anywhere)
+    new RegExp(String.raw`\b(?:take|taking|took) my (?:own )?(?:life|lyfe|lyf)${AFTER}`), // "take my life in a new direction" is work
+    /\bend(?:ing)? (?:it all|everything|all of it)\b/, /\btime to end it(?: all)?$/,
+    // "end it" as a plan; "end it with a closing line", "end it here" are an email's or a call's end.
+    /\b(?:want|wanna|going|gonna|plan|planning|ready|thinking about|thought about|decided|deciding|try|trying|need|about|how) (?:to )?end(?:ing)? it(?: (?:all|tonight|today|now|soon|for good|already|forever))?$/,
+    /\b(?:want|wish|need)(?:ed)? (?:it|it all|everything|this all|all of this|all this|my life) (?:all )?(?:to )?(?:just )?(?:end|be over)\b/,
+    /\b(?:want|wish|need)(?:ed)? (?:it all|everything|all of this|all this) (?:to )?(?:just )?stop\b/,
+    /\bmy life is (?:over|done|finished|pointless|meaningless|worthless)\b/,
+    /\bhate (?:being alive|living|existing|my life|my existence)\b/,
+    /\b(?:dont|do not|dont even) deserve (?:to )?(?:live|be alive|exist|be here|life)\b/, /\bdeserve to (?:die|be dead)\b/,
+    /\bshould(?:nt| not) (?:be alive|exist|be here anymore|have been born)\b/, /\bshould(?:nt| not) be here$/,
+    /\b(?:whats|what is|wheres|where is|is there|theres|there is) (?:the |even a |any |no )?point (?:of|in|to) (?:living|life|being alive|going on|existing|anything|any of (?:it|this))\b/,
+    // "Rather die than ..." (architect, 2026-11-02): DISTRESS, unless the thing after "than" is plainly something the person
+    // wants ("miss this interview", "not get this job"); a joke marker (lol, lmao, haha, jk, 😂, 🤣) also exempts it
+    // (isDistress, RATHER_DIE). "Rather die than go back to that job / be unemployed / tell my parents" stay distress: in a
+    // job search those can be real. "Rather die than keep living like this" and every "rather be dead" always are.
+    /\brather (?:be dead|not be alive|not exist|not wake up)\b/,
+    /\brather die than (?:keep|go on|going on|live|living|be alive|be here|continue|wake up|face (?:another|tomorrow|life))\b/,
+    /\bstop (?:existing|being alive)\b/, /\bstop living\b(?! (?:paycheck|like|in|with|at|for|on|off|under|out|from))/, /\bcease to exist\b/, /\b(?:want|wish|need)(?:ed)? (?:to )?(?:not exist|cease to exist|vanish forever|not be alive)\b/,
+    /\b(?:hope|hopefully|wish|praying|pray) (?:that )?i (?:dont|never|do not|wont|will not) wake up\b/,
+    /\b(?:life|living) (?:is|isnt|is not|aint) (?:not )?worth (?:it|living)\b/, /\bnot worth living\b/,
+    /\b(?:want|wanna|wan|wnt|ready|deserve|should|wish i could) (?:to )?(?:just )?di+e+\b/,
+    /\b(?:going|gonna) (?:to )?di+e+(?: (?:tonight|today|soon|anyway))?$/,
+    /\bwish i (?:was|were|was just|were just) dead\b/,
+    /\bwish i (?:wasnt|werent|was not|were not) (?:alive|here|around|born|living)\b/,
+    /\bwish i (?:had never been|hadnt been|was never|were never|never was) born\b/,
+    /\bbetter off (?:dead|without me|if i (?:was|were) (?:gone|dead)|if i (?:wasnt|werent) here)\b/,
+    /\b(?:no ?one|nobody) would (?:miss me|notice if i (?:died|was gone|were gone)|care if i (?:died|was gone|were gone|disappeared|wasnt here))\b/,
+    /\b(?:dont|do not|dnt|never) (?:want|wanna) (?:to )?(?:live|be alive|exist|wake up|be around anymore|go on|keep living)\b/,
+    /\b(?:dont|do not|dnt) (?:want|wanna) (?:to )?be here\b/,                         // anywhere (trunk caught it anywhere)
+    /\b(?:want|wanna|wish|need)(?: to)? (?:just )?not be (?:here|around)(?: anymore)?$/, /\b(?:want|wanna|wish|need)(?: to)? (?:just )?not be alive\b/,
+    /\b(?:no|zero) (?:reason|point) (?:to|in|of) (?:live|living|go on|going on|being alive|be alive|life)\b/, /\bnothing (?:left )?to live for\b/,
+    /\bcant (?:keep living|live like this)\b/, /\bcant go on(?: (?:anymore|like this|living))?$/,
+    /\b(?:tired|sick) of (?:living|being alive|life|existing)\b/, /\bdone (?:with life|living)\b/, /\bgive up on life\b/,
+    /\b(?:sleep|go to sleep|fall asleep) and (?:never|not) wake up\b/, /\bnever wake up\b/, /\bhope i (?:dont|never|do not) wake up\b/,
+    /\b(?:jump|jumping|jumped|throw myself|throwing myself|step|stepping|walk|walking|drive|driving) (?:off|off of|from|in front of|into) (?:a |the |some |my |our |this |that )?(?:\w+ )?(?:bridge|building|roof|rooftop|cliff|balcony|ledge|train|bus|car|traffic|truck|window|tower|overpass|parking garage)\b/,
+    new RegExp(String.raw`\b(?:took|take|taken|taking|swallowed|swallow|swallowing|downed|down|ate|chugged|popped|pop|popping) ${MANY} (?:(?:my|his|her|their|the) (?:\w+ )?)?${DRUG}\b(?! (?:course|courses|class|classes|exam|exams|school|student|program|rotation|degree|major|lecture)\b)`),
+    new RegExp(String.raw`\b(?:how many|how much)\b.{0,40}\b(?:to (?:die|kill (?:me|myself|someone|a person)|overdose|od)|(?:is|are|would be) (?:lethal|fatal|deadly|enough to die)|(?:would|will|does it take to|it takes to|to) (?:kill (?:me|you|someone|a person)|die))\b`),
+    /\b(?:lethal|fatal|deadly) (?:dose|amount|overdose|combination|mix)\b/,
+    /\b(?:painless|easiest|easy|quickest|quick|fastest|best|surest|least painful|most painless|simplest) (?:way|ways|method|methods) (?:to|of) (?:die|dying|kill myself|killing myself|end it|end my life|commit suicide)\b/,
+    /\bways to (?:die|kill myself|end my life)\b/,
+    /\b(?:want|wanna|going|gonna|plan|planning|thinking (?:about|of)|try|tried|trying|about|ready|decided) (?:to )?(?:od|oding|odd)\b/, /\b(?:i|just|almost|nearly) (?:odd|oded|od)(?: last night| tonight|$)/,
+    new RegExp(String.raw`\bod(?:d|ing|ed)? on\b(?! (?:coffee|caffeine|sugar|meetings|work|info|information|netflix|tv|memes)\b)`),
+    new RegExp(String.raw`\boverdos\w*\b(?! (?:of|on|from) (?!(?:my |the |some |all |a bottle of )?${DRUG})\w)`),          // never "overdose of coffee"
+    /\b(?:tie|tied|tying|make|made|making|got|have|bought|buy) (?:a |the |my )?noose\b/, /\bnoose\b/,
+    /\b(?:bought|buy|got|get|have|found) (?:a |some |the )?rope\b(?! access)/, /\brope\b.{0,30}\b(?:neck|hang|ceiling|beam|closet)\b/,
+    /\b(?:gun|pistol|rifle|firearm|knife|blade|razor)\b.{0,60}\b(?:on myself|to my (?:head|wrist|throat|chest)|in my mouth|end it|kill myself|use it on me)\b/,
+    /\buse (?:it|that|this|the gun|the knife) on myself\b/, /\bgun to my head\b/, /\bblow my (?:brains|head) out\b/, /\bdisappear forever\b/, /\bmy (?:last|final) goodbye\b/,
+    // Re-review 2 (2026-11-01): method, intent and time cues.
+    new RegExp(String.raw`\b(?:off|offing|offed) ${SELF}`),
+    /\bbullet (?:in|into|through) my (?:head|brain|skull|mouth)\b/, /\bput a (?:bullet|gun) (?:in|to) my (?:head|brain|mouth)\b/,
+    /\b(?:how|best way|ways?|easiest way|painless(?:ly)?|quickest way|fastest way|surest way) (?:to |do (?:i|you) )?(?:kill|hang|shoot|drown|poison|off|cut) (?:yourself|myself|urself|oneself|ur self|your self)\b/,
+    /\b(?:going to|gonna|gon|will|plan to|planning to|about to|ready to|want to|wanna|im gonna|ima|imma) (?:jump|hang|rope)(?: (?:myself|tonight|today|now|soon|off something))*$/,
+    /\b(?:going to|gonna|will|plan to|planning to|about to|ready to|want to|wanna|imma) end(?:ing)? things(?: (?:tonight|today|now|soon|for good|this week|this weekend|forever))?$/,
+    /\b(?:end|ending) things (?:tonight|today|this week|this weekend|for good|forever)\b/, /\bi(?:ll| will) end things(?: soon| tonight)?$/,
+    /\bhope i (?:die|dont wake up|never wake up|just die)\b(?! laughing| of laughter)/, /\bi (?:want|wanna) (?:to )?be dead\b/, /\b(?:just )?let me die\b/,
+    /\b(?:pills?|meds|tablets) to end it\b/, /\bbought (?:pills|a gun|rope|a rope|a razor|razor blades) (?:to|so i can) (?:end|die|kill)/,
+    /\b(?:bath|bathtub|tub|shower)\b.{0,30}\b(?:razor|blade|knife)\b/, /\b(?:razor|blade|knife)\b.{0,30}\b(?:bath|bathtub|tub|wrists?)\b/,
+    /\b(?:how (?:many|much)|what dose|what amount|enough)\b.{0,40}\bkills? (?:you|me|a person|someone|people)\b/, // never "this commute kills me"
+    // Italian, Portuguese, Dutch, Polish, Turkish, Indonesian, Tagalog, Hindi (romanized), Vietnamese, Swedish (Latin script, accents dropped).
+    /\b(?:voglio|vorrei) (?:morire|uccidermi|ammazzarmi|farla finita)\b/, /\bmi voglio (?:uccidere|ammazzare)\b/, /\bnon voglio piu vivere\b/, /\bla faccio finita\b/,
+    /\bquero (?:morrer|me matar|me suicidar|sumir para sempre)\b/, /\bnao quero mais viver\b/, /\bvou me (?:matar|suicidar)\b/,
+    /\bik wil (?:dood|sterven|niet meer leven|zelfmoord)\b/, /\bzelfmoord\b/, /\bvan kant maken\b/,
+    /\bchce (?:umrzec|sie zabic|zabic sie)\b/, /\bnie chce (?:juz )?zyc\b/, /\bsamoboj\w*/,
+    /\bolmek istiyorum\b/, /\bkendimi oldur\w*/, /\bintihar\w*/, /\byasamak istemiyorum\b/,
+    /\b(?:ingin|mau|pengen|pingin) mati\b/, /\bbunuh diri\b/, /\btidak mau hidup lagi\b/,
+    /\b(?:mamatay|magpakamatay|magpapakamatay)\b/, /\bayoko nang mabuhay\b/,
+    /\bmarna (?:chahta|chahti|hai|chahiye)\b/, /\b(?:khudkushi|aatmahatya|atmahatya)\b/, /\bjeena nahi\b/,
+    /\bmuon (?:chet|tu tu)\b/, /\btu sat\b/,
+    /\bvill (?:do|inte leva)\b/, /\bta livet av mig\b/, /\bsjalvmord\b/,
+    // Spanish, French, German: the core phrases (accents are dropped before reading).
+    /\b(?:quiero|quisiera|voy a|me voy a|ganas de) (?:morir(?:me)?|matarme|suicidarme|quitarme la vida|desaparecer para siempre)\b/,
+    /\bme (?:quiero|voy a) (?:morir|matar|suicidar)\b/, /\bno quiero (?:vivir|seguir viviendo|estar viva?|despertar)\b/,
+    /\b(?:acabar|terminar) con mi vida\b/, /\bno vale la pena vivir\b/,
+    /\b(?:je veux|j ai envie de|envie de|je vais) (?:mourir|me tuer|me suicider|en finir|disparaitre)\b/, /\bje (?:ne )?veux plus vivre\b/, /\b(?:envie|veux) d ?en finir\b/,
+    /\bmettre fin a mes jours\b/, /\bme (?:tuer|suicider)\b/,
+    /\bich (?:will|mochte|moechte|werde) (?:sterben|mich umbringen|mich toten|mich toeten|nicht mehr leben)\b/, /\bmich umbringen\b/,
+    /\bich bring(?:e)? mich um\b/, /\bselbstmord\w*/, /\bsuizid\w*/, /\bnicht mehr leben\b/, /\bmein leben beenden\b/,
+  ];
+  // Normalizing (re-review 2): a word mixing letters and digits is leetspeak (mys3lf, d13, k1ll; a pure number stays a
+  // number, so "30 advil" keeps its count); "*" inside a word is a censored letter (k*ll, f***ing); a letter typed three
+  // or more times is one (diiiie, suuuicidal); three or more single letters in a row are one word (k i l l); inserted
+  // profanity and fillers are dropped (fucking, fr, ngl, deadass); common misspellings of "myself" are mended.
+  const LEET = { 0: "o", 1: "i", 3: "e", 4: "a", 5: "s", 7: "t", 8: "b", 9: "g" };
+  const FILLER = /\b(?:fucking|fuckin|fking|fkn|fcking|freaking|frickin|effing|f+ing|goddamn|damn|bloody|literally|honestly|lowkey|highkey|ngl|fr|tbh|deadass|on god|ong|rn|lol|lmao)\b/g;
+  function distressClauses(text) {
+    // Letter look-alikes inside a word before anything else: "kiII" (capital i for l), "k!ll", "ki11", "k1ll".
+    const look = String(text == null ? "" : text).replace(/([a-z])II/g, "$1ll").replace(/(?<=[a-zA-Z])!(?=[a-zA-Z])/g, "i").replace(/(?<=[a-zA-Z])11(?=\b|[a-zA-Z])/g, "ll").replace(/(?<=[a-zA-Z])\|\|/g, "ll");
+    const t = look.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\u00df/g, "ss").toLowerCase()
+      .replace(/[‘’ʼ`´]/g, "'").replace(/'/g, "")
+      .replace(/(\w)-(\w)/g, "$1 $2")
+      .replace(/\b(?=[a-z0-9@$*]*[a-z])(?=[a-z0-9@$*]*[0-9@$])[a-z0-9@$*]+\b/g, (w) => w.replace(/[0-9]/g, (d) => LEET[d] ?? d).replace(/@/g, "a").replace(/\$/g, "s"))
+      .replace(/\bk\*+ll/g, "kill").replace(/\bf\*+(?:ing|in|k)\b/g, "fucking").replace(/\*/g, "")
+      .replace(/([a-z])\1{2,}/g, "$1");
+    return t.split(/[.!?,;:\n]+/).map((c) => {
+      let x = c.replace(/[^a-z0-9 ]+/g, " ").replace(/\b2\b/g, "to").replace(/\s+/g, " ").trim();
+      x = x.replace(/\b(?:[a-z] ){2,}[a-z]\b/g, (m) => m.replace(/ /g, ""));
+      x = x.replace(FILLER, " ").replace(/\bmy ?(?:slf|slef|sef|sefl|elf|selfe)\b/g, "myself").replace(/\s+/g, " ").trim();
+      for (const b of BENIGN) x = x.replace(b, " ").replace(/\s+/g, " ").trim();
+      return x;
+    }).filter(Boolean);
+  }
+  // Scripts the normalizer cannot keep (Cyrillic, Japanese, Korean, Chinese, Arabic): read on the raw text.
+  const NON_LATIN = [/умер(?:еть|ти)/, /покончить с собой/, /самоубийств/, /не хочу (?:больше )?жить/, /убить себя/,
+    /死にたい/, /自殺/, /生きていたくない/, /消えたい/, /죽고 ?싶/, /자살/, /살고 ?싶지 ?않/, /想死/, /自杀/, /不想活/,
+    /أموت/, /انتحار/, /أقتل نفسي/, /لا أريد أن أعيش/,
+    /मरना चाह/, /मर जाना चाह/, /आत्महत्या/, /ख़ुदकुशी/, /खुदकुशी/, /जीना नहीं चाह/, /मुझे मरना है/, /ज़िंदा नहीं रहना/];
+  // The message with its distress clauses taken out: what else the person asked, resumed after a check-in they answer
+  // with "i'm fine" (142 resumeAfterCheckin). Empty when the whole message was the distress.
+  function withoutDistress(text) {
+    return String(text == null ? "" : text).split(/[.!?;\n]+|,\s*/).map((c) => c.trim()).filter((c) => c && !isDistress(c)).join(". ");
+  }
+  // A reply to the check-in saying they are fine or were misread.
+  const FINE_RE = /^(?:(?:no|nah|nope|haha|lol|oh|sorry|honestly)[,! ]+)*(?:(?:i'?m|im|i am)\s+(?:fine|ok(?:ay)?|good|alright|all right|safe|not suicidal|okay now)|(?:you )?misread(?: me)?|false alarm|(?:i was |i'?m |im )?(?:just )?(?:venting|joking|kidding|exaggerating)|not like that|all good|i didn'?t mean it like that|it was (?:a )?(?:joke|figure of speech))\b/i;
+  const isFineReply = (text) => FINE_RE.test(String(text == null ? "" : text).trim().replace(/[’‘]/g, "'"));
+  const RATHER_DIE = /\brather die\b(?! than (?:miss(?:ing)? (?:this|the|my|out on|it)|lose (?:this|the) (?:offer|job|chance|opportunity)|not get(?:ting)? (?:this|the) (?:job|offer|role|internship)|pass(?:ing)? (?:this|it) up)\b)/;
+  const JOKE = /\b(?:lol+|lmao+|lmfao|haha+|hehe+|jk|jkjk)\b|\u{1F602}|\u{1F923}/u;
+  function isDistress(text) {
+    const raw = String(text == null ? "" : text).normalize("NFC").toLowerCase();
+    if (NON_LATIN.some((p) => p.test(raw))) return true;
+    const clauses = distressClauses(text);
+    if (clauses.some((c) => DISTRESS_PATTERNS.some((p) => p.test(c)))) return true;
+    return !JOKE.test(raw) && clauses.some((c) => RATHER_DIE.test(c));
+  }
+
   // ---------- Distress protocol (T-82) ----------
-  const CRISIS_RE = /\b(kill myself|end it all|self[- ]?harm|suicide|don't want to (?:live|be here)|no reason to (?:live|go on))\b/i;
   function distressResponse(input) {
     const o = input || {}, text = String(o.text || "");
-    const crisis = CRISIS_RE.test(text);
+    const crisis = isDistress(text);
     const facts = o.profileFacts || [];
     const grounding = facts.length ? `Here is what is also true, from your own record: ${facts[0]}.` : "Here is what is also true: one rough stretch is not a verdict on you.";
     return {
       protocol: "distress", crisis,
       warmth_first: true, honesty_kept: true,
       text: crisis
-        ? `I'm really glad you told me. Please reach out right now to someone who can help in person — in the US you can call or text 988 (Suicide and Crisis Lifeline) any time, or text HOME to 741741. You matter more than any job search; everything here can wait. ${grounding}`
+        ? `I'm really glad you told me. If you're thinking about hurting yourself, you can call or text 988 (Suicide and Crisis Lifeline) any time in the US, or text HOME to 741741. I'm here, and everything else can wait. ${grounding}`
         : `That sounds genuinely rough, and I'm not going to pretend a pep talk fixes it. ${grounding} Not everything is working — some of it is a brutal market for interns right now, and that's real, not a character flaw. Let's make today tiny: one step, then stop.`,
       one_step: o.oneStep || "Send the one follow-up email that's already drafted — two minutes, then you're done for today.",
       resources: crisis ? ["988 Suicide and Crisis Lifeline (US): call or text 988", "Crisis Text Line: text HOME to 741741"] : [],
@@ -31990,7 +32165,7 @@ const CareerSafety = (() => {
       text: `Stopped everything. ${report.sent_confirmed} already-sent item(s) stay sent (they were provider-confirmed). ${report.aborted_not_sent} in-flight item(s) had no confirmation and are marked NOT sent — nothing is half-sent. ${report.queued_halted} queued item(s) are halted and will not move until you say resume.` };
   }
 
-  return { DAILY_START, DAILY_CEILING, keyOf, createSuppressionStore, suppress, isSuppressed, applySuppression, forceOptOut, sendSchedule, planSendRequest, referralClaimCheck, assessmentRequest, aiUseAnswer, distressResponse, createQueueState, stopEverything };
+  return { DAILY_START, DAILY_CEILING, keyOf, createSuppressionStore, suppress, isSuppressed, applySuppression, forceOptOut, sendSchedule, planSendRequest, referralClaimCheck, assessmentRequest, aiUseAnswer, isDistress, withoutDistress, isFineReply, distressResponse, createQueueState, stopEverything };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerSafety;
 
@@ -49304,9 +49479,42 @@ const CareerRouter = (() => {
       reply: `You don't have a batch in flight right now — no application batch has been queued on this account that I can read back. Say "apply to N <role> roles" and I'll start one.` };
   }
 
+  // #354 SAFETY (2026-11-01): the router's crisis check is its FIRST check, on the person's own words (before detypo
+  // can rewrite one), through the one shared detector (139 CareerSafety.isDistress, which the trust turn and 125's
+  // screen also read). Before, it sat in handleAppendixSafety behind dozens of routes and its own short list, so "kms"
+  // or "i took too many pills" reached the fallback. The reply is 125's crisis answer, word for word.
+  // #354 re-review 2: the check-in remembers what else the person asked; "i'm fine" (or "you misread me") within two hours
+  // resumes it (resumeAfterCheckin). The handler notes it too when its trust turn answers first (noteCrisisCheckin).
+  // rest: what else was asked, when the caller judged it with the full screen (agent-chat: list, moderation, classifier,
+  // clause by clause); absent, the list's own reading (withoutDistress) is used at resume time.
+  function noteCrisisCheckin(ctx, rawText, rest) {
+    const m = threadMirrorForWrite(ctx);
+    if (m) m.crisisCheckin = Object.assign({ ask: s(rawText).slice(0, 600), at: nowOf(ctx) }, typeof rest === "string" ? { rest: rest.slice(0, 600) } : {});
+  }
+  function resumeAfterCheckin(rawText, c) {
+    const m = threadMirrorOf(c), ck = m && m.crisisCheckin;
+    if (!ck) return null;
+    delete threadMirrorForWrite(c).crisisCheckin; // one answer only: anything else said next simply goes on
+    if (!(Safety && Safety.isFineReply && Safety.isFineReply(rawText)) || Safety.isDistress(s(rawText)) || nowOf(c) - Number(ck.at || 0) > 2 * 3600 * 1000) return null;
+    const rest = typeof ck.rest === "string" ? ck.rest : Safety.withoutDistress ? Safety.withoutDistress(ck.ask) : "";
+    if (rest && rest.trim()) {
+      const r = dispatchChat(rest, c);
+      if (r && r.intent !== "career_fallback") return r;
+    }
+    return { intent: "conversation_ack", reply: "Thanks for telling me. I'm here whenever you need me. What should we work on?", resultStatus: "completed", sends: 0 };
+  }
+  function distressFirst(rawText, ctx) {
+    if (!(Safety && Safety.isDistress && Safety.isDistress(s(rawText)))) return null;
+    if (ctx) noteCrisisCheckin(ctx, rawText);
+    const r = Intel && Intel.respondToRequest ? Intel.respondToRequest(s(rawText)) : null;
+    let support = null;
+    try { support = Safety.distressResponse ? Safety.distressResponse({ text: s(rawText), profileFacts: [] }) : null; } catch { support = null; }
+    return { intent: "safety_support", reply: r && r.action === "support" ? r.text : support.text, resultStatus: "completed", sends: 0, support };
+  }
   function dispatchChat(text, ctx) {
     const c = ctx || {};
     const rawText = text;
+    { const d = distressFirst(rawText, c); if (d) return d; }
     text = expandShorthand(detypo(text)); // routing copy only — records keep the original (ROUTER DEAD ENDS 2026-10-31: shorthand too)
     const t = lc(text);
     if (!t) return null;
@@ -53099,6 +53307,9 @@ const CareerRouter = (() => {
   }
   function handleChat(text, ctx) {
     const c = ctx || {};
+    // #354 SAFETY: distress is answered before anything else reads the message (no part queued, no nudge appended).
+    { const d = distressFirst(text, c); if (d) return d; }
+    { const back = resumeAfterCheckin(text, c); if (back) { try { syncThreadOut(c); } catch { /* the resumed turn stands */ } return back; } }
     // COMPLEXITY WAVE (BUG-179): multi-intent accounting wraps the
     // dispatch — the parts are detected from the ORIGINAL text, the
     // dispatch serves what it serves, and whatever it did not serve
@@ -53203,7 +53414,7 @@ const CareerRouter = (() => {
       if (m && m.resumeIngest && typeof m.resumeIngest === "object" && intent !== "career_resume_ingest") m.resumeIngest.stale = true;
     } catch { /* a mark never breaks a turn */ }
   }
-  return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf };
+  return { handleChat, noteCrisisCheckin, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerRouter;
 

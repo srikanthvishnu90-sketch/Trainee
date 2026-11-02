@@ -114,6 +114,12 @@ import { supabaseFileStore } from "../trainee-file/store.ts";
 import { createFileService, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
 import { factsForTurn, replyWriterOn, writable, writeReply, writerChannel } from "../_shared/career_reply_writer.ts"; // V1 TEXTING VOICE
 import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
+import { trustTurn } from "../_shared/career_trust_turn.ts";
+import { classifierFromEnv, crisisScreen, moderationFromEnv, screenRest } from "../_shared/career_crisis_screen.ts"; // #354: the two-layer crisis screen // REQS DOC 1: what Trainee is, privacy, what it sees, referrals, thanks
+import { readConnections } from "../_shared/career_capabilities.ts"; // REQS DOC 1: every connection on the account
+
+// REQS DOC 1: what holds the card's place for a message in distress (see `distress` below); never shown or saved as a card.
+const DISTRESS_HOLD = { reply: "", status: "distress_hold" } as any;
 import { reminderTurn, supabaseReminderStore } from "../_shared/career_reminders.ts"; // REQS DOC 2: reminders
 import { overviewTurn } from "../_shared/career_overview.ts"; // REQS DOC 2: "any update?", "what's waiting on me?"
 
@@ -282,6 +288,13 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         flowCtx.note = redactionNote([...new Set([...input.redacted, ...red.removed])]);
       }
     }
+    // #354 SAFETY: the crisis screen starts now, beside the rest of the turn's reads: the deterministic list at once, and a
+    // moderation client with a 1.5 s cap. It never rejects; it is awaited where `distress` is decided below, and a
+    // moderation error or timeout leaves the list's verdict (career_crisis_screen.ts). The client is model_gateway.ts's
+    // moderation door, on with CAREER_CRISIS_MODERATION=on (set by trainee-go-live.sh on every deploy).
+    // Three layers (#354 re-review 2): the list, OpenAI moderation (primary) and the crisis classifier through callModel.
+    const crisisLayers = { moderation: moderationFromEnv(Deno.env), classifier: classifierFromEnv(Deno.env) };
+    const crisisPending = crisisScreen(message, crisisLayers);
 
     // GO-LIVE FLIP (2026-10-13, owner ruling: "the career version is the
     // final switch" — the money version is gone from live). Career is the
@@ -468,6 +481,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // skipped for it, so a button is never read as a typed word by whichever consumer happens to be waiting.
       const tapRaw = body.screen_tap && typeof body.screen_tap === "object" ? body.screen_tap as Record<string, unknown> : null;
       const tapIn = tapRaw ? { qid: String(tapRaw.qid ?? ""), answer: String(tapRaw.answer ?? "") } : null;
+      // REQS DOC 1: a message in distress gets the crisis answer (career_trust_turn.ts), never read as a card's answer, a mock
+      // interview's answer or any other waiting turn's, and even on a paused account. It holds the card's place, so every turn
+      // below that waits on "!card" stands down, and its own branch answers first. #354 safety follow-up: it is read before
+      // the connector, site-refusal and Outlook turns too, which stand down for it (no disconnect or link runs on such a
+      // message), and its branch is the first in the answer chain below.
+      const crisis = await crisisPending;
+      if (crisis.distress && !crisis.rules) console.log(`crisis screen: ${[crisis.moderation === "flagged" ? "moderation" : "", crisis.classifier === "flagged" ? "classifier" : ""].filter(Boolean).join(" and ")} flagged what the list missed`);
+      const distress = !tapIn && !careerTask && !careerBatch && crisis.distress;
       // M4: Outlook (Microsoft Graph) as a peer of Gmail, from any channel: "connect my outlook" / "use my work email" makes a
       // one-time link bound to this person, channel and thread; "disconnect outlook" deletes the access and what was read
       // from it and cancels its pending sends (_shared/outlook_connector.ts). Code's, before every other turn.
@@ -475,23 +496,23 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // its state and use, and what waits on it), "connect gmail" (a one-time link from any channel), "disconnect gmail" /
       // "disconnect outlook" (revoke where possible, erase, cancel pending sends, read back), and a task that needs a
       // connector not connected ("check my outlook"): asked once with the link, parked, resumed by the connect callback.
-      const connAns = !tapIn && !careerTask && !careerBatch && connectorAsk(message)
+      const connAns = !distress && !tapIn && !careerTask && !careerBatch && connectorAsk(message)
         ? await connectorChatTurn({ admin, env: Deno.env, fetch, now: Date.now, message, userId: user.id, threadId: tid, bridge: isBridgeCall })
           .catch((e) => { console.error("connector turn:", e?.message ?? e); return connectorFailure(message); })
         : null;
       // OWNER RULE: never LinkedIn, Indeed or Handshake. An ask to apply, message or act on one of them, or a link to one,
       // is declined plainly, naming the site, before every other turn (no card, question, apply, link read or batch sees
       // it): nothing is queued and nothing is left waiting for a later "yes" (career_networking.ts siteRefusedTurn).
-      const siteNo = !tapIn && !connAns && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const siteNo = !distress && !tapIn && !connAns && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await siteRefusedTurn({ message, userId: user.id, threadId: tid, now: Date.now(), state: ctx as unknown as Record<string, unknown>,
             store: supabaseOutreachStore(admin), events, model: null })
           .catch((e) => { console.error("site refusal turn:", e?.message ?? e); return null; })
         : null;
-      const outlookAns = !tapIn && !connAns && !siteNo && !careerTask && !careerBatch && outlookAsk(message)
+      const outlookAns = !distress && !tapIn && !connAns && !siteNo && !careerTask && !careerBatch && outlookAsk(message)
         ? await outlookChatTurn({ admin, message, userId: user.id, threadId: tid, bridge: isBridgeCall, now: Date.now(), env: Deno.env })
           .catch((e) => { console.error("outlook turn:", e?.message ?? e); return null; })
         : null;
-      const card = !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const card = distress ? DISTRESS_HOLD : !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         // FEATURE 16: OWNER RULE (2026-10-26): no card without a confirmed resume on file (resumeReady).
         ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id), store: supabaseCardStore(admin), events })
         : null;
@@ -844,6 +865,21 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             return ids.length - onRail.size;
           } }).catch((e) => { console.error("outreach status turn:", e?.message ?? e); return null; })
         : null;
+      // REQS DOC 1 (_shared/career_trust_turn.ts): "are you a bot", "do you sell my data", "what do you store", "can you see my
+      // other apps", a personal legal/tax/medical question, a bare thanks: answered by code from the privacy policy and the
+      // live connections, after every code-first turn above and before any brain or the router. Pure; nothing is changed.
+      // The record is read only when the question needs it: every connection row, and what is saved for this person (the
+      // resume on file, confirmed facts, the tracker and the queue, through the status read model); a failed read is null.
+      const trustAns = !careerTask && !careerBatch && (distress || !host.isHostControlled(message, ctx))
+        ? await trustTurn({ message, distress, deps: {
+            connections: () => readConnections(admin, user.id).catch(() => null),
+            stored: async () => {
+              const [resume, rows] = await Promise.all([resumeOnFileReader(admin, user.id)(), supabaseStanding(admin)(user.id).catch(() => null)]);
+              const lost = (k: string) => !rows || rows.unreadable.includes(k);
+              return { resume, facts: CareerProfile.confirmedFacts((ctx as any).profile ?? {}).length,
+                tracker: lost("tracker") ? null : (rows!.tracker ?? []).length, applications: lost("applications") ? null : (rows!.jobs ?? []).length };
+            } } }).catch((e) => { console.error("trust turn:", e?.message ?? e); return null; })
+        : null;
       // FEATURE 13: staged brain release. With CAREER_BRAIN=staged, a turn that every code-first turn above passed on, and
       // that the router itself would answer only with advice or conversation, goes to the brain (career_staged.ts); every
       // action stays code's and the router still answers a model failure. Unset or CAREER_BRAIN=router, it is never
@@ -852,7 +888,13 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // FEATURE GV (Google verification, 2026-10-26): "disconnect gmail" is answered by the connector framework above
       // (connAns), through the same _shared/google_disconnect.ts: revoked at Google, tokens, rows and mail rows deleted,
       // read back, and now pending sends cancelled. Before any other turn, on every channel.
-      if (connAns) {
+      if (distress && trustAns) {
+        out = { reply: trustAns.reply, intent: trustAns.intent, resultStatus: trustAns.status, contained: false, handler: "trust" };
+        // What else they asked, judged by the full screen clause by clause, waits for an "i'm fine" (142 resumeAfterCheckin).
+        const rest = await screenRest(message, crisisLayers).catch(() => "");
+        try { (CareerRouter as any).noteCrisisCheckin?.(ctx, message, rest); } catch { /* the check-in still stands; "i'm fine" then reads as a new message */ }
+        if (trustAns.meta) agentMeta = { ...(agentMeta || {}), ...trustAns.meta };
+      } else if (connAns) {
         out = { reply: connAns.reply, intent: connAns.intent, resultStatus: connAns.resultStatus, contained: false, handler: connAns.handler };
         if (connAns.meta) agentMeta = { ...(agentMeta || {}), ...connAns.meta };
       } else if (siteNo && !mock) { // a mock in progress keeps its answer (its guards are the card's, WO-025)
@@ -938,6 +980,16 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (offerAns.card) agentMeta = { offer_card: offerAns.card };
       } else if (outreachStatus) {
         out = { reply: outreachStatus.reply, intent: outreachStatus.intent, resultStatus: outreachStatus.status, contained: false, handler: "outreach_status" };
+      } else if (trustAns?.rest) {
+        // A referral asked beside something else: the referral line, then the router's answer to the message for the rest
+        // ("and should I counter"); the other ask is never dropped. A router that cannot place the whole message gets the rest.
+        let restOut = host.runTurn(message, ctx) as CareerTurnResult;
+        if (CareerReply.isFallbackText(restOut.reply) || restOut.intent === "career_catchall") restOut = host.runTurn(trustAns.rest, ctx) as CareerTurnResult;
+        out = { ...restOut, reply: `${trustAns.reply}\n${restOut.reply}`, ...(restOut.parts ? { parts: [`${trustAns.reply}\n${restOut.parts[0]}`, ...restOut.parts.slice(1)] } : {}) };
+        agentMeta = { ...(agentMeta || {}), referral: trustAns.intent };
+      } else if (trustAns) {
+        out = { reply: trustAns.reply, intent: trustAns.intent, resultStatus: trustAns.status, contained: false, handler: "trust" };
+        if (trustAns.meta) agentMeta = { ...(agentMeta || {}), ...trustAns.meta };
       } else if (!careerTask && !careerBatch && ((AGENT_BRAIN_RELEASED && chooseBrain(Deno.env) === "agent") || staged.toBrain()) && !host.isHostControlled(message, ctx)) {
         const meter = ledger.track(newMeter());
         const cfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };

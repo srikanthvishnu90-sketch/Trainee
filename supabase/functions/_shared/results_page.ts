@@ -11,7 +11,8 @@
 import { cap1, esc, hostOf, layout, webUrl, initialOf, type Row } from "./file_page.ts";
 import { BRAND } from "./brand.ts";
 import { stampHtml } from "./results_stamp.ts";
-import { applyHelp, countsOf, coverage, NOT_LISTED, specOf } from "./results_spec.ts";
+import { applyHelp, coverage, NOT_LISTED, specOf, stateCountsOf, stateOfDismissed, type Spec } from "./results_spec.ts";
+import { DESIGN_CSS, DESIGN_FONT_LINK } from "./results_design.ts";
 
 export type PayFilter = "any" | "meets" | "listed";
 export interface ResultRow extends Row {
@@ -91,26 +92,31 @@ dl.facts dt{color:var(--mute)}dl.facts dd{margin:0;overflow-wrap:anywhere}dd.pai
 .things .err{margin:8px 0 0;color:var(--bad);font-size:16px}.things .hand{margin:0;font-size:16px}
 .back{display:inline-flex;align-items:center;min-height:44px;color:var(--link);font-size:16px}
 @media (max-width:480px){.card .apply,.card .ghost.go,.selbar .apply,.things .apply{width:100%}.acts{flex-direction:column;align-items:stretch}}
-`;
+` + DESIGN_CSS;
 const hidden = (token: string, action: string, extra = "") => `<input type="hidden" name="t" value="${esc(token)}"><input type="hidden" name="action" value="${action}">${extra}`;
 const logoOf = (r: Row) => `<span class="logo"><span class="lettermark" aria-hidden="true">${esc(initialOf(r.job.company))}</span>${r.logo ? `<img src="${esc(r.logo)}" alt="${esc(r.job.company)} logo" width="48" height="48" loading="lazy" referrerpolicy="no-referrer">` : ""}</span>`;
-const specChip = (r: ResultRow) => { const sp = specOf(r); return `<span class="chip ${r.status ? r.status.word.replace(/ /g, "-") : "ready"}" role="status">${esc(sp.label)}</span>`; };
+// The chip is the colour AND the spec word (design 1.6, "Submitted - confirmed" only with evidence); the class keeps the row's status word.
+const chipOf = (sp: Spec, cls: string) => `<span class="chip ${cls} t-${sp.tone}" role="status">${esc(sp.label)}</span>`;
+const specChip = (r: ResultRow) => chipOf(specOf(r), r.status ? r.status.word.replace(/ /g, "-") : "ready");
 const approvable = (r: Row) => !r.status && !r.byHand && !r.blocked;
 
 function payFact(r: ResultRow): string {
-  if (!r.payShown) return `<dt>Pay</dt><dd>Pay not listed</dd>`;
+  if (!r.payShown) return `<dt>Pay</dt><dd class="key">Pay not listed</dd>`;
   // The posting's own figure is "listed on the posting"; a conversion is its own line and says how it was made (Q672, Q684).
-  return `<dt>Pay</dt><dd class="paid">${esc(r.payShown)} <span class="src">· listed on the posting${r.payNote ? `; ${esc(r.payNote)}` : ""}</span>${r.payConv ? `<br><span class="src conv">${esc(r.payConv)}</span>` : ""}</dd>`;
+  return `<dt>Pay</dt><dd class="paid key">${esc(r.payShown)} <span class="src">· listed on the posting${r.payNote ? `; ${esc(r.payNote)}` : ""}</span>${r.payConv ? `<br><span class="src conv">${esc(r.payConv)}</span>` : ""}</dd>`;
 }
 const markForm = (r: ResultRow, f: ResultsFeed, kind: "dismiss" | "restore") => kind === "dismiss"
   ? `<form method="post" class="mark">${hidden(f.token, "dismiss", `<input type="hidden" name="ref" value="${esc(r.ref)}">`)}<button type="submit" class="ghost small" aria-label="Dismiss ${esc(r.job.title)} at ${esc(r.job.company)}">Dismiss</button><p class="markhelp">Hides this role from your list. Private to you, and you can bring it back. It does not touch any application.</p></form>`
   : `<form method="post" class="mark">${hidden(f.token, "restore", `<input type="hidden" name="ref" value="${esc(r.ref)}">`)}<button type="submit" class="ghost small" aria-label="Restore ${esc(r.job.title)} at ${esc(r.job.company)}">Restore</button></form>`;
 function card(r: ResultRow, f: ResultsFeed): string {
   const j = r.job, link = webUrl(j.url), host = link ? hostOf(link) : "";
-  const facts = `<dl class="facts">${payFact(r)}<dt>Where</dt><dd>${esc(r.place || NOT_LISTED)}</dd>${r.posted ? `<dt>Posted</dt><dd>${esc(r.posted.replace(/^Posted /, ""))}</dd>` : ""}<dt>Source</dt><dd>${esc(j.source || NOT_LISTED)}</dd><dt>Requisition ID</dt><dd>${esc(r.reqId || NOT_LISTED)}</dd><dt>Checked</dt><dd>${esc((r.checked ?? "Check time unknown").replace(/^Checked /, ""))}</dd></dl>`;
-  const fit = r.why?.length ? `<p class="fit"><b>Why it fits:</b> ${esc(r.why.slice(0, 2).join(" "))}</p>` : "";
+  const facts = `<dl class="facts">${payFact(r)}<dt>Where</dt><dd class="key">${esc(r.place || NOT_LISTED)}</dd>${r.posted ? `<dt>Posted</dt><dd>${esc(r.posted.replace(/^Posted /, ""))}</dd>` : ""}<dt>Source</dt><dd>${esc(j.source || NOT_LISTED)}</dd><dt>Requisition ID</dt><dd>${esc(r.reqId || NOT_LISTED)}</dd><dt>Checked</dt><dd>${esc((r.checked ?? "Check time unknown").replace(/^Checked /, ""))}</dd></dl>`;
+  // The fit callout: one concrete reason from confirmed facts and a visible gap where the data has one. Nothing is invented.
+  const gapText = r.payNote ? `Pay: ${r.payNote}.` : !r.payShown ? "Pay not listed, so it wasn't checked against what you asked." : r.openQs ? (r.guide || `${r.openQs} employer ${r.openQs === 1 ? "question needs" : "questions need"} your answer.`) : "";
+  const fitLines = [r.why?.length ? `<p><b>Why it fits:</b> ${esc(r.why.slice(0, 1).join(" "))}</p>` : "", gapText ? `<p class="gap"><b>Gap:</b> ${esc(gapText)}</p>` : ""].join("");
+  const fit = fitLines ? `<div class="fit">${fitLines}</div>` : "";
   const more = `<details><summary>Full posting</summary>${r.full ? `<p class="full">${esc(r.full)}</p>` : `<p class="full">The full posting text isn't on file.</p>`}</details>`;
-  const open = host ? `<p class="open"><a href="${esc(link)}" rel="noopener noreferrer">Open on ${esc(host)}</a></p>` : "";
+  const open = host ? `<p class="open"><a href="${esc(link)}" rel="noopener noreferrer" aria-label="View role: ${esc(j.title)} on ${esc(host)}">View role on ${esc(host)}</a></p>` : "";
   const label = `${esc(j.title)} at ${esc(j.company)}`;
   // What will be sent: only a prepared application has one, and it is what the Apply on this card approves.
   const sendRows = !r.status && r.send?.length ? r.send : null;
@@ -128,7 +134,7 @@ function card(r: ResultRow, f: ResultsFeed): string {
   const guide = !r.status && !r.byHand && !r.blocked && r.guide ? `<p class="guide">${esc(r.guide)}${r.openQs ? ` <a href="?things=${esc(r.ref)}">Answer them now</a>` : ""}</p>` : "";
   const note = f.notes?.[r.ref] ?? r.note;
   const said = note ? `<p class="note" role="status">${esc(note)}</p>` : r.status ? `<p class="note">${esc(r.status.word === "preparing" ? r.guide || "Getting your application ready. Nothing has been sent." : r.status.detail)}</p>` : r.byHand ? `<p class="note">Not applied for automatically on this site.</p>` : r.blocked ? `<p class="note">Not offered: ${esc(r.blocked)}</p>` : "";
-  return `<li class="card" id="r-${esc(r.ref)}"><div class="head">${logoOf(r)}<div class="ttl"><h3 class="title">${esc(j.title)}</h3><p class="co">${esc(j.company)}</p></div></div>${facts}<p class="state">${r.rid ? `<span class="rid">${esc(r.rid)}</span>` : ""}${specChip(r)}</p>${fit}${open}${more}${sends}${guide}${acts ? `<div class="acts">${acts}</div>` : ""}${help}${said}${markForm(r, f, "dismiss")}</li>`;
+  return `<li class="card" id="r-${esc(r.ref)}"><p class="state">${r.rid ? `<span class="rid">${esc(r.rid)}</span>` : "<span></span>"}${specChip(r)}</p><div class="head">${logoOf(r)}<div class="ttl"><h3 class="title">${esc(j.title)}</h3><p class="co">${esc(j.company)}</p></div></div>${facts}${fit}${more}${sends}${guide}${acts ? `<div class="acts">${acts}</div>` : ""}${help}${said}<div class="more">${open}${markForm(r, f, "dismiss")}</div></li>`;
 }
 
 export function renderResults(f: ResultsFeed): string {
@@ -137,7 +143,13 @@ export function renderResults(f: ResultsFeed): string {
   const payOpts: [string, string][] = [["any", "Any pay"], ...(floor ? [["meets", `Lists ${floor} or more`] as [string, string]] : []), ["listed", "Lists pay"]];
   const filters = `<form method="get" class="filters" role="search"><label>Pay${sel("pay", f.filters.pay, payOpts)}</label><label>Where${sel("where", f.filters.where, [["", "Anywhere"], ["remote", "Remote"], ...f.places.map((p) => [p, p] as [string, string])])}</label><button type="submit" class="ghost">Show</button></form>`;
   const canPick = !f.paused && f.rows.some(approvable);
-  const selbar = canPick ? `<div class="selbar"><form method="post" id="sel">${hidden(f.token, "applysel")}<button type="submit" class="apply">Apply to selected</button></form><p>Tick the roles you want. Ones that are ready go in one tap; the rest say what they need.</p></div>` : "";
+  const cr0 = f.countRows ?? f.rows;
+  // Sticky bottom bar (spec 3.10): the page's main action (Apply to selected, solid black) and Pause on this page (danger).
+  const pausable = !f.paused && cr0.some((r) => ["ready", "notprep", "needs"].includes(specOf(r).bucket));
+  const selForm = canPick ? `<form method="post" id="sel">${hidden(f.token, "applysel")}<button type="submit" class="apply">Apply to selected</button></form>` : "";
+  const pauseForm = pausable ? `<form method="post">${hidden(f.token, "pause")}<button type="submit" class="ghost danger">Pause on this page</button></form>` : "";
+  const actionbar = selForm || pauseForm ? `<div class="actionbar" role="region" aria-label="Page actions"><div class="abin">${selForm}${pauseForm}</div></div>` : "";
+  const selhelp = canPick ? `<p class="selhelp">Tick the roles you want, then use Apply to selected at the bottom. Ones that are ready go in one tap; the rest say what they need.</p>` : "";
   const meets = f.rows.filter((r) => r.payGroup === "meets"), unchecked = f.rows.filter((r) => r.payGroup === "unchecked"), unlisted = f.rows.filter((r) => r.payGroup === "unlisted"), below = f.rows.filter((r) => r.payGroup === "below");
   const group = (title: string, note: string, rows: ResultRow[]) => rows.length ? `<h2 class="group">${esc(title)} (${rows.length})</h2>${note ? `<p class="groupnote">${esc(note)}</p>` : ""}<ul class="cards">${rows.map((r) => card(r, f)).join("")}</ul>` : "";
   const body = f.rows.length
@@ -148,22 +160,26 @@ export function renderResults(f: ResultsFeed): string {
     : `<div class="empty" role="status"><p>No roles match these filters.</p><p><a class="back" href="?">Show all ${f.total}</a></p></div>`;
   const shown = f.rows.length < f.total ? `<p class="lede">Showing ${f.rows.length} of ${f.total}. <a class="back" href="?">Show all</a></p>` : "";
   const top = f.top ? `<p class="top-note" role="alert">${esc(f.top)}</p>` : "";
-  const head = f.madeFor
-    ? `<p class="made">${esc(f.madeFor)}</p><h1>${esc(cap1(f.title))}</h1>${stampHtml(f.stamp ?? null)}${f.caveat ? `<p class="caveat">${esc(f.caveat)}</p>` : ""}`
-      + (f.quick?.length ? `<section class="quick" aria-label="Quick read"><h2>Quick read</h2>${f.quick.map((q) => `<p>${esc(q)}</p>`).join("")}</section>` : "")
-    : `<p class="eyebrow">Your results</p><h1>${esc(cap1(f.title))}</h1>${stampHtml(f.stamp ?? null)}<p class="lede">Sorted by fit to what you've confirmed. Pay is only what each posting lists. Nothing is sent until you tap Apply.</p>`;
-  const cr = f.countRows ?? f.rows, counts = countsOf(cr);
+  const kicker = `<p class="kicker">Roles file</p>`;
+  const headTop = f.madeFor
+    ? `${kicker}<p class="made">${esc(f.madeFor)}</p><h1>${esc(cap1(f.title))}</h1>${stampHtml(f.stamp ?? null)}${f.caveat ? `<p class="caveat">${esc(f.caveat)}</p>` : ""}`
+    : `${kicker}<h1>${esc(cap1(f.title))}</h1>${stampHtml(f.stamp ?? null)}<p class="lede">Sorted by fit to what you've confirmed. Pay is only what each posting lists. Nothing is sent until you tap Apply.</p>`;
+  const quick = f.madeFor && f.quick?.length ? `<section class="quick" aria-label="Quick read"><h2>Quick read</h2>${f.quick.map((q) => `<p>${esc(q)}</p>`).join("")}</section>` : "";
+  const cr = f.countRows ?? f.rows, counts = stateCountsOf(cr);
   const open = cr.some((r) => ["ready", "notprep", "needs"].includes(specOf(r).bucket));
-  const topBlock = `<section class="top" aria-label="Where things stand"><h2>Where things stand</h2><ul class="counts">${counts.filter((c) => c.n).map((c) => `<li><b>${c.n}</b> ${esc(c.label)}</li>`).join("") || "<li>No active roles</li>"}</ul>`
-    + (f.dismissed?.length ? `<p class="upd">${f.dismissed.length} dismissed by you, listed at the bottom (not counted above).</p>` : "")
+  // Counts: one primary state per role, so the strip sums to the role total. Blocked, excluded and closed roles are listed in their own
+  // words and are never in the ready count. (Dismissed roles are Excluded and shown at the bottom, not counted here.)
+  const topBlock = `<section class="top" aria-label="Where things stand"><h2>Where things stand</h2><ul class="counts">${counts.filter((c) => c.n).map((c) => `<li class="t-${c.tone}"><b>${c.n}</b> ${esc(c.label)}</li>`).join("") || "<li>No active roles</li>"}</ul>`
+    + (cr.length ? `<p class="upd">${cr.length} ${cr.length === 1 ? "role" : "roles"} in total; each is in exactly one state.</p>` : "")
+    + (f.dismissed?.length ? `<p class="upd">${f.dismissed.length} dismissed by you, listed at the bottom as Excluded (not counted above).</p>` : "")
     + `<p class="cover">${esc(coverage(f.coverRows ?? cr))}</p>${f.updated ? `<p class="upd">Page updated ${esc(f.updated)}. Counts come from each role's current state.</p>` : ""}`
     + (f.paused
       ? `<div class="pausebar"><p><b>Paused on this page.</b> This page is not starting new applications; Telegram buttons still work. Anything already approved or in progress is not changed by this and may still finish.</p><form method="post">${hidden(f.token, "resume")}<button type="submit" class="ghost">Resume</button></form></div>`
-      : open ? `<div class="pausebar"><form method="post">${hidden(f.token, "pause")}<button type="submit" class="ghost">Pause on this page</button></form><p>Stops this page from approving or starting anything new. It does not stop Telegram: the buttons there still work. Applications already approved or in progress are not cancelled and may still finish.</p></div>` : "")
+      : open ? `<div class="pausebar"><p><b>Pause on this page</b> (button at the bottom) stops this page from approving or starting anything new. It does not stop Telegram: the buttons there still work. Applications already approved or in progress are not cancelled and may still finish.</p></div>` : "")
     + `</section>`;
-  const gone = f.dismissed?.length ? `<details class="gone"><summary>Dismissed (${f.dismissed.length})</summary><ul class="cards">${f.dismissed.map((r) => `<li class="card" id="r-${esc(r.ref)}"><div class="head">${logoOf(r)}<div class="ttl"><h3 class="title">${esc(r.job.title)}</h3><p class="co">${esc(r.job.company)}</p></div></div><p class="state">${r.rid ? `<span class="rid">${esc(r.rid)}</span>` : ""}<span class="chip" role="status">Dismissed by you</span></p><p class="markhelp">Private and reversible. No application was touched. Current state: ${esc(specOf(r).label)}.</p>${markForm(r, f, "restore")}</li>`).join("")}</ul></details>` : "";
-  const inner = `<div id="root" class="results"><header>${BRAND}${head}${topBlock}${filters}${shown}${selbar}</header><main id="main">${top}${body}${gone}</main></div>`;
-  return layout(`${cap1(f.title)} - Trainee`, inner, { css: CSS });
+  const gone = f.dismissed?.length ? `<details class="gone"><summary>Dismissed (${f.dismissed.length})</summary><ul class="cards">${f.dismissed.map((r) => `<li class="card" id="r-${esc(r.ref)}"><p class="state">${r.rid ? `<span class="rid">${esc(r.rid)}</span>` : "<span></span>"}${chipOf(stateOfDismissed(), "dismissed")}</p><div class="head">${logoOf(r)}<div class="ttl"><h3 class="title">${esc(r.job.title)}</h3><p class="co">${esc(r.job.company)}</p></div></div><p class="markhelp">Dismissed by you. Private and reversible. No application was touched. Current state: ${esc(specOf(r).label)}.</p>${markForm(r, f, "restore")}</li>`).join("")}</ul></details>` : "";
+  const inner = `<div id="root" class="results">${BRAND}<header class="filehead">${headTop}${topBlock}</header>${quick}${filters}${shown}${selhelp}${actionbar}<main id="main">${top}${body}${gone}</main></div>`;
+  return layout(`${cap1(f.title)} - Trainee`, inner, { css: CSS, head: DESIGN_FONT_LINK });
 }
 
 // ---------------------------------------------------------------- "A few things first": the employer's open questions for one role
@@ -183,7 +199,7 @@ export function renderThings(o: { token: string; ref: string; title: string; com
     return `<fieldset${q.error ? ` aria-describedby="e_${esc(q.id)}"` : ""}><legend>${esc(q.label)}</legend>${ctl}${err}</fieldset>`;
   };
   const askable = o.questions.some((q) => q.kind !== "secret");
-  const inner = `<div id="root" class="things"><header>${BRAND}<p class="eyebrow">A few things first</p><h1>${esc(o.title)} at ${esc(o.company)}</h1>${stampHtml(o.stamp ?? null)}<p class="lede">The employer asks these. Your answers are saved as typed, nothing is guessed, and nothing is sent from this page.</p></header>`
+  const inner = `<div id="root" class="things">${BRAND}<header class="filehead"><p class="kicker">A few things first</p><h1>${esc(o.title)} at ${esc(o.company)}</h1>${stampHtml(o.stamp ?? null)}<p class="lede">The employer asks these. Your answers are saved as typed, nothing is guessed, and nothing is sent from this page.</p></header>`
     + `<main id="main">${o.note ? `<p class="top-note" role="status">${esc(o.note)}</p>` : ""}<form method="post">${hidden(o.token, "answer", `<input type="hidden" name="ref" value="${esc(o.ref)}">`)}${o.questions.map(field).join("")}${askable ? `<button type="submit" class="apply">Save answers</button>` : ""}</form><p><a class="back" href="?#r-${esc(o.ref)}">Back to the list</a></p></main></div>`;
-  return layout("A few things first - Trainee", inner, { css: CSS });
+  return layout("A few things first - Trainee", inner, { css: CSS, head: DESIGN_FONT_LINK });
 }

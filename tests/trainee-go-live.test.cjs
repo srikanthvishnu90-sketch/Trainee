@@ -602,10 +602,10 @@ test('FEATURE 17 dry run: without VERCEL_TOKEN the cloud runner is not wired (de
 });
 test('FEATURE 17: sizing not given is set to the runner\'s default; a per-person or per-site number not given is never set (NO LIMITS)', () => {
   const { code, out } = dry([], { ...CLOUD, CLOUD_MAX_CONCURRENT: '', CLOUD_MAX_PER_PORTAL: '', CLOUD_MAX_PER_PERSON_DAY: '', CLOUD_MAX_PER_SITE_MINUTE: '',
-    CLOUD_PREPARE_MAX_CONCURRENT: '', CLOUD_PREPARE_PER_PERSON_DAY: '', CLOUD_PREPARE_PER_SITE_MINUTE: '' });
+    CLOUD_PREPARE_MAX_CONCURRENT: '', CLOUD_PREPARE_PER_PERSON_DAY: '', CLOUD_PREPARE_PER_SITE_MINUTE: '', CLOUD_DISPATCH_PARALLEL: '' });
   assert.equal(code, 0, out);
   const set = out.match(/supabase secrets set --project-ref abcdefghijklmnopqrst --env-file <0600 temp file: ([^>]*)>/)[1].split(' ');
-  const wave1 = { CLOUD_MAX_CONCURRENT: 2, CLOUD_MAX_PER_PORTAL: 1, CLOUD_MAX_STARTS_PER_TICK: 2, CLOUD_PREPARE_MAX_CONCURRENT: 2, CLOUD_PREPARE_STARTS_PER_TICK: 2 };
+  const wave1 = { CLOUD_MAX_CONCURRENT: 60, CLOUD_MAX_PER_PORTAL: 20, CLOUD_MAX_STARTS_PER_TICK: 30, CLOUD_PREPARE_MAX_CONCURRENT: 60, CLOUD_PREPARE_STARTS_PER_TICK: 30, CLOUD_DISPATCH_PARALLEL: 16 }; // the scale defaults (cloud_runner_http.ts LIMIT_DEFAULTS)
   for (const [k, v] of Object.entries(wave1)) assert.ok(set.includes(`${k}=${v}`), `${k}=${v} in ${set.join(' ')}`);
   for (const k of ['CLOUD_MAX_PER_PERSON_DAY', 'CLOUD_MAX_PER_SITE_MINUTE', 'CLOUD_PREPARE_PER_PERSON_DAY', 'CLOUD_PREPARE_PER_SITE_MINUTE']) {
     assert.ok(!set.some((x) => x.startsWith(`${k}=`)), `${k} is not set when not given: ${set.join(' ')}`);

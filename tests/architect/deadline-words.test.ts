@@ -1,11 +1,13 @@
 // Deadlines said exactly (reqs Q588, Q589, Q590): weekday, date, and for a moment the time and its zone, in the person's own zone;
 // never the UTC calendar day of a moment. A date-only deadline is open until that day has ended everywhere, so a posting is never
 // refused (or shown as passed) while its last day is still running. Through the real job card (captionOf) and the real Apply screen
-// (postingVerdict, which the jobs page and the Telegram Confirm both run). The jobs page's own "Apply by" line is left as it is:
-// tests/architect/scenarios-file-apply-battery.ts pins it to the UTC day (an owner/architect call). Pure: no network, no database.
+// (postingVerdict, which the jobs page and the Telegram Confirm both run), and the jobs page's "Apply by" line (handleFile; architect
+// decision 2026-11-01: the local date, never the UTC day). Memory stores, a fixed clock: no network, no database.
 import assertNode from "node:assert/strict";
 import { deadlineOf, deadlinePassed, deadlineWords } from "../../supabase/functions/_shared/date_words.ts";
-import { captionOf, postingVerdict, type JobView } from "../../supabase/functions/_shared/telegram_jobs.ts";
+import { captionOf, jobViewOf, postingVerdict, refOf, type JobView } from "../../supabase/functions/_shared/telegram_jobs.ts";
+import { handleFile, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
+import { signedIn } from "./file-session-fakes.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -76,4 +78,32 @@ Deno.test("the Apply screen: a date-only deadline is open all of its last day; o
   eq(v2, "its deadline to apply (Friday, Nov 6) has passed");
   const v3 = postingVerdict(job(null), { ...row, deadline: "2026-11-06T23:59:00-05:00" }, [], false, Date.parse("2026-11-07T05:00:00Z"));
   eq(v3, "its deadline to apply (Friday, Nov 6, 10:59 PM CST (Chicago time)) has passed");
+});
+
+async function pageLine(deadline: string, tz: string | null): Promise<string> {
+  const A = signedIn();
+  const U = "11111111-1111-4111-8111-111111111111", LIST = "0123456789";
+  const hit = { job_id: "greenhouse:acme:1", company: "Acme", title: "Data Analyst", location: "Austin, TX", url: "https://boards.greenhouse.io/acme/jobs/1", pay: "$90k", deadline };
+  const row = { job_id: hit.job_id, provider: "greenhouse", description: "<p>Build dashboards.</p>", posted_at: "2026-10-30T12:00:00Z", deadline };
+  const kv = new Map<string, any>();
+  const store = {
+    async remember(u: string, r: string, j: any, s: string) { kv.set(`${u}|job|${r}`, { job: j, shownAs: s }); }, async recall(u: string, r: string) { return kv.get(`${u}|job|${r}`) ?? null; },
+    async rememberList(u: string, id: string, refs: string[]) { kv.set(`${u}|list|${id}`, refs); }, async recallList(u: string, id: string) { return kv.get(`${u}|list|${id}`) ?? null; },
+    async postings() { return [row]; }, async save() { return "saved"; }, async prepared() { return null; }, async applied() { return false; },
+    async want() { return { result: "queued" }; }, async appRow() { return null; }, async wanted() { return false; },
+  } as unknown as FileStore;
+  const v = jobViewOf(hit, row as any), ref = await refOf(U, v.job_id);
+  await store.remember(U, ref, v, "text"); await store.rememberList(U, LIST, [ref]);
+  const env = { get: (k: string) => ({ TRAINEE_FILE_LINK_SECRET: "file-link-secret-0123456789-abcdef", TRAINEE_FILE_BASE_URL: "https://trainee.example/file" } as Record<string, string>)[k] };
+  const t = await A.tok(U, LIST, NOW);
+  const res = await handleFile(new Request("https://trainee.example/file", { headers: { cookie: `tf_s=${t}` } }), { store, now: () => NOW, env, ...A.deps, timeZone: async () => tz });
+  eq(res.status, 200);
+  return (await res.text()).replace(/<script[\s\S]*?<\/script>/g, "").match(/Apply by [^<·]*/)?.[0]?.trim() ?? "";
+}
+
+Deno.test("the jobs page: a deadline at 03:00Z on Nov 5 is Nov 4 in Chicago (architect decision: local date, never the UTC day)", async () => {
+  eq(await pageLine("2026-11-05T03:00:00Z", "America/Chicago"), "Apply by Wednesday, Nov 4, 9:00 PM CST");
+  eq(await pageLine("2026-11-05T03:00:00Z", null), "Apply by Wednesday, Nov 4, 9:00 PM CST (Chicago time)");
+  eq(await pageLine("2026-11-05T03:00:00Z", "Asia/Tokyo"), "Apply by Thursday, Nov 5, 12:00 PM GMT+9");
+  eq(await pageLine("2026-11-06", "America/Los_Angeles"), "Apply by Friday, Nov 6", "a calendar day is that day everywhere");
 });

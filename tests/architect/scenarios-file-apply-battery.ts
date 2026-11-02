@@ -33,6 +33,7 @@ import { postgrestDouble } from "../flow/postgrest.ts";
 import { PgConn } from "../flow/pgwire.ts";
 import { confirmedResumeSql } from "../flow/resume-seed.ts";
 import { signedIn } from "./file-session-fakes.ts";
+import { deadlineWords } from "../../supabase/functions/_shared/date_words.ts";
 import { BY_HAND, descText, generate, HIT_LOCS, HIT_PAYS, type PayloadSpec, type PostingSpec, rng, ROW_LOCS, ROW_PAYS, sample, type Scenario, SECRET_MARK,
   type Step } from "./scenarios/file-apply-generator.ts";
 
@@ -491,7 +492,7 @@ function checkPage(w: World, S: Snapshot, ex: Expect[], set: { hash: string | nu
         else if (ROW_PAYS.map(norm).includes(b)) { if (!row || norm(row.pay) !== b) fail("detail: pay the posting does not state", `${id}: ${b}`); }
         else if (HIT_LOCS.map(norm).includes(b)) { reported = true; if (norm(p.job.location) !== b || (row && row.location)) fail("detail: a location neither stated nor reported", `${id}: ${b}`); }
         else if (HIT_PAYS.map(norm).includes(b)) { reported = true; if (norm(p.job.pay) !== b || (row && row.pay)) fail("detail: pay neither stated nor reported", `${id}: ${b}`); }
-        else if (b.startsWith("Apply by ")) { reported = true; if (b !== `Apply by ${dayOf(p.deadline)}`) fail("detail: a deadline neither stated nor reported", `${id}: ${b}`); }
+        else if (b.startsWith("Apply by ")) { reported = true; /* architect decision: local date (2026-11-01, #373): the deadline in the person's zone, Chicago when unknown, never the UTC day */ if (b !== `Apply by ${deadlineWords(p.deadline, w.deps.now(), null)}`) fail("detail: a deadline neither stated nor reported", `${id}: ${b}`); }
         else if (b === sourceOf(p.jobId, row?.provider)) { /* where it was found */ }
         else fail("detail: a detail from nowhere", `${id}: ${b}`);
       }

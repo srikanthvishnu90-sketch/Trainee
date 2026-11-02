@@ -83,15 +83,21 @@ const canonJson = (v: unknown) => JSON.stringify(canon(v));
 export interface Cadence { digest: boolean; report_hour?: number; report_minute?: number; tz?: string; weekdays?: boolean; ask?: "midnight" }
 type Part = "morning" | "evening" | "night" | "day";
 const DEFAULT_HOUR: Record<Part, number> = { morning: 8, evening: 18, night: 21, day: 8 };
-const WEEKDAYS = /\b(?:every|each|on) weekdays?\b|\bweekdays only\b|\b(?:monday|mon)\s*(?:-|to|through|thru)\s*(?:friday|fri)\b|\bweekdays\b/;
+// Weekdays only when the person asks for the ALERTS on weekdays (re-review of PR #365: "I'm free on weekdays, send roles
+// every morning" is not a request): "every weekday (morning)", "weekdays only", "only on weekdays", or "on weekdays" /
+// "Monday to Friday" in the same clause as the ask to send ("on weekdays send me...", "text me roles Mon-Fri"); a comma
+// ends the clause ("I'm free on weekdays, send roles every morning" is about the person, not the alerts).
+const SEND = "(?:send|text|message|alert|ping|email|notify)";
+const WD = "(?:on weekdays|mon(?:day)?\\s*(?:-|to|through|thru)\\s*fri(?:day)?)";
+const WEEKDAYS = new RegExp(`\\b(?:every|each) weekday\\b|\\bweekdays only\\b|\\bonly (?:on )?weekdays\\b|\\b${WD} (?:please )?${SEND}|\\b${SEND}\\b[^.,;!?]*\\b${WD}\\b`);
 export function cadenceFrom(message: unknown): Cadence | null {
   const m = String(message ?? "").toLowerCase().replace(/\s+/g, " ");
   if (/\b(right away|as soon as (?:they|it|one|there)|instantly|in real[- ]time)\b/.test(m)) return { digest: false };
-  const when = m.match(/\b(?:every|each) (morning|evening|night|day|weekday)s?\b|\b(daily|once a day|nightly|weekdays)\b/);
+  const when = m.match(/\b(?:every|each) (morning|evening|night|day|weekday)s?\b|\b(daily|once a day|nightly|weekdays only)\b/);
   if (!when) return null;
   const w = when[1] ?? when[2];
   // "every weekday evening", "daily in the morning": a part of day said beside a day-only cadence is that part's.
-  const named = w === "day" || w === "weekday" || w === "daily" || w === "once a day" || w === "weekdays" ? /\b(morning|evening|night)s?\b/.exec(m)?.[1] : w;
+  const named = w === "day" || w === "weekday" || w === "daily" || w === "once a day" || w === "weekdays only" ? /\b(morning|evening|night)s?\b/.exec(m)?.[1] : w;
   const part: Part = named === "morning" ? "morning" : named === "evening" ? "evening" : named === "night" || named === "nightly" ? "night" : "day";
   const weekdays = WEEKDAYS.test(m);
   const base = { digest: true as const, ...(weekdays ? { weekdays: true } : {}) };
@@ -124,11 +130,11 @@ function hourOf(t: TimeSaid, part: Part): number | null {
 // into other words ("at 3 companies") is never an hour.
 const AMPM = "(am|pm|a\\.m\\.|p\\.m\\.)";
 const ZONE_WORDS = "eastern|central|mountain|pacific|et|ct|mt|pt|est|edt|cst|cdt|mst|mdt|pst|pdt";
-const CADENCE = "(?:(?:every|each) (?:morning|evening|night|day|weekday)s?|daily|nightly|once a day|weekdays)";
+const CADENCE = "(?:(?:every|each) (?:morning|evening|night|day|weekday)s?|daily|nightly|once a day|weekdays only)";
 const TIME_FORMS: RegExp[] = [
   new RegExp(`\\b(?:at )?(\\d{1,2})(?::(\\d\\d))? ?${AMPM}(?=\\W|$)`),
   new RegExp(`\\b(?:at )?(\\d{1,2}):(\\d\\d)\\b`),
-  new RegExp(`\\b(?:at )?(\\d{1,2}) ?o'?clock\\b`),
+  new RegExp(`\\b(?:at )?(\\d{1,2}) ?o'?clock(?: ?${AMPM}(?=\\W|$))?`), // "7 o'clock pm" is 7 PM
   new RegExp(`\\bat (\\d{1,2}) (?:in the |tomorrow |each |every )?(morning|evening|afternoon|night|tonight)\\b`),
   new RegExp(`\\bat (\\d{1,2}) (?=(?:${ZONE_WORDS})\\b)`),
   new RegExp(`\\b${CADENCE},? at (\\d{1,2})(?=\\s*(?:$|[,.;!?)]|and\\b|please\\b|then\\b|instead\\b|from now\\b|time\\b))`),
@@ -190,6 +196,32 @@ const scheduleOf = (row: { tz: string; prefs: AlertPrefs }, c: Cadence | null): 
   ? { digest: !!row.prefs.digest, hour: row.prefs.report_hour, minute: row.prefs.report_minute ?? 0, tz: row.tz, weekdays_only: !!row.prefs.weekdays_only,
     quiet_start: row.prefs.quiet_start, quiet_end: row.prefs.quiet_end, ...(c.ask ? { ask: c.ask } : {}) }
   : undefined;
+
+// The honesty gap (coordinator, re-review of PR #365): the reply states the schedule before the turn commits, and the
+// write stays after the commit (a refused save writes no alert settings). When that write fails, the person is told at
+// once, in the place they asked (the web thread, or the channel the message came in on), and it is logged. Only when
+// this turn meant to write (the preview said saved, off or removed): a turn that changed nothing has nothing to undo.
+export const ALERT_SAVE_FAILED_REPLY = "I couldn't save that alert schedule \u2014 nothing changed; say it again to retry.";
+export async function alertWriteFailed(o: { error: unknown; preview: WatchSync | null; tell: (text: string) => Promise<void>; log: (line: string) => void }): Promise<boolean> {
+  o.log(`career watch alerts: the write after the commit failed: ${String((o.error as Error)?.message ?? o.error).slice(0, 300)}`);
+  if (!o.preview || !["saved", "off", "removed"].includes(o.preview.action)) return false;
+  try { await o.tell(ALERT_SAVE_FAILED_REPLY); return true; }
+  catch (e) { o.log(`career watch alerts: the follow-up was not sent either: ${String((e as Error)?.message ?? e).slice(0, 300)}`); return false; }
+}
+// One message right after a turn, where the turn came from: the web thread gets an assistant message; a texting channel
+// gets a status row on that channel, due now (trainee-deliver sends it on its next run; sms goes to the home channel).
+export function supabaseTellAfterTurn(admin: any, w: { userId: string; threadId: string; channel: string; key: string; now: () => number }) {
+  return async (text: string) => {
+    if (w.channel === "web") {
+      const r = await admin.from("agent_messages").insert({ thread_id: w.threadId, role: "assistant", content: text, meta: { career: true, intent: "career_alert_save_failed", key: w.key } });
+      if (r.error) throw new Error(`write the follow-up: ${r.error.message}`);
+      return;
+    }
+    const channel = ["imessage", "whatsapp", "telegram"].includes(w.channel) ? w.channel : null;
+    const r = await admin.from("career_outbox").insert({ user_id: w.userId, key: `status:${w.key}`, kind: "status", text, deliver_at: new Date(w.now()).toISOString(), channel });
+    if (r.error) throw new Error(`queue the follow-up: ${r.error.message}`);
+  };
+}
 
 // The same decision as syncWatchAlerts with nothing written (re-review of PR #365): the handler reads it BEFORE the reply
 // is written, so the reply states the exact schedule the save after the turn's commit writes (that save stays after the

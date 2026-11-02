@@ -51,8 +51,8 @@ const RUNS: { name: string; T0: number; offsets: [number, number] }[] = [
   { name: "across the fall-back (Nov 1 2026)", T0: tickAt(Date.UTC(2026, 9, 31, 12), NY, 11, 0), offsets: [-240, -300] },
   { name: "across the spring-forward (Mar 14 2027)", T0: tickAt(Date.UTC(2027, 2, 13, 12), NY, 11, 0), offsets: [-300, -240] },
 ];
-const PEOPLE: Record<string, string> = { "tok-1": "00000000-0000-4000-8000-000000000a01", "tok-2": "00000000-0000-4000-8000-000000000a02", "tok-3": "00000000-0000-4000-8000-000000000a03" };
-const CHAT: Record<string, string> = { "tok-1": "tg:7100000001", "tok-2": "tg:7100000002", "tok-3": "tg:7100000003" };
+const PEOPLE: Record<string, string> = { "tok-1": "00000000-0000-4000-8000-000000000a01", "tok-2": "00000000-0000-4000-8000-000000000a02", "tok-3": "00000000-0000-4000-8000-000000000a03", "tok-4": "00000000-0000-4000-8000-000000000a04" };
+const CHAT: Record<string, string> = { "tok-1": "tg:7100000001", "tok-2": "tg:7100000002", "tok-3": "tg:7100000003", "tok-4": "tg:7100000004" };
 
 let jobs = 0;
 const q = (s: string) => s.replace(/'/g, "''");
@@ -266,6 +266,26 @@ for (const { name: run, T0, offsets } of RUNS) Deno.test({
         eq(late.map((x) => x.address.includes(CHAT["tok-2"].slice(3))), [true], `sent once, to this person's chat only: ${JSON.stringify(late)}`);
         assert(late[0].text.includes(hit.url), late[0].text);
       });
+
+      await t.step("the write after the commit fails: the reply stated the schedule, so one follow-up says it was not saved, on the person's Telegram, at once", async () => {
+        const D = PEOPLE["tok-4"], at = T0 + 20 * MIN;
+        // The alert settings write fails for this person only (the turn itself commits).
+        await pg.sql(`create or replace function public.fx_fail_prefs() returns trigger language plpgsql as $$ begin
+            if new.user_id = '${D}' then raise exception 'test: the alert settings write fails'; end if; return new; end $$;
+          create trigger fx_fail_prefs before insert or update on public.career_alert_prefs for each row execute function public.fx_fail_prefs();`);
+        try {
+          const w = await sayer("tok-4")("send me new frontend internships in Chicago every evening at 7", at);
+          eq(w.intent, "career_watch_create", w.reply);
+          assert(w.reply.includes("every day at 7:00 PM"), `the reply stated the schedule: ${w.reply}`);
+          eq(await prefsOf(pg, D), null, "nothing saved");
+          const ob = await outbox(pg, D);
+          eq(ob.map((o: any) => [o.kind, o.text]), [["status", ALERT_SAVE_FAILED_REPLY]], "one follow-up, the exact words");
+          const sent = await deliver(admin, at + MIN);
+          eq(to("tok-4", sent).map((x) => x.text), [ALERT_SAVE_FAILED_REPLY], `sent on the person's own Telegram: ${JSON.stringify(sent)}`);
+        } finally {
+          await pg.sql(`drop trigger if exists fx_fail_prefs on public.career_alert_prefs; drop function if exists public.fx_fail_prefs();`);
+        }
+      });
     } finally {
       Date.now = realNow;
       handler?.restore();
@@ -275,7 +295,7 @@ for (const { name: run, T0, offsets } of RUNS) Deno.test({
 });
 
 // The words themselves, without a database: what is read as a cadence or as feedback, and what is not.
-import { cadenceFrom } from "../../supabase/functions/_shared/career_watch_alerts.ts";
+import { ALERT_SAVE_FAILED_REPLY, cadenceFrom } from "../../supabase/functions/_shared/career_watch_alerts.ts";
 import { parseFeedback } from "../../supabase/functions/_shared/career_alert_feedback.ts";
 Deno.test("cadence and feedback are read only from what the person said", () => {
   eq(cadenceFrom("send me new frontend internships in Chicago every morning"), { digest: true, report_hour: 8, report_minute: 0 }, "every morning");

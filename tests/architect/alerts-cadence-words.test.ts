@@ -8,7 +8,7 @@
 //   any turn   a cadence is changed only on the turn that set the watch or one about their alerts: "I go to the gym every
 //              evening" changes nothing (mutation: the cadence read on every turn)
 //   deno test -A --no-check tests/architect/alerts-cadence-words.test.ts
-import { cadenceFrom, previewWatchAlerts, scheduleLine, syncWatchAlerts, WATCH_PROFILE_KEY } from "../../supabase/functions/_shared/career_watch_alerts.ts";
+import { ALERT_SAVE_FAILED_REPLY, alertWriteFailed, cadenceFrom, previewWatchAlerts, scheduleLine, supabaseTellAfterTurn, syncWatchAlerts, WATCH_PROFILE_KEY } from "../../supabase/functions/_shared/career_watch_alerts.ts";
 import { reportDue } from "../../supabase/functions/_shared/career_alerts.ts";
 import { alertFeedbackTurn, supabaseFeedbackReads } from "../../supabase/functions/_shared/career_alert_feedback.ts";
 import { memoryAlertStore, startWatching, validPrefs } from "../../supabase/functions/_shared/career_alert_store.ts";
@@ -50,6 +50,9 @@ Deno.test("hour: a stated hour is honored; a bare number that runs on into other
   eq(at("send me jobs every day at 7 in the evening"), [19, 0], "at 7 in the evening");
   eq(at("send me jobs every evening at 6 in the morning"), [6, 0], "the time's own part of day");
   eq(at("every morning at 9 o'clock"), [9, 0], "o'clock");
+  eq(at("every day at 7 o'clock pm"), [19, 0], "o'clock pm");
+  eq(at("every evening at 7 o'clock am"), [7, 0], "o'clock am wins over the evening");
+  eq(at("every day at 9 o'clock a.m."), [9, 0], "o'clock a.m.");
   eq(at("every day at 5 a.m."), [5, 0], "a.m.");
   eq(at("every night"), [21, 0], "night with no time: 9 PM");
   eq(at("nightly"), [21, 0], "nightly");
@@ -66,6 +69,14 @@ Deno.test("midnight is asked about, never set; weekdays are kept", () => {
   eq(cadenceFrom("every weekday at 8am"), { digest: true, weekdays: true, report_hour: 8, report_minute: 0 }, "every weekday");
   eq(cadenceFrom("send me jobs every morning, weekdays only"), { digest: true, weekdays: true, report_hour: 8, report_minute: 0 }, "weekdays only");
   eq(cadenceFrom("send me jobs every morning"), { digest: true, report_hour: 8, report_minute: 0 }, "every day: no weekday flag");
+  // Only a request for the ALERTS on weekdays switches it (re-review of PR #365).
+  for (const said of ["I'm free on weekdays, send roles every morning", "I work weekdays; send me jobs every evening at 7", "I'm in class Monday to Friday, so text me roles every night"]) {
+    eq(cadenceFrom(said)?.weekdays ?? false, false, said);
+  }
+  eq(cadenceFrom("I'm free on weekdays"), null, "no cadence at all: nothing changed");
+  for (const said of ["every weekday morning at 8am", "send me roles every morning, weekdays only", "on weekdays send me data roles every morning", "text me roles every morning Mon-Fri", "send me jobs every evening, only on weekdays"]) {
+    eq(cadenceFrom(said)?.weekdays, true, said);
+  }
 });
 
 Deno.test("the alerts run: the minute and weekdays are honored on the person's clock", () => {
@@ -93,6 +104,14 @@ Deno.test("the reply states the exact schedule saved, quiet hours' move, and ask
   assert(/You asked for midnight/.test(scheduleLine(mid) ?? "") && /What time/.test(scheduleLine(mid) ?? ""), `asked: ${scheduleLine(mid)}`);
   eq((await store.get(U))?.prefs.report_hour, 19, "midnight changed nothing");
   eq(scheduleLine(await syncWatchAlerts({ userId: U, before: W, after: W, store, now, message: "I go to the gym every evening" })), null, "no schedule said: no line");
+  // Midnight for someone still on instant alerts: asked, and nothing about how alerts arrive changes.
+  const V = "00000000-0000-4000-8000-0000000000d2", WV = { [WATCH_PROFILE_KEY(V)]: W[WATCH_PROFILE_KEY(U)] };
+  await syncWatchAlerts({ userId: V, before: null, after: WV, store, now, message: "watch for data analyst roles in Chicago" });
+  const instant = (await store.get(V))?.prefs;
+  eq([instant?.digest ?? false, instant?.max_instant_per_day], [false, 3], "instant alerts");
+  const askV = await syncWatchAlerts({ userId: V, before: WV, after: WV, store, now, message: "send them every night at midnight" });
+  assert(/You asked for midnight/.test(scheduleLine(askV) ?? ""), `asked: ${scheduleLine(askV)}`);
+  eq([(await store.get(V))?.prefs.digest ?? false, (await store.get(V))?.prefs.max_instant_per_day, (await store.get(V))?.prefs.report_hour], [false, 3, instant?.report_hour], "still instant alerts: no daily message set at any hour");
 });
 
 // A service client over in-memory tables, filtering as PostgREST does (eq, in, not is null, order, limit).
@@ -159,4 +178,44 @@ Deno.test("any turn: the cadence changes only on the watch's own turn or a turn 
   }
   eq((await syncWatchAlerts({ userId: U, before: W, after: W, store, now, message: "send them every evening instead" })).action, "saved", "about their alerts");
   eq((await store.get(U))?.prefs.report_hour, 18, "every evening");
+});
+
+Deno.test("a write that fails after the commit is told at once, in the same place, and logged; a turn that wrote nothing tells nothing", async () => {
+  const U = "00000000-0000-4000-8000-0000000000e1", now = Date.parse("2026-11-01T14:00:00Z");
+  const W = { [WATCH_PROFILE_KEY(U)]: { type: "career_watch_profile", interests: [{ role: { terms: ["data analyst"], blockers: [] }, filters: { places: ["Chicago"] } }] } };
+  const good = memoryAlertStore();
+  const failing = { ...good, save: async () => { throw new Error("db down"); } } as typeof good;
+  const msg = "send me new data analyst roles in Chicago every evening at 7";
+  // The handler's order: preview (before the reply), commit, then the write, whose failure goes to alertWriteFailed.
+  const preview = await previewWatchAlerts({ userId: U, before: null, after: W, store: failing, now, message: msg });
+  assert(/at 7:00 PM/.test(scheduleLine(preview) ?? ""), `the reply stated the schedule: ${scheduleLine(preview)}`);
+  const told: string[] = [], logs: string[] = [];
+  const run = (pv: typeof preview | null, store = failing) => syncWatchAlerts({ userId: U, before: null, after: W, store, now, message: msg })
+    .then(() => false).catch((e) => alertWriteFailed({ error: e, preview: pv, tell: async (t) => { told.push(t); }, log: (l) => logs.push(l) }));
+  eq(await run(preview), true, "told");
+  eq(told, [ALERT_SAVE_FAILED_REPLY], "one follow-up, the exact words");
+  assert(logs.some((l) => /db down/.test(l)), `logged: ${logs}`);
+  eq(await good.get(U), null, "nothing was saved, as the follow-up says");
+  // A turn that meant no write (unchanged, or no preview) is not told; a write that succeeds is not told.
+  eq(await alertWriteFailed({ error: new Error("x"), preview: { action: "unchanged" }, tell: async (t) => { told.push(t); }, log: () => {} }), false, "unchanged");
+  eq(await alertWriteFailed({ error: new Error("x"), preview: null, tell: async (t) => { told.push(t); }, log: () => {} }), false, "no preview");
+  eq(await run(preview, good), false, "the write succeeded");
+  eq(told.length, 1, "still one");
+  // A follow-up that cannot be sent either is logged, never thrown into the saved turn.
+  const l2: string[] = [];
+  eq(await alertWriteFailed({ error: new Error("db down"), preview, tell: async () => { throw new Error("outbox down"); }, log: (l) => l2.push(l) }), false);
+  assert(l2.some((l) => /outbox down/.test(l)), `logged: ${l2}`);
+});
+
+Deno.test("the follow-up goes where the turn came from: the web thread, or that channel's outbox, due now", async () => {
+  const rows: Record<string, any[]> = { agent_messages: [], career_outbox: [] };
+  const admin = { from: (t: string) => ({ insert: async (r: any) => { rows[t].push(r); return { error: null }; } }) };
+  const now = () => Date.parse("2026-11-01T14:00:00Z");
+  await supabaseTellAfterTurn(admin, { userId: "u", threadId: "t1", channel: "web", key: "alert-save-failed:k1", now })(ALERT_SAVE_FAILED_REPLY);
+  await supabaseTellAfterTurn(admin, { userId: "u", threadId: "t1", channel: "telegram", key: "alert-save-failed:k2", now })(ALERT_SAVE_FAILED_REPLY);
+  await supabaseTellAfterTurn(admin, { userId: "u", threadId: "t1", channel: "sms", key: "alert-save-failed:k3", now })(ALERT_SAVE_FAILED_REPLY);
+  eq(rows.agent_messages.map((r) => [r.thread_id, r.role, r.content]), [["t1", "assistant", ALERT_SAVE_FAILED_REPLY]], "web: the thread");
+  eq(rows.career_outbox.map((r) => [r.key, r.kind, r.channel, r.deliver_at, r.text]), [
+    ["status:alert-save-failed:k2", "status", "telegram", "2026-11-01T14:00:00.000Z", ALERT_SAVE_FAILED_REPLY],
+    ["status:alert-save-failed:k3", "status", null, "2026-11-01T14:00:00.000Z", ALERT_SAVE_FAILED_REPLY]], "a channel: its outbox, now");
 });

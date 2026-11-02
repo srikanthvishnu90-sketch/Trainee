@@ -17,11 +17,15 @@
 --      it do not count.
 --   5. Rewritten by exact anchors (career_apply_reprepare_install, which career_apply_reconcile_bridge now ends with, so a
 --      reconcile that re-creates them takes it again): the duplicate checks of career_apply_enqueue, career_apply_prepare_own,
---      career_apply_record_own and the prior-row read of career_apply_email_reserve_for skip history rows; the pending list
---      (career_apply_pending_for) does not hide a re-queued posting behind its history row; the status read
---      (career_apply_status_for) leaves out a history row once a newer row exists for that posting; the per-ATS waiver
---      (career_apply_cloud_waiver_left) counts the new row once and the history row not at all. The daily cap counts sent
---      states only (career_apply_cloud_text_refusal 'went'), so a history row (not_submitted) never counted.
+--      career_apply_record_own, career_apply_prepare_for (the re-prepared application is stored for its new card) and the
+--      prior-row read of career_apply_email_reserve_for skip history rows; the pending list (career_apply_pending_for) does
+--      not hide a re-queued posting behind its history row; the status read (career_apply_status_for) leaves out a history
+--      row once a newer row exists for that posting. NOT rewritten: the per-ATS waiver (career_apply_cloud_waiver_left, D-010)
+--      keeps counting every cloud drive that ran (attempts > 0), a history row included: a drive that stopped at the form
+--      still opened the employer's form under the waiver. The daily cap counts sent states only
+--      (career_apply_cloud_text_refusal 'went'), so a history row (not_submitted) never counted.
+--   6. The re-preparation is asked with the person's own pace (career_apply_daily_limit, null when none is set), as the
+--      runner's door asks it; the dispatcher's claim still applies the runner's per-person number too.
 -- Additive and reversible (supabase/rollbacks/20261101130000_career_apply_reprepare_needs_answers.down.sql). Idempotent.
 
 create or replace function public.career_apply_job_history(j public.career_apply_jobs) returns boolean
@@ -44,7 +48,7 @@ begin
    insert into public.career_apply_wanted (user_id, posting_key, url, company, title, state, queued_at)
    values (new.user_id, new.job_id, new.url, left(coalesce(new.company, ''), 200), left(coalesce(new.payload->>'title', ''), 200), 'waiting', clock_timestamp())
    on conflict (user_id, posting_key) do update set state = 'waiting', taken_at = null, queued_at = clock_timestamp();
-   perform public.career_apply_prepare_request_put(new.user_id, array[new.job_id], null);
+   perform public.career_apply_prepare_request_put(new.user_id, array[new.job_id], public.career_apply_daily_limit(new.user_id));
   exception when others then
    -- Never lose the finish over the re-queue: the posting can still be asked for again in chat.
    raise warning 'reprepare: % (job %)', sqlerrm, new.id;
@@ -57,7 +61,8 @@ drop trigger if exists career_apply_reprepare_on_needs_answers on public.career_
 create trigger career_apply_reprepare_on_needs_answers after update of state on public.career_apply_jobs
  for each row execute function public.career_apply_reprepare_on_needs_answers();
 
--- 4. The candidates: 20261027141000's text, a history row and what is older than it not counted.
+-- 4. The candidates: 20261101121000's text (a browser error is retried after 30 minutes, a refusal after 7 days), a history
+--    row and what is older than it not counted.
 create or replace function public.career_apply_prepare_candidates(p_now timestamptz, p_per_person integer, p_limit integer)
 returns table (user_id uuid, job_id text, company text, title text, url text, location text, description text, epoch bigint, version bigint)
 language sql stable security definer set search_path = public, pg_temp as $$
@@ -96,7 +101,8 @@ language sql stable security definer set search_path = public, pg_temp as $$
    and (t.outcome = 'ready'
     or (t.outcome = 'asked' and exists (select from public.career_apply_questions q where q.user_id = c.user_id and q.state = 'open'
      and t.engine_job_id = any(q.job_ids)))
-    or (t.outcome <> 'asked' and t.at > p_now - interval '7 days')))
+    or (t.outcome = 'error' and t.at > p_now - interval '30 minutes')
+    or (t.outcome not in ('asked', 'error') and t.at > p_now - interval '7 days')))
  order by c.alerted_at desc, c.user_id, c.job_id
  limit greatest(0, coalesce(p_limit, 0))
 $$;
@@ -120,8 +126,8 @@ declare n int := 0; f text; bad text[] := '{}';
  pe_to text := E'and not exists (select from public.career_apply_jobs j where j.user_id = w.user_id and j.job_id in (w.posting_key, coalesce(t.engine_job_id, '''')) and not public.career_apply_job_history(j))';
  st_from text := E'from (select * from public.career_apply_jobs where user_id = p_user and (p_job_id is null or job_id = p_job_id) order by updated_at desc limit 200) j';
  st_to text := E'from (select * from public.career_apply_jobs h where h.user_id = p_user and (p_job_id is null or h.job_id = p_job_id) and not (public.career_apply_job_history(h) and exists (select from public.career_apply_jobs l where l.user_id = h.user_id and l.job_id = h.job_id and l.id <> h.id and l.created_at > h.created_at)) order by h.updated_at desc limit 200) j';
- wv_from text := E'and x.source = ''cloud'' and x.attempts > 0 and x.claimed_at >= w.created_at';
- wv_to text := E'and x.source = ''cloud'' and x.attempts > 0 and x.claimed_at >= w.created_at and not public.career_apply_job_history(x)';
+ pf_from text := E'if exists (select from public.career_apply_jobs where user_id = p_user and job_id in (p_payload->>''job_id'', p_posting_job_id)) then\n  raise exception ''duplicate_job''; end if;';
+ pf_to text := E'if exists (select from public.career_apply_jobs x where x.user_id = p_user and x.job_id in (p_payload->>''job_id'', p_posting_job_id) and not public.career_apply_job_history(x)) then\n  raise exception ''duplicate_job''; end if;';
 begin
  n := n + public.career_apply_mass_submit_rewrite('public.career_apply_enqueue(jsonb,text,text,integer)', array[enq_from, enq_to]);
  n := n + public.career_apply_mass_submit_rewrite('public.career_apply_prepare_own(jsonb,text[])', array[own_from, own_to]);
@@ -129,11 +135,11 @@ begin
  n := n + public.career_apply_mass_submit_rewrite('public.career_apply_email_reserve_for(uuid,jsonb,text,timestamptz)', array[em_from, em_to]);
  n := n + public.career_apply_mass_submit_rewrite('public.career_apply_pending_for(uuid)', array[pe_from, pe_to]);
  n := n + public.career_apply_mass_submit_rewrite('public.career_apply_status_for(uuid,text)', array[st_from, st_to]);
- n := n + public.career_apply_mass_submit_rewrite('public.career_apply_cloud_waiver_left(uuid,text,timestamptz)', array[wv_from, wv_to]);
+ n := n + public.career_apply_mass_submit_rewrite('public.career_apply_prepare_for(uuid,text,jsonb,text[])', array[pf_from, pf_to]);
  -- Every installed one must now carry the history exclusion; an anchor that moved fails loudly, never silently.
  foreach f in array array['public.career_apply_enqueue(jsonb,text,text,integer)', 'public.career_apply_prepare_own(jsonb,text[])',
    'public.career_apply_record_own(text,text,text,text)', 'public.career_apply_email_reserve_for(uuid,jsonb,text,timestamptz)',
-   'public.career_apply_pending_for(uuid)', 'public.career_apply_status_for(uuid,text)', 'public.career_apply_cloud_waiver_left(uuid,text,timestamptz)'] loop
+   'public.career_apply_pending_for(uuid)', 'public.career_apply_status_for(uuid,text)', 'public.career_apply_prepare_for(uuid,text,jsonb,text[])'] loop
   if to_regprocedure(f) is not null and position('career_apply_job_history' in pg_get_functiondef(to_regprocedure(f))) = 0 then bad := bad || f; end if;
  end loop;
  if cardinality(bad) > 0 then raise exception 'reprepare: an anchor was not found in %', array_to_string(bad, ', '); end if;

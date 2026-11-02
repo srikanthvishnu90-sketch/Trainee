@@ -18,7 +18,7 @@ declare r text[][] := array[
  array['public.career_apply_email_reserve_for(uuid,jsonb,text,timestamptz)', E'select * into prior from public.career_apply_jobs x where x.user_id = p_user and x.job_id = p_payload->>''job_id'' and not public.career_apply_job_history(x) for update;', E'select * into prior from public.career_apply_jobs where user_id = p_user and job_id = p_payload->>''job_id'' for update;'],
  array['public.career_apply_pending_for(uuid)', E'and not exists (select from public.career_apply_jobs j where j.user_id = w.user_id and j.job_id in (w.posting_key, coalesce(t.engine_job_id, '''')) and not public.career_apply_job_history(j))', E'and not exists (select from public.career_apply_jobs j where j.user_id = w.user_id and j.job_id in (w.posting_key, coalesce(t.engine_job_id, '''')))'],
  array['public.career_apply_status_for(uuid,text)', E'from (select * from public.career_apply_jobs h where h.user_id = p_user and (p_job_id is null or h.job_id = p_job_id) and not (public.career_apply_job_history(h) and exists (select from public.career_apply_jobs l where l.user_id = h.user_id and l.job_id = h.job_id and l.id <> h.id and l.created_at > h.created_at)) order by h.updated_at desc limit 200) j', E'from (select * from public.career_apply_jobs where user_id = p_user and (p_job_id is null or job_id = p_job_id) order by updated_at desc limit 200) j'],
- array['public.career_apply_cloud_waiver_left(uuid,text,timestamptz)', E'and x.source = ''cloud'' and x.attempts > 0 and x.claimed_at >= w.created_at and not public.career_apply_job_history(x)', E'and x.source = ''cloud'' and x.attempts > 0 and x.claimed_at >= w.created_at']];
+ array['public.career_apply_prepare_for(uuid,text,jsonb,text[])', E'if exists (select from public.career_apply_jobs x where x.user_id = p_user and x.job_id in (p_payload->>''job_id'', p_posting_job_id) and not public.career_apply_job_history(x)) then\n  raise exception ''duplicate_job''; end if;', E'if exists (select from public.career_apply_jobs where user_id = p_user and job_id in (p_payload->>''job_id'', p_posting_job_id)) then\n  raise exception ''duplicate_job''; end if;']];
  i int;
 begin
  for i in 1 .. array_length(r, 1) loop perform public.career_apply_mass_submit_rewrite(r[i][1], array[r[i][2], r[i][3]]); end loop;
@@ -37,7 +37,7 @@ begin
 end $$;
 revoke all on function public.career_apply_reconcile_bridge() from public, anon, authenticated;
 drop function if exists public.career_apply_reprepare_install();
--- 20261027141000's candidates.
+-- 20261101121000's candidates.
 create or replace function public.career_apply_prepare_candidates(p_now timestamptz, p_per_person integer, p_limit integer)
 returns table (user_id uuid, job_id text, company text, title text, url text, location text, description text, epoch bigint, version bigint)
 language sql stable security definer set search_path = public, pg_temp as $$
@@ -65,7 +65,8 @@ language sql stable security definer set search_path = public, pg_temp as $$
     and (t.outcome = 'ready'
      or (t.outcome = 'asked' and exists (select from public.career_apply_questions q where q.user_id = a.user_id and q.state = 'open'
       and t.engine_job_id = any(q.job_ids)))
-     or (t.outcome <> 'asked' and t.at > p_now - interval '7 days')))
+     or (t.outcome = 'error' and t.at > p_now - interval '30 minutes')
+     or (t.outcome not in ('asked', 'error') and t.at > p_now - interval '7 days')))
    and public.career_apply_company_key(p.company) <> ''
    and not public.career_apply_posting_sent(a.user_id, p.job_id, p.url, null, true)
  )

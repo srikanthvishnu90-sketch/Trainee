@@ -6,7 +6,7 @@ import { countsLine, statusReply } from "../../supabase/functions/_shared/career
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 const NOW = Date.parse("2026-11-01T18:00:00Z");
-const row = (i: number, state: string, reason: string | null = null) => ({ id: `j${i}`, company: `TEST Co ${i}`, url: `https://boards.greenhouse.io/co${i}/jobs/${i}`, state, reason,
+const row = (i: number, state: string, reason: string | null = null) => ({ id: `j${i}`, job_id: `greenhouse:co${i}:${i}`, company: `TEST Co ${i}`, url: `https://boards.greenhouse.io/co${i}/jobs/${i}`, state, reason,
   confirmation_id: null, email_confirmed_at: null, created_at: new Date(NOW - 3600000).toISOString(), updated_at: new Date(NOW - i * 60000).toISOString(), title: "Frontend Engineering Intern" });
 
 Deno.test("a batch of 12: counted by outcome, the captcha one listed first though it is the oldest", () => {
@@ -38,6 +38,10 @@ Deno.test("(B) a needs_answers row superseded by a newer row of the same posting
   const fresh = { ...row(1, "queued"), id: "j1b", created_at: new Date(NOW - 600000).toISOString() };
   eq(liveRows([old, fresh] as any).map((r: any) => r.id), ["j1b"]);
   eq(liveRows([old] as any).map((r: any) => r.id), ["j1"]);
+  // By job_id, as career_apply_status_for: the live row's link may differ (the board's form link); another posting at the
+  // same link is not the same application.
+  eq(liveRows([old, { ...fresh, url: "https://job-boards.greenhouse.io/co1/jobs/1?form" }] as any).map((r: any) => r.id), ["j1b"], "same posting, other link");
+  eq(liveRows([old, { ...fresh, job_id: "greenhouse:other:9" }] as any).map((r: any) => r.id).sort(), ["j1", "j1b"], "same link, another posting");
   const r = statusReply("where are my applications", [old, fresh, row(2, "submitted_unconfirmed")] as any, NOW)!;
   assert(r.reply.startsWith("2 applications:"), r.reply);
 });

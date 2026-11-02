@@ -18,6 +18,7 @@ const MAX_LISTED = 8, RECENT_DAYS = 30;
 export interface AppRow {
   id: string; company: string; state: string; reason?: string | null; confirmation_id?: string | null;
   email_confirmed_at?: string | null; created_at: string; updated_at: string; title?: string | null; url?: string | null;
+  job_id?: string | null;
 }
 export type ReadApplications = (userId: string) => Promise<AppRow[]>;
 
@@ -25,7 +26,7 @@ export type ReadApplications = (userId: string) => Promise<AppRow[]>;
 // deno-lint-ignore no-explicit-any
 export function supabaseApplications(admin: any): ReadApplications {
   return async (userId) => {
-    const r = await admin.from("career_apply_jobs").select("id,company,url,state,reason,confirmation_id,email_confirmed_at,created_at,updated_at,title:payload->>title")
+    const r = await admin.from("career_apply_jobs").select("id,job_id,company,url,state,reason,confirmation_id,email_confirmed_at,created_at,updated_at,title:payload->>title")
       .eq("user_id", userId).order("updated_at", { ascending: false }).limit(500);
     if (r.error) throw new Error(`read the applications: ${r.error.message}`);
     return (r.data ?? []) as AppRow[];
@@ -159,10 +160,11 @@ export function statusLine(a: AppRow): string {
 
 // The reply to a status question, from the rows (null: they could not be read). Null when the text is not one.
 // (B) 20261101130000: an application stopped for a question the form added after the approval (not_submitted,
-// needs_answers) is history once the same posting has a newer row (re-prepared, approved again): only the newer is said.
+// needs_answers) is history once the same posting (job_id, as career_apply_status_for matches) has a newer row
+// (re-prepared, approved again): only the newer is said.
 export function liveRows(rows: AppRow[]): AppRow[] {
   const history = (a: AppRow) => a.state === "not_submitted" && a.reason === "needs_answers";
-  return rows.filter((a) => !(history(a) && rows.some((b) => b !== a && b.url === a.url && Date.parse(b.created_at) > Date.parse(a.created_at))));
+  return rows.filter((a) => !(history(a) && !!a.job_id && rows.some((b) => b !== a && b.job_id === a.job_id && Date.parse(b.created_at) > Date.parse(a.created_at))));
 }
 export function statusReply(message: string, rows: AppRow[] | null, now: number): { reply: string; status: string; intent: string } | null {
   const ask = statusAsk(message);

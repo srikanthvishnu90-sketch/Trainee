@@ -262,6 +262,9 @@ if [[ -f "$BRIDGE_PATH" ]]; then
     # which the phases below test as they were: applied last, below.
     [[ "$(basename "$file")" == 20261101120000_* ]] && continue
     [[ "$(basename "$file")" == 20261101121000_* ]] && continue
+    # 20261101130000 (re-prepare after needs_answers) rewrites the reconcile and the functions the deferred files above install:
+    # applied last, below.
+    [[ "$(basename "$file")" == 20261101130000_* ]] && continue
     cp "$file" "$PENDING_ROOT/supabase/migrations/"
   done
 fi
@@ -877,6 +880,9 @@ echo "== career_resume_upload_resend.test.sql (a resend is the latest upload, sa
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261101120000_career_apply_cloud_throttle_sample.sql"
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261101121000_career_apply_prepare_error_retry.sql"
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261101121000_career_apply_prepare_error_retry.sql"
+# 20261101130000 redefines the candidates again (121000's error rule kept, history rows not counted): the last word, as in order.
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261101130000_career_apply_reprepare_needs_answers.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261101130000_career_apply_reprepare_needs_answers.sql"
 echo "== career_apply_mass_throughput.test.sql (one error never pauses an ATS; 3 in a row do; 2% at 50 as before; our prep errors retried after 30 min)"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_mass_throughput.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 # LAUNCH READINESS B1 (2026-10-26, audit PR #192): the definer lockdown, last, on the schema every phase above left

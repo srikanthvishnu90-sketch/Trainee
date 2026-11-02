@@ -7,9 +7,13 @@
 //   R4  at most ONE live row per person and posting, by the index: two concurrent approvals make one row
 //   R5  duplicate_job still holds for every other state (queued, driving, submitted_unconfirmed, needs_user, failed,
 //       not_submitted for any other reason)
-//   R6  readers: status lists the new row, not the superseded history; pending shows the re-queued posting; the per-ATS
-//       waiver counts the history row not at all; the daily cap never counted it (a sent state only); posting_sent ignores it
+//   R6  readers: status lists the new row, not the superseded history; posting_sent ignores it; the per-ATS waiver
+//       (D-010) still counts every cloud drive that ran, history included
 //   R7  reconcile (scripts/launch/verify-claim-guards.sql) keeps every rewrite
+//   R9  waiver: max_sends=1 and one drive that ended needs_answers leave 0; the re-preparation is asked with the person's
+//       own pace (career_apply_daily_limit), not null
+//   R10 readers by job_id (as the SQL): the jobs page's appRow (supabase-js over the PostgREST double) and the chat's
+//       liveRows pick the live row of a history+live pair whose links differ
 // Red on the parent (#384): R1-R4 and R6 fail without the migration.
 import assertNode from "node:assert/strict";
 import { pgBinDir, startPg } from "../flow/pg.ts";
@@ -21,6 +25,7 @@ const CI = Deno.env.get("CI") === "true";
 const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 const U = "7b0f8f8e-6a43-4a49-9d2c-0000000a0b01";
 const JOB = "greenhouse:reprep:5100001", URL_ = "https://boards.greenhouse.io/reprep/jobs/5100001";
+const JOB2 = "greenhouse:reprep:5100002", URL2 = "https://boards.greenhouse.io/reprep/jobs/5100002";
 
 Deno.test({
   name: "(B) needs_answers: re-queued, re-prepared, a NEW row on a NEW approval; one live row per posting; readers and guards hold",
@@ -43,18 +48,29 @@ Deno.test({
         insert into public.career_postings (job_id, provider, board, company, title, location, url, description, first_seen_at, last_seen_at)
         values ('${JOB}', 'greenhouse', 'reprep', 'TEST Reprep', 'Frontend Engineering Intern', 'Chicago, IL', '${URL_}', 'Build UI.', now(), now());`);
       // A prepared application, shown on a card and approved (the database's own functions, as the card path calls them).
-      const prepareAndApprove = async (why: string) => {
-        const pl = `jsonb_build_object('version',1,'user_id','${U}','job_id','${JOB}','company','TEST Reprep','url','${URL_}','title','Frontend Engineering Intern',
+      // via "prepare_for": stored the way the preparation stores it (career_apply_prepare_for, with its duplicate_job check);
+      // via "insert": written straight in, to show the card path's own guards while a live row already exists.
+      const prepareAndApprove = async (why: string, o: { via?: "prepare_for" | "insert"; job?: string; url?: string } = {}) => {
+        const job = o.job ?? JOB, url = o.url ?? URL_;
+        const pl = `jsonb_build_object('version',1,'user_id','${U}','job_id','${job}','company','TEST Reprep','url','${url}','title','Frontend Engineering Intern',
           'fields',jsonb_build_array(jsonb_build_object('name','first_name','label','First name','value','Alex'),jsonb_build_object('name','why','label','Why?','value',${`'${why}'`})),
           'privacy_epoch',0,'account_version',0,'expires_at',now()+interval '1 day','resume_sha256',repeat('a',64))`;
-        const p = JSON.parse(await q(`with p as (select ${pl} as pl) insert into public.career_apply_prepared (user_id, job_id, company, url, payload, payload_hash, card_lines)
-          select '${U}', '${JOB}', 'TEST Reprep', '${URL_}', pl, public.career_apply_payload_hash(pl), array['TEST Reprep: Frontend Engineering Intern', 'Why?: ${why}'] from p
+        const lines = `array['TEST Reprep: Frontend Engineering Intern', 'Why?: ${why}']`;
+        const p = JSON.parse(o.via === "prepare_for"
+          ? await q(`select json_build_object('id', r.id, 'hash', r.payload_hash) from public.career_apply_prepare_for('${U}', '${job}', ${pl}, ${lines}) r`)
+          : await q(`with p as (select ${pl} as pl) insert into public.career_apply_prepared (user_id, job_id, company, url, payload, payload_hash, card_lines)
+          select '${U}', '${job}', 'TEST Reprep', '${url}', pl, public.career_apply_payload_hash(pl), ${lines} from p
           returning json_build_object('id', id, 'hash', payload_hash)`));
         const card = JSON.parse(await q(`select row_to_json(c) from public.career_apply_card_open_for('${U}', array['${p.id}']::uuid[], now()) c`));
         const res = JSON.parse(await q(`select public.career_apply_card_answer_for('${U}', '${card.id}', '{1}', now())::text`));
         return { prepared: p, card, res };
       };
-      const rows = () => json(`select id, state, reason, payload_hash, source, attempts from public.career_apply_jobs where user_id = '${U}' and job_id = '${JOB}' order by created_at`);
+      const rows = (job = JOB) => json(`select id, state, reason, payload_hash, source, attempts from public.career_apply_jobs where user_id = '${U}' and job_id = '${job}' order by created_at`);
+      const driveToNeedsAnswers = async (id: string) => {
+        await q(`update public.career_apply_jobs set state = 'driving', attempts = 1, claimed_at = now(), lease_token = gen_random_uuid(), source = 'cloud' where id = '${id}'`);
+        const lease = await q(`select lease_token from public.career_apply_jobs where id = '${id}'`);
+        await q(`select public.career_apply_finish('${id}', '${lease}', 'not_submitted', '{"reason":"needs_answers","nothing_sent":true}'::jsonb)`);
+      };
       let first: any;
 
       await step("the first approval queues one row; the cloud drives it and the form stops it: needs_answers (nothing sent)", async () => {
@@ -73,12 +89,15 @@ Deno.test({
         eq(await q(`select count(*) from public.career_apply_prepare_requests where user_id = '${U}' and '${JOB}' = any(job_ids) and state = 'queued'`), "1");
         const c = await json(`select job_id from public.career_apply_prepare_candidates(now(), 25, 500) where user_id = '${U}'`);
         eq(c.map((x: any) => x.job_id), [JOB]);
+        eq(await q(`select count(*) from public.career_apply_prepare_requests where user_id = '${U}' and '${JOB}' = any(job_ids) and outcome ? 'waiting_for'`), "0",
+          "no pace set: nothing waits");
       });
 
       let second: any;
       await step("R3: the re-prepared application is shown on a NEW card; its approval makes a NEW row; the old row is unchanged", async () => {
         const before = JSON.stringify(first);
-        const b = await prepareAndApprove("second answer, with the new question");
+        // Stored through career_apply_prepare_for, as the preparation stores it: the history row does not make it a duplicate.
+        const b = await prepareAndApprove("second answer, with the new question", { via: "prepare_for" });
         eq(b.res.map((r: any) => r.result), ["queued"], JSON.stringify(b.res));
         const all = await rows();
         eq(all.length, 2);
@@ -109,6 +128,9 @@ Deno.test({
         const live = (await rows()).find((r: any) => r.state === "queued")!;
         for (const [state, reason] of [["queued", null], ["submitted_unconfirmed", null], ["needs_user", "bot_check"], ["failed", "x"], ["not_submitted", "posting_closed"], ["not_submitted", "FACTS_EXPIRED"]]) {
           await q(`set session_replication_role = replica; update public.career_apply_jobs set state = '${state}', reason = ${reason ? `'${reason}'` : "null"} where id = '${live.id}'; set session_replication_role = origin;`);
+          let refused = "";
+          try { await prepareAndApprove(`dup-pf ${state} ${reason}`, { via: "prepare_for" }); } catch (e) { refused = String((e as Error).message); }
+          assert(/duplicate_job/.test(refused), `${state}/${reason}: career_apply_prepare_for still refuses a live row: ${refused.slice(0, 200)}`);
           const d = await prepareAndApprove(`dup ${state} ${reason}`);
           eq(d.res.map((r: any) => r.result), ["duplicate"], `${state}/${reason}: no second row`);
         }
@@ -119,18 +141,59 @@ Deno.test({
         const st = JSON.parse(await q(`select public.career_apply_status_for('${U}', null)::text`));
         eq(st.length, 1, `status lists the live row, not the superseded history: ${JSON.stringify(st).slice(0, 300)}`);
         eq(await q(`select public.career_apply_posting_sent('${U}', '${JOB}', '${URL_}', null, false)`), "f", "history is not sent");
-        await q(`insert into public.career_apply_cloud_gate_waivers (user_id, portal, max_sends, expires_at, note) values ('${U}', 'greenhouse', 2, now() + interval '1 day', 'TEST')`);
-        // Two history rows were claimed by the cloud: the waiver counts neither.
-        eq(await q(`select public.career_apply_cloud_waiver_left('${U}', 'greenhouse', now() + interval '1 minute')`), "2");
+        // D-010: every cloud drive that ran counts against the waiver, a history row included (the drive opened the form).
+        await q(`insert into public.career_apply_cloud_gate_waivers (user_id, portal, max_sends, expires_at, note, created_at) values ('${U}', 'greenhouse', 3, now() + interval '1 day', 'TEST', now() - interval '1 day')`);
+        eq(await q(`select public.career_apply_cloud_waiver_left('${U}', 'greenhouse', now() + interval '1 minute')`), "1", "two drives that ended needs_answers used two of three");
+        await q(`delete from public.career_apply_cloud_gate_waivers where user_id = '${U}'`);
       });
 
       await step("R7: the launch reconcile keeps every rewrite", async () => {
         await q(`select public.career_apply_reconcile_bridge()`);
         for (const f of ["career_apply_enqueue(jsonb,text,text,integer)", "career_apply_prepare_own(jsonb,text[])", "career_apply_record_own(text,text,text,text)",
-          "career_apply_email_reserve_for(uuid,jsonb,text,timestamptz)", "career_apply_pending_for(uuid)", "career_apply_status_for(uuid,text)", "career_apply_cloud_waiver_left(uuid,text,timestamptz)"]) {
+          "career_apply_email_reserve_for(uuid,jsonb,text,timestamptz)", "career_apply_pending_for(uuid)", "career_apply_status_for(uuid,text)", "career_apply_prepare_for(uuid,text,jsonb,text[])"]) {
           eq(await q(`select position('career_apply_job_history' in pg_get_functiondef('public.${f}'::regprocedure)) > 0`), "t", f);
         }
+        eq(await q(`select position('career_apply_job_history' in pg_get_functiondef('public.career_apply_cloud_waiver_left(uuid,text,timestamptz)'::regprocedure)) > 0`), "f",
+          "the waiver is never rewritten: it counts every drive");
       });
+      await step("R9: waiver max_sends=1 and one drive that ended needs_answers leave 0; the re-preparation is asked at the person's own pace", async () => {
+        await q(`insert into public.career_postings (job_id, provider, board, company, title, location, url, description, first_seen_at, last_seen_at)
+          values ('${JOB2}', 'greenhouse', 'reprep', 'TEST Reprep', 'Frontend Engineering Intern', 'Chicago, IL', '${URL2}', 'Build UI.', now(), now())`);
+        await q(`insert into public.career_apply_cloud_gate_waivers (user_id, portal, max_sends, expires_at, note) values ('${U}', 'greenhouse', 1, now() + interval '1 day', 'TEST one')`);
+        const left = () => q(`select public.career_apply_cloud_waiver_left('${U}', 'greenhouse', now() + interval '1 minute')`);
+        eq(await left(), "1");
+        const a = await prepareAndApprove("job two", { via: "prepare_for", job: JOB2, url: URL2 });
+        eq(a.res.map((r: any) => r.result), ["queued"], JSON.stringify(a.res));
+        // The person's pace is 1 a day and one posting was already started today: the re-preparation waits for the day.
+        await q(`update public.career_watch_kv set value = value || '{"daily_limit":"1"}' where user_id = '${U}' and key = 'career:account';
+          update public.career_apply_prepare_requests set state = 'running', claimed_at = now() where user_id = '${U}' and '${JOB}' = any(job_ids)`);
+        eq(await q(`select public.career_apply_daily_limit('${U}')`), "1");
+        await driveToNeedsAnswers((await rows(JOB2))[0].id);
+        eq((await rows(JOB2)).map((r: any) => [r.state, r.reason]), [["not_submitted", "needs_answers"]]);
+        eq(await left(), "0", "the one drive the waiver allowed ran: none left, though it ended needs_answers");
+        eq(await q(`select string_agg(outcome->>'waiting_for', ',') from public.career_apply_prepare_requests where user_id = '${U}' and '${JOB2}' = any(job_ids)`),
+          "per_person_day", "asked with the person's own pace (1), not null");
+      });
+
+      await step("R10: readers match by job_id: a history+live pair whose links differ shows the live row", async () => {
+        const { postgrestDouble } = await import("../flow/postgrest.ts");
+        const { SUPABASE_URL, SERVICE_KEY } = await import("../flow/handler.ts");
+        const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.117.1");
+        const { supabaseFileStore } = await import("../../supabase/functions/trainee-file/store.ts");
+        const { supabaseApplications, liveRows } = await import("../../supabase/functions/_shared/career_apply_status.ts");
+        // The live row of JOB moves to another link (the board's form link): same posting, different url.
+        const live = (await rows()).find((r: any) => !(r.state === "not_submitted" && r.reason === "needs_answers"))!;
+        await q(`set session_replication_role = replica; update public.career_apply_jobs set url = '${URL_}?gh_src=form', updated_at = now() - interval '1 hour' where id = '${live.id}';
+          update public.career_apply_jobs set updated_at = now() where user_id = '${U}' and job_id = '${JOB}' and id <> '${live.id}'; set session_replication_role = origin;`);
+        const double = postgrestDouble(pg, { url: SUPABASE_URL, serviceKey: SERVICE_KEY, users: {} });
+        const admin: any = createClient(SUPABASE_URL, SERVICE_KEY, { global: { fetch: double.fetch as typeof fetch }, auth: { persistSession: false } });
+        const app = await supabaseFileStore(admin).appRow(U, JOB, URL_);
+        eq(app?.id, live.id, "the jobs page reads the live (newest) row, not a history row");
+        const mine = (await supabaseApplications(admin)(U)).filter((r: any) => r.job_id === JOB);
+        assert(mine.length >= 2, `history and live rows read: ${mine.length}`);
+        eq(liveRows(mine).map((r: any) => r.id), [live.id], "the chat's status says only the live row, matched by job_id");
+      });
+
       await step("R8: the rollback refuses while a posting has a history row and a live row (nothing half-undone)", async () => {
         let msg = "";
         try { await q(Deno.readTextFileSync(`${ROOT}/supabase/rollbacks/20261101130000_career_apply_reprepare_needs_answers.down.sql`)); } catch (e) { msg = String((e as Error).message); }

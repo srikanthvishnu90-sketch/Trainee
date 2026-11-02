@@ -311,6 +311,41 @@ export function reminderZone(key: string): string | null {
 }
 const whatOf = (text: string) => (/^Reminder: (.*)\. You asked me on /.exec(text)?.[1] ?? text);
 
+// The "set" of a reminder, on its own: what to say and the when-phrase as the person said it. reminderTurn uses it for
+// "remind me <when> to <what>", and the task planner (agent-chat/career_planner.ts) for a reminder step of a compound ask,
+// so both keep every rule here: the time in their zone, quiet hours said, nothing saved while paused, after STOP, with no
+// texting channel, or for a time past or over a year away.
+export async function setReminder(o: { what: string; when: string; userId: string; now: number; store: ReminderStore; newKey?: () => string }): Promise<ReminderReply> {
+  const s = o.store;
+  if (!o.what) return { reply: "What should the reminder say? Nothing is set yet.", status: "needs_text", intent: REMINDER_ASK_INTENT };
+  let mine: ReminderSettings, reach = false, paused = false, target: { contact: string; lastInboundAt: number | null } | null = null;
+  try { [mine, reach, paused, target] = await Promise.all([s.settings(o.userId), s.reachable(o.userId), s.paused ? s.paused(o.userId) : false, s.target ? s.target(o.userId) : null]); }
+  catch (e) { console.error("reminder: read:", e instanceof Error ? e.message : String(e)); return { reply: "I couldn't save that reminder just now, so nothing is set. Ask me again in a minute.", status: "unreadable", intent: REMINDER_SET_INTENT }; }
+  if (!reach) return { reply: "I can only send reminders by text, and no texting channel is linked to your account (or texts are stopped), so nothing is set. Link Telegram, WhatsApp or iMessage from the Trainee app, then ask again.", status: "no_channel", intent: REMINDER_SET_INTENT };
+  if (paused) return { reply: "Nothing is set: my texts to you are on hold (your account is paused, or you texted STOP on one of your linked numbers), and a reminder can't go out while they're held. Resume in the Trainee app or text START where you sent STOP, then ask me again.", status: "paused", intent: REMINDER_SET_INTENT };
+  const w = whenOf(o.when, o.now, mine.tz);
+  if ("error" in w) return { reply: `Nothing is set: ${w.error}. Say it like "remind me tomorrow at 9am to ${o.what}" or "in 2 hours".`, status: "bad_time", intent: REMINDER_SET_INTENT };
+  // RE-REVIEW 2 (PR #355): a default time only when the message names no time at all ("tomorrow to prep for the 3pm call").
+  const tl = w.defaulted ? TIMELIKE.exec(o.what) : null;
+  if (tl) return { reply: `When should I remind you to ${o.what}? I see "${tl[0]}" in it but I'm not sure that's when you want the reminder. Say it like "remind me tomorrow at 9am to ${o.what}". Nothing is set yet.`, status: "needs_time", intent: REMINDER_ASK_INTENT };
+  if (w.at <= o.now + 30_000) return { reply: `Nothing is set: ${whenLabel(w.at, w.zone)} has already passed. Give me a time that's still ahead.`, status: "past", intent: REMINDER_SET_INTENT };
+  if (w.at > o.now + YEAR) return { reply: "Nothing is set: that's more than a year away. Give me a time within the next year.", status: "too_far", intent: REMINDER_SET_INTENT };
+  const key = reminderKey((o.newKey ?? (() => crypto.randomUUID()))(), w.zone);
+  const text = reminderText(o.what, o.now, w.at, w.zone);
+  let ok = false;
+  try { ok = await s.add(o.userId, { key, text, at: w.at }); }
+  catch (e) { console.error("reminder: save:", e instanceof Error ? e.message : String(e)); }
+  if (!ok) return { reply: "I couldn't save that reminder just now, so nothing is set. Ask me again in a minute.", status: "not_saved", intent: REMINDER_SET_INTENT };
+  const note = w.assumed.length ? ` I used ${w.assumed.join(", and ")}.` : "";
+  // Quiet hours on the clock of the zone the reminder is in: the same zone delivery holds it by.
+  const quiet = quietAt(w.at, w.zone, mine) ? ` That's inside your quiet hours (${hour12(mine.quiet_start)} to ${hour12(mine.quiet_end)}), so it will come when they end, at ${whenLabel(nextAwake(w.at, w.zone, mine), w.zone)}.` : "";
+  // RE-REVIEW (PR #355): WhatsApp delivers free text only within its window after the person's last message; a reminder
+  // due after that waits for their next message (channel.ts deliverDue hold). Said, with when the window closes.
+  const closes = target && /^wa:/.test(target.contact) ? (target.lastInboundAt ?? -Infinity) + WHATSAPP_WINDOW_MS : null;
+  const wa = closes !== null && w.at >= closes ? ` One thing: this goes to WhatsApp, which only lets me text you within 24 hours of your last message to me${Number.isFinite(closes) ? ` (that window closes ${whenLabel(closes, w.zone)})` : ""}. Unless you message me in the 24 hours before it's due, it will wait until you next message me.` : "";
+  return { reply: `Set. At ${whenLabel(w.at, w.zone)} I'll text you: "${text}"${note}${quiet}${wa} Say "my reminders" to see them, or "cancel my reminder about ${short(o.what)}" to drop it.`, status: "set", intent: REMINDER_SET_INTENT };
+}
+
 // ------------------------------------------------------------------------------------------------ the turn
 export interface ReminderReply { reply: string; status: string; intent: string }
 export async function reminderTurn(o: { message: string; userId: string; now: number; store: ReminderStore; newKey?: () => string }): Promise<ReminderReply | null> {
@@ -334,35 +369,7 @@ export async function reminderTurn(o: { message: string; userId: string; now: nu
     if (!ask.what) return { reply: `What should I remind you about, and when? Say it like "remind me tomorrow at 9am to send my transcript". Nothing is set yet.`, status: "needs_text", intent: REMINDER_ASK_INTENT };
     return { reply: `When should I remind you to ${ask.what}? Say it with a time, like "remind me tomorrow at 9am to ${ask.what}". Nothing is set yet.`, status: "needs_time", intent: REMINDER_ASK_INTENT };
   }
-  if (ask.kind === "set") {
-    if (!ask.what) return { reply: "What should the reminder say? Nothing is set yet.", status: "needs_text", intent: REMINDER_ASK_INTENT };
-    let mine: ReminderSettings, reach = false, paused = false, target: { contact: string; lastInboundAt: number | null } | null = null;
-    try { [mine, reach, paused, target] = await Promise.all([s.settings(o.userId), s.reachable(o.userId), s.paused ? s.paused(o.userId) : false, s.target ? s.target(o.userId) : null]); }
-    catch (e) { console.error("reminder: read:", e instanceof Error ? e.message : String(e)); return { reply: "I couldn't save that reminder just now, so nothing is set. Ask me again in a minute.", status: "unreadable", intent: REMINDER_SET_INTENT }; }
-    if (!reach) return { reply: "I can only send reminders by text, and no texting channel is linked to your account (or texts are stopped), so nothing is set. Link Telegram, WhatsApp or iMessage from the Trainee app, then ask again.", status: "no_channel", intent: REMINDER_SET_INTENT };
-    if (paused) return { reply: "Nothing is set: my texts to you are on hold (your account is paused, or you texted STOP on one of your linked numbers), and a reminder can't go out while they're held. Resume in the Trainee app or text START where you sent STOP, then ask me again.", status: "paused", intent: REMINDER_SET_INTENT };
-    const w = whenOf(ask.when, o.now, mine.tz);
-    if ("error" in w) return { reply: `Nothing is set: ${w.error}. Say it like "remind me tomorrow at 9am to ${ask.what}" or "in 2 hours".`, status: "bad_time", intent: REMINDER_SET_INTENT };
-    // RE-REVIEW 2 (PR #355): a default time only when the message names no time at all ("tomorrow to prep for the 3pm call").
-    const tl = w.defaulted ? TIMELIKE.exec(ask.what) : null;
-    if (tl) return { reply: `When should I remind you to ${ask.what}? I see "${tl[0]}" in it but I'm not sure that's when you want the reminder. Say it like "remind me tomorrow at 9am to ${ask.what}". Nothing is set yet.`, status: "needs_time", intent: REMINDER_ASK_INTENT };
-    if (w.at <= o.now + 30_000) return { reply: `Nothing is set: ${whenLabel(w.at, w.zone)} has already passed. Give me a time that's still ahead.`, status: "past", intent: REMINDER_SET_INTENT };
-    if (w.at > o.now + YEAR) return { reply: "Nothing is set: that's more than a year away. Give me a time within the next year.", status: "too_far", intent: REMINDER_SET_INTENT };
-    const key = reminderKey((o.newKey ?? (() => crypto.randomUUID()))(), w.zone);
-    const text = reminderText(ask.what, o.now, w.at, w.zone);
-    let ok = false;
-    try { ok = await s.add(o.userId, { key, text, at: w.at }); }
-    catch (e) { console.error("reminder: save:", e instanceof Error ? e.message : String(e)); }
-    if (!ok) return { reply: "I couldn't save that reminder just now, so nothing is set. Ask me again in a minute.", status: "not_saved", intent: REMINDER_SET_INTENT };
-    const note = w.assumed.length ? ` I used ${w.assumed.join(", and ")}.` : "";
-    // Quiet hours on the clock of the zone the reminder is in: the same zone delivery holds it by.
-    const quiet = quietAt(w.at, w.zone, mine) ? ` That's inside your quiet hours (${hour12(mine.quiet_start)} to ${hour12(mine.quiet_end)}), so it will come when they end, at ${whenLabel(nextAwake(w.at, w.zone, mine), w.zone)}.` : "";
-    // RE-REVIEW (PR #355): WhatsApp delivers free text only within its window after the person's last message; a reminder
-    // due after that waits for their next message (channel.ts deliverDue hold). Said, with when the window closes.
-    const closes = target && /^wa:/.test(target.contact) ? (target.lastInboundAt ?? -Infinity) + WHATSAPP_WINDOW_MS : null;
-    const wa = closes !== null && w.at >= closes ? ` One thing: this goes to WhatsApp, which only lets me text you within 24 hours of your last message to me${Number.isFinite(closes) ? ` (that window closes ${whenLabel(closes, w.zone)})` : ""}. Unless you message me in the 24 hours before it's due, it will wait until you next message me.` : "";
-    return { reply: `Set. At ${whenLabel(w.at, w.zone)} I'll text you: "${text}"${note}${quiet}${wa} Say "my reminders" to see them, or "cancel my reminder about ${short(ask.what)}" to drop it.`, status: "set", intent: REMINDER_SET_INTENT };
-  }
+  if (ask.kind === "set") return await setReminder({ what: ask.what, when: ask.when, userId: o.userId, now: o.now, store: s, newKey: o.newKey });
   let rows: ReminderRow[], zone = DEFAULT_ZONE;
   try {
     const [r, z] = await Promise.all([s.pending(o.userId), s.settings(o.userId)]);

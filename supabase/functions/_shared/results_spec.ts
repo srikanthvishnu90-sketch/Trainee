@@ -72,16 +72,16 @@ export function countsOf(rows: readonly R[]): { key: Bucket; label: string; n: n
 
 // What the top of the page may say about what is already sent. "Nothing has been sent" is written only when no role is approved,
 // started, submitted or already in the person's applications.
-export const NOTHING_SENT = "Nothing has been sent. Apply sends only the application shown under What will be sent.";
+export const NOTHING_SENT = "Nothing has been sent. Apply sends only the application as its card shows it.";
 export function coverage(rows: readonly R[]): string {
   const moving = rows.filter((r) => { const s = specOf(r); return s.sent || s.bucket === "progress" || s.bucket === "done"; }).length;
-  return moving ? `${moving} ${moving === 1 ? "role is" : "roles are"} already approved, started or submitted (including any you dismissed). For every other role, nothing has been sent, and Apply sends only the application shown under What will be sent.` : NOTHING_SENT;
+  return moving ? `${moving} ${moving === 1 ? "role is" : "roles are"} already approved, started or submitted (including any you dismissed). For every other role, nothing has been sent, and Apply sends only the application as its card shows it.` : NOTHING_SENT;
 }
 
 // What the Apply button on a card does, in words next to it (PRD 5).
 export function applyHelp(r: R & { openQs?: number }): string {
   if (r.openQs) return `Apply first asks the ${r.openQs === 1 ? "employer's question" : `${r.openQs} employer questions`} this role needs. Nothing is sent.`;
-  if (r.tag) return "Apply approves and sends exactly the application shown under What will be sent. Nothing else goes.";
+  if (r.tag) return "Apply approves and sends exactly the application as its card shows it. Nothing else goes.";
   return "Apply starts preparing this application so you can see it. Nothing is sent until you tap Apply again.";
 }
 

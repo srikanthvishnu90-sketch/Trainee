@@ -54,7 +54,7 @@ Deno.test("top: counts by primary state from the rows, the coverage line, the up
   const { html } = await open();
   const t = top(html);
   assert(/3 Ready to apply/.test(t), t);
-  assert(t.includes("Nothing has been sent. Apply sends only the application shown under What will be sent."), t);
+  assert(t.includes("Nothing has been sent. Apply sends only the application as its card shows it."), t);
   assert(/Page updated .*20\d\d/.test(t), t);
   assert(/Pause on this page/.test(t) && /not cancelled/.test(t), "pause says in-flight stays");
 });
@@ -74,7 +74,7 @@ Deno.test("card: Apply is explained in words, role id and unknown labels are rea
   const { html } = await open();
   const card = plain(cardOf(html, refIn(html, "Frontend Intern", "Globex")));
   assert(/R-0\d/.test(card), card);
-  assert(card.includes("Apply approves and sends exactly the application shown under What will be sent."), card);
+  assert(card.includes("Apply approves and sends exactly the application as its card shows it."), card);
   assert(/Requisition ID Not listed/.test(card) && /Checked Check time unknown/.test(card) && /Pay not listed/i.test(card), card);
   assert(/Prepared/.test(card), "a ready role reads Prepared");
 });

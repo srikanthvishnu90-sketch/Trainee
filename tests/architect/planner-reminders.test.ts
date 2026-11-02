@@ -8,10 +8,13 @@
 //   quiet     a time inside their quiet hours is said so (delivery holds it to the end of them)
 //   holds     paused or STOPped, or no texting channel: nothing is set, and the reply says why
 //   once      the same plan twice, or a reminder already set in chat with the same words for that day: one row
-//   words     the reply never says "I don't send reminder texts"
+//   words     the reply never says "I don't send reminder texts"; the reminder says the person's words, never the model's
+//   key       the key is code's: a hash of the person, the words and the exact instant (same three, one row; a later
+//             time the same day, a second row); "Friday at 3pm" said on a Friday after 3pm is next Friday at 3pm, the
+//             time kept; a chat reminder for the same evening time (another UTC day) is not set twice
 //   deno test -A --no-check tests/architect/planner-reminders.test.ts
 import assertNode from "node:assert/strict";
-import { plannerTurn, type PlannerIO } from "../../supabase/functions/agent-chat/career_planner.ts";
+import { planReminderId, plannerTurn, type PlannerIO } from "../../supabase/functions/agent-chat/career_planner.ts";
 import { memoryReminderStore, type MemoryReminders, reminderTurn } from "../../supabase/functions/_shared/career_reminders.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -19,11 +22,11 @@ const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const THU = Date.UTC(2026, 9, 29, 15); // Thursday 2026-10-29, 10:00 AM in Chicago
 const U = "u-plan-remind";
 
-function fake(plan: unknown, init: Partial<MemoryReminders> = {}) {
+function fake(plan: unknown, init: Partial<MemoryReminders> = {}, now = THU) {
   const reminders = memoryReminderStore({ reachable: { [U]: true }, zones: { [U]: "America/Chicago" }, ...init });
   const ctx: Record<string, any> = {};
   const io: PlannerIO = {
-    userId: U, threadId: "t1", now: () => THU, tz: "America/Chicago", ctx, reminders,
+    userId: U, threadId: "t1", now: () => now, tz: "America/Chicago", ctx, reminders,
     model: async () => ({ content: [{ type: "tool_use", name: "plan_task", input: plan }] }),
     lastIntent: async () => null,
     router: async () => ({ reply: "?", intent: "career_catchall" }),
@@ -93,4 +96,53 @@ Deno.test("once: the same plan sent twice is one row; one already set in chat fo
   const r = claimed(await plannerTurn(chat.io, MSG));
   eq((await chat.reminders.pending(U)).length, 1, "one reminder, not two");
   ok(/already set/.test(r.reply), r.reply);
+});
+
+const planAt = (when: string, what = "prep for the call") => ({ kind: "task", steps: [PLAN.steps[0],
+  { capability: "reminder.set", text: `remind me ${when} to ${what}`, args: { when, what } }] });
+const msgAt = (when: string) => `apply to the analyst role at Stripe and remind me ${when} to prep for the call`;
+
+Deno.test("key: 'Friday at 3pm' said on a Friday after 3pm is next Friday at 3:00 PM, the stated time kept (no '9:00 AM' assumed)", async () => {
+  const FRI_4PM = Date.UTC(2026, 9, 30, 21); // Friday 2026-10-30, 4:00 PM in Chicago
+  const { io, reminders } = fake(planAt("Friday at 3pm"), {}, FRI_4PM);
+  const r = claimed(await plannerTurn(io, msgAt("Friday at 3pm")));
+  const rows = await reminders.pending(U);
+  eq(rows.length, 1, r.reply);
+  eq([chicago(rows[0].at), new Date(rows[0].at).toISOString().slice(0, 10)], ["Fri 3:00 PM", "2026-11-06"]);
+  ok(!/9:00 AM|didn't say a time/.test(r.reply), r.reply);
+});
+
+Deno.test("key: a chat reminder for Friday 8pm Chicago (Saturday in UTC) with the same words is not set again by the plan", async () => {
+  const { io, reminders } = fake(planAt("Friday at 8pm"));
+  eq((await reminderTurn({ message: "remind me Friday at 8pm to prep for the call", userId: U, now: THU, store: reminders }))?.status, "set");
+  const r = claimed(await plannerTurn(io, msgAt("Friday at 8pm")));
+  const rows = await reminders.pending(U);
+  eq(rows.length, 1, r.reply);
+  eq(new Date(rows[0].at).getUTCDay(), 6, "it is Saturday in UTC: the check compares the instant, not a UTC day");
+  ok(/already set/.test(r.reply), r.reply);
+});
+
+Deno.test("key: the same words at 3pm, then at 5pm the same Friday, are two reminders; the key is the hash of person, words and instant", async () => {
+  const three = fake(planAt("Friday at 3pm"));
+  claimed(await plannerTurn(three.io, msgAt("Friday at 3pm")));
+  const five = fake(planAt("Friday at 5pm"));
+  (five.io as any).reminders = three.reminders;
+  const r = claimed(await plannerTurn(five.io, msgAt("Friday at 5pm")));
+  const rows = (await three.reminders.pending(U)).sort((a, b) => a.at - b.at);
+  eq(rows.map((x) => chicago(x.at)), ["Fri 3:00 PM", "Fri 5:00 PM"], r.reply);
+  ok(!/already set/.test(r.reply), r.reply);
+  for (const row of rows) eq(row.key, `status:reminder:${await planReminderId(U, "prep for the call", row.at)}:America/Chicago`);
+  eq(await planReminderId(U, "Prep for the call", rows[0].at), await planReminderId(U, "prep for the call", rows[0].at), "case aside, the same words");
+  ok(await planReminderId(U, "prep for the call", rows[0].at) !== await planReminderId("someone-else", "prep for the call", rows[0].at), "another person, another key");
+});
+
+Deno.test("words: the reminder says the person's words, never the model's wording", async () => {
+  const plan = { kind: "task", steps: [PLAN.steps[0],
+    { capability: "reminder.set", text: "remind me Friday at 3pm to prep for the call", args: { when: "Friday at 3pm", what: "prepare thoroughly for your Stripe interview" } }] };
+  const { io, reminders } = fake(plan);
+  claimed(await plannerTurn(io, MSG));
+  const rows = await reminders.pending(U);
+  eq(rows.length, 1);
+  ok(/^Reminder: prep for the call\./.test(rows[0].text), rows[0].text);
+  ok(!/thoroughly|interview/.test(rows[0].text), rows[0].text);
 });

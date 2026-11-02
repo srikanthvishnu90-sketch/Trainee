@@ -103,7 +103,7 @@ Deno.test("F17 bridge: the token binds request, lease and sandbox; the person an
     secret: SECRET, readRequest: async () => row,
     rpc: async (name: string, args: any) => {
       calls.push({ name, args });
-      if (name === "career_apply_prepare_candidates") return [{ user_id: U, job_id: "ashby:ramp:1" }, { user_id: U, job_id: "ashby:other:9" }, { user_id: OTHER, job_id: "ashby:ramp:1" }];
+      if (name === "career_apply_prepare_candidates_for") return [{ user_id: U, job_id: "ashby:ramp:1" }, { user_id: U, job_id: "ashby:other:9" }, { user_id: OTHER, job_id: "ashby:ramp:1" }];
       if (name === "career_apply_prepare_request_posting") return args.p_posting === "ashby:ramp:1" ? { job_id: "ashby:ramp:1", url: RAMP_URL, company: "Ramp" } : null;
       if (name === "career_apply_cloud_resume_kept_for") return { filename: "Vishnu_Srikanth_Resume.pdf", sha256: "a".repeat(64), b64: "" };
       return { ok: true };

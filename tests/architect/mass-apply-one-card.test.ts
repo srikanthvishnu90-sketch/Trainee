@@ -22,7 +22,7 @@ async function run(ready: any[], o: { open?: any[] | Error; waiting?: any[] | Er
       if (name === "career_apply_prepare_request_ready") return ready;
       if (name === "career_apply_prepare_request_questions") return [];
       if (name === "career_apply_questions_open_as") { if (o.open instanceof Error) throw o.open; return o.open ?? []; }
-      if (name === "career_apply_prepare_candidates") { if (o.waiting instanceof Error) throw o.waiting; return o.waiting ?? []; }
+      if (name === "career_apply_prepare_candidates_for") { if (o.waiting instanceof Error) throw o.waiting; return o.waiting ?? []; }
       if (name === "career_apply_card_push_requested_for") return "dddddddd-bbbb-4ccc-8ddd-0000000000f4";
       if (name === "career_apply_prepare_request_notice") return true;
       if (name === "career_apply_prepare_request_finish") return { state: "done" };

@@ -125,6 +125,7 @@ const ANSWER = "Send a short thank-you note within a day that names one thing yo
 let modelRequests = 0;
 const fakeOpenAI = async (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
   const req = input instanceof Request && !init ? input : new Request(input as any, init);
+  if (new URL(req.url).pathname === "/v1/moderations" || (await req.clone().text()).includes("TRAINEE_CRISIS_SCREEN")) return Response.json({ id: "screen", model: "screen", results: [{ flagged: false, categories: {} }], choices: [{ index: 0, message: { role: "assistant", content: "NO" }, finish_reason: "stop" }], content: [{ type: "text", text: "NO" }], stop_reason: "end_turn", usage: { prompt_tokens: 1, completion_tokens: 1, input_tokens: 1, output_tokens: 1 } }); // #354: the crisis screen's moderation and classifier calls, not counted (architect OK 2026-11-02)
   if (new URL(req.url).hostname !== "api.openai.com") return new Response("not reachable in this test", { status: 404 });
   const body = await req.json(); modelRequests++;
   return new Response(JSON.stringify({ id: "fake", model: body.model, choices: [{ index: 0, message: { role: "assistant", content: ANSWER }, finish_reason: "stop" }], usage: { prompt_tokens: 100, completion_tokens: 40 } }), { status: 200, headers: { "content-type": "application/json" } });

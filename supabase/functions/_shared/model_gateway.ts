@@ -356,3 +356,27 @@ export async function responsesCall(o: { apiKey: string; model: string; body: Re
     } catch (e) { console.error("[model] budget settle failed; the reservation stays open and expires to its worst case:", e instanceof Error ? e.message : e); }
   }
 }
+
+// ---- The moderation door (#354 crisis screen, architect decision 2026-11-01) ----------------------------------------------
+// OpenAI's moderation endpoint (omni-moderation-latest) reads one inbound chat message for the crisis screen's second
+// layer (_shared/career_crisis_screen.ts). It is free, so nothing is reserved: this is the gateway's one unreserved send,
+// and it can only reach MODERATIONS_URL. The kill switch and the key are the same as callModel's (MODEL_BUDGET_PAUSED
+// stops it; OPENAI_API_KEY through modelConfig, never logged). It never logs or returns the text: it returns the
+// provider's JSON body, or throws (not configured, paused, HTTP error, timeout after timeoutMs, default 1.5 s).
+const MODERATIONS_URL = "https://api.openai.com/v1/moderations";
+export const MODERATION_MODEL = "omni-moderation-latest";
+// Whether the moderation door has a key to send with (never the key itself).
+export function moderationConfigured(env: Env): boolean { return !!modelConfig(env, "probe").apiKey; }
+export async function moderate(text: string, o: { env?: Env; request?: typeof fetch; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<unknown> {
+  const send = o.request || fetch;
+  const get = denoEnvGet();
+  const env: Env = o.env ?? { get: (k: string) => (get ? get(k) : undefined) };
+  if (budgetPausedByEnv((k: string) => env.get(k))) throw new ModelBudgetBlockedError("paused", "MODEL_BUDGET_PAUSED is on");
+  const apiKey = modelConfig(env, "probe").apiKey;
+  if (!apiKey) throw new ModelUnavailableError(0, "not_configured", "OpenAI API key is not configured");
+  const timeout = AbortSignal.timeout(o.timeoutMs || 1500);
+  const signal = o.signal ? AbortSignal.any([o.signal, timeout]) : timeout;
+  const res = await send(MODERATIONS_URL, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model: MODERATION_MODEL, input: String(text ?? "") }), signal });
+  if (!res.ok) { await res.body?.cancel(); throw new ModelUnavailableError(res.status, "moderation_http", `OpenAI moderation answered ${res.status}`); }
+  return await res.json();
+}

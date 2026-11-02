@@ -1,5 +1,6 @@
 // CRISIS TEXT IS CODE'S (D-035 review): a message that names self-harm or suicide is answered by code's own crisis reply,
-// never by the brain. The two crisis screens the router already carries decide, word for word: CareerIntel's request
+// never by the brain. Three screens decide, word for word: #354's word list (career_crisis_screen.ts rulesDistress, reply
+// SAFETY_REPLY) and the two the router already carries: CareerIntel's request
 // screen (125-career-intel.js respondToRequest, action "support": 988, Crisis Text Line, 911) and CareerSafety's distress
 // protocol (139-career-safety.js distressResponse, crisis: 988, Crisis Text Line). The router answers only some of their
 // phrases with safety_support (its appendix runs after other modules, and it reads only 125's screen): "I'm thinking about
@@ -7,6 +8,8 @@
 // career_staged.ts keeps every such turn off the brain, and the handler answers it with this reply when the router did
 // not. No new prose here: the reply is the core's text.
 import { CareerIntel, CareerSafety } from "../_shared/router_core.career.js";
+import { rulesDistress } from "../_shared/career_crisis_screen.ts";
+import { SAFETY_REPLY } from "../_shared/career_trust_turn.ts";
 
 // Typographic apostrophes as typed on phones ("don’t") read as the plain one the screens expect.
 const plain = (s: string) => String(s ?? "").replace(/[‘’ʼ]/g, "'");
@@ -21,7 +24,10 @@ export function crisisReply(message: string): string | null {
   try {
     const d = (CareerSafety as any)?.distressResponse?.({ text, profileFacts: [] });
     if (d && d.crisis === true && typeof d.text === "string") return d.text;
-  } catch { /* neither screen could read it: not a crisis by code's rule */ }
+  } catch { /* the word list below still decides */ }
+  // #354's deterministic word list (career_crisis_screen.ts rulesDistress: "I want to die", "I wanna die", "I want to end
+  // it", "don't want to be here"...), the same list the handler's three-layer screen starts from: its reply is #354's.
+  try { if (rulesDistress(text)) return SAFETY_REPLY; } catch { /* not a crisis by code's rule */ }
   return null;
 }
 

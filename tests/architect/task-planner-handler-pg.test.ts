@@ -65,6 +65,7 @@ Deno.test({ name: "TASK PLANNER: compound asks complete at the real handler, thr
     set({ OPENAI_API_KEY: "sk-fake-planner-not-a-key", MODEL_PROVIDER: null, CAREER_MODEL: "gpt-5-mini", CAREER_NETWORKING_DRAFT: "on" });
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
+      if (new URL(req.url).pathname === "/v1/moderations" || (await req.clone().text()).includes("TRAINEE_CRISIS_SCREEN")) return Response.json({ id: "screen", model: "screen", results: [{ flagged: false, categories: {} }], choices: [{ index: 0, message: { role: "assistant", content: "NO" }, finish_reason: "stop" }], content: [{ type: "text", text: "NO" }], stop_reason: "end_turn", usage: { prompt_tokens: 1, completion_tokens: 1, input_tokens: 1, output_tokens: 1 } }); // #354: the crisis screen's moderation and classifier calls, not counted (architect OK 2026-11-02)
       if (new URL(req.url).hostname === "api.openai.com") return outage ? new Response(JSON.stringify({ error: { type: "server_error", message: "fake outage" } }), { status: 500, headers: { "content-type": "application/json" } }) : await fakeOpenAI(req);
       return new Response("not reachable in this test", { status: 404 });
     }) as typeof fetch;

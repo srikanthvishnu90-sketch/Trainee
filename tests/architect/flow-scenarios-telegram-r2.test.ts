@@ -117,6 +117,7 @@ Deno.test({
           return f ? new Response(f.bytes as BodyInit) : new Response("not found", { status: 404 });
         }
         if (u.host === "api.telegram.org") return await bot.fetch(req);
+        if (u.pathname === "/v1/moderations" || (await req.clone().text()).includes("TRAINEE_CRISIS_SCREEN")) return Response.json({ id: "screen", model: "screen", results: [{ flagged: false, categories: {} }], choices: [{ index: 0, message: { role: "assistant", content: "NO" }, finish_reason: "stop" }], content: [{ type: "text", text: "NO" }], stop_reason: "end_turn", usage: { prompt_tokens: 1, completion_tokens: 1, input_tokens: 1, output_tokens: 1 } }); // #354: the crisis screen's moderation and classifier calls, not counted (architect OK 2026-11-02)
         if (u.host === "api.openai.com") return await fakeOpenAI(req);
         // A pasted posting link is looked up on its board's public API (apply here): the fake board has no such posting.
         if (/^(api\.lever\.co|boards-api\.greenhouse\.io|api\.ashbyhq\.com|jobs\.ashbyhq\.com)$/.test(u.host)) { bump("board_lookups"); return Response.json({ ok: false, error: "Document not found" }, { status: 404 }); }

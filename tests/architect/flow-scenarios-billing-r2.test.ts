@@ -117,6 +117,7 @@ Deno.test({
         const u = new URL(req.url);
         if (u.origin === new URL(SUPABASE_URL).origin) return await viaDouble(req);
         if (u.host === "api.stripe.com") return await cur.fake.fetch(req);
+        if (u.pathname === "/v1/moderations" || (await req.clone().text()).includes("TRAINEE_CRISIS_SCREEN")) return Response.json({ id: "screen", model: "screen", results: [{ flagged: false, categories: {} }], choices: [{ index: 0, message: { role: "assistant", content: "NO" }, finish_reason: "stop" }], content: [{ type: "text", text: "NO" }], stop_reason: "end_turn", usage: { prompt_tokens: 1, completion_tokens: 1, input_tokens: 1, output_tokens: 1 } }); // #354: the crisis screen's moderation and classifier calls, not counted (architect OK 2026-11-02)
         if (u.host === "api.openai.com") { wire.model++; const body = await req.json().catch(() => ({})); return completion(body, { role: "assistant", content: "Here is a general answer." }); }
         outbound.push(`${req.method} ${u.host}${u.pathname}`);
         throw new TypeError(`network refused: ${u.host}`);

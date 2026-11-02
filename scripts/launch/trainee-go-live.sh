@@ -266,7 +266,7 @@ MIGRATIONS=(
   20261101121000_career_apply_prepare_error_retry.sql
   20261101130000_career_apply_reprepare_needs_answers.sql
   20261102120000_career_apply_prepare_candidates_for.sql
-  20261102130000_career_apply_resume_file_restarts_preparation.sql
+  20261102140000_career_apply_resume_file_restarts_preparation.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"

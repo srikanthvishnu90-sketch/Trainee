@@ -1,3 +1,4 @@
+import { pendingLine } from "../../supabase/functions/_shared/career_hosted_prepare.ts";
 // MASS APPLY, MISSING INFORMATION, END TO END (owner requirement, 2026-11-02). When Trainee lacks something an application needs
 // (a resume, a phone number, work authorization, an employer's own question) it must ASK for exactly that, ONE thing at a time,
 // save the answer as a confirmed fact, keep preparing, and show the finished application on the results page ("What will be
@@ -416,6 +417,10 @@ Deno.test({
         assert(!/name="q_/.test(html), "no field for it on the page");
         assert(!/Social Security/i.test(plain(html).replace(/Enter your Social Security Number.*$/, "")), "never asked");
         assert(!/What will be sent/.test(plain(await cardHtml(INITECH))), "Initech is not shown as ready");
+        // Said plainly why, not a generic "could not be filled": it is something Trainee does not take in a message.
+        const rows = await json(`select * from public.career_apply_pending_for('${PERSON}') where company = 'Initech'`);
+        const line = rows[0] ? pendingLine(rows[0]) : "";
+        assert(/ID number, password or code/.test(line) && /can't take/.test(line) && /Nothing was sent/.test(line), `Initech's line: ${line}`);
         await nothingSent("Initech");
       });
 

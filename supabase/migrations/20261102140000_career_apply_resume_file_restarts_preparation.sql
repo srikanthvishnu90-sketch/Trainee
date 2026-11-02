@@ -4,7 +4,7 @@
 -- and "ask again" (chat: already in your queue; page: nothing to do) started nothing.
 -- When the person's resume file is stored: their "no_resume" tries are forgotten, and a preparation is asked for the postings
 -- waiting in their queue (the same call a needs_answers job makes, career_apply_prepare_request_put). Nothing is approved,
--- queued for sending or sent by it. Additive, idempotent. Rollback: supabase/rollbacks/20261102130000_career_apply_resume_file_restarts_preparation.down.sql
+-- queued for sending or sent by it. Additive, idempotent. Rollback: supabase/rollbacks/20261102140000_career_apply_resume_file_restarts_preparation.down.sql
 
 create or replace function public.career_apply_resume_file_restarts() returns trigger
 language plpgsql security definer set search_path = public, pg_temp as $$

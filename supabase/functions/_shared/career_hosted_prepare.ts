@@ -61,7 +61,8 @@ export function pendingLine(p: PendingRow): string {
     case "starting": return `${name}: waiting its turn to be prepared (within minutes); nothing is sent until you approve its card.`;
     case "waiting_on_you": return `${name}: waiting on your answer to ${p.open_questions === 1 ? "1 question" : `${p.open_questions} questions`}; say "what do you need from me". Nothing was sent.`;
     case "no_resume": return `${name}: not prepared: I don't have your resume file to attach. Send it here as a PDF or Word file. Nothing was sent.`;
-    case "refused": return `${name}: not prepared: the employer's form could not be filled ahead of time. Nothing was sent.`;
+    case "refused": if (/^sensitive_question/.test(p.detail ?? "")) return `${name}: not prepared: the form asks for something like an ID number, password or code, which I can't take in a message, here or on your page. Fill that one in on the employer's site yourself. Nothing was sent.`;
+      return `${name}: not prepared: the employer's form could not be filled ahead of time. Nothing was sent.`;
     case "error": return `${name}: not prepared: preparing it failed on my side. Nothing was sent.`;
     default: return `${name}: in your queue, not prepared yet. Nothing was sent.`;
   }

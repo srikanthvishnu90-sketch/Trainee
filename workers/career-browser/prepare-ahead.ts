@@ -186,10 +186,15 @@ export async function prepareOne(d: AheadDeps, c: Candidate): Promise<AheadOutco
         }
       }
     }
-    const r = await prepare({
+    const dryRun = () => prepare({
       url: d.urlFor ? d.urlFor(c) : c.url, factsPath, resumePath: resume.path, account: { epoch: Number(c.epoch), version: Number(c.version) },
       now: now(), runEngine: d.runEngine, resumeTag: resume.tag,
     });
+    let r = await dryRun();
+    // MASS APPLY (2026-11-01): the browser itself failing (DRIVER_ERROR: a crash or a timeout of the engine's browser, not
+    // the employer's page) is tried once more at once. A preparation is a dry run (nothing is ever submitted), so a second
+    // try is safe; without it one browser hiccup parked the posting for 7 days (prepare_candidates' wait after a refusal).
+    if (!r.ready && /^DRIVER_ERROR/.test(String((r.result as any)?.reason ?? ""))) r = await dryRun();
     if (!r.ready) {
       const result: any = r.result;
       // The questions name the posting's own company too (the engine's stop names the board's tenant or the page's host).

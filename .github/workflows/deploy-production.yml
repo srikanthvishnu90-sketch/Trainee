@@ -35,8 +35,10 @@ jobs:
     uses: ./.github/workflows/deploy-preflight.yml
   # S3's evidence: a reply-quality measurement of this SHA (or of a same-reply-code ancestor) and of the deployed SHA on the
   # same set. When one is missing, measure it (scripts/launch/measure-reply.sh: a measurement commit on ci/brain-eval whose
-  # second parent is that SHA, brain-eval dispatched on it, five router passes, about $0.10, capped by brain-eval.yml's
-  # EVAL_BUDGET_USD) and wait for the score; at most the candidate and then the deployed SHA. It judges nothing: the
+  # second parent is that SHA, brain-eval dispatched on it, five passes of the brain that SHA serves (its committed
+  # release_config.ts, D-035: staged for the candidate, router for a SHA before the config; router passes about $0.10,
+  # staged also pays the brain's model), capped by brain-eval.yml's EVAL_BUDGET_USD) and wait for the score; at most the
+  # candidate and then the deployed SHA. It judges nothing: the
   # standard below does, and a measurement that could not be made is S3's FAIL there, with its reason.
   measure:
     name: reply measurement (S3 evidence)
@@ -62,11 +64,13 @@ jobs:
           auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
           for round in 1 2; do
             git -c "http.extraheader=$auth" fetch --no-tags -q origin +refs/heads/ci/brain-eval:refs/remotes/origin/ci/brain-eval
-            need=$(deno run -A scripts/launch/deploy-standard.ts --sha "$GITHUB_SHA" --missing-measurement --exclude-run "$GITHUB_RUN_ID" | tee /dev/stderr | sed -n 's/^measure=//p')
+            ask=$(deno run -A scripts/launch/deploy-standard.ts --sha "$GITHUB_SHA" --missing-measurement --exclude-run "$GITHUB_RUN_ID" | tee /dev/stderr)
+            need=$(printf '%s\n' "$ask" | sed -n 's/^measure=//p'); brain=$(printf '%s\n' "$ask" | sed -n 's/^brain=//p')
             [ -z "$need" ] && exit 0
+            case "$brain" in router|staged) ;; *) echo "::error::no served brain for $need (got '$brain'); S3 will fail"; exit 1;; esac
             # Measured once already in this run and still no score: measuring again would only spend again.
             case " ${done_shas:-} " in *" $need "*) echo "::error::$need was measured in this run and still has no score; S3 will fail"; exit 1;; esac
-            MEASURE_WAIT_MIN=80 bash scripts/launch/measure-reply.sh "$need"
+            MEASURE_WAIT_MIN=80 MEASURE_BRAINS="$brain" bash scripts/launch/measure-reply.sh "$need"
             done_shas="${done_shas:-} $need"
           done
   standard:

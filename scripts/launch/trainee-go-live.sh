@@ -49,8 +49,10 @@
 #                 to replay), and one missing live stops the run before anything is deployed on top of it; then every
 #                 mark is read again and any missing one fails the run (a ledger row never stands in for the schema)
 #   3 secrets     one `supabase secrets set --env-file` from a 0600 temp file removed at once; CAREER_BRAIN=agent only
-#                 with --brain agent, CAREER_BRAIN=staged only with --brain staged (--brain router unsets it; without
-#                 --brain it is not touched)
+#                 with --brain agent, CAREER_BRAIN=staged only with --brain staged, CAREER_BRAIN=router (the emergency
+#                 rollback) only with --brain router; without --brain it is not touched. D-035: the brain served is the
+#                 committed release config (supabase/functions/agent-chat/release_config.ts PRODUCTION_BRAIN, "staged");
+#                 CAREER_BRAIN can only roll it back to the router, never turn on a brain the commit did not ship
 #   4 deploy      agent-chat from the staged career-only tree (index-career.ts as agent-chat/index.ts, JWT on), then
 #                 career-ingest, career-proactive, trainee-deliver, trainee-inbound, trainee-telegram, trainee-whatsapp
 #                 with --no-verify-jwt (pg_cron, LoopMessage, Telegram and Meta carry no JWT; each checks its own secret),
@@ -80,6 +82,10 @@ REPO="$(pwd)"
 DRY=""; SKIP_MIG=""; SKIP_DEPLOY=""; ONLY_SMOKE=""; BRAIN=""; ALLOW_SEND=""; NOWAIT=""; WANT_SHA=""; VERIFY=""; VERIFY_MODE=""; BUILD_SNAPSHOT=""
 NONINT=""; [[ "${TRAINEE_NON_INTERACTIVE:-}" == 1 ]] && NONINT=1
 UNSCHEDULE_CRON=""
+# D-037: the database switches of real submission (release_config.ts RELEASE_DB_SWITCHES), written after the claim guards.
+# Unset (a plain go-live, or --brain router): only missing rows are written 'on'; a row already there, such as the owner's
+# 'off', is never changed. --real-submit on|off overwrites existing rows on purpose.
+REAL_SUBMIT=""
 DEPLOY_LABEL="${TRAINEE_DEPLOY_LABEL:-owner}"
 while (( $# )); do
   case "$1" in
@@ -90,6 +96,8 @@ while (( $# )); do
     --brain) shift; BRAIN="${1:-}" ;;
     --brain=*) BRAIN="${1#--brain=}" ;;
     --allow-send) ALLOW_SEND=1 ;;
+    --real-submit) shift; REAL_SUBMIT="${1:-}" ;;
+    --real-submit=*) REAL_SUBMIT="${1#--real-submit=}" ;;
     --no-wait) NOWAIT=1 ;;
     --build-snapshot) BUILD_SNAPSHOT=1 ;;
     --non-interactive) NONINT=1 ;;
@@ -249,9 +257,13 @@ MIGRATIONS=(
   20261031040000_telegram_link_confirm.sql
   20261031050000_career_account_memory_one_copy.sql
   20261031060000_connectors_r3.sql
+  20261031063000_telegram_link_reply_code.sql
   20261031070000_career_resume_upload_resend.sql
   20261031090000_career_thread_facts_authority.sql
   20261031100000_trainee_file_signin_limits.sql
+  20261101120000_career_apply_cloud_throttle_sample.sql
+  20261101121000_career_apply_prepare_error_retry.sql
+  20261101130000_career_apply_reprepare_needs_answers.sql
   20261031110000_career_outreach_batch_unbounded.sql
 )
 MIGRATION_MARK=(
@@ -378,12 +390,16 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'career_apply_card_open_for' and pg_get_functiondef(oid) like '%least(p_now, now())%')"
   "exists (select 1 from pg_proc where proname = 'career_send_go' and pg_get_functiondef(oid) like '%career_send_bad_addresses%')"
   "exists (select 1 from pg_proc where proname = 'channel_link_nonce_redeem' and prosrc like '%the code stays unused%')"
-  "exists (select 1 from pg_proc where proname = 'channel_link_nonce_ask') and exists (select 1 from pg_proc where proname = 'channel_link_code_pending') and exists (select 1 from pg_proc where proname = 'channel_link_confirm' and prosrc like '%ambiguous%') and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'channel_link_requests' and column_name = 'by_code')"
+  "exists (select 1 from pg_proc where proname = 'channel_link_nonce_ask') and exists (select 1 from pg_proc where proname = 'channel_link_code_pending') and exists (select 1 from pg_proc where proname = 'channel_link_confirm' and (prosrc like '%ambiguous%' or prosrc like '%not by_code%')) and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'channel_link_requests' and column_name = 'by_code')"
   "exists (select 1 from pg_trigger where tgname = 'career_account_memory_one_copy' and tgrelid = 'public.agent_flow_state'::regclass)"
   "exists (select 1 from pg_proc where proname = 'oauth_connect_commit') and exists (select 1 from pg_proc where proname = 'career_outlook_store_messages') and exists (select 1 from pg_proc where proname = 'career_mail_record_events') and to_regclass('public.oauth_state_uses') is not null"
+  "exists (select 1 from pg_proc where proname = 'channel_link_confirm_code') and exists (select 1 from pg_proc where proname = 'channel_link_confirm' and prosrc like '%not by_code%') and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'channel_link_requests' and column_name = 'reply_code')"
   "exists (select 1 from pg_proc where proname = 'career_resume_upload_record_as' and prosrc like '%greatest(now(), public.career_resume_uploads.created_at)%')"
   "exists (select 1 from pg_trigger where tgname = 'career_thread_facts_authority' and tgrelid = 'public.agent_flow_state'::regclass) and exists (select 1 from pg_proc where proname = 'career_thread_facts_changed') and exists (select 1 from pg_proc where proname = 'career_account_authority_mark' and prosrc like '%thread_facts%')"
   "exists (select 1 from pg_proc where proname = 'trainee_file_login_count' and prosrc like '%trainee_file_login_account:%') and to_regclass('public.trainee_file_logins_user_created') is not null"
+  "exists (select 1 from pg_proc where proname = 'career_apply_cloud_throttle' and prosrc like '%consecutive_errors%')"
+  "exists (select 1 from pg_proc where proname = 'career_apply_prepare_candidates' and prosrc like '%30 minutes%')"
+  "exists (select 1 from pg_trigger where tgname = 'career_apply_reprepare_on_needs_answers' and tgrelid = 'public.career_apply_jobs'::regclass) and exists (select 1 from pg_trigger where tgname = 'career_apply_history_approval_guard' and tgrelid = 'public.career_apply_jobs'::regclass)"
   "exists (select 1 from pg_constraint where conrelid = 'public.career_outreach_drafts'::regclass and conname = 'career_outreach_drafts_n_check' and convalidated and pg_get_constraintdef(oid) not like '%<= 10%') and exists (select 1 from pg_constraint where conrelid = 'public.agent_turn_costs'::regclass and conname = 'agent_turn_costs_calls_check' and convalidated and pg_get_constraintdef(oid) not like '%<= 100%')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
@@ -927,6 +943,15 @@ else
   else
     run "psql *** -X -q -v ON_ERROR_STOP=1 -f scripts/launch/verify-claim-guards.sql" "${P[@]}" -f scripts/launch/verify-claim-guards.sql
   fi
+  # D-037: real submission's database switches, after every claim guard is verified in place (each claim still needs the
+  # person's approval of the exact payload). --real-submit off writes the kill switch.
+  [[ -z "$REAL_SUBMIT" || "$REAL_SUBMIT" == on || "$REAL_SUBMIT" == off ]] || fail "--real-submit takes on or off (got: $REAL_SUBMIT)"
+  if [[ -z "$REAL_SUBMIT" ]]; then RS_V=on; RS_OVER=false; else RS_V="$REAL_SUBMIT"; RS_OVER=true; fi
+  if [[ -n "$DRY" ]]; then
+    echo "DRY: psql *** -X -q -v ON_ERROR_STOP=1 -v v=$RS_V -v overwrite=$RS_OVER -f scripts/launch/release-db-switches.sql (CAREER_AGENT_SUBMIT, CAREER_CLOUD_APPLY, APPLY_VM: $([[ $RS_OVER == true ]] && echo "set to $RS_V" || echo "missing rows on; existing rows, the owner's off included, kept"))"
+  else
+    run "psql *** -X -q -v ON_ERROR_STOP=1 -v v=$RS_V -v overwrite=$RS_OVER -f scripts/launch/release-db-switches.sql" "${P[@]}" -v "v=$RS_V" -v "overwrite=$RS_OVER" -f scripts/launch/release-db-switches.sql
+  fi
   if [[ -n "$DRY" ]]; then
     echo "DRY: psql *** -tA: every migration mark (${#EARLIER[@]} earlier + ${#MIGRATIONS[@]}) read again on the live schema; any missing one fails the run, each named"
     echo "DRY: psql *** -c: insert into public.career_deploy_ledger one migration row per mark (sha, file, sha256, manifest sha256, --label)"
@@ -995,10 +1020,13 @@ else
   # no texting channel is told plainly that no message comes (career_outreach_track.ts reminderWords). Before the brain
   # lines: CAREER_BRAIN stays the env file's last name, as F13-10 reads it.
   add CAREER_OUTREACH_FOLLOWUPS on on
-  # The router answers unless the owner asks for the agent brain on this run (D-008); the environment never decides it.
+  # D-035: the committed release config decides the brain (release_config.ts); these only write the rollback switch.
+  # CAREER_BRAIN=agent stays pinned off in code (AGENT_BRAIN_RELEASED) and so serves the router.
   if [[ "$BRAIN" == agent ]]; then add CAREER_BRAIN agent agent; fi
   # FEATURE 13: the staged release (question and advice turns to the brain, every action to code) only with --brain staged.
   if [[ "$BRAIN" == staged ]]; then add CAREER_BRAIN staged staged; fi
+  # D-035: the emergency rollback is SET, not unset: unset serves the committed release brain (staged).
+  if [[ "$BRAIN" == router ]]; then add CAREER_BRAIN router router; fi
   if [[ -n "$DRY" ]]; then echo "DRY: supabase secrets set --project-ref $REF --env-file <0600 temp file: ${NAMES[*]}>"
   else
     ENVF="$(umask 077; mktemp "${TMPDIR:-/tmp}/trainee-secrets.XXXXXX")"; chmod 600 "$ENVF"
@@ -1011,8 +1039,8 @@ else
   case "$BRAIN" in
     agent) echo "  CAREER_BRAIN=agent: the agent brain answers career turns (the router still takes structured tasks and model outages)" ;;
     staged) echo "  CAREER_BRAIN=staged: the brain answers question and advice turns; every action, a model outage and any class in CAREER_BRAIN_ROUTER_INTENTS stay with code and the router (--brain router turns it off)" ;;
-    router) run "supabase secrets unset CAREER_BRAIN --project-ref $REF" supabase secrets unset CAREER_BRAIN --project-ref "$REF" ;;
-    *) echo "  CAREER_BRAIN not touched (the router answers unless it was set to agent before; --brain agent|router changes it)" ;;
+    router) echo "  CAREER_BRAIN=router: the emergency rollback; the router answers every turn whatever the release config says (removing the CAREER_BRAIN secret returns to the release brain)" ;;
+    *) echo "  CAREER_BRAIN not touched (the committed release config, supabase/functions/agent-chat/release_config.ts, decides the brain; CAREER_BRAIN=router rolls it back; --brain router sets that)" ;;
   esac
   if (( ${#GENERATED[@]} )); then
     echo "  generated: ${GENERATED[*]} (48 characters each; kept only in this process$([[ -n "$NONINT" ]] && echo '; --non-interactive never shows them: the function and its Vault schedule hold each'))"

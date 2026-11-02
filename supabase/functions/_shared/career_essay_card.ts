@@ -14,7 +14,7 @@
 // puts it on the form, and only the person's approval of the exact payload sends it.
 import { type DraftOutcome, draftEssay, type EssayQuestion, factText, MIN_FACTS, type ModelFn, whatWouldHelp } from "./essay_draft.ts";
 import { mapQuestion } from "./question_map.ts";
-import { type ModelConfig, modelConfig } from "./model_gateway.ts";
+import { type ModelConfig, modelConfig, openaiCareerModel } from "./model_gateway.ts";
 
 export const DAILY_DRAFTS = 60;
 export const DAY_MS = 24 * 3600_000;
@@ -147,7 +147,7 @@ type Env = { get(name: string): string | undefined };
 export function essayModelConfig(env: Env): ModelConfig {
   const pinned: Env = { get: (k) => (k === "MODEL_PROVIDER" ? "openai" : env.get(k)) };
   const cfg = modelConfig(pinned, "chat");
-  return { ...cfg, model: env.get("CAREER_MODEL") || cfg.model };
+  return { ...cfg, model: openaiCareerModel(env, cfg.model) };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

@@ -17,8 +17,10 @@ money, credentials and deploys.
 ## Rules that never move
 - The model decides, code enforces: external effects (send, submit, message) need the user's approval of the
   exact payload; facts about the user only from confirmed facts; never invent an answer (D-007).
-- OpenAI only; no Anthropic API spend (owner rule). No deploys, live migrations, credentials or spend
-  without the owner doing it or saying yes in writing.
+- Model providers: OpenAI, and Anthropic via ANTHROPIC_API_KEY for Trainee's models within the owner's
+  approved budget (owner, 2026-11-01 20:25 CT: "add this anthropic key, set the model to haiku, if haiku is
+  poor try sonnet, test with a 25$ budget"). Never commit a key. No deploys, live migrations, credentials or
+  spend without the owner doing it or saying yes in writing.
 - Never automate LinkedIn or Indeed; no captcha solving; no password or one-time code through chat.
 - The archive (`docs/bug-ledger.md`, `docs/career/forbidden-rules.md`, `docs/instinct-spec-series/BUILD-STATUS.md`,
   merge records, gauntlet ledgers) is frozen (D-006).

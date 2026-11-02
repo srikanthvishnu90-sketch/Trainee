@@ -7,6 +7,7 @@
 // Sending is off unless CLOUD_RUNNER_ENABLED=on, preparation unless CLOUD_PREPARE_ENABLED=on; the database's own switches
 // (CAREER_CLOUD_APPLY, CAREER_CLOUD_TEXT_CARDS) and every cap still decide each claim. Secrets are read by name only.
 import { dispatch, handleBridge, type ClaimedJob, type Rpc, type SandboxHost, vercelSandboxHost } from "./cloud_runner.ts";
+import { releaseValue } from "../agent-chat/release_config.ts"; // D-036/D-037 release flags
 import { dispatchPrepare, handlePrepareBridge, handlePrepareDoor, type PrepareRequestRow } from "./cloud_prepare.ts";
 
 export interface RunnerEnv { get(k: string): string | undefined }
@@ -53,7 +54,7 @@ export function sandboxHostOptions(env: (k: string) => string, f: typeof fetch):
     token: env("VERCEL_TOKEN"), teamId: env("VERCEL_TEAM_ID"), projectId: env("VERCEL_PROJECT_ID"),
     snapshotId: env("CLOUD_SANDBOX_SNAPSHOT_ID"), region: env("CLOUD_SANDBOX_REGION") || "iad1",
     vcpus: Number(env("CLOUD_SANDBOX_VCPUS")) >= 1 ? Math.floor(Number(env("CLOUD_SANDBOX_VCPUS"))) : 2,
-    scriptSubmitLive: env("UPMORE_SCRIPT_SUBMIT_LIVE") === "1", fetch: f,
+    scriptSubmitLive: releaseValue({ get: env }, "UPMORE_SCRIPT_SUBMIT_LIVE") === "1" /* D-037 release flag */, fetch: f,
   };
 }
 
@@ -61,7 +62,9 @@ export function createRunnerHandler(o: {
   env: RunnerEnv; fetch?: typeof fetch; host?: SandboxHost; waitUntil?: (p: Promise<unknown>) => void; now?: () => number;
 }): (req: Request) => Promise<Response> {
   const f = o.fetch ?? fetch;
-  const env = (k: string) => o.env.get(k) || "";
+  // D-037: the release flags (CLOUD_RUNNER_ENABLED, CLOUD_PREPARE_ENABLED, UPMORE_SCRIPT_SUBMIT_LIVE) are read with
+  // releaseValue at their release value unless the environment rolls them back; every other name as the environment holds it.
+  const env = (k: string) => releaseValue(o.env, k) || "";
   return async (req) => {
     const url = env("SUPABASE_URL"), key = env("SUPABASE_SERVICE_ROLE_KEY"), secret = env("CLOUD_RUNNER_SECRET");
     if (!url || !key || secret.length < 32) return json(503, { error: "not configured" });
@@ -92,17 +95,17 @@ export function createRunnerHandler(o: {
 
     if (path.endsWith("/prepare-dispatch")) {
       if (!env("CLOUD_DISPATCH_SECRET") || !tickSecret()) return json(401, { error: "unauthorized" });
-      if (env("CLOUD_PREPARE_ENABLED") !== "on") return json(200, { skipped: "CLOUD_PREPARE_ENABLED is not on" });
+      if (releaseValue(o.env, "CLOUD_PREPARE_ENABLED") !== "on") return json(200, { skipped: "CLOUD_PREPARE_ENABLED is not on" });
       const missing = hostReady();
-      if (missing) return json(503, { error: `not configured: ${missing}` });
+      if (missing) return json(503, { error: `needs setup: ${missing} is not set (the owner's credential); nothing was started`, needs_setup: missing });
       return json(200, await runPrepare());
     }
     if (path.endsWith("/prepare")) {
       const token = env("CAREER_PREPARE_AHEAD_TOKEN");
       if (!token || !same(req.headers.get("authorization") || "", `Bearer ${token}`)) return json(401, { error: "unauthorized" });
-      if (env("CLOUD_PREPARE_ENABLED") !== "on") return json(503, { error: "preparation is not on" });
+      if (releaseValue(o.env, "CLOUD_PREPARE_ENABLED") !== "on") return json(503, { error: "preparation is not on" });
       const missing = hostReady();
-      if (missing) return json(503, { error: `not configured: ${missing}` });
+      if (missing) return json(503, { error: `needs setup: ${missing} is not set (the owner's credential); nothing was started`, needs_setup: missing });
       let body: unknown = null;
       try { body = await req.json(); } catch { return json(400, { error: "bad request" }); }
       const out = await handlePrepareDoor(body, { rpc, perPersonDay: limits.prepare.perPersonDay,
@@ -114,9 +117,9 @@ export function createRunnerHandler(o: {
     }
     if (path.endsWith("/dispatch")) {
       if (!env("CLOUD_DISPATCH_SECRET") || !tickSecret()) return json(401, { error: "unauthorized" });
-      if (env("CLOUD_RUNNER_ENABLED") !== "on") return json(200, { skipped: "CLOUD_RUNNER_ENABLED is not on" });
+      if (releaseValue(o.env, "CLOUD_RUNNER_ENABLED") !== "on") return json(200, { skipped: "CLOUD_RUNNER_ENABLED is not on" });
       const missing = hostReady();
-      if (missing) return json(503, { error: `not configured: ${missing}` });
+      if (missing) return json(503, { error: `needs setup: ${missing} is not set (the owner's credential); nothing was started`, needs_setup: missing });
       return json(200, await dispatch({ rpc, host: host(), secret, bridgeUrl: env("CLOUD_BRIDGE_URL"), limits: limits.send }));
     }
     const p = /\/prep\/([a-z]+)$/.exec(path);

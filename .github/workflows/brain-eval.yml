@@ -30,6 +30,12 @@ on:
       # TASK COMPLETION (evals/career/tasks/): suite=tasks runs the state-judged task eval with the real model instead of
       # the held-out passes (judged by rows, no judge model: brain spend only). Every brain on the same 44 tasks, each
       # capped by TASKS_BUDGET_USD; a stopped run is not a score. The held-out steps below are skipped for it.
+      # D-038: the reply model to measure (a priced id from model_gateway.ts PRICES, e.g. claude-haiku-5-5). Empty: the
+      # measured commit's committed default (agent-chat/release_model.ts). Judges are unchanged whatever this says.
+      model:
+        description: "Reply model to measure (empty = the committed CAREER_MODEL_DEFAULT)"
+        type: string
+        default: ""
       suite:
         description: "heldout (the D-030 bar) or tasks (task completion, judged by end state)"
         type: choice
@@ -45,7 +51,14 @@ jobs:
     env:
       EVAL_BRAIN: ${{ inputs.brain || 'agent' }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      CAREER_MODEL: gpt-5-mini
+      # D-038: a claude- reply model calls Anthropic with this key (the judges stay OpenAI).
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CAREER_REPLY_MODEL: ${{ inputs.model }}
+      # OWNER'S RULING (2026-11-01 20:25 CT, in writing, relayed by the architect's main session): "$25" on the Anthropic key
+      # for these tests, apart from the OpenAI eval budget. run.ts counts every result file's claude- brain spend against it.
+      ANTHROPIC_EVAL_BUDGET_USD: "25"
+      # D-038: CAREER_REPLY_MODEL is only the dispatch's model input above (a listed, keyed model; see release_model.ts); empty, the brain runs the measured commit's committed
+      # model (agent-chat/release_model.ts), so a push measures the model that commit serves.
       EVAL_JUDGE_MODEL: gpt-5-mini
       # Owner, 2026-10-21: "gpt-4.1-mini judges every run from now on ... A judge that runs only sometimes makes runs
       # incomparable." In CI an item passes only when both pass it; Instinct scores every run beside them.
@@ -74,8 +87,11 @@ jobs:
         if: ${{ inputs.suite == 'tasks' }}
         env: { TASKS_BUDGET_USD: "2.00" }
         run: |
-          for b in router staged planner; do deno run -A --no-check --import-map=evals/career/tasks/import-map.json evals/career/tasks/run.ts --brain $b --model openai --budget-usd "$TASKS_BUDGET_USD" --label "tasks-$b-${{ github.run_id }}" || true; done
-          deno run -A --no-check --import-map=evals/career/tasks/agent-import-map.json evals/career/tasks/run.ts --brain agent --model openai --budget-usd "$TASKS_BUDGET_USD" --label "tasks-agent-${{ github.run_id }}" || true
+          # D-036 review: no `|| true`: the planner goes ON only on this measurement (planner against staged), so a run that
+          # fails fails the job instead of leaving a missing number. set -e stops at the first failed brain.
+          set -euo pipefail
+          for b in router staged planner; do deno run -A --no-check --import-map=evals/career/tasks/import-map.json evals/career/tasks/run.ts --brain $b --model openai --budget-usd "$TASKS_BUDGET_USD" --label "tasks-$b-${{ github.run_id }}"; done
+          deno run -A --no-check --import-map=evals/career/tasks/agent-import-map.json evals/career/tasks/run.ts --brain agent --model openai --budget-usd "$TASKS_BUDGET_USD" --label "tasks-agent-${{ github.run_id }}"
       - name: Held-out set, ${{ env.EVAL_BRAIN }} brain (the bar), five passes
         if: ${{ inputs.suite != 'tasks' }}
         run: |

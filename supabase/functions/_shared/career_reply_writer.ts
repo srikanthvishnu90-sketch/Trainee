@@ -37,7 +37,8 @@ export const PAYLOAD_INTENTS: ReadonlySet<string> = new Set([
   // router intents that show a draft or a mock question verbatim
   "outreach_draft", "negotiation_draft", "career_tailor", "prep_mock_start", "prep_mock_next", "prep_mock_followup",
 ]);
-const PAYLOAD_META = ["card_id", "email_card", "offer_card", "open_card", "career_approval_card_id", "employer_question", "screen_ask"];
+// results_file: the reply carries the results page's link, minted by code (role_results.ts); its words and link stay as they are.
+const PAYLOAD_META = ["card_id", "email_card", "offer_card", "open_card", "career_approval_card_id", "employer_question", "screen_ask", "results_file"];
 
 export function writable(out: { intent?: string | null; reply?: string; parts?: unknown }, meta: Record<string, unknown> | null, o: { structured: boolean }): boolean {
   if (o.structured) return false;

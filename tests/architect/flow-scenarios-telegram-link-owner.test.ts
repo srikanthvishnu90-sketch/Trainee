@@ -40,7 +40,7 @@ const X = IN as Record<string, unknown>;
 const CONFIRM = (X.TELEGRAM_LINK_CONFIRM_REPLY as string) ?? "<TELEGRAM_LINK_CONFIRM_REPLY>";
 const WAITING = (X.TELEGRAM_LINK_WAITING_REPLY as string) ?? "<TELEGRAM_LINK_WAITING_REPLY>";
 const AMBIGUOUS = (X.LINK_AMBIGUOUS_REPLY as string) ?? "<LINK_AMBIGUOUS_REPLY>";
-const ASK = /^Someone wants to link Telegram (@[A-Za-z0-9_]{5,32}|\(an account with no username\)) to your Trainee\. Reply YES to allow; ignore if this wasn't you\./;
+const ASK = /^Someone wants to link Telegram (@[A-Za-z0-9_]{5,32}|\(no username; Telegram id [0-9]{1,20}\)|\(an account with no username\)) to your Trainee\. To allow it, reply LINK ([0-9]{4}|\{code\}) here within 15 minutes\. A plain yes does not link it; ignore this if it wasn't you\./;
 const JOURNEYS = ["stranger", "owner", "twice", "expired", "late", "replay", "wrong", "forwarded", "stop", "deleted", "race", "two-codes"] as const;
 const MIN = 60000;
 
@@ -137,7 +137,7 @@ Deno.test({
         const confirmed = new Set<number>();
         const t0 = turns.length;
         const asks = () => said(O).filter((x) => ASK.test(x));
-        const yes = async (c: number) => { confirmed.add(c); await say(O, "yes"); };
+        const yes = async (c: number) => { confirmed.add(c); await say(O, `LINK ${ASK.exec(asks().filter((x) => x.includes(handles.has(c) ? `@${handles.get(c)} ` : `Telegram id ${c})`)).at(-1) ?? "")?.[2] ?? "none"}`); };
         const k = await code(u);
         if (kind === "stranger") {
           await say(S, `/start ${k}`);
@@ -209,9 +209,9 @@ Deno.test({
           const k2 = await code(u);
           await say(M, `/start ${k}`);
           await say(S, `/start ${k2}`);
-          const k1 = B.to(O).length;
+          const k1 = B.to(O).length, t1 = turns.length;
           await say(O, "yes");
-          if (!said(O, k1).includes(AMBIGUOUS)) fail(who, `a yes with two chats waiting was answered ${JSON.stringify(said(O, k1))}`);
+          if (turns.length === t1 || said(O, k1).includes(AMBIGUOUS)) fail(who, `a plain yes with two chats waiting did not go on to the turn: ${JSON.stringify(said(O, k1))}`);
         }
         // ------------------------------------------------------------------------------------- read back
         for (const c of [M, S, S2, Other]) {

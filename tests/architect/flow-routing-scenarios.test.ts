@@ -76,6 +76,8 @@ Deno.test({
       "CAREER_NETWORKING_DRAFT", "CAREER_SEND_RAIL", "CAREER_PEOPLE_SEARCH", "STRIPE_SECRET_KEY", "CAREER_REPLY_WRITER", "CAREER_APPLY_LINK"];
     const saved = Object.fromEntries(unset.map((k) => [k, Deno.env.get(k)]));
     for (const k of unset) Deno.env.delete(k);
+    // D-036: CAREER_MAIL_TRACKING is a release flag (on when unset): every mail path stays off only with "off".
+    Deno.env.set("CAREER_MAIL_TRACKING", "off");
     let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
     const realFetch = globalThis.fetch;
     const realError = console.error;

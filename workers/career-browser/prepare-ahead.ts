@@ -54,6 +54,10 @@ export interface AheadDeps {
   profileFor?: (userId: string) => Promise<any | null>;
   // The link the engine opens. Production: the posting's own. Tests point an https posting at a local employer page.
   urlFor?: (c: Candidate) => string;
+  // MASS APPLY (2026-11-01): the form's shape from the ATS's public board API (posting_schema.ts: Greenhouse), or null.
+  // Used only to ask the shared facts (fact:* questions) a form needs before any browser opens it; the browser still reads
+  // the form and builds the payload once those are answered. Absent: as before.
+  schemaFor?: (url: string) => Promise<{ fields: { name: string; label: string; required: boolean; type: string; options: { label: string }[] }[] } | null>;
   // The model the chat's drafter writes with; absent (or no profile), no cover letter is drafted ahead.
   draftModel?: ModelFn;
   // FEATURE 3: the model a cover note for each ready application is drafted with (the same drafter); absent, none.
@@ -164,10 +168,33 @@ export async function prepareOne(d: AheadDeps, c: Candidate): Promise<AheadOutco
       }
       return await record("no_resume", "no resume could be tailored to this posting from their confirmed facts");
     }
-    const r = await prepare({
+    // MASS APPLY: shared facts the form needs and they have not given, asked from the board API's schema with no browser
+    // pass (saves one browser run per Greenhouse posting in ask-then-ready). Only fact:* questions; anything else (an
+    // essay, a posting-only wording) is left to the browser's own read, which keys it exactly as before.
+    if (d.schemaFor) {
+      const schema = await d.schemaFor(d.urlFor ? d.urlFor(c) : c.url).catch(() => null);
+      if (schema) {
+        const wanted = schema.fields.filter((f) => f.required && !/file/.test(f.type))
+          .map((f) => ({ label: f.label, type: /select/.test(f.type) ? "select" : "input_text", options: f.options.map((o) => o.label) }));
+        const ask = questionsToStore({ posting: c.job_id, company: c.company, questions: wanted }, { facts: trusted, answered: new Set(rows.map((x) => x.key)) });
+        const facts = ask.questions.filter((q) => q.kind === "fact" && String(q.key).startsWith("fact:") && !Object.hasOwn(trusted, String(q.key).slice(5)) && !q.misfit);
+        if (facts.length) {
+          const n = must(await d.db.rpc("career_apply_prepare_ask_for", {
+            p_user: c.user_id, p_posting_job_id: c.job_id, p_engine_job_id: c.job_id, p_questions: facts,
+          }), "store the questions");
+          return { user_id: c.user_id, job_id: c.job_id, outcome: "asked", detail: `${n} question(s) asked from the board's published form (no browser)` };
+        }
+      }
+    }
+    const dryRun = () => prepare({
       url: d.urlFor ? d.urlFor(c) : c.url, factsPath, resumePath: resume.path, account: { epoch: Number(c.epoch), version: Number(c.version) },
       now: now(), runEngine: d.runEngine, resumeTag: resume.tag,
     });
+    let r = await dryRun();
+    // MASS APPLY (2026-11-01): the browser itself failing (DRIVER_ERROR: a crash or a timeout of the engine's browser, not
+    // the employer's page) is tried once more at once. A preparation is a dry run (nothing is ever submitted), so a second
+    // try is safe; without it one browser hiccup parked the posting for 7 days (prepare_candidates' wait after a refusal).
+    if (!r.ready && /^DRIVER_ERROR/.test(String((r.result as any)?.reason ?? ""))) r = await dryRun();
     if (!r.ready) {
       const result: any = r.result;
       // The questions name the posting's own company too (the engine's stop names the board's tenant or the page's host).
@@ -184,6 +211,9 @@ export async function prepareOne(d: AheadDeps, c: Candidate): Promise<AheadOutco
           detail: `${n} question(s) asked${letters ? `; ${letters} cover letter${letters === 1 ? "" : "s"} drafted for them to read` : ""}`,
         };
       }
+      // The browser itself failing twice is our error, not the employer's form refusing: recorded as such (it is tried
+      // again within the hour: prepare_candidates' wait after an error), never told as "the form could not be filled".
+      if (/^DRIVER_ERROR/.test(String(result.reason ?? ""))) return await record("error", "the browser failed while reading the form (DRIVER_ERROR); tried twice", undefined, result.posting);
       return await record("refused", String(result.reason ?? result.state ?? "not ready"), undefined, result.posting);
     }
     if (r.payload.resume_sha256 !== resume.sha256) return await record("error", "the engine sent another resume than the tailored one");

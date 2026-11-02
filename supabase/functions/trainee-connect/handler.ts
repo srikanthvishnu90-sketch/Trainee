@@ -21,7 +21,7 @@ export interface ConnectDeps {
   now: () => number;
   providers(): Record<ProviderId, ProviderInfo>;
   status(userId: string): Promise<Record<ProviderId, ProviderState>>;
-  start(provider: ProviderId, userId: string, channel: string): Promise<string | null>; // the provider's consent URL for this person, or null when it can't be made
+  start(provider: ProviderId, userId: string, channel: string, reason?: string): Promise<string | null>; // the provider's consent URL for this person, or null when it can't be made
   disconnect(provider: ProviderId, userId: string): Promise<{ ok: boolean; reply: string }>;
   claimLink(userId: string, jti: string, at: number): Promise<boolean>; // true only the first time a link token id is taken
   userOfTelegram?: (telegramId: string) => Promise<string | null>; // channel_contacts: 'tg:<id>' -> the linked account
@@ -110,7 +110,7 @@ export async function handleConnect(req: Request, d: ConnectDeps): Promise<Respo
       const p = provider as ProviderId;
       if (action === "start") {
         if (!d.providers()[p].configured) return unavailable();
-        const to = await d.start(p, u, claims.ch);
+        const to = await d.start(p, u, claims.ch, claims.w); // D-037: reason "send" is the incremental gmail.send consent
         if (!to) return unavailable();
         if ((req.headers.get("accept") ?? "").includes("application/json")) return json({ url: to });
         return html("", 303, { location: to });

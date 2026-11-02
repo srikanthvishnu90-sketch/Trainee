@@ -280,8 +280,9 @@ if (import.meta.main) {
   }
   if (!Deno.env.get("OPENAI_API_KEY")) { console.log("NOT RUN: no OPENAI_API_KEY (the judge needs it; outside agents' replies are graded by it too)."); Deno.exit(2); }
   const { callModel, modelConfig, newMeter } = await import("../../supabase/functions/_shared/model_gateway.ts");
+  const { careerModelConfig } = await import("../../supabase/functions/agent-chat/release_model.ts");
   const meter = newMeter(), judgeMeter = newMeter();
-  const brainCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+  const brainCfg = careerModelConfig(Deno.env);
   const judgeCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("EVAL_JUDGE_MODEL") || "gpt-5-mini" };
   const text = (res: any) => (res.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
   const ask = (prompt: string, max = 400) => callModel(judgeCfg, { system: "You are a strict grader. Output JSON only.", messages: [{ role: "user", content: prompt }], max_tokens: max }, { meter: judgeMeter, role: "chat" });

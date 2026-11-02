@@ -36864,14 +36864,18 @@ const CareerRouter = (() => {
     const m = s(gd).match(/(20\d\d)/) || profileFactsText(profile).match(/graduating[^0-9]*(20\d\d)/i);
     return m ? Number(m[1]) : null;
   }
+  // UNKNOWN EXPERIENCE (2026-11-01): years of experience come only from dated experience entries on the profile. With none
+  // (nothing on file, or entries without dates) the years are UNKNOWN (null), never 0: a person who has told us nothing is not
+  // screened out of "2+ years" postings, and 121 already reads null as "cannot decide, does not fire" (hardFilters,
+  // evidencedFullTimeYears).
   function experienceYearsOf(profile) {
-    let months = 0;
+    let months = 0, dated = 0;
     for (const f of ((profile && profile.facts) || [])) {
       if (f.kind !== "experience" || !f.start) continue;
       const a = Date.parse(`${f.start}-01T00:00:00Z`), b = f.end ? Date.parse(`${f.end}-01T00:00:00Z`) : a;
-      if (Number.isFinite(a) && Number.isFinite(b) && b >= a) months += Math.round((b - a) / 2592000000) + 1;
+      if (Number.isFinite(a) && Number.isFinite(b) && b >= a) { months += Math.round((b - a) / 2592000000) + 1; dated += 1; }
     }
-    return Math.floor(months / 12);
+    return dated ? Math.floor(months / 12) : null;
   }
   // 121's hardFilters treat profile preference locations as a hard filter and
   // its graduation regex reads only the FIRST year of a range; the router owns
@@ -36956,7 +36960,7 @@ const CareerRouter = (() => {
     // production Java"), not only in 121's narrower "years of experience" form
     const yearsReq = [...allText.matchAll(/\b(\d+)\+?\s*years?\b/gi)].map((m) => Number(m[1])).filter((n) => n >= 2);
     const myYears = experienceYearsOf(profile);
-    if (yearsReq.length && myYears + 1 < Math.max(...yearsReq)) reasons.push(`experience: the posting asks ${Math.max(...yearsReq)}+ years; your profile shows about ${myYears}`);
+    if (yearsReq.length && myYears != null && myYears + 1 < Math.max(...yearsReq)) reasons.push(`experience: the posting asks ${Math.max(...yearsReq)}+ years; your profile shows about ${myYears}`);
     // graduation windows, ranges read whole ("graduating May 2026–May 2027")
     const gy = gradYearOf(profile);
     if (gy) {

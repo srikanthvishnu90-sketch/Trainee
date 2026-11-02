@@ -1,14 +1,20 @@
 name: ci
 on:
-  # Branches are checked through their pull request; a push runs only on trunk. Before 2026-10-26 every push to a PR
-  # branch ran the whole suite twice (push + pull_request), and runs for superseded heads held the queue: 111 queued,
-  # 52 of them for commits already replaced, with 6 running.
+  # Branches are checked through their pull request; a push runs only on trunk and release/production. Before 2026-10-26
+  # every push to a PR branch ran the whole suite twice (push + pull_request), and runs for superseded heads held the
+  # queue: 111 queued, 52 of them for commits already replaced, with 6 running.
+  # D-034 (the deploy standard): every job here is a required check on the exact SHA that deploys (S1; S4 reads
+  # "acceptance (telegram)"), so every SHA pushed to trunk or release/production gets its own full run. A commit pushed
+  # to release/production that never was a trunk head would otherwise have no checks at all.
   push:
-    branches: [trunk]
+    branches: [trunk, release/production]
   pull_request:
 concurrency:
-  # One run per PR (or per ref for trunk pushes); a newer head cancels the older run. Trunk runs are never cancelled.
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # One run per PR: a newer head cancels the older run. A push gets a group of its own SHA: GitHub keeps one pending run
+  # per group and cancels the older pending one when a newer arrives ("higher priority waiting request"), which left
+  # trunk SHAs merged in quick succession with no checks (e74c4b353 and f4b751948, 2026-10-31 05:14) and so unable to
+  # deploy. Pushes are never cancelled; a re-push of the same SHA waits for the run already going.
+  group: ci-${{ github.event.pull_request.number || format('{0}@{1}', github.ref, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read

@@ -220,7 +220,7 @@ function matchOption(labels, value) {
   // sponsorship", "No, I need work authorization"): those are other answers, so the question goes back to the person.
   // The option's own text with only a bracketed clarification after it ("Computer Science (BS)"); or an approved answer
   // that is the option followed by more of the person's words ("No, I do not need it" onto "No").
-  if (v.length >= 2) { const r = one((l, i) => sameWithClarification(labels[i], value) || (l.length >= 2 && v.startsWith(l + " ") && !QUALIFIED.test(l))); if (r) return r; }
+  if (v.length >= 2) { const r = one((l, i) => sameWithClarification(labels[i], value) || (l.length >= 2 && !/^(yes|no)$/.test(l) && v.startsWith(l + " ") && !QUALIFIED.test(v))); if (r) return r; }
   return { error: exact.length > 1 ? "ambiguous_option" : "no_matching_option" };
 }
 

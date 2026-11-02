@@ -14,7 +14,7 @@
 //   - rendering truth: every company, title and lettermark whole (no half emoji), escaped, bidi controls dropped; no foreign tag,
 //     handler, script or javascript:/data: link; the plain-text twin likewise;
 //   - security on every response: CSP with hashed scripts only and frame-ancestors limited to Telegram, nosniff, no-store,
-//     no-referrer; every cookie HttpOnly, Secure, SameSite; every redirect to this host's own path; a session id planted before the
+//     a referrer policy that never sends to another site (same-origin); every cookie HttpOnly, Secure, SameSite; every redirect to this host's own path; a session id planted before the
 //     sign-in never survives it; sign-in texts and code tries per link stay under their caps and a stranger's number gets no text;
 //   - accessibility that decides correctness: every Apply names its role and company, every status chip is a status, the page has
 //     one live region for what changed.
@@ -312,7 +312,7 @@ async function checkResponse(rep: Report, where: string, res: Response, body: st
   }
   if (h.get("x-content-type-options") !== "nosniff") fail("no nosniff");
   if (!/no-store/.test(h.get("cache-control") ?? "")) fail("cacheable");
-  if (h.get("referrer-policy") !== "no-referrer") fail("referrer leaks");
+  if (h.get("referrer-policy") !== "same-origin") fail("referrer leaks"); // same-origin since the web-security round: nothing to another site
   for (const c of h.getSetCookie()) if (!/;\s*HttpOnly/i.test(c) || !/;\s*Secure/i.test(c) || !/;\s*SameSite=(Lax|Strict)/i.test(c) || !/;\s*Path=\//.test(c)) fail("a cookie without HttpOnly / Secure / SameSite / Path", c.replace(/=fs1\.[0-9a-f]+/, "=fs1.…").replace(/=v1\.[^;]+/, "=v1.…"));
   const loc = h.get("location");
   if (loc !== null && !/^\/(?![\/\\])/.test(loc)) fail("a redirect that leaves this host's own path", loc);

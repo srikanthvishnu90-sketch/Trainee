@@ -178,7 +178,7 @@ const ogTags = (o: Og) => `<meta property="og:type" content="website"><meta prop
 const OG_DEFAULT: Og = { title: "Your jobs on Trainee", description: "Tap Apply on any job.", image: null };
 export function layout(title: string, inner: string, o: { script?: string; bodyAttrs?: string; og?: Og; tg?: boolean; css?: string } = {}): string {
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer"><meta name="theme-color" content="${PLUM}" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">${ogTags(o.og ?? OG_DEFAULT)}
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="robots" content="noindex,nofollow"><meta name="referrer" content="same-origin"><meta name="theme-color" content="${PLUM}" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">${ogTags(o.og ?? OG_DEFAULT)}
 ${FAVICON}
 ${FONT_LINKS}
 <title>${esc(clip(title, 90))}</title><style>${CSS}${o.css ?? ""}</style></head>

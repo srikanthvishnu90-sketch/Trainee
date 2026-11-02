@@ -177,7 +177,7 @@ Deno.test("list: a row per posting with logo or lettermark, company, Apply, and 
   const m = mem(10); await m.ready;
   const r = await get(deps(m), await tok());
   eq(r.status, 200);
-  assert(/no-store/.test(r.headers.get("cache-control")!) && r.headers.get("referrer-policy") === "no-referrer");
+  assert(/no-store/.test(r.headers.get("cache-control")!) && r.headers.get("referrer-policy") === "same-origin"); // same-origin (web-security round): the page's own posts carry its Origin; nothing goes to another site
   const html = await r.text();
   eq((html.match(/<li class="row"/g) ?? []).length, 10);
   eq((html.match(/<h1[ >]/g) ?? []).length, 1);

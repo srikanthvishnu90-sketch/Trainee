@@ -7474,21 +7474,30 @@ const CareerRouter = (() => {
     return emitTrack(ctx, { intent: "tracking_log", reply, resultStatus: "completed", sends: 0, application: back }, { company: row.company, stage: hit[1], event_type: "manual_update", note: "user-reported stage move" });
   }
   // STATUS FROM THE SITUATION (2026-11-01): the handler reads the person's situation every turn (career_situation.ts: the
-  // apply queue, prepared applications, applications asked for, open questions, outreach drafts, the trackers) and puts it on
-  // ctx.situation. A status ask is answered from all of it, one short line per employer, saying what happened and what has
-  // NOT: only an application the employer confirmed, or one the queue recorded as sent, is called sent; everything else says
-  // it was not sent and what it waits on. A tracker row is the person's own report and is named as on the tracker. Nothing
-  // is changed. Without a situation (the web app before it loads, a test with none), the tracker answer below stands.
+  // apply queue, prepared applications, applications asked for, open questions, outreach drafts, the tracker) and puts it on
+  // ctx.situation. A status ask is answered from all of it, one short line per item. Two kinds of record (architect status
+  // rule, 2026-11-01):
+  //   (a) Trainee's own records: an application is "sent" only from the queue's send record (confirmed, or recorded as sent
+  //       without a confirmation); outreach is "sent" only with a send record (an approved or sending draft is not sent).
+  //   (b) the person's tracker: always "from what you told me: Plaid — Submitted", never merged with or overruled by (a).
+  // The situation keeps finished work for 14 days, so every count of sends and every "nothing was sent" is scoped to the
+  // last two weeks (D-007: older confirmed applications exist and are not read here). A source the situation could not read
+  // is named, and no negative is said from it. Nothing is changed. Without a situation, the tracker answer below stands.
   const SIT_KINDS = new Set(["application", "apply_request", "question", "outreach", "mail_draft", "tracked"]);
+  const SIT_WINDOW = "in the last two weeks";
+  const SIT_SOURCE_WORDS = { jobs: "the apply queue", wanted: "the applications you asked for", prepared: "prepared applications", questions: "open questions", outreach: "email drafts", mail_drafts: "email drafts", threads: "your tracker", interviews: "interviews" };
   function situationStatusLine(t, questionsFor) {
     const co = s(t.company) || "An employer";
     const what = s(t.blocker && t.blocker.what).replace(/[.;]+$/, "");
     const q = questionsFor(t.company);
-    if (t.kind === "tracked") return `${co}: on your tracker at the ${s(t.evidence && t.evidence.stage) || "applied"} stage, from what you told me.`;
     if (t.kind === "outreach" || t.kind === "mail_draft") {
       const to = s(t.title).replace(/^email to\s+/i, "") || "your contact";
-      if (t.state === "sent") return `Email to ${to}${t.company ? ` (${t.company})` : ""}: sent.`;
-      return `Email to ${to}${t.company ? ` (${t.company})` : ""}: drafted, not sent${/gmail is not connected/i.test(what) ? "; Gmail isn't connected" : ", waiting on your yes"}.`;
+      const head = `Email to ${to}${t.company ? ` (${t.company})` : ""}`;
+      if (t.state === "sent") return `${head}: sent.`;
+      if (t.state === "sending") return `${head}: approved, going out now; not sent yet.`;
+      if (t.state === "approved") return `${head}: approved, not sent yet.`;
+      if (t.state === "failed") return `${head}: not sent; the send failed.`;
+      return `${head}: drafted, not sent${/gmail is not connected/i.test(what) ? "; Gmail isn't connected" : "; waiting on your yes"}.`;
     }
     switch (t.state) {
       case "confirmed": return `${co}: sent, and ${co} confirmed it${t.evidence && t.evidence.confirmation_id ? ` (${t.evidence.confirmation_id})` : ""}.`;
@@ -7502,56 +7511,62 @@ const CareerRouter = (() => {
       default: return `${co}: ${s(t.state).replace(/_/g, " ") || "on record"}.`;
     }
   }
+  function trackerLine(r) {
+    const when = s(r.when || r.next_when);
+    return `From what you told me: ${s(r.company)}${r.role ? ` (${s(r.role)})` : ""}, ${s(r.stage) || "applied"}${when ? `, ${when}` : ""}.`;
+  }
   function situationStatus(text, ctx, store) {
     const sit = ctx && ctx.situation && typeof ctx.situation === "object" ? ctx.situation : null;
     if (!sit || !Array.isArray(sit.tasks)) return null;
     const tt = lc(text);
     // The empty-tracker shapes above answer their own asks (an expiring offer, a long silence, quiet hours).
     if (/\boffer\b[^.]*\bexpir|\bexpiring\b|\bghost|\bsilent\b|\bsilence\b|\bquiet hours\b/.test(tt)) return null;
+    const unread = Array.isArray(sit.unreadable) ? sit.unreadable : [];
+    const appsUnread = unread.some((k) => ["jobs", "wanted", "prepared"].includes(k));
+    const unreadLine = unread.length ? `I couldn't read ${[...new Set(unread.map((k) => SIT_SOURCE_WORDS[k] || k))].join(", ")} just now, so ${unread.length === 1 ? "that is" : "those are"} missing here.` : null;
     const tasks = sit.tasks.filter((x) => x && SIT_KINDS.has(x.kind));
-    const rows = store && Array.isArray(store.rows) ? store.rows : [];
     const questions = tasks.filter((x) => x.kind === "question");
     const questionsFor = (co) => questions.filter((x) => co && lc(x.company) === lc(co)).length;
-    // One line per employer: the queue's record outranks a tracker row for the same employer (the tracker is the person's
-    // report; the queue is what Trainee did). Questions are counted on their application's line.
-    const byCo = new Map();
-    for (const x of tasks) {
-      if (x.kind === "question") continue;
-      const key = x.kind === "outreach" || x.kind === "mail_draft" ? `out:${x.id}` : lc(x.company || x.id);
-      const prev = byCo.get(key);
-      if (!prev || (prev.kind === "tracked" && x.kind !== "tracked")) byCo.set(key, x);
-    }
-    for (const r of rows) {
-      const key = lc(r.company);
-      if (r.company && !byCo.has(key)) byCo.set(key, { kind: "tracked", company: r.company, state: "tracked", evidence: { stage: r.stage } });
-    }
-    const all = [...byCo.values()];
-    // A named employer: that employer's line only.
-    const names = new Set([...all.map((x) => s(x.company)), ...postingsFromCtx(ctx).map((p) => s(p.company))].filter(Boolean));
+    const mine = tasks.filter((x) => x.kind !== "question" && x.kind !== "tracked");
+    // The tracker: the situation's tracker rows and this thread's, once per employer and role.
+    const tracked = [];
+    const seen = new Set();
+    const addTracked = (r) => { const k = `${lc(r.company)}|${lc(r.role)}`; if (r.company && !seen.has(k)) { seen.add(k); tracked.push(r); } };
+    for (const x of tasks.filter((y) => y.kind === "tracked")) addTracked({ company: x.company, role: x.title, stage: x.evidence && x.evidence.stage, when: x.evidence && x.evidence.when });
+    for (const r of (store && Array.isArray(store.rows) ? store.rows : [])) addTracked({ company: r.company, role: r.role, stage: r.stage });
+    const isApp = (x) => x.kind === "application" || x.kind === "apply_request";
+    const sentState = (x) => ["confirmed", "submitted_unconfirmed"].includes(x.state);
+    // A named employer: that employer's lines only.
+    const names = new Set([...mine.map((x) => s(x.company)), ...tracked.map((r) => s(r.company)), ...postingsFromCtx(ctx).map((p) => s(p.company))].filter(Boolean));
     const named = [...names].filter((n) => new RegExp(`(?<![a-z0-9])${lc(n).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z0-9])`).test(tt));
     if (named.length) {
-      const mine = all.filter((x) => named.some((n) => lc(n) === lc(x.company)));
-      if (!mine.length) {
-        const co = named[0];
-        const reply = [`I don't have a ${co} application on file for you, so nothing was sent to ${co}.`, `If you applied on your own, tell me the role and I'll track it.`].join("\n");
-        return { intent: "tracking_status", reply, resultStatus: "prepared", sends: 0, counts: { total: 0 } };
+      const isNamed = (co) => named.some((n) => lc(n) === lc(co));
+      const m = mine.filter((x) => isNamed(x.company)), tr = tracked.filter((r) => isNamed(r.company));
+      const lines = [...m.map((x) => situationStatusLine(x, questionsFor)), ...tr.map(trackerLine)];
+      const co = m[0] ? m[0].company : tr[0] ? tr[0].company : named[0];
+      if (!m.some(isApp)) {
+        if (appsUnread) lines.unshift(`I couldn't read your applications just now, so I can't say whether I sent anything to ${co}.`);
+        else lines.unshift(`I haven't sent an application to ${co} ${SIT_WINDOW}.`);
       }
-      const lines = mine.map((x) => situationStatusLine(x, questionsFor));
-      const qn = mine.reduce((n, x) => n + (x.kind === "application" ? questionsFor(x.company) : 0), 0);
-      const reply = ensureNextStepText([...lines, qn ? `Want to answer ${mine[0].company}'s question${qn === 1 ? "" : "s"} now?` : "Tell me if anything changed and I'll update it."].join("\n"));
-      return { intent: "tracking_status", reply, resultStatus: "prepared", sends: 0, counts: { total: mine.length } };
+      const qn = m.reduce((n, x) => n + (x.kind === "application" ? questionsFor(x.company) : 0), 0);
+      const next = qn ? `Want to answer ${co}'s question${qn === 1 ? "" : "s"} now?` : !m.length && !tr.length ? "If you applied on your own, tell me the role and I'll track it." : "Tell me if anything changed and I'll update it.";
+      const reply = ensureNextStepText([...lines, next].join("\n"));
+      return { intent: "tracking_status", reply, resultStatus: "prepared", sends: 0, counts: { total: m.length + tr.length } };
     }
-    if (!all.length) return null;
-    const apps = all.filter((x) => x.kind === "application" || x.kind === "apply_request");
-    const sent = apps.filter((x) => ["confirmed", "submitted_unconfirmed"].includes(x.state)).length;
-    const notSent = apps.filter((x) => !["confirmed", "submitted_unconfirmed", "unknown_outcome"].includes(x.state)).length;
-    const head = apps.length ? `${sent} sent, ${notSent} not sent yet${sent ? "" : "; nothing has gone to an employer"}.` : "Here's what's in flight.";
-    const order = { confirmed: 0, submitted_unconfirmed: 1, unknown_outcome: 2, queued: 3, driving: 3, awaiting_approval: 4, needs_user: 5, waiting_extension: 6, failed: 7, tracked: 8 };
-    const lines = all.slice().sort((a, b) => (order[a.state] ?? 9) - (order[b.state] ?? 9)).map((x) => situationStatusLine(x, questionsFor));
+    if (!mine.length && !tracked.length && !unread.length) return null;
+    const apps = mine.filter(isApp);
+    const sent = apps.filter(sentState).length;
+    const notSent = apps.filter((x) => !sentState(x) && x.state !== "unknown_outcome").length;
+    const head = appsUnread ? null
+      : sent ? `I sent ${sent} application${sent === 1 ? "" : "s"} ${SIT_WINDOW}${notSent ? `; ${notSent} more ${notSent === 1 ? "is" : "are"} not sent yet` : ""}.`
+      : apps.length ? `I haven't sent an application ${SIT_WINDOW}; ${notSent} ${notSent === 1 ? "is" : "are"} not sent yet.`
+      : `I haven't sent an application ${SIT_WINDOW}.`;
+    const order = { confirmed: 0, submitted_unconfirmed: 1, unknown_outcome: 2, queued: 3, driving: 3, awaiting_approval: 4, needs_user: 5, waiting_extension: 6, failed: 7 };
+    const lines = mine.slice().sort((a, b) => (order[a.state] ?? 8) - (order[b.state] ?? 8)).map((x) => situationStatusLine(x, questionsFor));
     const firstQ = questions[0];
     const next = firstQ ? `Want to answer ${firstQ.company ? `${firstQ.company}'s` : "the"} question${questionsFor(firstQ.company) === 1 ? "" : "s"} first?` : "Name one and I'll show its history.";
-    const reply = ensureNextStepText([head, ...lines, next].join("\n"));
-    return { intent: "tracking_status", reply, resultStatus: "prepared", sends: 0, counts: { total: all.length, sent, not_sent: notSent } };
+    const reply = ensureNextStepText([head, ...lines, ...tracked.map(trackerLine), unreadLine, next].filter(Boolean).join("\n"));
+    return { intent: "tracking_status", reply, resultStatus: "prepared", sends: 0, counts: { total: mine.length + tracked.length, sent, not_sent: notSent } };
   }
   function handleTrackStatus(text, ctx) {
     const store = trackStoreOf(ctx);

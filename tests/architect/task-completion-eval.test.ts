@@ -26,11 +26,17 @@ const PLANNER_FLOOR = ["T01", "T02", "T03", "T04", "T05", "T06", "T07", "T09", "
   "T21", "T22", "T23", "T24", "T25", "T26", "T27", "T28", "T29", "T30", "T31", "T32", "T34", "T35", "T36", "T37", "T38", "T39", "T40", "T41", "T42", "T44"];
 const MUTATED = ["T01", "T05", "T09", "T15", "T44"];
 
+// The gate pins every release flag off for the test steps (scripts/gate.sh); this eval measures the product as released, so its
+// child process gets the environment without them (a flag unset is on at its release value).
+const PINNED = ["CAREER_TEXTING_NATIVE", "CAREER_NETWORKING_DRAFT", "CAREER_TAILOR_REWRITE", "CAREER_MOCK_JUDGE", "CAREER_MAIL_TRACKING", "CAREER_BRIEF_DIGEST",
+  "CAREER_OUTREACH_FOLLOWUPS", "CAREER_INTRO_REMINDERS", "UPMORE_SCRIPT_SUBMIT_LIVE", "CLOUD_RUNNER_ENABLED", "CLOUD_PREPARE_ENABLED", "CAREER_EMAIL_SEND", "CAREER_OUTREACH_SEND", "CAREER_SEND_RAIL"];
+const releaseEnv = () => Object.fromEntries(Object.entries(Deno.env.toObject()).filter(([k]) => !PINNED.includes(k)));
+
 type Run = { brain: string; total: number; passed: number; rate: number; invariant_breaks: number; stopped: string | null; items: { id: string; family: string; pass: boolean; failed: string[] }[] };
 async function run(brain: string, extra: string[] = []): Promise<Run> {
   const out = await Deno.makeTempFile({ suffix: `-${brain}.json` });
   const map = brain === "agent" ? "evals/career/tasks/agent-import-map.json" : "evals/career/tasks/import-map.json";
-  const p = await new Deno.Command(Deno.execPath(), { cwd: ROOT, args: ["run", "-A", "--no-check", `--import-map=${map}`, "evals/career/tasks/run.ts", "--brain", brain, "--model", "fake", "--label", `ci-${brain}${extra.length ? "-mutated" : ""}`, "--out", out, ...extra], stdout: "piped", stderr: "piped" }).output();
+  const p = await new Deno.Command(Deno.execPath(), { cwd: ROOT, env: releaseEnv(), clearEnv: true, args: ["run", "-A", "--no-check", `--import-map=${map}`, "evals/career/tasks/run.ts", "--brain", brain, "--model", "fake", "--label", `ci-${brain}${extra.length ? "-mutated" : ""}`, "--out", out, ...extra], stdout: "piped", stderr: "piped" }).output();
   const log = new TextDecoder().decode(p.stdout) + new TextDecoder().decode(p.stderr);
   if (!p.success) throw new Error(`${brain}: exit ${p.code}\n${log.slice(-3000)}`);
   console.log(log.trim().split("\n").slice(-2).join("\n"));

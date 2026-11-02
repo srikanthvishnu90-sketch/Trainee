@@ -37,7 +37,7 @@ export const SHARED_REPLY_MODULES = [
   "career_staffing_agencies.ts", "career_tailor.ts", "career_url_shape.js", "career_voice_link.ts", "channel.ts",
   "channel_adapters.ts", "channel_card_tap.ts", "channel_shape.ts", "channel_text.ts", "conversation.ts", "essay_draft.ts",
   "fact_quarantine.ts", "fact_schema.ts", "file_kinds.ts", "file_link.ts", "file_page.ts", "file_service.ts",
-  "identity_redact.ts", "link_check.ts", "model_budget.ts", "model_calls.ts", "model_gateway.ts", "person_claims.ts",
+  "identity_redact.ts", "length_limit.ts", "link_check.ts", "model_budget.ts", "model_calls.ts", "model_gateway.ts", "person_claims.ts",
   "personal_fact_source.ts", "posting_key.ts", "posting_pay.ts", "posting_place.ts", "posting_region.ts", "question_map.ts",
   "brand.ts", "row_answer.ts", "telegram_jobs.ts",
 ] as const;

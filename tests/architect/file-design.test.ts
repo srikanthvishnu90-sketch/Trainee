@@ -158,7 +158,7 @@ Deno.test("made for: a CONFIRMED preferred or first name only, else 'you'; the d
   eq(madeForLine("Ada", Date.parse("2026-11-02T03:00:00Z"), CHI), "Made for Ada · Nov 1, 2026", "the evening of Nov 1 in Chicago");
   eq(madeForLine(null, Date.parse("2026-11-02T03:00:00Z"), "Asia/Tokyo"), "Made for you · Nov 2, 2026");
   const shell = fileShellHtml({ made: "Made for Ada · Nov 1, 2026", eyebrow: "application proof", title: "Application to Acme", stamp: "Application record read Nov 1, 2026, 3:08 PM CT", body: "<p>x</p>" });
-  ok(shell.indexOf(`<p class="made">Made for Ada · Nov 1, 2026</p></header>`) < shell.indexOf(`<article class="fcard">`), "the personal line sits above the card");
+  ok(shell.indexOf(`<p class="made">Made for Ada · Nov 1, 2026</p></header>`) < shell.indexOf(`<div class="fcard">`), "the personal line sits above the card");
   ok(/<h1 class="ftitle">Application to Acme<\/h1><p class="stamp" data-stamp="known">/.test(shell), "the stamp is directly under the title");
 });
 
@@ -193,7 +193,7 @@ Deno.test("hosted File: Made for <first name> above one card, the title, its sta
   const r = await handleFile(new Request("https://x.example/f", { headers: { cookie: `tf_s=${await w.A.tok(U, m.id, w.at.t)}` } }), w.deps());
   eq(r.status, 200);
   const h = await r.text();
-  ok(h.includes(`<p class="made">Made for Ada · Nov 1, 2026</p></header><article class="fcard">`), "personal line above the card");
+  ok(h.includes(`<p class="made">Made for Ada · Nov 1, 2026</p></header><div class="fcard">`), "personal line above the card");
   ok(/<h1 class="ftitle">Application to Acme<\/h1><p class="stamp" data-stamp="known">Application record read Nov 1, 2026, 3:08 PM CT<\/p>/.test(h), "stamp from the File's own build time, Chicago");
   const conf = h.indexOf(">Confirmation</h2>"), fig = h.indexOf(`<figure class="evidence">`, conf);
   ok(conf > 0 && fig > conf && fig < h.indexOf("</section>", conf), "the receipt sits inside the Confirmation section");
@@ -259,7 +259,7 @@ Deno.test("error state: a store that throws gets the designed error page: what, 
 Deno.test("jobs list: the File shell; the stamp from the postings' own check times; none known is said as a value", async () => {
   const feed = (o: Record<string, unknown>) => renderFeed({ token: "t", rows: [], setHash: null, setSize: 0, ...o });
   const h = feed({ made: "Made for Ada · Nov 1, 2026", stamp: "Postings checked Nov 1, 2026, 3:08–3:25 PM CT" });
-  ok(h.includes(`<p class="made">Made for Ada · Nov 1, 2026</p></header><article class="fcard"><h1 class="ftitle">Your jobs</h1><p class="stamp" data-stamp="known">Postings checked Nov 1, 2026, 3:08–3:25 PM CT</p>`));
+  ok(h.includes(`<p class="made">Made for Ada · Nov 1, 2026</p></header><div class="fcard"><h1 class="ftitle">Your jobs</h1><p class="stamp" data-stamp="known">Postings checked Nov 1, 2026, 3:08–3:25 PM CT</p>`));
   ok(feed({}).includes(`data-stamp="unknown"`) && feed({}).includes("Check time unknown"));
   // Through the handler: last_seen_at of the postings on the page, in the person's zone.
   const { signedIn: si } = await import("./file-session-fakes.ts");

@@ -208,8 +208,8 @@ export function stateHtml(s: StateBlock): string {
 export interface FileShell { made: string; title: string; stamp: string | null; stampMissing?: string; eyebrow?: string | null; intro?: string | null; body: string; after?: string }
 export function fileShellHtml(o: FileShell): string {
   return `<header class="fhead">${BRAND}<p class="made">${esc(o.made)}</p></header>`
-    + `<article class="fcard">${o.eyebrow ? `<p class="eyebrow">${esc(cap1(o.eyebrow))}</p>` : ""}<h1 class="ftitle">${esc(o.title)}</h1>${stampHtml(o.stamp, o.stampMissing)}`
-    + `${blank(o.intro) ? "" : `<p class="intro">${esc(o.intro)}</p>`}<main id="main">${o.body}</main></article>${o.after ?? ""}`;
+    + `<div class="fcard">${o.eyebrow ? `<p class="eyebrow">${esc(cap1(o.eyebrow))}</p>` : ""}<h1 class="ftitle">${esc(o.title)}</h1>${stampHtml(o.stamp, o.stampMissing)}`
+    + `${blank(o.intro) ? "" : `<p class="intro">${esc(o.intro)}</p>`}<main id="main">${o.body}</main></div>${o.after ?? ""}`;
 }
 
 export const FILE_CSS = `

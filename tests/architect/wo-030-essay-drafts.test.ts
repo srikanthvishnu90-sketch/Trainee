@@ -105,7 +105,7 @@ function fakeStore(rows: OpenQuestion[], o: { postings?: boolean; extra?: OpenQu
   return store;
 }
 // The handler's rule: a turn whose status is shown, partial or any draft status leaves the questions as the last word.
-const waiting = (s: string) => ["shown", "partial"].includes(s) || s.startsWith("draft");
+const waiting = (s: string) => ["shown", "partial", "answered_next"].includes(s) || s.startsWith("draft");
 async function say(store: ReturnType<typeof fakeStore>, message: string, o: { model?: any; facts?: unknown[]; now?: number; thread?: string } = {}) {
   const r = await questionsTurn({
     message, userId: "u", threadId: o.thread ?? "t", now: o.now ?? T, store,
@@ -201,8 +201,10 @@ Deno.test("WO-030/3 never invent (D-007): only confirmed facts and the posting; 
   // The flow: an invented draft is written again once, with the failing items named; the clean one is shown.
   const store = fakeStore([SPONS(), RAMP()]);
   await say(store, "what do you need from me");
+  // One question per message (review of #360): "skip" moves past the sponsorship question to the essay, now question 1.
+  await say(store, "skip");
   const m = stub(INVENTED, CLEAN);
-  const r = await say(store, "draft 2", { model: m.model });
+  const r = await say(store, "draft 1", { model: m.model });
   eq(r!.status, "drafted");
   eq(m.calls.length, 2);
   const fix = m.calls[1].messages[0].content as string;
@@ -214,14 +216,15 @@ Deno.test("WO-030/3 never invent (D-007): only confirmed facts and the posting; 
   // Still invented after the one rewrite: not offered; the reply says what is missing.
   const st2 = fakeStore([SPONS(), RAMP()]);
   await say(st2, "what do you need from me");
+  await say(st2, "skip");
   const m2 = stub(INVENTED, INVENTED, CLEAN);
-  const r2 = await say(st2, "draft 2", { model: m2.model });
+  const r2 = await say(st2, "draft 1", { model: m2.model });
   eq(r2!.status, "draft_unverified");
   eq(m2.calls.length, 2, "regenerated at most once");
-  assert(/^I didn't show a draft for 2: it kept including things you haven't confirmed \(.*Stripe.*\)/.test(r2!.reply), r2!.reply);
+  assert(/^I didn't show a draft for 1: it kept including things you haven't confirmed \(.*Stripe.*\)/.test(r2!.reply), r2!.reply);
   assert(!r2!.reply.includes(INVENTED), "the failing draft is never shown");
   eq((await st2.shown("u"))!.drafts ?? {}, {}, "nothing is kept to use");
-  eq((await say(st2, "use 2"))!.status, "draft_none", "so there is nothing to use");
+  eq((await say(st2, "use 1"))!.status, "draft_none", "so there is nothing to use");
   eq(st2.answers, []);
 
   // Fewer than 2 confirmed facts that fit: no draft, and it says which facts would let it draft.
@@ -274,69 +277,77 @@ Deno.test("WO-030/4 the form's length limit is met by writing again, never by cu
 Deno.test("WO-030/5 the model only through the gateway: a failure says it couldn't draft right now, leaves the question open, never throws", async () => {
   const store = fakeStore([SPONS(), RAMP()]);
   await say(store, "what do you need from me");
+  // One question per message (review of #360): "skip" moves past the sponsorship question to the essay, now question 1.
+  await say(store, "skip");
   const m = stub(new Error("OpenAI 503"));
-  const r = await say(store, "draft 2", { model: m.model });
+  const r = await say(store, "draft 1", { model: m.model });
   eq(r!.status, "draft_model");
-  assert(/^I couldn't draft 2 right now, so nothing changed and 2 is still open\./.test(r!.reply), r!.reply);
+  assert(/^I couldn't draft 1 right now, so nothing changed and 1 is still open\./.test(r!.reply), r!.reply);
   eq(store.answers, []);
   eq(await store.countOpen("u"), 2);
   // The real gateway with no key (none here): not configured, before any network; the turn still answers.
   const noKey = modelConfig({ get: (k: string) => ({ CAREER_MODEL: "gpt-5-mini" } as Record<string, string>)[k] });
   eq(noKey.provider, "openai", "OpenAI only; never Anthropic by accident");
-  const r2 = await say(store, "draft 2", { model: (p: any) => callModel({ ...noKey, model: "gpt-5-mini" }, p) });
+  const r2 = await say(store, "draft 1", { model: (p: any) => callModel({ ...noKey, model: "gpt-5-mini" }, p) });
   eq(r2!.status, "draft_model");
   // The question is still answered the usual way afterwards.
-  const r3 = await say(store, "2 Ramp's tools are what I wished I had as a controller");
-  eq(r3!.status, "answered");
+  const r3 = await say(store, "Ramp's tools are what I wished I had as a controller");
+  eq(r3!.status, "answered_next", "saved, and the skipped sponsorship question is asked next");
   eq(store.answers, [["b", "Ramp's tools are what I wished I had as a controller"]]);
 });
 
 Deno.test("WO-030/6 ask once's guarantees hold for drafts: the thread's last word, a day, the numbers shown, and saved only on 'use N'", async () => {
   const store = fakeStore([SPONS(), RAMP()]);
-  const shown = await say(store, "what do you need from me");
-  assert(shown!.reply.includes(`For a written answer, say "draft 2" and I'll draft it from your confirmed facts for you to check first.`), shown!.reply);
+  await say(store, "what do you need from me");
+  // One question per message (review of #360): "skip" moves past the sponsorship question to the essay, now question 1.
+  const shown = await say(store, "skip");
+  assert(shown!.reply.includes(`For a written answer, say "draft 1" and I'll draft it from your confirmed facts for you to check first.`), shown!.reply);
   const m = stub(CLEAN);
   store.setIntent("career_brain");
-  eq(await say(store, "draft 2", { model: m.model }), null, "not the last word: not a draft command");
+  eq(await say(store, "draft 1", { model: m.model }), null, "not the last word: not a draft command");
   store.setIntent(QUESTIONS_INTENT);
-  eq(await say(store, "draft 2", { model: m.model, thread: "other" }), null, "another thread's questions");
-  eq((await say(store, "draft 7", { model: m.model }))!.reply, `I asked 2 questions, so there's no 7. Say "draft 1" to "draft 2".`);
-  eq((await say(store, "draft 1", { model: m.model }))!.status, "draft_not_essay", "only a written answer is drafted");
-  eq((await say(store, "use 2", { model: m.model }))!.status, "draft_none", "no draft yet: nothing to use");
+  eq(await say(store, "draft 1", { model: m.model, thread: "other" }), null, "another thread's questions");
+  eq((await say(store, "draft 7", { model: m.model }))!.reply, `I asked one question, so there's no 7. Say "draft 1".`);
+  const notEssay = fakeStore([SPONS()]);
+  await say(notEssay, "what do you need from me");
+  eq((await say(notEssay, "draft 1", { model: m.model }))!.status, "draft_not_essay", "only a written answer is drafted");
+  eq((await say(store, "use 1", { model: m.model }))!.status, "draft_none", "no draft yet: nothing to use");
   eq(m.calls.length, 0);
-  const r = await say(store, "draft 2", { model: m.model });
+  const r = await say(store, "draft 1", { model: m.model });
   eq(r!.status, "drafted");
-  assert(r!.reply.startsWith("Draft for 2, written only from your confirmed facts (F-001, F-002, F-003, F-004). Ramp's form doesn't say whether AI help is allowed, so this is a draft for you to edit, not a finished answer. Nothing is saved yet."), r!.reply);
-  assert(r!.reply.endsWith(`Reply "use 2" to save it as your answer, "redo 2" for another version, or "2" and your own words.`), r!.reply);
+  assert(r!.reply.startsWith("Draft for 1, written only from your confirmed facts (F-001, F-002, F-003, F-004). Ramp's form doesn't say whether AI help is allowed, so this is a draft for you to edit, not a finished answer. Nothing is saved yet."), r!.reply);
+  assert(r!.reply.endsWith(`Reply "use 1" to save it as your answer, "redo 1" for another version, or "1" and your own words.`), r!.reply);
   eq(store.answers, [], "shown, never saved on its own");
   eq(await store.countOpen("u"), 2);
-  // The draft survives between turns on the account, beside the questions shown.
+  // The draft survives between turns on the account, beside the question shown.
   eq(Object.keys((await store.shown("u"))!.drafts!), ["b"]);
   // Redo: another version, the earlier one given to the model to differ from.
   const m2 = stub("I want to work at Ramp because I want to build finance software used by controllers. At Brightline Health I closed the monthly books in 5 days instead of 9.");
-  eq((await say(store, "redo 2", { model: m2.model }))!.status, "drafted");
+  eq((await say(store, "redo 1", { model: m2.model }))!.status, "drafted");
   assert(m2.calls[0].messages[0].content.includes(`Write a different version from this earlier one:\n${CLEAN}`));
   const second = (await store.shown("u"))!.drafts!.b.text;
   // A day later nothing is used.
-  eq((await say(store, "use 2", { now: T + 25 * 3600000 }))!.status, "expired");
+  eq((await say(store, "use 1", { now: T + 25 * 3600000 }))!.status, "expired");
   eq(store.answers, []);
-  // "use 2" saves exactly the draft shown, through store.answer (back in time: the draft is the thread's last word again).
+  // "use 1" saves exactly the draft shown, through store.answer (back in time: the draft is the thread's last word again).
   store.setIntent(QUESTIONS_INTENT);
-  const u = await say(store, "use 2");
-  eq(u!.status, "draft_used", "question 1 is still open, so the questions stay the last word");
+  const u = await say(store, "use 1");
+  eq(u!.status, "answered_next", "saved; the sponsorship question is asked next, so the questions stay the last word");
   eq(store.answers, [["b", second]]);
-  assert(u!.reply.startsWith("Saved, as drafted. I won't ask this again:\n2. Why do you want to work at Ramp?: \""), u!.reply);
-  eq((await store.shown("u"))!.drafts, {}, "a used draft is gone");
-  eq((await say(store, "1 no"))!.status, "answered", "the other question is still answered by number");
+  assert(u!.reply.startsWith("Saved, as drafted. I won't ask this again:\nWhy do you want to work at Ramp?: \""), u!.reply);
+  assert(u!.reply.includes("Will you"), `the next question: ${u!.reply}`);
+  eq((await store.shown("u"))!.drafts ?? {}, {}, "a used draft is gone");
+  eq((await say(store, "no"))!.status, "answered", "the other question is answered as it is asked");
 
   // Their own words instead of a draft: saved as typed, and the draft can no longer be used.
   const st2 = fakeStore([SPONS(), RAMP()]);
   await say(st2, "what do you need from me");
-  await say(st2, "draft 2", { model: stub(CLEAN).model });
-  await say(st2, "2 I want to build what I wished I had");
+  await say(st2, "skip");
+  await say(st2, "draft 1", { model: stub(CLEAN).model });
+  await say(st2, "I want to build what I wished I had");
   eq(st2.answers, [["b", "I want to build what I wished I had"]]);
   st2.setIntent(QUESTIONS_INTENT);
-  eq((await say(st2, "use 2"))!.status, "draft_none");
+  eq((await say(st2, "use 1"))!.status, "draft_none");
   eq(st2.answers.length, 1);
   // One question shown: "use it" is a command, never saved as the answer "use it".
   const one = fakeStore([RAMP()]);
@@ -369,13 +380,15 @@ Deno.test("WO-030/7 the loop: stored with the form's AI words, shown, drafted, u
   );
   const store = fakeStore(rows);
   await say(store, "what do you need from me");
+  // One question per message (review of #360): "skip" moves past the sponsorship question to the essay, now question 1.
+  await say(store, "skip");
   const m = stub(CLEAN);
-  const d = await say(store, "draft 2", { model: m.model });
+  const d = await say(store, "draft 1", { model: m.model });
   eq(d!.status, "drafted");
   assert(d!.reply.includes(`Ramp's form allows AI help ("We encourage you to use AI tools to help research, prepare, or refine your application`), d!.reply);
   eq(m.calls[0].messages[0].content.split("\n").filter((l: string) => l.startsWith("- [")).length, 4, "the four confirmed facts that fit, nothing else");
-  await say(store, "use 2");
-  await say(store, "1 no");
+  await say(store, "use 1");
+  await say(store, "no");
   eq(store.answers, [["r1", CLEAN], ["r0", "No"]]);
   const merged = factsWithTextAnswers(facts, rows.map((r) => ({ id: r.id, key: r.key, kind: r.kind, answer: r.answer! })));
   const plan = (job: string, fields: any[]) =>

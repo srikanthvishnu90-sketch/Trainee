@@ -324,6 +324,16 @@ function codeReader(mode: string | undefined, local: boolean, userId: string): C
       return { status: String(body.status), stop: String(body.stop || codeStop("not_yet", ats)) };
     }, { now: Date.now, maxWaitMs: wait });
 }
+// Which family's script-submitted application this run may bind (null: none, and a form with no bound form post stops at
+// SUBMIT_DESTINATION_NOT_BOUND). A local test page names the family it stands in for (--script-submit); a real posting
+// is its host's family, only with --script-submit naming it or the owner's switch UPMORE_SCRIPT_SUBMIT_LIVE=1 on the host
+// the engine runs on. Every real Ashby form (Ramp's included) has no <form> post, so without one of the two even the dry
+// run that prepares the card stops there. The person's own Submit binds nothing here.
+export function scriptSubmitFamily(o: { local: boolean; flag: string | null; live: boolean; family: unknown; personSubmits: boolean }) {
+  if (o.personSubmits) return null;
+  if (o.local) return isScriptFamily(o.flag) ? o.flag : null;
+  return (o.flag || o.live) && isScriptFamily(o.family) ? o.family : null;
+}
 export async function runApply(args: string[]) {
   const o = options(args);
   if ((o["cloud-authorize-stdio"] || o["cloud-authorize-nonce"]) &&
@@ -436,11 +446,8 @@ export async function runApply(args: string[]) {
   const personSubmits = !!o["person-submits"];
   // Script submit binding: where a script-submitted form's one application request may go. A local test page names the
   // family it stands in for; a real posting's family is its host's, and only with the owner's switch.
-  const scriptFamily = personSubmits ? null : target.local
-    ? (o["script-submit"] ?? null)
-    : (o["script-submit"] || Deno.env.get("UPMORE_SCRIPT_SUBMIT_LIVE") === "1") && isScriptFamily(family)
-    ? family
-    : null;
+  const scriptFamily = scriptSubmitFamily({ local: target.local, flag: o["script-submit"] ?? null,
+    live: Deno.env.get("UPMORE_SCRIPT_SUBMIT_LIVE") === "1", family, personSubmits });
   const scriptEndpoint: Endpoint | null = scriptFamily ? scriptSubmitEndpoint(scriptFamily, u, target.local) : null;
   // Every write stopped while the agent's submit was open (keys never kept, only where it went and why).
   const stopped: { method: string; url: string; why: string }[] = [];

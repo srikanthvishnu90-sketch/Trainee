@@ -68,14 +68,15 @@ async function asked(person: string, questions: { key: string; label: string; ty
   });
   eq(r.error, null, JSON.stringify(r.error));
 }
-// "what do you need from me", then "use N" for the question with this label; the replies as the person reads them.
+// "what do you need from me" shows one question at a time (review of #360); "skip" until the question with this label is
+// the one shown, then "use 1" for its offer; the replies as the person reads them.
 async function useOffer(chat: Chat, label: string) {
-  const shown = await chat.say("what do you need from me");
+  let shown = await chat.say("what do you need from me");
   ok(shown);
-  const line = shown.reply.split("\n").find((l) => /^\d+\./.test(l) && l.includes(label));
-  assert(line, `${label} is asked: ${shown.reply}`);
-  const used = await chat.say(`use ${Number(/^(\d+)\./.exec(line!)![1])}`);
-  return { shown, used };
+  for (let i = 0; i < 12 && !shown!.reply.includes(label); i++) { shown = await chat.say("skip"); ok(shown); }
+  assert(shown!.reply.includes(label), `${label} is asked: ${shown!.reply}`);
+  const used = await chat.say("use 1");
+  return { shown: shown!, used };
 }
 const answerOf = async (person: string, key: string) =>
   await pg!.sql(`select coalesce(answer, '') from public.career_apply_questions where user_id = '${person}' and key = '${key}'`);
@@ -156,7 +157,9 @@ Deno.test({ name: "handler (b1): a phone, name or email said in chat writes noth
   await asked(person, [{ key: "fact:phone", label: "Phone" }, { key: "fact:first_name", label: "First name" }, { key: "fact:last_name", label: "Last name" }, { key: "fact:email", label: "Email" }]);
   const shown = await chat.say("what do you need from me");
   ok(shown);
-  assert(shown.reply.includes(`"my phone number is 312-555-0142"`), `their own words are offered back: ${shown.reply}`);
+  // One question at a time: the one shown offers their own words for it.
+  assert(["my phone number is 312-555-0142", "my name is Jordan Rivera", "my email is jordan.rivera@example.test"].some((w) => shown!.reply.includes(`"${w}"`)),
+    `their own words are offered back: ${shown!.reply}`);
   eq(await answerOf(person, "fact:phone"), "", "showing it saves nothing");
   const phone = await useOffer(chat, "Phone");
   assert(/Saved, as drafted/.test(phone.used.reply), phone.used.reply);

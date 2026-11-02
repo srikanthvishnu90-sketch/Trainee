@@ -79,16 +79,14 @@ Deno.test("dueDate: the day only from the person's words, counted from today; no
 });
 
 Deno.test("plannerOn: off unless CAREER_PLANNER=on with a non-router brain served; the router switch kills it; the allow-list limits it", () => {
-  // D-036: CAREER_PLANNER is a release flag (release_config.ts): unset serves it on with the release brain (staged).
-  eq(plannerOn(env({}), "u1"), true);
+  eq(plannerOn(env({}), "u1"), false);
   // On exactly when the SERVED brain (brainMode: CAREER_BRAIN, or the release config when unset) is not the router. True
   // before and after D-035/#371: unset serves router before it and staged after; "agent" is served as agent before it and
   // rolled back to the router after.
   for (const b of [undefined, "router", "staged", "agent", "off"]) {
     const e = (o: Record<string, string>) => env(b === undefined ? o : { ...o, CAREER_BRAIN: b });
     eq(plannerOn(e({ CAREER_PLANNER: "on" }), "u1"), brainMode(e({})) !== "router", `CAREER_BRAIN=${b ?? "unset"} serves ${brainMode(e({}))}`);
-    eq(plannerOn(e({}), "u1"), brainMode(e({})) !== "router", `CAREER_PLANNER unset (D-036: the release value, on): on exactly when a non-router brain is served (${b ?? "unset"})`);
-    eq(plannerOn(e({ CAREER_PLANNER: "off" }), "u1"), false, `CAREER_PLANNER=off (the rollback): off whatever brain is served (${b ?? "unset"})`);
+    eq(plannerOn(e({}), "u1"), false, `CAREER_PLANNER unset: off whatever brain is served (${b ?? "unset"})`);
   }
   eq(plannerOn(env({ CAREER_PLANNER: "on", CAREER_BRAIN: "router" }), "u1"), false, "the kill switch");
   eq(plannerOn(env({ CAREER_PLANNER: "on", CAREER_BRAIN: "staged" }), "u1"), true, "staged served: on");

@@ -29,7 +29,7 @@ import { fakeBot, plainOf } from "./scenarios/telegram-bot-api.ts";
 import { handleTelegram } from "../../supabase/functions/trainee-telegram/handler.ts";
 import { chatThroughAgent, deliverer } from "../../supabase/functions/_shared/channel_runtime.ts";
 import { supabaseInboundStore } from "../../supabase/functions/trainee-inbound/store.ts";
-import { RELEASE_FLAGS, RELEASE_NEVER_ON, releaseFlagOn } from "../../supabase/functions/agent-chat/release_config.ts";
+import { RELEASE_FLAGS, RELEASE_NEVER_ON, RELEASE_PENDING, releaseFlagOn } from "../../supabase/functions/agent-chat/release_config.ts";
 
 // Steps the code cannot pass yet (shrink-only; each names what fails today).
 export const KNOWN_GAP: readonly string[] = [
@@ -93,7 +93,7 @@ Deno.test({
     const pg: Pg = await startPg();
     const keys = ["CAREER_BRAIN", "CAREER_NETWORKING_DRAFT", "OPENAI_API_KEY", "CAREER_MODEL", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_BOT_USERNAME", "TRAINEE_SIGNUP",
       "TRAINEE_ALLOWED_CONTACTS", "TRAINEE_DELIVER_SECRET", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "LOOPMESSAGE_API_KEY", "WHATSAPP_TOKEN", "TRAINEE_FILE_BASE_URL", "TRAINEE_FILE_LINK_SECRET",
-      ...Object.keys(RELEASE_FLAGS), ...RELEASE_NEVER_ON];
+      ...Object.keys(RELEASE_FLAGS), ...RELEASE_NEVER_ON, ...Object.keys(RELEASE_PENDING)];
     const saved = Object.fromEntries(keys.map((k) => [k, Deno.env.get(k)]));
     for (const k of keys) Deno.env.delete(k);
     let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
@@ -124,6 +124,7 @@ Deno.test({
         CAREER_MODEL: "gpt-5-mini" })) Deno.env.set(k, v);
       // D-036: the release config as served: every release flag on, every never-on switch off (none of them set here).
       for (const f of Object.keys(RELEASE_FLAGS)) ok(releaseFlagOn(Deno.env, f), `release flag ${f} is served on`);
+      for (const f of Object.keys(RELEASE_PENDING)) ok(!releaseFlagOn(Deno.env, f), `${f} is pending, served off`);
       for (const f of RELEASE_NEVER_ON) ok(!["on", "1", "open"].includes(String(Deno.env.get(f) ?? "").trim().toLowerCase()), `${f} is off (TRAINEE_SIGNUP stays "closed")`);
 
       // Two live postings in Chicago; the second carries an instruction aimed at the assistant inside its description.
@@ -406,7 +407,7 @@ Deno.test({
       for (const r of results) console.log(`TELEGRAM_ACCEPTANCE ${r.id} ${r.outcome}${r.why ? `: ${r.why}` : ""}`);
       const gapsNowPassing = results.filter((r) => r.outcome === "KNOWN_GAP NOW PASSES").map((r) => r.id);
       if (gapsNowPassing.length) console.log(`TELEGRAM_ACCEPTANCE KNOWN_GAP entries that now pass (remove them; the list only shrinks): ${gapsNowPassing.join(", ")}`);
-      console.log(`TELEGRAM_ACCEPTANCE known_gap=${KNOWN_GAP.length} pass=${results.filter((r) => r.outcome === "PASS").length} fail=${results.filter((r) => r.outcome === "FAIL").length} model_calls=${modelCalls} brain_calls=${brainCalls} release_flags=${Object.keys(RELEASE_FLAGS).join(",")}`);
+      console.log(`TELEGRAM_ACCEPTANCE known_gap=${KNOWN_GAP.length} pass=${results.filter((r) => r.outcome === "PASS").length} fail=${results.filter((r) => r.outcome === "FAIL").length} model_calls=${modelCalls} brain_calls=${brainCalls} release_flags=${Object.keys(RELEASE_FLAGS).join(",")} release_pending=${Object.keys(RELEASE_PENDING).join(",")}`);
       globalThis.fetch = realFetch;
       h?.restore();
       for (const [k, v] of Object.entries(saved)) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v);

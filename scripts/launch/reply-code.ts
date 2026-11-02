@@ -65,6 +65,13 @@ export const RELEASE_FLAG_PATHS = [
   "supabase/functions/_shared/career_tailor_rewrite.ts",
   "supabase/functions/_shared/career_outreach_track.ts",
   "supabase/functions/career-proactive/index.ts",
+  // D-036 review: the scheduled run's whole path for its ON flags (briefs and digest, intro reminders, mail, follow-ups).
+  "supabase/functions/career-proactive/switches.ts",
+  "supabase/functions/career-proactive/handler.ts",
+  "supabase/functions/_shared/career_proactive_run.ts",
+  "supabase/functions/_shared/career_digest.ts",
+  "supabase/functions/_shared/career_people_reminders.ts",
+  "supabase/functions/_shared/career_inbox_followups.ts",
 ] as const;
 
 // Every reply-code path, repository-relative, sorted. Git pathspecs: a directory covers everything under it.

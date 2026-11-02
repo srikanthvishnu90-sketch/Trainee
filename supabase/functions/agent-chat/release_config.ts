@@ -53,8 +53,6 @@ export const RELEASE_CONFIG_PATH = "supabase/functions/agent-chat/release_config
 // effect (a send, a submit, a message to anyone but the person), and none needs a secret production lacks. The full
 // inventory, with what stays OFF and why, is docs/architect/RELEASE-FLAGS-2026-11-01.md.
 //
-//   CAREER_PLANNER            compound asks planned into steps over the existing code paths (career_planner.ts; also needs
-//                             the served brain to be staged, so CAREER_BRAIN=router turns it off too)
 //   CAREER_TEXTING_NATIVE     channel-native delivery: split like a person texts, typing indicator, the "on it" interim
 //   CAREER_NETWORKING_DRAFT   the model drafts outreach under the fact-lock; approved by hash, delivered by the person
 //   CAREER_TAILOR_REWRITE     truthful bullet rewrite toward a posting, each bullet audited against its one confirmed fact
@@ -63,21 +61,17 @@ export const RELEASE_CONFIG_PATH = "supabase/functions/agent-chat/release_config
 //   CAREER_BRIEF_DIGEST       interview briefs, interview drafts and the weekly digest, to the person
 //   CAREER_OUTREACH_FOLLOWUPS follow-up reminders on mail the person sent, to the person's own outbox
 //   CAREER_INTRO_REMINDERS    introduction reminders the person asked for, to the person's own outbox
-//   CAREER_CRISIS_MODERATION  the second crisis layer: the model gateway's moderation screen in front of every turn (its
-//                             reader, _shared/career_crisis_screen.ts, arrives with PR #354 and reads this table with
-//                             releaseFlagOn; until then crisis text is caught by code alone, agent-chat/crisis.ts)
 //
 // The environment can only turn a release flag OFF (the rollback, no deploy):
 //
-//   supabase secrets set CAREER_PLANNER=off --project-ref <ref>      that one feature off at once
-//   supabase secrets unset CAREER_PLANNER --project-ref <ref>        back to the release value
+//   supabase secrets set CAREER_MAIL_TRACKING=off --project-ref <ref>   that one feature off at once
+//   supabase secrets unset CAREER_MAIL_TRACKING --project-ref <ref>     back to the release value
 //
 // As with CAREER_BRAIN: unset, or set to the release value ("on"), serves the release value; any other value (off, 0, a
 // typo) serves "off", so a mistyped rollback still rolls back. A switch that is not in this table is read from the
 // environment exactly as before (default off): the real-submit and send-as-the-person switches are never in it
 // (RELEASE_NEVER_ON below; the owner turns those on himself, at his first live application).
 export const RELEASE_FLAGS: Readonly<Record<string, "on">> = Object.freeze({
-  CAREER_PLANNER: "on",
   CAREER_TEXTING_NATIVE: "on",
   CAREER_NETWORKING_DRAFT: "on",
   CAREER_TAILOR_REWRITE: "on",
@@ -86,7 +80,13 @@ export const RELEASE_FLAGS: Readonly<Record<string, "on">> = Object.freeze({
   CAREER_BRIEF_DIGEST: "on",
   CAREER_OUTREACH_FOLLOWUPS: "on",
   CAREER_INTRO_REMINDERS: "on",
-  CAREER_CRISIS_MODERATION: "on",
+});
+
+// D-036 review (2026-11-01): ON once its condition is met, not before; until then each is read from the environment as
+// before (default off) and every report names it as pending, never as live. Moving one into RELEASE_FLAGS is its own commit.
+export const RELEASE_PENDING: Readonly<Record<string, string>> = Object.freeze({
+  CAREER_PLANNER: "measured first: the task eval (brain-eval suite=tasks), planner on against off, and #371's fix (a crisis message with two asks reaches the 988 reply before the planner; planner reminders are delivered) landed",
+  CAREER_CRISIS_MODERATION: "reader pending #354: no code at this SHA reads it, so it is not reported as a live safety layer",
 });
 
 // Switches the release config never turns on: each submits to an employer, sends as the person, changes reply words no

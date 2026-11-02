@@ -18,14 +18,13 @@ the task eval (`evals/career/tasks/run.ts`, real handler), delivery and the appr
 that would change reply words with nothing measuring them stay OFF (reply writer, knowledge library, search judge).
 
 Columns: default before D-036 → served now; what it enables; what it needs; risk; class.
-(a) = ON for end-to-end testing; (b) = stays OFF; (c) = unchanged default, not a release flag.
+(a) = ON for end-to-end testing; (a′) = pending; (b) = stays OFF; (c) = unchanged default, not a release flag.
 
 ## (a) ON in the release config
 
 | Switch | Before → now | Enables | Needs | Risk / why safe |
 |---|---|---|---|---|
 | `CAREER_BRAIN` | router → staged (D-035) | question/advice turns to the model; actions stay code's | `OPENAI_API_KEY` (present; without it the router answers) | S3-measured; rollback `CAREER_BRAIN=router` |
-| `CAREER_PLANNER` | off → on | compound asks ("find 5, tailor 2, apply, remind me Friday") planned into steps over existing code paths | staged brain; model key | each step runs its own path; apply queues a card the person approves; drafts wait for "send 1"; reminders kept, not sent. Measured by the task eval |
 | `CAREER_TEXTING_NATIVE` | off → on | channel-native delivery: split like a person texts, links on their own line, typing indicator, "on it" interim | none | shapes and paces what is already sent; words unchanged |
 | `CAREER_NETWORKING_DRAFT` | off → on | model drafts outreach under the fact-lock | model key | approved by the hash of the exact text; delivered by the person (copy or mailto); never sent by Trainee |
 | `CAREER_TAILOR_REWRITE` | off → on | truthful bullet rewrite toward a posting | model key | each bullet audited against its one confirmed fact; failing bullets keep their words; the resume is approved as an exact payload |
@@ -33,8 +32,14 @@ Columns: default before D-036 → served now; what it enables; what it needs; ri
 | `CAREER_MAIL_TRACKING` | off → on | application status from the person's Gmail | person's Google grant (`gmail.readonly`, in verification); migration in repo | read only; nothing sent; a person without Gmail connected is skipped |
 | `CAREER_BRIEF_DIGEST` | off → on | interview briefs, interview drafts, weekly digest | `20261021050000_career_brief_digest.sql` (applied by go-live) | to the person only |
 | `CAREER_OUTREACH_FOLLOWUPS` | on by go-live → on by config | follow-up reminders on mail the person sent | none (no Gmail) | to the person's own outbox only |
-| `CAREER_CRISIS_MODERATION` | set on by go-live (PR #354) → on by config | the second crisis layer: the gateway's moderation screen on each turn | `OPENAI_API_KEY` (present) | adds a safety screen; sends nothing. Its reader arrives with #354, which must read it with `releaseFlagOn` (the raw-read test fails otherwise) and list its module in `RELEASE_FLAG_PATHS`; the go-live `add CAREER_CRISIS_MODERATION on` line becomes redundant (setting the release value is harmless) |
 | `CAREER_INTRO_REMINDERS` | off → on | introduction reminders the person asked for, pushed at their date | `20261027020000_career_intro_reminder_push.sql` (applied by go-live) | only the reminder text, to a person with a texting channel; the introduction itself is never sent |
+
+## (a′) Pending: OFF until the condition is met (`RELEASE_PENDING`), never reported as live
+
+| Switch | Enables | Waits for |
+|---|---|---|
+| `CAREER_PLANNER` | compound asks ("find 5, tailor 2, apply, remind me Friday") planned into steps over existing code paths | the task eval (`brain-eval` suite=tasks), planner on against off, no worse; and #371's fix (a crisis message with two asks gets the 988 reply before the planner; planner reminders are delivered) |
+| `CAREER_CRISIS_MODERATION` | the gateway's moderation screen on each turn (second crisis layer; code's `agent-chat/crisis.ts` is always on) | its reader, which lands with #354 (no code reads it at this SHA) |
 
 ## (b) Stays OFF
 

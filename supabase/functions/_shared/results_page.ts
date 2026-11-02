@@ -35,6 +35,8 @@ export interface ResultsFeed {
   countRows?: ResultRow[]; // every active (not dismissed) role, before the pay/place filter: the top counts are over these
   paused?: boolean; updated?: string; dismissed?: ResultRow[]; // the person's own marks (private); updated: when this page was drawn
   madeFor?: string; stamp?: string | null; caveat?: string; quick?: string[];
+  // "Apply to all N ready": the roles that are ready now (and not dismissed) and the hash of that exact set; absent: fewer than two, or paused.
+  all?: { hash: string; size: number } | null;
 }
 
 const BRAND_PLUM = "#5C2751";
@@ -139,6 +141,7 @@ export function renderResults(f: ResultsFeed): string {
   const filters = `<form method="get" class="filters" role="search"><label>Pay${sel("pay", f.filters.pay, payOpts)}</label><label>Where${sel("where", f.filters.where, [["", "Anywhere"], ["remote", "Remote"], ...f.places.map((p) => [p, p] as [string, string])])}</label><button type="submit" class="ghost">Show</button></form>`;
   const canPick = !f.paused && f.rows.some(approvable);
   const selbar = canPick ? `<div class="selbar"><form method="post" id="sel">${hidden(f.token, "applysel")}<button type="submit" class="apply">Apply to selected</button></form><p>Tick the roles you want. Ones that are ready go in one tap; the rest say what they need.</p></div>` : "";
+  const allbar = f.all && !f.paused ? `<div class="selbar allbar"><form method="post" id="all">${hidden(f.token, "applyall", `<input type="hidden" name="set" value="${esc(f.all.hash)}">`)}<button type="submit" class="apply">Apply to all ${f.all.size} ready</button></form><p>Approves the ${f.all.size} ready roles on this list, each exactly as its What will be sent shows. Dismissed roles and roles that aren't ready are left out. If anything changes first, nothing is approved.</p></div>` : "";
   const meets = f.rows.filter((r) => r.payGroup === "meets"), unchecked = f.rows.filter((r) => r.payGroup === "unchecked"), unlisted = f.rows.filter((r) => r.payGroup === "unlisted"), below = f.rows.filter((r) => r.payGroup === "below");
   const group = (title: string, note: string, rows: ResultRow[]) => rows.length ? `<h2 class="group">${esc(title)} (${rows.length})</h2>${note ? `<p class="groupnote">${esc(note)}</p>` : ""}<ul class="cards">${rows.map((r) => card(r, f)).join("")}</ul>` : "";
   const body = f.rows.length
@@ -163,7 +166,7 @@ export function renderResults(f: ResultsFeed): string {
       : open ? `<div class="pausebar"><form method="post">${hidden(f.token, "pause")}<button type="submit" class="ghost">Pause on this page</button></form><p>Stops this page from approving or starting anything new. It does not stop Telegram: the buttons there still work. Applications already approved or in progress are not cancelled and may still finish.</p></div>` : "")
     + `</section>`;
   const gone = f.dismissed?.length ? `<details class="gone"><summary>Dismissed (${f.dismissed.length})</summary><ul class="cards">${f.dismissed.map((r) => `<li class="card" id="r-${esc(r.ref)}"><div class="head">${logoOf(r)}<div class="ttl"><h3 class="title">${esc(r.job.title)}</h3><p class="co">${esc(r.job.company)}</p></div></div><p class="state">${r.rid ? `<span class="rid">${esc(r.rid)}</span>` : ""}<span class="chip" role="status">Dismissed by you</span></p><p class="markhelp">Private and reversible. No application was touched. Current state: ${esc(specOf(r).label)}.</p>${markForm(r, f, "restore")}</li>`).join("")}</ul></details>` : "";
-  const inner = `<div id="root" class="results"><header>${BRAND}${head}${topBlock}${filters}${shown}${selbar}</header><main id="main">${top}${body}${gone}</main></div>`;
+  const inner = `<div id="root" class="results"><header>${BRAND}${head}${topBlock}${filters}${shown}${allbar}${selbar}</header><main id="main">${top}${body}${gone}</main></div>`;
   return layout(`${cap1(f.title)} - Trainee`, inner, { css: CSS });
 }
 

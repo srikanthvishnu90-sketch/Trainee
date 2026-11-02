@@ -616,6 +616,9 @@ const placeOf = (j: JobView) => {
   const parts = [j.location, j.remote === "remote" ? "Remote" : j.remote === "hybrid" ? "Hybrid" : j.remote === "onsite" ? "On-site" : ""].filter(Boolean);
   return parts.filter((w, i) => parts.findIndex((x) => x.toLowerCase() === w.toLowerCase()) === i).join(" · ");
 };
+// The roles "Apply to all N ready" approves: ready right now (prepared, its tag shown, no status, not by hand, not blocked), not dismissed.
+const readySet = (rows: Row[], dismissed: Set<string>) => rows.filter((r) => !dismissed.has(r.ref) && !r.status && !r.byHand && !r.blocked && !!r.tag);
+const setHashOf = async (rows: Row[]) => rows.length ? (await sha(`v1|${rows.map((r) => `${r.ref}:${r.tag}`).join(",")}`)).slice(0, 16) : "";
 const CHANGED = "Changed since you opened this page, so nothing was sent.";
 const SENT = "Approved. It's queued to be sent exactly as its card showed; the status here changes when the employer's site confirms it.";
 // How a question is asked: the employer's options, yes or no, a longer answer, or text. A secret (password, code, ID or bank number)
@@ -688,7 +691,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   }
 
   if (action) {
-    if (!["apply", "applysel", "answer", "refresh", "dismiss", "restore", "pause", "resume"].includes(action)) return o.state("Not done", ["That is not something this page can do. Nothing was sent."], 400);
+    if (!["apply", "applysel", "applyall", "answer", "refresh", "dismiss", "restore", "pause", "resume"].includes(action)) return o.state("Not done", ["That is not something this page can do. Nothing was sent."], 400);
     // Re-read the stored meta right before writing and change only this field, so two taps cannot overwrite each other.
     const saveMeta = async (patch: (m: ListMeta) => void) => {
       try {
@@ -714,7 +717,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
         else if (!(await saveMeta((m) => { const s2 = new Set(m.dismissed ?? []); if (action === "dismiss") s2.add(ref); else s2.delete(ref); m.dismissed = [...s2]; }))) top = "I couldn't save that just now. Nothing changed.";
         else notes[ref] = action === "dismiss" ? "Dismissed. Private to you; no application was touched. You can restore it at the bottom of the page." : "Restored to your list. No application was touched.";
       }
-    } else if ((action === "apply" || action === "applysel") && paused) {
+    } else if ((action === "apply" || action === "applysel" || action === "applyall") && paused) {
       top = "Paused. Nothing was approved or started from this tap. Tap Resume at the top to continue.";
     } else if (action === "apply" && marked.has(fields.get("ref") ?? "")) {
       notes[fields.get("ref") ?? ""] = "This role is dismissed. Restore it first. Nothing was sent.";
@@ -724,6 +727,17 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
       if ("things" in g) return thingsPage(g.things, g.qs);
       if ("note" in g) notes[ref] = g.note;
       else notes[ref] = (await approveOne(u, ref, tag, d)) ?? SENT;
+    } else if (action === "applyall") {
+      // Apply to all N ready (owner, 2026-11-02): exactly the set that was shown, bound to its hash. The set is the roles that are
+      // READY right now (prepared, tag shown, nothing marked needs) and not dismissed; each goes through the same hash-bound approval
+      // as its own Apply. If the set is not exactly what the page showed, nothing is approved.
+      const cur = await loadFeed(claims, token, d), now = readySet(cur?.rows ?? [], marked);
+      if (!cur || !now.length || (fields.get("set") ?? "") !== await setHashOf(now)) top = "This list changed since you opened it, so nothing was approved.";
+      else {
+        let sent = 0;
+        for (const r of now) { const n = await approveOne(u, r.ref, r.tag!, d); notes[r.ref] = n ?? SENT; if (!n) sent++; }
+        top = `${sent} of ${now.length} approved and queued, each exactly as its card showed.${sent < now.length ? ` ${now.length - sent} not approved; each says why.` : ""} Nothing else was sent.`;
+      }
     } else if (action === "applysel") {
       const want = picks().filter((p) => !marked.has(p.ref));
       if (!want.length) top = picks().length ? "Those roles are dismissed. Restore them first. Nothing was sent." : "Tick at least one role first. Nothing was sent.";
@@ -851,5 +865,6 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   ].filter(Boolean);
   return o.html(renderResults({ token, title, floor: fl, rows, coverRows: all, countRows: keep, total: all.length, filters, places, top, notes,
     madeFor: `Made for ${meta.name ?? "you"} · ${day}`, stamp: await stampOf(rows), caveat, quick,
-    paused: !!meta.paused, updated, dismissed: gone }));
+    paused: !!meta.paused, updated, dismissed: gone,
+    all: !meta.paused && readySet(keep, new Set()).length >= 2 ? { hash: await setHashOf(readySet(keep, new Set())), size: readySet(keep, new Set()).length } : null }));
 }

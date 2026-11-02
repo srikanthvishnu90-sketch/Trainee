@@ -27,6 +27,8 @@ import { consentNotice, GMAIL_READONLY, GMAIL_SEND, requestableScopes } from "./
 import { channelOf, disconnectOutlook, disconnectWords, linkBase as outlookLinkBase, MICROSOFT_NOTE, outlookFor, RECONNECT_REPLY, TELEGRAM_BROWSER, tokenDeps as msTokenDeps } from "./outlook_connector.ts";
 import { ENV as MS_ENV, hasScope, outlookToken, PROVIDER as MS_PROVIDER } from "./outlook_graph.ts";
 import { vaultRefreshWrite } from "./oauth_vault_refresh.ts";
+import { missingWords, PARTIAL_WORDS } from "./oauth_connect.ts";
+export { missingWords, PARTIAL_WORDS };
 
 type Admin = any;
 export interface Env { get(k: string): string | undefined }
@@ -331,8 +333,11 @@ export async function connectorChatTurn(d: TurnIn): Promise<ChatOut | null> {
     const outlookOnly = ask.need === "outlook" || (ask.need === "mail" && s.find((x) => x.id === "gmail")!.state !== "connected");
     if (!outlookOnly) return null; // Gmail is connected: career_inbox_followups reads it
     const read = d.readOutlook ?? ((u: string) => outlookFor(d.admin, d.env, d.fetch, { now: d.now }).readInbox(u));
-    const r = await read(d.userId).catch((e) => ({ status: "ERROR", stored: 0, detail: String((e as Error)?.message ?? e) }));
-    const reply = r.status === "ok" ? `I read your Outlook: ${r.stored === 0 ? "no new messages" : r.stored === 1 ? "1 new message" : `${r.stored} new messages`} since I last looked (sender, subject and preview only).`
+    const r: { status: string; stored: number; detail?: string } = await read(d.userId).catch((e) => ({ status: "ERROR", stored: 0, detail: String((e as Error)?.message ?? e) }));
+    // CONNECTORS ROUND 3 (2026-10-31): a grant without Mail.Read (the box left unticked at Microsoft) was answered "ask me
+    // again in a minute", which never helps; and a disconnect while the inbox was read is not a failure to retry.
+    const reply = r.status === "NOT_WIRED" ? (/does not allow/i.test(String(r.detail ?? "")) ? PARTIAL_WORDS.outlook.read : "Outlook isn't connected any more, so nothing was read or kept. Text \"connect my outlook\" to connect it again.")
+      : r.status === "ok" ? `I read your Outlook: ${r.stored === 0 ? "no new messages" : r.stored === 1 ? "1 new message" : `${r.stored} new messages`} since I last looked (sender, subject and preview only).`
       : r.status === "NEEDS_RECONNECT" ? RECONNECT_REPLY
       : r.status === "RATE_LIMITED" ? `Microsoft asked Trainee to wait before reading more of your Outlook${r.stored ? `; I read ${r.stored} new message${r.stored === 1 ? "" : "s"} first` : ""}. I'll carry on as soon as it allows.`
       : "I couldn't finish reading your Outlook just now. What I read before is kept; ask me again in a minute.";
@@ -410,11 +415,23 @@ export async function afterConnect(d: AfterDeps, userId: string, id: ConnectorId
     if (!link.error && link.data?.link_id) {
       const uses = c.uses(o.scopes ?? []);
       await tell(d, { user_id: userId, channel: link.data.channel, thread_id: link.data.thread_id }, `connect:${link.data.link_id}`,
-        `Gmail connected: ${o.email ?? "your account"}.${uses.length ? ` You allowed me to ${uses.join(", and to ")}.` : ""} Say "${c.disconnectAsk}" any time to remove it.`);
+        [`Gmail connected: ${o.email ?? "your account"}.${uses.length ? ` You allowed me to ${uses.join(", and to ")}.` : ""}`,
+          missingWords("gmail", o.scopes ?? [], { sendAsked: requestableScopes([GMAIL_READONLY, GMAIL_SEND], d.env).scopes.includes(GMAIL_SEND) }),
+          `Say "${c.disconnectAsk}" any time to remove it.`].filter(Boolean).join(" "));
     }
   }
   const claimed = must(await d.admin.rpc("career_parked_claim", { p_user: userId, p_needs: needsFor(id), p_now: at(d.now()), p_lease_seconds: 300 }), "claim the waiting tasks") ?? [];
   return await runClaimed(d, claimed as any[]);
+}
+
+// CONNECTORS ROUND 3 (2026-10-31): a Gmail connect the database refused (oauth_connect_commit 'taken': the address is
+// another Trainee account's). The link is finished and the person told why, in the chat it came from; nothing resumes.
+export async function refusedConnect(d: Omit<AfterDeps, "runTurn">, userId: string, id: ConnectorId, words: string): Promise<boolean> {
+  if (id !== "gmail") return false; // Outlook's callback finishes and tells on its own link table
+  const link = await d.admin.rpc("career_connector_link_finish", { p_user: userId, p_connector: "gmail", p_outcome: "error", p_now: at(d.now()) });
+  if (link.error || !link.data?.link_id) return false;
+  await tell(d as AfterDeps, { user_id: userId, channel: link.data.channel, thread_id: link.data.thread_id }, `connect:${link.data.link_id}`, words);
+  return true;
 }
 
 // A sweeper's batch (many run at once): tasks whose connector is connected but whose resume failed or never ran.

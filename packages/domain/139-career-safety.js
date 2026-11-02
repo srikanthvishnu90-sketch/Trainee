@@ -157,7 +157,10 @@ const CareerSafety = (() => {
     /\b(?:dont|do not|dont even) deserve (?:to )?(?:live|be alive|exist|be here|life)\b/, /\bdeserve to (?:die|be dead)\b/,
     /\bshould(?:nt| not) (?:be alive|exist|be here anymore|have been born)\b/, /\bshould(?:nt| not) be here$/,
     /\b(?:whats|what is|wheres|where is|is there|theres|there is) (?:the |even a |any |no )?point (?:of|in|to) (?:living|life|being alive|going on|existing|anything|any of (?:it|this))\b/,
-    /\brather (?:be dead|die|not be alive|not exist|not wake up)\b/,
+    // "I'd rather die than miss this" weighs two things a person wants: an idiom. "Rather die than keep living like this"
+    // and every "rather be dead" stay distress (#406 review).
+    /\brather (?:be dead|not be alive|not exist|not wake up)\b/,
+    /\brather die\b(?! than (?!(?:keep|go on|going on|live|living|be alive|be here|continue|wake up|face)\b))/,
     /\bstop (?:existing|being alive)\b/, /\bstop living\b(?! (?:paycheck|like|in|with|at|for|on|off|under|out|from))/, /\bcease to exist\b/, /\b(?:want|wish|need)(?:ed)? (?:to )?(?:not exist|cease to exist|vanish forever|not be alive)\b/,
     /\b(?:hope|hopefully|wish|praying|pray) (?:that )?i (?:dont|never|do not|wont|will not) wake up\b/,
     /\b(?:life|living) (?:is|isnt|is not|aint) (?:not )?worth (?:it|living)\b/, /\bnot worth living\b/,

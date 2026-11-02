@@ -13429,6 +13429,7 @@ const CareerRouter = (() => {
     const dropped = (key, keep) => { const before = famRows(); rows = rows.filter(keep); family[key] += before - famRows(); };
     if (o.company) dropped("company", (r) => lc(r.company).includes(o.company));
     if (o.locations && o.locations.size) dropped("location", (r) => o.locations.has(lc((r.location || "").split(",")[0].split("—")[0].trim())) || (o.locations.has("remote") && r.remote === "remote"));
+    if (o.remoteOnly) dropped("location", (r) => r.remote === "remote" || /\bremote\b/i.test(s(r.location)));
     if (o.bands) dropped("band", (r) => o.bands.has(r.posting.seniority_band));
     rows.sort((a, b) => (b.score - a.score) || s(a.deadline || "9999").localeCompare(s(b.deadline || "9999")) || s(a.title).localeCompare(s(b.title)));
     return { ranked: rows, excluded, dedupedFrom: adapted.length, dedupedTo: deduped.length, family };
@@ -13468,7 +13469,11 @@ const CareerRouter = (() => {
     const countM = t.match(/(\d+)\s*(?:roles|jobs|internships)/);
     const limit = o.limit || (countM ? Number(countM[1]) : 5);
     const fams = o.families !== undefined ? o.families : discoveryFamilies(text);
-    const { ranked, excluded, dedupedTo, family } = rankedShortlist(profile, ctx, Object.assign({}, o, { askFamilies: fams && fams.length ? fams : null }));
+    const remoteOnly = !(o.locations && o.locations.size) && /\bremote\b/.test(t)
+      && !/\b(?:no|not|non|without|except|excluding)[- ]remote\b|\bremote\s+(?:is\s+)?(?:not|no)\b/.test(t)
+      && !postingsFromCtx(ctx).some((p) => { const city = lc(s(p.location).split(",")[0].split("—")[0].trim()); return city && !/remote/.test(city) && new RegExp(`\\b${city.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(t); })
+      && !/\b(?:in|near|around)\s+[a-z]/.test(t.replace(/\bin\s+(?:the\s+)?(?:us|usa|u\.s\.?)\b/g, ""));
+    const { ranked, excluded, dedupedTo, family } = rankedShortlist(profile, ctx, Object.assign({}, o, { askFamilies: fams && fams.length ? fams : null, remoteOnly }));
     try {
       const prevP = (ctx.discovery && ctx.discovery.lastParams) || null;
       const cleanedAsk = s(text).replace(/^\s*(wait|actually|ok|okay|so|eh|and)[ ,]+/i, "").replace(/^.*?\bi meant\s+/i, "").replace(/^(find|show|get|give|search|list)(\s+me)?\s+/i, "");

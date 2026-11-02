@@ -4,9 +4,10 @@
 // only), the source link, the full posting behind an expand, and one plum Apply. Sorted by fit; roles that list no pay are a
 // separate group. Filters for pay and place are a plain GET form (no script needed; a GET changes nothing).
 //
-// Apply never sends from the list. It opens the review: the exact application (every field and answer, the resume, where it
-// goes), and Approve there needs the 6-digit code Trainee sends to the person's own chat (approval_code.ts). "Apply to selected"
-// is the same review for the ticked roles, approved once, as one set.
+// One solid black Apply per card (owner, 2026-11-02). On a card whose application is prepared, "What will be sent" (the resume,
+// each answer, the cover note, where it goes) is an expand on the card itself, and the tap on Apply approves exactly that (the
+// hash-bound approval in trainee-file/handler.ts). A card that isn't ready says why: the employer's questions are asked on
+// "A few things first" (renderThings), or the application is still being prepared. Nothing here sends on a GET.
 import { cap1, esc, hostOf, layout, webUrl, initialOf, type Row, type Status } from "./file_page.ts";
 import { BRAND } from "./brand.ts";
 import { stampHtml } from "./results_stamp.ts";
@@ -18,6 +19,8 @@ export interface ResultRow extends Row {
   payNote: string | null; // "the range starts below $30/hr", "in CAD, not compared with your $30/hr"
   payConv: string | null; // "≈ $43-58/hr, assuming 2,080 hrs/yr": a converted figure, never labelled as the posting's
   place: string; // "Austin, TX · Hybrid"
+  guide?: string | null; // why Apply can't send yet: "2 questions need your answer first", or where the preparation stands
+  openQs?: number; // the employer's questions still open for this role (their page is ?things=<ref>)
 }
 export interface ResultsFeed {
   token: string; title: string; floor: string | null; rows: ResultRow[]; total: number;
@@ -62,13 +65,16 @@ dl.facts dt{color:var(--mute)}dl.facts dd{margin:0;overflow-wrap:anywhere}dd.pai
 .card form.go{margin:0}.card .ghost.go{min-width:120px;min-height:48px;text-decoration:none}
 .card .chip{min-height:44px}.card .note{margin:10px 0 0;font-size:16px;color:var(--ink)}
 .empty{margin:18px 0;padding:18px;border-radius:14px;background:var(--panel)}
-.review .card dl.facts{grid-template-columns:minmax(0,40%) 1fr}
-.codebox{margin:20px 0 0;padding:16px;border-radius:14px;background:var(--panel)}.codebox form+form{margin-top:18px}
-.codebox label{display:block;font-weight:600;margin:0 0 6px}
-.codebox input{width:100%;max-width:240px;min-height:48px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:20px;letter-spacing:.2em}
-.codebox .apply{margin-top:12px}.hint{font-size:15px;color:var(--mute)}
+.results .apply,.things .apply{display:inline-flex;align-items:center;justify-content:center;min-width:120px;min-height:48px;padding:6px 26px;border-radius:999px;border:2px solid #000;background:#000;color:#fff;font:inherit;font-size:17px;font-weight:600;cursor:pointer;text-decoration:none}
+.results .apply:hover,.things .apply:hover{background:#000;border-color:#000;opacity:.88}.results .apply:focus-visible,.things .apply:focus-visible,.ghost:focus-visible{outline:3px solid var(--link);outline-offset:2px}
+@media (prefers-color-scheme:dark){.results .apply,.things .apply{border-color:var(--ink)}.results .apply:hover,.things .apply:hover{border-color:var(--ink)}}
+.card details.send dl.facts{grid-template-columns:minmax(0,38%) 1fr;margin:6px 0 4px}.card .guide{margin:10px 0 0;font-size:16px;color:var(--ink)}
+.things fieldset{margin:0 0 16px;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--card)}.things legend{padding:0 6px;font-weight:600;font-size:17px;overflow-wrap:anywhere}
+.things .opt{display:flex;align-items:center;gap:10px;min-height:44px;font-size:17px}.things .opt input{width:22px;height:22px;accent-color:var(--ink)}
+.things input[type=text],.things select,.things textarea{box-sizing:border-box;width:100%;min-height:48px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:16px}
+.things .err{margin:8px 0 0;color:var(--bad);font-size:16px}.things .hand{margin:0;font-size:16px}
 .back{display:inline-flex;align-items:center;min-height:44px;color:var(--link);font-size:16px}
-@media (max-width:480px){.card .apply,.card .ghost.go,.codebox .apply,.selbar .apply{width:100%}.acts{flex-direction:column;align-items:stretch}}
+@media (max-width:480px){.card .apply,.card .ghost.go,.selbar .apply,.things .apply{width:100%}.acts{flex-direction:column;align-items:stretch}}
 `;
 const hidden = (token: string, action: string, extra = "") => `<input type="hidden" name="t" value="${esc(token)}"><input type="hidden" name="action" value="${action}">${extra}`;
 const logoOf = (r: Row) => `<span class="logo"><span class="lettermark" aria-hidden="true">${esc(initialOf(r.job.company))}</span>${r.logo ? `<img src="${esc(r.logo)}" alt="${esc(r.job.company)} logo" width="48" height="48" loading="lazy" referrerpolicy="no-referrer">` : ""}</span>`;
@@ -87,17 +93,21 @@ function card(r: ResultRow, f: ResultsFeed): string {
   const more = `<details><summary>Full posting</summary>${r.full ? `<p class="full">${esc(r.full)}</p>` : `<p class="full">The full posting text isn't on file.</p>`}</details>`;
   const open = host ? `<p class="open"><a href="${esc(link)}" rel="noopener noreferrer">Open on ${esc(host)}</a></p>` : "";
   const label = `${esc(j.title)} at ${esc(j.company)}`;
+  // What will be sent: only a prepared application has one, and it is what the Apply on this card approves.
+  const sendRows = !r.status && r.send?.length ? r.send : null;
+  const sends = sendRows ? `<details class="send"><summary>What will be sent</summary><dl class="facts">${sendRows.map((x) => `<dt>${esc(x.label)}</dt><dd>${x.needs ? "<strong>Needs you</strong>" : esc(x.value)}</dd>`).join("")}${r.tag ? `<dt>Application</dt><dd>${esc(r.tag)}</dd>` : ""}</dl></details>` : "";
   let acts = "";
-  if (r.status) acts = chip(r.status);
-  else if (r.byHand) acts = link ? `<a class="ghost go" href="${esc(link)}" rel="noopener noreferrer">Apply there</a>` : ""; // secondary: one plum action per page
+  if (r.status) acts = chip(r.status) + (r.status.word === "preparing" ? `<a class="ghost go" href="?#r-${esc(r.ref)}">Refresh</a>` : "");
+  else if (r.byHand) acts = link ? `<a class="ghost go" href="${esc(link)}" rel="noopener noreferrer">Apply there</a>` : "";
   else if (!r.blocked) {
     const tag = r.tag ?? "none";
     acts = `<label class="pick"><input type="checkbox" form="sel" name="pick" value="${esc(`${r.ref}:${tag}`)}" aria-label="Select ${label}"> Select</label>`
-      + `<form method="post" class="go">${hidden(f.token, "review", `<input type="hidden" name="ref" value="${esc(r.ref)}"><input type="hidden" name="tag" value="${esc(tag)}">`)}<button type="submit" class="ghost go" aria-label="Apply to ${label}">Apply</button></form>`;
+      + `<form method="post" class="go">${hidden(f.token, "apply", `<input type="hidden" name="ref" value="${esc(r.ref)}"><input type="hidden" name="tag" value="${esc(tag)}">`)}<button type="submit" class="apply" aria-label="Apply to ${label}">Apply</button></form>`;
   }
+  const guide = !r.status && !r.byHand && !r.blocked && r.guide ? `<p class="guide">${esc(r.guide)}${r.openQs ? ` <a href="?things=${esc(r.ref)}">Answer them now</a>` : ""}</p>` : "";
   const note = f.notes?.[r.ref] ?? r.note;
-  const said = note ? `<p class="note" role="status">${esc(note)}</p>` : r.status ? `<p class="note">${esc(r.status.detail)}</p>` : r.byHand ? `<p class="note">Not applied for automatically on this site.</p>` : r.blocked ? `<p class="note">Not offered: ${esc(r.blocked)}</p>` : "";
-  return `<li class="card" id="r-${esc(r.ref)}"><div class="head">${logoOf(r)}<div class="ttl"><h3 class="title">${esc(j.title)}</h3><p class="co">${esc(j.company)}</p></div></div>${facts}${fit}${open}${more}${acts ? `<div class="acts">${acts}</div>` : ""}${said}</li>`;
+  const said = note ? `<p class="note" role="status">${esc(note)}</p>` : r.status ? `<p class="note">${esc(r.status.word === "preparing" ? r.guide || "Getting your application ready. Nothing has been sent." : r.status.detail)}</p>` : r.byHand ? `<p class="note">Not applied for automatically on this site.</p>` : r.blocked ? `<p class="note">Not offered: ${esc(r.blocked)}</p>` : "";
+  return `<li class="card" id="r-${esc(r.ref)}"><div class="head">${logoOf(r)}<div class="ttl"><h3 class="title">${esc(j.title)}</h3><p class="co">${esc(j.company)}</p></div></div>${facts}${fit}${open}${more}${sends}${guide}${acts ? `<div class="acts">${acts}</div>` : ""}${said}</li>`;
 }
 
 export function renderResults(f: ResultsFeed): string {
@@ -106,7 +116,7 @@ export function renderResults(f: ResultsFeed): string {
   const payOpts: [string, string][] = [["any", "Any pay"], ...(floor ? [["meets", `Lists ${floor} or more`] as [string, string]] : []), ["listed", "Lists pay"]];
   const filters = `<form method="get" class="filters" role="search"><label>Pay${sel("pay", f.filters.pay, payOpts)}</label><label>Where${sel("where", f.filters.where, [["", "Anywhere"], ["remote", "Remote"], ...f.places.map((p) => [p, p] as [string, string])])}</label><button type="submit" class="ghost">Show</button></form>`;
   const canPick = f.rows.some(approvable);
-  const selbar = canPick ? `<div class="selbar"><form method="post" id="sel">${hidden(f.token, "review_sel")}<button type="submit" class="apply">Apply to selected</button></form><p>Tick the roles you want, then review them together.</p></div>` : "";
+  const selbar = canPick ? `<div class="selbar"><form method="post" id="sel">${hidden(f.token, "applysel")}<button type="submit" class="apply">Apply to selected</button></form><p>Tick the roles you want. Ones that are ready go in one tap; the rest say what they need.</p></div>` : "";
   const meets = f.rows.filter((r) => r.payGroup === "meets"), unchecked = f.rows.filter((r) => r.payGroup === "unchecked"), unlisted = f.rows.filter((r) => r.payGroup === "unlisted"), below = f.rows.filter((r) => r.payGroup === "below");
   const group = (title: string, note: string, rows: ResultRow[]) => rows.length ? `<h2 class="group">${esc(title)} (${rows.length})</h2>${note ? `<p class="groupnote">${esc(note)}</p>` : ""}<ul class="cards">${rows.map((r) => card(r, f)).join("")}</ul>` : "";
   const body = f.rows.length
@@ -120,22 +130,29 @@ export function renderResults(f: ResultsFeed): string {
   const head = f.madeFor
     ? `<p class="made">${esc(f.madeFor)}</p><h1>${esc(cap1(f.title))}</h1>${stampHtml(f.stamp ?? null)}${f.caveat ? `<p class="caveat">${esc(f.caveat)}</p>` : ""}`
       + (f.quick?.length ? `<section class="quick" aria-label="Quick read"><h2>Quick read</h2>${f.quick.map((q) => `<p>${esc(q)}</p>`).join("")}</section>` : "")
-    : `<p class="eyebrow">Your results</p><h1>${esc(cap1(f.title))}</h1>${stampHtml(f.stamp ?? null)}<p class="lede">Sorted by fit to what you've confirmed. Pay is only what each posting lists. Nothing is sent until you approve it.</p>`;
+    : `<p class="eyebrow">Your results</p><h1>${esc(cap1(f.title))}</h1>${stampHtml(f.stamp ?? null)}<p class="lede">Sorted by fit to what you've confirmed. Pay is only what each posting lists. Nothing is sent until you tap Apply.</p>`;
   const inner = `<div id="root" class="results"><header>${BRAND}${head}${filters}${shown}${selbar}</header><main id="main">${top}${body}</main></div>`;
   return layout(`${cap1(f.title)} - Trainee`, inner, { css: CSS });
 }
 
-// ---------------------------------------------------------------- the review: the exact application(s), then Approve with the code
-export interface ReviewItem { ref: string; tag: string; title: string; company: string; send: { label: string; value: string; needs?: boolean }[] }
-export function renderReview(o: { token: string; items: ReviewItem[]; set: string | null; note?: string; codeSent?: boolean; canApprove: boolean; stamp?: string | null }): string {
-  const many = o.items.length > 1;
-  const carry = many ? o.items.map((i) => `<input type="hidden" name="pick" value="${esc(`${i.ref}:${i.tag}`)}">`).join("") + `<input type="hidden" name="set" value="${esc(o.set ?? "")}">`
-    : `<input type="hidden" name="ref" value="${esc(o.items[0].ref)}"><input type="hidden" name="tag" value="${esc(o.items[0].tag)}">`;
-  const cards = o.items.map((i) => `<li class="card"><div class="ttl"><h3 class="title">${esc(i.title)}</h3><p class="co">${esc(i.company)}</p></div><dl class="facts">${i.send.map((s) => `<dt>${esc(s.label)}</dt><dd>${s.needs ? "<strong>Needs you</strong>" : esc(s.value)}</dd>`).join("")}<dt>Application</dt><dd>${esc(i.tag)}</dd></dl></li>`).join("");
-  const note = o.note ? `<p class="top-note" role="status">${esc(o.note)}</p>` : "";
-  const code = o.canApprove ? `<div class="codebox"><form method="post">${hidden(o.token, "code_send", carry)}<p>${o.codeSent ? "We sent a 6-digit code to your Trainee chat." : "To approve, we send a 6-digit code to your Trainee chat (where you text Trainee)."}</p><button type="submit" class="ghost">${o.codeSent ? "Send a new code" : "Text me a code"}</button></form>`
-    + `<form method="post">${hidden(o.token, many ? "approve_sel" : "approve", carry)}<label for="code">Code from your chat</label><input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 -]{6,9}" maxlength="9" required><br><button type="submit" class="apply">${many ? `Approve and send all ${o.items.length}` : "Approve and send"}</button><p class="hint">Trainee never asks for a password, and never asks for this code in chat.</p></form></div>`
-    : `<p class="top-note">Approving here isn't switched on yet, so nothing can be sent from this page. Nothing was sent.</p>`;
-  const inner = `<div id="root" class="review"><header>${BRAND}<p class="eyebrow">Check before it goes</p><h1>${many ? `Check ${o.items.length} applications` : "Check your application"}</h1>${stampHtml(o.stamp ?? null)}<p class="lede">This is exactly what will be sent${many ? " for each" : ""}. If anything changes before you approve, nothing is sent and you'll see it again.</p></header><main id="main">${note}<ul class="cards">${cards}</ul>${code}<p><a class="back" href="?">Back to the list</a></p></main></div>`;
-  return layout(many ? "Check your applications - Trainee" : "Check your application - Trainee", inner, { css: CSS });
+// ---------------------------------------------------------------- "A few things first": the employer's open questions for one role
+// One labelled input per question: the employer's own options as radios (a select when there are many), yes/no as two choices,
+// else text. Nothing is pre-filled or defaulted. A question that needs a secret has no input at all.
+export interface ThingQuestion { id: string; label: string; options: string[]; kind: "choice" | "yesno" | "text" | "long" | "secret"; value?: string; error?: string }
+export function renderThings(o: { token: string; ref: string; title: string; company: string; link: string | null; questions: ThingQuestion[]; note?: string; stamp?: string | null }): string {
+  const field = (q: ThingQuestion) => {
+    const id = `q_${q.id}`, err = q.error ? `<p class="err" id="e_${esc(q.id)}" role="alert">${esc(cap1(q.error))}</p>` : "";
+    const radios = (opts: string[]) => opts.map((x, i) => `<label class="opt" for="${esc(id)}_${i}"><input type="radio" id="${esc(id)}_${i}" name="${esc(id)}" value="${esc(x)}"${q.value === x ? " checked" : ""}> ${esc(x)}</label>`).join("");
+    let ctl: string;
+    if (q.kind === "secret") ctl = `<p class="hand">Trainee never collects this. Type it yourself on the employer's site${o.link ? `: <a href="${esc(o.link)}" rel="noopener noreferrer">${esc(hostOf(o.link))}</a>` : ""}.</p>`;
+    else if (q.kind === "yesno") ctl = radios(["Yes", "No"]);
+    else if (q.kind === "choice") ctl = q.options.length > 6 ? `<select id="${esc(id)}" name="${esc(id)}"><option value="">Choose one</option>${q.options.map((x) => `<option value="${esc(x)}"${q.value === x ? " selected" : ""}>${esc(x)}</option>`).join("")}</select>` : radios(q.options);
+    else if (q.kind === "long") ctl = `<textarea id="${esc(id)}" name="${esc(id)}" rows="5" maxlength="2000">${esc(q.value ?? "")}</textarea>`;
+    else ctl = `<input type="text" id="${esc(id)}" name="${esc(id)}" maxlength="2000" value="${esc(q.value ?? "")}">`;
+    return `<fieldset${q.error ? ` aria-describedby="e_${esc(q.id)}"` : ""}><legend>${esc(q.label)}</legend>${ctl}${err}</fieldset>`;
+  };
+  const askable = o.questions.some((q) => q.kind !== "secret");
+  const inner = `<div id="root" class="things"><header>${BRAND}<p class="eyebrow">A few things first</p><h1>${esc(o.title)} at ${esc(o.company)}</h1>${stampHtml(o.stamp ?? null)}<p class="lede">The employer asks these. Your answers are saved as typed, nothing is guessed, and nothing is sent from this page.</p></header>`
+    + `<main id="main">${o.note ? `<p class="top-note" role="status">${esc(o.note)}</p>` : ""}<form method="post">${hidden(o.token, "answer", `<input type="hidden" name="ref" value="${esc(o.ref)}">`)}${o.questions.map(field).join("")}${askable ? `<button type="submit" class="apply">Save answers</button>` : ""}</form><p><a class="back" href="?#r-${esc(o.ref)}">Back to the list</a></p></main></div>`;
+  return layout("A few things first - Trainee", inner, { css: CSS });
 }

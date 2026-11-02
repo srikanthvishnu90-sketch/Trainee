@@ -17,12 +17,15 @@ import { FILE_TTL_MS, verifyFileToken, type FileClaims } from "../_shared/file_l
 import { checkSession, CLEAR_LOGIN, CLEAR_SESSION, codeOf, LOGIN_TTL_MS, loginCookie, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, PAGE_TOKEN, pageTokenOf, sameToken, SESSION_ID, sessionCookie, sha256, startSession, type PhoneAuth, type SessionCheck, type SessionStore } from "../_shared/file_session.ts";
 import { verifyInitData } from "../_shared/telegram_webapp.ts";
 import { BOOT_SCRIPT, cut, FEED_SCRIPT, fullOf, hostOf, renderBootstrap, renderFeed, renderLinkState, renderPhoneLogin, renderPreview, renderText, signOutFoot, snippetOf, statusOf, type AppRow, type Feed, type Row } from "../_shared/file_page.ts";
-import { dayOf, BRAND, esc, layout, postedLine } from "../_shared/file_page.ts";
+import { dayOf, BRAND, esc, layout, postedLine, webUrl } from "../_shared/file_page.ts";
 import { actOn, bodyHtml, COPY_SCRIPT, KIND_CSS, KIND_LABEL, textOf, type Effects, type FileRecord } from "../_shared/file_kinds.ts";
 import type { FileService } from "../_shared/file_service.ts";
-import { renderResults, renderReview, type PayFilter, type ResultRow, type ReviewItem } from "../_shared/results_page.ts";
+import { renderResults, renderThings, type PayFilter, type ResultRow, type ThingQuestion } from "../_shared/results_page.ts";
 import { conversionNote, floorText, type Pay, payGroup, payText, startsBelow } from "../_shared/role_pay.ts";
-import type { ApprovalCodes } from "../_shared/approval_code.ts";
+import { checkAnswer, type OpenQuestion, type QuestionStore } from "../_shared/career_apply_questions.ts";
+import { type PendingRow, pendingLine } from "../_shared/career_hosted_prepare.ts";
+import { factType, NEVER_BY_TEXT } from "../_shared/question_map.ts";
+import { decodeRowQuestionType } from "../_shared/row_answer.ts";
 import { freshnessStamp } from "../_shared/results_stamp.ts";
 import type { ListMeta } from "../_shared/telegram_jobs.ts";
 import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, logoUrl, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
@@ -45,9 +48,14 @@ export interface FileDeps extends Omit<JobDeps, "store"> {
   files?: FileService; // the other file kinds (introduction, proof, plan, comparison, draft, brief); an id not found there is a jobs list
   fileEffects?: Effects; // what Introduce really does (send); absent, an approved introduction says it was not sent
   timeZone?: (userId: string) => Promise<string | null>; // the person's own zone (dates on the page are their day); absent or unknown, Chicago, said
-  // The approval code sent to the person's own chat (approval_code.ts): a results list approves only with it. Absent: a results
-  // list shows the exact application and approves nothing.
-  codes?: ApprovalCodes;
+  // The employer's open questions (career_apply_questions): a results card that isn't ready asks them on "A few things first", and
+  // answers are checked (checkAnswer) and saved (store.answer) exactly as the chat saves them. Absent: the page asks nothing.
+  questions?: QuestionStore;
+  // Prepare the person's queued applications again now that their questions are answered (career_hosted_prepare.ts). Absent: they
+  // wait in the queue and the page says so.
+  reprepare?: (userId: string) => Promise<"started" | "failed" | "off" | "skipped">;
+  // Where each queued posting stands (career_apply_pending_for), in the person's words. Absent: "getting it ready".
+  pending?: (userId: string) => Promise<PendingRow[] | null>;
   // Every phone step (number, code) answers only after this resolves, given how long the step took: deps.ts pads to a floor
   // (file_session.ts PHONE_STEP_FLOOR_MS) so time cannot tell whether the typed number is the account's. Absent: no padding.
   pace?: (step: "phone_start" | "phone_verify", elapsedMs: number) => Promise<void>;
@@ -318,7 +326,7 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   const action = req.method === "POST" ? (fields.get("action") ?? "") : "";
   // A tap that reaches an ended sign-in says what became of it: nothing was approved (file journey round 2: an Apply after the session
   // expired or was signed out elsewhere only said "You were signed out", leaving whether it went unsaid).
-  const tapped = action === "apply" || action === "applyall" ? ["Nothing was approved or sent from this tap."] : [];
+  const tapped = action === "apply" || action === "applyall" || action === "applysel" || action === "answer" ? ["Nothing was approved or sent from this tap."] : [];
   const signedOut = (why: string) => why === "error" ? state("Couldn't open this just now", ["Nothing was sent. Try again in a minute."], 503)
     : why === "expired" ? state("You were signed out", [...tapped, "Sign-ins last two hours. " + NEW_LINK], 401)
     : why === "revoked" || why === "unbound" ? state("You were signed out", [...tapped, "This sign-in was ended. " + NEW_LINK], 401)
@@ -513,14 +521,13 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
     const g = await d.files.get(u, claims.r).catch(() => null);
     if (g && g.state !== "missing") return handleKind({ g, d, claims, token, action, fields, req, html, text, state });
   }
-  // A results list (a role-and-pay ask from a texting channel, role_results.ts): Apply shows the exact application, and Approve
-  // needs the code from the person's chat.
-  // Unreadable is not "a plain list": the page then offers nothing (a results list must never fall back to one-tap approval).
+  // A results list (a role ask, role_results.ts): Apply on a prepared card approves what its "What will be sent" shows; on a card
+  // that isn't ready it asks for what's missing. Unreadable is not "a plain list": the page then offers nothing.
   let meta: ListMeta | null = null;
   if (d.store.recallListMeta) {
     try { meta = await d.store.recallListMeta(u, claims.r); } catch { return state("Couldn't open this just now", ["Nothing was opened and nothing was sent. Try again in a minute."], 503); }
   }
-  if (meta) return handleResults({ meta, d, claims, token, idHash: s.idHash, action, fields, url, req, html, text, state });
+  if (meta) return handleResults({ meta, d, claims, token, action, fields, url, req, html, text, state });
   const notes: Record<string, string> = {};
   let top: string | undefined;
 
@@ -602,36 +609,31 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
 }
 export { FILE_TTL_MS, hostOf };
 
-// ---------------------------------------------------------------- a results list: review the exact application, approve with the chat code
+// ---------------------------------------------------------------- a results list: one black Apply per card
 const PAY_FILTERS = new Set<PayFilter>(["any", "meets", "listed"]);
 const placeOf = (j: JobView) => {
   const parts = [j.location, j.remote === "remote" ? "Remote" : j.remote === "hybrid" ? "Hybrid" : j.remote === "onsite" ? "On-site" : ""].filter(Boolean);
   return parts.filter((w, i) => parts.findIndex((x) => x.toLowerCase() === w.toLowerCase()) === i).join(" · ");
 };
-// What a code approves: exactly these rows, each with the payload tag shown, named in the chat message.
-const scopeOf = (rows: Row[]) => ({ items: rows.map((r) => ({ ref: r.ref, tag: r.tag!, label: `${r.job.company} — ${r.job.title}` })) });
-const SEND_WORDS: Record<"too_many" | "not_sent" | "locked", string> = {
-  too_many: "That's the most codes for now. Use the latest one, or open a new link later.",
-  not_sent: "The code couldn't be sent just now. Nothing was sent. Try again in a minute.",
-  locked: "Too many wrong codes in the last 10 minutes, so no new code was sent. Wait, then try again.",
+const CHANGED = "Changed since you opened this page, so nothing was sent.";
+const SENT = "Approved. It's queued to be sent exactly as its card showed; the status here changes when the employer's site confirms it.";
+// How a question is asked: the employer's options, yes or no, a longer answer, or text. A secret (password, code, ID or bank number)
+// is never asked: the person does it on the employer's site.
+const kindOf = (q: OpenQuestion): ThingQuestion["kind"] => {
+  if (NEVER_BY_TEXT.test(q.label)) return "secret";
+  if (q.options.length) return "choice";
+  const type = decodeRowQuestionType(q.type)?.type ?? q.type;
+  if (/checkbox|boolean/.test(type) || q.kind === "consent" || (q.key.startsWith("fact:") && factType(q.key.slice(5)) === "yesno")) return "yesno";
+  return q.kind === "essay" ? "long" : "text";
 };
-const selHash = async (picks: { ref: string; tag: string }[]) => (await sha(`sel1|${picks.map((p) => `${p.ref}:${p.tag}`).sort().join(",")}`)).slice(0, 16);
-const CODE_WORDS: Record<string, string> = {
-  wrong: "That code didn't work, so nothing was sent. Check the latest code in your chat and try again.",
-  expired: "That code has expired, so nothing was sent. Get a new code and try again.",
-  locked: "Too many wrong codes, so nothing was sent. Wait 10 minutes, then get a new code.",
-  scope: "That code was sent for a different selection, so nothing was sent. Get a code for exactly what's on this page.",
-  used: "That code was already used, so nothing was sent. Get a new code and try again.",
-  none: "Get a code first: nothing was sent.",
-};
+const qsFor = (all: OpenQuestion[] | null, r: Row) => (all ?? []).filter((q) => q.job_ids.includes(r.job.job_id));
 
-async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaims; token: string; idHash: string; action: string; fields: URLSearchParams; url: URL; req: Request;
+async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaims; token: string; action: string; fields: URLSearchParams; url: URL; req: Request;
   html: (b: string, s?: number, e?: Record<string, string>) => Promise<Response>; text: (b: string, s?: number) => Promise<Response>; state: (t: string, p: string[], s: number) => Promise<Response> }): Promise<Response> {
   const { meta, d, claims, token, action, fields } = o, u = claims.u;
   const floor = meta.floor ? { amount: meta.floor.amount, period: meta.floor.period } : null;
   const notes: Record<string, string> = {};
   let top: string | undefined;
-  const reviewItem = (r: Row): ReviewItem => ({ ref: r.ref, tag: r.tag!, title: r.job.title, company: r.job.company, send: r.send ?? [] });
   // The one checked-at line under each page's title: when the postings shown were last seen live on their boards (career_postings
   // .last_seen_at), in the person's zone; none known (or unreadable): "Check time unknown", never an invented time.
   const tzOf = async () => d.timeZone ? await d.timeZone(u).catch(() => null) : null;
@@ -640,71 +642,97 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
     const seen = ids.length ? await d.store.postings(ids).catch(() => [] as PostingRow[]) : [];
     return freshnessStamp("Postings checked", seen.filter((p) => ids.includes(p.job_id)).map((p) => p.last_seen_at), { now: d.now(), tz: await tzOf() });
   };
-  const review = async (rows: Row[], note?: string, codeSent?: boolean) =>
-    o.html(renderReview({ token, items: rows.map(reviewItem), set: rows.length > 1 ? await selHash(rows.map((r) => ({ ref: r.ref, tag: r.tag! }))) : null, note, codeSent, canApprove: !!d.codes, stamp: await stampOf(rows) }));
-  // One row, judged now against the page as it is (the same screen the list ran): the row, or why nothing goes for it. An
-  // unprepared row is queued to be prepared (nothing is sent by that), and says so.
-  const gate = async (feed: Feed | null, ref: string, tag: string): Promise<{ row: Row } | { note: string }> => {
+  const readQs = async () => d.questions ? await d.questions.open(u, 500).catch(() => null) : null;
+  const thingsPage = async (row: Row, qs: OpenQuestion[], o2: { errs?: Record<string, string>; vals?: Record<string, string>; note?: string } = {}) =>
+    o.html(renderThings({ token, ref: row.ref, title: row.job.title, company: row.job.company, link: webUrl(row.job.url), stamp: await stampOf([row]), note: o2.note,
+      questions: qs.map((q) => ({ id: q.id, label: q.label, options: q.options, kind: kindOf(q), value: o2.vals?.[q.id], error: o2.errs?.[q.id] })) }));
+  // One row, judged now against the page as it is (the same screen the list ran): the row to approve, the questions it still needs
+  // answered, or why nothing goes for it. An unprepared row with no questions is queued to be prepared (nothing is sent by that).
+  type Gate = { row: Row } | { note: string } | { things: Row; qs: OpenQuestion[] };
+  const gate = async (feed: Feed | null, ref: string, tag: string, all: OpenQuestion[] | null): Promise<Gate> => {
     const row = feed?.rows.find((r) => r.ref === ref);
     if (!row) return { note: "This job isn't on this list any more. Nothing was sent." };
-    if (row.status) return { note: row.inApps ? `Already in your applications, so nothing more was sent. ${row.status.detail}` : `Nothing was approved: ${row.status.detail}` };
+    const asking = !row.byHand && !row.blocked && !row.tag && (!row.status || row.status.word === "preparing") ? qsFor(all, row) : [];
+    if (row.status && !asking.length) return { note: row.inApps ? `Already in your applications, so nothing more was sent. ${row.status.detail}` : `Nothing was approved: ${row.status.detail}` };
     if (row.byHand) return { note: "Not applied for automatically on this site. Open it and apply there yourself." };
     if (row.blocked) return { note: `Nothing was approved: ${row.blocked}` };
-    if (tag === "none" && !row.tag) {
+    if (!row.tag) {
+      if (tag !== "none") return { note: CHANGED };
+      if (asking.length) return { things: row, qs: asking };
       const w = await d.store.want(u, row.job, d.now()).catch(() => ({ result: "refused" as const, reason: "I couldn't save that just now." }));
-      return { note: w.result === "refused" ? `Not queued: ${w.reason ?? "I can't open that posting's application form yet."}` : "Getting your application ready. Nothing is sent until you check it and approve it here. Refresh in a minute." };
+      return { note: w.result === "refused" ? `Not queued: ${w.reason ?? "I can't open that posting's application form yet."}` : "Getting your application ready. Nothing is sent until you check it here and tap Apply. Refresh in a minute." };
     }
-    if (!/^[0-9a-f]{16}$/.test(tag) || tag !== row.tag) return { note: "Changed since you opened this page, so nothing was sent." };
+    if (!/^[0-9a-f]{16}$/.test(tag) || tag !== row.tag) return { note: CHANGED };
     return { row };
   };
   const picks = () => [...new Set(fields.getAll("pick"))].slice(0, MAX_ROWS).map((p) => { const [ref = "", tag = ""] = p.split(":"); return { ref, tag }; });
-  const many = action === "review_sel" || action === "approve_sel" || (action === "code_send" && !fields.has("ref"));
+
+  // A GET only shows: the questions of one role, drawn for the person to fill in. It saves and sends nothing.
+  const thingsRef = o.req.method === "GET" ? o.url.searchParams.get("things") : null;
+  if (thingsRef) {
+    const feed = await loadFeed(claims, token, d), all = await readQs(), row = feed?.rows.find((r) => r.ref === thingsRef);
+    const qs = row ? qsFor(all, row) : [];
+    if (row && qs.length && !row.byHand && !row.blocked && !row.tag) return thingsPage(row, qs);
+    top = "Nothing is waiting on you for that role. Nothing was sent.";
+  }
 
   if (action) {
-    const known = ["review", "review_sel", "code_send", "approve", "approve_sel", "refresh", "apply", "applyall"];
-    if (!known.includes(action)) return o.state("Not done", ["That is not something this page can do. Nothing was sent."], 400);
-    // The one-tap approvals of the plain jobs list do not exist here: every application is shown first and approved with the code.
-    if (action === "apply" || action === "applyall") top = "Apply opens the exact application first, and you approve it with a code from your chat. Nothing was sent.";
-    else if (action === "refresh") { /* a fresh read below */ }
-    else if (!many) {
+    if (!["apply", "applysel", "answer", "refresh"].includes(action)) return o.state("Not done", ["That is not something this page can do. Nothing was sent."], 400);
+    if (action === "refresh") { /* a fresh read below */ }
+    else if (action === "apply") {
       const ref = fields.get("ref") ?? "", tag = fields.get("tag") ?? "";
-      const g = await gate(await loadFeed(claims, token, d), ref, tag);
+      const g = await gate(await loadFeed(claims, token, d), ref, tag, await readQs());
+      if ("things" in g) return thingsPage(g.things, g.qs);
       if ("note" in g) notes[ref] = g.note;
-      else if (action === "review") return review([g.row]);
-      else if (!d.codes) return review([g.row]);
-      else if (action === "code_send") {
-        const sent = await d.codes.send(u, o.idHash, d.now(), scopeOf([g.row])).catch(() => ({ ok: false as const, why: "not_sent" as const }));
-        return review([g.row], sent.ok ? undefined : SEND_WORDS[sent.why], sent.ok);
-      } else {
-        const c = await d.codes.check(u, o.idHash, fields.get("code"), d.now(), scopeOf([g.row])).catch(() => "none" as const);
-        if (c !== "ok") return review([g.row], CODE_WORDS[c], c === "wrong");
-        const n = await approveOne(u, ref, tag, d);
-        notes[ref] = n ?? "Approved. It's queued to be sent exactly as you checked it; the status here changes when the employer's site confirms it.";
-      }
-    } else {
+      else notes[ref] = (await approveOne(u, ref, tag, d)) ?? SENT;
+    } else if (action === "applysel") {
       const want = picks();
       if (!want.length) top = "Tick at least one role first. Nothing was sent.";
       else {
-        const feed = await loadFeed(claims, token, d);
-        const ok: Row[] = [];
-        for (const p of want) { const g = await gate(feed, p.ref, p.tag); if ("note" in g) notes[p.ref] = g.note; else ok.push(g.row); }
-        if (action === "review_sel") {
-          if (ok.length) return review(ok, ok.length < want.length ? `${want.length - ok.length} of the ${want.length} you ticked can't go from here; the list says why. Nothing was sent for them.` : undefined);
-          top = "None of the roles you ticked can be approved right now; each says why. Nothing was sent.";
-        // Every ticked row must still be what was shown. The code (not the set field, which a page can recompute) binds the approval
-        // to the exact selection it was sent for; the set field only keeps a code request to the review that was on screen.
-        } else if (ok.length !== want.length || (action === "code_send" && (await selHash(ok.map((r) => ({ ref: r.ref, tag: r.tag! })))) !== (fields.get("set") ?? ""))) {
-          top = "This selection changed since you checked it, so nothing was approved. Check it again.";
-        } else if (!d.codes) return review(ok);
-        else if (action === "code_send") {
-          const sent = await d.codes.send(u, o.idHash, d.now(), scopeOf(ok)).catch(() => ({ ok: false as const, why: "not_sent" as const }));
-          return review(ok, sent.ok ? undefined : SEND_WORDS[sent.why], sent.ok);
-        } else {
-          const c = await d.codes.check(u, o.idHash, fields.get("code"), d.now(), scopeOf(ok)).catch(() => "none" as const);
-          if (c !== "ok") return review(ok, CODE_WORDS[c], c === "wrong");
-          let failed = 0;
-          for (const r of ok) { const n = await approveOne(u, r.ref, r.tag!, d); if (n) { notes[r.ref] = n; failed++; } else notes[r.ref] = "Approved. It's queued to be sent exactly as you checked it."; }
-          top = failed ? `${ok.length - failed} of ${ok.length} approved; each says what happened.` : `All ${ok.length} approved and queued, each exactly as you checked it.`;
+        // Every ticked role is judged against the page as it is now; the ones that are ready go together, each bound to the exact
+        // payload tag its card showed. A role that isn't ready, or changed since, is skipped and says why.
+        const feed = await loadFeed(claims, token, d), all = await readQs();
+        const ready: Row[] = [];
+        let asked = 0;
+        for (const p of want) {
+          const g = await gate(feed, p.ref, p.tag, all);
+          if ("things" in g) { notes[p.ref] = "Needs a few answers first, so nothing was sent for it. Use Answer them now on its card."; asked++; }
+          else if ("note" in g) notes[p.ref] = g.note;
+          else ready.push(g.row);
+        }
+        let sent = 0;
+        for (const r of ready) { const n = await approveOne(u, r.ref, r.tag!, d); notes[r.ref] = n ?? SENT; if (!n) sent++; }
+        const skipped = want.length - sent - asked;
+        top = `${sent} of ${want.length} approved and queued, each exactly as its card showed.${asked ? ` ${asked} ${asked === 1 ? "needs" : "need"} a few answers first.` : ""}${skipped ? ` ${skipped} not approved; each says why.` : ""} Nothing else was sent.`;
+      }
+    } else {
+      // "A few things first": each answer is checked and saved the way the chat saves it; never guessed, defaulted or invented.
+      const ref = fields.get("ref") ?? "";
+      const feed = await loadFeed(claims, token, d), row = feed?.rows.find((r) => r.ref === ref), all = await readQs();
+      if (!row) top = "This job isn't on this list any more. Nothing was saved or sent.";
+      else if (!d.questions || !all) top = "I can't save answers from this page just now. Nothing was saved and nothing was sent.";
+      else {
+        const qs = qsFor(all, row), errs: Record<string, string> = {}, vals: Record<string, string> = {};
+        let saved = 0;
+        for (const q of qs) {
+          if (kindOf(q) === "secret") { errs[q.id] = "Trainee never collects this. Type it yourself on the employer's site."; continue; }
+          const raw = (fields.get(`q_${q.id}`) ?? "").trim();
+          vals[q.id] = raw;
+          const c = checkAnswer(q, raw);
+          if (!c.ok) { errs[q.id] = c.skip ? "needs an answer here (to leave it for later, go back to the list)" : c.why === "had no answer" ? "needs an answer" : c.why; continue; }
+          try { await d.questions.answer(u, q.id, c.value); saved++; } catch { errs[q.id] = "couldn't be saved just now; nothing was lost, try again"; }
+        }
+        const still = qs.filter((q) => errs[q.id]);
+        if (!qs.length) notes[ref] = "Nothing is waiting on you for this role now. Refresh to see where it stands.";
+        else if (still.length) return thingsPage(row, still, { errs, vals, note: saved ? `Saved ${saved} ${saved === 1 ? "answer" : "answers"}. These still need you; nothing was sent.` : "Nothing was saved yet, and nothing was sent." });
+        else {
+          // Every question for this role is answered: it goes back in the queue and is prepared again with the answers. A fresh
+          // card, with every exact answer, comes back here; nothing is sent until its Apply is tapped.
+          const w = await d.store.want(u, row.job, d.now()).catch(() => ({ result: "refused" as const, reason: "I couldn't queue it just now." }));
+          const r = d.reprepare ? await d.reprepare(u).catch(() => "failed" as const) : "off";
+          notes[ref] = w.result === "refused" ? `Saved. It wasn't queued to prepare: ${w.reason ?? "I can't open that posting's form yet."} Nothing was sent.`
+            : r === "started" ? "Saved. Getting your application ready with your answers. Refresh in a minute to see exactly what will be sent; nothing is sent until you tap Apply."
+            : "Saved. Preparing it again hasn't started yet; it waits in your queue. Refresh in a minute. Nothing is sent until you tap Apply.";
         }
       }
     }
@@ -714,12 +742,19 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   if (!feed) return o.state("This list is gone", ["It is no longer available. " + NEW_LINK], 404);
   if (o.req.method === "GET" && o.url.searchParams.get("format") === "text") return o.text(renderText(feed));
   const pf = o.url.searchParams.get("pay") as PayFilter, filters = { pay: PAY_FILTERS.has(pf) ? pf : "any" as PayFilter, where: (o.url.searchParams.get("where") ?? "").trim().slice(0, 80) };
-  const all: ResultRow[] = feed.rows.map((r) => {
+  const openNow = await readQs(), pend = d.pending ? await d.pending(u).catch(() => null) : null;
+  const all: ResultRow[] = feed.rows.map((r0) => {
     // The numbers stored with the role when the list was made; the display text is never read back (it is not the posting's words).
+    const asking = !r0.byHand && !r0.blocked && !r0.tag && (!r0.status || r0.status.word === "preparing") ? qsFor(openNow, r0).length : 0;
+    const r: Row = asking ? { ...r0, status: null } : r0;
+    const where = pend?.find((p) => p.url === r.job.url || p.posting_key === r.job.job_id);
+    const guide = asking ? `${asking} ${asking === 1 ? "question needs" : "questions need"} your answer first.`
+      : r.status?.word === "preparing" ? (where ? pendingLine(where) : null)
+      : !r.status && !r.byHand && !r.blocked && !r.tag ? "Not prepared yet. Tap Apply and I'll start getting it ready; nothing is sent." : null;
     const pay = (r.job.pay_parsed ?? null) as Pay | null, g = payGroup(pay, floor);
     const other = g === "unchecked" && pay ? (pay.currency !== "USD" ? `in ${pay.currency === "unknown" ? "a currency it doesn't name" : pay.currency}` : "no period stated") : null;
     const payNote = other && floor ? `${other}, not compared with your ${floorText(floor)}` : other ?? (g === "meets" && startsBelow(pay, floor) && floor ? `the range starts below ${floorText(floor)}` : null);
-    return { ...r, payShown: pay ? payText(pay) : null, payGroup: g, payNote, payConv: conversionNote(pay, floor), place: placeOf(r.job) };
+    return { ...r, payShown: pay ? payText(pay) : null, payGroup: g, payNote, payConv: conversionNote(pay, floor), place: placeOf(r.job), guide, openQs: asking };
   });
   const rows = all.filter((r) => (filters.pay === "meets" ? r.payGroup === "meets" : filters.pay === "listed" ? !!r.payShown : true)
     && (!filters.where ? true : filters.where === "remote" ? r.job.remote === "remote" || /\bremote\b/i.test(r.job.location) : r.job.location.toLowerCase().includes(filters.where.toLowerCase())));
@@ -750,7 +785,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   const quick = [
     best.length ? `Best ${best.length === 1 ? "match" : "matches"}: ${best.join("; ")}.` : all.length ? `Closest by fit: ${all[0].job.title} at ${all[0].job.company}.` : "",
     fl ? `${nMeets} of ${all.length} list ${fl} or more${nUnlisted ? `; ${nUnlisted} ${nUnlisted === 1 ? "doesn't" : "don't"} list pay` : ""}${nOther ? `; ${nOther} can't be compared` : ""}${nBelow ? `; ${nBelow} now list less` : ""}.` : `${all.length} ${all.length === 1 ? "role" : "roles"}, sorted by fit.`,
-    "Next: tap Apply to check a role's exact application, or tick several and use Apply to selected. Nothing is sent until you approve it with the code from your chat.",
+    "Next: open What will be sent on a role, then tap Apply. A role that isn't ready asks for what it needs first. Nothing is sent until you tap Apply.",
   ].filter(Boolean);
   return o.html(renderResults({ token, title, floor: fl, rows, total: all.length, filters, places, top, notes,
     madeFor: `Made for ${meta.name ?? "you"} · ${day}`, stamp: await stampOf(rows), caveat, quick }));

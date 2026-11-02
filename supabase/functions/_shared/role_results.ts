@@ -1,12 +1,13 @@
-// "I want X roles that pay $Y" on a texting channel (owner, 2026-11-01): the matches go into a hosted results page (the jobs
-// list file, trainee-file), the chat gets a short answer and the link. The page's Apply shows the exact application for approval
-// and approves through the same code-enforced path as every other Apply (trainee-file/handler.ts).
+// "I want X roles" (with or without a pay floor) on any channel (owner, 2026-11-01/02): the matches go into a hosted results page
+// (the jobs list file, trainee-file), the chat gets a short answer and the link as its own message. The page's Apply on a
+// prepared application approves exactly the "What will be sent" shown on its card, through the hash-bound path every other
+// Apply uses (trainee-file/handler.ts).
 //
 // The list is written here, by code, from the search's own rows: ordered by fit (career_search.ts ranks by fit to CONFIRMED
 // facts), roles whose listed pay reaches the floor first, then the roles that list no pay (a separate group, never counted as
 // meeting it). A role whose listed pay is below the floor is not on the list. Nothing about pay is invented.
 import { jobViewOf, refOf, type JobStore, type ListMeta, type PostingRow } from "./telegram_jobs.ts";
-import { type Floor, parsePay, type Pay, payGroup, payText, resultsReply, type What } from "./role_pay.ts";
+import { type Floor, parsePay, type Pay, payGroup, payText, resultsParts, type What } from "./role_pay.ts";
 import type { SearchHit } from "./career_search.ts";
 import type { SourcePosting } from "./career_search_judge.ts";
 import type { Limits } from "./posting_constraints.ts";
@@ -29,7 +30,7 @@ export async function resultsFile(o: {
   userId: string; now: number; what: What; floor: Floor | null; picked: Picked[]; store: JobStore;
   name?: string | null; source?: "live" | "snapshot" | null; read?: string | null;
   links: (userId: string, listId: string) => Promise<{ url: string | null }>;
-}): Promise<{ reply: string; listId: string; url: string; meets: number; unlisted: number; unchecked: number; otherCurrency: number; noPeriod: number; below: number } | null> {
+}): Promise<{ reply: string; parts: string[]; listId: string; url: string; meets: number; unlisted: number; unchecked: number; otherCurrency: number; noPeriod: number; below: number } | null> {
   if (!o.store.rememberListMeta) return null;
   const meets: Picked[] = [], unlisted: Picked[] = [], unchecked: Picked[] = [];
   let below = 0;
@@ -68,5 +69,6 @@ export async function resultsFile(o: {
   const shownUnchecked = ordered.filter((p) => unchecked.includes(p));
   const otherCurrency = shownUnchecked.filter((p) => pays.get(p.hit.job_id)?.currency !== "USD").length;
   const counts = { meets: Math.min(meets.length, ordered.length), unchecked: shownUnchecked.length, otherCurrency, noPeriod: shownUnchecked.length - otherCurrency, unlisted: ordered.filter((p) => unlisted.includes(p)).length };
-  return { reply: resultsReply({ what: o.what, floor: o.floor, meets: counts.meets, unlisted: counts.unlisted, otherCurrency: counts.otherCurrency, noPeriod: counts.noPeriod, url }), listId, url, below, ...counts };
+  const parts = resultsParts({ what: o.what, floor: o.floor, meets: counts.meets, unlisted: counts.unlisted, otherCurrency: counts.otherCurrency, noPeriod: counts.noPeriod, url });
+  return { reply: parts.join("\n"), parts, listId, url, below, ...counts };
 }

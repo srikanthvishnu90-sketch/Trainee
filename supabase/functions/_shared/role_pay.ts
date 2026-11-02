@@ -111,18 +111,25 @@ export function conversionNote(p: Pay | null, floor: Floor | null): string | nul
 export const floorText = (f: Floor) => f.period === "hour" ? `$${money(f.amount)}/hr` : f.amount >= 1000 ? `$${thousands(f.amount)}k` : `$${money(f.amount)}/yr`;
 
 // ---------------------------------------------------------------- the reply on a texting channel
-// SMS, iMessage and WhatsApp (reqs Q74, Q584, Q585, Q620): plain text only (no markdown, no bullets, no bold), one or two short
-// sentences that answer on their own, then the link alone on its own line, introduced by the sentence before it.
+// Every channel (reqs Q74, Q584, Q585, Q620; owner 2026-11-02): plain text only (no markdown, no bullets, no bold), one or two short
+// sentences that answer on their own, then the link alone as its own message.
 export const TEXTING = new Set(["sms", "imessage", "whatsapp"]);
 export interface What { one: string; many: string }
 // Counts: meets (listed pay reaches the floor), unlisted (no pay), otherCurrency, noPeriod (each shown, never compared), and
 // unchecked (either of the last two, when the caller can't tell which). Every role found is counted, each with its true reason.
-export function resultsReply(o: { what: What; floor: Floor | null; meets: number; unlisted: number; otherCurrency?: number; noPeriod?: number; unchecked?: number; url: string }): string {
+// The reply as separate messages, on every channel (owner, 2026-11-02): one or two plain sentences, then the link ALONE in its own message.
+export const resultsReply = (o: Parameters<typeof resultsParts>[0]): string => resultsParts(o).join("\n");
+export function resultsParts(o: { what: What; floor: Floor | null; meets: number; unlisted: number; otherCurrency?: number; noPeriod?: number; unchecked?: number; url: string }): string[] {
   const oc = o.otherCurrency ?? 0, np = o.noPeriod ?? 0, un = o.unchecked ?? 0;
   const total = o.meets + o.unlisted + oc + np + un;
   const n = (k: number) => `${k} ${k === 1 ? o.what.one : o.what.many}`;
-  const tail = total === 1 ? `Here it is, with Apply on it:\n${o.url}` : `Here they are by fit, with Apply on each:\n${o.url}`;
-  if (!o.floor) return `I found ${n(total)}. ${tail}`;
+  const tail = total === 1 ? "Here it is, with Apply on it." : "Here they are by fit, with Apply on each.";
+  if (!o.floor) {
+    // No pay floor asked: still honest about how many list pay (a figure in another currency or without a period is listed pay too).
+    const listed = o.meets + oc + np + un;
+    const pay = !o.unlisted ? (total > 1 ? ", and all of them list pay" : ", and it lists pay") : !listed ? (total > 1 ? ", but none of them list pay" : ", but it doesn't list pay") : `: ${listed} ${listed === 1 ? "lists" : "list"} pay and ${o.unlisted} ${o.unlisted === 1 ? "doesn't" : "don't"}`;
+    return [`I found ${n(total)}${pay}. ${tail}`, o.url];
+  }
   const fl = floorText(o.floor);
   const reasons = ([[o.unlisted, "doesn't list pay", "don't list pay"], [oc, "lists pay in another currency", "list pay in another currency"],
     [np, "lists pay without saying per hour or per year", "list pay without saying per hour or per year"],
@@ -141,7 +148,7 @@ export function resultsReply(o: { what: What; floor: Floor | null; meets: number
     const joined = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
     first = `I found ${n(total)}: ${o.meets ? `${o.meets} ${lists(o.meets)} pay of ${fl} or more; ` : ""}${joined}, so I couldn't check ${checkless === 1 ? "that one" : `those ${checkless}`} against ${fl}.`;
   }
-  return `${first} ${tail}`;
+  return [`${first} ${tail}`, o.url];
 }
 // The reply may carry nothing a texting app would show as formatting: no markdown emphasis, headings, bullets or link syntax.
 export const MARKDOWN = /\*\*|__|^\s*[#>*-]\s|\[[^\]]*\]\([^)]*\)|`/m;

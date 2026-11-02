@@ -7,7 +7,8 @@ import { supabaseCardStore } from "../_shared/career_apply_cards.ts";
 import { supabaseAccountStamp, supabaseConfirmedFacts } from "../_shared/telegram_jobs.ts";
 import { supabaseFileStore, supabasePhoneAuth, supabaseSessionStore, supabaseTimeZone, supabaseUserOfTelegram } from "./store.ts";
 import { createFileService, supabaseFileKindStore } from "../_shared/file_service.ts";
-import { approvalCodes, supabaseChatSend, supabaseCodeStore } from "../_shared/approval_code.ts";
+import { supabaseQuestionStore } from "../_shared/career_apply_questions.ts";
+import { pendingRows, reprepareQueued } from "../_shared/career_hosted_prepare.ts";
 import type { FileDeps } from "./handler.ts";
 import { PHONE_STEP_FLOOR_MS, phonePace } from "../_shared/file_session.ts";
 
@@ -29,6 +30,8 @@ export function buildFileDeps(admin: any, env: FileDeps["env"], now: () => numbe
     pace: phonePace(PHONE_STEP_FLOOR_MS), background: edgeBackground,
     // The other file kinds. No fileEffects: until a sender is wired, an approved introduction honestly says it was not sent.
     files: createFileService({ store: supabaseFileKindStore(admin), env, now }),
-    // A results list's Approve: a one-time code queued to the person's own chat (career_outbox, delivered by trainee-deliver).
-    codes: approvalCodes(supabaseCodeStore(admin), supabaseChatSend(admin)) };
+    // A results card that isn't ready: the employer's open questions (asked on the page, saved the way the chat saves them), then
+    // the queued applications prepared again, and where each one stands.
+    questions: supabaseQuestionStore(admin), reprepare: (userId) => reprepareQueued({ admin, userId, env, fetch: globalThis.fetch.bind(globalThis) }),
+    pending: (userId) => pendingRows(admin, userId) };
 }

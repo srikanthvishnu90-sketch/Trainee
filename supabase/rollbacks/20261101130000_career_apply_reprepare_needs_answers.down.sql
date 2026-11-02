@@ -6,6 +6,8 @@ do $d$ begin
  end if;
 end $d$;
 drop trigger if exists career_apply_reprepare_on_needs_answers on public.career_apply_jobs;
+drop trigger if exists career_apply_history_approval_guard on public.career_apply_jobs;
+drop function if exists public.career_apply_history_approval_guard();
 drop function if exists public.career_apply_reprepare_on_needs_answers();
 alter table public.career_apply_jobs add constraint career_apply_jobs_user_id_job_id_key unique (user_id, job_id);
 drop index if exists public.career_apply_jobs_live_posting;

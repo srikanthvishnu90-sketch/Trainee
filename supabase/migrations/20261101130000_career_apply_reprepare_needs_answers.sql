@@ -26,6 +26,7 @@
 --      (career_apply_cloud_text_refusal 'went'), so a history row (not_submitted) never counted.
 --   6. The re-preparation is asked with the person's own pace (career_apply_daily_limit, null when none is set), as the
 --      runner's door asks it; the dispatcher's claim still applies the runner's per-person number too.
+--   7. An approval already bound to a history row is refused on any new row (career_apply_history_approval_guard).
 -- Additive and reversible (supabase/rollbacks/20261101130000_career_apply_reprepare_needs_answers.down.sql). Idempotent.
 
 create or replace function public.career_apply_job_history(j public.career_apply_jobs) returns boolean
@@ -60,6 +61,25 @@ revoke all on function public.career_apply_reprepare_on_needs_answers() from pub
 drop trigger if exists career_apply_reprepare_on_needs_answers on public.career_apply_jobs;
 create trigger career_apply_reprepare_on_needs_answers after update of state on public.career_apply_jobs
  for each row execute function public.career_apply_reprepare_on_needs_answers();
+
+-- 3b. An approval spent on a history row is never spent again: a new row whose payload, approval or engine approval is
+--     the same as a history row's of that person and posting is refused, whatever path inserts it (no user path does:
+--     the re-prepared application carries the new answer, so a new payload and a new approval).
+create or replace function public.career_apply_history_approval_guard() returns trigger
+language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+ if exists (select from public.career_apply_jobs x where x.user_id = new.user_id and x.job_id = new.job_id
+   and public.career_apply_job_history(x)
+   and (x.payload_hash = new.payload_hash or x.approval_hash = new.approval_hash
+    or nullif(x.payload->>'engine_approval', '') = nullif(new.payload->>'engine_approval', ''))) then
+  raise exception 'approval_spent: this approval was used by an application the form stopped; a new card and a new approval are needed';
+ end if;
+ return new;
+end $$;
+revoke all on function public.career_apply_history_approval_guard() from public, anon, authenticated;
+drop trigger if exists career_apply_history_approval_guard on public.career_apply_jobs;
+create trigger career_apply_history_approval_guard before insert on public.career_apply_jobs
+ for each row execute function public.career_apply_history_approval_guard();
 
 -- 4. The candidates: 20261101121000's text (a browser error is retried after 30 minutes, a refusal after 7 days), a history
 --    row and what is older than it not counted.

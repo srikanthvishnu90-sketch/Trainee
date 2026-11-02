@@ -47,7 +47,7 @@ export interface JobView {
   reasons: string[]; gaps: string[]; company_domain: string | null;
   // A results list's role (role_results.ts): the pay the posting states, as numbers, with its period, currency and own words. The
   // page renders from this, never by re-reading `pay` (which is display text).
-  pay_parsed?: { min: number; max: number; period: "hour" | "month" | "year" | null; currency: string; text: string } | null;
+  pay_parsed?: { min: number; max: number; period: "hour" | "month" | "year" | null; currency: string; text: string; up_to?: boolean } | null;
 }
 export interface PostingRow {
   job_id: string; provider?: string | null; company?: string; title?: string; location?: string | null; url?: string; description?: string | null;

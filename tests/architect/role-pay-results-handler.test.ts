@@ -99,7 +99,7 @@ Deno.test({ name: "results (handler): iMessage 'frontend internships that pay $3
   assert(/Pay \$35-40\/hr · listed on the posting/.test(p) && /Pay \$30\/hr · listed on the posting/.test(p), p);
   assert(/TEST Pay Quiet Pay Pay not listed/.test(p), "no pay invented");
   assert(!/TEST Pay Low/.test(p), "the $25/hr role is left out");
-  eq((html.match(/class="apply" aria-label="Apply to /g) ?? []).length, 3);
+  eq((html.match(/class="ghost go" aria-label="Apply to /g) ?? []).length, 3);
   // Apply on a role with no prepared application: queued to be prepared, nothing to send, nothing approved.
   const ref = html.split('<li class="card" id="r-').slice(1).find((c) => c.includes("TEST Pay Quiet"))!.slice(0, 12);
   const r = await handleFile(new Request(BASE, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ t: s, action: "review", ref, tag: "none" }).toString() }), d);

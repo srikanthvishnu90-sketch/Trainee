@@ -59,7 +59,7 @@ dl.facts dt{color:var(--mute)}dl.facts dd{margin:0;overflow-wrap:anywhere}dd.pai
 .card .open a{display:inline-flex;align-items:center;min-height:44px;color:var(--link);font-size:16px}
 .acts{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-top:14px}
 .pick{display:inline-flex;align-items:center;gap:10px;min-height:44px;font-size:16px;cursor:pointer}.pick input{width:22px;height:22px;accent-color:var(--accent)}
-.card form.go{margin:0}.card .apply{min-width:120px}
+.card form.go{margin:0}.card .ghost.go{min-width:120px;min-height:48px}
 .card .chip{min-height:44px}.card .note{margin:10px 0 0;font-size:16px;color:var(--ink)}
 .empty{margin:18px 0;padding:18px;border-radius:14px;background:var(--panel)}
 .review .card dl.facts{grid-template-columns:minmax(0,40%) 1fr}
@@ -68,7 +68,7 @@ dl.facts dt{color:var(--mute)}dl.facts dd{margin:0;overflow-wrap:anywhere}dd.pai
 .codebox input{width:100%;max-width:240px;min-height:48px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:20px;letter-spacing:.2em}
 .codebox .apply{margin-top:12px}.hint{font-size:15px;color:var(--mute)}
 .back{display:inline-flex;align-items:center;min-height:44px;color:var(--link);font-size:16px}
-@media (max-width:480px){.card .apply,.codebox .apply,.selbar .apply{width:100%}.acts{flex-direction:column;align-items:stretch}}
+@media (max-width:480px){.card .apply,.card .ghost.go,.codebox .apply,.selbar .apply{width:100%}.acts{flex-direction:column;align-items:stretch}}
 `;
 const hidden = (token: string, action: string, extra = "") => `<input type="hidden" name="t" value="${esc(token)}"><input type="hidden" name="action" value="${action}">${extra}`;
 const logoOf = (r: Row) => `<span class="logo"><span class="lettermark" aria-hidden="true">${esc(initialOf(r.job.company))}</span>${r.logo ? `<img src="${esc(r.logo)}" alt="${esc(r.job.company)} logo" width="48" height="48" loading="lazy" referrerpolicy="no-referrer">` : ""}</span>`;
@@ -93,7 +93,7 @@ function card(r: ResultRow, f: ResultsFeed): string {
   else if (!r.blocked) {
     const tag = r.tag ?? "none";
     acts = `<label class="pick"><input type="checkbox" form="sel" name="pick" value="${esc(`${r.ref}:${tag}`)}" aria-label="Select ${label}"> Select</label>`
-      + `<form method="post" class="go">${hidden(f.token, "review", `<input type="hidden" name="ref" value="${esc(r.ref)}"><input type="hidden" name="tag" value="${esc(tag)}">`)}<button type="submit" class="apply" aria-label="Apply to ${label}">Apply</button></form>`;
+      + `<form method="post" class="go">${hidden(f.token, "review", `<input type="hidden" name="ref" value="${esc(r.ref)}"><input type="hidden" name="tag" value="${esc(tag)}">`)}<button type="submit" class="ghost go" aria-label="Apply to ${label}">Apply</button></form>`;
   }
   const note = f.notes?.[r.ref] ?? r.note;
   const said = note ? `<p class="note" role="status">${esc(note)}</p>` : r.status ? `<p class="note">${esc(r.status.detail)}</p>` : r.byHand ? `<p class="note">Not applied for automatically on this site.</p>` : r.blocked ? `<p class="note">Not offered: ${esc(r.blocked)}</p>` : "";

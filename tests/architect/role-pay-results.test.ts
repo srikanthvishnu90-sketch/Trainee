@@ -86,7 +86,7 @@ Deno.test("page: one card per role (title, company, pay with its source or 'Pay 
   assert(/Where Austin, TX · Hybrid/.test(t) && /Posted 2 d ago/.test(t), t);
   assert(/Why it fits: You listed React and TypeScript\./.test(t), "the fit reason from confirmed facts");
   assert(html.includes('href="https://boards.greenhouse.io/acme/jobs/1"') && /Open on boards\.greenhouse\.io/.test(t), "the source link");
-  eq((html.match(/<button type="submit" class="apply" aria-label="Apply to /g) ?? []).length, 3, "an Apply on each card");
+  eq((html.match(/<button type="submit" class="ghost go" aria-label="Apply to /g) ?? []).length, 3, "an Apply on each card (secondary; Apply to selected is the primary)");
   eq((html.match(/type="checkbox" form="sel" name="pick"/g) ?? []).length, 3, "each card can be selected");
   assert(/<form method="post" id="sel">[\s\S]*Apply to selected/.test(html), "Apply to selected");
   assert(!/Hooli/.test(t), "below the floor: not on the page");
@@ -180,7 +180,7 @@ Deno.test("apply to selected: one review of exactly the ticked roles, one approv
   // A set that is not the one reviewed (a third role slipped in) approves nothing.
   const i = refIn(html, "UI Engineer Intern");
   const slipped = plain(await (await req(w, { body: { t: s, action: "approve_sel", pick: [...picks, `${i}:${tagOf(3)}`], set, code } })).text());
-  assert(/This selection changed since you checked it, so nothing was approved/.test(slipped), slipped);
+  assert(/That code was sent for a different selection, so nothing was sent/.test(slipped), slipped);
   eq(w.queue.length, 0);
   const done = plain(await (await req(w, { body: { t: s, action: "approve_sel", pick: picks, set, code } })).text());
   assert(/All 2 approved and queued, each exactly as you checked it/.test(done), done);

@@ -499,11 +499,19 @@ const placeOf = (j: JobView) => {
   const parts = [j.location, j.remote === "remote" ? "Remote" : j.remote === "hybrid" ? "Hybrid" : j.remote === "onsite" ? "On-site" : ""].filter(Boolean);
   return parts.filter((w, i) => parts.findIndex((x) => x.toLowerCase() === w.toLowerCase()) === i).join(" · ");
 };
+// What a code approves: exactly these rows, each with the payload tag shown, named in the chat message.
+const scopeOf = (rows: Row[]) => ({ items: rows.map((r) => ({ ref: r.ref, tag: r.tag!, label: `${r.job.company} — ${r.job.title}` })) });
+const SEND_WORDS: Record<"too_many" | "not_sent" | "locked", string> = {
+  too_many: "That's the most codes for now. Use the latest one, or open a new link later.",
+  not_sent: "The code couldn't be sent just now. Nothing was sent. Try again in a minute.",
+  locked: "Too many wrong codes in the last 10 minutes, so no new code was sent. Wait, then try again.",
+};
 const selHash = async (picks: { ref: string; tag: string }[]) => (await sha(`sel1|${picks.map((p) => `${p.ref}:${p.tag}`).sort().join(",")}`)).slice(0, 16);
 const CODE_WORDS: Record<string, string> = {
   wrong: "That code didn't work, so nothing was sent. Check the latest code in your chat and try again.",
   expired: "That code has expired, so nothing was sent. Get a new code and try again.",
-  locked: "Too many wrong codes, so nothing was sent. Get a new code and try again.",
+  locked: "Too many wrong codes, so nothing was sent. Wait 10 minutes, then get a new code.",
+  scope: "That code was sent for a different selection, so nothing was sent. Get a code for exactly what's on this page.",
   used: "That code was already used, so nothing was sent. Get a new code and try again.",
   none: "Get a code first: nothing was sent.",
 };
@@ -556,10 +564,10 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
       else if (action === "review") return review([g.row]);
       else if (!d.codes) return review([g.row]);
       else if (action === "code_send") {
-        const sent = await d.codes.send(u, o.idHash, d.now()).catch(() => ({ ok: false as const, why: "not_sent" as const }));
-        return review([g.row], sent.ok ? undefined : sent.why === "too_many" ? "That's the most codes for now. Use the latest one, or open a new link later." : "The code couldn't be sent just now. Nothing was sent. Try again in a minute.", sent.ok);
+        const sent = await d.codes.send(u, o.idHash, d.now(), scopeOf([g.row])).catch(() => ({ ok: false as const, why: "not_sent" as const }));
+        return review([g.row], sent.ok ? undefined : SEND_WORDS[sent.why], sent.ok);
       } else {
-        const c = await d.codes.check(u, o.idHash, fields.get("code"), d.now()).catch(() => "none" as const);
+        const c = await d.codes.check(u, o.idHash, fields.get("code"), d.now(), scopeOf([g.row])).catch(() => "none" as const);
         if (c !== "ok") return review([g.row], CODE_WORDS[c], c === "wrong");
         const n = await approveOne(u, ref, tag, d);
         notes[ref] = n ?? "Approved. It's queued to be sent exactly as you checked it; the status here changes when the employer's site confirms it.";
@@ -574,14 +582,16 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
         if (action === "review_sel") {
           if (ok.length) return review(ok, ok.length < want.length ? `${want.length - ok.length} of the ${want.length} you ticked can't go from here; the list says why. Nothing was sent for them.` : undefined);
           top = "None of the roles you ticked can be approved right now; each says why. Nothing was sent.";
-        } else if (ok.length !== want.length || (await selHash(ok.map((r) => ({ ref: r.ref, tag: r.tag! })))) !== (fields.get("set") ?? "")) {
+        // Every ticked row must still be what was shown. The code (not the set field, which a page can recompute) binds the approval
+        // to the exact selection it was sent for; the set field only keeps a code request to the review that was on screen.
+        } else if (ok.length !== want.length || (action === "code_send" && (await selHash(ok.map((r) => ({ ref: r.ref, tag: r.tag! })))) !== (fields.get("set") ?? ""))) {
           top = "This selection changed since you checked it, so nothing was approved. Check it again.";
         } else if (!d.codes) return review(ok);
         else if (action === "code_send") {
-          const sent = await d.codes.send(u, o.idHash, d.now()).catch(() => ({ ok: false as const, why: "not_sent" as const }));
-          return review(ok, sent.ok ? undefined : sent.why === "too_many" ? "That's the most codes for now. Use the latest one, or open a new link later." : "The code couldn't be sent just now. Nothing was sent. Try again in a minute.", sent.ok);
+          const sent = await d.codes.send(u, o.idHash, d.now(), scopeOf(ok)).catch(() => ({ ok: false as const, why: "not_sent" as const }));
+          return review(ok, sent.ok ? undefined : SEND_WORDS[sent.why], sent.ok);
         } else {
-          const c = await d.codes.check(u, o.idHash, fields.get("code"), d.now()).catch(() => "none" as const);
+          const c = await d.codes.check(u, o.idHash, fields.get("code"), d.now(), scopeOf(ok)).catch(() => "none" as const);
           if (c !== "ok") return review(ok, CODE_WORDS[c], c === "wrong");
           let failed = 0;
           for (const r of ok) { const n = await approveOne(u, r.ref, r.tag!, d); if (n) { notes[r.ref] = n; failed++; } else notes[r.ref] = "Approved. It's queued to be sent exactly as you checked it."; }

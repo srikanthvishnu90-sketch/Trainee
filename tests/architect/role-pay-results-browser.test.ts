@@ -40,7 +40,8 @@ const MEASURE = `(() => {
     texts.push({ el: name(el), size: parseFloat(s.fontSize), color: rgb(s.color).c, ground: ground(el) });
   }
   const applies = [...document.querySelectorAll(".apply")].filter(visible).map((el) => ({ el: name(el), bg: rgb(getComputedStyle(el).backgroundColor).c, w: el.getBoundingClientRect().width }));
-  return { scrollW: document.documentElement.scrollWidth, innerW: window.innerWidth, taps, texts, applies, body: ground(document.body), ink: rgb(getComputedStyle(document.body).color).c };
+  const goes = [...document.querySelectorAll("button.ghost.go")].filter(visible).map((el) => ({ el: name(el), bg: rgb(getComputedStyle(el).backgroundColor), w: el.getBoundingClientRect().width }));
+  return { scrollW: document.documentElement.scrollWidth, innerW: window.innerWidth, taps, texts, applies, goes, body: ground(document.body), ink: rgb(getComputedStyle(document.body).color).c };
 })()`;
 
 Deno.test({
@@ -95,9 +96,11 @@ Deno.test({
             const sizes = await pg.evaluate(`[".made","h1",".stamp",".caveat",".quick p"].map((q) => parseFloat(getComputedStyle(document.querySelector(q)).fontSize))`);
             assert(sizes[1] >= 28 && sizes[0] < sizes[1] && sizes[2] < sizes[1], `a large title over small lines: ${sizes}`);
             assert(/^Made for Ada · Nov 1, 2026$/.test((await pg.textContent(".made"))!.trim()));
-            const cardApply = list.applies.filter((a: any) => /^button\.apply 'Apply'$/.test(a.el));
-            eq(cardApply.length, 3, "an Apply on each card");
-            assert(cardApply.every((a: any) => a.w >= 390 - 2 * 20 - 2 * 18 - 4), "Apply is full width on a phone (Q567)");
+            // Plum only on the one primary action (owner, 2026-11-01): Apply to selected; each card's Apply is the secondary button.
+            eq(list.applies.map((a: any) => a.el), ["button.apply 'Apply to selected'"], "one primary action on the list");
+            eq(list.goes.length, 3, "an Apply on each card");
+            assert(list.goes.every((a: any) => a.w >= 390 - 2 * 20 - 2 * 18 - 4), "each card's Apply is full width on a phone");
+            assert(list.goes.every((a: any) => !a.bg || a.bg.a < 0.5 || !near(a.bg.c, rgbOf(tok.accent))), "card Apply is not plum");
             assert(/Pay not listed/.test(await pg.textContent("main") ?? ""));
             // Apply on Acme's card: the exact application.
             await pg.locator("li.card", { hasText: "Acme Web" }).getByRole("button", { name: /^Apply to/ }).click();

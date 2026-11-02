@@ -120,6 +120,13 @@ const CLEAR_RE = /^\s*(?:please\s+)?(?:forget|clear|remove|delete|drop|reset)\s+
 const SHOW_RE = /^\s*(?:what(?:'s|\s+is)\s+my\s+(?:job\s+)?judge\s+prompt|show\s+(?:me\s+)?my\s+(?:job\s+)?judge\s+prompt)\s*\??\s*$/i;
 export const JUDGE_PROMPT_INTENT = "career_judge_prompt";
 export interface JudgePromptResult { reply: string; status: "saved" | "refused" | "cleared" | "none" | "shown" | "unreadable"; intent: string }
+// Whether judgePromptTurn answers this message (no I/O): a "judge prompt: ..." instruction is code's, so the staged brain
+// never takes it (D-035; the brain branch comes before the router branch that runs judgePromptTurn).
+export function isJudgePromptAsk(message: string): boolean {
+  const m = String(message ?? "");
+  return SET_RE.test(m) || WHEN_RE.test(m) || CLEAR_RE.test(m) || SHOW_RE.test(m);
+}
+
 export async function judgePromptTurn(o: { message: string; userId: string; now: number; memory: MemoryStore; judgeOn: boolean }): Promise<JudgePromptResult | null> {
   const m = String(o.message ?? "");
   const set = SET_RE.exec(m) ?? WHEN_RE.exec(m), clear = CLEAR_RE.test(m), show = SHOW_RE.test(m);

@@ -115,7 +115,7 @@ test('networking follow-up reminders are switched on at launch (R2: the chat pro
   assert.doesNotMatch(dry(['--only-smoke']).out, /CAREER_OUTREACH_FOLLOWUPS/, '--only-smoke changes no secret');
 });
 
-test('CAREER_BRAIN=agent is set only with --brain agent; --brain router unsets it; otherwise it is not touched', () => {
+test('CAREER_BRAIN=agent is set only with --brain agent; --brain router sets the rollback (D-035); otherwise it is not touched', () => {
   const plain = dry([], { ...FAKE, CAREER_BRAIN: 'agent' }).out; // the environment never decides the brain
   assert.doesNotMatch(plain, /CAREER_BRAIN=agent/);
   assert.doesNotMatch(plain, /secrets unset CAREER_BRAIN/);
@@ -124,7 +124,9 @@ test('CAREER_BRAIN=agent is set only with --brain agent; --brain router unsets i
   assert.match(agent, /--env-file <0600 temp file: [^>]*CAREER_BRAIN=agent>/);
   const router = dry(['--brain=router']).out;
   assert.doesNotMatch(router, /CAREER_BRAIN=agent/);
-  assert.match(router, /DRY: supabase secrets unset CAREER_BRAIN --project-ref abcdefghijklmnopqrst/);
+  // D-035: unset serves the committed release brain (staged), so the rollback is set, never unset.
+  assert.match(router, /--env-file <0600 temp file: [^>]*CAREER_BRAIN=router>/);
+  assert.doesNotMatch(router, /secrets unset CAREER_BRAIN/);
   assert.notEqual(dry(['--brain', 'gpt']).code, 0, 'only agent or router');
 });
 

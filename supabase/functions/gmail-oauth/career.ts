@@ -68,36 +68,47 @@ function hmacKey(secret: string): Promise<CryptoKey> {
     { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"],
   );
 }
+// D-037 (review of #407): the send consent's state is bound to the Google account already connected: `bind` is
+// emailBind(that address), signed into the state, so the callback refuses any other account (oauth_connect.ts).
+export async function emailBind(email: string): Promise<string> {
+  const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(email ?? "").trim().toLowerCase()));
+  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+const BIND = /^[0-9a-f]{64}$/;
+
 export async function issueState(
-  userId: string, purpose: Purpose, secret: string, now: number = Date.now(),
+  userId: string, purpose: Purpose, secret: string, now: number = Date.now(), bind?: string,
 ): Promise<string> {
   const exp = now + 10 * 60 * 1000;
-  const payload = `${userId}.${exp}.${purpose}`;
+  if (bind !== undefined && (purpose !== "career" || !BIND.test(bind))) throw new Error("bad state binding");
+  const payload = bind ? `${userId}.${exp}.${purpose}.${bind}` : `${userId}.${exp}.${purpose}`;
   const sig = await crypto.subtle.sign("HMAC", await hmacKey(secret), new TextEncoder().encode(payload));
   return `${payload}.${b64url(new Uint8Array(sig))}`;
 }
 export async function verifyState(
   state: string, secret: string, now: number = Date.now(),
-): Promise<{ userId: string; purpose: Purpose }> {
+): Promise<{ userId: string; purpose: Purpose; bind?: string }> {
   const parts = String(state || "").split(".");
-  let userId = "", expS = "", purpose: Purpose = "gmail", sigB64 = "";
+  let userId = "", expS = "", purpose: Purpose = "gmail", sigB64 = "", bind = "";
   if (parts.length === 3) [userId, expS, sigB64] = parts; // legacy, pre-career
-  else if (parts.length === 4) {
+  else if (parts.length === 4 || parts.length === 5) {
     let p = "";
-    [userId, expS, p, sigB64] = parts;
+    if (parts.length === 4) [userId, expS, p, sigB64] = parts;
+    else [userId, expS, p, bind, sigB64] = parts; // D-037: a send consent bound to the connected account
     if (!(PURPOSES as string[]).includes(p)) throw new Error("bad state purpose");
     purpose = p as Purpose;
+    if (parts.length === 5 && (purpose !== "career" || !BIND.test(bind))) throw new Error("bad state binding");
   } else throw new Error("bad state");
   const exp = Number(expS);
   if (!userId || !Number.isFinite(exp) || now > exp) throw new Error("expired state");
-  const payload = parts.length === 3 ? `${userId}.${exp}` : `${userId}.${exp}.${purpose}`;
+  const payload = parts.length === 3 ? `${userId}.${exp}` : parts.length === 4 ? `${userId}.${exp}.${purpose}` : `${userId}.${exp}.${purpose}.${bind}`;
   const sig = unb64url(sigB64);
   const ok = await crypto.subtle.verify("HMAC", await hmacKey(secret), sig, new TextEncoder().encode(payload));
   if (!ok) throw new Error("bad state signature");
   // Canonical-encoding check: a base64url signature's last char carries spare bits, so a different string can
   // decode to the same bytes; re-encoding must reproduce the exact segment or the state is a forgery twin.
   if (b64url(sig) !== sigB64) throw new Error("bad state signature");
-  return { userId, purpose };
+  return bind ? { userId, purpose, bind } : { userId, purpose };
 }
 
 // ---- Scopes / status (ACCS-002) ----
@@ -234,7 +245,11 @@ export function redirectUriFrom(env: { get(k: string): string | undefined }): st
 
 // Google's consent URL: the one place the query is built (the page's Continue button, the chat's one-time link and the
 // legacy start all use it), so the scopes the page states are the scopes asked.
-export function googleConsentUrl(o: { clientId: string; redirectUri: string; state: string; scopes: string[] }): string {
+// incremental (D-037): Google keeps what the person already granted and adds these scopes (include_granted_scopes).
+// loginHint (D-037): the send consent names the connected account, so Google offers that one.
+export function googleConsentUrl(o: { clientId: string; redirectUri: string; state: string; scopes: string[]; incremental?: boolean; loginHint?: string }): string {
   const q = new URLSearchParams({ client_id: o.clientId, redirect_uri: o.redirectUri, response_type: "code", scope: o.scopes.join(" "), access_type: "offline", prompt: "consent", state: o.state });
+  if (o.incremental) q.set("include_granted_scopes", "true");
+  if (o.loginHint) q.set("login_hint", o.loginHint);
   return "https://accounts.google.com/o/oauth2/v2/auth?" + q.toString();
 }

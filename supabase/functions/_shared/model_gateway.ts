@@ -4,12 +4,13 @@
 // the Anthropic Messages shape, and reads back the same shape. This module sends it to the configured provider and
 // translates both ways, so the planner's tool loop, the router's forced tool call and the chat's text reply keep one shape.
 //
-// Provider: OpenAI, always (owner rule: OpenAI only, no Anthropic API spend; CLAUDE.md). No secret can switch it:
-// MODEL_PROVIDER, ANTHROPIC_API_KEY, ANTHROPIC_MODEL and ANTHROPIC_ROUTER_MODEL are ignored (Q3, 2026-10-28; the launch
-// audit's SEC11 found one secret change would have moved spend to Anthropic). A missing OPENAI_API_KEY fails as
-// "not configured" with the honest outage reply. Model: OPENAI_MODEL (default gpt-5-nano); the router may use
-// OPENAI_ROUTER_MODEL. Keys are read from the environment only and never logged. The Anthropic request branch in
-// callModel is reachable only from a hand-built ModelConfig (the finance planner's tests); it is on the removal list.
+// Provider: chosen from the MODEL NAME only (D-038, owner ruling 2026-11-01 as relayed by the architect's main session:
+// the career reply model may be Claude via ANTHROPIC_API_KEY). A "claude-" model goes to Anthropic's Messages API with
+// ANTHROPIC_API_KEY; every other model goes to OpenAI with OPENAI_API_KEY (modelConfigFor). No secret switches a provider on
+// its own: MODEL_PROVIDER, ANTHROPIC_MODEL and ANTHROPIC_ROUTER_MODEL are still ignored (Q3, 2026-10-28; SEC11), and
+// modelConfig (the router, planner and finance chat) stays OpenAI. A missing key fails as "not configured" with the honest
+// outage reply. Model: OPENAI_MODEL (default gpt-5-nano); the router may use OPENAI_ROUTER_MODEL; the career reply model is
+// agent-chat/release_model.ts. Keys are read from the environment only and never logged.
 import { ModelBudgetBlockedError, ModelUnavailableError, providerError, recordModelUsage, reserveModelCall } from "./model_calls.ts";
 import { type BudgetGate, budgetBlockOfType, budgetPausedByEnv, budgetReply, denoEnvGet, REFUSED_BEFORE_GENERATION, resolveBudgetGate, usageProven, worstCaseMicros } from "./model_budget.ts";
 
@@ -30,6 +31,21 @@ export function modelConfig(env: Env, role: ModelRole = "chat"): ModelConfig {
   return { provider: "openai", model, apiKey: env.get("OPENAI_API_KEY") || "", reasoningEffort: reasoningModel(model) ? (env.get("OPENAI_REASONING_EFFORT") || "minimal") : null };
 }
 export const providerName = (c: ModelConfig) => PROVIDER_NAME[c.provider];
+// D-038: the provider a model name belongs to. Only Claude model ids go to Anthropic.
+export const providerFor = (model: string): Provider => /^claude-/i.test(String(model || "")) ? "anthropic" : "openai";
+// D-038 review: CAREER_MODEL stays the OpenAI-only readers' model (mail, essay, mock prep, outreach replies). A claude- id
+// there is never sent to OpenAI: those readers get their OpenAI fallback instead. The reply model has its own key.
+export function openaiCareerModel(env: Env, fallback = "gpt-5-mini"): string {
+  const v = (env.get("CAREER_MODEL") ?? "").trim();
+  return v && providerFor(v) === "openai" ? v : fallback;
+}
+// A complete config for one named model: its provider, that provider's key, and its effort. Callers that pick a model
+// (the career reply model) use this instead of { ...modelConfig(env), model }, which would carry OpenAI's key and provider.
+// Anthropic effort: ANTHROPIC_EFFORT (low by default: a Telegram reply should land in seconds; owner may raise it).
+export function modelConfigFor(env: Env, model: string): ModelConfig {
+  if (providerFor(model) === "anthropic") return { provider: "anthropic", model, apiKey: env.get("ANTHROPIC_API_KEY") || "", reasoningEffort: env.get("ANTHROPIC_EFFORT") || "low" };
+  return { provider: "openai", model, apiKey: env.get("OPENAI_API_KEY") || "", reasoningEffort: reasoningModel(model) ? (env.get("OPENAI_REASONING_EFFORT") || "minimal") : null };
+}
 // Reasoning models (gpt-5 family, o-series) take max_completion_tokens and reasoning_effort, and reject a custom temperature.
 const reasoningModel = (model: string) => /^(gpt-5|o\d)/i.test(model);
 // Owner, 2026-10-11: keep OpenAI spend small. At minimal effort gpt-5-nano rarely thinks; 512 is a cap, not a spend.
@@ -81,6 +97,58 @@ export function toOpenAI(payload: any, cfg: ModelConfig): any {
   return body;
 }
 
+// The Anthropic request: the callers' payload is already in the Messages shape; only what the Messages API does not take is
+// translated or dropped (D-038). store:false is OpenAI's (the Messages API keeps no completion for reuse; nothing to send).
+// temperature is dropped: Claude 5.5 models take none ("Omit temperature, top_p, and top_k",
+// platform.claude.com/docs/en/models/haiku-5-5/overview). response_format json_schema becomes output_config.format.
+// Thinking is kept as low as each model allows, for chat latency (platform.claude.com/docs/en/build-with-claude/effort):
+// Haiku 5.5 takes thinking disabled at high effort or below; Sonnet 5.5's lowest is between_tools (disabled is a 400), whose
+// thinking blocks between tool calls count against max_tokens, so Sonnet gets ANTHROPIC_THINKING_HEADROOM more.
+// tool_choice is sent only with tools (a tools:[] + none request sends neither). Sonnet 5.5 rejects a forced tool_choice
+// (type "tool" or "any": a 400; platform.claude.com/docs/en/models/sonnet-5-5/migration-guide), so a forced choice is sent
+// as auto, and a forced single tool is sent alone: the caller's own check that a tool was called still decides (the flow
+// router throws to its regex net; the outreach parser fails closed). Effort: cfg.reasoningEffort (low by default).
+const ANTHROPIC_EFFORTS = new Set(["low", "medium", "high"]);
+export const ANTHROPIC_THINKING_HEADROOM = 1024;
+const NO_FORCED_TOOL = /^claude-sonnet-5-5/i;
+export function toAnthropic(payload: any, cfg: ModelConfig): any {
+  const sonnet55 = NO_FORCED_TOOL.test(cfg.model);
+  const body: any = { model: cfg.model, max_tokens: (payload.max_tokens || 1024) + (sonnet55 ? ANTHROPIC_THINKING_HEADROOM : 0), messages: payload.messages || [] };
+  if (payload.system) body.system = payload.system;
+  let tools: any[] = Array.isArray(payload.tools) ? payload.tools : [];
+  let tc = payload.tool_choice;
+  if (sonnet55 && tc && (tc.type === "tool" || tc.type === "any")) {
+    if (tc.type === "tool") tools = tools.filter((t: any) => t && t.name === tc.name);
+    tc = { type: "auto" };
+  }
+  if (tools.length) {
+    body.tools = tools;
+    if (tc) body.tool_choice = tc;
+  }
+  if (Array.isArray(payload.stop_sequences) && payload.stop_sequences.length) body.stop_sequences = payload.stop_sequences.slice(0, 4);
+  // Effort exists on Claude 4.6 and later; older ids (Haiku 4.5) reject it, so it is sent only to the 5.x family used here.
+  const effortOk = /^claude-(haiku|sonnet|opus)-5/i.test(cfg.model);
+  const out: any = effortOk ? { effort: ANTHROPIC_EFFORTS.has(String(cfg.reasoningEffort)) ? String(cfg.reasoningEffort) : "low" } : {};
+  const rf = payload.response_format;
+  if (rf?.type === "json_schema" && rf.json_schema?.schema) out.format = { type: "json_schema", schema: rf.json_schema.schema };
+  if (Object.keys(out).length) body.output_config = out;
+  if (/^claude-haiku-5/i.test(cfg.model)) body.thinking = { type: "disabled" };
+  else if (sonnet55) body.thinking = { type: "between_tools" };
+  return body;
+}
+// Anthropic message -> the callers' shape. Thinking blocks are KEPT, complete and in place: the agent loop replays an
+// assistant turn's content as it came (loop.ts), and Sonnet 5.5 requires them passed back unchanged in tool-use loops;
+// callers read only text and tool_use blocks, and toOpenAI drops them. A cut-off answer's tool calls are discarded, as on
+// the OpenAI side (a truncated call is never executable).
+export function fromAnthropic(body: any): any {
+  if (!body || !Array.isArray(body.content)) throw new ModelUnavailableError(502, "bad_response", "Anthropic returned no message");
+  const truncated = body.stop_reason === "max_tokens";
+  const content = body.content.filter((b: any) => b && !(truncated && b.type === "tool_use"));
+  const used = content.some((b: any) => b.type === "tool_use");
+  const stop_reason = truncated ? "max_tokens" : body.stop_reason === "tool_use" && !used ? "end_turn" : body.stop_reason;
+  return Object.assign({}, body, { content, stop_reason });
+}
+
 // OpenAI chat completion -> Anthropic message. Malformed completed tool calls fail; truncated calls are discarded.
 export function fromOpenAI(body: any): any {
   const choice = body && Array.isArray(body.choices) ? body.choices[0] : null;
@@ -116,13 +184,19 @@ export function fromOpenAI(body: any): any {
 // Several of these models are now marked Deprecated or Shut down on OpenAI's pages (noted per row). A model that is gone answers
 // with an error, which costs nothing; a price here that is too low is the risk, which is why a mismatch must be fixed here first.
 // Update here when the invoice disagrees; the cost is an estimate until it is reconciled with the provider's bill.
-export const PRICES: Record<string, { input: number; cached: number; cache_write: number; output: number; call_fee?: number; source: string; checked: "verified" | "third_party" | "unverified"; checked_on: string }> = {
+// long_context (D-038): a model whose whole request is priced higher once its prompt (input + cache reads + cache writes)
+// passes over_tokens: every rate times multiplier (Claude Haiku 5.5: 5x over 100,000 prompt tokens).
+export const PRICES: Record<string, { input: number; cached: number; cache_write: number; output: number; call_fee?: number; long_context?: { over_tokens: number; multiplier: number }; source: string; checked: "verified" | "third_party" | "unverified"; checked_on: string }> = {
   "gpt-5": { input: 1.25, cached: 0.125, cache_write: 0, output: 10.00, source: "https://developers.openai.com/api/docs/models/gpt-5 (page marks the model Deprecated)", checked: "verified", checked_on: "2026-10-28" },
   "gpt-5-nano": { input: 0.05, cached: 0.005, cache_write: 0, output: 0.40, source: "https://developers.openai.com/api/docs/models/gpt-5-nano (Deprecated)", checked: "verified", checked_on: "2026-10-28" },
   "gpt-5-mini": { input: 0.25, cached: 0.025, cache_write: 0, output: 2.00, source: "https://cloudprice.net/models/gpt-5-mini, Standard tier (OpenAI's developers.openai.com page for it was not reachable; deprecated 2026-10-19)", checked: "third_party", checked_on: "2026-10-28" },
   "gpt-4.1-nano": { input: 0.10, cached: 0.025, cache_write: 0, output: 0.40, source: "https://developers.openai.com/api/docs/models/gpt-4.1-nano (marked Shut down)", checked: "verified", checked_on: "2026-10-28" },
   // WO-061: the second, independent eval judge (owner, 2026-10-21: two judges, both must pass).
   "gpt-4.1-mini": { input: 0.40, cached: 0.10, cache_write: 0, output: 1.60, source: "https://developers.openai.com/api/docs/models/gpt-4.1-mini (Deprecated)", checked: "verified", checked_on: "2026-10-28" },
+  // D-038, the career reply model candidates (Anthropic, owner ruling 2026-11-01). Read on Anthropic's own pages on 2026-11-01:
+  // platform.claude.com/docs/en/about-claude/pricing and the model overview pages. cache_write is the 5-minute write rate.
+  "claude-haiku-5-5": { input: 0.10, cached: 0.01, cache_write: 0.125, output: 0.50, long_context: { over_tokens: 100000, multiplier: 5 }, source: "https://platform.claude.com/docs/en/about-claude/pricing and https://platform.claude.com/docs/en/models/haiku-5-5/overview ($0.10 in, $0.125 5m write, $0.01 hit, $0.50 out up to 100,000 prompt tokens; 5x over; Active, retirement not sooner than 2027-10-07)", checked: "verified", checked_on: "2026-11-01" },
+  "claude-sonnet-5-5": { input: 2.00, cached: 0.10, cache_write: 2.50, output: 10.00, source: "https://platform.claude.com/docs/en/about-claude/pricing ($2 in, $2.50 5m write, $0.10 hit, $10 out; no long-context surcharge listed)", checked: "verified", checked_on: "2026-11-01" },
   "claude-haiku-4-5-20251001": { input: 1.00, cached: 0.10, cache_write: 1.25, output: 5.00, source: "Anthropic published pricing, last known; platform.claude.com/docs/en/about-claude/pricing could not be fetched on 2026-10-28 (never used unless MODEL_PROVIDER=anthropic is set on purpose)", checked: "unverified", checked_on: "2026-10-11" },
 };
 // Realtime voice (not callModel: the browser talks to OpenAI with a key minted by career-voice; see career_voice.ts). Text prices for
@@ -134,7 +208,9 @@ export const PRICES: Record<string, { input: number; cached: number; cache_write
 export function costMicros(model: string, usage: any): number | null {
   const p = PRICES[model]; if (!p || !usage) return null;
   const n = (k: string) => Number(usage[k]) || 0;
-  return Math.round(n("input_tokens") * p.input + n("cache_read_input_tokens") * p.cached + n("cache_creation_input_tokens") * p.cache_write + n("output_tokens") * p.output);
+  const prompt = n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
+  const x = p.long_context && prompt > p.long_context.over_tokens ? p.long_context.multiplier : 1;
+  return Math.round(x * (n("input_tokens") * p.input + n("cache_read_input_tokens") * p.cached + n("cache_creation_input_tokens") * p.cache_write + n("output_tokens") * p.output));
 }
 
 // Per-turn meter: every call in one user turn adds to it; the turn's message meta carries the total.
@@ -218,7 +294,7 @@ export async function callModel(cfg: ModelConfig, payload: any, o: CallOptions =
   if (budgetPausedByEnv(env || (() => undefined))) throw new ModelBudgetBlockedError("paused", "MODEL_BUDGET_PAUSED is on");
   const gate = resolveBudgetGate(o.budget, env);
   if (!gate) throw new ModelBudgetBlockedError("unavailable", "the budget service is configured without a key");
-  const sendBody = cfg.provider === "openai" ? toOpenAI(payload, cfg) : Object.assign({}, payload, { model: cfg.model });
+  const sendBody = cfg.provider === "openai" ? toOpenAI(payload, cfg) : toAnthropic(payload, cfg);
   const bodyText = JSON.stringify(sendBody);
   const worst = worstCaseMicros(cfg.model, PRICES, {
     bytes: new TextEncoder().encode(bodyText).length,
@@ -249,7 +325,7 @@ export async function callModel(cfg: ModelConfig, payload: any, o: CallOptions =
     const raw = await res.text();
     if (raw.length > 200000) { const e = new ModelUnavailableError(502, "too_large", `${providerName(cfg)} response is too large`); meterAdd(o.meter, cfg, null, true); await report(false, 502, e.type, e.detail); throw e; }
     let out: any, parsed: any;
-    try { parsed = JSON.parse(raw); out = cfg.provider === "openai" ? fromOpenAI(parsed) : parsed; }
+    try { parsed = JSON.parse(raw); out = cfg.provider === "openai" ? fromOpenAI(parsed) : fromAnthropic(parsed); }
     catch (err) { const e = err instanceof ModelUnavailableError ? err : new ModelUnavailableError(502, "bad_response", `${providerName(cfg)} returned unreadable JSON`); meterAdd(o.meter, cfg, null, true); await report(false, e.status, e.type, e.detail); throw e; }
     // Settled to the actual cost only when the provider's own usage block is real (fromOpenAI turns a missing one into zeros)
     // and the model has a price; otherwise the worst case stays spent.

@@ -8,6 +8,7 @@
 // through the bridge, which names the person and the postings from the request, never from this process. Then it
 // finishes the request, and the bridge shows the card of what is ready (or texts the questions) in their thread.
 // Nothing is approved, queued or sent here.
+import { postingSchema, schemaCache } from "../../supabase/functions/_shared/posting_schema.ts";
 import { engineRunner, type RunEngine } from "../career-browser/approve-first.ts";
 import { prepareAhead, type PreparedResume, type ServiceRpc, storedProfile } from "../career-browser/prepare-ahead.ts";
 
@@ -51,8 +52,12 @@ export function keptResume(call: (op: string) => Promise<any>) {
 
 // One request, start to finish. `urlFor` is the tests' (a local copy of the employer's form); production opens the
 // posting's own link.
+// One cache per process: a posting's published form read once per 6 hours, whoever's preparation asks.
+const SCHEMAS = schemaCache();
 export async function runPrepareRequest(o: {
   bridge: ReturnType<typeof prepareBridge>; runEngine: RunEngine; urlFor?: (c: { url: string }) => string; tmpRoot?: string; log?: (l: string) => void;
+  // MASS APPLY: Greenhouse's board API (posting_schema.ts); off with schema: false. greenhouseApi: the tests' local board.
+  schema?: false | { fetch?: typeof fetch; greenhouseApi?: string };
 }) {
   const log = o.log ?? ((l: string) => console.log(l));
   const req = await o.bridge.call("request");
@@ -61,6 +66,7 @@ export async function runPrepareRequest(o: {
     done = await prepareAhead({
       db: o.bridge.db, runEngine: o.runEngine, profileFor: storedProfile(o.bridge.db), resumeFor: keptResume(o.bridge.call),
       ...(o.urlFor ? { urlFor: o.urlFor } : {}), ...(o.tmpRoot ? { tmpRoot: o.tmpRoot } : {}),
+      ...(o.schema === false ? {} : { schemaFor: (url: string) => postingSchema(url, { fetch: o.schema?.fetch ?? fetch, cache: SCHEMAS, greenhouseApi: o.schema?.greenhouseApi }) }),
     }, { only: { user_id: String(req.user_id), job_ids: (req.job_ids ?? []).map(String) }, perPerson: 25, limit: 500 });
   } catch (e) {
     log(`prepare: ${(e as Error)?.message ?? e}`);

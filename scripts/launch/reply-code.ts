@@ -42,12 +42,45 @@ export const SHARED_REPLY_MODULES = [
   "brand.ts", "row_answer.ts", "telegram_jobs.ts",
 ] as const;
 
+// D-036 (release flags, agent-chat/release_config.ts RELEASE_FLAGS): the code behind every flag the release serves ON that
+// changes what the person is sent, outside the eval's import closure. The release config itself is under agent-chat (so
+// flipping a flag is a reply-code change); these are the modules each ON flag switches on, so changing one re-measures:
+//   task/                     CAREER_PLANNER's plan and reminders (the planner itself is agent-chat/career_planner.ts)
+//   channel_voice.ts, channel_registry.ts, trainee-telegram/handler.ts, trainee-inbound/handler.ts, trainee-deliver/handler.ts
+//                             CAREER_TEXTING_NATIVE: how each reply is split, formatted and paced on each channel
+//   career_networking.ts      CAREER_NETWORKING_DRAFT's drafted outreach
+//   career_tailor_rewrite.ts  CAREER_TAILOR_REWRITE's bullets
+//   career_outreach_track.ts  CAREER_OUTREACH_FOLLOWUPS' reminder words; career-proactive/index.ts wires every scheduled
+//                             ON flag (CAREER_BRIEF_DIGEST, CAREER_MAIL_TRACKING, CAREER_INTRO_REMINDERS, follow-ups)
+// (career_mock_prep.ts, CAREER_MOCK_JUDGE, is already in SHARED_REPLY_MODULES.) tests/architect/release-flags.test.ts
+// fails when a flag enters RELEASE_FLAGS without its module here.
+export const RELEASE_FLAG_PATHS = [
+  "supabase/functions/_shared/task",
+  "supabase/functions/_shared/channel_voice.ts",
+  "supabase/functions/_shared/channel_registry.ts",
+  "supabase/functions/trainee-telegram/handler.ts",
+  "supabase/functions/trainee-inbound/handler.ts",
+  "supabase/functions/trainee-deliver/handler.ts",
+  "supabase/functions/_shared/career_networking.ts",
+  "supabase/functions/_shared/career_tailor_rewrite.ts",
+  "supabase/functions/_shared/career_outreach_track.ts",
+  "supabase/functions/career-proactive/index.ts",
+  // D-036 review: the scheduled run's whole path for its ON flags (briefs and digest, intro reminders, mail, follow-ups).
+  "supabase/functions/career-proactive/switches.ts",
+  "supabase/functions/career-proactive/handler.ts",
+  "supabase/functions/_shared/career_proactive_run.ts",
+  "supabase/functions/_shared/career_digest.ts",
+  "supabase/functions/_shared/career_people_reminders.ts",
+  "supabase/functions/_shared/career_inbox_followups.ts",
+] as const;
+
 // Every reply-code path, repository-relative, sorted. Git pathspecs: a directory covers everything under it.
-export const REPLY_CODE: readonly string[] = [
+export const REPLY_CODE: readonly string[] = [...new Set([
   ...REPLY_CODE_DIRS,
   ROUTER_BUNDLE,
   ...SHARED_REPLY_MODULES.map((f) => `supabase/functions/_shared/${f}`),
-].sort();
+  ...RELEASE_FLAG_PATHS,
+])].sort();
 
 // Whether a repository-relative file is reply code.
 export function isReplyCode(file: string): boolean {

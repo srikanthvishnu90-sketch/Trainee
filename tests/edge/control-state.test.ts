@@ -66,7 +66,8 @@ Deno.test("WO-091c/C1 apply by email: with the owner's switch off, a yes sends n
 
 Deno.test("WO-091c/C1b the chat wires apply-by-email's send to CAREER_EMAIL_SEND=on, the same pattern as outreach", () => {
   const src = read("supabase/functions/agent-chat/handler-career.ts");
-  assert(/sendOn:\s*Deno\.env\.get\("CAREER_EMAIL_SEND"\)\s*===\s*"on"/.test(src), "emailTurn gets sendOn from CAREER_EMAIL_SEND === \"on\"");
+  // D-037: CAREER_EMAIL_SEND is a release flag, read through the release config (on unless rolled back with "off").
+  assert(/sendOn:\s*chatSwitches\(Deno\.env\)\.emailSend,/.test(src), "emailTurn gets sendOn from the release flag CAREER_EMAIL_SEND");
   const docs = read("docs/launch/TRAINEE-GO-LIVE.md") + read("docs/product/TONIGHT-TEST-PLAN.md");
   assert(docs.includes("CAREER_EMAIL_SEND"), "the switch is documented where the owner turns things on");
 });

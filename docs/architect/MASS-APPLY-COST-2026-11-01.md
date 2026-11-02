@@ -102,3 +102,18 @@ The sandbox is 2 vCPU and 4 GB, as `supabase/functions/_shared/cloud_runner.ts` 
 | 5. Browser per posting for the schema | Measured with `MASS_NO_SCHEMA=1`: 24 browser dry runs for 12 postings, 174.7 s of preparation sandbox time (14.6 s per posting) | Wired as the safe version: Greenhouse's boards-API schema (33 ms, cached) asks the shared `fact:*` questions with no browser pass; the browser still builds the payload once. Measured: **20 browser runs** (one pass saved per Greenhouse posting in ask-then-ready) and 109.0 s of preparation sandbox time (9.1 s per posting). Lever and Ashby fall back to the browser. |
 
 The before and after runs were on the same day and container, at different load averages. The browser-run count (24 → 20) is the load-independent figure. **Estimated cost per application after:** preparation 9.1 s + send 13.8 s (166.1 s / 12 sends) on 2 vCPU / 4 GB, with the send billed at the 1-minute memory minimum, comes to about $0.0031. That is an estimate from these single-run times and the published rates, not a bill.
+
+### Review round (browser crashes, consecutive failures): three local runs on one head, one at a time
+
+| Run | Head | Load (1 min) | Total | Engine starts for 12 sends | Browser preparation runs | Model calls |
+|---|---|---|---|---|---|---|
+| 1 | 630e5da9 | 12.2 | 323.8 s | 12 | 20 | 0 |
+| 2 | 4479fb4f | 27.8 | 378.6 s | 15 | 21 | 0 |
+| 3 | 4479fb4f | 7.3 | 257.9 s | 12 | 20 | 0 |
+
+Root cause of the earlier `DRIVER_ERROR` failures: the container ran out of memory and CPU (load up to ~117 while other
+suites ran beside the e2e); Chromium died or timed out. Nothing in the flow was wrong. The engine now records the
+browser's own error (`driver_error`) in the evidence, so the cause is visible on the row. Run 2 shows the guard working:
+3 sends crashed before Submit was authorized (nothing reached the employer) and were driven once more (15 engine starts,
+12 sends, all exactly once). A crash after Submit was authorized is never resent: it is `unknown_outcome` and the
+person is asked. A preparation crash is recorded `error` and tried again after 30 minutes, not parked for 7 days.

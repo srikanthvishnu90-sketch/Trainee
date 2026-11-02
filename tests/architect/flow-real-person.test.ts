@@ -28,6 +28,7 @@ import { engineRunner, ownQueue, runApproved } from "../../workers/career-browse
 import { prepareAhead, storedProfile, tailoredResume } from "../../workers/career-browser/prepare-ahead.ts";
 import { edgeRenderer, memoryResumeStore, type ResumeStore } from "../../supabase/functions/_shared/career_tailor.ts";
 import { careerHandler, type Chat, supabaseParity } from "../flow/handler.ts";
+import { answerOneByOne } from "../helpers/one_question.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const assertEquals = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -180,18 +181,12 @@ Deno.test({
         assertEquals(r.status, 200, r.reply);
         return { reply: r.reply, status: r.resultStatus ?? "" };
       };
-      // Each shown question's number, by its label, then "use N" for each.
+      // One question at a time (review of #360): each question with this label, as it comes up, answered with "use 1".
       const useAll = async (labels: string[]) => {
-        const shown = await say("what do you need from me");
-        assertEquals(shown.status, "shown", shown.reply);
-        const lines = shown.reply.split("\n");
-        for (const label of labels) {
-          const i = lines.findIndex((l) => /^\d+\./.test(l) && l.includes(label));
-          assert(i >= 0, `${label} is asked: ${shown.reply}`);
-          const used = await say(`use ${Number(/^(\d+)\./.exec(lines[i])![1])}`);
-          assert(/Saved, as drafted/.test(used.reply), `${label}: ${used.reply}`);
-        }
-        return shown.reply;
+        const r = await answerOneByOne((m) => say(m).then((x) => ({ reply: x.reply, resultStatus: x.status })), labels.map((l) => [l, "use 1"] as [string, string]));
+        for (const label of labels) assert(r.saved.includes("Saved, as drafted"), `${label}: ${r.saved}`);
+        assert(!/Nothing was saved|There's no draft/.test(r.saved), r.saved);
+        return r.shown;
       };
 
       await t.step("prepare: confirmed entries, no name or email on file: it asks for those once; no page is opened", async () => {

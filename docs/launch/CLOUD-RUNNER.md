@@ -175,6 +175,7 @@ marker (`career_apply_cloud_text_claims`) the authorization requires. The gate, 
 | `CLOUD_RUNNER_SECRET`, `CLOUD_DISPATCH_SECRET`, `CAREER_PREPARE_AHEAD_TOKEN` | the job/request tokens' key, the ticks' header, the chat's kick | generated (48 characters) |
 | `CLOUD_BRIDGE_URL`, `CAREER_PREPARE_AHEAD_URL` | `<project>/functions/v1/career-cloud-runner` and `.../prepare` | derived, never asked |
 | `CLOUD_RUNNER_ENABLED`, `CLOUD_PREPARE_ENABLED` | `on` turns sending / preparation on | not touched: off |
+| `UPMORE_SCRIPT_SUBMIT_LIVE` | `1` binds a real Greenhouse, Ashby or Lever form's scripted Submit; handed to both sandboxes. Every Ashby form needs it (no `<form>` post) | Ashby postings stop at `SUBMIT_DESTINATION_NOT_BOUND`: no card, no send |
 | `CLOUD_MAX_CONCURRENT`, `CLOUD_MAX_PER_PORTAL`, `CLOUD_MAX_STARTS_PER_TICK` | sending: global, per family, per tick | 2, 1, 2 (wave 1) |
 | `CLOUD_MAX_PER_PERSON_DAY`, `CLOUD_MAX_PER_SITE_MINUTE` | sending: per person per 24 h, per employer host per minute | no number (NO LIMITS) |
 | `CLOUD_PREPARE_MAX_CONCURRENT`, `CLOUD_PREPARE_STARTS_PER_TICK` | preparation: global, per tick | 2, 2 (wave 1) |

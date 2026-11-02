@@ -398,11 +398,12 @@ function pushWorld(rows: QuestionRow[]) {
   return { push, texts, store, rows };
 }
 
-Deno.test("WO-032/Q1 open questions are texted once a day at most, at most 5 a text, the rest counted", async () => {
+Deno.test("WO-032/Q1 open questions are texted once a day at most, one a text (review of #360), the rest counted", async () => {
   const w = pushWorld(Array.from({ length: 7 }, (_, i) => qrow({ id: String(i + 1) })));
   eq(await runQuestions({ now: NOW, open: async () => w.rows, push: w.push }), 1);
-  eq(w.texts[0].ids, ["1", "2", "3", "4", "5"]);
-  assert(w.texts[0].text.includes("2 more after these.") && w.texts[0].text.length <= 1600 && !/[*_#`]/.test(w.texts[0].text), w.texts[0].text);
+  eq(w.texts[0].ids, ["1"]);
+  assert(w.texts[0].text.includes("Question 1 of 7") && w.texts[0].text.includes("I'll ask the next one after you answer this.") &&
+    w.texts[0].text.length <= 1600 && !/[*_#`]/.test(w.texts[0].text), w.texts[0].text);
   eq(await runQuestions({ now: NOW, open: async () => w.rows, push: w.push }), 0, "the same day: nothing more");
   // A preparation still under way (a question in the last 10 minutes) waits until it settles.
   const s = pushWorld([qrow({ id: "1" }), qrow({ id: "2", created_at: iso(NOW - 60000) })]);
@@ -418,11 +419,14 @@ Deno.test("WO-032/Q2 an answered question is never asked again, nor one already 
   eq(await runQuestions({ now: NOW, open: async () => none.rows, push: none.push }), 0);
 });
 
-Deno.test("WO-032/Q3 the push makes the questions the thread's last word: the numbered answer goes to questionsTurn", async () => {
+Deno.test("WO-032/Q3 the push makes the question the thread's last word: the answer goes to questionsTurn, which asks the next", async () => {
   const w = pushWorld([qrow({ id: "1", label: "Will you require sponsorship?", options: ["Yes", "No"], type: "select" }), qrow({ id: "2", label: "When can you start?" })]);
   eq(await runQuestions({ now: NOW, open: async () => w.rows, push: w.push }), 1);
-  const r = await questionsTurn({ message: "1 no 2 in two weeks", userId: "U1", threadId: "T1", now: NOW + 60000, store: w.store });
-  eq(r?.status, "answered", JSON.stringify(r));
+  const r = await questionsTurn({ message: "no", userId: "U1", threadId: "T1", now: NOW + 60000, store: w.store });
+  eq(r?.status, "answered_next", JSON.stringify(r));
+  assert(r!.reply.includes("When can you start?"), r!.reply);
+  const r2 = await questionsTurn({ message: "in two weeks", userId: "U1", threadId: "T1", now: NOW + 120000, store: w.store });
+  eq(r2?.status, "answered", JSON.stringify(r2));
   eq(w.rows.map((q) => q.answer), ["No", "in two weeks"]);
 });
 

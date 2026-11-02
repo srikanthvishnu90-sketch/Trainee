@@ -27,6 +27,7 @@ import { prepareAhead, storedProfile, tailoredResume } from "../../workers/caree
 import { edgeRenderer, memoryResumeStore, type ResumeStore } from "../../supabase/functions/_shared/career_tailor.ts";
 import { ANON_KEY, careerHandler, type Chat, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
 import { fakeDocument } from "../flow/fake-dom.ts";
+import { answerOneByOne } from "../helpers/one_question.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const assertEquals = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -168,21 +169,12 @@ Deno.test({
         return done.map((d) => d.outcome);
       };
       const open = async () => await pg.sql(`select coalesce(string_agg(key, ',' order by key), '') from public.career_apply_questions where user_id = '${PERSON}' and state = 'open'`);
-      // "what do you need from me", then each shown question answered by its number, in their own words.
+      // One question at a time (review of #360): each shown question answered in their own words as it comes up.
       const answer = async (answers: [RegExp, string][]) => {
-        const shown = await say("what do you need from me");
-        assertEquals(shown.resultStatus, "shown", shown.reply);
-        const lines = shown.reply.split("\n");
-        const parts: string[] = [];
-        for (const [label, value] of answers) {
-          const line = lines.find((l) => /^\d+\./.test(l) && label.test(l));
-          assert(line, `${label} is asked: ${shown.reply}`);
-          parts.push(`${/^(\d+)\./.exec(line!)![1]} ${value}`);
-        }
-        const r = await say(parts.join("\n"));
-        if (Deno.env.get("E2E_DEBUG")) console.log(`SHOWN:\n${shown.reply}\nSENT: ${parts.join(" / ")}\nREPLY:\n${r.reply}`);
-        assert(!/doesn't fit|does not fit|isn't one of/i.test(r.reply), `their answers are taken: ${r.reply}`);
-        return { shown: shown.reply, saved: r.reply };
+        const r = await answerOneByOne(say, answers);
+        if (Deno.env.get("E2E_DEBUG")) console.log(`SHOWN:\n${r.shown}\nREPLIES:\n${r.saved}`);
+        assert(!/doesn't fit|does not fit|isn't one of/i.test(r.saved), `their answers are taken: ${r.saved}`);
+        return r;
       };
 
       await t.step("sign up and resume: shown each entry, they say it is theirs; each entry evidenced", async () => {

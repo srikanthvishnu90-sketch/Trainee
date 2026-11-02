@@ -87,8 +87,9 @@ Deno.test("WO-100/5 'what do you need from me' with no questions open names Plai
   const r = await questionsTurn({ message: "what do you need from me", userId: USER, threadId: "A", now: w.now, store: none, situation: s } as any);
   assert(r && !/Nothing is waiting on you/.test(r.reply) && /Plaid[^\n]*code/.test(r.reply) && /Jordan Lee/.test(r.reply) && /Figma: prepared, waiting for a yes or no/.test(r.reply), r?.reply);
   const q = await questionsTurn({ message: "what do you need from me", userId: USER, threadId: "A", now: w.now, store: w.questionStore as any, situation: s } as any);
-  assert(q && /^2 questions only you can answer/.test(q.reply) && /1\. Are you legally authorized/.test(q.reply) && /Also waiting on you:\n1\. Plaid/.test(q.reply), q?.reply);
-  assert(!/Also waiting on you:[\s\S]*answer 2 questions/.test(q!.reply), "the numbered questions are not listed twice");
+  // One question per message (review of #360): the first of the 2, then everything else only the person can do.
+  assert(q && /^Question 1 of 2 only you can answer/.test(q.reply) && /\nAre you legally authorized/.test(q.reply) && /Also waiting on you:\n1\. Plaid/.test(q.reply), q?.reply);
+  assert(!/Also waiting on you:[\s\S]*answer 2 questions/.test(q!.reply), "the questions are not listed twice");
 });
 
 Deno.test("WO-100/6 in a new thread, list_applications shows an application recorded in another thread", async () => {

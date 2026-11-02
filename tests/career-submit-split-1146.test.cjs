@@ -255,7 +255,7 @@ function fakeQuestionStore(rows, statements) {
 const QNOW = Date.parse("2026-10-25T16:46:00.000Z");
 async function qSay(store, message, offsetMs) {
   const r = await questionsTurn({ message, userId: "split-q", threadId: "t-split-q", now: QNOW + (offsetMs || 0), store });
-  if (r) store.setIntent(["shown", "partial"].includes(r.status) || r.status.startsWith("draft") ? QUESTIONS_INTENT : "career_apply_questions_answer");
+  if (r) store.setIntent(["shown", "partial", "answered_next"].includes(r.status) || r.status.startsWith("draft") ? QUESTIONS_INTENT : "career_apply_questions_answer");
   return r;
 }
 const CONTACT_TEXT = "My name is Rowan Ellery. My email is rowan.ellery@example.test. My phone is +1 555 010 0199.";
@@ -272,9 +272,11 @@ test("(b) HANDLER: name/email/phone are offered back word for word from the pers
   assert.ok(shown && shown.status === "shown", JSON.stringify(shown));
   assert.ok(shown.reply.includes(`"${CONTACT_TEXT}"`), `the offer quotes the person's exact words: ${shown.reply}`);
   assert.deepEqual(store.answers, [], "showing the offer writes nothing");
+  // One question at a time (review of #360): each draft is "use 1" on the question shown; the next is asked in the reply.
   for (const n of [1, 2, 3, 4]) {
-    const r = await qSay(store, `use ${n}`, n * 1000);
-    assert.ok(r && /Saved, as drafted/.test(r.reply), `use ${n} saves its draft: ${r && r.reply}`);
+    const r = await qSay(store, "use 1", n * 1000);
+    assert.ok(r && /Saved, as drafted/.test(r.reply), `draft ${n} saved: ${r && r.reply}`);
+    if (n < 4) assert.ok(/Next: /.test(r.reply) && r.reply.includes(`"${CONTACT_TEXT}"`), `the next question with its offer: ${r.reply}`);
   }
   assert.deepEqual(store.answers, [
     ["q-first", "Rowan"], ["q-last", "Ellery"],
@@ -311,11 +313,14 @@ const WA_QUESTIONS = () => [
 
 test("(c) HANDLER: a work-authorization statement is offered back in the person's own words, and only 'use N' writes it", async () => {
   const store = fakeQuestionStore(WA_QUESTIONS(), [{ text: WA_TEXT, at: "2026-10-24T14:00:00.000Z" }]);
-  const shown = await qSay(store, "what do you need from me", 0);
-  assert.ok(shown && shown.status === "shown", JSON.stringify(shown));
+  const first = await qSay(store, "what do you need from me", 0);
+  assert.ok(first && first.status === "shown", JSON.stringify(first));
+  // One question at a time: work authorization first (the statement does not answer it), "skip" moves to sponsorship.
+  const shown = await qSay(store, "skip", 500);
+  assert.ok(shown && shown.status === "answered_next", JSON.stringify(shown));
   assert.ok(shown.reply.includes(`"${WA_TEXT}"`), `the offer quotes the person's verbatim clause: ${shown.reply}`);
   assert.deepEqual(store.answers, [], "the offer alone writes nothing");
-  const used = await qSay(store, "use 2", 1000);
+  const used = await qSay(store, "use 1", 1000);
   assert.ok(used && /Saved, as drafted/.test(used.reply), used && used.reply);
   assert.deepEqual(store.answers, [["q-sp", "No"]],
     "the sponsorship answer the statement carries — needsSponsorship false — is what 'use N' writes; the work-authorization question the statement does not answer stays open");

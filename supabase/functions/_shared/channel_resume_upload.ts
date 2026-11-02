@@ -22,6 +22,10 @@ export const FILE_KIND_REPLY = "I can read a resume sent as a PDF or a Word (.do
 export const FILE_TOO_BIG_REPLY = "That file is over 10 MB, so I didn't download it. Send a smaller PDF or .docx, or paste your resume as text here.";
 export const FILE_DOWNLOAD_REPLY = "I couldn't download that file from Telegram just now, so I haven't read it. Send it again in a minute.";
 export const FILE_NO_TEXT_REPLY = "I couldn't read any text in that file (it may be a scan or an image), so nothing was saved. Send a PDF or .docx with selectable text, or paste your resume here.";
+// ONBOARDING ROUND 3 (2026-11-01): a damaged file (a PDF cut off mid-download, a .docx whose zip is broken) was told "it
+// may be a scan or an image", and the person rescanned a file that was never a scan. A file the reader could not open, or
+// one cut off before its end, is now said to be damaged; a whole file with no text is still said to be a scan.
+export const FILE_DAMAGED_REPLY = "I couldn't open that file: it looks damaged or incomplete, or it has no text in it, so nothing was saved. Save it again as a PDF or Word (.docx) file and send that, or paste your resume here.";
 export const FILE_EMPTY_REPLY = "That file is empty (0 bytes), so there was nothing to read and nothing was saved. Send the resume file again, or paste its text here.";
 export const FILE_LOCKED_REPLY = "That PDF is locked with a password (or protected against copying), so I couldn't read its text and nothing was saved. Save an unlocked copy and send that, or paste your resume here. Never send me the password.";
 export const fileSecretReply = (kinds: string[]) => `Your file has ${kinds.join(" and ")} in it, so I didn't keep the file or read anything from it. Remove ${kinds.length > 1 ? "them" : "it"} from the file and send it again, or paste your resume here without ${kinds.length > 1 ? "them" : "it"}.`;
@@ -79,6 +83,13 @@ const encryptedPdf = (bytes: Uint8Array) => {
   return /\/Encrypt\s+\d+\s+\d+\s+R|\/Encrypt\s*<</.test(tail) || /\/Encrypt\s+\d+\s+\d+\s+R/.test(head);
 };
 
+// A file cut off (a download that stopped, a copy that failed): a PDF with no end-of-file marker, a Word file with no end of
+// its zip directory or no document part.
+const cutOff = (kind: FileKind, bytes: Uint8Array) => {
+  const tail = new TextDecoder("latin1").decode(bytes.subarray(Math.max(0, bytes.length - 1024)));
+  if (kind === "pdf") return !/%%EOF\s*$/.test(tail);
+  return !tail.includes("PK\u0005\u0006") || !new TextDecoder("latin1").decode(bytes).includes("word/document.xml");
+};
 // The file's text, line by line, by code. Node built-ins (zlib, Buffer) are loaded on first use, as edgeRenderer loads them.
 // deno-lint-ignore no-explicit-any
 let reader: Promise<any> | null = null;
@@ -224,10 +235,11 @@ export async function ingestResumeFile(o: {
   if (!got.bytes.length) return { ok: false, reply: FILE_EMPTY_REPLY, why: "empty" };
   const kind = fileKind(o.doc.name, o.doc.mime, got.bytes);
   if (!kind) return { ok: false, reply: FILE_KIND_REPLY, why: "kind" };
-  let text = "";
-  try { text = await fileText(kind, got.bytes); } catch (e) { console.error("resume file: not read:", (e as Error)?.message ?? e); }
+  let text = "", threw = false;
+  try { text = await fileText(kind, got.bytes); } catch (e) { threw = true; console.error("resume file: not read:", (e as Error)?.message ?? e); }
   if (text.replace(/\s+/g, "").length < 80) {
     if (kind === "pdf" && encryptedPdf(got.bytes)) return { ok: false, reply: FILE_LOCKED_REPLY, why: "locked" };
+    if (threw || cutOff(kind, got.bytes)) return { ok: false, reply: FILE_DAMAGED_REPLY, why: "damaged" };
     return { ok: false, reply: FILE_NO_TEXT_REPLY, why: "no_text" };
   }
   // ONBOARDING ROUND 2: an identity number, a card number or a password in the file. The text the chat reads had it
@@ -235,7 +247,7 @@ export async function ingestResumeFile(o: {
   // number in it. Now the file is not kept and nothing is read from it; the person is told what to remove.
   const found = redactIdentity(text).removed;
   if (found.length) {
-    const name: Record<string, string> = { ssn: "a Social Security number", card: "a card number", account: "an account number", password: "a password", code: "a one-time code" };
+    const name: Record<string, string> = { ssn: "a Social Security number", card: "a card number", account: "an account number", password: "a password", code: "a one-time code", key: "a key or token" };
     return { ok: false, reply: fileSecretReply([...new Set(found.map((k) => name[k] ?? "a private number"))]), why: "secret" };
   }
   const message = resumeMessage(text);
@@ -274,8 +286,14 @@ export function supabaseUploadRecorder(admin: any) {
 export async function fileUploadFor(admin: any, userId: string, upload: Upload | null): Promise<Upload | null> {
   if (!upload || upload.kind !== "message") return upload;
   try {
-    const r = await admin.from("career_resume_uploads").select("id,provider_ref,sha256").eq("user_id", userId).eq("message_sha256", upload.sha256)
-      .order("created_at", { ascending: false }).limit(1);
+    // ONBOARDING ROUND 3 (2026-11-01, flow-scenarios-onboarding-r3.test.ts): two files whose text reads the same (a PDF and
+    // the .docx it was saved from, sent seconds apart) give the same message. The newest upload was taken, so a yes to the
+    // entries the FIRST file showed (the second one's turn refused, or still on its way) recorded the second file, one
+    // the person was never shown, as their resume. The file is the newest upload received no later than the message
+    // that showed its entries (an upload is stored before its message; a resend is stored again as new: 20261031070000).
+    let q = admin.from("career_resume_uploads").select("id,provider_ref,sha256").eq("user_id", userId).eq("message_sha256", upload.sha256);
+    if (upload.at) q = q.lte("created_at", upload.at);
+    const r = await q.order("created_at", { ascending: false }).limit(1);
     const row = r.error ? null : r.data?.[0];
     if (!row) return upload;
     return { kind: "file", ref: `${row.provider_ref} (career_resume_uploads:${row.id})`, sha256: row.sha256, text: upload.text };

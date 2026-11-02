@@ -25,7 +25,11 @@ export function bindFields(fields: any[]) {
   for (const [name, rows] of groups) {
     const f = rows[0], group = rows.length > 1 && rows.every((r) => ["radio", "checkbox"].includes(r.inputType));
     if (rows.length > 1 && !group) throw fail("AMBIGUOUS_FIELD_NAME: " + name);
-    const label = group ? (f.groupLabel || f.label) : f.label, type = f.tag === "select" ? "select" : f.inputType;
+    // A group the page gives no question of its own is named by all its choices ("Yes - I consent ... / No - I do not
+    // consent ..."), never by its first option alone: the card reads "<question>: <the choice sent>", and a first option
+    // read as the question made "Yes - I consent ...: No - I do not consent ..." (owner review, 2026-10-31).
+    const label = group ? (f.groupLabel || rows.map((r) => r.label).filter(Boolean).join(" / ") || f.label) : f.label,
+      type = f.tag === "select" ? "select" : f.inputType;
     // An option is chosen by its value; where the page gives its options no distinct values (Ashby's radios all read
     // "on"), the option's own text is its value, or every answer would land on the first option (WO-031).
     const values = rows.map((r) => r.optionValue ?? r.label);

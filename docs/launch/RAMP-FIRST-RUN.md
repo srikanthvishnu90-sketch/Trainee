@@ -25,6 +25,9 @@ on it (`RAMP_PERSONA=<file outside the repo> deno test ... tests/architect/flow-
 
 ## The run
 
+0. Before it: the architect's dry run on the live page (`scripts/career/ramp-dry-run.ts`, never submits) and the trace,
+   with what he provides and every setting by submitter: docs/architect/RAMP-APPLY-TRACE-2026-10-31.md. Whichever sends it,
+   its host needs `UPMORE_SCRIPT_SUBMIT_LIVE=1` (Ashby has no form post); without it no card is ever prepared.
 1. Go-live with the hosted runner wired (docs/launch/CLOUD-RUNNER.md), the resume rule and Telegram card buttons from #194.
 2. Choose option (a) or (b) in CLOUD-RUNNER.md, "The owner's Ramp run and the gate".
 3. In Telegram: send the resume file, say it is his, then "apply me to this: <the link>". Answer the questions by number.

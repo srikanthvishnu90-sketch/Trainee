@@ -83,6 +83,20 @@ async function sha256Hex(s: string): Promise<string> {
   const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+// Whether a refused send consent's grant may be revoked at Google: only when the signed-in address is in NO
+// user_oauth_connections row (google_career or gmail) of any person, this person's own included. Revoking ends the whole
+// grant of that account for Trainee, so an account anyone has connected keeps its grant. Any doubt (no address, a read
+// error) is a no: never revoke on a guess.
+export async function sendRevokeAllowed(admin: Admin, email: string | null): Promise<boolean> {
+  if (!email || !email.trim()) return false;
+  const forms = [...new Set([email, email.trim(), email.trim().toLowerCase()])];
+  try {
+    const r = await admin.from("user_oauth_connections").select("user_id,provider,email").in("provider", ["google_career", "gmail"]).in("email", forms);
+    if (r.error || !Array.isArray(r.data)) return false;
+    return r.data.length === 0;
+  } catch { return false; }
+}
+
 // The send consent's checks, before anything is stored: the person has a connection of this provider; the account that
 // signed in is that connection's account and the one the state was bound to; the grant keeps every permission the
 // connection had and adds gmail.send. null: all hold.
@@ -119,7 +133,10 @@ export async function googleCallback(d: GoogleCallbackDeps, o: { code: string; s
   if (o.bind) {
     let why: SendRefusal | null;
     try { why = await sendConsentRefusal(d.admin, { userId: o.userId, provider: o.provider, bind: o.bind, email, scopes }); } catch { why = "send_no_connection"; }
-    if (why) return { ok: false, why, email, revoke: await revokeAtGoogle({ fetch: d.fetch, sleep: d.sleep }, secret) };
+    // Google keeps ONE grant per person and app: revoking this token ends every token of that account for Trainee. So the
+    // new grant is revoked only when no Trainee connection uses that Google account at all (sendRevokeAllowed); otherwise
+    // nothing is stored and nothing revoked, and the account's existing grant (this person's or another's) keeps working.
+    if (why) return { ok: false, why, email, ...(await sendRevokeAllowed(d.admin, email) ? { revoke: await revokeAtGoogle({ fetch: d.fetch, sleep: d.sleep }, secret) } : {}) };
   }
   let c: CommitOutcome;
   try { c = await commitGrant(d.admin, { userId: o.userId, provider: o.provider, secret, email, scopes, now: d.now() }); } catch { return { ok: false, why: "store", email }; }

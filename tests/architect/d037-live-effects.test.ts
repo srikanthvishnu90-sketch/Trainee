@@ -209,26 +209,54 @@ Deno.test("D-037/2d: incremental authorization: the normal connect never asks fo
 
 // ------------------------------------------------------------------------------------------------ the send consent's callback
 const SECRET = "s".repeat(40), NOW = 1_800_000_000_000, ALICE = "alice@example.test";
-async function sendCallback(o: { connected: { email: string; scopes: string } | null; signedIn: string; granted: string; bindTo?: string }) {
-  const db = new MemDb();
-  db.users.add(U);
-  if (o.connected) {
-    db.rows("user_oauth_connections").push({ user_id: U, provider: "google_career", vault_name: `oauth_google_career_${U}`, email: o.connected.email, scopes: o.connected.scopes, connected_at: "2026-10-01T00:00:00Z" });
-    db.vault.set(`oauth_google_career_${U}`, JSON.stringify({ access_token: "OLD-AT", refresh_token: "OLD-RT" }));
-  }
-  const revoked: string[] = [];
-  const f = (async (input: any, init?: any) => {
+// A fake Google that keeps ONE grant per account and app, as Google does: revoking any token of an account ends every
+// token of that account (the person's own earlier grant included).
+function fakeGoogle(o: { signedIn: string; granted: string }) {
+  const owner = new Map<string, string>(), dead = new Set<string>(), revokes: string[] = [];
+  const own = (tok: string, account: string) => { owner.set(tok, account.trim().toLowerCase()); return tok; };
+  let n = 0;
+  const fetch = (async (input: any, init?: any) => {
     const url = String(input instanceof Request ? input.url : input);
-    if (url.startsWith("https://oauth2.googleapis.com/token")) return Response.json({ access_token: "NEW-AT", refresh_token: "NEW-RT", expires_in: 3600, scope: o.granted });
+    if (url.startsWith("https://oauth2.googleapis.com/token")) {
+      n++;
+      return Response.json({ access_token: own(`NEW-AT-${n}`, o.signedIn), refresh_token: own(`NEW-RT-${n}`, o.signedIn), expires_in: 3600, scope: o.granted });
+    }
     if (url.startsWith("https://www.googleapis.com/oauth2/v2/userinfo")) return Response.json({ email: o.signedIn });
-    if (url.startsWith(GOOGLE_REVOKE)) { revoked.push(String(init?.body ?? url)); return new Response("", { status: 200 }); }
+    if (url.startsWith(GOOGLE_REVOKE)) {
+      const body = String(init?.body ?? url), tok = new URLSearchParams(body.includes("=") ? body : new URL(url).search).get("token") ?? "";
+      const acct = owner.get(tok);
+      revokes.push(acct ?? "?");
+      if (acct) dead.add(acct);
+      return new Response("", { status: 200 });
+    }
     throw new Error(`unexpected ${url}`);
   }) as typeof fetch;
+  const works = (tok: string) => owner.has(tok) && !dead.has(owner.get(tok)!);
+  return { fetch, own, works, revokes };
+}
+
+const Q = "7b0f8f8e-6a43-4a49-9d2c-00000000000q".replace("q", "9");
+async function sendCallback(o: { connected: { email: string; scopes: string } | null; signedIn: string; granted: string; bindTo?: string; others?: { user: string; email: string }[] }) {
+  const db = new MemDb();
+  db.users.add(U);
+  const g = fakeGoogle({ signedIn: o.signedIn, granted: o.granted });
+  const tokens: Record<string, string> = {};
+  if (o.connected) {
+    db.rows("user_oauth_connections").push({ user_id: U, provider: "google_career", vault_name: `oauth_google_career_${U}`, email: o.connected.email, scopes: o.connected.scopes, connected_at: "2026-10-01T00:00:00Z" });
+    tokens.mine = g.own("OLD-AT-P", o.connected.email);
+    db.vault.set(`oauth_google_career_${U}`, JSON.stringify({ access_token: tokens.mine, refresh_token: g.own("OLD-RT-P", o.connected.email) }));
+  }
+  for (const x of o.others ?? []) {
+    db.users.add(x.user);
+    db.rows("user_oauth_connections").push({ user_id: x.user, provider: "google_career", vault_name: `oauth_google_career_${x.user}`, email: x.email, scopes: `openid email https://www.googleapis.com/auth/gmail.readonly`, connected_at: "2026-10-01T00:00:00Z" });
+    tokens[x.user] = g.own(`AT-${x.user}`, x.email);
+    db.vault.set(`oauth_google_career_${x.user}`, JSON.stringify({ access_token: tokens[x.user] }));
+  }
   const state = await issueState(U, "career", SECRET, NOW, await emailBind(o.bindTo ?? ALICE));
   const v = await verifyState(state, SECRET, NOW);
-  const out = await googleCallback({ admin: db as any, fetch: f, now: () => NOW, clientId: "cid", clientSecret: "cs", redirectUri: "https://x.example/cb", grantedFallback: () => "", sleep: async () => {} },
+  const out = await googleCallback({ admin: db as any, fetch: g.fetch, now: () => NOW, clientId: "cid", clientSecret: "cs", redirectUri: "https://x.example/cb", grantedFallback: () => "", sleep: async () => {} },
     { code: "c1", state, userId: U, provider: "google_career", bind: v.bind });
-  return { out, row: db.rows("user_oauth_connections").find((r) => r.user_id === U) ?? null, vault: db.vault.get(`oauth_google_career_${U}`) ?? null, revoked };
+  return { out, row: db.rows("user_oauth_connections").find((r) => r.user_id === U) ?? null, vault: db.vault.get(`oauth_google_career_${U}`) ?? null, revokes: g.revokes, works: g.works, tokens };
 }
 const READ = "https://www.googleapis.com/auth/gmail.readonly";
 
@@ -236,28 +264,69 @@ Deno.test("D-037/2f: the send consent is bound to the connected account: the hap
   const r = await sendCallback({ connected: { email: ALICE, scopes: `openid email ${READ}` }, signedIn: "Alice@Example.test", granted: `openid email ${READ} ${GMAIL_SEND}` });
   eq(r.out.ok, true, JSON.stringify(r.out));
   ok(r.row?.scopes.includes(GMAIL_SEND) && r.row?.scopes.includes(READ) && r.row?.email.toLowerCase() === ALICE, `the same account, now with send: ${JSON.stringify(r.row)}`);
-  eq(r.revoked, [], "nothing revoked");
+  eq(r.revokes, [], "nothing revoked");
 });
 
-Deno.test("D-037/2g: a send consent from another account, without a connection, or dropping a permission stores nothing and revokes the new grant", async () => {
-  const cases = [
-    { name: "a different account (bob picked in Google's chooser, or a forwarded link)", o: { connected: { email: ALICE, scopes: `openid email ${READ}` }, signedIn: "bob@example.test", granted: `openid email ${READ} ${GMAIL_SEND}` }, why: "send_other_account" },
-    { name: "the state bound to another address than the connection", o: { connected: { email: ALICE, scopes: `openid email ${READ}` }, signedIn: ALICE, granted: `openid email ${READ} ${GMAIL_SEND}`, bindTo: "carol@example.test" }, why: "send_other_account" },
-    { name: "no connection", o: { connected: null, signedIn: ALICE, granted: `openid email ${READ} ${GMAIL_SEND}` }, why: "send_no_connection" },
-    { name: "the old read permission missing", o: { connected: { email: ALICE, scopes: `openid email ${READ}` }, signedIn: ALICE, granted: `openid email ${GMAIL_SEND}` }, why: "send_scopes" },
-    { name: "send not granted", o: { connected: { email: ALICE, scopes: `openid email ${READ}` }, signedIn: ALICE, granted: `openid email ${READ}` }, why: "send_scopes" },
-  ] as const;
-  for (const c of cases) {
-    const r = await sendCallback(c.o as any);
-    eq([r.out.ok, (r.out as any).why], [false, c.why], c.name);
-    eq(r.revoked.length > 0, true, `${c.name}: the grant Google just made is revoked`);
-    ok(r.revoked.every((b) => !/OLD-/.test(b)), `${c.name}: the person's own grant is not touched`);
-    if (c.o.connected) {
-      eq([r.row?.email, r.row?.scopes], [c.o.connected.email, c.o.connected.scopes], `${c.name}: the connection is unchanged`);
-      ok(/OLD-AT/.test(r.vault ?? ""), `${c.name}: the stored access is unchanged`);
-    } else eq([r.row, r.vault], [null, null], `${c.name}: nothing stored`);
-    ok(SEND_REFUSED_WORDS(c.why as any, ALICE).startsWith("Sending wasn't allowed"), "the landing says why");
+Deno.test("D-037/2g: a refused send consent stores nothing, leaves the connection as it was, and never ends a grant anyone uses", async () => {
+  const keep = (r: Awaited<ReturnType<typeof sendCallback>>, c: { email: string; scopes: string }, name: string) => {
+    eq([r.row?.email, r.row?.scopes], [c.email, c.scopes], `${name}: the connection is unchanged`);
+    ok(/OLD-AT-P/.test(r.vault ?? ""), `${name}: the stored access is unchanged`);
+  };
+  const conn = { email: ALICE, scopes: `openid email ${READ}` };
+
+  // The person unticks send, or drops read, on their own connected account: nothing stored, nothing revoked, and their
+  // read grant (mail tracking) keeps working. Google would end the whole grant on a revoke.
+  for (const [name, granted] of [["send not granted", `openid email ${READ}`], ["the old read permission missing", `openid email ${GMAIL_SEND}`]] as const) {
+    const r = await sendCallback({ connected: conn, signedIn: ALICE, granted });
+    eq([r.out.ok, (r.out as any).why], [false, "send_scopes"], name);
+    eq(r.revokes, [], `${name}: nothing revoked (it is the person's own account)`);
+    ok(r.works(r.tokens.mine), `${name}: alice's stored token still works`);
+    keep(r, conn, name);
   }
+
+  // bob@ picked in Google's chooser, while Trainee user Q has bob@ connected: refused, and Q's grant is untouched.
+  {
+    const r = await sendCallback({ connected: conn, signedIn: "bob@example.test", granted: `openid email ${READ} ${GMAIL_SEND}`, others: [{ user: Q, email: "bob@example.test" }] });
+    eq([r.out.ok, (r.out as any).why], [false, "send_other_account"]);
+    eq(r.revokes, [], "bob@ is connected to Q: nothing revoked");
+    ok(r.works(r.tokens[Q]), "Q's stored token still works");
+    ok(r.works(r.tokens.mine), "and so does alice's");
+    keep(r, conn, "other account, connected elsewhere");
+  }
+  // bob@ connected to no one: the grant Google just made is revoked, and only bob's tokens end.
+  {
+    const r = await sendCallback({ connected: conn, signedIn: "bob@example.test", granted: `openid email ${READ} ${GMAIL_SEND}` });
+    eq([r.out.ok, (r.out as any).why], [false, "send_other_account"]);
+    ok(r.revokes.length > 0 && r.revokes.every((a) => a === "bob@example.test"), `only bob's grant is revoked: ${r.revokes}`);
+    ok(r.works(r.tokens.mine), "alice's stored token still works");
+    keep(r, conn, "other account, connected nowhere");
+  }
+  // No connection at all, and the signed-in account connected nowhere: revoked, nothing stored.
+  {
+    const r = await sendCallback({ connected: null, signedIn: ALICE, granted: `openid email ${READ} ${GMAIL_SEND}` });
+    eq([r.out.ok, (r.out as any).why], [false, "send_no_connection"]);
+    ok(r.revokes.length > 0, "an unused grant is revoked");
+    eq([r.row, r.vault], [null, null], "nothing stored");
+  }
+  // The state bound to another address than the connection: refused; alice is connected (to P), so nothing revoked.
+  {
+    const r = await sendCallback({ connected: conn, signedIn: ALICE, granted: `openid email ${READ} ${GMAIL_SEND}`, bindTo: "carol@example.test" });
+    eq([r.out.ok, (r.out as any).why], [false, "send_other_account"]);
+    eq(r.revokes, []);
+    ok(r.works(r.tokens.mine));
+    keep(r, conn, "bound elsewhere");
+  }
+  for (const why of ["send_no_connection", "send_other_account", "send_scopes"] as const) ok(SEND_REFUSED_WORDS(why, ALICE).startsWith("Sending wasn't allowed"), "the landing says why");
+});
+
+Deno.test("D-037/2h: an old send link used after the person reconnected another account cannot put the previous account back", async () => {
+  // P made a send link while alice@ was connected, then reconnected bob@ within the link's 10 minutes; the old link is then
+  // opened and alice@ signs in. The connection is bob@ now, so the link's account is not the connected one: refused.
+  const now = { email: "bob@example.test", scopes: `openid email ${READ}` };
+  const r = await sendCallback({ connected: now, signedIn: ALICE, granted: `openid email ${READ} ${GMAIL_SEND}`, bindTo: ALICE });
+  eq([r.out.ok, (r.out as any).why], [false, "send_other_account"]);
+  eq([r.row?.email, r.row?.scopes], [now.email, now.scopes], "the connection stays bob@, as the person last set it");
+  ok(r.works(r.tokens.mine), "bob's stored token still works");
 });
 
 Deno.test("D-037/2e: a send refused for want of gmail.send offers the person the 'allow sending' link, and sends nothing", async () => {

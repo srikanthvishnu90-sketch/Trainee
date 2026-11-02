@@ -82,14 +82,17 @@ export const RELEASE_CONFIG_PATH = "supabase/functions/agent-chat/release_config
 // secrets are missing: it then answers "needs setup" and starts nothing (cloud_runner_http.ts). The three reply rewriters
 // stay off until each is measured (D-037 condition 3; docs/architect/RELEASE-FLAGS-2026-11-01.md).
 //
-//   CAREER_BATCH_EXECUTOR       batch asks handed to the worker's executor (which submits only what the person approved)
 //   UPMORE_SCRIPT_SUBMIT_LIVE   the cloud sandbox presses Submit on an approved application (release value "1")
 //   CLOUD_RUNNER_ENABLED        the cloud runner's send tick; CLOUD_PREPARE_ENABLED its preparation tick
 //   CAREER_EMAIL_SEND           an approved apply-by-email or follow-up email from the person's Gmail
 //   CAREER_OUTREACH_SEND        the scheduled send of approved outreach from the person's Gmail
 //   CAREER_SEND_RAIL            the sending rail for every approved email (one recipient, the person's own account)
-//   GOOGLE_APPROVED_EXTRA_SCOPES  gmail.send asked for at connect. Google has not verified the scope: until it does, only the
-//                               Google test users the owner adds in the Google Cloud console can grant it (his step).
+//   gmail.send is never asked for at the normal connect (it is not in the verification submission: an unverified scope
+//   would warn every read-only connect). It is asked for incrementally, only when the person approves their first send:
+//   the chat answers "to send this from your Gmail, allow sending: <link>", a connect link with reason "send" whose consent
+//   asks for gmail.send alone with include_granted_scopes (trainee-connect/store.ts). Google has not verified the scope:
+//   until it does, only the Google test users the owner adds in the Google Cloud console can grant it (his step).
+//   GOOGLE_APPROVED_EXTRA_SCOPES stays the owner's list of scopes Google approved (several allowed), not a release flag.
 export const RELEASE_FLAGS: Readonly<Record<string, string>> = Object.freeze({
   CAREER_TEXTING_NATIVE: "on",
   CAREER_NETWORKING_DRAFT: "on",
@@ -99,14 +102,12 @@ export const RELEASE_FLAGS: Readonly<Record<string, string>> = Object.freeze({
   CAREER_BRIEF_DIGEST: "on",
   CAREER_OUTREACH_FOLLOWUPS: "on",
   CAREER_INTRO_REMINDERS: "on",
-  CAREER_BATCH_EXECUTOR: "on",
   UPMORE_SCRIPT_SUBMIT_LIVE: "1",
   CLOUD_RUNNER_ENABLED: "on",
   CLOUD_PREPARE_ENABLED: "on",
   CAREER_EMAIL_SEND: "on",
   CAREER_OUTREACH_SEND: "on",
   CAREER_SEND_RAIL: "on",
-  GOOGLE_APPROVED_EXTRA_SCOPES: "https://www.googleapis.com/auth/gmail.send",
 });
 
 // D-037: the database switches the release serves on (public.career_cloud_settings; the database reads anything but 'on' as
@@ -124,6 +125,7 @@ export const RELEASE_DB_SWITCHES: Readonly<Record<string, "on">> = Object.freeze
 export const RELEASE_PENDING: Readonly<Record<string, string>> = Object.freeze({
   CAREER_PLANNER: "measured first: the task eval (brain-eval suite=tasks), planner on against off, and #371's fix (a crisis message with two asks reaches the 988 reply before the planner; planner reminders are delivered) landed",
   CAREER_CRISIS_MODERATION: "reader pending #354: no code at this SHA reads it, so it is not reported as a live safety layer",
+  CAREER_BATCH_EXECUTOR: "executor not deployed: nothing in production loads workers/career-browser/batch-executor.cjs, so a batch ask would commit an intent nobody runs (D-007, WO-106)",
 });
 
 // Switches the release config does not turn on: reply words no measurement covers yet (D-037 condition 3: each rewriter goes

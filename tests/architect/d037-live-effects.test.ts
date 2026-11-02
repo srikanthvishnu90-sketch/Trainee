@@ -10,6 +10,10 @@ import { mailHash, queueApproved, sendRailOn } from "../../supabase/functions/_s
 import { approvedExtras, GMAIL_SEND, requestableScopes } from "../../supabase/functions/_shared/google_scopes.ts";
 import { applyHereAsk } from "../../supabase/functions/_shared/apply_here.ts";
 import { inventedFact, REWRITERS, side, verdict } from "../../evals/career/rewriters/run.ts";
+import { pgBinDir, startPg } from "../flow/pg.ts";
+import { RELEASE_PENDING } from "../../supabase/functions/agent-chat/release_config.ts";
+import { SEND_CONSENT_SCOPES, SUBMITTED_SCOPES } from "../../supabase/functions/_shared/google_scopes.ts";
+import { supabaseConnectDeps } from "../../supabase/functions/trainee-connect/store.ts";
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -23,14 +27,18 @@ const U = "u-d037";
 Deno.test("D-037/1a: the database switches the release turns on are written by go-live, after the claim guards, with a kill switch", async () => {
   eq(Object.keys(RELEASE_DB_SWITCHES).sort(), ["APPLY_VM", "CAREER_AGENT_SUBMIT", "CAREER_CLOUD_APPLY"]);
   const sql = await text("scripts/launch/release-db-switches.sql");
-  const keys = [...sql.matchAll(/\('([A-Z_]+)', :'v'\)/g)].map((m) => m[1]).sort();
+  const keys = [...new Set([...sql.matchAll(/\('([A-Z_]+)', :'v'\)/g)].map((m) => m[1]))].sort();
   eq(keys, Object.keys(RELEASE_DB_SWITCHES).sort(), "the SQL writes exactly RELEASE_DB_SWITCHES");
   ok(!/\b(create|alter|drop)\b/i.test(sql.replace(/^--.*$/gm, "")), "values only, never schema");
   const sh = await text("scripts/launch/trainee-go-live.sh");
-  const guards = sh.indexOf('-f scripts/launch/verify-claim-guards.sql" "${P[@]}"'), write = sh.indexOf('-f scripts/launch/release-db-switches.sql" "${P[@]}"');
+  const guardLine = sh.split("\n").find((l) => l.includes('run "psql *** -X -q -v ON_ERROR_STOP=1 -f scripts/launch/verify-claim-guards.sql"')) ?? "";
+  ok(guardLine && !/\|\||;\s*true|\btrue\s*$/.test(guardLine.replace(/"[^"]*"/g, "")), `the claim-guard check is never softened (no || or || true): ${guardLine}`);
+  const guards = sh.indexOf(guardLine), write = sh.indexOf('-f scripts/launch/release-db-switches.sql" "${P[@]}"');
   ok(guards > 0 && write > guards, "the switches are written only after every claim guard is verified in place");
-  ok(/REAL_SUBMIT="on"/.test(sh) && /--real-submit\) shift; REAL_SUBMIT=/.test(sh), "on by default; --real-submit off is the kill switch");
-  ok(/\[\[ "\$REAL_SUBMIT" == on \|\| "\$REAL_SUBMIT" == off \]\] \|\| fail/.test(sh), "any other value stops the run");
+  ok(/^REAL_SUBMIT=""$/m.test(sh) && /--real-submit\) shift; REAL_SUBMIT=/.test(sh), "unset by default: a plain go-live overwrites nothing");
+  ok(/if \[\[ -z "\$REAL_SUBMIT" \]\]; then RS_V=on; RS_OVER=false; else RS_V="\$REAL_SUBMIT"; RS_OVER=true; fi/.test(sh), "only an explicit --real-submit overwrites");
+  ok(/\[\[ -z "\$REAL_SUBMIT" \|\| "\$REAL_SUBMIT" == on \|\| "\$REAL_SUBMIT" == off \]\] \|\| fail/.test(sh), "any other value stops the run");
+  ok(!/--brain\)[^\n]*REAL_SUBMIT/.test(sh), "--brain (the emergency rollback) never touches real submit");
 });
 
 const RUNNER_BASE = { SUPABASE_URL: "https://x.supabase.test", SUPABASE_SERVICE_ROLE_KEY: "svc", CLOUD_RUNNER_SECRET: "r".repeat(40),
@@ -75,6 +83,51 @@ Deno.test("D-037/1d: LinkedIn, Indeed and Handshake are never applied on; a capt
   for (const f of Object.keys(RELEASE_FLAGS)) ok(!/LINKEDIN|INDEED|CAPTCHA/.test(f), `${f} is not a LinkedIn, Indeed or captcha switch`);
 });
 
+Deno.test({ name: "D-037/1a': on Postgres: the owner's 'off' survives a plain go-live (and --brain router); only an explicit --real-submit overwrites", sanitizeResources: false, sanitizeOps: false, async fn() {
+  const CI = Deno.env.get("CI") === "true";
+  if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 binaries in CI"); console.log("NOT_RUN locally: no Postgres"); return; }
+  if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root (initdb)"); return; }
+  const pg = await startPg();
+  try {
+    const run = async (v: string, overwrite: boolean) => {
+      const p = await new Deno.Command(`${pgBinDir()}/psql`, { args: ["-X", "-q", "-h", pg.host, "-p", String(pg.port), "-U", "postgres", "-d", "postgres",
+        "-v", `v=${v}`, "-v", `overwrite=${overwrite}`, "-f", `${ROOT}/scripts/launch/release-db-switches.sql`], stdout: "piped", stderr: "piped" }).output();
+      ok(p.success, new TextDecoder().decode(p.stderr));
+    };
+    const rows = async () => (await pg.sql("select string_agg(key || '=' || value, ',' order by key) from public.career_cloud_settings where key in ('APPLY_VM','CAREER_AGENT_SUBMIT','CAREER_CLOUD_APPLY')")).trim();
+    await pg.sql("delete from public.career_cloud_settings where key in ('APPLY_VM','CAREER_AGENT_SUBMIT','CAREER_CLOUD_APPLY'); insert into public.career_cloud_settings (key, value) values ('CAREER_AGENT_SUBMIT', 'off')");
+    await run("on", false); // a plain go-live, as trainee-go-live.sh runs it with REAL_SUBMIT unset (also under --brain router)
+    eq(await rows(), "APPLY_VM=on,CAREER_AGENT_SUBMIT=off,CAREER_CLOUD_APPLY=on", "the owner's off is kept; only missing rows are written on");
+    await run("on", false);
+    eq(await rows(), "APPLY_VM=on,CAREER_AGENT_SUBMIT=off,CAREER_CLOUD_APPLY=on", "and again on the next go-live");
+    await run("off", true); // --real-submit off
+    eq(await rows(), "APPLY_VM=off,CAREER_AGENT_SUBMIT=off,CAREER_CLOUD_APPLY=off");
+    await run("on", false);
+    eq(await rows(), "APPLY_VM=off,CAREER_AGENT_SUBMIT=off,CAREER_CLOUD_APPLY=off", "a plain go-live after the kill switch changes nothing");
+    await run("on", true); // --real-submit on
+    eq(await rows(), "APPLY_VM=on,CAREER_AGENT_SUBMIT=on,CAREER_CLOUD_APPLY=on", "only an explicit --real-submit on turns them back on");
+  } finally { await pg.stop(); }
+} });
+
+Deno.test("D-037/1e: the batch executor stays off while nothing in production loads it", async () => {
+  ok(!("CAREER_BATCH_EXECUTOR" in RELEASE_FLAGS) && /executor not deployed/.test(RELEASE_PENDING.CAREER_BATCH_EXECUTOR ?? ""), "pending: executor not deployed");
+  // Entry points that run in production: every edge function's index, the launch scripts, the workflows, the worker services.
+  const roots = ["supabase/functions", "scripts/launch", ".github/workflows", "workers"];
+  const loaders: string[] = [];
+  // A load, not a mention: require/import of it, or a command that runs it (comments are skipped).
+  const LOADS = /require\(\s*["'][^"']*batch-executor|from\s+["'][^"']*batch-executor|import\(\s*["'][^"']*batch-executor|\b(?:node|deno run[^\n]*)\s+\S*batch-executor/;
+  const walk = async (d: string) => {
+    for await (const e of Deno.readDir(`${ROOT}/${d}`)) {
+      const p = `${d}/${e.name}`;
+      if (e.isDirectory) await walk(p);
+      else if (p !== "workers/career-browser/batch-executor.cjs" && !/test/.test(e.name) && LOADS.test((await Deno.readTextFile(`${ROOT}/${p}`).catch(() => "")).split("\n").filter((l) => !/^\s*(\/\/|\*|#|--)/.test(l)).join("\n"))) loaders.push(p);
+    }
+  };
+  for (const d of roots) await walk(d);
+  ok(LOADS.test(`const x = require("./batch-executor.cjs")`) && LOADS.test("node workers/career-browser/batch-executor.cjs"), "the scan sees a real load (mutation check)");
+  eq(loaders.filter((p) => !/\.md$/.test(p)), [], "nothing in production loads the executor; when something does, move CAREER_BATCH_EXECUTOR into RELEASE_FLAGS");
+});
+
 // ------------------------------------------------------------------------------------------------ 2. send as the person
 const conn = (scopes: string[]) => ({ vault_name: `oauth_google_career_${U}`, scopes });
 function tokenDeps(scopes: string[], reads: string[]) {
@@ -117,15 +170,36 @@ Deno.test("D-037/2c: the exact message (to, subject, body) is approved every tim
   ok(sendRailOn(envOf({})) && !sendRailOn(envOf({ CAREER_SEND_RAIL: "off" })), "the rail is on, and its kill switch works");
 });
 
-Deno.test("D-037/2d: gmail.send is asked for at connect in production; rolled back, it is not; the owner's Google test users are documented", async () => {
-  eq(approvedExtras(envOf({})), [GMAIL_SEND]);
-  ok(requestableScopes([GMAIL_SEND], envOf({})).scopes.includes(GMAIL_SEND), "asked for at connect");
-  ok(!requestableScopes([GMAIL_SEND], envOf({ GOOGLE_APPROVED_EXTRA_SCOPES: "off" })).scopes.includes(GMAIL_SEND), "rolled back: not asked");
-  eq(releaseValue(envOf({}), "GOOGLE_APPROVED_EXTRA_SCOPES"), GMAIL_SEND);
+Deno.test("D-037/2d: incremental authorization: the normal connect never asks for gmail.send; the send consent adds it to the grant", async () => {
+  eq(approvedExtras(envOf({})), [], "GOOGLE_APPROVED_EXTRA_SCOPES is not a release flag: unset, no extra scope");
+  ok(!requestableScopes([GMAIL_SEND], envOf({})).scopes.includes(GMAIL_SEND), "the plain connect asks only for the submitted scopes");
+  eq(approvedExtras(envOf({ GOOGLE_APPROVED_EXTRA_SCOPES: `${GMAIL_SEND} https://www.googleapis.com/auth/calendar.events` })).length, 2, "the owner may list several approved scopes");
+  ok(!("GOOGLE_APPROVED_EXTRA_SCOPES" in RELEASE_FLAGS));
+  eq([...SEND_CONSENT_SCOPES], ["openid", "email", GMAIL_SEND]);
+  // The connect page's two consent URLs, from the code that builds them.
+  const admin = { rpc: async (n: string) => ({ data: n === "career_connector_link_issue" ? "nonce-1" : { ok: true }, error: null }) };
+  const env = envOf({ GOOGLE_OAUTH_CLIENT_ID: "cid", OAUTH_STATE_SECRET: "s".repeat(40), GOOGLE_OAUTH_REDIRECT_URI: "https://x.example/cb" });
+  const d = supabaseConnectDeps(admin, env, fetch, () => 1_800_000_000_000);
+  const plain = new URL((await d.start("google", U, "telegram", "replies"))!), send = new URL((await d.start("google", U, "telegram", "send"))!);
+  const scopes = (u: URL) => (u.searchParams.get("scope") ?? "").split(" ");
+  ok(!scopes(plain).includes(GMAIL_SEND) && scopes(plain).every((x) => SUBMITTED_SCOPES.includes(x)), `plain connect: ${scopes(plain)}`);
+  eq(plain.searchParams.get("include_granted_scopes"), null);
+  ok(scopes(send).includes(GMAIL_SEND), `send consent: ${scopes(send)}`);
+  eq(send.searchParams.get("include_granted_scopes"), "true", "added to what the person already granted");
   const doc = await text("docs/architect/RELEASE-FLAGS-2026-11-01.md");
   ok(/test users/i.test(doc) && /Google Cloud console/.test(doc) && /owner/.test(doc), "the doc says the owner adds Google test users (Google has not verified gmail.send)");
   const src = await text("supabase/functions/_shared/career_outreach.ts");
   ok(/opted_out/.test(src) && /bounced/.test(src), "the outreach stop rules (opt-out, bounce) are still there");
+});
+
+Deno.test("D-037/2e: a send refused for want of gmail.send offers the person the 'allow sending' link, and sends nothing", async () => {
+  const src = await text("supabase/functions/_shared/career_inbox_followups.ts");
+  ok(/allow sending: \$\{allow\} then say yes again/.test(src) && /sendConsent\?: \(userId: string\) => Promise<string \| null>/.test(src));
+  const em = await text("supabase/functions/_shared/career_apply_email.ts");
+  ok(/To send this from your Gmail, allow sending: \$\{allow\} then say yes again\./.test(em));
+  const h = await text("supabase/functions/agent-chat/handler-career.ts");
+  eq(h.split("sendConsent: sendConsentFor").length - 1, 2, "both send paths get the link");
+  ok(/connectUrlsFor\(Deno\.env, u, "send",/.test(h), "the link is a connect link with reason send (the incremental consent)");
 });
 
 // ------------------------------------------------------------------------------------------------ 3. reply rewriters

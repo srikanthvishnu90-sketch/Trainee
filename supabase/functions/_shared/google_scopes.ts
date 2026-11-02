@@ -12,7 +12,6 @@
 //                   submission, the owner adds it with GOOGLE_APPROVED_EXTRA_SCOPES (one full scope URL per word).
 //   calendar.*      dropped: nothing in production reads or writes Calendar (career_capabilities.ts).
 // Pure: no I/O, no env reads (the caller passes its env).
-import { releaseValue } from "../agent-chat/release_config.ts"; // D-036/D-037 release flags
 
 export const OPENID = "openid";
 export const EMAIL = "email";
@@ -28,16 +27,15 @@ export const IDENTITY_SCOPES: readonly string[] = Object.freeze([OPENID, EMAIL, 
 
 const SCOPE_WORD = /^(?:openid|email|profile|https:\/\/www\.googleapis\.com\/auth\/[a-z0-9._-]+)$/;
 
+// D-037 (incremental authorization): what the send consent asks for, only when the person approves their first send:
+// gmail.send (with openid and email to name the account), on top of what they already granted (include_granted_scopes=true
+// in the consent URL). Never part of the normal connect, which asks only for the submission plus the owner's approved list.
+export const SEND_CONSENT_SCOPES: readonly string[] = Object.freeze([OPENID, EMAIL, GMAIL_SEND]);
+
 // The extra scopes the owner says Google has approved since (GOOGLE_APPROVED_EXTRA_SCOPES, space or comma separated).
 // Anything that is not a scope word is ignored, so a typo can never widen a request to something odd.
-// D-037: the extra scopes as the release serves them (agent-chat/release_config.ts RELEASE_FLAGS: gmail.send unless the
-// environment rolls GOOGLE_APPROVED_EXTRA_SCOPES back with "off"). The OAuth functions pass this to requestScopesFor.
-export function servedExtraScopes(env: { get(k: string): string | undefined }): string {
-  return String(releaseValue(env, "GOOGLE_APPROVED_EXTRA_SCOPES") ?? "");
-}
-
 export function approvedExtras(env: { get(k: string): string | undefined }): string[] {
-  return servedExtraScopes(env).split(/[\s,]+/).filter((s) => SCOPE_WORD.test(s));
+  return String(env.get("GOOGLE_APPROVED_EXTRA_SCOPES") ?? "").split(/[\s,]+/).filter((s) => SCOPE_WORD.test(s));
 }
 
 // What a consent URL may ask for: the asked scopes that were submitted (or approved since), plus openid and email so the

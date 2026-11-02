@@ -36,12 +36,13 @@ const ON = ["CAREER_BRIEF_DIGEST", "CAREER_INTRO_REMINDERS", "CAREER_MAIL_TRACKI
   "CAREER_OUTREACH_FOLLOWUPS", "CAREER_TAILOR_REWRITE", "CAREER_TEXTING_NATIVE"];
 // On only once its condition is met (RELEASE_PENDING says which): the planner after its measurement and #371's fix; crisis
 // moderation once #354's reader lands. Until then off, and never reported as live.
-const PENDING = ["CAREER_CRISIS_MODERATION", "CAREER_PLANNER"];
+const PENDING = ["CAREER_BATCH_EXECUTOR", "CAREER_CRISIS_MODERATION", "CAREER_PLANNER"];
 // D-037 (owner, 2026-11-01 20:04 CT: "turn these on: Real submissions … Sending email as the person … Reply rewriters"):
 // real submission and sending as the person, with their release values. The reply rewriters stay off until measured.
-const REAL_SUBMIT = { CAREER_BATCH_EXECUTOR: "on", UPMORE_SCRIPT_SUBMIT_LIVE: "1", CLOUD_RUNNER_ENABLED: "on", CLOUD_PREPARE_ENABLED: "on" };
-const SEND_AS_PERSON = { CAREER_EMAIL_SEND: "on", CAREER_OUTREACH_SEND: "on", CAREER_SEND_RAIL: "on",
-  GOOGLE_APPROVED_EXTRA_SCOPES: "https://www.googleapis.com/auth/gmail.send" };
+// (CAREER_BATCH_EXECUTOR is pending: "executor not deployed". gmail.send is asked for incrementally at the first send, so
+// GOOGLE_APPROVED_EXTRA_SCOPES stays the owner's list, not a release flag.)
+const REAL_SUBMIT = { UPMORE_SCRIPT_SUBMIT_LIVE: "1", CLOUD_RUNNER_ENABLED: "on", CLOUD_PREPARE_ENABLED: "on" };
+const SEND_AS_PERSON = { CAREER_EMAIL_SEND: "on", CAREER_OUTREACH_SEND: "on", CAREER_SEND_RAIL: "on" };
 const D037: Record<string, string> = { ...REAL_SUBMIT, ...SEND_AS_PERSON };
 const ALL = [...ON, ...Object.keys(D037)].sort();
 const UNMEASURED = ["CAREER_REPLY_WRITER", "CAREER_KNOWLEDGE", "CAREER_JUDGE"];
@@ -83,12 +84,14 @@ Deno.test("D-036 review: each chat and scheduled switch is on in production and 
   eq({ ...PROACTIVE_SWITCHES }, { mail: "CAREER_MAIL_TRACKING", outreachFollowups: "CAREER_OUTREACH_FOLLOWUPS", introReminders: "CAREER_INTRO_REMINDERS", briefs: "CAREER_BRIEF_DIGEST",
     outreachSend: "CAREER_OUTREACH_SEND" });
   const on = chatSwitches(PROD), pon = proactiveSwitches(PROD);
+  const released = (flag: string) => flag in RELEASE_FLAGS;
   for (const [k, flag] of Object.entries(CHAT_SWITCHES)) {
-    eq((on as any)[k], true, `${k} (${flag}) on in production`);
+    eq((on as any)[k], released(flag), `${k} (${flag}) ${released(flag) ? "on" : "off (pending)"} in production`);
     const off = chatSwitches(envOf({ [flag]: "off" })) as any;
     eq(off[k], false, `${flag}=off turns ${k} off`);
-    for (const [k2] of Object.entries(CHAT_SWITCHES)) if (k2 !== k) eq(off[k2], true, `${flag}=off leaves ${k2} on`);
+    for (const [k2, f2] of Object.entries(CHAT_SWITCHES)) if (k2 !== k) eq(off[k2], released(f2), `${flag}=off leaves ${k2} as served`);
   }
+  eq(on.batchExecutor, false, "the batch executor is pending (not deployed): off");
   for (const [k, flag] of Object.entries(PROACTIVE_SWITCHES)) {
     eq((pon as any)[k], true, `${k} (${flag}) on in production`);
     eq((proactiveSwitches(envOf({ [flag]: "off" })) as any)[k], false, `${flag}=off turns the scheduled ${k} off`);

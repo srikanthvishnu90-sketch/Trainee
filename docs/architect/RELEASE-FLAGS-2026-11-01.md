@@ -39,6 +39,7 @@ Columns: default before D-036 → served now; what it enables; what it needs; ri
 | Switch | Enables | Waits for |
 |---|---|---|
 | `CAREER_PLANNER` | compound asks ("find 5, tailor 2, apply, remind me Friday") planned into steps over existing code paths | the task eval (`brain-eval` suite=tasks), planner on against off, no worse; and #371's fix (a crisis message with two asks gets the 988 reply before the planner; planner reminders are delivered) |
+| `CAREER_BATCH_EXECUTOR` | batch asks handed to the worker's executor | the executor deployed: nothing in production loads `workers/career-browser/batch-executor.cjs`, so a batch ask would commit an intent nobody runs (D-007, WO-106) |
 | `CAREER_CRISIS_MODERATION` | the gateway's moderation screen on each turn (second crisis layer; code's `agent-chat/crisis.ts` is always on) | its reader, which lands with #354 (no code reads it at this SHA) |
 
 ## (a2) ON by D-037 (owner, 2026-11-01 20:04 CT: "turn these on: Real submissions … Sending email as the person … Reply rewriters")
@@ -49,16 +50,21 @@ captchas handed to the person, LinkedIn/Indeed/Handshake never opened. Each env 
 
 | Switch | Before → now | Enables | Needs | Fails closed how |
 |---|---|---|---|---|
-| `CAREER_BATCH_EXECUTOR` | off → on | batch asks handed to the worker's executor | `workers/career-browser/batch-executor.cjs` running on the owner's host | nothing drains the intents until it runs; each item still needs its approval |
 | `UPMORE_SCRIPT_SUBMIT_LIVE` | unset → `1` | the cloud sandbox presses Submit on an approved application | the cloud runner (below) | `=0`/`off` makes every sandbox a dry run |
 | `CLOUD_RUNNER_ENABLED`, `CLOUD_PREPARE_ENABLED` | off → on | the cloud runner's send and preparation ticks | `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`, `CLOUD_SANDBOX_SNAPSHOT_ID`, `CLOUD_BRIDGE_URL` (the owner's credentials) | 503 "needs setup: <secret> is not set"; no sandbox started |
-| `CAREER_AGENT_SUBMIT` (DB) | off → on (go-live) | the agent finishes an approved application | `release-db-switches.sql` after `verify-claim-guards.sql` | row ≠ `on` stops every claim at once; `trainee-go-live.sh --real-submit off` keeps it off |
+| `CAREER_AGENT_SUBMIT` (DB) | off → on (go-live, missing rows only) | the agent finishes an approved application | `release-db-switches.sql` after `verify-claim-guards.sql` | row ≠ `on` stops every claim at once, and a plain go-live (or `--brain router`) never changes an existing row; only `--real-submit on\|off` overwrites |
 | `CAREER_CLOUD_APPLY` (DB) | off → on (go-live) | cloud applying | same | same |
 | `APPLY_VM` (DB) | off → on (go-live) | the VM worker | same, plus `APPLY_VM_USER_IDS` (nobody until the owner names people or `*`) | same |
 | `CAREER_EMAIL_SEND` | off → on | an approved apply-by-email or follow-up email | the person's grant with gmail.send | no gmail.send on the grant: no token, nothing sent, the person told to reconnect |
 | `CAREER_OUTREACH_SEND` | off → on | the scheduled send of approved outreach | same | same |
 | `CAREER_SEND_RAIL` | off → on | the sending rail for every approved email | same | same; a changed message (to, subject or body) is refused against its approval hash |
-| `GOOGLE_APPROVED_EXTRA_SCOPES` | unset → gmail.send | gmail.send asked for at connect | **Google has not verified gmail.send: until it does, only Google test users can grant it. The owner adds them in the Google Cloud console (APIs & Services → OAuth consent screen → Test users); that is his step.** | a person not on the test-user list cannot grant it, and sending stays closed for them |
+
+**gmail.send, incrementally.** The normal connect asks only for the submitted scopes (openid, email, gmail.readonly) plus
+whatever the owner lists in `GOOGLE_APPROVED_EXTRA_SCOPES` (several allowed; not a release flag), so a read-only connect never
+shows Google's unverified-scope warning. When a person approves a send and their grant lacks gmail.send, the reply says
+"To send this from your Gmail, allow sending: <link>": a connect link with reason `send` whose consent asks for gmail.send
+with `include_granted_scopes=true`. **Google has not verified gmail.send: until it does, only Google test users can grant it.
+The owner adds them in the Google Cloud console (APIs & Services → OAuth consent screen → Test users); that is his step.**
 
 Mail leaves only from the person's own Google account (Gmail sets From; Trainee writes none), one recipient, no Cc or Bcc.
 Nothing sends from Trainee's own identity and there is no switch that could. `verify-apply-schema.sql` reports

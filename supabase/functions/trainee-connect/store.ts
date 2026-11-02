@@ -3,7 +3,7 @@
 // chat's own link does), and the single-use take of a link token id.
 // deno-lint-ignore-file no-explicit-any
 import { CONNECTORS, disconnectConnector, statuses, type ConnectorId, type Deps } from "../_shared/connectors.ts";
-import { servedExtraScopes } from "../_shared/google_scopes.ts"; // D-037: gmail.send asked for unless rolled back
+import { SEND_CONSENT_SCOPES } from "../_shared/google_scopes.ts"; // D-037: gmail.send only by the send consent
 import { outlookConsentFor } from "../_shared/outlook_connector.ts";
 import { SCOPES as MS_SCOPES } from "../_shared/outlook_graph.ts";
 import { googleConsentUrl, issueState, redirectUriFrom, requestScopesFor } from "../gmail-oauth/career.ts";
@@ -16,7 +16,7 @@ const must = (r: any, what: string) => { if (r?.error) throw new Error(`${what}:
 export function supabaseConnectDeps(admin: any, env: { get(k: string): string | undefined }, f: typeof fetch = fetch, now: () => number = Date.now): ConnectDeps {
   const base: Deps = { admin, env, fetch: f, now };
   // The scopes each consent URL asks for, from the code that builds it (never copy written on the page).
-  const googleScopes = () => requestScopesFor("career", servedExtraScopes(env)).scopes;
+  const googleScopes = () => requestScopesFor("career", env.get("GOOGLE_APPROVED_EXTRA_SCOPES")).scopes;
   return {
     env, now,
     providers: () => ({
@@ -38,14 +38,18 @@ export function supabaseConnectDeps(admin: any, env: { get(k: string): string | 
       }
       return out;
     },
-    async start(provider, userId, channel) {
+    async start(provider, userId, channel, reason) {
       if (provider === "microsoft") return await outlookConsentFor(admin, env, now(), { userId, channel });
       const clientId = env.get("GOOGLE_OAUTH_CLIENT_ID") || "", stateSecret = env.get("OAUTH_STATE_SECRET") || "";
       if (!clientId || !stateSecret) return null;
       const nonce = must(await admin.rpc("career_connector_link_issue", { p_user: userId, p_connector: "gmail", p_channel: channel, p_thread: null, p_now: at(now()) }), "make the Gmail link");
       const opened = must(await admin.rpc("career_connector_link_open", { p_nonce: String(nonce), p_now: at(now()) }), "open the Gmail link");
       if (!opened || opened.error) return null;
-      return googleConsentUrl({ clientId, redirectUri: redirectUriFrom(env), state: await issueState(userId, "career", stateSecret), scopes: googleScopes() });
+      // D-037: a link made for a send ("allow sending") asks for gmail.send on top of the existing grant; every other link
+      // asks only for the submitted (verified) scopes and any the owner lists as approved.
+      const send = reason === "send";
+      return googleConsentUrl({ clientId, redirectUri: redirectUriFrom(env), state: await issueState(userId, "career", stateSecret),
+        scopes: send ? [...SEND_CONSENT_SCOPES] : googleScopes(), incremental: send });
     },
     async disconnect(provider, userId) {
       const r = await disconnectConnector(base, CONNECTORS[CONNECTOR[provider]], userId);

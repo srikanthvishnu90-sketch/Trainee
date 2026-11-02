@@ -234,7 +234,9 @@ export function redirectUriFrom(env: { get(k: string): string | undefined }): st
 
 // Google's consent URL: the one place the query is built (the page's Continue button, the chat's one-time link and the
 // legacy start all use it), so the scopes the page states are the scopes asked.
-export function googleConsentUrl(o: { clientId: string; redirectUri: string; state: string; scopes: string[] }): string {
-  const q = new URLSearchParams({ client_id: o.clientId, redirect_uri: o.redirectUri, response_type: "code", scope: o.scopes.join(" "), access_type: "offline", prompt: "consent", state: o.state });
+// incremental (D-037): Google keeps what the person already granted and adds these scopes (include_granted_scopes).
+export function googleConsentUrl(o: { clientId: string; redirectUri: string; state: string; scopes: string[]; incremental?: boolean }): string {
+  const q = new URLSearchParams({ client_id: o.clientId, redirect_uri: o.redirectUri, response_type: "code", scope: o.scopes.join(" "), access_type: "offline", prompt: "consent", state: o.state })
+  if (o.incremental) q.set("include_granted_scopes", "true");;
   return "https://accounts.google.com/o/oauth2/v2/auth?" + q.toString();
 }

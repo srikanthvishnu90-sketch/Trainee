@@ -44,6 +44,7 @@ export const isSecretField = (label: string) => SECRET_FIELD.test(String(label ?
 export interface ReadinessInput {
   profile: any;                                  // the router's profile object (facts, basics, preferences, constraints)
   ask?: Pick<SearchAsk, "role" | "place" | "remote" | "remoteOnly" | "limits"> | null; // this turn's role ask: words said now count
+  resumeLinePending?: boolean;                   // the reply already carries the resume line (paste or confirm): no second resume ask
   salaryHard?: boolean;                          // the person made pay a hard constraint
   formFields?: string[];                         // field labels a role's form asked for, when known (secrets are sorted out of them)
 }
@@ -57,13 +58,17 @@ export interface Readiness {
 }
 
 const confirmedFact = (f: any) => !!f && typeof f === "object" && f.needs_confirmation !== true && (f.status == null || f.status === "confirmed") && f.status !== "rejected" && !personalSourceDenied(f);
+// Work authorization and sponsorship change what may be claimed on an application: only an explicit confirmation counts, a row that
+// merely lacks the flags does not.
+const explicitlyConfirmed = (f: any) => confirmedFact(f) && f.status === "confirmed" && f.needs_confirmation === false;
 const text = (f: any) => String(f?.text ?? f?.title ?? f?.name ?? "") + " " + String(f?.value ?? "");
 const US = /^(?:the )?(?:US|U\.S\.?|USA|United States(?: of America)?)$/i;
 
 export function applyReadiness(i: ReadinessInput): Readiness {
   const p = i.profile && typeof i.profile === "object" ? i.profile : {};
-  const facts: any[] = (Array.isArray(p.facts) ? p.facts : []).filter(confirmedFact);
+  // A profile rebuilt from stated facts (_fromStatedFacts) is not a confirmed profile: nothing in it counts as known.
   const denied = personalSourceDenied(p) || p._fromStatedFacts === true;
+  const facts: any[] = denied ? [] : (Array.isArray(p.facts) ? p.facts : []).filter(confirmedFact);
   const confirmedResume = !denied && facts.some((f) => ["education", "experience", "project", "leadership", "skill"].includes(f.kind));
   const basicsOk = (v: unknown) => !denied && confirmedResume && typeof v === "string" && v.trim().length > 0 && !personalSourceDenied(p.basics);
   const known = new Set<NeedKey>();
@@ -81,7 +86,7 @@ export function applyReadiness(i: ReadinessInput): Readiness {
   }
   // Work authorization and sponsorship: only an explicit, confirmed eligibility fact (US-scoped authorization). Never inferred.
   for (const f of facts) {
-    if (f.kind !== "eligibility") continue;
+    if (f.kind !== "eligibility" || !explicitlyConfirmed(f)) continue;
     const name = String(f.name ?? f.title ?? "").trim(), value = String(f.value ?? "").trim();
     if (/^work authori[sz]ation(?: \(US\))?$/i.test(name) && /^(yes|no)$/i.test(value) && US.test(String(f.country ?? "").trim())) known.add("work_authorization");
     else if (/^(?:visa )?sponsorship(?: needed| required)?$/i.test(name) && /^(yes|no)$/i.test(value)) known.add("sponsorship");
@@ -96,7 +101,9 @@ export function applyReadiness(i: ReadinessInput): Readiness {
   // Place: stated now, a confirmed location fact, or the confirmed resume's location line.
   if (i.ask?.place || facts.some((f) => f.kind === "location") || basicsOk(p.basics?.location)) known.add("location");
   // Remote scope matters only when remote is wanted: confirmed scope ("remote in the US", "work from anywhere") or said now with a place.
-  const wantsRemote = !!i.ask?.remote || facts.some((f) => ["goal", "location", "preference"].includes(f.kind) && /\bremote\b/i.test(text(f)));
+  // A negation ("I do not want remote roles") is not a wish for remote, and a search that stated on-site (remote false) is not asking for it.
+  const NEG_REMOTE = /\b(?:not|no|never|don'?t|do not|won'?t|without|avoid|except|rather than|instead of)\b[^.]{0,30}\bremote\b/i;
+  const wantsRemote = i.ask?.remote === false ? false : (!!i.ask?.remote || facts.some((f) => ["goal", "location", "preference"].includes(f.kind) && /\bremote\b/i.test(text(f)) && !NEG_REMOTE.test(text(f))));
   const scope = /\bremote\b[^.]{0,30}\b(?:in|within|across|from)\s+(?:the\s+)?(?:US|U\.S\.?|USA|United States|my country|anywhere|[A-Z][a-z]+)\b|\bwork from anywhere\b|\banywhere\b|\bUS[- ]remote\b|\bremote\s+\(?US\)?\b/i;
   if (wantsRemote && (facts.some((f) => ["goal", "location", "preference"].includes(f.kind) && scope.test(text(f))) || (i.ask?.place && i.ask.remote) || (i.ask?.remote && !i.ask.remoteOnly))) known.add("remote_scope");
   if (!wantsRemote) known.add("remote_scope");
@@ -109,7 +116,8 @@ export function applyReadiness(i: ReadinessInput): Readiness {
   // Sponsorship only matters when work authorization is not already confirmed as not needing it; with no sponsorship answer the single
   // most consequential authorization item is asked, and the second is held (one at a time).
   const missingNow = missing.filter((m) => !(m.key === "sponsorship" && missing.some((x) => x.key === "work_authorization")));
-  const ask_now = missingNow.filter((m) => m.blocks === "apply" || m.key === "seniority").slice(0, 2);
+  // The resume line already in the reply is the resume ask: asking again in the same turn would be two asks (one at a time).
+  const ask_now = i.resumeLinePending && missingNow.some((m) => m.key === "resume") ? [] : missingNow.filter((m) => m.blocks === "apply" || m.key === "seniority").slice(0, 2);
   const secure_only = [...new Set((i.formFields ?? []).filter(isSecretField).map((s) => s.trim()))];
   return { ready: missing.length === 0, known: [...known], missing: missingNow, ask_now, secure_only, rule };
 }
@@ -117,5 +125,6 @@ export function applyReadiness(i: ReadinessInput): Readiness {
 // Facts handed to the reply writer: only keys and reasons (no values: nothing about the person that is not needed to ask).
 export function readinessFacts(r: Readiness): string {
   if (r.ready) return "Application needs: nothing missing.";
-  return `Application needs (most consequential first): ${r.missing.map((m) => `${m.label} (${m.why})`).join("; ")}. Ask about: ${r.ask_now.map((m) => m.label).join(", then ") || "nothing yet"}.${r.secure_only.length ? ` A form also wants ${r.secure_only.length} secure field(s); never ask for those in chat.` : ""}`;
+  r = { ...r, missing: r.missing ?? [], ask_now: r.ask_now ?? [], secure_only: r.secure_only ?? [] };
+  return `Application needs (most consequential first): ${(r.missing ?? []).map((m) => `${m.label} (${m.why})`).join("; ")}. Ask about: ${r.ask_now.map((m) => m.label).join(", then ") || "nothing yet"}.${r.secure_only.length ? ` A form also wants ${r.secure_only.length} secure field(s); never ask for those in chat.` : ""}`;
 }

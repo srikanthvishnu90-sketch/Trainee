@@ -36,7 +36,7 @@ export interface Expect {
   prep?: boolean;
   searched?: boolean;
   // Spec 2.3: after a correction the search runs on the new constraint and the old one is not kept.
-  search?: { remote?: boolean; place?: string | null; bands_include?: string[]; bands_exclude?: string[]; not_bands?: string[]; role_has?: string };
+  search?: { remote?: boolean; place?: string | null; bands_include?: string[]; bands_exclude?: string[]; not_bands?: string[]; no_not_bands?: true; role_has?: string };
   // Spec 2.2: the structured needs handed to the brain: the first thing asked, how many, and what is never asked in chat.
   readiness?: { first?: string; max_ask?: number; present?: string[]; absent?: string[]; never_in_chat?: string[] };
   // Spec 6.5: every count derives from row states; "applied" only for an evidenced submission.
@@ -94,6 +94,7 @@ export function judge(e: Expect, s: EndState, now: number): { pass: boolean; fai
       if (e.search.place !== undefined && (p.place ?? p.whereText ?? null) !== e.search.place) failed.push(`search: place is ${p.place ?? p.whereText ?? null}, not ${e.search.place}`);
       if (e.search.role_has && !low(p.role).includes(low(e.search.role_has))) failed.push(`search: the role "${p.role}" lost "${e.search.role_has}"`);
       const notBands = (p.limits?.notBands ?? []).map(low);
+      if (e.search.no_not_bands && notBands.length) failed.push(`search: ${notBands.join(", ")} was ruled out by a message that was not a correction`);
       for (const b of e.search.not_bands ?? []) if (!notBands.includes(low(b))) failed.push(`search: level ${b} is not ruled out`);
       for (const b of e.search.bands_include ?? []) if (!bands.includes(low(b))) failed.push(`search: level ${b} is not in the constraints`);
       for (const b of e.search.bands_exclude ?? []) if (bands.includes(low(b))) failed.push(`search: the old level ${b} was kept`);

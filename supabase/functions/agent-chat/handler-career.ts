@@ -1086,7 +1086,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
               const f5Prior = (ctx as any).discovery ?? {};
               // Spec 2.3: the ask this list was made for is kept on the thread (a later correction starts from it), and after a
               // correction the router's own record of the search (it read "remote only" as a role) is replaced by the corrected one.
-              (ctx as any).discovery = { ...f5Prior, lastShortlist: found.shortlist, lastSource: found.source, lastAsk: f5Ask,
+              (ctx as any).discovery = { ...f5Prior, lastShortlist: found.shortlist, lastSource: found.source, lastAsk: f5Ask, lastAskAt: Date.now(),
                 ...(correctedAsk(message, f5Prior) ? { lastParams: { ...(f5Prior.lastParams ?? {}), ask: String(message).slice(0, 200), roleText: f5Ask.role, whereText: f5Ask.place, remote: f5Ask.remote } } : {}) };
               // ROLE RESULTS PAGE (owner, 2026-11-01 and 11-02): a role ask ("I want X roles that pay $Y", "find me 10 SWE intern roles")
               // on EVERY channel gets one or two plain sentences and then the results page's link ALONE as its own message
@@ -1109,7 +1109,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
               // (readiness_ask.ts; only with the reply writer on, and a question that fails its checks is dropped, not replaced).
               // A search applies to nothing: this queues nothing and writes no fact.
               {
-                const rd = applyReadiness({ profile: prof, ask: f5Ask });
+                const rd = applyReadiness({ profile: prof, ask: f5Ask, resumeLinePending: !!resumeLine });
                 agentMeta = { ...(agentMeta || {}), readiness: { ready: rd.ready, ask_now: rd.ask_now.map((n) => ({ key: n.key, chat: n.chat })), missing: rd.missing.map((n) => ({ key: n.key, chat: n.chat, blocks: n.blocks })), secure_only: rd.secure_only.length } };
                 if (replyWriterOn(Deno.env) && rd.ask_now.length) {
                   const aMeter = ledger.track(newMeter());
@@ -1126,6 +1126,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             }
           } catch (e) { console.error("career search judge: the router's reply stands:", (e as Error)?.message ?? e); }
           await ledger.record(f5Meter);
+        } else if (f5Free && (ctx as any).discovery?.lastAsk) {
+          // Spec 2.3: a turn that was not a search ends the search a correction could amend ("only remote" three messages later is not one).
+          (ctx as any).discovery = { ...(ctx as any).discovery, lastAsk: null, lastAskAt: null };
         }
         // FEATURE 5 (end)
         // D-035: a crisis message the staged route kept off the brain gets code's crisis reply (crisis.ts: the core's own

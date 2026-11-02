@@ -84,18 +84,61 @@ Deno.test("readiness: at most two asks, the first is the most consequential, and
   assertNode.equal(done.ask_now.length, 0);
 });
 
+const tag = (key: string, q: string) => JSON.stringify({ key, question: q });
+const sayRaw = (t: string) => async () => ({ content: [{ type: "text", text: t }] });
+const needs = (keys: string[]) => ({ ready: false, known: [], missing: [], ask_now: keys.map((key) => ({ key, label: key === "work_authorization" ? "work authorization (US)" : key.replace("_", " "), why: "", rank: 1, chat: true, blocks: "apply" })), secure_only: [], rule: "" }) as any;
+
 Deno.test("readiness ask: the model's question is checked, never replaced by canned prose", async () => {
   const r = applyReadiness({ profile: { basics: {}, facts: [] }, ask: ask() });
-  const say = (t: string) => async () => ({ content: [{ type: "text", text: t }] });
-  const good = await writeReadinessAsk({ readiness: r, message: "find me data analyst jobs", model: say("Do you have a resume handy you can paste in?") });
+  const good = await writeReadinessAsk({ readiness: r, message: "find me data analyst jobs", model: sayRaw(tag("resume", "Do you have a resume handy you can paste in?")) });
   assertNode.equal(good.text, "Do you have a resume handy you can paste in?");
   for (const bad of ["What is your password?", "Send me your resume? And your phone number?", "I applied for you. Want more?", "Check https://x.example/a ok?", "You need 3 things, ok?", "Great question! Resume?", "No question here."]) {
-    const w = await writeReadinessAsk({ readiness: r, message: "m", model: say(bad) });
+    const w = await writeReadinessAsk({ readiness: r, message: "m", model: sayRaw(tag("resume", bad)) });
     assertNode.equal(w.text, null, bad);
     assertNode.ok(w.rejected.length > 0);
   }
   assertNode.equal((await writeReadinessAsk({ readiness: r, message: "m", model: null })).text, null);
+  assertNode.equal((await writeReadinessAsk({ readiness: r, message: "m", model: sayRaw("Do you have a resume?") })).text, null, "an untagged question is dropped");
+  assertNode.equal((await writeReadinessAsk({ readiness: r, message: "m", model: sayRaw(tag("work_authorization", "Do you have a resume?")) })).text, null, "tagged with another need");
   assertNode.ok(askProblems("Which level are you aiming for?", { ...r, ask_now: [] }).includes("nothing blocking to ask"));
+});
+
+Deno.test("readiness ask: the review's probes are all rejected, whatever they are tagged", () => {
+  const wa = needs(["work_authorization"]), sp = needs(["sponsorship"]);
+  const probes: [string, any][] = [
+    ["Are you authorized to work in the US, and what's your date of birth?", wa],
+    ["What's the code they emailed you?", wa],
+    ["What is your LinkedIn login, so I can check your profile?", wa],
+    ["Can you share your Social-Security number? Are you authorized to work in the US?", wa],
+    ["Since you're a US citizen, do you need sponsorship?", sp],
+    ["Are you a US citizen? Reply here and I will start applying right away.", wa],
+    ["Do you have a veteran status or disability, and are you authorized to work?", wa],
+    ["Which is it: www.example.com ? Are you authorized to work in the US", wa],
+    ["Are you authorized to work in the US and what is your gender?", wa],
+    ["As a US citizen, are you authorized to work here?", wa],
+    ["Do you need sponsorship? I will submit once you say.", sp],
+    ["Are you authorized to work in the US? I can queue the applications after.", wa],
+    ["What's your mother's maiden name? Do you need sponsorship?", sp],
+  ];
+  for (const [q, r] of probes) assertNode.ok(askProblems(q, r, r.ask_now[0].key, "find data analyst jobs").length > 0, q);
+});
+
+Deno.test("readiness ask: a good question for each need passes", () => {
+  const good: Record<string, string> = {
+    resume: "Do you have a resume you can paste in here?",
+    work_authorization: "Are you legally authorized to work in the US?",
+    sponsorship: "Would you need visa sponsorship for a job here?",
+    remote_scope: "For remote roles, should they be open to your country only, or anywhere?",
+    seniority: "What level are you aiming for, internship or full-time?",
+    location: "Which city or area should I focus on?",
+    email: "What email should go on your applications?",
+    phone: "What phone number should forms use for you?",
+    full_name: "What full name should go on your applications?",
+    salary_floor: "What is the lowest salary you would take?",
+  };
+  for (const [k, q] of Object.entries(good)) assertNode.deepEqual(askProblems(q, needs([k]), k, "find data analyst jobs in Chicago"), [], q);
+  // a good question about one need is not good for another
+  assertNode.ok(askProblems(good.resume, needs(["sponsorship"]), "sponsorship", "x").length > 0);
 });
 
 Deno.test("correction: remote only replaces the place; the old place is not kept", () => {
@@ -124,7 +167,11 @@ Deno.test("correction: individual contributor only drops manager levels, keeps t
 Deno.test("correction: only a correction of a last search; an ordinary ask or a question is not one", () => {
   for (const m of ["find remote data analyst jobs", "is this remote?", "what about remote work generally?", "apply to these", "hello"]) assertNode.equal(correctionOf(m), null, m);
   assertNode.equal(correctedAsk("only remote roles", { lastParams: { roleText: "x" } }), null, "no last ask to correct");
-  assertNode.ok(correctedAsk("only remote roles", { lastAsk: ask() }));
+  const NOW = 1_800_000_000_000;
+  assertNode.ok(correctedAsk("only remote roles", { lastAsk: ask(), lastAskAt: NOW - 60_000 }, NOW));
+  assertNode.equal(correctedAsk("only remote roles", { lastAsk: ask(), lastAskAt: NOW - 31 * 60_000 }, NOW), null, "a search older than 30 minutes is not corrected");
+  assertNode.equal(correctedAsk("only remote roles", { lastAsk: ask() }, NOW), null, "no time on the ask: not recent");
+  assertNode.equal(correctedAsk("only remote roles", { lastAsk: null, lastAskAt: null }, NOW), null, "a non-search turn cleared it");
 });
 
 Deno.test("status summary: every count derives from row states and adds up", () => {
@@ -160,4 +207,64 @@ Deno.test("reply writer: a count or an 'applied' beyond the row states is reject
   const f2 = factsForTurn({ reply: "Your applications.", counts: summaryFacts(none), appliedOk: none.applied_ok });
   assertNode.ok(factCheck("You have applied to 1 role.", f2).length > 0);
   assertNode.ok(summaryFacts(none).includes("None is submitted and confirmed"));
+});
+
+Deno.test("correction: only the WHOLE message is one; inside a longer sentence it changes nothing", () => {
+  for (const m of ["no management consulting", "I am not a manager yet", "no director of engineering", "skip managers when you look at the Chicago ones", "I want product manager roles, no director level",
+    "not a manager", "only senior roles", "I would like a data analyst job but no managers please, in Chicago", "no managers at Acme", "exclude management consulting firms"]) assertNode.equal(correctionOf(m)?.contributorOnly ?? false, false, m);
+  for (const m of ["only individual contributor roles, no manager roles", "no managers", "skip managers", "Actually, no manager roles please", "IC only"]) assertNode.ok(correctionOf(m)?.contributorOnly, m);
+});
+
+Deno.test("correction: a manager title in the role keeps its manager level", () => {
+  const prev = ask({ role: "product manager", limits: { bands: ["manager"], pay: null, company: null, term: null, needsSponsor: false } });
+  const { ask: next } = applyCorrection(prev, correctionOf("no director roles")!.contributorOnly ? { contributorOnly: true } : {});
+  assertNode.deepEqual(next.limits.bands, ["manager"], "the manager band of a manager role stays");
+  assertNode.ok(!next.limits.notBands.includes("manager") && next.limits.notBands.includes("director"));
+});
+
+Deno.test("correction: remote only then not remote restores the original place", () => {
+  const first = applyCorrection(ask({ place: "Chicago" }), correctionOf("only remote roles")!).ask;
+  assertNode.equal(first.place, null); assertNode.equal(first.prevPlace, "Chicago");
+  const back = applyCorrection(first, correctionOf("actually no remote")!).ask;
+  assertNode.equal(back.place, "Chicago"); assertNode.equal(back.remote, false); assertNode.equal(back.prevPlace, null);
+});
+
+Deno.test("readiness: a profile rebuilt from stated facts counts as nothing known", () => {
+  const stated = profile({ _fromStatedFacts: true }, [...resume, fact({ kind: "eligibility", name: "Work authorization (US)", value: "Yes", country: "US" })]);
+  const r = applyReadiness({ profile: stated, ask: ask() });
+  assertNode.deepEqual(r.known.filter((k) => k !== "remote_scope" && k !== "salary_floor" && k !== "location"), []);
+  assertNode.equal(r.ask_now[0].key, "resume");
+});
+
+Deno.test("readiness: work authorization needs an explicit confirmation (status confirmed and needs_confirmation false)", () => {
+  const elig = { kind: "eligibility", name: "Work authorization (US)", value: "Yes", country: "US" };
+  const loose = [...resume, { id: "x", ...elig }];                                    // no flags at all
+  assertNode.ok(!applyReadiness({ profile: profile({}, loose), ask: ask() }).known.includes("work_authorization"));
+  const half = [...resume, { id: "y", ...elig, status: "confirmed" }];                // no needs_confirmation
+  assertNode.ok(!applyReadiness({ profile: profile({}, half), ask: ask() }).known.includes("work_authorization"));
+  const full = [...resume, fact(elig)];
+  assertNode.ok(applyReadiness({ profile: profile({}, full), ask: ask() }).known.includes("work_authorization"));
+});
+
+Deno.test("readiness: a negated or on-site remote mention is not a wish for remote; a pending resume line suppresses the resume ask", () => {
+  const neg = [...resume, fact({ kind: "preference", text: "I do not want remote roles" })];
+  assertNode.ok(!applyReadiness({ profile: profile({}, neg), ask: ask() }).missing.some((m) => m.key === "remote_scope"));
+  const pro = [...resume, fact({ kind: "goal", text: "remote data analyst" })];
+  assertNode.ok(applyReadiness({ profile: profile({}, pro), ask: ask({ remote: undefined }) }).missing.some((m) => m.key === "remote_scope"));
+  assertNode.ok(!applyReadiness({ profile: profile({}, pro), ask: ask({ remote: false }) }).missing.some((m) => m.key === "remote_scope"), "stated on-site");
+  const none = { basics: {}, facts: [] };
+  assertNode.equal(applyReadiness({ profile: none, ask: ask() }).ask_now[0].key, "resume");
+  assertNode.equal(applyReadiness({ profile: none, ask: ask(), resumeLinePending: true }).ask_now.length, 0);
+});
+
+Deno.test("status summary: an emailed code is sent-but-unfinished (still checking); overclaims in words and 'both'", () => {
+  const s = applySummary([{ state: "needs_user", reason: "email_code" }, { state: "needs_user", reason: "needs_answers" }, { state: "confirmed" }]);
+  assertNode.equal(s.counts.still_checking, 1); assertNode.equal(s.counts.needs_you, 1); assertNode.equal(s.submitted_not_confirmed, 1);
+  const f = summaryFacts(s);
+  assertNode.ok(/across all applications/.test(f) && /1 submitted, not confirmed yet/.test(f));
+  const none = applySummary([{ state: "queued" }, { state: "confirmed" }]);
+  assertNode.ok(overclaims("Two applications are confirmed.", none).length > 0);
+  assertNode.ok(overclaims("Both are confirmed.", none).length > 0);
+  assertNode.ok(overclaims("Three were submitted and confirmed.", none).length > 0);
+  assertNode.equal(overclaims("One is confirmed.", none).length, 0);
 });

@@ -2189,6 +2189,96 @@
     }
    },
    "note": "a queued application is approved at most: the counts come from the application rows, never from the queue or the press of Apply"
+  },
+  {
+   "id": "T54",
+   "family": "correction (negative): not a manager yet",
+   "setup": [
+    "resume"
+   ],
+   "turns": [
+    "find senior data analyst jobs in Chicago",
+    "I am not a manager yet"
+   ],
+   "oracle": {},
+   "expect": {
+    "queued": {
+     "max": 0
+    },
+    "search": {
+     "place": "Chicago",
+     "no_not_bands": true
+    }
+   },
+   "note": "spec 2.3: a statement about the person is not a correction; no level is ruled out"
+  },
+  {
+   "id": "T55",
+   "family": "correction (negative): inside a longer sentence",
+   "setup": [
+    "resume"
+   ],
+   "turns": [
+    "find senior data analyst jobs in Chicago",
+    "skip managers when you look at the Chicago ones"
+   ],
+   "oracle": {},
+   "expect": {
+    "queued": {
+     "max": 0
+    },
+    "search": {
+     "place": "Chicago",
+     "no_not_bands": true
+    }
+   },
+   "note": "spec 2.3: only the whole message is a correction"
+  },
+  {
+   "id": "T56",
+   "family": "correction (negative): management consulting",
+   "setup": [
+    "resume"
+   ],
+   "turns": [
+    "find senior data analyst jobs in Chicago",
+    "no management consulting"
+   ],
+   "oracle": {},
+   "expect": {
+    "queued": {
+     "max": 0
+    },
+    "search": {
+     "place": "Chicago",
+     "no_not_bands": true
+    }
+   },
+   "note": "spec 2.3: 'no management consulting' names an industry, not manager levels"
+  },
+  {
+   "id": "T57",
+   "family": "correction: remote only, then not remote",
+   "setup": [
+    "resume"
+   ],
+   "turns": [
+    "find data analyst jobs in Chicago",
+    "only remote roles",
+    "actually no remote"
+   ],
+   "oracle": {},
+   "expect": {
+    "queued": {
+     "max": 0
+    },
+    "search": {
+     "remote": false,
+     "place": "Chicago",
+     "role_has": "data analyst"
+    }
+   },
+   "note": "spec 2.3: the place the remote-only correction dropped comes back"
   }
  ]
 }

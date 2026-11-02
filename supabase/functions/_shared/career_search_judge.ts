@@ -327,7 +327,7 @@ export function supabaseSearchSources(admin: any, o: { window?: any[]; jobs?: an
 export interface ShortlistEntry { id: string | null; title: string; company: string | null; location: string | null; url: string | null }
 // limits: the level, pay floor, employer, season and sponsorship the person stated (posting_constraints.ts); remoteOnly: they
 // asked for remote alone, not "this city or remote".
-export interface SearchAsk { role: string; place: string | null; remote: boolean; remoteOnly?: boolean; limits?: Limits }
+export interface SearchAsk { role: string; place: string | null; remote: boolean; remoteOnly?: boolean; limits?: Limits; prevPlace?: string | null }
 export interface SearchJudgeResult {
   reply: string; status: "ranked" | "judged" | "none"; source: "live" | "snapshot" | "none";
   shortlist: ShortlistEntry[]; accounting: Accounting | null; modelCalled: boolean;

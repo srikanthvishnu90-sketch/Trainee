@@ -16,7 +16,7 @@ insert into profiles(id) select id from auth.users where id::text like '00000000
 create function pg_temp.rq(u text, part int, n int, age interval) returns void language sql as $$
  insert into career_apply_prepare_requests(user_id, job_ids, hosts, created_at)
  select u::uuid, array_agg('greenhouse:fair:' || right(u, 3) || ':' || part || ':' || g order by g),
-  array_agg('boards.greenhouse.io' order by g), now() - age + (part * interval '1 second')
+  array_agg('boards.greenhouse.io'::text order by g), now() - age + (part * interval '1 second')
  from generate_series(1, n) g
 $$;
 create function pg_temp.reset_queue() returns void language sql as $$ delete from career_apply_prepare_requests $$;

@@ -3424,6 +3424,14 @@ const CareerRouter = (() => {
     if (/^(jobs?|apply|applying|roles?|work|positions?|find jobs?|search)$/.test(t)) {
       return say(hasResume ? "Sure." : "Sure — I'll search as soon as I know what you're after.", "What role, and which city or remote?");
     }
+    // PARITY R18 (F1): a request for postings that names no role ("send me real postings with links") gets the one thing that
+    // is missing, never the generic fallback; with a goal on record, the offer is to search that goal, in the person's words,
+    // asked first (nothing is searched or saved on a guess).
+    if (/\b(?:send|show|give|get|find|want|need|list|dm|pull up)\b/.test(t) && /\b(?:postings?|listings|links?|jobs?|roles?|openings?|internships?|positions?)\b/.test(t)) {
+      const goal = statedFactsOf(ctx).find((f) => f && f.kind === "goal" && s(f.value).trim());
+      if (goal) { offerNext(ctx, `find ${s(goal.value).trim()}`); return say(`Your goal on record is ${s(goal.value).trim()}.`, "Want me to search live postings for that now, or a different role or city?"); }
+      return say("I'll search live postings as soon as I know what for.", "Which role should I look for, and in which city or remote?");
+    }
     return say("I'm not sure which part of your search that's about — I find roles, track your applications and prep you for interviews.", hasResume
       ? "Which of those should we do?"
       : "Which of those should we do, or do you want to send me your resume first?");
@@ -11549,6 +11557,12 @@ const CareerRouter = (() => {
     const JOB_NOUN_RE = /\b(jobs?|roles?|openings?|positions?|postings?|internships?)\b/;
     const jobAfterDelivery = deliveryM ? JOB_NOUN_RE.test(t.slice(deliveryM.index + deliveryM[0].length)) : false;
     const futureTrigger = /\b(opens? up|goes up|comes up|gets? posted|is posted|when|whenever|as soon as|the moment|the minute)\b/.test(t);
+    // PARITY R18 (F1): "send me real postings with links" / "dm me some marketing jobs" asks to SEE postings now: a search, not
+    // an alert. It saved a job watch named "real postings with links" the person never asked for. A send/dm ask is an alert
+    // only with a trigger, "new" postings, a recurrence or an alert word ("send me new grad roles as they get posted").
+    const sendNow = deliveryM && /^(?:send|dm)\b/.test(deliveryM[0]) && !futureTrigger
+      && !/\bnew\b(?![ -]?grads?\b)|\b(?:daily|every|each|weekly|going forward|from now on|regularly|as (?:they|soon as))\b|\b(?:alerts?|watch(?:es|ing)?|notif(?:y|ications?))\b/.test(t);
+    if (!classicCreate && sendNow) return null;
     if (classicCreate || (deliveryVerb && !tellQuestionOnly && jobObject && (jobAfterDelivery || futureTrigger))) return { op: "create" };
     return null;
   }
@@ -14070,7 +14084,7 @@ const CareerRouter = (() => {
     // Career-adjacent but unmatched: the 140 unmatched fallback finally has a
     // caller (the baseline noted it existed with none in the path).
     if (/\b(job|career|resume|interview|application|internship|intern)\b/.test(t)) {
-      return { intent: "career_fallback", reply: Reply ? Reply.fallback("unmatched") : "I didn't catch that.", resultStatus: "awaiting_user" };
+      return { intent: "career_fallback", reply: Reply ? Reply.fallback("unmatched") : "I may have missed what you meant. Tell me a role and a city, and I'll look for openings.", resultStatus: "awaiting_user" };
     }
     return null; // not a career turn this router owns: silence stays for other lanes' surfaces
   }
@@ -14284,6 +14298,9 @@ const CareerRouter = (() => {
       const value = m[1].trim();
       if (aspirationIsEvent(value)) continue; // an event about a held job is not a sought target
       if (!/\b(?:jobs?|roles?|positions?|internships?|apprenticeships?|fellowships?)\b/i.test(value)) continue;
+      // PARITY R18 (F1): "I want real SWE internship postings with links" asks for postings to look at, not a career goal: it
+      // was recorded as the goal ("your career goal is real ... postings in chicago with links") instead of searched.
+      if (/\b(?:postings?|listings|links?|urls?)\b/i.test(value)) continue;
       if (/\b(?:answers?|questions?|mock|practice|rehears(?:e|al)|drafts?|resumes?|cover letters?)\b/i.test(value)) continue;
       if (value.length > 200) continue;
       return { value, evidence: clause.replace(/[.!]$/, "").trim() };

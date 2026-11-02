@@ -33,6 +33,12 @@ export function modelConfig(env: Env, role: ModelRole = "chat"): ModelConfig {
 export const providerName = (c: ModelConfig) => PROVIDER_NAME[c.provider];
 // D-038: the provider a model name belongs to. Only Claude model ids go to Anthropic.
 export const providerFor = (model: string): Provider => /^claude-/i.test(String(model || "")) ? "anthropic" : "openai";
+// D-038 review: CAREER_MODEL stays the OpenAI-only readers' model (mail, essay, mock prep, outreach replies). A claude- id
+// there is never sent to OpenAI: those readers get their OpenAI fallback instead. The reply model has its own key.
+export function openaiCareerModel(env: Env, fallback = "gpt-5-mini"): string {
+  const v = (env.get("CAREER_MODEL") ?? "").trim();
+  return v && providerFor(v) === "openai" ? v : fallback;
+}
 // A complete config for one named model: its provider, that provider's key, and its effort. Callers that pick a model
 // (the career reply model) use this instead of { ...modelConfig(env), model }, which would carry OpenAI's key and provider.
 // Anthropic effort: ANTHROPIC_EFFORT (low by default: a Telegram reply should land in seconds; owner may raise it).
@@ -95,14 +101,30 @@ export function toOpenAI(payload: any, cfg: ModelConfig): any {
 // translated or dropped (D-038). store:false is OpenAI's (the Messages API keeps no completion for reuse; nothing to send).
 // temperature is dropped: Claude 5.5 models take none ("Omit temperature, top_p, and top_k",
 // platform.claude.com/docs/en/models/haiku-5-5/overview). response_format json_schema becomes output_config.format.
-// Thinking is kept off for chat latency: Haiku 5.5 takes thinking disabled at high effort or below; Sonnet 5.5's lowest is
-// between_tools (platform.claude.com/docs/en/build-with-claude/effort). Effort: cfg.reasoningEffort (low by default).
+// Thinking is kept as low as each model allows, for chat latency (platform.claude.com/docs/en/build-with-claude/effort):
+// Haiku 5.5 takes thinking disabled at high effort or below; Sonnet 5.5's lowest is between_tools (disabled is a 400), whose
+// thinking blocks between tool calls count against max_tokens, so Sonnet gets ANTHROPIC_THINKING_HEADROOM more.
+// tool_choice is sent only with tools (a tools:[] + none request sends neither). Sonnet 5.5 rejects a forced tool_choice
+// (type "tool" or "any": a 400; platform.claude.com/docs/en/models/sonnet-5-5/migration-guide), so a forced choice is sent
+// as auto, and a forced single tool is sent alone: the caller's own check that a tool was called still decides (the flow
+// router throws to its regex net; the outreach parser fails closed). Effort: cfg.reasoningEffort (low by default).
 const ANTHROPIC_EFFORTS = new Set(["low", "medium", "high"]);
+export const ANTHROPIC_THINKING_HEADROOM = 1024;
+const NO_FORCED_TOOL = /^claude-sonnet-5-5/i;
 export function toAnthropic(payload: any, cfg: ModelConfig): any {
-  const body: any = { model: cfg.model, max_tokens: payload.max_tokens || 1024, messages: payload.messages || [] };
+  const sonnet55 = NO_FORCED_TOOL.test(cfg.model);
+  const body: any = { model: cfg.model, max_tokens: (payload.max_tokens || 1024) + (sonnet55 ? ANTHROPIC_THINKING_HEADROOM : 0), messages: payload.messages || [] };
   if (payload.system) body.system = payload.system;
-  if (Array.isArray(payload.tools) && payload.tools.length) body.tools = payload.tools;
-  if (payload.tool_choice) body.tool_choice = payload.tool_choice;
+  let tools: any[] = Array.isArray(payload.tools) ? payload.tools : [];
+  let tc = payload.tool_choice;
+  if (sonnet55 && tc && (tc.type === "tool" || tc.type === "any")) {
+    if (tc.type === "tool") tools = tools.filter((t: any) => t && t.name === tc.name);
+    tc = { type: "auto" };
+  }
+  if (tools.length) {
+    body.tools = tools;
+    if (tc) body.tool_choice = tc;
+  }
   if (Array.isArray(payload.stop_sequences) && payload.stop_sequences.length) body.stop_sequences = payload.stop_sequences.slice(0, 4);
   // Effort exists on Claude 4.6 and later; older ids (Haiku 4.5) reject it, so it is sent only to the 5.x family used here.
   const effortOk = /^claude-(haiku|sonnet|opus)-5/i.test(cfg.model);
@@ -111,15 +133,17 @@ export function toAnthropic(payload: any, cfg: ModelConfig): any {
   if (rf?.type === "json_schema" && rf.json_schema?.schema) out.format = { type: "json_schema", schema: rf.json_schema.schema };
   if (Object.keys(out).length) body.output_config = out;
   if (/^claude-haiku-5/i.test(cfg.model)) body.thinking = { type: "disabled" };
-  else if (/^claude-sonnet-5/i.test(cfg.model)) body.thinking = { type: "between_tools" };
+  else if (sonnet55) body.thinking = { type: "between_tools" };
   return body;
 }
-// Anthropic message -> the callers' shape. Thinking blocks are not shown to callers; a cut-off answer's tool calls are
-// discarded, as on the OpenAI side (a truncated call is never executable).
+// Anthropic message -> the callers' shape. Thinking blocks are KEPT, complete and in place: the agent loop replays an
+// assistant turn's content as it came (loop.ts), and Sonnet 5.5 requires them passed back unchanged in tool-use loops;
+// callers read only text and tool_use blocks, and toOpenAI drops them. A cut-off answer's tool calls are discarded, as on
+// the OpenAI side (a truncated call is never executable).
 export function fromAnthropic(body: any): any {
   if (!body || !Array.isArray(body.content)) throw new ModelUnavailableError(502, "bad_response", "Anthropic returned no message");
   const truncated = body.stop_reason === "max_tokens";
-  const content = body.content.filter((b: any) => b && (b.type === "text" || (b.type === "tool_use" && !truncated)));
+  const content = body.content.filter((b: any) => b && !(truncated && b.type === "tool_use"));
   const used = content.some((b: any) => b.type === "tool_use");
   const stop_reason = truncated ? "max_tokens" : body.stop_reason === "tool_use" && !used ? "end_turn" : body.stop_reason;
   return Object.assign({}, body, { content, stop_reason });

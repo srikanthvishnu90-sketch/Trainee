@@ -15,7 +15,7 @@ import { peopleSink, supabasePeopleDeps } from "../_shared/career_people.ts";
 import { gmailSender, gmailThreadReader } from "../_shared/career_outreach_gmail.ts";
 import { runOutreachFollowupsGated } from "../_shared/career_outreach_track.ts";
 import { runRepliesLane } from "../_shared/career_outreach_replies.ts";
-import { callModel, modelConfig } from "../_shared/model_gateway.ts";
+import { callModel, modelConfig, openaiCareerModel } from "../_shared/model_gateway.ts";
 import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
 
 // The career Google grant (vault oauth_google_career_<uid>), read the same way by mail tracking and outreach.
@@ -118,7 +118,7 @@ serve((req) => {
     replies: Deno.env.get("CAREER_OUTREACH_REPLIES") === "on" ? async (now) => {
       const deps = grant(admin);
       const model = Deno.env.get("CAREER_OUTREACH_REPLIES_MODEL") === "on"
-        ? (payload: any) => callModel({ ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" }, payload, { role: "chat" }) : null;
+        ? (payload: any) => callModel({ ...modelConfig(Deno.env, "chat"), model: openaiCareerModel(Deno.env) }, payload, { role: "chat" }) : null;
       return await runRepliesLane({ admin, fetch, token: (u, scope) => careerTokenFor(deps, scope)(u), outbox: supabaseAlertStore(admin), model, now });
     } : undefined,
     // Introduction reminders (D-033) queue the reminder a person asked for to the outbox at its date; the run record's

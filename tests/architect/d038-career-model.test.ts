@@ -1,9 +1,11 @@
 // D-038: the career reply model is one committed default (agent-chat/release_model.ts), read by every career call site;
-// CAREER_MODEL is the rollback only; the provider follows the model name (claude- ids go to Anthropic with
+// CAREER_REPLY_MODEL is the rollback only (CAREER_MODEL stays the OpenAI-only readers'); the provider follows the model name (claude- ids go to Anthropic with
 // ANTHROPIC_API_KEY); every model the default or a rollback can name is priced, so the cost ledger and the global daily budget
 // stay right. Nothing here reaches a real provider: the provider is a stub fetch.
-import { CAREER_MODEL_DEFAULT, careerModel, careerModelConfig } from "../../supabase/functions/agent-chat/release_model.ts";
-import { callModel, costMicros, fromAnthropic, modelConfig, modelConfigFor, newMeter, PRICES, providerFor, toAnthropic } from "../../supabase/functions/_shared/model_gateway.ts";
+import { CAREER_MODEL_DEFAULT, careerModel, careerModelConfig, ROLLBACK_MODELS } from "../../supabase/functions/agent-chat/release_model.ts";
+import { mailModelConfig } from "../../supabase/functions/_shared/career_mail_model.ts";
+import { essayModelConfig } from "../../supabase/functions/_shared/career_essay_card.ts";
+import { ANTHROPIC_THINKING_HEADROOM, callModel, costMicros, fromAnthropic, modelConfig, modelConfigFor, newMeter, openaiCareerModel, PRICES, providerFor, toAnthropic } from "../../supabase/functions/_shared/model_gateway.ts";
 import { memoryBudgetGate, worstCaseMicros } from "../../supabase/functions/_shared/model_budget.ts";
 
 function assert(v: unknown, m = "assertion failed") { if (!v) throw new Error(m); }
@@ -41,22 +43,44 @@ Deno.test("D-038: every career call site reads the one default; no stray model i
     assert(t.includes("careerModelConfig(Deno.env)") && !/CAREER_MODEL"\)\s*\|\|/.test(t), `${f} measures the committed model`);
   }
   const wf = read(".github/workflows/brain-eval.yml");
-  eq((wf.match(/^\s*CAREER_MODEL:.*$/gm) ?? []).map((l) => l.trim()), ["CAREER_MODEL: ${{ inputs.model }}"], "brain-eval never pins a model; only the dispatch input names one");
+  eq((wf.match(/^\s*CAREER(_REPLY)?_MODEL:.*$/gm) ?? []).map((l) => l.trim()), ["CAREER_REPLY_MODEL: ${{ inputs.model }}"], "brain-eval never pins a model; only the dispatch input names one");
   assert(/ANTHROPIC_API_KEY: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/.test(wf) && /ANTHROPIC_EVAL_BUDGET_USD: "25"/.test(wf), "the Anthropic key and its own cap reach the run");
 });
 
-Deno.test("D-038: CAREER_MODEL rolls back to a priced model only; the provider and key follow the model name", () => {
-  eq(careerModel(env({ CAREER_MODEL: "gpt-4.1-mini" })), "gpt-4.1-mini", "a priced rollback is honoured");
-  eq(careerModel(env({ CAREER_MODEL: " gpt-4.1-mini " })), "gpt-4.1-mini", "trimmed");
-  eq(careerModel(env({ CAREER_MODEL: "gpt-5-mnii" })), CAREER_MODEL_DEFAULT, "a typo serves the default");
-  eq(careerModel(env({ CAREER_MODEL: "gpt-realtime-mini" })), CAREER_MODEL_DEFAULT, "a voice model is never the reply model");
-  const a = careerModelConfig(env({ CAREER_MODEL: "claude-haiku-5-5", OPENAI_API_KEY: "o", ANTHROPIC_API_KEY: "a" }));
+Deno.test("D-038: CAREER_REPLY_MODEL rolls back only to a listed, priced, keyed model; provider and key follow the name", () => {
+  const both = { OPENAI_API_KEY: "o", ANTHROPIC_API_KEY: "a" };
+  eq(careerModel(env({ ...both, CAREER_REPLY_MODEL: "claude-haiku-5-5" })), "claude-haiku-5-5", "a listed, keyed rollback is honoured");
+  eq(careerModel(env({ ...both, CAREER_REPLY_MODEL: " claude-sonnet-5-5 " })), "claude-sonnet-5-5", "trimmed");
+  eq(careerModel(env({ OPENAI_API_KEY: "o", CAREER_REPLY_MODEL: "claude-haiku-5-5" })), CAREER_MODEL_DEFAULT, "no Anthropic key: the default, never an unkeyed provider");
+  eq(careerModel(env({ ...both, CAREER_REPLY_MODEL: "gpt-4.1-mini" })), CAREER_MODEL_DEFAULT, "priced but not listed: the default");
+  eq(careerModel(env({ ...both, CAREER_REPLY_MODEL: "claude-haiku-5-6" })), CAREER_MODEL_DEFAULT, "a typo serves the default");
+  eq(careerModel(env({ ...both, CAREER_MODEL: "claude-haiku-5-5" })), CAREER_MODEL_DEFAULT, "CAREER_MODEL (the OpenAI readers' key) never moves the reply model");
+  for (const m of ROLLBACK_MODELS) assert(PRICES[m], `${m} on the rollback list is priced`);
+  const a = careerModelConfig(env({ ...both, CAREER_REPLY_MODEL: "claude-haiku-5-5" }));
   eq([a.provider, a.model, a.apiKey], ["anthropic", "claude-haiku-5-5", "a"], "a claude id uses Anthropic's key");
-  const o = careerModelConfig(env({ CAREER_MODEL: "gpt-4.1-mini", OPENAI_API_KEY: "o", ANTHROPIC_API_KEY: "a" }));
-  eq([o.provider, o.apiKey], ["openai", "o"], "a gpt id uses OpenAI's key");
+  const o = careerModelConfig(env(both));
+  eq([o.provider, o.apiKey], ["openai", "o"], "the default gpt id uses OpenAI's key");
   eq([providerFor("claude-sonnet-5-5"), providerFor("gpt-5-mini")], ["anthropic", "openai"]);
-  // The OpenAI-only configs are unchanged: no secret switches a provider (Q3/SEC11).
+  // The OpenAI-only configs are unchanged: no secret switches their provider (Q3/SEC11).
   eq(modelConfig(env({ OPENAI_API_KEY: "o", MODEL_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "a", OPENAI_MODEL: "claude-haiku-5-5" })).provider, "openai");
+});
+
+Deno.test("D-038 review: the four OpenAI-only CAREER_MODEL readers never send a Claude id to OpenAI", () => {
+  const claude = env({ OPENAI_API_KEY: "o", ANTHROPIC_API_KEY: "a", CAREER_MODEL: "claude-haiku-5-5" });
+  const gpt = env({ OPENAI_API_KEY: "o", CAREER_MODEL: "gpt-4.1-mini" });
+  eq([openaiCareerModel(claude), openaiCareerModel(gpt), openaiCareerModel(env({}))], ["gpt-5-mini", "gpt-4.1-mini", "gpt-5-mini"]);
+  const mail = mailModelConfig(claude), essay = essayModelConfig(claude);
+  eq([mail.provider, providerFor(mail.model)], ["openai", "openai"], "mail");
+  eq([essay.provider, providerFor(essay.model)], ["openai", "openai"], "essay");
+  for (const f of ["supabase/functions/_shared/career_mock_prep.ts", "supabase/functions/career-proactive/index.ts", "supabase/functions/_shared/career_mail_model.ts", "supabase/functions/_shared/career_essay_card.ts"]) {
+    const t = code(read(f));
+    assert(!/env\.get\(\s*["']CAREER_MODEL["']\s*\)/.test(t) && t.includes("openaiCareerModel("), `${f} reads CAREER_MODEL only through openaiCareerModel`);
+  }
+});
+
+Deno.test("D-038 review: the date of every price row is a real check, from 2026-10-01 to today", () => {
+  const today = new Date().toISOString().slice(0, 10);
+  for (const [m, r] of Object.entries(PRICES)) if (m.startsWith("claude-haiku-5") || m.startsWith("claude-sonnet-5")) assert(r.checked_on >= "2026-10-01" && r.checked_on <= today, m);
 });
 
 Deno.test("D-038: the Claude rows are verified, long-context priced and reserved", () => {
@@ -79,8 +103,36 @@ Deno.test("D-038: the Anthropic request drops what the Messages API does not tak
   eq(b.output_config, { effort: "low", format: { type: "json_schema", schema: { type: "object", properties: {}, additionalProperties: false } } });
   eq(b.thinking, { type: "disabled" });
   eq(toAnthropic({ messages: [] }, modelConfigFor(env({}), "claude-sonnet-5-5")).thinking, { type: "between_tools" });
-  const cut = fromAnthropic({ type: "message", content: [{ type: "thinking", thinking: "x" }, { type: "text", text: "a" }, { type: "tool_use", id: "1", name: "t", input: {} }], stop_reason: "max_tokens", usage: { input_tokens: 1, output_tokens: 1 } });
-  eq([cut.content.map((c: any) => c.type), cut.stop_reason], [["text"], "max_tokens"], "a cut-off call is never executable; thinking is not shown");
+  const cut = fromAnthropic({ type: "message", content: [{ type: "thinking", thinking: "x", signature: "s" }, { type: "text", text: "a" }, { type: "tool_use", id: "1", name: "t", input: {} }], stop_reason: "max_tokens", usage: { input_tokens: 1, output_tokens: 1 } });
+  eq([cut.content.map((c: any) => c.type), cut.stop_reason], [["thinking", "text"], "max_tokens"], "a cut-off call is never executable; thinking is kept");
+  // A tools:[] + none request (career_brain.ts regenerate) sends neither tools nor tool_choice.
+  const bare = toAnthropic({ messages: [], tools: [], tool_choice: { type: "none" }, max_tokens: 500 }, cfg);
+  eq(["tools" in bare, "tool_choice" in bare], [false, false]);
+});
+
+const ROUTE = { name: "route_message", description: "d", input_schema: { type: "object", properties: { intent: { type: "string" } } } };
+const OTHER = { name: "other", description: "d", input_schema: { type: "object", properties: {} } };
+Deno.test("D-038 review: a forced tool on Haiku 5.5 is sent as is; on Sonnet 5.5 (which rejects it) as auto with that tool alone", () => {
+  const forced = { system: "s", messages: [{ role: "user", content: "send sam 40" }], tools: [ROUTE, OTHER], tool_choice: { type: "tool", name: "route_message" }, max_tokens: 400 };
+  const h = toAnthropic(forced, modelConfigFor(env({}), "claude-haiku-5-5"));
+  eq([h.tool_choice, h.tools.map((t: any) => t.name), h.max_tokens, h.thinking], [{ type: "tool", name: "route_message" }, ["route_message", "other"], 400, { type: "disabled" }]);
+  const so = toAnthropic(forced, modelConfigFor(env({}), "claude-sonnet-5-5"));
+  eq([so.tool_choice, so.tools.map((t: any) => t.name), so.max_tokens, so.thinking], [{ type: "auto" }, ["route_message"], 400 + ANTHROPIC_THINKING_HEADROOM, { type: "between_tools" }]);
+  const any = toAnthropic({ ...forced, tool_choice: { type: "any" } }, modelConfigFor(env({}), "claude-sonnet-5-5"));
+  eq([any.tool_choice, any.tools.length], [{ type: "auto" }, 2], "any becomes auto with every tool");
+});
+
+Deno.test("D-038 review: a two-step tool loop replays the assistant turn with its thinking blocks complete, on both request shapes", () => {
+  for (const model of ["claude-haiku-5-5", "claude-sonnet-5-5"]) {
+    const cfg = modelConfigFor(env({ ANTHROPIC_API_KEY: "a" }), model);
+    const step1 = fromAnthropic({ type: "message", content: [{ type: "thinking", thinking: "plan", signature: "sig1" }, { type: "tool_use", id: "tu1", name: "other", input: {} }], stop_reason: "tool_use", usage: { input_tokens: 5, output_tokens: 5 } });
+    eq(step1.stop_reason, "tool_use");
+    // The agent loop (loop.ts) pushes the assistant content as it came, then the tool result.
+    const messages = [{ role: "user", content: "hi" }, { role: "assistant", content: step1.content }, { role: "user", content: [{ type: "tool_result", tool_use_id: "tu1", content: "ok" }] }];
+    const req2 = toAnthropic({ system: "s", messages, tools: [OTHER], max_tokens: 800 }, cfg);
+    eq(req2.messages[1].content, [{ type: "thinking", thinking: "plan", signature: "sig1" }, { type: "tool_use", id: "tu1", name: "other", input: {} }], `${model}: thinking passed back unchanged`);
+    eq(["tool_choice" in req2, req2.tools.length], [false, 1], `${model}: auto by default, tools kept`);
+  }
 });
 
 Deno.test("D-038: a Claude call goes to Anthropic with its key, is reserved and metered like OpenAI's", async () => {
@@ -89,14 +141,14 @@ Deno.test("D-038: a Claude call goes to Anthropic with its key, is reserved and 
     seen.push({ url, key: init.headers["x-api-key"], auth: init.headers.authorization, body: JSON.parse(init.body) });
     return new Response(JSON.stringify({ id: "m", type: "message", role: "assistant", model: "claude-haiku-5-5", content: [{ type: "text", text: "ok" }], stop_reason: "end_turn", usage: { input_tokens: 1000, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }), { status: 200 });
   }) as any;
-  const cfg = careerModelConfig(env({ CAREER_MODEL: "claude-haiku-5-5", ANTHROPIC_API_KEY: "test-anthropic-key", OPENAI_API_KEY: "test-openai-key" }));
+  const cfg = careerModelConfig(env({ CAREER_REPLY_MODEL: "claude-haiku-5-5", ANTHROPIC_API_KEY: "test-anthropic-key", OPENAI_API_KEY: "test-openai-key" }));
   const out = await callModel(cfg, { messages: [{ role: "user", content: "hi" }], max_tokens: 50, temperature: 0.2 }, { request, meter, budget: gate });
   eq(out.content, [{ type: "text", text: "ok" }]);
   eq([seen[0].url, seen[0].key, seen[0].auth], ["https://api.anthropic.com/v1/messages", "test-anthropic-key", undefined], "Anthropic's URL and key, never OpenAI's");
   assert(!("temperature" in seen[0].body), "no temperature sent");
   eq([meter.calls, meter.usd_micros, meter.provider], [1, 150, "anthropic"], "metered at the verified price");
   eq(gate.snapshot().spent, 150, "the budget settles to the proven cost");
-  const missing = careerModelConfig(env({ CAREER_MODEL: "claude-haiku-5-5", OPENAI_API_KEY: "o" }));
+  const missing = modelConfigFor(env({ OPENAI_API_KEY: "o" }), "claude-haiku-5-5");
   let err: any = null; try { await callModel(missing, { messages: [] }, { request: (async () => { throw new Error("must not send"); }) as any, budget: gate }); } catch (e) { err = e; }
   assert(err && err.type === "not_configured", "no ANTHROPIC_API_KEY: not configured, nothing sent");
 });

@@ -224,6 +224,8 @@ if (import.meta.main) {
   const now$ = () => before + (meter.usd_micros + judgeMeter.usd_micros) / 1e6;
   if (budget !== null) console.log(`budget $${budget.toFixed(2)} · already spent $${before.toFixed(3)} (${prior.length} result files)`);
   // D-038: a Claude brain runs only under its own cap (ANTHROPIC_EVAL_BUDGET_USD), checked before every item beside the eval cap.
+  const asked = (Deno.env.get("CAREER_REPLY_MODEL") ?? "").trim();
+  if (usesModel && asked && brainCfg.model !== asked) { console.log(`NOT RUN: CAREER_REPLY_MODEL=${asked} was refused (not on the rollback list, or its provider has no key); the default would be measured instead.`); Deno.exit(2); }
   const anthropicBrain = usesModel && brainCfg.provider === "anthropic";
   const aBudget = anthropicBrain ? Number(Deno.env.get("ANTHROPIC_EVAL_BUDGET_USD") ?? NaN) : null;
   if (anthropicBrain && !(aBudget! > 0)) { console.log("NOT RUN: a claude- brain needs ANTHROPIC_EVAL_BUDGET_USD (the Anthropic spend cap)."); Deno.exit(2); }

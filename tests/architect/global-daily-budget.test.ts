@@ -71,7 +71,7 @@ Deno.test("worst case: output cap x price + request bytes x input price; unknown
 
 Deno.test("the price table says where every price came from, and a per-call fee is part of the worst case", () => {
   for (const [m, p] of Object.entries(Gateway.PRICES)) {
-    assert(p.source && /^(verified|third_party|unverified)$/.test(p.checked) && /^\d{4}-\d{2}-\d{2}$/.test(p.checked_on), `${m} names its source, check state and date`);
+    assert(p.source && /^(verified|third_party|unverified)$/.test(p.checked) && /^\d{4}-\d{2}-\d{2}$/.test(p.checked_on) && p.checked_on >= "2026-10-01" && p.checked_on <= new Date().toISOString().slice(0, 10), `${m} names its source, check state and a real check date (2026-10-01 to today)`);
     assert(p.input > 0 && p.output > 0 && p.cached >= 0, `${m} has real rates`);
   }
   const withFee = { x: { input: 1, cached: 0, cache_write: 0, output: 1, call_fee: 5000 } };

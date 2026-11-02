@@ -13446,11 +13446,12 @@ const CareerRouter = (() => {
     const c = [p && p.url, ...((p && Array.isArray(p.source_urls)) ? p.source_urls : [])].map(s).find((u) => /^https?:\/\/\S+$/i.test(u));
     return c || null;
   }
-  function roleSentence(item) {
+  function roleSentence(item, i, all) {
+    const n = Array.isArray(all) && all.length > 1 ? `${i + 1}) ` : "";
     const where = item.remote === "remote" ? "remote" : item.remote === "hybrid" ? `hybrid in ${s(item.location).split(",")[0]}` : s(item.location);
     const pay = item.posting.salary && item.posting.salary.raw ? `, ${item.posting.salary.raw}` : "";
     const url = item.url || postingUrlOf(item.posting);
-    return `${item.title} at ${item.company}${url ? ` (${url})` : ""} — ${where}${pay}: ${item.reason}${item.caveat ? `; heads-up: ${item.caveat}` : ""}.`;
+    return `${n}${item.title} at ${item.company}${url ? ` (${url})` : ""} — ${where}${pay}: ${item.reason}${item.caveat ? `; heads-up: ${item.caveat}` : ""}.`;
   }
 
   const FAMILY_LABELS = { PM: "product management (PM)", SWE: "software engineering", "Data/ML": "data and machine learning", Design: "design", Finance: "finance", Consulting: "consulting", Operations: "operations", Marketing: "marketing", Sales: "sales" };
@@ -13525,7 +13526,7 @@ const CareerRouter = (() => {
       return Object.assign({ intent: o.intent || "career_discovery", reply }, publicFacts);
     }
     const profiled = !!(profile && (profile.facts || []).length);
-    const reply = compose({ headline: o.headline || (profiled ? `Here are the ${top.length} roles most worth applying to, ranked by fit with your profile.` : `Here ${top.length === 1 ? "is 1 role" : `are ${top.length} roles`} that match your search.`), facts: top.map(roleSentence),
+    const reply = compose({ headline: o.headline || (profiled ? `Here are the ${top.length} roles most worth applying to, ranked by fit with your profile.` : `Here ${top.length === 1 ? "is 1 role that matches" : `are ${top.length} roles that match`} your search.`), facts: top.map(roleSentence),
       nextStep: o.nextStep || (profiled ? "Tell me one to tailor your resume for, and I will do that next." : "Want me to rank them against your resume? Paste it here or attach the file.") });
     return Object.assign({ intent: o.intent || "career_discovery", reply }, publicFacts);
   }
@@ -16654,6 +16655,111 @@ const CareerRouter = (() => {
     const rm = lc(s(text)).match(/\b(?:for|to)\s+(?:a|an|the|this|that)\s+([a-z][a-z /&-]{1,40}?)\s+(role|job|position|internship|opening)\b/);
     if (rm) return { label: `the ${rm[1].trim()} ${rm[2]}`, cir: null, company: null };
     return { label: null, cir: null, company: null };
+  }
+  const TP_ORD = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, "1st": 1, "2nd": 2, "3rd": 3, "4th": 4, "5th": 5 };
+  const TP_STOP = new Set(["the", "for", "and", "job", "jobs", "role", "roles", "resume", "cv", "tailor", "tailored", "my", "your", "position", "posting", "opening", "one", "with", "that", "this", "can", "you", "please", "make", "fit", "version", "application", "apply", "about", "from", "into", "it", "to", "at", "me", "a", "an", "of", "in"]);
+  function tpNormUrl(u) { return lc(u).replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/[?#].*$/, "").replace(/[).,;!]+$/, "").replace(/\/+$/, ""); }
+  function tpEntry(p) { return { id: p.id || p.corpus_id || null, title: s(p.title), company: s(p.company), url: postingUrlOf(p) }; }
+  function tpResolve(entry, pool) {
+    if (!entry) return null;
+    return pool.find((p) => entry.id && (p.id === entry.id || p.corpus_id === entry.id))
+      || pool.find((p) => entry.url && postingUrlOf(p) && tpNormUrl(postingUrlOf(p)) === tpNormUrl(entry.url))
+      || pool.find((p) => lc(p.title) === lc(entry.title) && lc(p.company) === lc(entry.company)) || null;
+  }
+  function tpCompanyNamed(raw, company) {
+    const name = ltClean(s(company).replace(/\s*\(fictional\)\s*/gi, " "));
+    if (!name || name.length < 2) return false;
+    const re = new RegExp(`(?<![A-Za-z0-9])${ltEsc(name).replace(/&/g, "(?:&|and)")}(?![A-Za-z0-9])`, "gi");
+    for (const m of raw.matchAll(re)) {
+      const before = raw.slice(0, m.index), after = raw.slice(m.index + m[0].length);
+      if (/\b(?:not|except|besides|other than|instead of|than|no|skip|without)\s+(?:the\s+)?$/i.test(before)) continue;
+      if (/^\s+(?:up|down|out|off)\b/i.test(after)) continue;
+      if (/\b(?:for|to|at|with|the|my|our)\s+$/i.test(before) || /^(?:['’]s\b|\s*$|\s*[.!?,;]|\s+(?:role|job|posting|position|internship|opening|one|version|application|team|offer|analyst|engineer|intern|associate|data|software|marketing|investment|product|design|finance|sales|operations)\b)/i.test(after) || /^[A-Z]/.test(m[0])) return true;
+    }
+    return false;
+  }
+  const TP_ROLE_WORDS = new Set(["data", "analyst", "analytics", "business", "software", "engineer", "engineering", "developer", "designer", "design", "product", "manager", "marketing", "coordinator", "sales", "finance", "financial", "investment", "banking", "consultant", "consulting", "recruiter", "operations", "scientist", "science", "intern", "internship", "associate", "growth", "research", "security", "frontend", "backend", "fullstack"]);
+  const TP_ROLE_ALIAS = { swe: ["software", "engineer"], pm: ["product", "manager"], ib: ["investment", "banking"], ds: ["data", "scientist"], ux: ["designer"], analytics: ["analyst"], engineering: ["engineer"], internship: ["intern"] };
+  function tpRoleWords(text) {
+    const out = [];
+    for (const w of lc(text).split(/[^a-z0-9]+/)) for (const x of (TP_ROLE_ALIAS[w] || [w])) if (TP_ROLE_WORDS.has(x) && !out.includes(x)) out.push(x);
+    return out;
+  }
+  function tpTitleScore(p, raw, companies) {
+    const coWords = new Set(companies.flatMap((c) => lc(c).split(/[^a-z0-9]+/)));
+    const words = new Set(lc(raw).split(/[^a-z0-9]+/).filter((w) => w.length >= 2 && !TP_STOP.has(w) && !coWords.has(w)));
+    return [...new Set(lc(p.title).split(/[^a-z0-9]+/))].filter((w) => words.has(w)).length;
+  }
+  function tailorPostingNamed(text, ctx, list, poolIn) {
+    const raw = s(text);
+    const pool = poolIn || postingsFromCtx(ctx);
+    if (!pool.length) return { kind: "none" };
+    for (const u of raw.match(/https?:\/\/[^\s<>"']+/gi) || []) {
+      const hit = pool.find((p) => postingUrlOf(p) && tpNormUrl(postingUrlOf(p)) === tpNormUrl(u));
+      if (hit) return { kind: "posting", posting: hit, by: "link" };
+    }
+    const answering = Array.isArray(list) && list.length > 0;
+    const shown = answering ? list : (ctx.discovery && Array.isArray(ctx.discovery.lastShortlist) ? ctx.discovery.lastShortlist : []);
+    if (shown.length) {
+      const t = lc(raw);
+      let n = null;
+      const m1 = t.match(/(?:^|\s)#\s*(\d{1,2})\b/) || t.match(/\b(?:number|no\.|option|role|job|posting)\s*#?\s*(\d{1,2})\b/) || (answering ? t.match(/^\s*(\d{1,2})\s*[.)!]?\s*$/) : null);
+      const m2 = t.match(/\b(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\s+(?:one|role|job|posting|option)\b/);
+      if (m1) n = Number(m1[1]);
+      else if (m2) n = TP_ORD[m2[1]];
+      else if (/\b(?:top|best)\s+(?:one|match|role|job|posting)\b/.test(t)) n = 1;
+      if (n != null) {
+        const hit = n >= 1 && n <= shown.length ? tpResolve(shown[n - 1], pool) : null;
+        if (hit) return { kind: "posting", posting: hit, by: "number" };
+        return { kind: "ambiguous", options: shown.map((e) => tpResolve(e, pool)).filter(Boolean).slice(0, 5), why: "number" };
+      }
+    }
+    const companies = [...new Set(pool.map((p) => s(p.company)).filter(Boolean))];
+    const named = companies.filter((co) => tpCompanyNamed(raw, co));
+    const pickByTitle = answering && (raw.trim().split(/\s+/).length <= 4 || /\b(?:one|that|this)\b/i.test(raw));
+    let cands = named.length ? pool.filter((p) => named.includes(s(p.company))) : (pickByTitle ? pool.slice() : []);
+    if (!cands.length) return { kind: "none" };
+    if (cands.length > 1) {
+      const scored = cands.map((p) => ({ p, sc: tpTitleScore(p, raw, named) }));
+      const best = Math.max(...scored.map((x) => x.sc));
+      if (best > 0) cands = scored.filter((x) => x.sc === best).map((x) => x.p);
+      else if (!named.length) return { kind: "none" };
+    }
+    if (cands.length === 1 && named.length) {
+      const asked = tpRoleWords(raw), title = new Set(tpRoleWords(cands[0].title));
+      if (asked.length && asked.some((w) => !title.has(w))) return { kind: "mismatch", posting: cands[0], asked: asked.join(" ") };
+    }
+    if (cands.length === 1) return { kind: "posting", posting: cands[0], by: named.length ? "company" : "title" };
+    return { kind: "ambiguous", options: cands.slice(0, 5), why: named.length > 1 ? "companies" : "company" };
+  }
+  function tailorWhichReply(ctx, options, opts) {
+    const o = opts || {};
+    const items = (options || []).slice(0, 5);
+    markFrame(ctx, "tailor_pick", { options: items.map(tpEntry) });
+    const cos = [...new Set(items.map((p) => s(p.company)))];
+    const head = o.head || (cos.length === 1 ? `${cos[0]} has ${items.length} postings here:` : "These postings fit:");
+    const lines = [head, ...items.map((p, i) => `${i + 1}) ${p.title} at ${p.company}`)];
+    if (o.noResume) lines.push("I don't have your resume yet, so paste it or send the PDF with your answer.");
+    lines.push(o.question || "Which one should I tailor your resume to?");
+    return { intent: "tailor_needs_posting", reply: lines.join("\n"), resultStatus: "awaiting_user", artifact: null, sends: 0, options: items.map(tpEntry) };
+  }
+  function handleTailorPick(text, ctx) {
+    const fr = frameMarksOf(ctx).tailor_pick;
+    if (!fr || !Array.isArray(fr.options) || !fr.options.length || !ctx.profile) return null;
+    const askedAt = Date.parse(fr.at || "");
+    if (!Number.isFinite(askedAt) || nowOf(ctx) - askedAt > 30 * 60 * 1000) return null;
+    const raw = s(text).trim();
+    if (!raw || raw.split(/\s+/).length > 12) return null;
+    const pool = postingsFromCtx(ctx);
+    const offered = fr.options.map((e) => tpResolve(e, pool)).filter(Boolean);
+    if (!offered.length) return null;
+    const pick = tailorPostingNamed(raw, ctx, fr.options, offered);
+    if (pick.kind !== "posting") return null;
+    const wmir = threadMirrorForWrite(ctx);
+    if (wmir && wmir.frames) delete wmir.frames.tailor_pick;
+    const chained = handleTailor(raw, Object.assign({}, ctx, { posting: pick.posting }));
+    if (chained) chained.chained_from = "tailor_pick";
+    return chained;
   }
   function handleTailorNeedsFacts(text, ctx) {
     const target = tailorTargetOf(text, ctx);
@@ -22120,6 +22226,8 @@ const CareerRouter = (() => {
     if (paused) return paused;
     const shortlistRes = handleShortlistApply(text, c);
     if (shortlistRes) return shortlistRes;
+    const tailorPick = handleTailorPick(text, c);
+    if (tailorPick) return tailorPick;
     const batchRes = handleBatchApply(text, c);
     if (batchRes) return batchRes;
     const batchStatus = handleBatchStatus(text, c);
@@ -22172,7 +22280,8 @@ const CareerRouter = (() => {
     { const cg = routeCoverLetterGuidance(text, c); if (cg) return cg; }
     const recommendations = typeof CareerRecommendations !== "undefined" ? CareerRecommendations : req("./154-career-recommendations.js");
     const recommendationIntent = recommendations && recommendations.intentFor(text);
-    if (recommendationIntent) {
+    const tailorsNamed = /\btailor\b|\bmake my (?:resume|cv)\b|\b(?:customi[sz]e|adjust)\b[^.]*\b(?:resume|cv)\b/.test(t) && tailorPostingNamed(text, c).kind !== "none";
+    if (recommendationIntent && !tailorsNamed) {
       const rec = recommendations.recommend(Object.assign({}, c, { recommendationIntent, text: s(text) }));
       return { intent: "career_recommendations", reply: rec.text, resultStatus: "prepared", sends: 0, guidance: rec, payload: rec, artifact: rec };
     }
@@ -22478,6 +22587,15 @@ const CareerRouter = (() => {
         const bt = handleBatchTailor(text, c);
         if (bt) return bt;
       }
+      if (!c.jdText && !c.jd) {
+        const tgt = tailorPostingNamed(text, c);
+        if (tgt.kind === "posting") {
+          const chained = handleTailor(text, Object.assign({}, c, { posting: tgt.posting }));
+          if (chained) { chained.chained_from = "named_posting"; return chained; }
+        }
+        if (tgt.kind === "ambiguous" && tgt.options.length > 1) return tailorWhichReply(c, tgt.options);
+        if (tgt.kind === "mismatch") return tailorWhichReply(c, [tgt.posting], { head: `The only ${tgt.posting.company} posting I have is ${tgt.posting.title}, not the ${tgt.asked} role you named.`, question: `Should I tailor your resume to ${tgt.posting.company}'s ${tgt.posting.title} role? Reply 1 for yes.` });
+      }
       const stagedUsable = c.posting && (c.posting.jd_text || c.posting.title || (Array.isArray(c.posting.requirements) && c.posting.requirements.length));
       if (stagedUsable || c.jdText || c.jd) return handleTailor(text, c);
       const namedTarget = letterTargetOf(text, c);
@@ -22525,6 +22643,21 @@ const CareerRouter = (() => {
         return { intent: "tailor_needs_posting", reply, resultStatus: "awaiting_user", artifact: null, sends: 0 };
       }
       const disc = handleDiscovery(text, c, {});
+      {
+        const capM = s(text).match(/\b(?:for|to|at)\s+(?:the\s+)?([A-Z][A-Za-z0-9&.'’-]+(?:\s+[A-Z][A-Za-z0-9&.'’-]+){0,2})/);
+        const firm = capM ? capM[1].split(/\s+/).filter((w, i, a) => !(i > 0 && LT_ROLE_TRAIL.test(w))).join(" ") : null;
+        if (firm && !LT_ROLE_LEAD.test(firm.split(/\s+/)[0]) && !ltIsPlace(firm) && !ltIsSchool(firm) && !postingsFromCtx(c).some((p) => lc(p.company).includes(lc(firm)))) {
+          const leadM = s(text).match(/lead with\s+(.+?)(?:[.!?]|$)/i) || s(text).match(/(?:\s[—–-]\s*|:\s*)(.+?)\s+forward\b/i);
+          const lead = leadM ? leadM[1].replace(/\s+/g, " ").replace(/[,;.\s]+$/, "").trim() : null;
+          const reply = ensureNextStepText([`I don't have a ${firm} posting here, so I won't tailor to a different company's role.`, `Paste the ${firm} posting or its link and I'll tailor to it${lead && lead.length <= 90 ? `, leading with ${lead}` : ""}.`].join("\n"));
+          return { intent: "tailor_needs_posting", reply, resultStatus: "awaiting_user", artifact: null, sends: 0, company: firm };
+        }
+      }
+      if (disc.shortlist && disc.shortlist.length > 1 && !discoveryFamilies(text).length && !tailorTargetOf(text, c).label) {
+        const pool = postingsFromCtx(c);
+        const opts = disc.shortlist.slice(0, 3).map((x) => pool.find((p) => p.corpus_id === x.id)).filter(Boolean);
+        if (opts.length > 1) return tailorWhichReply(c, opts, { noResume: !resumeOnRecord(c) });
+      }
       if (disc.shortlist && disc.shortlist.length) {
         const topAdapted = postingsFromCtx(c).find((p) => p.corpus_id === disc.shortlist[0].id) || null;
         if (topAdapted) {

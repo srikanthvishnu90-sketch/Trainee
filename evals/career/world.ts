@@ -175,7 +175,7 @@ export async function worldTurn(w: World, o: { brain: "agent" | "router"; thread
   const outAns = !card && !asked && !controlled
     ? await outreachTurn({ message, userId: USER, threadId: o.threadId, now, store: w.outreach, gmailConnected: async () => gmailOn, connectAsk: missingIntegration("gmail") }).catch(() => null) : null;
   // o.production: the rest of the handler's code turns, in its order (CODE_TURN_ORDER), each only when none before it answered.
-  const later = o.production && !card && !asked && !outAns && !controlled ? await productionTurns(w, { message, threadId: o.threadId, now, ctx, situation, snapshot: t.snapshot }) : null;
+  const later = o.production && !card && !asked && !outAns && !controlled ? await productionTurns(w, { message, threadId: o.threadId, now, ctx, situation, snapshot: t.snapshot, channel: o.channel ?? null }) : null;
   if (card) out = { reply: card.reply, intent: ["shown", "not_on_card", "change"].includes(card.status) ? CARD_INTENT : "career_apply_card_answer", handler: "code:cards" };
   else if (asked) out = { reply: asked.reply, intent: ["shown", "partial"].includes(asked.status) ? QUESTIONS_INTENT : "career_apply_questions_answer", handler: "code:questions" };
   else if (outAns) out = { reply: outAns.reply, intent: outAns.intent, handler: "code:outreach" };
@@ -213,7 +213,7 @@ export async function worldTurn(w: World, o: { brain: "agent" | "router"; thread
 
 // The handler's code turns after outreach (CODE_TURN_ORDER "runs"), with the world's stores in place of Supabase's. Each runs
 // only when none before it answered, as in handler-career.ts.
-async function productionTurns(w: World, a: { message: string; threadId: string; now: number; ctx: any; situation: any; snapshot: any }): Promise<{ reply: string; intent: string | null; handler: string } | null> {
+async function productionTurns(w: World, a: { message: string; threadId: string; now: number; ctx: any; situation: any; snapshot: any; channel: string | null }): Promise<{ reply: string; intent: string | null; handler: string } | null> {
   const { applyTurn } = await import("../../supabase/functions/_shared/career_apply_chat.ts");
   const { supabaseApplications } = await import("../../supabase/functions/_shared/career_apply_status.ts");
   const { applicationsTurn } = await import("../../supabase/functions/_shared/career_apply_status.ts");
@@ -235,7 +235,9 @@ async function productionTurns(w: World, a: { message: string; threadId: string;
     connectAsk: missingIntegration("gmail") } } as any));
   if (f08) return { reply: f08.reply, intent: f08.intent ?? "career_followup", handler: "code:followup" };
   const stood: any = (await quiet(standingTurn({ message, userId: USER, now, read: supabaseStanding(w.admin) })))
-    ?? (await quiet(reminderTurn({ message, userId: USER, now, store: (w as any).reminders ??= memoryReminderStore() })))
+    // A person texting on iMessage, SMS, WhatsApp or Telegram is reachable there (their own linked channel); on the web app,
+    // nothing links one in the world.
+    ?? (await quiet(reminderTurn({ message, userId: USER, now, store: (w as any).reminders ??= memoryReminderStore({ zones: { [USER]: "America/Chicago" }, reachable: { [USER]: !!a.channel && a.channel !== "web" } }) })))
     ?? overviewTurn({ message, situation: a.situation, now } as any);
   if (stood) return { reply: stood.reply, intent: stood.intent ?? "career_status", handler: "code:standing" };
   const status: any = await quiet(applicationsTurn({ message, userId: USER, now, read: supabaseApplications(w.admin) }));

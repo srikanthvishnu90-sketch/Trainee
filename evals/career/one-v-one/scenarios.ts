@@ -138,12 +138,12 @@ export const SCENARIOS: Scenario[] = [
   S("V090", "offer", "whatsapp", "new", "what is a signing bonus", ["A one-time payment for joining, usually in your first paycheck. Some must be repaid if you leave within a year.", "Worth asking for when base pay won't move."], { maxQuestions: 0, must: ["one-time|one time"] }),
 
   // ------------------------------------------------------------------------------------------- reminders (6)
-  S("V091", "reminders", "imessage", "inflight", "remind me friday to follow up with ramp", ["I can't set reminders yet, so I won't promise one.", "Your Ramp application is stopped on a missing phone number. Want to fix that now instead?"], { must: ["ramp"], mustNot: [NO_DONE_REMIND] }),
-  S("V092", "reminders", "sms", "new", "text me tomorrow at 9 to apply", ["I can't schedule a text for a set time yet, so I won't say I will.", "Want me to set job alerts so new roles come to you?"], { mustNot: [NO_DONE_REMIND, String.raw`\bi'?ll text you (tomorrow|at 9)\b`] }),
-  S("V093", "reminders", "whatsapp", "new", "remind me about my interview on tuesday", ["I can't set reminders yet. Put it in your calendar now so it doesn't slip.", "Want to prep for it today?"], { mustNot: [NO_DONE_REMIND] }),
-  S("V094", "reminders", "telegram", "inflight", "can you nudge me if i forget to answer figma", ["Figma is waiting on 2 answers from you: work authorization and salary. I can't schedule nudges yet.", "Let's do them now. First one: are you authorized to work in the US?"], { must: ["figma"], mustNot: [NO_DONE_REMIND] }),
+  S("V091", "reminders", "imessage", "inflight", "remind me friday to follow up with ramp", ["Set: I'll text you here Friday, Oct 23 at 9:00 AM to follow up with Ramp. I picked 9 AM since you didn't give a time.", "Ramp's application is also stopped on a missing phone number. Want to fix that now?"], { must: ["set|i'll text you", "fri", "9"] }),
+  S("V092", "reminders", "sms", "new", "text me tomorrow at 9 to apply", ["Set: I'll text you here tomorrow, Oct 21 at 9:00 AM, to apply.", "Want me to line up roles for it now?"], { must: ["set|i'll text you", "9", "tomorrow|oct 21|wed"] }),
+  S("V093", "reminders", "whatsapp", "new", "remind me about my interview on tuesday", ["Next Tuesday, Oct 27? Tell me the interview time and I'll text you a reminder before it."], { must: ["oct 27|next tuesday|which tuesday", "time"] }),
+  S("V094", "reminders", "telegram", "inflight", "can you nudge me if i forget to answer figma", ["Figma is waiting on 2 answers from you: work authorization and salary.", "I can text you a reminder: say \"remind me tomorrow at 9 to answer Figma\". Or answer now: are you authorized to work in the US?"], { must: ["figma", "remind"] }),
   S("V095", "reminders", "imessage", "inflight", "stop texting me so much", ["Your job alert is the only thing that texts on its own. Want me to pause it, or cap it at one text a day?"], { askOne: true, must: ["alert"] }),
-  S("V096", "reminders", "web", "new", "remind me in 2 weeks to follow up with the recruiter", ["I can't set reminders yet, so I won't promise that.", "Note it in your calendar for two weeks out; I can draft the follow-up now so it's ready."], { mustNot: [NO_DONE_REMIND] }),
+  S("V096", "reminders", "web", "new", "remind me in 2 weeks to follow up with the recruiter", ["I send reminders by text, and this web chat isn't linked to a texting channel yet.", "Link iMessage, WhatsApp or Telegram and ask again. I can draft the follow-up now so it's ready."], { must: ["text", "imessage|whatsapp|telegram|link"], mustNot: [String.raw`\bset\b.*remind|i'?ll text you in 2 weeks`] }),
 
   // ------------------------------------------------------------------------------------------- status (9)
   S("V097", "status", "imessage", "inflight", "whats happening with my applications", ["Your 5 applications:\n1. Notion: sent and confirmed\n2. Brex: queued for the extension\n3. Figma: waiting on 2 answers\n4. Plaid: waiting on the code they emailed you\n5. Ramp: stopped, needs a phone number", "Want to start with Figma?"], { must: ["notion", "brex", "figma", "plaid", "ramp"], maxChars: 330 }),
@@ -205,8 +205,6 @@ const MORE: Record<string, { must?: string[]; mustNot?: string[] }> = {
   V085: { must: ["common|normal|typical|yes", "ask|extension|more time"] },
   V086: { must: ["commute|remote is worth|daily"] },
   V089: { must: ["thank", "\\["] },
-  V091: { must: [String.raw`can'?t|cannot|not able`, "phone"] },
-  V094: { must: ["authoriz|salary"] },
   V099: { must: [String.raw`don'?t have|no .*on file|not on file|nothing`] },
   V104: { must: ["sorry|stings|rough|tough", "stripe|brex|roles"] },
   V112: { must: ["what|which", "find|resume|prep|interview"] },
@@ -226,9 +224,6 @@ const MORE: Record<string, { must?: string[]; mustNot?: string[] }> = {
   V076: { must: [String.raw`\b(given|return|write|find)\b`, "approach|code|talk|think"] },
   V078: { must: [String.raw`\bask\b`, "success|team|role|hardest|90 days"] },
   V082: { must: ["real|true|honest", "example|now i|doing about|improv|working on"] },
-  V092: { must: [String.raw`can'?t|cannot|not able`, "alert|watch|instead"] },
-  V093: { must: [String.raw`can'?t|cannot|not able`, "calendar|prep"] },
-  V096: { must: [String.raw`can'?t|cannot|not able`, "calendar|draft"] },
   V105: { must: [String.raw`nothing|no applications|none`, "role|city|start"] },
   V108: { must: ["change|reset", String.raw`never (need|ask)|don'?t send`], mustNot: ["hunter2"] },
   V111: { must: [String.raw`don'?t send|never send|not here`, "secure|form|their own"], mustNot: ["123-45-6789"] },

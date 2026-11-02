@@ -59,7 +59,7 @@ export async function runAll(list: Scenario[], o: { brainModel?: ModelCall | nul
   for (const s of list) {
     const w = await openWorld(seed(s.state));
     let now = w.now;
-    for (const p of s.prior ?? []) { await worldTurn(w, { brain: "router", threadId: "A", message: p, now, production: true }); now += 90000; }
+    for (const p of s.prior ?? []) { await worldTurn(w, { brain: "router", threadId: "A", message: p, now, production: true, channel: s.channel }); now += 90000; }
     // The staged decision on the real state, before the graded turn (the probe works on a copy).
     const t = w.th("A");
     const ctx: any = w.H.createTurnCtx({ userId: USER, threadId: "A", now, accountPersistence: true, snapshot: t.snapshot, account: w.account, postings: w.kb });
@@ -67,7 +67,7 @@ export async function runAll(list: Scenario[], o: { brainModel?: ModelCall | nul
     const stop = o.stop?.();
     if (stop) { (rows as any).stopped = stop; break; }
     const real = !!(o.brainModel && d.brain);
-    const r = await worldTurn(w, { brain: real ? "agent" : "router", threadId: "A", message: s.msg, now, production: true, ...(real ? { model: o.brainModel, channel: s.channel } : {}) } as any);
+    const r = await worldTurn(w, { brain: real ? "agent" : "router", threadId: "A", message: s.msg, now, production: true, channel: s.channel, ...(real ? { model: o.brainModel } : {}) } as any);
     // A code turn answers first in production (CODE_TURN_ORDER); the brain is reached only when none did.
     const taken = d.brain && !r.handler.startsWith("code:");
     // The brain's path with a model that answers with the gold text: does the reply survive the path and the render?

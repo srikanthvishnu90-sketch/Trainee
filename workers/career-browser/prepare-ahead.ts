@@ -396,7 +396,10 @@ export function prepareDoor(o: {
 
 // What the engine's process may see on the preparation host: where its tools are, nothing else. The service key and every
 // other secret stay in this process (the engine, Chromium and the employer's page never get them).
-export const PREPARE_ENGINE_ENV_KEYS = ["PATH", "HOME", "TMPDIR", "DENO_DIR", "PLAYWRIGHT_BROWSERS_PATH", "UPMORE_PLAYWRIGHT_PATH", "UPMORE_CHROMIUM_PATH"];
+// UPMORE_SCRIPT_SUBMIT_LIVE (the owner's switch, as on the send worker, worker.ts ENGINE_ENV_KEYS): without it the dry run
+// on any real Ashby form stops at SUBMIT_DESTINATION_NOT_BOUND and no card is ever prepared.
+export const PREPARE_ENGINE_ENV_KEYS = ["PATH", "HOME", "TMPDIR", "DENO_DIR", "PLAYWRIGHT_BROWSERS_PATH", "UPMORE_PLAYWRIGHT_PATH", "UPMORE_CHROMIUM_PATH",
+  "UPMORE_SCRIPT_SUBMIT_LIVE"];
 export function prepareEngineEnv(from: (k: string) => string | undefined = (k) => Deno.env.get(k)): Record<string, string> {
   const env: Record<string, string> = { UPMORE_MASK_SCREENSHOTS: "1", UPMORE_BROWSER_HEADED: "0" };
   for (const k of PREPARE_ENGINE_ENV_KEYS) {

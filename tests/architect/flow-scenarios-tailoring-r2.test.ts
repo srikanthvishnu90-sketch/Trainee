@@ -27,6 +27,7 @@ import { careerHandler, SUPABASE_URL, supabaseParity } from "../flow/handler.ts"
 import { CareerRender } from "../../supabase/functions/_shared/router_core.career.js";
 import { questionsToStore } from "../../workers/career-browser/ask-once.ts";
 import { leaks, type Poison, rng } from "./scenarios/tailoring-r2-generator.ts";
+import { askedPart } from "../helpers/one_question.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -241,31 +242,36 @@ Deno.test({
               values ('${who}', '${sq(String(q.key))}', '${sq(String(q.kind))}', '${sq(String(q.label))}', '${sq(String(q.type))}', '${sq(JSON.stringify(q.options))}', array['${sq(res.posting)}'], '${sq(String(q.company))}')`);
           }
           const tag = `ask #${k}`;
+          // One question per message (review of #360): the first is shown; "skip" moves to the next.
           const list = await chat.say("what do you need from me");
           count("ask turns");
-          const order = qs.map((q) => q.label).sort((a, b) => list.reply.indexOf(a) - list.reply.indexOf(b));
-          if (qs.some((q) => !list.reply.includes(q.label))) { failures.push(`${tag}: not every question is listed: ${list.reply.slice(0, 300)}`); continue; }
-          // "draft N" on a question that is not a written answer: no model call, nothing saved.
-          const m = 1 + (k % qs.length);
+          const first = qs.find((q) => list.reply.includes(q.label));
+          if (!first || !new RegExp(`Question 1 of ${qs.length} `).test(list.reply) || qs.filter((q) => list.reply.includes(q.label)).length !== 1) {
+            failures.push(`${tag}: not one question of ${qs.length}: ${list.reply.slice(0, 300)}`); continue;
+          }
+          // "draft 1" on a question that is not a written answer: no model call, nothing saved.
           const before = calls.essay;
-          const d = await chat.say(`draft ${m}`);
+          const d = await chat.say("draft 1");
           count("ask turns");
-          if (calls.essay !== before) failures.push(`${tag}: "draft ${m}" (${order[m - 1]}) called the model`);
-          if (!/isn't a written answer/.test(d.reply)) failures.push(`${tag}: "draft ${m}" (${order[m - 1]}) -> ${d.reply.slice(0, 200)}`);
-          if (await answerOf(who)) failures.push(`${tag}: "draft ${m}" saved an answer`);
-          // A typed answer is saved as typed; a secret never.
-          const i = k % 2 === 0 ? 0 : 1;
-          const label = order[i];
+          if (calls.essay !== before) failures.push(`${tag}: "draft 1" (${first.label}) called the model`);
+          if (!/isn't a written answer/.test(d.reply)) failures.push(`${tag}: "draft 1" (${first.label}) -> ${d.reply.slice(0, 200)}`);
+          if (await answerOf(who)) failures.push(`${tag}: "draft 1" saved an answer`);
+          // A typed answer is saved as typed; a secret never. Odd scenarios answer the second question, after a "skip".
+          let shown = await chat.say("what do you need from me");
+          count("ask turns");
+          if (k % 2 === 1) { shown = await chat.say("skip"); count("ask turns"); }
+          const asked = qs.filter((q) => askedPart(shown.reply).includes(q.label));
+          if (asked.length !== 1) { failures.push(`${tag}: not one question shown: ${shown.reply.slice(0, 300)}`); continue; }
+          const label = asked[0].label;
           const typed = k % 4 === 3 ? "my ssn is 219-09-9999" : TYPED[qs.findIndex((q) => q.label === label)];
-          await chat.say("what do you need from me");
-          const a = await chat.say(`${i + 1} ${typed}`);
-          count("ask turns"); count("ask turns");
-          const key = qs.find((q) => q.label === label)!.key;
+          const a = await chat.say(typed);
+          count("ask turns");
+          const key = asked[0].key;
           const got = await answerOf(who, key);
           if (/ssn/.test(typed)) {
             if (got) failures.push(`${tag}: a secret saved as the answer to ${label}`);
             if (/219\D?09\D?9999/.test(await stored(who))) failures.push(`${tag}: the SSN is kept in a stored message`);
-          } else if (got !== typed) failures.push(`${tag}: "${i + 1} ${typed}" (${label}) -> saved ${JSON.stringify(got)}: ${a.reply.slice(0, 200)}`);
+          } else if (got !== typed) failures.push(`${tag}: "${typed}" (${label}) -> saved ${JSON.stringify(got)}: ${a.reply.slice(0, 200)}`);
         }
       });
 

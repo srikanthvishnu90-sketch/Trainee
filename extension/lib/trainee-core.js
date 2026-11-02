@@ -152,6 +152,21 @@
             const head = heads.find((x) => !x.contains(el) && !optionLabel(x) && !foreign(x, el) && labelText(x).trim().length > 0);
             if (head) return labelText(head);
           }
+          if (/^(radio|checkbox)$/i.test(el.type || "") && el.name) {
+            const sel = 'input[name="' + esc(el.name) + '"]', members = document.querySelectorAll(sel).length;
+            node = el;
+            for (let i = 0; i < 3 && node; i++) {
+              node = node.parentElement;
+              if (!node) break;
+              if (Array.from(node.querySelectorAll("input")).some((x) => x.name !== el.name && realControl(x))) break;
+              if (node.querySelectorAll(sel).length < members) continue;
+              const prev = node.previousElementSibling;
+              if (!prev) continue;
+              if (prev.querySelector("input,select,textarea") || foreign(prev, el)) break;
+              const t = labelText(prev).trim();
+              if (t) return t;
+            }
+          }
           return "";
         }
         function selectorFor(el, idx) {
@@ -3978,7 +3993,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         "checkbox"
       ].includes(r.inputType));
       if (rows.length > 1 && !group) throw fail("AMBIGUOUS_FIELD_NAME: " + name);
-      const label = group ? f.groupLabel || f.label : f.label, type = f.tag === "select" ? "select" : f.inputType;
+      const label = group ? f.groupLabel || rows.map((r) => r.label).filter(Boolean).join(" / ") || f.label : f.label, type = f.tag === "select" ? "select" : f.inputType;
       const values = rows.map((r) => r.optionValue ?? r.label);
       const distinct = new Set(values).size === values.length;
       const opts2 = group ? rows.map((r, i) => ({

@@ -42,6 +42,7 @@ import { supabaseAlertStore } from "../../supabase/functions/_shared/career_aler
 import { loginHash } from "../../supabase/functions/_shared/telegram_login.ts";
 import { handleTelegramLink } from "../../supabase/functions/trainee-telegram-link/handler.ts";
 import { TELEGRAM_CHANNEL_ONLY_REPLY, TELEGRAM_UNLINKED_REPLY } from "../../supabase/functions/_shared/channel_inbound.ts";
+import { answerOneByOne } from "../helpers/one_question.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -260,16 +261,10 @@ Deno.test({
       const deps = { db: svc, runEngine, profileFor: storedProfile(svc), urlFor: () => site.form, resumeFor: tailoredResume({ render: edgeRenderer(), resumes }) };
       const prepare = async () => (await prepareAhead(deps, { only: { user_id: person, job_ids: [KEY] } })).map((d) => d.outcome);
       const open = async () => await q1(`select coalesce(string_agg(key, ',' order by key), '') from public.career_apply_questions where user_id = '${person}' and state = 'open'`);
+      // One question at a time (review of #360): each answered in chat, in their words, as it is asked.
       const answer = async (answers: [RegExp, string][]) => {
-        const shown = await text(CHAT, "what do you need from me");
-        const lines = shown.reply.split("\n"), parts: string[] = [];
-        for (const [label, value] of answers) {
-          const line = lines.find((l) => /^\d+\./.test(l) && label.test(l));
-          assert(line, `${label} is asked: ${shown.reply}`);
-          parts.push(`${/^(\d+)\./.exec(line!)![1]} ${value}`);
-        }
-        const r = await text(CHAT, parts.join("\n"));
-        assert(!/doesn't fit|does not fit|isn't one of/i.test(r.reply), `their answers are taken: ${r.reply}`);
+        const r = await answerOneByOne((m) => text(CHAT, m), answers);
+        assert(!/doesn't fit|does not fit|isn't one of/i.test(r.saved), `their answers are taken: ${r.saved}`);
       };
       const jobs = async () => JSON.parse(await q1(`select coalesce(json_agg(row_to_json(j)), '[]') from public.career_apply_jobs j where user_id = '${person}'`));
 
@@ -329,7 +324,7 @@ Deno.test({
         eq(site.applications.length, 0);
       });
 
-      await t.step("5. only what is needed is asked, answered in chat by number", async () => {
+      await t.step("5. only what is needed is asked, one question at a time, answered in chat", async () => {
         eq(await prepare(), ["asked"]);
         eq(await open(), "fact:email,fact:first_name,fact:last_name");
         await answer([[/First name/i, "Alex"], [/Last name/i, "Testcase"], [/Email/i, "alex.testcase@example.test"]]);

@@ -10,7 +10,7 @@
 # before anything can deploy: the preflight (go-live dry run, migration rehearsal) runs on this SHA, then
 # scripts/launch/deploy-standard.ts judges S1-S4 (every required CI check success on this SHA; every PR merged since the last
 # successful deploy approved at its merged head; reply quality not below the deployed SHA's; the Telegram acceptance suite
-# passed and its KNOWN_GAP list did not grow). Any FAIL ends the run here: the deploy job never starts, so there is nothing
+# passed and its KNOWN_GAP list did not grow). S3's measurements are made first when missing (job "measure"). Any FAIL ends the run here: the deploy job never starts, so there is nothing
 # to approve. Inside the production environment, before go-live, the standard runs again with S5 (no feature enabled and
 # NOT_WIRED), which needs the environment's secrets. After go-live, S6: the live smoke runs again on its own; if go-live or
 # the smoke fails, the previous deployed SHA is deployed again (--skip-migrations: migrations are additive) and the run fails.
@@ -33,9 +33,47 @@ jobs:
     # deploy-preflight.yml's own jobs (go-live --dry-run at this SHA, the live-shaped migration rehearsal), called here so
     # their checks exist on every SHA pushed to release/production (on trunk they run only when their paths change).
     uses: ./.github/workflows/deploy-preflight.yml
+  # S3's evidence: a reply-quality measurement of this SHA (or of a same-reply-code ancestor) and of the deployed SHA on the
+  # same set. When one is missing, measure it (scripts/launch/measure-reply.sh: a measurement commit on ci/brain-eval whose
+  # second parent is that SHA, brain-eval dispatched on it, five router passes, about $0.10, capped by brain-eval.yml's
+  # EVAL_BUDGET_USD) and wait for the score; at most the candidate and then the deployed SHA. It judges nothing: the
+  # standard below does, and a measurement that could not be made is S3's FAIL there, with its reason.
+  measure:
+    name: reply measurement (S3 evidence)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: write # push the measurement commit to ci/brain-eval (no other branch is written)
+      actions: write # dispatch brain-eval; read this workflow's runs (the deployed SHA)
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: Measure what S3 lacks (the candidate, then the deployed SHA), and wait for the scores
+        run: |
+          set -o pipefail
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          for round in 1 2; do
+            git -c "http.extraheader=$auth" fetch --no-tags -q origin +refs/heads/ci/brain-eval:refs/remotes/origin/ci/brain-eval
+            need=$(deno run -A scripts/launch/deploy-standard.ts --sha "$GITHUB_SHA" --missing-measurement --exclude-run "$GITHUB_RUN_ID" | tee /dev/stderr | sed -n 's/^measure=//p')
+            [ -z "$need" ] && exit 0
+            # Measured once already in this run and still no score: measuring again would only spend again.
+            case " ${done_shas:-} " in *" $need "*) echo "::error::$need was measured in this run and still has no score; S3 will fail"; exit 1;; esac
+            MEASURE_WAIT_MIN=80 bash scripts/launch/measure-reply.sh "$need"
+            done_shas="${done_shas:-} $need"
+          done
   standard:
     name: deploy standard (S1-S4)
-    needs: preflight
+    needs: [preflight, measure]
+    # Runs when the measurement failed too: S3 then says what is missing. A failed preflight still stops it.
+    if: ${{ !cancelled() && needs.preflight.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     outputs:

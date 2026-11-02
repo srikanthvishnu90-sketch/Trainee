@@ -50,6 +50,9 @@ const SUITE = (gaps: string[], steps = STEPS_ALL) => `export const KNOWN_GAP: re
 const LOG_HEAD = "# Brain score log\n\n| run at (UTC) | brain commit | set | brain | set size | passed | score | judges | stopped | CI run |\n|---|---|---|---|---|---|---|---|---|---|\n";
 const row = (commit: string, brain: string, passed: number, run: string, o: { set?: string; size?: number; stopped?: string } = {}) =>
   `| 2026-10-31 10:00:00 | ${commit.slice(0, 7)} | ${o.set ?? "dev"} | ${brain} | ${o.size ?? 38} | ${passed} | ${(passed / (o.size ?? 38) * 100).toFixed(1)}% | gpt-5-mini x, gpt-4.1-mini y; both-pass | ${o.stopped ?? "no"} | ${run}; harness: parity |\n`;
+// One CI run's five passes (a measurement is exactly five qualifying passes). Sizes 76 and 114 keep the rates the
+// assertions name exact over five passes: 225/380 = 59.2%, 235/380 = 61.8%, 300/380 = 78.9%, 350/570 = 61.4%, 352/570 = 61.8%.
+const run5 = (commit: string, brain: string, passed: number[], run: string, o: { set?: string; size?: number; stopped?: string } = {}) => passed.map((p) => row(commit, brain, p, run, o)).join("");
 
 interface World {
   files: Map<string, string>; // `${sha}:${path}`
@@ -82,7 +85,7 @@ function base(): World {
     reviews: { 1: [{ state: "COMMENTED", commit_id: H1, user: "x", association: "NONE" }, { state: "APPROVED", commit_id: H1, user: "architect", association: "COLLABORATOR" }], 2: [] },
     prFiles: { 1: [{ filename: "src/a.ts", status: "modified", additions: 3, deletions: 1 }], 2: [{ filename: "src/b.ts", status: "modified", additions: 1, deletions: 0 }] },
     ledger: `# PR SHA reviewer [note]\n2 ${H2} architect-claude reviewed against WO-200, gate green\n`,
-    log: LOG_HEAD + row(D, "router", 22, "100") + row(D, "router", 23, "100") + row(C, "router", 23, "200") + row(C, "router", 24, "200") + row(C, "agent", 35, "200"),
+    log: LOG_HEAD + run5(D, "router", [44, 45, 45, 45, 46], "100", { size: 76 }) + run5(C, "router", [46, 47, 47, 47, 48], "200", { size: 76 }) + run5(C, "agent", [70, 70, 70, 70, 70], "200", { size: 76 }),
     parents: { [C]: B, [B]: D, [D]: A, [M]: C },
     trees: { [C]: "T2", [B]: "T2", [D]: "T1", [A]: "T1", [M]: "T2" },
     ancestors: { [C]: [B, D, A], [B]: [D, A], [D]: [A], [A]: [], [M]: [C, B, D, A] },
@@ -241,40 +244,44 @@ Deno.test("S2 mutation: a PR whose files cannot be read (404, an error, an empty
 
 // ------------------------------------------------------------------------------------------------ S3
 Deno.test("S3 mutation: any drop fails, however small (no tolerance); equal passes", async () => {
-  const w = base(); w.log = LOG_HEAD + row(D, "router", 23, "100") + row(D, "router", 24, "100") + row(C, "router", 23, "200") + row(C, "router", 23, "200") + row(C, "router", 24, "200");
+  const w = base(); w.log = LOG_HEAD + run5(D, "router", [70, 70, 70, 71, 71], "100", { size: 114 }) + run5(C, "router", [70, 70, 70, 70, 70], "200", { size: 114 });
   // deployed 47/2 = 23.5 a pass; candidate 70/3 = 23.33: 0.4 points lower
   await onlyFails(w, "S3", /router pass rate 61\.4% < deployed 61\.8%/);
-  w.log = LOG_HEAD + row(D, "router", 23, "100") + row(D, "router", 24, "100") + row(C, "router", 22, "200") + row(C, "router", 25, "200");
+  w.log = LOG_HEAD + run5(D, "router", [70, 70, 70, 71, 71], "100", { size: 114 }) + run5(C, "router", [68, 69, 70, 72, 73], "200", { size: 114 });
   eq((await verdicts(w)).v.S3, true, "equal means pass");
 });
 Deno.test("S3 mutation: the candidate's router pass rate is below the deployed one's", async () => {
-  const w = base(); w.log = LOG_HEAD + row(D, "router", 30, "100") + row(C, "router", 23, "200") + row(C, "router", 24, "200");
+  const w = base(); w.log = LOG_HEAD + run5(D, "router", [60, 60, 60, 60, 60], "100", { size: 76 }) + run5(C, "router", [46, 47, 47, 47, 48], "200", { size: 76 });
   await onlyFails(w, "S3", /router pass rate 61\.8% < deployed 78\.9%/);
 });
 Deno.test("S3 mutation: no measurement of the deployed SHA", async () => {
-  const w = base(); w.log = LOG_HEAD + row(C, "router", 23, "200");
+  const w = base(); w.log = LOG_HEAD + run5(C, "router", [23, 23, 23, 23, 23], "200");
   await onlyFails(w, "S3", /deployed: no router measurement/);
 });
 Deno.test("S3 mutation: no measurement of the candidate (only the agent brain was measured)", async () => {
-  const w = base(); w.log = LOG_HEAD + row(D, "router", 22, "100") + row(C, "agent", 35, "200");
+  const w = base(); w.log = LOG_HEAD + run5(D, "router", [22, 22, 22, 22, 22], "100") + run5(C, "agent", [35, 35, 35, 35, 35], "200");
   await onlyFails(w, "S3", /candidate: no router measurement/);
 });
 Deno.test("S3 mutation: a stopped run or a NOT A SCORE row is not a measurement", async () => {
-  const w = base(); w.log = LOG_HEAD + row(D, "router", 22, "100") + row(C, "router", 30, "200", { stopped: "yes" }) + row(C, "router", 30, "201", { stopped: "NOT A SCORE: 38 judge errors" });
+  const w = base(); w.log = LOG_HEAD + run5(D, "router", [22, 22, 22, 22, 22], "100") + run5(C, "router", [30, 30, 30, 30, 30], "200", { stopped: "yes" }) + run5(C, "router", [30, 30, 30, 30, 30], "201", { stopped: "NOT A SCORE: 38 judge errors" });
   await onlyFails(w, "S3", /candidate: no router measurement/);
 });
+Deno.test("S3 mutation: four qualifying passes (one crashed, one stopped) are not a measurement", async () => {
+  const w = base(); w.log = LOG_HEAD + run5(D, "router", [22, 22, 22, 22, 22], "100") + run5(C, "router", [30, 30, 30, 30], "200") + row(C, "router", 30, "200", { stopped: "yes" });
+  await onlyFails(w, "S3", /candidate: .*has 4 qualifying passes, not 5/);
+});
 Deno.test("S3 mutation: the deployed SHA measured only on another set", async () => {
-  const w = base(); w.log = LOG_HEAD + row(D, "router", 22, "100", { set: "heldout" }) + row(C, "router", 23, "200");
+  const w = base(); w.log = LOG_HEAD + run5(D, "router", [22, 22, 22, 22, 22], "100", { set: "heldout" }) + run5(C, "router", [23, 23, 23, 23, 23], "200");
   await onlyFails(w, "S3", /deployed: no router measurement .* on set dev\/38/);
 });
 Deno.test("S3: a first-parent ancestor with the same reply code stands for the candidate; one with different reply code does not", async () => {
-  const w = base(); w.log = LOG_HEAD + row(D, "router", 22, "100") + row(B, "router", 25, "200");
+  const w = base(); w.log = LOG_HEAD + run5(D, "router", [22, 22, 22, 22, 22], "100") + run5(B, "router", [25, 25, 25, 25, 25], "200");
   eq((await verdicts(w)).v.S3, true, "B (C's parent, same supabase/functions tree) measures C");
   w.trees[B] = "T-other";
   await onlyFails(w, "S3", /candidate: no router measurement/);
 });
 Deno.test("S3: a measurement-branch commit with the identical reply tree, descending from the candidate, measures it", async () => {
-  const w = base(); w.log = LOG_HEAD + row(D, "router", 22, "100") + row(M, "router", 25, "200");
+  const w = base(); w.log = LOG_HEAD + run5(D, "router", [22, 22, 22, 22, 22], "100") + run5(M, "router", [25, 25, 25, 25, 25], "200");
   eq((await verdicts(w)).v.S3, true, (await verdicts(w)).text);
   w.trees[M] = "T-aligned-differently";
   await onlyFails(w, "S3", /candidate: no router measurement/);

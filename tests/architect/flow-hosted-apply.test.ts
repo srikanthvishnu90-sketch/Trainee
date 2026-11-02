@@ -7,7 +7,7 @@
 //      CAREER_PREPARE_AHEAD_URL; the request is recorded; the dispatcher starts one preparation sandbox (the host is a
 //      named stand-in that runs workers/career-cloud/prepare-runner.ts in this process, the way a Vercel sandbox runs it,
 //      with the four values the dispatcher hands it and no credential); every database call goes through the bridge;
-//   3. the form's questions are texted to their channel at once (career_outbox 'questions'), answered by number in the
+//   3. the form's first question is texted to their channel at once (career_outbox 'questions'), one at a time in the
 //      chat; their answers kick the preparation again (career_hosted_prepare.ts);
 //   4. the card is shown in their thread at once (career_apply_card_push_requested_for) and queued for their channel,
 //      within a measured, bounded time of their last message;
@@ -41,6 +41,7 @@ import { supabaseMailStore } from "../../supabase/functions/_shared/career_mail_
 import { supabaseConfirmStore } from "../../supabase/functions/_shared/career_apply_confirm.ts";
 import { receiptText } from "../../supabase/functions/_shared/career_apply_receipts.ts";
 import { RAMP_KEY, RAMP_LINK, rampSite } from "../helpers/ramp_form.ts";
+import { questionLine } from "../helpers/one_question.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -165,15 +166,11 @@ Deno.test({
       const outbox = async (kind: string) => JSON.parse(await q1(`select coalesce(json_agg(json_build_object('key', key, 'text', text, 'card_id', card_id,
         'created_at', created_at, 'deliver_at', deliver_at, 'status', status) order by id), '[]') from public.career_outbox where user_id = '${PERSON}' and kind = '${kind}'`));
       let ok = true;
+      // One question per message (review of #360): the question a text asks, and the persona's answer to it, if any.
       const answerFrom = (text: string) => {
-        const parts: string[] = [], missing: string[] = [];
-        for (const line of text.split("\n")) {
-          const m = /^(\d+)\.\s+(.*)$/.exec(line.trim());
-          if (!m) continue;
-          const a = (persona.answers as { match: string; value: string }[]).find((x) => new RegExp(x.match, "i").test(m[2]));
-          if (a) parts.push(`${m[1]} ${a.value}`); else missing.push(m[2]);
-        }
-        return { parts, missing };
+        const q = questionLine(text);
+        const a = (persona.answers as { match: string; value: string }[]).find((x) => new RegExp(x.match, "i").test(q));
+        return { q, value: a?.value ?? null };
       };
 
       if (!ok) return;
@@ -207,7 +204,7 @@ Deno.test({
 
       let rounds = 0, card: any = null, cardAt = 0, waitingOnThem = false;
       if (!ok) return;
-      ok = await t.step("3-4. the form's questions texted at once, answered by number; prepared again on their answers; the card queued for their channel", async () => {
+      ok = await t.step("3-4. the form's first question texted at once; each next one asked after the answer; prepared again only when all are answered; the card queued for their channel", async () => {
         for (; rounds < 4 && !card; rounds++) {
           const cards = await outbox("card");
           if (cards.length) { card = cards[0]; cardAt = Date.parse(card.created_at); break; }
@@ -215,35 +212,33 @@ Deno.test({
           const fresh = qs[qs.length - 1];
           assert(fresh, `after preparing, either a card or the questions are queued for their channel: ${await q1(`select string_agg(outcome || ' ' || detail, ' | ') from public.career_apply_prepare_attempts`)} / ${await q1(`select string_agg(state || ' ' || outcome::text, ' | ') from public.career_apply_prepare_requests`)}`);
           assert(Date.parse(fresh.deliver_at) <= Date.now(), "due now, not after the 30-minute hold");
-          const { parts, missing } = answerFrom(fresh.text);
-          if (missing.length) {
-            if (OWNER_RUN) { console.log(`DRY RUN: questions the persona file does not answer:\n${missing.join("\n")}`); return; }
-            throw Error(`the TEST persona answers every question asked: ${missing.join(" | ")}\n${fresh.text}`);
-          }
+          assert(!/Reply with each number/.test(fresh.text) && /(?:One question|Question 1 of \d+) only you can answer/.test(fresh.text), `one question in the text: ${fresh.text}`);
           let text = fresh.text, r: Awaited<ReturnType<typeof say>>;
-          for (let page = 0; page < 6; page++) {
-            const { parts: ps, missing: ms } = page ? answerFrom(text) : { parts, missing };
-            if (ms.length) {
-              if (OWNER_RUN) { console.log(`DRY RUN: questions the persona file does not answer:\n${ms.join("\n")}`); waitingOnThem = true; return; }
-              throw Error(`the TEST persona answers every question asked: ${ms.join(" | ")}\n${text}`);
+          for (let n = 0; n < 30; n++) {
+            const { q, value } = answerFrom(text);
+            if (value === null) {
+              if (OWNER_RUN) { console.log(`DRY RUN: a question the persona file does not answer:\n${q}`); waitingOnThem = true; return; }
+              throw Error(`the TEST persona answers every question asked: ${q}\n${text}`);
             }
             lastAt = Date.now();
-            r = await say(ps.join("\n"));
+            r = await say(value);
             assert(/^Saved\./.test(r.reply) && !/doesn't fit|does not fit|isn't one of/i.test(r.reply), r.reply);
             assert(!/on your computer/.test(r.reply), `no promise the phone can't keep: ${r.reply}`);
             if (/I'm preparing your application again now with these answers/.test(r.reply)) break;
-            assert(/Once the rest are answered, I'll prepare your application again here\./.test(r.reply), r.reply);
+            assert(r.reply.includes("\nNext: "), `the next question is asked after the answer: ${r.reply}`);
+            eq(await q1(`select count(*) from public.career_apply_prepared where user_id = '${PERSON}'`), "0", "no card while a question is open");
+            text = r.reply;
             // A new user checks in midway (messy phrasing): where it stands, plainly; nothing claimed sent.
-            if (!OWNER_RUN && page === 0) {
+            if (!OWNER_RUN && n === 0) {
               const st = await say("where's my application to ramp?");
               eq(st.intent, "career_apply_status", st.reply);
               assert(/Ramp \(Software Engineering Intern, Frontend\): waiting on your answer to \d+ questions?; say "what do you need from me"\. Nothing was sent\./.test(st.reply), st.reply);
               assert(!/I have no application to ramp on record/i.test(st.reply), `not "no application" while it is being prepared: ${st.reply}`);
+              // The question is asked again when they ask for it, as the reply says.
+              const shown = await say("what do you need from me");
+              eq(shown.resultStatus, "shown", shown.reply);
+              text = shown.reply;
             }
-            // More are waiting: they ask for them, as the reply says.
-            const shown = await say("what do you need from me");
-            eq(shown.resultStatus, "shown", shown.reply);
-            text = shown.reply;
           }
           await settle();
         }

@@ -8,7 +8,7 @@ import { journey, rng, Runner, type RunStats } from "./scenarios/journeys-r2-run
 
 export const SEED = 20261102;
 export function runSlice(name: string, index: number) {
-  const PER = Number(Deno.env.get("JR2_PER_SLICE") || 60); // CI: 8 slices x 60; the full round (2,000) is JR2_PER_SLICE=250
+  const PER = Number(Deno.env.get("JR2_PER_SLICE") || 50); // CI: 8 slices x 50 (about 2.5 min each); the full round (2,000) is JR2_PER_SLICE=250
   const GROUP = Number(Deno.env.get("JR2_GROUP") || 6);
   const ONLY = Deno.env.get("JR2_ONLY");
   Deno.test({

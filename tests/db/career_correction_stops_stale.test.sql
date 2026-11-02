@@ -34,7 +34,7 @@ select t.ok((select count(*) = 2 from career_apply_prepared where state in ('rea
 -- A's correction of the GPA, 3.75 -> 3.95.
 insert into career_events (user_id, kind, subject, detail) values ('00000000-0000-4000-8000-0000013c0001', 'fact_confirmed', 'TEST University, GPA 3.95',
  jsonb_build_object('confirmation_event_id', 'fix-1', 'corrected', jsonb_build_object('from', '3.75', 'to', '3.95'), 'via', 'router: their correction of a confirmed resume entry'));
-select t.ok((select count(*) = 0 from career_apply_prepared where user_id = '00000000-0000-4000-8000-0000013c0001'), 'their prepared application from the old words is discarded');
+select t.ok((select count(*) = 0 from career_apply_prepared where user_id = '00000000-0000-4000-8000-0000013c0001' and state in ('ready', 'shown')) and (select count(*) = 1 from career_apply_prepared where user_id = '00000000-0000-4000-8000-0000013c0001' and state = 'expired'), 'their prepared application from the old words is expired (kept, never approvable)');
 select t.ok((select array_agg(job_id order by job_id) = array['greenhouse:cs:3'] from career_apply_jobs where user_id = '00000000-0000-4000-8000-0000013c0001'),
  'the approval carrying 3.75 is removed from the queue; the one without it stands');
 select t.ok((select count(*) = 1 from career_events where user_id = '00000000-0000-4000-8000-0000013c0001' and kind = 'note' and detail->>'why' = 'corrected'

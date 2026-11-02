@@ -10,8 +10,8 @@
 --
 -- A correction is recorded as its own fact_confirmed event (career_router_evidence.ts evidenceEntryCorrections: detail.via is
 -- ENTRY_CORRECTION_VIA, detail.corrected {from, to}), written in the same transaction as the corrected profile. On that event:
---   1. prepared and not yet approved, made before the correction: discarded (with their prepare attempts), so they are
---      prepared again from the corrected entry; a card showing one no longer approves it (its item is gone);
+--   1. prepared and not yet approved, made before the correction: expired (their prepare attempts removed), so they are
+--      prepared again from the corrected entry; a card showing one no longer approves it (its item is no longer ready, and is said by name);
 --   2. approved and not yet handed out (queued, never attempted) whose answers carry the corrected-away words: removed from
 --      the queue, as a new resume removes them (approve again with the corrected entry); one already being sent cannot be
 --      stopped and is counted;
@@ -24,9 +24,11 @@ declare old_words text := nullif(btrim(coalesce(new.detail->'corrected'->>'from'
 begin
  if new.kind <> 'fact_confirmed' or coalesce(new.detail->>'via', '') <> 'router: their correction of a confirmed resume entry' then return new; end if;
  perform pg_advisory_xact_lock(hashtextextended(new.user_id::text, 0));
+ -- Their prepare attempts go (so the posting is prepared again); the rows are kept, expired, so a card that showed one still
+ -- names its employer when it answers "changed after the card was shown".
  delete from public.career_apply_prepare_attempts a using public.career_apply_prepared p
-  where a.user_id = new.user_id and a.prepared_id = p.id and p.user_id = new.user_id and p.state in ('ready', 'shown') and p.created_at <= now();
- with x as (delete from public.career_apply_prepared p where p.user_id = new.user_id and p.state in ('ready', 'shown') and p.created_at <= now() returning 1)
+  where a.user_id = new.user_id and a.prepared_id = p.id and p.user_id = new.user_id and p.state in ('ready', 'shown');
+ with x as (update public.career_apply_prepared p set state = 'expired', updated_at = now() where p.user_id = new.user_id and p.state in ('ready', 'shown') returning 1)
  select count(*) into d from x;
  if old_words is not null and length(old_words) >= 2 then
   with x as (delete from public.career_apply_jobs j where j.user_id = new.user_id and j.state = 'queued' and j.attempts = 0

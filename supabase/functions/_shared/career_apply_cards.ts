@@ -367,8 +367,10 @@ const RESULT: Record<string, string> = {
 export function answerText(results: CardResult[], o: { declined?: "left_out" | "said_no" } = {}): string {
   const queued = results.filter((r) => r.result === "queued").length;
   const notSent = results.length - queued;
+  // WHOLE JOURNEYS R2: an item whose prepared application is gone (a newer resume or a corrected entry discarded it after the
+  // card was shown) has no company in the database's result; it read "1. null: not sent: ...". Said plainly instead.
   const lines = results.map((r) =>
-    `${r.n}. ${String(r.company).replace(/\s+/g, " ").slice(0, 80)}: ${
+    `${r.n}. ${(r.company === null || r.company === undefined ? "" : String(r.company)).replace(/\s+/g, " ").trim().slice(0, 80) || "An application no longer on file"}: ${
       r.result === "declined" && o.declined ? RESULT[o.declined] : RESULT[r.result] ?? RESULT.refused
     }`
   );

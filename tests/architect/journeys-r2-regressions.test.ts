@@ -6,6 +6,16 @@ import assertNode from "node:assert/strict";
 import { pgBinDir } from "../flow/pg.ts";
 import { CI, emailOf, POSTINGS, resumeOf, startWorld, tokenOf, uidOf, type Person, type World } from "./scenarios/journeys-r2-world.ts";
 import { textOf } from "./scenarios/journeys-r2-run.ts";
+import { answerText } from "../../supabase/functions/_shared/career_apply_cards.ts";
+
+// The card's answer for an item whose prepared application is gone (a newer resume discards prepared applications,
+// 20261026120018 career_resume_stop_unbound; the database's result then has no company): was "1. null: not sent: ...".
+// Found in the 2,000-journey run (journey 942: the card on Telegram, a correction on the web, "send them" on Telegram).
+Deno.test("whole journeys round 2: a card's answer never reads 'null' for an application no longer on file", () => {
+  const t = answerText([{ n: 1, company: null as unknown as string, result: "changed" }, { n: 2, company: "Bravo Labs", result: "changed" }]);
+  assertNode.ok(!/\bnull\b/.test(t), t);
+  assertNode.ok(/^1\. An application no longer on file: not sent: it changed after the card was shown$/m.test(t) && /^2\. Bravo Labs: not sent/m.test(t), t);
+});
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -71,6 +81,16 @@ Deno.test({
         eq(await w.prepare({ ...p, gpa: "3.95" }, POSTINGS.slice(0, 2).map((x) => x.key)), 2, "prepared again from the corrected entry");
         const again = await w.web(p, "show my applications");
         assert(/GPA: 3\.95/.test(again.reply) && !new RegExp(`GPA: ${old.replace(".", "\\.")}\\b`).test(again.reply), again.reply);
+        // The card on screen, then another correction, then "yes" to that card: nothing approved, each item named (was
+        // "1. null: not sent: it changed after the card was shown" in the 2,000-journey run, journey 942).
+        const onTg = await w.tg(p, "show my applications");
+        assert(/applications? (?:is|are) ready/.test(onTg.said.join("\n")), `setup: the card on Telegram: ${onTg.said.join(" | ")}`);
+        const fix2 = await w.web(p, "actually my GPA is 3.85");
+        eq(fix2.resultStatus, "completed", fix2.reply);
+        const late = (await w.tg(p, "yes")).said.join("\n");
+        assert(!/\bnull\b/.test(late), `the answer names each application: ${late}`);
+        const jobs2 = await w.json<{ fields: string }>(`select (payload->'fields')::text as fields from public.career_apply_jobs where user_id = ${q(p.uid)} and state in ('queued', 'driving')`);
+        eq(jobs2.filter((j) => /"value": ?"3\.95"/.test(j.fields)), [], `the yes approved the corrected-away 3.95: ${late}`);
         void emailOf;
       });
 

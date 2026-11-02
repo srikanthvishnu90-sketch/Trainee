@@ -931,7 +931,7 @@ echo "== career_apply_reprepare_guard.test.sql (20261101130000: an approval spen
 # (idempotent), then its test.
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102000000_career_correction_stops_stale.sql"
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102000000_career_correction_stops_stale.sql"
-echo "== career_correction_stops_stale.test.sql (prepared from the old words discarded; an approval carrying them removed; others untouched)"
+echo "== career_correction_stops_stale.test.sql (prepared from the old words expired; an approval carrying them removed; others untouched)"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_correction_stops_stale.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 # PEOPLE DRAFTS ROUND 3 (20261031110000): an outreach batch is as many drafts as were asked for (NO LIMITS); the table's
 # draft-number check stopped at 10. Twice (idempotent), then its test.

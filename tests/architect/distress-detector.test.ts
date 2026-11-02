@@ -84,7 +84,8 @@ const CAREER = [
   "time to end the call", "this is the point of no return for my offer", "the knife skills line cook job", "jump off the call",
   "i want to stop applying to banks", "stop living paycheck to paycheck, find me better pay", "trabajo en chicago", "je veux un emploi",
   "ich will einen job", "busco empleo de analista",
-  "i'd rather die than miss this interview", // #406 review: weighing two wanted things is an idiom
+  // #406 review: weighing two wanted things is an idiom
+  "i'd rather die than miss this interview",
 ];
 
 const router = () => (CareerRouter as any).handleChat as (t: string, c: unknown) => any;

@@ -40,6 +40,53 @@ export interface FileDeps extends Omit<JobDeps, "store"> {
   files?: FileService; // the other file kinds (introduction, proof, plan, comparison, draft, brief); an id not found there is a jobs list
   fileEffects?: Effects; // what Introduce really does (send); absent, an approved introduction says it was not sent
   timeZone?: (userId: string) => Promise<string | null>; // the person's own zone (dates on the page are their day); absent or unknown, Chicago, said
+  // Every phone step (number, code) answers only after this resolves, given how long the step took: deps.ts pads to a floor
+  // (file_session.ts PHONE_STEP_FLOOR_MS) so time cannot tell whether the typed number is the account's. Absent: no padding.
+  pace?: (step: "phone_start" | "phone_verify", elapsedMs: number) => Promise<void>;
+  // Work that outlives the answer (the sign-in text): the edge runtime keeps it alive (EdgeRuntime.waitUntil). Absent: it runs on.
+  background?: (work: Promise<unknown>) => void;
+}
+// A form post is never bigger than this (a typed number or code, the Mini App's signed data, a short note): a bigger body is
+// refused without being read past it.
+export const MAX_BODY_BYTES = 64 * 1024;
+export const ALLOWED_METHODS = "GET, HEAD, POST";
+
+// A post that another site made the browser send (a cross-site form, with the person's cookies; SameSite stops neither a sibling
+// subdomain nor a browser that ignores it) changes nothing. The browser's own Sec-Fetch-Site decides when it is there; else the
+// Origin (this page's own origin, or the site's address in TRAINEE_FILE_BASE_URL, which the /file proxy serves it at); else the
+// Referer. A "null" origin passes only when the browser itself says the post is same-origin (a page under a no-referrer policy).
+// A request with none of them is not from a browser that sends cross-site forms (every current one sends Origin on a POST).
+export function crossSite(req: Request, env: { get(k: string): string | undefined }): boolean {
+  const own = new Set<string>();
+  try { own.add(new URL(req.url).origin); } catch { /* no own origin */ }
+  try { const b = new URL((env.get("TRAINEE_FILE_BASE_URL") || "").trim()); if (b.protocol === "https:") own.add(b.origin); } catch { /* not set */ }
+  const site = (req.headers.get("sec-fetch-site") ?? "").trim().toLowerCase();
+  if (site && site !== "same-origin" && site !== "none") return true;
+  const origin = req.headers.get("origin");
+  if (origin !== null) return origin.trim() === "null" ? !site : !own.has(origin.trim());
+  if (site) return false;
+  const ref = req.headers.get("referer");
+  if (ref) { try { return !own.has(new URL(ref).origin); } catch { return true; } }
+  return false;
+}
+// The body, read no further than `cap` bytes: null when it is bigger (an honest or a lying Content-Length alike).
+async function readCapped(req: Request, cap: number): Promise<string | null> {
+  const said = Number(req.headers.get("content-length") ?? "");
+  if (Number.isFinite(said) && said > cap) { await req.body?.cancel().catch(() => {}); return null; }
+  if (!req.body) return "";
+  const reader = req.body.getReader(), parts: Uint8Array[] = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.byteLength;
+    if (n > cap) { await reader.cancel().catch(() => {}); return null; }
+    parts.push(value);
+  }
+  const all = new Uint8Array(n);
+  let at = 0;
+  for (const p of parts) { all.set(p, at); at += p.byteLength; }
+  return new TextDecoder().decode(all);
 }
 export const MAX_ROWS = FEED_ROWS;
 
@@ -59,7 +106,9 @@ function logoOrigins(env: { get(k: string): string | undefined }): string {
   return [origin, origin.includes("google.com") ? "https://*.gstatic.com" : ""].filter(Boolean).join(" ");
 }
 async function headers(type: string, env: { get(k: string): string | undefined }): Promise<Record<string, string>> {
-  return { "cache-control": "no-store", "referrer-policy": "no-referrer", "x-robots-tag": "noindex, nofollow", "x-content-type-options": "nosniff", "content-type": type,
+  // same-origin, not no-referrer: the page's own posts then carry its Origin (which the cross-site check reads; under no-referrer a
+  // browser sends "Origin: null"), and nothing is ever sent to another site.
+  return { "cache-control": "no-store", "referrer-policy": "same-origin", "x-robots-tag": "noindex, nofollow", "x-content-type-options": "nosniff", "content-type": type,
     "content-security-policy": `default-src 'none'; script-src ${await scriptHashes} https://telegram.org; connect-src 'self'; img-src ${logoOrigins(env) || "'none'"}; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors ${FRAMES}` };
 }
 const NEW_LINK = "Ask Trainee in Telegram for your jobs again and open the new link.";
@@ -229,13 +278,24 @@ export async function handleFile(req: Request, d: FileDeps): Promise<Response> {
 async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   const html = async (body: string, status = 200, extra: Record<string, string> = {}) => new Response(body, { status, headers: { ...(await headers("text/html; charset=utf-8", d.env)), ...extra } });
   const text = async (body: string, status = 200) => new Response(body, { status, headers: await headers("text/plain; charset=utf-8", d.env) });
-  if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "POST") return html(renderLinkState("Not supported", ["This page only opens and answers."]), 405);
+  if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "POST") return html(renderLinkState("Not supported", ["This page only opens and answers."]), 405, { allow: ALLOWED_METHODS });
+  // A HEAD (a link scanner, a preview, a prefetch) reads nothing and changes nothing: it never begins a link's sign-in (whose
+  // 15 minutes would then run out before the person opens it) and never uses a link up (file page web-security round).
+  if (req.method === "HEAD") return html("", 200);
   const url = new URL(req.url);
   // Every redirect goes to this page's own path on this host: a path that starts with two slashes (or a backslash a browser reads as
   // one) would be a link to another host (file journey round 2: "//evil.example/?t=..." redirected there after the sign-in).
   const here = `/${url.pathname.replace(/^[\/\\]+/, "")}`;
   let fields: URLSearchParams = url.searchParams;
-  if (req.method === "POST") { try { fields = new URLSearchParams(await req.text()); } catch { fields = new URLSearchParams(); } }
+  if (req.method === "POST") {
+    // Another site's form changes nothing here (file page web-security round: a cross-site post with the person's cookies texted
+    // codes, checked guesses, reset the sign-in, and with the page's form value approved and signed out).
+    if (crossSite(req, d.env)) { await req.body?.cancel().catch(() => {}); return html(renderLinkState("This came from another site", ["Nothing was done and nothing was sent. Open the page itself and try again."]), 403); }
+    let body: string | null = "";
+    try { body = await readCapped(req, MAX_BODY_BYTES); } catch { body = ""; }
+    if (body === null) return html(renderLinkState("That was too large", ["Nothing was done and nothing was sent."]), 413);
+    fields = new URLSearchParams(body);
+  }
   const botUrl = (d.env.get("TRAINEE_BOT_URL") || "").trim();
   const bot = /^https:\/\//.test(botUrl) ? botUrl : null;
   const secret = d.env.get("TRAINEE_FILE_LINK_SECRET");
@@ -255,7 +315,7 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
     : why === "expired" ? state("You were signed out", [...tapped, "Sign-ins last two hours. " + NEW_LINK], 401)
     : why === "revoked" || why === "unbound" ? state("You were signed out", [...tapped, "This sign-in was ended. " + NEW_LINK], 401)
     : state("This link isn't valid", [...tapped, "It may be cut short or changed. " + NEW_LINK], 403);
-  const given = req.method === "GET" || req.method === "HEAD" ? (url.searchParams.get("t") ?? "") : "";
+  const given = req.method === "GET" ? (url.searchParams.get("t") ?? "") : "";
 
   // ---- the link from the bot: says WHICH list, never WHO opened it. It opens a phone sign-in, never the list itself.
   if (given) {
@@ -288,7 +348,15 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
 
   const locked = () => state("Too many wrong codes", ["This link is locked so nobody can guess the code. " + NEW_LINK], 429);
   // ---- phone sign-in steps (the pending link is in the HttpOnly tf_l cookie)
-  if (action === "phone_start" || action === "phone_verify" || action === "phone_reset") return phoneStep(action);
+  if (action === "phone_reset") return phoneStep(action);
+  if (action === "phone_start" || action === "phone_verify") {
+    // Every answer of these two steps is paced to the same floor, whatever the number and whatever was refused, so the time an
+    // answer takes cannot say whether the typed number is the account's (only then is a code texted or checked).
+    const began = performance.now();
+    const res = await phoneStep(action);
+    if (d.pace) await d.pace(action, performance.now() - began).catch(() => {});
+    return res;
+  }
   async function phoneStep(step: string): Promise<Response> {
     const lt = await verifyFileToken(cookieOf(req, "tf_l"), secret, d.now());
     if (!lt.ok) return lt.why === "expired" ? bad("expired") : state("Open your link again", ["This sign-in isn't open any more. " + NEW_LINK], 403);
@@ -318,8 +386,13 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
         const counted = await sessions!.countSend(row.jti, MAX_CODE_SENDS).catch(() => null);
         if (counted === null) return down();
         if (counted) {
-          const sent = await d.phone.send(phone).catch(() => ({ ok: false as const, why: "refused" as const }));
-          if (!sent.ok) console.error(`trainee-file: the sign-in code was not texted (${sent.why})`);
+          // Sent in the background: the answer never waits for the provider, so its time is the same for any number.
+          let sending: Promise<void>;
+          try {
+            sending = d.phone.send(phone).then((sent) => { if (!sent.ok) console.error(`trainee-file: the sign-in code was not texted (${sent.why})`); },
+              () => console.error("trainee-file: the sign-in code was not texted (refused)"));
+          } catch { sending = Promise.resolve(); console.error("trainee-file: the sign-in code was not texted (refused)"); }
+          if (d.background) d.background(sending);
         }
       }
       return page("code");

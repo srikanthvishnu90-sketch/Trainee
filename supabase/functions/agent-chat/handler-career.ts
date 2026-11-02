@@ -93,6 +93,7 @@ import { hunterVerifier, supabaseCheckCache } from "../_shared/career_contacts.t
 import { GMAIL_SEND_SCOPE } from "../_shared/career_outreach_gmail.ts";
 import { missingIntegration } from "../_shared/agent/integrations.ts";
 import { documentsOf, materializeArtifacts } from "../_shared/channel_artifacts.ts";
+import { telegramBriefOn } from "../_shared/telegram_brief.ts"; // TELEGRAM BRIEF
 import { askFor, judgePromptTurn, searchJudgeTurn, supabaseJudgeCache, supabaseSearchSources } from "../_shared/career_search_judge.ts"; // FEATURE 5
 import { offerChatTurn } from "../_shared/career_offer_chat.ts"; // FEATURE 12
 import { connectorAsk, connectorChatTurn, connectorFailure } from "../_shared/connectors.ts"; // Task 3 (FEATURE GV's disconnect included)
@@ -451,6 +452,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       let agentMeta: Record<string, unknown> | null = null;
       let turnAttachments: unknown[] = [], turnLinks: string[] | null = null, turnFileLinks: string[] = []; // REPLY SHAPE: what the agent staged; the URLs it may show
       let turnPostings: unknown[] = []; // JOB CARDS: what the turn's search found, for channels that show cards
+      let postingsAsFile = false; // TELEGRAM BRIEF (brief P7.2): the set goes as one File link, never one card each
       const events = supabaseEventStore(admin);
       // RESUME CONFIRM RACE (2026-10-30) / KNOWN GAPS (2026-10-30): every fact_confirmed event this turn makes (the router's
       // resume confirmation, a fact stated in chat, the brain's confirm_profile_fact) is held here and written by this
@@ -1012,7 +1014,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           : host.runTurn(message, ctx);
         // askFor: the router's search plus the parameters the message states (level, pay, season, employer, sponsorship), or a
         // role search the router did not run at all (posting_constraints.ts reads it from the message itself).
-        const f5Said = f5Free && !f5Prompt ? askFor(message, out, (ctx as any).discovery) : null;
+        // TELEGRAM BRIEF (brief P7.3): a request for roles that names none ("show me real job postings that match my goal") is a
+        // search for the goal on record, and "any new roles today" one for what is new since the last list.
+        const f5Goal = (((ctx as any).statedFacts?.facts ?? []) as any[]).find((f) => f && f.kind === "goal" && typeof f.value === "string")?.value ?? null;
+        const f5LastList = Number((ctx as any).discovery?.lastListAt) || null;
+        const f5Said = f5Free && !f5Prompt ? askFor(message, out, (ctx as any).discovery, f5Goal, Date.now(), f5LastList) : null;
         const f5Ask = f5Said?.ask ?? null;
         if (f5Ask) {
           const f5Meter = ledger.track(newMeter());
@@ -1033,8 +1039,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                 : facts.some((f) => f && f.source === "resume-ingest" && f.needs_confirmation === true)
                 ? "\n\nAnd nothing is sent anywhere before your resume is confirmed: its entries are waiting for your word (reply \"yes, that's my resume\" if they're right)."
                 : "\n\nAnd nothing is sent anywhere before your resume is confirmed: paste or attach it, confirm it, then ask again.";
-              out = { ...out, reply: (f5Said?.append ? `${out.reply}\n\n${found.reply}` : found.reply) + resumeLine, resultStatus: found.status, handler: "search_judge" };
-              (ctx as any).discovery = { ...((ctx as any).discovery ?? {}), lastShortlist: found.shortlist, lastSource: found.source };
+              // TELEGRAM BRIEF (brief P7.1-P7.3): on Telegram the search is said in its texting shape: one summary line and the
+              // set as a File link after it, one role as plain text with its link, or a dead end with the nearest real
+              // alternative and an ask. The numbered list stays for the channels that read it as text.
+              const tgBrief = writerChannel((body as any)?.channel) === "telegram" && telegramBriefOn(Deno.env) && found.brief ? found.brief : null;
+              const said = tgBrief ? tgBrief.reply : found.reply;
+              out = { ...out, reply: (f5Said?.append ? `${out.reply}\n\n${said}` : said) + resumeLine, resultStatus: found.status, handler: "search_judge" };
+              if (tgBrief?.asFile && tgBrief.roles.length) { turnPostings = tgBrief.roles; postingsAsFile = true; }
+              (ctx as any).discovery = { ...((ctx as any).discovery ?? {}), lastShortlist: found.shortlist, lastSource: found.source, ...(found.shortlist.length && found.source === "live" ? { lastListAt: Date.now() } : {}) };
             }
           } catch (e) { console.error("career search judge: the router's reply stands:", (e as Error)?.message ?? e); }
           await ledger.record(f5Meter);
@@ -1223,7 +1235,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const visibleReply = [reply, ...reminderLines].join("\n");
         // The same reply as separate messages for a texting channel: the note, each part whole, then the reminders.
         const parts = out.parts ? [...(flowCtx.note ? [flowCtx.note] : []), ...out.parts, ...(artifactNote ? [artifactNote] : []), ...reminderLines] : null;
-        return { thread_id: tid, reply: visibleReply, action: null, capabilities: out.capabilities, turn_key: turnKey, reminders, ...(out.task ? { task: out.task } : {}), ...(out.batch ? { batch: out.batch } : {}), ...(parts ? { parts } : {}), ...(artifactsField ? { artifacts: artifactsField } : {}), ...(turnPostings.length ? { postings: turnPostings } : {}), ...(shapeField ? { shape: shapeField } : {}), meta: { career: true, intent: out.intent, result_status: out.resultStatus, contained: out.contained, ...(agentMeta || {}) } };
+        return { thread_id: tid, reply: visibleReply, action: null, capabilities: out.capabilities, turn_key: turnKey, reminders, ...(out.task ? { task: out.task } : {}), ...(out.batch ? { batch: out.batch } : {}), ...(parts ? { parts } : {}), ...(artifactsField ? { artifacts: artifactsField } : {}), ...(turnPostings.length ? { postings: turnPostings, ...(postingsAsFile ? { postings_as_file: true } : {}) } : {}), ...(shapeField ? { shape: shapeField } : {}), meta: { career: true, intent: out.intent, result_status: out.resultStatus, contained: out.contained, ...(agentMeta || {}) } };
       };
       const commitTurn = (events: unknown[]) => persistence.commit({ userId: user.id, threadId: tid, turnKey, requestHash, revision: loaded.revision, accountVersion: loaded.accountVersion, snapshot: host.extractSnapshot(ctx), patch: ctx._hostPatch, input: userContent, response: respond(), taskIntent, batchIntent, events });
       const confirmRows = confirmEvents.rows();

@@ -15,6 +15,7 @@ import { type JobDeps, type JobSender, sendJobCards, supabaseAccountStamp, supab
 import { feedUrlsFor } from "../_shared/file_link.ts";
 import { supabaseCardStore } from "../_shared/career_apply_cards.ts";
 import { escapeHtml, LATENCY_BUDGET, textingNativeOn } from "../_shared/channel_voice.ts";
+import { telegramBriefOn } from "../_shared/telegram_brief.ts";
 
 export interface ProviderWebhookDeps {
   env: { get(k: string): string | undefined };
@@ -30,11 +31,13 @@ export interface ProviderWebhookDeps {
 // The adapter's sends, bound to one chat, as the job cards use them.
 // KNOWN GAPS (2026-10-30, #311): with the texting voice on, the adapter sends text as HTML; a card's text is the posting's
 // own words (an employer's "R&D", "<5 years"), so it is escaped first. A photo's caption and an edit go as plain text.
-export function jobSenderFor(adapter: ChannelAdapter, address: string): JobSender {
+export function jobSenderFor(adapter: ChannelAdapter, address: string, replyTo?: string | null): JobSender {
   const asSent = (t: string) => (adapter.htmlText ? escapeHtml(t) : t);
   return {
     photo: async (a) => adapter.sendPhoto ? await adapter.sendPhoto(address, a) : { ok: false },
-    text: async (a) => { const r = await adapter.send(address, [asSent(a.text)], { buttons: a.buttons }); return { ok: r.ok, id: r.ok ? r.id : null }; },
+    text: async (a) => { const r = await adapter.send(address, [asSent(a.text)], { buttons: a.buttons, ...(replyTo ? { replyTo } : {}) }); return { ok: r.ok, id: r.ok ? r.id : null }; },
+    // TELEGRAM BRIEF (brief P2): a link alone in its message, with its preview card, threaded to the person's message.
+    ...(adapter.sendLink ? { link: async (a: { url: string; buttons?: any }) => { const r = await adapter.sendLink!(address, a.url, { replyTo, buttons: a.buttons }); return { ok: r.ok, id: r.ok ? r.id : null }; } } : {}),
     ...(adapter.editMessage ? { edit: async (a: { messageId: string; text: string; buttons?: any; caption?: boolean }) => await adapter.editMessage!(address, a.messageId, a) } : {}),
   };
 }
@@ -58,13 +61,14 @@ export function webhookDeps(adapter: ChannelAdapter, d: ProviderWebhookDeps): Co
       return {
         jobTap: async (a: { userId: string; data: string; messageId: string | null; contact: string }) =>
           await tapJob({ userId: a.userId, data: a.data, messageId: a.messageId, deps: jd(), send: jobSenderFor(adapter, addressOf(a.contact)) }),
-        showPostings: async (a: { userId: string; contact: string; hits: unknown[] }) =>
-          await sendJobCards({ userId: a.userId, hits: a.hits as any[], deps: jd(), send: jobSenderFor(adapter, addressOf(a.contact)) }),
+        showPostings: async (a: { userId: string; contact: string; hits: unknown[]; asFile?: boolean; replyTo?: string | null }) =>
+          await sendJobCards({ userId: a.userId, hits: a.hits as any[], deps: jd(), send: jobSenderFor(adapter, addressOf(a.contact), a.replyTo), ...(a.asFile ? { asFile: true } : {}) }),
       };
     })() : {}),
     // REPLY SHAPE: a file and a link, each its own message (the link with its preview card).
     ...(adapter.sendDocument ? { sendFile: async (a: { contact: string; filename: string; mime: string; bytes: Uint8Array }) => await adapter.sendDocument!(addressOf(a.contact), a) } : {}),
-    ...(adapter.sendLink ? { sendLink: async (a: { contact: string; url: string }) => await adapter.sendLink!(addressOf(a.contact), a.url) } : {}),
+    ...(adapter.sendLink ? { sendLink: async (a: { contact: string; url: string; replyTo?: string | null }) => await adapter.sendLink!(addressOf(a.contact), a.url, { replyTo: a.replyTo ?? null }) } : {}),
+    ...(adapter.react ? { react: async (address: string, messageId: string, emoji: string) => await adapter.react!(address, messageId, emoji) } : {}),
     ...(adapter.answerCallback ? { answerCallback: (id: string, text: string) => adapter.answerCallback!(id, text) } : {}),
     ...(admin && adapter.sendDocument ? {
       sendArtifacts: async (a: { userId: string; threadId: string | null; contact: string; artifacts: { ref: string }[] }) => {
@@ -84,6 +88,6 @@ export function webhookDeps(adapter: ChannelAdapter, d: ProviderWebhookDeps): Co
 export async function handleTelegram(req: Request, d: ProviderWebhookDeps): Promise<Response> {
   // KNOWN GAPS (2026-10-30, #311): the webhook's own replies (a fixed answer, the #301 second message, job cards) get the
   // texting voice too when CAREER_TEXTING_NATIVE=on, like the outbox's delivery (channel_registry.ts); off, unchanged.
-  const adapter = d.adapter ? d.adapter(d.env) : telegramAdapter({ token: d.env.get("TELEGRAM_BOT_TOKEN") || "", webhookSecret: d.env.get("TELEGRAM_WEBHOOK_SECRET") || "", native: textingNativeOn(d.env) });
+  const adapter = d.adapter ? d.adapter(d.env) : telegramAdapter({ token: d.env.get("TELEGRAM_BOT_TOKEN") || "", webhookSecret: d.env.get("TELEGRAM_WEBHOOK_SECRET") || "", native: textingNativeOn(d.env), brief: telegramBriefOn(d.env) });
   return await handleChannelWebhook(req, adapter, webhookDeps(adapter, d));
 }

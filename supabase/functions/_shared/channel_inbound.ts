@@ -22,6 +22,7 @@ import { deliverShaped, type ShapedFile } from "./channel_shape.ts";
 import { safeCut } from "./channel_text.ts";
 import { redactIdentity } from "./identity_redact.ts";
 import { ackFor, ackOnce, typingLoop } from "./channel_voice.ts";
+import { ACK_REACTION, slowWork } from "./telegram_brief.ts";
 
 export const SIGNUP_CLOSED_REPLY = "Trainee is invite-only right now, so I can't set you up yet. Nothing about you was saved except that you texted.";
 // PHONE LOGIN (owner, 2026-10-28): Telegram's own verified number, shared with one tap. Trainee never asks for a password or a
@@ -165,9 +166,10 @@ export interface CoreDeps {
   // OUTBOX_CHARS; when given with two or more, they are what the person reads, in order, and `reply` is not sent.
   // replyToMessageId (optional): the provider's id of the message the person replied to (SERIAL-1462). cardId (optional,
   // in the answer): the card this reply shows, so the outbox row that carries it is recorded against the card.
-  chat: (a: { userId: string; threadId: string | null; message: string; turnKey: string; replyToMessageId?: string | null; channel?: string; screenTap?: { qid: string; answer: string } | null }) => Promise<{ status: number; reply: string; shape?: { attachments: ShapedFile[]; links: string[]; more?: string[] }; threadId: string | null; parts?: string[]; cardId?: string | null; resultStatus?: string | null; postings?: unknown[]; screenButtons?: boolean; screenQid?: string | null; artifacts?: { ref: string; filename: string; mime: string }[] }>;
+  chat: (a: { userId: string; threadId: string | null; message: string; turnKey: string; replyToMessageId?: string | null; channel?: string; screenTap?: { qid: string; answer: string } | null }) => Promise<{ status: number; reply: string; shape?: { attachments: ShapedFile[]; links: string[]; more?: string[] }; threadId: string | null; parts?: string[]; cardId?: string | null; resultStatus?: string | null; postings?: unknown[]; postingsAsFile?: boolean; screenButtons?: boolean; screenQid?: string | null; artifacts?: { ref: string; filename: string; mime: string }[] }>;
   // a head start on the every-minute run; what it did (deliverDue's counts), when the deliverer says (the #301 rest waits for its head)
-  deliver: (a: { userId: string; key: string; now: number }) => Promise<unknown>;
+  // replyTo (TELEGRAM BRIEF, brief P1.2): the person's message this answers, so the answer is threaded to it.
+  deliver: (a: { userId: string; key: string; now: number; replyTo?: string | null }) => Promise<unknown>;
   // FEATURE 16 (Telegram; optional, so the other channels run unchanged):
   // resumeFile: a document the person sent, downloaded, read and stored as their upload (channel_resume_upload.ts); ok
   //   gives the message the chat receives for it, else the plain reply to say. Absent: the file is not read (WO-106 reply).
@@ -178,13 +180,17 @@ export interface CoreDeps {
   // JOB CARDS (telegram_jobs.ts): a tap on a posting's Apply / Details / Save / Next / Confirm / Edit / Cancel, and the postings a
   // turn found sent as cards (logo, caption, buttons) after its reply. Absent: the reply's words stand and no button exists.
   jobTap?: (a: { userId: string; data: string; messageId: string | null; contact: string }) => Promise<{ toast: string; status: string }>;
-  showPostings?: (a: { userId: string; contact: string; hits: unknown[] }) => Promise<{ sent: number; total: number }>;
+  // asFile (TELEGRAM BRIEF, brief P7.2): a set of roles goes as the list page's link (a File), never one card each.
+  showPostings?: (a: { userId: string; contact: string; hits: unknown[]; asFile?: boolean; replyTo?: string | null }) => Promise<{ sent: number; total: number }>;
   // FEATURE 16: the turn's documents (owner-scoped refs) sent as files after its reply; how many went. Absent: the channel
   // sends no files, and the reply's own words stand (agent-chat says when a file could not be attached).
   // REPLY SHAPE (channel_shape.ts): a file and a link, each its own message, after the reply. Absent: the channel has none, and
   // the reply's own words stand.
   sendFile?: (a: { contact: string; filename: string; mime: string; bytes: Uint8Array }) => Promise<{ ok: boolean }>;
-  sendLink?: (a: { contact: string; url: string }) => Promise<{ ok: boolean }>;
+  sendLink?: (a: { contact: string; url: string; replyTo?: string | null }) => Promise<{ ok: boolean }>;
+  // TELEGRAM BRIEF (brief P1.1, P7.5): the "on it" reaction on the person's message for slow work. Absent, or refused: the N12
+  // interim line (ackAfterMs) is the acknowledgment instead; never both.
+  react?: (address: string, messageId: string, emoji: string) => Promise<boolean>;
   sendArtifacts?: (a: { userId: string; threadId: string | null; contact: string; artifacts: { ref: string; filename: string; mime: string }[] }) => Promise<{ sent: number; failed: number }>;
   // N12/N13 (channel_voice.ts LATENCY_BUDGET; optional, so a channel without them runs unchanged):
   // typing: the platform's typing indicator to this address, shown as soon as a message arrives and every typingEveryMs
@@ -250,13 +256,15 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
   let contact = msg.contact;
   // TELEGRAM ROUND 2 (2026-10-30): a fixed answer sent straight back (not through the outbox) that Telegram refused because
   // the person blocked the bot or deleted their account (403) is that person's STOP, as it is on the outbox's sends.
+  // TELEGRAM BRIEF (brief P1.2): everything said back to this person's message is threaded as a reply to it.
+  const replyTo = msg.platformMessageId ?? null;
   const say = async (to: string, bubbles: string[], opts?: SendOptions): Promise<{ ok: boolean }> => {
-    const r = await d.reply(to, bubbles, opts);
+    const r = await d.reply(to, bubbles, replyTo && to === msg.contact ? { ...opts, replyTo } : opts);
     if ((r as { optOut?: boolean }).optOut) await store.setOptOut(to, true, now).catch(() => {});
     return r;
   };
   // N12: the one interim line of a slow turn (armed by interim(), at most once per message; stopped before the answer).
-  let working: ReturnType<typeof ackOnce> | null = null;
+  let working: ReturnType<typeof ackOnce> | null = null, reacted = false;
   const interim = (text: string) => {
     const w = ackOnce({ afterMs: d.ackAfterMs, ack: () => say(contact, d.render(text)), ...(d.timers ? { setTimer: d.timers.set, clearTimer: d.timers.clear } : {}) });
     w.start();
@@ -527,6 +535,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       return await answer(text, { connect: "telegram" });
     }
 
+    let postingsAsFile = false;
     let postings: unknown[] = [], cardsShown = 0, screenQidOut: string | null = null, shape: { attachments: ShapedFile[]; links: string[]; more?: string[] } | null = null;
     const notes: string[] = [];
     let reply: string, parts: string[] | null = null, artifacts: { ref: string; filename: string; mime: string }[] = [], turnThread: string | null = person.threadId;
@@ -543,8 +552,14 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       const fitted = !fileMessage && msg.forwardedFrom ? forwardedMessage(msg.forwardedFrom, said) : cutForChat(said);
       if (fitted.cut) notes.push(longCutNote(msg.forwardedFrom ? fitted.text.slice(0, -1) : fitted.text));
       if (msg.caption && msg.media && !fileMessage) notes.unshift(MEDIA_CAPTION_NOTE);
+      // TELEGRAM BRIEF (brief P1.1, P5.1, P7.5): slow work (a live search, a draft, an apply) is acknowledged at once with the
+      // eyes reaction on the person's message; then nothing until there is something real. A question answerable in one line
+      // gets no acknowledgment. Where no reaction could be shown, the N12 interim below is the one line; never both.
+      if (!working && !reacted && d.react && replyTo && msg.kind === "text" && !command && !fileMessage && !passedOn && slowWork(said)) {
+        reacted = await d.react(msg.address, replyTo, ACK_REACTION).catch(() => false);
+      }
       // N12: one interim if the turn runs past the budget (already armed when a file was being read: still one).
-      working ??= interim(ackFor(said));
+      if (!reacted) working ??= interim(ackFor(said));
       // The brain gets the person, the thread, the words and a turn key, and the reply-to id only when the platform gave one.
       const out = await d.chat({ userId: person.userId, threadId: person.threadId, message: fitted.text, turnKey, ...(msg.replyToMessageId ? { replyToMessageId: msg.replyToMessageId } : {}), ...(screenTap ? { screenTap } : {}) });
       reply = out.reply.trim() || CHAT_DOWN_REPLY;
@@ -558,6 +573,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       artifacts = Array.isArray(out.artifacts) ? out.artifacts : [];
       screenQidOut = out.screenButtons === true && typeof out.screenQid === "string" ? out.screenQid : null;
       postings = Array.isArray(out.postings) ? out.postings.slice(0, 200) : [];
+      postingsAsFile = out.postingsAsFile === true;
       turnThread = out.threadId ?? person.threadId;
       if (toBrain && command === "start") {
         reply = `${CHANNEL_REPLIES.start}\n\n${reply}`;
@@ -601,7 +617,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
     let headWent = true;
     try {
       for (const r of rows) {
-        const went = await d.deliver({ userId: person.userId, key: r.key, now });
+        const went = await d.deliver({ userId: person.userId, key: r.key, now, ...(replyTo ? { replyTo } : {}) });
         if (went && typeof went === "object" && "delivered" in went && !(Number((went as { delivered: unknown }).delivered) > 0)) { headWent = false; break; }
       }
     } catch (e) { headWent = false; console.error("inbound: immediate send failed (the outbox has it):", e instanceof Error ? e.message : String(e)); }
@@ -614,7 +630,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
     // JOB CARDS: the postings this turn found, each as its own card after the reply that introduces them. A failure here never
     // changes what was already said; the reply's own words stand.
     if (postings.length && d.showPostings) {
-      const shown = await d.showPostings({ userId: person.userId, contact, hits: postings }).catch((e) => { console.error("inbound: job cards failed:", e instanceof Error ? e.message : String(e)); return null; });
+      const shown = await d.showPostings({ userId: person.userId, contact, hits: postings, ...(postingsAsFile ? { asFile: true } : {}), ...(replyTo ? { replyTo } : {}) }).catch((e) => { console.error("inbound: job cards failed:", e instanceof Error ? e.message : String(e)); return null; });
       if (shown) cardsShown = shown.sent;
     }
     // FEATURE 16: the documents, after the reply that names them; one that does not go is said, never claimed sent.
@@ -642,7 +658,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
         }
         if (queued) { await later(st.kind === "link" ? st.url : fitReply(st.text)); continue; }
         let r: { ok: boolean; optOut?: boolean; sent?: number; retryAfterMs?: number };
-        if (st.kind === "link") r = await d.sendLink!({ contact, url: st.url }).catch(() => ({ ok: false }));
+        if (st.kind === "link") r = await d.sendLink!({ contact, url: st.url, ...(replyTo ? { replyTo } : {}) }).catch(() => ({ ok: false }));
         else {
           const bubbles = d.render(st.text), one = bubbles.join("\n\n");
           r = await say(contact, bubbles.length > 1 && one.length <= MORE_ONE_MESSAGE ? [one] : bubbles).catch(() => ({ ok: false }));

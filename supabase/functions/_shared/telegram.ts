@@ -19,8 +19,9 @@
 // Only private chats are read; a group's messages are ignored.
 import { equalSecret } from "./message_service.ts";
 import { type ChannelAdapter, type InboundMessage, packMessages, pacer, type ParseResult, type SendResult } from "./channel_adapters.ts";
-import { nativeRender, telegramPlain } from "./channel_voice.ts";
+import { formatForChannel, nativeRender, telegramPlain } from "./channel_voice.ts";
 import { safeSlice, utf8Bytes } from "./channel_text.ts";
+import { briefBubbles } from "./telegram_brief.ts";
 
 export const TELEGRAM_API = "https://api.telegram.org";
 export const TELEGRAM_CHARS = 4096;
@@ -51,6 +52,12 @@ const PACK = 1500; // the texting rule: one message carries at most 1,500 charac
 // having gone out), up to 30 s once part of the reply went out (the rest would otherwise be lost: it cannot be sent alone).
 export const WAIT_IN_PLACE_S = 5, WAIT_MID_REPLY_S = 30;
 const SECRET_RE = /^[A-Za-z0-9_-]{32,256}$/;
+// TELEGRAM BRIEF (brief P1.2): every message of an answer is threaded as a reply to the person's message (reply_to_message_id;
+// allow_sending_without_reply so a message the person deleted never stops the answer). ASSUMED field names, Bot API.
+const threaded = (replyTo: string | null | undefined) => {
+  const id = Number(replyTo);
+  return Number.isSafeInteger(id) && id > 0 ? { reply_to_message_id: id, allow_sending_without_reply: true } : {};
+};
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 export function telegramDeepLink(botUsername: string, nonce: string): string {
@@ -116,7 +123,9 @@ export function parseTelegramUpdate(u: any): { message: InboundMessage | null; i
   // forward_sender_name) is someone else's words the person passed on: never their command, their yes, a link nonce or
   // their own contact card.
   const forwardedFrom = forwardOrigin(m);
-  const base = { provider: "telegram" as const, channel: "telegram" as const, messageId, contact: `tg:${m.chat.id}`, address: String(m.chat.id), replyToMessageId: repliedTo,
+  // TELEGRAM BRIEF: the person's own message id, for the reply thread and the reaction (brief P1.1, P1.2).
+  const platformMessageId = Number.isSafeInteger(m.message_id) && m.message_id > 0 ? String(m.message_id) : null;
+  const base = { provider: "telegram" as const, channel: "telegram" as const, messageId, contact: `tg:${m.chat.id}`, address: String(m.chat.id), replyToMessageId: repliedTo, platformMessageId,
     ...(forwardedFrom ? { forwardedFrom } : {}) };
   // FEATURE 16: a document (a resume as a PDF or Word file) is read: getFile, then the file itself (channel_inbound.ts).
   // message.document: file_id (to download), file_unique_id (stable across bots and time), file_name, mime_type,
@@ -215,7 +224,7 @@ export function withLinks(text: string, entities: any): string {
 // no read receipt for a private chat (readBusinessMessage is for business connections only), so none is sent.
 export function telegramAdapter(o: {
   token: string; webhookSecret?: string; fetch?: typeof fetch; timeoutMs?: number;
-  clock?: () => number; sleep?: (ms: number) => Promise<void>; native?: boolean;
+  clock?: () => number; sleep?: (ms: number) => Promise<void>; native?: boolean; brief?: boolean;
 }): ChannelAdapter {
   const f = o.fetch ?? fetch, timeout = o.timeoutMs ?? 15000;
   const pace = pacer({ perChatMs: 1000, overallPerSecond: 30, clock: o.clock, sleep: o.sleep });
@@ -244,7 +253,10 @@ export function telegramAdapter(o: {
     channel: "telegram", provider: "telegram",
     limits: { chars: TELEGRAM_CHARS, packChars: PACK, perChatGapMs: 1000, overallPerSecond: 30, windowMs: null, dailyContacts: null, dailyTemplates: null },
     capabilities: { buttons: true, documents: true, previews: true, templates: false },
-    render: o.native ? nativeRender("telegram", PACK) : (text) => packMessages(text, PACK),
+    // TELEGRAM BRIEF (brief P1.2, P1.3, P2): bubbles of at most about three sentences, one idea each, no visible markdown, each
+    // link its own message after its line of context; with the texting voice on, the same bubbles in its HTML.
+    render: o.brief ? (o.native ? (text) => briefBubbles(text, PACK).map((b) => formatForChannel(b, "telegram")).filter((b) => b.trim()) : (text) => briefBubbles(text, PACK))
+      : o.native ? nativeRender("telegram", PACK) : (text) => packMessages(text, PACK),
     // KNOWN GAPS (2026-10-30, #311): with the texting voice on, send() goes with parse_mode HTML, so text that did not come
     // through render (a job card's text) must be escaped by its sender (htmlText).
     ...(o.native ? { htmlText: true } : {}),
@@ -318,14 +330,22 @@ export function telegramAdapter(o: {
     },
     // REPLY SHAPE: a link alone in its message, preview on for exactly that URL (link_preview_options {is_disabled:false, url};
     // https://core.telegram.org/bots/api#linkpreviewoptions, ASSUMED field names), so Telegram shows the title and image card.
-    async sendLink(address, url): Promise<SendResult> {
+    async sendLink(address, url, lo): Promise<SendResult> {
       await pace(address);
-      const r = await call("sendMessage", { chat_id: Number(address), text: safeSlice(url, TELEGRAM_CHARS), link_preview_options: { is_disabled: false, url, prefer_large_media: true } });
+      const r = await call("sendMessage", { chat_id: Number(address), text: safeSlice(url, TELEGRAM_CHARS), link_preview_options: { is_disabled: false, url, prefer_large_media: true }, ...threaded(lo?.replyTo),
+        ...(keyboardOf(lo?.buttons) ? { reply_markup: keyboardOf(lo?.buttons) } : {}) });
       if ("error" in r) return { ok: false, error: redact(`Telegram unreachable: ${r.error instanceof Error ? r.error.message : String(r.error)}`).slice(0, 200), retryable: false };
       if (r.status === 200 && r.body?.ok === true) return { ok: true, id: r.body?.result?.message_id != null ? String(r.body.result.message_id) : null };
       // TELEGRAM ROUND 3: a 429 says how long to wait, so the link waits that long in the outbox (channel_inbound.ts).
       const ra = r.status === 429 ? retryAfterOf(r.body) : null;
       return { ok: false, error: `Telegram sendLink HTTP ${r.status}: ${redact(String(r.body?.description ?? "")).slice(0, 120)}`, retryable: false, ...(ra !== null ? { retryAfterMs: ra * 1000 } : {}) };
+    },
+    // TELEGRAM BRIEF (brief P1.1): the eyes reaction on the person's message (setMessageReaction, reaction [{type:"emoji",
+    // emoji}]; https://core.telegram.org/bots/api#setmessagereaction, ASSUMED field names, as aiogram mirrors them). Best
+    // effort: a refusal (an older client, a reaction not allowed in the chat) is false, and the caller says one line instead.
+    async react(address, messageId, emoji): Promise<boolean> {
+      const r = await call("setMessageReaction", { chat_id: Number(address), message_id: Number(messageId), reaction: [{ type: "emoji", emoji }] }, 0);
+      return !("error" in r) && r.status === 200 && r.body?.ok === true;
     },
     // FEATURE 16: every tap is answered once, so the person's button stops spinning (answerCallbackQuery; ASSUMED).
     async answerCallback(callbackId, text): Promise<boolean> {
@@ -379,10 +399,10 @@ export function telegramAdapter(o: {
         // goes as its plain text, which fits whole.
         const html = !!o.native && !(bubbles[i].length > TELEGRAM_CHARS && telegramPlain(bubbles[i]).length <= TELEGRAM_CHARS);
         const text = html || !o.native ? bubbles[i] : telegramPlain(bubbles[i]);
-        let r = await call("sendMessage", { chat_id: Number(address), text: safeSlice(text, TELEGRAM_CHARS), link_preview_options: { is_disabled: false }, ...(html ? { parse_mode: "HTML" } : {}), ...keyboard }, wait);
+        let r = await call("sendMessage", { chat_id: Number(address), text: safeSlice(text, TELEGRAM_CHARS), link_preview_options: { is_disabled: false }, ...(html ? { parse_mode: "HTML" } : {}), ...keyboard, ...threaded(opts?.replyTo) }, wait);
         // V1: Telegram refused the markup, so nothing went out; the same words go again as plain text.
         if (html && !("error" in r) && r.status === 400 && /parse entities|can't find end|unsupported start tag/i.test(String(r.body?.description ?? ""))) {
-          r = await call("sendMessage", { chat_id: Number(address), text: safeSlice(telegramPlain(bubbles[i]), TELEGRAM_CHARS), link_preview_options: { is_disabled: false }, ...keyboard }, wait);
+          r = await call("sendMessage", { chat_id: Number(address), text: safeSlice(telegramPlain(bubbles[i]), TELEGRAM_CHARS), link_preview_options: { is_disabled: false }, ...keyboard, ...threaded(opts?.replyTo) }, wait);
         }
         // CHANNEL DELIVERY ROUND 2 (2026-10-30): what went out before a failure is reported (sent, sentIds), so a failure on
         // the 2nd+ message that certainly sent nothing (a 429 asking for more than WAIT_MID_REPLY_S, 502, 503, a connection

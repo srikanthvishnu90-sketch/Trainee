@@ -258,6 +258,8 @@ export interface JobSender {
   photo(a: { photoUrl: string; caption: string; buttons: Button[][] }): Promise<{ ok: boolean }>;
   text(a: { text: string; buttons?: Button[][]; replyTo?: string | null }): Promise<{ ok: boolean; id?: string | null }>;
   edit?(a: { messageId: string; text: string; buttons?: Button[][]; caption?: boolean }): Promise<{ ok: boolean }>;
+  // TELEGRAM BRIEF (brief P2, P7.2): a link alone in its message (with its preview card), after the line that introduced it.
+  link?(a: { url: string; buttons?: Button[][] }): Promise<{ ok: boolean; id?: string | null }>;
 }
 const listIdOf = async (userId: string, refs: string[], now: number) => (await hex(`${userId}|${refs.join(",")}|${now}`)).slice(0, 10);
 
@@ -286,7 +288,7 @@ export async function sendJobPage(o: { userId: string; jobs: JobView[]; page: nu
 
 // The postings an agent turn found, as cards: the first page now, the whole list remembered for Next. The rows the search
 // result does not carry (level, posted date, source, requirements) are read once, bounded, from the stored postings.
-export async function sendJobCards(o: { userId: string; hits: any[]; deps: JobDeps; send: JobSender }): Promise<{ sent: number; total: number }> {
+export async function sendJobCards(o: { userId: string; hits: any[]; deps: JobDeps; send: JobSender; asFile?: boolean }): Promise<{ sent: number; total: number }> {
   const hits = (o.hits ?? []).filter((h) => h && typeof h.job_id === "string" && h.job_id && /^https?:\/\//i.test(String(h.url ?? "")));
   if (!hits.length) return { sent: 0, total: 0 };
   const rows = new Map<string, PostingRow>();
@@ -299,6 +301,15 @@ export async function sendJobCards(o: { userId: string; hits: any[]; deps: JobDe
   for (let i = 0; i < jobs.length; i++) await o.deps.store.remember(o.userId, refs[i], jobs[i], "text");
   // APPLY HERE (apply_here.ts): the postings the person pasted or pointed at, each with ONE Apply button; several go as one list link.
   if (hits.every((h) => h.apply_here === true)) return await sendApplyHere({ userId: o.userId, jobs, refs, notChecked: hits.map((h) => (Array.isArray(h.not_checked) ? h.not_checked : []) as string[]), listId, deps: o.deps, send: o.send });
+  // TELEGRAM BRIEF (brief P7.2): a set of roles from a search whose reply already said the one summary line: the File (the list
+  // page: company, title, pay, location and posted date on each row, Apply on each) is the next message, the link alone.
+  if (o.asFile && jobs.length >= 2 && o.deps.feedLinks && o.send.link) {
+    const links = await o.deps.feedLinks(o.userId, listId).catch(() => null);
+    if (links?.url) {
+      const r = await o.send.link({ url: links.url, buttons: links.webApp ? [[{ text: "Open the list", webApp: links.webApp }]] : undefined });
+      if (r.ok) return { sent: 1, total: jobs.length };
+    }
+  }
   // A mass list is one short line and the link (Telegram shows the link's preview card): the rows, with Apply on each, are on the page.
   if (jobs.length > MASS_FROM && o.deps.feedLinks) {
     const links = await o.deps.feedLinks(o.userId, listId).catch(() => null);

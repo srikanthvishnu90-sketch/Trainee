@@ -51,6 +51,8 @@ export function chatThroughAgent(url: string, key: string, o: { retryDelayMs?: n
       : [];
     // JOB CARDS: the postings the turn's search found (agent-chat puts them on the response), sent as cards after the reply.
     const postings = Array.isArray(body.postings) ? (body.postings as unknown[]).filter((p) => p && typeof p === "object").slice(0, 200) : [];
+    // TELEGRAM BRIEF (brief P7.2): a set of roles goes as one File link after the summary line, never one card each.
+    const postingsAsFile = body.postings_as_file === true && postings.length > 0;
     // F09: the posting screen's yes/no question rides meta.screen_buttons = ["Yes","No"]; only exactly that is honored.
     const sb = Array.isArray(meta.screen_buttons) ? meta.screen_buttons : null;
     const screenQid = typeof meta.screen_qid === "string" && /^[0-9a-f]{8}$/.test(meta.screen_qid) ? meta.screen_qid : null;
@@ -60,7 +62,7 @@ export function chatThroughAgent(url: string, key: string, o: { retryDelayMs?: n
     const shaped = sh ? shapeReply({ attachments: sh.attachments, links: sh.links }) : null;
     const more = sh && Array.isArray(sh.more) ? sh.more.map((m) => String(m ?? "").trim()).filter(Boolean).slice(0, 1) : [];
     const shape = shaped && (shaped.attachments.length || shaped.links.length || more.length) ? { attachments: shaped.attachments, links: shaped.links, ...(more.length ? { more } : {}) } : null;
-    return { status: res.status, reply: String(body.reply ?? ""), ...(shape ? { shape } : {}), threadId: typeof body.thread_id === "string" ? body.thread_id : null, ...(parts ? { parts } : {}), ...(cardId ? { cardId } : {}), ...(resultStatus ? { resultStatus } : {}), ...(artifacts.length ? { artifacts } : {}), ...(postings.length ? { postings } : {}), ...(screenButtons ? { screenButtons, screenQid } : {}) };
+    return { status: res.status, reply: String(body.reply ?? ""), ...(shape ? { shape } : {}), threadId: typeof body.thread_id === "string" ? body.thread_id : null, ...(parts ? { parts } : {}), ...(cardId ? { cardId } : {}), ...(resultStatus ? { resultStatus } : {}), ...(artifacts.length ? { artifacts } : {}), ...(postings.length ? { postings } : {}), ...(screenButtons ? { screenButtons, screenQid } : {}), ...(postingsAsFile ? { postingsAsFile } : {}) };
   };
 }
 
@@ -71,11 +73,24 @@ export function chatThroughAgent(url: string, key: string, o: { retryDelayMs?: n
 // deno-lint-ignore no-explicit-any
 export function deliverer(admin: any, env: { get(k: string): string | undefined }) {
   let adapters: ReturnType<typeof adaptersFromEnv> | null = null;
-  return async (a: { userId: string; key?: string; now: number; wholeUser?: boolean }) => {
+  // replyTo (TELEGRAM BRIEF, brief P1.2): the head start threads the answer to the person's message. The every-minute run (a
+  // retry) has no such id and sends unthreaded: the words are the same, only the reply arrow is missing.
+  return async (a: { userId: string; key?: string; now: number; wholeUser?: boolean; replyTo?: string | null }) => {
     adapters ??= adaptersFromEnv(env);
     const store = supabaseChannelStore(admin, a.wholeUser ? { user: a.userId } : { only: { userId: a.userId, key: a.key! } });
-    const r = await deliverDue({ store, adapters, now: a.now, limit: a.wholeUser ? 40 : 1 });
+    const r = await deliverDue({ store, adapters: a.replyTo ? threadedAdapters(adapters, a.replyTo) : adapters, now: a.now, limit: a.wholeUser ? 40 : 1 });
     await store.release();
     return r; // what went (the inbound core sends a long answer's rest only after its head went: #301)
   };
+}
+
+// TELEGRAM BRIEF: the same adapters, each send threaded to one message (only where the adapter threads: Telegram reads replyTo).
+export function threadedAdapters<T extends Record<string, unknown>>(adapters: T, replyTo: string): T {
+  const out: Record<string, unknown> = {};
+  for (const [k, a] of Object.entries(adapters)) {
+    // deno-lint-ignore no-explicit-any
+    const ad = a as any;
+    out[k] = ad && typeof ad.send === "function" ? { ...ad, send: (address: string, bubbles: string[], opts?: Record<string, unknown>) => ad.send(address, bubbles, { ...opts, replyTo }) } : a;
+  }
+  return out as T;
 }

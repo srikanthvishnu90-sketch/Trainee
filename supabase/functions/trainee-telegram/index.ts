@@ -13,6 +13,6 @@ serve((req) => {
   const deliverNow = deliverer(admin, Deno.env); // one per request: the parts of a reply share Telegram's pacing
   return handleTelegram(req, {
     env: Deno.env, now: Date.now, store: () => supabaseInboundStore(admin), chat: chatThroughAgent(url, key, { channel: "telegram" }), admin, // REPLY SHAPE: agent-chat shapes Telegram replies only; // FEATURE 16: files and card buttons
-    deliver: (a) => deliverNow({ userId: a.userId, key: a.key, now: a.now }),
+    deliver: (a) => deliverNow({ userId: a.userId, key: a.key, now: a.now, ...(a.replyTo ? { replyTo: a.replyTo } : {}) }),
   });
 });

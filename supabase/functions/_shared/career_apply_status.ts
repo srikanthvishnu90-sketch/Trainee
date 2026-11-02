@@ -33,7 +33,9 @@ export function supabaseApplications(admin: any): ReadApplications {
 }
 
 const plain = (s: string) => ` ${String(s ?? "").toLowerCase().replace(/[’`]/g, "'").replace(/[?!.]+\s*$/, "").replace(/\s+/g, " ").trim()
-  .replace(/^[^\p{L}\p{N}"'(]+/u, "").replace(/^(?:(?:hey|hi|hello|ok|okay|pls|please)\b[,!:]?\s+)+/, "").replace(/,? (?:please|pls|thanks|thank you)$/, "")} `;
+  .replace(/^[^\p{L}\p{N}"'(]+/u, "").replace(/^(?:(?:hey|hi|hello|ok|okay|pls|please)\b[,!:]?\s+)+/, "").replace(/,? (?:please|pls|thanks|thank you)$/, "")
+  // TELEGRAM BRIEF (brief P7 target 2): "did my Acme application actually go through" is the same question without "actually".
+  .replace(/ (?:actually|really|even|ever|already) (?=(?:go|gone|get|been|send|sent|submit|submitted|work|land)\b)/g, " ")} `;
 // ROUTING SCENARIOS (2026-10-29): "apps" is "applications"; "what did I apply to" / "what have I applied to" / "show me
 // what I applied to" are the whole list; a greeting before the ask ("hey", "ok so", "please") is not part of it.
 const ALL = /^ (?:so )?(?:where are|where'?s|how are|what'?s the status of|what is the status of|status of|any updates? on|update on|check on|show me the status of) (?:all )?(?:of )?my (?:job )?(?:applications?|apps) $|^ (?:did|have) (?:my|any of my) (?:applications?|apps) (?:go through|gone through|get sent|been sent|get submitted|been submitted) $|^ (?:so )?(?:what|which (?:jobs|companies|roles|employers)|where) (?:did i apply(?: to| for)?|have i applied(?: to| for)?|i'?ve applied(?: to| for)?)(?: so far| yet)? $|^ (?:show me|tell me|list) (?:what|where) i(?:'?ve| have)? applied(?: to| for)?(?: so far)? $/;

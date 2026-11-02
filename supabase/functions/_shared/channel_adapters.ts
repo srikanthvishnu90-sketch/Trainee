@@ -70,6 +70,9 @@ export interface InboundMessage {
   // the build container), so no id is read there. A card's text yes approves only when this id is the message that
   // carried the card (career_apply_cards.ts).
   replyToMessageId?: string | null;
+  // TELEGRAM BRIEF (brief P1.2): the platform's own id of the message the person sent (Telegram message.message_id), so the
+  // answer is threaded as a reply to it and an acknowledgment reaction lands on it. Absent: the platform gave none.
+  platformMessageId?: string | null;
   // IDENTITY SCENARIOS (2026-10-30): a WhatsApp message forwarded from somewhere else (messages[].context.forwarded or
   // frequently_forwarded; Cloud API gives no sender name, so not forwardedFrom). Its words are not the person's own: a
   // forwarded "yes" never links a channel (Telegram's forwards carry forwardedFrom).
@@ -90,7 +93,8 @@ export interface InboundMessage {
 export interface Button { text: string; data?: string; loginUrl?: string; url?: string; webApp?: string }
 // shareContact: a one-tap "Share my phone number" button (Telegram's request_contact; the label); removeKeyboard: take that
 // button away again once the number arrived.
-export interface SendOptions { buttons?: Button[][]; shareContact?: string; removeKeyboard?: boolean }
+// replyTo (TELEGRAM BRIEF, brief P1.2): the platform id of the person's message this answers; every message sent is threaded to it.
+export interface SendOptions { buttons?: Button[][]; shareContact?: string; removeKeyboard?: boolean; replyTo?: string | null }
 // A WhatsApp status callback: a message we sent failed after Meta accepted it. hold: it failed for the window (131047)
 // or the per-user marketing limit (131049), so it goes back in the queue for the person's next message.
 // CHANNEL DELIVERY ROUND 2 (2026-10-30): every failure, not only the window's: retry (Meta's throughput and pair limits,
@@ -142,7 +146,10 @@ export interface ChannelAdapter extends DeliveryAdapter {
   // FEATURE 16: a document (the tailored resume PDF) as a file in the chat.
   sendDocument?(address: string, doc: { bytes: Uint8Array; filename: string; mime: string }): Promise<SendResult>;
   // REPLY SHAPE (channel_shape.ts): one link as its own message with the platform's link preview card (title, image).
-  sendLink?(address: string, url: string): Promise<SendResult>;
+  sendLink?(address: string, url: string, opts?: { replyTo?: string | null; buttons?: Button[][] }): Promise<SendResult>;
+  // TELEGRAM BRIEF (brief P1.1): a reaction on the person's own message (Telegram setMessageReaction), the "on it" for slow
+  // work. true: the platform took it. Absent: the platform (or this integration) has none, and one short line is said instead.
+  react?(address: string, messageId: string, emoji: string): Promise<boolean>;
   // V1 TEXTING VOICE (channel_voice.ts): the platform's typing indicator while Trainee works, shown once (the platform
   // clears it after a few seconds or when the reply arrives), for the message `inboundId` the person just sent; where the
   // platform ties it to that message (WhatsApp), showing it also marks the message read. true: the platform took it.

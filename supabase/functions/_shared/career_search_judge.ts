@@ -21,6 +21,7 @@
 // Nothing here sends, applies or writes anywhere but the person's own cache and standing instructions.
 import { searchPostings, type SearchHit } from "./career_search.ts";
 import { searchWords, wordStem } from "./career_ingest.ts";
+import { payFrom } from "./posting_pay.ts";
 import { hasLimits, type Limits, limitsLine, outsideLimits, REASON_WORDS, type Reason, searchTextOf, statedBand, statedPay } from "./posting_constraints.ts";
 import { CareerPool } from "./career_pool.js";
 import { CareerProfile } from "./router_core.career.js";
@@ -264,7 +265,7 @@ export async function judgePostings(o: {
 
 // ------------------------------------------------------------------------------------------------ the sources
 // A posting as searchPostings reads it, with where it came from.
-export interface SourcePosting { job_id: string; company: string; title: string; location: string; url: string; description: string; first_seen_at: string | null; closed_at?: string | null; fetched_on?: string | null; pay?: string | null }
+export interface SourcePosting { job_id: string; company: string; title: string; location: string; url: string; description: string; first_seen_at: string | null; closed_at?: string | null; fetched_on?: string | null; pay?: string | null; posted_at?: string | null; last_seen_at?: string | null }
 export interface SearchSources {
   // Open career_postings rows matching the words (the live board), newest first.
   live(words: string[], limit: number): Promise<SourcePosting[]>;
@@ -319,10 +320,19 @@ export function supabaseSearchSources(admin: any, o: { window?: any[]; jobs?: an
 export interface ShortlistEntry { id: string | null; title: string; company: string | null; location: string | null; url: string | null }
 // limits: the level, pay floor, employer, season and sponsorship the person stated (posting_constraints.ts); remoteOnly: they
 // asked for remote alone, not "this city or remote".
-export interface SearchAsk { role: string; place: string | null; remote: boolean; remoteOnly?: boolean; limits?: Limits }
+// newSince (TELEGRAM BRIEF, brief P7 target 3): only postings first seen at or after this time ("any new roles today").
+// fromGoal: the role and place were read from the person's recorded goal, not from this message.
+export interface SearchAsk { role: string; place: string | null; remote: boolean; remoteOnly?: boolean; limits?: Limits; newSince?: number | null; newFrom?: "last list" | "yesterday"; fromGoal?: boolean }
+// TELEGRAM BRIEF (brief P7.1-P7.3, P7.6, P5.3, P5.4): the same result as a texting channel says it. reply: at most three
+// sentences (a summary line with its caveat and checked-at stamp; one role in plain text with its link after its line; or a
+// dead end in one line with the nearest real alternative and an ask). roles: what the File (the list page) shows, each with
+// its working link; asFile: a set, so the roles go as one File link after the reply, never one card each.
+export interface BriefRole { job_id: string; title: string; company: string; location: string; url: string; pay: string | null; posted_at: string | null; first_seen_at: string | null; last_seen_at: string | null }
+export interface SearchBrief { reply: string; roles: BriefRole[]; asFile: boolean }
 export interface SearchJudgeResult {
   reply: string; status: "ranked" | "judged" | "none"; source: "live" | "snapshot" | "none";
   shortlist: ShortlistEntry[]; accounting: Accounting | null; modelCalled: boolean;
+  brief?: SearchBrief;
 }
 export const SEARCH_INTENTS = new Set(["career_discovery", "career_internship_discovery"]);
 // The ask, as the router parsed it this turn (discovery.lastParams, written by its handleDiscovery for this very text).
@@ -335,10 +345,13 @@ function enrich(message: string, base: SearchAsk | null): SearchAsk | null {
   const st = searchTextOf(message);
   const role = st.role || base?.role || "";
   if (!searchWords(role).length) return null;
-  const orRemote = /\b(?:or|and|\/)\s*remote\b|\bremote\s*(?:or|and|\/)\s|\bhybrid\b/i.test(message);
+  // TELEGRAM BRIEF: "remote ok" / "remote is fine" / "remote too" is this place or remote, never remote alone.
+  const orRemote = /\b(?:or|and|\/)\s*remote\b|\bremote\s*(?:or|and|\/)\s|\bhybrid\b|\bremote\s+(?:is\s+)?(?:ok|okay|fine|works|too|also)\b/i.test(message);
   // The router's own spelling of the place ("Chicago") is kept when the message's reading is the same place in lower case.
   const place = base?.place && st.place && base.place.toLowerCase() === st.place.toLowerCase() ? base.place : st.place ?? base?.place ?? null, remote = st.remote || !!base?.remote;
-  return { role, place, remote, remoteOnly: remote && !orRemote, limits: st.limits };
+  // TELEGRAM BRIEF: remote alone only when this message asks for remote without a place or "or remote"; a remote the router
+  // carried over from an earlier message ("remote ok") widens the place, it never narrows a search to remote alone.
+  return { role, place, remote, remoteOnly: st.remote && !orRemote && !(st.place && /\bremote\s+(?:is\s+)?(?:ok|okay|fine|works|too|also)\b/i.test(message)), limits: st.limits };
 }
 export function askFromRouter(message: string, routerOut: { intent?: string } | null, discovery: any): SearchAsk | null {
   if (!routerOut || !SEARCH_INTENTS.has(String(routerOut.intent ?? ""))) return null;
@@ -408,7 +421,8 @@ export async function searchJudgeTurn(o: {
   // that matched the role and place but nothing after the limits.
   let held = holdToLimits([], ask.limits), heldAny: ReturnType<typeof holdToLimits> | null = null;
   try {
-    const liveAll = (await o.sources.live([...searchWords(ask.role), ...placeWords], 300)).filter((p) => !p.closed_at && inPlace(p, ask));
+    // TELEGRAM BRIEF: "Chicago, remote ok": the place's words are not required of a remote posting (inPlace keeps either).
+    const liveAll = (await o.sources.live([...searchWords(ask.role), ...(ask.remote && !ask.remoteOnly ? [] : placeWords)], 300)).filter((p) => !p.closed_at && inPlace(p, ask));
     const h = holdToLimits(liveAll, ask.limits);
     if (liveAll.length && !h.kept.length) heldAny = h;
     if (h.kept.length) { source = "live"; pool = h.kept; held = h; }
@@ -424,6 +438,11 @@ export async function searchJudgeTurn(o: {
     } catch (e) { snapshotFailed = true; console.error("career search: snapshot", (e as Error)?.message ?? e); }
   }
   if (!liveNote && source !== "live") liveNote = liveRows ? "the live board has no match for it" : "the live board has no postings yet";
+  // TELEGRAM BRIEF: "any new roles": only what was first seen since the cut; the snapshot is never new.
+  if (typeof ask.newSince === "number" && Number.isFinite(ask.newSince)) {
+    pool = source === "live" ? pool.filter((p) => Date.parse(String(p.first_seen_at ?? "")) >= ask.newSince!) : [];
+    if (!pool.length) { source = "none"; liveRows = true; }
+  }
   // 2. The pre-filter: role first, then goal and fit to confirmed facts, then newest.
   const found = searchPostings(pool, roleWords.join(" "), o.profile, 50);
   const hits: SearchHit[] = found.postings;
@@ -432,7 +451,8 @@ export async function searchJudgeTurn(o: {
     if (snapshotFailed || (source === "none" && liveRows === null)) return null;
     const leftOut = heldAny && droppedLine(heldAny.dropped) ? ` ${Object.values(heldAny.dropped).reduce((a, b) => a! + b!, 0)} matched the role and place but were left out: ${droppedLine(heldAny.dropped)}.` : "";
     const reply = `I found no posting for ${asked(ask)}: ${liveNote}, and the saved snapshot has none either.${leftOut} Nothing was invented to fill the list. Widen the role or the place and I'll search again.`;
-    return { reply, status: "none", source: "none", shortlist: [], accounting: null, modelCalled: false };
+    const brief = await deadEnd({ ask, now: o.now, sources: o.sources, heldAny });
+    return { reply, status: "none", source: "none", shortlist: [], accounting: null, modelCalled: false, brief };
   }
   const byId = new Map(pool.map((p) => [p.job_id, p]));
   const freshness = source === "live"
@@ -493,13 +513,24 @@ export async function searchJudgeTurn(o: {
   if (more > 0) lines.push(`${more} more ${more === 1 ? "is" : "are"} not shown.`);
   lines.push(listed.length ? `Say "apply to these" to queue the ${listed.length === 1 ? "one" : listed.length} listed, or name one to tailor your resume for.` : "Widen the role or the place and I'll search again.");
   const shortlist = listed.map((r) => ({ id: r.h.job_id, title: r.h.title, company: r.h.company || null, location: where(r.h) || null, url: r.h.url || null }));
-  return { reply: lines.join("\n"), status: account ? "judged" : "ranked", source, shortlist, accounting: account, modelCalled };
+  const roles: BriefRole[] = listed.filter((r) => /^https:\/\//.test(String(r.h.url ?? ""))).map((r) => {
+    const p = byId.get(r.h.job_id);
+    return { job_id: r.h.job_id, title: r.h.title, company: r.h.company || "", location: where(r.h), url: r.h.url, pay: p?.pay ?? payFrom(p?.description) ?? null,
+      posted_at: p?.posted_at ?? null, first_seen_at: p?.first_seen_at ?? null, last_seen_at: p?.last_seen_at ?? null };
+  });
+  const brief = source === "live" ? liveBrief({ ask, roles, total: found.total, now: o.now })
+    : snapshotBrief({ ask, count: found.total, fetched: pool.map((p) => String(p.fetched_on ?? "")).filter(Boolean).sort().at(-1) ?? null, now: o.now });
+  return { reply: lines.join("\n"), status: account ? "judged" : "ranked", source, shortlist, accounting: account, modelCalled, brief };
 }
 
 // The ask for this turn: the router's search with the message's own parameters added; a search the router ran but named no
 // role for ("SWE internship Chicago summer 2027"); or a search the router did not run (searchAskFromMessage). `append`: the
 // router's own reply stays and the search follows it.
-export function askFor(message: string, routerOut: { intent?: string; resultStatus?: string } | null, discovery: any): { ask: SearchAsk; append: boolean } | null {
+export function askFor(message: string, routerOut: { intent?: string; resultStatus?: string } | null, discovery: any, goal?: string | null, now?: number, lastListAt?: number | null): { ask: SearchAsk; append: boolean } | null {
+  // TELEGRAM BRIEF (brief P7.3): "show me real job postings that match my goal, with the links" names no role of its own; it is
+  // a search for the recorded goal, never a goal to record again or a search for the words "real postings match goal links".
+  const g = goalAskFor(message, goal ?? null, now ?? Date.now(), lastListAt ?? null);
+  if (g) return { ask: g, append: false };
   const router = askFromRouter(message, routerOut, discovery);
   if (router) return { ask: enrich(message, router) ?? router, append: false };
   const p = discovery?.lastParams;
@@ -508,4 +539,107 @@ export function askFor(message: string, routerOut: { intent?: string; resultStat
     return ask ? { ask, append: false } : null;
   }
   return searchAskFromMessage(message, routerOut);
+}
+
+// ------------------------------------------------------------------------------------------------ TELEGRAM BRIEF
+// A request for roles that names no role of its own ("show me jobs that match my goal", "any new roles today", "send me the
+// links to postings for my goal"): the ask is the person's recorded goal, in their words, with anything this message states
+// (a place, remote, pay, a season) laid over it. Null when the message names a role, is a question about something else, or
+// no goal is on record (the router's own answer stands: it asks for one).
+const ROLE_REQUEST = /\b(?:show|find|get|send|give|list|pull up|search|look(?:ing)? for|any|are there|got)\b[^?!]{0,80}\b(?:jobs?|roles?|postings?|openings?|internships?|positions?|listings?)\b/i;
+const NEW_ASK = /\bnew\b[^?!]{0,40}\b(?:jobs?|roles?|postings?|openings?|internships?|positions?)\b|\b(?:jobs?|roles?|postings?|openings?)\b[^?!]{0,30}\b(?:since|today|this morning)\b/i;
+const GOAL_FILLER = new Set(["real", "live", "actual", "current", "open", "new", "fresh", "today", "todays", "this", "week", "morning", "since", "yesterday", "postings", "posting", "listings", "listing",
+  "links", "link", "url", "urls", "match", "matches", "matching", "goal", "goals", "with", "the", "that", "which", "fit", "fits", "these", "those", "please", "send", "give", "list", "pull", "up", "got", "there", "ones", "one", "show", "find", "get", "search", "look", "looking"]);
+export function goalAskFor(message: string, goal: string | null, now: number, lastListAt: number | null): SearchAsk | null {
+  const text = String(message ?? "").trim();
+  if (!goal || !text || text.length > 240 || !ROLE_REQUEST.test(text)) return null;
+  const st = searchTextOf(text);
+  const own = searchWords(st.role).filter((w) => !GOAL_FILLER.has(w) && !/^\d+$/.test(w));
+  if (own.length) return null; // the message names its own role: the ordinary search reads it
+  const base = enrich(goal, null);
+  if (!base) return null;
+  const limits = { ...(base.limits ?? {}), ...Object.fromEntries(Object.entries(st.limits ?? {}).filter(([, v]) => v !== null && v !== undefined && v !== false)) } as Limits;
+  const isNew = NEW_ASK.test(text);
+  // "new" means since the last list this thread was sent, else since this time yesterday.
+  const since = isNew ? (lastListAt && lastListAt < now ? lastListAt : now - DAY) : null;
+  return { ...base, place: st.place ?? base.place, remote: st.remote || base.remote, limits, newSince: since,
+    ...(isNew ? { newFrom: lastListAt && lastListAt < now ? "last list" as const : "yesterday" as const } : {}), fromGoal: true };
+}
+
+const CT = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const DAY_CT = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric" });
+export const stampAt = (ms: number) => `${CT.format(new Date(ms))} CT`;
+const dayOf = (iso: string | null) => { const t = Date.parse(String(iso ?? "")); return Number.isFinite(t) ? DAY_CT.format(new Date(t)) : null; };
+const n = (k: number, one: string, many = `${one}s`) => `${k} ${k === 1 ? one : many}`;
+const goalWords = (ask: SearchAsk) => ask.fromGoal ? `your goal, ${asked(ask)}` : asked(ask);
+// The checked-at stamp: when the board last saw these postings open (the oldest of them), else when this search ran.
+const checkedOf = (roles: BriefRole[], now: number) => {
+  const seen = roles.map((r) => Date.parse(String(r.last_seen_at ?? ""))).filter(Number.isFinite);
+  return seen.length ? Math.min(...seen) : now;
+};
+export function liveBrief(o: { ask: SearchAsk; roles: BriefRole[]; total: number; now: number }): SearchBrief {
+  const { ask, roles } = o;
+  const stamp = stampAt(checkedOf(roles, o.now));
+  if (roles.length === 1) {
+    // brief P7.1: one role is plain text: company, title, pay or location, posted date, checked-at, and its link after the line.
+    const r = roles[0], posted = dayOf(r.posted_at), seen = dayOf(r.first_seen_at);
+    const facts = [r.location || "location not listed", r.pay ? `pay ${r.pay}` : "pay not listed", posted ? `posted ${posted}` : seen ? `first seen ${seen} (posting date not listed)` : "posting date not listed"];
+    return { reply: `One live role matches ${goalWords(ask)}: ${r.title} at ${r.company || "an employer the posting does not name"} — ${facts.join(", ")}. Checked live ${stamp}.\n${r.url}`, roles: [], asFile: false };
+  }
+  // brief P7.2: a set is a File; chat carries exactly one summary line (what was found, with the caveat) and the link after it.
+  const week = roles.filter((r) => { const t = Date.parse(String(r.posted_at ?? r.first_seen_at ?? "")); return Number.isFinite(t) && o.now - t <= 7 * DAY; }).length;
+  const more = o.total > roles.length ? ` (the closest ${roles.length} of ${o.total})` : "";
+  const fresh = ask.newSince ? "new since your last list" : `${week} new this week`;
+  return { reply: `Found ${roles.length} live roles for ${goalWords(ask)}${more}: ${fresh}, checked ${stamp}. Each has its link, location and posted date, and pay where the posting lists it.`, roles, asFile: true };
+}
+// brief P7 "nothing verifiably live": said so, with the nearest real alternative (the snapshot, said as such) and an ask.
+export function snapshotBrief(o: { ask: SearchAsk; count: number; fetched: string | null; now: number }): SearchBrief {
+  return { reply: `Nothing verifiably live matches ${goalWords(o.ask)} right now (checked ${stampAt(o.now)}). The nearest real alternative is ${n(o.count, "posting")} in my saved snapshot of job boards${o.fetched ? ` from ${o.fetched}` : ""}, which may have closed since. Want me to send those?`, roles: [], asFile: false };
+}
+// brief P7.6 / P7.7 / P7 target 3: a dead end is one line, the widest change that would actually help (counted on the live
+// board, never guessed) and an ask; nothing about the person's filters changes without their yes.
+async function deadEnd(o: { ask: SearchAsk; now: number; sources: SearchSources; heldAny: ReturnType<typeof holdToLimits> | null }): Promise<SearchBrief> {
+  const { ask } = o, stamp = stampAt(o.now);
+  const head = ask.newSince
+    ? `Nothing new matching ${goalWords(ask)} since ${ask.newFrom === "last list" ? "your last list" : "yesterday"} (checked ${stamp}).`
+    : `Nothing live matches ${goalWords(ask)} right now (checked ${stamp}).`;
+  const options: { words: string; count: number }[] = [];
+  let premise = "";
+  const since = ask.newSince ?? null;
+  const fresh = (p: SourcePosting) => !p.closed_at && (since === null || Date.parse(String(p.first_seen_at ?? "")) >= since);
+  try {
+    // Every live posting for the role, wherever it is; then which change to the person's own filters would let some through.
+    const wide = (await o.sources.live(searchWords(ask.role), 300)).filter(fresh);
+    const roleHits = new Set(searchPostings(wide, roleWordsOf(ask.role).join(" "), null, 300).postings.map((h) => h.job_id));
+    const byRole = wide.filter((p) => roleHits.has(p.job_id));
+    if (ask.limits?.pay) {
+      const noPay = { ...ask.limits, pay: null } as Limits;
+      const under = holdToLimits(byRole.filter((p) => inPlace(p, ask)), noPay).kept;
+      const k = under.length;
+      if (k) options.push({ words: `lowering the pay floor (${n(k, "more role")})`, count: k });
+      // brief P1.4 / P5.3: a pay expectation the listed ranges do not reach is corrected with the numbers, first.
+      const hourly = ask.limits.pay.period === "hour";
+      const tops = under.map((p) => statedPay(p)).map((x) => hourly ? x?.hourMax : x?.yearMax).filter((v): v is number => typeof v === "number" && v > 0);
+      if (tops.length) {
+        const unit = hourly ? "/hr" : "/yr", money = (v: number) => `$${v.toLocaleString("en-US")}${unit}`;
+        premise = `the ${n(k, "match", "matches")} list pay up to ${money(Math.max(...tops))}, under your ${money(ask.limits.pay.amount)} floor${tops.length < k ? ` (${k - tops.length} list no pay)` : ""}`;
+      }
+    }
+    if (ask.place || ask.remoteOnly) {
+      const k = holdToLimits(byRole, ask.limits).kept.filter((p) => !inPlace(p, ask)).length;
+      if (k) options.push({ words: `widening the location beyond ${ask.place ?? "remote"} (${n(k, "more role")})`, count: k });
+    }
+  } catch (e) { console.error("career search: the dead end's alternatives", (e as Error)?.message ?? e); }
+  if (!options.length && o.heldAny) {
+    const k = Object.values(o.heldAny.dropped).reduce((a, b) => a! + b!, 0) ?? 0;
+    if (k) options.push({ words: `dropping ${droppedLine(o.heldAny.dropped)} from your filters`, count: k });
+  }
+  options.sort((a, b) => b.count - a.count);
+  if (!options.length) {
+    return { reply: `${head} No change to your filters finds more on the live board today, so the closest thing I can do is look again tomorrow. Want me to?`, roles: [], asFile: false };
+  }
+  const best = options.slice(0, 2).map((x) => x.words).join(" or ");
+  // The numbers ride the first sentence, so the whole answer stays three sentences, one bubble.
+  const first = premise ? `${head.replace(/\.$/, "")}: ${premise}.` : head;
+  return { reply: `${first} Widest change that would help: ${best}. Want me to?`, roles: [], asFile: false };
 }

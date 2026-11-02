@@ -75,6 +75,7 @@ function placeOf(t: string): string | null {
 }
 const CUE = /^(?:(?:please|hey|hi|ok|okay|so|and|also|can you|could you|can u|would you)\s+)*(?:(?:find|show|get|give|search(?: for)?|look(?:ing)? for|help me find|pull up|list)(?:\s+me)?|i(?:'m| am)? ?(?:looking for|searching for|seeking|want|need|would like|'d like)|i(?:'d| would) like|my goal is|any|are there any|do you have)\s*/i;
 const EXPAND: Record<string, string> = { swe: "software engineer", sde: "software engineer", pm: "product manager", ml: "machine learning", ds: "data science" };
+const BRIEF_NOISE = new Set(["ok", "okay", "fine", "real", "actual", "postings", "posting", "listings", "links", "link"]);
 const ROLE_NOISE = new Set(["me", "some", "any", "a", "an", "the", "jobs", "job", "roles", "role", "positions", "position", "openings", "opening", "opportunities", "opportunity", "work", "to", "i", "im", "am", "my", "of", "for", "paying", "pay", "pays", "salary", "make", "making", "earn", "at", "least", "over", "above", "under", "minimum", "min", "more", "or", "and", "in", "near", "around", "with", "no", "not", "non", "need", "needed", "visa", "sponsorship", "sponsor", "remote", "please", "per", "an", "hr", "hour", "hourly", "year", "yearly", "starting", "start", "season", "that", "are", "is", "will", "be", "who", "which", "interested", "good", "fit", "fits", "career", "new", "level", "grad", "graduate", "recent", "entry", "early", "junior", "jr", "senior", "sr", "intern", "interns", "internship", "internships", "coop", "co-op", "wage", "hiring"]);
 
 // What a search message states: the role (level, pay, place, term and sponsorship words taken out), the place, remote,
@@ -96,7 +97,9 @@ export function searchTextOf(message: string): SearchText {
     .replace(/\b(?:at|for|with)\s+[a-z0-9&.]+(?:\s+[a-z0-9&.]+){0,2}?(?=\s+in\b|[,.;?]|$)/g, (m) => limits.company && m.toLowerCase().includes(limits.company.toLowerCase()) ? " " : m);
   if (place) t = t.replace(new RegExp(`\\b(?:in|near|around|based in|located in)\\s+${place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"), " ").replace(new RegExp(`\\b${place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"), " ");
   for (const [k, v] of Object.entries(ALIAS)) if (v === place) t = t.replace(new RegExp(`\\b${k}\\b`, "g"), " ");
-  const words = t.split(/[^a-z0-9+#-]+/).filter((w) => w && !ROLE_NOISE.has(w) && !/^\d+$/.test(w)).map((w) => EXPAND[w] ?? w);
+  // TELEGRAM BRIEF: "remote ok", "$30/hr+" and "real job postings ... with the links" leave no role words behind ("ok", a bare
+  // "+", "postings", "links" were searched as the role).
+  const words = t.split(/[^a-z0-9+#-]+/).filter((w) => w && !ROLE_NOISE.has(w) && !BRIEF_NOISE.has(w) && !/^\d+$/.test(w) && !/^[+#-]+$/.test(w)).map((w) => EXPAND[w] ?? w);
   return { role: [...new Set(words.join(" ").split(" "))].join(" ").trim(), place, remote, limits };
 }
 

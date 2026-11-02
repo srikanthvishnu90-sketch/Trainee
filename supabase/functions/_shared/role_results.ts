@@ -29,7 +29,7 @@ export async function resultsFile(o: {
   userId: string; now: number; what: What; floor: Floor | null; picked: Picked[]; store: JobStore;
   name?: string | null; source?: "live" | "snapshot" | null; read?: string | null;
   links: (userId: string, listId: string) => Promise<{ url: string | null }>;
-}): Promise<{ reply: string; listId: string; url: string; meets: number; unlisted: number; unchecked: number; below: number } | null> {
+}): Promise<{ reply: string; listId: string; url: string; meets: number; unlisted: number; unchecked: number; otherCurrency: number; noPeriod: number; below: number } | null> {
   if (!o.store.rememberListMeta) return null;
   const meets: Picked[] = [], unlisted: Picked[] = [], unchecked: Picked[] = [];
   let below = 0;
@@ -64,6 +64,9 @@ export async function resultsFile(o: {
   await o.store.rememberListMeta(o.userId, listId, meta);
   const { url } = await o.links(o.userId, listId);
   if (!url) return null;
-  const counts = { meets: Math.min(meets.length, ordered.length), unchecked: ordered.filter((p) => unchecked.includes(p)).length, unlisted: ordered.filter((p) => unlisted.includes(p)).length };
-  return { reply: resultsReply({ what: o.what, floor: o.floor, ...counts, url }), listId, url, below, ...counts };
+  // Shown but not compared, each for its own reason: pay in another currency, or a figure with no period.
+  const shownUnchecked = ordered.filter((p) => unchecked.includes(p));
+  const otherCurrency = shownUnchecked.filter((p) => pays.get(p.hit.job_id)?.currency !== "USD").length;
+  const counts = { meets: Math.min(meets.length, ordered.length), unchecked: shownUnchecked.length, otherCurrency, noPeriod: shownUnchecked.length - otherCurrency, unlisted: ordered.filter((p) => unlisted.includes(p)).length };
+  return { reply: resultsReply({ what: o.what, floor: o.floor, meets: counts.meets, unlisted: counts.unlisted, otherCurrency: counts.otherCurrency, noPeriod: counts.noPeriod, url }), listId, url, below, ...counts };
 }

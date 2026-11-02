@@ -55,9 +55,17 @@ Deno.test({
       console.log("NOT_RUN locally: no Playwright");
       return;
     }
-    if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (Chromium's sandbox)"); return; }
     const chrome = Deno.env.get("UPMORE_CHROMIUM_PATH");
-    const browser = await pw.chromium.launch({ headless: true, chromiumSandbox: true, ...(chrome ? { executablePath: chrome } : {}) });
+    if (chrome) { try { Deno.statSync(chrome); } catch { throw Error(`UPMORE_CHROMIUM_PATH is set but ${chrome} does not exist: the browser test cannot run`); } }
+    // As root outside CI (a dev box), Chromium's sandbox can't start: run without it rather than skip. CI runs it sandboxed.
+    const root = Deno.uid?.() === 0 && !CI;
+    let browser: any;
+    try {
+      browser = await pw.chromium.launch({ headless: true, ...(root ? { args: ["--no-sandbox"] } : { chromiumSandbox: true }), ...(chrome ? { executablePath: chrome } : {}) });
+    } catch (e) {
+      throw Error(`Chromium did not start, so the results page was not tested in a browser: ${(e as Error)?.message ?? e}`);
+    }
+    let steps = 0;
     try {
       for (const scheme of ["light", "dark"] as const) {
         const tok: Tokens = scheme === "light" ? LIGHT : DARK;
@@ -136,6 +144,7 @@ Deno.test({
             await pg.waitForSelector("text=All 2 approved and queued");
             eq(w.queue.map((q) => q.job_id).sort(), ["greenhouse:acme:1", "greenhouse:initech:3", "lever:globex:2"]);
             eq(w.queue.find((q) => q.job_id === "lever:globex:2")!.payload, w.preps.get("lever:globex:2")!.payload);
+            steps++;
           } finally {
             await ctx.close();
             ac.abort();
@@ -143,6 +152,8 @@ Deno.test({
           }
         });
       }
+      // Both schemes really ran to the end (a silent skip is a failure, not a pass).
+      eq(steps, 2, "light and dark both ran the whole flow");
     } finally {
       await browser.close();
     }

@@ -59,7 +59,7 @@ dl.facts dt{color:var(--mute)}dl.facts dd{margin:0;overflow-wrap:anywhere}dd.pai
 .card .open a{display:inline-flex;align-items:center;min-height:44px;color:var(--link);font-size:16px}
 .acts{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-top:14px}
 .pick{display:inline-flex;align-items:center;gap:10px;min-height:44px;font-size:16px;cursor:pointer}.pick input{width:22px;height:22px;accent-color:var(--accent)}
-.card form.go{margin:0}.card .ghost.go{min-width:120px;min-height:48px}
+.card form.go{margin:0}.card .ghost.go{min-width:120px;min-height:48px;text-decoration:none}
 .card .chip{min-height:44px}.card .note{margin:10px 0 0;font-size:16px;color:var(--ink)}
 .empty{margin:18px 0;padding:18px;border-radius:14px;background:var(--panel)}
 .review .card dl.facts{grid-template-columns:minmax(0,40%) 1fr}
@@ -89,7 +89,7 @@ function card(r: ResultRow, f: ResultsFeed): string {
   const label = `${esc(j.title)} at ${esc(j.company)}`;
   let acts = "";
   if (r.status) acts = chip(r.status);
-  else if (r.byHand) acts = link ? `<a class="apply" href="${esc(link)}" rel="noopener noreferrer">Apply there</a>` : "";
+  else if (r.byHand) acts = link ? `<a class="ghost go" href="${esc(link)}" rel="noopener noreferrer">Apply there</a>` : ""; // secondary: one plum action per page
   else if (!r.blocked) {
     const tag = r.tag ?? "none";
     acts = `<label class="pick"><input type="checkbox" form="sel" name="pick" value="${esc(`${r.ref}:${tag}`)}" aria-label="Select ${label}"> Select</label>`

@@ -16,15 +16,15 @@ export const MAX_SENDS = 3; // per session
 export interface Scope { items: { ref: string; tag: string; label: string }[] }
 export type CodeCheck = "ok" | "wrong" | "expired" | "locked" | "none" | "used" | "scope";
 export interface CodeRow { user_id: string; session: string; scope: string; hash: string; expires_at: number; sends: number; used_at: number | null }
-export interface Fails { since: number; count: number }
 export interface CodeStore {
   get(userId: string, session: string): Promise<CodeRow | null>;
   put(row: CodeRow): Promise<void>;
   // Once only: true for the first caller for this (account, code row), the way an insert on a unique key is.
   use(userId: string, session: string, hash: string, at: number): Promise<boolean>;
-  // Wrong codes for the person in the current window (every session and code counts toward it).
-  fails(userId: string): Promise<Fails | null>;
-  setFails(userId: string, f: Fails): Promise<void>;
+  // Wrong codes for the person, counted atomically: each wrong try is its own row (never a read-then-write counter, which parallel
+  // requests overwrite), and the count is of the rows in the window. addFail returns the count including the one it just added.
+  addFail(userId: string, at: number): Promise<number>;
+  failCount(userId: string, since: number): Promise<number>;
 }
 // Into the person's own chat thread. false: it could not be queued.
 export type ChatSend = (userId: string, o: { key: string; text: string; at: number }) => Promise<boolean>;
@@ -47,13 +47,8 @@ export interface ApprovalCodes {
 }
 export function approvalCodes(store: CodeStore, chat: ChatSend, o: { code?: () => string } = {}): ApprovalCodes {
   const make = o.code ?? newCode;
-  const lockedNow = async (userId: string, now: number) => { const f = await store.fails(userId); return !!f && now - f.since < LOCK_WINDOW_MS && f.count >= MAX_TRIES; };
-  const fail = async (userId: string, now: number): Promise<CodeCheck> => {
-    const f = await store.fails(userId);
-    const next = f && now - f.since < LOCK_WINDOW_MS ? { since: f.since, count: f.count + 1 } : { since: now, count: 1 };
-    await store.setFails(userId, next);
-    return next.count >= MAX_TRIES ? "locked" : "wrong";
-  };
+  const lockedNow = async (userId: string, now: number) => (await store.failCount(userId, now - LOCK_WINDOW_MS)) >= MAX_TRIES;
+  const fail = async (userId: string, now: number): Promise<CodeCheck> => (await store.addFail(userId, now)) >= MAX_TRIES ? "locked" : "wrong";
   return {
     async send(userId, session, now, scope) {
       if (!scope.items.length) return { ok: false, why: "not_sent" };
@@ -84,10 +79,12 @@ export function approvalCodes(store: CodeStore, chat: ChatSend, o: { code?: () =
 }
 
 export function memoryCodeStore(): CodeStore & { rows(): CodeRow[] } {
-  const m = new Map<string, CodeRow>(), used = new Set<string>(), fails = new Map<string, Fails>();
+  const m = new Map<string, CodeRow>(), used = new Set<string>(), fails: { u: string; at: number }[] = [];
+  // No await between the push and the count: each call sees every earlier wrong try, as the database's insert-then-count does.
+  const count = (u: string, since: number) => fails.filter((f) => f.u === u && f.at >= since).length;
   return {
-    async fails(u) { const f = fails.get(u); return f ? { ...f } : null; },
-    async setFails(u, f) { fails.set(u, { ...f }); },
+    async addFail(u, at) { fails.push({ u, at }); return count(u, at - LOCK_WINDOW_MS); },
+    async failCount(u, since) { return count(u, since); },
     rows: () => [...m.values()].map((r) => ({ ...r })),
     async get(u, s) { const r = m.get(`${u}|${s}`); return r ? { ...r } : null; },
     async put(r) { m.set(`${r.user_id}|${r.session}`, { ...r }); },
@@ -108,11 +105,16 @@ export function supabaseCodeStore(admin: any): CodeStore {
       return v && v.user_id === u && v.session === s ? v as CodeRow : null;
     },
     async put(r) { must(await admin.from("career_watch_kv").upsert({ user_id: r.user_id, key: key(r.session), value: r, updated_at: new Date().toISOString() }, { onConflict: "user_id,key" }), "save the approval code"); },
-    async fails(u) {
-      const v = must(await admin.from("career_watch_kv").select("value").eq("user_id", u).eq("key", "tf:approve-fails").maybeSingle(), "read the wrong-code count")?.value;
-      return v && Number.isFinite(v.since) && Number.isFinite(v.count) ? { since: v.since, count: v.count } : null;
+    // One row per wrong try (a unique key each), then a count of the person's rows in the window: concurrent wrong codes each
+    // insert their own row, so none is lost, and each count includes every insert committed before it.
+    async addFail(u, at) {
+      must(await admin.from("career_watch_kv").insert({ user_id: u, key: `tf:approve-fail:${at}:${crypto.randomUUID()}`, value: { at }, updated_at: new Date(at).toISOString() }), "count the wrong code");
+      return await this.failCount(u, at - LOCK_WINDOW_MS);
     },
-    async setFails(u, f) { must(await admin.from("career_watch_kv").upsert({ user_id: u, key: "tf:approve-fails", value: f, updated_at: new Date().toISOString() }, { onConflict: "user_id,key" }), "count the wrong code"); },
+    async failCount(u, since) {
+      const rows = must(await admin.from("career_watch_kv").select("key").eq("user_id", u).like("key", "tf:approve-fail:%").gte("updated_at", new Date(since).toISOString()).limit(1000), "read the wrong-code count");
+      return Array.isArray(rows) ? rows.length : 0;
+    },
     async use(u, _s, h, at) {
       const r = await admin.from("career_watch_kv").insert({ user_id: u, key: `tf:approve-used:${h.slice(0, 64)}`, value: { at: new Date(at).toISOString() }, updated_at: new Date(at).toISOString() });
       if (!r.error) return true;

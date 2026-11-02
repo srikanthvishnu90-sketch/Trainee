@@ -56,7 +56,7 @@ Deno.test("reply: one or two plain sentences (found, how many meet the pay, the 
   assert(!MARKDOWN.test(r), "no markdown on a texting channel");
   assert((lines[0].match(/[.:](\s|$)/g) ?? []).length <= 2, "two sentences at most before the link");
   eq(resultsReply({ what, floor, meets: 0, unlisted: 3, url }).split("\n")[0], "I found 3 frontend internships, but none of them list pay, so I couldn't check them against $30/hr. Here they are by fit, with Apply on each:");
-  eq(resultsReply({ what, floor, meets: 1, unlisted: 0, url }).split("\n")[0], "I found 1 frontend internship that lists pay of $30/hr or more. Here they are by fit, with Apply on each:");
+  eq(resultsReply({ what, floor, meets: 1, unlisted: 0, url }).split("\n")[0], "I found 1 frontend internship that lists pay of $30/hr or more. Here it is, with Apply on it:");
 });
 
 // ================================================================== the list and the page

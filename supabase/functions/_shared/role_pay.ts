@@ -52,13 +52,22 @@ export function parsePay(stated: unknown, description?: unknown): Pay | null {
     if (!currency) continue; // a figure with no currency is not pay
     const at = m.index ?? 0;
     let lo = Number(n1.replace(/,/g, "")) * (k1 ? 1000 : 1);
-    const hasHi = n2 !== undefined;
+    // A range's upper figure must be pay too. One with no currency and no k counts only when it reads as the same kind of figure:
+    // not followed by a quantity word ("$25 - 40 hours per week" is $25 and a working week, not $25-40/hr), and of a size a range
+    // runs to (at least the lower figure, at most ten times it). "$35-40/hr", "CA$60,000-75,000" and "$90-120k" stay ranges.
+    let span = whole;
+    let hasHi = n2 !== undefined;
+    if (hasHi && !pre2 && !k2 && !suf) {
+      const after2 = text.slice(at + whole.length, at + whole.length + 20), up = Number(n2.replace(/,/g, ""));
+      const quantity = /^\s*(?:hours?|hrs?|weeks?|wks?|days?|months?|years?|yrs?|%|percent|people|employees|positions?|openings?)\b/i.test(after2);
+      if (quantity || !(up >= lo && up <= lo * 10)) { hasHi = false; span = `${pre1 ?? ""}${n1}${k1 ?? ""}`; }
+    }
     let hi = hasHi ? Number(n2.replace(/,/g, "")) * (k2 ? 1000 : 1) : lo;
     // "$90-120k": inside one range, the k on the upper figure belongs to the lower one too. Nowhere else does a k travel.
     if (hasHi && k2 && !k1 && lo < 1000 && hi >= 1000) lo *= 1000;
     if (!(lo > 0) || !(hi > 0)) continue;
     if (lo > hi) [lo, hi] = [hi, lo];
-    const after = text.slice(at + whole.length, at + whole.length + 30), before = text.slice(Math.max(0, at - 40), at);
+    const after = text.slice(at + span.length, at + span.length + 30), before = text.slice(Math.max(0, at - 40), at);
     const a = AFTER.exec(after), b = BEFORE.exec(before);
     const period: Period | null = a ? periodWord(a[1]) : b ? periodWord(b[1].replace(/^per /i, "")) : hi >= 10000 ? "year" : null;
     const up_to = !hasHi && /\bup to\s*$/i.test(before);
@@ -106,19 +115,33 @@ export const floorText = (f: Floor) => f.period === "hour" ? `$${money(f.amount)
 // sentences that answer on their own, then the link alone on its own line, introduced by the sentence before it.
 export const TEXTING = new Set(["sms", "imessage", "whatsapp"]);
 export interface What { one: string; many: string }
-export function resultsReply(o: { what: What; floor: Floor | null; meets: number; unlisted: number; unchecked?: number; url: string }): string {
-  const total = o.meets + o.unlisted + (o.unchecked ?? 0);
+// Counts: meets (listed pay reaches the floor), unlisted (no pay), otherCurrency, noPeriod (each shown, never compared), and
+// unchecked (either of the last two, when the caller can't tell which). Every role found is counted, each with its true reason.
+export function resultsReply(o: { what: What; floor: Floor | null; meets: number; unlisted: number; otherCurrency?: number; noPeriod?: number; unchecked?: number; url: string }): string {
+  const oc = o.otherCurrency ?? 0, np = o.noPeriod ?? 0, un = o.unchecked ?? 0;
+  const total = o.meets + o.unlisted + oc + np + un;
   const n = (k: number) => `${k} ${k === 1 ? o.what.one : o.what.many}`;
+  const tail = total === 1 ? `Here it is, with Apply on it:\n${o.url}` : `Here they are by fit, with Apply on each:\n${o.url}`;
+  if (!o.floor) return `I found ${n(total)}. ${tail}`;
+  const fl = floorText(o.floor);
+  const reasons = ([[o.unlisted, "doesn't list pay", "don't list pay"], [oc, "lists pay in another currency", "list pay in another currency"],
+    [np, "lists pay without saying per hour or per year", "list pay without saying per hour or per year"],
+    [un, "lists pay in another currency or without a period", "list pay in another currency or without a period"]] as [number, string, string][]).filter(([k]) => k > 0);
+  const kinds = reasons.length, checkless = total - o.meets;
+  const lists = (k: number) => (k === 1 ? "lists" : "list");
   let first: string;
-  if (!o.floor) first = `I found ${n(total)}.`;
-  else if (o.meets && o.unlisted) first = `I found ${n(o.meets)} that ${o.meets === 1 ? "lists" : "list"} pay of ${floorText(o.floor)} or more, plus ${o.unlisted} that ${o.unlisted === 1 ? "doesn't" : "don't"} list pay, so I couldn't check ${o.unlisted === 1 ? "it" : "those"}.`;
-  else if (o.meets) first = `I found ${n(o.meets)} that ${o.meets === 1 ? "lists" : "list"} pay of ${floorText(o.floor)} or more.`;
-  else if (!o.unlisted && o.unchecked) {
-    const one = o.unchecked === 1;
-    return `I found ${n(o.unchecked)}, but ${one ? "it lists" : "they list"} pay in another currency or without a period, so I couldn't compare ${one ? "it" : "them"} with ${floorText(o.floor)}. Here ${one ? "it is" : "they are"} by fit, with Apply on each:\n${o.url}`;
-  } else first = `I found ${n(o.unlisted)}, but ${o.unlisted === 1 ? "it doesn't" : "none of them"} list pay, so I couldn't check ${o.unlisted === 1 ? "it" : "them"} against ${floorText(o.floor)}.`;
-  if (o.unchecked) first += ` ${o.unchecked} ${o.unchecked === 1 ? "lists" : "list"} pay in another currency.`;
-  return `${first} Here they are by fit, with Apply on each:\n${o.url}`;
+  if (!kinds) first = `I found ${n(o.meets)} that ${lists(o.meets)} pay of ${fl} or more.`;
+  else if (kinds === 1 && o.meets && o.unlisted) first = `I found ${n(o.meets)} that ${lists(o.meets)} pay of ${fl} or more, plus ${o.unlisted} that ${o.unlisted === 1 ? "doesn't" : "don't"} list pay, so I couldn't check ${o.unlisted === 1 ? "it" : "those"}.`;
+  else if (kinds === 1 && !o.meets && o.unlisted) first = `I found ${n(o.unlisted)}, but ${o.unlisted === 1 ? "it doesn't" : "none of them"} list pay, so I couldn't check ${o.unlisted === 1 ? "it" : "them"} against ${fl}.`;
+  else if (kinds === 1 && !o.meets) {
+    const one = checkless === 1, why = (one ? reasons[0][1] : reasons[0][2]).replace(/^lists? /, "");
+    first = `I found ${n(checkless)}, but ${one ? "it lists" : "they list"} ${why.replace(/^pay /, "pay ")}, so I couldn't compare ${one ? "it" : "them"} with ${fl}.`;
+  } else {
+    const parts = reasons.map(([k, one, many]) => `${k} ${k === 1 ? one : many}`);
+    const joined = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
+    first = `I found ${n(total)}: ${o.meets ? `${o.meets} ${lists(o.meets)} pay of ${fl} or more; ` : ""}${joined}, so I couldn't check ${checkless === 1 ? "that one" : `those ${checkless}`} against ${fl}.`;
+  }
+  return `${first} ${tail}`;
 }
 // The reply may carry nothing a texting app would show as formatting: no markdown emphasis, headings, bullets or link syntax.
 export const MARKDOWN = /\*\*|__|^\s*[#>*-]\s|\[[^\]]*\]\([^)]*\)|`/m;

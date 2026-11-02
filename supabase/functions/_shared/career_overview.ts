@@ -50,6 +50,17 @@ export function overviewText(s: Situation, now: number): string {
   const tracked = T.filter((t) => t.kind === "tracked");
   const L: string[] = [];
   L.push(`Status as of now: ${confirmed.length} confirmed by the employer, ${unconfirmed.length + unknown.length} sent but not confirmed, ${running.length} in progress, ${blocked.length + (questions.length ? 1 : 0)} waiting on you.`);
+  // PARITY R09: what has NOT happened, from the same records (never inferred beyond them): no employer confirmation, nothing
+  // sent yet, no interview coming up on record, emails sent with no reply on record. Said only when something is in flight.
+  const sentApps = confirmed.length + unconfirmed.length + unknown.length;
+  const anyApps = apps.length + T.filter((t) => t.kind === "apply_request").length;
+  const sentMail = T.filter((t) => t.kind === "outreach" && t.state === "sent").length;
+  const not: string[] = [];
+  if (anyApps && !sentApps) not.push("nothing has been sent to an employer yet");
+  if (sentApps && !confirmed.length) not.push("no employer has confirmed one");
+  if (sentApps && !interviews.length) not.push("no interview coming up on record");
+  if (sentMail) not.push(`${sentMail} email${sentMail === 1 ? "" : "s"} you sent ${sentMail === 1 ? "has" : "have"} no reply on record`);
+  if (not.length) L.push(`Not yet: ${not.join("; ")}.`);
   if (confirmed.length) L.push("Confirmed by the employer:", ...confirmed.map((t) => `- ${name(t)}${t.evidence.confirmation_id ? `, confirmation ${t.evidence.confirmation_id}` : ""}${t.since ? ` (${day(t.since)})` : ""}`));
   if (unconfirmed.length || unknown.length) L.push("Sent, not confirmed by the employer yet:", ...unconfirmed.map((t) => `- ${name(t)}: sent${t.since ? ` ${day(t.since)}` : ""}, no confirmation from them yet`), ...unknown.map((t) => `- ${name(t)}: I can't tell whether it reached them; it will not be sent again`));
   if (running.length) L.push("In progress:", ...running.map((t) => `- ${name(t)}: ${t.state === "driving" ? "being sent now" : t.state === "waiting_extension" ? "asked for, not prepared yet" : t.kind === "outreach" ? "approved, sends on the schedule" : "approved, waiting to run"}${t.blocker && t.blocker.who !== "person" && t.blocker.how !== "nothing for you to do" && t.blocker.how !== "nothing yet" ? ` (${t.blocker.what}; ${t.blocker.how})` : ""}`));

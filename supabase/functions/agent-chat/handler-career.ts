@@ -98,6 +98,8 @@ import { missingIntegration } from "../_shared/agent/integrations.ts";
 import { documentsOf, materializeArtifacts } from "../_shared/channel_artifacts.ts";
 import { askFor, isJudgePromptAsk, judgePromptTurn, searchJudgeTurn, supabaseJudgeCache, supabaseSearchSources } from "../_shared/career_search_judge.ts"; // FEATURE 5
 import { offerChatTurn } from "../_shared/career_offer_chat.ts"; // FEATURE 12
+import { activityAsk, activityTurn, supabaseActivity } from "../_shared/career_activity.ts"; // REQS DOC 1: Q21, Q249, Q34
+import { redoAsk, redoTurn } from "../_shared/career_redo.ts"; // REQS DOC 1: Q83, Q196
 import { connectorAsk, connectorChatTurn, connectorFailure } from "../_shared/connectors.ts"; // Task 3 (FEATURE GV's disconnect included)
 import { networkingTurn, siteRefusedTurn } from "../_shared/career_networking.ts"; // FEATURE 10
 import { plannerOn, plannerTurn, type PlannerTurn } from "./career_planner.ts"; // TASK PLANNER
@@ -759,7 +761,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // database wrote when the application finished (career_apply_receipts), the person's own only, read by code; what was
       // sent field by field with each answer's fact, where and when, the hashes, the employer's words, and the pictures of
       // the proof attached through the channel artifact path. Nothing is sent or changed by it.
-      const receiptAns = !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !queued && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const receiptAns = !activityAsk(message) && !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !queued && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await receiptTurn({ message, userId: user.id, now: Date.now(), read: supabaseReceipts(admin) }).catch((e) => { console.error("receipt turn:", e?.message ?? e); return null; })
         : null;
       // END FEATURE 14
@@ -840,6 +842,22 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       if (offered?.state) (ctx as any).offerBenchmark = offered.state;
       const offerAns = offered?.answer ?? null;
       // END FEATURE 12
+      // REQS DOC 1 (Q21, Q249, Q34): "what did you do today", "what did you send this week", "how many applications did you
+      // send": counts from the application queue and the email log in the person's own day, the window and the counting
+      // method said (career_activity.ts). Read only; a record that cannot be read is named and not counted.
+      const activity = !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !queued && !f08 && !stood && !status && !networking && !offerAns && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+        ? await activityTurn({ message, userId: user.id, now: Date.now(), read: supabaseActivity(admin) }).catch((e) => { console.error("activity turn:", e?.message ?? e); return null; })
+        : null;
+      // REQS DOC 1 (Q83, Q196): "that's not what I asked", "you're not listening", "this is useless" with nothing else in the
+      // message: the miss owned in one line, what the last answer was taken as (its recorded intent and search), and one
+      // question (career_redo.ts). Read only. A message that carries the real ask after the complaint stays the router's.
+      const redo = !activity && !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !queued && !f08 && !stood && !status && !networking && !offerAns && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && redoAsk(message) && !host.isHostControlled(message, ctx)
+        ? await (async () => {
+            const r = await admin.from("agent_messages").select("meta").eq("thread_id", tid).eq("role", "assistant").order("id", { ascending: false }).limit(1);
+            if (r.error) console.error("redo turn: last reply unreadable:", r.error.message);
+            return redoTurn({ message, lastIntent: r.error ? null : (r.data?.[0]?.meta?.intent ?? null), discovery: (ctx as any).discovery });
+          })().catch((e) => { console.error("redo turn:", e?.message ?? e); return null; })
+        : null;
       // MASS NETWORKING M1: "where are my emails" / "what's the status of my emails?": the send rail's own counts
       // (career_send_status) and the approved emails not on the rail; read only, nothing is sent or changed.
       const outreachStatus = !card && !mock && !asked && !which && !emailed && !outreachAns && !cloud && !cardYes && !paced && !employerAns && !queued && !f08 && !stood && !status && !networking && !offerAns && !receiptAns && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
@@ -950,6 +968,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       } else if (networking) {
         // FEATURE 10: a batch shown is the thread's last word (OUTREACH_INTENT), so "send 1" answers it.
         out = { reply: networking.reply, intent: networking.intent, resultStatus: networking.status, contained: false, handler: "networking", ...(networking.parts ? { parts: networking.parts } : {}) };
+      } else if (activity) { // REQS DOC 1: Q21, Q249, Q34
+        out = { reply: activity.reply, intent: activity.intent, resultStatus: activity.status, contained: false, handler: "activity" };
+      } else if (redo) { // REQS DOC 1: Q83, Q196
+        out = { reply: redo.reply, intent: redo.intent, resultStatus: redo.status, contained: false, handler: "redo" };
       } else if (offerAns) { // FEATURE 12: the offer turn's answer; the counter's card rides the reply's meta.
         out = { reply: offerAns.reply, intent: offerAns.intent, resultStatus: offerAns.status, contained: false, handler: "offer", parts: offerAns.parts };
         if (offerAns.card) agentMeta = { offer_card: offerAns.card };

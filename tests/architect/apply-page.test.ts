@@ -147,6 +147,7 @@ Deno.test("not prepared: Apply queues it to be prepared, sends nothing, and the 
   const { w, s, html } = await open({ unprepared: [GLOBEX] });
   const ref = refIn(html, "Frontend Intern", "Globex");
   assert(/Not prepared yet\./.test(plain(cardOf(html, ref))));
+  delete (w.deps as { reprepare?: unknown }).reprepare; // no preparer wired: the card waits with a Refresh
   const t = await textOf(await post(w, s, { action: "apply", ref, tag: "none" }));
   assert(/Getting your application ready\. Nothing is sent until you check it here and tap Apply/.test(t), t);
   eq(w.wants, [GLOBEX]); eq(w.queue.length, 0);
@@ -155,6 +156,17 @@ Deno.test("not prepared: Apply queues it to be prepared, sends nothing, and the 
   // Where the preparation really stands is said in the person's words when it is known (no resume: not invented as "working").
   w.deps.pending = async () => [{ posting_key: GLOBEX, company: "Globex", title: "Frontend Intern", url: "https://jobs.lever.co/globex/2", stage: "no_resume", detail: null, open_questions: 0, at: "" }];
   assert(/I don't have your resume file to attach/.test(plain(cardOf(await (await get(w, s)).text(), ref))));
+});
+
+Deno.test("not prepared: the first Apply tap starts preparing it (the person's own ask), sends nothing, and the card then shows What will be sent with its own Apply", async () => {
+  const { w, s, html } = await open({ unprepared: [GLOBEX] });
+  const ref = refIn(html, "Frontend Intern", "Globex");
+  const t = await textOf(await post(w, s, { action: "apply", ref, tag: "none" }));
+  assert(/Getting your application ready\. Nothing is sent until you check it here and tap Apply/.test(t), t);
+  eq(w.wants, [GLOBEX]); eq(w.prepared, [GLOBEX]); eq(w.queue.length, 0);
+  const card = cardOf(await (await get(w, s)).text(), ref);
+  assert(/What will be sent/.test(plain(card)) && /class="apply"/.test(card), "prepared by the tap: What will be sent, then Apply");
+  eq(w.queue.length, 0);
 });
 
 // ================================================================== safety: GET never acts, cross-site refused, other accounts

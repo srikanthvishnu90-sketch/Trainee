@@ -197,7 +197,7 @@ Deno.test("WO-033/P1 'send 1-7,9' and its adversarial kin", () => {
   eq(parseOutreachReply("skip 4"), { kind: "skip", ns: [4] });
   eq(parseOutreachReply("edit 3: Hi Avery, a shorter note."), { kind: "edit", n: 3, text: "Hi Avery, a shorter note." });
   eq(parseOutreachReply("send none"), { kind: "none" });
-  for (const [t, why] of [["send 1-100", /no draft 100/], ["send all except", /leave out by number/], ["send all except everyone", /leave out by number/], ["send 0", /from 1/],
+  for (const [t, why] of [["send 1-1000000", /no draft 1000000/], ["send all except", /leave out by number/], ["send all except everyone", /leave out by number/], ["send 0", /from 1/],
     ["send 7-3", /runs backwards/], ["send 1-7; drop table drafts", /by number/], ["send 1--7", /by number/], ["send -3", /by number/], ["send 3.5", /by number/], ["send 1e3", /by number/]] as const) {
     const r = parseOutreachReply(t);
     assert(r && r.kind === "bad" && why.test(r.why), `${t}: ${JSON.stringify(r)}`);

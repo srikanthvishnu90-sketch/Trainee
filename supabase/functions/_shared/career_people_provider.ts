@@ -318,6 +318,21 @@ function rolesOf(phrase: string): { titles: string[]; seniority: string[] } {
 // A company as typed: letters (any script), digits, spaces and . , & ' ’ - (so "L’Oréal", "AT&T", "Stripe, Inc."), and never
 // with " at " or " from " inside it ("find alumni from DePaul at Ramp" searches Ramp, not a company "DePaul at Ramp").
 const CO = String.raw`[\p{L}\p{N}](?:(?!\s(?:at|from)\s)[\p{L}\p{N} .,&'’-]){0,80}`;
+// One typed slip (a letter dropped, doubled, swapped or changed) on a word of four or more letters (ROUTER ROUTING ROUND,
+// 2026-11-02): the role nouns and outreach verbs below are never read as a person's title because of a typo.
+const ROLE_NOUNS = ["roles", "positions", "openings", "postings", "listings", "internships", "internship", "vacancies", "jobs"];
+const OUTREACH_VERBS = ["email", "reach", "message", "write", "draft", "contact", "connect", "ping"];
+const firstWord = (p: string) => p.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+const lastWord = (p: string) => p.trim().split(/\s+/).pop()?.toLowerCase() ?? "";
+function near1(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1) || (a[i] === b[i + 1] && a[i + 1] === b[i] && a.slice(i + 2) === b.slice(i + 2));
+  return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
+}
+const nearAny = (w: string, words: string[]) => w.length >= 4 && words.some((x) => near1(w, x));
 // "people at every company I applied to", "engineering managers at every company I've applied to", "engineering managers
 // at Stripe", "find recruiters at Ramp", "alumni of DePaul at Stripe", "DePaul alumni at Stripe". Anything else: null.
 export function parseTargetAsk(message: string): TargetAsk | null {
@@ -334,6 +349,12 @@ export function parseTargetAsk(message: string): TargetAsk | null {
   if (m && m[1].trim().split(/\s+/).length <= 3 && !/\b(?:i|me|my|you|apply|applied|send|email|message|role|job|position)\b/i.test(m[1])) {
     return { kind: "role_at", titles: [cleanCell(m[1], 80).toLowerCase()], seniority: [], company: cleanCell(m[2], 120) };
   }
+  // ROUTER ROUTING ROUND (2026-11-02): "who works at People Inc.", "find people who work at Stripe", "employees at Jobber" ask
+  // for everyone at the firm, with no title filter. Trunk searched for people titled "who work" (matching no one) or left
+  // the ask to the router's campaign plan.
+  m = new RegExp(`${lead}(?:who\\s+(?:works?|is\\s+working)|(?:the\\s+)?(?:people|folks|employees|staff|everyone|anyone|someone)\\s+(?:who\\s+(?:works?|is\\s+working|are\\s+working)|working))\\s+(?:at|for)\\s+(${CO})$`, "iu").exec(t)
+    ?? new RegExp(`${lead}(?:the\\s+)?(?:employees|staff)\\s+(?:at|of|from)\\s+(${CO})$`, "iu").exec(t);
+  if (m && !/^(?:my|your|our)\b/i.test(m[1])) return { kind: "role_at", titles: [], seniority: [], company: cleanCell(m[1], 120) };
   m = new RegExp(`${lead}(.+?)\\s+(?:at|from)\\s+(${CO})$`, "iu").exec(t);
   // ROUTING SCENARIOS (2026-10-29): without "find" / "show" / "who are" in front, the words before "at" must name people
   // (a plural, or a role word): "withdraw from Stripe" and "aply to the analyst role at Figma" are not searches for a
@@ -345,6 +366,12 @@ export function parseTargetAsk(message: string): TargetAsk | null {
   // the networking turn's draft or who; it is never a search for a title "reach out to engineer" (2026-10-29).
   if (m && !/\b(i|me|my|you|work|working|apply|applying|applied|jobs?|roles?\s+open|send|email|e-mail|draft|write|message|msg|dm|ping|reach|contact|connect|touch|network|introduce|intro(?:duction)?s?|contacts?|know)\b/i.test(m[1]) && m[1].split(/\s+/).length <= 8 &&
     !/\b(?:withdraw\w*|cancel\w*|remove|delete|forget|stop|don'?t|do not|status|where|what|how|did|has|have|any|role|position|opening|posting|application)\b/i.test(m[1]) &&
+    // ROUTER ROUTING ROUND (2026-11-02): "data analyst roles at Applebee's", "openings at Jobber", "nurse positions at X",
+    // "internships at Stripe" ask for work there (the role search), never for people titled "data analyst role".
+    !/\b(?:roles|positions|openings|postings|listings|vacanc(?:y|ies)|internships?|opportunit(?:y|ies)|gigs?|careers|job\s+ads?)\b/i.test(m[1]) &&
+    // The same words typed with one slip ("data analyst rles", "nurse oepnings", "emil the recruiter", "recah out to
+    // engineers"): the head noun of a role search, or the outreach verb that opens the ask.
+    !nearAny(lastWord(m[1]), ROLE_NOUNS) && !nearAny(firstWord(m[1]), OUTREACH_VERBS) &&
     (led.trim() !== "" || peopleWords(m[1])) && !/^(?:my|your|our)\b/i.test(m[2])) {
     const r = rolesOf(m[1]);
     if (r.titles.length) return { kind: "role_at", ...r, company: cleanCell(m[2], 120) };

@@ -356,7 +356,10 @@ const ALSO = new Set(["career_goal_record", "intent_sensitive_correction", "prof
 const SEARCH_CUE = /\b(?:find|search|show|looking|look|want|need|seeking|hiring|openings?|jobs?|roles?|positions?|interns?(?:hips?)?|new[- ]?grad|entry[- ]level|remote)\b|\$\s?\d/i;
 export function searchAskFromMessage(message: string, routerOut: { intent?: string; resultStatus?: string } | null): { ask: SearchAsk; append: boolean } | null {
   const intent = String(routerOut?.intent ?? "");
-  const open = UNCLAIMED.has(intent), also = ALSO.has(intent) && String(routerOut?.resultStatus ?? "") === "completed";
+  // ROUTER ROUTING ROUND (2026-11-02): a search the router ran on its routing copy (a trailing "please" dropped, a typo
+  // repaired, shorthand spelled out) records that copy, not the message, so askFromRouter does not match it: the message is
+  // read here instead ("data analyst jobs at Generali please" searched nothing once the router took it as a search).
+  const open = UNCLAIMED.has(intent) || SEARCH_INTENTS.has(intent), also = ALSO.has(intent) && String(routerOut?.resultStatus ?? "") === "completed";
   if (!open && !also) return null;
   const text = String(message ?? "").trim();
   if (!text || text.length > 200 || /\?\s*$/.test(text)) return null;

@@ -214,9 +214,11 @@ export const LEGACY_OFF_MESSAGE = "The read-only Gmail connection for Upmore's c
 
 // Where Google's callback sends the person. The career (Trainee) grant ends on a plain page of its own, never on the
 // Upmore app; the legacy grant keeps Upmore's landing.
-export function careerLanding(ok: boolean): Response {
+// say: the plain reason a connect was refused (connectors round 3: an address another Trainee account holds, a sign-in used
+// twice); absent, the general words.
+export function careerLanding(ok: boolean, say?: string): Response {
   const title = ok ? "Gmail connected" : "Gmail wasn't connected";
-  const line = ok ? "You can close this tab and go back to your chat with Trainee." : "Nothing was saved. Text \"connect gmail\" to Trainee to try again.";
+  const line = ok ? "You can close this tab and go back to your chat with Trainee." : say || "Nothing was saved. Text \"connect gmail\" to Trainee to try again.";
   return new Response(
     systemPage(title, [line]),
     { status: ok ? 200 : 400, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer", "content-security-policy": `default-src 'none'; style-src 'unsafe-inline' ${FONT_CSP.style}; font-src ${FONT_CSP.font}; img-src data:; frame-ancestors 'none'` } },

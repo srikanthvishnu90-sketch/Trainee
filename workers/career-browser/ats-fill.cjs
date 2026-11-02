@@ -216,8 +216,8 @@ function matchOption(labels, value) {
   const one = (pred) => { const ix = ns.map((l, i) => (pred(l, i) ? i : -1)).filter((i) => i >= 0); return ix.length === 1 ? { index: ix[0] } : ix.length > 1 ? { error: "ambiguous_option" } : null; };
   const exact = ns.map((l, i) => (l === v ? i : -1)).filter((i) => i >= 0);
   if (exact.length === 1) return { index: exact[0] };
-  if (YES.test(v)) { const r = one((l) => /^yes\b/.test(l) && !QUALIFIED.test(l)); if (r) return r; }
-  if (NO.test(v)) { const r = one((l) => /^no\b/.test(l) && !QUALIFIED.test(l)); if (r) return r; }
+  // #340 (kept over round 3's yes-like rule): a "Yes" or a "No" is never an option that merely STARTS with it ("Yes, with
+  // sponsorship", "No, I need work authorization"): those are other answers, so the question goes back to the person.
   // The option's own text with only a bracketed clarification after it ("Computer Science (BS)"); or an approved answer
   // that is the option followed by more of the person's words ("No, I do not need it" onto "No").
   if (v.length >= 2) { const r = one((l, i) => sameWithClarification(labels[i], value) || (l.length >= 2 && v.startsWith(l + " ") && !QUALIFIED.test(l))); if (r) return r; }

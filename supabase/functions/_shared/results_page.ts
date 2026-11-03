@@ -10,7 +10,7 @@
 // "A few things first" (renderThings), or the application is still being prepared. Nothing here sends on a GET.
 import { cap1, esc, hostOf, layout, webUrl, initialOf, type Row } from "./file_page.ts";
 import { BRAND } from "./brand.ts";
-import { stampHtml } from "./results_stamp.ts";
+import { stampHtml } from "./file_design.ts";
 import { applyHelp, coverage, NOT_LISTED, specOf, stateCountsOf, stateOfDismissed, type Spec, type StateKey } from "./results_spec.ts";
 import { DESIGN_CSS, DESIGN_FONT_LINK } from "./results_design.ts";
 import { BATCH_CSS, filterByState, renderApprove, renderBatchHead, renderExceptions, renderPauseNote, renderStateFilters } from "./results_batch.ts";
@@ -32,13 +32,13 @@ export interface ResultsFeed {
   token: string; title: string; floor: string | null; rows: ResultRow[]; total: number;
   filters: { pay: PayFilter; where: string; state?: StateKey | null }; places: string[]; top?: string; notes?: Record<string, string>;
   // The header: who and when, what was read and when, what is not confirmed, and a 2-3 line quick read.
-  // stamp: "Postings checked ..." from the shown postings' own last_seen_at (results_stamp.ts); null: "Check time unknown".
+  // stamp: "Postings checked ..." from the shown postings' own last_seen_at (file_design.ts); null: "Check time unknown".
   coverRows?: ResultRow[]; // every role including dismissed: what has been sent is told over these
   countRows?: ResultRow[]; // every active (not dismissed) role, before the pay/place filter: the top counts are over these
   paused?: boolean; updated?: string; dismissed?: ResultRow[]; // the person's own marks (private); updated: when this page was drawn
   madeFor?: string; stamp?: string | null; caveat?: string; quick?: string[];
   // "Apply to all N ready": the roles that are ready now (and not dismissed) and the hash of that exact set; absent: fewer than two, or paused.
-  all?: { hash: string; size: number } | null;
+  all?: { hash: string; size: number; filtered?: boolean } | null;
 }
 
 const BRAND_PLUM = "#5C2751";
@@ -154,6 +154,7 @@ export function renderResults(f: ResultsFeed): string {
   const pauseForm = pausable ? `<form method="post">${hidden(f.token, "pause")}<button type="submit" class="ghost danger">Pause on this page</button></form>` : "";
   const actionbar = selForm || pauseForm ? `<div class="actionbar" role="region" aria-label="Page actions"><div class="abin">${selForm}${pauseForm}</div></div>` : "";
   const selhelp = canPick ? `<p class="selhelp">Tick the roles you want, then use Apply to selected at the bottom. Ones that are ready go in one tap; the rest say what they need.</p>` : "";
+  const allbar = f.all && !f.paused ? `<div class="selbar allbar"><form method="post" id="all">${hidden(f.token, "applyall", `<input type="hidden" name="set" value="${esc(f.all.hash)}">`)}<button type="submit" class="apply">Apply to all ${f.all.size} ready</button></form><p>Approves ${f.all.filtered ? `all ${f.all.size} ready roles on the whole list, not only the roles your filters show` : `the ${f.all.size} ready roles on this list`}, each exactly as its What will be sent shows. Dismissed roles and roles that aren't ready are left out. If anything changes first, nothing is approved.</p></div>` : "";
   const meets = f.rows.filter((r) => r.payGroup === "meets"), unchecked = f.rows.filter((r) => r.payGroup === "unchecked"), unlisted = f.rows.filter((r) => r.payGroup === "unlisted"), below = f.rows.filter((r) => r.payGroup === "below");
   const group = (title: string, note: string, rows: ResultRow[]) => rows.length ? `<h2 class="group">${esc(title)} (${rows.length})</h2>${note ? `<p class="groupnote">${esc(note)}</p>` : ""}<ul class="cards">${rows.map((r) => card(r, f)).join("")}</ul>` : "";
   const body = f.rows.length

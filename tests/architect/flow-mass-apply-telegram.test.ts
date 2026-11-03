@@ -149,6 +149,8 @@ Deno.test({
         insert into public.career_kb_postings (posting_key, source, board, company, title, location, url, posted_at, text_excerpt, content_hash) values
         ${postings.map((p, i) => `('${keyOf(p)}', '${p.family}', '${p.board}', '${p.company}', '${p.title}', 'Chicago, IL', '${world.urlOf(p)}', now() - interval '${i} minutes', '${desc}', 'mh${i}')`).join(",")};`);
 
+      // No model is configured in this flow (a key left set by an earlier test file in the same process would let a chat turn call one).
+      for (const k of ["ANTHROPIC_API_KEY", "CAREER_BRAIN", "CAREER_MODEL", "CAREER_REPLY_MODEL"]) { if (!(k in saved)) saved[k] = Deno.env.get(k); Deno.env.delete(k); }
       setEnv("CAREER_PREPARE_AHEAD_URL", `${RUNNER}/prepare`);
       setEnv("CAREER_PREPARE_AHEAD_TOKEN", KICK);
       // The gate pins the release flags off for tests (scripts/gate.sh); this flow measures them on, as released.
@@ -199,9 +201,9 @@ Deno.test({
       const runnerEnv: Record<string, string> = {
         SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY: SERVICE_KEY, CLOUD_RUNNER_SECRET: SECRET, CLOUD_DISPATCH_SECRET: DISPATCH,
         CAREER_PREPARE_AHEAD_TOKEN: KICK, UPMORE_SCRIPT_SUBMIT_LIVE: "1", CLOUD_PREPARE_ENABLED: "on", CLOUD_RUNNER_ENABLED: "on", CLOUD_BRIDGE_URL: RUNNER,
-        CLOUD_PREPARE_MAX_CONCURRENT: "6", CLOUD_PREPARE_PER_PERSON_DAY: String(10 * N), CLOUD_PREPARE_PER_SITE_MINUTE: String(10 * N),
+        CLOUD_PREPARE_MAX_CONCURRENT: "6", CLOUD_PREPARE_STARTS_PER_TICK: "2", CLOUD_PREPARE_PER_PERSON_DAY: String(10 * N), CLOUD_PREPARE_PER_SITE_MINUTE: String(10 * N),
         // Mass settings (docs/architect/MASS-APPLY-COST-2026-11-01.md): 8 sandboxes at once, at most 3 on one ATS host, up to 8
-        // started per tick. The defaults stay wave 1 (2, 1, 2: cloud_runner_http.ts LIMIT_DEFAULTS).
+        // started per tick. This test sets every number it relies on (the runner's own defaults are larger: cloud_runner_http.ts LIMIT_DEFAULTS).
         CLOUD_MAX_STARTS_PER_TICK: Deno.env.get("MASS_PER_TICK") || "4", CLOUD_MAX_CONCURRENT: Deno.env.get("MASS_CONCURRENT") || "4", CLOUD_MAX_PER_PORTAL: Deno.env.get("MASS_PER_PORTAL") || "2", CLOUD_MAX_PER_PERSON_DAY: String(CAP), CLOUD_MAX_PER_SITE_MINUTE: String(10 * N),
       };
       let modelCalls = 0;
@@ -213,7 +215,7 @@ Deno.test({
         if (u.origin === "http://runner.test") return await runner(req);
         if (u.origin === new URL(SUPABASE_URL).origin && u.pathname === "/functions/v1/agent-chat") return await handleChat(req);
         if (u.origin === new URL(SUPABASE_URL).origin || u.hostname === "127.0.0.1") return await double(req);
-        if (u.hostname === "api.openai.com") { modelCalls++; outbound.push(u.href); return Promise.reject(new Error("no model in this test")); }
+        if (u.hostname === "api.anthropic.com") { modelCalls++; outbound.push(u.href); return Promise.reject(new Error("no model in this test")); }
         if (u.hostname === "api.telegram.org") return await double(new Request(`${bot.origin}${u.pathname}${u.search}`, req));
         outbound.push(u.href);
         return Promise.reject(new Error(`the mass-apply flow reaches no real host: ${u.href}`));

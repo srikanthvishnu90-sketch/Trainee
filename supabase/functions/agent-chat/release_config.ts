@@ -1,3 +1,4 @@
+import { APPLY_ALL_YES_ENV, applyAllYesEnabled } from "../_shared/apply_all_yes_flag.ts";
 // RELEASE CONFIG (D-035, owner 2026-11-01: "Ship staged brain"): which brain a deployed agent-chat serves is part of the
 // deployed SHA, not a hand-set secret. This file is reply code (it lives under supabase/functions/agent-chat/, which
 // scripts/launch/reply-code.ts lists), so changing it needs a fresh reply-quality measurement before it can deploy, and
@@ -109,6 +110,17 @@ export const RELEASE_FLAGS: Readonly<Record<string, string>> = Object.freeze({
   CAREER_OUTREACH_SEND: "on",
   CAREER_SEND_RAIL: "on",
 });
+
+// APPLY ALL BY YES (owner, 2026-11-02 17:10 CT; _shared/apply_all_yes.ts): not a release flag. It adds no new way to send: a bare yes
+// approves only the roles the results message offered, each through the same hash-bound Confirm as the page's Apply, so every guard
+// there (duplicate, changed tag, posting screen, paused account, the database kill switches below, the queue's pace and cloud opt-in)
+// still decides each one. Served ON by this commit; the environment can only turn it OFF (no deploy), and the results message then
+// carries no question and no offer:
+//   supabase secrets set CAREER_APPLY_ALL_YES=off --project-ref <ref>     off at once
+//   supabase secrets unset CAREER_APPLY_ALL_YES --project-ref <ref>       back to on
+// One shared definition (_shared/apply_all_yes.ts), also used by the results page.
+export { APPLY_ALL_YES_ENV };
+export const applyAllYesOn: (env: Env) => boolean = applyAllYesEnabled;
 
 // D-037: the database switches the release serves on (public.career_cloud_settings; the database reads anything but 'on' as
 // off). trainee-go-live.sh writes them on every go-live from scripts/launch/release-db-switches.sql, which

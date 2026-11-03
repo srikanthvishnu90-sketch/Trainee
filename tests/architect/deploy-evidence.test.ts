@@ -438,7 +438,7 @@ Deno.test("S5: the secrets audit reads names through the supabase CLI and never 
   const bin = await Deno.makeTempDir({ prefix: "fake-supabase-" });
   const SECRET = "sk-THIS-VALUE-MUST-NEVER-PRINT-12345";
   // A fake `supabase secrets list -o json`: names with values and digests, as the real CLI returns digests.
-  const names = ["OPENAI_API_KEY", "CAREER_INGEST_SECRET", "INGEST_CONTACT_EMAIL", "CAREER_PROACTIVE_SECRET", "TRAINEE_DELIVER_SECRET", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_BOT_TOKEN"];
+  const names = ["ANTHROPIC_API_KEY", "CAREER_INGEST_SECRET", "INGEST_CONTACT_EMAIL", "CAREER_PROACTIVE_SECRET", "TRAINEE_DELIVER_SECRET", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_BOT_TOKEN"];
   await Deno.writeTextFile(`${bin}/supabase`, `#!/usr/bin/env bash\n[ "$SUPABASE_ACCESS_TOKEN" = "tok-${SECRET}" ] || { echo "no token" >&2; exit 1; }\necho '${JSON.stringify(names.map((n) => ({ name: n, value: SECRET, digest: SECRET })))}'\n`);
   await Deno.chmod(`${bin}/supabase`, 0o755);
   try {

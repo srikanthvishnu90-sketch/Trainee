@@ -4,7 +4,7 @@
 //   deno run -A evals/career/situations/situation-knowledge.ts                      retrieval + pack check (free, offline): are the right playbooks picked, is the pack honest
 //   deno run -A evals/career/situations/situation-knowledge.ts --replay replies.json score recorded replies { "S001": "reply text", ... }
 //   deno run -A evals/career/situations/situation-knowledge.ts --brain agent --arm knowledge|baseline [--label L] [--only S001,S002]
-//        asks the model (needs OPENAI_API_KEY; this is the spend, there is no judge). baseline = today's prompt, knowledge = + pack and playbooks.
+//        asks the model (needs ANTHROPIC_API_KEY; this is the spend, there is no judge). baseline = today's prompt, knowledge = + pack and playbooks.
 //   ... --emit-judge judge-batch.json      with --replay: writes the model-judge requests (judge-prompt.md filled in) for a later paid run; calls nothing
 //
 // Rubric: rubric.md. Results: evals/career/results/situation-knowledge.<label>.json. A check with no evidence is never a pass.
@@ -166,13 +166,13 @@ async function main() {
   let replies: Record<string, string> = {};
   if (replayFile) replies = JSON.parse(Deno.readTextFileSync(replayFile));
   else {
-    const key = Deno.env.get("OPENAI_API_KEY");
-    if (!key) { console.error("NOT RUN: --brain agent needs OPENAI_API_KEY (the model is the spend). Nothing was faked."); Deno.exit(2); }
+    const key = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!key) { console.error("NOT RUN: --brain agent needs ANTHROPIC_API_KEY (the model is the spend). Nothing was faked."); Deno.exit(2); }
     const arm = arg("--arm") ?? "knowledge";
-    const { callModel, modelConfig } = await import("../../../supabase/functions/_shared/model_gateway.ts");
+    const { callModel, modelConfigFor } = await import("../../../supabase/functions/_shared/model_gateway.ts");
     const { careerSystemPrompt } = await import("../../../supabase/functions/_shared/agent/prompt.ts");
     const { styleBlock } = await import("../../../supabase/functions/_shared/agent/style.ts");
-    const cfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+    const cfg = modelConfigFor(Deno.env, Deno.env.get("CAREER_REPLY_MODEL") || "claude-haiku-5-5");
     for (const s of sits) {
       const system = careerSystemPrompt("2026-10-28") + "\n\n" + styleBlock(s.message) + (arm === "knowledge" ? "\n\n" + knowledgeOf(s).text : "");
       const res = await callModel(cfg, { system, messages: [...s.history.map((h) => ({ role: h.role, content: [{ type: "text", text: h.content }] })), { role: "user", content: [{ type: "text", text: s.message }] }], tools: [], max_tokens: 900 });

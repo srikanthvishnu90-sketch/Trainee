@@ -48,6 +48,8 @@ export interface AheadDeps {
   // The resume tailored to this posting from the trusted profile, written to a file in dir; null when it cannot be.
   // deno-lint-ignore no-explicit-any
   resumeFor: (c: Candidate, dir: string, profile: any | null) => Promise<PreparedResume | null>;
+  // true: the resume is the person's own FILE (nothing is built from their facts), so a missing one is not a missing name or email.
+  resumeIsFile?: boolean;
   // The person's stored profile, as stored (storedProfile); prepareAhead keeps only its trusted facts. Absent: only their
   // answers count.
   // deno-lint-ignore no-explicit-any
@@ -159,7 +161,7 @@ export async function prepareOne(d: AheadDeps, c: Candidate): Promise<AheadOutco
     if (!resume) {
       // SUBMIT-STEER-1130: confirmed facts but no name or email on file, so no resume can carry them. Ask for those, once
       // (bound to this posting, so their answers make it a candidate again), instead of stopping here for good.
-      const missing = profile && Array.isArray(profile.facts) && profile.facts.length ? contactAsk(profile, rows, c.company) : [];
+      const missing = !d.resumeIsFile && profile && Array.isArray(profile.facts) && profile.facts.length ? contactAsk(profile, rows, c.company) : [];
       if (missing.length) {
         const n = must(await d.db.rpc("career_apply_prepare_ask_for", {
           p_user: c.user_id, p_posting_job_id: c.job_id, p_engine_job_id: c.job_id, p_questions: missing,
@@ -210,6 +212,10 @@ export async function prepareOne(d: AheadDeps, c: Candidate): Promise<AheadOutco
           user_id: c.user_id, job_id: c.job_id, outcome: "asked",
           detail: `${n} question(s) asked${letters ? `; ${letters} cover letter${letters === 1 ? "" : "s"} drafted for them to read` : ""}`,
         };
+      }
+      // The form's only open questions are ones Trainee never takes by text (an ID number, a password, a code): said as such.
+      if (result.reason === "needs_answers" && Array.isArray(result.questions) && result.questions.length) {
+        return await record("refused", "sensitive_question: the form asks for something Trainee does not take in a message", undefined, result.posting);
       }
       // The browser itself failing twice is our error, not the employer's form refusing: recorded as such (it is tried
       // again within the hour: prepare_candidates' wait after an error), never told as "the form could not be filled".
@@ -480,10 +486,11 @@ if (import.meta.main) {
   }
   const { createClient } = await import("npm:@supabase/supabase-js@2.117.1");
   const { edgeRenderer, supabaseResumeStore } = await import("../../supabase/functions/_shared/career_tailor.ts");
-  const { callModel, modelConfig, newMeter } = await import("../../supabase/functions/_shared/model_gateway.ts");
+  const { callModel, newMeter } = await import("../../supabase/functions/_shared/model_gateway.ts");
+  const { careerModelConfig } = await import("../../supabase/functions/agent-chat/release_model.ts");
   const admin = createClient(cred.url, cred.key, { auth: { persistSession: false } });
   const root = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
-  const cfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+  const cfg = careerModelConfig(Deno.env);
   // One pool for everything this host prepares: as many browsers as this machine holds, every employer site at full
   // parallelism unless it refuses; a refusal holds that site off for every host through the database.
   const pacing = preparePacing();

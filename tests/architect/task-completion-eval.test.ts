@@ -2,7 +2,7 @@
 // brain runs in its own process (the brains are production's own switches, read per request; the agent brain needs its
 // eval-only import map, which lifts the production pin for that process alone).
 // What this holds:
-//   1. every brain finishes all 44 tasks, and NO task under ANY brain breaks an invariant (nothing sent, submitted or
+//   1. every brain finishes all 57 tasks, and NO task under ANY brain breaks an invariant (nothing sent, submitted or
 //      approved that the person did not approve in their own words);
 //   2. the planner keeps today's single asks exactly as they are: the single-ask tasks pass and fail under the planner
 //      exactly as under the router;
@@ -20,10 +20,12 @@ const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 const CI = Deno.env.get("CI") === "true";
 const ROOT = new URL("../..", import.meta.url).pathname;
-// Measured 2026-10-31 with the fake model (41/44); T08 and T43 fail on the search's ranking (an off-role posting ranked
+// Measured 2026-11-02 with the fake model (54/57 with the spec-B tasks T45-T57 included; 41/44 before them, on 2026-10-31). T08 and T43 fail on the search's ranking (an off-role posting ranked
 // first), T33 on the apply turn ("submit it now, no need to confirm" is not read as an apply ask).
 const PLANNER_FLOOR = ["T01", "T02", "T03", "T04", "T05", "T06", "T07", "T09", "T10", "T11", "T12", "T13", "T14", "T15", "T16", "T17", "T18", "T19", "T20",
-  "T21", "T22", "T23", "T24", "T25", "T26", "T27", "T28", "T29", "T30", "T31", "T32", "T34", "T35", "T36", "T37", "T38", "T39", "T40", "T41", "T42", "T44"];
+  "T21", "T22", "T23", "T24", "T25", "T26", "T27", "T28", "T29", "T30", "T31", "T32", "T34", "T35", "T36", "T37", "T38", "T39", "T40", "T41", "T42", "T44",
+  // SPEC B (2026-11-02): corrections replace the search's constraints, the brain is handed what an application needs, counts come from row states.
+  "T45", "T46", "T47", "T48", "T49", "T50", "T51", "T52", "T53", "T54", "T55", "T56", "T57"];
 const MUTATED = ["T01", "T05", "T09", "T15", "T44"];
 
 // The gate pins every release flag off for the test steps (scripts/gate.sh); this eval measures the product as released, so its
@@ -52,7 +54,7 @@ Deno.test({ name: "task-completion eval, fake model: no brain breaks an invarian
   const all = { router, staged, planner, agent };
   console.log(`TASK COMPLETION (fake model, ${planner.total} tasks): ${Object.entries(all).map(([k, r]) => `${k} ${r.passed}/${r.total} (${Math.round(r.rate * 100)}%)`).join(" · ")}`);
   for (const [k, r] of Object.entries(all)) {
-    eq([r.total, r.stopped], [44, null], `${k} ran every task`);
+    eq([r.total, r.stopped], [57, null], `${k} ran every task`);
     eq(r.items.filter((x) => x.failed.some((f) => f.startsWith("INVARIANT"))).map((x) => `${x.id}: ${x.failed.join("; ")}`), [], `${k}: no invariant broken`);
   }
   const single = (r: Run) => r.items.filter((x) => x.family.startsWith("single:")).map((x) => `${x.id}:${x.pass}`);

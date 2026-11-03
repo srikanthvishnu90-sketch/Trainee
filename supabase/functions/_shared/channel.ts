@@ -6,6 +6,7 @@
 import { toBubbles } from "./conversation.ts";
 import { addressOf, type Channel, channelOf, type DeliveryAdapter, type SendResult } from "./channel_adapters.ts";
 import { DEFAULT_PREFS, nextAwake, quietAt, zoneOr } from "./career_alerts.ts";
+import { isLate, isMiss, lateLine, MISS_WINDOW_MS, missMessage, type MissRow } from "./delivery_misses.ts";
 
 export type ChannelCommand = "stop" | "start" | "help";
 const COMMANDS: Record<string, ChannelCommand> = {
@@ -108,6 +109,10 @@ export interface ChannelStore {
   heldFor?(userId: string): Promise<number>;
   nudgesOn?(day: string): Promise<number>;
   setNudged?(contact: string, at: number): Promise<void>;
+  // PARITY R10 (delivery_misses.ts): the person's promised messages that never went out on our side and that no message has
+  // owned yet (newest MISS_WINDOW_MS only), and recording them owned once a message saying so went out. Absent: not checked.
+  misses?(userId: string, now: number): Promise<MissRow[]>;
+  ownMisses?(userId: string, ids: string[], at: number): Promise<void>;
 }
 export type Send = (contact: string, bubbles: string[]) => Promise<{ ok: true; id: string | null; ids?: string[] } | { ok: false; error: string; retryable: boolean; sent?: number; sentIds?: string[] }>;
 
@@ -156,6 +161,9 @@ export const LIMITS_NOTE = "not sent: under the fit floor the person set, or pas
 export const CLOSED_SINCE =" (this posting has closed since this report was written)";
 // CHANNEL DELIVERY ROUND 2 (2026-10-30): a row bound to a channel the person no longer has, and no other channel to send it on.
 export const NO_CHANNEL_NOTE = "not sent: the channel this answers was unlinked and the person has no other texting channel";
+// PARITY R10: the delivery notes that mean a row was not sent on our side (a miss, when the row was promised at a time). The
+// person's own choices (STOP, a pause, alerts off or changed, an erased account) are not in it.
+export const MISS_NOTES: readonly string[] = [STALE_NOTE, NO_CHANNEL_NOTE];
 
 // budgetMs: a run that has used its time stops before the next row (a long card is many bubbles, each paced by the
 // provider); what it claimed and did not reach goes back for the next run (the store's release), never half sent.
@@ -207,6 +215,18 @@ export async function deliverDue(o: {
     if (!o.store.quiet) return false;
     if (!quiet.has(userId)) quiet.set(userId, await o.store.quiet(userId).catch((e) => { console.error("deliver: the pause could not be read:", e instanceof Error ? e.message : String(e)); return null; }));
     return quiet.get(userId)!;
+  };
+  // PARITY R10: the clock a promised row's times are said on (the reminder's own zone, else the person's saved one), and the
+  // misses owed to each person, read once per run (a read that fails owes nothing this run, and never holds delivery back).
+  const zoneFor = async (m: { key: string; userId?: string }): Promise<string> => {
+    const own = reminderZoneOf(m.key);
+    if (own) return own;
+    return zoneOr(o.store.quietHours && m.userId ? (await quietHoursOf(m.userId))?.tz : null);
+  };
+  const owedOf = new Map<string, MissRow[]>();
+  const missesOf = async (userId: string): Promise<MissRow[]> => {
+    if (!owedOf.has(userId)) owedOf.set(userId, await o.store.misses!(userId, o.now).catch((e) => { console.error("deliver: the missed messages could not be read:", e instanceof Error ? e.message : String(e)); return []; }));
+    return owedOf.get(userId)!;
   };
   for (const m of await o.store.due(o.now, o.limit ?? 100)) {
     if (o.clock && o.budgetMs !== undefined && o.clock() - o.now >= o.budgetMs) { r.deferred++; continue; }
@@ -328,6 +348,27 @@ export async function deliverDue(o: {
     // CHANNEL DELIVERY ROUND 2 (2026-10-30): a row some of whose messages already went out (an earlier attempt stopped by a
     // 429 or the window part way) sends only the rest; every id it went out as is kept, in order, so a provider's later
     // "failed" for one of them maps back to the right place.
+    // PARITY R10 (delivery_misses.ts), for a store that keeps the promise record (it has misses: Supabase's always, the memory
+    // store when asked): a promised message (a reminder, the morning report or brief, the weekly summary) more than LATE_MS past
+    // its time says so first, with the time it was due on the person's clock. It is its own first paragraph
+    // and the same on every attempt, so a row resumed part way lines up with the messages that already went.
+    if (o.store.misses && isLate(m.key, m.deliver_at, o.now, m.heldAt)) text = `${lateLine(m.deliver_at, o.now, await zoneFor(m))}\n\n${text}`;
+    // PARITY R10: what was promised and never went out is owned in the person's next message, as its own message right before
+    // it, once (recorded owned only when that message went). A row resumed part way already had its turn.
+    if (o.store.misses && o.store.ownMisses && !(m.sentParts ?? 0)) {
+      const owed = (await missesOf(m.userId)).filter((x) => x.id !== m.id);
+      if (owed.length) {
+        const zones = new Map<string, string>();
+        for (const x of owed) zones.set(x.id, await zoneFor({ key: x.key, userId: m.userId }));
+        let went = false;
+        try { went = (await adapter.send(addressOf(m.contact), adapter.render(missMessage(owed, o.now, (x) => zones.get(x.id)!)))).ok; }
+        catch (e) { console.error("deliver: the missed-message note could not be sent:", e instanceof Error ? e.message : String(e)); }
+        if (went) {
+          owedOf.set(m.userId, []);
+          await o.store.ownMisses(m.userId, owed.map((x) => x.id), o.now).catch((e) => console.error("deliver: the missed messages could not be recorded as owned:", e instanceof Error ? e.message : String(e)));
+        }
+      }
+    }
     const all = adapter.render(text), skip = Math.min(Math.max(0, m.sentParts ?? 0), all.length), before = m.sentIds ?? [];
     const bubbles = all.slice(skip);
     let res: SendResult;
@@ -403,9 +444,11 @@ export async function deliverDue(o: {
 
 // ------------------------------------------------------------------------------------------------ memory
 type MemRow = Omit<OutboxRow, "heldAt"> & { status: "queued" | "delivered" | "failed" | "skipped_opt_out" | "held"; retryAt: number | null; sentAt: number | null; error: string | null; heldAt?: number | null; providerIds?: string[] | null };
-export function memoryChannel(rows: OutboxRow[] = []): ChannelStore & { rows(): MemRow[]; queue(row: OutboxRow): void; optOuts(): string[]; unhold(userId: string): number } {
+// o.promises (PARITY R10): keep the promise record (misses, owned), as the Supabase store does; off, the store behaves as before.
+export function memoryChannel(rows: OutboxRow[] = [], o: { promises?: boolean } = {}): ChannelStore & { rows(): MemRow[]; queue(row: OutboxRow): void; optOuts(): string[]; unhold(userId: string): number } {
   const st: MemRow[] = rows.map((x) => ({ ...x, status: "queued", retryAt: null, sentAt: null, error: null }));
   const optOut = new Map<string, boolean>(), optOutAt = new Map<string, number>(), nudged = new Map<string, number>();
+  const owned = new Set<string>(); // PARITY R10: misses a message already owned
   return {
     async due(now, limit) {
       return st.filter((x) => (x.status === "queued" || (x.status === "failed" && x.retryAt !== null && x.retryAt <= now)) && x.deliver_at <= now)
@@ -436,6 +479,10 @@ export function memoryChannel(rows: OutboxRow[] = []): ChannelStore & { rows(): 
       return true;
     },
     async unclaimTemplate(c, at) { if (nudged.get(c) === at) nudged.delete(c); },
+    ...(o.promises ? { misses: async (userId: string, now: number) => {
+      return st.filter((x) => x.userId === userId && !owned.has(x.id) && x.deliver_at >= now - MISS_WINDOW_MS && isMiss(x, MISS_NOTES))
+        .sort((a, b) => a.deliver_at - b.deliver_at).map((x) => ({ id: x.id, key: x.key, text: x.text, deliver_at: x.deliver_at }));
+    }, ownMisses: async (_userId: string, ids: string[]) => { for (const id of ids) owned.add(id); } } : {}),
     rows() { return st.map((x) => ({ ...x })); },
     queue(row) { st.push({ ...row, status: "queued", retryAt: null, sentAt: null, error: null }); },
     optOuts() { return [...optOut].filter(([, v]) => v).map(([k]) => k); },

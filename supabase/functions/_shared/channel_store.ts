@@ -5,13 +5,16 @@
 // WO-038 (20261021070000_channel_parity.sql): the claim resolves each row's channel (its own, or the person's home
 // channel); a WhatsApp row carries the window's times; "held" rows wait for the person's next message; STOP is the
 // person's across channels.
-import type { ChannelStore, DeliveryMark, OutboxRow } from "./channel.ts";
+import { type ChannelStore, type DeliveryMark, MISS_NOTES, type OutboxRow } from "./channel.ts";
+import { isMiss, MISS_WINDOW_MS, PROMISED, type MissRow } from "./delivery_misses.ts";
 import type { Channel } from "./channel_adapters.ts";
 import { alertStillWanted, alertWithinLimits, freshAlertText } from "./career_watch_alerts.ts";
 import { briefStillTrue } from "./channel.ts";
 import { localDayStart, zoneOr } from "./career_alerts.ts";
 import { buttonsForRows } from "./channel_card_tap.ts"; // FEATURE 16
 
+// PARITY R10: where the misses a message already owned are kept (career_watch_kv), and how many ids are kept.
+const MISSES_OWNED = "career:misses-owned", MISSES_KEPT = 200;
 export const SENDING_TIMEOUT_MS = 10 * 60000; // longer than any run can last (a function's wall clock is shorter)
 export const UNKNOWN_OUTCOME = "delivery outcome unknown: the run stopped before recording it; not resent";
 const DAY_MS = 86400000;
@@ -30,7 +33,9 @@ export type DeliveryStore = ChannelStore & { release(): Promise<number>; sweep(n
 // `only` narrows the store to one row (a reply sent the moment it is written); `user` to everything due for one person
 // (a WhatsApp message: what waited for the window goes out first, then the answer). The rules are the same.
 // deno-lint-ignore no-explicit-any
-export function supabaseChannelStore(admin: any, o: { only?: { userId: string; key: string }; user?: string } = {}): DeliveryStore {
+// o.promises (PARITY R10): keep the promise record (a late promised message says so; misses are read and owned). The production
+// entry points (trainee-deliver, channel_runtime.ts deliverer) turn it on; off, the store behaves as before.
+export function supabaseChannelStore(admin: any, o: { only?: { userId: string; key: string }; user?: string; promises?: boolean } = {}): DeliveryStore {
   const claimed = new Map<string, { prior: string; attempts: number; parts?: number }>();
   return {
     async due(now, limit) {
@@ -226,6 +231,23 @@ export function supabaseChannelStore(admin: any, o: { only?: { userId: string; k
       must(done, "record delivery");
       claimed.delete(id);
     },
+    // PARITY R10 (delivery_misses.ts): the person's promised rows that never went out on our side in the last two weeks, less
+    // the ones a message already owned. Which were owned is kept in career_watch_kv (career:misses-owned), so no migration is
+    // needed. A read that fails throws (deliverDue then owes nothing this run).
+    ...(o.promises ? { misses: async (userId: string, now: number): Promise<MissRow[]> => {
+      const r = must<any[]>(await admin.from("career_outbox").select("id,key,text,deliver_at,status,error,retry_at").eq("user_id", userId)
+        .in("status", ["failed", "skipped_opt_out"]).gte("deliver_at", iso(now - MISS_WINDOW_MS)).order("deliver_at", { ascending: true }).limit(200), "read missed messages") || [];
+      const rows = r.filter((x) => PROMISED.test(String(x.key)) && isMiss({ key: String(x.key), status: String(x.status), error: x.error ?? null, retryAt: ms(x.retry_at) }, MISS_NOTES));
+      if (!rows.length) return [];
+      const kv = must<any>(await admin.from("career_watch_kv").select("value").eq("user_id", userId).eq("key", MISSES_OWNED).maybeSingle(), "read owned misses");
+      const owned = new Set<string>(Array.isArray(kv?.value?.ids) ? kv.value.ids.map(String) : []);
+      return rows.filter((x) => !owned.has(String(x.id))).map((x): MissRow => ({ id: String(x.id), key: String(x.key), text: String(x.text ?? ""), deliver_at: Date.parse(x.deliver_at) }));
+    }, ownMisses: async (userId: string, ids: string[], at: number) => {
+      const kv = must<any>(await admin.from("career_watch_kv").select("value").eq("user_id", userId).eq("key", MISSES_OWNED).maybeSingle(), "read owned misses");
+      const prior: string[] = Array.isArray(kv?.value?.ids) ? kv.value.ids.map(String) : [];
+      const all = [...new Set([...prior, ...ids.map(String)])].slice(-MISSES_KEPT);
+      must(await admin.from("career_watch_kv").upsert({ user_id: userId, key: MISSES_OWNED, value: { ids: all, at: iso(at) } }, { onConflict: "user_id,key" }), "record owned misses");
+    } } : {}),
     // CHANNEL DELIVERY ROUND 2 (2026-10-30): the template's count is everything waiting for the person on WhatsApp: held,
     // and still to go (a run claims 20; a person with 37 waiting was told "20 new updates").
     async heldFor(userId) {

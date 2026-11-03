@@ -6,7 +6,8 @@
 // docs/architect/mass-apply-proof-runbook.md section A, supabase/functions/_shared/cloud_runner_http.ts (503 "needs setup").
 //
 //   node scripts/launch/hosted-apply-setup.cjs [--secrets-file f] [--vercel-names-file f] [--settings-file f]
-//                                              [--cron-file f] [--functions-file f]
+//                                              [--cron-file f] [--functions-file f] [--require-switches]
+//   --require-switches                    switches not read => 'hosted apply: UNKNOWN (could not read switches)', exit 1
 //   --secrets-file / --vercel-names-file  one NAME per line (a NAME=value line is not a name and is ignored)
 //   --settings-file                       KEY=value lines for the switches in career_cloud_settings (a missing key is a missing row)
 //   --cron-file / --functions-file        one pg_cron job name / edge function slug per line
@@ -84,9 +85,15 @@ function assess(inp) {
 
 function main(argv) {
   const get = (f) => { const i = argv.indexOf(f); if (i < 0) return null; const p = argv[i + 1]; if (!p) throw new Error(`${f} needs a path`); return fs.readFileSync(p, 'utf8'); };
-  for (const a of argv) if (a.startsWith('--') && !['--secrets-file', '--vercel-names-file', '--settings-file', '--cron-file', '--functions-file'].includes(a)) { console.error(`unknown option: ${a}`); return 2; }
+  for (const a of argv) if (a.startsWith('--') && !['--secrets-file', '--vercel-names-file', '--settings-file', '--cron-file', '--functions-file', '--require-switches'].includes(a)) { console.error(`unknown option: ${a}`); return 2; }
   const r = assess({ fn: nameLines(get('--secrets-file')), vercel: nameLines(get('--vercel-names-file')), cron: nameLines(get('--cron-file')),
     functions: nameLines(get('--functions-file')), settings: settingsOf(get('--settings-file')) });
+  // --require-switches (go-live --verify, --require-hosted-apply): unreadable switches fail closed, never read as green.
+  if (argv.includes('--require-switches') && r.verdict === 'switches-unknown') {
+    console.log('hosted apply: UNKNOWN (could not read switches)');
+    for (const l of r.lines.slice(1)) console.log(l);
+    return 1;
+  }
   for (const l of r.lines) console.log(l);
   return r.fail ? 1 : 0;
 }

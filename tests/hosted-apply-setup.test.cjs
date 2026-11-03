@@ -98,7 +98,7 @@ test('secrets audit: --require-hosted-apply makes a missing name launch-blocking
   const v = tmp(['TRAINEE_FILE_UPSTREAM']);
   assert.equal(audit(['--vercel-names-file', v, '--require-hosted-apply'], launch()).code, 1);
   const all = [...launch(), ...names('fn')];
-  assert.equal(audit(['--vercel-names-file', v, '--require-hosted-apply'], all).code, 0);
+  assert.equal(audit(['--vercel-names-file', v, '--require-hosted-apply', '--cloud-settings-file', tmp(['CAREER_AGENT_SUBMIT=off'])], all).code, 0);
 });
 
 test('secrets audit: given the switches, off reads "off by design" (exit 0) and ON with names missing fails', () => {
@@ -109,9 +109,39 @@ test('secrets audit: given the switches, off reads "off by design" (exit 0) and 
   assert.equal(on.code, 1, on.out); assert.match(on.out, /switches are ON but it is NOT READY/);
 });
 
+test('--require-switches: switches unreadable => loud UNKNOWN line and exit 1; switches known off => off by design, exit 0', () => {
+  const run = (args) => spawnSync('node', [path.join(root, 'scripts/launch/hosted-apply-setup.cjs'), '--require-switches', ...args], { encoding: 'utf8' });
+  const s = tmp(['OPENAI_API_KEY']);
+  const unk = run(['--secrets-file', s]);
+  assert.equal(unk.status, 1); assert.match(unk.stdout, /^hosted apply: UNKNOWN \(could not read switches\)$/m);
+  const off = run(['--secrets-file', s, '--settings-file', tmp(['CAREER_AGENT_SUBMIT=off', 'CAREER_CLOUD_APPLY=off'])]);
+  assert.equal(off.status, 0); assert.match(off.stdout, /^hosted apply: off by design/m);
+  const empty = run(['--secrets-file', s, '--settings-file', tmp([])]);
+  assert.equal(empty.status, 0, 'a table read that returned no rows is known (all off), not unknown');
+});
+
+test('go-live --verify with a failing settings query fails closed (stub psql)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-stub-'));
+  fs.writeFileSync(path.join(dir, 'psql'), '#!/usr/bin/env bash\nexit 1\n', { mode: 0o755 });
+  const HA = path.join(root, 'scripts/launch/hosted-apply-setup.cjs');
+  const sh = fs.readFileSync(path.join(root, 'scripts/launch/trainee-go-live.sh'), 'utf8');
+  assert.match(sh, /hosted-apply-setup\.cjs" --require-switches/, 'verify passes --require-switches');
+  // The block as verify runs it, with HA_ARGS empty because every query failed: must exit non-zero with the UNKNOWN line.
+  const r = spawnSync('bash', ['-c', `node ${HA} --require-switches; echo code=$?`], { encoding: 'utf8', env: { PATH: `${dir}:${process.env.PATH}` } });
+  assert.match(r.stdout, /hosted apply: UNKNOWN \(could not read switches\)/); assert.match(r.stdout, /code=1/);
+});
+
+test('secrets audit: --require-hosted-apply with unreadable switches fails; without it the documented behavior (exit 0) is kept', () => {
+  const v = tmp(['TRAINEE_FILE_UPSTREAM']);
+  const all = [...launch(), ...names('fn')];
+  assert.equal(audit(['--vercel-names-file', v], all).code, 0);
+  const r = audit(['--vercel-names-file', v, '--require-hosted-apply'], all);
+  assert.equal(r.code, 1, r.out); assert.match(r.out, /^hosted apply: UNKNOWN \(could not read switches\)/m);
+});
+
 test('go-live --verify runs the hosted-apply check, reads only, and fails on ON-but-not-ready', () => {
   const sh = fs.readFileSync(path.join(root, 'scripts/launch/trainee-go-live.sh'), 'utf8');
-  assert.match(sh, /hosted-apply-setup\.cjs" \$\{HA_ARGS/);
+  assert.match(sh, /hosted-apply-setup\.cjs" --require-switches \$\{HA_ARGS/);
   assert.match(sh, /\(\( ha_code == 0 \)\) \|\| fail "hosted apply is switched on but not ready/);
   const verify = sh.slice(sh.indexOf('if [[ -n "$VERIFY_MODE" ]]; then\n  step "verify'), sh.indexOf('step "1/6 preflight"'));
   assert.ok(!/\b(insert|update|delete|alter|drop|create)\b[^\n]*(into|table|set)/i.test(verify.split('hosted apply setup:')[1] || ''), 'no write in the hosted-apply block');

@@ -711,7 +711,7 @@ if [[ -n "$VERIFY_MODE" ]]; then
   if [[ ${#PLATFORM_ARGS[@]} -gt 0 && -s "$WORK/platform.tsv" ]]; then cut -f1 "$WORK/platform.tsv" >"$HA_DIR/functions"; HA_ARGS+=(--functions-file "$HA_DIR/functions"); fi
   echo "hosted apply setup:"
   set +e
-  node "$REPO/scripts/launch/hosted-apply-setup.cjs" ${HA_ARGS[@]+"${HA_ARGS[@]}"} 2>&1 | mask
+  node "$REPO/scripts/launch/hosted-apply-setup.cjs" --require-switches ${HA_ARGS[@]+"${HA_ARGS[@]}"} 2>&1 | mask
   ha_code=${PIPESTATUS[0]}
   set -e
   set +e
@@ -720,7 +720,7 @@ if [[ -n "$VERIFY_MODE" ]]; then
   code=${PIPESTATUS[0]}
   set -e
   (( code == 0 )) || fail "the live project does not match $VERIFY (each mismatch is listed above)"
-  (( ha_code == 0 )) || fail "hosted apply is switched on but not ready (each missing prerequisite is listed above); switch it off with --real-submit off or finish its setup (docs/launch/CLOUD-RUNNER.md)"
+  (( ha_code == 0 )) || fail "hosted apply is unknown or switched on but not ready (each line is listed prerequisite is listed above); switch it off with --real-submit off or finish its setup (docs/launch/CLOUD-RUNNER.md)"
   ok
   exit 0
 fi

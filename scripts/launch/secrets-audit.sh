@@ -153,7 +153,7 @@ printf '%s\n' "$FN_NAMES" >"$tmp/fn"; hosted_args+=(--secrets-file "$tmp/fn")
 [[ -n "$CLOUD_SETTINGS" ]] && hosted_args+=(--settings-file "$CLOUD_SETTINGS")
 echo
 hosted_code=0
-node scripts/launch/hosted-apply-setup.cjs "${hosted_args[@]}" || hosted_code=$?
+node scripts/launch/hosted-apply-setup.cjs ${REQUIRE_HOSTED:+--require-switches} "${hosted_args[@]}" || hosted_code=$?
 ((miss_r)) && exit 1
 ((hosted_code)) && exit 1
 [[ -n "$REQUIRE_HOSTED" ]] && ((miss_c)) && exit 1

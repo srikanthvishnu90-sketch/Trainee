@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Trainee — Assisted Apply</title>
+<meta name="description" content="Privacy policy for the Trainee — Assisted Apply browser extension: what it handles, why, and what it never does.">
+<meta name="theme-color" content="#4A2F5E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234A2F5E'/%3E%3Ctext x='32' y='45' font-family='Georgia,serif' font-size='40' font-weight='700' text-anchor='middle' fill='%23fff'%3Es%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Brygada+1918:ital,wght@0,400..700;1,400..700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ============ BRAND TOKENS (same as index.html) ============ */
+:root{
+  --plum:#4A2F5E; --plum-hover:#5C3B74; --plum-light:#D4C2E2;
+  --white:#FFFFFF; --black:#000000; --ink:#141414;
+  --muted:#4F4F57; --muted-dark:#C2C2CA;
+  --line:#E6E6EA; --line-dark:#26262B; --soft:#F5F4F7;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--white);color:var(--ink);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-size:16px;letter-spacing:-.005em;-webkit-font-smoothing:antialiased}
+h1,h2{font-family:'Brygada 1918',Georgia,serif;font-weight:500;margin:0}
+p{margin:0}
+a{color:inherit;text-decoration:none}
+a:focus-visible{outline:3px solid var(--plum);outline-offset:3px;border-radius:8px}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+.muted{color:var(--muted)}
+
+/* ============ NAV (same as index.html) ============ */
+.nav{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.97);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.nav .wrap{display:flex;align-items:center;justify-content:space-between;height:64px;gap:16px}
+.logo{font-family:'Brygada 1918',Georgia,serif;font-size:24px;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
+.nav .back{font-size:15px;font-weight:500}
+.nav .back:hover{color:var(--plum)}
+
+/* ============ POLICY BODY ============ */
+.policy{max-width:680px;margin:0 auto;padding:72px 24px 96px}
+.policy h1{font-size:clamp(30px,3.6vw,42px);line-height:1.15;letter-spacing:-.01em}
+.policy .updated{font-size:14px;margin-top:14px}
+.policy .intro{font-size:17px;line-height:1.6;margin-top:28px}
+.policy h2{font-size:clamp(22px,2.4vw,28px);line-height:1.2;margin-top:48px}
+.policy ul{margin:18px 0 0;padding:0;list-style:none}
+.policy li{line-height:1.65;padding:14px 0;border-top:1px solid var(--line)}
+.policy li:first-child{border-top:none;padding-top:2px}
+.policy li strong{font-weight:600}
+.policy .plain li{padding:8px 0 8px 22px;border-top:none;position:relative}
+.policy .plain li::before{content:"";position:absolute;left:2px;top:17px;width:6px;height:6px;border-radius:50%;background:var(--plum)}
+.policy .questions{margin-top:48px;line-height:1.65}
+
+/* ============ FOOTER (same family as index.html) ============ */
+footer.site{background:var(--black);color:var(--white);padding:56px 0}
+footer.site .wrap{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+footer.site .logo{color:var(--white)}
+footer.site nav{display:flex;gap:22px;font-size:15px;color:var(--muted-dark)}
+footer.site nav a:hover{color:var(--white)}
+footer.site .copy{color:var(--muted-dark);font-size:15px}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a href="/" class="logo">trainee</a>
+    <a href="/" class="back">&larr; Back to home</a>
+  </div>
+</header>
+
+<main class="policy">
+  <h1>Trainee — Assisted Apply: Privacy Policy</h1>
+  <p class="updated muted">Last updated: October 20, 2026</p>
+
+  <p class="intro">This extension fills Greenhouse job application forms in your own browser from the saved answers in your Trainee account, and records the employer's confirmation after you submit an application yourself.</p>
+
+  <h2>What it handles, and why</h2>
+  <ul>
+    <li><strong>Your sign-in:</strong> your email and password go only to Trainee's own sign-in service. Your password is never stored. A sign-in token is kept on your device until you sign out.</li>
+    <li><strong>Your saved answers:</strong> your name, contact details, education, work history and confirmed screening answers sync from your Trainee account to your browser over your signed-in session, and are stored on your device while you are signed in. Signing out deletes them from the device.</li>
+    <li><strong>The application page:</strong> on Greenhouse, the extension reads the form to fill it and reads each filled field back to check it.</li>
+    <li><strong>Your proof:</strong> after you submit, the extension reads the employer's confirmation page — the confirmation reference and a short excerpt around it, the page address, and the answers that were submitted — and sends them to your own Trainee tracker, where they become your application record. A screenshot of the confirmation page is kept on your device only and is never sent anywhere.</li>
+  </ul>
+
+  <h2>What it never does</h2>
+  <ul class="plain">
+    <li>It never submits an application for you, solves a captcha, or checks a legal attestation. Those are always your own acts.</li>
+    <li>It never sells or shares your data with advertisers, data brokers, or any third party, and it contains no analytics or tracking.</li>
+    <li>It never uses your answers for anyone else, and never guesses an answer: a field with no confirmed answer in your account is left empty for you.</li>
+  </ul>
+
+  <p class="questions">Questions: use the contact on the Trainee website.</p>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <a href="/" class="logo">trainee</a>
+    <nav aria-label="Footer">
+      <a href="/">Home</a>
+      <a href="/privacy">Privacy</a>
+    </nav>
+    <span class="copy">&copy; 2026 Trainee</span>
+  </div>
+</footer>
+
+</body>
+</html>

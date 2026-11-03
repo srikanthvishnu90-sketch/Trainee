@@ -10,6 +10,7 @@
 //   - a record that cannot be read is said so; nothing is guessed.
 // Anything that is not a question about where applications stand returns null, and the turn goes on as before.
 import { sameCompany } from "./career_mail.ts";
+import { type ApplySummary, applySummary } from "./apply_status_summary.ts";
 
 export const STATUS_INTENT = "career_apply_status";
 const MAX_LISTED = 8, RECENT_DAYS = 30;
@@ -166,11 +167,16 @@ export function liveRows(rows: AppRow[]): AppRow[] {
   const history = (a: AppRow) => a.state === "not_submitted" && a.reason === "needs_answers";
   return rows.filter((a) => !(history(a) && !!a.job_id && rows.some((b) => b !== a && b.job_id === a.job_id && Date.parse(b.created_at) > Date.parse(a.created_at))));
 }
-export function statusReply(message: string, rows: AppRow[] | null, now: number): { reply: string; status: string; intent: string } | null {
+export function statusReply(message: string, rows: AppRow[] | null, now: number): { reply: string; status: string; intent: string; summary?: ApplySummary } | null {
   const ask = statusAsk(message);
   if (!ask) return null;
   if (!rows) return { reply: "I couldn't read your applications just now, so I can't say whether any were sent. Ask me again in a minute.", status: "unreadable", intent: STATUS_INTENT };
   rows = liveRows(rows);
+  const r = statusReplyFor(ask, rows, now);
+  // Spec 6.5: the counts a reply may state, from the rows' own states (all of the person's live rows; "applied" only for a confirmed one).
+  return { ...r, summary: applySummary(rows) };
+}
+function statusReplyFor(ask: NonNullable<ReturnType<typeof statusAsk>>, rows: AppRow[], now: number): { reply: string; status: string; intent: string } {
   if (ask.latest) {
     const last = [...rows].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0];
     if (!last) return { reply: "I have no application on record for you, so nothing was sent through Trainee.", status: "none", intent: STATUS_INTENT };

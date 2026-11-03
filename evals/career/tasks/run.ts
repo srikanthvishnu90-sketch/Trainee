@@ -24,6 +24,7 @@
 // deno-lint-ignore-file no-explicit-any
 import { pgBinDir, type Pg, startPg } from "../../../tests/flow/pg.ts";
 import { careerHandler, type Chat, supabaseParity } from "../../../tests/flow/handler.ts";
+import { evalNow, PIN_DB_SQL, pinClock } from "./clock.ts";
 import { type EndState, type Expect, judge } from "./judge.ts";
 import { calls as fakeCalls, clearOracle, fakeOpenAI, type OracleStep, setMutation, setOracle } from "./fake_model.ts";
 
@@ -41,12 +42,12 @@ const ENV_KEYS = ["CAREER_BRAIN", "CAREER_PLANNER", "CAREER_PLANNER_USERS", "CAR
 const q = (s: string) => s.replace(/'/g, "''");
 const uid = (i: number) => `7b0f8f8e-6a43-4a49-9d2c-${String(7_000_000_000_000 + i).slice(-12)}`;
 
-async function seed(pg: Pg, ids: string[]) {
-  const P: any[] = SET.postings;
+async function seed(pg: Pg, ids: string[], at: string) {
+  const P: any[] = SET.postings, T = `'${at}'::timestamptz`;
   await pg.sql(`insert into public.career_postings (job_id, provider, board, company, title, location, url, description, first_seen_at, last_seen_at) values
-    ${P.map((p) => `('${p.job_id}', 'greenhouse', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', '${q(p.description)}', now(), now())`).join(",\n")};
+    ${P.map((p) => `('${p.job_id}', 'greenhouse', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', '${q(p.description)}', ${T}, ${T})`).join(",\n")};
     insert into public.career_kb_postings (posting_key, source, board, company, title, location, url, posted_at, text_excerpt, content_hash) values
-    ${P.map((p, i) => `('${p.job_id}', 'greenhouse', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', now() - interval '${i} hours', '${q(p.description)}', 'k${i}')`).join(",\n")};`);
+    ${P.map((p, i) => `('${p.job_id}', 'greenhouse', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', ${T} - interval '${i} hours', '${q(p.description)}', 'k${i}')`).join(",\n")};`);
   for (const id of ids) {
     await pg.sql(`insert into auth.users (id, email) values ('${id}', '${id}@example.test'); insert into public.profiles (id) values ('${id}');
       insert into public.career_watch_kv (user_id, key, value) values ('${id}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
@@ -81,6 +82,10 @@ export async function endState(pg: Pg, u: string): Promise<EndState & { metas: a
     tailored: Math.max(Number(await json(pg, `select count(*) from public.channel_artifacts where user_id = '${u}' and mime = 'application/pdf'`)),
       new Set(metas.flatMap((m) => (m?.planner?.steps ?? []).flatMap((s: any) => s?.detail?.tailored ?? []))).size),
     prep: metas.some((m) => /prep|interview_brief/.test(String(m?.intent ?? ""))) || planned("interview.prep") || tool("interview_brief"),
+    // The constraints the person's latest search ran with (the thread's discovery.lastParams), for corrections (spec 2.3).
+    search_params: [...stores].reverse().map((s) => s?.discovery?.lastAsk ?? s?.discovery?.lastParams).find((p) => p && typeof p === "object") ?? null,
+    readiness: [...metas].reverse().map((m) => m?.readiness).find((r) => r && typeof r === "object") ?? null,
+    apply_summary: [...metas].reverse().map((m) => m?.apply_summary).find((r) => r && typeof r === "object") ?? null,
     searched: stores.some((s) => Array.isArray(s?.discovery?.lastShortlist) && s.discovery.lastShortlist.length > 0) || tool("search_jobs"),
     metas,
   };
@@ -103,11 +108,16 @@ export async function runTasks(o: { brain: BrainName; model: "fake" | "openai"; 
   let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
   const items: TaskResult[] = [];
   let stopped: string | null = null;
+  // The run's clock is pinned (clock.ts): the product and the judge both read the same fixed day, whatever day the machine says.
+  const runAt = new Date().toISOString(), at = evalNow();
+  let unpin: (() => void) | null = null;
   try {
+    unpin = pinClock(at);
     await supabaseParity(pg);
+    await pg.sql(PIN_DB_SQL(at));
     const people: Record<string, string> = {};
     tasks.forEach((t) => { people[`tok-${t.id}`] = uid(TASKS.indexOf(t) + 1); });
-    await seed(pg, Object.values(people));
+    await seed(pg, Object.values(people), at);
     if (o.model === "fake") Deno.env.set("OPENAI_API_KEY", "sk-fake-tasks-not-a-key");
     else if (!Deno.env.get("OPENAI_API_KEY")) throw new Error("NOT RUN: --model openai needs OPENAI_API_KEY");
     // The outside world, as the eval sees it: the model (the fake, or OpenAI itself on a paid run), and the job boards of
@@ -155,8 +165,9 @@ export async function runTasks(o: { brain: BrainName; model: "fake" | "openai"; 
     }
     const passed = items.filter((x) => x.pass).length;
     return { label: o.label, brain: o.brain, model: o.model, total: items.length, passed, rate: items.length ? passed / items.length : 0,
-      invariant_breaks: items.filter((x) => x.failed.some((f) => f.startsWith("INVARIANT"))).length, stopped, cost_usd: o.model === "fake" ? 0 : await spent(), items, run_at: new Date().toISOString() };
+      invariant_breaks: items.filter((x) => x.failed.some((f) => f.startsWith("INVARIANT"))).length, stopped, cost_usd: o.model === "fake" ? 0 : await spent(), items, run_at: runAt };
   } finally {
+    unpin?.();
     setMutation(null);
     clearOracle();
     for (const [k, v] of Object.entries(saved)) { if (v === undefined) Deno.env.delete(k); else Deno.env.set(k, v); }

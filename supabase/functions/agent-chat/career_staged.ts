@@ -19,6 +19,7 @@ import { crisisReply } from "./crisis.ts";
 type Env = { get(k: string): string | undefined };
 type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler: string | null; contained?: boolean; result?: any }; isHostControlled(text: string, ctx: any): boolean };
 
+import { correctedAsk } from "../_shared/search_correction.ts";
 export type BrainMode = "router" | "agent" | "staged";
 // The served brain (release_config.ts): the committed PRODUCTION_BRAIN unless CAREER_BRAIN rolls it back to the router.
 // "agent" is never served from here (the full brain stays pinned off in career_brain.ts).
@@ -221,6 +222,9 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (o.host.isHostControlled(o.message, o.ctx)) return { brain: false, mode, intent: null, reason: "host_control" };
   // Crisis text is code's (crisis.ts): never the brain's, whatever the router would class it as.
   if (crisisReply(o.message) !== null) return { brain: false, mode, intent: null, reason: "crisis" };
+  // Spec 2.3: a correction to the last search ("remote only", "only individual-contributor roles") changes its constraints in
+  // code (search_correction.ts) and the next results use them; it is not a question for the brain.
+  if (correctedAsk(o.message, o.ctx.discovery)) return { brain: false, mode, intent: null, reason: "search_correction" };
   let probe, records: any[] = [];
   try { const copy = probeCtx(o.ctx); probe = o.host.runTurn(o.message, copy); records = Array.isArray(copy.containmentRecords) ? copy.containmentRecords as any[] : []; }
   catch { return { brain: false, mode, intent: null, reason: "probe_failed" }; }

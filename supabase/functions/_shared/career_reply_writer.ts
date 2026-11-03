@@ -52,6 +52,8 @@ export function writable(out: { intent?: string | null; reply?: string; parts?: 
   return true;
 }
 
+import { type ApplySummary, overclaims } from "./apply_status_summary.ts";
+
 // ---------------------------------------------------------------------------------------------------------------------
 // The verified facts of one turn.
 
@@ -64,9 +66,14 @@ export interface TurnFacts {
   // From the situation read at the top of the turn (career_situation.ts), bounded.
   tasks: { company: string | null; title: string | null; state: string }[];
   next: { who: string; what: string; say?: string }[];
+  // Structured data the reply is written from (spec 2.2, 6.5): what an application still needs (apply_readiness.ts) and the status
+  // counts from row states (apply_status_summary.ts), as fact text; and how many rows may be called applied (evidenced only).
+  needs?: string;
+  counts?: string;
+  applied_ok?: number;
 }
 // deno-lint-ignore no-explicit-any
-export function factsForTurn(o: { reply: string; intent?: string | null; resultStatus?: string | null; effects?: { sent?: number; queued?: number; sendUnknown?: number; writes?: { size: number } } | null; situation?: any }): TurnFacts {
+export function factsForTurn(o: { needs?: string | null; counts?: string | null; appliedOk?: number | null; reply: string; intent?: string | null; resultStatus?: string | null; effects?: { sent?: number; queued?: number; sendUnknown?: number; writes?: { size: number } } | null; situation?: any }): TurnFacts {
   const s = o.situation && typeof o.situation === "object" ? o.situation : null;
   const tasks = Array.isArray(s?.tasks) ? s.tasks.filter((t: any) => t && t.kind !== "question").slice(0, 20)
     .map((t: any) => ({ company: t.company ? String(t.company) : null, title: t.title ? String(t.title) : null, state: String(t.state ?? "") })) : [];
@@ -76,13 +83,14 @@ export function factsForTurn(o: { reply: string; intent?: string | null; resultS
     said: String(o.reply ?? ""), intent: o.intent ?? null, status: o.resultStatus ?? null,
     effects: { sent: Number(e.sent) || 0, queued: Number(e.queued) || 0, sendUnknown: Number(e.sendUnknown) || 0, wrote: (e.writes?.size ?? 0) > 0 },
     tasks, next,
+    ...(o.needs ? { needs: o.needs } : {}), ...(o.counts ? { counts: o.counts } : {}), ...(typeof o.appliedOk === "number" ? { applied_ok: o.appliedOk } : {}),
   };
 }
 
 // Everything the facts establish, as sets the check compares against.
 interface Ledger { text: string; numbers: Set<string>; links: Set<string>; emails: Set<string>; claims: Set<string>; verbs: string }
 function factsText(f: TurnFacts): string {
-  return [f.said, ...f.tasks.map((t) => [t.company, t.title, t.state].filter(Boolean).join(" ")), ...f.next.map((n) => `${n.what} ${n.say ?? ""}`)].join("\n");
+  return [f.said, f.needs ?? "", f.counts ?? "", ...f.tasks.map((t) => [t.company, t.title, t.state].filter(Boolean).join(" ")), ...f.next.map((n) => `${n.what} ${n.say ?? ""}`)].join("\n");
 }
 function ledgerOf(f: TurnFacts): Ledger {
   const text = factsText(f);
@@ -198,6 +206,8 @@ export function factCheck(text: string, f: TurnFacts): string[] {
     out.push(`"${w}" after "${m[0].split(/\s+/)[0]}" reads as a name that is not in the facts`);
   }
   for (const c of positiveClaims(text)) if (!L.claims.has(c)) out.push(`says "${c}" but the facts do not`);
+  // Spec 6.5: "applied" (or a confirmed count) only for an evidenced submission, whatever else the facts say.
+  if (typeof f.applied_ok === "number") for (const o of overclaims(text, { applied_ok: f.applied_ok } as ApplySummary)) out.push(o);
   const factStems = new Set((L.verbs.match(/[a-z]+/g) ?? []).map(stem));
   for (const v of promisesIn(text)) if (!factStems.has(stem(v))) out.push(`promises "${v}" but the facts do not`);
   return [...new Set(out)];
@@ -305,7 +315,7 @@ export function writerPayload(f: TurnFacts, message: string, channel: WriterChan
   const did = [f.effects.sent ? `${f.effects.sent} email(s) sent this turn` : "", f.effects.queued ? `${f.effects.queued} application(s) queued this turn` : ""].filter(Boolean).join("; ");
   return {
     system: `${VOICE_RULES}\n${FORMAT[channel] ?? FORMAT.web}`,
-    messages: [{ role: "user", content: `THEY SAID:\n${String(message ?? "").slice(0, 1500)}\n\nREPLY (what Trainee's code wrote from their account this turn):\n${f.said.slice(0, 6000)}\n\nSITUATION:\n${situation || "- nothing else in flight"}${did ? `\n\nTHIS TURN DID: ${did}` : ""}` }],
+    messages: [{ role: "user", content: `THEY SAID:\n${String(message ?? "").slice(0, 1500)}\n\nREPLY (what Trainee's code wrote from their account this turn):\n${f.said.slice(0, 6000)}\n\nSITUATION:\n${situation || "- nothing else in flight"}${did ? `\n\nTHIS TURN DID: ${did}` : ""}${f.needs ? `\n\nWHAT AN APPLICATION STILL NEEDS (data; ask at most the first, one question, never a password, code or ID number): ${f.needs}` : ""}${f.counts ? `\n\nCOUNTS (from row states; say no other number; "applied" only for submitted and confirmed): ${f.counts}` : ""}` }],
     max_tokens: 400, temperature: 0.4,
   };
 }

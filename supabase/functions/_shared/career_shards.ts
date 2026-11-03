@@ -104,6 +104,16 @@ export function goneReadsOf(s: Pick<BoardState, "last_status" | "fail_count">): 
   return /^failed: HTTP (404|410)$/.test(st) ? Math.max(1, s.fail_count || 0) : 0;
 }
 
+// 2026-11-03 (ingest round 3): how many complete reads in a row before this one listed nothing while the board had open
+// postings ("ok [empty x2]"); career_ingest.ts EMPTY_AFTER closes them at the third. Any other status starts again at 0.
+export function emptyReadsOf(s: Pick<BoardState, "last_status">): number {
+  const m = /^ok \[empty x(\d+)\]$/.exec(String(s.last_status ?? ""));
+  return m ? Number(m[1]) : 0;
+}
+
+// Round 3: a pass read in parts whose first part marked what it saw ("partial: next part from 980 [seen marked]").
+export const passMarkedOf = (s: Pick<BoardState, "last_status">) => /^partial: .*\[seen marked\]$/.test(String(s.last_status ?? ""));
+
 export function fnv1a(s: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }

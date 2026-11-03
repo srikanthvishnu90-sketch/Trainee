@@ -4,7 +4,7 @@ What was found on the live site and what the repo now does. Nothing here was app
 
 ## Findings
 
-- **/file and /connect are not Vercel 404s.** On the production deployment (release/production, dpl_Dep28fNj) the root `vercel.json` rewrites and the root `api/` functions both deploy with Output Directory `site`. `/connect` runs `api/connect.js` and answers 503 "not set up" because `TRAINEE_CONNECT_UPSTREAM` is unset. `/file` runs `api/file.js`; `TRAINEE_FILE_UPSTREAM` is set, but the edge function it points at is not deployed (the Supabase project `mrwngntwmnaqrqhupvlt` lists no `trainee-file` and no `trainee-connect`), so Supabase answered `{"code":"NOT_FOUND","message":"Requested function was not found"}` and the proxy passed it through as a 404.
+- **/file and /connect are not Vercel 404s.** On the production deployment (release/production, dpl_Dep28fNj) the root `vercel.json` rewrites and the root `api/` functions both deploy. `/connect` runs `api/connect.js` and answers 503 "not set up" because `TRAINEE_CONNECT_UPSTREAM` is unset. `/file` runs `api/file.js`; `TRAINEE_FILE_UPSTREAM` is set, but the edge function it points at is not deployed (the Supabase project `mrwngntwmnaqrqhupvlt` lists no `trainee-file` and no `trainee-connect`), so Supabase answered `{"code":"NOT_FOUND","message":"Requested function was not found"}` and the proxy passed it through as a 404.
 - **/privacy** is the browser-extension policy (the page `main` served since Oct 20). Trainee has no chat-service privacy policy yet: it needs `LEGAL_NAME`, `SUPPORT_EMAIL`, `GOVERNING_STATE` (`docs/launch/legal-pages/owner-inputs.json`), which are unset.
 - The homepage source (`site/index.html` on trunk) was the unbuilt template: `[YOUR PRICE]`, `[DATE]`, founder placeholders, `careers@example.com`, the Twilio sandbox WhatsApp link, an unclipped-select CSS bug.
 
@@ -23,9 +23,10 @@ What was found on the live site and what the repo now does. Nothing here was app
 3. Price, launch timing, founder story and bio: supply real text or leave them out.
 4. The extension policy text is not edited; PR #440 lists where it no longer matches extension 0.2.0. Needs your review.
 
-## Vercel and Supabase steps (dashboard, owner only)
+## Needed for /file and /connect to work (facts only, not decided here)
 
-1. Supabase: deploy the `trainee-file` and `trainee-connect` edge functions (`supabase functions deploy trainee-file trainee-connect`).
-2. Vercel, project `trainee`, Settings, Environment Variables (Production): `TRAINEE_FILE_UPSTREAM` = `https://mrwngntwmnaqrqhupvlt.supabase.co/functions/v1/trainee-file`; `TRAINEE_CONNECT_UPSTREAM` = `https://mrwngntwmnaqrqhupvlt.supabase.co/functions/v1/trainee-connect`. Redeploy so the functions pick them up.
-3. Output Directory `site` can stay: functions and rewrites deploy from the repo root regardless (verified live). Do not add `outputDirectory` to `vercel.json`.
-4. After deploy check `/`, `/privacy`, `/file`, `/connect` (503 "not available yet" until step 1 is done).
+- Supabase: the `trainee-file` and `trainee-connect` edge functions are not deployed.
+- Vercel env vars the proxies read: `TRAINEE_FILE_UPSTREAM` and `TRAINEE_CONNECT_UPSTREAM` (the functions' `/functions/v1/<name>` URLs).
+- Until both are in place `/file` and `/connect` answer 503.
+
+Vercel Output Directory and production routes: Instinct decides at release time; not touched here.

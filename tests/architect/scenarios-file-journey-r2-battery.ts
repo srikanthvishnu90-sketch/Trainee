@@ -14,7 +14,7 @@
 //   - rendering truth: every company, title and lettermark whole (no half emoji), escaped, bidi controls dropped; no foreign tag,
 //     handler, script or javascript:/data: link; the plain-text twin likewise;
 //   - security on every response: CSP with hashed scripts only and frame-ancestors limited to Telegram, nosniff, no-store,
-//     no-referrer; every cookie HttpOnly, Secure, SameSite; every redirect to this host's own path; a session id planted before the
+//     a referrer policy that never sends to another site (same-origin); every cookie HttpOnly, Secure, SameSite; every redirect to this host's own path; a session id planted before the
 //     sign-in never survives it; sign-in texts and code tries per link stay under their caps and a stranger's number gets no text;
 //   - accessibility that decides correctness: every Apply names its role and company, every status chip is a status, the page has
 //     one live region for what changed.
@@ -23,11 +23,11 @@ import assertNode from "node:assert/strict";
 import { handleFile, type AppRow, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
 import { hashTag, jobViewOf, refOf, sendJobCards, tapJob, type JobDeps, type JobSender, type JobView, type PostingRow, type PreparedRow } from "../../supabase/functions/_shared/telegram_jobs.ts";
 import { feedUrlsFor } from "../../supabase/functions/_shared/file_link.ts";
-import { MAX_CODE_SENDS, MAX_CODE_TRIES, SESSION_TTL_MS, sha256, startSession, type PhoneAuth, type SessionStore } from "../../supabase/functions/_shared/file_session.ts";
+import { MAX_CODE_SENDS, MAX_CODE_TRIES, pageTokenOf, SESSION_TTL_MS, sha256, startSession, type PhoneAuth, type SessionStore } from "../../supabase/functions/_shared/file_session.ts";
 import { FEED_SCRIPT, renderFeed } from "../../supabase/functions/_shared/file_page.ts";
 import type { TapStore } from "../../supabase/functions/_shared/channel_card_tap.ts";
 import { wantsFrom } from "../../supabase/functions/_shared/career_apply_want.ts";
-import { fakePhone, memSessions } from "./file-session-fakes.ts";
+import { fakePhone, memSessions, phonePost } from "./file-session-fakes.ts";
 import { Page } from "./scenarios/file-journey-r2-dom.ts";
 import { descOf, generate, type PostingSpec, type PrepKind, type Scenario, type Step, TEXT, TITLE } from "./scenarios/file-journey-r2-generator.ts";
 
@@ -312,7 +312,7 @@ async function checkResponse(rep: Report, where: string, res: Response, body: st
   }
   if (h.get("x-content-type-options") !== "nosniff") fail("no nosniff");
   if (!/no-store/.test(h.get("cache-control") ?? "")) fail("cacheable");
-  if (h.get("referrer-policy") !== "no-referrer") fail("referrer leaks");
+  if (h.get("referrer-policy") !== "same-origin") fail("referrer leaks"); // same-origin since the web-security round: nothing to another site
   for (const c of h.getSetCookie()) if (!/;\s*HttpOnly/i.test(c) || !/;\s*Secure/i.test(c) || !/;\s*SameSite=(Lax|Strict)/i.test(c) || !/;\s*Path=\//.test(c)) fail("a cookie without HttpOnly / Secure / SameSite / Path", c.replace(/=fs1\.[0-9a-f]+/, "=fs1.…").replace(/=v1\.[^;]+/, "=v1.…"));
   const loc = h.get("location");
   if (loc !== null && !/^\/(?![\/\\])/.test(loc)) fail("a redirect that leaves this host's own path", loc);
@@ -412,10 +412,12 @@ export async function runScenario(s: Scenario, w: World, rep: Report, o: { pg?: 
   const draws: [Truth | null, Truth | null] = [null, null];
   let jtiTexts = new Map<string, number>(); void jtiTexts;
   const signIns = { links: 0, own: 0 };
-  const req = async (wh: string, dev: number, r: { get?: string; form?: Record<string, string>; noCookie?: boolean; ua?: string; path?: string }, privateOk: boolean): Promise<{ res: Response; body: string }> => {
+  // The page token a page drawn for a phone session carries in its forms (file_session.ts PAGE_TOKEN).
+  const tokOf = async (sid: string) => sid ? (await pageTokenOf(await sha256(sid), SECRET_LINK))! : "";
+  const req = async (wh: string, dev: number, r: { get?: string; form?: Record<string, string>; noCookie?: boolean; cookie?: string; ua?: string; path?: string }, privateOk: boolean): Promise<{ res: Response; body: string }> => {
     const b = B[dev];
     const path = r.path ?? "/file";
-    const headers: Record<string, string> = r.noCookie ? {} : { cookie: cookieHeader(b) };
+    const headers: Record<string, string> = r.noCookie ? (r.cookie ? { cookie: r.cookie } : {}) : { cookie: cookieHeader(b) };
     if (r.ua) headers["user-agent"] = r.ua;
     const init: RequestInit = r.form ? { method: "POST", headers: { ...headers, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(r.form).toString() } : { headers };
     const res = await handleFile(new Request(`https://trainee.example${path}${r.get ?? ""}`, init), w.deps);
@@ -502,8 +504,8 @@ export async function runScenario(s: Scenario, w: World, rep: Report, o: { pg?: 
         if (st.plant === "other_account") {
           if (r.res.status !== 403) { fail(wh, "another account's planted session did not stop the link", String(r.res.status)); break; }
           // The person signs out of the other account from that page, then opens the link again.
-          const t = /name="t" value="(fs1\.[0-9a-f]{64})"><input type="hidden" name="action" value="signout"/.exec(r.body)?.[1];
-          if (t !== b.planted) { fail(wh, "the different-account page offers no sign out of that session"); break; }
+          const t = /name="t" value="(fp1\.[0-9a-f]{64})"><input type="hidden" name="action" value="signout"/.exec(r.body)?.[1];
+          if (!t || t !== await pageTokenOf(await sha256(b.planted), SECRET_LINK)) { fail(wh, "the different-account page offers no sign out of that session"); break; }
           await req(wh, st.dev, { form: { t, action: "signout" } }, false);
           const again = await req(wh, st.dev, { path, get: `?t=${encodeURIComponent(fresh)}` }, false);
           await follow(wh, st.dev, again.res, false);
@@ -559,7 +561,7 @@ export async function runScenario(s: Scenario, w: World, rep: Report, o: { pg?: 
         else if (st.tag === "stale") tag = p.hashes.length > 1 ? hashTag(p.hashes[p.hashes.length - 2]) : "0123456789abcdef";
         else if (st.tag === "forged") tag = (await sha(`${s.id}|${k}`)).slice(0, 16);
         else tag = "none";
-        const t = b.jar.get("tf_s") ?? /name="t" value="([^"]*)"/.exec(b.page ?? "")?.[1] ?? "";
+        const t = b.jar.get("tf_s") ? (await pageTokenOf(await sha256(b.jar.get("tf_s")!), SECRET_LINK))! : /name="t" value="([^"]*)"/.exec(b.page ?? "")?.[1] ?? "";
         const ok = await valid(st.dev);
         const idx = T0w.list.indexOf(ref);
         if (ok && idx < 30 && tag !== "none" && approvableNow(p, T0w, w.clock.now) && tag === hashTag(T0w.prep.get(p.jobId)!.hash)) expectApprove = new Set([p.jobId]);
@@ -623,7 +625,7 @@ export async function runScenario(s: Scenario, w: World, rep: Report, o: { pg?: 
         const setOf = (T: Truth) => T.list.slice(0, 30).map((ref) => w.posts.find((x) => x.ref === ref)!).filter((p) => approvableNow(p, T, w.clock.now)).map((p) => `${p.ref}:${hashTag(T.prep.get(p.jobId)!.hash)}`).join(",");
         // The page dedups the same posting twice; none are generated, so the approvable set is the set.
         if (ok && D && setOf(D) === setOf(T1) && setOf(T1)) expectApprove = new Set(T1.list.slice(0, 30).map((ref) => w.posts.find((x) => x.ref === ref)!).filter((p) => approvableNow(p, T1, w.clock.now)).map((p) => p.jobId));
-        const t = b.jar.get("tf_s") ?? "";
+        const t = await tokOf(b.jar.get("tf_s") ?? "");
         const r = await req(wh, st.dev, { form: { t, action: "applyall", set } }, ok);
         if (!ok) { if (!/Nothing was approved or sent from this tap/.test(textOf(r.body))) fail(wh, "an Apply to all on an ended session does not say nothing was approved"); break; }
         if (r.res.status === 200) { const after = await w.truth(); checkFeed(rep, wh, r.body, w, after); b.page = r.body; draws[st.dev] = after; }
@@ -665,7 +667,7 @@ export async function runScenario(s: Scenario, w: World, rep: Report, o: { pg?: 
       case "clock": w.clock.now += st.ms; bump(rep, st.ms >= SESSION_TTL_MS ? "clock past expiry" : "clock before expiry"); break;
       case "phone_change": if (accounts) accounts[w.userId] = "+15125550111"; bump(rep, "phone changed"); break;
       case "signout": {
-        const t = B[st.dev].jar.get("tf_s") ?? "";
+        const t = await tokOf(B[st.dev].jar.get("tf_s") ?? "");
         const ok = await valid(st.dev);
         const r = await req(wh, st.dev, { form: { t, action: st.all ? "signout_all" : "signout" } }, false);
         if (ok && r.res.status !== 200) fail(wh, "sign out failed", String(r.res.status));
@@ -695,7 +697,8 @@ export async function runScenario(s: Scenario, w: World, rep: Report, o: { pg?: 
         const p = w.posts.find((x) => x.ref === ref)!;
         const tag = before.prep.get(p.jobId) ? hashTag(before.prep.get(p.jobId)!.hash) : "none";
         const vt = await w.vSession();
-        const r = await req(wh, 1, { noCookie: true, form: { t: vt, action: "apply", ref, tag } }, false);
+        // V's own browser (V's cookie and V's page token) against this account's row
+        const r = await req(wh, 1, { noCookie: true, cookie: `tf_s=${vt}`, form: { t: await tokOf(vt), action: "apply", ref, tag } }, false);
         if (r.res.status !== 404) fail(wh, "another account's session reached this account's row", String(r.res.status));
         bump(rep, "foreign session refused");
         break;
@@ -785,7 +788,8 @@ async function signedWorld(postings: PostingSpec[], id = 990_001) {
   const accounts = w.accounts;
   const sid = await startSession(w.sessions, { userId: U, via: "phone", phone: accounts[U], telegramId: null, list: w.listId, now: w.clock.now });
   const get = async (q = "") => await (await handleFile(new Request(`https://trainee.example/file${q}`, { headers: { cookie: `tf_s=${sid}` } }), w.deps)).text();
-  const post = async (f: Record<string, string>) => { const r = await handleFile(new Request("https://trainee.example/file", { method: "POST", headers: { cookie: `tf_s=${sid}`, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(f).toString() }), w.deps); return { status: r.status, body: await r.text() }; };
+  // The signed-in browser's post: its cookie, and in the form the page token drawn for it (a test's `t: sid` stands for that).
+  const post = async (f: Record<string, string>) => { const g = { ...f }; if (g.t === sid) g.t = (await pageTokenOf(await sha256(sid), SECRET_LINK))!; const r = await handleFile(new Request("https://trainee.example/file", { method: "POST", headers: { cookie: `tf_s=${sid}`, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(g).toString() }), w.deps); return { status: r.status, body: await r.text() }; };
   return { w, sid, get, post, accounts };
 }
 const formTag = (html: string, ref: string) => new RegExp(`name="ref" value="${ref}"><input type="hidden" name="tag" value="([0-9a-f]{16}|none)">`).exec(html)?.[1] ?? null;
@@ -863,7 +867,7 @@ export function journeyRegressions() {
     const html = await (await handleFile(new Request("https://trainee.example/file", { headers: { cookie: `tf_s=${sid}` } }), w.deps)).text();
     eq((html.match(/<li class="row"/g) ?? []).length, 30);
     assertNode.ok(html.includes("Showing the first 30 of 45. Ask Trainee in Telegram for the rest."));
-    const r = await handleFile(new Request("https://trainee.example/file", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ t: sid, action: "apply", ref: w.posts[35].ref, tag: "none" }).toString() }), w.deps);
+    const r = await handleFile(new Request("https://trainee.example/file", await phonePost({ t: sid, action: "apply", ref: w.posts[35].ref, tag: "none" }, SECRET_LINK)), w.deps);
     eq(r.status, 404);
     assertNode.ok(/past them\. Nothing was sent\./.test(textOf(await r.text())));
   });
@@ -891,10 +895,10 @@ export function journeyRegressions() {
     assertNode.ok(/nothing was approved\. Tap Apply again in a minute\./.test(note) && !/Confirm/.test(note), note);
   });
   Deno.test("regression: the script path is the plain form's twin: one request, focus back on the row, the change announced; an answer that is not the list is shown, never posted again (was: focus lost, nothing announced, a second POST)", async () => {
-    const { w, get } = await signedWorld([spec(1), spec(2, { prep: null }), spec(3)]);
+    const { w, get, sid } = await signedWorld([spec(1), spec(2, { prep: null }), spec(3)]);
     let requests = 0;
     const html = await get();
-    const page = new Page("https://trainee.example/file", html, async (body) => { requests++; return await (await handleFile(new Request("https://trainee.example/file", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body }), w.deps)).text(); });
+    const page = new Page("https://trainee.example/file", html, async (body) => { requests++; return await (await handleFile(new Request("https://trainee.example/file", { method: "POST", headers: { cookie: `tf_s=${sid}`, "content-type": "application/x-www-form-urlencoded" }, body }), w.deps)).text(); });
     page.run();
     const form = (ref: string) => page.html.getElementById(`r-${ref}`)!.all().find((n) => n.tag === "form")!;
     await page.tap(form(w.posts[1].ref));
@@ -914,6 +918,6 @@ export function journeyRegressions() {
     assertNode.ok(/\.name,\.role,\.desc,\.full\{unicode-bidi:plaintext;text-align:start\}/.test(css));
   });
 }
-// The page's session value as the page holds it (the form's own hidden input).
-async function signedWorldSid(html: string) { return /name="t" value="(fs1\.[0-9a-f]{64})"/.exec(html)![1]; }
+// The page's form value as the page holds it (the form's own hidden input: the session's page token, never its id).
+async function signedWorldSid(html: string) { return /name="t" value="(fp1\.[0-9a-f]{64})"/.exec(html)![1]; }
 function renderFeedFor() { return renderFeed({ token: "x", rows: [], setHash: null, setSize: 0 }); }

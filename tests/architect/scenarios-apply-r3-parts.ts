@@ -1,6 +1,7 @@
 // The in-memory half of apply round 3, in two parts (scenarios-apply-r3.test.ts: even scenarios + the regressions;
 // scenarios-apply-r3-2.test.ts: odd scenarios). Together they run every generated scenario once.
-import { eq, memWorld, newReport, parsePage, printReport, quarantineRulesAgree, runScenario, SCENARIOS, T0, U } from "./scenarios-apply-r3-battery.ts";
+import { eq, memWorld, newReport, parsePage, printReport, quarantineRulesAgree, runScenario, SCENARIOS, SECRET_LINK, T0, U } from "./scenarios-apply-r3-battery.ts";
+import { phonePost } from "./file-session-fakes.ts";
 import { handleFile } from "../../supabase/functions/trainee-file/handler.ts";
 import { tapJob } from "../../supabase/functions/_shared/telegram_jobs.ts";
 import { unsendableWhy, untrustedAnswers } from "../../supabase/functions/_shared/apply_trust.ts";
@@ -15,7 +16,7 @@ async function drawAndTap(s: Scenario, mutate?: (w: Awaited<ReturnType<typeof me
   const page = parsePage(await (await get()).text());
   if (mutate) await mutate(w);
   const tag = page.rows[0].tag ?? "none";
-  const tap = await (await handleFile(new Request("https://trainee.example/file", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ t: w.tokens.A, action: "apply", ref: w.posts[0].ref, tag }).toString() }), w.deps)).text();
+  const tap = await (await handleFile(new Request("https://trainee.example/file", await phonePost({ t: w.tokens.A, action: "apply", ref: w.posts[0].ref, tag }, SECRET_LINK)), w.deps)).text();
   const said: string[] = [];
   await tapJob({ userId: U, data: `jca:${w.posts[0].ref}`, messageId: null, deps: w.deps, send: { photo: async () => ({ ok: true }), text: async (a: { text: string; buttons?: unknown }) => { said.push(`${a.text}${a.buttons ? " [buttons]" : ""}`); return { ok: true, id: null }; } } as never });
   return { w, page, tap, said, apps: (await w.truth()).apps };

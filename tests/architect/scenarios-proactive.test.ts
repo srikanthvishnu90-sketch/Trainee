@@ -410,7 +410,7 @@ async function mailRun(s: BudgetScenario, gate: BudgetGate | null, request: type
   const store = { ...base, claimModelCalls: async (_u: string, want: number) => want };
   const outbox = memoryAlertStore();
   const mails = (u: string): MailIn[] => UNSURE.slice(0, s.perPerson).map(([subject, snippet], i) => ({ hash: `${u}-${i}`, from: GH, subject, snippet, date: iso(s.now - (10 - i) * MIN), auth: AUTH("greenhouse.io") }));
-  const model = gate ? mailModelWiring({ get: (k: string) => (k === "OPENAI_API_KEY" ? "sk-test-not-a-real-key" : undefined) }, { from: () => ({ insert: async () => ({ error: null }) }) }, request) : null;
+  const model = gate ? mailModelWiring({ get: (k: string) => (k === "ANTHROPIC_API_KEY" ? "sk-test-not-a-real-key" : undefined) }, { from: () => ({ insert: async () => ({ error: null }) }) }, request) : null;
   resetLocalBudgetGate(gate);
   try {
     const stats = await runMail({ outbox, now: s.now, store, read: async (u) => ({ status: "ok", mails: mails(u), readThrough: s.now, listed: s.perPerson }), model });

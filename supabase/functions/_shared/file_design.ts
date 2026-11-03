@@ -218,7 +218,7 @@ export const FILE_CSS = `
 .fcard{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px 20px 28px;box-shadow:0 1px 2px rgba(20,20,20,.04)}
 .ftitle{margin:0;font-family:${DISPLAY_FONT};font-weight:500;font-size:30px;line-height:1.18;overflow-wrap:anywhere}
 .eyebrow{margin:0 0 6px;font-size:14px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--mute)}
-.stamp{margin:8px 0 0;font-size:15px;color:var(--mute)}.intro{margin:14px 0 0;font-size:17px}
+.stamp{margin:8px 0 0;font-size:15px;color:var(--mute)}.stamp .v-unknown{color:inherit}.intro{margin:14px 0 0;font-size:17px}
 .fsec{margin:22px 0 0;padding-top:16px;border-top:1px solid var(--line)}
 .flabel{margin:0 0 10px;font-size:14px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--mute)}
 ol.nrows{list-style:none;margin:0;padding:0}

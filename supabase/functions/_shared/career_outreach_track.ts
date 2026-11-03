@@ -18,6 +18,7 @@
 // The reminder fires from runOutreachFollowups (the scheduled run): once, to the person's outbox, only while no reply is
 // on record. Every record is the person's own (by user id); a name matches only someone they wrote to through Trainee.
 import type { Outbox } from "./career_alert_store.ts";
+import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 release flags
 import { neverOpen } from "./career_people_sites.ts";
 import type { EventStore } from "./agent/timeline.ts";
 import { batchMessages, blockedAddresses, confirmed, draftFor, emailHash, type Followup, FOLLOWUP_DAYS, footerOf, messageOf, type ModelFn, OUTREACH_INTENT,
@@ -472,6 +473,6 @@ export async function runOutreachFollowups(o: RunOpts) {
 // outbox row is queued and no reminder is marked fired, however many are due. Sending has its own switch
 // (CAREER_OUTREACH_SEND); the reminders need no Gmail, so this gate stands on its own.
 export async function runOutreachFollowupsGated(env: { get(k: string): string | undefined }, o: RunOpts) {
-  if (env.get("CAREER_OUTREACH_FOLLOWUPS") !== "on") return undefined;
+  if (!releaseFlagOn(env, "CAREER_OUTREACH_FOLLOWUPS")) return undefined;
   return await runOutreachFollowups(o);
 }

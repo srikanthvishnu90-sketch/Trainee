@@ -27,7 +27,7 @@ Deno.test("OQ-1 open entry questions go to the brain with CAREER_BRAIN=staged an
 Deno.test("OQ-2 without CAREER_KNOWLEDGE=on (no research tool) the library answer stays: nothing unsourced from the model", () => {
   for (const m of OPEN) assertNode.equal(decide(m, env({ CAREER_BRAIN: "staged" })).reason === "open_career_question", false, m);
   assertNode.equal(decide(OPEN[0], env({ CAREER_BRAIN: "staged" })).reason, "code_product");
-  assertNode.equal(decide(OPEN[0], env({ CAREER_KNOWLEDGE: "on" })).brain, false, "router mode: never");
+  assertNode.equal(decide(OPEN[0], env({ CAREER_BRAIN: "router", CAREER_KNOWLEDGE: "on" })).brain, false, "router mode (the D-035 rollback): never");
 });
 Deno.test("OQ-3 company-specific and posting-requirement asks stay on the library / code", () => {
   for (const m of ["what does Stripe look for in software engineers?", "what do data analyst postings usually require?", "how do I get hired at Goldman Sachs as an analyst?", "find me data analyst jobs in Chicago", "apply to the Backend Software Engineer role at Ironstack Payments"]) {

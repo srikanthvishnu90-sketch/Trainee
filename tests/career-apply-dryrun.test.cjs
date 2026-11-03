@@ -24,8 +24,10 @@ const skip = pw ? false : "PLAYWRIGHT_UNRESOLVABLE: set UPMORE_PLAYWRIGHT_PATH";
 
 test("matchOption: one clear match or an error, never the closest", () => {
   const L = ["Yes, I am authorized to work", "No, I need work authorization"];
-  assert.deepEqual(matchOption(L, "Yes"), { index: 0 });
-  assert.deepEqual(matchOption(L, "no"), { index: 1 });
+  // #340: only the option's exact words; "Yes" is not "Yes, I am authorized to work" (tests/career-apply-exact-option.test.cjs).
+  assert.deepEqual(matchOption(L, "yes, i am authorized to work"), { index: 0 });
+  assert.deepEqual(matchOption(L, "No, I need work authorization"), { index: 1 });
+  assert.equal(matchOption(L, "Yes").error, "no_matching_option");
   assert.equal(matchOption(L, "Maybe").error, "no_matching_option");
   assert.equal(matchOption(["No", "Not sure"], "Not applicable").error, "no_matching_option", "'Not applicable' is not 'No'");
   assert.deepEqual(matchOption(["No", "Not sure"], "no"), { index: 0 });

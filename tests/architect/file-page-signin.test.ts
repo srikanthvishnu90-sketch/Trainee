@@ -6,11 +6,11 @@
 // fake text message: no network, no model, no database.
 import assertNode from "node:assert/strict";
 import { mintFileToken } from "../../supabase/functions/_shared/file_link.ts";
-import { LOGIN_TTL_MS, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, sha256, SESSION_TTL_MS } from "../../supabase/functions/_shared/file_session.ts";
+import { LOGIN_TTL_MS, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, PAGE_TOKEN, sha256, SESSION_TTL_MS } from "../../supabase/functions/_shared/file_session.ts";
 import { handleFile, type AppRow, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
 import { hashTag, jobViewOf, refOf, type PreparedRow } from "../../supabase/functions/_shared/telegram_jobs.ts";
 import type { TapStore } from "../../supabase/functions/_shared/channel_card_tap.ts";
-import { fakePhone, memSessions, sessionFor } from "./file-session-fakes.ts";
+import { fakePhone, memSessions, phonePost, sessionFor, signedInit } from "./file-session-fakes.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -126,9 +126,9 @@ Deno.test("flow: link -> phone number -> code texted to the account's own phone 
   // R16: employer-domain default. The employer's own domain, through this page's own origin; no third-party favicon service.
   assert(html.includes(`<img src="?logo=acme.com"`) && !/s2\/favicons/.test(html), "the employer's logo from its own domain");
   assert(/Sign out everywhere/.test(html));
-  // Apply: the hash the row shows, the session's own id in the form
+  // Apply: the hash the row shows, the session's page token in the form (never its id: that is in the HttpOnly cookie only)
   const t = fieldT(html), tag = tagOf(html, "Acme"), ref = refIn(html, "Acme");
-  eq(t, sid); eq(tag, hashTag(H));
+  assert(PAGE_TOKEN.test(t) && t !== sid && !html.includes(sid), "the page carries a page token, never the session id"); eq(tag, hashTag(H));
   const applied = await (await b.post({ t, action: "apply", ref, tag })).text();
   eq(w.log.answered.length, 1); eq(w.log.answered[0].n, 1);
   assert(/Queued/.test(applied) && !/Applied/.test(plain(applied).replace(/Applying with/g, "")), "queued, never called applied before a submit");
@@ -198,9 +198,9 @@ Deno.test("wrong account: a browser signed in as V opens U's link and sees nothi
   eq(w.P.texts.filter((x) => x.phone === U_PHONE).length, 0);
   eq((await su.verify(vcode)).status, 401, "a code that proves V never opens U's link");
   assert(!b2.jar.has("tf_s"));
-  // and V's session id posted against U's rows approves nothing
+  // and V's session (V's browser: cookie and page token) posted against U's rows approves nothing
   const vsid = b.jar.get("tf_s")!;
-  const p = await handleFile(new Request("https://trainee.example/file", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ t: vsid, action: "apply", ref: w.refs[0], tag: hashTag(H) }).toString() }), w.d);
+  const p = await handleFile(new Request("https://trainee.example/file", await phonePost({ t: vsid, action: "apply", ref: w.refs[0], tag: hashTag(H) }, SECRET)), w.d);
   eq(p.status, 404); eq(w.log.answered, []);
 });
 
@@ -281,18 +281,18 @@ Deno.test("revoked: sign out ends this session for reads and Apply; sign out eve
   for (const b of [laptop, phone]) { const s = await signIn(w, b); eq((await s.verify(w.P.lastCode())).status, 303); }
   w.tg["777"] = U;
   const mini = await sessionFor(w.S.store, { userId: U, list: LIST, now: NOW, via: "telegram", telegramId: "777" });
-  const lt = fieldT(await (await laptop.open("/file")).text());
+  const lt = fieldT(await (await laptop.open("/file")).text()), lsid = laptop.jar.get("tf_s")!;
   const out = await laptop.post({ t: lt, action: "signout" });
   eq(out.status, 200); assert(/signed out on this device/.test(plain(await out.text())) && !laptop.jar.has("tf_s"));
-  eq((await handleFile(new Request("https://trainee.example/file", { headers: { cookie: `tf_s=${lt}` } }), w.d)).status, 401, "the old id reads nothing");
-  const applyOld = await handleFile(new Request("https://trainee.example/file", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ t: lt, action: "apply", ref: w.refs[0], tag: hashTag(H) }).toString() }), w.d);
+  eq((await handleFile(new Request("https://trainee.example/file", { headers: { cookie: `tf_s=${lsid}` } }), w.d)).status, 401, "the old id reads nothing");
+  const applyOld = await handleFile(new Request("https://trainee.example/file", await phonePost({ t: lsid, action: "apply", ref: w.refs[0], tag: hashTag(H) }, SECRET)), w.d);
   eq(applyOld.status, 401); eq(w.log.answered, []);
   eq((await phone.open("/file")).status, 200, "the other device is still signed in");
-  const pt = fieldT(await (await phone.open("/file")).text());
+  const pt = fieldT(await (await phone.open("/file")).text()), psid = phone.jar.get("tf_s")!;
   eq((await phone.post({ t: pt, action: "signout_all" })).status, 200);
   eq((await phone.open("/file")).status, 403);
-  eq((await handleFile(new Request("https://trainee.example/file", { headers: { cookie: `tf_s=${pt}` } }), w.d)).status, 401);
-  const miniApply = await handleFile(new Request("https://trainee.example/file", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ t: mini, action: "apply", ref: w.refs[0], tag: hashTag(H) }).toString() }), w.d);
+  eq((await handleFile(new Request("https://trainee.example/file", { headers: { cookie: `tf_s=${psid}` } }), w.d)).status, 401);
+  const miniApply = await handleFile(new Request("https://trainee.example/file", await phonePost({ t: mini, action: "apply", ref: w.refs[0], tag: hashTag(H), init: await signedInit("777", NOW / 1000 - 30, BOT) }, SECRET)), w.d);
   eq(miniApply.status, 401, "the Telegram session ended too"); eq(w.log.answered, []);
   assert([...w.S.sessions.values()].every((x) => x.revoked_at));
 });
@@ -313,7 +313,7 @@ Deno.test("revoked: the account checked again on every request — a changed pho
   // Telegram unlinked
   w.phones[U] = U_PHONE; w.tg["777"] = U;
   const mini = await sessionFor(w.S.store, { userId: U, list: LIST, now: NOW, via: "telegram", telegramId: "777" });
-  const get = () => handleFile(new Request("https://trainee.example/file", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ t: mini, action: "refresh" }).toString() }), w.d);
+  const get = async () => handleFile(new Request("https://trainee.example/file", await phonePost({ t: mini, action: "refresh", init: await signedInit("777", NOW / 1000 - 30, BOT) }, SECRET)), w.d);
   eq((await get()).status, 200);
   delete w.tg["777"];
   eq((await get()).status, 401);

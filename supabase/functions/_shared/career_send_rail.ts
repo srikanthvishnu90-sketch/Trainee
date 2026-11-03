@@ -22,6 +22,7 @@
 // Content-Transfer-Encoding are written (Gmail adds From as the signed-in account); no Cc or Bcc ever; a header value
 // with a line break or a control character is refused, never cleaned.
 import { messageOf, payloadHash, type OutreachDraft } from "./career_outreach.ts";
+import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036/D-037 release flags
 
 export const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
@@ -39,7 +40,8 @@ const call = async (d: Rpc, name: string, p: unknown) => {
   if (r.error) throw new Error(`${name}: ${r.error.message}`);
   return r.data;
 };
-export const sendRailOn = (env: { get(k: string): string | undefined }) => env.get("CAREER_SEND_RAIL") === "on";
+// D-037: a release flag (agent-chat/release_config.ts): on unless the environment rolls it back (CAREER_SEND_RAIL=off).
+export const sendRailOn = (env: { get(k: string): string | undefined }) => releaseFlagOn(env, "CAREER_SEND_RAIL");
 
 // ------------------------------------------------------------------------------------------------ the message
 export interface Mail { to: string; subject: string; text: string }

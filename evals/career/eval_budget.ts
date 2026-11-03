@@ -1,0 +1,98 @@
+// Eval spend control for a Claude-only campaign (owner, 2026-11-02: ONE total of $70 for the cycle; target and hard max are both $70).
+//
+// Three layers, outermost first (the first two live in supabase/functions/_shared/model_budget.ts, owned by the
+// feat/claude-only-gateway PR; this file only reads and obeys them):
+//   1. every model call reserves against a BudgetGate before it is sent (callModel). With SUPABASE_URL and
+//      SUPABASE_SERVICE_ROLE_KEY set that is the shared database ledger (restBudgetGate); without them, a process-local twin.
+//   2. env MODEL_BUDGET_TARGET_USD (70) and MODEL_BUDGET_HARD_USD (70) name the ledger's target and hard stop.
+//   3. THIS FILE: a per-run preflight quote (token estimate x price) that refuses to start a run that would cross 80% of what
+//      remains under the target, and a spend line written to the run summary. Parallel passes (five processes, each seeing only
+//      the spend recorded before it started) are quoted together via EVAL_PARALLEL / --parallel.
+// Dependency (not in this PR): if the gateway PR exports a ledger status reader, pass it as `status` to preflight().
+import type { PriceRow } from "../../supabase/functions/_shared/model_budget.ts";
+
+export const DEFAULT_TARGET_USD = 70;
+export const DEFAULT_HARD_USD = 70;
+export const PREFLIGHT_SHARE = 1;
+
+export function budgetTargets(get: (k: string) => string | undefined): { target: number; hard: number } {
+  const t = get("MODEL_BUDGET_TARGET_USD"), h = get("MODEL_BUDGET_HARD_USD");
+  const target = t === undefined || t === "" ? DEFAULT_TARGET_USD : Number(t), hard = h === undefined || h === "" ? DEFAULT_HARD_USD : Number(h);
+  if (!(target > 0) || !(hard >= target)) throw new Error(`MODEL_BUDGET_TARGET_USD (${t}) and MODEL_BUDGET_HARD_USD (${h}) must be numbers with 0 < target <= hard`);
+  return { target, hard };
+}
+
+// Spend already recorded on disk that counts against the Anthropic campaign: result files of a run that used a Claude model
+// (brain or judge): brain + judge cost. OpenAI-era files are history, not part of the $70 (owner to confirm).
+export function claudeSpentUsd(results: { label?: string; model?: string | null; judge_model?: string | null; judge_model_2?: string | null; cost?: unknown; cost_usd?: { brain?: number; judge?: number } | number }[], exceptLabel = ""): number {
+  const seen = new Set<string>();
+  let sum = 0;
+  for (const r of results) {
+    if (r.label === exceptLabel || (r.label && seen.has(r.label))) continue;
+    if (![r.model, r.judge_model, r.judge_model_2].some((m) => /^claude-/i.test(String(m ?? "")))) continue;
+    if (r.label) seen.add(r.label);
+    const c = r.cost_usd;
+    sum += typeof c === "number" ? c : (Number(c?.brain) || 0) + (Number(c?.judge) || 0);
+  }
+  return sum;
+}
+
+// Token estimates, measured or estimated in the plan (claude-only-eval-plan.md section 3.1; [M] = measured, [E] = estimated).
+export const EST = {
+  request_in_tokens: { staged: 10_500, agent: 11_000 }, // [M] first brain request, local probe; no prompt caching yet
+  steps_per_item: { staged: 34 / 38, agent: 99 / 38 },    // [M] stored traces, dev pass; x1.25 below for Claude
+  claude_step_factor: 1.25,                                // [E]
+  out_tokens_per_step: { haiku: 150, sonnet: 400 },        // [E]
+  judge_in_tokens: 850, judge_b_extra_in: 250,            // [E] larger {stores, account} state; B adds the checklist
+  judge_out_tokens: { a: 250, b: 450 },                    // [E] B quotes evidence
+  retry_factor: 1.05,                                      // [E]
+};
+const perMTok = (tokens: number, usdPerM: number) => tokens * usdPerM / 1e6;
+const outRate = (model: string) => /sonnet|opus/i.test(model) ? EST.out_tokens_per_step.sonnet : EST.out_tokens_per_step.haiku;
+
+export interface Quote { brain_usd: number; judge_usd: number; total_usd: number; basis: string }
+// Worst-plausible cost of one pass: items x steps x (input + output tokens at the model's price), plus both judges per item.
+export function quoteRun(o: { items: number; brain: "router" | "staged" | "agent"; brainModel: string | null; judgeA: string | null; judgeB: string | null; prices: Record<string, PriceRow> }): Quote {
+  const price = (m: string) => { const p = o.prices[m]; if (!p) throw new Error(`no price for ${m}: an unpriced call cannot be quoted or capped`); return p; };
+  let brain = 0;
+  if (o.brain !== "router") {
+    if (!o.brainModel) throw new Error(`the ${o.brain} brain needs a model to be quoted`);
+    const p = price(o.brainModel), steps = o.items * EST.steps_per_item[o.brain] * EST.claude_step_factor;
+    brain = steps * (perMTok(EST.request_in_tokens[o.brain], p.input) + perMTok(outRate(o.brainModel), p.output));
+  }
+  let judge = 0;
+  if (o.judgeA) { const p = price(o.judgeA); judge += o.items * (perMTok(EST.judge_in_tokens, p.input) + perMTok(EST.judge_out_tokens.a, p.output)); }
+  if (o.judgeB) { const p = price(o.judgeB); judge += o.items * (perMTok(EST.judge_in_tokens + EST.judge_b_extra_in, p.input) + perMTok(EST.judge_out_tokens.b, p.output)); }
+  judge *= EST.retry_factor;
+  return { brain_usd: brain, judge_usd: judge, total_usd: brain + judge,
+    basis: `${o.items} items, ${o.brain} brain${o.brainModel ? ` ${o.brainModel}` : ""}, judges ${[o.judgeA, o.judgeB].filter(Boolean).join(" + ") || "none"}; token estimates x PRICES (estimate, not a measurement)` };
+}
+
+export interface Preflight { ok: boolean; reason: string | null; line: string; quote_usd: number; parallel: number; remaining_usd: number }
+// Refuse when the quote (times the passes that run at once) exceeds what remains of the $70 total (remaining = total minus recorded spend); the line prints the remaining allowance.
+export function preflight(o: { quote: Quote; parallel?: number; spent_usd: number; target_usd: number; hard_usd: number; ledger: "shared" | "process-local" }): Preflight {
+  const parallel = Math.max(1, o.parallel ?? 1), q = o.quote.total_usd * parallel, remaining = Math.max(0, o.target_usd - o.spent_usd);
+  let reason: string | null = null;
+  if (o.spent_usd + q > o.hard_usd) reason = `the quote $${q.toFixed(3)} on top of $${o.spent_usd.toFixed(3)} spent would pass the hard max $${o.hard_usd.toFixed(2)}`;
+  else if (q > PREFLIGHT_SHARE * remaining) reason = `the quote $${q.toFixed(3)} (${parallel} parallel) is more than the remaining allowance $${remaining.toFixed(3)} of the $${o.target_usd.toFixed(2)} total`;
+  return { ok: reason === null, reason, quote_usd: q, parallel, remaining_usd: remaining,
+    line: `preflight quote $${q.toFixed(3)} (brain $${(o.quote.brain_usd * parallel).toFixed(3)} + judges $${(o.quote.judge_usd * parallel).toFixed(3)}, ${parallel} parallel) · spent $${o.spent_usd.toFixed(3)} · remaining allowance $${remaining.toFixed(3)} of $${o.target_usd.toFixed(2)} total · ledger ${o.ledger}${reason ? ` · REFUSED: ${reason}` : ""}` };
+}
+
+// The spend line written to the run summary and the result file.
+export function spendLine(o: { label: string; quote_usd: number; brain_usd: number; judge_usd: number; spent_before_usd: number; target_usd: number; hard_usd: number }): string {
+  const actual = o.brain_usd + o.judge_usd, after = o.spent_before_usd + actual;
+  return `spend ${o.label}: $${actual.toFixed(3)} (brain $${o.brain_usd.toFixed(3)}, judges $${o.judge_usd.toFixed(3)}; quoted $${o.quote_usd.toFixed(3)}) · campaign total $${after.toFixed(3)} of $${o.target_usd.toFixed(2)} total (${(after / o.target_usd * 100).toFixed(1)}%)`;
+}
+
+// The gate every model call of an eval process reserves against: the shared database ledger when SUPABASE_URL and
+// SUPABASE_SERVICE_ROLE_KEY are set (model_budget.ts restBudgetGate, the same RPCs production uses), else a process-local twin
+// holding this process's share (1/parallel) of what remains under the target. `bud` is the model_budget.ts module.
+export function openGate(bud: { resolveBudgetGate: (explicit: undefined, get: (k: string) => string | undefined) => unknown; memoryBudgetGate: (limitMicros: number) => unknown },
+  get: (k: string) => string | undefined, spentUsd: number, targetUsd: number, parallel: number): { gate: any; shared: boolean } | { error: string } {
+  const shared = !!(get("SUPABASE_URL") && get("SUPABASE_SERVICE_ROLE_KEY"));
+  if (get("EVAL_LEDGER") === "shared" && !shared) return { error: "EVAL_LEDGER=shared needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (the shared budget ledger); a process-local twin would not count the other processes" };
+  const gate = shared ? bud.resolveBudgetGate(undefined, get) : bud.memoryBudgetGate(Math.floor(Math.max(0, targetUsd - spentUsd) * 1e6 / Math.max(1, parallel)));
+  if (!gate) return { error: "SUPABASE_URL is set without SUPABASE_SERVICE_ROLE_KEY, so the budget ledger cannot be reached; a call that cannot be metered is not made" };
+  return { gate, shared };
+}

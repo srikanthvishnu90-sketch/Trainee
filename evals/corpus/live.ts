@@ -2,11 +2,11 @@
 // by the same rules as offline (graders.cjs) and scored for mannerisms by the LLM judge (judge.cjs, the cheap OpenAI model
 // through the gateway). Money paths stay gated: a turn that would approve a live card (a yes after a confirm) is NOT sent,
 // is reported as not sent, and the thread is closed with "never mind". Results: evals/corpus/results/live-<stamp>.json.
-// Started by: deno run -A evals/corpus/run.ts --live (needs UPMORE_CHAT_URL, UPMORE_TEST_JWT, OPENAI_API_KEY).
+// Started by: deno run -A evals/corpus/run.ts --live (needs UPMORE_CHAT_URL, UPMORE_TEST_JWT, ANTHROPIC_API_KEY).
 import graders from "./graders.cjs";
 import judge from "./judge.cjs";
 import corpus from "../../corpus/corpus.json" with { type: "json" };
-import { callModel, modelConfig } from "../../supabase/functions/_shared/model_gateway.ts";
+import { callModel, modelConfigFor } from "../../supabase/functions/_shared/model_gateway.ts";
 const { grade } = graders as any;
 const { judgeMessages, parseJudge } = judge as any;
 const APPROVE = /^\s*(y|ya|yes|yep|yeah|yup|ok|okay|confirm|do it|go|send it|approve)\b/i;
@@ -19,7 +19,7 @@ export async function live(url: string, jwt: string, key: string, only: string[]
       const j = await r.json().catch(() => ({ error: `HTTP ${r.status}, not JSON` })); if (!r.ok && !j.error) j.error = `HTTP ${r.status}`; return j;
     } catch (e) { return { error: String(e instanceof Error ? e.message : e) }; }
   };
-  const cfg = modelConfig({ get: (k: string) => ({ OPENAI_API_KEY: key, MODEL_PROVIDER: "openai" } as any)[k] }, "probe");
+  const cfg = modelConfigFor({ get: (k: string) => ({ ANTHROPIC_API_KEY: key } as any)[k] }, "claude-haiku-5-5");
   const rows: any[] = [];
   for (const e of (corpus as any).examples) {
     if (only.length && !only.includes(e.id)) continue;

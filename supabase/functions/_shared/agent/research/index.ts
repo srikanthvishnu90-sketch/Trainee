@@ -1,6 +1,6 @@
 // The open-question pipeline (flag CAREER_KNOWLEDGE): understand -> ground -> write -> guard. One call per question:
 //   understand  Person Context Pack + message -> field, stage, place, question type, at most ONE question (understand.ts)
-//   ground      cached, capped OpenAI web search -> guard-accepted facts with URLs (ground.ts, guard.ts)
+//   ground      cached, capped web search (dark) -> guard-accepted facts with URLs (ground.ts, guard.ts)
 //   write       the research brief file, built from those facts, labelled general knowledge and the person's own facts (brief.ts)
 //   guard       any number or name no source accounts for is dropped by code; the chat paragraph is linted (chat.ts)
 // The brief is delivered through `publish`: in production file_publisher.ts files it as #280's `research_brief` kind. Without

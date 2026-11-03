@@ -30,6 +30,8 @@ const NOT_SENT: Record<string, string> = {
   // it ends); this is said only by a database without that requeue.
   HOST_RATE_LIMITED: "the employer's site was turning visitors away for a while (too many requests), so nothing was filled in or sent",
   needs_answers: "the form has questions you have not answered yet",
+  // MASS APPLY (2026-11-01): the posting's page was gone when it was sent (closed after you approved it).
+  POSTING_CLOSED: "this posting closed before it could be submitted",
 };
 const NEEDS_YOU: Record<string, string> = {
   captcha: "the page asks you to complete a verification",

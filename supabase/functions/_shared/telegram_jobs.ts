@@ -45,6 +45,9 @@ export interface JobView {
   pay: string | null; level: string | null; remote: "remote" | "hybrid" | "onsite" | null;
   posted_at: string | null; first_seen_at: string | null; deadline: string | null; source: string | null;
   reasons: string[]; gaps: string[]; company_domain: string | null;
+  // A results list's role (role_results.ts): the pay the posting states, as numbers, with its period, currency and own words. The
+  // page renders from this, never by re-reading `pay` (which is display text).
+  pay_parsed?: { min: number; max: number; period: "hour" | "month" | "year" | null; currency: string; text: string; up_to?: boolean } | null;
 }
 export interface PostingRow {
   job_id: string; provider?: string | null; company?: string; title?: string; location?: string | null; url?: string; description?: string | null;
@@ -69,7 +72,17 @@ export interface JobStore {
   // application by): this posting's own application, one under another id whose link is the same posting, the browser extension's
   // report, a batch ledger. Absent: not checked here (the queue still refuses it).
   elsewhere?(userId: string, job: JobView): Promise<boolean>;
+  // A results list made from a role-and-pay ask on a texting channel (role_results.ts): what was asked, the pay floor, and that
+  // its page approves only after the exact application is shown and a code from the person's chat is typed. Absent: no such lists.
+  rememberListMeta?(userId: string, listId: string, meta: ListMeta): Promise<void>;
+  recallListMeta?(userId: string, listId: string): Promise<ListMeta | null>;
 }
+// name: the person's first name as their profile states it (null: "you"); source: where the postings were read (the live board at
+// `at`, or the saved snapshot read on `read`); sources: how many boards the roles came from.
+export interface ListMeta { kind: "results"; what: string; floor: { amount: number; period: "hour" | "year" } | null; at: number;
+  name?: string | null; source?: "live" | "snapshot" | null; read?: string | null; sources?: number;
+  // The person's own marks on this page (private, reversible; they touch no application): roles set aside, and "Pause remaining".
+  dismissed?: string[]; paused?: { at: number } | null }
 
 export interface JobDeps {
   store: JobStore;
@@ -712,6 +725,8 @@ export function supabaseJobStore(admin: any): JobStore {
     async recall(userId, ref) { const v = await get(userId, `tg:job:${ref}`); return v?.job ? { job: v.job, shownAs: v.shownAs === "photo" ? "photo" : "text" } : null; },
     async rememberList(userId, listId, refs) { await put(userId, `tg:list:${listId}`, refs); },
     async recallList(userId, listId) { const v = await get(userId, `tg:list:${listId}`); return Array.isArray(v) ? v.map(String) : null; },
+    async rememberListMeta(userId, listId, meta) { await put(userId, `tg:listmeta:${listId}`, meta); },
+    async recallListMeta(userId, listId) { const v = await get(userId, `tg:listmeta:${listId}`); return v && v.kind === "results" ? v as ListMeta : null; },
     async postings(ids) {
       if (!ids.length) return [];
       return must(await admin.from("career_postings").select("job_id,provider,company,title,location,url,description,remote,seniority_band,posted_at,first_seen_at,last_seen_at,pay,closed_at").in("job_id", ids), "read postings") ?? [];

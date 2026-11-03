@@ -17,8 +17,9 @@ import { type ContactRow, contactsOf, firmKey, importContactsCsv, importContacts
 import { legacyRows } from "./career_referrals.ts";
 import { parsePeopleAsk, type PeopleDeps, type PersonRec, peopleTurn } from "./career_people.ts";
 import { chatAsk, companyKey } from "./career_people_import.ts";
+import { isCompanyLabel, registrable } from "./career_people_gmail.ts";
 import { batchMessages, confirmed, draftFor, type Drafted, emailHash, footerOf, messageOf, type ModelFn, OUTREACH_INTENT, type OutreachDraft,
-  type KeyedContact, type OutreachStore, payloadHash, type Recipient, recordOutreach, blockedAddresses, BLOCKED_WHY, draftLangOf } from "./career_outreach.ts";
+  type KeyedContact, type OutreachStore, payloadHash, type Recipient, recordOutreach, blockedAddresses, BLOCKED_WHY, draftLangOf, guardRecipient } from "./career_outreach.ts";
 import type { EventStore } from "./agent/timeline.ts";
 import { siteAsk, trackTurn } from "./career_outreach_track.ts";
 
@@ -37,15 +38,26 @@ export type Ask =
   | { kind: "who"; firm: string }
   | { kind: "draft"; target: Target; topic: string | null };
 export type Target =
-  | { by: "name"; name: string; firm: string | null }
+  // surname: the ask named them by an honorific and one name ("Dr. Chen", "Tanaka-san"): matched on the last name.
+  | { by: "name"; name: string; firm: string | null; surname?: boolean }
   | { by: "group"; firm: string; count: number | null; role: string | null };
 
 const plain = (s: unknown) => String(s ?? "").toLowerCase().replace(/[’']/g, "").replace(/&/g, " and ").replace(/[^a-z0-9@.]+/g, " ").trim();
+// PEOPLE DRAFTS R3 (2026-11-02): a name's key, in any script, accents folded ("José Álvarez" is "jose alvarez", "王伟"
+// stays "王伟"). Before, a name was read as a-z only: "王伟" and "李娜" at one firm both keyed "" and were taken for one
+// person (one of them vanished from every list and draft), and "José" could not be asked for by name at all. Stored
+// name keys written before this (career_account_contacts.name_key) are still read: legacyNameKey.
+export const nameKey = (s: unknown) => String(s ?? "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[’']/g, "").replace(/&/g, " and ").replace(/[^\p{L}\p{N}@.]+/gu, " ").trim();
+const legacyNameKey = plain;
+// Courtesy titles and honorific suffixes are no part of a name: "Dr. Wei Chen" is Wei Chen; "Dr. Chen" and "Tanaka-san"
+// are a last name.
+const HONORIFIC = /^(?:dr|mr|mrs|ms|mx|miss|prof|professor|sir|dame|herr|frau|mme|mlle|madame|monsieur|señor|señora|senor|senora|sr|sra|srta|dott|dottssa)\.?$/iu;
+const HONOR_SUFFIX = /(?:-san|-sama|-sensei|-kun|-chan|さん|様|先生|님|씨)$/u;
 const NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, a: 1, an: 1 };
 const numberOf = (w: string | undefined) => (w ? (/^\d+$/.test(w) ? Number(w) : NUM[w.toLowerCase()] ?? null) : null);
 const NUMW = "(\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)";
 const GROUP = "(?:contacts|connections|people|friends|folks|alums|alumni)";
-const FILLER = /^(?:(?:so|ok|okay|hey|hi|and|now|also|please|pls|can you|could you|would you|will you|help me|actually|wait|oh|oops|no)[, ]+)+/i;
+const FILLER = /^(?:(?:so|ok|okay|hey|hi|and|now|also|please|pls|can you|could you|would you|will you|help me|actually|wait|oh|oops|no|yo|plz|quick\s+q(?:uestion)?:?)[, ]+)+/i;
 // A firm as typed: the words after "at"/"from", up to the topic or the end.
 function firmOf(raw: string): string | null {
   // ROUTING SCENARIOS (2026-10-29): a second ask after the firm ("... at Stripe and apply to Stripe") is not part of it.
@@ -103,11 +115,14 @@ export function parseNetworkingAsk(message: string): Ask | null {
   // named "engineers".
   const plur = /^(?:all\s+(?:of\s+)?(?:the\s+)?)?((?:[a-z][a-z-]*\s+){0,3}(?:recruiter|engineer|manager|scientist|designer|analyst|director|lead|founder|partner|developer|associate|intern|executive|banker|consultant|researcher|architect|specialist|coordinator|officer|vp|leader|head|alum)s)$/i.exec(who2);
   if (plur && firm) return { kind: "draft", topic, target: { by: "group", firm, count: verbCount, role: plur[1].trim().replace(/s$/i, "") } };
-  const words = who2.split(/\s+/);
+  let words = who2.split(/\s+/), honor = false;
+  if (words.length > 1 && HONORIFIC.test(words[0])) { words = words.slice(1); honor = true; }
+  if (words.length && HONOR_SUFFIX.test(words[words.length - 1]) && words[words.length - 1].replace(HONOR_SUFFIX, "")) { words[words.length - 1] = words[words.length - 1].replace(HONOR_SUFFIX, ""); honor = true; }
   // ROUTING SCENARIOS (2026-10-29): "email status" / "email updates" are the send rail's asks, never a draft to "status".
   const STOP = /^(?:my|the|a|an|your|our|me|him|her|them|it|this|that|these|those|resume|cv|cover|letter|application|everyone|someone|anyone|recruiters?|people|contacts|connections|status|updates?)$/i;
-  if (words.length < 1 || words.length > 3 || words.some((w) => !/^[A-Za-z][A-Za-z.'’-]*$/.test(w) || STOP.test(w))) return null;
-  return { kind: "draft", topic, target: { by: "name", name: who2, firm } };
+  // PEOPLE DRAFTS R3: a name in any script ("José Álvarez", "Siobhán O'Neill", "王伟"), never only a-z.
+  if (words.length < 1 || words.length > 3 || words.some((w) => !/^\p{L}[\p{L}\p{M}.'’-]*$/u.test(w) || STOP.test(w))) return null;
+  return { kind: "draft", topic, target: { by: "name", name: words.join(" "), firm, ...(honor && words.length === 1 ? { surname: true } : {}) } };
 }
 
 // (a): a contacts CSV pasted in the message: a header with a name column and a company or email column, and at least one row.
@@ -119,13 +134,38 @@ export function pastedCsv(message: string): string | null {
 }
 
 // One person once: the same name at the same firm on two lists is one contact, kept as the row with a usable address.
-function uniq(rows: ContactRow[]): ContactRow[] {
-  const by = new Map<string, ContactRow>();
-  for (const r of rows) {
-    const k = `${plain(r.name)}@${plain(r.firm)}`, x = by.get(k);
-    if (!x || (!x.verified && r.verified) || (!x.email && r.email)) by.set(k, r);
+// PEOPLE DRAFTS R3 (2026-11-02): never two people made one, never a stale field kept over a newer one.
+//   - Two rows with the same name at the same firm but DIFFERENT addresses are two people ("Wei Zhang" and "Wei Zhang" at
+//     Google): both are kept, so a draft by name asks which. Before, one of them silently vanished and the other was drafted.
+//     A row with no address joins them only when there is exactly one address under that name there; with two or more
+//     it stays its own row (whose it is can't be told).
+//   - The same person's title or school on two rows (an old export and a page read this week) is the newest sourced one
+//     (seen_at: when the row was read); two different values with no way to tell which is newer are neither. Before, the
+//     first row's title won, so a draft could call someone by the title they left.
+const seenOf = (r: ContactRow) => Date.parse(String(r.seen_at ?? "")) || 0;
+function freshest(a: string, at: number, b: string, bt: number): string {
+  if (!a) return b ?? "";
+  if (!b) return a;
+  if (nameKey(a) === nameKey(b)) return at >= bt ? a : b;
+  if (at && bt && at !== bt) return at > bt ? a : b;
+  return "";
+}
+function mergeOne(x: ContactRow, r: ContactRow): ContactRow {
+  const base = (!x.verified && r.verified) || (!x.email && r.email) ? r : x;
+  const seen = Math.max(seenOf(x), seenOf(r));
+  return { ...base, title: freshest(x.title, seenOf(x), r.title, seenOf(r)), school: freshest(x.school, seenOf(x), r.school, seenOf(r)), ...(seen ? { seen_at: new Date(seen).toISOString() } : {}) };
+}
+export function uniq(rows: ContactRow[]): ContactRow[] {
+  const groups = new Map<string, ContactRow[]>();
+  for (const r of rows) { const k = `${nameKey(r.name)}@${plain(r.firm)}`; groups.set(k, [...(groups.get(k) ?? []), r]); }
+  const out: ContactRow[] = [];
+  for (const g of groups.values()) {
+    const emails = [...new Set(g.map((r) => (r.email ?? "").trim().toLowerCase()).filter(Boolean))];
+    if (emails.length <= 1) { out.push(g.reduce(mergeOne)); continue; }
+    for (const e of emails) out.push(g.filter((r) => (r.email ?? "").trim().toLowerCase() === e).reduce(mergeOne));
+    out.push(...g.filter((r) => !r.email));
   }
-  return [...by.values()];
+  return out;
 }
 const atFirm = (rows: ContactRow[], firm: string) => uniq(rows.filter((r) => r.firm && (sameFirm(r.firm, firm) || sameFirm(r.firm_raw, firm))));
 const lineOf = (r: ContactRow) => `- ${r.name}${r.title ? `, ${r.title}` : ""}${r.email ? ` (${r.email})` : " (no email address)"}`;
@@ -147,7 +187,9 @@ async function heldWhy(r: ContactRow, contacted: Set<string>, dnc: Set<string>, 
   if (b) return BLOCKED_WHY[b];
   return null;
 }
-const recipientOf = (r: ContactRow): Recipient => ({ name: r.name, firm: r.firm, title: r.title, school: r.school, email: r.email!, source: r.row ? `${r.file}, row ${r.row}` : r.file,
+// The row's own fields only, minus any that speak to a writer (career_outreach.ts guardRecipient): what the card shows
+// and what a redo is drafted from.
+const recipientOf = (r: ContactRow): Recipient => guardRecipient({ name: r.name, firm: r.firm, title: r.title, school: r.school, email: r.email!, source: r.row ? `${r.file}, row ${r.row}` : r.file,
   ...(r.address ? { address: r.address } : {}) });
 
 // FAMILY NETWORKING: an address the person typed for the person they named ("email Maya Chen at Stripe about a coffee
@@ -163,6 +205,53 @@ export function typedAddress(message: string): { text: string; email: string | n
   return { text, email: a[0].toLowerCase() };
 }
 export const TYPED_FILE = "what you typed in chat";
+
+// PEOPLE DRAFTS R3 (2026-11-02): a referral ask. Someone can refer you only at their own firm, and only for a posting
+// that is still open. "email Maya at Ramp about a referral for the analyst role at Stripe" was drafted (the topic's words
+// traced), and so was a referral ask for a posting that had closed.
+export interface Posting { title: string; company: string; closed_at: string | null; url?: string | null }
+export const REFERRAL = /\b(?:refer|referral|referrals|referring|put in a (?:good )?word|pass (?:along )?my (?:resume|cv|application)|forward my (?:resume|cv|application))\b/i;
+export function referralRole(topic: string): string | null {
+  const m = /\b(?:for|to|on|about|into)\s+(?:the|a|an|your|their|this|that)?\s*((?:[\p{L}&/+.'’-]+\s+){1,5}?)(?:role|position|job|opening|posting|internship|program)\b/iu.exec(String(topic ?? ""));
+  const words = (m?.[1] ?? "").trim().split(/\s+/).filter((w) => w && !/^(?:referral|referrals|refer|a|an|the|open|new)$/i.test(w));
+  return words.length ? words.join(" ") : null;
+}
+// The live reader: postings on file at the firm (career_postings, open or closed), narrowed by the role's longest word.
+// deno-lint-ignore no-explicit-any
+export function supabaseReferralPostings(admin: any): (firm: string, role: string) => Promise<Posting[]> {
+  return async (firm, role) => {
+    const esc = (s: string) => s.replace(/[\\%_,()]/g, (c) => `\\${c}`);
+    const word = nameKey(role).split(" ").filter((w) => !new Set(nameKey(firm).split(" ")).has(w)).sort((a, b) => b.length - a.length)[0];
+    if (!firm.trim() || !word) return [];
+    const r = await admin.from("career_postings").select("title,company,closed_at,url").ilike("company", esc(firm.trim())).ilike("title", `%${esc(word)}%`).limit(50);
+    if (r.error) throw new Error(`read the postings: ${r.error.message}`);
+    return (r.data ?? []) as Posting[];
+  };
+}
+// The postings at that firm whose title carries every word of the role named (the firm's own name left out of it).
+export function matchingPostings(posts: Posting[] | null, role: string, firm: string): Posting[] | null {
+  if (!posts) return null;
+  const firmWords = new Set(nameKey(firm).split(" "));
+  const want = nameKey(role).split(" ").filter((w) => w && !firmWords.has(w));
+  if (!want.length) return null;
+  return posts.filter((p) => sameFirm(p.company, firm) && want.every((w) => ` ${nameKey(p.title)} `.includes(` ${w} `)));
+}
+export function referralProblem(topic: string, recipientFirm: string, postings: Posting[] | null): string | null {
+  const t = String(topic ?? "");
+  if (!REFERRAL.test(t)) return null;
+  for (const m of t.matchAll(/\b(?:at|with)\s+((?:\p{Lu}[\p{L}\p{N}&.'’-]*)(?:\s+(?:\p{Lu}[\p{L}\p{N}&.'’-]*|of|&))*)/gu)) {
+    const firm = m[1].replace(/['’]s$/, "").replace(/\s+(?:of|&)$/, "").trim();
+    if (!firm) continue;
+    if (!recipientFirm) return `a referral for a job at ${firm} has to come from someone at ${firm}, and no firm is on file for them.`;
+    if (!sameFirm(firm, recipientFirm) && !sameFirm(normalizeFirm(firm), recipientFirm)) return `they are at ${recipientFirm}, and a referral for a job at ${firm} has to come from someone at ${firm}. Ask me to email someone you know at ${firm} instead.`;
+  }
+  const role = referralRole(t);
+  if (role && postings && postings.length && postings.every((p) => !!p.closed_at)) {
+    const at = postings.map((p) => String(p.closed_at).slice(0, 10)).sort().at(-1);
+    return `the ${role} posting at ${recipientFirm} closed${at ? ` on ${at}` : ""}, so I didn't write a referral ask for it. Say "email <name> at ${recipientFirm} about the ${role} team" for a conversation instead, or name an open posting.`;
+  }
+  return null;
+}
 async function keepTyped(o: NetworkingDeps, name: string, firm: string | null, email: string): Promise<void> {
   const book = bookOf(o);
   if ((await book.byEmail(email)).length) return;
@@ -185,6 +274,9 @@ export interface NetworkingDeps {
   reminderPush?: boolean;
   textingChannel?: () => Promise<string | null>;
   people?: PeopleDeps | null; // D-033 people finding, wired by the caller; absent or null: no people turn
+  // PEOPLE DRAFTS R3: the postings on file at a firm whose title carries these words (career_postings), for a referral
+  // ask that names a role. Absent: not checked (the reply never claims a posting is open).
+  postings?: (firm: string, titleWords: string) => Promise<Posting[]>;
 }
 export interface NetworkingResult { reply: string; intent: string; status: string; parts?: string[] }
 
@@ -201,7 +293,7 @@ const rowKey = (r: ContactRow) => `${r.file}#${r.row}`;
 // same person can't bring them back either.
 export const personKey = (r: ContactRow) => (r.email ? `e:${r.email.trim().toLowerCase()}` : `n:${plain(r.name)}@${plain(r.firm)}`);
 // A row with the keys the account table indexes: what any writer (this turn, people finding) hands putContacts.
-export const keyedContact = (r: ContactRow): KeyedContact => ({ row_key: rowKey(r), person_key: personKey(r), file: r.file, name_key: plain(r.name),
+export const keyedContact = (r: ContactRow): KeyedContact => ({ row_key: rowKey(r), person_key: personKey(r), file: r.file, name_key: nameKey(r.name),
   email: r.email ? r.email.trim().toLowerCase() : null, firm_key: firmKey(r.firm), firm_raw_key: firmKey(r.firm_raw), data: r });
 type Sel = { all?: boolean; linkedin?: boolean; rowKeys?: string[] };
 interface Book {
@@ -221,7 +313,7 @@ function bookOf(o: NetworkingDeps): Book {
 }
 function makeBook(o: NetworkingDeps): Book {
   const b = makeBookInner(o);
-  const isNamed = (r: ContactRow, k: string) => { const n = plain(r.name); return !!k && (n === k || n.startsWith(`${k} `)); };
+  const isNamed = (r: ContactRow, k: string) => { const n = nameKey(r.name); return !!k && (n === k || n.startsWith(`${k} `)); };
   return {
     ...b,
     atFirm: async (firm) => uniq([...await b.atFirm(firm), ...await savedPeople(o, { firm })]),
@@ -240,7 +332,7 @@ function makeBookInner(o: NetworkingDeps): Book {
     const older = legacyRows([...list(g.people), ...list(p._careerGraphPeople), ...list(p.connections)]);
     return older.length ? await verifyRows(older, o.mx ?? MX_NOT_WIRED) : [];
   })();
-  const named = (rows: ContactRow[], k: string) => rows.filter((r) => { const n = plain(r.name); return !!k && (n === k || n.startsWith(`${k} `)); });
+  const named = (rows: ContactRow[], k: string) => rows.filter((r) => { const n = nameKey(r.name); return !!k && (n === k || n.startsWith(`${k} `)); });
   const s = o.store;
   if (!(s.contactsSummary && s.contactsAtFirm && s.contactsNamed && s.contactsByEmail && s.contactsInFile && s.putContacts && s.forgetContacts)) {
     // The old per-chat list (a store without the account table).
@@ -265,7 +357,15 @@ function makeBookInner(o: NetworkingDeps): Book {
   const epoch = epochOf(o);
   return {
     atFirm: async (firm) => uniq([...await s.contactsAtFirm!(o.userId, firmKey(firm)), ...(await legacy()).filter((r) => sameFirm(r.firm, firm) || sameFirm(r.firm_raw, firm))]),
-    named: async (k, every) => { const rows = [...await s.contactsNamed!(o.userId, k), ...named(await legacy(), k)]; return every ? rows : uniq(rows); },
+    // Rows stored before name keys read every script carry the a-z key (legacyNameKey): both are read, and a row is kept
+    // only when its own name matches what was asked.
+    named: async (k, every) => {
+      const old = legacyNameKey(k);
+      const stored = [...await s.contactsNamed!(o.userId, k), ...(old && old !== k ? await s.contactsNamed!(o.userId, old) : [])];
+      const seen = new Set<string>();
+      const rows = [...named(stored, k).filter((r) => { const x = rowKey(r); if (seen.has(x)) return false; seen.add(x); return true; }), ...named(await legacy(), k)];
+      return every ? rows : uniq(rows);
+    },
     byEmail: (e) => s.contactsByEmail!(o.userId, e),
     inFile: (f) => s.contactsInFile!(o.userId, f),
     total: async () => {
@@ -292,7 +392,7 @@ function epochOf(o: NetworkingDeps): Promise<number | null> {
 const tracked_ = (o: NetworkingDeps) => trackTurn({ message: o.message, userId: o.userId, threadId: o.threadId, now: o.now, store: o.store, events: o.events,
   facts: (((o.state.profile as any)?.facts ?? []) as unknown[]), model: o.model,
   reminderPush: o.reminderPush === true, textingChannel: o.textingChannel,
-  contactsWithEmail: async (name) => (await bookOf(o).named(plain(name))).filter((r) => r.email && plain(r.name).split(" ")[0] === plain(name)).map((r) => `${r.name}${r.firm ? ` at ${r.firm}` : ""}`) });
+  contactsWithEmail: async (name) => (await bookOf(o).named(nameKey(name))).filter((r) => r.email && nameKey(r.name).split(" ")[0] === nameKey(name)).map((r) => `${r.name}${r.firm ? ` at ${r.firm}` : ""}`) });
 
 // LinkedIn, Indeed and Handshake: an ask to act on one of them (or a link to one) declined plainly, naming the site, with
 // what Trainee can do instead (career_outreach_track.ts siteAsk). The chat runs this before every apply, link-read and
@@ -322,7 +422,7 @@ export function forgetAsk(message: string): { all: true } | { linkedin: true } |
   if (!/^(?:forget|delete|remove|erase|clear|wipe)\b/.test(t) || t.length > 120) return null;
   if (/^(?:forget|delete|remove|erase|clear|wipe) (?:all (?:of )?)?(?:my |the )?(?:linked ?in) (?:contacts|connections|export|list)$/.test(t)) return { linkedin: true };
   if (/^(?:forget|delete|remove|erase|clear|wipe) (?:all (?:of )?)?(?:my |the )?(?:contacts|connections|contact list|contacts list|imported contacts)$/.test(t)) return { all: true };
-  const m = /^(?:forget|delete|remove|erase) ([a-z][a-z.'-]*(?: [a-z][a-z.'-]*){0,2}) from (?:my |the )?(?:contacts|connections|contact list|list)$/.exec(t);
+  const m = /^(?:forget|delete|remove|erase) (\p{L}[\p{L}\p{M}.'’-]*(?: \p{L}[\p{L}\p{M}.'’-]*){0,2}) from (?:my |the )?(?:contacts|connections|contact list|list)$/u.exec(t);
   return m ? { name: m[1] } : null;
 }
 async function forgetTurn(o: NetworkingDeps, a: NonNullable<ReturnType<typeof forgetAsk>>): Promise<NetworkingResult> {
@@ -330,9 +430,9 @@ async function forgetTurn(o: NetworkingDeps, a: NonNullable<ReturnType<typeof fo
   const notSaved: NetworkingResult = { reply: "I couldn't delete them from your contacts just now, so nothing was deleted. Please try again in a minute.", intent: FORGET_INTENT, status: "not_saved" };
   let sel: Sel, what: string | null = null;
   if ("name" in a) {
-    const want = plain(a.name);
-    const rows = (await book.named(want.split(" ")[0], true)).filter((r) => plain(r.name) === want || (!want.includes(" ") && plain(r.name).split(" ")[0] === want));
-    const whoIs = (r: ContactRow) => `${plain(r.name)}@${plain(r.firm)}`; // one person: the same name at the same firm, on any list
+    const want = nameKey(a.name);
+    const rows = (await book.named(want.split(" ")[0], true)).filter((r) => nameKey(r.name) === want || (!want.includes(" ") && nameKey(r.name).split(" ")[0] === want));
+    const whoIs = (r: ContactRow) => `${nameKey(r.name)}@${plain(r.firm)}`; // one person: the same name at the same firm, on any list
     if (new Set(rows.map(whoIs)).size > 1) {
       return { reply: `More than one ${a.name} is in your contacts: ${[...new Set(rows.map((r) => `${r.name}${r.firm ? ` at ${r.firm}` : ""}`))].join("; ")}. Say the full name. Nothing was deleted.`, intent: FORGET_INTENT, status: "which" };
     }
@@ -359,7 +459,7 @@ async function peopleWithBook(o: NetworkingDeps): Promise<NetworkingResult | nul
   if (ask?.kind === "who" || ask?.kind === "alumni") pre.push(...(await book.atFirm(ask.firm).catch(() => [])).filter((r) => !r.discovered));
   if (ask?.kind === "intro") {
     if (ask.firm) pre.push(...await book.atFirm(ask.firm).catch(() => []));
-    if (ask.name) pre.push(...await book.named(plain(ask.name).split(" ")[0], true).catch(() => []));
+    if (ask.name) pre.push(...await book.named(nameKey(ask.name).split(" ")[0], true).catch(() => []));
   }
   const preKeys = new Set(pre.map(rowKey));
   const had = o.state.contacts;
@@ -463,11 +563,16 @@ async function savedPeople(o: NetworkingDeps, want: { firm?: string | null; name
   // (not sendable) could be drafted to.
   const rows = recs.filter((r) => r.name && (!firm || sameFirm(normalizeFirm(r.company), firm))).map((r): ContactRow => {
     const found = r.source === "provider";
-    const usable = !found || (r.sendable === true && !!r.email && (r.email_status === "published" || r.email_status === "inferred"));
+    // PEOPLE DRAFTS R3 (2026-11-02): an address guessed from a format is a work address or none: never a personal mailbox
+    // (gmail.com, outlook.com ...), which no company's format makes. The database never infers one; a row that says so
+    // anyway is not written to.
+    const personalGuess = r.email_status === "inferred" && !!r.email && !isCompanyLabel(registrable(r.email.split("@")[1] ?? "").label);
+    const usable = !found || (r.sendable === true && !!r.email && !personalGuess && (r.email_status === "published" || r.email_status === "inferred"));
     return {
       file: found ? `named on ${r.source_url ?? "a public page"}` : r.source_ref.replace(/, row \d+$/, "") || r.source, row: found ? 0 : Number(/row (\d+)$/.exec(r.source_ref)?.[1] ?? 0),
       name: r.name!, email: usable ? r.email : null,
       firm: normalizeFirm(r.company), firm_raw: r.company, company: normalizeFirm(r.company), title: r.position, school: r.school, connected_on: r.connected_on,
+      seen_at: r.last_seen_at && Date.parse(r.last_seen_at) > (Date.parse(r.retrieved_at) || 0) ? r.last_seen_at : (r.retrieved_at || null),
       ...(found ? { discovered: true as const } : {}),
       ...(found && usable ? { address: r.email_status === "inferred" ? "inferred" as const : "published" as const } : {}),
     };
@@ -504,15 +609,25 @@ async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>
   let pool: ContactRow[];
   let label: string;
   if (t.by === "name") {
-    const want = plain(t.name), first = want.split(" ")[0];
+    const want = nameKey(t.name), first = want.split(" ")[0];
+    // "Dr. Chen" with no firm: a last name alone can't be looked up across every contact; ask for the firm.
+    if (t.surname && !firmName) return { reply: `Which firm is ${t.name} at? Say "email ${t.name} at <firm>", or their full name.`, intent: DRAFT_INTENT, status: "which" };
     const atThatFirm = firmName ? await book.atFirm(firmName) : [];
     const scope = firmName ? atThatFirm : await book.named(want.includes(" ") ? want : first);
-    const exact = scope.filter((r) => plain(r.name) === want);
-    pool = exact.length ? exact : scope.filter((r) => { const n = plain(r.name); return want.includes(" ") ? n.startsWith(`${want} `) : n.split(" ")[0] === first; });
+    const exact = scope.filter((r) => nameKey(r.name) === want);
+    pool = exact.length ? exact : t.surname ? scope.filter((r) => nameKey(r.name).split(" ").at(-1) === want)
+      : scope.filter((r) => { const n = nameKey(r.name); return want.includes(" ") ? n.startsWith(`${want} `) : n.split(" ")[0] === first; });
+    // The address they typed picks one of two people with the same name (never a third row made up for it).
+    if (typedEmail && pool.length > 1 && pool.some((r) => (r.email ?? "").toLowerCase() === typedEmail)) pool = pool.filter((r) => (r.email ?? "").toLowerCase() === typedEmail);
     label = `${t.name}${firmName ? ` at ${firmName}` : ""}`;
     if (!pool.length && await none()) return noneYet;
     if (!pool.length) return { reply: `No one named ${t.name}${firmName ? ` at ${firmName}` : ""} is in your contacts${atThatFirm.length ? ` (your contacts there: ${atThatFirm.slice(0, 5).map((r) => r.name).join(", ")})` : ""}. ${NO_FINDER} ${ADD_CONTACTS}`, intent: DRAFT_INTENT, status: "not_in_contacts" };
-    if (pool.length > 1) return { reply: `More than one ${t.name} is in your contacts:\n${pool.slice(0, LIST_MAX).map((r) => `${lineOf(r)}${r.firm ? ` at ${r.firm}` : ""}`).join("\n")}\nSay which, with the full name and firm ("email ${pool[0].name} at ${pool[0].firm || "<firm>"}").`, intent: DRAFT_INTENT, status: "which" };
+    if (pool.length > 1) {
+      // Two people with one name at one firm differ only by address: say which by it.
+      const sameNameFirm = new Set(pool.map((r) => `${nameKey(r.name)}@${plain(r.firm)}`)).size === 1;
+      const how = sameNameFirm ? `Say which by their address ("email ${pool[0].name} at ${pool[0].firm || "<firm>"}, ${pool.find((r) => r.email)?.email ?? "<their address>"}"). I won't pick one for you.` : `Say which, with the full name and firm ("email ${pool[0].name} at ${pool[0].firm || "<firm>"}").`;
+      return { reply: `More than one ${t.name} is in your contacts:\n${pool.slice(0, LIST_MAX).map((r) => `${lineOf(r)}${r.firm ? ` at ${r.firm}` : ""}`).join("\n")}\n${how}`, intent: DRAFT_INTENT, status: "which" };
+    }
   } else {
     const here = await book.atFirm(firmName!);
     const rw = t.role ? plain(t.role) : "";
@@ -525,6 +640,14 @@ async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>
       if (!all.total) return noneYet;
       return { reply: `${t.role ? `No ${t.role} at ${firmName}` : `No one at ${firmName}`} is in your ${plural(all.total, "contact")}.${there} ${NO_FINDER} ${ADD_CONTACTS}`, intent: DRAFT_INTENT, status: "none_at_firm" };
     }
+  }
+  // PEOPLE DRAFTS R3: a referral asked for a job at another firm, or for a posting that has closed, is not drafted.
+  if (ask.topic && REFERRAL.test(ask.topic)) {
+    const firms = [...new Set(pool.map((r) => r.firm).filter(Boolean))];
+    const role = referralRole(ask.topic);
+    const posts = role && firms.length === 1 && o.postings ? matchingPostings(await o.postings(firms[0], role).catch(() => null), role, firms[0]) : null;
+    const why = referralProblem(ask.topic, firms.length === 1 ? firms[0] : (firmName ?? ""), posts);
+    if (why) return { reply: `Nothing was drafted: ${why}`, intent: DRAFT_INTENT, status: "referral_refused" };
   }
   // NO LIMITS: a group draft covers everyone asked for (or everyone matching), not a batch of Trainee's size.
   const want = Math.max(1, t.by === "group" && t.count ? t.count : pool.length);
@@ -561,8 +684,11 @@ async function writeBatch(o: NetworkingDeps, pick: ContactRow[], held: { name: s
   const results: Drafted[] = [];
   for (let k = 0; k < pick.length; k += 5) results.push(...await Promise.all(pick.slice(k, k + 5).map((r) => draftFor({ model: o.model!, facts, r: recipientOf(r), topic, lang: draftLangOf(o.message) }))));
   const footer = footerOf(signature), ok: Omit<OutreachDraft, "id" | "batch_id" | "thread_id">[] = [];
-  const failed: { name: string; why: string }[] = [];
+  const failed: { name: string; why: string }[] = [], limited: string[] = [];
   for (const [k, d] of results.entries()) {
+    // PEOPLE DRAFTS R3: a draft the day's AI limit stopped (career_spend_cap.ts: no request was made) is said as that, once
+    // for all of them; before, each read "the writing model didn't answer", as if the model had failed.
+    if (!d.ok && d.why === "model" && /daily_limit|global_daily_limit|budget_paused|budget_not_open|budget_ended/.test(d.detail.join(" "))) { limited.push(pick[k].name); continue; }
     if (!d.ok) { failed.push({ name: pick[k].name, why: d.why === "unverified" ? `I couldn't write it without saying something not on record (${d.detail.slice(0, 2).join("; ")})` : d.why === "model" ? "the writing model didn't answer" : d.detail.join("; ") }); continue; }
     const draft = { n: ok.length + 1, recipient: recipientOf(pick[k]), subject: d.subject, body: d.body, footer, shared: d.shared, status: "shown" as const, hash: "",
       approved_hash: null, approved_at: null, sent_at: null, gmail_id: null, gmail_thread: null, result: null, created_at: new Date(o.now).toISOString() };
@@ -570,7 +696,8 @@ async function writeBatch(o: NetworkingDeps, pick: ContactRow[], held: { name: s
     ok.push(draft);
   }
   const notDone = [...held, ...failed];
-  const notLine = notDone.length ? `Not drafted: ${notDone.map((h) => `${h.name} (${h.why})`).join("; ")}.` : "";
+  const limitLine = limited.length ? `Not drafted yet: ${limited.length} (${limited.slice(0, LIST_MAX).join(", ")}${limited.length > LIST_MAX ? ` and ${limited.length - LIST_MAX} more` : ""}): you've reached today's limit on AI-written drafts, which resets at midnight UTC; ask again then and I'll write the rest.` : "";
+  const notLine = [notDone.length ? `Not drafted: ${notDone.map((h) => `${h.name} (${h.why})`).join("; ")}.` : "", limitLine].filter(Boolean).join(" ");
   if (!ok.length) return { reply: `Nothing was drafted (0/${considered}). ${notLine}`, intent: DRAFT_INTENT, status: "not_drafted" };
   const saved = await o.store.saveBatch(o.userId, o.threadId, ok, o.now);
   for (const d of saved) await recordOutreach(o.events, o.userId, "outreach_drafted", d, o.now, { from: "chat" });

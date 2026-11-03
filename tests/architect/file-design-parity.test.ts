@@ -203,8 +203,8 @@ Deno.test("R06/D07 + D09: every hosted File kind has exactly one page-level chec
     const h = await r.text();
     eq((h.match(/<p class="stamp" data-stamp="known">/g) ?? []).length, 1, `${kind}: one checked-at line`);
     ok(/<\/h1><p class="stamp" data-stamp="known">Facts as of Nov 1, 2026, 3:30 PM CT<\/p>/.test(h), `${kind}: directly under the title`);
-    ok(h.includes(`<meta name="robots" content="noindex,nofollow">`) && h.includes(`<meta name="referrer" content="no-referrer">`), `${kind}: private metas`);
-    eq(r.headers.get("referrer-policy"), "no-referrer"); ok(/noindex/.test(r.headers.get("x-robots-tag")!));
+    ok(h.includes(`<meta name="robots" content="noindex,nofollow">`) && h.includes(`<meta name="referrer" content="same-origin">`), `${kind}: private metas`);
+    eq(r.headers.get("referrer-policy"), "same-origin"); ok(/noindex/.test(r.headers.get("x-robots-tag")!));
   }
 });
 

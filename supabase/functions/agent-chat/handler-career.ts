@@ -124,7 +124,7 @@ import { writeReadinessAsk } from "../_shared/readiness_ask.ts";
 import { summaryFacts } from "../_shared/apply_status_summary.ts"; // SPEC 6.5
 import { resultsFile, whatOf } from "../_shared/role_results.ts"; // ROLE + PAY RESULTS PAGE
 import { supabaseAccountStamp, supabaseConfirmedFacts, supabaseJobStore, type JobDeps } from "../_shared/telegram_jobs.ts";
-import { APPLY_ALL_INTENT, type ApplyAllOffer, applyAllYesTurn, isApplyAllYes, isConditionalYes, readOffer } from "../_shared/apply_all_yes.ts"; // apply all by yes
+import { APPLY_ALL_INTENT, type ApplyAllOffer, applyAllYesTurn, isApplyAllYes, isConditionalYes, liveOfferRow, readOffer } from "../_shared/apply_all_yes.ts"; // apply all by yes
 import { applyAllYesOn } from "./release_config.ts";
 import { supabaseTapStore } from "../_shared/channel_card_tap.ts";
 import { feedUrlsFor } from "../_shared/file_link.ts";
@@ -510,7 +510,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // yes that does not reply to a card with "reply to the card message"; that answer stands down for a live offer (a yes that does
       // reply to a card still goes to the card).
       const offerLastWord = applyAllYesOn(Deno.env) && (isApplyAllYes(message) || isConditionalYes(message)) && !tapIn
-        ? readOffer((await supabaseEmployerAskStore(admin).lastAssistant(tid).catch(() => null))?.meta) : null;
+        ? readOffer((await liveOfferRow(admin, tid).catch(() => null))?.meta) : null;
       const card0 = !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         // FEATURE 16: OWNER RULE (2026-10-26): no card without a confirmed resume on file (resumeReady).
         ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id), store: supabaseCardStore(admin), events })
@@ -671,8 +671,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // path. It takes the cardYes slot (everything after it already stands down for a claimed yes); no live offer: null, nothing new.
       const applyAllYes = !cardYes0 && applyAllYesOn(Deno.env) && !tapIn && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx) && (isApplyAllYes(message) || isConditionalYes(message))
         ? await (async () => {
-          const last = await supabaseEmployerAskStore(admin).lastAssistant(tid);
-          if (!readOffer(last?.meta)) return null;
+          const last = await liveOfferRow(admin, tid); // the offer's message is the latest row, with no user turn after it
+          if (!last || !readOffer(last.meta)) return null;
           const jobDeps: JobDeps = { store: supabaseJobStore(admin), cards: supabaseCardStore(admin), tap: supabaseTapStore(admin), now: Date.now, env: Deno.env, events: supabaseEventStore(admin),
             facts: supabaseConfirmedFacts(admin), account: supabaseAccountStamp(admin) };
           const rd = applyReadiness({ profile: (ctx as any).profile ?? null, ask: (ctx as any).discovery?.lastAsk ?? null });
@@ -1178,7 +1178,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
               // shown", and the offer it makes (the list, each role's ref and the application tag it has now) is kept in this turn's meta,
               // so a bare yes next approves exactly those. Never when the message already ends with another question (the resume line or a
               // readiness ask): a yes there answers that one. CAREER_APPLY_ALL_YES=off leaves the results message as it was.
-              if (f5Offer && applyAllYesOn(Deno.env) && !f5Offer.resumeLine && (await resumeOnFileReader(admin, user.id)()) === true && !(agentMeta as any)?.readiness_ask) {
+              if (f5Offer && applyAllYesOn(Deno.env) && f5Offer.offer.jobs.some((j) => j.tag) && !f5Offer.resumeLine && (await resumeOnFileReader(admin, user.id)()) === true && !(agentMeta as any)?.readiness_ask) {
                 out = { ...out, reply: `${out.reply}\n${f5Offer.ask}`, parts: [...((out as any).parts ?? []), f5Offer.ask] };
                 agentMeta = { ...(agentMeta || {}), apply_all_offer: f5Offer.offer };
               }

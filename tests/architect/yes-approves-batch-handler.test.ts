@@ -15,7 +15,7 @@ const CI = Deno.env.get("CI") === "true";
 const NOW = Date.now(), DAY = 86400000, iso = (ms: number) => new Date(ms).toISOString();
 const SECRET = "TEST-results-link-secret-0123456789abcdef", BASE = "https://trainee.example/file";
 const P: Record<string, string> = {};
-for (let i = 1; i <= 10; i++) P[`q-${i}`] = `7b0f8f8e-6a43-4a49-9d2c-0000000b${String(i).padStart(4, "0")}`;
+for (let i = 1; i <= 12; i++) P[`q-${i}`] = `7b0f8f8e-6a43-4a49-9d2c-0000000b${String(i).padStart(4, "0")}`;
 const LIVE = [
   { id: "greenhouse:qa:1", company: "TEST Web", title: "Frontend Engineering Intern", loc: "Chicago, IL", d: "Build React and TypeScript components. Pay: $35 - $40 per hour." },
   { id: "greenhouse:qa:2", company: "TEST Design", title: "Frontend Intern", loc: "Remote", d: "Ship UI features in JavaScript with our design team." },
@@ -84,7 +84,7 @@ Deno.test({ name: "handler: the offer is stored on the results row; yes approves
     const parts = t.body.parts as string[];
     eq(parts.length, 3);
     assert(/^https:\/\/trainee\.example\/file\?t=v1\./.test(parts[1]), "the link is its own message");
-    eq(parts[2], "Reply yes and I'll apply to the 3 prepared so far and get the other 1 ready.", "the results message ends with the one question");
+    eq(parts[2], "Reply yes and I'll apply to the 3 prepared so far and get the other 1 ready. Each application's exact answers are on the page; I skip any with blank or sensitive answers.", "the results message ends with the one question");
     const m = await lastMeta(chat.thread()!);
     eq(m.apply_all_offer.jobs.length, 4); eq(m.apply_all_offer.jobs.filter((j: { tag: string | null }) => j.tag).length, 3);
     eq(await jobs(u), 0, "the results turn approved nothing");
@@ -150,7 +150,7 @@ Deno.test({ name: "handler: no confirmed resume gets no offer and no queue", ...
 Deno.test({ name: "handler: the employer question the yes asks is answered by the next message", ...T, async fn() {
   if (skip()) return; await world();
   await withEnv(async () => {
-    const u = P["q-9"]; await seedResume(u);
+    const u = P["q-9"]; await seedResume(u); await prepare(u, 1); // one role is ready, so the results message makes the offer
     await sql(`insert into public.career_apply_questions (user_id, key, kind, label, type, options, job_ids, company)
       values ('${u}', 'job:aaaaaaaaaaaaaaaa', 'attestation', 'Will you now or in the future require sponsorship?', 'select', '["Yes","No"]'::jsonb, array['greenhouse:qa:1'], 'TEST Web')`);
     const chat = handler!.chat("q-9");
@@ -197,5 +197,19 @@ Deno.test({ name: "handler: a reply-quote yes (WhatsApp) reaches the batch; an i
     await sql(`update public.career_watch_kv set value = '{"epoch":0,"version":0,"paused":true}' where user_id = '${u}' and key = 'career:account'`);
     await chat.say("yes", { channel: "imessage" });
     eq(await jobs(u), 0, "a paused account approves nothing");
+  });
+} });
+
+Deno.test({ name: "handler: a user turn stored after the offer with NO assistant reply ends the offer (offer must be the latest message by id)", ...T, async fn() {
+  if (skip()) return; await world();
+  await withEnv(async () => {
+    const u = P["q-11"]; await seedResume(u); for (const i of [0, 1, 2, 3]) await prepare(u, i);
+    const chat = handler!.chat("q-11");
+    eq((await chat.say(ASK, { channel: "imessage" })).status, 200);
+    assert((await lastMeta(chat.thread()!)).apply_all_offer, "the offer is on the newest assistant row");
+    // A later user message that never got a reply (a failed or dropped turn): the newest ASSISTANT row is still the offer.
+    await sql(`insert into public.agent_messages (thread_id, role, content) values ('${chat.thread()}', 'user', 'wait, not yet')`);
+    await chat.say("yes", { channel: "imessage" });
+    eq(await jobs(u), 0, "the offer is no longer the last word, so the yes approved nothing");
   });
 } });

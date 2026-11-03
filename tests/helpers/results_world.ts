@@ -93,6 +93,8 @@ export function world(o: { unprepared?: string[]; postings?: Posting[]; fields?:
       async confirm(u: string, ids: string[], hashes: string[]) {
         const p = [...preps.values()].find((x) => x.id === ids[0]);
         if (!p || p.payload_hash !== hashes[0]) throw new Error("card_changed");
+        // Atomic like the RPC: a second approval of a posting already in the queue is a "duplicate", never a second row.
+        if (queue.some((q) => q.user === u && q.job_id === p.job_id)) return { card: { id: "card-1" }, results: [{ n: 1, company: p.company, result: "duplicate" }] };
         queue.push({ user: u, prepared_id: p.id, payload_hash: p.payload_hash, payload: structuredClone(p.payload), job_id: p.job_id });
         return { card: { id: "card-1" }, results: [{ n: 1, company: p.company, result: "queued" }] };
       },

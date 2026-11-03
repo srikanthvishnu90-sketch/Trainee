@@ -13,7 +13,8 @@ import { APPLY_ALL_INTENT, applyAllYesTurn, isApplyAllYes, isConditionalYes, OFF
 import { overclaims } from "../../supabase/functions/_shared/apply_status_summary.ts";
 import type { OpenQuestion } from "../../supabase/functions/_shared/career_apply_questions.ts";
 import type { ListMeta } from "../../supabase/functions/_shared/telegram_jobs.ts";
-import { cardOf, get, HASH, made, NOW, plain, POSTINGS, post, refIn, textOf, U, V, world, type W } from "../helpers/results_world.ts";
+import { applyAllYesEnabled } from "../../supabase/functions/_shared/apply_all_yes.ts";
+import { cardOf, ENV, get, HASH, made, NOW, plain, POSTINGS, post, refIn, textOf, U, V, world, type W } from "../helpers/results_world.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -36,7 +37,7 @@ const meta = (w: W, listId: string) => w.store.recallListMeta!(U, listId) as Pro
 // ================================================================== 0. the question and the offer
 Deno.test("the results message ends with one plain question; the offer holds the list and each role's tag", async () => {
   const { r } = await setup();
-  eq(r.offerAsk, "Reply yes and I'll apply to all 4 shown.");
+  eq(r.offerAsk, "Reply yes and I'll apply to all 4 shown. Each application's exact answers are on the page; I skip any with blank or sensitive answers.");
   eq(r.offer.v, 1); eq(r.offer.list, r.listId); eq(r.offer.at, NOW);
   eq(r.offer.jobs.length, 4);
   for (const j of r.offer.jobs) eq(j.tag, hashTag(HASH(POSTINGS.findIndex((p) => p.job_id === j.job_id) + 1)), "each role carries the tag its page card shows");
@@ -322,4 +323,53 @@ Deno.test("page: with a filter on, the all-button still means the whole list and
   eq(a[1], b[1], "same hash: the whole list, not the shown rows"); eq(a[2], b[2]);
   assert(/all 4 ready roles on the whole list, not only the roles your filters show/.test(plain(filtered)), plain(filtered).slice(0, 600));
   assert(!/not only the roles your filters show/.test(plain(plainHtml)));
+});
+
+// ================================================================== review round 3
+Deno.test("batch yes skips (never approves) roles with a blank required field or a sensitive answer, and reports the skips with counts", async () => {
+  const { w, last } = await setup();
+  const [a, b, c, d] = POSTINGS.map((p) => p.job_id);
+  const edit = (id: string, fn: (fields: any[]) => any[]) => { const p = w.preps.get(id)!; w.preps.set(id, { ...p, payload: { ...p.payload, fields: fn(structuredClone((p.payload as any).fields)) } }); };
+  // The offer holds each role's tag from before these edits, so keep each tag: only the answers shown change.
+  edit(a, (f) => [...f, { name: "why", label: "Why do you want this role?", value: "" }]);                // blank required
+  edit(b, (f) => [...f, { name: "gender", label: "Gender", value: "Female" }]);                          // sensitive answer
+  edit(c, (f) => [...f, { name: "pw", label: "Account password", type: "password", value: "hunter2hunter2" }]); // secret
+  const r = (await yes(w, last))!;
+  eq(w.queue.map((q) => q.job_id), [d], "only the clean role is approved");
+  eq(r.counts.approved, 1); eq(r.counts.skipped_blank, 1); eq(r.counts.skipped_sensitive, 2);
+  assert(/Skipped 3 roles \(1 with a blank required field and 2 with sensitive answers\)/.test(r.reply), r.reply);
+  assert(/exact answers are on the page/.test(r.reply), r.reply);
+  eq(overclaims(r.reply, r.summary), []);
+  // An optional blank field (required:false) does not hold a role back.
+  const w2 = (await setup()); const p2 = w2.w.preps.get(a)!;
+  w2.w.preps.set(a, { ...p2, payload: { ...p2.payload, fields: [...(p2.payload as any).fields, { name: "linkedin", label: "LinkedIn", value: "", required: false }] } });
+  eq((await yes(w2.w, w2.last))!.counts.approved, 4);
+});
+
+Deno.test("the offer text says the exact payloads are on the page and that blank or sensitive ones are skipped", async () => {
+  const { r } = await setup();
+  assert(/exact answers are on the page/.test(r.offerAsk) && /skip any with blank or sensitive answers/.test(r.offerAsk), r.offerAsk);
+});
+
+Deno.test("CAREER_APPLY_ALL_YES=off hides the page button and the applyall action refuses (nothing approved)", async () => {
+  const { w, s, html } = await page();
+  const set = setOf(html)![1];
+  assert(applyAllYesEnabled({ get: () => undefined }) && !applyAllYesEnabled({ get: (k) => k === "CAREER_APPLY_ALL_YES" ? "off" : undefined }));
+  ENV.CAREER_APPLY_ALL_YES = "off";
+  try {
+    assert(!setOf(await (await get(w, s)).text()), "no Apply to all button when off");
+    const t = await textOf(await post(w, s, { action: "applyall", set }));
+    assert(/Apply to all is turned off\. Nothing was approved\./.test(t), t);
+    eq(w.queue.length, 0);
+  } finally { delete ENV.CAREER_APPLY_ALL_YES; }
+  assert(setOf(await (await get(w, s)).text()), "back on: the button is back");
+});
+
+Deno.test("two yes at once (concurrent): each role is approved once and the second yes does not double-approve", async () => {
+  const { w, last } = await setup();
+  w.clock.t = NOW + 60_000;
+  const go = () => applyAllYesTurn({ message: "yes", userId: U, now: w.clock.t, last, deps: w.deps, questions: w.deps.questions, prepare: w.deps.reprepare });
+  const [x, y] = await Promise.all([go(), go()]);
+  eq(w.queue.length, 4, "four applications, never eight"); eq(new Set(w.queue.map((q) => q.job_id)).size, 4);
+  eq(x!.counts.approved + y!.counts.approved, 4, "approved counts add up to the four, not eight");
 });

@@ -1,17 +1,15 @@
-// FAMILY EMAIL, pending on PR #196 (Google verification: "disconnect gmail" from the chat, and the migration
-// 20261026200011_google_disconnect_erase.sql). Moves to tests/architect/ when #196 lands with the patch named below.
+// FAMILY EMAIL: "disconnect gmail" from the chat and the Google row's delete.
 // Through the REAL handler on real Postgres, with a fake Google (Gmail reads and the revoke endpoint):
 //   a person who connected Gmail and had their mail read (status events, a follow-up draft, the read cursor, an
 //   assessment's deadline reminder queued in career_outbox) says "disconnect gmail". After it: no Google row, no Vault
 //   entry, and nothing read from that Gmail is left, including the reminder not yet delivered (it repeats an email's
 //   words and would otherwise still be texted after the person took Trainee's access away); the reply says only what the
 //   rows show; "check my email" then reads nothing.
-// On trunk: the chat has no disconnect (PR #196 adds it) and nothing erases mail rows on a grant's delete.
-// On #196 as of 2026-10-26: everything but the undelivered reminder (patch: the erase also deletes the person's
-// undelivered career_outbox rows keyed status:deadline:%).
+// Fixed by 20261103100000_google_disconnect_erase_outbox.sql (the erase also deletes the person's undelivered
+// career_outbox rows keyed status:deadline:%); before it only that reminder survived.
 import assertNode from "node:assert/strict";
-import { pgBinDir, type Pg, startPg } from "../../flow/pg.ts";
-import { careerHandler, supabaseParity } from "../../flow/handler.ts";
+import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
+import { careerHandler, supabaseParity } from "../flow/handler.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -19,7 +17,7 @@ const ME = "7b0f8f8e-6a43-4a49-9d2c-0000000000d1";
 const HOUR = 3_600_000, DAY = 86_400_000;
 const READ_ONLY = "openid email https://www.googleapis.com/auth/gmail.readonly";
 
-Deno.test({ name: "FAMILY EMAIL (pending #196): disconnect erases everything read from Gmail, the queued reminder too", sanitizeResources: false, sanitizeOps: false, async fn() {
+Deno.test({ name: "FAMILY EMAIL: disconnect erases everything read from Gmail, the queued reminder too", sanitizeResources: false, sanitizeOps: false, async fn() {
   if (!pgBinDir()) { if (Deno.env.get("CI") === "true") throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
   const pg: Pg = await startPg();
   const now = Date.now();
@@ -77,7 +75,8 @@ Deno.test({ name: "FAMILY EMAIL (pending #196): disconnect erases everything rea
 
     const gmail = calls.filter((c) => c.includes("gmail.googleapis.com")).length;
     const again = await chat.say("check my email");
-    eq(again.resultStatus, "NOT_WIRED", again.reply);
+    // Since the connector framework (connectors.ts) the answer is the connector-need reply, not the old NOT_WIRED read status.
+    eq([again.intent, again.resultStatus], ["career_connector_need", "not_wired"], again.reply);
     eq(calls.filter((c) => c.includes("gmail.googleapis.com")).length, gmail, "no Gmail call after the disconnect");
   } finally {
     handler?.restore();

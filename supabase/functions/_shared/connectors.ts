@@ -295,6 +295,23 @@ async function connectPageReply(d: Deps, o: { userId: string; channel: string; r
   return { reply: connectLine(o.reason, u.url), meta: o.channel === "telegram" ? { link_button: { text: "Connect email", url: u.url } } : null };
 }
 
+// Why an application stays "submitted" and not "Submitted - confirmed": only the employer's own confirmation email (or the reference
+// their page showed) moves it, and the email is read from the person's mailbox. When a status answer has applications waiting on that
+// and no mailbox is connected, the answer carries the connect page's link (reason "confirm") and says why, in plain words. Null when
+// nothing waits, a mailbox is connected, or nothing can be connected yet. The link is the same signed, single-use, one-hour link.
+export async function confirmMailAsk(d: Deps, o: { userId: string; channel: string; unconfirmed: number }): Promise<{ text: string; meta: Record<string, unknown> | null } | null> {
+  const n = Math.floor(Number(o.unconfirmed) || 0);
+  if (n < 1) return null;
+  if ((await statuses(d, o.userId)).some((x) => x.state === "connected")) return null;
+  const u = await connectUrlsFor(d.env, o.userId, "confirm", d.now(), /^[a-z]{3,16}$/.test(o.channel) ? o.channel : "web");
+  const mailWired = gmail.wired(d.env) || outlook.wired(d.env);
+  if (!u.url && !mailWired) return null;
+  const which = n === 1 ? "1 of your applications is" : `${n} of your applications are`;
+  const why = `${which} submitted, but the employer hasn't confirmed ${n === 1 ? "it" : "them"} yet. Only the employer's confirmation email can mark ${n === 1 ? "it" : "one"} Submitted - confirmed, so I need your email connected to see it (just the sender, subject and a short preview; I never send anything you haven't approved).`;
+  if (!u.url) return { text: `${why} Say "${gmail.connectAsk}" and I'll send you a link.`, meta: null };
+  return { text: `${why} Connect it here: ${u.url}`, meta: o.channel === "telegram" ? { link_button: { text: "Connect email", url: u.url } } : null };
+}
+
 // When the turn itself failed (a database read refused): the person still gets a plain, true answer, never the router's.
 export function connectorFailure(message: string): ChatOut | null {
   const a = connectorAsk(message);

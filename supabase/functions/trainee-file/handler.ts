@@ -24,8 +24,10 @@ import { renderResults, renderThings, type PayFilter, type ResultRow, type Thing
 import { conversionNote, floorText, type Pay, payGroup, payText, startsBelow } from "../_shared/role_pay.ts";
 import { checkAnswer, type OpenQuestion, type QuestionStore } from "../_shared/career_apply_questions.ts";
 import { type PendingRow, pendingLine } from "../_shared/career_hosted_prepare.ts";
+import { NO_RESUME_NEXT, NO_RESUME_REASON } from "../_shared/career_apply_from_chat.ts";
 import { factType, NEVER_BY_TEXT } from "../_shared/question_map.ts";
 import { decodeRowQuestionType } from "../_shared/row_answer.ts";
+import { redactIdentity } from "../_shared/identity_redact.ts";
 import { freshnessStamp } from "../_shared/results_stamp.ts";
 import { coverage, countsOf, NOTHING_SENT, NOT_LISTED, renderExport, reqIdOf, roleIds, specOf } from "../_shared/results_spec.ts";
 import type { ListMeta } from "../_shared/telegram_jobs.ts";
@@ -55,6 +57,9 @@ export interface FileDeps extends Omit<JobDeps, "store"> {
   // Prepare the person's queued applications again now that their questions are answered (career_hosted_prepare.ts). Absent: they
   // wait in the queue and the page says so.
   reprepare?: (userId: string) => Promise<"started" | "failed" | "off" | "skipped">;
+  // Whether the person has a confirmed resume (career_resume_on_file, the check the chat's apply turn makes). false: Apply asks for the
+  // resume first and queues nothing. null or absent: the queue is not held back here (the card still refuses a send without one).
+  resumeOnFile?: (userId: string) => Promise<boolean | null>;
   // Where each queued posting stands (career_apply_pending_for), in the person's words. Absent: "getting it ready".
   pending?: (userId: string) => Promise<PendingRow[] | null>;
   // Every phone step (number, code) answers only after this resolves, given how long the step took: deps.ts pads to a floor
@@ -666,6 +671,8 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
     if (!row.tag) {
       if (tag !== "none") return { note: CHANGED };
       if (asking.length) return { things: row, qs: asking };
+      // No confirmed resume: ask for exactly that (as the chat does) instead of queueing a preparation that cannot start.
+      if (d.resumeOnFile && (await d.resumeOnFile(u).catch(() => null)) === false) return { note: `Not queued: ${NO_RESUME_REASON}. ${NO_RESUME_NEXT} Nothing was sent.` };
       const w = await d.store.want(u, row.job, d.now()).catch(() => ({ result: "refused" as const, reason: "I couldn't save that just now." }));
       if (w.result === "refused") return { note: `Not queued: ${w.reason ?? "I can't open that posting's application form yet."}` };
       // The tap IS the person's ask to get this one ready: start preparing now (the queue holds only what they asked for). Preparing
@@ -756,7 +763,8 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
         for (const q of qs) {
           if (kindOf(q) === "secret") { errs[q.id] = "Trainee never collects this. Type it yourself on the employer's site."; continue; }
           const raw = (fields.get(`q_${q.id}`) ?? "").trim();
-          vals[q.id] = raw;
+          // A password, a code or an ID/card number typed here is refused and not drawn back into the page (the chat never echoes one either).
+          vals[q.id] = redactIdentity(raw).removed.length ? "" : raw;
           const c = checkAnswer(q, raw);
           if (!c.ok) { errs[q.id] = c.skip ? "needs an answer here (to leave it for later, go back to the list)" : c.why === "had no answer" ? "needs an answer" : c.why; continue; }
           try { await d.questions.answer(u, q.id, c.value); saved++; } catch { errs[q.id] = "couldn't be saved just now; nothing was lost, try again"; }

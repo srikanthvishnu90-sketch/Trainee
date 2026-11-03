@@ -149,6 +149,8 @@ Deno.test({
         insert into public.career_kb_postings (posting_key, source, board, company, title, location, url, posted_at, text_excerpt, content_hash) values
         ${postings.map((p, i) => `('${keyOf(p)}', '${p.family}', '${p.board}', '${p.company}', '${p.title}', 'Chicago, IL', '${world.urlOf(p)}', now() - interval '${i} minutes', '${desc}', 'mh${i}')`).join(",")};`);
 
+      // No model is configured in this flow (a key left set by an earlier test file in the same process would let a chat turn call one).
+      for (const k of ["ANTHROPIC_API_KEY", "CAREER_BRAIN", "CAREER_MODEL", "CAREER_REPLY_MODEL"]) { if (!(k in saved)) saved[k] = Deno.env.get(k); Deno.env.delete(k); }
       setEnv("CAREER_PREPARE_AHEAD_URL", `${RUNNER}/prepare`);
       setEnv("CAREER_PREPARE_AHEAD_TOKEN", KICK);
       // The gate pins the release flags off for tests (scripts/gate.sh); this flow measures them on, as released.

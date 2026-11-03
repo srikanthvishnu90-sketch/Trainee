@@ -78,6 +78,7 @@ function fakeModel(body: any): Response {
 }
 
 // ------------------------------------------------------------------------------------------------ the world
+let priorKey: string | undefined; // the model key as it was: a key left set would reach later test files in the same process
 let pg: Pg | null = null, handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
 const timings: number[] = [];
 async function world() {
@@ -100,6 +101,7 @@ async function world() {
     if (new URL(req.url).host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
     return viaDouble(req);
   }) as typeof fetch;
+  priorKey = Deno.env.get("ANTHROPIC_API_KEY");
   Deno.env.set("ANTHROPIC_API_KEY", "sk-test-fake");
   return { pg, handler };
 }
@@ -336,5 +338,6 @@ Deno.test({ name: "materials: measured turns, wall time and model calls (printed
   console.log(`MATERIALS MEASURE: turns=${xs.length} p50_ms=${q(0.5)} p95_ms=${q(0.95)} max_ms=${Math.round(xs.at(-1) ?? 0)} model_calls=${calls.length}`);
   assert(xs.length >= 9, "the flows above ran (5 + 4 turns)");
   handler?.restore();
+  if (priorKey === undefined) Deno.env.delete("ANTHROPIC_API_KEY"); else Deno.env.set("ANTHROPIC_API_KEY", priorKey);
   await pg?.stop();
 } });

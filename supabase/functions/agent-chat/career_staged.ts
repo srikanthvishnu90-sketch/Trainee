@@ -224,11 +224,11 @@ const FILE_PAGE_WORDS = new Set(("file page pages a an the my me us our your for
   "show open give send make create build get see share start started starting getting begin beginning guide intro introduction overview basics steps how help new first " +
   "job jobs application applications apply applying submit submitting submission anything nothing do does not dont don't never without any all no and").split(/\s+/));
 const SEARCH_LIKE = new Set(["career_discovery", "career_internship_discovery"]);
-export function filePageAsk(message: string, ask: { role?: string; place?: string | null; remote?: boolean; remoteOnly?: boolean; limits?: Record<string, unknown> } | null | undefined): boolean {
+export function filePageAsk(message: string, ask: { role?: string; place?: string | null; remote?: boolean; remoteOnly?: boolean; limits?: object } | null | undefined): boolean {
   const m = String(message ?? "").replace(/[\u2019`]/g, "'");
   if (!FILE_PAGE_ASK.test(m)) return false;
   if (!ask) return true;
-  const L = ask.limits ?? {};
+  const L = (ask.limits ?? {}) as Record<string, unknown>;
   const limited = Object.values(L).some((v) => Array.isArray(v) ? v.length > 0 : !!v);
   if (ask.place || ask.remote || ask.remoteOnly || limited) return false;
   return String(ask.role ?? "").toLowerCase().split(/[^a-z']+/).filter(Boolean).every((w) => FILE_PAGE_WORDS.has(w));
@@ -259,7 +259,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   } else intent = probe.intent ?? null;
   if (!intent) return { brain: false, mode, intent: null, reason: "router_claimed" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
-  if (SEARCH_LIKE.has(intent) && filePageAsk(o.message, askFor(o.message, { intent, resultStatus: probe.resultStatus }, o.ctx.discovery)?.ask)) return { brain: true, mode, intent, reason: "file_page_ask" };
+  if (SEARCH_LIKE.has(intent) && filePageAsk(o.message, askFor(o.message, { intent, resultStatus: probe.result?.resultStatus }, o.ctx.discovery)?.ask)) return { brain: true, mode, intent, reason: "file_page_ask" };
   if (openCareerQuestion(o.env, o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "open_career_question" };
   if (adviceQuestion(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "advice_question" };
   if (!STAGED_BRAIN_INTENTS.includes(intent)) return { brain: false, mode, intent, reason: "action" };

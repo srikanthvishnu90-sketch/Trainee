@@ -86,7 +86,7 @@ Deno.test("FP-4 a usable signed File link returns for the ask and opens; nothing
   const A = signedIn();
   const calls = { want: 0, save: 0, open: 0 };
   const fs: FileStore = { async remember() {}, async recall() { return null; }, async rememberList() {}, async recallList() { return null; }, async postings() { return []; }, async save() { calls.save++; return "saved"; },
-    async prepared() { return null; }, async want() { calls.want++; return { result: "queued" }; }, async appRow() { return null; }, async claimLink() { return true; }, async wanted() { return false; } };
+    async prepared() { return null; }, async applied() { return false; }, async want() { calls.want++; return { result: "queued" }; }, async appRow() { return null; }, async wanted() { return false; } };
   const deps: FileDeps = { ...A.deps, store: fs, now: () => at.t, env: { get: (k) => ENV[k] }, cards: { async open() { calls.open++; throw new Error("no"); } }, tap: {} as never, files: svc };
   const opened = await handleFile(new Request(links[0]), deps);
   // A link opens a phone sign-in and nothing private (file_link.ts): it redirects to the sign-in, which answers 200.

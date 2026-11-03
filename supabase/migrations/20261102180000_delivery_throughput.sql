@@ -177,13 +177,14 @@ begin
   loop
     -- delivered (career_outbox_sent), then skipped or failed for good (career_outbox_terminal_old); skip locked, so a row a
     -- delivery run holds is never waited for.
-    delete from career_outbox o using (select d.id from career_outbox d where d.status = 'delivered' and d.delivered_at < now() - p_older
-      order by d.delivered_at limit sz for update skip locked) x where o.id = x.id;
+    -- The ids are fixed first (array(...) runs once), so the delete can never take more than one batch whatever plan is chosen.
+    delete from career_outbox o where o.id = any(array(select d.id from career_outbox d where d.status = 'delivered' and d.delivered_at < now() - p_older
+      order by d.delivered_at limit sz for update skip locked));
     get diagnostics got = row_count; total := total + got;
     if got < sz then
-      delete from career_outbox o using (select d.id from career_outbox d
+      delete from career_outbox o where o.id = any(array(select d.id from career_outbox d
         where (d.status = 'skipped_opt_out' or (d.status = 'failed' and d.retry_at is null)) and d.created_at < now() - p_older
-        order by d.created_at limit sz for update skip locked) x where o.id = x.id;
+        order by d.created_at limit sz for update skip locked));
       get diagnostics got = row_count; total := total + got;
     end if;
     i := i + 1;

@@ -928,6 +928,9 @@ echo "== trainee_file_signin_limits.test.sql (texts and tries capped per account
 # 20261102120000: the same selection per person (reads 130000's career_apply_job_history), so it follows it. Twice (idempotent).
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102120000_career_apply_prepare_candidates_for.sql"
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102120000_career_apply_prepare_candidates_for.sql"
+# 20261102140000: a stored resume file restarts the waiting preparation (trigger on career_apply_cloud_resumes). Twice (idempotent).
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102140000_career_apply_resume_file_restarts_preparation.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102140000_career_apply_resume_file_restarts_preparation.sql"
 # DELIVERY THROUGHPUT (20261102180000): the shared token bucket, the two-lane sharded claim, the outbox retention, the foreign-key indexes and
 # autovacuum settings. Twice (idempotent), then its test.
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102180000_delivery_throughput.sql"

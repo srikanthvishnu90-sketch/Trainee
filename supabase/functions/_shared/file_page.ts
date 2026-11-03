@@ -177,11 +177,11 @@ ${DISABLED_CSS}
 export interface Og { title: string; description: string; image: string | null }
 const ogTags = (o: Og) => `<meta property="og:type" content="website"><meta property="og:site_name" content="Trainee"><meta property="og:title" content="${esc(o.title)}"><meta property="og:description" content="${esc(o.description)}">${o.image ? `<meta property="og:image" content="${esc(o.image)}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${esc(o.image)}">` : `<meta name="twitter:card" content="summary">`}<meta name="twitter:title" content="${esc(o.title)}"><meta name="twitter:description" content="${esc(o.description)}">`;
 const OG_DEFAULT: Og = { title: "Your jobs on Trainee", description: "Tap Apply on any job.", image: null };
-export function layout(title: string, inner: string, o: { script?: string; bodyAttrs?: string; og?: Og; tg?: boolean; css?: string } = {}): string {
+export function layout(title: string, inner: string, o: { script?: string; bodyAttrs?: string; og?: Og; tg?: boolean; css?: string; head?: string } = {}): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="robots" content="noindex,nofollow"><meta name="referrer" content="same-origin"><meta name="theme-color" content="${PLUM}" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">${ogTags(o.og ?? OG_DEFAULT)}
 ${FAVICON}
-${FONT_LINKS}
+${FONT_LINKS}${o.head ?? ""}
 <title>${esc(clip(title, 90))}</title><style>${CSS}${o.css ?? ""}</style></head>
 <body${o.bodyAttrs ? " " + o.bodyAttrs : ""}><div class="wrap">${inner}</div>${o.tg ? `<script src="https://telegram.org/js/telegram-web-app.js"></script>` : ""}${o.script ? `<script>${o.script}</script>` : ""}</body></html>`;
 }

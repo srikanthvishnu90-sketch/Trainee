@@ -9,6 +9,7 @@ import { supabaseFileStore, supabasePhoneAuth, supabaseSessionStore, supabaseTim
 import { createFileService, supabaseFileKindStore } from "../_shared/file_service.ts";
 import { supabaseQuestionStore } from "../_shared/career_apply_questions.ts";
 import { pendingRows, reprepareQueued } from "../_shared/career_hosted_prepare.ts";
+import { resumeOnFileReader } from "../_shared/career_apply_from_chat.ts";
 import type { FileDeps } from "./handler.ts";
 import { PHONE_STEP_FLOOR_MS, phonePace } from "../_shared/file_session.ts";
 
@@ -33,5 +34,6 @@ export function buildFileDeps(admin: any, env: FileDeps["env"], now: () => numbe
     // A results card that isn't ready: the employer's open questions (asked on the page, saved the way the chat saves them), then
     // the queued applications prepared again, and where each one stands.
     questions: supabaseQuestionStore(admin), reprepare: (userId) => reprepareQueued({ admin, userId, env, fetch: globalThis.fetch.bind(globalThis) }),
+    resumeOnFile: (userId) => resumeOnFileReader(admin, userId)(),
     pending: (userId) => pendingRows(admin, userId) };
 }

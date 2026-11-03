@@ -107,7 +107,7 @@ Deno.test({
             assert(/^Made for Ada · Nov 1, 2026$/.test((await pg.textContent(".made"))!.trim()));
             // A solid black Apply on every card (owner, 2026-11-02), white text, 48px+, full width on a phone; Apply to selected is black too.
             eq(list.goes.length, 3, "an Apply on each card");
-            eq(list.applies.length, 4, "three card Applys and Apply to selected, all black");
+            eq(list.applies.length, 5, "three card Applys, Apply to all 3 ready and Apply to selected, all black");
             assert(list.goes.every((a: any) => a.h >= 48 && near(a.bg.c, [0, 0, 0], 2) && near(a.fg.c, [255, 255, 255], 2)), "black pill, white text, 48px");
             assert(list.goes.every((a: any) => a.w >= 360 - 2 * 14 - 2 * 12 - 4), "each card's Apply is full width on a phone");
             assert(/Pay not listed/.test(await pg.textContent("main") ?? ""));

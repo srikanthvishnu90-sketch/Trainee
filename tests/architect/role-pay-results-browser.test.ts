@@ -115,7 +115,7 @@ Deno.test({
             const acmeCard = pg.locator("li.card", { hasText: "Acme Web" });
             await acmeCard.getByText("What will be sent").click();
             const sent = await acmeCard.locator("details.send").textContent() ?? "";
-            for (const x of ["ada-resume.pdf", "Ada", "ada@example.test", "Are you authorized to work in the US?", "I'd love to build at Acme Web.", "boards.greenhouse.io"]) assert(sent.includes(x), `${x} shown before the tap`);
+            for (const x of ["ada-resume.pdf", "Ada", "ada@example.test", "Are you 18 or older?", "I'd love to build at Acme Web.", "boards.greenhouse.io"]) assert(sent.includes(x), `${x} shown before the tap`);
             await check("the card with What will be sent open");
             eq(w.queue.length, 0, "nothing queued by looking");
             // One tap.

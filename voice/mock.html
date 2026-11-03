@@ -1,11 +1,8 @@
 <!doctype html>
-<!-- WO-035: the voice mock interview. Opened from the single-use link Trainee texts ("start a voice mock for Goldman IB").
-     The token is after "#", so it never reaches the web host; it goes only to the career-voice function.
-     The call runs on OpenAI's Realtime API over WebRTC with a short-lived client secret the function mints; the OpenAI
-     key never reaches this page. Audio is never recorded or uploaded: when the call ends this page sends only the words
-     (the Realtime API's text transcript events) to career-voice, which scores them and texts the debrief back.
-     Latency harness: every reply logs "[voice-latency]" with the time from the person going quiet (local microphone
-     level) and from the server's end-of-speech event to the first audio of the reply (output_audio_buffer.started). -->
+<!-- Voice mock interview: OFF. Owner directive 2026-11-02: Trainee is Claude-only, no OpenAI calls anywhere, and voice stays off.
+     This page is inert: it contacts no voice or realtime service and never asks for the microphone. It only offers the text
+     mock, through the career-voice function's "fallback" action with the link's token (read from the fragment, so it never
+     reaches the web host). -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -14,8 +11,8 @@
 <title>Voice mock interview</title>
 <link rel="icon" href="/icon-192.png">
 <style>
-  :root { --bg: #0B0B0D; --card: #1C1C1F; --text: #F2F2F7; --muted: #A1A1A6; --accent: #34C759; --warn: #FF9F0A; --line: #2C2C2E; }
-  @media (prefers-color-scheme: light) { :root { --bg: #F5F5F7; --card: #FFFFFF; --text: #111113; --muted: #5C5C61; --accent: #1F8A3B; --warn: #B25E00; --line: #DDDDE2; } }
+  :root { --bg: #0B0B0D; --card: #1C1C1F; --text: #F2F2F7; --muted: #A1A1A6; --accent: #34C759; --line: #2C2C2E; }
+  @media (prefers-color-scheme: light) { :root { --bg: #F5F5F7; --card: #FFFFFF; --text: #111113; --muted: #5C5C61; --accent: #1F8A3B; --line: #DDDDE2; } }
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: grid; place-items: start center; }
   main { width: min(520px, 100%); padding: 24px 16px 40px; }
@@ -23,214 +20,34 @@
   p { margin: 8px 0; }
   .muted { color: var(--muted); font-size: 14px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin: 16px 0; }
-  button { font: inherit; width: 100%; min-height: 50px; border-radius: 14px; border: 0; margin-top: 10px; cursor: pointer; }
-  .go { background: var(--accent); color: #fff; font-weight: 600; }
-  .alt { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  button { font: inherit; width: 100%; min-height: 50px; border-radius: 14px; border: 0; margin-top: 10px; cursor: pointer; background: var(--accent); color: #fff; font-weight: 600; }
   button[disabled] { opacity: .5; cursor: default; }
-  #status { font-weight: 600; }
-  .warn { color: var(--warn); }
-  [hidden] { display: none !important; }
-  details { margin-top: 12px; }
-  pre { white-space: pre-wrap; font-size: 12px; color: var(--muted); max-height: 180px; overflow: auto; }
 </style>
 </head>
 <body>
 <main>
   <h1>Voice mock interview</h1>
-  <p class="muted" id="what">A practice interview, out loud, with Trainee's interviewer.</p>
-
   <div class="card">
-    <p id="status">Ready when you are.</p>
-    <p class="muted" id="detail">Tap start, then allow the microphone. The interviewer speaks first.</p>
-    <button class="go" id="start">Start the call</button>
-    <button class="go" id="hangup" hidden>Hang up</button>
-    <button class="alt" id="textmock" hidden>Do the text mock instead</button>
+    <p id="status"><b>Voice is not available.</b></p>
+    <p class="muted" id="detail">Voice mock interviews are switched off. The text mock works: it runs in your messages.</p>
+    <button id="textmock">Do the text mock instead</button>
   </div>
-
-  <div class="card" id="privacy">
-    <p><b>Privacy.</b> Audio is never stored. Your microphone goes to OpenAI's realtime voice service only for the live call; Trainee does not record or upload it. When you hang up, this page sends Trainee only the words of the call (the text transcript), which are scored for your debrief and then dropped. The debrief itself is kept in your messages.</p>
-    <p class="muted">This link works once, for your account only, and must be started within 10 minutes of when it was sent.</p>
-  </div>
-
-  <details id="latencyBox">
-    <summary class="muted">Reply delay (for testing)</summary>
-    <pre id="latency">No replies yet.</pre>
-  </details>
 </main>
 <script>
-"use strict";
 (function () {
-  var FN = "https://mrwngntwmnaqrqhupvlt.supabase.co/functions/v1/career-voice";
-  var startToken = (location.hash.match(/[#&]t=([A-Za-z0-9._-]+)/) || [])[1] || "";
-  // Keep the token out of the address bar and history once read; this tab keeps it, so a reload still works.
-  try {
-    if (startToken) sessionStorage.setItem("voice_t", startToken); else startToken = sessionStorage.getItem("voice_t") || "";
-    history.replaceState(null, "", location.pathname);
-  } catch (e) { /* not fatal */ }
   var $ = function (id) { return document.getElementById(id); };
-  var callToken = "", pc = null, dc = null, mic = null, ctx = null, hangTimer = null, ended = false;
-  var turns = [];             // [{ who, text, id }] in call order: words only, never audio
-  var lat = { silence_to_audio_ms: [], vad_to_audio_ms: [] };
-  var lastVoiceAt = 0, pending = null;
-
-  function say(status, detail, warn) {
-    $("status").textContent = status;
-    $("status").className = warn ? "warn" : "";
-    $("detail").textContent = detail || "";
-  }
-  function offerText(show) { $("textmock").hidden = !show; }
-  function post(body, keepalive) {
-    // text/plain keeps this a simple request (no preflight), and lets the last send survive the page closing.
-    return fetch(FN, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(body), keepalive: !!keepalive })
-      .then(function (r) { return r.json().catch(function () { return { status: "ERROR" }; }).then(function (j) { j.http = r.status; return j; }); });
-  }
-  if (!startToken) { say("This page needs the link Trainee texted you.", "Text \"start a voice mock\" to get one.", true); $("start").disabled = true; }
-
-  // ---------- Latency harness ----------
-  function median(xs) { if (!xs.length) return null; var s = xs.slice().sort(function (a, b) { return a - b; }); return Math.round(s[Math.floor(s.length / 2)]); }
-  function showLatency() {
-    $("latency").textContent = "Replies measured: " + lat.silence_to_audio_ms.length +
-      "\nFrom you going quiet to the first audio of the reply: median " + median(lat.silence_to_audio_ms) + " ms" +
-      "\nFrom the server's end-of-speech event to the first audio: median " + median(lat.vad_to_audio_ms) + " ms" +
-      "\nAll (quiet to audio, ms): " + lat.silence_to_audio_ms.map(Math.round).join(", ");
-  }
-  function watchMicLevel(stream) {
-    try {
-      ctx = new (window.AudioContext || window.webkitAudioContext)();
-      var an = ctx.createAnalyser(); an.fftSize = 512;
-      ctx.createMediaStreamSource(stream).connect(an);
-      var buf = new Float32Array(an.fftSize);
-      (function tick() {
-        if (ended) return;
-        an.getFloatTimeDomainData(buf);
-        var sum = 0; for (var i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-        if (Math.sqrt(sum / buf.length) > 0.02) lastVoiceAt = performance.now();
-        requestAnimationFrame(tick);
-      })();
-    } catch (e) { console.warn("[voice-latency] no local level meter:", e && e.message); }
-  }
-
-  // ---------- Transcript (text events only) ----------
-  function turn(id, who) {
-    for (var i = 0; i < turns.length; i++) if (turns[i].id === id) return turns[i];
-    var t = { id: id, who: who, text: "" }; turns.push(t); return t;
-  }
-  function onEvent(ev) {
-    var now = performance.now();
-    switch (ev.type) {
-      case "input_audio_buffer.speech_stopped":
-        turn(ev.item_id, "candidate");
-        pending = { quietAt: lastVoiceAt || now, vadAt: now };
-        break;
-      case "conversation.item.input_audio_transcription.completed":
-        turn(ev.item_id, "candidate").text = String(ev.transcript || "").trim();
-        break;
-      case "response.created":
-        if (ev.response && ev.response.id) turn("r:" + ev.response.id, "interviewer");
-        break;
-      case "response.output_audio_transcript.done":
-        var t = turn("r:" + ev.response_id, "interviewer");
-        t.text = (t.text ? t.text + " " : "") + String(ev.transcript || "").trim();
-        break;
-      case "output_audio_buffer.started":
-        if (pending) {
-          var a = now - pending.quietAt, b = now - pending.vadAt;
-          lat.silence_to_audio_ms.push(a); lat.vad_to_audio_ms.push(b);
-          console.log("[voice-latency] quiet->first audio " + Math.round(a) + " ms; end-of-speech event->first audio " + Math.round(b) + " ms");
-          showLatency(); pending = null;
-        }
-        break;
-      case "error":
-        console.warn("[voice] server error:", ev.error && ev.error.message);
-        break;
-    }
-  }
-
-  // ---------- The call ----------
-  function failCall(status, detail) {
-    stopMedia();
-    say(status, (detail ? detail + " " : "") + "You can do the text mock instead: it starts in your messages.", true);
-    $("start").hidden = true; $("hangup").hidden = true; offerText(true);
-  }
-  function stopMedia() {
-    try { if (dc) dc.close(); } catch (e) {}
-    try { if (pc) pc.close(); } catch (e) {}
-    try { if (mic) mic.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
-    try { if (ctx) ctx.close(); } catch (e) {}
-    if (hangTimer) clearTimeout(hangTimer);
-  }
-  $("start").onclick = function () {
-    $("start").disabled = true;
-    if (typeof RTCPeerConnection === "undefined" || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      return failCall("This browser can't make the call.", "It has no WebRTC or microphone support.");
-    }
-    say("Asking for the microphone...", "");
-    // The microphone first, so a blocked microphone never uses up the link.
-    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
-      mic = stream;
-      say("Connecting...", "");
-      return post({ action: "start", token: startToken }).then(function (r) {
-        if (r.status === "NOT_WIRED") { stopMedia(); say("Voice isn't on yet.", r.message || "", true); $("start").hidden = true; offerText(true); return; }
-        if (r.status === "UPSTREAM_ERROR") { callToken = r.call_token || ""; return failCall("The voice service didn't answer.", ""); }
-        if (r.status !== "OK") { stopMedia(); say("This link can't start a call.", r.message || "Text \"start a voice mock\" for a new link.", true); $("start").hidden = true; return; }
-        callToken = r.call_token;
-        $("what").textContent = "A " + r.what + ", about " + r.minutes + " minutes, " + r.questions + " questions.";
-        return connect(r);
-      });
-    }).catch(function (e) {
-      var name = e && e.name;
-      if (name === "NotAllowedError" || name === "SecurityError") failCall("Your browser blocked the microphone.", "To talk, allow it in your browser settings and reload this page.");
-      else if (name === "NotFoundError") failCall("No microphone was found.", "");
-      else failCall("The call couldn't connect.", "");
-    });
-  };
-  function connect(r) {
-    pc = new RTCPeerConnection();
-    var audio = document.createElement("audio"); audio.autoplay = true; document.body.appendChild(audio);
-    pc.ontrack = function (e) { audio.srcObject = e.streams[0]; };
-    pc.addTrack(mic.getTracks()[0], mic);
-    watchMicLevel(mic);
-    dc = pc.createDataChannel("oai-events");
-    dc.addEventListener("message", function (m) { try { onEvent(JSON.parse(m.data)); } catch (e) {} });
-    dc.addEventListener("open", function () {
-      say("You're on the call.", "The interviewer will start. Hang up any time; your debrief comes by text.");
-      $("start").hidden = true; $("hangup").hidden = false;
-      dc.send(JSON.stringify({ type: "response.create" }));
-    });
-    pc.onconnectionstatechange = function () { if (pc && pc.connectionState === "failed" && !ended) failCall("The call dropped (WebRTC failed).", ""); };
-    hangTimer = setTimeout(function () { hangUp("Time is up."); }, (r.minutes + 2) * 60000);
-    return pc.createOffer().then(function (offer) {
-      return pc.setLocalDescription(offer).then(function () {
-        return fetch(r.calls_url + "?model=" + encodeURIComponent(r.model), {
-          method: "POST", body: offer.sdp, headers: { Authorization: "Bearer " + r.client_secret, "Content-Type": "application/sdp" },
-        });
-      });
-    }).then(function (res) {
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      return res.text();
-    }).then(function (sdp) { return pc.setRemoteDescription({ type: "answer", sdp: sdp }); })
-      .catch(function () { failCall("The call couldn't connect (WebRTC failed).", ""); });
-  }
-  function hangUp(why) {
-    if (ended) return;
-    ended = true; stopMedia();
-    $("hangup").hidden = true;
-    say(why || "Call ended.", "Sending the words of the call for scoring...");
-    var transcript = turns.filter(function (t) { return t.text; }).map(function (t) { return { who: t.who, text: t.text }; });
-    var send = function () { return post({ action: "finish", token: callToken, transcript: transcript, latency: lat }, true); };
-    send().catch(function () { return send(); }).then(function (r) {
-      if (r && r.status === "OK") say("Your debrief is on its way to your messages.", "It usually arrives within a minute or two.");
-      else say("The debrief couldn't be sent.", (r && r.message) || "Text \"start a voice mock\" to try again.", true);
-    }).catch(function () { say("The debrief couldn't be sent.", "Check your connection.", true); });
-  }
-  $("hangup").onclick = function () { hangUp("Call ended."); };
-  window.addEventListener("pagehide", function () { if (callToken && !ended && pc) hangUp("Call ended."); });
+  var m = /[#&]t=([A-Za-z0-9_.-]+)/.exec(location.hash || "");
+  var token = m ? m[1] : "";
+  var FN = "https://mrwngntwmnaqrqhupvlt.supabase.co/functions/v1/career-voice";
   $("textmock").onclick = function () {
     $("textmock").disabled = true;
-    post({ action: "fallback", token: callToken || startToken }).then(function (r) {
-      if (r.status === "OK") say("The text mock is in your messages now.", r.message || "");
-      else { say("The text mock couldn't start from here.", (r && r.message) || "Text \"start a mock interview\" instead.", true); }
-    }).catch(function () { say("The text mock couldn't start from here.", "Text \"start a mock interview\" instead.", true); });
+    fetch(FN, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ action: "fallback", token: token }) })
+      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        $("status").textContent = r.status === "OK" ? "The text mock is in your messages now." : "That link can't start the text mock.";
+        $("detail").textContent = r.status === "OK" ? "Its first question is waiting there." : 'Text "start a mock interview" instead.';
+      })
+      .catch(function () { $("status").textContent = "The text mock couldn't start from here."; $("detail").textContent = 'Text "start a mock interview" instead.'; });
   };
 })();
 </script>

@@ -191,7 +191,7 @@ export function understandPayload(m: MailMsg, t: Pick<ThreadRow, "recipient_name
   const offered = (t.offered ?? []).map((s, i) => `${i + 1}. ${s.start}`).join("\n");
   const body = String(m.text ?? "").split(/\n\s*On .{0,120} wrote:\s*\n/i)[0].slice(0, 4000);
   return {
-    system: UNDERSTAND_SYSTEM, max_tokens: 500, store: false,
+    system: UNDERSTAND_SYSTEM, max_tokens: 500,
     tools: [UNDERSTAND_TOOL], tool_choice: { type: "tool", name: "record_email" },
     messages: [{ role: "user", content: [
       `Today: ${new Date(now).toISOString()}. Conversation with ${t.recipient_name}${t.recipient_firm ? ` (${t.recipient_firm})` : ""}, subject "${t.subject}".`,

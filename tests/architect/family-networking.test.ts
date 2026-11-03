@@ -1,6 +1,6 @@
 // FAMILY CERTIFICATION: networking and outreach (capability map NW-*; outreach emails, coffee-chat asks, follow-ups,
 // referral asks, contact tracking), driven as a brand-new person would drive it, through the REAL chat handler
-// (agent-chat/handler-career.ts handleChat) on real Postgres. The model is a scripted stand-in at the OpenAI URL; Google,
+// (agent-chat/handler-career.ts handleChat) on real Postgres. The model is a scripted stand-in at the Anthropic URL; Google,
 // Gmail and LinkedIn are never reachable (any request to them is counted and must stay 0). Nothing leaves the machine.
 //
 // What is certified, each by the database's own rows and a reply that says no more than they show:
@@ -48,7 +48,7 @@ const ME = PEOPLE["tok-j"], OTHER = PEOPLE["tok-k"];
 // draft claims a job not on record; a row whose title carries an injected instruction gets the same invented claim (as a
 // model that obeyed it would). Both must be refused by the fact-lock and never shown or saved.
 let modelCalls = 0;
-function fakeOpenAI(body: any): Response {
+function fakeModel(body: any): Response {
   modelCalls++;
   const user = String((body.messages ?? []).find((m: any) => m.role === "user")?.content ?? "");
   const first = /- name: (\S+)/.exec(user)?.[1] ?? "there", topic = /ASK ABOUT[^\n]*\n- (.+)/.exec(user)?.[1] ?? "";
@@ -70,7 +70,7 @@ Deno.test({ name: "FAMILY networking and outreach: a new person, end to end, on 
   const pg: Pg = await startPg();
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   // D-036: CAREER_OUTREACH_FOLLOWUPS is a release flag (on when unset); this file's off steps run it rolled back ("off").
-  const env = { CAREER_NETWORKING_DRAFT: "on", OPENAI_API_KEY: "sk-test-not-real", CAREER_MODEL: "gpt-5-mini", CAREER_OUTREACH_FOLLOWUPS: "off" };
+  const env = { CAREER_NETWORKING_DRAFT: "on", ANTHROPIC_API_KEY: "sk-test-not-real", CAREER_MODEL: "claude-haiku-5-5", CAREER_OUTREACH_FOLLOWUPS: "off" };
   for (const [k, v] of Object.entries(env)) Deno.env.set(k, v);
   const outside = { google: 0, linkedin: 0 };
   try {
@@ -84,7 +84,7 @@ Deno.test({ name: "FAMILY networking and outreach: a new person, end to end, on 
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
       const host = new URL(req.url).host;
-      if (host === "api.openai.com") return fakeOpenAI(await req.json());
+      if (host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
       if (/(^|\.)google(apis)?\.com$/.test(host)) { outside.google++; return new Response("{}", { status: 500 }); }
       if (/(^|\.)linkedin\.com$/.test(host)) { outside.linkedin++; return new Response("{}", { status: 500 }); }
       return await viaDouble(req);
@@ -407,6 +407,7 @@ Deno.test({ name: "FAMILY networking and outreach: a new person, end to end, on 
 import * as CO from "../../supabase/functions/_shared/career_outreach.ts";
 import * as CN from "../../supabase/functions/_shared/career_networking.ts";
 import { followupTurn } from "../../supabase/functions/_shared/career_inbox_followups.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 const { memoryOutreachStore, OPT_OUT_LINE, OUTREACH_INTENT, outreachTurn } = CO;
 const mailtoOf = (m: any) => { if (!(CO as any).mailtoOf) throw new Error("no mailto link builder"); return (CO as any).mailtoOf(m); };
 const MAILTO_MAX = (CO as any).MAILTO_MAX as number;

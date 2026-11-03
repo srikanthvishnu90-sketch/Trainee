@@ -47,6 +47,9 @@ export interface PrepareDispatchResult { claimed: number; started: { request: st
 // postings stay in the person's queue.
 export async function dispatchPrepare(o: {
   rpc: Rpc; host: SandboxHost; limits: PrepareLimits; secret: string; bridgeUrl: string;
+  // Sandboxes created at once in this tick (1 to 32, default 8), as the send tick does (cloud_runner.ts dispatch): a tick that starts
+  // 30 preparations must not create them one after another inside its 55 seconds.
+  parallel?: number;
   retry?: { tries?: number; baseMs?: number; sleep?: (ms: number) => Promise<void> }; log?: (line: string) => void;
 }): Promise<PrepareDispatchResult> {
   const log = o.log ?? ((l: string) => console.log(l));
@@ -65,14 +68,14 @@ export async function dispatchPrepare(o: {
     return out;
   }
   out.claimed = rows.length;
-  for (const r of rows) {
+  const one = async (r: PrepareRequestRow): Promise<{ request: string; sandbox: string } | { request: string; why: string }> => {
     let sandbox = "";
     try {
       sandbox = await withRetry(() => o.host.create({ name: `trainee-prep-${r.id.slice(0, 8)}-${crypto.randomUUID().slice(0, 8)}` }), o.retry);
       await o.rpc("career_apply_prepare_request_sandbox", { p_id: r.id, p_lease: r.lease_token, p_sandbox: sandbox });
       const token = await prepareToken(o.secret, r.id, r.lease_token, sandbox);
       await withRetry(() => o.host.run(sandbox, { CLOUD_PREPARE_ID: r.id, CLOUD_SANDBOX_ID: sandbox, CLOUD_JOB_TOKEN: token, CLOUD_BRIDGE_URL: o.bridgeUrl }, PREPARE_SCRIPT), o.retry);
-      out.started.push({ request: r.id, sandbox });
+      return { request: r.id, sandbox };
     } catch (e) {
       const why = String((e as Error)?.message ?? e).slice(0, 200);
       if (sandbox) await o.host.stop(sandbox).catch(() => {});
@@ -80,7 +83,14 @@ export async function dispatchPrepare(o: {
       await o.rpc("career_apply_prepare_request_notice", { p_id: r.id, p_lease: r.lease_token, p_text: RUNNER_UNAVAILABLE_TEXT }).catch(() => {});
       await o.rpc("career_apply_prepare_request_finish", { p_id: r.id, p_lease: r.lease_token, p_state: "failed",
         p_outcome: { reason: "RUNNER_UNAVAILABLE", detail: why }, p_card: null }).catch(() => {});
-      out.unavailable.push({ request: r.id, why });
+      return { request: r.id, why };
+    }
+  };
+  // Bounded parallel; reported in the claim's order.
+  const n = Math.max(1, Math.min(32, Math.floor(Number(o.parallel)) || 8));
+  for (let i = 0; i < rows.length; i += n) {
+    for (const x of await Promise.all(rows.slice(i, i + n).map(one))) {
+      if ("sandbox" in x) out.started.push(x); else out.unavailable.push(x);
     }
   }
   log(`prepare dispatch: claimed ${out.claimed}, started ${out.started.length}, not started ${out.unavailable.length}`);
@@ -141,7 +151,8 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
       case "rpc": {
         const name = String(body?.name ?? ""), args = body?.args && typeof body.args === "object" && !Array.isArray(body.args) ? body.args : {};
         if (name === "career_apply_prepare_candidates") {
-          const rows = await d.rpc(name, { p_now: new Date(now).toISOString(), p_per_person: 25, p_limit: 500 });
+          // Read for THIS person only (the limit counts their rows, never other people's); the filter below is defence in depth.
+          const rows = await d.rpc("career_apply_prepare_candidates_for", { p_user: user, p_now: new Date(now).toISOString(), p_per_person: 25, p_limit: 500 });
           return { status: 200, body: (Array.isArray(rows) ? rows : []).filter((c: any) => c?.user_id === user && postings.has(String(c?.job_id))) };
         }
         if (PERSON_RPCS.has(name)) return { status: 200, body: await d.rpc(name, { p_user: user }) };
@@ -187,7 +198,7 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
         const stillAsking = c && "take" in c ? await (async () => {
           const q = await d.rpc("career_apply_questions_open_as", { p_user: user, p_limit: 1 });
           if (Array.isArray(q) && q.length) return true;
-          const more = await d.rpc("career_apply_prepare_candidates", { p_now: new Date(now).toISOString(), p_per_person: 25, p_limit: 500 });
+          const more = await d.rpc("career_apply_prepare_candidates_for", { p_user: user, p_now: new Date(now).toISOString(), p_per_person: 25, p_limit: 500 });
           return Array.isArray(more) && more.some((x: any) => x?.user_id === user && !readyNow.has(String(x?.job_id)));
         })().catch(() => false) : false; // unreadable: pushed as before (never hold a card on a read that failed)
         // A card is one message (4,000 characters): when the batch's ready applications do not all fit, a card of the first

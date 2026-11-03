@@ -265,6 +265,10 @@ async function present(o: { userId: string; threadId: string; now: number; store
   return t.text;
 }
 
+// The first open question, asked the way the questions turn asks it (one at a time, recorded as the one the next message answers).
+// Used when a batch yes (apply_all_yes.ts) leaves roles that need an answer. Null when none is open.
+export const askNextOpenQuestion = present;
+
 // One turn, before any brain. Null when the text is neither a request for the questions nor an answer to the ones just
 // shown, so the turn goes on as before.
 // WO-100: with the person's situation, the questions keep their numbers and everything else only the person can do (a

@@ -1,5 +1,5 @@
 // D-035 (owner, 2026-11-01: "Ship staged brain"), at the REAL handler (handleChat) on real Postgres, with CAREER_BRAIN
-// UNSET: the committed release brain (staged) as production deploys it. A scripted model answers at the OpenAI URL and
+// UNSET: the committed release brain (staged) as production deploys it. A scripted model answers at the Anthropic URL and
 // counts the brain's requests (a request that offers tools is the brain's). What code still owns, proven turn by turn:
 //   J  "judge prompt: ..." is saved by code (career_search_judge.ts), never sent to the brain.
 //   K  with no model key configured the brain is never tried: the router answers, the model is never called.
@@ -15,6 +15,7 @@ import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, SUPABASE_URL, supabaseParity, type Turn } from "../flow/handler.ts";
 import { confirmedResumeSql } from "../flow/resume-seed.ts";
 import { crisisReply } from "../../supabase/functions/agent-chat/crisis.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -36,7 +37,7 @@ const POSTINGS = [["alpha", "Alpha Works"], ["bravo", "Bravo Labs"]]
   .map(([board, company], i) => ({ key: `greenhouse:${board}:${i + 1}`, board, company, url: `https://boards.greenhouse.io/${board}/jobs/${i + 1}` }));
 
 let modelCalls = 0, brainCalls = 0;
-function fakeOpenAI(body: any): Response {
+function fakeModel(body: any): Response {
   modelCalls++;
   if (Array.isArray(body.tools) && body.tools.length) brainCalls++;
   const text = Array.isArray(body.tools) && body.tools.length ? BRAIN_ANSWER : "Subject: Hello\n\nHi there,\n\nWould you be open to a short call?";
@@ -47,11 +48,11 @@ Deno.test({ name: "D-035: with CAREER_BRAIN unset (staged), code keeps judge pro
   if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
   if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (initdb)"); return; }
   const pg: Pg = await startPg();
-  const keys = ["CAREER_BRAIN", "CAREER_BRAIN_ROUTER_INTENTS", "CAREER_KNOWLEDGE", "OPENAI_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "CAREER_JUDGE", "CAREER_PREPARE_AHEAD_URL",
+  const keys = ["CAREER_BRAIN", "CAREER_BRAIN_ROUTER_INTENTS", "CAREER_KNOWLEDGE", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "CAREER_JUDGE", "CAREER_PREPARE_AHEAD_URL",
     "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "CAREER_SEND_RAIL", "CAREER_PLANNER", "CAREER_PLANNER_USERS"];
   const saved = Object.fromEntries(keys.map((k) => [k, Deno.env.get(k)]));
   for (const k of keys) Deno.env.delete(k); // CAREER_BRAIN unset: the release brain, staged
-  const withKey = () => { Deno.env.set("OPENAI_API_KEY", "sk-test-d035-not-real"); Deno.env.set("CAREER_MODEL", "gpt-5-mini"); };
+  const withKey = () => { Deno.env.set("ANTHROPIC_API_KEY", "sk-test-d035-not-real"); Deno.env.set("CAREER_MODEL", "claude-haiku-5-5"); };
   let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
   const realFetch = globalThis.fetch;
   try {
@@ -70,7 +71,7 @@ Deno.test({ name: "D-035: with CAREER_BRAIN unset (staged), code keeps judge pro
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
       const u = new URL(req.url);
-      if (u.host === "api.openai.com") return fakeOpenAI(await req.json());
+      if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
       if (u.origin !== new URL(SUPABASE_URL).origin) { outbound.push(`${req.method} ${u.host}`); throw new TypeError(`network refused: ${u.host}`); }
       return await viaDouble(req);
     }) as typeof fetch;
@@ -91,7 +92,7 @@ Deno.test({ name: "D-035: with CAREER_BRAIN unset (staged), code keeps judge pro
     });
 
     await t.step("K: no model key configured: the router answers, the model is never called", async () => {
-      Deno.env.delete("OPENAI_API_KEY");
+      Deno.env.delete("ANTHROPIC_API_KEY");
       const say = sayAs(h!.chat("tok-d35k"), P("tok-d35k")), n = modelCalls;
       // The brain path, even when its model call fails before any request, logs its fallback: it must not be entered.
       const realError = console.error, logged: string[] = [];
@@ -166,7 +167,7 @@ Deno.test({ name: "D-035: with CAREER_BRAIN unset (staged), code keeps judge pro
     });
 
     await t.step("P: CAREER_PLANNER=on with no model key: the planner is never tried; no request, no cost row with a call", async () => {
-      Deno.env.delete("OPENAI_API_KEY"); Deno.env.set("CAREER_PLANNER", "on");
+      Deno.env.delete("ANTHROPIC_API_KEY"); Deno.env.set("CAREER_PLANNER", "on");
       const realLog = console.log, realError = console.error, logged: string[] = [];
       console.log = (...a: unknown[]) => { logged.push(a.map(String).join(" ")); };
       console.error = (...a: unknown[]) => { logged.push(a.map(String).join(" ")); };

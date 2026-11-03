@@ -11,6 +11,7 @@ import { type Floor, parsePay, type Pay, payGroup, payText, resultsParts, type W
 import type { SearchHit } from "./career_search.ts";
 import type { SourcePosting } from "./career_search_judge.ts";
 import type { Limits } from "./posting_constraints.ts";
+import { type ApplyAllOffer, offerOf, offerQuestion } from "./apply_all_yes.ts";
 
 export const RESULTS_MAX = 25;
 const hex = async (s: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -30,7 +31,7 @@ export async function resultsFile(o: {
   userId: string; now: number; what: What; floor: Floor | null; picked: Picked[]; store: JobStore;
   name?: string | null; source?: "live" | "snapshot" | null; read?: string | null;
   links: (userId: string, listId: string) => Promise<{ url: string | null }>;
-}): Promise<{ reply: string; parts: string[]; listId: string; url: string; meets: number; unlisted: number; unchecked: number; otherCurrency: number; noPeriod: number; below: number } | null> {
+}): Promise<{ reply: string; parts: string[]; listId: string; url: string; offer: ApplyAllOffer; offerAsk: string; meets: number; unlisted: number; unchecked: number; otherCurrency: number; noPeriod: number; below: number } | null> {
   if (!o.store.rememberListMeta) return null;
   const meets: Picked[] = [], unlisted: Picked[] = [], unchecked: Picked[] = [];
   let below = 0;
@@ -44,7 +45,7 @@ export async function resultsFile(o: {
   }
   const ordered = [...meets, ...unchecked, ...unlisted].slice(0, RESULTS_MAX);
   if (!ordered.length) return null;
-  const refs: string[] = [], boards = new Set<string>();
+  const refs: string[] = [], boards = new Set<string>(), shown: { ref: string; job_id: string }[] = [];
   for (const p of ordered) {
     // A live-board posting is a whole career_postings row (remote, level, provider, its own posted date); a snapshot one is not.
     const live = (p.posting ?? {}) as Partial<PostingRow>;
@@ -56,7 +57,7 @@ export async function resultsFile(o: {
     const ref = await refOf(o.userId, view.job_id);
     await o.store.remember(o.userId, ref, view, "text");
     boards.add(String(view.source ?? row.provider ?? view.job_id.split(":")[0]).toLowerCase());
-    refs.push(ref);
+    refs.push(ref); shown.push({ ref, job_id: view.job_id });
   }
   const listId = (await hex(`${o.userId}|results|${refs.join(",")}|${o.now}`)).slice(0, 10);
   await o.store.rememberList(o.userId, listId, refs);
@@ -70,5 +71,8 @@ export async function resultsFile(o: {
   const otherCurrency = shownUnchecked.filter((p) => pays.get(p.hit.job_id)?.currency !== "USD").length;
   const counts = { meets: Math.min(meets.length, ordered.length), unchecked: shownUnchecked.length, otherCurrency, noPeriod: shownUnchecked.length - otherCurrency, unlisted: ordered.filter((p) => unlisted.includes(p)).length };
   const parts = resultsParts({ what: o.what, floor: o.floor, meets: counts.meets, unlisted: counts.unlisted, otherCurrency: counts.otherCurrency, noPeriod: counts.noPeriod, url });
-  return { reply: parts.join("\n"), parts, listId, url, below, ...counts };
+  // The offer a bare yes answers (apply_all_yes.ts): the roles shown, each with the application tag it has right now (none: not prepared).
+  // A prepared application that cannot be read leaves its role untagged: a yes never approves what it could not see.
+  const offer = offerOf({ list: listId, at: o.now, jobs: await Promise.all(shown.map(async (x) => ({ ...x, payload_hash: (await o.store.prepared(o.userId, x.job_id).catch(() => null))?.payload_hash ?? null }))) });
+  return { reply: parts.join("\n"), parts, listId, url, offer, offerAsk: offerQuestion(offer), below, ...counts };
 }

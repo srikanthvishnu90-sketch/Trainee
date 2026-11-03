@@ -24,22 +24,22 @@ export const REPLY_CODE_DIRS = [
 export const ROUTER_BUNDLE = "supabase/functions/_shared/router_core.career.js";
 
 export const SHARED_REPLY_MODULES = [
-  "ai_policy.ts", "answer_options.ts", "apply_email.ts", "apply_trust.ts", "approval_words.ts", "career_account_memory.ts",
+  "ai_policy.ts", "answer_options.ts", "apply_email.ts", "apply_status_summary.ts", "career_search_judge.ts", "posting_constraints.ts", "search_correction.ts", "career_pool.js", "apply_trust.ts", "approval_words.ts", "career_account_memory.ts",
   "career_alert_store.ts", "career_alerts.ts", "career_apply.ts", "career_apply_cards.ts", "career_apply_gate.ts",
   "career_apply_screen.ts", "career_apply_status.ts", "career_apply_want.ts", "career_brief_store.ts", "career_calendar.ts",
   "career_capabilities.ts", "career_contacts.ts", "career_digest.ts", "career_floor.ts", "career_fresh.ts", "career_hired.ts",
   "career_host.js", "career_ingest.ts", "career_ingest_feeds.ts", "career_ingest_stream.ts", "career_invite.ts",
   "career_mail.ts", "career_mail_gmail.ts", "career_mail_langs.ts", "career_mail_model.ts", "career_mail_store.ts",
-  "career_materials_guard.ts", "career_mock.ts", "career_mock_prep.ts", "career_offer.ts", "career_outreach.ts",
+  "career_materials_guard.ts", "career_mock.ts", "career_mock_prep.ts", "career_reader_model.ts", "career_offer.ts", "career_outreach.ts",
   "career_outreach_gmail.ts", "career_outreach_replies.ts", "career_path.ts", "career_people_gmail.ts",
   "career_people_import.ts", "career_people_page.ts", "career_people_provider.ts", "career_people_sites.ts",
   "career_referrals.ts", "career_router_evidence.ts", "career_search.ts", "career_send_rail.ts", "career_situation.ts",
   "career_staffing_agencies.ts", "career_tailor.ts", "career_url_shape.js", "career_voice_link.ts", "channel.ts",
   "channel_adapters.ts", "channel_card_tap.ts", "channel_shape.ts", "channel_text.ts", "conversation.ts", "essay_draft.ts",
-  "fact_quarantine.ts", "fact_schema.ts", "file_kinds.ts", "file_link.ts", "file_page.ts", "file_service.ts",
+  "fact_quarantine.ts", "fact_schema.ts", "file_design.ts", "file_kinds.ts", "file_link.ts", "file_page.ts", "file_service.ts",
   "identity_redact.ts", "length_limit.ts", "link_check.ts", "model_budget.ts", "model_calls.ts", "model_gateway.ts", "person_claims.ts",
   "personal_fact_source.ts", "posting_key.ts", "posting_pay.ts", "posting_place.ts", "posting_region.ts", "question_map.ts",
-  "brand.ts", "row_answer.ts", "telegram_jobs.ts",
+  "brand.ts", "row_answer.ts", "telegram_jobs.ts", "apply_all_yes.ts", "apply_all_yes_flag.ts", "role_results.ts",
 ] as const;
 
 // D-036 (release flags, agent-chat/release_config.ts RELEASE_FLAGS): the code behind every flag the release serves ON that

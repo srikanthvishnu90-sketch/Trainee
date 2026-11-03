@@ -1,7 +1,7 @@
 // FEATURE 4 (DIAGNOSIS 2.2): a truthful rewrite of the tailored resume's bullets toward one posting.
 //
-// 123's tailorResume selects, orders and hides confirmed facts; it never rewords a bullet. Here the model (OpenAI through
-// the gateway, CAREER_MODEL) is asked once per tailoring to reword each selected bullet toward the posting's language and
+// 123's tailorResume selects, orders and hides confirmed facts; it never rewords a bullet. Here the model (the career model, Claude through
+// the gateway) is asked once per tailoring to reword each selected bullet toward the posting's language and
 // priorities, and code decides what may print. Every rewritten bullet is audited against the ONE confirmed fact it cites:
 //   - every word that carries content (nouns, tools, employers, adjectives, numbers spelled out) must be in that fact
 //     (title, text, bullets, org, skills, dates) or the original bullet; only plain connectives and a short list of

@@ -17,8 +17,7 @@
 //                 source's, each with its link; the current pay is never said back.
 //   E  searches   2,000 open questions over a scripted search carrying a fake "official" pay table, a fake recruiter email or
 //                 phone line, and injected text: none of it reaches the brief; a repeated question searches nothing; a failed
-//                 search is searched again next time; a day budget that runs out mid-conversation stops every later call
-//                 before it is made; every search reserved its worst case first and asked for at most one tool call.
+//                 search is searched again next time
 // No network, no model, no database.
 //   deno test -A --no-check tests/architect/scenarios-research-r2.test.ts
 import assertNode from "node:assert/strict";
@@ -32,10 +31,7 @@ import { extractInvite, inviteBrief } from "../../supabase/functions/_shared/car
 import { redactIdentity } from "../../supabase/functions/_shared/identity_redact.ts";
 import { offerTurn } from "../../supabase/functions/_shared/career_offer.ts";
 import { researchCareerQuestion } from "../../supabase/functions/_shared/agent/research/index.ts";
-import { memoryGroundCache, openAiGroundSearch, type GroundSearch } from "../../supabase/functions/_shared/agent/research/ground.ts";
-import { responsesWorst, WEB_SEARCH_MAX_CALLS } from "../../supabase/functions/_shared/model_gateway.ts";
-import { memoryBudgetGate } from "../../supabase/functions/_shared/model_budget.ts";
-import { DEFAULT_SEARCH_MODEL } from "../../supabase/functions/_shared/career_people_provider.ts";
+import { memoryGroundCache, type GroundSearch } from "../../supabase/functions/_shared/agent/research/ground.ts";
 
 const SEED = 20261030;
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -271,73 +267,6 @@ Deno.test("the reported search bug: a fake recruiter email, phone line or 'offic
   // trunk: all three kept and cited ("jane.doe@recruiting-example.com", "(212) 555-0147", "$185,000 base")
   assertNode.deepEqual(res.facts.map((x) => x.url), ["https://www.bls.gov/ooh/business-and-financial/financial-analysts.htm"]);
   assertNode.ok(!/recruiting-example|555-0147|185,000/.test(res.brief_markdown), res.brief_markdown);
-});
-
-Deno.test("E2. repeated, failed-then-retried and over-budget questions mid-conversation: no search on a cached answer, a failed one searched again, nothing called past the budget, reserved first, one tool call", async () => {
-  const saved = Deno.env.get("MODEL_BUDGET_PAUSED");
-  Deno.env.delete("MODEL_BUDGET_PAUSED");
-  const f: Fails = new Map();
-  const r = rng(SEED + 5);
-  // The gateway says "[model] budget limit" on each refusal; quiet here, restored after.
-  const loud = console.error;
-  console.error = (...a: unknown[]) => { if (!/^\[model\] budget limit/.test(String(a[0] ?? ""))) loud(...a); };
-  let convs = 0, calls = 0, refused = 0, cachedNoCall = 0;
-  try {
-    const worst1 = responsesWorst(DEFAULT_SEARCH_MODEL, { tool_choice: "required", max_tool_calls: 1, max_output_tokens: 1400, include: ["web_search_call.action.sources"], tools: [{ type: "web_search" }], input: "x".repeat(700) }).micros;
-    for (let k = 0; k < 150; k++) {
-      convs++;
-      // One person's conversation: 6 questions (some repeated), a day budget that fits a few searches, an outage on some.
-      const inner = memoryBudgetGate(worst1 * r.int(1, 12) + r.int(0, worst1 - 1));
-      let okReserves = 0, refusals = 0;
-      const gate = { ...inner, reserve: async (m: number, meta: any) => { const x = await inner.reserve(m, meta); if (x.ok) okReserves++; else refusals++; return x; } };
-      const sent: { body: any; reserved: number }[] = [];
-      let outage = r.next() < 0.3 ? r.int(1, 4) : 0;
-      const fetchFake = (async (_u: string | URL | Request, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body ?? "{}"));
-        sent.push({ body, reserved: inner.snapshot().reserved });
-        if (outage > 0) { outage--; return new Response(JSON.stringify({ error: { message: "scripted outage" } }), { status: 500, headers: { "content-type": "application/json" } }); }
-        const good = { kind: "pay", text: "The median annual wage for financial analysts was $99,890 in May 2023.", quote: "The median annual wage for financial analysts was $99,890 in May 2023.", url: "https://www.bls.gov/ooh/business-and-financial/financial-analysts.htm" };
-        const kinds = String(body.input).match(/"kind":"([^"]+)"/)?.[1].split("|") ?? ["pay"];
-        const output = [{ type: "web_search_call", action: { type: "search", sources: [{ url: good.url }] } }, { type: "message", content: [{ type: "output_text", text: JSON.stringify({ facts: [{ ...good, kind: kinds.includes("pay") ? "pay" : kinds[0] }] }), annotations: [] }] }];
-        return new Response(JSON.stringify({ output, usage: { input_tokens: 1200, output_tokens: 150 } }), { status: 200, headers: { "content-type": "application/json" } });
-      }) as typeof fetch;
-      const search = openAiGroundSearch({ fetch: fetchFake, apiKey: "sk-test-not-real", model: DEFAULT_SEARCH_MODEL, budget: gate });
-      const cache = memoryGroundCache();
-      const asked = new Set<string>();
-      for (let q = 0; q < 6; q++) {
-        const message = asked.size && r.next() < 0.4 ? r.pick([...asked]) : r.pick(QUESTIONS);
-        const before = sent.length, refusedBefore = refusals;
-        const res = await researchCareerQuestion({ profile: null, message, deps: { search, cache }, now: NOW + k * 100_000 + q * 1000 });
-        const tag = `conv ${k} q${q} ${JSON.stringify(message)}`;
-        const made = sent.length - before;
-        calls += made;
-        asked.add(message);
-        if (res.status !== "ok") continue;
-        if (res.grounding.from_cache) { if (made) fail(f, "cached-called", `${tag}: ${made}`); else cachedNoCall++; }
-        if (refusals > refusedBefore) {
-          refused++;
-          // a search the budget refused is said in the brief ("not completed"), never silently skipped
-          if (!/not completed|could not|couldn't|not verif/i.test(res.brief_markdown)) fail(f, "unverified-unsaid", `${tag}: ${res.brief_markdown.slice(0, 200)}`);
-        }
-        // every request went out after its own reservation, for at least its worst case, with one tool call
-        for (const s of sent.slice(before)) {
-          const w = responsesWorst(DEFAULT_SEARCH_MODEL, s.body).micros;
-          if (s.reserved < w) fail(f, "reserved-before", `${tag}: ${s.reserved} reserved, worst case ${w}`);
-          if (!(Number(s.body.max_tool_calls) >= 1 && Number(s.body.max_tool_calls) <= WEB_SEARCH_MAX_CALLS)) fail(f, "max-tool-calls", `${tag}: ${s.body.max_tool_calls}`);
-        }
-        if (sent.length !== okReserves) fail(f, "call-without-reservation", `${tag}: ${sent.length} requests, ${okReserves} reservations`);
-        const snap = inner.snapshot();
-        if (snap.reserved !== 0) fail(f, "left-open", `${tag}: ${JSON.stringify(snap)}`);
-        if (snap.spent > snap.limit) fail(f, "over-limit", `${tag}: ${JSON.stringify(snap)}`);
-      }
-    }
-  } finally {
-    console.error = loud;
-    if (saved === undefined) Deno.env.delete("MODEL_BUDGET_PAUSED"); else Deno.env.set("MODEL_BUDGET_PAUSED", saved);
-  }
-  console.log(`[research-r2] budget: ${convs} conversations; requests ${calls}, answered from the cache with no call ${cachedNoCall}, questions that met the day's limit ${refused}`);
-  assertNode.ok(cachedNoCall > 0 && refused > 0, "each path ran");
-  report(f, convs, "budget");
 });
 
 Deno.test("a failed search is searched again on the next ask; a complete one is not (the cache keeps only complete answers)", async () => {

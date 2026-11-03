@@ -89,7 +89,7 @@ function fakeGoogle(boxes: Record<string, () => Fixture[]>) {
   const fetch = async (input: Request | URL | string, init?: RequestInit) => {
     const req = input instanceof Request && !init ? input : new Request(input as any, init);
     const u = new URL(req.url);
-    if (u.hostname === "api.openai.com") { openai.push(await req.text()); return json({ error: { message: "the test's OpenAI fake answers nothing" } }, 500); }
+    if (u.hostname === "api.anthropic.com") { openai.push(await req.text()); return json({ error: { message: "the test's OpenAI fake answers nothing" } }, 500); }
     calls.push({ method: req.method, url: u.toString() });
     if (u.hostname !== "gmail.googleapis.com") return json({ error: "not faked" }, 404);
     const box = boxes[String(req.headers.get("authorization") ?? "").replace(/^Bearer /, "")];

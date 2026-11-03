@@ -13,6 +13,7 @@
 // read. Taps at once are each judged against the list as it is when they run: an Apply that queued a row first changes the set
 // (the Apply to all then approves nothing and says so); an Apply to all that ran first leaves that Apply "Already in your
 // applications". Either way each posting is approved once.
+import { applyAllYesEnabled } from "../_shared/apply_all_yes_flag.ts";
 import { FILE_TTL_MS, verifyFileToken, type FileClaims } from "../_shared/file_link.ts";
 import { checkSession, CLEAR_LOGIN, CLEAR_SESSION, codeOf, LOGIN_TTL_MS, loginCookie, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, PAGE_TOKEN, pageTokenOf, sameToken, SESSION_ID, sessionCookie, sha256, startSession, type PhoneAuth, type SessionCheck, type SessionStore } from "../_shared/file_session.ts";
 import { verifyInitData } from "../_shared/telegram_webapp.ts";
@@ -28,9 +29,9 @@ import { NO_RESUME_NEXT, NO_RESUME_REASON } from "../_shared/career_apply_from_c
 import { factType, NEVER_BY_TEXT } from "../_shared/question_map.ts";
 import { decodeRowQuestionType } from "../_shared/row_answer.ts";
 import { redactIdentity } from "../_shared/identity_redact.ts";
-import { freshnessStamp } from "../_shared/results_stamp.ts";
 import { coverage, countsOf, NOTHING_SENT, NOT_LISTED, renderExport, reqIdOf, roleIds, specOf } from "../_shared/results_spec.ts";
 import type { ListMeta } from "../_shared/telegram_jobs.ts";
+import { fileShellHtml, firstNameOf, freshnessStamp, madeForLine, stateHtml } from "../_shared/file_design.ts";
 import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, logoUrl, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
 
 export type { AppRow } from "../_shared/file_page.ts";
@@ -262,7 +263,11 @@ async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: R
   const n = rows.length;
   // The preview card is the brand card (static, nothing about the person in a public image) plus counts the page itself shows.
   const og = { title: `${n} match${n === 1 ? "" : "es"} for you`, description: "Tap Apply on any job. Opens in Trainee.", image: ogImage(d.env) };
-  return { token, rows, setHash, setSize: set.length, top, og, total: all.length };
+  // The File shell (file_design.ts): who it is for (a CONFIRMED name only, else "you"), and when the postings on it were last seen
+  // live on their boards (career_postings.last_seen_at), in the person's zone; none known, the page says the check time is unknown.
+  const shown = new Set(rows.map((r) => r.job.job_id));
+  const stamp = freshnessStamp("Postings checked", postings.filter((p) => shown.has(p.job_id)).map((p) => p.last_seen_at), { now: d.now(), tz });
+  return { token, rows, setHash, setSize: set.length, top, og, total: all.length, made: madeForLine(firstNameOf(facts), d.now(), tz), stamp };
 }
 
 // One Apply = one hash-bound approval through the Telegram Confirm path. Returns a note for the row when it did not go.
@@ -293,7 +298,11 @@ export async function handleFile(req: Request, d: FileDeps): Promise<Response> {
   try {
     return await handleFileOnce(req, d);
   } catch {
-    return new Response(renderLinkState("Couldn't open this just now", ["Nothing was opened and nothing was sent. Try again in a minute."]), { status: 503, headers: await headers("text/html; charset=utf-8", d.env) });
+    // The designed error state (brief P6.8): what happened, why, what happens next, and a retry that reopens this same page.
+    const here = (() => { try { return `/${new URL(req.url).pathname.replace(/^[\/\\]+/, "")}`; } catch { return "/"; } })();
+    const page = layout("Couldn't open this just now - Trainee", `<div id="root"><header class="fhead">${BRAND}</header><div class="fcard"><main id="main">${stateHtml({ kind: "error", title: "Couldn't open this just now",
+      reason: "Part of Trainee didn't answer. Nothing was opened and nothing was sent.", next: "Try again in a minute. Your link keeps working until it expires.", retry: { href: here, label: "Try again" } })}</main></div></div>`);
+    return new Response(page, { status: 503, headers: await headers("text/html; charset=utf-8", d.env) });
   }
 }
 
@@ -607,12 +616,22 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
     rec = again.rec;
   }
   if (req.method === "GET" && fields.get("format") === "text") return o.text(textOf(rec, { now: d.now() }));
-  const title = esc(String(rec.data?.title ?? KIND_LABEL[rec.kind]));
-  const inner = `<div id="root"><header>${BRAND}<p class="eyebrow">${esc(KIND_LABEL[rec.kind])}</p><h1>${title}</h1></header><main id="main">${note ? `<p class="note-top" role="status">${esc(note)}</p>` : ""}${bodyHtml(rec, token)}</main>`
+  // The shared File shell (file_design.ts): "Made for <first name> · <date>" above one card; the title, then when its facts were read
+  // (the moment this File was built from them; an application proof reads the application record), in the person's zone.
+  const [tz, facts] = await Promise.all([d.timeZone ? d.timeZone(u).catch(() => null) : null, d.facts ? d.facts(u).then((f) => f ?? [], () => []) : []]);
+  const stampLabel = rec.kind === "application_proof" ? "Application record read" : "Facts as of";
+  const shots = evidenceOrigin(d.env);
+  const body = `${note ? `<p class="note-top" role="status">${esc(note)}</p>` : ""}${bodyHtml(rec, token, { tz, evidenceImage: (x) => !!shots && originOf(x) === shots })}`;
+  const inner = `<div id="root">${fileShellHtml({ made: madeForLine(firstNameOf(facts), rec.created_at, tz), eyebrow: KIND_LABEL[rec.kind], title: String(rec.data?.title ?? KIND_LABEL[rec.kind]), stamp: freshnessStamp(stampLabel, [rec.created_at], { now: d.now(), tz }), body })}`
     + `<footer class="foot"><p>Expires ${esc(new Date(rec.expires_at).toISOString().slice(0, 16).replace("T", " "))} UTC. <a href="?format=text">Plain text version</a></p><form method="post"><input type="hidden" name="t" value="${esc(token)}"><input type="hidden" name="action" value="remove"><button type="submit" class="lnk">Remove this file</button></form></footer></div>`;
-  const csp = (await headers("text/html", d.env))["content-security-policy"].replace("script-src ", `script-src ${await kindScriptHash} `);
+  let csp = (await headers("text/html", d.env))["content-security-policy"].replace("script-src ", `script-src ${await kindScriptHash} `);
+  // A confirmation screenshot is shown inline only from the project's own storage origin; img-src then allows exactly that origin.
+  if (shots) csp = csp.replace(/img-src ([^;]+)/, (_m, v: string) => `img-src ${v === "'none'" ? shots : `${v} ${shots}`}`);
   return o.html(layout(`${String(rec.data?.title ?? KIND_LABEL[rec.kind])} - Trainee`, inner, { script: KIND_SCRIPT, tg: true, css: KIND_CSS, og: { title: `${KIND_LABEL[rec.kind]} from Trainee`, description: "Open in Trainee.", image: ogImage(d.env) } }), 200, { "content-security-policy": csp });
 }
+const originOf = (u: string) => { try { const x = new URL(u); return x.protocol === "https:" ? x.origin : null; } catch { return null; } };
+// The one origin a File may show evidence images from: the project's own storage (SUPABASE_URL), https only. Anything else is a link.
+const evidenceOrigin = (env: { get(k: string): string | undefined }) => originOf((env.get("SUPABASE_URL") || "").trim());
 export { FILE_TTL_MS, hostOf };
 
 // ---------------------------------------------------------------- a results list: one black Apply per card
@@ -621,6 +640,9 @@ const placeOf = (j: JobView) => {
   const parts = [j.location, j.remote === "remote" ? "Remote" : j.remote === "hybrid" ? "Hybrid" : j.remote === "onsite" ? "On-site" : ""].filter(Boolean);
   return parts.filter((w, i) => parts.findIndex((x) => x.toLowerCase() === w.toLowerCase()) === i).join(" · ");
 };
+// The roles "Apply to all N ready" approves: ready right now (prepared, its tag shown, no status, not by hand, not blocked), not dismissed.
+const readySet = (rows: Row[], dismissed: Set<string>) => rows.filter((r) => !dismissed.has(r.ref) && !r.status && !r.byHand && !r.blocked && !!r.tag);
+const setHashOf = async (rows: Row[]) => rows.length ? (await sha(`v1|${rows.map((r) => `${r.ref}:${r.tag}`).join(",")}`)).slice(0, 16) : "";
 const CHANGED = "Changed since you opened this page, so nothing was sent.";
 const SENT = "Approved. It's queued to be sent exactly as its card showed; the status here changes when the employer's site confirms it.";
 // How a question is asked: the employer's options, yes or no, a longer answer, or text. A secret (password, code, ID or bank number)
@@ -695,7 +717,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   }
 
   if (action) {
-    if (!["apply", "applysel", "answer", "refresh", "dismiss", "restore", "pause", "resume"].includes(action)) return o.state("Not done", ["That is not something this page can do. Nothing was sent."], 400);
+    if (!["apply", "applysel", "applyall", "answer", "refresh", "dismiss", "restore", "pause", "resume"].includes(action)) return o.state("Not done", ["That is not something this page can do. Nothing was sent."], 400);
     // Re-read the stored meta right before writing and change only this field, so two taps cannot overwrite each other.
     const saveMeta = async (patch: (m: ListMeta) => void) => {
       try {
@@ -721,7 +743,9 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
         else if (!(await saveMeta((m) => { const s2 = new Set(m.dismissed ?? []); if (action === "dismiss") s2.add(ref); else s2.delete(ref); m.dismissed = [...s2]; }))) top = "I couldn't save that just now. Nothing changed.";
         else notes[ref] = action === "dismiss" ? "Dismissed. Private to you; no application was touched. You can restore it at the bottom of the page." : "Restored to your list. No application was touched.";
       }
-    } else if ((action === "apply" || action === "applysel") && paused) {
+    } else if (action === "applyall" && !applyAllYesEnabled(d.env)) {
+      top = "Apply to all is turned off. Nothing was approved.";
+    } else if ((action === "apply" || action === "applysel" || action === "applyall") && paused) {
       top = "Paused. Nothing was approved or started from this tap. Tap Resume at the top to continue.";
     } else if (action === "apply" && marked.has(fields.get("ref") ?? "")) {
       notes[fields.get("ref") ?? ""] = "This role is dismissed. Restore it first. Nothing was sent.";
@@ -731,6 +755,17 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
       if ("things" in g) return thingsPage(g.things, g.qs);
       if ("note" in g) notes[ref] = g.note;
       else notes[ref] = (await approveOne(u, ref, tag, d)) ?? SENT;
+    } else if (action === "applyall") {
+      // Apply to all N ready (owner, 2026-11-02): exactly the set that was shown, bound to its hash. The set is the roles that are
+      // READY right now (prepared, tag shown, nothing marked needs) and not dismissed; each goes through the same hash-bound approval
+      // as its own Apply. If the set is not exactly what the page showed, nothing is approved.
+      const cur = await loadFeed(claims, token, d), now = readySet(cur?.rows ?? [], marked);
+      if (!cur || !now.length || (fields.get("set") ?? "") !== await setHashOf(now)) top = "This list changed since you opened it, so nothing was approved.";
+      else {
+        let sent = 0;
+        for (const r of now) { const n = await approveOne(u, r.ref, r.tag!, d); notes[r.ref] = n ?? SENT; if (!n) sent++; }
+        top = `${sent} of ${now.length} approved and queued, each exactly as its card showed.${sent < now.length ? ` ${now.length - sent} not approved; each says why.` : ""} Nothing else was sent.`;
+      }
     } else if (action === "applysel") {
       const want = picks().filter((p) => !marked.has(p.ref));
       if (!want.length) top = picks().length ? "Those roles are dismissed. Restore them first. Nothing was sent." : "Tick at least one role first. Nothing was sent.";
@@ -859,5 +894,6 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   ].filter(Boolean);
   return o.html(renderResults({ token, title, floor: fl, rows, coverRows: all, countRows: keep, total: all.length, filters, places, top, notes,
     madeFor: `Made for ${meta.name ?? "you"} · ${day}`, stamp: await stampOf(rows), caveat, quick,
-    paused: !!meta.paused, updated, dismissed: gone }));
+    paused: !!meta.paused, updated, dismissed: gone,
+    all: applyAllYesEnabled(d.env) && !meta.paused && readySet(keep, new Set()).length >= 2 ? { hash: await setHashOf(readySet(keep, new Set())), size: readySet(keep, new Set()).length, filtered: filters.pay !== "any" || !!filters.where } : null }));
 }

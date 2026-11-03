@@ -20,7 +20,7 @@ const { check } = checks as any;
 function assert(v: unknown, m = "assertion failed") { if (!v) throw new Error(m); }
 const T0 = Date.UTC(2026, 9, 11, 19, 1, 0);
 const DEAD_KEY = "sk-proj-TESTKEY-should-never-appear-anywhere-0000";
-const dead = { provider: "openai" as const, model: "gpt-5-nano", apiKey: DEAD_KEY, reasoningEffort: "minimal" };
+const dead = { provider: "anthropic" as const, model: "claude-haiku-5-5", apiKey: DEAD_KEY, reasoningEffort: "low" };
 const refuse = (async () => Response.json({ error: { message: "This API key is not scoped to a workspace", type: "invalid_request_error" } }, { status: 400 })) as any;
 const admin = () => ({ async rpc() { return { data: { ok: true, call_id: "slot" }, error: null }; } });
 const TRIAGED = new Set(["precondition", "not_built", "grader"]);

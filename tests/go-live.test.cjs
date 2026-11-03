@@ -22,14 +22,14 @@ test('dry run: preflight, only pending migrations (ledger), deploys incl. model-
 });
 
 test('dry run with the OpenAI key, the health token and the Alpaca pair: names only, the values are never printed',()=>{
-  const out=run({ALPACA_OAUTH_CLIENT_ID:'cid-should-not-print',ALPACA_OAUTH_CLIENT_SECRET:'secret-should-not-print',OPENAI_API_KEY:'sk-proj-should-not-print',HEALTH_CHECK_TOKEN:'token-should-not-print-0123456789',PROACTIVE_SECRET:'proactive-should-not-print-0123456789',SUPABASE_DB_URL:'postgresql://u:dbpass-should-not-print@h/db'});
-  assert.match(out,/supabase secrets set --project-ref mrwngntwmnaqrqhupvlt --env-file <0600 temp file: OPENAI_API_KEY MODEL_PROVIDER ALPACA_OAUTH_CLIENT_ID ALPACA_OAUTH_CLIENT_SECRET HEALTH_CHECK_TOKEN PROACTIVE_SECRET>/);
+  const out=run({ALPACA_OAUTH_CLIENT_ID:'cid-should-not-print',ALPACA_OAUTH_CLIENT_SECRET:'secret-should-not-print',ANTHROPIC_API_KEY:'sk-proj-should-not-print',HEALTH_CHECK_TOKEN:'token-should-not-print-0123456789',PROACTIVE_SECRET:'proactive-should-not-print-0123456789',SUPABASE_DB_URL:'postgresql://u:dbpass-should-not-print@h/db'});
+  assert.match(out,/supabase secrets set --project-ref mrwngntwmnaqrqhupvlt --env-file <0600 temp file: ANTHROPIC_API_KEY ALPACA_OAUTH_CLIENT_ID ALPACA_OAUTH_CLIENT_SECRET HEALTH_CHECK_TOKEN PROACTIVE_SECRET>/);
   assert.doesNotMatch(out,/should-not-print/);
 });
 
 test('dry run without an OpenAI key: an already-set secret is left alone, and a fresh run never replays applied migrations',()=>{
   const out=run({HOME:require('node:os').tmpdir()+'/upmore-go-live-test-home'});
-  assert.match(out,/skipped: no OPENAI_API_KEY given \(an already-set secret stays as it is\)/);
+  assert.match(out,/skipped: no ANTHROPIC_API_KEY given \(an already-set secret stays as it is\)/);
   assert.match(out,/apply-rails-and-seed\.sh --pending/);assert.doesNotMatch(out,/--all/);
 });
 
@@ -55,12 +55,12 @@ test('dry run: guided manual connect (the live sign-in window) is deployed after
 
 test('the owner one-command runner: hidden prompts only, secrets forgotten after, results pushed, never a secret echoed',()=>{
   const s=require('node:fs').readFileSync(path.join(root,'scripts/launch/owner-go-live.sh'),'utf8');
-  for(const v of ['SUPABASE_DB_URL','GAUNTLET_PASSWORD','OPENAI_API_KEY','ALPACA_OAUTH_CLIENT_ID','ALPACA_OAUTH_CLIENT_SECRET']){
+  for(const v of ['SUPABASE_DB_URL','GAUNTLET_PASSWORD','ANTHROPIC_API_KEY','ALPACA_OAUTH_CLIENT_ID','ALPACA_OAUTH_CLIENT_SECRET']){
     assert.ok(new RegExp(`ask ${v} "`).test(s),`${v} is asked on a hidden prompt`);
     assert.ok(!new RegExp(`echo[^\\n]*\\$\\{?${v}`).test(s),`${v} is never echoed`);
   }
   assert.match(s,/read -rs/);
-  assert.ok(s.indexOf('unset SUPABASE_DB_URL GAUNTLET_PASSWORD OPENAI_API_KEY')>s.indexOf('bash scripts/launch/go-live.sh'),'forgotten right after the run');
+  assert.ok(s.indexOf('unset SUPABASE_DB_URL GAUNTLET_PASSWORD ANTHROPIC_API_KEY')>s.indexOf('bash scripts/launch/go-live.sh'),'forgotten right after the run');
   assert.match(s,/git add evals\/gauntlet\/results evals\/gauntlet\/replays/);
   assert.match(s,/\[\[ -z "\$\(git status --porcelain\)" \]\]/,'never runs on uncommitted changes');
 });

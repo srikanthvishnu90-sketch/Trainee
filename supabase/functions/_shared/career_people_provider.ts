@@ -1,6 +1,6 @@
 // PEOPLE DISCOVERY AT SCALE (D-MN-3 as REPLACED by the owner, 2026-10-27 21:32: "don't use Hunter or Apollo ... so we can
 // do it with anyone"). No paid people/email provider. One adapter interface (PeopleProvider), one implementation (web):
-//   1. search    OpenAI's web_search tool (Responses API, through the gateway's OpenAI config: modelConfig, OpenAI only),
+//   1. search    a web search through the gateway (DARK: not available yet, so discovery answers "not set up"),
 //                with the search recipe below (company + role + "team", engineering blog, campus recruiting, speakers). Only
 //                the result URLs are used: what the model writes is never taken as a fact about anyone.
 //   2. read      each result page with N1's SSRF-guarded page reader (career_people_page.ts readPage: HTTPS only, public
@@ -23,14 +23,12 @@ import { neverOpen } from "./career_people_sites.ts";
 import { formerTitle, type PageRead, readPage, type Resolver } from "./career_people_page.ts";
 import { domainLabelOf, registrable } from "./career_people_gmail.ts";
 import { dohMx, isRoleAddress, isTeamName, type MxResolver } from "./career_contacts.ts";
-import { costMicros, modelConfig, responsesCall } from "./model_gateway.ts";
-import { type BudgetGate } from "./model_budget.ts";
-import { ModelBudgetBlockedError } from "./model_calls.ts";
+import { CLAUDE_DEFAULT_MODEL, modelConfig, WEB_SEARCH_AVAILABLE, webSearch } from "./model_gateway.ts";
 
 export type ProviderName = "web";
 export const LABEL: Record<ProviderName, string> = { web: "web search" };
 export const DEFAULT_CACHE_DAYS = 30;
-export const DEFAULT_SEARCH_MODEL = "gpt-4.1-mini"; // listed for the Responses web_search tool (OpenAI's guide, 2026-10-27)
+export const DEFAULT_SEARCH_MODEL = CLAUDE_DEFAULT_MODEL;
 // Hosts the search is told to leave out (and that are never fetched if they come back anyway).
 // Built from the never-open labels, so no such host is written in fetch code (WO-037/D7's scan).
 export const BLOCKED_SEARCH_DOMAINS = [["linkedin", "com"], ["indeed", "com"], ["joinhandshake", "com"], ["lnkd", "in"]].map((p) => p.join("."));
@@ -51,12 +49,12 @@ export interface PeopleProvider { name: ProviderName; supportsSchool: false; fin
 // ------------------------------------------------------------------------------------------------ config
 export interface ProviderConfig { provider: ProviderName | null; apiKey: string | null; model: string; cacheSeconds: number; leaseSeconds: number; switchedOn: boolean }
 // CAREER_PEOPLE_SEARCH=on switches discovery on (model spend: the owner's to approve); the key is the gateway's own
-// (OPENAI_API_KEY through modelConfig, OpenAI only). CAREER_PEOPLE_SEARCH_MODEL picks the model; CAREER_PEOPLE_CACHE_DAYS
+// (ANTHROPIC_API_KEY through modelConfig), and nothing runs while the gateway's web search is not available. CAREER_PEOPLE_SEARCH_MODEL picks the model; CAREER_PEOPLE_CACHE_DAYS
 // (default 30) is how long one company's discovery is reused for everyone.
 export function providerConfig(env: (k: string) => string | undefined): ProviderConfig {
   const switchedOn = (env("CAREER_PEOPLE_SEARCH") ?? "").trim().toLowerCase() === "on";
   const gw = modelConfig({ get: env });
-  const key = gw.provider === "openai" && gw.apiKey ? gw.apiKey : null;
+  const key = WEB_SEARCH_AVAILABLE && gw.apiKey ? gw.apiKey : null;
   const days = Number(env("CAREER_PEOPLE_CACHE_DAYS"));
   return {
     provider: switchedOn && key ? "web" : null, apiKey: switchedOn ? key : null, switchedOn,
@@ -99,43 +97,12 @@ export function searchRecipe(company: string, titles: string[]): string[] {
   const roles = titles.length ? titles.map((t) => `${c} ${cleanCell(t, 80)}`) : [`${c} team`];
   return [...new Set([...roles, `${c} team page`, `${c} engineering blog author`, `${c} campus recruiting recruiter`, `${c} conference speaker`, `${c} press contact`])];
 }
-// OpenAI's web_search tool through the Responses API (https://developers.openai.com/api/docs/guides/tools-web-search):
-// POST /v1/responses { model, tools: [{ type: "web_search", filters: { blocked_domains } }], tool_choice: "required",
-// include: ["web_search_call.action.sources"], input }. URLs come from web_search_call.action.sources[].url and the
-// message's url_citation annotations. 429 insufficient_quota: out of credits; other 429: rate limit; 401/403: key refused.
-// Every search is a paid call: it goes through the gateway's responsesCall, which reserves the day's budget before sending.
-export function openAiWebSearch(o: { fetch: typeof fetch; apiKey: string; model: string; budget?: BudgetGate }): SearchFn {
-  return async (query) => {
-    let r: Response;
-    try {
-      r = await responsesCall({
-        apiKey: o.apiKey, model: o.model, request: o.fetch, budget: o.budget, timeoutMs: 45_000,
-        body: {
-          tool_choice: "required", max_tool_calls: 1, max_output_tokens: 400, include: ["web_search_call.action.sources"],
-          tools: [{ type: "web_search", filters: { blocked_domains: BLOCKED_SEARCH_DOMAINS } }],
-          input: `Search the web for public pages that name people who work at this company, for: ${query}\nList the pages you found.`,
-        },
-      });
-    } catch (e) {
-      if (e instanceof ModelBudgetBlockedError) return { status: "out_of_credits", detail: `search: ${e.detail}` };
-      return { status: "error", detail: `search: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) }; }
-    if (!r.ok) {
-      const body = (await r.text().catch(() => "")).slice(0, 800);
-      if (r.status === 429 && /insufficient_quota|exceeded your current quota|billing/i.test(body)) return { status: "out_of_credits", detail: "search: HTTP 429 (quota)" };
-      if (r.status === 429) return { status: "rate_limited", retry_after_s: Math.max(1, Math.min(Number(r.headers.get("retry-after")) || 60, 86400)), detail: "search: HTTP 429" };
-      if (r.status === 401 || r.status === 403) return { status: "not_wired", reason: `the AI service refused the key (HTTP ${r.status})` };
-      return { status: "error", detail: `search: HTTP ${r.status}` };
-    }
-    const j: any = await r.json().catch(() => null);
-    const urls: { url: string; title: string }[] = [];
-    for (const item of Array.isArray(j?.output) ? j.output : []) {
-      if (item?.type === "web_search_call") for (const s of Array.isArray(item?.action?.sources) ? item.action.sources : []) if (s?.url) urls.push({ url: String(s.url), title: "" });
-      if (item?.type === "message") for (const c of Array.isArray(item.content) ? item.content : []) for (const a of Array.isArray(c?.annotations) ? c.annotations : []) {
-        if (a?.type === "url_citation" && a.url) urls.push({ url: String(a.url), title: cleanCell(a.title, 200) });
-      }
-    }
-    const micros = costMicros(o.model, j?.usage);
-    return { status: "ok", urls, cost_usd: micros === null ? null : micros / 1e6 };
+// The search is dark (owner directive 2026-11-02: Claude-only; Claude web search is not verified on these models). The
+// gateway's web-search door answers "not available", nothing is sent or spent, and the provider reports not_wired.
+export function gatewaySearch(): SearchFn {
+  return async () => {
+    const r = await webSearch();
+    return { status: "not_wired", reason: r.detail };
   };
 }
 
@@ -218,7 +185,7 @@ export function webProvider(o: { search: SearchFn; fetch: typeof fetch; resolve?
 }
 export function makeProvider(c: ProviderConfig, f: typeof fetch, o: { resolve?: Resolver; mx?: MxResolver; search?: SearchFn } = {}): PeopleProvider | null {
   if (c.provider !== "web" || !c.apiKey) return null;
-  return webProvider({ search: o.search ?? openAiWebSearch({ fetch: f, apiKey: c.apiKey, model: c.model }), fetch: f, resolve: o.resolve, mx: o.mx });
+  return webProvider({ search: o.search ?? gatewaySearch(), fetch: f, resolve: o.resolve, mx: o.mx });
 }
 
 // ------------------------------------------------------------------------------------------------ the store (RPC only)

@@ -25,7 +25,19 @@ export const CLAUDE_DEFAULT_MODEL = "claude-haiku-5-5";
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const PROVIDER_NAME: Record<Provider, string> = { anthropic: "Anthropic" };
 
+// A model or provider setting that is set but not honoured (a gpt id left in a secret, a typo, an unkeyed id) falls back to
+// Haiku 5.5. It is said once per boot per variable on the error log, so a stale secret is visible and never silent. The value
+// is cut to 60 characters and never a key.
+const ignoredSeen = new Set<string>();
+export function warnIgnoredOnce(name: string, value: string, why: string): void {
+  if (ignoredSeen.has(name)) return;
+  ignoredSeen.add(name);
+  console.error(`[model] ${name}="${String(value).slice(0, 60)}" is ignored (${why}); using ${CLAUDE_DEFAULT_MODEL}`);
+}
+export const resetIgnoredWarnings = () => ignoredSeen.clear();
 export function modelConfig(env: Env, _role: ModelRole = "chat"): ModelConfig {
+  const mp = (env.get("MODEL_PROVIDER") ?? "").trim();
+  if (mp && mp.toLowerCase() !== "anthropic") warnIgnoredOnce("MODEL_PROVIDER", mp, "Claude is the only provider");
   return modelConfigFor(env, CLAUDE_DEFAULT_MODEL);
 }
 export const providerName = (c: ModelConfig) => PROVIDER_NAME[c.provider];
@@ -39,7 +51,9 @@ export function providerFor(model: string): Provider {
 // model, otherwise `fallback` (Haiku 5.5). Any other value is ignored, never sent anywhere.
 export function readerModel(env: Env, fallback = CLAUDE_DEFAULT_MODEL): string {
   const v = (env.get("CAREER_MODEL") ?? "").trim();
-  return v && /^claude-/i.test(v) && PRICES[v] ? v : fallback;
+  if (v && /^claude-/i.test(v) && PRICES[v]) return v;
+  if (v) warnIgnoredOnce("CAREER_MODEL", v, "not a priced Claude model");
+  return fallback;
 }
 // A complete config for one named model: its provider, that provider's key, and its effort. Callers that pick a model
 // (the career reply model) use this instead of { ...modelConfig(env), model }.

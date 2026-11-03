@@ -21,6 +21,7 @@ export const ALLOWED: Record<string, string> = {
   "scripts/launch/go-live.sh": "launch package",
 };
 
+const SCANNED = ["supabase/functions", "workers", "scripts", "api", "site", "src"];
 const OPENAI = /api\.openai\.com|\bOPENAI_[A-Z_]+|\bgpt-[a-z0-9]/i;
 const EXT = /\.(ts|tsx|js|mjs|cjs|sh|py|yml|yaml)$/;
 const SKIP_FILE = /(^|\/)router_core[^/]*\.js$/; // generated bundle: job-board rows name companies, not providers
@@ -58,11 +59,11 @@ async function tree(): Promise<Record<string, string>> {
       else if (EXT.test(e.name) && !SKIP_FILE.test(e.name)) out[rel] = await Deno.readTextFile(`${ROOT}/${rel}`);
     }
   };
-  for (const d of ["supabase/functions", "workers", "scripts"]) await walk(d);
+  for (const d of SCANNED) await walk(d);
   return out;
 }
 
-Deno.test("claude-only: no OpenAI endpoint, OPENAI_* variable or gpt- model id in executable code under supabase/functions, workers or scripts (short, explicit allow-list)", async () => {
+Deno.test("claude-only: no OpenAI endpoint, OPENAI_* variable or gpt- model id in executable code under supabase/functions, workers, scripts, api, site or src (short, explicit allow-list)", async () => {
   const files = await tree();
   assert(Object.keys(files).length > 300, `the scan really read the tree (${Object.keys(files).length} files)`);
   const found = offenders(files), unlisted = Object.keys(found).filter((p) => !ALLOWED[p]);
@@ -80,7 +81,7 @@ Deno.test("claude-only: the scan notices each shape, ignores comments and data, 
   eq(offenders({ "supabase/functions/x/index.ts": "// api.openai.com, OPENAI_API_KEY and gpt-5 in a comment\n/* gpt-4 in a block\n   OPENAI_MODEL */ const a = 1; // gpt-5 trailing\n * gpt-3" }), {}, "comments are ignored");
   eq(offenders({ "scripts/x.sh": "# OPENAI_API_KEY is only a comment\nexport OPENAI_API_KEY=1" }), { "scripts/x.sh": ["2: export OPENAI_API_KEY=1"] }, "a shell comment is ignored, the export is not");
   eq(offenders({ "supabase/functions/x.ts": "const s = 'chatgpt-style sources'; const t = 'ChatGPT';" }), {}, "chatgpt is not a model id");
-  eq(Object.keys(ALLOWED).filter((p) => !/^(supabase\/functions|workers|scripts)\//.test(p)), [], "allowed paths are inside the scanned directories");
+  eq(Object.keys(ALLOWED).filter((p) => !/^(supabase\/functions|workers|scripts|api|site|src)\//.test(p)), [], "allowed paths are inside the scanned directories");
 });
 
 Deno.test("claude-only: providerFor refuses gpt-5-mini and every other non-Claude id, and accepts the two Claude models", () => {
@@ -91,4 +92,28 @@ Deno.test("claude-only: providerFor refuses gpt-5-mini and every other non-Claud
     assert(e2 && e2.type === "not_configured", `${id || "(empty)"} is refused`);
   }
   eq([providerFor("claude-haiku-5-5"), providerFor("claude-sonnet-5-5")], ["anthropic", "anthropic"]);
+});
+
+Deno.test("claude-only: a rejected CAREER_MODEL, CAREER_REPLY_MODEL or MODEL_PROVIDER is said once per boot on the error log and falls back to Haiku", async () => {
+  const { careerModel } = await import("../../supabase/functions/agent-chat/release_model.ts");
+  const { modelConfig, readerModel, resetIgnoredWarnings } = await import("../../supabase/functions/_shared/model_gateway.ts");
+  const env = (o: Record<string, string>) => ({ get: (k: string) => o[k] });
+  const lines: string[] = [], loud = console.error;
+  console.error = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
+  try {
+    resetIgnoredWarnings();
+    eq(careerModel(env({ ANTHROPIC_API_KEY: "a", CAREER_REPLY_MODEL: "gpt-5-mini" })), "claude-haiku-5-5");
+    careerModel(env({ ANTHROPIC_API_KEY: "a", CAREER_REPLY_MODEL: "gpt-5-mini" }));
+    eq(readerModel(env({ CAREER_MODEL: "gpt-4.1-mini" })), "claude-haiku-5-5");
+    readerModel(env({ CAREER_MODEL: "gpt-4.1-mini" }));
+    eq(modelConfig(env({ MODEL_PROVIDER: "openai" })).model, "claude-haiku-5-5");
+    modelConfig(env({ MODEL_PROVIDER: "openai" }));
+    eq(lines.length, 3, "once per variable, however often it is read: " + lines.join(" | "));
+    for (const name of ["CAREER_REPLY_MODEL", "CAREER_MODEL", "MODEL_PROVIDER"]) assert(lines.some((l) => l.includes(`${name}=`) && l.includes("claude-haiku-5-5")), name);
+    // Honoured or empty values say nothing.
+    resetIgnoredWarnings(); lines.length = 0;
+    careerModel(env({ ANTHROPIC_API_KEY: "a", CAREER_REPLY_MODEL: "claude-sonnet-5-5" }));
+    careerModel(env({})); readerModel(env({ CAREER_MODEL: "claude-sonnet-5-5" })); modelConfig(env({ MODEL_PROVIDER: "anthropic" })); modelConfig(env({}));
+    eq(lines, [], "nothing to say");
+  } finally { console.error = loud; resetIgnoredWarnings(); }
 });

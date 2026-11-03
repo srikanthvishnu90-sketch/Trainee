@@ -14,7 +14,7 @@
 // budget caps it) and ANTHROPIC_API_KEY is configured; anything else (a typo, an unknown id, a non-Claude id, no key) serves
 // the default. Every model here is a Claude model (providerFor refuses any other id).
 // The rollback is temporary; the lasting change is a reviewed commit to CAREER_MODEL_DEFAULT that passes the deploy standard.
-import { type ModelConfig, modelConfigFor, PRICES } from "../_shared/model_gateway.ts";
+import { type ModelConfig, modelConfigFor, PRICES, warnIgnoredOnce } from "../_shared/model_gateway.ts";
 
 type Env = { get(k: string): string | undefined };
 
@@ -30,6 +30,7 @@ const keyed = (env: Env, model: string) => !!modelConfigFor(env, model).apiKey.t
 export function careerModel(env: Env): string {
   const v = (env.get(CAREER_MODEL_ENV) ?? "").trim();
   if (v && ROLLBACK_MODELS.includes(v) && PRICES[v] && keyed(env, v)) return v;
+  if (v) warnIgnoredOnce(CAREER_MODEL_ENV, v, ROLLBACK_MODELS.includes(v) ? "no ANTHROPIC_API_KEY" : "not a listed Claude model");
   return CAREER_MODEL_DEFAULT;
 }
 

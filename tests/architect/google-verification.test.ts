@@ -317,7 +317,8 @@ Deno.test("GV/11 the legal pages are never published with a placeholder: the bui
   // Nothing under site/ carries a placeholder, and the pages are not published yet.
   const walk = (dir: URL): string[] => [...Deno.readDirSync(dir)].flatMap((e) => e.isDirectory ? walk(new URL(`${e.name}/`, dir)) : /\.(html|js|json|txt)$/.test(e.name) ? [new URL(e.name, dir).pathname] : []);
   for (const f of walk(new URL("site/", ROOT))) assert(!/\{\{(LEGAL_NAME|SUPPORT_EMAIL|GOVERNING_STATE|DOMAIN)\}\}/.test(Deno.readTextFileSync(f)), `${f} carries a placeholder`);
-  for (const f of ["site/privacy.html", "site/terms.html", "site/google.html"]) assert(!(() => { try { Deno.statSync(new URL(f, ROOT)); return true; } catch { return false; } })(), `${f} is not published before the owner's inputs`);
+  // site/privacy.html is the privacy page that was already live (restored from main); it carries no placeholder (checked above). terms and google stay unpublished until the owner's inputs.
+  for (const f of ["site/terms.html", "site/google.html"]) assert(!(() => { try { Deno.statSync(new URL(f, ROOT)); return true; } catch { return false; } })(), `${f} is not published before the owner's inputs`);
 });
 
 Deno.test("GV/12 once filled, the pages say only what the code does, with Google's Limited Use statement", async () => {

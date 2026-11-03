@@ -275,6 +275,8 @@ if [[ -f "$BRIDGE_PATH" ]]; then
     # 20261101130000 (re-prepare after needs_answers) rewrites the reconcile and the functions the deferred files above install:
     # applied last, below.
     [[ "$(basename "$file")" == 20261101130000_* ]] && continue
+    # 20261102120000 (the per-person candidates) reads career_apply_job_history, which 20261101130000 defines: applied after it, below.
+    [[ "$(basename "$file")" == 20261102120000_* ]] && continue
     # 20261102000000 (a corrected entry stops what was made from its old words): applied last, below, twice, with its test.
     [[ "$(basename "$file")" == 20261102000000_* ]] && continue
     # 20261031110000 (people drafts round 3) lifts the 1..10 draft-number check: applied last, below, twice, with its test.
@@ -923,6 +925,9 @@ echo "== trainee_file_signin_limits.test.sql (texts and tries capped per account
 # 20261101130000 redefines the candidates again (121000's error rule kept, history rows not counted): the last word, as in order.
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261101130000_career_apply_reprepare_needs_answers.sql"
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261101130000_career_apply_reprepare_needs_answers.sql"
+# 20261102120000: the same selection per person (reads 130000's career_apply_job_history), so it follows it. Twice (idempotent).
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102120000_career_apply_prepare_candidates_for.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102120000_career_apply_prepare_candidates_for.sql"
 echo "== career_apply_mass_throughput.test.sql (one error never pauses an ATS; 3 in a row do; 2% at 50 as before; our prep errors retried after 30 min)"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_mass_throughput.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 echo "== career_apply_reprepare_guard.test.sql (20261101130000: an approval spent on a history row is refused on any new row)"

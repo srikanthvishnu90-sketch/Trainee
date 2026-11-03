@@ -9,7 +9,7 @@ import { buildFileDeps, edgeBackground } from "../../supabase/functions/trainee-
 import { ACCOUNT_MAX_SENDS, ACCOUNT_MAX_TRIES, ACCOUNT_WINDOW_MS, MAX_CODE_SENDS, MAX_CODE_TRIES, phonePace, PHONE_STEP_FLOOR_MS } from "../../supabase/functions/_shared/file_session.ts";
 import { MAX_LINK_SPAN_MS, mintFileToken, verifyFileToken } from "../../supabase/functions/_shared/file_link.ts";
 import { fakePhone, memSessions } from "./file-session-fakes.ts";
-import { POLICY, SECRET } from "./scenarios-file-websec-battery.ts";
+import { ANSWER_DEADLINE_MS, answeredWhileHeld, generate, memEnv, newReport, POLICY, printReport, runScenario, SECRET } from "./scenarios-file-websec-battery.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -140,4 +140,39 @@ Deno.test("file websec: a link lives at most 72 hours from its issue; a longer o
   const c = JSON.parse(atob(t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
   eq(c.e - c.i, MAX_LINK_SPAN_MS, "minting caps the span");
   ok((await verifyFileToken(t, SECRET, now + MAX_LINK_SPAN_MS - 1)).ok, "a 72-hour link works until its end");
+});
+
+// PR #420's CI (architect shard 3/6) failed the Postgres sample on "#325 enum: own": the battery's oracle asked the account's
+// number to be answered within 25 ms. Over real Postgres on a loaded runner that number's answer is slower (it alone does one
+// more store round trip, countSend), and it waited for nothing: the text is handed to the background. The oracle now asks
+// whether the answer came while its text was still held by the provider; this pins both halves of that.
+Deno.test({ name: "file websec: a slow store is not an answer that waits for the text (enum scenarios with the account's count 80 ms slow)", sanitizeOps: false, sanitizeResources: false, async fn() {
+  const enums = generate().filter((s) => s.cat === "enum");
+  const picked = [enums.find((s) => s.id === 325)!, ...enums.filter((s) => s.id !== 325).slice(0, 11)];
+  const rep = newReport();
+  for (const s of picked) {
+    const e = memEnv();
+    const base = e.sessions;
+    // the round trip only the account's own number makes, as slow as a loaded runner's Postgres made it
+    e.sessions = { ...base, countSend: async (j, m) => { await new Promise((r) => setTimeout(r, 80)); return await base.countSend(j, m); } };
+    await runScenario(s, e, rep);
+  }
+  eq(printReport("enum, slow account count", rep), 0, "a slow store is no violation");
+  ok((rep.liveness["enum: answered while the text was held"] ?? 0) > 0, "some answers came while their text was held");
+  ok((rep.liveness["enum: same answer, same pacing"] ?? 0) === picked.length, "every enum scenario checked the answers");
+} });
+
+Deno.test("file websec: the enum oracle still catches an answer that waits for its text, and passes one that is only slow", async () => {
+  // an answer that waits for the text: it comes only once the held text is released
+  let release = () => {};
+  const held = new Promise<void>((r) => { release = r; });
+  const waits = held.then(() => "answer");
+  const w = await answeredWhileHeld(waits, () => release(), 60);
+  eq([w.answered, w.value], [false, "answer"], "waiting for the held text is caught, and the scenario still ends");
+  // an answer that is slow (a store round trip of 200 ms) but waits for nothing: never released, still answered
+  const slow = new Promise<string>((r) => setTimeout(() => r("answer"), 200));
+  let released = false;
+  const s = await answeredWhileHeld(slow, () => { released = true; });
+  eq([s.answered, s.value, released], [true, "answer", false], "a slow answer that waits for nothing passes");
+  ok(ANSWER_DEADLINE_MS >= 1000, "the deadline is far past any honest round trip");
 });

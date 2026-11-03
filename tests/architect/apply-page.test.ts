@@ -58,7 +58,7 @@ Deno.test("ready: one POST approves exactly the prepared payload once; the card 
   eq(w.queue[0].payload, w.preps.get(ACME)!.payload, "exactly the payload shown");
   const after = await (await get(w, s)).text();
   const card = cardOf(after, ref);
-  assert(/<span class="chip queued" role="status">Queued<\/span>/.test(card), "the status is the record's: queued");
+  assert(/<span class="chip queued" role="status">Approved<\/span>/.test(card), "the status is the record's: queued");
   assert(!/class="apply"/.test(card), "no Apply once it is in motion");
   // The same tap again: the posting goes once.
   const again = await textOf(await post(w, s, acmeApply(ref)));

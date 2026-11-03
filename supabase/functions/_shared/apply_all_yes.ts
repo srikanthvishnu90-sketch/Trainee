@@ -17,7 +17,7 @@
 // The reply states only counts taken from what each tap returned (apply_status_summary.ts: "approved", never "applied"). The
 // offer is spent by this turn: its reply carries `apply_all_done`, not the offer, so a second yes approves nothing new (and the
 // duplicate guard would refuse it anyway). This module sends nothing itself; the person's worker claims and finishes.
-import { hashTag, tapJob, type JobDeps, type JobSender, type JobView, type ListMeta } from "./telegram_jobs.ts";
+import { hashTag, screenedOut, tapJob, type JobDeps, type JobSender, type JobView, type ListMeta } from "./telegram_jobs.ts";
 import { YES_WINDOW_MS } from "./career_apply_cards.ts";
 import { type ApplySummary, applySummary } from "./apply_status_summary.ts";
 import type { OpenQuestion } from "./career_apply_questions.ts";
@@ -59,11 +59,18 @@ export function readOffer(meta: Record<string, unknown> | null | undefined): App
 
 // A bare affirmative, and nothing more: "yes", "yep", "yeah please", "do it", "go ahead", "apply to all (of them)", "send them all".
 // A yes with anything else on it ("yes but not Acme", "yes except 2", "yes and ...") is not this: it approves nothing.
-const FILLER = "(?:\\s+(?:please|pls|thanks|thank you|now|then))*";
-const YES = new RegExp(`^(?:(?:yes|yep|yeah|yea|yup|ya|y|sure|ok|okay|absolutely|definitely)(?:\\s+(?:please|do it|go ahead|apply|apply to all(?: of them)?|apply to them all|send them(?: all)?|send all|that works))?|do it|go ahead|go for it|please do|sounds good|apply to all(?: of them)?|apply to them all|send them all|send all of them|send all|apply to all of those)${FILLER}$`);
+// D-MS-1: only these words approve. "ok", "okay", "sure", "sounds good", "absolutely", "definitely", "ya", "maybe", "yes?", a thumbs-up
+// and the rest approve NOTHING.
+const YES = /^(?:(?:yes|yep|yeah)(?: (?:please|do it|go ahead|apply to all(?: of them)?|send them all|approve all))?|do it|go ahead|apply to all(?: of them)?|send them all|send all|approve all)(?: please)?$/;
+const norm = (message: string) => String(message ?? "").toLowerCase().replace(/[’`]/g, "'").replace(/[!.\s]+$/g, "").replace(/^[\s"']+|[\s"']+$/g, "").replace(/\s*,\s*/g, " ").replace(/\s+/g, " ").trim();
 export function isApplyAllYes(message: string): boolean {
-  const t = String(message ?? "").toLowerCase().replace(/[’`]/g, "'").replace(/[!.\s]+$/g, "").replace(/^[\s"']+|[\s"']+$/g, "").replace(/\s*,\s*/g, " ").replace(/\s+/g, " ").trim();
-  return t.length > 0 && t.length <= 60 && YES.test(t);
+  const t = norm(message);
+  return t.length > 0 && t.length <= 40 && YES.test(t);
+}
+// A yes with a condition on it ("yes but not Acme", "yeah except 2", "yes skip the first"): approves nothing, and says the offer is still open.
+export function isConditionalYes(message: string): boolean {
+  const t = norm(message);
+  return t.length <= 200 && /^(?:yes|yep|yeah)\b/.test(t) && !YES.test(t) && /\b(?:but|except|not|skip|without|only|besides|other than|don't|dont|exclude|minus)\b/.test(t);
 }
 
 export interface ApplyAllResult {
@@ -82,6 +89,9 @@ export interface ApplyAllDeps {
   deps: JobDeps;
   questions?: { open(userId: string, limit: number): Promise<OpenQuestion[]> };
   prepare?: (userId: string) => Promise<"started" | "failed" | "off" | "skipped">; // career_hosted_prepare.ts reprepareQueued
+  // Whether the person has a confirmed resume on file (apply_readiness.ts "resume"). false: nothing is approved or prepared and the
+  // handler asks for the resume through the readiness path. Absent: not checked here.
+  resumeConfirmed?: boolean;
 }
 
 const sink = (said: string[]): JobSender => ({ photo: async () => ({ ok: true }), text: async (a) => { said.push(a.text); return { ok: true, id: null }; } });
@@ -90,7 +100,8 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 const who = (j: JobView | null) => j ? (j.company || j.title || "a role") : "a role";
 
 export async function applyAllYesTurn(o: ApplyAllDeps): Promise<ApplyAllResult | null> {
-  if (!isApplyAllYes(o.message)) return null;
+  const plain = isApplyAllYes(o.message), conditional = !plain && isConditionalYes(o.message);
+  if (!plain && !conditional) return null;
   const offer = readOffer(o.last?.meta);
   if (!offer) return null; // no live offer: this yes is nothing new, the turn goes on as before
   if (!(o.now >= offer.at && o.now - offer.at <= OFFER_WINDOW_MS)) return null;
@@ -101,6 +112,8 @@ export async function applyAllYesTurn(o: ApplyAllDeps): Promise<ApplyAllResult |
     return { reply, status, intent: APPLY_ALL_INTENT, summary, counts, asks: { questions: 0, unprepared: 0, ...extra },
       meta: keepOffer ? { apply_all_offer: offer } : { apply_all_done: { list: offer.list, at: o.now, ...counts } } };
   };
+  if (conditional) return done(`I haven't approved anything. The offer to apply to all ${offer.jobs.length} shown is still open: reply just "yes" to approve exactly those, or use Apply on the list for one at a time.`, "not_plain", {}, true);
+  if (o.resumeConfirmed === false) return done("I don't have a confirmed resume on file, so nothing was approved or prepared.", "no_resume", { unprepared: 1 });
   // The list and the person's own marks on its page. Unreadable or gone: fail closed, nothing approved.
   let refs: string[] | null, meta: ListMeta | null = null;
   try {
@@ -141,6 +154,8 @@ export async function applyAllYesTurn(o: ApplyAllDeps): Promise<ApplyAllResult |
     if (await deps.store.applied(userId, job.job_id).catch(() => false) || (deps.store.elsewhere && await deps.store.elsewhere(userId, job).catch(() => false))) { already.push(name); continue; }
     const prepNow = await deps.store.prepared(userId, job.job_id).catch(() => null);
     if (prepNow) { readySince.push(name); continue; }
+    // The posting screen the page's Apply runs before it queues a posting to prepare: closed, stale, scam-looking, a knock-out.
+    if (await screenedOut(userId, job, deps)) { blocked.push(name); continue; }
     if (open && open.some((q) => q.job_ids.includes(job.job_id))) { needsInfo.push(name); continue; }
     const w = await deps.store.want(userId, job, deps.now()).catch(() => ({ result: "refused" as const }));
     if (w.result === "refused") { blocked.push(name); continue; }

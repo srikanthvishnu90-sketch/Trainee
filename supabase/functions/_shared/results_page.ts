@@ -36,7 +36,7 @@ export interface ResultsFeed {
   paused?: boolean; updated?: string; dismissed?: ResultRow[]; // the person's own marks (private); updated: when this page was drawn
   madeFor?: string; stamp?: string | null; caveat?: string; quick?: string[];
   // "Apply to all N ready": the roles that are ready now (and not dismissed) and the hash of that exact set; absent: fewer than two, or paused.
-  all?: { hash: string; size: number } | null;
+  all?: { hash: string; size: number; filtered?: boolean } | null;
 }
 
 const BRAND_PLUM = "#5C2751";
@@ -141,7 +141,7 @@ export function renderResults(f: ResultsFeed): string {
   const filters = `<form method="get" class="filters" role="search"><label>Pay${sel("pay", f.filters.pay, payOpts)}</label><label>Where${sel("where", f.filters.where, [["", "Anywhere"], ["remote", "Remote"], ...f.places.map((p) => [p, p] as [string, string])])}</label><button type="submit" class="ghost">Show</button></form>`;
   const canPick = !f.paused && f.rows.some(approvable);
   const selbar = canPick ? `<div class="selbar"><form method="post" id="sel">${hidden(f.token, "applysel")}<button type="submit" class="apply">Apply to selected</button></form><p>Tick the roles you want. Ones that are ready go in one tap; the rest say what they need.</p></div>` : "";
-  const allbar = f.all && !f.paused ? `<div class="selbar allbar"><form method="post" id="all">${hidden(f.token, "applyall", `<input type="hidden" name="set" value="${esc(f.all.hash)}">`)}<button type="submit" class="apply">Apply to all ${f.all.size} ready</button></form><p>Approves the ${f.all.size} ready roles on this list, each exactly as its What will be sent shows. Dismissed roles and roles that aren't ready are left out. If anything changes first, nothing is approved.</p></div>` : "";
+  const allbar = f.all && !f.paused ? `<div class="selbar allbar"><form method="post" id="all">${hidden(f.token, "applyall", `<input type="hidden" name="set" value="${esc(f.all.hash)}">`)}<button type="submit" class="apply">Apply to all ${f.all.size} ready</button></form><p>Approves ${f.all.filtered ? `all ${f.all.size} ready roles on the whole list, not only the roles your filters show` : `the ${f.all.size} ready roles on this list`}, each exactly as its What will be sent shows. Dismissed roles and roles that aren't ready are left out. If anything changes first, nothing is approved.</p></div>` : "";
   const meets = f.rows.filter((r) => r.payGroup === "meets"), unchecked = f.rows.filter((r) => r.payGroup === "unchecked"), unlisted = f.rows.filter((r) => r.payGroup === "unlisted"), below = f.rows.filter((r) => r.payGroup === "below");
   const group = (title: string, note: string, rows: ResultRow[]) => rows.length ? `<h2 class="group">${esc(title)} (${rows.length})</h2>${note ? `<p class="groupnote">${esc(note)}</p>` : ""}<ul class="cards">${rows.map((r) => card(r, f)).join("")}</ul>` : "";
   const body = f.rows.length

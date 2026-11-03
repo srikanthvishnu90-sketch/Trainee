@@ -110,6 +110,16 @@ export const RELEASE_FLAGS: Readonly<Record<string, string>> = Object.freeze({
   CAREER_SEND_RAIL: "on",
 });
 
+// APPLY ALL BY YES (owner, 2026-11-02 17:10 CT; _shared/apply_all_yes.ts): not a release flag. It adds no new way to send: a bare yes
+// approves only the roles the results message offered, each through the same hash-bound Confirm as the page's Apply, so every guard
+// there (duplicate, changed tag, posting screen, paused account, the database kill switches below, the queue's pace and cloud opt-in)
+// still decides each one. Served ON by this commit; the environment can only turn it OFF (no deploy), and the results message then
+// carries no question and no offer:
+//   supabase secrets set CAREER_APPLY_ALL_YES=off --project-ref <ref>     off at once
+//   supabase secrets unset CAREER_APPLY_ALL_YES --project-ref <ref>       back to on
+export const APPLY_ALL_YES_ENV = "CAREER_APPLY_ALL_YES";
+export const applyAllYesOn = (env: Env): boolean => (env.get(APPLY_ALL_YES_ENV) ?? "on").trim().toLowerCase() === "on";
+
 // D-037: the database switches the release serves on (public.career_cloud_settings; the database reads anything but 'on' as
 // off). trainee-go-live.sh writes them on every go-live from scripts/launch/release-db-switches.sql, which
 // tests/architect/release-flags.test.ts holds to this table. Their kill switch is the row: set it to 'off' and every claim

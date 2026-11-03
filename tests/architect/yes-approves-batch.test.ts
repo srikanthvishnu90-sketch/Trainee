@@ -9,7 +9,7 @@
 // Memory world (tests/helpers/results_world.ts): no network, no model, no database.
 import assertNode from "node:assert/strict";
 import { hashTag } from "../../supabase/functions/_shared/telegram_jobs.ts";
-import { APPLY_ALL_INTENT, applyAllYesTurn, isApplyAllYes, OFFER_WINDOW_MS, offerOf, offerQuestion, readOffer, type ApplyAllOffer } from "../../supabase/functions/_shared/apply_all_yes.ts";
+import { APPLY_ALL_INTENT, applyAllYesTurn, isApplyAllYes, isConditionalYes, OFFER_WINDOW_MS, offerOf, offerQuestion, readOffer, type ApplyAllOffer } from "../../supabase/functions/_shared/apply_all_yes.ts";
 import { overclaims } from "../../supabase/functions/_shared/apply_status_summary.ts";
 import type { OpenQuestion } from "../../supabase/functions/_shared/career_apply_questions.ts";
 import type { ListMeta } from "../../supabase/functions/_shared/telegram_jobs.ts";
@@ -51,9 +51,34 @@ Deno.test("the results message ends with one plain question; the offer holds the
   eq(readOffer({}), null); eq(readOffer(null), null);
 });
 
-Deno.test("what counts as a bare yes: plain affirmatives only; a yes with anything on it approves nothing", () => {
-  for (const m of ["yes", "Yes!", "yep", "yeah", "Yeah.", "y", "sure", "ok", "okay", "yes please", "yes, please", "do it", "go ahead", "apply to all", "Apply to all of them", "apply to them all", "send them all", "send all", "yes apply to all", "yes send them all", "yup", "sounds good", "yes do it"]) assert(isApplyAllYes(m), m);
-  for (const m of ["no", "nope", "yes but not Acme", "yes except 2", "yes, skip Globex", "yes and also email them", "what jobs", "apply to Acme", "yesterday", "yes?", "maybe", "not yet", "yes I work at Acme", "", "apply", "send them all to my mom", "yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes"]) assert(!isApplyAllYes(m), m);
+Deno.test("what counts as a bare yes (D-MS-1): only the plain words approve; ok, sure, sounds good, a maybe, 'yes?' and the rest approve NOTHING", () => {
+  for (const m of ["yes", "Yes!", "yep", "yeah", "Yeah.", "yes please", "yes, please", "do it", "go ahead", "apply to all", "Apply to all of them", "send them all", "send all", "approve all", "yes apply to all", "yes send them all", "yes do it", "yeah please"]) assert(isApplyAllYes(m), m);
+  for (const m of ["ok", "okay", "sure", "sounds good", "absolutely", "definitely", "ya", "y", "yup", "maybe", "yes?", "yeah maybe", "no", "nope", "yes but not Acme", "yes except 2", "yes, skip Globex", "yes and also email them", "what jobs", "apply to Acme", "yesterday", "not yet", "yes I work at Acme", "", "apply", "apply to them all", "send them all to my mom", "\u{1F44D}", "yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes"]) assert(!isApplyAllYes(m), m);
+  for (const m of ["yes but not Acme", "yeah except 2", "yes, skip Globex", "yep without the first one"]) assert(isConditionalYes(m), m);
+  for (const m of ["yes", "yes what is the salary?", "ok but not 2", "no"]) assert(!isConditionalYes(m), m);
+});
+
+Deno.test("a yes with a condition approves nothing and says the offer is still open (and keeps it)", async () => {
+  const { w, last } = await setup();
+  const r = (await yes(w, last, { message: "yes but not Acme" }))!;
+  eq(w.queue.length, 0); eq(r.status, "not_plain");
+  assert(/I haven't approved anything\. The offer to apply to all 4 shown is still open: reply just "yes"/.test(r.reply), r.reply);
+  assert("apply_all_offer" in r.meta, "the offer is still the last word");
+  eq((await yes(w, { intent: "x", meta: r.meta }, { at: NOW + 90_000 }))!.counts.approved, 4, "a plain yes then approves the offer");
+});
+
+Deno.test("no confirmed resume: nothing approved or prepared, and the readiness path is asked for", async () => {
+  const { w, last } = await setup({ unprepared: [GLOBEX] });
+  w.clock.t = NOW + 60_000;
+  const r = (await applyAllYesTurn({ message: "yes", userId: U, now: w.clock.t, last, deps: w.deps, questions: w.deps.questions, prepare: w.deps.reprepare, resumeConfirmed: false }))!;
+  eq(r.status, "no_resume"); eq(w.queue.length, 0); eq(w.wants.length, 0); eq(w.prepared.length, 0); eq(r.asks.unprepared, 1);
+});
+
+Deno.test("a role not prepared is screened before it is queued to prepare (a closed posting is not queued)", async () => {
+  const { w, last } = await setup({ unprepared: [GLOBEX] });
+  w.closed.add(GLOBEX);
+  const r = (await yes(w, last))!;
+  eq(w.wants.length, 0, "the screen the page's Apply runs stopped it"); eq(r.counts.blocked, 1); eq(r.counts.getting_ready, 0);
 });
 
 // ================================================================== 1. yes queues exactly the offered ready jobs
@@ -92,7 +117,7 @@ Deno.test("yes with no live offer queues nothing and falls through (null)", asyn
   eq(await yes(w, null), null);
   eq(await yes(w, { intent: "career_search", meta: { results_file: r.listId } }), null, "the results link alone is not an offer");
   eq(await yes(w, { intent: "career_apply_questions", meta: {} }), null);
-  eq(await yes(w, lastOf(r.offer), { message: "yes but not Acme" }), null, "a yes with conditions approves nothing");
+  eq((await yes(w, lastOf(r.offer), { message: "yes but not Acme" }))!.status, "not_plain", "a yes with conditions approves nothing");
   eq(await yes(w, lastOf(r.offer), { message: "what about Globex" }), null);
   eq(w.queue.length, 0); eq(w.wants.length, 0);
 });
@@ -287,4 +312,14 @@ Deno.test("page: the card for the all-button is not shown on another person's se
   const res = await post(w, s, { action: "applyall", set }, { headers: { origin: "https://evil.example", "sec-fetch-site": "cross-site" } });
   eq(res.status, 403); eq(w.queue.length, 0);
   void cardOf; void V;
+});
+
+Deno.test("page: with a filter on, the all-button still means the whole list and says so; the set is the same", async () => {
+  const { w, s } = await page();
+  const plainHtml = await (await get(w, s)).text();
+  const filtered = await (await get(w, s, "where=Remote")).text();
+  const a = setOf(plainHtml)!, b = setOf(filtered)!;
+  eq(a[1], b[1], "same hash: the whole list, not the shown rows"); eq(a[2], b[2]);
+  assert(/all 4 ready roles on the whole list, not only the roles your filters show/.test(plain(filtered)), plain(filtered).slice(0, 600));
+  assert(!/not only the roles your filters show/.test(plain(plainHtml)));
 });

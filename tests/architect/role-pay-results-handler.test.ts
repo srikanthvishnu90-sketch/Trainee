@@ -77,9 +77,11 @@ Deno.test({ name: "results (handler): iMessage 'frontend internships that pay $3
   eq(t.status, 200, t.reply);
   // The reply shape.
   const lines = t.reply.split("\n");
-  eq(lines.length, 2, t.reply);
+  // Owner 2026-11-02 17:10 CT: with a confirmed resume the message ends with the one question a bare yes answers (apply_all_yes.ts).
+  eq(lines.length, 3, t.reply);
+  assert(/^Reply yes and I'll /.test(lines[2]), `the message ends with the offer's question: ${lines[2]}`);
   eq(lines[0], "I found 2 frontend internships that list pay of $30/hr or more, plus 1 that doesn't list pay, so I couldn't check it. Here they are by fit, with Apply on each.");
-  eq(t.body.parts, lines, "sent as two messages: the sentences, then the link alone");
+  eq(t.body.parts, lines, "sent as three messages: the sentences, the link alone, then the question");
   assert(/^https:\/\/trainee\.example\/file\?t=v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/.test(lines[1]), `the link alone on its own line: ${lines[1]}`);
   assert(!MARKDOWN.test(t.reply), "no markdown on iMessage");
   assert(!/TEST Pay/.test(t.reply), "no wall of postings in the chat");

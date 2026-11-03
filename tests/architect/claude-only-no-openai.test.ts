@@ -3,7 +3,7 @@
 // `gpt-` model id. Comments, docs and data (.md, .json, .csv, fixtures, migrations, the job-board rows in router_core*.js) are not
 // executable code and are not scanned. The gateway itself refuses a non-Claude model id (providerFor).
 //
-// ALLOWED is the explicit, short list of files that still name OpenAI because ANOTHER work package owns them (only the launch scripts now). Each entry says which
+// ALLOWED is the explicit, short list of files that still name OpenAI because ANOTHER work package owns them (empty now: #444 cleaned the launch scripts). Each entry says which
 // package removes it; that package deletes its line here in the same PR (an entry whose file no longer matches FAILS this test, so
 // the list cannot rot, and nothing can be added to it silently).
 import assertNode from "node:assert/strict";
@@ -14,11 +14,6 @@ const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a,
 const ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 
 export const ALLOWED: Record<string, string> = {
-  // TODO(launch scripts package): the go-live scripts still ask for and audit an OpenAI key.
-  "scripts/launch/trainee-go-live.sh": "launch package",
-  "scripts/launch/owner-go-live.sh": "launch package",
-  "scripts/launch/secrets-audit.sh": "launch package",
-  "scripts/launch/go-live.sh": "launch package",
 };
 
 const SCANNED = ["supabase/functions", "workers", "scripts", "api", "site", "src"];

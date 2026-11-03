@@ -8,7 +8,7 @@ Deno.test("WO-004/H5 the simulator drops pending attachments when switching pers
   try {
     await Deno.writeTextFile(`${dir}/resume.txt`, "Ada Lovelace. Analyst.");
     await Deno.writeTextFile(`${dir}/script.txt`, [`/attach ${dir}/resume.txt`, "/as +15550004444", `/attach ${dir}/resume.txt`, "/reset", "/quit"].join("\n"));
-    const run = await new Deno.Command(Deno.execPath(), { args: ["run", "-A", "--no-check", "scripts/text.ts", "--fresh", "--as", "+15550005555", "--script", `${dir}/script.txt`], cwd: new URL("../../", import.meta.url), stdout: "piped", stderr: "piped", env: { OPENAI_API_KEY: "" } }).output();
+    const run = await new Deno.Command(Deno.execPath(), { args: ["run", "-A", "--no-check", "scripts/text.ts", "--fresh", "--as", "+15550005555", "--script", `${dir}/script.txt`], cwd: new URL("../../", import.meta.url), stdout: "piped", stderr: "piped", env: { ANTHROPIC_API_KEY: "" } }).output();
     const text = new TextDecoder().decode(run.stdout);
     assert(text.includes("(dropped 1 attachment meant for +15550005555)"), text);
     assert(text.includes("(dropped 1 attachment meant for +15550004444)"), text);
@@ -22,7 +22,7 @@ Deno.test("WO-004/H6 a router search in the simulator ranks the postings it hold
   const dir = await Deno.makeTempDir();
   try {
     await Deno.writeTextFile(`${dir}/script.txt`, ["/post Data Analyst | Stripe | Chicago, IL", "find me data analyst jobs", "/quit"].join("\n"));
-    const run = await new Deno.Command(Deno.execPath(), { args: ["run", "-A", "--no-check", "scripts/text.ts", "--fresh", "--brain", "router", "--as", "+15550006666", "--script", `${dir}/script.txt`], cwd: new URL("../../", import.meta.url), stdout: "piped", stderr: "piped", env: { OPENAI_API_KEY: "" } }).output();
+    const run = await new Deno.Command(Deno.execPath(), { args: ["run", "-A", "--no-check", "scripts/text.ts", "--fresh", "--brain", "router", "--as", "+15550006666", "--script", `${dir}/script.txt`], cwd: new URL("../../", import.meta.url), stdout: "piped", stderr: "piped", env: { ANTHROPIC_API_KEY: "" } }).output();
     const text = new TextDecoder().decode(run.stdout);
     assert(!text.includes("the current list is empty"), text);
     assert(text.includes("Data Analyst at Stripe"), text);

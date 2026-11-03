@@ -20,23 +20,23 @@ function run(args, env = {}, stubJson) {
 const namesFile = (lines) => { const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'names-')), 'n.txt'); fs.writeFileSync(f, lines.join('\n') + '\n'); return f; };
 
 test('missing launch secrets are listed by name with what they unlock; exit 1', () => {
-  const r = run(['--names-file', namesFile(['OPENAI_API_KEY', 'TRAINEE_FILE_LINK_SECRET'])]);
+  const r = run(['--names-file', namesFile(['ANTHROPIC_API_KEY', 'TRAINEE_FILE_LINK_SECRET'])]);
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /^fn +LOOPMESSAGE_API_KEY +MISSING .*phone-login code/m);
   assert.match(r.out, /^fn +OPS_MONITOR_TOKEN +MISSING /m);
   assert.match(r.out, /^fn +OWNER_TELEGRAM_CHAT_ID +MISSING /m);
   assert.match(r.out, /^vercel +TRAINEE_FILE_UPSTREAM +UNKNOWN /m);
-  assert.doesNotMatch(r.out, /^fn +OPENAI_API_KEY /m, 'a secret that is set is not listed');
+  assert.doesNotMatch(r.out, /^fn +ANTHROPIC_API_KEY /m, 'a secret that is set is not listed');
 });
 
 test('a name file line that carries a value (NAME=value) is ignored, and no value ever reaches the output', () => {
-  const r = run(['--names-file', namesFile([`OPENAI_API_KEY=${CANARY}`, CANARY, 'LOOPMESSAGE_API_KEY'])]);
+  const r = run(['--names-file', namesFile([`ANTHROPIC_API_KEY=${CANARY}`, CANARY, 'LOOPMESSAGE_API_KEY'])]);
   assert.ok(!r.out.includes(CANARY));
-  assert.match(r.out, /OPENAI_API_KEY +MISSING/, 'a NAME=value line is not trusted as a name');
+  assert.match(r.out, /ANTHROPIC_API_KEY +MISSING/, 'a NAME=value line is not trusted as a name');
 });
 
 test('the supabase CLI output is reduced to names: values and digests are dropped', () => {
-  const json = JSON.stringify([{ name: 'OPENAI_API_KEY', value: DIGEST + CANARY }, { name: 'LOOPMESSAGE_API_KEY', value: DIGEST }]);
+  const json = JSON.stringify([{ name: 'ANTHROPIC_API_KEY', value: DIGEST + CANARY }, { name: 'LOOPMESSAGE_API_KEY', value: DIGEST }]);
   const r = run([], { SUPABASE_PROJECT_REF: 'abcdefghijklmnopqrst' }, json);
   assert.ok(!r.out.includes(DIGEST) && !r.out.includes(CANARY));
   assert.doesNotMatch(r.out, /^fn +LOOPMESSAGE_API_KEY /m);

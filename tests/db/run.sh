@@ -569,6 +569,12 @@ for m in 20261028070000_global_daily_model_budget.sql; do
   "${QUIET[@]}" -f "$ROOT/supabase/migrations/$m"
   "${QUIET[@]}" -f "$ROOT/supabase/migrations/$m"
 done
+# 20261102160000: the total budget (target $70, hard $100) replaces the 4-argument reserve with a 6-argument one (drop + create). Re-applying
+# 20261028070000 just above re-created the 4-argument form, so this follows it, twice (idempotent), before the per-day test calls reserve.
+for m in 20261102160000_model_budget_total_cap.sql; do
+  "${QUIET[@]}" -f "$ROOT/supabase/migrations/$m"
+  "${QUIET[@]}" -f "$ROOT/supabase/migrations/$m"
+done
 echo "== global_daily_model_budget.test.sql (reserve inside the limit, refuse over it, one alert, missing usage keeps spend, service role only)"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/global_daily_model_budget.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 echo "== claim guards on the latest schema (scripts/launch/verify-claim-guards.sql)"

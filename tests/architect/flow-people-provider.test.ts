@@ -1,5 +1,5 @@
 // PEOPLE DISCOVERY (D-MN-3 as REPLACED 2026-10-27 21:32: no paid provider) on real Postgres 16 (the flow harness: every
-// migration in production order), through the service role's RPCs exactly as the edge functions call them. OpenAI's
+// migration in production order), through the service role's RPCs exactly as the edge functions call them. the model's
 // web_search tool, the public pages (read by N1's real page reader) and DNS-over-HTTPS are faked at the HTTP boundary;
 // any other host fails the test, LinkedIn is never requested, nothing real is called and no model is paid for. Every step
 // asserts database state: career_people rows (source, source_url, address and its label, evidence, MX, sendable, same_as),
@@ -7,7 +7,7 @@
 import nodeAssert from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import {
-  findTargets, makeProvider, parseTargetAsk, providerConfig, type ProviderConfig, queryKey, runLookups, supabaseProviderStore, type TargetAsk,
+  findTargets, makeProvider, parseTargetAsk, providerConfig, type ProviderConfig, queryKey, runLookups, type SearchFn, supabaseProviderStore, type TargetAsk,
 } from "../../supabase/functions/_shared/career_people_provider.ts";
 import { peopleTurn, supabasePeopleStore, TARGETS_INTENT } from "../../supabase/functions/_shared/career_people.ts";
 import { memoryOutreachStore } from "../../supabase/functions/_shared/career_outreach.ts";
@@ -38,14 +38,6 @@ function net(n: Net): typeof fetch {
     const u = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
     if (/linkedin|indeed|joinhandshake/i.test(u.hostname)) throw new Error(`never fetched: ${u}`);
     n.calls.push(`${u.hostname}${u.pathname}`);
-    if (u.hostname === "api.openai.com") {
-      if (n.mode === "rate") return new Response(JSON.stringify({ error: { code: "rate_limit_exceeded" } }), { status: 429, headers: { "retry-after": "120" } });
-      if (n.mode === "quota") return new Response(JSON.stringify({ error: { code: "insufficient_quota" } }), { status: 429 });
-      const q = String(JSON.parse(String(init?.body)).input);
-      const urls = /"Stripe"/i.test(q) ? ["https://stripe.com/team", "https://devconf2026.org/speakers", "https://www.linkedin.com/in/ada"] : /"Ramp"/i.test(q) ? ["https://ramp.com/about"] : [];
-      return Response.json({ usage: { input_tokens: 100, output_tokens: 10 }, output: [{ type: "web_search_call", action: { type: "search", sources: urls.map((url) => ({ type: "url", url })) } },
-        { type: "message", content: [{ type: "output_text", text: "Jane Roe (jane@stripe.com) runs engineering.", annotations: [] }] }] });
-    }
     if (u.hostname === "cloudflare-dns.com") return Response.json({ Status: 0, Answer: [{ type: 15, data: `10 mx.${u.searchParams.get("name")}.` }] });
     if (u.pathname === "/robots.txt") return new Response("User-agent: *\nAllow: /\n");
     const page = PAGES[u.toString()];
@@ -53,11 +45,22 @@ function net(n: Net): typeof fetch {
     throw new Error(`no real call allowed: ${u}`);
   }) as typeof fetch;
 }
-const searches = (n: Net) => n.calls.filter((c) => c.startsWith("api.openai.com")).length;
+const searches = (n: Net) => n.calls.filter((c) => c.startsWith("search.fixture")).length;
+// The web search is dark in production (no Claude web search yet), so the pipeline is driven with an injected search that
+// answers the way a working one would: URLs only, with the modes the provider must survive (rate limit, quota).
+function searchFor(n: Net): SearchFn {
+  return async (query) => {
+    n.calls.push("search.fixture/v1");
+    if (n.mode === "rate") return { status: "rate_limited", retry_after_s: 120, detail: "search: HTTP 429" };
+    if (n.mode === "quota") return { status: "out_of_credits", detail: "search: HTTP 429 (quota)" };
+    const urls = /"Stripe"/i.test(query) ? ["https://stripe.com/team", "https://devconf2026.org/speakers", "https://www.linkedin.com/in/ada"] : /"Ramp"/i.test(query) ? ["https://ramp.com/about"] : [];
+    return { status: "ok", urls: urls.map((url) => ({ url, title: "" })), cost_usd: 0.001 };
+  };
+}
 
 Deno.test({ name: "people discovery on real Postgres: NOT_WIRED, discover, published/known/inferred, dedupe, shared formats, bounce/reply, shared cache, refusal, no limit, exactly once, fairness, forget, erase", sanitizeResources: false, sanitizeOps: false, async fn(t) {
   // Hundreds of fake searches run here (120 companies x the recipe); the day's model budget is not what this measures
-  // (tests/architect/web-search-budget.test.ts is), so the process-local budget is unlimited for this test and reset after.
+  // (deleted with the OpenAI search path), so the process-local budget is unlimited for this test and reset after.
   resetLocalBudgetGate(memoryBudgetGate(Number.MAX_SAFE_INTEGER));
   if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
   const pg: Pg = await startPg();
@@ -69,8 +72,9 @@ Deno.test({ name: "people discovery on real Postgres: NOT_WIRED, discover, publi
     const store = supabaseProviderStore(pg.asService());
     const q = async (s: string) => (await pg.sql(s)).trim();
     const n: Net = { calls: [], mode: "ok" };
-    const on = (): ProviderConfig => providerConfig((k) => ({ CAREER_PEOPLE_SEARCH: "on", OPENAI_API_KEY: "sk-test-not-real" } as Record<string, string>)[k]);
-    const deps = (cfg: ProviderConfig) => ({ store, config: cfg, provider: makeProvider(cfg, net(n), { resolve: PUBLIC_IP }), now: Date.now });
+    // Switched on and keyed; the search itself is injected (it is dark in production), so the provider is forced to "web" here.
+    const on = (): ProviderConfig => ({ ...providerConfig((k) => ({ CAREER_PEOPLE_SEARCH: "on", ANTHROPIC_API_KEY: "sk-test-not-real" } as Record<string, string>)[k]), provider: "web", apiKey: "sk-test-not-real" });
+    const deps = (cfg: ProviderConfig) => ({ store, config: cfg, provider: makeProvider(cfg, net(n), { resolve: PUBLIC_IP, search: searchFor(n) }), now: Date.now });
     const EM = (co: string) => parseTargetAsk(`engineering managers at ${co}`) as TargetAsk;
     const rows = async (u: string) => JSON.parse(await q(`select coalesce(jsonb_agg(jsonb_build_object('name', name, 'email', email, 'status', email_status, 'ev', email_evidence,
       'mx', mx, 'sendable', sendable, 'url', source_url, 'same_as', (select o.source from career_people o where o.id = p.same_as)) order by name), '[]') from career_people p where user_id = '${u}' and source = 'provider'`));
@@ -85,9 +89,9 @@ Deno.test({ name: "people discovery on real Postgres: NOT_WIRED, discover, publi
     assert(!imp.error, JSON.stringify(imp.error));
 
     await t.step("not switched on: NOT_WIRED in plain words, no call, nothing queued, own contacts still answered", async () => {
-      const r = await findTargets(A, EM("Stripe"), deps(providerConfig((k) => ({ OPENAI_API_KEY: "sk-test-not-real" } as Record<string, string>)[k])));
+      const r = await findTargets(A, EM("Stripe"), deps(providerConfig((k) => ({ ANTHROPIC_API_KEY: "sk-test-not-real" } as Record<string, string>)[k])));
       eq(r.status, "NOT_WIRED");
-      assert(/isn't switched on yet/.test(r.reply) && !/NOT_WIRED|OPENAI/.test(r.reply), r.reply);
+      assert(/isn't switched on yet/.test(r.reply) && !/NOT_WIRED|ANTHROPIC/.test(r.reply), r.reply);
       eq(r.candidates.map((c) => c.name).sort(), ["Ada Lovelace", "Al Turing", "Grace Hopper"]);
       eq(n.calls.length, 0);
       eq(await q(`select count(*) from career_provider_jobs`), "0");
@@ -179,7 +183,7 @@ Deno.test({ name: "people discovery on real Postgres: NOT_WIRED, discover, publi
 
     await t.step("exactly once: 8 workers race over 80 queued searches; each runs once, one ledger row each", async () => {
       for (let i = 0; i < 80; i++) { const { key, norm } = await queryKey({ company: `Race${i}` }); await store.request([A, B, C][i % 3], "web", key, norm, 86400); }
-      const p = makeProvider(on(), net(n), { resolve: PUBLIC_IP });
+      const p = makeProvider(on(), net(n), { resolve: PUBLIC_IP, search: searchFor(n) });
       await Promise.all(Array.from({ length: 8 }, async () => { for (;;) { const r = await runLookups({ store, provider: p, batch: 7, leaseSeconds: 60 }); if (!r.claimed) break; } }));
       eq(await q(`select count(*) from career_provider_jobs where query_key like 'race%' and state = 'done'`), "80");
       eq(await q(`select count(*) from career_provider_lookups where query_key like 'race%'`), "80");
@@ -218,7 +222,7 @@ Deno.test({ name: "people discovery on real Postgres: NOT_WIRED, discover, publi
         people: { store: supabasePeopleStore(pg.asService()), gmail: null, fetch: net(n), targets: deps(cfg) } });
       const k = n.calls.length;
       // D has nothing yet; discovery off: said plainly, nothing searched, nothing queued, nothing invented
-      const off = await turn(D, "find me engineering managers at Stripe", providerConfig((x) => ({ OPENAI_API_KEY: "sk-test-not-real" } as Record<string, string>)[x]));
+      const off = await turn(D, "find me engineering managers at Stripe", providerConfig((x) => ({ ANTHROPIC_API_KEY: "sk-test-not-real" } as Record<string, string>)[x]));
       eq([off!.intent, off!.status], [TARGETS_INTENT, "NOT_WIRED"]);
       assert(/^No one matching at Stripe yet\. Searching the web for new people isn't switched on yet/.test(off!.reply), off!.reply);
       eq(await q(`select count(*) from career_people where user_id = '${D}'`), "0");

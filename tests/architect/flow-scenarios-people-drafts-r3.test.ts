@@ -17,13 +17,14 @@
 //   H  addresses   a discovered person whose stored address is a guessed personal mailbox: never drafted to.
 //   I  batch       150 people at one firm: 150 drafts, numbered once each, no cap; draft 120 approved by its number.
 //   J  allowance   the day's AI allowance runs out mid-batch: the drafts written are kept, the rest said as the limit.
-// The writer is a scripted stand-in at the OpenAI URL; any other host is refused and counted (asserted empty). Nothing is
+// The writer is a scripted stand-in at the Anthropic URL; any other host is refused and counted (asserted empty). Nothing is
 // approved, queued or sent.
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, SUPABASE_URL, supabaseParity, type Turn } from "../flow/handler.ts";
 import { generate } from "./scenarios/people-drafts-r3.ts";
 import { memoryBudgetGate, resetLocalBudgetGate } from "../../supabase/functions/_shared/model_budget.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -41,7 +42,7 @@ const sq = (s: string) => s.replace(/'/g, "''");
 // or only on the first try). Every prompt is kept, to check what reached it.
 const ADV = new Map<string, { add: (row: Record<string, string>) => string; when: "always" | "first" }>();
 const prompts: string[] = [];
-function fakeOpenAI(body: any): Response {
+function fakeModel(body: any): Response {
   const user = String((body.messages ?? []).find((m: any) => m.role === "user")?.content ?? "");
   prompts.push(user);
   const f = (k: string) => { const v = new RegExp(`^- ${k}: (.*)$`, "m").exec(user)?.[1]?.trim() ?? ""; return v === "(not given)" ? "" : v; };
@@ -61,7 +62,7 @@ Deno.test({ name: "people drafts r3 end to end: names, stale titles, injected ro
   const pg: Pg = await startPg();
   // Setup: a person's daily AI allowance (career_spend_cap.ts) is raised so one turn can draft 150 emails; step J checks the
   // allowance itself, with the day nearly used.
-  const env: Record<string, string> = { CAREER_NETWORKING_DRAFT: "on", OPENAI_API_KEY: "test-placeholder-not-a-key", CAREER_MODEL: "gpt-5-mini", CAREER_MODEL_DAILY_CALLS: "1000", CAREER_MODEL_DAILY_USD: "5" };
+  const env: Record<string, string> = { CAREER_NETWORKING_DRAFT: "on", ANTHROPIC_API_KEY: "test-placeholder-not-a-key", CAREER_MODEL: "claude-haiku-5-5", CAREER_MODEL_DAILY_CALLS: "1000", CAREER_MODEL_DAILY_USD: "5" };
   const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "CAREER_SEND_RAIL", "CAREER_OUTREACH_SEND", "CAREER_PEOPLE_SEARCH"];
   const saved = Object.fromEntries([...Object.keys(env), ...unset].map((k) => [k, Deno.env.get(k)]));
   for (const k of unset) Deno.env.delete(k);
@@ -83,7 +84,7 @@ Deno.test({ name: "people drafts r3 end to end: names, stale titles, injected ro
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
       const u = new URL(req.url);
-      if (u.host === "api.openai.com") return fakeOpenAI(await req.json().catch(() => ({})));
+      if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
       if (u.origin !== new URL(SUPABASE_URL).origin) { outbound.push(`${req.method} ${u.origin}${u.pathname}`); throw new TypeError(`network refused: ${u.host}`); }
       return await viaDouble(req);
     }) as typeof fetch;
@@ -343,7 +344,7 @@ Deno.test({ name: "people drafts r3 end to end: names, stale titles, injected ro
       const p = await person();
       await p.importList(Array.from({ length: 5 }, (_, j) => ({ name: `Quota ${String.fromCharCode(65 + j)} Person`, firm: "Sony", title: "Data Analyst", email: `quota.${j}@sony.example` })));
       // setup: 998 of the day's 1,000 calls already used (a recorded turn earlier today)
-      await pg.sql(`insert into public.agent_turn_costs (user_id, meter_state, provider, models, calls, usd_micros) values ('${p.id}', 'metered', 'openai', '{gpt-5-mini}', 998, 0)`);
+      await pg.sql(`insert into public.agent_turn_costs (user_id, meter_state, provider, models, calls, usd_micros) values ('${p.id}', 'metered', 'openai', '{claude-haiku-5-5}', 998, 0)`);
       const r = await p.say("reach out to everyone at Sony");
       const ds = await p.drafts();
       eq(ds.length, 2, `two drafts fit in what was left of the day: ${r.reply.slice(0, 300)}`);
@@ -352,7 +353,7 @@ Deno.test({ name: "people drafts r3 end to end: names, stale titles, injected ro
     });
 
     await t.step("nothing left the machine, nothing was approved or sent; every problem found is listed", async () => {
-      eq(outbound, [], "no request but the Supabase double and the scripted OpenAI URL");
+      eq(outbound, [], "no request but the Supabase double and the scripted Anthropic URL");
       eq(await q(`select count(*) from public.career_outreach_drafts where status <> 'shown' and not (user_id = any('{${[...approvedHere].join(",")}}'::uuid[]) and status = 'approved')`), "0", "nothing approved but the one asked for, nothing sent or dropped behind the person's back");
       if (fails.length) throw new Error(`${fails.length} scenario failures:\n${[...new Set(fails)].slice(0, 60).join("\n")}`);
       const unexpected = errors.filter((e) => !/not connected|NOT_WIRED|no Gmail|gmail/i.test(e));

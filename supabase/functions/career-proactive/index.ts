@@ -16,7 +16,7 @@ import { peopleSink, supabasePeopleDeps } from "../_shared/career_people.ts";
 import { gmailSender, gmailThreadReader } from "../_shared/career_outreach_gmail.ts";
 import { runOutreachFollowupsGated } from "../_shared/career_outreach_track.ts";
 import { runRepliesLane } from "../_shared/career_outreach_replies.ts";
-import { callModel, modelConfig, openaiCareerModel } from "../_shared/model_gateway.ts";
+import { readerCall } from "../_shared/career_reader_model.ts";
 import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
 
 // The career Google grant (vault oauth_google_career_<uid>), read the same way by mail tracking and outreach.
@@ -87,7 +87,7 @@ serve((req) => {
       store: () => supabaseMailStore(admin),
       confirm: () => supabaseConfirmStore(admin),
       read: (userId, since, now) => readMailSince({ fetch, token: careerToken(grant(admin)) }, userId, since, now),
-      // WO-040: the model's second look at ambiguous mail (OpenAI, CAREER_MODEL), only once the owner turns it on.
+      // WO-040: the model's second look at ambiguous mail (Claude, through the gateway), only once the owner turns it on.
       model: Deno.env.get("CAREER_MAIL_MODEL") === "on" ? () => mailModelWiring(Deno.env, admin) : undefined,
     } : undefined,
     // Outreach (WO-033) sends from people's own Gmail, so it runs only once the owner turns it on (CAREER_OUTREACH_SEND=on):
@@ -115,11 +115,11 @@ serve((req) => {
     // MASS NETWORKING M5: replies on sent outreach (Gmail; Outlook once M4's ports are passed), follow-ups after the
     // person's own interval, and calls from their calendar, every send and event only from an approved exact payload. On
     // only when the owner turns it on (CAREER_OUTREACH_REPLIES=on); the model reads replies and drafts only with
-    // CAREER_OUTREACH_REPLIES_MODEL=on (OpenAI through the gateway; no other spend).
+    // CAREER_OUTREACH_REPLIES_MODEL=on (Claude through the gateway; no other spend).
     replies: Deno.env.get("CAREER_OUTREACH_REPLIES") === "on" ? async (now) => {
       const deps = grant(admin);
       const model = Deno.env.get("CAREER_OUTREACH_REPLIES_MODEL") === "on"
-        ? (payload: any) => callModel({ ...modelConfig(Deno.env, "chat"), model: openaiCareerModel(Deno.env) }, payload, { role: "chat" }) : null;
+        ? readerCall(Deno.env) : null;
       return await runRepliesLane({ admin, fetch, token: (u, scope) => careerTokenFor(deps, scope)(u), outbox: supabaseAlertStore(admin), model, now });
     } : undefined,
     // Introduction reminders (D-033) queue the reminder a person asked for to the outbox at its date; the run record's

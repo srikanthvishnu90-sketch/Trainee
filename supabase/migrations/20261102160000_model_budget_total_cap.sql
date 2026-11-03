@@ -12,8 +12,8 @@
 --
 -- model_budget_reserve gains two optional arguments. With p_hard_limit_micros NULL it is the 2026-10-28 per-day behavior, untouched
 -- (windows, one row per approved day). With it set, the budget is the SUM over every model_budget_days row (the old days stay as
--- history, so nothing already spent is forgotten); there is no window and no per-day limit: the day's row is created if missing with
--- limit = hard, only to hold that day's spent and reserved micros. Both limits come from the caller (the environment variables above).
+-- history, so nothing already spent is forgotten); there is no window; while the owner's per-day window is open a day row keeps its approved limit (the daily gate still holds beside the total);
+-- otherwise a day row only holds that day's spent and reserved micros (limit lifted to the hard max). Both limits come from the caller (the environment variables above).
 -- Service role only, as every function in this family. Applied twice is a no-op.
 create table if not exists public.founder_alerts (
   id uuid primary key default gen_random_uuid(),
@@ -33,7 +33,7 @@ drop function if exists public.model_budget_reserve(bigint, text, text, timestam
 create or replace function public.model_budget_reserve(p_micros bigint, p_model text default null, p_role text default null, p_now timestamptz default now(),
   p_target_limit_micros bigint default null, p_hard_limit_micros bigint default null)
 returns jsonb language plpgsql set search_path = public, pg_temp as $$
-declare d date; ws timestamptz; we timestamptz; rec record; rid uuid; paused text; t bigint; after_t bigint;
+declare d date; ws timestamptz; we timestamptz; rec record; rid uuid; paused text; t bigint; after_t bigint; windowed boolean;
 begin
   if p_micros is null or p_micros <= 0 then raise exception 'a reservation must be a positive number of micro-dollars'; end if;
   select lower(value) into paused from public.model_budget_settings where key = 'paused';
@@ -51,9 +51,22 @@ begin
     perform pg_advisory_xact_lock(hashtext('model_budget_total'));
     perform public.model_budget_expire(p_now);
     d := public.model_budget_day(p_now);
-    insert into public.model_budget_days (day, limit_micros) values (d, p_hard_limit_micros)
-      on conflict (day) do update set limit_micros = greatest(public.model_budget_days.limit_micros, excluded.limit_micros);
+    -- While the owner's per-day budget window is open (model_budget_settings window_start <= now < window_end), a day row keeps its own
+    -- approved limit and that daily gate still holds beside the total (production serving keeps its own daily gate). With no open window
+    -- a day row only holds that day's spent and reserved micros: its limit is lifted to the hard max, which never binds before the total.
+    ws := public.model_budget_instant('window_start'); we := public.model_budget_instant('window_end');
+    windowed := ws is not null and we is not null and we > ws and p_now >= ws and p_now < we;
+    if windowed then
+      insert into public.model_budget_days (day, limit_micros) values (d, p_hard_limit_micros) on conflict (day) do nothing;
+    else
+      insert into public.model_budget_days (day, limit_micros) values (d, p_hard_limit_micros)
+        on conflict (day) do update set limit_micros = greatest(public.model_budget_days.limit_micros, excluded.limit_micros);
+    end if;
     select coalesce(sum(spent_micros + reserved_micros), 0) into t from public.model_budget_days;
+    select spent_micros, reserved_micros, limit_micros into rec from public.model_budget_days where day = d;
+    if windowed and rec.limit_micros < p_hard_limit_micros and rec.spent_micros + rec.reserved_micros + p_micros > rec.limit_micros then
+      return jsonb_build_object('ok', false, 'state', 'limit', 'day', d, 'spent', rec.spent_micros, 'reserved', rec.reserved_micros, 'limit', rec.limit_micros, 'total', t);
+    end if;
     if t + p_micros > p_hard_limit_micros then
       insert into public.founder_alerts (kind, user_id, detail)
         values ('model_budget_hard_stop', null, jsonb_build_object('total_micros', t, 'asked_micros', p_micros, 'hard_limit_micros', p_hard_limit_micros))

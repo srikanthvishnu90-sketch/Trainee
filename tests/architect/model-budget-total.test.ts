@@ -209,3 +209,24 @@ Deno.test("owner 2026-11-02 22:02: the default gate is ONE $70 total: warns at $
   const none = await g.reserve(1, { model: "m", role: "r" }); assert(!none.ok && none.reason === "limit", "nothing at $70");
   await assertNode.rejects(() => Budget.assertRunMayStart(g), "an eval run does not start at $70");
 });
+
+// Regression (CI of #447, flow-scenarios-telegram "budget 75"): production keeps its own daily gate. While the owner's per-day window is
+// open, a day row's approved limit holds beside the total (total mode used to lift every day row to the hard max, so a used-up day
+// still reached the model); with no window the row's limit is lifted as before.
+Deno.test({ name: "database: an open per-day window keeps the day's approved limit beside the total", sanitizeResources: false, sanitizeOps: false,
+  fn: () => withPg(async (pg) => {
+    const svc = pg.asService();
+    const reserve = (micros: number) => svc.rpc("model_budget_reserve", { p_micros: micros, p_model: "claude-haiku-5-5", p_role: "chat", p_target_limit_micros: 70 * M, p_hard_limit_micros: 70 * M });
+    await reset(pg);
+    await pg.sql(`insert into public.model_budget_settings(key,value) values ('window_start', to_char((now() - interval '1 day') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')),
+      ('window_end', to_char((now() + interval '1 day') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')) on conflict (key) do update set value = excluded.value;
+      insert into public.model_budget_days (day, limit_micros) values (public.model_budget_day(now()), 2000000) on conflict (day) do update set limit_micros = 2000000`);
+    eq((await reserve(M)).data.ok, true, "inside the day's $2");
+    eq((await reserve(M)).data.ok, true, "exactly the day's $2");
+    const over = (await reserve(1)).data;
+    eq([over.ok, over.state], [false, "limit"], "the day's approved limit holds although the $70 total has room");
+    eq(await total(pg), 2 * M, "the refused call reserved nothing");
+    await pg.sql(`delete from public.model_budget_settings where key in ('window_start', 'window_end')`);
+    eq((await reserve(M)).data.ok, true, "no open window: the day's limit is lifted to the total");
+    await reset(pg);
+  }) });

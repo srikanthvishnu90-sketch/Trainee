@@ -72,6 +72,7 @@ Deno.test({ name: "people finding and intros at the real handler: import, who, a
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   // D-036: CAREER_INTRO_REMINDERS is a release flag (on when unset); this file's off steps run it rolled back ("off").
   const env = { CAREER_NETWORKING_DRAFT: "on", ANTHROPIC_API_KEY: "sk-test-not-real", CAREER_MODEL: "claude-haiku-5-5", CAREER_INTRO_REMINDERS: "off" };
+  const savedEnv = Object.fromEntries(Object.keys(env).map((k) => [k, Deno.env.get(k)]));
   for (const [k, v] of Object.entries(env)) Deno.env.set(k, v);
   const outside: string[] = [];
   let restoreDns = () => {};
@@ -411,6 +412,7 @@ Deno.test({ name: "people finding and intros at the real handler: import, who, a
     eq(await q(`select count(*) from public.career_outreach_drafts`), 0, "no outreach drafts: intros never ride the sender");
   } finally {
     handler?.restore();
+    for (const [k, v] of Object.entries(savedEnv)) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v);
     restoreDns();
     await pg.stop();
   }

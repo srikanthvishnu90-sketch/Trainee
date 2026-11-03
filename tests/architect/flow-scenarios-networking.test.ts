@@ -343,6 +343,7 @@ Deno.test({ name: "networking scenarios end to end: asks, hostile imports, the a
       // discovered people at Stripe for them (from the shared cache)
       SEEDED.set("Stripe", true);
       await findTargets(P.seed, targetAskOf("find engineering managers at Stripe")!, { store, config: ON(), provider: seedProvider(), now: Date.now });
+      await findTargets(P.draft, targetAskOf("find engineering managers at Stripe")!, { store, config: ON(), provider: seedProvider(), now: Date.now }); // delivered from the shared cache (the live search is dark, so the handler cannot fetch it)
       const found = await say(chat, "find engineering managers at Stripe");
       eq(found.intent, "career_people_targets", found.reply);
       const drafts = async () => await json(`select coalesce(jsonb_agg(jsonb_build_object('n', n, 'to', recipient_email, 'status', status, 'hash', hash, 'approved_hash', approved_hash, 'body', body, 'subject', subject, 'recipient', recipient) order by created_at, n), '[]') from career_outreach_drafts where user_id = '${P.draft}'`);

@@ -136,6 +136,8 @@ Deno.test({
         insert into auth.users (id, email) values ('${PERSON}', '${PERSON}@example.test');
         insert into public.profiles (id) values ('${PERSON}');
         insert into public.career_watch_kv (user_id, key, value) values ('${PERSON}', 'career:account', '{"epoch":0,"version":0,"paused":false}');`);
+      // No model is configured in this flow (a key left set by an earlier test file in the same process would let a chat turn reach one).
+      for (const k of ["ANTHROPIC_API_KEY", "CAREER_BRAIN", "CAREER_MODEL", "CAREER_REPLY_MODEL"]) { if (!(k in saved)) saved[k] = Deno.env.get(k); Deno.env.delete(k); }
       setEnv("CAREER_PREPARE_AHEAD_URL", KICK_URL);
       setEnv("CAREER_PREPARE_AHEAD_TOKEN", KICK_TOKEN);
       agentChat = await careerHandler(pg, { "tok-person": PERSON });

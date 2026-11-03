@@ -19,7 +19,7 @@
 // lane); outcomes are recorded 20 at a time; a board larger than the posting budget is read in parts over several runs.
 import { equalSecret } from "../_shared/message_service.ts";
 import { ingestBoards, type Board, type BoardOutcome, type FetchFeed, type IngestRunRow, type IngestStats, type PostingsDb } from "../_shared/career_ingest.ts";
-import { boardKey, type BoardState, type BoardStateDb, bucketOf, capacityPer, claimable, goneReadsOf, laneBuckets, rereadGapMs } from "../_shared/career_shards.ts";
+import { boardKey, type BoardState, type BoardStateDb, bucketOf, capacityPer, claimable, emptyReadsOf, goneReadsOf, laneBuckets, passMarkedOf, rereadGapMs } from "../_shared/career_shards.ts";
 import { runReport } from "../_shared/career_ingest_lanes.mjs";
 
 export interface IngestDeps {
@@ -121,7 +121,9 @@ export async function handleIngest(req: Request, d: IngestDeps): Promise<Respons
           // Round 2: a read that answered 404 / 410 says how many in a row ("[gone x2]"; the count the next read goes on from)
           // and, once the board is taken as gone, how many open postings that closed.
           last_status: r.status === "failed" ? `failed: ${String(r.error).slice(0, 120)}${r.gone_reads ? ` [gone x${r.gone_reads}]` : ""}${r.gone_closed ? `; ${r.gone_closed} open postings closed` : ""}`
-            : r.status === "partial" && r.next_offset ? `partial: next part from ${r.next_offset}` : r.status,
+            : r.status === "partial" && r.next_offset ? `partial: next part from ${r.next_offset}${r.pass_marked ? " [seen marked]" : ""}`
+            // Round 3: a read that listed nothing while postings were open says how many in a row (the count goes on from it).
+            : r.status === "ok" && r.empty_reads ? `ok [empty x${r.empty_reads}]` : r.status,
           etag: r.status === "not_modified" ? s.etag : ok ? r.etag ?? null : s.etag, last_modified: r.status === "not_modified" ? s.last_modified : ok ? r.last_modified ?? null : s.last_modified,
           fail_count: ok ? 0 : s.fail_count + 1,
           // Feature 6: the body a full read answered (a partial read's body proves nothing: not kept).
@@ -136,7 +138,7 @@ export async function handleIngest(req: Request, d: IngestDeps): Promise<Respons
       // Feature 6: the run's CPU bound, as postings parsed (?posting_budget= from the schedule, or INGEST_POSTING_BUDGET).
       const postingBudget = int(q.get("posting_budget"), int(d.env.get("INGEST_POSTING_BUDGET"), 0, 0, 1000000), 0, 1000000) || undefined;
       stats = await ingestBoards({ ...common, useCursor: false, maxBoards: due.length, postingBudget,
-        boards: due.map((s) => ({ ...byKey.get(boardKey(s))!, etag: s.etag, last_modified: s.last_modified, body_sha: s.body_sha ?? null, offset: s.pass_offset ?? 0, pass_started_at: s.pass_started_at ?? null, gone_reads: goneReadsOf(s) })),
+        boards: due.map((s) => ({ ...byKey.get(boardKey(s))!, etag: s.etag, last_modified: s.last_modified, body_sha: s.body_sha ?? null, offset: s.pass_offset ?? 0, pass_started_at: s.pass_started_at ?? null, gone_reads: goneReadsOf(s), empty_reads: emptyReadsOf(s), pass_marked: passMarkedOf(s) })),
         onBoard: async (b, r) => { const k = boardKey(b); done.add(k); pending.push(rowOf(was.get(k)!, r)); if (pending.length >= 20) await flush(); } });
       if (leftClosed) { stats.closed += leftClosed; stats.boards_left_directory = left.length; }
       await flush();

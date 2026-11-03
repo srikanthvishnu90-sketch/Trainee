@@ -75,3 +75,7 @@ verify_jwt = false
 # Owner monitoring: the scheduler carries no JWT; the OPS_MONITOR_TOKEN authenticates in the handler.
 [functions.ops-monitor]
 verify_jwt = false
+
+# ACK FAST (CHAT_QUEUE): pg_cron and the chat webhooks carry no JWT; TRAINEE_TURN_SECRET authenticates in the handler.
+[functions.trainee-turn-worker]
+verify_jwt = false

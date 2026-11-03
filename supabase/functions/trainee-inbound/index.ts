@@ -6,6 +6,7 @@ import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { loopSend } from "../_shared/loopmessage.ts";
 import { chatThroughAgent, deliverer } from "../_shared/channel_runtime.ts";
+import { supabaseTurnQueue, workerKick } from "../_shared/inbound_turn_queue.ts";
 import { handleInbound } from "./handler.ts";
 import { supabaseInboundStore } from "./store.ts";
 
@@ -19,5 +20,6 @@ serve((req) => {
     chat: chatThroughAgent(url, key),
     // The answer, or a link question to another channel, through whichever adapters are wired.
     deliverReply: (a) => deliverNow({ userId: a.userId, key: a.key, now: a.now }),
+    queue: supabaseTurnQueue(admin, { kick: workerKick(Deno.env, url) }), // used only while CHAT_QUEUE=on
   });
 });

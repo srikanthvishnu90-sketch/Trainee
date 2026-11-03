@@ -29,6 +29,9 @@ import { fakeBot, plainOf } from "./scenarios/telegram-bot-api.ts";
 import { handleTelegram } from "../../supabase/functions/trainee-telegram/handler.ts";
 import { chatThroughAgent, deliverer } from "../../supabase/functions/_shared/channel_runtime.ts";
 import { supabaseInboundStore } from "../../supabase/functions/trainee-inbound/store.ts";
+import { supabaseTurnQueue, supabaseWorkerStore } from "../../supabase/functions/_shared/inbound_turn_queue.ts";
+import { telegramCoreDeps } from "../../supabase/functions/trainee-telegram/handler.ts";
+import { handleTurnWorker } from "../../supabase/functions/trainee-turn-worker/handler.ts";
 import { RELEASE_FLAGS, RELEASE_NEVER_ON, RELEASE_PENDING, releaseFlagOn, releaseValue } from "../../supabase/functions/agent-chat/release_config.ts";
 
 // Steps the code cannot pass yet (shrink-only; each names what fails today).
@@ -60,6 +63,10 @@ const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 const RESUME = await Deno.readTextFile(`${ROOT}/packages/career-data/fixtures/test-resume.txt`);
 const TOKEN = "123456:TEST-acceptance-token-not-real", SECRET = "TEST_acceptance_webhook_secret_0123456789";
 const CHAT = 7991001;
+// ACK FAST variant (tests/architect/telegram-acceptance-queue.test.ts runs this same file with ACCEPTANCE_CHAT_QUEUE=on): the same journey
+// with CHAT_QUEUE=on, so each webhook only queues the text and answers 200, and the real trainee-turn-worker handler then runs the turn
+// from the real queue table. Unset (the default, and CI's acceptance job): the flag is off and nothing here runs.
+const QUEUE_ON = Deno.env.get("ACCEPTANCE_CHAT_QUEUE") === "on";
 const q = (s: string) => `'${String(s).replace(/'/g, "''")}'`;
 const ACME = { job: "greenhouse:acmetest:5001", company: "Acme TEST", title: "Software Engineering Intern (TEST)", url: "https://boards.greenhouse.io/acmetest/jobs/5001" };
 const GLOBEX = { job: "lever:globextest:5002", company: "Globex TEST", title: "Software Engineer Intern (TEST)", url: "https://jobs.lever.co/globextest/5002" };
@@ -92,7 +99,7 @@ Deno.test({
     for (const g of KNOWN_GAP) ok((STEPS as readonly string[]).includes(g), `KNOWN_GAP names a step that does not exist: ${g}`);
     const pg: Pg = await startPg();
     const keys = ["CAREER_BRAIN", "CAREER_NETWORKING_DRAFT", "OPENAI_API_KEY", "CAREER_MODEL", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_BOT_USERNAME", "TRAINEE_SIGNUP",
-      "TRAINEE_ALLOWED_CONTACTS", "TRAINEE_DELIVER_SECRET", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "LOOPMESSAGE_API_KEY", "WHATSAPP_TOKEN", "TRAINEE_FILE_BASE_URL", "TRAINEE_FILE_LINK_SECRET",
+      "TRAINEE_ALLOWED_CONTACTS", "TRAINEE_DELIVER_SECRET", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "LOOPMESSAGE_API_KEY", "WHATSAPP_TOKEN", "TRAINEE_FILE_BASE_URL", "TRAINEE_FILE_LINK_SECRET", "CHAT_QUEUE", "TRAINEE_TURN_SECRET",
       ...Object.keys(RELEASE_FLAGS), ...RELEASE_NEVER_ON, ...Object.keys(RELEASE_PENDING)];
     const saved = Object.fromEntries(keys.map((k) => [k, Deno.env.get(k)]));
     for (const k of keys) Deno.env.delete(k);
@@ -121,7 +128,7 @@ Deno.test({
       const json = async (s: string) => JSON.parse((await sql(`select coalesce(json_agg(x), '[]') from (${s}) x`)) || "[]");
       for (const [k, v] of Object.entries({ TELEGRAM_BOT_TOKEN: TOKEN, TELEGRAM_WEBHOOK_SECRET: SECRET, TELEGRAM_BOT_USERNAME: "TraineeAcceptanceBot", TRAINEE_SIGNUP: "closed",
         TRAINEE_ALLOWED_CONTACTS: `telegram:${CHAT}`, TRAINEE_DELIVER_SECRET: "TEST-deliver-secret-0123456789-abcdefgh", OPENAI_API_KEY: "sk-test-not-real",
-        CAREER_MODEL: "gpt-5-mini" })) Deno.env.set(k, v);
+        CAREER_MODEL: "gpt-5-mini", ...(QUEUE_ON ? { CHAT_QUEUE: "on", TRAINEE_TURN_SECRET: "TEST-turn-secret-0123456789-abcdefghijkl" } : {}) })) Deno.env.set(k, v);
       // D-036: the release config as served: every release flag on, every never-on switch off (none of them set here).
       for (const [f, v] of Object.entries(RELEASE_FLAGS)) ok(releaseValue(Deno.env, f) === v, `release flag ${f} is served ${v}`);
       for (const f of Object.keys(RELEASE_PENDING)) ok(!releaseFlagOn(Deno.env, f), `${f} is pending, served off`);
@@ -137,13 +144,26 @@ Deno.test({
       const post = async (body: Record<string, unknown>, id = ++upd) => {
         await sql("delete from public.agent_rate_limits");
         const deliverNow = deliverer(admin, Deno.env);
+        const deps = { env: Deno.env, now: Date.now, store: () => supabaseInboundStore(admin), chat: chatThroughAgent(SUPABASE_URL, SERVICE_KEY, { channel: "telegram" }), admin,
+          deliver: (a: { userId: string; key: string; now: number }) => deliverNow({ userId: a.userId, key: a.key, now: a.now }) };
         const res = await handleTelegram(new Request(`${SUPABASE_URL}/functions/v1/trainee-telegram`, { method: "POST", headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": SECRET }, body: JSON.stringify({ update_id: id, ...body }) }),
-          { env: Deno.env, now: Date.now, store: () => supabaseInboundStore(admin), chat: chatThroughAgent(SUPABASE_URL, SERVICE_KEY, { channel: "telegram" }), admin,
-            deliver: (a) => deliverNow({ userId: a.userId, key: a.key, now: a.now }) });
+          { ...deps, ...(QUEUE_ON ? { queue: supabaseTurnQueue(admin) } : {}) });
         const text = await res.text();
         eq(res.status, 200, text.slice(0, 300));
         ok(!text.includes(TOKEN) && !text.includes(SECRET), "no secret in a webhook response");
-        return id;
+        if (QUEUE_ON) {
+          // The webhook only queued it; the worker (the real handler, as the pg_cron run calls it) runs the turn, then nothing is left.
+          ok(/"queued":true/.test(text), `the webhook queued the text and ran no turn: ${text.slice(0, 200)}`);
+          for (let i = 0; i < 40; i++) {
+            const w = await handleTurnWorker(new Request("https://fn.test/trainee-turn-worker", { method: "POST", headers: { "x-trainee-turn-secret": Deno.env.get("TRAINEE_TURN_SECRET")! }, body: "{}" }),
+              { env: Deno.env, store: supabaseWorkerStore(admin), depsFor: (c) => (c === "telegram" ? telegramCoreDeps(deps) : null) });
+            eq(w.status, 200);
+            if (Number(await sql("select count(*) from public.inbound_turn_queue where status in ('queued','claimed')")) === 0) break;
+            ok(i < 39, "the queue drained");
+          }
+          eq(await sql("select count(*) from public.inbound_turn_queue where status = 'failed'"), "0", "no turn failed");
+        }
+                return id;
       };
       const say = async (words: string) => {
         const before = bot.to(CHAT).length;
@@ -403,6 +423,14 @@ Deno.test({
 
       ok(bot.violations.length === 0, `every message valid for Telegram: ${bot.violations.slice(0, 3).join(" | ")}`);
       eq(outbound, [], "nothing left the machine");
+      if (QUEUE_ON) {
+        const q = await json("select status, count(*)::int as n, max(attempts) as attempts from public.inbound_turn_queue group by status");
+        eq(q.map((r: any) => r.status), ["done"], "every queued text ended done");
+        ok(q[0].n >= 20 && q[0].attempts === 1, `every text was run once, first try: ${JSON.stringify(q)}`);
+        eq(await sql("select count(*) from public.inbound_turn_queue where payload <> '{}'::jsonb or contact is not null"), "0", "no text or chat id kept on a finished row");
+        // a message replied twice is a failure: one reply row per update, none for an update twice
+        eq(await sql("select count(*) from (select key from public.career_outbox where kind = 'reply' group by key having count(*) > 1) d"), "0");
+      }
     } finally {
       for (const r of results) console.log(`TELEGRAM_ACCEPTANCE ${r.id} ${r.outcome}${r.why ? `: ${r.why}` : ""}`);
       const gapsNowPassing = results.filter((r) => r.outcome === "KNOWN_GAP NOW PASSES").map((r) => r.id);

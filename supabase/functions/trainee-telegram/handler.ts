@@ -15,6 +15,7 @@ import { type JobDeps, type JobSender, sendJobCards, supabaseAccountStamp, supab
 import { feedUrlsFor } from "../_shared/file_link.ts";
 import { supabaseCardStore } from "../_shared/career_apply_cards.ts";
 import { escapeHtml, LATENCY_BUDGET, textingNativeOn } from "../_shared/channel_voice.ts";
+import { chatQueueOn } from "../_shared/inbound_turn_queue.ts";
 
 export interface ProviderWebhookDeps {
   env: { get(k: string): string | undefined };
@@ -25,6 +26,8 @@ export interface ProviderWebhookDeps {
   adapter?: (env: ProviderWebhookDeps["env"]) => ChannelAdapter; // tests inject one over a fake fetch
   // deno-lint-ignore no-explicit-any
   admin?: any; // FEATURE 16: the service client, for the resume file and the card's buttons
+  // ACK FAST: with CHAT_QUEUE=on (and only then) the webhook queues each text and answers 200; trainee-turn-worker runs the turn.
+  queue?: CoreDeps["queue"];
   timers?: CoreDeps["timers"]; // N12: the clock the typing refresh and the interim run on (tests inject one)
 }
 // The adapter's sends, bound to one chat, as the job cards use them.
@@ -81,9 +84,17 @@ export function webhookDeps(adapter: ChannelAdapter, d: ProviderWebhookDeps): Co
   };
 }
 
+const adapterFor = (d: ProviderWebhookDeps) => d.adapter ? d.adapter(d.env) : telegramAdapter({ token: d.env.get("TELEGRAM_BOT_TOKEN") || "", webhookSecret: d.env.get("TELEGRAM_WEBHOOK_SECRET") || "", native: textingNativeOn(d.env) });
+// The turn's dependencies for one Telegram text, as the webhook runs it inline and as trainee-turn-worker runs it from the queue.
+export function telegramCoreDeps(d: ProviderWebhookDeps): CoreDeps {
+  return webhookDeps(adapterFor(d), d);
+}
+
 export async function handleTelegram(req: Request, d: ProviderWebhookDeps): Promise<Response> {
   // KNOWN GAPS (2026-10-30, #311): the webhook's own replies (a fixed answer, the #301 second message, job cards) get the
   // texting voice too when CAREER_TEXTING_NATIVE=on, like the outbox's delivery (channel_registry.ts); off, unchanged.
-  const adapter = d.adapter ? d.adapter(d.env) : telegramAdapter({ token: d.env.get("TELEGRAM_BOT_TOKEN") || "", webhookSecret: d.env.get("TELEGRAM_WEBHOOK_SECRET") || "", native: textingNativeOn(d.env) });
-  return await handleChannelWebhook(req, adapter, webhookDeps(adapter, d));
+  const adapter = adapterFor(d);
+  const core = webhookDeps(adapter, d);
+  if (d.queue && chatQueueOn(d.env)) core.queue = d.queue;
+  return await handleChannelWebhook(req, adapter, core);
 }

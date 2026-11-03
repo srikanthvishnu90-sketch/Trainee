@@ -208,6 +208,14 @@ export interface CoreDeps {
   typingEveryMs?: number;
   ackAfterMs?: number | null;
   timers?: { set: (fn: () => void, ms: number) => unknown; clear: (h: unknown) => void };
+  // ACK FAST (CHAT_QUEUE=on, _shared/inbound_turn_queue.ts): the webhook's side. With `queue`, handleChannelWebhook claims no message
+  // and runs no turn: each message is written to the durable queue (false: the provider id was queued before) and the provider
+  // gets its 200; trainee-turn-worker runs runInbound later. kick: a best-effort nudge to the worker, never awaited past ~1 s.
+  queue?: { enqueue: (msg: InboundMessage) => Promise<boolean>; kick?: () => Promise<unknown> | void };
+  // The worker's side: a failure of the turn (the model, agent-chat, the store) says nothing to the person and returns
+  // { status: 503, body: { retry: true } } so the worker runs the message again; set on every attempt but the last, whose failure
+  // is said once ("I couldn't answer that just now") exactly as it is without the queue.
+  deferFailure?: boolean;
 }
 type Out = { status: number; body: Record<string, unknown> };
 const ok = (body: Record<string, unknown>): Out => ({ status: 200, body: { ok: true, ...body } });
@@ -593,6 +601,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       }
       if (out.threadId && out.threadId !== person.threadId) await store.setThread(contact, out.threadId, person.userId);
     } catch (e) {
+      if (d.deferFailure) throw e; // the worker retries the message; nothing is said or queued for this attempt
       console.error("inbound: chat failed:", e instanceof Error ? e.message : String(e));
       reply = CHAT_DOWN_REPLY;
     }
@@ -686,6 +695,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
   } catch (e) {
     console.error("inbound failed:", e instanceof Error ? e.message : String(e));
     if (working) await working.stop();
+    if (d.deferFailure) return { status: 503, body: { ok: false, retry: true, error: e instanceof Error ? e.message.slice(0, 200) : "turn failed" } };
     try { await say(contact, d.render(CHAT_DOWN_REPLY)); } catch { /* already logged */ }
     return { status: 500, body: { ok: false, error: "internal" } };
   } finally {
@@ -715,6 +725,27 @@ export async function handleChannelWebhook(req: Request, adapter: ChannelAdapter
   }
   if (!parsed.messages.length) return json({ ok: true, ...(reheld ? { reheld } : {}), ...(failed ? { failed } : {}), ignored: (parsed.ignored ?? [])[0] ?? "nothing to read" });
   const results: Record<string, unknown>[] = [];
+  if (d.queue) {
+    // ACK FAST: verified (parseInbound), now written down and answered. A write that fails is a 503, so the provider sends it again
+    // (Telegram retries a non-2xx); the provider-id unique key makes that retry safe.
+    let queued = 0;
+    for (const m of parsed.messages) {
+      let fresh: boolean;
+      try { fresh = await d.queue.enqueue(m); }
+      catch (e) { console.error("inbound: queue write failed:", e instanceof Error ? e.message : String(e)); return json({ ok: false, error: "queue unavailable" }, 503); }
+      if (!fresh) { results.push({ ok: true, ignored: "duplicate webhook" }); continue; }
+      queued++;
+      results.push({ ok: true, queued: true });
+      // The typing indicator at once (within ~1 s, whatever Telegram's latency), so the person sees it before the worker starts.
+      if (d.typing && (m.kind === "text" || m.kind === "callback")) {
+        let t: unknown;
+        await Promise.race([Promise.resolve(d.typing(m.address)).catch(() => {}), new Promise((res) => { t = setTimeout(res, 800); })]);
+        clearTimeout(t as number);
+      }
+    }
+    if (queued && d.queue.kick) { try { await d.queue.kick(); } catch { /* the every-minute run has it */ } }
+    return json({ ok: true, ...(reheld ? { reheld } : {}), ...(failed ? { failed } : {}), results });
+  }
   for (const m of parsed.messages) {
     const r = await runInbound(m, d);
     results.push(r.body);

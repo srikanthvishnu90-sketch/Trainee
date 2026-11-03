@@ -266,6 +266,7 @@ MIGRATIONS=(
   20261101121000_career_apply_prepare_error_retry.sql
   20261101130000_career_apply_reprepare_needs_answers.sql
   20261102120000_career_apply_prepare_candidates_for.sql
+  20261102170000_inbound_turn_queue.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -403,6 +404,7 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'career_apply_prepare_candidates' and prosrc like '%30 minutes%')"
   "exists (select 1 from pg_trigger where tgname = 'career_apply_reprepare_on_needs_answers' and tgrelid = 'public.career_apply_jobs'::regclass) and exists (select 1 from pg_trigger where tgname = 'career_apply_history_approval_guard' and tgrelid = 'public.career_apply_jobs'::regclass)"
   "exists (select 1 from pg_proc where proname = 'career_apply_prepare_candidates_for')"
+  "to_regclass('public.inbound_turn_queue') is not null and exists (select 1 from pg_proc where proname = 'inbound_turn_claim')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql
@@ -440,7 +442,7 @@ DEPLOY_FNS=(agent-chat "${SCHEDULED[@]}" career-voice "${CHANNEL_FNS[@]}" "${JWT
 # Secret-gated, public (verify_jwt = false) functions, each deployed only when its secret is among the project's function
 # secrets (in a dry run: given in the environment). Absent secret: skipped with a log line, never a failure. Nothing here
 # sets the secret. gate_fns (run by make_manifest) appends the enabled ones to DEPLOY_FNS and GATED_ON.
-GATED=(trainee-file:TRAINEE_FILE_LINK_SECRET ops-monitor:OPS_MONITOR_TOKEN)
+GATED=(trainee-file:TRAINEE_FILE_LINK_SECRET ops-monitor:OPS_MONITOR_TOKEN trainee-turn-worker:TRAINEE_TURN_SECRET)
 GATED_ON=(); GATED_DONE=""
 # The Upmore finance functions still in supabase/functions. Trainee never deploys them (production stops drifting toward
 # the finance app); retiring them on the live project is the owner's decision (docs/architect/REMOVAL-LIST-2026-10-28.md).

@@ -37,6 +37,8 @@ fn|TRAINEE_FILE_LINK_SECRET|R|file page links + phone login (trainee-file is ski
 fn|TRAINEE_FILE_BASE_URL|R|the https URL of the file page that links point to
 fn|TRAINEE_BOT_URL|R|the bot link shown on file and connect pages
 vercel|TRAINEE_FILE_UPSTREAM|R|/file proxy to trainee-file (503 "File pages are not set up yet" without it)
+fn|TRAINEE_TURN_SECRET|O|ACK FAST: the turn worker secret (trainee-turn-worker is skipped by deploy without it; CHAT_QUEUE=on needs it)
+fn|CHAT_QUEUE|O|on: chat webhooks queue the text and answer 200, the worker runs the turn; unset or off: inline as before
 fn|OPS_MONITOR_TOKEN|R|owner alerts and daily digest (ops-monitor is skipped by deploy without it)
 fn|TELEGRAM_BOT_TOKEN|R|owner alert messages and Telegram
 fn|OWNER_TELEGRAM_CHAT_ID|R|where owner alerts are sent
@@ -92,6 +94,7 @@ texts-loopmessage|LOOPMESSAGE_API_KEY|TRAINEE_INBOUND_SECRET
 telegram|TELEGRAM_WEBHOOK_SECRET|TELEGRAM_BOT_TOKEN
 whatsapp|WHATSAPP_TOKEN|WHATSAPP_PHONE_NUMBER_ID WHATSAPP_APP_SECRET WHATSAPP_VERIFY_TOKEN
 file-pages|TRAINEE_FILE_LINK_SECRET|TRAINEE_FILE_BASE_URL TRAINEE_BOT_URL
+turn-queue|CHAT_QUEUE|TRAINEE_TURN_SECRET
 ops-monitor|OPS_MONITOR_TOKEN|TELEGRAM_BOT_TOKEN OWNER_TELEGRAM_CHAT_ID
 gmail-connect|GOOGLE_OAUTH_CLIENT_ID|GOOGLE_OAUTH_CLIENT_SECRET OAUTH_STATE_SECRET
 phone-prepare|CAREER_PREPARE_AHEAD_URL|CAREER_PREPARE_AHEAD_TOKEN

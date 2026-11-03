@@ -10,7 +10,8 @@ import { equalSecret } from "../_shared/message_service.ts";
 import type { Send } from "../_shared/channel.ts";
 import { loopMessageAdapter } from "../_shared/loopmessage_adapter.ts";
 import { textingNativeOn } from "../_shared/channel_voice.ts";
-import { runInbound, type InboundStore } from "../_shared/channel_inbound.ts";
+import { type CoreDeps, runInbound, type InboundStore } from "../_shared/channel_inbound.ts";
+import { chatQueueOn } from "../_shared/inbound_turn_queue.ts";
 
 export { CHAT_DOWN_REPLY, SIGNUP_CLOSED_REPLY, signupAllows, turnKeyFor } from "../_shared/channel_inbound.ts";
 export type { InboundStore, Person } from "../_shared/channel_inbound.ts";
@@ -21,6 +22,18 @@ export interface InboundDeps {
   send: (apiKey: string) => Send; // channel commands and the signup refusal go straight out: no account, no outbox row
   chat: (a: { userId: string; threadId: string | null; message: string; turnKey: string }) => Promise<{ status: number; reply: string; threadId: string | null }>;
   deliverReply: (a: { userId: string; key: string; apiKey: string; now: number }) => Promise<unknown>;
+  // ACK FAST: with CHAT_QUEUE=on (and only then) the webhook queues the text and answers 200; trainee-turn-worker runs the turn.
+  queue?: CoreDeps["queue"];
+}
+// The turn's dependencies for one iMessage text, as the webhook runs it inline and as trainee-turn-worker runs it from the queue.
+export function imessageCoreDeps(d: InboundDeps, apiKey: string, secret: string): CoreDeps {
+  const adapter = loopMessageAdapter({ apiKey, inboundSecret: secret, send: async (c, b) => await d.send(apiKey)(c, b), native: textingNativeOn(d.env) });
+  const send = d.send(apiKey);
+  return {
+    env: d.env, now: d.now, store: d.store(), render: adapter.render, chat: d.chat,
+    reply: (contact, bubbles) => send(contact, bubbles),
+    deliver: (a) => d.deliverReply({ userId: a.userId, key: a.key, apiKey, now: a.now }),
+  };
 }
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
@@ -46,11 +59,15 @@ export async function handleInbound(req: Request, d: InboundDeps): Promise<Respo
     return json({ ok: true, failed });
   }
   if (!msg) return json({ ok: true, ignored: (parsed.ignored ?? [])[0] ?? "nothing to read" });
-  const send = d.send(apiKey);
-  const r = await runInbound(msg, {
-    env: d.env, now: d.now, store: d.store(), render: adapter.render, chat: d.chat,
-    reply: (contact, bubbles) => send(contact, bubbles),
-    deliver: (a) => d.deliverReply({ userId: a.userId, key: a.key, apiKey, now: a.now }),
-  });
+  const core = imessageCoreDeps(d, apiKey, secret);
+  if (d.queue && chatQueueOn(d.env)) {
+    let fresh: boolean;
+    try { fresh = await d.queue.enqueue(msg); }
+    catch (e) { console.error("inbound: queue write failed:", e instanceof Error ? e.message : String(e)); return json({ ok: false, error: "queue unavailable" }, 503); }
+    if (!fresh) return json({ ok: true, ignored: "duplicate webhook" });
+    if (d.queue.kick) { try { await d.queue.kick(); } catch { /* the every-minute run has it */ } }
+    return json({ ok: true, queued: true });
+  }
+  const r = await runInbound(msg, core);
   return json(r.body, r.status);
 }

@@ -36,6 +36,7 @@
 #   the numbers, each optional. Infrastructure sizing not given is set to the runner's default (CLOUD_WAVE1 below, the
 #   same numbers as cloud_runner_http.ts LIMIT_DEFAULTS and docs/launch/CLOUD-RUNNER.md):
 #     CLOUD_MAX_CONCURRENT CLOUD_MAX_PER_PORTAL CLOUD_MAX_STARTS_PER_TICK CLOUD_PREPARE_MAX_CONCURRENT CLOUD_PREPARE_STARTS_PER_TICK
+#     CLOUD_DISPATCH_PARALLEL (sandboxes created at once in one tick)
 #   The per-person and per-site numbers are never set unless given (owner, 2026-10-27, NO LIMITS: no number of Trainee's
 #   own; the brake is an outside system's refusal); given, any whole number from 1:
 #     CLOUD_MAX_PER_PERSON_DAY CLOUD_MAX_PER_SITE_MINUTE CLOUD_PREPARE_PER_PERSON_DAY CLOUD_PREPARE_PER_SITE_MINUTE
@@ -266,6 +267,7 @@ MIGRATIONS=(
   20261101121000_career_apply_prepare_error_retry.sql
   20261101130000_career_apply_reprepare_needs_answers.sql
   20261102120000_career_apply_prepare_candidates_for.sql
+  20261102130000_career_apply_prepare_fair_claim.sql
   20261102140000_career_apply_resume_file_restarts_preparation.sql
 )
 MIGRATION_MARK=(
@@ -404,6 +406,7 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'career_apply_prepare_candidates' and prosrc like '%30 minutes%')"
   "exists (select 1 from pg_trigger where tgname = 'career_apply_reprepare_on_needs_answers' and tgrelid = 'public.career_apply_jobs'::regclass) and exists (select 1 from pg_trigger where tgname = 'career_apply_history_approval_guard' and tgrelid = 'public.career_apply_jobs'::regclass)"
   "exists (select 1 from pg_proc where proname = 'career_apply_prepare_candidates_for')"
+  "exists (select 1 from pg_proc where proname = 'career_apply_prepare_request_claim' and prosrc like '%order by q.turn%')"
   "exists (select 1 from pg_proc where proname = 'career_apply_resume_file_restarts')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
@@ -431,10 +434,10 @@ CLOUD_FN=career-cloud-runner
 CLOUD_HIDDEN=(CLOUD_RUNNER_SECRET CLOUD_DISPATCH_SECRET CAREER_PREPARE_AHEAD_TOKEN VERCEL_TOKEN)
 CLOUD_PLAIN=(VERCEL_TEAM_ID VERCEL_PROJECT_ID CLOUD_SANDBOX_SNAPSHOT_ID CLOUD_MAX_CONCURRENT CLOUD_MAX_PER_PORTAL CLOUD_MAX_STARTS_PER_TICK
   CLOUD_MAX_PER_PERSON_DAY CLOUD_MAX_PER_SITE_MINUTE CLOUD_PREPARE_MAX_CONCURRENT CLOUD_PREPARE_STARTS_PER_TICK CLOUD_PREPARE_PER_PERSON_DAY
-  CLOUD_PREPARE_PER_SITE_MINUTE CLOUD_RUNNER_ENABLED CLOUD_PREPARE_ENABLED)
+  CLOUD_PREPARE_PER_SITE_MINUTE CLOUD_DISPATCH_PARALLEL CLOUD_RUNNER_ENABLED CLOUD_PREPARE_ENABLED)
 # The runner's infrastructure sizing, set by name when not given. No per-person or per-site number (NO LIMITS, 2026-10-27).
-declare -A CLOUD_WAVE1=([CLOUD_MAX_CONCURRENT]=2 [CLOUD_MAX_PER_PORTAL]=1 [CLOUD_MAX_STARTS_PER_TICK]=2
-  [CLOUD_PREPARE_MAX_CONCURRENT]=2 [CLOUD_PREPARE_STARTS_PER_TICK]=2)
+declare -A CLOUD_WAVE1=([CLOUD_MAX_CONCURRENT]=60 [CLOUD_MAX_PER_PORTAL]=20 [CLOUD_MAX_STARTS_PER_TICK]=30
+  [CLOUD_PREPARE_MAX_CONCURRENT]=60 [CLOUD_PREPARE_STARTS_PER_TICK]=30 [CLOUD_DISPATCH_PARALLEL]=16)
 # Mass networking (lane M1): the sending rail's sender, started by pg_cron (trainee-career-send) with the proactive
 # secret; it sends nothing until CAREER_SEND_RAIL=on is set (docs/architect/OUTREACH-SEND-2026-10-27.md).
 SEND_FNS=(career-send)
@@ -847,7 +850,7 @@ if [[ -z "$ONLY_SMOKE" ]]; then
     [[ -z "${CLOUD_SANDBOX_SNAPSHOT_ID:-}" || "$CLOUD_SANDBOX_SNAPSHOT_ID" =~ ^snap_[A-Za-z0-9]{8,64}$ ]] || fail "CLOUD_SANDBOX_SNAPSHOT_ID is not a snapshot id (snap_...)"
     if [[ -n "${VERCEL_TOKEN:-}" ]] && ! env_safe "$VERCEL_TOKEN"; then fail "VERCEL_TOKEN has a space, quote, # or backslash (the value is not shown)"; fi
     for v in CLOUD_MAX_CONCURRENT CLOUD_MAX_PER_PORTAL CLOUD_MAX_STARTS_PER_TICK CLOUD_MAX_PER_PERSON_DAY CLOUD_MAX_PER_SITE_MINUTE \
-      CLOUD_PREPARE_MAX_CONCURRENT CLOUD_PREPARE_STARTS_PER_TICK CLOUD_PREPARE_PER_PERSON_DAY CLOUD_PREPARE_PER_SITE_MINUTE; do
+      CLOUD_PREPARE_MAX_CONCURRENT CLOUD_PREPARE_STARTS_PER_TICK CLOUD_PREPARE_PER_PERSON_DAY CLOUD_PREPARE_PER_SITE_MINUTE CLOUD_DISPATCH_PARALLEL; do
       [[ -z "${!v:-}" || "${!v}" =~ ^[1-9][0-9]{0,8}$ ]] || fail "$v must be a whole number from 1"
     done
     for v in CLOUD_RUNNER_ENABLED CLOUD_PREPARE_ENABLED; do
@@ -1013,7 +1016,7 @@ else
     done
     for v in "${CLOUD_PLAIN[@]}"; do
       if [[ -n "${!v:-}" ]]; then add "$v" "${!v}" "${!v}"
-      elif [[ -n "${CLOUD_WAVE1[$v]:-}" ]]; then add "$v" "${CLOUD_WAVE1[$v]}" "${CLOUD_WAVE1[$v]}"; echo "  $v: not given, set to the first wave's ${CLOUD_WAVE1[$v]}"
+      elif [[ -n "${CLOUD_WAVE1[$v]:-}" ]]; then add "$v" "${CLOUD_WAVE1[$v]}" "${CLOUD_WAVE1[$v]}"; echo "  $v: not given, set to the runner's default ${CLOUD_WAVE1[$v]}"
       else echo "  kept: $v (not given; off for a switch, no number for a per-person or per-site limit)"; fi
     done
     add CLOUD_BRIDGE_URL "$BASE/functions/v1/$CLOUD_FN" "$BASE/functions/v1/$CLOUD_FN"

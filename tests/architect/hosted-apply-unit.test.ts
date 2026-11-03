@@ -229,10 +229,10 @@ Deno.test("F17 runner routes: each door checks its own secret; preparation off a
   eq((await post(h(sendOff), "/dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) })).status, 200);
   eq(await (await post(h(sendOff), "/dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) })).json(), { skipped: "CLOUD_RUNNER_ENABLED is not on" });
   await post(h({ ...env, CLOUD_RUNNER_ENABLED: "on", CLOUD_MAX_PER_PERSON_DAY: "3", CLOUD_MAX_PER_SITE_MINUTE: "1" }), "/dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) });
-  eq(JSON.parse(seen.at(-1)!), { p_want: 2, p_global: 2, p_per_portal: 1, p_per_person_day: 3, p_per_site_minute: 1 }, "the send numbers from the env, the runner's sizing defaults for the rest");
+  eq(JSON.parse(seen.at(-1)!), { p_want: LIMIT_DEFAULTS.CLOUD_MAX_STARTS_PER_TICK, p_global: LIMIT_DEFAULTS.CLOUD_MAX_CONCURRENT, p_per_portal: LIMIT_DEFAULTS.CLOUD_MAX_PER_PORTAL, p_per_person_day: 3, p_per_site_minute: 1 }, "the send numbers from the env, the runner's sizing defaults for the rest");
   // NO LIMITS (owner, 2026-10-27): with no per-person or per-site number given, none is sent (null), never a default.
   await post(h({ ...env, CLOUD_RUNNER_ENABLED: "on" }), "/dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) });
-  eq(JSON.parse(seen.at(-1)!), { p_want: 2, p_global: 2, p_per_portal: 1, p_per_person_day: null, p_per_site_minute: null }, "no number of Trainee's own");
+  eq(JSON.parse(seen.at(-1)!), { p_want: LIMIT_DEFAULTS.CLOUD_MAX_STARTS_PER_TICK, p_global: LIMIT_DEFAULTS.CLOUD_MAX_CONCURRENT, p_per_portal: LIMIT_DEFAULTS.CLOUD_MAX_PER_PORTAL, p_per_person_day: null, p_per_site_minute: null }, "no number of Trainee's own");
   eq((await post(h({ ...env, CLOUD_RUNNER_SECRET: "short" }), "/dispatch")).status, 503, "no runner secret: not configured");
   eq(runnerLimits({ get: () => undefined }).send.perPersonDay, null, "unset: no per-person number");
   eq(runnerLimits({ get: () => undefined }).prepare.perPersonDay, null, "unset: no per-person number for preparation");
@@ -377,7 +377,7 @@ Deno.test("F2 the runner's default sizing is exactly as the launch doc tells the
     const values = cells[2].split("/").map((v) => Number(v.trim()));
     if (names.length === values.length && values.every((v) => Number.isInteger(v))) names.forEach((n, i) => (wave1[n] = values[i]));
   }
-  const want = ["CLOUD_MAX_CONCURRENT", "CLOUD_MAX_PER_PORTAL", "CLOUD_PREPARE_MAX_CONCURRENT"];
+  const want = ["CLOUD_MAX_CONCURRENT", "CLOUD_MAX_PER_PORTAL", "CLOUD_PREPARE_MAX_CONCURRENT", "CLOUD_DISPATCH_PARALLEL"];
   eq(Object.keys(wave1).sort(), [...want].sort(), "the sizing table names each number once");
   for (const k of want) eq(LIMIT_DEFAULTS[k as keyof typeof LIMIT_DEFAULTS], wave1[k], k);
   for (const k of ["CLOUD_MAX_PER_PERSON_DAY", "CLOUD_MAX_PER_SITE_MINUTE", "CLOUD_PREPARE_PER_PERSON_DAY", "CLOUD_PREPARE_PER_SITE_MINUTE"]) {

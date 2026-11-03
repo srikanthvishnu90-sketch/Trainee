@@ -296,7 +296,7 @@ Deno.test("GV/10 the legacy finance consent is off for Trainee; the career grant
   eq(redirectUriFrom(env({ SUPABASE_URL: "https://ref.supabase.co", GOOGLE_OAUTH_REDIRECT_URI: "http://evil.example/x" })), "https://ref.supabase.co/functions/v1/gmail-oauth", "never a non-https one");
 });
 
-const TEMPLATES = { privacy: read("docs/launch/legal-pages/privacy.template.html"), terms: read("docs/launch/legal-pages/terms.template.html"), home: read("site/index.html") };
+const TEMPLATES = { privacy: read("docs/launch/legal-pages/privacy.template.html"), terms: read("docs/launch/legal-pages/terms.template.html"), home: read("docs/launch/legal-pages/home.template.html") };
 const SAMPLE = { LEGAL_NAME: "Sample Test Entity", SUPPORT_EMAIL: "help@trainee.example", GOVERNING_STATE: "Sample State" };
 const text = (html: string) => html.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/\s+/g, " ");
 
@@ -317,7 +317,9 @@ Deno.test("GV/11 the legal pages are never published with a placeholder: the bui
   // Nothing under site/ carries a placeholder, and the pages are not published yet.
   const walk = (dir: URL): string[] => [...Deno.readDirSync(dir)].flatMap((e) => e.isDirectory ? walk(new URL(`${e.name}/`, dir)) : /\.(html|js|json|txt)$/.test(e.name) ? [new URL(e.name, dir).pathname] : []);
   for (const f of walk(new URL("site/", ROOT))) assert(!/\{\{(LEGAL_NAME|SUPPORT_EMAIL|GOVERNING_STATE|DOMAIN)\}\}/.test(Deno.readTextFileSync(f)), `${f} carries a placeholder`);
-  // site/privacy.html is the privacy page that was already live (restored from main); it carries no placeholder (checked above). terms and google stay unpublished until the owner's inputs.
+  // site/privacy.html is the browser-extension policy (live since Oct 20) behind its own notice that it is not the chat service's
+  // policy; Trainee's own privacy page, terms and notice are still not published.
+  assert(/This page covers the browser extension only/.test(Deno.readTextFileSync(new URL("site/privacy.html", ROOT))), "site/privacy.html is the extension policy, labelled as such, not a Trainee service policy");
   for (const f of ["site/terms.html", "site/google.html"]) assert(!(() => { try { Deno.statSync(new URL(f, ROOT)); return true; } catch { return false; } })(), `${f} is not published before the owner's inputs`);
 });
 

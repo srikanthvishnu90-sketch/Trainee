@@ -4,19 +4,12 @@
 // (modelConfigFor). CAREER_MODEL is honoured only when it names a Claude model; anything else (a gpt id left in a secret)
 // serves the default, so a stale secret can never move a reader off Claude.
 //
-// DEPENDENCY: the gateway work package (WP1) replaces openaiCareerModel with its own reader-model function and moves the
-// career default to Claude. When that lands, readerModel below becomes a one-line call to it; the default stays haiku
-// (D-038: Haiku first; Sonnet only if the measurement says so).
-import { callModel, type ModelConfig, modelConfigFor, providerFor } from "./model_gateway.ts";
+import { callModel, type ModelConfig, modelConfigFor, readerModel } from "./model_gateway.ts";
+export { readerModel };
 
 type Env = { get(k: string): string | undefined };
 
 export const READER_MODEL_DEFAULT = "claude-haiku-5-5";
-
-export function readerModel(env: Env): string {
-  const v = (env.get("CAREER_MODEL") ?? "").trim();
-  return v && providerFor(v) === "anthropic" ? v : READER_MODEL_DEFAULT;
-}
 
 // Provider "anthropic", ANTHROPIC_API_KEY, effort per ANTHROPIC_EFFORT: a complete config for callModel.
 export function readerModelConfig(env: Env): ModelConfig {

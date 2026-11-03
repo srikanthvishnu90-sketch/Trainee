@@ -7,6 +7,7 @@
 // action's state; an action's state says what is true ("Approved. Not sent yet" until a sender really sent it); nothing in a file
 // sends anything except through the exact-payload approval flow (an introduction's Introduce is bound to the hash of its exact message).
 // Pure functions: data in, string out. Untrusted text is always escaped.
+import { evidenceHtml, unknown, UNKNOWN, valueHtml } from "./file_design.ts";
 import { cap1, esc } from "./file_page.ts";
 
 export const SOURCES = ["From the posting", "From your resume", "From you", "Reported, not verified"] as const;
@@ -273,7 +274,9 @@ function actionsHtml(rec: FileRecord, token: string): string {
   return `<section class="blk" aria-label="Actions"><h2>Actions</h2>${out}</section>`;
 }
 
-export function bodyHtml(rec: FileRecord, token: string): string {
+// o.tz: the person's zone for times on the page; o.evidenceImage: whether a screenshot URL may be shown inline (its origin is one the
+// page's Content-Security-Policy allows); otherwise it is a link.
+export function bodyHtml(rec: FileRecord, token: string, o: { tz?: string | null; evidenceImage?: (url: string) => boolean } = {}): string {
   const d = rec.data ?? {};
   let main = "";
   switch (rec.kind) {
@@ -289,7 +292,13 @@ export function bodyHtml(rec: FileRecord, token: string): string {
       const kv = (k: string, v: unknown, s: Source = RECORDS) => v ? factHtml({ value: String(v), source: s }, k) : "";
       main = `<p class="state ${esc(d.status)}" role="status"><strong>${esc(cap1(d.status))}.</strong> ${esc(STATUS_NOTE[d.status] ?? "")}</p>`
         + sec("What was submitted", dl(kv("Company", d.company) + kv("Role", d.role) + kv("Sent to", d.destination) + kv("Resume", d.resume) + kv("Prepared", when(d.prepared_at)) + kv("Submitted", when(d.submitted_at)) + kv("Last updated", when(d.as_of))))
-        + sec("Confirmation", dl(kv("Confirmation ID", c.id)) + [linkHtml(c.url, "Open the confirmation"), linkHtml(c.screenshot_url, "Open the screenshot")].filter(Boolean).map((x) => `<p>${x}</p>`).join(""))
+        // The proof rides with the claim (brief P3.7, P6.6): the confirmation as a receipt (its snippet, where it came from and when,
+        // the link, and the screenshot inline when the page may show it). Without one, "Not confirmed yet" is the value, said.
+        + sec("Confirmation", (c.id || c.url || c.screenshot_url)
+          ? evidenceHtml({ quote: c.id ? `Confirmation ID: ${c.id}` : "The employer's confirmation page", source: RECORDS, at: d.submitted_at ?? d.as_of ?? null, href: c.url, hrefLabel: "Open the confirmation",
+            image: o.evidenceImage?.(c.screenshot_url) ? c.screenshot_url : null, imageAlt: `${d.company ?? "The employer"}'s confirmation screen` }, o.tz)
+            + (c.screenshot_url && !o.evidenceImage?.(c.screenshot_url) ? `<p>${linkHtml(c.screenshot_url, "Open the screenshot")}</p>` : "")
+          : d.status === "submitted" || d.status === "confirmed" ? `<p class="meta">${valueHtml(unknown(UNKNOWN.notConfirmed))} The employer hasn't sent a confirmation Trainee can show.</p>` : "")
         + sec("Answers given", dl(Fs(d.answers, true).map((a) => factHtml(a, a.question)).join("")))
         + sec("Not done", `<ul class="why">${(d.problems ?? []).filter((p: any) => p?.reason).map((p: any) => `<li><strong>${esc(cap1(p.outcome))}:</strong> ${esc(p.item)}. ${esc(p.reason)} ${src(RECORDS)}</li>`).join("")}</ul>`.replace(/^<ul class="why"><\/ul>$/, ""))
 

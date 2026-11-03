@@ -10,7 +10,7 @@
 // "A few things first" (renderThings), or the application is still being prepared. Nothing here sends on a GET.
 import { cap1, esc, hostOf, layout, webUrl, initialOf, type Row } from "./file_page.ts";
 import { BRAND } from "./brand.ts";
-import { stampHtml } from "./results_stamp.ts";
+import { stampHtml } from "./file_design.ts";
 import { applyHelp, coverage, NOT_LISTED, specOf, stateCountsOf, stateOfDismissed, type Spec } from "./results_spec.ts";
 import { DESIGN_CSS, DESIGN_FONT_LINK } from "./results_design.ts";
 
@@ -31,7 +31,7 @@ export interface ResultsFeed {
   token: string; title: string; floor: string | null; rows: ResultRow[]; total: number;
   filters: { pay: PayFilter; where: string }; places: string[]; top?: string; notes?: Record<string, string>;
   // The header: who and when, what was read and when, what is not confirmed, and a 2-3 line quick read.
-  // stamp: "Postings checked ..." from the shown postings' own last_seen_at (results_stamp.ts); null: "Check time unknown".
+  // stamp: "Postings checked ..." from the shown postings' own last_seen_at (file_design.ts); null: "Check time unknown".
   coverRows?: ResultRow[]; // every role including dismissed: what has been sent is told over these
   countRows?: ResultRow[]; // every active (not dismissed) role, before the pay/place filter: the top counts are over these
   paused?: boolean; updated?: string; dismissed?: ResultRow[]; // the person's own marks (private); updated: when this page was drawn

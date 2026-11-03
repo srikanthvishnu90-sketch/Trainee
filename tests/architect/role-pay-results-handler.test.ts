@@ -55,7 +55,7 @@ async function worldOnce() {
 const ENV_KEYS = ["TRAINEE_FILE_LINK_SECRET", "TRAINEE_FILE_BASE_URL", "ANTHROPIC_API_KEY", "CAREER_JUDGE", "CAREER_REPLY_WRITER", "CAREER_BRAIN"];
 async function withEnv(fn: () => Promise<void>) {
   const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, Deno.env.get(k)]));
-  for (const [k, v] of Object.entries({ TRAINEE_FILE_LINK_SECRET: SECRET, TRAINEE_FILE_BASE_URL: BASE, ANTHROPIC_API_KEY: "test-key" })) Deno.env.set(k, v);
+  for (const [k, v] of Object.entries({ TRAINEE_FILE_LINK_SECRET: SECRET, TRAINEE_FILE_BASE_URL: BASE })) Deno.env.set(k, v);
   for (const k of ["CAREER_JUDGE", "CAREER_REPLY_WRITER", "CAREER_BRAIN"]) Deno.env.delete(k);
   try { await fn(); } finally { for (const [k, v] of Object.entries(saved)) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v); }
 }

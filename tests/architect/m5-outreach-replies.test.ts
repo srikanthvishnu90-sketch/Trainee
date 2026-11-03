@@ -666,7 +666,7 @@ Deno.test("M5/O1 Outlook through #226's functions: free/busy for the slots, the 
 
 Deno.test("M5/Claude the reply reader goes through the gateway to api.anthropic.com only: a forced record_email tool call, the Anthropic key, nothing else contacted", async () => {
   const wire = fakeAnthropic(() => ({ tool: "record_email", input: { class: "interested", summary: "Interested; asked for your resume.", asks: ["send your resume"] } }));
-  const env = { get: (k: string) => ({ ANTHROPIC_API_KEY: "sk-ant-test", CAREER_MODEL: "claude-haiku-5-5" } as Record<string, string>)[k] };
+  const env = { get: (k: string) => ({ OPENAI_API_KEY: "sk-openai-not-used", ANTHROPIC_API_KEY: "sk-ant-test", CAREER_MODEL: "gpt-5-mini" } as Record<string, string>)[k] };
   const msg = { id: "m1", thread: "th1", from: "Avery Synthetic <avery.synthetic@beta.example>", to: "sam@example.test", subject: "Re: Question about your path at Beta", text: "Glad to help, send me your resume.", at: new Date(NOW).toISOString(), headers: {}, fromMe: false };
   const thread = { recipient_email: "avery.synthetic@beta.example", recipient_name: "Avery Synthetic", recipient_firm: "Beta", subject: "Question about your path at Beta", offered: [] } as any;
   const r = await understand({ msg, thread, model: readerCall(env, wire.request), now: NOW, tz: "America/Chicago" });
@@ -675,6 +675,6 @@ Deno.test("M5/Claude the reply reader goes through the gateway to api.anthropic.
   assert(wire.onlyAnthropic(), "no other host");
   // No Anthropic key: not configured, the reading stays "none" and nothing is sent anywhere.
   const none = fakeAnthropic(() => "x");
-  const r2 = await understand({ msg, thread, model: readerCall({ get: (k: string) => (k === "ANTHROPIC_API_KEY" ? "sk-openai-not-used" : undefined) }, none.request), now: NOW, tz: "America/Chicago" });
+  const r2 = await understand({ msg, thread, model: readerCall({ get: (k: string) => (k === "OPENAI_API_KEY" ? "sk-openai-not-used" : undefined) }, none.request), now: NOW, tz: "America/Chicago" });
   eq([r2.by, none.urls], ["none", []]);
 });

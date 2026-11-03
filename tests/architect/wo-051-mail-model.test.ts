@@ -122,7 +122,7 @@ Deno.test("WO-051/U2 how much is sent, per committed split (no label read on a h
 
 // ------------------------------------------------------------------------------------------------ P: what is sent
 const ENV = (more: Record<string, string> = {}) => ({ get: (k: string) => ({ ANTHROPIC_API_KEY: "sk-ant-test-not-real", ...more } as Record<string, string>)[k] });
-const fakeModel = (answer: () => string) => fakeAnthropic(() => answer(), { input_tokens: 400, output_tokens: 20 }); // the Anthropic Messages wire
+const fakeOpenAI = (answer: () => string) => fakeAnthropic(() => answer(), { input_tokens: 400, output_tokens: 20 }); // the Anthropic Messages wire
 function costSink() {
   const rows: any[] = [];
   return { admin: { from: (t: string) => ({ insert: async (row: any) => { rows.push({ table: t, ...row }); return { error: null }; } }) }, rows };
@@ -141,7 +141,7 @@ Deno.test("WO-051/P1 what is sent: the sender's display name and domain, the sub
   eq(mailModelPayload({ from: "no-reply@greenhouse.io", subject: "s", snippet: "t" }).messages[0].content.split("\n")[0], "From: (no name) (domain greenhouse.io)");
   assert(/Never the body, an attachment, the date, the message hash or the person's name or address/.test(MODEL_SRC), "said in a comment");
   assert(/never the sender's address, never the person's\s*\n?\/\/\s*own address/.test(MODEL_SRC) || /never the sender's address, never the person's own address/.test(MODEL_SRC), "said in a comment");
-  const ai = fakeModel(() => '{"kind":"none","confidence":0.9}');
+  const ai = fakeOpenAI(() => '{"kind":"none","confidence":0.9}');
   const w = mailModelWiring(ENV(), costSink().admin, ai.request);
   assert(w.status === "on");
   await secondPass([VAGUE], ASANA, (payload) => w.deps.call(payload, { calls: 0, failed: 0, input_tokens: 0, output_tokens: 0, cached_tokens: 0, usd_micros: 0, unpriced: 0, provider: null, models: [] }));
@@ -245,7 +245,7 @@ Deno.test("WO-051/S6 'none' and a low confidence: none holds an unsure step back
 // ------------------------------------------------------------------------------------------------ C: the daily cap
 const ATS_MAILS = (n: number, at = NOW - 2 * 60000) => Array.from({ length: n }, (_, i) => ({ ...VAGUE, hash: `d${i}`, date: iso(at + i) }));
 function runWith(store: any, mails: MailIn[], at = NOW, answer = () => '{"kind":"none","confidence":0.9}') {
-  const ai = fakeModel(answer), costs = costSink(), outbox = memoryAlertStore();
+  const ai = fakeOpenAI(answer), costs = costSink(), outbox = memoryAlertStore();
   const run = () => runMail({ outbox, now: at, store, read: async () => ({ status: "ok", mails, readThrough: at, listed: mails.length }), model: mailModelWiring(ENV(), costs.admin, ai.request) });
   return { run, ai, costs };
 }
@@ -290,7 +290,7 @@ Deno.test("WO-051/V1 the live eval without a key prints NOT_RUN and exits 0; not
   }).output();
   const text = new TextDecoder().decode(out.stdout);
   eq(out.code, 0, new TextDecoder().decode(out.stderr));
-  assert(/^NOT_RUN: no ANTHROPIC_API_KEY/.test(text), text);
+  assert(/^NOT_RUN: no OPENAI_API_KEY/.test(text), text);
   const stub = await withModel(allSplits().dev.slice(0, 40), say("none", 0.9));
   assert(stub.asked >= 1 && stub.rules.predicted >= stub.rules_and_model.predicted, "a model saying none only holds steps back");
 });

@@ -22,7 +22,8 @@
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, supabaseParity } from "../flow/handler.ts";
-import { calls, clearOracle, fakeModel, setOracle } from "../../evals/career/tasks/fake_model.ts";
+import { calls, clearOracle, fakeOpenAI as scriptedChat, setOracle } from "../../evals/career/tasks/fake_model.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 import { dueDate } from "../../supabase/functions/_shared/task/plan.ts";
 import { brainMode } from "../../supabase/functions/agent-chat/career_staged.ts";
 
@@ -66,7 +67,7 @@ Deno.test({ name: "TASK PLANNER: compound asks complete at the real handler, thr
     set({ ANTHROPIC_API_KEY: "sk-fake-planner-not-a-key", MODEL_PROVIDER: null, CAREER_MODEL: "claude-haiku-5-5", CAREER_NETWORKING_DRAFT: "on" });
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
-      if (new URL(req.url).hostname === "api.anthropic.com") return outage ? new Response(JSON.stringify({ error: { type: "server_error", message: "fake outage" } }), { status: 500, headers: { "content-type": "application/json" } }) : await fakeModel(req);
+      if (new URL(req.url).hostname === "api.anthropic.com") return outage ? new Response(JSON.stringify({ error: { type: "server_error", message: "fake outage" } }), { status: 500, headers: { "content-type": "application/json" } }) : await anthropicWire(req, (chat) => scriptedChat(new Request("https://fake.invalid/v1/chat/completions", { method: "POST", body: JSON.stringify(chat) })));
       return new Response("not reachable in this test", { status: 404 });
     }) as typeof fetch;
     h = await careerHandler(pg, people);

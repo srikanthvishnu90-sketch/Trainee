@@ -142,7 +142,7 @@ test('secrets audit: --require-hosted-apply with unreadable switches fails; with
 test('go-live --verify runs the hosted-apply check, reads only, and fails on ON-but-not-ready', () => {
   const sh = fs.readFileSync(path.join(root, 'scripts/launch/trainee-go-live.sh'), 'utf8');
   assert.match(sh, /hosted-apply-setup\.cjs" --require-switches \$\{HA_ARGS/);
-  assert.match(sh, /\(\( ha_code == 0 \)\) \|\| fail "hosted apply is unknown or switched on);
+  assert.match(sh, /\(\( ha_code == 0 \)\) \|\| fail "hosted apply is unknown or switched on/);
   const verify = sh.slice(sh.indexOf('if [[ -n "$VERIFY_MODE" ]]; then\n  step "verify'), sh.indexOf('step "1/6 preflight"'));
   assert.ok(!/\b(insert|update|delete|alter|drop|create)\b[^\n]*(into|table|set)/i.test(verify.split('hosted apply setup:')[1] || ''), 'no write in the hosted-apply block');
   const dry = spawnSync('bash', [path.join(root, 'scripts/launch/trainee-go-live.sh'), '--dry-run', '--verify', spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim()],

@@ -130,13 +130,13 @@ Deno.test("exceptions: a Submission uncertain role has no Apply, no retry and no
 });
 
 // ---------------------------------------------------------------- Approve these N: the one hash-bound action
-Deno.test("approve: 'Approve these N applications' is the hash-bound applyall form (action + the set hash), the only approval it draws, none when paused or absent", () => {
+Deno.test("approve: 'Apply to all N ready' is the hash-bound applyall form (action + the set hash), the only approval it draws, none when paused or absent", () => {
   const rows = [row(1, { tag: "a".repeat(16) }), row(2, { tag: "b".repeat(16) })];
   const html = renderResults(feed(rows, { all: all3, coverRows: rows, countRows: rows }));
   const sec = section(html, "batchact");
-  const form = /<form method="post" id="approve-batch">([\s\S]*?)<\/form>/.exec(sec)![1];
+  const form = /<form method="post" id="all">([\s\S]*?)<\/form>/.exec(sec)![1];
   eq([...form.matchAll(/<input type="hidden" name="(\w+)" value="([^"]*)">/g)].map((m) => [m[1], m[2]]), [["t", "tok"], ["action", "applyall"], ["set", all3.hash]], "exactly the fields of the one hash-bound action");
-  ok(/<button type="submit" class="apply">Approve these 2 applications<\/button>/.test(form));
+  ok(/<button type="submit" class="apply">Apply to all 2 ready<\/button>/.test(form));
   ok(header(html).includes("review <span class=\"bid\">01234567</span> covers 2 ready"), "the review version is the hash the approval is bound to");
   // No second path: every action name on the page is one the handler already has.
   const used = new Set(actions(html)); for (const a of used) ok(["apply", "applysel", "applyall", "pause", "resume", "dismiss", "restore"].includes(a), `unknown action ${a}`);
@@ -148,7 +148,7 @@ Deno.test("approve: 'Approve these N applications' is the hash-bound applyall fo
 Deno.test("approve: only the ready roles are named in the count; blocked, excluded and not-ready roles stay visible and out of it", () => {
   const rows = MIX();
   const html = renderResults(feed(rows, { all: { hash: "f".repeat(16), size: 2 }, coverRows: rows, countRows: rows, total: rows.length }));
-  ok(/Approve these 2 applications/.test(html) && !/Approve these 10/.test(html));
+  ok(/Apply to all 2 ready/.test(html) && !/Apply to all 10 ready/.test(html));
   ok(/Dismissed roles and roles that aren't ready are left out\. If anything changes first, nothing is approved\./.test(plain(section(html, "batchact"))));
   ok(html.includes("Role 4") && html.includes("Role 5"), "blocked and closed are still listed");
 });

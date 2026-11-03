@@ -79,8 +79,10 @@ export function approveBatchForm(f: Pick<F, "token" | "all" | "paused">, label: 
   return `<form method="post" id="${esc(id)}">${h("t", f.token)}${h("action", "applyall")}${h("set", f.all.hash)}<button type="submit" class="apply">${esc(label)}</button></form>`;
 }
 export function renderApprove(f: F): string {
-  const form = approveBatchForm(f, `Approve these ${f.all?.size ?? 0} applications`, "approve-batch");
-  return form ? `<section class="batchact" aria-label="Approve this batch">${form}<p>Approves the ${f.all!.size} ready roles on this list, each exactly as its What will be sent shows. Dismissed roles and roles that aren't ready are left out. If anything changes first, nothing is approved.</p></section>` : "";
+  // The same form and words as the merged "Apply to all N ready" (#430's yes approves the same set): one approval on the page.
+  const form = approveBatchForm(f, `Apply to all ${f.all?.size ?? 0} ready`, "all");
+  const a = f.all;
+  return form && a ? `<section class="batchact" aria-label="Approve this batch">${form}<p>Approves ${a.filtered ? `all ${a.size} ready roles on the whole list, not only the roles your filters show` : `the ${a.size} ready roles on this list`}, each exactly as its What will be sent shows. Dismissed roles and roles that aren't ready are left out. If anything changes first, nothing is approved.</p></section>` : "";
 }
 
 // Pause is honest: it pauses this page. Queued work is not cancelled, and the roles that are queued, in progress or approved are named.

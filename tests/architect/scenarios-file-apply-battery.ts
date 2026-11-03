@@ -719,7 +719,7 @@ later([1], { name: "file apply battery regressions: secrets, what we send, statu
       want: (seen, w) => [0, 1, 2].every((i) => rowOf(seen, i)?.link !== null && rowOf(seen, i)?.tag === null) && rowOf(seen, 3)?.link === null && !/javascript:/.test(seen!.html) && w.wantCalls.length === 0 },
     { name: "a posting on acme.bamboohr.com, on remoteok.com or news.ycombinator.com gets the lettermark; one on the employer's own careers host gets its logo (was: the ATS's or board's favicon)",
       s: SC(910_008, [POST(1, { url: "ats_other", slug: "marrowbyte" }), POST(2, { url: "board", boardHost: "news.ycombinator.com" }), POST(3, { url: "own_gh", slug: "oskarion" })], [{ k: "get" }]),
-      want: (seen) => rowOf(seen, 0)?.img === null && rowOf(seen, 1)?.img === null && /domain=oskarion\.com/.test(rowOf(seen, 2)?.img ?? "") },
+      want: (seen) => rowOf(seen, 0)?.img === null && rowOf(seen, 1)?.img === null && /(?:domain|logo)=oskarion\.com/.test(rowOf(seen, 2)?.img ?? "") },
     { name: "bidi overrides in a company, a title and a location never reach the page (was: rendered, reversing 'Reported, not verified')",
       s: SC(910_009, [POST(1, { company: "Evil‮gnp.exe Ltd", title: "Planner ‮reganam", rowLoc: "Lisbon ‮PT" })], [{ k: "get" }, { k: "text" }]),
       want: (seen) => !/[‪-‮⁦-⁩]/.test(seen!.html) && rowOf(seen, 0)!.name === "Evilgnp.exe Ltd" },

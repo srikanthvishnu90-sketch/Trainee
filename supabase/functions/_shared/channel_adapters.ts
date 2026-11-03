@@ -176,19 +176,24 @@ export function pacer(o: { perChatMs: number; overallPerSecond: number | null; c
   const gap = o.overallPerSecond ? Math.ceil(1000 / o.overallPerSecond) : 0;
   const lastByChat = new Map<string, number>();
   let lastAny = -Infinity;
-  const one = async (chat: string) => {
-    const now = clock();
-    const wait = Math.max(0, (lastByChat.get(chat) ?? -Infinity) + o.perChatMs - now, lastAny + gap - now);
-    if (wait > 0) await sleep(wait);
-    const t = clock();
-    lastByChat.set(chat, t);
-    lastAny = t;
+  // The global gap is taken one caller after another (a queue); a chat's own gap is waited OUTSIDE the queue, so a chat that
+  // must wait its second (the next bubble of a long message) never holds up anyone else.
+  let tail: Promise<void> = Promise.resolve();
+  return async (chat: string) => {
+    let rest = 0;
+    const p = tail.then(async () => {
+      const now = clock();
+      const chatWait = Math.max(0, (lastByChat.get(chat) ?? -Infinity) + o.perChatMs - now), gapWait = Math.max(0, lastAny + gap - now);
+      if (gapWait > 0) await sleep(gapWait);
+      rest = Math.max(0, chatWait - gapWait);
+      lastAny = clock();
+    });
+    tail = p.catch(() => {});
+    await p;
+    if (rest > 0) await sleep(rest);
+    lastByChat.set(chat, clock());
     if (lastByChat.size > 5000) lastByChat.clear(); // a run never reaches this; a long-lived instance stays bounded
   };
-  // Concurrent callers (deliverDue with concurrency above 1) queue here, one pacing step after another; a sequential caller
-  // never notices. The send itself is outside the queue.
-  let tail: Promise<void> = Promise.resolve();
-  return (chat: string) => { const p = tail.then(() => one(chat)); tail = p.catch(() => {}); return p; };
 }
 
 // The iMessage rendering stays exactly the one WO-013 shipped (bubbles of 700, a bare link alone for its preview card).

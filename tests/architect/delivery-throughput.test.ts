@@ -148,14 +148,23 @@ const claimRow = (id: number, key: string) => ({ id, user_id: `u${id}`, contact:
 Deno.test("store lanes: priority first, then bulk for what is left of the batch, the shard on both; priority rows are handed out first", async () => {
   const f = fakeAdmin((name, a) => ({ data: a.p_lane === "priority" ? [claimRow(5, "reply:a"), claimRow(6, "card:b")] : [claimRow(1, "alert:c"), claimRow(2, "alert:d")], error: null }));
   const rows = await supabaseChannelStore(f.admin, { lanes: true, shard: { index: 1, count: 4 } }).due(NOW, 10);
-  eq(f.calls.map((c) => [c.name, c.args.p_lane, c.args.p_limit, c.args.p_shard, c.args.p_shards]), [["career_outbox_claim_lane", "priority", 10, 1, 4], ["career_outbox_claim_lane", "bulk", 8, 1, 4]]);
+  eq(f.calls.map((c) => [c.name, c.args.p_lane, c.args.p_limit, c.args.p_shard, c.args.p_shards]), [["career_outbox_claim_lane", "priority", 8, 1, 4], ["career_outbox_claim_lane", "bulk", 8, 1, 4]]);
   eq(rows.slice(0, 2).map((r) => r.key).sort(), ["card:b", "reply:a"], "priority rows lead");
 });
 
-Deno.test("store lanes: a full priority batch claims no bulk; a project without the migration falls back to the plain claim, once", async () => {
-  const full = fakeAdmin(() => ({ data: [claimRow(1, "reply:a"), claimRow(2, "reply:b")], error: null }));
-  await supabaseChannelStore(full.admin, { lanes: true }).due(NOW, 2);
-  eq(full.calls.length, 1, "no bulk call when the priority lane filled the batch");
+Deno.test("store lanes: a priority backlog as long as the batch still leaves alerts and reports a quota in every round", async () => {
+  // priority always has more than asked; bulk has plenty
+  const f = fakeAdmin((_n, a) => ({ data: Array.from({ length: a.p_limit }, (_, i) => claimRow(i + (a.p_lane === "bulk" ? 1000 : 1), a.p_lane === "bulk" ? `alert:x${i}` : `reply:y${i}`)), error: null }));
+  const rows = await supabaseChannelStore(f.admin, { lanes: true }).due(NOW, 100);
+  eq(rows.length, 100);
+  eq(rows.filter((r) => r.key.startsWith("alert:")).length, 15, "15% of the batch is alerts although the priority backlog could fill it");
+  eq(rows.filter((r) => r.key.startsWith("reply:")).length, 85);
+  // when bulk has nothing, the quota goes back to the priority lane: the batch is still full
+  const g = fakeAdmin((_n, a) => ({ data: a.p_lane === "bulk" ? [] : Array.from({ length: a.p_limit }, (_, i) => claimRow(i + 1, `reply:y${i}`)), error: null }));
+  eq((await supabaseChannelStore(g.admin, { lanes: true }).due(NOW, 100)).length, 100, "nothing left unused");
+});
+
+Deno.test("store lanes: a project without the migration falls back to the plain claim, once; lanes off is the old claim only", async () => {
   const old = fakeAdmin((name) => name === "career_outbox_claim_lane" ? { data: null, error: { code: "PGRST202", message: "Could not find the function public.career_outbox_claim_lane in the schema cache" } } : { data: [claimRow(1, "alert:x")], error: null });
   const store = supabaseChannelStore(old.admin, { lanes: true });
   eq((await store.due(NOW, 5)).length, 1);

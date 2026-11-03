@@ -119,3 +119,34 @@ Deno.test("without a shared pacer the adapter is exactly what it was (the in-pro
   const r = await a.send("1", ["a", "b"]);
   eq([r.ok, sent.length], [true, 2]);
 });
+
+Deno.test("a chat waiting for its own second (the next bubble of a long message) does not hold up any other chat", async () => {
+  const sent: { chat: string; at: number }[] = [];
+  const f = (async (_u: string, i: RequestInit) => { sent.push({ chat: String(JSON.parse(String(i.body)).chat_id), at: performance.now() }); return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } })); }) as unknown as typeof fetch;
+  // the in-process pacer alone (no shared bucket): one adapter, as a delivery run has
+  const a = telegramAdapter({ token: "T", fetch: f });
+  const t0 = performance.now();
+  const long = a.send("1", ["first", "second"]);
+  await real(30);
+  const other = await a.send("2", ["x"]);
+  const otherAt = performance.now() - t0;
+  assert(other.ok);
+  assert(otherAt < 400, `the other chat waited ${otherAt.toFixed(0)} ms behind a bubble that must wait a second`);
+  await long;
+  const second = sent.filter((s) => s.chat === "1")[1].at - t0;
+  assert(second >= 900, `the same chat's next bubble still waits its second (${second.toFixed(0)} ms)`);
+  // and with the shared bucket the local pacer keeps only the overall gap (the chat's second is the bucket's key)
+  const b = bucketAdmin(), t1 = performance.now();
+  const c = telegramAdapter({ token: "T", fetch: okFetch([]), sharedPace: dbTelegramPacer(b.admin, { rate: 1000, burst: 100, perChatRate: 20, sleep: real }) });
+  await c.send("9", ["a", "b", "c"]);
+  assert(performance.now() - t1 < 500, "three bubbles to one chat take the bucket's 50 ms gaps, not three seconds");
+});
+
+Deno.test("a link, a document or a photo refused for the shared budget is a retryable failure that says how long to wait", async () => {
+  let fetched = 0;
+  const gate = { async rpc() { return { data: 7000, error: null }; } };
+  const a = telegramAdapter({ token: "T", fetch: (async () => { fetched++; return new Response("{}"); }) as unknown as typeof fetch, clock: () => 0, sleep: async () => {}, sharedPace: dbTelegramPacer(gate, { maxWaitMs: 1000, sleep: async () => {} }) });
+  const results: any[] = [await a.sendLink!("5", "https://example.test/x"), await a.sendDocument!("5", { bytes: new Uint8Array([1]), filename: "a.pdf", mime: "application/pdf" }), await a.sendPhoto!("5", { photoUrl: "https://example.test/p.png", caption: "c" })];
+  for (const r of results) eq([r.ok, r.retryable, r.retryAfterMs], [false, true, 7000]);
+  eq(fetched, 0, "nothing was sent");
+});

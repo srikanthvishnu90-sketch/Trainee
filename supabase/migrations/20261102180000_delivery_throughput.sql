@@ -16,7 +16,8 @@
 -- 3. Retention: career_outbox_purge deletes finished rows older than 30 days (delivered, skipped, failed for good) in
 --    batches. Safe for the unique (user_id, key) that stops a repeat: alerts are matched against postings first seen in the
 --    last 26 hours (career_proactive_run.ts) and receipts against applications finished recently, so a key older than 30
---    days is never offered again. It never touches queued, sending, held or retrying rows. Scheduled by
+--    days is never offered again. NOTE: deleting a row frees its (user_id, key): if the same key were enqueued again after that, it would be sent again;
+--    the 26-hour posting window and the recent-finished window are what make that not happen, so do not shorten the retention below them. It never touches queued, sending, held or retrying rows. Scheduled by
 --    scripts/launch/schedule-outbox-retention.sql (owner runs it).
 -- 4. Indexes: the 4 outbox indexes the scale report calls unused (career_outbox_parts, _provider_id, _provider_ids, _card_id)
 --    are KEPT, deliberately: the repo shows every one of them is read (see the comment above the retention index below), and
@@ -96,6 +97,8 @@ begin
 end $$;
 
 -- 2. ---------------------------------------------------------------------------------------------------------------------
+-- (link and questions are kinds the table allows: 20261026230017 career_outbox_kind_check lists alert, report, reply, receipt, card,
+-- status, followup, mock, brief, digest, link, questions.)
 -- The priority lane's kinds: what a person is waiting for (a reply, the card they approve, the link that signs them in,
 -- a question an application needs answered). Everything else is bulk.
 create index if not exists career_outbox_due_priority on public.career_outbox (deliver_at, id)

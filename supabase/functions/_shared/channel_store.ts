@@ -40,11 +40,17 @@ export function supabaseChannelStore(admin: any, o: {
   const missing = (e: { message?: string; code?: string } | null) => { const said = `${e?.code ?? ""} ${e?.message ?? ""}`; return !!e && /career_outbox_claim_lane|PGRST202/i.test(said) && /exist|find|no function|PGRST202/i.test(said); };
   const claimLanes = async (now: number, limit: number): Promise<any[]> => {
     const take = (lane: string, n: number) => admin.rpc("career_outbox_claim_lane", { p_now: iso(now), p_limit: n, p_lane: lane, p_shard: o.shard?.index ?? 0, p_shards: o.shard?.count ?? 1 });
-    const first = await take("priority", limit);
-    if (missing(first.error)) { lanesGone = true; return must<any[]>(await admin.rpc("career_outbox_claim", { p_now: iso(now), p_limit: limit }), "claim due messages") || []; }
+    // A bulk quota (about 15%) is reserved in every round: a backlog of replies and cards as long as the batch must not hold
+    // alerts and reports back until they are stale (channel.ts ALERT_STALE_MS) and dropped. The quota is the priority lane's
+    // too when bulk has nothing, so nothing is left unused.
+    const reserve = limit >= 2 ? Math.max(1, Math.ceil(limit * 0.15)) : 0;
+    const first = await take("priority", limit - reserve);
+    if (missing(first.error)) { lanesGone = true; return must<any[]>(await admin.rpc("career_outbox_claim", { p_now: iso(now), p_limit: limit }), "claim due messages") || []; } // (the plain claim has no shard: runs may overlap, skip locked keeps every row to one of them)
     const rows = must<any[]>(first, "claim due messages") || [];
-    if (rows.length >= limit) return rows;
-    return [...rows, ...(must<any[]>(await take("bulk", limit - rows.length), "claim due messages") || [])];
+    const bulk = must<any[]>(await take("bulk", limit - rows.length), "claim due messages") || [];
+    const got = [...rows, ...bulk];
+    if (got.length < limit && rows.length >= limit - reserve) return [...got, ...(must<any[]>(await take("priority", limit - got.length), "claim due messages") || [])];
+    return got;
   };
   const claimed = new Map<string, { prior: string; attempts: number; parts?: number }>();
   return {

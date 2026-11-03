@@ -220,7 +220,8 @@ export function telegramAdapter(o: {
   sharedPace?: SharedPace; // the database bucket every invocation shares (channel_pacer.ts); absent: this process only, as before
 }): ChannelAdapter {
   const f = o.fetch ?? fetch, timeout = o.timeoutMs ?? 15000;
-  const localPace = pacer({ perChatMs: 1000, overallPerSecond: 30, clock: o.clock, sleep: o.sleep });
+  // With the shared bucket, the chat's one-a-second is its key there; the local pacer keeps only the process's overall gap.
+  const localPace = pacer({ perChatMs: o.sharedPace ? 0 : 1000, overallPerSecond: 30, clock: o.clock, sleep: o.sleep });
   // Both: this process's own pacing, then the shared bucket. A refusal (the shared budget is spent for longer than a request
   // should sleep) is reported by the caller as a retryable failure that waits retryAfterMs, nothing sent.
   const pace = async (chat: string): Promise<{ ok: true } | { ok: false; retryAfterMs: number }> => {
@@ -314,7 +315,7 @@ export function telegramAdapter(o: {
     // FEATURE 16: a document as a file (sendDocument, multipart; https://core.telegram.org/bots/api#senddocument, ASSUMED):
     // the bytes themselves, never a link to them.
     async sendDocument(address, doc): Promise<SendResult> {
-      const g = await pace(address); if (!g.ok) return paced(g, "the shared send budget is spent; try again shortly", false);
+      const g = await pace(address); if (!g.ok) return paced(g, "the shared send budget is spent; try again shortly", true);
       try {
         const form = new FormData();
         form.append("chat_id", String(Number(address)));
@@ -328,7 +329,7 @@ export function telegramAdapter(o: {
     // REPLY SHAPE: a link alone in its message, preview on for exactly that URL (link_preview_options {is_disabled:false, url};
     // https://core.telegram.org/bots/api#linkpreviewoptions, ASSUMED field names), so Telegram shows the title and image card.
     async sendLink(address, url): Promise<SendResult> {
-      const g = await pace(address); if (!g.ok) return paced(g, "the shared send budget is spent; try again shortly", false);
+      const g = await pace(address); if (!g.ok) return paced(g, "the shared send budget is spent; try again shortly", true);
       const r = await call("sendMessage", { chat_id: Number(address), text: safeSlice(url, TELEGRAM_CHARS), link_preview_options: { is_disabled: false, url, prefer_large_media: true } });
       if ("error" in r) return { ok: false, error: redact(`Telegram unreachable: ${r.error instanceof Error ? r.error.message : String(r.error)}`).slice(0, 200), retryable: false };
       if (r.status === 200 && r.body?.ok === true) return { ok: true, id: r.body?.result?.message_id != null ? String(r.body.result.message_id) : null };
@@ -345,7 +346,7 @@ export function telegramAdapter(o: {
     // at most 1,024 characters, plain text; https://core.telegram.org/bots/api#sendphoto, ASSUMED). A refusal (Telegram could
     // not fetch the logo) is a plain failure, and the caller sends the same card as text.
     async sendPhoto(address, p): Promise<SendResult> {
-      const g = await pace(address); if (!g.ok) return paced(g, "the shared send budget is spent; try again shortly", false);
+      const g = await pace(address); if (!g.ok) return paced(g, "the shared send budget is spent; try again shortly", true);
       const r = await call("sendPhoto", { chat_id: Number(address), photo: p.photoUrl, caption: safeSlice(p.caption, TELEGRAM_CAPTION),
         ...(keyboardOf(p.buttons) ? { reply_markup: keyboardOf(p.buttons) } : {}) });
       if ("error" in r) return { ok: false, error: redact(`Telegram unreachable: ${r.error instanceof Error ? r.error.message : String(r.error)}`).slice(0, 200), retryable: false };

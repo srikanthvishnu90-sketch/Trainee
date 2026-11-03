@@ -149,7 +149,7 @@ jobs:
           CAREER_PROACTIVE_SECRET: ${{ secrets.CAREER_PROACTIVE_SECRET }}
           TRAINEE_DELIVER_SECRET: ${{ secrets.TRAINEE_DELIVER_SECRET }}
           TRAINEE_INBOUND_SECRET: ${{ secrets.TRAINEE_INBOUND_SECRET }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LOOPMESSAGE_API_KEY: ${{ secrets.LOOPMESSAGE_API_KEY }}
           INGEST_CONTACT_EMAIL: ${{ secrets.INGEST_CONTACT_EMAIL }}
           TRAINEE_ALLOWED_CONTACTS: ${{ secrets.TRAINEE_ALLOWED_CONTACTS }}
@@ -261,7 +261,7 @@ jobs:
           MASK_4: ${{ secrets.CAREER_PROACTIVE_SECRET }}
           MASK_5: ${{ secrets.TRAINEE_DELIVER_SECRET }}
           MASK_6: ${{ secrets.TRAINEE_INBOUND_SECRET }}
-          MASK_7: ${{ secrets.OPENAI_API_KEY }}
+          MASK_7: ${{ secrets.ANTHROPIC_API_KEY }}
           MASK_8: ${{ secrets.LOOPMESSAGE_API_KEY }}
           MASK_9: ${{ secrets.INGEST_CONTACT_EMAIL }}
           MASK_10: ${{ secrets.TRAINEE_ALLOWED_CONTACTS }}

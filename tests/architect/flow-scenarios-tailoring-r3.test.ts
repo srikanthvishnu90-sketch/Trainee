@@ -1,7 +1,7 @@
 // TAILORING, LETTERS AND FORM ANSWERS END TO END, ROUND 3 (architect, 2026-11-02; owner rule D-007). A sample of round 3's
 // battery (scenarios-tailoring-r3.test.ts, ~10,800 scenarios) through the REAL production handler (handler-career.ts handleChat;
 // harness tests/flow/handler.ts: real supabase-js over tests/flow/postgrest.ts, real Postgres 16 with every migration). Each
-// person pastes the fixture resume and confirms it in chat, in a thread of their own. The brain is scripted (a fake OpenAI
+// person pastes the fixture resume and confirms it in chat, in a thread of their own. The brain is scripted (a fake Anthropic
 // endpoint answers only the essay drafter; every other host is refused and recorded):
 //   cap        a written question with the form's own limit ("max 200 characters"): an answer over it is not saved and the
 //              reply says by how much; one inside it is saved word for word
@@ -20,6 +20,7 @@ import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { psqlSession } from "../flow/psql-session.ts";
 import { careerHandler, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
 import { questionsToStore } from "../../workers/career-browser/ask-once.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -38,7 +39,7 @@ Deno.test({
     if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 binaries in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
     if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (initdb)"); return; }
     const pg: Pg = await startPg();
-    const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "OPENAI_API_KEY", "CAREER_MODEL", "CAREER_TAILOR_REWRITE", "CAREER_HOSTED_PREPARE"];
+    const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "ANTHROPIC_API_KEY", "CAREER_MODEL", "CAREER_TAILOR_REWRITE", "CAREER_HOSTED_PREPARE"];
     const saved = Object.fromEntries(unset.map((k) => [k, Deno.env.get(k)]));
     for (const k of unset) Deno.env.delete(k);
     let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
@@ -59,7 +60,7 @@ Deno.test({
       const calls = { essay: 0, other: 0 };
       const answer = (content: string, model: string) => new Response(JSON.stringify({ id: "chatcmpl-test", model, choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }], usage: { prompt_tokens: 500, completion_tokens: 100 } }), { headers: { "content-type": "application/json" } });
       // deno-lint-ignore no-explicit-any
-      const fakeOpenAI = (body: any): Response => {
+      const fakeModel = (body: any): Response => {
         const sys = String(body.messages?.find((m: { role: string }) => m.role === "system")?.content ?? "");
         if (/one answer to a job application question/.test(sys)) { calls.essay++; return answer(essay.shift() ?? "", body.model); }
         calls.other++;
@@ -70,12 +71,11 @@ Deno.test({
         // deno-lint-ignore no-explicit-any
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
         const u = new URL(req.url);
-        if (u.host === "api.openai.com") return fakeOpenAI(await req.json());
+        if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
         if (u.origin !== new URL(SUPABASE_URL).origin) { outbound.push(`${req.method} ${u.host}`); throw new TypeError(`network refused: ${u.host}`); }
         return await viaDouble(req);
       }) as typeof fetch;
-      Deno.env.set("OPENAI_API_KEY", ["sk", "test", "fake"].join("-"));
-      Deno.env.set("CAREER_MODEL", "gpt-5-mini");
+      Deno.env.set("ANTHROPIC_API_KEY", ["sk", "test", "fake"].join("-"));
 
       const failures: string[] = [];
       const counts: Record<string, number> = {};

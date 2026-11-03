@@ -692,7 +692,7 @@ export async function runAllowance(s: Allowance) {
     call: (async (cfg: any, _p: any, o: any) => { sent++; await new Promise((res) => setTimeout(res, 1)); meterAdd(o.meter, cfg, { input_tokens: 1, output_tokens: 1 }); return { ok: true }; }) as any });
   let ok = 0;
   for (let k = 0; k < s.asked; k += s.group) {
-    const part = Array.from({ length: Math.min(s.group, s.asked - k) }, () => cap.call({ provider: "openai", model: "gpt-5-mini" } as any, {}, { meter }).then(() => { ok++; }, () => {}));
+    const part = Array.from({ length: Math.min(s.group, s.asked - k) }, () => cap.call({ provider: "anthropic", model: "claude-haiku-5-5" } as any, {}, { meter }).then(() => { ok++; }, () => {}));
     await Promise.all(part);
   }
   const want = Math.max(0, Math.min(s.asked, s.limit - s.used));

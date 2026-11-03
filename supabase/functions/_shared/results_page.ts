@@ -10,7 +10,7 @@
 // "A few things first" (renderThings), or the application is still being prepared. Nothing here sends on a GET.
 import { cap1, esc, hostOf, layout, webUrl, initialOf, type Row } from "./file_page.ts";
 import { BRAND } from "./brand.ts";
-import { stampHtml } from "./results_stamp.ts";
+import { stampHtml } from "./file_design.ts";
 import { applyHelp, coverage, NOT_LISTED, specOf, stateCountsOf, stateOfDismissed, type Spec } from "./results_spec.ts";
 import { DESIGN_CSS, DESIGN_FONT_LINK } from "./results_design.ts";
 
@@ -31,11 +31,13 @@ export interface ResultsFeed {
   token: string; title: string; floor: string | null; rows: ResultRow[]; total: number;
   filters: { pay: PayFilter; where: string }; places: string[]; top?: string; notes?: Record<string, string>;
   // The header: who and when, what was read and when, what is not confirmed, and a 2-3 line quick read.
-  // stamp: "Postings checked ..." from the shown postings' own last_seen_at (results_stamp.ts); null: "Check time unknown".
+  // stamp: "Postings checked ..." from the shown postings' own last_seen_at (file_design.ts); null: "Check time unknown".
   coverRows?: ResultRow[]; // every role including dismissed: what has been sent is told over these
   countRows?: ResultRow[]; // every active (not dismissed) role, before the pay/place filter: the top counts are over these
   paused?: boolean; updated?: string; dismissed?: ResultRow[]; // the person's own marks (private); updated: when this page was drawn
   madeFor?: string; stamp?: string | null; caveat?: string; quick?: string[];
+  // "Apply to all N ready": the roles that are ready now (and not dismissed) and the hash of that exact set; absent: fewer than two, or paused.
+  all?: { hash: string; size: number; filtered?: boolean } | null;
 }
 
 const BRAND_PLUM = "#5C2751";
@@ -150,6 +152,7 @@ export function renderResults(f: ResultsFeed): string {
   const pauseForm = pausable ? `<form method="post">${hidden(f.token, "pause")}<button type="submit" class="ghost danger">Pause on this page</button></form>` : "";
   const actionbar = selForm || pauseForm ? `<div class="actionbar" role="region" aria-label="Page actions"><div class="abin">${selForm}${pauseForm}</div></div>` : "";
   const selhelp = canPick ? `<p class="selhelp">Tick the roles you want, then use Apply to selected at the bottom. Ones that are ready go in one tap; the rest say what they need.</p>` : "";
+  const allbar = f.all && !f.paused ? `<div class="selbar allbar"><form method="post" id="all">${hidden(f.token, "applyall", `<input type="hidden" name="set" value="${esc(f.all.hash)}">`)}<button type="submit" class="apply">Apply to all ${f.all.size} ready</button></form><p>Approves ${f.all.filtered ? `all ${f.all.size} ready roles on the whole list, not only the roles your filters show` : `the ${f.all.size} ready roles on this list`}, each exactly as its What will be sent shows. Dismissed roles and roles that aren't ready are left out. If anything changes first, nothing is approved.</p></div>` : "";
   const meets = f.rows.filter((r) => r.payGroup === "meets"), unchecked = f.rows.filter((r) => r.payGroup === "unchecked"), unlisted = f.rows.filter((r) => r.payGroup === "unlisted"), below = f.rows.filter((r) => r.payGroup === "below");
   const group = (title: string, note: string, rows: ResultRow[]) => rows.length ? `<h2 class="group">${esc(title)} (${rows.length})</h2>${note ? `<p class="groupnote">${esc(note)}</p>` : ""}<ul class="cards">${rows.map((r) => card(r, f)).join("")}</ul>` : "";
   const body = f.rows.length
@@ -178,7 +181,7 @@ export function renderResults(f: ResultsFeed): string {
       : open ? `<div class="pausebar"><p><b>Pause on this page</b> (button at the bottom) stops this page from approving or starting anything new. It does not stop Telegram: the buttons there still work. Applications already approved or in progress are not cancelled and may still finish.</p></div>` : "")
     + `</section>`;
   const gone = f.dismissed?.length ? `<details class="gone"><summary>Dismissed (${f.dismissed.length})</summary><ul class="cards">${f.dismissed.map((r) => `<li class="card" id="r-${esc(r.ref)}"><p class="state">${r.rid ? `<span class="rid">${esc(r.rid)}</span>` : "<span></span>"}${chipOf(stateOfDismissed(), "dismissed")}</p><div class="head">${logoOf(r)}<div class="ttl"><h3 class="title">${esc(r.job.title)}</h3><p class="co">${esc(r.job.company)}</p></div></div><p class="markhelp">Dismissed by you. Private and reversible. No application was touched. Current state: ${esc(specOf(r).label)}.</p>${markForm(r, f, "restore")}</li>`).join("")}</ul></details>` : "";
-  const inner = `<div id="root" class="results">${BRAND}<header class="filehead">${headTop}${topBlock}</header>${quick}${filters}${shown}${selhelp}${actionbar}<main id="main">${top}${body}${gone}</main></div>`;
+  const inner = `<div id="root" class="results">${BRAND}<header class="filehead">${headTop}${topBlock}</header>${quick}${filters}${shown}${selhelp}${allbar}${actionbar}<main id="main">${top}${body}${gone}</main></div>`;
   return layout(`${cap1(f.title)} - Trainee`, inner, { css: CSS, head: DESIGN_FONT_LINK });
 }
 

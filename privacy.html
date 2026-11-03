@@ -92,7 +92,7 @@
   <ul>
     <li><strong>Supabase</strong> — sign-in, database, and encrypted vault (US). Your rows are isolated to your account.</li>
     <li><strong>Vercel</strong> — hosts the app.</li>
-    <li><strong>OpenAI</strong> (and Anthropic, if we switch providers) — your Guide messages, and any photo you attach, are sent to the AI provider so it can answer you. Conversations are trimmed and capped. Under these providers' API terms, data sent through their API is not used to train their models by default.</li>
+    <li><strong>Anthropic</strong> — your Guide messages, and any photo you attach, are sent to Anthropic's API so Claude can read them and answer you. If you connect Gmail and the email check is on, the sender name, subject and preview of an unclear employer email (long numbers and email addresses masked) are sent the same way for Claude to read; Trainee stores nothing from that beyond the confirmed facts and results shown in the app. Conversations are trimmed and capped. What Anthropic keeps, and whether it trains on API data, is governed by Anthropic's API terms.</li>
     <li><strong>Google</strong> — sign-in only, if you choose it.</li>
     <li><strong>SimpleFIN</strong> — only if you connect your bank (read-only bank data).</li>
     <li><strong>Alpaca</strong> — only if you connect your own brokerage account (account data, and the orders you approve).</li>

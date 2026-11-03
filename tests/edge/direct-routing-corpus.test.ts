@@ -21,7 +21,7 @@ async function owner(ask: string): Promise<string | null> {
   if (momentReply(ask)) return "momentReply";
   if (termsReply(ask)) return "termsReply";
   if (accreditedReply(ask, "2026-10-12")) return "accreditedReply";
-  if (accountPrivacyReply(ask, "openai")) return "accountPrivacyReply";
+  if (accountPrivacyReply(ask, "anthropic")) return "accountPrivacyReply";
   if (sleepReply(ask, { start: 22, end: 7 })) return "sleepReply";
   if (travelReply(ask, "America/New_York")) return "travelReply";
   for (const name of ORDER) if ((await ANSWERS[name](ask)) !== null) return name;

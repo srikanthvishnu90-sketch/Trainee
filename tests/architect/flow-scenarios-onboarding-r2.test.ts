@@ -5,7 +5,7 @@
 // chatThroughAgent, the head-start deliverer), into the real agent-chat handler (handler-career.ts handleChat) on a real
 // Postgres 16 with every migration (tests/flow/pg.ts) behind the PostgREST double. Telegram is a fake Bot API
 // (scenarios/telegram-bot-api.ts) that also serves getFile and the file itself: the resumes are real PDF and Word bytes,
-// read by the product's own reader. No model (CAREER_BRAIN and OPENAI_API_KEY unset); every other host is refused.
+// read by the product's own reader. No model (CAREER_BRAIN and ANTHROPIC_API_KEY unset); every other host is refused.
 // Each person signs up by their first message (an allow-listed chat), sends their resume as a FILE, and replies: partial
 // yeses, a correction, /start, a search or an apply ask, a newer resume before the yes, a cover letter or a transcript
 // instead, the yes, a dispute ("actually I never worked at X"), a newer resume after. After every turn the database is
@@ -73,7 +73,7 @@ Deno.test({
     const started = Date.now();
     const pg: Pg = await startPg();
     const keys = ["CAREER_BRAIN", "CAREER_KNOWLEDGE", "CAREER_BRAIN_ROUTER_INTENTS", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING",
-      "CAREER_ACCOUNT_MEMORY", "OPENAI_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "TRAINEE_FILE_BASE_URL", "TRAINEE_FILE_LINK_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET",
+      "CAREER_ACCOUNT_MEMORY", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "TRAINEE_FILE_BASE_URL", "TRAINEE_FILE_LINK_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET",
       "TELEGRAM_BOT_USERNAME", "TELEGRAM_LOGIN_URL", "TRAINEE_SIGNUP", "TRAINEE_ALLOWED_CONTACTS", "CAREER_REPLY_WRITER", "CAREER_TEXTING_NATIVE", "TRAINEE_DELIVER_SECRET", "LOOPMESSAGE_API_KEY",
       "WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "TRAINEE_LOGO_URL", "TRAINEE_LOGO_GUESS"];
     const saved = Object.fromEntries(keys.map((k) => [k, Deno.env.get(k)]));

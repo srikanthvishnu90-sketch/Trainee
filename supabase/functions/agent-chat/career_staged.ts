@@ -20,6 +20,7 @@ type Env = { get(k: string): string | undefined };
 type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler: string | null; contained?: boolean; result?: any }; isHostControlled(text: string, ctx: any): boolean };
 
 import { correctedAsk } from "../_shared/search_correction.ts";
+import { askFor } from "../_shared/career_search_judge.ts";
 export type BrainMode = "router" | "agent" | "staged";
 // The served brain (release_config.ts): the committed PRODUCTION_BRAIN unless CAREER_BRAIN rolls it back to the router.
 // "agent" is never served from here (the full brain stays pinned off in career_brain.ts).
@@ -212,6 +213,27 @@ export function adviceQuestion(message: string, intent: string | null, result: u
   return !/mock|drill|answer_score|session/i.test(kind);
 }
 
+// A File page ask ("show me a File page for getting started with job applications. Do not apply or submit anything") is not a
+// job search, but the router reads its words as one: the "role" it searches for is "file page getting started applications do
+// submit anything", the list is empty, and the person is told "Nothing to show yet" with no page. When every word the search
+// would use is a File-page or process word, and the ask states no place, pay, level, company, season, sponsorship or remote
+// limit, there is no search to run: the brain (which can make the page, create_file, and cannot apply: STAGED_WITHHELD_TOOLS)
+// takes it. An ask that names any role ("a File page of data analyst jobs") or any limit stays a search, on code's path.
+const FILE_PAGE_ASK = /\b(?:show|open|give|send|make|create|build|get|share|see)\b[^.?!]{0,40}\bfile page\b|\bfile page\b[^.?!]{0,60}\b(?:for|about|on|to)\b/i;
+const FILE_PAGE_WORDS = new Set(("file page pages a an the my me us our your for of on about to with and or in into from by at as is it this that these those please can could would will you i " +
+  "show open give send make create build get see share start started starting getting begin beginning guide intro introduction overview basics steps how help new first " +
+  "job jobs application applications apply applying submit submitting submission anything nothing do does not dont don't never without any all no and").split(/\s+/));
+const SEARCH_LIKE = new Set(["career_discovery", "career_internship_discovery"]);
+export function filePageAsk(message: string, ask: { role?: string; place?: string | null; remote?: boolean; remoteOnly?: boolean; limits?: Record<string, unknown> } | null | undefined): boolean {
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'");
+  if (!FILE_PAGE_ASK.test(m)) return false;
+  if (!ask) return true;
+  const L = ask.limits ?? {};
+  const limited = Object.values(L).some((v) => Array.isArray(v) ? v.length > 0 : !!v);
+  if (ask.place || ask.remote || ask.remoteOnly || limited) return false;
+  return String(ask.role ?? "").toLowerCase().split(/[^a-z']+/).filter(Boolean).every((w) => FILE_PAGE_WORDS.has(w));
+}
+
 export type StagedDecision = { brain: boolean; mode: BrainMode; intent: string | null; reason: string };
 
 // Whether this turn goes to the brain in staged mode. Called only after every code-first turn has passed on it.
@@ -237,6 +259,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   } else intent = probe.intent ?? null;
   if (!intent) return { brain: false, mode, intent: null, reason: "router_claimed" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
+  if (SEARCH_LIKE.has(intent) && filePageAsk(o.message, askFor(o.message, { intent, resultStatus: probe.resultStatus }, o.ctx.discovery)?.ask)) return { brain: true, mode, intent, reason: "file_page_ask" };
   if (openCareerQuestion(o.env, o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "open_career_question" };
   if (adviceQuestion(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "advice_question" };
   if (!STAGED_BRAIN_INTENTS.includes(intent)) return { brain: false, mode, intent, reason: "action" };

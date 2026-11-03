@@ -198,3 +198,14 @@ Deno.test("CO/12 brain-eval.yml: every run block parses in bash (the push's-apos
   assert(/--model claude/.test(wf) && !/--model openai/.test(wf));
   assert(/rejudge\.ts --from-branch ci\/brain-eval --run/.test(wf), "no rejudge action");
 });
+
+Deno.test("assertRunMayStart: an eval run is refused before it spends when the ledger would not take its quote, and the probe reservation is released", async () => {
+  const { assertRunMayStart, memoryBudgetGate } = await import("../../supabase/functions/_shared/model_budget.ts");
+  const gate = memoryBudgetGate(1_000_000);
+  await assertRunMayStart(gate, 400_000);
+  if (gate.snapshot().reserved !== 0 || gate.snapshot().spent !== 0) throw new Error("the probe must leave nothing reserved or spent");
+  let msg = ""; try { await assertRunMayStart(gate, 2_000_000); } catch (e) { msg = String((e as Error).message); }
+  if (!/^NOT RUN: /.test(msg)) throw new Error(`a quote over the limit must be refused, got: ${msg}`);
+  msg = ""; try { await assertRunMayStart(null, 1); } catch (e) { msg = String((e as Error).message); }
+  if (!/^NOT RUN: /.test(msg)) throw new Error("no gate means no run");
+});

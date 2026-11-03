@@ -313,6 +313,8 @@ if (import.meta.main) {
   const pre = preflight({ quote, parallel, spent_usd: before, target_usd: target, hard_usd: hard, ledger: sharedLedger ? "shared" : "process-local" });
   console.log(pre.line);
   if (!pre.ok) { console.log("NOT RUN: the preflight quote was refused; nothing was spent."); Deno.exit(2); }
+  try { await bud.assertRunMayStart(gate, Math.ceil(quote.total_usd * 1e6), { model: brainCfg.model, role: "eval" }); }
+  catch (e) { console.log(e instanceof Error ? e.message : String(e)); Deno.exit(2); }
   // Per-item stop: this run's spend plus a reserve for one more item must stay under the lowest cap named (the target, and
   // --budget-usd / EVAL_BUDGET_USD / ANTHROPIC_EVAL_BUDGET_USD when given), and always under the hard max.
   const caps = [target, ...[opt("--budget-usd"), get("EVAL_BUDGET_USD"), get("ANTHROPIC_EVAL_BUDGET_USD")].filter((x) => x != null && x !== "").map(Number)];

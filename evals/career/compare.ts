@@ -281,11 +281,14 @@ if (import.meta.main) {
   if (!Deno.env.get("ANTHROPIC_API_KEY")) { console.log("NOT RUN: no ANTHROPIC_API_KEY (the judge needs it; outside agents' replies are graded by it too)."); Deno.exit(2); }
   const { callModel, modelConfigFor, newMeter } = await import("../../supabase/functions/_shared/model_gateway.ts");
   const { careerModelConfig } = await import("../../supabase/functions/agent-chat/release_model.ts");
+  const bud = await import("../../supabase/functions/_shared/model_budget.ts");
+  const gate = bud.resolveBudgetGate(undefined, (k) => Deno.env.get(k)) ?? bud.memoryBudgetGate(15_000_000);
+  try { await bud.assertRunMayStart(gate, 1_000_000, { model: "compare", role: "eval" }); } catch (e) { console.log(e instanceof Error ? e.message : String(e)); Deno.exit(2); }
   const meter = newMeter(), judgeMeter = newMeter();
   const brainCfg = careerModelConfig(Deno.env);
   const judgeCfg = modelConfigFor(Deno.env, Deno.env.get("EVAL_JUDGE_MODEL") || "claude-sonnet-5-5");
   const text = (res: any) => (res.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
-  const ask = (prompt: string, max = 400) => callModel(judgeCfg, { system: "You are a strict grader. Output JSON only.", messages: [{ role: "user", content: prompt }], max_tokens: max }, { meter: judgeMeter, role: "chat" });
+  const ask = (prompt: string, max = 400) => callModel(judgeCfg, { system: "You are a strict grader. Output JSON only.", messages: [{ role: "user", content: prompt }], max_tokens: max }, { meter: judgeMeter, role: "chat", budget: gate });
   const judge: ConvJudge = async (prompt) => parseJudge(text(await ask(prompt)));
   const rubricJudge = async (prompt: string) => parseRubric(text(await ask(prompt, 500)));
   const label = opt("--label") || `compare-${new Date().toISOString().slice(0, 10)}`;
@@ -294,7 +297,7 @@ if (import.meta.main) {
   const results: ContestantResult[] = [];
   for (const c of (opt("--contestants") || "trainee-agent,trainee-router,claude-plain").split(",")) {
     if (c === "trainee-agent" || c === "trainee-router") {
-      const brain = await traineeBrain({ kind: c === "trainee-agent" ? "agent" : "router", postings: set.postings, model: (p) => callModel(brainCfg, p, { meter, role: "chat" }) });
+      const brain = await traineeBrain({ kind: c === "trainee-agent" ? "agent" : "router", postings: set.postings, model: (p) => callModel(brainCfg, p, { meter, role: "chat", budget: gate }) });
       results.push(await runContestant({ name: c, agent: c === "trainee-agent" ? `Trainee, ${brainCfg.model}` : "Trainee, scripted router", brain, stateful: true, items: pick(items), postings: set.postings, judge, rubricJudge }));
     } else if (c === "claude-plain") {
       const sys = opening(set.postings);
@@ -302,7 +305,7 @@ if (import.meta.main) {
         const msgs: any[] = [], replies: string[] = [];
         for (const u of users) {
           msgs.push({ role: "user", content: u });
-          const r = text(await callModel(brainCfg, { system: sys, messages: msgs, max_tokens: 900 }, { meter, role: "chat" }));
+          const r = text(await callModel(brainCfg, { system: sys, messages: msgs, max_tokens: 900 }, { meter, role: "chat", budget: gate }));
           msgs.push({ role: "assistant", content: r });
           replies.push(r);
         }

@@ -291,22 +291,3 @@ export interface WebSearchResult { available: false; reason: "not_available"; de
 export function webSearch(_query?: string, _opts?: Record<string, unknown>): Promise<WebSearchResult> {
   return Promise.resolve({ available: false, reason: "not_available", detail: "web search is not available: Claude web search is not verified live", results: [] });
 }
-
-// ---- LEGACY SHIMS (temporary; each is removed by the package that owns its callers) -------------------------------------------
-// They exist only so modules owned by other work packages still load while those packages move off them. None of them reaches a
-// network or spends anything.
-// TODO(readers package): career_mail_model.ts, career_essay_card.ts, career_mock_prep.ts and career-proactive/index.ts call
-//   openaiCareerModel; they move to readerModel and this alias is deleted.
-export const openaiCareerModel = (env: Env, fallback = CLAUDE_DEFAULT_MODEL): string => readerModel(env, fallback);
-// TODO(web search package): career_people_provider.ts, agent/research/ground.ts and evals/career/batch/entries.ts call these;
-//   they move to webSearch (or are deleted with research) and the shims are deleted. responsesCall answers 501 "not available".
-export const WEB_SEARCH_FEE_MICROS = 10_000, WEB_SEARCH_MAX_CALLS = 1, WEB_SEARCH_CONTENT_TOKENS = 32_000;
-export function responsesWorst(model: string, body: Record<string, unknown>): { bodyText: string; maxCalls: number; micros: number } {
-  const bodyText = JSON.stringify({ ...body, max_tool_calls: WEB_SEARCH_MAX_CALLS, model });
-  const micros = worstCaseMicros(model, PRICES, { bytes: new TextEncoder().encode(bodyText).length + WEB_SEARCH_MAX_CALLS * WEB_SEARCH_CONTENT_TOKENS, images: 0, maxOutputTokens: Number(body.max_output_tokens) || 4096 }) + WEB_SEARCH_MAX_CALLS * WEB_SEARCH_FEE_MICROS;
-  return { bodyText, maxCalls: WEB_SEARCH_MAX_CALLS, micros };
-}
-export const responsesSettle = (_model: string, _j: unknown): number | null => null;
-export function responsesCall(_o: { apiKey?: string; model?: string; body?: Record<string, unknown>; request?: typeof fetch; budget?: BudgetGate; timeoutMs?: number; role?: ModelRole }): Promise<Response> {
-  return Promise.resolve(new Response(JSON.stringify({ error: { type: "not_available", message: "web search is not available" } }), { status: 501, headers: { "content-type": "application/json" } }));
-}

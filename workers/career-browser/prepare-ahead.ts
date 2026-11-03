@@ -480,10 +480,11 @@ if (import.meta.main) {
   }
   const { createClient } = await import("npm:@supabase/supabase-js@2.117.1");
   const { edgeRenderer, supabaseResumeStore } = await import("../../supabase/functions/_shared/career_tailor.ts");
-  const { callModel, modelConfig, newMeter } = await import("../../supabase/functions/_shared/model_gateway.ts");
+  const { callModel, newMeter } = await import("../../supabase/functions/_shared/model_gateway.ts");
+  const { careerModelConfig } = await import("../../supabase/functions/agent-chat/release_model.ts");
   const admin = createClient(cred.url, cred.key, { auth: { persistSession: false } });
   const root = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
-  const cfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+  const cfg = careerModelConfig(Deno.env);
   // One pool for everything this host prepares: as many browsers as this machine holds, every employer site at full
   // parallelism unless it refuses; a refusal holds that site off for every host through the database.
   const pacing = preparePacing();

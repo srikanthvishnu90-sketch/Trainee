@@ -3,7 +3,7 @@
 // `gpt-` model id. Comments, docs and data (.md, .json, .csv, fixtures, migrations, the job-board rows in router_core*.js) are not
 // executable code and are not scanned. The gateway itself refuses a non-Claude model id (providerFor).
 //
-// ALLOWED is the explicit, short list of files that still name OpenAI because ANOTHER work package owns them. Each entry says which
+// ALLOWED is the explicit, short list of files that still name OpenAI because ANOTHER work package owns them (only the launch scripts now). Each entry says which
 // package removes it; that package deletes its line here in the same PR (an entry whose file no longer matches FAILS this test, so
 // the list cannot rot, and nothing can be added to it silently).
 import assertNode from "node:assert/strict";
@@ -14,15 +14,6 @@ const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a,
 const ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 
 export const ALLOWED: Record<string, string> = {
-  // TODO(voice package): voice stays off; the voice files are deleted or Claude-ified there.
-  "supabase/functions/_shared/career_voice.ts": "voice package",
-  "supabase/functions/_shared/career_voice_link.ts": "voice package",
-  // TODO(readers / web search package): the mail reader pins OpenAI; the people search names its Responses model.
-  "supabase/functions/_shared/career_mail_model.ts": "readers package",
-  "supabase/functions/_shared/career_people_provider.ts": "web search package",
-  // TODO(evals / CI package): the text harness and the prepare-ahead worker default to a gpt model.
-  "scripts/text.ts": "evals package",
-  "workers/career-browser/prepare-ahead.ts": "evals package",
   // TODO(launch scripts package): the go-live scripts still ask for and audit an OpenAI key.
   "scripts/launch/trainee-go-live.sh": "launch package",
   "scripts/launch/owner-go-live.sh": "launch package",

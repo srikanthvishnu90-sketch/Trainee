@@ -24,6 +24,7 @@
 // deno-lint-ignore-file no-explicit-any
 import { pgBinDir, type Pg, startPg } from "../../../tests/flow/pg.ts";
 import { careerHandler, type Chat, supabaseParity } from "../../../tests/flow/handler.ts";
+import { evalNow, PIN_DB_SQL, pinClock } from "./clock.ts";
 import { type EndState, type Expect, judge } from "./judge.ts";
 import { calls as fakeCalls, clearOracle, fakeAnthropic, type OracleStep, setMutation, setOracle } from "./fake_model.ts";
 
@@ -41,12 +42,12 @@ const ENV_KEYS = ["CAREER_BRAIN", "CAREER_PLANNER", "CAREER_PLANNER_USERS", "CAR
 const q = (s: string) => s.replace(/'/g, "''");
 const uid = (i: number) => `7b0f8f8e-6a43-4a49-9d2c-${String(7_000_000_000_000 + i).slice(-12)}`;
 
-async function seed(pg: Pg, ids: string[]) {
-  const P: any[] = SET.postings;
+async function seed(pg: Pg, ids: string[], at: string) {
+  const P: any[] = SET.postings, T = `'${at}'::timestamptz`;
   await pg.sql(`insert into public.career_postings (job_id, provider, board, company, title, location, url, description, first_seen_at, last_seen_at) values
-    ${P.map((p) => `('${p.job_id}', 'greenhouse', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', '${q(p.description)}', now(), now())`).join(",\n")};
+    ${P.map((p) => `('${p.job_id}', 'greenhouse', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', '${q(p.description)}', ${T}, ${T})`).join(",\n")};
     insert into public.career_kb_postings (posting_key, source, board, company, title, location, url, posted_at, text_excerpt, content_hash) values
-    ${P.map((p, i) => `('${p.job_id}', 'greenhouse', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', now() - interval '${i} hours', '${q(p.description)}', 'k${i}')`).join(",\n")};`);
+    ${P.map((p, i) => `('${p.job_id}', 'greenhouse', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', ${T} - interval '${i} hours', '${q(p.description)}', 'k${i}')`).join(",\n")};`);
   for (const id of ids) {
     await pg.sql(`insert into auth.users (id, email) values ('${id}', '${id}@example.test'); insert into public.profiles (id) values ('${id}');
       insert into public.career_watch_kv (user_id, key, value) values ('${id}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
@@ -109,11 +110,16 @@ export async function runTasks(o: { brain: BrainName; model: "fake" | "claude"; 
   let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
   const items: TaskResult[] = [];
   let stopped: string | null = null;
+  // The run's clock is pinned (clock.ts): the product and the judge both read the same fixed day, whatever day the machine says.
+  const runAt = new Date().toISOString(), at = evalNow();
+  let unpin: (() => void) | null = null;
   try {
+    unpin = pinClock(at);
     await supabaseParity(pg);
+    await pg.sql(PIN_DB_SQL(at));
     const people: Record<string, string> = {};
     tasks.forEach((t) => { people[`tok-${t.id}`] = uid(TASKS.indexOf(t) + 1); });
-    await seed(pg, Object.values(people));
+    await seed(pg, Object.values(people), at);
     // Claude only (owner, 2026-11-02): the one provider is Anthropic. No OpenAI key is ever set here, so nothing in the code under
     // test can reach OpenAI even if it tried; the fake answers on api.anthropic.com, the real run goes there with the real key.
     for (const k of openaiVars) Deno.env.delete(k);
@@ -165,8 +171,9 @@ export async function runTasks(o: { brain: BrainName; model: "fake" | "claude"; 
     }
     const passed = items.filter((x) => x.pass).length;
     return { label: o.label, brain: o.brain, model: o.model, total: items.length, passed, rate: items.length ? passed / items.length : 0,
-      invariant_breaks: items.filter((x) => x.failed.some((f) => f.startsWith("INVARIANT"))).length, stopped, cost_usd: o.model === "fake" ? 0 : await spent(), items, run_at: new Date().toISOString() };
+      invariant_breaks: items.filter((x) => x.failed.some((f) => f.startsWith("INVARIANT"))).length, stopped, cost_usd: o.model === "fake" ? 0 : await spent(), items, run_at: runAt };
   } finally {
+    unpin?.();
     setMutation(null);
     clearOracle();
     for (const [k, v] of Object.entries(saved)) { if (v === undefined) Deno.env.delete(k); else Deno.env.set(k, v); }

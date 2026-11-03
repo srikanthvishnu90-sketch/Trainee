@@ -42,9 +42,9 @@ Deno.test("spec: primary states are mutually exclusive and counted once; 'confir
   const c = countsOf(rows);
   eq(c.reduce((n, x) => n + x.n, 0), rows.length, "every role counted exactly once");
   eq(Object.fromEntries(c.map((x) => [x.key, x.n])), { ready: 1, needs: 1, preparing: 1, notprep: 0, progress: 2, done: 1, blocked: 1 });
-  eq(specOf(rows[4]).label, "Still checking");
-  eq(specOf(rows[3]).label, "Submitted and confirmed");
-  eq(specOf(rows[5]).label, "Approved");
+  eq(specOf(rows[4]).label, "Checking");
+  eq(specOf(rows[3]).label, "Submitted - confirmed");
+  eq(specOf(rows[5]).label, "Queued");
   eq(coverage([rows[0]]), NOTHING_SENT);
   assert(!/^Nothing has been sent/.test(coverage(rows)), "never says nothing was sent when roles are approved or submitted");
 });
@@ -53,7 +53,7 @@ Deno.test("spec: primary states are mutually exclusive and counted once; 'confir
 Deno.test("top: counts by primary state from the rows, the coverage line, the updated time, Pause remaining", async () => {
   const { html } = await open();
   const t = top(html);
-  assert(/3 Ready to apply/.test(t), t);
+  assert(/3 Ready for review/.test(t), t);
   assert(t.includes("Nothing has been sent. Apply sends only the application as its card shows it."), t);
   assert(/Page updated .*20\d\d/.test(t), t);
   assert(/Pause on this page/.test(t) && /not cancelled/.test(t), "pause says in-flight stays");
@@ -63,7 +63,7 @@ Deno.test("top: counts follow row states, not clicks: a queued row moves out of 
   const ref = refIn(await (await get(w, s)).text(), "Frontend Engineering Intern", "Acme Web");
   await post(w, s, { action: "apply", ref, tag: tagOf(1) });
   const html = await (await get(w, s)).text(), t = top(html);
-  assert(/2 Ready to apply/.test(t) && /1 Approved, started or still checking/.test(t), t);
+  assert(/2 Ready for review/.test(t) && /1 Queued/.test(t), t);
   assert(!t.includes("Nothing has been sent."), t);
   assert(/1 role is already approved, started or submitted/.test(t), t);
   // a second tap on the same role: current state and what it holds, not a bare refusal
@@ -76,7 +76,7 @@ Deno.test("card: Apply is explained in words, role id and unknown labels are rea
   assert(/R-0\d/.test(card), card);
   assert(card.includes("Apply approves and sends exactly the application as its card shows it."), card);
   assert(/Requisition ID Not listed/.test(card) && /Checked Check time unknown/.test(card) && /Pay not listed/i.test(card), card);
-  assert(/Prepared/.test(card), "a ready role reads Prepared");
+  assert(/Ready for review/.test(card), "a ready role reads Ready for review");
 });
 Deno.test("ids: a role keeps its id when the filter or sort changes", async () => {
   const { w, s, html } = await open();
@@ -88,7 +88,7 @@ Deno.test("ids: a role keeps its id when the filter or sort changes", async () =
   assert(a1 !== g1);
 });
 Deno.test("status: confirmed with an employer reference reads Submitted and confirmed, with the evidence; without evidence it is Still checking", async () => {
-  for (const [row, label, evid] of [[app("confirmed", { confirmation_id: "ABC-123" }), "Submitted and confirmed", "Employer reference ABC-123"], [app("confirmed"), "Still checking", ""], [app("driving"), "Started", ""]] as const) {
+  for (const [row, label, evid] of [[app("confirmed", { confirmation_id: "ABC-123" }), "Submitted - confirmed", "Employer reference ABC-123"], [app("confirmed"), "Checking", ""], [app("driving"), "In progress", ""]] as const) {
     const w = world(); const r = await made(w); const s = await w.A.tok(U, r.listId, NOW);
     const orig = w.store.appRow; w.store.appRow = async (u, id, url) => id === POSTINGS[0].job_id ? row : orig(u, id, url);
     const html = await (await get(w, s)).text();
@@ -97,7 +97,7 @@ Deno.test("status: confirmed with an employer reference reads Submitted and conf
     const ex = await (await get(w, s, "export=txt")).text();
     assert(ex.includes(`Status: ${label}`), ex);
     if (evid) assert(ex.includes(`Evidence: ${evid}`), ex);
-    if (label === "Submitted and confirmed") {
+    if (label === "Submitted - confirmed") {
       const dup = plain(await (await post(w, s, { action: "apply", ref, tag: "none" })).text());
       assert(/Already submitted for this role/.test(dup) && dup.includes("Employer reference ABC-123"), dup);
     }
@@ -110,12 +110,12 @@ Deno.test("dismiss: private and reversible, keeps ids, leaves counts honest and 
   const after = await (await post(w, s, { action: "dismiss", ref })).text();
   assert(!/<h3 class="title">Frontend Intern<\/h3><p class="co">Globex/.test(after.split("Dismissed (")[0]), "gone from the active list");
   assert(/Dismissed \(1\)/.test(after) && after.includes(before), "listed at the bottom with the same id");
-  assert(/2 Ready to apply/.test(top(after)));
+  assert(/2 Ready for review/.test(top(after)));
   eq(w.queue.length, 0); eq(w.wants.length, 0);
   const blocked = plain(await (await post(w, s, { action: "apply", ref, tag: tagOf(2) })).text());
   assert(/dismissed/i.test(blocked)); eq(w.queue.length, 0);
   const back = await (await post(w, s, { action: "restore", ref })).text();
-  assert(/3 Ready to apply/.test(top(back)) && !/Dismissed \(/.test(back));
+  assert(/3 Ready for review/.test(top(back)) && !/Dismissed \(/.test(back));
 });
 Deno.test("pause: no new approvals from the page, says in-flight stays, resume restores; nothing is cancelled", async () => {
   const { w, s, html } = await open();
@@ -137,7 +137,7 @@ Deno.test("export: ?export=txt is text/plain, every role with state, source URL 
   eq((t.match(/^R-\d+ /gm) ?? []).length, 3);
   assert((t.match(/Action available in private workspace/g) ?? []).length >= 3);
   assert(!/Open application: (?!https?:\/\/)/.test(t), "no fake urls");
-  assert(t.includes("Status: Prepared") && t.includes("Nothing has been sent."));
+  assert(t.includes("Status: Ready for review") && t.includes("Nothing has been sent."));
   const anon = await get(w, "not-a-session", "export=txt");
   assert(!(await anon.text()).includes("Source URL:"), "same auth as the page");
 });

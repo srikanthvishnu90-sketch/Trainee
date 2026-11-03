@@ -4,6 +4,10 @@
 //   deno run -A --no-check scripts/demo/file-signin-demo.ts [port]
 // then open http://localhost:<port>/demo/link (a fresh link for the test person; /demo/link?who=v for the second test account).
 // The test person's phone is +1 512 555 0100; the second account's is +1 512 555 0199.
+// A copied page is not a session: after signing in, view the page's source and copy the value of any hidden `t` input (a page
+// token, never the session id; the id is only in the HttpOnly cookie), then open /demo/replay?t=<that value> (or run
+// `curl -s -X POST -d 't=<value>&action=refresh' http://127.0.0.1:<port>/file`): the same form posted without the browser's cookie
+// is refused with "Sign in on this device", and nothing about the jobs is in the answer.
 import { mintFileToken } from "../../supabase/functions/_shared/file_link.ts";
 import { handleFile, type AppRow, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
 import { jobViewOf, refOf, type PreparedRow } from "../../supabase/functions/_shared/telegram_jobs.ts";
@@ -75,6 +79,14 @@ Deno.serve({ port, hostname: "127.0.0.1" }, async (req) => {
   }
   if (u.pathname === "/demo/last-code") return new Response(P.lastCode(), { headers: { "content-type": "text/plain", "cache-control": "no-store" } });
   if (u.pathname === "/demo/texts") return Response.json(P.texts);
+  if (u.pathname === "/demo/replay") {
+    // The page's form replayed from "another browser": the same fields, no cookie.
+    const r = await handleFile(new Request(`${u.origin}/file`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: u.origin, "sec-fetch-site": "same-origin" },
+      body: new URLSearchParams({ t: u.searchParams.get("t") ?? "", action: "refresh" }).toString() }), d);
+    const body = await r.text();
+    const title = /<h1>([^<]*)<\/h1>/.exec(body)?.[1] ?? "";
+    return Response.json({ status: r.status, page: title, shows_jobs: JOBS.some((j) => body.includes(j.company)) });
+  }
   if (u.pathname !== "/file") return new Response("not found", { status: 404 });
   const r = await handleFile(req, d);
   if (P.texts.length) console.log(`(demo) last code texted to ${P.texts.at(-1)!.phone}: ${P.lastCode()}`);

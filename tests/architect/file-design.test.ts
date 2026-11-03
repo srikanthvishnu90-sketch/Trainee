@@ -237,9 +237,9 @@ Deno.test("private by default: a hosted File opens only for its owner, after a p
   const other = "22222222-2222-4222-8222-222222222222";
   const theirs = await handleFile(new Request("https://x.example/f", { headers: { cookie: `tf_s=${await w.A.tok(other, m.id, w.at.t)}` } }), w.deps());
   eq(leaks(await theirs.text()), []);
-  // Every File response says do not cache, do not index, send no referrer.
+  // Every File response says do not cache, do not index, send no referrer to other sites (same-origin: trunk d12f4778).
   for (const r of [bare, link, signIn]) {
-    eq(r.headers.get("cache-control"), "no-store"); ok(/noindex/.test(r.headers.get("x-robots-tag") ?? "")); eq(r.headers.get("referrer-policy"), "no-referrer");
+    eq(r.headers.get("cache-control"), "no-store"); ok(/noindex/.test(r.headers.get("x-robots-tag") ?? "")); eq(r.headers.get("referrer-policy"), "same-origin");
   }
 });
 

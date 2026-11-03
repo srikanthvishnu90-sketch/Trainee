@@ -1,4 +1,4 @@
-// The fake model on the OpenAI wire for the task-completion eval: no key, no spend, deterministic. It plays each task's
+// The fake model on the Anthropic Messages wire (POST https://api.anthropic.com/v1/messages) for the task-completion eval: no key, no spend, deterministic. It plays each task's
 // oracle (evals/career/tasks/tasks.json: what a competent planner would do), keyed by the person's message:
 //   - the planner's call (the plan_task tool is forced): the oracle's steps;
 //   - the agent brain's loop (career tools offered): the oracle as agent tool calls, one per step, reading earlier tool
@@ -19,10 +19,11 @@ export let mutatePlan: ((steps: OracleStep[]) => OracleStep[]) | null = null;
 export function setMutation(f: ((steps: OracleStep[]) => OracleStep[]) | null) { mutatePlan = f; }
 const norm = (s: string) => String(s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
 
-const reply = (body: any, message: any, finish: string) => new Response(JSON.stringify({ id: `fake-${calls.length}`, model: body.model, choices: [{ index: 0, message, finish_reason: finish }], usage: { prompt_tokens: 50, completion_tokens: 20 } }), { status: 200, headers: { "content-type": "application/json" } });
-const text = (body: any, t: string) => reply(body, { role: "assistant", content: t }, "stop");
-const tool = (body: any, name: string, input: unknown) => reply(body, { role: "assistant", content: null, tool_calls: [{ id: `call_${calls.length}_${name}`, type: "function", function: { name, arguments: JSON.stringify(input) } }] }, "tool_calls");
+const message = (body: any, content: any[], stop: string) => new Response(JSON.stringify({ id: `fake-${calls.length}`, type: "message", role: "assistant", model: body.model, content, stop_reason: stop, usage: { input_tokens: 50, output_tokens: 20 } }), { status: 200, headers: { "content-type": "application/json" } });
+const text = (body: any, t: string) => message(body, [{ type: "text", text: t }], "end_turn");
+const tool = (body: any, name: string, input: unknown) => message(body, [{ type: "tool_use", id: `toolu_${calls.length}_${name}`, name, input }], "tool_use");
 const contentOf = (m: any) => typeof m?.content === "string" ? m.content : Array.isArray(m?.content) ? m.content.map((p: any) => p?.text ?? "").join("") : "";
+const isToolResult = (m: any) => m?.role === "user" && Array.isArray(m.content) && m.content.some((p: any) => p?.type === "tool_result");
 
 // The agent brain's calls for one task turn, given the tool results so far (in order).
 function agentActions(steps: OracleStep[], results: { name: string; out: any }[]): { name: string; input: any }[] {
@@ -55,11 +56,11 @@ function agentActions(steps: OracleStep[], results: { name: string; out: any }[]
   return acts;
 }
 
-export async function fakeOpenAI(req: Request): Promise<Response> {
+export async function fakeAnthropic(req: Request): Promise<Response> {
   const body = await req.json();
   const msgs: any[] = body.messages ?? [];
-  const tools: string[] = (body.tools ?? []).map((t: any) => t.function?.name);
-  const lastUser = [...msgs].reverse().find((m) => m.role === "user");
+  const tools: string[] = (body.tools ?? []).map((t: any) => t.name);
+  const lastUser = [...msgs].reverse().find((m) => m.role === "user" && !isToolResult(m));
   const user = contentOf(lastUser);
   if (tools.includes("plan_task")) {
     calls.push({ kind: "plan", user });
@@ -76,8 +77,8 @@ export async function fakeOpenAI(req: Request): Promise<Response> {
     const results: { name: string; out: any }[] = [];
     const byId = new Map<string, string>();
     for (const m of msgs.slice(at + 1)) {
-      if (m.role === "assistant") for (const c of m.tool_calls ?? []) byId.set(c.id, c.function?.name);
-      if (m.role === "tool") { let out: any = null; try { out = JSON.parse(contentOf(m)); } catch { out = contentOf(m); } results.push({ name: byId.get(m.tool_call_id) ?? "", out }); }
+      if (m.role === "assistant" && Array.isArray(m.content)) for (const c of m.content) if (c?.type === "tool_use") byId.set(c.id, c.name);
+      if (isToolResult(m)) for (const c of m.content) if (c?.type === "tool_result") { const raw = contentOf(c); let out: any = null; try { out = JSON.parse(raw); } catch { out = raw; } results.push({ name: byId.get(c.tool_use_id) ?? "", out }); }
     }
     const steps = oracle.get(norm(user));
     const acts = steps ? agentActions(steps, results) : [];

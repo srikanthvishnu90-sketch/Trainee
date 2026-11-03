@@ -2,7 +2,7 @@
 // application proof, plan review, comparison, draft, research brief), each = a typed schema + renderer + truthful action set + a
 // plain-text twin, behind one page shell and one create_file tool. Memory stores, a fake clock, no network, no model.
 import assertNode from "node:assert/strict";
-import { signedIn } from "./file-session-fakes.ts";
+import { signedIn, phonePost } from "./file-session-fakes.ts";
 const A = signedIn();
 import { actionsOf, KIND_IDS, SOURCES, textOf, validateKind, type FileRecord } from "../../supabase/functions/_shared/file_kinds.ts";
 import { createFileService, memoryFileStore } from "../../supabase/functions/_shared/file_service.ts";
@@ -150,7 +150,7 @@ function world(env: Record<string, string | undefined> = ENV, at = { t: NOW }) {
 }
 const tok = async (user: string, id: string, now = NOW) => await A.tok(user, id, now);
 const get = (d: FileDeps, t: string, q = "") => handleFile(new Request(`https://x.example/f${q}`, { headers: { cookie: `tf_s=${t}` } }), d);
-const post = (d: FileDeps, f: Record<string, string>) => handleFile(new Request("https://x.example/f", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(f).toString() }), d);
+const post = async (d: FileDeps, f: Record<string, string>) => handleFile(new Request("https://x.example/f", await phonePost(f, SECRET)), d);
 const plain = (h: string) => h.replace(/<style[\s\S]*?<\/style>/g, " ").replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ");
 
 Deno.test("service: validates, stores for one user, returns a signed link; refuses when links are not configured and stores nothing", async () => {

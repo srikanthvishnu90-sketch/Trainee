@@ -45,7 +45,7 @@ const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
 Deno.test({ name: "networking r2 end to end: 80 flows through the real RPCs, the stores, the rail and fake mailboxes on real Postgres", sanitizeResources: false, sanitizeOps: false, async fn(t) {
   if (!haveDb()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
-  for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]) Deno.env.delete(k);
+  for (const k of ["ANTHROPIC_API_KEY"]) Deno.env.delete(k);
   const db = await railDb();
   const realFetch = globalThis.fetch;
   let outside = 0;

@@ -75,14 +75,11 @@ export function appUrl(get: (k: string) => string | undefined): string {
 }
 export const voiceLink = (base: string, token: string) => `${base}${VOICE_PAGE_PATH}#t=${token}`;
 
-// The rail is wired when the server holds both the OpenAI key (the voice) and the service key (the signature), and the
-// owner has turned voice on (CAREER_VOICE=on): the OpenAI key is already set for the chat's model, and a voice minute
-// costs far more than a text turn, so the key alone never starts spending on calls. Neither key is returned, logged or
-// put in a link.
-export function voiceWired(get: (k: string) => string | undefined): { ok: true } | { ok: false; missing: string[] } {
-  const missing = ["OPENAI_API_KEY", "SUPABASE_SERVICE_ROLE_KEY"].filter((k) => !get(k));
-  if (get("CAREER_VOICE") !== "on") missing.push("CAREER_VOICE=on");
-  return missing.length ? { ok: false, missing } : { ok: true };
+// Voice is OFF for good (owner directive 2026-11-02: Claude-only, no OpenAI, voice stays off): there is no voice provider,
+// so this is false whatever the environment holds, CAREER_VOICE=on included. Nothing reads a provider key here.
+export const VOICE_OFF_REASON = "voice is off: no provider";
+export function voiceWired(_get?: (k: string) => string | undefined): { ok: false; reason: string; missing: string[] } {
+  return { ok: false, reason: VOICE_OFF_REASON, missing: [VOICE_OFF_REASON] };
 }
 
 export interface VoiceLinks {
@@ -93,13 +90,10 @@ export interface VoiceLinks {
 // deno-lint-ignore no-explicit-any
 export function supabaseVoiceLinks(admin: any, get: (k: string) => string | undefined): VoiceLinks {
   return {
-    async create(userId, threadId, state, now) {
-      if (!voiceWired(get).ok) return { ok: false, reason: "not_wired" };
-      const r = await admin.rpc("career_voice_create", { p_user: userId, p_thread: threadId, p_state: state, p_now: new Date(now).toISOString() });
-      if (r.error) throw new Error(`create the voice session: ${r.error.message}`);
-      if (!r.data) return { ok: false, reason: "limit" };
-      const token = await signToken({ s: String(r.data), u: userId, k: "start", exp: now + LINK_TTL_MS }, get("SUPABASE_SERVICE_ROLE_KEY")!);
-      return { ok: true, url: voiceLink(appUrl(get), token) };
+    // No session row and no link while voice is off (voiceWired is always false).
+    async create(_userId, _threadId, _state, _now) {
+      void admin; void get;
+      return { ok: false, reason: "not_wired" };
     },
   };
 }

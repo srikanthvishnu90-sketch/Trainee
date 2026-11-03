@@ -59,7 +59,9 @@ export interface OutboxRow {
 // "queued" with deliverAt: put back for a later time (the person's quiet hours on their clock as it is now).
 // sentParts (CHANNEL DELIVERY ROUND 2): on a failed or held row, how many of its messages went out so far (providerIds then
 // their ids); the next attempt starts after them.
-export type DeliveryMark = { status: "delivered" | "failed" | "skipped_opt_out" | "held" | "queued"; at: number; error?: string; providerId?: string; providerIds?: string[]; retryAt?: number; deliverAt?: number; sentParts?: number };
+// text (PROACTIVE SCENARIOS ROUND 3): on a delivered row, the words that went when delivery wrote them anew (an alert's
+// posting as it was then, a report's lines that still fit, a closed posting said); the row keeps what was sent.
+export type DeliveryMark = { status: "delivered" | "failed" | "skipped_opt_out" | "held" | "queued"; at: number; error?: string; providerId?: string; providerIds?: string[]; retryAt?: number; deliverAt?: number; sentParts?: number; text?: string };
 export interface ChannelStore {
   due(now: number, limit: number): Promise<OutboxRow[]>; // undelivered, deliver_at <= now, oldest first
   optedOut(contact: string): Promise<boolean>;
@@ -82,6 +84,13 @@ export interface ChannelStore {
   // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): of a daily report's links, the postings closed since (career_postings).
   // Absent: not checked.
   closedLinks?(urls: string[]): Promise<Set<string>>;
+  // PROACTIVE SCENARIOS ROUND 3 (2026-11-01): a queued job alert's or daily report's words as they are true now
+  // (career_watch_alerts.ts freshAlertText: the posting as it is now, its age now; a report's lines that still fit the
+  // person's search). null: nothing of it is still true for the person (not sent, FRESH_NOTE). Absent: the words as queued.
+  freshText?(row: OutboxRow, now: number): Promise<string | null>;
+  // PROACTIVE SCENARIOS ROUND 3 (2026-11-01): a queued interview brief (brief:<invite>:<n>) whose interview a later email
+  // cancelled or moved: false (not sent, BRIEF_GONE_NOTE). Absent: not checked.
+  briefWanted?(row: OutboxRow): Promise<boolean>;
   // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): the person's zone and quiet hours as they are now (their alert settings),
   // null when they have none on file. Absent: not checked (the time a row was planned for stands).
   quietHours?(userId: string): Promise<{ tz: string | null; quiet_start?: number; quiet_end?: number } | null>;
@@ -127,6 +136,16 @@ export const STOPPED_REPLY_NOTE = "not sent: the person texted STOP after the me
 // each alert still "first seen 20 min ago". A row the window held still goes out whole when they write (heldAt set).
 export const ALERT_STALE_MS = 48 * 3600000;
 export const STALE_NOTE = "not sent: a job alert or report more than 48 hours past its time is no longer news";
+// PROACTIVE SCENARIOS ROUND 3 (2026-11-01): every row not sent says why. A STOP held a row with no reason recorded.
+export const STOP_NOTE = "not sent: the person texted STOP; Trainee sends nothing on its own until START";
+export const FRESH_NOTE = "not sent: nothing in it is still true for the person (the posting changed or went, or their search changed) since it was queued";
+// Whether a queued interview brief (brief:<invite>:1, :2, or :moved for a new time) still says a real interview, from its
+// interview's row, the invite's own (null: not on file, so nothing says otherwise): not once a later email cancelled that
+// interview or moved it to another time (the ":moved" brief is its own invite's row: a second move or a cancel holds it too).
+export function briefStillTrue(_key: string, row: { moved_at?: string | null; cancelled_at?: string | null } | null): boolean {
+  return !row || (!row.cancelled_at && !row.moved_at);
+}
+export const BRIEF_GONE_NOTE = "not sent: a later email cancelled or moved this interview after the brief was queued";
 // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): what Trainee starts on a schedule waits out the person's quiet hours on their
 // clock as it is at delivery, not only as it was when it was planned: a person who moved zones (or changed their quiet
 // hours) after a row was queued got it in the middle of their night.
@@ -208,7 +227,7 @@ export async function deliverDue(o: {
     // STOP holds what Trainee starts (alerts, reports, cards, receipts); the answer to a message the person sent after STOP
     // still goes out, as the STOP reply promises.
     const out = await o.store.optedOut(m.contact);
-    if (!isReply(m.key) && out) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now }); r.skipped_opt_out++; continue; }
+    if (!isReply(m.key) && out) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: STOP_NOTE }); r.skipped_opt_out++; continue; }
     // CHANNEL DELIVERY SCENARIOS (2026-10-29): an answer to a message sent BEFORE the STOP is not one sent after it. The
     // rest of a long answer still queued (its later parts, a retry) went out after the person said STOP; now it is held
     // like everything else. The answer row's deliver_at is the time of the message it answers.
@@ -239,6 +258,12 @@ export async function deliverDue(o: {
     // account) is checked again now. Not wanted: not sent. A check that cannot be read leaves the row for the next run.
     if (/^(alert|report):/.test(m.key) && o.now - m.deliver_at > ALERT_STALE_MS && ((adapter.limits.windowMs ?? null) === null || m.heldAt === null)) {
       await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: STALE_NOTE }); r.skipped_opt_out++; continue;
+    }
+    if (m.key.startsWith("brief:") && o.store.briefWanted) {
+      let wanted: boolean | null;
+      try { wanted = await o.store.briefWanted(m); } catch (e) { console.error("deliver: the interview could not be read:", e instanceof Error ? e.message : String(e)); wanted = null; }
+      if (wanted === null) { r.deferred++; continue; }
+      if (!wanted) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: BRIEF_GONE_NOTE }); r.skipped_opt_out++; continue; }
     }
     if (/^(alert|report):/.test(m.key) && o.store.alertWanted) {
       let wanted: boolean | null;
@@ -271,14 +296,23 @@ export async function deliverDue(o: {
     // postings on it close. Each one closed since it was written is said to be closed, on its own line; a read that fails
     // leaves the report for the next run.
     let text = m.text;
+    // PROACTIVE SCENARIOS ROUND 3 (2026-11-01): the alert or report as it is true now (the posting's words now, its age
+    // now, the person's search now); a read that fails leaves the row for the next run.
+    if (/^(alert|report):/.test(m.key) && o.store.freshText) {
+      let fresh: string | null | undefined;
+      try { fresh = await o.store.freshText(m, o.now); } catch (e) { console.error("deliver: the alert's posting could not be read:", e instanceof Error ? e.message : String(e)); fresh = undefined; }
+      if (fresh === undefined) { r.deferred++; continue; }
+      if (fresh === null) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: FRESH_NOTE }); r.skipped_opt_out++; continue; }
+      text = fresh;
+    }
     if (m.key.startsWith("report:") && o.store.closedLinks) {
-      const urls = [...m.text.matchAll(/^ {2}(https:\/\/\S+)$/gm)].map((x) => x[1]);
+      const urls = [...text.matchAll(/^ {2}(https:\/\/\S+)$/gm)].map((x) => x[1]);
       if (urls.length) {
         let closed: Set<string> | null;
         try { closed = await o.store.closedLinks(urls); } catch (e) { console.error("deliver: the report's postings could not be read:", e instanceof Error ? e.message : String(e)); closed = null; }
         if (closed === null) { r.deferred++; continue; }
         if (closed.size) {
-          const lines = m.text.split("\n");
+          const lines = text.split("\n");
           for (let i = 1; i < lines.length; i++) if (closed.has(lines[i].trim()) && lines[i - 1].startsWith("- ") && !lines[i - 1].endsWith(CLOSED_SINCE)) lines[i - 1] += CLOSED_SINCE;
           text = lines.join("\n");
         }
@@ -304,7 +338,7 @@ export async function deliverDue(o: {
     }
     if (res.ok) {
       const ids = [...before, ...(res.ids ?? (res.id ? [res.id] : []))];
-      await o.store.mark(m.id, { status: "delivered", at: o.now, providerId: ids[0] ?? res.id ?? undefined, ...(ids.length ? { providerIds: ids } : {}) });
+      await o.store.mark(m.id, { status: "delivered", at: o.now, providerId: ids[0] ?? res.id ?? undefined, ...(ids.length ? { providerIds: ids } : {}), ...(text !== m.text ? { text } : {}) });
       r.delivered++;
       if (!known && contacts.has(channel)) contacts.set(channel, contacts.get(channel)! + 1);
       continue;
@@ -388,7 +422,7 @@ export function memoryChannel(rows: OutboxRow[] = []): ChannelStore & { rows(): 
       const x = st.find((y) => y.id === id); if (!x) return;
       x.status = m.status; x.error = m.error ?? null;
       if (m.sentParts !== undefined) { x.sentParts = m.sentParts; x.providerIds = m.providerIds ?? x.providerIds ?? null; }
-      if (m.status === "delivered") { x.sentAt = m.at; x.providerIds = m.providerIds ?? (m.providerId ? [m.providerId] : null); }
+      if (m.status === "delivered") { x.sentAt = m.at; x.providerIds = m.providerIds ?? (m.providerId ? [m.providerId] : null); if (m.text !== undefined) x.text = m.text; }
       if (m.status === "held") x.heldAt ??= m.at;
       if (m.status === "queued" && m.deliverAt !== undefined) x.deliver_at = m.deliverAt;
       if (m.status === "failed") { x.attempts++; x.retryAt = m.retryAt ?? null; }

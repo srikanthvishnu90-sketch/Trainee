@@ -35,7 +35,7 @@ export interface PlanUser {
   last_report_on: string | null; // YYYY-MM-DD in the person's zone
   held?: string[]; // job_ids the daily cap held back
   sent_this_week?: number; // WO-037: alerts queued for delivery in the last 7 days (the run counts them from the outbox)
-  // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): the jobs (twinKey) of alerts already queued for the person: the same job
+  // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): the jobs (twinKeys) of alerts already queued for the person: the same job
   // seen again on another board is not news.
   alerted_twins?: string[];
 }
@@ -82,28 +82,87 @@ const ms = (t: unknown) => { const n = Date.parse(String(t ?? "")); return Numbe
 // an <img onerror=...>) went into the alert and the daily report as written, and the dashboard's feed reads the same rows;
 // invisible direction and control characters went in too. Markup is dropped (a script or style element with its content),
 // invisible characters are dropped, control characters read as spaces.
+// PROACTIVE SCENARIOS ROUND 3 (2026-11-01): a field longer than its room is cut between whole characters and says it was
+// cut. It was cut at a UTF-16 unit: an emoji at the edge ("Tailspin 🦄🦄…") left half a character (a lone surrogate) in the
+// alert, and a long company name cut mid-word ("Bank of America Merrill Lync") read as a name the posting never had.
+const GRAPHEMES = typeof Intl !== "undefined" && "Segmenter" in Intl ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+function clipWhole(s: string, n: number): string {
+  if (s.length <= n) return s;
+  let out = "";
+  for (const g of GRAPHEMES ? Array.from(GRAPHEMES.segment(s), (x) => x.segment) : [...s]) { if (out.length + g.length > n - 1) break; out += g; }
+  return `${out.trim()}…`;
+}
 export function postingText(s: unknown, n: number): string {
-  return String(s ?? "")
+  return clipWhole(String(s ?? "")
     .replace(/<\s*(script|style)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, " ")
     .replace(/<\s*\/?\s*[a-z][^>]*>/gi, " ")
-    .replace(FORMAT_CHARS, "").replace(CONTROL_CHARS, " ")
-    .replace(/\s+/g, " ").trim().slice(0, n).trim();
+    .replace(FORMAT_CHARS, "").replace(CONTROL_CHARS, " ").replace(LONE_SURROGATE, "")
+    .replace(/\s+/g, " ").trim(), n);
 }
 const clean = postingText;
 // The same job on two boards (a company that posts on Greenhouse and on Lever, each with its own id and sometimes its own
 // pay): one job to the person. Its board (provider:board, from the job id) and its company, title and place as the person
 // would read them. Two postings alike on ONE board are two openings (two requisitions), never twins.
-export const twinKey = (p: any) => `${String(p?.job_id ?? "").split(":").slice(0, 2).join(":")}|${[p?.company, p?.title, p?.location].map((x) => clean(x, 200).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()).join("|")}`;
+// PROACTIVE SCENARIOS ROUND 3 (2026-11-01): as the person would read them, not as each board spells them. An aggregator
+// that carries the employer's own posting writes "Acme, Inc." for "Acme" and "New York, NY, United States" for "New York,
+// NY", and the person got the same job twice. A company's legal form and a trailing "United States" are not part of the
+// name or the place; and the same title behind the same link (a board that carries another board's posting) is the same job.
+const LEGAL = /(^| )(inc|incorporated|llc|ltd|limited|corp|corporation|co|company|the|plc|gmbh|ag|bv|pbc)(?= |$)/gu;
+const norm = (x: unknown) => clean(x, 200).toLowerCase().replace(/&/g, " and ").replace(/[^\p{L}\p{N}]+/gu, " ").replace(/\s+/g, " ").trim();
+const companyKey = (x: unknown) => { const n = norm(x), k = n.replace(LEGAL, " ").replace(LEGAL, " ").replace(/\s+/g, " ").trim(); return k || n; };
+const placeKey = (x: unknown) => norm(x).replace(/( (united states( of america)?|usa|us))+$/u, "").trim();
+const linkKey = (u: unknown) => {
+  try { const x = new URL(String(u ?? "")); return `${x.hostname.toLowerCase().replace(/^www\./, "")}${x.pathname.replace(/\/+$/, "")}`; } catch { return ""; }
+};
+const sourceKey = (p: any) => String(p?.job_id ?? "").split(":").slice(0, 2).join(":");
+export const twinKey = (p: any) => `${sourceKey(p)}|${[companyKey(p?.company), norm(p?.title), placeKey(p?.location)].join("|")}`;
+// Every name a posting goes by as one job: its company, title and place; and its title behind its link.
+export const twinKeys = (p: any): string[] => {
+  const link = linkKey(p?.url);
+  return [twinKey(p), ...(link ? [`${sourceKey(p)}|link|${norm(p?.title)}|${link}`] : [])];
+};
 const sourceOf = (k: string) => k.slice(0, k.indexOf("|"));
 const jobOf = (k: string) => k.slice(k.indexOf("|") + 1);
-// Whether a posting (its twinKey) is the same job as one already taken from another board.
-function twinOf(taken: Map<string, Set<string>>, k: string): boolean {
-  const from = taken.get(jobOf(k));
-  return !!from && [...from].some((s) => s !== sourceOf(k));
+// Whether a posting (its twinKeys) is the same job as one already taken from another board.
+function twinOf(taken: Map<string, Set<string>>, ks: string[]): boolean {
+  return ks.some((k) => { const from = taken.get(jobOf(k)); return !!from && [...from].some((s) => s !== sourceOf(k)); });
 }
-function take(taken: Map<string, Set<string>>, k: string) {
-  if (!taken.has(jobOf(k))) taken.set(jobOf(k), new Set());
-  taken.get(jobOf(k))!.add(sourceOf(k));
+// The keys of a posting, worked out once per posting object.
+const keyMemo = new WeakMap<object, string[]>();
+const keysOf = (p: any): string[] => {
+  if (!p || typeof p !== "object") return twinKeys(p);
+  let k = keyMemo.get(p);
+  if (!k) { k = twinKeys(p); keyMemo.set(p, k); }
+  return k;
+};
+// The postings by each job name they go by.
+function twinIndex(postings: any[]): Map<string, any[]> {
+  const idx = new Map<string, any[]>();
+  for (const p of postings) for (const k of keysOf(p)) { const j = jobOf(k); const l = idx.get(j); if (l) l.push(p); else idx.set(j, [p]); }
+  return idx;
+}
+// These keys and the keys of every posting that is the same job, through other boards, one after another: a posting on
+// another board than the key's under the same name is the same job, and so is every posting under its other names.
+function closeTwins(keys: string[], idx: Map<string, any[]>): string[] {
+  const out = new Set(keys), todo = [...keys], seen = new Set<any>();
+  while (todo.length) {
+    const k = todo.pop()!;
+    for (const q of idx.get(jobOf(k)) ?? []) {
+      if (seen.has(q)) continue;
+      const qk = keysOf(q);
+      if (sourceOf(qk[0]) === sourceOf(k)) continue; // two openings on one board are two jobs
+      seen.add(q);
+      for (const x of qk) if (!out.has(x)) { out.add(x); todo.push(x); }
+    }
+  }
+  return [...out];
+}
+function take(taken: Map<string, Set<string>>, ks: string[]) {
+  for (const k of ks) {
+    if (!taken.has(jobOf(k))) taken.set(jobOf(k), new Set());
+    taken.get(jobOf(k))!.add(sourceOf(k));
+  }
 }
 const httpsUrl = (u: unknown) => (/^https:\/\/\S+$/.test(String(u ?? "")) ? String(u) : null);
 
@@ -188,10 +247,21 @@ export function nextAwake(from: number, tz: string, p: Pick<AlertPrefs, "quiet_s
   return from;
 }
 function ago(mins: number) { return mins < 1 ? "under a minute ago" : mins < 120 ? `${mins} min ago` : `${Math.round(mins / 60)} hours ago`; }
-const line = (p: any) => `${clean(p.title, 120)} at ${clean(p.company, 80)}${p.location ? ` (${clean(p.location, 80)})` : ""}`;
+// One posting as an alert or a report line says it: its own title, company and place, nothing else.
+export const postingLine = (p: any) => `${clean(p.title, 120)} at ${clean(p.company, 80)}${clean(p.location, 80) ? ` (${clean(p.location, 80)})` : ""}`;
+const line = postingLine;
+// A job alert's words, from the posting as it is at `now`. PROACTIVE SCENARIOS ROUND 3 (2026-11-01): delivery writes them
+// again from the posting as it is then (channel.ts deliverDue, the store's freshText): an alert found at 23:00 and held for
+// quiet hours said "first seen under a minute ago" at 7:00, and one whose posting changed its title or place while it
+// waited said the old one.
+export function alertText(p: any, now: number): string {
+  const mins = Math.max(0, Math.floor((now - ms(p.first_seen_at)) / 60000));
+  return `New match: ${line(p)}, first seen ${ago(Number.isFinite(mins) ? mins : 0)}.\n${httpsUrl(p.url)}`;
+}
 
 export function planProactive(o: { users: PlanUser[]; postings: any[]; now: number; fits?: AlertFits }): Planned[] {
   const out: Planned[] = [];
+  const idx = twinIndex(o.postings);
   for (const u of o.users) {
     if (!u.prefs || !u.prefs.on) continue;
     const prefs = u.prefs, l = local(o.now, u.tz), since = ms(u.last_checked_at);
@@ -207,17 +277,20 @@ export function planProactive(o: { users: PlanUser[]; postings: any[]; now: numb
     const at = isQuiet(l.hour, prefs) ? nextAwake(o.now, u.tz, prefs) : o.now;
     // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): one alert per job. The same job on two boards (its own id on each, other
     // pay) was two alerts, and took two of the day's places.
+    // PROACTIVE SCENARIOS ROUND 3 (2026-11-01): one job is every posting that is the same job as another, one board after
+    // another (the employer's board, an aggregator that copies its link under another name, a third that copies its words),
+    // and the copy said is the job's first among the news (the employer's own, not the aggregator's that came a minute
+    // later), so a later copy is known by the one alerted.
     const twins = new Map<string, Set<string>>();
-    for (const k of u.alerted_twins ?? []) take(twins, k);
-    for (const p of fresh) {
-      const twin = twinKey(p);
-      if (twinOf(twins, twin)) continue;
-      take(twins, twin);
+    take(twins, closeTwins(u.alerted_twins ?? [], idx));
+    for (const p0 of fresh) {
+      if (twinOf(twins, keysOf(p0))) continue;
+      const job = closeTwins(keysOf(p0), idx), mine = new Set(job);
+      const p = fresh.filter((q) => keysOf(q).every((k) => mine.has(k))).sort((a, b) => ms(a.first_seen_at) - ms(b.first_seen_at) || String(a.job_id).localeCompare(String(b.job_id)))[0] ?? p0;
+      take(twins, job);
       if (room <= 0) { out.push({ userId: u.id, kind: "held", job_id: p.job_id }); continue; }
       room--;
-      const mins = Math.max(0, Math.floor((o.now - ms(p.first_seen_at)) / 60000));
-      out.push({ userId: u.id, kind: "alert", key: `alert:${p.job_id}`, at, job_id: p.job_id,
-        text: `New match: ${line(p)}, first seen ${ago(mins)}.\n${httpsUrl(p.url)}` });
+      out.push({ userId: u.id, kind: "alert", key: `alert:${p.job_id}`, at, job_id: p.job_id, text: alertText(p, o.now) });
     }
     // The daily report: once per local day, at or after the person's hour.
     if (l.hour >= prefs.report_hour && u.last_report_on !== l.date) {
@@ -226,7 +299,7 @@ export function planProactive(o: { users: PlanUser[]; postings: any[]; now: numb
       const day = o.postings
         .filter((p) => matchPosting(p, prefs) && floorOk(p) && ((ms(p.first_seen_at) > o.now - DAY && freshWhenSeen(p)) || held.has(p.job_id)))
         .sort(byFit(fits))
-        .filter((p) => { const t = twinKey(p); if (twinOf(listed, t)) return false; take(listed, t); return true; });
+        .filter((p) => { if (twinOf(listed, keysOf(p))) return false; take(listed, closeTwins(keysOf(p), idx)); return true; });
       const text = day.length
         ? [`Your daily job report: ${day.length} match${day.length === 1 ? "" : "es"} in the last day.`,
            ...day.slice(0, REPORT_LIMIT).map((p) => `- ${line(p)}\n  ${httpsUrl(p.url)}`),

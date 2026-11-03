@@ -54,11 +54,11 @@ import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWi
 import { brainMode, STAGED_TOOL_POLICY, stagedRoute } from "./career_staged.ts";
 import { CRISIS_INTENT, crisisReply } from "./crisis.ts";
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
-import { CARD_ANSWER_INTENT, CARD_INTENT, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
+import { CARD_ANSWER_INTENT, CARD_INTENT, CARD_NEEDS_REPLY_STATUS, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
 import { billingTurn, PAY_BY_CHECKOUT, stripeFromEnv, supabaseBillingStore } from "../_shared/career_billing.ts";
 import { mockTurn, supabaseMockStore as supabaseMockStoreUncapped } from "../_shared/career_mock.ts";
 import { hiredSourceFromEnv } from "../_shared/career_hired.ts";
-import { QUESTIONS_INTENT, questionsTurn, supabaseQuestionStore } from "../_shared/career_apply_questions.ts";
+import { askNextOpenQuestion, QUESTIONS_INTENT, questionsTurn, supabaseQuestionStore } from "../_shared/career_apply_questions.ts";
 import { applicationsTurn, supabaseApplications } from "../_shared/career_apply_status.ts";
 import { emailStatusAsk, outreachStatusTurn } from "../_shared/career_send_rail.ts"; // "where are my emails"
 import { standingTurn, supabaseStanding } from "../_shared/career_standing.ts";
@@ -77,7 +77,7 @@ import { supabaseAlertStore } from "../_shared/career_alert_store.ts";
 import { syncWatchAlerts } from "../_shared/career_watch_alerts.ts";
 import { supabaseWantStore } from "../_shared/career_apply_want.ts";
 import { feature1Deps, resumeOnFileReader } from "../_shared/career_apply_from_chat.ts"; // FEATURE 1; FEATURE 16: resumeOnFileReader
-import { cancelTurn, prepareAfterAnswers, withPending } from "../_shared/career_hosted_prepare.ts"; // FEATURE 17
+import { cancelTurn, prepareAfterAnswers, reprepareQueued, withPending } from "../_shared/career_hosted_prepare.ts"; // FEATURE 17
 import { supabaseUndoStore, undoTurn } from "../_shared/career_undo.ts"; // C21/C22: "undo" / "cancel that"
 import { statusAsk } from "../_shared/career_apply_status.ts"; // FEATURE 17
 import { supabaseMemoryStore } from "../_shared/agent/memory.ts";
@@ -122,7 +122,10 @@ import { applyReadiness } from "../_shared/apply_readiness.ts"; // SPEC 2.2
 import { writeReadinessAsk } from "../_shared/readiness_ask.ts";
 import { summaryFacts } from "../_shared/apply_status_summary.ts"; // SPEC 6.5
 import { resultsFile, whatOf } from "../_shared/role_results.ts"; // ROLE + PAY RESULTS PAGE
-import { supabaseJobStore } from "../_shared/telegram_jobs.ts";
+import { supabaseAccountStamp, supabaseConfirmedFacts, supabaseJobStore, type JobDeps } from "../_shared/telegram_jobs.ts";
+import { APPLY_ALL_INTENT, type ApplyAllOffer, applyAllYesTurn, isApplyAllYes, isConditionalYes, liveOfferRow, readOffer } from "../_shared/apply_all_yes.ts"; // apply all by yes
+import { applyAllYesOn } from "./release_config.ts";
+import { supabaseTapStore } from "../_shared/channel_card_tap.ts";
 import { feedUrlsFor } from "../_shared/file_link.ts";
 import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
 import { reminderTurn, supabaseReminderStore } from "../_shared/career_reminders.ts"; // REQS DOC 2: reminders
@@ -502,10 +505,16 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         ? await outlookChatTurn({ admin, message, userId: user.id, threadId: tid, bridge: isBridgeCall, now: Date.now(), env: Deno.env })
           .catch((e) => { console.error("outlook turn:", e?.message ?? e); return null; })
         : null;
-      const card = !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      // APPLY ALL BY YES (apply_all_yes.ts): a plain yes while the results message's offer is the thread's last word. The card turn answers a
+      // yes that does not reply to a card with "reply to the card message"; that answer stands down for a live offer (a yes that does
+      // reply to a card still goes to the card).
+      const offerLastWord = applyAllYesOn(Deno.env) && (isApplyAllYes(message) || isConditionalYes(message)) && !tapIn
+        ? readOffer((await liveOfferRow(admin, tid).catch(() => null))?.meta) : null;
+      const card0 = !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         // FEATURE 16: OWNER RULE (2026-10-26): no card without a confirmed resume on file (resumeReady).
         ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id), store: supabaseCardStore(admin), events })
         : null;
+      const card = card0 && offerLastWord && card0.status === CARD_NEEDS_REPLY_STATUS ? null : card0;
       // WO-025: the text mock interview, code's like the card: "mock me for <role> at <company>", "end mock", and the answers
       // while the mock's question is this thread's last word. Same guards as the card; the card goes first.
       const mock = !card && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
@@ -653,9 +662,45 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // Option A (chosen 2026-10-22 under the owner's delegation): a text yes never approves or sends; only the person's
       // tap on the exact payload does. A "yes" while the cloud card is the thread's last word only opens that card, read
       // as the person. Never on a channel's service-role turn.
-      const cardYes = !tapIn && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const cardYes0 = !tapIn && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await cloudCardYesTurn({ message, threadId: tid, ownSession: !isBridgeCall, store: personCloudCardStore(supabase) })
         : null;
+      // APPLY ALL BY YES (apply_all_yes.ts; owner, 2026-11-02): a bare yes while the results message's offer ("Reply yes and I'll apply to
+      // all N shown") is the thread's last word approves exactly the roles that offer named, each through the page Apply's hash-bound
+      // path. It takes the cardYes slot (everything after it already stands down for a claimed yes); no live offer: null, nothing new.
+      const applyAllYes = !cardYes0 && applyAllYesOn(Deno.env) && !tapIn && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx) && (isApplyAllYes(message) || isConditionalYes(message))
+        ? await (async () => {
+          const last = await liveOfferRow(admin, tid); // the offer's message is the latest row, with no user turn after it
+          if (!last || !readOffer(last.meta)) return null;
+          const jobDeps: JobDeps = { store: supabaseJobStore(admin), cards: supabaseCardStore(admin), tap: supabaseTapStore(admin), now: Date.now, env: Deno.env, events: supabaseEventStore(admin),
+            facts: supabaseConfirmedFacts(admin), account: supabaseAccountStamp(admin) };
+          const rd = applyReadiness({ profile: (ctx as any).profile ?? null, ask: (ctx as any).discovery?.lastAsk ?? null });
+          // The resume must be on file with its confirmation events (career_resume_on_file, the card's rule); unknown counts as none.
+          const onFile = (await resumeOnFileReader(admin, user.id)()) === true;
+          const res = await applyAllYesTurn({ message, userId: user.id, now: Date.now(), last, deps: jobDeps, questions: supabaseQuestionStore(admin), resumeConfirmed: onFile,
+            prepare: (u) => reprepareQueued({ admin, userId: u, env: Deno.env, fetch: (i: any, init: any) => fetch(i, init) }) });
+          if (!res) return null;
+          // What it still needs from the person, asked ONE at a time and in the model's words (readiness_ask.ts, D-007), never code's:
+          // a need that keeps roles from being prepared (apply_readiness.ts), else the employer's first open question.
+          const parts: string[] = [res.reply];
+          let asked1 = false;
+          if (res.asks.unprepared || res.asks.questions) {
+            const block = rd.ask_now.filter((n) => n.blocks === "apply");
+            if (res.asks.unprepared && block.length && replyWriterOn(Deno.env)) {
+              const aMeter = ledger.track(newMeter());
+              const asked = await writeReadinessAsk({ readiness: { ...rd, ask_now: block }, message, channel: writerChannel((body as any)?.channel), model: (payload) => callModel(careerModelConfig(Deno.env), payload, { meter: aMeter, role: "chat" }) })
+                .catch((e) => { console.error("apply-all readiness ask: no question this turn:", (e as Error)?.message ?? e); return null; });
+              await ledger.record(aMeter);
+              if (asked?.text) { parts.push(asked.text); res.meta = { ...res.meta, readiness_ask: { key: block[0].key } }; }
+            } else if (res.asks.questions) {
+              const q = await askNextOpenQuestion({ userId: user.id, threadId: tid, now: Date.now(), store: supabaseQuestionStore(admin) }).catch(() => null);
+              if (q) { parts.push(q); asked1 = true; }
+            }
+          }
+          return { ...res, parts, asked1, applyAll: true as const };
+        })().catch((e) => { console.error("apply all by yes:", (e as Error)?.message ?? e); return null; })
+        : null;
+      const cardYes: any = cardYes0 ?? applyAllYes;
       // SUBMIT-STEER-1130: "did my application to Acme go through?", "where are my applications": answered from
       // career_apply_jobs, the one record of what was sent, code's like the card. Submitted is said only as recorded;
       // "confirmed" only when the employer confirmed it; an unreadable record is said, never guessed.
@@ -935,6 +980,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         out = { reply: repliesAns.reply, intent: repliesAns.intent, resultStatus: repliesAns.status, contained: false, handler: "outreach_replies" };
       } else if (cloud) {
         out = { reply: cloud.reply, intent: cloud.intent, resultStatus: cloud.status, contained: false, handler: "cloud" };
+      } else if (cardYes?.applyAll) {
+        // The yes approved the offer's roles (or said why not); the offer is spent, so a second yes is nothing new.
+        out = { reply: cardYes.reply, intent: cardYes.asked1 ? QUESTIONS_INTENT : APPLY_ALL_INTENT, resultStatus: cardYes.status, contained: false, handler: "apply_all_yes", ...(cardYes.parts.length > 1 ? { parts: cardYes.parts } : {}) } as typeof out;
+        agentMeta = { ...cardYes.meta };
       } else if (cardYes) {
         // The card stays the last word, so the app shows it again; its Approve is the only way anything is sent.
         out = { reply: cardYes.reply, intent: CLOUD_CARD_INTENT, resultStatus: cardYes.status, contained: false, handler: "cloud_card" };
@@ -1067,6 +1116,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         // role search the router did not run at all (posting_constraints.ts reads it from the message itself).
         const f5Said = f5Free && !f5Prompt ? askFor(message, out, (ctx as any).discovery) : null;
         const f5Ask = f5Said?.ask ?? null;
+        let f5Offer: { offer: ApplyAllOffer; ask: string; resumeLine: boolean } | null = null; // the yes the results message ends with (apply_all_yes.ts)
         if (f5Ask) {
           const f5Meter = ledger.track(newMeter());
           const f5Cfg = careerModelConfig(Deno.env);
@@ -1106,6 +1156,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                 if (made) {
                   out = { ...out, reply: made.reply + resumeLine, parts: [made.parts[0], ...(resumeLine ? [resumeLine.trim()] : []), made.parts[1]] };
                   agentMeta = { ...(agentMeta || {}), results_file: made.listId };
+                  f5Offer = { offer: made.offer, ask: made.offerAsk, resumeLine: !!resumeLine };
                 }
               }
               // SPEC 2.2 (apply_readiness.ts): what an application still needs, from CONFIRMED facts only, handed to the model as data.
@@ -1126,6 +1177,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                     agentMeta = { ...(agentMeta || {}), readiness_ask: { key: rd.ask_now[0].key } };
                   } else if (asked) agentMeta = { ...(agentMeta || {}), readiness_ask_dropped: asked.rejected.slice(0, 4) };
                 }
+              }
+              // APPLY ALL BY YES (apply_all_yes.ts): the results message ends with ONE plain question, "Reply yes and I'll apply to all N
+              // shown", and the offer it makes (the list, each role's ref and the application tag it has now) is kept in this turn's meta,
+              // so a bare yes next approves exactly those. Never when the message already ends with another question (the resume line or a
+              // readiness ask): a yes there answers that one. CAREER_APPLY_ALL_YES=off leaves the results message as it was.
+              if (f5Offer && applyAllYesOn(Deno.env) && f5Offer.offer.jobs.some((j) => j.tag) && !f5Offer.resumeLine && (await resumeOnFileReader(admin, user.id)()) === true && !(agentMeta as any)?.readiness_ask) {
+                out = { ...out, reply: `${out.reply}\n${f5Offer.ask}`, parts: [...((out as any).parts ?? []), f5Offer.ask] };
+                agentMeta = { ...(agentMeta || {}), apply_all_offer: f5Offer.offer };
               }
             }
           } catch (e) { console.error("career search judge: the router's reply stands:", (e as Error)?.message ?? e); }

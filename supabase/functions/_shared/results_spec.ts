@@ -35,35 +35,59 @@ export const BUCKETS: { key: Bucket; label: string }[] = [
   { key: "blocked", label: "Blocked or applied by hand" },
 ];
 
-export interface Spec { bucket: Bucket; label: string; detail: string; evidence: string | null; sent: boolean }
-type R = Pick<Row, "status" | "byHand" | "blocked" | "tag"> & { openQs?: number };
+// The state system of the design spec (1.6): the labels are verbatim, one primary state per role.
+export type StateKey = "discovered" | "checking" | "needs_info" | "preparing" | "ready" | "approved" | "queued" | "in_progress" | "user_step" | "uncertain" | "submitted" | "blocked" | "excluded" | "closed";
+export type Tone = "neutral" | "info" | "attention" | "plum" | "risk" | "confirmed";
+export const STATES: Record<StateKey, { label: string; tone: Tone }> = {
+  discovered: { label: "Discovered", tone: "neutral" }, checking: { label: "Checking", tone: "info" },
+  needs_info: { label: "Needs candidate information", tone: "attention" }, preparing: { label: "Preparing", tone: "info" },
+  ready: { label: "Ready for review", tone: "plum" }, approved: { label: "Approved", tone: "plum" }, queued: { label: "Queued", tone: "info" },
+  in_progress: { label: "In progress", tone: "info" }, user_step: { label: "User step needed", tone: "attention" },
+  uncertain: { label: "Submission uncertain", tone: "risk" }, submitted: { label: "Submitted - confirmed", tone: "confirmed" },
+  blocked: { label: "Blocked", tone: "risk" }, excluded: { label: "Excluded", tone: "neutral" }, closed: { label: "Closed before submission", tone: "neutral" },
+};
+export interface Spec { bucket: Bucket; key: StateKey; tone: Tone; label: string; detail: string; evidence: string | null; sent: boolean }
+type R = Pick<Row, "status" | "byHand" | "blocked" | "tag"> & { openQs?: number; missing?: string[] };
+const mk = (key: StateKey, bucket: Bucket, detail: string, evidence: string | null, sent: boolean): Spec => ({ bucket, key, tone: STATES[key].tone, label: STATES[key].label, detail, evidence, sent });
 
-// One primary state per role. A row is "Submitted and confirmed" ONLY when the application row holds evidence (an employer
-// reference or a confirmation email); a "confirmed" with none on file is "Still checking".
+// One primary state per role. A row is "Submitted - confirmed" ONLY when the application row holds evidence (an employer
+// reference or a confirmation email); a "confirmed" with none on file is "Checking". A posting that is closed or past its deadline is
+// "Closed before submission"; a dismissed role is "Excluded" (stateOfDismissed).
 export function specOf(r: R): Spec {
   const s = r.status;
   if (s) {
     switch (s.word) {
       case "confirmed":
-        return s.evidence ? { bucket: "done", label: "Submitted and confirmed", detail: s.detail, evidence: s.evidence, sent: true }
-          : { bucket: "progress", label: "Still checking", detail: "Recorded as confirmed, but no confirmation reference or email is on file for it yet, so it isn't counted as confirmed.", evidence: null, sent: true };
-      case "submitted": return { bucket: "progress", label: "Still checking", detail: s.detail, evidence: null, sent: true };
-      case "unknown": return { bucket: "progress", label: "Still checking", detail: s.detail, evidence: null, sent: true };
-      case "queued": return { bucket: "progress", label: "Approved", detail: "Approved and waiting its turn; not started.", evidence: null, sent: false };
-      case "sending": return { bucket: "progress", label: "Started", detail: s.detail, evidence: null, sent: false };
-      case "preparing": return { bucket: "preparing", label: "Preparing", detail: s.detail, evidence: null, sent: false };
-      case "needs you": return { bucket: "needs", label: "Needs you", detail: s.detail, evidence: null, sent: !!s.sent };
-      case "failed": case "not submitted": return { bucket: "blocked", label: "Not sent", detail: s.detail, evidence: null, sent: false };
-      case "in applications": return { bucket: "blocked", label: "Already in your applications", detail: s.detail, evidence: null, sent: true };
+        return s.evidence ? mk("submitted", "done", s.detail, s.evidence, true)
+          : mk("checking", "progress", "Recorded as confirmed, but no confirmation reference or email is on file for it yet, so it isn't counted as confirmed.", null, true);
+      case "submitted": return mk("checking", "progress", s.detail, null, true);
+      case "unknown": return mk("uncertain", "progress", s.detail, null, true);
+      case "queued": return mk("queued", "progress", "Approved and waiting its turn; not started.", null, false);
+      case "sending": return mk("in_progress", "progress", s.detail, null, false);
+      case "preparing": return mk("preparing", "preparing", s.detail, null, false);
+      case "needs you": return mk("user_step", "needs", s.detail, null, !!s.sent);
+      case "failed": case "not submitted": return mk("blocked", "blocked", s.detail, null, false);
+      case "in applications": return mk("in_progress", "blocked", s.detail, null, true);
     }
   }
-  if (r.byHand) return { bucket: "blocked", label: "Apply by hand", detail: "Not applied for automatically on this site.", evidence: null, sent: false };
-  if (r.blocked) return { bucket: "blocked", label: "Blocked", detail: r.blocked, evidence: null, sent: false };
-  if (r.openQs) return { bucket: "needs", label: "Needs you", detail: `${r.openQs} ${r.openQs === 1 ? "question needs" : "questions need"} your answer first.`, evidence: null, sent: false };
-  if (r.tag) return { bucket: "ready", label: "Prepared", detail: "Prepared and waiting for your approval. Nothing has been sent.", evidence: null, sent: false };
-  return { bucket: "notprep", label: "Not prepared yet", detail: "Nothing is prepared for this role yet.", evidence: null, sent: false };
+  if (r.byHand) return mk("user_step", "blocked", "Not applied for automatically on this site. Apply there yourself.", null, false);
+  if (r.blocked) return /\b(closed|deadline|expired|no longer|filled)\b/i.test(r.blocked) ? mk("closed", "blocked", r.blocked, null, false) : mk("blocked", "blocked", r.blocked, null, false);
+  if (r.openQs) {
+    const what = r.missing?.length ? `Missing: ${r.missing.join("; ")}.` : `${r.openQs} ${r.openQs === 1 ? "question needs" : "questions need"} your answer first.`;
+    return mk("needs_info", "needs", what, null, false);
+  }
+  if (r.tag) return mk("ready", "ready", "Prepared and waiting for your approval. Nothing has been sent.", null, false);
+  return mk("discovered", "notprep", "Found; nothing is prepared for this role yet.", null, false);
 }
+// A role the person dismissed: intentionally not pursued, the reason kept (private, reversible).
+export const stateOfDismissed = (): Spec => mk("excluded", "blocked", "Dismissed by you. Private and reversible; no application was touched.", null, false);
 
+// The counts strip in the spec's own state words: every role is in exactly one state, so the numbers sum to the role total.
+export function stateCountsOf(rows: readonly R[]): { key: StateKey; label: string; tone: Tone; n: number }[] {
+  const n = new Map<StateKey, number>();
+  for (const r of rows) { const k = specOf(r).key; n.set(k, (n.get(k) ?? 0) + 1); }
+  return (Object.keys(STATES) as StateKey[]).map((key) => ({ key, label: STATES[key].label, tone: STATES[key].tone, n: n.get(key) ?? 0 }));
+}
 export function countsOf(rows: readonly R[]): { key: Bucket; label: string; n: number }[] {
   const n = new Map<Bucket, number>();
   for (const r of rows) { const b = specOf(r).bucket; n.set(b, (n.get(b) ?? 0) + 1); }
@@ -98,7 +122,7 @@ export function renderExport(o: { title: string; updated: string; counts: { labe
     const url = httpUrl(r.url);
     // A link is "Open application" only where the person finishes it themselves on the employer's site; everything else is an
     // action the private workspace carries out after approval. No made-up addresses.
-    const userStep = r.byHand || r.spec.bucket === "needs" || r.spec.label === "Not sent" || r.spec.label === "Blocked";
+    const userStep = r.byHand || r.spec.bucket === "needs" || r.spec.key === "blocked" || r.spec.key === "closed" || r.spec.key === "user_step";
     L.push(`${r.id}  ${oneLine(r.title)} at ${oneLine(r.employer)}`);
     L.push(`  Status: ${r.dismissed ? "Dismissed by you (private; no application touched)" : r.spec.label}`);
     if (!r.dismissed && r.spec.detail) L.push(`  Detail: ${oneLine(r.spec.detail)}`);

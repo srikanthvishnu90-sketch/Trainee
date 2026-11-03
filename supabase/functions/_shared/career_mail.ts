@@ -179,7 +179,9 @@ function tenantAgrees(local: string, name: string): boolean {
   return !!l && (l === t.map((w) => w[0]).join("") || (l.length >= 3 && (c.startsWith(l) || l.startsWith(c))));
 }
 
-const CO = "([A-Z][A-Za-z0-9&.'’-]*(?:\\s+(?:[A-Z][A-Za-z0-9&.'’-]*|&|of)){0,3})";
+// RESEARCH ROUND 2 (2026-10-30): a name that opens with initials ("D. E. Shaw & Co. would like to invite you") was read as
+// "Shaw & Co": the sentence split at "D. " and "E. ", and the name took no initials.
+const CO = "((?:[A-Z]\\.\\s?){0,3}[A-Z][A-Za-z0-9&.'’-]*(?:\\s+(?:[A-Z][A-Za-z0-9&.'’-]*|&|of)){0,3})";
 const TEXT_COMPANY = [
   new RegExp(`\\b${CO}\\s+(?:has\\s+)?(?:invited|invites|requested|sent|has sent)\\b`, "g"),
   new RegExp(`\\b(?:invited by|application (?:was )?(?:sent|submitted) to|has been submitted to|application to|applying to|applied to [^.]{0,60}? at|offer from|test from|invitation from|from)\\s+${CO}`, "g"),
@@ -215,7 +217,7 @@ const NOT_COMPANY = /^(i|you|your|we|our|the|this|that|hi|hello|dear|thank|thank
 // The employer a sentence names, read sentence by sentence; leading words that are not a name are dropped.
 export function companyFromText(text: string): string | undefined {
   // "Gap Inc. has invited you": the period of an abbreviation does not end the sentence.
-  const sentences = text.split(/(?<!\b(?:Inc|Co|Corp|Ltd|Jr|Sr|St|Mr|Ms|Mrs|Dr)\.)(?<=[.!?])\s+|\n+/);
+  const sentences = text.split(/(?<!\b(?:Inc|Co|Corp|Ltd|Jr|Sr|St|Mr|Ms|Mrs|Dr)\.)(?<!\b[A-Z]\.)(?<=[.!?])\s+|\n+/);
   for (const re of TEXT_COMPANY) for (const sentence of sentences) for (const m of sentence.matchAll(re)) {
     const words = m[1].replace(/[.,!?:;'’]+$/, "").replace(/'s$/, "").trim().split(/\s+/);
     while (words.length && (NOT_COMPANY.test(words[0].replace(/[^A-Za-z]/g, "")) || words[0] === "&")) words.shift();
@@ -385,7 +387,8 @@ const RULES: [Exclude<MailKind, "other" | "recruiter_reply">, RegExp, RegExp?][]
 // Words that make a message something other than an application step, checked on the subject and sender first.
 // WO-045: a candidate-experience survey ("How was your interview experience at Lyft?").
 const NOISE_SUBJECT = /\b(job alerts?|new jobs|jobs for you|jobs? (matching|recommended)|recommended (jobs|for you)|is hiring|are hiring|hiring now|great match|top applicant|newsletter|webinar|digest|info session|career fair|events?|conference|registration(?! interview)|rsvp|survey|feedback|statement|receipt|your order|package|shipped|deals?|sale|% off|premium|verify|verification|password|sign[- ]?in|security code|candidate account|viewed your|tips|course|salaries|profile(?! (has been |was )?(registered|submitted|received))|product update|what'?s new|new features|withdrawn|self-identification|automatic reply|auto-?reply|autoreply|out of (the )?office|ooo|how (was|did) your [^?]{0,40}?(experience|go)|(rate|tell us about|share) your [^?]{0,30}?experience|candidate experience)\b/i;
-const NOISE_TEXT = new RegExp(String.raw`\b(complete your application|finish (applying|your application)|haven'?t (submitted|finished)|isn'?t finished|started an application|pick up where you left off|unsubscribe from (job )?alerts|viewed your (application|profile)|mock interviews?|practice interviews?|interview tips|career coach(es|ing)?|(health|wellness|wellbeing|property|tax|fitness|medical|hearing|vision|skin|home|energy|credit) assessments?|assessor(?! de )|out of (the )?office|when i return|limited access to (my )?e-?mail|video visit|clinician|telehealth|your (doctor|provider|care team)|mychart|lab results|` +
+// Family email (2026-10-26): a "home assessment" (a property survey) is noise, a "take-home assessment" is a job test.
+const NOISE_TEXT = new RegExp(String.raw`\b(complete your application|finish (applying|your application)|haven'?t (submitted|finished)|isn'?t finished|started an application|pick up where you left off|unsubscribe from (job )?alerts|viewed your (application|profile)|mock interviews?|practice interviews?|interview tips|career coach(es|ing)?|(health|wellness|wellbeing|property|tax|fitness|medical|hearing|vision|skin|(?<!take[- ])home|energy|credit) assessments?|assessor(?! de )|out of (the )?office|when i return|limited access to (my )?e-?mail|video visit|clinician|telehealth|your (doctor|provider|care team)|mychart|lab results|` +
   // WO-043: a journalist's or podcast's interview, and a test vendor's own marketing ("practice questions", "free trial").
   String.raw`(podcast|press|media|radio|tv|news) interview|(working on|writing) (a|an) (story|article|piece|episode)|for (our|a|an) (story|article|podcast|episode|show)|practice (questions|problems|tests?)|start practicing|interview-ready|free trial|` +
   // WO-045: a practice site's games ("keep your streak alive", "the leaderboard", "your weekly coding challenge").
@@ -1162,6 +1165,8 @@ export interface StatusEvent {
   // WO-040 review: why a flagged event was only said, never applied: an offer through an e-signature or self-serve ATS
   // ("via DocuSign"), or the model's reading of an offer or rejection ("model").
   note?: string;
+  // An assessment's deadline as the email states it (assessmentDeadline); absent when it states none.
+  due?: Deadline;
 }
 export interface StatusText { key: string; hash: string; ref: string; text: string }
 // step (WO-034): a thank-you drafted right after an interview ("thanks"), or the thank-you and nudge after quiet days (the
@@ -1172,6 +1177,50 @@ export interface Draft { key: string; ref: string; kind: "followup" | "thank_you
 // only recorded: the application it names (ref, null when none), never a stage move, an event, a text or a new application.
 export interface Evidence { hash: string; ref: string | null; kind: Exclude<MailKind, "other">; via: "calendar" | "forward"; company?: string }
 export interface Plan { events: StatusEvent[]; texts: StatusText[]; drafts: Draft[]; apps: TrackedApp[]; unmatched: number; ambiguous: number; other: number; refused: number; evidence: Evidence[] }
+
+// ------------------------------------------------------------------------------------------------ deadlines (EM-08)
+// An assessment's deadline, only as the email states it: a time limit from when it arrived ("within 72 hours", "you have
+// 5 days to complete it") or a calendar date after a deadline word ("by November 5", "expires on Friday, October 30").
+// at: the moment it is due (a time limit) or the start of the stated date in UTC (a date; dated: true, no time is
+// guessed). words: the email's own words, said back so the person can check them. Business days, a duration ("90 minutes
+// in one sitting") and anything vaguer ("at your convenience") are no deadline: null, and the person is told to check.
+export interface Deadline { at: string; words: string; dated: boolean }
+const NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, fourteen: 14, "twenty-four": 24, "forty-eight": 48, "seventy-two": 72 };
+const N_WORD = String.raw`(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|fourteen|twenty-four|forty-eight|seventy-two)`;
+const WITHIN = new RegExp(String.raw`\b(?:within|in the next)\s+(?:the\s+next\s+)?${N_WORD}\s+(hours?|days?|calendar days?)\b(?!\s+of\s+(?:work|effort|time))`, "i");
+const HAVE = new RegExp(String.raw`\b${N_WORD}\s+(hours?|days?|calendar days?)\s+to\s+(?:complete|finish|submit)\b`, "i");
+const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+const DATED = new RegExp(String.raw`\b(?:by|before|due(?:\s+(?:on|by))?|expires?(?:\s+on)?|deadline(?:\s+is)?:?|no later than|until|closes?(?:\s+on)?)\s+(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day,?\s+)?(${MONTHS.join("|")}|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?!\s*(?:,\s*)?\d{4})|\b(?:by|before|due(?:\s+(?:on|by))?|expires?(?:\s+on)?|deadline(?:\s+is)?:?|no later than|until|closes?(?:\s+on)?)\s+(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day,?\s+)?(${MONTHS.join("|")}|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b`, "i");
+export function assessmentDeadline(m: Pick<MailMeta, "subject" | "snippet" | "date">): Deadline | null {
+  const text = `${String(m.subject ?? "")}\n${String(m.snippet ?? "")}`.replace(/\s+/g, " ");
+  const sent = Date.parse(m.date);
+  if (!Number.isFinite(sent)) return null;
+  const rel = WITHIN.exec(text) ?? HAVE.exec(text);
+  if (rel) {
+    const n = /^\d+$/.test(rel[1]) ? Number(rel[1]) : NUM[rel[1].toLowerCase()];
+    const hours = /^hour/i.test(rel[2]) ? n : n * 24;
+    if (n > 0 && hours <= 60 * 24) return { at: new Date(sent + hours * 3_600_000).toISOString(), words: rel[0].trim(), dated: false };
+  }
+  const d = DATED.exec(text);
+  if (d) {
+    const [mon, dd, yyyy] = d[1] ? [d[1], d[2], null] : [d[3], d[4], d[5]];
+    const month = MONTHS.findIndex((x) => x.startsWith(mon.toLowerCase().slice(0, 3)));
+    const dayN = Number(dd), sentYear = new Date(sent).getUTCFullYear();
+    if (month < 0 || dayN < 1 || dayN > 31) return null;
+    let at = Date.UTC(yyyy ? Number(yyyy) : sentYear, month, dayN);
+    if (new Date(at).getUTCDate() !== dayN) return null; // "February 30"
+    // A date without a year that is well before the email (a December email's "January 3") is next year's.
+    if (!yyyy && at < sent - 7 * 86_400_000) at = Date.UTC(sentYear + 1, month, dayN);
+    if (at < sent - 86_400_000 || at > sent + 120 * 86_400_000) return null;
+    return { at: new Date(at).toISOString(), words: d[0].trim(), dated: true };
+  }
+  return null;
+}
+// How a deadline is said: the day (and for a time limit, nothing finer than the day in UTC: the person's zone is not known
+// here), followed by the email's own words.
+export function dueText(d: Deadline): string {
+  return `due ${new Date(d.at).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })} (the email says "${clip(d.words, 80)}")`;
+}
 
 export const FOLLOW_UP_DAYS = 14, THANK_YOU_DAYS = 7, DRAFT_WINDOW_DAYS = 30;
 const DAY = 86400000;
@@ -1189,7 +1238,7 @@ function statusText(e: StatusEvent, subject: string, was: string): string {
     case "received": return `${co}${r} confirmed your application on ${when}. I'm tracking it.${email}`;
     case "rejection": return `${co}${r} said no on ${when}. Marked Rejected.${email}`;
     case "interview": return `${co}${r} wants to interview you (email ${when}). Marked Interview rounds.${email}`;
-    case "assessment": return `${co}${r} sent an assessment on ${when}. Marked OA/assessment; check the email for the deadline.${email}`;
+    case "assessment": return e.due ? `${co}${r} sent an assessment on ${when}, ${dueText(e.due)}. Marked OA/assessment.${email}` : `${co}${r} sent an assessment on ${when}. Marked OA/assessment; check the email for the deadline.${email}`;
     case "offer": return `${co}${r} sent an offer on ${when}. Marked Offer.${email}`;
     case "recruiter_reply": return `A recruiter at ${co}${r} wrote on ${when}. Marked Recruiter screen.${email}`;
   }
@@ -1264,6 +1313,8 @@ export function planUpdates(mails: MailIn[], applications: TrackedApp[], now: nu
       hash: m.hash, ref: app.ref, kind: c.kind, company: app.company, role: app.role ?? c.role,
       stage: forward ? to : fresh ? was : null, flagged, evidence: c.evidence, at: new Date(Date.parse(m.date) || now).toISOString(), new_app: fresh,
     };
+    const due = c.kind === "assessment" ? assessmentDeadline(m) : null;
+    if (due) e.due = due;
     plan.events.push(e);
     app.events!.push({ kind: c.kind, at: e.at, source: "mail" });
     if (forward) app.stage = to;

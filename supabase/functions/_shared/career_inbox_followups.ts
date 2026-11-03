@@ -12,19 +12,21 @@
 //           recipient, the exact subject and text, its SHA-256). The address is the one the person typed or the one their
 //           emailed application went to; never guessed. Nothing is sent by showing it.
 //   yes     while that card is this thread's last word (by its id): approved for exactly that hash, claimed through the
-//           database's career_outreach_claim (age, pause, do-not-contact, caps, spacing), and sent once from the person's
+//           database's career_outreach_claim (age, pause, do-not-contact; no volume limit, NO LIMITS), and sent once from the person's
 //           own Gmail, only with CAREER_EMAIL_SEND=on and a career grant that may send; otherwise the reply says exactly
 //           which is missing and the card stays. A sent one is recorded on its mail draft as 'sent', so it is never due again.
 import type { EventStore } from "./agent/timeline.ts";
 import type { Outbox } from "./career_alert_store.ts";
 import { type ConfirmStore } from "./career_apply_confirm.ts";
-import { type Draft, sameCompany } from "./career_mail.ts";
+import { assessmentDeadline, type Deadline, type Draft, dueText as dueTextOf, sameCompany } from "./career_mail.ts";
 import { careerTokenFor, CAREER_READ_SCOPE, type ReadResult, readMailSince, type TokenDeps } from "./career_mail_gmail.ts";
 import type { MailStore } from "./career_mail_store.ts";
 import { type Admit, dayStartOf, type Message, messageOf, type OutreachDraft, type OutreachStore, payloadHash, recordOutreach, type SendResult } from "./career_outreach.ts";
 import { ONE_ADDRESS } from "./career_outreach_gmail.ts";
 import { runMail } from "./career_proactive_run.ts";
 import { type DraftRow, type ReadStanding, standingFrom } from "./career_standing.ts";
+import { vaultRefreshWrite } from "./oauth_vault_refresh.ts";
+import { PARTIAL_WORDS } from "./oauth_connect.ts";
 
 export const CHECK_INTENT = "career_inbox_check";
 export const FOLLOWUP_CARD_INTENT = "career_followup_card";
@@ -86,30 +88,65 @@ export function followupAnswer(message: string): FollowupAsk | null {
 }
 
 // ------------------------------------------------------------------------------------------------ the mail run, now
+export interface Reminder { who: string; at: number }
 export type MailNow =
-  | { status: "ok"; read: number; statuses: string[]; offers: string[]; read_through: string | null }
-  | { status: "NOT_WIRED" } | { status: "ERROR"; detail: string; statuses: string[]; offers: string[] };
+  | { status: "ok"; read: number; statuses: string[]; offers: string[]; read_through: string | null; reminders?: Reminder[] }
+  | { status: "NOT_WIRED" } | { status: "ERROR"; detail: string; statuses: string[]; offers: string[]; reminders?: Reminder[] };
+// EM-08: when an assessment's reminder is due. A stated date (no time): the day before, 14:00 UTC (morning in the
+// Americas, afternoon in Europe). A time limit: 24 hours before it ends, or halfway when the limit is shorter than 2 days.
+export function remindAt(d: Deadline, sentMs: number): number {
+  const due = Date.parse(d.at);
+  if (d.dated) return due - 86_400_000 + 14 * 3_600_000;
+  return due - Math.min(86_400_000, Math.max(0, (due - sentMs) / 2));
+}
+const dayWord = (ms: number) => new Date(ms).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
 // One run of the scheduled mail tracking (runMail) for this person only. Its texts are collected for this reply instead of
 // the outbox; everything it records (events, drafts, confirmations, the cursor) it records exactly as on its schedule.
 export async function mailNow(o: {
   userId: string; now: number; store: MailStore; cursor: (userId: string) => Promise<string | null>;
   read: (userId: string, sinceMs: number, nowMs: number) => Promise<ReadResult>; confirm?: ConfirmStore | null;
 }): Promise<MailNow> {
-  const said: { kind: string; text: string }[] = [];
-  const outbox: Outbox = { enqueue: async (_u, m) => { said.push({ kind: m.kind, text: m.text }); return true; } };
+  const said: { kind: string; text: string; key: string }[] = [];
+  const outbox: Outbox = { enqueue: async (_u, m) => { said.push({ kind: m.kind, text: m.text, key: m.key }); return true; } };
   let got = null as ReadResult | null;
   const read_through = await o.cursor(o.userId);
   const store: MailStore = { ...o.store, people: async () => [{ user_id: o.userId, read_through }] };
   const statuses = () => said.filter((s) => s.kind === "status").map((s) => s.text), offers = () => said.filter((s) => s.kind === "followup").map((s) => s.text);
+  // EM-08: an assessment this read moved (its status was said, so it was recorded just now and never before) gets one
+  // reminder before its deadline, when the email states one and the reminder's time is still ahead.
+  const remind = async (): Promise<Reminder[]> => {
+    const out: Reminder[] = [];
+    const write = o.confirm?.remind?.bind(o.confirm);
+    if (!got || !write) return out;
+    for (const m of got.mails) {
+      const text = said.find((s) => s.kind === "status" && s.key === `status:${m.hash}`)?.text;
+      const who = text ? /^(.+?) sent an assessment on /.exec(text)?.[1] : null;
+      const d = who ? assessmentDeadline(m) : null;
+      if (!who || !d) continue;
+      const at = remindAt(d, Date.parse(m.date));
+      if (!(at > o.now)) continue;
+      const line = `Reminder: your ${who} assessment is ${dueTextOf(d)}. The link is in their email; Trainee doesn't take assessments for you.`;
+      try {
+        if (await write(o.userId, { key: `status:deadline:${m.hash}`, text: line, at })) out.push({ who, at });
+      } catch (e) {
+        console.error("mail: deadline reminder not queued", e instanceof Error ? e.message : String(e));
+      }
+    }
+    return out;
+  };
   try {
     await runMail({ outbox, now: o.now, store, confirm: o.confirm ?? null, batch: 1, read: async (u, since, now) => (got = await o.read(u, since, now)) });
   } catch (e) {
-    return { status: "ERROR", detail: e instanceof Error ? e.message : String(e), statuses: statuses(), offers: offers() };
+    // The read's own failure, in the person's words; the run's internal summary ("failed for 1 people") is for the logs.
+    console.error("mail now:", e instanceof Error ? e.message : String(e));
+    const r = got as ReadResult | null;
+    const detail = r?.status === "ERROR" ? "Gmail returned an error partway through" : r?.status === "RATE_LIMITED" ? "Gmail asked Trainee to slow down" : "something went wrong saving what was read";
+    return { status: "ERROR", detail, statuses: statuses(), offers: offers(), reminders: await remind() };
   }
   if (!got || (got as ReadResult).status === "NOT_WIRED") return { status: "NOT_WIRED" };
   const r = got as ReadResult;
-  if (r.status === "RATE_LIMITED") return { status: "ERROR", detail: "Gmail asked Trainee to slow down; what was read is kept", statuses: statuses(), offers: offers() };
-  return { status: "ok", read: r.mails.length, statuses: statuses(), offers: offers(), read_through: r.readThrough !== null ? new Date(r.readThrough).toISOString() : read_through };
+  if (r.status === "RATE_LIMITED") return { status: "ERROR", detail: "Gmail asked Trainee to slow down", statuses: statuses(), offers: offers(), reminders: await remind() };
+  return { status: "ok", read: r.mails.length, statuses: statuses(), offers: offers(), read_through: r.readThrough !== null ? new Date(r.readThrough).toISOString() : read_through, reminders: await remind() };
 }
 
 // ------------------------------------------------------------------------------------------------ the card
@@ -126,24 +163,46 @@ export interface FollowupDeps {
   mailOn: boolean; readNow: (userId: string) => Promise<MailNow>;
   sendOn: boolean; canSend: (userId: string) => Promise<boolean>; send: (userId: string, m: Message) => Promise<SendResult>;
   connectAsk?: string;
+  // D-037 (incremental authorization): the person's "allow sending" link (a connect link with reason "send" that asks Google
+  // for gmail.send on top of their grant), or null when it can't be made. Offered only when a send was refused for want of it.
+  sendConsent?: (userId: string) => Promise<string | null>;
+  // CONNECTORS ROUND 3 (2026-10-31): whether the person's Gmail grant may read mail (a partial grant: the box left unticked
+  // at Google). Absent: not told apart from a Gmail that isn't connected.
+  readGrant?: (userId: string) => Promise<"ok" | "not_connected" | "not_allowed">;
 }
 export interface FollowupTurn { reply: string; status: string; intent: string; meta?: Record<string, unknown> | null }
 const clip = (s: unknown, n: number) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
 const word = (k: Card["kind"]) => (k === "followup" ? "follow-up" : "thank-you");
 const subjectOf = (c: Card) => clip(c.kind === "followup" ? `Following up on my ${c.role ? `${clip(c.role, 80)} ` : ""}application` : `Thank you${c.role ? `: ${clip(c.role, 80)} interview` : ""}`, 150);
 const VIA: Record<string, string> = { typed: "the address you gave", record: "the address your application was emailed to" };
-export function cardText(d: OutreachDraft, c: Card): string {
+// The card's exact message as a mailto link: the person's own mail app opens it addressed, with this subject and text.
+export function mailtoOf(m: Message): string {
+  return `mailto:${m.to}?subject=${encodeURIComponent(m.subject)}&body=${encodeURIComponent(m.text)}`;
+}
+// sends: Trainee may send this from the person's Gmail (CAREER_EMAIL_SEND=on and a grant with gmail.send). Otherwise, as
+// Google verification ships it (gmail.readonly only, PR #196), the card says plainly that Trainee doesn't send, and gives
+// the exact text to copy and the same text as a mailto link.
+export function cardText(d: OutreachDraft, c: Card, sends = true): string {
   const m = messageOf(d);
-  return [`Your ${word(c.kind)} to ${clip(c.company, 80)}${c.role ? ` (${clip(c.role, 80)})` : ""}, ready to send from your Gmail (${c.basis}):`,
-    `To: ${m.to} (${VIA[c.via ?? "typed"] ?? "the address you gave"})`, `Subject: ${m.subject}`, "", m.text, "",
-    `Nothing is sent until you say yes, and a yes sends exactly this, once. Say "body: your words" to change it, "to name@company.com" for another address, or "no".`].join("\n");
+  const head = `Your ${word(c.kind)} to ${clip(c.company, 80)}${c.role ? ` (${clip(c.role, 80)})` : ""}, ${sends ? "ready to send from your Gmail" : "ready for you to send"} (${c.basis}):`;
+  const tail = sends
+    ? `Nothing is sent until you say yes, and a yes sends exactly this, once. Say "body: your words" to change it, "to name@company.com" for another address, or "no".`
+    : `Trainee doesn't send email for you: copy it into your own email, or open it ready to send in your mail app: ${mailtoOf(m)}\nSay "body: your words" to change it, "to name@company.com" for another address, or "no".`;
+  return [head, `To: ${m.to} (${VIA[c.via ?? "typed"] ?? "the address you gave"})`, `Subject: ${m.subject}`, "", m.text, "", tail].join("\n");
 }
 const ADMIT: Record<Exclude<Admit, "ok">, string> = {
   not_approved: "the approval was not recorded", changed: "the email changed after you saw it", expired: "the approval is too old",
-  paused: "your account is paused", do_not_contact: "that address asked not to be contacted", daily_cap: "you've reached today's limit of emails Trainee sends for you",
-  spacing: "Trainee sent an email for you less than 90 seconds ago", recipient_cap: "that address already got 3 emails through Trainee this month",
+  paused: "your account is paused", do_not_contact: "that address asked not to be contacted",
 };
 
+// Someone the person wrote to through Trainee (their own outreach drafts), by full name or first name.
+async function isOutreachPerson(store: OutreachStore, userId: string, name: string): Promise<boolean> {
+  if (!store.history) return false;
+  const want = String(name ?? "").toLowerCase().replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!want) return false;
+  const rows = await store.history(userId, 500).catch(() => []);
+  return rows.some((d) => { const n = String(d.recipient?.name ?? "").toLowerCase().replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim(); return n === want || n.split(" ")[0] === want; });
+}
 // Which follow-up the person means: the drafted one for that employer first, then the due one, of the kind they named.
 function pick(rows: { drafts: DraftRow[]; due: Draft[] }, company: string, which: Card["kind"] | null): Card[] {
   const drafted: Card[] = rows.drafts.filter((d) => sameCompany(d.company, company)).map((d) => ({ key: d.draft_key, ref: d.application_ref, kind: d.kind, company: d.company, role: d.role, text: d.text, basis: d.basis }));
@@ -168,21 +227,29 @@ export async function followupTurn(o: { message: string; userId: string; threadI
 async function checkTurn(o: { userId: string; deps: FollowupDeps }, connected: boolean): Promise<FollowupTurn> {
   const lead = connected ? "Thanks for connecting. " : "";
   if (!o.deps.mailOn) return { reply: `${lead}I haven't read your mail: reading it is not switched on in Trainee yet, so nothing was read from your inbox. What I have on record is what you told me and what Trainee sent.`, status: "MAIL_OFF", intent: CHECK_INTENT };
-  const r = await o.deps.readNow(o.userId).catch((e) => ({ status: "ERROR" as const, detail: e instanceof Error ? e.message : String(e), statuses: [], offers: [] }));
-  if (r.status === "NOT_WIRED") return { reply: `NOT_WIRED: nothing was read. Trainee can't read your Gmail yet: connect it in the Trainee app (it asks to read your mail), then say "check my email".${o.deps.connectAsk ? `\n\n${o.deps.connectAsk}` : ""}`, status: "NOT_WIRED", intent: CHECK_INTENT };
-  const found = [...r.statuses, ...r.offers.map((x) => `${x}\nSay "send the ${/thank-you/.test(x) ? "thank-you" : "follow-up"} to" and the company to see it as an email from your Gmail.`)];
+  const r: MailNow = await o.deps.readNow(o.userId).catch((e) => ({ status: "ERROR" as const, detail: e instanceof Error ? e.message : String(e), statuses: [], offers: [] }));
+  // CONNECTORS ROUND 3 (2026-10-31): said in plain words (it began with an internal code), and a Gmail connected without
+  // the permission to read mail is told so, with how to give it, instead of being asked to connect what is connected.
+  if (r.status === "NOT_WIRED") {
+    const why = o.deps.readGrant ? await o.deps.readGrant(o.userId).catch(() => null) : null;
+    if (why === "not_allowed") return { reply: PARTIAL_WORDS.gmail.read, status: "NOT_WIRED", intent: CHECK_INTENT };
+    return { reply: `Nothing was read: Trainee can't read your Gmail yet. Connect it (it asks to read your mail), then say "check my email".${o.deps.connectAsk ? `\n\n${o.deps.connectAsk}` : ""}`, status: "NOT_WIRED", intent: CHECK_INTENT };
+  }
+  const reminded = (r.reminders ?? []).map((x: Reminder) => `I'll remind you on ${dayWord(x.at)} that the ${x.who} assessment is due.`);
+  const found = [...r.statuses, ...reminded, ...r.offers.map((x) => `${x}\nSay "send the ${/thank-you/.test(x) ? "thank-you" : "follow-up"} to" and the company to see it as an email you can send yourself.`)];
   if (r.status === "ERROR") {
     console.error("follow-up: mail read", r.detail);
-    return { reply: [`I couldn't finish reading your mail just now (${clip(r.detail, 160)}). Anything read is kept; ask me again in a minute.`, ...found].join("\n\n"), status: "ERROR", intent: CHECK_INTENT };
+    return { reply: [`I couldn't finish reading your mail just now: ${clip(r.detail, 160)}. What I read before that is kept; ask me again in a minute.`, ...found].join("\n\n"), status: "ERROR", intent: CHECK_INTENT };
   }
   const when = r.read_through ? new Date(r.read_through).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : null;
   const head = `${lead}I read your mail${when ? ` through ${when}` : ""}: ${r.read} new message${r.read === 1 ? "" : "s"}, read from your Gmail only (sender, subject and preview).`;
   return { reply: [head, ...(found.length ? found : ["Nothing in it changes any of your applications."])].join("\n\n"), status: found.length ? "updated" : "nothing_new", intent: CHECK_INTENT };
 }
 
-async function cardTurn(o: { userId: string; threadId: string; now: number; deps: FollowupDeps }, ask: Extract<FollowupAsk, { kind: "card" }>): Promise<FollowupTurn> {
+async function cardTurn(o: { userId: string; threadId: string; now: number; deps: FollowupDeps }, ask: Extract<FollowupAsk, { kind: "card" }>): Promise<FollowupTurn | null> {
   const done = (reply: string, status: string): FollowupTurn => ({ reply, status, intent: FOLLOWUP_ANSWER_INTENT });
   const s = standingFrom(await o.deps.read(o.userId), o.now);
+  if ((s.unreadable.includes("mail") || s.unreadable.includes("drafts")) && await isOutreachPerson(o.deps.outreach, o.userId, ask.company)) return null;
   if (s.unreadable.includes("mail") || s.unreadable.includes("drafts")) return done(`I couldn't read your mail record just now, so I can't tell whether ${clip(ask.company, 80)} replied; nothing was drafted or sent. Ask me again in a minute.`, "unreadable");
   const what = ask.which ? word(ask.which) : "follow-up";
   const found = pick(s, ask.company, ask.which);
@@ -190,6 +257,9 @@ async function cardTurn(o: { userId: string; threadId: string; now: number; deps
     const sent = (s.sent ?? []).find((d) => sameCompany(d.company, ask.company) && (!ask.which || d.kind === ask.which));
     if (sent) return done(`Your ${word(sent.kind)} to ${clip(sent.company, 80)} was already sent from your Gmail on your yes; nothing more is due for it.`, "already_sent");
     const known = s.apps.some((a) => sameCompany(a.company, ask.company)) || s.tracker.some((a) => sameCompany(a.company, ask.company));
+    // FAMILY NETWORKING: "follow up with Maya" names a person the person emailed through Trainee, not an employer: the
+    // networking turn after this one answers it (career_outreach_track.ts). Only when no application matches the name.
+    if (!known && await isOutreachPerson(o.deps.outreach, o.userId, ask.company)) return null;
     return done(known
       ? `No ${what} is due for ${clip(ask.company, 80)} right now: an application gets a follow-up after 14 days with no reply, and an interview step a thank-you after 7 days with nothing since. Nothing was drafted or sent.`
       : `There's no application to ${clip(ask.company, 80)} on record, so there's no ${what} to send. Nothing was drafted or sent.`, "none_due");
@@ -215,7 +285,8 @@ async function show(o: { userId: string; threadId: string; now: number; deps: Fo
   const [d] = await o.deps.outreach.saveBatch(o.userId, o.threadId, [{ ...base, hash }], o.now);
   // On the account's timeline as outreach (the kinds the timeline knows), marked as this follow-up.
   await recordOutreach(o.deps.events, o.userId, "outreach_drafted", d, o.now, { followup: c.kind, key: c.key });
-  return { reply: `${lead}${cardText(d, c)}`, status: "shown", intent: FOLLOWUP_CARD_INTENT, meta: { followup_card: d.id, followup: c } };
+  const sends = o.deps.sendOn && await o.deps.canSend(o.userId).catch(() => false);
+  return { reply: `${lead}${cardText(d, c, sends)}`, status: "shown", intent: FOLLOWUP_CARD_INTENT, meta: { followup_card: d.id, followup: c } };
 }
 
 async function askAnswer(o: { userId: string; threadId: string; now: number; deps: FollowupDeps }, ans: FollowupAsk, c: Card): Promise<FollowupTurn | null> {
@@ -249,9 +320,13 @@ async function cardAnswer(o: { userId: string; threadId: string; now: number; de
   // The yes: exactly the message on the card, by its hash, here and again in the database's claim.
   const m = messageOf(d), h = await payloadHash(m);
   if (h !== d.hash) return done("Not sent: the email changed after you saw it, so your yes was not for this version.", "changed");
-  if (!o.deps.sendOn) return waiting(`Not sent: sending email from your Gmail is not switched on in Trainee yet. Nothing went to ${co}. The ${word(c.kind)} is kept as shown; you can copy it and send it yourself, or say yes again once sending is on.`, "SEND_OFF");
+  // Sending is deferred (Google verification asks for gmail.readonly only): a yes sends nothing, and the reply says so plainly
+  // and hands over the exact text, never a connection step that would not add sending.
+  const yourself = `Copy the email above into your own email, or open it ready to send: ${mailtoOf(m)}`;
+  if (!o.deps.sendOn) return waiting(`Not sent: Trainee doesn't send email for you, so nothing went to ${co}. ${yourself}`, "SEND_OFF");
   if (!(await o.deps.canSend(o.userId).catch(() => false))) {
-    return waiting(`NOT_WIRED: not sent. Trainee can't send from your Gmail yet: your Google connection doesn't allow sending. Connect Gmail in the Trainee app (it asks to send on your behalf), then say yes again.${o.deps.connectAsk ? `\n\n${o.deps.connectAsk}` : ""}`, "NOT_WIRED");
+    const allow = o.deps.sendConsent ? await o.deps.sendConsent(o.userId).catch(() => null) : null;
+    return waiting(`Not sent: your Google connection lets Trainee read your mail, not send it, so nothing went to ${co}.${allow ? ` To send it from your Gmail, allow sending: ${allow} then say yes again.` : ""} ${yourself}`, "NOT_WIRED");
   }
   const at = new Date(o.now).toISOString();
   const approved: OutreachDraft = { ...d, status: "approved", approved_hash: h, approved_at: at };
@@ -271,7 +346,7 @@ async function cardAnswer(o: { userId: string; threadId: string; now: number; de
   }
   // Nothing went (no grant that may send, a limit, Gmail's refusal): the same card waits for a fresh yes.
   await s.update(o.userId, { ...sending, status: "shown", approved_hash: null, approved_at: null, sent_at: null, result: r.status === "NOT_WIRED" ? "not_wired" : r.status === "RATE_LIMITED" ? "rate_limited" : `error: ${r.detail}`.slice(0, 200) }, { status: "sending" });
-  if (r.status === "NOT_WIRED") return waiting(`NOT_WIRED: not sent. Trainee can't send from your Gmail yet. Connect Gmail in the Trainee app, then say yes again.${o.deps.connectAsk ? `\n\n${o.deps.connectAsk}` : ""}`, "NOT_WIRED");
+  if (r.status === "NOT_WIRED") return waiting(`Not sent: your Google connection doesn't let Trainee send email, so nothing went to ${co}. ${yourself}`, "NOT_WIRED");
   if (r.status === "RATE_LIMITED") return waiting(`Not sent: Gmail asked Trainee to slow down. Nothing went to ${co}; say yes again in a few minutes.`, "rate_limited");
   return waiting(`Not sent: Gmail refused it (${clip(r.detail, 120)}). Nothing went to ${co}; say yes to try once more.`, "refused");
 }
@@ -319,12 +394,16 @@ export function careerGrant(admin: any, env: { get(k: string): string | undefine
       if (error) throw new Error("read the career grant's vault entry");
       return data ? String(data) : null;
     },
-    writeVault: async (name, secret) => {
-      const { error } = await admin.rpc("oauth_vault_store", { p_name: name, p_secret: secret });
-      if (error) throw new Error("save the refreshed career grant");
-    },
+    writeVault: (name, secret) => vaultRefreshWrite(admin, name, secret, "save the refreshed career grant"),
   };
 }
+// CONNECTORS ROUND 3: may the person's career Google grant read mail? (FollowupDeps.readGrant)
+export const gmailReadGrant = (admin: any) => async (userId: string): Promise<"ok" | "not_connected" | "not_allowed"> => {
+  const { data, error } = await admin.from("user_oauth_connections").select("scopes").eq("user_id", userId).eq("provider", "google_career").maybeSingle();
+  if (error) throw new Error(`read the career grant: ${error.message}`);
+  if (!data) return "not_connected";
+  return String(data.scopes ?? "").split(/[\s,]+/).includes(CAREER_READ_SCOPE) ? "ok" : "not_allowed";
+};
 // The person's mail, read now with the career grant's gmail.readonly, through the scheduled run's reader.
 export const gmailReadNow = (grant: TokenDeps, f: typeof fetch) => (userId: string, since: number, now: number) =>
   readMailSince({ fetch: f, token: careerTokenFor(grant, CAREER_READ_SCOPE) }, userId, since, now);

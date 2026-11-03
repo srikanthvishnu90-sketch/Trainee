@@ -61,11 +61,12 @@ Deno.test("WO-009/8 admission: no approval of this exact payload, no browser", (
   eq(admitApplication([], app("gh:acme:1", "Acme"), T0), { ok: true, reason: null });
 });
 
-Deno.test("WO-009/9 admission: never the same job twice, one application per company per 30 days", () => {
-  const log = [{ user_id: "u1", job_id: "gh:acme:1", company: "Acme Inc.", at: T0 - 5 * DAY, state: "confirmed" }];
+Deno.test("WO-009/9 admission: never the same posting twice; another role at the same company goes (D-MS-3, owner 2026-10-27)", () => {
+  const log = [{ user_id: "u1", job_id: "gh:acme:1", company: "Acme Inc.", at: T0 - 5 * DAY, state: "confirmed", url: "https://boards.greenhouse.io/acme/jobs/1" }];
   eq(admitApplication(log, app("gh:acme:1", "Acme"), T0).reason, "duplicate_job");
-  eq(admitApplication(log, app("gh:acme:2", "ACME"), T0).reason, "company_cooldown", "company names are normalized");
-  eq(admitApplication(log, app("gh:acme:2", "Acme"), T0 + 26 * DAY).ok, true, "after 30 days");
+  eq(admitApplication(log, app("gh:acme:1-copy", "Acme", { url: "https://job-boards.greenhouse.io/embed/job_app?for=acme&gh_jid=1" }), T0).reason, "duplicate_job",
+    "the same posting under another id (its Greenhouse job number)");
+  eq(admitApplication(log, app("gh:acme:2", "ACME"), T0).ok, true, "another role at the same company, the same week");
   const failed = [{ user_id: "u1", job_id: "gh:acme:1", company: "Acme", at: T0 - DAY, state: "failed" }];
   eq(admitApplication(failed, app("gh:acme:1", "Acme"), T0).ok, true, "a failed attempt can be retried");
 });

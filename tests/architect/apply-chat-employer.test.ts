@@ -75,7 +75,7 @@ Deno.test("yes keeps the posting out; a second yes stands; the next ask for it i
   assert(/Acme Health is where you work, so nothing was queued there/.test(again.reply), again.reply);
   const later = (await t.say("apply to the Data Analyst role at Acme Health"))!;
   eq([later.kind, later.status], ["ask", "refused"]);
-  assert(/current employer \(they said so when asked\)/.test(later.reply) && !/where you work now\?/.test(later.reply), later.reply);
+  assert(/current employer \(you said so when I asked\)/.test(later.reply) && !/where you work now\?/.test(later.reply), later.reply);
   eq(await keys(t.wants), []);
 });
 
@@ -83,7 +83,7 @@ Deno.test("an exact-name fact refuses outright; a distinct employer is not confu
   const t = thread([{ kind: "experience", text: "I work at Contoso Analytics" }]);
   const exact = (await t.say("apply to the Data Analyst role at Contoso Analytics"))!;
   eq([exact.kind, exact.status], ["ask", "refused"]);
-  assert(/Contoso Analytics is their current employer/.test(exact.reply), exact.reply);
+  assert(/Contoso Analytics is your current employer/.test(exact.reply) && /apply anyway/.test(exact.reply) && !/\btheir\b|\bthey (?:said|set|did|work|named|already)\b|themselves|the person/i.test(exact.reply), `to the person, in the second person: ${exact.reply}`);
   const other = (await t.say("apply to the Data Analyst role at Fabrikam Data"))!;
   eq([other.kind, other.status], ["ask", "queued"]);
   eq(await keys(t.wants), ["greenhouse:fabrikam:1"]);
@@ -111,6 +111,6 @@ Deno.test("a batch: the question attaches to the possible-match postings only, t
   eq(await keys(t.wants), ["greenhouse:acmerobotics:1", "greenhouse:contoso:1", "greenhouse:fabrikam:1"]);
   const rerun = (await t.say("apply to these", list))!;
   eq(rerun.status, "already", `three already queued, Acme Health refused as theirs, nothing asked again: ${rerun.reply}`);
-  assert(!/where you work now\?/.test(rerun.reply) && /they said so when asked/.test(rerun.reply), rerun.reply);
+  assert(!/where you work now\?/.test(rerun.reply) && /you said so when I asked/.test(rerun.reply), rerun.reply);
   eq((await keys(t.wants)).length, 3);
 });

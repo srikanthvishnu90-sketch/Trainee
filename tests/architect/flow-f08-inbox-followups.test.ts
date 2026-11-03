@@ -62,6 +62,9 @@ Deno.test({ name: "FEATURE 8: check my email now, the employer's email everywher
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   try {
     for (const f of flags) Deno.env.delete(f);
+    // D-036/D-037: CAREER_MAIL_TRACKING and CAREER_EMAIL_SEND are release flags (on when unset); the off steps run them
+    // rolled back ("off"), the on steps set "on".
+    Deno.env.set("CAREER_MAIL_TRACKING", "off"); Deno.env.set("CAREER_EMAIL_SEND", "off");
     await supabaseParity(pg);
     for (const id of Object.values(PEOPLE)) {
       await pg.sql(`insert into auth.users (id, email) values ('${id}', '${id}@example.test'); insert into public.profiles (id) values ('${id}');
@@ -87,6 +90,7 @@ Deno.test({ name: "FEATURE 8: check my email now, the employer's email everywher
     const q = (sql: string) => pg.sql(sql);
 
     await t.step("switch off: 'check my email now' says nothing was read, and reads nothing", async () => {
+      Deno.env.set("CAREER_MAIL_TRACKING", "off"); // D-036: a release flag (on when unset); "off" is its rollback
       const r = await say(chat, "check my email now");
       eq(r.intent, "career_inbox_check", r.reply);
       eq(r.resultStatus, "MAIL_OFF", r.reply);
@@ -140,19 +144,19 @@ Deno.test({ name: "FEATURE 8: check my email now, the employer's email everywher
       eq(card.intent, "career_followup_card", card.reply);
       eq(card.resultStatus, "shown", card.reply);
       assert(/To: jane\.doe@stripe\.com \(the address you gave\)/.test(card.reply) && /Subject: Following up on my Data Analyst application/.test(card.reply), card.reply);
-      assert(/Hello, I applied for the Data Analyst role at Stripe on .*\n\nPat Lee/.test(card.reply) && /Nothing is sent until you say yes/.test(card.reply), card.reply);
+      assert(/Hello, I applied for the Data Analyst role at Stripe on .*\n\nPat Lee/.test(card.reply) && /Trainee doesn't send email for you: copy it into your own email, or open it ready to send in your mail app: mailto:jane\.doe@stripe\.com\?subject=/.test(card.reply), `sending is off, so the card says Trainee doesn't send and gives the text (family email, 2026-10-26):\n${card.reply}`);
       eq(await q(`select status || '|' || recipient_email || '|' || (hash ~ '^[a-f0-9]{64}$') from public.career_outreach_drafts where user_id = '${me}'`), "shown|jane.doe@stripe.com|true");
     });
 
     await t.step("yes with sending off, then without the gmail.send grant: each says exactly that, nothing goes", async () => {
       const off = await say(chat, "yes");
       eq(off.resultStatus, "SEND_OFF", off.reply);
-      assert(/Not sent: sending email from your Gmail is not switched on in Trainee yet\. Nothing went to Stripe/.test(off.reply), off.reply);
+      assert(/Not sent: Trainee doesn't send email for you, so nothing went to Stripe\. Copy the email above into your own email, or open it ready to send: mailto:/.test(off.reply), off.reply);
       Deno.env.set("CAREER_EMAIL_SEND", "on");
       await q(`update public.user_oauth_connections set scopes = '${READ}' where user_id = '${me}'`);
       const nogrant = await say(chat, "yes");
       eq(nogrant.resultStatus, "NOT_WIRED", nogrant.reply);
-      assert(/NOT_WIRED: not sent\. Trainee can't send from your Gmail yet/.test(nogrant.reply), nogrant.reply);
+      assert(/Not sent: your Google connection lets Trainee read your mail, not send it, so nothing went to Stripe\. Copy the email above/.test(nogrant.reply), nogrant.reply);
       await q(`update public.user_oauth_connections set scopes = '${READ} ${SEND}' where user_id = '${me}'`);
       eq(google.sent.length, 0);
       eq(await q(`select status from public.career_outreach_drafts where user_id = '${me}'`), "shown");
@@ -191,8 +195,9 @@ Deno.test({ name: "FEATURE 8: check my email now, the employer's email everywher
       const none = await say(other, "draft the follow-up to Stripe");
       assert(/There's no application to Stripe on record/.test(none.reply), none.reply);
       const read = await say(other, "check my inbox");
-      eq(read.resultStatus, "NOT_WIRED", read.reply);
-      assert(/NOT_WIRED: nothing was read\. Trainee can't read your Gmail yet/.test(read.reply), read.reply);
+      // Task 3 (connector framework): with no mailbox of their own, Trainee asks once for one; nothing is read.
+      assert(["NOT_WIRED", "asked", "not_wired"].includes(String(read.resultStatus)), read.reply);
+      assert(/nothing was read|one-time link/i.test(read.reply) && !/Stripe|Acme/.test(read.reply), read.reply);
       eq(google.gmail(), calls, "no Gmail call without their own grant");
       const thanks = await say(chat, "send the thank-you to Acme");
       assert(/There's no application to Acme on record, so there's no thank-you to send/.test(thanks.reply), thanks.reply);

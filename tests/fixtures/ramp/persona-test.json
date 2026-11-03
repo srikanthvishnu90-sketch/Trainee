@@ -1,0 +1,58 @@
+{
+  "label": "TEST persona (synthetic, packages/career-data/fixtures/test-resume.txt)",
+  "resume_path": "packages/career-data/fixtures/test-resume.txt",
+  "file": {
+    "name": "Alex_Testcase_Resume.pdf",
+    "text": "%PDF-1.4\n% TEST synthetic resume file for the Ramp-shaped flow, not a real person\n%%EOF\n"
+  },
+  "answers": [
+    {
+      "match": "legal name",
+      "value": "Alex Testcase"
+    },
+    {
+      "match": "first name",
+      "value": "Alex"
+    },
+    {
+      "match": "last name",
+      "value": "Testcase"
+    },
+    {
+      "match": "whatsapp",
+      "value": "No - I do not consent to receiving WhatsApp messages"
+    },
+    {
+      "match": "text message",
+      "value": "No - I do not consent to receiving text messages"
+    },
+    {
+      "match": "^email|\\bemail\\b",
+      "value": "alex.testcase@example.test"
+    },
+    {
+      "match": "phone",
+      "value": "+1 555-0100"
+    },
+    {
+      "match": "graduation date",
+      "value": "05/15/2028"
+    },
+    {
+      "match": "new york",
+      "value": "yes"
+    },
+    {
+      "match": "sponsorship",
+      "value": "no"
+    },
+    {
+      "match": "built",
+      "value": "DeployBoard (TEST project): a Go tool that deploys containerised apps on Kubernetes, used by 12 student teams on AWS EKS."
+    },
+    {
+      "match": "school",
+      "value": "TEST University"
+    }
+  ]
+}

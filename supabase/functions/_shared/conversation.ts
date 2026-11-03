@@ -3,6 +3,7 @@
 // the person's history and state; the reply is split into texting-sized bubbles. Agent-initiated messages (alerts,
 // reports, nudges) are queued per person, delivered once each, and become part of the conversation.
 import { channelCommand, CHANNEL_REPLIES, type ChannelStore } from "./channel.ts";
+import { findUrls, isBareUrl, safeCut } from "./channel_text.ts";
 export interface Attachment { name: string; mime: string; bytes: Uint8Array }
 export interface Inbound { contact: string; text: string; at: number; attachments?: Attachment[] }
 export interface Outbound { contact: string; kind: "reply" | "proactive"; bubbles: string[] }
@@ -45,8 +46,11 @@ export function normalizeContact(contact: string): string {
 // ---- bubble formatting (first written for the retired imessage-inbound test bridge) ----
 // Short texting-sized bubbles on sentence boundaries; each bare URL gets its
 // own bubble so iMessage renders a link preview card; nothing the outbox holds is cut.
-const URL_RE = /https?:\/\/[^\s<>"']+/g;
-const isBareLink = (s: string) => /^https?:\/\/\S+$/.test(s.trim());
+// CHANNEL DELIVERY SCENARIOS (2026-10-29): a link is found by channel_text.ts findUrls, so the sentence around it keeps its
+// own punctuation and brackets ("(https://x/1)." sends https://x/1, never "https://x/1)."), a link's own brackets stay
+// ("…/wiki/Foo_(bar)"), and a markdown link [label](url) sends its label and the link, never "[label](" and "url)".
+const isBareLink = (s: string) => isBareUrl(s);
+const MD_LINK = /!?\[([^\]\n]+)\]\((https?:\/\/[^\s()]*(?:\([^\s()]*\)[^\s()]*)*)\)/g;
 
 // Exported for the WhatsApp and Telegram adapters (WO-038), which pack messages at their own size with the same rules.
 export function splitLong(text: string, max: number): string[] {
@@ -74,8 +78,14 @@ export function splitLong(text: string, max: number): string[] {
     let rest = line.trim();
     if (!rest) continue;
     while (rest.length > max) {
+      // CHANNEL DELIVERY SCENARIOS (2026-10-29): at the last space that fits, however early, so a word or a link that
+      // fits the next message is never cut. Only a single word longer than a whole message is cut, and never inside a
+      // character; a link that long goes whole on its own (the platform's own limit is the adapter's).
       let cut = rest.lastIndexOf(" ", max);
-      if (cut < max * 0.4) cut = max; // no good break: hard cut (rare)
+      if (cut <= 0) {
+        const sp = rest.indexOf(" "), word = sp < 0 ? rest : rest.slice(0, sp);
+        cut = isBareLink(word) ? word.length : safeCut(rest, max) || max;
+      }
       add(rest.slice(0, cut).trim());
       rest = rest.slice(cut).trim();
     }
@@ -112,7 +122,7 @@ function packBubbles(segments: string[], previews = true): string[] {
   if (j < 0) { keep[keep.length - 1] = CUT_NOTE; return keep; }
   const room = BUBBLE_CHARS - CUT_NOTE.length - 1;
   let text = keep[j];
-  if (text.length > room) { const cut = text.lastIndexOf(" ", room); text = text.slice(0, cut > room * 0.5 ? cut : room).trimEnd(); }
+  if (text.length > room) { const cut = text.lastIndexOf(" ", room); text = text.slice(0, cut > room * 0.5 ? cut : safeCut(text, room)).trimEnd(); }
   keep[j] = `${text} ${CUT_NOTE}`;
   return keep;
 }
@@ -124,14 +134,17 @@ export function fitOutbox(text: string): string {
   if (t.length <= OUTBOX_CHARS) return t;
   const room = OUTBOX_CHARS - CUT_NOTE.length - 1;
   const cut = t.lastIndexOf(" ", room);
-  return `${t.slice(0, cut > room * 0.5 ? cut : room).trimEnd()} ${CUT_NOTE}`;
+  return `${t.slice(0, cut > room * 0.5 ? cut : safeCut(t, room)).trimEnd()} ${CUT_NOTE}`;
 }
 
 export function toBubbles(reply: string): string[] {
   // Strip hidden markers (exec-offer etc.) — they'd render as raw text in iMessage.
-  const clean = reply.replace(/<!--[\s\S]*?-->/g, "").trim();
+  const clean = reply.replace(/<!--[\s\S]*?-->/g, "").replace(MD_LINK, (_m, label: string, url: string) => {
+    const l = label.trim();
+    return l === url ? url : `${l} ${url}`;
+  }).trim();
   if (!clean) return [];
-  const urls = clean.match(URL_RE) ?? [];
+  const urls = findUrls(clean);
   // Many links: no preview cards (a wall of them), plain texting-sized text instead.
   if (urls.length > 2) return packBubbles(clean.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean), false);
   const raw: string[] = [];
@@ -143,20 +156,22 @@ export function toBubbles(reply: string): string[] {
       buf = "";
     };
     for (const line of para.split("\n")) {
-      const lineUrls = line.match(URL_RE);
-      if (!lineUrls) {
+      const lineUrls = findUrls(line);
+      if (!lineUrls.length) {
         buf += (buf ? "\n" : "") + line;
         continue;
       }
-      let rest = line;
+      let at = 0;
       for (const u of lineUrls) {
-        const i = rest.indexOf(u);
-        const before = rest.slice(0, i).replace(/[\s:–—-]+$/, "").trim();
+        // The text before the link (without the bracket or "here:" that led to it), the link alone, then what follows it
+        // (without the bracket and punctuation that closed it).
+        const before = line.slice(at, u.start).replace(/[\s:–—(<\["“‘'-]+$/, "").trim();
         if (before) buf += (buf ? "\n" : "") + before;
         flush();
-        raw.push(u);
-        rest = rest.slice(i + u.length).replace(/^[\s.,;)]+/, "");
+        raw.push(u.url);
+        at = u.end + /^[\s.,;:!?)>\]"”’']*/.exec(line.slice(u.end))![0].length;
       }
+      const rest = line.slice(at);
       if (rest.trim()) buf += (buf ? "\n" : "") + rest.trim();
     }
     flush();

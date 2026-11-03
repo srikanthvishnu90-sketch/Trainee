@@ -21,17 +21,28 @@ const NOT_SENT: Record<string, string> = {
   APPROVED_APPLICATION_CHANGED: "the form changed after you approved it, so it was stopped",
   APPROVED_BODY_MISMATCH: "what the page tried to send was not exactly what you approved, so it was stopped",
   RESUME_CHANGED: "your resume file is not the one you approved",
+  NO_RESUME: "no resume was attached to it, and Trainee never applies without your resume",
   HOST_REDIRECT_REFUSED: "the page tried to go somewhere other than the employer's own site",
   PERSON_DID_NOT_SUBMIT: "Submit was not pressed in the window within 10 minutes",
   IDENTITY_NUMBER_REQUESTED: "the form asks for an ID number, which Trainee never fills in",
   ACCOUNT_LOGIN_REQUIRED: "the employer's site needs you to sign in to an account first",
+  // Since 20261029180000 such an application goes back to the queue and is sent once the site allows (no receipt until
+  // it ends); this is said only by a database without that requeue.
+  HOST_RATE_LIMITED: "the employer's site was turning visitors away for a while (too many requests), so nothing was filled in or sent",
   needs_answers: "the form has questions you have not answered yet",
+  // MASS APPLY (2026-11-01): the posting's page was gone when it was sent (closed after you approved it).
+  POSTING_CLOSED: "this posting closed before it could be submitted",
 };
 const NEEDS_YOU: Record<string, string> = {
   captcha: "the page asks you to complete a verification",
   email_code: "the employer emailed you a code to finish it",
   // WO-039: the cloud met a verification check, which Trainee never solves or gets around. The link is theirs to finish.
-  bot_check: "a verification check appeared, and Trainee never solves one, so finish this one yourself at this link",
+  // FEATURE 17: what to do, exactly: open the link, enter the answers they approved (the card has them), complete the
+  // check, press Submit. The check stopped it before Submit, so nothing reached the employer.
+  bot_check: "a verification check appeared, and Trainee never solves one, so finish this one yourself: open the link below, " +
+    "enter the answers you approved on the card, complete the check on the page, then press Submit",
+  // Mass submission: the employer's site asks you to sign in to an account; Trainee never signs in for you.
+  login_required: "the employer's site asks you to sign in to an account first, and Trainee never signs in for you, so finish this one yourself at this link",
 };
 
 // WO-032: a row is confirmed only by the employer's email matched to it (career_apply_confirm.ts); its receipt says whose
@@ -70,6 +81,7 @@ export function receiptText(
       }
       return `Sent to ${company}. The employer has not confirmed it yet; their confirmation email is the proof.${tail}`;
     case "needs_user":
+      if (reason === "bot_check") return `${company} is not finished: ${NEEDS_YOU.bot_check}. Nothing reached ${company}.${tail}`;
       return `${company} is not finished: ${NEEDS_YOU[reason] ?? "it needs you"}. Nothing else was sent.${tail}`;
     case "failed":
       return `${company} did not accept it${reason ? `: their form said "${reason}"` : ""}.${tail}`;

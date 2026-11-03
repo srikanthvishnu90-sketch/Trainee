@@ -146,12 +146,20 @@ test("create-watch: an ask with NO role named is refused honestly and saves noth
   assert.equal(savedProfile(ctx), null);
 });
 
-test("create-watch: no profile on file -> awaiting_user, nothing saved", () => {
+// OWNER RULE (2026-10-28, Telegram-first list #4): a stated watch is created without a profile on file.
+test("create-watch: no profile on file -> the stated watch is saved", () => {
   const ctx = { userId: USER, now: NOW };
   const r = Router.handleChat("Watch for investment banking analyst roles in Chicago", ctx);
   assert.equal(r.intent, "career_watch_create");
-  assert.equal(r.resultStatus, "awaiting_user");
-  assert.equal(savedProfile(ctx), null);
+  assert.equal(r.resultStatus, "prepared", r.reply);
+  const wp = savedProfile(ctx);
+  assert.ok(wp && wp.interests.length === 1, "the watch is saved");
+  assert.deepEqual(wp.interests[0].filters.locations, ["Chicago"]);
+});
+test("create-watch: no profile and no role named -> nothing saved", () => {
+  const ctx = { userId: USER, now: NOW };
+  const r = Router.handleChat("set an alert for new ones", ctx);
+  assert.equal(savedProfile(ctx), null, r.reply);
 });
 
 test("manage: listing with no watches answers honestly and materializes no state", () => {

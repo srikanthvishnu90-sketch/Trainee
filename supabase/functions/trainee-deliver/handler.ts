@@ -7,13 +7,14 @@
 import { equalSecret } from "../_shared/message_service.ts";
 import { deliverDue, type Send } from "../_shared/channel.ts";
 import { toBubbles } from "../_shared/conversation.ts";
+import { imessageNativeRender, textingNativeOn } from "../_shared/channel_voice.ts";
 import type { Channel, DeliveryAdapter } from "../_shared/channel_adapters.ts";
 import type { DeliveryStore } from "../_shared/channel_store.ts";
 
 export const ROWS_PER_RUN = 20; // most rows are one or two bubbles; a run that nears its time budget stops (channel.ts deliverDue)
 export const RUN_BUDGET_MS = 100_000; // under the Edge wall clock (150 s on the smallest plan), with room to record the run
 export const DEFAULT_DAILY_CONTACTS = 300; // LoopMessage's smaller plan; set LOOPMESSAGE_DAILY_CONTACTS for the larger one
-export type DeliveryRun = { delivered: number; failed: number; retried: number; skipped_opt_out: number; capped: number; deferred?: number; held?: number; nudged?: number; not_wired?: number; swept: number; ms: number; error: string | null; at: string };
+export type DeliveryRun = { delivered: number; failed: number; retried: number; skipped_opt_out: number; capped: number; deferred?: number; held?: number; nudged?: number; not_wired?: number; swept: number; rerouted?: number; ms: number; error: string | null; at: string };
 export interface DeliverDeps {
   env: { get(k: string): string | undefined };
   store: () => DeliveryStore;
@@ -39,18 +40,23 @@ export async function handleDeliver(req: Request, d: DeliverDeps): Promise<Respo
   const cap = capRaw === undefined || capRaw === "" ? DEFAULT_DAILY_CONTACTS : Number(capRaw);
   if (!Number.isInteger(cap) || cap < 1) return json({ error: "not configured: LOOPMESSAGE_DAILY_CONTACTS must be a whole number of contacts a day" }, 503);
   const adapters: Partial<Record<Channel, DeliveryAdapter>> = { ...others };
-  if (apiKey) adapters.imessage = { channel: "imessage", limits: { dailyContacts: cap }, render: toBubbles, send: d.send(apiKey) };
+  // CHANNEL DELIVERY SCENARIOS (2026-10-29): with CAREER_TEXTING_NATIVE=on iMessage gets plain text too (it was always the
+  // raw markdown here, "**bold**" and "# headings" included, whatever the setting).
+  if (apiKey) adapters.imessage = { channel: "imessage", limits: { dailyContacts: cap }, render: textingNativeOn(d.env) ? imessageNativeRender : toBubbles, send: d.send(apiKey) };
   const started = d.now(), at = new Date(started).toISOString();
   const store = d.store();
   let swept = 0;
   try {
     swept = await store.sweep(started);
+    // CHANNEL DELIVERY ROUND 2 (2026-10-30): a row bound to a channel the person unlinked (Telegram "unlink", a WhatsApp
+    // number that changed owner or moved) waited "queued" forever; now it goes to their home channel, or fails with the reason.
+    const rerouted = store.reroute ? await store.reroute(started) : 0;
     const r = await deliverDue({ store, adapters, now: started, limit: ROWS_PER_RUN, clock: d.now, budgetMs: RUN_BUDGET_MS });
     // Only a run that finished puts back what it claimed and did not send (capped rows, rows of a channel not wired).
     // After a failure mid-run a claimed row may already be with the provider, so it stays "sending" and the next sweep
     // fails it instead of resending it.
     await store.release();
-    const run = { ...r, swept, ms: d.now() - started, error: null, at };
+    const run = { ...r, swept, ...(rerouted ? { rerouted } : {}), ms: d.now() - started, error: null, at };
     await d.recordRun(run);
     return json(run);
   } catch (e) {

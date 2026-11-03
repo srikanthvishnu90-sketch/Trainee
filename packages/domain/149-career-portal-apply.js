@@ -49,11 +49,12 @@
    browser driver (REAL_PORTAL_NOT_WIRED). Account-walled boards
    (Workday/iCIMS/Taleo) and the owner's signed-in session remain future,
    owner-gated work — see docs/career/board-automation-map.md.
-   Caps (§6.4) are the owner's DECIDED numbers (15/day locked 2026-10-12;
-   5/vendor/day; 1/company/30 days) and are ENFORCED here (MI-110): a run
-   or submit that would exceed one stops CAP_REACHED naming the cap and
-   the count, counted from the submissions ledger this module writes;
-   the never-twice-to-the-same-job rule (§8.3) is enforced alongside.
+   No volume caps (owner, 2026-10-27: D-MS-2, "never set a limit"; the
+   §6.4 numbers 15/day, 5/vendor/day and 1/company/30 days are gone). A
+   run or submit stops only on the never-twice-to-the-same-job rule
+   (§8.3, DUPLICATE_APPLICATION) or on the employer's site refusing right
+   now (PORTAL_REFUSING: a rate limit it answered with, kept as a
+   "portal_refused" ledger record until the time it allows again).
    That ledger never contained the user's own hand-filed applications,
    so the never-twice rule also reads what the host knows — tracker
    rows and user statements passed as manualApplications — and a match
@@ -119,8 +120,10 @@ const CareerPortalApply = (() => {
     return null;
   }
   const isEeoDeclineText = (text) => eeoDeclineMatch(text) !== null;
-  // Spec 2 §6.4 caps — DECIDED by the owner (15/day locked 2026-10-12) and enforced (MI-110).
-  const SPEC_CAPS = { perDay: 15, perVendorPerDay: 5, perCompanyPer30Days: 1 };
+  // Spec 2 §6.4 caps (15/day, 5/vendor/day, 1/company/30 days; MI-110) are REMOVED: the owner, 2026-10-27, D-MS-2 and
+  // "no person limit, never set a limit". Upmore sets no volume number of its own. What still stops an application:
+  // the exact same posting already submitted for this person (never twice), and the employer's application site
+  // refusing right now (a rate limit or a bot wall it answered with): that portal waits until it allows again.
   // MUSE-F-025: the bounded re-scan of a zero-field form read (see the
   // discover step in prepareRound and docs/apply/ROOT-CAUSE-F025-2026-10-22.md).
   const EMPTY_FORM_RESCAN_MAX_READS = 5;
@@ -169,6 +172,8 @@ const CareerPortalApply = (() => {
       answers: {}, submitted: null, confirmationSeq: 0,
       submitOutcome: o.submitOutcome || "accepted",
       captchaAt: o.captchaAt || null, // null | "open" | "review"
+      // Mass submission: the site refusing for load at open ({ retryAfterS }): HTTP 429 / 503 Retry-After, before any fill.
+      rateLimited: o.rateLimited || null,
       accountName: o.accountName !== undefined ? o.accountName : "Alex Testcase (TEST)",
       // WO-096: a code step at review ({ ats, expect }): the board emailed a code and its review waits until the one it
       // sent is typed. The code is the page's own state, never one of the application's answers.
@@ -187,7 +192,11 @@ const CareerPortalApply = (() => {
       calls,
       get accountName() { return state.accountName; },
       setSubmitOutcome(v) { state.submitOutcome = v; },
-      open() { calls.open += 1; return { ok: true, captcha: state.captchaAt === "open" ? "challenge" : null }; },
+      open() {
+        calls.open += 1;
+        if (state.rateLimited) return { ok: false, rateLimited: true, retryAfterS: state.rateLimited.retryAfterS ?? null };
+        return { ok: true, captcha: state.captchaAt === "open" ? "challenge" : null };
+      },
       form() { return { fields: allFields().map((f) => Object.assign({}, f)), captchaAt: state.captchaAt }; },
       get fillFailures() { return state.fillFailures.slice(); },
       fill(fieldId, value) {
@@ -640,32 +649,68 @@ const CareerPortalApply = (() => {
     if (r.url) return classifyTarget(r.url).atsFamily || null;
     return null;
   }
+  // The portal a refusal is kept against: its host when known, else its ATS family.
+  function portalOf(posting, board) {
+    const p = posting || {};
+    let host = null;
+    try { if (p.url) host = new URL(p.url).host.toLowerCase(); } catch (e) { host = null; }
+    return { host: host || (board && board.host) || null, vendor: p.vendor || vendorOf(p) || (board && board.atsFamily) || null };
+  }
+  // What the employer's site said: it refuses until `until`. Kept as a record of the submissions ledger (status
+  // "portal_refused"), so it is saved with the ledger and every later drive that reads it waits too. As long as the site
+  // asked (Retry-After), else 30 s doubling on each refusal in a row, at most an hour between tries.
+  const isRefusal = (r) => !!r && r.status === "portal_refused" && !!r.host;
+  function recordRefusal(log, posting, board, now, retryAfterS, why, userId) {
+    if (!log) return null;
+    if (!Array.isArray(log.records)) log.records = [];
+    const where = portalOf(posting, board), nowMs = tsMs(now);
+    const base = Number.isFinite(nowMs) ? nowMs : Date.now();
+    const prior = log.records.filter((r) => isRefusal(r) && r.host === where.host && tsMs(r.timestamp) > base - 2 * 3600000).length;
+    const waitMs = retryAfterS != null && Number.isFinite(Number(retryAfterS)) && Number(retryAfterS) >= 0
+      ? Math.min(Number(retryAfterS) * 1000, 86400000) : Math.min(3600000, 30000 * Math.pow(2, prior));
+    const rec = { userId: userId || null, status: "portal_refused", canonicalKey: (posting && posting.canonicalKey) || null, host: where.host, vendor: where.vendor,
+      why: why || "rate_limited", timestamp: new Date(base).toISOString(), until: new Date(base + waitMs).toISOString() };
+    log.records.push(rec);
+    return rec;
+  }
+  // No volume caps (owner, 2026-10-27). Stops only: the same posting already submitted for this person, and a portal
+  // refusing right now. `counts` are reported for the record, never compared with a number.
   function capCheck(log, userId, posting, now, board) {
     const p = posting || {};
     const recs = ((log && log.records) || []).filter((r) => r.userId === userId && r.status === "submitted");
     const day = daySlice(now);
-    const vendor = p.vendor || vendorOf(p) || (board && board.atsFamily) || null;
+    const where = portalOf(p, board);
+    const vendor = where.vendor;
     const company = p.company || null;
     const companyKey = company ? normName(company) : "";
     const nowMs = tsMs(now);
     const WINDOW30 = 30 * 24 * 3600 * 1000;
-    let perDay = 0, perVendorPerDay = 0, perCompanyPer30Days = 0;
+    let today = 0, vendorToday = 0, company30Days = 0;
     for (const r of recs) {
       if (day && daySlice(r.timestamp) === day) {
-        perDay += 1;
-        if (vendor && vendorOf(r) === vendor) perVendorPerDay += 1;
+        today += 1;
+        if (vendor && vendorOf(r) === vendor) vendorToday += 1;
       }
       if (companyKey && r.company && normName(r.company) === companyKey) {
         const ms = tsMs(r.timestamp);
-        if (Number.isFinite(ms) && Number.isFinite(nowMs) && ms <= nowMs && nowMs - ms < WINDOW30) perCompanyPer30Days += 1;
+        if (Number.isFinite(ms) && Number.isFinite(nowMs) && ms <= nowMs && nowMs - ms < WINDOW30) company30Days += 1;
       }
     }
-    const counts = { perDay, perVendorPerDay, perCompanyPer30Days };
+    const counts = { today, vendorToday, company30Days };
     const stops = [];
-    if (perDay >= SPEC_CAPS.perDay) stops.push({ cap: "perDay", count: perDay, limit: SPEC_CAPS.perDay });
-    if (vendor && perVendorPerDay >= SPEC_CAPS.perVendorPerDay) stops.push({ cap: "perVendorPerDay", count: perVendorPerDay, limit: SPEC_CAPS.perVendorPerDay, vendor });
-    if (companyKey && perCompanyPer30Days >= SPEC_CAPS.perCompanyPer30Days) stops.push({ cap: "perCompanyPer30Days", count: perCompanyPer30Days, limit: SPEC_CAPS.perCompanyPer30Days, company });
+    if (p.canonicalKey && recs.some((r) => r.canonicalKey === p.canonicalKey)) stops.push({ cap: "samePosting", postingKey: p.canonicalKey });
+    const refusing = ((log && log.records) || []).filter((r) => isRefusal(r) && r.host === where.host && Number.isFinite(nowMs) && tsMs(r.until) > nowMs)
+      .sort((x, y) => tsMs(y.until) - tsMs(x.until))[0];
+    if (refusing) stops.push({ cap: "portalRefusing", host: refusing.host, vendor: refusing.vendor || vendor, until: refusing.until, why: refusing.why });
     return { ok: stops.length === 0, stops, counts, vendor, company };
+  }
+  // The stop a capCheck refusal becomes, in one place for every gate.
+  function capStop(s) {
+    if (s.cap === "samePosting") {
+      return { code: "DUPLICATE_APPLICATION", extra: { reason: "this exact posting was already submitted for this person — never twice" } };
+    }
+    return { code: "PORTAL_REFUSING", extra: { host: s.host, until: s.until, why: s.why,
+      reason: `the employer's application site is turning requests away right now (${s.why === "bot_check" ? "a verification wall" : "too many requests"}); nothing was filled or sent, and this one waits until ${s.until}` } };
   }
 
   // ---------- §8.3 collision check: the user's own hand-filed applications (MI-108 / G3) ----------
@@ -730,15 +775,10 @@ const CareerPortalApply = (() => {
     const recs = (log && log.records) || [];
     const chk = capCheck(log, userId, posting, now, board);
     return {
-      decisionPending: false, enforced: true, // §6.4 numbers are the owner's decided caps (MI-110)
-      specDefaults: Object.assign({}, SPEC_CAPS),
-      submittedToday: chk.counts.perDay,
+      decisionPending: false, enforced: true, // the gates below are enforced; there is no volume number (owner, 2026-10-27)
+      volumeLimit: null,
+      submittedToday: chk.counts.today,
       counts: chk.counts,
-      remaining: {
-        perDay: Math.max(0, SPEC_CAPS.perDay - chk.counts.perDay),
-        perVendorPerDay: Math.max(0, SPEC_CAPS.perVendorPerDay - chk.counts.perVendorPerDay),
-        perCompanyPer30Days: Math.max(0, SPEC_CAPS.perCompanyPer30Days - chk.counts.perCompanyPer30Days),
-      },
       wouldStop: chk.stops,
       submittedThisPosting: recs.filter((r) => r.userId === userId && r.status === "submitted" && posting && r.canonicalKey === posting.canonicalKey).length,
     };
@@ -1000,6 +1040,15 @@ const CareerPortalApply = (() => {
     const dup = (log.records || []).some((r) => r.userId === session.userId && r.canonicalKey === posting.canonicalKey && r.status === "submitted");
     if (dup) { logStep("eligibility_stop", { reason: "duplicate" }); return blocked("DUPLICATE_APPLICATION"); }
 
+    // A site that refused and has not allowed again yet is not even opened (its refusal is in the ledger).
+    {
+      const held = capCheck(log, session.userId, posting, inp.now, board).stops.find((x) => x.cap === "portalRefusing");
+      if (held) {
+        logStep("portal_held", { host: held.host, until: held.until });
+        const st = capStop(held);
+        return blocked(st.code, st.extra);
+      }
+    }
     // open the board; a challenge here stops everything (§6.3)
     const opened = continued ? {} : board.open();
     logStep(continued ? "resume_form" : "open", { host: board.host });
@@ -1008,6 +1057,12 @@ const CareerPortalApply = (() => {
     // above is not enough — boards redirect to employer sites) as a
     // typed refusal. The run stops here: no form read, no fill, no
     // doorstep, no submit on or after the off-list page.
+    if (opened && opened.rateLimited) {
+      const rf = recordRefusal(log, posting, board, inp.now, opened.retryAfterS, "rate_limited", session.userId);
+      logStep("portal_refused", { at: "open", host: rf && rf.host, until: rf && rf.until });
+      const st = capStop({ cap: "portalRefusing", host: rf && rf.host, until: rf && rf.until, why: "rate_limited" });
+      return blocked(st.code, st.extra);
+    }
     if (opened && opened.code) {
       logStep("host_redirect_refused", { code: opened.code, finalUrl: opened.finalUrl || null, host: opened.host || null, at: "open" });
       return blocked(opened.code, { reason: opened.reason || "the page landed off the tested-ATS allowlist (§6.3)", finalUrl: opened.finalUrl || null, host: opened.host || null });
@@ -1360,16 +1415,13 @@ const CareerPortalApply = (() => {
         reason: `the user already holds an application at ${c0.company} for this job (stage: ${c0.stage}; source: ${c0.source}) — the product never files a duplicate (§8.3)` });
     }
 
-    // §6.4 caps (MI-110): the decided caps are enforced, not reported —
-    // a run that would exceed one stops here and never presents a
-    // doorstep that cannot submit. submitDoorstep re-checks at click
-    // time (counts can change between doorstep and click).
+    // The gate before the doorstep (no volume caps since 2026-10-27, owner): the same posting already submitted, or the
+    // portal refusing right now, stops here; submitDoorstep re-checks at click time.
     const caps = capCheck(log, session.userId, posting, inp.now, board);
     if (!caps.ok) {
-      const s = caps.stops[0];
-      logStep("cap_reached_stop", { cap: s.cap, count: s.count, limit: s.limit, stops: caps.stops });
-      return blocked("CAP_REACHED", { cap: s.cap, count: s.count, limit: s.limit, stops: caps.stops, counts: caps.counts,
-        reason: `the owner's decided application cap is reached (${s.cap}: ${s.count} of ${s.limit}) — this submission waits for a later day or window` });
+      const st = capStop(caps.stops[0]);
+      logStep("gate_stop", { code: st.code, stops: caps.stops });
+      return blocked(st.code, Object.assign({ stops: caps.stops, counts: caps.counts }, st.extra));
     }
 
     // the doorstep: final review, exact payload snapshot, STOP (§6.1 step 5/6 boundary)
@@ -1665,10 +1717,9 @@ const CareerPortalApply = (() => {
       }
       const caps = capCheck(log, session.userId, posting, inp.now, board);
       if (!caps.ok) {
-        const sc = caps.stops[0];
-        logStep("cap_reached_stop", { cap: sc.cap, count: sc.count, limit: sc.limit, stops: caps.stops });
-        return blocked("CAP_REACHED", { cap: sc.cap, count: sc.count, limit: sc.limit, stops: caps.stops, counts: caps.counts,
-          reason: `the owner's decided application cap is reached (${sc.cap}: ${sc.count} of ${sc.limit}) — this submission waits for a later day or window` });
+        const st = capStop(caps.stops[0]);
+        logStep("gate_stop", { code: st.code, stops: caps.stops });
+        return blocked(st.code, Object.assign({ stops: caps.stops, counts: caps.counts }, st.extra));
       }
       session.doorstep = { payload: stored.payload, payloadSha256: stored.payloadSha256, postingKey: posting.canonicalKey, vendor: caps.vendor, company: posting.company || null, atFinalReview: true,
         requiredFieldIds: (formDef.fields || []).filter((f) => f.required).map((f) => f.field_id) };
@@ -1732,9 +1783,8 @@ const CareerPortalApply = (() => {
         reason: "the doorstep payload is missing readback values for required fields — the submit gate refuses to arm or click over a hollow payload" };
     }
     const board = session.board;
-    // §6.4 caps re-check (MI-110): counts can change between doorstep
-    // and click — the gate that fires is the gate that counts. The cap
-    // stop lands BEFORE the arming wire: a capped submit never arms.
+    // Re-check at click (no volume caps since 2026-10-27): the same posting submitted since the doorstep, or the
+    // portal refusing since, stops BEFORE the arming wire: such a submit never arms.
     const caps = capCheck(log, session.userId, {
       canonicalKey: session.doorstep.postingKey,
       vendor: session.doorstep.vendor || null,
@@ -1742,9 +1792,8 @@ const CareerPortalApply = (() => {
       url: (c.posting && c.posting.url) || null,
     }, c.now, board);
     if (!caps.ok) {
-      const s = caps.stops[0];
-      return { resultStatus: "blocked", code: "CAP_REACHED", cap: s.cap, count: s.count, limit: s.limit, stops: caps.stops, counts: caps.counts,
-        reason: `the owner's decided application cap is reached (${s.cap}: ${s.count} of ${s.limit}) — this submission waits for a later day or window` };
+      const st = capStop(caps.stops[0]);
+      return Object.assign({ resultStatus: "blocked", code: st.code, stops: caps.stops, counts: caps.counts }, st.extra);
     }
     // §8.3 collision re-check (MI-108 / G3): the knowledge that the
     // user already holds an application at this job can arrive between
@@ -1949,6 +1998,6 @@ const CareerPortalApply = (() => {
     return report;
   }
 
-  return { classifyTarget, createSandboxBoard, createPortalSession, analyzeForm, runApply, runApplyWithEmailCode, codeStopText, submitDoorstep, reconcile, resolveUnknownOutcomes, profileValue, capCheck, collisionCheck, deriveAnswers, answerMapCoverage, ANSWER_KEY_SOURCES, NON_ANSWER_FACT_KINDS, EDUCATION_KEYS, SANDBOX_FIELDS, SPEC_CAPS, resumeApply, continueApply, portalInputsFromBank, EEO_DECLINE_MEANING, EEO_DECLINE_SOURCE, eeoDeclineMatch, isEeoDeclineText };
+  return { classifyTarget, createSandboxBoard, createPortalSession, analyzeForm, runApply, runApplyWithEmailCode, codeStopText, submitDoorstep, reconcile, resolveUnknownOutcomes, profileValue, capCheck, collisionCheck, deriveAnswers, answerMapCoverage, ANSWER_KEY_SOURCES, NON_ANSWER_FACT_KINDS, EDUCATION_KEYS, SANDBOX_FIELDS, recordRefusal, resumeApply, continueApply, portalInputsFromBank, EEO_DECLINE_MEANING, EEO_DECLINE_SOURCE, eeoDeclineMatch, isEeoDeclineText };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerPortalApply;

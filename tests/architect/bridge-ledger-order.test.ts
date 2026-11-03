@@ -92,12 +92,18 @@ Deno.test({
       await pg.sql(`insert into auth.users (id) values ('${u}');
         insert into public.profiles (id) values ('${u}') on conflict do nothing;
         insert into public.career_watch_kv (user_id, key, value) values ('${u}', 'career:account', '{"epoch":0,"version":0,"paused":false}');`);
+          // OWNER RULE 2026-10-26 (20261026210016, review of PR #194): a confirmed resume on file and the stored resume the payloads bind.
+          await pg.sql(`with t as (insert into public.agent_threads (user_id) values ('${u}') returning id)
+            insert into public.agent_flow_state (thread_id, user_id, state) select id, '${u}', '{"career":{"stores":{"profile":{"facts":[{"id":"seed","kind":"experience","status":"confirmed","needs_confirmation":false,"confirmation_event_id":"seed-ev","text":"TEST Analyst"}]}}}}' from t;
+            insert into public.career_events (user_id, kind, subject, detail) values ('${u}', 'fact_confirmed', 'TEST Analyst', '{"confirmation_event_id":"seed-ev"}');
+            insert into storage.objects (bucket_id, name) values ('career-resumes', '${u}/' || repeat('d', 64) || '.pdf');`);
       const svc = pg.asService();
       for (const [job, company] of [["ok", "Acme"], ["tampered", "Globex"], ["bound", "Initech"]]) {
         const p = {
           version: 1, user_id: u, job_id: job, company, url: `https://boards.greenhouse.io/${company.toLowerCase()}/jobs/${job}`,
           fields: [{ name: "first_name", value: "Ada" }], privacy_epoch: 0, account_version: 0,
           expires_at: new Date(Date.now() + DAY).toISOString(),
+          resume_sha256: "d".repeat(64), // OWNER RULE 2026-10-26 (20261026210016): an approved application binds its resume
         };
         const h = await pg.sql(`select public.career_apply_payload_hash($j$${JSON.stringify(p)}$j$::jsonb)`);
         const r = await svc.rpc("career_apply_enqueue", { p_payload: p, p_hash: h, p_approval: h, p_daily: 25 });

@@ -125,3 +125,17 @@ How you work:
   list. No filler, no flattery, no "as an AI". Tell them their real odds and gaps when it helps them.
 - You are not a lawyer, doctor or financial adviser; for those, give general information and say who to ask.`;
 }
+
+
+// REPLY SHAPE (Telegram, CAREER_REPLY_WRITER=on): how a reply is laid out. Added to the system prompt only on that channel and
+// flag; the attach_document tool exists only then. Instructions, not wording: every sentence of the reply is the model's own.
+export const SHAPE_RULES = `How to shape this reply (Telegram):
+- Write ONE short, plain paragraph (a few sentences, under 700 characters) that answers the question directly. Good grammar, no jargon, no preamble, no headers, no bullet lists, no list of postings.
+- Keep what is published or confirmed apart from what is unknown or undisclosed, in the same paragraph: say where each known thing comes from (the posting, the company's own page, what they told you), and say plainly what you could not verify or what the company has not disclosed. Never fill a gap with a guess or a typical figure.
+- When there is more detail than fits (research, a comparison, a full list of postings, drafted emails, a tailored resume summary), call attach_document with a descriptive file name (company-research.md) and put the detail there, about 4 KB per file. In the paragraph, say in a few words what the file holds, and only after the tool call succeeded. Drafted messages in a file are drafts: nothing is sent without their approval of the exact text.
+- For a page the person acts on or keeps (an introduction to approve, proof of an application, a weekly plan, a comparison, a draft, a research brief), call create_file with its kind and data instead of writing it out; every fact needs its source label. The system adds the link after your reply, so never write that URL yourself, and say in a few words what the page holds only once the call has succeeded.
+- A link matters only when they will want to open it. Use only a link a tool returned or they gave you. Put each link alone on its own line at the end, nothing else on that line, at most three; they are sent as separate messages with a preview card. Never put a link inside a sentence.`;
+// DEFAULT (owner, 2026-10-29): no attachment. The attach_document bullet is replaced by the hosted page; the file bullet returns only
+// in a turn where the person asked for a file (attachAsked).
+export const NO_ATTACH_RULE = `- When there is more detail than fits (research on a company or role, a comparison, a full list of postings, drafted emails, a tailored resume summary), never attach a file: nobody should have to download anything. Call create_file with the kind research_brief (research), comparison or draft, and say in a few words what the page holds, only after the call succeeded. A file is sent only when the person asks for one.`;
+export const shapeRulesFor = (attach: boolean): string => attach ? SHAPE_RULES : SHAPE_RULES.split("\n").map((l) => l.includes("attach_document") ? NO_ATTACH_RULE : l).join("\n");

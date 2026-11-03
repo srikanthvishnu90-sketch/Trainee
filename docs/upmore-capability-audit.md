@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-10-28):** the current inventory of features, depth and status is `docs/architect/FEATURES.md`. Kept for history; do not use as current.
+
 # Upmore: capability and connector audit
 
 Audit date: October 8, 2026. Target: the local checkout of `srikanthvishnu90-sketch/upmore-agent`, base commit `db68fff`, including the existing uncommitted monitor/test changes. Those changes were preserved. This is a code, architecture, product, and test audit, not a certification of the deployed service. Production secrets, customer accounts, merchant actions, bank transfers, and brokerage trades were not exercised.

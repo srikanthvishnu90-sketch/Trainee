@@ -1,9 +1,8 @@
 // The card's yes (D-031; SERIAL-1440, 1442, 1451, 1461; the owner, 2026-10-22 5:09 PM: "for submitting a yes, does handle
-// a batch of submissions"): one texted yes approves exactly the batch the card shows, and only when the text carries the
-// channel's reply-to id and that id is the message that carried the card (the user's texts carry one only when they
-// reply directly). Within 10 minutes of the showing, once (the card is single-use), each item by the payload hash the
-// card carries (an item that changed since is refused by name). A yes with no reply id, or in reply to any other or
-// older message, approves nothing and says how (reply directly to the card, or tap). The yes approves; it never sends:
+// a batch of submissions"; D-MS-1, 2026-10-27): one texted yes approves exactly the batch the card shows: in direct reply
+// to the card's message, or as a plain text while the card is the thread's last word (any channel). Within 10 minutes of
+// the showing, once (the card is single-use), each item by the payload hash the card carries (an item that changed since
+// is refused by name). A yes in reply to any other or older message approves nothing and says how. The yes approves; it never sends:
 // the person's own worker claims and finishes, and no chat turn module names a claim or finish door. The cloud card
 // (the bridge draft, C9) is unchanged: its yes only opens that card. Synthetic only; no network, no database.
 import { CARD_INTENT, type CardStore, cardTurn } from "../../supabase/functions/_shared/career_apply_cards.ts";
@@ -49,11 +48,13 @@ Deno.test("the card's yes: in direct reply to the card's message, within 10 minu
   }
 });
 
-Deno.test("SERIAL-1461 reply identity: no reply id, a different message, an older card's message approve nothing and say how; only the card's own message approves; a decline needs no reply id", async () => {
+Deno.test("D-MS-1 reply identity: a plain yes while the card is the last word approves it (every channel); a reply to a different message, or to an older card's message, approves nothing and says how; a decline needs no reply id", async () => {
   for (const m of [...YES_FORMS, ...EXCEPT_FORMS]) {
+    // D-MS-1 (owner, 2026-10-27; replaces SERIAL-1461's reply-only rule): no reply id (iMessage, SMS, the web app), the
+    // card the thread's last word: the yes approves exactly the batch shown.
     const absent = wo022Store();
     const a = await turn(absent, m);
-    ok(a?.status === "needs_reply" && /reply directly to the card/.test(a!.reply) && /tap Approve/.test(a!.reply) && /Nothing was approved/.test(a!.reply) && absent.approvals.length === 0, `"${m}" with no reply id: ${JSON.stringify(a)}`);
+    ok(a?.status === "answered" && absent.approvals.length === 1, `"${m}" with no reply id, card the last word: ${JSON.stringify(a)}`);
     const other = wo022Store();
     const d = await turn(other, m, { replyTo: "msg-other" });
     ok(d?.status === "needs_reply" && other.approvals.length === 0, `"${m}" in reply to another message, with the card as the last word: ${JSON.stringify(d)}`);
@@ -125,9 +126,13 @@ Deno.test("SERIAL-1442 exact payloads: whatever changed since the card was shown
   };
   const r = await cardTurn({ message: "yes", userId: "u", threadId: "t", now: NOW, store, replyTo: "msg-card-7" });
   ok(r?.status === "answered" && /^1 approved exactly as shown/.test(r!.reply), r?.reply);
-  for (const [n, why] of [[1, "it changed after the card was shown"], [2, "your details changed after it was prepared"], [3, "you applied to them in the last 30 days"], [4, "you already applied to this posting"], [5, "today's daily limit is already used"], [6, "the queue refused it"], [8, "your saved daily pace could not be read"]] as const) {
+  for (const [n, why] of [[1, "it changed after the card was shown"], [2, "your details changed after it was prepared"], [3, "you applied to them in the last 30 days"], [5, "it is over the daily pace you set yourself"], [6, "the queue refused it"], [8, "your saved daily pace could not be read"]] as const) {
     ok(new RegExp(`^${n}\\. [A-Za-z ]+: not sent: ${why.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "m").test(r!.reply), `${n}: ${why}: ${r!.reply}`);
   }
+  // The same posting already in the person's applications (sent, or approved and waiting for a site that asked us to slow
+  // down: 20261029180000): never "you already applied" (it may never have been sent), never the word "duplicate".
+  ok(/^4\. [A-Za-z ]+: not added again: this posting is already in your applications \(sent, or approved and waiting to go\)/m.test(r!.reply) &&
+    !/already applied|duplicate/i.test(r!.reply), r!.reply);
   ok(/^7\. Fine Co: approved/m.test(r!.reply), r!.reply);
 });
 

@@ -23,6 +23,9 @@ on:
       - ".github/workflows/deploy-production.yml"
       - ".github/workflows/deploy-preflight.yml"
   workflow_dispatch:
+  # D-034: deploy-production.yml calls both jobs on every push to release/production, so the deploy standard's S1 finds
+  # them on the exact SHA it judges (their checks are named "preflight / <job name>" there).
+  workflow_call:
 permissions:
   contents: read
 jobs:

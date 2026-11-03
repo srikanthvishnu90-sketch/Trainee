@@ -113,7 +113,11 @@ Deno.test({
       const runEngine = engineRunner({ root: ROOT, extra: ["--state-dir", `${work}/engine-state`] });
       const r = await prepare({ url: `${employer.base}/apply`, factsPath, resumePath, account: { epoch: 0, version: 0 }, now: Date.now(), runEngine });
       assert(r.ready, `the dry run reached the card: ${JSON.stringify((r as any).result)}`);
-      // Let the page's own late requests (beacons, the image) arrive before reading the logs.
+      // Let the page's own late requests (beacons, the image) arrive before reading the logs: wait until the page's four
+      // stopped writes and its one GET autosave have reported in (bounded; a fixed 500 ms was a guess on a loaded runner),
+      // then the same 500 ms more for anything that should not come.
+      const reported = () => employer.seen.filter((x) => x.path === "/stopped").length >= 4 && employer.seen.some((x) => x.path === "/went");
+      for (const end = Date.now() + 20_000; !reported() && Date.now() < end;) await new Promise((ok) => setTimeout(ok, 25));
       await new Promise((ok) => setTimeout(ok, 500));
       const at = (s: Seen[]) => s.map((x) => `${x.method} ${x.path}${x.query}`);
       console.log(`employer received: ${JSON.stringify(at(employer.seen))}\nother origin received: ${JSON.stringify(at(third.seen))}`);

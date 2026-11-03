@@ -4,25 +4,115 @@
 # (docs/launch/TRAINEE-GO-LIVE.md, "From GitHub"): migrations, secrets, deploys, schedules, smoke, and the deploy ledger.
 # Every value comes from the environment's secrets; one left unset keeps what the project has (the script's header).
 # Nothing here pushes, tags or changes the repo. Rollback: docs/launch/TRAINEE-GO-LIVE.md, "Rollback".
+#
+# THE DEPLOY STANDARD (D-034; owner, in writing, 2026-10-31 11:57 CT: "set a requirement a standard, whenever the product
+# reaches that standard deploy ... if it does then auto deploy, also make sure u test everytime if it does"). On every push,
+# before anything can deploy: the preflight (go-live dry run, migration rehearsal) runs on this SHA, then
+# scripts/launch/deploy-standard.ts judges S1-S4 (every required CI check success on this SHA; every PR merged since the last
+# successful deploy approved at its merged head; reply quality not below the deployed SHA's; the Telegram acceptance suite
+# passed and its KNOWN_GAP list did not grow). S3's measurements are made first when missing (job "measure"). Any FAIL ends the run here: the deploy job never starts, so there is nothing
+# to approve. Inside the production environment, before go-live, the standard runs again with S5 (no feature enabled and
+# NOT_WIRED), which needs the environment's secrets. After go-live, S6: the live smoke runs again on its own; if go-live or
+# the smoke fails, the previous deployed SHA is deployed again (--skip-migrations: migrations are additive) and the run fails.
+# The environment's required reviewers stay: a run that meets the standard still waits for that approval.
 name: deploy-production
 on:
   push:
     branches: [release/production]
 permissions:
   contents: read
+  checks: read
+  pull-requests: read
+  actions: read
 concurrency:
   group: deploy-production
   cancel-in-progress: false
 jobs:
-  deploy:
-    name: deploy (production)
+  preflight:
+    name: preflight
+    # deploy-preflight.yml's own jobs (go-live --dry-run at this SHA, the live-shaped migration rehearsal), called here so
+    # their checks exist on every SHA pushed to release/production (on trunk they run only when their paths change).
+    uses: ./.github/workflows/deploy-preflight.yml
+  # S3's evidence: a reply-quality measurement of this SHA (or of a same-reply-code ancestor) and of the deployed SHA on the
+  # same set. When one is missing, measure it (scripts/launch/measure-reply.sh: a measurement commit on ci/brain-eval whose
+  # second parent is that SHA, brain-eval dispatched on it, five passes of the brain that SHA serves (its committed
+  # release_config.ts, D-035: staged for the candidate, router for a SHA before the config; router passes about $0.10,
+  # staged also pays the brain's model), capped by brain-eval.yml's EVAL_BUDGET_USD) and wait for the score; at most the
+  # candidate and then the deployed SHA. It judges nothing: the
+  # standard below does, and a measurement that could not be made is S3's FAIL there, with its reason.
+  measure:
+    name: reply measurement (S3 evidence)
     runs-on: ubuntu-24.04
-    environment: production
-    timeout-minutes: 60
+    timeout-minutes: 180
+    permissions:
+      contents: write # push the measurement commit to ci/brain-eval (no other branch is written)
+      actions: write # dispatch brain-eval; read this workflow's runs (the deployed SHA)
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: Measure what S3 lacks (the candidate, then the deployed SHA), and wait for the scores
+        run: |
+          set -o pipefail
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          for round in 1 2; do
+            git -c "http.extraheader=$auth" fetch --no-tags -q origin +refs/heads/ci/brain-eval:refs/remotes/origin/ci/brain-eval
+            ask=$(deno run -A scripts/launch/deploy-standard.ts --sha "$GITHUB_SHA" --missing-measurement --exclude-run "$GITHUB_RUN_ID" | tee /dev/stderr)
+            need=$(printf '%s\n' "$ask" | sed -n 's/^measure=//p'); brain=$(printf '%s\n' "$ask" | sed -n 's/^brain=//p')
+            [ -z "$need" ] && exit 0
+            case "$brain" in router|staged) ;; *) echo "::error::no served brain for $need (got '$brain'); S3 will fail"; exit 1;; esac
+            # Measured once already in this run and still no score: measuring again would only spend again.
+            case " ${done_shas:-} " in *" $need "*) echo "::error::$need was measured in this run and still has no score; S3 will fail"; exit 1;; esac
+            MEASURE_WAIT_MIN=80 MEASURE_BRAINS="$brain" bash scripts/launch/measure-reply.sh "$need"
+            done_shas="${done_shas:-} $need"
+          done
+  standard:
+    name: deploy standard (S1-S4)
+    needs: [preflight, measure]
+    # Runs when the measurement failed too: S3 then says what is missing. A failed preflight still stops it.
+    if: ${{ !cancelled() && needs.preflight.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    outputs:
+      deployed_sha: ${{ steps.judge.outputs.deployed_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: The brain eval's score log (ci/brain-eval) and the approvals ledger at the trunk tip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git -c "http.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" fetch --no-tags origin +refs/heads/ci/brain-eval:refs/remotes/origin/ci/brain-eval +refs/heads/trunk:refs/remotes/origin/trunk
+      - name: S1-S4 on this SHA (waits up to 90 minutes for its CI to finish; decides nothing by waiting)
+        id: judge
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: deno run -A scripts/launch/deploy-standard.ts --sha "$GITHUB_SHA" --checks S1,S2,S3,S4 --exclude-run "$GITHUB_RUN_ID" --wait-checks 90
+  deploy:
+    name: deploy (production)
+    needs: standard
+    runs-on: ubuntu-24.04
+    environment: production
+    # Every step that can leave the project half-deployed has its own timeout well inside the job's, so a hung go-live or
+    # smoke ends as that step's failure and the rollback below still has 35 minutes to run (a job timeout would cancel it).
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
         with: { node-version: "22.23.3" }
@@ -37,7 +127,20 @@ jobs:
           psql --version
           supabase --version
           deno --version
+      - name: The brain eval's score log (ci/brain-eval) and the approvals ledger at the trunk tip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git -c "http.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" fetch --no-tags origin +refs/heads/ci/brain-eval:refs/remotes/origin/ci/brain-eval +refs/heads/trunk:refs/remotes/origin/trunk
+      - name: The deploy standard, S1-S5, at the moment of deploy (S5 reads the project's secret names, never a value)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: deno run -A scripts/launch/deploy-standard.ts --sha "$GITHUB_SHA" --exclude-run "$GITHUB_RUN_ID"
       - name: Go live at the pushed commit
+        id: golive
+        timeout-minutes: 75
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
@@ -46,7 +149,7 @@ jobs:
           CAREER_PROACTIVE_SECRET: ${{ secrets.CAREER_PROACTIVE_SECRET }}
           TRAINEE_DELIVER_SECRET: ${{ secrets.TRAINEE_DELIVER_SECRET }}
           TRAINEE_INBOUND_SECRET: ${{ secrets.TRAINEE_INBOUND_SECRET }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LOOPMESSAGE_API_KEY: ${{ secrets.LOOPMESSAGE_API_KEY }}
           INGEST_CONTACT_EMAIL: ${{ secrets.INGEST_CONTACT_EMAIL }}
           TRAINEE_ALLOWED_CONTACTS: ${{ secrets.TRAINEE_ALLOWED_CONTACTS }}
@@ -63,6 +166,26 @@ jobs:
           WHATSAPP_TEMPLATE_UPDATES: ${{ secrets.WHATSAPP_TEMPLATE_UPDATES }}
           WHATSAPP_TEMPLATE_LANGUAGE: ${{ secrets.WHATSAPP_TEMPLATE_LANGUAGE }}
           WHATSAPP_DAILY_TEMPLATES: ${{ secrets.WHATSAPP_DAILY_TEMPLATES }}
+          # FEATURE 17: the cloud runner (docs/launch/CLOUD-RUNNER.md); each unset one keeps what the project has.
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          CLOUD_SANDBOX_SNAPSHOT_ID: ${{ secrets.CLOUD_SANDBOX_SNAPSHOT_ID }}
+          CLOUD_RUNNER_SECRET: ${{ secrets.CLOUD_RUNNER_SECRET }}
+          CLOUD_DISPATCH_SECRET: ${{ secrets.CLOUD_DISPATCH_SECRET }}
+          CAREER_PREPARE_AHEAD_TOKEN: ${{ secrets.CAREER_PREPARE_AHEAD_TOKEN }}
+          CLOUD_MAX_CONCURRENT: ${{ secrets.CLOUD_MAX_CONCURRENT }}
+          CLOUD_MAX_PER_PORTAL: ${{ secrets.CLOUD_MAX_PER_PORTAL }}
+          CLOUD_MAX_STARTS_PER_TICK: ${{ secrets.CLOUD_MAX_STARTS_PER_TICK }}
+          CLOUD_MAX_PER_PERSON_DAY: ${{ secrets.CLOUD_MAX_PER_PERSON_DAY }}
+          CLOUD_MAX_PER_SITE_MINUTE: ${{ secrets.CLOUD_MAX_PER_SITE_MINUTE }}
+          CLOUD_PREPARE_MAX_CONCURRENT: ${{ secrets.CLOUD_PREPARE_MAX_CONCURRENT }}
+          CLOUD_PREPARE_STARTS_PER_TICK: ${{ secrets.CLOUD_PREPARE_STARTS_PER_TICK }}
+          CLOUD_PREPARE_PER_PERSON_DAY: ${{ secrets.CLOUD_PREPARE_PER_PERSON_DAY }}
+          CLOUD_PREPARE_PER_SITE_MINUTE: ${{ secrets.CLOUD_PREPARE_PER_SITE_MINUTE }}
+          CLOUD_RUNNER_ENABLED: ${{ secrets.CLOUD_RUNNER_ENABLED }}
+          CLOUD_PREPARE_ENABLED: ${{ secrets.CLOUD_PREPARE_ENABLED }}
+          CAREER_PREPARE_AHEAD_URL: ${{ secrets.CAREER_PREPARE_AHEAD_URL }}
           TRAINEE_GO_LIVE_LOG: ${{ runner.temp }}/go-live/go-live.log
           TRAINEE_DEPLOY_LABEL: github-actions run ${{ github.run_id }}
         run: |
@@ -71,6 +194,64 @@ jobs:
           # The script prints each secret as *** and passes every command's output through its own mask; GitHub masks
           # the secrets above in this log as well.
           bash scripts/launch/trainee-go-live.sh --sha "$GITHUB_SHA" --non-interactive --label "$TRAINEE_DEPLOY_LABEL"
+      # S6: the live smoke again, on its own, after go-live finished (go-live's step 6 already ran it once): the health of
+      # every function, trainee-telegram's webhook, and one synthetic "hi" turn of agent-chat for the test account
+      # (UPMORE_TEST_JWT). Its FAIL rolls back below.
+      - name: S6 live smoke after deploy
+        id: smoke
+        timeout-minutes: 15
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          CAREER_INGEST_SECRET: ${{ secrets.CAREER_INGEST_SECRET }}
+          CAREER_PROACTIVE_SECRET: ${{ secrets.CAREER_PROACTIVE_SECRET }}
+          TRAINEE_DELIVER_SECRET: ${{ secrets.TRAINEE_DELIVER_SECRET }}
+          TRAINEE_INBOUND_SECRET: ${{ secrets.TRAINEE_INBOUND_SECRET }}
+          UPMORE_TEST_JWT: ${{ secrets.UPMORE_TEST_JWT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          WHATSAPP_VERIFY_TOKEN: ${{ secrets.WHATSAPP_VERIFY_TOKEN }}
+          TRAINEE_GO_LIVE_LOG: ${{ runner.temp }}/go-live/smoke.log
+        run: |
+          set -o pipefail
+          bash scripts/launch/trainee-go-live.sh --sha "$GITHUB_SHA" --only-smoke --no-wait --non-interactive --label "github-actions run ${{ github.run_id }} smoke"
+      # Rollback: go-live started and the commit did not end live and smoked (go-live or the smoke failed, was cancelled or
+      # timed out) after the standard passed. The previous successful production deploy's SHA
+      # (the standard job read it from this workflow's runs) is deployed again from its own checkout, exactly as
+      # docs/launch/TRAINEE-GO-LIVE.md "Everything back to an earlier commit" says, migrations skipped (they are additive;
+      # nothing is dropped). The run stays failed either way.
+      - name: Rollback checkout (the previous deployed SHA)
+        if: always() && steps.golive.outcome != '' && steps.golive.outcome != 'skipped' && !(steps.golive.outcome == 'success' && steps.smoke.outcome == 'success') && needs.standard.outputs.deployed_sha != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.standard.outputs.deployed_sha }}
+          path: rollback-tree
+          persist-credentials: false
+      - name: Roll back to the previous deployed SHA
+        if: always() && steps.golive.outcome != '' && steps.golive.outcome != 'skipped' && !(steps.golive.outcome == 'success' && steps.smoke.outcome == 'success')
+        timeout-minutes: 35
+        env:
+          PREVIOUS_SHA: ${{ needs.standard.outputs.deployed_sha }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          CAREER_INGEST_SECRET: ${{ secrets.CAREER_INGEST_SECRET }}
+          CAREER_PROACTIVE_SECRET: ${{ secrets.CAREER_PROACTIVE_SECRET }}
+          TRAINEE_DELIVER_SECRET: ${{ secrets.TRAINEE_DELIVER_SECRET }}
+          TRAINEE_INBOUND_SECRET: ${{ secrets.TRAINEE_INBOUND_SECRET }}
+          UPMORE_TEST_JWT: ${{ secrets.UPMORE_TEST_JWT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          WHATSAPP_VERIFY_TOKEN: ${{ secrets.WHATSAPP_VERIFY_TOKEN }}
+          TRAINEE_GO_LIVE_LOG: ${{ runner.temp }}/go-live/rollback.log
+        run: |
+          set -o pipefail
+          if [ -z "$PREVIOUS_SHA" ]; then echo "::error::no previous successful production deploy to roll back to; the live project is as go-live left it"; exit 1; fi
+          echo "::error::rolling back to $PREVIOUS_SHA (go-live: ${{ steps.golive.outcome }}, smoke: ${{ steps.smoke.outcome }})"
+          bash rollback-tree/scripts/launch/trainee-go-live.sh --sha "$PREVIOUS_SHA" --skip-migrations --no-wait --non-interactive --label "github-actions run ${{ github.run_id }} rollback"
+          echo "::error::rolled back to $PREVIOUS_SHA; this run is failed: $GITHUB_SHA did not stay live"
+          exit 1
       - name: Collect the provenance manifest, the rollback copy and the log, secrets masked
         if: always()
         env:
@@ -80,7 +261,7 @@ jobs:
           MASK_4: ${{ secrets.CAREER_PROACTIVE_SECRET }}
           MASK_5: ${{ secrets.TRAINEE_DELIVER_SECRET }}
           MASK_6: ${{ secrets.TRAINEE_INBOUND_SECRET }}
-          MASK_7: ${{ secrets.OPENAI_API_KEY }}
+          MASK_7: ${{ secrets.ANTHROPIC_API_KEY }}
           MASK_8: ${{ secrets.LOOPMESSAGE_API_KEY }}
           MASK_9: ${{ secrets.INGEST_CONTACT_EMAIL }}
           MASK_10: ${{ secrets.TRAINEE_ALLOWED_CONTACTS }}
@@ -91,9 +272,15 @@ jobs:
           MASK_15: ${{ secrets.WHATSAPP_TOKEN }}
           MASK_16: ${{ secrets.WHATSAPP_APP_SECRET }}
           MASK_17: ${{ secrets.WHATSAPP_VERIFY_TOKEN }}
+          MASK_18: ${{ secrets.CLOUD_RUNNER_SECRET }}
+          MASK_19: ${{ secrets.CLOUD_DISPATCH_SECRET }}
+          MASK_20: ${{ secrets.CAREER_PREPARE_AHEAD_TOKEN }}
+          MASK_21: ${{ secrets.VERCEL_TOKEN }}
+          MASK_22: ${{ secrets.CAREER_PREPARE_AHEAD_URL }}
         run: |
           out="$RUNNER_TEMP/deploy-artifacts"; mkdir -p "$out"
           cp "$RUNNER_TEMP/go-live/go-live.log" "$out/" 2>/dev/null || echo "no log was written"
+          cp "$RUNNER_TEMP/go-live/smoke.log" "$RUNNER_TEMP/go-live/rollback.log" "$out/" 2>/dev/null || true
           cp "$HOME"/trainee-provenance/manifest-*.json "$out/" 2>/dev/null || echo "no provenance manifest was written"
           if [ -d "$HOME/trainee-rollback" ]; then cp -r "$HOME/trainee-rollback" "$out/rollback"; fi
           # Defence in depth over the script's own mask: every secret value (and the database password on its own) is

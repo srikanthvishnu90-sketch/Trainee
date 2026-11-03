@@ -152,6 +152,21 @@
             const head = heads.find((x) => !x.contains(el) && !optionLabel(x) && !foreign(x, el) && labelText(x).trim().length > 0);
             if (head) return labelText(head);
           }
+          if (/^(radio|checkbox)$/i.test(el.type || "") && el.name) {
+            const sel = 'input[name="' + esc(el.name) + '"]', members = document.querySelectorAll(sel).length;
+            node = el;
+            for (let i = 0; i < 3 && node; i++) {
+              node = node.parentElement;
+              if (!node) break;
+              if (Array.from(node.querySelectorAll("input")).some((x) => x.name !== el.name && realControl(x))) break;
+              if (node.querySelectorAll(sel).length < members) continue;
+              const prev = node.previousElementSibling;
+              if (!prev) continue;
+              if (prev.querySelector("input,select,textarea") || foreign(prev, el)) break;
+              const t = labelText(prev).trim();
+              if (t) return t;
+            }
+          }
           return "";
         }
         function selectorFor(el, idx) {
@@ -174,6 +189,10 @@
           if (typeof el.className === "string" && /requiredInput/.test(el.className)) return;
           const visible2 = type === "file" ? true : el.offsetParent !== null || el.getClientRects().length > 0;
           if (!visible2 && !includeHidden) return;
+          if (/^(text|email|tel|url|search|number|textarea)$/.test(type) && (el.closest("[aria-hidden='true']") || el.getAttribute("tabindex") === "-1")) {
+            const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+            if (r && (r.right <= 0 || r.bottom <= 0)) return;
+          }
           const gl = clean2(groupLabelFor(el));
           const member = type === "radio" || type === "checkbox";
           const label = labelFor(el) || !member && type !== "search" && gl || weakLabelFor(el);
@@ -277,6 +296,32 @@
       };
     }
   });
+
+  // supabase/functions/_shared/length_limit.ts
+  function statedLimit(label) {
+    const t = String(label ?? "").toLowerCase().replace(/,(?=\d{3})/g, "");
+    const num = (re) => {
+      const m = re.exec(t);
+      return m ? Number(m[m.length - 1]) : null;
+    };
+    const words = num(/\b(?:in|under|within|max(?:imum)?|up to|no more than|less than|fewer than|at most|limit(?:ed)? to|(?:word )?limit:?)\s*(?:of\s*)?(\d{2,4})\s*words?\b/) ?? num(/\b(\d{2,4})\s*(?:-\s*)?words?\s*(?:or (?:less|fewer)|max(?:imum)?|limit|or under)\b/) ?? num(/\b(\d{2,4})-word\b/);
+    const chars = num(/\b(?:in|under|within|max(?:imum)?|up to|no more than|less than|fewer than|at most|limit(?:ed)? to|(?:character )?limit:?)\s*(?:of\s*)?(\d{2,5})\s*char(?:acter)?s?\b/) ?? num(/\b(\d{2,5})\s*char(?:acter)?s?\s*(?:or (?:less|fewer)|max(?:imum)?|limit)\b/);
+    const sentences2 = num(/\bin\s*(?:\d\s*-\s*)?(\d{1,2})\s*sentences?\b/) ?? num(/\b(?:no more than|at most|up to|max(?:imum)?)\s*(\d{1,2})\s*sentences?\b/);
+    return words !== null || chars !== null || sentences2 !== null ? {
+      words,
+      chars,
+      sentences: sentences2
+    } : null;
+  }
+  var countWords = (s) => s.split(/\s+/).filter(Boolean).length;
+  function overStatedLimit(label, value) {
+    const l = statedLimit(label);
+    if (!l) return null;
+    const v = String(value ?? "").trim();
+    if (l.chars !== null && v.length > l.chars) return `has ${v.length} characters and the form allows ${l.chars}; shorten it (I never cut an answer off)`;
+    if (l.words !== null && countWords(v) > l.words) return `has ${countWords(v)} words and the form allows ${l.words}; shorten it (I never cut an answer off)`;
+    return null;
+  }
 
   // supabase/functions/_shared/fact_schema.ts
   var FACT_SCHEMA = {
@@ -1572,8 +1617,14 @@
       (q) => LONG_TYPES.has(String(q.type))
     ]
   ];
+  var HONEYPOT = /\bleave (this |it )?(field |box |blank:? |empty:? )?(blank|empty)\b|\b(leave|keep) (this |it )?(field )?(blank|empty)\b|\b(do not|don'?t) (fill|enter|complete|type)\b|\b(blank|empty) if you(?:'| a)re human\b|\bif you(?:'| a)re (a )?human\b/i;
   function mapQuestion(q) {
     const t = norm(q.label);
+    if (HONEYPOT.test(t)) return {
+      fact: "unknown",
+      kind: "unknown",
+      why: "a field the form asks people to leave blank"
+    };
     for (const [fact, test, when] of RULES) {
       if (!test.test(t)) continue;
       if (when && !when(q, t)) continue;
@@ -1590,7 +1641,7 @@
     };
   }
   var RULE_COUNT = RULES.length;
-  var NEVER_BY_TEXT = /social security|\bssn\b|passport (number|no\b)|driver'?s licen[cs]e (number|no\b)|national (id|insurance) number|\btax(payer)? id|\bitin\b|alien (registration )?number|\ba-number\b|bank account|routing number|card number|\bpassword\b|\bpin\b/i;
+  var NEVER_BY_TEXT = /social security|\bssn\b|passport\s*(#|no\b|num|number)|driver'?s'? licen[cs]e\s*(#|no\b|num|number)|licen[cs]e\s*(#|number)|national (id|identification|identity|insurance)\b|\btax(payer)? id|\btax identification|\bitin\b|alien (registration )?number|\ba-number\b|bank account|routing number|card number|\bpassword\b|\bpin\b|social insurance|\(sin\)|^\s*sin\b(?!\s+(?:experiencia|patrocinio|visa|embargo))|\bsin\s*(#|no\b|num|number)|\b(your|enter|provide) sin\b|\bni (number|no\b)|\bnin\b|tax file number|\btfn\b|aadhaa?r|\bpan (card )?(number|no\b|#)|government[- ]issued( photo)? id|personnummer|\bcpf\b|\bcurp\b|\bpesel\b|\bnric\b|\bbsn\b|\bdni\b|\bnie\b|\bpps (number|no\b)|\b(id|identity|identification) (card |document )?(number|no\b|#)|\biban\b|sort code|account number|\bcvv\b/i;
   function h16(s) {
     let h = 0xcbf29ce484222325n;
     for (const b of new TextEncoder().encode(s)) h = BigInt.asUintN(64, (h ^ BigInt(b)) * 0x100000001b3n);
@@ -2198,8 +2249,17 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     const re = EDUCATION[v.replace(/'s|s$/g, "").replace(/ degree$/, "")] ?? EDUCATION[v];
     if (!re) return false;
     const t = low(label);
+    if (/\bmba\b|\bm\.b\.a\b|business administration/.test(t) && !/\bmba\b|\bm\.b\.a\b|business/.test(v)) return false;
     return re.test(t) && !/in progress|pursuing|currently enrolled|incomplete|candidate|expected/.test(t);
   }
+  function sameAnswerOption(value, label, comma = false) {
+    const v = low(value), l = low(label);
+    if (!v || !l.startsWith(v)) return false;
+    const rest = l.slice(v.length).trim();
+    if (QUALIFIER.test(rest)) return false;
+    return rest === "" || /^\([^()]*\)$/.test(rest) || /^or\b/.test(rest) || comma && /^,/.test(rest);
+  }
+  var QUALIFIER = /\b(interim|in progress|pending|expired|inactive|lapsed|former|previous|previously|incomplete|expected|pursuing|current|currently|not|non|no|partial|provisional|temporary)\b/;
   function chooseOption(fact, value, options, question = "") {
     if (!options.length) return null;
     const v = low(value);
@@ -2249,6 +2309,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         const re = EDUCATION[v.replace(/'s|s$/g, "").replace(/ degree$/, "")] ?? EDUCATION[v];
         if (!re) return null;
         if (options.some((o) => /\brelevant\b|\brelated\b|\bdiscipline\b|\bfield\b/.test(low(o.label)))) return null;
+        if (!/\bmba\b|business/.test(v) && options.some((o) => re.test(low(o.label)) && /\bmba\b|\bm\.b\.a\b|business administration/.test(low(o.label)))) return null;
         const hits = options.filter((o) => degreeOptionFor(value, o.label));
         const core = (l) => low(l).replace(/'s\b|\bdegree\b|[^a-z]/g, "").replace(/s$/, "");
         if (hits.length > 1 && hits.every((o) => core(o.label) === core(hits[0].label))) return (hits.find((o) => low(o.label) === v) ?? hits.find((o) => /\bdegree\b/.test(low(o.label))) ?? hits[0]).value;
@@ -2265,6 +2326,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       case "city": {
         const [city, st] = v.split(/\s*,\s*/);
         if (!city) return null;
+        if (fact === "city" && !st) return null;
         const full = st ? STATES[st] ?? st : null;
         return only(options.filter((o) => {
           const parts = low(o.label).split(/\s*,\s*/);
@@ -2280,7 +2342,11 @@ ${words}`)}`, wording = `label:${h16(words)}`;
           if (whole.length === 1 && options.filter((o) => /^united states\b/.test(low(o.label))).length > 1) return whole[0].value;
           return only(options.filter((o) => US.test(low(o.label)) || /^united states\b|u\.?s\.? citizen/.test(low(o.label)))) ?? usCitizenChoice(v, options);
         }
-        return only(options.filter((o) => low(o.label).startsWith(v)));
+        return only(options.filter((o) => sameAnswerOption(v, o.label, true)));
+      case "gpa": {
+        const g = /^\d(?:\.\d{1,2})?$/.test(v) ? v : null;
+        return g ? only(options.filter((o) => new RegExp(`^${g.replace(".", "\\.")}\\s*(?:/|out of)\\s*4(?:\\.0+)?$`).test(low(o.label)) || sameAnswerOption(g, o.label))) : null;
+      }
       case "notice_period":
       case "start_date":
         return bySpan(value, options, "weeks");
@@ -2294,11 +2360,11 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       }
       case "security_clearance":
         if (/^(none|no|n\/a)$/.test(v)) return only(options.filter((o) => /^none\b|do not.*(hold|have)|never held|not.*hold|^n\/a|^no\b/.test(low(o.label))));
-        return only(options.filter((o) => low(o.label).includes(v)));
+        return only(options.filter((o) => sameAnswerOption(v, o.label)));
     }
     const yn = yesNoOf(v);
     if (yn) return byYesNo(yn, options);
-    return only(options.filter((o) => low(o.label).includes(v) && v.length >= 3));
+    return only(options.filter((o) => v.length >= 2 && sameAnswerOption(v, o.label)));
   }
 
   // supabase/functions/_shared/posting_place.ts
@@ -2614,6 +2680,8 @@ ${words}`)}`, wording = `label:${h16(words)}`;
 
   // supabase/functions/_shared/career_apply.ts
   var SUCCESS = /(application (?:has been |was )?(?:submitted|received)|thank you for (?:applying|your application)|we(?:'ve| have) received your application|successfully submitted|application is complete|your application was sent)/i;
+  var ALREADY = /\b(already (applied|submitted|received|have an application|on file)|(previously|before) applied|applied (to|for) this (job|position|role|posting) before|duplicate (application|submission)|an application (with this [a-z ]+ )?already exists)\b/i;
+  var FAILED = /\b(an? (error|problem) (has )?occurred|something went wrong|could not be (submitted|sent|processed|received|completed)|couldn'?t (submit|send|process)|unable to (submit|send|process|complete)|(was|has) not been (submitted|sent|received)|was not (submitted|sent|received)|(submission|application) (has )?failed|failed to (submit|send)|please try again|server error)\b/i;
   var ID = /(?:application|confirmation|reference|submission|tracking)\s*(?:(?:id|number|no\.?)\s*[:#]?|#)\s*([A-Z0-9][A-Z0-9-]{4,})\b/i;
   function classifyOutcome(o) {
     if (o.captcha) return {
@@ -2638,6 +2706,16 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     };
     const m = ID.exec(o.page_text || "");
     const id = m && /\d/.test(m[1]) ? m[1] : null;
+    if (ALREADY.test(o.page_text || "")) return {
+      state: "not_submitted",
+      reason: "the employer's page says an application is already on file; whether this one was taken is not known",
+      confirmation_id: null
+    };
+    if (FAILED.test(o.page_text || "")) return {
+      state: "not_submitted",
+      reason: "the employer's page reports an error; whether the application was taken is not known",
+      confirmation_id: null
+    };
     if (SUCCESS.test(o.page_text || "")) return {
       state: "confirmed",
       reason: "employer confirmation on the page",
@@ -2654,7 +2732,6 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       confirmation_id: null
     };
   }
-  var COMPANY_COOLDOWN_DAYS = 30;
   var DAY = 864e5;
   var COUNTED_STATES = /* @__PURE__ */ new Set([
     "queued",
@@ -2694,6 +2771,19 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     const st = paceState(l?.daily);
     return st.state === "set" ? st.pace : st.state === "none" ? Infinity : NaN;
   };
+  function postingKey(url) {
+    const m = /^https?:\/\/([^/?#@]+)([^?#]*)(\?[^#]*)?/.exec(String(url ?? "").trim().toLowerCase());
+    if (!m) return null;
+    const h = m[1].replace(/^www\./, "").replace(/:(80|443)$/, "");
+    let p = (m[2] ?? "").replace(/\/+$/, "");
+    if (/^\/[^/]+\/.+\/(apply|application)$/.test(p)) p = p.replace(/\/(apply|application)$/, "").replace(/\/+$/, "");
+    if (/(^|\.)greenhouse\.io$/.test(h)) {
+      const jid = /[?&]gh_jid=([0-9]+)/.exec(m[3] ?? "")?.[1] ?? /\/jobs\/([0-9]+)$/.exec(p)?.[1];
+      if (jid) return "greenhouse.io/jobs/" + jid;
+    }
+    const q = (m[3] ?? "").slice(1).split("&").filter((x) => x !== "" && !/^(utm_[a-z_]*|gh_src|src|source|ref|referrer|lever-[a-z-]*)(=|$)/.test(x)).sort((a, b) => a < b ? -1 : a > b ? 1 : 0).join("&");
+    return h + p + (q ? "?" + q : "");
+  }
   function admitApplication(log, a, now, limits) {
     if (a.approval_hash !== void 0 || a.payload_hash !== void 0) {
       if (!a.approval_hash || a.approval_hash !== a.payload_hash) return {
@@ -2702,14 +2792,10 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       };
     }
     const mine = log.filter((x) => x.user_id === a.user_id && COUNTED.has(x.state));
-    if (mine.some((x) => x.job_id === a.job_id)) return {
+    const key = postingKey(a.url);
+    if (mine.some((x) => x.job_id === a.job_id || key !== null && postingKey(x.url) === key)) return {
       ok: false,
       reason: "duplicate_job"
-    };
-    const co = normCompany(a.company);
-    if (co && mine.some((x) => normCompany(x.company) === co && now - x.at < COMPANY_COOLDOWN_DAYS * DAY)) return {
-      ok: false,
-      reason: "company_cooldown"
     };
     if (limits?.unreadable !== void 0 || Number.isNaN(dailyLimit(limits))) return {
       ok: false,
@@ -2810,6 +2896,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       "eeo"
     ]
   ];
+  var PAY_HISTORY = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
   var CONTACT = /* @__PURE__ */ new Set([
     "first_name",
     "last_name",
@@ -2828,6 +2915,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   var SOMEONE_ELSE = /\breferr|\breferen|\bteam member|\breferee|\bemergency|\bmanager|\bsupervisor|\brecruiter|\bspouse|\bparent|\bguardian|\bemployee who/i;
   function classifyField(label, type) {
     const l = String(label || "");
+    if (HONEYPOT.test(l)) return "unknown";
     if (/file/.test(type) && /resume|cv/i.test(l)) return "resume";
     if (type === "checkbox" && l.length > 120 && !l.includes("?")) return "unknown";
     for (const [re, key] of KEYS) {
@@ -2840,7 +2928,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       if (key === "website" && /\b(academic|program|department|school|university|college|company|employer|organi[sz]ation)\b/i.test(l)) continue;
       if ((key === "email" || key === "phone") && /e-?mail/i.test(l) && /phone|mobile|number/i.test(l)) continue;
       if (key === "phone" && /\b(sms|text messages?|texts)\b/i.test(l)) continue;
-      if (key === "salary_expectation" && (/current|present|monthly|per month|hourly|per hour|range|bracket|band|format|\$00/i.test(l) || VARIABLE_PAY.test(l))) continue;
+      if (key === "salary_expectation" && (/current|present|monthly|per month|hourly|per hour|range|bracket|band|format|\$00/i.test(l) || PAY_HISTORY.test(l) || VARIABLE_PAY.test(l))) continue;
       if ((key === "resume" || key === "cover_letter") && !/file/.test(type)) continue;
       if (key === "sponsorship" && /\bnot\b|without|no longer/i.test(l.split("?")[0])) continue;
       if (key === "sponsorship" && l.includes("?") && !/sponsor|visa/i.test(l.split("?")[0])) continue;
@@ -2999,10 +3087,19 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     return m.kind === "fact" && (otherCountry(m.fact, placeText(q), location2, homeInUs(answers)) || beyondFact(m.fact, q));
   }
   var byNationalityList = (options) => options.some((o) => /nationality|citizen/i.test(o.label)) && options.some((o) => /permit|visa/i.test(o.label));
+  var GPA_OTHER = /\b(major|in[- ]major|high[- ]school|secondary|graduate|grad school|master'?s|mba|law school|departmental|department|semester|term|weighted|unweighted|last (two|2|four|4) (years|semesters))\b[^?]{0,25}\b(gpa|grade point)|\b(gpa|grade point average)\b[^?]{0,30}\b(in|for|from) (your )?(major|high school|graduate|master'?s|the last)\b|\b(percentage|percent|%|cgpa)\b/i;
+  var gpaScale = (label) => {
+    const m = /\b(?:out of|scale of|on an?|on the)\s*(\d+(?:\.\d+)?)|\/\s*(\d+(?:\.\d+)?)\b|\b(\d+(?:\.\d+)?)[- ]point scale/i.exec(label);
+    const n = m ? Number(m[1] ?? m[2] ?? m[3]) : null;
+    return n !== null && n !== 4;
+  };
+  var PAY_UNIT = /\bin thousands\b|\bthousands of\b|\(\s*(?:in\s+)?(?:k|000s|'000s?|thousands?)\s*\)|\bin k\b|\b000s\b/i;
   function beyondFact(fact, f) {
     if ((fact === "relocation" || fact === "job_relocation") && /multi_select|multiselect/.test(f.type)) return true;
     if (fact === "security_clearance" && (f.options ?? []).some((o) => /\b(expired|inactive|previously held|lapsed)\b/i.test(o.label))) return true;
     if (fact === "work_authorization" && byNationalityList(f.options ?? [])) return true;
+    if (fact === "gpa" && (GPA_OTHER.test(f.label) || gpaScale(f.label))) return true;
+    if (PAY_FACTS.has(fact) && PAY_UNIT.test(f.label)) return true;
     return BEYOND_FACT.some(([facts, re]) => facts.includes(fact) && re.test(askedPart(f.label)));
   }
   var STATE_CODE = /,\s*([A-Z]{2})\b/g;
@@ -3103,6 +3200,21 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   ]);
   var nameWords = (n) => n.split(" ").filter((w) => w.length >= 3 && !GENERIC_NAME.has(w));
   var SPLIT = /\s*[;,\n]\s*/;
+  function placeFact(fact, value, answers) {
+    if (fact !== "city" || value.includes(",")) return [
+      fact,
+      value
+    ];
+    const loc = String(answers.location?.value ?? "").trim();
+    const [city, st] = loc.split(/\s*,\s*/);
+    return st && city.toLowerCase() === value.trim().toLowerCase() ? [
+      "location",
+      loc
+    ] : [
+      fact,
+      value
+    ];
+  }
   function byMeaning(f, company, answers, places = [], posting = [], location2) {
     const m = mapQuestion({
       label: f.label,
@@ -3177,7 +3289,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       };
     }
     if (!a) return null;
-    const choice = f.options.length ? chooseOption(m.fact, String(a.value), f.options, f.label) : null;
+    const choice = f.options.length ? chooseOption(...placeFact(m.fact, String(a.value), answers), f.options, f.label) : null;
     if (f.options.length) return choice === null ? null : {
       value: choice,
       factId: a.factId
@@ -3262,6 +3374,8 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   function typedFieldProblem(f, value) {
     if (f.options.length || f.type === "checkbox" || /file/.test(f.type)) return null;
     const v = String(value).trim(), label = norm(f.label);
+    const long = overStatedLimit(f.label, v);
+    if (long) return long;
     if (f.type === "number" && (!/^-?\d+(?:\.\d+)?$/.test(v) || !Number.isFinite(Number(v)))) return "needs a finite number, written as digits";
     const component = ![
       "date",
@@ -3596,7 +3710,8 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       const admit = admitApplication(log, {
         user_id: o.userId,
         job_id: p.job_id,
-        company: p.company
+        company: p.company,
+        url: p.url
       }, o.now, o.limits);
       if (!admit.ok) {
         skipped.push({
@@ -3669,7 +3784,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         })] ?? (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? o.answers[key] : void 0) ?? o.saved[normLabel(f.label)];
         let a = direct;
         let value = a ? String(a.value) : null;
-        if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === o.answers[key] ? chooseOption(key, value, f.options, f.label) : null);
+        if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === o.answers[key] ? chooseOption(...placeFact(key, value, o.answers), f.options, f.label) : null);
         if (value === null && !direct) {
           const e = educationEnd(f, p.fields, o.answers);
           if (e) {
@@ -3731,6 +3846,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         user_id: o.userId,
         job_id: p.job_id,
         company: p.company,
+        url: p.url,
         at: o.now,
         state: "planned"
       });
@@ -3944,7 +4060,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         "checkbox"
       ].includes(r.inputType));
       if (rows.length > 1 && !group) throw fail("AMBIGUOUS_FIELD_NAME: " + name);
-      const label = group ? f.groupLabel || f.label : f.label, type = f.tag === "select" ? "select" : f.inputType;
+      const label = group ? f.groupLabel || rows.map((r) => r.label).filter(Boolean).join(" / ") || f.label : f.label, type = f.tag === "select" ? "select" : f.inputType;
       const values = rows.map((r) => r.optionValue ?? r.label);
       const distinct = new Set(values).size === values.length;
       const opts2 = group ? rows.map((r, i) => ({
@@ -4063,7 +4179,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     ownAnswerOnly: () => ownAnswerOnly,
     payloadText: () => payloadText,
     planForm: () => planForm,
-    postingKey: () => postingKey,
+    postingKey: () => postingKey2,
     postingLinks: () => postingLinks,
     quarantinedFact: () => quarantinedFact2,
     questionsForTrainee: () => questionsForTrainee,
@@ -4277,7 +4393,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     };
     return null;
   }
-  function postingKey(href) {
+  function postingKey2(href) {
     const p = detectPortal(href);
     if (!p) return null;
     const u = new URL(href), seg = u.pathname.split("/").filter(Boolean);
@@ -4922,7 +5038,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     const seen = /* @__PURE__ */ new Set(), out = [];
     for (const m of String(text || "").matchAll(/https:\/\/[^\s<>"')]+/g)) {
       const url = m[0].replace(/[.,;]+$/, "");
-      const key = postingKey(url);
+      const key = postingKey2(url);
       if (!key || seen.has(key)) continue;
       seen.add(key);
       out.push(applyUrl(url));

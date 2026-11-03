@@ -33,6 +33,8 @@ export interface CareerEvent {
 export interface EventQuery { kinds?: string[]; subject?: string; from?: string; to?: string; limit?: number }
 export interface EventStore {
   add(e: CareerEvent): Promise<void>;
+  // SCALE (owner, 2026-10-27): many events in one write (a batch of hundreds approved by one yes). Absent: one add each.
+  addMany?(es: CareerEvent[]): Promise<void>;
   recall(userId: string, q: EventQuery): Promise<CareerEvent[]>; // newest first
 }
 
@@ -66,6 +68,26 @@ export async function recordEvent(store: EventStore | null | undefined, e: Param
   }
 }
 
+// Many events in one write where the store can (addMany), else one by one; a timeline that cannot be written never
+// changes the caller's answer. Returns how many were recorded.
+export async function recordEvents(store: EventStore | null | undefined, es: Parameters<typeof normalizeEvent>[0][]): Promise<number> {
+  if (!store || !es.length) return 0;
+  let rows: CareerEvent[];
+  try { rows = es.map(normalizeEvent); } catch (err) {
+    console.error("career events not recorded:", err instanceof Error ? err.message : String(err));
+    return 0;
+  }
+  if (store.addMany) {
+    try { await store.addMany(rows); return rows.length; } catch (err) {
+      console.error(`career events not recorded (${rows.length}):`, err instanceof Error ? err.message : String(err));
+      return 0;
+    }
+  }
+  let n = 0;
+  for (const e of rows) { try { await store.add(e); n++; } catch (err) { console.error(`career event not recorded (${e.kind}):`, err instanceof Error ? err.message : String(err)); } }
+  return n;
+}
+
 // A subject matches when every word of it starts a word of the event's subject or detail ("JPM" finds "JPMorgan Chase";
 // "bankers" finds "banker").
 export function matchesSubject(e: CareerEvent, subject: string | undefined): boolean {
@@ -88,6 +110,7 @@ export function memoryEventStore(initial: CareerEvent[] = []): EventStore & { du
   let id = rows.reduce((m, r) => Math.max(m, r.id ?? 0), 0);
   return {
     async add(e) { rows.push({ ...JSON.parse(JSON.stringify(e)), id: ++id }); },
+    async addMany(es) { for (const e of es) rows.push({ ...JSON.parse(JSON.stringify(e)), id: ++id }); },
     async recall(u, q) { return JSON.parse(JSON.stringify(rows.filter((r) => r.user_id === u && matches(r, q)).sort(newestFirst).slice(0, limitOf(q)))); },
     dump() { return JSON.parse(JSON.stringify(rows)); },
   };
@@ -100,6 +123,11 @@ export function supabaseEventStore(admin: any): EventStore {
     async add(e) {
       const r = await admin.from("career_events").insert({ user_id: e.user_id, at: e.at, kind: e.kind, subject: e.subject, detail: e.detail, source: e.source });
       if (r.error) throw new Error(`record event: ${r.error.message}`);
+    },
+    async addMany(es) {
+      if (!es.length) return;
+      const r = await admin.from("career_events").insert(es.map((e) => ({ user_id: e.user_id, at: e.at, kind: e.kind, subject: e.subject, detail: e.detail, source: e.source })));
+      if (r.error) throw new Error(`record events: ${r.error.message}`);
     },
     async recall(u, q) {
       let s = admin.from("career_events").select("id,user_id,at,kind,subject,detail,source").eq("user_id", u);

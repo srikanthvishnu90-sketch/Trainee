@@ -195,14 +195,17 @@ if (!vm.SourceTextModule) {
     assert.equal(app.db.state.career.stores.workerCapabilities, undefined, "runtime worker availability is not user snapshot state");
   });
 
-  test("actual staged watch ask without a profile requests facts and saves no watch", async () => {
+  test("actual staged watch ask without a profile saves the watch, then asks once for the resume (owner decision 2026-10-28)", async () => {
     const app = await stagedEntry();
     app.db.state.career.stores = {};
     const out = await app.chat("Watch for investment banking analyst intern roles in Chicago");
     assert.equal(out.meta.intent, "career_watch_create");
-    assert.equal(out.meta.result_status, "awaiting_user");
+    assert.equal(out.meta.result_status, "prepared");
     assert.equal(out.meta.contained, false);
-    assert.equal(app.db.state.career.stores.alertWatchState, undefined);
+    const wp = app.db.state.career.stores.alertWatchState[app.bundle.CareerAssign.PROFILE_KEY(USER)];
+    assert.equal(wp.interests.length, 1, "the watch row is saved before the ask");
+    assert.match(out.reply, /send your resume/i);
+    assert.doesNotMatch(out.reply, /city you want/i, "the place was given, so it is not asked for again");
   });
 
   test("actual staged apply ask names the missing browser worker and submits nothing", async () => {

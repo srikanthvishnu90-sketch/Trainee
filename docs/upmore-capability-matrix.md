@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-10-28):** the current inventory of features, depth and status is `docs/architect/FEATURES.md`. Kept for history; do not use as current.
+
 # Upmore: all 256 capability contracts
 
 Companion to [the top-to-bottom audit](upmore-capability-audit.md). Generated from the current catalog plus individually authored acceptance criteria on October 8, 2026. These criteria are proposed requirements, not assertions that tests already passed.

@@ -1,12 +1,14 @@
 // The apply core (WO-009a, D-011: mass applying first). Pure functions, no browser and no network:
 //   classifyOutcome   what the employer's page shows after submit → the only states we ever report
-//   admitApplication  the person's approval of this exact payload, duplicates, one per company per 30 days, a daily limit
+//   admitApplication  the person's approval of this exact payload; the exact same posting refused as a duplicate (D-MS-3);
+//                     only a daily pace the person set themselves (D-MS-2: no product volume cap)
 //   greenhouseQuestions / classifyField / planBatch
 //                     prepare every application BEFORE a browser opens: the employer's published questions are answered from
 //                     the person's confirmed facts; anything missing is asked once for the whole batch and saved, so later
 //                     batches need nothing; the batch is admitted against the limits up front.
 // The worker (WO-009b) fills exactly the prepared fields by name, reads each back, and classifies the outcome here.
-import { answerKey, AUTH_FACTS, FOREIGN, mapQuestion, NAMES_US, norm as normQuestion, RELATIVE_PLACE } from "./question_map.ts";
+import { overStatedLimit } from "./length_limit.ts";
+import { answerKey, AUTH_FACTS, FOREIGN, HONEYPOT, mapQuestion, NAMES_US, norm as normQuestion, RELATIVE_PLACE } from "./question_map.ts";
 import { rowAnswerKey } from "./row_answer.ts";
 import { chooseOption, levelOption, usCitizenChoice, yesNoFromFact, yesNoOf } from "./answer_options.ts";
 import { type PlacePart, postingAtHome, postingCountry, postingPlaces, STATE_NAMES } from "./posting_place.ts";
@@ -23,6 +25,12 @@ export interface Outcome { state: OutcomeState; reason: string; confirmation_id:
 
 // Employer confirmation wording. Only counted when the form is gone from the page.
 const SUCCESS = /(application (?:has been |was )?(?:submitted|received)|thank you for (?:applying|your application)|we(?:'ve| have) received your application|successfully submitted|application is complete|your application was sent)/i;
+// The employer saying the application is a duplicate of one it already has, or that it failed, in thank-you words
+// (round 2 of the apply scenarios, 2026-10-30: "You have already applied to this job. We have received your application."
+// and "Thank you for applying. Unfortunately an error occurred and your application could not be submitted." were both
+// read as the employer's confirmation). Neither is a confirmation: what the employer holds is not known from the page.
+const ALREADY = /\b(already (applied|submitted|received|have an application|on file)|(previously|before) applied|applied (to|for) this (job|position|role|posting) before|duplicate (application|submission)|an application (with this [a-z ]+ )?already exists)\b/i;
+const FAILED = /\b(an? (error|problem) (has )?occurred|something went wrong|could not be (submitted|sent|processed|received|completed)|couldn'?t (submit|send|process)|unable to (submit|send|process|complete)|(was|has) not been (submitted|sent|received)|was not (submitted|sent|received)|(submission|application) (has )?failed|failed to (submit|send)|please try again|server error)\b/i;
 // An id needs an id label and a token with a digit: a word is never an id (BUG-208: "security").
 const ID = /(?:application|confirmation|reference|submission|tracking)\s*(?:(?:id|number|no\.?)\s*[:#]?|#)\s*([A-Z0-9][A-Z0-9-]{4,})\b/i;
 
@@ -33,15 +41,37 @@ export function classifyOutcome(o: Observation): Outcome {
   if (o.form_present_after) return { state: "not_submitted", reason: o.required_empty_after ? `${o.required_empty_after} required field(s) still empty` : "the form is still open", confirmation_id: null };
   const m = ID.exec(o.page_text || "");
   const id = m && /\d/.test(m[1]) ? m[1] : null;
+  if (ALREADY.test(o.page_text || "")) return { state: "not_submitted", reason: "the employer's page says an application is already on file; whether this one was taken is not known", confirmation_id: null };
+  if (FAILED.test(o.page_text || "")) return { state: "not_submitted", reason: "the employer's page reports an error; whether the application was taken is not known", confirmation_id: null };
   if (SUCCESS.test(o.page_text || "")) return { state: "confirmed", reason: "employer confirmation on the page", confirmation_id: id };
   if (o.url_after !== o.url_before) return { state: "submitted_unconfirmed", reason: "the page moved and the form is gone, but the employer said nothing yet", confirmation_id: null };
   return { state: "not_submitted", reason: "nothing changed on the page", confirmation_id: null };
+}
+
+// After the one application request went out and the employer answered it (scripts/apply.ts, a single acknowledged
+// POST): what the page shows can no longer mean "not submitted", which may be sent again (round 2 of the apply scenarios,
+// 2026-10-30: a page that stayed the same, showed the form again, a thank-you in another language on the same address,
+// "you already applied" or an error were each recorded not_submitted after the employer had the application). An end the
+// page does not make clear is unknown_outcome: counted as applied, never sent again, and said as unknown. A verification
+// check after the send is not one the person can finish at the link (that would send it a second time): unknown too. An
+// emailed code the employer asks for to finish stays the person's (needs_user); validation errors on the form stay failed.
+// The same rule as the extension's outcomeAfterClick (extension/src/apply_core.ts).
+export type SentOutcome = { state: OutcomeState | "unknown_outcome"; reason: string; confirmation_id: string | null };
+export function outcomeAfterSend(o: Observation): SentOutcome {
+  if (o.captcha && !o.email_code_prompt) {
+    return { state: "unknown_outcome", reason: "a verification check showed after the application was sent; whether the employer took it is not known; never sent again", confirmation_id: null };
+  }
+  const r = classifyOutcome({ ...o, captcha: false });
+  if (r.state === "not_submitted") return { state: "unknown_outcome", reason: `after the application was sent, ${r.reason}; counted as applied, never sent again`, confirmation_id: null };
+  return r;
 }
 
 // ------------------------------------------------------------------------------------------------ admission
 // The person's pace as the apply path carries it: `daily` is their number, or null for none; `unreadable` carries the
 // stored value when it is present but not a pace (SERIAL-1430: unknown, never "no limit").
 export interface Limits { daily?: number | null; unreadable?: string }
+// D-MS-3 (owner, 2026-10-27): no "one per company per 30 days". Kept exported, unused by admission, only so callers that
+// still word a refusal by it compile until they move to the duplicate rule (career_apply_want.ts, career_apply_chat.ts).
 export const COMPANY_COOLDOWN_DAYS = 30;
 const DAY = 86400000;
 // States that mean an application reached (or may have reached) the employer, or is approved to; a failed or
@@ -80,15 +110,36 @@ export const dailyLimit = (l?: Limits): number => {
   return st.state === "set" ? st.pace : st.state === "none" ? Infinity : NaN;
 };
 
-export interface LogRow { user_id: string; job_id: string; company: string; at: number; state: string }
-export function admitApplication(log: LogRow[], a: { user_id: string; job_id: string; company: string; approval_hash?: string; payload_hash?: string }, now: number, limits?: Limits): { ok: boolean; reason: string | null } {
+// A job link as one posting: the SQL's career_apply_posting_key (20261027140000), rule for rule (tests/architect/
+// mass-submit-posting-key.test.ts compares them). Lower case; the host without www. and without a default port, any other
+// port kept; the path without trailing slashes, and without a final /apply or /application when two or more segments come
+// before it; the query kept, sorted, without tracking parameters; any Greenhouse link naming a job number is that number.
+// Null when it is not a web link.
+export function postingKey(url: unknown): string | null {
+  const m = /^https?:\/\/([^/?#@]+)([^?#]*)(\?[^#]*)?/.exec(String(url ?? "").trim().toLowerCase());
+  if (!m) return null;
+  const h = m[1].replace(/^www\./, "").replace(/:(80|443)$/, "");
+  let p = (m[2] ?? "").replace(/\/+$/, "");
+  if (/^\/[^/]+\/.+\/(apply|application)$/.test(p)) p = p.replace(/\/(apply|application)$/, "").replace(/\/+$/, "");
+  if (/(^|\.)greenhouse\.io$/.test(h)) {
+    const jid = /[?&]gh_jid=([0-9]+)/.exec(m[3] ?? "")?.[1] ?? /\/jobs\/([0-9]+)$/.exec(p)?.[1];
+    if (jid) return "greenhouse.io/jobs/" + jid;
+  }
+  const q = (m[3] ?? "").slice(1).split("&")
+    .filter((x) => x !== "" && !/^(utm_[a-z_]*|gh_src|src|source|ref|referrer|lever-[a-z-]*)(=|$)/.test(x))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join("&");
+  return h + p + (q ? "?" + q : "");
+}
+export interface LogRow { user_id: string; job_id: string; company: string; at: number; state: string; url?: string }
+// D-MS-3: refused only when this exact posting (its job id, or its canonical link) is already sent or in flight for this
+// person. Two roles at one company are two postings. D-MS-2: no product daily number; only a pace the person set.
+export function admitApplication(log: LogRow[], a: { user_id: string; job_id: string; company: string; url?: string; approval_hash?: string; payload_hash?: string }, now: number, limits?: Limits): { ok: boolean; reason: string | null } {
   if (a.approval_hash !== undefined || a.payload_hash !== undefined) {
     if (!a.approval_hash || a.approval_hash !== a.payload_hash) return { ok: false, reason: "not_approved" };
   }
   const mine = log.filter((x) => x.user_id === a.user_id && COUNTED.has(x.state));
-  if (mine.some((x) => x.job_id === a.job_id)) return { ok: false, reason: "duplicate_job" };
-  const co = normCompany(a.company);
-  if (co && mine.some((x) => normCompany(x.company) === co && now - x.at < COMPANY_COOLDOWN_DAYS * DAY)) return { ok: false, reason: "company_cooldown" };
+  const key = postingKey(a.url);
+  if (mine.some((x) => x.job_id === a.job_id || (key !== null && postingKey(x.url) === key))) return { ok: false, reason: "duplicate_job" };
   if (limits?.unreadable !== undefined || Number.isNaN(dailyLimit(limits))) return { ok: false, reason: 'pace_unreadable' } as any;
   const own = dailyLimit(limits);
   if (Number.isFinite(own) && mine.filter((x) => x.at > now - DAY).length >= own) return { ok: false, reason: "daily_cap" };
@@ -142,6 +193,8 @@ const KEYS: [RegExp, string][] = [
   [/salary|compensation\s*expectation|desired\s*pay/i, "salary_expectation"],
   [/gender|race|ethnicity|veteran|disability|hispanic|latino/i, "eeo"],
 ];
+// What a person was paid before, which only their own answer to that question may fill.
+export const PAY_HISTORY = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
 // A wrong mapping sends a wrong answer; an unknown only asks. So the person's own contact facts go only into a free-text
 // box (never a checkbox, radio or select, where "Do you own a smartphone?" or "Email me about other openings" would take
 // the person's number or address), and never into a question about someone else (a reference, a manager, an emergency
@@ -151,6 +204,8 @@ const FREE_TEXT = /^(input_text|text|email|tel|url|textarea|input|search|number|
 const SOMEONE_ELSE = /\breferr|\breferen|\bteam member|\breferee|\bemergency|\bmanager|\bsupervisor|\brecruiter|\bspouse|\bparent|\bguardian|\bemployee who/i;
 export function classifyField(label: string, type: string): string {
   const l = String(label || "");
+  // A honeypot that says what it is ("Website (leave blank)", "If you are human, leave this empty"): never anything to fill.
+  if (HONEYPOT.test(l)) return "unknown";
   if (/file/.test(type) && /resume|cv/i.test(l)) return "resume";
   // One checkbox carrying a long statement (no question in it) is an acknowledgement for the person to read, never a
   // fact. A long question rendered as checkboxes ("Will you ... require sponsorship ...?") is still a question.
@@ -172,7 +227,9 @@ export function classifyField(label: string, type: string): string {
     if (key === "website" && /\b(academic|program|department|school|university|college|company|employer|organi[sz]ation)\b/i.test(l)) continue;
     if ((key === "email" || key === "phone") && /e-?mail/i.test(l) && /phone|mobile|number/i.test(l)) continue;
     if (key === "phone" && /\b(sms|text messages?|texts)\b/i.test(l)) continue;
-    if (key === "salary_expectation" && (/current|present|monthly|per month|hourly|per hour|range|bracket|band|format|\$00/i.test(l) || VARIABLE_PAY.test(l))) continue;
+    // Round 2 (2026-10-30): a salary history ("Salary history", "Previous salary", "What was your salary at your last job?")
+    // asks what the person was paid, not what they expect: never answered with the expectation.
+    if (key === "salary_expectation" && (/current|present|monthly|per month|hourly|per hour|range|bracket|band|format|\$00/i.test(l) || PAY_HISTORY.test(l) || VARIABLE_PAY.test(l))) continue;
     // The resume answer is the approved file itself: it goes into an upload, never typed into a box as text.
     if ((key === "resume" || key === "cover_letter") && !/file/.test(type)) continue;
     // "a visa that does NOT require sponsorship" asks the opposite of the sponsorship fact: ask the person. Only the
@@ -202,7 +259,7 @@ export interface Answer { value: string; factId: string }
 export interface PlannedField { name: string; label: string; value: string; factId: string }
 // location: the posting's own location text as the employer wrote it (WO-053); without it, a question that depends on
 // where the job is (an office with no place named, work rights "in the country where this job is located") is asked.
-export interface PlanPosting { job_id: string; company: string; title: string; fields: FormField[]; location?: string }
+export interface PlanPosting { job_id: string; company: string; title: string; fields: FormField[]; location?: string; url?: string }
 export const normLabel = (l: string) => String(l || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
 const yesNo = (v: string) => (/^(y|yes|true)$/i.test(v.trim()) ? "yes" : /^(n|no|false)$/i.test(v.trim()) ? "no" : null);
 
@@ -292,6 +349,13 @@ export function factStaysHere(q: { label: string; type: string; options?: { labe
   return m.kind === "fact" && (otherCountry(m.fact, placeText(q), location, homeInUs(answers)) || beyondFact(m.fact, q));
 }
 const byNationalityList = (options: { label: string }[]) => options.some((o) => /nationality|citizen/i.test(o.label)) && options.some((o) => /permit|visa/i.test(o.label));
+const GPA_OTHER = /\b(major|in[- ]major|high[- ]school|secondary|graduate|grad school|master'?s|mba|law school|departmental|department|semester|term|weighted|unweighted|last (two|2|four|4) (years|semesters))\b[^?]{0,25}\b(gpa|grade point)|\b(gpa|grade point average)\b[^?]{0,30}\b(in|for|from) (your )?(major|high school|graduate|master'?s|the last)\b|\b(percentage|percent|%|cgpa)\b/i;
+const gpaScale = (label: string) => {
+  const m = /\b(?:out of|scale of|on an?|on the)\s*(\d+(?:\.\d+)?)|\/\s*(\d+(?:\.\d+)?)\b|\b(\d+(?:\.\d+)?)[- ]point scale/i.exec(label);
+  const n = m ? Number(m[1] ?? m[2] ?? m[3]) : null;
+  return n !== null && n !== 4;
+};
+const PAY_UNIT = /\bin thousands\b|\bthousands of\b|\(\s*(?:in\s+)?(?:k|000s|'000s?|thousands?)\s*\)|\bin k\b|\b000s\b/i;
 export function beyondFact(fact: string, f: { label: string; type: string; options?: { label: string }[] }): boolean {
   // A "select all that apply" list about where they live and would move is answered as a whole, by the person.
   if ((fact === "relocation" || fact === "job_relocation") && /multi_select|multiselect/.test(f.type)) return true;
@@ -300,6 +364,12 @@ export function beyondFact(fact: string, f: { label: string; type: string; optio
   // WO-057: a list that tells authorization by nationality from a work permit asks which, not only whether: never the
   // direct "yes" (byMeaning answers it for a US citizen at a US job).
   if (fact === "work_authorization" && byNationalityList(f.options ?? [])) return true;
+  // ROUND 3 (2026-11-02): the GPA the person stated is their overall one, on a 4.0 scale. A GPA on another scale ("out of
+  // 5.0", "/10", a percentage), or another GPA (in the major, in high school, in graduate school, the last two years) is
+  // a different number: asked, never their 4.0 GPA put there.
+  if (fact === "gpa" && (GPA_OTHER.test(f.label) || gpaScale(f.label))) return true;
+  // A pay box in thousands ("in thousands", "(k)", "000s") takes another number than the one they stated: asked.
+  if (PAY_FACTS.has(fact) && PAY_UNIT.test(f.label)) return true;
   return BEYOND_FACT.some(([facts, re]) => facts.includes(fact) && re.test(askedPart(f.label)));
 }
 
@@ -388,6 +458,14 @@ const GENERIC_NAME = new Set(["and", "the", "of", "group", "holdings", "holding"
   "technologies", "technology", "tech", "partners", "industries", "enterprises", "usa", "america", "americas", "national", "united", "worldwide"]);
 const nameWords = (n: string) => n.split(" ").filter((w) => w.length >= 3 && !GENERIC_NAME.has(w));
 const SPLIT = /\s*[;,\n]\s*/;
+// ROUND 3 (2026-11-02): a city stated alone ("Portland") onto a place list that names states ("Portland, Maine") is read
+// with the state the person's own location gives ("Portland, OR"): their Portland is never another state's.
+function placeFact(fact: string, value: string, answers: Record<string, Answer>): [string, string] {
+  if (fact !== "city" || value.includes(",")) return [fact, value];
+  const loc = String(answers.location?.value ?? "").trim();
+  const [city, st] = loc.split(/\s*,\s*/);
+  return st && city.toLowerCase() === value.trim().toLowerCase() ? ["location", loc] : [fact, value];
+}
 function byMeaning(f: FormField, company: string, answers: Record<string, Answer>, places: string[] = [], posting: PlacePart[] = [], location?: string): Answer | null {
   const m = mapQuestion({ label: f.label, type: f.type, options: f.options });
   if (m.kind === "essay" || m.kind === "file" || m.kind === "unknown") return null;
@@ -463,7 +541,7 @@ function byMeaning(f: FormField, company: string, answers: Record<string, Answer
     if (c !== null) return { value: c, factId: answers.citizenship.factId };
   }
   if (!a) return null;
-  const choice = f.options.length ? chooseOption(m.fact, String(a.value), f.options, f.label) : null;
+  const choice = f.options.length ? chooseOption(...placeFact(m.fact, String(a.value), answers), f.options, f.label) : null;
   if (f.options.length) return choice === null ? null : { value: choice, factId: a.factId };
   if (f.type === "checkbox") {
     const yn = yesNoFromFact(m.fact, String(a.value), f.label) ?? yesNoOf(a.value);
@@ -524,6 +602,9 @@ export function questionFieldType(f: TypedField): string {
 export function typedFieldProblem(f: TypedField, value: string): string | null {
   if (f.options.length || f.type === "checkbox" || /file/.test(f.type)) return null;
   const v = String(value).trim(), label = normQuestion(f.label);
+  // ROUND 3: an answer longer than the form's own stated limit is never filled to be cut off there; the person shortens it.
+  const long = overStatedLimit(f.label, v);
+  if (long) return long;
   if (f.type === "number" && (!/^-?\d+(?:\.\d+)?$/.test(v) || !Number.isFinite(Number(v)))) return "needs a finite number, written as digits";
   // Some forms split a date into separately labelled components. Those explicit non-native fields take only
   // their stated component; a native date/month input still requires its complete declared precision.
@@ -834,7 +915,7 @@ export function planBatch(o: { userId: string; postings: PlanPosting[]; answers:
   const skipped: { job_id: string; reason: string }[] = [];
   const log = o.log.slice();
   for (const p of o.postings) {
-    const admit = admitApplication(log, { user_id: o.userId, job_id: p.job_id, company: p.company }, o.now, o.limits);
+    const admit = admitApplication(log, { user_id: o.userId, job_id: p.job_id, company: p.company, url: p.url }, o.now, o.limits);
     if (!admit.ok) { skipped.push({ job_id: p.job_id, reason: admit.reason! }); continue; }
     const filled: PlannedField[] = [];
     let blocked = false;
@@ -884,7 +965,7 @@ export function planBatch(o: { userId: string; postings: PlanPosting[]; answers:
         (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? o.answers[key] : undefined) ?? o.saved[normLabel(f.label)];
       let a: Answer | undefined = direct;
       let value: string | null = a ? String(a.value) : null;
-      if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === o.answers[key] ? chooseOption(key, value, f.options, f.label) : null);
+      if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === o.answers[key] ? chooseOption(...placeFact(key, value, o.answers), f.options, f.label) : null);
       if (value === null && !direct) {
         const e = educationEnd(f, p.fields, o.answers);
         if (e) { a = e; value = f.options.length ? matchOption(e.value, f.options) : e.value; }
@@ -916,7 +997,7 @@ export function planBatch(o: { userId: string; postings: PlanPosting[]; answers:
     }
     if (blocked) { skipped.push({ job_id: p.job_id, reason: "needs_answers" }); continue; }
     ready.push({ job_id: p.job_id, company: p.company, title: p.title, fields: filled });
-    log.push({ user_id: o.userId, job_id: p.job_id, company: p.company, at: o.now, state: "planned" });
+    log.push({ user_id: o.userId, job_id: p.job_id, company: p.company, url: p.url, at: o.now, state: "planned" });
   }
   return { ready, needs: [...needs.values()].map(({ label, key, job_ids, field_name }) => ({ label, key, job_ids, ...(field_name !== undefined ? { field_name } : {}) })), skipped };
 }

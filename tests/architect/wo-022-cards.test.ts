@@ -36,8 +36,12 @@ Deno.test("WO-022/1 the answers a card takes, and what is never an answer", () =
   eq(parseCardReply("show my applications"), { kind: "show" });
   // "stop" is the carrier's opt-out word: it silences every text, so it is never a card answer.
   eq(parseCardReply("STOP"), null);
-  for (const t of ["yes I want alerts for data jobs", "sure", "maybe", "yes but", "what is on 2?", "approve 2"]) {
+  for (const t of ["yes I want alerts for data jobs", "what is on 2?"]) {
     eq(parseCardReply(t), null, t);
+  }
+  // D-MS-1: ambiguous replies are answers that approve nothing (the card asks again); never an approval.
+  for (const t of ["sure", "maybe", "yes but", "approve 2"]) {
+    eq(parseCardReply(t), { kind: "unclear" }, t);
   }
 });
 
@@ -49,6 +53,7 @@ const prep = (i: number, lines = 4): Prepared => ({
     ...Array.from({ length: lines - 2 }, (_, k) => `Question ${k}: answer ${i}.${k}`),
     `Sends to https://jobs.lever.co/test/${i}`,
   ],
+  resume_sha256: "b".repeat(64), // OWNER RULE 2026-10-26: the store reads each prepared application's resume hash; none, no card
 });
 
 Deno.test("WO-022/2 a card shows every line of every application verbatim, at most 8, under 1,600 characters with two or more", () => {
@@ -116,9 +121,9 @@ Deno.test("WO-022/4 a text yes within 10 minutes approves exactly what it says (
   const bad = await turn(m.store, "yes but not 9", T, "M-C1");
   eq(bad?.status, "not_on_card");
   eq(m.answers.length, 0);
-  const bare = await turn(m.store, "yes but not 2");
-  eq(bare?.status, "needs_reply", "SERIAL-1461: a yes with no reply id approves nothing and says how");
-  assert(/reply directly to the card/.test(bare!.reply) && /tap Approve/.test(bare!.reply), bare!.reply);
+  const quoted = await turn(m.store, "yes but not 2", T, "M-other");
+  eq(quoted?.status, "needs_reply", "a yes quoting a message that is not the card approves nothing and says how");
+  assert(/reply directly to the card/.test(quoted!.reply) && /tap Approve/.test(quoted!.reply), quoted!.reply);
   eq(m.answers.length, 0);
   const yes = await turn(m.store, "yes but not 2", T, "M-C1");
   eq(yes?.status, "answered", "SERIAL-1440 (1) / 1461: a yes in direct reply to the card's message, within 10 minutes, approves the batch it names");
@@ -147,7 +152,7 @@ Deno.test("WO-022/5 the answer's words: what was approved, what was not and why"
     { n: 2, company: "B", result: "daily_cap" },
     { n: 3, company: "C", result: "company_cooldown" },
   ]);
-  assert(/^1 approved exactly as shown/.test(t) && /today's daily limit is already used/.test(t) && /last 30 days/.test(t), t);
+  assert(/^1 approved exactly as shown/.test(t) && /over the daily pace you set yourself/.test(t) && /last 30 days/.test(t), t);
   assert(
     /^Nothing was approved\. Nothing went to an employer\./.test(
       answerText([{ n: 1, company: "A", result: "declined" }]),
@@ -188,7 +193,7 @@ Deno.test("WO-022/6 the loop: prepared on the computer, card, one text yes appro
   const queue: any[] = [];
   let card: any = null, last: string | null = null;
   const store: CardStore = {
-    pending: async () => prepared.map((p) => ({ id: p.id, company: p.payload.company, card_lines: p.card })),
+    pending: async () => prepared.map((p) => ({ id: p.id, company: p.payload.company, card_lines: p.card, resume_sha256: p.payload.resume_sha256 })),
     open: async (_u, ids) => {
       card = {
         id: "C1",

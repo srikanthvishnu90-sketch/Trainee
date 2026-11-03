@@ -2,7 +2,7 @@
 //   chat     "find analyst jobs in Chicago" -> handleChat -> the router's discovery lists four postings from the knowledge
 //            base (career_kb_postings) and keeps the served list on the thread (discovery.lastShortlist)
 //   chat     "apply to these" -> handleChat (handler-career.ts) -> each listed posting through the same screens as a single
-//            ask: their current employer (a confirmed fact) refuses one, an application there 10 days ago refuses one, the
+//            ask: their current employer (a confirmed fact) refuses one, the very posting applied to 10 days ago refuses one, the
 //            two others go into career_apply_wanted; the reply lists queued and not queued with the reason for each;
 //            nothing is approved, filled or sent
 //   prepare  prepare-ahead.ts prepareAhead draws both; shared facts asked once; the essay asked once PER posting
@@ -108,7 +108,7 @@ Deno.test({
         insert into public.profiles (id) values ('${PERSON}'), ('${OTHER}');
         insert into public.career_watch_kv (user_id, key, value) values ('${PERSON}', 'career:account', '{"epoch":0,"version":0,"paused":false}'), ('${OTHER}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
         insert into public.career_apply_jobs (user_id, job_id, company, url, payload, payload_hash, approval_hash, state, created_at)
-        values ('${PERSON}', 'greenhouse:prior:3', '${PRIOR}', 'https://boards.greenhouse.io/prior/jobs/3', '{}', repeat('a', 64), repeat('a', 64), 'submitted_unconfirmed', now() - interval '10 days');`);
+        values ('${PERSON}', 'greenhouse:prior:10', '${PRIOR}', 'https://boards.greenhouse.io/prior/jobs/10', '{}', repeat('a', 64), repeat('a', 64), 'submitted_unconfirmed', now() - interval '10 days');`);
       const svc = pg.asService(), person = pg.asPerson(PERSON);
       agentChat = await careerHandler(pg, { "tok-person": PERSON, "tok-other": OTHER });
       const chat: Chat = agentChat.chat("tok-person");
@@ -158,7 +158,7 @@ Deno.test({
         assertEquals((await wanted()).map((w: any) => w.key), [JOB2, JOB].sort(), "exactly the two that pass their screens");
         assert(/Queued 2/.test(r.reply) && r.reply.includes(`${ROLE} at ${COMPANY}`) && r.reply.includes(`${ROLE} at ${SIBLING}`), r.reply);
         assert(new RegExp(`${CURRENT}[^\\n]*current employer`, "i").test(r.reply), `the current-employer refusal, with its reason: ${r.reply}`);
-        assert(new RegExp(`${PRIOR}[^\\n]*already applied`, "i").test(r.reply) && /30 days/.test(r.reply), `the 30-day refusal, with its reason: ${r.reply}`);
+        assert(new RegExp(`${PRIOR}[^\\n]*already[^\\n]*same posting`, "i").test(r.reply) && !/30 days/.test(r.reply), `the exact-duplicate refusal, with its reason (D-MS-3: no 30-day rule): ${r.reply}`);
         assert(/nothing (is|was) (sent|submitted)/i.test(r.reply) && /the card that shows it exactly/.test(r.reply) && /one yes to that card approves exactly what it shows/.test(r.reply), r.reply);
         assertEquals(await pg.sql(`select count(*) from public.career_apply_jobs where user_id = '${PERSON}' and company in ('${COMPANY}', '${SIBLING}')`), "0", "nothing approved: no queue row until their tap");
         assertEquals(site.posts.apply.length + site2.posts.sibling.length, 0);
@@ -180,27 +180,28 @@ Deno.test({
         assertEquals((await wanted()).length, 2, "the first thread's two stay as they were; the new thread added nothing");
       });
 
+      // One question at a time (review of #360): "what do you need from me" shows the first open question; "skip" moves on
+      // to the next; the one shown is answered with the whole message, or "use 1" for its offered draft.
+      const untilShown = async (label: string, company?: string) => {
+        let s = await say("what do you need from me");
+        assertEquals(s.resultStatus, "shown", s.reply);
+        for (let i = 0; i < 12 && !(s.reply.includes(label) && (!company || s.reply.includes(company))); i++) {
+          s = await say("skip");
+          assertEquals(s.resultStatus, "answered_next", s.reply);
+        }
+        assert(s.reply.includes(label) && (!company || s.reply.includes(company)), `${label}${company ? ` for ${company}` : ""} is asked: ${s.reply}`);
+        return s.reply;
+      };
       const useAll = async (labels: string[]) => {
-        const shown = await say("what do you need from me");
-        assertEquals(shown.resultStatus, "shown", shown.reply);
-        const lines = shown.reply.split("\n");
         for (const label of labels) {
-          const i = lines.findIndex((l) => /^\d+\./.test(l) && l.includes(label));
-          assert(i >= 0, `${label} is asked: ${shown.reply}`);
-          const used = await say(`use ${Number(/^(\d+)\./.exec(lines[i])![1])}`);
+          await untilShown(label);
+          const used = await say("use 1");
           assert(/Saved, as drafted/.test(used.reply), `${label}: ${used.reply}`);
         }
       };
       const outcomes = (done: { user_id: string; job_id: string; outcome: string }[]) =>
         done.filter((d) => d.user_id === PERSON).map((d) => [d.job_id, d.outcome]).sort((a, b) => a[0].localeCompare(b[0]));
       const openKeys = async () => (await pg.sql(`select coalesce(string_agg(key, ',' order by key), '') from public.career_apply_questions where user_id = '${PERSON}' and state = 'open'`)).split(",").filter(Boolean);
-      const lineFor = (shown: string, label: string, company?: string) => {
-        const lines = shown.split("\n");
-        const i = lines.findIndex((l) => /^\d+\./.test(l) && l.includes(label) && (!company || l.includes(company)));
-        assert(i >= 0, `${label}${company ? ` for ${company}` : ""} is asked: ${shown}`);
-        return Number(/^(\d+)\./.exec(lines[i])![1]);
-      };
-
       await t.step("prepare: the server run draws exactly the two queued postings; shared facts asked once, the essay once per posting", async () => {
         assertEquals(outcomes(await prepareAhead(deps)), [[JOB2, "asked"], [JOB, "asked"]].sort((a, b) => a[0].localeCompare(b[0])));
         assertEquals(await openKeys(), ["fact:email", "fact:first_name", "fact:last_name"]);
@@ -217,14 +218,14 @@ Deno.test({
       let preparedId = "", preparedId2 = "";
       await t.step("their words (SERIAL-1441: a posting-bound answer never crosses postings in a batch): the first employer's essay readies the first only; the sibling waits for its own, then is ready with that text alone", async () => {
         await useAll(["Phone", SPONSOR, AUTH]);
-        let shown = await say("what do you need from me");
-        await say(`${lineFor(shown.reply, WHY, COMPANY)} ${FIRST_WHY}`);
+        await untilShown(WHY, COMPANY);
+        await say(FIRST_WHY);
         let done = await prepareAhead(deps);
         assertEquals(outcomes(done), [[JOB, "ready"]], JSON.stringify(done));
         preparedId = done.find((d) => d.job_id === JOB)!.prepared_id!;
         assertEquals(await pg.sql(`select count(*) from public.career_apply_prepared where user_id = '${PERSON}' and job_id = '${JOB2}'`), "0", "the sibling is not prepared on the first's essay");
-        shown = await say("what do you need from me");
-        await say(`${lineFor(shown.reply, WHY, SIBLING)} ${SIBLING_WHY}`);
+        await untilShown(WHY, SIBLING);
+        await say(SIBLING_WHY);
         done = await prepareAhead(deps);
         assertEquals(outcomes(done), [[JOB2, "ready"]], JSON.stringify(done));
         preparedId2 = done[0].prepared_id!;
@@ -249,10 +250,11 @@ Deno.test({
         const other: Chat = agentChat!.chat("tok-other");
         const theirs = await other.say("yes");
         assert(theirs.resultStatus !== "answered" && theirs.intent !== "career_apply_card", `another person's yes is not this card's: ${theirs.intent} ${theirs.reply}`);
-        // SERIAL-1461: a bare yes in thread A (no reply id) approves nothing and says how.
+        // D-MS-1 (2026-10-27; replaces SERIAL-1461's reply-only rule): a bare yes in thread A is about the card A showed,
+        // and that card was closed by B's: out of date, nothing approved.
         const bareA = await say("yes");
-        assertEquals(bareA.resultStatus, "needs_reply", bareA.reply);
-        assert(/reply directly to the card/.test(bareA.reply) && /tap Approve/.test(bareA.reply) && /Nothing was approved/.test(bareA.reply), bareA.reply);
+        assertEquals(bareA.resultStatus, "card_outdated", bareA.reply);
+        assert(/out of date/.test(bareA.reply) && /nothing was approved/.test(bareA.reply), bareA.reply);
         // A yes in thread A in reply to A's card message: that card is out of date; nothing is approved, on either card.
         const cardMsgA = await pg.sql(`select id from public.agent_messages where thread_id = '${chat.thread()}' and role = 'assistant' and meta->>'card_id' = '${metaA.card_id}' order by id desc limit 1`);
         const yesA = await say("yes", { reply_to_message_id: Number(cardMsgA) });

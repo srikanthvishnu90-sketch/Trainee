@@ -1,7 +1,7 @@
 // FEATURE 5 (2026-10-25): job search that ranks by fit and explains it, proven through the production handler.
 // A person's texts go through handleChat (supabase/functions/agent-chat/handler-career.ts) unchanged, on a real Postgres
 // (CI's migration order) with the real supabase-js client; the only seams are the HTTP hop to the Supabase project
-// (tests/flow/postgrest.ts) and the HTTP hop to the model provider, answered here by a fake OpenAI that judges by a rule the
+// (tests/flow/postgrest.ts) and the HTTP hop to the model provider, answered here by a fake Anthropic that judges by a rule the
 // test sets. The postings are fake rows in career_postings (the live board) and career_kb_postings (the saved snapshot).
 //
 //   (s) the live board empty: the list comes from the snapshot, and the reply says so and how old it is
@@ -17,6 +17,7 @@
 // Run: CI=true deno test -A --no-check [--import-map=tests/flow/supabase-npm.json] tests/architect/f05-search-judge-handler.test.ts
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 import { careerHandler, type Chat, supabaseParity } from "../flow/handler.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -30,7 +31,7 @@ for (let i = 1; i <= 8; i++) PEOPLE[`f05-${i}`] = `7b0f8f8e-6a43-4a49-9d2c-00000
 // ------------------------------------------------------------------------------------------------ the fake model
 type Rule = (p: { id: string; title: string; text: string }) => { verdict: string; reason: string } | null;
 const model = { calls: 0, bodies: [] as any[], rule: null as Rule | null, fail: false };
-function fakeOpenAI(body: any): Response {
+function fakeModel(body: any): Response {
   model.calls++; model.bodies.push(body);
   if (model.fail) return new Response(JSON.stringify({ error: { message: "test outage", type: "server_error" } }), { status: 500, headers: { "content-type": "application/json" } });
   const user = JSON.parse(body.messages.find((m: any) => m.role === "user").content);
@@ -65,9 +66,9 @@ async function world() {
   const dbl = globalThis.fetch;
   globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (url.startsWith("https://api.openai.com/")) {
+    if (url.startsWith("https://api.anthropic.com/")) {
       const raw = init?.body ?? (input instanceof Request ? await input.text() : "{}");
-      return fakeOpenAI(JSON.parse(String(raw)));
+      return anthropicWire(new Request(url, { method: "POST", body: String(raw) }), (chat) => fakeModel(chat));
     }
     return dbl(input as any, init);
   }) as typeof fetch;
@@ -131,17 +132,17 @@ Deno.test({ name: "f05 (l): the live board's matches, ranked by fit to confirmed
   if (skip()) return;
   await world();
   await seedLive();
-  env({ CAREER_JUDGE: null, OPENAI_API_KEY: "test-key" });
+  env({ CAREER_JUDGE: null, ANTHROPIC_API_KEY: "test-key" });
   const chat = handler!.chat("f05-2");
   await withProfile(chat);
   for (const ask of ["find me data analyst jobs in Chicago", "show me data analyst roles in Chicago", "find data analyst openings in Chicago"]) {
     const t = await chat.say(ask);
     ok(t);
     assert(/^From 3 live postings for data analyst in Chicago, first seen in the last 7 days\./m.test(t.reply), `${ask}: ${t.reply}`);
-    assert(/Ranked by fit score to your confirmed facts; not judged \(the model judge is off\)\./.test(t.reply), t.reply);
+    assert(/Ranked by how well each matches what you've confirmed\./.test(t.reply) && !/\d+\/100|model judge/.test(t.reply), t.reply); // OWNER LIST #6 (2026-10-28): fit in words, no internal words
     const rows = listed(t.reply);
     eq(rows.length, 3, t.reply);
-    assert(rows.every((l) => /TEST Live (Analytics|Retail|Freight)/.test(l) && /fit \d+\/100|not eligible/.test(l)), t.reply);
+    assert(rows.every((l) => /TEST Live (Analytics|Retail|Freight)/.test(l) && /(strong|good|partial) match|not eligible/.test(l)), t.reply);
     assert(!/TEST Snapshot|New York/.test(t.reply), `nothing from the snapshot or another city: ${t.reply}`);
     assert(/https:\/\/boards\.greenhouse\.io\/f05live\/jobs\/1/.test(t.reply), "each posting with its own link");
   }
@@ -152,7 +153,7 @@ Deno.test({ name: "f05 (j): judged on the fixed scale with grounded reasons and 
   if (skip()) return;
   await world();
   await seedLive();
-  env({ CAREER_JUDGE: "on", OPENAI_API_KEY: "test-key" });
+  env({ CAREER_JUDGE: "on", ANTHROPIC_API_KEY: "test-key" });
   model.calls = 0; model.fail = false;
   model.rule = (p) => p.title === "Data Analyst" ? { verdict: "strong", reason: "Asks for Python and SQL on PostgreSQL, which your profile shows." }
     : /Marketing/.test(p.title) ? { verdict: "fair", reason: "Excel reporting matches your Excel work; SQL is only a plus." }
@@ -170,7 +171,7 @@ Deno.test({ name: "f05 (j): judged on the fixed scale with grounded reasons and 
   eq(model.calls, 1, "one model call judges the batch");
   const sent = JSON.parse(model.bodies[0].messages.find((m: any) => m.role === "user").content);
   assert(sent.confirmed_facts.some((f: string) => /Python/.test(f)), "the judge reads the confirmed facts");
-  eq(model.bodies[0].model, "gpt-5-mini");
+  eq(model.bodies[0].model, "claude-haiku-5-5");
   assert(/strong: most of what it asks for/.test(model.bodies[0].messages[0].content), "the scale's words and meanings go to the model");
   eq(await count(`select count(*) from public.agent_turn_costs where user_id = '${person}' and calls = 1 and input_tokens = 900`), 1, "the judge call is metered");
   // The same ask again: every verdict from the cache, no new call.
@@ -191,7 +192,7 @@ Deno.test({ name: "f05 (g): a reason that names something not in the posting or 
   if (skip()) return;
   await world();
   await seedLive();
-  env({ CAREER_JUDGE: "on", OPENAI_API_KEY: "test-key" });
+  env({ CAREER_JUDGE: "on", ANTHROPIC_API_KEY: "test-key" });
   model.fail = false;
   model.rule = (p) => p.title === "Data Analyst" ? { verdict: "strong", reason: "Google alumni do well here." }
     : { verdict: "weak", reason: "Most of it is not in your profile." };
@@ -202,7 +203,7 @@ Deno.test({ name: "f05 (g): a reason that names something not in the posting or 
   assert(/2\/3 judged; 0 strong, 0 fair; 2 dropped as weak\/no; 1 not judged \(the reason named something not in the posting or your profile\)/.test(t.reply), t.reply);
   const rows = listed(t.reply);
   eq(rows.length, 1, t.reply);
-  assert(/TEST Live Analytics.*not judged; fit \d+\/100/.test(rows[0]), rows[0]);
+  assert(/TEST Live Analytics.*not judged; (strong|good|partial) match/.test(rows[0]), rows[0]);
   assert(!/Google/.test(t.reply), "the invented reason is never shown");
 } });
 
@@ -210,7 +211,7 @@ Deno.test({ name: "f05 (f): the model failing leaves the fit order, and the repl
   if (skip()) return;
   await world();
   await seedLive();
-  env({ CAREER_JUDGE: "on", OPENAI_API_KEY: "test-key" });
+  env({ CAREER_JUDGE: "on", ANTHROPIC_API_KEY: "test-key" });
   model.fail = true;
   try {
     const chat = handler!.chat("f05-5");
@@ -227,7 +228,7 @@ Deno.test({ name: "f05 (p): 'judge prompt: ...' is kept as a standing instructio
   if (skip()) return;
   await world();
   await seedLive();
-  env({ CAREER_JUDGE: "on", OPENAI_API_KEY: "test-key" });
+  env({ CAREER_JUDGE: "on", ANTHROPIC_API_KEY: "test-key" });
   model.fail = false; model.rule = null;
   const person = PEOPLE["f05-6"], chat = handler!.chat("f05-6");
   await withProfile(chat);
@@ -250,7 +251,7 @@ Deno.test({ name: "f05 (p): 'judge prompt: ...' is kept as a standing instructio
 } });
 
 Deno.test({ name: "f05: teardown", ...T, async fn() {
-  env({ CAREER_JUDGE: null, OPENAI_API_KEY: null });
+  env({ CAREER_JUDGE: null, ANTHROPIC_API_KEY: null });
   handler?.restore();
   await pg?.stop();
 } });

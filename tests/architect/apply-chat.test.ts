@@ -48,15 +48,29 @@ Deno.test("several open postings ask which; a role the employer lacks is said wi
   eq((await w.wants.list("u1")).length, 0);
 });
 
-Deno.test("an application to that employer in the last 30 days refuses the pick; the employer guard stands", async () => {
+Deno.test("the exact posting already applied to refuses the pick, at any date; another posting at that employer does not (D-MS-3); the employer guard stands", async () => {
   // The queue's own rows (career_apply_jobs), as the handler reads them; applyTurn maps them to applications.
-  const rows = [{ id: "j1", company: "Test Co 1", state: "submitted_unconfirmed", created_at: new Date(NOW - 5 * 86400_000).toISOString(), updated_at: "" }];
-  eq(trackedFromRows(rows as any).map((a) => a.stage), ["Submitted"], "a sent application counts; a failed one would not");
-  const w = world([posting(1)], rows);
-  const r = await w.turn("apply to the Data Analyst role at Test Co 1");
-  eq(r?.status, "refused");
-  assert(/already applied/.test(r!.reply) && /30 days/.test(r!.reply), r!.reply);
-  eq((await w.wants.list("u1")).length, 0);
+  const row = (url: string, ago: number, state = "submitted_unconfirmed") => ({ id: "j1", company: "Test Co 1", url, state, created_at: new Date(NOW - ago * 86400_000).toISOString(), updated_at: "" });
+  const same = posting(1).url;
+  eq(trackedFromRows([row(same, 5)] as any).map((a) => [a.stage, a.url]), [["Submitted", same]], "a sent application counts and keeps its link; a failed one would not");
+  for (const ago of [5, 45]) {
+    const w = world([posting(1)], [row(same, ago)]);
+    const r = await w.turn("apply to the Data Analyst role at Test Co 1");
+    eq(r?.status, "refused", `${ago} days ago`);
+    assert(/already/.test(r!.reply) && /same posting/.test(r!.reply) && !/30 days/.test(r!.reply), r!.reply);
+    eq((await w.wants.list("u1")).length, 0);
+  }
+  // A different posting at Test Co 1 applied to 5 days ago: this one is queued.
+  const other = world([posting(1)], [row("https://boards.greenhouse.io/testco1/jobs/777", 5)]);
+  const q = await other.turn("apply to the Data Analyst role at Test Co 1");
+  eq(q?.status, "queued", q?.reply);
+  eq((await other.wants.list("u1")).map((x) => x.posting_key), ["greenhouse:testco1:1"]);
+  // The employer guard stands: a fact that they work there holds the pick and asks first; nothing is queued.
+  const cur = world([posting(1)]);
+  const c = await cur.turn("apply to the Data Analyst role at Test Co 1", [{ kind: "experience", text: "you work at Test Co 1" }]);
+  eq(c?.status, "asking_employer", c?.reply);
+  assert(/where you work now/i.test(c!.reply), c!.reply);
+  eq((await cur.wants.list("u1")).length, 0);
 });
 
 Deno.test("no volume ceiling: the 26th and 51st postings of a day are queued like the first", async () => {

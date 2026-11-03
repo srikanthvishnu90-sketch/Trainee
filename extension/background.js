@@ -1061,7 +1061,11 @@ async function handle(m, sender) {
         return { ok: true };
       } catch (e) {
         const why = /daily_cap/.test(e.message) ? "You reached today's application limit." : /company_cooldown/.test(e.message)
-          ? "You applied to this company in the last 30 days." : /duplicate_job/.test(e.message) ? "You already applied to this posting."
+          ? "You applied to this company in the last 30 days." : /duplicate_job/.test(e.message)
+          // The same posting is already in the person's applications: sent, being sent, or approved and waiting (a site that
+          // asked us to slow down, or a claim not started yet: it goes again by itself). Never "you already applied" for one
+          // that may never have been sent (the chat's and the card's words, career_apply_cards.ts).
+          ? "This posting is already in your applications (sent, or approved and waiting to go); each posting goes at most once."
           : e.message === "SIGNED_OUT" ? say.signedOut : /stale|current/.test(e.message) ? "Your account changed since this card was made; review it again."
           : /agent submit is off/.test(e.message) ? "Trainee sending is switched off for your account."
           : /no live batch approval/.test(e.message) ? "Your batch approval for this posting is no longer live (withdrawn, used, or over a day old)."

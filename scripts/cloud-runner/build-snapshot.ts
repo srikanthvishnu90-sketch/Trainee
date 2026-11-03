@@ -26,7 +26,7 @@ const SETUP = [
   "npm ci --prefix tools --no-audit --no-fund",
   "cd tools && npx --no-install playwright install chromium && sudo npx --no-install playwright install-deps chromium && cd ..",
   "curl -fsSL https://dl.deno.land/release/v2.9.6/deno-x86_64-unknown-linux-gnu.zip -o /tmp/deno.zip && cd /tmp && unzip -oq deno.zip && sudo mv deno /usr/local/bin/ && cd /vercel/repo",
-  "deno cache workers/career-cloud/sandbox-runner.ts scripts/apply.ts",
+  "deno cache workers/career-cloud/sandbox-runner.ts workers/career-cloud/prepare-runner.ts scripts/apply.ts",
   "PLAYWRIGHT_BROWSERS_PATH=/vercel/.cache/ms-playwright UPMORE_PLAYWRIGHT_PATH=/vercel/repo/tools/node_modules/playwright DENO_BIN=/usr/local/bin/deno node --test --test-reporter=tap tests/career-cloud-worker.test.cjs",
 ].join(" && ");
 

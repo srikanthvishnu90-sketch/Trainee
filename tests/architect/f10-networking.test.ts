@@ -53,12 +53,17 @@ Deno.test("F10 import: a LinkedIn export and a contacts CSV, with coverage fract
   assertMatch(r!.reply, /Connections\.csv: imported 6\/8 rows into your contacts \(left out: 1 duplicate; row 7: no name\)/);
   assertMatch(r!.reply, /4\/6 have an email address; the other 2 can be looked up by firm but not written to, since I never guess an address/);
   assertMatch(r!.reply, /Most contacts: Stripe 4/);
-  assertEquals(contactsOf(state).length, 6);
+  // Architect ruling R1 (2026-10-27): the rows are the account's (career_account_contacts), and no chat keeps a copy
+  // (the per-chat copy had to be capped by the chat state's size). So the count is read from the account, and the chat
+  // state holds none. Was: contactsOf(state).length === 6, then 8.
+  assertEquals((await store.contactsSummary!(U)).total, 6);
+  assertEquals(contactsOf(state).length, 0, "no per-chat copy");
   // No profile URL is kept from the export.
   assert(!JSON.stringify(state).includes("linkedin.com/in/"));
+  assert(!JSON.stringify(await store.contactsAtFirm!(U, "stripe")).includes("linkedin.com/in/"));
   const pasted = await networkingTurn({ message: `add these\n${CONTACTS}`, userId: U, threadId: T, now: NOW, state, store, model: null });
   assertMatch(pasted!.reply, /pasted list 2026-10-25 15:00 UTC: imported 2\/2 rows/);
-  assertEquals(contactsOf(state).length, 8);
+  assertEquals((await store.contactsSummary!(U)).total, 8);
   const bad = await networkingTurn({ message: "my resume", userId: U, threadId: T, now: NOW, state, store, model: null, attachments: [{ name: "resume.pdf", mime: "application/pdf", text: null }] });
   assertEquals(bad!.status, "not_imported");
   assertMatch(bad!.reply, /resume\.pdf: not read/);
@@ -81,8 +86,16 @@ Deno.test("F10 who: from their own contacts, one person once; none says so and h
   assertMatch(notThere!.reply, /None of your 8 contacts .* is at Plaid Technologies\. I don't have a people database/);
   // People the router kept from an earlier export count too, with the same checks.
   const older: Record<string, unknown> = { profile: { connections: [{ name: "Robin Old", company: "Stripe", position: "Analyst", email: "robin.old@stripe.example" }] } };
+  // Architect ruling R1 (2026-10-27): contacts are the account's, not the thread's. `older` is another thread of the same
+  // person U, whose account already holds the 4 Stripe contacts imported above; so the answer there is those 4 plus the
+  // router's legacy row, each once (it was 1, the legacy row alone, while contacts were per thread).
   const legacy = await networkingTurn({ message: "who do I know at Stripe", userId: U, threadId: T, now: NOW, state: older, store, model: null });
-  assertMatch(legacy!.reply, /You have 1 contact at Stripe \(from LinkedIn connections \(imported earlier\)\), 1 with an email address:\n- Robin Old, Analyst \(robin\.old@stripe\.example\)/);
+  assertMatch(legacy!.reply, /^You have 5 contacts at Stripe \(from 3 lists\), 5 with an email address:/);
+  assertMatch(legacy!.reply, /\n- Robin Old, Analyst \(robin\.old@stripe\.example\)/);
+  assertEquals((legacy!.reply.match(/Lee Park/g) ?? []).length, 1, legacy!.reply);
+  // A person with no contacts on their account still gets the legacy row alone, exactly as before.
+  const alone = await networkingTurn({ message: "who do I know at Stripe", userId: "u-legacy-only", threadId: "t-legacy", now: NOW, state: { profile: structuredClone(older.profile) }, store, model: null });
+  assertMatch(alone!.reply, /You have 1 contact at Stripe \(from LinkedIn connections \(imported earlier\)\), 1 with an email address:\n- Robin Old, Analyst \(robin\.old@stripe\.example\)/);
 });
 
 Deno.test("F10 draft: onto the outreach batch; one approval per exact message; held and failed ones counted with reasons", async () => {

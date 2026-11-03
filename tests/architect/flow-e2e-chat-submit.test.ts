@@ -27,6 +27,7 @@ import { prepareAhead, storedProfile, tailoredResume } from "../../workers/caree
 import { edgeRenderer, memoryResumeStore, type ResumeStore } from "../../supabase/functions/_shared/career_tailor.ts";
 import { ANON_KEY, careerHandler, type Chat, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
 import { fakeDocument } from "../flow/fake-dom.ts";
+import { answerOneByOne } from "../helpers/one_question.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const assertEquals = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -168,21 +169,12 @@ Deno.test({
         return done.map((d) => d.outcome);
       };
       const open = async () => await pg.sql(`select coalesce(string_agg(key, ',' order by key), '') from public.career_apply_questions where user_id = '${PERSON}' and state = 'open'`);
-      // "what do you need from me", then each shown question answered by its number, in their own words.
+      // One question at a time (review of #360): each shown question answered in their own words as it comes up.
       const answer = async (answers: [RegExp, string][]) => {
-        const shown = await say("what do you need from me");
-        assertEquals(shown.resultStatus, "shown", shown.reply);
-        const lines = shown.reply.split("\n");
-        const parts: string[] = [];
-        for (const [label, value] of answers) {
-          const line = lines.find((l) => /^\d+\./.test(l) && label.test(l));
-          assert(line, `${label} is asked: ${shown.reply}`);
-          parts.push(`${/^(\d+)\./.exec(line!)![1]} ${value}`);
-        }
-        const r = await say(parts.join("\n"));
-        if (Deno.env.get("E2E_DEBUG")) console.log(`SHOWN:\n${shown.reply}\nSENT: ${parts.join(" / ")}\nREPLY:\n${r.reply}`);
-        assert(!/doesn't fit|does not fit|isn't one of/i.test(r.reply), `their answers are taken: ${r.reply}`);
-        return { shown: shown.reply, saved: r.reply };
+        const r = await answerOneByOne(say, answers);
+        if (Deno.env.get("E2E_DEBUG")) console.log(`SHOWN:\n${r.shown}\nREPLIES:\n${r.saved}`);
+        assert(!/doesn't fit|does not fit|isn't one of/i.test(r.saved), `their answers are taken: ${r.saved}`);
+        return r;
       };
 
       await t.step("sign up and resume: shown each entry, they say it is theirs; each entry evidenced", async () => {
@@ -241,10 +233,17 @@ Deno.test({
         assertEquals(await pg.sql(`select items->0->>'payload_hash' from public.career_apply_cards where id = '${cardMeta.card_id}'`), preparedHash);
       });
 
-      await t.step("a text yes with no reply to the card approves nothing (the tap or a reply to the card does)", async () => {
+      // D-MS-1 (owner, 2026-10-27; replaces the reply-only rule): a text yes while the card is the thread's last word
+      // approves it. Here the person first asks something else, so the card is no longer the last word and a bare "maybe"
+      // and a bare "yes" do nothing to it; the tap below is what approves.
+      await t.step("an unclear reply approves nothing; after another turn a bare yes is not the card's (D-MS-1)", async () => {
+        const unclear = await say("maybe");
+        assert(/nothing was approved/i.test(unclear.reply), unclear.reply);
+        await say("what do you need from me");
         const r = await say("yes");
-        assert(/Nothing was approved/.test(r.reply), r.reply);
+        assert(r.resultStatus !== "answered", `a yes after another turn is not the card's: ${r.reply}`);
         assertEquals(await pg.sql(`select count(*) from public.career_apply_jobs where user_id = '${PERSON}'`), "0");
+        assertEquals(await pg.sql(`select state from public.career_apply_cards where id = '${cardMeta.card_id}'`), "open");
       });
 
       await t.step("their tap on the web chat's card (src/career-apply-card.js, their own session): queued, bound to the card's hash", async () => {

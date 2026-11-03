@@ -36,7 +36,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-LIVE_MISSING_DEFAULT="20261020110000_career_connector.sql 20261020130000_career_resume_tailoring.sql
+# 20261026120018 (one confirmed resume) is NOT APPLIED and replaces career_apply_profile_for, created by 20261025120000.
+LIVE_MISSING_DEFAULT="20261026120018_career_resume_one_record.sql 20261020110000_career_connector.sql 20261020130000_career_resume_tailoring.sql
   20261021020000_career_voice_mock.sql 20261021030000_career_hired_backgrounds.sql 20261021090000_career_mail_erase.sql
   20261021100000_career_proactive_last_word.sql 20261021110000_career_board_state.sql
   20261021130000_career_mail_model_calls.sql 20261021220430_career_apply_message_cards.sql
@@ -50,9 +51,20 @@ LIVE_MISSING_DEFAULT="20261020110000_career_connector.sql 20261020130000_career_
   20261026060006_career_more_providers.sql 20261026060106_career_ingest_runs.sql 20261026070007_career_alert_min_fit.sql
   20261026080008_career_mail_drafts_sent.sql 20261026090009_career_account_memory.sql
   20261026100000_career_apply_cloud_runner.sql 20261026100001_career_apply_want_guard.sql
-  20261026140000_career_apply_receipt_store.sql
+  20261026140000_career_apply_receipt_store.sql 20261026200011_google_disconnect_erase.sql
+  20261026210016_career_resume_required.sql 20261026210017_career_resume_on_file_one_record.sql 20261026220016_channel_telegram_login.sql
   20261026230100_career_erase_complete.sql 20261026230300_career_turn_gate.sql
-  20261026230400_career_kb_postings_recency_index.sql"
+  20261026230400_career_kb_postings_recency_index.sql
+  20261026230017_career_cloud_hosted_apply.sql 20261027140000_career_apply_host_backoff.sql 20261027141000_career_apply_mass_submit.sql 20261028050000_agent_turn_costs_always_recorded.sql 20261028070000_global_daily_model_budget.sql 20261028120000_career_apply_host_gate.sql
+  20261028130000_billing_cancel_at_period_end.sql 20261029100000_career_outreach_reply_rules.sql 20261029160000_career_email_format_guards.sql
+  20261029170000_career_resume_on_file_quarantine.sql 20261029180000_career_apply_refusal_requeue.sql 20261029190000_career_apply_unstarted_requeue.sql 20261029200000_career_connector_disconnect_rules.sql 20261029230000_trainee_file_sessions.sql 20261030000000_career_outbox_parts_order.sql 20261030010000_career_apply_card_confirm.sql 20261030020000_billing_webhook_sync.sql 20261030030000_career_ingest_bounded.sql 20261030040000_career_send_claim_guards.sql 20261030050000_account_erase_r2.sql 20261030060000_career_resume_confirm_atomic.sql 20261030070000_proactive_r2.sql 20261030080000_career_evidence_every_confirmation.sql 20261030090000_career_outreach_stop_address.sql 20261030100000_channel_delivery_r2.sql 20261030110000_career_ingest_r2.sql 20261030120000_channel_identity.sql 20261030130000_billing_r2.sql 20261030140000_career_apply_submit_worker.sql 20261030150000_career_ingest_reread_gap.sql 20261031000000_career_apply_cloud_authorize_closed.sql 20261031010000_clock_sweep.sql 20261031020000_career_outreach_r3.sql 20261031030000_telegram_link_code_kept.sql 20261031040000_telegram_link_confirm.sql 20261031050000_career_account_memory_one_copy.sql 20261031060000_connectors_r3.sql 20261031070000_career_resume_upload_resend.sql 20261031090000_career_thread_facts_authority.sql 20261031100000_trainee_file_signin_limits.sql 20261031110000_career_outreach_batch_unbounded.sql"
+# 20261026210016 and 20261026220016 (FEATURE 16, NOT APPLIED) are new here, not live; 20261026210016 reads
+# career_apply_profile_for, created by 20261025120000 (missing above).
+# The last four are not live: 20261026060006 and 20261026060106 alter career_board_state, created by 20261021110000
+# (missing above); 20261026100000 says NOT APPLIED in its header, and applied to the live mimic before the one ledger it
+# would generate its portal claim from the older claim_at; 20261026230017 (FEATURE 17) is NOT APPLIED and reads
+# career_apply_prepare_attempts, created by 20261025120000 (missing above). The same entries as PR #194's, plus 230017.
+[[ -n "${LIVE_MISSING:-}" ]] && LIVE_MISSING_GIVEN=1
 read -r -a LIVE_MISSING <<<"$(echo ${LIVE_MISSING:-$LIVE_MISSING_DEFAULT})"
 LIVE_SAFE="${LIVE_SAFE_BRIEF_DIGEST:-1}"
 BRIEF=20261021050000_career_brief_digest.sql
@@ -60,7 +72,14 @@ BRIEF=20261021050000_career_brief_digest.sql
 # The same lists go-live applies and checks (never a copy that could drift).
 eval "$(sed -n '/^MIGRATIONS=(/,/^)/p; /^MIGRATION_MARK=(/,/^)/p' "$GO_LIVE")"
 (( ${#MIGRATIONS[@]} == ${#MIGRATION_MARK[@]} && ${#MIGRATIONS[@]} > 0 )) || { echo "FAIL could not read MIGRATIONS from $GO_LIVE"; exit 1; }
-is_missing() { local m; for m in "${LIVE_MISSING[@]}"; do [[ "$m" == "$1" ]] && return 0; done; return 1; }
+# Everything from 2026-10-27 on is new since the live snapshot (no deploy since): missing live unless LIVE_MISSING is given.
+LIVE_NEW_FROM="${LIVE_NEW_FROM:-20261027000000}"
+is_missing() {
+  local m
+  for m in "${LIVE_MISSING[@]}"; do [[ "$m" == "$1" ]] && return 0; done
+  [[ -z "${LIVE_MISSING_GIVEN:-}" && "${1:0:14}" > "$LIVE_NEW_FROM" ]] && return 0
+  return 1
+}
 for m in "${LIVE_MISSING[@]}"; do [[ -f "$ROOT/supabase/migrations/$m" ]] || { echo "FAIL LIVE_MISSING names $m, which is not a migration file"; exit 1; }; done
 
 # Two clusters (the stubs create roles, which a cluster shares): live_mimic on PORT, file_order on PORT + 1.

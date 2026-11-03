@@ -86,7 +86,8 @@ class FakeQuery {
   private patch: Record<string, unknown> | null = null;
   private wantRows = false;
   constructor(private rows: () => Map<string, any>, private keyOfRow: (row: any) => string) {}
-  insert(row: any) { this.rows().set(this.keyOfRow(row), { ...row }); return Promise.resolve({ data: null, error: null }); }
+  // created_at as the column's default (now()) when the row does not carry one: the offer's time is the database's.
+  insert(row: any) { this.rows().set(this.keyOfRow(row), { created_at: new Date().toISOString(), ...row }); return Promise.resolve({ data: null, error: null }); }
   select(_cols?: string) { this.wantRows = true; return this; }
   update(patch: Record<string, unknown>) { this.patch = patch; return this; }
   eq(col: string, val: unknown) { this.filters.push([col, val]); return this; }

@@ -49,10 +49,10 @@ const FAMS = [
   { atsFamily: "lever", urlFor: (co, n) => `https://jobs.lever.co/${co}/${n}` },
   { atsFamily: "ashby", urlFor: (co, n) => `https://jobs.ashbyhq.com/${co}/${n}` },
 ];
-// The market spreads across ATS families on purpose: 149's SPEC_CAPS are
-// perDay 15 AND perVendorPerDay 5 AND perCompanyPer30Days 1 — a fixture
-// that put all 20 postings on one vendor would be testing a market that
-// cannot exist under the product's own caps.
+// The market spreads across ATS families (a realistic market). Since the
+// owner's NO LIMITS rule (2026-10-27) 149 has no per-day, per-vendor or
+// per-company cap; scenario 2 pins that 13 earlier submissions today stop
+// nothing, and that only a site's own refusal defers an application.
 function posting(n, over = {}) {
   const fam = FAMS[n % 3];
   const co = `testco${n}`;
@@ -183,7 +183,7 @@ test("loop: 15 requested -> 13 submitted-confirmed, every other outcome named", 
   assert.equal(run.summary.confirmations.length, 13);
   for (const c of run.summary.confirmations) assert.match(c.confirmationId, /^SBX-\d{4}$/, "sandbox confirmation id");
   assert.equal(tracked.length, 13, "every submission wrote a tracker record");
-  assert.equal(log.records.filter((r) => r.status === "submitted").length, 13, "the submission log (cap source) holds all 13");
+  assert.equal(log.records.filter((r) => r.status === "submitted").length, 13, "the submission log (the exactly-once source) holds all 13");
   // the report speaks the whole trajectory
   const spoken = Batch.speakSummary(run).join("\n");
   assert.match(spoken, /Found 20/);
@@ -191,8 +191,8 @@ test("loop: 15 requested -> 13 submitted-confirmed, every other outcome named", 
   assert.match(spoken, /captcha/i);
 });
 
-// ---------------- Scenario 2: the cap is truth ----------------
-test("loop: with 13 already submitted today, only 2 more submit — the rest defer by cap, named", () => {
+// ---------------- Scenario 2: no volume cap; only a site's refusal defers ----------------
+test("loop: with 13 already submitted today, all 13 doorstep-ready applications still submit — no count defers them", () => {
   const log = { records: [] };
   for (let i = 0; i < 13; i++) log.records.push({ userId: USER, status: "submitted", timestamp: NOW, canonicalKey: `seed:other:${i}`, company: `Seed Co ${i}` });
   const { deps } = makeDeps(log);
@@ -201,11 +201,29 @@ test("loop: with 13 already submitted today, only 2 more submit — the rest def
   assert.equal(Batch.approveRun(run, { approvedByUser: true, now: NOW, userId: run.userId, profileSha256: run.profileSha256 }).ok, true);
   const ex = Batch.executeRun(run, deps);
   assert.equal(ex.ok, true);
-  assert.equal(run.summary.submitted, 2, "15/day cap: 13 already down, exactly 2 more fit today");
-  const capDeferred = run.deferred.filter((x) => x.code === "CAP_REACHED");
-  assert.equal(capDeferred.length, 11, "the other 11 doorstep-ready applications deferred at click time");
-  assert.ok(capDeferred.every((x) => x.resumeOn), "each cap deferral names its resume day");
-  assert.equal(log.records.filter((r) => r.status === "submitted").length, 15, "the day ends exactly at the cap, never above it");
+  assert.equal(run.summary.submitted, 13, "no 15/day cap: every approved, doorstep-ready application submits");
+  assert.equal(run.deferred.filter((x) => x.code === "CAP_REACHED").length, 0, "nothing is deferred by a count");
+  assert.equal(log.records.filter((r) => r.status === "submitted").length, 26, "the day goes past the old cap of 15");
+});
+
+test("loop: a site that is refusing (a rate limit in the ledger) defers only ITS applications, each to the site's own time; the other sites submit", () => {
+  const log = { records: [] };
+  const until = new Date(NOW + 5 * 60000).toISOString();
+  // Lever is refusing for five minutes (as 149 records a 429 with Retry-After at open).
+  log.records.push({ userId: USER, status: "portal_refused", host: "jobs.lever.co", vendor: "lever", why: "rate_limited", timestamp: NOW, until, canonicalKey: null });
+  const { deps } = makeDeps(log);
+  const run = newRun();
+  Batch.prepareRun(run, deps);
+  const held = Object.values(run.apps).filter((a) => a.stage === "deferred_refusal");
+  assert.ok(held.length > 0 && held.every((a) => /jobs\.lever\.co/.test(a.url)), `only lever's are held: ${JSON.stringify(held.map((a) => a.url))}`);
+  const deferred = run.deferred.filter((x) => x.code === "PORTAL_REFUSING");
+  assert.equal(deferred.length, held.length);
+  assert.ok(deferred.every((x) => x.resumeOn === until), "each resumes at the site's own time");
+  assert.equal(Batch.approveRun(run, { approvedByUser: true, now: NOW, userId: run.userId, profileSha256: run.profileSha256 }).ok, true);
+  Batch.executeRun(run, deps);
+  assert.ok(run.summary.submitted > 0, "the sites that answer submit");
+  assert.equal(log.records.filter((r) => r.status === "submitted" && /lever/.test(r.vendor || "")).length, 0, "nothing went to the refusing site");
+  assert.match(Batch.speakSummary(run).join("\n"), /turning requests away/);
 });
 
 // ---------------- Scenario 3: tamper truth (MI-116 across invocations) ----

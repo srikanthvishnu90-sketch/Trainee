@@ -1,0 +1,1279 @@
+{
+ "total": 130,
+ "ok": 130,
+ "items": [
+  {
+   "id": "S001",
+   "ok": true,
+   "picked": [
+    "emp-small-firms-startups-approach",
+    "stage-freshman",
+    "how-cold-email"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S002",
+   "ok": true,
+   "picked": [
+    "emp-small-firms-startups-approach",
+    "ctx-non-target-school",
+    "stage-sophomore"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S003",
+   "ok": true,
+   "picked": [
+    "stage-junior",
+    "ctx-low-gpa"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S004",
+   "ok": true,
+   "picked": [
+    "stage-senior",
+    "offer-evaluate"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S005",
+   "ok": true,
+   "picked": [
+    "stage-new-grad",
+    "how-volume-vs-targeted",
+    "how-weekly-search-system"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S006",
+   "ok": true,
+   "picked": [
+    "ctx-international-student",
+    "stage-junior",
+    "ctx-sponsorship-search"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S007",
+   "ok": true,
+   "picked": [
+    "emo-overwhelm-burnout",
+    "stage-career-changer"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S008",
+   "ok": true,
+   "picked": [
+    "emo-overwhelm-burnout",
+    "stage-laid-off",
+    "stage-mid-career-move"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S009",
+   "ok": true,
+   "picked": [
+    "stage-returning-to-work"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S010",
+   "ok": true,
+   "picked": [
+    "stage-military-transition",
+    "how-resume-for-stage",
+    "stage-mid-career-move"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S011",
+   "ok": true,
+   "picked": [
+    "offer-negotiate",
+    "offer-evaluate",
+    "stage-new-grad"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S012",
+   "ok": true,
+   "picked": [
+    "emp-big-vs-startup-vs-small",
+    "offer-multiple-and-deadlines",
+    "offer-evaluate"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S013",
+   "ok": true,
+   "picked": [
+    "emo-rejection"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S014",
+   "ok": true,
+   "picked": [
+    "how-follow-up-no-reply",
+    "int-first-screen"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S015",
+   "ok": true,
+   "picked": [
+    "ctx-no-network-first-gen",
+    "how-informational-interview-alumni",
+    "stage-sophomore"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S016",
+   "ok": true,
+   "picked": [
+    "ctx-non-target-school",
+    "stage-senior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S017",
+   "ok": true,
+   "picked": [
+    "emp-research-lab",
+    "stage-freshman"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S018",
+   "ok": true,
+   "picked": [
+    "stage-bootcamp-self-taught",
+    "how-portfolio-projects",
+    "how-volume-vs-targeted"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S019",
+   "ok": true,
+   "picked": [
+    "emp-research-lab",
+    "stage-grad-student"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S020",
+   "ok": true,
+   "picked": [
+    "emp-big-vs-startup-vs-small",
+    "stage-mid-career-move"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S021",
+   "ok": true,
+   "picked": [
+    "emo-confidence-imposter",
+    "stage-senior",
+    "how-resume-for-stage"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S022",
+   "ok": true,
+   "picked": [
+    "stage-sophomore",
+    "how-cold-email"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S023",
+   "ok": true,
+   "picked": [
+    "emp-research-lab",
+    "how-cold-email",
+    "stage-sophomore"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S024",
+   "ok": true,
+   "picked": [
+    "how-cold-email"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S025",
+   "ok": true,
+   "picked": [
+    "how-referral-ask"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S026",
+   "ok": true,
+   "picked": [
+    "how-referral-ask"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S027",
+   "ok": true,
+   "picked": [
+    "how-informational-interview-alumni",
+    "stage-career-changer",
+    "stage-mid-career-move"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S028",
+   "ok": true,
+   "picked": [
+    "how-career-fairs-events",
+    "how-informational-interview-alumni",
+    "stage-junior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S029",
+   "ok": true,
+   "picked": [
+    "how-informational-interview-alumni",
+    "stage-senior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S030",
+   "ok": true,
+   "picked": [
+    "how-cold-email",
+    "how-follow-up-no-reply"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S031",
+   "ok": true,
+   "picked": [
+    "how-linkedin-manual-outreach"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S032",
+   "ok": true,
+   "picked": [
+    "how-linkedin-manual-outreach",
+    "how-volume-vs-targeted"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S033",
+   "ok": true,
+   "picked": [
+    "stage-freshman"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S034",
+   "ok": true,
+   "picked": [
+    "emp-small-firms-startups-approach",
+    "stage-freshman",
+    "how-cold-email"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S035",
+   "ok": true,
+   "picked": [
+    "emp-small-firms-startups-approach",
+    "stage-sophomore"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S036",
+   "ok": true,
+   "picked": [
+    "stage-junior",
+    "offer-evaluate"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S037",
+   "ok": true,
+   "picked": [
+    "emo-overwhelm-burnout",
+    "stage-no-experience",
+    "stage-junior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S038",
+   "ok": true,
+   "picked": [
+    "stage-senior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S039",
+   "ok": true,
+   "picked": [
+    "emp-small-firms-startups-approach",
+    "ctx-non-target-school",
+    "stage-sophomore"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S040",
+   "ok": true,
+   "picked": [
+    "stage-junior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S041",
+   "ok": true,
+   "picked": [
+    "stage-new-grad"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S042",
+   "ok": true,
+   "picked": [
+    "emo-overwhelm-burnout",
+    "how-weekly-search-system",
+    "int-first-screen"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S043",
+   "ok": true,
+   "picked": [],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S044",
+   "ok": true,
+   "picked": [
+    "emo-overwhelm-burnout"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S045",
+   "ok": true,
+   "picked": [],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S046",
+   "ok": true,
+   "picked": [
+    "emo-overwhelm-burnout",
+    "how-weekly-search-system"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S047",
+   "ok": true,
+   "picked": [
+    "emo-overwhelm-burnout"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S048",
+   "ok": true,
+   "picked": [
+    "stage-career-changer",
+    "how-portfolio-projects"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S049",
+   "ok": true,
+   "picked": [
+    "stage-career-changer"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S050",
+   "ok": true,
+   "picked": [
+    "stage-career-changer",
+    "stage-mid-career-move"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S051",
+   "ok": true,
+   "picked": [
+    "stage-career-changer",
+    "stage-mid-career-move"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S052",
+   "ok": true,
+   "picked": [
+    "stage-career-changer",
+    "stage-mid-career-move"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S053",
+   "ok": true,
+   "picked": [
+    "stage-bootcamp-self-taught",
+    "choose-grad-school-vs-job"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S054",
+   "ok": true,
+   "picked": [
+    "stage-bootcamp-self-taught"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S055",
+   "ok": true,
+   "picked": [
+    "how-portfolio-projects",
+    "stage-junior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S056",
+   "ok": true,
+   "picked": [
+    "how-portfolio-projects",
+    "stage-career-changer"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S057",
+   "ok": true,
+   "picked": [
+    "stage-no-experience"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S058",
+   "ok": true,
+   "picked": [
+    "stage-no-experience",
+    "how-resume-for-stage",
+    "stage-senior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S059",
+   "ok": true,
+   "picked": [
+    "stage-gap-year-or-gap",
+    "how-resume-for-stage"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S060",
+   "ok": true,
+   "picked": [
+    "stage-gap-year-or-gap"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S061",
+   "ok": true,
+   "picked": [
+    "stage-laid-off"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S062",
+   "ok": true,
+   "picked": [
+    "stage-laid-off",
+    "int-first-screen"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S063",
+   "ok": true,
+   "picked": [
+    "stage-returning-to-work"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S064",
+   "ok": true,
+   "picked": [
+    "stage-returning-to-work"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S065",
+   "ok": true,
+   "picked": [
+    "stage-military-transition"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S066",
+   "ok": true,
+   "picked": [
+    "ctx-international-student",
+    "ctx-sponsorship-search",
+    "stage-grad-student"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S067",
+   "ok": true,
+   "picked": [
+    "emo-rejection",
+    "ctx-international-student",
+    "ctx-sponsorship-search"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S068",
+   "ok": true,
+   "picked": [
+    "ctx-international-student",
+    "ctx-sponsorship-search",
+    "stage-grad-student"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S069",
+   "ok": true,
+   "picked": [
+    "emp-small-firms-startups-approach",
+    "ctx-international-student",
+    "stage-freshman"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S070",
+   "ok": true,
+   "picked": [
+    "ctx-sponsorship-search",
+    "ctx-international-student"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S071",
+   "ok": true,
+   "picked": [
+    "emp-big-vs-startup-vs-small",
+    "stage-new-grad"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S072",
+   "ok": true,
+   "picked": [
+    "emp-big-vs-startup-vs-small",
+    "offer-evaluate",
+    "emp-small-firms-startups-approach"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S073",
+   "ok": true,
+   "picked": [
+    "emp-big-vs-startup-vs-small",
+    "stage-new-grad"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S074",
+   "ok": true,
+   "picked": [
+    "emp-small-firms-startups-approach",
+    "stage-junior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S075",
+   "ok": true,
+   "picked": [
+    "emp-public-sector-nonprofit"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S076",
+   "ok": true,
+   "picked": [
+    "emp-public-sector-nonprofit"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S077",
+   "ok": true,
+   "picked": [
+    "stage-new-grad",
+    "emp-research-lab"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S078",
+   "ok": true,
+   "picked": [
+    "stage-sophomore",
+    "how-resume-for-stage"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S079",
+   "ok": true,
+   "picked": [
+    "how-resume-for-stage"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S080",
+   "ok": true,
+   "picked": [
+    "how-resume-for-stage",
+    "ctx-low-gpa",
+    "stage-junior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S081",
+   "ok": true,
+   "picked": [
+    "ctx-low-gpa",
+    "stage-senior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S082",
+   "ok": true,
+   "picked": [
+    "how-resume-for-stage"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S083",
+   "ok": true,
+   "picked": [
+    "stage-career-changer",
+    "how-resume-for-stage"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S084",
+   "ok": true,
+   "picked": [
+    "ctx-non-target-school",
+    "stage-junior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S085",
+   "ok": true,
+   "picked": [
+    "ctx-relocation-remote"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S086",
+   "ok": true,
+   "picked": [
+    "ctx-relocation-remote",
+    "stage-new-grad"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S087",
+   "ok": true,
+   "picked": [
+    "int-first-screen",
+    "stage-new-grad"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S088",
+   "ok": true,
+   "picked": [
+    "int-behavioral",
+    "int-first-screen"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S089",
+   "ok": true,
+   "picked": [
+    "int-behavioral",
+    "stage-senior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S090",
+   "ok": true,
+   "picked": [
+    "int-technical-or-case",
+    "int-first-screen"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S091",
+   "ok": true,
+   "picked": [
+    "int-first-screen",
+    "int-technical-or-case",
+    "stage-junior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S092",
+   "ok": true,
+   "picked": [
+    "int-thank-you-and-after",
+    "how-follow-up-no-reply",
+    "int-first-screen"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S093",
+   "ok": true,
+   "picked": [
+    "int-first-screen",
+    "stage-senior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S094",
+   "ok": true,
+   "picked": [
+    "int-first-screen"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S095",
+   "ok": true,
+   "picked": [
+    "int-first-screen"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S096",
+   "ok": true,
+   "picked": [
+    "offer-evaluate"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S097",
+   "ok": true,
+   "picked": [
+    "stage-junior",
+    "offer-negotiate",
+    "offer-evaluate"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S098",
+   "ok": true,
+   "picked": [
+    "offer-multiple-and-deadlines",
+    "offer-negotiate",
+    "offer-evaluate"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S099",
+   "ok": true,
+   "picked": [
+    "emp-big-vs-startup-vs-small",
+    "offer-evaluate",
+    "stage-new-grad"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S100",
+   "ok": true,
+   "picked": [
+    "offer-multiple-and-deadlines",
+    "offer-negotiate",
+    "offer-evaluate"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S101",
+   "ok": true,
+   "picked": [
+    "offer-multiple-and-deadlines",
+    "offer-evaluate"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S102",
+   "ok": true,
+   "picked": [
+    "offer-negotiate"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S103",
+   "ok": true,
+   "picked": [
+    "emo-rejection"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S104",
+   "ok": true,
+   "picked": [
+    "emo-rejection",
+    "how-resume-for-stage",
+    "how-weekly-search-system"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S105",
+   "ok": true,
+   "picked": [
+    "emo-rejection"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S106",
+   "ok": true,
+   "picked": [
+    "how-follow-up-no-reply"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S107",
+   "ok": true,
+   "picked": [
+    "emo-confidence-imposter",
+    "int-first-screen"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S108",
+   "ok": true,
+   "picked": [
+    "emo-confidence-imposter"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S109",
+   "ok": true,
+   "picked": [
+    "emo-confidence-imposter",
+    "emp-small-firms-startups-approach",
+    "stage-sophomore"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S110",
+   "ok": true,
+   "picked": [
+    "how-volume-vs-targeted"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S111",
+   "ok": true,
+   "picked": [
+    "how-volume-vs-targeted"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S112",
+   "ok": true,
+   "picked": [
+    "how-weekly-search-system",
+    "stage-junior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S113",
+   "ok": true,
+   "picked": [
+    "stage-junior",
+    "how-career-fairs-events"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S114",
+   "ok": true,
+   "picked": [
+    "how-career-fairs-events",
+    "stage-sophomore"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S115",
+   "ok": true,
+   "picked": [
+    "how-career-fairs-events"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S116",
+   "ok": true,
+   "picked": [
+    "choose-grad-school-vs-job",
+    "stage-grad-student"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S117",
+   "ok": true,
+   "picked": [
+    "choose-grad-school-vs-job",
+    "stage-grad-student"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S118",
+   "ok": true,
+   "picked": [
+    "choose-grad-school-vs-job",
+    "offer-evaluate",
+    "emp-research-lab"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S119",
+   "ok": true,
+   "picked": [
+    "stage-mid-career-move"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S120",
+   "ok": true,
+   "picked": [
+    "stage-mid-career-move"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S121",
+   "ok": true,
+   "picked": [
+    "stage-mid-career-move"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S122",
+   "ok": true,
+   "picked": [],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S123",
+   "ok": true,
+   "picked": [],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S124",
+   "ok": true,
+   "picked": [],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S125",
+   "ok": true,
+   "picked": [
+    "how-linkedin-manual-outreach"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S126",
+   "ok": true,
+   "picked": [
+    "how-volume-vs-targeted"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S127",
+   "ok": true,
+   "picked": [
+    "how-weekly-search-system",
+    "stage-junior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S128",
+   "ok": true,
+   "picked": [
+    "stage-senior"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S129",
+   "ok": true,
+   "picked": [
+    "stage-new-grad"
+   ],
+   "missing": [],
+   "unwanted": []
+  },
+  {
+   "id": "S130",
+   "ok": true,
+   "picked": [],
+   "missing": [],
+   "unwanted": []
+  }
+ ]
+}

@@ -19,6 +19,7 @@ import { approvedQuestionsAfterRefusal, assertApprovedPayload, factsFromPayload,
 import { questionsToStore } from "../career-browser/ask-once.ts";
 import { hashApplyPayload } from "../../supabase/functions/_shared/career_apply_store.ts";
 import { authorizeCurrentCloudJob } from "./current_sources.ts";
+import { dbHostGate, fileJournal, handBack, type HostGate, type Journal, type JournalResult, massRun, type Pacing, pacingFrom, requeueMissing, sentNothingRefusal, unstartedWhy } from "../career-browser/mass-run.ts";
 
 export interface CloudJob {
   id: string;
@@ -45,6 +46,19 @@ export interface CloudQueue {
   // rows Messages asks), for the job this worker holds the lease on (career_apply_cloud_ask). Returns how many were kept.
   ask(job: CloudJob, questions: Record<string, unknown>[]): Promise<number>;
   gatePresent(): Promise<boolean>;
+  // Many instances (the database lane's leased claim, docs/launch/CLOUD-RUNNER.md "Many instances"): a claim that only
+  // leases, and the begin that turns the leases this round starts into drives. Absent: the claim starts drives itself.
+  begin?(jobs: CloudJob[]): Promise<Set<string>>;
+  // Owner rule (2026-10-27, back off then RESUME): the employer's site refused before anything was sent; the same job
+  // goes back to the queue, not handed out before `until` (career_apply_requeue_refused_for, 20261029180000). Returns
+  // when it may be handed out again (epoch ms), or null when the database does not have the requeue yet. Absent: the
+  // job is recorded not_submitted as before.
+  requeue?(job: CloudJob, reason: string, retryAfterS: number | null, until: number): Promise<number | null>;
+  // A claim whose engine never started (the worker stopping, no start inside its lease budget, its host held): the same
+  // job back to the queue, not handed out before `until` (career_apply_requeue_unstarted_for, 20261029190000). Returns
+  // when it may be handed out again (epoch ms), or null when it cannot be put back (a database without it, or one that
+  // refuses it, e.g. a card approval that expired since): then it is recorded not sent. Absent: recorded not sent.
+  putBack?(job: CloudJob, why: string, until: number): Promise<number | null>;
 }
 // "interrupted": the worker was stopped on purpose (systemctl stop, Ctrl+C) while the engine ran. The application is
 // unknown and never re-driven, but a deliberate shutdown is not a failure the employer saw, so the throttle skips it.
@@ -61,6 +75,9 @@ const BY_DESIGN = new Set([
   "APPROVED_MANIFEST_CHANGED", "INVALID_APPROVED_SCHEMA", "CONTRACT_REFUSED", "FACT_OWNER_MISMATCH",
   "CARD_CLOUD_PERMISSION_REVOKED", "CARD_CLOUD_AUTH_REQUIRED", "CARD_CLOUD_AUTH_REFUSED", "CARD_CLOUD_AUTH_PROTOCOL", "CARD_CLOUD_AUTH_TIMEOUT",
   "APPROVED_SOURCE_WITHDRAWN", "CARD_CLOUD_SOURCE_READ_FAILED", "CARD_CLOUD_AUTHORIZATION_REFUSED",
+  // MASS APPLY (2026-11-01): the posting closed after the approval (its page 404/410 at the open, nothing filled): that one
+  // posting ends, nothing sent; it is no failure of the site, so it never counts toward pausing the ATS.
+  "POSTING_CLOSED",
 ]);
 const BOT_CHECK = (state: string, reason: string) =>
   (state === "needs_user" && reason === "captcha") || (state === "not_submitted" && reason === "CAPTCHA_AT_SUBMIT");
@@ -73,6 +90,8 @@ export function settle(result: { state?: string; reason?: string } | null): { st
     return { state: "unknown_outcome", reason: "the engine gave no result after it started; not retried", outcome: "error", errorKind: "ENGINE_NO_RESULT" };
   }
   if (BOT_CHECK(state, reason)) return { state: "needs_user", reason: "bot_check", outcome: "bot_check", errorKind: reason };
+  // The employer's sign-in wall: the person signs in and finishes it at the link (never retried; not a failure the employer saw).
+  if (handBack({ state, reason }) === "login_required") return { state: "needs_user", reason: "login_required", outcome: "not_sent", errorKind: reason };
   if (state === "confirmed" || state === "submitted_unconfirmed") return { state, reason, outcome: "submitted", errorKind: null };
   if (state === "not_submitted" && BY_DESIGN.has(reason)) return { state, reason, outcome: "not_sent", errorKind: reason };
   return { state, reason, outcome: "error", errorKind: reason || state };
@@ -117,9 +136,12 @@ export async function evidenceOf(job: CloudJob, run: any, s: ReturnType<typeof s
     started_at: new Date(t.started).toISOString(),
     finished_at: new Date(t.finished).toISOString(),
     ...(s.outcome === "bot_check" ? { link: job.url, handed_back: "a verification check appeared; the person finishes it at the link" } : {}),
+    ...(s.reason === "login_required" ? { link: job.url, handed_back: "the employer's site asks the person to sign in; they finish it at the link" } : {}),
     // WO-102: a question the engine stopped on (needs_answers) goes back with the job in the form's own terms, so it is
     // asked of the person rather than lost. Never an answer.
     ...(s.reason === "needs_answers" ? { questions } : {}),
+    // MASS APPLY: the browser's own failure (scripts/apply.ts driver_error), kept so a DRIVER_ERROR's cause can be found.
+    ...(typeof run?.result?.driver_error === "string" ? { driver_error: clip(run.result.driver_error, 200) } : {}),
   };
   if (JSON.stringify(out).length > 60000) out.answers = answers.map((a: any) => ({ ...a, value: a.value.slice(0, 200) }));
   if (JSON.stringify(out).length > 60000 && out.questions) out.questions = questions.map((q: any) => ({ ...q, options: [] }));
@@ -135,12 +157,21 @@ export async function runCloudJob(job: CloudJob, d: {
   now?: () => number;
   log?: (line: string) => void;
   stopping?: () => boolean;
+  // Mass submission: awaited right before the engine starts (the scheduler's durable journal line). If it throws, the
+  // engine never starts and the job is recorded not_submitted: nothing was sent.
+  beforeEngine?: () => Promise<void>;
+  // The scheduler puts back a job whose site refused before anything was sent (mass-run.ts sentNothingRefusal): such a
+  // run is returned with requeue: true and not finished here.
+  requeueRefusal?: boolean;
+  // Submit worker round (2026-10-31): the engine's answer, awaited before the queue records it (the scheduler's journal),
+  // so a worker that dies between the two records that answer on its next start instead of "unknown".
+  beforeFinish?: (r: JournalResult) => Promise<void>;
 }) {
   // Capture the claimed job and lease before asynchronous work; the child never selects its authority.
   job = structuredClone(job);
   const now = d.now ?? Date.now, log = d.log ?? ((l: string) => console.log(l)), started = now();
   let s: ReturnType<typeof settle> = { state: "not_submitted", reason: "DRIVER_ERROR", outcome: "error", errorKind: "DRIVER_ERROR" };
-  let run: any = null, began = false;
+  let run: any = null, began = false, putBack = false;
   const dir = await Deno.makeTempDir({ dir: d.tmpRoot, prefix: "trainee-cloud-" });
   try {
     await Deno.chmod(dir, 0o700);
@@ -155,6 +186,8 @@ export async function runCloudJob(job: CloudJob, d: {
       await d.queue.authorize(job, phase);
     };
     await authorize("before_engine");
+    // OWNER RULE (2026-10-26, "never submit applications without a real resume"): no resume bound, no run.
+    if (!/^[a-f0-9]{64}$/.test(String(p?.resume_sha256 ?? ""))) throw Object.assign(Error("NO_RESUME"), { code: "NO_RESUME" });
     const r = await d.queue.resume(job);
     if (!r) throw Object.assign(Error("RESUME_NOT_IN_CLOUD"), { code: "RESUME_NOT_IN_CLOUD" });
     const bytes = b64bytes(r.b64);
@@ -166,9 +199,10 @@ export async function runCloudJob(job: CloudJob, d: {
     await Deno.writeFile(resumePath, bytes, { mode: 0o600 });
     await Deno.writeTextFile(factsPath, JSON.stringify(factsFromPayload(p)), { mode: 0o600 });
     await authorize("before_engine");
+    if (d.beforeEngine) await d.beforeEngine();
     let effectRequested = false, effectAuthorized = false;
     began = true;
-    run = await d.runEngine(["--url", job.url, "--facts", factsPath, "--resume", resumePath, "--submit", "--approved", p.engine_approval], undefined, {
+    const drive = () => d.runEngine(["--url", job.url, "--facts", factsPath, "--resume", resumePath, "--submit", "--approved", p.engine_approval], undefined, {
       beforeEffect: async () => {
         if (effectRequested) throw Error("CARD_CLOUD_AUTH_PROTOCOL");
         effectRequested = true;
@@ -176,7 +210,23 @@ export async function runCloudJob(job: CloudJob, d: {
         effectAuthorized = true;
       },
     });
+    run = await drive();
+    // MASS APPLY (2026-11-01): the engine's browser itself failed (DRIVER_ERROR: a crash or a timeout under load, not the
+    // employer's page). Driven once more, under the same lease, ONLY when the run provably never reached Submit: the
+    // Submit authorization (beforeEffect, asked right before the one click) was never requested, and the engine says
+    // nothing left the browser (not_submitted). Its own exactly-once store refuses a resend of anything it recorded as
+    // sent. Authorized again before the second run. Reached Submit and then failed: recorded unknown, never resent.
+    const crashed = () => run?.result?.state === "not_submitted" && run?.result?.reason === "DRIVER_ERROR";
+    if (crashed() && !effectRequested) {
+      log(`${job.id}: the browser failed before Submit (DRIVER_ERROR); driven once more`);
+      await authorize("before_engine");
+      run = await drive();
+    }
+    // Whichever run was last: once ANY run reached Submit (the authorization was asked), a crash is never "not sent".
+    if (crashed() && effectRequested) run = { ...run, result: { ...run.result, state: "unknown_outcome", reason: "DRIVER_ERROR_AT_SUBMIT" } };
     if (["confirmed", "submitted_unconfirmed"].includes(run?.result?.state || "") && !effectAuthorized) throw Error("CARD_CLOUD_AUTH_REQUIRED");
+    // Refused at the page's open, before anything was filled, and no effect was ever asked for: nothing was sent.
+    putBack = !!d.requeueRefusal && !effectRequested && sentNothingRefusal(run?.result) !== null;
     s = settle(run?.result ?? null);
     if (s.state === "unknown_outcome" && d.stopping?.()) s = { ...s, outcome: "interrupted", errorKind: "WORKER_STOPPED" };
   } catch (e: any) {
@@ -191,6 +241,12 @@ export async function runCloudJob(job: CloudJob, d: {
       : settle({ state: "not_submitted", reason: code });
   } finally {
     await Deno.remove(dir, { recursive: true }).catch(() => {});
+  }
+  if (putBack) {
+    log(`${job.id}: the employer's site refused before anything was sent (HOST_RATE_LIMITED); it goes back to the queue`);
+    return { id: job.id, user_id: job.user_id, state: "refused", reason: "HOST_RATE_LIMITED", outcome: "not_sent" as Outcome, errorKind: "HOST_RATE_LIMITED",
+      recorded: false, requeue: true, status: typeof run?.result?.status === "number" ? run.result.status as number : null,
+      ...(typeof run?.result?.retry_after_s === "number" ? { retry_after_s: run.result.retry_after_s as number } : {}) };
   }
   const evidence: Record<string, unknown> = await evidenceOf(job, run, s, { started, finished: now() });
   // Ask, never guess: a stop on required fields with no confirmed fact (needs_answers) puts each one to the person as an
@@ -207,6 +263,10 @@ export async function runCloudJob(job: CloudJob, d: {
     }
     if ((Array.isArray(result.questions) ? result.questions.length : 0) > questions.length) evidence.not_asked_by_text = "typed on the form (an identity or bank number), never by text";
   }
+  if (began && d.beforeFinish) {
+    try { await d.beforeFinish({ state: s.state, reason: s.reason, outcome: s.outcome, errorKind: s.errorKind, evidence }); }
+    catch { /* the journal could not keep it: the record below is still made */ }
+  }
   let recorded = false;
   for (let i = 0; i < 4 && !recorded; i++) {
     try {
@@ -217,49 +277,160 @@ export async function runCloudJob(job: CloudJob, d: {
     }
   }
   log(`${job.id}: ${s.state} (${s.outcome}${s.errorKind ? ", " + s.errorKind : ""})${recorded ? "" : "; NOT RECORDED: the queue marks it unknown after 15 minutes"}`);
-  return { id: job.id, user_id: job.user_id, ...s, recorded };
+  // The seconds a host that refused for load asked for (HOST_RATE_LIMITED), for the shared back-off (mass-run.ts refusal).
+  const retry = typeof run?.result?.retry_after_s === "number" ? { retry_after_s: run.result.retry_after_s as number } : {};
+  return { id: job.id, user_id: job.user_id, ...s, recorded, ...retry };
 }
 
-// The loop: up to `contexts` applications at a time (default 3, at most 6), one per engine process and so one per
-// browser context; a slot that frees is filled from the next claim. A queue that cannot be read waits and asks again.
-// stop() ends claiming; the applications in flight finish and are recorded.
+// The loop (owner D-MS-2, 2026-10-27: no product volume cap, safety pacing only): claims approved applications in
+// batches (MASS_SUBMIT_CLAIM_BATCH) and runs up to `concurrency` at once (MASS_SUBMIT_CONCURRENCY, or CLOUD_CONTEXTS as
+// before), one engine process and so one browser context per job, each employer host paced (MASS_SUBMIT_HOST_MAX at once,
+// MASS_SUBMIT_HOST_SPACING_MS between starts, widened after a verification check; mass-run.ts). A queue that cannot be
+// read waits and asks again. stop() ends claiming; the applications in flight finish and are recorded, and any claimed
+// but not started goes back to the queue, the same job, to run later once (queue.putBack, 20261029190000; nothing was
+// sent; a database without it records it not_submitted). With a journal (CLOUD_JOURNAL_DIR) a worker that died leaves
+// each started job recorded unknown_outcome on its next start (never re-driven) and each claimed-but-unstarted one run
+// under its lease, or put back when its lease budget has no time left.
 export async function cloudLoop(o: {
   queue: CloudQueue;
   runEngine: RunEngine;
   stop: () => boolean;
   contexts?: number;
+  pacing?: Partial<Pacing>;
+  journal?: Journal<CloudJob>;
+  // The hosts' refusals shared by every instance (mass-run.ts dbHostGate); absent, this process's own.
+  gate?: HostGate;
+  drain?: boolean;
   idleMs?: number;
   tmpRoot?: string;
   sleep?: (ms: number) => Promise<void>;
   log?: (line: string) => void;
 }) {
-  const n = Math.max(1, Math.min(6, Math.floor(o.contexts ?? 3)));
-  const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const log = o.log ?? ((l: string) => console.log(l));
-  const inFlight = new Set<Promise<unknown>>();
+  // How many at once: `contexts` or the pacing's concurrency; unset, this machine's capacity (mass-run.ts machineSlots).
+  const pacing = pacingFrom(() => undefined, { ...(o.contexts !== undefined ? { concurrency: Math.max(1, Math.floor(o.contexts)) } : {}), ...o.pacing });
   const done: Awaited<ReturnType<typeof runCloudJob>>[] = [];
-  while (!o.stop()) {
-    const free = n - inFlight.size;
-    let jobs: CloudJob[] = [];
-    if (free > 0) {
+  const finishOnce = async (job: CloudJob, state: string, reason: string, outcome: Outcome, errorKind: string) => {
+    const evidence = { reason, by: "cloud" };
+    for (let i = 0; i < 4; i++) {
       try {
-        jobs = await o.queue.claim(free);
+        await o.queue.finish(job, state, evidence, outcome, errorKind);
+        return true;
       } catch (e: any) {
-        log(`The queue could not be read (${e?.message ?? e}); asking again shortly. Nothing was run.`);
+        // A claim the database already closed (its 15-minute sweep): nothing is left to record.
+        if (/invalid apply (claim|transition)/i.test(String(e?.body ?? e?.message ?? ""))) return true;
+        if (i < 3) await new Promise((r) => setTimeout(r, 50 * 2 ** i));
       }
     }
-    for (const job of jobs.slice(0, free)) {
-      const p: Promise<unknown> = runCloudJob(job, { queue: o.queue, runEngine: o.runEngine, tmpRoot: o.tmpRoot, log, stopping: o.stop })
-        .then((r) => { done.push(r); })
-        .finally(() => inFlight.delete(p));
-      inFlight.add(p);
-    }
-    if (!jobs.length) {
-      if (inFlight.size >= n || free <= 0) await Promise.race(inFlight);
-      else await Promise.race([sleep(o.idleMs ?? 15_000), ...inFlight]);
-    }
-  }
-  await Promise.all(inFlight);
+    return false;
+  };
+  await massRun<CloudJob>({
+    claim: (n) => o.queue.claim(n),
+    onClaimError: (e: any) => {
+      log(`The queue could not be read (${e?.message ?? e}); asking again shortly. Nothing was run.`);
+      return "wait";
+    },
+    run: async (job, onStart, onResult) => {
+      const r: any = await runCloudJob(job, { queue: o.queue, runEngine: o.runEngine, tmpRoot: o.tmpRoot, log, stopping: o.stop, beforeEngine: onStart,
+        requeueRefusal: typeof o.queue.requeue === "function", beforeFinish: onResult });
+      if (r.requeue) return { state: r.state, reason: r.reason, recorded: false, retry_after_s: r.retry_after_s ?? null, requeue: true, status: r.status ?? null };
+      done.push(r);
+      return { state: r.state, reason: r.reason, recorded: r.recorded, retry_after_s: (r as { retry_after_s?: number }).retry_after_s ?? null };
+    },
+    // The site refused before anything was sent: the same job back to the queue until the site allows (its approval and
+    // hash kept). A database without the requeue records it not sent, as before. If it cannot be written at all, the
+    // database's sweep closes the drive as unknown after 15 minutes (never driven again).
+    requeue: async (job, q) => {
+      for (let i = 0; i < 4; i++) {
+        try {
+          const nb = await o.queue.requeue!(job, q.reason, q.retryAfterS, q.until);
+          if (nb === null) break;
+          log(`${job.id}: queued again (nothing was sent; the employer's site asked us to wait; runs again after ${new Date(nb).toISOString()})`);
+          const r = { id: job.id, user_id: job.user_id, state: "queued", reason: "HOST_RATE_LIMITED", outcome: "not_sent" as Outcome, errorKind: "HOST_RATE_LIMITED", recorded: true };
+          done.push(r);
+          return { state: "queued", reason: "HOST_RATE_LIMITED", recorded: true, not_before: nb };
+        } catch (e: any) {
+          const text = String(e?.body ?? e?.message ?? e);
+          if (requeueMissing(text)) break;
+          if (/invalid apply (claim|transition)/i.test(text)) return { state: "closed", reason: "HOST_RATE_LIMITED", recorded: true };
+          if (i < 3) await new Promise((r) => setTimeout(r, 50 * 2 ** i));
+          else return { state: "unrecorded", reason: "HOST_RATE_LIMITED", recorded: false };
+        }
+      }
+      const recorded = await finishOnce(job, "not_submitted", "HOST_RATE_LIMITED", "not_sent", "HOST_RATE_LIMITED");
+      log(`${job.id}: not_submitted (not_sent, HOST_RATE_LIMITED)${recorded ? "" : "; NOT RECORDED: the queue marks it unknown after 15 minutes"}`);
+      const r = { id: job.id, user_id: job.user_id, state: "not_submitted", reason: "HOST_RATE_LIMITED", outcome: "not_sent" as Outcome, errorKind: "HOST_RATE_LIMITED", recorded };
+      done.push(r);
+      return r;
+    },
+    // Claimed and never started (the scheduler cleared its journal line first): the same job back to the queue, to run
+    // later once (owner: back off, then RESUME). A database that cannot put it back records it not sent, as before.
+    putBack: typeof o.queue.putBack !== "function" ? undefined : async (job, why, until) => {
+      for (let i = 0; i < 4; i++) {
+        try {
+          const nb = await o.queue.putBack!(job, why, until);
+          if (nb === null) break;
+          log(`${job.id}: queued again (not started: ${why.split(":")[0]}; nothing was sent; runs later, after ${new Date(nb).toISOString()})`);
+          done.push({ id: job.id, user_id: job.user_id, state: "queued", reason: why, outcome: "not_sent" as Outcome, errorKind: why.split(":")[0], recorded: true });
+          return { state: "queued", reason: why, recorded: true, not_before: nb };
+        } catch (e: any) {
+          if (/invalid apply (claim|transition)/i.test(String(e?.body ?? e?.message ?? e))) return { state: "closed", reason: why, recorded: true };
+          if (i < 3) await new Promise((r) => setTimeout(r, 50 * 2 ** i));
+        }
+      }
+      const recorded = await finishOnce(job, "not_submitted", why, "not_sent", why);
+      log(`${job.id}: not_submitted (not_sent, ${why})${recorded ? "" : "; NOT RECORDED: the queue marks it unknown after 15 minutes"}`);
+      const r = { id: job.id, user_id: job.user_id, state: "not_submitted", reason: why, outcome: "not_sent" as Outcome, errorKind: why, recorded };
+      done.push(r);
+      return r;
+    },
+    unstarted: async (job, why) => {
+      const recorded = await finishOnce(job, "not_submitted", why, "not_sent", why);
+      log(`${job.id}: not_submitted (not_sent, ${why})${recorded ? "" : "; NOT RECORDED: the queue marks it unknown after 15 minutes"}`);
+      const r = { id: job.id, user_id: job.user_id, state: "not_submitted", reason: why, outcome: "not_sent" as Outcome, errorKind: why, recorded };
+      done.push(r);
+      return r;
+    },
+    // The worker died after the engine answered and before the queue recorded it: that answer is recorded now (the board's
+    // own confirmation, or its refusal), under the same lease; never driven again. A lease the database already swept is
+    // left as the sweep recorded it (unknown; the employer's email can still confirm it).
+    recovered: async (job, res) => {
+      const state = OUTCOMES.has(res.state) ? res.state : "unknown_outcome";
+      const outcome = (["submitted", "bot_check", "error", "not_sent", "interrupted"].includes(String(res.outcome)) ? res.outcome : "error") as Outcome;
+      const evidence = { ...(res.evidence ?? {}), by: "cloud", recovered_from_journal: true };
+      let recorded = false;
+      for (let i = 0; i < 4 && !recorded; i++) {
+        try {
+          await o.queue.finish(job, state, evidence, outcome, res.errorKind ?? null);
+          recorded = true;
+        } catch (e: any) {
+          if (/invalid apply (claim|transition)/i.test(String(e?.body ?? e?.message ?? ""))) { recorded = true; break; }
+          if (i < 3) await new Promise((r) => setTimeout(r, 50 * 2 ** i));
+        }
+      }
+      log(`${job.id}: ${state} (recorded from the journal: the worker stopped after the employer answered)${recorded ? "" : "; NOT RECORDED: the queue marks it unknown after 15 minutes"}`);
+      const r = { id: job.id, user_id: job.user_id, state, reason: String(res.reason ?? ""), outcome, errorKind: res.errorKind ?? null, recorded };
+      done.push(r as any);
+      return r;
+    },
+    orphaned: async (job) => {
+      const reason = "the worker stopped while this application ran; not retried";
+      const recorded = await finishOnce(job, "unknown_outcome", reason, "interrupted", "WORKER_STOPPED");
+      log(`${job.id}: unknown_outcome (interrupted, WORKER_STOPPED)${recorded ? "" : "; NOT RECORDED: the queue marks it unknown after 15 minutes"}`);
+      const r = { id: job.id, user_id: job.user_id, state: "unknown_outcome", reason, outcome: "interrupted" as Outcome, errorKind: "WORKER_STOPPED", recorded };
+      done.push(r);
+      return r;
+    },
+    ...(typeof o.queue.begin === "function" ? { begin: (jobs: CloudJob[]) => o.queue.begin!(jobs) } : {}),
+    pacing,
+    stop: o.stop,
+    journal: o.journal,
+    gate: o.gate,
+    drain: o.drain,
+    idleMs: o.idleMs ?? 15_000,
+    sleep: o.sleep,
+    log,
+  });
   return done;
 }
 
@@ -372,13 +543,41 @@ export function restQueue(o: { url: string; key: string; fetch?: typeof fetch })
     async claim(limit) {
       const rows = await rpc("career_apply_cloud_claim", { p_limit: limit });
       if (!Array.isArray(rows)) throw Error("APPLY_QUEUE_UNAVAILABLE");
-      return rows;
+      // Only rows this claim took (an id and a lease): a database before 20261030140000 could return an all-null row.
+      return rows.filter((r: any) => r && typeof r.id === "string" && typeof r.lease_token === "string");
     },
     authorize: (job, phase) => authorizeCurrentCloudJob(job, phase, { rpc }),
     resume: (job) => rpc("career_apply_cloud_resume", { p_id: job.id, p_lease: job.lease_token }),
     ask: (job, questions) => rpc("career_apply_cloud_ask", { p_id: job.id, p_lease: job.lease_token, p_questions: questions }),
     finish: (job, state, evidence, outcome, errorKind) =>
       rpc("career_apply_cloud_finish", { p_id: job.id, p_lease: job.lease_token, p_state: state, p_evidence: evidence, p_outcome: outcome, p_error_kind: errorKind }),
+    async requeue(job, reason, retryAfterS, until) {
+      try {
+        const r = await rpc("career_apply_requeue_refused_for", { p_id: job.id, p_lease: job.lease_token, p_reason: reason,
+          p_retry_after_s: retryAfterS, p_until: new Date(until).toISOString() });
+        const nb = Date.parse(r?.not_before);
+        return Number.isFinite(nb) ? nb : until;
+      } catch (e: any) {
+        if (e?.status === 404 || requeueMissing(String(e?.body ?? ""))) return null;
+        throw e;
+      }
+    },
+    async putBack(job, why, until) {
+      try {
+        const r = await rpc("career_apply_requeue_unstarted_for", { p_id: job.id, p_lease: job.lease_token, p_why: unstartedWhy(why),
+          p_until: new Date(until).toISOString() });
+        const nb = Date.parse(r?.not_before);
+        return Number.isFinite(nb) ? nb : until;
+      } catch (e: any) {
+        const body = String(e?.body ?? "");
+        if (e?.status === 404 || requeueMissing(body) || /career_apply_requeue_unstarted|invalid unstarted reason/i.test(body)) return null;
+        // No longer this worker's claim: nothing to record (the caller treats it as closed).
+        if (/invalid apply (claim|transition)/i.test(body)) throw e;
+        // The database refused it for another reason (a card approval expired since): recorded not sent instead.
+        if (typeof e?.status === "number" && e.status >= 400 && e.status < 500) return null;
+        throw e;
+      }
+    },
     async gatePresent() {
       try {
         return typeof (await rpc("career_apply_cloud_open", { p_portal: "lever" })) === "boolean";
@@ -412,8 +611,9 @@ export async function preflight(o: { queue: CloudQueue; key: string; envFile?: s
   return { ok: true as const };
 }
 
-// deno run -A workers/career-cloud/worker.ts, with SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, CLOUD_CONTEXTS (3),
-// CLOUD_EVIDENCE_DIR and UPMORE_CLOUD_ENV_FILE from the systemd env file (docs/launch/CLOUD-WORKER.md).
+// deno run -A workers/career-cloud/worker.ts, with SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, CLOUD_EVIDENCE_DIR and
+// UPMORE_CLOUD_ENV_FILE from the systemd env file (docs/launch/CLOUD-WORKER.md); the pacing names MASS_SUBMIT_* (or
+// CLOUD_CONTEXTS for how many at once) and CLOUD_JOURNAL_DIR are optional (docs/launch/CLOUD-RUNNER.md).
 if (import.meta.main) {
   const env = (k: string) => Deno.env.get(k) || "";
   const url = env("SUPABASE_URL"), key = env("SUPABASE_SERVICE_ROLE_KEY");
@@ -438,7 +638,19 @@ if (import.meta.main) {
       console.log("Stopping: no new claims; the applications in flight finish and are recorded (systemd: KillMode=mixed).");
     });
   }
-  const contexts = Number(env("CLOUD_CONTEXTS") || 3);
-  console.log(`Cloud worker up: ${contexts} contexts. The kill switch and the gate are read from the database on every claim.`);
-  await cloudLoop({ queue, runEngine: cloudEngineRunner({ root, evidenceRoot }), stop: () => stopping, contexts });
+  // No number of ours (owner, 2026-10-27): as many at once as this machine holds unless the owner sets one; a site slows
+  // only when it refuses. Many instances may run this at once (docs/launch/CLOUD-RUNNER.md "Many instances").
+  const pacing = pacingFrom((k) => Deno.env.get(k), /^\d+$/.test(env("CLOUD_CONTEXTS")) ? { concurrency: Number(env("CLOUD_CONTEXTS")) } : {});
+  const journalDir = env("CLOUD_JOURNAL_DIR") || `${evidenceRoot}/journal`;
+  console.log(`Cloud worker up: up to ${pacing.concurrency} at once on this machine; a site that refuses is backed off for every instance. ` +
+    "The kill switch and the gate are read from the database on every claim.");
+  // Every instance shares the hosts' refusals through the database (career_apply_host_backoff_*; until the database lane
+  // ships them, each instance backs off on its own and says so once).
+  const gateRpc = { rpc: async (name: string, args?: unknown) => {
+    const r = await fetch(`${url.replace(/\/$/, "")}/rest/v1/rpc/${name}`, { method: "POST",
+      headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify(args ?? {}) });
+    const text = await r.text();
+    return r.ok ? { data: text ? JSON.parse(text) : null, error: null } : { data: null, error: { message: `${r.status} ${text.slice(0, 200)}` } };
+  } };
+  await cloudLoop({ queue, runEngine: cloudEngineRunner({ root, evidenceRoot }), stop: () => stopping, pacing, journal: fileJournal<CloudJob>(journalDir), gate: dbHostGate(gateRpc) });
 }

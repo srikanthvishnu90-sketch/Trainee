@@ -5,7 +5,8 @@
 //   external   touches the world (send, submit, message); NEVER runs here. It becomes a pending approval the
 //              person approves on its exact payload (WO-005), and the model is told it is waiting.
 // Messages use the Anthropic block shape (text / tool_use / tool_result); _shared/model_gateway.ts converts to OpenAI.
-import { bracketUntraced, factSources, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, unsourcedMoney, untracedFacts, waiverSolicits } from "./reply_guards.ts";
+import { bracketUntraced, factSources, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, closedNotes, unsourcedFigures, untracedFacts, waiverSolicits } from "./reply_guards.ts";
+import { urlsIn } from "../channel_shape.ts";
 import { STANDING_REFUSED, standingRefusal } from "./memory.ts";
 export type Effect = "read" | "write_own" | "external";
 // `turn` is this turn's own record, filled by runAgentTurn: the person's message (a confirmation must come from it) and
@@ -15,7 +16,7 @@ export type Effect = "read" | "write_own" | "external";
 // (WO-038's contract): the same text as separate messages, so a texting channel delivers each whole and in order.
 // `before` (WO-091b): the previous turn's reply as the person saw it ("" on a first turn), so a tool can check that "the
 // first one" is a posting that reply showed. Undefined only for a caller that runs a tool without the loop's history.
-export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; show?: { intent: string; text: string; parts?: string[] } } }
+export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[] } } }
 export interface ToolSpec {
   name: string;
   description: string;
@@ -33,6 +34,13 @@ export interface TurnResult {
   pending_approvals: { tool: string; input: unknown; summary: string }[];
   stopped: "final" | "max_steps" | "model_error" | "incomplete_reply";
   show?: { intent: string; text: string; parts?: string[] };
+  // JOB CARDS: the postings the turn's last successful search_jobs returned, for channels that show them as cards.
+  postings?: unknown[];
+  // REPLY SHAPE: the documents the turn staged with attach_document (each passed the fact guards), and the URLs the turn may
+  // show (those a tool returned or the person typed).
+  attachments?: { filename: string; content: string }[];
+  linksSeen?: string[];
+  fileLinks?: string[]; // FILE KINDS: links to the files create_file made this turn, minted by code; the channel sends them, the model never writes them
 }
 
 export const MAX_STEPS_REPLY = "I couldn't finish that in one go, so I stopped partway. Nothing was sent or submitted. Tell me which part to do first.";
@@ -50,6 +58,8 @@ export const INCOMPLETE_AFTER_SAVE_REPLY = "I saved what you told me, but couldn
 // An unbacked claim is put to the model once (do it, or say it plainly); if it stands, only its sentences go. With
 // nothing left, the reply is this line: it promises nothing, because code cannot know a tool could do it.
 export const CLAIM_UNBACKED_REPLY = "I didn't change anything this time.";
+// A reply whose every sentence carried a key-shaped string (ADVERSARIAL ROUND 2): nothing of it is shown.
+export const SECRET_DROPPED_REPLY = "I can't share keys, tokens or passwords, and I didn't change anything.";
 const ALERT_NOUN = "(?:(?:an?|your|the|new|these|those|\\d+) )?(?:(?:job|daily|instant|new) )?(?:alerts?|job watch(?:es)?)\\b";
 const I_HAVE = "\\bi(?:'ve| have)? (?:just |now |also )?";
 const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write" }[] = [
@@ -57,8 +67,14 @@ const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write" }[] = [
   { kind: "postings queued", by: ["queue_applications"], said: new RegExp(`\\b(?:were|was|have been|has been|are now|is now) queued\\b|${I_HAVE}queued\\b|^queued\\b|(?:^|${I_HAVE})added (?:\\d+|them|it|these|those|all)\\b[^.]{0,30}\\bto your (?:apply )?queue`, "i") },
   { kind: "an application tracked", by: ["track_application"], said: new RegExp(`\\bi(?:'m| am) (?:now )?tracking\\b|\\bnow tracking\\b|(?:^|${I_HAVE})added (?:it|this|that|them)\\b[^.]{0,20}\\bto your (?:tracker|applications)|\\b(?:is|are) now (?:on|in) your tracker|${I_HAVE}(?:tracked|logged)\\b|^tracked\\b`, "i") },
   { kind: "something saved", by: "any_write", said: new RegExp(`\\bkept for good\\b|\\b(?:saved|kept)(?::| as (?:an?|your)\\b| for good\\b| it\\b| that\\b| this\\b| your\\b)|${I_HAVE}(?:saved|kept|stored|recorded|remembered|added|updated) (?:it|that|this|them|these|those|your|to your|the (?:fact|instruction|preference|rule|note|setting)s?\\b|as (?:an?|your)\\b|for (?:good|you|later)\\b)|\\bi(?:'ll| will) (?:keep|remember) (?:that|this|it)\\b|^(?:done|all set)\\b.{0,60}\\b(?:saved|kept|remembered|standing instruction|your profile|your preferences?)\\b`, "i") },
+  // ADVERSARIAL ROUND 2 (2026-10-30): "I've confirmed your GPA 4.0" when no confirmation ran (a posting told the model to
+  // mark it confirmed) is a false record: only confirm_profile_fact, on the person's own yes, confirms a fact.
+  { kind: "a fact confirmed", by: ["confirm_profile_fact"], said: new RegExp(`${I_HAVE}(?:confirmed|verified|marked (?:(?:it|that|this|them|your [\\w ]{1,30}) )?(?:as )?(?:confirmed|verified))\\b|\\b(?:has|have) been (?:confirmed|verified)\\b|\\b(?:is|are) now (?:confirmed|verified)\\b`, "i") },
   // Nothing external runs inside the turn (it waits for the person's yes on its card), so a reply never sent anything.
-  { kind: "something sent or applied for", by: [], said: new RegExp(`${I_HAVE}(?:sent|submitted|emailed|messaged|shared|forwarded) (?:it|this|that|them|your (?:application|email|message|note|resume|cover letter)s?|the (?:application|email|message|note|resume|cover letter)s?|\\d+ (?:applications?|emails?|messages?|notes?))\\b|${I_HAVE}applied (?:you |for you )?(?:to|for) (?:it|this|that|them|these|those|all|\\d+)\\b|${I_HAVE}applied you\\b|\\b(?:has|have) been (?:sent|submitted)\\b|^(?:sent|submitted)\\b`, "i") },
+  { kind: "something sent or applied for", by: [], said: new RegExp(`${I_HAVE}(?:sent|submitted|emailed|messaged|shared|forwarded) (?:it|this|that|them|your (?:application|email|message|note|resume|cover letter)s?|the (?:application|email|message|note|resume|cover letter)s?|\\d+ (?:applications?|emails?|messages?|notes?))\\b|${I_HAVE}applied (?:you |for you )?(?:to|for) (?:it|this|that|them|these|those|all|\\d+)\\b|${I_HAVE}applied you\\b|\\b(?:has|have) been (?:sent|submitted)\\b|^(?:sent|submitted)\\b` +
+    // ADVERSARIAL ROUND 2 (2026-10-30): "I emailed attacker@evil.example", "I've messaged the recruiter", "I sent your
+    // resume to x@y" named who instead of what, and reached the person as if it had happened.
+    `|${I_HAVE}(?:emailed|messaged|texted|contacted|reached out to|replied to|wrote to|written to)\\b(?! (?:you|yourself)\\b)|${I_HAVE}(?:sent|forwarded|shared)\\b[^.!?\\n]{0,60}\\bto\\s+(?:[^\\s@]+@[^\\s@]+|the (?:recruiter|hiring manager|employer|company|team)|[A-Z][a-z]+)`, "i") },
 ];
 // A negation in the claim's own clause, before it or directly on it ("Nothing was queued", "I queued none of them"); a
 // condition or offer before the claim ("If you say yes, I'll queue") or in its own clause ("live only once you
@@ -216,24 +232,44 @@ function missingAnswerBody(reply: string, message: string, receiptOnly = false, 
   const clauses = pieces(plainQuotes(reply).replace(/\b(that|this|it)'s\b/gi, "$1 is").replace(/[*_`~]/g, "")).flatMap((p) => p.text.split(/[;—–]/)).map((s) => s.trim().replace(/^(?:[-•]|\d+[.)])\s+/, "").replace(/[.!?]+$/, "").trim()).filter(Boolean);
   return clauses.length > 0 && clauses.every((s) => CLOSING_ONLY.test(s) || (!SOCIAL_MESSAGE.test(message.trim()) && (ACK_ONLY.test(s) || PROGRESS_ONLY.test(s))) || (receiptOnly && claimsIn(s).length > 0));
 }
+// REPLY SHAPE: what the turn staged and which links it may show ride the result, whichever way the turn ended.
+export async function runAgentTurn(o: Parameters<typeof runAgentTurnInner>[0]): Promise<TurnResult> {
+  const r = await runAgentTurnInner(o);
+  const attachments = o.ctx.turn?.attachments ?? [];
+  const seen = o.ctx.turn?.seen ?? [];
+  const typed = [o.said ?? o.message, ...o.history.filter((m: any) => m && m.role === "user").map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))].join("\n");
+  const fileLinks = o.ctx.turn?.fileLinks ?? [];
+  return { ...r, ...(attachments.length ? { attachments } : {}), ...(fileLinks.length ? { fileLinks } : {}), linksSeen: urlsIn(`${typed}\n${seen.join("\n")}`) };
+}
 const COMPLETENESS_REPAIR = "The previous draft did not contain an answer body after output validation. Answer the person's original request using only the conversation and successful tool results already available. Give the requested content, or ask a concrete question for missing information. A generic acknowledgement, action receipt, closing confirmation or unresolved fill-in field is not the requested answer. Keep placeholders only in a draft or template the person requested. Do not invent personal facts or claim actions. Tools are disabled for this single repair; do not repeat any action.";
 
-export async function runAgentTurn(o: { system: string; history: any[]; message: string; tools: ToolSpec[]; model: ModelFn; ctx: ToolCtx; maxSteps?: number }): Promise<TurnResult> {
+// `said` (ADVERSARIAL ROUND 2, 2026-10-30): the person's own words when `message` also carries what code appended to them
+// (an attached file's name and text). The model reads `message`; every tool check that asks "did the person say this"
+// (a confirmation, a kept instruction, a fact, a contact) reads `said`, and the appended text rides `turn.attached`.
+async function runAgentTurnInner(o: { system: string; history: any[]; message: string; said?: string; tools: ToolSpec[]; model: ModelFn; ctx: ToolCtx; maxSteps?: number }): Promise<TurnResult> {
   const max = o.maxSteps ?? 6;
   const byName = new Map(o.tools.map((t) => [t.name, t]));
   const toolDefs = o.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
   const messages: any[] = [...o.history, { role: "user", content: [{ type: "text", text: o.message }] }];
+  let found: unknown[] = [];
   const tool_calls: TurnResult["tool_calls"] = [], pending_approvals: TurnResult["pending_approvals"] = [];
   const last = [...o.history].reverse().find((m) => m && m.role === "assistant");
   const before = !last ? "" : typeof last.content === "string" ? last.content
     : Array.isArray(last.content) ? last.content.filter((b: any) => b && b.type === "text").map((b: any) => String(b.text ?? "")).join("\n") : "";
-  o.ctx.turn = { message: o.message, added: [], before };
   const saved = () => tool_calls.some((t) => t.ok && t.effect === "write_own");
   // WO-091a: what this turn's tools returned is a source for what the reply may say about the person, and names the
   // postings a raw job id stands for.
   const seen: string[] = [];
-  const typed = [o.message, ...o.history.filter((m: any) => m && m.role === "user").map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))].join("\n");
+  const said = o.said ?? o.message;
+  o.ctx.turn = { message: said, added: [], before, attachments: [], seen, ...(said !== o.message ? { attached: o.message.startsWith(said) ? o.message.slice(said.length).trim() : o.message } : {}) };
+  const typed = [said, ...o.history.filter((m: any) => m && m.role === "user").map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))].join("\n");
   const toolNames = o.tools.map((t) => t.name);
+  // FILE KINDS: the same fact guard attach_document uses, handed to create_file: what the person never said and no tool returned is refused.
+  o.ctx.turn.guard = (t: string) => {
+    const known = new Set(urlsIn(`${typed}\n${seen.join("\n")}`));
+    const sources = factSources({ state: o.ctx.state, message: o.message, history: o.history, results: seen });
+    return [...untracedFacts(t, sources).map((f) => f.word), ...unsourcedFigures(t, [typed, ...seen, ...sources]).map((m) => m.figure), ...urlsIn(t).filter((l) => !known.has(l))];
+  };
   let steps = 0, checked = false, ask = false, repairing = false;
   let repairNote = COMPLETENESS_REPAIR;
   // WO-061 (H028, H035, H007, H033): code's review of its own draft rides in that one call's system prompt, never in
@@ -243,7 +279,7 @@ export async function runAgentTurn(o: { system: string; history: any[]; message:
   // WO-106 (eval E010, 2026-10-21: the whole reply was "Tell me if that's off."): what the model wrote beside a tool call
   // (the answer, then add_profile_fact) is kept; when the last message is only a short trailer, the answer goes first.
   const earlier: string[] = [];
-  const incomplete = (): TurnResult => ({ reply: saved() ? INCOMPLETE_AFTER_SAVE_REPLY : INCOMPLETE_REPLY, steps, tool_calls, pending_approvals, stopped: "incomplete_reply" });
+  const incomplete = (): TurnResult => ({ reply: saved() ? INCOMPLETE_AFTER_SAVE_REPLY : INCOMPLETE_REPLY, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "incomplete_reply" });
   while (steps < max) {
     steps++;
     let res;
@@ -252,8 +288,8 @@ export async function runAgentTurn(o: { system: string; history: any[]; message:
     try { res = await o.model({ system, messages, tools: toolDefs, max_tokens: MAX_TOKENS, ...(ask || repairing ? { tool_choice: { type: "none" } } : {}) }); }
     catch {
       const show = o.ctx.turn?.show; // what the person must read was already made: it is the reply
-      if (show) return { reply: show.text, steps, tool_calls, pending_approvals, stopped: "final", show };
-      return { reply: saved() ? MODEL_ERROR_AFTER_SAVE_REPLY : MODEL_ERROR_REPLY, steps, tool_calls, pending_approvals, stopped: "model_error" };
+      if (show) return { reply: show.text, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "final", show };
+      return { reply: saved() ? MODEL_ERROR_AFTER_SAVE_REPLY : MODEL_ERROR_REPLY, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "model_error" };
     }
     const content = Array.isArray(res && res.content) ? res.content : [];
     const uses = content.filter((b: any) => b && b.type === "tool_use");
@@ -265,7 +301,7 @@ export async function runAgentTurn(o: { system: string; history: any[]; message:
     // text-only repair as a filtered-away answer, inside the remaining step budget.
     if (res?.stop_reason === "max_tokens") {
       const show = o.ctx.turn?.show;
-      if (show) return { reply: show.text, steps, tool_calls, pending_approvals, stopped: "final", show };
+      if (show) return { reply: show.text, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "final", show };
       if (repairing || steps >= max) return incomplete();
       repairing = true;
       repairNote = "Your previous response reached its token limit before completing. Produce a concise complete answer. " + COMPLETENESS_REPAIR;
@@ -274,7 +310,7 @@ export async function runAgentTurn(o: { system: string; history: any[]; message:
     if (!uses.length) {
       let reply = content.filter((b: any) => b && b.type === "text").map((b: any) => b.text).join("").trim();
       const show = o.ctx.turn?.show;
-      if (show) return { reply: show.text, steps, tool_calls, pending_approvals, stopped: "final", show };
+      if (show) return { reply: show.text, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "final", show };
       // A model may write its answer beside a tool call, then finish with only a closing question. Recover that body
       // without a length heuristic; the assembled reply still passes every truth filter below. A substantive final
       // answer always supersedes earlier text. Once a repair starts, rejected earlier text must not be reintroduced.
@@ -287,15 +323,17 @@ export async function runAgentTurn(o: { system: string; history: any[]; message:
       // stands after that, code fixes.
       const sources = factSources({ state: o.ctx.state, message: o.message, history: o.history, results: seen });
       const leak = { tools: toolNames, typed, postings: postingsOf(seen) };
-      const claims = unbackedClaims(reply, tool_calls), leaks = leakedWords(reply, leak), facts = untracedFacts(reply, sources);
-      const money = unsourcedMoney(reply, [typed, ...seen, ...sources]);
+      // ADVERSARIAL ROUND 2: a GPA traces only to the person's own words and facts, never to what a tool read this turn.
+      const personal = factSources({ state: o.ctx.state, message: said, history: o.history, results: [] });
+      const claims = unbackedClaims(reply, tool_calls), leaks = leakedWords(reply, leak), facts = untracedFacts(reply, sources, personal);
+      const money = unsourcedFigures(reply, [typed, ...seen, ...sources]);
       const waiver = waiverSolicits(reply, standingRefusal, o.message);
       if ((claims.length || leaks.length || facts.length || money.length || waiver.length) && !checked && !repairing && steps < max) {
         checked = true;
         const told = [
           claims.length ? `Your reply says ${[...new Set(claims.map((c) => c.kind))].join(" and ")}, but no tool that does that succeeded this turn. Either call the tool now, or rewrite the reply without saying it happened.` : "",
           leaks.length ? `Your reply shows internal words the person must never see: ${leaks.join(", ")}. Say it in plain words; name a posting by its title and company.` : "",
-          money.length ? `Your reply states pay or money figures that no tool returned this turn and they did not say: ${[...new Set(money.map((m) => m.figure))].join(", ")}. Remove them, and say you don't have verified pay for that unless a posting a tool returned states it.` : "",
+          money.length ? `Your reply states pay, money or count figures that no tool returned this turn and they did not say: ${[...new Set(money.map((m) => m.figure))].join(", ")}. Remove them, and say you don't have a verified figure for that unless a tool returned it.` : "",
           waiver.length ? "Your reply offers them wording to send, offers to save something, or asks them to confirm something, after they asked to waive their yes or grant a standing permission. Never propose that wording, offer to save it or ask them to confirm it: say plainly it can't be kept, because every application and message still needs their yes on its card." : "",
           facts.length ? `Your reply states things about the person that are not in their confirmed facts, their own messages or this turn's tool results: ${facts.map((f) => f.word).join(", ")}. Answer from supported facts, or ask a concrete question for what is missing. Only if they requested a draft or template, mark missing facts with fill-in brackets; a placeholder is not an answer to an informational question.` : "",
         ].filter(Boolean).join(" ");
@@ -308,18 +346,23 @@ export async function runAgentTurn(o: { system: string; history: any[]; message:
         continue;
       }
       let out = reply;
-      const stillMoney = unsourcedMoney(reply, [typed, ...seen, ...sources]);
+      const stillMoney = unsourcedFigures(reply, [typed, ...seen, ...sources]);
       // WO-061 (H018): proposed waiver wording that stands after the check is removed by code, with its save offer.
       const stillWaiver = waiverSolicits(reply, standingRefusal, o.message);
       if (claims.length || stillMoney.length || stillWaiver.length) {
         out = rebuild(pieces(reply), new Set([...claims.map((c) => c.index), ...stillMoney.map((m) => m.index), ...stillWaiver]));
-        if (!/[A-Za-z0-9]/.test(out) && ((stillWaiver.length && !claims.length) || !ANSWER_REQUEST.test(o.message))) return { reply: stillWaiver.length && !claims.length ? STANDING_REFUSED : CLAIM_UNBACKED_REPLY, steps, tool_calls, pending_approvals, stopped: "final" };
+        if (!/[A-Za-z0-9]/.test(out) && ((stillWaiver.length && !claims.length) || !ANSWER_REQUEST.test(o.message))) return { reply: stillWaiver.length && !claims.length ? STANDING_REFUSED : CLAIM_UNBACKED_REPLY, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "final" };
         // WO-061 (H018 p1): after a waiver strip the refusal must still be there; if the person asked to waive their yes
         // and nothing left says it is still needed, code says it first.
         if (stillWaiver.length && standingRefusal(o.message) && !/\b(your yes|your approval|without (asking|approval|your)|needs? (your|their) (yes|ok|okay|approval)|not kept|can'?t keep|won'?t (share|send|apply|skip))\b/i.test(out)) out = `${STANDING_REFUSED}\n\n${out}`;
       }
       if (leakedWords(out, leak).length) out = stripLeaks(out, leak);
-      if (untracedFacts(out, sources).length) out = bracketUntraced(out, sources);
+      // RESEARCH ROUND 3: a posting read as closed this turn is never left sounding open.
+      const closed = closedNotes(out, seen);
+      if (closed.length) out = `${closed.join(" ")}\n\n${out}`;
+      if (untracedFacts(out, sources, personal).length) out = bracketUntraced(out, sources, personal);
+      // ADVERSARIAL ROUND 2: a key-shaped string never reaches the person (reply_guards.ts stripSecrets).
+      if (secretIn(out)) { out = stripSecrets(out); if (!/[A-Za-z0-9]/.test(out)) out = SECRET_DROPPED_REPLY; }
       // A successful write backs its receipt, but does not answer a request for content. A plain fact statement
       // can still end with a backed receipt; use the existing answer-request check rather than grading its prose.
       if (missingAnswerBody(out, o.message, requestsAnswerBody(o.message), sources)) {
@@ -330,7 +373,7 @@ export async function runAgentTurn(o: { system: string; history: any[]; message:
         if (!out.trim()) repairNote = "Your last answer was empty. " + COMPLETENESS_REPAIR;
         continue;
       }
-      return { reply: out, steps, tool_calls, pending_approvals, stopped: "final" };
+      return { reply: out, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "final" };
     }
     const pre = content.filter((b: any) => b && b.type === "text").map((b: any) => String(b.text ?? "")).join("").trim();
     if (pre) earlier.push(pre);
@@ -351,14 +394,25 @@ export async function runAgentTurn(o: { system: string; history: any[]; message:
       }
       try {
         const out = await t.run(input, o.ctx);
+        // REPLY SHAPE: a staged document passes the same guards as a reply (facts about the person, money, links) or the model is told why not.
+        const att = u.name === "attach_document" && out && typeof out === "object" ? (out as any).attachment : null;
+        if (att) {
+          const knownLinks = new Set(urlsIn(`${typed}\n${seen.join("\n")}`));
+          const sources = factSources({ state: o.ctx.state, message: o.message, history: o.history, results: seen });
+          const bad = [...untracedFacts(att.content, sources).map((f) => f.word), ...unsourcedFigures(att.content, [typed, ...seen, ...sources]).map((m) => m.figure),
+            ...urlsIn(att.content).filter((l) => !knownLinks.has(l))]; // exact match against links the person typed or a tool returned, never a substring (a cut-off or prefix URL is a different link)
+          if (bad.length) { throw new Error(`not attached: the file states things no tool returned this turn and the person did not say: ${[...new Set(bad)].slice(0, 8).join(", ")}. Remove them or mark them "not verified", then attach again.`); }
+          o.ctx.turn!.attachments!.push({ filename: att.filename, content: att.content });
+        }
         tool_calls.push({ name: t.name, ok: true, effect: t.effect });
         results.push({ type: "tool_result", tool_use_id: u.id, content: resultText(out) });
         seen.push(resultText(out));
+        if (u.name === "search_jobs" && out && Array.isArray((out as any).postings)) found = (out as any).postings.slice(0, 50);
       } catch (e) { if (e instanceof AskPerson) ask = true; fail(t.effect, e instanceof Error ? e.message : String(e), e); }
     }
     messages.push({ role: "user", content: results });
   }
   const show = o.ctx.turn?.show;
-  if (show) return { reply: show.text, steps, tool_calls, pending_approvals, stopped: "final", show };
-  return { reply: saved() ? MAX_STEPS_AFTER_SAVE_REPLY : MAX_STEPS_REPLY, steps, tool_calls, pending_approvals, stopped: "max_steps" };
+  if (show) return { reply: show.text, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "final", show };
+  return { reply: saved() ? MAX_STEPS_AFTER_SAVE_REPLY : MAX_STEPS_REPLY, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "max_steps" };
 }

@@ -5,6 +5,7 @@
 import { applyUrl, detectPortal, formUrlFor, postingKey } from "./posting_key.ts";
 import { COMPANY_COOLDOWN_DAYS, dailyLimit, type Limits, normCompany } from "./career_apply.ts";
 import { sameCompany, type TrackedApp } from "./career_mail.ts";
+import { contentOf, type GateResult, gatePicks } from "./career_apply_gate.ts";
 
 export interface Want { posting_key: string; url: string; company: string; title: string; queued_at: string }
 export interface WantRow extends Want { state: "waiting" | "taken" }
@@ -20,28 +21,39 @@ export interface WantStore {
 const NEVER = /(^|\.)(linkedin\.com|indeed\.com)$/i;
 const host = (url: string) => { try { return new URL(url).hostname; } catch { return ""; } };
 
-export interface Pick { url?: string; job_id?: string; company?: string; title?: string; location?: string }
+import type { PostingContent } from "./career_apply_gate.ts";
+export interface Pick { url?: string; job_id?: string; company?: string; title?: string; location?: string; content?: PostingContent }
 // WO-091b: a refused pick names the posting and the reason, so the model says exactly what happened. `url` and `why` are
 // the same refusal in WO-066's words, kept for its callers.
 // SERIAL-1490: `ask` marks a refusal that is a question to the person (a possible current-employer match): the posting
 // is not queued until they answer it, and the chat asks it once.
-export interface Refusal { posting: { job_id: string | null; company: string; title: string; url: string }; reason: string; url: string; why: string; ask?: "employer" }
-export function refusal(p: Pick, reason: string): Refusal {
+// `reason` is for the model (it may tell it what to do next, about "they"); `said` is the same refusal in words to the person
+// ("you", "your"), what a chat reply shows them. Without its own wording, `said` is the reason.
+export interface Refusal { posting: { job_id: string | null; company: string; title: string; url: string }; reason: string; said: string; url: string; why: string; ask?: "employer" | "fact" }
+export function refusal(p: Pick, reason: string, said = reason): Refusal {
   const url = String(p?.url ?? "").trim();
-  return { posting: { job_id: p?.job_id ? String(p.job_id) : null, company: String(p?.company ?? ""), title: String(p?.title ?? ""), url }, reason, url, why: reason };
+  return { posting: { job_id: p?.job_id ? String(p.job_id) : null, company: String(p?.company ?? ""), title: String(p?.title ?? ""), url }, reason, said, url, why: reason };
 }
+
+// One posting, compared: its key without case. A posting's id is unique on its board (a Greenhouse job number, a Lever or
+// Ashby posting id, a Workday requisition), so "jobs.lever.co/Acme/<id>" and "jobs.lever.co/acme/<id>" are one posting;
+// the key itself keeps the link's case (the board's own reads use it).
+export const samePosting = (key: string | null | undefined) => key ? key.toLowerCase() : null;
+// The posting a pick names: its board's form when it is known by its id (WO-078: a shelf posting shown on the employer's
+// own careers page), else its link. The same rule wantsFrom queues by.
+const pickLink = (p: Pick) => formUrlFor(String(p?.job_id ?? "")) ?? String(p?.url ?? "").trim();
 
 // The postings the brain picked, kept when each is a real application link the extension can open; refused with why.
 export function wantsFrom(picks: Pick[], now: number): { ok: Want[]; refused: Refusal[] } {
   const ok: Want[] = [], refused: Refusal[] = [], seen = new Set<string>();
   for (const p of picks) {
     // WO-078: a shelf posting is queued at its board's own form, whatever its public link (an employer's careers page).
-    const url = formUrlFor(String(p?.job_id ?? "")) ?? String(p?.url ?? "").trim();
-    if (NEVER.test(host(url))) { refused.push(refusal({ ...p, url }, "LinkedIn and Indeed are never automated; the person applies there themselves")); continue; }
+    const url = pickLink(p);
+    if (NEVER.test(host(url))) { refused.push(refusal({ ...p, url }, "LinkedIn and Indeed are never automated; the person applies there themselves", "Trainee never applies on LinkedIn or Indeed; apply there yourself")); continue; }
     const key = detectPortal(url) ? postingKey(url) : null;
-    if (!key) { refused.push(refusal({ ...p, url }, "not a Greenhouse, Lever, Ashby or Workday posting link the extension can open")); continue; }
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (!key) { refused.push(refusal({ ...p, url }, "not a Greenhouse, Lever, Ashby or Workday posting link I can open yet")); continue; }
+    if (seen.has(samePosting(key)!)) continue;
+    seen.add(samePosting(key)!);
     ok.push({ posting_key: key, url: applyUrl(url), company: String(p.company ?? "").slice(0, 200), title: String(p.title ?? "").slice(0, 200), queued_at: new Date(now).toISOString() });
   }
   return { ok, refused };
@@ -67,23 +79,30 @@ export async function queueWants(store: WantStore, userId: string, picks: Pick[]
   const { ok, refused } = wantsFrom(picks, now);
   // SERIAL-1430: a saved pace that cannot be read is unknown, not "no limit": nothing is queued, each pick refused by name.
   if (o.limits?.unreadable !== undefined || Number.isNaN(dailyLimit(o.limits))) {
-    for (const w of ok) refused.push(refusal({ ...w, job_id: w.posting_key }, `their saved daily pace could not be read (it says ${JSON.stringify(String(o.limits?.unreadable ?? ""))}); nothing was queued until they set it again ("set my daily pace to N", or "no daily pace")`));
+    for (const w of ok) refused.push(refusal({ ...w, job_id: w.posting_key }, `their saved daily pace could not be read (it says ${JSON.stringify(String(o.limits?.unreadable ?? ""))}); nothing was queued until they set it again ("set my daily pace to N", or "no daily pace")`,
+      `your saved daily pace couldn't be read (it says ${JSON.stringify(String(o.limits?.unreadable ?? ""))}); nothing was queued until you set it again ("set my daily pace to N", or "no daily pace")`));
     return { queued: 0, already: 0, items: [] as Want[], refused, limit: null as number | null };
   }
   const cap = dailyLimit(o.limits);
   const used = Number.isFinite(cap) ? await store.queuedSince(userId, dayStart(now, o.tz)) : 0;
   const room = Math.max(0, cap - used);
-  const have = new Set((await store.list(userId)).map((w) => w.posting_key));
-  const fresh = ok.filter((w) => !have.has(w.posting_key));
+  const have = new Set((await store.list(userId)).map((w) => samePosting(w.posting_key)));
+  const fresh = ok.filter((w) => !have.has(samePosting(w.posting_key)));
   const take = fresh.slice(0, room);
-  for (const w of fresh.slice(room)) refused.push(refusal({ ...w, job_id: w.posting_key }, `over the daily pace they set themselves (${cap} a day)`));
+  for (const w of fresh.slice(room)) refused.push(refusal({ ...w, job_id: w.posting_key }, `over the daily pace they set themselves (${cap} a day)`, `over the daily pace you set (${cap} a day)`));
   const r = await store.put(userId, take);
   for (const x of r.refused ?? []) {
     const w = take.find((t) => t.posting_key === x.posting_key);
     if (!w) continue;
-    refused.push(refusal({ ...w, job_id: w.posting_key }, x.reason === "company_cooldown"
-      ? `they already applied to ${w.company || "this employer"} in the last ${COMPANY_COOLDOWN_DAYS} days (the queue's own record); Trainee applies once per company every ${COMPANY_COOLDOWN_DAYS} days; nothing was queued`
-      : x.reason === "daily_cap" ? `over the daily pace they set themselves${Number.isFinite(cap) ? ` (${cap} a day)` : ""}` : `the queue refused it (${x.reason})`));
+    const pace = Number.isFinite(cap) ? ` (${cap} a day)` : "";
+    refused.push(x.reason === "company_cooldown"
+      ? refusal({ ...w, job_id: w.posting_key }, `they already applied to ${w.company || "this employer"} in the last ${COMPANY_COOLDOWN_DAYS} days (the queue's own record); Trainee applies once per company every ${COMPANY_COOLDOWN_DAYS} days; nothing was queued`,
+        `you already applied to ${w.company || "this employer"} in the last ${COMPANY_COOLDOWN_DAYS} days; Trainee applies once per company every ${COMPANY_COOLDOWN_DAYS} days, so nothing was queued`)
+      : x.reason === "daily_cap" ? refusal({ ...w, job_id: w.posting_key }, `over the daily pace they set themselves${pace}`, `over the daily pace you set${pace}`)
+      // D-MS-3: the queue's own record has this exact posting already sent or in flight (any path, any link to it).
+      : x.reason === "duplicate_job" ? refusal({ ...w, job_id: w.posting_key }, `${w.title || "this posting"} at ${w.company || "this employer"} is already in their applications as the same posting; nothing was queued`,
+        `${w.title || "this posting"} at ${w.company || "this employer"} is already in your applications as the same posting; nothing was queued`)
+      : refusal({ ...w, job_id: w.posting_key }, `the queue refused it (${x.reason})`));
   }
   return { queued: r.added.length, already: ok.length - fresh.length + r.already.length, items: r.added, refused, limit: Number.isFinite(cap) ? cap : null };
 }
@@ -102,10 +121,11 @@ export async function resolvePicks(picks: Pick[], get?: ((jobId: string) => Prom
     const id = String(p?.job_id ?? "").trim() || (p?.url ? postingKey(String(p.url)) ?? "" : "");
     const rec = id ? await get(id) : null;
     if (!rec) {
-      refused.push(refusal(p, "not found among the postings on file (it may have closed, or was never listed); nothing was queued for it. Search again, or the person can paste its link into the Trainee extension's queue themselves"));
+      refused.push(refusal(p, "not found among the postings on file (it may have closed, or was never listed); nothing was queued for it. Search again, or the person can paste the posting's link in chat",
+        "not found among the postings on file (it may have closed, or was never listed); nothing was queued for it. Paste its link here and I'll check it"));
       continue;
     }
-    const real: Pick = { job_id: String(rec.job_id ?? id), url: String(rec.url || p.url || ""), company: String(rec.company ?? ""), title: String(rec.title ?? ""), location: String(rec.location ?? "") };
+    const real: Pick = { job_id: String(rec.job_id ?? id), url: String(rec.url || p.url || ""), company: String(rec.company ?? ""), title: String(rec.title ?? ""), location: String(rec.location ?? ""), content: contentOf(rec) };
     if (rec.closed_at) { refused.push(refusal(real, `${real.title} at ${real.company} has closed; nothing was queued for it`)); continue; }
     ok.push(real);
   }
@@ -229,25 +249,12 @@ export const employerQuestion = (company: string) => `is ${company} where you wo
 // Their knowing go-ahead, in their own words this turn ("I know I work there, apply anyway").
 const GO_AHEAD = /\b(anyway|regardless|even though|internal(ly)?|knowing|i know (i|it|that|they|this))\b/i;
 
-const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-const SOURCE: Record<string, string> = { tracker: "in their tracker", queue: "through Trainee", mail: "found in their mail" };
-// D-011: one application per company per 30 days. Their applications from every source the server reads (the tracker in
-// every thread and Trainee's own sends: mail.applications, as where_do_i_stand reads them). "Saved" was never sent.
-export function recentApplication(company: string, apps: TrackedApp[], now: number): TrackedApp | null {
-  const window = COMPANY_COOLDOWN_DAYS * 86400_000;
-  const at = (a: TrackedApp) => Date.parse(String(a.applied_at ?? ""));
-  return (apps ?? [])
-    .filter((a) => a && a.stage !== "Saved" && (normCompany(a.company) === normCompany(company) || sameCompany(a.company, company)))
-    .filter((a) => !Number.isFinite(at(a)) || now - at(a) < window)
-    .sort((a, b) => (Number.isFinite(at(b)) ? at(b) : Infinity) - (Number.isFinite(at(a)) ? at(a) : Infinity))[0] ?? null;
-}
-
 // Each resolved pick, checked against what the person said this turn (`message`), what the previous turn showed them
 // (`before`; undefined when the caller has no history), their applications and their confirmed facts.
 // `resolved` (SERIAL-1491): the person's answers to the possible-match question in this thread; "no" clears a possible
 // match for that company (and no other), "yes" makes it their employer in their own words.
-export function screenPicks(picks: Pick[], o: { message?: string; before?: string; apps: TrackedApp[]; facts: any[]; now: number; resolved?: EmployerAnswer[] }): { ok: Pick[]; refused: Refusal[] } {
-  const ok: Pick[] = [], refused: Refusal[] = [];
+export function screenPicks(picks: Pick[], o: { message?: string; before?: string; apps: TrackedApp[]; facts: any[]; now: number; resolved?: EmployerAnswer[] }): { ok: Pick[]; refused: Refusal[]; gate: GateResult } {
+  const passed: Pick[] = [], refused: Refusal[] = [];
   const message = o.message ?? "";
   const answered = (co: string) => (o.resolved ?? []).filter((a) => a && a.company && sameCompany(a.company, co)).map((a) => !!a.is_employer).pop();
   const named = o.message === undefined ? [] : employersNamed(message);
@@ -256,38 +263,52 @@ export function screenPicks(picks: Pick[], o: { message?: string; before?: strin
     const co = String(p.company ?? ""), what = `${p.title || "this posting"} at ${co || "an employer not on record"}`;
     if (o.message !== undefined && !namesEmployer(message, co)) {
       if (named.length && !named.some((n) => namesEmployer(n, co))) {
-        refused.push(refusal(p, `${what} is not the employer they named (${named.join(", ")}); nothing was queued for it. Search for ${named[0]}, or ask them for its link`));
+        refused.push(refusal(p, `${what} is not the employer they named (${named.join(", ")}); nothing was queued for it. Search for ${named[0]}, or ask them for its link`,
+          `${what} isn't the employer you named (${named.join(", ")}); nothing was queued for it. Send me its link if that's the one you meant`));
         continue;
       }
       if (!named.length && byReference && o.before !== undefined && !namesEmployer(o.before, co)) {
-        refused.push(refusal(p, `they did not name ${co || "this employer"}, and ${what} was not among the postings shown to them last turn; nothing was queued for it. Ask which posting they mean`));
+        refused.push(refusal(p, `they did not name ${co || "this employer"}, and ${what} was not among the postings shown to them last turn; nothing was queued for it. Ask which posting they mean`,
+          `you didn't name ${co || "this employer"}, and ${what} wasn't in the list I just showed you; nothing was queued for it. Which posting do you mean?`));
         continue;
       }
     }
     const job = currentEmployerFact(co, o.facts), said = answered(co);
     if ((job || said === true) && !GO_AHEAD.test(message)) {
       const basis = job ? `their confirmed fact: "${String(job.text ?? job.value ?? "").slice(0, 160)}"` : "they said so when asked";
-      refused.push(refusal(p, `${co} is their current employer (${basis}); nothing was queued. Ask them first, and queue it only if they say to go ahead knowing that`));
+      const basisYou = job ? `your confirmed fact: "${String(job.text ?? job.value ?? "").slice(0, 160)}"` : "you said so when I asked";
+      refused.push(refusal(p, `${co} is their current employer (${basis}); nothing was queued. Ask them first, and queue it only if they say to go ahead knowing that`,
+        `${co} is your current employer (${basisYou}); nothing was queued. Say "apply anyway" if you still want it`));
       continue;
     }
     // SERIAL-1490: a possible match (a shared leading distinctive word, one name longer) is a question, asked once, and the
     // posting waits for the answer; their "no" on this thread clears it for this company only.
     const maybe = !job && said === undefined ? possibleEmployerFact(co, o.facts) : null;
     if (maybe && !GO_AHEAD.test(message)) {
-      refused.push({ ...refusal(p, `${co} may be where they work now (their confirmed fact: "${String(maybe.text ?? maybe.value ?? "").slice(0, 160)}"); nothing was queued until they answer: ${employerQuestion(co)}`), ask: "employer" });
+      const fact = String(maybe.text ?? maybe.value ?? "").slice(0, 160);
+      refused.push({ ...refusal(p, `${co} may be where they work now (their confirmed fact: "${fact}"); nothing was queued until they answer: ${employerQuestion(co)}`,
+        `${co} may be where you work now (your confirmed fact: "${fact}"); nothing was queued until you answer: ${employerQuestion(co)}`), ask: "employer" });
       continue;
     }
-    const prior = recentApplication(co, o.apps, o.now);
+    // A different posting at the same company is allowed, at any date. A recorded application to this exact
+    // posting is still a duplicate. Only compare real URLs: employer name alone never identifies a posting.
+    // The posting by its id when it has one (its board's form), else by its link; compared without case (samePosting).
+    const key = samePosting(postingKey(pickLink(p)));
+    const prior = key && (o.apps ?? []).find((a) => a.stage !== "Saved" && a.url && samePosting(postingKey(a.url)) === key);
     if (prior) {
-      const t = Date.parse(String(prior.applied_at ?? ""));
-      const when = Number.isFinite(t) ? `on ${isoDay(t)}` : "(date not on record)";
-      const next = Number.isFinite(t) ? `; the first day they can apply there again is ${isoDay(t + COMPANY_COOLDOWN_DAYS * 86400_000)}` : "";
-      refused.push(refusal(p, `they already applied to ${prior.company}${prior.role ? ` (${prior.role})` : ""} ${when}, ${SOURCE[prior.source] ?? "on record"} (stage: ${prior.stage}). Trainee applies once per company every ${COMPANY_COOLDOWN_DAYS} days${next}; nothing was queued`));
+      refused.push(refusal(p, `${what} is already in their applications as the same posting; nothing was queued`, `${what} is already in your applications as the same posting; nothing was queued`));
       continue;
     }
-    ok.push(p);
+    passed.push(p);
   }
-  return { ok, refused };
+  // THE POSTING SCREEN (career_apply_gate.ts, F09): whatever got this far is screened for closed, stale, scam-looking and
+  // knock-out mismatches against CONFIRMED facts before it can be queued or shown for approval. Not optional, not a switch.
+  const gate = gatePicks(passed, { facts: o.facts, now: o.now });
+  const gated = new Set<Pick>(gate.ok);
+  for (const d of gate.dropped) refused.push(refusal({ ...d.posting, job_id: d.posting.job_id ?? undefined }, `screened out (${d.kind === "knockout" ? "knock-out" : d.kind}): ${d.why}`));
+  for (const h of gate.held) refused.push({ ...refusal({ ...h, job_id: h.job_id ?? undefined }, `held, not guessed: it needs a fact you haven't confirmed (${h.facts.join(", ").replace(/_/g, " ")})`), ask: "fact" });
+  const ok = passed.filter((p) => gated.has(p));
+  return { ok, refused, gate };
 }
 
 export function memoryWantStore(): WantStore & { dump(): Record<string, WantRow[]> } {

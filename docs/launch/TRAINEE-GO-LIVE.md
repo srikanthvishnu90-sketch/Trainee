@@ -110,6 +110,8 @@ read from the environment or asked on a hidden prompt; none is echoed, written t
 | `TRAINEE_ROTATE_CHANNELS=1` | only when replacing a Telegram webhook secret or a WhatsApp verify token on purpose | as with `TRAINEE_ROTATE_INBOUND`: Enter never replaces one already set |
 | `WHATSAPP_TEMPLATE_UPDATES`, `WHATSAPP_TEMPLATE_LANGUAGE` | the approved template's name (`trainee_updates`) and language (`en_US`). Unset: outside WhatsApp's 24-hour window nothing is sent; messages wait for the person's next message | function secrets |
 | `WHATSAPP_DAILY_TEMPLATES` | your WhatsApp messaging limit, templates a day (unset means 250, a new account's tier) | function secret |
+| `CAREER_PREPARE_AHEAD_URL`, `CAREER_PREPARE_AHEAD_TOKEN` (optional, both or neither) | the preparation host's door, `https://<host>/prepare`, and that host's own token (section "Running mass submission" below). Left empty, phone-only preparation stays `NOT_WIRED` and the smoke says so | function secrets (agent-chat kicks the host with them; the smoke reads the host's `/status`) |
+| `TRAINEE_FILE_LINK_SECRET`, `OPS_MONITOR_TOKEN` (set on the project by the owner, never by this script) | the signing secret of `trainee-file`'s hosted list page, and `ops-monitor`'s bearer token. Step 4 deploys `trainee-file` / `ops-monitor` (both `--no-verify-jwt`; the link or token authenticates) only when its secret is already among the project's function secrets (a dry run: given in the environment). Absent: it is skipped with a `gated: ... SKIPPED` log line, never a failure, and it is not in the provenance manifest | function secrets |
 
 Function secrets are project-wide in Supabase: every function sees every one.
 
@@ -208,7 +210,9 @@ Telegram works like iMessage once the person has pressed Start: no window, no co
 sends at most 1,500 and splits longer text on purpose, one message a second to one chat). The bot is never told a phone
 number, so a person reaches their account one of two ways: they text **connect telegram** where they already use Trainee
 (or tap Connect Telegram in the app, `channel_link_telegram_start()`, once the app has the button) and open the one-time
-link it sends; or, if their chat is on the allow list (`TRAINEE_ALLOWED_CONTACTS` entries like `telegram:<chat id>`) or
+link it sends, then reply **YES** where they already use Trainee when it asks "Someone wants to link Telegram @name to your
+Trainee" (opening the link alone links nothing: a forwarded or copied link is not proof of who opened it;
+20261031040000_telegram_link_confirm.sql); or, if their chat is on the allow list (`TRAINEE_ALLOWED_CONTACTS` entries like `telegram:<chat id>`) or
 sign-up is open, pressing Start makes a new account.
 
 1. In Telegram, message **@BotFather**: `/newbot`, a name (`Trainee`), a username ending in `bot`. BotFather shows the
@@ -222,7 +226,7 @@ sign-up is open, pressing Start makes a new account.
    curl -sS "https://api.telegram.org/bot${TG_TOKEN}/setWebhook" \
      --data-urlencode "url=https://<ref>.supabase.co/functions/v1/trainee-telegram" \
      --data-urlencode "secret_token=${TG_SECRET}" \
-     --data-urlencode 'allowed_updates=["message","my_chat_member"]' \
+     --data-urlencode 'allowed_updates=["message","callback_query","my_chat_member"]' \
      --data-urlencode "drop_pending_updates=true"
    unset TG_TOKEN TG_SECRET
    ```
@@ -292,6 +296,36 @@ Not verified against Meta's own pages (they did not load from the build environm
 form, the business-scoped id fields (`user_id`, `from_user_id`, sending with `recipient`), whether 131047 comes back on
 the send or only in a status (both are handled), and Graph API `v21.0` (set `WHATSAPP_GRAPH_VERSION` to the version your
 app shows). Steps 7 and 10 check them live.
+
+## The cloud runner (FEATURE 17: preparation and sending without anyone's computer)
+
+Go-live deploys `career-cloud-runner` every time (without its secrets it answers 503 "not configured"). It wires it, on
+the same run, only when `VERCEL_TOKEN` is given: then it asks for `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID` and
+`CLOUD_SANDBOX_SNAPSHOT_ID` (or builds the snapshot at `--sha` with `--build-snapshot`: one Vercel sandbox for about 25
+minutes, which is spend), generates `CLOUD_RUNNER_SECRET`, `CLOUD_DISPATCH_SECRET` and `CAREER_PREPARE_AHEAD_TOKEN` when not
+given, derives `CLOUD_BRIDGE_URL` and `CAREER_PREPARE_AHEAD_URL` from the project ref, sets the runner's sizing by name
+(each as given, or its default: sending 2 at once, 1 per family, 2 started a tick; preparation 2 at once, 2 a tick) and a
+per-person or per-site number only when one is given (none by default: the owner's NO LIMITS rule, 2026-10-27), and schedules the two minute ticks (`scripts/launch/schedule-career-cloud.sql`). It never
+turns anything on by itself: `CLOUD_RUNNER_ENABLED=on` / `CLOUD_PREPARE_ENABLED=on` only when given, and the database's
+`CAREER_AGENT_SUBMIT` / `CAREER_CLOUD_APPLY` / `CAREER_CLOUD_TEXT_CARDS` only by the owner's SQL. Everything else (the route, the limits, the
+recommended first-wave numbers, the gate): docs/launch/CLOUD-RUNNER.md. The owner's first run: docs/launch/RAMP-FIRST-RUN.md.
+## Running mass submission
+
+There is no volume number of Trainee's own (owner, 2026-10-27). Every executor runs as many applications as its machine
+holds, on every employer site. It slows only when a site refuses (a 429, a Retry-After, or a verification check), and then
+only on that site, for every instance at once. A captcha is never solved: it ends `needs_user` with its link, and so does
+a sign-in wall. Each application is started at most once, even when a worker is killed mid-batch.
+
+- **The commands**:
+  - submitting from the cloud: `deno run -A workers/career-cloud/worker.ts`, on as many machines as you like;
+  - the person's own computer: `deno run -A workers/career-browser/approve-first.ts run <resume.pdf>`, one at a time with
+    `--headed`, `--handoff` or `--person-submits`;
+  - phone-only preparation: `deno run -A workers/career-browser/prepare-ahead.ts serve --port 8787` behind HTTPS, with
+    `PREPARE_AHEAD_SHARD=i/n` on each of several hosts.
+- **What go-live takes**: `CAREER_PREPARE_AHEAD_URL` and `CAREER_PREPARE_AHEAD_TOKEN` (both or neither; the table above).
+  Without them, phone-only preparation is `NOT_WIRED`: the smoke says so, and `prepareHostStatus` gives the chat a
+  plain sentence.
+- **Hosts, env names, scaling out, and the measured numbers**: docs/launch/MASS-SUBMISSION.md.
 
 ## Rollback
 

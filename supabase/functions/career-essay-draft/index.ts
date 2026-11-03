@@ -1,7 +1,7 @@
 // career-essay-draft (WO-049): the extension card's "Draft from my facts". The signed-in person's own session only (the
 // gateway verifies the JWT, verify_jwt = true in supabase/config.toml, and Supabase Auth reads the person from it, as
 // agent-chat's handler-career.ts does); their facts are read here from their account, never from the request; the model
-// is OpenAI only, through the gateway's callModel. Logic and tests: ../_shared/career_essay_card.ts,
+// is Claude (Anthropic), through the gateway's callModel. Logic and tests: ../_shared/career_essay_card.ts,
 // tests/architect/wo-049-essay-card.test.ts.
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";

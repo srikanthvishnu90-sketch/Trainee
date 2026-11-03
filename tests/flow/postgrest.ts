@@ -159,6 +159,22 @@ commit;`);
       const u = o.users[tok];
       return u ? json(200, { id: u.id, email: u.email ?? null, aud: "authenticated", role: "authenticated" }) : json(401, { message: "invalid token" });
     }
+    // GoTrue's admin create (supabase-js auth.admin.createUser), service role only: the account a texting channel's
+    // first message signs up (trainee-inbound/store.ts createPerson). The stub's auth.users keeps the id and the email.
+    if (url.pathname === "/auth/v1/admin/users" && req.method === "POST") {
+      if (who.role !== "service_role") return json(403, { message: "not the service role" });
+      const body = await req.json().catch(() => ({}));
+      const email = typeof body?.email === "string" ? body.email : null;
+      // As Auth does (the 2026-10-26 launch audit): a user with neither an email nor a phone is refused.
+      if (!email && !(typeof body?.phone === "string" && body.phone)) return json(422, { code: 422, error_code: "validation_failed", msg: "an email or a phone is required" });
+      // As Auth does: an address already registered is refused.
+      if (email && (await pg.sql(`select count(*) from auth.users where lower(email) = lower(${q(email)})`)) !== "0") {
+        return json(422, { code: 422, error_code: "email_exists", msg: "A user with this email address has already been registered" });
+      }
+      const id = await pg.sql(`insert into auth.users (email) values (${email === null ? "null" : q(email)}) returning id`);
+      return json(200, { id: (/[0-9a-f-]{36}/.exec(id) ?? [""])[0], aud: "authenticated", role: "authenticated", email, phone: body?.phone ?? null,
+        user_metadata: body?.user_metadata ?? {}, app_metadata: {}, created_at: new Date().toISOString() });
+    }
     const rpc = /^\/rest\/v1\/rpc\/([a-z_][a-z0-9_]*)$/.exec(url.pathname);
     if (rpc) {
       const args = req.method === "GET" ? Object.fromEntries(url.searchParams) : await req.json().catch(() => ({}));

@@ -91,3 +91,17 @@ test("each check refuses what it is for", () => {
   has(fixture((d) => fs.rmSync(path.join(d, "icons/icon-48.png"))), /icons\/icon-48\.png is referenced/);
   has(fixture((d) => fs.writeFileSync(path.join(d, "README.md"), "x")), /must not ship/);
 });
+
+// Owner rule (back off, then RESUME; 20261029180000/20261029190000): a posting already in the queue may be approved and
+// waiting (a site that asked us to slow down, a claim not started yet), never sent. Approving it again in the extension
+// says what the chat and the card say: it is already in the person's applications (sent, or approved and waiting to go),
+// never "You already applied", which would be untrue for one still waiting.
+test("the extension's answer to approving a queued posting again matches the chat's: already in your applications, never 'already applied'", () => {
+  const bg = fs.readFileSync(path.join(EXT, "background.js"), "utf8");
+  const branch = bg.match(/\/duplicate_job\/\.test\(e\.message\)[\s\S]*?\?\s*("[^"]*")/);
+  assert.ok(branch, "the duplicate_job branch is there");
+  const said = JSON.parse(branch[1]);
+  assert.match(said, /already in your applications \(sent, or approved and waiting to go\)/);
+  assert.match(said, /each posting goes at most once/);
+  assert.doesNotMatch(bg, /already applied to this posting/i);
+});

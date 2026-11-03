@@ -344,6 +344,7 @@ Deno.test("WO-028/13 tailored resumes go with the person: the career erase and a
   eq(await store.removeAll(USER), 2);
   eq([...store.files.keys()], [`career-resumes/00000000-0000-4000-8000-000000000099/${"c".repeat(64)}.pdf`], "only their own folder");
   const handler = await Deno.readTextFile(new URL("../../supabase/functions/agent-chat/handler-career.ts", import.meta.url));
-  const commit = handler.indexOf("const saved = await persistence.commit("), erase = handler.indexOf("if (ctx._hostPatch?.erase === true) await supabaseResumeStore(admin).removeAll(user.id)");
+  // The save is the evidenced commit (commitTurn wraps persistence.commit since #318).
+  const commit = handler.indexOf("saved = await commitTurn("), erase = handler.indexOf("if (ctx._hostPatch?.erase === true) await supabaseResumeStore(admin).removeAll(user.id)");
   assert(commit > 0 && erase > commit, "the erase removes them once it is recorded");
 });

@@ -85,7 +85,7 @@ async function withFakeNetwork(status: (c: Call) => number, run: (calls: Call[])
     calls.push(c);
     return new Response("{}", { status: status(c) });
   };
-  try { await run(calls); } finally { globalThis.fetch = origFetch; }
+  try { await run(calls); } finally { globalThis.fetch = origFetch; Deno.env.delete("SUPABASE_URL"); Deno.env.delete("SUPABASE_SERVICE_ROLE_KEY"); }
 }
 const post = (body: BodyInit, headers: Record<string, string> = {}) => new Request("https://x.test/fn", { method: "POST", body, headers });
 

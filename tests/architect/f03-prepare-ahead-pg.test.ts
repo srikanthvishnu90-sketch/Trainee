@@ -13,6 +13,7 @@
 // Nothing is approved, queued or sent: career_apply_jobs stays empty.
 // Fail-first: on the base (arch/diagnosis-1240) handleProactive has no prepare-ahead rail, so nothing is prepared and no
 // card is pushed. Run: deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/f03-prepare-ahead-pg.test.ts
+import { confirmedResumeSql } from "../flow/resume-seed.ts"; // OWNER RULE 2026-10-26: the person has a confirmed resume
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, SERVICE_KEY, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
@@ -92,7 +93,8 @@ Deno.test({
     try {
       await supabaseParity(pg);
       await pg.sql(`insert into auth.users (id, email) values ('${PERSON}', 'ahead@example.test'); insert into public.profiles (id) values ('${PERSON}');
-        insert into public.career_watch_kv (user_id, key, value) values ('${PERSON}', 'career:account', '{"epoch":0,"version":0,"paused":false}');`);
+        insert into public.career_watch_kv (user_id, key, value) values ('${PERSON}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
+        ${confirmedResumeSql(PERSON)}`);
       handler = await careerHandler(pg, { "tok-ahead": PERSON });
       const admin: any = createClient(SUPABASE_URL, SERVICE_KEY);
       const chat = handler.chat("tok-ahead");
@@ -123,7 +125,13 @@ Deno.test({
       const second = await board(pg, "Data Analyst", "Employer 01", T0 + HOUR - 30 * 60000);
       const other = await board(pg, "Marketing Manager", "Employer 11", T0 + HOUR);
       const engine = fakeEngine({ [picked[8].url]: "login", [picked[9].url]: "crash" });
-      const resumes = memoryResumeStore();
+      // The tailored renders are stored as Storage stores them (the bucket's object row), as in the other flow tests: the
+      // queue takes an application only with its stored resume (OWNER RULE 2026-10-26, 20261026210016).
+      const memResumes = memoryResumeStore();
+      const resumes = { ...memResumes, put: async (path: string, pdf: Uint8Array) => {
+        await memResumes.put(path, pdf);
+        await pg.sql(`insert into storage.objects (bucket_id, name) values ('career-resumes', '${path}') on conflict (bucket_id, name) do nothing`);
+      } };
       const before = await pg.sql(`select count(*) from public.career_apply_jobs where user_id = '${PERSON}'`);
 
       const run = async (at: number, on = true) => {

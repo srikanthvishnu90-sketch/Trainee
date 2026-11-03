@@ -1,0 +1,33 @@
+# One VM, N workers: `docker compose -f docker/apply-vm/docker-compose.yml --env-file /etc/apply-vm/worker.env up -d --scale worker=1`.
+# Workers are stateless (the database holds every lease), so more VMs = the same file on another VM with its own env file.
+# Secrets are only in /etc/apply-vm/worker.env (0600, outside the repo); nothing here is a secret.
+services:
+  worker:
+    image: trainee-apply-vm
+    build:
+      context: ../..
+      dockerfile: docker/apply-vm/Dockerfile
+    env_file: ${APPLY_VM_ENV_FILE:-/etc/apply-vm/worker.env}
+    restart: unless-stopped
+    init: true                 # reaps Chromium's children
+    ipc: host                  # Chromium needs shared memory (Playwright's own advice)
+    security_opt:
+      - seccomp=${APPLY_VM_SECCOMP:-./seccomp_profile.json}   # downloaded in the runbook (step 5): lets Chromium's sandbox run without root
+    cap_drop: [ALL]
+    mem_limit: ${APPLY_VM_MEM_LIMIT:-6g}
+    stop_grace_period: 5m      # a stop never abandons an application in flight: no new claims, in-flight ones finish and are recorded
+    volumes:
+      - apply-vm-evidence:/var/lib/apply-vm
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+  # Stage 1 only (the dry run): the local mock Greenhouse/Lever forms, sharing the worker's network so 127.0.0.1:8787 is its own.
+  mock-ats:
+    image: trainee-apply-vm
+    profiles: ["dryrun"]
+    network_mode: "service:worker"
+    environment: { PORT: "8787" }
+    command: ["node", "/app/mock/mock-ats-server.cjs"]
+    depends_on: [worker]
+volumes:
+  apply-vm-evidence:

@@ -225,15 +225,19 @@ const CareerRender = (() => {
     out.writeUInt32BE(adler32(data), 2 + body.length);
     return out;
   }
-  function inflateRaw(data) { return inflateRawCore(data).buffer; }
+  function inflateRaw(data, opts) { return inflateRawCore(data, opts && opts.maxOutputLength).buffer; }
   // Returns the decoded bytes plus `end`: the offset just past the
   // deflate stream. Callers slice streams out of larger buffers (a PDF
   // stream is followed by "\nendstream"), so trailing bytes after the
   // final block are normal and must not be read as part of the stream —
   // Node's zlib tolerates them the same way.
-  function inflateRawCore(data) {
+  // maxOut (FEATURE 16, review of PR #194): stop with a RangeError once the output passes it, as Node's maxOutputLength
+  // does, so a small compressed stream can never expand without bound.
+  function inflateRawCore(data, maxOut) {
     let pos = 0, bitbuf = 0, bitcnt = 0;
+    const cap = Number.isFinite(maxOut) && maxOut > 0 ? maxOut : Infinity;
     const out = [];
+    const over = () => { if (out.length > cap) { const e = new RangeError("inflated output exceeds maxOutputLength"); e.code = "ERR_BUFFER_TOO_LARGE"; throw e; } };
     const getBits = (n) => {
       while (bitcnt < n) {
         if (pos >= data.length) throw new Error("deflate stream ends early");
@@ -277,6 +281,7 @@ const CareerRender = (() => {
         pos += 4;
         if (pos + len > data.length) throw new Error("stored block overruns the stream");
         for (let i = 0; i < len; i++) out.push(data[pos++]);
+        over();
       } else if (type === 1 || type === 2) {
         let lit, dist;
         if (type === 1) {
@@ -315,17 +320,18 @@ const CareerRender = (() => {
           const d = DIST_BASE[dsym] + getBits(DIST_EXT[dsym]);
           if (d > out.length) throw new Error("deflate distance too far back");
           for (let j = 0; j < len; j++) out.push(out[out.length - d]);
+          if (out.length > cap) over();
         }
       } else throw new Error("invalid deflate block type");
     } while (!last);
     return { buffer: Bytes.from(out), end: pos - (bitcnt >> 3) };
   }
-  function zlibInflate(data) {
+  function zlibInflate(data, opts) {
     if (data.length < 6) throw new Error("zlib stream too short");
     const cmf = data[0], flg = data[1];
     if ((cmf * 256 + flg) % 31 !== 0 || (cmf & 0x0f) !== 8) throw new Error("invalid zlib header");
     if (flg & 0x20) throw new Error("preset dictionary not supported");
-    const core = inflateRawCore(data.subarray(2));
+    const core = inflateRawCore(data.subarray(2), opts && opts.maxOutputLength);
     const at = 2 + core.end; // the Adler-32 sits right after the deflate stream
     if (at + 4 > data.length) throw new Error("zlib stream truncated before its checksum");
     const stored = ((data[at] << 24) | (data[at + 1] << 16) | (data[at + 2] << 8) | data[at + 3]) >>> 0;
@@ -335,8 +341,8 @@ const CareerRender = (() => {
   const pureZlib = {
     deflateSync: (data) => zlibDeflate(data),
     deflateRawSync: (data) => deflateStored(data),
-    inflateSync: (data) => zlibInflate(data),
-    inflateRawSync: (data) => inflateRaw(data),
+    inflateSync: (data, opts) => zlibInflate(data, opts),
+    inflateRawSync: (data, opts) => inflateRaw(data, opts),
   };
   function sha256HexPure(data) {
     const K = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2];
@@ -496,14 +502,19 @@ const CareerRender = (() => {
   }
   // Central-directory reader: part name -> inflated Bytes. Independent of
   // the writer (walks the EOCD + central directory, verifies CRC on read).
-  function unzipParts(buf) {
+  // FEATURE 16 (review of PR #194: a 783 KB .docx reached 1.7 GB): only the parts `want` names are inflated (all, when
+  // absent), each to at most PART_MAX bytes (Node's maxOutputLength; the pure-JS inflater the same), and all of them
+  // together to at most TOTAL_MAX; a part past either is left out, never inflated whole. `namesOnly` lists the names and
+  // inflates nothing.
+  const PART_MAX = 5 * 1024 * 1024, TOTAL_MAX = 20 * 1024 * 1024, MAX_STREAMS = 400;
+  function unzipParts(buf, want, namesOnly) {
     const parts = new Map();
     if (!Bytes.isBuffer(buf) || buf.length < 22) return parts;
     let eocd = -1;
     for (let i = buf.length - 22; i >= 0 && i >= buf.length - 22 - 65536; i--) { if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; } }
     if (eocd < 0) return parts;
     const count = buf.readUInt16LE(eocd + 10);
-    let p = buf.readUInt32LE(eocd + 16);
+    let p = buf.readUInt32LE(eocd + 16), total = 0;
     for (let n = 0; n < count && p + 46 <= buf.length; n++) {
       if (buf.readUInt32LE(p) !== 0x02014b50) break;
       const method = buf.readUInt16LE(p + 10);
@@ -512,18 +523,25 @@ const CareerRender = (() => {
       const nameLen = buf.readUInt16LE(p + 28), extraLen = buf.readUInt16LE(p + 30), commentLen = buf.readUInt16LE(p + 32);
       const localOff = buf.readUInt32LE(p + 42);
       const name = buf.toString("utf8", p + 46, p + 46 + nameLen);
+      p += 46 + nameLen + extraLen + commentLen;
+      if (namesOnly) { parts.set(name, null); continue; }
+      if (want && !want(name)) continue;
+      if (localOff + 30 > buf.length) continue;
       const lNameLen = buf.readUInt16LE(localOff + 26), lExtraLen = buf.readUInt16LE(localOff + 28);
       const dataStart = localOff + 30 + lNameLen + lExtraLen;
       const raw = buf.subarray(dataStart, dataStart + compSize);
+      const room = Math.min(PART_MAX, TOTAL_MAX - total);
+      if (room <= 0) break;
       let data = null;
-      try { data = method === 8 ? zlib.inflateRawSync(raw) : Bytes.from(raw); } catch { data = null; }
-      if (data && crc32(data) === crc) parts.set(name, data);
-      p += 46 + nameLen + extraLen + commentLen;
+      try { data = method === 8 ? zlib.inflateRawSync(raw, { maxOutputLength: room }) : (raw.length <= room ? Bytes.from(raw) : null); } catch { data = null; }
+      if (data && crc32(data) === crc) { parts.set(name, data); total += data.length; }
+      else total += room; // a part that failed or went past its cap still cost up to its room: charged, so bombs cannot be retried for free
     }
     return parts;
   }
-  const docxPartNames = (buf) => [...unzipParts(buf).keys()];
-  function docxPart(buf, name) { return unzipParts(buf).get(name) || null; }
+
+  const docxPartNames = (buf) => [...unzipParts(buf, null, true).keys()];
+  function docxPart(buf, name) { return unzipParts(buf, (n) => n === name).get(name) || null; }
   // Rebuild a DOCX with some parts replaced (audit-mode mutants in tests).
   function rebuildDocx(buf, replacements) {
     const parts = unzipParts(buf);
@@ -715,6 +733,7 @@ const CareerRender = (() => {
   // ================= PDF extraction — parser A (content-stream operators) =================
   function pdfStreams(buf) {
     const streams = [];
+    let total = 0;
     const s = buf.toString("latin1");
     let idx = 0;
     while (true) {
@@ -725,13 +744,129 @@ const CareerRender = (() => {
       const en = s.indexOf("endstream", start);
       if (en < 0) break;
       const raw = buf.subarray(start, en);
-      try { streams.push(zlib.inflateSync(raw)); } catch { /* not a flate stream (e.g. object stream) — parser B still scans it raw */ }
+      // FEATURE 16: each stream to at most PART_MAX, all of them to TOTAL_MAX, at most MAX_STREAMS of them; one past a cap
+      // is left out, never inflated whole.
+      const room = Math.min(PART_MAX, TOTAL_MAX - total);
+      if (room <= 0 || streams.length >= MAX_STREAMS) break;
+      try { const out = zlib.inflateSync(raw, { maxOutputLength: room }); streams.push(out); total += out.length; } catch { total += room; /* not a flate stream, or past the cap: charged what it could cost; parser B still scans it raw */ }
       idx = en + 9;
     }
     return streams;
   }
   function readPdfLiteral(s, i) {
-    // s[i] === '(' ; returns [decodedString, nextIndex]
+    const [bytes, ni] = readPdfLiteralBytes(s, i);
+    return [decodeWinAnsi(Bytes.from(bytes)), ni];
+  }
+  // KNOWN GAPS (2026-10-30, #317): text written as hex strings ("<48656C6C6F> Tj", and every string of a font whose codes
+  // are two bytes: Word's and Google Docs' embedded fonts, CID fonts with Identity-H) was never read, so a resume saved
+  // that way was told "it may be a scan". A hex string's bytes, or null when "<" does not open one (a "<<" dictionary).
+  function readPdfHexBytes(s, i) {
+    const end = s.indexOf(">", i + 1);
+    if (end < 0 || end - i > 32768) return null;
+    const h = s.slice(i + 1, end);
+    if (!/^[0-9A-Fa-f\s]*$/.test(h)) return null;
+    const hex = h.replace(/\s+/g, "");
+    const even = hex.length % 2 ? `${hex}0` : hex;
+    const bytes = [];
+    for (let k = 0; k < even.length; k += 2) bytes.push(parseInt(even.slice(k, k + 2), 16));
+    return [bytes, end + 1];
+  }
+  // A font's ToUnicode CMap (the PDF's own map from its codes to text): bfchar and bfrange entries, and the code width its
+  // codespace names (two bytes for a CID font).
+  function parseToUnicode(t) {
+    const map = new Map();
+    let width = 0;
+    const cs = String(t || "").match(/begincodespacerange\s*<([0-9A-Fa-f]+)>/);
+    if (cs) width = Math.max(1, Math.min(4, Math.floor(cs[1].length / 2)));
+    const utf16 = (hex) => {
+      const h = String(hex).replace(/\s+/g, "");
+      let out = "";
+      for (let k = 0; k + 4 <= h.length; k += 4) out += String.fromCharCode(parseInt(h.slice(k, k + 4), 16));
+      if (h.length % 4 === 2) out += String.fromCharCode(parseInt(h.slice(-2), 16));
+      return out;
+    };
+    for (const blk of String(t || "").matchAll(/beginbfchar([\s\S]*?)endbfchar/g)) {
+      for (const e of blk[1].matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]*)>/g)) { if (!width) width = Math.max(1, Math.floor(e[1].length / 2)); if (map.size < 200000) map.set(parseInt(e[1], 16), utf16(e[2])); }
+    }
+    for (const blk of String(t || "").matchAll(/beginbfrange([\s\S]*?)endbfrange/g)) {
+      for (const e of blk[1].matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(?:<([0-9A-Fa-f]*)>|\[([^\]]*)\])/g)) {
+        const lo = parseInt(e[1], 16), hi = parseInt(e[2], 16);
+        if (!width) width = Math.max(1, Math.floor(e[1].length / 2));
+        if (!(hi >= lo) || hi - lo > 65535 || map.size > 200000) continue;
+        if (e[3] !== undefined) {
+          const base = utf16(e[3]);
+          if (!base) continue;
+          const head = base.slice(0, -1), last = base.charCodeAt(base.length - 1);
+          for (let c = lo; c <= hi; c++) map.set(c, head + String.fromCharCode(last + (c - lo)));
+        } else {
+          const each = [...e[4].matchAll(/<([0-9A-Fa-f]*)>/g)].map((x) => utf16(x[1]));
+          for (let c = lo; c <= hi && c - lo < each.length; c++) map.set(c, each[c - lo]);
+        }
+      }
+    }
+    return { map, width };
+  }
+  // The page fonts by their resource names (/F1 ...), each with its code width and its ToUnicode map (null: none). Read from
+  // the PDF's objects: a /Font resource dictionary (inline or by reference), each font object, its /ToUnicode stream.
+  // A PDF with no ToUnicode and no Type0 font reads exactly as before (an empty map: every string is WinAnsi).
+  function pdfFontMaps(buf) {
+    const out = new Map();
+    let s;
+    try { s = buf.toString("latin1"); } catch { return out; }
+    if (s.indexOf("/ToUnicode") < 0 && s.indexOf("/Type0") < 0) return out;
+    const objAt = new Map();
+    const objRe = /(\d+)\s+(\d+)\s+obj\b/g;
+    let m;
+    while ((m = objRe.exec(s)) && objAt.size < 20000) objAt.set(m[1], m.index + m[0].length);
+    const bodyOf = (n) => { const at = objAt.get(String(n)); if (at === undefined) return ""; const end = s.indexOf("endobj", at); return s.slice(at, end < 0 ? Math.min(s.length, at + 65536) : end); };
+    const streamOf = (n) => {
+      const at = objAt.get(String(n));
+      if (at === undefined || !zlib) return "";
+      const end = s.indexOf("endobj", at), st = s.indexOf("stream", at);
+      if (st < 0 || (end >= 0 && st > end)) return "";
+      let start = st + 6;
+      if (s[start] === "\r" && s[start + 1] === "\n") start += 2; else if (s[start] === "\n") start += 1;
+      const en = s.indexOf("endstream", start);
+      if (en < 0) return "";
+      const raw = buf.subarray(start, en);
+      try { return /\/FlateDecode/.test(s.slice(at, st)) ? zlib.inflateSync(raw, { maxOutputLength: PART_MAX }).toString("latin1") : raw.toString("latin1"); } catch { return ""; }
+    };
+    const entries = [];
+    const fontRe = /\/Font\s*(?:<<([\s\S]*?)>>|(\d+)\s+\d+\s+R)/g;
+    while ((m = fontRe.exec(s)) && entries.length < 2000) {
+      const dict = m[1] !== undefined ? m[1] : bodyOf(m[2]);
+      for (const e of dict.matchAll(/\/([^\s/<>[\]()]+)\s+(\d+)\s+\d+\s+R/g)) entries.push([e[1], e[2]]);
+    }
+    const cmaps = new Map();
+    for (const [name, n] of entries) {
+      if (out.has(name)) continue;
+      const body = bodyOf(n);
+      if (!/\/Type\s*\/Font\b/.test(body)) continue;
+      const type0 = /\/Subtype\s*\/Type0\b/.test(body);
+      const tu = body.match(/\/ToUnicode\s+(\d+)\s+\d+\s+R/);
+      let cmap = null;
+      if (tu) { if (!cmaps.has(tu[1])) cmaps.set(tu[1], parseToUnicode(streamOf(tu[1]))); cmap = cmaps.get(tu[1]); }
+      const map = cmap && cmap.map.size ? cmap.map : null;
+      out.set(name, { width: map && cmap.width ? cmap.width : (type0 ? 2 : 1), map });
+    }
+    return out;
+  }
+  // A string's bytes as text in its font: through the font's ToUnicode map when it has one (a code it lacks is WinAnsi in a
+  // one-byte font, nothing in a two-byte one), else WinAnsi; a two-byte font without a map names glyphs, not text: nothing.
+  function decodeInFont(bytes, f) {
+    if (!f) return decodeWinAnsi(Bytes.from(bytes));
+    if (!f.map) return f.width === 1 ? decodeWinAnsi(Bytes.from(bytes)) : "";
+    let out = "";
+    for (let k = 0; k + f.width <= bytes.length; k += f.width) {
+      let code = 0;
+      for (let j = 0; j < f.width; j++) code = code * 256 + bytes[k + j];
+      const u = f.map.get(code);
+      out += u !== undefined ? u : f.width === 1 ? decodeWinAnsi(Bytes.from([code])) : "";
+    }
+    return out;
+  }
+  function readPdfLiteralBytes(s, i) {
+    // s[i] === '(' ; returns [bytes, nextIndex]
     const bytes = [];
     let depth = 1; i++;
     while (i < s.length && depth > 0) {
@@ -748,7 +883,7 @@ const CareerRender = (() => {
       else if (c === ")") { depth--; if (depth > 0) bytes.push(41); i++; }
       else { bytes.push(s.charCodeAt(i) & 0xff); i++; }
     }
-    return [decodeWinAnsi(Bytes.from(bytes)), i];
+    return [bytes, i];
   }
   // Full operator walk: returns [{ text, x, y, size, font, page }] in
   // reading order (page order, then y descending, then x ascending).
@@ -756,21 +891,48 @@ const CareerRender = (() => {
     const runs = [];
     if (!Bytes.isBuffer(buf) || !zlib) return runs;
     const streams = pdfStreams(buf);
+    const fonts = pdfFontMaps(buf);
     streams.forEach((streamBuf, page) => {
       const s = streamBuf.toString("latin1");
       let font = null, size = 0, x = 0, y = 0, pendingText = null;
+      // ONBOARDING ROUND 2 (2026-10-30): a resume saved as a PDF by Word or Google Docs writes most lines as TJ arrays
+      // ("[(Data)-250(Analyst)-250(Intern)] TJ"); every string but the array's last was dropped, so "Data Analyst Intern,
+      // Northwind" read as "Northwind" and the person was shown entries that were not theirs. An array's strings are one
+      // run, with a space where the array moves the next string a word's width or more. T* and ' move to the next line
+      // (by the leading TL, TD's, or the font size), and Td / TD move from the line's start in the text matrix's scale.
+      let inArray = false, ma = 1, md = 1, lineX = 0, lineY = 0, lead = 0;
       let i = 0;
       const numBefore = (pos) => { const m = s.slice(Math.max(0, pos - 40), pos).match(/(-?[\d.]+)\s*(-?[\d.]+)\s*$/); return m ? [parseFloat(m[1]), parseFloat(m[2])] : null; };
+      const opAt = (k, op) => s.startsWith(op, k) && !/[A-Za-z0-9*]/.test(s[k + op.length] || " ") && !/[A-Za-z0-9]/.test(s[k - 1] || " ");
+      const nextLine = () => { lineY -= (lead || size * 1.2) * md; x = lineX; y = lineY; };
       while (i < s.length) {
         const c = s[i];
-        if (c === "(") { const [txt, ni] = readPdfLiteral(s, i); pendingText = txt; i = ni; continue; }
-        if (c === "/" ) { const m = s.slice(i).match(/^\/(\S+)\s+([\d.]+)\s+Tf/); if (m) { font = m[1]; size = parseFloat(m[2]); i += m[0].length; continue; } i++; continue; }
-        if (s.startsWith("Tj", i) || s.startsWith("TJ", i) || s.startsWith("'", i) || s.startsWith('"', i)) {
-          if (pendingText !== null && pendingText !== "") runs.push({ text: pendingText, x, y, size, font, page });
-          pendingText = null; i += 2; continue;
+        // KNOWN GAPS (#317): a "<<" dictionary is stepped over whole (its second "<" never opens a hex string).
+        if (c === "<" && s[i + 1] === "<") { i += 2; continue; }
+        const got = c === "(" ? readPdfLiteralBytes(s, i) : c === "<" ? readPdfHexBytes(s, i) : null;
+        if (got) {
+          const [bytes, ni] = got;
+          const txt = decodeInFont(bytes, font ? fonts.get(font) : null);
+          if (inArray && pendingText !== null) {
+            const gap = s.slice(i - 30 < 0 ? 0 : i - 30, i).match(/[)>]\s*(-?[\d.]+)\s*$/);
+            const space = gap && parseFloat(gap[1]) <= -180 && !/\s$/.test(pendingText) && !/^\s/.test(txt);
+            pendingText += (space ? " " : "") + txt;
+          } else pendingText = txt;
+          i = ni; continue;
         }
-        if (s.startsWith("Tm", i)) { const nums = s.slice(Math.max(0, i - 60), i).match(/(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s*$/); if (nums) { x = parseFloat(nums[5]); y = parseFloat(nums[6]); } i += 2; continue; }
-        if (s.startsWith("Td", i) || s.startsWith("TD", i)) { const pair = numBefore(i); if (pair) { x += pair[0]; y += pair[1]; } i += 2; continue; }
+        if (c === "[") { inArray = true; pendingText = null; i++; continue; }
+        if (c === "]") { inArray = false; i++; continue; }
+        if (c === "/" ) { const m = s.slice(i).match(/^\/(\S+)\s+([\d.]+)\s+Tf/); if (m) { font = m[1]; size = parseFloat(m[2]); i += m[0].length; continue; } i++; continue; }
+        if (opAt(i, "BT")) { x = y = lineX = lineY = 0; ma = md = 1; i += 2; continue; }
+        if (opAt(i, "TL")) { const m = s.slice(Math.max(0, i - 20), i).match(/(-?[\d.]+)\s*$/); if (m) lead = parseFloat(m[1]); i += 2; continue; }
+        if (opAt(i, "T*")) { nextLine(); i += 2; continue; }
+        if (s.startsWith("Tj", i) || s.startsWith("TJ", i) || s.startsWith("'", i) || s.startsWith('"', i)) {
+          if (c === "'" || c === '"') nextLine();
+          if (pendingText !== null && pendingText !== "") runs.push({ text: pendingText, x, y, size: size * Math.abs(ma || 1), font, page });
+          pendingText = null; inArray = false; i += c === "'" || c === '"' ? 1 : 2; continue;
+        }
+        if (s.startsWith("Tm", i)) { const nums = s.slice(Math.max(0, i - 60), i).match(/(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s*$/); if (nums) { ma = parseFloat(nums[1]) || 1; md = parseFloat(nums[4]) || 1; x = lineX = parseFloat(nums[5]); y = lineY = parseFloat(nums[6]); } i += 2; continue; }
+        if (s.startsWith("Td", i) || s.startsWith("TD", i)) { const pair = numBefore(i); if (pair) { lineX += pair[0] * ma; lineY += pair[1] * md; x = lineX; y = lineY; if (s[i + 1] === "D") lead = -pair[1]; } i += 2; continue; }
         i++;
       }
     });
@@ -847,16 +1009,17 @@ const CareerRender = (() => {
     return lines;
   }
   function docxStructure(buf) {
-    const parts = unzipParts(buf);
+    const parts = unzipParts(buf, (n) => n === "word/document.xml" || n === "word/styles.xml");
+    const names = [...unzipParts(buf, null, true).keys()];
     const docXml = (parts.get("word/document.xml") || Bytes.alloc(0)).toString("utf8");
     const stylesXml = (parts.get("word/styles.xml") || Bytes.alloc(0)).toString("utf8");
     const fonts = [...new Set([...stylesXml.matchAll(/w:ascii="([^"]+)"/g)].map((m) => m[1]))];
     const sizes = [...new Set([...stylesXml.matchAll(/<w:sz w:val="(\d+)"/g)].map((m) => parseInt(m[1], 10) / 2))].sort((a, b) => a - b);
-    const mediaParts = [...parts.keys()].filter((k) => k.startsWith("word/media/")).length;
+    const mediaParts = names.filter((k) => k.startsWith("word/media/")).length;
     const images = mediaParts + (docXml.match(/<w:drawing|<a:blip|<w:pict/g) || []).length;
     const tables = (docXml.match(/<w:tbl[\s>]/g) || []).length;
     const textFrames = (docXml.match(/txbxContent/g) || []).length;
-    const headerFooterParts = [...parts.keys()].filter((k) => /word\/(header|footer)\d*\.xml/.test(k)).length;
+    const headerFooterParts = names.filter((k) => /word\/(header|footer)\d*\.xml/.test(k)).length;
     return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, fonts, fontSizesPt: sizes, images, tables, textFrames, headerFooterParts, headings: [] };
   }
   // External parser B (python-docx) — used when the caller opts in.

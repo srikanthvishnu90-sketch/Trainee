@@ -93,11 +93,11 @@ test("OUTE-002/004 buildList: hygiene exclusions, yield report, per-firm cap, re
   const supp = M.createSuppressionStore(); supp.suppress({ email: "sup@evercore.com", scope: "shared" });
   records.push(cand({ person_id: "sup", full_name: "Victor Hale", work_email: "sup@evercore.com" }));
   const pool = M.buildList(records, M.parseTarget("500 bulge bracket investment bankers"), { profile: { school: "DePaul University", current_employer: "My Firm" }, suppression: supp, userId: "u1", nowMs });
-  assert.equal(pool.yield.found, 23); assert.equal(pool.selected.filter((c) => c.current_firm === "Goldman Sachs").length, 15); // per-firm cap
-  assert.ok(pool.reserve.length >= 2); assert.equal(pool.exclusions.own_employer, 1); assert.equal(pool.exclusions.already_emailed, 1);
+  assert.equal(pool.yield.found, 23); assert.equal(pool.selected.filter((c) => c.current_firm === "Goldman Sachs").length, 17); // no per-firm cap (owner NO LIMITS)
+  assert.equal(pool.reserve.length, 0, "reserve existed only for the per-firm limit; with none, every sendable name is selected"); assert.equal(pool.exclusions.own_employer, 1); assert.equal(pool.exclusions.already_emailed, 1);
   assert.equal(pool.exclusions.eu_uk, 1); assert.equal(pool.exclusions.opt_out, 1); assert.equal(pool.exclusions.suppressed, 1); assert.equal(pool.exclusions.no_email, 1);
   const card = M.listReviewCard(pool, null);
-  assert.ok(card.sample_rows.length <= 10); assert.match(card.text, /Found 23; trusted emails/); assert.ok(card.breakdown.by_firm["Goldman Sachs"] === 15);
+  assert.ok(card.sample_rows.length <= 10); assert.match(card.text, /Found 23; trusted emails/); assert.ok(card.breakdown.by_firm["Goldman Sachs"] === 17);
 });
 test("OUTR-001/002 warm paths rank alumni first and show the path", () => {
   const rows = M.warmPaths([cand({ full_name: "Cold One", schools: ["Elsewhere"], relationship_to_user: "none" }), cand({ full_name: "Alum One", relationship_to_user: "same school and club" })], "Evercore", { school: "DePaul University" });

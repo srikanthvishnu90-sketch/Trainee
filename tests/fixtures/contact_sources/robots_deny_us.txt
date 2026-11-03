@@ -1,0 +1,5 @@
+User-agent: TraineeContactBot
+Disallow: /
+
+User-agent: *
+Allow: /

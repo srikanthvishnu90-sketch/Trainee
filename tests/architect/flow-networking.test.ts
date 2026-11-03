@@ -3,12 +3,13 @@
 // they know at Stripe, asks to email Maya about a role (Trainee asks how they sign, then drafts from confirmed facts onto
 // the outreach batch), approves exactly that message with "send 1", and the scheduled send run (runOutreachSends over the
 // same database, its claim RPC, a fake Gmail) sends exactly what was approved, once. The model is a scripted stand-in at
-// the OpenAI URL; nothing leaves the machine. Addresses come only from the person's own files; another person sees none.
+// the Anthropic URL; nothing leaves the machine. Addresses come only from the person's own files; another person sees none.
 import assertNode from "node:assert/strict";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, SERVICE_KEY, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
 import { type Message, runOutreachSends, type Sender, supabaseOutreachStore } from "../../supabase/functions/_shared/career_outreach.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -19,10 +20,10 @@ const LINKEDIN = await Deno.readTextFile(`${ROOT}tests/fixtures/f10/Connections.
 const CONTACTS = await Deno.readTextFile(`${ROOT}tests/fixtures/f10/contacts.csv`);
 const PEOPLE: Record<string, string> = { "tok-n": "7b0f8f8e-6a43-4a49-9d2c-0000000000f1", "tok-x": "7b0f8f8e-6a43-4a49-9d2c-0000000000f2" };
 
-// The scripted writer at the OpenAI URL: one short email from the recipient row and the ask it was given. Sam's draft
+// The scripted writer at the Anthropic URL: one short email from the recipient row and the ask it was given. Sam's draft
 // claims a job that is not on record, so the fact-lock refuses it twice and it is never shown.
 let modelCalls = 0;
-function fakeOpenAI(body: any): Response {
+function fakeModel(body: any): Response {
   modelCalls++;
   const user = String((body.messages ?? []).find((m: any) => m.role === "user")?.content ?? "");
   const first = /- name: (\S+)/.exec(user)?.[1] ?? "there", topic = /ASK ABOUT[^\n]*\n- (.+)/.exec(user)?.[1];
@@ -35,7 +36,7 @@ Deno.test({ name: "F10: networking emails from chat at the real handler: import,
   if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
   const pg: Pg = await startPg();
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
-  const env = { CAREER_NETWORKING_DRAFT: "on", OPENAI_API_KEY: "sk-test-not-real", CAREER_MODEL: "gpt-5-mini" };
+  const env = { CAREER_NETWORKING_DRAFT: "on", ANTHROPIC_API_KEY: "sk-test-not-real", CAREER_MODEL: "claude-haiku-5-5" };
   for (const [k, v] of Object.entries(env)) Deno.env.set(k, v);
   try {
     await supabaseParity(pg);
@@ -48,7 +49,7 @@ Deno.test({ name: "F10: networking emails from chat at the real handler: import,
     const viaDouble = globalThis.fetch;
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
-      if (new URL(req.url).host === "api.openai.com") return fakeOpenAI(await req.json());
+      if (new URL(req.url).host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
       return await viaDouble(req);
     }) as typeof fetch;
     const chat: Chat = handler.chat("tok-n");
@@ -76,8 +77,11 @@ Deno.test({ name: "F10: networking emails from chat at the real handler: import,
       eq([up.intent, up.resultStatus], ["career_contacts_import", "imported"], up.reply);
       assert(/Connections\.csv: imported 6\/8 rows into your contacts \(left out: 1 duplicate; row 7: no name\)/.test(up.reply), up.reply);
       assert(/4\/6 have an email address/.test(up.reply) && /never guess an address/.test(up.reply), up.reply);
-      const stored = JSON.parse(await pg.sql(`select state->'career'->'stores'->'contacts' from public.agent_flow_state where user_id = '${me}' order by updated_at desc limit 1`));
+      // Architect ruling R1 (2026-10-27): the contacts are the account's (career_account_contacts), not the chat's; no chat
+      // state carries a copy. Was: the chat snapshot's stores.contacts held the 6 rows.
+      const stored = JSON.parse(await pg.sql(`select coalesce(jsonb_agg(data order by row_key), '[]'::jsonb) from public.career_account_contacts where user_id = '${me}'`));
       eq(stored.length, 6);
+      eq(await pg.sql(`select count(*) from public.agent_flow_state where user_id = '${me}' and state->'career'->'stores' ? 'contacts'`), "0", "no per-chat copy");
       assert(!JSON.stringify(stored).includes("linkedin.com/in/"), "no profile URL kept");
       const pasted = await say(chat, `and these\n${CONTACTS}`);
       assert(/imported 2\/2 rows/.test(pasted.reply), pasted.reply);

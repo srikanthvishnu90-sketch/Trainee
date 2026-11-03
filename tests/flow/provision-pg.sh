@@ -15,7 +15,7 @@ BRIDGE=20261024130000_career_apply_card_cloud_bridge.sql
 # initdb refuses to run as root (containers); the postgres account owns the cluster there. CI runs unprivileged.
 AS=(); if [[ "$(id -u)" == "0" ]]; then AS=(runuser -u postgres --); chown postgres "$WORK"; fi
 "${AS[@]}" "$PGBIN/initdb" -D "$WORK/data" -U postgres --auth=trust >/dev/null
-"${AS[@]}" "$PGBIN/pg_ctl" -D "$WORK/data" -o "-p $PORT -k $WORK -c listen_addresses=''" -l "$WORK/log" -w start >/dev/null
+"${AS[@]}" "$PGBIN/pg_ctl" -D "$WORK/data" -o "-p $PORT -k $WORK -c listen_addresses='' -c max_connections=${PG_MAX_CONNECTIONS:-100}" -l "$WORK/log" -w start >/dev/null
 PSQL=(psql -X -q -v ON_ERROR_STOP=1 -h "$WORK" -p "$PORT" -U postgres -d postgres)
 PGOPTIONS='-c client_min_messages=error' "${PSQL[@]}" -f "$ROOT/tests/db/stubs.sql" >/dev/null 2>&1
 RUN="$ROOT/tests/db/run.sh"

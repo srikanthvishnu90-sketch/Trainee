@@ -148,6 +148,10 @@ export function runReport(o) {
   parts.push(`failed ${n(s.boards_failed)}${why ? ` (${why})` : ""}`);
   parts.push(`postings new ${n(s.new)}, seen ${n(s.seen)}, reopened ${n(s.reopened)}, closed ${n(s.closed)}`);
   if (s.url_rejected) parts.push(`not job links, refused ${n(s.url_rejected)}`);
+  // 2026-10-30 (ingest round 2): boards whose postings were closed without a list to read them from, said apart.
+  if (s.boards_gone) parts.push(`gone at the ATS (404/410 read after read): ${n(s.boards_gone)} board${s.boards_gone === 1 ? "" : "s"}, open postings closed`);
+  if (s.boards_left_directory) parts.push(`left the directory: ${n(s.boards_left_directory)} board${s.boards_left_directory === 1 ? "" : "s"}, open postings closed`);
+  if (s.boards_continued) parts.push(`read in parts: ${n(s.boards_continued)} board${s.boards_continued === 1 ? "" : "s"} stopped at the posting budget, continued next run`);
   if (s.stopped_by) parts.push(`stopped by the ${s.stopped_by === "deadline" ? "deadline" : "posting budget"}: ${n((o.due ?? 0) - (s.attempted ?? 0))} boards left for the next run`);
   const cov = o.coverage || {};
   if (cov.lane || cov.directory) {

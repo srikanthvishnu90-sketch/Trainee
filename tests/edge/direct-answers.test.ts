@@ -86,8 +86,8 @@ import SRC_TERMS from "../../terms.html" with { type: "text" };
 import SRC_TRADE from "../../packages/domain/66-agent-trade.js" with { type: "text" };
 
 Deno.test("show my full account number: none is held or shown; the brokerage's last four only (Q03)", () => {
-  for (const t of ["show my full account number", "whats my account number", "can you give me my routing number", "send me my full card number", "what is my checking account number?", "i need my full account number"]) assertEquals(accountPrivacyReply(t, "openai"), ACCOUNT_NUMBER_NONE, t);
-  for (const t of ["what's my account balance", "how many accounts do i have", "my account number changed", "is 1234 my account"]) assertEquals(accountPrivacyReply(t, "openai"), null, t);
+  for (const t of ["show my full account number", "whats my account number", "can you give me my routing number", "send me my full card number", "what is my checking account number?", "i need my full account number"]) assertEquals(accountPrivacyReply(t, "anthropic"), ACCOUNT_NUMBER_NONE, t);
+  for (const t of ["what's my account balance", "how many accounts do i have", "my account number changed", "is 1234 my account"]) assertEquals(accountPrivacyReply(t, "anthropic"), null, t);
   assert(!/\d{5,}/.test(ACCOUNT_NUMBER_NONE), "no number in the reply");
   assertMatch(ACCOUNT_NUMBER_NONE, /\*\*\*\*1234/);
   // The You screen does show a connected brokerage as "Connected, live (****1234)".
@@ -95,8 +95,8 @@ Deno.test("show my full account number: none is held or shown; the brokerage's l
 });
 
 Deno.test("delete my data: never done from chat; the app's own Delete data steps, the policy's email and 30 days (Q04)", () => {
-  for (const t of ["delete my data", "pls delete my account", "i want to delete all my data", "how do i delete my account?", "delete everything you have on me", "erase my personal info", "forget me", "can you delete my upmore account permanently"]) assertEquals(accountPrivacyReply(t, "openai"), DELETE_DATA_STEPS, t);
-  for (const t of ["delete my reminder for rent", "delete my bank account", "remove my budget", "delete that charge", "clear everything", "remove my card from netflix", "delete the iou with sam"]) assertEquals(accountPrivacyReply(t, "openai"), null, t);
+  for (const t of ["delete my data", "pls delete my account", "i want to delete all my data", "how do i delete my account?", "delete everything you have on me", "erase my personal info", "forget me", "can you delete my upmore account permanently"]) assertEquals(accountPrivacyReply(t, "anthropic"), DELETE_DATA_STEPS, t);
+  for (const t of ["delete my reminder for rent", "delete my bank account", "remove my budget", "delete that charge", "clear everything", "remove my card from netflix", "delete the iou with sam"]) assertEquals(accountPrivacyReply(t, "anthropic"), null, t);
   assertMatch(DELETE_DATA_STEPS, /Nothing was deleted\.$/);
   // Each step named is a real control with that label in the app, on the You screen, and the modal asks for DELETE.
   assertMatch(SRC_APP, /id="profile" aria-label="You">[\s\S]{0,400}?<h1 class="ptitle">You<\/h1>/);
@@ -111,13 +111,14 @@ Deno.test("delete my data: never done from chat; the app's own Delete data steps
 });
 
 Deno.test("who can see my messages: the person's own rows and the AI provider this deployment runs on, from the policy (Q06)", () => {
-  for (const t of ["who can see my messages", "who else can read my chats", "are my chats private?", "do you sell my data", "does anyone else see my messages", "do you train on my data", "is my data safe"]) assertEquals(accountPrivacyReply(t, "openai"), whoSeesReply("openai"), t);
-  for (const t of ["who can see my spending", "can you see my balance", "who sells the cheapest data plan"]) assert(accountPrivacyReply(t, "openai") === null || /Upmore's AI provider/.test(accountPrivacyReply(t, "openai")!), t);
-  assertMatch(whoSeesReply("openai"), /which is OpenAI right now/);
+  for (const t of ["who can see my messages", "who else can read my chats", "are my chats private?", "do you sell my data", "does anyone else see my messages", "do you train on my data", "is my data safe"]) assertEquals(accountPrivacyReply(t, "anthropic"), whoSeesReply("anthropic"), t);
+  for (const t of ["who can see my spending", "can you see my balance", "who sells the cheapest data plan"]) assert(accountPrivacyReply(t, "anthropic") === null || /Upmore's AI provider/.test(accountPrivacyReply(t, "anthropic")!), t);
   assertMatch(whoSeesReply("anthropic"), /which is Anthropic \(Claude\) right now/);
-  assertMatch(whoSeesReply("openai"), /From Upmore's privacy policy, updated Oct 11, 2026 \(You, then Privacy Policy\)\.$/);
+  assertMatch(whoSeesReply("anthropic"), /which is Anthropic \(Claude\) right now/);
+  assertMatch(whoSeesReply("anthropic"), /From Upmore's privacy policy, updated Oct 11, 2026 \(You, then Privacy Policy\)\.$/);
   // Both providers are the policy's own list, and its date is the one quoted.
-  assertMatch(SRC_PRIVACY, /OpenAI<\/strong> \(and Anthropic, if we switch providers\)/);
+  assertMatch(SRC_PRIVACY, /<strong>Anthropic<\/strong>/);
+  assert(!/OpenAI/.test(SRC_PRIVACY), "the policy names no OpenAI");
   assertMatch(SRC_PRIVACY, /not used to train their models by default/);
   assertMatch(SRC_PRIVACY, /Last updated:<\/strong> October 11, 2026/);
   assertMatch(SRC_APP, /id="privacyRow"[^>]*><span class="pl">Privacy Policy</);
@@ -125,23 +126,24 @@ Deno.test("who can see my messages: the person's own rows and the AI provider th
   // move money" and saved merchant logins until 2026-10-12): the chat's "(You, then Privacy Policy)" points at it.
   const sheet = /<div class="sheet" id="privacySheet"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/.exec(SRC_APP)![0];
   assertMatch(sheet, /Last updated: October 11, 2026/);
-  assertMatch(sheet, /OpenAI, or Anthropic if we switch providers/);
+  assertMatch(sheet, /Anthropic \(your Guide messages/);
+  assert(!/OpenAI/.test(sheet), "the in-app policy names no OpenAI");
   assertMatch(sheet, /Alpaca \(only if you connect your own brokerage account/);
   for (const stale of [/go to Claude/, /brokerage connection \(Plaid\)/, /merchant logins you/, /we never move money,/]) assert(!stale.test(sheet), String(stale));
 });
 
 Deno.test("change my phone number or email: no phone on the account; email changes by asking, nothing changed (Q08)", () => {
-  for (const t of ["change my phone number", "i got a new number", "update my cell number", "how do i change my number"]) assertEquals(accountPrivacyReply(t, "openai"), PHONE_NONE, t);
-  for (const t of ["can i update my email", "change my login email"]) assertEquals(accountPrivacyReply(t, "openai"), EMAIL_NONE, t);
-  for (const t of ["change my phone plan", "my phone bill went up", "cancel my phone plan", "update my phone carrier"]) assertEquals(accountPrivacyReply(t, "openai"), null, t);
+  for (const t of ["change my phone number", "i got a new number", "update my cell number", "how do i change my number"]) assertEquals(accountPrivacyReply(t, "anthropic"), PHONE_NONE, t);
+  for (const t of ["can i update my email", "change my login email"]) assertEquals(accountPrivacyReply(t, "anthropic"), EMAIL_NONE, t);
+  for (const t of ["change my phone plan", "my phone bill went up", "cancel my phone plan", "update my phone carrier"]) assertEquals(accountPrivacyReply(t, "anthropic"), null, t);
   assertMatch(PHONE_NONE, /Nothing was changed\.$/);
   // Sign-up really is email + password or Google: no phone field.
   assert(!/type="tel"/.test(SRC_APP), "the app has no phone input");
 });
 
 Deno.test("what are your fees: the Terms' own price, billing not live, no Upmore fee on actions, the sale fees named (Q05)", () => {
-  for (const t of ["what are your fees", "what's the pricing", "how much does upmore cost", "do you charge anything", "is upmore free?", "any fees?", "does upmore take a cut", "how much is the app"]) assertEquals(accountPrivacyReply(t, "openai"), FEES_REPLY, t);
-  for (const t of ["what are the fees on my chase card", "how much is it to send $40", "any fees on this transfer", "what fees did i pay last month", "netflix price", "how much do i owe", "is this charge free", "how much will it cost me to cancel netflix"]) assertEquals(accountPrivacyReply(t, "openai"), null, t);
+  for (const t of ["what are your fees", "what's the pricing", "how much does upmore cost", "do you charge anything", "is upmore free?", "any fees?", "does upmore take a cut", "how much is the app"]) assertEquals(accountPrivacyReply(t, "anthropic"), FEES_REPLY, t);
+  for (const t of ["what are the fees on my chase card", "how much is it to send $40", "any fees on this transfer", "what fees did i pay last month", "netflix price", "how much do i owe", "is this charge free", "how much will it cost me to cancel netflix"]) assertEquals(accountPrivacyReply(t, "anthropic"), null, t);
   // Every fact is the Terms' or the app's own.
   const plain = SRC_TERMS.replace(/<[^>]*>/g, "");
   assertMatch(plain, /Upmore costs \$10 per month when subscriptions are live \(billing is not live yet — nothing is charged today\)/);

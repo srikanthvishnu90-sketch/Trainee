@@ -12,6 +12,7 @@
 //      functions (the draft bridge is not installed here), a started sandbox is stopped at the finish.
 //   3. real Postgres and the real engine in Chromium on a local form: the engine's dry run prepares, then the sandbox
 //      runner submits exactly the approved application once, records it, and reads back submitted_unconfirmed.
+import { confirmedResumeSql } from "../flow/resume-seed.ts"; // OWNER RULE 2026-10-26: the person has a confirmed resume
 import assertNode from "node:assert/strict";
 import { pgBinDir, startPg, type Pg } from "../flow/pg.ts";
 import { type ClaimedJob, dispatch, handleBridge, jobToken, type Rpc, type SandboxHost } from "../../supabase/functions/_shared/cloud_runner.ts";
@@ -125,6 +126,7 @@ async function people(pg: Pg, ids: string[], portals: string[]) {
     await pg.sql(`insert into auth.users (id, email) values ('${u}', '${u.slice(-2)}@example.test');
       insert into public.profiles (id) values ('${u}');
       insert into public.career_watch_kv (user_id, key, value) values ('${u}', 'career:account', '{"epoch":1,"version":1,"paused":false}');
+      ${confirmedResumeSql(u)}
       select public.career_apply_cloud_optin_as('${u}', true, 'TEST terms');
       insert into public.career_apply_cloud_resumes (user_id, sha256, filename, bytes, privacy_epoch)
        values ('${u}', '${RESUME_SHA}', 'resume.pdf', decode('${btoa(String.fromCharCode(...RESUME))}', 'base64'), 1);`);
@@ -227,8 +229,11 @@ Deno.test({
       const rates = await rpc("career_apply_cloud_check_rates", { p_days: 7 });
       const lever = rates.hosts.find((h: any) => h.host === "jobs.lever.co");
       eq([lever.attempts, lever.bot_checks, lever.bot_check_rate], [2, 1, 0.5], "per host: 1 check in 2 attempts (the not-started one counts as an attempt)");
-      // A checked application is never claimed again, and the existing throttle paused Lever for the cloud; Greenhouse's
-      // waiting application goes next.
+      // A checked application is never claimed again, and a paused Lever is not dispatched to; Greenhouse's waiting application
+      // goes next. One verification check no longer pauses a portal by itself (#384: the bot-check rule is 2 in the last 20 attempts,
+      // tests/db/career_apply_mass_throughput.test.sql), so the pause this step needs is the one two checks would have made.
+      await pg.sql(`insert into public.career_apply_cloud_pauses (scope, portal, reason, until, created_at)
+        values ('portal', 'lever', 'bot_check_spike: 2 bot checks in the last 20 attempts', now() + interval '6 hours', now())`);
       const again = await dispatch({ rpc, host: f.host, secret: SECRET, bridgeUrl: "https://bridge.test", limits: { want: 10, global: 4, perPortal: 2 },
         retry: { sleep: noSleep }, log: () => {} });
       await Promise.all(runs);
@@ -313,13 +318,14 @@ Deno.test({
       // Setup, named: the approved application as the cloud claim leaves it (driving, source cloud, its own lease) and its
       // approved resume where the cloud keeps it. The claim itself refuses any host but a portal family's (part 2 and
       // tests/db/career_apply_cloud_runner.test.sql), so a page on 127.0.0.1 is put in its claimed state directly.
+      // The resume first: the owner's resume rule (20261026210016) lets a row into driving only with its resume stored.
+      await pg.sql(`insert into public.career_apply_cloud_resumes (user_id, sha256, filename, bytes, privacy_epoch)
+        values ('${P1}', '${p.payload.resume_sha256}', 'resume.pdf', decode('${btoa(String.fromCharCode(...resume))}', 'base64'), 1)`);
       const q = (s: string) => `$q$${s}$q$`;
       const claimed = JSON.parse(await pg.sql(`insert into public.career_apply_jobs (user_id, job_id, company, url, payload, payload_hash, approval_hash,
         state, attempts, claimed_at, lease_token, source) select '${P1}', ${q(p.payload.job_id)}, ${q(p.payload.company)}, ${q(p.payload.url)}, x.p,
         public.career_apply_payload_hash(x.p), public.career_apply_payload_hash(x.p), 'driving', 1, now(), gen_random_uuid(), 'cloud'
         from (select ${q(JSON.stringify(p.payload))}::jsonb p) x returning json_build_object('id', id, 'lease', lease_token)`).then((s) => s.split("\n").at(-1)!));
-      await pg.sql(`insert into public.career_apply_cloud_resumes (user_id, sha256, filename, bytes, privacy_epoch)
-        values ('${P1}', '${p.payload.resume_sha256}', 'resume.pdf', decode('${btoa(String.fromCharCode(...resume))}', 'base64'), 1)`);
 
       const rpc = pgRpc(pg), readJob = pgReadJob(pg), stopped: string[] = [];
       const deps = { rpc, readJob, secret: SECRET, stop: async (s: string) => { stopped.push(s); } };

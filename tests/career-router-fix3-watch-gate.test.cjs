@@ -104,25 +104,25 @@ test("fix3 read-back: after the served ask, 'what am I watching?' names both rol
   assert.doesNotMatch(second.out.reply, /no job watches/i, second.out.reply);
 });
 
-test("fix3 control: no master profile and no standing record -> gate reply, and no state is materialized", () => {
+// OWNER RULE (2026-10-28, Telegram-first list #4): a new person's "set a job alert for <role> in <city>" creates the
+// watch on the role and place they stated; the old profile gate held every first alert. Only an ask with no role stops.
+test("fix3 control (owner 2026-10-28): no master profile and no standing record -> the stated watch is created", () => {
   const r = turn(USER, "fx3-t3", ASK, { watchState: {} });
   assert.equal(r.out.intent, "career_watch_create", r.out.reply);
-  assert.equal(r.out.resultStatus, "awaiting_user", r.out.reply);
-  assert.match(r.out.reply, /profile on file first/i, r.out.reply);
-  assert.equal((r.snap.stores || {}).alertWatchState, undefined, "a gated ask must not create the watch state container");
-  assert.equal(recordOf(r.snap, USER), null, "no phantom watch record may exist after the gate reply");
+  assert.equal(r.out.resultStatus, "prepared", r.out.reply);
+  const wp = recordOf(r.snap, USER);
+  assert.ok(wp && wp.interests.length === 1, "the watch record holds the stated watch");
 });
 
-test("fix3 control: standing record WITHOUT a scoring basis + no master profile -> gate reply, record untouched", () => {
+test("fix3 control (owner 2026-10-28): standing record WITHOUT a scoring basis + no master profile -> the stated watch is added", () => {
   const seed = standingRecord(USER, false);
   assert.ok(!seed.scoring_profile, "fixture check: the seed carries no scoring basis");
   const watchState = { [A.PROFILE_KEY(USER)]: clone(seed) };
   const r = turn(USER, "fx3-t4", ASK, { watchState });
   assert.equal(r.out.intent, "career_watch_create", r.out.reply);
-  assert.equal(r.out.resultStatus, "awaiting_user", r.out.reply);
-  assert.match(r.out.reply, /profile on file first/i, r.out.reply);
+  assert.equal(r.out.resultStatus, "prepared", r.out.reply);
   const wp = recordOf(r.snap, USER);
-  assert.deepEqual(wp, seed, "with no honest basis anywhere, the record is left exactly as it stood — nothing added, nothing removed");
+  assert.ok(wp.interests.length >= seed.interests.length, "nothing standing is removed");
 });
 
 test("fix3 control: master profile on file -> the watch is created and recorded as the reply states", () => {

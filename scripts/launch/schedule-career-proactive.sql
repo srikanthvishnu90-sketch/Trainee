@@ -26,4 +26,18 @@ $job$, :'url'));
 -- so it stops counting toward the daily cap and the 30-day company rule. Pure SQL, no secret; every 15 minutes.
 select cron.unschedule('trainee-apply-sweep') where exists (select 1 from cron.job where jobname = 'trainee-apply-sweep');
 select cron.schedule('trainee-apply-sweep', '*/15 * * * *', 'select public.career_apply_sweep_stale()');
-select jobname, schedule from cron.job where jobname in ('trainee-career-proactive', 'trainee-apply-sweep');
+-- Mass networking (lane M1): the sending rail. Every minute, CAREER_SEND_WORKERS (default 4) career-send instances start
+-- side by side, each for about 100 seconds; the database hands each sender account to one instance at a time, so more
+-- instances only add throughput. The function sends nothing until CAREER_SEND_RAIL=on is set on the project.
+\set send_workers `printf '%s' "${CAREER_SEND_WORKERS:-4}"`
+select cron.unschedule('trainee-career-send') where exists (select 1 from cron.job where jobname = 'trainee-career-send');
+select cron.schedule('trainee-career-send', '* * * * *', format($job$
+  select net.http_post(
+    url := %L,
+    headers := jsonb_build_object('content-type', 'application/json',
+      'x-trainee-proactive-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'trainee_career_proactive_secret')),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 140000)
+  from generate_series(1, %s)
+$job$, regexp_replace(:'url', '/career-proactive$', '/career-send'), greatest(1, least(64, :'send_workers'::int))));
+select jobname, schedule from cron.job where jobname in ('trainee-career-proactive', 'trainee-apply-sweep', 'trainee-career-send');

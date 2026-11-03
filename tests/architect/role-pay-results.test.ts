@@ -82,7 +82,7 @@ Deno.test("page: one card per role (title, company, pay with its source or 'Pay 
   assert(/Frontend Intern Globex Pay Pay not listed/.test(t), "no pay: said, never invented");
   assert(/Where Austin, TX · Hybrid/.test(t) && /Posted 2 d ago/.test(t), t);
   assert(/Why it fits: You listed React and TypeScript\./.test(t), "the fit reason from confirmed facts");
-  assert(html.includes('href="https://boards.greenhouse.io/acme/jobs/1"') && /Open on boards\.greenhouse\.io/.test(t), "the source link");
+  assert(html.includes('href="https://boards.greenhouse.io/acme/jobs/1"') && /View role on boards\.greenhouse\.io/.test(t), "the source link");
   eq((html.match(/<button type="submit" class="apply" aria-label="Apply to /g) ?? []).length, 3, "a black Apply on each card");
   eq((html.match(/type="checkbox" form="sel" name="pick"/g) ?? []).length, 3, "each card can be selected");
   assert(/<form method="post" id="sel">[\s\S]*Apply to selected/.test(html), "Apply to selected");

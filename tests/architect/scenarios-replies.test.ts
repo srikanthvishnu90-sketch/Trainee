@@ -189,7 +189,13 @@ Deno.test({ name: `replies at scale, end to end on Postgres: ${E2E} sampled scen
     // One clock for the whole run: the lane's "now" moves at least a second a pass and never falls behind the real time the
     // mailbox stamps messages with (a slow runner took minutes, and a message "from the future" was skipped as not yet arrived).
     const sync = () => runReplySync({ store, readers, model: null, now: (clock = Math.max(clock + 1000, Date.now())), worker: "r1", tz: async () => "America/Chicago", mailboxes: 1000 });
-    const picked = sample(SCENARIOS, E2E, 2026);
+    // The return dates of the end-to-end scenarios are counted from the day this run starts, so each one is in the future of
+    // the clock that sends: the follow-up of an auto-reply with a date waits past it on whatever day the test runs. Part 1's
+    // scenarios keep their fixed dates and the fixed NOW they are read at. (This was Nov 2..27, 2026, read at the real
+    // clock: from 2026-11-03 00:00 UTC "until Nov 2" was past and the follow-up rightly went at once.)
+    const base = Date.UTC(new Date(started).getUTCFullYear(), new Date(started).getUTCMonth(), new Date(started).getUTCDate()) + DAY;
+    const picked = sample(generate({ seed: 20261029, count: 10_000, base }), E2E, 2026);
+    assertNode.ok(picked.every((s) => !s.returnAt || Date.parse(s.returnAt) > started + DAY), "every return date is still ahead of the clock that sends");
     const P = new Map(picked.map((s, i) => [s.id, uid(i + 1, "7a")]));
     const Q = uid(1, "7b"), R = uid(2, "7b"); // two other people who also have email queued to (or try) the same addresses
     for (const u of [...P.values(), Q, R]) await railPerson(db, u);

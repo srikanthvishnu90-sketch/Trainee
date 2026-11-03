@@ -100,7 +100,7 @@ import { askFor, isJudgePromptAsk, judgePromptTurn, searchJudgeTurn, supabaseJud
 import { offerChatTurn } from "../_shared/career_offer_chat.ts"; // FEATURE 12
 import { activityAsk, activityTurn, supabaseActivity } from "../_shared/career_activity.ts"; // REQS DOC 1: Q21, Q249, Q34
 import { redoAsk, redoTurn } from "../_shared/career_redo.ts"; // REQS DOC 1: Q83, Q196
-import { connectorAsk, connectorChatTurn, connectorFailure } from "../_shared/connectors.ts"; // Task 3 (FEATURE GV's disconnect included)
+import { confirmMailAsk, connectorAsk, connectorChatTurn, connectorFailure } from "../_shared/connectors.ts"; // Task 3 (FEATURE GV's disconnect included)
 import { networkingTurn, siteRefusedTurn, supabaseReferralPostings } from "../_shared/career_networking.ts"; // FEATURE 10
 import { plannerOn, plannerTurn, type PlannerTurn } from "./career_planner.ts"; // TASK PLANNER
 import { careerTools } from "../_shared/agent/career_tools.ts"; // TASK PLANNER: track_application, remember_instruction
@@ -969,11 +969,16 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         out = { reply: f08.reply, intent: f08.intent, resultStatus: f08.status, contained: false, handler: "followup" };
         if (f08.meta) agentMeta = f08.meta;
       } else if (stood) {
-        out = { reply: stood.reply, intent: stood.intent, resultStatus: stood.status, contained: false, handler: "standing" };
+        // A submitted application is "Submitted - confirmed" only on the employer's confirmation email: with none connected the answer says why and carries the connect link.
+        const needMail = await confirmMailAsk({ admin, env: Deno.env, fetch, now: Date.now }, { userId: user.id, channel: writerChannel((body as any)?.channel), unconfirmed: Number((stood as any).summary?.submitted_not_confirmed) || 0 }).catch((e) => { console.error("confirm mail ask:", e?.message ?? e); return null; });
+        out = { reply: needMail ? `${stood.reply}\n\n${needMail.text}` : stood.reply, intent: stood.intent, resultStatus: stood.status, contained: false, handler: "standing" };
         if ((stood as any).summary) agentMeta = { ...(agentMeta || {}), apply_summary: (stood as any).summary }; // spec 6.5: counts from row states
+        if (needMail?.meta) agentMeta = { ...(agentMeta || {}), ...needMail.meta };
       } else if (status) {
-        out = { reply: status.reply, intent: status.intent, resultStatus: status.status, contained: false, handler: "status" };
+        const needMail = await confirmMailAsk({ admin, env: Deno.env, fetch, now: Date.now }, { userId: user.id, channel: writerChannel((body as any)?.channel), unconfirmed: Number((status as any).summary?.submitted_not_confirmed) || 0 }).catch((e) => { console.error("confirm mail ask:", e?.message ?? e); return null; });
+        out = { reply: needMail ? `${status.reply}\n\n${needMail.text}` : status.reply, intent: status.intent, resultStatus: status.status, contained: false, handler: "status" };
         if ((status as any).summary) agentMeta = { ...(agentMeta || {}), apply_summary: (status as any).summary }; // spec 6.5: counts from row states
+        if (needMail?.meta) agentMeta = { ...(agentMeta || {}), ...needMail.meta };
       } else if (networking) {
         // FEATURE 10: a batch shown is the thread's last word (OUTREACH_INTENT), so "send 1" answers it.
         out = { reply: networking.reply, intent: networking.intent, resultStatus: networking.status, contained: false, handler: "networking", ...(networking.parts ? { parts: networking.parts } : {}) };

@@ -92,7 +92,7 @@ Deno.test({
     const TEXT = sampleText(), HOOKS = sampleWebhooks();
     const people: Record<string, string> = {};
     for (let i = 1; i <= TEXT.length + 40; i++) people[`tok-b2-${i}`] = uidOf(i);
-    const keys = ["CAREER_BRAIN", "ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "CAREER_MODEL", "MODEL_PROVIDER", "CAREER_BRAIN_ROUTER_INTENTS",
+    const keys = ["CAREER_BRAIN", "ANTHROPIC_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "CAREER_MODEL", "MODEL_PROVIDER", "CAREER_BRAIN_ROUTER_INTENTS",
       "CAREER_MODEL_DAILY_USD", "CAREER_MODEL_DAILY_CALLS", "MODEL_BUDGET_PAUSED", "CAREER_REPLY_WRITER", "TELEGRAM_BOT_TOKEN"];
     const saved = Object.fromEntries(keys.map((k) => [k, Deno.env.get(k)]));
     for (const k of keys) Deno.env.delete(k);

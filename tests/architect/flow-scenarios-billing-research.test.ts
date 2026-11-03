@@ -68,7 +68,7 @@ Deno.test({
     const RES = researchScenarios(20261031, 400).filter((_, i) => i % 7 === 0).slice(0, 60);
     const people: Record<string, string> = {};
     for (let i = 1; i <= BILL.length + 2; i++) people[`tok-br-${i}`] = uidOf(i);
-    const unset = ["CAREER_BRAIN", "ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY", "STRIPE_SECRET_KEY", "CAREER_RESEARCH_REPLY", "TRAINEE_REPORT_SECRET"];
+    const unset = ["CAREER_BRAIN", "ANTHROPIC_API_KEY", "STRIPE_SECRET_KEY", "CAREER_RESEARCH_REPLY", "TRAINEE_REPORT_SECRET"];
     const saved = Object.fromEntries(unset.map((k) => [k, Deno.env.get(k)]));
     for (const k of unset) Deno.env.delete(k);
     const pg: Pg = await startPg();

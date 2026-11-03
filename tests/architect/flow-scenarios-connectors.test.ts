@@ -78,7 +78,7 @@ Deno.test({ name: `connectors end to end on Postgres through the real handler: $
     GOOGLE_OAUTH_CLIENT_ID: "fake-google-client-0000", OAUTH_STATE_SECRET: "fake-state-secret-0000-xxxxxxxxxxxxxxxx", GMAIL_LINK_BASE: "https://proj.example.test/functions/v1/gmail-oauth",
     MICROSOFT_OAUTH_CLIENT_ID: "fake-ms-client-0000", MICROSOFT_OAUTH_CLIENT_SECRET: "fake-ms-secret-0000", OUTLOOK_LINK_BASE: "https://proj.example.test/functions/v1/outlook-oauth",
   };
-  const UNSET = ["CAREER_BRAIN", "ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY"];
+  const UNSET = ["CAREER_BRAIN", "ANTHROPIC_API_KEY", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY"];
   const saved = Object.fromEntries([...Object.keys(ENV), ...UNSET].map((k) => [k, Deno.env.get(k)]));
   for (const k of UNSET) Deno.env.delete(k);
   for (const [k, v] of Object.entries(ENV)) Deno.env.set(k, v);

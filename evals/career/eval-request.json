@@ -1,8 +1,9 @@
 {
- "note": "D-038: staged brain on claude-haiku-5-5, dev set, five passes; judges unchanged. Reply code of 725fa19bf (second parent). Logged as staged:claude-haiku-5-5 so S3 never counts it. Anthropic cap $25.",
+ "note": "deploy standard S3 (scripts/launch/measure-reply.sh): measure the second parent",
  "action": "eval",
  "set": "dev",
- "brains": ["staged"],
- "model": "claude-haiku-5-5",
+ "brains": [
+  "staged"
+ ],
  "passes": 5
 }

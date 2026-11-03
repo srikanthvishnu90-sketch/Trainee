@@ -7,7 +7,8 @@
 // own gate again at the moment of queuing (matchPosting: their keywords, place and relevance floor; and news, not
 // backlog), so nothing below the person's threshold is ever sent; the planner holds no alert for a weekly count (but see the
 // database's career_alert_enqueue, which still does). Each alert carries its posting's first_seen_at, for the latency report.
-import { DEFAULT_PREFS, fitFloorOk, localDay, matchPosting, planProactive, quietAt, twinKey, zoneOr } from "./career_alerts.ts";
+import { DEFAULT_PREFS, fitFloorOk, localDay, matchPosting, planProactive, quietAt, twinKeys, zoneOr } from "./career_alerts.ts";
+const TWIN_LOOKBACK_MS = 72 * 3600000; // how far back an alert makes the same job on another board not news
 import { alertFits } from "./career_alert_fit.ts";
 import { freshWhenSeen } from "./career_fresh.ts";
 import type { AlertRow, AlertStore, Outbox } from "./career_alert_store.ts";
@@ -96,9 +97,12 @@ export async function runAlerts(o: {
   // plans the same postings again and, freshest first, puts newer ones ahead of them: a cap of 3 a day became 5. The
   // alerts already queued for postings this run would plan again (first seen at or after the person's last check) count
   // against today before planning. A store that cannot say is counted at each duplicate the run meets instead.
-  const checked = Math.max(o.now - 26 * 3600000, Math.min(...rows.map((r) => Date.parse(r.last_checked_at)).filter(Number.isFinite)));
+  // PROACTIVE SCENARIOS ROUND 3 (2026-11-01): and the alerts of the last three days, for the same job on another board. Only
+  // the alerts since the last check were read, so a job an aggregator carried a run or more after its own board's alert (an
+  // hour, a day later) was news again and alerted twice.
+  const checked = Math.min(o.now - TWIN_LOOKBACK_MS, Math.max(o.now - 26 * 3600000, Math.min(...rows.map((r) => Date.parse(r.last_checked_at)).filter(Number.isFinite))));
   const queued = o.store.alertKeysSince
-    ? await o.store.alertKeysSince(new Date(Number.isFinite(checked) ? checked : o.now - 26 * 3600000).toISOString())
+    ? await o.store.alertKeysSince(new Date(Number.isFinite(checked) ? checked : o.now - TWIN_LOOKBACK_MS).toISOString())
       .catch((e) => { console.error("alerts: the queued alerts could not be read; each duplicate is counted instead:", errText(e)); return null; })
     : null;
   const seenAt = new Map(postings.map((p) => [`alert:${p.job_id}`, Date.parse(String(p.first_seen_at ?? ""))]));
@@ -111,8 +115,13 @@ export async function runAlerts(o: {
   // step (enqueueAlert), that count is the truth, alerts a dead run queued included: the plan's room is only a first guess.
   const atomic = typeof o.outbox.enqueueAlert === "function";
   const byId = new Map(postings.map((p) => [p.job_id, p]));
+  // The postings of the alerts already queued that this run did not read (older than its window): for their jobs only.
+  const alertedIds = [...new Set([...(queued?.values() ?? [])].flatMap((ks) => [...ks]).map((k) => k.slice("alert:".length)))].filter((id) => !byId.has(id));
+  const alerted = new Map(byId);
+  // A read that fails stops the run (as the held postings' read does): never an alert on a guess that it is not a twin.
+  if (alertedIds.length) for (const p of await o.postingsById(alertedIds.slice(0, 2000))) alerted.set(p.job_id, p);
   const users: AlertRow[] = rows.map((r) => ({ ...r, instant_sent_today: (r.sent_on === localDate(o.now, r.tz) ? r.instant_sent_today : 0) + (atomic ? 0 : counted.get(r.id)!.size),
-    alerted_twins: [...(queued?.get(r.id) ?? [])].map((k) => byId.get(k.slice("alert:".length))).filter(Boolean).map(twinKey) }));
+    alerted_twins: [...(queued?.get(r.id) ?? [])].map((k) => alerted.get(k.slice("alert:".length))).filter(Boolean).flatMap(twinKeys) }));
   // F7: the fit to each matching posting, for people whose watch record carries their confirmed facts; ranked and floored
   // by the planner, and the floor checked again below at the moment of queuing.
   const fits = await alertFits({ users, postings, profiles, full: o.postingsById });

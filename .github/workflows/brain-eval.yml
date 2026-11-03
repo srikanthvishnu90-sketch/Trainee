@@ -79,6 +79,11 @@ jobs:
       # quote all five.
       MODEL_BUDGET_TARGET_USD: "70"
       MODEL_BUDGET_HARD_USD: "70"
+      # ONE $70 across every run: the shared database ledger (the same one production reserves in). The runners fail closed
+      # (NOT RUN, exit 2, no model call) when EVAL_LEDGER=shared and the ledger or either secret below is missing or unreachable.
+      EVAL_LEDGER: shared
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       ANTHROPIC_EVAL_BUDGET_USD: "70"
       EVAL_PARALLEL: "5"
       EVAL_JUDGE_MODEL: claude-sonnet-5-5
@@ -91,6 +96,11 @@ jobs:
       - name: The key is present
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then echo "NOT RUN: the ANTHROPIC_API_KEY secret is not set"; exit 2; fi
+      - name: The shared ledger secrets are present
+        run: |
+          for k in SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY; do
+            if [ -z "$(printenv "$k")" ]; then echo "NOT RUN: the repository secret $k is not set (the shared \$70 budget ledger); no model call was made"; exit 2; fi
+          done
       - name: What this run measures
         id: req
         run: |

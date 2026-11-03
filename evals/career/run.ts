@@ -30,7 +30,7 @@ export interface EvalResult { total: number; passed: number; pass_rate: number; 
 import { type BrainName, checkExpect, HARNESS, type ModelFn, outcomeOf } from "./harness.ts";
 import { isClaude, JUDGE_A_MAX_TOKENS, JUDGE_A_MODEL, JUDGE_A_SYSTEM, JUDGE_B_MAX_TOKENS, JUDGE_B_MODEL, JUDGE_B_SYSTEM, judgeBPrompt, judgeFingerprint, judgeModelProblem, parseJudgeB } from "./judges.ts";
 import { attribute, attributionLines } from "./attribution.ts";
-import { budgetTargets, claudeSpentUsd, openGate, preflight, quoteRun, spendLine } from "./eval_budget.ts";
+import { budgetTargets, claudeSpentUsd, ledgerSpentUsd, openGate, preflight, quoteRun, spendLine } from "./eval_budget.ts";
 // stop: asked before each item; a reason ends the run there (the spend cap), and the items not run are not scored.
 export async function runEval(items: EvalItem[], brain: Brain, judge: Judge, stop?: () => string | null): Promise<EvalResult> {
   const out: EvalItemResult[] = [];
@@ -281,10 +281,12 @@ if (import.meta.main) {
       for await (const e of Deno.readDir(new URL(dir, import.meta.url))) if (e.name.endsWith(".json")) prior.push(JSON.parse(await Deno.readTextFile(new URL(`${dir}${e.name}`, import.meta.url))));
     } catch { /* no results yet */ }
   }
-  const before = claudeSpentUsd(prior, label);
+  let before = claudeSpentUsd(prior, label);
   const opened = openGate(bud, get, before, target, parallel);
   if ("error" in opened) { console.log(`NOT RUN: ${opened.error}.`); Deno.exit(2); }
   const { gate, shared: sharedLedger } = opened;
+  // Shared ledger: the spend before this run is what ALL runs recorded in the one $70 ledger (not just result files on this disk).
+  if (sharedLedger) { const led = await ledgerSpentUsd(gate); if (led === null) { console.log("NOT RUN: the shared budget ledger could not be read; no model call was made."); Deno.exit(2); } before = led; console.log(`shared ledger: $${led.toFixed(3)} recorded across all runs; remaining allowance $${Math.max(0, target - led).toFixed(3)} of $${target.toFixed(2)}`); }
   const call = (meterOf: typeof meter) => (cfg: any, payload: any) => gw.callModel(cfg, payload, { meter: meterOf, role: "chat", budget: gate });
   const brain: Brain = await makeBrain({ name: brainName as any, env: Deno.env, model: usesModel ? (p: any) => gw.callModel(brainCfg, p, { meter, role: "chat", budget: gate }) : null });
   const judge = makeJudge({ cfgA: judgeCfg, cfgB: judge2Cfg, call: call(judgeMeter) });

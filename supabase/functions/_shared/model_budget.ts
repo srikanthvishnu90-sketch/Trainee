@@ -174,8 +174,18 @@ export function denoEnvGet(): EnvGet | null {
 
 // The gate for a call: the caller's own (tests, a handler with an admin client), else the project's shared ledger, else the local twin.
 // null = refuse (a project URL with no service key).
+// EVAL_LEDGER=shared (set by every eval/measure workflow): the run must count against the ONE $70 database ledger. A process-local twin
+// would only see this process, so when the project URL or service key is missing the answer is "no gate" (fail closed), and the problem
+// names the missing piece.
+export const evalLedgerShared = (get: EnvGet | null): boolean => String(get?.("EVAL_LEDGER") ?? "").trim().toLowerCase() === "shared";
+export function sharedLedgerProblem(get: EnvGet | null): string | null {
+  if (!evalLedgerShared(get)) return null;
+  const missing = [["SUPABASE_URL", get?.("SUPABASE_URL")], ["SUPABASE_SERVICE_ROLE_KEY", get?.("SUPABASE_SERVICE_ROLE_KEY")]].filter(([, v]) => !String(v ?? "").trim()).map(([k]) => k);
+  return missing.length ? `EVAL_LEDGER=shared needs the shared budget ledger, but ${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} missing; a process-local twin would not count the other runs` : null;
+}
 export function resolveBudgetGate(explicit: BudgetGate | undefined, get: EnvGet | null = denoEnvGet(), request?: typeof fetch): BudgetGate | null {
   if (explicit) return explicit;
+  if (sharedLedgerProblem(get)) return null; // fail closed: never fall back to the local twin when the shared ledger is required
   const cap = budgetLimits(get);
   if (cap === null) return null; // MODEL_BUDGET_TARGET_USD / MODEL_BUDGET_HARD_USD is malformed: refuse rather than guess a limit
   const url = get?.("SUPABASE_URL") ?? "", key = get?.("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -226,10 +236,13 @@ export function usageProven(provider: string, raw: any): boolean {
 // reservation still counts in the ledger. An unreadable ledger also refuses (fail closed). Throws ModelBudgetBlockedError
 // (message "NOT RUN: ..."); returns the status when the run may start.
 const notRun = (block: "limit" | "unavailable", detail: string) => { const e = new ModelBudgetBlockedError(block, detail); e.message = `NOT RUN: ${e.message}`; return e; };
-export async function assertRunMayStart(gate: BudgetGate | null = resolveBudgetGate(undefined), quoteMicros?: number, meta: BudgetMeta = { model: "eval", role: "eval" }): Promise<BudgetStatus> {
+export async function assertRunMayStart(gate: BudgetGate | null = resolveBudgetGate(undefined), quoteMicros?: number, meta: BudgetMeta = { model: "eval", role: "eval" }, get: EnvGet | null = denoEnvGet()): Promise<BudgetStatus> {
+  const shared = sharedLedgerProblem(get);
+  if (shared) throw notRun("unavailable", `${shared}; no new run starts`);
+  const sharedMode = evalLedgerShared(get);
   if (!gate || !gate.status) throw notRun("unavailable", "the budget cannot be read, so no new run starts");
   const st = await gate.status();
-  if (!st) throw notRun("unavailable", "the budget could not be read, so no new run starts");
+  if (!st) throw notRun("unavailable", sharedMode ? "the shared budget ledger (model_budget_total_status) is unreachable or unreadable, so no new run starts" : "the budget could not be read, so no new run starts");
   if (st.state === "over_target" || st.state === "stopped") throw notRun("limit", `the release+test spend total is reached ($${(st.total / 1e6).toFixed(2)} of $${(st.target / 1e6).toFixed(2)}); no new run starts`);
   if (quoteMicros !== undefined) {
     const r = await gate.reserve(Math.max(1, Math.ceil(quoteMicros)), meta);

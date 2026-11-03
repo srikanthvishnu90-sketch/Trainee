@@ -63,7 +63,7 @@ async function main() {
     const cfg = modelConfigFor(Deno.env, Deno.env.get("JUDGE_MODEL") || "claude-sonnet-5-5");
     const bud = await import("../../supabase/functions/_shared/model_budget.ts");
     const gate = bud.resolveBudgetGate(undefined, (k) => Deno.env.get(k)) ?? bud.memoryBudgetGate(5_000_000);
-    try { await bud.assertRunMayStart(gate, 1_000_000, { model: cfg.model, role: "eval" }); } catch (e) { console.error(e instanceof Error ? e.message : String(e)); Deno.exit(2); }
+    try { const st = await bud.assertRunMayStart(gate, 1_000_000, { model: cfg.model, role: "eval" }); console.error(`ledger: $${(st.total / 1e6).toFixed(3)} recorded across all runs; remaining allowance $${Math.max(0, (st.target - st.total) / 1e6).toFixed(3)} of $${(st.target / 1e6).toFixed(2)}`); } catch (e) { console.error(e instanceof Error ? e.message : String(e)); Deno.exit(2); }
     for (const s of have) {
       const res = await callModel(cfg, { system: "You are a strict grader. Answer with JSON only.", messages: [{ role: "user", content: [{ type: "text", text: judgeRequest(s, recs[s.id], template).prompt }] }], max_tokens: 1500 }, { role: "chat", budget: gate });
       const text = (res.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("");

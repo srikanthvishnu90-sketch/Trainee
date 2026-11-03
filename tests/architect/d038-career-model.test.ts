@@ -4,7 +4,10 @@
 // (providerFor throws); every model the default or a rollback can name is priced, so the cost ledger and the global daily budget
 // stay right. Nothing here reaches a real provider: the provider is a stub fetch.
 import { CAREER_MODEL_DEFAULT, careerModel, careerModelConfig, ROLLBACK_MODELS } from "../../supabase/functions/agent-chat/release_model.ts";
-import { ANTHROPIC_THINKING_HEADROOM, callModel, costMicros, fromAnthropic, modelConfig, modelConfigFor, newMeter, PRICES, providerFor, readerModel, toAnthropic } from "../../supabase/functions/_shared/model_gateway.ts";
+import { mailModelConfig } from "../../supabase/functions/_shared/career_mail_model.ts";
+import { essayModelConfig } from "../../supabase/functions/_shared/career_essay_card.ts";
+import { ANTHROPIC_THINKING_HEADROOM, callModel, costMicros, fromAnthropic, modelConfig, modelConfigFor, newMeter, PRICES, providerFor, toAnthropic } from "../../supabase/functions/_shared/model_gateway.ts";
+import { readerModel } from "../../supabase/functions/_shared/career_reader_model.ts";
 import { memoryBudgetGate, worstCaseMicros } from "../../supabase/functions/_shared/model_budget.ts";
 
 function assert(v: unknown, m = "assertion failed") { if (!v) throw new Error(m); }
@@ -150,4 +153,18 @@ Deno.test("D-038: a Claude call goes to Anthropic with its key, is reserved and 
   const missing = modelConfigFor(env({}), "claude-haiku-5-5");
   let err: any = null; try { await callModel(missing, { messages: [] }, { request: (async () => { throw new Error("must not send"); }) as any, budget: gate }); } catch (e) { err = e; }
   assert(err && err.type === "not_configured", "no ANTHROPIC_API_KEY: not configured, nothing sent");
+});
+Deno.test("owner directive 2026-11-02: the four background readers (mail, essay, mock judge, outreach replies) are Claude-only; CAREER_MODEL never sends a gpt id anywhere", () => {
+  const claude = env({ OPENAI_API_KEY: "o", ANTHROPIC_API_KEY: "a", CAREER_MODEL: "claude-sonnet-5-5" });
+  const gpt = env({ OPENAI_API_KEY: "o", ANTHROPIC_API_KEY: "a", CAREER_MODEL: "gpt-4.1-mini" });
+  eq([readerModel(claude), readerModel(gpt), readerModel(env({}))], ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-haiku-5-5"]);
+  for (const e of [claude, gpt, env({ OPENAI_API_KEY: "o", ANTHROPIC_API_KEY: "a" })]) {
+    const mail = mailModelConfig(e), essay = essayModelConfig(e);
+    eq([mail.provider, providerFor(mail.model), mail.apiKey], ["anthropic", "anthropic", "a"], "mail");
+    eq([essay.provider, providerFor(essay.model), essay.apiKey], ["anthropic", "anthropic", "a"], "essay");
+  }
+  for (const f of ["supabase/functions/_shared/career_mock_prep.ts", "supabase/functions/career-proactive/index.ts", "supabase/functions/_shared/career_mail_model.ts", "supabase/functions/_shared/career_essay_card.ts"]) {
+    const t = code(read(f));
+    assert(!/env\.get\(\s*["']CAREER_MODEL["']\s*\)/.test(t) && !t.includes("openaiCareerModel") && /readerModelConfig\(|readerCall\(/.test(t), `${f} reads its model only through career_reader_model.ts`);
+  }
 });

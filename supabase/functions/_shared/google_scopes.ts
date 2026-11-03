@@ -59,7 +59,7 @@ export function permissionScopes(scopes: string[]): string[] {
 export const PRIVACY_URL_PATH = "/privacy#google";
 
 // modelCheck: CAREER_MAIL_MODEL is on for the mail run (career-proactive), so an unclear email's masked sender name,
-// subject and preview go to OpenAI's API for a second opinion (career_mail_model.ts mailModelPayload).
+// subject and preview go to Anthropic's API for a second opinion (career_mail_model.ts mailModelPayload).
 export function consentNotice(scopes: string[], o: { modelCheck?: boolean } = {}): { title: string; reads: string[]; never: string[]; undo: string[] } {
   const read = scopes.includes(GMAIL_READONLY), send = scopes.includes(GMAIL_SEND);
   const reads: string[] = [];
@@ -68,7 +68,7 @@ export function consentNotice(scopes: string[], o: { modelCheck?: boolean } = {}
       "While an application you approved is being sent, the security code the application system (Greenhouse, Lever, Ashby or Workday) emails you, so Trainee can type it into that form. The code is used once and never stored.",
       "The sender, subject, date and Gmail's short preview of each new email (never the full email), to find employers' confirmations, rejections, interviews and replies and update your application tracker. For those, Trainee keeps only the result (for example \"Acme: interview\") and one short evidence line from the subject; for every other email it keeps nothing.",
     );
-    if (o.modelCheck) reads.push("When an employer email is unclear, its sender name, subject and preview, with long numbers and email addresses masked, are checked by OpenAI's model for Trainee. OpenAI does not train on it.");
+    if (o.modelCheck) reads.push("When an employer email is unclear, its sender name, subject and preview, with long numbers and email addresses masked, are sent to Anthropic's API so Claude can read them for Trainee, under Anthropic's API terms. Trainee stores nothing from that beyond the result it confirms.");
   }
   if (send) reads.push("Send one email you approved word for word in the chat, from your own Gmail. Nothing is sent without your yes to that exact email.");
   reads.push("Your Google email address, to show you which account you connected.");

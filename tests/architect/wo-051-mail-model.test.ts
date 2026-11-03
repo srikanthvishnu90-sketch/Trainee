@@ -290,7 +290,7 @@ Deno.test("WO-051/V1 the live eval without a key prints NOT_RUN and exits 0; not
   }).output();
   const text = new TextDecoder().decode(out.stdout);
   eq(out.code, 0, new TextDecoder().decode(out.stderr));
-  assert(/^NOT_RUN: no OPENAI_API_KEY/.test(text), text);
+  assert(/^NOT_RUN: no ANTHROPIC_API_KEY/.test(text), text);
   const stub = await withModel(allSplits().dev.slice(0, 40), say("none", 0.9));
   assert(stub.asked >= 1 && stub.rules.predicted >= stub.rules_and_model.predicted, "a model saying none only holds steps back");
 });

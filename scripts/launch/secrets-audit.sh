@@ -26,7 +26,7 @@ esac; done
 # where: fn = Supabase function secret, vercel = Vercel project env, gh = GitHub environment `production` secret
 # Format: where|NAME|tier|feature
 MANIFEST='
-fn|OPENAI_API_KEY|R|the model (every reply)
+fn|ANTHROPIC_API_KEY|R|the model (every reply; Claude only)
 fn|LOOPMESSAGE_API_KEY|R|inbound texts and the phone-login code (trainee-inbound answers 503 NOT_WIRED without it)
 fn|TRAINEE_INBOUND_SECRET|R|LoopMessage webhook URL (?secret=)
 fn|CAREER_INGEST_SECRET|R|job ingest schedule
@@ -84,7 +84,7 @@ has() { grep -qxF "$2" <<<"$1"; }
 
 # feature|switch (a function secret name whose presence turns it on, or "always")|the function secrets it needs
 FEATURE_MANIFEST='
-model|always|OPENAI_API_KEY
+model|always|ANTHROPIC_API_KEY
 job-ingest|always|CAREER_INGEST_SECRET INGEST_CONTACT_EMAIL
 alerts|always|CAREER_PROACTIVE_SECRET
 delivery|always|TRAINEE_DELIVER_SECRET

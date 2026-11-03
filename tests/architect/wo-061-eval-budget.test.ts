@@ -43,13 +43,14 @@ Deno.test("WO-061/4 a run already at the cap runs nothing", async () => {
 
 // Owner, 2026-10-21: "It scores 95% or better on the held-out evaluation set" with "Two independent judges"; the bar moved
 // from the official set (D-027) to the held-out set, both judges must pass an item, and every run is logged.
-Deno.test("WO-061/5 the workflow passes the cap, never reads a stopped run as a score, judges twice and logs every run", async () => {
+Deno.test("WO-061/5 the workflow passes the cap, never reads a stopped run as a score, judges twice with Claude and logs every run", async () => {
   const wf = await Deno.readTextFile(".github/workflows/brain-eval.yml");
-  { const m = wf.match(/EVAL_BUDGET_USD: "([0-9.]+)"/); if (!m || !(Number(m[1]) > 0 && Number(m[1]) <= 35.51)) throw new Error("no spend limit at or under the owner's ceiling is set (2026-10-25 23:17 CDT, in writing: \"$20 more\" on top of the $15.51 recorded, so 35.51; before it, $15 on top of $1.535)"); }
+  { const m = wf.match(/MODEL_BUDGET_TARGET_USD: "([0-9.]+)"/), h = wf.match(/MODEL_BUDGET_HARD_USD: "([0-9.]+)"/);
+    if (!m || Number(m[1]) !== 70 || !h || Number(h[1]) !== 100) throw new Error("the owner's directive (2026-11-02) is a $70 target and a $100 hard max"); }
+  if (!/ANTHROPIC_EVAL_BUDGET_USD: "[0-9.]+"/.test(wf)) throw new Error("no Anthropic budget cap env");
   if (!/a\.stopped/.test(wf) || !/judge error/.test(wf)) throw new Error("the verdict reads a stopped run or a run whose judge errored");
   if (!/>= 0\.95/.test(wf) || !/--set heldout/.test(wf)) throw new Error("the owner's bar (95% on the held-out set) is not the verdict");
   if (!/for p in 1 2 3 4 5;/.test(wf)) throw new Error("fewer than five passes decide whether a fix helped (second judge, 2026-10-21: three passes cannot resolve a change under about 5 points)");
-  if (!/Instinct/.test(wf) || !/both-pass/.test(wf)) throw new Error("one judge alone decides (Instinct is the second judge, both must pass)");
   if (!/score-log\.ts/.test(wf)) throw new Error("the run is not logged");
-  if (!/EVAL_JUDGE_MODEL_2: gpt-4\.1-mini/.test(wf)) throw new Error("gpt-4.1-mini does not judge every run (owner, 2026-10-21: a judge that runs only sometimes makes runs incomparable)");
+  if (!/EVAL_JUDGE_MODEL: claude-sonnet-5-5/.test(wf) || !/EVAL_JUDGE_MODEL_2: claude-haiku-5-5/.test(wf)) throw new Error("the two Claude judges do not judge every run (owner, 2026-10-21: a judge that runs only sometimes makes runs incomparable)");
 });

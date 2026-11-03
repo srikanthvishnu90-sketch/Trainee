@@ -11,11 +11,11 @@
 // runner sends each item's turns through the REAL agent-chat handler (tests/flow/handler.ts, real Postgres with every
 // migration, as the task eval and the Telegram acceptance suite do) on the release config, and grades the last reply with
 // S3's own judge: the same prompt (JUDGE_PROMPT/judgePrompt), the same parse, the same two judges (EVAL_JUDGE_MODEL,
-// default gpt-5-mini, and EVAL_JUDGE_MODEL_2 when set), both must pass (bothJudges).
+// default claude-sonnet-5-5, and EVAL_JUDGE_MODEL_2 when set), both must pass (bothJudges).
 //
-// Spend: OpenAI only (the brain, the rewriter and the judges), never another provider. --budget-usd (default 5) is the
+// Spend: Anthropic only (the brain, the rewriter and the judges), never another provider. --budget-usd (default 5) is the
 // total for the whole run: the handler's own spend (agent_turn_costs) plus the judges' metered spend; the run stops before
-// the next item once spend plus a reserve reaches it, and a stopped comparison is not a verdict. Needs OPENAI_API_KEY;
+// the next item once spend plus a reserve reaches it, and a stopped comparison is not a verdict. Needs ANTHROPIC_API_KEY;
 // without it: NOT RUN, exit 2. Run as an unprivileged user (initdb refuses root).
 //
 // An invented-fact failure (D-007) is an item whose judges failed a must_not that forbids a claim the record does not
@@ -58,7 +58,7 @@ if (import.meta.main) {
   const which = opt("--rewriter") ?? "all";
   const rewriters: Rewriter[] = which === "all" ? [...REWRITERS] : (REWRITERS as readonly string[]).includes(which) ? [which as Rewriter] : [];
   if (!rewriters.length) { console.log(`NOT RUN: --rewriter must be one of ${REWRITERS.join(", ")} or all`); Deno.exit(2); }
-  if (!Deno.env.get("OPENAI_API_KEY")) { console.log("NOT RUN: no OPENAI_API_KEY (OpenAI only; the brain, the rewriter and the judges need it)."); Deno.exit(2); }
+  if (!Deno.env.get("ANTHROPIC_API_KEY")) { console.log("NOT RUN: no ANTHROPIC_API_KEY (Claude only; the brain, the rewriter and the judges need it)."); Deno.exit(2); }
   const budget = Number(opt("--budget-usd") ?? "5");
   const setName = opt("--set") ?? "heldout";
   const label = opt("--label") ?? `rewriters-${new Date().toISOString().slice(0, 10)}`;
@@ -67,11 +67,11 @@ if (import.meta.main) {
   const items: EvalItem[] = JSON.parse(await Deno.readTextFile(`${ROOT}evals/career/${file}`)).items;
   const { startPg } = await import("../../../tests/flow/pg.ts");
   const { careerHandler, supabaseParity } = await import("../../../tests/flow/handler.ts");
-  const { callModel, modelConfig, newMeter, PRICES } = await import("../../../supabase/functions/_shared/model_gateway.ts");
+  const { callModel, modelConfigFor, newMeter, PRICES } = await import("../../../supabase/functions/_shared/model_gateway.ts");
   const judgeMeter = newMeter();
-  const judgeCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("EVAL_JUDGE_MODEL") || "gpt-5-mini" };
+  const judgeCfg = modelConfigFor(Deno.env, Deno.env.get("EVAL_JUDGE_MODEL") || "claude-sonnet-5-5");
   const judge2 = Deno.env.get("EVAL_JUDGE_MODEL_2");
-  const judge2Cfg = judge2 ? { ...modelConfig(Deno.env, "chat"), model: judge2 } : null;
+  const judge2Cfg = judge2 ? modelConfigFor(Deno.env, judge2) : null;
   const oneJudge = async (cfg: any, item: EvalItem, reply: string): Promise<Verdict> => {
     try {
       const res = await callModel(cfg, { system: "You are a strict grader. Output JSON only.", messages: [{ role: "user", content: judgePrompt(item, reply, null) }], max_tokens: 400 }, { meter: judgeMeter, role: "chat" });
@@ -100,10 +100,10 @@ if (import.meta.main) {
     }
     const h = await careerHandler(pg, people);
     const viaDouble = globalThis.fetch;
-    // The outside world: OpenAI (the only paid host) and the Supabase double; nothing else is reachable.
+    // The outside world: Anthropic (the only paid host) and the Supabase double; nothing else is reachable.
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
-      if (new URL(req.url).hostname === "api.openai.com") return await realFetch(req);
+      if (new URL(req.url).hostname === "api.anthropic.com") return await realFetch(req);
       return await viaDouble(req);
     }) as typeof fetch;
     const handlerSpend = async () => Number((await pg.sql("select coalesce(sum(usd_micros), 0) from public.agent_turn_costs")).trim()) / 1e6;

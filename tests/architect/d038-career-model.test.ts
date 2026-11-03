@@ -48,8 +48,8 @@ Deno.test("D-038: every career call site reads the one default; no stray model i
     assert(t.includes("careerModelConfig(Deno.env)") && !/CAREER_MODEL"\)\s*\|\|/.test(t), `${f} measures the committed model`);
   }
   const wf = read(".github/workflows/brain-eval.yml");
-  eq((wf.match(/^\s*CAREER(_REPLY)?_MODEL:.*$/gm) ?? []).map((l) => l.trim()), ["CAREER_REPLY_MODEL: ${{ inputs.model }}"], "brain-eval never pins a model; only the dispatch input names one");
-  assert(/ANTHROPIC_API_KEY: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/.test(wf) && /ANTHROPIC_EVAL_BUDGET_USD: "25"/.test(wf), "the Anthropic key and its own cap reach the run");
+  eq((wf.match(/^\s*CAREER(_REPLY)?_MODEL:.*$/gm) ?? []).map((l) => l.trim()), ["CAREER_REPLY_MODEL: ${{ steps.req.outputs.model }}"], "brain-eval never pins a model; only the (allowlisted) request names one");
+  assert(/ANTHROPIC_API_KEY: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/.test(wf) && /ANTHROPIC_EVAL_BUDGET_USD: "70"/.test(wf), "the Anthropic key and its own cap reach the run");
 });
 
 Deno.test("D-038: CAREER_REPLY_MODEL rolls back only to a listed, priced, keyed Claude model; any other id serves the default", () => {

@@ -168,6 +168,16 @@ export function memoryBudgetGate(limitMicros = DEFAULT_HARD_MICROS, targetMicros
 }
 let localGate: BudgetGate | null = null;
 
+// An eval or script run (not a single reply) may start only if the ledger would let its quoted worst case through right now:
+// reserve it, then release it (a proven no-call). Throws the owner-facing reason when the budget is exhausted, paused, not yet
+// open, ended or unreachable, so a run is refused before it spends rather than half-way through.
+export async function assertRunMayStart(gate: BudgetGate | null, quoteMicros: number, meta: BudgetMeta = { model: "eval", role: "eval" }): Promise<void> {
+  if (!gate) throw new Error("NOT RUN: the budget ledger cannot be reached, so a call that cannot be metered is not made");
+  const r = await gate.reserve(Math.max(1, Math.ceil(quoteMicros)), meta);
+  if (!r.ok) throw new Error(`NOT RUN: ${budgetReply(r.reason)}${r.detail ? ` (${r.detail})` : ""}`);
+  await gate.release(r.id);
+}
+
 type EnvGet = (k: string) => string | undefined;
 export function denoEnvGet(): EnvGet | null {
   try { const e = (globalThis as any).Deno?.env; return e ? (k: string) => e.get(k) : null; } catch (_) { return null; }

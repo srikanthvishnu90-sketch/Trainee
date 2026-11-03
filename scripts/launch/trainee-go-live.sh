@@ -17,7 +17,7 @@
 #   CAREER_INGEST_SECRET, CAREER_PROACTIVE_SECRET, TRAINEE_DELIVER_SECRET, TRAINEE_INBOUND_SECRET
 #                                                the four function secrets (32+ of A-Z a-z 0-9 . _ ~ -, because the inbound
 #                                                one rides in a URL); Enter generates a 48-character one (openssl rand -hex 24)
-#   LOOPMESSAGE_API_KEY, OPENAI_API_KEY          Enter keeps the one already set on the project
+#   LOOPMESSAGE_API_KEY, ANTHROPIC_API_KEY          Enter keeps the one already set on the project
 #   INGEST_CONTACT_EMAIL, TRAINEE_ALLOWED_CONTACTS, LOOPMESSAGE_DAILY_CONTACTS   settings; Enter keeps what is set
 #   UPMORE_TEST_JWT (optional), TRAINEE_SMOKE_CONTACT (with --allow-send)        for the smoke checks
 #   PDL_API_KEY (optional)                       People Data Labs, hired-candidate aggregates (WO-036, D-018); Enter keeps
@@ -479,7 +479,7 @@ fail() { echo "STEP $CUR: FAILED: $1"; REPORTED=1; exit 1; }
 mask_values() {
   local v
   for v in SUPABASE_ACCESS_TOKEN SUPABASE_DB_URL CAREER_INGEST_SECRET CAREER_PROACTIVE_SECRET TRAINEE_DELIVER_SECRET TRAINEE_INBOUND_SECRET \
-    LOOPMESSAGE_API_KEY OPENAI_API_KEY UPMORE_TEST_JWT TRAINEE_ALLOWED_CONTACTS TRAINEE_SMOKE_CONTACT INGEST_CONTACT_EMAIL PDL_API_KEY \
+    LOOPMESSAGE_API_KEY ANTHROPIC_API_KEY UPMORE_TEST_JWT TRAINEE_ALLOWED_CONTACTS TRAINEE_SMOKE_CONTACT INGEST_CONTACT_EMAIL PDL_API_KEY \
     TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET WHATSAPP_TOKEN WHATSAPP_APP_SECRET WHATSAPP_VERIFY_TOKEN \
     CLOUD_RUNNER_SECRET CLOUD_DISPATCH_SECRET CAREER_PREPARE_AHEAD_TOKEN VERCEL_TOKEN CAREER_PREPARE_AHEAD_URL; do
     [[ -n "${!v:-}" ]] && printf '%s\n' "${!v}"
@@ -774,7 +774,7 @@ if [[ -z "$DRY" && -z "$ONLY_SMOKE" && " ${GENERATED[*]} " == *" TRAINEE_INBOUND
 fi
 if [[ -z "$ONLY_SMOKE" ]]; then
   ask LOOPMESSAGE_API_KEY "LoopMessage API key (Enter to keep the one already set)" hidden
-  ask OPENAI_API_KEY "OpenAI key (Enter to keep the one already set)" hidden
+  ask ANTHROPIC_API_KEY "Anthropic key (Enter to keep the one already set)" hidden
   ask INGEST_CONTACT_EMAIL "Contact email the job boards see in the User-Agent (Enter to keep the one already set)" plain
   ask TRAINEE_ALLOWED_CONTACTS "Phone numbers allowed to sign up, comma-separated (Enter to keep what is set)" hidden
   ask LOOPMESSAGE_DAILY_CONTACTS "LoopMessage contacts a day, 300 or 1000 by plan (Enter to keep; unset means 300)" plain
@@ -783,7 +783,7 @@ if [[ -z "$ONLY_SMOKE" ]]; then
   # (docs/launch/CLOUD-RUNNER.md, Preparation host). Optional: without them the chat says nothing is prepared yet.
   ask CAREER_PREPARE_AHEAD_URL "Preparation host URL, https://<host>/prepare (Enter to keep; unset: phone-only preparation stays NOT_WIRED)" plain
   ask CAREER_PREPARE_AHEAD_TOKEN "Preparation host token, the host's own CAREER_PREPARE_AHEAD_TOKEN (Enter to keep)" hidden
-  for v in LOOPMESSAGE_API_KEY OPENAI_API_KEY INGEST_CONTACT_EMAIL TRAINEE_ALLOWED_CONTACTS PDL_API_KEY CAREER_PREPARE_AHEAD_URL CAREER_PREPARE_AHEAD_TOKEN; do
+  for v in LOOPMESSAGE_API_KEY ANTHROPIC_API_KEY INGEST_CONTACT_EMAIL TRAINEE_ALLOWED_CONTACTS PDL_API_KEY CAREER_PREPARE_AHEAD_URL CAREER_PREPARE_AHEAD_TOKEN; do
     if [[ -n "${!v:-}" ]] && ! env_safe "${!v}"; then fail "$v has a space, quote, # or backslash (the value is not shown)"; fi
   done
   [[ -z "${INGEST_CONTACT_EMAIL:-}" || "$INGEST_CONTACT_EMAIL" == *@* ]] || fail "INGEST_CONTACT_EMAIL is not an email address"
@@ -987,8 +987,8 @@ else
   # Audit B2: the chat's door to the preparation host (both or neither, checked in preflight).
   if [[ -n "${CAREER_PREPARE_AHEAD_URL:-}" ]]; then add CAREER_PREPARE_AHEAD_URL "$CAREER_PREPARE_AHEAD_URL" "***"; add CAREER_PREPARE_AHEAD_TOKEN "$CAREER_PREPARE_AHEAD_TOKEN" "***"
   else echo "  kept: CAREER_PREPARE_AHEAD_URL, CAREER_PREPARE_AHEAD_TOKEN (not given; what the project has stays: with neither set, phone-only preparation is NOT_WIRED and the chat says so)"; fi
-  # OpenAI only (owner, 2026-10-12): the key goes with MODEL_PROVIDER=openai, as in go-live.sh.
-  if [[ -n "${OPENAI_API_KEY:-}" ]]; then add OPENAI_API_KEY "$OPENAI_API_KEY" "***"; add MODEL_PROVIDER openai openai; else echo "  kept: OPENAI_API_KEY (not given; an already-set key stays as it is)"; fi
+  # Claude only (owner, 2026-11-02): the Anthropic key alone; no OpenAI key and no MODEL_PROVIDER are set.
+  if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then add ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY" "***"; else echo "  kept: ANTHROPIC_API_KEY (not given; an already-set key stays as it is)"; fi
   # WO-038: each channel's values when given; a channel never given stays NOT_WIRED.
   for v in "${CHANNEL_HIDDEN[@]}" "${CHANNEL_PLAIN[@]}"; do
     if [[ -n "${!v:-}" ]]; then add "$v" "${!v}" "***"; else echo "  kept: $v (not given; what is set stays, and with nothing set that channel is NOT_WIRED)"; fi

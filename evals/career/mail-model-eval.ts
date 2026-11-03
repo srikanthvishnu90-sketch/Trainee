@@ -8,9 +8,9 @@
 //   deno run --allow-read evals/career/mail-model-eval.ts [--only split,...] [--json]
 //
 // --model live (the owner runs it; never in CI): the rules, then the model on the mail sent, through the model gateway on
-// OpenAI with the strict answer schema, every safety rule of career_mail_model.ts applied; prints rules-only against
-// rules + model on the named splits, and the cost. Without OPENAI_API_KEY it prints NOT_RUN and exits 0.
-//   OPENAI_API_KEY=... deno run --allow-read --allow-env --allow-net=api.openai.com evals/career/mail-model-eval.ts --model live --only blind300,blind240
+// Claude with the strict answer schema, every safety rule of career_mail_model.ts applied; prints rules-only against
+// rules + model on the named splits, and the cost. Without ANTHROPIC_API_KEY it prints NOT_RUN and exits 0.
+//   ANTHROPIC_API_KEY=... deno run --allow-read --allow-env --allow-net=api.anthropic.com evals/career/mail-model-eval.ts --model live --only blind300,blind240
 import { classifyMail, type Classified, type MailKind, type MailMeta, STATUS_KINDS } from "../../supabase/functions/_shared/career_mail.ts";
 import { certainty, type MailModel, mailModelConfig, mailModelWiring, neverSent, opinion, readVerdict, mailModelPayload } from "../../supabase/functions/_shared/career_mail_model.ts";
 import { newMeter } from "../../supabase/functions/_shared/model_gateway.ts";
@@ -112,7 +112,7 @@ if (import.meta.main) {
     const env = { get: (k: string) => { try { return Deno.env.get(k); } catch { return undefined; } } };
     const wired = mailModelWiring(env, null);
     if (!mailModelConfig(env).apiKey || wired.status !== "on") {
-      console.log("NOT_RUN: no OPENAI_API_KEY; the rules + model numbers were not measured and nothing was spent.");
+      console.log("NOT_RUN: no ANTHROPIC_API_KEY; the rules + model numbers were not measured and nothing was spent.");
       Deno.exit(0);
     }
     if (!only) { console.log("NOT_RUN: name the splits to spend on with --only (e.g. --only blind300,blind240)."); Deno.exit(0); }
@@ -128,7 +128,7 @@ if (import.meta.main) {
     console.log(`cost: ${meter.calls} calls (${meter.failed} failed), ${meter.input_tokens} input + ${meter.output_tokens} output tokens, $${(meter.usd_micros / 1e6).toFixed(4)}${meter.unpriced ? ` (+${meter.unpriced} calls unpriced)` : ""}`);
     Deno.exit(0);
   }
-  if (mode && mode !== "none") { console.log(`unknown --model ${mode}: use --model live (needs OPENAI_API_KEY)`); Deno.exit(2); }
+  if (mode && mode !== "none") { console.log(`unknown --model ${mode}: use --model live (needs ANTHROPIC_API_KEY)`); Deno.exit(2); }
   const rows = splits.map(([name, mails]) => ({ name, ...selection(mails), reach: HELD_OUT.includes(name) ? null : reach(mails) }));
   if (Deno.args.includes("--json")) console.log(JSON.stringify(rows, null, 2));
   else {

@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Trainee — your personal career agent</title>
-<meta name="description" content="Trainee is a personal career agent that lives in your messages. It finds jobs, tailors your resume, applies for you, and lines up coffee chats.">
+<meta name="description" content="Trainee is a personal career agent that lives in your messages. It finds jobs, tailors your resume, applies for you, and drafts coffee chat notes.">
 <meta property="og:title" content="Trainee — your personal career agent">
-<meta property="og:description" content="A career agent that lives in your messages. Finds jobs, tailors your resume, applies for you, and lines up coffee chats.">
+<meta property="og:description" content="A career agent that lives in your messages. Finds jobs, tailors your resume, applies for you, and drafts coffee chat notes.">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#5C2751">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%235C2751'/%3E%3Ctext x='32' y='45' font-family='Georgia,serif' font-size='40' font-weight='700' text-anchor='middle' fill='%23fff'%3Es%3C/text%3E%3C/svg%3E">
@@ -127,7 +127,7 @@ a:focus-visible,button:focus-visible,summary:focus-visible,input:focus-visible,s
 .field label{font-size:15px;font-weight:600}
 .input{height:52px;border:1px solid #CFCFD6;border-radius:12px;padding:0 14px;font-size:17px;color:var(--ink);background:#fff;width:100%}
 .input:focus{border-color:var(--plum);outline:none;box-shadow:0 0 0 3px rgba(74,47,94,.18)}
-.phone-row{display:grid;grid-template-columns:minmax(0,150px) minmax(0,1fr);gap:10px}
+.phone-row{display:grid;grid-template-columns:minmax(0,240px) minmax(0,1fr);gap:10px}
 .hint{font-size:14px;color:var(--muted)}
 .err{font-size:14px;color:var(--error);min-height:0}
 .consent{display:flex;gap:12px;align-items:flex-start;font-size:14px;line-height:1.5;color:var(--muted)}
@@ -539,11 +539,7 @@ kbd{font-family:inherit;font-size:12px;border:1px solid var(--d-line);border-rad
 <script>
   window.TRAINEE = {
     name: 'Trainee',
-    agentNumber: '+10000000000',      // the number your agent texts from (E.164)
-    agentNumberPretty: '+1 (000) 000-0000',
     signupEndpoint: 'https://mrwngntwmnaqrqhupvlt.supabase.co/functions/v1/site-signup',               // live: Trainee waitlist capture (Supabase edge function) — '' would run in demo mode
-    supportEmail: 'support@example.com',
-    careersEmail: 'careers@example.com',
     careersEndpoint: 'https://mrwngntwmnaqrqhupvlt.supabase.co/functions/v1/site-careers'              // live: careers applications (multipart form: name, email, resume) — '' would run demo mode
   };
 </script>
@@ -575,28 +571,16 @@ kbd{font-family:inherit;font-size:12px;border:1px solid var(--d-line);border-rad
   <section class="light center" id="home">
     <div class="wrap hero">
       <h1 class="reveal">Your personal career agent, in your messages.</h1>
-      <p class="lede muted reveal" style="--d:.1s">Finds jobs, tailors your resume, applies for you, and lines up coffee chats. You just text it.</p>
+      <p class="lede muted reveal" style="--d:.1s">Finds jobs, tailors your resume, applies for you, and drafts coffee chat notes. You just text it.</p>
       <div class="reveal" style="--d:.2s">
         <a href="#signup" class="btn"><svg class="imsg" viewBox="0 0 24 24" role="img" aria-label="iMessage"><path fill="#34DA50" d="M5.285 0A5.273 5.273 0 0 0 0 5.285v13.43A5.273 5.273 0 0 0 5.285 24h13.43A5.273 5.273 0 0 0 24 18.715V5.285A5.273 5.273 0 0 0 18.715 0ZM12 4.154a8.809 7.337 0 0 1 8.809 7.338A8.809 7.337 0 0 1 12 18.828a8.809 7.337 0 0 1-2.492-.303A8.656 7.337 0 0 1 5.93 19.93a9.929 7.337 0 0 0 1.54-2.155 8.809 7.337 0 0 1-4.279-6.283A8.809 7.337 0 0 1 12 4.154"/></svg>Join the waitlist</a>
         <p class="note muted">Launching soon. No app to download.</p>
         <div style="margin-top:16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-          <a href="https://t.me/TraineeCareerBot" class="btn sm" target="_blank" rel="noopener"><svg class="ic" viewBox="0 0 24 24" role="img" aria-label="Telegram"><path fill="#26A5E4" d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>Chat on Telegram</a> <a href="https://wa.me/14155238886?text=join%20basic-rocket" class="btn sm" target="_blank" rel="noopener"><svg class="ic" viewBox="0 0 24 24" role="img" aria-label="WhatsApp"><path fill="#25D366" d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.028 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.89a11.821 11.821 0 0 0-3.48-8.413Z"/></svg>Chat on WhatsApp</a>
-          <!-- WHATSAPP BUTTON: restored with the real sandbox link when the Twilio setup lands -->
+          <a href="https://t.me/TraineeCareerBot" class="btn sm" target="_blank" rel="noopener"><svg class="ic" viewBox="0 0 24 24" role="img" aria-label="Telegram"><path fill="#26A5E4" d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>Chat on Telegram</a>
         </div>
       </div>
       <div class="hero-phone reveal" style="--d:.3s">
         <div class="phone"><div class="screen" data-media="hero" role="img" aria-label="Video: Trainee introduces itself in iMessage"></div></div>
-      </div>
-    </div>
-    <div class="wrap logos reveal">
-      <p class="muted">Works across the tools you already use</p>
-      <div class="logo-row">
-        <span><svg class="brand" width="24" height="24" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path fill="#0a66c2" d="M218.123 218.127h-37.931v-59.403c0-14.165-.253-32.4-19.728-32.4c-19.756 0-22.779 15.434-22.779 31.369v60.43h-37.93V95.967h36.413v16.694h.51a39.91 39.91 0 0 1 35.928-19.733c38.445 0 45.533 25.288 45.533 58.186zM56.955 79.27c-12.157.002-22.014-9.852-22.016-22.009s9.851-22.014 22.008-22.016c12.157-.003 22.014 9.851 22.016 22.008A22.013 22.013 0 0 1 56.955 79.27m18.966 138.858H37.95V95.967h37.97zM237.033.018H18.89C8.58-.098.125 8.161-.001 18.471v219.053c.122 10.315 8.576 18.582 18.89 18.474h218.144c10.336.128 18.823-8.139 18.966-18.474V18.454c-.147-10.33-8.635-18.588-18.966-18.453"/></svg>LinkedIn</span>
-        <span><svg class="brand" width="24" height="24" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 204"><defs><linearGradient id="SVGHzDbHcwG" x1="165" x2="165" y1="44" y2="166" gradientUnits="userSpaceOnUse"><stop stop-color="#60d673"/><stop offset=".17" stop-color="#42c868"/><stop offset=".39" stop-color="#0ebc5f"/><stop offset=".62" stop-color="#00a9bb"/><stop offset=".86" stop-color="#3c90ff"/><stop offset="1" stop-color="#3186ff"/></linearGradient><linearGradient id="SVG41ATXboZ" x1="8" x2="184" y1="46.13" y2="46.13" gradientUnits="userSpaceOnUse"><stop offset=".08" stop-color="#ff63a0"/><stop offset=".3" stop-color="#fc413d"/><stop offset=".5" stop-color="#fc413d"/><stop offset=".65" stop-color="#fc413d"/><stop offset=".72" stop-color="#fc5c30"/><stop offset=".86" stop-color="#feb10c"/><stop offset=".91" stop-color="#fec700"/><stop offset=".96" stop-color="#ffdb0f"/></linearGradient></defs><path fill="url(#SVGHzDbHcwG)" d="M146 44h38v110c0 6.627-5.373 12-12 12h-20a6 6 0 0 1-6-6z" transform="translate(-11.636 -37.818)scale(1.45454)"/><path fill="#fc413d" d="M55.273 26.182H0v160c0 9.638 7.816 17.454 17.455 17.454h29.09a8.727 8.727 0 0 0 8.728-8.728z"/><path fill="url(#SVG41ATXboZ)" d="M39.226 30.456c-8.033-6.752-20.018-5.714-26.77 2.319c-6.752 8.032-5.714 20.017 2.319 26.77l76.078 63.949a8 8 0 0 0 10.295 0l76.078-63.95c8.032-6.752 9.07-18.737 2.318-26.77c-6.752-8.032-18.737-9.07-26.769-2.318L96 78.18z" transform="translate(-11.636 -37.818)scale(1.45454)"/></svg>Gmail</span>
-        <span><svg class="brand" width="24" height="24" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="#0078D4" d="M8.56 12.03q0 .38-.06.73q-.11.34-.3.62q-.2.27-.49.43q-.3.16-.71.16q-.42 0-.71-.17t-.48-.45t-.27-.63q-.09-.35-.09-.72q0-.36.09-.72q.08-.35.27-.63t.5-.45q.3-.17.72-.17q.43 0 .72.17q.3.18.48.46q.18.29.27.64q.06.36.06.73M22 12v7.81q0 .39-.27.69q-.28.25-.67.25H7.94q-.39 0-.67-.25q-.27-.3-.27-.69V17H2.83q-.33 0-.59-.24Q2 16.5 2 16.17V7.83q0-.33.24-.59Q2.5 7 2.83 7h5.42V4.13q0-.37.25-.63q.26-.25.63-.25h10.74q.37 0 .63.25q.25.26.25.63v6.91l1.04.6h.01q.08.06.14.16q.06.09.06.2m-5-6.87v2.5h2.5v-2.5M17 8.88v2.5h2.5v-2.5M17 12.63v1.52l2.54-1.52m-6.91-7.5v2.5h3.12v-2.5m-3.12 3.75v2.5h3.12v-2.5m-3.12 3.75v1.69l2.01 1.24l1.11-.66v-2.27M9.5 5.13V7h1.77q.06 0 .11.04V5.12M7 15.32q.73 0 1.32-.26q.58-.26.99-.71q.4-.45.6-1.07q.21-.62.22-1.34q0-.69-.21-1.29q-.2-.59-.6-1.03q-.39-.44-.95-.69q-.57-.25-1.29-.25q-.77 0-1.37.25q-.59.25-1 .7q-.41.46-.62 1.08q-.21.63-.21 1.37q0 .7.21 1.3q.22.59.62 1.02t.97.68q.58.24 1.32.24m1.25 4.18h10.32L12 15.4v.77q0 .33-.24.59q-.26.24-.59.24H8.25m12.5 2.39v-6.03l-4.92 2.95Z"/></svg>Outlook</span>
-        <span><svg class="brand" width="24" height="24" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path fill="#fff" d="M195.368 60.632H60.632v134.736h134.736z"/><path fill="#ea4335" d="M195.368 256L256 195.368l-30.316-5.172l-30.316 5.172l-5.533 27.73z"/><path fill="#188038" d="M0 195.368v40.421C0 246.956 9.044 256 20.21 256h40.422l6.225-30.316l-6.225-30.316l-33.033-5.172z"/><path fill="#1967d2" d="M256 60.632V20.21C256 9.044 246.956 0 235.79 0h-40.422q-5.532 22.554-5.533 33.196q0 10.641 5.533 27.436q20.115 5.76 30.316 5.76T256 60.631"/><path fill="#fbbc04" d="M256 60.632h-60.632v134.736H256z"/><path fill="#34a853" d="M195.368 195.368H60.632V256h134.736z"/><path fill="#4285f4" d="M195.368 0H20.211C9.044 0 0 9.044 0 20.21v175.158h60.632V60.632h134.736z"/><path fill="#4285f4" d="M88.27 165.154c-5.036-3.402-8.523-8.37-10.426-14.94l11.689-4.816q1.59 6.063 5.558 9.398c2.627 2.223 5.827 3.318 9.566 3.318q5.734 0 9.852-3.487c2.746-2.324 4.127-5.288 4.127-8.875q0-5.508-4.345-8.994c-2.897-2.324-6.535-3.486-10.88-3.486h-6.754v-11.57h6.063q5.608 0 9.448-3.033c2.56-2.02 3.84-4.783 3.84-8.303c0-3.132-1.145-5.625-3.435-7.494c-2.29-1.87-5.188-2.813-8.708-2.813c-3.436 0-6.164.91-8.185 2.745a16.1 16.1 0 0 0-4.413 6.754l-11.57-4.817c1.532-4.345 4.345-8.185 8.471-11.503s9.398-4.985 15.798-4.985c4.733 0 8.994.91 12.767 2.745c3.772 1.836 6.736 4.379 8.875 7.613c2.14 3.25 3.2 6.888 3.2 10.93c0 4.126-.993 7.613-2.98 10.476s-4.43 5.052-7.327 6.585v.69a22.25 22.25 0 0 1 9.398 7.327c2.442 3.284 3.672 7.208 3.672 11.79c0 4.58-1.163 8.673-3.487 12.26c-2.324 3.588-5.54 6.417-9.617 8.472c-4.092 2.055-8.69 3.1-13.793 3.1c-5.912.016-11.369-1.685-16.405-5.087m71.797-58.005l-12.833 9.28l-6.417-9.734l23.023-16.607h8.825v78.333h-12.598z"/></svg>Google Calendar</span>
-        <span><svg class="brand" width="24" height="24" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="5.5" fill="#000"/><g transform="translate(4 4) scale(.6667)"><title>Handshake</title><path fill="#D3FB52" d="M20.728 0 16.49 24h-4.583l1.87-10.532-4.743 3.893L7.856 24H3.272L7.51 0h4.582L9.806 13.012l4.729-3.862L16.145 0h4.583z"/></g></svg>Handshake</span>
-        <span><svg class="brand" width="24" height="24" aria-hidden="true" focusable="false" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>Indeed</title><path fill="#003A9B" d="M11.566 21.5633v-8.762c.2553.0231.5009.0346.758.0346 1.2225 0 2.3739-.3206 3.3506-.8928v9.6182c0 .8219-.1957 1.4287-.5757 1.8338-.378.4033-.8808.6049-1.491.6049-.6007 0-1.0766-.2016-1.468-.6183-.3781-.4032-.5739-1.01-.5739-1.8184zM11.589.5659c2.5447-.8929 5.4424-.8449 7.6186.987.405.3687.8673.8334 1.0515 1.3806.2207.6913-.7695-.073-.9057-.167-.71-.4532-1.4182-.8334-2.2127-1.0946C12.8614.3873 8.8122 2.709 6.2945 6.315c-1.0516 1.5939-1.7367 3.2721-2.299 5.1174-.0614.2017-.1094.4647-.2207.6413-.1113.2036-.048-.5453-.048-.5702.0845-.7623.2438-1.4997.4414-2.237C5.3292 5.3375 7.897 2.0655 11.5891.5658zm4.9281 7.0587c0 1.6686-1.353 3.0224-3.0205 3.0224-1.6677 0-3.0186-1.3538-3.0186-3.0224 0-1.6687 1.351-3.0224 3.0186-3.0224 1.6676 0 3.0205 1.3518 3.0205 3.0224Z"/></svg>Indeed</span>
       </div>
     </div>
   </section>
@@ -630,7 +614,7 @@ kbd{font-family:inherit;font-size:12px;border:1px solid var(--d-line);border-rad
       <div class="faq reveal">
         <details>
           <summary>What is Trainee?<i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-plus"/></svg></i></summary>
-          <p class="muted">A career agent that lives in your messages. Text it what you want and it finds jobs, tailors your resume, applies, sets up coffee chats and preps you for interviews.</p>
+          <p class="muted">A career agent that lives in your messages. Text it what you want and it finds jobs, tailors your resume, applies when you say yes, drafts coffee chat notes and preps you for interviews.</p>
         </details>
         <details>
           <summary>Does it apply without asking me?<i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-plus"/></svg></i></summary>
@@ -639,14 +623,6 @@ kbd{font-family:inherit;font-size:12px;border:1px solid var(--d-line);border-rad
         <details>
           <summary>Do I need to download an app?<i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-plus"/></svg></i></summary>
           <p class="muted">No. Join the waitlist below. When your spot opens, Trainee texts you and lives in your Messages app from then on.</p>
-        </details>
-        <details>
-          <summary>When does Trainee launch?<i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-plus"/></svg></i></summary>
-          <p class="muted">[Launch timing]. Join the waitlist and we'll text you as soon as your spot opens.</p>
-        </details>
-        <details>
-          <summary>How much does it cost?<i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-plus"/></svg></i></summary>
-          <p class="muted">[YOUR PRICE]. Cancel anytime.</p>
         </details>
       </div>
     </div>
@@ -663,7 +639,6 @@ kbd{font-family:inherit;font-size:12px;border:1px solid var(--d-line);border-rad
       <div class="reveal" style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
         <a href="#signup" class="btn" style="height:52px;padding:0 24px"><svg class="imsg" viewBox="0 0 24 24" role="img" aria-label="iMessage"><path fill="#34DA50" d="M5.285 0A5.273 5.273 0 0 0 0 5.285v13.43A5.273 5.273 0 0 0 5.285 24h13.43A5.273 5.273 0 0 0 24 18.715V5.285A5.273 5.273 0 0 0 18.715 0ZM12 4.154a8.809 7.337 0 0 1 8.809 7.338A8.809 7.337 0 0 1 12 18.828a8.809 7.337 0 0 1-2.492-.303A8.656 7.337 0 0 1 5.93 19.93a9.929 7.337 0 0 0 1.54-2.155 8.809 7.337 0 0 1-4.279-6.283A8.809 7.337 0 0 1 12 4.154"/></svg>iMessage — join the waitlist</a>
         <a href="https://t.me/TraineeCareerBot" class="btn" style="height:52px;padding:0 24px" target="_blank" rel="noopener"><svg class="ic" viewBox="0 0 24 24" role="img" aria-label="Telegram"><path fill="#26A5E4" d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>Chat on Telegram</a>
-        <a href="https://wa.me/14155238886?text=join%20basic-rocket" class="btn" style="height:52px;padding:0 24px" target="_blank" rel="noopener"><svg class="ic" viewBox="0 0 24 24" role="img" aria-label="WhatsApp"><path fill="#25D366" d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.028 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.89a11.821 11.821 0 0 0-3.48-8.413Z"/></svg>Chat on WhatsApp</a>
       </div>
       <p class="note muted reveal">Same Trainee on every channel — one agent, one memory of your search.</p>
     </div>
@@ -711,7 +686,7 @@ kbd{font-family:inherit;font-size:12px;border:1px solid var(--d-line);border-rad
             </div>
             <label class="consent">
               <input type="checkbox" id="su-consent" required>
-              <span>I agree to receive automated texts from Trainee about the waitlist, my account and my job search. Message frequency varies. Message and data rates may apply. Consent isn't a condition of purchase. Reply STOP to opt out or HELP for help. See the <a href="#product/sms-terms">SMS Terms</a>, <a href="#product/terms">Terms</a> and <a href="#product/privacy">Privacy Policy</a>.</span>
+              <span>I agree to receive automated texts from Trainee about the waitlist, my account and my job search. Message frequency varies. Message and data rates may apply. Consent isn't a condition of purchase. Reply STOP to opt out or HELP for help. See the <a href="#product/sms-terms">SMS Terms</a>.</span>
             </label>
             <p class="err" id="su-err" role="alert"></p>
             <button class="btn" type="submit" id="su-btn"><svg class="imsg" viewBox="0 0 24 24" role="img" aria-label="iMessage"><path fill="#34DA50" d="M5.285 0A5.273 5.273 0 0 0 0 5.285v13.43A5.273 5.273 0 0 0 5.285 24h13.43A5.273 5.273 0 0 0 24 18.715V5.285A5.273 5.273 0 0 0 18.715 0ZM12 4.154a8.809 7.337 0 0 1 8.809 7.338A8.809 7.337 0 0 1 12 18.828a8.809 7.337 0 0 1-2.492-.303A8.656 7.337 0 0 1 5.93 19.93a9.929 7.337 0 0 0 1.54-2.155 8.809 7.337 0 0 1-4.279-6.283A8.809 7.337 0 0 1 12 4.154"/></svg>Join the waitlist</button>
@@ -747,7 +722,7 @@ kbd{font-family:inherit;font-size:12px;border:1px solid var(--d-line);border-rad
           </div>
           <div class="field">
             <label for="tEmail">Email</label>
-            <input class="input" id="tEmail" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+            <input class="input" id="tEmail" name="email" type="email" autocomplete="email" placeholder="Your email" required>
           </div>
           <div class="field">
             <span class="flabel" id="tResumeLabel">Resume</span>
@@ -780,13 +755,6 @@ kbd{font-family:inherit;font-size:12px;border:1px solid var(--d-line);border-rad
       <div class="roles" id="roles"></div>
     </div>
   </section>
-  <section class="dark center">
-    <div class="wrap section">
-      <h2 class="reveal" style="font-size:clamp(28px,3.4vw,42px)">Have a question about working with us?</h2>
-      <p class="muted reveal" style="--d:.1s;margin:14px 0 28px;font-size:18px">Email us any time. We read every note.</p>
-      <div class="reveal" style="--d:.2s"><a id="careersMail" href="#" class="btn"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-envelope-simple"/></svg></i>Email us</a></div>
-    </div>
-  </section>
 </div>
 
 <!-- =========================== ABOUT =========================== -->
@@ -800,30 +768,11 @@ kbd{font-family:inherit;font-size:12px;border:1px solid var(--d-line);border-rad
   </section>
   <section class="dark">
     <div class="wrap section">
-      <div class="head center reveal"><div class="kicker"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-book-open"/></svg></i>Our story</div><h2>Why we started</h2></div>
-      <div class="a-story">
-        <p class="muted reveal">[Paragraph 1: the problem you lived. What job hunting felt like for you and the people around you.]</p>
-        <p class="muted reveal">[Paragraph 2: the moment you decided to build Trainee, and why it lives in your messages.]</p>
-        <p class="muted reveal">[Paragraph 3: where you're headed, and who Trainee is for.]</p>
-      </div>
-    </div>
-  </section>
-  <section class="light">
-    <div class="wrap section">
       <div class="head center reveal"><h2>What we believe</h2></div>
       <div class="values">
         <div class="value reveal"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-hand-heart"/></svg></i><h3>A human touch</h3><p class="muted">Every message should feel like it came from a friend who has your back.</p></div>
         <div class="value reveal" style="--d:.1s"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-check-circle"/></svg></i><h3>Your voice, your yes</h3><p class="muted">Nothing goes out in your name without your approval.</p></div>
         <div class="value reveal" style="--d:.2s"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-users-three"/></svg></i><h3>Access for everyone</h3><p class="muted">Great opportunities shouldn't depend on who you already know.</p></div>
-      </div>
-    </div>
-  </section>
-  <section class="dark">
-    <div class="wrap section">
-      <div class="head center reveal"><h2>The team</h2></div>
-      <div class="team">
-        <div class="person reveal"><span class="pav">YN</span><h3>[Your name]</h3><p class="muted">Founder &amp; CEO</p><p class="muted">[One-line bio]</p></div>
-        <div class="person reveal" style="--d:.1s"><span class="pav"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-plus"/></svg></i></span><h3>You?</h3><p class="muted">We're not hiring yet, but we'd love to have your resume on file.</p><a href="#careers">Send your resume<i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-arrow-right"/></svg></i></a></div>
       </div>
     </div>
   </section>
@@ -901,8 +850,6 @@ kbd{font-family:inherit;font-size:12px;border:1px solid var(--d-line);border-rad
       <a href="#about">About</a>
       <a href="#careers">Careers</a>
       <a href="#product/security">Security</a>
-      <a href="#product/privacy">Privacy</a>
-      <a href="#product/terms">Terms</a>
       <a href="#product/support">Contact</a>
     </nav>
     <span class="muted">© 2026 Trainee</span>
@@ -1023,7 +970,7 @@ var ROLES = [];
 var TOUR = [
   { title:'Reads the job', slug:'job-breakdown',
     desc:'Send any job link. Trainee pulls out what the role really cares about, compares it with your background, and flags gaps before you apply.',
-    bullets:['Plain-English breakdown of every post','Your fit, scored against the role','Gaps flagged before you apply'],
+    bullets:['Plain-English breakdown of every post','Your fit, against the role','Gaps flagged before you apply'],
     thread:[
       {f:'stamp', t:'Today 9:41 AM'},
       {f:'me', t:'is this one worth applying to?'},
@@ -1040,51 +987,48 @@ var TOUR = [
       {f:'me', t:'tailor my resume for the M&A role'},
       {f:'you', t:'done. moved your valuation work to the top and tightened every bullet'},
       {f:'card', side:'you', icon:'file-pdf', title:'Resume – M&A Analyst.pdf', sub:'PDF Document · 1 page'},
-      {f:'me', t:'this is so much better'},
-      {f:'you', t:'12 more coming tonight'}
+      {f:'me', t:'this is so much better'}
     ]},
   { title:'Applies for you', slug:'applying',
-    desc:'Tell Trainee what you want once. It finds matching roles, fills out every application and sends them when you say yes.',
-    bullets:['Applies in batches, with your OK','Fills the forms and short answers','Tracks every application'],
+    desc:'Tell Trainee what you want. It prepares each application and shows you exactly what it will send; nothing goes until you say yes.',
+    bullets:['You approve the exact answers','Fills the forms and short answers','Tracks every application'],
     thread:[
-      {f:'me', t:'apply to every summer analyst role in Chicago and NYC'},
-      {f:'you', t:'found 31. 24 are a strong fit'},
-      {f:'you', t:'send those 24 and skip the 7 that want a CS degree?'},
+      {f:'me', t:'apply to summer analyst roles in Chicago'},
+      {f:'you', t:'this one fits. here is exactly what I’ll send'},
+      {f:'card', side:'you', icon:'check-circle', title:'Summer Analyst – Chicago', sub:'Your answers and resume, ready to approve'},
       {f:'me', t:'yes'},
-      {f:'stamp', t:'Today 11:48 AM'},
-      {f:'you', t:'all 24 sent. 3 already moved to under review'}
+      {f:'you', t:'submitted. I’ll tell you when the employer’s confirmation email arrives'}
     ]},
-  { title:'Books coffee chats', slug:'coffee-chats',
-    desc:'Trainee finds alumni and team members at the firms you want, writes each one a personal note from your email, and books the time when they reply.',
-    bullets:['Finds the right people','Personal emails, sent from you','Follows up and books the time'],
+  { title:'Coffee chat notes', slug:'coffee-chats',
+    desc:'Send Trainee your contacts. It tells you who you know at the firms you want and drafts a personal note to each for you to review and send.',
+    bullets:['Works from your own contacts','Personal drafts, in your words','You review and send every note'],
     thread:[
-      {f:'you', t:'found 6 alumni at firms you applied to. drafted a note to each'},
-      {f:'you', q:true, t:'“Hi Jordan, I’m a finance student at your alma mater and just applied to your team’s analyst program…”'},
-      {f:'me', t:'send all 6'},
-      {f:'you', t:'sent. Jordan already replied'},
-      {f:'card', side:'you', icon:'calendar-blank', title:'Coffee chat with Jordan', sub:'Thursday, 3:00 – 3:30 PM'},
-      {f:'me', t:'let’s go'}
+      {f:'me', t:'who do I know at Stripe?'},
+      {f:'you', t:'from the contacts you sent me: Jordan, an analyst on the finance team'},
+      {f:'me', t:'write Jordan about the analyst role'},
+      {f:'you', q:true, t:'“Hi Jordan, I’m a finance student and just applied to your team’s analyst program…”'},
+      {f:'you', t:'here’s the draft. edit it, then copy it into your own email when you’re happy with it'}
     ]},
   { title:'Sends job alerts', slug:'job-alerts',
-    desc:'Trainee keeps watching after you close the chat, and texts you the moment a role you’d actually want goes live.',
-    bullets:['Matches what you told it','Texts you early, before the rush','Pause or change alerts by text'],
+    desc:'Trainee keeps watching after you close the chat, and texts you when a role you’d actually want goes live.',
+    bullets:['Matches what you told it','Texts you when it goes live','Pause or change alerts by text'],
     thread:[
       {f:'stamp', t:'Mon 7:02 AM'},
       {f:'you', t:'a new role just went live. strong match'},
       {f:'card', side:'you', icon:'briefcase', title:'Corporate Finance Analyst – Chicago', sub:'jobs.lever.co'},
-      {f:'you', t:'want me to apply before the rush?'},
+      {f:'you', t:'want me to prepare the application?'},
       {f:'me', t:'yes!!'},
-      {f:'you', t:'sent. you’re one of the first applicants'}
+      {f:'you', t:'ready. check what I’ll send and say yes'}
     ]},
   { title:'Preps your interviews', slug:'interview-prep',
     desc:'Real practice for the real interview. Trainee asks the questions you’ll likely face for that role and firm, and gives honest feedback on every answer.',
     bullets:['Behavioral and technical questions','Built from the role and firm','Honest feedback, by text'],
     thread:[
       {f:'me', t:'superday tomorrow. prep me'},
-      {f:'you', t:'10 questions, real format. first one: walk me through a DCF'},
+      {f:'you', t:'let’s practice in the real format. first one: walk me through a DCF'},
       {f:'me', t:'project free cash flows, discount them at WACC, add a terminal value'},
       {f:'you', t:'solid start. say which terminal value method you’d use and why'},
-      {f:'you', t:'question 2: why us over the other banks?'}
+      {f:'you', t:'next: why us over the other banks?'}
     ]}
 ];
 
@@ -1093,7 +1037,7 @@ var THREADS = {
   hero: [
     {f:'stamp', t:'Today 9:41 AM'},
     {f:'you', t:'Hey, I’m Trainee, your personal career agent'},
-    {f:'you', t:'I find jobs, tailor your resume, apply for you, and line up coffee chats. all by text'},
+    {f:'you', t:'I find jobs, tailor your resume, prepare your applications and draft coffee chat notes. all by text'},
     {f:'me', t:'wait, you can do all that?'},
     {f:'you', t:'yep. send me your resume and tell me what you’re looking for'},
     {f:'me', t:'let’s do it'}
@@ -1104,10 +1048,9 @@ var THREADS = {
     {f:'you', t:'on it. send me your resume and where you want to be'},
     {f:'card', side:'me', icon:'file-pdf', title:'Resume.pdf', sub:'PDF Document · 1 page'},
     {f:'me', t:'Chicago or NYC, banking or corporate finance'},
-    {f:'you', t:'found 31 roles that fit. tailoring your resume for each now'},
-    {f:'you', t:'also found 6 alumni at those firms. want me to reach out?'},
+    {f:'you', t:'here are the roles that fit best so far. want a tailored resume for each?'},
     {f:'me', t:'yes please'},
-    {f:'you', t:'done. I’ll text you when they reply'}
+    {f:'you', t:'on it. I’ll show you each application before anything is sent'}
   ]
 };
 function threadFor(name) { if (THREADS[name]) return THREADS[name]; var t = TOUR.filter(function (x) { return x.slug === name; })[0]; return t ? t.thread : THREADS.intro; }
@@ -1127,12 +1070,12 @@ var PAGES = [
 <a href="#product/job-breakdown"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-magnifying-glass"/></svg></i><strong>Reads the job</strong><span>What each role really wants, in plain English.</span></a>
 <a href="#product/resume"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-file-text"/></svg></i><strong>Tailors your resume</strong><span>A new version for every role.</span></a>
 <a href="#product/applying"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-paper-plane-tilt"/></svg></i><strong>Applies for you</strong><span>In batches, once you say yes.</span></a>
-<a href="#product/coffee-chats"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-coffee"/></svg></i><strong>Books coffee chats</strong><span>Finds people and writes the email.</span></a>
+<a href="#product/coffee-chats"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-coffee"/></svg></i><strong>Coffee chat notes</strong><span>Drafts notes to people you know.</span></a>
 <a href="#product/job-alerts"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-bell-ringing"/></svg></i><strong>Job alerts</strong><span>A text when a great role goes live.</span></a>
 <a href="#product/interview-prep"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-microphone"/></svg></i><strong>Interview prep</strong><span>Mock interviews over text.</span></a>
 </div>
 <h2>Welcome to Trainee</h2>
-<p>Trainee is a personal career agent that lives in your messages. You text it what you want, and it does the work: it reads job posts, tailors your resume, applies for you, finds people to talk to, and gets you ready for interviews.</p>
+<p>Trainee is a personal career agent that lives in your messages. You text it what you want, and it does the work: it reads job posts, tailors your resume, prepares applications for your yes, drafts notes to people you know, and gets you ready for interviews.</p>
 <p>There's no app to download and nothing new to learn. If you can send a text, you can use Trainee.</p>
 <h2>Why we built Trainee</h2>
 <h3>The problem</h3>
@@ -1199,16 +1142,16 @@ var PAGES = [
 <h2>Try it</h2>
 <p>Text Trainee: <code>apply to analyst roles in Chicago</code></p>`},
 
-{ slug:'coffee-chats', group:'Features', title:'Books coffee chats',
-  desc:'Trainee finds the right people at the firms you want and writes to them for you.',
+{ slug:'coffee-chats', group:'Features', title:'Coffee chat notes',
+  desc:'Trainee tells you who you know at the firms you want and drafts a note to each for you to review.',
   html:`
-<div class="vid" data-video="videos/coffee-chats.mp4" data-label="Books coffee chats video"></div>
+<div class="vid" data-video="videos/coffee-chats.mp4" data-label="Coffee chat notes video"></div>
 <h2>What it does</h2>
-<p>Trainee looks for alumni and team members at the companies you’re targeting, drafts a short personal note to each, sends them from your own email once you approve, and helps book the time when they reply.</p>
+<p>Trainee works from the contacts you give it: send your LinkedIn connections export (LinkedIn: Settings, Data privacy, Get a copy of your data, Connections) or paste rows like Name,Company,Title,Email. Ask who you know at a firm, and Trainee drafts a short personal note to each of them for you to review and send yourself. It has no people database and never guesses names or email addresses.</p>
 <h2>Highlights</h2>
-<ul><li>Finds alumni and team members</li><li>Personal emails, sent from you</li><li>One polite follow-up, then books the time</li></ul>
+<ul><li>Works from your own contacts</li><li>Personal drafts, in your words</li><li>You review and send every note</li></ul>
 <h2>Try it</h2>
-<p>Text Trainee: <code>find alumni at the firms I applied to</code></p>`},
+<p>Text Trainee: <code>who do I know at Stripe</code></p>`},
 
 { slug:'job-alerts', group:'Features', title:'Job alerts',
   desc:'A text the day a role you would actually want goes live.',
@@ -1233,20 +1176,13 @@ var PAGES = [
 <p>Text Trainee: <code>I have an interview tomorrow. prep me</code></p>`},
 
 { slug:'connections', group:'Connections', title:'Connections',
-  desc:'Link the accounts Trainee needs to act for you. Everything is optional and can be disconnected.',
+  desc:'Connect Gmail so Trainee can track your application emails. It is optional and you can disconnect it at any time.',
   html:`
-<div class="note"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-info"/></svg></i><p>[Confirm which connections are live at launch and remove the rest.]</p></div>
-<h2>Email</h2>
-<div class="brands"><span><svg class="brand" width="20" height="20" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 204"><defs><linearGradient id="SVGHzDbHcwG" x1="165" x2="165" y1="44" y2="166" gradientUnits="userSpaceOnUse"><stop stop-color="#60d673"/><stop offset=".17" stop-color="#42c868"/><stop offset=".39" stop-color="#0ebc5f"/><stop offset=".62" stop-color="#00a9bb"/><stop offset=".86" stop-color="#3c90ff"/><stop offset="1" stop-color="#3186ff"/></linearGradient><linearGradient id="SVG41ATXboZ" x1="8" x2="184" y1="46.13" y2="46.13" gradientUnits="userSpaceOnUse"><stop offset=".08" stop-color="#ff63a0"/><stop offset=".3" stop-color="#fc413d"/><stop offset=".5" stop-color="#fc413d"/><stop offset=".65" stop-color="#fc413d"/><stop offset=".72" stop-color="#fc5c30"/><stop offset=".86" stop-color="#feb10c"/><stop offset=".91" stop-color="#fec700"/><stop offset=".96" stop-color="#ffdb0f"/></linearGradient></defs><path fill="url(#SVGHzDbHcwG)" d="M146 44h38v110c0 6.627-5.373 12-12 12h-20a6 6 0 0 1-6-6z" transform="translate(-11.636 -37.818)scale(1.45454)"/><path fill="#fc413d" d="M55.273 26.182H0v160c0 9.638 7.816 17.454 17.455 17.454h29.09a8.727 8.727 0 0 0 8.728-8.728z"/><path fill="url(#SVG41ATXboZ)" d="M39.226 30.456c-8.033-6.752-20.018-5.714-26.77 2.319c-6.752 8.032-5.714 20.017 2.319 26.77l76.078 63.949a8 8 0 0 0 10.295 0l76.078-63.95c8.032-6.752 9.07-18.737 2.318-26.77c-6.752-8.032-18.737-9.07-26.769-2.318L96 78.18z" transform="translate(-11.636 -37.818)scale(1.45454)"/></svg>Gmail</span><span><svg class="brand" width="20" height="20" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="#0078D4" d="M8.56 12.03q0 .38-.06.73q-.11.34-.3.62q-.2.27-.49.43q-.3.16-.71.16q-.42 0-.71-.17t-.48-.45t-.27-.63q-.09-.35-.09-.72q0-.36.09-.72q.08-.35.27-.63t.5-.45q.3-.17.72-.17q.43 0 .72.17q.3.18.48.46q.18.29.27.64q.06.36.06.73M22 12v7.81q0 .39-.27.69q-.28.25-.67.25H7.94q-.39 0-.67-.25q-.27-.3-.27-.69V17H2.83q-.33 0-.59-.24Q2 16.5 2 16.17V7.83q0-.33.24-.59Q2.5 7 2.83 7h5.42V4.13q0-.37.25-.63q.26-.25.63-.25h10.74q.37 0 .63.25q.25.26.25.63v6.91l1.04.6h.01q.08.06.14.16q.06.09.06.2m-5-6.87v2.5h2.5v-2.5M17 8.88v2.5h2.5v-2.5M17 12.63v1.52l2.54-1.52m-6.91-7.5v2.5h3.12v-2.5m-3.12 3.75v2.5h3.12v-2.5m-3.12 3.75v1.69l2.01 1.24l1.11-.66v-2.27M9.5 5.13V7h1.77q.06 0 .11.04V5.12M7 15.32q.73 0 1.32-.26q.58-.26.99-.71q.4-.45.6-1.07q.21-.62.22-1.34q0-.69-.21-1.29q-.2-.59-.6-1.03q-.39-.44-.95-.69q-.57-.25-1.29-.25q-.77 0-1.37.25q-.59.25-1 .7q-.41.46-.62 1.08q-.21.63-.21 1.37q0 .7.21 1.3q.22.59.62 1.02t.97.68q.58.24 1.32.24m1.25 4.18h10.32L12 15.4v.77q0 .33-.24.59q-.26.24-.59.24H8.25m12.5 2.39v-6.03l-4.92 2.95Z"/></svg>Outlook</span></div>
-<p>Connect Gmail or Outlook so coffee chat emails and follow-ups come from your own address. Trainee only sends messages you've approved.</p>
-<h2>Calendar</h2>
-<div class="brands"><span><svg class="brand" width="20" height="20" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path fill="#fff" d="M195.368 60.632H60.632v134.736h134.736z"/><path fill="#ea4335" d="M195.368 256L256 195.368l-30.316-5.172l-30.316 5.172l-5.533 27.73z"/><path fill="#188038" d="M0 195.368v40.421C0 246.956 9.044 256 20.21 256h40.422l6.225-30.316l-6.225-30.316l-33.033-5.172z"/><path fill="#1967d2" d="M256 60.632V20.21C256 9.044 246.956 0 235.79 0h-40.422q-5.532 22.554-5.533 33.196q0 10.641 5.533 27.436q20.115 5.76 30.316 5.76T256 60.631"/><path fill="#fbbc04" d="M256 60.632h-60.632v134.736H256z"/><path fill="#34a853" d="M195.368 195.368H60.632V256h134.736z"/><path fill="#4285f4" d="M195.368 0H20.211C9.044 0 0 9.044 0 20.21v175.158h60.632V60.632h134.736z"/><path fill="#4285f4" d="M88.27 165.154c-5.036-3.402-8.523-8.37-10.426-14.94l11.689-4.816q1.59 6.063 5.558 9.398c2.627 2.223 5.827 3.318 9.566 3.318q5.734 0 9.852-3.487c2.746-2.324 4.127-5.288 4.127-8.875q0-5.508-4.345-8.994c-2.897-2.324-6.535-3.486-10.88-3.486h-6.754v-11.57h6.063q5.608 0 9.448-3.033c2.56-2.02 3.84-4.783 3.84-8.303c0-3.132-1.145-5.625-3.435-7.494c-2.29-1.87-5.188-2.813-8.708-2.813c-3.436 0-6.164.91-8.185 2.745a16.1 16.1 0 0 0-4.413 6.754l-11.57-4.817c1.532-4.345 4.345-8.185 8.471-11.503s9.398-4.985 15.798-4.985c4.733 0 8.994.91 12.767 2.745c3.772 1.836 6.736 4.379 8.875 7.613c2.14 3.25 3.2 6.888 3.2 10.93c0 4.126-.993 7.613-2.98 10.476s-4.43 5.052-7.327 6.585v.69a22.25 22.25 0 0 1 9.398 7.327c2.442 3.284 3.672 7.208 3.672 11.79c0 4.58-1.163 8.673-3.487 12.26c-2.324 3.588-5.54 6.417-9.617 8.472c-4.092 2.055-8.69 3.1-13.793 3.1c-5.912.016-11.369-1.685-16.405-5.087m71.797-58.005l-12.833 9.28l-6.417-9.734l23.023-16.607h8.825v78.333h-12.598z"/></svg>Google Calendar</span></div>
-<p>Connect Google Calendar so Trainee can suggest times and add interviews and coffee chats for you.</p>
-<h2>Job sites</h2>
-<div class="brands"><span><svg class="brand" width="20" height="20" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path fill="#0a66c2" d="M218.123 218.127h-37.931v-59.403c0-14.165-.253-32.4-19.728-32.4c-19.756 0-22.779 15.434-22.779 31.369v60.43h-37.93V95.967h36.413v16.694h.51a39.91 39.91 0 0 1 35.928-19.733c38.445 0 45.533 25.288 45.533 58.186zM56.955 79.27c-12.157.002-22.014-9.852-22.016-22.009s9.851-22.014 22.008-22.016c12.157-.003 22.014 9.851 22.016 22.008A22.013 22.013 0 0 1 56.955 79.27m18.966 138.858H37.95V95.967h37.97zM237.033.018H18.89C8.58-.098.125 8.161-.001 18.471v219.053c.122 10.315 8.576 18.582 18.89 18.474h218.144c10.336.128 18.823-8.139 18.966-18.474V18.454c-.147-10.33-8.635-18.588-18.966-18.453"/></svg>LinkedIn</span><span><svg class="brand" width="20" height="20" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="5.5" fill="#000"/><g transform="translate(4 4) scale(.6667)"><title>Handshake</title><path fill="#D3FB52" d="M20.728 0 16.49 24h-4.583l1.87-10.532-4.743 3.893L7.856 24H3.272L7.51 0h4.582L9.806 13.012l4.729-3.862L16.145 0h4.583z"/></g></svg>Handshake</span><span><svg class="brand" width="20" height="20" aria-hidden="true" focusable="false" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>Indeed</title><path fill="#003A9B" d="M11.566 21.5633v-8.762c.2553.0231.5009.0346.758.0346 1.2225 0 2.3739-.3206 3.3506-.8928v9.6182c0 .8219-.1957 1.4287-.5757 1.8338-.378.4033-.8808.6049-1.491.6049-.6007 0-1.0766-.2016-1.468-.6183-.3781-.4032-.5739-1.01-.5739-1.8184zM11.589.5659c2.5447-.8929 5.4424-.8449 7.6186.987.405.3687.8673.8334 1.0515 1.3806.2207.6913-.7695-.073-.9057-.167-.71-.4532-1.4182-.8334-2.2127-1.0946C12.8614.3873 8.8122 2.709 6.2945 6.315c-1.0516 1.5939-1.7367 3.2721-2.299 5.1174-.0614.2017-.1094.4647-.2207.6413-.1113.2036-.048-.5453-.048-.5702.0845-.7623.2438-1.4997.4414-2.237C5.3292 5.3375 7.897 2.0655 11.5891.5658zm4.9281 7.0587c0 1.6686-1.353 3.0224-3.0205 3.0224-1.6677 0-3.0186-1.3538-3.0186-3.0224 0-1.6687 1.351-3.0224 3.0186-3.0224 1.6676 0 3.0205 1.3518 3.0205 3.0224Z"/></svg>Indeed</span></div>
-<p>Trainee can use your LinkedIn, Handshake or Indeed profile details to fill in applications faster.</p>
+<h2>Gmail</h2>
+<div class="brands"><span><svg class="brand" width="20" height="20" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 204"><defs><linearGradient id="SVGHzDbHcwG" x1="165" x2="165" y1="44" y2="166" gradientUnits="userSpaceOnUse"><stop stop-color="#60d673"/><stop offset=".17" stop-color="#42c868"/><stop offset=".39" stop-color="#0ebc5f"/><stop offset=".62" stop-color="#00a9bb"/><stop offset=".86" stop-color="#3c90ff"/><stop offset="1" stop-color="#3186ff"/></linearGradient><linearGradient id="SVG41ATXboZ" x1="8" x2="184" y1="46.13" y2="46.13" gradientUnits="userSpaceOnUse"><stop offset=".08" stop-color="#ff63a0"/><stop offset=".3" stop-color="#fc413d"/><stop offset=".5" stop-color="#fc413d"/><stop offset=".65" stop-color="#fc413d"/><stop offset=".72" stop-color="#fc5c30"/><stop offset=".86" stop-color="#feb10c"/><stop offset=".91" stop-color="#fec700"/><stop offset=".96" stop-color="#ffdb0f"/></linearGradient></defs><path fill="url(#SVGHzDbHcwG)" d="M146 44h38v110c0 6.627-5.373 12-12 12h-20a6 6 0 0 1-6-6z" transform="translate(-11.636 -37.818)scale(1.45454)"/><path fill="#fc413d" d="M55.273 26.182H0v160c0 9.638 7.816 17.454 17.455 17.454h29.09a8.727 8.727 0 0 0 8.728-8.728z"/><path fill="url(#SVG41ATXboZ)" d="M39.226 30.456c-8.033-6.752-20.018-5.714-26.77 2.319c-6.752 8.032-5.714 20.017 2.319 26.77l76.078 63.949a8 8 0 0 0 10.295 0l76.078-63.95c8.032-6.752 9.07-18.737 2.318-26.77c-6.752-8.032-18.737-9.07-26.769-2.318L96 78.18z" transform="translate(-11.636 -37.818)scale(1.45454)"/></svg>Gmail</span></div>
+<p>Connect Gmail so Trainee can read the emails that matter to your applications and update your tracker. The permission is read-only: Trainee can't send, delete, label or change any email.</p>
 <h2>Disconnecting</h2>
-<p>Text <code>connections</code> to see what's linked, and tell Trainee to disconnect anything at any time.</p>`},
+<p>Say <code>disconnect gmail</code> to Trainee. It revokes Trainee's access at Google and deletes the stored access and what it saved from your Gmail. You can also remove Trainee yourself at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>`},
 
 { slug:'approvals', group:'Account', title:'Approvals & control',
   desc:'Decide how much Trainee asks before it acts, and pause it whenever you want.',
@@ -1268,70 +1204,21 @@ var PAGES = [
 <tr><td><code>STOP</code></td><td>Stop all texts from Trainee</td></tr>
 </tbody></table></div>`},
 
-{ slug:'pricing', group:'Account', title:'Pricing',
-  desc:'Simple pricing. Cancel any time by text.',
-  html:`
-<h2>Plans</h2>
-<div class="tbl"><table><thead><tr><th>Plan</th><th>Price</th><th>Includes</th></tr></thead><tbody>
-<tr><td>[Plan name]</td><td>[YOUR PRICE]</td><td>[What's included]</td></tr>
-<tr><td>[Plan name]</td><td>[YOUR PRICE]</td><td>[What's included]</td></tr>
-</tbody></table></div>
-<h2>Canceling</h2>
-<p>Text <code>cancel plan</code> to Trainee or email support. You keep access until the end of your billing period.</p>`},
-
 { slug:'security', group:'Trust & Legal', title:'Security',
   desc:'How Trainee protects your information and your accounts.',
   html:`
-<div class="note"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-warning"/></svg></i><p>Template. Only publish claims that are true of your actual systems.</p></div>
 <h2>Your approval comes first</h2>
 <p>Trainee never submits an application or sends an email in your name without your approval or a rule you set.</p>
 <h2>Data protection</h2>
-<p>[Describe encryption in transit and at rest, where data is hosted, and who on your team can access it.]</p>
+<p>Information is sent over encrypted connections. Each person can read only their own records, and the tokens of accounts you connect are kept in an encrypted secret store that only Trainee's servers use.</p>
 <h2>Connected accounts</h2>
-<p>[Describe how connections are authorized, for example through OAuth, and that passwords are never stored.]</p>
+<p>Google is connected on Google's own page, so Trainee never sees your Google password. Saying "disconnect gmail" revokes Trainee's access at Google and deletes what it kept.</p>
 <h2>Reporting a problem</h2>
-<p>Email <a class="js-support" href="#">support</a> to report a security concern.</p>`},
-
-{ slug:'privacy', group:'Trust & Legal', title:'Privacy Policy',
-  desc:'What we collect, why, and the choices you have.',
-  html:`
-<div class="note"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-warning"/></svg></i><p>Template only. Have a lawyer review this before launch.</p></div>
-<p class="mut">Last updated: [DATE]</p>
-<h2>Information we collect</h2>
-<p>[Name, phone number, resume contents, job preferences, messages you send to Trainee, and data from accounts you connect.]</p>
-<h2>How we use it</h2>
-<p>[To find roles, prepare applications, send messages you approve, and improve Trainee.]</p>
-<h2>How we share it</h2>
-<p>[With employers when you apply, with people you choose to contact, and with service providers that help run Trainee. We do not sell your personal information.]</p>
-<h2>Mobile information</h2>
-<p>No mobile information will be shared with third parties or affiliates for marketing or promotional purposes. Text messaging opt-in data and consent will not be shared with any third parties.</p>
-<h2>Your choices</h2>
-<p>[How to access, export or delete your data, and how to disconnect accounts.]</p>
-<h2>Contact</h2>
-<p>[Company legal name, address and privacy contact email.]</p>`},
-
-{ slug:'terms', group:'Trust & Legal', title:'Terms of Service',
-  desc:'The rules for using Trainee.',
-  html:`
-<div class="note"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-warning"/></svg></i><p>Template only. Have a lawyer review this before launch.</p></div>
-<p class="mut">Last updated: [DATE]</p>
-<h2>Using Trainee</h2>
-<p>[Eligibility, account responsibilities, and acceptable use.]</p>
-<h2>Your content</h2>
-<p>[You own your resume and materials. You give Trainee permission to use them to provide the service.]</p>
-<h2>Actions taken for you</h2>
-<p>[Trainee acts on your approval. You're responsible for the accuracy of information you provide.]</p>
-<h2>Payments</h2>
-<p>[Billing, renewals, refunds and cancellation.]</p>
-<h2>Limits of liability</h2>
-<p>[Standard disclaimers. Trainee can't guarantee interviews or offers.]</p>
-<h2>Contact</h2>
-<p>[Company legal name, address and contact email.]</p>`},
+<p>Text <code>HELP</code> to Trainee and say it is a security concern.</p>`},
 
 { slug:'sms-terms', group:'Trust & Legal', title:'SMS Terms',
   desc:'How Trainee texts you, and how to stop.',
   html:`
-<div class="note"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-warning"/></svg></i><p>Template. Carriers review this page when you register your texting number, so keep it accurate.</p></div>
 <h2>Program description</h2>
 <p>Trainee sends automated text messages about your account, job search, applications, alerts and interview prep to users who sign up at this website and confirm by text.</p>
 <h2>Message frequency</h2>
@@ -1341,26 +1228,22 @@ var PAGES = [
 <h2>Opting out</h2>
 <p>Text <code>STOP</code> at any time to stop receiving messages. You'll receive one final confirmation. Text <code>START</code> to rejoin.</p>
 <h2>Help</h2>
-<p>Text <code>HELP</code> for help, or contact <a class="js-support" href="#">support</a>.</p>
+<p>Text <code>HELP</code> for help.</p>
 <h2>Carriers</h2>
 <p>Carriers are not liable for delayed or undelivered messages.</p>
-<h2>Privacy</h2>
-<p>See our <a href="#product/privacy">Privacy Policy</a>.</p>`},
+`},
 
 { slug:'support', group:'Support', title:'Contact support',
-  desc:'We usually reply within one business day.',
+  desc:'How to get help with Trainee.',
   html:`
 <h2>Fastest: text Trainee</h2>
 <p>Text <code>HELP</code> to Trainee and tell it what's going on. If it can't fix it, it will pass your message to our team.</p>
-<h2>Email</h2>
-<p>Email <a class="js-support" href="#">our support team</a> with your name and the phone number you signed up with.</p>
 <h2>Common questions</h2>
 <h3>I didn't get a reply after signing up</h3>
-<p>Make sure you sent the pre-written message from the phone number you entered. If it still doesn't work, email support.</p>
+<p>Make sure you sent the pre-written message from the phone number you entered. If it still doesn't work, text <code>HELP</code> to Trainee.</p>
 <h3>How do I stop texts?</h3>
 <p>Text <code>STOP</code>. See <a href="#product/sms-terms">SMS Terms</a>.</p>
-<h3>How do I delete my data?</h3>
-<p>Email support and we'll delete your account and data. See the <a href="#product/privacy">Privacy Policy</a>.</p>`}
+`}
 ];
 </script>
 
@@ -1400,7 +1283,6 @@ var PAGES = [
   function toast(msg) { var t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(function () { t.classList.remove('show'); }, 2200); }
 
   /* emails */
-  $('careersMail').href = 'mailto:' + C.careersEmail;
   document.addEventListener('click', function (e) {
     var a = e.target.closest && e.target.closest('.js-support');
     if (a) { e.preventDefault(); location.href = 'mailto:' + C.supportEmail; }

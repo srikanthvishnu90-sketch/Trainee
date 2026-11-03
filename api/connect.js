@@ -17,6 +17,8 @@ async function pass(request) {
   if (request.method === "POST") init.body = await request.text();
   const r = await fetch(up, init);
   const body = await r.text();
+  // Supabase answers a function that is not deployed with its own 404 JSON; passing that on looks like a missing page on this site.
+  if (r.status === 404 && /"code":"NOT_FOUND"/.test(body) && /Requested function was not found/.test(body)) return new Response("Connect pages are not available yet.", { status: 503, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
   const json = /application\/json/.test(r.headers.get("content-type") || "");
   const h = new Headers({ "content-type": json ? "application/json; charset=utf-8" : "text/html; charset=utf-8" });
   for (const k of KEEP) { const v = r.headers.get(k); if (v) h.set(k, v); }

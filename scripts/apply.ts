@@ -495,7 +495,7 @@ export async function runApply(args: string[]) {
   const held = new Set<Promise<unknown>>();
   const hold = (p: Promise<unknown>) => { held.add(p); return p.finally(() => held.delete(p)); };
   // Discovery: one stopped request, by kind, origin and path only (never its query, fragment or body).
-  const stopped = (req: any, kind: string) => {
+  const discoveryStop = (req: any, kind: string) => {
     stopCount++;
     const list = evidence.discovery?.stopped;
     if (!Array.isArray(list) || list.length >= 200) return;
@@ -739,20 +739,20 @@ export async function runApply(args: string[]) {
       });
       // Any other page of this context (a popup, a new tab) is not this posting: nothing it asks for goes out.
       await page.context().route("**/*", async (route: any) => {
-        try { stopped(route.request(), "popup"); } catch { /* the record is best effort */ }
+        try { discoveryStop(route.request(), "popup"); } catch { /* the record is best effort */ }
         await hold(route.abort("blockedbyclient").catch(() => {}));
       });
       // A socket opened before the first value stays open, but nothing the page sends on it after that goes out; a
       // socket opened after it (its address can carry the value) is never connected.
       await page.routeWebSocket(/.*/, (ws: any) => {
         if (populated) {
-          stopped({ url: () => ws.url(), method: () => "WS", resourceType: () => "websocket" }, "websocket");
+          discoveryStop({ url: () => ws.url(), method: () => "WS", resourceType: () => "websocket" }, "websocket");
           ws.close();
           return;
         }
         const server = ws.connectToServer();
         ws.onMessage((m: unknown) => {
-          if (populated) { stopped({ url: () => ws.url(), method: () => "WS", resourceType: () => "websocket" }, "websocket"); return; }
+          if (populated) { discoveryStop({ url: () => ws.url(), method: () => "WS", resourceType: () => "websocket" }, "websocket"); return; }
           server.send(m);
         });
       });
@@ -767,7 +767,7 @@ export async function runApply(args: string[]) {
       if (discovery && populated) {
         let main = false;
         try { main = req.isNavigationRequest() && req.frame() === page.mainFrame(); } catch { /* a detached frame */ }
-        try { stopped(req, main ? "navigation" : String(req.resourceType())); } catch { /* the record is best effort */ }
+        try { discoveryStop(req, main ? "navigation" : String(req.resourceType())); } catch { /* the record is best effort */ }
         if (main) {
           // Not aborted: an aborted navigation shows the browser's error page in its own process, and the form, unloading
           // in the old one, is out of the engine's reach while it goes (a page timer's request reached the employer in

@@ -26,6 +26,7 @@ export interface EngineResult {
     confirmation_id?: string | null;
     evidence_path?: string;
     fields?: string[];
+    retry_after_s?: number;
     // D-024: the engine's proof of a click (scripts/apply.ts), kept with the queue's record.
     proof?: Record<string, unknown>;
   };

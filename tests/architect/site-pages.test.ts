@@ -32,6 +32,8 @@ Deno.test("/ is the Trainee landing page; /privacy is the extension policy and s
   assertNode.match(p, /This page covers the browser extension only\./);
   assertNode.match(p, /has not been published yet/);
   assertNode.match(p, /Last updated:/);
+  assertNode.match(p, /Questions: text HELP to Trainee\./);
+  assertNode.ok(!/contact on the Trainee website/.test(p), "the only contact the site offers is texting HELP");
   // The homepage links no Trainee privacy or terms page until the owner's inputs exist (no /privacy, /terms, #product/privacy|terms).
   const h = read("site/index.html");
   assertNode.ok(!/href="(?:\/privacy|\/terms|\/google|#product\/(?:privacy|terms))"/.test(h), "no link to a policy page that is not published");
@@ -94,6 +96,12 @@ Deno.test("nothing served from site/ carries a placeholder, template note, examp
   const b = buildInterim(read("docs/launch/legal-pages/home.template.html"));
   assertNode.ok(b.ok);
   assertNode.equal(read("site/index.html"), (b as { html: string }).html, "site/index.html drifted: run deno run -A scripts/launch/build-legal-pages.ts --interim");
+});
+
+Deno.test("the homepage makes no availability claim it cannot back: no iMessage or WhatsApp channel, no launch date hint", () => {
+  const h = read("site/index.html");
+  assertNode.ok(!/iMessage|WhatsApp|wa\.me|Launching soon/i.test(h), "iMessage, WhatsApp and 'Launching soon' are not claimed");
+  assertNode.match(h, /t\.me\/TraineeCareerBot/); // Telegram is the one chat channel linked (owner to confirm it is live)
 });
 
 Deno.test("every in-page #link on the homepage resolves to an element, a route (home, about, careers, product) or a help page that exists", () => {
@@ -162,6 +170,17 @@ Deno.test({
         assertNode.ok(m.box >= m.need, `country selector ${m.box}px is narrower than its longest option needs (${Math.ceil(m.need)}px) at ${width}`);
         await ctx.close();
       }
+      // Careers role cards must never link to mailto:undefined (no address is configured): render one role and read every href.
+      const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+      await ctx.route(/^https?:/, (r: any) => r.abort());
+      const page = await ctx.newPage();
+      await page.setContent(read("site/index.html").replace("var ROLES = [];", "var ROLES = [{title:'Test role',team:'Team',location:'Chicago',type:'Full-time',icon:'briefcase'}];"));
+      await page.evaluate(() => { location.hash = "#careers"; });
+      await page.waitForTimeout(150);
+      const hrefs: string[] = await page.evaluate(() => [...document.querySelectorAll("a[href]")].map((a) => a.getAttribute("href") || ""));
+      assertNode.ok(hrefs.length > 10 && await page.evaluate(() => document.querySelectorAll("#roles .role").length) === 1, "the role card rendered");
+      assertNode.deepEqual(hrefs.filter((h) => /undefined|^mailto:/i.test(h)), [], "no rendered link is mailto: or contains 'undefined'");
+      await ctx.close();
     } finally {
       await browser.close();
     }

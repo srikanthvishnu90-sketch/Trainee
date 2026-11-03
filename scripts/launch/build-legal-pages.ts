@@ -300,6 +300,10 @@ function interim(once: (from: string, to: string) => void, cut: (marker: string,
   once("<h2>Email</h2>\n<p>Email <a class=\"js-support\" href=\"#\">our support team</a> with your name and the phone number you signed up with.</p>\n", "");
   once("If it still doesn't work, email support.", "If it still doesn't work, text <code>HELP</code> to Trainee.");
   once("<h3>How do I delete my data?</h3>\n<p>Email support and we'll delete your account and data. See the <a href=\"#product/privacy\">Privacy Policy</a>.</p>", "");
+  // No address to open a mail window to: the careers list shows roles as plain cards, and there is no support mailto handler.
+  once("  document.addEventListener('click', function (e) {\n    var a = e.target.closest && e.target.closest('.js-support');\n    if (a) { e.preventDefault(); location.href = 'mailto:' + C.supportEmail; }\n  });\n", "");
+  once(`return '<a class="role reveal" href="mailto:' + C.careersEmail + '?subject=' + encodeURIComponent(r.title) + '">' +`, `return '<div class="role reveal">' +`);
+  once(`'<span class="go">Apply<i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-arrow-right"/></svg></i></span></a>';`, `'</div>';`);
   // The Gmail pages the full build publishes (/google, /privacy#google) do not exist in the interim build.
   once(' What it reads and keeps is listed in the <a href="/google">notice shown before you connect</a> and in the <a href="/privacy#google">Privacy Policy</a>.', "");
   once(' See <a href="/google">what Trainee reads in Gmail</a>.', "");

@@ -5,7 +5,6 @@
 // caller passes them from the code that builds it); an unconfigured provider has no button; "Connected as" is written only for
 // a connection that exists; an address is untrusted text and always escaped; no secret, client id or token is ever rendered.
 import { BRAND, esc, layout, TG_READY, type Og } from "./file_page.ts";
-import { DARK_T, LIGHT_T, SERIF, type DesignTokens } from "./results_design.ts";
 import { reasonKey, REASONS } from "./connect_link.ts";
 
 export type ProviderId = "google" | "microsoft";
@@ -39,51 +38,36 @@ function extraReach(scopes: string[], than: string[]): string | null {
 }
 
 // ---------------------------------------------------------------- html
-// The look of the hosted results page (results_design.ts, owner design spec 2026-11-02): paper ground, Source Serif 4 headings over
-// Inter, a plum file header, a SOLID BLACK primary button, 16px body, nothing a person decides on under 14px, 44px+ hit areas, a dark
-// scheme that is checked pair by pair (tests/architect/connect-page-design.test.ts). Colour never carries a state alone: every state
-// is a word ("Connected", "Needs reconnecting") the chat uses too.
-const vars = (t: DesignTokens) => `--paper:${t.paper};--card:${t.card};--ink:${t.ink};--ink-2:${t.ink2};--hair:${t.hair};--plum-950:${t.p950};--plum-800:${t.p800};--plum-700:${t.p700};--plum-600:${t.p600};--plum-50:${t.p50};--plum-text:${t.ptext};`
-  + `--st-confirmed:${t.confirmed};--st-attention:${t.attention};--st-risk:${t.risk};--st-confirmed-bg:${t.confirmedBg};--st-attention-bg:${t.attentionBg};`
-  // The shared shell's own names (file_page.ts), pointed at the same palette.
-  + `--bg:${t.paper};--panel:${t.p50};--mute:${t.ink2};--line:${t.hair};--link:${t.ptext};--accent:${t.p700};--bad:${t.risk};--warn:${t.attention};--good:${t.confirmed}`;
+// The page keeps Trainee's one visual identity (brand.ts tokens, checked in a real browser by design-pages-browser.test.ts): the
+// shared ground and ink, plum ONLY on the one primary action and links, Inter + Brygada 1918, dark scheme. On top of that the
+// results page's habits: 16px body, nothing under 14px, 44px+ tap targets, cards for accounts, and states in words ("Connected",
+// "Needs reconnecting"), never colour alone. tests/architect/connect-page-design.test.ts computes every size and contrast pair.
 export const CONNECT_CSS = `
-:root{${vars(LIGHT_T)}}
-@media (prefers-color-scheme:dark){:root{${vars(DARK_T)}}}
-.wrap:has(>.connect){padding-left:calc(14px + env(safe-area-inset-left));padding-right:calc(14px + env(safe-area-inset-right))}
+.wrap:has(>.connect){padding-left:calc(16px + env(safe-area-inset-left));padding-right:calc(16px + env(safe-area-inset-right))}
 .connect{font-size:16px;line-height:1.5;overflow-wrap:anywhere}
-.connect h1{font-family:${SERIF};font-weight:600;letter-spacing:0}
-.filehead{margin:0 0 14px;padding:16px;border-radius:16px;background:linear-gradient(135deg,var(--plum-950),var(--plum-800));color:#fff}
-.filehead .brand{margin-bottom:12px}.filehead .wm{color:#fff}
-.filehead h1{margin:0;font-size:24px;line-height:1.2;color:#fff}
-.filehead .lede{margin:8px 0 0;font-size:16px;color:#F1E8F5}
+.connect .lede{margin:8px 0 0;font-size:16px;color:var(--mute)}
 .line{margin:0 0 12px;font-size:16px}
 .actions{margin-top:20px;display:flex;flex-direction:column;gap:10px}.actions form{margin:0}
 .primary,.secondary,.notnow,.back,.lnk{font:inherit;cursor:pointer}
-.primary,.secondary{display:flex;width:100%;align-items:center;justify-content:center;text-align:center;text-decoration:none;border-radius:11px}
-.primary{min-height:48px;padding:6px 22px;font-size:17px;font-weight:600;background:#000;border:2px solid #000;color:#fff}
-.primary:hover{opacity:.88}
-@media (prefers-color-scheme:dark){.primary{border-color:var(--ink)}}
-.secondary{min-height:48px;padding:6px 18px;font-size:16px;font-weight:600;background:transparent;border:1px solid var(--plum-700);color:var(--plum-text)}
-@media (prefers-color-scheme:dark){.secondary{border-color:var(--plum-text)}}
+.primary,.secondary{display:flex;width:100%;align-items:center;justify-content:center;text-align:center;text-decoration:none;min-height:48px;padding:6px 22px;border-radius:999px;font-size:17px;font-weight:600}
+.primary{background:var(--accent);border:1px solid var(--accent);color:var(--accent-ink)}.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.primary:disabled{background:var(--disabled-bg);border-color:var(--disabled-bg);color:var(--disabled-ink);cursor:default}
+.secondary{background:transparent;border:1px solid var(--ink);color:var(--ink)}.secondary:hover{border-color:var(--mute)}
+.secondary:disabled{color:var(--mute);cursor:default}
 .notnow,.back{display:flex;align-items:center;justify-content:center;min-height:44px;font-size:16px;text-decoration:underline}
-.notnow{color:var(--ink-2)}.back{color:var(--plum-text)}
-.fine{margin:0 4px;font-size:14px;color:var(--ink-2)}
-.acct{margin:0 0 10px;padding:12px;border-radius:14px;border:1px solid var(--hair);background:var(--card)}.acct p{margin:0}
-.acct .who{font-size:16px;font-weight:600;color:var(--ink)}.acct .muted{margin-top:6px;font-size:14px;color:var(--ink-2)}
-.chip{display:inline-flex;align-items:center;margin:0 0 8px;padding:3px 10px;border-radius:999px;font-size:14px;line-height:1.4;font-weight:600;border:1px solid currentColor}
+.notnow{color:var(--mute)}.back{color:var(--link)}
+.fine{margin:0 4px;font-size:14px;color:var(--mute)}
+.acct{margin:0 0 10px;padding:12px 14px;border-radius:14px;border:1px solid var(--line);background:var(--panel)}.acct p{margin:0}
+.acct .who{font-size:16px;font-weight:600;color:var(--ink)}.acct .muted{margin-top:6px;font-size:14px;color:var(--mute)}
+.chip{display:inline-flex;align-items:center;margin:0 0 8px;padding:3px 10px;border-radius:999px;font-size:14px;line-height:1.4;font-weight:600;border:1px solid currentColor;background:var(--bg)}
 .chip::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;margin-right:6px;flex:none}
-.chip.t-confirmed{background:var(--st-confirmed-bg);color:var(--st-confirmed)}.chip.t-attention{background:var(--st-attention-bg);color:var(--st-attention)}
-.alert{margin:0 0 12px;padding:12px;border-radius:14px;border:1px solid var(--hair);border-left:4px solid var(--st-attention);background:var(--card);color:var(--ink)}.alert .chip{display:flex;width:fit-content}
+.chip.t-confirmed{color:var(--good)}.chip.t-attention{color:var(--warn)}
+.alert{margin:0 0 12px;padding:12px 14px;border-radius:14px;border:1px solid var(--line);border-left:4px solid var(--warn);background:var(--panel);color:var(--ink)}.alert .chip{display:flex;width:fit-content}
 .lnk{display:inline-flex;align-items:center;min-height:44px;padding:0 4px;border:0;background:none;text-decoration:underline;font-size:16px}
-.lnk.danger{color:var(--st-risk);margin-top:2px}
-.ok{font-weight:600;color:var(--st-confirmed)}
-.connect a:focus-visible,.connect button:focus-visible{outline:3px solid var(--plum-600);outline-offset:2px}
-.filehead a:focus-visible{outline-color:#fff}
+.lnk.danger{color:var(--bad);margin-top:2px}
+.ok{font-weight:600;color:var(--good)}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 `;
-// Source Serif 4 from the host the page's CSP already allows for Inter; the SERIF stack keeps the page right with no network.
-const SERIF_LINK = `<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600&display=swap" rel="stylesheet">`;
 
 export const CONNECT_SCRIPT = `(function(){${TG_READY}var w=window.Telegram&&window.Telegram.WebApp;var inTg=!!(w&&w.initData);function open(u){if(inTg&&w.openLink){w.openLink(u)}else{location.href=u}}document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a.notnow,a.tgback");if(a&&inTg&&w.close){e.preventDefault();w.close()}});document.addEventListener("submit",function(e){var f=e.target;if(!f.classList||!f.classList.contains("go")||!window.fetch)return;e.preventDefault();var b=f.querySelector("button");if(b)b.disabled=true;fetch(f.action||location.href,{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded",accept:"application/json"},body:new URLSearchParams(new FormData(f)).toString(),credentials:"same-origin"}).then(function(r){return r.ok?r.json():null}).then(function(j){if(j&&j.url){open(j.url);if(b)b.disabled=false}else{f.submit()}}).catch(function(){f.submit()})})})();`;
 export const CONNECT_BOOT = `(function(){${TG_READY}var p=new URLSearchParams(location.hash.slice(1)),d=p.get("tgWebAppData");if(!d){document.getElementById("nodata").hidden=false;return}var f=document.createElement("form");f.method="post";function a(n,v){var i=document.createElement("input");i.type="hidden";i.name=n;i.value=v;f.appendChild(i)}a("init",d);a("w",document.body.getAttribute("data-w"));document.body.appendChild(f);f.submit()})();`;
@@ -91,7 +75,7 @@ export const CONNECT_BOOT = `(function(){${TG_READY}var p=new URLSearchParams(lo
 const hidden = (token: string, action: string, provider: string) => `<input type="hidden" name="t" value="${esc(token)}"><input type="hidden" name="action" value="${action}"><input type="hidden" name="provider" value="${provider}">`;
 const back = (botUrl: string | null, cls = "primary") => (botUrl ? `<a class="${cls}${cls === "primary" ? "" : " tgback"}" href="${esc(botUrl)}" rel="noopener noreferrer">Back to Telegram</a>` : "");
 const page = (title: string, inner: string, o: { og?: Og; script?: string; tg?: boolean; lede?: string; bodyAttrs?: string } = {}) =>
-  layout(`${title} - Trainee`, `<div id="root" class="connect"><header class="filehead">${BRAND}<h1>${esc(title)}</h1>${o.lede ? `<p class="lede">${esc(o.lede)}</p>` : ""}</header><main id="main">${inner}</main></div>`, { script: o.script, tg: o.tg, og: o.og, bodyAttrs: o.bodyAttrs, css: CONNECT_CSS, head: SERIF_LINK });
+  layout(`${title} - Trainee`, `<div id="root" class="connect"><header>${BRAND}<h1>${esc(title)}</h1>${o.lede ? `<p class="lede">${esc(o.lede)}</p>` : ""}</header><main id="main">${inner}</main></div>`, { script: o.script, tg: o.tg, og: o.og, bodyAttrs: o.bodyAttrs, css: CONNECT_CSS });
 
 export function renderConnect(m: ConnectModel): string {
   const reason = REASONS[reasonKey(m.reason)];

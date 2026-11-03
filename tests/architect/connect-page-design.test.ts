@@ -1,16 +1,14 @@
-// The account-connect page wears the hosted results page's design (owner, 2026-11-02; results_design.ts): paper ground, Source Serif 4
-// over Inter, a plum file header, a solid black primary button, 16px body, 14px at the very least for anything a person decides on,
-// 44px hit areas, a dark scheme whose every text/ground pair is computed here, and states in words. It also keeps the connect page's
-// own rules: plain words, nothing sent without approval, no secret or token in a URL, and the chat gives the link (with the reason)
-// when an application can only be confirmed from the person's email. The browser half (real Chromium, phone width, light and dark)
-// is CI-only: locally it logs NOT_RUN when there is no Playwright, exactly like role-pay-results-browser.test.ts.
+// The account-connect page keeps Trainee's one identity (brand.ts tokens, the contract design-pages-browser.test.ts measures in Chromium:
+// shared ground and ink, plum only on the primary action and links) and adds the results page's habits: 16px body, 14px at the very
+// least for anything a person decides on, 44px hit areas, every text/ground pair computed here, and states in words. Also the connect
+// page's own rules (plain words, nothing sent without approval, no token in a URL) and the chat link for "Submitted - confirmed".
+// The browser half is CI-only: locally it logs NOT_RUN when there is no Playwright.
 import assertNode from "node:assert/strict";
 import { createRequire } from "node:module";
-import { contrast } from "../../supabase/functions/_shared/brand.ts";
+import { contrast, DARK, LIGHT, readablePairs, TOKENS_CSS } from "../../supabase/functions/_shared/brand.ts";
 import { CONNECT_CSS, renderBootstrap, renderConnect, renderDone, renderPreview, renderState, previewOg, type ProviderView } from "../../supabase/functions/_shared/connect_page.ts";
 import { connectLine, connectUrlsFor, mintConnectToken, REASONS, reasonKey, verifyConnectToken } from "../../supabase/functions/_shared/connect_link.ts";
 import { confirmMailAsk } from "../../supabase/functions/_shared/connectors.ts";
-import { DARK_T, designPairs, LIGHT_T, SERIF } from "../../supabase/functions/_shared/results_design.ts";
 import { handleConnect, type ConnectDeps, type ProviderId, type ProviderInfo, type ProviderState } from "../../supabase/functions/trainee-connect/handler.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -46,40 +44,24 @@ const rules = (css: string): { sel: string; body: string }[] => [...css.matchAll
 const declared = (body: string, prop: string) => { const m = new RegExp(`(?:^|;)\\s*${prop}:([^;]+)`).exec(body); return m ? m[1].trim() : null; };
 const px = (v: string | null) => { const m = v && /^(\d+(?:\.\d+)?)px$/.exec(v); return m ? Number(m[1]) : null; };
 
-Deno.test("the design is the results page's: tokens in both schemes, Source Serif 4 over Inter, a plum file header, 16px body", () => {
-  const light = /:root\{([^}]*)\}/.exec(CONNECT_CSS)![1], dark = /prefers-color-scheme:dark\)\{:root\{([^}]*)\}/.exec(CONNECT_CSS)![1];
-  for (const [name, css, t] of [["light", light, LIGHT_T], ["dark", dark, DARK_T]] as const) {
-    for (const [v, want] of Object.entries({ paper: t.paper, card: t.card, ink: t.ink, "ink-2": t.ink2, hair: t.hair, "plum-950": t.p950, "plum-800": t.p800, "plum-700": t.p700, "plum-text": t.ptext, "st-confirmed": t.confirmed, "st-attention": t.attention, "st-risk": t.risk })) {
-      assert(css.includes(`--${v}:${want};`), `${name}: --${v} is ${want}`);
-    }
-    assert(css.includes(`--bg:${t.paper};`), `${name}: the shell's ground is the paper`);
-  }
-  eq(LIGHT_T.paper, "#FBF9F7", "owner token: paper");
+Deno.test("the page is drawn from the shared Trainee tokens in both schemes, with a 16px body and the plum only on the primary action", () => {
   for (const [name, html] of Object.entries(PAGES)) {
-    assert(html.includes(CONNECT_CSS), `${name}: carries the design`);
-    assert(html.includes("family=Source+Serif+4") && html.includes("family=Inter"), `${name}: Source Serif 4 and Inter are asked for`);
-    assert(html.includes('<header class="filehead">'), `${name}: the plum file header`);
+    assert(html.includes(TOKENS_CSS), `${name}: the shared tokens`);
+    assert(html.includes(CONNECT_CSS), `${name}: carries the connect styles`);
+    assert(html.includes("Brygada+1918") && html.includes("Inter"), `${name}: the shared fonts`);
     assert(/<h1>[^<]+<\/h1>/.test(html), `${name}: one title`);
+    assert(html.includes('class="mark"'), `${name}: the T mark`);
   }
   const r = rules(CONNECT_CSS);
   const of = (sel: string) => r.filter((x) => x.sel.split(",").map((s) => s.trim()).includes(sel));
   assert(of(".connect").some((x) => declared(x.body, "font-size") === "16px"), "body text is 16px");
-  assert(of(".connect h1").some((x) => (declared(x.body, "font-family") ?? "").startsWith("'Source Serif 4'") && declared(x.body, "font-family") === SERIF), "headings are Source Serif 4");
-  assert(of(".filehead").some((x) => /linear-gradient\(135deg,var\(--plum-950\),var\(--plum-800\)\)/.test(x.body) && declared(x.body, "border-radius") === "16px"), "plum-950 to plum-800 at 135 degrees, 16px radius");
-});
-
-Deno.test("the primary button is solid black with white text and 48px; Microsoft is the plum outline; nothing else is filled", () => {
-  const r = rules(CONNECT_CSS);
+  assert(of(".line").some((x) => declared(x.body, "font-size") === "16px"), "the plain lines are 16px");
   const primary = r.find((x) => x.sel === ".primary")!;
-  assert(/background:#000;/.test(primary.body) && /border:2px solid #000/.test(primary.body) && /color:#fff/.test(primary.body), primary.body);
-  assert(px(declared(primary.body, "min-height")) === 48, "48px tall");
-  const dark = /prefers-color-scheme:dark\)\{\.primary\{([^}]*)\}\}/.exec(CONNECT_CSS);
-  assert(dark && /border-color:var\(--ink\)/.test(dark[1]), "in dark the black button keeps a visible edge");
-  const secondary = r.find((x) => x.sel === ".secondary")!;
-  assert(/background:transparent/.test(secondary.body) && /border:1px solid var\(--plum-700\)/.test(secondary.body) && /color:var\(--plum-text\)/.test(secondary.body), secondary.body);
-  assert(!/background:(?:var\(--accent\)|var\(--plum)/.test(CONNECT_CSS.replace(/background:var\(--plum-950\),var\(--plum-800\)/, "")), "plum is never a button fill");
-  assert(!/var\(--accent\)/.test(CONNECT_CSS.replace(/--accent:[^;}]*/g, "")), "the old plum action colour is not used");
-  eq(contrast("#FFFFFF", "#000000") >= 7, true, "white on black is AAA");
+  assert(/background:var\(--accent\)/.test(primary.body) && /color:var\(--accent-ink\)/.test(primary.body), "the primary is the plum action");
+  assert(px(declared(r.find((x) => x.sel === ".primary,.secondary")!.body, "min-height")) === 48, "48px tall");
+  assert(/background:transparent/.test(r.find((x) => x.sel === ".secondary")!.body), "the secondary is not filled");
+  assert(!/background:var\(--accent\)/.test(CONNECT_CSS.replace(/\.primary\{[^}]*\}/, "")), "no other plum fill");
+  assert(/\.primary:disabled\{background:var\(--disabled-bg\)/.test(CONNECT_CSS), "a disabled primary is muted, never still plum");
 });
 
 Deno.test("every text size on the page is at least 14px, and every tap target is at least 44px tall", () => {
@@ -88,36 +70,23 @@ Deno.test("every text size on the page is at least 14px, and every tap target is
     const size = declared(body, "font-size");
     if (size) assert((px(size) ?? 99) >= 14, `${sel} text is ${size}, under 14px`);
   }
-  for (const sel of [".primary", ".secondary", ".notnow", ".back", ".lnk"]) {
-    const hit = r.filter((x) => x.sel.split(",").map((s) => s.trim()).includes(sel)).map((x) => px(declared(x.body, "min-height"))).filter((v) => v !== null);
-    assert(hit.length > 0 && Math.max(...hit as number[]) >= 44, `${sel} has a min-height of at least 44px`);
-  }
-  // min-height does nothing on an inline box: every tap target is a flex/inline-flex/block box.
-  for (const sel of [".notnow,.back", ".lnk"]) {
+  for (const sel of [".primary,.secondary", ".notnow,.back", ".lnk"]) {
     const x = r.find((y) => y.sel === sel)!;
-    assert(/display:(?:inline-)?flex/.test(x.body), `${sel} is a flex box, so its 44px height is real`);
+    assert(px(declared(x.body, "min-height"))! >= 44, `${sel} has a min-height of at least 44px`);
+    assert(/display:(?:inline-)?flex/.test(x.body), `${sel} is a flex box, so its height is real (min-height does nothing on an inline box)`);
   }
-  for (const [name, html] of Object.entries(PAGES)) {
-    for (const m of html.matchAll(/style="([^"]*)"/g)) assert(!/font-size/.test(m[1]), `${name}: no inline font size`);
-  }
+  for (const [name, html] of Object.entries(PAGES)) for (const m of html.matchAll(/style="([^"]*)"/g)) assert(!/font-size/.test(m[1]), `${name}: no inline font size`);
 });
 
 Deno.test("contrast: every pair the page draws as text meets its minimum in light and dark (computed, WCAG relative luminance)", () => {
-  for (const [scheme, t] of [["light", LIGHT_T], ["dark", DARK_T]] as const) {
-    // The results design's own pairs, which this page reuses.
-    for (const [what, fg, bg, min] of designPairs(t)) assert(contrast(fg, bg) >= min, `${scheme}: ${what} ${contrast(fg, bg).toFixed(2)}:1 < ${min}`);
-    // This page's pairs: [text, ground, minimum].
+  for (const [scheme, t] of [["light", LIGHT], ["dark", DARK]] as const) {
+    for (const [what, fg, bg, min] of readablePairs(t)) assert(contrast(fg, bg) >= min, `${scheme}: ${what} ${contrast(fg, bg).toFixed(2)}:1 < ${min}`);
     const mine: [string, string, string, number][] = [
-      ["page text on paper", t.ink, t.paper, 4.5], ["muted line on paper (Not now, fine print)", t.ink2, t.paper, 4.5], ["muted line on account card", t.ink2, t.card, 4.5],
-      ["account name on card", t.ink, t.card, 4.5], ["Back to Telegram link on paper", t.ptext, t.paper, 4.5], ["Microsoft button text on paper", t.ptext, t.paper, 4.5],
-      ["Disconnect on paper", t.risk, t.paper, 4.5], ["Disconnect on card", t.risk, t.card, 4.5], ["Connected line on paper", t.confirmed, t.paper, 4.5],
-      ["Connected chip", t.confirmed, t.confirmedBg, 4.5], ["Needs reconnecting chip", t.attention, t.attentionBg, 4.5], ["alert text on card", t.ink, t.card, 4.5],
-      ["primary text on black", "#FFFFFF", "#000000", 7], ["header title on plum-800", "#FFFFFF", t.p800, 7], ["header line on plum-800", "#F1E8F5", t.p800, 7], ["header line on plum-950", "#F1E8F5", t.p950, 7],
+      ["account name on card", t.ink, t.panel, 4.5], ["muted line on card", t.mute, t.panel, 4.5], ["Connected chip", t.good, t.bg, 4.5], ["Needs reconnecting chip", t.warn, t.bg, 4.5],
+      ["Disconnect on card", t.bad, t.panel, 4.5], ["Disconnect on ground", t.bad, t.bg, 4.5], ["Back to Telegram link", t.link, t.bg, 4.5], ["Not now", t.mute, t.bg, 4.5],
+      ["primary text on plum", t.accentInk, t.accent, 7], ["Microsoft button text", t.ink, t.bg, 4.5], ["disabled primary", t.disabledInk, t.disabledBg, 4.5],
     ];
     for (const [what, fg, bg, min] of mine) assert(contrast(fg, bg) >= min, `${scheme}: ${what} ${contrast(fg, bg).toFixed(2)}:1 < ${min}`);
-    // The black button must stay visible against the page in dark: its edge is the ink colour.
-    assert(contrast(t.ink, t.paper) >= 4.5, `${scheme}: the button's edge`);
-    if (scheme === "dark") assert(contrast("#000000", t.paper) < 1.2 && contrast(t.ink, "#000000") >= 7, "dark: black on paper is invisible by itself, which is why the ink edge is there");
   }
 });
 
@@ -297,7 +266,7 @@ const ratio = (a: number[], b: number[]) => { const x = lum(a), y = lum(b); retu
 // Measured in the page: sideways scroll, tap targets, text sizes and each text's contrast against the ground it sits on.
 const MEASURE = `(() => {
   const rgb = (s) => { const m = /rgba?\\(([^)]+)\\)/.exec(s); if (!m) return null; const p = m[1].split(/[ ,\\/]+/).filter(Boolean).map(Number); return { c: p.slice(0, 3), a: p.length > 3 ? p[3] : 1 }; };
-  const ground = (el) => { if (el.closest(".filehead")) return [61,26,77]; for (let e = el; e; e = e.parentElement) { const b = rgb(getComputedStyle(e).backgroundColor); if (b && b.a > 0.5) return b.c; } return [255,255,255]; };
+  const ground = (el) => { for (let e = el; e; e = e.parentElement) { const b = rgb(getComputedStyle(e).backgroundColor); if (b && b.a > 0.5) return b.c; } return [255,255,255]; };
   const visible = (el) => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none" && !el.closest("[hidden]"); };
   const name = (el) => el.tagName.toLowerCase() + (typeof el.className === "string" && el.className ? "." + el.className.trim().split(/\\s+/).join(".") : "") + " '" + (el.textContent || el.value || "").trim().slice(0, 40) + "'";
   const taps = [...document.querySelectorAll("a[href],button")].filter(visible).map((el) => ({ el: name(el), h: el.getBoundingClientRect().height }));
@@ -314,7 +283,7 @@ const MEASURE = `(() => {
 })()`;
 
 Deno.test({
-  name: "connect page in Chromium (phone width, light and dark): paper ground, black primary, 16px body, 14px minimum, 44px taps, AA contrast on every text, no sideways scroll",
+  name: "connect page in Chromium (phone width, light and dark): shared ground, plum primary, 16px body, 14px minimum, 44px taps, AA contrast on every text, no sideways scroll",
   sanitizeResources: false,
   sanitizeOps: false,
   async fn() {
@@ -342,7 +311,7 @@ Deno.test({
         ["needs reconnecting", { google: { state: "needs_reconnect", email: "ada@gmail.example" } }, /Reconnect Google/],
       ];
       for (const scheme of ["light", "dark"] as const) {
-        const tok = scheme === "light" ? { bg: LIGHT_T.paper, ink: LIGHT_T.ink } : { bg: DARK_T.paper, ink: DARK_T.ink };
+        const tok = scheme === "light" ? LIGHT : DARK;
         for (const [label, state, expect] of variants) {
           const d = mem(state);
           const ac = new AbortController();
@@ -364,9 +333,8 @@ Deno.test({
             if (!near(m.body, rgbOf(tok.bg))) bad.push(`ground ${m.body} is not ${tok.bg}`);
             if (!near(m.ink, rgbOf(tok.ink))) bad.push(`ink ${m.ink} is not ${tok.ink}`);
             if (m.bodySize < 16) bad.push(`body text ${m.bodySize}px is under 16px`);
-            if (!/Source Serif 4/.test(m.h1)) bad.push(`the title is not Source Serif 4: ${m.h1}`);
             for (const a of m.prim) {
-              if (!near(a.bg, [0, 0, 0], 2) || !near(a.fg, [255, 255, 255], 2)) bad.push(`the primary ${a.el} is ${a.bg} on ${a.fg}, not white on black`);
+              if (!near(a.bg, rgbOf(tok.accent), 2) || !near(a.fg, rgbOf(tok.accentInk), 2)) bad.push(`the primary ${a.el} is ${a.bg} on ${a.fg}, not the plum action`);
               if (a.h < 48) bad.push(`the primary is ${a.h}px tall`);
             }
             eq(bad, [], `${label} (${scheme})`);

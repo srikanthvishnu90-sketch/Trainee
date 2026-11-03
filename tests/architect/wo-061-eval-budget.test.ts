@@ -48,8 +48,11 @@ Deno.test("WO-061/5 the workflow passes the cap, never reads a stopped run as a 
   { const m = wf.match(/MODEL_BUDGET_TARGET_USD: "([0-9.]+)"/), h = wf.match(/MODEL_BUDGET_HARD_USD: "([0-9.]+)"/);
     if (!m || Number(m[1]) !== 70 || !h || Number(h[1]) !== 70) throw new Error("the owner's directive (2026-11-02) is one $70 total: target and hard max both 70"); }
   if (!/ANTHROPIC_EVAL_BUDGET_USD: "[0-9.]+"/.test(wf)) throw new Error("no Anthropic budget cap env");
-  if (!/a\.stopped/.test(wf) || !/judge error/.test(wf)) throw new Error("the verdict reads a stopped run or a run whose judge errored");
-  if (!/>= 0\.95/.test(wf) || !/--set heldout/.test(wf)) throw new Error("the owner's bar (95% on the held-out set) is not the verdict");
+  { const vt = await Deno.readTextFile("evals/career/verdict.ts"), second = wf.slice(wf.indexOf("A second, independent reading"));
+    if (!/\.stopped/.test(vt) || !/judge error/.test(vt)) throw new Error("the verdict reads a stopped run or a run whose judge errored");
+    if (!/import\("file:\/\/" \+ Deno\.cwd\(\) \+ "\/evals\/career\/verdict\.ts"\)/.test(second) || !/releaseGate\(set, ps\)/.test(second) || /0\.95/.test(second)) throw new Error("the second reading must call verdict.ts releaseGate, not repeat the threshold");
+    if (!/passed \* 20 >= total \* 19/.test(vt)) throw new Error("the bar is exact counts: passed/total >= 0.95"); }
+  if (!/--set heldout/.test(wf)) throw new Error("the owner's bar (95% on the held-out set) is not the verdict");
   if (!/for p in 1 2 3 4 5;/.test(wf)) throw new Error("fewer than five passes decide whether a fix helped (second judge, 2026-10-21: three passes cannot resolve a change under about 5 points)");
   if (!/score-log\.ts/.test(wf)) throw new Error("the run is not logged");
   if (!/EVAL_JUDGE_MODEL: claude-sonnet-5-5/.test(wf) || !/EVAL_JUDGE_MODEL_2: claude-haiku-5-5/.test(wf)) throw new Error("the two Claude judges do not judge every run (owner, 2026-10-21: a judge that runs only sometimes makes runs incomparable)");

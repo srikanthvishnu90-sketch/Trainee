@@ -211,3 +211,13 @@ Deno.test("assertRunMayStart: an eval run is refused before it spends when the l
   msg = ""; try { await assertRunMayStart(null, 1); } catch (e) { msg = String((e as Error).message); }
   if (!/^NOT RUN: /.test(msg)) throw new Error("no gate means no run");
 });
+
+Deno.test("CO/gate the workflow: Haiku is the only candidate reply model, a sealed request names its release brain, no Sonnet-if-Haiku-is-poor rule", async () => {
+  const wf = await Deno.readTextFile(".github/workflows/brain-eval.yml");
+  assert(/const MODELS = \["claude-haiku-5-5"\];/.test(wf), "the model allowlist is Haiku only (Sonnet is Judge A, never a candidate reply model)");
+  assert(!/below 90|under 90|only if Haiku|if Haiku/i.test(wf), "no Sonnet fallback rule in the workflow");
+  assert(/release_brain/.test(wf) && /NOT RUN: a sealed request names its release_brain/.test(wf), "a sealed request must name its release brain");
+  assert(/--release-brain \$\{\{ steps\.req\.outputs\.release_brain \}\}/.test(wf), "verdict.ts reads the same release brain");
+  const dec = await Deno.readTextFile("docs/architect/DECISIONS.md");
+  assert(!/Sonnet only if Haiku/i.test(dec), "the decision log withdraws the Sonnet-if-Haiku-is-poor wording");
+});

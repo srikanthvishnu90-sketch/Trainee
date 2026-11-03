@@ -1,9 +1,10 @@
 # CLAUDE ONLY (owner directive, 2026-11-02): Trainee is Claude-only, judges included; no OpenAI call anywhere in this workflow.
 # Total spend $70 (MODEL_BUDGET_TARGET_USD and MODEL_BUDGET_HARD_USD are both $70; every eval process charges the shared
-# budget ledger and run.ts refuses to start a run whose preflight quote exceeds what remains of the $70). Sonnet as the
-# brain only if Haiku scores below 90%.
+# budget ledger and run.ts refuses to start a run whose preflight quote exceeds what remains of the $70). The reply brain is
+# Haiku (the committed default); there is no fallback model: Sonnet is Judge A only (owner, 2026-11-03 01:15 CT).
 # The bar (WO-061 / D-030, owner, 95%): the chat brain must score 95% or better on the held-out set, and the owner ruled
-# 2026-11-02 that this means all FIVE passes (verdict.ts). Judges: Judge A claude-sonnet-5-5 (the original prompt) and Judge B
+# 2026-11-02 that this means all FIVE passes (verdict.ts releaseGate: the RELEASE brain, release_brain in the request, default
+# agent; exact counts passed/total >= 0.95 on every pass; other brains are reported and cannot rescue the gate). Judges: Judge A claude-sonnet-5-5 (the original prompt) and Judge B
 # claude-haiku-5-5 (a checklist prompt that must quote evidence the code finds in the reply), an item passing only when both
 # pass it (evals/career/judges.ts; JUDGES.md). Instinct is retired from the gate. The router runs beside the other brains on the
 # same set as the comparison. Every run adds one line per pass to evals/career/SCORE-LOG.md (date/time, brain commit, set size,
@@ -39,6 +40,11 @@ on:
         description: "Comma-separated: router, staged, agent"
         type: string
         default: "router,staged,agent"
+      release_brain:
+        description: "The brain whose five passes decide the sealed bar (must be one of the brains measured)"
+        type: choice
+        options: [agent, staged, router]
+        default: agent
       action:
         description: "eval (default) or rejudge (re-judge a stored run's transcripts with the Claude judges; no brain call)"
         type: choice
@@ -96,16 +102,20 @@ jobs:
             const action = ev ? (Deno.env.get("IN_ACTION") || "eval") : (f.action ?? "eval");
             const rejudgeRun = String((ev ? Deno.env.get("IN_REJUDGE_RUN") : f.rejudge_run) ?? "").trim();
             const passes = Number(f.passes ?? 5);
+            // The release brain (verdict.ts releaseGate): the brain whose five passes decide the sealed bar. A push must state it on a sealed
+            // request; a dispatch takes the input (default agent). It must be one of the brains measured.
+            const releaseBrain = String(ev ? (Deno.env.get("IN_RELEASE_BRAIN") || "agent") : (f.release_brain ?? (set !== "sealed" ? "agent" : ""))).trim();
             const suite = ev ? "heldout" : (f.suite ?? "heldout");
             // D-038: an optional reply model from an allowlist (the request file model on a push); empty = the committed default.
-            const MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5"]; // Claude only: the claude- part of release_model.ts ROLLBACK_MODELS
+            const MODELS = ["claude-haiku-5-5"]; // Haiku only: Sonnet is Judge A, never a candidate reply model (owner, 2026-11-03)
             const model = String((ev ? "" : f.model) ?? "").trim();
             if (model && (!MODELS.includes(model) || suite !== "heldout" || set === "sealed")) { console.log(`NOT RUN: model ${model} needs the allowlist (${MODELS.join(", ")}), the heldout suite and a set other than sealed`); Deno.exit(2); }
+            if (set === "sealed" && (!brains.includes(releaseBrain) || !["router", "staged", "agent"].includes(releaseBrain))) { console.log(`NOT RUN: a sealed request names its release_brain (${releaseBrain || "missing"}), and it must be one of the brains measured (${brains})`); Deno.exit(2); }
             if (!["heldout", "tasks"].includes(suite) || (suite === "tasks" && (action !== "eval" || set !== "dev"))) { console.log(`NOT RUN: bad suite ${suite} (heldout, or tasks with action eval on the dev set)`); Deno.exit(2); }
             if (!["dev", "sealed", "fresh"].includes(set) || !brains.length || brains.some((b) => !["router", "staged", "agent"].includes(b)) || !["eval", "pubkey", "rejudge"].includes(action) || passes !== 5 || (action === "rejudge" && !/^[0-9]+$/.test(rejudgeRun))) {
               console.log(`NOT RUN: bad request (set ${set}, brains ${brains}, action ${action}, rejudge run ${rejudgeRun}, passes ${passes}; the owner requires five passes)`); Deno.exit(2);
             }
-            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `set=${set}\nbrains=${brains.join(" ")}\nbrains_csv=${brains.join(",")}\naction=${action}\npasses=${passes}\nsuite=${suite}\nmodel=${model}\nrejudge_run=${rejudgeRun}\n`, { append: true });
+            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `set=${set}\nbrains=${brains.join(" ")}\nbrains_csv=${brains.join(",")}\naction=${action}\npasses=${passes}\nrelease_brain=${releaseBrain || "agent"}\nsuite=${suite}\nmodel=${model}\nrejudge_run=${rejudgeRun}\n`, { append: true });
             console.log(suite === "tasks" ? "measuring: the task eval (router, staged, planner, agent; $2 each)" : `measuring: action ${action}, set ${set}, brains ${brains.join(", ")}, ${passes} passes, model ${model || "the committed default"}`);
           '
         env:
@@ -113,6 +123,7 @@ jobs:
           IN_BRAINS: ${{ inputs.brains }}
           IN_ACTION: ${{ inputs.action }}
           IN_REJUDGE_RUN: ${{ inputs.rejudge_run }}
+          IN_RELEASE_BRAIN: ${{ inputs.release_brain }}
       # The sealed set's recipient key: derived from the CI secret, its public half committed so the set can be sealed to
       # it. The secret's value never leaves the runner.
       - name: Recipient key for the sealed set (no model call)
@@ -171,7 +182,7 @@ jobs:
         run: |
           ls evals/career/results/${{ steps.req.outputs.set }}-*-${{ github.run_id }}-p*.json >/dev/null 2>&1 && deno run -A evals/career/score-log.ts evals/career/results/${{ steps.req.outputs.set }}-*-${{ github.run_id }}-p*.json --run ${{ github.run_id }}
           set +e
-          deno run -A evals/career/verdict.ts --run ${{ github.run_id }} --set ${{ steps.req.outputs.set }} --brains ${{ steps.req.outputs.brains_csv }} --passes ${{ steps.req.outputs.passes }} --out "$RUNNER_TEMP/verdict.txt"
+          deno run -A evals/career/verdict.ts --run ${{ github.run_id }} --set ${{ steps.req.outputs.set }} --brains ${{ steps.req.outputs.brains_csv }} --passes ${{ steps.req.outputs.passes }} --release-brain ${{ steps.req.outputs.release_brain }} --out "$RUNNER_TEMP/verdict.txt"
           echo "code=$?" >> "$GITHUB_OUTPUT"
           cat "$RUNNER_TEMP/verdict.txt" >> "$GITHUB_STEP_SUMMARY"
           if [ "${{ steps.req.outputs.set }}" = "sealed" ]; then
@@ -191,15 +202,15 @@ jobs:
         if: always() && steps.req.outputs.action == 'eval' && steps.req.outputs.suite == 'heldout'
         run: |
           cat "$RUNNER_TEMP/verdict.txt" 2>/dev/null || echo "NOT A SCORE: no verdict was written"
-          # A second, independent reading of the raw pass files: a claimed bar must hold on every pass (finished, no judge
-          # error, both judges on every item, 95% or more), or the job fails whatever verdict.ts said.
+          # A second, independent reading of the raw pass files, by the same function verdict.ts uses (releaseGate; no second threshold):
+          # on the sealed set the release brain must have all five clean passes at 95% or more, or the job fails whatever verdict.ts said.
           deno eval '
-            const set = "${{ steps.req.outputs.set }}", run = "${{ github.run_id }}", v = Deno.readTextFileSync(Deno.env.get("RUNNER_TEMP") + "/verdict.txt");
-            for (const b of "${{ steps.req.outputs.brains_csv }}".split(",")) {
-              if (!new RegExp(`^${b}: .*BAR MET`, "m").test(v)) continue;
-              const ps = [1, 2, 3, 4, 5].map((p) => { try { return JSON.parse(Deno.readTextFileSync(`evals/career/results/${set}-${b}-${run}-p${p}.json`)); } catch { return null; } });
-              const clean = (a) => a && !a.stopped && a.total === a.planned && a.items.every((x) => !/^(brain|judge) error/.test(x.note ?? "") && [a.judge_model, a.judge_model_2].every((m) => (x.judges ?? []).some((j) => j.model === m && !/^judge error/.test(j.note ?? ""))));
-              if (set !== "sealed" || !ps.every((a) => clean(a) && a.pass_rate >= 0.95)) { console.log(`VERDICT REFUSED: ${b} is not at 95% on every clean pass of the sealed set`); Deno.exit(1); }
-            }
+            const set = "${{ steps.req.outputs.set }}", run = "${{ github.run_id }}", b = "${{ steps.req.outputs.release_brain }}";
+            const v = Deno.readTextFileSync(Deno.env.get("RUNNER_TEMP") + "/verdict.txt");
+            const { releaseGate } = await import("file://" + Deno.cwd() + "/evals/career/verdict.ts");
+            const ps = [1, 2, 3, 4, 5].map((p) => { try { return JSON.parse(Deno.readTextFileSync(`evals/career/results/${set}-${b}-${run}-p${p}.json`)); } catch { return null; } });
+            const g = releaseGate(set, ps);
+            const claimed = new RegExp(`^${b}: .*BAR MET`, "m").test(v);
+            if (set === "sealed" ? !g.ok : claimed) { console.log(`VERDICT REFUSED: release brain ${b} is not at 95% on all five clean passes of the sealed set: ${g.reasons.join("; ")}`); Deno.exit(1); }
           '
           [ "${{ steps.verdict.outputs.code }}" = "0" ]

@@ -169,3 +169,45 @@ Deno.test("SEALED/14 a router watch counts by the host's own rule: an interest a
   assert(routerWatches({ "career:reminder-queue:u1": { interests: [{}] } }) === 0, "another record counted");
   assert(outcomeOf({ stores: { alertWatchState: { "career:watch-profile:u1": { interests: [{ interest_id: "i1" }] } } }, account: null }).alerts === 1);
 });
+
+// ---- the release gate (owner, 2026-11-03 01:15 CT): all FIVE passes of the RELEASE brain at 95%+ on the sealed set, no fallback ----
+Deno.test("GATE/1 exact counts: passed/total >= 0.95 with nothing rounded", async () => {
+  const { meetsBar } = await import("../../evals/career/verdict.ts");
+  assert(meetsBar(19, 20) && meetsBar(950, 1000) && meetsBar(20, 20), "exactly 95% must pass");
+  assert(!meetsBar(949, 1000) && !meetsBar(9499, 10000) && !meetsBar(18, 20) && !meetsBar(0, 0), "under 95% (or nothing) must not");
+});
+
+Deno.test("GATE/2 five passes with one at 94.9% fail the job; five at exactly 95.0% pass", async () => {
+  const { releaseGate } = await import("../../evals/career/verdict.ts");
+  const under = verdict("sealed", { agent: [pass(960, 1000), pass(960, 1000), pass(949, 1000), pass(970, 1000), pass(980, 1000)] }, 5);
+  assert(!under.barMet.agent && under.fail, "[96, 96, 94.9, 97, 98]% met the bar");
+  assert(releaseGate("sealed", [pass(960, 1000), pass(960, 1000), pass(949, 1000), pass(970, 1000), pass(980, 1000)]).reasons.some((r) => /pass 3: 949\/1000 is under 95%/.test(r)));
+  const exact = verdict("sealed", { agent: [pass(950, 1000), pass(950, 1000), pass(950, 1000), pass(950, 1000), pass(950, 1000)] }, 5);
+  assert(exact.barMet.agent && !exact.fail, exact.lines.join("\n"));
+});
+
+Deno.test("GATE/3 four clean passes and one missing, or an unfinished or unscored pass, fail", () => {
+  const four = [pass(20, 20), pass(20, 20), pass(20, 20), pass(20, 20)];
+  assert(verdict("sealed", { agent: [...four, null] }, 5).fail, "one missing pass met the bar");
+  assert(verdict("sealed", { agent: four }, 5).fail, "four passes met a five-pass bar");
+  assert(verdict("sealed", { agent: [...four, pass(20, 20, { stopped: "budget" })] }, 5).fail, "a stopped pass met the bar");
+  assert(verdict("sealed", { agent: [...four, pass(20, 20, {}, false)] }, 5).fail, "a pass the second judge did not score met the bar");
+});
+
+Deno.test("GATE/4 another brain at 100% cannot rescue a release brain with one pass at 94%", () => {
+  const fives = (n: number, of: number) => Array.from({ length: 5 }, () => pass(n, of));
+  const r = verdict("sealed", { agent: [pass(1000, 1000), pass(1000, 1000), pass(940, 1000), pass(1000, 1000), pass(1000, 1000)], staged: fives(1000, 1000), router: fives(1000, 1000) }, 5);
+  assert(r.fail && !r.barMet.agent && !r.barMet.staged && !r.barMet.router, "another brain rescued the gate");
+  assert(/reported only/.test(r.lines.find((l) => l.startsWith("staged:")) ?? ""), "the other brain is reported, not judged");
+  const bad = verdict("sealed", { agent: fives(1000, 1000), staged: [pass(500, 1000), ...fives(1000, 1000).slice(1)] }, 5);
+  assert(bad.barMet.agent && !bad.fail, "a failing other brain does not fail the release brain's clean five passes");
+  assert(!verdict("sealed", { staged: fives(1000, 1000) }, 5).barMet.staged && verdict("sealed", { staged: fives(1000, 1000) }, 5).fail, "no release brain measured: the job fails");
+  assert(!verdict("sealed", { staged: fives(1000, 1000) }, 5, "staged").fail, "an explicit --release-brain is the one judged");
+});
+
+Deno.test("GATE/5 the dev and fresh sets never produce a bar met", () => {
+  for (const set of ["dev", "fresh"]) {
+    const v = verdict(set, { agent: Array.from({ length: 5 }, () => pass(20, 20, { set })) }, 5);
+    assert(!v.barMet.agent && !/BAR MET/.test(v.lines.join("\n")), `${set} produced a bar met`);
+  }
+});

@@ -36,7 +36,7 @@ builds and follows `AGENTS.md`. The owner (Vishnu) decides product, credentials,
 - No password or one-time code is stored or sent through chat. Secrets never travel through chat and are never committed (`tests/no-secrets.test.cjs`). A login is the person signing in themselves.
 - Never automate LinkedIn or Indeed; no captcha solving.
 - Model providers and budget: Claude only for the career brain (Anthropic, `ANTHROPIC_API_KEY`); one $70 total for this release cycle's evals and release-and-test (D-038a). Real employer submission stays off until the owner turns it on himself. No spend, deploys, live migrations or credentials without the owner doing it or saying yes in writing.
-- Deploy only through the documented release path: a push to `release/production`, owner-approved, passing the deploy standard (D-034; `.github/workflows/deploy-production.yml`, `docs/launch/TRAINEE-GO-LIVE.md`). Agents never deploy, apply migrations to the live project, or touch production environment variables.
+- Deploy only through the documented release path: a push to `release/production`, owner-approved, passing the deploy standard (D-034; `.github/workflows/deploy-production.yml`, `docs/launch/TRAINEE-GO-LIVE.md`). Agents never deploy or apply migrations to the live database without the owner's approval in chat, and never touch production environment variables.
 - Docs follow the code: if a doc contradicts the repo, fix the doc in the same PR.
 - Never skip, disable or weaken a test to get green. Never edit an architect test to pass it.
 

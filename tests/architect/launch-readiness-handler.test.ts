@@ -98,7 +98,7 @@ Deno.test({ name: "launch readiness at the real handler: spend ceiling, turn ord
     const say = async (c: Chat, message: string) => { const r = await c.say(message); eq(r.status, 200, r.reply); return r; };
     const costRows = async (pid: string) => Number((await pg.sql(`select count(*) from public.agent_turn_costs where user_id = '${pid}' and calls > 0`)).trim()); // rows with model calls; a zero-call turn leaves a calls = 0 row (2026-10-28)
     const spendToday = (pid: string, usdMicros: number, calls: number, ago = "0 minutes") => pg.sql(`insert into public.agent_turn_costs
-      (user_id, provider, models, calls, usd_micros, created_at) values ('${pid}', 'openai', '{claude-haiku-5-5}', ${calls}, ${usdMicros}, now() - interval '${ago}')`);
+      (user_id, provider, models, calls, usd_micros, created_at) values ('${pid}', 'anthropic', '{claude-haiku-5-5}', ${calls}, ${usdMicros}, now() - interval '${ago}')`);
 
     await t.step("X7: over today's ceiling the model is never asked, no cost is recorded, the router answers and the reply says why", async () => {
       Deno.env.set("CAREER_BRAIN", "staged");

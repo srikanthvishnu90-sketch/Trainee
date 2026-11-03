@@ -228,10 +228,10 @@ export async function callModel(cfg: ModelConfig, payload: any, o: CallOptions =
     console.error(`[model] budget ${got.reason}${got.detail ? `: ${got.detail}` : ""}`);
     throw new ModelBudgetBlockedError(got.reason, got.reason === "limit" ? "the global model budget is used up" : got.reason === "paused" ? "the model budget is switched off" : got.reason === "before" ? "the model budget window has not opened" : got.reason === "after" ? "the model budget window has ended and no new budget is approved" : `the model budget could not be checked${got.detail ? `: ${got.detail}` : ""}`);
   }
-  // 80% of the target warns; at the target a loud flag is raised on every call but production keeps serving; only the hard max
-  // (a reservation that does not fit, above) stops it. Eval and test runners refuse new runs at the target (assertRunMayStart).
-  if (got.overTarget) console.error("[model] BUDGET TARGET EXCEEDED: the release+test spend target (MODEL_BUDGET_TARGET_USD) is reached; production still serves, eval and test runs must not start, and every call stops at the hard max (MODEL_BUDGET_HARD_USD)");
-  else if (got.warn) console.error("[model] budget warning: 80% of the release+test spend target (MODEL_BUDGET_TARGET_USD) is spent or reserved");
+  // The total is $70: 80% ($56) warns; a reservation that does not fit (above) is refused and, at $70, the database pauses every
+  // call. Eval and test runners also refuse new runs at the total (assertRunMayStart).
+  if (got.overTarget) console.error("[model] BUDGET TARGET EXCEEDED: the release+test spend total (MODEL_BUDGET_TARGET_USD) is reached; eval and test runs must not start");
+  else if (got.warn) console.error("[model] budget warning: 80% of the $70 release+test spend total (MODEL_BUDGET_TARGET_USD) is spent or reserved");
   // Until proven otherwise the whole worst case is spent. Only the branches below that prove more change this.
   let close: { kind: "keep" } | { kind: "actual"; micros: number } | { kind: "release" } = { kind: "keep" };
   try {

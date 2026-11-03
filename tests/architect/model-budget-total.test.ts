@@ -1,5 +1,5 @@
 // The shared TOTAL model budget with two thresholds (owner, 2026-11-02 18:38 and 18:52 CT): a spend TARGET (MODEL_BUDGET_TARGET_USD,
-// default 70) and an absolute HARD max (MODEL_BUDGET_HARD_USD, default 100), one ledger for production and evals.
+// default 70) and a HARD max (MODEL_BUDGET_HARD_USD, default 70: the same $70 total), one ledger for production and evals.
 //   target: 80% warns; 100% raises a loud flag, production keeps serving, eval/test runners refuse to start a run.
 //   hard:   a reservation counts before its call; at 100% every call is refused and the database sets the paused switch.
 // Fakes only: the provider is an in-process fake; the database is a throwaway local Postgres 16 (skipped locally without PGBIN).
@@ -19,10 +19,10 @@ const body = (usage: unknown = { input_tokens: 100, output_tokens: 20 }) => JSON
 const fakeProvider = () => { const sent: unknown[] = []; return { sent, request: (async (_u: string, init: any) => { sent.push(JSON.parse(init.body)); return new Response(body(), { status: 200 }); }) as unknown as typeof fetch }; };
 const payload = { max_tokens: 100, messages: [{ role: "user", content: "hello" }] };
 
-Deno.test("limits: unset is $70 target and $100 hard; set values are honoured; a malformed value or a hard max below the target is refused", () => {
-  eq(Budget.budgetLimits(env({})), { target: 70 * M, hard: 100 * M });
+Deno.test("limits: unset is one $70 total (target and hard both 70); set values are honoured; a malformed value or a hard max below the target is refused", () => {
+  eq(Budget.budgetLimits(env({})), { target: 70 * M, hard: 70 * M });
   eq(Budget.budgetLimits(env({ MODEL_BUDGET_TARGET_USD: "50", MODEL_BUDGET_HARD_USD: "75.5" })), { target: 50 * M, hard: 75_500_000 });
-  eq(Budget.budgetLimits(env({ MODEL_BUDGET_TARGET_USD: " ", MODEL_BUDGET_HARD_USD: "" })), { target: 70 * M, hard: 100 * M }, "blank is unset");
+  eq(Budget.budgetLimits(env({ MODEL_BUDGET_TARGET_USD: " ", MODEL_BUDGET_HARD_USD: "" })), { target: 70 * M, hard: 70 * M }, "blank is unset");
   for (const bad of [{ MODEL_BUDGET_TARGET_USD: "seventy" }, { MODEL_BUDGET_HARD_USD: "-1" }, { MODEL_BUDGET_HARD_USD: "0" }, { MODEL_BUDGET_TARGET_USD: "1e9" }, { MODEL_BUDGET_TARGET_USD: "80", MODEL_BUDGET_HARD_USD: "60" }])
     eq(Budget.budgetLimits(env(bad)), null, `refused: ${JSON.stringify(bad)}`);
   eq(Budget.resolveBudgetGate(undefined, env({ MODEL_BUDGET_HARD_USD: "oops" })), null, "a malformed limit refuses to spend (no gate)");
@@ -197,3 +197,15 @@ Deno.test({ name: "end to end: 200 concurrent callModel calls on the real total 
     let err: unknown = null; try { await Budget.assertRunMayStart(gate); } catch (e) { err = e; }
     assert(err instanceof ModelBudgetBlockedError, "and no eval or test run may start");
   }) });
+
+Deno.test("owner 2026-11-02 22:02: the default gate is ONE $70 total: warns at $56, refuses what does not fit, and stops at $70", async () => {
+  const g = Budget.memoryBudgetGate();
+  eq([g.snapshot().limit, g.snapshot().target], [70 * M, 70 * M]);
+  const a = await g.reserve(55 * M, { model: "m", role: "r" }); assert(a.ok && !a.warn, "$55 is under 80%");
+  const b = await g.reserve(1 * M, { model: "m", role: "r" }); assert(b.ok && b.warn === true, "$56 is 80%: warns");
+  const c = await g.reserve(15 * M, { model: "m", role: "r" }); assert(!c.ok && c.reason === "limit", "$71 does not fit: refused before any call");
+  const d = await g.reserve(14 * M, { model: "m", role: "r" }); assert(d.ok && d.overTarget === true, "exactly $70");
+  eq((await g.status!()).state, "stopped");
+  const none = await g.reserve(1, { model: "m", role: "r" }); assert(!none.ok && none.reason === "limit", "nothing at $70");
+  await assertNode.rejects(() => Budget.assertRunMayStart(g), "an eval run does not start at $70");
+});

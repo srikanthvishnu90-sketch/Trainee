@@ -1,11 +1,11 @@
 -- One shared TOTAL model budget with two thresholds (owner, 2026-11-02 18:38 and 18:52 CT): Trainee is Claude-only and the whole
--- release+test cycle has a spend TARGET of $70 and an absolute HARD MAX of $100, across production AND evals, every day.
+-- release+test cycle has ONE spend total of $70 (target and hard max are the same figure by default), across production AND evals, every day.
 --
 --   target (MODEL_BUDGET_TARGET_USD, default 70)  at 80% of it a warning is raised (founder_alerts model_budget_target_warning, and
 --                                                 reserve answers warn); at 100% a loud alert is raised (model_budget_target_exceeded,
 --                                                 over_target) but production traffic keeps being served. Eval and test runners read
 --                                                 model_budget_total_status and REFUSE to start any new run (model_budget.ts assertRunMayStart).
---   hard   (MODEL_BUDGET_HARD_USD,   default 100) a reservation counts toward it BEFORE the call (spent + reserved + this call <= hard,
+--   hard   (MODEL_BUDGET_HARD_USD,   default 70)  a reservation counts toward it BEFORE the call (spent + reserved + this call <= hard,
 --                                                 serialized by one advisory lock, so concurrent callers cannot both take the last dollar).
 --                                                 When spent + reserved reaches it, the settings row 'paused' is set to true: every model
 --                                                 call is refused (reason 'paused') until the owner raises the hard max and sets it false.

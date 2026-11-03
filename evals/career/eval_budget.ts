@@ -1,10 +1,10 @@
-// Eval spend control for a Claude-only campaign (owner, 2026-11-02: total spend target $70, absolute hard max $100).
+// Eval spend control for a Claude-only campaign (owner, 2026-11-02: ONE total of $70 for the cycle; target and hard max are both $70).
 //
 // Three layers, outermost first (the first two live in supabase/functions/_shared/model_budget.ts, owned by the
 // feat/claude-only-gateway PR; this file only reads and obeys them):
 //   1. every model call reserves against a BudgetGate before it is sent (callModel). With SUPABASE_URL and
 //      SUPABASE_SERVICE_ROLE_KEY set that is the shared database ledger (restBudgetGate); without them, a process-local twin.
-//   2. env MODEL_BUDGET_TARGET_USD (70) and MODEL_BUDGET_HARD_USD (100) name the ledger's target and hard stop.
+//   2. env MODEL_BUDGET_TARGET_USD (70) and MODEL_BUDGET_HARD_USD (70) name the ledger's target and hard stop.
 //   3. THIS FILE: a per-run preflight quote (token estimate x price) that refuses to start a run that would cross 80% of what
 //      remains under the target, and a spend line written to the run summary. Parallel passes (five processes, each seeing only
 //      the spend recorded before it started) are quoted together via EVAL_PARALLEL / --parallel.
@@ -12,8 +12,8 @@
 import type { PriceRow } from "../../supabase/functions/_shared/model_budget.ts";
 
 export const DEFAULT_TARGET_USD = 70;
-export const DEFAULT_HARD_USD = 100;
-export const PREFLIGHT_SHARE = 0.8;
+export const DEFAULT_HARD_USD = 70;
+export const PREFLIGHT_SHARE = 1;
 
 export function budgetTargets(get: (k: string) => string | undefined): { target: number; hard: number } {
   const t = get("MODEL_BUDGET_TARGET_USD"), h = get("MODEL_BUDGET_HARD_USD");
@@ -69,20 +69,20 @@ export function quoteRun(o: { items: number; brain: "router" | "staged" | "agent
 }
 
 export interface Preflight { ok: boolean; reason: string | null; line: string; quote_usd: number; parallel: number; remaining_usd: number }
-// Refuse when the quote (times the passes that run at once) would cross 80% of what remains under the target, or the hard max.
+// Refuse when the quote (times the passes that run at once) exceeds what remains of the $70 total (remaining = total minus recorded spend); the line prints the remaining allowance.
 export function preflight(o: { quote: Quote; parallel?: number; spent_usd: number; target_usd: number; hard_usd: number; ledger: "shared" | "process-local" }): Preflight {
   const parallel = Math.max(1, o.parallel ?? 1), q = o.quote.total_usd * parallel, remaining = Math.max(0, o.target_usd - o.spent_usd);
   let reason: string | null = null;
   if (o.spent_usd + q > o.hard_usd) reason = `the quote $${q.toFixed(3)} on top of $${o.spent_usd.toFixed(3)} spent would pass the hard max $${o.hard_usd.toFixed(2)}`;
-  else if (q > PREFLIGHT_SHARE * remaining) reason = `the quote $${q.toFixed(3)} (${parallel} parallel) is over ${PREFLIGHT_SHARE * 100}% of the $${remaining.toFixed(3)} left under the $${o.target_usd.toFixed(2)} target`;
+  else if (q > PREFLIGHT_SHARE * remaining) reason = `the quote $${q.toFixed(3)} (${parallel} parallel) is more than the remaining allowance $${remaining.toFixed(3)} of the $${o.target_usd.toFixed(2)} total`;
   return { ok: reason === null, reason, quote_usd: q, parallel, remaining_usd: remaining,
-    line: `preflight quote $${q.toFixed(3)} (brain $${(o.quote.brain_usd * parallel).toFixed(3)} + judges $${(o.quote.judge_usd * parallel).toFixed(3)}, ${parallel} parallel) · spent $${o.spent_usd.toFixed(3)} · remaining $${remaining.toFixed(3)} of $${o.target_usd.toFixed(2)} target ($${o.hard_usd.toFixed(2)} hard) · ledger ${o.ledger}${reason ? ` · REFUSED: ${reason}` : ""}` };
+    line: `preflight quote $${q.toFixed(3)} (brain $${(o.quote.brain_usd * parallel).toFixed(3)} + judges $${(o.quote.judge_usd * parallel).toFixed(3)}, ${parallel} parallel) · spent $${o.spent_usd.toFixed(3)} · remaining allowance $${remaining.toFixed(3)} of $${o.target_usd.toFixed(2)} total · ledger ${o.ledger}${reason ? ` · REFUSED: ${reason}` : ""}` };
 }
 
 // The spend line written to the run summary and the result file.
 export function spendLine(o: { label: string; quote_usd: number; brain_usd: number; judge_usd: number; spent_before_usd: number; target_usd: number; hard_usd: number }): string {
   const actual = o.brain_usd + o.judge_usd, after = o.spent_before_usd + actual;
-  return `spend ${o.label}: $${actual.toFixed(3)} (brain $${o.brain_usd.toFixed(3)}, judges $${o.judge_usd.toFixed(3)}; quoted $${o.quote_usd.toFixed(3)}) · campaign total $${after.toFixed(3)} of $${o.target_usd.toFixed(2)} target, $${o.hard_usd.toFixed(2)} hard max (${(after / o.target_usd * 100).toFixed(1)}%)`;
+  return `spend ${o.label}: $${actual.toFixed(3)} (brain $${o.brain_usd.toFixed(3)}, judges $${o.judge_usd.toFixed(3)}; quoted $${o.quote_usd.toFixed(3)}) · campaign total $${after.toFixed(3)} of $${o.target_usd.toFixed(2)} total (${(after / o.target_usd * 100).toFixed(1)}%)`;
 }
 
 // The gate every model call of an eval process reserves against: the shared database ledger when SUPABASE_URL and

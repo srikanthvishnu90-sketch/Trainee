@@ -1,6 +1,6 @@
 # CLAUDE ONLY (owner directive, 2026-11-02): Trainee is Claude-only, judges included; no OpenAI call anywhere in this workflow.
-# Total spend target $70, absolute hard max $100 (MODEL_BUDGET_TARGET_USD / MODEL_BUDGET_HARD_USD; every eval process charges the
-# shared budget ledger and run.ts refuses to start a run whose preflight quote would cross 80% of what remains). Sonnet as the
+# Total spend $70 (MODEL_BUDGET_TARGET_USD and MODEL_BUDGET_HARD_USD are both $70; every eval process charges the shared
+# budget ledger and run.ts refuses to start a run whose preflight quote exceeds what remains of the $70). Sonnet as the
 # brain only if Haiku scores below 90%.
 # The bar (WO-061 / D-030, owner, 95%): the chat brain must score 95% or better on the held-out set, and the owner ruled
 # 2026-11-02 that this means all FIVE passes (verdict.ts). Judges: Judge A claude-sonnet-5-5 (the original prompt) and Judge B
@@ -67,12 +67,12 @@ jobs:
       # The sealed set opens with HELDOUT_SEAL_KEY alone, after the owner has run the rewrap workflow (sealed-set-rewrap.yml):
       # the set was first sealed to a key derived from the old provider secret, which this workflow no longer receives.
       HELDOUT_SEAL_KEY: ${{ secrets.HELDOUT_SEAL_KEY }}
-      # OWNER'S DIRECTIVE (2026-11-02): total spend target $70, absolute hard max $100, across every run and retry. The shared
+      # OWNER'S DIRECTIVE (2026-11-02): total spend $70 (target = hard max), across every run and retry. The shared
       # ledger (supabase/functions/_shared/model_budget.ts) takes these two names; run.ts and rejudge.ts read them for the
       # preflight quote and stop at the target. Builder's note: five passes run in parallel, so EVAL_PARALLEL=5 makes each one
       # quote all five.
       MODEL_BUDGET_TARGET_USD: "70"
-      MODEL_BUDGET_HARD_USD: "100"
+      MODEL_BUDGET_HARD_USD: "70"
       ANTHROPIC_EVAL_BUDGET_USD: "70"
       EVAL_PARALLEL: "5"
       EVAL_JUDGE_MODEL: claude-sonnet-5-5

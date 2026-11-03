@@ -1,14 +1,13 @@
-// The shared TOTAL model budget with two thresholds (owner, 2026-11-02 18:38 and 18:52 CT: Claude-only; the release+test cycle has
-// a spend TARGET of $70 and an absolute HARD MAX of $100). ONE ledger covers production AND evals: when a Supabase project is
+// The shared TOTAL model budget (owner, 2026-11-02 22:02 CT: Claude-only; the release+test cycle has ONE total of $70, and
+// MODEL_BUDGET_TARGET_USD and MODEL_BUDGET_HARD_USD both default to it). ONE ledger covers production AND evals: when a Supabase project is
 // configured every caller reserves in the same database ledger (supabase/migrations/20261102160000_model_budget_total_cap.sql, which
 // sums spend over all days); where there is no project the process-local twin applies the same arithmetic. Replaces the per-day
 // windows of 2026-10-28 (the old daily rows stay as history; the total sums them, so nothing already spent is forgotten).
 //
-//   MODEL_BUDGET_TARGET_USD (default 70)   at 80% of it: a warning flag (reserve answers warn; the gateway logs it; one founder_alerts
-//                                          row). At 100% of it: a LOUD alert flag (over_target, a console.error on every call, one
-//                                          founder_alerts row) but production traffic keeps being served; eval and test runners
-//                                          REFUSE to start any new run (assertRunMayStart below).
-//   MODEL_BUDGET_HARD_USD   (default 100)  the absolute maximum. A reservation counts toward it BEFORE its call; one that does not fit
+//   MODEL_BUDGET_TARGET_USD (default 70)   at 80% of it ($56): a warning flag (reserve answers warn; the gateway logs it; one
+//                                          founder_alerts row). Eval and test runners refuse to start a run at or over it
+//                                          (assertRunMayStart below).
+//   MODEL_BUDGET_HARD_USD   (default 70)   the same $70 total, as the stop. A reservation counts toward it BEFORE its call; one that does not fit
 //                                          makes NO request (ModelBudgetBlockedError "limit"). When spent + reserved reaches it the
 //                                          database sets the 'paused' setting (the MODEL_BUDGET_PAUSED switch's twin) and every model
 //                                          call is refused until the owner raises the hard max and clears it.
@@ -26,7 +25,7 @@
 import { ModelBudgetBlockedError } from "./model_calls.ts";
 
 export const DEFAULT_TARGET_USD = 70;
-export const DEFAULT_HARD_USD = 100;
+export const DEFAULT_HARD_USD = 70;
 export const DEFAULT_TARGET_MICROS = DEFAULT_TARGET_USD * 1_000_000;
 export const DEFAULT_HARD_MICROS = DEFAULT_HARD_USD * 1_000_000;
 // The warning flag rises at this share of the TARGET (spent + reserved).
@@ -65,7 +64,7 @@ export function chicagoDay(ms: number): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: BUDGET_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms));
 }
 
-// MODEL_BUDGET_TARGET_USD and MODEL_BUDGET_HARD_USD as whole micro-dollars. Unset or blank = the defaults ($70, $100). Anything
+// MODEL_BUDGET_TARGET_USD and MODEL_BUDGET_HARD_USD as whole micro-dollars. Unset or blank = the default ($70 total for both). Anything
 // else must be a positive number of dollars, and the hard max must not be below the target; otherwise null and the caller refuses
 // to spend (a typo must never lift or hide a limit).
 const usdMicros = (raw: string, dflt: number): number | null => {
@@ -168,16 +167,6 @@ export function memoryBudgetGate(limitMicros = DEFAULT_HARD_MICROS, targetMicros
 }
 let localGate: BudgetGate | null = null;
 
-// An eval or script run (not a single reply) may start only if the ledger would let its quoted worst case through right now:
-// reserve it, then release it (a proven no-call). Throws the owner-facing reason when the budget is exhausted, paused, not yet
-// open, ended or unreachable, so a run is refused before it spends rather than half-way through.
-export async function assertRunMayStart(gate: BudgetGate | null, quoteMicros: number, meta: BudgetMeta = { model: "eval", role: "eval" }): Promise<void> {
-  if (!gate) throw new Error("NOT RUN: the budget ledger cannot be reached, so a call that cannot be metered is not made");
-  const r = await gate.reserve(Math.max(1, Math.ceil(quoteMicros)), meta);
-  if (!r.ok) throw new Error(`NOT RUN: ${budgetReply(r.reason)}${r.detail ? ` (${r.detail})` : ""}`);
-  await gate.release(r.id);
-}
-
 type EnvGet = (k: string) => string | undefined;
 export function denoEnvGet(): EnvGet | null {
   try { const e = (globalThis as any).Deno?.env; return e ? (k: string) => e.get(k) : null; } catch (_) { return null; }
@@ -231,14 +220,22 @@ export function usageProven(provider: string, raw: any): boolean {
   return ok(u.input_tokens) && ok(u.output_tokens);
 }
 
-// An eval or test runner calls this BEFORE starting any new run (owner, 2026-11-02): at or over the target, or at the hard stop,
-// the run does not start. Production traffic never calls it (it keeps serving past the target; only the hard max stops it).
-// An unreadable ledger also refuses (fail closed). Throws ModelBudgetBlockedError; returns the status when the run may start.
-export async function assertRunMayStart(gate: BudgetGate | null = resolveBudgetGate(undefined)): Promise<BudgetStatus> {
-  if (!gate || !gate.status) throw new ModelBudgetBlockedError("unavailable", "the budget cannot be read, so no new run starts");
+// An eval or test runner calls this BEFORE starting any new run (owner, 2026-11-02): at or over the $70 total the run does not
+// start; and when the run's quoted worst case is given (micros) the ledger must be able to take it right now (it is reserved,
+// then released: a proven no-call). Production serving does not call it (its own per-person daily gate stays); every
+// reservation still counts in the ledger. An unreadable ledger also refuses (fail closed). Throws ModelBudgetBlockedError
+// (message "NOT RUN: ..."); returns the status when the run may start.
+const notRun = (block: "limit" | "unavailable", detail: string) => { const e = new ModelBudgetBlockedError(block, detail); e.message = `NOT RUN: ${e.message}`; return e; };
+export async function assertRunMayStart(gate: BudgetGate | null = resolveBudgetGate(undefined), quoteMicros?: number, meta: BudgetMeta = { model: "eval", role: "eval" }): Promise<BudgetStatus> {
+  if (!gate || !gate.status) throw notRun("unavailable", "the budget cannot be read, so no new run starts");
   const st = await gate.status();
-  if (!st) throw new ModelBudgetBlockedError("unavailable", "the budget could not be read, so no new run starts");
-  if (st.state === "over_target" || st.state === "stopped") throw new ModelBudgetBlockedError("limit", `the release+test spend target is reached ($${(st.total / 1e6).toFixed(2)} of $${(st.target / 1e6).toFixed(2)}); no new run starts`);
+  if (!st) throw notRun("unavailable", "the budget could not be read, so no new run starts");
+  if (st.state === "over_target" || st.state === "stopped") throw notRun("limit", `the release+test spend total is reached ($${(st.total / 1e6).toFixed(2)} of $${(st.target / 1e6).toFixed(2)}); no new run starts`);
+  if (quoteMicros !== undefined) {
+    const r = await gate.reserve(Math.max(1, Math.ceil(quoteMicros)), meta);
+    if (!r.ok) throw notRun(r.reason === "limit" ? "limit" : "unavailable", `${budgetReply(r.reason)}${r.detail ? ` (${r.detail})` : ""}; no new run starts`);
+    await gate.release(r.id);
+  }
   return st;
 }
 

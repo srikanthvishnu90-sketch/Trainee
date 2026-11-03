@@ -73,24 +73,26 @@ Deno.test("CO/4 the judge set has a fingerprint that changes with either prompt 
   assert(doc.includes(await judgeFingerprint(JUDGE_PROMPT)), "JUDGES.md does not carry the current fingerprint; update it with the judges");
 });
 
-Deno.test("CO/5 preflight: the quote is refused past 80% of what remains under the target, counts parallel passes, and stops at the hard max", () => {
+Deno.test("CO/5 preflight: the quote is refused when it exceeds what remains of the $70 total, counts parallel passes, and prints the remaining allowance", () => {
   const q = quoteRun({ items: 162, brain: "staged", brainModel: "claude-haiku-5-5", judgeA: JUDGE_A_MODEL, judgeB: JUDGE_B_MODEL, prices: PRICES });
   assert(q.total_usd > 0.5 && q.total_usd < 2.5, `a 162-item staged Haiku pass quotes about a dollar: ${q.total_usd}`);
-  assert(preflight({ quote: q, spent_usd: 0, target_usd: 70, hard_usd: 100, ledger: "shared" }).ok);
-  const five = preflight({ quote: q, parallel: 5, spent_usd: 0, target_usd: 70, hard_usd: 100, ledger: "process-local" });
+  assert(preflight({ quote: q, spent_usd: 0, target_usd: 70, hard_usd: 70, ledger: "shared" }).ok);
+  const five = preflight({ quote: q, parallel: 5, spent_usd: 0, target_usd: 70, hard_usd: 70, ledger: "process-local" });
   assert(five.ok && five.quote_usd > 4.9 * q.total_usd && /process-local/.test(five.line));
-  const near = preflight({ quote: q, spent_usd: 69, target_usd: 70, hard_usd: 100, ledger: "shared" });
-  assert(!near.ok && /80%/.test(near.reason ?? "") && /REFUSED/.test(near.line));
-  assert(!preflight({ quote: q, spent_usd: 99.5, target_usd: 200, hard_usd: 100, ledger: "shared" }).ok, "hard max");
+  const near = preflight({ quote: q, spent_usd: 69.95, target_usd: 70, hard_usd: 70, ledger: "shared" });
+  assert(!near.ok && /remaining/i.test(near.line) && /REFUSED/.test(near.line));
+  assert(Math.abs(near.remaining_usd - 0.05) < 1e-9 && /remaining allowance \$0\.050/.test(near.line), "prints the remaining allowance: " + near.line);
+  assert(preflight({ quote: q, spent_usd: 70 - q.total_usd - 0.01, target_usd: 70, hard_usd: 70, ledger: "shared" }).ok, "fits exactly what remains");
+  assert(!preflight({ quote: q, spent_usd: 69.5, target_usd: 200, hard_usd: 70, ledger: "shared" }).ok, "hard max");
   const sonnet = quoteRun({ items: 162, brain: "staged", brainModel: "claude-sonnet-5-5", judgeA: JUDGE_A_MODEL, judgeB: JUDGE_B_MODEL, prices: PRICES });
   assert(sonnet.brain_usd > 10 * q.brain_usd, "Sonnet costs far more than Haiku");
   let threw = false; try { quoteRun({ items: 1, brain: "staged", brainModel: "no-such-model", judgeA: null, judgeB: null, prices: PRICES }); } catch { threw = true; }
   assert(threw, "an unpriced model cannot be quoted");
-  assert(/campaign total/.test(spendLine({ label: "x", quote_usd: 1, brain_usd: 0.5, judge_usd: 0.2, spent_before_usd: 3, target_usd: 70, hard_usd: 100 })));
+  assert(/campaign total/.test(spendLine({ label: "x", quote_usd: 1, brain_usd: 0.5, judge_usd: 0.2, spent_before_usd: 3, target_usd: 70, hard_usd: 70 })));
 });
 
-Deno.test("CO/6 targets default to 70 and 100, read MODEL_BUDGET_*, and refuse nonsense; only Claude-era results count", () => {
-  assert(JSON.stringify(budgetTargets(() => undefined)) === JSON.stringify({ target: 70, hard: 100 }));
+Deno.test("CO/6 targets both default to 70, read MODEL_BUDGET_*, and refuse nonsense; only Claude-era results count", () => {
+  assert(JSON.stringify(budgetTargets(() => undefined)) === JSON.stringify({ target: 70, hard: 70 }));
   assert(budgetTargets((k) => ({ MODEL_BUDGET_TARGET_USD: "50", MODEL_BUDGET_HARD_USD: "60" } as any)[k]).hard === 60);
   let threw = false; try { budgetTargets((k) => ({ MODEL_BUDGET_TARGET_USD: "80", MODEL_BUDGET_HARD_USD: "60" } as any)[k]); } catch { threw = true; }
   assert(threw);
@@ -194,7 +196,7 @@ Deno.test("CO/12 brain-eval.yml: every run block parses in bash (the push's-apos
   assert(!/push's/.test(req), "the apostrophe that closed the shell quote is back");
   assert(!/openai|gpt-/i.test(wf.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n")), "an OpenAI name is in the workflow");
   assert(/ANTHROPIC_API_KEY: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/.test(wf) && /EVAL_JUDGE_MODEL: claude-sonnet-5-5/.test(wf) && /EVAL_JUDGE_MODEL_2: claude-haiku-5-5/.test(wf));
-  assert(/MODEL_BUDGET_TARGET_USD: "70"/.test(wf) && /MODEL_BUDGET_HARD_USD: "100"/.test(wf) && /ANTHROPIC_EVAL_BUDGET_USD/.test(wf) && !/\bEVAL_BUDGET_USD:/.test(wf));
+  assert(/MODEL_BUDGET_TARGET_USD: "70"/.test(wf) && /MODEL_BUDGET_HARD_USD: "70"/.test(wf) && /ANTHROPIC_EVAL_BUDGET_USD/.test(wf) && !/\bEVAL_BUDGET_USD:/.test(wf));
   assert(/--model claude/.test(wf) && !/--model openai/.test(wf));
   assert(/rejudge\.ts --from-branch ci\/brain-eval --run/.test(wf), "no rejudge action");
 });

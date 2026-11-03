@@ -83,8 +83,8 @@ DRY=""; SKIP_MIG=""; SKIP_DEPLOY=""; ONLY_SMOKE=""; BRAIN=""; ALLOW_SEND=""; NOW
 NONINT=""; [[ "${TRAINEE_NON_INTERACTIVE:-}" == 1 ]] && NONINT=1
 UNSCHEDULE_CRON=""
 # D-037: the database switches of real submission (release_config.ts RELEASE_DB_SWITCHES), written after the claim guards.
-# Unset (a plain go-live, or --brain router): only missing rows are written 'on'; a row already there, such as the owner's
-# 'off', is never changed. --real-submit on|off overwrites existing rows on purpose.
+# Owner, 2026-11-02: real employer submission stays DISABLED this release. Unset (a plain go-live, or --brain router) writes
+# the rows 'off' (missing rows created off, an existing 'on' turned off). --real-submit on is refused here.
 REAL_SUBMIT=""
 DEPLOY_LABEL="${TRAINEE_DEPLOY_LABEL:-owner}"
 while (( $# )); do
@@ -951,10 +951,10 @@ else
   fi
   # D-037: real submission's database switches, after every claim guard is verified in place (each claim still needs the
   # person's approval of the exact payload). --real-submit off writes the kill switch.
-  [[ -z "$REAL_SUBMIT" || "$REAL_SUBMIT" == on || "$REAL_SUBMIT" == off ]] || fail "--real-submit takes on or off (got: $REAL_SUBMIT)"
-  if [[ -z "$REAL_SUBMIT" ]]; then RS_V=on; RS_OVER=false; else RS_V="$REAL_SUBMIT"; RS_OVER=true; fi
+  [[ -z "$REAL_SUBMIT" || "$REAL_SUBMIT" == off ]] || fail "--real-submit on is refused: real employer submission stays disabled this release (owner, 2026-11-02); the default writes 'off' (got: $REAL_SUBMIT)"
+  RS_V=off; RS_OVER=true
   if [[ -n "$DRY" ]]; then
-    echo "DRY: psql *** -X -q -v ON_ERROR_STOP=1 -v v=$RS_V -v overwrite=$RS_OVER -f scripts/launch/release-db-switches.sql (CAREER_AGENT_SUBMIT, CAREER_CLOUD_APPLY, APPLY_VM: $([[ $RS_OVER == true ]] && echo "set to $RS_V" || echo "missing rows on; existing rows, the owner's off included, kept"))"
+    echo "DRY: psql *** -X -q -v ON_ERROR_STOP=1 -v v=$RS_V -v overwrite=$RS_OVER -f scripts/launch/release-db-switches.sql (CAREER_AGENT_SUBMIT, CAREER_CLOUD_APPLY, APPLY_VM: set to off)"
   else
     run "psql *** -X -q -v ON_ERROR_STOP=1 -v v=$RS_V -v overwrite=$RS_OVER -f scripts/launch/release-db-switches.sql" "${P[@]}" -v "v=$RS_V" -v "overwrite=$RS_OVER" -f scripts/launch/release-db-switches.sql
   fi

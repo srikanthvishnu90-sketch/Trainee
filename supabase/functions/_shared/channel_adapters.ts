@@ -169,13 +169,14 @@ export function packMessages(text: string, max: number): string[] {
   return out;
 }
 
-// Pacing per chat and overall, on an injected clock (tests) or the real one. Sequential callers only (deliverDue is).
+// Pacing per chat and overall, on an injected clock (tests) or the real one. One process only: Telegram's limit across
+// processes is the database bucket (channel_pacer.ts).
 export function pacer(o: { perChatMs: number; overallPerSecond: number | null; clock?: () => number; sleep?: (ms: number) => Promise<void> }) {
   const clock = o.clock ?? Date.now, sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const gap = o.overallPerSecond ? Math.ceil(1000 / o.overallPerSecond) : 0;
   const lastByChat = new Map<string, number>();
   let lastAny = -Infinity;
-  return async (chat: string) => {
+  const one = async (chat: string) => {
     const now = clock();
     const wait = Math.max(0, (lastByChat.get(chat) ?? -Infinity) + o.perChatMs - now, lastAny + gap - now);
     if (wait > 0) await sleep(wait);
@@ -184,6 +185,10 @@ export function pacer(o: { perChatMs: number; overallPerSecond: number | null; c
     lastAny = t;
     if (lastByChat.size > 5000) lastByChat.clear(); // a run never reaches this; a long-lived instance stays bounded
   };
+  // Concurrent callers (deliverDue with concurrency above 1) queue here, one pacing step after another; a sequential caller
+  // never notices. The send itself is outside the queue.
+  let tail: Promise<void> = Promise.resolve();
+  return (chat: string) => { const p = tail.then(() => one(chat)); tail = p.catch(() => {}); return p; };
 }
 
 // The iMessage rendering stays exactly the one WO-013 shipped (bubbles of 700, a bare link alone for its preview card).

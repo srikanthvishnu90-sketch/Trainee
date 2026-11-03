@@ -167,7 +167,7 @@ export const NO_CHANNEL_NOTE = "not sent: the channel this answers was unlinked 
 // saying updates are waiting (when one is configured), and their next message puts the held rows back in the queue.
 export async function deliverDue(o: {
   store: ChannelStore; send?: Send; adapters?: Partial<Record<Channel, DeliveryAdapter>>; now: number; limit?: number;
-  dailyContactCap?: number; clock?: () => number; budgetMs?: number;
+  dailyContactCap?: number; clock?: () => number; budgetMs?: number; concurrency?: number;
 }) {
   const r = { delivered: 0, failed: 0, retried: 0, skipped_opt_out: 0, capped: 0, deferred: 0, held: 0, nudged: 0, not_wired: 0 };
   const day = utcDay(o.now);
@@ -179,6 +179,7 @@ export async function deliverDue(o: {
     if (!contacts.has(ch)) contacts.set(ch, o.adapters ? await o.store.contactsSentOn(day, ch) : await o.store.contactsSentOn(day));
     return contacts.get(ch)!;
   };
+  const inflightNew = new Map<Channel, number>();
   const toNudge = new Map<string, { row: OutboxRow; adapter: DeliveryAdapter }>();
   const hold = async (m: OutboxRow, adapter: DeliveryAdapter, error: string, optedOut = false, sent?: { parts: number; ids: string[] }) => {
     await o.store.mark(m.id, { status: "held", at: o.now, error: error.slice(0, 500), ...(sent && sent.parts ? { sentParts: sent.parts, providerIds: sent.ids } : {}) });
@@ -208,11 +209,11 @@ export async function deliverDue(o: {
     if (!quiet.has(userId)) quiet.set(userId, await o.store.quiet(userId).catch((e) => { console.error("deliver: the pause could not be read:", e instanceof Error ? e.message : String(e)); return null; }));
     return quiet.get(userId)!;
   };
-  for (const m of await o.store.due(o.now, o.limit ?? 100)) {
-    if (o.clock && o.budgetMs !== undefined && o.clock() - o.now >= o.budgetMs) { r.deferred++; continue; }
-    if (isReply(m.key) && stalled.has(lane(m))) { r.deferred++; continue; }
+  const handle = async (m: OutboxRow): Promise<void> => {
+    if (o.clock && o.budgetMs !== undefined && o.clock() - o.now >= o.budgetMs) { r.deferred++; return; }
+    if (isReply(m.key) && stalled.has(lane(m))) { r.deferred++; return; }
     const channel = channelOf(m.contact), adapter = adapterFor(channel);
-    if (!adapter) { r.not_wired++; continue; } // claimed but untouched: the run's release puts it back, queued
+    if (!adapter) { r.not_wired++; return; } // claimed but untouched: the run's release puts it back, queued
     // IDENTITY SCENARIOS (2026-10-30): a run claims up to a hundred rows at once, each with the contact it targeted then. A
     // Telegram chat unlinked, a WhatsApp number shown to be someone else's, or a chat moved by a link while the run was
     // sending got the rest of the claimed rows anyway (the rest of a long answer went to the chat just unlinked). Each row is
@@ -221,13 +222,13 @@ export async function deliverDue(o: {
     if (o.store.stillTheirs) {
       let mine: boolean | null;
       try { mine = await o.store.stillTheirs(m.userId, m.contact); } catch (e) { console.error("deliver: the contact's owner could not be read:", e instanceof Error ? e.message : String(e)); mine = null; }
-      if (mine === null) { r.deferred++; continue; }
-      if (!mine) { await o.store.mark(m.id, { status: "queued", at: o.now }); r.deferred++; continue; }
+      if (mine === null) { r.deferred++; return; }
+      if (!mine) { await o.store.mark(m.id, { status: "queued", at: o.now }); r.deferred++; return; }
     }
     // STOP holds what Trainee starts (alerts, reports, cards, receipts); the answer to a message the person sent after STOP
     // still goes out, as the STOP reply promises.
     const out = await o.store.optedOut(m.contact);
-    if (!isReply(m.key) && out) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: STOP_NOTE }); r.skipped_opt_out++; continue; }
+    if (!isReply(m.key) && out) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: STOP_NOTE }); r.skipped_opt_out++; return; }
     // CHANNEL DELIVERY SCENARIOS (2026-10-29): an answer to a message sent BEFORE the STOP is not one sent after it. The
     // rest of a long answer still queued (its later parts, a retry) went out after the person said STOP; now it is held
     // like everything else. The answer row's deliver_at is the time of the message it answers.
@@ -236,7 +237,7 @@ export async function deliverDue(o: {
       // TELEGRAM ROUND 3 (2026-10-31): or AT it: a 403 (the person blocked the bot) on part k of an answer, in the run that
       // answered their message, is recorded at that message's time, and every later part of the same answer still went to the
       // chat that had just blocked Trainee, one refused call each.
-      if (since !== null && m.deliver_at <= since) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: STOPPED_REPLY_NOTE }); r.skipped_opt_out++; continue; }
+      if (since !== null && m.deliver_at <= since) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: STOPPED_REPLY_NOTE }); r.skipped_opt_out++; return; }
     }
     // ERASE SCENARIOS ROUND 2 (2026-10-30): an answer a run had claimed went out after the person's account was deleted
     // (a pause does not hold an answer, and the account's pause was gone with it). A deleted account gets nothing; a check
@@ -244,52 +245,52 @@ export async function deliverDue(o: {
     if (isReply(m.key) && o.store.gone) {
       let g: boolean | null;
       try { g = await o.store.gone(m.userId); } catch (e) { console.error("deliver: the account could not be read:", e instanceof Error ? e.message : String(e)); g = null; }
-      if (g === null) { r.deferred++; continue; }
-      if (g) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: GONE_NOTE }); r.skipped_opt_out++; continue; }
+      if (g === null) { r.deferred++; return; }
+      if (g) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: GONE_NOTE }); r.skipped_opt_out++; return; }
     }
     // WO-091c: the same for a pause or an erase that came after the row was queued, checked now, at delivery. A pause that
     // cannot be read leaves the row claimed and untouched (the run's release puts it back), never sent on a guess.
     if (!isReply(m.key)) {
       const q = await isQuiet(m.userId);
-      if (q === null) { r.deferred++; continue; }
-      if (q) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: PAUSED_NOTE }); r.skipped_opt_out++; continue; }
+      if (q === null) { r.deferred++; return; }
+      if (q) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: PAUSED_NOTE }); r.skipped_opt_out++; return; }
     }
     // A job alert or report queued before the person paused or stopped their alerts by text (their watch, not the
     // account) is checked again now. Not wanted: not sent. A check that cannot be read leaves the row for the next run.
     if (/^(alert|report):/.test(m.key) && o.now - m.deliver_at > ALERT_STALE_MS && ((adapter.limits.windowMs ?? null) === null || m.heldAt === null)) {
-      await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: STALE_NOTE }); r.skipped_opt_out++; continue;
+      await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: STALE_NOTE }); r.skipped_opt_out++; return;
     }
     if (m.key.startsWith("brief:") && o.store.briefWanted) {
       let wanted: boolean | null;
       try { wanted = await o.store.briefWanted(m); } catch (e) { console.error("deliver: the interview could not be read:", e instanceof Error ? e.message : String(e)); wanted = null; }
-      if (wanted === null) { r.deferred++; continue; }
-      if (!wanted) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: BRIEF_GONE_NOTE }); r.skipped_opt_out++; continue; }
+      if (wanted === null) { r.deferred++; return; }
+      if (!wanted) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: BRIEF_GONE_NOTE }); r.skipped_opt_out++; return; }
     }
     if (/^(alert|report):/.test(m.key) && o.store.alertWanted) {
       let wanted: boolean | null;
       try { wanted = await o.store.alertWanted(m); } catch (e) { console.error("deliver: the job alerts could not be read:", e instanceof Error ? e.message : String(e)); wanted = null; }
-      if (wanted === null) { r.deferred++; continue; }
-      if (!wanted) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: ALERTS_OFF_NOTE }); r.skipped_opt_out++; continue; }
+      if (wanted === null) { r.deferred++; return; }
+      if (!wanted) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: ALERTS_OFF_NOTE }); r.skipped_opt_out++; return; }
     }
     if (m.key.startsWith("alert:") && o.store.alertWithinLimits) {
       let within: boolean | null;
       try { within = await o.store.alertWithinLimits(m, o.now); } catch (e) { console.error("deliver: the alert limits could not be read:", e instanceof Error ? e.message : String(e)); within = null; }
-      if (within === null) { r.deferred++; continue; }
-      if (!within) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: LIMITS_NOTE }); r.skipped_opt_out++; continue; }
+      if (within === null) { r.deferred++; return; }
+      if (!within) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: LIMITS_NOTE }); r.skipped_opt_out++; return; }
     }
     // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): quiet hours on the person's clock as it is now. Inside them, the row goes
     // back in the queue for the first quarter hour after them (after the checks above: a stale or unwanted row is not
     // kept for the morning); a read that fails leaves it for the next run.
     if (QUIET_AWARE.test(m.key) && o.store.quietHours) {
       const q = await quietHoursOf(m.userId);
-      if (q === undefined) { r.deferred++; continue; }
+      if (q === undefined) { r.deferred++; return; }
       // REVIEW (PR #355): a reminder set in chat carries the zone the person named on its key (career_reminders.ts
       // reminderKey); its quiet hours are on that clock, with the default hours when none are saved, as its reply said.
       // Held on the saved zone (or Eastern), "9am London time" from a Chicago account waited until 7 AM Chicago.
       const own = reminderZoneOf(m.key);
       if (q || own) {
         const tz = own ?? zoneOr(q!.tz), hours = { quiet_start: q?.quiet_start ?? DEFAULT_PREFS.quiet_start, quiet_end: q?.quiet_end ?? DEFAULT_PREFS.quiet_end };
-        if (quietAt(o.now, tz, hours)) { await o.store.mark(m.id, { status: "queued", at: o.now, deliverAt: Math.max(o.now + 60000, nextAwake(o.now, tz, hours)) }); r.deferred++; continue; }
+        if (quietAt(o.now, tz, hours)) { await o.store.mark(m.id, { status: "queued", at: o.now, deliverAt: Math.max(o.now + 60000, nextAwake(o.now, tz, hours)) }); r.deferred++; return; }
       }
     }
     // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): a daily report waits in the outbox (quiet hours, a channel behind) while
@@ -301,8 +302,8 @@ export async function deliverDue(o: {
     if (/^(alert|report):/.test(m.key) && o.store.freshText) {
       let fresh: string | null | undefined;
       try { fresh = await o.store.freshText(m, o.now); } catch (e) { console.error("deliver: the alert's posting could not be read:", e instanceof Error ? e.message : String(e)); fresh = undefined; }
-      if (fresh === undefined) { r.deferred++; continue; }
-      if (fresh === null) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: FRESH_NOTE }); r.skipped_opt_out++; continue; }
+      if (fresh === undefined) { r.deferred++; return; }
+      if (fresh === null) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: FRESH_NOTE }); r.skipped_opt_out++; return; }
       text = fresh;
     }
     if (m.key.startsWith("report:") && o.store.closedLinks) {
@@ -310,7 +311,7 @@ export async function deliverDue(o: {
       if (urls.length) {
         let closed: Set<string> | null;
         try { closed = await o.store.closedLinks(urls); } catch (e) { console.error("deliver: the report's postings could not be read:", e instanceof Error ? e.message : String(e)); closed = null; }
-        if (closed === null) { r.deferred++; continue; }
+        if (closed === null) { r.deferred++; return; }
         if (closed.size) {
           const lines = text.split("\n");
           for (let i = 1; i < lines.length; i++) if (closed.has(lines[i].trim()) && lines[i - 1].startsWith("- ") && !lines[i - 1].endsWith(CLOSED_SINCE)) lines[i - 1] += CLOSED_SINCE;
@@ -321,10 +322,16 @@ export async function deliverDue(o: {
     const window = adapter.limits.windowMs ?? null;
     const stall = () => { if (isReply(m.key)) stalled.add(lane(m)); };
     // An opted-out person's held answer waits for their next message; Trainee never starts a template to them.
-    if (window !== null && (m.lastInboundAt == null || o.now - m.lastInboundAt >= window)) { stall(); await hold(m, adapter, HELD_NOTE, out); continue; }
+    if (window !== null && (m.lastInboundAt == null || o.now - m.lastInboundAt >= window)) { stall(); await hold(m, adapter, HELD_NOTE, out); return; }
     const cap = adapter.limits.dailyContacts ?? Infinity;
     const known = await o.store.sentTo(m.contact, day);
-    if (!known && cap !== Infinity && await counted(channel) >= cap) { stall(); r.capped++; continue; } // stays queued for tomorrow's allowance
+    // Rows of other people may be in flight (concurrency): a new contact being sent to now counts against the plan's cap
+    // before its send ends, so the cap is never passed by the rows that were checked together.
+    let reserved = false;
+    if (!known && cap !== Infinity) {
+      if (await counted(channel) + (inflightNew.get(channel) ?? 0) >= cap) { stall(); r.capped++; return; } // stays queued for tomorrow's allowance
+      inflightNew.set(channel, (inflightNew.get(channel) ?? 0) + 1); reserved = true;
+    }
     // CHANNEL DELIVERY ROUND 2 (2026-10-30): a row some of whose messages already went out (an earlier attempt stopped by a
     // 429 or the window part way) sends only the rest; every id it went out as is kept, in order, so a provider's later
     // "failed" for one of them maps back to the right place.
@@ -336,25 +343,28 @@ export async function deliverDue(o: {
       try { res = await adapter.send(addressOf(m.contact), bubbles, m.buttons?.length ? { buttons: m.buttons } : undefined); }
       catch (e) { res = { ok: false, error: e instanceof Error ? e.message : String(e), retryable: true }; }
     }
+    if (reserved) {
+      inflightNew.set(channel, (inflightNew.get(channel) ?? 1) - 1);
+      if (res.ok && contacts.has(channel)) contacts.set(channel, contacts.get(channel)! + 1);
+    }
     if (res.ok) {
       const ids = [...before, ...(res.ids ?? (res.id ? [res.id] : []))];
       await o.store.mark(m.id, { status: "delivered", at: o.now, providerId: ids[0] ?? res.id ?? undefined, ...(ids.length ? { providerIds: ids } : {}), ...(text !== m.text ? { text } : {}) });
       r.delivered++;
-      if (!known && contacts.has(channel)) contacts.set(channel, contacts.get(channel)! + 1);
-      continue;
+      return;
     }
     const went = res.sent && res.sent > 0 ? { parts: skip + res.sent, ids: [...before, ...(res.sentIds ?? [])] } : skip > 0 ? { parts: skip, ids: before } : undefined;
     const progress = went ? { sentParts: went.parts, providerIds: went.ids } : {};
     // WhatsApp refused it for the window or the per-user limit: nothing of that message went out, so it waits for the next
     // message (from the first message that did not go).
     stall();
-    if (res.hold) { await hold(m, adapter, res.error, out, went); continue; }
+    if (res.hold) { await hold(m, adapter, res.error, out, went); return; }
     if (res.optOut) {
       // The person blocked Trainee on this channel (Telegram's 403): that is their STOP; recorded, not retried.
       await o.store.setOptOut(m.contact, true, o.now);
       await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: res.error, ...progress });
       r.skipped_opt_out++;
-      continue;
+      return;
     }
     const attempt = m.attempts + 1;
     // TELEGRAM SCENARIOS (2026-10-30): never sooner than the provider asked (Telegram's 429 retry_after). CHANNEL DELIVERY
@@ -366,6 +376,20 @@ export async function deliverDue(o: {
       await o.store.mark(m.id, { status: "failed", at: o.now, error: res.error, retryAt: Math.max(o.now + backoff, (o.clock ? Math.max(o.now, o.clock()) : o.now) + (res.retryAfterMs ?? 0)), ...progress }); r.retried++;
     }
     else { await o.store.mark(m.id, { status: "failed", at: o.now, error: res.error, ...progress }); r.failed++; }
+  };
+  // WO-DT: with concurrency above 1, rows of different people (and channels) go out side by side; the rows of one person on one
+  // channel stay one after another, in order (a reply's parts, "later replies wait for a stalled one"). Concurrency 1 (the
+  // default) is the old single file, row by row.
+  const due = await o.store.due(o.now, o.limit ?? 100);
+  const workers = Math.max(1, Math.min(64, Math.floor(o.concurrency ?? 1)));
+  if (workers === 1) for (const m of due) await handle(m);
+  else {
+    const lanes = new Map<string, OutboxRow[]>();
+    for (const m of due) { const k = lane(m); (lanes.get(k) ?? lanes.set(k, []).get(k)!).push(m); }
+    const queue = [...lanes.values()];
+    await Promise.all(Array.from({ length: Math.min(workers, queue.length) }, async () => {
+      for (let next = queue.shift(); next; next = queue.shift()) for (const m of next) await handle(m);
+    }));
   }
   // After every row of the run is held, so the count is whole ("Trainee has 3 new update(s) for you").
   let templates: number | null = null;

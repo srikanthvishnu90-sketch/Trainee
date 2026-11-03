@@ -1,7 +1,0 @@
-eval capability2-grounded-local @ 48f919d2
-PASS  acceptance  29/29 test files pass, 2 recorded elsewhere, 209 proven capabilities, registry valid, refuses overclaim: true
-PASS  scenarios   25/25 operating model, 12/12 gold; naive baseline 3/25 (fails S01,S02,S03,S04,S06,S07,S08,S09,S10,S11,S12,S13,S14,S15,S16,S18,S19,S20,S21,S22,S24,S25)
-PASS  benchmark   plays P/R 1/1; subscriptions P/R 1/1 vs naive 0.4349/1; ledger verified-only true; news brief precision min 0.9333, alert recall min 1, false alerts/wk max 0 vs raw feed precision 0.096
-PASS  judged      15 clean turns, 9 flagged samples, 0 misses; LLM judge not run
-PASS  safety      injection 115/115, traps 45/45, advice 100/100
-verdict: RELEASE OK

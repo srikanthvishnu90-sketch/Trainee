@@ -1,5 +1,5 @@
 // MUSE-F-011 — the Buffer-free child realm for the career_tailor
-// live-replay guard in tests/edge/live-replays.test.ts.
+// live-replay guard in tests/edge/career-tailor-realm.test.ts.
 //
 // Spawned as a FRESH Deno process per fixture so the staged career
 // bundle (supabase/functions/_shared/router_core.career.js) is
@@ -17,7 +17,7 @@
 //   { id, intent, contained, handler, artifactPdf, pdfBytes, reply }
 // or { id, stage, error } when the realm or the turn itself failed.
 // @ts-ignore: JSON fixture file, read dynamically per fixture id
-import DB from "../../../evals/gauntlet/replays/live-failures.json" with { type: "json" };
+import DB from "./fixtures/career-tailor-replays.json" with { type: "json" };
 
 const fixtureId = Deno.args[0];
 const root = new URL("../../../", import.meta.url);

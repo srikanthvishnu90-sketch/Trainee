@@ -44,7 +44,7 @@ Deno.test("NO LIMITS: no reply text in the apply modules or the batch stack stat
   }
   ok(!bad.length, `reply text states a daily application cap:\n${bad.join("\n")}`);
   // The bundles carry the same batch-stack text the source does (the bundle check keeps them equal).
-  for (const b of ["supabase/functions/_shared/router_core.career.js", "supabase/functions/_shared/router_core.js"]) {
+  for (const b of ["supabase/functions/_shared/router_core.career.js"]) {
     const src = await Deno.readTextFile(new URL(`../../${b}`, import.meta.url));
     ok(!/today's application limit was reached|hit today's application cap/.test(src), `${b} still carries the old cap wording`);
   }

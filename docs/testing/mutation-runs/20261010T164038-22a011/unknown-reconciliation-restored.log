@@ -1,5 +1,0 @@
-running 1 test from ./tests/edge/payment-service.test.ts
-timeout after accepted submit recovers by lookup without a second send ... ok (495µs)
-
-ok | 1 passed | 0 failed | 8 filtered out (1ms)
-

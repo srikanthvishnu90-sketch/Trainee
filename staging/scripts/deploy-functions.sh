@@ -9,23 +9,17 @@
 #   agent-chat    the chat entry (POST /functions/v1/agent-chat {message} -> {reply})
 #   gmail-oauth   the career grant flow (start_career / purpose-routed callback /
 #                 per-source status+disconnect; packages/domain/120-career-access.js's rail)
-#   agent-exec    runtime dependency: agent-chat calls it server-side
-#                 (agent-chat/_shared/capabilities.ts callExec -> /functions/v1/agent-exec)
-# Everything else in supabase/functions/ is deliberately NOT deployed to staging v1:
-# finance rails (plaid, plaid-sync, simplefin-*, stripe-*), messaging rails
-# (imessage-inbound, agent-message-*), agent-payments, agent-proactive,
-# agent-workflows, broker-oauth-*, cancel-watcher, delete-account,
-# exec-vault-store, manual-connect, model-health, news-feed.
+# Everything else in supabase/functions/ is deliberately NOT deployed to staging v1. (The Upmore finance functions,
+# including agent-exec, were removed from the repo on 2026-10-28.)
 #
 # THE ENTRYPOINT WORKAROUND (repo-documented, docs/career/deploy-checklist-access.md
 # + TOOLS.md 2026-10-12): stock sb.py hardcodes "entrypoint_path": "index.ts".
-# agent-chat imports ../_shared/* (the top-level functions/_shared tree) and
-# ../agent-exec/merchant-catalog.ts, so it can only deploy from the
+# agent-chat imports ../_shared/* (the top-level functions/_shared tree), so it can only deploy from the
 # supabase/functions ROOT with entrypoint "agent-chat/index.ts". This script
 # implements the documented workaround programmatically: it copies sb.py to
 # /tmp, rewrites that one field in the COPY (the installed sb.py is never
 # modified), verifies the rewrite landed, and deploys with the copy.
-# gmail-oauth and agent-exec import only ./ siblings + remote modules (verified:
+# gmail-oauth imports only ./ siblings + remote modules (verified:
 # zero "../" imports), so they deploy per-directory with stock sb.py, exactly as
 # the access checklist prescribes for gmail-oauth.
 set -euo pipefail
@@ -47,12 +41,10 @@ FUNCTIONS_DIR="$REPO_ROOT/supabase/functions"
 # docs/career/phase-a-audit-2026-10-13.md §1 and supabase/config.toml:
 #   agent-chat   verify_jwt=true   (config.toml [functions.agent-chat]; prod v219 ACTIVE, verify_jwt=true)
 #   gmail-oauth  verify_jwt=true   (no config.toml entry -> platform default true; access checklist: "Keep JWT verification ON")
-#   agent-exec   verify_jwt=true   (no config.toml entry -> platform default true; agent-chat calls it with the user's JWT)
 # slug|deploy-mode|verify_jwt
 FUNCTION_SET=(
   "agent-chat|tree|true"
   "gmail-oauth|dir|true"
-  "agent-exec|dir|true"
 )
 
 # --- production / safety guard (must stay in this file; verified by grep) ---
@@ -89,7 +81,7 @@ if [ "$DRY_RUN" = "1" ]; then
     fi
     n=$((n + 1))
   done
-  echo "step $n: verify — SUPABASE_REF=$REF python3 $SB functions; assert agent-chat, gmail-oauth, agent-exec all listed ACTIVE"
+  echo "step $n: verify — SUPABASE_REF=$REF python3 $SB functions; assert agent-chat and gmail-oauth are listed ACTIVE"
   echo "DRY RUN complete: ${#FUNCTION_SET[@]} functions. Nothing was executed."
   exit 0
 fi
@@ -121,8 +113,8 @@ for row in "${FUNCTION_SET[@]}"; do
 done
 
 LIST_OUT="$(SUPABASE_REF="$REF" python3 "$SB" functions)"
-for slug in agent-chat gmail-oauth agent-exec; do
+for slug in agent-chat gmail-oauth; do
   printf '%s' "$LIST_OUT" | grep -q "\"slug\": \"$slug\"" || {
     echo "FAIL verify: $slug not listed on staging ref $REF after deploy" >&2; exit 1; }
 done
-echo "PASS deploy-functions: agent-chat, gmail-oauth, agent-exec listed on staging ref $REF"
+echo "PASS deploy-functions: agent-chat, gmail-oauth listed on staging ref $REF"

@@ -81,7 +81,7 @@ test("F-001/2 batch: the apply reply names each selected role with its link and 
 });
 
 test("F-001/3 the shipped bundles carry it", async () => {
-  for (const b of ["router_core.career.js", "router_core.js"]) {
+  for (const b of ["router_core.career.js"]) {
     const src = fs.readFileSync(path.join(root, "supabase/functions/_shared", b), "utf8");
     assert.match(src, /function postingUrlOf\(p\)/, `${b}: discovery links`);
     assert.match(src, /lines\.push\(`The \$\{selApps\.length\} selected:`\)/, `${b}: the batch's named selection`);

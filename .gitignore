@@ -25,3 +25,7 @@ tools/node_modules/
 
 # P0 proven loop receipts (scripts/career/prove-loop.cjs): synthetic TEST persona runs, local only
 /tmp/prove-loop/
+
+# a local symlink/dir of installed tools (never committed)
+node_modules
+/node_modules/

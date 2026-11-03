@@ -1,5 +1,0 @@
-running 1 test from ./tests/edge/workflow-service.test.ts
-reused bill entry ID cannot silently discard a changed payee or currency ... ok (4ms)
-
-ok | 1 passed | 0 failed | 5 filtered out (6ms)
-

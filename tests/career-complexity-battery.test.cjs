@@ -255,11 +255,11 @@ test("regression watch (passed before the wave, must not break): c20 negotiation
 
 test("the shipped bundle carries the career data (BUG-174): firm sets and the company-file library are embedded", async () => {
   const fs = require("node:fs");
-  const bundle = fs.readFileSync(path.join(ROOT, "supabase/functions/_shared/router_core.js"), "utf8");
+  const bundle = fs.readFileSync(path.join(ROOT, "supabase/functions/_shared/router_core.career.js"), "utf8");
   assert.match(bundle, /CAREER_FIRM_SETS_JSON/);
   assert.match(bundle, /CAREER_CIRS_JSON/);
   const { pathToFileURL } = require("node:url");
-  const m = await import(pathToFileURL(path.join(ROOT, "supabase/functions/_shared/router_core.js")).href);
+  const m = await import(pathToFileURL(path.join(ROOT, "supabase/functions/_shared/router_core.career.js")).href);
   const ctx = { userId: "u", threadId: "t", now: NOW };
   const intel = m.CareerRouter.handleChat("tell me everything about recruiting at Evercore — process, culture, comp", ctx);
   assert.equal(intel.intent, "company_intel");

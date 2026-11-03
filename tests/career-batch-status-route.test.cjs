@@ -110,7 +110,7 @@ test("F-002/4 approvals stay the card's: 'Approve batch …' and a bare 'yes' ar
 });
 
 test("F-002/5 the deployed composition: the generated bundles carry the dispatch, and the handler reads the run record into the turn", async () => {
-  for (const b of ["router_core.career.js", "router_core.js"]) {
+  for (const b of ["router_core.career.js"]) {
     const src = fs.readFileSync(path.join(root, "supabase/functions/_shared", b), "utf8");
     assert.match(src, /const batchStatus = handleBatchStatus\(text, c\);\s*if \(batchStatus\) return batchStatus;/, `${b} dispatches the status route`);
   }

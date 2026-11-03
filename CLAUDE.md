@@ -26,5 +26,17 @@ money, credentials and deploys.
   merge records, gauntlet ledgers) is frozen (D-006).
 
 ## Commands
-Gate: `bash scripts/gate.sh` (after WO-001). Architect tests: `deno test -A --no-check --ignore=tests/architect/pending tests/architect/`.
-Eval: `deno run -A evals/career/run.ts --brain agent|router --label <label>` (after WO-003).
+Each exists in the repo; the CI gate runs the first three. Needs Node 22, Deno 2.9, Python 3; `npm ci --prefix tools` installs the pinned esbuild and Playwright (a root `package.json` would break the Deno typechecks, so there is none).
+- Whole gate: `bash scripts/gate.sh` (`GATE_PARTITION=core|browser|coverage|architect` runs one slice, as CI does).
+- Architect tests: `deno test -A --no-check --ignore=tests/architect/pending tests/architect/`
+- Career and shared node tests: `node --test tests/career-*.test.cjs` (the gate also lists the shared suites and skips the frozen archive tests).
+- Edge tests: `deno test -A --no-check tests/edge/<file>.test.ts` (the list is `edge_tests` in `scripts/gate.sh`).
+- Career bundle: `python3 scripts/build-router-core.py --career-only` (add `--check` to verify it is current). Rebuild after any change in `packages/domain`.
+- Typecheck: `deno check scripts/apply.ts supabase/functions/agent-chat/index-career.ts` (the full list is the `career-typecheck` step in `scripts/gate.sh`).
+- Database tests: `bash tests/db/run.sh` (needs a local Postgres 16; touches no live project).
+- Eval: `deno run -A evals/career/run.ts --brain agent|router --set heldout --label <label>` (calls a model; owner budget only).
+- Site pages: `deno run -A scripts/launch/build-legal-pages.ts --interim` rebuilds `site/index.html`.
+- Extension package: `bash scripts/extension/package.sh --variant <name> --out dist`.
+- Go-live (`scripts/launch/trainee-go-live.sh`) is the owner's, from the owner's shell. Agents never run it.
+
+`src/build-app.py` still builds the root `index.html` from `src/upmore-app-template.html`; Vercel does not serve it (Output Directory is `site`).

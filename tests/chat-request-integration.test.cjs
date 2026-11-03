@@ -1,6 +1,6 @@
 // Actual built app in a synthetic DOM; this is not browser verification.
 const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
-const {buildContext}=require('./agent100/harness/stubs');
+const {buildContext}=require('./helpers/app-stubs');
 const thread='11111111-1111-4111-8111-111111111111',otherThread='22222222-2222-4222-8222-222222222222';
 const defer=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 function fixture(){

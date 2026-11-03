@@ -1,9 +1,0 @@
-bucketOf: ok
-normalizePlaidHoldings: ok
-feeFor: ok
-portfolioSummary: ok
-concentration boundary: ok
-empty: ok
-investSummaryText: ok
-
-All SPEC 08 engine tests passed.

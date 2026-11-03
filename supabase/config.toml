@@ -1,38 +1,11 @@
-# Explicit gateway modes for the new authenticated workflow and worker units.
+# Explicit gateway modes for the Trainee edge functions (the Upmore finance functions were removed 2026-10-28).
 # https://supabase.com/docs/guides/functions/function-configuration
 # Webhooks/workers authenticate in their handlers; no endpoint is public data.
-[functions.agent-workflows]
-verify_jwt = true
-
 [functions.agent-chat]
 verify_jwt = true
 
-[functions.agent-message-inbound]
-verify_jwt = false
-
-[functions.agent-message-turn]
-verify_jwt = false
-
-[functions.agent-message-worker]
-verify_jwt = false
-
-[functions.agent-payments]
-verify_jwt = false
-
-# Brokerage connect: start needs the signed-in person; the callback is a browser redirect from the broker with no Upmore
-# JWT, authenticated by the signed, single-use OAuth state instead.
-[functions.broker-oauth-start]
-verify_jwt = true
-
-[functions.broker-oauth-callback]
-verify_jwt = false
-
 [functions.model-health]
 verify_jwt = false
-
-# Guided manual connect: every action is the signed-in person's own (consent, the live sign-in window, read, disconnect).
-[functions.manual-connect]
-verify_jwt = true
 
 # WO-035 voice mock: the app's voice page has no Upmore session; the signed, single-use, 10-minute link (and the call
 # token it returns) authorizes each action in the handler.

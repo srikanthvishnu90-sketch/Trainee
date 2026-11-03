@@ -8,7 +8,7 @@
 #   unset, one is generated for this run and printed ONCE (test account only —
 #   export it in the same shell so smoke.sh can sign in).
 #
-# Method (the repo's existing pattern, tests/chatbox-59/RUNBOOK.md + the GoTrue
+# Method (the GoTrue
 # admin API): the project's anon + service_role keys are fetched TRANSIENTLY from
 # the Management API (/projects/{ref}/api-keys) through sb.py's own request
 # helper, held only in this process's environment, never printed, never written

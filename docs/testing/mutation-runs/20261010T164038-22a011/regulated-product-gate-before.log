@@ -1,5 +1,0 @@
-running 1 test from ./tests/edge/payment-service.test.ts
-unverified adapter cannot reserve a worker or call a provider ... ok (335µs)
-
-ok | 1 passed | 0 failed | 8 filtered out (1ms)
-

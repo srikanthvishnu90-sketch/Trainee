@@ -6,28 +6,36 @@ product
 
 ## Users
 
-US adults managing their own finances, including students and people with irregular income. Users start in Messages or the mobile web app and need to understand upcoming obligations, keep more money and finish financial tasks with proof.
+US job seekers: students and new graduates first (the first cohort, D-004), then anyone looking for work. They live
+in their messages, not in dashboards, and want a job without filling in forms all day.
 
 ## Product Purpose
 
-Upmore connects the accounts a user chooses, explains the evidence-backed financial picture, prepares exact actions, obtains the appropriate authority and verifies outcomes. The original 50 scenarios and the supplied October 10 master plan define the target capability scope; proposed features are not existing product claims.
+Trainee takes a person from "I need a job" to an offer, mostly over text. It learns who they are, finds matching
+postings as they appear, prepares truthful tailored applications and applies at volume with one approval per batch,
+drafts networking outreach, preps interviews and negotiation, and keeps a tracker. A hosted File page shows what was
+done. Success is measured in interviews and offers, not messages sent.
 
 ## Brand Personality
 
-Calm, plain and useful. Explain amounts, deadlines, uncertainty and the next available step without shaming the user. Preserve the existing dark interface and green action vocabulary in the app template.
+Direct, warm and plain, like a capable friend who texts back. Say what happened, what did not, and the next step.
+No hype, no filler, no internal codes in replies.
 
 ## Anti-references
 
-Avoid an unsolicited investment pitch after connection, a feed of guesses, guaranteed financial outcomes, fabricated completion and unexplained totals. Avoid controls that make a read connection look like permission to pay, trade or disclose documents.
+Spray-and-pray applying, invented answers or experience, claiming something was sent or submitted when it was not,
+a bot voice with canned prose, caps or limits the person did not choose, and anything that automates LinkedIn or
+Indeed.
 
 ## Design Principles
 
-- Show what is known, missing and stale before suggesting an action.
-- Keep financial calculations traceable to source records.
-- Make the review concrete and the consequence understandable.
-- Distinguish preparation, submission and verified completion.
-- Preserve account ownership across navigation, asynchronous requests and sign-in changes.
+- The model decides, code enforces: every external effect needs the person's approval of the exact payload.
+- Facts about the person come only from what they confirmed; never invent an answer (D-007).
+- Distinguish prepared, approved, submitted and confirmed by the employer.
+- Short texts first, detail in the File page.
+- Report failures plainly and own missed promises.
 
 ## Accessibility and Inclusion
 
-Use the repository's labeled controls and visible keyboard focus. New forms require keyboard access, readable contrast, mobile layouts, status/error announcements and reduced-motion support. No accessibility certification or full-app conformance is claimed.
+Labeled controls, visible keyboard focus, readable contrast, mobile-first layouts, status and error announcements,
+reduced-motion support. No accessibility certification is claimed.

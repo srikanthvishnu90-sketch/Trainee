@@ -69,7 +69,7 @@ test("F-006/4 a true zero still says none; a plural-titled internship is served 
 });
 
 test("F-006/5 the shipped bundles carry both", () => {
-  for (const b of ["router_core.career.js", "router_core.js"]) {
+  for (const b of ["router_core.career.js"]) {
     const src = fs.readFileSync(path.join(root, "supabase/functions/_shared", b), "utf8");
     assert.match(src, /function bandText\(x\)/, `${b}: one band normalizer`);
     assert.match(src, /I have \$\{label\} roles, but none that match all of your ask\./, `${b}: the honest zero`);

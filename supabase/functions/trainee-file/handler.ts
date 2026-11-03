@@ -13,7 +13,7 @@
 // read. Taps at once are each judged against the list as it is when they run: an Apply that queued a row first changes the set
 // (the Apply to all then approves nothing and says so); an Apply to all that ran first leaves that Apply "Already in your
 // applications". Either way each posting is approved once.
-import { applyAllYesEnabled } from "../_shared/apply_all_yes.ts";
+import { applyAllYesEnabled } from "../_shared/apply_all_yes_flag.ts";
 import { FILE_TTL_MS, verifyFileToken, type FileClaims } from "../_shared/file_link.ts";
 import { checkSession, CLEAR_LOGIN, CLEAR_SESSION, codeOf, LOGIN_TTL_MS, loginCookie, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, PAGE_TOKEN, pageTokenOf, sameToken, SESSION_ID, sessionCookie, sha256, startSession, type PhoneAuth, type SessionCheck, type SessionStore } from "../_shared/file_session.ts";
 import { verifyInitData } from "../_shared/telegram_webapp.ts";

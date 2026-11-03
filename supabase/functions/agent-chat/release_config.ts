@@ -1,3 +1,4 @@
+import { APPLY_ALL_YES_ENV, applyAllYesEnabled } from "../_shared/apply_all_yes_flag.ts";
 // RELEASE CONFIG (D-035, owner 2026-11-01: "Ship staged brain"): which brain a deployed agent-chat serves is part of the
 // deployed SHA, not a hand-set secret. This file is reply code (it lives under supabase/functions/agent-chat/, which
 // scripts/launch/reply-code.ts lists), so changing it needs a fresh reply-quality measurement before it can deploy, and
@@ -117,8 +118,9 @@ export const RELEASE_FLAGS: Readonly<Record<string, string>> = Object.freeze({
 // carries no question and no offer:
 //   supabase secrets set CAREER_APPLY_ALL_YES=off --project-ref <ref>     off at once
 //   supabase secrets unset CAREER_APPLY_ALL_YES --project-ref <ref>       back to on
-export const APPLY_ALL_YES_ENV = "CAREER_APPLY_ALL_YES";
-export const applyAllYesOn = (env: Env): boolean => (env.get(APPLY_ALL_YES_ENV) ?? "on").trim().toLowerCase() === "on";
+// One shared definition (_shared/apply_all_yes.ts), also used by the results page.
+export { APPLY_ALL_YES_ENV };
+export const applyAllYesOn: (env: Env) => boolean = applyAllYesEnabled;
 
 // D-037: the database switches the release serves on (public.career_cloud_settings; the database reads anything but 'on' as
 // off). trainee-go-live.sh writes them on every go-live from scripts/launch/release-db-switches.sql, which

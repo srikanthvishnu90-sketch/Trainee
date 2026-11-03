@@ -373,3 +373,17 @@ Deno.test("two yes at once (concurrent): each role is approved once and the seco
   eq(w.queue.length, 4, "four applications, never eight"); eq(new Set(w.queue.map((q) => q.job_id)).size, 4);
   eq(x!.counts.approved + y!.counts.approved, 4, "approved counts add up to the four, not eight");
 });
+
+Deno.test("batch hold-back: placeholder values count as blank; visa, citizenship, SSN, salary and similar answers are sensitive", async () => {
+  const [a] = POSTINGS.map((p) => p.job_id);
+  const run = async (extra: any[]) => { const { w, last } = await setup(); const p = w.preps.get(a)!; w.preps.set(a, { ...p, payload: { ...p.payload, fields: [...(p.payload as any).fields, ...extra] } }); return (await yes(w, last))!; };
+  for (const v of ["n/a", "N/A", " na ", "None", "-", "--", "TBD", "tba", "?", "null", "undefined", "Not Applicable", "unknown"]) {
+    const r = await run([{ name: "why", label: "Why this role?", value: v }]);
+    eq([r.counts.approved, r.counts.skipped_blank], [3, 1], `placeholder ${JSON.stringify(v)} is blank`);
+  }
+  eq((await run([{ name: "why", label: "Why this role?", value: "n/a", required: false }])).counts.approved, 4, "optional placeholder does not hold back");
+  for (const label of ["Will you require visa sponsorship?", "Work authorization status", "Are you legally authorized to work in the US?", "Citizenship", "Nationality", "SSN", "Social Security number", "Salary history", "Salary expectations", "Desired compensation"]) {
+    const r = await run([{ name: "x", label, value: "Yes" }]);
+    eq([r.counts.approved, r.counts.skipped_sensitive], [3, 1], `${label} is sensitive`);
+  }
+});

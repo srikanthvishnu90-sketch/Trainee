@@ -27,7 +27,7 @@ export const OFFER_WINDOW_MS = YES_WINDOW_MS;
 export const OFFER_MAX = 25;
 // CAREER_APPLY_ALL_YES=off turns the whole feature off: no question or offer in the results message, no yes handling, and the results page
 // neither shows its Apply to all button nor accepts the applyall action (agent-chat/release_config.ts applyAllYesOn is the same rule).
-export const applyAllYesEnabled = (env: { get(k: string): string | undefined }): boolean => (env.get("CAREER_APPLY_ALL_YES") ?? "on").trim().toLowerCase() === "on";
+export { APPLY_ALL_YES_ENV, applyAllYesEnabled } from "./apply_all_yes_flag.ts";
 // Said in the offer itself: the exact payloads are on the page, and the yes skips any with blank or sensitive answers.
 const PAGE_NOTE = " Each application's exact answers are on the page; I skip any with blank or sensitive answers.";
 

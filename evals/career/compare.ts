@@ -3,9 +3,9 @@
 // responds, its grammar, how structured it is, and whether it can listen, comprehend, and create or adjust tasks.
 //
 // Contestants:
-//   trainee-agent         Trainee's model brain, in-process (needs OPENAI_API_KEY)
+//   trainee-agent         Trainee's model brain, in-process (needs ANTHROPIC_API_KEY)
 //   trainee-router        Trainee's scripted router, in-process (no model)
-//   openai-plain          a bare model with the same opening the outside agents get, no tools (a floor: what any
+//   claude-plain          a bare model with the same opening the outside agents get, no tools (a floor: what any
 //                         chat model does with no product around it)
 //   transcript:<file>     replies recorded from another agent (Instinct, Claude, Dots, ChatGPT...) by a tester who sent
 //                         the person's words verbatim, in a fresh chat opened with SCRIPT.md's opening message
@@ -15,7 +15,7 @@
 // has no state to inspect. A conversation a transcript does not cover is "not recorded", never a failure. A judge error
 // is a failure. Nothing here runs without the judge's key: NOT RUN, exit 2. Scores are never estimated.
 //
-//   deno run -A evals/career/compare.ts --contestants trainee-agent,openai-plain,transcript:evals/career/compare/transcripts/claude.json --label <label>
+//   deno run -A evals/career/compare.ts --contestants trainee-agent,claude-plain,transcript:evals/career/compare/transcripts/claude.json --label <label>
 //   deno run -A evals/career/compare.ts --kit [--check]     the testers' script and transcript template (no key)
 //   deno run -A evals/career/compare.ts --lint <contestant> text hygiene only, no judge (trainee-router or a transcript)
 import { type ConvBrain, type ConvItem, type ConvJudge, runConversations, traineeBrain, transcript } from "./run-conversations.ts";
@@ -278,12 +278,12 @@ if (import.meta.main) {
     console.log(`${lint}: ${h.replies} replies; ` + HYGIENE.map((x) => `${x.id} ${h.hits[x.id]}`).join(", "));
     Deno.exit(0);
   }
-  if (!Deno.env.get("OPENAI_API_KEY")) { console.log("NOT RUN: no OPENAI_API_KEY (the judge needs it; outside agents' replies are graded by it too)."); Deno.exit(2); }
-  const { callModel, modelConfig, newMeter } = await import("../../supabase/functions/_shared/model_gateway.ts");
+  if (!Deno.env.get("ANTHROPIC_API_KEY")) { console.log("NOT RUN: no ANTHROPIC_API_KEY (the judge needs it; outside agents' replies are graded by it too)."); Deno.exit(2); }
+  const { callModel, modelConfigFor, newMeter } = await import("../../supabase/functions/_shared/model_gateway.ts");
   const { careerModelConfig } = await import("../../supabase/functions/agent-chat/release_model.ts");
   const meter = newMeter(), judgeMeter = newMeter();
   const brainCfg = careerModelConfig(Deno.env);
-  const judgeCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("EVAL_JUDGE_MODEL") || "gpt-5-mini" };
+  const judgeCfg = modelConfigFor(Deno.env, Deno.env.get("EVAL_JUDGE_MODEL") || "claude-sonnet-5-5");
   const text = (res: any) => (res.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
   const ask = (prompt: string, max = 400) => callModel(judgeCfg, { system: "You are a strict grader. Output JSON only.", messages: [{ role: "user", content: prompt }], max_tokens: max }, { meter: judgeMeter, role: "chat" });
   const judge: ConvJudge = async (prompt) => parseJudge(text(await ask(prompt)));
@@ -292,11 +292,11 @@ if (import.meta.main) {
   const only = opt("--only");
   const pick = (list: ConvItem[]) => list.filter((i) => !only || only.split(",").includes(i.id));
   const results: ContestantResult[] = [];
-  for (const c of (opt("--contestants") || "trainee-agent,trainee-router,openai-plain").split(",")) {
+  for (const c of (opt("--contestants") || "trainee-agent,trainee-router,claude-plain").split(",")) {
     if (c === "trainee-agent" || c === "trainee-router") {
       const brain = await traineeBrain({ kind: c === "trainee-agent" ? "agent" : "router", postings: set.postings, model: (p) => callModel(brainCfg, p, { meter, role: "chat" }) });
       results.push(await runContestant({ name: c, agent: c === "trainee-agent" ? `Trainee, ${brainCfg.model}` : "Trainee, scripted router", brain, stateful: true, items: pick(items), postings: set.postings, judge, rubricJudge }));
-    } else if (c === "openai-plain") {
+    } else if (c === "claude-plain") {
       const sys = opening(set.postings);
       const brain: ConvBrain = async (users) => {
         const msgs: any[] = [], replies: string[] = [];

@@ -11,7 +11,7 @@
 //           /alerts data analyst, analyst | new york, remote   turn alerts on without the brain (a test shortcut)
 //           /post Data Analyst | Stripe | Remote - US   add a TEST posting first seen now (example.test link)
 //           /state           print this person's stored state          /quit
-// --brain agent needs OPENAI_API_KEY (model: CAREER_MODEL, default gpt-5-mini); nothing is sent anywhere else.
+// --brain agent needs ANTHROPIC_API_KEY (Claude only: model CAREER_REPLY_MODEL, default claude-haiku-5-5); nothing is sent anywhere else.
 // State lives in .simulator/state.json (gitignored) so a session resumes; --fresh starts over.
 import { handleInbound, memoryStore, type Brain, type Attachment, type MemoryState } from "../supabase/functions/_shared/conversation.ts";
 import { memoryChannel } from "../supabase/functions/_shared/channel.ts";
@@ -19,7 +19,7 @@ import { CareerAccess, CareerOnboarding, CareerRouter, CareerDoorstep, CareerRep
 import { CareerPool } from "../supabase/functions/_shared/career_pool.js";
 import { CareerHost } from "../supabase/functions/_shared/career_host.js";
 import { agentTurn } from "../supabase/functions/agent-chat/career_brain.ts";
-import { callModel, modelConfig, newMeter } from "../supabase/functions/_shared/model_gateway.ts";
+import { callModel, modelConfigFor, newMeter } from "../supabase/functions/_shared/model_gateway.ts";
 import { memoryPostingsDb, searchWords, type Posting } from "../supabase/functions/_shared/career_ingest.ts";
 import { memoryAlertStore, startWatching, validPrefs, type MemoryAlerts } from "../supabase/functions/_shared/career_alert_store.ts";
 import { runAlerts } from "../supabase/functions/_shared/career_proactive_run.ts";
@@ -36,7 +36,7 @@ const STATE_DIR = ".simulator", STATE_FILE = `${STATE_DIR}/state.json`;
 const MIME: Record<string, string> = { txt: "text/plain", md: "text/markdown", csv: "text/csv", json: "application/json", pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", heic: "image/heic" };
 
 if (brainName !== "router" && brainName !== "agent") { console.error("--brain must be router or agent"); Deno.exit(2); }
-if (brainName === "agent" && !opt("--world") && !Deno.env.get("OPENAI_API_KEY")) { console.log("NOT CONFIGURED: --brain agent needs OPENAI_API_KEY in the environment."); Deno.exit(2); }
+if (brainName === "agent" && !opt("--world") && !Deno.env.get("ANTHROPIC_API_KEY")) { console.log("NOT CONFIGURED: --brain agent needs ANTHROPIC_API_KEY in the environment."); Deno.exit(2); }
 
 type Saved = { mem: MemoryState; now: number; as: string; alerts?: MemoryAlerts; posts?: Posting[]; optedOut?: string[] };
 let saved: Saved | null = null;
@@ -106,7 +106,7 @@ const routerBrain: Brain = async (a) => {
 const outreach = memoryOutreachStore();
 const agentBrain: Brain = async (a) => {
   const ctx = turnCtx(a.userId, a.stores) as Record<string, unknown>;
-  const cfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+  const cfg = modelConfigFor(Deno.env, Deno.env.get("CAREER_REPLY_MODEL") || "claude-haiku-5-5");
   const model = (p: any) => callModel(cfg, p, { meter, role: "chat" });
   const ans = await outreachTurn({ message: a.message, userId: a.userId, threadId: a.userId, now, store: outreach, gmailConnected: async () => true,
     redraft: (d) => draftFor({ model, facts: ((ctx as any).profile?.facts ?? []), r: d.recipient, previous: d.body }) });
@@ -130,9 +130,9 @@ if (opt("--world")) {
   const file = JSON.parse(Deno.readTextFileSync(opt("--world")!));
   const set = JSON.parse(Deno.readTextFileSync(new URL("../evals/career/conversations.json", import.meta.url)));
   const scripted = opt("--model") === "scripted";
-  if (brainName === "agent" && !scripted && !Deno.env.get("OPENAI_API_KEY")) { console.log("NOT CONFIGURED: --brain agent needs OPENAI_API_KEY, or --model scripted."); Deno.exit(2); }
+  if (brainName === "agent" && !scripted && !Deno.env.get("ANTHROPIC_API_KEY")) { console.log("NOT CONFIGURED: --brain agent needs ANTHROPIC_API_KEY, or --model scripted."); Deno.exit(2); }
   const w = await openWorld(file, { postings: set.postings });
-  const cfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+  const cfg = modelConfigFor(Deno.env, Deno.env.get("CAREER_REPLY_MODEL") || "claude-haiku-5-5");
   const firms = [...new Set((file.postings ?? []).map((p: any) => String(p.company)))] as string[];
   const scriptedModel = (message: string) => async (p: any) => {
     const last = p.messages.at(-1);

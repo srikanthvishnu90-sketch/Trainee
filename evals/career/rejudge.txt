@@ -1,11 +1,4 @@
-heldout-agent-39541224991 gpt-4.1-mini
-heldout-agent-39542849277 gpt-4.1-mini
-heldout-agent-39543405447-p1 gpt-4.1-mini
-heldout-agent-39543405447-p2 gpt-4.1-mini
-heldout-agent-39543405447-p3 gpt-4.1-mini
-heldout-agent-39545335380-p1 gpt-4.1-mini
-heldout-agent-39545335380-p2 gpt-4.1-mini
-heldout-agent-39545335380-p3 gpt-4.1-mini
-heldout-agent-39545926640-p1 gpt-4.1-mini
-heldout-agent-39545926640-p2 gpt-4.1-mini
-heldout-agent-39545926640-p3 gpt-4.1-mini
+# Re-score queue: "<label> <judge model>" per line; lines starting with # are skipped.
+# 2026-10-26: emptied. The 11 labels queued here (runs of 2026-10-21) have no result file on trunk or on ci/brain-eval,
+# so the step failed every run (run 40371458562, step 6). The SCORE-LOG lines from run 39603731114 on record both CI
+# judges' counts inline, so nothing needs a re-score.

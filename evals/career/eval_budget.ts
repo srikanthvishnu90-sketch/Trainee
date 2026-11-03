@@ -91,8 +91,20 @@ export function spendLine(o: { label: string; quote_usd: number; brain_usd: numb
 export function openGate(bud: { resolveBudgetGate: (explicit: undefined, get: (k: string) => string | undefined) => unknown; memoryBudgetGate: (limitMicros: number) => unknown },
   get: (k: string) => string | undefined, spentUsd: number, targetUsd: number, parallel: number): { gate: any; shared: boolean } | { error: string } {
   const shared = !!(get("SUPABASE_URL") && get("SUPABASE_SERVICE_ROLE_KEY"));
-  if (get("EVAL_LEDGER") === "shared" && !shared) return { error: "EVAL_LEDGER=shared needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (the shared budget ledger); a process-local twin would not count the other processes" };
+  const asked = String(get("EVAL_LEDGER") ?? "").trim().toLowerCase() === "shared";
+  if (asked && !shared) {
+    const missing = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].filter((k) => !get(k));
+    return { error: `EVAL_LEDGER=shared needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (the shared budget ledger; missing: ${missing.join(", ")}); a process-local twin would not count the other processes` };
+  }
   const gate = shared ? bud.resolveBudgetGate(undefined, get) : bud.memoryBudgetGate(Math.floor(Math.max(0, targetUsd - spentUsd) * 1e6 / Math.max(1, parallel)));
   if (!gate) return { error: "SUPABASE_URL is set without SUPABASE_SERVICE_ROLE_KEY, so the budget ledger cannot be reached; a call that cannot be metered is not made" };
   return { gate, shared };
+}
+
+// Total recorded spend (settled + reserved) in the shared ledger, in USD: what ALL runs have used of the one $70. null = unreadable
+// (the caller refuses to start).
+export async function ledgerSpentUsd(gate: { status?: () => Promise<{ total: number } | null> } | null): Promise<number | null> {
+  if (!gate?.status) return null;
+  const st = await gate.status();
+  return st ? st.total / 1e6 : null;
 }

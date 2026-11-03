@@ -40,7 +40,7 @@ export const picked = (list: Posting[] = POSTINGS): Picked[] => list.map((p) => 
 export const HASH = (n: number) => String(n).repeat(64).slice(0, 64).replace(/[^0-9a-f]/g, "a");
 export const prep = (jobId: string, n: number, list: Posting[] = POSTINGS, extra: { label: string; value: string }[] = []): PreparedRow => ({ id: `33333333-3333-4333-8333-00000000000${n}`, job_id: jobId, company: list[n - 1].company!, url: list[n - 1].url!, state: "ready", card_lines: [],
   payload_hash: HASH(n), payload: { resume_sha256: "f".repeat(64), resume_name: "ada-resume.pdf", destination: list[n - 1].url, cover_note: `I'd love to build at ${list[n - 1].company}.`,
-    fields: [{ name: "first_name", label: "First name", value: "Ada" }, { name: "email", label: "Email", value: "ada@example.test" }, { name: "auth", label: "Are you authorized to work in the US?", value: "Yes" },
+    fields: [{ name: "first_name", label: "First name", value: "Ada" }, { name: "email", label: "Email", value: "ada@example.test" }, { name: "adult", label: "Are you 18 or older?", value: "Yes" },
       ...extra.map((x, i) => ({ name: `extra_${i}`, ...x }))] } });
 
 // ---------------------------------------------------------------- the world: a memory store, the queue, the chat outbox
@@ -93,6 +93,8 @@ export function world(o: { unprepared?: string[]; postings?: Posting[]; fields?:
       async confirm(u: string, ids: string[], hashes: string[]) {
         const p = [...preps.values()].find((x) => x.id === ids[0]);
         if (!p || p.payload_hash !== hashes[0]) throw new Error("card_changed");
+        // Atomic like the RPC: a second approval of a posting already in the queue is a "duplicate", never a second row.
+        if (queue.some((q) => q.user === u && q.job_id === p.job_id)) return { card: { id: "card-1" }, results: [{ n: 1, company: p.company, result: "duplicate" }] };
         queue.push({ user: u, prepared_id: p.id, payload_hash: p.payload_hash, payload: structuredClone(p.payload), job_id: p.job_id });
         return { card: { id: "card-1" }, results: [{ n: 1, company: p.company, result: "queued" }] };
       },

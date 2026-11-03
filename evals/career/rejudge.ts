@@ -122,10 +122,13 @@ if (import.meta.main) {
   for (const dir of ["./results/", "./tasks/results/"]) {
     try { for await (const e of Deno.readDir(new URL(dir, import.meta.url))) if (e.name.endsWith(".json")) prior.push(JSON.parse(await Deno.readTextFile(new URL(`${dir}${e.name}`, import.meta.url)))); } catch { /* none */ }
   }
-  const before = claudeSpentUsd(prior);
+  let before = claudeSpentUsd(prior);
   const parallel = Math.max(1, Number(opt("--parallel") ?? get("EVAL_PARALLEL") ?? 1) || 1);
   const opened = openGate(bud, get, before, target, parallel);
   if ("error" in opened) { console.log(`NOT RUN: ${opened.error}.`); Deno.exit(2); }
+  // Shared ledger: refuse to start unless the one $70 ledger can be read; spend before = what ALL runs recorded in it.
+  try { const st = await bud.assertRunMayStart(opened.gate, undefined, { model: "rejudge", role: "eval" }); if (opened.shared) { before = st.total / 1e6; console.log(`shared ledger: $${(st.total / 1e6).toFixed(3)} recorded across all runs; remaining allowance $${Math.max(0, (st.target - st.total) / 1e6).toFixed(3)} of $${(st.target / 1e6).toFixed(2)}`); } }
+  catch (e) { console.log(e instanceof Error ? e.message : String(e)); Deno.exit(2); }
   const meter = gw.newMeter();
   const cfgA = gw.modelConfigFor(Deno.env, a), cfgB = gw.modelConfigFor(Deno.env, b);
   const call = (cfg: any, payload: any) => gw.callModel(cfg, payload, { meter, role: "chat", budget: opened.gate });
@@ -154,6 +157,7 @@ if (import.meta.main) {
     const pre = preflight({ quote, parallel, spent_usd: before, target_usd: target, hard_usd: hard, ledger: opened.shared ? "shared" : "process-local" });
     console.log(pre.line);
     if (!pre.ok) { console.log("NOT RUN: the preflight quote was refused; nothing was spent."); Deno.exit(2); }
+    try { await bud.assertRunMayStart(opened.gate, Math.ceil(quote.total_usd * 1e6), { model: "rejudge", role: "eval" }); } catch (e) { console.log(e instanceof Error ? e.message : String(e)); Deno.exit(2); }
     const outs = await rejudgeRun({ stored, itemsOf, judge: makeJudge({ cfgA, cfgB, call }), judgeModels: { a, b }, newRun, branch, judgeCost: () => meter.usd_micros / 1e6 });
     await Deno.mkdir(new URL("./results/", import.meta.url), { recursive: true });
     let log = ""; try { log = await Deno.readTextFile(new URL("./SCORE-LOG.md", import.meta.url)); } catch { /* new */ }

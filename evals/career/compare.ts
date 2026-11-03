@@ -283,7 +283,7 @@ if (import.meta.main) {
   const { careerModelConfig } = await import("../../supabase/functions/agent-chat/release_model.ts");
   const bud = await import("../../supabase/functions/_shared/model_budget.ts");
   const gate = bud.resolveBudgetGate(undefined, (k) => Deno.env.get(k)) ?? bud.memoryBudgetGate(15_000_000);
-  try { await bud.assertRunMayStart(gate, 1_000_000, { model: "compare", role: "eval" }); } catch (e) { console.log(e instanceof Error ? e.message : String(e)); Deno.exit(2); }
+  try { const st = await bud.assertRunMayStart(gate, 1_000_000, { model: "compare", role: "eval" }); console.log(`ledger: $${(st.total / 1e6).toFixed(3)} recorded across all runs; remaining allowance $${Math.max(0, (st.target - st.total) / 1e6).toFixed(3)} of $${(st.target / 1e6).toFixed(2)}`); } catch (e) { console.log(e instanceof Error ? e.message : String(e)); Deno.exit(2); }
   const meter = newMeter(), judgeMeter = newMeter();
   const brainCfg = careerModelConfig(Deno.env);
   const judgeCfg = modelConfigFor(Deno.env, Deno.env.get("EVAL_JUDGE_MODEL") || "claude-sonnet-5-5");

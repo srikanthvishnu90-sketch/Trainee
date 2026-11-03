@@ -27,10 +27,10 @@ const MIGRATION = new URL("../../supabase/migrations/20261028070000_global_daily
 const LIMIT = 20_000_000;
 
 // ---- fakes -------------------------------------------------------------------------------------------------------------
-const cfg: Gateway.ModelConfig = { provider: "openai", model: "gpt-5-mini", apiKey: "sk-test-not-real", reasoningEffort: "minimal" };
+const cfg: Gateway.ModelConfig = { provider: "anthropic", model: "claude-haiku-5-5", apiKey: "sk-ant-test-not-real", reasoningEffort: "low" };
 const payload = { max_tokens: 200, messages: [{ role: "user", content: "hello" }] };
 const OMIT = Symbol("no usage field");
-const okBody = (usage: unknown = { prompt_tokens: 100, completion_tokens: 20 }) => ({ id: "x", model: "gpt-5-mini", choices: [{ message: { content: "hi" }, finish_reason: "stop" }], ...(usage === OMIT ? {} : { usage }) });
+const okBody = (usage: unknown = { input_tokens: 100, output_tokens: 20 }) => ({ id: "x", type: "message", role: "assistant", model: "claude-haiku-5-5", content: [{ type: "text", text: "hi" }], stop_reason: "end_turn", ...(usage === OMIT ? {} : { usage }) });
 type Ev = string;
 // A gate that records what happened, in order, around an inner gate. The fake provider logs "request" to the same list.
 function spy(inner: Budget.BudgetGate = Budget.memoryBudgetGate()) {
@@ -57,16 +57,16 @@ const blockedOf = async (p: Promise<unknown>) => { try { await p; return null; }
 // ---- Part 1: arithmetic and order of operations -------------------------------------------------------------------------
 Deno.test("worst case: output cap x price + request bytes x input price; unknown model costs the highest price", () => {
   const P = Gateway.PRICES;
-  const mini = Budget.worstCaseMicros("gpt-5-mini", P, { bytes: 1000, images: 0, maxOutputTokens: 712 });
-  eq(mini, Math.ceil(1000 * 0.25 + 712 * 2.0));
-  const unknown = Budget.worstCaseMicros("gpt-9-imaginary", P, { bytes: 1000, images: 0, maxOutputTokens: 712 });
+  const haiku = Budget.worstCaseMicros("claude-haiku-5-5", P, { bytes: 1000, images: 0, maxOutputTokens: 712 });
+  eq(haiku, Math.ceil(1000 * 0.125 + 712 * 0.5), "the dearest input rate (the 5-minute cache write) counts");
+  const unknown = Budget.worstCaseMicros("claude-imaginary-9", P, { bytes: 1000, images: 0, maxOutputTokens: 712 });
   const high = Budget.highestPrice(P);
   eq(unknown, Math.ceil(1000 * high.input + 712 * high.output));
   for (const m of Object.keys(P)) assert(unknown >= Budget.worstCaseMicros(m, P, { bytes: 1000, images: 0, maxOutputTokens: 712 }), `unknown model is never cheaper than ${m}`);
-  assert(Budget.worstCaseMicros("gpt-5-mini", P, { bytes: 0, images: 2, maxOutputTokens: 0 }) >= 2 * Budget.IMAGE_TOKENS_UPPER * 0.25, "images carry a flat allowance");
-  eq(Budget.worstCaseMicros("gpt-5-nano", P, { bytes: 0, images: 0, maxOutputTokens: 0 }), 1, "never zero");
+  assert(Budget.worstCaseMicros("claude-haiku-5-5", P, { bytes: 0, images: 2, maxOutputTokens: 0 }) >= 2 * Budget.IMAGE_TOKENS_UPPER * 0.125, "images carry a flat allowance");
+  eq(Budget.worstCaseMicros("claude-haiku-5-5", P, { bytes: 0, images: 0, maxOutputTokens: 0 }), 1, "never zero");
   // Anthropic's cache write rate counts as an input rate (it is the dearest input).
-  assert(Budget.worstCaseMicros("claude-haiku-4-5-20251001", P, { bytes: 1000, images: 0, maxOutputTokens: 0 }) >= 1250);
+  assert(Budget.worstCaseMicros("claude-sonnet-5-5", P, { bytes: 1000, images: 0, maxOutputTokens: 0 }) >= 2500);
 });
 
 Deno.test("the price table says where every price came from, and a per-call fee is part of the worst case", () => {
@@ -80,20 +80,21 @@ Deno.test("the price table says where every price came from, and a per-call fee 
 });
 
 Deno.test("usage is proven only by a real usage block (a missing one is never read as zero)", () => {
-  assert(Budget.usageProven("openai", { usage: { prompt_tokens: 1, completion_tokens: 2 } }));
-  for (const bad of [{}, { usage: null }, { usage: {} }, { usage: { prompt_tokens: 1 } }, { usage: { prompt_tokens: "1", completion_tokens: 2 } }, { usage: { prompt_tokens: -1, completion_tokens: 2 } }, { usage: { prompt_tokens: NaN, completion_tokens: 2 } }, null, "x"])
-    assert(!Budget.usageProven("openai", bad), `not proven: ${JSON.stringify(bad)}`);
   assert(Budget.usageProven("anthropic", { usage: { input_tokens: 1, output_tokens: 2 } }));
+  for (const bad of [{}, { usage: null }, { usage: {} }, { usage: { input_tokens: 1 } }, { usage: { input_tokens: "1", output_tokens: 2 } }, { usage: { input_tokens: -1, output_tokens: 2 } }, { usage: { input_tokens: NaN, output_tokens: 2 } }, null, "x"])
+    assert(!Budget.usageProven("anthropic", bad), `not proven: ${JSON.stringify(bad)}`);
+  assert(Budget.usageProven("anthropic", { usage: { input_tokens: 1, output_tokens: 2 } }));
+  assert(!Budget.usageProven("openai", { usage: { prompt_tokens: 1, completion_tokens: 2 } }), "no other provider's usage is ever proven");
   assert(!Budget.usageProven("anthropic", { usage: { prompt_tokens: 1, completion_tokens: 2 } }));
 });
 
 // Every behavior the gateway must keep, run against the real module and against each broken copy.
 async function gatewayScenarios(mod: { callModel: typeof Gateway.callModel; chatReply: typeof Gateway.chatReply }, B: { memoryBudgetGate: typeof Budget.memoryBudgetGate; rpcBudgetGate: typeof Budget.rpcBudgetGate; resolveBudgetGate: typeof Budget.resolveBudgetGate }) {
   const worstOf = (ev: Ev[]) => Number(ev.find((e) => e.startsWith("reserve:"))!.split(":")[1]);
-  // 1. Reserve BEFORE the request; a proven cost settles to the actual cost (100 in x .25 + 20 out x 2 = 65).
+  // 1. Reserve BEFORE the request; a proven cost settles to the actual cost (100 in x $0.10 + 20 out x $0.50 per million = 20 micro-dollars).
   { const s = spy(B.memoryBudgetGate()), p = provider(s.ev); await mod.callModel(cfg, payload, { request: p.request, budget: s.gate });
     eq(s.ev.map((e) => e.split(":")[0]), ["reserve", "request", "settle"], "reserve, then request, then settle");
-    eq(s.settles, [65], "settled to the actual cost"); assert(worstOf(s.ev) > 65, "the reservation is a worst case, larger than the actual"); }
+    eq(s.settles, [20], "settled to the actual cost"); assert(worstOf(s.ev) > 20, "the reservation is a worst case, larger than the actual"); }
   // 2. The day is used up: NO request, a typed error, and the plain-words reply.
   { const inner = B.memoryBudgetGate(10), s = spy(inner), p = provider(s.ev);
     const e = await blockedOf(mod.callModel(cfg, payload, { request: p.request, budget: s.gate }));
@@ -117,14 +118,14 @@ async function gatewayScenarios(mod: { callModel: typeof Gateway.callModel; chat
     for (const bad of [0, -5, 1.5, NaN, Infinity]) { const r = await g.reserve(bad, { model: "m", role: "r" }); assert(!r.ok, `size ${bad} refused`); }
     eq(hit, 0, "no RPC for an invalid size"); }
   // 4. Missing / partial / unparseable usage keeps the FULL worst case as spent.
-  for (const usage of [OMIT, null, {}, { prompt_tokens: 5 }, { prompt_tokens: "x", completion_tokens: 1 }]) {
+  for (const usage of [OMIT, null, {}, { input_tokens: 5 }, { input_tokens: "x", output_tokens: 1 }]) {
     const s = spy(B.memoryBudgetGate()), p = provider(s.ev, { body: okBody(usage) }); await mod.callModel(cfg, payload, { request: p.request, budget: s.gate });
     eq(s.settles, [null], `usage ${usage === OMIT ? "absent" : JSON.stringify(usage)} keeps the worst case`);
     eq((s.inner as any).snapshot().spent, worstOf(s.ev), "spent equals the whole reservation"); }
   // 5. A model with no price keeps the worst case too (it was reserved at the highest price).
-  { const s = spy(B.memoryBudgetGate()), p = provider(s.ev, { body: { ...okBody(), model: "gpt-9-imaginary" } });
-    await mod.callModel({ ...cfg, model: "gpt-9-imaginary" }, payload, { request: p.request, budget: s.gate }); eq(s.settles, [null], "unpriced model: worst case kept");
-    assert(worstOf(s.ev) > 2000, "reserved at the highest price in the table (200 tokens x 10 plus the request)"); eq((s.inner as any).snapshot().spent, worstOf(s.ev)); }
+  { const s = spy(B.memoryBudgetGate()), p = provider(s.ev, { body: { ...okBody(), model: "claude-imaginary-9" } });
+    await mod.callModel({ ...cfg, model: "claude-imaginary-9" }, payload, { request: p.request, budget: s.gate }); eq(s.settles, [null], "unpriced model: worst case kept");
+    assert(worstOf(s.ev) > 2000, "reserved at the highest price in the table (200 tokens x $10 plus the request)"); eq((s.inner as any).snapshot().spent, worstOf(s.ev)); }
   // 6. Anything unproven after sending keeps the worst case: network error, timeout, 5xx, unreadable JSON, too large.
   for (const how of [{ throws: new Error("reset") }, { status: 500, body: { error: { message: "x" } } }, { status: 502, raw: "<html>" }, { raw: "not json" }, { raw: "x".repeat(200001) }]) {
     const s = spy(B.memoryBudgetGate()), p = provider(s.ev, how as any); await blockedOf(mod.callModel(cfg, payload, { request: p.request, budget: s.gate }));
@@ -231,28 +232,24 @@ Deno.test("every paid call goes through the gateway: no direct provider URL, key
   eq(scanForDirectProviderUse({ "supabase/functions/_shared/model_gateway.ts": 'fetch("https://api.openai.com/x")' }), [], "the gateway is allowed");
 });
 
-Deno.test("gateway source: the only sends are in callModel and responsesCall, each after its reservation, and the kill switch and fail-closed checks come first", async () => {
+Deno.test("gateway source: the only send is in callModel, after its reservation, and the kill switch and fail-closed checks come first", async () => {
   const g = await Deno.readTextFile(new URL("model_gateway.ts", SHARED));
   const sends = [...g.matchAll(/await (?:request|send)\(/g)].map((m) => m.index!);
-  eq(sends.length, 3, "exactly three sends: OpenAI and Anthropic in callModel, OpenAI's web search in responsesCall");
-  const fn = g.indexOf("export async function callModel"), ws = g.indexOf("export async function responsesCall"), end = g.length;
-  assert(fn > 0 && ws > fn, "callModel, then responsesCall");
-  // Each door, in its own text: pause check, reserve, refusal check, then its sends.
-  for (const [name, from, to] of [["callModel", fn, g.indexOf("// What a person reads when the provider is down", fn)], ["responsesCall", ws, end]] as const) {
-    const body = g.slice(from, to), mine = sends.filter((i) => i > from && i < to).map((i) => i - from);
-    assert(mine.length >= 1, `${name} sends`);
-    const paused = body.indexOf("budgetPausedByEnv("), reserve = body.indexOf("await gate.reserve("), closed = body.indexOf("if (!got.ok)");
-    if (name === "responsesCall") assert(body.indexOf("refuseVoiceModel(") >= 0 && body.indexOf("refuseVoiceModel(") < paused, "voice models are refused before anything else");
-    assert(paused > 0 && paused < reserve && reserve < closed && closed < Math.min(...mine), `${name}: pause check, reserve, refusal check, then the first send`);
-  }
-  assert(sends.every((i) => i > fn && i < end), "every send is inside one of the two doors");
+  eq(sends.length, 1, "exactly one send: Anthropic's Messages API in callModel (web search is a dark stub with no send)");
+  const fn = g.indexOf("export async function callModel"), end = g.indexOf("// What a person reads when the provider is down", fn);
+  assert(fn > 0 && end > fn, "callModel found");
+  const body = g.slice(fn, end), mine = sends.filter((i) => i > fn && i < end).map((i) => i - fn);
+  eq(mine.length, 1, "the send is inside callModel");
+  const voice = body.indexOf("refuseVoiceModel("), claude = body.indexOf("providerFor(cfg.model)"), paused = body.indexOf("budgetPausedByEnv("), reserve = body.indexOf("await gate.reserve("), closed = body.indexOf("if (!got.ok)");
+  assert(voice >= 0 && voice < claude && claude < paused && paused < reserve && reserve < closed && closed < mine[0], "voice refusal, Claude-only check, pause check, reserve, refusal check, then the send");
   const other = g.replace(g.slice(fn, end), "");
   assert(!/\bfetch\(/.test(other.replace(/\/\/.*$/gm, "")), "no other fetch in the gateway");
+  assert(!/api\.openai|OPENAI_|gpt-/i.test(g.replace(/\/\/.*$/gm, "")), "no other provider in the gateway");
   // Every production caller of the model goes through callModel (directly or via chatReply/plannerModel).
   const files = await productionSources();
   const callers = Object.entries(files).filter(([p, t]) => /\bcallModel\(|\bchatReply\(|\bplannerModel\(/.test(t) && !p.endsWith("model_gateway.ts")).map(([p]) => p);
   assert(callers.length >= 6, `callers found: ${callers.join(", ")}`);
-  for (const p of callers) assert(!/\bfrom ["'][^"']*model_budget\.ts["']/.test(files[p]) || /career_voice|financial_planner|career_spend_cap/.test(p), `${p} does not hand-roll a gate`);
+  for (const p of callers) assert(!/\bfrom ["'][^"']*model_budget\.ts["']/.test(files[p]) || /career_voice|financial_planner|career_spend_cap|model_health/.test(p), `${p} does not hand-roll a gate`);
 });
 
 // ---- Part 3: the database, on real Postgres ------------------------------------------------------------------------------
@@ -281,7 +278,7 @@ const day = async (pg: Pg, d: string) => {
   const r = await pg.sql(`select spent_micros || '|' || reserved_micros || '|' || limit_micros from public.model_budget_days where day = '${d}'`);
   const [spent, reserved, limit] = r.split("|").map(Number); return { spent, reserved, limit };
 };
-const reserve = (pg: Pg, micros: number, now?: string) => pg.asService().rpc("model_budget_reserve", { p_micros: micros, p_model: "gpt-5-mini", p_role: "chat", p_now: now ?? IN_WINDOW });
+const reserve = (pg: Pg, micros: number, now?: string) => pg.asService().rpc("model_budget_reserve", { p_micros: micros, p_model: "claude-haiku-5-5", p_role: "chat", p_now: now ?? IN_WINDOW });
 
 async function sqlScenarios(pg: Pg) {
   const svc = pg.asService();
@@ -451,15 +448,16 @@ Deno.test({ name: "database: 200 concurrent reservations never exceed $20; settl
 Deno.test({ name: "end to end: 200 concurrent callModel calls on the real budget; only the affordable ones reach the provider, even with no usage records", sanitizeResources: false, sanitizeOps: false,
   fn: () => withPg(async (pg) => {
     await resetBudget(pg);
-    const gate = Budget.rpcBudgetGate((name, args) => pg.asService().rpc(name, name === "model_budget_reserve" ? { ...args, p_now: IN_WINDOW } : args));
+    // The per-day mode (no limits passed), the one this file tests; the total mode is tests/architect/model-budget-total.test.ts.
+    const gate = Budget.rpcBudgetGate((name, args) => { const { p_target_limit_micros: _t, p_hard_limit_micros: _h, ...legacy } = args as any; return pg.asService().rpc(name, name === "model_budget_reserve" ? { ...legacy, p_now: IN_WINDOW } : legacy); });
     await gate.reserve(1, { model: "m", role: "r" }).then((r) => r.ok && gate.release(r.id)); // warm
     await resetBudget(pg);
-    // gpt-5 with a 100k output cap: about $1.00 worst case a call, so about 19 fit in $20.
-    const big = { max_tokens: 100_000, messages: [{ role: "user", content: "hello" }] }, c5 = { ...cfg, model: "gpt-5" };
+    // Sonnet 5.5 with a 100k output cap: about $1.00 worst case a call, so about 19 fit in $20.
+    const big = { max_tokens: 100_000, messages: [{ role: "user", content: "hello" }] }, c5 = { ...cfg, model: "claude-sonnet-5-5" };
     const ev: Ev[] = [], p = provider(ev, { body: okBody(OMIT) }); // the provider "answers" and sends no usage at all
     const rs = await Promise.allSettled(Array.from({ length: 200 }, () => Gateway.callModel(c5, big, { request: p.request, budget: gate })));
     const sent = p.sent.length, d = await day(pg, "2026-10-29");
-    const worst = Budget.worstCaseMicros("gpt-5", Gateway.PRICES, { bytes: new TextEncoder().encode(JSON.stringify(p.sent[0].body)).length, images: 0, maxOutputTokens: 100_512 });
+    const worst = Budget.worstCaseMicros("claude-sonnet-5-5", Gateway.PRICES, { bytes: new TextEncoder().encode(JSON.stringify(p.sent[0].body)).length, images: 0, maxOutputTokens: 100_000 + Gateway.ANTHROPIC_THINKING_HEADROOM });
     eq(sent, Math.floor(LIMIT / worst), "exactly the affordable number of calls were sent"); eq(rs.filter((r) => r.status === "fulfilled").length, sent);
     eq(d.reserved, 0, "all settled"); eq(d.spent, sent * worst, "no usage record: every call stays spent at its worst case");
     assert(d.spent <= LIMIT, "never over $20");
@@ -493,7 +491,8 @@ const SQL_MUTANTS: { name: string; from: string; to: string }[] = [
 Deno.test({ name: "mutation: each database guard is broken in turn and the scenarios catch it", sanitizeResources: false, sanitizeOps: false,
   fn: () => withPg(async (pg) => {
     const original = await Deno.readTextFile(MIGRATION);
-    const apply = async (sql: string) => { const f = await Deno.makeTempFile({ suffix: ".sql" }); await Deno.writeTextFile(f, sql); await pg.sql(await Deno.readTextFile(f)); await Deno.remove(f); };
+    // The migration under test (20261028070000) is the 4-argument per-day function; 20261102160000 replaced it with a 6-argument one, so it is dropped first (two overloads would make a call ambiguous).
+    const apply = async (sql: string) => { await pg.sql(`drop function if exists public.model_budget_reserve(bigint, text, text, timestamptz, bigint, bigint)`); const f = await Deno.makeTempFile({ suffix: ".sql" }); await Deno.writeTextFile(f, sql); await pg.sql(await Deno.readTextFile(f)); await Deno.remove(f); };
     await sqlScenarios(pg); // the unmutated database passes
     for (const m of SQL_MUTANTS) {
       assert(original.includes(m.from), `mutation target present: ${m.name}`);
@@ -540,7 +539,7 @@ Deno.test("mutation: each gateway and budget guard is broken in turn and the sce
     const load = async (m?: Mut) => {
       const id = n++, bFile = `${dir}/budget${id}.ts`, gFile = `${dir}/gateway${id}.ts`;
       let g = src.gateway.replace(`from "./model_calls.ts"`, `from "${calls}"`).replace(`from "./model_budget.ts"`, `from "file://${bFile}"`);
-      let b = src.budget;
+      let b = src.budget.replace(`from "./model_calls.ts"`, `from "${calls}"`);
       if (m) {
         const cur = m.file === "gateway" ? g : b; assert(cur.includes(m.from), `mutation target present: ${m.name}`);
         if (m.file === "gateway") g = g.replace(m.from, m.to); else b = b.replace(m.from, m.to);

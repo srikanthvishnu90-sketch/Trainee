@@ -75,7 +75,8 @@ Deno.test({ name: "FAMILY EMAIL: disconnect erases everything read from Gmail, t
 
     const gmail = calls.filter((c) => c.includes("gmail.googleapis.com")).length;
     const again = await chat.say("check my email");
-    eq(again.resultStatus, "NOT_WIRED", again.reply);
+    // Since the connector framework (connectors.ts) the answer is the connector-need reply, not the old NOT_WIRED read status.
+    eq([again.intent, again.resultStatus], ["career_connector_need", "not_wired"], again.reply);
     eq(calls.filter((c) => c.includes("gmail.googleapis.com")).length, gmail, "no Gmail call after the disconnect");
   } finally {
     handler?.restore();

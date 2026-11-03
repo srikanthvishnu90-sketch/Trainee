@@ -935,6 +935,9 @@ echo "== trainee_file_signin_limits.test.sql (texts and tries capped per account
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102130000_career_apply_prepare_fair_claim.sql"
 echo "== career_apply_prepare_fair_claim.test.sql (preparation is claimed in turns per person: 100 roles do not block others; limits unchanged; rollback restores the old order)"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_prepare_fair_claim.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+# 20261102140000: a stored resume file restarts the waiting preparation (trigger on career_apply_cloud_resumes). Twice (idempotent).
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102140000_career_apply_resume_file_restarts_preparation.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102140000_career_apply_resume_file_restarts_preparation.sql"
 echo "== career_apply_mass_throughput.test.sql (one error never pauses an ATS; 3 in a row do; 2% at 50 as before; our prep errors retried after 30 min)"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_mass_throughput.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 echo "== career_apply_reprepare_guard.test.sql (20261101130000: an approval spent on a history row is refused on any new row)"

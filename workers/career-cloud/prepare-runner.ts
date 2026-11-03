@@ -78,7 +78,7 @@ export async function runPrepareRequest(o: {
   let done: Awaited<ReturnType<typeof prepareAhead>> = [];
   try {
     done = await prepareAhead({
-      db: o.bridge.db, runEngine: o.runEngine, limiter: new PacedLimiter({ concurrency: parallel, hostMax: parallel, hostSpacingMs: 0 }), profileFor: storedProfile(o.bridge.db), resumeFor: keptResume(o.bridge.call),
+      db: o.bridge.db, runEngine: o.runEngine, limiter: new PacedLimiter({ concurrency: parallel, hostMax: parallel, hostSpacingMs: 0 }), profileFor: storedProfile(o.bridge.db), resumeFor: keptResume(o.bridge.call), resumeIsFile: true,
       ...(o.urlFor ? { urlFor: o.urlFor } : {}), ...(o.tmpRoot ? { tmpRoot: o.tmpRoot } : {}),
       ...(o.schema === false ? {} : { schemaFor: (url: string) => postingSchema(url, { fetch: o.schema?.fetch ?? fetch, cache: SCHEMAS, greenhouseApi: o.schema?.greenhouseApi }) }),
     }, { only: { user_id: String(req.user_id), job_ids: (req.job_ids ?? []).map(String) }, perPerson: 25, limit: 500 });

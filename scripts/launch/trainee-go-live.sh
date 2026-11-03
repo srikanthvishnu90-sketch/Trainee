@@ -268,6 +268,7 @@ MIGRATIONS=(
   20261101130000_career_apply_reprepare_needs_answers.sql
   20261102120000_career_apply_prepare_candidates_for.sql
   20261102130000_career_apply_prepare_fair_claim.sql
+  20261102140000_career_apply_resume_file_restarts_preparation.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -406,6 +407,7 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_trigger where tgname = 'career_apply_reprepare_on_needs_answers' and tgrelid = 'public.career_apply_jobs'::regclass) and exists (select 1 from pg_trigger where tgname = 'career_apply_history_approval_guard' and tgrelid = 'public.career_apply_jobs'::regclass)"
   "exists (select 1 from pg_proc where proname = 'career_apply_prepare_candidates_for')"
   "exists (select 1 from pg_proc where proname = 'career_apply_prepare_request_claim' and prosrc like '%order by q.turn%')"
+  "exists (select 1 from pg_proc where proname = 'career_apply_resume_file_restarts')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql

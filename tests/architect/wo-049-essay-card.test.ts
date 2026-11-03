@@ -15,6 +15,8 @@ import {
   type SnapField,
 } from "../../extension/src/apply_core.ts";
 import { answerKey } from "../../supabase/functions/_shared/question_map.ts";
+import { callModel } from "../../supabase/functions/_shared/model_gateway.ts";
+import { fakeAnthropic } from "./helpers/fake_anthropic.ts";
 import FN_SRC from "../../supabase/functions/career-essay-draft/index.ts" with { type: "text" };
 import CORE_SRC from "../../supabase/functions/_shared/career_essay_card.ts" with { type: "text" };
 import CONFIG from "../../supabase/config.toml" with { type: "text" };
@@ -219,7 +221,7 @@ Deno.test("WO-049/7 never an unconfirmed fact in the output: a draft fact and an
   assert(m2.calls[0].messages[0].content.includes(`Write a different version from this earlier one:\n${CLEAN}`));
 });
 
-Deno.test("WO-049/8 the edge: the person's own session only, POST only, JSON; OpenAI only, whatever MODEL_PROVIDER says", async () => {
+Deno.test("WO-049/8 the edge: the person's own session only, POST only, JSON; Claude only, whatever MODEL_PROVIDER says", async () => {
   const cors = { "Access-Control-Allow-Origin": "x" };
   const b64 = (o: unknown) => btoa(JSON.stringify(o)).replace(/=+$/, "");
   const person = `${b64({ alg: "none" })}.${b64({ role: "authenticated", sub: "u1" })}.sig`;
@@ -239,13 +241,16 @@ Deno.test("WO-049/8 the edge: the person's own session only, POST only, JSON; Op
   const body = await res.json();
   eq([body.ok, body.text], [true, CLEAN]);
   eq(res.headers.get("access-control-allow-origin"), "x");
-  // OpenAI only.
+  // Claude only, whatever MODEL_PROVIDER says.
   const env = (o: Record<string, string>) => ({ get: (k: string) => o[k] });
-  eq(essayModelConfig(env({ MODEL_PROVIDER: "anthropic", OPENAI_API_KEY: "k1", ANTHROPIC_API_KEY: "k2" })).provider, "openai");
-  eq(essayModelConfig(env({ OPENAI_API_KEY: "k1" })).apiKey, "k1");
-  eq(essayModelConfig(env({ OPENAI_API_KEY: "k1", CAREER_MODEL: "TEST-model" })).model, "TEST-model");
+  eq(essayModelConfig(env({ MODEL_PROVIDER: "openai", OPENAI_API_KEY: "k1", ANTHROPIC_API_KEY: "k2" })).provider, "anthropic");
+  eq(essayModelConfig(env({ OPENAI_API_KEY: "k1", ANTHROPIC_API_KEY: "k2" })).apiKey, "k2");
+  eq(essayModelConfig(env({ OPENAI_API_KEY: "k1" })).apiKey, "", "an OpenAI key is not a key: not configured");
+  eq(essayModelConfig(env({ ANTHROPIC_API_KEY: "k2", CAREER_MODEL: "claude-sonnet-5-5" })).model, "claude-sonnet-5-5");
+  eq(essayModelConfig(env({ ANTHROPIC_API_KEY: "k2", CAREER_MODEL: "gpt-5-mini" })).model, "claude-haiku-5-5", "a gpt id never moves the essay off Claude");
   for (const src of [FN_SRC, CORE_SRC]) {
-    assert(!/anthropic/i.test(src), "no Anthropic anywhere in the function");
+    const code = src.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+    assert(!/openai|api\.anthropic|ANTHROPIC_API_KEY|OPENAI_API_KEY/i.test(code), "no provider URL or key in the function: only the gateway names them");
     assert(!/gpt-|claude-|\bo\d-/i.test(src), "no model identifier in the function");
   }
   assert(/callModel\(cfg, payload/.test(FN_SRC) && /essayModelConfig\(Deno\.env\)/.test(FN_SRC), "the gateway's callModel with the pinned config");
@@ -388,4 +393,13 @@ Deno.test("WO-049/15 the card reads the employer's AI policy itself: a form that
   eq(essayQuestions({ schema: [essay, ban] as any, fields: [] })[0].own, OWN_WORDS_BANNED);
   eq(essayQuestions({ schema: [essay, vague] as any, fields: [] })[0].own, OWN_WORDS_UNREAD);
   assert(/q\.own/.test(PANEL) && /if \(q\.own\)/.test(PANEL), "the card hides the button and shows the reason");
+});
+
+Deno.test("WO-049/16 the essay draft goes through the gateway to api.anthropic.com only, on the Claude reader model", async () => {
+  const wire = fakeAnthropic(() => CLEAN);
+  const cfg = essayModelConfig({ get: (k: string) => ({ OPENAI_API_KEY: "sk-openai-not-used", ANTHROPIC_API_KEY: "sk-ant-test", CAREER_MODEL: "gpt-5-mini" } as Record<string, string>)[k] });
+  const d = deps({ model: (payload: any) => callModel(cfg, payload, { role: "chat", request: wire.request }) });
+  const r = await essayCardDraft("u1", ask(), d);
+  eq((r as any).text, CLEAN);
+  eq([wire.urls, wire.bodies[0].model, wire.headers[0]["x-api-key"], wire.onlyAnthropic()], [["https://api.anthropic.com/v1/messages"], "claude-haiku-5-5", "sk-ant-test", true]);
 });

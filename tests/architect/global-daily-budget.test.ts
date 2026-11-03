@@ -16,7 +16,7 @@ import * as Gateway from "../../supabase/functions/_shared/model_gateway.ts";
 import * as Budget from "../../supabase/functions/_shared/model_budget.ts";
 import { ModelBudgetBlockedError, ModelUnavailableError } from "../../supabase/functions/_shared/model_calls.ts";
 import { spendCap } from "../../supabase/functions/_shared/career_spend_cap.ts";
-import { handleVoice, voiceWorstCaseMicros } from "../../supabase/functions/_shared/career_voice.ts";
+import { handleVoice } from "../../supabase/functions/_shared/career_voice.ts";
 import { signToken } from "../../supabase/functions/_shared/career_voice_link.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -165,24 +165,16 @@ Deno.test("the career turn's note says the global limit in plain words, whoever 
   eq(cap.refused(), "global"); eq(cap.note(), "Trainee has used up its AI budget, so I didn't use the AI for this reply.");
 });
 
-Deno.test("voice: the call's worst case is reserved before a key is minted, kept once minted, returned if nothing was minted", async () => {
+Deno.test("voice: start is a hard NOT_WIRED; it reserves nothing, mints nothing, and the link is not used up", async () => {
   const key = "service-role-secret-for-the-test-0123456789";
   const now = Date.UTC(2026, 9, 28, 15, 0, 0);
   const token = await signToken({ s: "11111111-1111-4111-8111-111111111111", u: "22222222-2222-4222-8222-222222222222", k: "start", exp: now + 600_000 }, key);
-  const run = async (gate: Budget.BudgetGate, mintOk = true) => {
-    let minted = 0, started = 0;
-    const sessions: any = { read: async () => ({ state: { minutes: 20, questions: [], role: "x" }, started_at: null }), start: async () => { started++; return { questions: [], role: "x" }; } };
-    const mint = () => async () => { minted++; return mintOk ? { ok: true, value: "ek_test", expires_at: 1 } : { ok: false, status: 500 }; };
-    const res = await handleVoice(new Request("https://x/", { method: "POST", body: JSON.stringify({ action: "start", token }) }),
-      { env: (k) => ({ SUPABASE_SERVICE_ROLE_KEY: key, OPENAI_API_KEY: "sk-fake", CAREER_VOICE: "on", CAREER_VOICE_ENABLED: "on" } as Record<string, string>)[k], now: () => now, cors: {}, sessions, mint: mint as any, budget: gate });
-    return { body: await res.json(), status: res.status, minted, started };
-  };
-  { const inner = Budget.memoryBudgetGate(), s = spy(inner); const r = await run(s.gate); eq(r.body.status, "OK");
-    eq(s.ev, [`reserve:${voiceWorstCaseMicros("gpt-realtime-mini", 20)}`, "settle:kept"], "reserve the whole call's worst case, then keep it");
-    eq((inner as any).snapshot().spent, 3_000_000, "a minted key's worst case is spent"); }
-  { const s = spy(Budget.memoryBudgetGate(1000)); const r = await run(s.gate); eq(r.status, 429); eq(r.minted, 0, "no key minted"); eq(r.started, 0, "the link is not used up");
-    eq(r.body.message, "Trainee has used up its AI budget, so I didn't use the AI for this reply."); }
-  { const inner = Budget.memoryBudgetGate(), s = spy(inner); const r = await run(s.gate, false); eq(r.status, 502); assert(s.ev.includes("release")); eq((inner as any).snapshot().reserved, 0, "nothing minted: returned"); }
+  const inner = Budget.memoryBudgetGate(), s = spy(inner);
+  let started = 0;
+  const sessions: any = { read: async () => ({ state: { minutes: 20, questions: [], role: "x" }, started_at: null }), start: async () => { started++; return { questions: [], role: "x" }; } };
+  const res = await handleVoice(new Request("https://x/", { method: "POST", body: JSON.stringify({ action: "start", token }) }),
+    { env: (k) => ({ SUPABASE_SERVICE_ROLE_KEY: key, OPENAI_API_KEY: "sk-fake", ANTHROPIC_API_KEY: "sk-ant-fake", CAREER_VOICE: "on", CAREER_VOICE_ENABLED: "on" } as Record<string, string>)[k], now: () => now, cors: {}, sessions });
+  eq((await res.json()).status, "NOT_WIRED"); eq(started, 0, "the link is not used up"); eq(s.ev, [], "no reservation: nothing is spent on voice");
 });
 
 // ---- Part 2: every paid-call path is covered ---------------------------------------------------------------------------
@@ -190,8 +182,6 @@ Deno.test("voice: the call's worst case is reserved before a key is minted, kept
 // the files listed here, and the listed files must reserve first. Comments are ignored.
 const ALLOWED: Record<string, string> = {
   "supabase/functions/_shared/model_gateway.ts": "the gateway: callModel reserves before it sends (checked below)",
-  "supabase/functions/_shared/career_voice.ts": "the realtime voice key: handleVoice reserves before it mints (checked below)",
-  "supabase/functions/_shared/career_voice_link.ts": "reads whether the key exists to say NOT_WIRED; never calls the provider",
 };
 const PROVIDER = /api\.openai\.com|api\.anthropic\.com|openai\.com\/v1|(?:Deno\.)?env\.get\(\s*["'](?:OPENAI|ANTHROPIC)_API_KEY["']|\bnew OpenAI\(|\bnew Anthropic\(|from ["'](?:npm:)?(?:openai|@anthropic-ai\/sdk)/;
 export function scanForDirectProviderUse(files: Record<string, string>, allowed = ALLOWED): string[] {

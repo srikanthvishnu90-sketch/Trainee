@@ -9,6 +9,7 @@ import { memoryMailStore } from "../../supabase/functions/_shared/career_mail_st
 import { memoryAlertStore } from "../../supabase/functions/_shared/career_alert_store.ts";
 import { runMail } from "../../supabase/functions/_shared/career_proactive_run.ts";
 import { allSplits, HELD_OUT, selection, withModel } from "../../evals/career/mail-model-eval.ts";
+import { fakeAnthropic } from "./helpers/fake_anthropic.ts";
 import MODEL_SRC from "../../supabase/functions/_shared/career_mail_model.ts" with { type: "text" };
 import INDEX_SRC from "../../supabase/functions/career-proactive/index.ts" with { type: "text" };
 import MIGRATION from "../../supabase/migrations/20261021130000_career_mail_model_calls.sql" with { type: "text" };
@@ -120,25 +121,17 @@ Deno.test("WO-051/U2 how much is sent, per committed split (no label read on a h
 });
 
 // ------------------------------------------------------------------------------------------------ P: what is sent
-const ENV = (more: Record<string, string> = {}) => ({ get: (k: string) => ({ OPENAI_API_KEY: "sk-test-not-real", ...more } as Record<string, string>)[k] });
-function fakeOpenAI(answer: () => string) {
-  const bodies: any[] = [];
-  const request = (async (_u: string | URL | Request, init?: RequestInit) => {
-    const body = JSON.parse(String(init?.body ?? "{}"));
-    bodies.push(body);
-    return new Response(JSON.stringify({ id: "x", model: body.model, choices: [{ message: { content: answer() }, finish_reason: "stop" }], usage: { prompt_tokens: 400, completion_tokens: 20 } }), { status: 200 });
-  }) as typeof fetch;
-  return { request, bodies };
-}
+const ENV = (more: Record<string, string> = {}) => ({ get: (k: string) => ({ ANTHROPIC_API_KEY: "sk-ant-test-not-real", ...more } as Record<string, string>)[k] });
+const fakeOpenAI = (answer: () => string) => fakeAnthropic(() => answer(), { input_tokens: 400, output_tokens: 20 }); // the Anthropic Messages wire
 function costSink() {
   const rows: any[] = [];
   return { admin: { from: (t: string) => ({ insert: async (row: any) => { rows.push({ table: t, ...row }); return { error: null }; } }) }, rows };
 }
 
-Deno.test("WO-051/P1 what is sent: the sender's display name and domain, the subject and the snippet, masked; never an address, the body, the date or the hash; the strict schema reaches OpenAI", async () => {
+Deno.test("WO-051/P1 what is sent: the sender's display name and domain, the subject and the snippet, masked; never an address, the body, the date or the hash; the strict schema reaches Claude as output_config.format", async () => {
   const m = mailIn("p1", "\"Jo Smith\" <jo.smith@asana.com>", "Re: Account Manager role 4829137", "To: sam.lee@gmail.com. Hi Sam, quick one about your application: call me on 415 555 0199 or write to jo.smith@asana.com.");
   const p = mailModelPayload(m);
-  eq(Object.keys(p).sort(), ["max_tokens", "messages", "store", "system"]);
+  eq(Object.keys(p).sort(), ["max_tokens", "messages", "system"]);
   const lines = (p.messages[0].content as string).split("\n");
   eq(lines.map((l) => l.split(":")[0]), ["From", "Subject", "Snippet"]);
   eq(lines[0], "From: Jo Smith (domain asana.com)", "name and domain only");
@@ -153,11 +146,11 @@ Deno.test("WO-051/P1 what is sent: the sender's display name and domain, the sub
   assert(w.status === "on");
   await secondPass([VAGUE], ASANA, (payload) => w.deps.call(payload, { calls: 0, failed: 0, input_tokens: 0, output_tokens: 0, cached_tokens: 0, usd_micros: 0, unpriced: 0, provider: null, models: [] }));
   const body = ai.bodies[0];
-  eq([body.store, body.response_format?.type, body.response_format?.json_schema?.strict], [false, "json_schema", true]);
-  eq(body.response_format.json_schema.schema, MAIL_VERDICT_FORMAT.json_schema.schema);
-  eq(body.response_format.json_schema.schema.properties.kind.enum, ["received", "rejection", "interview", "assessment", "offer", "recruiter_reply", "none"]);
-  eq(body.response_format.json_schema.schema.additionalProperties, false);
-  assert(!JSON.stringify(body.messages).includes("no-reply@"), "the sender's address never reaches OpenAI");
+  eq([body.output_config?.format?.type, "store" in body, "response_format" in body, ai.onlyAnthropic()], ["json_schema", false, false, true]);
+  eq(body.output_config.format.schema, MAIL_VERDICT_FORMAT.json_schema.schema);
+  eq(body.output_config.format.schema.properties.kind.enum, ["received", "rejection", "interview", "assessment", "offer", "recruiter_reply", "none"]);
+  eq(body.output_config.format.schema.additionalProperties, false);
+  assert(!JSON.stringify(body.messages).includes("no-reply@"), "the sender's address never reaches the model");
 });
 
 // ------------------------------------------------------------------------------------------------ J: the schema
@@ -285,7 +278,7 @@ Deno.test("WO-051/K1 each person's calls are metered into one agent_turn_costs r
   eq([s.model_calls, s.model_decided, h.ai.bodies.length], [2, 1, 2], "two unsure emails asked; the clear rejection never");
   eq(h.costs.rows.length, 1);
   const c = h.costs.rows[0];
-  eq([c.table, c.user_id, c.thread_id, c.provider, c.calls, c.input_tokens, c.output_tokens], ["agent_turn_costs", "U1", null, "openai", 2, 800, 40]);
+  eq([c.table, c.user_id, c.thread_id, c.provider, c.calls, c.input_tokens, c.output_tokens], ["agent_turn_costs", "U1", null, "anthropic", 2, 800, 40]);
   assert(c.usd_micros > 0, "priced from the gateway's table");
 });
 
@@ -307,5 +300,5 @@ Deno.test("WO-051/D1 the privacy decision is the owner's: a pending row says wha
   assert(row, "D-025 is there");
   for (const must of ["CAREER_MAIL_MODEL", "display name and domain", "Never sent:", "the body", "Why:", "Cost (ASSUMED)", "200 calls a person a day", "| pending owner |"]) assert(row.includes(must), `D-025 says: ${must}`);
   assert(!/\|\s*settled/.test(row), "not settled by a builder");
-  assert(!/anthropic/i.test(MODEL_SRC), "no other provider in the second opinion");
+  assert(!/openai|gpt-/i.test(MODEL_SRC.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n")), "no other provider in the second opinion");
 });

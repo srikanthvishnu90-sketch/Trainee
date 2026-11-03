@@ -1,7 +1,7 @@
 // FAMILY: APPLICATION MATERIALS (AM-01, AM-02, AM-03; 2026-10-26). A brand-new person, typing the way people type, gets
 // a tailored resume through the REAL handler (handleChat, supabase/functions/agent-chat/handler-career.ts) on real
 // Postgres (CI's migration order) with the real supabase-js client; the only seams are the HTTP hop to the Supabase
-// project (tests/flow/postgrest.ts) and a fake OpenAI endpoint (no spend). Every assertion reads state: the rows in
+// project (tests/flow/postgrest.ts) and a fake Anthropic endpoint (no spend). Every assertion reads state: the rows in
 // channel_artifacts, the bytes in them parsed back (PDF and DOCX), the model calls made, the reply against that state.
 //
 //   (1) "tailor it for this Ramp frontend intern role": the reply's "Saved as PDF and DOCX files, attached" is what is
@@ -29,6 +29,7 @@ import { careerHandler, type Chat, SERVICE_KEY, SUPABASE_URL, supabaseParity, ty
 import { CareerProfile, CareerRender, CareerTailor } from "../../supabase/functions/_shared/router_core.career.js";
 import { employerFiles } from "../../supabase/functions/_shared/career_tailor_rewrite.ts";
 import { documentsOf, fetchArtifactBytes } from "../../supabase/functions/_shared/channel_artifacts.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -68,7 +69,7 @@ Requirements: Python and SQL; experience automating reports. Nice to have: Table
 // ------------------------------------------------------------------------------------------------ the fake model
 const calls: any[] = [];
 let answer: (bullets: { id: string; text: string }[]) => { id: string; text: string }[] = (b) => b;
-function fakeOpenAI(body: any): Response {
+function fakeModel(body: any): Response {
   calls.push(body);
   const user = body.messages.find((m: any) => m.role === "user");
   const ask = JSON.parse(typeof user.content === "string" ? user.content : user.content.map((c: any) => c.text ?? "").join(""));
@@ -96,11 +97,10 @@ async function world() {
   const viaDouble = globalThis.fetch;
   globalThis.fetch = (async (input: any, init?: any) => {
     const req = input instanceof Request && !init ? input : new Request(input, init);
-    if (new URL(req.url).host === "api.openai.com") return fakeOpenAI(await req.json());
+    if (new URL(req.url).host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
     return viaDouble(req);
   }) as typeof fetch;
-  Deno.env.set("OPENAI_API_KEY", "sk-test-fake");
-  Deno.env.set("CAREER_MODEL", "gpt-5-mini");
+  Deno.env.set("ANTHROPIC_API_KEY", "sk-test-fake");
   return { pg, handler };
 }
 const skip = () => {

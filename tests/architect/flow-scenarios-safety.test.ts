@@ -1,6 +1,6 @@
 // The safety and truth rules end to end, sampled from the generated scenarios (tests/architect/scenarios-fixture.ts), through
 // the REAL production handler (handler-career.ts handleChat; harness tests/flow/handler.ts: real supabase-js over
-// tests/flow/postgrest.ts, real Postgres 16 with every migration). No model (CAREER_BRAIN and OPENAI_API_KEY unset), and
+// tests/flow/postgrest.ts, real Postgres 16 with every migration). No model (CAREER_BRAIN and ANTHROPIC_API_KEY unset), and
 // every host but the Supabase double is refused and recorded: none may be LinkedIn, Indeed or Handshake, and none may
 // write (a GET of an employer's public job board, which the apply turn reads on demand, is refused here and listed). After every turn the database is checked:
 //   sites    an ask on LinkedIn, Indeed or Handshake is declined naming the site; nothing queued, carded or batched; a
@@ -46,7 +46,7 @@ Deno.test({
     if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (initdb)"); return; }
     const started = Date.now();
     const pg: Pg = await startPg();
-    const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "OPENAI_API_KEY"];
+    const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "ANTHROPIC_API_KEY"];
     const saved = Object.fromEntries(unset.map((k) => [k, Deno.env.get(k)]));
     for (const k of unset) Deno.env.delete(k);
     // D-036: CAREER_MAIL_TRACKING is a release flag (on when unset): every mail path stays off only with "off".

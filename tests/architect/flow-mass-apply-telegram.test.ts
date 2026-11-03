@@ -213,7 +213,7 @@ Deno.test({
         if (u.origin === "http://runner.test") return await runner(req);
         if (u.origin === new URL(SUPABASE_URL).origin && u.pathname === "/functions/v1/agent-chat") return await handleChat(req);
         if (u.origin === new URL(SUPABASE_URL).origin || u.hostname === "127.0.0.1") return await double(req);
-        if (u.hostname === "api.openai.com") { modelCalls++; outbound.push(u.href); return Promise.reject(new Error("no model in this test")); }
+        if (u.hostname === "api.anthropic.com") { modelCalls++; outbound.push(u.href); return Promise.reject(new Error("no model in this test")); }
         if (u.hostname === "api.telegram.org") return await double(new Request(`${bot.origin}${u.pathname}${u.search}`, req));
         outbound.push(u.href);
         return Promise.reject(new Error(`the mass-apply flow reaches no real host: ${u.href}`));

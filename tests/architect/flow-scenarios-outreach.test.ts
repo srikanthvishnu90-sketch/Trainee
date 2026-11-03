@@ -39,7 +39,7 @@ let flows = 0;
 
 Deno.test({ name: "outreach end to end: ~80 flows through the rail's functions, the stores and a fake Gmail on real Postgres", sanitizeResources: false, sanitizeOps: false, async fn(t) {
   if (!haveDb()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
-  for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]) Deno.env.delete(k);
+  for (const k of ["ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"]) Deno.env.delete(k);
   const db = await railDb();
   // Nothing may leave the machine: every fetch that is not the PostgREST double or the fake Gmail is refused and counted.
   const realFetch = globalThis.fetch;

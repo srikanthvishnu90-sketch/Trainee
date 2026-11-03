@@ -224,7 +224,7 @@ Deno.test({
       console.log("NOT_RUN locally: no Postgres binaries");
       return;
     }
-    for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]) Deno.env.delete(k);
+    for (const k of ["ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"]) Deno.env.delete(k);
     // A fake Stripe key (never a real one): the cancel call is answered below, at the HTTP boundary, and counted.
     Deno.env.set("STRIPE_SECRET_KEY", "sk_test_scenarios_fake_not_a_key");
     const total = Object.values(E2E).reduce((a, b) => a + b, 0);

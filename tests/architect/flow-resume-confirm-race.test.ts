@@ -16,7 +16,7 @@
 // After every step: every fact_confirmed event names an entry a saved profile holds as confirmed, every confirmed entry
 // has its event, one event per entry, and career_resume_on_file is true exactly when a profile holds confirmed entries.
 // The loser's reply says plainly that it was not saved and to send it again; a resend is idempotent.
-// No model, no network (CAREER_BRAIN, OPENAI_API_KEY unset; CAREER_ACCOUNT_MEMORY off, the default).
+// No model, no network (CAREER_BRAIN, ANTHROPIC_API_KEY unset; CAREER_ACCOUNT_MEMORY off, the default).
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, SERVICE_KEY, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
@@ -29,7 +29,7 @@ const CI = Deno.env.get("CI") === "true";
 const RESUME = await Deno.readTextFile(`${ROOT}/packages/career-data/fixtures/test-resume.txt`);
 const PASTE = `ok here is my resume:\n${RESUME}`, YES = "yes, that's my resume";
 const PERSON = (n: number) => `7b0f8f8e-6a43-4a49-9d2c-00000000c7${String(n).padStart(2, "0")}`;
-const ENV_OFF = ["CAREER_BRAIN", "CAREER_KNOWLEDGE", "CAREER_BRAIN_ROUTER_INTENTS", "CAREER_ACCOUNT_MEMORY", "OPENAI_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL",
+const ENV_OFF = ["CAREER_BRAIN", "CAREER_KNOWLEDGE", "CAREER_BRAIN_ROUTER_INTENTS", "CAREER_ACCOUNT_MEMORY", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL",
   "CAREER_REPLY_WRITER", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "TRAINEE_FILE_BASE_URL"];
 
 Deno.test({ name: "a resume yes on two threads at once: the evidence and the confirmation are saved together or not at all, in every order", sanitizeResources: false, sanitizeOps: false, async fn(t) {

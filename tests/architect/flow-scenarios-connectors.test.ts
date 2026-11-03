@@ -1,7 +1,7 @@
 // Connectors, disconnect and erase end to end (owner rules, 2026-10-29): a seeded sample of the generated account states
 // (tests/architect/scenarios/connectors-generator.ts, the same ones scenarios-connectors.test.ts runs over the store), each
 // a person of their own on real Postgres 16 with every migration, through the REAL handler (handler-career.ts handleChat;
-// harness tests/flow/handler.ts: real supabase-js over tests/flow/postgrest.ts). No model (CAREER_BRAIN and OPENAI_API_KEY
+// harness tests/flow/handler.ts: real supabase-js over tests/flow/postgrest.ts). No model (CAREER_BRAIN and ANTHROPIC_API_KEY
 // unset); Google's revoke endpoint, Gmail and Outlook are faked at the HTTP boundary; every other host is refused.
 //   1. Each person has what the generator gave them: grants (Gmail, Outlook, the legacy finance grant) and their Vault
 //      entries, a token state, approved emails, emails queued on the sending rail to N people from either mailbox (the
@@ -78,7 +78,7 @@ Deno.test({ name: `connectors end to end on Postgres through the real handler: $
     GOOGLE_OAUTH_CLIENT_ID: "fake-google-client-0000", OAUTH_STATE_SECRET: "fake-state-secret-0000-xxxxxxxxxxxxxxxx", GMAIL_LINK_BASE: "https://proj.example.test/functions/v1/gmail-oauth",
     MICROSOFT_OAUTH_CLIENT_ID: "fake-ms-client-0000", MICROSOFT_OAUTH_CLIENT_SECRET: "fake-ms-secret-0000", OUTLOOK_LINK_BASE: "https://proj.example.test/functions/v1/outlook-oauth",
   };
-  const UNSET = ["CAREER_BRAIN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY"];
+  const UNSET = ["CAREER_BRAIN", "ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY"];
   const saved = Object.fromEntries([...Object.keys(ENV), ...UNSET].map((k) => [k, Deno.env.get(k)]));
   for (const k of UNSET) Deno.env.delete(k);
   for (const [k, v] of Object.entries(ENV)) Deno.env.set(k, v);

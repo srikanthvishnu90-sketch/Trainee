@@ -1,5 +1,5 @@
 // TASK PLANNER at the REAL handler (agent-chat/handler-career.ts handleChat, unchanged harness tests/flow/handler.ts) on
-// real Postgres, with a fake model on the OpenAI wire (evals/career/tasks/fake_model.ts; no key, no spend). Outcomes are
+// real Postgres, with a fake model on the Anthropic wire (evals/career/tasks/fake_model.ts; no key, no spend). Outcomes are
 // rows, never wording.
 // Fail-first: the first step runs the compound ask with the planner OFF (today's production: CAREER_BRAIN unset, and the
 // staged release) and asserts what is lost: the apply part and the reminder are dropped, nothing is tailored. The same ask
@@ -22,7 +22,7 @@
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, supabaseParity } from "../flow/handler.ts";
-import { calls, clearOracle, fakeOpenAI, setOracle } from "../../evals/career/tasks/fake_model.ts";
+import { calls, clearOracle, fakeModel, setOracle } from "../../evals/career/tasks/fake_model.ts";
 import { dueDate } from "../../supabase/functions/_shared/task/plan.ts";
 import { brainMode } from "../../supabase/functions/agent-chat/career_staged.ts";
 
@@ -47,7 +47,7 @@ Deno.test({ name: "TASK PLANNER: compound asks complete at the real handler, thr
   if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (initdb)"); return; }
   const pg: Pg = await startPg();
   const realFetch = globalThis.fetch;
-  const keys = ["CAREER_BRAIN", "CAREER_PLANNER", "CAREER_PLANNER_USERS", "CAREER_NETWORKING_DRAFT", "OPENAI_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL"];
+  const keys = ["CAREER_BRAIN", "CAREER_PLANNER", "CAREER_PLANNER_USERS", "CAREER_NETWORKING_DRAFT", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL"];
   const saved = Object.fromEntries(keys.map((k) => [k, Deno.env.get(k)]));
   let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
   const set = (o: Record<string, string | null>) => { for (const [k, v] of Object.entries(o)) { if (v === null) Deno.env.delete(k); else Deno.env.set(k, v); } };
@@ -63,10 +63,10 @@ Deno.test({ name: "TASK PLANNER: compound asks complete at the real handler, thr
         insert into public.career_watch_kv (user_id, key, value) values ('${id}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
         insert into public.channel_contacts (contact, user_id) values ('+1555${id.slice(-7).replace(/[^0-9]/g, "0").padStart(7, "0")}', '${id}');`);
     }
-    set({ OPENAI_API_KEY: "sk-fake-planner-not-a-key", MODEL_PROVIDER: null, CAREER_MODEL: "gpt-5-mini", CAREER_NETWORKING_DRAFT: "on" });
+    set({ ANTHROPIC_API_KEY: "sk-fake-planner-not-a-key", MODEL_PROVIDER: null, CAREER_MODEL: "claude-haiku-5-5", CAREER_NETWORKING_DRAFT: "on" });
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
-      if (new URL(req.url).hostname === "api.openai.com") return outage ? new Response(JSON.stringify({ error: { type: "server_error", message: "fake outage" } }), { status: 500, headers: { "content-type": "application/json" } }) : await fakeOpenAI(req);
+      if (new URL(req.url).hostname === "api.anthropic.com") return outage ? new Response(JSON.stringify({ error: { type: "server_error", message: "fake outage" } }), { status: 500, headers: { "content-type": "application/json" } }) : await fakeModel(req);
       return new Response("not reachable in this test", { status: 404 });
     }) as typeof fetch;
     h = await careerHandler(pg, people);

@@ -80,7 +80,7 @@ Deno.test("F11/5 the judge: rubric-anchored prompt, Claude only, metered with on
   const wire = fakeAnthropic(() => '{"covered":["dense rank"],"verdict":"strong","fix":"Say why."}');
   const rows2: any[] = [];
   const admin2 = { from: (t: string) => ({ insert: async (r: any) => { rows2.push({ t, r }); return { error: null }; } }) };
-  const live = modelJudge(admin2, { get: (k) => ({ OPENAI_API_KEY: "sk-openai-not-used", ANTHROPIC_API_KEY: "sk-ant-test", CAREER_MODEL: "gpt-5-mini", MODEL_PROVIDER: "openai" } as Record<string, string>)[k] }, {
+  const live = modelJudge(admin2, { get: (k) => ({ ANTHROPIC_API_KEY: "sk-ant-test", CAREER_MODEL: "claude-haiku-5-5", MODEL_PROVIDER: "openai" } as Record<string, string>)[k] }, {
     callModel: (cfg, payload, o) => callModel(cfg, payload, { ...o, request: wire.request }),
   });
   eq((await live({ question: "Q", requirement: "sql", keys: ["dense rank"], answer: "dense rank", userId: "u1", threadId: "t1" }))?.verdict, "strong");

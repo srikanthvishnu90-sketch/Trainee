@@ -1,13 +1,14 @@
 // PEOPLE FINDING and INTRODUCTIONS (D-033) through the REAL handler (agent-chat/handler-career.ts handleChat) on real
 // Postgres, as new people use it on the web (their app's request, with `attachments`) and through the texting bridge
 // (Telegram and SMS turns arrive as the service-role call with `as_user_id`, exactly as channel_runtime sends them).
-// Every step asserts the database, and that the reply says no more than the database holds. The model (OpenAI), Gmail
+// Every step asserts the database, and that the reply says no more than the database holds. The model (the model), Gmail
 // and one company website are scripted fakes at their real URLs; any other host fails the test. Nothing is sent: no
 // request to Gmail's send endpoint, no outreach row, no outbox row; nothing is fetched from LinkedIn, Indeed or Handshake.
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, SERVICE_KEY, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
 import { fakeNet, HANDSHAKE_HTML, http, INDEED_HTML, zipOf } from "./people-finding-fixtures.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 const MAX_INFLATE = 20_000_000; // career_people_import.ts MAX_INFLATE: one ZIP entry inflates to at most this
 
 function assert(v: unknown, m?: string): asserts v { assertNode.ok(v, m); }
@@ -25,7 +26,7 @@ const sha = async (s: string) => [...new Uint8Array(await crypto.subtle.digest("
 
 // ------------------------------------------------------------------------------------------------ the fakes
 let modelCalls = 0;
-function fakeOpenAI(body: any): Response {
+function fakeModel(body: any): Response {
   modelCalls++;
   const user = String((body.messages ?? []).find((m: any) => m.role === "user")?.content ?? "");
   const first = /- name: (\S+)/.exec(user)?.[1] ?? "there";
@@ -70,7 +71,7 @@ Deno.test({ name: "people finding and intros at the real handler: import, who, a
   const pg: Pg = await startPg();
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   // D-036: CAREER_INTRO_REMINDERS is a release flag (on when unset); this file's off steps run it rolled back ("off").
-  const env = { CAREER_NETWORKING_DRAFT: "on", OPENAI_API_KEY: "sk-test-not-real", CAREER_MODEL: "gpt-5-mini", CAREER_INTRO_REMINDERS: "off" };
+  const env = { CAREER_NETWORKING_DRAFT: "on", ANTHROPIC_API_KEY: "sk-test-not-real", CAREER_MODEL: "claude-haiku-5-5", CAREER_INTRO_REMINDERS: "off" };
   for (const [k, v] of Object.entries(env)) Deno.env.set(k, v);
   const outside: string[] = [];
   let restoreDns = () => {};
@@ -87,7 +88,7 @@ Deno.test({ name: "people finding and intros at the real handler: import, who, a
       const u = new URL(req.url);
       if (u.origin === new URL(SUPABASE_URL).origin) return await viaDouble(req);
       outside.push(`${req.method} ${u.host}${u.pathname}${u.search}`);
-      if (u.host === "api.openai.com") return fakeOpenAI(await req.json());
+      if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
       if (u.host === "gmail.googleapis.com") return fakeGmail(u);
       return new Response("not faked", { status: 599 });
     }) as typeof fetch;
@@ -404,7 +405,7 @@ Deno.test({ name: "people finding and intros at the real handler: import, who, a
       eq([...new Set(outside.filter((c) => c.startsWith("DNS ")).map((c) => c.split(" ")[1].split("/")[0]))], ["rampfixture.com"], "only the page's own name was resolved");
       eq([...new Set(site.log.connect)], ["93.184.215.14"], "the page reader connected only to the address it checked (pinned)");
       eq([...new Set(site.log.sni)], ["rampfixture.com"], "and did TLS for the page's own name");
-      eq(hosts, ["api.openai.com", "gmail.googleapis.com", "rampfixture.com"], outside.join("\n"));
+      eq(hosts, ["api.anthropic.com", "gmail.googleapis.com", "rampfixture.com"], outside.join("\n"));
       assert(!outside.some((c) => /\/send|messages\/send/.test(c)), "nothing sent");
     });
     eq(await q(`select count(*) from public.career_outreach_drafts`), 0, "no outreach drafts: intros never ride the sender");

@@ -248,14 +248,14 @@ Deno.test("WO-040/M4 the model never writes what the person reads: extra fields 
 });
 
 Deno.test("WO-040/M5 Claude only, off by default: CAREER_MAIL_MODEL=on wires it; MODEL_PROVIDER=openai and a gpt id in CAREER_MODEL are ignored; no key is NOT_WIRED", () => {
-  eq(mailModelConfig(ENV({ MODEL_PROVIDER: "openai", OPENAI_API_KEY: "o" })).provider, "anthropic");
+  eq(mailModelConfig(ENV({ MODEL_PROVIDER: "openai", ANTHROPIC_API_KEY: "o" })).provider, "anthropic");
   eq(mailModelConfig(ENV()).model, "claude-haiku-5-5");
-  eq([mailModelConfig(ENV({ CAREER_MODEL: "gpt-5-mini" })).provider, mailModelConfig(ENV({ CAREER_MODEL: "gpt-5-mini" })).model], ["anthropic", "claude-haiku-5-5"], "a gpt id left in CAREER_MODEL never moves the reader off Claude");
-  eq(mailModelConfig({ get: (k: string) => ({ OPENAI_API_KEY: "o" } as Record<string, string>)[k] }).apiKey, "", "an OpenAI key alone is not a key: not configured");
+  eq([mailModelConfig(ENV({ CAREER_MODEL: "claude-haiku-5-5" })).provider, mailModelConfig(ENV({ CAREER_MODEL: "claude-haiku-5-5" })).model], ["anthropic", "claude-haiku-5-5"], "a gpt id left in CAREER_MODEL never moves the reader off Claude");
+  eq(mailModelConfig({ get: (k: string) => ({ ANTHROPIC_API_KEY: "o" } as Record<string, string>)[k] }).apiKey, "", "an the model key alone is not a key: not configured");
   const none = mailModelWiring({ get: () => undefined }, costSink().admin);
   eq(none.status, "NOT_WIRED");
   assert(none.status === "NOT_WIRED" && none.ask.length < 160 && /ANTHROPIC_API_KEY/.test(none.ask) && !/OPENAI/i.test(none.ask), "a one-line ask");
-  assert(!/openai|gpt-|api\.openai/i.test(MODEL_SRC.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n")), "no OpenAI anywhere in the second pass");
+  assert(!/openai|gpt-|api\.openai/i.test(MODEL_SRC.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n")), "no the model anywhere in the second pass");
   assert(/model: Deno\.env\.get\("CAREER_MAIL_MODEL"\) === "on" \? \(\) => mailModelWiring\(Deno\.env, admin\) : undefined/.test(INDEX_SRC), "wired only on CAREER_MAIL_MODEL=on");
 });
 

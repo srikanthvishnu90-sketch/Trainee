@@ -3421,6 +3421,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     return f.type === "month" ? `${year}-${month}` : `${year}-${month}-${day}`;
   }
   var YES_NO_VALUE = /^(yes|no|y|n|true|false)$/i;
+  var GRAD_YEAR = /\b(graduat\w*|class|completion|end)\b[^?.]{0,30}\byear\b|\byear\b[^?.]{0,30}\b(graduat\w*|complet\w*)\b/;
   var YES_NO_LIKE = /^(yes|no|y|n|true|false|i (agree|accept|acknowledge|consent|understand)\b.*|i am (not )?currently employed)$/i;
   var COMPOUND = /\bif (so|yes|not|no|applicable|you (are|were|have|do|did|answered|selected))\b[^?]{0,80}\b(list|provide|describe|explain|specify|enter|state|indicate|give|share|tell|include)\b|\bplease (list|provide|describe|explain|specify|share|confirm your)\b|,? or (would|are|do|will|have|can|could) you\b/;
   function asksYesNo(t) {
@@ -3431,6 +3432,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   }
   function fitsField(f, value, ownAnswer = false) {
     if (typedFieldProblem(f, value)) return false;
+    if (GRAD_YEAR.test(norm(f.label)) && !/\b(19|20)\d\d\b/.test(String(value))) return false;
     if (ownAnswer) return true;
     if (f.options.length || f.widget || f.type === "checkbox" || /file/.test(f.type)) return true;
     const t = norm(f.label), v = String(value).trim();

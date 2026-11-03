@@ -308,7 +308,7 @@ given, derives `CLOUD_BRIDGE_URL` and `CAREER_PREPARE_AHEAD_URL` from the projec
 per-person or per-site number only when one is given (none by default: the owner's NO LIMITS rule, 2026-10-27), and schedules the two minute ticks (`scripts/launch/schedule-career-cloud.sql`). It never
 turns anything on by itself: `CLOUD_RUNNER_ENABLED=on` / `CLOUD_PREPARE_ENABLED=on` only when given, and the database's
 `CAREER_AGENT_SUBMIT` / `CAREER_CLOUD_APPLY` / `CAREER_CLOUD_TEXT_CARDS` only by the owner's SQL. Everything else (the route, the limits, the
-recommended first-wave numbers, the gate): docs/launch/CLOUD-RUNNER.md. The owner's first run: docs/launch/RAMP-FIRST-RUN.md.
+recommended first-wave numbers, the gate): docs/launch/CLOUD-RUNNER.md. `CAREER_CLOUD_TEXT_CARDS` is also in the release switch set (`release-db-switches.sql`): a plain go-live writes it `on` only when its row is missing and keeps an existing row, and with `CAREER_AGENT_SUBMIT` or `CAREER_CLOUD_APPLY` off the route stays closed. `trainee-go-live.sh --verify` and `secrets-audit.sh` end with a hosted-apply block (`scripts/launch/hosted-apply-setup.cjs`, names only): "off by design" when a switch is not `on`; "ON but NOT READY" (verify fails) when all three are on and a prerequisite is missing. The owner's first run: docs/launch/RAMP-FIRST-RUN.md.
 ## Running mass submission
 
 There is no volume number of Trainee's own (owner, 2026-10-27). Every executor runs as many applications as its machine

@@ -433,7 +433,8 @@ Deno.test({ name: "identity on Postgres: 80 multi-channel journeys through the r
             const on = (await rows<{ asked_on: string }>(db, `select asked_on from public.channel_link_requests where contact = ${q(`tg:${chat}`)} and by_code and answered_at is null`))[0]?.asked_on ?? "";
             J(read(on, m).some((x) => /^Someone wants to link Telegram /.test(x)), `${c}: the account's channel ${on} was not asked`);
             const y = sent.length;
-            if (on.startsWith("tg:")) await tg(Number(on.slice(3)), "yes"); else await lm(on, "yes");
+            const linkReply = `LINK ${/reply LINK ([0-9]{4}) /.exec(read(on, m).filter((x) => /^Someone wants to link Telegram /.test(x)).at(-1) ?? "")?.[1] ?? "none"}`;
+            if (on.startsWith("tg:")) await tg(Number(on.slice(3)), linkReply); else await lm(on, linkReply);
             J(read(`tg:${chat}`, y).includes(IN.LINKED_HERE_REPLY), `${c}: after the YES told ${JSON.stringify(read(`tg:${chat}`, y))}`);
           } else J(read(`tg:${chat}`, m).includes(reply), `${c}: told ${JSON.stringify(read(`tg:${chat}`, m))}`);
           J(await owner(`tg:${chat}`) === want, `${c}: the chat is ${await owner(`tg:${chat}`)}'s, want ${want}`);
@@ -627,7 +628,7 @@ Deno.test({ name: "identity on Postgres: 80 multi-channel journeys through the r
         const early = [await owner(`tg:${4100000 + n}`), await owner(`tg:${4200000 + n}`), await owner(`tg:${4300000 + n}`)].filter(Boolean);
         J(!early.length, `${early.length} chats linked before the YES`);
         J((await rows(db, `select id from public.channel_link_requests where user_id = ${q(u)} and by_code`)).length === 1, "one link asked more than once");
-        await lm(P(n), "yes");
+        await lm(P(n), `LINK ${/reply LINK ([0-9]{4}) /.exec(read(P(n)).filter((x) => /^Someone wants to link Telegram /.test(x)).at(-1) ?? "")?.[1] ?? "none"}`);
         const owners = [await owner(`tg:${4100000 + n}`), await owner(`tg:${4200000 + n}`), await owner(`tg:${4300000 + n}`)].filter(Boolean);
         J(owners.length === 1 && owners[0] === u, `${owners.length} chats linked by one link`);
       });

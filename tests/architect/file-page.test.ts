@@ -8,7 +8,7 @@ import { handleFile, type AppRow, type FileDeps, type FileStore } from "../../su
 import { hashTag, jobViewOf, refOf, sendJobCards, type PreparedRow } from "../../supabase/functions/_shared/telegram_jobs.ts";
 import type { TapStore } from "../../supabase/functions/_shared/channel_card_tap.ts";
 import { SESSION_ID, SESSION_TTL_MS as SESSION_MS, sha256 } from "../../supabase/functions/_shared/file_session.ts";
-import { signedIn } from "./file-session-fakes.ts";
+import { signedIn, phonePost } from "./file-session-fakes.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -79,7 +79,7 @@ const signed = async (user = U, list = LIST, now = NOW) => (await mintFileToken(
 const linkTok = async (user = U, list = LIST) => (await mintFileToken({ secret: SECRET, userId: user, list, now: NOW, kind: "l" }))!;
 // A signed-in page read: the session cookie (the link itself is exchanged once, see the link tests).
 const get = (d: FileDeps, t: string, extra = "") => handleFile(new Request(`https://x.example/f${extra ? "?" + extra.replace(/^&/, "") : ""}`, { headers: { cookie: `tf_s=${t}` } }), d);
-const post = (d: FileDeps, f: Record<string, string>) => handleFile(new Request("https://x.example/f", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(f).toString() }), d);
+const post = async (d: FileDeps, f: Record<string, string>) => handleFile(new Request("https://x.example/f", await phonePost(f, SECRET)), d);
 const plain = (h: string) => h.replace(/<style[\s\S]*?<\/style>/g, " ").replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/\s+/g, " ");
 async function ref(n: number) { return await refOf(U, `greenhouse:acme:${n}`); }
 
@@ -177,7 +177,7 @@ Deno.test("list: a row per posting with logo or lettermark, company, Apply, and 
   const m = mem(10); await m.ready;
   const r = await get(deps(m), await tok());
   eq(r.status, 200);
-  assert(/no-store/.test(r.headers.get("cache-control")!) && r.headers.get("referrer-policy") === "no-referrer");
+  assert(/no-store/.test(r.headers.get("cache-control")!) && r.headers.get("referrer-policy") === "same-origin"); // same-origin (web-security round): the page's own posts carry its Origin; nothing goes to another site
   const html = await r.text();
   eq((html.match(/<li class="row"/g) ?? []).length, 10);
   eq((html.match(/<h1[ >]/g) ?? []).length, 1);
@@ -194,8 +194,8 @@ Deno.test("list: a row per posting with logo or lettermark, company, Apply, and 
   assert(/<details>\s*<summary>/.test(html) && html.includes("class=\"full\""), "the full posting is behind a tap, closed by default");
   assert(!/<details[^>]* open/.test(html));
   // brand: Trainee's tokens and fonts, both themes by prefers-color-scheme
-  for (const tokenValue of ["#4A2F5E", "#D4C2E2", "#141414", "#4F4F57", "#FAF8F4", "#E6E3DD", "#B42318", "#EDEDF0", "#A6A6B0", "#1F1F25"]) assert(html.includes(tokenValue), `brand token ${tokenValue}`);
-  assert(/Brygada 1918/.test(html) && /family=Inter/.test(html) && /prefers-color-scheme:dark/.test(html) && /name="theme-color" content="#4A2F5E"/.test(html));
+  for (const tokenValue of ["#5C2751", "#D4C2E2", "#141414", "#4F4F57", "#FAF8F4", "#E6E3DD", "#B42318", "#EDEDF0", "#A6A6B0", "#1F1F25"]) assert(html.includes(tokenValue), `brand token ${tokenValue}`);
+  assert(/Brygada 1918/.test(html) && /family=Inter/.test(html) && /prefers-color-scheme:dark/.test(html) && /name="theme-color" content="#5C2751"/.test(html));
   assert(/<html lang="en"/.test(html) && /name="viewport"/.test(html) && /min-height:\s*(4[4-9]|[5-9][0-9])px/.test(html));
   assert(/script-src 'sha256-/.test(r.headers.get("content-security-policy")!) && !/unsafe-eval|script-src[^;]*unsafe-inline/.test(r.headers.get("content-security-policy")!));
   for (const img of html.matchAll(/<img\b[^>]*>/g)) assert(/\balt="[^"]+"/.test(img[0]));
@@ -241,8 +241,9 @@ Deno.test("link states: an expired session, an invalid one and an unconfigured p
   eq(late.status, 401);
   const h = await late.text();
   assert(/signed out/i.test(plain(h)) && !h.includes("Acme") && !/<form/.test(h) && /href="https:\/\/t\.me\/TraineeBot"[^>]*>Get a new link</.test(h));
-  eq((await get(deps(m), t.slice(0, -3) + "aaa")).status, 403);
-  eq((await get(deps(m, { env: { TRAINEE_FILE_LINK_SECRET: undefined } }), t)).status, 200, "a signed-in session does not need the link secret");
+  eq((await get(deps(m), t.slice(0, -1) + (t.endsWith("a") ? "b" : "a"))).status, 403);
+  // The page's forms carry a page token made with the link secret (file_session.ts PAGE_TOKEN), so with no secret nothing opens.
+  eq((await get(deps(m, { env: { TRAINEE_FILE_LINK_SECRET: undefined } }), t)).status, 503, "no page is drawn without the secret its page token needs");
   eq((await handleFile(new Request("https://x.example/f"), deps(m))).status, 403);
   eq((await post(deps(m, { now: NOW + SESSION_MS + 5 }), { t, action: "apply", ref: await ref(1), tag: hashTag(H) })).status, 401);
   eq(m.log.answered, []);
@@ -449,7 +450,7 @@ Deno.test("link preview and Mini App: og/twitter tags from real counts, theme-co
   assert(/property="og:title" content="2 matches for you"/.test(html) && /property="og:description" content="Tap Apply on any job\. Opens in Trainee\."/.test(html));
   assert(html.includes('property="og:image" content="https://trainee.example/og-file.png"') && html.includes('og:image:width" content="1200"') && html.includes('og:image:height" content="630"') && html.includes('twitter:card" content="summary_large_image"'));
   assert(!/Acme|Co2|ada-resume/.test(html.match(/<head>[\s\S]*<\/head>/)![0]), "nothing about the person in the head tags");
-  assert(/name="theme-color" content="#4A2F5E"/.test(html) && /viewport-fit=cover/.test(html) && /env\(safe-area-inset-bottom\)/.test(html) && /100dvh/.test(html));
+  assert(/name="theme-color" content="#5C2751"/.test(html) && /viewport-fit=cover/.test(html) && /env\(safe-area-inset-bottom\)/.test(html) && /100dvh/.test(html));
   assert(html.includes('src="https://telegram.org/js/telegram-web-app.js"') && /w\.ready\(\);w\.expand\(\)/.test(html) && /setBackgroundColor/.test(html) && /setHeaderColor/.test(html));
   assert(/script-src 'sha256-[^']+' 'sha256-[^']+' https:\/\/telegram\.org/.test(r.headers.get("content-security-policy")!));
   const m1 = mem(1); await m1.ready;
@@ -474,7 +475,7 @@ Deno.test("link: the bot's link opens a phone sign-in, never the list; the pendi
   for (const secret of ["Acme", "Data Analyst", "Co2", "ada-resume", ">Apply<", 'value="apply"', "+1512555"]) assert(!html.includes(secret), `the sign-in page shows no ${secret}`);
   assert(!/name="t"/.test(html), "no session on the sign-in page");
   // a link token is never a session: not for actions, not as a cookie
-  eq((await post(d, { t: link, action: "apply", ref: await ref(1), tag: hashTag(H) })).status, 403);
+  eq((await post(d, { t: link, action: "apply", ref: await ref(1), tag: hashTag(H) })).status, 401);
   eq((await handleFile(new Request("https://x.example/file", { headers: { cookie: `tf_s=${link}` } }), d)).status, 403);
   eq(m.log.answered, []);
 });

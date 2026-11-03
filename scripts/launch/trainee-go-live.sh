@@ -17,7 +17,7 @@
 #   CAREER_INGEST_SECRET, CAREER_PROACTIVE_SECRET, TRAINEE_DELIVER_SECRET, TRAINEE_INBOUND_SECRET
 #                                                the four function secrets (32+ of A-Z a-z 0-9 . _ ~ -, because the inbound
 #                                                one rides in a URL); Enter generates a 48-character one (openssl rand -hex 24)
-#   LOOPMESSAGE_API_KEY, OPENAI_API_KEY          Enter keeps the one already set on the project
+#   LOOPMESSAGE_API_KEY, ANTHROPIC_API_KEY          Enter keeps the one already set on the project
 #   INGEST_CONTACT_EMAIL, TRAINEE_ALLOWED_CONTACTS, LOOPMESSAGE_DAILY_CONTACTS   settings; Enter keeps what is set
 #   UPMORE_TEST_JWT (optional), TRAINEE_SMOKE_CONTACT (with --allow-send)        for the smoke checks
 #   PDL_API_KEY (optional)                       People Data Labs, hired-candidate aggregates (WO-036, D-018); Enter keeps
@@ -36,6 +36,7 @@
 #   the numbers, each optional. Infrastructure sizing not given is set to the runner's default (CLOUD_WAVE1 below, the
 #   same numbers as cloud_runner_http.ts LIMIT_DEFAULTS and docs/launch/CLOUD-RUNNER.md):
 #     CLOUD_MAX_CONCURRENT CLOUD_MAX_PER_PORTAL CLOUD_MAX_STARTS_PER_TICK CLOUD_PREPARE_MAX_CONCURRENT CLOUD_PREPARE_STARTS_PER_TICK
+#     CLOUD_DISPATCH_PARALLEL (sandboxes created at once in one tick)
 #   The per-person and per-site numbers are never set unless given (owner, 2026-10-27, NO LIMITS: no number of Trainee's
 #   own; the brake is an outside system's refusal); given, any whole number from 1:
 #     CLOUD_MAX_PER_PERSON_DAY CLOUD_MAX_PER_SITE_MINUTE CLOUD_PREPARE_PER_PERSON_DAY CLOUD_PREPARE_PER_SITE_MINUTE
@@ -49,8 +50,10 @@
 #                 to replay), and one missing live stops the run before anything is deployed on top of it; then every
 #                 mark is read again and any missing one fails the run (a ledger row never stands in for the schema)
 #   3 secrets     one `supabase secrets set --env-file` from a 0600 temp file removed at once; CAREER_BRAIN=agent only
-#                 with --brain agent, CAREER_BRAIN=staged only with --brain staged (--brain router unsets it; without
-#                 --brain it is not touched)
+#                 with --brain agent, CAREER_BRAIN=staged only with --brain staged, CAREER_BRAIN=router (the emergency
+#                 rollback) only with --brain router; without --brain it is not touched. D-035: the brain served is the
+#                 committed release config (supabase/functions/agent-chat/release_config.ts PRODUCTION_BRAIN, "staged");
+#                 CAREER_BRAIN can only roll it back to the router, never turn on a brain the commit did not ship
 #   4 deploy      agent-chat from the staged career-only tree (index-career.ts as agent-chat/index.ts, JWT on), then
 #                 career-ingest, career-proactive, trainee-deliver, trainee-inbound, trainee-telegram, trainee-whatsapp
 #                 with --no-verify-jwt (pg_cron, LoopMessage, Telegram and Meta carry no JWT; each checks its own secret),
@@ -80,6 +83,10 @@ REPO="$(pwd)"
 DRY=""; SKIP_MIG=""; SKIP_DEPLOY=""; ONLY_SMOKE=""; BRAIN=""; ALLOW_SEND=""; NOWAIT=""; WANT_SHA=""; VERIFY=""; VERIFY_MODE=""; BUILD_SNAPSHOT=""
 NONINT=""; [[ "${TRAINEE_NON_INTERACTIVE:-}" == 1 ]] && NONINT=1
 UNSCHEDULE_CRON=""
+# D-037: the database switches of real submission (release_config.ts RELEASE_DB_SWITCHES), written after the claim guards.
+# Owner, 2026-11-02: real employer submission stays DISABLED this release. Unset (a plain go-live, or --brain router) writes
+# the rows 'off' (missing rows created off, an existing 'on' turned off). --real-submit on is refused here.
+REAL_SUBMIT=""
 DEPLOY_LABEL="${TRAINEE_DEPLOY_LABEL:-owner}"
 while (( $# )); do
   case "$1" in
@@ -90,6 +97,8 @@ while (( $# )); do
     --brain) shift; BRAIN="${1:-}" ;;
     --brain=*) BRAIN="${1#--brain=}" ;;
     --allow-send) ALLOW_SEND=1 ;;
+    --real-submit) shift; REAL_SUBMIT="${1:-}" ;;
+    --real-submit=*) REAL_SUBMIT="${1#--real-submit=}" ;;
     --no-wait) NOWAIT=1 ;;
     --build-snapshot) BUILD_SNAPSHOT=1 ;;
     --non-interactive) NONINT=1 ;;
@@ -247,6 +256,20 @@ MIGRATIONS=(
   20261031020000_career_outreach_r3.sql
   20261031030000_telegram_link_code_kept.sql
   20261031040000_telegram_link_confirm.sql
+  20261031050000_career_account_memory_one_copy.sql
+  20261031060000_connectors_r3.sql
+  20261031063000_telegram_link_reply_code.sql
+  20261031070000_career_resume_upload_resend.sql
+  20261031090000_career_thread_facts_authority.sql
+  20261031100000_trainee_file_signin_limits.sql
+  20261031110000_career_outreach_batch_unbounded.sql
+  20261101120000_career_apply_cloud_throttle_sample.sql
+  20261101121000_career_apply_prepare_error_retry.sql
+  20261101130000_career_apply_reprepare_needs_answers.sql
+  20261102120000_career_apply_prepare_candidates_for.sql
+  20261102130000_career_apply_prepare_fair_claim.sql
+  20261102140000_career_apply_resume_file_restarts_preparation.sql
+  20261102160000_model_budget_total_cap.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -372,7 +395,21 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'career_apply_card_open_for' and pg_get_functiondef(oid) like '%least(p_now, now())%')"
   "exists (select 1 from pg_proc where proname = 'career_send_go' and pg_get_functiondef(oid) like '%career_send_bad_addresses%')"
   "exists (select 1 from pg_proc where proname = 'channel_link_nonce_redeem' and prosrc like '%the code stays unused%')"
-  "exists (select 1 from pg_proc where proname = 'channel_link_nonce_ask') and exists (select 1 from pg_proc where proname = 'channel_link_code_pending') and exists (select 1 from pg_proc where proname = 'channel_link_confirm' and prosrc like '%ambiguous%') and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'channel_link_requests' and column_name = 'by_code')"
+  "exists (select 1 from pg_proc where proname = 'channel_link_nonce_ask') and exists (select 1 from pg_proc where proname = 'channel_link_code_pending') and exists (select 1 from pg_proc where proname = 'channel_link_confirm' and (prosrc like '%ambiguous%' or prosrc like '%not by_code%')) and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'channel_link_requests' and column_name = 'by_code')"
+  "exists (select 1 from pg_trigger where tgname = 'career_account_memory_one_copy' and tgrelid = 'public.agent_flow_state'::regclass)"
+  "exists (select 1 from pg_proc where proname = 'oauth_connect_commit') and exists (select 1 from pg_proc where proname = 'career_outlook_store_messages') and exists (select 1 from pg_proc where proname = 'career_mail_record_events') and to_regclass('public.oauth_state_uses') is not null"
+  "exists (select 1 from pg_proc where proname = 'channel_link_confirm_code') and exists (select 1 from pg_proc where proname = 'channel_link_confirm' and prosrc like '%not by_code%') and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'channel_link_requests' and column_name = 'reply_code')"
+  "exists (select 1 from pg_proc where proname = 'career_resume_upload_record_as' and prosrc like '%greatest(now(), public.career_resume_uploads.created_at)%')"
+  "exists (select 1 from pg_trigger where tgname = 'career_thread_facts_authority' and tgrelid = 'public.agent_flow_state'::regclass) and exists (select 1 from pg_proc where proname = 'career_thread_facts_changed') and exists (select 1 from pg_proc where proname = 'career_account_authority_mark' and prosrc like '%thread_facts%')"
+  "exists (select 1 from pg_proc where proname = 'trainee_file_login_count' and prosrc like '%trainee_file_login_account:%') and to_regclass('public.trainee_file_logins_user_created') is not null"
+  "exists (select 1 from pg_constraint where conrelid = 'public.career_outreach_drafts'::regclass and conname = 'career_outreach_drafts_n_check' and convalidated and pg_get_constraintdef(oid) not like '%<= 10%') and exists (select 1 from pg_constraint where conrelid = 'public.agent_turn_costs'::regclass and conname = 'agent_turn_costs_calls_check' and convalidated and pg_get_constraintdef(oid) not like '%<= 100%')"
+  "exists (select 1 from pg_proc where proname = 'career_apply_cloud_throttle' and prosrc like '%consecutive_errors%')"
+  "exists (select 1 from pg_proc where proname = 'career_apply_prepare_candidates' and prosrc like '%30 minutes%')"
+  "exists (select 1 from pg_trigger where tgname = 'career_apply_reprepare_on_needs_answers' and tgrelid = 'public.career_apply_jobs'::regclass) and exists (select 1 from pg_trigger where tgname = 'career_apply_history_approval_guard' and tgrelid = 'public.career_apply_jobs'::regclass)"
+  "exists (select 1 from pg_proc where proname = 'career_apply_prepare_candidates_for')"
+  "exists (select 1 from pg_proc where proname = 'career_apply_prepare_request_claim' and prosrc like '%order by q.turn%')"
+  "exists (select 1 from pg_proc where proname = 'career_apply_resume_file_restarts')"
+  "exists (select 1 from pg_proc where proname = 'model_budget_total_status') and exists (select 1 from pg_proc where proname = 'model_budget_reserve' and pronargs = 6)"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql
@@ -399,10 +436,10 @@ CLOUD_FN=career-cloud-runner
 CLOUD_HIDDEN=(CLOUD_RUNNER_SECRET CLOUD_DISPATCH_SECRET CAREER_PREPARE_AHEAD_TOKEN VERCEL_TOKEN)
 CLOUD_PLAIN=(VERCEL_TEAM_ID VERCEL_PROJECT_ID CLOUD_SANDBOX_SNAPSHOT_ID CLOUD_MAX_CONCURRENT CLOUD_MAX_PER_PORTAL CLOUD_MAX_STARTS_PER_TICK
   CLOUD_MAX_PER_PERSON_DAY CLOUD_MAX_PER_SITE_MINUTE CLOUD_PREPARE_MAX_CONCURRENT CLOUD_PREPARE_STARTS_PER_TICK CLOUD_PREPARE_PER_PERSON_DAY
-  CLOUD_PREPARE_PER_SITE_MINUTE CLOUD_RUNNER_ENABLED CLOUD_PREPARE_ENABLED)
+  CLOUD_PREPARE_PER_SITE_MINUTE CLOUD_DISPATCH_PARALLEL CLOUD_RUNNER_ENABLED CLOUD_PREPARE_ENABLED)
 # The runner's infrastructure sizing, set by name when not given. No per-person or per-site number (NO LIMITS, 2026-10-27).
-declare -A CLOUD_WAVE1=([CLOUD_MAX_CONCURRENT]=2 [CLOUD_MAX_PER_PORTAL]=1 [CLOUD_MAX_STARTS_PER_TICK]=2
-  [CLOUD_PREPARE_MAX_CONCURRENT]=2 [CLOUD_PREPARE_STARTS_PER_TICK]=2)
+declare -A CLOUD_WAVE1=([CLOUD_MAX_CONCURRENT]=60 [CLOUD_MAX_PER_PORTAL]=20 [CLOUD_MAX_STARTS_PER_TICK]=30
+  [CLOUD_PREPARE_MAX_CONCURRENT]=60 [CLOUD_PREPARE_STARTS_PER_TICK]=30 [CLOUD_DISPATCH_PARALLEL]=16)
 # Mass networking (lane M1): the sending rail's sender, started by pg_cron (trainee-career-send) with the proactive
 # secret; it sends nothing until CAREER_SEND_RAIL=on is set (docs/architect/OUTREACH-SEND-2026-10-27.md).
 SEND_FNS=(career-send)
@@ -445,7 +482,7 @@ fail() { echo "STEP $CUR: FAILED: $1"; REPORTED=1; exit 1; }
 mask_values() {
   local v
   for v in SUPABASE_ACCESS_TOKEN SUPABASE_DB_URL CAREER_INGEST_SECRET CAREER_PROACTIVE_SECRET TRAINEE_DELIVER_SECRET TRAINEE_INBOUND_SECRET \
-    LOOPMESSAGE_API_KEY OPENAI_API_KEY UPMORE_TEST_JWT TRAINEE_ALLOWED_CONTACTS TRAINEE_SMOKE_CONTACT INGEST_CONTACT_EMAIL PDL_API_KEY \
+    LOOPMESSAGE_API_KEY ANTHROPIC_API_KEY UPMORE_TEST_JWT TRAINEE_ALLOWED_CONTACTS TRAINEE_SMOKE_CONTACT INGEST_CONTACT_EMAIL PDL_API_KEY \
     TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET WHATSAPP_TOKEN WHATSAPP_APP_SECRET WHATSAPP_VERIFY_TOKEN \
     CLOUD_RUNNER_SECRET CLOUD_DISPATCH_SECRET CAREER_PREPARE_AHEAD_TOKEN VERCEL_TOKEN CAREER_PREPARE_AHEAD_URL; do
     [[ -n "${!v:-}" ]] && printf '%s\n' "${!v}"
@@ -740,7 +777,7 @@ if [[ -z "$DRY" && -z "$ONLY_SMOKE" && " ${GENERATED[*]} " == *" TRAINEE_INBOUND
 fi
 if [[ -z "$ONLY_SMOKE" ]]; then
   ask LOOPMESSAGE_API_KEY "LoopMessage API key (Enter to keep the one already set)" hidden
-  ask OPENAI_API_KEY "OpenAI key (Enter to keep the one already set)" hidden
+  ask ANTHROPIC_API_KEY "Anthropic key (Enter to keep the one already set)" hidden
   ask INGEST_CONTACT_EMAIL "Contact email the job boards see in the User-Agent (Enter to keep the one already set)" plain
   ask TRAINEE_ALLOWED_CONTACTS "Phone numbers allowed to sign up, comma-separated (Enter to keep what is set)" hidden
   ask LOOPMESSAGE_DAILY_CONTACTS "LoopMessage contacts a day, 300 or 1000 by plan (Enter to keep; unset means 300)" plain
@@ -749,7 +786,7 @@ if [[ -z "$ONLY_SMOKE" ]]; then
   # (docs/launch/CLOUD-RUNNER.md, Preparation host). Optional: without them the chat says nothing is prepared yet.
   ask CAREER_PREPARE_AHEAD_URL "Preparation host URL, https://<host>/prepare (Enter to keep; unset: phone-only preparation stays NOT_WIRED)" plain
   ask CAREER_PREPARE_AHEAD_TOKEN "Preparation host token, the host's own CAREER_PREPARE_AHEAD_TOKEN (Enter to keep)" hidden
-  for v in LOOPMESSAGE_API_KEY OPENAI_API_KEY INGEST_CONTACT_EMAIL TRAINEE_ALLOWED_CONTACTS PDL_API_KEY CAREER_PREPARE_AHEAD_URL CAREER_PREPARE_AHEAD_TOKEN; do
+  for v in LOOPMESSAGE_API_KEY ANTHROPIC_API_KEY INGEST_CONTACT_EMAIL TRAINEE_ALLOWED_CONTACTS PDL_API_KEY CAREER_PREPARE_AHEAD_URL CAREER_PREPARE_AHEAD_TOKEN; do
     if [[ -n "${!v:-}" ]] && ! env_safe "${!v}"; then fail "$v has a space, quote, # or backslash (the value is not shown)"; fi
   done
   [[ -z "${INGEST_CONTACT_EMAIL:-}" || "$INGEST_CONTACT_EMAIL" == *@* ]] || fail "INGEST_CONTACT_EMAIL is not an email address"
@@ -815,7 +852,7 @@ if [[ -z "$ONLY_SMOKE" ]]; then
     [[ -z "${CLOUD_SANDBOX_SNAPSHOT_ID:-}" || "$CLOUD_SANDBOX_SNAPSHOT_ID" =~ ^snap_[A-Za-z0-9]{8,64}$ ]] || fail "CLOUD_SANDBOX_SNAPSHOT_ID is not a snapshot id (snap_...)"
     if [[ -n "${VERCEL_TOKEN:-}" ]] && ! env_safe "$VERCEL_TOKEN"; then fail "VERCEL_TOKEN has a space, quote, # or backslash (the value is not shown)"; fi
     for v in CLOUD_MAX_CONCURRENT CLOUD_MAX_PER_PORTAL CLOUD_MAX_STARTS_PER_TICK CLOUD_MAX_PER_PERSON_DAY CLOUD_MAX_PER_SITE_MINUTE \
-      CLOUD_PREPARE_MAX_CONCURRENT CLOUD_PREPARE_STARTS_PER_TICK CLOUD_PREPARE_PER_PERSON_DAY CLOUD_PREPARE_PER_SITE_MINUTE; do
+      CLOUD_PREPARE_MAX_CONCURRENT CLOUD_PREPARE_STARTS_PER_TICK CLOUD_PREPARE_PER_PERSON_DAY CLOUD_PREPARE_PER_SITE_MINUTE CLOUD_DISPATCH_PARALLEL; do
       [[ -z "${!v:-}" || "${!v}" =~ ^[1-9][0-9]{0,8}$ ]] || fail "$v must be a whole number from 1"
     done
     for v in CLOUD_RUNNER_ENABLED CLOUD_PREPARE_ENABLED; do
@@ -915,6 +952,15 @@ else
   else
     run "psql *** -X -q -v ON_ERROR_STOP=1 -f scripts/launch/verify-claim-guards.sql" "${P[@]}" -f scripts/launch/verify-claim-guards.sql
   fi
+  # D-037: real submission's database switches, after every claim guard is verified in place (each claim still needs the
+  # person's approval of the exact payload). --real-submit off writes the kill switch.
+  [[ -z "$REAL_SUBMIT" || "$REAL_SUBMIT" == off ]] || fail "--real-submit on is refused: real employer submission stays disabled this release (owner, 2026-11-02); the default writes 'off' (got: $REAL_SUBMIT)"
+  RS_V=off; RS_OVER=true
+  if [[ -n "$DRY" ]]; then
+    echo "DRY: psql *** -X -q -v ON_ERROR_STOP=1 -v v=$RS_V -v overwrite=$RS_OVER -f scripts/launch/release-db-switches.sql (CAREER_AGENT_SUBMIT, CAREER_CLOUD_APPLY, APPLY_VM: set to off)"
+  else
+    run "psql *** -X -q -v ON_ERROR_STOP=1 -v v=$RS_V -v overwrite=$RS_OVER -f scripts/launch/release-db-switches.sql" "${P[@]}" -v "v=$RS_V" -v "overwrite=$RS_OVER" -f scripts/launch/release-db-switches.sql
+  fi
   if [[ -n "$DRY" ]]; then
     echo "DRY: psql *** -tA: every migration mark (${#EARLIER[@]} earlier + ${#MIGRATIONS[@]}) read again on the live schema; any missing one fails the run, each named"
     echo "DRY: psql *** -c: insert into public.career_deploy_ledger one migration row per mark (sha, file, sha256, manifest sha256, --label)"
@@ -944,8 +990,8 @@ else
   # Audit B2: the chat's door to the preparation host (both or neither, checked in preflight).
   if [[ -n "${CAREER_PREPARE_AHEAD_URL:-}" ]]; then add CAREER_PREPARE_AHEAD_URL "$CAREER_PREPARE_AHEAD_URL" "***"; add CAREER_PREPARE_AHEAD_TOKEN "$CAREER_PREPARE_AHEAD_TOKEN" "***"
   else echo "  kept: CAREER_PREPARE_AHEAD_URL, CAREER_PREPARE_AHEAD_TOKEN (not given; what the project has stays: with neither set, phone-only preparation is NOT_WIRED and the chat says so)"; fi
-  # OpenAI only (owner, 2026-10-12): the key goes with MODEL_PROVIDER=openai, as in go-live.sh.
-  if [[ -n "${OPENAI_API_KEY:-}" ]]; then add OPENAI_API_KEY "$OPENAI_API_KEY" "***"; add MODEL_PROVIDER openai openai; else echo "  kept: OPENAI_API_KEY (not given; an already-set key stays as it is)"; fi
+  # Claude only (owner, 2026-11-02): the Anthropic key alone; no OpenAI key and no MODEL_PROVIDER are set.
+  if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then add ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY" "***"; else echo "  kept: ANTHROPIC_API_KEY (not given; an already-set key stays as it is)"; fi
   # WO-038: each channel's values when given; a channel never given stays NOT_WIRED.
   for v in "${CHANNEL_HIDDEN[@]}" "${CHANNEL_PLAIN[@]}"; do
     if [[ -n "${!v:-}" ]]; then add "$v" "${!v}" "***"; else echo "  kept: $v (not given; what is set stays, and with nothing set that channel is NOT_WIRED)"; fi
@@ -972,7 +1018,7 @@ else
     done
     for v in "${CLOUD_PLAIN[@]}"; do
       if [[ -n "${!v:-}" ]]; then add "$v" "${!v}" "${!v}"
-      elif [[ -n "${CLOUD_WAVE1[$v]:-}" ]]; then add "$v" "${CLOUD_WAVE1[$v]}" "${CLOUD_WAVE1[$v]}"; echo "  $v: not given, set to the first wave's ${CLOUD_WAVE1[$v]}"
+      elif [[ -n "${CLOUD_WAVE1[$v]:-}" ]]; then add "$v" "${CLOUD_WAVE1[$v]}" "${CLOUD_WAVE1[$v]}"; echo "  $v: not given, set to the runner's default ${CLOUD_WAVE1[$v]}"
       else echo "  kept: $v (not given; off for a switch, no number for a per-person or per-site limit)"; fi
     done
     add CLOUD_BRIDGE_URL "$BASE/functions/v1/$CLOUD_FN" "$BASE/functions/v1/$CLOUD_FN"
@@ -983,10 +1029,13 @@ else
   # no texting channel is told plainly that no message comes (career_outreach_track.ts reminderWords). Before the brain
   # lines: CAREER_BRAIN stays the env file's last name, as F13-10 reads it.
   add CAREER_OUTREACH_FOLLOWUPS on on
-  # The router answers unless the owner asks for the agent brain on this run (D-008); the environment never decides it.
+  # D-035: the committed release config decides the brain (release_config.ts); these only write the rollback switch.
+  # CAREER_BRAIN=agent stays pinned off in code (AGENT_BRAIN_RELEASED) and so serves the router.
   if [[ "$BRAIN" == agent ]]; then add CAREER_BRAIN agent agent; fi
   # FEATURE 13: the staged release (question and advice turns to the brain, every action to code) only with --brain staged.
   if [[ "$BRAIN" == staged ]]; then add CAREER_BRAIN staged staged; fi
+  # D-035: the emergency rollback is SET, not unset: unset serves the committed release brain (staged).
+  if [[ "$BRAIN" == router ]]; then add CAREER_BRAIN router router; fi
   if [[ -n "$DRY" ]]; then echo "DRY: supabase secrets set --project-ref $REF --env-file <0600 temp file: ${NAMES[*]}>"
   else
     ENVF="$(umask 077; mktemp "${TMPDIR:-/tmp}/trainee-secrets.XXXXXX")"; chmod 600 "$ENVF"
@@ -999,8 +1048,8 @@ else
   case "$BRAIN" in
     agent) echo "  CAREER_BRAIN=agent: the agent brain answers career turns (the router still takes structured tasks and model outages)" ;;
     staged) echo "  CAREER_BRAIN=staged: the brain answers question and advice turns; every action, a model outage and any class in CAREER_BRAIN_ROUTER_INTENTS stay with code and the router (--brain router turns it off)" ;;
-    router) run "supabase secrets unset CAREER_BRAIN --project-ref $REF" supabase secrets unset CAREER_BRAIN --project-ref "$REF" ;;
-    *) echo "  CAREER_BRAIN not touched (the router answers unless it was set to agent before; --brain agent|router changes it)" ;;
+    router) echo "  CAREER_BRAIN=router: the emergency rollback; the router answers every turn whatever the release config says (removing the CAREER_BRAIN secret returns to the release brain)" ;;
+    *) echo "  CAREER_BRAIN not touched (the committed release config, supabase/functions/agent-chat/release_config.ts, decides the brain; CAREER_BRAIN=router rolls it back; --brain router sets that)" ;;
   esac
   if (( ${#GENERATED[@]} )); then
     echo "  generated: ${GENERATED[*]} (48 characters each; kept only in this process$([[ -n "$NONINT" ]] && echo '; --non-interactive never shows them: the function and its Vault schedule hold each'))"

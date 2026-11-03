@@ -1,11 +1,15 @@
-# WO-061 (owner, 2026-10-21; D-030): the chat brain's one bar is 95% or better on the held-out set (evals/career/heldout-live.json),
-# one full pass, on the build that is live. Judges: gpt-5-mini and gpt-4.1-mini here (OpenAI; no Anthropic spend), an item
-# passing in CI only when both pass it, and Instinct, the owner-appointed second judge, who scores every run beside them
-# into evals/career/instinct/<run>.json (evals/career/both-pass.ts). The router runs beside the agent on the same set as
-# the comparison. Every run adds one line per pass to evals/career/SCORE-LOG.md (date/time, brain commit, set size, score)
-# and commits it with the result files to ci/brain-eval. Needs the repository secret OPENAI_API_KEY; without it the run
-# prints NOT RUN and fails: a score is never faked. Spend: the runner counts every result file's recorded spend against
-# EVAL_BUDGET_USD and stops before the item that would cross it; a stopped run is not a score.
+# CLAUDE ONLY (owner directive, 2026-11-02): Trainee is Claude-only, judges included; no OpenAI call anywhere in this workflow.
+# Total spend $70 (MODEL_BUDGET_TARGET_USD and MODEL_BUDGET_HARD_USD are both $70; every eval process charges the shared
+# budget ledger and run.ts refuses to start a run whose preflight quote exceeds what remains of the $70). The reply brain is
+# Haiku (the committed default); there is no fallback model: Sonnet is Judge A only (owner, 2026-11-03 01:15 CT).
+# The bar (WO-061 / D-030, owner, 95%): the chat brain must score 95% or better on the held-out set, and the owner ruled
+# 2026-11-02 that this means all FIVE passes (verdict.ts releaseGate: the RELEASE brain, release_brain in the request, default
+# agent; exact counts passed/total >= 0.95 on every pass; other brains are reported and cannot rescue the gate). Judges: Judge A claude-sonnet-5-5 (the original prompt) and Judge B
+# claude-haiku-5-5 (a checklist prompt that must quote evidence the code finds in the reply), an item passing only when both
+# pass it (evals/career/judges.ts; JUDGES.md). Instinct is retired from the gate. The router runs beside the other brains on the
+# same set as the comparison. Every run adds one line per pass to evals/career/SCORE-LOG.md (date/time, brain commit, set size,
+# score) and commits it with the result files to ci/brain-eval. Needs the repository secret ANTHROPIC_API_KEY; without it the run
+# prints NOT RUN and fails: a score is never faked. A stopped run is not a score.
 # A measurement commit on ci/brain-eval merges the branch measured as its second parent; that is the brain commit logged.
 # 2026-10-26 (sealed held-out set): what a run measures is read from evals/career/eval-request.json (a push) or the
 # dispatch inputs: the set (dev: the 38 the builder has seen; sealed: the bar), the brains (router, staged, agent) and the
@@ -36,6 +40,20 @@ on:
         description: "Comma-separated: router, staged, agent"
         type: string
         default: "router,staged,agent"
+      release_brain:
+        description: "The brain whose five passes decide the sealed bar (must be one of the brains measured)"
+        type: choice
+        options: [agent, staged, router]
+        default: agent
+      action:
+        description: "eval (default) or rejudge (re-judge a stored run's transcripts with the Claude judges; no brain call)"
+        type: choice
+        options: [eval, rejudge]
+        default: eval
+      rejudge_run:
+        description: "action rejudge: the CI run id whose stored pass files on ci/brain-eval are re-judged"
+        type: string
+        default: ""
       allow_sealed_rerun:
         description: "Owner only: run the sealed set again although this hash was already run (RUNS.json)"
         type: boolean
@@ -48,31 +66,28 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      # D-038: no CAREER_MODEL pin. The brain runs the measured commit's committed model (agent-chat/release_model.ts; a
-      # commit before D-038 falls back to gpt-5-mini in run.ts), or the request's "model" (allowlisted below) for a
-      # comparison run, logged under its own brain name (e.g. staged:claude-haiku-5-5) so S3 never counts it.
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      # OWNER'S RULING (2026-11-01 20:25 CT, in writing, relayed by the architect's main session): "$25" on the Anthropic key
-      # for these tests, apart from the OpenAI eval budget. run.ts stops a claude- brain before the item that would cross it,
-      # counting every result file's claude- brain spend.
-      ANTHROPIC_EVAL_BUDGET_USD: "25"
-      EVAL_JUDGE_MODEL: gpt-5-mini
-      # Owner, 2026-10-21: "gpt-4.1-mini judges every run from now on ... A judge that runs only sometimes makes runs
-      # incomparable." In CI an item passes only when both pass it; Instinct scores every run beside them.
-      EVAL_JUDGE_MODEL_2: gpt-4.1-mini
-      # OWNER'S RULING (2026-10-21, later): "Eval spend ceiling is now $15 total tonight ($4.57 used so far)."
-      # BUILDER'S ARITHMETIC (not an owner figure): this limit sums every recorded result file since the eval began,
-      # so it is set to (recorded spend before tonight, $1.535) + $15 = $16.535, and written lower ($15.95) because five
-      # passes run in parallel and each sees only the spend recorded before it started: four others (about $0.12 each)
-      # can land beside the one that reaches the limit. Builder's arithmetic, not an owner figure. Ledger: evals/career/ROOT-CAUSES.md, "EVAL SPEND LEDGER".
-      # OWNER'S RULING (2026-10-25 23:17 CDT, in writing): "$20 more" for this round (brain eval, job judging, resume
-      # rewrite). Recorded all-time spend before it: $15.51 (SCORE-LOG close line). Ceiling = 15.51 + 20 = 35.51, written
-      # 35.50 for the same parallel-pass margin as above.
-      # 2026-10-26: the cap now counts the all-time baseline in evals/career/spend-ledger.json ($15.508 to 2026-10-21 15:10 UTC)
-      # plus every result file after it; before, it summed only the result files in the checkout and saw $0 (run
-      # 40371458562: spent_before_usd 0). The ceiling itself is the owner's and unchanged.
-      EVAL_BUDGET_USD: "35.50"
+      # D-038: no model pin. The brain runs the measured commit's committed Claude model (agent-chat/release_model.ts), or the
+      # request model (allowlisted below) for a comparison run, logged under its own brain name (e.g. staged:claude-haiku-5-5)
+      # so S3 never counts it. run.ts refuses a brain that is not a claude- model.
+      # The sealed set opens with HELDOUT_SEAL_KEY alone, after the owner has run the rewrap workflow (sealed-set-rewrap.yml):
+      # the set was first sealed to a key derived from the old provider secret, which this workflow no longer receives.
+      HELDOUT_SEAL_KEY: ${{ secrets.HELDOUT_SEAL_KEY }}
+      # OWNER'S DIRECTIVE (2026-11-02): total spend $70 (target = hard max), across every run and retry. The shared
+      # ledger (supabase/functions/_shared/model_budget.ts) takes these two names; run.ts and rejudge.ts read them for the
+      # preflight quote and stop at the target. Builder's note: five passes run in parallel, so EVAL_PARALLEL=5 makes each one
+      # quote all five.
+      MODEL_BUDGET_TARGET_USD: "70"
+      MODEL_BUDGET_HARD_USD: "70"
+      # ONE $70 across every run: the shared database ledger (the same one production reserves in). The runners fail closed
+      # (NOT RUN, exit 2, no model call) when EVAL_LEDGER=shared and the ledger or either secret below is missing or unreachable.
+      EVAL_LEDGER: shared
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      ANTHROPIC_EVAL_BUDGET_USD: "70"
+      EVAL_PARALLEL: "5"
+      EVAL_JUDGE_MODEL: claude-sonnet-5-5
+      EVAL_JUDGE_MODEL_2: claude-haiku-5-5
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 2 }
@@ -80,7 +95,12 @@ jobs:
         with: { deno-version: "v2.9.6" }
       - name: The key is present
         run: |
-          if [ -z "$OPENAI_API_KEY" ]; then echo "NOT RUN: the OPENAI_API_KEY secret is not set"; exit 2; fi
+          if [ -z "$ANTHROPIC_API_KEY" ]; then echo "NOT RUN: the ANTHROPIC_API_KEY secret is not set"; exit 2; fi
+      - name: The shared ledger secrets are present
+        run: |
+          for k in SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY; do
+            if [ -z "$(printenv "$k")" ]; then echo "NOT RUN: the repository secret $k is not set (the shared \$70 budget ledger); no model call was made"; exit 2; fi
+          done
       - name: What this run measures
         id: req
         run: |
@@ -89,28 +109,36 @@ jobs:
             const ev = Deno.env.get("GITHUB_EVENT_NAME") === "workflow_dispatch";
             const set = ev ? (Deno.env.get("IN_SET") || "dev") : (f.set ?? "dev");
             const brains = (ev ? (Deno.env.get("IN_BRAINS") || "router,staged,agent").split(",") : (f.brains ?? ["agent"])).map((b) => b.trim()).filter(Boolean);
-            const action = ev ? "eval" : (f.action ?? "eval");
+            const action = ev ? (Deno.env.get("IN_ACTION") || "eval") : (f.action ?? "eval");
+            const rejudgeRun = String((ev ? Deno.env.get("IN_REJUDGE_RUN") : f.rejudge_run) ?? "").trim();
             const passes = Number(f.passes ?? 5);
+            // The release brain (verdict.ts releaseGate): the brain whose five passes decide the sealed bar. A push must state it on a sealed
+            // request; a dispatch takes the input (default agent). It must be one of the brains measured.
+            const releaseBrain = String(ev ? (Deno.env.get("IN_RELEASE_BRAIN") || "agent") : (f.release_brain ?? (set !== "sealed" ? "agent" : ""))).trim();
             const suite = ev ? "heldout" : (f.suite ?? "heldout");
-            // D-038: an optional reply model from an allowlist (a push's request "model"); empty = the committed default.
-            const MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5", "gpt-5-mini"]; // = release_model.ts ROLLBACK_MODELS
+            // D-038: an optional reply model from an allowlist (the request file model on a push); empty = the committed default.
+            const MODELS = ["claude-haiku-5-5"]; // Haiku only: Sonnet is Judge A, never a candidate reply model (owner, 2026-11-03)
             const model = String((ev ? "" : f.model) ?? "").trim();
             if (model && (!MODELS.includes(model) || suite !== "heldout" || set === "sealed")) { console.log(`NOT RUN: model ${model} needs the allowlist (${MODELS.join(", ")}), the heldout suite and a set other than sealed`); Deno.exit(2); }
+            if (set === "sealed" && (!brains.includes(releaseBrain) || !["router", "staged", "agent"].includes(releaseBrain))) { console.log(`NOT RUN: a sealed request names its release_brain (${releaseBrain || "missing"}), and it must be one of the brains measured (${brains})`); Deno.exit(2); }
             if (!["heldout", "tasks"].includes(suite) || (suite === "tasks" && (action !== "eval" || set !== "dev"))) { console.log(`NOT RUN: bad suite ${suite} (heldout, or tasks with action eval on the dev set)`); Deno.exit(2); }
-            if (!["dev", "sealed", "fresh"].includes(set) || !brains.length || brains.some((b) => !["router", "staged", "agent"].includes(b)) || !["eval", "pubkey"].includes(action) || passes !== 5) {
-              console.log(`NOT RUN: bad request (set ${set}, brains ${brains}, action ${action}, passes ${passes}; the owner requires five passes)`); Deno.exit(2);
+            if (!["dev", "sealed", "fresh"].includes(set) || !brains.length || brains.some((b) => !["router", "staged", "agent"].includes(b)) || !["eval", "pubkey", "rejudge"].includes(action) || passes !== 5 || (action === "rejudge" && !/^[0-9]+$/.test(rejudgeRun))) {
+              console.log(`NOT RUN: bad request (set ${set}, brains ${brains}, action ${action}, rejudge run ${rejudgeRun}, passes ${passes}; the owner requires five passes)`); Deno.exit(2);
             }
-            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `set=${set}\nbrains=${brains.join(" ")}\nbrains_csv=${brains.join(",")}\naction=${action}\npasses=${passes}\nsuite=${suite}\nmodel=${model}\n`, { append: true });
+            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `set=${set}\nbrains=${brains.join(" ")}\nbrains_csv=${brains.join(",")}\naction=${action}\npasses=${passes}\nrelease_brain=${releaseBrain || "agent"}\nsuite=${suite}\nmodel=${model}\nrejudge_run=${rejudgeRun}\n`, { append: true });
             console.log(suite === "tasks" ? "measuring: the task eval (router, staged, planner, agent; $2 each)" : `measuring: action ${action}, set ${set}, brains ${brains.join(", ")}, ${passes} passes, model ${model || "the committed default"}`);
           '
         env:
           IN_SET: ${{ inputs.set }}
           IN_BRAINS: ${{ inputs.brains }}
+          IN_ACTION: ${{ inputs.action }}
+          IN_REJUDGE_RUN: ${{ inputs.rejudge_run }}
+          IN_RELEASE_BRAIN: ${{ inputs.release_brain }}
       # The sealed set's recipient key: derived from the CI secret, its public half committed so the set can be sealed to
       # it. The secret's value never leaves the runner.
       - name: Recipient key for the sealed set (no model call)
         if: steps.req.outputs.action == 'pubkey'
-        run: deno run -A evals/career/sealed/seal.ts pubkey --secret-env OPENAI_API_KEY > evals/career/sealed/recipient.json && cat evals/career/sealed/recipient.json
+        run: deno run -A evals/career/sealed/seal.ts pubkey --secret-env HELDOUT_SEAL_KEY > evals/career/sealed/recipient.json && cat evals/career/sealed/recipient.json
       - name: Open the sealed set
         if: steps.req.outputs.action == 'eval' && steps.req.outputs.suite == 'heldout' && steps.req.outputs.set == 'sealed'
         run: |
@@ -145,8 +173,14 @@ jobs:
         run: |
           set -euo pipefail
           export PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH
-          for b in router staged planner; do deno run -A --no-check --import-map=evals/career/tasks/import-map.json evals/career/tasks/run.ts --brain $b --model openai --budget-usd "$TASKS_BUDGET_USD" --label "tasks-$b-${{ github.run_id }}"; done
-          deno run -A --no-check --import-map=evals/career/tasks/agent-import-map.json evals/career/tasks/run.ts --brain agent --model openai --budget-usd "$TASKS_BUDGET_USD" --label "tasks-agent-${{ github.run_id }}"
+          for b in router staged planner; do deno run -A --no-check --import-map=evals/career/tasks/import-map.json evals/career/tasks/run.ts --brain $b --model claude --budget-usd "$TASKS_BUDGET_USD" --label "tasks-$b-${{ github.run_id }}"; done
+          deno run -A --no-check --import-map=evals/career/tasks/agent-import-map.json evals/career/tasks/run.ts --brain agent --model claude --budget-usd "$TASKS_BUDGET_USD" --label "tasks-agent-${{ github.run_id }}"
+      # action rejudge: the stored transcripts of an earlier run, judged again by the two Claude judges. No brain runs and no other
+      # model is called (rejudge.ts refuses every host but api.anthropic.com and every model but the two judges); the new pass files
+      # and their SCORE-LOG rows (judge=claude) are committed below, so S3 can compare against them.
+      - name: Re-judge stored transcripts (judges only)
+        if: steps.req.outputs.action == 'rejudge'
+        run: deno run -A evals/career/rejudge.ts --from-branch ci/brain-eval --run "${{ steps.req.outputs.rejudge_run }}" --new-run "${{ github.run_id }}"
       - name: Re-score recorded runs (judge only)
         if: steps.req.outputs.action == 'eval' && steps.req.outputs.suite == 'heldout'
         run: |
@@ -158,7 +192,7 @@ jobs:
         run: |
           ls evals/career/results/${{ steps.req.outputs.set }}-*-${{ github.run_id }}-p*.json >/dev/null 2>&1 && deno run -A evals/career/score-log.ts evals/career/results/${{ steps.req.outputs.set }}-*-${{ github.run_id }}-p*.json --run ${{ github.run_id }}
           set +e
-          deno run -A evals/career/verdict.ts --run ${{ github.run_id }} --set ${{ steps.req.outputs.set }} --brains ${{ steps.req.outputs.brains_csv }} --passes ${{ steps.req.outputs.passes }} --out "$RUNNER_TEMP/verdict.txt"
+          deno run -A evals/career/verdict.ts --run ${{ github.run_id }} --set ${{ steps.req.outputs.set }} --brains ${{ steps.req.outputs.brains_csv }} --passes ${{ steps.req.outputs.passes }} --release-brain ${{ steps.req.outputs.release_brain }} --out "$RUNNER_TEMP/verdict.txt"
           echo "code=$?" >> "$GITHUB_OUTPUT"
           cat "$RUNNER_TEMP/verdict.txt" >> "$GITHUB_STEP_SUMMARY"
           if [ "${{ steps.req.outputs.set }}" = "sealed" ]; then
@@ -178,15 +212,15 @@ jobs:
         if: always() && steps.req.outputs.action == 'eval' && steps.req.outputs.suite == 'heldout'
         run: |
           cat "$RUNNER_TEMP/verdict.txt" 2>/dev/null || echo "NOT A SCORE: no verdict was written"
-          # A second, independent reading of the raw pass files: a claimed bar must hold on every pass (finished, no judge
-          # error, both judges on every item, 95% or more), or the job fails whatever verdict.ts said.
+          # A second, independent reading of the raw pass files, by the same function verdict.ts uses (releaseGate; no second threshold):
+          # on the sealed set the release brain must have all five clean passes at 95% or more, or the job fails whatever verdict.ts said.
           deno eval '
-            const set = "${{ steps.req.outputs.set }}", run = "${{ github.run_id }}", v = Deno.readTextFileSync(Deno.env.get("RUNNER_TEMP") + "/verdict.txt");
-            for (const b of "${{ steps.req.outputs.brains_csv }}".split(",")) {
-              if (!new RegExp(`^${b}: .*BAR MET`, "m").test(v)) continue;
-              const ps = [1, 2, 3, 4, 5].map((p) => { try { return JSON.parse(Deno.readTextFileSync(`evals/career/results/${set}-${b}-${run}-p${p}.json`)); } catch { return null; } });
-              const clean = (a) => a && !a.stopped && a.total === a.planned && a.items.every((x) => !/^(brain|judge) error/.test(x.note ?? "") && [a.judge_model, a.judge_model_2].every((m) => (x.judges ?? []).some((j) => j.model === m && !/^judge error/.test(j.note ?? ""))));
-              if (set !== "sealed" || !ps.every((a) => clean(a) && a.pass_rate >= 0.95)) { console.log(`VERDICT REFUSED: ${b} is not at 95% on every clean pass of the sealed set`); Deno.exit(1); }
-            }
+            const set = "${{ steps.req.outputs.set }}", run = "${{ github.run_id }}", b = "${{ steps.req.outputs.release_brain }}";
+            const v = Deno.readTextFileSync(Deno.env.get("RUNNER_TEMP") + "/verdict.txt");
+            const { releaseGate } = await import("file://" + Deno.cwd() + "/evals/career/verdict.ts");
+            const ps = [1, 2, 3, 4, 5].map((p) => { try { return JSON.parse(Deno.readTextFileSync(`evals/career/results/${set}-${b}-${run}-p${p}.json`)); } catch { return null; } });
+            const g = releaseGate(set, ps);
+            const claimed = new RegExp(`^${b}: .*BAR MET`, "m").test(v);
+            if (set === "sealed" ? !g.ok : claimed) { console.log(`VERDICT REFUSED: release brain ${b} is not at 95% on all five clean passes of the sealed set: ${g.reasons.join("; ")}`); Deno.exit(1); }
           '
           [ "${{ steps.verdict.outputs.code }}" = "0" ]

@@ -547,7 +547,8 @@ Deno.test({
       await t.step("their text: the questions say a draft is ready; it is shown whole only when they ask; only \"use 1\" saves it", async () => {
         const list = await text("what do you need from me");
         assertEquals(list?.status, "shown", JSON.stringify(list));
-        assertMatch(list!.reply, /1\. Cover letter/);
+        // One question per message (review of #360): the cover letter is the question shown, under its own line.
+        assertMatch(list!.reply, /\nCover letter/);
         assertMatch(list!.reply, /A draft of 1 is ready, written only from your confirmed facts\. Say "draft 1" to read it/);
         const early = await text("use 1");
         assertEquals(early?.status, "draft_none", "a draft they have not read is never saved");

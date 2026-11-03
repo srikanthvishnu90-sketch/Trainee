@@ -31,7 +31,7 @@ function fakeSink(refuse: (r: Row) => string | null = () => null, opts: { throws
     } };
   } };
 }
-const cfg = { ...modelConfig({ get: () => undefined }, "chat"), model: "gpt-5-mini" };
+const cfg = { ...modelConfig({ get: () => undefined }, "chat"), model: "claude-haiku-5-5", apiKey: "sk-ant-fake" };
 const oneCall = () => { const m = newMeter(); meterAdd(m, cfg, { input_tokens: 100, output_tokens: 40 }); return m; };
 const U = "00000000-0000-0000-0000-00000000aaaa", T = "00000000-0000-0000-0000-00000000bbbb";
 const refuseCounted = (r: Row) => r.calls === null ? null : "permission denied";
@@ -45,7 +45,7 @@ async function ledgerScenarios(mod: { turnLedger: typeof turnLedger }) {
   // 2. A turn with one call: one row with the call, its tokens and cost; no extra zero row beside it.
   { const s = fakeSink(), l = mod.turnLedger(s, U, T); const m = l.track(oneCall()); await l.record(m);
     eq(await l.finish(), "metered"); eq(s.rows.length, 1, "one-call turn: exactly one row");
-    eq([s.rows[0].meter_state, s.rows[0].calls, s.rows[0].input_tokens, s.rows[0].output_tokens, s.rows[0].provider], ["metered", 1, 100, 40, "openai"]);
+    eq([s.rows[0].meter_state, s.rows[0].calls, s.rows[0].input_tokens, s.rows[0].output_tokens, s.rows[0].provider], ["metered", 1, 100, 40, "anthropic"]);
     assert(Number(s.rows[0].usd_micros) > 0, "priced"); }
   // 3. A call whose turn never got to record it (the turn threw): finish() still records it.
   { const s = fakeSink(), l = mod.turnLedger(s, U, T); l.track(oneCall());
@@ -123,17 +123,17 @@ const P = (n: number) => PEOPLE[`tok-tc${n}`];
 const ADVICE = "how should I follow up after an interview?";
 const ANSWER = "Send a short thank-you note within a day that names one thing you discussed.";
 let modelRequests = 0;
-const fakeOpenAI = async (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
+const fakeAnthropic = async (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
   const req = input instanceof Request && !init ? input : new Request(input as any, init);
-  if (new URL(req.url).hostname !== "api.openai.com") return new Response("not reachable in this test", { status: 404 });
+  if (new URL(req.url).hostname !== "api.anthropic.com") return new Response("not reachable in this test", { status: 404 });
   const body = await req.json(); modelRequests++;
-  return new Response(JSON.stringify({ id: "fake", model: body.model, choices: [{ index: 0, message: { role: "assistant", content: ANSWER }, finish_reason: "stop" }], usage: { prompt_tokens: 100, completion_tokens: 40 } }), { status: 200, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify({ id: "fake", type: "message", role: "assistant", model: body.model, content: [{ type: "text", text: ANSWER }], stop_reason: "end_turn", usage: { input_tokens: 100, output_tokens: 40 } }), { status: 200, headers: { "content-type": "application/json" } });
 };
 
 Deno.test({ name: "real handler: zero-call, one-call and sink-failure turns leave persisted rows", sanitizeResources: false, sanitizeOps: false, async fn(t) {
   if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
   const pg: Pg = await startPg();
-  const keys = ["CAREER_BRAIN", "CAREER_BRAIN_ROUTER_INTENTS", "OPENAI_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "CAREER_MODEL_DAILY_USD", "CAREER_MODEL_DAILY_CALLS"];
+  const keys = ["CAREER_BRAIN", "CAREER_BRAIN_ROUTER_INTENTS", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "CAREER_MODEL_DAILY_USD", "CAREER_MODEL_DAILY_CALLS"];
   const saved: Record<string, string | undefined> = {};
   for (const k of keys) saved[k] = Deno.env.get(k);
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
@@ -143,16 +143,16 @@ Deno.test({ name: "real handler: zero-call, one-call and sink-failure turns leav
       await pg.sql(`insert into auth.users (id, email) values ('${pid}', '${pid}@example.test'); insert into public.profiles (id) values ('${pid}');
         insert into public.career_watch_kv (user_id, key, value) values ('${pid}', 'career:account', '{"epoch":0,"version":0,"paused":false}');`);
     }
-    Deno.env.set("OPENAI_API_KEY", "sk-fake-tc-not-a-key"); Deno.env.delete("MODEL_PROVIDER"); Deno.env.set("CAREER_MODEL", "gpt-5-mini");
+    Deno.env.set("ANTHROPIC_API_KEY", "sk-ant-fake-tc-not-a-key"); Deno.env.delete("MODEL_PROVIDER"); Deno.env.delete("CAREER_MODEL");
     Deno.env.delete("CAREER_MODEL_DAILY_USD"); Deno.env.delete("CAREER_MODEL_DAILY_CALLS"); Deno.env.delete("CAREER_BRAIN_ROUTER_INTENTS");
-    globalThis.fetch = fakeOpenAI as typeof fetch;
+    globalThis.fetch = fakeAnthropic as typeof fetch;
     handler = await careerHandler(pg, PEOPLE);
     const say = async (c: Chat, message: string, extra: Record<string, unknown> = {}) => { const r = await c.say(message, extra); eq(r.status, 200, r.reply); return r; };
     // [meter_state, calls, models] per row, oldest first; calls is null for unrecorded.
     const rows = async (pid: string) => JSON.parse((await pg.sql(`select coalesce(json_agg(json_build_array(meter_state, calls, models) order by id), '[]'::json) from public.agent_turn_costs where user_id = '${pid}'`)) || "[]");
 
     await t.step("a zero-call turn (the router answers, no model asked) leaves one row that says 0 calls", async () => {
-      Deno.env.delete("CAREER_BRAIN");
+      Deno.env.set("CAREER_BRAIN", "router"); // D-035: unset now serves the release brain (staged); the router path is the rollback
       const n = modelRequests;
       await say(handler!.chat("tok-tc1"), "hi");
       eq(modelRequests - n, 0, "no model request was made");
@@ -168,13 +168,13 @@ Deno.test({ name: "real handler: zero-call, one-call and sink-failure turns leav
       const r = await say(handler!.chat("tok-tc2"), ADVICE);
       assert(r.reply.includes(ANSWER), r.reply);
       eq(modelRequests - n, 1, "one model request");
-      eq(await rows(P(2)), [["metered", 1, ["gpt-5-mini"]]], "one row, no extra zero row beside it");
+      eq(await rows(P(2)), [["metered", 1, ["claude-haiku-5-5"]]], "one row, no extra zero row beside it");
       const usd = Number(await pg.sql(`select usd_micros from public.agent_turn_costs where user_id = '${P(2)}'`));
       assert(usd > 0, `priced (${usd})`);
     });
 
     await t.step("the same turn key sent twice is one turn: one row", async () => {
-      Deno.env.delete("CAREER_BRAIN");
+      Deno.env.set("CAREER_BRAIN", "router"); // D-035: unset now serves the release brain (staged); the router path is the rollback
       const c = handler!.chat("tok-tc3");
       await say(c, "hi", { turn_key: "tc-replay-1" });
       await say(c, "hi", { turn_key: "tc-replay-1" });
@@ -195,7 +195,7 @@ Deno.test({ name: "real handler: zero-call, one-call and sink-failure turns leav
       eq(modelRequests - n, 1, "the model was called");
       eq(await rows(P(4)), [["unrecorded", null, []]], "unrecorded, calls NULL: the spend of this turn is unknown, not zero");
       // A zero-call turn whose zero row is refused is unrecorded too.
-      Deno.env.delete("CAREER_BRAIN");
+      Deno.env.set("CAREER_BRAIN", "router"); // D-035: unset now serves the release brain (staged); the router path is the rollback
       await say(handler!.chat("tok-tc5"), "hi");
       eq(await rows(P(5)), [["unrecorded", null, []]]);
       // Another person's zero-call turn is unaffected.

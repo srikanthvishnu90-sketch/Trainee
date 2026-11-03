@@ -6,15 +6,19 @@
 #   bash scripts/launch/secrets-audit.sh --names-file names.txt  # offline: one secret NAME per line (no values)
 #   bash scripts/launch/secrets-audit.sh --vercel-names-file v.txt   # offline Vercel env NAMES; else `vercel env ls production` if linked
 #   bash scripts/launch/secrets-audit.sh --strict                # optional/channel secrets count as missing too
+#   bash scripts/launch/secrets-audit.sh --features              # per feature: ENABLED or OFF, WIRED or NOT_WIRED (deploy standard S5)
+#     A feature is ENABLED when its switch secret is set (or always, for the core); WIRED when every secret it needs is set.
+#     Exit 1 when any feature is ENABLED and NOT_WIRED: a feature without its secrets must stay off, never faked (D-034).
 # Exit 0: nothing launch-blocking is missing. Exit 1: something is. Exit 2: the audit could not read the names (nothing is "ok" then).
 # Feature -> secrets, who sets them, and the verify command: docs/launch/OWNER-SETUP-CHECKLIST.md.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-NAMES_FILE=""; VERCEL_FILE=""; STRICT=""
+NAMES_FILE=""; VERCEL_FILE=""; STRICT=""; FEATURES=""
 while (($#)); do case "$1" in
   --names-file) NAMES_FILE="${2:?--names-file needs a path}"; shift 2;;
   --vercel-names-file) VERCEL_FILE="${2:?--vercel-names-file needs a path}"; shift 2;;
   --strict) STRICT=1; shift;;
+  --features) FEATURES=1; shift;;
   *) echo "unknown option: $1" >&2; exit 2;;
 esac; done
 
@@ -22,7 +26,7 @@ esac; done
 # where: fn = Supabase function secret, vercel = Vercel project env, gh = GitHub environment `production` secret
 # Format: where|NAME|tier|feature
 MANIFEST='
-fn|OPENAI_API_KEY|R|the model (every reply)
+fn|ANTHROPIC_API_KEY|R|the model (every reply; Claude only)
 fn|LOOPMESSAGE_API_KEY|R|inbound texts and the phone-login code (trainee-inbound answers 503 NOT_WIRED without it)
 fn|TRAINEE_INBOUND_SECRET|R|LoopMessage webhook URL (?secret=)
 fn|CAREER_INGEST_SECRET|R|job ingest schedule
@@ -77,6 +81,36 @@ VERCEL_KNOWN=""; { [[ -n "$VERCEL_FILE" ]] || [[ -n "$VERCEL_NAMES" ]]; } && VER
 if [[ -n "$unreadable" ]]; then echo "NOT RUN: could not read $unreadable. Nothing is reported as present." >&2; exit 2; fi
 
 has() { grep -qxF "$2" <<<"$1"; }
+
+# feature|switch (a function secret name whose presence turns it on, or "always")|the function secrets it needs
+FEATURE_MANIFEST='
+model|always|ANTHROPIC_API_KEY
+job-ingest|always|CAREER_INGEST_SECRET INGEST_CONTACT_EMAIL
+alerts|always|CAREER_PROACTIVE_SECRET
+delivery|always|TRAINEE_DELIVER_SECRET
+texts-loopmessage|LOOPMESSAGE_API_KEY|TRAINEE_INBOUND_SECRET
+telegram|TELEGRAM_WEBHOOK_SECRET|TELEGRAM_BOT_TOKEN
+whatsapp|WHATSAPP_TOKEN|WHATSAPP_PHONE_NUMBER_ID WHATSAPP_APP_SECRET WHATSAPP_VERIFY_TOKEN
+file-pages|TRAINEE_FILE_LINK_SECRET|TRAINEE_FILE_BASE_URL TRAINEE_BOT_URL
+ops-monitor|OPS_MONITOR_TOKEN|TELEGRAM_BOT_TOKEN OWNER_TELEGRAM_CHAT_ID
+gmail-connect|GOOGLE_OAUTH_CLIENT_ID|GOOGLE_OAUTH_CLIENT_SECRET OAUTH_STATE_SECRET
+phone-prepare|CAREER_PREPARE_AHEAD_URL|CAREER_PREPARE_AHEAD_TOKEN
+people-data|PDL_API_KEY|PDL_API_KEY'
+if [[ -n "$FEATURES" ]]; then
+  bad=0
+  while IFS='|' read -r feature switch needs; do
+    [[ -z "$feature" ]] && continue
+    if [[ "$switch" == always ]] || has "$FN_NAMES" "$switch"; then on=ENABLED; else on=OFF; fi
+    missing=""
+    for n in $needs; do has "$FN_NAMES" "$n" || missing+="${missing:+,}$n"; done
+    if [[ -z "$missing" ]]; then wired=WIRED; else wired=NOT_WIRED; fi
+    [[ $on == ENABLED && $wired == NOT_WIRED ]] && bad=$((bad+1))
+    printf 'FEATURE %-18s %-7s %-9s%s\n' "$feature" "$on" "$wired" "${missing:+ missing=$missing}"
+  done <<<"$FEATURE_MANIFEST"
+  echo "features enabled and NOT_WIRED: $bad"
+  ((bad)) && exit 1
+  exit 0
+fi
 miss_r=0; miss_o=0; unk=0
 printf '%-8s %-34s %-6s %s\n' WHERE NAME STATUS "UNLOCKS"
 while IFS='|' read -r where name tier feature; do

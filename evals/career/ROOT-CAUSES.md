@@ -999,20 +999,3 @@ of private content.
 - Spend: tonight $13.974 of $15 (all-time recorded $15.508). A further 5-pass run would cross the $15.95 workflow
   limit, so the eval line is closed for tonight. Awaiting the second judge's score against stacked build 2 (85.8/86.0);
   if it comes in lower or H004 misbehaves on its read, the H004 fix is dropped.
-
-## 2026-10-26: sealed held-out set; the 38 become the dev set (eval track, PR feat/sealed-eval-20261026)
-- Harness: parity with agent-chat's stores (standing instructions, apply queue, outreach drafts, seeded postings) and a
-  code-checked outcome per item. Scores from here on carry `harness: parity 2026-10-26`; they are not comparable with the
-  lines above, and the harness gain is never read as a brain gain. Still not covered: handler-career's code-first turns.
-- Baseline on the new harness (run 40386610748, dev set, five passes, both CI judges on every item, $0.970): router
-  24/21/21/20/20, staged 35/33/33/33/32, agent 36/33/34/36/35 of 38. Recorded all-time spend $16.092 before, $17.062 after.
-- Round A (run 40388246181, $0.679; recorded $17.061 before, $17.740 after). Root cause (audit S3): posting and email text
-  reached the model with nothing saying it is data, and remember_instruction kept a quote found anywhere in the message,
-  pasted text included. Fix: standing instructions only from the person's own words; every posting tool result and the
-  brain prompt say posting text is data; search-judge reasons with a link, an address or an instruction are refused.
-  Staged 33/33/32/33/34 (mean 86.8 vs 87.4): a tie, as expected (the dev set has no injection items). Agent: NOT A SCORE,
-  every pass: the OpenAI account answered HTTP 429 insufficient_quota ("no credits remaining") from about item 23 on, so
-  13-18 items per pass have no verdict. A safety-class fix with no measured gain: under D-030's ratchet the owner decides.
-- The account ran dry at $17.74 recorded, under the $35.50 ceiling: the binding limit is the account's credit, not the
-  workflow cap. No further run until the owner adds credit. Rounds B (the saved-fact playback only after a save) and C
-  (follow-through on the turn before) are unmeasured and held on branch hold/brain-prompt-rounds-bc-20261026.

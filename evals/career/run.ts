@@ -8,7 +8,9 @@
 // --budget-usd (or EVAL_BUDGET_USD) is a total across runs: the spend already recorded in evals/career/results/*.json
 // counts against it, and the run stops before the next item once the spend plus a reserve for one more item reaches it.
 // A stopped run is written with "stopped", and is not a score.
-// Needs OPENAI_API_KEY (the judge; and the agent brain). Without it: NOT RUN, exit 2. A score is never faked.
+// Claude only (owner, 2026-11-02): needs ANTHROPIC_API_KEY (the two judges, judges.ts; and the brain). Without it, or with a
+// non-claude- judge or brain: NOT RUN, exit 2. A score is never faked. Before the first item a preflight quote (eval_budget.ts)
+// refuses a run that would cross 80% of what remains under MODEL_BUDGET_TARGET_USD (70; hard max MODEL_BUDGET_HARD_USD, 100).
 // Results: evals/career/results/<label>.json, plus the pass rate and failing ids on stdout.
 // 2026-10-26 (sealed set): `category` names the journey stage; `expect` is the outcome counted by code from the end state
 // (harness.ts outcomeOf: rows written or not), checked beside the judges: an item passes only when both judges pass it AND
@@ -22,10 +24,13 @@ export interface EvalItem { id: string; persona: string; turns: string[]; must: 
 export type Trace = { stopped: string; steps: number; tools: { name: string; ok: boolean; error?: string }[]; errors?: string[]; route?: string; intent?: string | null; reason?: string }[];
 export type Brain = (turns: string[], item?: EvalItem) => Promise<{ replies: string[]; state: unknown; trace?: Trace }>;
 export type Judge = (item: EvalItem, lastReply: string, state: unknown) => Promise<{ pass: boolean; failed: string[]; score: number; note: string }>;
-export interface EvalItemResult { id: string; category?: string; outcome?: unknown; state_check?: { ok: boolean; failed: string[] }; pass: boolean; failed: string[]; score: number; replies: string[]; note: string; state?: unknown; trace?: Trace; judges?: { model: string; pass: boolean; failed: string[]; note: string }[] }
+export interface EvalItemResult { id: string; disagree?: boolean; category?: string; outcome?: unknown; state_check?: { ok: boolean; failed: string[] }; pass: boolean; failed: string[]; score: number; replies: string[]; note: string; state?: unknown; trace?: Trace; judges?: { model: string; pass: boolean; failed: string[]; note: string }[] }
 export interface EvalResult { total: number; passed: number; pass_rate: number; items: EvalItemResult[]; planned: number; stopped: string | null }
 
 import { type BrainName, checkExpect, HARNESS, type ModelFn, outcomeOf } from "./harness.ts";
+import { isClaude, JUDGE_A_MAX_TOKENS, JUDGE_A_MODEL, JUDGE_A_SYSTEM, JUDGE_B_MAX_TOKENS, JUDGE_B_MODEL, JUDGE_B_SYSTEM, judgeBPrompt, judgeFingerprint, judgeModelProblem, parseJudgeB } from "./judges.ts";
+import { attribute, attributionLines } from "./attribution.ts";
+import { budgetTargets, claudeSpentUsd, ledgerSpentUsd, openGate, preflight, quoteRun, spendLine } from "./eval_budget.ts";
 // stop: asked before each item; a reason ends the run there (the spend cap), and the items not run are not scored.
 export async function runEval(items: EvalItem[], brain: Brain, judge: Judge, stop?: () => string | null): Promise<EvalResult> {
   const out: EvalItemResult[] = [];
@@ -42,7 +47,7 @@ export async function runEval(items: EvalItem[], brain: Brain, judge: Judge, sto
     try {
       const j = await judge(it, replies[replies.length - 1] ?? "", state);
       // The end state the judges saw is kept, so a later re-score (rejudge.ts) grades exactly what they graded.
-      out.push({ id: it.id, ...cat, pass: !!j.pass && sc.ok, failed: [...(j.failed || []), ...sc.failed.map((f) => `state: ${f}`)], score: Number(j.score) || 1, replies, note: j.note || "", ...((j as any).judges ? { judges: (j as any).judges } : {}), state: state ?? null, outcome, state_check: sc, ...(trace ? { trace } : {}) });
+      out.push({ id: it.id, ...cat, ...((j as any).disagree !== undefined ? { disagree: !!(j as any).disagree } : {}), pass: !!j.pass && sc.ok, failed: [...(j.failed || []), ...sc.failed.map((f) => `state: ${f}`)], score: Number(j.score) || 1, replies, note: j.note || "", ...((j as any).judges ? { judges: (j as any).judges } : {}), state: state ?? null, outcome, state_check: sc, ...(trace ? { trace } : {}) });
     } catch (e) {
       out.push({ id: it.id, ...cat, pass: false, failed: it.must, score: 1, replies, note: `judge error: ${e instanceof Error ? e.message : String(e)}`, outcome, state_check: sc });
     }
@@ -55,7 +60,7 @@ export async function runEval(items: EvalItem[], brain: Brain, judge: Judge, sto
 // when judges disagree, the item counts as a failure until both pass it."): both verdicts are kept, and the item passes
 // only when every judge passes it. A judge that errors fails the item.
 export type Verdict = { pass: boolean; failed: string[]; score: number; note: string };
-export function bothJudges(verdicts: { model: string; v: Verdict }[]): Verdict & { judges: { model: string; pass: boolean; failed: string[]; note: string }[] } {
+export function bothJudges(verdicts: { model: string; v: Verdict }[]): Verdict & { judges: { model: string; pass: boolean; failed: string[]; note: string }[]; disagree: boolean } {
   const judges = verdicts.map(({ model, v }) => ({ model, pass: !!v.pass, failed: v.failed || [], note: v.note || "" }));
   return {
     pass: judges.length > 0 && judges.every((j) => j.pass),
@@ -63,6 +68,8 @@ export function bothJudges(verdicts: { model: string; v: Verdict }[]): Verdict &
     score: Math.min(...verdicts.map(({ v }) => Number(v.score) || 1)),
     note: judges.map((j) => `[${j.model}: ${j.pass ? "pass" : "FAIL"}] ${j.note}`).join(" "),
     judges,
+    // Judge A and judge B split on this item (one passed, one failed); every result reports the rate.
+    disagree: judges.length > 1 && judges.some((j) => j.pass) && judges.some((j) => !j.pass),
   };
 }
 
@@ -113,6 +120,28 @@ export function parseJudge(text: string): { pass: boolean; failed: string[]; sco
   const j = JSON.parse(m[0]);
   if (typeof j.pass !== "boolean") throw new Error("judge JSON has no boolean pass");
   return { pass: j.pass, failed: Array.isArray(j.failed) ? j.failed.map(String) : [], score: Math.max(1, Math.min(5, Number(j.score) || 1)), note: String(j.note || "") };
+}
+
+// The two Claude judges as one Judge (judges.ts). `call` sends one request with a config (run.ts and rejudge.ts each pass their
+// own metered, budget-gated callModel). A call that fails is retried once (a transient provider error is not a verdict); a
+// second failure is a judge error, which fails the item and makes the pass NOT A SCORE. Judge A grades with JUDGE_PROMPT,
+// judge B with the checklist prompt and must quote evidence the code finds in the reply or the state.
+export type JudgeCall = (cfg: any, payload: any) => Promise<any>;
+const textOf = (res: any) => (res.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
+export function makeJudge(o: { cfgA: any; cfgB: any; call: JudgeCall }): Judge {
+  const askA = async (item: EvalItem, reply: string, state: unknown) =>
+    parseJudge(textOf(await o.call(o.cfgA, { system: JUDGE_A_SYSTEM, messages: [{ role: "user", content: judgePrompt(item, reply, state) }], max_tokens: JUDGE_A_MAX_TOKENS })));
+  const askB = async (item: EvalItem, reply: string, state: unknown) =>
+    parseJudgeB(textOf(await o.call(o.cfgB, { system: JUDGE_B_SYSTEM, messages: [{ role: "user", content: judgeBPrompt(item, reply, state, outcomeOf) }], max_tokens: JUDGE_B_MAX_TOKENS })), item, reply, state);
+  const settle = async (ask: typeof askA, item: EvalItem, reply: string, state: unknown) => {
+    let last: unknown = null;
+    for (let k = 0; k < 2; k++) { try { return await ask(item, reply, state); } catch (e) { last = e; } }
+    return { pass: false, failed: item.must, score: 1, note: `judge error: ${last instanceof Error ? last.message : String(last)}` };
+  };
+  return async (item, reply, state) => {
+    const [a, b] = await Promise.all([settle(askA, item, reply, state), settle(askB, item, reply, state)]);
+    return bothJudges([{ model: o.cfgA.model, v: a }, { model: o.cfgB.model, v: b }]);
+  };
 }
 
 // The brains, as agent-chat runs them, over in-memory stores for one synthetic person (see harness.ts for what is and is
@@ -214,53 +243,58 @@ export async function makeBrain(o: { name: BrainName; model: ModelFn | null; env
 // ids, categories and verdicts: no turns, replies, state, rubric text or judge notes, so builders cannot read the items
 // back out of the results.
 export function redactSealed(r: EvalResult): EvalResult {
-  return { ...r, items: r.items.map((x) => ({ id: x.id, ...(x.category ? { category: x.category } : {}), pass: x.pass, failed: [], score: x.score, replies: [],
+  return { ...r, items: r.items.map((x) => ({ id: x.id, ...(x.disagree !== undefined ? { disagree: x.disagree } : {}), ...(x.category ? { category: x.category } : {}), pass: x.pass, failed: [], score: x.score, replies: [],
     note: /^(brain|judge) error/.test(x.note) ? x.note.split(":")[0] : "", state_check: x.state_check ? { ok: x.state_check.ok, failed: [] } : undefined,
     ...(x.judges ? { judges: x.judges.map((j) => ({ model: j.model, pass: j.pass, failed: [], note: /^judge error/.test(j.note) ? "judge error" : "" })) } : {}),
     ...(x.trace ? { trace: x.trace.map((t) => ({ stopped: t.stopped, steps: t.steps, tools: t.tools.map((c) => ({ name: c.name, ok: c.ok })), ...(t.route ? { route: t.route } : {}) })) } : {}) })) };
 }
 
+
+// ---------------------------------------------------------------------------------------------------- CLI
 if (import.meta.main) {
   const args = Deno.args, opt = (n: string) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] ?? null : null; };
+  const get = (k: string) => Deno.env.get(k);
   const brainName = opt("--brain") || "router", label = opt("--label") || `${brainName}-${new Date().toISOString().slice(0, 10)}`;
   if (!["router", "agent", "staged"].includes(brainName)) { console.log(`NOT RUN: --brain must be router, agent or staged (got ${brainName}).`); Deno.exit(2); }
   const usesModel = brainName === "agent" || brainName === "staged";
-  if (!Deno.env.get("OPENAI_API_KEY")) { console.log("NOT RUN: no OPENAI_API_KEY (the judge needs it)."); Deno.exit(2); }
-  const { callModel, modelConfig, newMeter, PRICES } = await import("../../supabase/functions/_shared/model_gateway.ts");
+  // Claude only: both judges are claude- ids sent to Anthropic with ANTHROPIC_API_KEY. An EVAL_JUDGE_MODEL that names anything
+  // else is refused, never sent to another provider.
+  const judgeAModel = get("EVAL_JUDGE_MODEL") || JUDGE_A_MODEL, judgeBModel = get("EVAL_JUDGE_MODEL_2") || JUDGE_B_MODEL;
+  for (const m of [judgeAModel, judgeBModel]) { const why = judgeModelProblem(m, Deno.env); if (why) { console.log(`NOT RUN: ${why}.`); Deno.exit(2); } }
+  const gw = await import("../../supabase/functions/_shared/model_gateway.ts");
+  const bud = await import("../../supabase/functions/_shared/model_budget.ts");
+  const { newMeter, PRICES, modelConfigFor } = gw;
   const meter = newMeter(), judgeMeter = newMeter();
-  // D-038: the measured commit's committed reply model (agent-chat/release_model.ts) or the request's model; a commit from
-  // before D-038 has no release_model.ts and is measured as it served, on CAREER_MODEL or gpt-5-mini.
+  // D-038: the measured commit's committed reply model (agent-chat/release_model.ts) or the request's model (CAREER_REPLY_MODEL).
   const rm: any = await import("../../supabase/functions/agent-chat/release_model.ts").catch(() => null);
-  const brainCfg = rm ? rm.careerModelConfig(Deno.env) : { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
-  const committedModel: string = rm ? rm.CAREER_MODEL_DEFAULT : "gpt-5-mini";
-  // A comparison run (a model other than the committed one) is logged under its own brain name, so S3 never reads it as
-  // the served brain's score.
+  const brainCfg = rm ? rm.careerModelConfig(Deno.env) : modelConfigFor(Deno.env, get("CAREER_REPLY_MODEL") || "claude-haiku-5-5");
+  const committedModel: string = rm ? rm.CAREER_MODEL_DEFAULT : "claude-haiku-5-5";
+  if (usesModel && !isClaude(brainCfg.model)) { console.log(`NOT RUN: the brain model ${brainCfg.model} is not a claude- model (Trainee is Claude only); name one with CAREER_REPLY_MODEL.`); Deno.exit(2); }
   const brainLabel = usesModel && brainCfg.model !== committedModel ? `${brainName}:${brainCfg.model}` : brainName;
-  const judgeCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("EVAL_JUDGE_MODEL") || "gpt-5-mini" };
-  const judge2Model = Deno.env.get("EVAL_JUDGE_MODEL_2") || null;
-  const judge2Cfg = judge2Model ? { ...modelConfig(Deno.env, "chat"), model: judge2Model } : null;
-  const brain: Brain = await makeBrain({ name: brainName as any, env: Deno.env, model: usesModel ? (p: any) => callModel(brainCfg, p, { meter, role: "chat" }) : null });
-  const oneJudge = async (cfg: any, item: EvalItem, reply: string, state: unknown) => {
-    const res = await callModel(cfg, { system: "You are a strict grader. Output JSON only.", messages: [{ role: "user", content: judgePrompt(item, reply, state) }], max_tokens: 400 }, { meter: judgeMeter, role: "chat" });
-    return parseJudge((res.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join(""));
-  };
-  // A judge call that fails is retried once (a transient provider error is not a verdict); a second failure is a judge
-  // error, which fails the item and makes the pass NOT A SCORE.
-  const settle = async (cfg: any, item: EvalItem, reply: string, state: unknown) => {
-    let last: unknown = null;
-    for (let k = 0; k < 2; k++) { try { return await oneJudge(cfg, item, reply, state); } catch (e) { last = e; } }
-    return { pass: false, failed: item.must, score: 1, note: `judge error: ${last instanceof Error ? last.message : String(last)}` };
-  };
-  const judge: Judge = async (item, reply, state) => {
-    if (!judge2Cfg) return settle(judgeCfg, item, reply, state);
-    const [a, b] = await Promise.all([settle(judgeCfg, item, reply, state), settle(judge2Cfg, item, reply, state)]);
-    return bothJudges([{ model: judgeCfg.model, v: a }, { model: judge2Cfg.model, v: b }]);
-  };
+  const judgeCfg = modelConfigFor(Deno.env, judgeAModel), judge2Cfg = modelConfigFor(Deno.env, judgeBModel);
+  // ---- the shared ledger and the preflight quote
+  const { target, hard } = budgetTargets(get);
+  const parallel = Math.max(1, Number(opt("--parallel") ?? get("EVAL_PARALLEL") ?? 1) || 1);
+  const prior: any[] = [];
+  for (const dir of ["./results/", "./tasks/results/"]) {
+    try {
+      for await (const e of Deno.readDir(new URL(dir, import.meta.url))) if (e.name.endsWith(".json")) prior.push(JSON.parse(await Deno.readTextFile(new URL(`${dir}${e.name}`, import.meta.url))));
+    } catch { /* no results yet */ }
+  }
+  let before = claudeSpentUsd(prior, label);
+  const opened = openGate(bud, get, before, target, parallel);
+  if ("error" in opened) { console.log(`NOT RUN: ${opened.error}.`); Deno.exit(2); }
+  const { gate, shared: sharedLedger } = opened;
+  // Shared ledger: the spend before this run is what ALL runs recorded in the one $70 ledger (not just result files on this disk).
+  if (sharedLedger) { const led = await ledgerSpentUsd(gate); if (led === null) { console.log("NOT RUN: the shared budget ledger could not be read; no model call was made."); Deno.exit(2); } before = led; console.log(`shared ledger: $${led.toFixed(3)} recorded across all runs; remaining allowance $${Math.max(0, target - led).toFixed(3)} of $${target.toFixed(2)}`); }
+  const call = (meterOf: typeof meter) => (cfg: any, payload: any) => gw.callModel(cfg, payload, { meter: meterOf, role: "chat", budget: gate });
+  const brain: Brain = await makeBrain({ name: brainName as any, env: Deno.env, model: usesModel ? (p: any) => gw.callModel(brainCfg, p, { meter, role: "chat", budget: gate }) : null });
+  const judge = makeJudge({ cfgA: judgeCfg, cfgB: judge2Cfg, call: call(judgeMeter) });
   const setName = opt("--set") || "official";
   let setPath: string | URL;
   // "heldout" is the sealed held-out set (the bar) from 2026-10-26; the 38 it used to name are the dev set.
   if (setName === "sealed" || setName === "heldout") {
-    const p = Deno.env.get("EVAL_SEALED_PATH");
+    const p = get("EVAL_SEALED_PATH");
     if (!p) { console.log("NOT RUN: --set sealed needs EVAL_SEALED_PATH (the file CI decrypted with evals/career/sealed/seal.ts open)."); Deno.exit(2); }
     setPath = p;
   } else if (setName === "dev") setPath = new URL("./heldout-live.json", import.meta.url);
@@ -272,45 +306,49 @@ if (import.meta.main) {
   const only = opt("--only");
   if (only && (setName === "sealed" || setName === "heldout")) { console.log("NOT RUN: --only is refused on the sealed set (a sealed run scores every item)."); Deno.exit(2); }
   const items: EvalItem[] = set.items.filter((i: EvalItem) => !only || only.split(",").includes(i.id));
-  const budgetArg = opt("--budget-usd") ?? Deno.env.get("EVAL_BUDGET_USD") ?? null;
-  const budget = budgetArg === null ? null : Number(budgetArg);
-  if (budget !== null && (!(budget > 0) || !PRICES[judgeCfg.model] || (judge2Cfg && !PRICES[judge2Cfg.model]) || (usesModel && !PRICES[brainCfg.model]))) {
-    console.log(`NOT RUN: a budget needs a positive number and a priced model (judge ${judgeCfg.model}, brain ${brainCfg.model}); an unpriced call cannot be capped.`);
-    Deno.exit(2);
-  }
-  const prior: any[] = [];
-  try {
-    for await (const e of Deno.readDir(new URL("./results/", import.meta.url))) {
-      if (e.name.endsWith(".json")) prior.push(JSON.parse(await Deno.readTextFile(new URL(`./results/${e.name}`, import.meta.url))));
-    }
-  } catch { /* no results yet */ }
-  const ledger: Ledger = JSON.parse(await Deno.readTextFile(new URL("./spend-ledger.json", import.meta.url)));
-  const before = spentUsd(prior, label, ledger);
-  const now$ = () => before + (meter.usd_micros + judgeMeter.usd_micros) / 1e6;
-  if (budget !== null) console.log(`budget $${budget.toFixed(2)} · already spent $${before.toFixed(3)} (ledger baseline $${ledger.baseline_usd.toFixed(3)} + ${prior.length} result files)`);
-  // D-038 (owner, 2026-11-01: "$25" on the Anthropic key for these tests, apart from the OpenAI eval budget).
-  const asked = (Deno.env.get("CAREER_REPLY_MODEL") ?? "").trim();
+  const asked = (get("CAREER_REPLY_MODEL") ?? "").trim();
   if (usesModel && asked && brainCfg.model !== asked) { console.log(`NOT RUN: CAREER_REPLY_MODEL=${asked} was refused (not on the rollback list, or its provider has no key); the default would be measured instead.`); Deno.exit(2); }
-  const anthropicBrain = usesModel && brainCfg.provider === "anthropic";
-  const aBudget = anthropicBrain ? Number(Deno.env.get("ANTHROPIC_EVAL_BUDGET_USD") ?? NaN) : null;
-  if (anthropicBrain && !(aBudget! > 0)) { console.log("NOT RUN: a claude- brain needs ANTHROPIC_EVAL_BUDGET_USD (the Anthropic spend cap)."); Deno.exit(2); }
-  const aBefore = prior.filter((x) => x.label !== label && /^claude-/i.test(String(x.model ?? ""))).reduce((a, x) => a + (Number(x.cost_usd?.brain) || 0), 0);
-  if (anthropicBrain) console.log(`anthropic budget $${aBudget!.toFixed(2)} · already spent $${aBefore.toFixed(3)}`);
-  const evalStop = budgetStop(budget, now$), aStop = budgetStop(aBudget, () => aBefore + meter.usd_micros / 1e6, 0.05);
-  const raw = await runEval(items, brain, judge, () => evalStop() ?? (anthropicBrain ? aStop() : null));
+  // The preflight quote: token estimate x price. Refuses a run that would cross 80% of what remains under the target.
+  let quote;
+  try { quote = quoteRun({ items: items.length, brain: brainName as any, brainModel: usesModel ? brainCfg.model : null, judgeA: judgeCfg.model, judgeB: judge2Cfg.model, prices: PRICES }); }
+  catch (e) { console.log(`NOT RUN: ${e instanceof Error ? e.message : e}`); Deno.exit(2); }
+  const pre = preflight({ quote, parallel, spent_usd: before, target_usd: target, hard_usd: hard, ledger: sharedLedger ? "shared" : "process-local" });
+  console.log(pre.line);
+  if (!pre.ok) { console.log("NOT RUN: the preflight quote was refused; nothing was spent."); Deno.exit(2); }
+  try { await bud.assertRunMayStart(gate, Math.ceil(quote.total_usd * 1e6), { model: brainCfg.model, role: "eval" }); }
+  catch (e) { console.log(e instanceof Error ? e.message : String(e)); Deno.exit(2); }
+  // Per-item stop: this run's spend plus a reserve for one more item must stay under the lowest cap named (the target, and
+  // --budget-usd / EVAL_BUDGET_USD / ANTHROPIC_EVAL_BUDGET_USD when given), and always under the hard max.
+  const caps = [target, ...[opt("--budget-usd"), get("EVAL_BUDGET_USD"), get("ANTHROPIC_EVAL_BUDGET_USD")].filter((x) => x != null && x !== "").map(Number)];
+  if (caps.some((c) => !(c > 0))) { console.log("NOT RUN: a budget needs a positive number."); Deno.exit(2); }
+  const cap = Math.min(...caps), budget = caps.length > 1 ? cap : null;
+  const now$ = () => before + (meter.usd_micros + judgeMeter.usd_micros) / 1e6;
+  const capStop = budgetStop(cap, now$), hardStop = budgetStop(hard, now$, 0.05);
+  const raw = await runEval(items, brain, judge, () => capStop() ?? hardStop());
   const sealedSet = setName === "sealed" || setName === "heldout" || setName === "fresh";
   const r = sealedSet ? redactSealed(raw) : raw;
   let source = "unknown";
   try { const o = await new Deno.Command("git", { args: ["rev-parse", "--short", "HEAD^2"] }).output(); if (o.success) source = new TextDecoder().decode(o.stdout).trim(); } catch { /* no second parent */ }
   let commit = "unknown";
   try { commit = new TextDecoder().decode((await new Deno.Command("git", { args: ["rev-parse", "--short", "HEAD"] }).output()).stdout).trim(); } catch { /* not a git checkout */ }
-  const result = { label, harness: HARNESS, set: setName === "fresh" ? "fresh" : sealedSet ? "sealed" : setName, ...(set.sha256 ? { set_sha256: set.sha256 } : {}), brain: brainLabel, model: usesModel ? brainCfg.model : null, judge_model: judgeCfg.model, judge_model_2: judge2Cfg?.model ?? null, commit, source_commit: source === "unknown" ? commit : source, run_at: new Date().toISOString(),
-    cost_usd: { brain: meter.usd_micros / 1e6, judge: judgeMeter.usd_micros / 1e6 }, unpriced_calls: meter.unpriced + judgeMeter.unpriced,
-    budget_usd: budget, spent_before_usd: before, brain_turn_ms: BRAIN_TURN_MS, brain_calls: meter.calls, brain_failed_calls: meter.failed,
-    ...(anthropicBrain ? { anthropic_budget_usd: aBudget, anthropic_spent_before_usd: aBefore } : {}), ...r };
+  const attribution = attribute(r.items, brainLabel);
+  const split = r.items.filter((x) => x.disagree).length;
+  const costs = { brain: meter.usd_micros / 1e6, judge: judgeMeter.usd_micros / 1e6 };
+  const spend = spendLine({ label, quote_usd: quote.total_usd, brain_usd: costs.brain, judge_usd: costs.judge, spent_before_usd: before, target_usd: target, hard_usd: hard });
+  const result = { label, harness: HARNESS, set: setName === "fresh" ? "fresh" : sealedSet ? "sealed" : setName, ...(set.sha256 ? { set_sha256: set.sha256 } : {}), brain: brainLabel, model: usesModel ? brainCfg.model : null, judge_model: judgeCfg.model, judge_model_2: judge2Cfg.model,
+    judge_prompt_sha: await judgeFingerprint(JUDGE_PROMPT, { a: judgeCfg.model, b: judge2Cfg.model }), judge_disagreement: { items: split, rate: r.total ? split / r.total : 0 },
+    commit, source_commit: source === "unknown" ? commit : source, run_at: new Date().toISOString(),
+    cost_usd: costs, unpriced_calls: meter.unpriced + judgeMeter.unpriced, quote_usd: quote.total_usd, spend_line: spend, ledger: sharedLedger ? "shared" : "process-local",
+    budget_usd: budget, spent_before_usd: before, target_usd: target, hard_usd: hard, brain_turn_ms: BRAIN_TURN_MS, brain_calls: meter.calls, brain_failed_calls: meter.failed,
+    route_attribution: attribution, ...r };
   await Deno.mkdir(new URL("./results/", import.meta.url), { recursive: true });
   await Deno.writeTextFile(new URL(`./results/${label}.json`, import.meta.url), JSON.stringify(result, null, 1));
-  console.log(`${label}: ${r.passed}/${r.total} passed (${Math.round(r.pass_rate * 100)}%) · brain ${brainName} · judges ${judgeCfg.model}${judge2Cfg ? ` + ${judge2Cfg.model}` : ""} · cost $${(result.cost_usd.brain + result.cost_usd.judge).toFixed(3)}`);
+  console.log(`${label}: ${r.passed}/${r.total} passed (${Math.round(r.pass_rate * 100)}%) · brain ${brainName} · judges ${judgeCfg.model} + ${judge2Cfg.model} (split on ${split}) · cost $${(costs.brain + costs.judge).toFixed(3)}`);
   console.log(`failing: ${r.items.filter((x) => !x.pass).map((x) => x.id).join(", ") || "none"}`);
+  console.log(spend);
+  const lines = attributionLines(attribution);
+  for (const l of lines) console.log(l);
+  const sum = get("GITHUB_STEP_SUMMARY");
+  if (sum) { try { await Deno.writeTextFile(sum, `${spend}\n${lines.join("\n")}\n`, { append: true }); } catch { /* no summary file */ } }
   if (r.stopped) { console.log(`STOPPED after ${r.total} of ${r.planned} items (${r.stopped}): not a score.`); Deno.exit(3); }
 }

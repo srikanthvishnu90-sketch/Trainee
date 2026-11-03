@@ -1,0 +1,63 @@
+# PR SHA reviewer [note]
+# Deploy standard S2 (D-034): an independent reviewer's approval of a merged PR, by the exact head SHA that was merged, for
+# PRs whose approval is not a GitHub APPROVED review by an owner, member or collaborator other than the PR's author (GitHub
+# refuses a review of one's own PR, and the architect and the builder push from one account).
+# One line per approval: `<PR number> <40-hex merged head SHA> <reviewer> [note]`. The reviewer is who reviewed it (one
+# token; never blank, never the PR's author, never the account that merged it); such a line approves nothing. A line approves only that SHA: a PR pushed again
+# after its line needs a new line. Lines are added, never edited; an approval is written only after the review against the
+# PR's work order (CLAUDE.md, "Your loop", step 3), never in bulk and never backdated.
+# scripts/launch/deploy-standard.ts reads this file from the TRUNK TIP when it judges a SHA, so a line may approve a PR
+# merged before the line was. A PR whose diff only adds lines here is exempt from needing an approval of its own.
+# Ledger reviewer names are an audit record, not a cryptographic proof; true enforcement needs a second reviewer account plus trunk branch protection (owner decision, open).
+308 95af676f1df70d09f0d4c8b6ccaf1b146007454c independent-review-agent-batch-20261031 risk=high
+310 be2dcadc1c559201267e80efc30cfc1f80886100 independent-review-agent-batch-20261031 risk=high
+311 344c22a087e56e5d9b9cdb392cd28f4c2bd2c266 independent-review-agent-batch-20261031 risk=high
+312 a26bff71743a65745a72bf23182085fe983d31da independent-review-agent-batch-20261031 risk=low
+313 672f485b8a92928b35088ad5c8e667baf07f8bad independent-review-agent-batch-20261031 risk=low
+314 a74e5f40897d602bef36fca303c08e7b72aef6cc independent-review-agent-batch-20261031 risk=high
+315 faf3219effa524b71797b2cffed9480871bc3418 independent-review-agent-batch-20261031 risk=high
+316 0cfa0b723a114d27eaf45622d12be1aa82732449 independent-review-agent-batch-20261031 risk=high
+318 b8bf37361d3d6d900af1442bcd81d0c6d89d1a45 independent-review-agent-batch-20261031 risk=high
+320 6a0fbcdfb713b593531b7282c078a7edef8b2767 independent-review-agent-batch-20261031 risk=low
+325 735f4599723ce0f21fca00ecb7a61aa613ef961a independent-review-agent-batch-20261031 risk=high
+327 0433b6e4d4bb3f9b4d67832eca57c410e65d99d9 independent-review-agent-batch-20261031 risk=high
+328 e7498822edc56a94f594bfa13281851113296d56 independent-review-agent-batch-20261031 risk=high
+330 d115b405bcd0999c8bab6e1384a613b499661cd6 independent-review-agent-batch-20261031 risk=high
+331 8816952751ded3a6fec69b37268dce93ac447f3b independent-review-agent-batch-20261031 risk=low
+332 185d1fb1fccea30016f6a40f0fc03df00ca7fd25 independent-review-agent-batch-20261031 risk=high
+333 5631f74afed5e2bb17f09c299c2954f32bf139cc independent-review-agent-batch-20261031 risk=high
+334 016b4fe30be804226c25d9f4bc54fd7f03cfe980 independent-review-agent-batch-20261031 risk=high
+337 59aee197b17a8bb31f234591d3a4199d71e2e84b independent-review-agent-batch-20261031 risk=high
+341 050ea85953dc5325759a482231f00d2056bc35a0 independent-review-agent-batch-20261031 risk=high
+342 ffc399f10db8f130788ac2a342946fe18445519c independent-review-agent-batch-20261031 risk=high
+343 17e045b14e38629b36cc89a43819a7936a3754c5 independent-review-agent-batch-20261031 risk=high
+344 f0827da2a11e7b9c1760feaa210b9ac0e750c36f independent-review-agent-batch-20261031 risk=low
+345 3109bd61d69dfcedea88853d5dd8aadee8fcbcd8 independent-review-agent-batch-20261031 risk=high
+346 2d629e34581e8bc152440691ef9d38b1c349ee06 independent-review-agent-batch-20261031 risk=high
+347 f75d3b17deff29ee8682d2b9571e50e3113bcce8 independent-review-agent-batch-20261031 risk=high
+351 0b5fabea4736ae9fd05005f64a95ccdb129f6f0f independent-review-agent-batch-20261031 risk=high
+352 d1fc567048e400b45fd1b6b5826bc0ecf8a229b6 independent-review-agent-batch-20261031 risk=high
+307 4bd1932f32aa729981d4fadb01091373fb2ae492 independent-review-agent-batch-20261031 risk=high
+309 5b5a8084f2047feec4a746b05ee6cd7ad7011185 independent-review-agent-batch-20261031 risk=high
+317 89c9708450404fab8e5d41265b9b278331e987e6 independent-review-agent-batch-20261031 risk=high
+319 725886b0ff8050c11abb981469af3d6c24f81492 independent-review-agent-batch-20261031 risk=high
+321 385e5d86ec4218123ab30cac4a84824007f2b91f independent-review-agent-batch-20261031 risk=high
+322 94ecd86054a39f7504af46f3644c99f7d420c7b1 independent-review-agent-batch-20261031 risk=high
+323 c5a76e1b190188565b2d18eac93eb7a80e43535e independent-review-agent-batch-20261031 risk=high
+324 65c99c51ae889f1f0492bafaf8fa3ae6a88ac3a6 independent-review-agent-batch-20261031 risk=high
+326 8d85a6d1d5e41cf0115ccbdbc8cd39936e24fa32 independent-review-agent-batch-20261031 risk=high
+329 dff50782bf8fc0205c7e399939f3121d60ef8c78 independent-review-agent-batch-20261031 risk=high
+335 3c6766bdaf23bc8452e5e37d1bcdb14f88cfd713 independent-review-agent-batch-20261031 risk=low
+336 0120f5db45f4b20519e16a13d262aa4e8853fda2 independent-review-agent-batch-20261031 risk=high
+339 c4aeed0ed8ee2b3becdd0d18437aafc767020439 independent-review-agent-batch-20261031 risk=high
+352 d1fc567048e400b45fd1b6b5826bc0ecf8a229b6 independent-review-agent-rv352 risk=high
+351 0b5fabea4736ae9fd05005f64a95ccdb129f6f0f independent-review-agent-rv351 risk=high
+356 f2806a8fdfde500e2d71d6cb67b37beea2c0be95 independent-review-agent-rv7 risk=low
+353 209452f83d1e761dbaf745dc6fe2c3390a3c793a independent-review-agent-rv11 risk=high
+360 687a9c909fcfc963c645eda89648421c3f03ecbe independent-review-agent-rv20 risk=high
+359 1f13b08c7b6288d991ca551b3f7299187b2f0c0c independent-review-agent-rv24 risk=high
+350 9c1e84db5faece146a22264760805f0b6c9aea3c independent-review-agent-rv13 risk=high
+369 1449a110ed607bdcecadd5484af938f84cefcb0a independent-review-agent-rv17 risk=low
+355 e7256358f761c639a65515f7dc964ca7da2cc154 independent-review-agent-rv19 risk=high
+362 6fe093be955b4f1d026d1e33dcbd720aab3f6a94 independent-review-agent-rv21 risk=high
+386 34b6661d28cc05d08c4bc04b8d43824cc8a80867 independent-review-agent-rv32 risk=low note=merged-before-CI-to-unbreak-trunk

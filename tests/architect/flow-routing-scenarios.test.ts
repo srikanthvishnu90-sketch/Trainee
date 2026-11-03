@@ -5,7 +5,7 @@
 // For each: the turn that answered (from the reply's intent) is the one the pure mirror (pureRoute) names and one the
 // scenario allows; and nothing external happened: no request left the machine but a posting-board read (refused here),
 // nothing on the send rail, no draft approved, no application approved or sent, no subscription changed, and only an
-// apply ask ever adds to the person's apply queue. No model: CAREER_BRAIN, OPENAI_API_KEY and every model switch unset.
+// apply ask ever adds to the person's apply queue. No model: CAREER_BRAIN, ANTHROPIC_API_KEY and every model switch unset.
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
@@ -72,10 +72,12 @@ Deno.test({
     if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 binaries in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
     if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (initdb)"); return; }
     const pg: Pg = await startPg();
-    const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "OPENAI_API_KEY",
+    const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "ANTHROPIC_API_KEY",
       "CAREER_NETWORKING_DRAFT", "CAREER_SEND_RAIL", "CAREER_PEOPLE_SEARCH", "STRIPE_SECRET_KEY", "CAREER_REPLY_WRITER", "CAREER_APPLY_LINK"];
     const saved = Object.fromEntries(unset.map((k) => [k, Deno.env.get(k)]));
     for (const k of unset) Deno.env.delete(k);
+    // D-036: CAREER_MAIL_TRACKING is a release flag (on when unset): every mail path stays off only with "off".
+    Deno.env.set("CAREER_MAIL_TRACKING", "off");
     let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
     const realFetch = globalThis.fetch;
     const realError = console.error;

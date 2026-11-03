@@ -382,7 +382,7 @@ Per channel: what, code, depth, status. All speak one conversation interface; th
 
 ### F35 Memory and the person's situation
 - **What:** the person's profile, confirmed facts, standing instructions and a timeline persist across threads and channels; the system prompt gets a situation block built by code each turn (every task in flight, what blocks it, who acts).
-- **Code:** `career_account_memory.ts`, `agent/memory.ts`, `agent/timeline.ts`, `career_situation.ts`, `career_capabilities.ts`, `career_standing.ts`, `career_host.js`, migration `20261026090009_career_account_memory.sql`; `CAREER_ACCOUNT_MEMORY=on` for account scope.
+- **Code:** `career_account_memory.ts`, `agent/memory.ts`, `agent/timeline.ts`, `career_situation.ts`, `career_capabilities.ts`, `career_standing.ts`, `career_host.js`, migration `20261026090009_career_account_memory.sql`; since 2026-10-31 account scope is the default for anyone with a texting contact linked (or whose account already holds the memory), with one profile copy across threads (`20261031050000`); `CAREER_ACCOUNT_MEMORY=on` forces it, `=off` turns it off (root cause 3, `docs/architect/ROOT-CAUSES-2026-10-31.md`).
 - **Depth:** model window of the last 40 messages plus a code-written summary; nothing before an erase reaches the model; a correction replaces what it corrects (PR #102, open); pasted text never writes the tracker (PR #111, open). Prompt injection into saved memory (audit S3) fixed partially: the saved instruction must be built from the quote.
 - **Status:** Y/Y/Y (#37, #41, #138, #182); Deployed Y (account scope Y-off); Live seen (`conversation_recall` 30, `profile_recall` 8).
 

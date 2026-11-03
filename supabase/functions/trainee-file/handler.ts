@@ -21,6 +21,7 @@ import { dayOf, BRAND, esc, layout, postedLine, webUrl } from "../_shared/file_p
 import { actOn, bodyHtml, COPY_SCRIPT, KIND_CSS, KIND_LABEL, textOf, type Effects, type FileRecord } from "../_shared/file_kinds.ts";
 import type { FileService } from "../_shared/file_service.ts";
 import { renderResults, renderThings, type PayFilter, type ResultRow, type ThingQuestion } from "../_shared/results_page.ts";
+import { parseStateFilter } from "../_shared/results_batch.ts";
 import { conversionNote, floorText, type Pay, payGroup, payText, startsBelow } from "../_shared/role_pay.ts";
 import { checkAnswer, type OpenQuestion, type QuestionStore } from "../_shared/career_apply_questions.ts";
 import { type PendingRow, pendingLine } from "../_shared/career_hosted_prepare.ts";
@@ -783,7 +784,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   const feed = await loadFeed(claims, token, d, notes);
   if (!feed) return o.state("This list is gone", ["It is no longer available. " + NEW_LINK], 404);
   if (o.req.method === "GET" && o.url.searchParams.get("format") === "text") return o.text(renderText(feed));
-  const pf = o.url.searchParams.get("pay") as PayFilter, filters = { pay: PAY_FILTERS.has(pf) ? pf : "any" as PayFilter, where: (o.url.searchParams.get("where") ?? "").trim().slice(0, 80) };
+  const pf = o.url.searchParams.get("pay") as PayFilter, filters = { pay: PAY_FILTERS.has(pf) ? pf : "any" as PayFilter, where: (o.url.searchParams.get("where") ?? "").trim().slice(0, 80), state: parseStateFilter(o.url.searchParams.get("state")) };
   const openNow = await readQs(), pend = d.pending ? await d.pending(u).catch(() => null) : null;
   // Stable ids over the WHOLE list (not the filter, not the sort, not what is dismissed).
   const rawRefs = (await d.store.recallList(u, claims.r).catch(() => null)) ?? feed.rows.map((r) => r.ref);

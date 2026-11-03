@@ -18,6 +18,11 @@
 --   claim_token      the claim's own token: only the worker that holds it can finish the row, so a worker whose lease was
 --                    taken over cannot mark the newer attempt done or failed.
 --   available_at     retry backoff: a released row is not claimable until then (20 s, then 60 s).
+--   done_steps       the side effects of the turn that go straight to the person (a Yes/No prompt, job cards, documents, a long
+--                    answer's rest, files, links) are each recorded here BEFORE they are sent, under the claim's token, so a retry
+--                    skips what a dead attempt already did (at most once, never twice) and a stale attempt (its lease taken over,
+--                    or timed out) records nothing and so sends nothing: inbound_turn_step is the fence.
+--   told             a failed row's person has been told (the turn said it itself, or the worker's sweep queued the neutral line).
 -- Every function is SECURITY DEFINER with a fixed search_path and service_role only; the table is RLS-on with no policy.
 -- Rollback: supabase/rollbacks/20261102170000_inbound_turn_queue.down.sql
 
@@ -33,6 +38,8 @@ create table if not exists public.inbound_turn_queue (
   lease_until timestamptz,
   claim_token uuid,
   available_at timestamptz not null default now(),
+  done_steps text[] not null default '{}',
+  told boolean not null default false,
   last_error text check (last_error is null or length(last_error) <= 500),
   created_at timestamptz not null default now(),
   finished_at timestamptz,
@@ -65,13 +72,20 @@ end $$;
 -- queued or claimed row of the same contact (one in flight per person, in order). Two workers never get the same row, and
 -- never two rows of one contact in one call (the second has the first as its older row).
 create or replace function public.inbound_turn_claim(p_limit integer default 5, p_lease_seconds integer default 180,
-  p_now timestamptz default now(), p_max_attempts integer default 3)
+  p_now timestamptz default now(), p_max_attempts integer default 3, p_max_inflight integer default 20)
 returns setof public.inbound_turn_queue language plpgsql security definer set search_path = public, pg_temp as $$
+declare room integer;
 begin
+  -- Claims are serialized for the few milliseconds of the count and the update, so the global cap holds under concurrent workers
+  -- (the row locks below still skip rows another transaction holds).
+  perform pg_advisory_xact_lock(hashtext('inbound_turn_claim'));
   update public.inbound_turn_queue q
      set status = 'failed', finished_at = p_now, contact = null, lease_until = null, claim_token = null,
          last_error = left(coalesce(q.last_error || '; ', '') || 'lease expired on the last attempt', 500)
    where q.status = 'claimed' and q.lease_until <= p_now and q.attempts >= p_max_attempts;
+  -- Global in-flight cap: rows under a live lease count; at the cap nothing new is claimed (the queue absorbs the burst).
+  select greatest(0, least(coalesce(p_limit, 0), coalesce(p_max_inflight, 20) - count(*)))::integer into room
+    from public.inbound_turn_queue where status = 'claimed' and lease_until > p_now;
   return query
   with c as (
     select q.id from public.inbound_turn_queue q
@@ -80,7 +94,7 @@ begin
        and not exists (select 1 from public.inbound_turn_queue o
                         where o.contact = q.contact and o.id < q.id and o.status in ('queued', 'claimed'))
      order by q.id
-     limit greatest(0, coalesce(p_limit, 0))
+     limit room
      for update of q skip locked)
   update public.inbound_turn_queue u
      set status = 'claimed', attempts = u.attempts + 1, claimed_at = p_now,
@@ -93,7 +107,7 @@ end $$;
 -- retried), 'retry' (it did not finish: back to queued after a backoff, or failed when no attempt is left). Returns the row's
 -- new status, or 'stale' when the token is not the row's current claim (the lease was taken over: this worker changes nothing).
 create or replace function public.inbound_turn_finish(p_id bigint, p_token uuid, p_outcome text, p_error text default null,
-  p_now timestamptz default now(), p_max_attempts integer default 3)
+  p_now timestamptz default now(), p_max_attempts integer default 3, p_told boolean default false)
 returns text language plpgsql security definer set search_path = public, pg_temp as $$
 declare r public.inbound_turn_queue; s text; err text := left(p_error, 500);
 begin
@@ -108,10 +122,36 @@ begin
   s := case when p_outcome = 'done' then 'done' else 'failed' end;
   update public.inbound_turn_queue
      set status = s, finished_at = p_now, contact = null, lease_until = null, claim_token = null,
-         payload = case when s = 'done' then '{}'::jsonb else payload end,
+         payload = case when s = 'done' then '{}'::jsonb else payload end, told = (s = 'failed' and coalesce(p_told, false)),
          last_error = case when p_outcome = 'retry' then left(coalesce(err, 'out of attempts'), 500) else err end
    where id = p_id;
   return s;
+end $$;
+
+-- The fence and the once-only record of one side effect. true: this claim's attempt may do it now (it is recorded first). false: it
+-- was done by an earlier attempt, or this token is no longer the row's claim (stale: do nothing).
+create or replace function public.inbound_turn_step(p_id bigint, p_token uuid, p_step text)
+returns boolean language plpgsql security definer set search_path = public, pg_temp as $$
+declare n integer;
+begin
+  update public.inbound_turn_queue set done_steps = done_steps || p_step
+   where id = p_id and claim_token = p_token and status = 'claimed' and not (p_step = any(done_steps));
+  get diagnostics n = row_count;
+  return n = 1;
+end $$;
+
+-- Failed rows whose person has not been told (the worker queues a neutral line for each, then marks it).
+create or replace function public.inbound_turn_untold(p_limit integer default 10)
+returns setof public.inbound_turn_queue language sql stable security definer set search_path = public, pg_temp as $$
+  select * from public.inbound_turn_queue where status = 'failed' and not told order by id limit greatest(0, coalesce(p_limit, 0))
+$$;
+create or replace function public.inbound_turn_told(p_id bigint)
+returns boolean language plpgsql security definer set search_path = public, pg_temp as $$
+declare n integer;
+begin
+  update public.inbound_turn_queue set told = true where id = p_id and status = 'failed' and not told;
+  get diagnostics n = row_count;
+  return n = 1;
 end $$;
 
 -- What ops-monitor reads: how many wait, how long the oldest has waited, how many are in flight, and the failed rows the owner
@@ -140,12 +180,18 @@ begin
 end $$;
 
 revoke all on function public.inbound_turn_enqueue(text, text, text, jsonb) from public, anon, authenticated;
-revoke all on function public.inbound_turn_claim(integer, integer, timestamptz, integer) from public, anon, authenticated;
-revoke all on function public.inbound_turn_finish(bigint, uuid, text, text, timestamptz, integer) from public, anon, authenticated;
+revoke all on function public.inbound_turn_claim(integer, integer, timestamptz, integer, integer) from public, anon, authenticated;
+revoke all on function public.inbound_turn_finish(bigint, uuid, text, text, timestamptz, integer, boolean) from public, anon, authenticated;
+revoke all on function public.inbound_turn_step(bigint, uuid, text) from public, anon, authenticated;
+revoke all on function public.inbound_turn_untold(integer) from public, anon, authenticated;
+revoke all on function public.inbound_turn_told(bigint) from public, anon, authenticated;
 revoke all on function public.inbound_turn_health(timestamptz, interval) from public, anon, authenticated;
 revoke all on function public.inbound_turn_purge(timestamptz, interval, interval) from public, anon, authenticated;
 grant execute on function public.inbound_turn_enqueue(text, text, text, jsonb) to service_role;
-grant execute on function public.inbound_turn_claim(integer, integer, timestamptz, integer) to service_role;
-grant execute on function public.inbound_turn_finish(bigint, uuid, text, text, timestamptz, integer) to service_role;
+grant execute on function public.inbound_turn_claim(integer, integer, timestamptz, integer, integer) to service_role;
+grant execute on function public.inbound_turn_finish(bigint, uuid, text, text, timestamptz, integer, boolean) to service_role;
+grant execute on function public.inbound_turn_step(bigint, uuid, text) to service_role;
+grant execute on function public.inbound_turn_untold(integer) to service_role;
+grant execute on function public.inbound_turn_told(bigint) to service_role;
 grant execute on function public.inbound_turn_health(timestamptz, interval) to service_role;
 grant execute on function public.inbound_turn_purge(timestamptz, interval, interval) to service_role;

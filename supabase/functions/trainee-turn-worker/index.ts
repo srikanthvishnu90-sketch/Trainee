@@ -9,6 +9,7 @@ import { supabaseWorkerStore } from "../_shared/inbound_turn_queue.ts";
 import { telegramCoreDeps } from "../trainee-telegram/handler.ts";
 import { imessageCoreDeps } from "../trainee-inbound/handler.ts";
 import { loopSend } from "../_shared/loopmessage.ts";
+import { failedTurnNotice } from "../_shared/inbound_turn_queue.ts";
 import { handleTurnWorker } from "./handler.ts";
 
 serve((req) => {
@@ -16,7 +17,8 @@ serve((req) => {
   if (!url || !key) return new Response(JSON.stringify({ error: "not configured: Supabase URL or service key missing" }), { status: 503, headers: { "content-type": "application/json" } });
   const admin = createClient(url, key, { auth: { persistSession: false } });
   return handleTurnWorker(req, {
-    env: Deno.env, store: supabaseWorkerStore(admin),
+    env: Deno.env, store: supabaseWorkerStore(admin, { maxInflight: Number(Deno.env.get("TURN_MAX_INFLIGHT")) >= 1 ? Math.floor(Number(Deno.env.get("TURN_MAX_INFLIGHT"))) : undefined }),
+    notifyFailed: (msg) => failedTurnNotice(supabaseInboundStore(admin), msg, Date.now()),
     // deno-lint-ignore no-explicit-any
     background: (globalThis as any).EdgeRuntime?.waitUntil ? (p) => (globalThis as any).EdgeRuntime.waitUntil(p) : undefined,
     depsFor: (channel) => {

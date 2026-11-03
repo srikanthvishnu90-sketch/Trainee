@@ -22,7 +22,7 @@ begin
   select payload::text into s from public.inbound_turn_queue where id = a.id;
   if s <> '{}' then raise exception 'FAIL text kept on a done row'; end if;
   raise notice 'ok   lease taken over only after it ran out; a stale holder changes nothing; done keeps no text';
-  select has_function_privilege('anon', 'public.inbound_turn_claim(integer,integer,timestamptz,integer)', 'execute') into ok_;
+  select has_function_privilege('anon', 'public.inbound_turn_claim(integer,integer,timestamptz,integer,integer)', 'execute') into ok_;
   if ok_ then raise exception 'FAIL anon can claim turns'; end if;
   raise notice 'ok   anon cannot run the queue functions';
 end $$;

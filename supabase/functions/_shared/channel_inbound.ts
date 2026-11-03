@@ -216,6 +216,10 @@ export interface CoreDeps {
   // { status: 503, body: { retry: true } } so the worker runs the message again; set on every attempt but the last, whose failure
   // is said once ("I couldn't answer that just now") exactly as it is without the queue.
   deferFailure?: boolean;
+  // The worker's once-only record and fence for the sends that go straight to the person (not through the outbox, which refuses a second
+  // row for a key): called with a step name BEFORE the send; true: do it now (it is recorded); false: an earlier attempt already did it,
+  // or this attempt is no longer the row's claim (timed out, taken over): do nothing. Absent (the webhook inline): every send happens.
+  once?: (step: string) => Promise<boolean>;
 }
 type Out = { status: number; body: Record<string, unknown> };
 const ok = (body: Record<string, unknown>): Out => ({ status: 200, body: { ok: true, ...body } });
@@ -272,15 +276,21 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
   let contact = msg.contact;
   // TELEGRAM ROUND 2 (2026-10-30): a fixed answer sent straight back (not through the outbox) that Telegram refused because
   // the person blocked the bot or deleted their account (403) is that person's STOP, as it is on the outbox's sends.
-  const say = async (to: string, bubbles: string[], opts?: SendOptions): Promise<{ ok: boolean }> => {
+  const sayRaw = async (to: string, bubbles: string[], opts?: SendOptions): Promise<{ ok: boolean }> => {
     const r = await d.reply(to, bubbles, opts);
     if ((r as { optOut?: boolean }).optOut) await store.setOptOut(to, true, now).catch(() => {});
     return r;
   };
+  // From the queue (d.once): each straight-out line is one recorded step, numbered in the order the turn reaches them (the path to the
+  // chat is the same on every attempt), so a retry does not say it again. The regions that name their own step (the tail below) use sayRaw.
+  let sayN = 0;
+  const say = async (to: string, bubbles: string[], opts?: SendOptions): Promise<{ ok: boolean }> =>
+    d.once && !(await d.once(`say:${++sayN}`)) ? { ok: true } : await sayRaw(to, bubbles, opts);
+  const stepOnce = async (name: string) => !d.once || await d.once(name);
   // N12: the one interim line of a slow turn (armed by interim(), at most once per message; stopped before the answer).
   let working: ReturnType<typeof ackOnce> | null = null;
   const interim = (text: string) => {
-    const w = ackOnce({ afterMs: d.ackAfterMs, ack: () => say(contact, d.render(text)), ...(d.timers ? { setTimer: d.timers.set, clearTimer: d.timers.clear } : {}) });
+    const w = ackOnce({ afterMs: d.ackAfterMs, ack: () => sayRaw(contact, d.render(text)), ...(d.timers ? { setTimer: d.timers.set, clearTimer: d.timers.clear } : {}) });
     w.start();
     return w;
   };
@@ -639,33 +649,43 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       }
     } catch (e) { headWent = false; console.error("inbound: immediate send failed (the outbox has it):", e instanceof Error ? e.message : String(e)); }
     // F09: the screen's yes/no question gets Yes / No buttons where the channel has them (Telegram), else the plain words.
-    if (screenQidOut) {
+    if (screenQidOut && await stepOnce("screen")) {
       const buttons = msg.channel === "telegram" ? screenButtons(screenQidOut) : undefined;
       const already = /reply yes or no/i.test(reply) || (parts ?? []).some((p) => /reply yes or no/i.test(p));
-      if (buttons || !already) await say(contact, d.render(buttons ? "Yes or no?" : SCREEN_REPLY_YES_NO), buttons ? { buttons } : undefined).catch(() => ({ ok: false }));
+      if (buttons || !already) await sayRaw(contact, d.render(buttons ? "Yes or no?" : SCREEN_REPLY_YES_NO), buttons ? { buttons } : undefined).catch(() => ({ ok: false }));
     }
     // JOB CARDS: the postings this turn found, each as its own card after the reply that introduces them. A failure here never
     // changes what was already said; the reply's own words stand.
-    if (postings.length && d.showPostings) {
+    if (postings.length && d.showPostings && await stepOnce("cards")) {
       const shown = await d.showPostings({ userId: person.userId, contact, hits: postings }).catch((e) => { console.error("inbound: job cards failed:", e instanceof Error ? e.message : String(e)); return null; });
       if (shown) cardsShown = shown.sent;
     }
     // FEATURE 16: the documents, after the reply that names them; one that does not go is said, never claimed sent.
     let docs: { sent: number; failed: number } | null = null;
-    if (artifacts.length && d.sendArtifacts) {
+    if (artifacts.length && d.sendArtifacts && await stepOnce("docs")) {
       docs = await d.sendArtifacts({ userId: person.userId, threadId: turnThread, contact, artifacts }).catch(() => ({ sent: 0, failed: artifacts.length }));
-      if (docs.failed) await say(contact, d.render(DOC_NOT_SENT_REPLY)).catch(() => ({ ok: false }));
+      if (docs.failed) await sayRaw(contact, d.render(DOC_NOT_SENT_REPLY)).catch(() => ({ ok: false }));
     }
     // REPLY SHAPE: the answer went first; now the rest, each file, then each link, one message each, in that order.
     let shaped: { files: number; links: number } | null = null;
-    if (!more && shape?.more?.length) for (const m of shape.more.slice(0, 1)) await say(contact, d.render(m)).catch(() => ({ ok: false }));
+    if (!more && shape?.more?.length && await stepOnce("more")) for (const m of shape.more.slice(0, 1)) await sayRaw(contact, d.render(m)).catch(() => ({ ok: false }));
     if (steps.length) {
       let n = rows.length, files = 0, links = 0, queued = !headWent, fileMissed = false;
       // A refusal that said how long to wait (Telegram's 429 retry_after) holds what waits until then; the parts after it wait
       // behind it (the outbox's parts rule).
       let waitUntil = now;
-      const later = async (text: string) => { n++; await store.enqueueReply(person!.userId, `${key}:${n}`, text, waitUntil, msg.channel, { of: key, n }, null); };
+      // Inline, parts are numbered as they are queued. From the queue (d.once) a part's number is its step's, so a retry that skips a
+      // step already done cannot move the numbers of the steps after it; and a failed write here is logged, never a failed turn (the
+      // sends before it already happened and a 503 would run the message again).
+      let at = 0;
+      const later = async (text: string) => {
+        const num = d.once ? rows.length + at + 1 : ++n;
+        try { await store.enqueueReply(person!.userId, `${key}:${num}`, text, waitUntil, msg.channel, { of: key, n: num }, null); }
+        catch (e) { if (!d.once) throw e; console.error("inbound: could not queue a later part:", e instanceof Error ? e.message : String(e)); }
+      };
       for (const st of steps) {
+        at++;
+        if (!(await stepOnce(`step:${at}`))) continue;
         if (st.kind === "file") {
           if (queued && headWent) { if (!fileMissed) await later(DOC_NOT_SENT_REPLY); fileMissed = true; continue; }
           const sf = d.sendFile;
@@ -678,7 +698,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
         if (st.kind === "link") r = await d.sendLink!({ contact, url: st.url }).catch(() => ({ ok: false }));
         else {
           const bubbles = d.render(st.text), one = bubbles.join("\n\n");
-          r = await say(contact, bubbles.length > 1 && one.length <= MORE_ONE_MESSAGE ? [one] : bubbles).catch(() => ({ ok: false }));
+          r = await sayRaw(contact, bubbles.length > 1 && one.length <= MORE_ONE_MESSAGE ? [one] : bubbles).catch(() => ({ ok: false }));
         }
         if (r.ok) { if (st.kind === "link") links++; continue; }
         if (r.optOut) break; // blocked: nothing more goes, nothing waits
@@ -688,7 +708,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
         if (st.kind === "more" && (r.sent ?? 0) > 0) continue;
         await later(st.kind === "link" ? st.url : fitReply(st.text));
       }
-      if (fileMissed && !(queued && headWent)) await say(contact, d.render(DOC_NOT_SENT_REPLY)).catch(() => ({ ok: false }));
+      if (fileMissed && !(queued && headWent) && await stepOnce("filemissed")) await sayRaw(contact, d.render(DOC_NOT_SENT_REPLY)).catch(() => ({ ok: false }));
       if (shaping) shaped = { files, links };
     }
     return ok({ replied: true, ...(shaped ? { shaped } : {}), ...(cardsShown ? { cards: cardsShown } : {}), ...(parts ? { parts: parts.length } : {}), ...(docs ? { documents: docs } : {}) });

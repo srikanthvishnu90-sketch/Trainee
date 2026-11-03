@@ -11,11 +11,11 @@ import { TELEGRAM_API } from "../../supabase/functions/_shared/telegram.ts";
 import { LOOPMESSAGE_SEND_URL, loopSend } from "../../supabase/functions/_shared/loopmessage.ts";
 import { CHAT_DOWN_REPLY } from "../../supabase/functions/_shared/channel_inbound.ts";
 import type { InboundMessage } from "../../supabase/functions/_shared/channel_adapters.ts";
-import { chatQueueOn, MAX_ATTEMPTS, providerKey, type QueueRow, supabaseTurnQueue, workerKick, type WorkerStore } from "../../supabase/functions/_shared/inbound_turn_queue.ts";
+import { chatQueueOn, FAILED_TURN_REPLY, failedTurnNotice, MAX_ATTEMPTS, providerKey, type QueueRow, supabaseTurnQueue, workerKick, type WorkerStore } from "../../supabase/functions/_shared/inbound_turn_queue.ts";
 import { evaluate, type Snapshot } from "../../supabase/functions/_shared/ops_monitor.ts";
 import { handleTelegram, telegramCoreDeps } from "../../supabase/functions/trainee-telegram/handler.ts";
 import { handleInbound, imessageCoreDeps } from "../../supabase/functions/trainee-inbound/handler.ts";
-import { handleTurnWorker, runRow } from "../../supabase/functions/trainee-turn-worker/handler.ts";
+import { handleTurnWorker, runRow, tellUntold } from "../../supabase/functions/trainee-turn-worker/handler.ts";
 import { RELEASE_FLAGS, RELEASE_NEVER_ON } from "../../supabase/functions/agent-chat/release_config.ts";
 
 function assert(v: unknown, m = "assertion failed"): asserts v { if (!v) throw new Error(m); }
@@ -25,22 +25,33 @@ const TG_TOKEN = "123456:fake-telegram-token-TTTTTTTT", TG_SECRET = "t".repeat(4
 
 // An in-memory stand-in for the database side: the queue the webhook writes (unique provider id) and the worker's claim/finish.
 // Ordering, leases and races are not modeled here: ack-fast-queue-pg.test.ts runs the real functions.
-function memQueue(o: { failEnqueue?: boolean } = {}) {
-  const rows: (QueueRow & { status: string; error?: string | null })[] = [];
+function memQueue(o: { failEnqueue?: boolean; finishThrows?: boolean } = {}) {
+  const rows: (QueueRow & { status: string; error?: string | null; steps: string[]; told: boolean })[] = [];
   let id = 0;
   const store: WorkerStore = {
     claim: async (limit) => {
       const out: QueueRow[] = [];
-      for (const r of rows) if (r.status === "queued" && out.length < limit) { r.status = "claimed"; r.attempts++; out.push({ ...r }); }
+      for (const r of rows) if (r.status === "queued" && out.length < limit) { r.status = "claimed"; r.attempts++; r.claim_token = crypto.randomUUID(); out.push({ ...r }); }
       return out;
     },
-    finish: async (rid, token, outcome, error) => {
+    finish: async (rid, token, outcome, error, told) => {
+      if (o.finishThrows) throw new Error("process killed");
       const r = rows.find((x) => x.id === rid && x.claim_token === token && x.status === "claimed");
       if (!r) return "stale";
       r.error = error ?? null;
       r.status = outcome === "done" ? "done" : outcome === "failed" ? "failed" : r.attempts < MAX_ATTEMPTS ? "queued" : "failed";
+      if (r.status === "failed") r.told = told === true;
+      if (r.status === "queued") r.claim_token = crypto.randomUUID();
       return r.status;
     },
+    step: async (rid, token, step) => {
+      const r = rows.find((x) => x.id === rid && x.claim_token === token && x.status === "claimed");
+      if (!r || r.steps.includes(step)) return false;
+      r.steps.push(step);
+      return true;
+    },
+    untold: async () => rows.filter((r) => r.status === "failed" && !r.told).map((r) => ({ ...r })),
+    told: async (rid) => { const r = rows.find((x) => x.id === rid && x.status === "failed" && !x.told); if (!r) return false; r.told = true; return true; },
   };
   const enqueueCalls: string[] = [];
   const queue = {
@@ -48,7 +59,7 @@ function memQueue(o: { failEnqueue?: boolean } = {}) {
       enqueueCalls.push(providerKey(m));
       if (o.failEnqueue) throw new Error("database down");
       if (rows.some((r) => r.provider_msg_id === providerKey(m))) return false;
-      rows.push({ id: ++id, channel: m.channel, provider_msg_id: providerKey(m), contact: m.contact, payload: JSON.parse(JSON.stringify(m)), attempts: 0, claim_token: crypto.randomUUID(), status: "queued" });
+      rows.push({ id: ++id, channel: m.channel, provider_msg_id: providerKey(m), contact: m.contact, payload: JSON.parse(JSON.stringify(m)), attempts: 0, claim_token: crypto.randomUUID(), status: "queued", steps: [], told: false });
       return true;
     },
     kick: () => { kicks++; },
@@ -89,7 +100,7 @@ function harness(o: { env?: Record<string, string>; chat?: (a: any) => Promise<a
 const rowTo = (q: ReturnType<typeof memQueue>, i = 0) => ({ ...q.rows[i], claim_token: q.rows[i].claim_token });
 
 Deno.test("the switch: only CHAT_QUEUE=on turns the queue on; unset, off, or any typo is off (a mistyped rollback still rolls back)", () => {
-  const env = (v?: string) => ({ get: (k: string) => (k === "CHAT_QUEUE" ? v : undefined) });
+  const env = (v?: string) => ({ get: (k: string) => (k === "CHAT_QUEUE" ? v : k === "TRAINEE_TURN_SECRET" ? TURN_SECRET : undefined) });
   eq([chatQueueOn(env()), chatQueueOn(env("")), chatQueueOn(env("off")), chatQueueOn(env("0")), chatQueueOn(env("true")), chatQueueOn(env("onn"))], [false, false, false, false, false, false]);
   eq([chatQueueOn(env("on")), chatQueueOn(env(" ON "))], [true, true]);
   // Not a release flag the deploy serves on, and not hidden in the never-on list: it is read from the environment, default off.
@@ -289,4 +300,132 @@ Deno.test("ops path: a failed queue row alerts the owner (a new failure is a new
   eq(failed.map((a) => a.kind), ["turn_queue_failed"]);
   assert(/2 inbound text/.test(failed[0].text) && failed[0].key.endsWith(":41"));
   eq(kinds({ queued: 9, claimed: 0, oldestQueuedAt: new Date(NOW - 6 * 60000).toISOString(), failedRecent: 0, newestFailedId: null }), ["turn_queue_stuck"]);
+});
+
+Deno.test("CHAT_QUEUE=on without a usable TRAINEE_TURN_SECRET (missing, or under 32 characters) runs the turn inline and queues nothing", async () => {
+  for (const secret of ["", "x".repeat(31)]) {
+    const h = harness({ env: { CHAT_QUEUE: "on", TRAINEE_TURN_SECRET: secret } });
+    const q = memQueue();
+    eq(chatQueueOn(h.env), false);
+    const res = await h.tgPost(h.tgUpdate("7001", "hi"), q.queue);
+    eq(res.status, 200);
+    eq(h.chats.length, 1, "the turn ran inside the webhook");
+    eq(h.sentTelegram.map((m) => m.text), ["You said: hi"]);
+    eq(q.enqueueCalls, [], "nothing queued: no worker could be reached");
+    const r2 = await h.lmPost("+15550001111", "hello", `lm-nosecret-${secret.length}`, q.queue);
+    eq(r2.status, 200);
+    eq(q.enqueueCalls, []);
+    eq(h.sentLoop.length, 1);
+  }
+});
+
+// A turn with everything a turn can send straight to the person after its answer.
+const richChat = (log: string[]) => async (a: any) => ({ status: 200, reply: `You said: ${a.message}`, threadId: "t-1",
+  postings: [{ job_id: "j1" }], artifacts: [{ ref: "r1", filename: "cv.pdf", mime: "application/pdf" }], screenButtons: true, screenQid: "abcd1234",
+  shape: { attachments: [], links: ["https://example.test/a"], more: ["The rest of the long answer."] } });
+function richDeps(h: ReturnType<typeof harness>, log: string[]) {
+  return () => ({
+    ...telegramCoreDeps(h.tgDeps()),
+    showPostings: async () => { log.push("cards"); return { sent: 1, total: 1 }; },
+    sendArtifacts: async () => { log.push("docs"); return { sent: 1, failed: 0 }; },
+    sendLink: async (a: { url: string }) => { log.push(`link:${a.url}`); return { ok: true }; },
+  });
+}
+
+Deno.test("worker: a worker that dies after documents and before finishing: the retry sends no prompt, cards, documents, rest or link twice", async () => {
+  const log: string[] = [];
+  const h = harness({ env: { CHAT_QUEUE: "on" }, chat: richChat(log) });
+  const q = memQueue({ finishThrows: true });
+  await h.tgPost(h.tgUpdate("7001", "find jobs", 9500), q.queue);
+  const depsFor = richDeps(h, log);
+  const [first] = await q.store.claim(1);
+  // attempt 1 does everything, then the process dies before it can mark the row (finish throws)
+  await runRow(first, { env: h.env, store: q.store, depsFor }).catch(() => "died");
+  eq(log, ["cards", "docs", "link:https://example.test/a"], "attempt 1 sent each once");
+  const prompts1 = h.sentTelegram.filter((m) => /Yes or no/.test(m.text)).length, rest1 = h.sentTelegram.filter((m) => /rest of the long answer/.test(m.text)).length;
+  eq([prompts1, rest1], [1, 1]);
+  const sent1 = h.sentTelegram.length, outbox1 = h.W.outbox.length;
+  // the lease runs out and the row is claimed again (attempt 2) by a worker that survives
+  const row = q.rows[0]; row.status = "queued"; row.claim_token = crypto.randomUUID();
+  const q2 = { ...q.store, finish: memQueue().store.finish };
+  const [second] = await q.store.claim(1);
+  eq(second.attempts, 2);
+  q.rows[0].status = "claimed";
+  const live = memQueue(); live.rows.push(q.rows[0]);
+  eq(await runRow(second, { env: h.env, store: { ...q.store, finish: live.store.finish }, depsFor }), "done");
+  void q2;
+  eq(log, ["cards", "docs", "link:https://example.test/a"], "the retry sent no cards, documents or link again");
+  eq(h.sentTelegram.length, sent1, "and said nothing again (no second prompt, no second rest)");
+  eq(h.W.outbox.length, outbox1, "and queued no second reply row");
+});
+
+Deno.test("worker: a failing write of a later part does not fail the turn after sends were made (no 503, no rerun)", async () => {
+  const log: string[] = [];
+  const h = harness({ env: { CHAT_QUEUE: "on" }, chat: async (a: any) => ({ status: 200, reply: `You said: ${a.message}`, threadId: "t-1", shape: { attachments: [], links: ["https://example.test/b"], more: [] } }) });
+  const q = memQueue();
+  await h.tgPost(h.tgUpdate("7001", "x", 9501), q.queue);
+  const depsFor = () => {
+    const core = telegramCoreDeps(h.tgDeps());
+    const real = core.store.enqueueReply.bind(core.store);
+    core.store.enqueueReply = async (u, k, ...rest) => { if (/:[2-9]$/.test(k) && log.length === 0) { log.push("later-failed"); throw new Error("db blip"); } return await real(u, k, ...rest); };
+    return { ...core, sendLink: async () => ({ ok: false }) }; // Telegram refuses the link, so it goes to the outbox as a later part, whose write fails
+  };
+  const [row] = await q.store.claim(1);
+  eq(await runRow(row, { env: h.env, store: q.store, depsFor }), "done");
+  eq(log, ["later-failed"]);
+});
+
+Deno.test("worker: a timed-out attempt is fenced: when its stuck turn wakes up it sends nothing and writes no reply", async () => {
+  let release!: (v: any) => void;
+  const gate = new Promise((r) => { release = r; });
+  const log: string[] = [];
+  const h = harness({ env: { CHAT_QUEUE: "on" }, chat: async (a: any) => { await gate; return await richChat(log)(a); } });
+  const q = memQueue();
+  await h.tgPost(h.tgUpdate("7001", "go", 9600), q.queue);
+  const [row] = await q.store.claim(1);
+  const depsFor = richDeps(h, log);
+  eq(await runRow(row, { env: h.env, store: q.store, depsFor, deadlineMs: 30 }), "queued");
+  release(true); // the first attempt's turn finally returns
+  await new Promise((r) => setTimeout(r, 100));
+  eq(log, [], "no cards, documents or links from the stale attempt");
+  eq(h.sentTelegram, [], "no message from the stale attempt");
+  eq(h.outboxFor("tg:9600").length, 0, "and no reply row: the live attempt owns the answer");
+  // the retry (attempt 2) then answers once
+  const [again] = await q.store.claim(1);
+  eq(await runRow(again, { env: h.env, store: q.store, depsFor }), "done");
+  eq(h.sentTelegram.filter((m) => /You said: go/.test(m.text)).length, 1);
+});
+
+Deno.test("worker: a row that fails with its person untold (channel not wired; a stuck last attempt) gets one neutral outbox line, once", async () => {
+  // a channel this deploy cannot run: three attempts, failed, untold
+  const h = harness({ env: { CHAT_QUEUE: "on" } });
+  const q = memQueue();
+  await h.tgPost(h.tgUpdate("7001", "hi", 9700), q.queue);
+  await h.W.inbound.createPerson("tg:7001", NOW);
+  const deps = { env: h.env, store: q.store, depsFor: () => null, notifyFailed: (m: InboundMessage) => failedTurnNotice(h.W.inbound, m, NOW) };
+  for (let i = 0; i < MAX_ATTEMPTS; i++) { const [r] = await q.store.claim(1); eq(await runRow(r, deps), i < MAX_ATTEMPTS - 1 ? "queued" : "failed"); }
+  eq(q.rows[0].status, "failed");
+  eq(await tellUntold(deps), 1);
+  eq(await tellUntold(deps), 0, "told once");
+  const lines = h.W.outbox.filter((r: any) => r.key === "reply:failed:telegram:9700");
+  eq(lines.map((r: any) => r.text), [FAILED_TURN_REPLY]);
+  assert(!/model|error|503|agent-chat/i.test(FAILED_TURN_REPLY), "neutral and model-free");
+  // a last attempt that times out (runInbound never got to speak) is untold as well; one the turn told itself is not told twice
+  const h2 = harness({ env: { CHAT_QUEUE: "on" }, chat: () => new Promise(() => {}) });
+  const q2 = memQueue();
+  await h2.tgPost(h2.tgUpdate("7002", "hi", 9701), q2.queue);
+  await h2.W.inbound.createPerson("tg:7002", NOW);
+  const d2 = { env: h2.env, store: q2.store, depsFor: () => telegramCoreDeps(h2.tgDeps()), deadlineMs: 20, notifyFailed: (m: InboundMessage) => failedTurnNotice(h2.W.inbound, m, NOW) };
+  for (let i = 0; i < MAX_ATTEMPTS; i++) { const [r] = await q2.store.claim(1); await runRow(r, d2); }
+  eq(q2.rows[0].status, "failed");
+  eq(q2.rows[0].told, false);
+  eq(await tellUntold(d2), 1);
+  const h3 = harness({ env: { CHAT_QUEUE: "on" }, chat: async () => { throw new Error("agent-chat HTTP 503"); } });
+  const q3 = memQueue();
+  await h3.tgPost(h3.tgUpdate("7003", "hi", 9702), q3.queue);
+  const d3 = { env: h3.env, store: q3.store, depsFor: () => telegramCoreDeps(h3.tgDeps()), notifyFailed: (m: InboundMessage) => failedTurnNotice(h3.W.inbound, m, NOW) };
+  for (let i = 0; i < MAX_ATTEMPTS; i++) { const [r] = await q3.store.claim(1); await runRow(r, d3); }
+  eq(q3.rows[0].told, true, "the turn said CHAT_DOWN itself");
+  eq(await tellUntold(d3), 0);
+  eq(h3.sentTelegram.length, 1, "the person got exactly one line");
 });

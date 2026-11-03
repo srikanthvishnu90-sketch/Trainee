@@ -23,16 +23,16 @@ Deno.test({
     try {
       const j = async <T = any>(s: string): Promise<T> => JSON.parse((await pg.sql(s)) || "null");
       const enqueue = async (id: string, contact: string, text = "hi") => (await pg.sql(`select public.inbound_turn_enqueue('telegram', ${q(id)}, ${q(contact)}, ${q(JSON.stringify({ text }))}::jsonb)`)) === "t";
-      const claim = async (limit = 10, lease = 180, off = 0, max = 3): Promise<Row[]> =>
-        await j(`select coalesce(json_agg(c order by c.id), '[]') from public.inbound_turn_claim(${limit}, ${lease}, now() + interval '${off} seconds', ${max}) c`);
-      const finish = async (r: { id: number; claim_token: string | null }, outcome: string, err: string | null = null, off = 0) =>
-        await pg.sql(`select public.inbound_turn_finish(${r.id}, ${q(r.claim_token ?? "00000000-0000-0000-0000-000000000000")}::uuid, ${q(outcome)}, ${err === null ? "null" : q(err)}, now() + interval '${off} seconds', 3)`);
+      const claim = async (limit = 10, lease = 180, off = 0, max = 3, inflight = 20): Promise<Row[]> =>
+        await j(`select coalesce(json_agg(c order by c.id), '[]') from public.inbound_turn_claim(${limit}, ${lease}, now() + interval '${off} seconds', ${max}, ${inflight}) c`);
+      const finish = async (r: { id: number; claim_token: string | null }, outcome: string, err: string | null = null, off = 0, told = false) =>
+        await pg.sql(`select public.inbound_turn_finish(${r.id}, ${q(r.claim_token ?? "00000000-0000-0000-0000-000000000000")}::uuid, ${q(outcome)}, ${err === null ? "null" : q(err)}, now() + interval '${off} seconds', 3, ${told})`);
       const row = async (id: string): Promise<Row> => await j(`select row_to_json(x) from public.inbound_turn_queue x where provider_msg_id = ${q(id)}`);
       const reset = async () => { await pg.sql("delete from public.inbound_turn_queue"); };
 
       await t.step("grants: service_role only; the table is closed to anon and signed-in people", async () => {
-        const fns = ["inbound_turn_enqueue(text,text,text,jsonb)", "inbound_turn_claim(integer,integer,timestamptz,integer)", "inbound_turn_finish(bigint,uuid,text,text,timestamptz,integer)",
-          "inbound_turn_health(timestamptz,interval)", "inbound_turn_purge(timestamptz,interval,interval)"];
+        const fns = ["inbound_turn_enqueue(text,text,text,jsonb)", "inbound_turn_claim(integer,integer,timestamptz,integer,integer)", "inbound_turn_finish(bigint,uuid,text,text,timestamptz,integer,boolean)",
+          "inbound_turn_health(timestamptz,interval)", "inbound_turn_step(bigint,uuid,text)", "inbound_turn_untold(integer)", "inbound_turn_told(bigint)", "inbound_turn_purge(timestamptz,interval,interval)"];
         for (const f of fns) {
           for (const role of ["anon", "authenticated"]) eq(await pg.sql(`select has_function_privilege('${role}', 'public.${f}', 'execute')`), "f", `${role} cannot run ${f}`);
           eq(await pg.sql(`select has_function_privilege('service_role', 'public.${f}', 'execute')`), "t", `service_role runs ${f}`);
@@ -189,6 +189,62 @@ Deno.test({
         eq(await pg.sql("select count(*) from public.inbound_turn_queue where attempts > 2"), "0");
         for (const [c, order] of doneOrder) eq(order, [...order].sort((a, b) => a - b), `${c}: done in the order they were sent`);
         console.log(`ACK_QUEUE_CHAOS messages=${total} people=${people} workers=8 deaths=${deaths} claims=${claimsSeen} effects=${total} refused_duplicates=${redone} seconds=${secs}`);
+      });
+
+      await t.step("global in-flight cap: a burst of 100 people is claimed 20 at a time, however many workers ask at once; finishing frees room", async () => {
+        await reset();
+        for (let i = 0; i < 100; i++) await enqueue(`burst:${i}`, `tg:burst${i}`);
+        const racers = await Promise.all(Array.from({ length: 10 }, () => claim(100)));
+        const got = racers.flat();
+        eq(got.length, 20, "10 workers asking for 100 each got 20 rows between them");
+        eq(new Set(got.map((r) => r.id)).size, 20, "no row twice");
+        eq(await claim(100), [], "at the cap nothing more is handed out");
+        for (const r of got.slice(0, 5)) eq(await finish(r, "done"), "done");
+        eq((await claim(100)).length, 5, "five finished: room for five");
+        eq((await claim(100, 180, 0, 3, 50)).length, 30, "a raised cap (50) admits up to it");
+        eq(Number(await pg.sql("select count(*) from public.inbound_turn_queue where status = 'queued'")), 45);
+        // a lease that ran out frees its place (the row is reclaimed by the next claim, not counted twice)
+        eq((await claim(100, 180, 181)).length, 20, "after the leases ran out the cap applies to the new claims");
+      });
+
+      await t.step("steps: a side effect is recorded before it is sent, once per message; a stale or finished claim records nothing (the fence)", async () => {
+        await reset();
+        await enqueue("m:s1", "tg:S");
+        const [a] = await claim(1, 30);
+        const step = async (r: { id: number; claim_token: string | null }, name: string) => (await pg.sql(`select public.inbound_turn_step(${r.id}, ${q(r.claim_token!)}::uuid, ${q(name)})`)) === "t";
+        eq(await step(a, "docs"), true);
+        eq(await step(a, "docs"), false, "the same step is not done twice");
+        eq(await step({ id: a.id, claim_token: "00000000-0000-0000-0000-000000000000" }, "cards"), false, "not the row's claim");
+        eq(await finish(a, "retry", "died", 0), "queued");
+        eq(await step(a, "cards"), false, "an attempt that was released cannot record or send anything");
+        const [b] = await claim(1, 30, 21);
+        eq(await step(b, "docs"), false, "the retry sees what the first attempt did");
+        eq(await step(b, "cards"), true);
+        const [c] = await claim(1, 30, 60);
+        eq([c.id, c.attempts], [b.id, 3], "lease ran out: reclaimed");
+        eq(await step(b, "more"), false, "the attempt whose lease was taken over is fenced");
+        eq(await step(c, "more"), true);
+        eq(await finish(c, "done", null, 60), "done");
+        eq(await step(c, "link"), false, "a finished row records nothing");
+      });
+
+      await t.step("failed rows nobody told are listed once for the sweep; one the turn told itself is not", async () => {
+        await reset();
+        await enqueue("m:t1", "tg:T1"); await enqueue("m:t2", "tg:T2"); await enqueue("m:t3", "tg:T3");
+        const [a, b, c] = await claim(5);
+        eq(await finish(a, "failed", "dead channel", 0, false), "failed");
+        eq(await finish(b, "failed", "chat down", 0, true), "failed");
+        eq(await finish(c, "done"), "done");
+        const untold = await j(`select coalesce(json_agg(u), '[]') from public.inbound_turn_untold(10) u`);
+        eq(untold.map((r: Row) => r.provider_msg_id), ["m:t1"]);
+        eq(untold[0].payload, { text: "hi" }, "the text is kept on a failed row, so the line can be addressed");
+        eq(await pg.sql(`select public.inbound_turn_told(${untold[0].id})`), "t");
+        eq(await pg.sql(`select public.inbound_turn_told(${untold[0].id})`), "f", "marked once");
+        eq(await j(`select coalesce(json_agg(u), '[]') from public.inbound_turn_untold(10) u`), []);
+        // the reaper's failures (a worker that died on its last attempt) are untold too
+        await enqueue("m:t4", "tg:T4");
+        await claim(1, 30, 0); await claim(1, 30, 31); await claim(1, 30, 62); await claim(1, 30, 93);
+        eq((await j(`select coalesce(json_agg(u), '[]') from public.inbound_turn_untold(10) u`)).map((r: Row) => r.provider_msg_id), ["m:t4"]);
       });
 
       await t.step("rollback: down removes it all, up again restores it, and the earlier tables are untouched", async () => {

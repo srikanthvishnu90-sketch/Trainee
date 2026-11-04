@@ -20,7 +20,7 @@
 //                 opted-out person are never drafted to, nothing is approved before "send 1", and "send 1" approves
 //                 exactly that draft's payload; nothing is sent.
 // No real model and no network: web search answers with no pages (the shared cache, seeded through the same RPCs by an
-// in-process provider, answers the asks), the drafter is a scripted stand-in at the OpenAI URL, every other host is
+// in-process provider, answers the asks), the drafter is a scripted stand-in at the Anthropic URL, every other host is
 // refused and counted (asserted empty).
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
@@ -32,6 +32,7 @@ import { type PagePerson } from "../../supabase/functions/_shared/career_people_
 import { companyKey, isFormula, readsAsInstruction } from "../../supabase/functions/_shared/career_people_import.ts";
 import { isRoleAddress } from "../../supabase/functions/_shared/career_contacts.ts";
 import { memoryBudgetGate, resetLocalBudgetGate } from "../../supabase/functions/_shared/model_budget.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -80,11 +81,12 @@ function seedProvider() {
   });
 }
 const SEEDED = new Map<string, true>();
-const ON = (): ProviderConfig => providerConfig((k) => ({ CAREER_PEOPLE_SEARCH: "on", OPENAI_API_KEY: "sk-test-not-real" } as Record<string, string>)[k]);
+// The search is injected below (dark in production), so the provider is forced to "web" here.
+const ON = (): ProviderConfig => ({ ...providerConfig((k) => ({ CAREER_PEOPLE_SEARCH: "on", ANTHROPIC_API_KEY: "sk-test-not-real" } as Record<string, string>)[k]), provider: "web", apiKey: "sk-test-not-real" });
 
-// The scripted writer at the OpenAI URL (the drafter's chat call); OpenAI's web search answers with no pages.
+// The scripted writer at the Anthropic URL (the drafter's chat call); the model's web search answers with no pages.
 const calls = { draft: 0, search: 0, payloads: [] as string[] };
-function fakeOpenAI(path: string, body: any): Response {
+function fakeModel(path: string, body: any): Response {
   if (/\/responses$/.test(path)) {
     calls.search++;
     return Response.json({ usage: { input_tokens: 10, output_tokens: 1 }, output: [{ type: "web_search_call", action: { type: "search", sources: [] } }, { type: "message", content: [{ type: "output_text", text: "Jane Roe (jane@nowhere.example) runs it.", annotations: [] }] }] });
@@ -125,10 +127,12 @@ Deno.test({ name: "networking scenarios end to end: asks, hostile imports, the a
   if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (initdb)"); return; }
   resetLocalBudgetGate(memoryBudgetGate(Number.MAX_SAFE_INTEGER)); // many scripted calls; the day's budget is not what this measures
   const pg: Pg = await startPg();
-  const env: Record<string, string> = { CAREER_NETWORKING_DRAFT: "on", OPENAI_API_KEY: "sk-test-not-real", CAREER_MODEL: "gpt-5-mini", CAREER_PEOPLE_SEARCH: "on" };
+  const env: Record<string, string> = { CAREER_NETWORKING_DRAFT: "on", ANTHROPIC_API_KEY: "sk-test-not-real", CAREER_MODEL: "claude-haiku-5-5", CAREER_PEOPLE_SEARCH: "on" };
   const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "CAREER_SEND_RAIL", "CAREER_OUTREACH_SEND"];
   const saved = Object.fromEntries([...Object.keys(env), ...unset].map((k) => [k, Deno.env.get(k)]));
   for (const k of unset) Deno.env.delete(k);
+  // D-036: CAREER_MAIL_TRACKING is a release flag (on when unset): every mail path stays off only with "off".
+  Deno.env.set("CAREER_MAIL_TRACKING", "off");
   for (const [k, v] of Object.entries(env)) Deno.env.set(k, v);
   let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
   const outbound: string[] = [];
@@ -147,8 +151,7 @@ Deno.test({ name: "networking scenarios end to end: asks, hostile imports, the a
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
       const u = new URL(req.url);
-      if (u.pathname === "/v1/moderations" || (await req.clone().text()).includes("TRAINEE_CRISIS_SCREEN")) return Response.json({ id: "screen", model: "screen", results: [{ flagged: false, categories: {} }], choices: [{ index: 0, message: { role: "assistant", content: "NO" }, finish_reason: "stop" }], content: [{ type: "text", text: "NO" }], stop_reason: "end_turn", usage: { prompt_tokens: 1, completion_tokens: 1, input_tokens: 1, output_tokens: 1 } }); // #354: the crisis screen's moderation and classifier calls, not counted (architect OK 2026-11-02)
-      if (u.host === "api.openai.com") return fakeOpenAI(u.pathname, await req.json().catch(() => ({})));
+      if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel("/v1/chat/completions", chat));
       if (u.origin !== new URL(SUPABASE_URL).origin) { outbound.push(`${req.method} ${u.origin}${u.pathname}`); throw new TypeError(`network refused: ${u.host}`); }
       return await viaDouble(req);
     }) as typeof fetch;
@@ -340,6 +343,7 @@ Deno.test({ name: "networking scenarios end to end: asks, hostile imports, the a
       // discovered people at Stripe for them (from the shared cache)
       SEEDED.set("Stripe", true);
       await findTargets(P.seed, targetAskOf("find engineering managers at Stripe")!, { store, config: ON(), provider: seedProvider(), now: Date.now });
+      await findTargets(P.draft, targetAskOf("find engineering managers at Stripe")!, { store, config: ON(), provider: seedProvider(), now: Date.now }); // delivered from the shared cache (the live search is dark, so the handler cannot fetch it)
       const found = await say(chat, "find engineering managers at Stripe");
       eq(found.intent, "career_people_targets", found.reply);
       const drafts = async () => await json(`select coalesce(jsonb_agg(jsonb_build_object('n', n, 'to', recipient_email, 'status', status, 'hash', hash, 'approved_hash', approved_hash, 'body', body, 'subject', subject, 'recipient', recipient) order by created_at, n), '[]') from career_outreach_drafts where user_id = '${P.draft}'`);
@@ -393,7 +397,7 @@ Deno.test({ name: "networking scenarios end to end: asks, hostile imports, the a
     });
 
     await t.step("nothing left the machine; every problem found is listed", () => {
-      eq(outbound, [], "no request but the Supabase double and the scripted OpenAI URL");
+      eq(outbound, [], "no request but the Supabase double and the scripted Anthropic URL");
       if (fails.length) throw new Error(`${fails.length} scenario failures:\n${[...new Set(fails)].slice(0, 60).join("\n")}`);
       const unexpected = errors.filter((e) => !/not connected|NOT_WIRED|no Gmail|gmail/i.test(e));
       if (unexpected.length) console.log(`[networking e2e] logged errors (${unexpected.length}): ${unexpected.slice(0, 5).join(" | ")}`);

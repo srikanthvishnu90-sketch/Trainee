@@ -281,7 +281,7 @@ const CareerHost = (() => {
       for (const key of STATE_KEYS) delete ctx[key];
       ctx.globalPause = { set: true, at: new Date(ctx.now).toISOString(), source: "account_control" };
       ctx._hostPatch = { erase: true, paused: true };
-      return { intent: "career_profile_erased", reply: "I removed your saved career profile and active career context, cleared account watches and paused career work. Existing chat/audit records may retain earlier text; it is excluded from active context. No uncertain action was retried." };
+      return { intent: "career_profile_erased", reply: "I removed your saved career profile and active career context, cleared account watches, deleted our chat messages in every thread from Trainee's records and paused career work. Only this exchange is kept there; copies already delivered stay in your messaging app. No uncertain action was retried." };
     }
     const match = ask.match(/^(?:(?:actually|correction|to clarify)[,:]?\s+)?my preferred location is ([^\r\n]{1,100}?)[.!]*$/i);
     if (match && ctx.profile && typeof ctx.profile === "object") {

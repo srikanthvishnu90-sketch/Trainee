@@ -3,13 +3,14 @@
 // draft on the sending rail (N2's onApproved hand-off -> queueApprovedOutreach), bound to its approval hash; a sender
 // instance (runSendWorker, the career-send function's loop) sends it once from the person's Gmail (faked at the HTTP
 // boundary); "where are my emails" has a plain answer; another "send 1" never sends it again. The model is a scripted
-// stand-in at the OpenAI URL; nothing leaves the machine.
+// stand-in at the Anthropic URL; nothing leaves the machine.
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, supabaseParity } from "../flow/handler.ts";
 import { PgConn, serviceRpc } from "../flow/pgwire.ts";
 import { FakeGmail } from "../flow/send-rail-fixture.ts";
 import { outreachSendStatus, runSendWorker } from "../../supabase/functions/_shared/career_send_rail.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -19,7 +20,7 @@ const RESUME = await Deno.readTextFile(`${ROOT}packages/career-data/fixtures/tes
 const LINKEDIN = await Deno.readTextFile(`${ROOT}tests/fixtures/f10/Connections.csv`);
 const PEOPLE: Record<string, string> = { "tok-s": "7b0f8f8e-6a43-4a49-9d2c-0000000052f1" };
 
-function fakeOpenAI(body: any): Response {
+function fakeModel(body: any): Response {
   const user = String((body.messages ?? []).find((m: any) => m.role === "user")?.content ?? "");
   const first = /- name: (\S+)/.exec(user)?.[1] ?? "there";
   const text = `Subject: A quick question\n\nHi ${first},\n\nI'd be grateful for 15 minutes to hear how you got started. Would you be open to a short call?`;
@@ -30,7 +31,7 @@ Deno.test({ name: "M1 flow: chat approval -> send rail queue -> one send from th
   if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
   const pg: Pg = await startPg();
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
-  const env = { CAREER_NETWORKING_DRAFT: "on", OPENAI_API_KEY: "sk-test-not-real", CAREER_MODEL: "gpt-5-mini", CAREER_SEND_RAIL: "on" };
+  const env = { CAREER_NETWORKING_DRAFT: "on", ANTHROPIC_API_KEY: "sk-test-not-real", CAREER_MODEL: "claude-haiku-5-5", CAREER_SEND_RAIL: "on" };
   for (const [k, v] of Object.entries(env)) Deno.env.set(k, v);
   const me = PEOPLE["tok-s"];
   try {
@@ -43,8 +44,7 @@ Deno.test({ name: "M1 flow: chat approval -> send rail queue -> one send from th
     const viaDouble = globalThis.fetch;
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
-      if (new URL(req.url).pathname === "/v1/moderations" || (await req.clone().text()).includes("TRAINEE_CRISIS_SCREEN")) return Response.json({ id: "screen", model: "screen", results: [{ flagged: false, categories: {} }], choices: [{ index: 0, message: { role: "assistant", content: "NO" }, finish_reason: "stop" }], content: [{ type: "text", text: "NO" }], stop_reason: "end_turn", usage: { prompt_tokens: 1, completion_tokens: 1, input_tokens: 1, output_tokens: 1 } }); // #354: the crisis screen's moderation and classifier calls, not counted (architect OK 2026-11-02)
-      if (new URL(req.url).host === "api.openai.com") return fakeOpenAI(await req.json());
+      if (new URL(req.url).host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
       return await viaDouble(req);
     }) as typeof fetch;
     const chat: Chat = handler.chat("tok-s");

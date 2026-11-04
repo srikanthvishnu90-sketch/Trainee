@@ -2,7 +2,7 @@
 // conversations (tests/architect/scenarios/onboarding-generator.ts; all of them run through the pure code in
 // scenarios-onboarding.test.ts) through the REAL production handler (handler-career.ts handleChat; harness
 // tests/flow/handler.ts: real supabase-js over tests/flow/postgrest.ts, real Postgres 16 with every migration). No model
-// (CAREER_BRAIN and OPENAI_API_KEY unset), no network (every host but the Supabase double is refused). Each person is new:
+// (CAREER_BRAIN and ANTHROPIC_API_KEY unset), no network (every host but the Supabase double is refused). Each person is new:
 // they paste a resume, then reply in any order (ambiguous replies, a no, a correction, a question in between, a new ask,
 // the same resume again, a different resume), say yes or never do, and maybe replace the resume. After every turn the
 // database is judged against the same model the pure test uses:
@@ -53,9 +53,11 @@ Deno.test({
     if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (initdb)"); return; }
     const started = Date.now();
     const pg: Pg = await startPg();
-    const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "OPENAI_API_KEY"];
+    const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "ANTHROPIC_API_KEY"];
     const saved = Object.fromEntries(unset.map((k) => [k, Deno.env.get(k)]));
     for (const k of unset) Deno.env.delete(k);
+    // D-036: CAREER_MAIL_TRACKING is a release flag (on when unset): every mail path stays off only with "off".
+    Deno.env.set("CAREER_MAIL_TRACKING", "off");
     let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
     const realFetch = globalThis.fetch;
     const realLog = { log: console.log, info: console.info, warn: console.warn, error: console.error, debug: console.debug };

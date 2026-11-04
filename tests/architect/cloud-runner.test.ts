@@ -229,8 +229,11 @@ Deno.test({
       const rates = await rpc("career_apply_cloud_check_rates", { p_days: 7 });
       const lever = rates.hosts.find((h: any) => h.host === "jobs.lever.co");
       eq([lever.attempts, lever.bot_checks, lever.bot_check_rate], [2, 1, 0.5], "per host: 1 check in 2 attempts (the not-started one counts as an attempt)");
-      // A checked application is never claimed again, and the existing throttle paused Lever for the cloud; Greenhouse's
-      // waiting application goes next.
+      // A checked application is never claimed again, and a paused Lever is not dispatched to; Greenhouse's waiting application
+      // goes next. One verification check no longer pauses a portal by itself (#384: the bot-check rule is 2 in the last 20 attempts,
+      // tests/db/career_apply_mass_throughput.test.sql), so the pause this step needs is the one two checks would have made.
+      await pg.sql(`insert into public.career_apply_cloud_pauses (scope, portal, reason, until, created_at)
+        values ('portal', 'lever', 'bot_check_spike: 2 bot checks in the last 20 attempts', now() + interval '6 hours', now())`);
       const again = await dispatch({ rpc, host: f.host, secret: SECRET, bridgeUrl: "https://bridge.test", limits: { want: 10, global: 4, perPortal: 2 },
         retry: { sleep: noSleep }, log: () => {} });
       await Promise.all(runs);

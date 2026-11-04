@@ -297,7 +297,9 @@ Deno.test("B5 a lane like the largest: 112 boards x 300 postings with long descr
     rounds++;
   }
   eq(left.length, 0, `every board read within ${rounds} runs`);
-  eq(db.rows.size, 112 * 300 + 1000 + 1000, "every posting (Workday past 1,000 is a partial read, as before)");
+  // Ingest round 3 (2026-11-03): a Workday board past one read's 50 pages is read in parts, as a large one-request board is
+  // (it used to stop at its first 1,000 postings every time).
+  eq(db.rows.size, 112 * 300 + 3400 + 1495, "every posting, a Workday board past 1,000 read in parts");
 });
 
 // ------------------------------------------------------------------------------------------------ B6

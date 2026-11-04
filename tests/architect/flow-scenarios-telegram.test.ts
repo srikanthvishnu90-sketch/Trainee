@@ -4,7 +4,7 @@
 // store over supabase-js, agent-chat through chatThroughAgent, the head-start deliverer, the service client for the files
 // and the buttons), the real agent-chat handler (handler-career.ts handleChat), trainee-deliver's real handler for the
 // every-minute run, on a real Postgres 16 with every migration (tests/flow/pg.ts) behind the PostgREST double
-// (tests/flow/postgrest.ts). Telegram is a fake Bot API (scenarios/telegram-bot-api.ts) and OpenAI a scripted wire; every other
+// (tests/flow/postgrest.ts). Telegram is a fake Bot API (scenarios/telegram-bot-api.ts) and the model a scripted wire; every other
 // host is refused and recorded (asserted empty). Then the database is read back:
 //   order      20 chats (10 pairs), updates retried and out of order: every update one turn (agent_messages), one reply row
 //              (career_outbox reply:tg:<update_id>), delivered to that chat; a retried update adds nothing.
@@ -19,7 +19,7 @@
 //              a changed payload, a closed posting, a posting past its deadline, LinkedIn, another person's chat: nothing.
 //   overflow   5 long answers (#301) with the hosted page set up but no signed links: the rest comes as one second
 //              message, never as a Mini App URL sent as a plain link.
-//   budget     5 turns that need the model with the day's budget used up: no request reaches OpenAI, a short honest reply.
+//   budget     5 turns that need the model with the day's budget used up: no request reaches the model, a short honest reply.
 // Run: deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/flow-scenarios-telegram.test.ts
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
@@ -36,6 +36,7 @@ import { adaptersFromEnv } from "../../supabase/functions/_shared/channel_regist
 import { CHAT_DOWN_REPLY, PHONE_NOT_YOURS_REPLY, VOICE_NOT_READ_REPLY, PHOTO_NOT_READ_REPLY } from "../../supabase/functions/_shared/channel_inbound.ts";
 import { CHANNEL_REPLIES } from "../../supabase/functions/_shared/channel.ts";
 import { hashTag, refOf } from "../../supabase/functions/_shared/telegram_jobs.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const TOKEN = "123456:TEST-flow-telegram-token-not-real", SECRET = "TEST_flow_webhook_secret_0123456789_abcdefgh";
@@ -55,7 +56,7 @@ Deno.test({
     if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (initdb)"); return; }
     const pg: Pg = await startPg();
     const keys = ["CAREER_BRAIN", "CAREER_KNOWLEDGE", "CAREER_BRAIN_ROUTER_INTENTS", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING",
-      "CAREER_ACCOUNT_MEMORY", "OPENAI_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "CAREER_MODEL_DAILY_USD", "CAREER_MODEL_DAILY_CALLS", "MODEL_BUDGET_PAUSED", "TRAINEE_FILE_BASE_URL",
+      "CAREER_ACCOUNT_MEMORY", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "CAREER_MODEL_DAILY_USD", "CAREER_MODEL_DAILY_CALLS", "MODEL_BUDGET_PAUSED", "TRAINEE_FILE_BASE_URL",
       "TRAINEE_FILE_LINK_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_BOT_USERNAME", "TELEGRAM_LOGIN_URL", "TRAINEE_SIGNUP", "TRAINEE_ALLOWED_CONTACTS", "CAREER_REPLY_WRITER",
       "CAREER_TEXTING_NATIVE", "TRAINEE_DELIVER_SECRET", "LOOPMESSAGE_API_KEY", "WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "TRAINEE_LOGO_URL", "TRAINEE_LOGO_GUESS"];
     const saved = Object.fromEntries(keys.map((k) => [k, Deno.env.get(k)]));
@@ -71,9 +72,9 @@ Deno.test({
       const bot = fakeBot({ token: TOKEN, now: Date.now });
       const openai = { chat: 0, responses: 0 };
       const viaDouble = globalThis.fetch, outbound: string[] = [];
-      // ---------------------------------------------------------------------------------------- the scripted OpenAI wire
+      // ---------------------------------------------------------------------------------------- the scripted Anthropic wire
       const completion = (body: any, message: any) => Response.json({ id: "chatcmpl-test", model: body.model, choices: [{ index: 0, message, finish_reason: message.tool_calls ? "tool_calls" : "stop" }], usage: { prompt_tokens: 300, completion_tokens: 200 } });
-      const fakeOpenAI = async (req: Request) => {
+      const fakeModel = async (req: Request) => {
         const body = await req.json().catch(() => ({}));
         if (/\/responses$/.test(new URL(req.url).pathname)) {
           openai.responses++;
@@ -99,8 +100,7 @@ Deno.test({
         if (u.origin === new URL(SUPABASE_URL).origin && u.pathname === "/functions/v1/agent-chat") return await handleChat(req);
         if (u.origin === new URL(SUPABASE_URL).origin) return await viaDouble(req);
         if (u.host === "api.telegram.org") return await bot.fetch(req);
-        if (u.pathname === "/v1/moderations" || (await req.clone().text()).includes("TRAINEE_CRISIS_SCREEN")) return Response.json({ id: "screen", model: "screen", results: [{ flagged: false, categories: {} }], choices: [{ index: 0, message: { role: "assistant", content: "NO" }, finish_reason: "stop" }], content: [{ type: "text", text: "NO" }], stop_reason: "end_turn", usage: { prompt_tokens: 1, completion_tokens: 1, input_tokens: 1, output_tokens: 1 } }); // #354: the crisis screen's moderation and classifier calls, not counted (architect OK 2026-11-02)
-        if (u.host === "api.openai.com") return await fakeOpenAI(req);
+        if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(new Request("https://fake.invalid/v1/chat/completions", { method: "POST", body: JSON.stringify(chat) })));
         outbound.push(`${req.method} ${u.host}`);
         throw new TypeError(`network refused: ${u.host}`);
       }) as typeof fetch;
@@ -309,7 +309,7 @@ Deno.test({
       await sql(`update public.model_budget_settings set value = to_char((now() - interval '1 day') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') where key = 'window_start';
         update public.model_budget_settings set value = to_char((now() + interval '1 day') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') where key = 'window_end';
         insert into public.model_budget_days (day, limit_micros) values (public.model_budget_day(now()), 20000000), (public.model_budget_day(now() + interval '1 day'), 20000000) on conflict (day) do update set limit_micros = excluded.limit_micros;`);
-      for (const [k, v] of Object.entries({ CAREER_BRAIN: "staged", CAREER_KNOWLEDGE: "on", OPENAI_API_KEY: "sk-test-not-real", CAREER_MODEL: "gpt-5-mini", CAREER_REPLY_WRITER: "on",
+      for (const [k, v] of Object.entries({ CAREER_BRAIN: "staged", CAREER_KNOWLEDGE: "on", ANTHROPIC_API_KEY: "sk-test-not-real", CAREER_MODEL: "claude-haiku-5-5", CAREER_REPLY_WRITER: "on",
         TRAINEE_FILE_BASE_URL: "https://files.trainee.test/f" })) Deno.env.set(k, v);
       await t.step("overflow (#301): a long answer with the hosted page set up but no signed links: the rest as one second message, never a Mini App URL as a plain link", async () => {
         for (let n = 70; n < 75; n++) {
@@ -330,7 +330,7 @@ Deno.test({
           bump(`overflow_${words.length}_messages`);
         }
       });
-      await t.step("budget: turns that need the model with the day's budget used up: no request reaches OpenAI, a short honest reply", async () => {
+      await t.step("budget: turns that need the model with the day's budget used up: no request reaches the model, a short honest reply", async () => {
         await sql(`update public.model_budget_days set limit_micros = spent_micros + reserved_micros`);
         for (let n = 75; n < 80; n++) {
           await seed(n);
@@ -339,7 +339,7 @@ Deno.test({
           bump("updates");
           const said = bot.to(CHAT(n)).slice(before.said).map(plainOf);
           if (r.status !== 200) fail(`budget ${n}`, `status ${r.status}`);
-          if (openai.chat + openai.responses !== before.chat + before.responses) fail(`budget ${n}`, `${openai.chat + openai.responses - before.chat - before.responses} OpenAI requests over the day's budget`);
+          if (openai.chat + openai.responses !== before.chat + before.responses) fail(`budget ${n}`, `${openai.chat + openai.responses - before.chat - before.responses} the model requests over the day's budget`);
           if (!said.length) fail(`budget ${n}`, "silence");
           if (said.join("\n").length > 1500) fail(`budget ${n}`, `a long reply with no budget: ${said.join(" ").slice(0, 120)}`);
           if (said.some((x) => /I can't help|I couldn't answer that/.test(x))) fail(`budget ${n}`, `${said.join(" ").slice(0, 160)}`);
@@ -354,7 +354,7 @@ Deno.test({
         for (const v of bot.violations) fail("Bot API", v);
         if (outbound.length) fail("network", outbound.join(", "));
       });
-      console.log(`[flow-telegram] ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(", ")}; ${bot.msgs.length} messages, ${bot.answers.length} taps answered; OpenAI chat ${openai.chat}, searches ${openai.responses}; ${failures.length} failures`);
+      console.log(`[flow-telegram] ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(", ")}; ${bot.msgs.length} messages, ${bot.answers.length} taps answered; the model chat ${openai.chat}, searches ${openai.responses}; ${failures.length} failures`);
       assertNode.deepEqual(failures, [], failures.join("\n"));
     } finally {
       globalThis.fetch = realFetch;

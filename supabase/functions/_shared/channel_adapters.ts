@@ -90,7 +90,9 @@ export interface InboundMessage {
 export interface Button { text: string; data?: string; loginUrl?: string; url?: string; webApp?: string }
 // shareContact: a one-tap "Share my phone number" button (Telegram's request_contact; the label); removeKeyboard: take that
 // button away again once the number arrived.
-export interface SendOptions { buttons?: Button[][]; shareContact?: string; removeKeyboard?: boolean }
+// urgent: an answer to a message the person just sent (the STOP confirmation, a crisis reply are such answers). A shared send budget
+// never sends it to the retry queue after a short wait: it waits for its token as long as the request can.
+export interface SendOptions { buttons?: Button[][]; shareContact?: string; removeKeyboard?: boolean; urgent?: boolean }
 // A WhatsApp status callback: a message we sent failed after Meta accepted it. hold: it failed for the window (131047)
 // or the per-user marketing limit (131049), so it goes back in the queue for the person's next message.
 // CHANNEL DELIVERY ROUND 2 (2026-10-30): every failure, not only the window's: retry (Meta's throughput and pair limits,
@@ -169,19 +171,29 @@ export function packMessages(text: string, max: number): string[] {
   return out;
 }
 
-// Pacing per chat and overall, on an injected clock (tests) or the real one. Sequential callers only (deliverDue is).
+// Pacing per chat and overall, on an injected clock (tests) or the real one. One process only: Telegram's limit across
+// processes is the database bucket (channel_pacer.ts).
 export function pacer(o: { perChatMs: number; overallPerSecond: number | null; clock?: () => number; sleep?: (ms: number) => Promise<void> }) {
   const clock = o.clock ?? Date.now, sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const gap = o.overallPerSecond ? Math.ceil(1000 / o.overallPerSecond) : 0;
   const lastByChat = new Map<string, number>();
   let lastAny = -Infinity;
+  // The global gap is taken one caller after another (a queue); a chat's own gap is waited OUTSIDE the queue, so a chat that
+  // must wait its second (the next bubble of a long message) never holds up anyone else.
+  let tail: Promise<void> = Promise.resolve();
   return async (chat: string) => {
-    const now = clock();
-    const wait = Math.max(0, (lastByChat.get(chat) ?? -Infinity) + o.perChatMs - now, lastAny + gap - now);
-    if (wait > 0) await sleep(wait);
-    const t = clock();
-    lastByChat.set(chat, t);
-    lastAny = t;
+    let rest = 0;
+    const p = tail.then(async () => {
+      const now = clock();
+      const chatWait = Math.max(0, (lastByChat.get(chat) ?? -Infinity) + o.perChatMs - now), gapWait = Math.max(0, lastAny + gap - now);
+      if (gapWait > 0) await sleep(gapWait);
+      rest = Math.max(0, chatWait - gapWait);
+      lastAny = clock();
+    });
+    tail = p.catch(() => {});
+    await p;
+    if (rest > 0) await sleep(rest);
+    lastByChat.set(chat, clock());
     if (lastByChat.size > 5000) lastByChat.clear(); // a run never reaches this; a long-lived instance stays bounded
   };
 }

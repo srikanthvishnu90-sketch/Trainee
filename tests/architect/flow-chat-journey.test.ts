@@ -2,7 +2,7 @@
 // (supabase/functions/agent-chat/handler-career.ts handleChat; harness tests/flow/handler.ts: real supabase-js over
 // tests/flow/postgrest.ts, real Postgres 16 with every migration). After each turn the reply is checked for facts
 // (numbers, names, a question asked) and the database for what changed. No real model and no network: the only model
-// call (the networking drafter, CAREER_NETWORKING_DRAFT=on) is a scripted stand-in at the OpenAI URL, as in
+// call (the networking drafter, CAREER_NETWORKING_DRAFT=on) is a scripted stand-in at the Anthropic URL, as in
 // flow-networking.test.ts and flow-send-rail.test.ts, with a dummy key; every other host than the Supabase double is
 // refused here and the attempt recorded (asserted empty at the end).
 //
@@ -30,6 +30,7 @@ import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, SUPABASE_URL, supabaseParity, type Turn } from "../flow/handler.ts";
 import { confirmedResumeSql } from "../flow/resume-seed.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -50,9 +51,9 @@ const POSTINGS = [["alpha", "Alpha Works"], ["bravo", "Bravo Labs"], ["charlie",
 const DUP_KEY = "kb-duplicate:alpha:1";
 const byCompany = (c: string) => POSTINGS.find((p) => p.company === c)!;
 
-// The scripted writer at the OpenAI URL (flow-send-rail.test.ts's): one short email from the recipient row.
+// The scripted writer at the Anthropic URL (flow-send-rail.test.ts's): one short email from the recipient row.
 let modelCalls = 0;
-function fakeOpenAI(body: any): Response {
+function fakeModel(body: any): Response {
   modelCalls++;
   const user = String((body.messages ?? []).find((m: any) => m.role === "user")?.content ?? "");
   const first = /- name: (\S+)/.exec(user)?.[1] ?? "there";
@@ -68,11 +69,13 @@ Deno.test({
     if (!pgBinDir()) { if (CI) throw new Error("the chat journey needs Postgres 16 binaries in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
     if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (initdb)"); return; }
     const pg: Pg = await startPg();
-    const env: Record<string, string> = { CAREER_NETWORKING_DRAFT: "on", OPENAI_API_KEY: "sk-test-not-real", CAREER_MODEL: "gpt-5-mini", CAREER_SEND_RAIL: "on" };
+    const env: Record<string, string> = { CAREER_NETWORKING_DRAFT: "on", ANTHROPIC_API_KEY: "sk-test-not-real", CAREER_MODEL: "claude-haiku-5-5", CAREER_SEND_RAIL: "on" };
     // The router path (no brain): every turn is the product's code; the only model call is the drafter's, scripted above.
     const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY"];
     const saved = Object.fromEntries([...Object.keys(env), ...unset].map((k) => [k, Deno.env.get(k)]));
     for (const k of unset) Deno.env.delete(k);
+    // D-036: CAREER_MAIL_TRACKING is a release flag (on when unset): every mail path stays off only with "off".
+    Deno.env.set("CAREER_MAIL_TRACKING", "off");
     for (const [k, v] of Object.entries(env)) Deno.env.set(k, v);
     let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
     const realError = console.error;
@@ -87,14 +90,13 @@ Deno.test({
         ${POSTINGS.map((p, i) => `('${p.key}', 'greenhouse', '${p.board}', '${p.company}', 'Data Analyst', 'Chicago, IL', '${p.url}', now() - interval '${i} hours', '${desc}', 'cj${i}')`).join(",")},
         ('${DUP_KEY}', 'greenhouse', 'alpha', 'Alpha Works', 'Data Analyst', 'Chicago, IL', '${POSTINGS[0].url}', now() - interval '30 minutes', '${desc}', 'cj-dup');`);
       h = await careerHandler(pg, { "tok-journey": PERSON });
-      // No network: the Supabase double answers its own origin, the scripted model the OpenAI URL; anything else is refused.
+      // No network: the Supabase double answers its own origin, the scripted model the Anthropic URL; anything else is refused.
       const viaDouble = globalThis.fetch;
       const outbound: string[] = [];
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
         const u = new URL(req.url);
-        if (u.pathname === "/v1/moderations" || (await req.clone().text()).includes("TRAINEE_CRISIS_SCREEN")) return Response.json({ id: "screen", model: "screen", results: [{ flagged: false, categories: {} }], choices: [{ index: 0, message: { role: "assistant", content: "NO" }, finish_reason: "stop" }], content: [{ type: "text", text: "NO" }], stop_reason: "end_turn", usage: { prompt_tokens: 1, completion_tokens: 1, input_tokens: 1, output_tokens: 1 } }); // #354: the crisis screen's moderation and classifier calls, not counted (architect OK 2026-11-02)
-        if (u.host === "api.openai.com") return fakeOpenAI(await req.json());
+        if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
         if (u.origin !== new URL(SUPABASE_URL).origin) { outbound.push(`${req.method} ${u.origin}${u.pathname}`); throw new TypeError(`network refused in the journey test: ${u.host}`); }
         return await viaDouble(req);
       }) as typeof fetch;

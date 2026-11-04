@@ -125,7 +125,7 @@ function world(o: { env?: Record<string, string | undefined>; native?: boolean; 
   const clock = { t: NOW };
   const bot = fakeBot({ clock, fail: o.fail, throwFirst: o.throwFirst });
   const vars: Record<string, string | undefined> = { TELEGRAM_BOT_TOKEN: TOKEN, TELEGRAM_WEBHOOK_SECRET: SECRET, TELEGRAM_BOT_USERNAME: "TraineeTestBot", TRAINEE_SIGNUP: "open",
-    ...(o.native ? { CAREER_TEXTING_NATIVE: "on" } : {}), ...o.env };
+    CAREER_TEXTING_NATIVE: o.native ? "on" : "off", ...o.env };
   const env = { get: (k: string) => vars[k] || undefined };
   const sleep = async (ms: number) => { clock.t += ms; };
   const adapters = adaptersFromEnv(env, { fetch: bot.fetch, clock: () => clock.t, sleep });

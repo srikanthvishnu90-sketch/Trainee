@@ -62,6 +62,9 @@ Deno.test({ name: "FEATURE 8: check my email now, the employer's email everywher
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   try {
     for (const f of flags) Deno.env.delete(f);
+    // D-036/D-037: CAREER_MAIL_TRACKING and CAREER_EMAIL_SEND are release flags (on when unset); the off steps run them
+    // rolled back ("off"), the on steps set "on".
+    Deno.env.set("CAREER_MAIL_TRACKING", "off"); Deno.env.set("CAREER_EMAIL_SEND", "off");
     await supabaseParity(pg);
     for (const id of Object.values(PEOPLE)) {
       await pg.sql(`insert into auth.users (id, email) values ('${id}', '${id}@example.test'); insert into public.profiles (id) values ('${id}');
@@ -87,6 +90,7 @@ Deno.test({ name: "FEATURE 8: check my email now, the employer's email everywher
     const q = (sql: string) => pg.sql(sql);
 
     await t.step("switch off: 'check my email now' says nothing was read, and reads nothing", async () => {
+      Deno.env.set("CAREER_MAIL_TRACKING", "off"); // D-036: a release flag (on when unset); "off" is its rollback
       const r = await say(chat, "check my email now");
       eq(r.intent, "career_inbox_check", r.reply);
       eq(r.resultStatus, "MAIL_OFF", r.reply);

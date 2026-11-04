@@ -5,7 +5,7 @@
 // the company interviews. The debrief quotes only the person's own words and states no number the rubric did not give.
 //
 // WO-035 adds the voice mock: "start a voice mock for Goldman IB" answers with a single-use link to the app's voice page
-// (career_voice_link.ts), the call runs on OpenAI's Realtime API with the same plan of questions (career_voice.ts), and
+// (career_voice_link.ts) which is now inert: voice is off (no provider; career_voice.ts), and
 // the transcript's words, never audio, come back to voiceDebrief here, scored with the same rubric. Firms without a full
 // record get their sourced interview patterns from packages/career-data/interview-patterns.json (127 interviewPatterns).
 //
@@ -631,7 +631,7 @@ export function voiceStartText(s: MockState, url: string): string {
   return lines.join("\n");
 }
 export function voiceOffText(s: MockState): string {
-  return `Voice mocks aren't on yet, so there is no call to join. The text mock works now: text "${textAsk(s)}".`;
+  return `Voice is not available, so there is no call to join. The text mock works now: text "${textAsk(s)}".`;
 }
 
 export interface Turn { who: "interviewer" | "candidate"; text: string }

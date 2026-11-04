@@ -12,19 +12,23 @@
 //                                                                fact-lock, drafts that wait for "send 1"
 //   tracker.update, instruction.remember                      -> the agent tools track_application / remember_instruction
 //                                                                (their own words-only checks)
-//   reminder.set                                              -> the reminder store (_shared/task/reminders.ts): kept,
-//                                                                never sent on its own
+//   reminder.set                                              -> the chat reminder turn (_shared/career_reminders.ts
+//                                                                reminderTurn, PR #355): one career_outbox row delivered
+//                                                                by the texting channel at the time asked, in their zone,
+//                                                                held by quiet hours, never saved while paused or STOPped
+//                                                                or with no texting channel; listed by "my reminders"
 // A turn the planner does not claim (a single ask, a question, a code-first prompt waiting for its answer, a model outage,
 // a plan of one step) falls through to today's chain unchanged. Every part of the message is accounted for: a step
 // refused by code, a step its path did not do, and an action no step took are each named in the reply. The reply is
 // each path's own reply, in order; this module writes no claim of its own.
 // deno-lint-ignore-file no-explicit-any
 import { actionsIn, capability, checkPlan, compoundAsk, dueDate, MAX_PICKS, MAX_REMINDERS, MAX_STEPS, PLAN_INTENT, PLAN_TOOL, planSystem, type Refused, type Step, uncovered, unsaidWords } from "../_shared/task/plan.ts";
-import type { ReminderStore } from "../_shared/task/reminders.ts";
+import { REMINDER_SET_INTENT, type ReminderStore, setReminder, whenOf } from "../_shared/career_reminders.ts";
 import type { ToolCtx, ToolSpec } from "../_shared/agent/loop.ts";
 import { whenSaid } from "../_shared/agent/career_tools.ts";
 import { documentsOf } from "../_shared/channel_artifacts.ts";
 import { brainMode } from "./career_staged.ts";
+import { releaseFlagOn } from "./release_config.ts";
 import { CARD_INTENT } from "../_shared/career_apply_cards.ts";
 import { MOCK_INTENT } from "../_shared/career_mock.ts";
 import { QUESTIONS_INTENT } from "../_shared/career_apply_questions.ts";
@@ -43,7 +47,8 @@ type Env = { get(k: string): string | undefined };
 // The switch: per person and reversible, and off whenever the served brain is the router (brainMode decides what is
 // served: CAREER_BRAIN, or the release config when it is unset; CAREER_BRAIN=router always rolls back).
 export function plannerOn(env: Env, userId: string): boolean {
-  if (String(env.get("CAREER_PLANNER") ?? "").trim().toLowerCase() !== "on") return false;
+  // D-036: a release flag (release_config.ts RELEASE_FLAGS): on unless the environment rolls it back (CAREER_PLANNER=off).
+  if (!releaseFlagOn(env, "CAREER_PLANNER")) return false;
   if (brainMode(env) === "router") return false;
   const allow = String(env.get("CAREER_PLANNER_USERS") ?? "").split(/[\s,]+/).filter(Boolean);
   return !allow.length || allow.includes(userId);
@@ -213,13 +218,58 @@ async function runStep(io: PlannerIO, s: Step, message: string): Promise<{ res: 
       : `Kept for every chat: ${out.kept?.text ?? input.instruction}.`;
     return { res: res("done", name), turn: { reply, intent: name } };
   }
-  // reminder.set: the day only from the person's own words, counted in their time zone (UTC when none is on file).
+  // reminder.set: the day only from the person's own words (never the model's args), then PR #355's setReminder sets it
+  // exactly as "remind me <when> to <what>" typed alone would: delivered at that time in their zone, held by
+  // quiet hours, refused while paused, after STOP or with no texting channel; its reply says which, in its own words.
   const when = String(s.args.when ?? "").trim() || s.text;
   const said = whenSaid(message, when);
   const due = said ? dueDate(said, io.now(), io.tz) : null;
   if (!said || !due) return { res: res("not_done", null, "I couldn't tell which day you meant"), turn: null };
-  const what = String(s.args.what ?? "").trim();
-  const text = what && !unsaidWords(message, what).length ? what : s.text;
-  const r = await io.reminders.add(io.userId, { id: crypto.randomUUID(), what: text.slice(0, 200), when: said, due_date: due, tz: io.tz, created_at: new Date(io.now()).toISOString(), source: "plan" });
-  return { res: res("done", "reminder_set"), turn: { reply: `${r.added ? "Reminder kept" : "That reminder was already kept"} for ${said} (${due}): ${text.slice(0, 200)}. It's kept on your account; I don't send reminder texts on my own yet.`, intent: "reminder_set" } };
+  const argWhat = String(s.args.what ?? "").trim();
+  // What the reminder says: the model's "what" only in their words, else the step's own words without "remind me" and
+  // the day, else the whole message (their words, cut short): never words they did not write.
+  const stepWhat = s.text.replace(/\bremind(?:\s+me)?\b/i, "").replace(said, "").replace(/^\s*(?:to|about|on|at|,)\s+/i, "").replace(/\s+/g, " ").trim();
+  const what = (argWhat && !unsaidWords(message, argWhat).length ? argWhat : stepWhat.split(/\s+/).length >= 2 ? stepWhat : message).replace(/[.!?\s]+$/, "").slice(0, 200);
+  // The when-phrase as they said it; "Friday at 3pm" said on a Friday after 3pm is next Friday (dueDate's day) at 3pm:
+  // the weekday becomes that date and every other word they said (the time, the zone) stays.
+  let phrase = said;
+  let zoneTz: string | null = null;
+  try { zoneTz = (await io.reminders.settings(io.userId)).tz; } catch { zoneTz = io.tz; }
+  const first = whenOf(phrase, io.now(), zoneTz);
+  if (!("error" in first) && first.at <= io.now() + 30_000 && WEEKDAY_WORD.test(phrase)) {
+    const [, m, d] = due.split("-").map(Number);
+    phrase = phrase.replace(WEEKDAY_WORD, `${MONTHS[m - 1]} ${d}`);
+  }
+  // One reminder per person, words and exact time: the key is code's (a hash of those three), so the same plan sent
+  // again finds its row and sets nothing new, and the same words at another time ("Friday 3pm", then "Friday 5pm") is
+  // another reminder. One already set in chat (PR #355's own turn, its own key) with the same words for that exact time
+  // is not set twice either.
+  const w = whenOf(phrase, io.now(), zoneTz);
+  // A relative time ("in a week", "in 2 hours") moves with the clock: the same message replayed a minute later names an
+  // instant a minute later. For those the key is the time in its 10-minute bucket, and the same words due within 10
+  // minutes of it (the bucket either side included) are the same reminder; anything further apart, the same day or not,
+  // is another reminder ("Sunday at 5pm", then "in 3 days", are two).
+  const relative = RELATIVE_WHEN.test(phrase);
+  const basis = "error" in w ? phrase : relative ? relativeBasis(w.at) : w.at;
+  const id = await planReminderId(io.userId, what, basis);
+  const sameWords = (text: string) => (/^Reminder: (.*)\. You asked me on /.exec(text)?.[1] ?? "").toLowerCase() === what.toLowerCase();
+  const sameTime = (at: number) => !("error" in w) && (relative ? Math.abs(at - w.at) <= REPLAY_WINDOW_MS : at === w.at);
+  const already = (await io.reminders.pending(io.userId)).find((r) => r.key.includes(`:${id}:`) || (sameWords(r.text) && sameTime(r.at)));
+  if (already) return { res: res("done", REMINDER_SET_INTENT), turn: { reply: `That reminder is already set: "${already.text}"`, intent: REMINDER_SET_INTENT, status: "already" } };
+  const t = await setReminder({ what, when: phrase, userId: io.userId, now: io.now(), store: io.reminders, newKey: () => id });
+  // Not set (paused, STOPped, no texting channel, a time past): the reminder turn's own words say why, in the reply.
+  if (t.status !== "set") return { res: { ...res("not_done", t.intent, t.reply.replace(/[.\s]+$/, "")), detail: { status: t.status } }, turn: null };
+  return { res: res("done", t.intent), turn: { reply: t.reply, intent: t.intent, status: t.status } };
+}
+const RELATIVE_WHEN = /\b(?:in\s+(?:a|an|a few|a couple(?: of)?|one|two|three|four|five|six|seven|eight|nine|ten|\d+(?:\.\d+)?)\s+(?:min(?:ute)?s?|hours?|hrs?|days?|weeks?|months?)|from now|later today|tonight)\b/i;
+// A relative reminder's replay window: the same words due within 10 minutes are the same reminder; its key's bucket.
+export const REPLAY_WINDOW_MS = 10 * 60_000;
+export const relativeBasis = (at: number) => `b10:${Math.floor(at / REPLAY_WINDOW_MS)}`;
+const WEEKDAY_WORD = /\b(?:mon|tues?|wed(?:nes)?|thu(?:rs?)?|fri|sat(?:ur)?|sun)(?:day)?\b/i;
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+// The id of a planner reminder's key (status:reminder:<id>:<zone>): the person, the words (case aside) and the exact
+// instant it is due (for a relative time, relativeBasis: its 10-minute bucket). Same three, same id; any one different, another.
+export async function planReminderId(userId: string, what: string, at: number | string): Promise<string> {
+  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}|${what.toLowerCase()}|${at}`)));
+  return `plan${[...d.slice(0, 12)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 }

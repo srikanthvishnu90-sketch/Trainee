@@ -112,7 +112,8 @@ export function dedupeKey(c: { full_name: string; firm?: string | null; email?: 
   return c.email ? `e:${c.email}` : `n:${nameKey(c.full_name)}|${normKey(c.firm)}`;
 }
 function fnv(s: string): string { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, "0"); }
-export const contactId = (c: { full_name: string; firm?: string | null }): string => `ct_${fnv(`n:${nameKey(c.full_name)}|${normKey(c.firm)}`)}${fnv(`${normKey(c.firm)}~${nameKey(c.full_name)}`)}`;
+// PEOPLE DRAFTS R3: with an address, the address is part of the id: two people with one name at one firm are two ids.
+export const contactId = (c: { full_name: string; firm?: string | null; email?: string | null }): string => `ct_${fnv(`n:${nameKey(c.full_name)}|${normKey(c.firm)}${c.email ? `|e:${c.email}` : ""}`)}${fnv(`${normKey(c.firm)}~${nameKey(c.full_name)}`)}`;
 
 const BLOCKED_SOURCE_HOSTS = ["linkedin.com", "indeed.com", "joinhandshake.com", "glassdoor.com", "ziprecruiter.com"];
 export const isBlockedHost = (host: string): boolean => { const h = host.toLowerCase().replace(/\.$/, ""); return BLOCKED_SOURCE_HOSTS.some((b) => h === b || h.endsWith("." + b)); };
@@ -152,7 +153,7 @@ export function toContact(c: Candidate): { contact: Contact } | { rejected: Reje
   const role = c.role_title ? String(c.role_title).replace(/\s+/g, " ").trim().slice(0, 160) || null : null;
   const list = (a?: string[]) => [...new Set((a ?? []).map((x) => String(x).replace(/\s+/g, " ").trim().slice(0, 160)).filter(Boolean))];
   return { contact: {
-    id: contactId({ full_name: name, firm }), full_name: name, role_title: role,
+    id: contactId({ full_name: name, firm, email }), full_name: name, role_title: role,
     role_family: c.role_family ?? classifyRoleFamily(role, firm),
     firm, location: c.location ? String(c.location).replace(/\s+/g, " ").trim().slice(0, 120) || null : null,
     education: list(c.education), shared_connections: list(c.shared_connections),
@@ -162,8 +163,18 @@ export function toContact(c: Candidate): { contact: Contact } | { rejected: Reje
 }
 
 const TRUST: Record<EmailBasis, number> = { licensed_verifier: 3, published_on_source: 2, user_supplied: 1 };
+// PEOPLE DRAFTS R3 (2026-11-02): a field both records carry is the NEWEST source's (the latest retrieved_at in each one's
+// provenance), or none when they differ and the dates can't tell. Before, the first record's title always won, so a
+// person's old title (from an export read a year ago) stood over the one their firm's page shows today.
+const newestAt = (c: Contact) => Math.max(0, ...c.provenance.map((p) => Date.parse(p.retrieved_at) || 0));
 export function mergeContacts(a: Contact, b: Contact): Contact {
-  const pick = <T>(x: T | null, y: T | null) => x ?? y;
+  const at = newestAt(a), bt = newestAt(b);
+  const pick = <T>(x: T | null, y: T | null): T | null => {
+    if (x == null || x === "") return y;
+    if (y == null || y === "") return x;
+    if (normKey(x) === normKey(y)) return at >= bt ? x : y;
+    return at && bt && at !== bt ? (at > bt ? x : y) : null;
+  };
   const useB = b.email && (!a.email || TRUST[b.email_basis!] > TRUST[a.email_basis!]);
   const seen = new Set<string>();
   const provenance = [...a.provenance, ...b.provenance].filter((p) => { const k = `${p.source_kind}|${p.source_url}`; if (seen.has(k)) return false; seen.add(k); return true; });
@@ -177,16 +188,21 @@ export function mergeContacts(a: Contact, b: Contact): Contact {
 
 // Dedupe a list: by email first, then by normalized name + firm. A name-only record with no firm joins a same-name record
 // only when exactly one such record exists (two "Alex Kim"s at different firms are different people).
+// PEOPLE DRAFTS R3 (2026-11-02): two records with one name at one firm but DIFFERENT addresses are two people: before, the
+// second was merged into the first by name (its school and title joined someone else's record, one address was lost). And
+// a record with no firm joins a same-name record only when neither has an address the other lacks a match for.
 export function dedupe(list: Contact[]): Contact[] {
   const byEmail = new Map<string, Contact>(), byNF = new Map<string, Contact>(), out: Contact[] = [];
+  const ambiguous = new Set<string>(); // name+firm keys held by two or more different addresses: a record with none joins neither
+  const sameOrNone = (a: Contact | undefined, b: Contact) => !!a && (a.email && b.email ? a.email === b.email : !ambiguous.has(`${nameKey(b.full_name)}|${normKey(b.firm)}`));
   for (const c of list) {
     const nf = `${nameKey(c.full_name)}|${normKey(c.firm)}`;
-    let hit = (c.email && byEmail.get(c.email)) || byNF.get(nf);
-    if (!hit && !c.firm) { const same = out.filter((o) => nameKey(o.full_name) === nameKey(c.full_name)); if (same.length === 1) hit = same[0]; }
+    let hit = (c.email && byEmail.get(c.email)) || (sameOrNone(byNF.get(nf), c) ? byNF.get(nf) : undefined);
+    if (!hit && !c.firm) { const same = out.filter((o) => nameKey(o.full_name) === nameKey(c.full_name)); if (same.length === 1 && sameOrNone(same[0], c)) hit = same[0]; }
     if (hit) {
       const m = mergeContacts(hit, c); out[out.indexOf(hit)] = m;
       if (m.email) byEmail.set(m.email, m); byNF.set(`${nameKey(m.full_name)}|${normKey(m.firm)}`, m); byNF.set(nf, m);
-    } else { out.push(c); if (c.email) byEmail.set(c.email, c); byNF.set(nf, c); }
+    } else { if (byNF.has(nf)) ambiguous.add(nf); out.push(c); if (c.email) byEmail.set(c.email, c); byNF.set(nf, c); }
   }
   return out;
 }

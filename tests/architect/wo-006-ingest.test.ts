@@ -51,10 +51,18 @@ Deno.test("WO-006/3 a board that fails to load closes nothing and is counted as 
   assert(stats.failures.length === 1 && /503/.test(stats.failures[0].error) && stats.failures[0].board === "stripe", "the failure is reported with its board");
 });
 
-Deno.test("WO-006/4 a board that returns zero postings successfully closes its open postings", async () => {
+// Ingest round 3 (2026-11-03, architect): a board answering an empty list while it has open postings is as often an outage
+// as a board whose jobs all closed at once, so its postings close on the EMPTY_AFTER-th (3rd) such read in a row
+// (career_ingest.ts EMPTY_AFTER; the scheduled run carries the count in career_board_state, "ok [empty x2]").
+Deno.test("WO-006/4 a board that returns zero postings successfully closes its open postings (on the third such read in a row)", async () => {
   const s = board("Stripe"), db = memoryPostingsDb();
   await ingestBoards({ boards: [s], fetchFeed: net({ stripe: [job(s, "1", "Data Analyst")] }), db, now: T0 });
-  const stats = await ingestBoards({ boards: [s], fetchFeed: net({ stripe: [] }), db, now: T0 + H });
+  const outcomes: { empty_reads?: number }[] = [];
+  const held = await ingestBoards({ boards: [s], fetchFeed: net({ stripe: [] }), db, now: T0 + H, onBoard: (_b, r) => { outcomes.push(r); } });
+  eq(held.closed, 0, "one empty read: held");
+  eq((await db.open()).length, 1);
+  eq(outcomes[0].empty_reads, 1, "the empty read is counted");
+  const stats = await ingestBoards({ boards: [{ ...s, empty_reads: 2 }], fetchFeed: net({ stripe: [] }), db, now: T0 + 3 * H });
   eq(stats.closed, 1);
   eq((await db.open()).length, 0);
 });

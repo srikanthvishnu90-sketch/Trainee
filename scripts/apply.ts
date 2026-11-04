@@ -880,6 +880,9 @@ export async function runApply(args: string[]) {
       // the seconds it asked for, or none: the default doubling).
       const refused = main && !allowSubmit ? pageRefusal(response.status(), response.headers()["retry-after"], Date.now()) : null;
       if (refused) evidence.rate_limited = refused;
+      // MASS APPLY (2026-11-01): the posting's own page answering 404/410 at the open, before anything was filled, is a
+      // closed posting: not sent, and not an error of the site (it must not pause the whole ATS for everyone's batch).
+      if (main && !allowSubmit && (response.status() === 404 || response.status() === 410)) evidence.closed = response.status();
       if (uploadReq) uploadEchoes.push((await response.text()).slice(0, 20000));
       if (response.status() >= 300 && response.status() < 400) {
         const targetURL = new URL(response.headers().location || "/", req.url());
@@ -903,6 +906,7 @@ export async function runApply(args: string[]) {
     if (evidence.rate_limited) {
       return write({ state: "not_submitted", reason: "HOST_RATE_LIMITED", status: evidence.rate_limited.status, retry_after_s: evidence.rate_limited.retry_after_s });
     }
+    if (evidence.closed) return write({ state: "not_submitted", reason: "POSTING_CLOSED", status: evidence.closed });
     if (opened.captcha && !(o.handoff && await handOff())) return write({ state: "needs_user", reason: "captcha" });
     const history: any = {}, values: any = {}, planned: any = {};
     for (let step = 0; step < 8; step++) {
@@ -1400,6 +1404,9 @@ export async function runApply(args: string[]) {
     const result = {
       state: sent ? "unknown_outcome" : "not_submitted",
       reason: sent ? "READBACK_REQUIRED" : notSentReason,
+      // MASS APPLY (2026-11-01): what the browser itself said when it failed (a crash, a timeout, out of memory), so a
+      // DRIVER_ERROR can be told apart and its cause found. The browser's own words only: no field value, no page text.
+      ...(notSentReason === "DRIVER_ERROR" ? { driver_error: String(e?.name || "Error").slice(0, 40) + ": " + String(e?.message || "").split("\n")[0].replace(/https?:\/\/\S+/g, "<url>").slice(0, 160) } : {}),
       ...(evidence.proof ? { proof: evidence.proof } : {}),
     };
     if (fenced) {

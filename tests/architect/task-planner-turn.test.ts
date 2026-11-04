@@ -12,7 +12,7 @@
 import assertNode from "node:assert/strict";
 import { plannerTurn, type PlannerIO } from "../../supabase/functions/agent-chat/career_planner.ts";
 import { checkPlan, MAX_PICKS, MAX_REMINDERS, MAX_STEPS } from "../../supabase/functions/_shared/task/plan.ts";
-import { memoryReminderStore } from "../../supabase/functions/_shared/task/reminders.ts";
+import { memoryReminderStore } from "../../supabase/functions/_shared/career_reminders.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -21,7 +21,8 @@ const LIST = Array.from({ length: 40 }, (_, i) => ({ job_id: `j${i + 1}`, title:
 
 function fake(plan: unknown) {
   const calls = { model: 0, router: [] as string[], apply: [] as string[], networking: [] as string[], track: [] as any[], remember: [] as any[] };
-  const reminders = memoryReminderStore();
+  // PR #355's store (career_outbox rows the texting channel delivers): this person has a texting channel linked.
+  const reminders = memoryReminderStore({ reachable: { u1: true } });
   const ctx: Record<string, any> = {};
   const io: PlannerIO = {
     userId: "u1", threadId: "t1", now: () => FRI, tz: null, ctx, reminders,
@@ -72,7 +73,7 @@ Deno.test(`caps: at most ${MAX_REMINDERS} reminders from one message; the rest a
   const { io, reminders } = fake({ kind: "task", steps: [{ capability: "jobs.search", text: "find jobs in Chicago" },
     ...days.map((d) => ({ capability: "reminder.set", text: `remind me ${d}`, args: { what: "follow up", when: d } }))] });
   const r = claimed(await plannerTurn(io, msg));
-  eq((await reminders.list("u1")).length, MAX_REMINDERS);
+  eq((await reminders.pending("u1")).length, MAX_REMINDERS);
   ok(r.reply.includes(`at most ${MAX_REMINDERS} reminders`) && r.reply.includes("remind me Thursday") && r.reply.includes("remind me Saturday"), r.reply);
   eq(r.resultStatus, "partial");
 });
@@ -111,11 +112,11 @@ Deno.test("tracker: an employer the person never named is not written; one they 
 Deno.test("reminder: the day is the person's, never the model's args", async () => {
   const noDay = fake({ kind: "task", steps: [{ capability: "jobs.search", text: "find jobs in Chicago" }, { capability: "reminder.set", text: "remind me to follow up", args: { what: "follow up", when: "Friday" } }] });
   const r = claimed(await plannerTurn(noDay.io, "find jobs in Chicago and remind me to follow up"));
-  eq(await noDay.reminders.list("u1"), [], "no day said, no reminder");
+  eq(await noDay.reminders.pending("u1"), [], "no day said, no reminder");
   eq((r.meta.planner as any).steps.find((s: any) => s.capability === "reminder.set").status, "not_done");
   const said = fake({ kind: "task", steps: [{ capability: "jobs.search", text: "find jobs in Chicago" }, { capability: "reminder.set", text: "remind me Friday to follow up", args: { what: "follow up", when: "Friday" } }] });
   claimed(await plannerTurn(said.io, "find jobs in Chicago and remind me Friday to follow up"));
-  eq((await said.reminders.list("u1")).map((x) => x.due_date), ["2026-11-06"]);
+  eq((await said.reminders.pending("u1")).map((x) => new Date(x.at).toISOString().slice(0, 10)), ["2026-11-06"]);
 });
 
 Deno.test("one step: a compound message planned as one step is today's chain's; nothing runs", async () => {

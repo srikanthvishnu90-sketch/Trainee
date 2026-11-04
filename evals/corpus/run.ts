@@ -3,7 +3,7 @@
 // a double yes). Writes evals/corpus/results/offline.json and docs/corpus/README.md (pass rate by file).
 //   deno run -A evals/corpus/run.ts           offline (CI checks the committed report is current: tests/edge/corpus-evals.test.ts)
 //   deno run -A evals/corpus/run.ts --live    against the deployed handler + the LLM judge (needs UPMORE_CHAT_URL,
-//                                             UPMORE_TEST_JWT, OPENAI_API_KEY; prints NOT RUN without them)
+//                                             UPMORE_TEST_JWT, ANTHROPIC_API_KEY; prints NOT RUN without them)
 import graders from "./graders.cjs";
 import variants from "./variants.cjs";
 import corpus from "../../corpus/corpus.json" with { type: "json" };
@@ -48,8 +48,8 @@ export function report(results: any[]) {
 
 if (import.meta.main) {
   if (Deno.args.includes("--live")) {
-    const url = Deno.env.get("UPMORE_CHAT_URL"), jwt = Deno.env.get("UPMORE_TEST_JWT"), key = Deno.env.get("OPENAI_API_KEY");
-    if (!url || !jwt || !key) { console.log("NOT RUN: --live needs UPMORE_CHAT_URL, UPMORE_TEST_JWT and OPENAI_API_KEY (the judge). No live score was produced."); Deno.exit(2); }
+    const url = Deno.env.get("UPMORE_CHAT_URL"), jwt = Deno.env.get("UPMORE_TEST_JWT"), key = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!url || !jwt || !key) { console.log("NOT RUN: --live needs UPMORE_CHAT_URL, UPMORE_TEST_JWT and ANTHROPIC_API_KEY (the judge). No live score was produced."); Deno.exit(2); }
     const { live } = await import("./live.ts");
     const only = Deno.args.filter(a => /^\d\.\d{2}$/.test(a));
     await live(url, jwt, key, only);

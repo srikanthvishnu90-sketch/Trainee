@@ -47,6 +47,9 @@ export interface PrepareDispatchResult { claimed: number; started: { request: st
 // postings stay in the person's queue.
 export async function dispatchPrepare(o: {
   rpc: Rpc; host: SandboxHost; limits: PrepareLimits; secret: string; bridgeUrl: string;
+  // Sandboxes created at once in this tick (1 to 32, default 8), as the send tick does (cloud_runner.ts dispatch): a tick that starts
+  // 30 preparations must not create them one after another inside its 55 seconds.
+  parallel?: number;
   retry?: { tries?: number; baseMs?: number; sleep?: (ms: number) => Promise<void> }; log?: (line: string) => void;
 }): Promise<PrepareDispatchResult> {
   const log = o.log ?? ((l: string) => console.log(l));
@@ -65,14 +68,14 @@ export async function dispatchPrepare(o: {
     return out;
   }
   out.claimed = rows.length;
-  for (const r of rows) {
+  const one = async (r: PrepareRequestRow): Promise<{ request: string; sandbox: string } | { request: string; why: string }> => {
     let sandbox = "";
     try {
       sandbox = await withRetry(() => o.host.create({ name: `trainee-prep-${r.id.slice(0, 8)}-${crypto.randomUUID().slice(0, 8)}` }), o.retry);
       await o.rpc("career_apply_prepare_request_sandbox", { p_id: r.id, p_lease: r.lease_token, p_sandbox: sandbox });
       const token = await prepareToken(o.secret, r.id, r.lease_token, sandbox);
       await withRetry(() => o.host.run(sandbox, { CLOUD_PREPARE_ID: r.id, CLOUD_SANDBOX_ID: sandbox, CLOUD_JOB_TOKEN: token, CLOUD_BRIDGE_URL: o.bridgeUrl }, PREPARE_SCRIPT), o.retry);
-      out.started.push({ request: r.id, sandbox });
+      return { request: r.id, sandbox };
     } catch (e) {
       const why = String((e as Error)?.message ?? e).slice(0, 200);
       if (sandbox) await o.host.stop(sandbox).catch(() => {});
@@ -80,7 +83,14 @@ export async function dispatchPrepare(o: {
       await o.rpc("career_apply_prepare_request_notice", { p_id: r.id, p_lease: r.lease_token, p_text: RUNNER_UNAVAILABLE_TEXT }).catch(() => {});
       await o.rpc("career_apply_prepare_request_finish", { p_id: r.id, p_lease: r.lease_token, p_state: "failed",
         p_outcome: { reason: "RUNNER_UNAVAILABLE", detail: why }, p_card: null }).catch(() => {});
-      out.unavailable.push({ request: r.id, why });
+      return { request: r.id, why };
+    }
+  };
+  // Bounded parallel; reported in the claim's order.
+  const n = Math.max(1, Math.min(32, Math.floor(Number(o.parallel)) || 8));
+  for (let i = 0; i < rows.length; i += n) {
+    for (const x of await Promise.all(rows.slice(i, i + n).map(one))) {
+      if ("sandbox" in x) out.started.push(x); else out.unavailable.push(x);
     }
   }
   log(`prepare dispatch: claimed ${out.claimed}, started ${out.started.length}, not started ${out.unavailable.length}`);
@@ -141,7 +151,8 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
       case "rpc": {
         const name = String(body?.name ?? ""), args = body?.args && typeof body.args === "object" && !Array.isArray(body.args) ? body.args : {};
         if (name === "career_apply_prepare_candidates") {
-          const rows = await d.rpc(name, { p_now: new Date(now).toISOString(), p_per_person: 25, p_limit: 500 });
+          // Read for THIS person only (the limit counts their rows, never other people's); the filter below is defence in depth.
+          const rows = await d.rpc("career_apply_prepare_candidates_for", { p_user: user, p_now: new Date(now).toISOString(), p_per_person: 25, p_limit: 500 });
           return { status: 200, body: (Array.isArray(rows) ? rows : []).filter((c: any) => c?.user_id === user && postings.has(String(c?.job_id))) };
         }
         if (PERSON_RPCS.has(name)) return { status: 200, body: await d.rpc(name, { p_user: user }) };
@@ -177,7 +188,31 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
         const ready = await d.rpc("career_apply_prepare_request_ready", { p_id: id, p_lease: lease });
         let card: string | null = null, push = "nothing_ready";
         const c = Array.isArray(ready) && ready.length ? cardFor(ready.filter((r: any) => { const one = cardFor([r]); return one !== null && "take" in one; })) : null;
-        if (c && "take" in c) {
+        // MASS APPLY (2026-11-01): ONE card for the batch. While the person still has a question open (another posting of
+        // the batch waits on their answer), no card is pushed: it would show part of the batch and be replaced by the next.
+        // The card goes when the last answer readies the rest.
+        // Nor while another of their postings still waits to be prepared (questions are asked a round at a time, so one
+        // posting can be ready while the rest have not asked theirs yet). A held card is not lost: "show my applications"
+        // and the scheduled push show it.
+        const readyNow = new Set(outcomes.filter((o: { outcome: string }) => o.outcome === "ready").map((o: { job_id: string }) => o.job_id));
+        const stillAsking = c && "take" in c ? await (async () => {
+          const q = await d.rpc("career_apply_questions_open_as", { p_user: user, p_limit: 1 });
+          if (Array.isArray(q) && q.length) return true;
+          const more = await d.rpc("career_apply_prepare_candidates_for", { p_user: user, p_now: new Date(now).toISOString(), p_per_person: 25, p_limit: 500 });
+          return Array.isArray(more) && more.some((x: any) => x?.user_id === user && !readyNow.has(String(x?.job_id)));
+        })().catch(() => false) : false; // unreadable: pushed as before (never hold a card on a read that failed)
+        // A card is one message (4,000 characters): when the batch's ready applications do not all fit, a card of the first
+        // few would be a second, partial card. They are told the batch is ready instead; "show my applications" shows all of
+        // them on one card, in pages, with one Approve.
+        const fits = Array.isArray(ready) ? ready.filter((r: any) => { const one = cardFor([r]); return one !== null && "take" in one; }).length : 0;
+        const partial = !stillAsking && c && "take" in c && c.take.length < fits;
+        if (stillAsking) push = "held_for_answers";
+        else if (partial) {
+          const told = !!await d.rpc("career_apply_prepare_request_notice", { p_id: id, p_lease: lease,
+            p_text: `All ${fits} applications are ready. Say "show my applications" to see every one on one card and approve them with one tap. Nothing was sent.` });
+          push = told ? "told_ready" : "held";
+        }
+        if (c && "take" in c && !stillAsking && !partial) {
           card = await d.rpc("career_apply_card_push_requested_for", { p_user: user, p_request: id, p_ids: c.take.map((p) => p.id), p_text: c.text,
             p_now: new Date(now).toISOString() });
           push = card ? "shown" : "held";
@@ -193,7 +228,7 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
         }
         // Nothing to show and nothing to ask: they are told why, in their words, once.
         let told = false;
-        if (!card && !questions && push !== "held" && !outcomes.some((o: { outcome: string }) => o.outcome === "asked" || o.outcome === "ready")) {
+        if (!card && !questions && push !== "held" && push !== "held_for_answers" && push !== "told_ready" && !outcomes.some((o: { outcome: string }) => o.outcome === "asked" || o.outcome === "ready")) {
           told = !!await d.rpc("career_apply_prepare_request_notice", { p_id: id, p_lease: lease, p_text: notPreparedText(outcomes) });
           if (told) push = "told";
         }

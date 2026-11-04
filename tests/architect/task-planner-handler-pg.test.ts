@@ -1,5 +1,5 @@
 // TASK PLANNER at the REAL handler (agent-chat/handler-career.ts handleChat, unchanged harness tests/flow/handler.ts) on
-// real Postgres, with a fake model on the OpenAI wire (evals/career/tasks/fake_model.ts; no key, no spend). Outcomes are
+// real Postgres, with a fake model on the Anthropic wire (evals/career/tasks/fake_model.ts; no key, no spend). Outcomes are
 // rows, never wording.
 // Fail-first: the first step runs the compound ask with the planner OFF (today's production: CAREER_BRAIN unset, and the
 // staged release) and asserts what is lost: the apply part and the reminder are dropped, nothing is tailored. The same ask
@@ -22,7 +22,7 @@
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, supabaseParity } from "../flow/handler.ts";
-import { calls, clearOracle, fakeOpenAI, setOracle } from "../../evals/career/tasks/fake_model.ts";
+import { calls, clearOracle, fakeAnthropic, setOracle } from "../../evals/career/tasks/fake_model.ts";
 import { dueDate } from "../../supabase/functions/_shared/task/plan.ts";
 import { brainMode } from "../../supabase/functions/agent-chat/career_staged.ts";
 
@@ -47,7 +47,7 @@ Deno.test({ name: "TASK PLANNER: compound asks complete at the real handler, thr
   if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (initdb)"); return; }
   const pg: Pg = await startPg();
   const realFetch = globalThis.fetch;
-  const keys = ["CAREER_BRAIN", "CAREER_PLANNER", "CAREER_PLANNER_USERS", "CAREER_NETWORKING_DRAFT", "OPENAI_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL"];
+  const keys = ["CAREER_BRAIN", "CAREER_PLANNER", "CAREER_PLANNER_USERS", "CAREER_NETWORKING_DRAFT", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL"];
   const saved = Object.fromEntries(keys.map((k) => [k, Deno.env.get(k)]));
   let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
   const set = (o: Record<string, string | null>) => { for (const [k, v] of Object.entries(o)) { if (v === null) Deno.env.delete(k); else Deno.env.set(k, v); } };
@@ -60,13 +60,14 @@ Deno.test({ name: "TASK PLANNER: compound asks complete at the real handler, thr
       ${P.map((p, i) => `('${p.job_id}', 'greenhouse', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', now() - interval '${i} hours', '${q(p.description)}', 'k${i}')`).join(",")};`);
     for (const id of Object.values(people)) {
       await pg.sql(`insert into auth.users (id, email) values ('${id}', '${id}@example.test'); insert into public.profiles (id) values ('${id}');
-        insert into public.career_watch_kv (user_id, key, value) values ('${id}', 'career:account', '{"epoch":0,"version":0,"paused":false}');`);
+        insert into public.career_watch_kv (user_id, key, value) values ('${id}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
+        insert into public.channel_contacts (contact, user_id) values ('+1555${id.slice(-7).replace(/[^0-9]/g, "0").padStart(7, "0")}', '${id}');`);
     }
-    set({ OPENAI_API_KEY: "sk-fake-planner-not-a-key", MODEL_PROVIDER: null, CAREER_MODEL: "gpt-5-mini", CAREER_NETWORKING_DRAFT: "on" });
+    set({ ANTHROPIC_API_KEY: "sk-fake-planner-not-a-key", MODEL_PROVIDER: null, CAREER_MODEL: "claude-haiku-5-5", CAREER_NETWORKING_DRAFT: "on" });
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
       if (new URL(req.url).pathname === "/v1/moderations" || (await req.clone().text()).includes("TRAINEE_CRISIS_SCREEN")) return Response.json({ id: "screen", model: "screen", results: [{ flagged: false, categories: {} }], choices: [{ index: 0, message: { role: "assistant", content: "NO" }, finish_reason: "stop" }], content: [{ type: "text", text: "NO" }], stop_reason: "end_turn", usage: { prompt_tokens: 1, completion_tokens: 1, input_tokens: 1, output_tokens: 1 } }); // #354: the crisis screen's moderation and classifier calls, not counted (architect OK 2026-11-02)
-      if (new URL(req.url).hostname === "api.openai.com") return outage ? new Response(JSON.stringify({ error: { type: "server_error", message: "fake outage" } }), { status: 500, headers: { "content-type": "application/json" } }) : await fakeOpenAI(req);
+      if (new URL(req.url).hostname === "api.anthropic.com") return outage ? new Response(JSON.stringify({ error: { type: "server_error", message: "fake outage" } }), { status: 500, headers: { "content-type": "application/json" } }) : await fakeAnthropic(req);
       return new Response("not reachable in this test", { status: 404 });
     }) as typeof fetch;
     h = await careerHandler(pg, people);
@@ -84,14 +85,16 @@ Deno.test({ name: "TASK PLANNER: compound asks complete at the real handler, thr
       return c;
     };
     const queued = async (tok: string) => (await sql(`select coalesce(string_agg(company, ',' order by company), '') from public.career_apply_wanted where user_id = '${people[tok]}'`)).split(",").filter(Boolean);
-    const reminders = async (tok: string) => JSON.parse(await sql(`select coalesce((select value->'items' from public.career_watch_kv where user_id = '${people[tok]}' and key = 'career:reminders')::text, '[]')`)) as any[];
+    // Planner reminders are PR #355's chat reminders: career_outbox rows the texting channel delivers (each person here has a
+    // texting contact). due_date: the UTC day of the time it goes out (9 AM Eastern when no time or zone was said).
+    const reminders = async (tok: string) => JSON.parse(await sql(`select coalesce(json_agg(json_build_object('due_date', to_char(deliver_at at time zone 'UTC', 'YYYY-MM-DD'), 'text', text) order by deliver_at), '[]') from public.career_outbox where user_id = '${people[tok]}' and key like 'status:reminder:%'`)) as any[];
     const tailored = async (tok: string) => n(`select count(*) from public.channel_artifacts where user_id = '${people[tok]}' and mime = 'application/pdf'`);
     const nothingSent = async (tok: string) => {
       const u = people[tok];
       eq(await n(`select count(*) from public.career_apply_jobs where user_id = '${u}'`), 0, "no application approved or sent: only the card's tap does that");
       eq(await n(`select count(*) from public.career_apply_cards where user_id = '${u}'`), 0, "no card opened or answered by the plan");
       eq(await n(`select count(*) from public.career_send_queue where user_id = '${u}'`), 0, "nothing on the sending rail");
-      eq(await n(`select count(*) from public.career_outbox where user_id = '${u}'`), 0, "nothing queued to go out on its own");
+      eq(await n(`select count(*) from public.career_outbox where user_id = '${u}' and key not like 'status:reminder:%'`), 0, "nothing queued to go out on its own but the reminders they asked for");
     };
     const plannerCalls = () => calls.filter((c) => c.kind === "plan").length;
 
@@ -115,7 +118,7 @@ Deno.test({ name: "TASK PLANNER: compound asks complete at the real handler, thr
       const r = await say(c, COMPOUND);
       eq([r.intent, r.resultStatus], ["career_plan", "completed"], r.reply);
       const steps = r.body.meta.planner.steps.map((s: any) => `${s.capability}:${s.status}:${s.intent}`);
-      eq(steps.map((s: string) => s.replace(/:career_(internship_)?discovery$/, ":search")), ["jobs.search:done:search", "resume.tailor:done:career_tailor", "apply.queue:done:career_apply_queue", "reminder.set:done:reminder_set"]);
+      eq(steps.map((s: string) => s.replace(/:career_(internship_)?discovery$/, ":search")), ["jobs.search:done:search", "resume.tailor:done:career_tailor", "apply.queue:done:career_apply_queue", "reminder.set:done:career_reminder_set"]);
       const q2 = await queued(tok);
       eq(q2.length, 2, q2.join(","));
       assert(q2.every((co) => FE.includes(co)), `only the listed frontend postings: ${q2}`);
@@ -123,6 +126,7 @@ Deno.test({ name: "TASK PLANNER: compound asks complete at the real handler, thr
       const list = JSON.parse(await sql(`select (state->'career'->'stores'->'discovery'->'lastShortlist')::text from public.agent_flow_state where user_id = '${people[tok]}' order by updated_at desc limit 1`));
       eq(q2, list.slice(0, 2).map((p: any) => p.company).sort());
       eq((await reminders(tok)).map((x) => x.due_date), [dueDate("Friday", Date.now(), null)]);
+      assert(!/don't send reminder texts/i.test(r.reply) && /I'll text you/.test(r.reply), `the reply says it will be delivered: ${r.reply}`);
       assert(await tailored(tok) >= 1 && new Set(r.body.meta.planner.steps[1].detail.tailored).size === 2, JSON.stringify(r.body.meta.planner.steps[1]));
       assert(/Not done|Not started/.test(r.reply) === false, r.reply);
       await nothingSent(tok);
@@ -142,6 +146,9 @@ Deno.test({ name: "TASK PLANNER: compound asks complete at the real handler, thr
       eq(plannerCalls(), before, "the answer is the outreach turn's, never the planner's");
       eq(await sql(`select string_agg(recipient_email || ':' || status, ',') from public.career_outreach_drafts where user_id = '${people[tok]}'`), "maya.chen@stripe.example:approved", yes.reply);
       eq(await n(`select count(*) from public.career_send_queue where user_id = '${people[tok]}'`), 0, "approved, not sent: the rail is off");
+      // PR #355's own list turn reads the planner's reminder back: a real reminder the texting channel delivers.
+      const listed = await say(c, "what reminders do I have");
+      assert(listed.intent === "career_reminder_list" && /follow up/.test(listed.reply), `listed: ${listed.reply}`);
     });
 
     await t.step("guards at the handler: LinkedIn, words the person did not say, an unregistered capability: refused and named; the other part done", async () => {

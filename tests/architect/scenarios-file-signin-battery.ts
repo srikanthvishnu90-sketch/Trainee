@@ -18,7 +18,7 @@
 // and restored), no network: the phone and the texts are fakes, every fetch that is not the PostgREST double is refused.
 import assertNode from "node:assert/strict";
 import { mintFileToken } from "../../supabase/functions/_shared/file_link.ts";
-import { LOGIN_TTL_MS, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, SESSION_TTL_MS, sha256, type SessionStore } from "../../supabase/functions/_shared/file_session.ts";
+import { LOGIN_TTL_MS, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, PAGE_TOKEN, pageTokenOf, SESSION_TTL_MS, sha256, type SessionStore } from "../../supabase/functions/_shared/file_session.ts";
 import { handleFile, type AppRow, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
 import { hashTag, jobViewOf, refOf, type JobView, type PreparedRow } from "../../supabase/functions/_shared/telegram_jobs.ts";
 import type { TapStore } from "../../supabase/functions/_shared/channel_card_tap.ts";
@@ -283,6 +283,24 @@ export async function runScenario(s: Scenario, env: Env, rep: Report): Promise<v
   const valid = (x: OSession | undefined) => !!x && !x.revoked && !x.dead && W.now < x.created + SESSION_TTL_MS && bound(x);
   const permanentlyEnded = (x: OSession) => x.revoked || x.dead || W.now >= x.created + SESSION_TTL_MS || !W.exists[x.user];
   const holderWho: Partial<Record<Actor, Who>> = { owner: "u", other: "v" };
+  // Which session a post acts as (file_session.ts, the page-token round): a phone session only through its own cookie AND the
+  // page token drawn for it; a Mini App session through its id in the form AND Telegram's fresh initData for its own Telegram user
+  // (the oracle knows which initData it minted, for whom). Anything else acts as no session at all.
+  const inits = new Map<string, string>(); // initData minted fresh by the oracle -> its Telegram user
+  const freshInit = async (tg: string) => { const x = await signedInit(tg, Math.floor(W.now / 1000) - 10); inits.set(x, tg); return x; };
+  const authOf = async (ck: string, form: URLSearchParams | null, method: string): Promise<OSession | undefined> => {
+    if (method !== "POST" || !form) return undefined;
+    const ft = form.get("t") ?? "";
+    if (PAGE_TOKEN.test(ft)) {
+      const x = /^fs1\./.test(ck) ? byHash.get(await hashOf(ck)) : undefined;
+      return x && x.via === "phone" && ft === await pageTokenOf(x.hash, SECRET) ? x : undefined;
+    }
+    if (/^fs1\./.test(ft)) {
+      const x = byHash.get(await hashOf(ft)), tg = inits.get(form.get("init") ?? "");
+      return x && x.via === "telegram" && !!tg && tg === x.tg ? x : undefined;
+    }
+    return undefined;
+  };
 
   async function request(actor: Actor, step: string, o: { method?: string; query?: string; form?: Record<string, string>; cookie?: string; ua?: string; init?: string }): Promise<{ status: number; body: string; ctx: Ctx; res: Response | null }> {
     const st = actors[actor];
@@ -293,12 +311,14 @@ export async function runScenario(s: Scenario, env: Env, rep: Report): Promise<v
     const qT = o.query ? new URLSearchParams(o.query).get("t") ?? "" : "";
     const linkTok = qT || cookieOf("tf_l");
     const lc = linkTok ? claimsOf(linkTok) : null;
+    // The Mini App's script adds Telegram's initData (its own Telegram user's) to every post it makes.
+    if (actor === "mini" && form?.get("t") && !form.has("init")) form.set("init", await freshInit(sessions.find((x) => x.id === form.get("t"))?.tg ?? "777"));
     const presented = [cookieOf("tf_s"), form?.get("t") ?? ""].filter((x) => /^fs1\./.test(x));
     const ctx: Ctx = { actor, step, method, form, jti: lc?.j ?? null, linkWho: lc ? whoOf(lc.u) : null, presented, faulted: [], provider: [], lookups: [], created: [], begins: [], finishes: [], texts: [], checks: [], approvals: [], dupAnswers: [], init: o.init };
     // what the oracle knows before the request
-    const pre = await Promise.all(presented.map(async (id) => byHash.get(await hashOf(id))));
-    const entitled = new Set<Who>(pre.filter((x) => valid(x) && x!.holder === actor).map((x) => x!.user));
-    const validT = form?.get("t") ? pre[presented.indexOf(form.get("t")!)] : undefined;
+    const ck = cookieOf("tf_s"), validT = await authOf(ck, form, method);
+    const cookieS = method === "GET" && /^fs1\./.test(ck) ? byHash.get(await hashOf(ck)) : undefined;
+    const entitled = new Set<Who>([validT, cookieS?.via === "phone" ? cookieS : undefined].filter((x) => valid(x) && x!.holder === actor).map((x) => x!.user));
     const validTAtStart = valid(validT); // a request racing a sign-out may still pass the check it made first
     const liveBefore = { u: W.phone.u ? W.live.get(W.phone.u) ?? null : null, v: W.phone.v ? W.live.get(W.phone.v) ?? null : null };
     const tgBefore = { ...W.tg };
@@ -604,7 +624,7 @@ export async function runScenario(s: Scenario, env: Env, rep: Report): Promise<v
         const cur = job ? preps.get(`${who}|${job}`) : null;
         const tag = step.tag === "seen" ? rows.find((x) => x.ref === ref)?.tag ?? "none" : step.tag === "stale" ? (st.tags.get(ref) ?? ["0".repeat(16)])[0] : step.tag === "garbage" ? "zz'><b>"
           : step.tag === "none" ? "none" : step.tag === "other_row" ? rows.find((x) => x.ref !== ref)?.tag ?? "f".repeat(16) : cur ? hashTag(cur.payload_hash) : "none";
-        const curSession = t ? sessions.find((x) => x.id === t) : undefined;
+        const curSession = t ? await authOf(st.jar.get("tf_s") ?? "", new URLSearchParams({ t, ...(a === "mini" ? { init: await freshInit(sessions.find((x) => x.id === t)?.tg ?? "777") } : {}) }), "POST") : undefined;
         const before = job ? queued.get(`${who}|${job}`) ?? 0 : 0;
         const x = await request(a, name, { form: { ...(t ? { t } : {}), action: "apply", ref, tag } });
         // liveness: Apply on a row as shown, with the payload unchanged, from a valid session, queues it

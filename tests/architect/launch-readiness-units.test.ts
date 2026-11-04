@@ -20,7 +20,7 @@ import { CareerHost } from "../../supabase/functions/_shared/career_host.js";
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 const env = (o: Record<string, string>) => ({ get: (k: string) => o[k] });
-const cfg = { provider: "openai" as const, model: "gpt-5-mini", apiKey: "sk-fake", reasoningEffort: null };
+const cfg = { provider: "anthropic" as const, model: "claude-haiku-5-5", apiKey: "sk-fake", reasoningEffort: "low" };
 
 Deno.test("X7: the ceiling counts this turn's spend; the turn that crosses it stops at its next call, and reads the spend once", async () => {
   let reads = 0, sent = 0;
@@ -54,7 +54,7 @@ Deno.test("X7: the env limits: defaults, explicit values, and junk falls back to
 
 Deno.test("X7: the mock-interview judge makes its call through the capped call it is given", async () => {
   let viaCap = 0;
-  const judge = modelJudge({ from: () => ({ insert: async () => ({ error: null }) }) }, env({ CAREER_MODEL: "gpt-5-mini" }),
+  const judge = modelJudge({ from: () => ({ insert: async () => ({ error: null }) }) }, env({ CAREER_MODEL: "claude-haiku-5-5" }),
     { callModel: (async () => { viaCap++; throw new Error("the person's daily model limit is reached"); }) as any });
   const v = await judge({ question: "Tell me about SQL", requirement: "SQL", keys: ["joins"], answer: "I use joins every day", userId: "u", threadId: "t" } as any);
   eq([viaCap, v], [1, null], "the capped call was used, and its refusal leaves the code's own check");

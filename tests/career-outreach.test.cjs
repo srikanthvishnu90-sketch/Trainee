@@ -291,7 +291,7 @@ test("OUTE-010 OOO parses a return date, reschedules the follow-up, and never co
   const r = M.classifyReply({ body: "I'm out of office until October 20" }, { nowMs });
   assert.equal(r.classification, "auto-reply-ooo"); assert.equal(r.return_date, "2026-10-20"); assert.equal(r.reschedule_followup_on, "2026-10-21"); assert.equal(r.counts_as_reply, false);
   const camp = M.createCampaign({ id: "oo", userId: "u1", approved: true });
-  const out = M.handleReply(camp, { body: "On vacation, back on November 3" }, cand({}), {});
+  const out = M.handleReply(camp, { body: "On vacation, back on November 3" }, cand({}), { nowMs }); // the fixed clock: "November 3" read against the real date rolled to next year after 2026-11-03
   assert.equal(out.reschedule_followup_on, "2026-11-04"); assert.equal(camp.stats.replies, 0);
 });
 

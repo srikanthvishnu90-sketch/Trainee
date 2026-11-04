@@ -31,24 +31,54 @@ const cap1 = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const FALLBACK_ZONE = "America/Chicago";
 
 // ---------------------------------------------------------------- values: verified, stated, or a first-class unknown
-export type Value = { kind: "verified"; text: string } | { kind: "stated"; text: string } | { kind: "unknown"; text: string };
+// A fact on a File always carries its source (audit R17): the same labels the File kinds use (file_kinds.ts SOURCES), Trainee's own
+// records, or Trainee's own arithmetic over rows shown on the same page. A verified or stated value without one of these is never
+// drawn as a fact: it is drawn as the unknown "Unverified", so an unsourced number cannot reach a page.
+export const FILE_SOURCES = ["From the posting", "From your resume", "From you", "Reported, not verified", "From Trainee's records", "Added up from the rows above"] as const;
+export type FileSource = typeof FILE_SOURCES[number];
+export type Value = { kind: "verified"; text: string; source: FileSource } | { kind: "stated"; text: string; source: FileSource } | { kind: "unknown"; text: string };
 // The unknowns a File writes as values (brief P3.5, P6.5). A caller may pass its own words; these are the shared ones.
 export const UNKNOWN = {
   unverified: "Unverified", payNotListed: "Pay not listed", locationNotListed: "Location not listed", postedNotGiven: "Posted date not given",
   closed: "Closed", amountUnknown: "Amount unknown", notConfirmed: "Not confirmed yet", checkUnknown: "Check time unknown",
 } as const;
 const blank = (s: unknown) => s === null || s === undefined || !String(s).replace(BIDI_CONTROLS, "").replace(LONE_SURROGATE, "").trim();
-export const verified = (text: string): Value => ({ kind: "verified", text });
-export const stated = (text: string): Value => ({ kind: "stated", text });
+const sourced = (s: unknown): s is FileSource => (FILE_SOURCES as readonly unknown[]).includes(s);
+export const verified = (text: string, source: FileSource): Value => ({ kind: "verified", text, source });
+export const stated = (text: string, source: FileSource): Value => ({ kind: "stated", text, source });
 export const unknown = (text: string = UNKNOWN.unverified): Value => ({ kind: "unknown", text });
 // A value from data: blank is the named unknown (never an empty cell); otherwise verified only when the caller has proof.
-export function valueOf(text: string | null | undefined, o: { verified: boolean; missing: string }): Value {
+export function valueOf(text: string | null | undefined, o: { verified: boolean; missing: string; source: FileSource }): Value {
   if (blank(text)) return unknown(o.missing);
-  return o.verified ? verified(String(text).trim()) : stated(String(text).trim());
+  return o.verified ? verified(String(text).trim(), o.source) : stated(String(text).trim(), o.source);
 }
+// The source chip, under the value it qualifies.
+const chip = (s: FileSource) => `<span class="fsrc">${esc(s)}</span>`;
 export function valueHtml(v: Value): string {
+  // Unsourced or blank: never drawn as a fact (R17).
+  if (v.kind !== "unknown" && (blank(v.text) || !sourced(v.source))) return valueHtml(unknown(UNKNOWN.unverified));
   const text = blank(v.text) ? UNKNOWN.unverified : v.text;
-  return `<span class="v v-${v.kind}" data-v="${v.kind}">${esc(text)}${v.kind === "verified" ? ` <span class="vtag">Verified</span>` : ""}</span>`;
+  return `<span class="v v-${v.kind}" data-v="${v.kind}">${esc(text)}${v.kind === "verified" ? ` <span class="vtag">Verified</span>` : ""}${v.kind === "unknown" ? "" : chip(v.source)}</span>`;
+}
+
+// A total only from complete data (audit D08: no grand totals from partial data). Every value must be a sourced money amount in the
+// same form ("$1,250", "$32/hr" all with the same suffix); one unknown or unparseable value and there is no total, said with how many
+// are missing.
+export function totalOf(values: readonly Value[]): { value: Value; caveat: string | null } {
+  const parsed = values.map((v) => {
+    if (v.kind === "unknown" || !sourced(v.source)) return null;
+    const m = /^\$\s?([\d,]+(?:\.\d{1,2})?)\s*(\/\s*\w+)?$/.exec(v.text.trim());
+    return m ? { n: Number(m[1].replace(/,/g, "")), unit: (m[2] ?? "").replace(/\s/g, "") } : null;
+  });
+  const missing = parsed.filter((p) => !p).length;
+  const units = new Set(parsed.filter(Boolean).map((p) => p!.unit));
+  if (!values.length || missing || units.size > 1) {
+    const why = !values.length ? "There is nothing to add up." : missing ? `${missing} of ${values.length} ${missing === 1 ? "amount isn't" : "amounts aren't"} known, so there is no total.` : "These amounts aren't in the same unit, so there is no total.";
+    return { value: unknown("No total"), caveat: why };
+  }
+  const sum = parsed.reduce((a, p) => a + p!.n, 0), unit = [...units][0];
+  const txt = `$${sum.toLocaleString("en-US", { minimumFractionDigits: Number.isInteger(sum) ? 0 : 2, maximumFractionDigits: 2 })}${unit}`;
+  return { value: stated(txt, "Added up from the rows above"), caveat: null };
 }
 
 // ---------------------------------------------------------------- freshness stamp (brief P3.3, P6.4)
@@ -125,6 +155,15 @@ export function rowsHtml(items: readonly RowItem[]): string {
 export const sectionHtml = (label: string, body: string, o: { caveat?: { text: string; title?: string } | null } = {}) =>
   body ? `<section class="fsec"><h2 class="flabel">${esc(label)}</h2>${o.caveat ? caveatHtml(o.caveat.text, o.caveat.title) : ""}${body}</section>` : "";
 
+// Rows under a label. When any value is unknown and the caller gave no caveat, a caveat says how many are not known (audit D08:
+// caveats wherever data is incomplete), directly above the rows.
+export function rowsSectionHtml(label: string, items: readonly RowItem[], caveat?: { text: string; title?: string } | null): string {
+  if (!items.length) return "";
+  const n = items.filter((r) => r.value.kind === "unknown").length;
+  const auto = n && !caveat ? { text: `${n} of ${items.length} ${n === 1 ? "isn't" : "aren't"} known, so ${n === 1 ? "it is" : "they are"} shown as unknown rather than guessed.` } : null;
+  return sectionHtml(label, rowsHtml(items), { caveat: caveat ?? auto });
+}
+
 export interface Evidence { quote: string; source: string; at?: number | string | null; href?: string | null; hrefLabel?: string; image?: string | null; imageAlt?: string }
 // The proof rides with the claim: the snippet, where it came from and when, and the receipt itself (link, or the screenshot inline
 // when its origin is one the page's CSP allows; the caller decides that and passes image only then).
@@ -140,13 +179,14 @@ export interface JobCard {
   company: string; title: string; logo?: string | null; // a same-origin or allowlisted logo src; absent, the lettermark
   pay: Value; location: Value; posted: Value; fit?: string | null;
   action: { html: string } | { href: string; label: string } | null; // ONE primary action, drawn at the bottom
+  closed?: boolean; // the posting is closed: no action is offered, the card says so where the action would be (audit D01)
 }
 export function jobCardHtml(c: JobCard): string {
   const img = c.logo ? `<img src="${esc(c.logo)}" alt="" width="44" height="44" loading="lazy" referrerpolicy="no-referrer">` : "";
   const fact = (k: string, v: Value) => `<div class="jf"><dt>${esc(k)}</dt><dd>${valueHtml(v)}</dd></div>`;
-  const act = !c.action ? "" : "html" in c.action ? c.action.html
+  const act = c.closed ? `<p class="jclosed" role="status">${valueHtml(unknown(UNKNOWN.closed))} This posting is no longer taking applications.</p>` : !c.action ? "" : "html" in c.action ? c.action.html
     : /^https?:\/\//i.test(c.action.href) ? `<a class="apply jbtn" href="${esc(c.action.href)}" rel="noopener noreferrer">${esc(c.action.label)}</a>` : "";
-  return `<article class="jcard"><div class="jhead"><span class="jlogo"><span class="lettermark" aria-hidden="true">${esc(initialOf(c.company))}</span>${img}</span>`
+  return `<article class="jcard${c.closed ? " jcard-closed" : ""}"><div class="jhead"><span class="jlogo"><span class="lettermark" aria-hidden="true">${esc(initialOf(c.company))}</span>${img}</span>`
     + `<span class="jwho"><span class="jrole">${esc(c.title)}</span><span class="jco">${esc(c.company)}</span></span></div>`
     + `<dl class="jfacts">${fact("Pay", c.pay)}${fact("Location", c.location)}${fact("Posted", c.posted)}</dl>`
     + (blank(c.fit) ? "" : `<p class="jfit">${esc(c.fit)}</p>`) + (act ? `<div class="jact">${act}</div>` : "") + `</article>`;
@@ -207,5 +247,11 @@ a.nname{color:var(--link);display:inline-flex;align-items:center;min-height:44px
 .fstate .apply{margin-top:6px}
 .fbar{display:block;height:6px;width:40%;margin:0 0 14px;border-radius:999px;background:var(--line)}
 @media (prefers-reduced-motion:no-preference){.fbar{animation:fpulse 1.6s ease-in-out infinite}}@keyframes fpulse{50%{opacity:.4}}
+.fsrc{display:block;margin-top:2px;font-size:14px;font-weight:400;font-style:normal;color:var(--mute);white-space:normal}
+.v .fsrc{text-align:inherit}.jf .fsrc{text-align:left}
+.jclosed{margin:0;font-size:16px;color:var(--mute)}.jclosed .v{display:inline;max-width:none}
+.jcard-closed{background:var(--card)}.jcard-closed .jrole{color:var(--mute)}
+.apply:focus-visible,.fcard a:focus-visible,.fcard button:focus-visible{outline:3px solid var(--ink);outline-offset:3px}
+
 @media (max-width:360px){.jfacts{grid-template-columns:1fr 1fr}.fcard{padding:20px 16px 24px}}
 `;

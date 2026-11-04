@@ -270,6 +270,7 @@ MIGRATIONS=(
   20261102130000_career_apply_prepare_fair_claim.sql
   20261102140000_career_apply_resume_file_restarts_preparation.sql
   20261102160000_model_budget_total_cap.sql
+  20261103100000_google_disconnect_erase_outbox.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -410,6 +411,7 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'career_apply_prepare_request_claim' and prosrc like '%order by q.turn%')"
   "exists (select 1 from pg_proc where proname = 'career_apply_resume_file_restarts')"
   "exists (select 1 from pg_proc where proname = 'model_budget_total_status') and exists (select 1 from pg_proc where proname = 'model_budget_reserve' and pronargs = 6)"
+  "exists (select 1 from pg_proc where proname = 'google_career_disconnect_erase' and prosrc like '%status:deadline:%')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql

@@ -4,6 +4,7 @@
 // Messages wire (a stub fetch); nothing in this file reaches a real provider and nothing spends.
 import { modelConfig, modelConfigFor, providerFor, toAnthropic, fromAnthropic, callModel, chatReply, plannerModel, costMicros, newMeter, meterAdd, OUTAGE_REPLY, CLAUDE_DEFAULT_MODEL, webSearch } from "../../supabase/functions/_shared/model_gateway.ts";
 import { ModelUnavailableError } from "../../supabase/functions/_shared/model_calls.ts";
+import { memoryBudgetGate } from "../../supabase/functions/_shared/model_budget.ts";
 function assert(v: unknown, m = "assertion failed") { if (!v) throw new Error(m); }
 const eq = (a: unknown, b: unknown, m = "") => assert(JSON.stringify(a) === JSON.stringify(b), `${m} ${JSON.stringify(a)} !== ${JSON.stringify(b)}`);
 const env = (o: Record<string, string>) => ({ get: (k: string) => o[k] });

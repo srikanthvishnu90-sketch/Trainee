@@ -272,6 +272,7 @@ MIGRATIONS=(
   20261102130000_career_apply_prepare_fair_claim.sql
   20261102140000_career_apply_resume_file_restarts_preparation.sql
   20261102160000_model_budget_total_cap.sql
+  20261102170000_inbound_turn_queue.sql
   20261102180000_delivery_throughput.sql
   20261103100000_google_disconnect_erase_outbox.sql
 )
@@ -415,6 +416,7 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'career_apply_prepare_request_claim' and prosrc like '%order by q.turn%')"
   "exists (select 1 from pg_proc where proname = 'career_apply_resume_file_restarts')"
   "exists (select 1 from pg_proc where proname = 'model_budget_total_status') and exists (select 1 from pg_proc where proname = 'model_budget_reserve' and pronargs = 6)"
+  "to_regclass('public.inbound_turn_queue') is not null and exists (select 1 from pg_proc where proname = 'inbound_turn_claim')"
   "exists (select 1 from pg_proc where proname = 'career_outbox_claim_lane') and exists (select 1 from pg_proc where proname = 'channel_rate_acquire') and to_regclass('public.channel_rate_buckets') is not null"
   "exists (select 1 from pg_proc where proname = 'google_career_disconnect_erase' and prosrc like '%status:deadline:%')"
 )
@@ -457,7 +459,7 @@ DEPLOY_FNS=(agent-chat "${SCHEDULED[@]}" career-voice "${CHANNEL_FNS[@]}" "${JWT
 # trainee-connect (the hosted account-connect page behind /connect) signs its links with TRAINEE_CONNECT_LINK_SECRET, else
 # TRAINEE_FILE_LINK_SECRET (_shared/connect_link.ts connectSecret): it is gated on the file secret, the same one trainee-file needs,
 # so /connect has a function behind it whenever /file does. Without this entry go-live never deployed it (the /connect proxy 404'd).
-GATED=(trainee-file:TRAINEE_FILE_LINK_SECRET trainee-connect:TRAINEE_FILE_LINK_SECRET ops-monitor:OPS_MONITOR_TOKEN)
+GATED=(trainee-file:TRAINEE_FILE_LINK_SECRET trainee-connect:TRAINEE_FILE_LINK_SECRET ops-monitor:OPS_MONITOR_TOKEN trainee-turn-worker:TRAINEE_TURN_SECRET)
 GATED_ON=(); GATED_DONE=""
 # The Upmore finance functions still in supabase/functions. Trainee never deploys them (production stops drifting toward
 # the finance app); retiring them on the live project is the owner's decision (docs/architect/REMOVAL-LIST-2026-10-28.md).

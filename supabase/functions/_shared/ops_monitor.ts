@@ -18,6 +18,8 @@ export interface Snapshot {
   // Optional so a caller that does not read them is unchanged (undefined = not measured, like null).
   deploySmoke?: { id: string; created_at: string; sha: string; fail: number; notRun: number } | null; // newest founder_alerts kind=deploy_smoke
   outbox?: { oldestPendingAt: string | null; pending: number } | null; // texts due but never delivered (career_outbox)
+  // ACK FAST (CHAT_QUEUE): the inbound turn queue (inbound_turn_health); a failed row is a text the person got no answer to.
+  turnQueue?: { queued: number; claimed: number; oldestQueuedAt: string | null; failedRecent: number; newestFailedId: number | null } | null;
   // approval_rate_v (rolling 7 days, per kind); undefined/null = not measured.
   approval?: { kind: string; shown: number; approvedUnchanged: number }[] | null;
 }
@@ -26,6 +28,7 @@ export interface Snapshot {
 export const APPROVAL_TARGET_PCT = 95, APPROVAL_MIN_SHOWN = 20;
 export interface Spend { source: "model_budget" | "turn_costs"; day: string; spentMicros: number; reservedMicros: number; limitMicros: number }
 export interface Thresholds { ingestStaleMs: number; deliveryWindowMs: number; deliveryMinFailed: number; deliverySilentMs: number; workerQueuedMs: number; workerDrivingMs: number; http5xxMin: number; smokeFreshMs: number; outboxStuckMs: number }
+export const TURN_QUEUE_STUCK_MS = 5 * MIN; // a turn normally answers in under 20 s; five minutes is a stuck worker
 export const DEFAULTS: Thresholds = { ingestStaleMs: 2 * H, deliveryWindowMs: 30 * MIN, deliveryMinFailed: 3, deliverySilentMs: 10 * MIN, workerQueuedMs: 20 * MIN, workerDrivingMs: 30 * MIN, http5xxMin: 10, smokeFreshMs: 24 * H, outboxStuckMs: 30 * MIN };
 export interface Alert { kind: string; key: string; cooldownMs: number; text: string }
 
@@ -84,6 +87,10 @@ export function evaluate(s: Snapshot, t: Thresholds = DEFAULTS): Alert[] {
   if (sm && sm.fail > 0 && ago(s.now, sm.created_at) <= t.smokeFreshMs) out.push({ kind: "deploy_smoke_failed", key: sm.id, cooldownMs: 24 * H,
     text: `The last deploy smoke${sm.sha ? ` (commit ${sm.sha.slice(0, 7)})` : ""} had ${sm.fail} failing check(s) and ${sm.notRun} not run, at ${sm.created_at}. The live project may not match what was shipped; re-run scripts/launch/trainee-go-live.sh --only-smoke.` });
   // Stuck queue: texts that were due long ago and were never delivered (the delivery runner can be "running" and still not draining).
+  if (s.turnQueue && s.turnQueue.failedRecent > 0) out.push({ kind: "turn_queue_failed", key: `turn_queue_failed:${s.turnQueue.newestFailedId ?? 0}`, cooldownMs: 6 * H,
+    text: `${s.turnQueue.failedRecent} inbound text(s) failed all their attempts in the last 24 hours and got no answer (inbound_turn_queue, status failed; the text is kept on the row).` });
+  if (s.turnQueue && s.turnQueue.oldestQueuedAt && ago(s.now, s.turnQueue.oldestQueuedAt) > TURN_QUEUE_STUCK_MS) out.push({ kind: "turn_queue_stuck", key: "turn_queue_stuck", cooldownMs: 2 * H,
+    text: `The oldest inbound text has waited ${mins(ago(s.now, s.turnQueue.oldestQueuedAt))} for its answer (${s.turnQueue.queued} queued, ${s.turnQueue.claimed} running). trainee-turn-worker is not keeping up or is not running.` });
   if (s.outbox && s.outbox.pending > 0 && s.outbox.oldestPendingAt && ago(s.now, s.outbox.oldestPendingAt) > t.outboxStuckMs) out.push({ kind: "outbox_stuck", key: "outbox_stuck", cooldownMs: 2 * H,
     text: `${s.outbox.pending} queued text(s) are past due and undelivered; the oldest has waited ${mins(ago(s.now, s.outbox.oldestPendingAt))}. The delivery queue is stuck.` });
   for (const a of s.approval ?? []) {
@@ -158,6 +165,11 @@ export async function readSnapshot(admin: Admin, env: { get(k: string): string |
     outbox: await safe(async () => {
       const r = await admin.from("career_outbox").select("deliver_at").is("delivered_at", null).lt("deliver_at", iso(now - DEFAULTS.outboxStuckMs)).order("deliver_at", { ascending: true }).limit(500);
       return r.error ? null : { oldestPendingAt: r.data?.[0]?.deliver_at ?? null, pending: (r.data ?? []).length };
+    }),
+    turnQueue: await safe(async () => {
+      const r = await admin.rpc("inbound_turn_health", {});
+      const x = Array.isArray(r.data) ? r.data[0] : r.data;
+      return r.error || !x ? null : { queued: Number(x.queued ?? 0), claimed: Number(x.claimed ?? 0), oldestQueuedAt: x.oldest_queued_at ?? null, failedRecent: Number(x.failed_recent ?? 0), newestFailedId: x.newest_failed_id == null ? null : Number(x.newest_failed_id) };
     }),
     approval: await safe(async () => {
       const r = await admin.from("approval_rate_v").select("kind,shown,approved_unchanged");

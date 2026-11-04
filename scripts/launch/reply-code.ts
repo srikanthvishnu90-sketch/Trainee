@@ -47,6 +47,7 @@ export const SHARED_REPLY_MODULES = [
 // flipping a flag is a reply-code change); these are the modules each ON flag switches on, so changing one re-measures:
 //   task/                     CAREER_PLANNER's plan and reminders (the planner itself is agent-chat/career_planner.ts)
 //   channel_voice.ts, channel_registry.ts, trainee-telegram/handler.ts, trainee-inbound/handler.ts, trainee-deliver/handler.ts
+//   channel_inbound.ts, inbound_turn_queue.ts, trainee-turn-worker/: ACK FAST (CHAT_QUEUE), where the turn runs once the webhook has queued it
 //                             CAREER_TEXTING_NATIVE: how each reply is split, formatted and paced on each channel
 //   career_networking.ts      CAREER_NETWORKING_DRAFT's drafted outreach
 //   career_tailor_rewrite.ts  CAREER_TAILOR_REWRITE's bullets
@@ -61,6 +62,12 @@ export const RELEASE_FLAG_PATHS = [
   "supabase/functions/trainee-telegram/handler.ts",
   "supabase/functions/trainee-inbound/handler.ts",
   "supabase/functions/trainee-deliver/handler.ts",
+  // ACK FAST (CHAT_QUEUE, default off): with it on, the turn runs in the worker from the queue; the code that decides when and how a
+  // queued text is run, retried and (on its last attempt) answered is reply code. The inbound core is the same one the webhooks run.
+  "supabase/functions/_shared/channel_inbound.ts",
+  "supabase/functions/_shared/inbound_turn_queue.ts",
+  "supabase/functions/trainee-turn-worker/handler.ts",
+  "supabase/functions/trainee-turn-worker/index.ts",
   "supabase/functions/_shared/career_networking.ts",
   "supabase/functions/_shared/career_tailor_rewrite.ts",
   "supabase/functions/_shared/career_outreach_track.ts",

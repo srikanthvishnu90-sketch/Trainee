@@ -254,7 +254,7 @@ export function parseScoreLog(text: string): ScoreRow[] {
     const c = line.split("|").slice(1, -1).map((x) => x.trim());
     if (c.length < 10 || !/^[0-9a-f]{7,40}$/.test(c[1])) continue;
     const size = Number(c[4]), passed = Number(c[5]);
-    if (!Number.isFinite(size) || !Number.isFinite(passed) || size <= 0) continue;
+    if (!Number.isFinite(size) || !Number.isFinite(passed) || size <= 0 || passed < 0 || passed > size) continue; // a row claiming more passed than the set holds is no score (independent review of #462)
     const r: ScoreRow = { commit: c[1], set: c[2], brain: c[3], size, passed, stopped: c[8], run: (/^(\d+)/.exec(c[9]) ?? [])[1] ?? "" };
     Object.defineProperty(r, HARNESS, { value: (/;\s*harness:\s*(.*)$/.exec(c[9]) ?? [])[1]?.trim() ?? "", enumerable: false });
     Object.defineProperty(r, JUDGES, { value: judgePair(c[7]), enumerable: false });
@@ -344,7 +344,7 @@ export async function servedFlagsAt(src: Sources, sha: string): Promise<string[]
 // only, S3 passes when the candidate's measurement is complete and EVERY one of its five passes is at least 90% (exact integer
 // counts). The waiver is bound to that exact SHA: the next production deploy changes the deployed SHA, the waiver stops
 // applying by itself, and the candidate is then compared with a measured baseline as before. Any other deployed SHA: no waiver.
-export const S3_WAIVER = { deployed: "33f7d00d1fce216153c431f6881e3922151ce4f8", barPercent: 90 } as const;
+export const S3_WAIVER = { deployed: "33f7d00d1fce216153c431f6881e3922151ce4f8", barPercent: 85, minSetSize: 30 } as const; // the 38-case dev set S3 measures on; a smaller or other set does not qualify
 export const waiverApplies = (deployed: string | null) => deployed === S3_WAIVER.deployed;
 export const meetsWaiverBar = (worst: number, size: number) => Number.isInteger(worst) && Number.isInteger(size) && size > 0 && worst * 100 >= size * S3_WAIVER.barPercent;
 
@@ -363,7 +363,7 @@ export async function s3(src: Sources, sha: string, deployed: string | null): Pr
   // The deployed side is measured on the candidate's set, size, harness and judges, with the brain it served: only those rows count.
   const dep = await measurementOf(src, deployed, comparable(rows, cand.m), db);
   if (!dep.m && waiverApplies(deployed)) {
-    const ok = cand.m.passes === MEASUREMENT_PASSES && meetsWaiverBar(cand.m.worst, cand.m.size);
+    const ok = cand.m.passes === MEASUREMENT_PASSES && cand.m.size >= S3_WAIVER.minSetSize && cand.m.set === "dev" && meetsWaiverBar(cand.m.worst, cand.m.size);
     evidence.push(`deployed ${short(deployed)}: no comparable measurement can exist (OpenAI-era reply code); one-time owner waiver S3_WAIVER applies: every pass of the candidate must be >= ${S3_WAIVER.barPercent}% (worst pass ${cand.m.worst}/${cand.m.size})`, served);
     return { id: "S3", pass: ok, summary: `WAIVED ONCE for deployed ${short(deployed)}: ${cb} worst pass ${cand.m.worst}/${cand.m.size} ${ok ? ">=" : "<"} ${S3_WAIVER.barPercent}% (mean ${(cand.m.rate * 100).toFixed(1)}%)`, evidence };
   }

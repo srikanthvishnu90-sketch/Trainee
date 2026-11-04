@@ -98,3 +98,21 @@
 458 e05d99b95bfff862a3f2a0844a78e7a935fa55e2 independent-review-agent-rv43 risk=low note=confirm-ask-rows-survive-disconnect
 460 e7e96bb4358ed15ffbe33cc002c1cdfddfebe776 independent-review-agent-rv43 risk=low
 456 4d769e5fca7cc069d90bf8f17fee56d0a19f0caa independent-review-agent-rv43 risk=low
+461 4862e0c72518686495a8dc6ba2e16970af120883 independent-review-agent-rv44 risk=low note=intent-assertion-dropped
+462 af7263f9841f1e9f2e21a4877a5b5bc76ef4ec52 independent-review-agent-rv44 risk=med note=waiver-not-pinned-to-brain-or-set-and-passed-gt-size-unchecked
+463 72c990a6b5289b5112c68003798238f158da3627 independent-review-agent-rv44 risk=low
+464 e334f084bbfc2d427ec20b3667733ea4a507a761 independent-review-agent-rv44 risk=med note=optional-fill-failures-now-block
+465 33229e9b47b6577888dea4e902b946a1d14a4098 independent-review-agent-rv44 risk=med note=h018-trigger-regex-broad
+467 1086461144d0858b2bd54736cb8a5226f66bfc6d independent-review-agent-rv44 risk=med note=waiver-failure-message-misleading-and-brain-not-pinned
+348 53e84b28af365fcf662dc1ddee60f4630ccacb35 independent-review-agent-rv45 risk=high note=defect-fixed-on-trunk-by-telegram-link-reply-code-migration
+454 ddfac1510e0ee9a7f7ee253f8188c1231fa58175 independent-review-agent-rv45 risk=med note=defect-fixed-in-463
+455 792230b1271da77af4cf0df87c60303f347190de independent-review-agent-rv45 risk=med note=defect-fixed-in-463
+437 ec239c145bfc06ce0edd9a6a6f435e638fd2170c independent-review-agent-rv45 risk=med note=defect-fixed-in-463
+453 263f254787ae0bb9e25e66715b98bf0d02e3a2cf independent-review-agent-rv45 risk=low
+472 7e9c4821def7984edc3db6eb6438bcd62a5dbd00 independent-review-agent-rv44 risk=med note=stale-90pct-comment-and-brain-not-pinned
+477 3cf40f2f3ae573244f40fb3406264ab5a92e391a independent-review-agent-rv44 risk=low note=new-public-function-gated-on-file-secret
+471 8398090e394a1b83f97e96eb1e046b672cdf6cd1 independent-review-agent-rv44 risk=low
+457 af355a6d3072af869026444915ac77c8cbbcd105 independent-review-agent-rv44 risk=low note=release-merge-tree-identical-to-approved-trunk-head
+469 8840311e284c753e9dac75fa7274b3b96c3dab05 independent-review-agent-rv44 risk=low note=release-merge-tree-identical-to-approved-trunk-head
+474 7731d4d259bf788d3787c619866b4d55dcb54a1a independent-review-agent-rv44 risk=low note=release-merge-tree-identical-to-approved-trunk-head
+479 90320f93a1eb5ead4f0d1a6d80b01fd16f30733d independent-review-agent-rv44 risk=low note=release-merge-tree-identical-to-approved-trunk-head

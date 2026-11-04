@@ -449,7 +449,10 @@ DEPLOY_FNS=(agent-chat "${SCHEDULED[@]}" career-voice "${CHANNEL_FNS[@]}" "${JWT
 # Secret-gated, public (verify_jwt = false) functions, each deployed only when its secret is among the project's function
 # secrets (in a dry run: given in the environment). Absent secret: skipped with a log line, never a failure. Nothing here
 # sets the secret. gate_fns (run by make_manifest) appends the enabled ones to DEPLOY_FNS and GATED_ON.
-GATED=(trainee-file:TRAINEE_FILE_LINK_SECRET ops-monitor:OPS_MONITOR_TOKEN)
+# trainee-connect (the hosted account-connect page behind /connect) signs its links with TRAINEE_CONNECT_LINK_SECRET, else
+# TRAINEE_FILE_LINK_SECRET (_shared/connect_link.ts connectSecret): it is gated on the file secret, the same one trainee-file needs,
+# so /connect has a function behind it whenever /file does. Without this entry go-live never deployed it (the /connect proxy 404'd).
+GATED=(trainee-file:TRAINEE_FILE_LINK_SECRET trainee-connect:TRAINEE_FILE_LINK_SECRET ops-monitor:OPS_MONITOR_TOKEN)
 GATED_ON=(); GATED_DONE=""
 # The Upmore finance functions still in supabase/functions. Trainee never deploys them (production stops drifting toward
 # the finance app); retiring them on the live project is the owner's decision (docs/architect/REMOVAL-LIST-2026-10-28.md).
@@ -1115,7 +1118,7 @@ else
     if [[ -n "$DRY" ]]; then echo "DRY: psql *** -c: insert into public.career_deploy_ledger (${SHIP_SHA:-<sha>}, $fn, its bundle sha256, the platform version, --label)"
     else ledger_function "$fn"; fi
   done
-  # Public by design (verify_jwt = false in supabase/config.toml): trainee-file's signed link and ops-monitor's token authenticate.
+  # Public by design (verify_jwt = false in supabase/config.toml): trainee-file's and trainee-connect's signed links and ops-monitor's token authenticate.
   for fn in ${GATED_ON[@]+"${GATED_ON[@]}"}; do
     run "supabase functions deploy $fn --project-ref $REF --no-verify-jwt --use-docker" supabase functions deploy "$fn" --project-ref "$REF" --no-verify-jwt --use-docker
     if [[ -n "$DRY" ]]; then echo "DRY: psql *** -c: insert into public.career_deploy_ledger (${SHIP_SHA:-<sha>}, $fn, its bundle sha256, the platform version, --label)"

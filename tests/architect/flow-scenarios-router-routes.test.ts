@@ -6,10 +6,11 @@
 //      people search; "who works at People Inc." is the networking turn's; nothing is sent, approved or queued.
 //   B  the staged brain with a scripted model: "what does Applebee's pay?" (no company file) reaches the brain; "tell me
 //      about Applebee's" stays the router's honest no-file answer, with no model call.
-// Every host but the Supabase double and the scripted OpenAI wire is refused and recorded (asserted empty).
+// Every host but the Supabase double and the scripted Anthropic wire is refused and recorded (asserted empty).
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const PEOPLE = Array.from({ length: 12 }, (_, i) => `7b0f8f8e-6a43-4a49-9d2c-00000044${String(i).padStart(4, "0")}`);
@@ -36,7 +37,7 @@ Deno.test({
     if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (initdb)"); return; }
     const pg: Pg = await startPg();
     const keys = ["CAREER_BRAIN", "CAREER_KNOWLEDGE", "CAREER_BRAIN_ROUTER_INTENTS", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING",
-      "CAREER_ACCOUNT_MEMORY", "OPENAI_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "CAREER_MODEL_DAILY_USD", "CAREER_MODEL_DAILY_CALLS", "MODEL_BUDGET_PAUSED", "TRAINEE_FILE_BASE_URL",
+      "CAREER_ACCOUNT_MEMORY", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "CAREER_MODEL_DAILY_USD", "CAREER_MODEL_DAILY_CALLS", "MODEL_BUDGET_PAUSED", "TRAINEE_FILE_BASE_URL",
       "TRAINEE_FILE_LINK_SECRET", "TELEGRAM_BOT_TOKEN", "CAREER_REPLY_WRITER", "CAREER_APPLY_LINK", "CAREER_SEND_RAIL", "CAREER_NETWORKING_DRAFT", "CAREER_PEOPLE_SEARCH", "STRIPE_SECRET_KEY"];
     const saved = Object.fromEntries(keys.map((k) => [k, Deno.env.get(k)]));
     for (const k of keys) Deno.env.delete(k);
@@ -54,7 +55,7 @@ Deno.test({
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
         const u = new URL(req.url);
-        if (u.host === "api.openai.com") return fakeChat(await req.json().catch(() => ({})));
+        if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeChat(chat));
         if (u.origin !== new URL(SUPABASE_URL).origin) { outbound.push(`${req.method} ${u.host}`); throw new TypeError(`network refused: ${u.host}`); }
         return await viaDouble(req);
       }) as typeof fetch;
@@ -86,8 +87,7 @@ Deno.test({
       });
 
       Deno.env.set("CAREER_BRAIN", "staged");
-      Deno.env.set("OPENAI_API_KEY", "sk-test-not-real");
-      Deno.env.set("CAREER_MODEL", "gpt-5-mini");
+      Deno.env.set("ANTHROPIC_API_KEY", "sk-test-not-real");
       await t.step("B. staged brain: a pay question at a firm with no file reaches the brain; another no-file question stays the router's", async () => {
         const before = wire.chat;
         const pay = await say("what does Applebee's pay?");

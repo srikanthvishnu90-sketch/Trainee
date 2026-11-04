@@ -34,11 +34,13 @@ export const PAYLOAD_INTENTS: ReadonlySet<string> = new Set([
   "career_apply_card", "career_apply_email", "career_outreach_batch", "career_apply_questions", "career_message_approval",
   "career_followup_card", "career_networking_draft", "career_mock", "career_apply_confirm_which", "career_apply_employer_ask",
   "career_offer_counter", "career_cloud_optin", "career_outreach_signature",
+  // what a batch yes approved (apply_all_yes.ts): the counts and names are code's, from the taps' own results
+  "career_apply_all_yes",
   // router intents that show a draft or a mock question verbatim
   "outreach_draft", "negotiation_draft", "career_tailor", "prep_mock_start", "prep_mock_next", "prep_mock_followup",
 ]);
 // results_file: the reply carries the results page's link, minted by code (role_results.ts); its words and link stay as they are.
-const PAYLOAD_META = ["card_id", "email_card", "offer_card", "open_card", "career_approval_card_id", "employer_question", "screen_ask", "results_file"];
+const PAYLOAD_META = ["card_id", "email_card", "offer_card", "open_card", "career_approval_card_id", "employer_question", "screen_ask", "results_file", "apply_all_offer", "apply_all_done"];
 
 export function writable(out: { intent?: string | null; reply?: string; parts?: unknown }, meta: Record<string, unknown> | null, o: { structured: boolean }): boolean {
   if (o.structured) return false;

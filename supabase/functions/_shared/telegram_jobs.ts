@@ -424,6 +424,19 @@ export function secretFields(p: PreparedRow): string[] {
   (Array.isArray(p.card_lines) ? p.card_lines : []).forEach((l, i) => { if (secretLine(String(l ?? ""))) out.push(`card line ${i + 1}`); });
   return out;
 }
+// Why a batch yes (apply_all_yes.ts) must not approve this application on the person's behalf: a required field is blank (the page lists it
+// under "Left blank"; a field marked required:false is optional and does not count), or an answer is sensitive (a secret-looking field, or
+// a demographic, health, criminal-record or date-of-birth answer). The person reviews those one at a time on the page.
+const SENSITIVE_ANSWER = /\b(?:gender|sex\b|race|ethnic|hispanic|latino|veteran|disabilit|sexual|orientation|religio|pronoun|criminal|convict|felony|date of birth|birth ?date|dob|health|medical|pregnan|marital|visa|work(?:ing)? authori[sz]|authori[sz]ed to work|right to work|sponsor|citizen|nationalit|\\bssn\\b|social ?security|salary|compensation|pay expectation|desired pay|wage)/i;
+// A value that says nothing ("n/a", "none", "-", "tbd", "?", "null"...) is blank for a batch yes.
+const PLACEHOLDER = /^(?:n\/?a|na|none|-+|tbd|tba|\?+|null|undefined|not applicable|unknown)$/i;
+const blankValue = (v: unknown) => { const t = String(v ?? "").trim(); return !t || PLACEHOLDER.test(t); };
+export function batchHoldBack(p: PreparedRow): "blank" | "sensitive" | null {
+  const fields: any[] = Array.isArray((p.payload as any)?.fields) ? (p.payload as any).fields : [];
+  if (secretFields(p).length || fields.some((f) => isSecretField(f) || (!blankValue(f?.value) && SENSITIVE_ANSWER.test(`${f?.label ?? ""} ${f?.name ?? ""}`)))) return "sensitive";
+  if (fields.some((f) => blankValue(f?.value) && f?.required !== false)) return "blank";
+  return null;
+}
 // An answer carrying ANOTHER account's fact (its user_id is not the payload's): its value is never printed to this person
 // (apply round 3: the page's "What we send" and this card printed it). apply_trust.ts makes such an application unapprovable.
 export const foreignFact = (f: any, pl: any) => f?.user_id !== undefined && f.user_id !== pl?.user_id;

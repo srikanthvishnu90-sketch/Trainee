@@ -37,7 +37,7 @@ Deno.test("design: every role card has one solid black 'Apply' pill with an acce
     assert(/<details class="send"><summary>What will be sent<\/summary>/.test(c), "the exact application is an expand on the card");
   }
   const acme = plain(cardOf(html, refIn(html, "Frontend Engineering Intern", "Acme Web")));
-  for (const x of ["Resume ada-resume.pdf", "First name Ada", "Email ada@example.test", "Are you authorized to work in the US? Yes", "Cover note I'd love to build at Acme Web.", "Sends to boards.greenhouse.io", `Application ${tagOf(1)}`]) assert(acme.includes(x), `${x}: ${acme}`);
+  for (const x of ["Resume ada-resume.pdf", "First name Ada", "Email ada@example.test", "Are you 18 or older? Yes", "Cover note I'd love to build at Acme Web.", "Sends to boards.greenhouse.io", `Application ${tagOf(1)}`]) assert(acme.includes(x), `${x}: ${acme}`);
   assert(/aria-label="Apply to Frontend Engineering Intern at Acme Web"/.test(html));
   // CSS: black, white text, 48px+ tall, kept visible in dark mode; the list's other primary, Apply to selected, is black too.
   const css = /<style>([\s\S]*?)<\/style>/.exec(html)![1];
@@ -58,7 +58,7 @@ Deno.test("ready: one POST approves exactly the prepared payload once; the card 
   eq(w.queue[0].payload, w.preps.get(ACME)!.payload, "exactly the payload shown");
   const after = await (await get(w, s)).text();
   const card = cardOf(after, ref);
-  assert(/<span class="chip queued" role="status">Approved<\/span>/.test(card), "the status is the record's: queued");
+  assert(/<span class="chip queued t-info" role="status">Queued<\/span>/.test(card), "the status is the record's: queued");
   assert(!/class="apply"/.test(card), "no Apply once it is in motion");
   // The same tap again: the posting goes once.
   const again = await textOf(await post(w, s, acmeApply(ref)));

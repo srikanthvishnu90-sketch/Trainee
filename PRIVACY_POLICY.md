@@ -1,6 +1,6 @@
 # Upmore Privacy Policy
 
-> **Superseded.** This is the September 26, 2026 draft. The published policy is `privacy.html` (served at /privacy, last updated October 11, 2026): it names OpenAI (or Anthropic) as the AI provider, Alpaca for brokerage, and no saved merchant passwords. Kept as history; do not quote it.
+> **Superseded.** This is the September 26, 2026 draft. The published policy is `privacy.html` (served at /privacy, last updated October 11, 2026): it names Anthropic as the AI provider, Alpaca for brokerage, and no saved merchant passwords. Kept as history; do not quote it.
 
 **Last updated: September 26, 2026**
 

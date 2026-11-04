@@ -2,7 +2,7 @@
 // task holds. Pure (no I/O, no model): a task passes only when every expectation holds on the rows the turns left, and
 // no invariant is broken. The reply's words are never read.
 // deno-lint-ignore-file no-explicit-any
-import { dueDate } from "../../../supabase/functions/_shared/task/plan.ts";
+import { dueDate, localDate } from "../../../supabase/functions/_shared/task/plan.ts";
 
 export interface EndState {
   queued: { posting_key: string; company: string; title: string }[]; // career_apply_wanted
@@ -55,6 +55,30 @@ export function invariants(s: EndState, e: Expect): string[] {
   return out;
 }
 
+// The day a reminder's "when" must come out as, for a person with no saved time zone (the fixture's: the reminder module
+// assumes Eastern, and 9:00 AM when no time is said). Written from the reminder module's documented rules, not read back
+// from the product, so a drift in either shows (tests/architect/task-eval-clock.test.ts holds the two together for every
+// hour of two years):
+//   "next week"        the coming Monday (said with its date), NOT today + 7: they agree only on a Monday.
+//   "<weekday>"        the coming one; said on that weekday it is today if 9:00 AM has not passed, else a week on.
+//   "in N days/weeks"  N x 24 hours (N x 7 x 24) from now, as the Eastern date it lands on.
+const EVAL_ZONE = "America/New_York", NUMS: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 };
+const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+export function expectedDue(when: string, now: number): string | null {
+  const w = String(when ?? "").toLowerCase();
+  const today = localDate(now, EVAL_ZONE), dow = new Date(`${today}T12:00:00Z`).getUTCDay();
+  const plus = (n: number) => { const d = new Date(`${today}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  if (/\bnext week\b/.test(w)) return plus((1 - dow + 7) % 7 || 7);
+  const rel = /\bin (a|an|one|two|three|four|five|six|seven|\d{1,3}) (day|week)s?\b/.exec(w);
+  if (rel) return localDate(now + (NUMS[rel[1]] ?? Number(rel[1])) * (rel[2] === "week" ? 7 : 1) * 86_400_000, EVAL_ZONE);
+  const day = WEEKDAYS.findIndex((d) => new RegExp(`\\b${d}\\b`).test(w));
+  if (day >= 0 && !/\b(tomorrow|today|tonight)\b/.test(w)) {
+    const k = (day - dow + 7) % 7;
+    const hm = new Intl.DateTimeFormat("en-GB", { timeZone: EVAL_ZONE, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(now));
+    return plus(k === 0 ? (hm < "09:00" ? 0 : 7) : k);
+  }
+  return dueDate(when, now, EVAL_ZONE);
+}
 export function judge(e: Expect, s: EndState, now: number): { pass: boolean; failed: string[] } {
   const failed: string[] = [...invariants(s, e)];
   if (e.queued) {
@@ -77,7 +101,7 @@ export function judge(e: Expect, s: EndState, now: number): { pass: boolean; fai
   if (e.reminders) {
     if (!e.reminders.length && s.reminders.length) failed.push(`reminders: ${s.reminders.length} set; none was asked with a day`);
     for (const r of e.reminders) {
-      const due = dueDate(r.when, now, null);
+      const due = expectedDue(r.when, now);
       if (!s.reminders.some((x) => x.due_date === due)) failed.push(`reminders: none due ${due} (${r.when})`);
     }
   }

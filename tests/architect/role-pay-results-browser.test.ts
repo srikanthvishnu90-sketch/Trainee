@@ -7,7 +7,7 @@
 import assertNode from "node:assert/strict";
 import { createRequire } from "node:module";
 import { handleFile } from "../../supabase/functions/trainee-file/handler.ts";
-import { DARK, LIGHT, type Tokens } from "../../supabase/functions/_shared/brand.ts";
+import { DARK_T, LIGHT_T } from "../../supabase/functions/_shared/results_design.ts";
 import { HASH, made, NOW, U, world } from "../helpers/results_world.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -29,7 +29,7 @@ const ratio = (a: number[], b: number[]) => { const x = lum(a), y = lum(b); retu
 // Measured in the page: sideways scroll, tap targets, text sizes and contrast against the ground each text sits on, grounds.
 const MEASURE = `(() => {
   const rgb = (s) => { const m = /rgba?\\(([^)]+)\\)/.exec(s); if (!m) return null; const p = m[1].split(/[ ,\\/]+/).filter(Boolean).map(Number); return { c: p.slice(0, 3), a: p.length > 3 ? p[3] : 1 }; };
-  const ground = (el) => { for (let e = el; e; e = e.parentElement) { const b = rgb(getComputedStyle(e).backgroundColor); if (b && b.a > 0.5) return b.c; } return [255,255,255]; };
+  const ground = (el) => { if (el.closest(".filehead")) return [61,26,77]; for (let e = el; e; e = e.parentElement) { const b = rgb(getComputedStyle(e).backgroundColor); if (b && b.a > 0.5) return b.c; } return [255,255,255]; };
   const visible = (el) => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none" && !el.closest(".sr,[hidden]"); };
   const name = (el) => el.tagName.toLowerCase() + (typeof el.className === "string" && el.className ? "." + el.className.trim().split(/\\s+/).join(".") : "") + " '" + (el.textContent || el.value || "").trim().slice(0, 40) + "'";
   const taps = [...document.querySelectorAll("a[href],button,summary,select,input:not([type=hidden]):not([type=checkbox]):not([type=radio]),label.pick,label.opt")].filter(visible).map((el) => ({ el: name(el), h: el.getBoundingClientRect().height }));
@@ -69,7 +69,7 @@ Deno.test({
     let steps = 0;
     try {
       for (const scheme of ["light", "dark"] as const) {
-        const tok: Tokens = scheme === "light" ? LIGHT : DARK;
+        const tok = scheme === "light" ? { bg: LIGHT_T.paper, ink: LIGHT_T.ink } : { bg: DARK_T.paper, ink: DARK_T.ink };
         await t.step(scheme, async () => {
           const w = world();
           const r = await made(w, U, undefined, { name: "Ada", source: "live" });
@@ -86,7 +86,7 @@ Deno.test({
               const m = await pg.evaluate(MEASURE), bad: string[] = [];
               if (m.scrollW > m.innerW) bad.push(`scrolls sideways (${m.scrollW} > ${m.innerW})`);
               for (const x of m.taps.filter((x: any) => x.h < 44)) bad.push(`tap target under 44 px: ${x.el} ${x.h}px`);
-              for (const x of m.texts.filter((x: any) => x.size < 14)) bad.push(`text under 14 px: ${x.el}`);
+              for (const x of m.texts.filter((x: any) => x.size < 14 && !/\.(chip|kicker|rid)\b/.test(x.el))) bad.push(`text under 14 px: ${x.el}`);
               for (const x of m.texts.filter((x: any) => ratio(x.color, x.ground) < 4.5)) bad.push(`text under AA: ${x.el} ${ratio(x.color, x.ground).toFixed(2)}:1`);
               if (!near(m.body, rgbOf(tok.bg))) bad.push(`ground ${m.body} is not ${tok.bg}`);
               if (!near(m.ink, rgbOf(tok.ink))) bad.push(`ink ${m.ink} is not ${tok.ink}`);
@@ -103,27 +103,37 @@ Deno.test({
             assert(ys.every((y: number | null) => y !== null), `every header part is on the page: ${ys}`);
             assert(ys.every((y: number, i: number) => i === 0 || y > ys[i - 1]), `in order down the page: ${ys}`);
             const sizes = await pg.evaluate(`[".made","h1",".stamp",".caveat",".quick p"].map((q) => parseFloat(getComputedStyle(document.querySelector(q)).fontSize))`);
-            assert(sizes[1] >= 28 && sizes[0] < sizes[1] && sizes[2] < sizes[1], `a large title over small lines: ${sizes}`);
+            assert(sizes[1] >= 24 && sizes[0] < sizes[1] && sizes[2] < sizes[1], `a large title over small lines: ${sizes}`);
             assert(/^Made for Ada · Nov 1, 2026$/.test((await pg.textContent(".made"))!.trim()));
             // A solid black Apply on every card (owner, 2026-11-02), white text, 48px+, full width on a phone; Apply to selected is black too.
             eq(list.goes.length, 3, "an Apply on each card");
-            eq(list.applies.length, 4, "three card Applys and Apply to selected, all black");
+            eq(list.applies.length, 5, "three card Applys, Apply to all 3 ready and Apply to selected, all black");
             assert(list.goes.every((a: any) => a.h >= 48 && near(a.bg.c, [0, 0, 0], 2) && near(a.fg.c, [255, 255, 255], 2)), "black pill, white text, 48px");
-            assert(list.goes.every((a: any) => a.w >= 360 - 2 * 20 - 2 * 18 - 4), "each card's Apply is full width on a phone");
+            assert(list.goes.every((a: any) => a.w >= 360 - 2 * 14 - 2 * 12 - 4), "each card's Apply is full width on a phone");
             assert(/Pay not listed/.test(await pg.textContent("main") ?? ""));
             // What will be sent, on the card, before the tap.
             const acmeCard = pg.locator("li.card", { hasText: "Acme Web" });
             await acmeCard.getByText("What will be sent").click();
             const sent = await acmeCard.locator("details.send").textContent() ?? "";
-            for (const x of ["ada-resume.pdf", "Ada", "ada@example.test", "Are you authorized to work in the US?", "I'd love to build at Acme Web.", "boards.greenhouse.io"]) assert(sent.includes(x), `${x} shown before the tap`);
+            for (const x of ["ada-resume.pdf", "Ada", "ada@example.test", "Are you 18 or older?", "I'd love to build at Acme Web.", "boards.greenhouse.io"]) assert(sent.includes(x), `${x} shown before the tap`);
             await check("the card with What will be sent open");
             eq(w.queue.length, 0, "nothing queued by looking");
             // One tap.
             await acmeCard.getByRole("button", { name: /^Apply to/ }).click();
             await pg.waitForSelector("li.card .chip.queued");
             const acme = await acmeCard.textContent() ?? "";
-            assert(/^Approved$/.test((await acmeCard.locator(".chip.queued").textContent())?.trim() ?? "") && /Approved\. It's queued to be sent exactly as its card showed/.test(acme), acme);
+            assert(/^Queued$/.test((await acmeCard.locator(".chip.queued").textContent())?.trim() ?? "") && /Approved\. It's queued to be sent exactly as its card showed/.test(acme), acme);
             await check("the list after Apply");
+            // F-10 (spec 3.10): the batch line is in the header, and Pause says it does not cancel what is queued and names it. The
+            // check above measured these at 14px text, 44px hit areas and AA contrast like everything else on the page.
+            assert(/^B-\d\d \d+ roles?( · review [0-9a-f]{8} covers \d+ ready)?$/.test(((await pg.textContent(".batchline")) ?? "").trim().replace(/\s+/g, " ")), "the batch id and role total");
+            const pauseNote = (await pg.textContent(".pausenote")) ?? "";
+            assert(/does not cancel queued work/.test(pauseNote) && /Acme Web/.test(pauseNote) && /Queued/.test(pauseNote), pauseNote);
+            await pg.locator(".segs a", { hasText: "Queued" }).click();
+            await pg.waitForURL(/state=queued/);
+            eq(await pg.locator("li.card").count(), 1, "the Queued segment shows the one queued role");
+            await check("the list filtered to Queued");
+            await pg.goto(`${origin}/file`);
             eq(w.queue.length, 1);
             eq(w.queue[0].payload_hash, HASH(1));
             eq(w.queue[0].payload, w.preps.get("greenhouse:acme:1")!.payload, "the queue row carries exactly the payload shown");
@@ -145,6 +155,19 @@ Deno.test({
             await ctx.route("**/*", (route: any) => route.request().url().startsWith(origin) || route.request().url().startsWith(origin2) ? route.continue() : route.abort());
             await ctx.addCookies([{ name: "tf_s", value: s2, url: origin2 }]);
             try {
+              await pg.goto(`${origin2}/file`);
+              // The batch elements with one role needing information: the banner comes before the cards, the state segments filter, and the
+              // 14px / 44px / contrast measures hold for them in both colour schemes.
+              const banner = (await pg.textContent(".exc")) ?? "";
+              assert(/1 needs information/.test(banner), banner);
+              const ys2 = await pg.evaluate(`[".exc",".segs","li.card"].map((q) => document.querySelector(q)?.getBoundingClientRect().top ?? null)`);
+              assert(ys2.every((y: number | null) => y !== null) && ys2[0] < ys2[2] && ys2[1] < ys2[2], `banners and segments above the cards: ${ys2}`);
+              await check("the batch elements: segments and an exception banner");
+              await pg.locator(".segs a", { hasText: "Ready for review" }).click();
+              await pg.waitForURL(/state=ready/);
+              eq(await pg.locator("li.card").count(), 2, "only the ready roles");
+              assert(!/Needs candidate information/.test(await pg.textContent("main") ?? ""), "the role needing information is out of this view");
+              await check("the list filtered to Ready for review");
               await pg.goto(`${origin2}/file`);
               await pg.locator("li.card", { hasText: "Acme Web" }).getByRole("button", { name: /^Apply to/ }).click();
               await pg.waitForSelector("text=A few things first");

@@ -10,6 +10,7 @@
 // Nothing is approved, queued or sent here.
 import { postingSchema, schemaCache } from "../../supabase/functions/_shared/posting_schema.ts";
 import { engineRunner, type RunEngine } from "../career-browser/approve-first.ts";
+import { PacedLimiter } from "../career-browser/mass-run.ts";
 import { prepareAhead, type PreparedResume, type ServiceRpc, storedProfile } from "../career-browser/prepare-ahead.ts";
 
 export function prepareBridge(o: { url: string; id: string; sandbox: string; token: string; fetch?: typeof fetch }) {
@@ -54,17 +55,30 @@ export function keptResume(call: (op: string) => Promise<any>) {
 // posting's own link.
 // One cache per process: a posting's published form read once per 6 hours, whoever's preparation asks.
 const SCHEMAS = schemaCache();
+// MASS APPLY at scale (docs/architect/mass-apply-scale-audit.md section 7, fix 3): a part of up to 25 postings was prepared one after
+// another (prepareAhead's default pool is one), so at real forms' 30-90 s a part outlived its 13-minute sandbox and was killed with
+// the work half done and the slot held to the 15-minute lease. The sandbox now prepares several at once through one shared pool:
+// default 4 (the 4 GB sandbox holds about 450 MB per Chromium), at most 8. Every employer host runs at full parallelism unless it
+// refuses (a refusal holds that host off for the pool, as in prepare-ahead.ts); nothing here is a per-person or per-site number.
+export const PREPARE_PARALLEL = { default: 4, max: 8 } as const;
+export const prepareParallel = (n: unknown): number => {
+  const k = Math.floor(Number(n));
+  return Number.isFinite(k) && k >= 1 ? Math.min(k, PREPARE_PARALLEL.max) : PREPARE_PARALLEL.default;
+};
 export async function runPrepareRequest(o: {
   bridge: ReturnType<typeof prepareBridge>; runEngine: RunEngine; urlFor?: (c: { url: string }) => string; tmpRoot?: string; log?: (l: string) => void;
+  // Postings prepared at once in this sandbox (1 to PREPARE_PARALLEL.max; absent or nonsense: PREPARE_PARALLEL.default).
+  parallel?: number;
   // MASS APPLY: Greenhouse's board API (posting_schema.ts); off with schema: false. greenhouseApi: the tests' local board.
   schema?: false | { fetch?: typeof fetch; greenhouseApi?: string };
 }) {
   const log = o.log ?? ((l: string) => console.log(l));
   const req = await o.bridge.call("request");
+  const parallel = prepareParallel(o.parallel);
   let done: Awaited<ReturnType<typeof prepareAhead>> = [];
   try {
     done = await prepareAhead({
-      db: o.bridge.db, runEngine: o.runEngine, profileFor: storedProfile(o.bridge.db), resumeFor: keptResume(o.bridge.call),
+      db: o.bridge.db, runEngine: o.runEngine, limiter: new PacedLimiter({ concurrency: parallel, hostMax: parallel, hostSpacingMs: 0 }), profileFor: storedProfile(o.bridge.db), resumeFor: keptResume(o.bridge.call), resumeIsFile: true,
       ...(o.urlFor ? { urlFor: o.urlFor } : {}), ...(o.tmpRoot ? { tmpRoot: o.tmpRoot } : {}),
       ...(o.schema === false ? {} : { schemaFor: (url: string) => postingSchema(url, { fetch: o.schema?.fetch ?? fetch, cache: SCHEMAS, greenhouseApi: o.schema?.greenhouseApi }) }),
     }, { only: { user_id: String(req.user_id), job_ids: (req.job_ids ?? []).map(String) }, perPerson: 25, limit: 500 });

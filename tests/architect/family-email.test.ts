@@ -18,8 +18,9 @@
 //               say so plainly and offer the exact text as a mailto link; no request to Gmail other than reads, ever.
 //   isolation   another person sees none of it and gets no Gmail read without their own grant.
 //   disconnect  the grant row's delete (what "disconnect gmail" and gmail-oauth's disconnect do) is in
-//               tests/architect/pending/family-email-disconnect.test.ts: on trunk it erases nothing, and the erase is PR
-//               #196's migration (20261026200011_google_disconnect_erase.sql).
+//               tests/architect/family-email-disconnect.test.ts (the erase is
+//               20261026200011_google_disconnect_erase.sql; the queued deadline reminder too since
+//               20261103100000_google_disconnect_erase_outbox.sql).
 //   cost        ingest latency and model calls per 100 messages, measured here: the chat's read asks no model; the
 //               scheduled run's second look (CAREER_MAIL_MODEL=on) is measured on the same 100 with a counting fake.
 import assertNode from "node:assert/strict";
@@ -89,7 +90,7 @@ function fakeGoogle(boxes: Record<string, () => Fixture[]>) {
   const fetch = async (input: Request | URL | string, init?: RequestInit) => {
     const req = input instanceof Request && !init ? input : new Request(input as any, init);
     const u = new URL(req.url);
-    if (u.hostname === "api.openai.com") { openai.push(await req.text()); return json({ error: { message: "the test's OpenAI fake answers nothing" } }, 500); }
+    if (u.hostname === "api.anthropic.com") { openai.push(await req.text()); return json({ error: { message: "the test's OpenAI fake answers nothing" } }, 500); }
     calls.push({ method: req.method, url: u.toString() });
     if (u.hostname !== "gmail.googleapis.com") return json({ error: "not faked" }, 404);
     const box = boxes[String(req.headers.get("authorization") ?? "").replace(/^Bearer /, "")];

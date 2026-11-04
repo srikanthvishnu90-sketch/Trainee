@@ -8,6 +8,7 @@
 import type { JobView } from "./telegram_jobs.ts";
 import { reasonWords } from "./career_apply_status.ts";
 import { BODY_FONT, BRAND, DISABLED_CSS, FAVICON, FONT_LINKS, PLUM, TOKENS_CSS } from "./brand.ts";
+import { FILE_CSS, stampHtml, stateHtml } from "./file_design.ts";
 
 export type Word = "queued" | "preparing" | "sending" | "submitted" | "confirmed" | "failed" | "not submitted" | "needs you" | "unknown" | "in applications";
 export interface Status { word: Word; detail: string; sent?: boolean; evidence?: string | null } // evidence: what the row holds that shows the outcome (an employer reference, a confirmation email); null/absent: none on file
@@ -27,7 +28,9 @@ export interface Row {
   posted?: string | null; // "Posted 3 d ago (Oct 28)" from the posting's own date (postedLine), else when Trainee first saw it
 }
 // total: how many postings the list holds; the page shows the first rows.length of them and says so when that is fewer.
-export interface Feed { og?: Og; token: string; rows: Row[]; setHash: string | null; setSize: number; top?: string; botUrl?: string | null; total?: number }
+// made: "Made for Ada · Nov 1, 2026" above the card; stamp: "Postings checked ..." from the postings' own check times (file_design.ts
+// freshnessStamp), null when none is known (the page then says the check time is unknown, as a value).
+export interface Feed { og?: Og; token: string; rows: Row[]; setHash: string | null; setSize: number; top?: string; botUrl?: string | null; total?: number; made?: string; stamp?: string | null }
 
 // Bidi overrides and isolates (U+202A-E, U+2066-9) in a company, title or location would reverse the text after them on the page,
 // a provenance label included; they are dropped, never rendered.
@@ -159,7 +162,7 @@ ul.rows{list-style:none;margin:0;padding:0}
 .act{flex:none;margin:0}
 .apply{display:inline-flex;align-items:center;justify-content:center;min-width:96px;min-height:48px;padding:6px 20px;border-radius:999px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:600;text-decoration:none;cursor:pointer}.apply:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
 .chip{flex:none;min-height:48px;display:inline-flex;align-items:center;justify-content:flex-end;font-weight:600;color:var(--mute)}
-.chip.queued,.chip.in-applications,.chip.sending,.chip.submitted,.chip.confirmed{color:var(--good)}.chip.failed,.chip.not-submitted,.chip.unknown{color:var(--bad)}.chip.needs-you{color:var(--warn)}
+.chip.in-applications,.chip.sending,.chip.submitted,.chip.confirmed{color:var(--good)}.chip.failed,.chip.not-submitted,.chip.unknown{color:var(--bad)}.chip.needs-you{color:var(--warn)}
 details{margin:4px 0 0 58px}summary{list-style:none;cursor:pointer;min-height:44px;padding:4px 0}
 summary::-webkit-details-marker{display:none}
 .role{display:block;font-weight:500;overflow-wrap:anywhere}.desc{overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--mute);font-size:16px}
@@ -171,17 +174,18 @@ details[open] .desc{display:block;-webkit-line-clamp:unset}
 .note a,details a,.top-note a{color:var(--link)}main p>a:not(.apply){display:inline-flex;align-items:center;min-height:44px}.lnk{display:inline;min-height:44px;padding:0 4px;border:0;background:none;color:var(--link);font:inherit;text-decoration:underline;cursor:pointer}.sendh{margin:8px 0 2px;font-weight:600;font-size:15px}.send{margin:0 0 8px;padding-left:20px;font-size:15px;color:var(--mute)}.send li{margin:2px 0;overflow-wrap:anywhere}
 :focus-visible{outline:3px solid var(--accent);outline-offset:3px;border-radius:8px}
 ${DISABLED_CSS}
+${FILE_CSS}
 .foot{margin-top:24px;padding-top:14px;border-top:1px solid var(--line);font-size:15px;color:var(--mute)}
 @media (max-width:360px){details,.meta,.why,.note{margin-left:0}.apply{min-width:80px;padding:6px 12px}}
 `;
 export interface Og { title: string; description: string; image: string | null }
 const ogTags = (o: Og) => `<meta property="og:type" content="website"><meta property="og:site_name" content="Trainee"><meta property="og:title" content="${esc(o.title)}"><meta property="og:description" content="${esc(o.description)}">${o.image ? `<meta property="og:image" content="${esc(o.image)}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${esc(o.image)}">` : `<meta name="twitter:card" content="summary">`}<meta name="twitter:title" content="${esc(o.title)}"><meta name="twitter:description" content="${esc(o.description)}">`;
 const OG_DEFAULT: Og = { title: "Your jobs on Trainee", description: "Tap Apply on any job.", image: null };
-export function layout(title: string, inner: string, o: { script?: string; bodyAttrs?: string; og?: Og; tg?: boolean; css?: string } = {}): string {
+export function layout(title: string, inner: string, o: { script?: string; bodyAttrs?: string; og?: Og; tg?: boolean; css?: string; head?: string } = {}): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="robots" content="noindex,nofollow"><meta name="referrer" content="same-origin"><meta name="theme-color" content="${PLUM}" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">${ogTags(o.og ?? OG_DEFAULT)}
 ${FAVICON}
-${FONT_LINKS}
+${FONT_LINKS}${o.head ?? ""}
 <title>${esc(clip(title, 90))}</title><style>${CSS}${o.css ?? ""}</style></head>
 <body${o.bodyAttrs ? " " + o.bodyAttrs : ""}><div class="wrap">${inner}</div>${o.tg ? `<script src="https://telegram.org/js/telegram-web-app.js"></script>` : ""}${o.script ? `<script>${o.script}</script>` : ""}</body></html>`;
 }
@@ -224,13 +228,16 @@ function rowHtml(r: Row, token: string): string {
 <details><summary><span class="role">${esc(j.title)}</span><span class="desc">${esc(r.snippet)}</span></summary>${sendList}${more}</details>${meta}${posted}${sendsLine}${why}${note}</li>`;
 }
 
+// A list with no jobs says so, why, and what happens next (file_design.ts stateHtml), never a blank card.
+const EMPTY_FEED = stateHtml({ kind: "empty", title: "No jobs on this list yet", reason: "Nothing is listed here, so nothing is waiting for you to approve.", next: "Ask Trainee in your chat to find roles. Any it finds are listed here, and nothing is sent until you tap Apply." });
 export function renderFeed(f: Feed): string {
   const names = [...new Set(f.rows.map((r) => r.resume).filter(Boolean))] as string[];
   const withLine = names.length ? `<p class="with">Applying with: ${esc(names.join(", "))}</p>` : "";
   const more = f.total && f.total > f.rows.length ? `<p class="with">Showing the first ${f.rows.length} of ${f.total}. Ask Trainee in Telegram for the rest.</p>` : "";
   const all = f.setHash && f.setSize >= 2 ? `<form method="post" class="ajax all">${hidden(f.token, "applyall", `<input type="hidden" name="set" value="${f.setHash}">`)}<button type="submit">Apply to all ${f.setSize}</button></form>` : "";
   const top = f.top ? `<p class="top-note" role="alert">${esc(f.top)} ${refresh(f.token)}</p>` : "";
-  const inner = `<div id="root"><header>${BRAND}<h1>Your jobs</h1>${withLine}${more}${all}</header><main id="main">${top}<ul class="rows">${f.rows.map((r) => rowHtml(r, f.token)).join("")}</ul></main>${signOutFoot(f.token)}</div><p id="live" class="sr" role="status" aria-live="polite"></p>`;
+  // The File shell (file_design.ts): the wordmark and who it was made for above one card; the title, its freshness stamp, then the rows.
+  const inner = `<div id="root"><header class="fhead">${BRAND}${f.made ? `<p class="made">${esc(f.made)}</p>` : ""}</header><div class="fcard"><h1 class="ftitle">Your jobs</h1>${stampHtml(f.stamp ?? null)}${withLine}${more}${all}<main id="main">${top}${f.rows.length ? `<ul class="rows">${f.rows.map((r) => rowHtml(r, f.token)).join("")}</ul>` : EMPTY_FEED}</main></div>${signOutFoot(f.token)}</div><p id="live" class="sr" role="status" aria-live="polite"></p>`;
   return layout("Your jobs - Trainee", inner, { script: FEED_SCRIPT, tg: true, og: f.og });
 }
 // Sign out of this page here, or everywhere it is open (every session of the account ends; each needs a new sign-in).

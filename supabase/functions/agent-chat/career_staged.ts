@@ -243,7 +243,7 @@ export function filePageAsk(message: string, ask: { role?: string; place?: strin
 // where they want to go) and the router's own result must be empty with no role family asked: a search that found or asked
 // for anything stays code's.
 const SWITCH_FROM = /\b(?:i'?m|im|i\s+am|i\s+work\s+as|i\s+worked\s+as|i\s+used\s+to\s+(?:be|work\s+as))\s+(?:a|an)\s+[a-z][a-z -]{1,30}/i;
-const SWITCH_TO = /\b(?:wanna|want\s+to|trying\s+to|hoping\s+to|looking\s+to|like\s+to|would\s+like\s+to|thinking\s+of|ready\s+to)\s+(?:do|work|get\s+into|move\s+(?:in)?to|switch\s+(?:in)?to|go\s+into|try|change)\s+(?:something|anything|stuff|work)\b|\bcareer\s+(?:change|switch|pivot)\b|\bchange\s+careers\b|\bswitch\s+careers\b/i;
+const SWITCH_TO = /\b(?:wanna|want\s+to|trying\s+to|hoping\s+to|looking\s+to|like\s+to|would\s+like\s+to|thinking\s+of|ready\s+to)\s+(?:do|work|get\s+into|move\s+(?:in)?to|switch\s+(?:in)?to|go\s+into|try|change)\s+(?:something|anything|stuff|work)\s+(?:with|w|w\/|in|involving|around|using|related\s+to)\s+(?:computers?|tech(?:nology)?|data|software|coding|code|programming|design|health(?:care)?|finance|marketing|science|engineering|cars?|music|art|writing)\b|\bcareer\s+(?:change|switch|pivot)\b|\bchange\s+careers\b|\bswitch\s+careers\b/i;
 export function careerSwitcherOpenAsk(message: string, intent: string | null, result: unknown): boolean {
   if (!intent || !SEARCH_LIKE.has(intent)) return false;
   const m = String(message ?? "").replace(/[’`]/g, "'");
@@ -254,7 +254,7 @@ export function careerSwitcherOpenAsk(message: string, intent: string | null, re
   return true;
 }
 
-export type StagedDecision ={ brain: boolean; mode: BrainMode; intent: string | null; reason: string };
+export type StagedDecision = { brain: boolean; mode: BrainMode; intent: string | null; reason: string };
 
 // Whether this turn goes to the brain in staged mode. Called only after every code-first turn has passed on it.
 export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean }): StagedDecision {

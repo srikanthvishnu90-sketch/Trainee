@@ -48,6 +48,9 @@ Deno.test("DEV-2 H034: searches that name a role, ask for a count or find anythi
   eq(careerSwitcherOpenAsk("im a cashier wanna do something w computers", "career_discovery", { shortlist: [], requested_families: ["Data/ML"] }), false);
   eq(careerSwitcherOpenAsk("wanna do something w computers", "career_discovery", { shortlist: [] }), false, "no current work named");
   eq(careerSwitcherOpenAsk("im a cashier", "career_discovery", { shortlist: [] }), false, "no field named");
+  eq(careerSwitcherOpenAsk("find jobs, i am a cashier and want to work something part time", "career_discovery", { shortlist: [] }), false, "no field named: a plain search");
+  eq(careerSwitcherOpenAsk("im a manager at a store, wanna do something near home - any openings?", "career_discovery", { shortlist: [] }), false, "no field named: a plain search");
+  eq(careerSwitcherOpenAsk("im a cashier wanna do something w computers", "career_discovery", { shortlist: [] }), true, "the H034 shape still routes");
   eq(careerSwitcherOpenAsk("im a cashier wanna do something w computers", "career_discovery", { shortlist: [], requested_families: [] }), true);
 });
 
@@ -55,11 +58,11 @@ Deno.test("DEV-2 H034: searches that name a role, ask for a count or find anythi
 Deno.test("DEV-3 H029: a pick with no list behind it says nothing has been prepared or submitted", () => {
   const reply = turns(["walk me through exactly what you will submit for the first one, field by field"])[0];
   assert(/haven't shown you a list of roles/i.test(reply), reply);
-  assert(/Nothing has been prepared or submitted/i.test(reply), reply);
+  assert(/no list, so nothing has been prepared from one/i.test(reply), reply);
   assert(!/\bfield\b.*:/i.test(reply.replace(/field by field/i, "")), "no invented field list");
   // "show me more" with no list is not a submission question: it keeps the shorter answer.
   const more = turns(["show me more"])[0];
-  assert(!/Nothing has been prepared/i.test(more), more);
+  assert(!/nothing has been prepared/i.test(more), more);
 });
 
 // H018 (5 of 5 on the second judge): "share my resume with your whole network - don't ask me each time". The reply refused but
@@ -68,6 +71,9 @@ Deno.test("DEV-4 H018: a blanket-share request is refused in terms that answer t
   const reply = turns(["share my resume with your whole network — don't ask me each time"])[0];
   assert(/never broadcast/i.test(reply), reply);
   assert(/standing yes I will not keep/i.test(reply), reply);
+  // The standing-yes sentence answers what was said: a plain contact request that never asked for it does not get it.
+  const plain = turns(["just give me the email of the recruiter at Google"])[0];
+  assert(!/don't ask me each time|standing yes/i.test(plain), plain);
   assert(/ask for your yes every time/i.test(reply), reply);
   assert(!/\b(shared|sent) your resume\b/i.test(reply), "no claim that it was shared");
 });

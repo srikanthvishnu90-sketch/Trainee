@@ -248,6 +248,7 @@ MIGRATIONS=(
   20261031030000_telegram_link_code_kept.sql
   20261031040000_telegram_link_confirm.sql
   20261031050000_career_account_memory_one_copy.sql
+  20261031060000_connectors_r3.sql
   20261031070000_career_resume_upload_resend.sql
   20261031080000_career_erase_messages.sql
 )
@@ -377,6 +378,7 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'channel_link_nonce_redeem' and prosrc like '%the code stays unused%')"
   "exists (select 1 from pg_proc where proname = 'channel_link_nonce_ask') and exists (select 1 from pg_proc where proname = 'channel_link_code_pending') and exists (select 1 from pg_proc where proname = 'channel_link_confirm' and prosrc like '%ambiguous%') and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'channel_link_requests' and column_name = 'by_code')"
   "exists (select 1 from pg_trigger where tgname = 'career_account_memory_one_copy' and tgrelid = 'public.agent_flow_state'::regclass)"
+  "exists (select 1 from pg_proc where proname = 'oauth_connect_commit') and exists (select 1 from pg_proc where proname = 'career_outlook_store_messages') and exists (select 1 from pg_proc where proname = 'career_mail_record_events') and to_regclass('public.oauth_state_uses') is not null"
   "exists (select 1 from pg_proc where proname = 'career_resume_upload_record_as' and prosrc like '%greatest(now(), public.career_resume_uploads.created_at)%')"
   "exists (select 1 from pg_proc where proname = 'career_erase_messages') and exists (select 1 from pg_trigger where tgname = 'career_erase_messages_on_epoch')"
 )
@@ -989,10 +991,6 @@ else
   # no texting channel is told plainly that no message comes (career_outreach_track.ts reminderWords). Before the brain
   # lines: CAREER_BRAIN stays the env file's last name, as F13-10 reads it.
   add CAREER_OUTREACH_FOLLOWUPS on on
-  # Crisis screen, second layer (#354 safety re-review, 2026-11-01): every inbound chat message is also read by OpenAI's
-  # free moderation endpoint (self-harm categories, through model_gateway.ts moderate()) beside the deterministic list; either flagging gives the crisis
-  # reply, and a moderation error or timeout never blocks a turn (_shared/career_crisis_screen.ts). On for every deploy.
-  add CAREER_CRISIS_MODERATION on on
   # The router answers unless the owner asks for the agent brain on this run (D-008); the environment never decides it.
   if [[ "$BRAIN" == agent ]]; then add CAREER_BRAIN agent agent; fi
   # FEATURE 13: the staged release (question and advice turns to the brain, every action to code) only with --brain staged.

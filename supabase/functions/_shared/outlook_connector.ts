@@ -18,6 +18,7 @@ import {
 import { disconnectOf, outlookConnectOf, outlookStatusOf } from "./connector_words.ts";
 import { FONT_CSP, systemPage } from "./brand.ts";
 import { vaultRefreshWrite } from "./oauth_vault_refresh.ts";
+import { commitGrant, missingWords, TAKEN_WORDS } from "./oauth_connect.ts";
 
 type Admin = any;
 type Env = { get(k: string): string | undefined };
@@ -99,31 +100,58 @@ export async function syncInbox(admin: Admin, call: any, userId: string, now: nu
   const st = must(await admin.from("career_outlook_state").select("delta_link,synced_at").eq("user_id", userId).maybeSingle(), "read the Outlook state");
   const conn = must(await admin.from("user_oauth_connections").select("connected_at").eq("user_id", userId).eq("provider", PROVIDER).maybeSingle(), "read the Outlook connection");
   if (!conn) return { status: "NOT_WIRED", stored: 0, patch: {} };
+  // CONNECTORS ROUND 3 (2026-10-31): the erase epoch before the mail is read. What was read is written only while the
+  // connection is there and no "forget everything" came since (career_outlook_store_messages, 20261031060000); before, a
+  // sync that read the inbox before "disconnect outlook" or an erase committed wrote the messages after it.
+  const epoch = await eraseEpoch(admin, userId);
   const since = st?.synced_at ?? conn.connected_at ?? at(now);
   const r = await readInboxDelta(call, userId, { deltaLink: st?.delta_link ?? null, sinceIso: new Date(since).toISOString() });
+  let withdrawn = false;
   const store = async (mails: any[]) => {
-    let n = 0;
-    for (const m of mails) {
-      const ins = await admin.from("career_outlook_messages").upsert({ user_id: userId, message_hash: m.hash, conversation_hash: m.conversationHash, from_address: m.fromAddress.slice(0, 320),
-        subject: m.subject, preview: m.snippet, received_at: m.date }, { onConflict: "user_id,message_hash" });
-      must(ins, "store an Outlook message");
-      n++;
+    if (!mails.length) return 0;
+    const rows = mails.map((m) => ({ message_hash: m.hash, conversation_hash: m.conversationHash ?? null, from_address: String(m.fromAddress ?? "").slice(0, 320),
+      subject: m.subject ?? null, preview: m.snippet ?? null, received_at: m.date }));
+    const ins = await admin.rpc("career_outlook_store_messages", { p_user: userId, p_rows: rows, p_epoch: epoch });
+    if (ins.error && missingFn(ins.error, "career_outlook_store_messages")) {
+      // A project without 20261031060000: the old writes.
+      for (const row of rows) must(await admin.from("career_outlook_messages").upsert({ user_id: userId, ...row }, { onConflict: "user_id,message_hash" }), "store an Outlook message");
+      return rows.length;
     }
+    const n = Number(must(ins, "store the Outlook messages"));
+    if (n < 0) { withdrawn = true; return 0; }
     return n;
   };
+  // Disconnected or erased while the inbox was read: nothing was written, and nothing about it is kept.
+  const gone = { status: "NOT_WIRED", stored: 0, patch: {} };
   if (r.status === "ok") {
     const n = await store(r.mails);
+    if (withdrawn) return gone;
     return { status: "ok", stored: n, patch: { delta_link: r.deltaLink, synced_at: at(now), next_sync_at: at(now + 5 * 60_000) } };
   }
   if (r.status === "RATE_LIMITED") {
     const n = await store(r.mails);
+    if (withdrawn) return gone;
     return { status: "RATE_LIMITED", stored: n, patch: { retry_after: at(now + r.retryAfterMs), ...(r.resumeLink ? { delta_link: r.resumeLink } : {}) } };
   }
   if (r.status === "NEEDS_RECONNECT") return { status: r.status, stored: 0, patch: { needs_reconnect_reason: r.reason } };
-  if (r.status === "NOT_WIRED") return { status: r.status, stored: 0, patch: {} };
+  if (r.status === "NOT_WIRED") return { status: r.status, stored: 0, detail: r.reason, patch: {} };
   const n = await store(r.mails);
+  if (withdrawn) return gone;
   return { status: "ERROR", stored: n, detail: r.detail, patch: { last_error: r.detail, next_sync_at: at(now + 5 * 60_000) } };
 }
+
+// The account's erase epoch ("forget everything" raises it); null when it cannot be read (the write then checks only the
+// connection).
+export async function eraseEpoch(admin: Admin, userId: string): Promise<number | null> {
+  const r = await admin.from("career_watch_kv").select("value").eq("user_id", userId).eq("key", "career:account").maybeSingle();
+  if (r?.error) return null;
+  const e = Number(r?.data?.value?.epoch ?? 0);
+  return Number.isFinite(e) ? e : null;
+}
+export const missingFn = (e: any, fn: string) => {
+  const s = `${e?.code ?? ""} ${e?.message ?? ""}`;
+  return (s.includes(fn) || /PGRST202/.test(s)) && /exist|find|no function|PGRST202/i.test(s);
+};
 
 // ------------------------------------------------------------------------------------------------ leased batches
 // One worker's batch: claim (skip locked, expired leases reclaimed), work each person, release with what was learned. Many
@@ -327,14 +355,26 @@ export async function handleOutlookOAuth(req: Request, d: OAuthDeps): Promise<Re
       if (!clientId || !clientSecret) throw new Error("not configured");
       const tok = await exchangeCode(d.fetch, { code: url.searchParams.get("code")!, verifier: await pkceVerifier(linkId, secret), clientId, clientSecret, redirectUri: self, now });
       const userId = String(link.user_id);
-      const stored = await d.admin.rpc("oauth_vault_store", { p_name: vaultNameOf(userId), p_secret: JSON.stringify(tok) });
-      if (stored.error) throw new Error("save the access");
-      must(await d.admin.from("user_oauth_connections").upsert({ user_id: userId, provider: PROVIDER, vault_name: vaultNameOf(userId), email: tok.email, scopes: tok.scopes, connected_at: at(now) }, { onConflict: "user_id,provider" }), "record the connection");
+      // CONNECTORS ROUND 3 (2026-10-31, oauth_connect.ts): the Vault entry and the row in one transaction holding the
+      // account. An account deleted while the person was at Microsoft stores nothing (Microsoft has no revoke to call); an
+      // address another Trainee account holds stores nothing and is said plainly.
+      const c = await commitGrant(d.admin, { userId, provider: PROVIDER, secret: JSON.stringify(tok), email: tok.email ?? null, scopes: String(tok.scopes ?? ""), now });
+      if (c === "gone") {
+        d.log?.("outlook-oauth: the account was deleted before the callback; nothing stored");
+        return (await d.landing?.({ ok: false, denied: false, email: null })) ?? page("Outlook wasn't connected", ["This Trainee account no longer exists, so nothing was saved."], 410);
+      }
+      if (c === "taken") {
+        await d.admin.from("career_outlook_links").update({ outcome: "error" }).eq("id", linkId);
+        await tell(d, link, linkId, TAKEN_WORDS("Outlook", tok.email ?? null), now);
+        return (await d.landing?.({ ok: false, denied: false, email: null })) ?? page("Outlook wasn't connected", [TAKEN_WORDS("Outlook", tok.email ?? null)], 409);
+      }
       must(await d.admin.from("career_outlook_state").upsert({ user_id: userId, email: tok.email, token_expires_at: at(tok.expires_at), needs_reconnect_at: null, needs_reconnect_reason: null,
         next_sync_at: at(now), retry_after: null, updated_at: at(now) }, { onConflict: "user_id" }), "record the Outlook state");
       const can = [hasScope(tok.scopes, "Mail.Read") && "read your mail for replies", hasScope(tok.scopes, "Mail.Send") && "send emails you approve word for word",
         hasScope(tok.scopes, "Calendars.ReadWrite") && "check your calendar and add invites you approve"].filter(Boolean);
-      const text = `Outlook connected: ${tok.email ?? "your account"}.${can.length ? ` You allowed me to ${can.join(", ")}.` : ""} Say "disconnect outlook" any time to remove it.`;
+      // CONNECTORS ROUND 3: a permission left unticked is said now, with how to give it (missingWords).
+      const text = [`Outlook connected: ${tok.email ?? "your account"}.${can.length ? ` You allowed me to ${can.join(", ")}.` : ""}`,
+        missingWords("outlook", String(tok.scopes ?? "").split(/\s+/).filter(Boolean)), 'Say "disconnect outlook" any time to remove it.'].filter(Boolean).join(" ");
       await tell(d, link, linkId, text, now);
       await d.afterConnect?.({ userId, email: tok.email, scopes: String(tok.scopes ?? "").split(/\s+/).filter(Boolean) })
         .catch((e) => d.log?.(`outlook-oauth: resuming waiting tasks failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`));

@@ -2,7 +2,7 @@
 // Fail-safe: either layer flagging gives the crisis reply; moderation erroring or timing out leaves the list's verdict
 // and never blocks the turn. A fake moderation client stands in for OpenAI: nothing here leaves the process.
 import assertNode from "node:assert/strict";
-import { crisisScreen, gatewayModeration, type Moderate, moderationFromEnv, readModeration } from "../../supabase/functions/_shared/career_crisis_screen.ts";
+import { classifierFromEnv, CLASSIFIER_PROMPT, CRISIS_SCREEN_MARKER, crisisScreen, gatewayModeration, type Moderate, moderationFromEnv, moderationReleaseOn, PRODUCTION_CRISIS_MODERATION, readModeration } from "../../supabase/functions/_shared/career_crisis_screen.ts";
 import { moderate, MODERATION_MODEL } from "../../supabase/functions/_shared/model_gateway.ts";
 import { SAFETY_REPLY, trustTurn } from "../../supabase/functions/_shared/career_trust_turn.ts";
 
@@ -17,14 +17,14 @@ const quiet = () => { const lines: string[] = []; return { lines, log: (l: strin
 
 Deno.test("moderation flags what the list missed: the crisis reply wins", async () => {
   const v = await crisisScreen(OBLIQUE, flag());
-  eq(v, { distress: true, rules: false, moderation: "flagged", categories: ["self-harm/intent"] });
+  eq(v, { distress: true, rules: false, moderation: "flagged", classifier: "off", categories: ["self-harm/intent"] });
   const a = await trustTurn({ message: OBLIQUE, distress: v.distress, deps: { connections: () => Promise.resolve([]), stored: () => Promise.resolve(null) } });
   eq(a?.intent, "safety_support");
   eq(a?.reply, SAFETY_REPLY);
 });
 
 Deno.test("no flag from moderation and none from the list: no crisis", async () => {
-  eq(await crisisScreen(CAREER, clear), { distress: false, rules: false, moderation: "clear", categories: [] });
+  eq(await crisisScreen(CAREER, clear), { distress: false, rules: false, moderation: "clear", classifier: "off", categories: [] });
 });
 
 Deno.test("the list's hit stands without waiting on moderation, even if moderation says clear or hangs", async () => {
@@ -43,7 +43,7 @@ Deno.test("a moderation timeout falls back to the list within the cap, logs it, 
   const q = quiet();
   const started = Date.now();
   const v = await crisisScreen(CAREER, hang, { timeoutMs: 50, log: q.log });
-  eq(v, { distress: false, rules: false, moderation: "timeout", categories: [] });
+  eq(v, { distress: false, rules: false, moderation: "timeout", classifier: "off", categories: [] });
   assert(Date.now() - started < 1000, `within the cap: ${Date.now() - started} ms`);
   assert(aborted, "the call was aborted");
   eq(q.lines.length, 1); assert(/timed out/.test(q.lines[0]) && !q.lines[0].includes(CAREER), "logged, never the text");
@@ -53,7 +53,7 @@ Deno.test("a moderation error (thrown, rejected or HTTP) falls back to the list 
   for (const m of [(() => { throw new Error("boom"); }) as Moderate, (() => Promise.reject(new Error("network"))) as Moderate,
     gatewayModeration((t, o) => moderate(t, { ...o, env: { get: (k) => (k === "OPENAI_API_KEY" ? "k" : undefined) }, request: () => Promise.resolve(new Response("no", { status: 500 })) }))]) {
     const q = quiet();
-    eq(await crisisScreen(CAREER, m, { log: q.log }), { distress: false, rules: false, moderation: "error", categories: [] });
+    eq(await crisisScreen(CAREER, m, { log: q.log }), { distress: false, rules: false, moderation: "error", classifier: "off", categories: [] });
     eq(q.lines.length, 1); assert(/failed/.test(q.lines[0]), q.lines[0]);
   }
   // an error never hides the list's own hit
@@ -92,26 +92,131 @@ Deno.test("the gateway's moderation door: /v1/moderations only, the key from the
   assert(Date.now() - t0 < 1000, "cut at the deadline");
 });
 
-Deno.test("the second layer is on only with CAREER_CRISIS_MODERATION=on, through the gateway door", async () => {
+Deno.test("moderation is ON by default from the committed release constant; =off is the emergency disable; no key logs loudly once", async () => {
   const env = (o: Record<string, string>) => ({ get: (k: string) => o[k] });
-  eq(moderationFromEnv(env({})), null);
-  eq(moderationFromEnv(env({ OPENAI_API_KEY: "k" })), null, "a key alone does not turn it on");
+  eq(PRODUCTION_CRISIS_MODERATION, "on", "the release ships it on");
   let doorCalls = 0;
-  const client = moderationFromEnv(env({ CAREER_CRISIS_MODERATION: "on" }), () => { doorCalls++; return Promise.resolve({ results: [{ categories: { "self-harm": true } }] }); });
-  assert(client, "on");
+  const door = () => { doorCalls++; return Promise.resolve({ results: [{ categories: { "self-harm": true } }] }); };
+  const client = moderationFromEnv(env({}), door);
+  assert(client, "on with no environment setting at all");
   eq((await crisisScreen(OBLIQUE, client)).distress, true);
-  eq(doorCalls, 1, "the door was used");
+  eq(doorCalls, 1, "the gateway door was used");
+  for (const v of ["off", "OFF", " off "]) eq(moderationFromEnv(env({ CAREER_CRISIS_MODERATION: v }), door), null, `the emergency disable: ${v}`);
+  for (const v of ["on", "yes", "typo"]) assert(moderationFromEnv(env({ CAREER_CRISIS_MODERATION: v }), door), `only "off" disables: ${v}`);
+  eq(moderationFromEnv(env({}), door, { release: "off" }), null, "a release that ships it off is off");
+  eq(moderationReleaseOn(env({})), true); eq(moderationReleaseOn(env({ CAREER_CRISIS_MODERATION: "off" })), false);
+  // no key: off, and one loud line per cold start (never the text)
+  const q = quiet();
+  eq(moderationFromEnv(env({}), undefined, { log: q.log }), null);
+  eq(moderationFromEnv(env({}), undefined, { log: q.log }), null);
+  eq(q.lines.length, 1, "said once");
+  assert(/CRISIS SCREEN DEGRADED/.test(q.lines[0]) && /word list alone/.test(q.lines[0]), q.lines[0]);
+  assert(typeof moderationFromEnv(env({ OPENAI_API_KEY: "k" })) === "function", "with a key, the real gateway door");
   const live = Deno.readTextFileSync(new URL("../../scripts/launch/trainee-go-live.sh", import.meta.url));
-  assert(/^\s*add CAREER_CRISIS_MODERATION on on$/m.test(live), "every deploy turns it on");
-  const src = Deno.readTextFileSync(new URL("../../supabase/functions/_shared/career_crisis_screen.ts", import.meta.url)).replace(/\/\/[^\n]*/g, "");
-  assert(!/api\.openai\.com|OPENAI_API_KEY/.test(src), "the screen holds no URL and reads no key");
+  assert(!/CAREER_CRISIS_MODERATION/.test(live), "not gated by the deploy script");
+  const src = Deno.readTextFileSync(new URL("../../supabase/functions/_shared/career_crisis_screen.ts", import.meta.url));
+  assert(/^export const PRODUCTION_CRISIS_MODERATION: "on" \| "off" = "on";$/m.test(src), "the committed release line");
+  const code = src.replace(/\/\/[^\n]*/g, "");
+  assert(!/api\.openai\.com|OPENAI_API_KEY/.test(code), "the screen holds no URL and reads no key");
+  eq((code.match(/env\.get\(/g) ?? []).length, 4, "the two release flags, the model key, and the pass-through that hands the gateway its own environment");
 });
 
 Deno.test("the handler starts the screen before the turn's reads and decides distress from its verdict", () => {
   const h = Deno.readTextFileSync(new URL("../../supabase/functions/agent-chat/handler-career.ts", import.meta.url));
   const at = (re: RegExp) => { const m = re.exec(h); assert(m, `${re}`); return m!.index; };
-  const start = at(/const crisisPending = crisisScreen\(message, moderationFromEnv\(Deno\.env\)\);/);
+  assert(/const crisisLayers = \{ moderation: moderationFromEnv\(Deno\.env\), classifier: classifierFromEnv\(Deno\.env\) \};/.test(h), "both model layers, from the environment");
+  const start = at(/const crisisPending = crisisScreen\(message, crisisLayers\);/);
   assert(start < at(/const loaded = await persistence\.load/), "started before the thread's state is read");
   assert(start < at(/const distress = /) && /const crisis = await crisisPending;[\s\S]{0,300}const distress = !tapIn && !careerTask && !careerBatch && crisis\.distress;/.test(h));
   assert(/trustTurn\(\{ message, distress, deps:/.test(h), "the trust turn answers what the screen flagged");
+});
+
+// ---- Layer 3: the crisis classifier (a fake model call; nothing leaves the process) ----
+const fakeCall = (said: string | Error | "hang") => { const calls: any[] = []; const call = (cfg: any, payload: any, o: any) => { calls.push({ cfg, payload, o }); return said === "hang" ? new Promise(() => {}) : said instanceof Error ? Promise.reject(said) : Promise.resolve({ content: [{ type: "text", text: said }] }); }; return { calls, call }; };
+const KEYED = (o: Record<string, string> = {}) => ({ get: (k: string) => ({ OPENAI_API_KEY: "k", ...o } as Record<string, string>)[k] });
+
+Deno.test("classifier: YES flags a message the list and moderation both miss; any yes wins; it is on by default", async () => {
+  const f = fakeCall("YES");
+  const c = classifierFromEnv(KEYED(), f.call as any)!;
+  assert(c, "on by default");
+  const v = await crisisScreen(OBLIQUE, { moderation: clear, classifier: c });
+  eq(v.distress, true); eq(v.classifier, "flagged"); eq(v.moderation, "clear");
+  eq(f.calls.length, 1);
+  assert(String(f.calls[0].payload.system).startsWith(CRISIS_SCREEN_MARKER), "the fixed marker leads the prompt");
+  eq(f.calls[0].payload.messages[0].content, OBLIQUE);
+  eq(f.calls[0].o.role, "crisis_screen", "charged as crisis_screen"); eq(f.calls[0].o.timeoutMs, 2500);
+  for (const cue of ["note", "giving belongings away", "won't be around", "bridge", "pills", "garage", "tonight"]) assert(CLASSIFIER_PROMPT.includes(cue), `the prompt names ${cue}`);
+});
+
+Deno.test("classifier: NO is clear; an error, a timeout or an unreadable answer never suppresses another layer's yes, and is logged by state, never text", async () => {
+  eq((await crisisScreen(CAREER, { classifier: classifierFromEnv(KEYED(), fakeCall("no").call as any) })).distress, false);
+  for (const bad of [new Error("boom"), "maybe" as const]) {
+    const q = quiet();
+    const v = await crisisScreen(OBLIQUE, { moderation: flag(), classifier: classifierFromEnv(KEYED(), fakeCall(bad).call as any) }, { log: q.log });
+    eq(v.distress, true, "moderation's yes stands"); eq(v.moderation, "flagged");
+    assert(q.lines.every((l) => !l.includes(OBLIQUE)), "never the text");
+  }
+  const q = quiet(), t0 = Date.now();
+  const v = await crisisScreen(CAREER, { moderation: clear, classifier: classifierFromEnv(KEYED(), fakeCall("hang").call as any) }, { classifierTimeoutMs: 50, log: q.log });
+  eq(v.distress, false); eq(v.classifier, "timeout"); assert(Date.now() - t0 < 1000);
+  eq(q.lines.length, 1); assert(/classifier timed out/.test(q.lines[0]) && !q.lines[0].includes(CAREER), "a dead layer is visible, by state only");
+  const qe = quiet();
+  await crisisScreen(CAREER, { classifier: classifierFromEnv(KEYED(), fakeCall(new Error("provider down")).call as any) }, { log: qe.log });
+  assert(qe.lines.length === 1 && /classifier failed/.test(qe.lines[0]) && !qe.lines[0].includes(CAREER), qe.lines.join("|"));
+  // the classifier's yes stands even when moderation errors
+  const e = await crisisScreen(OBLIQUE, { moderation: () => Promise.reject(new Error("x")), classifier: classifierFromEnv(KEYED(), fakeCall("Yes.").call as any) }, { log: quiet().log });
+  eq(e.distress, true); eq(e.classifier, "flagged"); eq(e.moderation, "error");
+});
+
+Deno.test("classifier: the model comes from one key with a price; no price or no key turns it off loudly; =off disables it", () => {
+  const f = fakeCall("no");
+  eq(classifierFromEnv(KEYED({ CAREER_CRISIS_CLASSIFIER: "off" }), f.call as any), null, "the emergency disable");
+  eq(classifierFromEnv(KEYED(), f.call as any, { release: "off" }), null);
+  const q = quiet();
+  eq(classifierFromEnv(KEYED({ CAREER_CRISIS_MODEL: "no-such-model" }), f.call as any, { log: q.log }), null, "a model with no price is refused");
+  assert(/CRISIS CLASSIFIER OFF: model no-such-model has no price/.test(q.lines[0] ?? ""), q.lines.join("|"));
+  const q2 = quiet();
+  eq(classifierFromEnv({ get: () => undefined }, f.call as any, { log: q2.log }), null, "no key: off");
+  assert(/no model key/.test(q2.lines[0] ?? ""), q2.lines.join("|"));
+  const c = classifierFromEnv(KEYED({ CAREER_CRISIS_MODEL: "gpt-5-mini" }), f.call as any)!;
+  c("x", new AbortController().signal); eq(f.calls.at(-1).cfg.model, "gpt-5-mini", "CAREER_CRISIS_MODEL picks the model");
+  const d = classifierFromEnv(KEYED(), f.call as any)!;
+  d("x", new AbortController().signal); eq(f.calls.at(-1).cfg.model, "gpt-5-nano", "default: the gateway's current default model");
+});
+
+Deno.test("classifier: a long message is read at both ends (a pasted resume, then the line that matters)", async () => {
+  const resume = "EXPERIENCE\n" + "Built dashboards in SQL and Python for the sales team. ".repeat(120);
+  const msg = `${resume}\ni've written my note`;
+  assert(msg.length > 4000);
+  const f = fakeCall("YES");
+  const v = await crisisScreen(msg, { classifier: classifierFromEnv(KEYED(), f.call as any) });
+  eq(v.distress, true);
+  const seen = String(f.calls[0].payload.messages[0].content);
+  assert(seen.endsWith("i've written my note"), "the end of the message reaches the classifier");
+  assert(seen.startsWith("EXPERIENCE") && seen.length <= 2 * 1000 + 10, `both ends, bounded: ${seen.length}`);
+});
+
+Deno.test("moderation: a category_scores threshold flags below OpenAI's boolean cut; null keeps the booleans", () => {
+  const body = { results: [{ categories: { "self-harm": false, "self-harm/intent": false }, category_scores: { "self-harm": 0.04, "self-harm/intent": 0.2, violence: 0.9 } }] };
+  eq(readModeration(body, null), { flagged: false, categories: [] });
+  eq(readModeration(body, 0.1), { flagged: true, categories: ["self-harm/intent"] });
+  eq(readModeration(body, 0.03), { flagged: true, categories: ["self-harm", "self-harm/intent"] });
+  eq(readModeration({ results: [{ categories: { "self-harm": true } }] }, 0.5), { flagged: true, categories: ["self-harm"] }, "the boolean still counts");
+});
+
+Deno.test("the reply writer never rewrites the crisis check-in: 988 and 741741 survive with CAREER_REPLY_WRITER=on", async () => {
+  const { writable } = await import("../../supabase/functions/_shared/career_reply_writer.ts");
+  eq(writable({ intent: "safety_support", reply: SAFETY_REPLY }, { safety: true }, { structured: false }), false);
+  eq(writable({ intent: "something_else", reply: SAFETY_REPLY }, null, { structured: false }), false, "by its numbers too");
+  eq(writable({ intent: "career_identity", reply: "I'm Trainee, an AI career agent." }, null, { structured: false }), true, "other replies still go to the writer");
+  assert(/\b988\b/.test(SAFETY_REPLY) && /\b741741\b/.test(SAFETY_REPLY));
+});
+
+Deno.test("screenRest: what else was asked, judged clause by clause by the full screen", async () => {
+  const { screenRest } = await import("../../supabase/functions/_shared/career_crisis_screen.ts");
+  const flagIf = (re: RegExp): Moderate => (t) => Promise.resolve(re.test(t) ? { flagged: true, categories: ["self-harm/intent"] } : { flagged: false, categories: [] });
+  eq(await screenRest("find me data analyst jobs in chicago. i gave away my things and wrote the letters", { moderation: flagIf(/letters/) }), "find me data analyst jobs in chicago");
+  eq(await screenRest("find me jobs. tonight is the night", { classifier: flagIf(/tonight/) }), "find me jobs", "the classifier's clause verdict counts");
+  eq(await screenRest("find me jobs and tonight is the night", { moderation: flagIf(/jobs and tonight/) }), "", "one clause: nothing to separate");
+  eq(await screenRest("find me jobs. see you", { moderation: flagIf(/^find me jobs\. see you$/) }), "", "flagged only as a whole: nothing is resumed");
 });

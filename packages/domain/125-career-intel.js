@@ -650,7 +650,7 @@ const CareerIntel = (() => {
     // The one distress detector (139 CareerSafety.isDistress; its policy is written there), never a list of our own.
     const Safety = typeof CareerSafety !== "undefined" ? CareerSafety : require("./139-career-safety.js");
     if (Safety.isDistress(t)) {
-      return { action: "support", text: "I hear you, and the career stuff can wait. Please reach out now: in the US you can call or text 988 (Suicide and Crisis Lifeline) any time, or text HOME to 741741. If you might act on this, call 911. You matter more than any application. When you're ready, I'm here — no grilling, at your pace." };
+      return { action: "support", text: "I want to check in, because what you wrote sounded really heavy. If you're thinking about hurting yourself, you can call or text 988 any time (US), or text HOME to 741741, and if you're in danger right now, call 911. I'm here and glad to keep talking. If I read that wrong, just tell me and we'll pick up where you left off." };
     }
     if (/(i'?m a failure|i feel like a failure|everyone is ahead of me|i'?ll never get in|hopeless about)/i.test(t)) {
       return { action: "support", text: "You're not a failure — you're early in a process whose timelines are genuinely brutal and mostly hidden. Honest version: your current position is a starting point, not a verdict, and there are routes from it. So the plan shrinks to one doable step, and here it is, picked: today, write down the one role you want next and the one person who could open a door to it. That is the whole task for today — small, real, and it counts." };

@@ -103,7 +103,7 @@ test('dry run: no secret value is ever printed, only names and ***', () => {
     assert.doesNotMatch(out, /fake-dbpass|QZ81|NNNNNNNN|IIIIIIII/);
   }
   const { out } = dry();
-  assert.match(out, /supabase secrets set --project-ref abcdefghijklmnopqrst --env-file <0600 temp file: CAREER_INGEST_SECRET=\*\*\* CAREER_PROACTIVE_SECRET=\*\*\* TRAINEE_DELIVER_SECRET=\*\*\* TRAINEE_INBOUND_SECRET=\*\*\* INGEST_CONTACT_EMAIL=\*\*\* LOOPMESSAGE_API_KEY=\*\*\* LOOPMESSAGE_DAILY_CONTACTS=\*\*\* TRAINEE_ALLOWED_CONTACTS=\*\*\* OPENAI_API_KEY=\*\*\* MODEL_PROVIDER=openai CAREER_OUTREACH_FOLLOWUPS=on CAREER_CRISIS_MODERATION=on>/);
+  assert.match(out, /supabase secrets set --project-ref abcdefghijklmnopqrst --env-file <0600 temp file: CAREER_INGEST_SECRET=\*\*\* CAREER_PROACTIVE_SECRET=\*\*\* TRAINEE_DELIVER_SECRET=\*\*\* TRAINEE_INBOUND_SECRET=\*\*\* INGEST_CONTACT_EMAIL=\*\*\* LOOPMESSAGE_API_KEY=\*\*\* LOOPMESSAGE_DAILY_CONTACTS=\*\*\* TRAINEE_ALLOWED_CONTACTS=\*\*\* OPENAI_API_KEY=\*\*\* MODEL_PROVIDER=openai CAREER_OUTREACH_FOLLOWUPS=on>/);
 });
 
 test('networking follow-up reminders are switched on at launch (R2: the chat promises a texted reminder only when they run)', () => {

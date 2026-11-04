@@ -56,7 +56,9 @@ const MAX_CHARS = 300; // a longer text carries more than one of these questions
 // CareerSafety.isDistress (packages/domain/139-career-safety.js, where its policy is written): the router's first check
 // and 125's screen read the same one, so no path catches what another misses (#354 safety follow-up, 2026-11-01).
 export const isDistress = (message: string): boolean => (CareerSafety as { isDistress: (t: string) => boolean }).isDistress(message);
-export const SAFETY_REPLY = "I hear you, and the career stuff can wait. Please reach out now: in the US you can call or text 988 (Suicide and Crisis Lifeline) any time, or text HOME to 741741. If you might act on this, call 911. You matter more than any application. When you're ready, I'm here — no grilling, at your pace.";
+// #354 re-review 2: a gentle check-in, never alarm words (a false alarm costs one kind message): 988, the text line, 911
+// only for danger right now, and a way back to what they asked (the router resumes it on "i'm fine": 142 resumeAfterCheckin).
+export const SAFETY_REPLY = "I want to check in, because what you wrote sounded really heavy. If you're thinking about hurting yourself, you can call or text 988 any time (US), or text HOME to 741741, and if you're in danger right now, call 911. I'm here and glad to keep talking. If I read that wrong, just tell me and we'll pick up where you left off.";
 const JOB_WORDS = /\b(jobs?|roles?|positions?|internships?|openings?|postings?|hiring|careers?|apply|applying|applications?|interviews?|resume)\b/;
 const WORK_AUTH = /\b(authori[sz]ed|authori[sz]ation|sponsor\w*|visas?|opt|cpt|h-?1b|work permit|green card|citizen\w*)\b/;
 // An offer or a negotiation is career advice the router gives (negotiation, offer benchmark), never a lawyer's question.

@@ -219,6 +219,7 @@ MIGRATIONS=(
   20261027210000_career_people_provider.sql
   20261027230000_career_outlook_connector.sql
   20261027240000_career_outreach_replies.sql
+  20261028010000_career_apply_outcomes.sql
   20261028050000_agent_turn_costs_always_recorded.sql
   20261028070000_global_daily_model_budget.sql
   20261028110000_career_connector_framework.sql
@@ -361,6 +362,7 @@ MIGRATION_MARK=(
   "to_regclass('public.career_provider_jobs') is not null and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'career_people' and column_name = 'sendable')"
   "to_regclass('public.career_outlook_sends') is not null and exists (select 1 from pg_proc where proname = 'career_outlook_claim') and exists (select 1 from pg_trigger where tgname = 'user_oauth_connections_outlook_erase')"
   "to_regclass('public.career_outreach_turns') is not null and exists (select 1 from pg_proc where proname = 'career_outreach_action_claim' and prosrc like '%skip locked%')"
+  "to_regclass('public.career_apply_outcomes') is not null"
   "exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'agent_turn_costs' and column_name = 'meter_state')"
   "to_regclass('public.model_budget_days') is not null and to_regclass('public.model_budget_reservations') is not null and exists (select 1 from pg_proc where proname = 'model_budget_reserve')"
   "to_regclass('public.career_parked_tasks') is not null and to_regclass('public.career_connector_links') is not null and exists (select 1 from pg_proc where proname = 'career_parked_due') and exists (select 1 from pg_trigger where tgname = 'user_oauth_connections_connector_cancel')"

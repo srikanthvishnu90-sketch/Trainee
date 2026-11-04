@@ -29,7 +29,7 @@ const U = "u-d037";
 
 // ------------------------------------------------------------------------------------------------ 1. real submission
 Deno.test("D-037/1a: the database switches the release turns on are written by go-live, after the claim guards, with a kill switch", async () => {
-  eq(Object.keys(RELEASE_DB_SWITCHES).sort(), ["APPLY_VM", "CAREER_AGENT_SUBMIT", "CAREER_CLOUD_APPLY"]);
+  eq(Object.keys(RELEASE_DB_SWITCHES).sort(), ["APPLY_VM", "CAREER_AGENT_SUBMIT", "CAREER_CLOUD_APPLY", "CAREER_CLOUD_TEXT_CARDS"]);
   const sql = await text("scripts/launch/release-db-switches.sql");
   const keys = [...new Set([...sql.matchAll(/\('([A-Z_]+)', :'v'\)/g)].map((m) => m[1]))].sort();
   eq(keys, Object.keys(RELEASE_DB_SWITCHES).sort(), "the SQL writes exactly RELEASE_DB_SWITCHES");
@@ -87,6 +87,17 @@ Deno.test("D-037/1d: LinkedIn, Indeed and Handshake are never applied on; a capt
   for (const f of Object.keys(RELEASE_FLAGS)) ok(!/LINKEDIN|INDEED|CAPTCHA/.test(f), `${f} is not a LinkedIn, Indeed or captcha switch`);
 });
 
+Deno.test("D-037/1a'': CAREER_CLOUD_TEXT_CARDS is a release switch: written on when missing, an existing row kept, the route's own migration requires it", async () => {
+  ok(RELEASE_DB_SWITCHES.CAREER_CLOUD_TEXT_CARDS === "on");
+  const sql = (await text("scripts/launch/release-db-switches.sql")).replace(/^--.*$/gm, "");
+  const [over, plain] = sql.split("\\else");
+  ok(/\('CAREER_CLOUD_TEXT_CARDS', :'v'\)/.test(over) && /\('CAREER_CLOUD_TEXT_CARDS', :'v'\)/.test(plain), "both the overwrite and the plain branch write it");
+  ok(/on conflict \(key\) do nothing/.test(plain.split("\\endif")[0]), "the plain branch keeps an existing row");
+  const mig = await text("supabase/migrations/20261026230017_career_cloud_hosted_apply.sql");
+  ok(/key = 'CAREER_CLOUD_TEXT_CARDS'/.test(mig) && /'CAREER_CLOUD_TEXT_CARDS'\)\);/.test(mig), "the migration reads the row and allows the key");
+  ok((await text("scripts/launch/trainee-go-live.sh")).includes("CAREER_CLOUD_APPLY, CAREER_CLOUD_TEXT_CARDS, APPLY_VM"), "go-live names it in its plan");
+});
+
 Deno.test({ name: "D-037/1a': on Postgres: the owner's 'off' survives a plain go-live (and --brain router); only an explicit --real-submit overwrites", sanitizeResources: false, sanitizeOps: false, async fn() {
   const CI = Deno.env.get("CI") === "true";
   if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 binaries in CI"); console.log("NOT_RUN locally: no Postgres"); return; }
@@ -98,18 +109,18 @@ Deno.test({ name: "D-037/1a': on Postgres: the owner's 'off' survives a plain go
         "-v", `v=${v}`, "-v", `overwrite=${overwrite}`, "-f", `${ROOT}/scripts/launch/release-db-switches.sql`], stdout: "piped", stderr: "piped" }).output();
       ok(p.success, new TextDecoder().decode(p.stderr));
     };
-    const rows = async () => (await pg.sql("select string_agg(key || '=' || value, ',' order by key) from public.career_cloud_settings where key in ('APPLY_VM','CAREER_AGENT_SUBMIT','CAREER_CLOUD_APPLY')")).trim();
-    await pg.sql("delete from public.career_cloud_settings where key in ('APPLY_VM','CAREER_AGENT_SUBMIT','CAREER_CLOUD_APPLY'); insert into public.career_cloud_settings (key, value) values ('CAREER_AGENT_SUBMIT', 'off')");
+    const rows = async () => (await pg.sql("select string_agg(key || '=' || value, ',' order by key) from public.career_cloud_settings where key in ('APPLY_VM','CAREER_AGENT_SUBMIT','CAREER_CLOUD_APPLY','CAREER_CLOUD_TEXT_CARDS')")).trim();
+    await pg.sql("delete from public.career_cloud_settings where key in ('APPLY_VM','CAREER_AGENT_SUBMIT','CAREER_CLOUD_APPLY','CAREER_CLOUD_TEXT_CARDS'); insert into public.career_cloud_settings (key, value) values ('CAREER_AGENT_SUBMIT', 'off')");
     await run("on", false); // a plain go-live, as trainee-go-live.sh runs it with REAL_SUBMIT unset (also under --brain router)
-    eq(await rows(), "APPLY_VM=on,CAREER_AGENT_SUBMIT=off,CAREER_CLOUD_APPLY=on", "the owner's off is kept; only missing rows are written on");
+    eq(await rows(), "APPLY_VM=on,CAREER_AGENT_SUBMIT=off,CAREER_CLOUD_APPLY=on,CAREER_CLOUD_TEXT_CARDS=on", "the owner's off is kept; only missing rows are written on");
     await run("on", false);
-    eq(await rows(), "APPLY_VM=on,CAREER_AGENT_SUBMIT=off,CAREER_CLOUD_APPLY=on", "and again on the next go-live");
+    eq(await rows(), "APPLY_VM=on,CAREER_AGENT_SUBMIT=off,CAREER_CLOUD_APPLY=on,CAREER_CLOUD_TEXT_CARDS=on", "and again on the next go-live");
     await run("off", true); // --real-submit off
-    eq(await rows(), "APPLY_VM=off,CAREER_AGENT_SUBMIT=off,CAREER_CLOUD_APPLY=off");
+    eq(await rows(), "APPLY_VM=off,CAREER_AGENT_SUBMIT=off,CAREER_CLOUD_APPLY=off,CAREER_CLOUD_TEXT_CARDS=off");
     await run("on", false);
-    eq(await rows(), "APPLY_VM=off,CAREER_AGENT_SUBMIT=off,CAREER_CLOUD_APPLY=off", "a plain go-live after the kill switch changes nothing");
+    eq(await rows(), "APPLY_VM=off,CAREER_AGENT_SUBMIT=off,CAREER_CLOUD_APPLY=off,CAREER_CLOUD_TEXT_CARDS=off", "a plain go-live after the kill switch changes nothing");
     await run("on", true); // --real-submit on
-    eq(await rows(), "APPLY_VM=on,CAREER_AGENT_SUBMIT=on,CAREER_CLOUD_APPLY=on", "only an explicit --real-submit on turns them back on");
+    eq(await rows(), "APPLY_VM=on,CAREER_AGENT_SUBMIT=on,CAREER_CLOUD_APPLY=on,CAREER_CLOUD_TEXT_CARDS=on", "only an explicit --real-submit on turns them back on");
   } finally { await pg.stop(); }
 } });
 

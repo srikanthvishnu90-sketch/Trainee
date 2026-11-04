@@ -109,3 +109,52 @@ Deno.test("DEV-6 H025/H028: the brain is told to acknowledge first and to say th
   assert(/alongside the part you can do now/.test(STAGED_PROMPT_NOTE));
   for (const item of ["just apply me to 3", "software intern", "which ones are actually safe", "cashier"]) assert(!p.includes(item) && !STAGED_PROMPT_NOTE.includes(item), item);
 });
+
+// RUN 41766476050 (staged, claude-haiku-5-5; five passes 36/37/33/35/33): H025 failed 4 of 5 passes on BOTH judges (no brief
+// acknowledgement of an overwhelmed person, then two questions) and H034 failed 3 of 5 (2 on both judges): the reply said the search
+// was empty and named no entry route. The prompt already had both rules, so the cause was upstream of them: the nearest style
+// example for an "apply for me" message is the apply example (no acknowledgement, two questions), and an empty search result
+// ("Nothing found: say so plainly") outranks a rule that sits earlier in the prompt. The situation now picks the example.
+import { selectStyle, styleBlock, STYLE_EXAMPLES, SITUATIONAL } from "../../supabase/functions/_shared/agent/style.ts";
+const ids = (m: string) => selectStyle(m).map((e) => e.id);
+
+Deno.test("DEV-7 H025: a distressed message gets the acknowledge-first example last, whatever example is nearest by words", () => {
+  for (const m of [
+    "I'm so overwhelmed, can you just apply me to a few roles and handle the rest",
+    "im stressed and scared, please apply for me",
+    "I feel stuck and exhausted with this search",
+    "i'm burned out, just do the applications",
+  ]) {
+    const got = ids(m);
+    eq(got.at(-1), "T17", m);
+    assert(got.includes("T07") && got.includes("T08"), "the honesty guards stay in: " + m);
+    assert(got.indexOf("T17") > got.indexOf("T07"), "the situational example is read last");
+    assert(styleBlock(m).includes("you don't have to carry it all at once"), m);
+  }
+  const t17 = STYLE_EXAMPLES.find((e) => e.id === "T17")!;
+  assert(/^That sounds like a lot/.test(t17.reply), "acknowledges first");
+  assert(/nothing goes out until you say yes/.test(t17.reply), "says nothing is sent without their yes");
+  eq((t17.reply.match(/\?/g) || []).length, 1, "one question");
+});
+
+Deno.test("DEV-8 H034: a person naming a field they want to move into gets the entry-routes example; other messages do not", () => {
+  for (const m of ["im a cashier wanna do something w computers", "I want to get into nursing, I work in a warehouse", "thinking of a career change", "trying to switch careers"]) {
+    assert(ids(m).includes("T18"), m);
+  }
+  const t18 = STYLE_EXAMPLES.find((e) => e.id === "T18")!;
+  assert(/Realistic first steps/.test(t18.reply) && /Which of those/.test(t18.reply), "names roles, then one question");
+  for (const m of ["find me data analyst jobs in Chicago", "apply for me", "what about the second one", "never show me staffing agencies ever", "hello", ""]) {
+    assert(!ids(m).includes("T17") && !ids(m).includes("T18"), `no situational example for: ${m}`);
+  }
+  // The word-overlap picks are unchanged by the new examples (they are never picked by words).
+  eq(ids("tell me about the 2nd one")[0], "T02");
+  assert(SITUATIONAL.every((s) => STYLE_EXAMPLES.some((e) => e.id === s.id)));
+});
+
+Deno.test("DEV-9 H025/H034: an empty search does not outrank the acknowledgement or the entry roles in the prompt", () => {
+  const p = careerSystemPrompt("2026-11-04");
+  assert(/A search that comes back empty does not move the acknowledgement: it still opens the\s+reply/.test(p));
+  assert(/A search that finds nothing\s+never replaces those roles: name them first/.test(p));
+  for (const item of ["cashier", "software intern", "help desk", "computers"]) assert(!p.includes(item), item);
+  for (const e of STYLE_EXAMPLES.filter((x) => x.id === "T17" || x.id === "T18")) for (const item of ["software intern", "cashier", "which ones are actually safe", "just apply me to 3"]) assert(!e.user.includes(item) && !e.reply.includes(item), `${e.id}: ${item}`);
+});

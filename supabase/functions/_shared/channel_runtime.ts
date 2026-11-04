@@ -4,6 +4,7 @@ import { deliverDue } from "./channel.ts";
 import { supabaseChannelStore } from "./channel_store.ts";
 import { adaptersFromEnv } from "./channel_registry.ts";
 import { shapeReply } from "./channel_shape.ts";
+import { telegramPacerFromEnv } from "./channel_pacer.ts"; // every Telegram send takes its token from the one shared bucket
 
 // The turn runs as the person through agent-chat's service-role path, so history, erase, the host's STOP and pause,
 // persistence and the hourly turn limit are the chat's own. The channel is never sent: the brain is channel-blind.
@@ -72,7 +73,7 @@ export function chatThroughAgent(url: string, key: string, o: { retryDelayMs?: n
 export function deliverer(admin: any, env: { get(k: string): string | undefined }) {
   let adapters: ReturnType<typeof adaptersFromEnv> | null = null;
   return async (a: { userId: string; key?: string; now: number; wholeUser?: boolean }) => {
-    adapters ??= adaptersFromEnv(env);
+    adapters ??= adaptersFromEnv(env, { sharedPace: telegramPacerFromEnv(env, admin) });
     const store = supabaseChannelStore(admin, a.wholeUser ? { user: a.userId } : { only: { userId: a.userId, key: a.key! } });
     const r = await deliverDue({ store, adapters, now: a.now, limit: a.wholeUser ? 40 : 1 });
     await store.release();

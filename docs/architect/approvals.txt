@@ -110,3 +110,9 @@
 437 ec239c145bfc06ce0edd9a6a6f435e638fd2170c independent-review-agent-rv45 risk=med note=defect-fixed-in-463
 453 263f254787ae0bb9e25e66715b98bf0d02e3a2cf independent-review-agent-rv45 risk=low
 472 7e9c4821def7984edc3db6eb6438bcd62a5dbd00 independent-review-agent-rv44 risk=med note=stale-90pct-comment-and-brain-not-pinned
+477 3cf40f2f3ae573244f40fb3406264ab5a92e391a independent-review-agent-rv44 risk=low note=new-public-function-gated-on-file-secret
+471 8398090e394a1b83f97e96eb1e046b672cdf6cd1 independent-review-agent-rv44 risk=low
+457 af355a6d3072af869026444915ac77c8cbbcd105 independent-review-agent-rv44 risk=low note=release-merge-tree-identical-to-approved-trunk-head
+469 8840311e284c753e9dac75fa7274b3b96c3dab05 independent-review-agent-rv44 risk=low note=release-merge-tree-identical-to-approved-trunk-head
+474 7731d4d259bf788d3787c619866b4d55dcb54a1a independent-review-agent-rv44 risk=low note=release-merge-tree-identical-to-approved-trunk-head
+479 90320f93a1eb5ead4f0d1a6d80b01fd16f30733d independent-review-agent-rv44 risk=low note=release-merge-tree-identical-to-approved-trunk-head

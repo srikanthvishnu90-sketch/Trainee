@@ -11,8 +11,9 @@
 import { cap1, esc, hostOf, layout, webUrl, initialOf, type Row } from "./file_page.ts";
 import { BRAND } from "./brand.ts";
 import { stampHtml } from "./file_design.ts";
-import { applyHelp, coverage, NOT_LISTED, specOf, stateCountsOf, stateOfDismissed, type Spec } from "./results_spec.ts";
+import { applyHelp, coverage, NOT_LISTED, specOf, stateCountsOf, stateOfDismissed, type Spec, type StateKey } from "./results_spec.ts";
 import { DESIGN_CSS, DESIGN_FONT_LINK } from "./results_design.ts";
+import { BATCH_CSS, filterByState, renderApprove, renderBatchHead, renderExceptions, renderPauseNote, renderStateFilters } from "./results_batch.ts";
 
 export type PayFilter = "any" | "meets" | "listed";
 export interface ResultRow extends Row {
@@ -29,7 +30,7 @@ export interface ResultRow extends Row {
 }
 export interface ResultsFeed {
   token: string; title: string; floor: string | null; rows: ResultRow[]; total: number;
-  filters: { pay: PayFilter; where: string }; places: string[]; top?: string; notes?: Record<string, string>;
+  filters: { pay: PayFilter; where: string; state?: StateKey | null }; places: string[]; top?: string; notes?: Record<string, string>;
   // The header: who and when, what was read and when, what is not confirmed, and a 2-3 line quick read.
   // stamp: "Postings checked ..." from the shown postings' own last_seen_at (file_design.ts); null: "Check time unknown".
   coverRows?: ResultRow[]; // every role including dismissed: what has been sent is told over these
@@ -94,7 +95,7 @@ dl.facts dt{color:var(--mute)}dl.facts dd{margin:0;overflow-wrap:anywhere}dd.pai
 .things .err{margin:8px 0 0;color:var(--bad);font-size:16px}.things .hand{margin:0;font-size:16px}
 .back{display:inline-flex;align-items:center;min-height:44px;color:var(--link);font-size:16px}
 @media (max-width:480px){.card .apply,.card .ghost.go,.selbar .apply,.things .apply{width:100%}.acts{flex-direction:column;align-items:stretch}}
-` + DESIGN_CSS;
+` + DESIGN_CSS + BATCH_CSS;
 const hidden = (token: string, action: string, extra = "") => `<input type="hidden" name="t" value="${esc(token)}"><input type="hidden" name="action" value="${action}">${extra}`;
 const logoOf = (r: Row) => `<span class="logo"><span class="lettermark" aria-hidden="true">${esc(initialOf(r.job.company))}</span>${r.logo ? `<img src="${esc(r.logo)}" alt="${esc(r.job.company)} logo" width="48" height="48" loading="lazy" referrerpolicy="no-referrer">` : ""}</span>`;
 // The chip is the colour AND the spec word (design 1.6, "Submitted - confirmed" only with evidence); the class keeps the row's status word.
@@ -140,10 +141,11 @@ function card(r: ResultRow, f: ResultsFeed): string {
 }
 
 export function renderResults(f: ResultsFeed): string {
+  f = { ...f, rows: filterByState(f.rows, f.filters.state) }; // the state filter (results_batch.ts); pay and place were applied by the caller
   const floor = f.floor;
   const sel = (name: string, cur: string, opts: [string, string][]) => `<select name="${name}">${opts.map(([v, l]) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
   const payOpts: [string, string][] = [["any", "Any pay"], ...(floor ? [["meets", `Lists ${floor} or more`] as [string, string]] : []), ["listed", "Lists pay"]];
-  const filters = `<form method="get" class="filters" role="search"><label>Pay${sel("pay", f.filters.pay, payOpts)}</label><label>Where${sel("where", f.filters.where, [["", "Anywhere"], ["remote", "Remote"], ...f.places.map((p) => [p, p] as [string, string])])}</label><button type="submit" class="ghost">Show</button></form>`;
+  const filters = `<form method="get" class="filters" role="search">${f.filters.state ? `<input type="hidden" name="state" value="${esc(f.filters.state)}">` : ""}<label>Pay${sel("pay", f.filters.pay, payOpts)}</label><label>Where${sel("where", f.filters.where, [["", "Anywhere"], ["remote", "Remote"], ...f.places.map((p) => [p, p] as [string, string])])}</label><button type="submit" class="ghost">Show</button></form>`;
   const canPick = !f.paused && f.rows.some(approvable);
   const cr0 = f.countRows ?? f.rows;
   // Sticky bottom bar (spec 3.10): the page's main action (Apply to selected, solid black) and Pause on this page (danger).
@@ -181,7 +183,7 @@ export function renderResults(f: ResultsFeed): string {
       : open ? `<div class="pausebar"><p><b>Pause on this page</b> (button at the bottom) stops this page from approving or starting anything new. It does not stop Telegram: the buttons there still work. Applications already approved or in progress are not cancelled and may still finish.</p></div>` : "")
     + `</section>`;
   const gone = f.dismissed?.length ? `<details class="gone"><summary>Dismissed (${f.dismissed.length})</summary><ul class="cards">${f.dismissed.map((r) => `<li class="card" id="r-${esc(r.ref)}"><p class="state">${r.rid ? `<span class="rid">${esc(r.rid)}</span>` : "<span></span>"}${chipOf(stateOfDismissed(), "dismissed")}</p><div class="head">${logoOf(r)}<div class="ttl"><h3 class="title">${esc(r.job.title)}</h3><p class="co">${esc(r.job.company)}</p></div></div><p class="markhelp">Dismissed by you. Private and reversible. No application was touched. Current state: ${esc(specOf(r).label)}.</p>${markForm(r, f, "restore")}</li>`).join("")}</ul></details>` : "";
-  const inner = `<div id="root" class="results">${BRAND}<header class="filehead">${headTop}${topBlock}</header>${quick}${filters}${shown}${selhelp}${allbar}${actionbar}<main id="main">${top}${body}${gone}</main></div>`;
+  const inner = `<div id="root" class="results">${BRAND}<header class="filehead">${headTop}${renderBatchHead(f)}${topBlock}</header>${quick}${filters}${shown}${renderStateFilters(f)}${renderExceptions(f)}${renderApprove(f)}${renderPauseNote(f)}${selhelp}${actionbar}<main id="main">${top}${body}${gone}</main></div>`;
   return layout(`${cap1(f.title)} - Trainee`, inner, { css: CSS, head: DESIGN_FONT_LINK });
 }
 

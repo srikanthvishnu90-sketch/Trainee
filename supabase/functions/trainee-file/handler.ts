@@ -21,7 +21,9 @@ import { BOOT_SCRIPT, cut, FEED_SCRIPT, fullOf, hostOf, renderBootstrap, renderF
 import { dayOf, BRAND, esc, layout, postedLine, webUrl } from "../_shared/file_page.ts";
 import { actOn, bodyHtml, COPY_SCRIPT, KIND_CSS, KIND_LABEL, textOf, type Effects, type FileRecord } from "../_shared/file_kinds.ts";
 import type { FileService } from "../_shared/file_service.ts";
+import { fetchLogo, memoryLogoCache, validDomain, type LogoCache } from "../_shared/logo_cache.ts";
 import { renderResults, renderThings, type PayFilter, type ResultRow, type ThingQuestion } from "../_shared/results_page.ts";
+import { parseStateFilter } from "../_shared/results_batch.ts";
 import { conversionNote, floorText, type Pay, payGroup, payText, startsBelow } from "../_shared/role_pay.ts";
 import { checkAnswer, type OpenQuestion, type QuestionStore } from "../_shared/career_apply_questions.ts";
 import { type PendingRow, pendingLine } from "../_shared/career_hosted_prepare.ts";
@@ -32,7 +34,7 @@ import { redactIdentity } from "../_shared/identity_redact.ts";
 import { coverage, countsOf, NOTHING_SENT, NOT_LISTED, renderExport, reqIdOf, roleIds, specOf } from "../_shared/results_spec.ts";
 import type { ListMeta } from "../_shared/telegram_jobs.ts";
 import { fileShellHtml, firstNameOf, freshnessStamp, madeForLine, stateHtml } from "../_shared/file_design.ts";
-import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, logoUrl, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
+import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
 
 export type { AppRow } from "../_shared/file_page.ts";
 export interface FileStore extends JobStore {
@@ -51,6 +53,8 @@ export interface FileDeps extends Omit<JobDeps, "store"> {
   phone?: PhoneAuth; // the account's confirmed phone and the texted code; absent, phone sign-in is off
   files?: FileService; // the other file kinds (introduction, proof, plan, comparison, draft, brief); an id not found there is a jobs list
   fileEffects?: Effects; // what Introduce really does (send); absent, an approved introduction says it was not sent
+  logoFetch?: typeof fetch; // TRAINEE_LOGO_URL=self: how the server fetches an employer's own logo (tests pass a fake; default fetch)
+  logoCache?: LogoCache; // and where it keeps them (default: one in-memory cache per instance)
   timeZone?: (userId: string) => Promise<string | null>; // the person's own zone (dates on the page are their day); absent or unknown, Chicago, said
   // The employer's open questions (career_apply_questions): a results card that isn't ready asks them on "A few things first", and
   // answers are checked (checkAnswer) and saved (store.answer) exactly as the chat saves them. Absent: the page asks nothing.
@@ -122,8 +126,17 @@ const kindScriptHash = (async () => `'sha256-${b64(await sha(KIND_SCRIPT))}'`)()
 // frame-ancestors: Telegram's own web clients only (the Mini App is a frame inside web.telegram.org); nothing else may frame the page.
 // img-src: the logo provider's origin only (computed from config), never every https host.
 const FRAMES = "https://web.telegram.org https://*.telegram.org";
+// Logos (audit R16, architect decision 2026-11-01): by DEFAULT from the employer's own domain, fetched by the server and served from
+// this page's own origin (logo_cache.ts), so img-src is 'self' and the reader's browser contacts no third party; no own domain, the
+// lettermark. A third-party logo service is never the default (Google's s2 favicons would tell Google which companies a person is
+// looking at): TRAINEE_LOGO_URL=google, or an explicit https template with {domain}, opts in; a non-https template means no logos.
+const S2 = "https://www.google.com/s2/favicons?sz=128&domain={domain}";
+const logoMode = (env: { get(k: string): string | undefined }): string => { const v = (env.get("TRAINEE_LOGO_URL") || "").trim(); return !v || v === "self" ? "self" : v === "google" ? S2 : v; };
+const selfLogos = (env: { get(k: string): string | undefined }) => logoMode(env) === "self";
+const LOGOS = memoryLogoCache();
 function logoOrigins(env: { get(k: string): string | undefined }): string {
-  const tpl = (env.get("TRAINEE_LOGO_URL") || "").trim() || "https://www.google.com/s2/favicons?sz=128&domain={domain}";
+  if (selfLogos(env)) return "'self'";
+  const tpl = logoMode(env);
   let origin = "";
   try { const u = new URL(tpl.split("{domain}").join("example.com")); if (u.protocol === "https:") origin = u.origin; } catch { /* no logo provider */ }
   return [origin, origin.includes("google.com") ? "https://*.gstatic.com" : ""].filter(Boolean).join(" ");
@@ -199,8 +212,9 @@ function sendOf(p: PreparedRow): { items: { label: string; value: string; needs?
 }
 // The logo only from the employer's own domain, through the configured provider, https only; the CSP allows that provider's origin only.
 function rowLogo(job: JobView, env: { get(k: string): string | undefined }): string | null {
-  const dom = logoDomain(job, env), u = logoUrl(job, env);
-  if (!dom || !u) return null;
+  if (selfLogos(env)) { const dom = logoDomain(job, env); return dom && validDomain(dom) ? `?logo=${encodeURIComponent(dom)}` : null; }
+  const dom = logoDomain(job, env), tpl = logoMode(env), u = dom ? tpl.split("{domain}").join(encodeURIComponent(dom)) : null;
+  if (!dom || !u || !/^https:\/\//.test(u)) return null;
   try {
     const x = new URL(u), allowed = logoOrigins(env).split(" ").filter(Boolean)[0];
     return x.protocol === "https:" && x.origin === allowed && u.includes(encodeURIComponent(dom)) ? u : null;
@@ -532,6 +546,8 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   }
   const claims = { u: s.userId, r: s.list, k: "s", j: "0".repeat(16), i: 0, e: Date.parse(s.row.expires_at) } as FileClaims;
   const { u } = claims;
+  // A logo for a row of THIS signed-in person's list, from that employer's own domain (TRAINEE_LOGO_URL=self). Any other domain: 404.
+  if (req.method === "GET" && url.searchParams.has("logo")) return await logoOf(url.searchParams.get("logo") ?? "", claims, d);
   if (d.files) {
     const g = await d.files.get(u, claims.r).catch(() => null);
     if (g && g.state !== "missing") return handleKind({ g, d, claims, token, action, fields, req, html, text, state });
@@ -628,6 +644,20 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
   // A confirmation screenshot is shown inline only from the project's own storage origin; img-src then allows exactly that origin.
   if (shots) csp = csp.replace(/img-src ([^;]+)/, (_m, v: string) => `img-src ${v === "'none'" ? shots : `${v} ${shots}`}`);
   return o.html(layout(`${String(rec.data?.title ?? KIND_LABEL[rec.kind])} - Trainee`, inner, { script: KIND_SCRIPT, tg: true, css: KIND_CSS, og: { title: `${KIND_LABEL[rec.kind]} from Trainee`, description: "Open in Trainee.", image: ogImage(d.env) } }), 200, { "content-security-policy": csp });
+}
+async function logoOf(want: string, claims: FileClaims, d: FileDeps): Promise<Response> {
+  const none = () => new Response("", { status: 404, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+  const dom = want.trim().toLowerCase();
+  if (!selfLogos(d.env) || !validDomain(dom)) return none();
+  const refs = ((await d.store.recallList(claims.u, claims.r).catch(() => null)) ?? []).slice(0, MAX_ROWS);
+  const jobs = (await Promise.all(refs.map((r) => d.store.recall(claims.u, r).catch(() => null)))).filter(Boolean).map((c) => c!.job);
+  const posts = jobs.length ? await d.store.postings(jobs.map((j) => j.job_id)).catch(() => [] as PostingRow[]) : [];
+  const allowed = jobs.some((j) => logoDomain({ ...j, company_domain: j.company_domain ?? posts.find((p) => p.job_id === j.job_id)?.company_domain ?? null }, d.env) === dom);
+  if (!allowed) return none();
+  const logo = await fetchLogo(dom, { fetch: d.logoFetch ?? fetch, cache: d.logoCache ?? LOGOS, now: d.now() }).catch(() => null);
+  if (!logo) return none();
+  return new Response(logo.bytes as Uint8Array<ArrayBuffer>, { status: 200, headers: { "content-type": logo.type, "cache-control": "private, max-age=86400", "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; sandbox", "referrer-policy": "no-referrer", "cross-origin-resource-policy": "same-origin" } });
 }
 const originOf = (u: string) => { try { const x = new URL(u); return x.protocol === "https:" ? x.origin : null; } catch { return null; } };
 // The one origin a File may show evidence images from: the project's own storage (SUPABASE_URL), https only. Anything else is a link.
@@ -826,7 +856,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   const feed = await loadFeed(claims, token, d, notes);
   if (!feed) return o.state("This list is gone", ["It is no longer available. " + NEW_LINK], 404);
   if (o.req.method === "GET" && o.url.searchParams.get("format") === "text") return o.text(renderText(feed));
-  const pf = o.url.searchParams.get("pay") as PayFilter, filters = { pay: PAY_FILTERS.has(pf) ? pf : "any" as PayFilter, where: (o.url.searchParams.get("where") ?? "").trim().slice(0, 80) };
+  const pf = o.url.searchParams.get("pay") as PayFilter, filters = { pay: PAY_FILTERS.has(pf) ? pf : "any" as PayFilter, where: (o.url.searchParams.get("where") ?? "").trim().slice(0, 80), state: parseStateFilter(o.url.searchParams.get("state")) };
   const openNow = await readQs(), pend = d.pending ? await d.pending(u).catch(() => null) : null;
   // Stable ids over the WHOLE list (not the filter, not the sort, not what is dismissed).
   const rawRefs = (await d.store.recallList(u, claims.r).catch(() => null)) ?? feed.rows.map((r) => r.ref);

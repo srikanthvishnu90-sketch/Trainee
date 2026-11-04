@@ -7,7 +7,7 @@
 //
 //   deno run -A evals/career/run-conversations.ts --brain router|agent --label <label> [--only C01,C05] [--set in-flight|in-flight-heldout]
 //
-// Needs OPENAI_API_KEY (the judge, and the agent brain). Without it: NOT RUN, exit 2. A score is never faked.
+// Needs ANTHROPIC_API_KEY (the judge, and the agent brain). Without it: NOT RUN, exit 2. A score is never faked.
 // Results: evals/career/results/<label>.conversations.json, the pass rate and the failing ids on stdout.
 import { parseJudge } from "./run.ts";
 
@@ -146,8 +146,8 @@ export async function worldBrain(o: { kind: "agent" | "router"; world: any; post
 if (import.meta.main) {
   const args = Deno.args, opt = (n: string) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] ?? null : null; };
   const brainName = opt("--brain") || "router", label = opt("--label") || `${brainName}-${new Date().toISOString().slice(0, 10)}`;
-  if (!Deno.env.get("OPENAI_API_KEY")) { console.log("NOT RUN: no OPENAI_API_KEY (the judge needs it)."); Deno.exit(2); }
-  const { callModel, modelConfig, newMeter } = await import("../../supabase/functions/_shared/model_gateway.ts");
+  if (!Deno.env.get("ANTHROPIC_API_KEY")) { console.log("NOT RUN: no ANTHROPIC_API_KEY (the judge needs it)."); Deno.exit(2); }
+  const { callModel, modelConfigFor, newMeter } = await import("../../supabase/functions/_shared/model_gateway.ts");
   const { careerModelConfig } = await import("../../supabase/functions/agent-chat/release_model.ts");
   // --set in-flight | in-flight-heldout (WO-100): the seeded world's items, or their held-out paraphrases.
   const setName = opt("--set") ?? "", inFlight = setName.startsWith("in-flight");
@@ -157,7 +157,7 @@ if (import.meta.main) {
   const set = flight ? { postings: [...base.postings, ...world.postings], items: setName === "in-flight-heldout" ? flight.heldout : flight.items } : base;
   const meter = newMeter(), judgeMeter = newMeter();
   const brainCfg = careerModelConfig(Deno.env);
-  const judgeCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("EVAL_JUDGE_MODEL") || "gpt-5-mini" };
+  const judgeCfg = modelConfigFor(Deno.env, Deno.env.get("EVAL_JUDGE_MODEL") || "claude-sonnet-5-5");
   const kind = brainName === "agent" ? "agent" : "router", model = (p: any) => callModel(brainCfg, p, { meter, role: "chat" });
   const brain = flight ? await worldBrain({ kind, world, postings: base.postings, items: set.items, model }) : await traineeBrain({ kind, postings: set.postings, model });
   const judge: ConvJudge = async (prompt) => {

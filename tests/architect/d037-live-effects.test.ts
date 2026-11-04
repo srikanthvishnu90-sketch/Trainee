@@ -40,8 +40,8 @@ Deno.test("D-037/1a: the database switches the release turns on are written by g
   const guards = sh.indexOf(guardLine), write = sh.indexOf('-f scripts/launch/release-db-switches.sql" "${P[@]}"');
   ok(guards > 0 && write > guards, "the switches are written only after every claim guard is verified in place");
   ok(/^REAL_SUBMIT=""$/m.test(sh) && /--real-submit\) shift; REAL_SUBMIT=/.test(sh), "unset by default: a plain go-live overwrites nothing");
-  ok(/if \[\[ -z "\$REAL_SUBMIT" \]\]; then RS_V=on; RS_OVER=false; else RS_V="\$REAL_SUBMIT"; RS_OVER=true; fi/.test(sh), "only an explicit --real-submit overwrites");
-  ok(/\[\[ -z "\$REAL_SUBMIT" \|\| "\$REAL_SUBMIT" == on \|\| "\$REAL_SUBMIT" == off \]\] \|\| fail/.test(sh), "any other value stops the run");
+  ok(/RS_V=off; RS_OVER=true/.test(sh) && !/RS_V=on/.test(sh) && /--real-submit on is refused/.test(sh), "owner 2026-11-02: a go-live always writes the submit switches off; on is refused");
+  ok(/\[\[ -z "\$REAL_SUBMIT" \|\| "\$REAL_SUBMIT" == off \]\] \|\| fail/.test(sh), "any other value, on included, stops the run");
   ok(!/--brain\)[^\n]*REAL_SUBMIT/.test(sh), "--brain (the emergency rollback) never touches real submit");
 });
 

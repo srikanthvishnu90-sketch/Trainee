@@ -8,6 +8,7 @@
 import type { JobView } from "./telegram_jobs.ts";
 import { reasonWords } from "./career_apply_status.ts";
 import { BODY_FONT, BRAND, DISABLED_CSS, FAVICON, FONT_LINKS, PLUM, TOKENS_CSS } from "./brand.ts";
+import { FILE_CSS, stampHtml } from "./file_design.ts";
 
 export type Word = "queued" | "preparing" | "sending" | "submitted" | "confirmed" | "failed" | "not submitted" | "needs you" | "unknown" | "in applications";
 export interface Status { word: Word; detail: string; sent?: boolean; evidence?: string | null } // evidence: what the row holds that shows the outcome (an employer reference, a confirmation email); null/absent: none on file
@@ -27,7 +28,9 @@ export interface Row {
   posted?: string | null; // "Posted 3 d ago (Oct 28)" from the posting's own date (postedLine), else when Trainee first saw it
 }
 // total: how many postings the list holds; the page shows the first rows.length of them and says so when that is fewer.
-export interface Feed { og?: Og; token: string; rows: Row[]; setHash: string | null; setSize: number; top?: string; botUrl?: string | null; total?: number }
+// made: "Made for Ada · Nov 1, 2026" above the card; stamp: "Postings checked ..." from the postings' own check times (file_design.ts
+// freshnessStamp), null when none is known (the page then says the check time is unknown, as a value).
+export interface Feed { og?: Og; token: string; rows: Row[]; setHash: string | null; setSize: number; top?: string; botUrl?: string | null; total?: number; made?: string; stamp?: string | null }
 
 // Bidi overrides and isolates (U+202A-E, U+2066-9) in a company, title or location would reverse the text after them on the page,
 // a provenance label included; they are dropped, never rendered.
@@ -171,6 +174,7 @@ details[open] .desc{display:block;-webkit-line-clamp:unset}
 .note a,details a,.top-note a{color:var(--link)}main p>a:not(.apply){display:inline-flex;align-items:center;min-height:44px}.lnk{display:inline;min-height:44px;padding:0 4px;border:0;background:none;color:var(--link);font:inherit;text-decoration:underline;cursor:pointer}.sendh{margin:8px 0 2px;font-weight:600;font-size:15px}.send{margin:0 0 8px;padding-left:20px;font-size:15px;color:var(--mute)}.send li{margin:2px 0;overflow-wrap:anywhere}
 :focus-visible{outline:3px solid var(--accent);outline-offset:3px;border-radius:8px}
 ${DISABLED_CSS}
+${FILE_CSS}
 .foot{margin-top:24px;padding-top:14px;border-top:1px solid var(--line);font-size:15px;color:var(--mute)}
 @media (max-width:360px){details,.meta,.why,.note{margin-left:0}.apply{min-width:80px;padding:6px 12px}}
 `;
@@ -230,7 +234,8 @@ export function renderFeed(f: Feed): string {
   const more = f.total && f.total > f.rows.length ? `<p class="with">Showing the first ${f.rows.length} of ${f.total}. Ask Trainee in Telegram for the rest.</p>` : "";
   const all = f.setHash && f.setSize >= 2 ? `<form method="post" class="ajax all">${hidden(f.token, "applyall", `<input type="hidden" name="set" value="${f.setHash}">`)}<button type="submit">Apply to all ${f.setSize}</button></form>` : "";
   const top = f.top ? `<p class="top-note" role="alert">${esc(f.top)} ${refresh(f.token)}</p>` : "";
-  const inner = `<div id="root"><header>${BRAND}<h1>Your jobs</h1>${withLine}${more}${all}</header><main id="main">${top}<ul class="rows">${f.rows.map((r) => rowHtml(r, f.token)).join("")}</ul></main>${signOutFoot(f.token)}</div><p id="live" class="sr" role="status" aria-live="polite"></p>`;
+  // The File shell (file_design.ts): the wordmark and who it was made for above one card; the title, its freshness stamp, then the rows.
+  const inner = `<div id="root"><header class="fhead">${BRAND}${f.made ? `<p class="made">${esc(f.made)}</p>` : ""}</header><div class="fcard"><h1 class="ftitle">Your jobs</h1>${stampHtml(f.stamp ?? null)}${withLine}${more}${all}<main id="main">${top}<ul class="rows">${f.rows.map((r) => rowHtml(r, f.token)).join("")}</ul></main></div>${signOutFoot(f.token)}</div><p id="live" class="sr" role="status" aria-live="polite"></p>`;
   return layout("Your jobs - Trainee", inner, { script: FEED_SCRIPT, tg: true, og: f.og });
 }
 // Sign out of this page here, or everywhere it is open (every session of the account ends; each needs a new sign-in).

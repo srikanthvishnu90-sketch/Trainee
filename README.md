@@ -1,43 +1,49 @@
-# Upmore Agent Program — the full app + the doing layer
+# Trainee
 
-The doing layer. Upmore's agent finds, prepares and **completes** money tasks end to end — cancelling, paying, claiming, investing — on licensed partner rails, under limits the user sets.
+Trainee is a personal career agent for job seekers. Over text (Telegram, WhatsApp, iMessage/SMS) it learns who the
+person is from facts they confirm, finds matching openings, prepares tailored applications, and applies **only after
+the person says yes** to the exact application shown. It also drafts and, after approval, sends networking outreach
+from the person's own mailbox, tracks replies, and hosts shareable "File" pages. Every action ends with proof the
+person can see; the product never says something happened unless the employer's or provider's own record shows it.
 
-ChatGPT Finances connects accounts for analysis. Upmore connects accounts to **act**.
+Who it is for: anybody looking for work (D-004). The product name is Trainee (D-005); some code identifiers still carry
+older names and are not renamed.
 
-This repo is self-contained: the **complete current app** (every feature, the full agentic layer) plus the program docs (spec, build plan, loop, Claude Code prompt). Clone this one repo and build.
+## What is in this repo
 
-## What's here
+| Path | What it is |
+|---|---|
+| `supabase/functions/` | Edge functions. The Trainee ones: `agent-chat` (the conversation brain and handlers), `trainee-inbound`, `trainee-telegram`, `trainee-telegram-link`, `trainee-whatsapp`, `trainee-deliver`, `trainee-report`, `trainee-file`, `trainee-connect`, `career-ingest`, `career-proactive`, `career-send`, `career-cloud-runner`, `career-email-code`, `career-essay-draft`, `agent-exec`, `gmail-oauth`, `outlook-oauth`, `extension-sync`, `site-signup`, `site-careers`, `delete-account`, plus `_shared/`. |
+| `supabase/migrations/` | Database migrations (additive; applied only by the release path). |
+| `tests/architect/` | The architect's acceptance tests (Deno), one file per work order or behaviour. |
+| `tests/` (`career-*.test.cjs`, `tests/edge/`, `tests/db/`) | Node suites, edge tests, and SQL migration/RLS tests. |
+| `evals/career/` | The career eval harness, held-out sets and score log (`SCORE-LOG.md`). |
+| `site/`, `api/`, `vercel.json` | The public site (`site/index.html`, `site/privacy.html`), and the Vercel proxies for `/file` (`api/file.js`) and `/connect` (`api/connect.js`), wired by the rewrites in `vercel.json`. |
+| `extension/` | The browser extension that fills Greenhouse, Lever and Ashby applications in the person's own browser. |
+| `scripts/` , `scripts/launch/` | Gate, shard and build scripts; the owner's release and go-live scripts. |
+| `docs/architect/` | Architecture, `DECISIONS.md`, work orders, feature specs. |
+| `docs/launch/` | Go-live and owner runbooks. |
 
-**The app (production code):**
-- `src/upmore-app-template.html` — the app. Edit this, never `index.html`.
-- `src/build-app.py` — regenerates `index.html` + `sw.js` from the template. Run after every template change, commit the generated files too.
-- `supabase/functions/` — the agentic layer: `agent-exec` (Browserbase CDP driver, OTP handoff, atomic approval claims, verified-playbook gate, merchant catalog), `agent-chat`, `exec-vault-store` (encrypted credential vault), `plaid`, `simplefin-*`, `stripe-*`.
-- `tests/agent100/` — the Agent100 harness. Dry run must stay 103/103.
-- `plans/cancel-agent/` — cancel agent architecture, compliance diff, build plan.
-- `index.html`, `sw.js`, `vercel.json`, `manifest.webmanifest`, `icons/`, `fonts/`, `img/` — the deployed PWA.
-- `UPMORE-APP-README.md` — the app's own readme.
+## Where to start
 
-**The program (what to build and in what order):**
-- `SPEC.md` — the full agent capabilities spec (permission tiers T0–T4, ~260-capability catalog, execution methods, partners & licensing, build order, the 10x test, the never list). The source of truth.
-- `BUILD_PLAN.md` — the build order as engineering waves with honest speed estimates, what each wave needs from Vishnu, and what gates it.
-- `LOOP.md` — the engineering loop design: how Claude Code works through the plan task by task, definition of done, where human taps are required.
-- `PROMPT.md` — the master prompt. Paste into Claude Code to start the Oct 1 v1 build.
+- Architecture: `docs/architect/ARCHITECTURE.md`. Owner rulings: `docs/architect/DECISIONS.md`.
+- Feature specs: `docs/architect/specs/` (`MASS-APPLY-SPEC-2026-10-27.md`, `NETWORKING-SPEC-2026-10-27.md`,
+  `TASK-INTELLIGENCE-SPEC-2026-10-27.md`).
+- Work orders and the queue: `docs/architect/work-orders/README.md`.
+- Release: `docs/launch/TRAINEE-GO-LIVE.md` (owner only; agents never deploy).
+- Working rules for agents: `CLAUDE.md` (architect) and `AGENTS.md` (builders).
 
-**Deliberately excluded:** `qa/` (64MB of screenshots/scratch), `tests/agent100/results/` (run logs), `research/` (old notes). Nothing Claude Code needs to build is missing.
+## Checks
 
-## Relationship to the Upmore app repo
+The CI gate is `bash scripts/gate.sh`; CI (`.github/workflows/ci.yml`) runs it partitioned (core, browser, architect,
+forms-ci coverage) plus the database job (`bash tests/db/run.sh`), the send-rail load test and the Telegram
+acceptance suite. See `CLAUDE.md` for the exact commands.
 
-Production deploys from `srikanthvishnu90-sketch/Upmore` (Vercel). Until Vishnu says otherwise: build here, then sync the changed files back to the Upmore repo for deploy. Paths mirror the app repo 1:1, so sync is a straight copy.
+## Upmore (removed / frozen archive)
 
-## The one architectural rule
-
-**Upmore never becomes the bank, the broker, or the adviser. It drives the companies that already are.** Money never sits in an Upmore account. Every rail that moves money belongs to a licensed partner.
-
-## Status
-
-- [x] Repo created on GitHub (private)
-- [x] Full app + agentic layer mirrored in
-- [ ] Wave 0: foundation (tiers, ledger, Stop everything, module extraction)
-- [ ] Wave 1: data spine + proactive loop
-- [ ] Wave 2: cancel agent live
-- [ ] 10x test vs ChatGPT Finances
+This repo began as Upmore, a finance agent. Trainee does not use the Upmore app (owner decision). Upmore's code,
+specs and docs (for example `src/`, the root `index.html`, `UPMORE-APP-README.md`, `SPEC.md`, `BUILD_PLAN.md`,
+`PROMPT.md`, `LOOP.md`, finance modules under `packages/domain/`, and most of `docs/` older than 2026-10-18) are a
+frozen archive: do not build on them, and do not treat them as describing Trainee. Some Trainee code still lives in
+files that carry Upmore-era names (for example `packages/domain/*-career-*.js`), and `UPMORE_*` environment variable
+names remain in places; these are identifiers, not product claims.

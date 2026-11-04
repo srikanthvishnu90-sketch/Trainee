@@ -166,7 +166,7 @@ function fakeMailbox(gmail: FakeGmail) {
 
 Deno.test({ name: `replies at scale, end to end on Postgres: ${E2E} sampled scenarios through both lanes, read back from the database`, sanitizeResources: false, sanitizeOps: false, async fn(t) {
   if (!haveDb()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
-  for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]) Deno.env.delete(k);
+  for (const k of ["ANTHROPIC_API_KEY"]) Deno.env.delete(k);
   const started = Date.now();
   const db = await railDb();
   try {

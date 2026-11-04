@@ -291,6 +291,12 @@ Deno.test("S3 waiver mutation: one pass under 90% fails (34/38 = 89.5%), whateve
   w.log = LOG_HEAD + run5(C, "router", [34, 38, 38, 38, 38], "200");
   await onlyFails(w, "S3", /WAIVED ONCE .*worst pass 34\/38 < 90%/);
 });
+Deno.test("S3 waiver: the real release-1 measurement (36, 37, 33, 35, 33 of 38; mean 91.6%) fails on its two 86.8% passes: a workflow that succeeded is not a gate that passed", async () => {
+  // brain-eval run 41766476050 on release 3eb2e1c: the measuring job and the eval run both concluded success; the quality gate is S3.
+  const w = base(); deployedIsTheWaivedSha(w);
+  w.log = LOG_HEAD + run5(C, "router", [36, 37, 33, 35, 33], "200");
+  await onlyFails(w, "S3", /WAIVED ONCE .*worst pass 33\/38 < 90% \(mean 91\.6%\)/);
+});
 Deno.test("S3 waiver mutation: it does not apply to any other deployed SHA", async () => {
   const w = base(); // deployed D, not the waived SHA
   w.log = LOG_HEAD + run5(C, "router", [38, 38, 38, 38, 38], "200");

@@ -639,29 +639,34 @@ test('FEATURE 17: the cloud schedule reads CLOUD_DISPATCH_SECRET into Vault and 
 // deployed only when TRAINEE_FILE_LINK_SECRET / OPS_MONITOR_TOKEN is among the function secrets; absent = skipped, never a failure.
 test('gated functions: deployed with --no-verify-jwt only when their secret is set; absent is a log line, not a failure', () => {
   const cfg = fs.readFileSync(path.join(root, 'supabase/config.toml'), 'utf8');
-  for (const fn of ['trainee-file', 'ops-monitor']) assert.match(cfg, new RegExp(`\\[functions\\.${fn}\\]\\nverify_jwt = false`));
+  for (const fn of ['trainee-file', 'trainee-connect', 'ops-monitor']) assert.match(cfg, new RegExp(`\\[functions\\.${fn}\\]\\nverify_jwt = false`));
   const off = dry();
   assert.equal(off.code, 0, off.out);
   assert.match(off.out, /gated: trainee-file SKIPPED \(TRAINEE_FILE_LINK_SECRET is not among the function secrets\)/);
+  assert.match(off.out, /gated: trainee-connect SKIPPED \(TRAINEE_FILE_LINK_SECRET is not among the function secrets\)/);
   assert.match(off.out, /gated: ops-monitor SKIPPED \(OPS_MONITOR_TOKEN is not among the function secrets\)/);
-  assert.doesNotMatch(off.out, /functions deploy (trainee-file|ops-monitor)/);
+  assert.doesNotMatch(off.out, /functions deploy (trainee-file|trainee-connect|ops-monitor)/);
   const on = dry([], { ...FAKE, TRAINEE_FILE_LINK_SECRET: 'fake-file-link-secret-0000-FFFFFFFFFFFFFFFF', OPS_MONITOR_TOKEN: 'fake-ops-monitor-token-0000-OOOOOOOOOOOOOOO' });
   assert.equal(on.code, 0, on.out);
   assert.match(on.out, /supabase functions deploy trainee-file --project-ref \S+ --no-verify-jwt --use-docker/);
+  // The connect page (/connect proxy -> trainee-connect) signs links with TRAINEE_CONNECT_LINK_SECRET, else TRAINEE_FILE_LINK_SECRET,
+  // and is deployed with the file page under the same secret (it used to be missing here, so /connect had no function behind it).
+  assert.match(on.out, /supabase functions deploy trainee-connect --project-ref \S+ --no-verify-jwt --use-docker/);
   assert.match(on.out, /supabase functions deploy ops-monitor --project-ref \S+ --no-verify-jwt --use-docker/);
-  assert.match(on.out, /deno check [^\n]*trainee-file\/index\.ts [^\n]*ops-monitor\/index\.ts/);
-  assert.doesNotMatch(on.out, /trainee-connect/);
+  assert.match(on.out, /deno check [^\n]*trainee-file\/index\.ts [^\n]*trainee-connect\/index\.ts [^\n]*ops-monitor\/index\.ts/);
   const only = dry([], { ...FAKE, OPS_MONITOR_TOKEN: 'fake-ops-monitor-token-0000-OOOOOOOOOOOOOOO' });
   assert.match(only.out, /gated: trainee-file SKIPPED/);
+  assert.match(only.out, /gated: trainee-connect SKIPPED/);
   assert.match(only.out, /functions deploy ops-monitor /);
-  assert.doesNotMatch(only.out, /functions deploy trainee-file/);
+  assert.doesNotMatch(only.out, /functions deploy (trainee-file|trainee-connect)/);
 });
 
 test('gated functions: a failed secrets listing skips both with a log line, never deploys them ungated, and does not abort the run', () => {
   const r = nonint(['--sha', HEAD_SHA, '--skip-migrations'], CI_ENV, { listFails: true, bundleOk: true });
   assert.match(r.out, /gated: trainee-file SKIPPED \(secrets list unavailable\)/, r.out);
+  assert.match(r.out, /gated: trainee-connect SKIPPED \(secrets list unavailable\)/);
   assert.match(r.out, /gated: ops-monitor SKIPPED \(secrets list unavailable\)/);
-  assert.doesNotMatch(r.calls, /functions deploy (trainee-file|ops-monitor)/);
+  assert.doesNotMatch(r.calls, /functions deploy (trainee-file|trainee-connect|ops-monitor)/);
   assert.doesNotMatch(r.out, /gated: \S+ will be deployed/);
 });
 

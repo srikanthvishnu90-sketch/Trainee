@@ -48,20 +48,33 @@ export const STYLE_EXAMPLES: StyleExample[] = [
     reply: "I find jobs, watch for new ones, prepare applications you approve, and run interview practice. What are you after? A role and a city is enough to start." },
   { id: "T16", tags: ["remember", "know", "about", "me", "what", "do", "you"], user: "what do you remember about me",
     reply: "You're a pharmacist in Boulder, 6 years in retail, after hospital roles at $100k or more, no weekends. Standing rule: no staffing agencies. Anything to change?" },
+  // T17 and T18 are chosen by the situation, not by word overlap (see SITUATIONAL below).
+  { id: "T17", tags: [], user: "im drowning in all this, can you just take over the marketing coordinator applications",
+    reply: "That sounds like a lot, and you don't have to carry it all at once. I'll search for marketing coordinator roles, line up the best few, and nothing goes out until you say yes to each one. Which city should I search, or is remote fine?" },
+  { id: "T18", tags: [], user: "i stock shelves at a grocery store and want to get into healthcare",
+    reply: "Realistic first steps from retail floor work: medical receptionist, patient registration clerk, pharmacy technician trainee, medical records clerk. They value dependability and handling the public, and most train on the job or with a short certificate. Which of those sounds closest to what you want?" },
 ];
 // Always in: never act on what the person has not given, and never claim what has not happened.
 export const ALWAYS = ["T07", "T08"];
 
+// SITUATIONAL examples: the person's state decides them, because the closest-by-words example can pull the wrong way (an
+// "apply for me" message from a distressed person is nearest the apply example, which has no acknowledgement). They go in
+// after the two guards, so they are the last thing the model reads before the person's message.
+const DISTRESS = /\b(?:overwhelm(?:ed|ing)?|stress(?:ed|ful)?|scared|terrified|anxious|panick\w*|drowning|burn(?:ed|t)\s*out|exhausted|hopeless|discouraged|desperate|freaking\s+out|stuck|can'?t\s+(?:cope|take\s+(?:this|it)|handle\s+(?:this|it)))\b/i;
+const FIELD_MOVE = /\b(?:wanna|want\s+to|trying\s+to|hoping\s+to|looking\s+to|ready\s+to|thinking\s+(?:of|about))\s+(?:get\s+into|move\s+(?:in)?to|switch\s+(?:in)?to|go\s+into|break\s+into|change\s+to|do\s+something)\b|\bcareer\s+(?:change|switch|pivot)\b|\b(?:change|switch)\s+careers\b/i;
+export const SITUATIONAL: { id: string; when: RegExp }[] = [{ id: "T17", when: DISTRESS }, { id: "T18", when: FIELD_MOVE }];
+const situational = (message: string) => SITUATIONAL.filter((s) => s.when.test(String(message ?? "").replace(/[\u2019`]/g, "'"))).map((s) => STYLE_EXAMPLES.find((e) => e.id === s.id)!);
+
 const words = (s: string) => new Set(String(s ?? "").toLowerCase().replace(/[’']/g, "'").split(/[^a-z0-9']+/).filter((w) => w.length > 1));
 export function selectStyle(message: string, k = 4): StyleExample[] {
   const w = words(message);
-  const scored = STYLE_EXAMPLES.filter((e) => !ALWAYS.includes(e.id))
+  const scored = STYLE_EXAMPLES.filter((e) => !ALWAYS.includes(e.id) && !SITUATIONAL.some((s) => s.id === e.id))
     .map((e, i) => ({ e, i, score: e.tags.filter((t) => w.has(t)).length * 2 + [...words(e.user)].filter((t) => w.has(t)).length }))
     .filter((s) => s.score > 0)
     .sort((a, b) => b.score - a.score || a.i - b.i)
     .slice(0, k)
     .map((s) => s.e);
-  return [...scored, ...ALWAYS.map((id) => STYLE_EXAMPLES.find((e) => e.id === id)!)];
+  return [...scored, ...ALWAYS.map((id) => STYLE_EXAMPLES.find((e) => e.id === id)!), ...situational(message)];
 }
 export function styleBlock(message: string): string {
   return [

@@ -75,7 +75,7 @@ Deno.test({
     const keys = ["CAREER_BRAIN", "CAREER_KNOWLEDGE", "CAREER_BRAIN_ROUTER_INTENTS", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING",
       "CAREER_ACCOUNT_MEMORY", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "TRAINEE_FILE_BASE_URL", "TRAINEE_FILE_LINK_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET",
       "TELEGRAM_BOT_USERNAME", "TELEGRAM_LOGIN_URL", "TRAINEE_SIGNUP", "TRAINEE_ALLOWED_CONTACTS", "CAREER_REPLY_WRITER", "CAREER_TEXTING_NATIVE", "TRAINEE_DELIVER_SECRET", "LOOPMESSAGE_API_KEY",
-      "WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "TRAINEE_LOGO_URL", "TRAINEE_LOGO_GUESS"];
+      "WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "TRAINEE_LOGO_URL", "TRAINEE_LOGO_GUESS", "TELEGRAM_GLOBAL_PACER"];
     const saved = Object.fromEntries(keys.map((k) => [k, Deno.env.get(k)]));
     for (const k of keys) Deno.env.delete(k);
     const realFetch = globalThis.fetch;
@@ -123,6 +123,8 @@ Deno.test({
       const sql = async (s: string) => (await fast.sql(s)).trim();
       for (const [k, v] of Object.entries({ TELEGRAM_BOT_TOKEN: TOKEN, TELEGRAM_WEBHOOK_SECRET: SECRET, TELEGRAM_BOT_USERNAME: "TraineeOnbBot", TRAINEE_SIGNUP: "closed",
         TRAINEE_ALLOWED_CONTACTS: sample.map((_, i) => `telegram:${CHAT(i)}`).concat(Array.from({ length: 6 }, (_, k) => `telegram:${CHAT(200 + k)}`)).join(","),
+        // The shared Telegram bucket (channel_pacer.ts) really waits one second per chat per message; 70 sessions would take minutes. Its own tests (telegram-global-pacer, delivery-throughput-pg) cover it.
+        TELEGRAM_GLOBAL_PACER: "off",
         TRAINEE_DELIVER_SECRET: "TEST-deliver-secret-0123456789-abcdefgh" })) Deno.env.set(k, v);
       for (const i of seededIdx) {
         await sql(`insert into auth.users (id, email) values ('${SEEDED(i)}', 'onbr2-${i}@example.test'); insert into public.profiles (id) values ('${SEEDED(i)}');

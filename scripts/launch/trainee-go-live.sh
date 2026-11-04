@@ -84,8 +84,9 @@ DRY=""; SKIP_MIG=""; SKIP_DEPLOY=""; ONLY_SMOKE=""; BRAIN=""; ALLOW_SEND=""; NOW
 NONINT=""; [[ "${TRAINEE_NON_INTERACTIVE:-}" == 1 ]] && NONINT=1
 UNSCHEDULE_CRON=""
 # D-037: the database switches of real submission (release_config.ts RELEASE_DB_SWITCHES), written after the claim guards.
-# Owner, 2026-11-02: real employer submission stays DISABLED this release. Unset (a plain go-live, or --brain router) writes
-# the rows 'off' (missing rows created off, an existing 'on' turned off). --real-submit on is refused here.
+# Owner, 2026-11-04 (D-041): real employer submission is ON again (supersedes the 2026-11-02 always-off). Unset (a plain
+# go-live, or --brain router): only missing rows are written 'on'; a row already there, such as the owner's 'off', is never
+# changed. --real-submit on|off overwrites existing rows on purpose. Every claim still needs the person's approval of the exact payload.
 REAL_SUBMIT=""
 DEPLOY_LABEL="${TRAINEE_DEPLOY_LABEL:-owner}"
 while (( $# )); do
@@ -219,6 +220,7 @@ MIGRATIONS=(
   20261027210000_career_people_provider.sql
   20261027230000_career_outlook_connector.sql
   20261027240000_career_outreach_replies.sql
+  20261028010000_career_apply_outcomes.sql
   20261028050000_agent_turn_costs_always_recorded.sql
   20261028070000_global_daily_model_budget.sql
   20261028110000_career_connector_framework.sql
@@ -270,6 +272,7 @@ MIGRATIONS=(
   20261102130000_career_apply_prepare_fair_claim.sql
   20261102140000_career_apply_resume_file_restarts_preparation.sql
   20261102160000_model_budget_total_cap.sql
+  20261102180000_delivery_throughput.sql
   20261103100000_google_disconnect_erase_outbox.sql
 )
 MIGRATION_MARK=(
@@ -360,6 +363,7 @@ MIGRATION_MARK=(
   "to_regclass('public.career_provider_jobs') is not null and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'career_people' and column_name = 'sendable')"
   "to_regclass('public.career_outlook_sends') is not null and exists (select 1 from pg_proc where proname = 'career_outlook_claim') and exists (select 1 from pg_trigger where tgname = 'user_oauth_connections_outlook_erase')"
   "to_regclass('public.career_outreach_turns') is not null and exists (select 1 from pg_proc where proname = 'career_outreach_action_claim' and prosrc like '%skip locked%')"
+  "to_regclass('public.career_apply_outcomes') is not null"
   "exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'agent_turn_costs' and column_name = 'meter_state')"
   "to_regclass('public.model_budget_days') is not null and to_regclass('public.model_budget_reservations') is not null and exists (select 1 from pg_proc where proname = 'model_budget_reserve')"
   "to_regclass('public.career_parked_tasks') is not null and to_regclass('public.career_connector_links') is not null and exists (select 1 from pg_proc where proname = 'career_parked_due') and exists (select 1 from pg_trigger where tgname = 'user_oauth_connections_connector_cancel')"
@@ -411,6 +415,7 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'career_apply_prepare_request_claim' and prosrc like '%order by q.turn%')"
   "exists (select 1 from pg_proc where proname = 'career_apply_resume_file_restarts')"
   "exists (select 1 from pg_proc where proname = 'model_budget_total_status') and exists (select 1 from pg_proc where proname = 'model_budget_reserve' and pronargs = 6)"
+  "exists (select 1 from pg_proc where proname = 'career_outbox_claim_lane') and exists (select 1 from pg_proc where proname = 'channel_rate_acquire') and to_regclass('public.channel_rate_buckets') is not null"
   "exists (select 1 from pg_proc where proname = 'google_career_disconnect_erase' and prosrc like '%status:deadline:%')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
@@ -689,6 +694,7 @@ if [[ -n "$VERIFY_MODE" ]]; then
     echo "DRY: psql *** -tA: every migration mark in the manifest, on the live schema"
     echo "DRY: supabase functions list --project-ref ${REF:-<ref>} (the platform's versions; skipped without a ref)"
     echo "DRY: node scripts/launch/deploy-provenance.cjs compare: exit 1 on any mismatch"
+    echo "DRY: psql *** -tA + supabase secrets list (names only): node scripts/launch/hosted-apply-setup.cjs (hosted apply: off by design, or ON and ready, or ON and NOT READY = exit 1)"
     ok; exit 0
   fi
   db_init
@@ -709,12 +715,27 @@ if [[ -n "$VERIFY_MODE" ]]; then
   if [[ -n "$REF" ]] && supabase functions list --project-ref "$REF" 2>/dev/null | node "$PROV" platform-versions >"$WORK/platform.tsv" 2>/dev/null; then
     PLATFORM_ARGS=(--platform "$WORK/platform.tsv")
   fi
+  # Hosted apply setup (names only, reads only): a release can verify green while every hosted-apply claim answers 503 or
+  # cloud_switches_off. Off by design (a switch row not 'on') is reported as such and never fails; switches ON with a missing
+  # prerequisite fails. Unreadable sources are left out (reported UNCHECKED), never guessed.
+  HA_ARGS=(); HA_DIR="$WORK/hosted-apply"; mkdir -p "$HA_DIR"
+  if "${P[@]}" -tAc "select coalesce(string_agg(key || '=' || value, E'\n' order by key), '') from public.career_cloud_settings where key in ('CAREER_AGENT_SUBMIT','CAREER_CLOUD_APPLY','CAREER_CLOUD_TEXT_CARDS')" >"$HA_DIR/settings" 2>/dev/null </dev/null; then HA_ARGS+=(--settings-file "$HA_DIR/settings")
+  elif "${P[@]}" -tAc "select to_regclass('public.career_cloud_settings') is null" 2>/dev/null </dev/null | grep -qx t; then : >"$HA_DIR/settings"; HA_ARGS+=(--settings-file "$HA_DIR/settings"); fi
+  if "${P[@]}" -tAc "select coalesce(string_agg(jobname, E'\n'), '') from cron.job" >"$HA_DIR/cron" 2>/dev/null </dev/null; then HA_ARGS+=(--cron-file "$HA_DIR/cron"); fi
+  if [[ -n "$REF" ]] && supabase secrets list --project-ref "$REF" -o json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);if(!Array.isArray(a))process.exit(3);for(const x of a)if(x&&typeof x.name==="string"&&/^[A-Z][A-Z0-9_]*$/.test(x.name))console.log(x.name)})' >"$HA_DIR/secrets" 2>/dev/null; then HA_ARGS+=(--secrets-file "$HA_DIR/secrets"); fi
+  if [[ ${#PLATFORM_ARGS[@]} -gt 0 && -s "$WORK/platform.tsv" ]]; then cut -f1 "$WORK/platform.tsv" >"$HA_DIR/functions"; HA_ARGS+=(--functions-file "$HA_DIR/functions"); fi
+  echo "hosted apply setup:"
+  set +e
+  node "$REPO/scripts/launch/hosted-apply-setup.cjs" --require-switches ${HA_ARGS[@]+"${HA_ARGS[@]}"} 2>&1 | mask
+  ha_code=${PIPESTATUS[0]}
+  set -e
   set +e
   node "$PROV" compare --manifest "$MANIFEST" --ledger-functions "$WORK/ledger-functions.txt" --ledger-migrations "$WORK/ledger-migrations.txt" \
     --marks "$WORK/marks.txt" ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} 2>&1 | mask
   code=${PIPESTATUS[0]}
   set -e
   (( code == 0 )) || fail "the live project does not match $VERIFY (each mismatch is listed above)"
+  (( ha_code == 0 )) || fail "hosted apply is unknown or switched on but not ready (each missing prerequisite is listed above); switch it off with --real-submit off or finish its setup (docs/launch/CLOUD-RUNNER.md)"
   ok
   exit 0
 fi
@@ -959,10 +980,10 @@ else
   fi
   # D-037: real submission's database switches, after every claim guard is verified in place (each claim still needs the
   # person's approval of the exact payload). --real-submit off writes the kill switch.
-  [[ -z "$REAL_SUBMIT" || "$REAL_SUBMIT" == off ]] || fail "--real-submit on is refused: real employer submission stays disabled this release (owner, 2026-11-02); the default writes 'off' (got: $REAL_SUBMIT)"
-  RS_V=off; RS_OVER=true
+  [[ -z "$REAL_SUBMIT" || "$REAL_SUBMIT" == on || "$REAL_SUBMIT" == off ]] || fail "--real-submit takes on or off (got: $REAL_SUBMIT)"
+  if [[ -z "$REAL_SUBMIT" ]]; then RS_V=on; RS_OVER=false; else RS_V="$REAL_SUBMIT"; RS_OVER=true; fi
   if [[ -n "$DRY" ]]; then
-    echo "DRY: psql *** -X -q -v ON_ERROR_STOP=1 -v v=$RS_V -v overwrite=$RS_OVER -f scripts/launch/release-db-switches.sql (CAREER_AGENT_SUBMIT, CAREER_CLOUD_APPLY, APPLY_VM: set to off)"
+    echo "DRY: psql *** -X -q -v ON_ERROR_STOP=1 -v v=$RS_V -v overwrite=$RS_OVER -f scripts/launch/release-db-switches.sql (CAREER_AGENT_SUBMIT, CAREER_CLOUD_APPLY, CAREER_CLOUD_TEXT_CARDS, APPLY_VM: $([[ $RS_OVER == true ]] && echo "set to $RS_V" || echo "missing rows on; existing rows, the owner's off included, kept"))"
   else
     run "psql *** -X -q -v ON_ERROR_STOP=1 -v v=$RS_V -v overwrite=$RS_OVER -f scripts/launch/release-db-switches.sql" "${P[@]}" -v "v=$RS_V" -v "overwrite=$RS_OVER" -f scripts/launch/release-db-switches.sql
   fi
@@ -1162,6 +1183,15 @@ for v in "${SCHED_VARS[@]}" TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET WHATSAPP_
 done
 SMOKE_ARGS=()
 [[ -n "$ALLOW_SEND" ]] && SMOKE_ARGS+=(--allow-send)
+# --only-smoke skips step 3, which is where a secret not given is found to be kept on the project. Without this the S6 smoke
+# of deploy-production.yml ran with those secrets missing, answered "NOT RUN", and rolled back a deploy that had succeeded
+# (runs 41775410502, 41769271910, 41716253003). Same rule as step 3: given wins; else set on the project = kept (its gate NOT RUN).
+if [[ -n "$ONLY_SMOKE" && -z "$DRY" ]]; then
+  for v in "${SCHED_VARS[@]}"; do
+    [[ -n "${!v:-}" ]] && continue
+    if live_has "$v"; then KEEP_LIVE+=("$v"); echo "  kept: $v (not given; set on the project, so its smoke gate is NOT RUN)"; fi
+  done
+fi
 # A function secret kept on the project is not known here: the smoke reports its gate NOT RUN instead of refusing to run.
 (( ${#KEEP_LIVE[@]} )) && SMOKE_ARGS+=(--kept "$(IFS=,; echo "${KEEP_LIVE[*]}")")
 # Right after scheduling, the jobs have not fired yet: wait for each to fire once (ingest and alerts run every 5 minutes).

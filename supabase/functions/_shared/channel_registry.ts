@@ -10,6 +10,7 @@ import type { Channel, ChannelAdapter } from "./channel_adapters.ts";
 import { loopMessageAdapter } from "./loopmessage_adapter.ts";
 import { telegramAdapter } from "./telegram.ts";
 import { DEFAULT_DAILY_TEMPLATES, whatsappAdapter } from "./whatsapp.ts";
+import type { SharedPace } from "./channel_pacer.ts";
 import { textingNativeOn } from "./channel_voice.ts"; // V1 TEXTING VOICE: CAREER_TEXTING_NATIVE=on splits and formats per channel
 
 export const DEFAULT_DAILY_CONTACTS = 300; // LoopMessage's smaller plan
@@ -30,7 +31,7 @@ export function wiredChannels(env: Env): Channel[] {
 }
 
 // Every wired channel's adapter. A bad number setting throws (the function answers 503 with it, sending nothing).
-export function adaptersFromEnv(env: Env, o: { fetch?: typeof fetch; clock?: () => number; sleep?: (ms: number) => Promise<void> } = {}): Partial<Record<Channel, ChannelAdapter>> {
+export function adaptersFromEnv(env: Env, o: { fetch?: typeof fetch; clock?: () => number; sleep?: (ms: number) => Promise<void>; sharedPace?: SharedPace } = {}): Partial<Record<Channel, ChannelAdapter>> {
   const out: Partial<Record<Channel, ChannelAdapter>> = {};
   const wired = wiredChannels(env);
   if (wired.includes("imessage")) {
@@ -39,7 +40,7 @@ export function adaptersFromEnv(env: Env, o: { fetch?: typeof fetch; clock?: () 
     out.imessage = loopMessageAdapter({ apiKey: env.get("LOOPMESSAGE_API_KEY")!, inboundSecret: env.get("TRAINEE_INBOUND_SECRET"), dailyContacts: cap, fetch: o.fetch, sleep: o.sleep, native: textingNativeOn(env) });
   }
   if (wired.includes("telegram")) {
-    out.telegram = telegramAdapter({ token: env.get("TELEGRAM_BOT_TOKEN")!, webhookSecret: env.get("TELEGRAM_WEBHOOK_SECRET"), fetch: o.fetch, clock: o.clock, sleep: o.sleep, native: textingNativeOn(env) });
+    out.telegram = telegramAdapter({ token: env.get("TELEGRAM_BOT_TOKEN")!, webhookSecret: env.get("TELEGRAM_WEBHOOK_SECRET"), fetch: o.fetch, clock: o.clock, sleep: o.sleep, native: textingNativeOn(env), sharedPace: o.sharedPace });
   }
   if (wired.includes("whatsapp")) {
     const cap = whole(env.get("WHATSAPP_DAILY_TEMPLATES"), DEFAULT_DAILY_TEMPLATES);

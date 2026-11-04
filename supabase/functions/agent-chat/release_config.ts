@@ -129,6 +129,7 @@ export const applyAllYesOn: (env: Env) => boolean = applyAllYesEnabled;
 export const RELEASE_DB_SWITCHES: Readonly<Record<string, "on">> = Object.freeze({
   CAREER_AGENT_SUBMIT: "on",
   CAREER_CLOUD_APPLY: "on",
+  CAREER_CLOUD_TEXT_CARDS: "on", // the text-card route's own switch; without its row every claim is cloud_switches_off
   APPLY_VM: "on",
 });
 

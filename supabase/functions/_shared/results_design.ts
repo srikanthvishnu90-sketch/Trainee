@@ -124,6 +124,11 @@ dl.facts dd.key{font-size:16px;color:var(--ink)}dl.facts dd.paid{font-weight:600
 .things .opt{font-size:16px}.things .opt input{accent-color:var(--plum-700)}.things .err{color:var(--st-risk)}
 .things .top-note,.results .top-note{border-radius:11px;background:var(--plum-50);border-left:4px solid var(--plum-600)}
 .back{font-size:16px}
+/* Phone fixes: the Dismiss form takes the whole row (it was squeezed to ~32px beside the view link at 360px); the fixed bottom bar never hides a focused control; a skip link past the long header */
+.more form.mark{flex:1 1 100%}
+html{scroll-padding-bottom:104px}
+.skip{position:absolute;left:-9999px;top:0;z-index:10;padding:12px 16px;background:#000;color:#fff!important;border-radius:0 0 11px 0;font-weight:600}.skip:focus{left:0}
+.fstate{padding:16px;border-radius:14px;background:var(--card);border:1px solid var(--hair)}
 @media (prefers-reduced-motion:no-preference){.card,.chip,.ghost,.apply{transition:background-color .15s ease,border-color .15s ease,opacity .15s ease}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 @media (max-width:480px){.card .acts{flex-direction:column;align-items:stretch}.card .state{flex-wrap:wrap}}

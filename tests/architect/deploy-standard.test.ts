@@ -7,7 +7,7 @@ import assertNode from "node:assert/strict";
 import { parse as parseYaml } from "npm:yaml@2.9.1";
 import {
   ACCEPTANCE_CHECK, ACCEPTANCE_FILE, type CheckId, type CheckRun, evaluate, jobCheckNames, knownGaps, LEDGER, parseLedger, parseScoreLog, prOf, type PullFile, report, type Review,
-  ledgerApproves, ledgerOnly, type Sources, stepIds,
+  ledgerApproves, ledgerOnly, S3_WAIVER, type Sources, stepIds,
 } from "../../scripts/launch/deploy-standard.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -269,6 +269,45 @@ Deno.test("S3 mutation: a stopped run or a NOT A SCORE row is not a measurement"
 Deno.test("S3 mutation: four qualifying passes (one crashed, one stopped) are not a measurement", async () => {
   const w = base(); w.log = LOG_HEAD + run5(D, "router", [22, 22, 22, 22, 22], "100") + run5(C, "router", [30, 30, 30, 30], "200") + row(C, "router", 30, "200", { stopped: "yes" });
   await onlyFails(w, "S3", /candidate: .*has 4 qualifying passes, not 5/);
+});
+// ---- the one-time S3 waiver (owner, 2026-11-04): the OpenAI-era deployed SHA cannot be measured by the Claude-only harness.
+// It applies to THAT SHA only, and then every one of the candidate's five passes must be at least 90%.
+function deployedIsTheWaivedSha(w: World): string {
+  const W = S3_WAIVER.deployed;
+  for (const [k, v] of [...w.files]) if (k.startsWith(`${D}:`)) w.files.set(`${W}:${k.slice(D.length + 1)}`, v);
+  w.parents[B] = W; w.parents[W] = A; w.trees[W] = w.trees[D];
+  for (const k of Object.keys(w.ancestors)) w.ancestors[k] = w.ancestors[k].map((x) => (x === D ? W : x));
+  w.ancestors[W] = [A]; w.deployed = W;
+  return W;
+}
+Deno.test("S3 waiver: the waived deployed SHA with no baseline passes when every candidate pass is >= 90%", async () => {
+  const w = base(); deployedIsTheWaivedSha(w);
+  w.log = LOG_HEAD + run5(C, "router", [35, 36, 36, 37, 38], "200"); // 35/38 = 92.1% is the worst pass
+  const { v, text } = await verdicts(w);
+  eq(v.S3, true, text); ok(/S3 PASS: WAIVED ONCE for .*worst pass 35\/38 >= 90%/.test(text), text);
+});
+Deno.test("S3 waiver mutation: one pass under 90% fails (34/38 = 89.5%), whatever the mean", async () => {
+  const w = base(); deployedIsTheWaivedSha(w);
+  w.log = LOG_HEAD + run5(C, "router", [34, 38, 38, 38, 38], "200");
+  await onlyFails(w, "S3", /WAIVED ONCE .*worst pass 34\/38 < 90%/);
+});
+Deno.test("S3 waiver mutation: it does not apply to any other deployed SHA", async () => {
+  const w = base(); // deployed D, not the waived SHA
+  w.log = LOG_HEAD + run5(C, "router", [38, 38, 38, 38, 38], "200");
+  await onlyFails(w, "S3", /deployed: no router measurement/);
+});
+Deno.test("S3 waiver mutation: a row claiming more passed than the set holds is no score; a tiny set does not qualify", async () => {
+  const w = base(); deployedIsTheWaivedSha(w);
+  w.log = LOG_HEAD + run5(C, "router", [99, 38, 38, 38, 38], "200"); // 99/38 is not a score: the run has four qualifying passes
+  await onlyFails(w, "S3", /candidate: .*qualifying passes/);
+  w.log = LOG_HEAD + run5(C, "router", [10, 10, 10, 10, 10], "200", { size: 10 }); // 100% of ten cases is not the dev set
+  await onlyFails(w, "S3", /WAIVED ONCE .*<|WAIVED ONCE/);
+  const { v } = await verdicts(w); eq(v.S3, false);
+});
+Deno.test("S3 waiver mutation: an unmeasured candidate is still a failure", async () => {
+  const w = base(); deployedIsTheWaivedSha(w);
+  w.log = LOG_HEAD;
+  await onlyFails(w, "S3", /candidate: no router measurement/);
 });
 Deno.test("S3 mutation: the deployed SHA measured only on another set", async () => {
   const w = base(); w.log = LOG_HEAD + run5(D, "router", [22, 22, 22, 22, 22], "100", { set: "heldout" }) + run5(C, "router", [23, 23, 23, 23, 23], "200");

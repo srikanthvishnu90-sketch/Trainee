@@ -7,6 +7,7 @@
 //
 //   v1.<base64url claims JSON>.<base64url HMAC-SHA-256("v1." + claims, TRAINEE_FILE_LINK_SECRET)>
 export const FILE_TTL_MS = 24 * 3600_000;
+export const MAX_LINK_SPAN_MS = 72 * 3600_000; // the longest a minted link ever lives (issue to expiry)
 // k "l": the link the bot sends (opens a phone sign-in; used up by it, once). k "s": kept for the token format only; sessions are
 // server side now (file_session.ts) and the page never accepts a signed "s" token. j: a random id, the link's sign-in row.
 export type TokenKind = "l" | "s";
@@ -35,7 +36,7 @@ const LIST = /^[0-9a-f]{10}$/;
 export async function mintFileToken(o: { secret: string | undefined; userId: string; list: string; now: number; ttlMs?: number; kind?: TokenKind }): Promise<string | null> {
   if (!o.secret || o.secret.length < SECRET_MIN || !o.userId || !LIST.test(o.list)) return null;
   const j = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
-  const claims: FileClaims = { u: o.userId, r: o.list, k: o.kind ?? "s", j, i: o.now, e: o.now + Math.min(o.ttlMs ?? FILE_TTL_MS, 72 * 3600_000) };
+  const claims: FileClaims = { u: o.userId, r: o.list, k: o.kind ?? "s", j, i: o.now, e: o.now + Math.min(o.ttlMs ?? FILE_TTL_MS, MAX_LINK_SPAN_MS) };
   const body = b64(enc.encode(JSON.stringify(claims)));
   return `v1.${body}.${await sign(o.secret, `v1.${body}`)}`;
 }
@@ -48,6 +49,10 @@ export async function verifyFileToken(token: unknown, secret: string | undefined
   let c: Partial<FileClaims>;
   try { c = JSON.parse(unb64(m[1])); } catch { return { ok: false, why: "malformed" }; }
   if (typeof c.u !== "string" || !c.u || !LIST.test(String(c.r)) || (c.k !== "l" && c.k !== "s") || !/^[0-9a-f]{16}$/.test(String(c.j)) || !Number.isFinite(c.i) || !Number.isFinite(c.e)) return { ok: false, why: "malformed" };
+  // The bot never mints a link that lives longer than MAX_LINK_SPAN_MS (mintFileToken caps it): a span longer than that, or an
+  // expiry before the issue time, was not made here and opens nothing (file page web-security round: a link valid for ten years
+  // was accepted as long as its signature checked).
+  if ((c.e as number) - (c.i as number) > MAX_LINK_SPAN_MS || (c.e as number) <= (c.i as number)) return { ok: false, why: "malformed" };
   if (now >= (c.e as number) || (c.i as number) > now + 60_000) return { ok: false, why: "expired" };
   return { ok: true, claims: c as FileClaims };
 }

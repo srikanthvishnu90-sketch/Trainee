@@ -1,7 +1,7 @@
 // FEATURE 4 (DIAGNOSIS 2.2): a truthful rewrite of the tailored resume's bullets toward one posting.
 //
-// 123's tailorResume selects, orders and hides confirmed facts; it never rewords a bullet. Here the model (OpenAI through
-// the gateway, CAREER_MODEL) is asked once per tailoring to reword each selected bullet toward the posting's language and
+// 123's tailorResume selects, orders and hides confirmed facts; it never rewords a bullet. Here the model (the career model, Claude through
+// the gateway) is asked once per tailoring to reword each selected bullet toward the posting's language and
 // priorities, and code decides what may print. Every rewritten bullet is audited against the ONE confirmed fact it cites:
 //   - every word that carries content (nouns, tools, employers, adjectives, numbers spelled out) must be in that fact
 //     (title, text, bullets, org, skills, dates) or the original bullet; only plain connectives and a short list of
@@ -16,6 +16,7 @@
 //
 // Behind CAREER_TAILOR_REWRITE=on (default off). One model call per tailoring, metered by the caller's meter.
 import { CareerProfile, CareerRouter, CareerTailor, CareerWriting } from "./router_core.career.js";
+import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 release flags
 import { baseResume, changelog, confirmedOnly, submissionResume } from "./career_tailor.ts";
 import { claimProblems } from "./person_claims.ts";
 import { redactIdentity } from "./identity_redact.ts";
@@ -23,7 +24,8 @@ import { redactIdentity } from "./identity_redact.ts";
 export const REWRITE_FLAG = "CAREER_TAILOR_REWRITE";
 export const MAX_BULLETS = 14;
 export const MAX_TOKENS = 1600;
-export const rewriteOn = (env: { get(k: string): string | undefined }) => (env.get(REWRITE_FLAG) || "").trim().toLowerCase() === "on";
+// D-036: a release flag (agent-chat/release_config.ts RELEASE_FLAGS): on unless the environment rolls it back.
+export const rewriteOn = (env: { get(k: string): string | undefined }) => releaseFlagOn(env, REWRITE_FLAG);
 
 export type ModelFn = (payload: any) => Promise<any>;
 export interface Target { id: string; index: number; text: string; factId: string; section: string | null }

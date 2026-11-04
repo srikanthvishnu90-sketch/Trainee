@@ -514,7 +514,7 @@ async function briefRun(s: BriefBudgetScenario, gate: BudgetGate | null, request
   let faulted = 0;
   const outbox = { enqueue: async (u: string, m: any) => { if (s.faultPart2 && faulted < 1 && /^brief:.*:2$/.test(m.key)) { faulted++; throw new Error("insert timed out"); } return box.enqueue(u, m); } };
   const mails = (u: string) => UNSURE.slice(0, s.perPerson).map(([subject, snippet], i) => ({ hash: `${u}-${i}`.padEnd(64, "e").replace(/[^0-9a-f]/g, "f"), from: "Asana Recruiting <recruiting@asana.com>", subject, snippet, date: iso(s.now - (10 - i) * MIN), auth: AUTH("asana.com") }));
-  const model = gate ? mailModelWiring({ get: (k: string) => (k === "OPENAI_API_KEY" ? "sk-test-not-a-real-key" : undefined) }, { from: () => ({ insert: async () => ({ error: null }) }) }, request) : null;
+  const model = gate ? mailModelWiring({ get: (k: string) => (k === "ANTHROPIC_API_KEY" ? "sk-test-not-a-real-key" : undefined) }, { from: () => ({ insert: async () => ({ error: null }) }) }, request) : null;
   resetLocalBudgetGate(gate);
   try {
     for (const now of [s.now, s.now + 5 * MIN]) {

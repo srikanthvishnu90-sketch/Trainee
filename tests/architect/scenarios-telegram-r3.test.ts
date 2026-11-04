@@ -385,7 +385,7 @@ async function forwardScenario(id: number, r: ReturnType<typeof rng>): Promise<s
   const other = A + 3;
   res.push((await w.post(text(w, other, `/start ${code}`))).text);
   if (w.userOf(other) === own.u) whys.push(`${variant}: the new chat was linked before the owner's YES`);
-  res.push((await w.post(text(w, A, "yes"))).text);
+  res.push((await w.post(text(w, A, `LINK ${/reply LINK ([0-9]{4}) /.exec(w.B.to(A).map(plainOf).filter((t) => /^Someone wants to link Telegram /.test(t)).at(-1) ?? "")?.[1] ?? "none"}`))).text);
   if (w.userOf(other) !== own.u) whys.push(`${variant}: the owner's link code was used up by a forwarded message`);
   common(w, whys, res);
   return whys;
@@ -518,7 +518,7 @@ async function deeplinkScenario(id: number, r: ReturnType<typeof rng>): Promise<
   // is opened, and its YES links the new chat.
   const C = 910000000 + id * 4, other = C + 1, own = C + 2, home = C + 3;
   w.W.link(`tg:${home}`, owner, w.clock.t - 3600000, { home: true, lastInboundAt: w.clock.t - 3600000 });
-  const yesAtHome = async () => { res.push((await w.post(text(w, home, "yes"))).text); };
+  const yesAtHome = async () => { res.push((await w.post(text(w, home, `LINK ${/reply LINK ([0-9]{4}) /.exec(w.B.to(home).map(plainOf).filter((t) => /^Someone wants to link Telegram /.test(t)).at(-1) ?? "")?.[1] ?? "none"}`))).text); };
   const variant = r.pick(["forged", "malformed", "expired", "used", "elsewhere-then-owner", "already-mine", "group"] as const);
   const code = await w.W.inbound.issueLinkNonce!(owner, w.clock.t);
   const said = (c: number, from: number) => w.B.to(c).slice(from).map(plainOf);

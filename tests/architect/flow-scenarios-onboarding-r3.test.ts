@@ -3,7 +3,7 @@
 // scenarios-onboarding-r3.test.ts) sent through the REAL trainee-telegram webhook as its index.ts composes it, into the
 // real agent-chat handler (handler-career.ts handleChat) on a real Postgres 16 with every migration (tests/flow/pg.ts)
 // behind the PostgREST double. Telegram is a fake Bot API that also serves the files (real PDF and Word bytes, read by the
-// product's own reader). No model (CAREER_BRAIN and OPENAI_API_KEY unset); every other host is refused.
+// product's own reader). No model (CAREER_BRAIN and ANTHROPIC_API_KEY unset); every other host is refused.
 //   pair      the same resume as a PDF and as the .docx it came from, seconds apart, then the PDF again, then the yes: the
 //             record names the PDF (the file whose message showed the entries last), not the .docx
 //   fix       after the yes, "actually I graduated 2023" / "my GPA is 3.8": exactly that value changes in the profile and
@@ -55,7 +55,7 @@ Deno.test({
     const started = Date.now();
     const pg: Pg = await startPg();
     const keys = ["CAREER_BRAIN", "CAREER_KNOWLEDGE", "CAREER_BRAIN_ROUTER_INTENTS", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING",
-      "CAREER_ACCOUNT_MEMORY", "OPENAI_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "TRAINEE_FILE_BASE_URL", "TRAINEE_FILE_LINK_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET",
+      "CAREER_ACCOUNT_MEMORY", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "TRAINEE_FILE_BASE_URL", "TRAINEE_FILE_LINK_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET",
       "TELEGRAM_BOT_USERNAME", "TELEGRAM_LOGIN_URL", "TRAINEE_SIGNUP", "TRAINEE_ALLOWED_CONTACTS", "CAREER_REPLY_WRITER", "CAREER_TEXTING_NATIVE", "TRAINEE_DELIVER_SECRET", "LOOPMESSAGE_API_KEY",
       "WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "TRAINEE_LOGO_URL", "TRAINEE_LOGO_GUESS"];
     const saved = Object.fromEntries(keys.map((k) => [k, Deno.env.get(k)]));

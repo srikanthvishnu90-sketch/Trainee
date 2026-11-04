@@ -34,10 +34,13 @@ export const PAYLOAD_INTENTS: ReadonlySet<string> = new Set([
   "career_apply_card", "career_apply_email", "career_outreach_batch", "career_apply_questions", "career_message_approval",
   "career_followup_card", "career_networking_draft", "career_mock", "career_apply_confirm_which", "career_apply_employer_ask",
   "career_offer_counter", "career_cloud_optin", "career_outreach_signature",
+  // what a batch yes approved (apply_all_yes.ts): the counts and names are code's, from the taps' own results
+  "career_apply_all_yes",
   // router intents that show a draft or a mock question verbatim
   "outreach_draft", "negotiation_draft", "career_tailor", "prep_mock_start", "prep_mock_next", "prep_mock_followup",
 ]);
-const PAYLOAD_META = ["card_id", "email_card", "offer_card", "open_card", "career_approval_card_id", "employer_question", "screen_ask"];
+// results_file: the reply carries the results page's link, minted by code (role_results.ts); its words and link stay as they are.
+const PAYLOAD_META = ["card_id", "email_card", "offer_card", "open_card", "career_approval_card_id", "employer_question", "screen_ask", "results_file", "apply_all_offer", "apply_all_done"];
 
 export function writable(out: { intent?: string | null; reply?: string; parts?: unknown }, meta: Record<string, unknown> | null, o: { structured: boolean }): boolean {
   if (o.structured) return false;
@@ -46,12 +49,12 @@ export function writable(out: { intent?: string | null; reply?: string; parts?: 
   if (meta && PAYLOAD_META.some((k) => meta[k] !== undefined && meta[k] !== null)) return false;
   const text = String(out.reply ?? "");
   if (!text.trim()) return false;
-  // #354 review item 10: the crisis check-in is code's, word for word (988, 741741, 911): never rewritten.
-  if (out.intent === "safety_support" || meta?.safety === true || (/\b988\b/.test(text) && /\b741741\b/.test(text))) return false;
   // A draft shown in any turn (its subject line) is its exact words.
   if (/^\s*Subject:/im.test(text)) return false;
   return true;
 }
+
+import { type ApplySummary, overclaims } from "./apply_status_summary.ts";
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The verified facts of one turn.
@@ -65,9 +68,14 @@ export interface TurnFacts {
   // From the situation read at the top of the turn (career_situation.ts), bounded.
   tasks: { company: string | null; title: string | null; state: string }[];
   next: { who: string; what: string; say?: string }[];
+  // Structured data the reply is written from (spec 2.2, 6.5): what an application still needs (apply_readiness.ts) and the status
+  // counts from row states (apply_status_summary.ts), as fact text; and how many rows may be called applied (evidenced only).
+  needs?: string;
+  counts?: string;
+  applied_ok?: number;
 }
 // deno-lint-ignore no-explicit-any
-export function factsForTurn(o: { reply: string; intent?: string | null; resultStatus?: string | null; effects?: { sent?: number; queued?: number; sendUnknown?: number; writes?: { size: number } } | null; situation?: any }): TurnFacts {
+export function factsForTurn(o: { needs?: string | null; counts?: string | null; appliedOk?: number | null; reply: string; intent?: string | null; resultStatus?: string | null; effects?: { sent?: number; queued?: number; sendUnknown?: number; writes?: { size: number } } | null; situation?: any }): TurnFacts {
   const s = o.situation && typeof o.situation === "object" ? o.situation : null;
   const tasks = Array.isArray(s?.tasks) ? s.tasks.filter((t: any) => t && t.kind !== "question").slice(0, 20)
     .map((t: any) => ({ company: t.company ? String(t.company) : null, title: t.title ? String(t.title) : null, state: String(t.state ?? "") })) : [];
@@ -77,13 +85,14 @@ export function factsForTurn(o: { reply: string; intent?: string | null; resultS
     said: String(o.reply ?? ""), intent: o.intent ?? null, status: o.resultStatus ?? null,
     effects: { sent: Number(e.sent) || 0, queued: Number(e.queued) || 0, sendUnknown: Number(e.sendUnknown) || 0, wrote: (e.writes?.size ?? 0) > 0 },
     tasks, next,
+    ...(o.needs ? { needs: o.needs } : {}), ...(o.counts ? { counts: o.counts } : {}), ...(typeof o.appliedOk === "number" ? { applied_ok: o.appliedOk } : {}),
   };
 }
 
 // Everything the facts establish, as sets the check compares against.
 interface Ledger { text: string; numbers: Set<string>; links: Set<string>; emails: Set<string>; claims: Set<string>; verbs: string }
 function factsText(f: TurnFacts): string {
-  return [f.said, ...f.tasks.map((t) => [t.company, t.title, t.state].filter(Boolean).join(" ")), ...f.next.map((n) => `${n.what} ${n.say ?? ""}`)].join("\n");
+  return [f.said, f.needs ?? "", f.counts ?? "", ...f.tasks.map((t) => [t.company, t.title, t.state].filter(Boolean).join(" ")), ...f.next.map((n) => `${n.what} ${n.say ?? ""}`)].join("\n");
 }
 function ledgerOf(f: TurnFacts): Ledger {
   const text = factsText(f);
@@ -199,6 +208,8 @@ export function factCheck(text: string, f: TurnFacts): string[] {
     out.push(`"${w}" after "${m[0].split(/\s+/)[0]}" reads as a name that is not in the facts`);
   }
   for (const c of positiveClaims(text)) if (!L.claims.has(c)) out.push(`says "${c}" but the facts do not`);
+  // Spec 6.5: "applied" (or a confirmed count) only for an evidenced submission, whatever else the facts say.
+  if (typeof f.applied_ok === "number") for (const o of overclaims(text, { applied_ok: f.applied_ok } as ApplySummary)) out.push(o);
   const factStems = new Set((L.verbs.match(/[a-z]+/g) ?? []).map(stem));
   for (const v of promisesIn(text)) if (!factStems.has(stem(v))) out.push(`promises "${v}" but the facts do not`);
   return [...new Set(out)];
@@ -306,7 +317,7 @@ export function writerPayload(f: TurnFacts, message: string, channel: WriterChan
   const did = [f.effects.sent ? `${f.effects.sent} email(s) sent this turn` : "", f.effects.queued ? `${f.effects.queued} application(s) queued this turn` : ""].filter(Boolean).join("; ");
   return {
     system: `${VOICE_RULES}\n${FORMAT[channel] ?? FORMAT.web}`,
-    messages: [{ role: "user", content: `THEY SAID:\n${String(message ?? "").slice(0, 1500)}\n\nREPLY (what Trainee's code wrote from their account this turn):\n${f.said.slice(0, 6000)}\n\nSITUATION:\n${situation || "- nothing else in flight"}${did ? `\n\nTHIS TURN DID: ${did}` : ""}` }],
+    messages: [{ role: "user", content: `THEY SAID:\n${String(message ?? "").slice(0, 1500)}\n\nREPLY (what Trainee's code wrote from their account this turn):\n${f.said.slice(0, 6000)}\n\nSITUATION:\n${situation || "- nothing else in flight"}${did ? `\n\nTHIS TURN DID: ${did}` : ""}${f.needs ? `\n\nWHAT AN APPLICATION STILL NEEDS (data; ask at most the first, one question, never a password, code or ID number): ${f.needs}` : ""}${f.counts ? `\n\nCOUNTS (from row states; say no other number; "applied" only for submitted and confirmed): ${f.counts}` : ""}` }],
     max_tokens: 400, temperature: 0.4,
   };
 }

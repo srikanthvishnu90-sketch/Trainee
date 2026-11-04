@@ -5,7 +5,7 @@
 //   external   touches the world (send, submit, message); NEVER runs here. It becomes a pending approval the
 //              person approves on its exact payload (WO-005), and the model is told it is waiting.
 // Messages use the Anthropic block shape (text / tool_use / tool_result); _shared/model_gateway.ts converts to OpenAI.
-import { bracketUntraced, factSources, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, unsourcedMoney, untracedFacts, waiverSolicits } from "./reply_guards.ts";
+import { bracketUntraced, factSources, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, closedNotes, unsourcedFigures, untracedFacts, waiverSolicits } from "./reply_guards.ts";
 import { urlsIn } from "../channel_shape.ts";
 import { STANDING_REFUSED, standingRefusal } from "./memory.ts";
 export type Effect = "read" | "write_own" | "external";
@@ -268,7 +268,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
   o.ctx.turn.guard = (t: string) => {
     const known = new Set(urlsIn(`${typed}\n${seen.join("\n")}`));
     const sources = factSources({ state: o.ctx.state, message: o.message, history: o.history, results: seen });
-    return [...untracedFacts(t, sources).map((f) => f.word), ...unsourcedMoney(t, [typed, ...seen, ...sources]).map((m) => m.figure), ...urlsIn(t).filter((l) => !known.has(l))];
+    return [...untracedFacts(t, sources).map((f) => f.word), ...unsourcedFigures(t, [typed, ...seen, ...sources]).map((m) => m.figure), ...urlsIn(t).filter((l) => !known.has(l))];
   };
   let steps = 0, checked = false, ask = false, repairing = false;
   let repairNote = COMPLETENESS_REPAIR;
@@ -326,14 +326,14 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       // ADVERSARIAL ROUND 2: a GPA traces only to the person's own words and facts, never to what a tool read this turn.
       const personal = factSources({ state: o.ctx.state, message: said, history: o.history, results: [] });
       const claims = unbackedClaims(reply, tool_calls), leaks = leakedWords(reply, leak), facts = untracedFacts(reply, sources, personal);
-      const money = unsourcedMoney(reply, [typed, ...seen, ...sources]);
+      const money = unsourcedFigures(reply, [typed, ...seen, ...sources]);
       const waiver = waiverSolicits(reply, standingRefusal, o.message);
       if ((claims.length || leaks.length || facts.length || money.length || waiver.length) && !checked && !repairing && steps < max) {
         checked = true;
         const told = [
           claims.length ? `Your reply says ${[...new Set(claims.map((c) => c.kind))].join(" and ")}, but no tool that does that succeeded this turn. Either call the tool now, or rewrite the reply without saying it happened.` : "",
           leaks.length ? `Your reply shows internal words the person must never see: ${leaks.join(", ")}. Say it in plain words; name a posting by its title and company.` : "",
-          money.length ? `Your reply states pay or money figures that no tool returned this turn and they did not say: ${[...new Set(money.map((m) => m.figure))].join(", ")}. Remove them, and say you don't have verified pay for that unless a posting a tool returned states it.` : "",
+          money.length ? `Your reply states pay, money or count figures that no tool returned this turn and they did not say: ${[...new Set(money.map((m) => m.figure))].join(", ")}. Remove them, and say you don't have a verified figure for that unless a tool returned it.` : "",
           waiver.length ? "Your reply offers them wording to send, offers to save something, or asks them to confirm something, after they asked to waive their yes or grant a standing permission. Never propose that wording, offer to save it or ask them to confirm it: say plainly it can't be kept, because every application and message still needs their yes on its card." : "",
           facts.length ? `Your reply states things about the person that are not in their confirmed facts, their own messages or this turn's tool results: ${facts.map((f) => f.word).join(", ")}. Answer from supported facts, or ask a concrete question for what is missing. Only if they requested a draft or template, mark missing facts with fill-in brackets; a placeholder is not an answer to an informational question.` : "",
         ].filter(Boolean).join(" ");
@@ -346,7 +346,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         continue;
       }
       let out = reply;
-      const stillMoney = unsourcedMoney(reply, [typed, ...seen, ...sources]);
+      const stillMoney = unsourcedFigures(reply, [typed, ...seen, ...sources]);
       // WO-061 (H018): proposed waiver wording that stands after the check is removed by code, with its save offer.
       const stillWaiver = waiverSolicits(reply, standingRefusal, o.message);
       if (claims.length || stillMoney.length || stillWaiver.length) {
@@ -357,6 +357,9 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         if (stillWaiver.length && standingRefusal(o.message) && !/\b(your yes|your approval|without (asking|approval|your)|needs? (your|their) (yes|ok|okay|approval)|not kept|can'?t keep|won'?t (share|send|apply|skip))\b/i.test(out)) out = `${STANDING_REFUSED}\n\n${out}`;
       }
       if (leakedWords(out, leak).length) out = stripLeaks(out, leak);
+      // RESEARCH ROUND 3: a posting read as closed this turn is never left sounding open.
+      const closed = closedNotes(out, seen);
+      if (closed.length) out = `${closed.join(" ")}\n\n${out}`;
       if (untracedFacts(out, sources, personal).length) out = bracketUntraced(out, sources, personal);
       // ADVERSARIAL ROUND 2: a key-shaped string never reaches the person (reply_guards.ts stripSecrets).
       if (secretIn(out)) { out = stripSecrets(out); if (!/[A-Za-z0-9]/.test(out)) out = SECRET_DROPPED_REPLY; }
@@ -396,7 +399,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         if (att) {
           const knownLinks = new Set(urlsIn(`${typed}\n${seen.join("\n")}`));
           const sources = factSources({ state: o.ctx.state, message: o.message, history: o.history, results: seen });
-          const bad = [...untracedFacts(att.content, sources).map((f) => f.word), ...unsourcedMoney(att.content, [typed, ...seen, ...sources]).map((m) => m.figure),
+          const bad = [...untracedFacts(att.content, sources).map((f) => f.word), ...unsourcedFigures(att.content, [typed, ...seen, ...sources]).map((m) => m.figure),
             ...urlsIn(att.content).filter((l) => !knownLinks.has(l))]; // exact match against links the person typed or a tool returned, never a substring (a cut-off or prefix URL is a different link)
           if (bad.length) { throw new Error(`not attached: the file states things no tool returned this turn and the person did not say: ${[...new Set(bad)].slice(0, 8).join(", ")}. Remove them or mark them "not verified", then attach again.`); }
           o.ctx.turn!.attachments!.push({ filename: att.filename, content: att.content });

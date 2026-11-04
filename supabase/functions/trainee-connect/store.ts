@@ -3,9 +3,10 @@
 // chat's own link does), and the single-use take of a link token id.
 // deno-lint-ignore-file no-explicit-any
 import { CONNECTORS, disconnectConnector, statuses, type ConnectorId, type Deps } from "../_shared/connectors.ts";
+import { SEND_CONSENT_SCOPES } from "../_shared/google_scopes.ts"; // D-037: gmail.send only by the send consent
 import { outlookConsentFor } from "../_shared/outlook_connector.ts";
 import { SCOPES as MS_SCOPES } from "../_shared/outlook_graph.ts";
-import { googleConsentUrl, issueState, redirectUriFrom, requestScopesFor } from "../gmail-oauth/career.ts";
+import { emailBind, googleConsentUrl, issueState, redirectUriFrom, requestScopesFor } from "../gmail-oauth/career.ts";
 import type { ConnectDeps, ProviderId, ProviderInfo, ProviderState } from "./handler.ts";
 
 const CONNECTOR: Record<ProviderId, ConnectorId> = { google: "gmail", microsoft: "outlook" };
@@ -37,14 +38,24 @@ export function supabaseConnectDeps(admin: any, env: { get(k: string): string | 
       }
       return out;
     },
-    async start(provider, userId, channel) {
+    async start(provider, userId, channel, reason) {
       if (provider === "microsoft") return await outlookConsentFor(admin, env, now(), { userId, channel });
       const clientId = env.get("GOOGLE_OAUTH_CLIENT_ID") || "", stateSecret = env.get("OAUTH_STATE_SECRET") || "";
       if (!clientId || !stateSecret) return null;
       const nonce = must(await admin.rpc("career_connector_link_issue", { p_user: userId, p_connector: "gmail", p_channel: channel, p_thread: null, p_now: at(now()) }), "make the Gmail link");
       const opened = must(await admin.rpc("career_connector_link_open", { p_nonce: String(nonce), p_now: at(now()) }), "open the Gmail link");
       if (!opened || opened.error) return null;
-      return googleConsentUrl({ clientId, redirectUri: redirectUriFrom(env), state: await issueState(userId, "career", stateSecret), scopes: googleScopes() });
+      // D-037: a link made for a send ("allow sending") asks for gmail.send on top of the existing grant, bound to the Google
+      // account already connected (its address signed into the state, and named to Google as login_hint); the callback
+      // refuses any other account. With no Gmail connected there is nothing to add to: the plain connect. Every other link
+      // asks only for the submitted (verified) scopes and any the owner lists as approved.
+      const held = reason === "send"
+        ? must(await admin.from("user_oauth_connections").select("email").eq("user_id", userId).eq("provider", "google_career").maybeSingle(), "read the Gmail connection")
+        : null;
+      const bound = typeof held?.email === "string" && held.email.trim() ? held.email.trim() : null;
+      const state = await issueState(userId, "career", stateSecret, now(), bound ? await emailBind(bound) : undefined);
+      return googleConsentUrl({ clientId, redirectUri: redirectUriFrom(env), state,
+        scopes: bound ? [...SEND_CONSENT_SCOPES] : googleScopes(), incremental: !!bound, ...(bound ? { loginHint: bound } : {}) });
     },
     async disconnect(provider, userId) {
       const r = await disconnectConnector(base, CONNECTORS[CONNECTOR[provider]], userId);

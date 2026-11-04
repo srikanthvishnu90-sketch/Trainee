@@ -6,6 +6,8 @@ import {
   answerKeys, bankItems, checkVerdict, covers, debriefTail, fitOf, isDrillAsk, isWeakListAsk, matchPosting, type MockPrep, modelJudge,
   pastedJd, postingPlan, requirementsOf, supabaseMockPrep, technicalShare, weakSpots,
 } from "../../supabase/functions/_shared/career_mock_prep.ts";
+import { callModel } from "../../supabase/functions/_shared/model_gateway.ts";
+import { fakeAnthropic } from "./helpers/fake_anthropic.ts";
 import { MOCK_INTENT, mockTurn, type MockState, type MockStore, parseMockCommand } from "../../supabase/functions/_shared/career_mock.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -52,7 +54,7 @@ Deno.test("F11/4 grading: a technical answer that never touches the requirement 
   assert(story.weak && /structure/.test(story.why));
 });
 
-Deno.test("F11/5 the judge: rubric-anchored prompt, OpenAI only, metered with one cost row, held to the key, never inventing facts", async () => {
+Deno.test("F11/5 the judge: rubric-anchored prompt, Claude only, metered with one cost row, held to the key, never inventing facts", async () => {
   eq(checkVerdict({ covered: ["dense rank", "made up"], verdict: "ok", fix: "Explain the partition step." }, ["dense rank", "partitioned by department"], "q a"), { covered: ["dense rank"], verdict: "ok", fix: "Explain the partition step." });
   eq(checkVerdict({ covered: [], verdict: "weak", fix: "Mention your 3 years at Google." }, ["k"], "question answer")?.fix, null, "a number or a name not in the context is dropped");
   eq(checkVerdict({ covered: [], verdict: "weak", fix: "Say what you would decide and why." }, ["k"], "question answer")?.fix, "Say what you would decide and why.");
@@ -61,10 +63,10 @@ Deno.test("F11/5 the judge: rubric-anchored prompt, OpenAI only, metered with on
   const rows: any[] = [];
   const admin = { from: (t: string) => ({ insert: async (r: any) => { rows.push({ t, r }); return { error: null }; } }) };
   let sent: any = null;
-  const judge = modelJudge(admin, { get: (k) => ({ MODEL_PROVIDER: "anthropic", OPENAI_API_KEY: "sk-test" } as Record<string, string>)[k] }, {
+  const judge = modelJudge(admin, { get: (k) => ({ MODEL_PROVIDER: "openai", ANTHROPIC_API_KEY: "sk-ant-test" } as Record<string, string>)[k] }, {
     call: async (payload, meter) => {
       sent = payload;
-      meter.calls++; meter.provider = "openai"; meter.models.push("gpt-5-mini"); meter.input_tokens += 100; meter.output_tokens += 20;
+      meter.calls++; meter.provider = "anthropic"; meter.models.push("claude-haiku-5-5"); meter.input_tokens += 100; meter.output_tokens += 20;
       return { content: [{ type: "text", text: '{"covered":["dense rank"],"verdict":"weak","fix":"Explain the partition step."}' }] };
     },
   });
@@ -72,11 +74,23 @@ Deno.test("F11/5 the judge: rubric-anchored prompt, OpenAI only, metered with on
   eq(v, { covered: ["dense rank"], verdict: "weak", fix: "Explain the partition step." });
   assert(/Do not state or guess any fact about the candidate/.test(sent.system) && JSON.parse(sent.messages[0].content).key_points.length === 2);
   eq(rows.length, 1);
-  eq([rows[0].t, rows[0].r.user_id, rows[0].r.calls, rows[0].r.provider], ["agent_turn_costs", "u1", 1, "openai"]);
+  eq([rows[0].t, rows[0].r.user_id, rows[0].r.calls, rows[0].r.provider], ["agent_turn_costs", "u1", 1, "anthropic"]);
+  // Through the real gateway on a fake Anthropic Messages wire: the judge's one request goes to api.anthropic.com on the
+  // Claude reader model, with the Anthropic key, and no other host is contacted (a gpt id in CAREER_MODEL changes nothing).
+  const wire = fakeAnthropic(() => '{"covered":["dense rank"],"verdict":"strong","fix":"Say why."}');
+  const rows2: any[] = [];
+  const admin2 = { from: (t: string) => ({ insert: async (r: any) => { rows2.push({ t, r }); return { error: null }; } }) };
+  const live = modelJudge(admin2, { get: (k) => ({ ANTHROPIC_API_KEY: "sk-ant-test", CAREER_MODEL: "claude-haiku-5-5", MODEL_PROVIDER: "openai" } as Record<string, string>)[k] }, {
+    callModel: (cfg, payload, o) => callModel(cfg, payload, { ...o, request: wire.request }),
+  });
+  eq((await live({ question: "Q", requirement: "sql", keys: ["dense rank"], answer: "dense rank", userId: "u1", threadId: "t1" }))?.verdict, "strong");
+  eq([wire.urls, wire.bodies[0].model, wire.headers[0]["x-api-key"], wire.onlyAnthropic()], [["https://api.anthropic.com/v1/messages"], "claude-haiku-5-5", "sk-ant-test", true]);
+  eq([rows2[0].r.provider, rows2[0].r.models], ["anthropic", ["claude-haiku-5-5"]]);
   const broken = modelJudge(admin, { get: () => undefined }, { call: () => Promise.reject(new Error("down")) });
   eq(await broken({ question: "Q", requirement: null, keys: [], answer: "a" }), null, "a failed judge leaves the code check standing");
-  // Off by default: no CAREER_MOCK_JUDGE, no judge.
-  eq(supabaseMockPrep({}, { get: () => undefined }).judge, null);
+  // D-036: CAREER_MOCK_JUDGE is a release flag: on when unset, and CAREER_MOCK_JUDGE=off (its rollback) means no judge.
+  eq(supabaseMockPrep({}, { get: (k) => (k === "CAREER_MOCK_JUDGE" ? "off" : undefined) }).judge, null);
+  assert(typeof supabaseMockPrep({}, { get: () => undefined }).judge === "function");
   assert(typeof supabaseMockPrep({}, { get: (k) => (k === "CAREER_MOCK_JUDGE" ? "on" : undefined) }).judge === "function");
 });
 

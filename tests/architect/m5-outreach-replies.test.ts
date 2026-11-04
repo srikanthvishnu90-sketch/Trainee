@@ -5,10 +5,12 @@
 // reply text. Run: deno test -A --no-check tests/architect/
 import {
   ACTIONS_INTENT, type Action, conversationFor, gmailMailbox, intervalAsk, memoryRepliesStore, mergeTurn, nextStep, type Outbox, proposeEvent,
-  type ReplyRail, repliesTurn, returnDate, rulePass, runFollowupDrafts, runOutreachActions, runReplySync, runScheduling, sendRailReplyRail, summaryAsk, understandPayload,
+  type ReplyRail, repliesTurn, returnDate, rulePass, runFollowupDrafts, runOutreachActions, runReplySync, runScheduling, sendRailReplyRail, summaryAsk, understand, understandPayload,
 } from "../../supabase/functions/_shared/career_outreach_replies.ts";
 import { googleCalendar, isFree, proposeSlots, wall } from "../../supabase/functions/_shared/career_calendar.ts";
 import { payloadHash } from "../../supabase/functions/_shared/career_outreach.ts";
+import { readerCall } from "../../supabase/functions/_shared/career_reader_model.ts";
+import { fakeAnthropic } from "./helpers/fake_anthropic.ts";
 
 function eq(a: unknown, b: unknown, m = "") { const x = JSON.stringify(a), y = JSON.stringify(b); if (x !== y) throw new Error(`${m}\n  got:  ${x}\n  want: ${y}`); }
 function assert(v: unknown, m = "assertion failed"): asserts v { if (!v) throw new Error(m); }
@@ -660,4 +662,19 @@ Deno.test("M5/O1 Outlook through #226's functions: free/busy for the slots, the 
   eq((await runOutreachActions({ store: s.store, rail: s.rail, calendars: cal, now: NOW, worker: "w" })).events, 1);
   eq((await runOutreachActions({ store: s.store, rail: s.rail, calendars: cal, now: NOW + 60_000, worker: "w" })).events, 0);
   eq([created.length, created[0].attendees, (await s.store.thread(U, id))!.status], [1, ["olive@corp.example"], "call_scheduled"]);
+});
+
+Deno.test("M5/Claude the reply reader goes through the gateway to api.anthropic.com only: a forced record_email tool call, the Anthropic key, nothing else contacted", async () => {
+  const wire = fakeAnthropic(() => ({ tool: "record_email", input: { class: "interested", summary: "Interested; asked for your resume.", asks: ["send your resume"] } }));
+  const env = { get: (k: string) => ({ OPENAI_API_KEY: "sk-openai-not-used", ANTHROPIC_API_KEY: "sk-ant-test", CAREER_MODEL: "gpt-5-mini" } as Record<string, string>)[k] };
+  const msg = { id: "m1", thread: "th1", from: "Avery Synthetic <avery.synthetic@beta.example>", to: "sam@example.test", subject: "Re: Question about your path at Beta", text: "Glad to help, send me your resume.", at: new Date(NOW).toISOString(), headers: {}, fromMe: false };
+  const thread = { recipient_email: "avery.synthetic@beta.example", recipient_name: "Avery Synthetic", recipient_firm: "Beta", subject: "Question about your path at Beta", offered: [] } as any;
+  const r = await understand({ msg, thread, model: readerCall(env, wire.request), now: NOW, tz: "America/Chicago" });
+  eq([r.cls, r.by, r.asks], ["interested", "model", ["send your resume"]]);
+  eq([wire.urls, wire.bodies.length, wire.bodies[0].model, wire.bodies[0].tool_choice, wire.headers[0]["x-api-key"], "store" in wire.bodies[0]], [["https://api.anthropic.com/v1/messages"], 1, "claude-haiku-5-5", { type: "tool", name: "record_email" }, "sk-ant-test", false]);
+  assert(wire.onlyAnthropic(), "no other host");
+  // No Anthropic key: not configured, the reading stays "none" and nothing is sent anywhere.
+  const none = fakeAnthropic(() => "x");
+  const r2 = await understand({ msg, thread, model: readerCall({ get: (k: string) => (k === "OPENAI_API_KEY" ? "sk-openai-not-used" : undefined) }, none.request), now: NOW, tz: "America/Chicago" });
+  eq([r2.by, none.urls], ["none", []]);
 });

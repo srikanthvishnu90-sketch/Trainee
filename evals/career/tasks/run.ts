@@ -4,7 +4,7 @@
 //
 //   deno run -A --import-map=evals/career/tasks/import-map.json evals/career/tasks/run.ts --brain router|staged|planner --model fake
 //   deno run -A --import-map=evals/career/tasks/agent-import-map.json evals/career/tasks/run.ts --brain agent --model fake
-//   (paid, never in CI's gate: --model openai with OPENAI_API_KEY and --budget-usd; see .github/workflows/brain-eval.yml,
+//   (paid, never in CI's gate: --model claude with ANTHROPIC_API_KEY and --budget-usd; see .github/workflows/brain-eval.yml,
 //    workflow_dispatch suite=tasks)
 //
 // Brains (production's own switches, read per request by the handler):
@@ -17,15 +17,16 @@
 //            agent-chat/career_brain.ts to released/career_brain.ts. Run without that map, --brain agent is NOT RUN.
 // Every brain also runs with CAREER_NETWORKING_DRAFT=on (drafting outreach is a model call on every brain).
 // Models: fake (fake_model.ts plays each task's oracle: what the code paths complete when the model plans right; free,
-// deterministic, CI) or openai (the real model; needs OPENAI_API_KEY; spend read from agent_turn_costs, capped by
+// deterministic, CI) or claude (the real model, Anthropic only; needs ANTHROPIC_API_KEY; spend read from agent_turn_costs, capped by
 // --budget-usd, stops before the next task at the cap; a stopped run is not a score).
 // Setup turns (paste and confirm the resume, send the contacts file) always run on the router, before the brain is set.
 // Output: evals/career/tasks/results/<label>.json and one summary line (completion rate, invariant breaks, failing ids).
 // deno-lint-ignore-file no-explicit-any
 import { pgBinDir, type Pg, startPg } from "../../../tests/flow/pg.ts";
 import { careerHandler, type Chat, supabaseParity } from "../../../tests/flow/handler.ts";
+import { evalNow, PIN_DB_SQL, pinClock } from "./clock.ts";
 import { type EndState, type Expect, judge } from "./judge.ts";
-import { calls as fakeCalls, clearOracle, fakeOpenAI, type OracleStep, setMutation, setOracle } from "./fake_model.ts";
+import { calls as fakeCalls, clearOracle, fakeAnthropic, type OracleStep, setMutation, setOracle } from "./fake_model.ts";
 
 export type BrainName = "router" | "staged" | "planner" | "agent";
 export interface Task { id: string; family: string; setup: string[]; turns: string[]; oracle: Record<string, OracleStep[]>; expect: Expect; note?: string }
@@ -37,19 +38,20 @@ const SET = JSON.parse(await Deno.readTextFile(new URL("./tasks.json", import.me
 const RESUME = await Deno.readTextFile(`${ROOT}packages/career-data/fixtures/test-resume.txt`);
 const CONTACTS = await Deno.readTextFile(new URL("./contacts.csv", import.meta.url));
 export const TASKS: Task[] = SET.tasks;
-const ENV_KEYS = ["CAREER_BRAIN", "CAREER_PLANNER", "CAREER_PLANNER_USERS", "CAREER_NETWORKING_DRAFT", "OPENAI_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "CAREER_BRAIN_ROUTER_INTENTS"];
+const ENV_KEYS = ["CAREER_BRAIN", "CAREER_PLANNER", "CAREER_PLANNER_USERS", "CAREER_NETWORKING_DRAFT", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "CAREER_REPLY_MODEL", "CAREER_BRAIN_ROUTER_INTENTS"];
 const q = (s: string) => s.replace(/'/g, "''");
 const uid = (i: number) => `7b0f8f8e-6a43-4a49-9d2c-${String(7_000_000_000_000 + i).slice(-12)}`;
 
-async function seed(pg: Pg, ids: string[]) {
-  const P: any[] = SET.postings;
+async function seed(pg: Pg, ids: string[], at: string) {
+  const P: any[] = SET.postings, T = `'${at}'::timestamptz`;
   await pg.sql(`insert into public.career_postings (job_id, provider, board, company, title, location, url, description, first_seen_at, last_seen_at) values
-    ${P.map((p) => `('${p.job_id}', 'greenhouse', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', '${q(p.description)}', now(), now())`).join(",\n")};
+    ${P.map((p) => `('${p.job_id}', 'greenhouse', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', '${q(p.description)}', ${T}, ${T})`).join(",\n")};
     insert into public.career_kb_postings (posting_key, source, board, company, title, location, url, posted_at, text_excerpt, content_hash) values
-    ${P.map((p, i) => `('${p.job_id}', 'greenhouse', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', now() - interval '${i} hours', '${q(p.description)}', 'k${i}')`).join(",\n")};`);
+    ${P.map((p, i) => `('${p.job_id}', 'greenhouse', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', ${T} - interval '${i} hours', '${q(p.description)}', 'k${i}')`).join(",\n")};`);
   for (const id of ids) {
     await pg.sql(`insert into auth.users (id, email) values ('${id}', '${id}@example.test'); insert into public.profiles (id) values ('${id}');
-      insert into public.career_watch_kv (user_id, key, value) values ('${id}', 'career:account', '{"epoch":0,"version":0,"paused":false}');`);
+      insert into public.career_watch_kv (user_id, key, value) values ('${id}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
+      insert into public.channel_contacts (contact, user_id) values ('+1555' || lpad((abs(hashtext('${id}')) % 10000000)::text, 7, '0'), '${id}');`);
   }
 }
 
@@ -68,15 +70,22 @@ export async function endState(pg: Pg, u: string): Promise<EndState & { metas: a
     drafts: (await json(pg, `select json_agg(json_build_object('email', recipient_email, 'status', status)) from public.career_outreach_drafts where user_id = '${u}'`)) ?? [],
     send_queue: Number(await json(pg, `select count(*) from public.career_send_queue where user_id = '${u}'`)),
     apply_jobs: Number(await json(pg, `select count(*) from public.career_apply_jobs where user_id = '${u}'`)),
-    outbox: Number(await json(pg, `select count(*) from public.career_outbox where user_id = '${u}'`)),
+    outbox: Number(await json(pg, `select count(*) from public.career_outbox where user_id = '${u}' and key not like 'status:reminder:%'`)),
     tracker: stores.flatMap((s) => Array.isArray(s?.trackStore?.rows) ? s.trackStore.rows : []).map((r: any) => ({ company: String(r.company ?? ""), stage: String(r.stage ?? ""), next_when: r.next_when ?? null })),
-    reminders: ((await kv("career:reminders"))?.items ?? []).map((r: any) => ({ what: r.what, when: r.when, due_date: r.due_date })),
+    // A reminder is asked for by name, so it is not a message sent on its own: kept in the outbox (PR #355) for the texting channel at the time asked.
+    reminders: [...((await kv("career:reminders"))?.items ?? []).map((r: any) => ({ what: r.what, when: r.when, due_date: r.due_date })),
+      ...((await json(pg, `select json_agg(json_build_object('what', text, 'when', '', 'due_date', (deliver_at at time zone 'UTC')::date::text, 'local', (deliver_at at time zone 'America/Chicago')::date::text)) from public.career_outbox where user_id = '${u}' and key like 'status:reminder:%'`)) ?? [])
+        .flatMap((r: any) => [{ what: r.what, when: r.when, due_date: r.due_date }, { what: r.what, when: r.when, due_date: r.local }])],
     watch: JSON.stringify([watchKv, prefs]),
     standing: ((await kv("career:standing"))?.items ?? []).map((x: any) => String(x?.text ?? "")),
     // Two tailored resumes can be the same bytes (the store keeps one copy): the postings a planned step tailored count too.
     tailored: Math.max(Number(await json(pg, `select count(*) from public.channel_artifacts where user_id = '${u}' and mime = 'application/pdf'`)),
       new Set(metas.flatMap((m) => (m?.planner?.steps ?? []).flatMap((s: any) => s?.detail?.tailored ?? []))).size),
     prep: metas.some((m) => /prep|interview_brief/.test(String(m?.intent ?? ""))) || planned("interview.prep") || tool("interview_brief"),
+    // The constraints the person's latest search ran with (the thread's discovery.lastParams), for corrections (spec 2.3).
+    search_params: [...stores].reverse().map((s) => s?.discovery?.lastAsk ?? s?.discovery?.lastParams).find((p) => p && typeof p === "object") ?? null,
+    readiness: [...metas].reverse().map((m) => m?.readiness).find((r) => r && typeof r === "object") ?? null,
+    apply_summary: [...metas].reverse().map((m) => m?.apply_summary).find((r) => r && typeof r === "object") ?? null,
     searched: stores.some((s) => Array.isArray(s?.discovery?.lastShortlist) && s.discovery.lastShortlist.length > 0) || tool("search_jobs"),
     metas,
   };
@@ -86,33 +95,44 @@ function brainEnv(brain: BrainName | "setup") {
   for (const k of ["CAREER_BRAIN", "CAREER_PLANNER"]) Deno.env.delete(k);
   if (brain === "router" || brain === "setup") Deno.env.set("CAREER_BRAIN", "router");
   if (brain === "staged" || brain === "planner") Deno.env.set("CAREER_BRAIN", "staged");
-  if (brain === "planner") Deno.env.set("CAREER_PLANNER", "on");
+  // D-036: CAREER_PLANNER is a release flag (on when unset), so every brain but "planner" rolls it back by name.
+  Deno.env.set("CAREER_PLANNER", brain === "planner" ? "on" : "off");
   if (brain === "agent") Deno.env.set("CAREER_BRAIN", "agent");
 }
 
-export async function runTasks(o: { brain: BrainName; model: "fake" | "openai"; label: string; only?: string[]; budgetUsd?: number | null; mutate?: ((s: OracleStep[]) => OracleStep[]) | null; quiet?: boolean }): Promise<RunResult> {
+export async function runTasks(o: { brain: BrainName; model: "fake" | "claude"; label: string; only?: string[]; budgetUsd?: number | null; mutate?: ((s: OracleStep[]) => OracleStep[]) | null; quiet?: boolean }): Promise<RunResult> {
   const tasks = TASKS.filter((t) => !o.only?.length || o.only.includes(t.id));
-  const saved: Record<string, string | undefined> = Object.fromEntries(ENV_KEYS.map((k) => [k, Deno.env.get(k)]));
+  // Any OPENAI_* variable in the environment is cleared for the run and restored after: nothing here may reach OpenAI.
+  const openaiVars = Object.keys(Deno.env.toObject()).filter((k) => /^OPENAI_/.test(k));
+  const saved: Record<string, string | undefined> = Object.fromEntries([...ENV_KEYS, ...openaiVars].map((k) => [k, Deno.env.get(k)]));
   const realFetch = globalThis.fetch;
   const pg = await startPg();
   let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
   const items: TaskResult[] = [];
   let stopped: string | null = null;
+  // The run's clock is pinned (clock.ts): the product and the judge both read the same fixed day, whatever day the machine says.
+  const runAt = new Date().toISOString(), at = evalNow();
+  let unpin: (() => void) | null = null;
   try {
+    unpin = pinClock(at);
     await supabaseParity(pg);
+    await pg.sql(PIN_DB_SQL(at));
     const people: Record<string, string> = {};
     tasks.forEach((t) => { people[`tok-${t.id}`] = uid(TASKS.indexOf(t) + 1); });
-    await seed(pg, Object.values(people));
-    if (o.model === "fake") Deno.env.set("OPENAI_API_KEY", "sk-fake-tasks-not-a-key");
-    else if (!Deno.env.get("OPENAI_API_KEY")) throw new Error("NOT RUN: --model openai needs OPENAI_API_KEY");
-    // The outside world, as the eval sees it: the model (the fake, or OpenAI itself on a paid run), and the job boards of
+    await seed(pg, Object.values(people), at);
+    // Claude only (owner, 2026-11-02): the one provider is Anthropic. No OpenAI key is ever set here, so nothing in the code under
+    // test can reach OpenAI even if it tried; the fake answers on api.anthropic.com, the real run goes there with the real key.
+    for (const k of openaiVars) Deno.env.delete(k);
+    if (o.model === "fake") Deno.env.set("ANTHROPIC_API_KEY", "sk-ant-fake-tasks-not-a-key");
+    else if (!Deno.env.get("ANTHROPIC_API_KEY")) throw new Error("NOT RUN: --model claude needs ANTHROPIC_API_KEY");
+    // The outside world, as the eval sees it: the model (the fake, or Anthropic itself on a paid run), and the job boards of
     // the seeded postings, which answer as live (the brain's link check drops a posting whose board says 404). Nothing
     // else is reachable.
     const jobNumbers = new Set((SET.postings as any[]).map((p) => p.job_id.split(":")[2]));
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
       const url = new URL(req.url);
-      if (url.hostname === "api.openai.com") return o.model === "fake" ? await fakeOpenAI(req) : await realFetch(req);
+      if (url.hostname === "api.anthropic.com") return o.model === "fake" ? await fakeAnthropic(req) : await realFetch(req);
       if (/(^|\.)greenhouse\.io$/.test(url.hostname)) {
         const n = /\/jobs\/(\d+)/.exec(url.pathname)?.[1];
         return n && jobNumbers.has(n) ? new Response(JSON.stringify({ id: Number(n) }), { status: 200, headers: { "content-type": "application/json" } }) : new Response("not found", { status: 404 });
@@ -120,7 +140,8 @@ export async function runTasks(o: { brain: BrainName; model: "fake" | "openai"; 
       return new Response("not reachable in the task eval", { status: 404 });
     }) as typeof fetch;
     Deno.env.delete("MODEL_PROVIDER");
-    Deno.env.set("CAREER_MODEL", Deno.env.get("CAREER_MODEL") || "gpt-5-mini");
+    Deno.env.delete("CAREER_MODEL");
+    Deno.env.set("CAREER_REPLY_MODEL", Deno.env.get("CAREER_REPLY_MODEL") || "claude-haiku-5-5");
     Deno.env.set("CAREER_NETWORKING_DRAFT", "on");
     setMutation(o.mutate ?? null);
     h = await careerHandler(pg, people);
@@ -150,8 +171,9 @@ export async function runTasks(o: { brain: BrainName; model: "fake" | "openai"; 
     }
     const passed = items.filter((x) => x.pass).length;
     return { label: o.label, brain: o.brain, model: o.model, total: items.length, passed, rate: items.length ? passed / items.length : 0,
-      invariant_breaks: items.filter((x) => x.failed.some((f) => f.startsWith("INVARIANT"))).length, stopped, cost_usd: o.model === "fake" ? 0 : await spent(), items, run_at: new Date().toISOString() };
+      invariant_breaks: items.filter((x) => x.failed.some((f) => f.startsWith("INVARIANT"))).length, stopped, cost_usd: o.model === "fake" ? 0 : await spent(), items, run_at: runAt };
   } finally {
+    unpin?.();
     setMutation(null);
     clearOracle();
     for (const [k, v] of Object.entries(saved)) { if (v === undefined) Deno.env.delete(k); else Deno.env.set(k, v); }
@@ -167,16 +189,16 @@ export function summaryLine(r: RunResult): string {
 
 if (import.meta.main) {
   const args = Deno.args, opt = (n: string) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] ?? null : null; };
-  const brain = (opt("--brain") || "router") as BrainName, model = (opt("--model") || "fake") as "fake" | "openai";
-  if (!["router", "staged", "planner", "agent"].includes(brain) || !["fake", "openai"].includes(model)) { console.log("NOT RUN: --brain router|staged|planner|agent, --model fake|openai"); Deno.exit(2); }
+  const brain = (opt("--brain") || "router") as BrainName, model = (opt("--model") || "fake") as "fake" | "claude";
+  if (!["router", "staged", "planner", "agent"].includes(brain) || !["fake", "claude"].includes(model)) { console.log("NOT RUN: --brain router|staged|planner|agent, --model fake|claude"); Deno.exit(2); }
   if (!pgBinDir()) { console.log("NOT RUN: no Postgres 16 binaries (PGBIN or /usr/lib/postgresql/16/bin)"); Deno.exit(2); }
   if (brain === "agent") {
     const { AGENT_BRAIN_RELEASED } = await import("../../../supabase/functions/agent-chat/career_brain.ts");
     if (!AGENT_BRAIN_RELEASED) { console.log("NOT RUN: --brain agent needs --import-map=evals/career/tasks/agent-import-map.json (the production pin AGENT_BRAIN_RELEASED=false holds otherwise)"); Deno.exit(2); }
   }
-  if (model === "openai" && !Deno.env.get("OPENAI_API_KEY")) { console.log("NOT RUN: --model openai needs OPENAI_API_KEY"); Deno.exit(2); }
-  const budgetArg = opt("--budget-usd") ?? Deno.env.get("EVAL_BUDGET_USD") ?? null;
-  if (model === "openai" && budgetArg === null) { console.log("NOT RUN: --model openai needs --budget-usd (or EVAL_BUDGET_USD): an uncapped paid run is never started"); Deno.exit(2); }
+  if (model === "claude" && !Deno.env.get("ANTHROPIC_API_KEY")) { console.log("NOT RUN: --model claude needs ANTHROPIC_API_KEY"); Deno.exit(2); }
+  const budgetArg = opt("--budget-usd") ?? Deno.env.get("EVAL_BUDGET_USD") ?? Deno.env.get("ANTHROPIC_EVAL_BUDGET_USD") ?? null;
+  if (model === "claude" && budgetArg === null) { console.log("NOT RUN: --model claude needs --budget-usd (or ANTHROPIC_EVAL_BUDGET_USD): an uncapped paid run is never started"); Deno.exit(2); }
   const label = opt("--label") || `tasks-${brain}-${model}-${new Date().toISOString().slice(0, 10)}`;
   // --mutate drop_last (fake model only): the planner is handed every plan without its last step, so the eval's own
   // guard can be shown to catch a dropped part (tests/architect/task-completion-eval.test.ts).

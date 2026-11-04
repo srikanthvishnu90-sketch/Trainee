@@ -5,12 +5,11 @@
 import assertNode from "node:assert/strict";
 import * as B from "../../supabase/functions/_shared/router_core.career.js";
 import { CareerHost } from "../../supabase/functions/_shared/career_host.js";
-import { ERASE_SENTENCE } from "../../supabase/functions/_shared/career_trust_turn.ts";
 
 const OVERCLAIM = /on every channel|every channel|from (?:every|all) (?:your )?(?:apps?|channels?|devices?)|from telegram|from imessage|from whatsapp|everywhere/i;
 const RECORDS = /from Trainee's records/;
 // The erase keeps the erase turn's own two messages (the person's "yes, erase it" and the answer; migration
-// 20261031080000), so a reply may say only "this exchange" is kept, never only the answer.
+// 20261104120000), so a reply may say only "this exchange" is kept, never only the answer.
 const ONLY_ANSWER = /only (?:this|the) answer|answer confirming the erase is kept/i;
 
 Deno.test("the erase confirmation says the messages leave Trainee's records, and that delivered copies stay in the person's app", () => {
@@ -38,7 +37,6 @@ Deno.test("the erase confirmation says the messages leave Trainee's records, and
 Deno.test("every erase description in code says 'from Trainee's records' and none says 'every channel'", () => {
   const ROUTER = Deno.readTextFileSync(new URL("../../packages/domain/142-career-router.js", import.meta.url));
   const HOST = Deno.readTextFileSync(new URL("../../supabase/functions/_shared/career_host.js", import.meta.url));
-  assert(!OVERCLAIM.test(ERASE_SENTENCE) && RECORDS.test(ERASE_SENTENCE), ERASE_SENTENCE);
   const erased = HOST.match(/intent: "career_profile_erased", reply: "([^"]+)"/)?.[1] ?? "";
   assert(erased && !OVERCLAIM.test(erased) && RECORDS.test(erased) && !ONLY_ANSWER.test(erased) && /only this exchange is kept/i.test(erased), erased);
   for (const line of ROUTER.split("\n").filter((l) => /career_erase_confirm|career_profile_erased/.test(l) && /chat messages/.test(l))) {

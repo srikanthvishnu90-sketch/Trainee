@@ -18,6 +18,9 @@ as untrusted notes: re-verify it in code before relying on it.
 6. Open a PR into `trunk` titled `WO-<NNN>: <title>` with: what changed, the gate output, the order's demo steps and what you saw, and anything you could not do.
 7. Do not merge. The architect reviews; changes come back as review comments.
 
+The flow rules (one change per PR, size cap, 7-day max age, no stacked PRs, rebase only on a green trunk, clock as an
+input, WIP limit of 2 open PRs) are in `docs/architect/PROCESS.md`; the PR template carries its checklist.
+
 ## Never
 - Design, re-scope, or start work no order asks for. No new lanes, registries, ledgers, merge records or status essays. A PR description is the record.
 - Write to the archive: `docs/bug-ledger.md`, `docs/career/forbidden-rules.md`, `docs/instinct-spec-series/BUILD-STATUS.md`, merge records, gauntlet ledgers (D-006).

@@ -61,7 +61,9 @@ test("all ready: the first line is n/n and nothing else is named before the rest
   }
 });
 
-test("mixed: k/n first, then each other application named exactly once with its code", () => {
+// Launch readiness Q3 (2026-10-26): each stop is named in plain words in the reply; its code stays on the record
+// (acc.outcomes below), never in the text the person reads.
+test("mixed: k/n first, then each other application named exactly once, in plain words, its code on the record only", () => {
   const ps = [posting(1), posting(2), posting(3), posting(4)];
   const run = prepare(ps, { deps: {
     boardFor: (p) => p.id === "JOB-C-2" ? Portal.createSandboxBoard({ captchaAt: "open" })
@@ -74,9 +76,10 @@ test("mixed: k/n first, then each other application named exactly once with its 
   const lines = Batch.speakSummary(run);
   assert.equal(lines[0], "1/4 applications ready for your yes.");
   const dropLines = lines.slice(1, 4);
-  assert.match(dropLines[0], /^- CoverCo 2 — Software Engineering Intern: CAPTCHA_HANDOFF — /);
-  assert.match(dropLines[1], /^- CoverCo 3 — Software Engineering Intern: BOARD_NOT_WIRED — /);
-  assert.match(dropLines[2], /^- CoverCo 4 — Software Engineering Intern: UNCOVERED_QUESTION — /);
+  assert.equal(dropLines[0], "- CoverCo 2 — Software Engineering Intern: a captcha appeared, so the last step is yours.");
+  assert.equal(dropLines[1], "- CoverCo 3 — Software Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.");
+  assert.equal(dropLines[2], "- CoverCo 4 — Software Engineering Intern: a required question has no confirmed fact on your profile, so I stopped instead of inventing an answer.");
+  assert.ok(!/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/.test(lines.join("\n")), `no internal code in the reply: ${lines.join(" | ")}`);
   assert.match(lines[4], /^Found 4 /);
   for (const n of [2, 3, 4]) {
     assert.equal(dropLines.filter((l) => l.includes(`CoverCo ${n} `)).length, 1, `CoverCo ${n} is named once in the coverage block`);

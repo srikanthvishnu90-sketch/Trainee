@@ -1,0 +1,6 @@
+{
+  "_note": "Owner inputs for the Trainee legal pages (docs/launch/GOOGLE-VERIFICATION-2026-10-26.md §5 step 0). Fill every value, then run: deno run -A scripts/launch/build-legal-pages.ts. The build refuses to write any page while a value is null or empty.",
+  "LEGAL_NAME": null,
+  "SUPPORT_EMAIL": null,
+  "GOVERNING_STATE": null
+}

@@ -4,8 +4,9 @@
 //    (it is closed as not sent, with the reason).
 // 2. One cap: the person's own daily limit is the database's, whatever a caller passes, and every path counts the same
 //    states (TS and SQL from one list).
-// 3. One 30-day ledger: an application to a company counts wherever it was recorded (the queue, the extension's
-//    employer-confirmation reports, the old batch stack's ledger), at approval and again at claim.
+// 3. One ledger: an application counts wherever it was recorded (the queue, the extension's employer-confirmation
+//    reports, the old batch stack's ledger), at approval and again at claim. Since D-MS-3 (owner, 2026-10-27,
+//    20261027140000) what it refuses is the exact same posting, not the company: two roles at one employer both go.
 // 4. Unique confirmation IDs (D-024): an ID another employer's application already carries is never kept as proof.
 // Nothing here reaches the live project.
 import assertNode from "node:assert/strict";
@@ -19,14 +20,17 @@ const uid = () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
 
 Deno.test("G3/ts one list of counted states: a drive in progress or an unknown outcome counts in TS as in SQL", () => {
   const now = Date.UTC(2026, 9, 23, 12);
+  const url = "https://jobs.lever.co/acme/j0";
   for (const state of ["driving", "unknown_outcome"]) {
-    const log = [{ user_id: "u", job_id: "j0", company: "Acme", at: now - 3 * DAY, state }];
-    const r = admitApplication(log, { user_id: "u", job_id: "j1", company: "Acme Inc" }, now);
-    assertNode.equal(r.reason, "company_cooldown", state);
+    const log = [{ user_id: "u", job_id: "j0", company: "Acme", at: now - 3 * DAY, state, url }];
+    const r = admitApplication(log, { user_id: "u", job_id: "j1", company: "Acme Inc", url: "https://www.jobs.lever.co/acme/j0/apply" }, now);
+    assertNode.equal(r.reason, "duplicate_job", `${state}: the same posting under another id`);
+    assertNode.equal(admitApplication(log, { user_id: "u", job_id: "j2", company: "Acme Inc", url: "https://jobs.lever.co/acme/j2" }, now).ok, true,
+      `${state}: another role at the employer (D-MS-3)`);
   }
   for (const state of ["failed", "not_submitted"]) {
-    const log = [{ user_id: "u", job_id: "j0", company: "Acme", at: now - 3 * DAY, state }];
-    assertNode.equal(admitApplication(log, { user_id: "u", job_id: "j1", company: "Acme" }, now).ok, true, state);
+    const log = [{ user_id: "u", job_id: "j0", company: "Acme", at: now - 3 * DAY, state, url }];
+    assertNode.equal(admitApplication(log, { user_id: "u", job_id: "j0", company: "Acme", url }, now).ok, true, state);
   }
 });
 
@@ -48,12 +52,19 @@ Deno.test({
         await pg.sql(`insert into auth.users (id) values ('${u}');
           insert into public.profiles (id) values ('${u}') on conflict do nothing;
           insert into public.career_watch_kv (user_id, key, value) values ('${u}', 'career:account', '${JSON.stringify({ epoch: 0, version: 0, paused: false, ...account })}');`);
+          // OWNER RULE 2026-10-26 (20261026210016, review of PR #194): a confirmed resume on file and the stored resume the payloads bind.
+          await pg.sql(`with t as (insert into public.agent_threads (user_id) values ('${u}') returning id)
+            insert into public.agent_flow_state (thread_id, user_id, state) select id, '${u}', '{"career":{"stores":{"profile":{"facts":[{"id":"seed","kind":"experience","status":"confirmed","needs_confirmation":false,"confirmation_event_id":"seed-ev","text":"TEST Analyst"}]}}}}' from t;
+            insert into public.career_events (user_id, kind, subject, detail) values ('${u}', 'fact_confirmed', 'TEST Analyst', '{"confirmation_event_id":"seed-ev"}');
+            insert into storage.objects (bucket_id, name) values ('career-resumes', '${u}/' || repeat('d', 64) || '.pdf');`);
         return u;
       };
       const payload = (u: string, job: string, company: string, extra: Record<string, unknown> = {}) => ({
         version: 1, user_id: u, job_id: job, company, url: `https://boards.greenhouse.io/${company.toLowerCase().replace(/\W+/g, "")}/jobs/${job}`,
         fields: [{ name: "first_name", value: "Ada" }], privacy_epoch: 0, account_version: 0,
-        expires_at: new Date(Date.now() + DAY).toISOString(), ...extra,
+        expires_at: new Date(Date.now() + DAY).toISOString(),
+        resume_sha256: "d".repeat(64), // OWNER RULE 2026-10-26 (20261026210016): an approved application binds its resume
+        ...extra,
       });
       const hashOf = async (p: unknown) =>
         await pg.sql(`select encode(sha256(convert_to(public.career_apply_canonical($j$${JSON.stringify(p)}$j$::jsonb),'UTF8')),'hex')`);
@@ -134,43 +145,46 @@ Deno.test({
         for (const s of sqlStates) assertNode.ok(COUNTED_STATES.has(s), `${s} counted in SQL but not in TS`);
       });
 
-      await t.step("3a an application the extension reported counts for the company and the day", async () => {
+      await t.step("3a an application the extension reported counts for its posting and the day", async () => {
         const u = await person();
         await pg.sql(`insert into public.extension_submission_reports (user_id, employer, role, posting_url, confirmation_text, tracker_record, observed_at)
-          values ('${u}', 'Acme, Inc.', 'Analyst', 'https://jobs.lever.co/acme/1', 'Thanks for applying', '{}', now() - interval '5 days')`);
+          values ('${u}', 'Acme, Inc.', 'Analyst', 'https://boards.greenhouse.io/acme/jobs/f1', 'Thanks for applying', '{}', now() - interval '5 days')`);
         const r = await enqueue(payload(u, "f1", "Acme"));
-        assertNode.match(String(r.error?.message), /company_cooldown/);
+        assertNode.match(String(r.error?.message), /duplicate_job/, "the posting the extension reported");
+        assertNode.equal((await enqueue(payload(u, "f1b", "Acme"))).error, null, "another role at that employer goes (D-MS-3)");
         const u2 = await person({ daily_limit: "1" });
         await pg.sql(`insert into public.extension_submission_reports (user_id, employer, role, posting_url, confirmation_text, tracker_record, observed_at)
           values ('${u2}', 'Umbrella', 'Analyst', 'https://jobs.lever.co/umbrella/1', 'Thanks for applying', '{}', now() - interval '2 hours')`);
         assertNode.match(String((await enqueue(payload(u2, "f2", "Globex"))).error?.message), /daily_cap/);
       });
 
-      await t.step("3b an application the old batch stack recorded counts for the company", async () => {
+      await t.step("3b an application the old batch stack recorded counts for its posting", async () => {
         const u = await person();
         await pg.sql(`insert into public.career_batch_ledgers_v1 (user_id, records) values ('${u}',
           $j$[{"userId":"${u}","canonicalKey":"greenhouse:globex:9","status":"submitted","timestamp":"${new Date(Date.now() - 3 * DAY).toISOString()}","company":"Globex Corporation"}]$j$::jsonb)`);
-        assertNode.match(String((await enqueue(payload(u, "g1", "Globex"))).error?.message), /company_cooldown/);
-        assertNode.equal((await enqueue(payload(u, "g2", "Initech"))).error, null, "another company is not held");
+        assertNode.match(String((await enqueue(payload(u, "greenhouse:globex:9", "Globex"))).error?.message), /duplicate_job/);
+        assertNode.equal((await enqueue(payload(u, "g1", "Globex"))).error, null, "another role at the employer is not held (D-MS-3)");
       });
 
-      await t.step("3c an application approved before another path applied to the same company is not sent", async () => {
+      await t.step("3c an application approved before another path sent the same posting is not sent; another role still goes", async () => {
         const u = await person();
         assertNode.equal((await enqueue(payload(u, "h1", "Acme"))).error, null);
+        assertNode.equal((await enqueue(payload(u, "h2", "Acme"))).error, null);
         await pg.sql(`insert into public.extension_submission_reports (user_id, employer, role, posting_url, confirmation_text, tracker_record, observed_at)
-          values ('${u}', 'ACME', 'Analyst', 'https://jobs.lever.co/acme/7', 'Thanks for applying', '{}', now())`);
+          values ('${u}', 'ACME', 'Analyst', 'https://boards.greenhouse.io/acme/jobs/h1', 'Thanks for applying', '{}', now())`);
         const got = await pg.asPerson(u).rpc("career_apply_claim_own", { p_limit: 3, p_source: "own_computer" });
-        assertNode.deepEqual(got.data, [], JSON.stringify(got));
-        assertNode.match(await state(u, "h1"), /^not_submitted\|.*30 days/);
+        assertNode.deepEqual((got.data as { job_id: string }[]).map((j) => j.job_id), ["h2"], JSON.stringify(got));
+        assertNode.match(await state(u, "h1"), /^not_submitted\|.*already sent/);
       });
 
-      await t.step("3e apply-by-email reads the same ledger: an employer the extension already applied to is not emailed", async () => {
+      await t.step("3e apply-by-email reads the same ledger: a posting the extension already sent is not emailed", async () => {
         const u = await person();
         await pg.sql(`insert into public.extension_submission_reports (user_id, employer, role, posting_url, confirmation_text, tracker_record, observed_at)
-          values ('${u}', 'Acme Corporation', 'Analyst', 'https://jobs.lever.co/acme/3', 'Thanks for applying', '{}', now() - interval '1 day')`);
+          values ('${u}', 'Acme Corporation', 'Analyst', 'https://example.org/x1', 'Thanks for applying', '{}', now() - interval '1 day')`);
         const email = (job: string, company: string) => ({
           kind: "email", version: 1, user_id: u, job_id: job, company, url: `https://example.org/${job}`, to: "jobs@example.org",
-          subject: "Application", body: "TEST application body", attachment: { sha256: "c".repeat(64) },
+          // OWNER RULE (20261026210016): an emailed application goes into driving only with the person's resume, stored for them.
+          subject: "Application", body: "TEST application body", attachment: { sha256: "d".repeat(64) }, resume_sha256: "d".repeat(64),
         });
         const reserve = async (p: any) => {
           const h = await hashOf(p);
@@ -179,11 +193,11 @@ Deno.test({
             on conflict (user_id, key) do update set value = excluded.value`);
           return await pg.sql(`select state || '|' || source from public.career_apply_email_reserve_for('${u}', $j$${JSON.stringify(p)}$j$::jsonb, '${h}', now())`);
         };
-        await assertNode.rejects(() => reserve(email("x1", "Acme")), /company_cooldown/);
-        assertNode.equal(await reserve(email("x2", "Globex")), "driving|email", "another employer is emailed");
+        await assertNode.rejects(() => reserve(email("x1", "Acme")), /duplicate_job/);
+        assertNode.equal(await reserve(email("x2", "Acme")), "driving|email", "another role at the employer is emailed (D-MS-3)");
       });
 
-      await t.step("3f an application counts from when it went: approved 40 days ago, sent 5 days ago, still cools the company", async () => {
+      await t.step("3f D-MS-3: an application sent 5 days ago refuses its own posting, never the company", async () => {
         const u = await person();
         assertNode.equal((await enqueue(payload(u, "s1", "Acme"))).error, null);
         // Dated as an old approval that was sent recently (written past every trigger: only the dates are the subject).
@@ -191,8 +205,9 @@ Deno.test({
           update public.career_apply_jobs set state = 'confirmed', source = 'own_computer', attempts = 1,
            created_at = now() - interval '40 days', claimed_at = now() - interval '5 days' where user_id = '${u}' and job_id = 's1';
           set session_replication_role = origin;`);
-        const r = await enqueue(payload(u, "s2", "Acme Inc"));
-        assertNode.match(String(r.error?.message), /company_cooldown/, "sent 5 days ago: the company is still cooling");
+        assertNode.equal((await enqueue(payload(u, "s2", "Acme Inc"))).error, null, "another role at the employer goes");
+        const same = payload(u, "s1-again", "Acme", { url: "https://boards.greenhouse.io/acme/jobs/s1" });
+        assertNode.match(String((await enqueue(same)).error?.message), /duplicate_job/, "the same posting under another id does not");
       });
 
       await t.step("3d TS and SQL read a company's name the same way", async () => {

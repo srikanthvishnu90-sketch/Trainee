@@ -9,6 +9,7 @@ import { memoryMailStore } from "../../supabase/functions/_shared/career_mail_st
 import { memoryAlertStore } from "../../supabase/functions/_shared/career_alert_store.ts";
 import { runMail } from "../../supabase/functions/_shared/career_proactive_run.ts";
 import { allSplits, HELD_OUT, selection, withModel } from "../../evals/career/mail-model-eval.ts";
+import { fakeAnthropic } from "./helpers/fake_anthropic.ts";
 import MODEL_SRC from "../../supabase/functions/_shared/career_mail_model.ts" with { type: "text" };
 import INDEX_SRC from "../../supabase/functions/career-proactive/index.ts" with { type: "text" };
 import MIGRATION from "../../supabase/migrations/20261021130000_career_mail_model_calls.sql" with { type: "text" };
@@ -54,7 +55,10 @@ const FWD_BARE = mailIn("f2", "Sam Lee <sam.lee@gmail.com>", "Fwd: Asana - updat
 // ------------------------------------------------------------------------------------------------ E: off is today
 // sha256 of every committed split's classifications (2564 emails), taken at the branch point 4e79ef0f before any WO-051
 // change. The second opinion lives outside the classifier; this pins that the rules read every email exactly as before.
-const GOLDEN = { n: 2564, sha256: "ee59cb5e1102217cc1f9d64dab60ebd6efa43c38b22b93a100f5fe3a996eaa94" };
+// Family email (2026-10-26): one reading's evidence changed and no kind did. The Spanish "nos gustaría invitarte a una
+// entrevista" became a decisive interview phrase (career_mail_langs.ts), so mail-blind240 C234 (interview before and after)
+// now cites that phrase; every other one of the 2564 readings is byte-identical to the previous golden (ee59cb5e...).
+const GOLDEN = { n: 2564, sha256: "0a951cbc0d8d1654644f25604e0601be9b4f0ca4af1235e2b5539fcdbacc42e0" };
 const FILES = ["mail-labels", "mail-blind", "mail-dev4", "mail-blind160", "mail-dev5", "mail-blind200", "mail-dev6", "mail-blind240", "mail-dev7", "mail-blind300"];
 async function committed(): Promise<{ file: string; mails: any[] }[]> {
   const out = [];
@@ -117,25 +121,17 @@ Deno.test("WO-051/U2 how much is sent, per committed split (no label read on a h
 });
 
 // ------------------------------------------------------------------------------------------------ P: what is sent
-const ENV = (more: Record<string, string> = {}) => ({ get: (k: string) => ({ OPENAI_API_KEY: "sk-test-not-real", ...more } as Record<string, string>)[k] });
-function fakeOpenAI(answer: () => string) {
-  const bodies: any[] = [];
-  const request = (async (_u: string | URL | Request, init?: RequestInit) => {
-    const body = JSON.parse(String(init?.body ?? "{}"));
-    bodies.push(body);
-    return new Response(JSON.stringify({ id: "x", model: body.model, choices: [{ message: { content: answer() }, finish_reason: "stop" }], usage: { prompt_tokens: 400, completion_tokens: 20 } }), { status: 200 });
-  }) as typeof fetch;
-  return { request, bodies };
-}
+const ENV = (more: Record<string, string> = {}) => ({ get: (k: string) => ({ ANTHROPIC_API_KEY: "sk-ant-test-not-real", ...more } as Record<string, string>)[k] });
+const fakeOpenAI = (answer: () => string) => fakeAnthropic(() => answer(), { input_tokens: 400, output_tokens: 20 }); // the Anthropic Messages wire
 function costSink() {
   const rows: any[] = [];
   return { admin: { from: (t: string) => ({ insert: async (row: any) => { rows.push({ table: t, ...row }); return { error: null }; } }) }, rows };
 }
 
-Deno.test("WO-051/P1 what is sent: the sender's display name and domain, the subject and the snippet, masked; never an address, the body, the date or the hash; the strict schema reaches OpenAI", async () => {
+Deno.test("WO-051/P1 what is sent: the sender's display name and domain, the subject and the snippet, masked; never an address, the body, the date or the hash; the strict schema reaches Claude as output_config.format", async () => {
   const m = mailIn("p1", "\"Jo Smith\" <jo.smith@asana.com>", "Re: Account Manager role 4829137", "To: sam.lee@gmail.com. Hi Sam, quick one about your application: call me on 415 555 0199 or write to jo.smith@asana.com.");
   const p = mailModelPayload(m);
-  eq(Object.keys(p).sort(), ["max_tokens", "messages", "store", "system"]);
+  eq(Object.keys(p).sort(), ["max_tokens", "messages", "system"]);
   const lines = (p.messages[0].content as string).split("\n");
   eq(lines.map((l) => l.split(":")[0]), ["From", "Subject", "Snippet"]);
   eq(lines[0], "From: Jo Smith (domain asana.com)", "name and domain only");
@@ -150,11 +146,11 @@ Deno.test("WO-051/P1 what is sent: the sender's display name and domain, the sub
   assert(w.status === "on");
   await secondPass([VAGUE], ASANA, (payload) => w.deps.call(payload, { calls: 0, failed: 0, input_tokens: 0, output_tokens: 0, cached_tokens: 0, usd_micros: 0, unpriced: 0, provider: null, models: [] }));
   const body = ai.bodies[0];
-  eq([body.store, body.response_format?.type, body.response_format?.json_schema?.strict], [false, "json_schema", true]);
-  eq(body.response_format.json_schema.schema, MAIL_VERDICT_FORMAT.json_schema.schema);
-  eq(body.response_format.json_schema.schema.properties.kind.enum, ["received", "rejection", "interview", "assessment", "offer", "recruiter_reply", "none"]);
-  eq(body.response_format.json_schema.schema.additionalProperties, false);
-  assert(!JSON.stringify(body.messages).includes("no-reply@"), "the sender's address never reaches OpenAI");
+  eq([body.output_config?.format?.type, "store" in body, "response_format" in body, ai.onlyAnthropic()], ["json_schema", false, false, true]);
+  eq(body.output_config.format.schema, MAIL_VERDICT_FORMAT.json_schema.schema);
+  eq(body.output_config.format.schema.properties.kind.enum, ["received", "rejection", "interview", "assessment", "offer", "recruiter_reply", "none"]);
+  eq(body.output_config.format.schema.additionalProperties, false);
+  assert(!JSON.stringify(body.messages).includes("no-reply@"), "the sender's address never reaches the model");
 });
 
 // ------------------------------------------------------------------------------------------------ J: the schema
@@ -282,7 +278,7 @@ Deno.test("WO-051/K1 each person's calls are metered into one agent_turn_costs r
   eq([s.model_calls, s.model_decided, h.ai.bodies.length], [2, 1, 2], "two unsure emails asked; the clear rejection never");
   eq(h.costs.rows.length, 1);
   const c = h.costs.rows[0];
-  eq([c.table, c.user_id, c.thread_id, c.provider, c.calls, c.input_tokens, c.output_tokens], ["agent_turn_costs", "U1", null, "openai", 2, 800, 40]);
+  eq([c.table, c.user_id, c.thread_id, c.provider, c.calls, c.input_tokens, c.output_tokens], ["agent_turn_costs", "U1", null, "anthropic", 2, 800, 40]);
   assert(c.usd_micros > 0, "priced from the gateway's table");
 });
 
@@ -294,7 +290,7 @@ Deno.test("WO-051/V1 the live eval without a key prints NOT_RUN and exits 0; not
   }).output();
   const text = new TextDecoder().decode(out.stdout);
   eq(out.code, 0, new TextDecoder().decode(out.stderr));
-  assert(/^NOT_RUN: no OPENAI_API_KEY/.test(text), text);
+  assert(/^NOT_RUN: no ANTHROPIC_API_KEY/.test(text), text);
   const stub = await withModel(allSplits().dev.slice(0, 40), say("none", 0.9));
   assert(stub.asked >= 1 && stub.rules.predicted >= stub.rules_and_model.predicted, "a model saying none only holds steps back");
 });
@@ -304,5 +300,5 @@ Deno.test("WO-051/D1 the privacy decision is the owner's: a pending row says wha
   assert(row, "D-025 is there");
   for (const must of ["CAREER_MAIL_MODEL", "display name and domain", "Never sent:", "the body", "Why:", "Cost (ASSUMED)", "200 calls a person a day", "| pending owner |"]) assert(row.includes(must), `D-025 says: ${must}`);
   assert(!/\|\s*settled/.test(row), "not settled by a builder");
-  assert(!/anthropic/i.test(MODEL_SRC), "no other provider in the second opinion");
+  assert(!/openai|gpt-/i.test(MODEL_SRC.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n")), "no other provider in the second opinion");
 });

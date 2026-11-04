@@ -2,11 +2,11 @@
 // Code checks what a tool call means, not only its shape (audit chat-brain F2, F4):
 //   queue_applications  each pick is resolved by its job_id from the postings on file, and its employer and title come from
 //                       that record, never from the model. A pick is refused, with a reason the model relays, when its
-//                       employer is not the one the person named (or showed them last turn), when they applied there in the
-//                       last 30 days (tracker, every thread, the apply queue: D-011's one per company per 30 days), or when
-//                       it is their confirmed current employer.
+//                       employer is not the one the person named (or showed them last turn), when this exact posting is already in
+//                       their applications (every thread, the apply queue; D-MS-3, 2026-10-27: no one-per-company window, another
+//                       posting at the same employer is allowed), or when it is their confirmed current employer.
 //   remember_instruction  an instruction that waives the person's approval, or asks for a forbidden act, is never kept.
-// Battery rows: BR-023 (wrong company), BR-018 (already applied by hand), BR-019 (30 days), BR-021 (current employer),
+// Battery rows: BR-023 (wrong company), BR-018 (already applied by hand), BR-019 (no company window), BR-021 (current employer),
 // BR-084 (autopilot). Contract: docs/architect/work-orders/WO-091b-tool-checks.md. Offline: scripted model, fake stores.
 import { careerTools } from "../../supabase/functions/_shared/agent/career_tools.ts";
 import { memoryWantStore } from "../../supabase/functions/_shared/career_apply_want.ts";
@@ -86,41 +86,44 @@ Deno.test("WO-091b/3 a pick that is not on file, or has closed, is refused with 
   eq(wants.dump().u1 ?? [], []);
 });
 
-Deno.test("WO-091b/4 BR-018: already applied by hand at Northwind Ledger (this thread's tracker, or another thread's) is refused", async () => {
+Deno.test("WO-091b/4 BR-018: the exact posting already applied to (this thread's tracker, another thread's, or Trainee's queue) is refused; another posting at that employer is not (D-MS-3)", async () => {
+  const NW = "https://job-boards.greenhouse.io/northwindledger/jobs/2002";
+  const queueRow = (url: string, ago: number) => ({ id: "J-9", company: "Northwind Ledger", url, state: "confirmed", created_at: new Date(NOW - ago * DAY).toISOString(), updated_at: new Date(NOW - ago * DAY).toISOString() });
+  // A hand-reported application names an employer, not a posting: it never blocks a different posting there.
   const { t } = setup();
   const state: Record<string, unknown> = {};
   await t.track_application.run({ company: "Northwind Ledger", role: "New Grad Software Engineer", stage: "Submitted" }, ctx("I applied to Northwind Ledger by hand", state, {}, NOW - 2 * DAY));
-  const out: any = await t.queue_applications.run({ postings: [pick("greenhouse:northwindledger:2002")] },
+  const byEmployer: any = await t.queue_applications.run({ postings: [pick("greenhouse:northwindledger:2002")] },
     ctx("Apply me to the New Grad Software Engineer role at Northwind Ledger.", state));
-  eq(out.queued, 0, "no double apply");
-  assert(/already applied|applied to Northwind Ledger/i.test(out.refused[0].reason) && /30 days/.test(out.refused[0].reason), out.refused[0].reason);
+  eq(byEmployer.queued, 1, "an employer-level note is not this posting (no one-per-company rule)");
 
-  // The application lives in another conversation's tracker: read across threads (mail.applications).
-  const mail = memoryMailStore({ tracker: { u1: [{ app_id: "A-1", company: "Northwind Ledger Inc.", role: "SWE", stage: "Submitted", applied_at: new Date(NOW - 5 * DAY).toISOString(), events: [] }] } });
-  const other = setup({ mail });
-  const out2: any = await other.t.queue_applications.run({ postings: [pick("greenhouse:northwindledger:2002")] }, ctx("Apply me to the New Grad Software Engineer role at Northwind Ledger."));
-  eq(out2.queued, 0, "another thread's application counts");
-  // And one that went through Trainee's own queue.
-  const mail3 = memoryMailStore({ queue: { u1: [{ id: "J-9", company: "Northwind Ledger", url: "https://job-boards.greenhouse.io/northwindledger/jobs/1", state: "confirmed", created_at: new Date(NOW - 3 * DAY).toISOString(), updated_at: new Date(NOW - 3 * DAY).toISOString() }] } });
-  const out3: any = await setup({ mail: mail3 }).t.queue_applications.run({ postings: [pick("greenhouse:northwindledger:2002")] }, ctx("Apply me to the New Grad Software Engineer role at Northwind Ledger."));
-  eq(out3.queued, 0, "an application Trainee sent counts");
+  // The same posting recorded in Trainee's own queue, however long ago, is a duplicate, under another host spelling too.
+  for (const [ago, url] of [[3, NW], [40, "https://boards.greenhouse.io/northwindledger/jobs/2002"]] as const) {
+    const mail = memoryMailStore({ queue: { u1: [queueRow(url, ago)] } });
+    const out: any = await setup({ mail }).t.queue_applications.run({ postings: [pick("greenhouse:northwindledger:2002")] }, ctx("Apply me to the New Grad Software Engineer role at Northwind Ledger."));
+    eq(out.queued, 0, `the same posting ${ago} days later is still a duplicate`);
+    assert(/same posting/i.test(out.refused[0].reason) && !/30 days/.test(out.refused[0].reason), out.refused[0].reason);
+  }
+  // A different posting at the same employer, applied to 3 days ago through Trainee, is allowed.
+  const mail3 = memoryMailStore({ queue: { u1: [queueRow("https://job-boards.greenhouse.io/northwindledger/jobs/1", 3)] } });
+  eq(((await setup({ mail: mail3 }).t.queue_applications.run({ postings: [pick("greenhouse:northwindledger:2002")] }, ctx("Apply me to the New Grad Software Engineer role at Northwind Ledger."))) as any).queued, 1, "another posting at the same employer within 30 days is allowed");
 });
 
-Deno.test("WO-091b/5 BR-019: one application per company per 30 days; the reason gives the first day they can, by arithmetic", async () => {
+Deno.test("WO-091b/5 BR-019: no one-per-company window (D-MS-3): a different posting 10 days after a rejection is queued; only the exact posting is refused, at any date", async () => {
+  const row = (url: string, ago: number, state = "confirmed") => ({ id: "J-5", company: "Eastbank Systems", url, state, created_at: new Date(NOW - ago * DAY).toISOString(), updated_at: new Date(NOW - ago * DAY).toISOString() });
+  const EB = "https://job-boards.greenhouse.io/eastbank/jobs/3003";
+  const ask = (rows: any[], s: Record<string, unknown> = {}) => setup({ mail: memoryMailStore({ queue: { u1: rows } }) }).t.queue_applications.run({ postings: [pick("greenhouse:eastbank:3003")] }, ctx("Apply me to the Early Career role at Eastbank Systems.", s)) as Promise<any>;
+  // Employer-level tracker rejection 10 days ago (no posting named): the new posting goes through.
   const { t } = setup();
   const state: Record<string, unknown> = {};
   await t.track_application.run({ company: "Eastbank Systems", role: "Software Engineer", stage: "Rejected" }, ctx("I applied to Eastbank Systems and got rejected", state, {}, NOW - 10 * DAY));
-  const out: any = await t.queue_applications.run({ postings: [pick("greenhouse:eastbank:3003")] }, ctx("Apply me to the Early Career role at Eastbank Systems.", state));
-  eq(out.queued, 0);
-  assert(/2026-10-10/.test(out.refused[0].reason) && /2026-11-09/.test(out.refused[0].reason), `applied on, and first day again: ${out.refused[0].reason}`);
-
-  // Guards: 31 days ago is outside the window; a posting only saved was never applied to.
-  const old = setup(), s2: Record<string, unknown> = {};
-  await old.t.track_application.run({ company: "Eastbank Systems", stage: "Rejected" }, ctx("x", s2, {}, NOW - 31 * DAY));
-  eq(((await old.t.queue_applications.run({ postings: [pick("greenhouse:eastbank:3003")] }, ctx("Apply me to the Early Career role at Eastbank Systems.", s2))) as any).queued, 1, "31 days ago: allowed");
-  const saved = setup(), s3: Record<string, unknown> = {};
-  await saved.t.track_application.run({ company: "Eastbank Systems", stage: "Saved" }, ctx("save it", s3, {}, NOW - 2 * DAY));
-  eq(((await saved.t.queue_applications.run({ postings: [pick("greenhouse:eastbank:3003")] }, ctx("Apply me to the Early Career role at Eastbank Systems.", s3))) as any).queued, 1, "saved is not applied");
+  eq(((await t.queue_applications.run({ postings: [pick("greenhouse:eastbank:3003")] }, ctx("Apply me to the Early Career role at Eastbank Systems.", state))) as any).queued, 1, "10 days after a rejection at the employer: allowed");
+  eq((await ask([row("https://job-boards.greenhouse.io/eastbank/jobs/9", 10)])).queued, 1, "another posting there 10 days ago: allowed");
+  const dup = await ask([row(EB, 10)]);
+  eq(dup.queued, 0, "the exact posting 10 days ago: refused");
+  assert(/same posting/i.test(dup.refused[0].reason) && !/30 days|2026-11-09/.test(dup.refused[0].reason), dup.refused[0].reason);
+  eq((await ask([row(EB, 31)])).queued, 0, "the exact posting 31 days ago: still refused (no window)");
+  eq((await ask([row(EB, 2, "queued")])).queued, 1, "a row that never went out is not an application");
 });
 
 Deno.test("WO-091b/6 BR-021: the person's confirmed current employer is refused; a past one, or an unconfirmed draft, is not", async () => {
@@ -144,9 +147,9 @@ Deno.test("WO-091b/6 BR-021: the person's confirmed current employer is refused;
 });
 
 Deno.test("WO-091b/7 R8: three bad picks in one call: queued 0, each refused with its own reason", async () => {
-  const { wants, t } = setup();
   const state: Record<string, unknown> = { profile: { facts: [confirmedFact("Software engineer at Copperline Infra (current)")] } };
-  await t.track_application.run({ company: "Northwind Ledger", stage: "Submitted" }, ctx("I applied to Northwind Ledger by hand", state, {}, NOW - DAY));
+  const mail = memoryMailStore({ queue: { u1: [{ id: "J-7", company: "Northwind Ledger", url: "https://job-boards.greenhouse.io/northwindledger/jobs/2002", state: "confirmed", created_at: new Date(NOW - DAY).toISOString(), updated_at: new Date(NOW - DAY).toISOString() }] } });
+  const { wants, t } = setup({ mail });
   const out: any = await t.queue_applications.run({ postings: [
     pick("greenhouse:meridian:1001", { company: "Quickhire Remote Jobs", title: "Operations" }),
     pick("greenhouse:northwindledger:2002"),
@@ -156,7 +159,7 @@ Deno.test("WO-091b/7 R8: three bad picks in one call: queued 0, each refused wit
   eq(out.refused.map((r: any) => r.posting.company), ["Meridian Fulfillment", "Northwind Ledger", "Copperline Infra, Inc."]);
   const [wrong, tracked, current] = out.refused.map((r: any) => r.reason);
   assert(/not the employer/i.test(wrong), wrong);
-  assert(/30 days/.test(tracked) && !/not the employer/i.test(tracked), tracked);
+  assert(/same posting/i.test(tracked) && !/not the employer/i.test(tracked), tracked);
   assert(/current employer/i.test(current), current);
   eq(wants.dump().u1 ?? [], []);
 });

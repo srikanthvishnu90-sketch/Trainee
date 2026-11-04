@@ -427,7 +427,7 @@ test("submit: the same posting twice is refused by the record, so nothing is sen
       const trail = await sw.evaluate(async (id) => ((await chrome.storage.session.get("card_trail")).card_trail || []).filter((x) => x.tabId === id), form.tabId);
       throw Error(e.message + " panel=" + JSON.stringify(p) + " card.hash=" + c?.hash + " begins=" + world.state.begins.length + " trail=" + JSON.stringify(trail));
     });
-    assert.match(stopped.message, /already applied/);
+    assert.match(stopped.message, /already in your applications/);
     await sleep(500);
     assert.equal(submitsFor(id).length, before, "nothing sent");
   } finally {
@@ -873,7 +873,7 @@ test("review 2: a notice already on the page is not the employer's answer; the s
       await form.panel.click("#approve");
       const end = await waitCard(form.tabId, (c) => c.status === "done" || c.status === "stopped", 40000);
       if (round === 1) assert.equal(end.result, "confirmed", end.message);
-      else assert.match(end.message, /already applied/);
+      else assert.match(end.message, /already in your applications/);
     } finally {
       await closeForm(form);
     }
@@ -900,7 +900,7 @@ test("review 2: a click the employer answered with an error is never sent again"
     await readyCard(form);
     await form.panel.click("#approve");
     const again = await waitCard(form.tabId, (c) => c.status === "stopped");
-    assert.match(again.message, /already applied/);
+    assert.match(again.message, /already in your applications/);
   } finally {
     await closeForm(form);
   }
@@ -927,7 +927,7 @@ test("review 2: an employer that never answers: unknown, counted as applied, nev
     await readyCard(form);
     await form.panel.click("#approve");
     const again = await waitCard(form.tabId, (c) => c.status === "stopped");
-    assert.match(again.message, /already applied/);
+    assert.match(again.message, /already in your applications/);
   } finally {
     await closeForm(form);
   }
@@ -1170,7 +1170,7 @@ test("proof: without the picture after the click, the card never says confirmed;
   }
 });
 
-test("queue: after a posting that stops (already applied), Skip moves on and every later posting is sent and confirmed", async (t) => {
+test("queue: after a posting that stops (already in your applications), Skip moves on and every later posting is sent and confirmed", async (t) => {
   if (skip(t)) return;
   fresh();
   const applied = "lever-lyrahealth-35bffe8b-ac9f-4749-ba4c-5f3a4d2bd77d";
@@ -1196,7 +1196,7 @@ test("queue: after a posting that stops (already applied), Skip moves on and eve
       await panel.click("#approve");
       if (id === applied) {
         const stopped = await waitCard(tabId, (c) => c.url === url && c.status === "stopped");
-        assert.match(stopped.message, /already applied/);
+        assert.match(stopped.message, /already in your applications/);
         await panel.click("#q-skip");
         continue;
       }

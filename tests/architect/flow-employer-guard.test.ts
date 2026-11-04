@@ -9,6 +9,9 @@
 //   batch          "apply to these" over the thread's list: the distinct employers queue, the question attaches to the
 //                  Acme postings only; the answer names the company while two are open
 // Regression test for the shared matcher's two contracts (employer-matcher-contract.test.ts is the unit pin).
+// OWNER RULE (2026-10-26, "never submit applications without a real resume"): nothing is queued for a person with no
+// confirmed resume, so each person here first gives theirs (the synthetic TEST resume) and confirms it, as a real person
+// would; every employer-guard assertion below is unchanged.
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, supabaseParity } from "../flow/handler.ts";
@@ -24,6 +27,7 @@ const ROWS: [string, string, string, string, string, string][] = [
   ["greenhouse:fabrikam:4", "greenhouse", "fabrikam", "Fabrikam Data", "Data Analyst", "https://boards.greenhouse.io/fabrikam/jobs/4"],
 ];
 const ASK_INTENT = "career_apply_employer_ask", ANSWER_INTENT = "career_apply_employer_answer";
+const RESUME = await Deno.readTextFile(new URL("../../packages/career-data/fixtures/test-resume.txt", import.meta.url));
 
 Deno.test({ name: "SERIAL-1490/1491: the employer guard at the real handler: exact refusal, distinct employers, a partial name asked once, repeated answers stand", sanitizeResources: false, sanitizeOps: false, async fn(t) {
   if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
@@ -43,14 +47,22 @@ Deno.test({ name: "SERIAL-1490/1491: the employer guard at the real handler: exa
     handler = await careerHandler(pg, PEOPLE);
     const wanted = async (person: string) => JSON.parse(await pg.sql(`select coalesce(json_agg(posting_key order by posting_key), '[]') from public.career_apply_wanted where user_id = '${person}'`)) as string[];
     const say = async (chat: Chat, message: string) => { const r = await chat.say(message); eq(r.status, 200, r.reply); return r; };
+    // The seed (OWNER RULE 2026-10-26): the person's resume, pasted and confirmed in the same thread, evidenced.
+    const withResume = async (chat: Chat, person: string) => {
+      eq((await say(chat, `here is my resume:\n${RESUME}`)).intent, "career_resume_ingest");
+      const yes = await say(chat, "yes, that's my resume");
+      eq([yes.intent, yes.resultStatus], ["career_resume_ingest", "completed"], yes.reply);
+      eq(await pg.sql(`select public.career_resume_on_file('${person}')`), "t", "a confirmed resume on file");
+    };
 
     await t.step("exact name: their current employer is refused; a distinct employer is queued, not confused", async () => {
       const chat = handler!.chat("tok-a"), me = PEOPLE["tok-a"];
+      await withResume(chat, me);
       const said = await say(chat, "I work at Contoso Analytics");
       eq(said.intent, "profile_correction", said.reply);
       const exact = await say(chat, "apply to the Data Analyst role at Contoso Analytics");
       eq([exact.intent, exact.resultStatus], ["career_apply_queue", "refused"], exact.reply);
-      assert(/Contoso Analytics is their current employer/.test(exact.reply) && !/where you work now\?/.test(exact.reply), exact.reply);
+      assert(/Contoso Analytics is your current employer/.test(exact.reply) && !/where you work now\?/.test(exact.reply) && !/\btheir\b|\bthey (?:said|set|did|work|named|already)\b|themselves|the person/i.test(exact.reply), exact.reply);
       eq(await wanted(me), []);
       const other = await say(chat, "apply to the Data Analyst role at Fabrikam Data");
       eq([other.intent, other.resultStatus], ["career_apply_queue", "queued"], other.reply);
@@ -61,6 +73,7 @@ Deno.test({ name: "SERIAL-1490/1491: the employer guard at the real handler: exa
 
     await t.step("partial name: asked once; no queues it once; no again stands; yes keeps the other out; yes again stands; no second question", async () => {
       const chat = handler!.chat("tok-b"), me = PEOPLE["tok-b"];
+      await withResume(chat, me);
       eq((await say(chat, "I work at Acme")).intent, "profile_correction");
       const ask = await say(chat, "apply to the Data Analyst role at Acme Robotics Inc");
       eq([ask.intent, ask.resultStatus], [ASK_INTENT, "asking_employer"], ask.reply);
@@ -86,7 +99,7 @@ Deno.test({ name: "SERIAL-1490/1491: the employer guard at the real handler: exa
       eq(await wanted(me), ["greenhouse:acmerobotics:1"]);
       const again = await say(chat, "apply to the Data Analyst role at Acme Health");
       eq([again.intent, again.resultStatus], ["career_apply_queue", "refused"], again.reply);
-      assert(/they said so when asked/.test(again.reply) && !/where you work now\?/.test(again.reply), `their answer is remembered on the thread: ${again.reply}`);
+      assert(/you said so when I asked/.test(again.reply) && !/where you work now\?/.test(again.reply), `their answer is remembered on the thread: ${again.reply}`);
       const back = await say(chat, "apply to the Data Analyst role at Acme Robotics Inc");
       eq([back.intent, back.resultStatus], ["career_apply_queue", "already"], `their no is remembered too: ${back.reply}`);
       eq(await wanted(me), ["greenhouse:acmerobotics:1"]);
@@ -94,6 +107,7 @@ Deno.test({ name: "SERIAL-1490/1491: the employer guard at the real handler: exa
 
     await t.step("batch: the question attaches to its postings only; the rest queue; the answer names the company while two are open", async () => {
       const chat = handler!.chat("tok-c"), me = PEOPLE["tok-c"];
+      await withResume(chat, me);
       eq((await say(chat, "I work at Acme")).intent, "profile_correction");
       const found = await say(chat, "find analyst jobs in Chicago");
       eq(found.intent, "career_discovery", found.reply);
@@ -114,7 +128,7 @@ Deno.test({ name: "SERIAL-1490/1491: the employer guard at the real handler: exa
       eq(await wanted(me), ["greenhouse:acmerobotics:1", "greenhouse:contoso:3", "greenhouse:fabrikam:4"]);
       const rerun = await say(chat, "apply to these");
       eq(rerun.resultStatus, "already", rerun.reply);
-      assert(!/where you work now\?/.test(rerun.reply) && /they said so when asked/.test(rerun.reply), rerun.reply);
+      assert(!/where you work now\?/.test(rerun.reply) && /you said so when I asked/.test(rerun.reply), rerun.reply);
       eq((await wanted(me)).length, 3);
       eq(await wanted(PEOPLE["tok-a"]), ["greenhouse:fabrikam:4"], "another person's queue is untouched");
     });

@@ -187,11 +187,13 @@ test("SC-045: close-out record — no campaign on file, nothing invented (BUG-10
   assert.deepEqual(r.payload.angles, []);
 });
 
-test("SC-046: firm-cap record states the locked numbers (BUG-108)", () => {
+// NO LIMITS (owner, 2026-10-27): Trainee sets no per-firm cap; the record says there is none, never a number.
+test("SC-046: firm-cap record states there is no per-firm cap (BUG-108, NO LIMITS)", () => {
   const { r } = drive("SC-046", ASKS["SC-046"]);
   assert.equal(r.payload.kind, "firm_cap");
-  assert.equal(r.payload.per_firm_cap, 15);
-  assert.equal(r.payload.window_days, 30);
+  assert.equal(r.payload.per_firm_cap, null);
+  assert.equal(r.payload.window_days, null);
+  assert.match(r.reply, /no per-firm cap/i);
 });
 
 test("SC-047: suppression-check record (BUG-108)", () => {

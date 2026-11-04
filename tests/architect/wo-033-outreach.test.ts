@@ -1,13 +1,13 @@
-// WO-033: contact lists, outreach drafted per person from real facts, approved in batches of 10 by one reply, sent one at
-// a time from the person's own Gmail under caps code enforces, every step on the timeline, and the referral map from the
+// WO-033: contact lists, outreach drafted per person from real facts, approved in batches of 10 by one reply, sent from
+// the person's own Gmail with no volume number of Trainee's own (NO LIMITS, owner 2026-10-27; only Gmail's refusal slows it), every step on the timeline, and the referral map from the
 // person's own exports. Synthetic data, a scripted model, fake Gmail and DNS. Run: deno test -A --no-check tests/architect/
 import {
   checkAddress, contactsOf, hunterPass, hunterVerifier, importContactsCsv, importContactsFile, listCost, listReport, mapHunter, memoryCheckCache,
   MX_NOT_WIRED, type MxResolver, normalizeFirm, vendorSource, verifyRows,
 } from "../../supabase/functions/_shared/career_contacts.ts";
 import {
-  admitSend, batchMessages, BATCH_FOOT, capFor, classifyReply, draftFor, emailHash, memoryOutreachStore, messageOf, OPT_OUT_LINE, OUTREACH_INTENT,
-  type OutreachDraft, outreachLock, outreachTurn, parseOutreachReply, payloadHash, RECIPIENT_CAP, recordReply, runOutreachSends, type Sender, sharedFacts,
+  admitSend, batchMessages, BATCH_FOOT, classifyReply, draftFor, emailHash, memoryOutreachStore, messageOf, OPT_OUT_LINE, OUTREACH_INTENT,
+  type OutreachDraft, outreachLock, outreachTurn, parseOutreachReply, payloadHash, recordReply, runOutreachSends, type Sender, sharedFacts,
 } from "../../supabase/functions/_shared/career_outreach.ts";
 import { buildRaw, careerTokenFor, gmailSender, GMAIL_SEND_SCOPE } from "../../supabase/functions/_shared/career_outreach_gmail.ts";
 import { REFERRAL_ASK, referralMap, targetFirms } from "../../supabase/functions/_shared/career_referrals.ts";
@@ -197,7 +197,7 @@ Deno.test("WO-033/P1 'send 1-7,9' and its adversarial kin", () => {
   eq(parseOutreachReply("skip 4"), { kind: "skip", ns: [4] });
   eq(parseOutreachReply("edit 3: Hi Avery, a shorter note."), { kind: "edit", n: 3, text: "Hi Avery, a shorter note." });
   eq(parseOutreachReply("send none"), { kind: "none" });
-  for (const [t, why] of [["send 1-100", /no draft 100/], ["send all except", /leave out by number/], ["send all except everyone", /leave out by number/], ["send 0", /from 1/],
+  for (const [t, why] of [["send 1-1000000", /no draft 1000000/], ["send all except", /leave out by number/], ["send all except everyone", /leave out by number/], ["send 0", /from 1/],
     ["send 7-3", /runs backwards/], ["send 1-7; drop table drafts", /by number/], ["send 1--7", /by number/], ["send -3", /by number/], ["send 3.5", /by number/], ["send 1e3", /by number/]] as const) {
     const r = parseOutreachReply(t);
     assert(r && r.kind === "bad" && why.test(r.why), `${t}: ${JSON.stringify(r)}`);
@@ -263,44 +263,38 @@ Deno.test("WO-033/S1 no send without approval; an edit after approval needs a ne
   eq(gmail.sent.map((m) => m.text.split("\n")[0]), ["Hi, body 1.", "Hi Person, a note in my own words."], "the edit goes once approved");
 });
 
-Deno.test("WO-033/S2 caps: warm-up 10, then 20, the person's 30, never 31; 90 seconds apart; one per run", async () => {
-  // The rule itself.
-  eq([capFor({ own: null, firstSentAt: null, now: OCT14 }), capFor({ own: 30, firstSentAt: "2026-10-10T00:00:00Z", now: OCT14 }), capFor({ own: null, firstSentAt: "2026-10-01T00:00:00Z", now: OCT14 }), capFor({ own: 31, firstSentAt: "2026-10-01T00:00:00Z", now: OCT14 }), capFor({ own: 30, firstSentAt: "2026-10-01T00:00:00Z", now: OCT14 })],
-    [{ cap: 10, warmup: true }, { cap: 10, warmup: true }, { cap: 20, warmup: false }, { cap: 30, warmup: false }, { cap: 30, warmup: false }]);
-  // Warm-up: no send history, so the 11th of the day is refused.
-  const store = memoryOutreachStore(), gmail = fakeGmail();
-  await batchOf(store, 10); await turn(store, "send all");
-  await batchOf(store, 10, OCT14 + 1); await turn(store, "send all");
-  const burst = await runOutreachSends({ store, sender: gmail, now: OCT14 });
-  eq(burst.sent, 1, "one send per person per run, never a burst");
-  const soon = await runOutreachSends({ store, sender: gmail, now: OCT14 + 60_000 });
-  eq([soon.sent, soon.refused.spacing], [0, 1], "60 seconds later: waits");
-  for (let k = 1; k <= 12; k++) await runOutreachSends({ store, sender: gmail, now: OCT14 + k * 91_000 });
-  eq(gmail.sent.length, 10, "first week: at most 10 a day");
-  // Past the first week: 20 by default; the 21st refused.
-  const day8 = Date.parse("2026-10-22T13:00:00Z");
-  // WO-091c: an approval lasts 7 days, so the 10 approved on day 0 and never sent are dropped on day 8, not sent; three
-  // fresh batches leave 10 waiting past the cap.
-  for (let b = 0; b < 3; b++) { await batchOf(store, 10, day8 + b); await turn(store, "send all"); }
-  const before = gmail.sent.length;
-  let last: any;
-  for (let k = 0; k < 30; k++) last = await runOutreachSends({ store, sender: gmail, now: day8 + k * 91_000 });
-  eq([gmail.sent.length - before, last.refused.daily_cap], [20, 1], "20 a day by default: the 21st is refused");
-  eq(store.dump().drafts.filter((d) => d.result === "expired").length, 10, "day 0's unsent approvals expired on day 8");
-  // The person's own 30, through the tool; 31 never.
+Deno.test("WO-033/S2 NO LIMITS: no warm-up, daily number, spacing or per-run number; no limit tool; only Gmail's 429 slows it", async () => {
+  // A brand-new sender (no send history) with 40 approved: one run sends all 40, back to back.
+  const store = memoryOutreachStore();
+  for (let b = 0; b < 4; b++) { await batchOf(store, 10, OCT14 + b); await turn(store, "send all"); }
+  let refusedAt = Infinity, refusals = 0;
+  const sent: string[] = [];
+  const gmail: Sender = { async send(_u, m) {
+    if (sent.length >= refusedAt) { refusals++; return { status: "RATE_LIMITED", detail: "HTTP 429 userRateLimitExceeded" }; }
+    sent.push(m.to); return { status: "sent", id: `G${sent.length}`, thread_id: `T${sent.length}` };
+  } };
+  const run = await runOutreachSends({ store, sender: gmail, now: OCT14 });
+  eq([run.sent, Object.keys(run.refused)], [40, []], "all 40 in one run: no warm-up 10, no daily 20, no 90 seconds, no one-per-run");
+  eq(new Set(sent).size, 40, "each once");
+  eq((await runOutreachSends({ store, sender: gmail, now: OCT14 + 1000 })).sent, 0, "and never again");
+  // The next day, 30 more; Gmail's own ceiling answers 429 after 25: that person's run stops at the first refusal (no
+  // tight retry loop), the other 5 stay approved and go on the next run once Gmail allows.
+  const day2 = OCT14 + 86_400_000;
+  for (let b = 0; b < 3; b++) { await batchOf(store, 10, day2 + b); await turn(store, "send all", day2 + b); }
+  refusedAt = 65;
+  const hit = await runOutreachSends({ store, sender: gmail, now: day2 + 1000 });
+  eq([hit.sent, hit.rate_limited, refusals], [25, 1, 1], "Gmail's refusal is the only brake, and it is asked once");
+  eq(store.dump().drafts.filter((d) => d.status === "approved").length, 5, "the rest wait, approved");
+  refusedAt = Infinity;
+  eq((await runOutreachSends({ store, sender: gmail, now: day2 + 3600_000 })).sent, 5, "they go when Gmail allows");
+  eq([sent.length, new Set(sent).size], [70, 70]);
+  // No tool sets a number, and the rule itself has none.
   const tools = byName(careerTools({ postings: async () => [], outreach: { store } }));
-  await rejects(() => tools.set_outreach_limit.run({ per_day: 31 }, { userId: U, threadId: TH, now: day8, state: {}, turn: { message: "raise my limit to 31 a day", added: [] } }), /30 a day is the most, ever/);
-  await rejects(() => tools.set_outreach_limit.run({ per_day: 30 }, { userId: U, threadId: TH, now: day8, state: {}, turn: { message: "send more", added: [] } }), /did not ask for that number/);
-  await tools.set_outreach_limit.run({ per_day: 30 }, { userId: U, threadId: TH, now: day8, state: {}, turn: { message: "raise my daily limit to 30", added: [] } });
-  const day9 = Date.parse("2026-10-23T13:00:00Z");
-  for (let b = 0; b < 4; b++) { await batchOf(store, 10, day9 + b); await turn(store, "send all"); }
-  const mid = gmail.sent.length;
-  for (let k = 0; k < 40; k++) last = await runOutreachSends({ store, sender: gmail, now: day9 + k * 91_000 });
-  eq([gmail.sent.length - mid, last.refused.daily_cap], [30, 1], "the person's own 30, and the 31st is refused");
-  await rejects(() => store.setPrefs(U, { daily_cap: 31 }), /1 to 30/);
-  // The rule refuses on its own too.
-  const d = { status: "approved", approved_hash: "h", hash: "h" } as unknown as OutreachDraft;
-  eq(admitSend({ draft: d, hash: "h", now: day9, dayStart: day9 - 3600_000, sends: Array.from({ length: 30 }, (_, i) => day9 - 3000_000 + i), firstSentAt: "2026-10-01T00:00:00Z", own: 31, dnc: false }), "daily_cap", "31 is clamped to 30");
+  eq(tools.set_outreach_limit, undefined, "no outreach limit tool");
+  const d = { status: "approved", approved_hash: "h", hash: "h", approved_at: new Date(day2).toISOString(), created_at: new Date(day2).toISOString() } as unknown as OutreachDraft;
+  eq(admitSend({ draft: d, hash: "h", now: day2, dnc: false }), "ok", "admission is the approval, its age, pause and do-not-contact only");
+  assert(!/capFor|WARMUP|GAP_MS|MAX_DAILY|DEFAULT_DAILY|daily_cap"|RECIPIENT_CAP/.test(SRC_OUTREACH), "no volume constant in the outreach code");
+  assert(!/set_outreach_limit|MAX_DAILY|BATCH_MAX/.test(SRC_TOOLS), "no volume constant in the tools");
 });
 
 Deno.test("WO-033/S3 Gmail: one recipient, no Cc or Bcc, no smuggled header, NOT_WIRED without the grant's gmail.send", async () => {
@@ -348,8 +342,8 @@ Deno.test("WO-033/O1 a 'stop' or 'unsubscribe' reply puts them on the do-not-con
   eq([s.sent, s.refused.do_not_contact], [0, 1]);
 });
 
-// One recipient, many Trainee users (architect review 2026-10-20, the 2M-user case): the same banker is everyone's
-// target, so caps per sender alone would still flood them.
+// One recipient, many Trainee users: the owner removed the cross-person count (2026-10-27 20:40 CDT: no "3 emails per
+// address per 30 days across all users"). Each person's own approved email goes once; a "stop" still stops everyone (X2).
 async function approvedTo(store: ReturnType<typeof memoryOutreachStore>, user: string, email: string, at: number) {
   const d: any = { n: 1, recipient: recipient({ name: "Shared Banker Synthetic", email, firm: "Goldman Sachs" }), subject: `From ${user}`, body: `Hi from ${user}.`,
     footer: `${user}\n\n${OPT_OUT_LINE}`, status: "approved", approved_at: new Date(at).toISOString(), sent_at: null, gmail_id: null, gmail_thread: null, result: null,
@@ -357,15 +351,13 @@ async function approvedTo(store: ReturnType<typeof memoryOutreachStore>, user: s
   d.hash = await payloadHash(messageOf(d)); d.approved_hash = d.hash;
   return (await store.saveBatch(user, `${user}-thread`, [d], at))[0];
 }
-Deno.test("WO-033/X1 one recipient gets at most RECIPIENT_CAP Trainee emails in 30 days from all users together", async () => {
+Deno.test("WO-033/X1 one recipient, five Trainee users: no cross-person count; each person's approved email goes once", async () => {
   const store = memoryOutreachStore(), gmail = fakeGmail(), to = "shared.banker@gs.example";
   for (let k = 1; k <= 5; k++) await approvedTo(store, `TEST-U${k}`, to, OCT14);
   const s = await runOutreachSends({ store, sender: gmail, now: OCT14 });
-  eq([s.sent, s.refused.recipient_cap], [RECIPIENT_CAP, 5 - RECIPIENT_CAP], "three of five senders reach them; the rest are held");
-  eq(gmail.sent.filter((m) => m.to === to).length, RECIPIENT_CAP);
-  // A month later the window has passed: one more may go.
-  await approvedTo(store, "TEST-U9", to, OCT14 + 31 * 86400_000);
-  eq((await runOutreachSends({ store, sender: gmail, now: OCT14 + 31 * 86400_000 })).sent, 1);
+  eq([s.sent, Object.keys(s.refused)], [5, []], "all five people's own approved emails go");
+  eq(gmail.sent.filter((m) => m.to === to).map((m) => m.subject), ["From TEST-U1", "From TEST-U2", "From TEST-U3", "From TEST-U4", "From TEST-U5"], "one each, none doubled");
+  eq((await runOutreachSends({ store, sender: gmail, now: OCT14 + 1000 })).sent, 0, "and none again");
 });
 Deno.test("WO-033/X2 a 'stop' to any Trainee user stops every Trainee user's drafts to that address", async () => {
   const store = memoryOutreachStore(), gmail = fakeGmail(), to = "asked.to.stop@gs.example";

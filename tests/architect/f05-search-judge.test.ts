@@ -99,7 +99,7 @@ Deno.test("f05 judge prompt: kept as one standing instruction, replaced, shown, 
   eq(await say("find me data analyst jobs"), null);
   const s = await say("judge prompt: weigh SQL above everything");
   eq(s?.status, "saved");
-  assert(/off right now/.test(s!.reply), "says the judge is off");
+  assert(/as soon as judging is switched on/.test(s!.reply) && !/model judge/.test(s!.reply), "says judging is not on yet, in plain words (OWNER LIST #6, 2026-10-28)");
   eq((await say("when you judge jobs, prefer small teams"))?.status, "saved");
   eq((await memory.standing("u")).map((x) => x.text), ["I need visa sponsorship", "Judge: prefer small teams"]);
   assert(/prefer small teams/.test((await say("what's my judge prompt?"))!.reply));
@@ -128,7 +128,7 @@ Deno.test("f05 turn: the live board first, with its freshness; the snapshot only
   const r = (await searchJudgeTurn({ message: "m", ask, userId: "u", now: NOW, profile: null, sources: sources(live), judge: { on: false } }))!;
   eq(r.source, "live");
   assert(/^From 1 live posting for data analyst in Chicago, first seen in the last 2 days\./.test(r.reply), r.reply);
-  assert(/^Not judged \(the model judge is off\), and you have no confirmed facts yet, so these are newest first/m.test(r.reply), r.reply);
+  assert(/^You have no confirmed facts yet, so these are newest first/m.test(r.reply), r.reply); // OWNER LIST #6 (2026-10-28)
   eq(r.shortlist.map((e) => e.id), ["g:1"]);
   const s = (await searchJudgeTurn({ message: "m", ask, userId: "u", now: NOW, profile: null, sources: sources([], [{ ...P("kb:1", "Data Analyst", "Chicago, IL", 20), fetched_on: "2026-10-15" }]), judge: { on: false } }))!;
   eq(s.source, "snapshot");

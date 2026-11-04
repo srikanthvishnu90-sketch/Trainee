@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Link Telegram · Trainee</title>
+<style>
+  body { font: 16px/1.5 system-ui, -apple-system, sans-serif; margin: 0; padding: 32px 16px; color: #111; background: #fafafa; }
+  main { max-width: 420px; margin: 0 auto; background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 24px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+  a { color: #0a58ca; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Link Telegram</h1>
+  <p id="say">Checking your Telegram sign-in...</p>
+  <p><button id="link" type="button" hidden>Link</button> <button id="unlink" type="button" hidden>Unlink Telegram</button> <a href="/">Back to Trainee</a></p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.js"></script>
+<script src="/src/telegram-link.js"></script>
+<script>
+(async () => {
+  const backend = "https://mrwngntwmnaqrqhupvlt.supabase.co";
+  const anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yd25nbnR3bW5hcXJxaHVwdmx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAwMzk1MDksImV4cCI6MjEwNTYxNTUwOX0.BZKqFIUdjLU_eLuTQecxsHdhIQu1GprTbZmkAPO6p88";
+  const supa = window.supabase.createClient(backend, anonKey);
+  const o = { backend, anonKey, fetch: (u, i) => fetch(u, i), token: async () => (await supa.auth.getSession()).data?.session?.access_token || null };
+  const say = document.getElementById("say"), link = document.getElementById("link"), unlink = document.getElementById("unlink");
+  const L = window.TraineeTelegramLink, auth = L.authFrom(location.search);
+  // Telegram's signed fields are not kept in the address bar or history.
+  history.replaceState(null, "", location.pathname);
+  const session = (await supa.auth.getSession()).data?.session || null;
+  const done = (r) => { say.textContent = r.reply; link.hidden = true; unlink.hidden = !(r.outcome === "linked" || r.outcome === "already" || r.outcome === "account_has_other"); };
+  if (!session) { say.textContent = "Sign in to Trainee in this browser first, then tap \"Link your Trainee account\" in Telegram again."; }
+  else if (!auth) { say.textContent = "Open this page from the \"Link your Trainee account\" button in Telegram. To unlink Telegram from your account, use the button below."; unlink.hidden = false; }
+  else {
+    say.textContent = L.question(auth, session.user?.email || "");
+    link.hidden = false;
+    link.onclick = async () => { link.disabled = true; done(await L.link(o, "?" + new URLSearchParams(auth).toString())); };
+  }
+  unlink.onclick = async () => { unlink.disabled = true; const u = await L.unlink(o); say.textContent = u.reply; unlink.hidden = u.outcome === "unlinked" || u.outcome === "not_linked"; unlink.disabled = false; };
+})();
+</script>
+</body>
+</html>

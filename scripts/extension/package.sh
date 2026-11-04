@@ -6,6 +6,7 @@
 #
 #   shipped  extension/ as committed; config.js unchanged; refused unless personSubmits and agentSubmits are both false.
 #   agent    the same files, except config.js in the package has ONLY agentSubmits: true (personSubmits stays false).
+#            Refused while the privacy policy says the extension "never submits an application for you".
 #            Refused if that one replacement did not happen exactly. The repository's extension/config.js is never written.
 #            Sending still needs the person's batch approval AND the owner's CAREER_AGENT_SUBMIT 'on' in the database.
 #
@@ -36,6 +37,21 @@ while [ $# -gt 0 ]; do
 done
 case "$variant" in shipped|agent) ;; *) echo "refused: --variant must be shipped or agent (got '${variant}')" >&2; usage ;; esac
 [ -n "$out" ] || usage
+# Google verification (review of #196): the privacy policy says the extension "never submits an application for you". That
+# is true only of the shipped variant (agentSubmits: false). An agent build is refused while any policy source says it,
+# and while the policy cannot be read (a build that cannot check the claim does not get the benefit of the doubt).
+# Change the policy sentence first (docs/launch/legal-pages/privacy.template.html, and site/privacy.html once built).
+if [ "$variant" = agent ]; then
+  policy_claim="never submits an application for you"
+  template="$root/docs/launch/legal-pages/privacy.template.html"
+  [ -r "$template" ] || { echo "refused: the agent variant needs the privacy policy template to check ($template is missing). Nothing was written." >&2; exit 1; }
+  for p in "$template" "$root/site/privacy.html"; do
+    if [ -r "$p" ] && grep -qF "$policy_claim" "$p"; then
+      echo "refused: the privacy policy (${p#"$root"/}) says the extension \"$policy_claim\", and the agent variant submits. Change the policy first. Nothing was written." >&2
+      exit 1
+    fi
+  done
+fi
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 case "$out/" in "$root/extension/"*) echo "refused: the output directory must not be inside extension/" >&2; exit 1 ;; esac

@@ -54,11 +54,18 @@ export interface EmailDeps {
   resume: (userId: string, posting: EmailPosting) => Promise<Resume | null>; // tailored to the posting, else their file
   attachment: (userId: string, sha256: string) => Promise<Resume | null>; // the exact file on the card, by its hash
   canSend: (userId: string) => Promise<boolean>; // a career grant with gmail.send
+  // D-037 (incremental authorization): the "allow sending" link that asks Google for gmail.send on top of the grant, or null.
+  sendConsent?: (userId: string) => Promise<string | null>;
   send: (userId: string, m: OutMail) => Promise<SendResult>;
   // WO-091c: the owner's switch. The chat passes CAREER_EMAIL_SEND === "on" (agent-chat/handler-career.ts), the same
   // pattern as outreach's CAREER_OUTREACH_SEND; false: a yes sends nothing and reserves nothing, and the card is kept.
   // Absent only where a test drives the turn directly.
   sendOn?: boolean;
+  // OWNER RULE (2026-10-26, "never submit applications without a real resume"): the same check as the chat's apply turn
+  // and the card (resumeOnFileReader: career_resume_on_file). true: on file; false: none; null: could not be read, which
+  // decides nothing, so nothing is prepared or sent (fail closed). Read before an email is drafted and again before the
+  // yes reserves it. The database refuses the reserve on its own too (career_apply_jobs_resume_guard, 20261026210016).
+  resumeOnFile?: () => Promise<boolean | null>;
 }
 
 const clip = (s: unknown, n: number) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
@@ -156,9 +163,18 @@ export function emailCardText(p: EmailPayload, changed = false): string {
 const REFUSED: Record<string, string> = {
   daily_cap: "today's daily application limit is already used",
   company_cooldown: "you applied to them in the last 30 days",
-  duplicate_job: "you already applied to this posting",
+  duplicate_job: "this posting is already in your applications (sent, or approved and waiting to go), and each posting goes at most once",
   changed_since_yes: "the email changed after you saw it, so your yes was not for this version",
+  no_resume: "I have no confirmed resume on file for you, so nothing goes without one",
 };
+const RESUME_UNREAD_EMAIL = "I couldn't check your resume on file just now, so nothing was drafted or sent. Ask again in a minute.";
+const NO_RESUME_EMAIL = "Not drafted: I have no confirmed resume on file for you, and no application goes without one. Paste or attach your resume, confirm it, then ask again.";
+async function resumeState(o: { resumeOnFile?: () => Promise<boolean | null> }): Promise<"on_file" | "missing" | "unknown"> {
+  if (!o.resumeOnFile) return "on_file"; // only where a test drives the turn without the check; the chat always passes it
+  let r: boolean | null;
+  try { r = await o.resumeOnFile(); } catch { r = null; }
+  return r === true ? "on_file" : r === false ? "missing" : "unknown";
+}
 export async function emailTurn(o: { message: string; userId: string; threadId: string; now: number; deps: EmailDeps }): Promise<EmailTurn | null> {
   const r = parseEmailReply(o.message);
   if (!r) return null;
@@ -178,6 +194,9 @@ export async function emailTurn(o: { message: string; userId: string; threadId: 
     const found = (await s.postings(r.company)).filter((p) => p.apply_email && sameCompany(p.company, r.company))
       .filter((p) => !r.title || roleOverlap(p.title, r.title) >= 0.5);
     if (!found.length) return done(`I don't see an open posting at ${clip(r.company, 80)} that asks for applications by email.`, "none");
+    const onFile = await resumeState(o.deps);
+    if (onFile === "unknown") return done(RESUME_UNREAD_EMAIL, "resume_unreadable");
+    if (onFile === "missing") return done(NO_RESUME_EMAIL, "no_resume");
     if (found.length > 1) {
       const titles = found.slice(0, 5).map((p, i) => `${i + 1}. ${clip(p.title, 80)}`);
       return done([`${clip(found[0].company, 80)} has ${found.length} postings that take applications by email:`, ...titles, `Say "apply by email to ${clip(found[0].company, 80)} for" and the title.`].join("\n"), "which");
@@ -221,8 +240,15 @@ export async function emailTurn(o: { message: string; userId: string; threadId: 
   }
   if (!(await o.deps.canSend(o.userId))) {
     // The card stays this thread's last word: once Gmail is connected, a yes sends it.
+    const allow = o.deps.sendConsent ? await o.deps.sendConsent(o.userId).catch(() => null) : null;
+    if (allow) return { reply: `NOT_WIRED: not sent. To send this from your Gmail, allow sending: ${allow} then say yes again.`, status: "NOT_WIRED", waiting: true, card_id: card.id };
     return { reply: "NOT_WIRED: not sent. Trainee can't send from your Gmail yet. Connect Gmail in the Trainee app (it asks to send on your behalf), then say yes again.", status: "NOT_WIRED", waiting: true, card_id: card.id };
   }
+  // The resume rule again at the yes: a resume deleted or replaced since the card was shown sends nothing.
+  const onFile = await resumeState(o.deps);
+  // Unknown: nothing is reserved or sent; the card stays this thread's last word, so a yes once it can be read sends it.
+  if (onFile === "unknown") return { reply: `Not sent: I couldn't check your resume on file just now, so nothing went to ${co}. Say yes again in a minute.`, status: "resume_unreadable", waiting: true, card_id: card.id };
+  if (onFile === "missing") return done(`Not sent: ${REFUSED.no_resume}. Nothing went to ${co}.`, "no_resume");
   const resume = await o.deps.attachment(o.userId, card.payload.attachment.sha256);
   if (!resume || resume.sha256 !== card.payload.attachment.sha256 || (await sha(resume.bytes)) !== resume.sha256) {
     return done(`Not sent: your resume file is not the one on this email. Say "apply by email to ${co}" for a fresh one.`, "resume_changed");

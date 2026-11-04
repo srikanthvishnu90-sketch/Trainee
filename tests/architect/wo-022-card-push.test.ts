@@ -118,11 +118,14 @@ Deno.test("WO-022/P5 the scheduled run pushes cards and records how many; then o
   );
   eq(res.status, 200);
   eq(runs.map((r) => [r.cards, r.error]), [[1, null]]);
-  const bare = await cardTurn({ message: "yes but not 2", userId: "A", threadId: "TH", now: T + 60000, store });
-  eq(bare?.status, "needs_reply", "SERIAL-1461: a yes with no reply id approves nothing");
-  const out = await cardTurn({ message: "yes but not 2", userId: "A", threadId: "TH", now: T + 60000, store, replyTo: "M-C1" });
-  eq(out?.status, "answered", "SERIAL-1440 (1): one text yes to the pushed card approves the batch it names, within 10 minutes");
+  const other = await cardTurn({ message: "yes but not 2", userId: "A", threadId: "TH", now: T + 60000, store, replyTo: "M-other" });
+  eq(other?.status, "needs_reply", "a yes quoting some other message is not about the card: nothing approved");
+  eq(approved, []);
+  // D-MS-1 (2026-10-27): the plain yes right after the pushed card (no reply id: iMessage, SMS) approves it.
+  const out = await cardTurn({ message: "yes but not 2", userId: "A", threadId: "TH", now: T + 60000, store });
+  eq(out?.status, "answered", "SERIAL-1440 (1) / D-MS-1: one text yes to the pushed card approves the batch it names, within 10 minutes");
   eq(approved, [[1, 3]], "exactly 1 and 3");
+  card = { ...card, shown_at: new Date(T).toISOString() };
   const late = await cardTurn({ message: "yes", userId: "A", threadId: "TH", now: T + 11 * 60000, store, replyTo: "M-C1" });
   eq(late?.status, "stale_card", "11 minutes after the card: nothing approved");
   eq(approved, [[1, 3]]);

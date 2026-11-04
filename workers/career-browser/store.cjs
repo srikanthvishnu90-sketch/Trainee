@@ -25,19 +25,33 @@ function createFileTaskStore(root) {
     const dir = fs.openSync(root, "r");
     try { fs.fsyncSync(dir); } finally { fs.closeSync(dir); }
   }
-  function withLock(id, fn) {
-    const lock = safe(id) + ".lock";
-    let fd;
-    try { fd = fs.openSync(lock, "wx", 0o600); }
+  // Mass submission (D-MS-2): several engine processes for one person may reach this lock at once. Its holder runs a
+  // synchronous critical section of milliseconds, so a live holder is waited for (up to busyMs), never stolen.
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  function acquire(lock) {
+    try { return fs.openSync(lock, "wx", 0o600); }
     catch (e) {
       if (e.code !== "EEXIST") throw e;
       // Never steal an aged lease. Only a demonstrably dead local owner may
       // be recovered; a reused PID conservatively keeps the lease locked.
-      const owner = JSON.parse(fs.readFileSync(lock, "utf8"));
-      try { process.kill(owner.pid, 0); throw fail("TASK_BUSY"); }
+      let owner;
+      try { owner = JSON.parse(fs.readFileSync(lock, "utf8")); }
+      catch (r) { if (r.code === "ENOENT" || r instanceof SyntaxError) return null; throw r; } // released, or being written
+      try { process.kill(owner.pid, 0); return null; }
       catch (alive) { if (alive.code !== "ESRCH") throw alive; }
-      fs.unlinkSync(lock);
-      fd = fs.openSync(lock, "wx", 0o600);
+      try { fs.unlinkSync(lock); } catch (u) { if (u.code !== "ENOENT") throw u; }
+      return null;
+    }
+  }
+  function withLock(id, fn, busyMs = 10000) {
+    const lock = safe(id) + ".lock";
+    let fd = null;
+    for (const until = Date.now() + busyMs; fd === null; ) {
+      fd = acquire(lock);
+      if (fd === null) {
+        if (Date.now() >= until) throw fail("TASK_BUSY");
+        Atomics.wait(pause, 0, 0, 10 + Math.floor(Math.random() * 15));
+      }
     }
     fs.writeFileSync(fd, JSON.stringify({ pid: process.pid })); fs.fsyncSync(fd);
     try {

@@ -27,7 +27,12 @@ const ON_FILE: Record<string, any> = {
   "greenhouse:c:3": { job_id: "greenhouse:c:3", company: "Charlie Data", title: "Data Analyst", url: "https://boards.greenhouse.io/c/jobs/3", closed_at: null },
   "greenhouse:d:4": { job_id: "greenhouse:d:4", company: "Delta Freight", title: "Data Analyst", url: "https://boards.greenhouse.io/d/jobs/4", closed_at: null },
 };
-const PRIOR = [{ id: "j1", company: "Charlie Data", title: "Data Analyst", state: "submitted_unconfirmed", created_at: new Date(NOW - 10 * 86400_000).toISOString(), updated_at: "" }];
+// Charlie Data: the listed posting itself was applied to 10 days ago (blocks). Delta Freight: a different posting there was
+// applied to 4 days ago (blocks nothing; D-MS-3: only an exact duplicate blocks, no one-per-company window).
+const PRIOR = [
+  { id: "j1", company: "Charlie Data", title: "Data Analyst", url: "https://boards.greenhouse.io/c/jobs/3", state: "submitted_unconfirmed", created_at: new Date(NOW - 10 * 86400_000).toISOString(), updated_at: "" },
+  { id: "j2", company: "Delta Freight", title: "Ops Analyst", url: "https://boards.greenhouse.io/d/jobs/40", state: "submitted_unconfirmed", created_at: new Date(NOW - 4 * 86400_000).toISOString(), updated_at: "" },
+];
 function world(o: { resume?: boolean | null; kick?: "started" | "off" | "failed"; shortlist?: ShortlistEntry[]; postings?: any[]; prepareOn?: boolean } = {}) {
   const wants = memoryWantStore(), kicks: string[][] = [];
   const turn = (message: string) => applyTurn({
@@ -72,14 +77,14 @@ Deno.test("F01 'apply to 1 and 3' queues exactly those two from the list when th
   assert(!/submitted|applied for you/.test(r!.reply), r!.reply);
 });
 
-Deno.test("F01 'apply to all of them': each refusal named with its reason (closed on file, applied in 30 days), the fraction says how many", async () => {
+Deno.test("F01 'apply to all of them': each refusal named with its reason (closed on file, this exact posting already applied to), the fraction says how many; another posting at an employer applied to 4 days ago is queued", async () => {
   const w = world({ kick: "off" });
   const r = await w.turn("apply to all of them");
   eq(r?.status, "queued", r?.reply);
   eq(await w.keys(), ["greenhouse:a:1", "greenhouse:d:4"]);
   assert(r!.reply.startsWith("2/4 queued;"), r!.reply);
   assert(/TEST Analyst at Bravo Labs: posting closed/.test(r!.reply), r!.reply);
-  assert(/Data Analyst at Charlie Data: they already applied/.test(r!.reply) && /30 days/.test(r!.reply), r!.reply);
+  assert(/Data Analyst at Charlie Data: [^\n]*already[^\n]*same posting/.test(r!.reply) && !/30 days/.test(r!.reply), r!.reply);
   assert(/Preparing them hasn't started yet; they wait in your queue\./.test(r!.reply), `off is said, never "started": ${r!.reply}`);
   const again = await w.turn("apply to 1 and 4");
   assert(again!.reply.startsWith("0/2 queued (2 already in your queue);"), again!.reply);
@@ -100,7 +105,7 @@ Deno.test("F01 positions past the list are named, never guessed; a posting with 
   eq(await gone.keys(), []);
 });
 
-Deno.test("F01 no resume on file: nothing queued, every posting named, what to do said; unknown decides nothing", async () => {
+Deno.test("F01 no resume on file: nothing queued, every posting named, what to do said; an unreadable check queues nothing either", async () => {
   const w = world({ resume: false });
   const r = await w.turn("apply to 1 and 4");
   eq(r?.status, "no_resume");
@@ -112,23 +117,30 @@ Deno.test("F01 no resume on file: nothing queued, every posting named, what to d
   const s = await single.turn("apply to the TEST Analyst role at Alpha Works");
   eq(s?.status, "no_resume", s?.reply);
   assert(s!.reply.startsWith("0/1 queued.") && /no resume on file/.test(s!.reply), s!.reply);
+  // Fail closed (review of PR #194, under the owner's resume rule): a resume check that cannot be made queues nothing.
   const unknown = world({ resume: null });
-  eq((await unknown.turn("apply to the first one"))?.status, "queued", "an unreadable profile is not 'no resume'");
+  const u = await unknown.turn("apply to the first one");
+  eq(u?.status, "resume_unreadable", u?.reply);
+  assert(/couldn't check your resume on file just now, so nothing was queued/.test(u!.reply), u!.reply);
+  eq([await unknown.keys(), unknown.kicks], [[], []]);
 });
 
-Deno.test("F01 no resume on file with the server prepare off: the want is queued, nothing is asked to prepare, and the reply says a confirmed resume comes first", async () => {
+// OWNER RULE (2026-10-26, "never submit applications without a real resume"): this test pinned PR #175's behavior (with
+// the server prepare off, the want was queued without a resume). The owner's written rule supersedes it: nothing is
+// queued without a confirmed resume, prepare on or off. Same worlds, same asks; the expectations are the rule's.
+Deno.test("F01 no resume on file with the server prepare off: nothing queued either (owner rule 2026-10-26), nothing asked to prepare, the reply says what to do", async () => {
   const w = world({ resume: false, prepareOn: false, kick: "off" });
   const r = await w.turn("apply to 1 and 4");
-  eq(r?.status, "queued", r?.reply);
-  assert(r!.reply.startsWith("2/2 queued;"), r!.reply);
-  assert(/I have no confirmed resume on file yet, so nothing can be prepared until you paste or attach your resume and confirm it\./.test(r!.reply), r!.reply);
+  eq(r?.status, "no_resume", r?.reply);
+  assert(r!.reply.startsWith("0/2 queued."), r!.reply);
+  assert(/Paste or attach your resume, confirm it, then ask again\./.test(r!.reply), r!.reply);
   assert(!/started preparing/.test(r!.reply), r!.reply);
-  eq([await w.keys(), w.kicks], [["greenhouse:a:1", "greenhouse:d:4"], []]);
+  eq([await w.keys(), w.kicks], [[], []]);
   const single = world({ resume: false, prepareOn: false, postings: [ON_FILE["greenhouse:a:1"]] });
   const s = await single.turn("apply to the TEST Analyst role at Alpha Works");
-  eq(s?.status, "queued", s?.reply);
-  assert(/no confirmed resume on file yet/.test(s!.reply) && !/started preparing/.test(s!.reply), s!.reply);
-  eq([await single.keys(), single.kicks], [["greenhouse:a:1"], []]);
+  eq(s?.status, "no_resume", s?.reply);
+  assert(/no resume on file/.test(s!.reply) && !/started preparing/.test(s!.reply), s!.reply);
+  eq([await single.keys(), single.kicks], [[], []]);
   const on = world({ resume: false, prepareOn: true });
   eq((await on.turn("apply to 1 and 4"))?.status, "no_resume", "with the prepare on, nothing is queued without a resume");
   eq([await on.keys(), on.kicks], [[], []]);

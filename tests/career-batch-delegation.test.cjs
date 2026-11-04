@@ -442,7 +442,9 @@ test("degradation: worker configured but the board service is down — every sel
     assert.equal(record.summary.stops.length, 15, "all 15 selected applications reached the drive stage and stopped there");
     assert.ok(record.summary.stops.every((x) => x.code === "BOARD_NOT_WIRED"), "one honest name on every stop");
     const status = await app.chat("batch status", "dk-down-status", { action: "status", runId });
-    assert.match(status.body.reply, /BOARD_NOT_WIRED/, "the readback names the stop in-thread");
+    // Launch readiness Q3 (2026-10-26): the stop reaches the person in plain words; its code stays on the record only.
+    assert.match(status.body.reply, /Trainee can't reach this employer's application site from here, so nothing was filled or sent/, "the readback names the stop in-thread");
+    assert.doesNotMatch(status.body.reply, /BOARD_NOT_WIRED/, "in plain words, never its code");
   } finally {
     app.close();
     provider.close();

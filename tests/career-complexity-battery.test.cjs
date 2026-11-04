@@ -165,9 +165,10 @@ test("c01/c10/c40 (BUG-179): multi-intent parts are queued and named, finance is
   const [c10t1] = ALL.c10;
   assert.match(c10t1.res.reply, /shelved/i);
   const [c40t1] = ALL.c40;
-  // SERIAL-1500: the caps answer states the enforced rule and names the planner's caps as planned, not enforced.
-  assert.match(c40t1.res.reply, /10 a day in your first week of sending, then 20 a day unless you set your own number \(up to 30, never more\)/);
-  assert.match(c40t1.res.reply, /15 first emails to one firm in 30 days\), a per-domain cap, a daily ramp and bounce breakers are planned, not enforced today/);
+  // NO LIMITS (owner, 2026-10-27; supersedes SERIAL-1500): the caps answer says Trainee sets no volume limit of its own
+  // and states no daily number, ramp or per-firm cap.
+  assert.match(c40t1.res.reply, /no volume limit of its own/);
+  assert.doesNotMatch(c40t1.res.reply, /\d+ a day|daily ramp|per-firm cap|first week of sending/);
   assert.match(c40t1.res.reply, /shortlist/i);
 });
 

@@ -139,7 +139,7 @@ const CareerBatchApply = (() => {
   // app state: { postingKey, company, role, url, stage, stop, payloadSha256,
   //              confirmationId, tailored }
   // stages: selected | doorstep | stopped | captcha_handoff |
-  //         deferred_cap | deferred_count | submitted
+  //         deferred_refusal | deferred_count | submitted
   function event(run, type, data) {
     run.events.push(Object.assign({ seq: run.events.length + 1, type }, data || {}));
   }
@@ -477,10 +477,12 @@ const CareerBatchApply = (() => {
       stopApp(run, app, "UNCOVERED_QUESTION", "a required question has no confirmed fact — nothing was invented to fill it", { asks: res.asks || [] });
       return;
     }
-    if (res.resultStatus === "blocked" && res.code === "CAP_REACHED") {
-      app.stage = "deferred_cap";
-      run.deferred.push({ postingKey: app.postingKey, company: app.company, role: app.role, code: "CAP_REACHED", reason: res.reason || "the daily application cap is reached", resumeOn: nextDayIso(run.createdAt) });
-      event(run, "deferred_cap", { postingKey: app.postingKey, cap: res.cap || null });
+    // No volume caps (owner, 2026-10-27). The employer's site refusing right now (a rate limit): this one waits until the
+    // time the site allows, then resumes; nothing was filled or sent.
+    if (res.resultStatus === "blocked" && res.code === "PORTAL_REFUSING") {
+      app.stage = "deferred_refusal";
+      run.deferred.push({ postingKey: app.postingKey, company: app.company, role: app.role, code: "PORTAL_REFUSING", reason: res.reason || "the employer's site is turning requests away right now", resumeOn: res.until || null });
+      event(run, "deferred_refusal", { postingKey: app.postingKey, host: res.host || null, until: res.until || null });
       return;
     }
     if (res.resultStatus === "blocked" && res.code === "CAPTCHA_HANDOFF") {
@@ -568,12 +570,6 @@ const CareerBatchApply = (() => {
     return out;
   }
   function firstOpenQuestion(run) { const all = openQuestions(run); return all.length ? all[0] : null; }
-
-  function nextDayIso(now) {
-    const d = new Date(now || Date.now());
-    d.setHours(0, 0, 0, 0);
-    return new Date(d.getTime() + dayMs).toISOString().slice(0, 10);
-  }
 
   function cardSha(run) {
     const pairs = run.selected
@@ -760,7 +756,7 @@ const CareerBatchApply = (() => {
         stopApp(run, app, "EXECUTION_ERROR", `the drive threw: ${err && err.message ? err.message.slice(0, 160) : "unknown error"}`);
       }
     }
-    const anyStopped = run.selected.some((k) => ["stopped", "captcha_handoff", "deferred_cap"].includes(run.apps[k].stage));
+    const anyStopped = run.selected.some((k) => ["stopped", "captcha_handoff", "deferred_refusal"].includes(run.apps[k].stage));
     run.status = anyStopped ? "completed_with_stops" : "completed";
     run.summary = summarizeRun(run);
     event(run, "executed", { status: run.status });
@@ -777,10 +773,10 @@ const CareerBatchApply = (() => {
       }
       return;
     }
-    if (out && out.resultStatus === "blocked" && out.code === "CAP_REACHED") {
-      app.stage = "deferred_cap";
-      run.deferred.push({ postingKey: app.postingKey, company: app.company, role: app.role, code: "CAP_REACHED", reason: out.reason || "the daily application cap was reached at click time", resumeOn: nextDayIso(run.createdAt) });
-      event(run, "deferred_cap", { postingKey: app.postingKey, at: "click" });
+    if (out && out.resultStatus === "blocked" && out.code === "PORTAL_REFUSING") {
+      app.stage = "deferred_refusal";
+      run.deferred.push({ postingKey: app.postingKey, company: app.company, role: app.role, code: "PORTAL_REFUSING", reason: out.reason || "the employer's site was turning requests away at click time", resumeOn: out.until || null });
+      event(run, "deferred_refusal", { postingKey: app.postingKey, at: "click", until: out.until || null });
       return;
     }
     if (out && out.resultStatus === "blocked" && out.code === "CAPTCHA_HANDOFF") {
@@ -809,7 +805,7 @@ const CareerBatchApply = (() => {
   function accountRun(run) {
     const afterYes = !!run.approvalRef;
     const capByKey = {};
-    for (const x of run.deferred || []) if (x && x.code === "CAP_REACHED") capByKey[x.postingKey] = x;
+    for (const x of run.deferred || []) if (x && x.code === "PORTAL_REFUSING") capByKey[x.postingKey] = x;
     const outcomes = [];
     let through = 0;
     for (const key of run.selected || []) {
@@ -818,10 +814,10 @@ const CareerBatchApply = (() => {
       if (a.coverage) o.fields = { filled: a.coverage.filled, total: a.coverage.total };
       if (a.stage === "submitted" || (!afterYes && a.stage === "doorstep")) { o.through = true; through += 1; }
       else if ((a.stage === "stopped" || a.stage === "captcha_handoff") && a.stop) { o.code = a.stop.code; o.reason = a.stop.reason; }
-      else if (a.stage === "deferred_cap") {
+      else if (a.stage === "deferred_refusal") {
         const c = capByKey[key];
-        o.code = "CAP_REACHED";
-        o.reason = `${(c && c.reason) || "the daily application cap is reached"} — queued for ${(c && c.resumeOn) || "tomorrow"}`;
+        o.code = "PORTAL_REFUSING";
+        o.reason = `${(c && c.reason) || "the employer's site is turning requests away right now"} — it resumes ${(c && c.resumeOn) ? `at ${c.resumeOn}` : "when the site allows"}`;
       } else if (PENDING_REASONS[a.stage]) { o.code = PENDING_REASONS[a.stage].code; o.reason = PENDING_REASONS[a.stage].reason; }
       else { o.code = "NO_RECORD"; o.reason = "the run holds no application record for this selection"; }
       outcomes.push(o);
@@ -889,8 +885,37 @@ const CareerBatchApply = (() => {
     };
   }
 
+  // Launch readiness Q3 (2026-10-26): a stop reaches the person in plain
+  // words; its code stays on the record (app.stop.code, the summary's
+  // stops), never in the reply. A code with no sentence here says only
+  // what is always true of a stop.
+  const STOP_WORDS = {
+    BOARD_NOT_WIRED: "Trainee can't reach this employer's application site from here, so nothing was filled or sent",
+    UNCOVERED_QUESTION: "a required question has no confirmed fact on your profile, so I stopped instead of inventing an answer",
+    CAPTCHA_HANDOFF: "a captcha appeared, so the last step is yours",
+    EXECUTION_ERROR: "it stopped with an error, so it is not counted as submitted",
+    DRIVER_ERROR: "it stopped with an error before it was submitted",
+    NO_RESULT: "the employer's site gave no result, so it is not counted as submitted",
+    UNKNOWN_OUTCOME: "the submit gave no readable result, so it is recorded as unknown and will not be sent again on its own",
+    NOT_PREPARED: "it is selected but not prepared yet",
+    NOT_SUBMITTED: "it reached the final review but was not in what you approved, so it was not sent",
+    PORTAL_REFUSING: "the employer's site was turning requests away for a while, so it waits until the site allows and then goes on its own; nothing was sent",
+    COUNT_DEFERRED: "it is beyond the number you asked for, so it stays in the queue",
+    KNOCKOUT_UNMET: "it has a requirement you don't meet",
+    JOB_CLOSED: "the posting is closed",
+  };
+  function plainStop(code) {
+    return STOP_WORDS[code] || "it was stopped, so it is not counted as submitted";
+  }
+  // "Found 1 role", "Found 3 data analyst roles": the family is a noun
+  // phrase that may already end in role(s).
+  function rolesPhrase(n, familyText) {
+    const fam = String(familyText || "").replace(/\s*\broles?$/i, "").trim();
+    return `${n} ${fam ? `${fam} ` : ""}${n === 1 ? "role" : "roles"}`;
+  }
+
   // The first line of every batch reply: the fraction that came
-  // through, then each one that did not, named once with its code.
+  // through, then each one that did not, named once in plain words.
   function coverageLines(run) {
     const acc = accountRun(run);
     const verb = acc.phase === "submitted" ? "submitted" : "ready for your yes";
@@ -906,12 +931,12 @@ const CareerBatchApply = (() => {
       if (unconfirmed.length) {
         const confirmed = selApps.filter((a) => a.stage === "submitted" && a.confirmationId).length;
         lines[0] = `${confirmed}/${acc.total} applications submitted with employer confirmations.`;
-        for (const a of unconfirmed) lines.push(`- ${a.company || "a company"} — ${a.role || "a role"}: SENT_WITHOUT_CONFIRMATION — the employer's system took the application but recorded no confirmation; it is not counted as submitted.`);
+        for (const a of unconfirmed) lines.push(`- ${a.company || "a company"} — ${a.role || "a role"}: the employer's system took the application but recorded no confirmation, so it is not counted as submitted.`);
       }
     }
     for (const o of acc.outcomes) {
       if (o.through) continue;
-      lines.push(`- ${o.company || "a company"} — ${o.role || "a role"}: ${o.code} — ${o.reason}`);
+      lines.push(`- ${o.company || "a company"} — ${o.role || "a role"}: ${plainStop(o.code)}.`);
     }
     return lines;
   }
@@ -919,9 +944,9 @@ const CareerBatchApply = (() => {
   function speakSummary(run) {
     const sm = run.summary || summarizeRun(run);
     const lines = coverageLines(run);
-    lines.push(`Found ${sm.found} ${run.familyText} roles${sm.duplicatesRemoved ? ` — ${sm.duplicatesRemoved} duplicate${sm.duplicatesRemoved === 1 ? "" : "s"} removed` : ""}.`);
-    if (sm.screenedOut.length) lines.push(`Screened out ${sm.screenedOut.length}: ${sm.screenedOut.map((x) => `${x.company || "a posting"} (${x.code === "KNOCKOUT_UNMET" ? "knockout requirement you don't meet" : x.code === "JOB_CLOSED" ? "posting closed" : x.code})`).join("; ")}.`);
-    lines.push(`${sm.eligible} were eligible; I took the ${sm.selected} you named.`);
+    lines.push(`Found ${rolesPhrase(sm.found, run.familyText)}${sm.duplicatesRemoved ? ` — ${sm.duplicatesRemoved} duplicate${sm.duplicatesRemoved === 1 ? "" : "s"} removed` : ""}.`);
+    if (sm.screenedOut.length) lines.push(`Screened out ${sm.screenedOut.length}: ${sm.screenedOut.map((x) => `${x.company || "a posting"} (${x.code === "KNOCKOUT_UNMET" ? "knockout requirement you don't meet" : x.code === "JOB_CLOSED" ? "posting closed" : plainStop(x.code)})`).join("; ")}.`);
+    lines.push(`${sm.eligible} ${sm.eligible === 1 ? "was" : "were"} eligible; I took the ${sm.selected} you named.`);
     // MUSE-F-001 (ported from the loop-writer package, muse/2026-10-20-loop-writer): the selection by name — company,
     // role, the posting's own link and where each one stands — from the run's own application records, never re-derived.
     const selApps = (run.selected || []).map((k) => run.apps[k]).filter(Boolean);
@@ -932,7 +957,7 @@ const CareerBatchApply = (() => {
           : a.stage === "submitted" ? (a.confirmationId ? `submitted — confirmation ${a.confirmationId}` : "sent — no confirmation from the employer is recorded, so this is not counted as submitted")
           : a.stage === "captcha_handoff" ? "a captcha appeared — the last step is yours"
           : a.stage === "stopped" ? "stopped (named below)"
-          : a.stage === "deferred_cap" ? "queued past today's cap"
+          : a.stage === "deferred_refusal" ? "waiting for the employer's site to allow it"
           : a.stage === "selected" ? "selected, not prepared yet"
           : a.stage === "excluded_by_user" ? "left out by your yes — not sent"
           : a.stage;
@@ -950,10 +975,10 @@ const CareerBatchApply = (() => {
       }
     }
     if (sm.confirmations.length) lines.push(`Submitted ${sm.confirmations.length} with employer confirmations: ${sm.confirmations.map((c) => `${c.company} (${c.confirmationId})`).join("; ")}.`);
-    for (const st of sm.stops) lines.push(`Stopped — ${st.company || "a role"}: ${st.code === "UNCOVERED_QUESTION" ? "a required question has no confirmed fact on your profile, so I stopped instead of inventing an answer" : st.code === "CAPTCHA_HANDOFF" ? `a captcha appeared; the last step is yours here: ${st.handoffUrl || ""}` : `${st.code} — ${st.reason}`}`);
-    const capDef = sm.deferred.filter((x) => x.code === "CAP_REACHED");
+    for (const st of sm.stops) lines.push(`Stopped — ${st.company || "a role"}: ${st.code === "UNCOVERED_QUESTION" ? "a required question has no confirmed fact on your profile, so I stopped instead of inventing an answer" : st.code === "CAPTCHA_HANDOFF" ? `a captcha appeared; the last step is yours here: ${st.handoffUrl || ""}` : `${plainStop(st.code)}.`}`);
+    const capDef = sm.deferred.filter((x) => x.code === "PORTAL_REFUSING");
     const countDef = sm.deferred.filter((x) => x.code === "COUNT_DEFERRED");
-    if (capDef.length) lines.push(`${capDef.length} hit today's application cap and are queued for ${capDef[0].resumeOn || "tomorrow"} — they resume automatically, they are not lost.`);
+    if (capDef.length) lines.push(`${capDef.length} wait because the employer's site was turning requests away for a while; they resume ${capDef[0].resumeOn ? `at ${capDef[0].resumeOn}` : "when it allows"} on their own, and nothing of them was sent.`);
     if (countDef.length) lines.push(`${countDef.length} more were eligible beyond the ${run.requested} you named; they stay in the queue.`);
     return lines;
   }

@@ -1,20 +1,26 @@
 name: ci
 on:
-  # Branches are checked through their pull request; a push runs only on trunk. Before 2026-10-26 every push to a PR
-  # branch ran the whole suite twice (push + pull_request), and runs for superseded heads held the queue: 111 queued,
-  # 52 of them for commits already replaced, with 6 running.
+  # Branches are checked through their pull request; a push runs only on trunk and release/production. Before 2026-10-26
+  # every push to a PR branch ran the whole suite twice (push + pull_request), and runs for superseded heads held the
+  # queue: 111 queued, 52 of them for commits already replaced, with 6 running.
+  # D-034 (the deploy standard): every job here is a required check on the exact SHA that deploys (S1; S4 reads
+  # "acceptance (telegram)"), so every SHA pushed to trunk or release/production gets its own full run. A commit pushed
+  # to release/production that never was a trunk head would otherwise have no checks at all.
   push:
-    branches: [trunk]
+    branches: [trunk, release/production]
   pull_request:
 concurrency:
-  # One run per PR (or per ref for trunk pushes); a newer head cancels the older run. Trunk runs are never cancelled.
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # One run per PR: a newer head cancels the older run. A push gets a group of its own SHA: GitHub keeps one pending run
+  # per group and cancels the older pending one when a newer arrives ("higher priority waiting request"), which left
+  # trunk SHAs merged in quick succession with no checks (e74c4b353 and f4b751948, 2026-10-31 05:14) and so unable to
+  # deploy. Pushes are never cancelled; a re-push of the same SHA waits for the run already going.
+  group: ci-${{ github.event.pull_request.number || format('{0}@{1}', github.ref, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:
-  gate:
-    name: gate (core)
+  gate-core-shard:
+    name: gate (core shard ${{ matrix.shard }}/2)
     runs-on: ubuntu-24.04
     # The gate took 9.3-9.6 min on #62 (2026-10-20), its career-and-shared step alone 520-537 s; at 10 the next test
     # cancelled it (5470fe98). Consolidating the fix line onto trunk (PR #156) added ~270 tests and the 15-minute cap
@@ -56,9 +62,21 @@ jobs:
     # the single core step had been taking. The architect job is now the longer of the two: at 934 s its Deno
     # suite is the next step to watch; if it nears the cap, split tests/architect along its handler/flow files,
     # not by raising the cap.
+    # 2026-10-30: core was the longest job of every run again: job median 785 s over the 15 green runs 41112398301-
+    # 41143560374 (its node step 638-730 s, edge tests 30 s, typecheck 10 s), so it set the run's wall time (median
+    # 13.3 min), ahead of forms-ci coverage shard 1 (704 s). Its node suites are now split across two parallel shards
+    # packed by measured seconds (scripts/node-shards.cjs, table scripts/core-shard-durations.json, the same
+    # longest-first packing as the architect shards); the non-node core steps run in shard 1. Same command, flags and
+    # --test-concurrency=2 in each shard; tests/career-ci-core-shards.test.cjs proves the shards partition the core
+    # selection. The required check name `gate (core)` is the aggregate job below.
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     env:
       GATE_PARTITION: core
+      GATE_CORE_SHARD: ${{ matrix.shard }}/2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -91,7 +109,7 @@ jobs:
         # be): the step summary lines, then the failing tests' names.
         run: |
           set -o pipefail
-          bash scripts/gate.sh 2>&1 | tee "$RUNNER_TEMP/gate.log"
+          GATE_NODE_DURATIONS="$RUNNER_TEMP/node-durations.jsonl" bash scripts/gate.sh 2>&1 | tee "$RUNNER_TEMP/gate.log"
       - name: Gate result as annotations
         if: always()
         run: |
@@ -102,7 +120,33 @@ jobs:
           [ -n "$failed" ] && echo "::error title=gate failing tests::$(printf '%s' "$failed" | cut -c1-180 | sed ':a;N;$!ba;s/\n/%0A/g')"
           # Deno's own errors (load failures, type errors), which are not TAP lines; color codes stripped.
           sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/gate.log" | grep -E '^error: |TS[0-9]+ \[ERROR\]|^ERRORS?$|FAILED \(exit' | head -10 | while read -r l; do echo "::error title=gate error::$(printf '%s' "$l" | cut -c1-300)"; done
+          # Each node suite's seconds (JSON lines for `node scripts/node-shards.cjs update`) where the gate ran node suites
+          # with the durations reporter (core shards, browser), 45 lines a notice (an annotation keeps only 4,096 characters).
+          if [ -s "$RUNNER_TEMP/node-durations.jsonl" ]; then
+            split -l 45 "$RUNNER_TEMP/node-durations.jsonl" "$RUNNER_TEMP/node-durations.part."
+            for part in "$RUNNER_TEMP"/node-durations.part.*; do
+              echo "::notice title=node suite durations::$(sed ':a;N;$!ba;s/\n/%0A/g' "$part")"
+            done
+          fi
           exit 0
+  gate:
+    name: gate (core)
+    runs-on: ubuntu-24.04
+    # The required check (name unchanged). Passes only when every core shard succeeded and the shards still partition the
+    # core node suites exactly. always() so a failed or cancelled shard fails this check rather than skipping it.
+    needs: gate-core-shard
+    if: always()
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - name: Every core shard succeeded
+        run: |
+          echo "core shards: ${{ needs.gate-core-shard.result }}"
+          test "${{ needs.gate-core-shard.result }}" = success
+      - name: Every core node suite is in exactly one shard
+        run: GATE_PARTITION=core GATE_CORE_VERIFY=2 bash scripts/gate.sh
   gate-browser:
     name: gate (browser)
     runs-on: ubuntu-24.04
@@ -145,7 +189,7 @@ jobs:
         # be): the step summary lines, then the failing tests' names.
         run: |
           set -o pipefail
-          bash scripts/gate.sh 2>&1 | tee "$RUNNER_TEMP/gate.log"
+          GATE_NODE_DURATIONS="$RUNNER_TEMP/node-durations.jsonl" bash scripts/gate.sh 2>&1 | tee "$RUNNER_TEMP/gate.log"
       - name: Gate result as annotations
         if: always()
         run: |
@@ -156,24 +200,51 @@ jobs:
           [ -n "$failed" ] && echo "::error title=gate failing tests::$(printf '%s' "$failed" | cut -c1-180 | sed ':a;N;$!ba;s/\n/%0A/g')"
           # Deno's own errors (load failures, type errors), which are not TAP lines; color codes stripped.
           sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/gate.log" | grep -E '^error: |TS[0-9]+ \[ERROR\]|^ERRORS?$|FAILED \(exit' | head -10 | while read -r l; do echo "::error title=gate error::$(printf '%s' "$l" | cut -c1-300)"; done
+          # Each node suite's seconds (JSON lines for `node scripts/node-shards.cjs update`) where the gate ran node suites
+          # with the durations reporter (core shards, browser), 45 lines a notice (an annotation keeps only 4,096 characters).
+          if [ -s "$RUNNER_TEMP/node-durations.jsonl" ]; then
+            split -l 45 "$RUNNER_TEMP/node-durations.jsonl" "$RUNNER_TEMP/node-durations.part."
+            for part in "$RUNNER_TEMP"/node-durations.part.*; do
+              echo "::notice title=node suite durations::$(sed ':a;N;$!ba;s/\n/%0A/g' "$part")"
+            done
+          fi
           exit 0
-  gate-architect:
-    name: gate (architect)
+  gate-architect-shard:
+    name: gate (architect shard ${{ matrix.shard }}/6)
     runs-on: ubuntu-24.04
     # The architect step of the gate (tests/architect, Deno: handler and flow tests that each provision a throwaway
     # Postgres, several driving Chromium) and its companion Deno check of scripts/apply.ts, split out of gate (core)
     # 2026-10-26 (see the gate job's comment). Runs in parallel with the other gate jobs; it is not advisory, and a
     # failure here fails the run exactly as it did inside gate (core). It needs the same tooling (node, Chromium,
     # Postgres 16 from the runner image), so its setup is the same as the other gate jobs'.
-    timeout-minutes: 30
+    # Sharded 2026-10-29: the single job ran `deno test` over all 200+ architect files serially, 1,323 s in the
+    # Career gate step of a green run (run 40790880196; setup took ~25 s) and past the 30-minute cap on others
+    # (runs 40788526016, 40787919188 cancelled), which blocked every PR. Six shards (scripts/architect-shards.ts;
+    # tests/architect/ci-shard-partition.test.ts proves each file runs in exactly one). Since 2026-10-30 the shards are
+    # packed by measured duration (scripts/architect-shard-durations.json, longest file first to the least-loaded shard)
+    # instead of by sorted-file index, which had left them at 354-651 s of tests on trunk; each shard reports its files'
+    # durations as a notice so the table can be refreshed (`architect-shards.ts update`). The 45-minute cap is a
+    # backstop, not a target. The required check name `gate (architect)` is the aggregate job below.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
     env:
       GATE_PARTITION: architect
+      GATE_ARCHITECT_SHARD: ${{ matrix.shard }}/6
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: "22.23.3" }
       - uses: denoland/setup-deno@v2
         with: { deno-version: "v2.9.6" }
+      - name: Cache the Deno dir (esm.sh / jsr / npm imports of the tests)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/deno
+          key: deno-2.9.6-${{ hashFiles('tests/architect/**/*.ts', 'supabase/functions/_shared/**/*.ts', 'scripts/apply.ts') }}
+          restore-keys: deno-2.9.6-
       - name: Install tooling and use the runner's packaged Chrome
         run: |
           # The versions come from tools/package.json + tools/package-lock.json, the same pins the career browser worker installs
@@ -200,7 +271,7 @@ jobs:
         # be): the step summary lines, then the failing tests' names.
         run: |
           set -o pipefail
-          bash scripts/gate.sh 2>&1 | tee "$RUNNER_TEMP/gate.log"
+          GATE_NODE_DURATIONS="$RUNNER_TEMP/node-durations.jsonl" bash scripts/gate.sh 2>&1 | tee "$RUNNER_TEMP/gate.log"
       - name: Gate result as annotations
         if: always()
         run: |
@@ -211,26 +282,70 @@ jobs:
           [ -n "$failed" ] && echo "::error title=gate failing tests::$(printf '%s' "$failed" | cut -c1-180 | sed ':a;N;$!ba;s/\n/%0A/g')"
           # Deno's own errors (load failures, type errors), which are not TAP lines; color codes stripped.
           sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/gate.log" | grep -E '^error: |TS[0-9]+ \[ERROR\]|^ERRORS?$|FAILED \(exit' | head -10 | while read -r l; do echo "::error title=gate error::$(printf '%s' "$l" | cut -c1-300)"; done
+          # Each node suite's seconds (JSON lines for `node scripts/node-shards.cjs update`) where the gate ran node suites
+          # with the durations reporter (core shards, browser), 45 lines a notice (an annotation keeps only 4,096 characters).
+          if [ -s "$RUNNER_TEMP/node-durations.jsonl" ]; then
+            split -l 45 "$RUNNER_TEMP/node-durations.jsonl" "$RUNNER_TEMP/node-durations.part."
+            for part in "$RUNNER_TEMP"/node-durations.part.*; do
+              echo "::notice title=node suite durations::$(sed ':a;N;$!ba;s/\n/%0A/g' "$part")"
+            done
+          fi
+          # This shard's files and their seconds (JSON lines for `deno run -A scripts/architect-shards.ts update`), 45 lines a
+          # notice: an annotation keeps only its first 4,096 characters, which had cut each shard's list at ~58 files.
+          deno run -A scripts/architect-shards.ts durations "$RUNNER_TEMP/gate.log" 2>/dev/null | head -300 > "$RUNNER_TEMP/architect-durations.jsonl" || true
+          if [ -s "$RUNNER_TEMP/architect-durations.jsonl" ]; then
+            split -l 45 "$RUNNER_TEMP/architect-durations.jsonl" "$RUNNER_TEMP/architect-durations.part."
+            for part in "$RUNNER_TEMP"/architect-durations.part.*; do
+              echo "::notice title=architect file durations::$(sed ':a;N;$!ba;s/\n/%0A/g' "$part")"
+            done
+          fi
           exit 0
-  gate-coverage:
-    name: gate (forms-ci coverage)
+  gate-architect:
+    name: gate (architect)
     runs-on: ubuntu-24.04
-    # The forms-ci coverage suite alone (see the gate job's correction note): 40 serial Chromium fixture drives
-    # whose cost is irreducible inside any shared job's sum, so the suite gets a parallel job of its own. It
-    # reads its committed expected pin and writes only to a temp dir; its verdict gates exactly as it did inside
-    # the single job — nothing about the suite, its assertions or its artifacts changes, only its scheduling.
-    # The 60 here is measured, not padded: timed locally on the fix VM, this suite's first form drives took
-    # 152.7 s and 327.6 s apiece (a second local run independently put the same first drive at 148 s), and
-    # there are 11 form drives plus the suite's own re-drives — the suite alone sums past any 30-minute job
-    # it shares, and past 30 even solo on a slow VM. Speeding the drives instead (a shared browser context)
-    # was rejected: the suite's fresh-session-per-form isolation is part of what its pins prove, and changing
-    # it would change the artifact, not just the schedule. So the coverage job's budget is set from the
-    # measurement, to be re-baselined from the first green CI run's duration and recorded in the gate job's
-    # history. Headroom, not a target: the finding stands — this suite's serial drive cost is the gate's
-    # long pole, and it grows with every captured form.
+    # The required check (name unchanged). Passes only when every architect shard succeeded and the shards still
+    # partition tests/architect exactly. always() so a failed or cancelled shard fails this check rather than skipping it.
+    needs: gate-architect-shard
+    if: always()
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: Every architect shard succeeded
+        run: |
+          echo "architect shards: ${{ needs.gate-architect-shard.result }}"
+          test "${{ needs.gate-architect-shard.result }}" = success
+      - name: Every architect test file is in exactly one shard
+        run: deno run -A scripts/architect-shards.ts verify 6
+  gate-coverage-shard:
+    name: gate (forms-ci coverage shard ${{ matrix.shard }}/5)
+    runs-on: ubuntu-24.04
+    # The forms-ci coverage suite (tests/career-forms-ci-coverage.test.cjs), split across parallel shards
+    # 2026-10-26. Measured before the split: the single gate (forms-ci coverage) job took 45.3 min on trunk
+    # 9d4226fc0 (run 40423628274) and 45.2 min on fe8405586 (run 40372383659); checkout, setup and installs took
+    # ~25 s of that, and the one node invocation over this one suite 2,683 s and 2,676 s — the suite's tests run
+    # serially in one process, so caching or parallel setup could not move it; only splitting the suite's tests
+    # across processes could. Each shard runs the same file, unedited, under node's own --test-name-pattern /
+    # --test-skip-pattern selection (table and completeness rules: scripts/forms-ci-shards.cjs). The last shard
+    # runs every test not named in another shard, so a new or renamed test can never fall out of CI; the
+    # read-only proof runs in every shard. Each shard reports the tests that passed in it (artifact + a notice with
+    # per-test seconds, readable through the checks API), and the aggregate job below — which keeps the required
+    # check name — fails unless every shard succeeded and every test of the suite passed in some shard. The suite
+    # history above stands: its fresh-session-per-form drives and its pins are unchanged; only scheduling moved.
+    # First sharded run (PR #209, run 40441854421, 4 shards): the coverage check completed 14.0 min after the run
+    # started (shards 668 / 619 / 793 / 616 s of tests; their sum, 2,696 s, matches the single job's 2,676-2,683 s,
+    # and all 27 of the suite's tests passed). Four shards cannot go below ~790 s (the WPP-redriving guard and EOS
+    # must share one), so the table moved to five shards, whose floor is Anduril's own 668 s drive.
+    # The 60-minute budget is unchanged (headroom, not a target).
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
     env:
       GATE_PARTITION: coverage
+      GATE_COVERAGE_SHARD: ${{ matrix.shard }}/5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -272,7 +387,7 @@ jobs:
         # be): the step summary lines, then the failing tests' names.
         run: |
           set -o pipefail
-          bash scripts/gate.sh 2>&1 | tee "$RUNNER_TEMP/gate.log"
+          GATE_NODE_DURATIONS="$RUNNER_TEMP/node-durations.jsonl" bash scripts/gate.sh 2>&1 | tee "$RUNNER_TEMP/gate.log"
       - name: Gate result as annotations
         if: always()
         run: |
@@ -283,6 +398,14 @@ jobs:
           [ -n "$failed" ] && echo "::error title=gate failing tests::$(printf '%s' "$failed" | cut -c1-180 | sed ':a;N;$!ba;s/\n/%0A/g')"
           # Deno's own errors (load failures, type errors), which are not TAP lines; color codes stripped.
           sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/gate.log" | grep -E '^error: |TS[0-9]+ \[ERROR\]|^ERRORS?$|FAILED \(exit' | head -10 | while read -r l; do echo "::error title=gate error::$(printf '%s' "$l" | cut -c1-300)"; done
+          # Each node suite's seconds (JSON lines for `node scripts/node-shards.cjs update`) where the gate ran node suites
+          # with the durations reporter (core shards, browser), 45 lines a notice (an annotation keeps only 4,096 characters).
+          if [ -s "$RUNNER_TEMP/node-durations.jsonl" ]; then
+            split -l 45 "$RUNNER_TEMP/node-durations.jsonl" "$RUNNER_TEMP/node-durations.part."
+            for part in "$RUNNER_TEMP"/node-durations.part.*; do
+              echo "::notice title=node suite durations::$(sed ':a;N;$!ba;s/\n/%0A/g' "$part")"
+            done
+          fi
           # forms-ci coverage diagnostics read-back (2026-10-24): the diag JSONL is appended event-by-event
           # during the drives, so it exists even when a test timeout kills the suite file before its
           # test.after summary can run — and the suite's own ::error prints are TAP-prefixed under
@@ -293,16 +416,96 @@ jobs:
             node scripts/forms-ci-diag-annotations.cjs "$FORMS_CI_COVERAGE_DIAG" || true
           fi
           exit 0
+      - name: Report the tests this shard ran
+        # The names (and seconds) of the suite's tests that passed or failed in this shard, from the gate log's TAP
+        # lines, for the aggregate job's completeness check; also printed as a notice for rebalancing the table.
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/shard-report"
+          test -f "$RUNNER_TEMP/gate.log" || exit 0
+          node scripts/forms-ci-shards.cjs report "$RUNNER_TEMP/gate.log" "$RUNNER_TEMP/shard-report/shard-${{ matrix.shard }}.json"
+      - name: Upload the shard report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forms-ci-coverage-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/shard-report/shard-${{ matrix.shard }}.json
+          if-no-files-found: ignore
       - name: Upload forms-ci coverage diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: forms-ci-coverage-diag
+          name: forms-ci-coverage-diag-shard-${{ matrix.shard }}
           path: ${{ runner.temp }}/forms-ci-coverage-diag.jsonl
           if-no-files-found: ignore
+  gate-coverage:
+    name: gate (forms-ci coverage)
+    runs-on: ubuntu-24.04
+    # The required check. It passes only when every coverage shard above succeeded AND every test the suite defines
+    # passed in some shard (scripts/forms-ci-shards.cjs verify lists the suite's tests statically and compares them
+    # with the shards' reports). always() so a failed or cancelled shard fails this check rather than skipping it.
+    needs: gate-coverage-shard
+    if: always()
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - name: Every coverage shard succeeded
+        run: |
+          echo "coverage shards: ${{ needs.gate-coverage-shard.result }}"
+          test "${{ needs.gate-coverage-shard.result }}" = success
+      - uses: actions/download-artifact@v4
+        if: always()
+        with:
+          pattern: forms-ci-coverage-shard-*
+          path: ${{ runner.temp }}/shard-reports
+      - name: Every test of the suite passed in some shard
+        if: always()
+        run: node scripts/forms-ci-shards.cjs verify "$RUNNER_TEMP/shard-reports"
   database:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Migrations, RLS and SQL tests on a throwaway Postgres 16, plus the migration ledger
-        run: PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH bash tests/db/run.sh
+        run: |
+          set -o pipefail
+          PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH bash tests/db/run.sh 2>&1 | tee "$RUNNER_TEMP/db.log"
+      # The failing lines as annotations, readable through the checks API where the raw log is not.
+      - name: Failure lines as annotations
+        if: failure()
+        run: echo "::error::$(tail -n 60 "$RUNNER_TEMP/db.log" | grep -v '^  ok ' | tail -n 30 | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')"
+  send-rail-load:
+    name: load (send rail)
+    runs-on: ubuntu-24.04
+    # Mass networking (lane M1, owner's scale rule 2026-10-27): 10,000 people x 50 approved emails plus one heavy
+    # sender, 20 concurrent sender sessions, real Postgres 16, Gmail faked. Its own job so the gate's time caps are not
+    # spent on it; it fails the run like any other job. The measured numbers are printed (SEND RAIL LOAD ...).
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: The sending rail under load
+        run: PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH deno test -A --no-check tests/load/send-rail-load.test.ts
+  acceptance-telegram:
+    name: acceptance (telegram)
+    runs-on: ubuntu-24.04
+    # D-034, the deploy standard's S4: the Telegram acceptance suite on its own check, so the deploy standard can read its
+    # verdict on the exact SHA. It also runs inside an architect shard (every tests/architect file does); this job is the
+    # check scripts/launch/deploy-standard.ts reads. Real Postgres 16, the real webhook and agent-chat, a scripted model;
+    # nothing leaves the runner. KNOWN_GAP steps run and print their state; every other step must pass.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: Telegram acceptance suite
+        run: |
+          set -o pipefail
+          PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH deno test -A --no-check tests/architect/telegram-acceptance.test.ts 2>&1 | tee "$RUNNER_TEMP/acceptance.log"
+      - name: Each step's outcome
+        if: always()
+        run: |
+          test -f "$RUNNER_TEMP/acceptance.log" || exit 0
+          grep -E '^TELEGRAM_ACCEPTANCE ' "$RUNNER_TEMP/acceptance.log" | sed 's/\x1b\[[0-9;]*m//g' | tee -a "$GITHUB_STEP_SUMMARY"

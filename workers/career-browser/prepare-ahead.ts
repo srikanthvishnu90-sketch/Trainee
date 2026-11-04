@@ -21,8 +21,12 @@
 // confirmed fact) and kept beside the question (career_apply_question_draft_put_for). It is never their answer: the chat
 // shows it whole when they ask, only their "use N" saves it, and the posting is then prepared again with it.
 //
-// Usage (the worker host, the service role; never on a schedule from here):
+// Usage (the worker host, the service role; never on a schedule from here; docs/launch/CLOUD-RUNNER.md "Preparation host"):
 //   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... deno run -A workers/career-browser/prepare-ahead.ts once [--limit N] [--draft-cover-letters]
+// Mass submission (owner, 2026-10-27: no product number, "never set a limit", "operate at large scale"): every posting
+// the database offers is prepared, as many at once as this machine has browsers for, every employer site at full
+// parallelism unless it refuses (then held off for every host, through the database). Many hosts run at once:
+// PREPARE_AHEAD_SHARD="i/n" gives each its share of the people. --limit N (the owner's) reads one page of N.
 // --draft-cover-letters calls the model (the gateway's provider, paid) once or twice for each cover letter drafted; without
 // it none is drafted ahead, and the person can still say "draft N" in the chat.
 import { engineFacts, engineRunner, prepare, questionsToStore, type ResumeTag, type RunEngine, type TextAnswer } from "./approve-first.ts";
@@ -30,6 +34,7 @@ import { trustedManifest } from "../../extension/src/apply_core.ts";
 import { type ResumeStore, tailorForPosting, type TailorDeps } from "../../supabase/functions/_shared/career_tailor.ts";
 import { draftEssay, type ModelFn } from "../../supabase/functions/_shared/essay_draft.ts";
 import { mapQuestion } from "../../supabase/functions/_shared/question_map.ts";
+import { dbHostGate, PacedLimiter, type Pacing, pacingFrom } from "./mass-run.ts";
 
 export interface Candidate {
   user_id: string; job_id: string; company: string; title: string; url: string; location: string; description: string;
@@ -43,18 +48,27 @@ export interface AheadDeps {
   // The resume tailored to this posting from the trusted profile, written to a file in dir; null when it cannot be.
   // deno-lint-ignore no-explicit-any
   resumeFor: (c: Candidate, dir: string, profile: any | null) => Promise<PreparedResume | null>;
+  // true: the resume is the person's own FILE (nothing is built from their facts), so a missing one is not a missing name or email.
+  resumeIsFile?: boolean;
   // The person's stored profile, as stored (storedProfile); prepareAhead keeps only its trusted facts. Absent: only their
   // answers count.
   // deno-lint-ignore no-explicit-any
   profileFor?: (userId: string) => Promise<any | null>;
   // The link the engine opens. Production: the posting's own. Tests point an https posting at a local employer page.
   urlFor?: (c: Candidate) => string;
+  // MASS APPLY (2026-11-01): the form's shape from the ATS's public board API (posting_schema.ts: Greenhouse), or null.
+  // Used only to ask the shared facts (fact:* questions) a form needs before any browser opens it; the browser still reads
+  // the form and builds the payload once those are answered. Absent: as before.
+  schemaFor?: (url: string) => Promise<{ fields: { name: string; label: string; required: boolean; type: string; options: { label: string }[] }[] } | null>;
   // The model the chat's drafter writes with; absent (or no profile), no cover letter is drafted ahead.
   draftModel?: ModelFn;
   // FEATURE 3: the model a cover note for each ready application is drafted with (the same drafter); absent, none.
   coverNoteModel?: ModelFn;
   now?: () => number;
   tmpRoot?: string;
+  // The shared pool every preparation on this host goes through (its bound and its per-host pacing). Absent: one at a
+  // time, unpaced.
+  limiter?: PacedLimiter;
 }
 export interface AheadOutcome { user_id: string; job_id: string; outcome: "ready" | "asked" | "refused" | "no_resume" | "error"; detail: string; prepared_id?: string; cover_note?: boolean }
 
@@ -63,17 +77,51 @@ const must = (r: { data: any; error: { message: string } | null }, what: string)
   return r.data;
 };
 
+// The preparation host's pool (owner, 2026-10-27 19:55: no number of ours): as many browsers at once as this machine holds
+// (machineSlots; PREPARE_AHEAD_CONCURRENCY or MASS_SUBMIT_CONCURRENCY when the owner sets one), every employer host at full
+// parallelism unless it refuses (mass-run.ts HostGate, shared through the database).
+export function preparePacing(get: (k: string) => string | undefined = (k) => Deno.env.get(k), slots?: () => number): Pacing {
+  const raw = (get("PREPARE_AHEAD_CONCURRENCY") ?? "").trim();
+  return pacingFrom(get, /^\d{1,6}$/.test(raw) && Number(raw) >= 1 ? { concurrency: Number(raw) } : {}, slots);
+}
+// Many preparation hosts at once: PREPARE_AHEAD_SHARD="i/n" makes this one take only the people whose id falls in its
+// share (a stable hash), so n hosts split the work with no lock between them. Absent: every person.
+export function shardOf(spec: string | undefined): ((userId: string) => boolean) | null {
+  const m = /^\s*(\d{1,4})\s*\/\s*(\d{1,4})\s*$/.exec(spec ?? "");
+  if (!m || Number(m[2]) < 1 || Number(m[1]) >= Number(m[2])) return null;
+  const i = Number(m[1]), n = Number(m[2]);
+  return (u) => {
+    let h = 2166136261;
+    for (let k = 0; k < u.length; k++) h = Math.imul(h ^ u.charCodeAt(k), 16777619) >>> 0;
+    return h % n === i;
+  };
+}
+
 // FEATURE 1: `only` prepares just these postings of this person (the rows the chat just queued, prepare-ahead.ts serve);
 // the candidates are still the database's (career_apply_prepare_candidates: its gates decide), only narrowed.
-export async function prepareAhead(d: AheadDeps, o: { perPerson?: number; limit?: number; only?: { user_id: string; job_ids: string[] } } = {}): Promise<AheadOutcome[]> {
+// Owner, 2026-10-27: no per-person number and no per-run number. The candidates are read a page at a time (a page is what
+// this machine runs at once, so no read holds more than it can work on) and prepared through the shared pool, until the
+// database offers no new one. Every try is recorded, which takes a posting out of the candidates, so the run ends; a
+// posting offered again in the same run (its record failed) is not tried twice.
+export async function prepareAhead(d: AheadDeps, o: { perPerson?: number; limit?: number; only?: { user_id: string; job_ids: string[] }; shard?: (userId: string) => boolean } = {}): Promise<AheadOutcome[]> {
   const now = d.now ?? Date.now;
-  const all: Candidate[] = must(await d.db.rpc("career_apply_prepare_candidates", {
-    p_now: new Date(now()).toISOString(), p_per_person: o.perPerson ?? 5, p_limit: o.limit ?? 50,
-  }), "read the postings to prepare") ?? [];
+  const limiter = d.limiter ?? new PacedLimiter({ concurrency: 1, hostMax: 1, hostSpacingMs: 0 });
+  const page = Math.max(1, Math.floor(o.limit ?? 2 * limiter.pacing.concurrency));
   const only = o.only ? new Set(o.only.job_ids) : null;
-  const candidates = only ? all.filter((c) => c.user_id === o.only!.user_id && only.has(c.job_id)) : all;
-  const out: AheadOutcome[] = [];
-  for (const c of candidates) out.push(await prepareOne(d, c));
+  const tried = new Set<string>(), out: AheadOutcome[] = [];
+  for (let round = 0; ; round++) {
+    const all: Candidate[] = must(await d.db.rpc("career_apply_prepare_candidates", {
+      p_now: new Date(now()).toISOString(), p_per_person: Math.max(1, Math.floor(o.perPerson ?? page)), p_limit: page + tried.size,
+    }), "read the postings to prepare") ?? [];
+    const candidates = all.filter((c) => !tried.has(`${c.user_id}\n${c.job_id}`) &&
+      (only ? c.user_id === o.only!.user_id && only.has(c.job_id) : true) && (o.shard ? o.shard(c.user_id) : true)).slice(0, page);
+    if (!candidates.length) break;
+    for (const c of candidates) tried.add(`${c.user_id}\n${c.job_id}`);
+    out.push(...await Promise.all(candidates.map((c) => limiter.run(d.urlFor ? d.urlFor(c) : c.url, () => prepareOne(d, c),
+      (r) => (r.outcome === "refused" && /^HOST_RATE_LIMITED|^CAPTCHA_AT_SUBMIT|^captcha/.test(r.detail) ? { why: "rate_limited", retryAfterS: null } : null)))));
+    // `only` asks for a known few, and an owner-given --limit is one page: neither pages on.
+    if (only || o.limit !== undefined) break;
+  }
   return out;
 }
 
@@ -113,7 +161,7 @@ export async function prepareOne(d: AheadDeps, c: Candidate): Promise<AheadOutco
     if (!resume) {
       // SUBMIT-STEER-1130: confirmed facts but no name or email on file, so no resume can carry them. Ask for those, once
       // (bound to this posting, so their answers make it a candidate again), instead of stopping here for good.
-      const missing = profile && Array.isArray(profile.facts) && profile.facts.length ? contactAsk(profile, rows, c.company) : [];
+      const missing = !d.resumeIsFile && profile && Array.isArray(profile.facts) && profile.facts.length ? contactAsk(profile, rows, c.company) : [];
       if (missing.length) {
         const n = must(await d.db.rpc("career_apply_prepare_ask_for", {
           p_user: c.user_id, p_posting_job_id: c.job_id, p_engine_job_id: c.job_id, p_questions: missing,
@@ -122,10 +170,33 @@ export async function prepareOne(d: AheadDeps, c: Candidate): Promise<AheadOutco
       }
       return await record("no_resume", "no resume could be tailored to this posting from their confirmed facts");
     }
-    const r = await prepare({
+    // MASS APPLY: shared facts the form needs and they have not given, asked from the board API's schema with no browser
+    // pass (saves one browser run per Greenhouse posting in ask-then-ready). Only fact:* questions; anything else (an
+    // essay, a posting-only wording) is left to the browser's own read, which keys it exactly as before.
+    if (d.schemaFor) {
+      const schema = await d.schemaFor(d.urlFor ? d.urlFor(c) : c.url).catch(() => null);
+      if (schema) {
+        const wanted = schema.fields.filter((f) => f.required && !/file/.test(f.type))
+          .map((f) => ({ label: f.label, type: /select/.test(f.type) ? "select" : "input_text", options: f.options.map((o) => o.label) }));
+        const ask = questionsToStore({ posting: c.job_id, company: c.company, questions: wanted }, { facts: trusted, answered: new Set(rows.map((x) => x.key)) });
+        const facts = ask.questions.filter((q) => q.kind === "fact" && String(q.key).startsWith("fact:") && !Object.hasOwn(trusted, String(q.key).slice(5)) && !q.misfit);
+        if (facts.length) {
+          const n = must(await d.db.rpc("career_apply_prepare_ask_for", {
+            p_user: c.user_id, p_posting_job_id: c.job_id, p_engine_job_id: c.job_id, p_questions: facts,
+          }), "store the questions");
+          return { user_id: c.user_id, job_id: c.job_id, outcome: "asked", detail: `${n} question(s) asked from the board's published form (no browser)` };
+        }
+      }
+    }
+    const dryRun = () => prepare({
       url: d.urlFor ? d.urlFor(c) : c.url, factsPath, resumePath: resume.path, account: { epoch: Number(c.epoch), version: Number(c.version) },
       now: now(), runEngine: d.runEngine, resumeTag: resume.tag,
     });
+    let r = await dryRun();
+    // MASS APPLY (2026-11-01): the browser itself failing (DRIVER_ERROR: a crash or a timeout of the engine's browser, not
+    // the employer's page) is tried once more at once. A preparation is a dry run (nothing is ever submitted), so a second
+    // try is safe; without it one browser hiccup parked the posting for 7 days (prepare_candidates' wait after a refusal).
+    if (!r.ready && /^DRIVER_ERROR/.test(String((r.result as any)?.reason ?? ""))) r = await dryRun();
     if (!r.ready) {
       const result: any = r.result;
       // The questions name the posting's own company too (the engine's stop names the board's tenant or the page's host).
@@ -142,6 +213,13 @@ export async function prepareOne(d: AheadDeps, c: Candidate): Promise<AheadOutco
           detail: `${n} question(s) asked${letters ? `; ${letters} cover letter${letters === 1 ? "" : "s"} drafted for them to read` : ""}`,
         };
       }
+      // The form's only open questions are ones Trainee never takes by text (an ID number, a password, a code): said as such.
+      if (result.reason === "needs_answers" && Array.isArray(result.questions) && result.questions.length) {
+        return await record("refused", "sensitive_question: the form asks for something Trainee does not take in a message", undefined, result.posting);
+      }
+      // The browser itself failing twice is our error, not the employer's form refusing: recorded as such (it is tried
+      // again within the hour: prepare_candidates' wait after an error), never told as "the form could not be filled".
+      if (/^DRIVER_ERROR/.test(String(result.reason ?? ""))) return await record("error", "the browser failed while reading the form (DRIVER_ERROR); tried twice", undefined, result.posting);
       return await record("refused", String(result.reason ?? result.state ?? "not ready"), undefined, result.posting);
     }
     if (r.payload.resume_sha256 !== resume.sha256) return await record("error", "the engine sent another resume than the tailored one");
@@ -298,22 +376,73 @@ export function storedProfile(admin: ServiceRpc) {
 }
 
 // FEATURE 1: the worker host's door for the chat (agent-chat kickPrepare, career_apply_from_chat.ts). A POST with the
-// shared token and { user_id, job_ids } is answered 202 at once and prepares exactly those queued rows, one run at a time
-// (runs are chained, never concurrent). Anything else is refused. It prepares only; nothing is approved, queued or sent.
-export function prepareDoor(o: { token: string; run: (only: { user_id: string; job_ids: string[] }) => Promise<unknown> }) {
-  let chain: Promise<unknown> = Promise.resolve();
+// shared token and { user_id, job_ids } is answered 202 at once and prepares exactly those queued rows. Mass submission
+// (D-MS-2): runs are no longer chained one after another; each goes through the host's shared pool (its bound and its
+// per-host pacing), and a posting already being prepared for that person is not started twice. Anything else is refused.
+// It prepares only; nothing is approved, queued or sent.
+// GET /status with the same token says, in plain words, whether this host is up and what it is doing (prepareHostStatus
+// in supabase/functions/_shared/prepare_host_status.ts reads it for the chat and the smoke check).
+export interface DoorStatus {
+  ok: true; service: "prepare-ahead"; started_at: string; runs: number; in_flight: number; waiting: number; prepared: number;
+  last_run_at: string | null; last_error: string | null; concurrency: number; host_max: number; host_spacing_ms: number;
+}
+export function prepareDoor(o: {
+  token: string;
+  run: (only: { user_id: string; job_ids: string[] }) => Promise<unknown>;
+  limiter?: PacedLimiter;
+  now?: () => number;
+}) {
+  const now = o.now ?? Date.now;
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const busy = new Set<string>();
+  const st = { started_at: new Date(now()).toISOString(), runs: 0, active: 0, prepared: 0, last_run_at: null as string | null, last_error: null as string | null };
+  const authorized = (req: Request) => !!o.token && req.headers.get("authorization") === `Bearer ${o.token}`;
   return async (req: Request): Promise<Response> => {
+    const path = new URL(req.url).pathname;
+    if (req.method === "GET" && path.endsWith("/status")) {
+      if (!authorized(req)) return new Response("unauthorized", { status: 401 });
+      const p = o.limiter?.pacing;
+      const body: DoorStatus = {
+        ok: true, service: "prepare-ahead", started_at: st.started_at, runs: st.runs, in_flight: o.limiter?.inFlight ?? st.active,
+        waiting: busy.size, prepared: st.prepared, last_run_at: st.last_run_at, last_error: st.last_error,
+        concurrency: p?.concurrency ?? 1, host_max: p?.hostMax ?? 1, host_spacing_ms: p?.hostSpacingMs ?? 0,
+      };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }
     if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
-    if (!o.token || req.headers.get("authorization") !== `Bearer ${o.token}`) return new Response("unauthorized", { status: 401 });
+    if (!authorized(req)) return new Response("unauthorized", { status: 401 });
     // deno-lint-ignore no-explicit-any
     let body: any;
     try { body = await req.json(); } catch { return new Response("bad request", { status: 400 }); }
     const user = String(body?.user_id ?? ""), ids = Array.isArray(body?.job_ids) ? body.job_ids.map(String).filter((x: string) => x && x.length <= 300).slice(0, 100) : [];
     if (!UUID.test(user) || !ids.length) return new Response("bad request", { status: 400 });
-    chain = chain.then(() => o.run({ user_id: user, job_ids: ids })).catch((e) => console.error(`prepare-ahead serve: ${e instanceof Error ? e.message : e}`));
+    const fresh = [...new Set<string>(ids)].filter((id) => !busy.has(`${user}\n${id}`));
+    if (fresh.length) {
+      for (const id of fresh) busy.add(`${user}\n${id}`);
+      st.runs++;
+      st.active++;
+      void Promise.resolve().then(() => o.run({ user_id: user, job_ids: fresh }))
+        .then((r) => { st.prepared += Array.isArray(r) ? r.length : 0; st.last_error = null; })
+        .catch((e) => { st.last_error = String(e instanceof Error ? e.message : e).slice(0, 200); console.error(`prepare-ahead serve: ${st.last_error}`); })
+        .finally(() => { st.active--; st.last_run_at = new Date(now()).toISOString(); for (const id of fresh) busy.delete(`${user}\n${id}`); });
+    }
     return new Response(JSON.stringify({ accepted: ids.length }), { status: 202, headers: { "content-type": "application/json" } });
   };
+}
+
+// What the engine's process may see on the preparation host: where its tools are, nothing else. The service key and every
+// other secret stay in this process (the engine, Chromium and the employer's page never get them).
+// UPMORE_SCRIPT_SUBMIT_LIVE (the owner's switch, as on the send worker, worker.ts ENGINE_ENV_KEYS): without it the dry run
+// on any real Ashby form stops at SUBMIT_DESTINATION_NOT_BOUND and no card is ever prepared.
+export const PREPARE_ENGINE_ENV_KEYS = ["PATH", "HOME", "TMPDIR", "DENO_DIR", "PLAYWRIGHT_BROWSERS_PATH", "UPMORE_PLAYWRIGHT_PATH", "UPMORE_CHROMIUM_PATH",
+  "UPMORE_SCRIPT_SUBMIT_LIVE"];
+export function prepareEngineEnv(from: (k: string) => string | undefined = (k) => Deno.env.get(k)): Record<string, string> {
+  const env: Record<string, string> = { UPMORE_MASK_SCREENSHOTS: "1", UPMORE_BROWSER_HEADED: "0" };
+  for (const k of PREPARE_ENGINE_ENV_KEYS) {
+    const v = from(k);
+    if (v) env[k] = v;
+  }
+  return env;
 }
 
 // FEATURE 3: the scheduled run's `prepareAhead` dependency (career-proactive handler.ts), one posting at a time through
@@ -333,26 +462,57 @@ export function aheadPrepare(o: { admin: any; base: Omit<AheadDeps, "coverNoteMo
   };
 }
 
+// The credential this host holds, by name (never its value): PREPARE_AHEAD_KEY when the owner made the narrow preparation
+// role (docs/launch/CLOUD-RUNNER.md "Preparation host": the Request to the database lane), else the service role key as
+// before, said plainly at start. Either way it stays in this process: the engine's process gets prepareEngineEnv() only.
+export function prepareCredential(get: (k: string) => string | undefined = (k) => Deno.env.get(k)): { url: string; key: string; name: string } | null {
+  const url = get("SUPABASE_URL") ?? "", narrow = get("PREPARE_AHEAD_KEY") ?? "", service = get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!url) return null;
+  if (narrow) return { url, key: narrow, name: "PREPARE_AHEAD_KEY" };
+  if (service) return { url, key: service, name: "SUPABASE_SERVICE_ROLE_KEY" };
+  return null;
+}
+
 if (import.meta.main) {
   const [cmd, ...rest] = Deno.args;
+  const usage = "usage: prepare-ahead.ts once [--limit N] [--draft-cover-letters] | daily   (SUPABASE_URL and PREPARE_AHEAD_KEY or SUPABASE_SERVICE_ROLE_KEY in the environment)\n" +
+    "       prepare-ahead.ts serve [--port N] [--draft-cover-letters]   (also CAREER_PREPARE_AHEAD_TOKEN: the chat's kick, agent-chat CAREER_PREPARE_AHEAD_URL)";
+  if (!["daily", "once", "serve"].includes(cmd)) { console.error(usage); Deno.exit(2); }
+  if (cmd === "daily" && Deno.env.get("CAREER_PREPARE_AHEAD") !== "on") { console.error("CAREER_PREPARE_AHEAD is not on; nothing was prepared."); Deno.exit(2); }
+  const cred = prepareCredential();
+  if (!cred) { console.error("SUPABASE_URL and PREPARE_AHEAD_KEY (or SUPABASE_SERVICE_ROLE_KEY) are required; nothing was prepared."); Deno.exit(2); }
+  if (cred.name === "SUPABASE_SERVICE_ROLE_KEY") {
+    console.log("prepare-ahead: running with the service role key (no narrower preparation key, PREPARE_AHEAD_KEY, is set). It stays in this process; the browser never sees it.");
+  }
+  const { createClient } = await import("npm:@supabase/supabase-js@2.117.1");
+  const { edgeRenderer, supabaseResumeStore } = await import("../../supabase/functions/_shared/career_tailor.ts");
+  const { callModel, newMeter } = await import("../../supabase/functions/_shared/model_gateway.ts");
+  const { careerModelConfig } = await import("../../supabase/functions/agent-chat/release_model.ts");
+  const admin = createClient(cred.url, cred.key, { auth: { persistSession: false } });
+  const root = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
+  const cfg = careerModelConfig(Deno.env);
+  // One pool for everything this host prepares: as many browsers as this machine holds, every employer site at full
+  // parallelism unless it refuses; a refusal holds that site off for every host through the database.
+  const pacing = preparePacing();
+  const gate = dbHostGate(admin);
+  const limiter = new PacedLimiter(pacing, Date.now, gate);
+  const runEngine = engineRunner({ root, isolate: prepareEngineEnv() });
+  const shard = shardOf(Deno.env.get("PREPARE_AHEAD_SHARD"));
+  console.log(`prepare-ahead: up to ${pacing.concurrency} at once on this machine; no number per site or per run; a site that refuses is backed off for every host${shard ? `; this host takes its share ${Deno.env.get("PREPARE_AHEAD_SHARD")}` : ""}.`);
   if (cmd === "daily") {
     // FEATURE 3: the day's preparation and its one card, as the scheduled career-proactive run does it, on the host that
     // has the engine (an edge function cannot run a browser). Run it on a schedule (every 15 minutes is enough: once a
     // local day per person, the card retried until it is shown). CAREER_PREPARE_AHEAD=on is required.
-    if (Deno.env.get("CAREER_PREPARE_AHEAD") !== "on") { console.error("CAREER_PREPARE_AHEAD is not on; nothing was prepared."); Deno.exit(2); }
-    const url = Deno.env.get("SUPABASE_URL"), key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    if (!url || !key) { console.error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required; nothing was prepared."); Deno.exit(2); }
-    const { createClient } = await import("npm:@supabase/supabase-js@2.117.1");
-    const { edgeRenderer, supabaseResumeStore } = await import("../../supabase/functions/_shared/career_tailor.ts");
     const { supabaseAlertStore } = await import("../../supabase/functions/_shared/career_alert_store.ts");
     const { supabasePostingsDb } = await import("../../supabase/functions/_shared/career_ingest.ts");
     const { supabaseAheadStore } = await import("../../supabase/functions/_shared/career_prepare_ahead.ts");
     const { runPrepareAhead } = await import("../../supabase/functions/_shared/career_proactive_run.ts");
-    const { callModel, modelConfig, newMeter } = await import("../../supabase/functions/_shared/model_gateway.ts");
-    const admin = createClient(url, key, { auth: { persistSession: false } });
-    const root = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
-    const cfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
     const alerts = supabaseAlertStore(admin), postings = supabasePostingsDb(admin);
+    const prepareFor = aheadPrepare({
+      admin,
+      base: { db: admin, runEngine, profileFor: storedProfile(admin), resumeFor: tailoredResume({ render: edgeRenderer(), resumes: supabaseResumeStore(admin) }) },
+      cover: Deno.env.get("CAREER_PREPARE_AHEAD_COVER") === "on" ? { newMeter, call: (payload, meter) => callModel(cfg, payload, { meter, role: "chat" }) } : undefined,
+    });
     const stats = await runPrepareAhead({
       now: Date.now(), recentPostings: (since) => postings.newSince(since), ahead: supabaseAheadStore(admin),
       // Paused, opted out or erased: nothing is prepared for them (career_quiet_users, as the scheduled run filters).
@@ -360,8 +520,9 @@ if (import.meta.main) {
         const rows = await alerts.active();
         const q = await admin.rpc("career_quiet_users", { p_users: rows.map((r) => r.id) });
         if (q.error) throw new Error(`read who is paused: ${q.error.message}`);
-        const quiet = new Set((q.data ?? []).map((r: any) => String(r.user_id)));
-        return rows.filter((r) => !quiet.has(r.id));
+        const quiet = new Set((q.data ?? []).map((r: any) => String(r?.user_id ?? r))); // bare ids or {user_id}: either shape
+        // Many hosts: this one takes only its share of the people (PREPARE_AHEAD_SHARD).
+        return rows.filter((r) => !quiet.has(r.id) && (!shard || shard(r.id)));
       } },
       watches: async (ids) => {
         const out = new Map<string, unknown>();
@@ -370,51 +531,38 @@ if (import.meta.main) {
         for (const r of data ?? []) out.set(String(r.user_id), r.value);
         return out;
       },
-      prepare: aheadPrepare({
-        admin,
-        base: { db: admin, runEngine: engineRunner({ root }), profileFor: storedProfile(admin), resumeFor: tailoredResume({ render: edgeRenderer(), resumes: supabaseResumeStore(admin) }) },
-        cover: Deno.env.get("CAREER_PREPARE_AHEAD_COVER") === "on" ? { newMeter, call: (payload, meter) => callModel(cfg, payload, { meter, role: "chat" }) } : undefined,
-      }),
+      // Each posting through the one pool, so the employer's site is paced across everything this host prepares.
+      prepare: (c) => limiter.run(c.url, () => prepareFor(c)),
     });
     console.log(`${stats.ready}/${stats.picked} applications ready for ${stats.people} people; ${stats.cards} card(s) pushed; nothing was sent.`);
     Deno.exit(0);
   }
-  if (cmd !== "once" && cmd !== "serve") {
-    console.error("usage: prepare-ahead.ts once [--limit N] [--draft-cover-letters] | daily   (SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the environment)\n" +
-      "       prepare-ahead.ts serve [--port N] [--draft-cover-letters]   (also CAREER_PREPARE_AHEAD_TOKEN: the chat's kick, agent-chat CAREER_PREPARE_AHEAD_URL)");
-    Deno.exit(2);
-  }
-  const url = Deno.env.get("SUPABASE_URL"), key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!url || !key) { console.error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required; nothing was prepared."); Deno.exit(2); }
-  const { createClient } = await import("npm:@supabase/supabase-js@2.117.1");
-  const { edgeRenderer, supabaseResumeStore } = await import("../../supabase/functions/_shared/career_tailor.ts");
-  const admin = createClient(url, key, { auth: { persistSession: false } });
-  const i = rest.indexOf("--limit"), limit = i >= 0 ? Number(rest[i + 1]) : 50;
-  const root = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
+  const i = rest.indexOf("--limit"), asked = i >= 0 ? Number(rest[i + 1]) : NaN;
+  const limit = Number.isInteger(asked) && asked > 0 ? asked : undefined;
   const profileFor = storedProfile(admin);
   // The chat's own model door (agent-chat handler-career.ts drafts with the same configuration), only when asked.
-  const { callModel, modelConfig, newMeter } = await import("../../supabase/functions/_shared/model_gateway.ts");
-  const meter = newMeter(), cfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+  const meter = newMeter();
   const draftModel: ModelFn | undefined = rest.includes("--draft-cover-letters")
     ? (payload) => callModel(cfg, payload, { meter, role: "chat" }) : undefined;
   const deps: AheadDeps = {
-    db: admin, runEngine: engineRunner({ root }), profileFor, draftModel,
+    db: admin, runEngine, profileFor, draftModel, limiter,
     resumeFor: tailoredResume({ render: edgeRenderer(), resumes: supabaseResumeStore(admin) }),
   };
   if (cmd === "serve") {
     const token = Deno.env.get("CAREER_PREPARE_AHEAD_TOKEN") ?? "";
-    if (!token) { console.error("CAREER_PREPARE_AHEAD_TOKEN is required to serve; nothing was started."); Deno.exit(2); }
+    if (token.length < 32) { console.error("CAREER_PREPARE_AHEAD_TOKEN (32 or more characters) is required to serve; nothing was started."); Deno.exit(2); }
     const p = rest.indexOf("--port"), port = p >= 0 ? Number(rest[p + 1]) : 8787;
     Deno.serve({ port }, prepareDoor({
-      token,
+      token, limiter,
       run: async (only) => {
-        const done = await prepareAhead(deps, { only, perPerson: 25, limit: 200 });
+        const done = await prepareAhead(deps, { only });
         for (const r of done) console.log(`${r.outcome.toUpperCase()} ${r.job_id} (${r.detail})`);
+        return done;
       },
     }));
     await new Promise(() => {});
   }
-  const done = await prepareAhead(deps, { limit: Number.isInteger(limit) && limit > 0 ? limit : 50 });
+  const done = await prepareAhead(deps, { limit, ...(shard ? { shard } : {}) });
   for (const r of done) console.log(`${r.outcome.toUpperCase()} ${r.job_id} (${r.detail})`);
   console.log(`${done.filter((r) => r.outcome === "ready").length} of ${done.length} prepared before they asked; nothing was sent.`);
   if (draftModel) console.log(`model calls for cover letters: ${meter.calls} (${meter.failed} failed), $${(meter.usd_micros / 1e6).toFixed(4)}${meter.unpriced ? `, ${meter.unpriced} unpriced` : ""}`);

@@ -222,7 +222,7 @@ test("run on a person's computer refuses a service key before anything is read o
   fs.writeFileSync(none, "http://insecure.example.test/job\n");
   const empty = await batch({ UPMORE_SUPABASE_ANON_KEY: tok("anon") }, none);
   assert.equal(empty.code, 2);
-  assert.match(empty.out, /1 to 50 https job links/);
+  assert.match(empty.out, /at least one https job link/);
 });
 
 function signIn(appUrl, timeoutMs) {

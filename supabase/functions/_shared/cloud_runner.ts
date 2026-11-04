@@ -49,13 +49,19 @@ export interface SandboxHost {
   // A fresh sandbox from the runner snapshot; its id.
   create(o: { name: string }): Promise<string>;
   // Start the runner in it (not waited for). The env carries the job id, the sandbox id, the token and the bridge URL.
-  run(sandbox: string, env: Record<string, string>): Promise<void>;
+  // `script`: the repo path to run (default: the send runner, workers/career-cloud/sandbox-runner.ts).
+  run(sandbox: string, env: Record<string, string>, script?: string): Promise<void>;
   stop(sandbox: string): Promise<void>;
 }
 export interface DispatchLimits {
   want: number; // at most this many new applications per tick
   global: number; // at most this many applications driven by the cloud at once
   perPortal: number; // at most this many at once on one portal family (greenhouse, lever, ashby)
+  // FEATURE 17: with both given (a number or null), the dispatcher also claims text-card approvals
+  // (career_apply_cloud_dispatch_claim2). null: no such number (NO LIMITS; only the person's own pace binds); a number:
+  // at most perPersonDay sent per person in 24 hours, at most perSiteMinute claims per employer host per minute.
+  perPersonDay?: number | null;
+  perSiteMinute?: number | null;
 }
 export interface DispatchResult {
   claimed: number;
@@ -98,7 +104,11 @@ export async function dispatch(o: {
   let jobs: ClaimedJob[];
   try {
     jobs = await withRetry(async () => {
-      const rows = await o.rpc("career_apply_cloud_dispatch_claim", { p_want: o.limits.want, p_global: o.limits.global, p_per_portal: o.limits.perPortal });
+      const both = o.limits.perPersonDay !== undefined && o.limits.perSiteMinute !== undefined;
+      const rows = both
+        ? await o.rpc("career_apply_cloud_dispatch_claim2", { p_want: o.limits.want, p_global: o.limits.global, p_per_portal: o.limits.perPortal,
+          p_per_person_day: o.limits.perPersonDay, p_per_site_minute: o.limits.perSiteMinute })
+        : await o.rpc("career_apply_cloud_dispatch_claim", { p_want: o.limits.want, p_global: o.limits.global, p_per_portal: o.limits.perPortal });
       if (!Array.isArray(rows)) throw Error("APPLY_QUEUE_UNAVAILABLE");
       return rows as ClaimedJob[];
     }, { tries: 2, baseMs: o.retry?.baseMs, sleep: o.retry?.sleep });
@@ -171,7 +181,9 @@ export async function handleBridge(op: string, body: any, d: BridgeDeps): Promis
       case "sources":
         return { status: 200, body: await d.rpc("career_apply_message_cloud_sources", { p_user: row.user_id }) };
       case "authorize":
-        return { status: 200, body: await d.rpc("career_apply_message_cloud_authorize", {
+        // FEATURE 17: either route's authorization (a card-cloud job goes to the bridge's own, unchanged; a text-card job
+        // to career_apply_cloud_text_authorize), chosen by the database from the job, never by the request.
+        return { status: 200, body: await d.rpc("career_apply_cloud_authorize_any", {
           p_id: id, p_lease: lease, p_hash: String(body?.p_hash ?? ""), p_source_digest: String(body?.p_source_digest ?? ""),
         }) };
       case "resume":
@@ -210,6 +222,10 @@ export function vercelSandboxHost(o: {
   vcpus?: number;
   timeoutMs?: number;
   repoDir?: string;
+  // The owner's switch UPMORE_SCRIPT_SUBMIT_LIVE=1 (a secret of this function): handed to both runner scripts so the engine
+  // binds a real Greenhouse, Ashby or Lever form's scripted Submit (scripts/apply.ts scriptSubmitFamily). Without it every
+  // Ashby posting, Ramp's included, stops at SUBMIT_DESTINATION_NOT_BOUND in the preparation and in the send.
+  scriptSubmitLive?: boolean;
   fetch?: typeof fetch;
 }): SandboxHost {
   const f = o.fetch ?? fetch, api = "https://api.vercel.com";
@@ -234,11 +250,13 @@ export function vercelSandboxHost(o: {
       if (!id) throw Error("vercel: no sandbox session id");
       return String(id);
     },
-    async run(sandbox, env) {
+    async run(sandbox, env, script = "workers/career-cloud/sandbox-runner.ts") {
+      if (!/^workers\/career-cloud\/(sandbox|prepare)-runner\.ts$/.test(script)) throw Error("vercel: not a runner script");
       await call(`/v2/sandboxes/sessions/${encodeURIComponent(sandbox)}/cmd`, {
         command: "bash", cwd: dir,
-        args: ["-c", "exec deno run -A --no-check workers/career-cloud/sandbox-runner.ts > /tmp/runner.log 2>&1"],
-        env: { ...env, PLAYWRIGHT_BROWSERS_PATH: "/vercel/.cache/ms-playwright", UPMORE_PLAYWRIGHT_PATH: `${dir}/tools/node_modules/playwright` },
+        args: ["-c", `exec deno run -A --no-check ${script} > /tmp/runner.log 2>&1`],
+        env: { ...env, PLAYWRIGHT_BROWSERS_PATH: "/vercel/.cache/ms-playwright", UPMORE_PLAYWRIGHT_PATH: `${dir}/tools/node_modules/playwright`,
+          ...(o.scriptSubmitLive ? { UPMORE_SCRIPT_SUBMIT_LIVE: "1" } : {}) },
       });
     },
     async stop(sandbox) {

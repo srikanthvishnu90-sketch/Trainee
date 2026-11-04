@@ -12,17 +12,34 @@ export interface AlertStore {
   get(userId: string): Promise<AlertRow | null>;
   save(row: AlertRow): Promise<void>;
   // WO-091c: the alerts run's own counters only, never the person's settings (prefs, tz): a stop that lands mid-run holds.
-  saveCounters?(userId: string, c: AlertCounters): Promise<void>;
+  // `counted`: the day's count was kept by enqueueAlert itself; instant_sent_today and sent_on are not written.
+  saveCounters?(userId: string, c: AlertCounters, o?: { counted?: boolean }): Promise<void>;
   // The person's alert settings removed (they asked Trainee to forget everything): their words are not kept.
   remove?(userId: string): Promise<void>;
   active(): Promise<AlertRow[]>; // everyone with alerts on
   // WO-037: alerts per person whose delivery time is at or after `sinceIso` (the weekly cap's count). A store without it
   // sends no alerts (the run fails closed).
   alertsSince?(sinceIso: string): Promise<Map<string, number>>;
+  // PROACTIVE SCENARIOS (2026-10-29): the keys of the alerts due at or after `sinceIso` (an alert is never due before it
+  // was queued), by person, so alerts a run queued before dying (its counters never saved) count against the person's day
+  // (career_proactive_run.ts runAlerts).
+  alertKeysSince?(sinceIso: string): Promise<Map<string, Set<string>>>;
 }
 // first_seen_at (WO-037, alerts only): when Trainee first saw the posting, kept with the alert so the latency from
 // first seen to delivered can be reported (career_alert_latency).
-export interface Outbox { enqueue(userId: string, m: { key: string; kind: "alert" | "report" | "receipt" | "status" | "followup" | "brief" | "digest"; text: string; at: number; first_seen_at?: string }): Promise<boolean> } // false: that key was already queued or sent
+export interface Outbox {
+  enqueue(userId: string, m: { key: string; kind: "alert" | "report" | "receipt" | "status" | "followup" | "brief" | "digest"; text: string; at: number; first_seen_at?: string }): Promise<boolean>; // false: that key was already queued or sent
+  // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): one job alert, queued only if the person's settings as they are at that
+  // moment still have room for it, with the count kept in the same step, one person at a time. Two runs at once that
+  // read the boards at different moments each planned the person's whole day from the same counters and queued it: a cap
+  // of 3 became 6. And a person who turned alerts off, asked for fewer or raised their fit floor while a run was going got
+  // everything that run had planned. `day`: the person's local day (the run's); `weekSince`: the start of the rolling
+  // week; `fit`: the alert's fit (null: none known). "queued", or why not: "duplicate" (that key was queued before),
+  // "capped" (no room today or this week), "below_fit", "off" (alerts off, settings gone, or the account paused),
+  // "unsupported" (the store cannot do it; the caller queues with enqueue and keeps the count itself).
+  enqueueAlert?(userId: string, m: { key: string; text: string; at: number; first_seen_at?: string; fit: number | null }, c: { day: string; weekSince: string }): Promise<AlertQueued>;
+}
+export type AlertQueued = "queued" | "duplicate" | "capped" | "below_fit" | "off" | "unsupported";
 
 // The person's words, checked: what the tools accept and what the table's constraint accepts are the same rules.
 export function validPrefs(input: Record<string, unknown>, base: AlertPrefs = DEFAULT_PREFS): { ok: true; prefs: AlertPrefs } | { ok: false; error: string } {
@@ -76,18 +93,50 @@ export function startWatching(prev: AlertRow | null, o: { userId: string; prefs:
 }
 
 // ------------------------------------------------------------------------------------------------ memory
-export interface MemoryAlerts { rows: Record<string, AlertRow>; outbox: { userId: string; key: string; kind: string; text: string; at: number; first_seen_at?: string }[] }
+export interface MemoryAlerts { rows: Record<string, AlertRow>; outbox: { userId: string; key: string; kind: string; text: string; at: number; first_seen_at?: string; fit?: number | null }[] }
 export function memoryAlertStore(initial?: MemoryAlerts): AlertStore & Outbox & { dump(): MemoryAlerts } {
   const st: MemoryAlerts = initial ? JSON.parse(JSON.stringify(initial)) : { rows: {}, outbox: [] };
   return {
     async get(id) { return st.rows[id] ? JSON.parse(JSON.stringify(st.rows[id])) : null; },
     async save(row) { st.rows[row.id] = JSON.parse(JSON.stringify(row)); },
-    async saveCounters(id, c) { if (st.rows[id]) st.rows[id] = { ...st.rows[id], ...JSON.parse(JSON.stringify(c)) }; },
+    async saveCounters(id, c, o) {
+      if (!st.rows[id]) return;
+      const { instant_sent_today, sent_on, ...rest } = JSON.parse(JSON.stringify(c));
+      st.rows[id] = { ...st.rows[id], ...rest, ...(o?.counted ? {} : { instant_sent_today, sent_on }) };
+    },
+    // As career_alert_enqueue does it in the database (one person at a time): the settings as they are now decide. The
+    // count is taken before anything can interleave and given back if the row is not written; the row is written through
+    // this store's own enqueue (so a wrapper that fails it, fails this too).
+    async enqueueAlert(this: Outbox, userId, m, c) {
+      const row = st.rows[userId];
+      if (!row || !row.prefs?.on) return "off";
+      if (st.outbox.some((o) => o.userId === userId && o.key === m.key)) return "duplicate";
+      if (typeof row.prefs.min_fit === "number" && !(typeof m.fit === "number" && m.fit >= row.prefs.min_fit)) return "below_fit";
+      const today = row.sent_on === c.day ? Math.max(0, row.instant_sent_today | 0) : 0;
+      if (today >= Math.min(MAX_INSTANT_PER_DAY, Math.floor(Number(row.prefs.max_instant_per_day) || 0))) return "capped";
+      // No weekly count: owner rule "no caps"; career_alert_enqueue (20261030180000) dropped it. max_per_week is accepted and ignored.
+      const was = { n: row.instant_sent_today, on: row.sent_on };
+      row.instant_sent_today = today + 1;
+      row.sent_on = c.day;
+      let ok = false;
+      try {
+        ok = await this.enqueue(userId, { key: m.key, kind: "alert", text: m.text, at: m.at, ...(m.first_seen_at ? { first_seen_at: m.first_seen_at } : {}), ...(m.fit !== null ? { fit: m.fit } : {}) } as any);
+      } finally {
+        if (!ok) { row.instant_sent_today = was.n; row.sent_on = was.on; }
+      }
+      return ok ? "queued" : "duplicate";
+    },
     async remove(id) { delete st.rows[id]; },
     async active() { return Object.values(st.rows).filter((r) => r.prefs.on).map((r) => JSON.parse(JSON.stringify(r))); },
     async alertsSince(since) {
       const t = Date.parse(since), out = new Map<string, number>();
       for (const o of st.outbox) if (o.kind === "alert" && o.at >= t) out.set(o.userId, (out.get(o.userId) ?? 0) + 1);
+      return out;
+    },
+    // Memory rows keep no queue time; an alert's time is never before it was queued, so every alert due since counts.
+    async alertKeysSince(since) {
+      const t = Date.parse(since), out = new Map<string, Set<string>>();
+      for (const o of st.outbox) if (o.kind === "alert" && o.at >= t) { if (!out.has(o.userId)) out.set(o.userId, new Set()); out.get(o.userId)!.add(o.key); }
       return out;
     },
     async enqueue(userId, m) {
@@ -116,9 +165,19 @@ export function supabaseAlertStore(admin: any): AlertStore & Outbox {
     async get(id) { const r = must<any>(await admin.from("career_alert_prefs").select("*").eq("user_id", id).maybeSingle(), "read alert settings"); return r ? fromDb(r) : null; },
     async save(row) { must(await admin.from("career_alert_prefs").upsert(toDb(row), { onConflict: "user_id" }), "save alert settings"); },
     async remove(id) { must(await admin.from("career_alert_prefs").delete().eq("user_id", id), "remove alert settings"); },
-    async saveCounters(id, c) {
-      must(await admin.from("career_alert_prefs").update({ last_checked_at: c.last_checked_at, instant_sent_today: c.instant_sent_today, sent_on: c.sent_on,
+    async saveCounters(id, c, o) {
+      must(await admin.from("career_alert_prefs").update({ last_checked_at: c.last_checked_at, ...(o?.counted ? {} : { instant_sent_today: c.instant_sent_today, sent_on: c.sent_on }),
         last_report_on: c.last_report_on, held: (c.held || []).slice(0, 200), updated_at: new Date().toISOString() }).eq("user_id", id), "save alert counters");
+    },
+    // career_alert_enqueue (20261030070000_proactive_r2.sql): the person's row locked, their settings and counts read, the
+    // alert inserted and counted, in one transaction. A project without that migration answers "unsupported".
+    async enqueueAlert(userId, m, c) {
+      const r = await admin.rpc("career_alert_enqueue", { p_user: userId, p_key: m.key, p_text: m.text, p_at: new Date(m.at).toISOString(),
+        p_first_seen: m.first_seen_at ?? null, p_fit: typeof m.fit === "number" ? Math.round(m.fit) : null, p_day: c.day, p_week_since: c.weekSince });
+      const said = `${(r.error as any)?.code ?? ""} ${r.error?.message ?? ""}`;
+      if (r.error && /career_alert_enqueue|PGRST202/i.test(said) && /exist|find|no function|PGRST202/i.test(said)) return "unsupported";
+      const v = String(must<any>(r, "queue an alert") ?? "");
+      return (["queued", "duplicate", "capped", "below_fit", "off"].includes(v) ? v : "off") as AlertQueued;
     },
     async active() {
       const out: AlertRow[] = [];
@@ -133,6 +192,14 @@ export function supabaseAlertStore(admin: any): AlertStore & Outbox {
       const out = new Map<string, number>();
       for (const r of must<any[]>(await admin.rpc("career_alerts_sent_since", { p_since: since }), "count this week's alerts") || []) out.set(r.user_id, Number(r.n) || 0);
       return out;
+    },
+    async alertKeysSince(since) {
+      const out = new Map<string, Set<string>>();
+      for (let from = 0; ; from += PAGE) {
+        const got = must<any[]>(await admin.from("career_outbox").select("user_id,key").eq("kind", "alert").gte("deliver_at", since).order("id").range(from, from + PAGE - 1), "read the alerts queued") || [];
+        for (const r of got) { if (!out.has(r.user_id)) out.set(r.user_id, new Set()); out.get(r.user_id)!.add(String(r.key)); }
+        if (got.length < PAGE) return out;
+      }
     },
     async enqueue(userId, m) {
       const r = await admin.from("career_outbox").insert({ user_id: userId, key: m.key, kind: m.kind, text: m.text, deliver_at: new Date(m.at).toISOString(),

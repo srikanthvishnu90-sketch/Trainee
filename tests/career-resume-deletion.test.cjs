@@ -7,7 +7,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const root = path.resolve(__dirname, "..");
-const DELETE_ACCOUNT = fs.readFileSync(path.join(root, "supabase/functions/delete-account/index.ts"), "utf8");
+// The function and the steps it runs (moved to _shared/account_delete.ts in ERASE SCENARIOS ROUND 2, 2026-10-30).
+const DELETE_ACCOUNT = fs.readFileSync(path.join(root, "supabase/functions/delete-account/index.ts"), "utf8") + "\n" +
+  fs.readFileSync(path.join(root, "supabase/functions/_shared/account_delete.ts"), "utf8");
 const MIGRATION = fs.readFileSync(path.join(root, "supabase/migrations/20261020130000_career_resume_tailoring.sql"), "utf8");
 
 test("delete-account lists and removes the person's career-resumes folder before the auth user is deleted", () => {

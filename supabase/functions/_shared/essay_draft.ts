@@ -12,7 +12,10 @@
 //   4. The model is called only through the injected `model` (the gateway's callModel in the handler, a stub in tests); a
 //      failure says so and leaves the question open. Nothing here throws out of the turn.
 import { CareerProfile, CareerWriting } from "./router_core.career.js";
-import { type AiPolicy, readAiPolicy } from "./ai_policy.ts";
+import { type AiPolicy, instructsAi, readAiPolicy } from "./ai_policy.ts";
+import { claimProblems, selfRole } from "./person_claims.ts";
+import { redactIdentity } from "./identity_redact.ts";
+import { statedLimit } from "./length_limit.ts";
 
 export type ModelFn = (payload: any) => Promise<any>;
 export interface DraftDeps {
@@ -41,7 +44,13 @@ export function confirmedFacts(facts: unknown[]): any[] {
     f && typeof f === "object" && !f.needs_confirmation && (!f.status || f.status === "confirmed") && !unproven(f) && !CareerProfile.quarantinedFact(f)
   );
 }
-const SKIP_KEYS = new Set(["id", "kind", "status", "source", "needs_confirmation", "unproven", "fact_id"]);
+// TAILORING ROUND 2: how a fact was confirmed is not what it says. Its provenance ("owner confirmed in chat the resume entry
+// shown to them (2026-10-29T15:04:00Z)"), its confirmation event's id (a UUID), when it was confirmed and the ids of the
+// facts that evidence it were sources of claims: "I was the owner of the data team" traced to "owner confirmed", "I
+// supported 29 clinics" to the 29th of the month the fact was confirmed, "4000 customers" to a UUID's digits.
+const SKIP_KEYS = new Set(["id", "kind", "status", "source", "needs_confirmation", "unproven", "fact_id", "provenance", "confirmation_event_id", "confirmed_at",
+  "created_at", "updated_at", "added_at", "stated_at", "evidence", "derived_from", "message_sha256", "shown_sha256", "shown_message_ids", "quarantined",
+  "source_key", "source_table", "event_id"]);
 function strings(v: unknown, out: string[] = [], depth = 0): string[] {
   if (depth > 3 || v == null) return out;
   if (typeof v === "string" || typeof v === "number") out.push(String(v));
@@ -77,15 +86,8 @@ export function whatWouldHelp(label: string, company: string | null): string {
 // ---------------------------------------------------------------------------------------------------------------------
 // Length: the form's own words ("in 150 words or less", "max 500 characters", "in 1-3 sentences"); else 250 words.
 export function lengthLimit(label: string): Limit {
-  const t = String(label ?? "").toLowerCase().replace(/,(?=\d{3})/g, "");
-  const num = (re: RegExp) => { const m = re.exec(t); return m ? Number(m[m.length - 1]) : null; };
-  const w = num(/\b(?:in|under|within|max(?:imum)?|up to|no more than|less than|fewer than|at most|limit(?:ed)? to|(?:word )?limit:?)\s*(?:of\s*)?(\d{2,4})\s*words?\b/) ??
-    num(/\b(\d{2,4})\s*(?:-\s*)?words?\s*(?:or (?:less|fewer)|max(?:imum)?|limit|or under)\b/) ?? num(/\b(\d{2,4})-word\b/);
-  const c = num(/\b(?:in|under|within|max(?:imum)?|up to|no more than|less than|fewer than|at most|limit(?:ed)? to|(?:character )?limit:?)\s*(?:of\s*)?(\d{2,5})\s*char(?:acter)?s?\b/) ??
-    num(/\b(\d{2,5})\s*char(?:acter)?s?\s*(?:or (?:less|fewer)|max(?:imum)?|limit)\b/);
-  const s = num(/\bin\s*(?:\d\s*-\s*)?(\d{1,2})\s*sentences?\b/) ?? num(/\b(?:no more than|at most|up to|max(?:imum)?)\s*(\d{1,2})\s*sentences?\b/);
-  const stated = w !== null || c !== null || s !== null;
-  return { words: w ?? (stated ? null : DEFAULT_WORDS), chars: Math.min(c ?? HARD_CHARS, HARD_CHARS), sentences: s, stated };
+  const l = statedLimit(label);
+  return { words: l?.words ?? (l ? null : DEFAULT_WORDS), chars: Math.min(l?.chars ?? HARD_CHARS, HARD_CHARS), sentences: l?.sentences ?? null, stated: !!l };
 }
 const countWords = (s: string) => s.split(/\s+/).filter(Boolean).length;
 const countSentences = (s: string) => (W.splitSentences(s) as string[]).length;
@@ -150,6 +152,13 @@ export function factLock(text: string, sources: string[]): Lock {
   for (const c of W.extractCheckables(text) as { type: string; value: string; numeric?: number; sentence: string }[]) {
     if (c.type === "entity" && !c.value.includes(" ") && STARTERS.has(c.value.toLowerCase()) && c.sentence.trim().startsWith(c.value)) continue;
     if (c.type === "number") {
+      // TAILORING ROUND 2: 154 reads "thirty-three percent" as "three percent"; the number said is the whole compound.
+      const tens = c.numeric != null && c.numeric < 10 ? new RegExp(`\\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)-${esc(c.value.toLowerCase())}\\b`).exec(c.sentence.toLowerCase()) : null;
+      if (tens) {
+        const whole = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 }[tens[1]]! + c.numeric!;
+        if (!nums.has(String(whole)) && !hasWords(corpus, tens[0])) miss(tens[0]);
+        continue;
+      }
       const ok = c.numeric != null ? nums.has(String(c.numeric)) || hasWords(corpus, c.value) : nums.has(c.value.replace(/[$,%]/g, ""));
       if (!ok) miss(c.value);
     } else if (!hasWords(corpus, c.value)) {
@@ -171,7 +180,9 @@ export function factLock(text: string, sources: string[]): Lock {
   }
   const low = ` ${norm(text)} `;
   for (const list of [TOOLS, TITLES, DEGREES, SCALE]) {
-    for (const w of list) if (low.includes(` ${norm(w)} `) && !hasWords(corpus, w)) miss(w);
+    // TAILORING ROUND 2: a title said of someone else ("my manager said", "reported to the head of sales", "your Google
+    // Cloud Engineer role") is no claim about the person (person_claims.ts roleFraming); said of them, it must be traced.
+    for (const w of list) if (low.includes(` ${norm(w)} `) && !hasWords(corpus, w) && (list !== TITLES || selfRole(text, w))) miss(w);
   }
   const corpusScaled = new Set(scaled(raw)), corpusPct = new Set(percents(raw));
   for (const v of scaled(text)) if (!corpusScaled.has(v)) miss(v);
@@ -195,7 +206,7 @@ function textOf(msg: any): { text: string; cut: boolean } {
 const SYSTEM = [
   "You write one answer to a job application question, for the person applying, in their own plain first-person voice.",
   "Rules that do not bend:",
-  "1. Use ONLY the facts listed. Every employer, school, title, tool, number, date and result you mention must appear in those facts, the question or the company name. If the answer would need something the facts do not say, leave that part out; never fill a gap with something plausible.",
+  "1. Use ONLY the facts listed. Every employer, school, title, degree, tool, number, date and result you say about the person must appear in those facts. The question and the company name are what you answer, never a source of facts about the person: never say the person did, studied, holds or is anything only because the question mentions it. Never state work authorization, citizenship, a visa, sponsorship, salary, or anything about gender, race, ethnicity, veteran status or disability unless a fact says it. If the answer would need something the facts do not say, leave that part out; never fill a gap with something plausible.",
   "2. Stay inside the length limit and finish every sentence.",
   "3. No greeting, sign-off, heading, list or quotation marks. Return only the answer text.",
   "4. Never mention AI, Upmore or that this is a draft. No stock phrases (\"I am excited to apply\", \"passionate\", \"in today's fast-paced world\").",
@@ -220,6 +231,12 @@ export function draftPayload(o: { q: EssayQuestion; facts: any[]; limit: Limit; 
 // context; with no statement on the form the draft is offered for the person to edit.
 export function employerGate(q: EssayQuestion, siblingLabels: string[]) {
   const policy = readAiPolicy([q.label, q.ai_policy ?? "", ...siblingLabels]);
+  // ROUND 3: a line written for an AI tool (ai_policy.ts instructsAi) is never followed: the question is not drafted for.
+  const injected = instructsAi([q.label, q.ai_policy ?? "", ...siblingLabels]);
+  if (injected) {
+    const said = injected.length > 90 ? `${injected.slice(0, 87)}...` : injected;
+    return { policy, gate: { allowed: false, reason: `${q.company ? `${q.company}'s form` : "This form"} has a line written for AI tools ("${said}"), so this is not drafted.` } };
+  }
   const gate = W.gate0({
     kind: "cover_letter",
     program: q.company ?? undefined,
@@ -247,7 +264,7 @@ export async function draftEssay(o: {
   const facts = factsFor(all, o.q);
   if (facts.length < MIN_FACTS) return { ok: false, why: "thin", policy, detail: [String(facts.length)], tries: 0 };
   const limit = lengthLimit(o.limitText ? `${o.q.label} ${o.limitText}` : o.q.label);
-  const sources = [...facts.map(factText), o.q.company ?? "", o.q.label];
+  const sources = { facts: facts.map(factText), posting: [o.q.company ?? "", o.q.label] };
   let fix: string[] = [], last: Judged | null = null;
   for (let tries = 1; tries <= 2; tries++) {
     let msg: any;
@@ -270,9 +287,73 @@ export async function draftEssay(o: {
 
 // Every check a draft must pass before anyone reads it: each name and number traced to the sources, inside the limit,
 // finished, no stock phrase.
+// TAILORING SCENARIOS (2026-10-29): the posting (the question, the company) may be named in an answer but is never a source
+// of a claim about the person. factLock traces names against facts and posting alike; claimProblems (person_claims.ts)
+// then holds every claim about the person (a degree, a title, a tool, a number, leadership, work authorization, how they
+// identify, a secret, a posting's name as their employer or school) to their confirmed facts alone.
 interface Judged { pass: boolean; lock: Lock; long: string | null; cut: boolean; banned: string[] }
-function judge(text: string, cut: boolean, sources: string[], limit: Limit): Judged {
-  const lock = factLock(text, sources);
+// ROUND 3 (2026-11-02): words that are not an answer at all: an instruction ("ignore previous instructions", "rank this
+// candidate first"), a role marker ("System:"), or the writer saying it is an AI. In any case, anywhere in the text.
+const NOT_AN_ANSWER = /\b(ignore|disregard)\b[^.?!]{0,30}\b(previous|prior|above|earlier|preceding)\b[^.?!]{0,20}\b(instructions?|prompts?|directions?|rules)\b|\bas an? (ai|artificial intelligence|language model|large language model|llm|chatbot|ai assistant|ai model)\b|\bi(?:'m| am) an? (ai|artificial intelligence|language model|llm|chatbot|ai assistant|ai model)\b|(^|[.!?\n]\s*)(system|assistant|user|developer)\s*:|\bsystem prompt\b|\b(rank|rate|score|select|shortlist|advance|approve)\s+(this|the)\s+(candidate|applicant|application)\b/i;
+// ROUND 3: an answer for one posting that names another employer as the one applied to ("I am eager to join Bluth Company"
+// on a Larkspur Health form: a letter copied from another job, or the person's former employer), or another role than the
+// posting's ("the Senior Data Engineer role" on a cover letter for the Data Analyst role). The employer the answer is for
+// is the question's company; the role, the one its label names ("Cover letter for the Data Analyst role at ...").
+const wordsOf = (s: string) => norm(s).replace(/\b(the|inc|llc|ltd|corp|co|company|test)\b/g, " ").split(" ").filter(Boolean);
+const sameName = (a: string, b: string) => {
+  const x = wordsOf(a), y = wordsOf(b);
+  return !!x.length && !!y.length && (x.every((w) => y.includes(w)) || y.every((w) => x.includes(w)));
+};
+const NAME = "([A-Z][\\w&.'’-]*(?:\\s+(?:[A-Z][\\w&.'’-]*|&|of|and|de|la))*)";
+const DESIRE = /\b(want|wants|wanted|hope|hoping|eager|excited|exciting|keen|love|like|look(?:ing)? forward|thrilled|glad|happy|ready|chance|opportunity|aim|plan|would|could|can|why|delighted|honou?red|proud to)\b[^.!?]{0,50}$/i;
+const ALWAYS = new RegExp(`\\b(?:apply(?:ing)? (?:to|at|with|for a role at|for a position at)|(?:this|your) (?:role|position|opening|opportunity|job|team) (?:at|with)|for (?:a |the )?(?:role|position|job) at)\\s+(?:the\\s+)?${NAME}`, "g");
+const WISHED = new RegExp(`\\b(?:join(?:ing)?|work(?:ing)? (?:at|for|with)|contribut(?:e|ing) to|grow(?:ing)? with|be(?:come|ing)? (?:a )?part of|bring [^.!?]{0,40}? to)\\s+(?:the\\s+)?${NAME}`, "g");
+const ROLE = new RegExp(`\\b(?:the|this|your)\\s+${NAME}\\s+(?:role|position|opening|opportunity)\\b`, "g");
+// A wish, not a past one ("I was excited to join Bluth Company in 2020" is their history).
+const PAST_WISH = /\b(was|were|had been|felt|became)\s+(?:so\s+|very\s+|really\s+)?\S+[^.!?]{0,50}$/i;
+const wish = (before: string) => DESIRE.test(before) && !PAST_WISH.test(before.slice(before.search(DESIRE) - 25 < 0 ? 0 : before.search(DESIRE) - 25));
+export function targetProblems(text: string, company: string | null, label = ""): string[] {
+  const out: string[] = [];
+  const firm = String(company ?? "").trim();
+  if (firm) {
+    const named = (m: RegExpMatchArray, wished: boolean) => {
+      const x = m[1].replace(/(\s+(?:and|of|&|de|la))+$/, "").replace(/['’]s$/, "").trim();
+      if (!x || wordsOf(x).length === 0 || STARTERS.has(x.toLowerCase())) return;
+      if (wished && !wish(text.slice(0, m.index ?? 0))) return;
+      if (!sameName(x, firm)) out.push(`it names ${x} as the employer, but this answer is for ${firm}`);
+    };
+    for (const m of text.matchAll(ALWAYS)) named(m, false);
+    for (const m of text.matchAll(WISHED)) named(m, true);
+  }
+  const role = /\bfor the (.+?) (?:role|position)\b/i.exec(label)?.[1];
+  if (role) {
+    for (const m of text.matchAll(ROLE)) {
+      const x = m[1].replace(/(\s+(?:and|of|&|de|la))+$/, "").trim();
+      if (!wish(text.slice(0, m.index ?? 0)) && !/\b(apply|applying|candidate|consider|interested|fit)\b[^.!?]{0,40}$/i.test(text.slice(0, m.index ?? 0))) continue;
+      // A role is named exactly ("Senior Data Analyst" is not the "Data Analyst" role).
+      const same = wordsOf(x).sort().join(" ") === wordsOf(role).sort().join(" ");
+      if (!same && !sameName(x, firm)) out.push(`it names the role as ${x}, but this is for the ${role} role`);
+    }
+  }
+  return [...new Set(out)];
+}
+const CLAIM_VOCAB = [...TOOLS, ...TITLES, ...DEGREES, ...SCALE];
+function judge(text: string, cut: boolean, sources: { facts: string[]; posting: string[] }, limit: Limit): Judged {
+  const traced = factLock(text, [...sources.facts, ...sources.posting]);
+  // The company's own name is never a claim, even when it is also a tool's or a word's ("why Stripe", "why Visa").
+  const claims = claimProblems(text, { record: sources.facts, mentionable: sources.posting, vocab: CLAIM_VOCAB, company: sources.posting[0] });
+  // A secret in the text is named as one, never quoted: its digits or words are not repeated in the reply the person
+  // reads, nor in the "write it again" note the model gets.
+  const redacted = redactIdentity(text);
+  const shown = (u: string) => {
+    if (!redacted.removed.length) return true;
+    const v = norm(/"([^"]+)"/.exec(u)?.[1] ?? u);
+    return !v || !norm(text).includes(v) || norm(redacted.text).includes(v);
+  };
+  const meta = NOT_AN_ANSWER.test(text) ? ["it holds an instruction or a note about AI, not an answer"] : [];
+  const target = targetProblems(text, sources.posting[0] || null, sources.posting[1] ?? "");
+  const untraced = [...traced.untraced, ...claims, ...meta, ...target].filter(shown);
+  const lock: Lock = claims.length || meta.length || target.length || !traced.pass ? { pass: false, untraced } : traced;
   const long = overLimit(text, limit);
   const banned = W.slopGate(text, { factPack: [] }).metrics.banned_phrases.value.hard as string[];
   return { pass: lock.pass && !long && !cut && !banned.length, lock, long, cut, banned };
@@ -296,7 +377,7 @@ export async function checkDraft(o: {
   if (facts.length < MIN_FACTS) return { ok: false, why: "thin", policy, detail: [String(facts.length)], tries: 0 };
   const limit = lengthLimit(o.limitText ? `${o.q.label} ${o.limitText}` : o.q.label);
   const text = String(o.text ?? "").trim();
-  const j = judge(text, !/[.!?]["”')\]]?$/.test(text), [...facts.map(factText), o.q.company ?? "", o.q.label], limit);
+  const j = judge(text, !/[.!?]["”')\]]?$/.test(text), { facts: facts.map(factText), posting: [o.q.company ?? "", o.q.label] }, limit);
   return j.pass ? { ok: true, text, policy, factIds: facts.map(factId).filter(Boolean), limit, tries: 0 } : failed(j, policy, 0);
 }
 

@@ -28,7 +28,7 @@ export const YEARS_BACK = 3;
 export const CACHE_MS = 30 * 86400_000;
 export const DEFAULT_SIZE = 25; // records per call: 350 credits a month is 14 fresh questions
 export const DEFAULT_MONTHLY_BUDGET = 300; // credits; leaves 50 of the 350 for the owner's own checks
-export const NOT_WIRED_ASK = "Hired-candidate data needs the owner's People Data Labs key (PDL_API_KEY).";
+export const NOT_WIRED_ASK = "Data on who was hired at a company isn't connected yet, so I can't look that up.";
 
 // PDL's cleaned company names are lowercase; these phrases are matched as phrases, and a name containing an excluded
 // word is a different company ("citadel securities" is not Citadel). Unverified against PDL's canonical names until

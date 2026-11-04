@@ -1,0 +1,92 @@
+# Owner-authorized zero-model-cost ciphertext rewrap. Manual dispatch ONLY.
+# This workflow must be reviewed on trunk before GitHub registers workflow_dispatch.
+name: sealed-set-recipient-rewrap
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: sealed-set-recipient-rewrap
+  cancel-in-progress: false
+jobs:
+  rewrap:
+    # Only the repository owner may start this operation from the reviewed default branch.
+    if: github.actor == 'srikanthvishnu90-sketch' && github.ref == 'refs/heads/trunk'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout reviewed sealed-eval code at an immutable commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: srikanthvishnu90-sketch/upmore-agent
+          ref: 1b4818338a557609984e34c2487e3037d314e7dd
+          persist-credentials: true
+      - name: Install Deno
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed
+        with:
+          deno-version: v2.9.6
+      - name: Validate branch has not advanced
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head_sha="$(git ls-remote origin refs/heads/fix/seal-multi-recipient-20261026 | cut -f1)"
+          test "$head_sha" = "1b4818338a557609984e34c2487e3037d314e7dd"
+      - name: Rewrap and prove recovery without model calls
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          HELDOUT_SEAL_KEY: ${{ secrets.HELDOUT_SEAL_KEY }}
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          test -n "$OPENAI_API_KEY"
+          test -n "$HELDOUT_SEAL_KEY"
+          f=evals/career/sealed/heldout-sealed.v1.json
+          # Value-blind preflight: the configured original secret must still match
+          # the recipient public key committed in the ciphertext metadata.
+          # Never print either derived public key or secret.
+          deno eval '
+            const { recipientFromSecret } = await import("./evals/career/sealed/seal.ts");
+            const data = JSON.parse(Deno.readTextFileSync("evals/career/sealed/heldout-sealed.v1.json"));
+            const old = data.recipients.find((r) => r.secret_env === "OPENAI_API_KEY");
+            if (!old || !Deno.env.get("OPENAI_API_KEY") || !Deno.env.get("HELDOUT_SEAL_KEY")) {
+              console.error("NOT RUN: required recipient or secret is missing");
+              Deno.exit(2);
+            }
+            const derived = await recipientFromSecret(Deno.env.get("OPENAI_API_KEY"));
+            if (derived.pub !== old.pub) {
+              console.error("NOT RUN: original OPENAI_API_KEY no longer matches the sealed recipient; no changes made");
+              Deno.exit(2);
+            }
+            console.log("Value-blind original recipient compatibility verified");
+          '
+          cp "$f" "$RUNNER_TEMP/sealed-before.json"
+          trap 'rm -f "$RUNNER_TEMP/sealed-before.json" "$RUNNER_TEMP/verify-plain.json"' EXIT
+          deno run -A evals/career/sealed/seal.ts rewrap "$f" --secret-env HELDOUT_SEAL_KEY >/dev/null
+          deno eval '
+            const a=JSON.parse(Deno.readTextFileSync(Deno.env.get("RUNNER_TEMP")+"/sealed-before.json"));
+            const b=JSON.parse(Deno.readTextFileSync("evals/career/sealed/heldout-sealed.v1.json"));
+            if(a.sha256!==b.sha256 || a.iv!==b.iv || a.ciphertext!==b.ciphertext || a.items!==b.items ||
+                !b.recipients.some(r=>r.secret_env==="OPENAI_API_KEY") ||
+                !b.recipients.some(r=>r.secret_env==="HELDOUT_SEAL_KEY"))
+              Deno.exit(1);
+          '
+          # Remove original credential from this process's environment before decrypt verification.
+          unset OPENAI_API_KEY
+          deno run -A evals/career/sealed/seal.ts open "$f" --out "$RUNNER_TEMP/verify-plain.json" >/dev/null
+          test -s "$RUNNER_TEMP/verify-plain.json"
+          rm -f "$RUNNER_TEMP/verify-plain.json"
+          test "$(git diff --name-only | wc -l | tr -d ' ')" = 1
+          test "$(git diff --name-only)" = "$f"
+          echo "Verified: encrypted payload unchanged; held-out recipient decrypts; no model calls."
+      - name: Commit only rewrapped ciphertext to the feature branch
+        run: |
+          set -euo pipefail
+          git config user.name "seal-rewrap[bot]"
+          git config user.email "seal-rewrap[bot]@users.noreply.github.com"
+          git add -- evals/career/sealed/heldout-sealed.v1.json
+          git diff --cached --quiet && { echo "No recipient change; nothing committed."; exit 1; }
+          test "$(git diff --cached --name-only)" = "evals/career/sealed/heldout-sealed.v1.json"
+          git commit -m "chore(seal): add held-out key recipient without changing ciphertext"
+          git push origin HEAD:refs/heads/fix/seal-multi-recipient-20261026

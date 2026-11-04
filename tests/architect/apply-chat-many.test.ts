@@ -1,6 +1,6 @@
 // SERIAL-1410 (1): the batch ask in chat ("apply to these", "apply to the top 2", "apply to 3 roles", "apply to the second
 // one") queues from the thread's last listed postings (discovery.lastShortlist), each posting through the same screens as
-// a single ask (their current employer, an application there in 30 days, their own pace), nothing approved, nothing sent;
+// a single ask (their current employer, this exact posting already applied to, their own pace), nothing approved, nothing sent;
 // the reply lists what was queued and what was not, with the reason for each. No list on the thread: not this turn's.
 import assertNode from "node:assert/strict";
 import { applyManyAsk, applyTurn, type ShortlistEntry } from "../../supabase/functions/_shared/career_apply_chat.ts";
@@ -16,7 +16,12 @@ const LIST: ShortlistEntry[] = [
   { id: "greenhouse:prior:10", title: "Data Analyst", company: "Fabrikam Data", location: "Chicago, IL", url: "https://boards.greenhouse.io/prior/jobs/10" },
 ];
 const FACTS = [{ kind: "experience", text: "you work at Contoso Analytics" }];
-const PRIOR = [{ id: "j1", company: "Fabrikam Data", title: "Data Analyst", state: "submitted_unconfirmed", created_at: new Date(NOW - 10 * 86400_000).toISOString(), updated_at: "" }];
+// Fabrikam Data: the very posting on the list was applied to (10 days ago). TEST Chat Employer: a different posting there
+// was applied to 3 days ago, which blocks nothing (D-MS-3: only an exact duplicate blocks, no one-per-company window).
+const PRIOR = [
+  { id: "j1", company: "Fabrikam Data", title: "Data Analyst", url: "https://boards.greenhouse.io/prior/jobs/10", state: "submitted_unconfirmed", created_at: new Date(NOW - 10 * 86400_000).toISOString(), updated_at: "" },
+  { id: "j2", company: "TEST Chat Employer", title: "Other Analyst", url: "https://boards.greenhouse.io/chattest/jobs/99", state: "submitted_unconfirmed", created_at: new Date(NOW - 3 * 86400_000).toISOString(), updated_at: "" },
+];
 const world = (o: { shortlist?: ShortlistEntry[]; apps?: any[]; facts?: any[]; limits?: () => Promise<any> } = {}) => {
   const wants = memoryWantStore();
   const turn = (message: string) => applyTurn({ message, userId: "u1", now: NOW, postings: { search: async () => [] }, wants, apps: async () => o.apps ?? [], facts: o.facts ?? [], shortlist: o.shortlist, limits: o.limits });
@@ -48,7 +53,7 @@ Deno.test("SERIAL-1440/2 no list on the thread: a clarification that says what t
   eq(await w.keys(), []);
 });
 
-Deno.test("SERIAL-1410/1 'apply to these': every posting screened on its own; two queued, two refused with their reasons; nothing approved or sent", async () => {
+Deno.test("SERIAL-1410/1 'apply to these': every posting screened on its own; two queued (one at an employer applied to 3 days ago for another posting), two refused with their reasons; nothing approved or sent", async () => {
   const w = world({ shortlist: LIST, apps: PRIOR, facts: FACTS });
   const r = await w.turn("apply to these");
   eq([r?.status, r?.intent], ["queued", "career_apply_queue"]);
@@ -57,7 +62,7 @@ Deno.test("SERIAL-1410/1 'apply to these': every posting screened on its own; tw
   assert(/Queued 2/.test(reply) && reply.includes("TEST Analyst at TEST Chat Employer") && reply.includes("TEST Analyst at TEST Sibling Employer"), reply);
   assert(/Not queued/.test(reply), reply);
   assert(/Contoso Analytics[^\n]*current employer/i.test(reply), `the current-employer refusal names its reason: ${reply}`);
-  assert(/Fabrikam Data[^\n]*already applied/i.test(reply) && /30 days/.test(reply), `the 30-day refusal names its reason: ${reply}`);
+  assert(/Fabrikam Data[^\n]*already[^\n]*same posting/i.test(reply) && !/30 days/.test(reply), `the exact-duplicate refusal names its reason, with no 30-day rule: ${reply}`);
   assert(/Nothing is sent and nothing is filled yet/.test(reply) && /the card that shows it exactly/.test(reply) && /one yes to that card approves exactly what it shows/.test(reply), reply);
   assert(!/\bsubmitted\b|applied for you/.test(reply.replace(/already applied[^.]*/g, "")), `never a submission claimed: ${reply}`);
   eq(r!.queued?.map((p) => p.job_id), ["greenhouse:chattest:7", "greenhouse:chatsib:8"]);
@@ -89,7 +94,7 @@ Deno.test("SERIAL-1410/1 their own pace binds across the batch; an unreadable pa
   const paced = world({ shortlist: LIST, limits: async () => ({ daily: 1 }) });
   const r = await paced.turn("apply to these");
   eq([r?.status, (await paced.keys()).length], ["queued", 1]);
-  assert(/over the daily pace they set themselves \(1 a day\)/.test(r!.reply), r!.reply);
+  assert(/over the daily pace you set \(1 a day\)/.test(r!.reply) && !/\btheir\b|\bthey (?:said|set|did|work|named|already)\b|themselves|the person/i.test(r!.reply), r!.reply);
   let calls = 0;
   const unknown = world({ shortlist: LIST, limits: async () => { calls++; throw new Error("rpc down"); } });
   const u = await unknown.turn("apply to these");

@@ -5,6 +5,11 @@ const form=unknown=>`<!doctype html><h1>TEST role</h1><form method="post" action
 before(async()=>{server=http.createServer(async(req,res)=>{
  if(req.method==='POST'){const parts=[];for await(const chunk of req)parts.push(chunk);const data=await new Response(Buffer.concat(parts),{headers:{'content-type':req.headers['content-type']}}).formData();const file=data.get('resume');receipts.push({first:data.get('first_name'),last:data.get('last_name'),work:data.get('work_authorization'),sha:file?crypto.createHash('sha256').update(Buffer.from(await file.arrayBuffer())).digest('hex'):null});if(onHeld){heldResponse=res;const f=onHeld;onHeld=null;f();return;}res.writeHead(req.url==='/error-submit'?503:200,{'Content-Type':'text/html'}).end(req.url==='/error-submit'?'<h1>Response unavailable</h1>':'<h1>Thank you for applying</h1><p>Application received. Confirmation number: TEST-12345.</p>');return;}
  if(req.url==='/redirect'){res.writeHead(302,{Location:'https://example.invalid/never-requested'}).end();return;}
+ // The employer's site refusing for load at the page itself (owner rule: back off, then RESUME): 503 with no Retry-After,
+ // 503 with one, 429 with none.
+ if(req.url==='/busy-503'){res.writeHead(503,{'Content-Type':'text/html'}).end('<h1>Service Unavailable</h1>');return;}
+ if(req.url==='/busy-503-ra'){res.writeHead(503,{'Content-Type':'text/html','Retry-After':'7'}).end('<h1>Service Unavailable</h1>');return;}
+ if(req.url==='/limited-429'){res.writeHead(429,{'Content-Type':'text/html'}).end('<h1>Too Many Requests</h1>');return;}
  let html=form(req.url==='/unknown');if(req.url==='/error')html=html.replace('action="/submit"','action="/error-submit"');
  if(req.url==='/tamper')html=html.replace('type="submit">','type="submit" onclick="document.getElementById(\'first\').value=\'INVENTED\'">');
  if(req.url==='/hidden')html=html.replace('</form>','<input type="hidden" name="consent" value="yes"></form>');
@@ -78,3 +83,17 @@ test('009b-4 missing observation proof cannot be reconstructed from a cached con
  const again=await run({answer:'yes',dir});assert.equal(again.result.state,'unknown_outcome');assert.equal(again.result.reason,'READBACK_REQUIRED');assert.equal(receipts.length,n+1);
 });
 test('009b-4 a final review without an observed resume input cannot be approved',async()=>{const n=receipts.length,r=await run({route:'/no-resume',answer:'yes'});assert.equal(r.result.state,'not_submitted');assert.equal(r.result.reason,'RESUME_INPUT_NOT_OBSERVED');assert.equal(receipts.length,n);});
+
+// Owner rule (2026-10-27): back off only when an outside system refuses, then RESUME. A 503 at the page's open is the site
+// refusing for load whether or not it says when to come back (before, only a 503 with Retry-After was; one without it
+// ran on as an ordinary page and the application ended unsent instead of being put back): HOST_RATE_LIMITED, nothing
+// filled or sent, the seconds asked for or none (the workers' default doubling).
+test('a 503 at the page with no Retry-After is a refusal for load (HOST_RATE_LIMITED, no seconds), like a 503 with one and a 429; nothing is filled or sent',async()=>{
+ for(const [route,status,secs] of [['/busy-503',503,null],['/busy-503-ra',503,7],['/limited-429',429,null]]){
+  const n=receipts.length,r=await run({route,answer:'yes'});
+  assert.ok(r.result,route+': no RESULT line: '+r.err.slice(0,400));
+  assert.deepEqual({state:r.result.state,reason:r.result.reason,status:r.result.status,retry_after_s:r.result.retry_after_s},{state:'not_submitted',reason:'HOST_RATE_LIMITED',status,retry_after_s:secs},route);
+  assert.equal(receipts.length,n,route+': nothing was sent');
+  assert.ok(!r.out.includes('Submit this application to '),route+': never asked to submit');
+ }
+});

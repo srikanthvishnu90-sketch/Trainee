@@ -11,6 +11,7 @@
 import { CareerJobs } from "./router_core.career.js";
 import { type Board, type FetchFeed, type FeedPosting, type FeedRead, type Posting, type PostingsDb, searchWords } from "./career_ingest.ts";
 import { detectPortal, postingKey } from "./posting_key.ts";
+import { neverOpen } from "./career_people_sites.ts";
 
 // ------------------------------------------------------------------------------------------------ the asks
 const URL_IN = /https?:\/\/[^\s<>"'()]+/gi;
@@ -18,16 +19,34 @@ const URL_IN = /https?:\/\/[^\s<>"'()]+/gi;
 // this job <link>"), never a question about how ("how do I apply to <link>?", "should I apply to <link>?") and never the
 // past ("I applied to <link>").
 const HOW = /^\s*(how|what|where|when|why|which|should|is|are|am|do|does|did)\b/i;
+// ROUTING SCENARIOS (2026-10-29): what comes before "apply" decides whether a text is an ask to apply at all. A greeting
+// ("hey", "ok so", an emoji) is dropped before the question test, so "hey did you apply to X?" stays a question; a
+// negation ("hey don't apply to X", "never apply to X") or a second ask joined to it ("connect gmail and apply to X",
+// "withdraw from X and apply to Y") is never an apply: the cancel turn or the router asks instead of queueing half of it.
+const APPLY_LEAD = /^(?:(?:hey|hi|hello|ok|okay|so|pls|please|actually|oh|um|also)\b[,!:]?\s+)+/i;
+export function applyText(message: string): string | null {
+  const raw = String(message ?? "").trim().replace(/^[^\p{L}\p{N}"'(]+/u, "").replace(APPLY_LEAD, "");
+  const at = raw.search(/\bapply\b/i);
+  if (at < 0) return raw;
+  const before = raw.slice(0, at);
+  if (/\b(?:don'?t|dont|do not|never|not|no longer|stop|cancel|withdraw)\b/i.test(before)) return null;
+  if (/\b(?:and|then|plus)\b|[;]/i.test(before)) return null;
+  return raw;
+}
 export interface LinkAsk { url: string; key: string; family: "greenhouse" | "lever" | "ashby"; board: string; atsId: string }
 export function linkAsk(message: string): LinkAsk | null {
-  const raw = String(message ?? "").trim();
-  if (!/\bapply\b/i.test(raw) || /\bapplied\b/i.test(raw) || HOW.test(raw)) return null;
+  const raw = applyText(message);
+  if (raw === null || !/\bapply\b/i.test(raw) || /\bapplied\b/i.test(raw) || HOW.test(raw)) return null;
   const links = [...new Set((raw.match(URL_IN) ?? []).map((u) => u.replace(/[.,;:!?)\]]+$/, "")))];
   const asks = links.map(linkOf).filter((x): x is LinkAsk => !!x);
   // One posting per ask; two different postings in one text is the batch ask's, not this turn's.
   return asks.length === 1 ? asks[0] : null;
 }
 export function linkOf(url: string): LinkAsk | null {
+  // Never LinkedIn, Indeed or Handshake (owner rule), on any suffix or subdomain: the chat declines those before this turn.
+  let host = "";
+  try { host = new URL(url).hostname; } catch { return null; }
+  if (neverOpen(host)) return null;
   const portal = detectPortal(url);
   if (!portal || portal.family === "workday") return null;
   const key = postingKey(url);
@@ -40,8 +59,8 @@ export function linkOf(url: string): LinkAsk | null {
 // possessive. The single ask's other shape ("apply to the <role> role at <Company>") is career_apply_chat.ts applyAsk's.
 const CO = "([A-Z][A-Za-z0-9&.-]*(?:\\s+[A-Z][A-Za-z0-9&.-]*)*)";
 export function possessiveAsk(message: string): { company: string; role: string } | null {
-  const raw = String(message ?? "").trim();
-  if (!/\bapply\b/i.test(raw) || /\bapplied\b/i.test(raw) || HOW.test(raw)) return null;
+  const raw = applyText(message);
+  if (raw === null || !/\bapply\b/i.test(raw) || /\bapplied\b/i.test(raw) || HOW.test(raw)) return null;
   const m = raw.match(new RegExp(`\\bapply\\s+(?:me\\s+)?(?:to|for)\\s+(?:the\\s+)?${CO}['’]s?\\s+(.+?)\\s*(?:role|position|job|posting|opening)?\\s*[.!]?\\s*$`));
   if (!m) return null;
   const role = m[2].replace(/\s+(?:role|position|job|posting|opening)$/i, "").trim();

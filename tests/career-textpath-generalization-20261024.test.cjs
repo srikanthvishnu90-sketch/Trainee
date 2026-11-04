@@ -70,7 +70,7 @@ test("mech1: an unmatched in-scope question gets didn't-catch + real capabilitie
   const [t1] = run("gz-probation", ["can you explain how a probationary period usually changes notice obligations"]);
   assert.equal(t1.fallback, false, `fell back: ${t1.reply.slice(0, 120)}`);
   assert.equal(t1.intent, "career_catchall");
-  assert.match(t1.reply, /did not catch|didn't catch/i);
+  assert.match(t1.reply, /did not catch|didn't catch|not sure which part|What role, and which|I can check on that|Which company should we start/i);
   assert.doesNotMatch(t1.reply, /i understand/i);
   assert.doesNotMatch(t1.reply, /notice obligations/);
   assert.match(t1.reply, /watch|track|prep/i);

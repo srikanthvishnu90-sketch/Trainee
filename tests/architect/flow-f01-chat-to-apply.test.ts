@@ -3,7 +3,7 @@
 // from what the person says to the rows in their apply queue and the worker's prepare being asked for exactly those rows.
 //   "find analyst jobs in Chicago"  -> the router lists four postings and keeps the list on the thread
 //   "apply to 1 and 3"             -> positions on that list; one queued, the closed one named; "1/2 queued; ..."
-//   "apply to the 4th one"         -> the employer they applied to 10 days ago is named with the 30-day rule; 0/1
+//   "apply to the 4th one"         -> the very posting they applied to 10 days ago is named as the same posting (D-MS-3: no 30-day rule); 0/1
 //   "apply to all of them"         -> 1/4 queued (1 already in your queue); every refusal named
 //   "apply to the X role at Y"     -> the single named ask, 1/1 queued
 //   the prepare                    -> off: said "hasn't started"; on (CAREER_PREPARE_AHEAD_URL): the worker is asked with
@@ -55,7 +55,7 @@ Deno.test({
         insert into public.profiles (id) values ('${PERSON}'), ('${OTHER}');
         insert into public.career_watch_kv (user_id, key, value) values ('${PERSON}', 'career:account', '{"epoch":0,"version":0,"paused":false}'), ('${OTHER}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
         insert into public.career_apply_jobs (user_id, job_id, company, url, payload, payload_hash, approval_hash, state, created_at)
-        values ('${PERSON}', 'greenhouse:delta:3', 'Delta Prior', 'https://boards.greenhouse.io/delta/jobs/3', '{}', repeat('a', 64), repeat('a', 64), 'submitted_unconfirmed', now() - interval '10 days');`);
+        values ('${PERSON}', 'greenhouse:delta:4', 'Delta Prior', 'https://boards.greenhouse.io/delta/jobs/4', '{}', repeat('a', 64), repeat('a', 64), 'submitted_unconfirmed', now() - interval '10 days');`);
       agentChat = await careerHandler(pg, { "tok-person": PERSON, "tok-other": OTHER });
       // The worker's prepare door, answered here: every request the handler makes to it is kept.
       const kicks: { auth: string | null; body: any }[] = [];
@@ -110,11 +110,11 @@ Deno.test({
       Deno.env.set("CAREER_PREPARE_AHEAD_TOKEN", "TEST-token");
       const ord = ["first", "second", "third", "fourth"];
 
-      await t.step("chat: 'apply to the <Nth> one' on the employer applied to 10 days ago: 0/1, named with the 30-day rule; nothing asked to prepare", async () => {
+      await t.step("chat: 'apply to the <Nth> one' on the very posting applied to 10 days ago: 0/1, named as the same posting (D-MS-3: no 30-day rule); nothing asked to prepare", async () => {
         const r = await say(chat, `apply to the ${ord[pos[D] - 1]} one`);
         assertEquals([r.intent, r.resultStatus], ["career_apply_queue", "refused"], r.reply);
         assert(r.reply.startsWith("0/1 queued."), r.reply);
-        assert(/Delta Prior[^\n]*already applied/.test(r.reply) && /30 days/.test(r.reply), r.reply);
+        assert(/Delta Prior[^\n]*already in your applications as the same posting/.test(r.reply) && !/30 days/.test(r.reply) && !/\btheir\b|\bthey (?:said|set|did|work|named|already)\b|themselves|the person/i.test(r.reply), r.reply);
         assertEquals([await wanted(), kicks.length], [[A], 0]);
       });
 
@@ -123,7 +123,7 @@ Deno.test({
         assertEquals([r.intent, r.resultStatus], ["career_apply_queue", "queued"], r.reply);
         assert(r.reply.startsWith("1/4 queued (1 already in your queue); I'll show you each application's exact answers on a card before anything is sent."), r.reply);
         assert(r.reply.includes("Data Analyst at Charlie Freight"), r.reply);
-        assert(/Bravo Labs: posting closed/.test(r.reply) && /Delta Prior[^\n]*already applied/.test(r.reply), r.reply);
+        assert(/Bravo Labs: posting closed/.test(r.reply) && /Delta Prior[^\n]*already in your applications as the same posting/.test(r.reply), r.reply);
         assert(/I've started preparing it now/.test(r.reply), r.reply);
         assertEquals(await wanted(), [A, C].sort());
         assertEquals(kicks, [{ auth: "Bearer TEST-token", body: { user_id: PERSON, job_ids: [C] } }]);

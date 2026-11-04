@@ -75,11 +75,12 @@ test("P8 t2 verbatim confirms the just-created watch and creates nothing twice",
   assert.equal(wp.interests.length, 1, "the affirmation must not duplicate the watch");
 });
 
-test("P8 t1 verbatim with no profile reaches the watch intent's profile gate — never the generic fallback", () => {
+// OWNER RULE (2026-10-28): with no profile the stated watch is created (it was held at a profile gate).
+test("P8 t1 verbatim with no profile creates the watch — never the generic fallback", () => {
   const ctx = seam.createTurnCtx({ userId: USER, threadId: "p8-3", now: NOW, snapshot: null, profile: null });
   const r = seam.runTurn(P8_T1, ctx);
   assert.equal(r.intent, "career_watch_create", r.reply);
-  assert.match(r.reply, /profile on file/i, r.reply);
+  assert.equal(r.resultStatus, "prepared", r.reply);
   assert.doesNotMatch(r.reply, /didn't catch that|I'm Trainee, a career agent: I find roles/i);
 });
 

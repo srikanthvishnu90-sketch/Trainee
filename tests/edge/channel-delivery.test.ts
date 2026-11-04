@@ -42,8 +42,12 @@ Deno.test("WO-013b-1/L2 retry only when it certainly did not go out: never opene
   eq(timedOut.retryable, false, "a timeout may have been delivered");
   assert(/may have been delivered/.test(timedOut.error), timedOut.error);
   const second = await loopSend({ apiKey: "k", fetch: fakeFetch((i) => (i === 0 ? ok() : status(503))).f, sleep: noSleep })("+15550001111", ["a", "b", "c"]) as any;
-  eq([second.ok, second.retryable], [false, false], "a retry would resend the first bubble");
+  // CHANNEL DELIVERY ROUND 2 (2026-10-30): what went is reported, so the retry resumes from bubble 2 and never resends the
+  // first (career_outbox.sent_parts); it was final, and bubbles 2 and 3 were never sent.
+  eq([second.ok, second.retryable, second.sent], [false, true, 1], "a 503 on bubble 2 sent nothing of it: retried from bubble 2, bubble 1 never again");
   assert(/after 1 of 3 bubbles went out/.test(second.error), second.error);
+  const timeoutLater = await loopSend({ apiKey: "k", fetch: fakeFetch((i) => (i === 0 ? ok() : new DOMException("signal timed out", "TimeoutError"))).f, sleep: noSleep })("+15550001111", ["a", "b"]) as any;
+  eq([timeoutLater.ok, timeoutLater.retryable, timeoutLater.sent], [false, false, 1], "a timeout on bubble 2 may have been delivered: final");
 });
 
 // A minimal Supabase client: every query is recorded; results come from `answer` by table and operation.

@@ -1,4 +1,4 @@
-# Deploy preflight on every PR that changes what go-live ships: the go-live script's --dry-run at the PR head (the commit
+# Deploy preflight on every PR (and every trunk push) that changes what go-live ships: the go-live script's --dry-run at the PR head (the commit
 # staged from git archive, the router bundle checks, the provenance manifest, the whole plan; nothing live, no secret),
 # and the migration rehearsal on a throwaway Postgres shaped like the live project (tests/db/rehearse_live_migrations.sh).
 name: deploy-preflight
@@ -10,6 +10,22 @@ on:
       - "tests/db/**"
       - ".github/workflows/deploy-production.yml"
       - ".github/workflows/deploy-preflight.yml"
+  # Also on trunk (same paths), so a rehearsal failure that lands on trunk is seen there and not only on the next PR
+  # that happens to touch these paths (fe8405586: 5 failures, a stale LIVE_MISSING list, unnoticed until #197). Push runs
+  # only on trunk, as in ci.yml; workflow_dispatch runs both jobs on the chosen ref. Off a PR the checkout ref is empty, so
+  # actions/checkout takes github.sha; the dry run's HEAD_SHA falls back to github.sha explicitly.
+  push:
+    branches: [trunk]
+    paths:
+      - "supabase/**"
+      - "scripts/launch/**"
+      - "tests/db/**"
+      - ".github/workflows/deploy-production.yml"
+      - ".github/workflows/deploy-preflight.yml"
+  workflow_dispatch:
+  # D-034: deploy-production.yml calls both jobs on every push to release/production, so the deploy standard's S1 finds
+  # them on the exact SHA it judges (their checks are named "preflight / <job name>" there).
+  workflow_call:
 permissions:
   contents: read
 jobs:
@@ -28,7 +44,7 @@ jobs:
         with: { deno-version: "v2.9.6" }
       - name: Dry run at the PR head
         env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -o pipefail
           bash scripts/launch/trainee-go-live.sh --dry-run --non-interactive --sha "$HEAD_SHA" 2>&1 | tee "$RUNNER_TEMP/dry-run.log"

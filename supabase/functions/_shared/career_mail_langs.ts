@@ -65,6 +65,9 @@ const ES: LangWords = {
       "(agenda|programa|reserva) (tu|su|una) entrevista",
       "(segunda|primera|tercera|próxima|siguiente) entrevista",
       "(nos gustaría|queremos|quisiéramos) (tener una entrevista|entrevistarte|entrevistarle)",
+      // Family email (2026-10-26): the invitation itself, "nos gustaría invitarte a una entrevista" (French, German,
+      // Portuguese and Italian already read their own "inviter à un entretien", "zu einem Vorstellungsgespräch einladen").
+      "(nos gustaría|queremos|quisiéramos|me gustaría|deseamos) invitar(te|le|les) a (una |la |tu |su )?([\\p{L}-]+ ){0,2}entrevista",
       // WO-050: an interview moved or confirmed ("hemos tenido que mover tu entrevista", "cambio de hora de tu entrevista").
       "(mover|cambiar|reprogramar|reagendar|aplazar|posponer|movido|cambiado|reprogramado) (tu|su|la) entrevista",
       "cambio de (hora|fecha|horario) de (tu|su|la) entrevista",

@@ -32,7 +32,9 @@ export const CONVERSATIONS: { id: string; title: string; turns: Turn[] }[] = [
   ] },
   { id: "T03", title: "what do you need from me?", turns: [
     { user: "what do you need from me?", oracle: seq([{ name: "list_applications", input: {} }]),
-      truth: [T("q_work_auth", "authori[sz]ed to work"), T("q_salary", "salary"), T("plaid_code", "plaid[^\\n]{0,160}code"), T("figma_yes", "figma[^\\n]{0,200}(yes|approv|card)|card[^\\n]{0,100}open|prepared and waiting"), T("outreach_approval", "jordan|recruiter[^\\n]{0,100}(draft|approv)|outreach"), T("gmail_connect", "gmail")] },
+      // One question per message (review of #360): the first is asked and the count says another follows; the salary
+      // question is asked after the answer to this one.
+      truth: [T("q_work_auth", "authori[sz]ed to work"), T("q_count", "question 1 of 2"), T("plaid_code", "plaid[^\\n]{0,160}code"), T("figma_yes", "figma[^\\n]{0,200}(yes|approv|card)|card[^\\n]{0,100}open|prepared and waiting"), T("outreach_approval", "jordan|recruiter[^\\n]{0,100}(draft|approv)|outreach"), T("gmail_connect", "gmail")] },
   ] },
   { id: "T04", title: "why didn't the Ramp one go through?", turns: [
     { user: "why didn't the Ramp one go through?", oracle: seq([{ name: "where_do_i_stand", input: { company: "Ramp" } }, { name: "recall", input: { subject: "Ramp" } }]),

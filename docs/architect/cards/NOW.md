@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-10-28):** the current inventory of features, depth and status is `docs/architect/FEATURES.md`. Kept for history; do not use as current.
+
 # NOW: what Codex works on next (the architect updates this; newest first)
 
 Read this first, every time you start or finish something. The cards are in this folder; the full requirement list

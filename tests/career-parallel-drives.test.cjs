@@ -12,7 +12,8 @@
 //   - no cross-talk: each session's answers() holds only its own fills
 //   - a foreign user is refused mid-flight, while a slow fill runs
 //   - one leg's board failure never touches a sibling leg
-//   - maxSessionsPerUser stays a GLOBAL cap across shards
+//   - maxSessionsPerUser stays a GLOBAL bound across shards (a resource
+//     bound on browser sessions, not a volume limit)
 //   - boardShards absent/1 = the original single-core service
 // Check: node --test tests/career-parallel-drives.test.cjs
 const { test } = require("node:test");
@@ -223,23 +224,27 @@ test("F-033: a request queued behind a >=5s board call is served, not reset", as
   assert.equal(slowResult.body.ok, true);
 });
 
-test("cap race: two approve drains racing the last per-day slot", async (t) => {
-  // The drive-layer cap seam, with the REAL modules end to end
-  // (executor -> 155 -> 149 -> sandbox boards): caps are counted by
-  // 149 from the submissions ledger, and the executor's discipline
-  // is read-snapshot -> execute (mutates the snapshot) -> whole-
-  // ledger replace (batch-executor buildDeps/saveLedger). Two
-  // drains that snapshot CONCURRENTLY therefore share one stale
-  // view. This guard proves, in order:
-  //   (a) NAIVE store (whole replace, no version check): the race
-  //       is real — both legs submit, the per-day cap (15) is
-  //       exceeded (16). A characterization of the seam as it stands.
+test("ledger race and no volume cap: two approve drains racing; a fresh read lets both through; only a site's refusal defers one", async (t) => {
+  // The drive-layer ledger seam, with the REAL modules end to end
+  // (executor -> 155 -> 149 -> sandbox boards). The executor's
+  // discipline is read-snapshot -> execute (mutates the snapshot) ->
+  // whole-ledger replace (batch-executor buildDeps/saveLedger). Two
+  // drains that snapshot CONCURRENTLY share one stale view. NO LIMITS
+  // (owner, 2026-10-27): 149 has no per-day/vendor/company cap, so the
+  // ledger matters for exactly-once and for a site's refusal, never for
+  // a count. This guard pins, in order:
+  //   (a) NAIVE store (whole replace, no version check): both legs
+  //       submit and the second save ERASES the first leg's record (a
+  //       lost write, characterized: the ledger is blind to one).
   //   (b) VERSIONED store (saveLedger refuses a stale snapshot with
-  //       LEDGER_VERSION_CONFLICT): exactly one leg proceeds; the
-  //       cap holds at 15; the loser's refusal is named.
-  //   (c) FRESH-READ drain after the winner lands: 149 itself stops
-  //       the second leg with CAP_REACHED naming perDay — the
-  //       refusal a re-driven leg meets once the ledger is current.
+  //       LEDGER_VERSION_CONFLICT): no record is lost; the loser's
+  //       refusal is named.
+  //   (c) FRESH-READ drain after the winner lands: the second leg
+  //       SUBMITS (14 earlier submissions today stop nothing).
+  //   (d) a site's refusal in the ledger (status portal_refused, until a
+  //       minute from now) defers a leg to that site: 155 records it
+  //       PORTAL_REFUSING with resumeOn = the site's own time; nothing
+  //       is submitted for it.
   // The production ledger RPC (career_batch_save_ledger_v1) takes
   // only the records today — (b)'s version token is the discipline
   // it needs; that is the S-1 lane's draft-migration territory, and
@@ -276,10 +281,8 @@ test("cap race: two approve drains racing the last per-day slot", async (t) => {
     status: "open", atsFamily: "greenhouse", location: "Chicago, IL", posted_at: "2026-10-10",
     jd_text: "Software engineering intern role. JavaScript, testing, code review, agile team.",
   });
-  // 14 seeds = one per-day slot left (limit 15). Vendors rotate so
-  // no per-vendor cap binds first (limit 5; greenhouse holds 4 — the
-  // racing legs' vendor — so a winner's submit is the 5th, allowed,
-  // and only the per-day count decides the race).
+  // 14 earlier submissions today across vendors (under the removed
+  // caps, one per-day slot would have been left; now they stop nothing).
   const SEED_VENDORS = ["greenhouse", "lever", "ashby", "workday", "greenhouse", "lever", "smartrecruiters", "greenhouse", "lever", "ashby", "greenhouse", "lever", "workday", "ashby"];
   const seedRecord = (i) => ({
     userId: USER, status: "submitted", timestamp: new Date(NOW - i * 60000).toISOString(),
@@ -381,7 +384,7 @@ test("cap race: two approve drains racing the last per-day slot", async (t) => {
     const store = makeStore(versioned);
     await prepareAndApprove(store, "a", "RaceA");
     await prepareAndApprove(store, "b", "RaceB");
-    assert.equal(store.state.records.filter((r) => r.status === "submitted").length, 14, "seed: 14 submitted, one per-day slot left");
+    assert.equal(store.state.records.filter((r) => r.status === "submitted").length, 14, "seed: 14 submitted today");
     store.armBarrier(2); // both approve drains snapshot the ledger before either saves
     const execA = executorView(store, ["appr-a"]);
     const execB = executorView(store, ["appr-b"]);
@@ -412,7 +415,7 @@ test("cap race: two approve drains racing the last per-day slot", async (t) => {
   {
     const { store, settled } = await scenario(true);
     const submitted = store.state.records.filter((r) => r.status === "submitted").length;
-    assert.equal(submitted, 15, `versioned discipline: the cap holds (got ${submitted})`);
+    assert.equal(submitted, 15, `versioned discipline: the winner's record is kept, none lost (got ${submitted})`);
     const results = settled.flatMap((s) => (s.status === "fulfilled" ? s.value : []));
     const blocked = results.filter((r) => r.status === "blocked" || r.status === "uncertain");
     assert.equal(blocked.length, 1, `exactly one drain is refused: ${JSON.stringify(results)}`);
@@ -420,7 +423,7 @@ test("cap race: two approve drains racing the last per-day slot", async (t) => {
     assert.equal(conflictCode, "LEDGER_VERSION_CONFLICT");
   }
 
-  // (c) fresh-read drain after the winner: 149 names CAP_REACHED / perDay
+  // (c) fresh-read drain after the winner: the second leg submits too — no count stops it
   {
     const store = makeStore(true);
     await prepareAndApprove(store, "a", "FreshA");
@@ -431,15 +434,28 @@ test("cap race: two approve drains racing the last per-day slot", async (t) => {
     assert.equal(store.state.records.filter((r) => r.status === "submitted").length, 15);
     const execB = executorView(store, ["appr-b"]);
     const [rb] = await execB.runBatchPending();
-    assert.equal(rb.submitted, 0, "the fresh-read leg submits nothing");
-    const bRecord = await store.readRun({ userId: USER, runId: rb.runId });
-    const bRun = (bRecord && bRecord.run) || {};
-    const apps = Object.values(bRun.apps || {});
-    assert.ok(apps.every((a) => a.stage === "deferred_cap"), `the leg's app is deferred_cap: ${JSON.stringify(apps.map((a) => a.stage))}`);
-    const deferred = (bRun.deferred || []).filter((d) => d.code === "CAP_REACHED");
-    assert.equal(deferred.length, 1, `155 records the refusal as CAP_REACHED in run.deferred: ${JSON.stringify(bRun.deferred)}`);
-    assert.match(deferred[0].reason || "", /cap/i);
-    assert.equal(store.state.records.filter((r) => r.status === "submitted").length, 15, "the cap still holds after the refused leg");
+    assert.equal(rb.submitted, 1, `the fresh-read leg submits: ${JSON.stringify(rb)}`);
+    assert.equal(store.state.records.filter((r) => r.status === "submitted").length, 16, "16 today: no volume cap");
+  }
+
+  // (d) a site's refusal in the ledger defers the leg to that site until the site's own time
+  {
+    const store = makeStore(true);
+    await prepareAndApprove(store, "c", "HeldC");
+    const until = new Date(NOW + 60000).toISOString();
+    store.state.records.push({ userId: USER, status: "portal_refused", host: "boards.greenhouse.io", vendor: "greenhouse", why: "rate_limited",
+      timestamp: new Date(NOW).toISOString(), until, canonicalKey: null });
+    store.state.version += 1;
+    const execC = executorView(store, ["appr-c"]);
+    const [rc] = await execC.runBatchPending();
+    assert.equal(rc.submitted, 0, "nothing submitted to a refusing site");
+    const cRun = ((await store.readRun({ userId: USER, runId: rc.runId })) || {}).run || {};
+    const apps = Object.values(cRun.apps || {});
+    assert.ok(apps.every((a) => a.stage === "deferred_refusal"), `deferred_refusal: ${JSON.stringify(apps.map((a) => a.stage))}`);
+    const deferred = (cRun.deferred || []).filter((d) => d.code === "PORTAL_REFUSING");
+    assert.equal(deferred.length, 1, `155 records PORTAL_REFUSING: ${JSON.stringify(cRun.deferred)}`);
+    assert.equal(deferred[0].resumeOn, until, "it resumes at the site's own time");
+    assert.equal(store.state.records.filter((r) => r.status === "submitted").length, 14);
   }
 });
 

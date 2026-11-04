@@ -1,4 +1,5 @@
 import { parsePace } from "./career_apply.ts";
+import { resumeRecordTurn, type ResumeRecordStore, supabaseResumeRecordStore } from "./career_resume_record.ts";
 // WO-039: the person turns the cloud on and off in chat. Code's, like the card: the model never decides it.
 //
 // "apply for me in the cloud" shows the terms in exact words: which postings (only what they approve on a card, on
@@ -66,12 +67,19 @@ export interface CloudOptinStore {
   lastAssistant(threadId: string): Promise<{ intent: string | null; content: string | null; at: number | null }>;
   // How many texts were queued to the person after a time, other than the thread's own replies.
   outboxSince(userId: string, at: number): Promise<number>;
+  // ONE CONFIRMED RESUME (20261026120018): "which resume do you have" / "delete my resume" ride this turn, which every
+  // channel's text reaches before any brain. Absent: not answered here.
+  resume?: ResumeRecordStore;
 }
 
 // One turn, before any brain. Null when the text is not about the cloud, so the turn goes on as before.
 export async function cloudTurn(
   o: { message: string; userId: string; threadId: string; now: number; store: CloudOptinStore },
 ): Promise<{ reply: string; status: string; intent: string } | null> {
+  if (o.store.resume) {
+    const r = await resumeRecordTurn({ message: o.message, userId: o.userId, store: o.store.resume });
+    if (r) return r;
+  }
   const cmd = parseCloudCommand(o.message);
   if (cmd?.kind === "off") {
     await o.store.set(o.userId, false, null);
@@ -126,6 +134,7 @@ export function supabaseCloudOptinStore(admin: any): CloudOptinStore {
     return r.data;
   };
   return {
+    resume: supabaseResumeRecordStore(admin),
     async dailyLimit(userId) {
       // The person's own pace, or null for none (CAPS-1390). SERIAL-1430: a saved pace that cannot be read is neither;
       // the ask and the yes stop on it (PaceUnreadable) rather than show terms that say "no daily limit".

@@ -1,14 +1,13 @@
 // SERIAL-1500 (3) / SERIAL-1501: BATCH_MAX (10) is a display page, not a scope cap. A long list is drafted and approved
 // ten at a time; every page's approvals stand, the send run reads approvals (not the page), and nothing about paging
-// cuts what the person approved. This proves THAT and nothing wider: every protection the send path has stays as it is
-// and is observed here as a fact: exact per-message approval (a changed draft is refused), the first-week warm-up of 10
-// a day, the person's own number up to 30, 90-second spacing, 3 emails to one address in 30 days, do-not-contact, and
-// the 7-day approval expiry, which is what bounds a long approved list in practice (a tradeoff, written up in
-// docs/architect/reports/OUTREACH-CEILINGS-2026-10-26.md). No real send: a fake sender records what would have gone.
+// cuts what the person approved. NO LIMITS (owner, 2026-10-27): Trainee sets no volume number of its own, so there is
+// no warm-up, no daily number and no spacing: everything approved goes in one run. What stays and is observed here:
+// exact per-message approval (a changed draft is refused), Gmail's own refusal (RATE_LIMITED) is the only thing that
+// slows a person, and the 7-day approval expiry. No real send: a fake sender records what would have gone.
 import assertNode from "node:assert/strict";
 import {
-  admitSend, APPROVAL_TTL_MS, BATCH_MAX, GAP_MS, MAX_DAILY, memoryOutreachStore, messageOf, OPT_OUT_LINE, OUTREACH_INTENT, type OutreachDraft, outreachTurn,
-  payloadHash, runOutreachSends, type Sender, WARMUP_DAILY, WARMUP_DAYS,
+  admitSend, APPROVAL_TTL_MS, BATCH_MAX, memoryOutreachStore, messageOf, OPT_OUT_LINE, OUTREACH_INTENT, type OutreachDraft, outreachTurn,
+  payloadHash, runOutreachSends, type Sender,
 } from "../../supabase/functions/_shared/career_outreach.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -29,26 +28,22 @@ async function page(store: ReturnType<typeof memoryOutreachStore>, k: number, at
   store.setIntent(TH, OUTREACH_INTENT);
   return saved;
 }
-function fakeSender(): Sender & { sent: string[] } {
+function fakeSender(o: { refuseAfter?: number } = {}): Sender & { sent: string[]; refused: number; open: () => void } {
   const sent: string[] = [];
-  return { sent, async send(_u, m) { sent.push(m.to); return { status: "sent", id: `g${sent.length}`, thread_id: `t${sent.length}` }; } };
-}
-// One day of the scheduled run: runs every 100 seconds from 11:00 until a run sends nothing, as the schedule would.
-async function runDay(store: any, sender: Sender, dayStartAt: number) {
-  let now = dayStartAt, sentToday = 0;
-  for (let k = 0; k < 60; k++) {
-    const r = await runOutreachSends({ store, sender, now, tz: async () => "America/New_York" });
-    if (!r.sent) return sentToday;
-    sentToday += r.sent;
-    now += GAP_MS + 10_000;
-  }
-  return sentToday;
+  let gate = o.refuseAfter ?? Infinity;
+  const me = { sent, refused: 0, open: () => { gate = Infinity; },
+    async send(_u: string, m: { to: string }) {
+      // Gmail's own per-account ceiling, faked: past it, 429 (RATE_LIMITED) until it opens again.
+      if (sent.length >= gate) { me.refused++; return { status: "RATE_LIMITED" as const, detail: "HTTP 429 userRateLimitExceeded" }; }
+      sent.push(m.to); return { status: "sent" as const, id: `g${sent.length}`, thread_id: `t${sent.length}` };
+    } };
+  return me;
 }
 const approvedCount = (store: any) => store.dump().drafts.filter((d: OutreachDraft) => d.status === "approved").length;
 
-Deno.test("five pages of ten, each approved as shown: fifty approvals stand; the page shows ten, the run reads fifty; nothing about paging cuts the list", async () => {
+Deno.test("five pages of ten, each approved as shown: fifty approvals stand; one run sends all fifty, no warm-up, daily number or spacing", async () => {
   const store = memoryOutreachStore();
-  await store.setPrefs(U, { daily_cap: MAX_DAILY, signature: "Sam Student" });
+  await store.setPrefs(U, { signature: "Sam Student" });
   for (let k = 1; k <= 5; k++) {
     await page(store, k, T0 + k * 60_000);
     const r = await outreachTurn({ message: "send all", userId: U, threadId: TH, now: T0 + k * 60_000 + 5_000, store, gmailConnected: async () => true });
@@ -64,37 +59,43 @@ Deno.test("five pages of ten, each approved as shown: fifty approvals stand; the
   const all = store.dump().drafts as OutreachDraft[];
   for (const d of all) eq(d.approved_hash, d.hash, `${d.recipient.email} approved exactly as shown`);
   const one = all[0], changed = { ...one, body: one.body + " and one more line" };
-  eq(admitSend({ draft: changed, hash: await payloadHash(messageOf(changed)), now: T0 + DAY, dayStart: T0 + DAY - 3600_000, sends: [], firstSentAt: null, own: MAX_DAILY, dnc: false }), "changed");
-  // The protections, observed: 10 a day for the first week even with 30 set and 50 approved, 90 seconds apart; nothing dropped.
+  eq(admitSend({ draft: changed, hash: await payloadHash(messageOf(changed)), now: T0 + DAY, dnc: false }), "changed");
+  // A brand-new sender (no history), fifty approved: one run, all fifty, each once.
   const sender = fakeSender();
-  const perDay: number[] = [];
-  for (let d = 1; d <= 5; d++) perDay.push(await runDay(store, sender, T0 + d * DAY));
-  eq(perDay, [WARMUP_DAILY, WARMUP_DAILY, WARMUP_DAILY, WARMUP_DAILY, WARMUP_DAILY], "the first-week warm-up paces it, 10 a day");
-  eq(sender.sent.length, 50, "all fifty went, none lost to paging");
+  const r = await runOutreachSends({ store, sender, now: T0 + DAY, tz: async () => "America/New_York" });
+  eq(r.sent, 50, `one run sends everything approved: ${JSON.stringify(r)}`);
+  eq(Object.keys(r.refused), [], "nothing refused for volume (no daily_cap, spacing or warm-up)");
   eq(new Set(sender.sent).size, 50, "each once");
+  eq((await runOutreachSends({ store, sender, now: T0 + DAY + 1000 })).sent, 0, "a second run sends nothing again");
   eq(store.dump().drafts.filter((d: OutreachDraft) => d.status === "sent").length, 50);
 });
 
-Deno.test("the 7-day approval expiry, not the page, is what bounds a long approved list: approvals the pace cannot reach in 7 days are dropped as expired", async () => {
+Deno.test("only Gmail slows it: past Gmail's own ceiling (429) the rest wait, approved and unsent; they go when Gmail allows; the 7-day expiry still holds", async () => {
   const store = memoryOutreachStore();
-  await store.setPrefs(U, { daily_cap: MAX_DAILY, signature: "Sam Student" });
+  await store.setPrefs(U, { signature: "Sam Student" });
   for (let k = 1; k <= 10; k++) {
     await page(store, k, T0 + k * 60_000);
     eq((await outreachTurn({ message: "send all", userId: U, threadId: TH, now: T0 + k * 60_000 + 5_000, store, gmailConnected: async () => true }))?.status, "approved");
   }
   eq(approvedCount(store), 100, "a hundred approved at once, ten pages");
-  const sender = fakeSender();
-  const perDay: number[] = [];
-  for (let d = 1; d <= 9; d++) perDay.push(await runDay(store, sender, T0 + d * DAY));
-  // Days 1-6: the warm-up's 10 a day (60). Day 7: the approvals were made at T0, so the 7-day window closes during that
-  // day's run: a few go before it does, and every remaining approval is dropped as expired; nothing goes on day 8 or 9.
-  eq(perDay.slice(0, WARMUP_DAYS - 1), Array(WARMUP_DAYS - 1).fill(WARMUP_DAILY), `six full warm-up days: ${perDay}`);
-  assert(perDay[6] > 0 && perDay[6] < WARMUP_DAILY, `day 7 is cut by the window closing mid-run: ${perDay}`);
-  eq(perDay.slice(WARMUP_DAYS), [0, 0], `after the approval window nothing more goes: ${perDay}`);
-  const sent = 60 + perDay[6];
-  eq(sender.sent.length, sent);
-  const left = store.dump().drafts as OutreachDraft[];
-  eq(left.filter((d) => d.status === "sent").length, sent);
-  eq(left.filter((d) => d.status === "skipped").length, 100 - sent, `the ${100 - sent} the pace could not reach in 7 days are dropped as expired, and would need approving again`);
+  const sender = fakeSender({ refuseAfter: 70 });
+  const first = await runOutreachSends({ store, sender, now: T0 + DAY });
+  eq([first.sent, first.rate_limited], [70, 1], "70 go; Gmail's 429 stops this person's run at once (one refusal, no tight retry loop)");
+  eq(sender.refused, 1);
+  eq(approvedCount(store), 30, "the other 30 stay approved, waiting on Gmail, never dropped or doubled");
+  assert((store.dump().drafts as OutreachDraft[]).some((d) => d.result === "rate_limited"), "the refusal is recorded on the draft");
+  sender.open();
+  const later = await runOutreachSends({ store, sender, now: T0 + DAY + 3600_000 });
+  eq(later.sent, 30, "when Gmail allows, the rest go");
+  eq([sender.sent.length, new Set(sender.sent).size], [100, 100], "all hundred, each once");
+  // The approval's 7-day life is not a volume number and stays: approvals Gmail never took in 7 days lapse.
+  const store2 = memoryOutreachStore();
+  await store2.setPrefs(U, { signature: "Sam Student" });
+  await page(store2, 1, T0);
+  await outreachTurn({ message: "send all", userId: U, threadId: TH, now: T0 + 5_000, store: store2, gmailConnected: async () => true });
+  const shut = fakeSender({ refuseAfter: 0 });
+  eq((await runOutreachSends({ store: store2, sender: shut, now: T0 + DAY })).sent, 0);
+  const late = await runOutreachSends({ store: store2, sender: fakeSender(), now: T0 + 8 * DAY });
+  eq([late.sent, late.refused.expired], [0, BATCH_MAX], "past 7 days they lapse unsent and need approving again");
   eq(APPROVAL_TTL_MS, 7 * DAY);
 });

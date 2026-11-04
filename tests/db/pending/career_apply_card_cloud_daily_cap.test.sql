@@ -1,5 +1,5 @@
 -- TESTS ONLY / WRITTEN / NOT_RUN. No SQL execution, apply, engine or employer evidence claimed.
--- Outside run.sh discovery. Requires reviewed bridge SQL including cloud-only15/day clamp
+-- Outside run.sh discovery. Requires reviewed bridge SQL; since 20261027140000 (D-MS-2) the cloud-only15/day clamp is gone
 -- (source reviewed: 7bbd2096); missing prerequisites are setup errors, never baseline regressions.
 -- After 20261025140000 (CAPS-1390) the queue's enqueue takes no ceiling from its caller: the tap-time check below
 -- is against the person's own pace; the bridge's claim-time 15 is its own text and is exercised unchanged.
@@ -75,13 +75,14 @@ set role service_role;
 insert into cap_state values('optin',public.career_apply_cloud_optin_as(
  '00000000-0000-4000-8000-00000000cb01',true,'Synthetic cloud-only daily cap terms'));
 reset role;
-select pg_temp.cap_ok((select (v->>'daily')::integer=15 from cap_state where k='optin'),
- 'new cloud opt-in reports15 while account/global limit remains25');
--- Simulate an EXISTING legacy row; the migration must clamp its effective limit without rewriting it.
-update public.career_apply_cloud_optin set daily=25 where user_id='00000000-0000-4000-8000-00000000cb01';
-select pg_temp.cap_ok((select daily=25 from public.career_apply_cloud_optin where user_id='00000000-0000-4000-8000-00000000cb01')
- and (public.career_apply_cloud_optin_get('00000000-0000-4000-8000-00000000cb01')->>'daily')::integer=15,
- 'legacy raw opt-in daily25 is exposed effectively as15');
+-- D-MS-2 (20261027140000, owner 2026-10-27): no cloud-only 15; the opt-in carries the person's own pace (25, set by them).
+select pg_temp.cap_ok((select (v->>'daily')::integer=25 from cap_state where k='optin'),
+ 'new cloud opt-in reports the person''s own pace (25), no cloud-only 15');
+-- An EXISTING legacy row: its raw number is not rewritten and no longer decides; the person's current pace does.
+update public.career_apply_cloud_optin set daily=7 where user_id='00000000-0000-4000-8000-00000000cb01';
+select pg_temp.cap_ok((select daily=7 from public.career_apply_cloud_optin where user_id='00000000-0000-4000-8000-00000000cb01')
+ and (public.career_apply_cloud_optin_get('00000000-0000-4000-8000-00000000cb01')->>'daily')::integer=25,
+ 'a legacy raw opt-in number (7) is kept but the person''s own current pace (25) is what is reported');
 insert into public.career_cloud_settings(key,value) values('CAREER_CLOUD_APPLY','on'),('CAREER_AGENT_SUBMIT','on')
  on conflict(key) do update set value=excluded.value;
 -- Claimed history below predates this waiver, so its5-send allowance cannot mask the daily boundary.
@@ -141,6 +142,9 @@ select pg_temp.cap_ok((select count(*)=14 from public.career_apply_jobs where
  user_id='00000000-0000-4000-8000-00000000cb01' and source='cloud' and attempts=1
  and state='submitted_unconfirmed' and claimed_at>clock_timestamp()-interval'1 day'),
  'PRECONDITION:14 counted cloud history rows, plus two actually approved unattempted jobs');
+-- The person lowers their own pace to 15: exactly the 15th goes, the 16th waits, refused by their own number.
+update public.career_watch_kv set value=value||'{"daily_limit":15}'
+ where user_id='00000000-0000-4000-8000-00000000cb01' and key='career:account';
 set role service_role;
 insert into cap_state select 'fifteenth',coalesce(jsonb_agg(to_jsonb(j)),'[]') from public.career_apply_cloud_claim(6) j;
 reset role;
@@ -150,17 +154,23 @@ select pg_temp.cap_ok((select jsonb_array_length(v)=1 from cap_state where k='fi
   and claimed_at>clock_timestamp()-interval'1 day')
  and (select count(*)=1 from public.career_apply_jobs j join cap_bound b on b.id=j.id
   where j.state='driving' and j.source='cloud' and j.attempts=1 and j.lease_token is not null),
- '14 prior sends allow exactly the15th cloud claim; two candidates cannot become16');
+ 'with their own pace of 15: 14 prior sends allow exactly the 15th cloud claim');
+select pg_temp.cap_ok((select count(*)=1 from public.career_apply_jobs j join cap_bound b on b.id=j.id
+  where j.state='queued' and j.source is null and j.attempts=0 and j.lease_token is null
+  and public.career_apply_cloud_refusal(j,clock_timestamp())='daily_limit'),
+ 'the 16th is refused by their own pace, by name, and keeps zero attempts/lease');
+-- Their pace back at 25: the 16th cloud send of the day goes (no cloud-only 15, D-MS-2).
+update public.career_watch_kv set value=value||'{"daily_limit":25}'
+ where user_id='00000000-0000-4000-8000-00000000cb01' and key='career:account';
 set role service_role;
 insert into cap_state select 'sixteenth',coalesce(jsonb_agg(to_jsonb(j)),'[]') from public.career_apply_cloud_claim(6) j;
 reset role;
-select pg_temp.cap_ok((select v='[]'::jsonb from cap_state where k='sixteenth')
- and (select count(*)=1 from public.career_apply_jobs j join cap_bound b on b.id=j.id
-  where j.state='queued' and j.source is null and j.attempts=0 and j.lease_token is null
-  and public.career_apply_cloud_refusal(j,clock_timestamp())='daily_limit'),
- '16th cloud claim refused specifically by daily_limit, pending job retains zero attempts/lease');
-select pg_temp.cap_ok((select daily=25 from public.career_apply_cloud_optin where user_id='00000000-0000-4000-8000-00000000cb01'),
- 'claim clamp works while legacy raw daily25 remains unchanged');
+select pg_temp.cap_ok((select jsonb_array_length(v)=1 from cap_state where k='sixteenth')
+ and (select count(*)=16 from public.career_apply_jobs where user_id='00000000-0000-4000-8000-00000000cb01'
+  and source='cloud' and attempts=1 and claimed_at>clock_timestamp()-interval'1 day'),
+ 'with their pace at 25, the 16th cloud claim goes: no cloud-only 15');
+select pg_temp.cap_ok((select daily=7 from public.career_apply_cloud_optin where user_id='00000000-0000-4000-8000-00000000cb01'),
+ 'the legacy raw opt-in number remains unchanged');
 
 -- Tap: the number it hands the queue (15) is no ceiling since 20261025140000 (CAPS-1390: Trainee sets no daily number);
 -- the one ledger refuses a tap only against the pace the person set themselves. Here their own pace is set to exactly

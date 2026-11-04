@@ -21,7 +21,10 @@ export const CONFIRM_WINDOW_DAYS = 14;
 export const CONFIRM_INTENT = "career_apply_confirm_which";
 const DAY = 86400000;
 // What may be confirmed: sent and not yet confirmed by an email (a row confirmed before WO-032 by a page alone included).
-const OPEN = new Set(["submitted_unconfirmed", "unknown_outcome", "confirmed"]);
+// "driving" too (submit worker round, 2026-10-31): a worker that died after the employer accepted the application and before it
+// wrote the outcome leaves it recorded as being driven; the employer's email in that time is its proof, read once (the database
+// checks the email came after the claim: career_apply_confirm_as, 20261030140000).
+const OPEN = new Set(["submitted_unconfirmed", "unknown_outcome", "confirmed", "driving"]);
 
 export interface QueueRow {
   id: string; company: string; title?: string | null; url?: string | null; state: string;
@@ -84,6 +87,11 @@ export interface ConfirmStore {
   confirm(userId: string, p: Extract<ConfirmPlan, { kind: "confirm" }>): Promise<string>;
   // false: this message was asked about before (once per message, ever).
   ask(userId: string, p: Extract<ConfirmPlan, { kind: "ask" }>): Promise<boolean>;
+  // EM-08: queue one reminder text read from the person's mail (an assessment's deadline) into career_outbox, kind status,
+  // delivered at `at`. false: that key was queued before (once per message, ever). It rides on this store because this is
+  // the per-person writer the chat's mail read is handed (handler-career.ts wires mailNow with it); a store without it
+  // queues no reminder, and the reply then promises none.
+  remind?(userId: string, r: { key: string; text: string; at: number }): Promise<boolean>;
 }
 export interface AskStore {
   pending(): Promise<PendingAsk[]>;
@@ -132,7 +140,7 @@ export async function confirmWhichTurn(o: { message: string; userId: string; thr
 
 // ------------------------------------------------------------------------------------------------ memory (tests)
 export function memoryConfirmStore(init: { queue?: Record<string, QueueRow[]> } = {}) {
-  const st = { queue: JSON.parse(JSON.stringify(init.queue ?? {})) as Record<string, QueueRow[]>, asks: {} as Record<string, any>, confirmed: [] as { user: string; id: string; hash: string }[] };
+  const st = { queue: JSON.parse(JSON.stringify(init.queue ?? {})) as Record<string, QueueRow[]>, asks: {} as Record<string, any>, reminders: {} as Record<string, { key: string; text: string; at: number }>, confirmed: [] as { user: string; id: string; hash: string }[] };
   const store: ConfirmStore & AskStore & { st: typeof st; thread: Record<string, { intent: string | null; meta: any }> } = {
     st, thread: {},
     async queue(u) { return JSON.parse(JSON.stringify(st.queue[u] ?? [])); },
@@ -155,6 +163,12 @@ export function memoryConfirmStore(init: { queue?: Record<string, QueueRow[]> } 
       return true;
     },
     async pending() { return Object.values(st.asks).filter((a: any) => a.state === "pending").map((a: any) => ({ user_id: a.user_id, hash: a.hash, text: a.text })); },
+    async remind(u, r) {
+      const k = `${u}:${r.key}`;
+      if (st.reminders[k]) return false;
+      st.reminders[k] = { ...r };
+      return true;
+    },
     async push(u, h, text) {
       const a = st.asks[`${u}:${h}`];
       if (!a || a.state !== "pending") return false;
@@ -215,6 +229,13 @@ export function supabaseConfirmStore(admin: any): ConfirmStore & AskStore {
         const p: any = of.get(r.user_id);
         return { user_id: r.user_id, hash: String(r.key).slice("career:confirm-ask:".length), text: String(r.value?.text ?? ""), tz: p?.tz ?? null, quiet_start: p?.prefs?.quiet_start, quiet_end: p?.prefs?.quiet_end };
       });
+    },
+    async remind(u, r) {
+      if (!/^status:deadline:[a-f0-9]{64}$/.test(r.key)) throw new Error("a mail reminder's key is status:deadline:<message hash>");
+      const got = await admin.from("career_outbox").insert({ user_id: u, key: r.key, kind: "status", text: String(r.text).slice(0, 4000), deliver_at: new Date(r.at).toISOString() });
+      if (got.error && (got.error.code === "23505" || /duplicate key/i.test(got.error.message))) return false;
+      must(got, "queue the deadline reminder");
+      return true;
     },
     async push(u, h, text) { return !!must(await admin.rpc("career_apply_confirm_ask_push_as", { p_user: u, p_hash: h, p_text: text }), "ask which application"); },
     async lastAssistant(threadId) {

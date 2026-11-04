@@ -93,7 +93,12 @@ test("155 readback: confirmed counted apart from sent-unconfirmed, and the error
     `the sent-unconfirmed row is named as not submitted: ${lines.join(" | ")}`);
   const errLine = lines.find((l) => l.includes("TestCo 3"));
   assert.ok(errLine, `the errored row appears in the spoken readback: ${lines.join(" | ")}`);
-  assert.ok(errLine.includes(sm.stops[0].code), `and it appears WITH its recorded error: ${errLine}`);
+  // Launch readiness Q3 (2026-10-26): the error is said in plain words; its code stays on the record (sm.stops above).
+  assert.ok(typeof sm.stops[0].code === "string" && sm.stops[0].code.length > 0, "the record still carries the stop's code");
+  // The exact sentence for the recorded code (EXECUTION_ERROR), not one any error code would match (DRIVER_ERROR says
+  // "before it was submitted").
+  assert.equal(sm.stops[0].code, "EXECUTION_ERROR", "the recorded stop is an execution error");
+  assert.equal(errLine, "- TestCo 3 — Software Engineering Intern: it stopped with an error, so it is not counted as submitted.", `and it appears WITH its recorded error, in plain words: ${errLine}`);
 
   // the exactly-once accounting still holds over all three outcomes
   assert.doesNotThrow(() => Batch.assertAccounted(run), "every selected application is accounted for exactly once");

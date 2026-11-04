@@ -13,7 +13,7 @@ import { LOOPMESSAGE_SEND_URL, loopSend } from "../../supabase/functions/_shared
 import { TELEGRAM_API } from "../../supabase/functions/_shared/telegram.ts";
 import { WHATSAPP_GRAPH, whatsappSignature } from "../../supabase/functions/_shared/whatsapp.ts";
 import { ALREADY_TELEGRAM_REPLY, LINKED_HERE_REPLY, linkAskText, linkedReply, linkPendingReply, SIGNUP_CLOSED_REPLY, TELEGRAM_LINK_INVALID_REPLY,
-  TELEGRAM_LINKED_ELSEWHERE_REPLY, TELEGRAM_LINKED_REPLY, TELEGRAM_NOT_WIRED_REPLY } from "../../supabase/functions/_shared/channel_inbound.ts";
+  TELEGRAM_LINKED_ELSEWHERE_REPLY, TELEGRAM_NOT_WIRED_REPLY, TELEGRAM_LINK_CONFIRM_REPLY, telegramLinkAskText } from "../../supabase/functions/_shared/channel_inbound.ts";
 import { cardFor } from "../../supabase/functions/_shared/career_apply_cards.ts";
 import { receiptText } from "../../supabase/functions/_shared/career_apply_receipts.ts";
 import { handleInbound } from "../../supabase/functions/trainee-inbound/handler.ts";
@@ -58,6 +58,7 @@ function harness(o: { env?: Record<string, string>; tgFail?: (body: any) => Resp
     throw new Error(`unexpected fetch ${url}`);
   }) as unknown as typeof fetch;
   const vars: Record<string, string> = {
+    CAREER_TEXTING_NATIVE: "off", // the release config turns the voice on by itself (D-036); these shapes are the plain ones
     TRAINEE_INBOUND_SECRET: SECRET, LOOPMESSAGE_API_KEY: "fake-loop-key", TRAINEE_SIGNUP: "open",
     TELEGRAM_BOT_TOKEN: TG_TOKEN, TELEGRAM_WEBHOOK_SECRET: TG_SECRET, TELEGRAM_BOT_USERNAME: "TraineeTestBot",
     WHATSAPP_TOKEN: WA_TOKEN, WHATSAPP_PHONE_NUMBER_ID: PNID, WHATSAPP_APP_SECRET: WA_APP, WHATSAPP_VERIFY_TOKEN: WA_VERIFY, WHATSAPP_TEMPLATE_UPDATES: "trainee_updates",
@@ -522,9 +523,17 @@ Deno.test("WO-038/L1 Connect Telegram: a single-use 10-minute link, sent on the 
   const link = /^https:\/\/t\.me\/TraineeTestBot\?start=([A-Za-z0-9_-]{32})$/m.exec(reply);
   assert(link, `a bare link on its own line: ${reply}`);
   eq(h.chats.length, 1, "the brain never saw it");
+  // TELEGRAM LINK OWNERSHIP (2026-10-31): opening the link proves nothing about who opened it; the channel already linked is
+  // asked, and only its YES binds the chat.
   const t = h.mark();
   await h.text("telegram", "7001", `/start ${link[1]}`);
-  eq(h.read("7001", t), [TELEGRAM_LINKED_REPLY]);
+  eq(h.read("7001", t), [TELEGRAM_LINK_CONFIRM_REPLY]);
+  eq(h.userOf("tg:7001"), null, "not linked before the YES");
+  const asked = h.read(ADDR.imessage, t);
+  eq(asked.map((x) => x.replace(/reply LINK [0-9]{4} /, "reply LINK {code} ")), [telegramLinkAskText(null, "tg:7001")]);
+  const y = h.mark();
+  await h.text("imessage", ADDR.imessage, `LINK ${/reply LINK ([0-9]{4}) /.exec(asked[0] ?? "")?.[1] ?? "none"}`);
+  eq(h.read("7001", y), [LINKED_HERE_REPLY]);
   eq(h.userOf("tg:7001"), u, "the chat joined the account the link was made for");
   await h.text("telegram", "7001", "find me data analyst jobs");
   eq([h.chats.at(-1).userId, h.chats.at(-1).threadId], [u, `t-${u}`], "same person, same thread");

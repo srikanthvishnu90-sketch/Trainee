@@ -2,6 +2,14 @@
 # WO-001: career code and its shared boundaries; no live/provider calls.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+# The tests run with every release flag rolled back (release_config.ts: any value but the release value is "off"), so they
+# pin the behavior they were written for and a leaked model key cannot make a flag's model call reach a real host. A test of
+# a flag on sets it explicitly; tests/architect/release-flags.test.ts holds the committed defaults with its own environment.
+for _flag in CAREER_TEXTING_NATIVE CAREER_NETWORKING_DRAFT CAREER_TAILOR_REWRITE CAREER_MOCK_JUDGE CAREER_MAIL_TRACKING CAREER_BRIEF_DIGEST \
+  CAREER_OUTREACH_FOLLOWUPS CAREER_INTRO_REMINDERS UPMORE_SCRIPT_SUBMIT_LIVE CLOUD_RUNNER_ENABLED CLOUD_PREPARE_ENABLED \
+  CAREER_EMAIL_SEND CAREER_OUTREACH_SEND CAREER_SEND_RAIL; do
+  export "$_flag=off"
+done
 failed=0
 results=()
 details=()
@@ -112,11 +120,13 @@ edge_tests=(
   tests/edge/conversation-hardening.test.ts
   tests/edge/career-ingest.test.ts
   tests/edge/career-ingest-scale.test.ts
+  tests/edge/career-ingest-bounded.test.ts
   tests/edge/career-alerts.test.ts
   tests/edge/career-proactive.test.ts
   tests/edge/channel.test.ts
   tests/edge/channel-delivery.test.ts tests/edge/channel-integrity.test.ts
   tests/edge/channel-inbound.test.ts
+  tests/edge/telegram-link-reply-code.test.ts
   tests/edge/capability-journey.test.ts
   tests/edge/eval-judge.test.ts
   tests/edge/career-apply-store.test.ts
@@ -164,6 +174,8 @@ PY
 # (architect), with its companion Deno check of scripts/apply.ts. Core keeps every other step. Scheduling only,
 # as above: the steps and their commands are unchanged, and the union of core and architect is the old core.
 browser_node_tests=(
+  tests/career-apply-dryrun.test.cjs
+  tests/career-apply-exact-option.test.cjs
   tests/career-approval-card-browser.test.cjs
   tests/career-dashboard-browser.test.cjs
   tests/career-extension-agent-submits.test.cjs
@@ -175,6 +187,7 @@ browser_node_tests=(
   tests/career-fact-import-panel.test.cjs
   tests/career-greenhouse-savedform.test.cjs
   tests/career-owned-worker-browser.test.cjs
+  tests/career-parallel-apply.test.cjs
   tests/career-portal-browser.test.cjs
   tests/career-portal-lever-radio.test.cjs
   tests/career-portal-submit-integrity.test.cjs
@@ -217,30 +230,93 @@ fi
 if [[ $partition != all ]]; then
   printf 'GATE PARTITION %s: core %s suites, browser %s suites, coverage %s suites, total %s\n' "$partition" "${#node_core_tests[@]}" "${#node_browser_tests[@]}" "${#node_coverage_tests[@]}" "${#node_all_tests[@]}"
 fi
+# Core shards (2026-10-30): GATE_CORE_SHARD=i/n runs shard i of n of the core node suites, packed by measured seconds
+# (scripts/node-shards.cjs, table scripts/core-shard-durations.json); the other core steps (edge tests, pay importers,
+# bundle check, typecheck) run in shard 1 only. Same node command, flags and concurrency as unsharded core; only the
+# file list is a slice. GATE_CORE_VERIFY=n checks that n shards partition the core suites exactly and stops there (the
+# aggregate gate (core) job runs it). GATE_CORE_LIST=1 prints the core suites and stops (tests/career-ci-core-shards.test.cjs).
+if [[ -n ${GATE_CORE_LIST:-} ]]; then
+  printf '%s\n' "${node_core_tests[@]}"
+  exit 0
+fi
+if [[ -n ${GATE_CORE_VERIFY:-} ]]; then
+  node scripts/node-shards.cjs verify "$GATE_CORE_VERIFY" "${node_core_tests[@]}"
+  node scripts/node-shards.cjs plan "$GATE_CORE_VERIFY" "${node_core_tests[@]}"
+  exit 0
+fi
+core_shard=1
+core_shard_count=1
+if [[ $partition == core && -n ${GATE_CORE_SHARD:-} ]]; then
+  core_shard=${GATE_CORE_SHARD%/*}
+  core_shard_count=${GATE_CORE_SHARD#*/}
+  node scripts/node-shards.cjs verify "$core_shard_count" "${node_core_tests[@]}"
+  core_shard_list=$(node scripts/node-shards.cjs list "$core_shard" "$core_shard_count" "${node_core_tests[@]}")
+  mapfile -t node_core_tests <<<"$core_shard_list"
+  printf 'GATE CORE SHARD %s: %s suites\n' "$GATE_CORE_SHARD" "${#node_core_tests[@]}"
+fi
+# Each node suite's seconds (JSON lines) for the shard tables, from an extra reporter; TAP stays on stdout as before.
+node_durations_file=${GATE_NODE_DURATIONS:-$(mktemp)}
+node_reporters=(--test-reporter=tap --test-reporter-destination=stdout
+  --test-reporter=./scripts/node-test-durations.mjs "--test-reporter-destination=$node_durations_file")
 
 step test-paths portable_test_paths "${career_tests[@]}" "${shared_tests[@]}" "${edge_tests[@]}"
 step browser-runtime browser_ready
 if [[ $partition == all || $partition == architect ]]; then
   # Pending orders stay excluded; every landed architect test runs (an empty folder is a failure).
-  step architect-tests deno test -A --no-check --ignore=tests/architect/pending tests/architect/
-  step apply-cli-typecheck deno check scripts/apply.ts
+  if [[ -z ${GATE_ARCHITECT_SHARD:-} ]]; then
+    step architect-tests deno test -A --no-check --ignore=tests/architect/pending tests/architect/
+    step apply-cli-typecheck deno check scripts/apply.ts
+  else
+    # Architect shards (2026-10-29): GATE_ARCHITECT_SHARD=i/n runs shard i of n of the architect files, packed by measured
+    # duration since 2026-10-30 (scripts/architect-shards.ts and its table scripts/architect-shard-durations.json;
+    # tests/architect/ci-shard-partition.test.ts proves the shards partition the suite and stay balanced). Same command
+    # and flags as above, only the file list is a slice. The aggregate job (gate (architect)) fails unless every shard
+    # passed. The apply.ts typecheck runs in shard 1 only.
+    shard=${GATE_ARCHITECT_SHARD%/*}
+    shard_count=${GATE_ARCHITECT_SHARD#*/}
+    deno run -A scripts/architect-shards.ts verify "$shard_count"
+    mapfile -t architect_files < <(deno run -A scripts/architect-shards.ts list "$shard" "$shard_count")
+    printf 'GATE ARCHITECT SHARD %s: %s files\n' "$GATE_ARCHITECT_SHARD" "${#architect_files[@]}"
+    deno run -A scripts/architect-shards.ts plan "$shard_count" | sed -n "${shard}p"
+    step "architect-tests-shard-$shard" deno test -A --no-check "${architect_files[@]}"
+    if [[ $shard == 1 ]]; then step apply-cli-typecheck deno check scripts/apply.ts; fi
+  fi
 fi
 if [[ $partition == all ]]; then
   step career-and-shared-tests node --test --test-concurrency=2 "${node_all_tests[@]}"
 elif [[ $partition == core ]]; then
-  step career-and-shared-tests-core node --test --test-concurrency=2 "${node_core_tests[@]}"
+  if (( core_shard_count > 1 )); then
+    step "career-and-shared-tests-core-shard-$core_shard" node --test --test-concurrency=2 "${node_reporters[@]}" "${node_core_tests[@]}"
+  else
+    step career-and-shared-tests-core node --test --test-concurrency=2 "${node_reporters[@]}" "${node_core_tests[@]}"
+  fi
 elif [[ $partition == architect ]]; then
   : # the architect partition runs no node suites; core, browser and coverage hold all of them
 elif [[ $partition == browser ]]; then
-  step career-and-shared-tests-browser node --test --test-concurrency=2 "${node_browser_tests[@]}"
-else
+  step career-and-shared-tests-browser node --test --test-concurrency=2 "${node_reporters[@]}" "${node_browser_tests[@]}"
+elif [[ -z ${GATE_COVERAGE_SHARD:-} ]]; then
   step career-and-shared-tests-coverage node --test --test-concurrency=2 "${node_coverage_tests[@]}"
+else
+  # Coverage shards (2026-10-26): GATE_COVERAGE_SHARD=i/n runs shard i of n of the forms-ci suite's tests in this
+  # job, selected by node's own test-name patterns (scripts/forms-ci-shards.cjs holds the table and its
+  # completeness rules; the last shard runs every test not named elsewhere, and the read-only proof runs in all).
+  # The suite file and its assertions are unchanged; the aggregate gate (forms-ci coverage) job checks that every
+  # test of the suite passed in some shard.
+  if (( ${#node_coverage_tests[@]} != 1 )); then
+    echo "GATE COVERAGE SHARD: sharding expects exactly one coverage suite, got ${#node_coverage_tests[@]}" >&2
+    exit 1
+  fi
+  shard_args=()
+  shard_list=$(node scripts/forms-ci-shards.cjs args "${GATE_COVERAGE_SHARD%/*}" "${GATE_COVERAGE_SHARD#*/}")
+  mapfile -t shard_args <<<"$shard_list"
+  printf 'GATE COVERAGE SHARD %s: %s\n' "$GATE_COVERAGE_SHARD" "${shard_args[*]}"
+  step "career-and-shared-tests-coverage-shard-${GATE_COVERAGE_SHARD%/*}" node --test --test-concurrency=2 "${shard_args[@]}" "${node_coverage_tests[@]}"
 fi
-if [[ $partition == all || $partition == core ]]; then
+if [[ $partition == all || ( $partition == core && $core_shard == 1 ) ]]; then
   step career-edge-tests deno test -A --no-check "${edge_tests[@]}"
   step pay-importers bash -c "python3 tests/pay-importers.test.py && python3 tests/aggregate-lca.test.py"
   step career-bundle python3 scripts/build-router-core.py --career-only --check
-  step career-typecheck deno check supabase/functions/agent-chat/index-career.ts supabase/functions/career-ingest/index.ts supabase/functions/career-proactive/index.ts supabase/functions/trainee-deliver/index.ts supabase/functions/trainee-inbound/index.ts supabase/functions/trainee-telegram/index.ts supabase/functions/trainee-whatsapp/index.ts supabase/functions/career-voice/index.ts supabase/functions/career-essay-draft/index.ts supabase/functions/career-email-code/index.ts supabase/functions/site-signup/index.ts supabase/functions/site-careers/index.ts supabase/functions/career-cloud-runner/index.ts
+  step career-typecheck deno check supabase/functions/agent-chat/index-career.ts supabase/functions/career-ingest/index.ts supabase/functions/career-proactive/index.ts supabase/functions/trainee-deliver/index.ts supabase/functions/trainee-inbound/index.ts supabase/functions/trainee-telegram/index.ts supabase/functions/trainee-telegram-link/index.ts supabase/functions/trainee-whatsapp/index.ts supabase/functions/career-voice/index.ts supabase/functions/career-essay-draft/index.ts supabase/functions/career-email-code/index.ts supabase/functions/site-signup/index.ts supabase/functions/site-careers/index.ts supabase/functions/career-cloud-runner/index.ts supabase/functions/outlook-oauth/index.ts
 fi
 
 # Every step's result again at the end: a CI log read from its tail still shows which step failed.

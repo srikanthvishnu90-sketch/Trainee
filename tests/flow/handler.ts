@@ -33,6 +33,7 @@ export interface Chat { say(message: string, extra?: Record<string, unknown>): P
 
 // The handler, loaded once per process with fetch pointed at the double.
 let loaded: Promise<(req: Request) => Promise<Response>> | null = null;
+let envCleanupArmed = false;
 export async function careerHandler(pg: Pg, people: Record<string, string>) {
   const users: Record<string, { id: string; email: string }> = {};
   for (const [token, id] of Object.entries(people)) users[token] = { id, email: `${id}@example.test` };
@@ -40,6 +41,12 @@ export async function careerHandler(pg: Pg, people: Record<string, string>) {
   Deno.env.set("SUPABASE_URL", SUPABASE_URL);
   Deno.env.set("SUPABASE_ANON_KEY", ANON_KEY);
   Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", SERVICE_KEY);
+  // The environment is shared by every test file in the run. A project URL and key left behind point the model budget's gate
+  // at a double that is gone, and the gate then (rightly) refuses every paid call in a later file. Clear them when this file ends.
+  if (!envCleanupArmed) {
+    envCleanupArmed = true;
+    globalThis.addEventListener("unload", () => { for (const k of ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY"]) Deno.env.delete(k); });
+  }
   const realFetch = globalThis.fetch;
   globalThis.fetch = double.fetch as typeof fetch;
   loaded ??= import("../../supabase/functions/agent-chat/handler-career.ts").then((m) => m.handleChat);

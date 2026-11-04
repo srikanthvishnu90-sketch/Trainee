@@ -9,9 +9,9 @@ This side owns the host, the executor and the database. The router's chat famili
 The person texts → `prepare-ahead.ts` prepares on the server → the card → their own tap → `career_apply_claim_own` →
 the engine submits on their computer (`approve-first.ts` `runApproved`) → `career_apply_finish_own` records it → chat
 reads it back. The cloud worker runs the same engine. The agent submits; the person approves the exact answers on the
-card. There is one ledger (`career_apply_ledger`) and one cap (`career_apply_daily_limit`), both in SQL (G3,
-`20261025100000`). The cloud card bridge's `least(15, …)` is a stricter opt-in limit on the cloud only, and it is not on
-this path.
+card. There is one ledger (`career_apply_ledger`, G3, `20261025100000`). Since D-MS-2/D-MS-3 (2026-10-27) there is no
+limit of Trainee's own: only a pace the person sets themselves, backoff when a portal refuses, and the exact-duplicate
+rule (see "Volume ceilings" below).
 
 ## What a real person lacked at 6bf3478e
 
@@ -216,37 +216,68 @@ supabase-js client, Supabase-parity grants and RLS, the HTTP hop answered over t
 | this commit | 9 passed | 3 red: a1 "15 of 15 not shown"; a3 its precondition; c "Updated — I saved your corrected sponsorship answer" |
 | join eea59b6e | 8 passed, 1 failed (a2; the join predates this commit) | 3 red, same messages |
 
-## Volume ceilings on the chosen path (CAPS-1218 inventory; nothing removed yet)
+## Volume ceilings on the chosen path (D-MS-2 and D-MS-3, owner, 2026-10-27)
 
-Latest definitions, in migration order. Removal waits for a green join head, and goes in code and migration drafts only.
+There is no volume limit of Trainee's own anywhere (owner, 19:55 CDT: "no person limit, never set a limit"). The changes
+are in two migrations:
+- `20261027140000_career_apply_host_backoff.sql`: a portal's refusal is the only thing that holds work back.
+- `20261027141000_career_apply_mass_submit.sql`: the bounds are removed, the exact-duplicate rule replaces the company
+  rule, and every claim is fair and parallel.
 
-| Ceiling | Value | Where |
+The TS mirrors follow. Neither migration is applied: the owner applies migrations (D-MS-4).
+
+| Was | Now | Where |
 |---|---|---|
-| The person's daily limit | default 25, floor 1, max 50 (`career:account.daily_limit`) | `supabase/migrations/20261020050000_career_apply_daily_limit.sql:6-11` (`career_apply_daily_limit`) |
-| The daily count check at the tap and the claim | `least(coalesce(p_daily, 50), career_apply_daily_limit(u))` over 24h of the one ledger | `20261025100000_career_apply_one_ledger.sql:76-87` (`career_apply_ledger_refusal`) |
-| Enqueue's limit argument | `p_daily default 25`, refused unless `between 1 and 50` | `20261025100000_career_apply_one_ledger.sql:156,162` (`career_apply_enqueue`) |
-| The card tap passes the person's limit | `career_apply_enqueue(…, career_apply_daily_limit(p_user))` | `20261020050000_career_apply_daily_limit.sql:51` (`career_apply_card_answer_for`) |
-| Extension and form-answer paths | the same | `20261021000000_career_apply_extension.sql:27`; `20261021120000_career_apply_form_answers.sql:18` |
-| Cloud claim | `least(coalesce(o.daily, 25), career_apply_daily_limit(u))` | `20261025100000_career_apply_one_ledger.sql:236`; also `20261024120000_career_apply_cloud_gate_waiver.sql:63`, `20261025110000_career_apply_bridge_reconcile.sql:98` |
-| Cloud opt-in's own limit | `daily between 1 and 50` | `20261021080000_career_apply_cloud.sql:191` |
-| Card cloud bridge (DRAFT, not applied) | `least(15, coalesce(o.daily, 15), …)`; opt-in default 15 | `20261024130000_career_apply_card_cloud_bridge.sql:70,200,617,703,716,730-731`; `20261025110000_career_apply_bridge_reconcile.sql:160` |
-| Claim batch size | `least(6, p_limit)` per claim call | `20261025100000_career_apply_one_ledger.sql:263,275`; `20261025110000_career_apply_bridge_reconcile.sql:71,130` |
-| The person's computer claims one at a time | `claim(limit = 1)`; the loop claims 1 | `workers/career-browser/approve-first.ts:408,443` |
-| Cloud worker concurrency | `max(1, min(6, contexts ?? 3))` browser contexts | `workers/career-cloud/worker.ts:236` |
-| TS mirror of the daily limit | `DEFAULT_DAILY = 25, MAX_DAILY = 50`; `dailyLimit()`; `admitApplication` → `daily_cap` | `supabase/functions/_shared/career_apply.ts:46,57,68` |
-| Store-side claim bound | `limit > 6` refused | `supabase/functions/_shared/career_apply_store.ts:37` |
-| Applications per card | `MAX_PER_CARD = 8` | `supabase/functions/_shared/career_apply_cards.ts:43,87` |
-| Server prepare-ahead | 5 per person, 50 per run (caller); SQL clamps per person to 25 and the run to 200 | `workers/career-browser/prepare-ahead.ts:67`; `20261025120000_career_apply_prepare_ahead.sql:75-77` |
-| Old batch stack (off this path, no real site: G3a) | `SPEC_CAPS { perDay: 15, perVendorPerDay: 5, perCompanyPer30Days: 1 }` | `packages/domain/149-career-portal-apply.js:123,665-667` |
+| The person's daily limit: 25 by default, 50 at most | None. A pace the person sets themselves still holds, with no maximum. An unreadable saved pace refuses by name. | `career_apply_pace_state` (`20261025160000`); `career_apply_ledger_refusal` (7 args, `20261027141000`) |
+| Enqueue's `p_daily`: 1..50 | Any value, or none. It is never a ceiling. | `career_apply_enqueue` |
+| Cloud claim: `least(coalesce(o.daily, 25), …)`, plus the bridge's 15 | Only the person's own pace | `career_apply_cloud_refusal`, rewritten wherever it is installed (`career_apply_mass_submit_install`) |
+| Cloud opt-in: 15 (bridge), 1..50 earlier | Carries the person's own pace, or null. The default of 15 is dropped. | `career_apply_cloud_optin_as` / `_get` |
+| Bridge authorize-before-effect: 15 and the company rule | The person's own pace and the exact-posting rule | `career_apply_message_cloud_authorize` (when the bridge is installed) |
+| Claim batch: `least(6, p_limit)` | The worker's own batch size, as given | `career_apply_claim_own`, `career_apply_claim`, `career_apply_cloud_claim_at` |
+| Dispatcher: 6 at a time, 500 a call | Each family's share in one call. No upper bound on the worker's numbers. | `career_apply_cloud_dispatch_claim` |
+| Store-side claim: `limit > 6` refused | Any whole number ≥ 0 | `supabase/functions/_shared/career_apply_store.ts` |
+| Applications per card: 8 | Any number on one card (tested with 500). One answer covers all of them, each refused by name if its payload changed since it was shown. | `career_apply_cards_items_check`, `career_apply_card_open_for`, `career_apply_card_push_for`. TS `MAX_PER_CARD` is in `career_apply_cards.ts` (builder B's lane). |
+| The chat's apply queue: 100 at once | Any number | `career_apply_want_put_for` |
+| One per company per 30 days (`company_cooldown`), and its copy in the erase tombstone (`20261026230100`) | Gone. Only the exact same posting, already sent or in flight, is refused (`duplicate_job`). No employer hash is kept after an erase. | `career_apply_posting_sent`, `career_apply_posting_key`, `career_apply_erased_guard`; the queue, apply-by-email, the apply queue, the server prepare, the cloud check, the claim's re-check |
+| Safety pacing (a default spacing, a per-host count) | None. Back off only on a portal refusal (below). | `career_apply_host_backoff` |
+| The person's computer claims one at a time | Unchanged in the worker (builder C's lane). The database takes any number. | `workers/career-browser/approve-first.ts` |
+| Cloud worker concurrency `min(6, …)` | Unchanged in the worker (builder C's lane) | `workers/career-cloud/worker.ts` |
+| TS mirror | `admitApplication`: exact posting only (`postingKey`, the SQL's canonical link), no company rule, only the person's own pace | `supabase/functions/_shared/career_apply.ts` |
 
-Kept unchanged, as asked:
-- **One per company per 30 days:** `career_apply_ledger_refusal`, `20261025100000_career_apply_one_ledger.sql:81-82` (and the cloud refusal at :241), `company_cooldown`.
-  **Flagged as unresolved:** it is not user-approved policy and not an exact-duplicate rule, and different roles at one
-  company may be legitimate.
-- **Unique confirmation IDs:** `career_apply_confirmation_key`, `career_apply_jobs_confirmation`.
-- **Payload-hash re-verify at claim:** `career_apply_void_unsendable`, `career_apply_jobs_fixed`.
+**Refusal backoff (`20261027140000`).** A drive that meets a 429 or rate-limit page (`rate_limited`), a bot wall
+(`bot_wall`; that drive ends `needs_user` and is never retried) or a 503 (`server_busy`) reports it. The service calls
+`career_apply_host_refused_for(job, lease, reason, retry_after, now)`; the person's computer calls
+`career_apply_host_refused_own(job, lease, reason, retry_after)`. That host then waits, in that address's scope (`cloud`,
+or the person's own id), for the portal's Retry-After. Without one it waits 30 s, doubling up to an hour. Every claim
+skips a waiting host and its applications stay queued. The first accepted request resumes it:
+`career_apply_host_ok_for` / `_own`. `career_apply_host_wait(url, scope, now)` and `career_apply_host_wait_own(url)` say
+whether a host is waiting, until when and why, so the chat can tell the person.
 
-## Approval model on the chosen path today (APPROVAL-1226; not changed)
+**Scale.** Every claim is:
+- **Fair:** `career_apply_claim_turns`, kept by a trigger. The longest-waiting people go first, each with an equal share,
+  so one heavy person never starves the rest.
+- **Parallel:** `FOR UPDATE SKIP LOCKED` on people and on rows, with no global lock.
+- **Bounded and indexed:** `career_apply_jobs_queued_user`, `career_apply_claim_turns_ready`. A claim re-checks the hash
+  of only the rows it hands out.
+- **Leased:** 15 minutes, then `career_apply_sweep` (SKIP LOCKED, 10,000 a call) records `unknown_outcome`, never re-sent.
+
+`tests/db/career_apply_claim_load.py` runs in the database job: 10,000 people × 50 approved applications plus one person
+with 2,000, claimed by 20 concurrent workers. It asserts exactly-once (every row once, its own lease, none left), fairness
+(the first round serves one each, and the heavy person does not delay anyone) and prints the measured throughput and
+latency.
+
+Kept unchanged:
+- **Unique confirmation IDs:** `career_apply_jobs_confirmation`.
+- **Payload-hash re-verify at every claim:** `career_apply_void_unsendable`'s rules, applied to the rows each claim hands
+  out; `career_apply_jobs_fixed`.
+- **Every resume check:** the message card's prepared-resume requirement, the cloud's resume by hash.
+- **Every approval and hash check in enqueue.**
+
+`career_apply_guards_missing()` reads non-empty if any claim or cloud check keeps a product bound or the company rule.
+The reconcile the launch scripts run after every apply ends with `career_apply_mass_submit_install()`, so no apply order
+of the bridge draft, its rollback, the one-ledger file or the erase file brings one back.
+
+## Approval model on the chosen path (APPROVAL-1226; changed 2026-10-27 by D-MS-1)
 
 - **A batch, by the person's own call.** `career_apply_card_answer_own(p_card, p_approve int[])` approves every listed
   item of one card in one call (`20261020030000_career_apply_cards.sql:130`, body
@@ -256,8 +287,43 @@ Kept unchanged, as asked:
   whose prepared payload no longer hashes to it is `changed`, not queued (the same function). Enqueue requires
   `approval = payload hash = career_apply_payload_hash(payload)` (`20261025100000…:162-163`). The claim closes any job
   whose payload no longer hashes to its approval as not sent (`career_apply_void_unsendable`).
-- **A chat "yes" does not approve (Option A, 2026-10-22).** A text "yes" to the card replies "A text yes doesn't send
-  anything … tap Approve" (`supabase/functions/_shared/career_apply_cards.ts:174-181`). A text "no" declines.
-- **The tension, unresolved:** the owner's words "a yes does handle a batch of submissions" (Oct 22 5:09 PM) fit the
-  database's batch approval. The chat path's Option A refuses a text yes. That is the owner's call, and I have changed
-  neither.
+- **(Superseded 2026-10-27 by D-MS-1, below.)** ~~A chat "yes" does not approve (Option A, 2026-10-22).~~ A text "yes"
+  to the card replied "A text yes doesn't send anything … tap Approve"; later (SERIAL-1461) only a yes in direct reply to
+  the card's message counted.
+- **(Resolved 2026-10-27 by the owner, D-MS-1.)** The tension between "a yes does handle a batch of submissions" and
+  Option A is closed in favour of the texted yes.
+
+### Approval model from 2026-10-27 (D-MS-1, mass submission, chat side)
+
+- **A texted yes approves exactly the batch shown, on any channel** (SMS/iMessage, WhatsApp, Telegram, the web app).
+  `cardTurn` (`supabase/functions/_shared/career_apply_cards.ts`) calls the existing batch approval once,
+  `career_apply_card_answer_as(p_user, p_card, p_approve int[])` with the card's numbers: the same function the tap uses
+  (`_own`), no new trust path. The database still decides per item: an item whose prepared payload no longer hashes to
+  the hash the card carries is `changed`, not queued, and the rest go on; the reply names it ("2. Beta Labs: not sent: it
+  changed after the card was shown") and says how to see it again.
+- **Which card a yes is about.** The card this thread showed, while it is still the thread's last word (the plain yes
+  that iMessage, SMS and the web app send), or the card whose message the text replies to (Telegram, WhatsApp Cloud). A
+  reply to any other message approves nothing and says how. Of two cards shown only the latest is open (opening a card
+  closes the older one in `career_apply_card_open_for`): a yes to the older one is "out of date", nothing approved.
+  Within 10 minutes of the showing (the chat and `career_apply_card_answer_for`'s `card_stale`), once (`card_answered`).
+- **What a reply means.** "yes", "yes to all", "approve all", "send them", "go ahead": the whole card. "yes except 3",
+  "yes but not Acme", "approve, skip 2": all but those. "only 1, 2 and 5", "just 1 and 2", "1, 2 and 5", "send 1 and
+  3": exactly those. "not Acme" alone: confirmed first ("Reply "yes except 1" to send the other 5"), nothing approved.
+  "no": declines all. "wait", "hold on", "not yet": holds, nothing approved, the card still waits. "maybe", "ok", "sure",
+  "yes?", "1 or 2", "approve 2", "yes 3", "yes acme", "yes but not the one in Ohio": unclear, nothing approved, the card
+  asks again in plain words. A number not on the card, an employer not on it, "yes send all 60" on a card of 3, or a
+  subset that leaves nothing: refused, nothing approved. "stop" stays the carrier's opt-out, never a card answer.
+- **No 8-per-card limit (D-MS-2).** "show my applications" puts the whole batch on one card, paged into messages of at
+  most 3,800 characters for reading (`batchFor`; the reply's `parts`, delivered whole on every channel), and one yes
+  covers every page; the answer says plainly how many were approved and lists each not sent with why. A batch past 20
+  pages (a transport bound for one reply) shows what fits and says "N more are ready; they come on the next card". The
+  scheduled push (`cardFor`) is still one text. **Until builder A's D-MS-2 migration** drops the database's
+  `between 1 and 8` (`career_apply_card_open_for`, the `items` check), the database refuses a larger card: the chat then
+  shows 8 and says how many more wait, and the next card holds the rest.
+- **Mass asks.** "apply me to all of them", "apply to the top 50", "apply to all remote ones", "apply to every SWE intern
+  role you found" queue the listed postings (a filter is read against the listed titles and locations) as one batch
+  (`career_apply_chat.ts` `applyManyAsk` / `applyManyTurn`). The resume rule is unchanged: no confirmed resume, nothing
+  queued, the reply asks for it.
+- **Tests:** `tests/architect/mass-submit-chat.test.ts`, `mass-submit-channels.test.ts` (iMessage, Telegram, WhatsApp
+  through their real webhook handlers), `mass-submit-handler-pg.test.ts` (the production handler on Postgres, the web
+  app's turn; `career_apply_jobs` asserted).

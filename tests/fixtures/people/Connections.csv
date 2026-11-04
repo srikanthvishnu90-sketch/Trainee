@@ -1,0 +1,15 @@
+Notes:
+"When exporting your connection data, you may notice that some of the email addresses are missing. You will only see email addresses for connections who have allowed their connections to see or download their email address using this setting https://www.linkedin.com/psettings/privacy/email. You can learn more here https://www.linkedin.com/help/linkedin/answer/261"
+
+First Name,Last Name,URL,Email Address,Company,Position,Connected On
+Priya,Shah,https://www.linkedin.com/in/priya-shah-fixture,,Ramp,Senior Data Analyst,14 Mar 2025
+Lee,Park,https://www.linkedin.com/in/lee-park-fixture,lee.park@rampfixture.com,"Ramp, Inc.",Software Engineer,02 Feb 2024
+José,Núñez,https://www.linkedin.com/in/jose-nunez-fixture,,Stripe,"Product Manager, Payments",09 Sep 2023
+王,伟,https://www.linkedin.com/in/wang-wei-fixture,,Ant Group,Engineer,01 Jan 2022
+Zoë,Ångström,https://www.linkedin.com/in/zoe-angstrom-fixture,zoe@acmefixture.org,Acme Corp,"Head of ""Growth""",30 Jun 2025
+Priya,Shah,https://www.linkedin.com/in/priya-shah-fixture,,Ramp,Senior Data Analyst,14 Mar 2025
+"=HYPERLINK(""http://evil.invalid/x"",""Click me"")",Bad,https://www.linkedin.com/in/evil-fixture,,Ramp,Analyst,01 Jan 2025
+Sam,Rivera,https://www.linkedin.com/in/sam-rivera-fixture,,"=cmd|' /C calc'!A0",Technical Recruiter,05 May 2025
+,,https://www.linkedin.com/in/no-name-fixture,,Ramp,,01 Jan 2024
+Alex,O'Brien,https://www.linkedin.com/in/alex-obrien-fixture,alex.obrien@rampfixture.com,Ramp,Recruiter,12 Dec 2024
+Dana,Kim,https://www.linkedin.com/in/dana-kim-fixture,,Goldman Sachs & Co. LLC,Analyst,not a date

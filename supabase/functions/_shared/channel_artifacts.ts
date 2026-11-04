@@ -91,8 +91,11 @@ export function documentsOf(result: any): TurnDocument[] {
     out.push(doc);
   };
   if (Array.isArray(result.documents)) for (const d of result.documents) push(d);
-  const pdf = result.artifact && typeof result.artifact === "object" ? result.artifact.pdf : null;
-  if (pdf) push(pdf);
+  const art = result.artifact && typeof result.artifact === "object" ? result.artifact : null;
+  if (art?.pdf) push(art.pdf);
+  // FAMILY MATERIALS (AM-03): the Word copy of the same resume, when the turn rendered one (career_tailor_rewrite.ts
+  // employerFiles), rides beside the PDF, so "Saved as PDF and DOCX files, attached" is what the person gets.
+  if (art?.docx) push(art.docx);
   return out;
 }
 
@@ -111,7 +114,12 @@ export async function materializeArtifacts(
   const expires = new Date(now + (args.ttlMs ?? ARTIFACT_TTL_MS)).toISOString();
   const artifacts: ArtifactRef[] = [];
   let failed = 0;
-  for (const doc of args.documents) {
+  // FAMILY MATERIALS (AM-03): a turn can now carry two documents (the resume as PDF, then as DOCX). The first is the
+  // primary one, and it stays the thread's NEWEST row, as it was when a turn carried one document: rows are written
+  // last-first, each earlier document one millisecond newer than the next, and the refs come back in the turn's order.
+  const made: (ArtifactRef | null)[] = args.documents.map(() => null);
+  for (let i = args.documents.length - 1; i >= 0; i--) {
+    const doc = args.documents[i];
     try {
       const id = crypto.randomUUID();
       const { error } = await admin.from(ARTIFACTS_TABLE).insert({
@@ -123,15 +131,16 @@ export async function materializeArtifacts(
         mime: doc.mime,
         bytes_b64: doc.base64,
         sha256: doc.sha256,
-        created_at: new Date(now).toISOString(),
+        created_at: new Date(now - i).toISOString(),
         expires_at: expires,
       });
       if (error) { failed += 1; continue; }
-      artifacts.push({ kind: "document", ref: id, filename: doc.filename, mime: doc.mime });
+      made[i] = { kind: "document", ref: id, filename: doc.filename, mime: doc.mime };
     } catch {
       failed += 1;
     }
   }
+  for (const a of made) if (a) artifacts.push(a);
   return { artifacts, failed };
 }
 

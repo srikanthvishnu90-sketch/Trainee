@@ -76,7 +76,7 @@ const prepared = runs.at(-1);
 const queue: any[] = [];
 let card: any = null, last: string | null = null;
 const store: CardStore = {
-  pending: async () => [{ id: "PREPARED-1", company: ready.payload.company, card_lines: ready.card }],
+  pending: async () => [{ id: "PREPARED-1", company: ready.payload.company, card_lines: ready.card, resume_sha256: ready.payload.resume_sha256 }], // OWNER RULE: a card shows only an application that binds its resume
   open: async (_u, ids) => {
     card = { id: "CARD-" + (await hashApplyPayload([ids, ready.hash])).slice(0, 12), items: ids.map((id, i) => ({ n: i + 1, prepared_id: id, payload_hash: ready.hash })), shown_at: new Date().toISOString() };
     last = CARD_INTENT;

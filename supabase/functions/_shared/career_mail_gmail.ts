@@ -50,6 +50,20 @@ async function get(d: GmailDeps, url: string, token: string): Promise<{ r: Respo
   }
 }
 
+// Gmail's snippet is HTML-escaped text ("we won&#39;t be moving forward"), and HTML-only mail often opens with invisible
+// preheader padding (U+034F, U+200B-U+200D, U+FEFF, U+00AD). The classifier reads words, so the snippet is read as the words
+// it shows: the escapes decoded once (&amp;#39; stays the text "&#39;"), the padding dropped, spaces collapsed.
+const NAMED: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", ndash: "–", mdash: "—", lsquo: "‘", rsquo: "’", ldquo: "“", rdquo: "”", hellip: "…" };
+export function plainSnippet(s: unknown): string {
+  return String(s ?? "")
+    .replace(/&(#x[0-9a-f]{1,6}|#[0-9]{1,7}|[a-z]{2,8});/gi, (all, e: string) => {
+      if (e[0] !== "#") return NAMED[e.toLowerCase()] ?? all;
+      const n = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      return Number.isFinite(n) && n > 0 && n <= 0x10ffff && !(n >= 0xd800 && n <= 0xdfff) ? String.fromCodePoint(n) : all;
+    })
+    .replace(/[͏­​-‍⁠﻿]/g, "").replace(/\s+/g, " ").trim();
+}
+
 const header = (msg: any, name: string) =>
   String((msg?.payload?.headers ?? []).find((h: any) => String(h?.name ?? "").toLowerCase() === name.toLowerCase())?.value ?? "");
 
@@ -85,7 +99,7 @@ export async function readMailSince(
     const at = Number(msg?.internalDate) || Date.parse(header(msg, "Date")) || nowMs;
     // Every Authentication-Results header, in order: only the first (Gmail's own) is ever trusted (career_mail.ts).
     const auth = (msg?.payload?.headers ?? []).filter((h: any) => String(h?.name ?? "").toLowerCase() === "authentication-results").map((h: any) => String(h?.value ?? "")).slice(0, 5);
-    mails.push({ hash: await messageHash(userId, id), from: header(msg, "From"), subject: header(msg, "Subject"), snippet: String(msg?.snippet ?? ""), date: new Date(at).toISOString(), auth });
+    mails.push({ hash: await messageHash(userId, id), from: header(msg, "From"), subject: header(msg, "Subject"), snippet: plainSnippet(msg?.snippet), date: new Date(at).toISOString(), auth });
     through = Math.max(through ?? 0, at);
   }
   const all = todo.length <= maxMessages;
@@ -100,7 +114,8 @@ export async function readMailSince(
 export interface TokenDeps {
   connection: (userId: string) => Promise<{ vault_name: string; scopes?: string | string[] | null } | null>;
   readVault: (name: string) => Promise<string | null>;
-  writeVault: (name: string, secret: string) => Promise<void>;
+  // false: the connection went while the token was refreshed (oauth_vault_refresh wrote nothing): the token is not used.
+  writeVault: (name: string, secret: string) => Promise<void | boolean>;
   fetch: typeof fetch;
   env: { get(k: string): string | undefined };
   now: () => number;
@@ -132,7 +147,8 @@ export function careerTokenFor(d: TokenDeps, scope: string): (userId: string) =>
       if (r.status === 400 || r.status === 401) return null; // invalid_grant: revoked; the person reconnects in the app
       throw new Error(`refresh the career grant: HTTP ${r.status}`);
     }
-    await d.writeVault(name, JSON.stringify({ ...tok, access_token: nt.access_token, refresh_token: nt.refresh_token || tok.refresh_token, expires_at: d.now() + (Number(nt.expires_in) || 3600) * 1000 }));
+    const kept = await d.writeVault(name, JSON.stringify({ ...tok, access_token: nt.access_token, refresh_token: nt.refresh_token || tok.refresh_token, expires_at: d.now() + (Number(nt.expires_in) || 3600) * 1000 }));
+    if (kept === false) return null; // disconnected (or the account deleted) while this refresh ran: nothing is read or sent with it
     return String(nt.access_token);
   };
 }

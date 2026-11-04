@@ -11,6 +11,7 @@
 //            channel_artifacts; "where do I stand with TEST Acme" links to it; another person sees none of it.
 // The facts are a synthetic test person's own statements (name and email), each with its source. Nothing reaches a real
 // site; the model is never called (every turn here is code's).
+import { confirmedResumeSql } from "../flow/resume-seed.ts"; // OWNER RULE 2026-10-26: the person has a confirmed resume
 import assertNode from "node:assert/strict";
 import { pgBinDir, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, supabaseParity } from "../flow/handler.ts";
@@ -88,7 +89,8 @@ Deno.test({
       await supabaseParity(pg);
       for (const id of [PERSON, OTHER]) {
         await pg.sql(`insert into auth.users (id, email) values ('${id}', '${id}@example.test'); insert into public.profiles (id) values ('${id}');
-          insert into public.career_watch_kv (user_id, key, value) values ('${id}', 'career:account', '{"epoch":0,"version":0,"paused":false}');`);
+          insert into public.career_watch_kv (user_id, key, value) values ('${id}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
+          ${confirmedResumeSql(id, "%PDF-1.4\n% synthetic receipt-test resume\n%%EOF\n")}`);
       }
       const url = `${site.base}/apply`;
       const factsPath = `${work}/facts.json`, resumePath = `${work}/resume.pdf`;

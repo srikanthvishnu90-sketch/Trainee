@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-10-28):** the current inventory of features, depth and status is `docs/architect/FEATURES.md`. Kept for history; do not use as current.
+
 # Capability Inventory — Upmore (career pivot)
 
 Generated 2026-10-12 from the repo itself on branch `pivot/career` (base: `claude/wave01-build` tip `099b2b0`, tagged `finance-final`). This file is the progress truth.

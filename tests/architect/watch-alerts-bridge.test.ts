@@ -173,7 +173,8 @@ Deno.test("7 a change starts watching from now: postings already on the boards a
 });
 
 Deno.test("8 the handler calls the bridge after the turn is saved, for every turn, not inside the held brain branch", () => {
-  const commit = HANDLER.indexOf("const saved = await persistence.commit(");
+  // The save is the evidenced commit (commitTurn wraps persistence.commit since #318); the first await of it is the save.
+  const commit = HANDLER.indexOf("saved = await commitTurn(");
   const call = HANDLER.indexOf("syncWatchAlerts(");
   assert(commit > 0 && call > commit, "syncWatchAlerts runs after persistence.commit (a refused save writes no alert settings)");
   assert(call < HANDLER.indexOf("return json(cors, saved.response, 200)"), "and before the saved reply is returned");

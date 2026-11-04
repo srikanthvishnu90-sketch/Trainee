@@ -240,7 +240,7 @@ if (!vm.SourceTextModule) {
       const turn = await app.chat("Find me software engineering intern roles", "pool-ask-1");
       assert.equal(turn.status, 200);
       assert.ok(db.kbCalls >= 1, "the handler read career_kb_postings");
-      assert.ok(!turn.body.reply.includes("holds no roles at all"), `reply must not be the honest-empty text: ${turn.body.reply}`);
+      assert.ok(!turn.body.reply.includes("I won't make any up"), `reply must not be the honest-empty text: ${turn.body.reply}`);
       assert.ok(turn.body.reply.includes("Northwind Ledger"), `reply names a role from the pool: ${turn.body.reply}`);
       assert.ok(turn.body.reply.includes("Software Engineering Intern"), `reply names the ranked role: ${turn.body.reply}`);
     } finally { app.close(); }
@@ -254,7 +254,7 @@ if (!vm.SourceTextModule) {
       const turn = await app.chat("Find me software engineering intern roles", "pool-ask-degraded-1");
       assert.equal(turn.status, 200);
       assert.ok(db.kbCalls >= 1, "the handler attempted the KB read");
-      assert.ok(turn.body.reply.includes("holds no roles at all"), `reply is the designed honest-empty text: ${turn.body.reply}`);
+      assert.ok(turn.body.reply.includes("I won't make any up"), `reply is the designed honest-empty text: ${turn.body.reply}`);
       assert.ok(!turn.body.reply.includes("Northwind Ledger"), "no role is served from a failed read");
     } finally { app.close(); }
   });

@@ -30,6 +30,7 @@
 // written in SQL because no PostgREST runs here; RECEIPT_READ pins index.ts's query to this one.
 //
 // Not covered yet (later gaps): facts written by chat (G2).
+import { confirmedResumeSql } from "../flow/resume-seed.ts"; // OWNER RULE 2026-10-26: the person has a confirmed resume
 import assertNode from "node:assert/strict";
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const assertEquals = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -165,7 +166,8 @@ Deno.test({
       // Setup (not the person acting): their account, as the chat host writes it on their first text.
       await pg.sql(`insert into auth.users (id, email) values ('${PERSON}', 'flow.tester@example.test');
         insert into public.profiles (id) values ('${PERSON}');
-        insert into public.career_watch_kv (user_id, key, value) values ('${PERSON}', 'career:account', '{"epoch":0,"version":0,"paused":false}');`);
+        insert into public.career_watch_kv (user_id, key, value) values ('${PERSON}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
+        ${confirmedResumeSql(PERSON, "%PDF-1.4\n% synthetic flow-test resume\n%%EOF\n")}`);
       const factsPath = `${work}/facts.json`, resumePath = `${work}/resume.pdf`;
       await Deno.writeTextFile(factsPath, JSON.stringify(FACTS));
       await Deno.writeFile(resumePath, new TextEncoder().encode("%PDF-1.4\n% synthetic flow-test resume\n%%EOF\n"));
@@ -369,6 +371,7 @@ Deno.test({
       await pg.sql(`insert into auth.users (id, email) values ('${PERSON}', 'flow.tester@example.test');
         insert into public.profiles (id) values ('${PERSON}');
         insert into public.career_watch_kv (user_id, key, value) values ('${PERSON}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
+        ${confirmedResumeSql(PERSON)}
         insert into public.career_apply_questions (user_id, key, kind, label, type, state, answer, answered_at) values
          ('${PERSON}', 'fact:first_name', 'fact', 'First name', 'input_text', 'answered', 'Flow', now()),
          ('${PERSON}', 'fact:last_name', 'fact', 'Last name', 'input_text', 'answered', 'Tester', now()),
@@ -544,7 +547,8 @@ Deno.test({
       await t.step("their text: the questions say a draft is ready; it is shown whole only when they ask; only \"use 1\" saves it", async () => {
         const list = await text("what do you need from me");
         assertEquals(list?.status, "shown", JSON.stringify(list));
-        assertMatch(list!.reply, /1\. Cover letter/);
+        // One question per message (review of #360): the cover letter is the question shown, under its own line.
+        assertMatch(list!.reply, /\nCover letter/);
         assertMatch(list!.reply, /A draft of 1 is ready, written only from your confirmed facts\. Say "draft 1" to read it/);
         const early = await text("use 1");
         assertEquals(early?.status, "draft_none", "a draft they have not read is never saved");

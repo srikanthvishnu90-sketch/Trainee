@@ -12,6 +12,7 @@
 // tests/architect/wo-028-tailor.test.ts). If those built-ins are missing where it runs, the renderer says so and the
 // tool refuses; nothing is stored or linked.
 import { CareerProfile, CareerRender, CareerTailor } from "./router_core.career.js";
+import { documentLines, guardMaterials } from "./career_materials_guard.ts";
 
 export const RESUME_BUCKET = "career-resumes";
 export const LINK_TTL_SECONDS = 7 * 86400;
@@ -377,6 +378,9 @@ export async function tailorForPosting(o: {
   // The hard gate again, on exactly what will print: every line cited to a confirmed fact that supports it.
   const audit = CareerTailor.auditResume(doc, clean);
   if (!audit.ok) return { ok: false, refused: "truth_audit", reason: `the truth check refused it: ${audit.violations.slice(0, 3).map((v: any) => v.reason).join("; ")}`, ms: ms() };
+  // G5/B2: no skill, employer, title, date or number the person did not confirm, on any printed line.
+  const guard = guardMaterials(documentLines(doc), clean);
+  if (!guard.ok) return { ok: false, refused: "truth_audit", reason: `the truth check refused it: ${guard.refused.flatMap((x) => x.reasons).slice(0, 3).join("; ")}`, ms: ms() };
   const r = await o.deps.render(doc);
   if (!r.ok) return { ok: false, refused: "render", reason: `the PDF could not be made: ${r.reason}`, ms: ms() };
   if (!r.ats.pass) return { ok: false, refused: "ats_parse", reason: `it failed the ATS parse check: ${r.ats.reasons.slice(0, 3).join("; ")}`, ms: ms() };

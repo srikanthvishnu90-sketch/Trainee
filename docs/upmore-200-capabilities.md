@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-10-28):** the current inventory of features, depth and status is `docs/architect/FEATURES.md`. Kept for history; do not use as current.
+
 # Upmore — 50 Capabilities
 
 > **Superseded on paper trading (owner rule, 2026-10-11; noted 2026-10-12):** everything is live. There is no paper

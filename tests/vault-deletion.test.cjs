@@ -11,7 +11,8 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 const MIG = path.join(root, "supabase/migrations");
 const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
-const DELETE_ACCOUNT = read("supabase/functions/delete-account/index.ts");
+// The function and the steps it runs (moved to _shared/account_delete.ts in ERASE SCENARIOS ROUND 2, 2026-10-30).
+const DELETE_ACCOUNT = read("supabase/functions/delete-account/index.ts") + "\n" + read("supabase/functions/_shared/account_delete.ts");
 const ALL_SQL = fs.readdirSync(MIG).filter((f) => f.endsWith(".sql")).sort().map((f) => fs.readFileSync(path.join(MIG, f), "utf8")).join("\n");
 
 // file -> [{ secret, out: "delete-account" (the RPC it calls) | "trigger" (an after-delete trigger on the row) }]
@@ -25,6 +26,8 @@ const WRITERS = {
     { secret: "broker_pending_<link>", out: "trigger", trigger: "broker_pending_links_vault_cleanup" },
   ],
   "20261012010000_manual_connections.sql": [{ secret: "manual_<uid>_<platform>", out: "trigger", trigger: "manual_connections_vault_cleanup" }],
+  // oauth_vault_refresh: a refreshed token, written only while its connection row exists (and under that row's lock).
+  "20261030050000_account_erase_r2.sql": [{ secret: "oauth_<provider>_<uid>, refreshed", out: "trigger", trigger: "user_oauth_connections_vault_cleanup", rpc: "oauth_vault_delete" }],
 };
 
 test("every vault.create_secret in a migration is declared with its way out", () => {

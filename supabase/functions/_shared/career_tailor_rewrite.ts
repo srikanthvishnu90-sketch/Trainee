@@ -1,7 +1,7 @@
 // FEATURE 4 (DIAGNOSIS 2.2): a truthful rewrite of the tailored resume's bullets toward one posting.
 //
-// 123's tailorResume selects, orders and hides confirmed facts; it never rewords a bullet. Here the model (OpenAI through
-// the gateway, CAREER_MODEL) is asked once per tailoring to reword each selected bullet toward the posting's language and
+// 123's tailorResume selects, orders and hides confirmed facts; it never rewords a bullet. Here the model (the career model, Claude through
+// the gateway) is asked once per tailoring to reword each selected bullet toward the posting's language and
 // priorities, and code decides what may print. Every rewritten bullet is audited against the ONE confirmed fact it cites:
 //   - every word that carries content (nouns, tools, employers, adjectives, numbers spelled out) must be in that fact
 //     (title, text, bullets, org, skills, dates) or the original bullet; only plain connectives and a short list of
@@ -16,12 +16,16 @@
 //
 // Behind CAREER_TAILOR_REWRITE=on (default off). One model call per tailoring, metered by the caller's meter.
 import { CareerProfile, CareerRouter, CareerTailor, CareerWriting } from "./router_core.career.js";
-import { baseResume, changelog, confirmedOnly } from "./career_tailor.ts";
+import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 release flags
+import { baseResume, changelog, confirmedOnly, submissionResume } from "./career_tailor.ts";
+import { claimProblems } from "./person_claims.ts";
+import { redactIdentity } from "./identity_redact.ts";
 
 export const REWRITE_FLAG = "CAREER_TAILOR_REWRITE";
 export const MAX_BULLETS = 14;
 export const MAX_TOKENS = 1600;
-export const rewriteOn = (env: { get(k: string): string | undefined }) => (env.get(REWRITE_FLAG) || "").trim().toLowerCase() === "on";
+// D-036: a release flag (agent-chat/release_config.ts RELEASE_FLAGS): on unless the environment rolls it back.
+export const rewriteOn = (env: { get(k: string): string | undefined }) => releaseFlagOn(env, REWRITE_FLAG);
 
 export type ModelFn = (payload: any) => Promise<any>;
 export interface Target { id: string; index: number; text: string; factId: string; section: string | null }
@@ -71,6 +75,9 @@ export function auditRewrite(o: { original: string; proposed: string; fact: any;
   const reasons: string[] = [];
   const p = String(o.proposed ?? "").replace(/\s+/g, " ").trim();
   if (!p) return { ok: false, reasons: ["the rewrite is empty"] };
+  // A secret (an SSN, a card number, a password, a code) is refused by name, never quoted back in a reason.
+  const secret = redactIdentity(p).removed;
+  if (secret.length) return { ok: false, reasons: [`it holds a ${secret[0] === "ssn" ? "Social Security number" : secret[0] === "card" ? "card number" : secret[0] === "code" ? "one-time code" : secret[0] === "account" ? "account number" : "password"}`] };
   if (/[\r\n]/.test(String(o.proposed))) reasons.push("the rewrite is more than one line");
   if (p.length > Math.max(220, Math.round(o.original.length * 1.6))) reasons.push(`the rewrite is ${p.length} characters, too long for one bullet`);
   const corpus = `${factCorpus(o.fact)} ${o.original}`;
@@ -103,6 +110,10 @@ export function auditRewrite(o: { original: string; proposed: string; fact: any;
     reasons.push(/^[A-Z]/.test(w) && p.indexOf(w) > 0 ? `name "${w}" is not on this entry of your record` : `"${w}" is not on this entry of your record`);
   }
   for (const b of CareerTailor.bannedPhrasesIn(p) as string[]) reasons.push(`banned phrase "${b}"`);
+  // TAILORING SCENARIOS (2026-10-29): a word that only shares a stem with the fact is no evidence of a claim: "Managed"
+  // traced to "the management team", "team leader" to "the leadership team"; and "40+" is more than "40". Each claim
+  // about the person (leadership, numbers, degrees, authorization, how they identify, a secret) is held to this fact.
+  for (const c of claimProblems(p, { record: [corpus] })) reasons.push(c.replace(/your confirmed record/g, "this entry of your record"));
   // 123's own gate on the line by itself.
   if (!reasons.length) {
     const a = CareerTailor.auditResume([{ text: p, factIds: [o.fact.id], type: "bullet" }], o.profile);
@@ -181,7 +192,8 @@ export async function rewriteResume(o: { resume: any; profile: any; jd: any; pos
     if (proposed === undefined || proposed.replace(/\s+/g, " ").trim() === t.text.trim()) { unchanged++; continue; }
     const fact = CareerProfile.getFact(o.profile, t.factId);
     const a = auditRewrite({ original: t.text, proposed, fact, profile: o.profile });
-    if (!a.ok) { rejected.push({ id: t.id, factId: t.factId, before: t.text, proposed: proposed.trim(), reasons: a.reasons }); continue; }
+    // The refused wording rides the reply's meta (tailor_rewrite): a secret in it is never kept.
+    if (!a.ok) { rejected.push({ id: t.id, factId: t.factId, before: t.text, proposed: redactIdentity(proposed.trim()).text, reasons: a.reasons }); continue; }
     const after = proposed.replace(/\s+/g, " ").trim();
     withText(resume, t, after);
     accepted.push({ id: t.id, factId: t.factId, before: t.text, after });
@@ -203,12 +215,15 @@ export async function rewriteResume(o: { resume: any; profile: any; jd: any; pos
 // ------------------------------------------------------------------------------------------------ the live turn
 // The router's career_tailor result (the tailored document rides it as tailorDoc / tailorJd) is rewritten, re-rendered
 // through 123's render (148 PDF, exactly as the router renders it) and the artifact replaced in place, so the PDF that is
-// materialized and the copy the router kept on the profile are the rewritten one. Off, or anything missing: untouched.
+// materialized and the copy the router kept on the profile are the rewritten one. Anything missing: untouched. Off: no
+// model call, no reply change, and the files become the employer copy (employerFiles).
 export interface TurnOut { reply: string; intent: string; result?: any; [k: string]: unknown }
 export interface RewriteTurn { out: TurnOut; summary: { status: string; accepted: Accepted[]; rejected: Rejected[]; unchanged: number; changelog: string } | null }
 export async function tailorRewriteTurn(o: { out: TurnOut; profile: any; on: boolean; model: ModelFn; voice?: any }): Promise<RewriteTurn> {
   const res = o.out?.result;
-  if (!o.on || o.out?.intent !== "career_tailor" || !res || !res.tailorDoc || !res.artifact || res.artifact.kind !== "tailored_resume" || !o.profile) return { out: o.out, summary: null };
+  if (o.out?.intent !== "career_tailor" || !res || !res.tailorDoc || !res.artifact || res.artifact.kind !== "tailored_resume" || !o.profile) return { out: o.out, summary: null };
+  // Off: no model call and no reply change; the attached files become the employer copy (employerFiles below).
+  if (!o.on) { employerFiles(res, res.tailorDoc, o.profile); return { out: o.out, summary: null }; }
   const jd = CareerTailor.parseJD(String(res.tailorJd || ""));
   const posting = { title: res.tailorPosting?.title ?? null, company: res.tailorPosting?.company ?? res.artifact.company ?? null };
   const r = await rewriteResume({ resume: res.tailorDoc, profile: o.profile, jd, posting, model: o.model, voice: o.voice });
@@ -221,14 +236,45 @@ export async function tailorRewriteTurn(o: { out: TurnOut; profile: any; on: boo
   const log = changelog({ diff, base, tailored: cited, profile: clean, jd, hidden: [], persona: null, rewrites: r });
   let reply = o.out.reply;
   if (r.accepted.length) {
-    const rendered = CareerTailor.render(r.resume, { profile: o.profile });
-    if (rendered?.pdf) {
-      Object.assign(res.artifact, { text: rendered.text || "", markdown: rendered.markdown || "", pdf: rendered.pdf, sha256: CareerRouter.sha256(rendered.text || ""), reworded: r.accepted.length });
+    if (employerFiles(res, r.resume, o.profile)) {
+      res.artifact.reworded = r.accepted.length;
     } else {
-      // The rewritten document did not render: the select-and-reorder PDF already attached stands, and nothing claims a rewrite.
+      // The rewritten document did not render: the select-and-reorder files stand, and nothing claims a rewrite.
+      employerFiles(res, res.tailorDoc, o.profile);
       return { out: { ...o.out, reply: `${reply}\nNo bullet was reworded this time (the reworded version did not render), so the attached resume is in your own confirmed words.` }, summary: { status: "render_failed", accepted: [], rejected: r.rejected, unchanged: r.unchanged, changelog: "" } };
     }
-  }
+  } else employerFiles(res, res.tailorDoc, o.profile);
   reply = `${reply}\nWhat changed: ${log.line}`;
   return { out: { ...o.out, reply }, summary: { status: r.status, accepted: r.accepted, rejected: r.rejected, unchanged: r.unchanged, changelog: log.line } };
+}
+
+// FAMILY MATERIALS (AM-03, 2026-10-26): the files the person is handed are the ones they would send. The router's PDF
+// printed the tailor's eligibility verdict on the page as if it were a resume line, was named Resume_Resume.pdf when no
+// name is on file, and the reply's "Saved as PDF and DOCX files, attached" was half true: only the PDF rode the reply.
+// Here the attached files become the employer copy (career_tailor.ts submissionResume: cited lines only; the verdict and
+// gap notes stay in the reply, where the person reads them), audited again against the confirmed facts, rendered as PDF
+// and DOCX from the same lines (channel_artifacts.ts documentsOf attaches both), and named for the person or, with no
+// name on file, for the posting. The router keeps the same artifact object on the profile, so "send me the pdf again"
+// sends this copy. Anything that does not hold (an empty copy, a failed audit, a format that did not render) leaves the
+// router's files exactly as they were.
+export function employerFiles(res: any, doc: any, profile: any): boolean {
+  try {
+    const sub = submissionResume(doc);
+    if (!sub.sections.length) return false;
+    if (!CareerTailor.auditResume(sub, confirmedOnly(profile)).ok) return false;
+    const rendered = CareerTailor.render(sub, { profile });
+    if (!rendered?.pdf?.base64 || !rendered?.docx?.base64) return false;
+    const company = String(res.artifact?.company || res.tailorPosting?.company || "").replace(/\([^)]*\)/g, " ")
+      .replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
+    const named = (ext: string, given: string) => (sub.header?.name ? given : `Resume${company ? `_${company}` : ""}.${ext}`);
+    Object.assign(res.artifact, {
+      text: rendered.text || "", markdown: rendered.markdown || "", sha256: CareerRouter.sha256(rendered.text || ""),
+      pdf: { ...rendered.pdf, filename: named("pdf", rendered.pdf.filename) },
+      docx: { ...rendered.docx, filename: named("docx", rendered.docx.filename) },
+      employer_copy: true,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }

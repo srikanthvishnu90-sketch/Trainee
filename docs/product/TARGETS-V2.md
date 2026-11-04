@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-10-28):** the current inventory of features, depth and status is `docs/architect/FEATURES.md`. Kept for history; do not use as current.
+
 # Trainee feature depth targets v2: where each one stands
 
 Source: the owner's "TRAINEE - FEATURE DEPTH TARGETS v2" (2026-10-19). One row per target, with what the code does today and what's next. Updated 2026-10-20 after #87 merged (WO-058) and sealed sample H was scored once, with WO-059 in review.

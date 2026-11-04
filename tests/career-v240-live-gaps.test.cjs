@@ -414,7 +414,9 @@ if (!vm.SourceTextModule) {
       assert.equal(t.status, 200);
       assert.ok(db.kbTargetedCalls >= 1, "the handler ran a targeted KB lookup for the named company beyond the window");
       assert.equal(t.body.meta.intent, "career_batch_apply", `intent=${t.body.meta.intent}; reply: ${(t.body.reply || "").slice(0, 240)}`);
-      assert.ok((t.body.reply || "").includes("Stopped — Gusto: BOARD_NOT_WIRED"), `the stop is the true worker stop: ${(t.body.reply || "").slice(0, 300)}`);
+      // Launch readiness Q3 (2026-10-26): the stop reaches the person in plain words; its code stays on the record only.
+      assert.ok((t.body.reply || "").includes("Stopped — Gusto: Trainee can't reach this employer's application site from here, so nothing was filled or sent."), `the stop is the true worker stop: ${(t.body.reply || "").slice(0, 300)}`);
+      assert.ok(!(t.body.reply || "").includes("BOARD_NOT_WIRED"), "the stop's code is never in the reply");
       assert.ok(!(t.body.reply || "").includes("not in the list I can work from"), "never the false served-list stop for a KB-held role");
       const sj = JSON.stringify(db.state);
       const committed = [...sj.matchAll(/"namedApply":\{"company":"((?:[^"\\]|\\.)*)"/g)].map((m) => JSON.parse(`"${m[1]}"`));

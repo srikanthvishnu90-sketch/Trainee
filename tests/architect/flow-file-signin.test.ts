@@ -9,7 +9,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { postgrestDouble } from "../flow/postgrest.ts";
 import { mintFileToken } from "../../supabase/functions/_shared/file_link.ts";
-import { MAX_CODE_TRIES, sha256 } from "../../supabase/functions/_shared/file_session.ts";
+import { MAX_CODE_TRIES, pageTokenOf, sha256 } from "../../supabase/functions/_shared/file_session.ts";
 import { handleFile, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
 import { supabaseSessionStore } from "../../supabase/functions/trainee-file/store.ts";
 import { jobViewOf, refOf } from "../../supabase/functions/_shared/telegram_jobs.ts";
@@ -90,11 +90,14 @@ Deno.test({ name: "trainee-file sign-in on real Postgres: link -> phone -> code 
     const lc3 = `tf_l=${cookies(o3).tf_l}`;
     await req({ form: { action: "phone_start", phone: U_PHONE }, cookie: lc3 });
     const sid2 = cookies(await req({ form: { action: "phone_verify", code: P.lastCode() }, cookie: lc3 })).tf_s;
-    eq((await req({ form: { t: sid, action: "signout" } })).status, 200);
+    // sign out from the page, as its browser sends it: the cookie, and the page token drawn for that session
+    const tok = async (id: string) => (await pageTokenOf(await sha256(id), SECRET))!;
+    eq((await req({ form: { t: sid, action: "signout" } })).status, 401, "the session id alone in a form signs nothing out");
+    eq((await req({ form: { t: await tok(sid), action: "signout" }, cookie: `tf_s=${sid}` })).status, 200);
     assert(await q(`select revoked_at is not null from trainee_file_sessions where id_hash = '${await sha256(sid)}'`) === "t");
     eq((await req({ cookie: `tf_s=${sid}` })).status, 401);
     eq((await req({ cookie: `tf_s=${sid2}` })).status, 200, "the other device still signed in");
-    eq((await req({ form: { t: sid2, action: "signout_all" } })).status, 200);
+    eq((await req({ form: { t: await tok(sid2), action: "signout_all" }, cookie: `tf_s=${sid2}` })).status, 200);
     eq(await q(`select count(*) from trainee_file_sessions where user_id = '${U}' and revoked_at is null`), "0");
     eq((await req({ cookie: `tf_s=${sid2}` })).status, 401);
 

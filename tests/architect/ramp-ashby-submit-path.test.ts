@@ -61,8 +61,10 @@ Deno.test("L1b the hosted runner hands UPMORE_SCRIPT_SUBMIT_LIVE=1 to both sandb
     assert(!JSON.stringify(b.env).includes("TEST-service-key") && !JSON.stringify(b.env).includes("TEST-vercel-token"), "no secret of the function reaches a sandbox");
   }
   sent.length = 0;
-  for (const v of ["", "0", "true", "on"]) {
-    const off = vercelSandboxHost(sandboxHostOptions(secrets(v ? { UPMORE_SCRIPT_SUBMIT_LIVE: v } : {}), f));
+  // D-037: UPMORE_SCRIPT_SUBMIT_LIVE is a release flag (release value "1", so unset serves "1"); every other value is its
+  // rollback, and none of them turns live submit on.
+  for (const v of ["off", "0", "true", "on"]) {
+    const off = vercelSandboxHost(sandboxHostOptions(secrets({ UPMORE_SCRIPT_SUBMIT_LIVE: v }), f));
     await off.run("sbx3", {});
   }
   eq(sent.map((b) => Object.hasOwn(b.env, "UPMORE_SCRIPT_SUBMIT_LIVE")), [false, false, false, false], "only the exact value 1 turns it on");

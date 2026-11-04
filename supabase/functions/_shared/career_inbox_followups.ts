@@ -163,6 +163,9 @@ export interface FollowupDeps {
   mailOn: boolean; readNow: (userId: string) => Promise<MailNow>;
   sendOn: boolean; canSend: (userId: string) => Promise<boolean>; send: (userId: string, m: Message) => Promise<SendResult>;
   connectAsk?: string;
+  // D-037 (incremental authorization): the person's "allow sending" link (a connect link with reason "send" that asks Google
+  // for gmail.send on top of their grant), or null when it can't be made. Offered only when a send was refused for want of it.
+  sendConsent?: (userId: string) => Promise<string | null>;
   // CONNECTORS ROUND 3 (2026-10-31): whether the person's Gmail grant may read mail (a partial grant: the box left unticked
   // at Google). Absent: not told apart from a Gmail that isn't connected.
   readGrant?: (userId: string) => Promise<"ok" | "not_connected" | "not_allowed">;
@@ -322,7 +325,8 @@ async function cardAnswer(o: { userId: string; threadId: string; now: number; de
   const yourself = `Copy the email above into your own email, or open it ready to send: ${mailtoOf(m)}`;
   if (!o.deps.sendOn) return waiting(`Not sent: Trainee doesn't send email for you, so nothing went to ${co}. ${yourself}`, "SEND_OFF");
   if (!(await o.deps.canSend(o.userId).catch(() => false))) {
-    return waiting(`Not sent: your Google connection lets Trainee read your mail, not send it, so nothing went to ${co}. ${yourself}`, "NOT_WIRED");
+    const allow = o.deps.sendConsent ? await o.deps.sendConsent(o.userId).catch(() => null) : null;
+    return waiting(`Not sent: your Google connection lets Trainee read your mail, not send it, so nothing went to ${co}.${allow ? ` To send it from your Gmail, allow sending: ${allow} then say yes again.` : ""} ${yourself}`, "NOT_WIRED");
   }
   const at = new Date(o.now).toISOString();
   const approved: OutreachDraft = { ...d, status: "approved", approved_hash: h, approved_at: at };

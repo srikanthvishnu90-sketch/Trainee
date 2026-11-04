@@ -44,20 +44,21 @@ export const TO_CODE: string[] = [
   "delete my career profile",
 ];
 
-Deno.test("F13-1 the mode: staged only when CAREER_BRAIN says staged; unset and router are the router; agent stays pinned", () => {
-  eq(brainMode(env({})), "router");
+// D-035 (owner, 2026-11-01: "Ship staged brain"): the committed release config serves staged; CAREER_BRAIN only rolls back.
+Deno.test("F13-1 the mode: the release config's staged when CAREER_BRAIN is unset or staged; router (or any other value) rolls back; agent stays pinned", () => {
+  eq(brainMode(env({})), "staged", "unset serves the committed release brain");
   eq(brainMode(env({ CAREER_BRAIN: "router" })), "router", "the kill switch");
   eq(brainMode(env({ CAREER_BRAIN: "staged" })), "staged");
   eq(brainMode(env({ CAREER_BRAIN: " Staged " })), "staged");
-  eq(brainMode(env({ CAREER_BRAIN: "agent" })), "agent");
+  eq(brainMode(env({ CAREER_BRAIN: "agent" })), "router", "agent is never served: pinned off, so the router");
   eq(brainMode(env({ CAREER_BRAIN: "on" })), "router", "anything else is the router");
   eq(AGENT_BRAIN_RELEASED, false, "the full brain stays pinned off; staged is its own reviewed path");
 });
 
-Deno.test("F13-2 unset or router: no turn goes to the brain, and the router is not even probed", () => {
+Deno.test("F13-2 the rollback (router) or agent: no turn goes to the brain, and the router is not even probed", () => {
   let probed = 0;
   const spy = { ...host, runTurn: (t: string, c: any) => { probed++; return host.runTurn(t, c); }, isHostControlled: host.isHostControlled };
-  for (const e of [env({}), env({ CAREER_BRAIN: "router" }), env({ CAREER_BRAIN: "agent" })]) {
+  for (const e of [env({ CAREER_BRAIN: "router" }), env({ CAREER_BRAIN: "agent" }), env({ CAREER_BRAIN: "off" })]) {
     for (const [m] of TO_BRAIN) eq(stagedDecision({ env: e, message: m, ctx: fresh(), host: spy, structured: false }).brain, false, m);
   }
   eq(probed, 0, "no probe outside staged mode");
@@ -139,7 +140,7 @@ Deno.test("F13-9 tool policy at the boundary: no external tool exists, and the a
   eq(withheld(undefined, all).length, all.length, "the full brain's tools are unchanged");
 });
 
-Deno.test("F13-10 go-live: --brain staged sets CAREER_BRAIN=staged; --brain router (the kill switch) unsets it", async () => {
+Deno.test("F13-10 go-live: --brain staged sets CAREER_BRAIN=staged; --brain router (the kill switch) sets CAREER_BRAIN=router (D-035)", async () => {
   const root = new URL("../..", import.meta.url).pathname;
   const run = async (args: string[]) => {
     const o = await new Deno.Command("bash", { args: ["scripts/launch/trainee-go-live.sh", "--dry-run", ...args], cwd: root, clearEnv: true,
@@ -151,7 +152,7 @@ Deno.test("F13-10 go-live: --brain staged sets CAREER_BRAIN=staged; --brain rout
   assert(/--env-file <0600 temp file: .*CAREER_BRAIN=staged>/.test(staged.out), staged.out);
   assert(/CAREER_BRAIN=staged: the brain answers question and advice turns/.test(staged.out), staged.out);
   const router = await run(["--brain=router"]);
-  assert(!/CAREER_BRAIN=staged/.test(router.out) && /DRY: supabase secrets unset CAREER_BRAIN/.test(router.out), router.out);
+  assert(!/CAREER_BRAIN=staged/.test(router.out) && /--env-file <0600 temp file: .*CAREER_BRAIN=router>/.test(router.out) && !/secrets unset CAREER_BRAIN/.test(router.out), router.out);
   const plain = await run([]);
   assert(!/CAREER_BRAIN=staged/.test(plain.out) && /CAREER_BRAIN not touched/.test(plain.out), plain.out);
 });

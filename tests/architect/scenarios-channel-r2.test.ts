@@ -715,7 +715,7 @@ Deno.test({ name: `channel r2: a second channel linked mid-conversation (x/link)
       if (nonce) await w.tgText(tg, `/start ${nonce}`);
       // TELEGRAM LINK OWNERSHIP (2026-10-31): the link asks the channel already linked; its YES binds the chat.
       w.clock.t += 10000;
-      if (nonce) await w.lmText(im, "yes");
+      if (nonce) await w.lmText(im, `LINK ${/reply LINK ([0-9]{4}) /.exec(w.P.to("loopmessage", im).map((x) => x.text).filter((t) => /^Someone wants to link Telegram /.test(t)).at(-1) ?? "")?.[1] ?? "none"}`);
     }
     w.clock.t += 2 * MIN; await w.run();
     w.clock.t += 10000;

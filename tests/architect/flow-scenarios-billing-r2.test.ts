@@ -34,6 +34,7 @@ import { REFUND_PROMISE, RETENTION } from "./scenarios/billing-check.ts";
 import { PAY_BY_CHECKOUT, type Subscription } from "../../supabase/functions/_shared/career_billing.ts";
 import { handleStripeWebhook, stripeSignature, type SyncRow, supabaseWebhookStore, webhookStripe } from "../../supabase/functions/_shared/stripe_webhook.ts";
 import { restDeps } from "../../supabase/functions/_shared/account_delete.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const LIVE = ["active", "trialing", "past_due", "unpaid"];
@@ -91,7 +92,7 @@ Deno.test({
     const TEXT = sampleText(), HOOKS = sampleWebhooks();
     const people: Record<string, string> = {};
     for (let i = 1; i <= TEXT.length + 40; i++) people[`tok-b2-${i}`] = uidOf(i);
-    const keys = ["CAREER_BRAIN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "CAREER_MODEL", "MODEL_PROVIDER", "CAREER_BRAIN_ROUTER_INTENTS",
+    const keys = ["CAREER_BRAIN", "ANTHROPIC_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "CAREER_MODEL", "MODEL_PROVIDER", "CAREER_BRAIN_ROUTER_INTENTS",
       "CAREER_MODEL_DAILY_USD", "CAREER_MODEL_DAILY_CALLS", "MODEL_BUDGET_PAUSED", "CAREER_REPLY_WRITER", "TELEGRAM_BOT_TOKEN"];
     const saved = Object.fromEntries(keys.map((k) => [k, Deno.env.get(k)]));
     for (const k of keys) Deno.env.delete(k);
@@ -117,7 +118,7 @@ Deno.test({
         const u = new URL(req.url);
         if (u.origin === new URL(SUPABASE_URL).origin) return await viaDouble(req);
         if (u.host === "api.stripe.com") return await cur.fake.fetch(req);
-        if (u.host === "api.openai.com") { wire.model++; const body = await req.json().catch(() => ({})); return completion(body, { role: "assistant", content: "Here is a general answer." }); }
+        if (u.host === "api.anthropic.com") { wire.model++; return anthropicWire(req, (body) => completion(body, { role: "assistant", content: "Here is a general answer." })); }
         outbound.push(`${req.method} ${u.host}${u.pathname}`);
         throw new TypeError(`network refused: ${u.host}`);
       }) as typeof fetch;
@@ -132,8 +133,7 @@ Deno.test({
 
       Deno.env.set("STRIPE_SECRET_KEY", STRIPE_KEY_R2);
       Deno.env.set("CAREER_BRAIN", "staged");
-      Deno.env.set("OPENAI_API_KEY", MODEL_KEY);
-      Deno.env.set("CAREER_MODEL", "gpt-5-mini");
+      Deno.env.set("ANTHROPIC_API_KEY", MODEL_KEY);
 
       await t.step(`A. text: ${TEXT.length} sampled scenarios through the chat handler (web and Telegram), staged brain on`, async () => {
         for (const [i, sc] of TEXT.entries()) {
@@ -220,7 +220,7 @@ Deno.test({
         counts.modelSanity = wire.model - before;
         if (!counts.modelSanity) failures.push("A: the staged brain never called the fake model, so the zero-calls check proves nothing");
       });
-      Deno.env.delete("CAREER_BRAIN"); Deno.env.delete("OPENAI_API_KEY"); Deno.env.delete("CAREER_MODEL");
+      Deno.env.delete("CAREER_BRAIN"); Deno.env.delete("ANTHROPIC_API_KEY"); Deno.env.delete("CAREER_MODEL");
 
       const admin = createClient(SUPABASE_URL, SERVICE_KEY, { global: { fetch: h!.double.fetch as typeof fetch }, auth: { persistSession: false, autoRefreshToken: false } });
       const read = async (u: string) => {

@@ -193,7 +193,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/go-live"
           # The script prints each secret as *** and passes every command's output through its own mask; GitHub masks
           # the secrets above in this log as well.
-          bash scripts/launch/trainee-go-live.sh --sha "$GITHUB_SHA" --non-interactive --label "$TRAINEE_DEPLOY_LABEL"
+          # D-041 (owner, 2026-11-04): this release turns real submission ON, overwriting the rows an earlier always-off go-live wrote.
+          # Remove --real-submit on afterwards so a later owner "off" survives a plain go-live.
+          bash scripts/launch/trainee-go-live.sh --sha "$GITHUB_SHA" --non-interactive --real-submit on --label "$TRAINEE_DEPLOY_LABEL"
       # S6: the live smoke again, on its own, after go-live finished (go-live's step 6 already ran it once): the health of
       # every function, trainee-telegram's webhook, and one synthetic "hi" turn of agent-chat for the test account
       # (UPMORE_TEST_JWT). Its FAIL rolls back below.

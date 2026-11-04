@@ -30,12 +30,34 @@ export type DeliveryStore = ChannelStore & { release(): Promise<number>; sweep(n
 // `only` narrows the store to one row (a reply sent the moment it is written); `user` to everything due for one person
 // (a WhatsApp message: what waited for the window goes out first, then the answer). The rules are the same.
 // deno-lint-ignore no-explicit-any
-export function supabaseChannelStore(admin: any, o: { only?: { userId: string; key: string }; user?: string } = {}): DeliveryStore {
+export function supabaseChannelStore(admin: any, o: {
+  only?: { userId: string; key: string }; user?: string;
+  // DELIVERY THROUGHPUT (20261102180000): the scheduled run's claim in two lanes, replies / approvals before alerts / receipts,
+  // and (shard) only the people of one shard, so several runs can go side by side. Absent: the one career_outbox_claim, as before.
+  lanes?: boolean; shard?: { index: number; count: number };
+} = {}): DeliveryStore {
+  let lanesGone = false; // the project does not have the migration: the plain claim from here on
+  const missing = (e: { message?: string; code?: string } | null) => { const said = `${e?.code ?? ""} ${e?.message ?? ""}`; return !!e && /career_outbox_claim_lane|PGRST202/i.test(said) && /exist|find|no function|PGRST202/i.test(said); };
+  const claimLanes = async (now: number, limit: number): Promise<any[]> => {
+    const take = (lane: string, n: number) => admin.rpc("career_outbox_claim_lane", { p_now: iso(now), p_limit: n, p_lane: lane, p_shard: o.shard?.index ?? 0, p_shards: o.shard?.count ?? 1 });
+    // A bulk quota (about 15%) is reserved in every round: a backlog of replies and cards as long as the batch must not hold
+    // alerts and reports back until they are stale (channel.ts ALERT_STALE_MS) and dropped. The quota is the priority lane's
+    // too when bulk has nothing, so nothing is left unused.
+    const reserve = limit >= 2 ? Math.max(1, Math.ceil(limit * 0.15)) : 0;
+    const first = await take("priority", limit - reserve);
+    if (missing(first.error)) { lanesGone = true; return must<any[]>(await admin.rpc("career_outbox_claim", { p_now: iso(now), p_limit: limit }), "claim due messages") || []; } // (the plain claim has no shard: runs may overlap, skip locked keeps every row to one of them)
+    const rows = must<any[]>(first, "claim due messages") || [];
+    const bulk = must<any[]>(await take("bulk", limit - rows.length), "claim due messages") || [];
+    const got = [...rows, ...bulk];
+    if (got.length < limit && rows.length >= limit - reserve) return [...got, ...(must<any[]>(await take("priority", limit - got.length), "claim due messages") || [])];
+    return got;
+  };
   const claimed = new Map<string, { prior: string; attempts: number; parts?: number }>();
   return {
     async due(now, limit) {
       const claim = o.only ? admin.rpc("career_outbox_claim_key", { p_user: o.only.userId, p_key: o.only.key, p_now: iso(now) })
         : o.user ? admin.rpc("career_outbox_claim_user", { p_user: o.user, p_now: iso(now), p_limit: limit })
+        : o.lanes && !lanesGone ? claimLanes(now, limit).then((data) => ({ data, error: null }))
         : admin.rpc("career_outbox_claim", { p_now: iso(now), p_limit: limit });
       const rows = must<any[]>(await claim, "claim due messages") || [];
       const out: OutboxRow[] = rows.map((r) => ({ id: String(r.id), userId: r.user_id, contact: r.contact, key: r.key, text: r.text, deliver_at: Date.parse(r.deliver_at), attempts: r.attempts }));
@@ -80,7 +102,8 @@ export function supabaseChannelStore(admin: any, o: { only?: { userId: string; k
           for (const r of out) if (buttons.has(r.id)) r.buttons = buttons.get(r.id)!;
         } catch (e) { console.error("deliver: the card's buttons could not be read:", e instanceof Error ? e.message : String(e)); }
       }
-      return out.sort((a, b) => a.deliver_at - b.deliver_at || Number(a.id) - Number(b.id));
+      const lane = (r: OutboxRow) => (o.lanes && !/^(reply|card|link|questions):/.test(r.key) ? 1 : 0); // priority rows first
+      return out.sort((a, b) => lane(a) - lane(b) || a.deliver_at - b.deliver_at || Number(a.id) - Number(b.id));
     },
     async optedOut(contact) {
       return must<boolean>(await admin.rpc("channel_opted_out", { p_contact: contact }), "read opt-out") === true;

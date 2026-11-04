@@ -118,3 +118,10 @@
 479 90320f93a1eb5ead4f0d1a6d80b01fd16f30733d independent-review-agent-rv44 risk=low note=release-merge-tree-identical-to-approved-trunk-head
 445 fa6c2e4614091e39b4f87ec9370ef413a382cc18 independent-review-agent-rv45 risk=medium note=approve-delivery-throughput-sql-read-not-run-pg-tests-not-run-locally
 475 706e82025f518512bc282ca5c03ea4416218355f independent-review-agent-rv46 risk=low note=approve-situational-examples-analog-of-dev-cases-watch-leakage
+448 567477214ebd665a20fb45b047187d6330f36822 independent-review-agent-rv50 risk=low note=all-3-findings-resolved-on-trunk-by-483-and-485-no-new-issues
+482 e5c54d69d497d10ac9ad1ccf731940703f190330 independent-review-agent-rv47 risk=low-medium note=fix-correct-no-test-adds-supabase-cli-dependency-to-only-smoke
+483 ff0d78c4b9fe26d9d2a7370dea5ef32789dfe59f independent-review-agent-rv47 risk=low note=deletes-stray-sed-backup-file-nothing-references-it
+485 7a44ea910029a73df4b55fb019ef1378557e1c2b independent-review-agent-rv48 risk=medium note=approve-d041-go-live-restores-d037-guards-intact
+476 07bfff6d13bddf16a7afe88ed15a0c599c733218 independent-review-agent-rv49 risk=low note=presentation-only-empty-states-dismiss-fix-skip-link-no-action-paths-touched
+234 061b6334bfbd5d0d411a1daaf09e5f7b2dce149f independent-review-agent-rv49 risk=low note=additive-security-invoker-view-verified-locally-sql-untested-in-ci
+489 a989e93c2479428ff192cfa239f610fb47806141 independent-review-agent-rv51 risk=low note=release-merge-tree-identical-to-approved-trunk-head

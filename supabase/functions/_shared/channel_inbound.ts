@@ -221,6 +221,10 @@ export interface CoreDeps {
   // or this attempt is no longer the row's claim (timed out, taken over): do nothing. Absent (the webhook inline): every send happens.
   once?: (step: string) => Promise<boolean>;
 }
+// ACK FAST: a STOP (or a block, Telegram's 403 as a message) is never queued behind other turns: it is the person's order that
+// Trainee stop messaging them, so the webhook runs it at once, as it did before the queue (no model, a fixed reply).
+export const isStopNow = (m: InboundMessage): boolean =>
+  m.kind === "blocked" || (m.kind === "text" && !(m.forwardedFrom || m.caption || m.forwarded) && (m.command ?? channelCommand(m.text, m.sms ? "sms" : m.channel)) === "stop");
 type Out = { status: number; body: Record<string, unknown> };
 const ok = (body: Record<string, unknown>): Out => ({ status: 200, body: { ok: true, ...body } });
 
@@ -750,6 +754,7 @@ export async function handleChannelWebhook(req: Request, adapter: ChannelAdapter
     // (Telegram retries a non-2xx); the provider-id unique key makes that retry safe.
     let queued = 0;
     for (const m of parsed.messages) {
+      if (isStopNow(m)) { const r = await runInbound(m, { ...d, queue: undefined }); results.push(r.body); continue; }
       let fresh: boolean;
       try { fresh = await d.queue.enqueue(m); }
       catch (e) { console.error("inbound: queue write failed:", e instanceof Error ? e.message : String(e)); return json({ ok: false, error: "queue unavailable" }, 503); }

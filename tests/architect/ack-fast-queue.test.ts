@@ -206,6 +206,22 @@ Deno.test("worker: a queued telegram text is answered once, the row is done, and
   eq(h.sentTelegram.length, sentBefore, "the person is not answered twice");
 });
 
+Deno.test("flag ON: a STOP is never queued behind other turns: both webhooks run it at once (the opt-out is recorded, the fixed reply goes), other texts are queued", async () => {
+  const h = harness({ env: { CHAT_QUEUE: "on" } });
+  const q = memQueue();
+  const tg = await h.tgPost(h.tgUpdate("7002", "STOP", 9200), q.queue);
+  eq(tg.status, 200);
+  eq(q.rows.length, 0, "telegram STOP is not queued");
+  assert(h.sentTelegram.some((m) => /unsubscribed/i.test(m.text)), "the STOP confirmation went out in the webhook");
+  eq(h.chats.length, 0, "no model turn for a STOP");
+  const lm = await h.lmPost("+15550002222", "stop", "lm-stop-1", q.queue);
+  eq(lm.status, 200);
+  eq(q.rows.length, 0, "iMessage STOP is not queued");
+  assert(h.sentLoop.some((t) => /unsubscribed/i.test(t)), "the iMessage STOP confirmation went out in the webhook");
+  await h.tgPost(h.tgUpdate("7002", "stop looking at sales jobs", 9201), q.queue);
+  eq(q.rows.length, 1, "a sentence that only begins with the word stop is an ordinary text and is queued");
+});
+
 Deno.test("worker: auth is the shared secret; no secret configured is a 503", async () => {
   const h = harness();
   const q = memQueue();

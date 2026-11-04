@@ -10,7 +10,7 @@ import { equalSecret } from "../_shared/message_service.ts";
 import type { Send } from "../_shared/channel.ts";
 import { loopMessageAdapter } from "../_shared/loopmessage_adapter.ts";
 import { textingNativeOn } from "../_shared/channel_voice.ts";
-import { type CoreDeps, runInbound, type InboundStore } from "../_shared/channel_inbound.ts";
+import { type CoreDeps, isStopNow, runInbound, type InboundStore } from "../_shared/channel_inbound.ts";
 import { chatQueueOn } from "../_shared/inbound_turn_queue.ts";
 
 export { CHAT_DOWN_REPLY, SIGNUP_CLOSED_REPLY, signupAllows, turnKeyFor } from "../_shared/channel_inbound.ts";
@@ -60,7 +60,7 @@ export async function handleInbound(req: Request, d: InboundDeps): Promise<Respo
   }
   if (!msg) return json({ ok: true, ignored: (parsed.ignored ?? [])[0] ?? "nothing to read" });
   const core = imessageCoreDeps(d, apiKey, secret);
-  if (d.queue && chatQueueOn(d.env)) {
+  if (d.queue && chatQueueOn(d.env) && !isStopNow(msg)) {
     let fresh: boolean;
     try { fresh = await d.queue.enqueue(msg); }
     catch (e) { console.error("inbound: queue write failed:", e instanceof Error ? e.message : String(e)); return json({ ok: false, error: "queue unavailable" }, 503); }

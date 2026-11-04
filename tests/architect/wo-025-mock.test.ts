@@ -360,7 +360,7 @@ Deno.test("WO-025/14 the handler runs the mock right after the card, behind the 
   const mock = HANDLER.indexOf("await mockTurn(");
   const brain = HANDLER.indexOf('chooseBrain(Deno.env) === "agent"');
   assert(card > 0 && mock > card && brain > mock, "card, then mock, then the brain");
-  assert(/const mock = !card && !careerTask && !careerBatch && !host\.isHostControlled\(message, ctx\)\s*\?\s*await mockTurn\(\{ message, userId: user\.id, threadId: tid, now: Date\.now\(\), store: supabaseMockStore\(admin\) \}\)\s*:\s*null;/.test(HANDLER), "same guards as the card");
+  assert(/const mock = !crisisText && !card && !careerTask && !careerBatch && !host\.isHostControlled\(message, ctx\)\s*\?\s*await mockTurn\(\{ message, userId: user\.id, threadId: tid, now: Date\.now\(\), store: supabaseMockStore\(admin\) \}\)\s*:\s*null;/.test(HANDLER), "same guards as the card");
   assert(/\} else if \(mock\) \{\s*\/\/[^\n]*\n\s*out = \{ reply: mock\.reply, intent: mock\.intent, resultStatus: mock\.status, contained: false, handler: "mock" \};/.test(HANDLER), "the mock's intent becomes the reply's, so the last-word rule can read it");
 });
 

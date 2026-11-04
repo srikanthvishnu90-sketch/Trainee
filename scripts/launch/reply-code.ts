@@ -39,7 +39,7 @@ export const SHARED_REPLY_MODULES = [
   "fact_quarantine.ts", "fact_schema.ts", "file_design.ts", "file_kinds.ts", "file_link.ts", "file_page.ts", "file_service.ts",
   "identity_redact.ts", "length_limit.ts", "link_check.ts", "model_budget.ts", "model_calls.ts", "model_gateway.ts", "person_claims.ts",
   "personal_fact_source.ts", "posting_key.ts", "posting_pay.ts", "posting_place.ts", "posting_region.ts", "posting_text.ts", "question_map.ts",
-  "brand.ts", "row_answer.ts", "telegram_jobs.ts", "apply_all_yes.ts", "apply_all_yes_flag.ts", "role_results.ts",
+  "brand.ts", "career_trust_turn.ts", "row_answer.ts", "telegram_jobs.ts", "apply_all_yes.ts", "apply_all_yes_flag.ts", "role_results.ts",
 ] as const;
 
 // D-036 (release flags, agent-chat/release_config.ts RELEASE_FLAGS): the code behind every flag the release serves ON that
@@ -72,6 +72,8 @@ export const RELEASE_FLAG_PATHS = [
   "supabase/functions/_shared/career_digest.ts",
   "supabase/functions/_shared/career_people_reminders.ts",
   "supabase/functions/_shared/career_inbox_followups.ts",
+  // #354/#406: the crisis screen (CAREER_CRISIS_MODERATION and CAREER_CRISIS_CLASSIFIER switch its layers) decides the 988 reply.
+  "supabase/functions/_shared/career_crisis_screen.ts",
 ] as const;
 
 // Every reply-code path, repository-relative, sorted. Git pathspecs: a directory covers everything under it.

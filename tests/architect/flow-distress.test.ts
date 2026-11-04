@@ -57,14 +57,14 @@ Deno.test({ name: "#354 safety: distress gets the crisis reply first at the real
   }
 } });
 
-// The second layer at the real handler: the gateway's moderation door, faked at the network (only /v1/moderations).
+// The model layer at the real handler (D-038a: the moderation door is off, so the Claude classifier is the second layer), faked at the network (api.anthropic.com only).
 const OBLIQUE = "i gave away my things and wrote the letters, tonight is the night";
-Deno.test({ name: "#354 safety: moderation flags what the list misses at the real handler; a timeout or error never blocks the turn", sanitizeResources: false, sanitizeOps: false, async fn(t) {
+Deno.test({ name: "#354 safety: the classifier flags what the list misses at the real handler; a timeout or error never blocks the turn", sanitizeResources: false, sanitizeOps: false, async fn(t) {
   if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
   const pg: Pg = await startPg();
   const realFetch = globalThis.fetch;
   const saved: Record<string, string | undefined> = {};
-  for (const k of ["OPENAI_API_KEY", "CAREER_CRISIS_MODERATION", "MODEL_BUDGET_PAUSED"]) saved[k] = Deno.env.get(k);
+  for (const k of ["ANTHROPIC_API_KEY", "CAREER_CRISIS_CLASSIFIER", "MODEL_BUDGET_PAUSED"]) saved[k] = Deno.env.get(k);
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   const seen: string[] = [];
   const modelCalls: string[] = [];
@@ -72,39 +72,39 @@ Deno.test({ name: "#354 safety: moderation flags what the list misses at the rea
   const fake = async (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
     const req = input instanceof Request && !init ? input : new Request(input as any, init);
     const url = new URL(req.url);
-    // Every model call is answered like any other (NO marker special-casing): the crisis classifier's call must show up here.
-    if (url.hostname === "api.openai.com" && url.pathname === "/v1/chat/completions") {
-      const body = await req.json();
-      modelCalls.push(JSON.stringify(body));
-      return Response.json({ id: "fake", model: body.model, choices: [{ index: 0, message: { role: "assistant", content: "NO" }, finish_reason: "stop" }], usage: { prompt_tokens: 50, completion_tokens: 1 } });
-    }
-    if (url.hostname !== "api.openai.com" || url.pathname !== "/v1/moderations") return new Response("not reachable in this test", { status: 404 });
-    const text = String((await req.json()).input ?? "");
+    // Every model call is answered like any other (no marker special-casing for the answer): the crisis classifier's call must show up here.
+    if (url.hostname !== "api.anthropic.com" || url.pathname !== "/v1/messages") return new Response("not reachable in this test", { status: 404 });
+    const body = await req.json();
+    const raw = JSON.stringify(body);
+    modelCalls.push(raw);
+    const msg = (text: string) => Response.json({ id: "fake", type: "message", role: "assistant", model: body.model, content: [{ type: "text", text }], stop_reason: "end_turn", usage: { input_tokens: 50, output_tokens: 1 } });
+    if (!raw.includes(CRISIS_SCREEN_MARKER)) return msg("NO");
+    const first = body.messages?.[0]?.content;
+    const text = String(typeof first === "string" ? first : Array.isArray(first) ? first.map((x: any) => x?.text ?? "").join("") : "");
     seen.push(text);
     if (behaviour === "hang") return await new Promise<Response>((_res, rej) => req.signal.addEventListener("abort", () => rej(req.signal.reason)));
     if (behaviour === "fail") return new Response("{}", { status: 500 });
-    const harm = text === OBLIQUE;
-    return Response.json({ results: [{ flagged: harm, categories: { "self-harm": harm, "self-harm/intent": harm, "self-harm/instructions": false } }] });
+    return msg(text === OBLIQUE ? "YES" : "NO");
   };
   try {
     await supabaseParity(pg);
     const me = "7b0f8f8e-6a43-4a49-9d2c-0000000d0c36";
     await pg.sql(`insert into auth.users (id, email) values ('${me}', '${me}@example.test'); insert into public.profiles (id) values ('${me}');
       insert into public.career_watch_kv (user_id, key, value) values ('${me}', 'career:account', '{"epoch":0,"version":0,"paused":false}');`);
-    Deno.env.set("OPENAI_API_KEY", "sk-fake-crisis-not-a-key");
-    Deno.env.set("CAREER_CRISIS_MODERATION", "on");
+    Deno.env.set("ANTHROPIC_API_KEY", "sk-fake-crisis-not-a-key");
+    Deno.env.set("CAREER_CRISIS_CLASSIFIER", "on");
     Deno.env.delete("MODEL_BUDGET_PAUSED");
     globalThis.fetch = fake as typeof fetch; // the double passes every non-Supabase origin to this
     handler = await careerHandler(pg, { "tok-moderation": me });
     const chat: Chat = handler.chat("tok-moderation");
     const say = async (message: string) => { const r = await chat.say(message); eq(r.status, 200, r.reply); return r; };
 
-    await t.step("a message the list misses, flagged by moderation, gets the crisis reply", async () => {
+    await t.step("a message the list misses, flagged by the classifier, gets the crisis reply", async () => {
       assert(!(await import("../../supabase/functions/_shared/career_crisis_screen.ts")).rulesDistress(OBLIQUE), "the list alone misses it");
       const r = await say(OBLIQUE);
       eq(r.intent, "safety_support", `${r.intent}: ${r.reply}`);
       eq(r.reply, SAFETY_REPLY);
-      assert(seen.includes(OBLIQUE), "moderation read it");
+      assert(seen.includes(OBLIQUE), "the classifier read it");
     });
     await t.step("a clear career message is answered as career talk, and the crisis classifier really read it", async () => {
       const n = modelCalls.length;
@@ -114,13 +114,13 @@ Deno.test({ name: "#354 safety: moderation flags what the list misses at the rea
       eq(mine.length, 1, "the classifier's call happened: the layer cannot silently vanish");
       assert(mine[0].includes("find me data analyst jobs in chicago"), "it read this message");
     });
-    await t.step("a list hit answers without waiting for moderation", async () => {
+    await t.step("a list hit answers without waiting for the classifier", async () => {
       behaviour = "hang";
       const t0 = Date.now(), r = await say("kms");
       eq(r.intent, "safety_support");
-      assert(Date.now() - t0 < 1400, `no wait on moderation: ${Date.now() - t0} ms`);
+      assert(Date.now() - t0 < 1400, `no wait on the classifier: ${Date.now() - t0} ms`);
     });
-    await t.step("moderation hanging past its cap or failing never blocks the turn: the list's verdict stands", async () => {
+    await t.step("the classifier hanging past its cap or failing never blocks the turn: the list's verdict stands", async () => {
       behaviour = "hang";
       const t0 = Date.now(), r = await say("what should i put in my cover letter");
       assert(r.intent !== "safety_support", `${r.intent}: ${r.reply}`);
@@ -128,7 +128,7 @@ Deno.test({ name: "#354 safety: moderation flags what the list misses at the rea
       behaviour = "fail";
       const f = await say("how do i follow up after an interview");
       assert(f.intent !== "safety_support" && f.reply.length > 0, `${f.intent}: ${f.reply}`);
-      eq((await say("i want to die")).intent, "safety_support", "a failing moderation never hides the list's hit");
+      eq((await say("i want to die")).intent, "safety_support", "a failing classifier never hides the list's hit");
     });
   } finally {
     handler?.restore();

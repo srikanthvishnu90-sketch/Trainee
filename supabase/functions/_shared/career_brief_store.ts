@@ -153,7 +153,7 @@ export function supabaseDigestStore(admin: any): DigestStore {
     },
     async rows(u, sinceIso) {
       const [queue, threads, mail, interviews, drafts, alerts, events] = await Promise.all([
-        admin.from("career_apply_jobs").select("id,company,url,state,created_at,updated_at,title:payload->>title").eq("user_id", u).order("created_at", { ascending: false }).limit(1000),
+        admin.from("career_apply_jobs").select("id,company,url,state,created_at,claimed_at,updated_at,title:payload->>title").eq("user_id", u).order("created_at", { ascending: false }).limit(1000),
         admin.from("agent_flow_state").select("rows:state->career->stores->trackStore->rows").eq("user_id", u).limit(200),
         admin.from("career_mail_events").select("application_ref,kind,company,role,stage,flagged,evidence,message_hash,mail_at").eq("user_id", u).order("mail_at", { ascending: true }).limit(2000),
         admin.from("career_interviews").select("*").eq("user_id", u).order("seen_at", { ascending: false }).limit(200),

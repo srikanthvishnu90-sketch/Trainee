@@ -19,7 +19,7 @@
 // stored text is text Postgres stores; nothing is invented (pay, place, date only from the source, never reworded); the run
 // log says what happened (failures recorded, counts equal to what changed in the table); a failing board is not read
 // every window for ever.
-import { boardFetchFeed, boardPay, GONE_AFTER, ingestBoards, type Board, type BoardOutcome, type FetchFeed, type IngestRunRow, type IngestStats, type Posting } from "../../../supabase/functions/_shared/career_ingest.ts";
+import { boardFetchFeed, boardPay, EMPTY_AFTER, GONE_AFTER, ingestBoards, type Board, type BoardOutcome, type FetchFeed, type IngestRunRow, type IngestStats, type Posting } from "../../../supabase/functions/_shared/career_ingest.ts";
 import { streamProbe } from "../../../supabase/functions/_shared/career_ingest_stream.ts";
 import { boardKey, memoryBoardState, type BoardState } from "../../../supabase/functions/_shared/career_shards.ts";
 import { handleIngest } from "../../../supabase/functions/career-ingest/handler.ts";
@@ -95,8 +95,11 @@ export function checkRow(p: Posting) {
   ok(Date.parse(p.last_seen_at) >= Date.parse(p.first_seen_at), `${p.job_id}: last seen before first seen`);
 }
 // A source text and what was stored: a clean text is stored as it is (no reword); any text never gains a word.
+// Ingest round 3 (2026-11-03): markup is not text. A title with tags or entities is stored as its plain text, never as
+// markup (tests/architect/scenarios-ingest-r3*.test.ts hold what that text is); here: no tag and no script body stored.
 function sameText(src: string, stored: string, what: string, limit: number) {
   const c = cleanText(src);
+  if (/[<&]/.test(src)) { ok(!/<\/?(?:b|i|p|div|span|script|style)\b/i.test(stored) && !/alert\(1\)|var tracking/.test(stored) && stored.length <= limit && WELL_FORMED(stored), `${what}: markup is not stored: ${JSON.stringify(stored)}`); return; }
   if (c === src && src.length <= limit) eq(stored, src, `${what}: a clean text is stored as the board wrote it`);
   else ok(stored.length <= limit && WELL_FORMED(stored), `${what}: stored text within its limit and storable`);
 }
@@ -194,6 +197,12 @@ export async function runRead(s: ReadScenario) {
     if (o2.status === "not_modified") {
       ok(s.answer === "list_same" || s.answer === "not_modified", `${s.answer}: not modified only when nothing changed`);
       eq(open2, openBefore, "not modified: nothing changes");
+    } else if (s.answer === "list_empty" && openBefore.length) {
+      // Ingest round 3: one empty list while postings are open is held (an outage as often as not): nothing closes until
+      // EMPTY_AFTER such reads in a row (career_ingest.ts).
+      eq([o2.status, o2.empty_reads, o2.body_sha ?? null], ["ok", 1, null], "list_empty: held, counted, no validators kept");
+      eq(open2, openBefore, "list_empty: held, nothing closed");
+      eq(st2.closed, 0, "list_empty: held");
     } else {
       eq(o2.status, "ok", `${s.answer}: a good read (${o2.error ?? ""})`);
       eq(open2, sorted(exp2), `${s.answer}: the board's postings, exactly (no ghost, none lost)`);
@@ -221,9 +230,12 @@ export async function runRead(s: ReadScenario) {
   // 3. a good read again: the board's postings, exactly; first seen never moved
   const C = [...A.filter(() => r.chance(0.5)), ...nextJobs(r, p, 1000, r.int(0, 8))];
   net.answer.set(key, { kind: "list", jobs: C });
+  const before3 = await openIds();
   const st3 = await read({ ...B, etag: null, last_modified: null, body_sha: null }, T0 + 14 * H);
   eq(outcomes.at(-1)!.status, "ok", "third read");
-  eq(await openIds(), sorted(expectedIds(p, board, C)), "third read: the board's postings, exactly");
+  const want3 = sorted(expectedIds(p, board, C));
+  // Ingest round 3: an empty list while postings are open is held (career_ingest.ts EMPTY_AFTER).
+  eq(await openIds(), !want3.length && before3.length ? before3 : want3, "third read: the board's postings, exactly");
   eq(st3.failures.length, 0, "third read has no failure");
   for (const x of await db.all()) {
     checkRow(x);
@@ -337,7 +349,7 @@ export function handlerDeps(o: { boards: () => Board[]; db: PgLike; state: Retur
 export const post = (lane: number, lanes: number, q = "") => new Request(`https://fn.test/?lane=${lane}&lanes=${lanes}&window_min=15${q}`, { method: "POST", headers: { "x-trainee-ingest-secret": SECRET() } });
 
 // ------------------------------------------------------------------------------------------------ life
-interface World { p: Provider; board: string; company: string; jobs: Job[]; removed: Job[]; next: number; mode: string; gone: number; fails: number; lastAttempt: number | null; renamedFrom?: string; alive: boolean }
+interface World { p: Provider; board: string; company: string; jobs: Job[]; removed: Job[]; next: number; mode: string; gone: number; fails: number; lastAttempt: number | null; renamedFrom?: string; alive: boolean; empty?: number }
 const waitMs = (f: number) => (f < 2 ? 0 : Math.min(24 * H, 2 ** (f - 2) * H));
 export async function runLife(s: LifeScenario) {
   const r = rng(s.seed);
@@ -417,16 +429,20 @@ export async function runLife(s: LifeScenario) {
       if (!wasRead) { eq(now, before, `${k(w)} not read: nothing changes`); continue; }
       w.lastAttempt = at;
       const m = w.mode;
-      if (m === "down" || m === "bad") { w.fails++; w.gone = 0; eq(now, before, `${k(w)} ${m}: a failed read closes nothing`); }
+      if (m === "down" || m === "bad") { w.fails++; w.gone = 0; w.empty = 0; eq(now, before, `${k(w)} ${m}: a failed read closes nothing`); }
       else if (m === "gone") {
-        w.fails++; w.gone++;
+        w.fails++; w.gone++; w.empty = 0;
         if (w.gone >= GONE_AFTER) eq(now, [], `${k(w)}: ${w.gone} gone answers in a row: its postings closed`);
         else eq(now, before, `${k(w)}: ${w.gone} gone answer(s): not yet closed`);
         const st = state.rows.get(boardKey({ provider: w.p, board: w.board }))!;
         ok(st.last_status?.includes(`[gone x${w.gone}]`), `${k(w)}: the state says gone x${w.gone}: ${st.last_status}`);
       } else {
         w.fails = 0; w.gone = 0;
-        eq(now, sorted(expectedIds(w.p, w.board, w.jobs)), `run ${run} ${k(w)} ${m}: the board's postings, exactly`);
+        const want = sorted(expectedIds(w.p, w.board, w.jobs));
+        // Ingest round 3: an empty list while postings are open closes them at the EMPTY_AFTER-th such read in a row.
+        w.empty = !want.length && before.length ? (w.empty ?? 0) + 1 : 0;
+        if (w.empty && w.empty < EMPTY_AFTER) eq(now, before, `run ${run} ${k(w)} ${m}: an empty list (${w.empty} in a row): held`);
+        else eq(now, want, `run ${run} ${k(w)} ${m}: the board's postings, exactly`);
       }
       const st = state.rows.get(boardKey({ provider: w.p, board: w.board }))!;
       eq(st.fail_count, w.fails, `${k(w)}: failures in a row`);
@@ -435,7 +451,7 @@ export async function runLife(s: LifeScenario) {
     for (const x of await db.open()) {
       const w = worlds.find((y) => y.p === x.provider && y.board === x.board);
       ok(w, `${x.job_id}: an open posting of no board`);
-      if (w!.alive && (w!.mode === "list" || w!.mode === "same") && read.has(k(w!))) ok(expectedIds(w!.p, w!.board, w!.jobs).includes(x.job_id), `${x.job_id}: open but not listed (ghost)`);
+      if (w!.alive && (w!.mode === "list" || w!.mode === "same") && read.has(k(w!)) && !w!.empty) ok(expectedIds(w!.p, w!.board, w!.jobs).includes(x.job_id), `${x.job_id}: open but not listed (ghost)`);
     }
     // first seen never moves; every row storable.
     for (const x of await db.all()) {

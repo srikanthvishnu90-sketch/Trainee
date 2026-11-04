@@ -10,7 +10,7 @@
 // "A few things first" (renderThings), or the application is still being prepared. Nothing here sends on a GET.
 import { cap1, esc, hostOf, layout, webUrl, initialOf, type Row } from "./file_page.ts";
 import { BRAND } from "./brand.ts";
-import { stampHtml } from "./file_design.ts";
+import { stampHtml, stateHtml } from "./file_design.ts";
 import { applyHelp, coverage, NOT_LISTED, specOf, stateCountsOf, stateOfDismissed, type Spec, type StateKey } from "./results_spec.ts";
 import { DESIGN_CSS, DESIGN_FONT_LINK } from "./results_design.ts";
 import { BATCH_CSS, filterByState, renderApprove, renderBatchHead, renderExceptions, renderPauseNote, renderStateFilters } from "./results_batch.ts";
@@ -162,7 +162,9 @@ export function renderResults(f: ResultsFeed): string {
       + group("Pay in another currency", floor ? `Shown as each posting lists it; not compared with ${floor}.` : "", unchecked.filter((r) => /^in /.test(r.payNote ?? "")))
       + group("Pay without a period", floor ? `The posting doesn't say per hour or per year, so it wasn't compared with ${floor}.` : "", unchecked.filter((r) => !/^in /.test(r.payNote ?? "")))
       + group("Pay not listed", floor ? `These don't list pay, so they weren't checked against ${floor}.` : "These don't list pay.", unlisted) + group(`Lists less than ${floor ?? "you asked"}`, "Their posted pay changed since this list was made.", below)
-    : `<div class="empty" role="status"><p>No roles match these filters.</p><p><a class="back" href="?">Show all ${f.total}</a></p></div>`;
+    : f.total === 0
+      ? stateHtml({ kind: "empty", title: "No roles on this list yet", reason: "Nothing is listed here, so nothing is waiting for you to approve.", next: "Ask Trainee in your chat to find roles. Any it finds are listed here, and nothing is sent until you tap Apply." })
+      : `<div class="empty" role="status"><p>No roles match these filters.</p><p><a class="back" href="?">Show all ${f.total}</a></p></div>`;
   const shown = f.rows.length < f.total ? `<p class="lede">Showing ${f.rows.length} of ${f.total}. <a class="back" href="?">Show all</a></p>` : "";
   const top = f.top ? `<p class="top-note" role="alert">${esc(f.top)}</p>` : "";
   const kicker = `<p class="kicker">Roles file</p>`;
@@ -183,7 +185,7 @@ export function renderResults(f: ResultsFeed): string {
       : open ? `<div class="pausebar"><p><b>Pause on this page</b> (button at the bottom) stops this page from approving or starting anything new. It does not stop Telegram: the buttons there still work. Applications already approved or in progress are not cancelled and may still finish.</p></div>` : "")
     + `</section>`;
   const gone = f.dismissed?.length ? `<details class="gone"><summary>Dismissed (${f.dismissed.length})</summary><ul class="cards">${f.dismissed.map((r) => `<li class="card" id="r-${esc(r.ref)}"><p class="state">${r.rid ? `<span class="rid">${esc(r.rid)}</span>` : "<span></span>"}${chipOf(stateOfDismissed(), "dismissed")}</p><div class="head">${logoOf(r)}<div class="ttl"><h3 class="title">${esc(r.job.title)}</h3><p class="co">${esc(r.job.company)}</p></div></div><p class="markhelp">Dismissed by you. Private and reversible. No application was touched. Current state: ${esc(specOf(r).label)}.</p>${markForm(r, f, "restore")}</li>`).join("")}</ul></details>` : "";
-  const inner = `<div id="root" class="results">${BRAND}<header class="filehead">${headTop}${renderBatchHead(f)}${topBlock}</header>${quick}${filters}${shown}${renderStateFilters(f)}${renderExceptions(f)}${renderApprove(f)}${renderPauseNote(f)}${selhelp}${actionbar}<main id="main">${top}${body}${gone}</main></div>`;
+  const inner = `<div id="root" class="results"><a class="skip" href="#main">Skip to the roles</a>${BRAND}<header class="filehead">${headTop}${renderBatchHead(f)}${topBlock}</header>${quick}${f.total === 0 ? "" : filters}${shown}${renderStateFilters(f)}${renderExceptions(f)}${renderApprove(f)}${renderPauseNote(f)}${selhelp}${actionbar}<main id="main">${top}${body}${gone}</main></div>`;
   return layout(`${cap1(f.title)} - Trainee`, inner, { css: CSS, head: DESIGN_FONT_LINK });
 }
 

@@ -14,7 +14,7 @@
 // constant moves into agent-chat/release_config.ts once that file lands, #371.) With no OpenAI key the list answers
 // alone and one loud error line says so per cold start.
 import { CareerSafety } from "./router_core.career.js";
-import { callModel, type ModelConfig, modelConfig, moderate, moderationConfigured, PRICES } from "./model_gateway.ts";
+import { callModel, type ModelConfig, modelConfig, modelConfigFor, moderate, moderationConfigured, PRICES } from "./model_gateway.ts";
 
 export const MODERATION_TIMEOUT_MS = 1500;
 export const SELF_HARM_CATEGORIES = ["self-harm", "self-harm/intent", "self-harm/instructions"] as const;
@@ -65,7 +65,7 @@ export function moderationReleaseOn(env: Env, release: "on" | "off" = PRODUCTION
 export function moderationFromEnv(env: Env, door?: ModerateDoor, o: { release?: "on" | "off"; log?: (line: string) => void } = {}): Moderate | null {
   if (!moderationReleaseOn(env, o.release)) return null;
   if (!door && !moderationConfigured(env)) {
-    if (!warnedNoKey) { warnedNoKey = true; (o.log ?? ((l: string) => console.error(l)))("CRISIS SCREEN DEGRADED: no OpenAI key, so the moderation layer is OFF and the word list alone screens for crisis messages. Set the key."); }
+    if (!warnedNoKey) { warnedNoKey = true; (o.log ?? ((l: string) => console.error(l)))("CRISIS SCREEN DEGRADED: the moderation layer is OFF (Claude only, D-038a), so the word list and the Claude classifier screen for crisis messages."); }
     return null;
   }
   return gatewayModeration(door);
@@ -100,7 +100,8 @@ export function classifierFromEnv(env: Env, call: ModelCall = callModel, o: { re
   const model = (env.get(CRISIS_MODEL_ENV) || "").trim() || CRISIS_CLASSIFIER_DEFAULT_MODEL || modelConfig(env, "chat").model;
   const warn = (why: string) => { if (warnedClassifier !== why) { warnedClassifier = why; (o.log ?? ((l: string) => console.error(l)))(`CRISIS CLASSIFIER OFF: ${why}; the list and moderation screen alone.`); } };
   if (!PRICES[model]) { warn(`model ${model} has no price in model_gateway.ts PRICES, so it is refused`); return null; }
-  const cfg = modelConfig({ get: (k: string) => (k === "OPENAI_MODEL" ? model : env.get(k)) }, "chat");
+  let cfg: ModelConfig;
+  try { cfg = modelConfigFor(env, model); } catch { warn(`model ${model} is not a Claude model (D-038a: Claude only)`); return null; }
   if (!cfg.apiKey) { warn("no model key"); return null; }
   return async (text) => {
     const r = await call(cfg, { system: CLASSIFIER_PROMPT, messages: [{ role: "user", content: String(text ?? "").slice(0, 2000) }], max_tokens: 4 }, { role: "router", timeoutMs: CLASSIFIER_TIMEOUT_MS });

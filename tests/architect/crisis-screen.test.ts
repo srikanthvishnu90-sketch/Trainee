@@ -3,7 +3,7 @@
 // and never blocks the turn. A fake moderation client stands in for OpenAI: nothing here leaves the process.
 import assertNode from "node:assert/strict";
 import { classifierFromEnv, CLASSIFIER_PROMPT, CRISIS_SCREEN_MARKER, crisisScreen, gatewayModeration, type Moderate, moderationFromEnv, moderationReleaseOn, PRODUCTION_CRISIS_MODERATION, readModeration } from "../../supabase/functions/_shared/career_crisis_screen.ts";
-import { moderate, MODERATION_MODEL } from "../../supabase/functions/_shared/model_gateway.ts";
+import { moderate, moderationConfigured } from "../../supabase/functions/_shared/model_gateway.ts";
 import { SAFETY_REPLY, trustTurn } from "../../supabase/functions/_shared/career_trust_turn.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -60,36 +60,19 @@ Deno.test("a moderation error (thrown, rejected or HTTP) falls back to the list 
   eq((await crisisScreen("i took too many pills", () => Promise.reject(new Error("x")))).distress, true);
 });
 
-Deno.test("the gateway's moderation door: /v1/moderations only, the key from the environment, the kill switch, never the text in errors", async () => {
-  const seen: { url: string; init: RequestInit }[] = [];
+Deno.test("the gateway's moderation door is OFF (D-038a, Claude only): it sends nothing anywhere and never carries a key or the text", async () => {
+  const seen: unknown[] = [];
+  const spy = ((...a: unknown[]) => { seen.push(a); return Promise.resolve(Response.json({ results: [{ flagged: true, categories: { "self-harm/intent": true } }] })); }) as typeof fetch;
   const env = (o: Record<string, string>) => ({ get: (k: string) => o[k] });
-  const ok = (cats: Record<string, boolean>) => (url: string | URL | Request, init?: RequestInit) => {
-    seen.push({ url: String(url), init: init! });
-    return Promise.resolve(Response.json({ results: [{ flagged: true, categories: cats }] }));
-  };
-  const ctl = new AbortController();
-  const body = await moderate("x", { env: env({ OPENAI_API_KEY: "sk-test" }), request: ok({ "self-harm/intent": true }) as typeof fetch, signal: ctl.signal });
-  eq(seen[0].url, "https://api.openai.com/v1/moderations");
-  eq(JSON.parse(String(seen[0].init.body)), { model: MODERATION_MODEL, input: "x" });
-  eq((seen[0].init.headers as Record<string, string>).authorization, "Bearer sk-test");
-  assert(seen[0].init.signal instanceof AbortSignal, "the call carries a deadline");
-  eq(readModeration(body), { flagged: true, categories: ["self-harm/intent"] });
-  // only the self-harm categories are read
+  eq(moderationConfigured(env({ OPENAI_API_KEY: "sk-test", ANTHROPIC_API_KEY: "sk-ant" })), false, "no key makes it configured");
+  await assertNode.rejects(() => moderate("secret words", { env: env({ OPENAI_API_KEY: "sk-test", ANTHROPIC_API_KEY: "sk-ant" }), request: spy }), (e: Error) => /not_configured|moderation is off/.test(e.message) && !/secret words|sk-/.test(e.message));
+  eq(seen.length, 0, "nothing was sent");
+  const g = Deno.readTextFileSync(new URL("../../supabase/functions/_shared/model_gateway.ts", import.meta.url)).replace(/\/\/[^\n]*/g, "");
+  assert(!/moderations|api\.openai/.test(g), "the gateway holds no moderation URL");
+  // the reader of a moderation body stays (a future Claude-side layer may reuse the shape); only the self-harm categories are read
   eq(readModeration({ results: [{ categories: { "self-harm": false, "self-harm/intent": true, "self-harm/instructions": true, violence: true } }] }), { flagged: true, categories: ["self-harm/intent", "self-harm/instructions"] });
   eq(readModeration({ results: [{ categories: { violence: true, harassment: true } }] }), { flagged: false, categories: [] }, "another category is not this screen's business");
   assertNode.throws(() => readModeration({}), /no result/);
-  // no key: not configured, nothing sent; the kill switch: paused, nothing sent
-  const n = seen.length;
-  await assertNode.rejects(() => moderate("x", { env: env({}), request: ok({}) as typeof fetch }), /not configured/);
-  await assertNode.rejects(() => moderate("x", { env: env({ OPENAI_API_KEY: "k", MODEL_BUDGET_PAUSED: "on" }), request: ok({}) as typeof fetch }), /PAUSED/);
-  eq(seen.length, n, "nothing sent without a key or with the kill switch on");
-  // an HTTP error never carries the text
-  await assertNode.rejects(() => moderate("secret words", { env: env({ OPENAI_API_KEY: "k" }), request: () => Promise.resolve(new Response("x", { status: 429 })) }), (e: Error) => /429/.test(e.message) && !/secret words/.test(e.message));
-  // the deadline: a hang is cut at timeoutMs
-  const hang = (_u: unknown, init?: RequestInit) => new Promise<Response>((_res, rej) => init?.signal?.addEventListener("abort", () => rej(init!.signal!.reason)));
-  const t0 = Date.now();
-  await assertNode.rejects(() => moderate("x", { env: env({ OPENAI_API_KEY: "k" }), request: hang as typeof fetch, timeoutMs: 50 }));
-  assert(Date.now() - t0 < 1000, "cut at the deadline");
 });
 
 Deno.test("moderation is ON by default from the committed release constant; =off is the emergency disable; no key logs loudly once", async () => {
@@ -110,15 +93,15 @@ Deno.test("moderation is ON by default from the committed release constant; =off
   eq(moderationFromEnv(env({}), undefined, { log: q.log }), null);
   eq(moderationFromEnv(env({}), undefined, { log: q.log }), null);
   eq(q.lines.length, 1, "said once");
-  assert(/CRISIS SCREEN DEGRADED/.test(q.lines[0]) && /word list alone/.test(q.lines[0]), q.lines[0]);
-  assert(typeof moderationFromEnv(env({ OPENAI_API_KEY: "k" })) === "function", "with a key, the real gateway door");
+  assert(/CRISIS SCREEN DEGRADED/.test(q.lines[0]) && /moderation layer is OFF/.test(q.lines[0]), q.lines[0]);
+  eq(moderationFromEnv(env({ OPENAI_API_KEY: "k", ANTHROPIC_API_KEY: "k" })), null, "with a key the real gateway door is still off (D-038a)");
   const live = Deno.readTextFileSync(new URL("../../scripts/launch/trainee-go-live.sh", import.meta.url));
   assert(!/CAREER_CRISIS_MODERATION/.test(live), "not gated by the deploy script");
   const src = Deno.readTextFileSync(new URL("../../supabase/functions/_shared/career_crisis_screen.ts", import.meta.url));
   assert(/^export const PRODUCTION_CRISIS_MODERATION: "on" \| "off" = "on";$/m.test(src), "the committed release line");
   const code = src.replace(/\/\/[^\n]*/g, "");
   assert(!/api\.openai\.com|OPENAI_API_KEY/.test(code), "the screen holds no URL and reads no key");
-  eq((code.match(/env\.get\(/g) ?? []).length, 4, "the two release flags, the model key, and the pass-through that hands the gateway its own environment");
+  eq((code.match(/env\.get\(/g) ?? []).length, 3, "the two release flags and the classifier model name; the gateway reads the key from the environment it is handed");
 });
 
 Deno.test("the handler starts the screen before the turn's reads and decides distress from its verdict", () => {
@@ -132,7 +115,7 @@ Deno.test("the handler starts the screen before the turn's reads and decides dis
 
 // ---- Layer 3: the crisis classifier (a fake model call; nothing leaves the process) ----
 const fakeCall = (said: string | Error | "hang") => { const calls: any[] = []; const call = (cfg: any, payload: any, o: any) => { calls.push({ cfg, payload, o }); return said === "hang" ? new Promise(() => {}) : said instanceof Error ? Promise.reject(said) : Promise.resolve({ content: [{ type: "text", text: said }] }); }; return { calls, call }; };
-const KEYED = (o: Record<string, string> = {}) => ({ get: (k: string) => ({ OPENAI_API_KEY: "k", ...o } as Record<string, string>)[k] });
+const KEYED = (o: Record<string, string> = {}) => ({ get: (k: string) => ({ ANTHROPIC_API_KEY: "k", ...o } as Record<string, string>)[k] });
 
 Deno.test("classifier: YES flags a message the list and moderation both miss; any yes wins; it is on by default", async () => {
   const f = fakeCall("YES");
@@ -173,8 +156,10 @@ Deno.test("classifier: the model comes from one key with a price; no price or no
   const q2 = quiet();
   eq(classifierFromEnv({ get: () => undefined }, f.call as any, { log: q2.log }), null, "no key: off");
   assert(/no model key/.test(q2.lines[0] ?? ""), q2.lines.join("|"));
-  const c = classifierFromEnv(KEYED({ CAREER_CRISIS_MODEL: "gpt-5-mini" }), f.call as any)!;
-  c("x", new AbortController().signal); eq(f.calls.at(-1).cfg.model, "gpt-5-mini", "CAREER_CRISIS_MODEL picks the model");
+  const qg = quiet();
+  eq(classifierFromEnv(KEYED({ CAREER_CRISIS_MODEL: "gpt-5-mini" }), f.call as any, { log: qg.log }), null, "a non-Claude model is refused (D-038a)");
+  const c = classifierFromEnv(KEYED({ CAREER_CRISIS_MODEL: "claude-sonnet-5-5" }), f.call as any)!;
+  c("x", new AbortController().signal); eq(f.calls.at(-1).cfg.model, "claude-sonnet-5-5", "CAREER_CRISIS_MODEL picks the model");
   const d = classifierFromEnv(KEYED(), f.call as any)!;
-  d("x", new AbortController().signal); eq(f.calls.at(-1).cfg.model, "gpt-5-nano", "default: the gateway's current default model");
+  d("x", new AbortController().signal); eq(f.calls.at(-1).cfg.model, "claude-haiku-5-5", "default: the gateway's current default model");
 });

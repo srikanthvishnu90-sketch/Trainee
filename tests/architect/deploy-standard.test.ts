@@ -296,6 +296,14 @@ Deno.test("S3 waiver mutation: it does not apply to any other deployed SHA", asy
   w.log = LOG_HEAD + run5(C, "router", [38, 38, 38, 38, 38], "200");
   await onlyFails(w, "S3", /deployed: no router measurement/);
 });
+Deno.test("S3 waiver mutation: a row claiming more passed than the set holds is no score; a tiny set does not qualify", async () => {
+  const w = base(); deployedIsTheWaivedSha(w);
+  w.log = LOG_HEAD + run5(C, "router", [99, 38, 38, 38, 38], "200"); // 99/38 is not a score: the run has four qualifying passes
+  await onlyFails(w, "S3", /candidate: .*qualifying passes/);
+  w.log = LOG_HEAD + run5(C, "router", [10, 10, 10, 10, 10], "200", { size: 10 }); // 100% of ten cases is not the dev set
+  await onlyFails(w, "S3", /WAIVED ONCE .*<|WAIVED ONCE/);
+  const { v } = await verdicts(w); eq(v.S3, false);
+});
 Deno.test("S3 waiver mutation: an unmeasured candidate is still a failure", async () => {
   const w = base(); deployedIsTheWaivedSha(w);
   w.log = LOG_HEAD;

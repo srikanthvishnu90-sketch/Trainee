@@ -76,7 +76,10 @@ Deno.test({ name: "FAMILY EMAIL: disconnect erases everything read from Gmail, t
     const gmail = calls.filter((c) => c.includes("gmail.googleapis.com")).length;
     const again = await chat.say("check my email");
     // Since the connector framework (connectors.ts) the answer is the connector-need reply, not the old NOT_WIRED read status.
-    eq([again.intent, again.resultStatus], ["career_connector_need", "not_wired"], again.reply);
+    // Which mailbox it names depends on what is wired in the process (Gmail or Outlook, a link or "not switched on"): the
+    // property is that it says a mailbox must be connected first and reads nothing.
+    assert(/I need your (?:Gmail or Outlook|Gmail|Outlook) connected/.test(again.reply), again.reply);
+    assert(!/I read|new message/i.test(again.reply), again.reply);
     eq(calls.filter((c) => c.includes("gmail.googleapis.com")).length, gmail, "no Gmail call after the disconnect");
   } finally {
     handler?.restore();

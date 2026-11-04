@@ -2530,6 +2530,14 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   var COUNTRY_ONLY = /^(afghanistan|albania|algeria|andorra|angola|armenia|azerbaijan|bahrain|bangladesh|belarus|bolivia|bosnia|botswana|bulgaria|cambodia|cameroon|costa rica|croatia|cyprus|dominican republic|ecuador|el salvador|estonia|ethiopia|ghana|guatemala|honduras|iceland|iran|iraq|jamaica|kazakhstan|kosovo|kuwait|latvia|lithuania|luxembourg|malta|mauritius|moldova|mongolia|montenegro|morocco|mozambique|myanmar|namibia|nepal|nicaragua|north macedonia|oman|pakistan|paraguay|rwanda|senegal|serbia|slovakia|slovenia|sri lanka|tanzania|tunisia|uganda|ukraine|uruguay|uzbekistan|venezuela|zambia|zimbabwe|bahamas|barbados|bermuda|cayman islands|trinidad and tobago|canada|united kingdom|uk|great britain|england|scotland|wales|ireland|germany|deutschland|france|spain|españa|portugal|italy|netherlands|belgium|switzerland|austria|sweden|norway|denmark|finland|poland|czechia|czech republic|hungary|romania|greece|israel|india|china|taiwan|japan|south korea|korea|australia|new zealand|mexico|méxico|brazil|brasil|argentina|colombia|chile|peru|philippines|indonesia|malaysia|vietnam|thailand|uae|united arab emirates|saudi arabia|ksa|qatar|south africa|nigeria|kenya|egypt|turkey|türkiye|emea|apac|latam|europe|asia|africa)$/i;
   var NAMES_US2 = /^(us|u\.s\.?|usa|u\.s\.a\.?|united states( of america)?|america)$/i;
   var WAY_OF_WORK = /^(remote|hybrid|on[- ]?site|in[- ]?office|office|anywhere|flexible|distributed|virtual|wfh|work from home|field|travel|multiple locations|various( locations)?|world ?wide|global|home based)$/i;
+  var TIME_ZONE = /^(?:(?:[PMCEA][SD]?T|HST|AKST|AKDT|GMT|UTC|CET|CEST|EET|EEST|WET|WEST|BST|IST|SGT|JST|KST|AEST|AEDT|NZST|BRT|ART)(?:\s*(?:[+-−]|\+\/-)\s*\d{1,2}(?::?\d{2})?)?(?:\s+(?:time(?:\s*zones?)?|hours|overlap|preferred))?|(?:pacific|eastern|central|mountain|atlantic|alaska|hawaii)(?:\s+(?:standard|daylight))?(?:\s+time)?(?:\s*zones?)?(?:\s+hours)?|(?:us|north american?|european|americas?)\s+time\s*zones?|time\s*zones?.*|[+-]\s*\d{1,2}\s*(?:hours?|h)?)$/i;
+  var ZONE_OR_PLACE = /* @__PURE__ */ new Set([
+    "pt",
+    "et",
+    "ct",
+    "mt"
+  ]);
+  var CONTINENT = /^(?:the\s+)?(?:north\s+|south\s+|latin\s+|central\s+)?americas?$/i;
   var AMBIGUOUS_CODE = /* @__PURE__ */ new Set([
     "al",
     "ar",
@@ -2566,9 +2574,14 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     for (const chunk of String(text ?? "").split(/\s*(?:;|\||•|·|\n)\s*/)) {
       const head = chunk.replace(/:.*$/, "");
       for (const seg of head.split(/\s+\/\s*|\s*\/\s+|(?<=[a-z])\/(?=[A-Z])|\s+or\s+|\s+&\s+/i)) {
-        let tokens = seg.split(/\s*(?:,|\(|\)|\s-\s|^([A-Z]{2})-|-(?=[A-Z][a-z]))\s*/).filter((t) => t && t.trim()).map((t) => t.replace(/\s+/g, " ").trim());
+        let tokens = seg.split(/\s*(?:,|\(|\)|\s[-–—]\s|^([A-Z]{2})-|-(?=[A-Z][a-z]))\s*/).filter((t) => t && t.trim()).map((t) => t.replace(/\s+/g, " ").trim());
         tokens = tokens.flatMap((t) => {
           const x = t.replace(/\s+\d{5}(-\d{4})?$/, "");
+          const r = /^(.*?\S)[\s-]+(remote|anywhere)$/i.exec(x);
+          if (r && !/^(fully|full|100%|partially|partly|hybrid|or)$/i.test(r[1])) return [
+            r[1],
+            r[2]
+          ];
           const m = /^(.*?\S)\s+([A-Z]{2}|USA|US)$/.exec(x);
           return m && (STATE_NAMES[m[2].toLowerCase()] || NAMES_US2.test(m[2])) && !/^(remote|anywhere)$/i.test(m[1]) ? [
             m[1],
@@ -2577,6 +2590,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
             x
           ];
         });
+        tokens = tokens.filter((t) => !TIME_ZONE.test(t) && !CONTINENT.test(t));
         const places = tokens.filter((t) => !WAY_OF_WORK.test(t) && !/^(remote|anywhere)$/i.test(t));
         if (places.length >= 2 && places.every(knownCity)) {
           for (const t of places) {
@@ -2598,14 +2612,19 @@ ${words}`)}`, wording = `label:${h16(words)}`;
           remote: false
         };
         let abroadCity = false, ambiguousState = "";
+        const remoteOnly = tokens.some((t) => /^(remote|anywhere)\b/i.test(t)) && !tokens.some((t) => !/^(remote|anywhere)\b/i.test(t) && !/^[A-Z]{2}$/.test(t) && !NAMES_US2.test(t) && !WAY_OF_WORK.test(t));
+        let unsettled = false;
         const isState = (t) => /^[A-Z]{2}$/.test(t) && !!STATE_NAMES[t.toLowerCase()] || !!STATE_BY_NAME[t.toLowerCase()];
         tokens.forEach((t, i) => {
           const low2 = t.toLowerCase();
           if (/^(remote|anywhere)\b/i.test(t)) {
             p.remote = true;
-            const rest = t.replace(/^(remote|anywhere)\b[\s:-]*(in\s+(the\s+)?)?/i, "");
+            const rest = t.replace(/^(remote|anywhere)\b[\s:–—-]*(in\s+(the\s+)?)?/i, "");
             if (rest && NAMES_US2.test(rest)) p.country ||= "us";
-            else if (rest && (ABROAD.test(rest) || ABROAD_CODE.test(rest))) p.country = "abroad";
+            else if (rest && STATE_BY_NAME[rest.toLowerCase()]) {
+              p.state ||= STATE_BY_NAME[rest.toLowerCase()];
+              p.country ||= "us";
+            } else if (rest && (ABROAD.test(rest) || ABROAD_CODE.test(rest))) p.country = "abroad";
             return;
           }
           if (WAY_OF_WORK.test(t)) return;
@@ -2619,6 +2638,10 @@ ${words}`)}`, wording = `label:${h16(words)}`;
             return;
           }
           if (/^[A-Z]{2}$/.test(t)) {
+            if (remoteOnly && (ZONE_OR_PLACE.has(low2) || AMBIGUOUS_CODE.has(low2) && !tokens.some((x) => NAMES_US2.test(x)))) {
+              unsettled = true;
+              return;
+            }
             if (STATE_NAMES[low2]) {
               p.state ||= low2;
               if (AMBIGUOUS_CODE.has(low2)) ambiguousState = low2;
@@ -2659,6 +2682,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         if (abroadCity && p.country !== "us") p.country = "abroad";
         if (ambiguousState && p.country !== "abroad") p.country = abroadCity ? "abroad" : "us";
         if (p.city && !p.country && US_CITIES.has(p.city)) p.country = "us";
+        if (unsettled && !p.city && !p.state) p.country = "";
         if (p.city === "nyc") p.city = "new york";
         if (p.city === "sf") p.city = "san francisco";
         if (p.city || p.state || p.country || p.remote) out.push(p);
@@ -3421,6 +3445,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     return f.type === "month" ? `${year}-${month}` : `${year}-${month}-${day}`;
   }
   var YES_NO_VALUE = /^(yes|no|y|n|true|false)$/i;
+  var GRAD_YEAR = /\b(graduat\w*|class|completion|end)\b[^?.]{0,30}\byear\b|\byear\b[^?.]{0,30}\b(graduat\w*|complet\w*)\b/;
   var YES_NO_LIKE = /^(yes|no|y|n|true|false|i (agree|accept|acknowledge|consent|understand)\b.*|i am (not )?currently employed)$/i;
   var COMPOUND = /\bif (so|yes|not|no|applicable|you (are|were|have|do|did|answered|selected))\b[^?]{0,80}\b(list|provide|describe|explain|specify|enter|state|indicate|give|share|tell|include)\b|\bplease (list|provide|describe|explain|specify|share|confirm your)\b|,? or (would|are|do|will|have|can|could) you\b/;
   function asksYesNo(t) {
@@ -3431,6 +3456,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   }
   function fitsField(f, value, ownAnswer = false) {
     if (typedFieldProblem(f, value)) return false;
+    if (GRAD_YEAR.test(norm(f.label)) && !/\b(19|20)\d\d\b/.test(String(value))) return false;
     if (ownAnswer) return true;
     if (f.options.length || f.widget || f.type === "checkbox" || /file/.test(f.type)) return true;
     const t = norm(f.label), v = String(value).trim();

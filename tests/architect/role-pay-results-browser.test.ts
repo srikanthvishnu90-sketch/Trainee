@@ -124,6 +124,16 @@ Deno.test({
             const acme = await acmeCard.textContent() ?? "";
             assert(/^Queued$/.test((await acmeCard.locator(".chip.queued").textContent())?.trim() ?? "") && /Approved\. It's queued to be sent exactly as its card showed/.test(acme), acme);
             await check("the list after Apply");
+            // F-10 (spec 3.10): the batch line is in the header, and Pause says it does not cancel what is queued and names it. The
+            // check above measured these at 14px text, 44px hit areas and AA contrast like everything else on the page.
+            assert(/^B-\d\d \d+ roles?( · review [0-9a-f]{8} covers \d+ ready)?$/.test(((await pg.textContent(".batchline")) ?? "").trim().replace(/\s+/g, " ")), "the batch id and role total");
+            const pauseNote = (await pg.textContent(".pausenote")) ?? "";
+            assert(/does not cancel queued work/.test(pauseNote) && /Acme Web/.test(pauseNote) && /Queued/.test(pauseNote), pauseNote);
+            await pg.locator(".segs a", { hasText: "Queued" }).click();
+            await pg.waitForURL(/state=queued/);
+            eq(await pg.locator("li.card").count(), 1, "the Queued segment shows the one queued role");
+            await check("the list filtered to Queued");
+            await pg.goto(`${origin}/file`);
             eq(w.queue.length, 1);
             eq(w.queue[0].payload_hash, HASH(1));
             eq(w.queue[0].payload, w.preps.get("greenhouse:acme:1")!.payload, "the queue row carries exactly the payload shown");
@@ -145,6 +155,19 @@ Deno.test({
             await ctx.route("**/*", (route: any) => route.request().url().startsWith(origin) || route.request().url().startsWith(origin2) ? route.continue() : route.abort());
             await ctx.addCookies([{ name: "tf_s", value: s2, url: origin2 }]);
             try {
+              await pg.goto(`${origin2}/file`);
+              // The batch elements with one role needing information: the banner comes before the cards, the state segments filter, and the
+              // 14px / 44px / contrast measures hold for them in both colour schemes.
+              const banner = (await pg.textContent(".exc")) ?? "";
+              assert(/1 needs information/.test(banner), banner);
+              const ys2 = await pg.evaluate(`[".exc",".segs","li.card"].map((q) => document.querySelector(q)?.getBoundingClientRect().top ?? null)`);
+              assert(ys2.every((y: number | null) => y !== null) && ys2[0] < ys2[2] && ys2[1] < ys2[2], `banners and segments above the cards: ${ys2}`);
+              await check("the batch elements: segments and an exception banner");
+              await pg.locator(".segs a", { hasText: "Ready for review" }).click();
+              await pg.waitForURL(/state=ready/);
+              eq(await pg.locator("li.card").count(), 2, "only the ready roles");
+              assert(!/Needs candidate information/.test(await pg.textContent("main") ?? ""), "the role needing information is out of this view");
+              await check("the list filtered to Ready for review");
               await pg.goto(`${origin2}/file`);
               await pg.locator("li.card", { hasText: "Acme Web" }).getByRole("button", { name: /^Apply to/ }).click();
               await pg.waitForSelector("text=A few things first");

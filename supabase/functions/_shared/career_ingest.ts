@@ -18,6 +18,7 @@ import { FEEDS, isMoreProvider, MORE_PROVIDERS } from "./career_ingest_feeds.ts"
 // (tests/edge/career-ingest-scale.test.ts fails while the copy is stale). It sets globalThis.CareerUrlShape.
 import "./career_url_shape.js";
 import { chunksOf, cut, idChunks, jsonArrayElements, readBody, rowContentError, storable, transientStorageError, type ArrayScan } from "./career_ingest_stream.ts";
+import { plainLine, plainText, sameJob, scrubRaw, truthfulPostedAt } from "./posting_text.ts";
 
 // etag / last_modified: what the board's last full read answered (career_board_state, WO-037), sent back as a conditional
 // request; absent on the cursor path.
@@ -28,7 +29,11 @@ import { chunksOf, cut, idChunks, jsonArrayElements, readBody, rowContentError, 
 // the pass that part belongs to began (its first part). Absent: a read from the start.
 // gone_reads (2026-10-30, ingest round 2): how many reads in a row before this one the board answered 404 / 410 (it no
 // longer exists at the ATS); at GONE_AFTER the board's open postings are closed (they are gone with it).
-export interface Board { company: string; provider: string; board: string; etag?: string | null; last_modified?: string | null; body_sha?: string | null; offset?: number | null; pass_started_at?: string | null; gone_reads?: number | null }
+// empty_reads (2026-11-03, ingest round 3): how many complete reads in a row before this one listed no posting at all
+// while the board still had open postings (career_shards.ts emptyReadsOf); at EMPTY_AFTER they are closed.
+// pass_marked (round 3): the pass this part belongs to marked every posting its first part saw as seen at the pass's start
+// (career_shards.ts passMarkedOf), so its last part closes exactly what the pass never saw.
+export interface Board { company: string; provider: string; board: string; etag?: string | null; last_modified?: string | null; body_sha?: string | null; offset?: number | null; pass_started_at?: string | null; gone_reads?: number | null; empty_reads?: number | null; pass_marked?: boolean | null }
 export interface FeedPosting {
   job_id: string; company: string; title: string; location?: string; url: string; description?: string;
   ats_id?: string; department?: string; posted_at?: string | null; remote?: string; role_family?: string; seniority_band?: string;
@@ -49,11 +54,19 @@ export type FetchFeed = (b: Board) => Promise<FeedPosting[] | FeedRead>;
 // resumes there (pass_started_at: when this pass began). null/absent: the pass is over.
 // gone_reads: a failed read that answered 404 / 410: how many in a row now (this one included); gone_closed: the open
 // postings closed because the board is gone (GONE_AFTER reached).
-export interface BoardOutcome { status: "ok" | "partial" | "not_modified" | "failed"; error?: string; etag?: string | null; last_modified?: string | null; body_sha?: string | null; next_offset?: number | null; pass_started_at?: string | null; gone_reads?: number; gone_closed?: number }
+// empty_reads (round 3): this read listed nothing while postings were open: how many such reads in a row now.
+export interface BoardOutcome { status: "ok" | "partial" | "not_modified" | "failed"; error?: string; etag?: string | null; last_modified?: string | null; body_sha?: string | null; next_offset?: number | null; pass_started_at?: string | null; gone_reads?: number; gone_closed?: number; empty_reads?: number; pass_marked?: boolean }
 // A board that answers 404 / 410 on this many reads in a row is gone: its open postings are closed (never left listed as
 // open for ever), and it is read again only on the failure backoff (career_shards.ts retryAfterMs), not every window.
 export const GONE_AFTER = 3;
 export const goneAnswer = (error: string) => /^HTTP (404|410)$/.test(error);
+// 2026-11-03 (ingest round 3): a board that answers 200 with an empty list while it has open postings is, as often as not,
+// a board in an outage or mid-migration (an ATS answering its public list empty while its index rebuilds), not a board
+// whose every job closed at once. Its postings used to close on that one read, and with them every application queued
+// for them (20261030110000_career_ingest_r2.sql closes those). They close once EMPTY_AFTER complete reads in a row list
+// nothing; a read that lists anything starts the count again. The held read keeps no validators, so the next read is a
+// full one (an unchanged empty body is never "not modified" into a hold for ever).
+export const EMPTY_AFTER = 3;
 // A stored posting without its description (2026-10-30): the description's SHA-256 stands in for it, so a run compares
 // a board's postings with what is stored without reading 20 KB of text per posting back.
 export type KnownPosting = Omit<Posting, "description"> & { description_sha: string };
@@ -84,6 +97,8 @@ export interface IngestStats {
   boards_continued?: number; // 2026-10-30: boards stopped inside at the posting budget, their next part due next run
   boards_gone?: number; // 2026-10-30 (round 2): boards found gone this run (GONE_AFTER reads of 404 / 410), their postings closed
   boards_left_directory?: number; // boards no longer in the directory, their postings closed and their state forgotten (handler)
+  boards_empty_held?: number; // round 3: boards that listed nothing while postings were open, held (fewer than EMPTY_AFTER reads)
+  replaced?: number; // round 3: ids the board gave to another job: the old job closed, the new one stored as new
   failures: { board: string; provider: string; error: string }[];
   large_closes: { board: string; provider: string; closed: number; was_open: number }[]; // a board that lost half or more at once
 }
@@ -183,7 +198,8 @@ export async function ingestBoards(o: { boards: Board[]; fetchFeed: FetchFeed; d
     // Nothing changed since the last full read: nothing to write, nothing to close.
     if (r.not_modified) { st.boards_ok++; st.boards_not_modified = (st.boards_not_modified ?? 0) + 1; await o.onBoard?.(b0, { status: "not_modified", ...validators }); return; }
 
-    const seen = new Set<string>();
+    const seen = new Set<string>(), quiet: string[] = [];
+    const marked = offset > 0 && !!b0.pass_marked, passStartMs = Date.parse(b0.pass_started_at ?? now);
     async function handle(list: FeedPosting[]) {
       const fresh = new Map<string, FeedPosting>();
       for (const p of list) {
@@ -202,15 +218,37 @@ export async function ingestBoards(o: { boards: Board[]; fetchFeed: FetchFeed; d
         fresh.set(p.job_id, p);
       }
       if (!fresh.size) return;
-      const writes: Posting[] = [], touched: string[] = [], needWhole: FeedPosting[] = [];
-      const due = (old: { last_seen_at: string }) => o.now - Date.parse(old.last_seen_at) >= touchAfterMs;
+      const writes: Posting[] = [], touched: string[] = [], needWhole: FeedPosting[] = [], replaced: string[] = [];
+      // Round 3: a later part of a marked pass touches what it sees not yet seen in this pass; the first part keeps the ids
+      // it saw unchanged and left untouched (`quiet`), touched only if the pass goes on past it.
+      const due = (old: { last_seen_at: string }) => marked ? Date.parse(old.last_seen_at) < passStartMs : o.now - Date.parse(old.last_seen_at) >= touchAfterMs;
+      const keepQuiet = (id: string) => { if (offset === 0) quiet.push(id); };
+      // 2026-11-03 (round 3): the id a board gave to another job (the title says another job, not the same one edited) is a
+      // new posting: first seen now, and the job it was before closed first, so every application queued for that job
+      // ends as not sent (20261030110000_career_ingest_r2.sql) instead of going to the new one. It used to be merged.
+      const another = (old: { title: string; closed_at: string | null }, p: FeedPosting) => {
+        if (sameJob(old.title, p.title)) return false;
+        st.new++; st.replaced = (st.replaced ?? 0) + 1;
+        if (!old.closed_at) replaced.push(p.job_id);
+        writes.push({ ...p, provider: b.provider, board: b.board, first_seen_at: now, last_seen_at: now, closed_at: null });
+        return true;
+      };
+      // A posted date only when it can be true (posting_text.ts truthfulPostedAt). Workday states an age ("Posted 30+ Days
+      // Ago"), read as the latest date it allows: a later read of the same job never moves the stored date later.
+      const dated = (p: FeedPosting, old?: { posted_at?: string | null; title: string } | null): FeedPosting => {
+        let at = truthfulPostedAt(p.posted_at, o.now);
+        const was = old ? truthfulPostedAt(old.posted_at, o.now) : null;
+        if (b.provider === "workday" && at && was && Date.parse(was) < Date.parse(at) && sameJob(old!.title, p.title)) at = was;
+        return { ...p, posted_at: at };
+      };
       if (o.db.known) {
         const known = new Map((await store(() => o.db.known!([...fresh.keys()]))).map((p) => [p.job_id, p]));
-        for (const p of fresh.values()) {
-          const old = known.get(p.job_id);
+        for (const p0 of fresh.values()) {
+          const old = known.get(p0.job_id), p = dated(p0, old);
           if (!old) { st.new++; writes.push({ ...p, provider: b.provider, board: b.board, first_seen_at: now, last_seen_at: now, closed_at: null }); continue; }
+          if (another(old, p)) continue;
           if (old.closed_at) st.reopened++; else st.seen++;
-          if (!old.closed_at && sameKnown(old, p, await sha256Hex(p.description ?? ""))) { if (due(old)) touched.push(p.job_id); continue; }
+          if (!old.closed_at && sameKnown(old, p, await sha256Hex(p.description ?? ""))) { if (due(old)) touched.push(p.job_id); else keepQuiet(p.job_id); continue; }
           // A posting the feed gave no description keeps the stored one (as a whole row would): read back for these only.
           if (p.description === undefined) { needWhole.push(p); continue; }
           const { description_sha: _sha, ...rest } = old;
@@ -222,14 +260,16 @@ export async function ingestBoards(o: { boards: Board[]; fetchFeed: FetchFeed; d
         }
       } else {
         const known = new Map((await store(() => o.db.getMany([...fresh.keys()]))).map((p) => [p.job_id, p]));
-        for (const p of fresh.values()) {
-          const old = known.get(p.job_id);
+        for (const p0 of fresh.values()) {
+          const old = known.get(p0.job_id), p = dated(p0, old);
           if (!old) { st.new++; writes.push({ ...p, provider: b.provider, board: b.board, first_seen_at: now, last_seen_at: now, closed_at: null }); continue; }
+          if (another(old, p)) continue;
           if (old.closed_at) st.reopened++; else st.seen++;
-          if (!old.closed_at && same(old, p)) { if (due(old)) touched.push(p.job_id); continue; }
+          if (!old.closed_at && same(old, p)) { if (due(old)) touched.push(p.job_id); else keepQuiet(p.job_id); continue; }
           writes.push({ ...old, ...p, provider: b.provider, board: b.board, first_seen_at: old.first_seen_at, last_seen_at: later(now, old.last_seen_at), closed_at: null });
         }
       }
+      if (replaced.length) await store(() => o.db.close(replaced, now));
       if (writes.length) await store(() => o.db.putMany(writes));
       if (touched.length) await store(() => o.db.touch(touched, now));
     }
@@ -269,15 +309,31 @@ export async function ingestBoards(o: { boards: Board[]; fetchFeed: FetchFeed; d
       st.boards_partial++;
       if (more) st.boards_continued = (st.boards_continued ?? 0) + 1;
       const nextOffset = offset +Math.max(1, consumed > 2 * RESUME_OVERLAP ? consumed - RESUME_OVERLAP : consumed);
-      await o.onBoard?.(b0, { status: "partial", ...validators, body_sha: null, next_offset: nextOffset, pass_started_at: passStarted });
+      // 2026-11-03 (round 3): the pass goes on past its first part: what that part saw unchanged and left untouched (seen
+      // under touchAfterMs ago) is marked seen now, so the pass's last part closes exactly what no part saw. It used to
+      // close only what was last seen before the pass start less touchAfterMs: a posting a board took down soon after the
+      // last pass stayed open through the whole next pass (found on 12,000-posting boards read over 14 runs).
+      let passMarked = marked;
+      if (offset === 0) {
+        try { if (quiet.length) await store(() => o.db.touch(quiet, now)); passMarked = true; }
+        catch (e) { await fail(b0, storageFailed(e)); return; }
+      }
+      await o.onBoard?.(b0, { status: "partial", ...validators, body_sha: null, next_offset: nextOffset, pass_started_at: passStarted, ...(passMarked ? { pass_marked: true } : {}) });
       return;
     }
     const complete = r.complete;
+    let emptyReads = 0, held = false;
     try {
       if (complete && offset === 0) {
         const open = await store(() => o.db.openForBoard(b));
         const gone = open.map((p) => p.job_id).filter((id) => !seen.has(id));
-        if (gone.length) {
+        // Round 3: a list with nothing in it while postings are open closes them only at EMPTY_AFTER such reads in a row.
+        if (gone.length && seen.size === 0) {
+          emptyReads = Math.max(0, Math.floor(Number(b0.empty_reads) || 0)) + 1;
+          held = emptyReads < EMPTY_AFTER;
+          if (held) st.boards_empty_held = (st.boards_empty_held ?? 0) + 1;
+        }
+        if (gone.length && !held) {
           await store(() => o.db.close(gone, now));
           st.closed += gone.length;
           if (gone.length >= 20 && gone.length * 2 >= open.length) st.large_closes.push({ board: b.board, provider: b.provider, closed: gone.length, was_open: open.length });
@@ -285,7 +341,8 @@ export async function ingestBoards(o: { boards: Board[]; fetchFeed: FetchFeed; d
       } else if (complete && o.db.staleForBoard) {
         // The last part of a pass read over several runs: what no part saw is gone. A posting an earlier part saw was written
         // or touched then, or had been touched less than touchAfterMs before (so after pass start - touchAfterMs).
-        const before = new Date(Date.parse(passStarted) - touchAfterMs).toISOString();
+        // Round 3: a marked pass touched every posting it saw that was not seen since its start: what is older is gone.
+        const before = marked ? new Date(passStartMs).toISOString() : new Date(Date.parse(passStarted) - touchAfterMs).toISOString();
         const gone = (await store(() => o.db.staleForBoard!(b, before))).filter((id) => !seen.has(id));
         if (gone.length) { await store(() => o.db.close(gone, now)); st.closed += gone.length; }
       }
@@ -297,6 +354,8 @@ export async function ingestBoards(o: { boards: Board[]; fetchFeed: FetchFeed; d
     if (!complete) st.boards_partial++;
     const outcome: BoardOutcome = plain ? { status: complete ? "ok" : "partial" } : { status: complete ? "ok" : "partial", ...validators };
     if (offset > 0) Object.assign(outcome, { body_sha: null, next_offset: null, pass_started_at: null });
+    if (emptyReads) outcome.empty_reads = emptyReads;
+    if (held) Object.assign(outcome, { etag: null, last_modified: null, body_sha: null });
     await o.onBoard?.(b0, outcome);
   }
 
@@ -549,17 +608,8 @@ export function supabasePostingsDb(admin: any): PostingsDb & { recordRun(stats: 
 // ------------------------------------------------------------------------------------------------ the network
 const SR_PAGE = 100, SR_MAX_PAGES = 10; // SmartRecruiters pages its list; past 1,000 the read is partial (closes nothing)
 // Greenhouse escapes its HTML once more than it means to ("&amp;amp;"), so 121's stripHtml leaves "&amp;" in the text.
-const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
-export function decodeEntities(t: string): string {
-  let out = t;
-  for (let i = 0; i < 3 && /&(#\d+|#x[0-9a-f]+|[a-z]+);/i.test(out); i++) {
-    out = out.replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, (m, e: string) => {
-      if (e[0] === "#") { const n = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : Number(e.slice(1)); return Number.isFinite(n) && n > 0 && n < 0x110000 ? String.fromCodePoint(n) : m; }
-      return ENTITIES[e.toLowerCase()] ?? m;
-    });
-  }
-  return out.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-}
+// 2026-11-03 (round 3): every named entity a board writes (posting_text.ts), not six of them, and a script's body out.
+export const decodeEntities = (t: string): string => plainText(t);
 const RAW_ID: Record<string, (j: any) => string> = { greenhouse: (j) => j.id, lever: (j) => j.id, ashby: (j) => j.id, smartrecruiters: (j) => j.id,
   ...Object.fromEntries(MORE_PROVIDERS.map((p) => [p, FEEDS[p].id])) };
 // Every provider ingest reads: the 121 bundle's four and WO-044's seven.
@@ -688,16 +738,20 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
   }
   // WO-044: a provider of career_ingest_feeds.ts. GET, or Workday's read-only search POST; paged where the provider
   // pages (past maxPages the read is partial and closes nothing); the conditional request applies to one-request GETs.
-  async function readMore(b: Board, deadline: number) {
+  // 2026-11-03 (round 3): `startPage`: a paged board read in parts over several runs starts its part there; `more` says the
+  // read stopped at the page cap or the deadline with the list going on (the next part continues it), where a list that
+  // moved under the read (`complete` false, `more` false) starts its pass again.
+  async function readMore(b: Board, deadline: number, startPage = 0) {
     const spec = FEEDS[b.provider as keyof typeof FEEDS];
-    let raw: any[] = [], complete = true, first: unknown = null, total: number | null = null;
+    let raw: any[] = [], complete = true, more = false, first: unknown = null, total: number | null = null, listed = 0, moved = false;
     const ids = new Set<string>();
     let validators: { etag: string | null; last_modified: string | null; body_sha?: string | null } | null = null;
-    for (let page = 0; page < spec.maxPages; page++) {
+    const lastPage = startPage + spec.maxPages;
+    for (let page = startPage; page < lastPage; page++) {
       const rq = spec.request(b.board, page);
       const left = deadline - Date.now();
       // Out of time after the first page of a paged board: what was read is a partial read (it closes nothing).
-      if (left <= 0 && page > 0) { complete = false; break; }
+      if (left <= 0 && page > startPage) { complete = false; more = true; break; }
       if (left <= 0) throw new Error(`timed out after ${timeoutMs / 1000}s`);
       const h: Record<string, string> = { ...headers, accept: rq.accept };
       const cond = spec.maxPages === 1 && rq.method === "GET";
@@ -707,7 +761,7 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
       let res: Response;
       try { res = await fetchFn(rq.url, { method: rq.method, headers: h, body: rq.body, signal: AbortSignal.timeout(left) }); }
       catch (e) {
-        if (page > 0) { complete = false; break; }
+        if (page > startPage) { complete = false; more = true; break; }
         throw new Error(e instanceof Error && /timed? ?out|abort/i.test(`${e.name} ${e.message}`) ? `timed out after ${timeoutMs / 1000}s` : e instanceof Error ? e.message : String(e)); }
       if (res.status === 304 && cond && (b.etag || b.last_modified)) { try { await res.body?.cancel(); } catch { /* already closed */ } return null; }
       if (res.status < 200 || res.status >= 300) { try { await res.body?.cancel(); } catch { /* already closed */ } throw new Error(`HTTP ${res.status}`); }
@@ -721,7 +775,7 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
       const data = spec.parse(text);
       if (!spec.shape(data)) throw new Error(`not a ${b.provider} board (unexpected body)`);
       const got = spec.jobs(data);
-      if (page === 0) { first = data; total = spec.total(data, 0); }
+      if (page === startPage) { first = data; total = spec.total(data, page); }
       if (spec.maxPages === 1) { raw.push(...got); break; }
       // 2026-10-30 (round 2): a paged board's ids are counted once. A page that repeats one an earlier page gave means the
       // list moved between pages (or the board ignores the offset and answers page one again): the read is partial and
@@ -733,16 +787,23 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
         if (!j || typeof j !== "object") continue;
         const id = spec.id(j);
         if (id && before.has(id)) { repeated++; continue; }
+        listed++;
         if (id && ids.has(id)) continue;
         if (id) ids.add(id);
         raw.push(j); added++;
       }
-      if (repeated) complete = false;
-      if (got.length < spec.pageSize || added === 0 || (total !== null && ids.size >= total)) break;
-      if (page + 1 >= spec.maxPages) complete = false;
+      if (repeated) { complete = false; moved = true; }
+      // 2026-11-03 (round 3): the list ends where a page comes back short, never where the board's total says: a total
+      // that counts low ("total": 40 with 100 listed) used to end the read at 40 as complete, and the 60 never read closed.
+      if (got.length < spec.pageSize || added === 0) break;
+      if (page + 1 >= lastPage) { complete = false; more = !moved; }
     }
+    // Round 3: fewer listed than the board's own total on a read from the top: a posting slid past the read while the list
+    // moved (one taken down on page 1 moves page 2's first to page 1's end, never read), or the total counts what the list
+    // does not show. Either way the read is not the whole list: it closes nothing.
+    if (complete && startPage === 0 && total !== null && listed < total) complete = false;
     raw = raw.filter((j) => j && typeof j === "object");
-    return { json: { name: spec.company(first), jobs: raw.map((j) => spec.toGreenhouse(j, b.board)) }, raw, complete, validators };
+    return { json: { name: spec.company(first), jobs: raw.map((j) => spec.toGreenhouse(j, b.board)) }, raw, complete, more: more && !moved, listed, validators };
   }
   // 2026-10-30, `stream` (the deployed function): a bounded read. A body up to WHOLE_MAX characters is read whole (hashed,
   // parsed once) and normalized a batch at a time as the run asks for it; a longer one is never held: its job array is
@@ -754,11 +815,27 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
     const offset = Math.max(0, Math.floor(Number(b.offset) || 0));
     const more = isMoreProvider(b.provider), spec = more ? FEEDS[b.provider as keyof typeof FEEDS] : null;
     if (b.provider === "smartrecruiters" || (spec && spec.maxPages > 1)) {
-      const r = await legacy(b);
-      const read: FeedRead = Array.isArray(r) ? { postings: r, complete: true } : r;
+      // 2026-11-03 (round 3): a paged board larger than one read's pages (1,000 postings; fewer when the deadline comes
+      // first) is read in parts over several runs, as a large one-request board is: this part starts at the page that
+      // holds Board.offset, and one that stops with the list going on ends in a "more" read error, so the run records
+      // where the next part starts (career_board_state pass_offset) and the part that ends the list closes what the pass
+      // never saw. Such a board used to be read from page one every time, partial every time: its first 1,000 postings
+      // only, and nothing it took down ever closed.
+      const pageSize = b.provider === "smartrecruiters" ? SR_PAGE : spec!.pageSize;
+      const startPage = Math.floor(offset / pageSize), skip = offset - startPage * pageSize;
+      const r = await legacy(b, startPage);
+      const read: FeedRead & { more?: boolean; listed?: number } = Array.isArray(r) ? { postings: r, complete: true } : r;
       if (read.not_modified) return read;
-      const all = read.postings;
-      return { ...read, postings: [], batches: (async function* () { for (let i = offset; i < all.length; i += INGEST_BATCH) { const s = all.slice(i, i + INGEST_BATCH); yield { postings: s, consumed: s.length }; } })() };
+      const all = read.postings, more = !!read.more, listed = read.listed ?? all.length;
+      const { more: _m, listed: _l, ...rest } = read;
+      return { ...rest, complete: more ? true : read.complete, postings: [], batches: (async function* () {
+        let given = 0;
+        for (let i = skip; i < all.length; i += INGEST_BATCH) { const s = all.slice(i, i + INGEST_BATCH); given += s.length; yield { postings: s, consumed: s.length }; }
+        // Entries a board listed that make no posting (no title, no link) still count toward where the next part starts.
+        const left = Math.max(0, listed - skip - given);
+        if (left) yield { postings: [], consumed: left };
+        if (more) throw new Error(`more of the board than one read: the next part starts at ${offset + Math.max(0, listed - skip)}`);
+      })() };
     }
     const core = more ? null : { feed: (CareerJobs.feeds as any)[b.provider], normalize: ({ greenhouse: CareerJobs.normalizeGreenhouse, lever: CareerJobs.normalizeLever, ashby: CareerJobs.normalizeAshby } as any)[b.provider] };
     if (core && (!core.feed || !core.normalize)) throw new Error(`provider ${b.provider} is not supported`);
@@ -786,8 +863,10 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
       catch (e) { throw new Error(ctl.signal.aborted ? `timed out after ${timeoutMs / 1000}s` : e instanceof Error ? e.message : String(e)); }
       // A board's own name, then each slice of its jobs -> postings (the provider's normalizer, as the whole read does).
       const norm = (slice: any[], root: Record<string, unknown>, company: string | null): FeedPosting[] => {
-        if (spec) return toPostings(b, CareerJobs.normalizeGreenhouse({ name: company, jobs: slice.map((j) => spec.toGreenhouse(j, b.board)) }, b.board, b.company), slice);
-        const json = b.provider === "lever" ? slice : { ...root, jobs: slice };
+        // Round 3: a script or style block in any field is not the posting's text (posting_text.ts scrubRaw).
+        if (spec) return toPostings(b, CareerJobs.normalizeGreenhouse({ name: company, jobs: slice.map((j) => scrubRaw(spec.toGreenhouse(j, b.board))) }, b.board, b.company), slice);
+        const clean = slice.map((j) => scrubRaw(j));
+        const json = b.provider === "lever" ? clean : { ...root, jobs: clean };
         return toPostings(b, core!.normalize(json, b.board, b.company), slice);
       };
       if (body.text !== null) {
@@ -838,44 +917,53 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
       if (!streaming) stop();
     }
   }
-  const legacy = async (b: Board): Promise<FeedPosting[] | FeedRead> => {
+  const legacy = async (b: Board, startPage = 0): Promise<FeedPosting[] | (FeedRead & { more?: boolean; listed?: number })> => {
     if (isMoreProvider(b.provider)) {
-      const r = await readMore(b, Date.now() + timeoutMs);
+      const r = await readMore(b, Date.now() + timeoutMs, startPage);
       if (r === null) return { postings: [], complete: false, not_modified: true, etag: b.etag ?? null, last_modified: b.last_modified ?? null, ...(opts.bodyHash ? { body_sha: b.body_sha ?? null } : {}) };
       if ("same" in r) return { postings: [], complete: false, not_modified: true, etag: r.validators?.etag ?? b.etag ?? null, last_modified: r.validators?.last_modified ?? b.last_modified ?? null, body_sha: r.sha };
-      const postings = toPostings(b, CareerJobs.normalizeGreenhouse(r.json, b.board, b.company), r.raw);
-      if (opts.bodyHash || (r.validators && (r.validators.etag || r.validators.last_modified))) return { postings, complete: r.complete, etag: r.validators?.etag ?? null, last_modified: r.validators?.last_modified ?? null, ...(opts.bodyHash ? { body_sha: r.validators?.body_sha ?? null } : {}) };
-      return r.complete ? postings : { postings, complete: false };
+      const postings = toPostings(b, CareerJobs.normalizeGreenhouse({ ...r.json, jobs: r.json.jobs.map((j) => scrubRaw(j)) }, b.board, b.company), r.raw);
+      const part = startPage > 0 || r.more ? { more: r.more, listed: r.listed } : {};
+      if (opts.bodyHash || (r.validators && (r.validators.etag || r.validators.last_modified))) return { postings, complete: r.complete, ...part, etag: r.validators?.etag ?? null, last_modified: r.validators?.last_modified ?? null, ...(opts.bodyHash ? { body_sha: r.validators?.body_sha ?? null } : {}) };
+      return r.complete && !part.more && startPage === 0 ? postings : { postings, complete: r.complete, ...part };
     }
     const feed = (CareerJobs.feeds as any)[b.provider];
     const normalize = ({ greenhouse: CareerJobs.normalizeGreenhouse, lever: CareerJobs.normalizeLever, ashby: CareerJobs.normalizeAshby, smartrecruiters: CareerJobs.normalizeSmartRecruiters } as any)[b.provider];
     if (!feed || !normalize) throw new Error(`provider ${b.provider} is not supported`);
     const deadline = Date.now() + timeoutMs;
     const base = withPay(b.provider, feed(b.board).url as string);
-    let raw: any[] = [], complete = true, json: any, validators: { etag: string | null; last_modified: string | null; body_sha?: string | null } | null = null;
+    let raw: any[] = [], complete = true, more = false, listed = 0, json: any, validators: { etag: string | null; last_modified: string | null; body_sha?: string | null } | null = null;
     if (b.provider === "smartrecruiters") {
       // 2026-10-30 (round 2): ids are counted once. A page that repeats one already read means the list moved (or the
       // board pages in a loop): what was read is partial and closes nothing. Duplicates used to count toward totalFound,
       // so the read looked complete and the postings never read were closed.
+      // Round 3: the list ends at a short page, never at totalFound (a total that counts low closed what was never read);
+      // fewer listed than totalFound on a read from the top is not the whole list; `startPage`: a part of a pass.
       const ids = new Set<string>();
-      for (let page = 0; ; page++) {
-        const j = await getJson("smartrecruiters", `${base}?limit=${SR_PAGE}&offset=${page * SR_PAGE}`, deadline);
+      let total = NaN, moved = false;
+      for (let page = startPage; ; page++) {
+        let j: any;
+        try { j = await getJson("smartrecruiters", `${base}?limit=${SR_PAGE}&offset=${page * SR_PAGE}`, deadline); }
+        catch (e) { if (page > startPage) { complete = false; more = true; break; } throw e; }
+        if (page === startPage) total = Number(j && j.totalFound);
         const got = rawJobs.smartrecruiters(j).filter((x: any) => x && typeof x === "object");
         const before = new Set(ids); // an id twice on one page is the board's own duplicate (kept once), not a moved list
         let added = 0, repeated = 0;
         for (const x of got) {
           const id = String(RAW_ID.smartrecruiters(x) ?? "");
           if (id && before.has(id)) { repeated++; continue; }
+          listed++;
           if (id && ids.has(id)) continue;
           if (id) ids.add(id);
           raw.push(x); added++;
         }
         json = { ...j, content: raw };
-        if (repeated) complete = false;
-        const total = Number(j && j.totalFound);
-        if (got.length < SR_PAGE || added === 0 || (Number.isFinite(total) && ids.size >= total)) break;
-        if (page + 1 >= SR_MAX_PAGES) { complete = false; break; }
+        if (repeated) { complete = false; moved = true; }
+        if (got.length < SR_PAGE || added === 0) break;
+        if (page + 1 >= startPage + SR_MAX_PAGES) { complete = false; more = !moved; break; }
       }
+      if (moved) more = false;
+      if (complete && startPage === 0 && Number.isFinite(total) && listed < total) complete = false;
     } else {
       // One request per board: the conditional request applies (SmartRecruiters pages, so it reads in full).
       const seen: { etag?: string | null; last_modified?: string | null; body_sha?: string | null } = {};
@@ -884,10 +972,13 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
       raw = rawJobs[b.provider](json);
       validators = { etag: seen.etag ?? null, last_modified: seen.last_modified ?? null, ...(opts.bodyHash ? { body_sha: seen.body_sha ?? null } : {}) };
     }
-    const postings = toPostings(b, normalize(json, b.board, b.company), raw);
-    if (opts.bodyHash) return { postings, complete, etag: validators?.etag ?? null, last_modified: validators?.last_modified ?? null, body_sha: validators?.body_sha ?? null };
-    if (validators && (validators.etag || validators.last_modified)) return { postings, complete, ...validators };
-    return complete ? postings : { postings, complete };
+    const clean = raw.map((j) => scrubRaw(j)); // round 3: scripts out of every field before the normalizer reads it
+    const cleanJson = b.provider === "lever" ? clean : b.provider === "smartrecruiters" ? { ...json, content: clean } : { ...json, jobs: clean };
+    const postings = toPostings(b, normalize(cleanJson, b.board, b.company), raw);
+    const part = startPage > 0 || more ? { more, listed } : {};
+    if (opts.bodyHash) return { postings, complete, ...part, etag: validators?.etag ?? null, last_modified: validators?.last_modified ?? null, body_sha: validators?.body_sha ?? null };
+    if (validators && (validators.etag || validators.last_modified)) return { postings, complete, ...part, ...validators };
+    return complete && !more && startPage === 0 ? postings : { postings, complete, ...part };
   };
   return opts.stream ? streamRead : legacy;
 }
@@ -901,18 +992,19 @@ function toPostings(b: Board, normalized: any[], raw: any[]): FeedPosting[] {
     // length limit ends between characters, never inside an emoji: one such posting used to fail its board's write and,
     // as a storage error that was not transient, the whole lane run, every tick. An id or a link with a control character
     // or a space is not a usable id or link: the posting is left out.
-    const safeClip = (v: unknown, n: number) => cut(storable(v).replace(/\s+/g, " ").trim(), n).trim();
     normalized.forEach((p, i) => {
       const atsId = String(RAW_ID[b.provider](raw[i]) ?? "");
-      const title = safeClip(p.title, 500), url = String(p.url || "");
+      // 2026-11-03 (round 3): a short field is stored as the plain text the board meant: no tag, no entity, no script, no
+      // bidi override (posting_text.ts plainLine). "<b>Senior</b> Data Analyst" and "R&amp;D" used to be stored as written.
+      const title = plainLine(p.title, 500), url = String(p.url || "");
       if (!atsId || !title || !/^https:\/\//.test(url) || url.length > 2000 || /[\s\u0000-\u001f\u007f]/.test(url) || storable(url) !== url) return;
       if (/[\u0000-\u001f\u007f]/.test(atsId) || storable(atsId) !== atsId || atsId.length > 1000) return;
       const description = cut(decodeEntities(storable(p.jd_text || "")), MAX_DESCRIPTION);
       const pay = boardPay(b.provider, raw[i]);
       postings.push({
-        job_id: `${b.provider}:${token}:${atsId}`, ats_id: atsId, company: safeClip(p.company || b.company, 300) || b.board, title,
-        location: safeClip(p.location, 1000), url, description,
-        department: safeClip(p.department, 300), posted_at: p.posted_at || null, remote: p.remote, role_family: p.role_family, seniority_band: p.seniority_band,
+        job_id: `${b.provider}:${token}:${atsId}`, ats_id: atsId, company: plainLine(p.company || b.company, 300) || b.board, title,
+        location: plainLine(p.location, 1000), url, description,
+        department: plainLine(p.department, 300), posted_at: p.posted_at || null, remote: p.remote, role_family: p.role_family, seniority_band: p.seniority_band,
         apply_email: applyEmailOf({ description, url }), pay: pay === null ? null : cut(storable(pay), PAY_MAX) || null,
       });
     });

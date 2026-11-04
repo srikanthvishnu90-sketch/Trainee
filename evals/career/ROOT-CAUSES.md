@@ -999,3 +999,26 @@ of private content.
 - Spend: tonight $13.974 of $15 (all-time recorded $15.508). A further 5-pass run would cross the $15.95 workflow
   limit, so the eval line is closed for tonight. Awaiting the second judge's score against stacked build 2 (85.8/86.0);
   if it comes in lower or H004 misbehaves on its read, the H004 fix is dropped.
+
+---
+
+## Run 41745711576 (staged brain, claude-haiku-5-5, judges claude-sonnet-5-5 + claude-haiku-5-5, dev set, 5 passes: 86.8 / 81.6 / 84.2 / 84.2 / 89.5)
+Failures per case over the five passes: H034 5, H029 5, H018 5, H011 4, H025 3, H028 3, H021 1, H035 1, H001 1, H027 1.
+- H034 (5/5, both judges, router): the router read a career switcher's ask as a search with no role, found an empty pool and said
+  "Nothing to show yet" asking for a resume; no entry route named. Line: `packages/domain/142-career-router.js` empty-pool reply.
+  Fix: `career_staged.ts` `careerSwitcherOpenAsk` sends it to the brain (reason `career_switcher_open_ask`); prompt.ts already tells
+  the brain to name two to four entry roles from the work they do now.
+- H029 (5/5, haiku judge only, router): "I haven't shown you a list of roles yet" never says nothing is prepared. Fix: the reply adds
+  "Nothing has been prepared or submitted for any role yet." (142, `handleListReference`).
+- H018 (5/5, haiku judge only, router): the refusal never answers "don't ask me each time". Fix: the reply says a standing yes is
+  one it will not keep and that it asks every time (142, people-matching stop).
+- H011 (4/5, one judge per pass, router): the debrief scored the question title ("Tell me about yourself") and never showed the
+  person's own answer, so the judges read it as feedback on an answer never given. Fix: the debrief quotes the recorded answer
+  (their words, trimmed to 160) (142, `handleMockDebrief`, `quotedAnswer`).
+- H025 (3/5, brain): opened with "I can't queue applications from this chat" for an overwhelmed person. Fix: prompt.ts acknowledge-first
+  rule for overwhelm; the staged note asks for acknowledgement and the part it can do now.
+- H028 (3/5, haiku judge only, brain): "which ones are safe" answered with an empty-account speech, never "no list yet". Fix: prompt.ts
+  rule for a reference to a list that does not exist.
+- Noise, not fixed: H021, H035, H001, H027 (one pass each, judge disagreement, sonnet passed; H001's reply is the prompt's own
+  prescribed opener; H027's flagged M&A topics are the question bank's).
+- Proof: `tests/architect/dev-reply-quality.test.ts` (offline). Re-run: pending (the lead measures).

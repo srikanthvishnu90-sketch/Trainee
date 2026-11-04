@@ -140,7 +140,9 @@ export function supabaseMailStore(admin: any): MailStore {
       // application for another job at the same employer was merged away and its rejection moved Trainee's application.
       const need = [...new Set(queue.filter((r) => !r.title && WENT.has(r.state) && r.job_id).map((r) => String(r.job_id)))];
       if (need.length) {
-        const ps = must<any[]>(await admin.from("career_postings").select("job_id,title").in("job_id", need.slice(0, 100)), "read posting titles") ?? [];
+        // Every id, 100 to a request (the queue read allows 1000 rows): a title left unread makes that application roleless again.
+        const ps: any[] = [];
+        for (let i = 0; i < need.length; i += 100) ps.push(...(must<any[]>(await admin.from("career_postings").select("job_id,title").in("job_id", need.slice(i, i + 100)), "read posting titles") ?? []));
         const titles = new Map(ps.filter((x) => x.title).map((x) => [String(x.job_id), String(x.title)]));
         for (const r of queue) if (!r.title && titles.has(String(r.job_id))) r.posting_title = titles.get(String(r.job_id));
       }

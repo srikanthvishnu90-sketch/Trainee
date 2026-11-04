@@ -69,7 +69,7 @@ export function postingPlaces(text: string): PlacePart[] {
         const x = t.replace(/\s+\d{5}(-\d{4})?$/, "");
         // Round 3: "US Remote", "Texas Remote", "Canada Remote": the place, then the way of work (as "Remote - US" reads).
         const r = /^(.*?\S)[\s-]+(remote|anywhere)$/i.exec(x);
-        if (r && !/^(fully|full|100%|partially|partly|hybrid|or)$/i.test(r[1])) return [r[1], r[2]];
+        if (r && !/^(fully|full|100%|partially|partly|hybrid|or|not|non|no|never|semi|mostly|largely|mainly|primarily|rarely|occasionally|limited|onsite|on-site|in-office|office)$/i.test(r[1])) return [r[1], r[2]]; // "Not Remote", "Mostly Remote", "Onsite Remote" say how the work is NOT done: never a remote posting (independent review of #455)
         const m = /^(.*?\S)\s+([A-Z]{2}|USA|US)$/.exec(x);
         return m && (STATE_NAMES[m[2].toLowerCase()] || NAMES_US.test(m[2])) && !/^(remote|anywhere)$/i.test(m[1]) ? [m[1], m[2]] : [x];
       });

@@ -104,6 +104,10 @@ Deno.test("filters: through the handler, ?state= filters the cards, an unknown s
   eq((ready.match(/<li class="card"/g) ?? []).length, 2);
   eq((await (await get(w, s, "state=zzz")).text().then((h) => (h.match(/<li class="card"/g) ?? []).length)), 3);
   eq(w.queue.length, 0, "a GET sends nothing");
+  // Independent review of #437: a state filter hides roles, so the approve-all text must say it covers the whole list, not only what is shown.
+  ok(/class="batchact"/.test(one), "the approve-all element is on the filtered page (world has 2 ready roles)");
+  ok(plain(one).includes("on the whole list, not only the roles your filters show"), plain(one).slice(0, 400));
+  ok(!plain(all).includes("not only the roles your filters show"), "unfiltered: the plain wording");
 });
 
 // ---------------------------------------------------------------- exception banners

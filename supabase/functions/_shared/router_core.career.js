@@ -14098,7 +14098,7 @@ const CareerRouter = (() => {
       return { intent: "people_matching_stop", reply, resultStatus: "awaiting_user", sends: 0 };
     }
     if (/\bgive me the (email|names? and contacts|contacts)\b|\bjust give me the email of\b|\bshare my resume with your (whole )?network\b|\bnames and contacts of\b/.test(t)) {
-      const reply = compose({ headline: "I don't have people's contact details to hand out — and I won't guess them.", facts: ["No people database or email-finder is connected to this product, so there are no names or addresses on file to give you. An inferred or invented address is exactly how outreach lands in a stranger's inbox, so this product only ever uses addresses that come from a real source with the person attached.", "Your resume is likewise never broadcast: it travels one approved draft at a time, to a named person, on your approval."], nextStep: alt });
+      const reply = compose({ headline: "I don't have people's contact details to hand out — and I won't guess them.", facts: ["No people database or email-finder is connected to this product, so there are no names or addresses on file to give you. An inferred or invented address is exactly how outreach lands in a stranger's inbox, so this product only ever uses addresses that come from a real source with the person attached.", "Your resume is likewise never broadcast: it travels one approved draft at a time, to a named person, and I ask for your yes every time."].concat(/don'?t ask me|do not ask me|each time|every time|standing (?:yes|ok|approval)|without (?:asking|checking)|always (?:ok|approve)/.test(t) ? ["\"Don't ask me each time\" is a standing yes I will not keep: I ask for your yes every time."] : []), nextStep: alt });
       return { intent: "people_matching_stop", reply, resultStatus: "awaiting_user", sends: 0 };
     }
     if (/\bbuild my match profile\b|\bwhat do you know about me that you'?d use for matching\b/.test(t)) {
@@ -16761,7 +16761,7 @@ const CareerRouter = (() => {
     if (!list.length) {
       const goal = statedFactsOf(ctx).find((f) => f.kind === "goal");
       if (goal) offerNext(ctx, `find ${goal.value}`);
-      return done("I haven't shown you a list of roles yet, so there's nothing to pick from.", [], goal ? `Want me to search for ${goal.value} now?` : "What role should I search for, and which city or remote?");
+      return done("I haven't shown you a list of roles yet, so there's nothing to pick from.", moreAsk ? [] : ["There is no list, so nothing has been prepared from one."], goal ? `Want me to search for ${goal.value} now?` : "What role should I search for, and which city or remote?");
     }
     if (moreAsk) {
       const more = Array.isArray(disc.lastMore) ? disc.lastMore.filter((r) => r && r.title) : [];
@@ -20182,6 +20182,13 @@ const CareerRouter = (() => {
     return { intent: "prep_mock_next", reply, resultStatus: "running", graded, contradiction: contra, mock: { id: state.mockId, question: state.currentQ } };
   }
 
+  function quotedAnswer(m, q) {
+    const list = m && Array.isArray(m.answers) ? m.answers : [];
+    const a = q == null ? list[0] : list.find((x) => x && x.q === q);
+    const txt = a ? s(a.answer).replace(/\s+/g, " ").trim() : "";
+    if (!txt) return null;
+    return txt.length > 160 ? txt.slice(0, 157).trimEnd() + "..." : txt;
+  }
   function mockImprovement(summary) {
     if (!summary || !Array.isArray(summary.what_didnt)) return null;
     let weakest = null;
@@ -20261,6 +20268,8 @@ const CareerRouter = (() => {
       `Honest verdict: your weakest area is ${summary ? summary.fix_first : "structure"} — that is the one to drill before the real round.`];
     if (summary && Array.isArray(summary.what_didnt) && summary.what_didnt.length) facts.push(`The answer that needs work first: "${s(summary.what_didnt[0].q).slice(0, 90)}".`);
     const imp = mockImprovement(summary);
+    const said = imp ? quotedAnswer(m, imp.q) : (answered === 1 ? quotedAnswer(m, null) : null);
+    if (said) facts.push(`Your answer, as I recorded it: "${said}"`);
     if (imp) facts.push(`One concrete improvement, on your answer to "${s(imp.q).slice(0, 90)}": ${imp.line}`);
     const reply = compose({ headline: "Your debrief — scored from this session's record.", facts, nextStep: "Want to retry your weakest answer once more, or run a fresh mock?" });
     return { intent: "prep_mock_debrief", reply, resultStatus: "prepared", sends: 0, summary };

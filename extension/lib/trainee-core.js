@@ -2578,7 +2578,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         tokens = tokens.flatMap((t) => {
           const x = t.replace(/\s+\d{5}(-\d{4})?$/, "");
           const r = /^(.*?\S)[\s-]+(remote|anywhere)$/i.exec(x);
-          if (r && !/^(fully|full|100%|partially|partly|hybrid|or)$/i.test(r[1])) return [
+          if (r && !/^(fully|full|100%|partially|partly|hybrid|or|not|non|no|never|semi|mostly|largely|mainly|primarily|rarely|occasionally|limited|onsite|on-site|in-office|office)$/i.test(r[1])) return [
             r[1],
             r[2]
           ];

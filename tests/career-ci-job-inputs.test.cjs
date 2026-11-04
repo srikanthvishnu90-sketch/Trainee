@@ -63,13 +63,21 @@ test("changes: a renamed-out input counts (delete + add), read from the test mer
 test("trace-opens + verify: files opened while the command runs are recorded; one outside the list fails the job", { skip: process.platform !== "linux" }, () => {
   const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "trace-")), "opens.txt");
   const inside = inputsOf("database").find((p) => p.endsWith(".json")) ?? "tests/fixtures/export-tables.json";
-  const r = spawnSync("python3", [TRACE, out, "--", "node", "-e", `require("fs").readFileSync(${JSON.stringify(inside)}); process.exit(3)`], { cwd: ROOT, encoding: "utf8" });
+  // Trace a scratch working tree, not the repository: node's test runner runs other test files at the same time and the tracer
+  // records every open under its working directory, so tracing the repository picks up their files and fails this test.
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "trace-work-"));
+  for (const p of [inside, "README.md"]) {
+    if (!fs.existsSync(path.join(ROOT, p))) continue;
+    fs.mkdirSync(path.dirname(path.join(work, p)), { recursive: true });
+    fs.copyFileSync(path.join(ROOT, p), path.join(work, p));
+  }
+  const r = spawnSync("python3", [TRACE, out, "--", "node", "-e", `require("fs").readFileSync(${JSON.stringify(inside)}); process.exit(3)`], { cwd: work, encoding: "utf8" });
   assert.equal(r.status, 3, r.stderr); // the command's own exit status
   const lines = fs.readFileSync(out, "utf8").split("\n");
   assert.equal(lines[0], "# complete"); assert.ok(lines.includes(inside), lines.join("\n"));
   assert.ok(!lines.includes("scripts/gate.sh"), "the tracer's own setup walk is not recorded");
   assert.equal(spawnSync("node", [CLI, "verify", "database", out], { cwd: ROOT }).status, 0);
-  spawnSync("python3", [TRACE, out, "--", "node", "-e", `require("fs").readFileSync("README.md")`], { cwd: ROOT });
+  spawnSync("python3", [TRACE, out, "--", "node", "-e", `require("fs").readFileSync("README.md")`], { cwd: work });
   if (fs.existsSync(path.join(ROOT, "README.md"))) {
     const v = spawnSync("node", [CLI, "verify", "database", out], { cwd: ROOT, encoding: "utf8" });
     assert.equal(v.status, 1); assert.match(v.stderr, /README\.md/);

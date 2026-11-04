@@ -25,6 +25,7 @@
     "database": [
       "tests/db/",
       "tests/fixtures/export-tables.json",
+      "tests/fixtures/card-cloud-db-20261021/",
       "supabase/migrations/",
       "supabase/rollbacks/",
       "scripts/launch/"

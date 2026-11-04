@@ -8,12 +8,19 @@
 // 503 with Retry-After at its page, or a verification check. Then that host is held off (as long as it asked, else 30 s
 // doubling to at most an hour, reset by the next success) for EVERY instance, through the database (dbHostGate), and
 // resumed when it allows. The owner may still set a number (MASS_SUBMIT_*), never needed.
+// A job the host refused before anything was sent (a 429 or a 503 at the page's open: sentNothingRefusal) is not ended: the same job goes back to the queue (o.requeue, 20261029180000), its approval unchanged, not handed out
+// before the host's hold ends, and runs again then; every refusal backs off again, with no cap of ours. A verification
+// check or a sign-in wall is the person's (needs_user, never retried); anything else after the engine started is recorded
+// as it ended, and an unknown is never driven again. A job claimed and never started (the worker stopping, no start
+// inside its lease budget, its host held, its journal line unwritable) is not ended either: the same job goes back to the
+// queue (o.putBack, 20261029190000), its journal line cleared first, and runs later, once.
 //
 // Exactly once: a claimed application is started at most once. Before its engine starts, the start is written to a
 // durable journal (fsync) when one is given. A worker that dies mid-batch leaves in the journal:
 //   started, not finished   -> recorded unknown_outcome on the next start, never driven again (it may have been sent);
 //   claimed, never started  -> driven on the next start under the same lease, if the lease still has time to run it;
-//                              otherwise recorded not_submitted: nothing was sent.
+//                              otherwise put back in the queue (o.putBack; without it recorded not_submitted): nothing
+//                              was sent.
 // Without the journal (a lost machine), the database's own sweep closes a drive older than 15 minutes as unknown and never
 // re-drives it (attempts = 1): exactly once never rests on this machine. A claimed application that cannot start inside
 // its lease budget (`startBudgetMs` after its claim) is never started late.
@@ -92,6 +99,26 @@ export const BACKOFF_BASE_MS = 30_000, BACKOFF_CEIL_MS = 3_600_000;
 export function backoffMs(level: number, retryAfterS: number | null): number {
   if (retryAfterS !== null && Number.isFinite(retryAfterS) && retryAfterS >= 0) return Math.min(retryAfterS * 1000, 86_400_000);
   return Math.min(BACKOFF_CEIL_MS, BACKOFF_BASE_MS * 2 ** Math.max(0, level));
+}
+// The seconds a host's Retry-After header asks for (RFC 9110 10.2.3): delay-seconds (digits only), or an HTTP-date in
+// one of its three forms (IMF-fixdate, RFC 850, asctime), counted from `now` (a date already past is 0). Anything else is
+// not an answer (null: the default doubling applies). At most a day (86,400 s), the longest any gate holds a host: a
+// larger number would not fit the database's integer argument and would leave the host not held at all.
+// Date.parse alone is far too lenient here: it reads "1.5", "-1", "12/31" or "Retry in 5" as dates in 2001, which meant
+// a wait of 0 s, the host asked again at once (found by tests/architect/scenarios-apply.test.ts, retry).
+const HTTP_DATE = [
+  /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/,
+  /^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), \d{2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2} \d{2}:\d{2}:\d{2} GMT$/,
+  /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ \d]\d \d{2}:\d{2}:\d{2} \d{4}$/,
+];
+export const RETRY_AFTER_MAX_S = 86_400;
+export function retryAfterSeconds(raw: string | null | undefined, now: number): number | null {
+  const v = String(raw ?? "").trim();
+  if (/^\d+$/.test(v)) return Math.min(Number(v), RETRY_AFTER_MAX_S);
+  if (!HTTP_DATE.some((re) => re.test(v))) return null;
+  // asctime has no zone: it is GMT (RFC 9110). RFC 850's two-digit year: Date.parse reads it as 19xx/20xx as browsers do.
+  const at = Date.parse(HTTP_DATE[2].test(v) ? `${v} GMT` : v);
+  return Number.isFinite(at) ? Math.min(RETRY_AFTER_MAX_S, Math.max(0, Math.round((at - now) / 1000))) : null;
 }
 export function localHostGate(): HostGate {
   const st = new Map<string, { until: number; level: number }>();
@@ -201,6 +228,34 @@ export function refusal(r: { state?: string; reason?: string | null; retry_after
   if (isBotCheck(r)) return { why: "bot_check", retryAfterS: null };
   return null;
 }
+// The employer's page itself, at its open, refusing for load (scripts/apply.ts, before anything is filled): a 429 (Too Many
+// Requests) or a 503 (Service Unavailable), with or without Retry-After. Owner rule (2026-10-27): back off only when an
+// outside system refuses, then RESUME; a 503 is the site saying it cannot take us now, the same as a 429. The seconds it
+// asked for (retryAfterSeconds), or null: the default doubling. Anything else is not a refusal for load.
+export function pageRefusal(status: number, retryAfter: string | null | undefined, now: number): { status: number; retry_after_s: number | null } | null {
+  if (status !== 429 && status !== 503) return null;
+  return { status, retry_after_s: retryAfterSeconds(retryAfter, now) };
+}
+// The host refused BEFORE anything was filled or sent, for load: the engine's HOST_RATE_LIMITED (a 429 or a 503, with or
+// without Retry-After: pageRefusal), which scripts/apply.ts reports only at the page's open, before any
+// field is filled and before any write leaves the browser. Owner rule (2026-10-27): "back off only when an outside
+// system refuses, then RESUME". Such an application is not ended: the same job goes back to the queue, its approval and
+// hash binding unchanged, not to be claimed before the host's hold ends (career_apply_requeue_refused_*, 20261029180000),
+// and runs again then. Nothing else is put back: a verification check and a sign-in wall are the person's (needs_user,
+// never retried), and anything after the engine may have sent is unknown, never driven again. Returns the database's
+// reason, or null.
+export function sentNothingRefusal(r: { state?: string; reason?: string | null; status?: number | null; proof?: unknown; confirmation_id?: unknown } | null | undefined): "rate_limited" | "server_busy" | null {
+  if (!r || r.state !== "not_submitted" || String(r.reason ?? "").split(":")[0] !== "HOST_RATE_LIMITED") return null;
+  if (r.proof || r.confirmation_id) return null;
+  return r.status === 503 ? "server_busy" : "rate_limited";
+}
+// Why a claim was let go without its engine starting, as the database's put-back names it (20261029190000).
+export function unstartedWhy(why: string): string {
+  return String(why ?? "").split(":")[0].trim().toLowerCase();
+}
+// A database that does not have the requeue yet (before 20261029180000): the application is recorded as before.
+export const requeueMissing = (text: string) => /career_apply_requeue_refused|PGRST202|could not find the function|no function/i.test(text);
+
 // What only the person can do: a verification check (never solved or got around) or the employer's sign-in wall (never
 // signed in for them). Either ends the application needs_user with its link, and it is never retried. The engine stops
 // on both before anything is sent (CAPTCHA_AT_SUBMIT: no write left the browser; ACCOUNT_LOGIN_REQUIRED: before filling).
@@ -217,10 +272,17 @@ export function handBack(r: { state?: string; reason?: string | null } | null | 
 // engine started. The start is written and fsynced before the engine runs; the file is removed once the outcome is
 // recorded. It holds the person's approved answers for as long as the drive lasts, like the facts file the engine reads.
 // Each instance has its own folder (one per machine or container).
-export interface JournalEntry<J> { job: J; claimedAt: number; started: boolean }
+// Submit worker round (2026-10-31): the employer's answer is written here too, after the engine returned and before the
+// queue records it (`result`). A worker that dies between the two used to leave only "started", recorded unknown on its
+// next start although the employer had answered (a confirmation number on the page): the next start now records that
+// answer (o.recovered), and still never drives the application again.
+export interface JournalResult { state: string; reason?: string | null; outcome?: string | null; errorKind?: string | null; evidence?: Record<string, unknown> }
+export interface JournalEntry<J> { job: J; claimedAt: number; started: boolean; result?: JournalResult }
 export interface Journal<J extends { id: string }> {
   put(job: J, claimedAt: number): Promise<void>;
   start(id: string): Promise<void>;
+  // The engine's answer, before the queue records it (optional: a journal without it leaves the start only).
+  result?(id: string, r: JournalResult): Promise<void>;
   done(id: string): Promise<void>;
   list(): Promise<JournalEntry<J>[]>;
 }
@@ -261,6 +323,11 @@ export function fileJournal<J extends { id: string }>(dir: string): Journal<J> {
       const e = JSON.parse(await Deno.readTextFile(file(id)));
       await write(file(id), { ...e, started: true });
     },
+    async result(id, r) {
+      await init();
+      const e = JSON.parse(await Deno.readTextFile(file(id)));
+      await write(file(id), { ...e, started: true, result: r });
+    },
     async done(id) {
       await Deno.remove(file(id)).catch(() => {});
     },
@@ -271,7 +338,10 @@ export function fileJournal<J extends { id: string }>(dir: string): Journal<J> {
         if (!f.isFile || !f.name.endsWith(".json")) continue;
         try {
           const e = JSON.parse(await Deno.readTextFile(`${dir}/${f.name}`));
-          if (e?.job?.id && typeof e.claimedAt === "number") out.push({ job: e.job, claimedAt: e.claimedAt, started: e.started === true });
+          if (e?.job?.id && typeof e.claimedAt === "number") {
+            out.push({ job: e.job, claimedAt: e.claimedAt, started: e.started === true,
+              ...(e.started === true && e.result && typeof e.result.state === "string" ? { result: e.result } : {}) });
+          }
         } catch { /* a torn temp write: its rename never happened, so the job was never started from it */ }
       }
       return out.sort((a, b) => a.claimedAt - b.claimedAt);
@@ -281,7 +351,10 @@ export function fileJournal<J extends { id: string }>(dir: string): Journal<J> {
 
 // --------------------------------------------------------------------------------------------------- the scheduler
 export interface MassJob { id: string; url: string; lease_token?: string; claimed_at?: string | null }
-export interface MassResult { state: string; reason?: string | null; recorded?: boolean; retry_after_s?: number | null }
+// requeue: the run met a host refusing before anything was sent and recorded nothing; the scheduler puts the same job back
+// (o.requeue). not_before: when the database will hand a requeued job out again (epoch ms).
+export interface MassResult { state: string; reason?: string | null; recorded?: boolean; retry_after_s?: number | null; requeue?: boolean; status?: number | null; not_before?: number | null }
+export interface Requeue { why: string; reason: "rate_limited" | "server_busy"; retryAfterS: number | null; until: number }
 export interface MassOutcome extends MassResult { id: string; host: string; started: boolean }
 
 // When an application was claimed: the earlier of this machine's clock and the database's claimed_at, so a clock that
@@ -296,12 +369,25 @@ export async function massRun<J extends MassJob>(o: {
   // Runs one claimed application and records its outcome (the finish). `onStart` is awaited right before its engine
   // starts (the journal's durable start); if it throws, the engine must not start. Never throws for a job: a failure is
   // its recorded outcome.
-  run: (job: J, onStart: () => Promise<void>) => Promise<MassResult>;
+  run: (job: J, onStart: () => Promise<void>, onResult?: (r: JournalResult) => Promise<void>) => Promise<MassResult>;
   // Ends a claimed application that will not be started (its lease budget ran out, or the worker is stopping). Nothing
-  // was sent. Recorded not_submitted (the queue has no release today; see docs/launch/CLOUD-RUNNER.md).
+  // was sent. Recorded not_submitted. Used only where putBack (below) is absent, or for a run that may not be put back.
   unstarted: (job: J, why: string) => Promise<MassResult>;
   // A started application a crashed run left unfinished: recorded unknown_outcome, never driven again.
   orphaned: (job: J) => Promise<MassResult>;
+  // A started application a crashed run left with the engine's answer journaled but not recorded: that answer recorded
+  // (never driven again). Absent: orphaned.
+  recovered?: (job: J, r: JournalResult) => Promise<MassResult>;
+  // A run whose host refused before anything was sent (its result says requeue): the same job back to the queue, not to
+  // be handed out before `until` (the host's hold); returns state "queued" and the database's not_before. Absent, or for
+  // anything but a load refusal, it is recorded not sent (unstarted).
+  requeue?: (job: J, q: Requeue) => Promise<MassResult>;
+  // A claimed application whose engine never started and will not start in this run (the worker stopping, its lease
+  // budget spent, its host held, its journal line unwritable): the same job back to the queue, not to be handed out
+  // before `until` (now, or the host's hold), to run later, once (20261029190000). Called only for a claim that never
+  // started, after its journal line is cleared. Returns state "queued" and the database's not_before; a queue that
+  // cannot put it back records it not sent instead (as unstarted does). Absent: unstarted.
+  putBack?: (job: J, why: string, until: number) => Promise<MassResult>;
   // A queue whose claim only leases (many instances: career_apply_claim_fair): the leased applications this round will
   // start become drives, in one call, after their journal lines and before any engine starts. Returns the ids begun; one
   // whose lease lapsed (another instance has it now) is not started here and nothing is recorded for it.
@@ -329,6 +415,9 @@ export async function massRun<J extends MassJob>(o: {
   type Item = { job: J; claimedAt: number; host: string };
   const pending: Item[] = [];
   const inFlight = new Set<Promise<void>>();
+  // The latest time a job this run put back (a host refused it before anything was sent) may be handed out again: a drain
+  // ends only after an empty claim made after it, so a requeued job is driven again before the drain stops.
+  let resumeAt = 0, dryAt = 0;
   let signal: () => void = () => {};
   const waitEvent = (ms: number) => new Promise<void>((resolve) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -360,7 +449,7 @@ export async function massRun<J extends MassJob>(o: {
     for (const e of await o.journal.list()) {
       const item = { job: e.job, claimedAt: claimTime(e.job, e.claimedAt), host: hostOf(e.job.url) };
       if (e.started) {
-        const r = await guarded(() => o.orphaned(e.job));
+        const answered = e.result, r = answered && o.recovered ? await guarded(() => o.recovered!(e.job, answered)) : await guarded(() => o.orphaned(e.job));
         settle(item, true, r);
         await forget(e.job.id, r);
         orphans++;
@@ -378,17 +467,37 @@ export async function massRun<J extends MassJob>(o: {
       pacer.began(item.host, now());
       began = true;
     };
+    // The engine's answer, journaled before the queue records it (a crash between the two keeps the answer).
+    const onResult = async (res: JournalResult) => { if (o.journal?.result) await o.journal.result(item.job.id, res).catch(() => {}); };
     const pr: Promise<void> = (async () => {
-      const r = await guarded(() => o.run(item.job, onStart));
+      let r = await guarded(() => o.run(item.job, onStart, onResult));
       const no = refusal(r);
       if (no) {
+        let until: number;
         try {
-          const until = await gate.refused(item.host, no.why, no.retryAfterS, now());
-          pacer.hold(item.host, until);
+          until = await gate.refused(item.host, no.why, no.retryAfterS, now());
           log(`${item.host} refused (${no.why === "rate_limited" ? "rate limited" : "a verification check, handed back to the person, never retried"}); every instance waits until ${new Date(until).toISOString()} before starting there again.`);
         } catch (e) {
+          until = now() + backoffMs(0, no.retryAfterS);
           log(`${item.host} refused, and the shared back-off could not be written (${String((e as Error)?.message ?? e).slice(0, 120)}).`);
         }
+        pacer.hold(item.host, until);
+        // Refused before anything was sent (the run recorded nothing): the same job goes back to the queue until the host's
+        // hold ends, its approval unchanged, and runs again then (owner: back off, then RESUME). Never a verification check.
+        if (r.requeue) {
+          const first = r, reason = first.status === 503 ? "server_busy" as const : "rate_limited" as const;
+          r = no.why === "rate_limited" && o.requeue
+            ? await guarded(() => o.requeue!(item.job, { why: no.why, reason, retryAfterS: no.retryAfterS, until }))
+            : await guarded(() => o.unstarted(item.job, String(first.reason ?? "HOST_RATE_LIMITED")));
+          if (r.state === "queued") {
+            resumeAt = Math.max(resumeAt, until, Number(r.not_before ?? 0));
+            log(`${item.job.id}: nothing was sent; it goes back to the queue and runs again once ${item.host} allows (after ${new Date(Math.max(until, Number(r.not_before ?? 0))).toISOString()}).`);
+          }
+        }
+      } else if (r.requeue) {
+        // A run may say "put it back" only for a refusal the gate is told of; anything else is recorded as not sent.
+        const first = r;
+        r = await guarded(() => o.unstarted(item.job, String(first.reason ?? "HOST_RATE_LIMITED")));
       } else if (began && r.state !== "unrecorded") {
         await gate.ok(item.host).catch(() => {});
       }
@@ -401,7 +510,23 @@ export async function massRun<J extends MassJob>(o: {
     });
     inFlight.add(pr);
   };
-  const giveUp = async (item: Item, why: string) => {
+  // A claim that never started and will not start here. Put back (owner: back off, then RESUME; 20261029190000) when the
+  // queue can: its journal line is cleared FIRST, so a crash after the put-back can never start it from this lease (a
+  // crash before it leaves the drive to the database's sweep: unknown, never driven twice). Else recorded not sent.
+  const giveUp = async (item: Item, why: string, until = now(), journaled = true) => {
+    if (o.putBack) {
+      let cleared = true;
+      if (o.journal && journaled) await o.journal.done(item.job.id).catch(() => { cleared = false; });
+      if (cleared) {
+        const r = await guarded(() => o.putBack!(item.job, why, until));
+        if (r.state === "queued") {
+          resumeAt = Math.max(resumeAt, until, Number(r.not_before ?? 0));
+          log(`${item.job.id}: not started (${why}); nothing was sent; it goes back to the queue and runs later.`);
+        }
+        settle(item, false, r);
+        return;
+      }
+    }
     const r = await guarded(() => o.unstarted(item.job, why));
     settle(item, false, r);
     await forget(item.job.id, r);
@@ -426,15 +551,20 @@ export async function massRun<J extends MassJob>(o: {
     if (!dry && free > 0) {
       const want = Math.min(p.claimBatch, free);
       try {
+        const asked = now();
         const jobs = await o.claim(want);
         const at = now();
-        if (!jobs.length) dry = true;
+        if (!jobs.length) { dry = true; dryAt = asked; }
         for (const job of jobs) {
+          // A claim row with no id or link is nothing this worker claimed (a database's claim that returned a row it did
+          // not take, 20261030140000): never run, never recorded.
+          if (!job || typeof job.id !== "string" || !job.id || typeof job.url !== "string") { log("The claim returned a row with no application in it; skipped."); continue; }
           const item = { job, claimedAt: claimTime(job, at), host: hostOf(job.url) };
           if (o.journal) {
             try { await o.journal.put(job, item.claimedAt); } catch (e) {
               // Without its journal line a crash could not tell whether it ran: it is not started.
-              await giveUp(item, `JOURNAL_UNWRITABLE: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
+              // Put back a little later (this machine's disk), so another instance or a later round takes it.
+              await giveUp(item, `JOURNAL_UNWRITABLE: ${String((e as Error)?.message ?? e).slice(0, 120)}`, now() + BACKOFF_BASE_MS, false);
               continue;
             }
           }
@@ -458,7 +588,7 @@ export async function massRun<J extends MassJob>(o: {
       for (let i = 0; i < pending.length;) {
         if (pacer.heldUntil(pending[i].host) > t) {
           const [item] = pending.splice(i, 1);
-          await giveUp(item, "HOST_HELD");
+          await giveUp(item, "HOST_HELD", pacer.heldUntil(item.host));
           continue;
         }
         i++;
@@ -501,8 +631,10 @@ export async function massRun<J extends MassJob>(o: {
     }
     if (!pending.length && !inFlight.size) {
       if (dry) {
-        if (o.drain) break;
-        await sleep(idle);
+        if (o.drain && dryAt > resumeAt) break;
+        // A job this run put back is due again soon: wait for its time, then ask (a drain does not end before it).
+        if (resumeAt >= dryAt) await waitEvent(Math.min(idle, resumeAt - now() + 1));
+        else await sleep(idle);
         dry = false;
       }
       continue;
@@ -518,7 +650,7 @@ export async function massRun<J extends MassJob>(o: {
       until = Math.min(until, item.claimedAt + p.startBudgetMs + 1);
       if (pacer.inFlight(item.host) < p.hostMax) until = Math.min(until, pacer.readyAt(item.host));
     }
-    if (dry) until = Math.min(until, now() + idle);
+    if (dry) until = Math.min(until, now() + idle, resumeAt >= dryAt ? Math.max(now(), resumeAt + 1) : Infinity);
     // A host held by another instance can be released early (its next success); look again at least every few seconds.
     if (pending.length) until = Math.min(until, now() + 5_000);
     await waitEvent(until - now());

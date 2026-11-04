@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-10-28):** the current inventory of features, depth and status is `docs/architect/FEATURES.md`. Kept for history; do not use as current.
+
 # Backend gap map, 2026-10-23
 
 The architect's map of the whole backend, from ingest to a proven application, at trunk `63a1233f`. It is in

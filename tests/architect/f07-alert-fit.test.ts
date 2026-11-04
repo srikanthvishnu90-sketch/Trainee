@@ -57,7 +57,7 @@ Deno.test("F7/3 caps and quiet hours still come from the person's own settings, 
   const fits = new Map([["u1", new Map([["greenhouse:acme:a", fit(20)], ["greenhouse:acme:b", fit(90)]])]]);
   eq(alerts(planProactive({ users: [user({ prefs: prefs({ max_instant_per_day: 1 }) })], postings: ps, now: NOW, fits })), ["b"], "a cap of 1: the best fit");
   eq(alerts(planProactive({ users: [user({ instant_sent_today: 2 })], postings: ps, now: NOW, fits })), [], "today's room used up: held");
-  eq(alerts(planProactive({ users: [user({ sent_this_week: 15 })], postings: ps, now: NOW, fits })), [], "the weekly cap: held");
+  eq(alerts(planProactive({ users: [user({ sent_this_week: 15 })], postings: ps, now: NOW, fits })), ["b", "a"], "no weekly cap: 15 already this week changes nothing");
   // 11:00 in New York is inside quiet hours 9 to 12: the alert waits for 12:00 New York (16:00Z).
   const quiet = planProactive({ users: [user({ prefs: prefs({ quiet_start: 9, quiet_end: 12 }) })], postings: ps, now: NOW, fits }).filter((p) => p.kind === "alert");
   eq(quiet.map((p) => (p as any).at), [Date.UTC(2026, 9, 19, 16), Date.UTC(2026, 9, 19, 16)], "moved to the end of the person's quiet hours");

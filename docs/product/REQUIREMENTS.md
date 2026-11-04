@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-10-28):** the current inventory of features, depth and status is `docs/architect/FEATURES.md`. Kept for history; do not use as current.
+
 # Upmore careers: the requirements and where each one stands
 
 Owner, 2026-10-19: the whole product follows one path: **understand you, find suitable opportunities, prepare your

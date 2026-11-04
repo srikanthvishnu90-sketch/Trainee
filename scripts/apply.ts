@@ -10,12 +10,13 @@ import { createRequire } from "node:module";
 import {
   admitApplication,
   classifyField,
-  classifyOutcome,
   normLabel,
+  outcomeAfterSend,
   planBatch,
   questionFieldType,
 } from "../supabase/functions/_shared/career_apply.ts";
 import { hashApplyPayload } from "../supabase/functions/_shared/career_apply_store.ts";
+import { pageRefusal } from "../workers/career-browser/mass-run.ts";
 // How a form's fields become the planner's questions; shared with the browser extension (WO-031).
 import { bindFields as bind } from "./career/form-bind.ts";
 import { aiPolicyStatements } from "../supabase/functions/_shared/ai_policy.ts";
@@ -32,7 +33,7 @@ import {
 import { CODE_MAX_WAIT_MS, pollForCode } from "../supabase/functions/_shared/career_email_code_poll.ts";
 // WO-102: the submission-quality contract, the extension's own functions (never copied): which facts may be sent at all
 // (trustedManifest), and which planned answers they stand behind (contractFill).
-import { contractFill, type Manifest, trustedManifest } from "../extension/src/apply_core.ts";
+import { contractFill, isIdentityField, type Manifest, trustedManifest } from "../extension/src/apply_core.ts";
 import { rowQuestionLabel, rowQuestionType } from "../supabase/functions/_shared/row_answer.ts";
 import {
   bodyContents,
@@ -53,9 +54,12 @@ const sha = (b: any) => crypto.createHash("sha256").update(b).digest("hex");
 // A confirmed answer for a single checkbox: "Yes" checks it as surely as "true" does.
 const yesish = (v: unknown) => /^(true|yes|y|on|checked)$/i.test(String(v ?? "").trim());
 // A form asking for an identity number stops before anything is filled: those are the person's to type, never held or
-// sent by Trainee (standing rule: no full ID numbers anywhere).
-const IDENTITY_NUMBER =
-  /social security|\bssn\b|passport (number|no\b)|driver'?s licen[cs]e (number|no\b)|national (id|insurance) number|\btax(payer)? id|\bitin\b|alien (registration )?number|\ba-number\b/i;
+// sent by Trainee (standing rule: no full ID numbers anywhere). Round 2 of the apply scenarios (2026-10-30): the engine's
+// own list missed the numbers of other countries and the ways forms write them ("Social Insurance Number (SIN)", "CURP",
+// "Identity card no.", "Government-issued ID number", "Tax File Number (TFN)"), so the form was planned and the question
+// went to the person by text. One list now, the extension's (extension/src/apply_core.ts isIdentityField, NEVER_BY_TEXT
+// beside it), on the field's label and its name.
+const IDENTITY_NUMBER = { test: (labelOrName: string) => isIdentityField({ label: labelOrName }) };
 // A hidden field the employer's page sets is sent as it is and shown in the review, unless it consents to something on
 // the person's behalf: a consent-like name with any value but a decline ("0", "false", "no", empty) stops.
 const consentOnBehalf = (name: string, value: string) =>
@@ -320,6 +324,16 @@ function codeReader(mode: string | undefined, local: boolean, userId: string): C
       return { status: String(body.status), stop: String(body.stop || codeStop("not_yet", ats)) };
     }, { now: Date.now, maxWaitMs: wait });
 }
+// Which family's script-submitted application this run may bind (null: none, and a form with no bound form post stops at
+// SUBMIT_DESTINATION_NOT_BOUND). A local test page names the family it stands in for (--script-submit); a real posting
+// is its host's family, only with --script-submit naming it or the owner's switch UPMORE_SCRIPT_SUBMIT_LIVE=1 on the host
+// the engine runs on. Every real Ashby form (Ramp's included) has no <form> post, so without one of the two even the dry
+// run that prepares the card stops there. The person's own Submit binds nothing here.
+export function scriptSubmitFamily(o: { local: boolean; flag: string | null; live: boolean; family: unknown; personSubmits: boolean }) {
+  if (o.personSubmits) return null;
+  if (o.local) return isScriptFamily(o.flag) ? o.flag : null;
+  return (o.flag || o.live) && isScriptFamily(o.family) ? o.family : null;
+}
 export async function runApply(args: string[]) {
   const o = options(args);
   if ((o["cloud-authorize-stdio"] || o["cloud-authorize-nonce"]) &&
@@ -390,7 +404,7 @@ export async function runApply(args: string[]) {
         e.post?.destination === e.payload.destination && e.post?.mutations === 1 && acknowledged(e.post.status) &&
         observed
       ) {
-        const result = classifyOutcome(obs);
+        const result = outcomeAfterSend(obs);
         store.withLock(id, () => store.put({ ...store.get(id), state: result.state, result }));
         return { ...result, already_recorded: true, evidence_path: existing.evidence_path };
       }
@@ -432,11 +446,8 @@ export async function runApply(args: string[]) {
   const personSubmits = !!o["person-submits"];
   // Script submit binding: where a script-submitted form's one application request may go. A local test page names the
   // family it stands in for; a real posting's family is its host's, and only with the owner's switch.
-  const scriptFamily = personSubmits ? null : target.local
-    ? (o["script-submit"] ?? null)
-    : (o["script-submit"] || Deno.env.get("UPMORE_SCRIPT_SUBMIT_LIVE") === "1") && isScriptFamily(family)
-    ? family
-    : null;
+  const scriptFamily = scriptSubmitFamily({ local: target.local, flag: o["script-submit"] ?? null,
+    live: Deno.env.get("UPMORE_SCRIPT_SUBMIT_LIVE") === "1", family, personSubmits });
   const scriptEndpoint: Endpoint | null = scriptFamily ? scriptSubmitEndpoint(scriptFamily, u, target.local) : null;
   // Every write stopped while the agent's submit was open (keys never kept, only where it went and why).
   const stopped: { method: string; url: string; why: string }[] = [];
@@ -552,8 +563,13 @@ export async function runApply(args: string[]) {
         return false;
       }).map((e: any) => ({ name: e.name, value: String(e.value ?? "") }))
     );
+    // A field the engine filled itself with the approved answer is explained, wherever the page put it since: a form in
+    // pages hides the page it just left (round 2 of the apply scenarios, 2026-10-30: every hidden-section wizard stopped
+    // at its second page on the person's own answers from the first).
+    const ours = (h: { name: string; value: string }) =>
+      Object.hasOwn(planned, h.name) && Object.hasOwn(wire, h.name) && typeof wire[h.name] === "string" && wire[h.name] === h.value;
     const unexplained = hidden.filter((h: any) =>
-      !(pageFields && Object.hasOwn(pageFields, h.name) && pageFields[h.name] === h.value) && !echoed(h.value)
+      !(pageFields && Object.hasOwn(pageFields, h.name) && pageFields[h.name] === h.value) && !echoed(h.value) && !ours(h)
     );
     if (unexplained.length) throw fail("UNCONFIRMED_HIDDEN_FIELD: " + unexplained.map((h: any) => h.name).join(", "));
   }
@@ -858,14 +874,15 @@ export async function runApply(args: string[]) {
       if (!["GET", "HEAD"].includes(req.method()) && !readQuery && !codeReq && req.url() === destination) {
         postStatus = response.status();
       }
-      // Mass submission (owner, 2026-10-27): the employer's site refusing for load (429, or 503 with Retry-After) on the
-      // page itself, before anything was filled, stops the run as not sent; the worker backs off that host for every
-      // instance and the application is not started again by this run (HOST_RATE_LIMITED, with the seconds it asked for).
-      if (main && !allowSubmit && (response.status() === 429 || (response.status() === 503 && response.headers()["retry-after"]))) {
-        const ra = String(response.headers()["retry-after"] ?? "").trim();
-        const secs = /^\d{1,6}$/.test(ra) ? Number(ra) : Number.isFinite(Date.parse(ra)) ? Math.max(0, Math.round((Date.parse(ra) - Date.now()) / 1000)) : null;
-        evidence.rate_limited = { status: response.status(), retry_after_s: secs };
-      }
+      // Mass submission (owner, 2026-10-27): the employer's site refusing for load (a 429 or a 503, with or without
+      // Retry-After: pageRefusal) on the page itself, before anything was filled, stops the run as not sent; the worker
+      // backs off that host for every instance and puts the same job back until the host allows (HOST_RATE_LIMITED, with
+      // the seconds it asked for, or none: the default doubling).
+      const refused = main && !allowSubmit ? pageRefusal(response.status(), response.headers()["retry-after"], Date.now()) : null;
+      if (refused) evidence.rate_limited = refused;
+      // MASS APPLY (2026-11-01): the posting's own page answering 404/410 at the open, before anything was filled, is a
+      // closed posting: not sent, and not an error of the site (it must not pause the whole ATS for everyone's batch).
+      if (main && !allowSubmit && (response.status() === 404 || response.status() === 410)) evidence.closed = response.status();
       if (uploadReq) uploadEchoes.push((await response.text()).slice(0, 20000));
       if (response.status() >= 300 && response.status() < 400) {
         const targetURL = new URL(response.headers().location || "/", req.url());
@@ -889,12 +906,13 @@ export async function runApply(args: string[]) {
     if (evidence.rate_limited) {
       return write({ state: "not_submitted", reason: "HOST_RATE_LIMITED", status: evidence.rate_limited.status, retry_after_s: evidence.rate_limited.retry_after_s });
     }
+    if (evidence.closed) return write({ state: "not_submitted", reason: "POSTING_CLOSED", status: evidence.closed });
     if (opened.captcha && !(o.handoff && await handOff())) return write({ state: "needs_user", reason: "captcha" });
     const history: any = {}, values: any = {}, planned: any = {};
     for (let step = 0; step < 8; step++) {
       current = await observe();
       if (current.raw.some((f: any) => f.inputType === "password")) throw fail("ACCOUNT_LOGIN_REQUIRED");
-      const idFields = current.schema.filter((f: any) => IDENTITY_NUMBER.test(f.label || f.name));
+      const idFields = current.schema.filter((f: any) => IDENTITY_NUMBER.test(f.label || f.name) || IDENTITY_NUMBER.test(String(f.name || "").replace(/[_\-\[\]]+/g, " ")));
       if (idFields.length) {
         return write({
           state: "not_submitted",
@@ -1361,7 +1379,8 @@ export async function runApply(args: string[]) {
       }
       evidence.proof.final_url = page.url();
       Object.freeze(evidence.proof);
-      const classified = classifyOutcome(obs);
+      // The one POST went out and the employer acknowledged it: never "not submitted" from here (outcomeAfterSend).
+      const classified = outcomeAfterSend(obs);
       // Without both pictures the product never says the application went through as confirmed.
       const judged = classified.state === "confirmed" && !evidence.proof.after_submit
         ? { ...classified, state: "submitted_unconfirmed", reason: "AFTER_SUBMIT_PROOF_MISSING" }
@@ -1385,6 +1404,9 @@ export async function runApply(args: string[]) {
     const result = {
       state: sent ? "unknown_outcome" : "not_submitted",
       reason: sent ? "READBACK_REQUIRED" : notSentReason,
+      // MASS APPLY (2026-11-01): what the browser itself said when it failed (a crash, a timeout, out of memory), so a
+      // DRIVER_ERROR can be told apart and its cause found. The browser's own words only: no field value, no page text.
+      ...(notSentReason === "DRIVER_ERROR" ? { driver_error: String(e?.name || "Error").slice(0, 40) + ": " + String(e?.message || "").split("\n")[0].replace(/https?:\/\/\S+/g, "<url>").slice(0, 160) } : {}),
       ...(evidence.proof ? { proof: evidence.proof } : {}),
     };
     if (fenced) {

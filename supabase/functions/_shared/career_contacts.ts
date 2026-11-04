@@ -16,6 +16,7 @@
 // Trainee never probes a mailbox over SMTP itself (RCPT TO): it is abusive to the receiving server and gets the sender's
 // IPs blocked. Hunter runs its own checks on its own servers; that is the one mailbox-level signal, and it is labeled.
 import { CareerProfile } from "./router_core.career.js";
+import { cleanCell, isFormula, readsAsInstruction } from "./career_people_import.ts";
 
 export const MAX_CONTACTS = 3000; // what the per-thread state keeps (the snapshot is at most 1 MB)
 export const NO_SMTP_PROBE = "Trainee never probes a mailbox over SMTP itself: it is abusive to mail servers and gets IPs blocked. Only Hunter's own check, where it ran, speaks to the mailbox.";
@@ -32,6 +33,11 @@ export interface ContactRow {
   title: string; school: string; connected_on: string | null;
   check?: Checks; verified?: boolean;
   vendor?: string; vendor_email_status?: string; // the list vendor's own claim (Apollo's "Email Status"), never a check
+  // A person web discovery found (career_people source "provider"): their address was published on the page that names
+  // them, or inferred from the company's email format. The draft card says which (2026-10-29).
+  address?: "published" | "inferred";
+  discovered?: true; // found by web discovery: someone a draft may reach, never someone the person "knows"
+  seen_at?: string | null; // when this row was read from its source (import, page, Gmail): which of two rows of one person is newer
 }
 export type SourceResult =
   | { status: "ok"; source: string; kind: "own_export" | "vendor"; vendor: string | null; rows: ContactRow[]; duplicates: number; skipped: { row: number; why: string }[]; cost_usd: number }
@@ -108,20 +114,39 @@ export function importContactsCsv(file: string, text: string): { rows: ContactRo
   const hi = lines.findIndex((r) => columnsOf(r) !== null);
   if (hi < 0) return { rows: [], duplicates: 0, skipped: [], vendor: null, error: "no header row with a name column and a company or email column" };
   const at = columnsOf(lines[hi])!, vendor = isApollo(lines[hi]) ? "apollo" : null;
-  const cell = (r: string[], k: string) => (at[k] === undefined ? "" : String(r[at[k]] ?? "").replace(/\s+/g, " ").trim());
+  // NETWORKING SCENARIOS (2026-10-29): a list is a file anyone can make, so its cells get the export's rules
+  // (career_people_import.ts): a cell a spreadsheet would run as a formula (= + - @, a tab or CR, a DDE pipe) or that reads
+  // as an instruction is never kept as written (a name: the row is left out with the reason; any other field: blanked);
+  // markup and control characters are dropped and every field is bounded. Before, every cell was kept as written.
+  const raw = (r: string[], k: string) => (at[k] === undefined ? "" : String(r[at[k]] ?? ""));
+  const cell = (r: string[], k: string, max = 300) => {
+    const v = raw(r, k);
+    if (isFormula(v) || readsAsInstruction(v)) return "";
+    const c = cleanCell(v, max);
+    return readsAsInstruction(c) ? "" : c;
+  };
   const rows: ContactRow[] = [], skipped: { row: number; why: string }[] = [], seen = new Set<string>();
   let duplicates = 0;
   lines.slice(hi + 1).forEach((r, i) => {
     const row = i + 1;
-    const name = cell(r, "name") || [cell(r, "first"), cell(r, "last")].filter(Boolean).join(" ");
-    if (!name) { skipped.push({ row, why: "no name" }); return; }
-    const firmRaw = cell(r, "firm"), firm = normalizeFirm(firmRaw), email = cell(r, "email").toLowerCase() || null;
+    const parts = at.name !== undefined ? [raw(r, "name")] : [raw(r, "first"), raw(r, "last")];
+    if (parts.some(isFormula)) { skipped.push({ row, why: "a name that is a spreadsheet formula" }); return; }
+    const rawName = parts.filter((x) => x.trim()).join(" ");
+    const name = cleanCell(rawName, 200);
+    if (readsAsInstruction(rawName) || readsAsInstruction(name)) { skipped.push({ row, why: "a name that reads as an instruction" }); return; }
+    if (!name || !/\p{L}/u.test(name)) { skipped.push({ row, why: "no name" }); return; }
+    if (/https?:|www\.|\/\//i.test(name)) { skipped.push({ row, why: "a name that is a link" }); return; }
+    const rawEmail = raw(r, "email");
+    // Never cut to fit: a cut address would be a different, made-up one, so a cell past an address's length is none.
+    const cleaned = isFormula(rawEmail) ? "" : cleanCell(rawEmail, 100_000).toLowerCase().replace(/^mailto:/, "");
+    const email = cleaned && cleaned.length <= 320 ? cleaned : null;
+    const firmRaw = cell(r, "firm", 200), firm = normalizeFirm(firmRaw);
     const key = email ? `e:${email}` : `n:${plain(name)}@${plain(firm)}`;
     if (seen.has(key)) { duplicates++; return; }
     seen.add(key);
     if (rows.length >= MAX_CONTACTS) { skipped.push({ row, why: `past the ${MAX_CONTACTS}-contact limit` }); return; }
     rows.push({
-      file, row, name, email, firm, firm_raw: firmRaw, company: firm, title: cell(r, "title"), school: cell(r, "school"), connected_on: cell(r, "connected") || null,
+      file, row, name, email, firm, firm_raw: firmRaw, company: firm, title: cell(r, "title", 300), school: cell(r, "school", 200), connected_on: cell(r, "connected", 40) || null,
       ...(vendor ? { vendor, vendor_email_status: cell(r, "email_status") || undefined } : {}),
     });
   });
@@ -187,6 +212,43 @@ export const ROLE_LOCALS = new Set(["info", "admin", "administrator", "support",
   "careers", "career", "jobs", "job", "recruiting", "recruitment", "recruiter", "talent", "hiring", "help", "marketing", "press", "media", "pr", "billing",
   "accounts", "finance", "noreply", "no-reply", "donotreply", "do-not-reply", "postmaster", "abuse", "webmaster", "hostmaster", "enquiries", "inquiries",
   "ir", "investor", "investors", "investorrelations", "legal", "compliance", "privacy", "security", "service", "customerservice", "feedback", "events", "general"]);
+// NETWORKING SCENARIOS (2026-10-29): a role inbox is more than the bare words above: "careers.us@", "recruiting-team@",
+// "talent-acquisition@", "university.recruiting@", "jobs+eng@" and "talentacquisition@" are inboxes too, never a person's
+// address. One is when the local part (a +tag dropped) is an inbox word, or splits wholly into inbox words and their
+// qualifiers (a region, a team, campus/university) with at least one inbox word among them. A person's own address
+// ("hi.nguyen@", "pressley@", "jobson@", "info.li@") is not: one part is a name.
+// The same rule as the database's career_email_is_role (20261029160000): keep the two in step (the flow test compares them).
+const ROLE_CORE = new Set([...ROLE_LOCALS, "people", "recruit", "staffing"]);
+const ROLE_QUALIFIERS = new Set(["acquisition", "us", "uk", "eu", "emea", "apac", "latam", "na", "global", "university", "campus", "college", "grad",
+  "graduate", "graduates", "early", "intern", "interns", "internships", "internship", "ops", "operations", "employment",
+  "resumes", "resume", "cv", "apply", "applications", "application", "eng", "engineering", "tech", "notifications", "notification", "mail", "desk",
+  "hq", "relations", "partnerships", "partners", "programs", "program", "student", "students", "new", "newgrad", "dept", "department", "center"]);
+// A part run together from inbox words ("talentacquisition", "campusrecruiting"): only words of 3+ letters join that way,
+// so a name like "hina" (hi + na) is never read as one.
+const longest = (xs: Iterable<string>) => [...xs].filter((w) => w.length >= 3 && /^[a-z]+$/.test(w)).sort((a, b) => b.length - a.length).join("|");
+const ROLE_RUN = new RegExp(`^(?:${longest([...ROLE_CORE, ...ROLE_QUALIFIERS])})+$`);
+const ROLE_CORE_IN = new RegExp(`(?:${longest(ROLE_CORE)})`);
+export function isRoleAddress(email: unknown): boolean {
+  const local = String(email ?? "").trim().toLowerCase().split("@")[0].replace(/\+.*$/, "");
+  if (!local) return false;
+  const bare = local.replace(/[._-]+/g, "");
+  if (ROLE_CORE.has(local) || ROLE_CORE.has(bare)) return true;
+  let core = false;
+  for (const part of local.split(/[._-]+/)) {
+    if (!part || /^\d+$/.test(part)) continue;
+    if (ROLE_CORE.has(part)) { core = true; continue; }
+    if (ROLE_QUALIFIERS.has(part)) continue;
+    if (!ROLE_RUN.test(part)) return false;
+    if (ROLE_CORE_IN.test(part)) core = true;
+  }
+  return core;
+}
+// A "person" whose name is a team or inbox ("Talent Acquisition", "Careers Team", "Recruiting", "Press Office"): every word
+// is an inbox word, so it is a team, never someone to write to (and never given an address in a person's format).
+export const isTeamName = (name: unknown): boolean => {
+  const w = String(name ?? "").toLowerCase().replace(/[^a-z\s-]/g, " ").trim().split(/[\s-]+/).filter(Boolean);
+  return w.length > 0 && w.length <= 4 && isRoleAddress(`${w.join(".")}@x.io`);
+};
 export const DISPOSABLE = new Set(["mailinator.com", "guerrillamail.com", "guerrillamail.net", "sharklasers.com", "10minutemail.com", "10minutemail.net",
   "yopmail.com", "yopmail.net", "temp-mail.org", "tempmail.com", "tempmailo.com", "trashmail.com", "trashmail.de", "getnada.com", "nada.email",
   "dispostable.com", "maildrop.cc", "throwawaymail.com", "fakeinbox.com", "mailnesia.com", "mintemail.com", "mohmal.com", "emailondeck.com",
@@ -203,7 +265,7 @@ export async function checkAddress(email: string | null, mx: MxResolver, cache =
   const e = String(email ?? "").trim().toLowerCase();
   const syntax = EMAIL.test(e) && !e.includes("..") && !/^\.|\.@/.test(e) ? "pass" : "fail";
   const [local = "", domain = ""] = e.split("@");
-  const role = syntax === "pass" && (ROLE_LOCALS.has(local) || ROLE_LOCALS.has(local.replace(/[._+-]/g, ""))) ? "flagged" : "pass";
+  const role = syntax === "pass" && (ROLE_LOCALS.has(local) || ROLE_LOCALS.has(local.replace(/[._+-]/g, "")) || isRoleAddress(e)) ? "flagged" : "pass";
   const disposable = syntax === "pass" && DISPOSABLE.has(domain) ? "flagged" : "pass";
   let mxState: Checks["mx"] = "not_run";
   if (syntax === "pass") {

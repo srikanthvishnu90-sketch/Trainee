@@ -18,9 +18,10 @@
 // The reminder fires from runOutreachFollowups (the scheduled run): once, to the person's outbox, only while no reply is
 // on record. Every record is the person's own (by user id); a name matches only someone they wrote to through Trainee.
 import type { Outbox } from "./career_alert_store.ts";
+import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 release flags
 import { neverOpen } from "./career_people_sites.ts";
 import type { EventStore } from "./agent/timeline.ts";
-import { batchMessages, confirmed, draftFor, emailHash, type Followup, FOLLOWUP_DAYS, footerOf, messageOf, type ModelFn, OUTREACH_INTENT,
+import { batchMessages, blockedAddresses, confirmed, draftFor, emailHash, type Followup, FOLLOWUP_DAYS, footerOf, messageOf, type ModelFn, OUTREACH_INTENT,
   type OutreachDraft, type OutreachStore, payloadHash, recordOutreach } from "./career_outreach.ts";
 
 export const TRACK_INTENT = "career_outreach_track";
@@ -91,7 +92,17 @@ const LINKEDIN = /\blinked ?in\b|\beasy ?apply\b|\bin-?mails?\b/;
 // Any ACTION on LinkedIn: messaging, connecting, endorsing, posting, commenting, following, applying (Easy Apply), and
 // any ask routed "via / on / through LinkedIn". Their own export stays theirs (LI_OWN).
 const LI_ACT = /\b(?:message|msg|dm|inmail|in-mail|connect|link (?:my|your|to)|hook up|add (?:her|him|them|everyone|people|[a-z]+) on|invite|send (?:an? |the |my |some )?(?:connection(?: request)?s?|invites?|invitations?|messages?|notes?|dms?|inmails?|requests?)|connection requests?|reach out|ping|scrape|crawl|automate|auto-?(?:connect|message|apply|send)|pull (?:people|profiles|contacts|emails)|find (?:people|profiles|recruiters|alumni|emails?)|search|look up|log ?in|sign ?in|endorse|endorsements?|recommend (?:me|her|him|them)|write (?:me |her |him )?(?:a )?recommendation|post|publish|share|comment|like (?:her|his|their|the|a|my) post|follow(?! ?-?up)|apply|easy ?apply|submit)\b|\b(?:via|through|thru|over|using) linked ?in\b|\beasy ?apply\b/;
-const LI_OWN = /\b(?:connections\.csv|export|download|copy of (?:my|your) data|get a copy|here (?:are|is)|these are|attached|my linkedin profile|my profile (?:link|url))\b/;
+// Their own: the export, or their own profile link ("my linkedin is <link>", "here's my linkedin: <link>"). "here is" alone
+// is not theirs ("here is a job on linkedin, apply to it" is an ask; scenarios-sites.test.ts).
+const LI_OWN = /\b(?:connections\.csv|export(?:ed|s)?|download(?:ed)? (?:my|the) (?:linkedin )?(?:data|connections|contacts|export)|copy of (?:my|your) data|get a copy|here(?: are|'s| is) my|these are my|attached (?:are |is )?my|my linkedin (?:profile|url|link|page|is)|my profile (?:link|url))\b/;
+// Common misspellings of LinkedIn read as LinkedIn ("message maya on linkedn", "apply via linked-in").
+const LI_TYPO = /\b(?:linked[ -]in|linkedn|linkdin|linkedln|linkden|linkdn|lnkdin|linkeding|linkdein)\b/g;
+// A question about what the person should do themselves ("how do I message recruiters on LinkedIn?", "should I apply on
+// Indeed or the company site?", "how should I update my linkedin headline?") asks for advice, not for Trainee to act; one
+// that hands the act to Trainee ("can you", "for me", "please") is an ask.
+const ADVICE = /^(?:(?:so|ok|okay|and|but|also|hey|quick question|q|honestly)[,:]?\s+)*(?:how (?:do|can|should|would|could) i|should i|would i|is it (?:ok|okay|worth|smart|good|bad|weird|fine|normal|appropriate|rude|better|wise|possible) (?:to|if i)|what should i|what(?:'s| is) the best way to|when should i|do i need to|any tips|tips (?:for|on)|is (?:it|linkedin|handshake|indeed)\b[^?]* worth)\b/;
+const LI_EXPORT = /\b(?:connections\.csv|export(?:ed|s)?|download(?:ed)?|copy of (?:my|your) data|get a copy|connections|contacts)\b/;
+const HANDED = /\b(?:for me|you|u|ur|please|pls|plz|yourself)\b/;
 // Indeed and Handshake named as the place of the action ("on Indeed", "through my Handshake", "Indeed's Easy Apply",
 // "Handshake jobs"), never the plain words ("indeed I did", "a firm handshake").
 const SITE_WORD: [Exclude<Site, "LinkedIn">, RegExp][] = [
@@ -113,25 +124,35 @@ export function siteOfLink(url: string): Site | null {
 // no employer link beside it, or an action named on one of them), and which. Their own LinkedIn export stays theirs.
 export function siteAsk(message: string): Site | null {
   const raw = String(message ?? "").slice(0, 4000);
-  const t = lower(raw);
-  if (!t) return null;
-  const own = LI_OWN.test(t);
+  if (!lower(raw)) return null;
   const unmailed = raw.replace(/\S+@\S+/g, " ");
-  const links = (unmailed.match(LINK) ?? []).map((u) => u.replace(/[.,;:!?)\]]+$/, ""));
+  const links = (unmailed.match(LINK) ?? []).map((u) => u.replace(/[.,;:!?)\]>"']+$/, ""));
   const sites = links.map(siteOfLink);
-  // A link to the employer's own page beside it is the way in: that turn reads it, and never opens the others.
-  if (sites.some((s) => s) && sites.some((s, i) => !s && /\//.test(links[i]))) return null;
+  // The words, without the links: a tracking parameter naming a site ("?utm_source=linkedin") is not the site named.
+  const t = lower(unmailed.replace(LINK, " ")).replace(LI_TYPO, "linkedin");
+  const own = LI_OWN.test(t);
+  // An employer's own page beside it is the way in: that turn reads it, and never opens the others.
+  const employer = sites.some((s, i) => !s && /\//.test(links[i]));
+  if (sites.some((s) => s) && employer) return null;
   const linked = sites.find((s): s is Site => !!s);
-  // A link to one of them is refused when it comes with an action or alone ("<link>", "this one <link>"); a LinkedIn
-  // link that is their own profile ("my linkedin profile <link>") is theirs.
+  // A link to one of them is refused when it comes with an action or alone ("<link>", "this one <link> please"); a
+  // LinkedIn profile link that is their own ("my linkedin is <link>") is theirs.
   if (linked) {
-    const words = lower(unmailed.replace(LINK, " ")).split(" ").filter(Boolean).length;
-    return (linked === "LinkedIn" && own) || !(SITE_ACT.test(t) || words <= 3) ? null : linked;
+    const profileOnly = links.every((u, i) => sites[i] !== "LinkedIn" || /linkedin\.[a-z.]+\/(?:in|pub)\//i.test(u));
+    if (linked === "LinkedIn" && own && profileOnly && !LI_ACT.test(t.replace(/\bmy linkedin (?:profile|url|link|page)\b/g, " "))) return null;
+    const words = t.replace(/\b(?:please|pls|plz|thanks|thank you|thx|asap|for me|now|this|that|one|here|ok|okay|hey|hi|the|job|link|posting)\b/g, " ")
+      .split(" ").filter((x) => /[a-z0-9]/.test(x)).length;
+    return SITE_ACT.test(t) || words <= 3 ? linked : null;
   }
-  const li = LINKEDIN.test(t) && LI_ACT.test(t) && !own;
+  // Advice the person asked for themselves, never an act handed to Trainee.
+  if (ADVICE.test(t) && !HANDED.test(t)) return null;
+  // An apply ask beside the employer's own posting link applies there ("apply to the analyst job at Indeed <careers link>").
+  if (employer && !/\b(?:message|msg|dm|inmail|connect|reach out|ping|invite|endorse|post|scrape|crawl|search|log ?in|sign ?in)\b/.test(t)) return null;
+  // In words, only their export is theirs ("here are my linkedin connections, who should I email?"); "here's my linkedin,
+  // connect me with ..." is still an ask.
+  const li = LINKEDIN.test(t) && LI_ACT.test(t) && !(own && LI_EXPORT.test(t));
   if (li && /\blinked ?in\b/.test(t)) return "LinkedIn";
-  const w = lower(unmailed); // "Easy Apply ... on Indeed" is Indeed's
-  for (const [site, rx] of SITE_WORD) if (rx.test(w) && SITE_ACT.test(w)) return site;
+  for (const [site, rx] of SITE_WORD) if (rx.test(t) && SITE_ACT.test(t)) return site; // "Easy Apply ... on Indeed" is Indeed's
   return li ? "LinkedIn" : null;
 }
 
@@ -345,7 +366,9 @@ async function followTurn(o: TrackDeps, name: string, rows: OutreachDraft[], fol
   // The waiting follow-up stays the thread's last word when it is the newest batch, so "send 1" or "send none" answers it.
   if (pendingFollow) return { reply: `You already have a follow-up to ${who(d)} waiting (draft ${pendingFollow.n}, ${pendingFollow.status === "shown" ? "not approved yet" : "approved, not sent"}). Nothing new was drafted.${pendingFollow.batch_id === rows[0].batch_id && pendingFollow.status === "shown" ? ` Say "send ${pendingFollow.n}" to approve it as shown, or "send none".` : ""}`,
     intent: pendingFollow.batch_id === rows[0].batch_id ? OUTREACH_INTENT : TRACK_INTENT, status: "already" };
-  if ((await o.store.dnc(o.userId)).has(await emailHash(d.recipient.email))) return { reply: `${who(d)} asked not to be contacted, so nothing was drafted.`, intent: TRACK_INTENT, status: "do_not_contact" };
+  // OUTREACH SCENARIOS (2026-10-30): anyone's opt-out list and the bounce list, not only the person's own.
+  const blocked = (await blockedAddresses(o.store, o.userId, [d.recipient.email])).get(d.recipient.email.trim().toLowerCase());
+  if (blocked) return { reply: blocked === "bounced" ? `${who(d)}'s address bounced before, so no one emails it again; nothing was drafted.` : `${who(d)} asked not to be contacted, so nothing was drafted.`, intent: TRACK_INTENT, status: "do_not_contact" };
   const facts = confirmed(o.facts as unknown[]);
   if (!facts.length) return { reply: "I write only from facts you've confirmed, and there are none on record, so nothing was drafted. Paste your resume here and confirm it, then ask again.", intent: TRACK_INTENT, status: "no_facts" };
   if (!o.model) return { reply: `Drafting emails isn't switched on here yet, so no follow-up was written or sent. Your first email to ${who(d)} went on ${shortDay(Date.parse(d.sent_at ?? "") || o.now)} ("${d.subject}").`, intent: TRACK_INTENT, status: "drafting_off" };
@@ -450,6 +473,6 @@ export async function runOutreachFollowups(o: RunOpts) {
 // outbox row is queued and no reminder is marked fired, however many are due. Sending has its own switch
 // (CAREER_OUTREACH_SEND); the reminders need no Gmail, so this gate stands on its own.
 export async function runOutreachFollowupsGated(env: { get(k: string): string | undefined }, o: RunOpts) {
-  if (env.get("CAREER_OUTREACH_FOLLOWUPS") !== "on") return undefined;
+  if (!releaseFlagOn(env, "CAREER_OUTREACH_FOLLOWUPS")) return undefined;
   return await runOutreachFollowups(o);
 }

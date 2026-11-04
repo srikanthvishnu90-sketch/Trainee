@@ -42,6 +42,7 @@ import {
   verifyState,
   issueState,
   careerLanding,
+  googleConsentUrl,
   LEGACY_OFF_MESSAGE,
   redirectUriFrom,
   requestScopesFor,
@@ -52,8 +53,10 @@ import { disconnectGoogle, disconnectReply } from "../_shared/google_disconnect.
 // (GET ?t= peeks, a form POST is the person's tap, then Google's consent with this function's own signed state), so the
 // OAuth client's redirect URI does not change; after a career grant is stored, the person is told in the chat the link
 // came from and the tasks that waited for Gmail resume (_shared/connectors.ts).
-import { afterConnect, handleConnectorLink } from "../_shared/connectors.ts";
+import { afterConnect, handleConnectorLink, refusedConnect } from "../_shared/connectors.ts";
+import { googleCallback, REPLAYED_WORDS, SEND_REFUSED_WORDS, TAKEN_WORDS } from "../_shared/oauth_connect.ts";
 import { chatThroughAgent, deliverer } from "../_shared/channel_runtime.ts";
+import { connectLanding, connectPageOn } from "../_shared/connect_landing.ts";
 
 // deno-lint-ignore no-explicit-any
 const later = (p: Promise<unknown>) => { const rt = (globalThis as any).EdgeRuntime; if (rt?.waitUntil) rt.waitUntil(p); };
@@ -63,8 +66,7 @@ const later = (p: Promise<unknown>) => { const rt = (globalThis as any).EdgeRunt
 async function consentUrlFor(userId: string, purpose: "gmail" | "career", clientId: string, stateSecret: string): Promise<string> {
   const state = await issueState(userId, purpose, stateSecret);
   const asked = requestScopesFor(purpose, Deno.env.get("GOOGLE_APPROVED_EXTRA_SCOPES"));
-  const q = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri(), response_type: "code", scope: asked.scopes.join(" "), access_type: "offline", prompt: "consent", state });
-  return "https://accounts.google.com/o/oauth2/v2/auth?" + q.toString();
+  return googleConsentUrl({ clientId, redirectUri: redirectUri(), state, scopes: asked.scopes });
 }
 
 const APP_URL = "https://upmore-srikanthvishnu90-sketchs-projects.vercel.app";
@@ -120,10 +122,19 @@ serve(async (req) => {
       // Legacy landings keep the Upmore app's ?gmail=..; a career grant lands on careerLanding (career.ts).
       let purpose: "gmail" | "career" = "gmail";
       // The career (Trainee) grant lands on its own plain page, never on the Upmore app; the legacy grant keeps Upmore's.
-      const done = (ok: boolean) =>
+      const doneBase = (ok: boolean) =>
         purpose === "career" ? careerLanding(ok) : Response.redirect(`${APP_URL}/#you?gmail=${ok ? "connected" : "error"}`, 302);
+      // The connect page's calm done state ("Connected as <email>", a way back to Telegram) once the owner has switched that page on.
+      let landEmail: string | null = null, denied = false;
+      const done = (ok: boolean) => (purpose === "career" ? connectLanding(Deno.env, { provider: "google", ok, denied, email: landEmail }) : null) ?? doneBase(ok);
       try {
-        if (url.searchParams.get("error")) return done(false);
+        if (url.searchParams.get("error")) {
+          denied = url.searchParams.get("error") === "access_denied";
+          // Which grant this was: the signed state says; an unreadable state is the legacy landing, as before.
+          // Only with the connect page switched on: off, a denied consent lands exactly where it always did.
+          if (connectPageOn(Deno.env)) try { purpose = (await verifyState(url.searchParams.get("state") || "", stateSecret)).purpose; } catch { /* legacy landing */ }
+          return done(false);
+        }
         const code = url.searchParams.get("code") || "";
         const state = url.searchParams.get("state") || "";
         const verified = await verifyState(state, stateSecret);
@@ -132,45 +143,30 @@ serve(async (req) => {
         // A legacy consent started before the legacy path was switched off is not stored either.
         if (!startAllowed(purpose, Deno.env)) throw new Error("legacy Gmail connect is off");
         if (!clientId || !clientSecret) throw new Error("OAuth not configured");
-        const tokRes = await fetch("https://oauth2.googleapis.com/token", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            code, client_id: clientId, client_secret: clientSecret,
-            redirect_uri: redirectUri(), grant_type: "authorization_code",
-          }),
-        });
-        const tok = await tokRes.json().catch(() => ({}));
-        if (!tokRes.ok || !tok.access_token) {
-          throw new Error(String(tok.error_description || tok.error || "token exchange failed"));
-        }
-        // Confirm which Google address granted access (also validates the token).
-        const meRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-          headers: { Authorization: `Bearer ${tok.access_token}` },
-        });
-        const me = await meRes.json().catch(() => ({}));
-        const email = typeof me.email === "string" ? me.email : null;
-
-        const provider = providerForPurpose(purpose);
-        const vaultName = vaultNameFor(userId, purpose);
-        // Scopes actually granted (Google echoes them on the token response) win over scopes requested.
-        const grantedScopes = typeof tok.scope === "string" && tok.scope.trim()
-          ? tok.scope.split(/\s+/).filter(Boolean).join(" ")
-          : requestScopesFor(purpose, Deno.env.get("GOOGLE_APPROVED_EXTRA_SCOPES")).scopes.join(" ");
+        // CONNECTORS ROUND 3 (2026-10-31, _shared/oauth_connect.ts): the state is spent once, then the code exchanged; the
+        // Vault entry and the row are written in one transaction holding the account. A gone account stores nothing (the new
+        // grant is revoked at Google); an address another Trainee account holds stores nothing and is said plainly.
         const admin = createClient(supabaseUrl, serviceKey);
-        const secret = JSON.stringify({
-          access_token: tok.access_token,
-          refresh_token: tok.refresh_token || null,
-          expires_at: Date.now() + (Number(tok.expires_in) || 3600) * 1000,
-          email, scopes: grantedScopes,
-        });
-        const { error: verr } = await admin.rpc("oauth_vault_store", { p_name: vaultName, p_secret: secret });
-        if (verr) throw new Error("could not save tokens");
-        const { error: uerr } = await admin.from("user_oauth_connections").upsert({
-          user_id: userId, provider, vault_name: vaultName,
-          email, scopes: grantedScopes, connected_at: new Date().toISOString(),
-        }, { onConflict: "user_id,provider" });
-        if (uerr) throw new Error("could not record connection");
+        // The Vault entry follows the state's purpose (oauth_connect_commit derives the same name from the provider).
+        const provider = providerForPurpose(purpose) as "google_career" | "gmail";
+        if (vaultNameFor(userId, purpose) !== `oauth_${provider}_${userId}`) throw new Error("vault name");
+        const fallbackScopes = !purpose ? "" : requestScopesFor(purpose, Deno.env.get("GOOGLE_APPROVED_EXTRA_SCOPES")).scopes.join(" ");
+        const got = await googleCallback({ admin, fetch, now: Date.now, clientId, clientSecret, redirectUri: redirectUri(),
+          grantedFallback: () => fallbackScopes }, { code, state, userId, provider, ...(verified.bind ? { bind: verified.bind } : {}) });
+        landEmail = got.email ?? null;
+        if (!got.ok) {
+          console.error("[gmail-oauth] callback refused:", got.why);
+          if (got.why === "taken" && purpose === "career") {
+            await refusedConnect({ admin, env: Deno.env, fetch, now: Date.now, deliver: deliverer(admin, Deno.env), log: (l) => console.log(l) }, userId, "gmail", TAKEN_WORDS("Gmail", got.email ?? null)).catch(() => {});
+          }
+          // D-037: an "allow sending" consent from another account, without a connection, or without every permission: refused,
+          // the new grant revoked, the connection untouched, and the landing says which.
+          if (got.why === "send_no_connection" || got.why === "send_other_account" || got.why === "send_scopes") return careerLanding(false, SEND_REFUSED_WORDS(got.why, null));
+          if (purpose === "career" && (got.why === "taken" || got.why === "replayed")) return careerLanding(false, got.why === "taken" ? TAKEN_WORDS("Gmail", got.email ?? null) : REPLAYED_WORDS);
+          return done(false);
+        }
+        const email = got.email;
+        const grantedScopes = got.scopes;
         if (purpose === "career") {
           // Task 3: told where the link came from, then the tasks that waited for Gmail resume, after the response.
           const run = chatThroughAgent(supabaseUrl, serviceKey);

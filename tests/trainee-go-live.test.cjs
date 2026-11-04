@@ -21,7 +21,7 @@ const FAKE = {
   TRAINEE_DELIVER_SECRET: 'fake-deliver-secret-0000-DDDDDDDDDDDDDDDDDD',
   TRAINEE_INBOUND_SECRET: 'fake-inbound-secret-0000-NNNNNNNNNNNNNNNNNN',
   LOOPMESSAGE_API_KEY: 'fake-loop-key-0000-LLLLLLLLLL',
-  OPENAI_API_KEY: 'sk-proj-fake-should-never-print-0000-OOOOOOOO',
+  ANTHROPIC_API_KEY: 'sk-proj-fake-should-never-print-0000-OOOOOOOO',
   TRAINEE_ALLOWED_CONTACTS: '+15550009876,+15550004321',
   INGEST_CONTACT_EMAIL: 'owner-fake-QZ81@example.test',
   LOOPMESSAGE_DAILY_CONTACTS: '1000',
@@ -103,7 +103,7 @@ test('dry run: no secret value is ever printed, only names and ***', () => {
     assert.doesNotMatch(out, /fake-dbpass|QZ81|NNNNNNNN|IIIIIIII/);
   }
   const { out } = dry();
-  assert.match(out, /supabase secrets set --project-ref abcdefghijklmnopqrst --env-file <0600 temp file: CAREER_INGEST_SECRET=\*\*\* CAREER_PROACTIVE_SECRET=\*\*\* TRAINEE_DELIVER_SECRET=\*\*\* TRAINEE_INBOUND_SECRET=\*\*\* INGEST_CONTACT_EMAIL=\*\*\* LOOPMESSAGE_API_KEY=\*\*\* LOOPMESSAGE_DAILY_CONTACTS=\*\*\* TRAINEE_ALLOWED_CONTACTS=\*\*\* OPENAI_API_KEY=\*\*\* MODEL_PROVIDER=openai CAREER_OUTREACH_FOLLOWUPS=on>/);
+  assert.match(out, /supabase secrets set --project-ref abcdefghijklmnopqrst --env-file <0600 temp file: CAREER_INGEST_SECRET=\*\*\* CAREER_PROACTIVE_SECRET=\*\*\* TRAINEE_DELIVER_SECRET=\*\*\* TRAINEE_INBOUND_SECRET=\*\*\* INGEST_CONTACT_EMAIL=\*\*\* LOOPMESSAGE_API_KEY=\*\*\* LOOPMESSAGE_DAILY_CONTACTS=\*\*\* TRAINEE_ALLOWED_CONTACTS=\*\*\* ANTHROPIC_API_KEY=\*\*\* CAREER_OUTREACH_FOLLOWUPS=on>/);
 });
 
 test('networking follow-up reminders are switched on at launch (R2: the chat promises a texted reminder only when they run)', () => {
@@ -115,7 +115,7 @@ test('networking follow-up reminders are switched on at launch (R2: the chat pro
   assert.doesNotMatch(dry(['--only-smoke']).out, /CAREER_OUTREACH_FOLLOWUPS/, '--only-smoke changes no secret');
 });
 
-test('CAREER_BRAIN=agent is set only with --brain agent; --brain router unsets it; otherwise it is not touched', () => {
+test('CAREER_BRAIN=agent is set only with --brain agent; --brain router sets the rollback (D-035); otherwise it is not touched', () => {
   const plain = dry([], { ...FAKE, CAREER_BRAIN: 'agent' }).out; // the environment never decides the brain
   assert.doesNotMatch(plain, /CAREER_BRAIN=agent/);
   assert.doesNotMatch(plain, /secrets unset CAREER_BRAIN/);
@@ -124,7 +124,9 @@ test('CAREER_BRAIN=agent is set only with --brain agent; --brain router unsets i
   assert.match(agent, /--env-file <0600 temp file: [^>]*CAREER_BRAIN=agent>/);
   const router = dry(['--brain=router']).out;
   assert.doesNotMatch(router, /CAREER_BRAIN=agent/);
-  assert.match(router, /DRY: supabase secrets unset CAREER_BRAIN --project-ref abcdefghijklmnopqrst/);
+  // D-035: unset serves the committed release brain (staged), so the rollback is set, never unset.
+  assert.match(router, /--env-file <0600 temp file: [^>]*CAREER_BRAIN=router>/);
+  assert.doesNotMatch(router, /secrets unset CAREER_BRAIN/);
   assert.notEqual(dry(['--brain', 'gpt']).code, 0, 'only agent or router');
 });
 
@@ -290,7 +292,7 @@ test('main: one line per check and a summary, waits for the schedules when asked
   assert.equal(polls, 3, 'polled until every schedule had fired');
   assert.match(out, /waiting up to 120 s/);
   assert.match(out, /^summary: 17 PASS, 0 WARN, 0 FAIL, 0 NOT RUN$/m);
-  for (const l of lines.filter((l) => !/^summary|^waiting/.test(l))) assert.match(l, /^(PASS|FAIL|WARN|NOT RUN) /);
+  for (const l of lines.filter((l) => !/^summary|^waiting/.test(l))) assert.match(l, /^(PASS|FAIL|WARN|NOT RUN|CERT|NOTE) /);
   for (const v of SECRET_VALUES) assert.ok(!out.includes(v) && !out.includes(encodeURIComponent(v)), `${v.slice(0, 12)}… is not printed`);
 
   const bare = [];
@@ -336,13 +338,14 @@ test('an inbound secret already on the project is never replaced by an Enter; TR
 
 // --non-interactive (the production workflow, .github/workflows/deploy-production.yml): no terminal is ever opened and
 // nothing is asked. The same stub tools as above; `secrets list` answers with the names in `live` (never values).
-function nonint(args, env, { live = ['TRAINEE_INBOUND_SECRET'], listFails = false } = {}) {
+function nonint(args, env, { live = ['TRAINEE_INBOUND_SECRET'], listFails = false, bundleOk = false } = {}) {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'trainee-go-live-nonint-'));
   const calls = path.join(bin, 'calls.log');
   const stub = (name, body) => { fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\necho "${name} $*" >> "${calls}"\n${body}\n`); fs.chmodSync(path.join(bin, name), 0o755); };
   const rows = live.map((n) => `${n} | 0f0f`).join('\\n');
   stub('supabase', `if [[ "$1 $2" == "secrets list" ]]; then ${listFails ? 'echo "Access token not provided" >&2; exit 1' : `printf "NAME | DIGEST\\n${rows}\\n"`}; fi; exit 0`);
   stub('psql', 'exit 0'); stub('deno', 'exit 0');
+  if (bundleOk) stub('python3', 'exit 0'); // the router-bundle freshness check is not what this case tests
   stub('node', `if [[ "$1" == *trainee-smoke.cjs ]]; then exit 0; fi\nexec "${process.execPath}" "$@"`);
   stub('git', `if [[ "$1" == status ]]; then exit 0; fi\nexec "${REAL_GIT}" "$@"`);
   const res = spawnSync('bash', [SCRIPT, '--non-interactive', ...args], { cwd: root, encoding: 'utf8', detached: true, stdio: ['ignore', 'pipe', 'pipe'],
@@ -367,14 +370,14 @@ test('--non-interactive: every missing required value fails preflight at once, e
 });
 
 test('--non-interactive: a function secret set on the project is kept (never generated or rotated), one not set is generated, optional values keep what is set', () => {
-  const { CAREER_INGEST_SECRET, CAREER_PROACTIVE_SECRET, TRAINEE_DELIVER_SECRET, TRAINEE_INBOUND_SECRET, OPENAI_API_KEY, LOOPMESSAGE_API_KEY, PDL_API_KEY, ...rest } = CI_ENV;
-  const r = nonint(['--sha', HEAD_SHA, '--skip-migrations', '--skip-deploy'], rest, { live: ['CAREER_INGEST_SECRET', 'TRAINEE_INBOUND_SECRET', 'OPENAI_API_KEY'] });
+  const { CAREER_INGEST_SECRET, CAREER_PROACTIVE_SECRET, TRAINEE_DELIVER_SECRET, TRAINEE_INBOUND_SECRET, ANTHROPIC_API_KEY, LOOPMESSAGE_API_KEY, PDL_API_KEY, ...rest } = CI_ENV;
+  const r = nonint(['--sha', HEAD_SHA, '--skip-migrations', '--skip-deploy'], rest, { live: ['CAREER_INGEST_SECRET', 'TRAINEE_INBOUND_SECRET', 'ANTHROPIC_API_KEY'] });
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /kept: CAREER_INGEST_SECRET \(not given; set on the project, so it is neither generated nor rotated\)/);
   assert.match(r.out, /kept: TRAINEE_INBOUND_SECRET \(not given; set on the project/);
   assert.match(r.out, /generated: CAREER_PROACTIVE_SECRET TRAINEE_DELIVER_SECRET \(48 characters each; kept only in this process; --non-interactive never shows them/);
-  assert.match(r.out, /not given: OPENAI_API_KEY \(--non-interactive: what the project has stays\)/);
-  assert.match(r.out, /kept: OPENAI_API_KEY \(not given; an already-set key stays as it is\)/);
+  assert.match(r.out, /not given: ANTHROPIC_API_KEY \(--non-interactive: what the project has stays\)/);
+  assert.match(r.out, /kept: ANTHROPIC_API_KEY \(not given; an already-set key stays as it is\)/);
   // The env file names only what this run sets: the two generated secrets and the values given, never a kept one.
   const set = r.out.match(/supabase secrets set --project-ref abcdefghijklmnopqrst --env-file <0600 temp file: ([^>]*)>/);
   assert.ok(set, r.out);
@@ -446,7 +449,7 @@ test('deploy-production.yml: push to release/production only, environment produc
   assert.match(wf, /postgresql-client/);
   const src = fs.readFileSync(SCRIPT, 'utf8');
   const read = ['SUPABASE_ACCESS_TOKEN', 'SUPABASE_PROJECT_REF', 'SUPABASE_DB_URL', 'CAREER_INGEST_SECRET', 'CAREER_PROACTIVE_SECRET', 'TRAINEE_DELIVER_SECRET',
-    'TRAINEE_INBOUND_SECRET', 'OPENAI_API_KEY', 'LOOPMESSAGE_API_KEY', 'INGEST_CONTACT_EMAIL', 'TRAINEE_ALLOWED_CONTACTS', 'LOOPMESSAGE_DAILY_CONTACTS',
+    'TRAINEE_INBOUND_SECRET', 'ANTHROPIC_API_KEY', 'LOOPMESSAGE_API_KEY', 'INGEST_CONTACT_EMAIL', 'TRAINEE_ALLOWED_CONTACTS', 'LOOPMESSAGE_DAILY_CONTACTS',
     'PDL_API_KEY', 'UPMORE_TEST_JWT', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_WEBHOOK_SECRET', 'TELEGRAM_BOT_USERNAME', 'WHATSAPP_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID',
     'WHATSAPP_APP_SECRET', 'WHATSAPP_VERIFY_TOKEN', 'WHATSAPP_TEMPLATE_UPDATES', 'WHATSAPP_TEMPLATE_LANGUAGE', 'WHATSAPP_DAILY_TEMPLATES'];
   for (const v of read) {
@@ -475,11 +478,11 @@ test('deploy-preflight.yml: on PRs touching supabase/ or scripts/launch, the dry
 test('mask-artifacts.py replaces every given secret (and a database URL\'s password alone) with ***, and prints only counts', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trainee-mask-'));
   fs.mkdirSync(path.join(dir, 'rollback'));
-  fs.writeFileSync(path.join(dir, 'go-live.log'), `x ${FAKE.OPENAI_API_KEY} y\npassword fake-dbpass-QZ81x and url ${FAKE.SUPABASE_DB_URL}\nplain line\n`);
+  fs.writeFileSync(path.join(dir, 'go-live.log'), `x ${FAKE.ANTHROPIC_API_KEY} y\npassword fake-dbpass-QZ81x and url ${FAKE.SUPABASE_DB_URL}\nplain line\n`);
   fs.writeFileSync(path.join(dir, 'rollback', 'index.ts'), `const k = "${FAKE.TRAINEE_INBOUND_SECRET}";\n`);
   fs.writeFileSync(path.join(dir, 'manifest.json'), '{"sha":"abc"}\n');
   const res = spawnSync('python3', [path.join(root, 'scripts/launch/mask-artifacts.py'), dir], { encoding: 'utf8',
-    env: { PATH: process.env.PATH, MASK_1: FAKE.OPENAI_API_KEY, MASK_2: FAKE.SUPABASE_DB_URL, MASK_3: FAKE.TRAINEE_INBOUND_SECRET, MASK_4: '', MASK_5: 'abc' } });
+    env: { PATH: process.env.PATH, MASK_1: FAKE.ANTHROPIC_API_KEY, MASK_2: FAKE.SUPABASE_DB_URL, MASK_3: FAKE.TRAINEE_INBOUND_SECRET, MASK_4: '', MASK_5: 'abc' } });
   assert.equal(res.status, 0, res.stderr);
   assert.equal(res.stdout.trim(), 'masked: 3 files checked, 2 had a secret value replaced by ***');
   const log = fs.readFileSync(path.join(dir, 'go-live.log'), 'utf8');
@@ -599,10 +602,10 @@ test('FEATURE 17 dry run: without VERCEL_TOKEN the cloud runner is not wired (de
 });
 test('FEATURE 17: sizing not given is set to the runner\'s default; a per-person or per-site number not given is never set (NO LIMITS)', () => {
   const { code, out } = dry([], { ...CLOUD, CLOUD_MAX_CONCURRENT: '', CLOUD_MAX_PER_PORTAL: '', CLOUD_MAX_PER_PERSON_DAY: '', CLOUD_MAX_PER_SITE_MINUTE: '',
-    CLOUD_PREPARE_MAX_CONCURRENT: '', CLOUD_PREPARE_PER_PERSON_DAY: '', CLOUD_PREPARE_PER_SITE_MINUTE: '' });
+    CLOUD_PREPARE_MAX_CONCURRENT: '', CLOUD_PREPARE_PER_PERSON_DAY: '', CLOUD_PREPARE_PER_SITE_MINUTE: '', CLOUD_DISPATCH_PARALLEL: '' });
   assert.equal(code, 0, out);
   const set = out.match(/supabase secrets set --project-ref abcdefghijklmnopqrst --env-file <0600 temp file: ([^>]*)>/)[1].split(' ');
-  const wave1 = { CLOUD_MAX_CONCURRENT: 2, CLOUD_MAX_PER_PORTAL: 1, CLOUD_MAX_STARTS_PER_TICK: 2, CLOUD_PREPARE_MAX_CONCURRENT: 2, CLOUD_PREPARE_STARTS_PER_TICK: 2 };
+  const wave1 = { CLOUD_MAX_CONCURRENT: 60, CLOUD_MAX_PER_PORTAL: 20, CLOUD_MAX_STARTS_PER_TICK: 30, CLOUD_PREPARE_MAX_CONCURRENT: 60, CLOUD_PREPARE_STARTS_PER_TICK: 30, CLOUD_DISPATCH_PARALLEL: 16 }; // the scale defaults (cloud_runner_http.ts LIMIT_DEFAULTS)
   for (const [k, v] of Object.entries(wave1)) assert.ok(set.includes(`${k}=${v}`), `${k}=${v} in ${set.join(' ')}`);
   for (const k of ['CLOUD_MAX_PER_PERSON_DAY', 'CLOUD_MAX_PER_SITE_MINUTE', 'CLOUD_PREPARE_PER_PERSON_DAY', 'CLOUD_PREPARE_PER_SITE_MINUTE']) {
     assert.ok(!set.some((x) => x.startsWith(`${k}=`)), `${k} is not set when not given: ${set.join(' ')}`);
@@ -630,4 +633,110 @@ test('FEATURE 17: the cloud schedule reads CLOUD_DISPATCH_SECRET into Vault and 
   }
   const snap = fs.readFileSync(path.join(root, 'scripts/cloud-runner/build-snapshot.ts'), 'utf8');
   assert.match(snap, /deno cache [^"]*workers\/career-cloud\/prepare-runner\.ts/, 'the snapshot caches the preparation runner too');
+});
+
+// trainee-file (hosted list page) and ops-monitor are public (verify_jwt = false in supabase/config.toml) and secret-gated:
+// deployed only when TRAINEE_FILE_LINK_SECRET / OPS_MONITOR_TOKEN is among the function secrets; absent = skipped, never a failure.
+test('gated functions: deployed with --no-verify-jwt only when their secret is set; absent is a log line, not a failure', () => {
+  const cfg = fs.readFileSync(path.join(root, 'supabase/config.toml'), 'utf8');
+  for (const fn of ['trainee-file', 'trainee-connect', 'ops-monitor']) assert.match(cfg, new RegExp(`\\[functions\\.${fn}\\]\\nverify_jwt = false`));
+  const off = dry();
+  assert.equal(off.code, 0, off.out);
+  assert.match(off.out, /gated: trainee-file SKIPPED \(TRAINEE_FILE_LINK_SECRET is not among the function secrets\)/);
+  assert.match(off.out, /gated: trainee-connect SKIPPED \(TRAINEE_FILE_LINK_SECRET is not among the function secrets\)/);
+  assert.match(off.out, /gated: ops-monitor SKIPPED \(OPS_MONITOR_TOKEN is not among the function secrets\)/);
+  assert.doesNotMatch(off.out, /functions deploy (trainee-file|trainee-connect|ops-monitor)/);
+  const on = dry([], { ...FAKE, TRAINEE_FILE_LINK_SECRET: 'fake-file-link-secret-0000-FFFFFFFFFFFFFFFF', OPS_MONITOR_TOKEN: 'fake-ops-monitor-token-0000-OOOOOOOOOOOOOOO' });
+  assert.equal(on.code, 0, on.out);
+  assert.match(on.out, /supabase functions deploy trainee-file --project-ref \S+ --no-verify-jwt --use-docker/);
+  // The connect page (/connect proxy -> trainee-connect) signs links with TRAINEE_CONNECT_LINK_SECRET, else TRAINEE_FILE_LINK_SECRET,
+  // and is deployed with the file page under the same secret (it used to be missing here, so /connect had no function behind it).
+  assert.match(on.out, /supabase functions deploy trainee-connect --project-ref \S+ --no-verify-jwt --use-docker/);
+  assert.match(on.out, /supabase functions deploy ops-monitor --project-ref \S+ --no-verify-jwt --use-docker/);
+  assert.match(on.out, /deno check [^\n]*trainee-file\/index\.ts [^\n]*trainee-connect\/index\.ts [^\n]*ops-monitor\/index\.ts/);
+  const only = dry([], { ...FAKE, OPS_MONITOR_TOKEN: 'fake-ops-monitor-token-0000-OOOOOOOOOOOOOOO' });
+  assert.match(only.out, /gated: trainee-file SKIPPED/);
+  assert.match(only.out, /gated: trainee-connect SKIPPED/);
+  assert.match(only.out, /functions deploy ops-monitor /);
+  assert.doesNotMatch(only.out, /functions deploy (trainee-file|trainee-connect)/);
+});
+
+test('gated functions: a failed secrets listing skips both with a log line, never deploys them ungated, and does not abort the run', () => {
+  const r = nonint(['--sha', HEAD_SHA, '--skip-migrations'], CI_ENV, { listFails: true, bundleOk: true });
+  assert.match(r.out, /gated: trainee-file SKIPPED \(secrets list unavailable\)/, r.out);
+  assert.match(r.out, /gated: trainee-connect SKIPPED \(secrets list unavailable\)/);
+  assert.match(r.out, /gated: ops-monitor SKIPPED \(secrets list unavailable\)/);
+  assert.doesNotMatch(r.calls, /functions deploy (trainee-file|trainee-connect|ops-monitor)/);
+  assert.doesNotMatch(r.out, /gated: \S+ will be deployed/);
+});
+
+test('--verify with no project ref: the gated-secrets lookup is skipped (no secrets list call) and does not abort', () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'trainee-go-live-verify-'));
+  const calls = path.join(bin, 'calls.log');
+  const stub = (name, body) => { fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\necho "${name} $*" >> "${calls}"\n${body}\n`); fs.chmodSync(path.join(bin, name), 0o755); };
+  stub('supabase', 'exit 1'); stub('psql', 'exit 0'); stub('deno', 'exit 0');
+  const { SUPABASE_PROJECT_REF, ...noRef } = FAKE;
+  const res = spawnSync('bash', [SCRIPT, '--verify', HEAD_SHA], { cwd: root, encoding: 'utf8', detached: true, stdio: ['ignore', 'pipe', 'pipe'],
+    env: { PATH: `${bin}:${process.env.PATH}`, HOME: home, TRAINEE_GO_LIVE_LOG: path.join(bin, 'run.log'), ...noRef } });
+  const out = res.stdout + res.stderr;
+  const log = fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : '';
+  assert.doesNotMatch(log, /secrets list/, 'no lookup without a ref');
+  assert.doesNotMatch(out, /could not read the project's secret names/);
+  assert.match(out, /gated: trainee-file SKIPPED \(secrets list unavailable: no project ref\)/, out);
+});
+
+// ---- OPS: certification, explicit NOT RUN reasons, and the recorded smoke result ----
+const FILE_URL = 'https://app.example.test/file';
+test('checkFilePage: a made-up link refused with a 4xx page passes; 404, 503 not-set-up, and an open page fail with the fix named', async () => {
+  const f = fakeFetch(() => [410, { error: 'expired' }]);
+  assert.equal((await smoke.checkFilePage({ url: FILE_URL, fetchFn: f })).status, 'PASS');
+  assert.match(f.calls[0].url, /^https:\/\/app\.example\.test\/file\?t=smoke-/);
+  const nf = await smoke.checkFilePage({ url: FILE_URL, fetchFn: fakeFetch(() => [404, {}]) });
+  assert.equal(nf.status, 'FAIL'); assert.match(nf.detail, /not deployed/);
+  const ns = await smoke.checkFilePage({ url: FILE_URL, fetchFn: fakeFetch(() => [503, { error: 'File pages are not set up yet.' }]) });
+  assert.equal(ns.status, 'FAIL'); assert.match(ns.detail, /TRAINEE_FILE_UPSTREAM/); assert.match(ns.detail, /TRAINEE_FILE_LINK_SECRET/);
+  assert.equal((await smoke.checkFilePage({ url: FILE_URL, fetchFn: fakeFetch(() => [200, {}]) })).status, 'FAIL');
+  assert.equal((await smoke.checkFilePage({ url: 'http://plain.test/file', fetchFn: fakeFetch(() => [410, {}]) })).status, 'FAIL');
+});
+
+test('certify: only a live PASS certifies; real Apply is never certified by a smoke; every uncertified line says why', () => {
+  const p = (check) => ({ status: 'PASS', check, detail: '' });
+  const all = [p('file page (TRAINEE_FILE_BASE_URL) refuses a made-up link'), p('trainee-inbound refuses a wrong secret'), p('trainee-inbound answers the right secret'),
+    p('trainee-inbound answers HELP (texted to TRAINEE_SMOKE_CONTACT)'), p('schedule trainee-deliver'), p('preparation host (phone-only preparation) is up')];
+  const c = Object.fromEntries(smoke.certify(all).map((x) => [x.feature, x]));
+  assert.ok(c['file endpoint'].certified && c.inbound.certified && c['phone login'].certified);
+  assert.equal(c['real Apply'].certified, false); assert.match(c['real Apply'].reason, /confirmed by the employer/);
+  const none = Object.fromEntries(smoke.certify([{ status: 'NOT RUN', check: 'trainee-inbound answers HELP', detail: 'skipped' }, { status: 'WARN', check: 'trainee-inbound answers HELP (texted to X)', detail: 'HTTP 503, not wired yet: NOT_WIRED: LOOPMESSAGE_API_KEY is not set' }]).map((x) => [x.feature, x]));
+  for (const f of ['file endpoint', 'inbound', 'phone login', 'real Apply']) { assert.equal(none[f].certified, false, f); assert.ok(none[f].reason.length > 20, f); }
+  assert.match(none.inbound.reason, /LOOPMESSAGE_API_KEY/); assert.match(none['file endpoint'].reason, /TRAINEE_FILE_BASE_URL/);
+  const failed = smoke.certify([{ status: 'FAIL', check: 'file page (TRAINEE_FILE_BASE_URL) refuses a made-up link', detail: 'HTTP 404' }, p('trainee-inbound answers HELP (x)')]);
+  assert.equal(failed.find((x) => x.feature === 'phone login').certified, false);
+});
+
+test('main: prints a certified / not certified line per feature, names why each NOT RUN, records one counts-only row, and survives an unrecordable result', async () => {
+  const env = { SUPABASE_URL: BASE, ...FAKE, GITHUB_SHA: '0768a16' + 'a'.repeat(33), TRAINEE_FILE_BASE_URL: FILE_URL };
+  const fetchFn = fakeFetch((c) => c.fn === 'file' ? [410, {}] : c.fn === 'agent-chat' ? (c.init.headers.Authorization ? [200, { reply: 'hello there' }] : [401, {}]) : c.fn === 'trainee-inbound' && c.body && c.body.text ? [503, { error: 'NOT_WIRED: LOOPMESSAGE_API_KEY is not set; no turn was run' }] : handlerLike(c));
+  const lines = [], sqls = [];
+  const sql = async (q) => { sqls.push(q); return q.includes('cron.job') ? goodJobs.map((j) => j.join('|')).join('\n') : q.startsWith('insert') ? '' : fakeSql(goodJobs, goodRuns)(q); };
+  const code = await smoke.main(['--allow-send'], env, { fetch: fetchFn, sql, log: (s) => lines.push(s) });
+  const out = lines.join('\n');
+  assert.equal(code, 0, out);
+  assert.match(out, /^CERT +CERTIFIED file endpoint: /m);
+  assert.match(out, /^CERT +NOT CERTIFIED inbound: .*LOOPMESSAGE_API_KEY/m);
+  assert.match(out, /^CERT +NOT CERTIFIED phone login: /m);
+  assert.match(out, /^CERT +NOT CERTIFIED real Apply: .*confirmed by the employer/m);
+  const ins = sqls.filter((q) => q.startsWith('insert'));
+  assert.equal(ins.length, 1);
+  assert.match(ins[0], /'deploy_smoke'/); assert.match(ins[0], /"fail":0/); assert.match(ins[0], /"sha":"0768a16/);
+  for (const v of Object.values(FAKE)) assert.ok(!ins[0].includes(v) && !out.includes(v), 'no secret in the row or the log');
+  const bare = [];
+  await smoke.main([], { SUPABASE_URL: BASE, ...FAKE }, { fetch: fakeFetch((c) => c.fn === 'agent-chat' ? [401, {}] : handlerLike(c)), sql: async () => { throw new Error('db down'); }, log: (s) => bare.push(s) });
+  const b = bare.join('\n');
+  assert.match(b, /^NOT RUN file page \(TRAINEE_FILE_BASE_URL\): NOT_WIRED: .*TRAINEE_FILE_LINK_SECRET.*TRAINEE_FILE_UPSTREAM/m);
+  assert.match(b, /^CERT +NOT CERTIFIED file endpoint: .*TRAINEE_FILE_BASE_URL/m);
+});
+
+test('recordSql: only counts, booleans and a validated sha reach the row', () => {
+  const q = smoke.recordSql({ pass: 1, warn: 0, fail: 2, not_run: 3 }, [{ feature: 'phone login', certified: false, reason: "x'; drop table founder_alerts; --" }], "0768a16'; drop");
+  assert.ok(!q.includes('drop') && q.includes('"sha":""') && q.includes('"phone_login":false'));
 });

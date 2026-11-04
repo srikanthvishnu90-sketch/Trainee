@@ -18,6 +18,30 @@ module.exports=async function rpc(db,user,thread,name,args={}) {
     if(!saved.error&&!saved.data?.error) {db.batchIntents ||= new Map();db.batchIntents.set(intent.intent_id,copy(intent));}
     return saved;
   }
+  // RESUME CONFIRM RACE (2026-10-30, migration 20261030060000): the turn's commit and the resume confirmation's
+  // fact_confirmed events in one step, as career_host_commit_evidenced does: every event names a confirmed entry of the
+  // profile this commit saves, a refused commit or a replay writes none, and a failed event write fails the whole commit.
+  if(name==='career_host_commit_evidenced') {
+    const base=args.p_base,events=args.p_events;
+    if(!Array.isArray(events)||!events.length||events.length>60||(args.p_task&&args.p_batch)||(base?.p_patch&&'erase' in base.p_patch))return {data:null,error:{message:'invalid evidenced commit'}};
+    const held=[...(base?.p_snapshot?.stores?.profile?.facts||[]),...(base?.p_patch?.memory?.profile?.facts||[])];
+    const ids=new Set();
+    for(const e of events) {
+      const cid=e?.detail?.confirmation_event_id;
+      if(e?.kind!=='fact_confirmed'||e.user_id!==user||!cid||ids.has(cid))return {data:null,error:{message:'invalid evidenced commit'}};
+      if(!held.some(f=>f&&f.confirmation_event_id===cid&&f.status==='confirmed'&&f.needs_confirmation===false))return {data:null,error:{message:'evidence without state'}};
+      ids.add(cid);
+    }
+    if(db.options?.failEvents)return {data:null,error:{message:'TEST EVENT WRITE FAILED'}};
+    const replay=db.receipts?.has(base.p_key);
+    const saved=args.p_batch?await module.exports(db,user,thread,'career_batch_turn_commit_v1',{p_base:base,p_intent:args.p_batch})
+      :args.p_task?await module.exports(db,user,thread,'career_task_turn_commit_v1',{p_base:base,p_intent:args.p_task})
+      :await module.exports(db,user,thread,'career_host_commit',base);
+    if(saved.error||saved.data?.error||replay)return saved;
+    db.events ||= [];
+    for(const e of events)if(!db.events.some(x=>x.kind==='fact_confirmed'&&x.detail?.confirmation_event_id===e.detail.confirmation_event_id))db.events.push(copy(e));
+    return saved;
+  }
   if(name==='career_batch_result_v1') {const rec=db.batchRuns?.get(args.p_run);return {data:{batch:rec&&rec.userId===args.p_user?copy(rec):null},error:null};}
   if(!['career_host_load','career_host_commit'].includes(name))throw Error('unexpected RPC '+name);
   if(args.p_user!==user||args.p_thread!==thread)throw Error('fixture owner mismatch');

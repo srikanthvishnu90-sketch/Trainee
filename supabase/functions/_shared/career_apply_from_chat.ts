@@ -18,6 +18,7 @@
 // it exactly.
 import { checkAnswer, type OpenQuestion } from "./career_apply_questions.ts";
 import { sameCompany } from "./career_mail.ts";
+import { contentOf, type PostingContent } from "./career_apply_gate.ts";
 
 // ------------------------------------------------------------------------------------------------ positions in the list
 const ORD_WORD: Record<string, number> = {
@@ -55,7 +56,7 @@ export function positionsOf(after: string): number[] | null {
 }
 
 // ------------------------------------------------------------------------------------------ the listed postings on file
-export interface Listed { job_id?: string; url?: string; company?: string; title?: string; location?: string }
+export interface Listed { job_id?: string; url?: string; company?: string; title?: string; location?: string; content?: PostingContent }
 export interface ListedRefusal { job_id: string | null; company: string; title: string; reason: string }
 // Each listed posting by its id on file (career_postings): closed is refused; no record and no link is "posting not
 // found"; no record but a link is kept as listed (the extension can open it). A read that fails decides nothing: the
@@ -72,7 +73,7 @@ export async function checkListed(picks: Listed[], get?: ((id: string) => Promis
       continue;
     }
     if (rec) {
-      ok.push({ job_id: String(rec.job_id ?? id), url: String(rec.url || p.url || ""), company: String(rec.company ?? p.company ?? ""), title: String(rec.title ?? p.title ?? ""), location: String(rec.location ?? p.location ?? "") });
+      ok.push({ job_id: String(rec.job_id ?? id), url: String(rec.url || p.url || ""), company: String(rec.company ?? p.company ?? ""), title: String(rec.title ?? p.title ?? ""), location: String(rec.location ?? p.location ?? ""), content: contentOf(rec) });
       continue;
     }
     if (rec === null && !String(p.url ?? "").trim()) {

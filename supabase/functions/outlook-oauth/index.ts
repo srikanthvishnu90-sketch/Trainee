@@ -10,6 +10,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { handleOutlookOAuth } from "../_shared/outlook_connector.ts";
 import { chatThroughAgent, deliverer } from "../_shared/channel_runtime.ts";
 import { afterConnect } from "../_shared/connectors.ts";
+import { connectLanding } from "../_shared/connect_landing.ts";
 
 // deno-lint-ignore no-explicit-any
 const later = (p: Promise<unknown>) => { const rt = (globalThis as any).EdgeRuntime; if (rt?.waitUntil) rt.waitUntil(p); return Promise.resolve(); };
@@ -22,6 +23,7 @@ serve((req) => {
   const run = chatThroughAgent(url, key);
   return handleOutlookOAuth(req, {
     admin, env: Deno.env, fetch, deliver, log,
+    landing: (o) => connectLanding(Deno.env, { provider: "microsoft", ...o }),
     afterConnect: (a) => later(afterConnect({ admin, env: Deno.env, fetch, now: Date.now, deliver, log,
       runTurn: async (t) => ({ reply: (await run(t)).reply, persisted: true }) }, a.userId, "outlook", a).catch((e) => log(`outlook-oauth: resume: ${String(e?.message ?? e).slice(0, 120)}`))),
   });

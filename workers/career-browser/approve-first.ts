@@ -17,7 +17,7 @@ import { QUARANTINE_VERSION, quarantinedFact, trustedManifest } from "../../exte
 import { applicationApprovalHash } from "../../scripts/apply.ts";
 import { factDependencies } from "../../supabase/functions/_shared/fact_quarantine.ts";
 import { rowQuestionLabel, rowQuestionType } from "../../supabase/functions/_shared/row_answer.ts";
-import { fileJournal, handBack, type Journal, massRun, PacedLimiter, type Pacing, pacingFrom } from "./mass-run.ts";
+import { fileJournal, handBack, type HostGate, type Journal, massRun, PacedLimiter, type Pacing, pacingFrom, requeueMissing, sentNothingRefusal, unstartedWhy } from "./mass-run.ts";
 
 export interface EngineResult {
   result: {
@@ -340,8 +340,12 @@ export async function runApproved(d: {
   // Mass submission: awaited right before the engine starts (the scheduler's durable journal line). If it throws, the
   // engine never starts and the application is recorded not_submitted: nothing was sent.
   beforeEngine?: (job: Job) => Promise<void>;
+  // The scheduler puts back a job whose host refused before anything was sent (mass-run.ts sentNothingRefusal): such a
+  // run is not finished here (it is returned with requeue: true and recorded by the scheduler's requeue). Without it, the
+  // run is recorded not_submitted as before.
+  requeueRefusal?: boolean;
 }) {
-  const done: { id: string; state: string; reason?: string }[] = [];
+  const done: { id: string; state: string; reason?: string; retry_after_s?: number | null; requeue?: boolean; status?: number | null }[] = [];
   for (const job of await d.claim()) {
     let state = "not_submitted", evidence: Record<string, unknown> = {};
     let started = false;
@@ -377,6 +381,13 @@ export async function runApproved(d: {
       if (!run || !OUTCOMES.has(run.result.state)) {
         state = "unknown_outcome";
         evidence = { reason: "the engine gave no result after it started; not retried" };
+      } else if (d.requeueRefusal && sentNothingRefusal(run.result as any)) {
+        // The employer's site refused at the page's open, before anything was filled or sent (HOST_RATE_LIMITED): not
+        // finished here; the scheduler puts the same job back until the site allows, then it runs again.
+        const rr: any = run.result;
+        done.push({ id: job.id, state: "refused", reason: "HOST_RATE_LIMITED", requeue: true, status: typeof rr.status === "number" ? rr.status : null,
+          ...(typeof rr.retry_after_s === "number" ? { retry_after_s: rr.retry_after_s } : {}) });
+        continue;
       } else if (handBack(run.result)) {
         // A verification check or the employer's sign-in wall: the person finishes it at the link; never retried. The
         // engine stopped before anything was sent.
@@ -394,6 +405,9 @@ export async function runApproved(d: {
           reason: run.result.reason ?? null,
           confirmation_id: run.result.confirmation_id ?? null,
           evidence_path: run.result.evidence_path ?? null,
+          // The employer's site refused for load (HOST_RATE_LIMITED): the seconds it asked for, so the host is held off as
+          // long as it asked (mass-run.ts refusal), not the default doubling.
+          ...(typeof run.result.retry_after_s === "number" ? { retry_after_s: run.result.retry_after_s } : {}),
           ...(bound ? { proof } : proof ? { proof_refused: "PROOF_NOT_THIS_APPLICATION" } : {}),
         };
         // FEATURE 14: the pictures and the page's text go to the receipt store, never into the row's evidence (hashes only).
@@ -405,7 +419,8 @@ export async function runApproved(d: {
       evidence = { reason: String(e?.message || e) };
     }
     await d.finish(job.id, job.lease_token, state, evidence);
-    done.push({ id: job.id, state, reason: evidence.reason as string | undefined });
+    done.push({ id: job.id, state, reason: evidence.reason as string | undefined,
+      ...(typeof evidence.retry_after_s === "number" ? { retry_after_s: evidence.retry_after_s } : {}) });
   }
   return done;
 }
@@ -486,6 +501,32 @@ export function ownQueue(client: RpcClient) {
         await client.rpc("career_apply_finish_own", { p_id: id, p_lease: lease, p_state: state, p_evidence: evidence }),
       );
     },
+    // Owner rule (2026-10-27, back off then RESUME): the employer's site refused before anything was sent; the same job
+    // goes back to the queue, not handed out before `until` (20261029180000_career_apply_refusal_requeue.sql). Returns
+    // when it may be handed out again (epoch ms), or null when this database does not have the requeue yet.
+    async requeue(id: string, lease: string, reason: string, retryAfterS: number | null, until: number): Promise<number | null> {
+      const r = await client.rpc("career_apply_requeue_refused_own",
+        { p_id: id, p_lease: lease, p_reason: reason, p_retry_after_s: retryAfterS, p_until: new Date(until).toISOString() });
+      if (r.error && requeueMissing(`${r.error.code ?? ""} ${r.error.message ?? ""}`)) return null;
+      const nb = Date.parse(must(r)?.not_before);
+      return Number.isFinite(nb) ? nb : until;
+    },
+    // Owner rule (back off then RESUME): a claim whose engine never started (the worker stopping, no start inside its lease
+    // budget, its host held) goes back to the queue, the same job, not handed out before `until`
+    // (20261029190000_career_apply_unstarted_requeue.sql). Returns when it may be handed out again (epoch ms), or null when
+    // it cannot be put back (a database without the requeue, or one that refuses it): then it is recorded not sent.
+    async putBack(id: string, lease: string, why: string, until: number): Promise<number | null> {
+      const r = await client.rpc("career_apply_requeue_unstarted_own",
+        { p_id: id, p_lease: lease, p_why: unstartedWhy(why), p_until: new Date(until).toISOString() });
+      if (r.error) {
+        const text = `${r.error.code ?? ""} ${r.error.message ?? ""}`;
+        if (requeueMissing(text) || /career_apply_requeue_unstarted|invalid unstarted reason/i.test(text)) return null;
+        // A refusal other than "no longer your claim" (an approval expired since): not put back; recorded not sent.
+        if (r.error.code === "P0001" && !/invalid apply (claim|transition)/i.test(text)) return null;
+      }
+      const nb = Date.parse(must(r)?.not_before);
+      return Number.isFinite(nb) ? nb : until;
+    },
     // FEATURE 14: one picture of the proof, under the drive's lease (20261026140000_career_apply_receipt_store.sql).
     async attach(id: string, lease: string, kind: string, sha256: string, b64: string) {
       return must(
@@ -504,7 +545,8 @@ export function ownQueue(client: RpcClient) {
 // read as unknown over a network blip; if it still cannot be recorded, the drive is left to the database, which marks it
 // unknown after 15 minutes and never re-drives it, and the local evidence path is reported. The engine never runs twice
 // for one claim: with a journal (MASS_SUBMIT_JOURNAL_DIR), a run that died leaves each started application recorded
-// unknown on the next start and each claimed-but-unstarted one run under its lease or ended as not sent.
+// unknown on the next start and each claimed-but-unstarted one run under its lease or put back in the queue (20261029190000;
+// a database without it: ended as not sent).
 export async function runLoop(o: {
   queue: ReturnType<typeof ownQueue>;
   resume: { path: string; sha256: string };
@@ -518,6 +560,8 @@ export async function runLoop(o: {
   pacing?: Pacing;
   journal?: Journal<Job>;
   drain?: boolean;
+  // The hosts' refusals (mass-run.ts): absent, this process's own (localHostGate).
+  gate?: HostGate;
 }) {
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const log = o.log ?? ((l: string) => console.log(l));
@@ -562,13 +606,57 @@ export async function runLoop(o: {
         runEngine: o.runEngine,
         emailCode: o.emailCode,
         beforeEngine: () => onStart(),
+        requeueRefusal: typeof (o.queue as any).requeue === "function",
         // FEATURE 14: the proof's pictures go with the receipt (a queue without the call keeps them on this computer).
         ...(typeof (o.queue as any).attach === "function"
           ? { attach: (j: Job, kind: string, sha: string, b64: string) => o.queue.attach(j.id, j.lease_token, kind, sha, b64) }
           : {}),
       });
+      if (d.requeue) return { state: d.state, reason: d.reason ?? null, recorded: false, retry_after_s: d.retry_after_s ?? null, requeue: true, status: d.status ?? null };
       say(d, recorded);
-      return { state: d.state, reason: d.reason ?? null, recorded };
+      return { state: d.state, reason: d.reason ?? null, recorded, retry_after_s: d.retry_after_s ?? null };
+    },
+    // The site refused before anything was sent: the same job back to the queue until the site allows (its approval kept).
+    // A database without the requeue records it not sent, as before. Retried like a finish; if it still cannot be written
+    // the database's sweep closes the drive as unknown after 15 minutes (never driven again).
+    requeue: async (job, q) => {
+      const evidence = { reason: "HOST_RATE_LIMITED", ...(q.retryAfterS !== null ? { retry_after_s: q.retryAfterS } : {}) };
+      for (let i = 0; i < 4; i++) {
+        try {
+          const nb = await (o.queue as any).requeue(job.id, job.lease_token, q.reason, q.retryAfterS, q.until);
+          if (nb === null) {
+            const recorded = await record(job.id, job.lease_token, "not_submitted", evidence);
+            say({ id: job.id, state: "not_submitted", reason: "HOST_RATE_LIMITED" }, recorded);
+            return { state: "not_submitted", reason: "HOST_RATE_LIMITED", recorded };
+          }
+          say({ id: job.id, state: "queued", reason: `the employer's site asked us to wait; nothing was sent; runs again after ${new Date(nb).toISOString()}` }, true);
+          return { state: "queued", reason: "HOST_RATE_LIMITED", recorded: true, not_before: nb };
+        } catch (e: any) {
+          // The database already closed this claim (its 15-minute sweep): nothing is left to record.
+          if (e?.message === "APPLY_CLAIM_CLOSED") return { state: "closed", reason: "HOST_RATE_LIMITED", recorded: true };
+          if (i < 3) await sleep(2_000 * 2 ** i);
+        }
+      }
+      say({ id: job.id, state: "unrecorded", reason: "HOST_RATE_LIMITED" }, false);
+      return { state: "unrecorded", reason: "HOST_RATE_LIMITED", recorded: false };
+    },
+    // Claimed and never started (the scheduler cleared its journal line first): the same job back to the queue, to run
+    // later once (owner: back off, then RESUME). A database that cannot put it back records it not sent, as before.
+    putBack: typeof (o.queue as any).putBack !== "function" ? undefined : async (job, why, until) => {
+      for (let i = 0; i < 4; i++) {
+        try {
+          const nb = await (o.queue as any).putBack(job.id, job.lease_token, why, until);
+          if (nb === null) break;
+          say({ id: job.id, state: "queued", reason: `not started (${why.split(":")[0]}); nothing was sent; it goes back to the queue and runs later` }, true);
+          return { state: "queued", reason: why, recorded: true, not_before: nb };
+        } catch (e: any) {
+          if (e?.message === "APPLY_CLAIM_CLOSED") return { state: "closed", reason: why, recorded: true };
+          if (i < 3) await sleep(2_000 * 2 ** i);
+        }
+      }
+      const recorded = await record(job.id, job.lease_token, "not_submitted", { reason: why });
+      say({ id: job.id, state: "not_submitted", reason: why }, recorded);
+      return { state: "not_submitted", reason: why, recorded };
     },
     // Claimed and never started: nothing was sent.
     unstarted: async (job, why) => {
@@ -588,6 +676,7 @@ export async function runLoop(o: {
     pacing: o.pacing ?? pacingFrom(() => undefined, { concurrency: 1, claimBatch: 1, hostMax: 1, hostSpacingMs: 0 }),
     stop: o.stop,
     journal: o.journal,
+    gate: o.gate,
     drain: o.drain,
     idleMs: o.idleMs ?? 30_000,
     sleep,

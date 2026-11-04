@@ -5,7 +5,7 @@
 // the company interviews. The debrief quotes only the person's own words and states no number the rubric did not give.
 //
 // WO-035 adds the voice mock: "start a voice mock for Goldman IB" answers with a single-use link to the app's voice page
-// (career_voice_link.ts), the call runs on OpenAI's Realtime API with the same plan of questions (career_voice.ts), and
+// (career_voice_link.ts) which is now inert: voice is off (no provider; career_voice.ts), and
 // the transcript's words, never audio, come back to voiceDebrief here, scored with the same rubric. Firms without a full
 // record get their sourced interview patterns from packages/career-data/interview-patterns.json (127 interviewPatterns).
 //
@@ -15,6 +15,7 @@
 import { CareerPaths, CareerPrep } from "./router_core.career.js";
 import { supabaseCardStore } from "./career_apply_cards.ts";
 import { hostEnv, supabaseVoiceLinks, type VoiceLinks } from "./career_voice_link.ts";
+import { redactIdentity } from "./identity_redact.ts";
 // FEATURE 11: posting-bound mocks, grading against the answer key and the posting, weak spots kept and drilled.
 import {
   type BoundPosting, debriefTail, drillQuestions, type Fit, fitLine, fitOf, isDrillAsk, isWeakListAsk, judgedFit, mockEvent, type MockPrep,
@@ -398,6 +399,17 @@ function nudgeFor(g: any): string {
   return "Add a number and how you know it.";
 }
 
+// RESEARCH ROUND 2 (2026-10-30): an answer is kept, scored and quoted without its secrets. A key or token pasted into a
+// practice answer ("I stored the deploy key sk-proj-... in the repo"), and an identity number or password said in a voice
+// call (whose words never pass the chat's input redaction), were saved in the mock's record word for word and quoted back
+// in the debrief ("Strongest: Q4 \"... my password is hunter2!\""). They are removed before anything keeps them
+// (identity_redact.ts, the chat's own input redaction, keys included).
+export function withoutSecrets(text: string): { text: string; removed: boolean } {
+  const r = redactIdentity(String(text ?? ""));
+  return { text: r.text, removed: r.removed.length > 0 };
+}
+const REMOVED_NOTE = "I removed a key, password or ID number from that answer and didn't keep it.";
+
 // One answer (or a skip, when text is null): scored, a one-line nudge, then the next question or, after the last one or
 // past the time, the debrief.
 export function next(s0: MockState, text: string | null, now: number): { state: MockState; reply: string; done: boolean; head: string; rest: string } {
@@ -410,11 +422,12 @@ export function next(s0: MockState, text: string | null, now: number): { state: 
     s.answers.push({ n: i + 1, text: "", skipped: true, scores: null, gaps: [], fix: null, nudge: "Skipped." });
     head = "Skipped.";
   } else {
-    const answer = String(text).trim().slice(0, MAX_ANSWER);
+    const clean = withoutSecrets(String(text).trim().slice(0, MAX_ANSWER));
+    const answer = clean.text;
     const g = graded(answer);
     const nudge = nudgeFor(g);
     s.answers.push({ n: i + 1, text: answer, skipped: false, scores: g.scores, gaps: g.gaps || [], fix: g.fix_first ?? null, nudge });
-    head = `${g.scores.total} of 15. ${nudge}`;
+    head = `${g.scores.total} of 15. ${nudge}${clean.removed ? ` ${REMOVED_NOTE}` : ""}`;
   }
   s.last_at = now;
   if (s.answers.length >= s.questions.length) { const e = end(s, now, "done"); return { state: e.state, reply: `${head}\n\n${e.reply}`, done: true, head, rest: e.reply }; }
@@ -618,7 +631,7 @@ export function voiceStartText(s: MockState, url: string): string {
   return lines.join("\n");
 }
 export function voiceOffText(s: MockState): string {
-  return `Voice mocks aren't on yet, so there is no call to join. The text mock works now: text "${textAsk(s)}".`;
+  return `Voice is not available, so there is no call to join. The text mock works now: text "${textAsk(s)}".`;
 }
 
 export interface Turn { who: "interviewer" | "candidate"; text: string }
@@ -664,7 +677,7 @@ export function voiceDebrief(s0: MockState, turns: Turn[], now: number): { state
   for (let n = 1; n <= reached; n++) {
     const said = answers.get(n);
     if (!said) { s.answers.push({ n, text: "", skipped: true, scores: null, gaps: [], fix: null, nudge: "Skipped." }); continue; }
-    const answer = said.slice(0, MAX_VOICE_ANSWER);
+    const answer = withoutSecrets(said.slice(0, MAX_VOICE_ANSWER)).text;
     const g = graded(answer);
     s.answers.push({ n, text: answer, skipped: false, scores: g.scores, gaps: g.gaps || [], fix: g.fix_first ?? null, nudge: nudgeFor(g) });
   }

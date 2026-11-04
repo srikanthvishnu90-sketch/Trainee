@@ -21,6 +21,7 @@
 // that cannot be written never changes the answer.
 import { type EventStore, recordEvents } from "./agent/timeline.ts";
 import { sameCompany } from "./career_mail.ts";
+import { approvalWords } from "./approval_words.ts";
 
 export interface Prepared {
   id: string;
@@ -42,6 +43,11 @@ export interface CardResult {
 export interface CardStore {
   pending(userId: string): Promise<Prepared[]>; // ready, or shown on a card that closed: oldest first
   open(userId: string, ids: string[]): Promise<Card>;
+  // One Confirm (the jobs page's Apply, Telegram's Confirm): open a card of exactly these prepared applications, each still at
+  // exactly the hash the person approved, and approve every item, in ONE transaction (career_apply_card_confirm_as). Opening a
+  // card closes the person's other open cards, so an open and an answer in two calls let two approvals at once close each
+  // other's card and both approve nothing. Throws card_changed (a hash differs) or invalid card (no longer open to approve).
+  confirm?(userId: string, ids: string[], hashes: string[]): Promise<{ card: Card; results: CardResult[] }>;
   latestOpen(userId: string): Promise<Card | null>;
   answer(userId: string, cardId: string, approve: number[]): Promise<CardResult[]>;
   lastAssistantIntent(threadId: string): Promise<string | null>;
@@ -156,7 +162,8 @@ export function parseSelection(raw: string): { nums: number[]; names: string[] }
 }
 
 export function parseCardReply(text: string): CardReply | null {
-  const raw = String(text ?? "").toLowerCase().replace(/[’‘`]/g, "'").replace(/\s+/g, " ").trim();
+  // A thumbs-up alone, or "yess"/"yse" alone, is "yes" (approval_words.ts).
+  const raw = approvalWords(String(text ?? "")).toLowerCase().replace(/[’‘`]/g, "'").replace(/\s+/g, " ").trim();
   const asked = /\?\s*$/.test(raw);
   const t = raw.replace(/[.!?]+$/, "").trim();
   if (!t) return null;
@@ -346,7 +353,9 @@ const RESULT: Record<string, string> = {
   // NO LIMITS: the database says daily_cap only against a daily pace the person set themselves (CAPS-1390).
   daily_cap: "not sent: it is over the daily pace you set yourself; say \"no daily pace\" to lift it, then \"show my applications\"",
   company_cooldown: "not sent: you applied to them in the last 30 days",
-  duplicate: "not sent: you already applied to this posting",
+  // The same posting is already in the person's applications: sent, being sent, or approved and waiting (a site that
+  // asked us to slow down: it goes again by itself, 20261029180000). Never "you already applied" for one never sent.
+  duplicate: "not added again: this posting is already in your applications (sent, or approved and waiting to go); each posting goes at most once",
   stale: "not sent: your details changed after it was prepared; prepare it again",
   no_resume: "not sent: there is no confirmed resume on file to send with it",
   changed: "not sent: it changed after the card was shown",
@@ -635,6 +644,9 @@ export function supabaseCardStore(admin: any): CardStore {
     },
     async open(userId, ids) {
       return must(await admin.rpc("career_apply_card_open_as", { p_user: userId, p_ids: ids }), "open a card");
+    },
+    async confirm(userId, ids, hashes) {
+      return must(await admin.rpc("career_apply_card_confirm_as", { p_user: userId, p_ids: ids, p_hashes: hashes }), "confirm a card");
     },
     async latestOpen(userId) {
       const rows = must(

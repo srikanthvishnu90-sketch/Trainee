@@ -4,6 +4,9 @@
 // these tests run. Test-only; it never reaches the live project.
 
 export class PgError extends Error {}
+// The runtime's own Deno.connect, taken when this module loads: a test that stands a fake network in for Deno.connect
+// (flow-people-finding.test.ts) must not take the database's socket with it, as it never took psql's.
+const realConnect = Deno.connect.bind(Deno);
 
 export class PgConn {
   private buf = new Uint8Array(0);
@@ -11,7 +14,7 @@ export class PgConn {
   private constructor(private conn: Deno.Conn) {}
 
   static async connect(o: { host: string; port: number; user?: string; database?: string }): Promise<PgConn> {
-    const conn = await Deno.connect({ transport: "unix", path: `${o.host}/.s.PGSQL.${o.port}` });
+    const conn = await realConnect({ transport: "unix", path: `${o.host}/.s.PGSQL.${o.port}` });
     const c = new PgConn(conn);
     const enc = new TextEncoder();
     const params = enc.encode(`user\0${o.user ?? "postgres"}\0database\0${o.database ?? "postgres"}\0client_encoding\0UTF8\0\0`);
@@ -97,6 +100,47 @@ export class PgConn {
     }
   }
 
+  // One simple query, everything it answered: each result's rows (a statement that returns rows), the notices and the
+  // error with all its fields (S severity, M message, D detail, H hint, W context, ...), and the transaction status
+  // after it (I idle, T in a transaction, E in a failed one). Used by tests/flow/pg.ts's sql(), which sends one
+  // statement at a time as psql does.
+  exec(sql: string): Promise<{ results: (string | null)[][][]; notices: Record<string, string>[]; error: Record<string, string> | null; status: string }> {
+    const run = this.chain.then(() => this.execNow(sql));
+    this.chain = run.catch(() => {});
+    return run;
+  }
+
+  private async execNow(sql: string) {
+    const q = new TextEncoder().encode(sql + "\0");
+    const msg = new Uint8Array(5 + q.length);
+    msg[0] = 0x51; // 'Q'
+    new DataView(msg.buffer).setInt32(1, 4 + q.length);
+    msg.set(q, 5);
+    await this.write(msg);
+    const results: (string | null)[][][] = [], notices: Record<string, string>[] = [];
+    let error: Record<string, string> | null = null;
+    const dec = new TextDecoder();
+    for (;;) {
+      const [t, body] = await this.read();
+      if (t === "T") results.push([]);
+      else if (t === "D") {
+        const dv = new DataView(body.buffer, body.byteOffset);
+        const n = dv.getInt16(0);
+        let off = 2;
+        const row: (string | null)[] = [];
+        for (let i = 0; i < n; i++) {
+          const len = dv.getInt32(off);
+          off += 4;
+          if (len < 0) row.push(null);
+          else { row.push(dec.decode(body.subarray(off, off + len))); off += len; }
+        }
+        results[results.length - 1].push(row);
+      } else if (t === "E") error = errorFields(body);
+      else if (t === "N") notices.push(errorFields(body));
+      else if (t === "Z") return { results, notices, error, status: String.fromCharCode(body[0]) };
+    }
+  }
+
   async one(sql: string): Promise<string | null> {
     const r = await this.query(sql);
     return r.length ? r[0][0] : null;
@@ -108,6 +152,17 @@ export class PgConn {
       this.conn.write(x).catch(() => {}).finally(() => { try { this.conn.close(); } catch { /* closed */ } });
     } catch { /* closed */ }
   }
+}
+
+function errorFields(body: Uint8Array): Record<string, string> {
+  const dec = new TextDecoder(), out: Record<string, string> = {};
+  let off = 0;
+  while (off < body.length && body[off] !== 0) {
+    const end = body.indexOf(0, off + 1);
+    out[String.fromCharCode(body[off])] = dec.decode(body.subarray(off + 1, end));
+    off = end + 1;
+  }
+  return out;
 }
 
 function errorText(body: Uint8Array): string {

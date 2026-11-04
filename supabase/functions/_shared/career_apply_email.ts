@@ -54,6 +54,8 @@ export interface EmailDeps {
   resume: (userId: string, posting: EmailPosting) => Promise<Resume | null>; // tailored to the posting, else their file
   attachment: (userId: string, sha256: string) => Promise<Resume | null>; // the exact file on the card, by its hash
   canSend: (userId: string) => Promise<boolean>; // a career grant with gmail.send
+  // D-037 (incremental authorization): the "allow sending" link that asks Google for gmail.send on top of the grant, or null.
+  sendConsent?: (userId: string) => Promise<string | null>;
   send: (userId: string, m: OutMail) => Promise<SendResult>;
   // WO-091c: the owner's switch. The chat passes CAREER_EMAIL_SEND === "on" (agent-chat/handler-career.ts), the same
   // pattern as outreach's CAREER_OUTREACH_SEND; false: a yes sends nothing and reserves nothing, and the card is kept.
@@ -161,7 +163,7 @@ export function emailCardText(p: EmailPayload, changed = false): string {
 const REFUSED: Record<string, string> = {
   daily_cap: "today's daily application limit is already used",
   company_cooldown: "you applied to them in the last 30 days",
-  duplicate_job: "you already applied to this posting",
+  duplicate_job: "this posting is already in your applications (sent, or approved and waiting to go), and each posting goes at most once",
   changed_since_yes: "the email changed after you saw it, so your yes was not for this version",
   no_resume: "I have no confirmed resume on file for you, so nothing goes without one",
 };
@@ -238,6 +240,8 @@ export async function emailTurn(o: { message: string; userId: string; threadId: 
   }
   if (!(await o.deps.canSend(o.userId))) {
     // The card stays this thread's last word: once Gmail is connected, a yes sends it.
+    const allow = o.deps.sendConsent ? await o.deps.sendConsent(o.userId).catch(() => null) : null;
+    if (allow) return { reply: `NOT_WIRED: not sent. To send this from your Gmail, allow sending: ${allow} then say yes again.`, status: "NOT_WIRED", waiting: true, card_id: card.id };
     return { reply: "NOT_WIRED: not sent. Trainee can't send from your Gmail yet. Connect Gmail in the Trainee app (it asks to send on your behalf), then say yes again.", status: "NOT_WIRED", waiting: true, card_id: card.id };
   }
   // The resume rule again at the yes: a resume deleted or replaced since the card was shown sends nothing.

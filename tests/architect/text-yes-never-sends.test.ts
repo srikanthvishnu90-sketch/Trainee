@@ -126,9 +126,13 @@ Deno.test("SERIAL-1442 exact payloads: whatever changed since the card was shown
   };
   const r = await cardTurn({ message: "yes", userId: "u", threadId: "t", now: NOW, store, replyTo: "msg-card-7" });
   ok(r?.status === "answered" && /^1 approved exactly as shown/.test(r!.reply), r?.reply);
-  for (const [n, why] of [[1, "it changed after the card was shown"], [2, "your details changed after it was prepared"], [3, "you applied to them in the last 30 days"], [4, "you already applied to this posting"], [5, "it is over the daily pace you set yourself"], [6, "the queue refused it"], [8, "your saved daily pace could not be read"]] as const) {
+  for (const [n, why] of [[1, "it changed after the card was shown"], [2, "your details changed after it was prepared"], [3, "you applied to them in the last 30 days"], [5, "it is over the daily pace you set yourself"], [6, "the queue refused it"], [8, "your saved daily pace could not be read"]] as const) {
     ok(new RegExp(`^${n}\\. [A-Za-z ]+: not sent: ${why.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "m").test(r!.reply), `${n}: ${why}: ${r!.reply}`);
   }
+  // The same posting already in the person's applications (sent, or approved and waiting for a site that asked us to slow
+  // down: 20261029180000): never "you already applied" (it may never have been sent), never the word "duplicate".
+  ok(/^4\. [A-Za-z ]+: not added again: this posting is already in your applications \(sent, or approved and waiting to go\)/m.test(r!.reply) &&
+    !/already applied|duplicate/i.test(r!.reply), r!.reply);
   ok(/^7\. Fine Co: approved/m.test(r!.reply), r!.reply);
 });
 

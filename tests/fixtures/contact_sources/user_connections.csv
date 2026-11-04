@@ -1,0 +1,9 @@
+Notes:
+"When exporting your connection data, you may notice that some of the email addresses are missing."
+
+First Name,Last Name,URL,Email Address,Company,Position,Connected On,Location,Education,Shared Connections
+Maria,Santos,https://www.linkedin.com/in/msantos-fixture,maria.santos@northbridge.example,Northbridge Capital,Vice President,12 Mar 2024,"New York, NY",Wharton; Fordham,Dev Patel; Li Wei
+Dev,Patel,https://www.linkedin.com/in/dpatel-fixture,,Orbit Software,Staff Engineer,03 Jan 2023,"Austin, TX",UT Austin,
+=HYPERLINK("http://evil.example","Click"),Injected,,,Acme,Analyst,01 Jan 2024,,,
+Sam,Okafor,,,Riverside Medical Center,Registered Nurse,05 May 2022,"Columbus, OH",Ohio State,Maria Santos
+Maria,Santos,,,Northbridge Capital,VP,,,,

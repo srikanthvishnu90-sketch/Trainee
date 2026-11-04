@@ -23,7 +23,7 @@
       "value": "No - I do not consent to receiving WhatsApp messages"
     },
     {
-      "match": "text messages",
+      "match": "text message",
       "value": "No - I do not consent to receiving text messages"
     },
     {

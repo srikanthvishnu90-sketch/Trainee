@@ -73,7 +73,9 @@ export function supabaseStanding(admin: any, read: ReadApplications = supabaseAp
 }
 
 // ------------------------------------------------------------------------------------------------ the asks
-const plain = (s: string) => ` ${String(s ?? "").toLowerCase().replace(/[’`]/g, "'").replace(/[?!.]+\s*$/, "").replace(/\s+/g, " ").trim()} `;
+// ROUTING SCENARIOS (2026-10-29): a greeting before the ask ("hey", "ok so", "please") or "please" after it is not part of it.
+const plain = (s: string) => ` ${String(s ?? "").toLowerCase().replace(/[’`]/g, "'").replace(/[?!.]+\s*$/, "").replace(/\s+/g, " ").trim()
+  .replace(/^[^\p{L}\p{N}"'(]+/u, "").replace(/^(?:(?:hey|hi|hello|ok|okay|pls|please)\b[,!:]?\s+)+/, "").replace(/,? (?:please|pls|thanks|thank you)$/, "")} `;
 const STAND_ALL = /^ (?:so )?(?:where do i stand|how do i stand|what'?s my standing) $/;
 const STAND_ONE = /^ (?:so )?(?:where do i stand|how do i stand|what'?s my standing|how am i doing) (?:with|at|on) (.+?) $/;
 const INBOX_ALL = /^ (?:so )?(?:who (?:has |'?s )?emailed me|who has written to me|who wrote to me|who (?:has )?(?:replied|responded|got back to me)|any news(?: from (?:employers|anyone|companies))?|any (?:replies|responses|emails?|mail)(?: from (?:employers|anyone|companies))?|(?:have i|did i) (?:hear|heard) (?:back|anything)(?: from anyone)?|(?:did|has) anyone (?:get back to me|gotten back to me|reply|replied|respond|responded|email me|emailed me|write back|written back)|what'?s in my inbox|anything in my inbox|any (?:rejections|interviews|offers)(?: yet)?) $/;
@@ -175,7 +177,7 @@ function followupsText(s: Standing): string {
 }
 
 // One chat turn: null when the text is not one of these asks (nothing is read); the one model otherwise.
-export async function standingTurn(o: { message: string; userId: string; now: number; read: ReadStanding }): Promise<{ reply: string; status: string; intent: string } | null> {
+export async function standingTurn(o: { message: string; userId: string; now: number; read: ReadStanding }): Promise<{ reply: string; status: string; intent: string; summary?: import("./apply_status_summary.ts").ApplySummary } | null> {
   const ask = standingAsk(o.message);
   if (!ask) return null;
   let s: Standing;
@@ -186,7 +188,7 @@ export async function standingTurn(o: { message: string; userId: string; now: nu
   }
   if (ask.kind === "status") {
     const base = statusReply(o.message, s.jobs, o.now) ?? statusReply(ask.company ? `did my application to ${ask.company} go through` : "where are my applications", s.jobs, o.now);
-    return { reply: statusText(o.message, s, ask.company, o.now), status: base?.status ?? "shown", intent: STANDING_INTENT };
+    return { reply: statusText(o.message, s, ask.company, o.now), status: base?.status ?? "shown", intent: STANDING_INTENT, ...(base?.summary ? { summary: base.summary } : {}) };
   }
   if (ask.kind === "inbox") return { reply: inboxText(s, ask.company), status: s.mail === null ? "unreadable" : "shown", intent: INBOX_INTENT };
   return { reply: followupsText(s), status: s.mail === null ? "unreadable" : s.drafts.length || s.due.length ? "shown" : "none", intent: FOLLOWUPS_INTENT };

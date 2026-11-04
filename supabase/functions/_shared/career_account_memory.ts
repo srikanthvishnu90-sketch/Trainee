@@ -5,7 +5,8 @@
 // account record, migration 20261026090009). This module does the two things the seam cannot, because they need the
 // handler's stores:
 //   1. Facts the person stated in chat this turn get a fact_confirmed event and an owner provenance
-//      (career_router_evidence.ts evidenceStatedFacts), like a confirmed resume entry.
+//      (career_router_evidence.ts evidenceStatedFacts), like a confirmed resume entry. The event is held and written
+//      with the turn's commit (agent-chat passes `evidence`), never before it.
 //   2. A standing need the router did not understand ("never send me staffing agencies", "remember that I only want
 //      roles in Chicago") is kept as a standing instruction on the account, in the brain's own store (career_watch_kv
 //      'career:standing', _shared/agent/memory.ts, wiped by an erase), under the brain's own rules (addStanding refuses
@@ -15,6 +16,27 @@
 import { addStanding, type MemoryStore, type Standing } from "./agent/memory.ts";
 import { type EventStore, recordEvent } from "./agent/timeline.ts";
 import { evidenceStatedFacts, type StatedEvidence } from "./career_router_evidence.ts";
+
+// ROOT CAUSE 3 (docs/architect/ROOT-CAUSES-2026-10-31.md): the profile (the confirmed resume and its entries) and the
+// tracker are the PERSON's, not one thread's, for everyone who talks to Trainee on more than one surface. Telegram,
+// WhatsApp and iMessage share one texting thread and the web opens its own threads, so before this a resume confirmed on
+// Telegram was unknown on the web. Account scope needs migration 20261026090009 (the `memory` patch key), which precedes
+// 20261030060000 (career_host_commit_evidenced), which every confirmation on trunk already needs.
+//   CAREER_ACCOUNT_MEMORY=off  never (the owner's kill switch back to per-thread);
+//   CAREER_ACCOUNT_MEMORY=on   always;
+//   unset (the default)        when the person has a texting contact linked (every Telegram, WhatsApp or iMessage turn
+//                              has one: channel_contacts is how the turn found them), or the account already holds their
+//                              memory (once on, it stays on: the account is the record). A contact that could not be read
+//                              counts as none (per-thread, as before) unless the account already holds the memory.
+// A web-only person keeps per-thread scope by default: an approval stamped before their confirmed facts reach the account
+// stays current (the authority fence, 20261026090009, moves when confirmed facts on the account change). When they link a
+// phone, their next turn folds the thread's profile into the account, and any approval stamped before is asked again.
+export function accountMemoryOn(env: { get(key: string): string | undefined }, person: { textingLinked: boolean | null; accountHasMemory: boolean }): boolean {
+  const v = (env.get("CAREER_ACCOUNT_MEMORY") ?? "").trim().toLowerCase();
+  if (v === "off") return false;
+  if (v === "on") return true;
+  return person.accountHasMemory || person.textingLinked === true;
+}
 
 // The router's answers that mean it did not act on the text.
 const UNHANDLED = new Set(["career_catchall", "career_fallback", "honest_unavailable"]);
@@ -44,11 +66,15 @@ export async function accountMemoryAfterTurn(o: {
   message: string; userId: string; threadId: string; now: number; out: MemoryTurnOut;
   // deno-lint-ignore no-explicit-any
   statedBefore: any[]; ctx: any; events: EventStore | null | undefined; standing: MemoryStore | null | undefined;
+  // KNOWN GAPS (2026-10-30): where the stated facts' fact_confirmed events go. agent-chat passes the turn's held store
+  // (heldEvents), so they are written by the turn's own commit (career_host_commit_evidenced, 20261030080000) or not at
+  // all: a refused save leaves no event naming a fact no saved record holds. Absent: `events`, as before.
+  evidence?: EventStore | null;
 }): Promise<MemoryTurnResult> {
   const out = o.out;
   let patch: MemoryPatch | null = null;
   const after = Array.isArray(o.ctx?.statedFacts?.facts) ? o.ctx.statedFacts.facts : [];
-  const stated = await evidenceStatedFacts({ userId: o.userId, threadId: o.threadId, now: o.now, message: o.message, before: o.statedBefore, after, events: o.events });
+  const stated = await evidenceStatedFacts({ userId: o.userId, threadId: o.threadId, now: o.now, message: o.message, before: o.statedBefore, after, events: o.evidence ?? o.events });
   if (stated.untraced || stated.refused) console.error(`career memory: stated facts without an event: ${stated.untraced} not in their words, ${stated.refused} not recorded`);
   let standing: MemoryTurnResult["standing"] = null;
   const ask = o.standing && UNHANDLED.has(String(out.intent)) ? standingAsk(o.message) : null;

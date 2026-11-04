@@ -133,9 +133,16 @@ Deno.test("WO-039/3 parallel contexts: one engine process per job, never more th
   const jobs = [await job("A", 4), await job("B", 5), await job("A", 6), await job("C", 7), await job("B", 8)];
   const { q, finished } = memQueue(jobs), seen: any[] = [];
   let now = 0, peak = 0;
+  // "In parallel" is forced, not left to timing (2026-10-30): the first engine run waits (up to 10 s) for a second to be
+  // running beside it, so a loaded machine cannot make 20 ms runs look sequential; a loop that never runs two at once
+  // waits it out and fails the peak check.
+  let second!: () => void;
+  const two = new Promise<void>((r) => { second = r; });
   const engine = fakeEngine(async () => {
     now++;
     peak = Math.max(peak, now);
+    if (now >= 2) second();
+    else { let t: ReturnType<typeof setTimeout> | undefined; await Promise.race([two, new Promise<void>((r) => { t = setTimeout(r, 10_000); })]); clearTimeout(t); }
     await new Promise((r) => setTimeout(r, 20));
     now--;
     return sent;
@@ -300,7 +307,7 @@ Deno.test("WO-039/9 the engine never sees the service key; a resume named facts.
   await Deno.chmod(fake, 0o755);
   Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", "TEST-SECRET-KEY");
   Deno.env.set("SUPABASE_URL", "https://example.test");
-  Deno.env.set("OPENAI_API_KEY", "TEST-OPENAI");
+  Deno.env.set("ANTHROPIC_API_KEY", "TEST-ANTHROPIC");
   try {
     const r = await cloudEngineRunner({ root: "/repo", evidenceRoot: dir, deno: fake })(["--url", "u"]);
     const names = String(r!.result.env).trim().split(/\s+/);
@@ -309,7 +316,7 @@ Deno.test("WO-039/9 the engine never sees the service key; a resume named facts.
   } finally {
     Deno.env.delete("SUPABASE_SERVICE_ROLE_KEY");
     Deno.env.delete("SUPABASE_URL");
-    Deno.env.delete("OPENAI_API_KEY");
+    Deno.env.delete("ANTHROPIC_API_KEY");
   }
   const j = await job("A", 12), { q, finished } = memQueue([j], { resume: () => ({ filename: "facts.json", sha256: RESUME_SHA, b64 }) }), seen: any[] = [];
   await runCloudJob(j, { queue: q, log: () => {}, runEngine: fakeEngine(() => sent, seen) });

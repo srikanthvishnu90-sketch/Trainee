@@ -73,8 +73,8 @@ Deno.test("shape: concise answer (facts, then interpretation, then the limit), n
 
 Deno.test("parts: text, then the file, then the link alone; web gets the same three pieces and nothing else", async () => {
   const { reply } = await build();
-  assertEquals(researchParts(reply).map((p) => p.kind), ["text", "attachment", "link"]);
-  const w = webParts(reply);
+  assertEquals(researchParts(reply, { attach: true }).map((p) => p.kind), ["text", "attachment", "link"]);
+  const w = webParts(reply, { attach: true });
   assertEquals(w.map((p) => p.type), ["text", "file", "link"]);
   assertEquals((w[2] as { url: string }).url, reply.report!.url);
   assert(!JSON.stringify(w).match(/button|card|action/i));
@@ -99,7 +99,7 @@ const sleep = async () => {};
 Deno.test("telegram: three separate messages in order: the answer, the file (sendDocument), the report link alone", async () => {
   const { reply } = await build();
   const { f, calls } = platform();
-  const r = await deliverResearch({ reply, address: "12345", adapter: telegramAdapter({ token: "t", fetch: f, sleep, clock: () => 0 }) });
+  const r = await deliverResearch({ reply, attach: true, address: "12345", adapter: telegramAdapter({ token: "t", fetch: f, sleep, clock: () => 0 }) });
   assertEquals(calls.map((c) => c.url.split("/").pop()), ["sendMessage", "sendDocument", "sendMessage"]);
   assertEquals(calls[0].body.text, reply.answer);
   assert(calls[1].body.filename.endsWith(".txt"));
@@ -115,7 +115,7 @@ Deno.test("whatsapp and iMessage: the answer, then the link alone with its previ
     ["imessage", (f: typeof fetch) => loopMessageAdapter({ apiKey: "k", fetch: f, sleep })],
   ] as const) {
     const { f, calls } = platform();
-    const r = await deliverResearch({ reply, address: name === "imessage" ? "+15551234567" : "15551234567", adapter: mk(f) });
+    const r = await deliverResearch({ reply, attach: true, address: name === "imessage" ? "+15551234567" : "15551234567", adapter: mk(f) });
     const texts = calls.map((c) => c.body?.text?.body ?? c.body?.text);
     assertEquals(texts, [reply.answer, reply.report!.url], name);
     if (name === "whatsapp") assertEquals(calls[1].body.text.preview_url, true);
@@ -176,7 +176,7 @@ Deno.test("failed report store: the answer says the report wasn't saved, and the
     const { reply } = await build({ store });
     assertEquals(reply.report, undefined);
     assert(reply.answer.includes("I couldn't save the full report this time"), reply.answer);
-    const parts = researchParts(reply);
+    const parts = researchParts(reply, { attach: true });
     assertEquals(parts.map((p) => p.kind), ["text", "attachment", "link"]);
     assertEquals((parts[2] as { url: string }).url, A); // A carries the most grounded points
   }
@@ -190,14 +190,14 @@ Deno.test("failed delivery: a file that didn't go is recorded and said; an answe
   const failDoc = (async (input: string | URL | Request, init?: RequestInit) => String(input).endsWith("/sendDocument")
     ? Response.json({ ok: false, description: "Bad Request: file upload failed" }, { status: 400 }) : f(input, init)) as typeof fetch;
   let recorded: unknown = null;
-  const r = await deliverResearch({ reply, address: "12345", adapter: telegramAdapter({ token: "t", fetch: failDoc, sleep, clock: () => 0 }), record: (s) => { recorded = s; } });
+  const r = await deliverResearch({ reply, attach: true, address: "12345", adapter: telegramAdapter({ token: "t", fetch: failDoc, sleep, clock: () => 0 }), record: (s) => { recorded = s; } });
   assertEquals(r.ok, false);
   assertEquals(r.states.map((s) => `${s.kind}:${s.status}`), ["text:delivered", "attachment:failed", "link:delivered", "note:delivered"]);
   assertEquals(calls.map((c) => c.body?.text), [reply.answer, reply.report!.url, "The source list file didn't go through."]);
   assertEquals(recorded, r.states);
 
   const dead = (async () => Response.json({ ok: false, description: "Bad Request: chat not found" }, { status: 400 })) as typeof fetch;
-  const r2 = await deliverResearch({ reply, address: "12345", adapter: telegramAdapter({ token: "t", fetch: dead, sleep, clock: () => 0 }) });
+  const r2 = await deliverResearch({ reply, attach: true, address: "12345", adapter: telegramAdapter({ token: "t", fetch: dead, sleep, clock: () => 0 }) });
   assertEquals(r2.states.map((s) => `${s.kind}:${s.status}`), ["text:failed", "attachment:skipped", "link:skipped"]);
 });
 

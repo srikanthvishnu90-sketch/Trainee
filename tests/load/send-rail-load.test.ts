@@ -140,7 +140,7 @@ Deno.test({ name: `M1 send rail at scale: ${PEOPLE} people x ${EACH} emails + on
       seed_s: +(seededMs / 1000).toFixed(1),
       enqueue: { people: VIA_ENQUEUE, items: VIA_ENQUEUE * EACH, s: +(enqueueMs / 1000).toFixed(2), per_s: Math.round((VIA_ENQUEUE * EACH) / (enqueueMs / 1000)), p50_ms_per_50: +pct(enqLat, 50).toFixed(1), p99_ms_per_50: +pct(enqLat, 99).toFixed(1) },
       send: { s: +(sendMs / 1000).toFixed(1), per_s: Math.round(sent / (sendMs / 1000)), claims: sum("claims") },
-      latency_ms: Object.fromEntries(Object.entries(lat).map(([k, v]) => [k, { n: v.length, p50: +pct(v, 50).toFixed(2), p95: +pct(v, 95).toFixed(2), p99: +pct(v, 99).toFixed(2), max: +Math.max(...v).toFixed(1) }])),
+      latency_ms: Object.fromEntries(Object.entries(lat).map(([k, v]) => [k, { n: v.length, p50: +pct(v, 50).toFixed(2), p95: +pct(v, 95).toFixed(2), p99: +pct(v, 99).toFixed(2), max: +v.reduce((m, x) => Math.max(m, x), 0).toFixed(1) }])),
       first_email_s: { p50: +pct(firsts, 50).toFixed(1), p99: +pct(firsts, 99).toFixed(1), max: +Math.max(...firsts).toFixed(1) },
       heavy: { queued: EACH + HEAVY_EXTRA, sent: perAccount.get(heavyId), sent_when_everyone_had_started: heavyAtLastFirst, gmail_refusals: refusedHeavy },
     };

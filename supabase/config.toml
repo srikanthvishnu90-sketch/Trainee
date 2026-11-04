@@ -63,3 +63,15 @@ verify_jwt = false
 # the jobs secret authenticate in the handler (_shared/outlook_connector.ts).
 [functions.outlook-oauth]
 verify_jwt = false
+
+# Hosted file pages: the signed, expiring, single-user token in the link is the credential (no Upmore JWT in a browser tab).
+[functions.trainee-file]
+verify_jwt = false
+
+# Hosted account-connect page: the signed, expiring, single-use link (or Telegram's signed Mini App data) is the credential.
+[functions.trainee-connect]
+verify_jwt = false
+
+# Owner monitoring: the scheduler carries no JWT; the OPS_MONITOR_TOKEN authenticates in the handler.
+[functions.ops-monitor]
+verify_jwt = false

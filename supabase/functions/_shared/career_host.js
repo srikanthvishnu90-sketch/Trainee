@@ -566,7 +566,18 @@ const CareerHost = (() => {
     // module 143's containment. Never throws: a chain crash is contained to
     // module 140's honest fallback text, and the failure record is kept on
     // ctx.containmentRecords for the handler to log.
+    // ONBOARDING SCENARIOS (2026-10-29): every turn's outcome goes to the router's resume ask (CareerRouter.noteServedTurn),
+    // whoever answered it, so a yes is bound only to the question asked last. The edge handler calls noteTurn for the
+    // turns it answers before the host (cards, applies, connectors...).
+    function noteTurn(ctx, intent) {
+      try { if (CareerRouter && typeof CareerRouter.noteServedTurn === "function") CareerRouter.noteServedTurn(ctx, intent == null ? null : String(intent)); } catch { /* never breaks a turn */ }
+    }
     function runTurn(text, ctx) {
+      const out = runTurnInner(text, ctx);
+      noteTurn(ctx, out && out.intent);
+      return out;
+    }
+    function runTurnInner(text, ctx) {
       let handler = null;
       const controls = applyHostControl(text, ctx);
       if (controls) return { ...controls, action: null, handler: "CareerHostControl", contained: false, capabilities: workerCapabilities };
@@ -717,7 +728,7 @@ const CareerHost = (() => {
       return { v: 1, scope: { userId: ctx.userId }, stores, privacy_epoch: epoch, ...(accountBacked ? { account_memory: 1 } : {}) };
     }
 
-    return { createTurnCtx, runTurn, extractSnapshot, isHostControlled, STATE_KEYS: STATE_KEYS.slice() };
+    return { createTurnCtx, runTurn, noteTurn, extractSnapshot, isHostControlled, STATE_KEYS: STATE_KEYS.slice() };
   }
 
   return { createCareerHost, STATE_KEYS: STATE_KEYS.slice() };

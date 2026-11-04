@@ -1,9 +1,8 @@
 // WO-035: the voice mock interview, and interview patterns for 50 firms. "start a voice mock for Goldman IB" answers with
-// a signed, single-use, 10-minute link bound to the person's account, bare on its own line. The page runs an OpenAI
-// Realtime call with a short-lived client secret the career-voice function mints (the real key never leaves the server;
-// without it, NOT_WIRED and the text mock). The page sends the transcript's words, never audio; the debrief is scored
-// with the text mock's rubric over the person's own words and goes back into their thread. The 50 firms' patterns each
-// cite a public URL and a checked date.
+// owner directive 2026-11-02 (Claude-only, no OpenAI anywhere): voice is OFF and is a hard NOT_WIRED whatever the
+// environment holds (CAREER_VOICE=on included): no link is issued, "start" mints nothing and contacts no host, the text mock
+// is offered. The debrief scorer, the session store and the 50 firms' patterns (each cite a public URL and a checked date)
+// are unchanged.
 // Run: deno test -A --no-check tests/architect/wo-035-voice-mock.test.ts
 import {
   answersFromTranscript,
@@ -26,18 +25,16 @@ import {
   handleVoice,
   interviewerInstructions,
   NOT_WIRED_TEXT,
-  openaiMint,
-  realtimeSecretRequest,
-  REALTIME_CLIENT_SECRETS_URL,
   supabaseVoiceSessions,
   type VoiceRow,
   type VoiceSessions,
 } from "../../supabase/functions/_shared/career_voice.ts";
-import { LINK_TTL_MS, signToken, supabaseVoiceLinks, verifyToken } from "../../supabase/functions/_shared/career_voice_link.ts";
+import { LINK_TTL_MS, signToken, supabaseVoiceLinks, verifyToken, voiceWired } from "../../supabase/functions/_shared/career_voice_link.ts";
 import { CareerPrep } from "../../supabase/functions/_shared/router_core.career.js";
 import { HYGIENE } from "../../evals/career/compare.ts";
 import PATTERNS from "../../packages/career-data/interview-patterns.json" with { type: "json" };
 import HANDLER from "../../supabase/functions/_shared/career_voice.ts" with { type: "text" };
+import LINK_SRC from "../../supabase/functions/_shared/career_voice_link.ts" with { type: "text" };
 import INDEX from "../../supabase/functions/career-voice/index.ts" with { type: "text" };
 import PAGE from "../../voice/mock.html" with { type: "text" };
 import MIGRATION from "../../supabase/migrations/20261021020000_career_voice_mock.sql" with { type: "text" };
@@ -63,9 +60,10 @@ const hygieneOk = (r: string, where: string) => { for (const h of HYGIENE) asser
 
 // The voice session table's rules, in memory (the SQL is tested in tests/db/career_voice_mock.test.sql): one start per
 // link, within 10 minutes; one debrief per started call, within its window; one move to the text mock.
-function memSessions(state: MockState, o: { user?: string; created?: number } = {}) {
+function memSessions(state: MockState, o: { user?: string; created?: number; started?: boolean } = {}) {
   const created = o.created ?? T;
   const row: VoiceRow & { call_expires_at?: string } = { thread: THREAD, state, link_expires_at: new Date(created + LINK_TTL_MS).toISOString() };
+  if (o.started) { row.started_at = new Date(created).toISOString(); row.call_expires_at = new Date(created + 35 * MIN).toISOString(); }
   const calls: string[] = [];
   const stored: { fn: string; args: Record<string, unknown> }[] = [];
   const owner = o.user ?? USER;
@@ -96,30 +94,23 @@ function memSessions(state: MockState, o: { user?: string; created?: number } = 
   };
   return { s, row, calls, stored };
 }
-// OpenAI's client_secrets endpoint, faked: records what it was sent and with which key.
-function fakeOpenAI(status = 200) {
-  const sent: { url: string; auth: string; body: any }[] = [];
-  const f = (async (url: string, init: RequestInit) => {
-    sent.push({ url, auth: String((init.headers as Record<string, string>).Authorization), body: JSON.parse(String(init.body)) });
-    if (status !== 200) return new Response("no", { status });
-    return new Response(JSON.stringify({ value: "ek_test_ephemeral_123", expires_at: 1792000000, session: { type: "realtime" } }), { status: 200 });
-  }) as unknown as typeof fetch;
-  return { f, sent };
-}
-async function call(body: unknown, d: { sessions: VoiceSessions; env?: Record<string, string>; now?: number; openai?: ReturnType<typeof fakeOpenAI>; delivered?: string[]; logs?: string[] }) {
-  const ai = d.openai ?? fakeOpenAI();
+// Voice contacts no host at all: fetch is replaced for the whole file, and every test that goes through call() asserts it
+// was never used.
+const fetched: string[] = [];
+globalThis.fetch = ((u: unknown) => { fetched.push(String(u)); return Promise.reject(new Error("no network in voice tests")); }) as typeof fetch;
+async function call(body: unknown, d: { sessions: VoiceSessions; env?: Record<string, string>; now?: number; delivered?: string[]; logs?: string[] }) {
   const res = await handleVoice(new Request("https://fn.test/career-voice", { method: "POST", body: JSON.stringify(body) }), {
-    env: env(d.env ?? { SUPABASE_SERVICE_ROLE_KEY: KEY, OPENAI_API_KEY: OPENAI_KEY, CAREER_VOICE: "on" }),
+    env: env(d.env ?? { SUPABASE_SERVICE_ROLE_KEY: KEY, OPENAI_API_KEY: OPENAI_KEY, ANTHROPIC_API_KEY: "sk-ant-test", CAREER_VOICE: "on" }),
     now: () => d.now ?? T,
     cors: {},
     sessions: d.sessions,
-    mint: (k) => openaiMint(k, ai.f),
     deliver: async (_u, key) => void d.delivered?.push(key),
     log: (l) => void d.logs?.push(l),
   });
   const text = await res.text();
-  return { status: res.status, text, body: JSON.parse(text), sent: ai.sent };
+  return { status: res.status, text, body: JSON.parse(text), sent: fetched };
 }
+const callToken = (o: { exp?: number } = {}) => signToken({ s: SID, u: USER, k: "call", exp: o.exp ?? T + 50 * MIN }, KEY);
 const startToken = (o: { exp?: number; user?: string; key?: string } = {}) =>
   signToken({ s: SID, u: o.user ?? USER, k: "start", exp: o.exp ?? T + LINK_TTL_MS }, o.key ?? KEY);
 const goldman = () => ({ ...start({ role: "IB", company: "Goldman", now: T }).state, voice: true });
@@ -162,46 +153,29 @@ Deno.test("WO-035/1 the texts that ask for a voice mock; the text mock and the c
   for (const t of ["stop", "end", "start", "voice", "voice memo", "what is a voice mock?", "send a voice note"]) eq(parseMockCommand(t), null, t);
 });
 
-Deno.test("WO-035/2 the start link: signed, bound to the account, 10 minutes, plain text and alone on its own line", async () => {
+Deno.test("WO-035/2 voice is off: no start link is issued, whatever the environment holds", async () => {
   const kv: { fn: string; args: any }[] = [];
   const admin = { rpc: async (fn: string, args: any) => (kv.push({ fn, args }), { data: SID, error: null }) };
-  const links = supabaseVoiceLinks(admin, env({ SUPABASE_SERVICE_ROLE_KEY: KEY, OPENAI_API_KEY: OPENAI_KEY, CAREER_VOICE: "on", UPMORE_APP_URL: "https://app.example.test" }));
+  const links = supabaseVoiceLinks(admin, env({ SUPABASE_SERVICE_ROLE_KEY: KEY, OPENAI_API_KEY: OPENAI_KEY, ANTHROPIC_API_KEY: "sk-ant-test", CAREER_VOICE: "on", UPMORE_APP_URL: "https://app.example.test" }));
   const store: MockStore = {
     get: async () => null, save: async () => {}, clear: async () => {}, lastAssistantIntent: async () => null, voice: links,
   };
   const r = await mockTurn({ message: "start a voice mock for Goldman IB", userId: USER, threadId: THREAD, now: T, store });
-  assert(r && r.status === "voice_link" && r.intent === MOCK_VOICE_INTENT, JSON.stringify(r));
-  const lines = r.reply.split("\n");
-  const at = lines.findIndex((l) => l.startsWith("https://"));
-  assert(at > 0, r.reply);
-  assert(/^https:\/\/app\.example\.test\/voice\/mock#t=v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(lines[at]), `the link is bare and alone: "${lines[at]}"`);
-  eq(r.reply.match(/https?:\/\//g)?.length, 1, "one link");
-  assert(r.reply.length <= 1500, `${r.reply.length} characters`);
-  hygieneOk(r.reply, "voice start");
-  assert(/Audio is never stored/.test(r.reply) && /within 2 minutes/.test(r.reply), r.reply);
-  assert(!/password|code/i.test(r.reply), "no password or code in chat");
-  // The session holds the same plan the text mock would run, for this person's thread.
-  eq(kv[0].fn, "career_voice_create");
-  eq([kv[0].args.p_user, kv[0].args.p_thread], [USER, THREAD]);
+  assert(r && r.status === "voice_not_wired" && r.intent === MOCK_VOICE_INTENT, JSON.stringify(r));
+  assert(/Voice is not available/.test(r.reply) && /text "mock me for IB at Goldman Sachs/.test(r.reply), r.reply);
+  assert(!/https?:\/\//.test(r.reply), "no link");
+  hygieneOk(r.reply, "voice off");
+  eq(kv.length, 0, "no session row is created while voice is off");
   const text = start({ role: "IB", company: "Goldman", now: T }).state;
-  eq(kv[0].args.p_state.questions, text.questions, "same questions as the text mock");
-  eq(kv[0].args.p_state.voice, true);
-  // The token names this session and this person, for 10 minutes, and only verifies with the server's key.
-  const token = lines[at].split("#t=")[1];
-  const v = await verifyToken(token, KEY, T, "start");
-  assert(v.ok, JSON.stringify(v));
-  eq([v.claims.s, v.claims.u, v.claims.exp], [SID, USER, T + LINK_TTL_MS]);
-  eq((await verifyToken(token, KEY, T + LINK_TTL_MS, "start")).ok, false, "expired at 10 minutes");
-  eq((await verifyToken(token, "another-key", T, "start")).ok, false, "a different key never verifies it");
-  // Without a voice rail: no link, the text mock offered in one line, never an error.
+  for (const e of [{ SUPABASE_SERVICE_ROLE_KEY: KEY, CAREER_VOICE: "on" }, { SUPABASE_SERVICE_ROLE_KEY: KEY, OPENAI_API_KEY: OPENAI_KEY, CAREER_VOICE: "on" }, {}]) {
+    eq(await supabaseVoiceLinks(admin, env(e)).create(USER, THREAD, text, T), { ok: false, reason: "not_wired" });
+  }
+  eq(voiceWired(env({ SUPABASE_SERVICE_ROLE_KEY: KEY, OPENAI_API_KEY: OPENAI_KEY, ANTHROPIC_API_KEY: "sk-ant-test", CAREER_VOICE: "on" })), { ok: false, reason: "voice is off: no provider", missing: ["voice is off: no provider"] });
+  eq(kv.length, 0);
+  // No voice rail at all: same one-line offer.
   const off = await mockTurn({ message: "start a voice mock for Goldman IB", userId: USER, threadId: THREAD, now: T, store: { ...store, voice: undefined } });
-  assert(off && off.status === "voice_not_wired" && /aren't on yet/.test(off.reply) && /text "mock me for IB at Goldman Sachs/.test(off.reply), off?.reply);
-  const noKey = await supabaseVoiceLinks(admin, env({ SUPABASE_SERVICE_ROLE_KEY: KEY, CAREER_VOICE: "on" })).create(USER, THREAD, text, T);
-  eq(noKey, { ok: false, reason: "not_wired" });
-  const notOn = await supabaseVoiceLinks(admin, env({ SUPABASE_SERVICE_ROLE_KEY: KEY, OPENAI_API_KEY: OPENAI_KEY })).create(USER, THREAD, text, T);
-  eq(notOn, { ok: false, reason: "not_wired" }, "the key alone never turns voice on: the owner sets CAREER_VOICE=on");
-  eq(kv.length, 1, "no session is created when voice is off");
-  // The start text for every company on file and a few without: one link line, plain, one message.
+  assert(off && off.status === "voice_not_wired" && /Voice is not available/.test(off.reply), off?.reply);
+  // The start text for every company on file and a few without: one link line, plain, one message (the text builder is unchanged).
   for (const c of [...firms().map((f) => f.name), "Acme Widgets", null]) {
     const st = { ...start({ role: "software engineer", company: c, now: T }).state, voice: true };
     const t = voiceStartText(st, "https://app.example.test/voice/mock#t=v1.abc.def");
@@ -210,66 +184,39 @@ Deno.test("WO-035/2 the start link: signed, bound to the account, 10 minutes, pl
   }
 });
 
-Deno.test("WO-035/3 the ephemeral-token function never returns the real key, and refuses without a valid signed link", async () => {
+Deno.test("WO-035/3 start is a hard NOT_WIRED even with CAREER_VOICE=on and every key set: nothing minted, no host contacted", async () => {
   const m = memSessions(goldman());
-  const ai = fakeOpenAI();
-  for (const bad of [undefined, "", "v1.x.y", await startToken({ key: "forged-with-another-key-0123456789abcdef" }), await startToken({ user: OTHER })]) {
-    const r = await call({ action: "start", token: bad }, { sessions: m.s, openai: ai });
+  fetched.length = 0;
+  for (const bad of [undefined, "", "v1.x.y", await startToken({ key: "forged-with-another-key-0123456789abcdef" })]) {
+    const r = await call({ action: "start", token: bad }, { sessions: m.s });
     assert(r.status === 401 && r.body.status === "REFUSED", `refused: ${r.text}`);
   }
-  eq(ai.sent.length, 0, "OpenAI is never called without a valid link");
-  eq(m.calls, [], "and the link is not touched");
-  const r = await call({ action: "start", token: await startToken() }, { sessions: m.s, openai: ai });
-  eq([r.status, r.body.status], [200, "OK"], r.text);
-  eq(r.body.client_secret, "ek_test_ephemeral_123");
-  assert(!r.text.includes(OPENAI_KEY) && !r.text.includes("sk-"), "the real key is never in the response");
-  assert(!r.text.includes(KEY), "nor the service key");
-  eq(ai.sent.length, 1);
-  eq([ai.sent[0].url, ai.sent[0].auth], [REALTIME_CLIENT_SECRETS_URL, `Bearer ${OPENAI_KEY}`], "the real key goes only to OpenAI");
-  const sent = ai.sent[0].body;
-  eq([sent.session.type, sent.expires_after.anchor], ["realtime", "created_at"]);
-  assert(sent.expires_after.seconds <= 60, "the client secret lives a minute at most");
-  eq(sent.session.audio.input.transcription.model, "gpt-4o-mini-transcribe");
-  assert(sent.session.audio.input.turn_detection.type === "semantic_vad", "turn detection set");
-  // The call token can post a debrief; it can never open another call.
-  const again = await call({ action: "start", token: r.body.call_token }, { sessions: m.s, openai: ai });
-  eq([again.status, again.body.status], [401, "REFUSED"]);
-  // An upstream failure says so and still offers the text mock.
-  const m2 = memSessions(goldman());
-  const down = await call({ action: "start", token: await startToken() }, { sessions: m2.s, openai: fakeOpenAI(500) });
-  assert(down.status === 502 && down.body.status === "UPSTREAM_ERROR" && down.body.text_mock === true && !down.text.includes(OPENAI_KEY), down.text);
+  eq(m.calls, [], "a bad link never touches the store");
+  const logs: string[] = [];
+  const r = await call({ action: "start", token: await startToken() }, { sessions: m.s, logs });
+  eq([r.status, r.body.status, r.body.text_mock, r.body.message], [200, "NOT_WIRED", true, NOT_WIRED_TEXT], r.text);
+  assert(!("client_secret" in r.body) && !("call_token" in r.body) && !("calls_url" in r.body), r.text);
+  assert(!r.text.includes(OPENAI_KEY) && !r.text.includes(KEY) && !r.text.includes("sk-ant"), "no key in the response");
+  assert(logs.some((l) => l.includes("voice is off: no provider")), logs.join("|"));
+  eq(m.calls, [], "the link is not used up");
+  eq(fetched, [], "no host is contacted: not OpenAI, not Anthropic, not anyone");
+  assert(NOT_WIRED_TEXT.startsWith("Voice is not available"), "honest text");
 });
 
-Deno.test("WO-035/4 an expired or reused link is refused", async () => {
-  const m = memSessions(goldman());
+Deno.test("WO-035/4 an expired or foreign link is refused", async () => {
   const token = await startToken();
-  eq((await call({ action: "start", token }, { sessions: m.s })).body.status, "OK");
-  const reused = await call({ action: "start", token }, { sessions: m.s });
-  eq([reused.status, reused.body.status, reused.body.reason], [410, "REFUSED", "used"], reused.text);
   const m2 = memSessions(goldman());
   const late = await call({ action: "start", token }, { sessions: m2.s, now: T + LINK_TTL_MS });
   eq([late.status, late.body.reason], [410, "expired"], "the signed expiry");
   eq(m2.calls, [], "an expired link never reaches the store");
-  // The row's own 10 minutes hold even for a token signed longer.
-  const m3 = memSessions(goldman());
-  const long = await call({ action: "start", token: await startToken({ exp: T + 60 * MIN }) }, { sessions: m3.s, now: T + 11 * MIN });
-  eq([long.status, long.body.reason], [410, "used"], long.text);
-  // Another person's link (or a link for another person) never opens this session.
   const theirs = await call({ action: "start", token: await signToken({ s: SID, u: OTHER, k: "start", exp: T + LINK_TTL_MS }, KEY) }, { sessions: memSessions(goldman()).s });
-  eq(theirs.body.status, "REFUSED");
+  eq(theirs.body.status, "NOT_WIRED", "a valid link of any person gets the same off answer");
+  const call2 = await call({ action: "start", token: await callToken() }, { sessions: memSessions(goldman()).s });
+  eq([call2.status, call2.body.status], [401, "REFUSED"], "a call token never opens a call");
 });
 
-Deno.test("WO-035/5 NOT_WIRED without the key: the link is not used up and the page offers the text mock", async () => {
+Deno.test("WO-035/5 the text mock in one tap; the page is inert and says voice is not available", async () => {
   const m = memSessions(goldman());
-  const r = await call({ action: "start", token: await startToken() }, { sessions: m.s, env: { SUPABASE_SERVICE_ROLE_KEY: KEY } });
-  eq([r.status, r.body.status, r.body.text_mock, r.body.message], [200, "NOT_WIRED", true, NOT_WIRED_TEXT]);
-  eq(m.calls, [], "the link is still unused");
-  const none = await call({ action: "start", token: await startToken() }, { sessions: m.s, env: {} });
-  eq([none.status, none.body.status], [200, "NOT_WIRED"]);
-  const off = await call({ action: "start", token: await startToken() }, { sessions: m.s, env: { SUPABASE_SERVICE_ROLE_KEY: KEY, OPENAI_API_KEY: OPENAI_KEY } });
-  eq([off.status, off.body.status], [200, "NOT_WIRED"], "the key without CAREER_VOICE=on spends nothing");
-  eq(m.calls, [], "the link is still unused");
-  // One tap: the text mock, same role and company, in the person's thread.
   const fb = await call({ action: "fallback", token: await startToken() }, { sessions: m.s, env: { SUPABASE_SERVICE_ROLE_KEY: KEY } });
   eq(fb.body.status, "OK", fb.text);
   const f = m.stored.find((x) => x.fn === "fallback")!.args as any;
@@ -277,12 +224,8 @@ Deno.test("WO-035/5 NOT_WIRED without the key: the link is not used up and the p
   assert(/^Here is the text mock instead\.\n\nMock interview: IB mock for Goldman Sachs\. About 20 minutes, 6 questions, by text\. /.test(f.text), f.text);
   hygieneOk(f.text, "fallback");
   eq((await call({ action: "fallback", token: await startToken() }, { sessions: m.s })).body.status, "REFUSED", "once");
-  // The page says so and offers the text mock in one tap, for a blocked microphone and a failed connection too.
-  assert(PAGE.includes('r.status === "NOT_WIRED"') && PAGE.includes("Voice isn't on yet."), "page: not wired");
-  assert(/NotAllowedError[\s\S]{0,120}Your browser blocked the microphone/.test(PAGE), "page: microphone blocked");
-  assert(/connectionState === "failed"[\s\S]{0,120}WebRTC failed/.test(PAGE) && /typeof RTCPeerConnection === "undefined"/.test(PAGE), "page: WebRTC failed or missing");
-  assert(/function failCall[\s\S]{0,300}offerText\(true\)/.test(PAGE) && /action: "fallback"/.test(PAGE), "page: every failure offers the text mock, one tap");
-  assert(PAGE.indexOf("getUserMedia({ audio: true })") < PAGE.indexOf('action: "start"'), "the microphone is asked before the link is used");
+  assert(PAGE.includes("Voice is not available") && PAGE.includes('action: "fallback"'), "page: not available, text mock offered");
+  assert(!/getUserMedia|RTCPeerConnection|realtime|openai/i.test(PAGE.replace(/<!--[\s\S]*?-->/, "")), "the page never asks for the microphone or opens a call");
 });
 
 Deno.test("WO-035/6 the interviewer: the same plan, a follow-up at most, and only the record's facts with their fields", () => {
@@ -305,8 +248,6 @@ Deno.test("WO-035/6 the interviewer: the same plan, a follow-up at most, and onl
   assert(/interview-patterns\.json, firm meta/.test(meta) && meta.includes("https://www.metacareers.com/"), meta);
   const acme = interviewerInstructions(start({ role: "data analyst", company: "Acme Widgets", now: T }).state);
   assert(/There is no record of Acme Widgets on file\. Say nothing about how Acme Widgets hires or interviews/.test(acme) && !acme.includes("\n- "), acme);
-  const req = realtimeSecretRequest(st, { model: "gpt-realtime" });
-  eq([req.session.model, req.session.instructions], ["gpt-realtime", ins]);
 });
 
 Deno.test("WO-035/7 the debrief uses the rubric and quotes only the person's words in the transcript", () => {
@@ -337,8 +278,6 @@ Deno.test("WO-035/8 no audio is persisted: the code never records or uploads it,
     assert(!/MediaRecorder|audio\/(?:webm|wav|ogg|mpeg)|\.wav\b|\bBlob\(|storage\.from\(|createSignedUploadUrl|base64.{0,20}audio/i.test(src), `${name} never records or uploads audio`);
   }
   assert(!/\baudio\b[^\n]*\b(?:bytea|text|jsonb)\b/i.test(MIGRATION) && !/transcript\s+(?:text|jsonb)/i.test(MIGRATION), "no audio or transcript column");
-  assert(/Audio is never stored/.test(PAGE), "the privacy text says so");
-  assert(/transcript: transcript, latency: lat/.test(PAGE), "the page sends words and timings only");
   // Every storage call of a whole call, through the Supabase store.
   const st = goldman();
   const turns = call20(st);
@@ -354,21 +293,19 @@ Deno.test("WO-035/8 no audio is persisted: the code never records or uploads it,
     rpc: async (fn: string, args: Record<string, unknown>) => (ops.push({ op: fn, args }), { data: fn === "career_voice_start" ? st : true, error: null }),
   };
   const sessions = supabaseVoiceSessions(admin);
-  const first = await call({ action: "start", token: await startToken() }, { sessions });
-  const r = await call({ action: "finish", token: first.body.call_token, transcript: turns }, { sessions });
+  const r = await call({ action: "finish", token: await callToken(), transcript: turns }, { sessions });
   eq(r.body.status, "OK", r.text);
   const writes = ops.filter((o) => o.op !== "career_watch_kv.read");
-  eq(writes.map((o) => o.op), ["career_voice_start", "career_voice_finish"], "the only writes: the link's one use, then the debrief");
+  eq(writes.map((o) => o.op), ["career_voice_finish"], "the only write: the debrief");
   const stored = JSON.stringify(writes);
   assert(!/audio|recording|"transcript"/i.test(stored), "nothing named audio or transcript is stored");
   assert(!stored.includes("zebra") && !stored.includes(turns[0].text), "the interviewer's words are not stored");
-  const text = String((writes[1].args as any).p_text);
+  const text = String((writes[0].args as any).p_text);
   assert(text.startsWith("Debrief, IB voice mock for Goldman Sachs"), text);
   for (const t of turns.filter((x) => x.who === "candidate")) assert(!stored.includes(t.text) || t.text.length <= 110, "no answer is stored whole, only short quotes in the debrief");
   // A turn carrying anything but words is refused.
-  const m = memSessions(goldman());
-  const c = await call({ action: "start", token: await startToken() }, { sessions: m.s });
-  const bad = await call({ action: "finish", token: c.body.call_token, transcript: [{ who: "candidate", text: "hi", audio: "UklGRiQAAABXQVZF" }] }, { sessions: m.s });
+  const m = memSessions(goldman(), { started: true });
+  const bad = await call({ action: "finish", token: await callToken(), transcript: [{ who: "candidate", text: "hi", audio: "UklGRiQAAABXQVZF" }] }, { sessions: m.s });
   eq([bad.status, bad.body.reason], [400, "bad_transcript"]);
 });
 
@@ -377,11 +314,10 @@ Deno.test("WO-035/9 the 2-minute debrief path, timed offline on a 20-minute call
   const turns = call20(st);
   const words = turns.filter((t) => t.who === "candidate").reduce((n, t) => n + t.text.split(" ").length, 0);
   assert(words >= 2700, `about 20 minutes of speech at 150 words a minute: ${words} words`);
-  const m = memSessions(st);
-  const c = await call({ action: "start", token: await startToken() }, { sessions: m.s });
+  const m = memSessions(st, { started: true });
   const delivered: string[] = [], logs: string[] = [];
   const t0 = performance.now();
-  const r = await call({ action: "finish", token: c.body.call_token, transcript: turns, latency: { silence_to_audio_ms: [640, 720, 810], vad_to_audio_ms: [310, 350, 420] } },
+  const r = await call({ action: "finish", token: await callToken(), transcript: turns, latency: { silence_to_audio_ms: [640, 720, 810], vad_to_audio_ms: [310, 350, 420] } },
     { sessions: m.s, now: T + 20 * MIN, delivered, logs });
   const ms = performance.now() - t0;
   eq(r.body.status, "OK", r.text);
@@ -391,9 +327,9 @@ Deno.test("WO-035/9 the 2-minute debrief path, timed offline on a 20-minute call
   eq(r.body.latency.silence_to_audio, { n: 3, median_ms: 720, p90_ms: 810 });
   assert(logs.some((l) => /reply delay after silence n=3 median=720/.test(l)), "the harness's numbers reach the function log");
   // Once only: a second post of the same call is refused.
-  eq((await call({ action: "finish", token: c.body.call_token, transcript: turns }, { sessions: m.s, now: T + 21 * MIN })).body.reason, "done");
+  eq((await call({ action: "finish", token: await callToken(), transcript: turns }, { sessions: m.s, now: T + 21 * MIN })).body.reason, "done");
   // A call token that has expired posts nothing.
-  const late = await call({ action: "finish", token: c.body.call_token, transcript: turns }, { sessions: memSessions(st).s, now: T + 60 * MIN });
+  const late = await call({ action: "finish", token: await callToken(), transcript: turns }, { sessions: memSessions(st, { started: true }).s, now: T + 60 * MIN });
   eq(late.body.reason, "expired");
 });
 
@@ -435,8 +371,11 @@ Deno.test("WO-035/10 the 50 firms: every pattern and question cites a public URL
 
 Deno.test("WO-035/11 wiring: the function is deployed without a JWT, CORS limited to the app, the migration's rules", () => {
   assert(/\[functions\.career-voice\]\nverify_jwt = false/.test(CONFIG), "verify_jwt off: the signed link is the gate");
-  assert(INDEX.includes("corsFor(req)") && INDEX.includes("openaiMint(apiKey)"), "CORS and the one key call");
-  assert(!/anthropic/i.test(HANDLER + INDEX + PAGE), "OpenAI only");
+  assert(INDEX.includes("corsFor(req)"), "CORS");
+  const code = (t: string) => t.replace(/<!--[\s\S]*?-->/g, "").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  for (const [name, src] of [["career_voice.ts", HANDLER], ["career-voice/index.ts", INDEX], ["voice/mock.html", PAGE], ["career_voice_link.ts", LINK_SRC]] as const) {
+    assert(!/openai|anthropic|realtime|gpt-|OPENAI_API_KEY|ANTHROPIC_API_KEY|client_secrets|mint/i.test(code(src)), `${name} names no provider and mints nothing`);
+  }
   for (const fn of ["career_voice_create", "career_voice_start", "career_voice_finish", "career_voice_fallback"]) {
     assert(MIGRATION.includes(`create or replace function public.${fn}(`), fn);
   }

@@ -3,7 +3,7 @@
 // gate (career_apply_host_backoff_*) and its own journal. The engine is a stand-in that takes ENGINE_MS and refuses on
 // hosts named "refuse-*" (a 429 with Retry-After) the first time each host is tried. Every engine start is appended to
 // a log line "RAN <job id> <host> <ms>" (the test counts them: each job at most once, ever).
-//   SCALE_PG="<socket dir>:<port>:<pgbin>" SCALE_ID=<n> SCALE_JOURNAL=<dir> SCALE_CONCURRENCY=<n> ENGINE_MS=<ms>
+//   SCALE_PG="<socket dir>:<port>:<pgbin>" SCALE_ID=<n> SCALE_JOURNAL=<dir> SCALE_CONCURRENCY=<n> ENGINE_MS=<ms> [SCALE_START=<uuid>]
 //   deno run -A tests/flow/scale-worker.ts
 import { psqlSession } from "./psql-session.ts";
 import { dbHostGate, fileJournal, type MassJob, massRun, pacingFrom } from "../../workers/career-browser/mass-run.ts";
@@ -33,7 +33,11 @@ const gate = dbHostGate({
 }, { log: () => {}, cacheMs: 200 });
 type J = MassJob & { user_id: string };
 const tried = new Set<string>();
-let cursor: string | null = null;
+// Where this instance's walk over people begins. Production passes none (the claim starts each fresh walk at a random
+// person); the scale test spreads its instances evenly (SCALE_START) so that "every person is served within the first
+// starts" depends on the claim's walk, not on where random starting points happened to fall (2026-10-30: with random
+// starts, 1994 of 2001 people were reached in a window shorter than one walk per instance, on run 40877292448).
+let cursor: string | null = env("SCALE_START") || null;
 let stop = false;
 // A worker in production never stops asking; this one stops once the database holds nothing queued that is not leased
 // by another instance (a single empty claim is not proof: rows a concurrent claim holds are skipped).

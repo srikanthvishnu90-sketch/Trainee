@@ -34,6 +34,8 @@ function isPrivateHost(url: string): boolean {
   return false;
 }
 const isHttp = (url: string) => { try { return /^https?:$/.test(new URL(url).protocol); } catch { return false; } };
+// A page read over plain http can be read, but it is never shown as a link (scenarios 2026-10-29): only https is linked.
+export const isHttps = (url: string) => { try { return new URL(url).protocol === "https:"; } catch { return false; } };
 
 // One form for comparing links: no fragment, no trailing slash on the path, host lowercased.
 export function normalizeUrl(url: string): string {
@@ -116,7 +118,7 @@ async function readOne(start: string, f: typeof fetch, timeout: number): Promise
 // THE LINK GUARD. Of the links a draft wants to show, only those a fetch above returned (status 200, same normalized
 // address) survive; every other one is dropped and named, so the reply can say it left a link out instead of passing it on.
 export function verifiedLinkGuard(urls: string[], verified: Pick<SourcePage, "url" | "status">[]): { kept: string[]; dropped: string[] } {
-  const ok = new Set(verified.filter((v) => v.status === 200 && !isBlockedHost(v.url)).map((v) => normalizeUrl(v.url)));
+  const ok = new Set(verified.filter((v) => v.status === 200 && isHttps(v.url) && !isBlockedHost(v.url)).map((v) => normalizeUrl(v.url)));
   const kept: string[] = [], dropped: string[] = [];
   for (const u of urls) {
     const n = normalizeUrl(u);

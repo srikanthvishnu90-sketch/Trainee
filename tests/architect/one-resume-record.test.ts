@@ -217,13 +217,15 @@ Deno.test({ name: "one confirmed resume: entries, readers, change, delete, trick
       const got = await pg.asService().rpc("career_apply_cloud_resume", { p_id: id, p_lease: u });
       eq([got.data?.sha256, got.data?.b64?.replace(/\n/g, ""), got.data?.filename], [f.sha, b64(PDF_A), "Ada Resume.pdf"]);
       // A row written past every trigger (as a superuser restoring data could) that carries another resume: a claim hands
-      // nothing out and the row stays where it was.
+      // nothing out, and (submit worker round, 20261030140000) ends it as not sent with its reason instead of leaving it
+      // queued for ever.
       const tampered = w.payload(u, "gh-6", "Initrode", "b".repeat(64));
       await pg.sql(`set session_replication_role = replica; insert into public.career_apply_jobs (user_id, job_id, company, url, payload, payload_hash, approval_hash)
         values ('${u}', 'gh-6', 'Initrode', '${tampered.url}', ${q(JSON.stringify(tampered))}::jsonb, '${await w.hash(tampered)}', '${await w.hash(tampered)}'); set session_replication_role = origin;`);
       const again = await pg.asPerson(u).rpc("career_apply_claim_own", { p_limit: 6, p_source: "own_computer" });
       eq([again.error, again.data], [null, []], "nothing handed out");
-      eq(await pg.sql(`select state from public.career_apply_jobs where user_id = '${u}' and job_id = 'gh-6'`), "queued");
+      eq(await pg.sql(`select state || ' | ' || reason from public.career_apply_jobs where user_id = '${u}' and job_id = 'gh-6'`),
+        "not_submitted | not sent: the resume you approved it with is no longer your confirmed resume; nothing was sent. Approve it again with your current resume");
       await pg.sql(`delete from public.career_apply_jobs where user_id = '${u}' and job_id = 'gh-6'`);
       // A render whose stored time is before the confirmation was made from what they had before: refused.
       const early = "6".repeat(64);

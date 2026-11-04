@@ -6,6 +6,7 @@
 // It never rewrites anything: it says ok, or which words are not on the person's confirmed record. The caller refuses
 // the document (or the answer) on a no. Drafts are not facts: only confirmed facts and the person's own basics count.
 import { CareerProfile, CareerTailor } from "./router_core.career.js";
+import { claimProblems } from "./person_claims.ts";
 
 export interface GuardLine { text: string; factIds?: string[] }
 export interface GuardResult { ok: boolean; refused: { text: string; reasons: string[] }[] }
@@ -50,6 +51,9 @@ const stem = (w: string) => w.toLowerCase().replace(/(ing|ed|es|s)$/, "");
 export function lineProblems(text: string, rec: Record_, factIds?: string[]): string[] {
   const t = String(text ?? "").replace(/\s+/g, " ").trim();
   if (!t) return [];
+  // A secret is refused by name; its digits are never quoted back in a reason.
+  const secret = claimProblems(t, { record: [] }).filter((x) => x.startsWith("it holds a"));
+  if (secret.length) return secret;
   const scoped = factIds?.length
     ? lc([...factIds.map((id) => rec.byFact.get(String(id)) ?? ""), rec.own].join(" "))
     : rec.lower;
@@ -75,6 +79,10 @@ export function lineProblems(text: string, rec: Record_, factIds?: string[]): st
       if (!hasWord(rec.lower, x)) { reasons.push(`name "${x}" is not on your record`); }
     }
   }
+  // TAILORING SCENARIOS (2026-10-29): the claims the checks above do not see (a degree written out, a spelled-out or
+  // multiplied metric, "40+" for 40, work authorization, how the person identifies, a lower-case employer, a secret).
+  // TAILORING ROUND 2: a name after "at", "for", "with", "from" or "by" in a printed line, in any case ("at hooli").
+  reasons.push(...claimProblems(t, { record: [rec.text], line: true }));
   return [...new Set(reasons)];
 }
 

@@ -1,0 +1,9 @@
+{
+  "imports": {
+    "https://esm.sh/@supabase/supabase-js@2.117.1": "npm:@supabase/supabase-js@2.117.1",
+    "../../../supabase/functions/agent-chat/career_brain.ts": "./released/career_brain.ts"
+  },
+  "scopes": {
+    "./released/": { "../../../supabase/functions/agent-chat/career_brain.ts": "../../../supabase/functions/agent-chat/career_brain.ts" }
+  }
+}

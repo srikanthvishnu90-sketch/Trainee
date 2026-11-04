@@ -21,9 +21,9 @@
 //      link where the provider gives one) is created only after the person approves that exact event, once.
 // No volume limit of Trainee's own (owner, 2026-10-27): the only brakes are an outside system's refusal (429, quota), met
 // by backing off that mailbox and resuming.
-import { type ModelFn, outreachLock, payloadHash, confirmed, factText, parseNumbers, OPT_OUT_LINE, sha256 } from "./career_outreach.ts";
+import { type ModelFn, outreachLock, payloadHash, confirmed, factText, parseBatchYes, parseNumbers, OPT_OUT_LINE, sha256 } from "./career_outreach.ts";
 import { ONE_ADDRESS } from "./career_outreach_gmail.ts";
-import { queueApproved, type Rpc } from "./career_send_rail.ts";
+import { autoReply, decodeEntities, deliveryNotice, newText, optedOut, queueApproved, type Rpc } from "./career_send_rail.ts";
 import { type Busy, type CalendarProvider, fmtIn, googleCalendar, isFree, type OutlookCalendarPort, outlookCalendar, proposeSlots, type Slot, validZone } from "./career_calendar.ts";
 
 // ------------------------------------------------------------------------------------------------ shapes
@@ -111,10 +111,23 @@ export interface RepliesStore {
   wantingCall(limit: number): Promise<ThreadRow[]>;
   mailboxes(userId: string): Promise<{ provider: Provider; last_error: string | null; last_ok_at: string | null }[]>; // threads that want a call and have no scheduling reply yet, any person
   lastAssistantIntent(chatThreadId: string): Promise<string | null>;
+  // NETWORKING R2 (2026-10-30): which batch a chat last showed (pushed there, or "show outreach approvals"), so a "send all"
+  // there answers exactly that batch, never one drafted after it was shown. markShown: a store that records the batch an
+  // approvals reply showed or answered (the in-memory one); the database store reads it from the chat's last message. A store without shownBatch
+  // answers the newest batch (as before).
+  shownBatch?(userId: string, chatThreadId: string): Promise<string | null>;
+  markShown?(userId: string, chatThreadId: string, batchId: string): Promise<void>;
+  batch?(userId: string, batchId: string): Promise<Action[]>;
+  // "stop emailing <address>": every email and follow-up of this person's to that address that has not gone yet is
+  // cancelled (queued on the rail, approved drafts, follow-ups shown or approved), and no follow-up is drafted to it again.
+  stopAddress?(userId: string, email: string): Promise<StopResult>;
+  // The addresses of this person's outreach whose name matches (for "stop emailing Maya Chen").
+  addressesNamed?(userId: string, name: string): Promise<{ email: string; name: string }[]>;
   // The sending rail's row of the outreach email this conversation began with (career_send_queue, kind outreach), if the
   // rail sent it: follow-ups name it so the rail keeps the sequence in order and stops it on a reply.
   railRoot(userId: string, draftId: string): Promise<string | null>;
 }
+export interface StopResult { queued: number; drafts: number; actions: number; threads: number; sent: number }
 export interface Outbox { enqueue(userId: string, m: { key: string; kind: "status" | "followup"; text: string; at: number }): Promise<boolean> }
 
 const DAY = 86_400_000;
@@ -122,15 +135,13 @@ const clip = (s: unknown, n: number) => String(s ?? "").replace(/\s+/g, " ").tri
 export const addressOf = (from: string) => (/<([^>]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
 
 // ------------------------------------------------------------------------------------------------ the rule pre-pass
-const BOUNCE_FROM = /\b(mailer-daemon|postmaster|mail delivery (?:subsystem|system)|microsoftexchange[0-9a-f]*)\b/i;
-const BOUNCE_SUBJECT = /(delivery status notification|undeliverable|undelivered mail|delivery has failed|mail delivery failed|returned mail|failure notice|address not found|delivery failure)/i;
-const OOO_SUBJECT = /^\s*(?:re:\s*)?(?:automatic reply|auto(?:matic)?[- ]?reply|autoreply|out of (?:the )?office|ooo\b|away from (?:the )?office|on vacation|on leave)/i;
-const OOO_TEXT = /\b(?:i am|i'm|i will be) (?:currently )?(?:out of (?:the )?office|away|on (?:vacation|leave|holiday|pto|parental leave))\b|\bout of (?:the )?office (?:until|through|till)\b/i;
-const STOP_TEXT = /^\s*(?:stop|unsubscribe|remove me|opt out|please stop)\b|\b(?:unsubscribe|stop (?:emailing|contacting|writing to|messaging) me|remove me from|take me off|do not (?:contact|email) me|don'?t (?:contact|email|write to) me|opt me out|not interested|no longer interested|please don'?t reach out|no thanks?,? (?:i'?m|we'?re) (?:all )?set)\b/i;
+// The words are the sending rail's (career_send_rail.ts deliveryNotice, autoReply, newText, optedOut): one reading of a
+// thread for both lanes.
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 // The date an out-of-office says they are back, as the start of that day in `tz`; null when none is said plainly.
 export function returnDate(text: string, now: number, tz: string): string | null {
-  const t = String(text ?? "").toLowerCase();
+  // "10 November", "5th of Nov": the month first, as the patterns below read it.
+  const t = String(text ?? "").toLowerCase().replace(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?/g, "$2 $1");
   const near = /(?:back|return(?:ing)?|in the office|available)\b[^.]{0,40}?\b(?:on |by |after )?(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day,? )?(?:(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? (\d{1,2})|(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?|(\d{4})-(\d{2})-(\d{2}))/.exec(t)
     ?? /(?:until|through|till)\b[^.]{0,20}?(?:(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? (\d{1,2})|(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?|(\d{4})-(\d{2})-(\d{2}))/.exec(t);
   if (!near) return null;
@@ -145,13 +156,18 @@ export function returnDate(text: string, now: number, tz: string): string | null
   if (at > now + 366 * DAY) return null;
   return new Date(Date.UTC(new Date(at).getUTCFullYear(), new Date(at).getUTCMonth(), new Date(at).getUTCDate())).toISOString();
 }
-export type Rule = { cls: "bounce" | "out_of_office" | "not_interested"; return_at?: string | null; by: "headers" | "words" } | null;
+// "notice": a delivery delay warning or a read receipt. Neither is an answer: nothing is recorded and nothing changes (a
+// delay is not a bounce: the mail system is still trying).
+export type Rule = { cls: "bounce" | "out_of_office" | "not_interested" | "notice"; return_at?: string | null; by: "headers" | "words" } | null;
 export function rulePass(m: MailMsg, recipient: string, now: number, tz: string): Rule {
+  const notice = deliveryNotice({ from: m.from, subject: m.subject, text: m.text, headers: m.headers });
+  if (notice === "bounce") return { cls: "bounce", by: "headers" };
+  if (notice) return { cls: "notice", by: "headers" };
   const h = Object.fromEntries(Object.entries(m.headers ?? {}).map(([k, v]) => [k.toLowerCase(), String(v ?? "")]));
-  if (BOUNCE_FROM.test(m.from) || BOUNCE_SUBJECT.test(m.subject) || /report-type=delivery-status/i.test(h["content-type"] ?? "") || /^\s*5\.\d\.\d/.test(h["x-failed-recipients"] ? "5.0.0" : "")) return { cls: "bounce", by: "headers" };
   const auto = /auto-replied|auto-generated/i.test(h["auto-submitted"] ?? "") || "x-autoreply" in h || "x-autorespond" in h || /auto_reply/i.test(h["precedence"] ?? "") || /^(?:oof|autoreply)$/i.test(h["x-auto-response-suppress"] ?? "");
-  if (auto || OOO_SUBJECT.test(m.subject) || OOO_TEXT.test(m.text.slice(0, 600))) return { cls: "out_of_office", return_at: returnDate(`${m.subject}\n${m.text}`, now, tz), by: auto ? "headers" : "words" };
-  if (addressOf(m.from) === recipient.toLowerCase() && STOP_TEXT.test(m.text.slice(0, 400).split(/\n\s*(?:on .{0,80} wrote:|-{2,}|>)/i)[0])) return { cls: "not_interested", by: "words" };
+  if (autoReply(m)) return { cls: "out_of_office", return_at: returnDate(`${m.subject}\n${newText(m.text)}`, now, tz), by: auto ? "headers" : "words" };
+  // Only the reply's own new words, never the quoted history below it.
+  if (addressOf(m.from) === recipient.toLowerCase() && optedOut(newText(m.text).slice(0, 600))) return { cls: "not_interested", by: "words" };
   return null;
 }
 
@@ -175,7 +191,7 @@ export function understandPayload(m: MailMsg, t: Pick<ThreadRow, "recipient_name
   const offered = (t.offered ?? []).map((s, i) => `${i + 1}. ${s.start}`).join("\n");
   const body = String(m.text ?? "").split(/\n\s*On .{0,120} wrote:\s*\n/i)[0].slice(0, 4000);
   return {
-    system: UNDERSTAND_SYSTEM, max_tokens: 500, store: false,
+    system: UNDERSTAND_SYSTEM, max_tokens: 500,
     tools: [UNDERSTAND_TOOL], tool_choice: { type: "tool", name: "record_email" },
     messages: [{ role: "user", content: [
       `Today: ${new Date(now).toISOString()}. Conversation with ${t.recipient_name}${t.recipient_firm ? ` (${t.recipient_firm})` : ""}, subject "${t.subject}".`,
@@ -202,6 +218,7 @@ export function checkReading(input: any, now: number, tz: string): Reading | nul
 }
 export async function understand(o: { msg: MailMsg; thread: ThreadRow; model: ModelFn | null; now: number; tz: string }): Promise<Reading> {
   const rule = rulePass(o.msg, o.thread.recipient_email, o.now, o.tz);
+  if (rule?.cls === "notice") return { cls: "other", summary: "A mail system's notice (a delivery delay or a read receipt), not an answer.", asks: [], commitments: [], times: [], contact_tz: null, return_at: null, referral: null, by: "rules" };
   if (rule) {
     const summary = rule.cls === "bounce" ? "The email bounced: the address did not accept it." : rule.cls === "out_of_office"
       ? `Automatic out-of-office reply${rule.return_at ? `; back ${fmtIn(Date.parse(rule.return_at), o.tz).replace(/,? \d.*$/, "")}` : ""}.` : "They asked not to be contacted.";
@@ -269,6 +286,8 @@ export async function conversationFor(store: RepliesStore, userId: string, threa
 // One message on a watched thread, understood and recorded once.
 export async function recordMessage(o: { store: RepliesStore; userId: string; thread: ThreadRow; msg: MailMsg; model: ModelFn | null; now: number; tz: string }): Promise<string> {
   const t = o.thread;
+  // A delivery delay warning or a read receipt is not a turn of the conversation: nothing is recorded, nothing changes.
+  if (!o.msg.fromMe && rulePass(o.msg, t.recipient_email, o.now, o.tz)?.cls === "notice") return "ignored";
   if (o.msg.fromMe) {
     const conv = mergeTurn(t, { who: "person", asks: [], commitments: [], at: o.msg.at });
     const after = { ...t, ...conv };
@@ -350,7 +369,7 @@ export async function runReplySync(o: SyncRun) {
         stats.messages++;
         const t = (await o.store.thread(row.user_id, base.id)) ?? base; // the state after the turns before this one
         const res = await recordMessage({ store: o.store, userId: row.user_id, thread: t, msg: m, model: o.model, now: o.now, tz });
-        if (res !== "seen") { stats.recorded++; stats.classes[res] = (stats.classes[res] ?? 0) + 1; }
+        if (res !== "seen" && res !== "ignored") { stats.recorded++; stats.classes[res] = (stats.classes[res] ?? 0) + 1; }
       }
       await o.store.releaseSync(row.user_id, row.provider, o.worker, got.cursor, got.more ? o.now : o.now + 300_000, null);
     } catch (e) {
@@ -366,11 +385,21 @@ export async function runReplySync(o: SyncRun) {
 const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
 export const GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const b64dec = (s: string) => { try { const bin = atob(String(s).replace(/-/g, "+").replace(/_/g, "/")); return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))); } catch { return ""; } };
+// HTML as text: line breaks where the markup breaks lines, the quoted history (Gmail's gmail_quote, a blockquote,
+// Outlook's reply header and rule) marked with "> " so newText cuts it there, entities decoded.
+export function htmlText(html: string): string {
+  return decodeEntities(String(html ?? "")
+    .replace(/<(style|script|head|title)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<(?:blockquote|div[^>]*\b(?:class="[^"]*gmail_quote|id="(?:divRplyFwdMsg|appendonsend)")|hr)\b[^>]*>/gi, "\n> ")
+    .replace(/<br\s*\/?>|<\/(?:p|div|li|tr|h\d)>/gi, "\n")
+    .replace(/<[^>]+>/g, ""))
+    .replace(/[ \t\u00a0]+/g, " ").replace(/\n /g, "\n");
+}
 function plainOf(p: any, depth = 0): string {
   if (!p || depth > 6) return "";
   if (p.mimeType === "text/plain" && p.body?.data) return b64dec(p.body.data);
   for (const c of p.parts ?? []) { const x = plainOf(c, depth + 1); if (x) return x; }
-  if (p.mimeType === "text/html" && p.body?.data) return b64dec(p.body.data).replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ");
+  if (p.mimeType === "text/html" && p.body?.data) return htmlText(b64dec(p.body.data));
   return "";
 }
 export function gmailMsg(j: any): MailMsg {
@@ -502,14 +531,24 @@ export async function actionHash(kind: ActionKind, p: Record<string, any>): Prom
 export const SUGGESTED_DAYS = [3, 7, 14]; // days after the first email
 export const SUGGESTED_STEPS = [3, 4, 7]; // the same, as waits between touches
 export const FOLLOWUP_ASK = "When someone doesn't reply to an outreach email, when should I draft follow-ups for your approval? Most replies come within three touches, so I suggest follow-ups 3, 7 and 14 days after the first email: say \"use the suggested\". Or set your own, like \"follow up after 5 days\", \"follow up after 2, 5, 9 and 20 days\" or \"4 follow-ups a week apart\", or say \"no follow-ups\".";
-export async function runFollowupDrafts(o: { store: RepliesStore; outbox: Outbox; model: ModelFn | null; person: (userId: string) => Promise<Person>; now: number; worker: string; limit?: number; leaseS?: number }) {
-  const stats = { asked: 0, due: 0, drafted: 0, failed: 0, batches: 0 };
-  for (const u of await o.store.askDue(500, o.now)) if (await o.outbox.enqueue(u, { key: "status:outreach-followup-interval-ask", kind: "status", text: FOLLOWUP_ASK, at: o.now })) stats.asked++;
+// OUTREACH SCENARIOS (2026-10-30): `quiet` (career_quiet_users: paused, texted STOP, erased). A quiet person gets nothing
+// started on their behalf (the rule every other proactive rail keeps, career-proactive/handler.ts): before, this run asked
+// them for an interval, drafted their follow-ups with the model and queued the batch to their outbox while they were
+// paused. Now their due threads are released untouched (drafted after they resume) and no ask is queued.
+export type Quiet = (userIds: string[]) => Promise<Set<string>>;
+const quietOf = async (quiet: Quiet | undefined, ids: string[]) => (!quiet || !ids.length ? new Set<string>() : await quiet([...new Set(ids)]).catch(() => new Set(ids)));
+export async function runFollowupDrafts(o: { store: RepliesStore; outbox: Outbox; model: ModelFn | null; person: (userId: string) => Promise<Person>; now: number; worker: string; limit?: number; leaseS?: number; quiet?: Quiet }) {
+  const stats = { asked: 0, due: 0, drafted: 0, failed: 0, batches: 0, quiet: 0 };
+  const ask = await o.store.askDue(500, o.now);
+  const askQuiet = await quietOf(o.quiet, ask);
+  for (const u of ask) if (!askQuiet.has(u) && await o.outbox.enqueue(u, { key: "status:outreach-followup-interval-ask", kind: "status", text: FOLLOWUP_ASK, at: o.now })) stats.asked++;
   const due = await o.store.followupsDue(o.worker, o.limit ?? 200, o.now, o.leaseS ?? 300);
   stats.due = due.length;
   const byUser = new Map<string, ThreadRow[]>();
   for (const t of due) byUser.set(t.user_id, [...(byUser.get(t.user_id) ?? []), t]);
+  const quiet = await quietOf(o.quiet, [...byUser.keys()]);
   for (const [userId, threads] of byUser) {
+    if (quiet.has(userId)) { for (const t of threads) await o.store.releaseThread(t.id, o.worker); stats.quiet += threads.length; continue; }
     const person = await o.person(userId);
     const items: { thread_id: string; kind: ActionKind; payload: Record<string, any>; hash: string; step?: number | null }[] = [];
     for (const t of threads) {
@@ -589,10 +628,13 @@ export async function proposeEvent(o: { store: RepliesStore; userId: string; thr
   const [a] = await o.store.saveActions(o.userId, [{ thread_id: t.id, kind: "calendar_event", payload, hash: await actionHash("calendar_event", payload) }], o.now);
   return a;
 }
-export async function runScheduling(o: { store: RepliesStore; outbox: Outbox; calendars: Partial<Record<Provider, CalendarProvider>>; model: ModelFn | null; person: (u: string) => Promise<Person>; tz: (u: string) => Promise<string | null>; now: number; limit?: number }) {
+export async function runScheduling(o: { store: RepliesStore; outbox: Outbox; calendars: Partial<Record<Provider, CalendarProvider>>; model: ModelFn | null; person: (u: string) => Promise<Person>; tz: (u: string) => Promise<string | null>; now: number; limit?: number; quiet?: Quiet }) {
   const stats: Record<string, number> = {};
   const fresh: Action[] = [];
-  for (const t of await o.store.wantingCall(o.limit ?? 200)) {
+  const wanting = await o.store.wantingCall(o.limit ?? 200);
+  const quiet = await quietOf(o.quiet, wanting.map((t) => t.user_id));
+  for (const t of wanting) {
+    if (quiet.has(t.user_id)) { stats.quiet = (stats.quiet ?? 0) + 1; continue; } // drafted once they resume
     const cal = o.calendars[t.provider];
     const tz = (await o.tz(t.user_id).catch(() => null)) || "America/New_York";
     const r = cal ? await draftScheduling({ store: o.store, userId: t.user_id, thread: t, calendar: cal, model: o.model, person: await o.person(t.user_id), tz, now: o.now }) : { status: "not_wired" as const };
@@ -717,6 +759,47 @@ export function intervalAsk(message: string): IntervalAsk | null {
 export const stepsOf = (days: number[]) => days.map((d, i) => d - (i ? days[i - 1] : 0));
 export const daysOf = (steps: number[]) => steps.reduce((out: number[], g) => [...out, (out[out.length - 1] ?? 0) + g], []);
 
+// ------------------------------------------------------------------------------------------------ "stop emailing X"
+// NETWORKING R2 (2026-10-30): the person's own "stop emailing maya@acme.com" / "stop emailing Maya Chen" / "don't email
+// X anymore" / "cancel all emails to X" / "stop following up with X". Before, nothing answered it (only "cancel N" for one
+// draft): queued emails, approved drafts and follow-ups to that address still went. Now every one of this person's that
+// has not gone is cancelled in one step (career_send_stop_address), no follow-up is drafted to them again, and the reply
+// says exactly what was stopped and what had already gone. It is the person's choice about their own emails: it does not
+// put the contact on anyone's do-not-contact list, and a new email to them is drafted only if the person asks again.
+export const STOP_INTENT = "career_outreach_stop_address";
+const STOP_ADDR = /[a-z0-9._%+-]{1,64}@(?:[a-z0-9-]{1,63}\.)+[a-z]{2,24}/i;
+export function stopAsk(message: string): { email: string } | { name: string } | null {
+  const t = String(message ?? "").replace(/[’]/g, "'").replace(/\s+/g, " ").trim().replace(/[.!]+$/, "").trim();
+  if (t.length > 200 || /\?\s*$/.test(t)) return null;
+  const m = /^(?:(?:please|pls|ok|okay|hey|actually)[, ]+)*(?:stop|quit|cease|don'?t|do not|never|no more|cancel(?: all| every| any)?(?: (?:the|my))?|halt)\s+(?:(?:all |every |any )?(?:e-?mailing|emailing|writing to|contacting|messaging|sending (?:e-?mails?|anything|follow-?ups?|messages?) to|following up with|follow(?:ing)?-?ups? (?:to|with|for)|(?:e-?mails?|follow-?ups?|messages?|outreach)(?: (?:to|for))?|e-?mail|email|write to|contact)\s+)(.+?)(?:\s+(?:any ?more|again|from now on|please|for me|altogether|entirely|completely|yet|now|for now|today))*$/i.exec(t);
+  if (!m) return null;
+  const who = m[1].trim().replace(/^(?:to|with|for)\s+/i, "").replace(/^<|>$/g, "").trim();
+  if (!who || /^(?:me|us|myself|anyone|everyone|people|them|him|her|it|all|everybody)$/i.test(who)) return null;
+  const a = STOP_ADDR.exec(who);
+  if (a) return { email: a[0].toLowerCase() };
+  if (!/^[\p{L}][\p{L}'.-]*(?: [\p{L}][\p{L}'.-]*){0,3}$/u.test(who)) return null;
+  return { name: who };
+}
+async function stopTurn(o: { userId: string; store: RepliesStore }, ask: { email: string } | { name: string }): Promise<{ reply: string; intent: string; status: string } | null> {
+  if (!o.store.stopAddress) return null;
+  let email: string, label: string;
+  if ("email" in ask) { email = ask.email; label = email; }
+  else {
+    const found = o.store.addressesNamed ? await o.store.addressesNamed(o.userId, ask.name) : [];
+    if (!found.length) return { reply: `I don't have any email of yours to someone named ${ask.name}, so there's nothing to stop. If they're under another name, say "stop emailing" and their address.`, intent: STOP_INTENT, status: "not_found" };
+    if (found.length > 1) return { reply: `More than one of your contacts is named ${ask.name}: ${found.slice(0, 10).map((f) => `${f.name} <${f.email}>`).join(", ")}. Nothing was stopped: say "stop emailing" and the address.`, intent: STOP_INTENT, status: "which" };
+    email = found[0].email; label = `${found[0].name} <${email}>`;
+  }
+  const r = await o.store.stopAddress(o.userId, email);
+  const n = (k: number, one: string, many = `${one}s`) => `${k} ${k === 1 ? one : many}`;
+  const stopped = [r.queued ? n(r.queued, "queued email") : "", r.drafts ? n(r.drafts, "approved draft") : "", r.actions ? n(r.actions, "follow-up waiting for your approval", "follow-ups waiting for your approval") : ""].filter(Boolean);
+  const none = !stopped.length;
+  if (none && !r.threads && !r.sent) return { reply: `Nothing of yours is waiting to go to ${label}, and I have no email to them on record, so nothing changed.`, intent: STOP_INTENT, status: "nothing" };
+  const head = none ? `Nothing was waiting to go to ${label}.` : `Stopped: ${stopped.join(", ")} to ${label} won't be sent.`;
+  const gone = r.sent ? ` ${n(r.sent, "email")} to them already went and can't be unsent.` : "";
+  return { reply: `${head}${gone} No follow-up will be drafted to them. This doesn't tell them anything or add them to a do-not-contact list; I'll only write to them again if you ask me to.`, intent: STOP_INTENT, status: none ? "nothing_waiting" : "stopped" };
+}
+
 // The chat turn: approvals of the latest batch while it is the thread's last word; the interval; the summaries.
 export async function repliesTurn(o: { message: string; userId: string; chatThreadId: string; now: number; store: RepliesStore; tz?: string | null }): Promise<{ reply: string; intent: string; status: string } | null> {
   const tz = o.tz || "America/New_York";
@@ -735,29 +818,74 @@ export async function repliesTurn(o: { message: string; userId: string; chatThre
     const mailboxes = await o.store.mailboxes(o.userId).catch(() => []);
     return { reply: summaryText(threads, s, { tz, waiting, mailboxes }), intent: "career_outreach_summary", status: s };
   }
-  const t = String(o.message ?? "").toLowerCase().replace(/[.!?]+$/, "").trim();
+  const t = String(o.message ?? "").toLowerCase().replace(/\s+/g, " ").trim().replace(/[.!?]+$/, "").trim();
+  const stop = stopAsk(o.message);
+  if (stop) return await stopTurn(o, stop);
   const show = /^(?:show|see|list)(?: me)?(?: my| the)? outreach approvals$/.test(t);
-  if (!show && (await o.store.lastAssistantIntent(o.chatThreadId)) !== ACTIONS_INTENT) return null;
-  const batch = await o.store.latestBatch(o.userId);
+  // NETWORKING R2 (2026-10-30): the answer binds to the batch this chat showed: the batch the scheduled run pushed here
+  // (the delivered text is the chat's last word, career_outbox_to_thread), or the one "show outreach approvals" showed
+  // here. Before, "send all" read the person's newest batch, so one drafted between showing and the yes was approved
+  // unseen; and a "send all" answering the pushed batch itself was never read (that text's intent is career_proactive),
+  // so the yes the push asked for approved nothing.
+  const last = show ? null : await o.store.lastAssistantIntent(o.chatThreadId);
+  const bound = !show && !!o.store.shownBatch && !!o.store.batch;
+  const shownId = bound ? await o.store.shownBatch!(o.userId, o.chatThreadId) : null;
+  if (!show && last !== ACTIONS_INTENT && !shownId) return null;
+  const latest = await o.store.latestBatch(o.userId);
+  if (bound && !shownId) {
+    // Nothing on record as shown in this chat: nothing is approved; what is waiting is shown, and the next answer binds to it.
+    if (latest[0] && o.store.markShown) await o.store.markShown(o.userId, o.chatThreadId, latest[0].batch_id);
+    return { reply: `Nothing was approved: I can't tell which batch that answers here. ${actionsText(latest, await threadsMap(o.store, o.userId, latest))}`, intent: ACTIONS_INTENT, status: "reshown" };
+  }
+  const batch = shownId ? await o.store.batch!(o.userId, shownId) : latest;
+  // Every approvals reply in this chat answers this batch: the next answer here binds to it too.
+  if (!show && shownId && o.store.markShown) await o.store.markShown(o.userId, o.chatThreadId, shownId);
   const threads = await threadsMap(o.store, o.userId, batch);
-  if (show) return { reply: actionsText(batch, threads), intent: ACTIONS_INTENT, status: "shown" };
+  if (show) {
+    if (latest[0] && o.store.markShown) await o.store.markShown(o.userId, o.chatThreadId, latest[0].batch_id);
+    return { reply: actionsText(batch, threads), intent: ACTIONS_INTENT, status: "shown" };
+  }
+  const newer = shownId && latest[0] && latest[0].batch_id !== shownId ? latest.filter((a) => a.status === "shown").length : 0;
+  const newerLine = newer ? ` ${newer} more drafted since ${newer === 1 ? "is" : "are"} waiting and ${newer === 1 ? "was" : "were"} not approved: say "show outreach approvals" to see ${newer === 1 ? "it" : "them"}.` : "";
   const ns = batch.map((a) => a.n);
   let want: number[] | null = null;
   if (/^(?:send none|none|don'?t send(?: any)?|cancel(?: all)?|no)$/.test(t)) {
     const done = await o.store.cancel(o.userId, batch[0]?.batch_id ?? "", batch.filter((a) => a.status === "shown").map((a) => a.n)); // what is still waiting; an approval already given stands
-    return { reply: done.length ? `Nothing will be sent or created from these ${done.length}.` : "Nothing was waiting.", intent: "career_outreach_actions_answer", status: "none" };
+    return { reply: `${done.length ? `Nothing will be sent or created from these ${done.length}.` : "Nothing was waiting."}${newerLine}`, intent: "career_outreach_actions_answer", status: "none" };
   }
+  const ambiguous = { reply: `Nothing was approved: say "send all", "send 1,3" or "send none".`, intent: ACTIONS_INTENT, status: "ambiguous" };
+  // Owner rules (2026-10-29): a number left out that is not in this batch ("all except 9") approves nothing.
+  const leaveOut = (ex: number[]) => {
+    const unknown = ex.filter((n) => !ns.includes(n));
+    return unknown.length ? { reply: `There is no ${unknown.join(", ")} in this batch (it has ${ns.join(", ")}). Nothing was approved.`, intent: ACTIONS_INTENT, status: "not_in_batch" } : null;
+  };
   const all = /^(?:yes|send|approve|ok|okay)?(?: them)? ?(?:send |approve )?all(?: of them)?(?: (?:except|but|minus|without) (.+))?$/.exec(t);
   if (all) {
     if (all[1] === undefined) want = ns;
-    else { const ex = parseNumbers(all[1]); if (!ex || !ex.ok) return { reply: `Nothing was approved: say which to leave out by number, e.g. "send all except 2".`, intent: ACTIONS_INTENT, status: "bad" }; want = ns.filter((n) => !ex.ns.includes(n)); }
+    else {
+      const ex = parseNumbers(all[1]);
+      if (!ex || !ex.ok) return { reply: `Nothing was approved: say which to leave out by number, e.g. "send all except 2".`, intent: ACTIONS_INTENT, status: "bad" };
+      const off = leaveOut(ex.ns);
+      if (off) return off;
+      want = ns.filter((n) => !ex.ns.includes(n));
+    }
   } else {
     const some = /^(?:send|approve)(?: only| just| numbers?)? (.+)$/.exec(t);
     const nums = some ? parseNumbers(some[1]) : null;
+    // Owner rules (2026-10-29): one clear yes ("yes", "yep", "send them", "👍") approves exactly the batch shown, read as the
+    // outreach batch's yes is (parseBatchYes: "yes except 2", "only 1-3"; "ok"/"sure" alone and any question are not a yes).
+    const y = nums?.ok ? null : parseBatchYes(o.message);
     if (nums && nums.ok) want = nums.ns;
-    else if (some || /^(?:yes|yep|sure|ok|okay|sounds good|maybe|probably)\b/.test(t)) return { reply: `Nothing was approved: say "send all", "send 1,3" or "send none".`, intent: ACTIONS_INTENT, status: "ambiguous" };
+    else if (y?.kind === "send" && y.all) {
+      const off = leaveOut(y.except);
+      if (off) return off;
+      want = ns.filter((n) => !y.except.includes(n));
+    } else if (y?.kind === "send") want = y.ns;
+    else if (some || y || /^(?:yes|yep|yeah|sure|ok|okay|sounds good|maybe|probably)\b/.test(t)) return ambiguous;
   }
   if (!want) return null;
+  // A question ("send all?", "approve 1?") is never an approval.
+  if (/\?\s*$/.test(String(o.message ?? "").trim())) return ambiguous;
   const unknown = want.filter((n) => !ns.includes(n));
   if (unknown.length) return { reply: `There is no ${unknown.join(", ")} in this batch (it has ${ns.join(", ")}). Nothing was approved.`, intent: ACTIONS_INTENT, status: "not_in_batch" };
   // Each approved only if its exact payload is still the one shown.
@@ -771,13 +899,13 @@ export async function repliesTurn(o: { message: string; userId: string; chatThre
   if (changed.length) lines.push(`Not approved (changed since shown): ${changed.join(", ")}.`);
   const left = batch.filter((a) => !want!.includes(a.n) && a.status === "shown").map((a) => a.n);
   if (left.length) lines.push(`Still waiting: ${left.join(", ")}.`);
-  return { reply: lines.join(" "), intent: left.length ? ACTIONS_INTENT : "career_outreach_actions_answer", status: ok.length ? "approved" : "none_approved" };
+  return { reply: lines.join(" ") + newerLine, intent: left.length ? ACTIONS_INTENT : "career_outreach_actions_answer", status: ok.length ? "approved" : "none_approved" };
 }
 
 // ------------------------------------------------------------------------------------------------ stores
 export function memoryRepliesStore() {
   const threads: ThreadRow[] = [], turns: (TurnRow & { user_id: string })[] = [], sync: (SyncRow & { lease_owner: string | null; lease_until: number | null })[] = [];
-  const prefs: Record<string, FollowupPrefs> = {}, actions: Action[] = [], dnc = new Set<string>(), intents: Record<string, string | null> = {};
+  const prefs: Record<string, FollowupPrefs> = {}, actions: Action[] = [], dnc = new Set<string>(), intents: Record<string, string | null> = {}, shown: Record<string, string> = {}, pushedTo: Record<string, string> = {};
   const aliases: { thread_id: string; provider_thread: string }[] = [];
   const leases: Record<string, { owner: string; until: number }> = {}, actionLease: Record<string, { owner: string; until: number; at: number }> = {};
   let seq = 0;
@@ -786,7 +914,13 @@ export function memoryRepliesStore() {
   const self = {
     // test hooks
     dump: () => copy({ threads, turns, sync, prefs, actions, dnc: [...dnc] }),
-    setIntent(id: string, v: string | null) { intents[id] = v; },
+    // The chat's last word: ACTIONS_INTENT means the actions message showing each person's newest batch at this moment.
+    setIntent(id: string, v: string | null) {
+      intents[id] = v;
+      if (v === ACTIONS_INTENT) for (const a of actions) shown[`${a.user_id}|${id}`] = a.batch_id;
+    },
+    // The scheduled run's batch delivered into this chat (career_outbox_to_thread: intent career_proactive).
+    pushed(u: string, id: string, b: string) { intents[id] = "career_proactive"; pushedTo[`${u}|${id}`] = b; },
     addDnc(email: string) { dnc.add(lower(email)); },
     // The rail sent a follow-up or a reply with times as a new message on its own provider thread (career_outreach_threads_adopt).
     alias(threadId: string, providerThread: string) { aliases.push({ thread_id: threadId, provider_thread: providerThread }); },
@@ -976,6 +1110,27 @@ export function memoryRepliesStore() {
     async mailboxes(u: string) { return copy(sync.filter((x) => x.user_id === u).map((x) => ({ provider: x.provider, last_error: x.last_error ?? null, last_ok_at: null }))); },
     async wantingCall(limit: number) { return copy(threads.filter((t) => t.status === "wants_call" && !actions.some((a) => a.thread_id === t.id && a.kind === "schedule_reply" && ["shown", "approved", "running", "done"].includes(a.status))).slice(0, limit)); },
     async lastAssistantIntent(id: string) { return intents[id] ?? null; },
+    async shownBatch(u: string, chat: string) {
+      if (intents[chat] === "career_proactive") return pushedTo[`${u}|${chat}`] ?? null;
+      return intents[chat] === ACTIONS_INTENT ? shown[`${u}|${chat}`] ?? null : null;
+    },
+    async markShown(u: string, chat: string, b: string) { shown[`${u}|${chat}`] = b; },
+    async batch(u: string, b: string) { return copy(actions.filter((a) => a.user_id === u && a.batch_id === b).sort((x, y) => x.n - y.n)); },
+    async stopAddress(u: string, email: string) {
+      const e = lower(email);
+      const out: StopResult = { queued: 0, drafts: 0, actions: 0, threads: 0, sent: 0 };
+      for (const t of threads.filter((x) => x.user_id === u && x.recipient_email === e)) {
+        out.threads++;
+        if (t.followup_state !== "done") t.followup_state = "off";
+        out.sent += 1 + (t.followups_sent ?? 0);
+        for (const a of actions.filter((x) => x.thread_id === t.id && (x.status === "shown" || x.status === "approved"))) { a.status = "cancelled"; a.result = "cancelled: you said stop emailing them"; out.actions++; }
+      }
+      return out;
+    },
+    async addressesNamed(u: string, name: string) {
+      const want = name.toLowerCase().replace(/\s+/g, " ").trim();
+      return [...new Map(threads.filter((t) => t.user_id === u && (t.recipient_name.toLowerCase() === want || t.recipient_name.toLowerCase().split(" ")[0] === want)).map((t) => [t.recipient_email, { email: t.recipient_email, name: t.recipient_name }])).values()];
+    },
     async railRoot() { return null; },
   };
   return self;
@@ -1006,12 +1161,17 @@ export function supabaseRepliesStore(admin: any): RepliesStore {
     askDue: async (limit, now) => ((await rpc("career_outreach_followup_ask_due", { p_limit: limit, p_now: iso(now) }, "who to ask")) ?? []).map((x: any) => String(typeof x === "object" ? Object.values(x)[0] : x)),
     async prefs(u) { const r = must(await admin.from("career_outreach_followup_prefs").select("steps,off,asked_at").eq("user_id", u).maybeSingle(), "read follow-up settings"); return r ?? { steps: null, off: false, asked_at: null }; },
     async setPrefs(u, p) { must(await admin.from("career_outreach_followup_prefs").upsert({ user_id: u, ...p, updated_at: new Date().toISOString() }, { onConflict: "user_id" }), "save follow-up settings"); },
-    async saveActions(u, items, at) {
+    // 2026-10-31: created_at is the database's own clock at the insert (the column's default), never the caller's `at`.
+    // shownBatch below orders a batch against the chat message that showed it (agent_messages.created_at, also the
+    // database's clock): with the caller's time, a batch drafted by a run that started before "show outreach approvals"
+    // (its `at` the run's start) and saved after it read as shown, and so did one saved in the same millisecond as the
+    // message (the worker's millisecond against Postgres's microseconds; CI run 41154002130, B3: the newer batch approved).
+    async saveActions(u, items, _at) {
       const batch_id = crypto.randomUUID();
       const out: Action[] = [];
       let n = 0;
       for (const it of items) { // one by one: the one-follow-up-per-thread index refuses a second, and the rest still go in
-        const r = await admin.from("career_outreach_actions").insert({ user_id: u, thread_id: it.thread_id, kind: it.kind, step: it.step ?? null, batch_id, n: n + 1, payload: it.payload, hash: it.hash, created_at: new Date(at).toISOString() }).select(ACOLS);
+        const r = await admin.from("career_outreach_actions").insert({ user_id: u, thread_id: it.thread_id, kind: it.kind, step: it.step ?? null, batch_id, n: n + 1, payload: it.payload, hash: it.hash }).select(ACOLS);
         if (r.error && (r.error.code === "23505" || /duplicate key/i.test(r.error.message))) continue;
         out.push(...(must(r, "save an action") ?? [])); n++;
       }
@@ -1043,6 +1203,31 @@ export function supabaseRepliesStore(admin: any): RepliesStore {
       const rows = must(await admin.from("agent_messages").select("meta").eq("thread_id", id).eq("role", "assistant").order("id", { ascending: false }).limit(1), "read the last reply");
       return rows?.[0]?.meta?.intent ?? null;
     },
+    // The batch a chat showed: the one the scheduled run pushed there (its outbox key names it), or, when the chat's last
+    // word is an approvals reply ("show outreach approvals", a partial yes), the newest batch that existed when that reply
+    // was written: a batch drafted after it was never shown there. Both times are the database's (saveActions above), so
+    // "after" is the order the rows went in. An approvals message older than every batch showed none: null (nothing is
+    // approved; the turn shows what is waiting and binds the next answer to it).
+    async shownBatch(u, chat) {
+      const last = must(await admin.from("agent_messages").select("meta,created_at").eq("thread_id", chat).eq("role", "assistant").order("id", { ascending: false }).limit(1), "read the last reply");
+      const meta = last?.[0]?.meta ?? {};
+      const pushed = /^(?:followup|status):outreach-actions:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?::\d+)?$/.exec(String(meta.outbox_key ?? ""));
+      if (meta.proactive && pushed) return pushed[1];
+      if (meta.intent !== ACTIONS_INTENT) return null;
+      const newest = (q: any) => q.order("created_at", { ascending: false }).limit(1);
+      const before = last?.[0]?.created_at ? must(await newest(admin.from("career_outreach_actions").select("batch_id").eq("user_id", u).lte("created_at", last[0].created_at)), "read the batch shown") : [];
+      return before?.[0]?.batch_id ?? null;
+    },
+    batch: async (u, b) => must(await admin.from("career_outreach_actions").select(ACOLS).eq("user_id", u).eq("batch_id", b).order("n"), "read the batch") ?? [],
+    async stopAddress(u, email) {
+      const r = must(await admin.rpc("career_send_stop_address", { p: { user: u, email: email.trim().toLowerCase() } }), "stop emailing an address") ?? {};
+      return { queued: Number(r.queued) || 0, drafts: Number(r.drafts) || 0, actions: Number(r.actions) || 0, threads: Number(r.threads) || 0, sent: Number(r.sent) || 0 };
+    },
+    // The person's conversations and their drafts not sent yet (career_outreach_addresses_named, 20261030090000).
+    async addressesNamed(u, name) {
+      const rows = (await rpc("career_outreach_addresses_named", { p: { user: u, name } }, "read your outreach")) ?? [];
+      return (Array.isArray(rows) ? rows : []).map((r: any) => ({ email: String(r.email), name: String(r.name) }));
+    },
   };
 }
 export { type Busy, isFree };
@@ -1072,8 +1257,13 @@ export async function runRepliesLane(o: {
   const out: Record<string, unknown> = {};
   const step = async (name: string, f: () => Promise<unknown>) => { try { out[name] = await f(); } catch (e) { out[name] = { error: (e instanceof Error ? e.message : String(e)).slice(0, 300) }; } };
   await step("sync", () => runReplySync({ store, readers, model: o.model, now: o.now, worker, tz }));
-  await step("followups", () => runFollowupDrafts({ store, outbox: o.outbox, model: o.model, person, now: o.now, worker }));
-  await step("scheduling", () => runScheduling({ store, outbox: o.outbox, calendars, model: o.model, person, tz, now: o.now }));
+  const quiet: Quiet = async (ids) => {
+    const { data, error } = await o.admin.rpc("career_quiet_users", { p_users: ids });
+    if (error) throw new Error(`read who is paused: ${error.message}`);
+    return new Set<string>((data ?? []).map((r: any) => String(r?.user_id ?? r)));
+  };
+  await step("followups", () => runFollowupDrafts({ store, outbox: o.outbox, model: o.model, person, now: o.now, worker, quiet }));
+  await step("scheduling", () => runScheduling({ store, outbox: o.outbox, calendars, model: o.model, person, tz, now: o.now, quiet }));
   await step("actions", () => runOutreachActions({ store, rail, calendars, now: o.now, worker }));
   return out;
 }

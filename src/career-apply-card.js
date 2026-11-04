@@ -25,7 +25,7 @@
     declined: 'not sent',
     daily_cap: 'not sent: today’s daily limit is already used',
     company_cooldown: 'not sent: you applied to them in the last 30 days',
-    duplicate: 'not sent: you already applied to this posting',
+    duplicate: 'not added again: this posting is already in your applications (sent, or approved and waiting to go); each posting goes at most once',
     stale: 'not sent: your details changed after it was prepared; prepare it again',
     changed: 'not sent: it changed after the card was shown',
     pace_unreadable: 'not sent: your saved daily pace could not be read',

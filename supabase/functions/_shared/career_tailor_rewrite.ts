@@ -1,7 +1,7 @@
 // FEATURE 4 (DIAGNOSIS 2.2): a truthful rewrite of the tailored resume's bullets toward one posting.
 //
-// 123's tailorResume selects, orders and hides confirmed facts; it never rewords a bullet. Here the model (OpenAI through
-// the gateway, CAREER_MODEL) is asked once per tailoring to reword each selected bullet toward the posting's language and
+// 123's tailorResume selects, orders and hides confirmed facts; it never rewords a bullet. Here the model (the career model, Claude through
+// the gateway) is asked once per tailoring to reword each selected bullet toward the posting's language and
 // priorities, and code decides what may print. Every rewritten bullet is audited against the ONE confirmed fact it cites:
 //   - every word that carries content (nouns, tools, employers, adjectives, numbers spelled out) must be in that fact
 //     (title, text, bullets, org, skills, dates) or the original bullet; only plain connectives and a short list of
@@ -16,12 +16,16 @@
 //
 // Behind CAREER_TAILOR_REWRITE=on (default off). One model call per tailoring, metered by the caller's meter.
 import { CareerProfile, CareerRouter, CareerTailor, CareerWriting } from "./router_core.career.js";
+import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 release flags
 import { baseResume, changelog, confirmedOnly, submissionResume } from "./career_tailor.ts";
+import { claimProblems } from "./person_claims.ts";
+import { redactIdentity } from "./identity_redact.ts";
 
 export const REWRITE_FLAG = "CAREER_TAILOR_REWRITE";
 export const MAX_BULLETS = 14;
 export const MAX_TOKENS = 1600;
-export const rewriteOn = (env: { get(k: string): string | undefined }) => (env.get(REWRITE_FLAG) || "").trim().toLowerCase() === "on";
+// D-036: a release flag (agent-chat/release_config.ts RELEASE_FLAGS): on unless the environment rolls it back.
+export const rewriteOn = (env: { get(k: string): string | undefined }) => releaseFlagOn(env, REWRITE_FLAG);
 
 export type ModelFn = (payload: any) => Promise<any>;
 export interface Target { id: string; index: number; text: string; factId: string; section: string | null }
@@ -71,6 +75,9 @@ export function auditRewrite(o: { original: string; proposed: string; fact: any;
   const reasons: string[] = [];
   const p = String(o.proposed ?? "").replace(/\s+/g, " ").trim();
   if (!p) return { ok: false, reasons: ["the rewrite is empty"] };
+  // A secret (an SSN, a card number, a password, a code) is refused by name, never quoted back in a reason.
+  const secret = redactIdentity(p).removed;
+  if (secret.length) return { ok: false, reasons: [`it holds a ${secret[0] === "ssn" ? "Social Security number" : secret[0] === "card" ? "card number" : secret[0] === "code" ? "one-time code" : secret[0] === "account" ? "account number" : "password"}`] };
   if (/[\r\n]/.test(String(o.proposed))) reasons.push("the rewrite is more than one line");
   if (p.length > Math.max(220, Math.round(o.original.length * 1.6))) reasons.push(`the rewrite is ${p.length} characters, too long for one bullet`);
   const corpus = `${factCorpus(o.fact)} ${o.original}`;
@@ -103,6 +110,10 @@ export function auditRewrite(o: { original: string; proposed: string; fact: any;
     reasons.push(/^[A-Z]/.test(w) && p.indexOf(w) > 0 ? `name "${w}" is not on this entry of your record` : `"${w}" is not on this entry of your record`);
   }
   for (const b of CareerTailor.bannedPhrasesIn(p) as string[]) reasons.push(`banned phrase "${b}"`);
+  // TAILORING SCENARIOS (2026-10-29): a word that only shares a stem with the fact is no evidence of a claim: "Managed"
+  // traced to "the management team", "team leader" to "the leadership team"; and "40+" is more than "40". Each claim
+  // about the person (leadership, numbers, degrees, authorization, how they identify, a secret) is held to this fact.
+  for (const c of claimProblems(p, { record: [corpus] })) reasons.push(c.replace(/your confirmed record/g, "this entry of your record"));
   // 123's own gate on the line by itself.
   if (!reasons.length) {
     const a = CareerTailor.auditResume([{ text: p, factIds: [o.fact.id], type: "bullet" }], o.profile);
@@ -181,7 +192,8 @@ export async function rewriteResume(o: { resume: any; profile: any; jd: any; pos
     if (proposed === undefined || proposed.replace(/\s+/g, " ").trim() === t.text.trim()) { unchanged++; continue; }
     const fact = CareerProfile.getFact(o.profile, t.factId);
     const a = auditRewrite({ original: t.text, proposed, fact, profile: o.profile });
-    if (!a.ok) { rejected.push({ id: t.id, factId: t.factId, before: t.text, proposed: proposed.trim(), reasons: a.reasons }); continue; }
+    // The refused wording rides the reply's meta (tailor_rewrite): a secret in it is never kept.
+    if (!a.ok) { rejected.push({ id: t.id, factId: t.factId, before: t.text, proposed: redactIdentity(proposed.trim()).text, reasons: a.reasons }); continue; }
     const after = proposed.replace(/\s+/g, " ").trim();
     withText(resume, t, after);
     accepted.push({ id: t.id, factId: t.factId, before: t.text, after });

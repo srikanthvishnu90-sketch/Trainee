@@ -10,6 +10,7 @@
 // What the person is told (disconnectReply) is only what that read-back shows, in plain words; a revoke Google did not
 // confirm is said so, with where to remove access by hand.
 // deno-lint-ignore-file no-explicit-any
+import { disconnectOf } from "./connector_words.ts";
 
 export const GOOGLE_REVOKE = "https://oauth2.googleapis.com/revoke";
 export const GOOGLE_PROVIDERS = ["google_career", "gmail"] as const;
@@ -136,13 +137,17 @@ export async function disconnectGoogle(admin: any, userId: string, d: RevokeDeps
 }
 
 const PERMISSIONS = "myaccount.google.com/permissions";
+// What Google said to the revoke, in plain words: confirmed only when Google answered 200 for every grant.
+export function revokeWords(r: DisconnectResult): string {
+  const outcomes = Object.values(r.revoke);
+  return outcomes.length && outcomes.every((o) => o === "revoked")
+    ? "Google confirmed Trainee's access is revoked."
+    : `Google didn't confirm that Trainee's access is revoked, so please remove Trainee at ${PERMISSIONS} to be sure.`;
+}
 export function disconnectReply(r: DisconnectResult): string {
   if (!r.had.length && r.ok && !r.mailErased) return "No Google account is connected to Trainee, so there was nothing to disconnect.";
   if (!r.had.length && r.ok) return "No Google account is connected to Trainee, but I deleted the application updates, drafts and read time still saved from an earlier connection. Your application tracker and this chat keep their history.";
-  const outcomes = Object.values(r.revoke);
-  const google = outcomes.length && outcomes.every((o) => o === "revoked")
-    ? "Google confirmed Trainee's access is revoked."
-    : `Google didn't confirm that Trainee's access is revoked, so please remove Trainee at ${PERMISSIONS} to be sure.`;
+  const google = revokeWords(r);
   if (!r.ok) {
     return `I couldn't finish disconnecting Gmail: I wasn't able to ${r.failures.join(", or ")}. ${google} Say "disconnect gmail" again to retry.`;
   }
@@ -154,6 +159,7 @@ export function disconnectReply(r: DisconnectResult): string {
 
 // The chat's ask: "disconnect gmail", "disconnect my google account", "remove access to gmail", "revoke gmail".
 export const GOOGLE_DISCONNECT_RE = /^\s*(?:please\s+)?(?:disconnect|unlink|revoke|remove)\s+(?:access\s+to\s+|trainee\s+from\s+)?(?:my\s+)?(?:gmail|google(?:\s+account)?|google\s+mail)\b[\s.!]*$/i;
+// CONNECTOR SCENARIOS (2026-10-29): read by connector_words.ts (lead-ins, "remove gmail access", typos; never "remove Google").
 export function isGoogleDisconnect(text: string): boolean {
-  return GOOGLE_DISCONNECT_RE.test(String(text ?? ""));
+  return disconnectOf(text) === "gmail";
 }

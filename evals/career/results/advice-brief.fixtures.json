@@ -1,0 +1,244 @@
+[
+ {
+  "id": "ib-freshman",
+  "r": {
+   "scores": {
+    "honest_read": 2,
+    "staged_timing": 2,
+    "field_fit": 2,
+    "sourced_numbers": 2,
+    "named_only_if_sourced": 2,
+    "networking": 2,
+    "credentials": 2,
+    "data_section": 2,
+    "unverified": 2,
+    "personalized": 2
+   },
+   "total": 20,
+   "unsourced": [],
+   "chat": [],
+   "pass": true,
+   "notes": []
+  }
+ },
+ {
+  "id": "nurse-new-grad",
+  "r": {
+   "scores": {
+    "honest_read": 2,
+    "staged_timing": 2,
+    "field_fit": 2,
+    "sourced_numbers": 2,
+    "named_only_if_sourced": 2,
+    "networking": 2,
+    "credentials": 2,
+    "data_section": 2,
+    "unverified": 2,
+    "personalized": 2
+   },
+   "total": 20,
+   "unsourced": [],
+   "chat": [],
+   "pass": true,
+   "notes": []
+  }
+ },
+ {
+  "id": "electrician-apprentice",
+  "r": {
+   "scores": {
+    "honest_read": 2,
+    "staged_timing": 2,
+    "field_fit": 2,
+    "sourced_numbers": 2,
+    "named_only_if_sourced": 2,
+    "networking": 2,
+    "credentials": 2,
+    "data_section": 2,
+    "unverified": 2,
+    "personalized": 2
+   },
+   "total": 20,
+   "unsourced": [],
+   "chat": [],
+   "pass": true,
+   "notes": []
+  }
+ },
+ {
+  "id": "teacher-switcher",
+  "r": {
+   "scores": {
+    "honest_read": 2,
+    "staged_timing": 2,
+    "field_fit": 2,
+    "sourced_numbers": 2,
+    "named_only_if_sourced": 2,
+    "networking": 2,
+    "credentials": 2,
+    "data_section": 2,
+    "unverified": 2,
+    "personalized": 2
+   },
+   "total": 20,
+   "unsourced": [],
+   "chat": [],
+   "pass": true,
+   "notes": []
+  }
+ },
+ {
+  "id": "laid-off-52-pm",
+  "r": {
+   "scores": {
+    "honest_read": 2,
+    "staged_timing": 2,
+    "field_fit": 2,
+    "sourced_numbers": 2,
+    "named_only_if_sourced": 2,
+    "networking": 2,
+    "credentials": 2,
+    "data_section": 2,
+    "unverified": 2,
+    "personalized": 2
+   },
+   "total": 20,
+   "unsourced": [],
+   "chat": [],
+   "pass": true,
+   "notes": []
+  }
+ },
+ {
+  "id": "f1-data",
+  "r": {
+   "scores": {
+    "honest_read": 2,
+    "staged_timing": 2,
+    "field_fit": 2,
+    "sourced_numbers": 2,
+    "named_only_if_sourced": 2,
+    "networking": 2,
+    "credentials": 2,
+    "data_section": 2,
+    "unverified": 2,
+    "personalized": 2
+   },
+   "total": 20,
+   "unsourced": [],
+   "chat": [],
+   "pass": true,
+   "notes": []
+  }
+ },
+ {
+  "id": "veteran-trades",
+  "r": {
+   "scores": {
+    "honest_read": 2,
+    "staged_timing": 2,
+    "field_fit": 2,
+    "sourced_numbers": 2,
+    "named_only_if_sourced": 2,
+    "networking": 2,
+    "credentials": 2,
+    "data_section": 2,
+    "unverified": 2,
+    "personalized": 2
+   },
+   "total": 20,
+   "unsourced": [],
+   "chat": [],
+   "pass": true,
+   "notes": []
+  }
+ },
+ {
+  "id": "cc-transfer-eng",
+  "r": {
+   "scores": {
+    "honest_read": 2,
+    "staged_timing": 2,
+    "field_fit": 2,
+    "sourced_numbers": 2,
+    "named_only_if_sourced": 2,
+    "networking": 2,
+    "credentials": 2,
+    "data_section": 2,
+    "unverified": 2,
+    "personalized": 2
+   },
+   "total": 20,
+   "unsourced": [],
+   "chat": [],
+   "pass": true,
+   "notes": []
+  }
+ },
+ {
+  "id": "bootcamp-swe",
+  "r": {
+   "scores": {
+    "honest_read": 2,
+    "staged_timing": 2,
+    "field_fit": 2,
+    "sourced_numbers": 2,
+    "named_only_if_sourced": 2,
+    "networking": 2,
+    "credentials": 2,
+    "data_section": 2,
+    "unverified": 2,
+    "personalized": 2
+   },
+   "total": 20,
+   "unsourced": [],
+   "chat": [],
+   "pass": true,
+   "notes": []
+  }
+ },
+ {
+  "id": "mba-consulting",
+  "r": {
+   "scores": {
+    "honest_read": 2,
+    "staged_timing": 2,
+    "field_fit": 2,
+    "sourced_numbers": 2,
+    "named_only_if_sourced": 2,
+    "networking": 2,
+    "credentials": 2,
+    "data_section": 2,
+    "unverified": 2,
+    "personalized": 2
+   },
+   "total": 20,
+   "unsourced": [],
+   "chat": [],
+   "pass": true,
+   "notes": []
+  }
+ },
+ {
+  "id": "firstgen-swe-small",
+  "r": {
+   "scores": {
+    "honest_read": 2,
+    "staged_timing": 2,
+    "field_fit": 2,
+    "sourced_numbers": 2,
+    "named_only_if_sourced": 2,
+    "networking": 2,
+    "credentials": 2,
+    "data_section": 2,
+    "unverified": 2,
+    "personalized": 2
+   },
+   "total": 20,
+   "unsourced": [],
+   "chat": [],
+   "pass": true,
+   "notes": []
+  }
+ }
+]

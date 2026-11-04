@@ -194,7 +194,7 @@ Deno.test("the Stripe adapter: form-encoded, idempotent cancel, paid invoices; t
     eq(h.get("content-type"), "application/x-www-form-urlencoded");
     eq(h.get("authorization"), `Bearer ${KEY}`);
     const i = calls.find((x) => x.url.includes("/invoices"))!;
-    eq(i.url, "https://api.stripe.com/v1/invoices?customer=cus_fake1&status=paid&limit=5");
+    eq(i.url, "https://api.stripe.com/v1/invoices?customer=cus_fake1&status=paid&limit=5&expand%5B%5D=data.charge");
     // A Stripe error that echoes the key is never repeated.
     const bad = stripeFromEnv((async () => new Response(JSON.stringify({ error: { message: `Invalid API Key provided: ${KEY}` } }), { status: 401 })) as typeof fetch, KEY)!;
     const w2 = world(row(), bad as any);

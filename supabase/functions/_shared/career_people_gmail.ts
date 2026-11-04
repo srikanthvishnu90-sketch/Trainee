@@ -15,7 +15,7 @@
 //                   site; anything else in the mail is left alone.
 import { authenticated } from "./career_mail.ts";
 import { JOB_ALERT_SENDERS, type JobSite } from "./career_people_sites.ts";
-import { ROLE_LOCALS } from "./career_contacts.ts";
+import { isRoleAddress, ROLE_LOCALS } from "./career_contacts.ts";
 import { cleanCell, cleanEmail, companyKey, readsAsInstruction } from "./career_people_import.ts";
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -137,7 +137,7 @@ export async function correspondentsStep(d: GmailRead, userId: string, label: st
       for (const a of [...header(g.body, "from"), ...header(g.body, "to"), ...header(g.body, "cc")].flatMap(addresses)) {
         const [local, domain] = a.email.split("@");
         if (a.email === mine || registrable(domain).label !== label) continue;
-        if (ROLE_LOCALS.has(local) || ROLE_LOCALS.has(local.replace(/[._+-]/g, "")) || /^(no-?reply|do-?not-?reply|notifications?|mailer|bounce)/.test(local)) continue;
+        if (ROLE_LOCALS.has(local) || ROLE_LOCALS.has(local.replace(/[._+-]/g, "")) || isRoleAddress(local) || /^(no-?reply|do-?not-?reply|notifications?|mailer|bounce)/.test(local)) continue;
         items.push({ name: a.name, email: a.email, domain: registrable(domain).full, last_seen_at: at, message_hash: hash });
       }
       return { ok: true, items, refused: false, atMs };

@@ -164,29 +164,30 @@ Deno.test({
         assertEquals((await wanted()).map((w: any) => w.key).sort(), [JOB2, JOB].sort());
       });
 
+      // One question at a time (coordinator review of #360): "what do you need from me" shows the first open question;
+      // "skip" moves on to the next; the one shown is answered with the whole message, or "use 1" for its offered draft.
+      const untilShown = async (label: string, company?: string) => {
+        let s = await say("what do you need from me");
+        assertEquals(s.resultStatus, "shown", s.reply);
+        for (let i = 0; i < 12 && !(s.reply.includes(label) && (!company || s.reply.includes(company))); i++) {
+          s = await say("skip");
+          assertEquals(s.resultStatus, "answered_next", s.reply);
+        }
+        assert(s.reply.includes(label) && (!company || s.reply.includes(company)), `${label}${company ? ` for ${company}` : ""} is asked: ${s.reply}`);
+        return s.reply;
+      };
       const useAll = async (labels: string[]) => {
-        const shown = await say("what do you need from me");
-        assertEquals(shown.resultStatus, "shown", shown.reply);
-        const lines = shown.reply.split("\n");
+        const texts: string[] = [];
         for (const label of labels) {
-          const i = lines.findIndex((l) => /^\d+\./.test(l) && l.includes(label));
-          assert(i >= 0, `${label} is asked: ${shown.reply}`);
-          const used = await say(`use ${Number(/^(\d+)\./.exec(lines[i])![1])}`);
+          texts.push(await untilShown(label));
+          const used = await say("use 1");
           assert(/Saved, as drafted/.test(used.reply), `${label}: ${used.reply}`);
         }
-        return shown.reply;
+        return texts.join("\n");
       };
       const outcomes = (done: { user_id: string; job_id: string; outcome: string }[]) =>
         done.filter((d) => d.user_id === PERSON).map((d) => [d.job_id, d.outcome]).sort((a, b) => a[0].localeCompare(b[0]));
       const openKeys = async () => (await pg.sql(`select coalesce(string_agg(key, ',' order by key), '') from public.career_apply_questions where user_id = '${PERSON}' and state = 'open'`)).split(",").filter(Boolean);
-      // The shown questions, as "N. <label> ..." lines; the essay's line for one employer is the one naming it.
-      const lineFor = (shown: string, label: string, company?: string) => {
-        const lines = shown.split("\n");
-        const i = lines.findIndex((l) => /^\d+\./.test(l) && l.includes(label) && (!company || l.includes(company)));
-        assert(i >= 0, `${label}${company ? ` for ${company}` : ""} is asked: ${shown}`);
-        return Number(/^(\d+)\./.exec(lines[i])![1]);
-      };
-
       await t.step("prepare: the server run draws both queued postings (no alert ever sent them); with no name or email on file it asks for those once, shared", async () => {
         const done = await prepareAhead(deps);
         assertEquals(outcomes(done), [[JOB2, "asked"], [JOB, "asked"]].sort((a, b) => a[0].localeCompare(b[0])), JSON.stringify(done));
@@ -216,10 +217,8 @@ Deno.test({
       const SIBLING_WHY = "TEST Sibling ships weekly and I want to learn that pace.";
       await t.step("their words: phone, sponsorship and work authorization used by them; the first employer's essay typed for it alone", async () => {
         await useAll(["Phone", SPONSOR, AUTH]);
-        const shown = await say("what do you need from me");
-        assertEquals(shown.resultStatus, "shown", shown.reply);
-        const n = lineFor(shown.reply, WHY, COMPANY);
-        const saved = await say(`${n} ${FIRST_WHY}`);
+        await untilShown(WHY, COMPANY);
+        const saved = await say(FIRST_WHY);
         assert(/kept word for word/.test(saved.reply), saved.reply);
         const left = await openKeys();
         assertEquals(left.length, 1, `the sibling's essay stays open: ${left.join(",")}`);
@@ -243,9 +242,8 @@ Deno.test({
 
       let preparedId2 = "";
       await t.step("the sibling's own essay, typed for it; then it is ready with that text and nothing of the first's", async () => {
-        const shown = await say("what do you need from me");
-        const n = lineFor(shown.reply, WHY, SIBLING);
-        const saved = await say(`${n} ${SIBLING_WHY}`);
+        await untilShown(WHY, SIBLING);
+        const saved = await say(SIBLING_WHY);
         assert(/kept word for word/.test(saved.reply), saved.reply);
         const done = await prepareAhead(deps);
         assertEquals(outcomes(done), [[JOB2, "ready"]], JSON.stringify(done));

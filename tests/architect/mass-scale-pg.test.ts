@@ -75,11 +75,15 @@ Deno.test({
       await Deno.writeTextFile(runlog, "");
       if (Deno.uid?.() === 0) await new Deno.Command("chmod", { args: ["a+rw", runlog] }).output();
       const im = Deno.env.get("IMPORT_MAP");
+      // Each instance's walk over people starts at its own evenly spaced place (id / (WORKERS + 2) of the uuid space), so
+      // the fairness window below is covered by the claim's walks themselves; random places (production's) leave gaps in
+      // a window shorter than one walk per instance by chance alone (7 of 2001 people unserved on run 40877292448).
+      const startOf = (id: number) => `${Math.floor((id * 0x100000000) / (WORKERS + 2)).toString(16).padStart(8, "0")}-0000-4000-8000-000000000000`;
       const spawn = (id: number) => {
         const c = new Deno.Command("setsid", {
           args: [Deno.execPath(), "run", "-A", "--no-check", ...(im ? [`--import-map=${im}`] : []), `${ROOT}/tests/flow/scale-worker.ts`],
           env: { ...Deno.env.toObject(), SCALE_PG: `${pg.host}:${pg.port}:${pgBinDir()}`, SCALE_ID: String(id), SCALE_JOURNAL: `${work}/journal-${id}`,
-            SCALE_CONCURRENCY: String(CONC), ENGINE_MS: String(ENGINE_MS), SCALE_RUNLOG: runlog, SCALE_LEASE_S: "3" },
+            SCALE_CONCURRENCY: String(CONC), ENGINE_MS: String(ENGINE_MS), SCALE_RUNLOG: runlog, SCALE_LEASE_S: "3", SCALE_START: startOf(id) },
           stdout: "piped", stderr: "piped", stdin: "null",
         }).spawn();
         return { id, c, out: new Response(c.stdout).text(), err: new Response(c.stderr).text() };

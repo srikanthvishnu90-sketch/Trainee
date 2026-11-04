@@ -25,6 +25,8 @@ import { type Admit, dayStartOf, type Message, messageOf, type OutreachDraft, ty
 import { ONE_ADDRESS } from "./career_outreach_gmail.ts";
 import { runMail } from "./career_proactive_run.ts";
 import { type DraftRow, type ReadStanding, standingFrom } from "./career_standing.ts";
+import { vaultRefreshWrite } from "./oauth_vault_refresh.ts";
+import { PARTIAL_WORDS } from "./oauth_connect.ts";
 
 export const CHECK_INTENT = "career_inbox_check";
 export const FOLLOWUP_CARD_INTENT = "career_followup_card";
@@ -161,6 +163,12 @@ export interface FollowupDeps {
   mailOn: boolean; readNow: (userId: string) => Promise<MailNow>;
   sendOn: boolean; canSend: (userId: string) => Promise<boolean>; send: (userId: string, m: Message) => Promise<SendResult>;
   connectAsk?: string;
+  // D-037 (incremental authorization): the person's "allow sending" link (a connect link with reason "send" that asks Google
+  // for gmail.send on top of their grant), or null when it can't be made. Offered only when a send was refused for want of it.
+  sendConsent?: (userId: string) => Promise<string | null>;
+  // CONNECTORS ROUND 3 (2026-10-31): whether the person's Gmail grant may read mail (a partial grant: the box left unticked
+  // at Google). Absent: not told apart from a Gmail that isn't connected.
+  readGrant?: (userId: string) => Promise<"ok" | "not_connected" | "not_allowed">;
 }
 export interface FollowupTurn { reply: string; status: string; intent: string; meta?: Record<string, unknown> | null }
 const clip = (s: unknown, n: number) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
@@ -220,7 +228,13 @@ async function checkTurn(o: { userId: string; deps: FollowupDeps }, connected: b
   const lead = connected ? "Thanks for connecting. " : "";
   if (!o.deps.mailOn) return { reply: `${lead}I haven't read your mail: reading it is not switched on in Trainee yet, so nothing was read from your inbox. What I have on record is what you told me and what Trainee sent.`, status: "MAIL_OFF", intent: CHECK_INTENT };
   const r: MailNow = await o.deps.readNow(o.userId).catch((e) => ({ status: "ERROR" as const, detail: e instanceof Error ? e.message : String(e), statuses: [], offers: [] }));
-  if (r.status === "NOT_WIRED") return { reply: `NOT_WIRED: nothing was read. Trainee can't read your Gmail yet: connect it in the Trainee app (it asks to read your mail), then say "check my email".${o.deps.connectAsk ? `\n\n${o.deps.connectAsk}` : ""}`, status: "NOT_WIRED", intent: CHECK_INTENT };
+  // CONNECTORS ROUND 3 (2026-10-31): said in plain words (it began with an internal code), and a Gmail connected without
+  // the permission to read mail is told so, with how to give it, instead of being asked to connect what is connected.
+  if (r.status === "NOT_WIRED") {
+    const why = o.deps.readGrant ? await o.deps.readGrant(o.userId).catch(() => null) : null;
+    if (why === "not_allowed") return { reply: PARTIAL_WORDS.gmail.read, status: "NOT_WIRED", intent: CHECK_INTENT };
+    return { reply: `Nothing was read: Trainee can't read your Gmail yet. Connect it (it asks to read your mail), then say "check my email".${o.deps.connectAsk ? `\n\n${o.deps.connectAsk}` : ""}`, status: "NOT_WIRED", intent: CHECK_INTENT };
+  }
   const reminded = (r.reminders ?? []).map((x: Reminder) => `I'll remind you on ${dayWord(x.at)} that the ${x.who} assessment is due.`);
   const found = [...r.statuses, ...reminded, ...r.offers.map((x) => `${x}\nSay "send the ${/thank-you/.test(x) ? "thank-you" : "follow-up"} to" and the company to see it as an email you can send yourself.`)];
   if (r.status === "ERROR") {
@@ -311,7 +325,8 @@ async function cardAnswer(o: { userId: string; threadId: string; now: number; de
   const yourself = `Copy the email above into your own email, or open it ready to send: ${mailtoOf(m)}`;
   if (!o.deps.sendOn) return waiting(`Not sent: Trainee doesn't send email for you, so nothing went to ${co}. ${yourself}`, "SEND_OFF");
   if (!(await o.deps.canSend(o.userId).catch(() => false))) {
-    return waiting(`Not sent: your Google connection lets Trainee read your mail, not send it, so nothing went to ${co}. ${yourself}`, "NOT_WIRED");
+    const allow = o.deps.sendConsent ? await o.deps.sendConsent(o.userId).catch(() => null) : null;
+    return waiting(`Not sent: your Google connection lets Trainee read your mail, not send it, so nothing went to ${co}.${allow ? ` To send it from your Gmail, allow sending: ${allow} then say yes again.` : ""} ${yourself}`, "NOT_WIRED");
   }
   const at = new Date(o.now).toISOString();
   const approved: OutreachDraft = { ...d, status: "approved", approved_hash: h, approved_at: at };
@@ -379,12 +394,16 @@ export function careerGrant(admin: any, env: { get(k: string): string | undefine
       if (error) throw new Error("read the career grant's vault entry");
       return data ? String(data) : null;
     },
-    writeVault: async (name, secret) => {
-      const { error } = await admin.rpc("oauth_vault_store", { p_name: name, p_secret: secret });
-      if (error) throw new Error("save the refreshed career grant");
-    },
+    writeVault: (name, secret) => vaultRefreshWrite(admin, name, secret, "save the refreshed career grant"),
   };
 }
+// CONNECTORS ROUND 3: may the person's career Google grant read mail? (FollowupDeps.readGrant)
+export const gmailReadGrant = (admin: any) => async (userId: string): Promise<"ok" | "not_connected" | "not_allowed"> => {
+  const { data, error } = await admin.from("user_oauth_connections").select("scopes").eq("user_id", userId).eq("provider", "google_career").maybeSingle();
+  if (error) throw new Error(`read the career grant: ${error.message}`);
+  if (!data) return "not_connected";
+  return String(data.scopes ?? "").split(/[\s,]+/).includes(CAREER_READ_SCOPE) ? "ok" : "not_allowed";
+};
 // The person's mail, read now with the career grant's gmail.readonly, through the scheduled run's reader.
 export const gmailReadNow = (grant: TokenDeps, f: typeof fetch) => (userId: string, since: number, now: number) =>
   readMailSince({ fetch: f, token: careerTokenFor(grant, CAREER_READ_SCOPE) }, userId, since, now);

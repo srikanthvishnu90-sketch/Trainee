@@ -1,0 +1,53 @@
+{
+  "concurrency": 5,
+  "parallel_wall_ms": 2589,
+  "serial_wall_ms": 5474,
+  "per_application": [
+    {
+      "id": "greenhouse-gh1",
+      "status": "submitted_page_confirmed",
+      "attempts": 1,
+      "ms": 2250,
+      "fill_ms": 765,
+      "submit_ms": 336,
+      "confirmation": "GH-GH1"
+    },
+    {
+      "id": "greenhouse-flaky-gh2",
+      "status": "submitted_page_confirmed",
+      "attempts": 2,
+      "ms": 2589,
+      "fill_ms": 472,
+      "submit_ms": 108,
+      "confirmation": "GH-FLAKY-GH2"
+    },
+    {
+      "id": "lever-lv1",
+      "status": "submitted_page_confirmed",
+      "attempts": 1,
+      "ms": 2173,
+      "fill_ms": 657,
+      "submit_ms": 404,
+      "confirmation": "LV-LV1"
+    },
+    {
+      "id": "lever-lv2",
+      "status": "submitted_page_confirmed",
+      "attempts": 1,
+      "ms": 2161,
+      "fill_ms": 625,
+      "submit_ms": 353,
+      "confirmation": "LV-LV2"
+    },
+    {
+      "id": "greenhouse-gh3",
+      "status": "submitted_page_confirmed",
+      "attempts": 1,
+      "ms": 2189,
+      "fill_ms": 633,
+      "submit_ms": 350,
+      "confirmation": "GH-GH3"
+    }
+  ],
+  "mock_received": 10
+}

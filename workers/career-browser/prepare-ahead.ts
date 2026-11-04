@@ -48,12 +48,18 @@ export interface AheadDeps {
   // The resume tailored to this posting from the trusted profile, written to a file in dir; null when it cannot be.
   // deno-lint-ignore no-explicit-any
   resumeFor: (c: Candidate, dir: string, profile: any | null) => Promise<PreparedResume | null>;
+  // true: the resume is the person's own FILE (nothing is built from their facts), so a missing one is not a missing name or email.
+  resumeIsFile?: boolean;
   // The person's stored profile, as stored (storedProfile); prepareAhead keeps only its trusted facts. Absent: only their
   // answers count.
   // deno-lint-ignore no-explicit-any
   profileFor?: (userId: string) => Promise<any | null>;
   // The link the engine opens. Production: the posting's own. Tests point an https posting at a local employer page.
   urlFor?: (c: Candidate) => string;
+  // MASS APPLY (2026-11-01): the form's shape from the ATS's public board API (posting_schema.ts: Greenhouse), or null.
+  // Used only to ask the shared facts (fact:* questions) a form needs before any browser opens it; the browser still reads
+  // the form and builds the payload once those are answered. Absent: as before.
+  schemaFor?: (url: string) => Promise<{ fields: { name: string; label: string; required: boolean; type: string; options: { label: string }[] }[] } | null>;
   // The model the chat's drafter writes with; absent (or no profile), no cover letter is drafted ahead.
   draftModel?: ModelFn;
   // FEATURE 3: the model a cover note for each ready application is drafted with (the same drafter); absent, none.
@@ -155,7 +161,7 @@ export async function prepareOne(d: AheadDeps, c: Candidate): Promise<AheadOutco
     if (!resume) {
       // SUBMIT-STEER-1130: confirmed facts but no name or email on file, so no resume can carry them. Ask for those, once
       // (bound to this posting, so their answers make it a candidate again), instead of stopping here for good.
-      const missing = profile && Array.isArray(profile.facts) && profile.facts.length ? contactAsk(profile, rows, c.company) : [];
+      const missing = !d.resumeIsFile && profile && Array.isArray(profile.facts) && profile.facts.length ? contactAsk(profile, rows, c.company) : [];
       if (missing.length) {
         const n = must(await d.db.rpc("career_apply_prepare_ask_for", {
           p_user: c.user_id, p_posting_job_id: c.job_id, p_engine_job_id: c.job_id, p_questions: missing,
@@ -164,10 +170,33 @@ export async function prepareOne(d: AheadDeps, c: Candidate): Promise<AheadOutco
       }
       return await record("no_resume", "no resume could be tailored to this posting from their confirmed facts");
     }
-    const r = await prepare({
+    // MASS APPLY: shared facts the form needs and they have not given, asked from the board API's schema with no browser
+    // pass (saves one browser run per Greenhouse posting in ask-then-ready). Only fact:* questions; anything else (an
+    // essay, a posting-only wording) is left to the browser's own read, which keys it exactly as before.
+    if (d.schemaFor) {
+      const schema = await d.schemaFor(d.urlFor ? d.urlFor(c) : c.url).catch(() => null);
+      if (schema) {
+        const wanted = schema.fields.filter((f) => f.required && !/file/.test(f.type))
+          .map((f) => ({ label: f.label, type: /select/.test(f.type) ? "select" : "input_text", options: f.options.map((o) => o.label) }));
+        const ask = questionsToStore({ posting: c.job_id, company: c.company, questions: wanted }, { facts: trusted, answered: new Set(rows.map((x) => x.key)) });
+        const facts = ask.questions.filter((q) => q.kind === "fact" && String(q.key).startsWith("fact:") && !Object.hasOwn(trusted, String(q.key).slice(5)) && !q.misfit);
+        if (facts.length) {
+          const n = must(await d.db.rpc("career_apply_prepare_ask_for", {
+            p_user: c.user_id, p_posting_job_id: c.job_id, p_engine_job_id: c.job_id, p_questions: facts,
+          }), "store the questions");
+          return { user_id: c.user_id, job_id: c.job_id, outcome: "asked", detail: `${n} question(s) asked from the board's published form (no browser)` };
+        }
+      }
+    }
+    const dryRun = () => prepare({
       url: d.urlFor ? d.urlFor(c) : c.url, factsPath, resumePath: resume.path, account: { epoch: Number(c.epoch), version: Number(c.version) },
       now: now(), runEngine: d.runEngine, resumeTag: resume.tag,
     });
+    let r = await dryRun();
+    // MASS APPLY (2026-11-01): the browser itself failing (DRIVER_ERROR: a crash or a timeout of the engine's browser, not
+    // the employer's page) is tried once more at once. A preparation is a dry run (nothing is ever submitted), so a second
+    // try is safe; without it one browser hiccup parked the posting for 7 days (prepare_candidates' wait after a refusal).
+    if (!r.ready && /^DRIVER_ERROR/.test(String((r.result as any)?.reason ?? ""))) r = await dryRun();
     if (!r.ready) {
       const result: any = r.result;
       // The questions name the posting's own company too (the engine's stop names the board's tenant or the page's host).
@@ -184,6 +213,13 @@ export async function prepareOne(d: AheadDeps, c: Candidate): Promise<AheadOutco
           detail: `${n} question(s) asked${letters ? `; ${letters} cover letter${letters === 1 ? "" : "s"} drafted for them to read` : ""}`,
         };
       }
+      // The form's only open questions are ones Trainee never takes by text (an ID number, a password, a code): said as such.
+      if (result.reason === "needs_answers" && Array.isArray(result.questions) && result.questions.length) {
+        return await record("refused", "sensitive_question: the form asks for something Trainee does not take in a message", undefined, result.posting);
+      }
+      // The browser itself failing twice is our error, not the employer's form refusing: recorded as such (it is tried
+      // again within the hour: prepare_candidates' wait after an error), never told as "the form could not be filled".
+      if (/^DRIVER_ERROR/.test(String(result.reason ?? ""))) return await record("error", "the browser failed while reading the form (DRIVER_ERROR); tried twice", undefined, result.posting);
       return await record("refused", String(result.reason ?? result.state ?? "not ready"), undefined, result.posting);
     }
     if (r.payload.resume_sha256 !== resume.sha256) return await record("error", "the engine sent another resume than the tailored one");
@@ -396,7 +432,10 @@ export function prepareDoor(o: {
 
 // What the engine's process may see on the preparation host: where its tools are, nothing else. The service key and every
 // other secret stay in this process (the engine, Chromium and the employer's page never get them).
-export const PREPARE_ENGINE_ENV_KEYS = ["PATH", "HOME", "TMPDIR", "DENO_DIR", "PLAYWRIGHT_BROWSERS_PATH", "UPMORE_PLAYWRIGHT_PATH", "UPMORE_CHROMIUM_PATH"];
+// UPMORE_SCRIPT_SUBMIT_LIVE (the owner's switch, as on the send worker, worker.ts ENGINE_ENV_KEYS): without it the dry run
+// on any real Ashby form stops at SUBMIT_DESTINATION_NOT_BOUND and no card is ever prepared.
+export const PREPARE_ENGINE_ENV_KEYS = ["PATH", "HOME", "TMPDIR", "DENO_DIR", "PLAYWRIGHT_BROWSERS_PATH", "UPMORE_PLAYWRIGHT_PATH", "UPMORE_CHROMIUM_PATH",
+  "UPMORE_SCRIPT_SUBMIT_LIVE"];
 export function prepareEngineEnv(from: (k: string) => string | undefined = (k) => Deno.env.get(k)): Record<string, string> {
   const env: Record<string, string> = { UPMORE_MASK_SCREENSHOTS: "1", UPMORE_BROWSER_HEADED: "0" };
   for (const k of PREPARE_ENGINE_ENV_KEYS) {
@@ -447,10 +486,11 @@ if (import.meta.main) {
   }
   const { createClient } = await import("npm:@supabase/supabase-js@2.117.1");
   const { edgeRenderer, supabaseResumeStore } = await import("../../supabase/functions/_shared/career_tailor.ts");
-  const { callModel, modelConfig, newMeter } = await import("../../supabase/functions/_shared/model_gateway.ts");
+  const { callModel, newMeter } = await import("../../supabase/functions/_shared/model_gateway.ts");
+  const { careerModelConfig } = await import("../../supabase/functions/agent-chat/release_model.ts");
   const admin = createClient(cred.url, cred.key, { auth: { persistSession: false } });
   const root = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
-  const cfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+  const cfg = careerModelConfig(Deno.env);
   // One pool for everything this host prepares: as many browsers as this machine holds, every employer site at full
   // parallelism unless it refuses; a refusal holds that site off for every host through the database.
   const pacing = preparePacing();
@@ -480,7 +520,7 @@ if (import.meta.main) {
         const rows = await alerts.active();
         const q = await admin.rpc("career_quiet_users", { p_users: rows.map((r) => r.id) });
         if (q.error) throw new Error(`read who is paused: ${q.error.message}`);
-        const quiet = new Set((q.data ?? []).map((r: any) => String(r.user_id)));
+        const quiet = new Set((q.data ?? []).map((r: any) => String(r?.user_id ?? r))); // bare ids or {user_id}: either shape
         // Many hosts: this one takes only its share of the people (PREPARE_AHEAD_SHARD).
         return rows.filter((r) => !quiet.has(r.id) && (!shard || shard(r.id)));
       } },

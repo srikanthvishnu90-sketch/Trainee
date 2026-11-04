@@ -211,6 +211,47 @@ async function checkRuns({ sql }) {
 }
 const psqlRunner = (dbUrl) => async (q) => execFileSync('psql', [dbUrl, '-X', '-q', '-tA', '-v', 'ON_ERROR_STOP=1', '-c', q], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 
+// The hosted file page (phone login, Apply buttons). TRAINEE_FILE_BASE_URL is the page's public https URL (the Vercel /file route).
+// A made-up link must come back as a 4xx HTML "link" page: 404 means the route is missing, 503 means the proxy or the function
+// is not set up (Vercel TRAINEE_FILE_UPSTREAM, or TRAINEE_FILE_LINK_SECRET missing), 2xx would mean it opened without a link.
+async function checkFilePage({ url, fetchFn }) {
+  const name = 'file page (TRAINEE_FILE_BASE_URL) refuses a made-up link';
+  let u;
+  try { u = new URL(url); if (u.protocol !== 'https:') throw new Error(); } catch { return r('FAIL', name, 'TRAINEE_FILE_BASE_URL is not an https URL'); }
+  u.search = ''; u.searchParams.set('t', 'smoke-' + crypto.randomBytes(12).toString('hex'));
+  const x = await call(fetchFn, u.toString(), { method: 'GET', redirect: 'manual' }, 20000);
+  if (x.status >= 400 && x.status < 500 && x.status !== 404 && x.status !== 429) return r('PASS', name, `HTTP ${x.status}`);
+  if (x.status === 404) return r('FAIL', name, 'HTTP 404: the /file route or the function is not deployed');
+  if (x.status === 503) return r('FAIL', name, `HTTP 503: not set up (${said(x)}); set Vercel TRAINEE_FILE_UPSTREAM and the function secret TRAINEE_FILE_LINK_SECRET`);
+  return r('FAIL', name, `HTTP ${x.status || 'none'}: ${said(x) || 'expected a refusal'}`);
+}
+
+// Per feature, certified or not, from what THIS run actually saw. NOT RUN, WARN and FAIL never certify anything.
+// "Real Apply" is never certified by a smoke: it needs a real application that the employer confirmed.
+function certify(results) {
+  const by = (re) => results.filter((x) => re.test(x.check));
+  const state = (re) => { const l = by(re); return l.length === 0 ? 'NOT RUN' : l.some((x) => x.status === 'FAIL') ? 'FAIL' : l.every((x) => x.status === 'PASS') ? 'PASS' : l.some((x) => x.status === 'WARN') ? 'WARN' : 'NOT RUN'; };
+  const why = (re, fallback) => { const l = by(re).filter((x) => x.status !== 'PASS'); return l.length ? l.map((x) => `${x.check} ${x.status}${x.detail ? ` (${clip(x.detail, 90)})` : ''}`).join('; ') : fallback; };
+  const file = state(/^file page/), send = state(/^trainee-inbound answers HELP/), gate = state(/^trainee-inbound (refuses|answers the right)/);
+  const runs = state(/^schedule |has a recent row/), prep = state(/^preparation host/);
+  const cert = (feature, certified, reason) => ({ feature, certified, reason });
+  const out = [];
+  out.push(cert('file endpoint', file === 'PASS', file === 'PASS' ? 'a made-up link was refused by the live page' : why(/^file page/, 'NOT RUN: TRAINEE_FILE_BASE_URL not given to the smoke')));
+  out.push(cert('inbound', gate === 'PASS' && send === 'PASS', gate === 'PASS' && send === 'PASS' ? 'webhook gate and a real LoopMessage send (HELP) both answered' : why(/^trainee-inbound/, 'NOT RUN: no trainee-inbound check ran') + (send !== 'PASS' ? '; needs LOOPMESSAGE_API_KEY on the project and --allow-send with TRAINEE_SMOKE_CONTACT' : '')));
+  out.push(cert('phone login', file === 'PASS' && send === 'PASS', file === 'PASS' && send === 'PASS' ? 'page reachable and LoopMessage sends (the code arriving on a real phone is not probed)' : `needs the file endpoint and the LoopMessage send: file ${file}, send ${send}`));
+  const applyReady = file === 'PASS' && runs === 'PASS' && prep === 'PASS';
+  out.push(cert('real Apply', false, `never certified by a smoke: it needs one real application confirmed by the employer. Prerequisites seen: file page ${file}, schedules ${runs}, preparation host ${prep}${applyReady ? '' : ' (not all PASS)'}`));
+  return out;
+}
+
+// One founder_alerts row per smoke run so ops-monitor can tell the owner a deploy smoke failed. Counts and booleans only, plus a
+// validated commit sha: no secret, URL or phone number can reach the row.
+function recordSql(counts, certs, sha) {
+  const safeSha = /^[0-9a-f]{7,40}$/.test(sha || '') ? sha : '';
+  const detail = { sha: safeSha, ...counts, certified: Object.fromEntries(certs.map((c) => [c.feature.replace(/ /g, '_'), c.certified])) };
+  return `insert into public.founder_alerts (kind, user_id, detail) values ('deploy_smoke', null, '${JSON.stringify(detail)}'::jsonb)`;
+}
+
 function parseArgs(argv) {
   const o = { allowSend: false, waitRuns: 0, kept: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -229,7 +270,7 @@ async function main(argv, env, deps = {}) {
   const fetchFn = deps.fetch || fetch, sleep = deps.sleep || ((ms) => new Promise((res) => setTimeout(res, ms)));
   const now = deps.now || Date.now;
   // Never print a value that was handed in; an error message from a provider or psql could carry one back.
-  const hidden = ['SUPABASE_DB_URL', 'UPMORE_TEST_JWT', 'TRAINEE_SMOKE_CONTACT', 'CAREER_PREPARE_AHEAD_URL', 'CAREER_PREPARE_AHEAD_TOKEN', ...GATED.map((g) => g.env), ...CHANNEL_SECRETS].map((k) => env[k]).filter((v) => v && v.length >= 4);
+  const hidden = ['SUPABASE_DB_URL', 'UPMORE_TEST_JWT', 'TRAINEE_SMOKE_CONTACT', 'CAREER_PREPARE_AHEAD_URL', 'CAREER_PREPARE_AHEAD_TOKEN', 'TRAINEE_FILE_BASE_URL', ...GATED.map((g) => g.env), ...CHANNEL_SECRETS].map((k) => env[k]).filter((v) => v && v.length >= 4);
   const scrub = (s) => hidden.reduce((t, v) => t.split(v).join('***').split(encodeURIComponent(v)).join('***'), String(s));
   const line = (x) => log(scrub(`${x.status.padEnd(7)} ${x.check}${x.detail ? `: ${x.detail}` : ''}`));
   let opts;
@@ -263,6 +304,8 @@ async function main(argv, env, deps = {}) {
   // Not wired is reported, not counted (as a channel not given); wired and failing is a FAIL.
   const prep = await checkPrepareHost({ url: env.CAREER_PREPARE_AHEAD_URL, token: env.CAREER_PREPARE_AHEAD_TOKEN, fetchFn });
   if (prep.length === 1 && prep[0].status === 'NOT RUN') optional(prep[0]); else add(prep);
+  if (env.TRAINEE_FILE_BASE_URL) add(await checkFilePage({ url: env.TRAINEE_FILE_BASE_URL, fetchFn }));
+  else optional(r('NOT RUN', 'file page (TRAINEE_FILE_BASE_URL)', 'NOT_WIRED: TRAINEE_FILE_BASE_URL not given; the file endpoint and phone login are NOT CERTIFIED (needs the function secrets TRAINEE_FILE_LINK_SECRET, TRAINEE_FILE_BASE_URL, TRAINEE_BOT_URL and Vercel TRAINEE_FILE_UPSTREAM)'));
   if (env.UPMORE_TEST_JWT) add(await checkChatHi({ base, jwt: env.UPMORE_TEST_JWT, fetchFn }));
   else add(r('NOT RUN', 'agent-chat answers "hi" for the test user', 'missing UPMORE_TEST_JWT'));
 
@@ -280,9 +323,16 @@ async function main(argv, env, deps = {}) {
     add(runs);
   }
   const n = (s) => results.filter((x) => x.status === s).length;
-  log(`summary: ${n('PASS')} PASS, ${n('WARN')} WARN, ${n('FAIL')} FAIL, ${n('NOT RUN')} NOT RUN`);
+  const counts = { pass: n('PASS'), warn: n('WARN'), fail: n('FAIL'), not_run: n('NOT RUN') };
+  log(`summary: ${counts.pass} PASS, ${counts.warn} WARN, ${counts.fail} FAIL, ${counts.not_run} NOT RUN`);
+  const certs = certify(results);
+  for (const c of certs) log(scrub(`${c.certified ? 'CERT    CERTIFIED' : 'CERT    NOT CERTIFIED'} ${c.feature}: ${c.reason}`));
+  if (env.SUPABASE_DB_URL || deps.sql) {
+    try { await (deps.sql || psqlRunner(env.SUPABASE_DB_URL))(recordSql(counts, certs, env.GITHUB_SHA || env.TRAINEE_SMOKE_SHA)); }
+    catch { log('NOTE    the smoke result was not recorded (founder_alerts unreadable); ops-monitor cannot alert on this run'); }
+  }
   return n('FAIL') ? 1 : 0;
 }
 
-module.exports = { GATED, RUNS, CHANNEL_SECRETS, checkPrepareHost, checkGate, checkInboundHelp, checkTelegram, checkTelegramWebhook, checkWhatsApp, checkChatNoJwt, checkChatHi, checkRuns, helpBody, main };
+module.exports = { certify, recordSql, checkFilePage, GATED, RUNS, CHANNEL_SECRETS, checkPrepareHost, checkGate, checkInboundHelp, checkTelegram, checkTelegramWebhook, checkWhatsApp, checkChatNoJwt, checkChatHi, checkRuns, helpBody, main };
 if (require.main === module) main(process.argv.slice(2), process.env).then((code) => { process.exitCode = code; }, (e) => { console.log(`FAIL    trainee smoke crashed: ${e && e.message}`); process.exitCode = 1; });

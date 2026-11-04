@@ -20,7 +20,9 @@
 // an erase), go to the judge with every search. They can shape a verdict, never the grounding rule or the scale.
 // Nothing here sends, applies or writes anywhere but the person's own cache and standing instructions.
 import { searchPostings, type SearchHit } from "./career_search.ts";
-import { searchWords } from "./career_ingest.ts";
+import { searchWords, wordStem } from "./career_ingest.ts";
+import { correctedAsk } from "./search_correction.ts";
+import { hasLimits, type Limits, limitsLine, outsideLimits, REASON_WORDS, type Reason, searchTextOf, statedBand, statedPay } from "./posting_constraints.ts";
 import { CareerPool } from "./career_pool.js";
 import { CareerProfile } from "./router_core.career.js";
 import { addStanding, type MemoryStore, type Standing } from "./agent/memory.ts";
@@ -119,6 +121,13 @@ const CLEAR_RE = /^\s*(?:please\s+)?(?:forget|clear|remove|delete|drop|reset)\s+
 const SHOW_RE = /^\s*(?:what(?:'s|\s+is)\s+my\s+(?:job\s+)?judge\s+prompt|show\s+(?:me\s+)?my\s+(?:job\s+)?judge\s+prompt)\s*\??\s*$/i;
 export const JUDGE_PROMPT_INTENT = "career_judge_prompt";
 export interface JudgePromptResult { reply: string; status: "saved" | "refused" | "cleared" | "none" | "shown" | "unreadable"; intent: string }
+// Whether judgePromptTurn answers this message (no I/O): a "judge prompt: ..." instruction is code's, so the staged brain
+// never takes it (D-035; the brain branch comes before the router branch that runs judgePromptTurn).
+export function isJudgePromptAsk(message: string): boolean {
+  const m = String(message ?? "");
+  return SET_RE.test(m) || WHEN_RE.test(m) || CLEAR_RE.test(m) || SHOW_RE.test(m);
+}
+
 export async function judgePromptTurn(o: { message: string; userId: string; now: number; memory: MemoryStore; judgeOn: boolean }): Promise<JudgePromptResult | null> {
   const m = String(o.message ?? "");
   const set = SET_RE.exec(m) ?? WHEN_RE.exec(m), clear = CLEAR_RE.test(m), show = SHOW_RE.test(m);
@@ -316,14 +325,32 @@ export function supabaseSearchSources(admin: any, o: { window?: any[]; jobs?: an
 
 // ------------------------------------------------------------------------------------------------ the turn
 export interface ShortlistEntry { id: string | null; title: string; company: string | null; location: string | null; url: string | null }
-export interface SearchAsk { role: string; place: string | null; remote: boolean }
+// limits: the level, pay floor, employer, season and sponsorship the person stated (posting_constraints.ts); remoteOnly: they
+// asked for remote alone, not "this city or remote".
+export interface SearchAsk { role: string; place: string | null; remote: boolean; remoteOnly?: boolean; limits?: Limits; prevPlace?: string | null }
 export interface SearchJudgeResult {
   reply: string; status: "ranked" | "judged" | "none"; source: "live" | "snapshot" | "none";
   shortlist: ShortlistEntry[]; accounting: Accounting | null; modelCalled: boolean;
+  // Every row the reply would rank (judged-in or not judged), in its order, with the posting it came from: the results page's
+  // list (role_results.ts), which holds more than the reply shows.
+  picked?: { hit: SearchHit; posting: SourcePosting | null }[];
 }
 export const SEARCH_INTENTS = new Set(["career_discovery", "career_internship_discovery"]);
 // The ask, as the router parsed it this turn (discovery.lastParams, written by its handleDiscovery for this very text).
 // Null when the router did not run a search on this message: a follow-up, a fit question, a chained turn.
+// 2026-10-28 (search-parameter eval): the router's parse keeps a role only when the message ends in "roles/jobs/internships/
+// openings" and a place only when capitalized after "in"; level, pay, employer, season and sponsorship were never carried.
+// askFromRouter stays the router's own parse; askFor (below) reads the message again (posting_constraints.ts searchTextOf):
+// what the message states wins, the router's parse fills what it does not say.
+function enrich(message: string, base: SearchAsk | null): SearchAsk | null {
+  const st = searchTextOf(message);
+  const role = st.role || base?.role || "";
+  if (!searchWords(role).length) return null;
+  const orRemote = /\b(?:or|and|\/)\s*remote\b|\bremote\s*(?:or|and|\/)\s|\bhybrid\b/i.test(message);
+  // The router's own spelling of the place ("Chicago") is kept when the message's reading is the same place in lower case.
+  const place = base?.place && st.place && base.place.toLowerCase() === st.place.toLowerCase() ? base.place : st.place ?? base?.place ?? null, remote = st.remote || !!base?.remote;
+  return { role, place, remote, remoteOnly: remote && !orRemote, limits: st.limits };
+}
 export function askFromRouter(message: string, routerOut: { intent?: string } | null, discovery: any): SearchAsk | null {
   if (!routerOut || !SEARCH_INTENTS.has(String(routerOut.intent ?? ""))) return null;
   const p = discovery?.lastParams;
@@ -332,17 +359,53 @@ export function askFromRouter(message: string, routerOut: { intent?: string } | 
   if (!searchWords(role).length) return null;
   return { role, place: typeof p.whereText === "string" && p.whereText.trim() ? p.whereText.trim() : null, remote: !!p.remote };
 }
+// A search the router did not run: the message states a role and the router claimed nothing else for it (no intent, its
+// fallback or catch-all, a goal it recorded, or a fact it recorded from the same sentence: "new grad backend, no sponsorship
+// needed" was taken as a correction and never searched). `append`: the router's own reply is kept and the search follows it.
+const UNCLAIMED = new Set(["", "undefined", "career_fallback", "career_catchall"]);
+const ALSO = new Set(["career_goal_record", "intent_sensitive_correction", "profile_correction"]);
+const SEARCH_CUE = /\b(?:find|search|show|looking|look|want|need|seeking|hiring|openings?|jobs?|roles?|positions?|interns?(?:hips?)?|new[- ]?grad|entry[- ]level|remote)\b|\$\s?\d/i;
+export function searchAskFromMessage(message: string, routerOut: { intent?: string; resultStatus?: string } | null): { ask: SearchAsk; append: boolean } | null {
+  const intent = String(routerOut?.intent ?? "");
+  // ROUTER ROUTING ROUND (2026-11-02): a search the router ran on its routing copy (a trailing "please" dropped, a typo
+  // repaired, shorthand spelled out) records that copy, not the message, so askFromRouter does not match it: the message is
+  // read here instead ("data analyst jobs at Generali please" searched nothing once the router took it as a search).
+  const open = UNCLAIMED.has(intent) || SEARCH_INTENTS.has(intent), also = ALSO.has(intent) && String(routerOut?.resultStatus ?? "") === "completed";
+  if (!open && !also) return null;
+  const text = String(message ?? "").trim();
+  if (!text || text.length > 200 || /\?\s*$/.test(text)) return null;
+  const ask = enrich(text, null);
+  if (!ask || searchWords(ask.role).length > 6) return null;
+  if (!SEARCH_CUE.test(text) && !ask.place && !ask.limits?.bands) return null;
+  // Said with nothing that makes it a search for work (no level, pay, place, remote, employer or job word): not a search.
+  if (!ask.limits?.bands && !ask.limits?.pay && !ask.place && !ask.remote && !/\b(?:jobs?|roles?|positions?|openings?|interns?(?:hips?)?)\b/i.test(text)) return null;
+  return { ask, append: also };
+}
 const DAY = 86400000;
 const where = (p: { location?: string | null }) => String(p.location ?? "").trim();
 function inPlace(p: SourcePosting, ask: SearchAsk): boolean {
   const loc = where(p).toLowerCase();
+  // "remote" alone, or "remote in Canada": only a remote posting (inside that place, when one is named).
+  if (ask.remoteOnly) return /\bremote\b/.test(loc) && (!ask.place || loc.includes(ask.place.toLowerCase()));
   if (ask.place && loc.includes(ask.place.toLowerCase())) return true;
   if (ask.remote && /\bremote\b/.test(loc)) return true;
   return !ask.place && !ask.remote;
 }
 // "data internships" finds "Data Intern" titles: the shared stem of the two.
 const roleWordsOf = (role: string) => [...new Set(searchWords(role).map((w) => /^intern(ship)?s?$/.test(w) ? "intern" : w))];
-const asked = (ask: SearchAsk) => `${ask.role.replace(/\s+(roles|jobs|openings|positions)$/i, "")}${ask.place ? ` in ${ask.place}` : ""}${ask.remote ? `${ask.place ? " or" : ""} remote` : ""}`;
+const asked = (ask: SearchAsk) => {
+  const lim = ask.limits && hasLimits(ask.limits) ? limitsLine(ask.limits) : "";
+  const role = ask.role.replace(/\s+(roles|jobs|openings|positions)$/i, "");
+  return `${ask.remoteOnly ? "remote " : ""}${role}${ask.place ? ` in ${ask.place}` : ""}${ask.remote && !ask.remoteOnly ? `${ask.place ? " or" : ""} remote` : ""}${lim ? ` (${lim})` : ""}`;
+};
+// Postings the person's stated limits rule out (posting_constraints.ts), counted by reason; the rest stay.
+function holdToLimits(pool: SourcePosting[], limits: Limits | undefined): { kept: SourcePosting[]; dropped: Partial<Record<Reason, number>>; noPay: number } {
+  if (!limits || !hasLimits(limits)) return { kept: pool, dropped: {}, noPay: 0 };
+  const dropped: Partial<Record<Reason, number>> = {}, kept: SourcePosting[] = [];
+  for (const p of pool) { const r = outsideLimits(p, limits); if (r) dropped[r] = (dropped[r] ?? 0) + 1; else kept.push(p); }
+  return { kept, dropped, noPay: limits.pay ? kept.filter((p) => !statedPay(p)).length : 0 };
+}
+const droppedLine = (d: Partial<Record<Reason, number>>) => Object.entries(d).map(([r, n]) => `${n} ${REASON_WORDS[r as Reason]}`).join(", ");
 
 export async function searchJudgeTurn(o: {
   message: string; ask: SearchAsk; userId: string; now: number; profile: any; sources: SearchSources;
@@ -355,16 +418,23 @@ export async function searchJudgeTurn(o: {
   // 1. The source: the live board when it has a match, else the snapshot. A read that fails is said, never guessed.
   let source: "live" | "snapshot" | "none" = "none", pool: SourcePosting[] = [], liveNote = "";
   let liveRows: boolean | null = null;
+  // What the person's stated limits (level, pay, season, employer, sponsorship) left out of the source used, and of the one
+  // that matched the role and place but nothing after the limits.
+  let held = holdToLimits([], ask.limits), heldAny: ReturnType<typeof holdToLimits> | null = null;
   try {
-    const live = (await o.sources.live([...searchWords(ask.role), ...placeWords], 300)).filter((p) => !p.closed_at && inPlace(p, ask));
-    if (live.length) { source = "live"; pool = live; }
+    const liveAll = (await o.sources.live([...searchWords(ask.role), ...placeWords], 300)).filter((p) => !p.closed_at && inPlace(p, ask));
+    const h = holdToLimits(liveAll, ask.limits);
+    if (liveAll.length && !h.kept.length) heldAny = h;
+    if (h.kept.length) { source = "live"; pool = h.kept; held = h; }
     else liveRows = await o.sources.liveHasRows();
   } catch (e) { console.error("career search: live board", (e as Error)?.message ?? e); liveNote = "the live board could not be read just now"; }
   let snapshotFailed = false;
   if (source === "none") {
     try {
-      const snap = (await o.sources.snapshot(roleWords, ask.place, 300)).filter((p) => inPlace(p, ask));
-      if (snap.length) { source = "snapshot"; pool = snap; }
+      const snapAll = (await o.sources.snapshot(roleWords.map(wordStem), ask.place, 300)).filter((p) => inPlace(p, ask));
+      const h = holdToLimits(snapAll, ask.limits);
+      if (snapAll.length && !h.kept.length) heldAny ??= h;
+      if (h.kept.length) { source = "snapshot"; pool = h.kept; held = h; }
     } catch (e) { snapshotFailed = true; console.error("career search: snapshot", (e as Error)?.message ?? e); }
   }
   if (!liveNote && source !== "live") liveNote = liveRows ? "the live board has no match for it" : "the live board has no postings yet";
@@ -374,7 +444,8 @@ export async function searchJudgeTurn(o: {
   if (!hits.length) {
     // A source that could not be read is not evidence of no postings: the router's own reply stands.
     if (snapshotFailed || (source === "none" && liveRows === null)) return null;
-    const reply = `I found no posting for ${asked(ask)}: ${liveNote}, and the saved snapshot has none either. Nothing was invented to fill the list. Widen the role or the place and I'll search again.`;
+    const leftOut = heldAny && droppedLine(heldAny.dropped) ? ` ${Object.values(heldAny.dropped).reduce((a, b) => a! + b!, 0)} matched the role and place but were left out: ${droppedLine(heldAny.dropped)}.` : "";
+    const reply = `I found no posting for ${asked(ask)}: ${liveNote}, and the saved snapshot has none either.${leftOut} Nothing was invented to fill the list. Widen the role or the place and I'll search again.`;
     return { reply, status: "none", source: "none", shortlist: [], accounting: null, modelCalled: false };
   }
   const byId = new Map(pool.map((p) => [p.job_id, p]));
@@ -392,8 +463,10 @@ export async function searchJudgeTurn(o: {
   // OWNER LIST #6 (2026-10-28): a fit is said in words, never as a raw score ("fit 12/100" read as a verdict on the person).
   const matchWord = (n: number | null) => n == null ? "match not scored" : n >= 75 ? "strong match" : n >= 55 ? "good match" : "partial match";
   const fitWord = (h: SearchHit) => h.fit ? (h.fit.excluded ? `not eligible on your confirmed facts (${h.fit.reasons[0] ?? "a hard requirement"})` : matchWord(h.fit.score)) : null;
+  // A level was asked for and this posting's own text states none: it stays, and the line says so.
+  const noLevel = (h: SearchHit) => !!ask.limits?.bands && statedBand(h.title, byId.get(h.job_id)?.description ?? "") === "unstated";
   const lineOf = (h: SearchHit, i: number, tail: string | null) =>
-    `${i + 1}. ${h.title} at ${h.company || "an employer the posting does not name"}${where(h) ? ` — ${where(h)}` : ""}${h.url ? ` (${h.url})` : ""}${tail ? `. ${tail}` : ""}${/[.!?]$/.test(tail ?? "") ? "" : "."}`;
+    `${i + 1}. ${h.title} at ${h.company || "an employer the posting does not name"}${where(h) ? ` — ${where(h)}` : ""}${h.url ? ` (${h.url})` : ""}${noLevel(h) ? " [level not stated]" : ""}${tail ? `. ${tail}` : ""}${/[.!?]$/.test(tail ?? "") ? "" : "."}`;
   const top = hits.slice(0, N);
   // 3. The judge, when on and a model is given; else the fit order.
   let rows: { h: SearchHit; tail: string | null }[] = [], account: Accounting | null = null, modelCalled = false, header: string;
@@ -423,11 +496,35 @@ export async function searchJudgeTurn(o: {
   }
   const listed = rows.slice(0, show);
   const more = rows.length - listed.length;
-  const lines = [freshness, header];
+  const lines = [freshness];
+  if (ask.limits && hasLimits(ask.limits)) {
+    const out = droppedLine(held.dropped);
+    lines.push(`Held to what you asked (${limitsLine(ask.limits)}).${out ? ` Left out: ${out}.` : ""}${held.noPay ? ` ${held.noPay} of those list no pay, so the floor could not be checked on them.` : ""}`);
+  }
+  lines.push(header);
   if (listed.length) lines.push(...listed.map((r, i) => lineOf(r.h, i, r.tail)));
   else lines.push(`None of the ${top.length} judged came out ${[...KEPT_VERDICTS].join(" or ")}, so none is listed.`);
   if (more > 0) lines.push(`${more} more ${more === 1 ? "is" : "are"} not shown.`);
   lines.push(listed.length ? `Say "apply to these" to queue the ${listed.length === 1 ? "one" : listed.length} listed, or name one to tailor your resume for.` : "Widen the role or the place and I'll search again.");
   const shortlist = listed.map((r) => ({ id: r.h.job_id, title: r.h.title, company: r.h.company || null, location: where(r.h) || null, url: r.h.url || null }));
-  return { reply: lines.join("\n"), status: account ? "judged" : "ranked", source, shortlist, accounting: account, modelCalled };
+  const picked = rows.slice(0, 25).map((r) => ({ hit: r.h, posting: byId.get(r.h.job_id) ?? null }));
+  return { reply: lines.join("\n"), status: account ? "judged" : "ranked", source, shortlist, accounting: account, modelCalled, picked };
+}
+
+// The ask for this turn: the router's search with the message's own parameters added; a search the router ran but named no
+// role for ("SWE internship Chicago summer 2027"); or a search the router did not run (searchAskFromMessage). `append`: the
+// router's own reply stays and the search follows it.
+export function askFor(message: string, routerOut: { intent?: string; resultStatus?: string } | null, discovery: any): { ask: SearchAsk; append: boolean } | null {
+  // Spec 2.3: a correction ("remote only", "only individual-contributor roles") replaces the constraint of the last search;
+  // the router's own reading of it (a search for the role "remote only") is not used.
+  const fixed = correctedAsk(message, discovery);
+  if (fixed) return { ask: fixed.ask, append: false };
+  const router = askFromRouter(message, routerOut, discovery);
+  if (router) return { ask: enrich(message, router) ?? router, append: false };
+  const p = discovery?.lastParams;
+  if (routerOut && SEARCH_INTENTS.has(String(routerOut.intent ?? "")) && p && p.ask === String(message ?? "").slice(0, 200)) {
+    const ask = enrich(message, { role: "", place: typeof p.whereText === "string" ? p.whereText : null, remote: !!p.remote });
+    return ask ? { ask, append: false } : null;
+  }
+  return searchAskFromMessage(message, routerOut);
 }

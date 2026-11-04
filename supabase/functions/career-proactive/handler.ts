@@ -8,10 +8,9 @@
 // question or ask pushed, no mail read, no interview draft or digest queued. Outreach's claim reads the same state in
 // the database, and delivery checks it again before a queued text goes out (channel.ts deliverDue).
 import { equalSecret } from "../_shared/message_service.ts";
-import { type QuestionRow, runAlerts, runAsks, runCards, runDigest, runInterviewDrafts, runMail, runPrepareAhead, runQuestions, runReceipts, type ReadyRow, type RunStats } from "../_shared/career_proactive_run.ts";
+import { type QuestionRow, type ReceiptDue, runAlerts, runAsks, runCards, runDigest, runInterviewDrafts, runMail, runPrepareAhead, runQuestions, runReceipts, type ReadyRow, type RunStats } from "../_shared/career_proactive_run.ts";
 import type { AheadCandidate, AheadOutcome, AheadStore } from "../_shared/career_prepare_ahead.ts";
 import type { AskStore, ConfirmStore } from "../_shared/career_apply_confirm.ts";
-import type { ReceiptRow } from "../_shared/career_apply_receipts.ts";
 import type { AlertStore, Outbox } from "../_shared/career_alert_store.ts";
 import type { MailStore } from "../_shared/career_mail_store.ts";
 import type { ReadResult } from "../_shared/career_mail_gmail.ts";
@@ -27,7 +26,7 @@ export interface ProactiveDeps {
   recentPostings: (sinceIso: string) => Promise<any[]>;
   postingsById: (ids: string[]) => Promise<any[]>;
   // Applications that finished since a time (career_apply_jobs), for their receipts. Absent: no receipts this run.
-  finishedApplications?: (sinceIso: string) => Promise<ReceiptRow[]>;
+  finishedApplications?: (sinceIso: string) => Promise<ReceiptDue[]>;
   // Applications prepared on the person's computer, not yet shown, and the push of one card (WO-022 step 3). Absent: no
   // cards this run.
   readyApplications?: () => Promise<ReadyRow[]>;
@@ -105,7 +104,14 @@ export async function handleProactive(req: Request, d: ProactiveDeps): Promise<R
       Object.assign(stats, { ahead_people: s.people, ahead_picked: s.picked, ahead_ready: s.ready, ahead_cards: s.cards });
     });
   }
-  if (d.finishedApplications) await step("receipts", () => runReceipts({ outbox: store, now: started, finished: d.finishedApplications!, events: d.events ? d.events() : null }), (n) => { stats.receipts = n; });
+  // PROACTIVE SCENARIOS (2026-10-29): receipts too wait for a quiet person. They were queued for a paused or opted-out
+  // person and then dropped at delivery (skipped_opt_out, once per key ever), so the person who resumed the next morning
+  // never heard how their application ended. Now nothing is queued while they are quiet, and a resume inside the receipt
+  // window (26 hours) says it then.
+  if (d.finishedApplications) {
+    const finished = d.finishedApplications;
+    await step("receipts", () => runReceipts({ outbox: store, now: started, finished: async (since) => awake(await finished(since), (r) => r.user_id), events: d.events ? d.events() : null }), (n) => { stats.receipts = n; });
+  }
   if (d.readyApplications && d.pushCard) {
     const ready = d.readyApplications;
     await step("cards", () => runCards({ now: started, ready: async () => awake(await ready(), (r) => r.user_id), push: d.pushCard! }), (n) => { stats.cards = n; });

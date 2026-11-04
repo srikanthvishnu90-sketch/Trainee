@@ -16,7 +16,7 @@
 //                          not on record is held, never passed: nothing is inferred about where they are or what they
 //                          are authorized for. A restriction phrased as authorization is screened as a place (the
 //                          person's stated location), never as a claim about their authorization.
-import { postingPlaces, STATE_NAMES } from "./posting_place.ts";
+import { postingPlaces, STATE_NAMES, unsettledRemoteCode } from "./posting_place.ts";
 
 // key -> the words a text uses for it (whole words, case-blind). Kept identical in 152 (REGION_TABLE there).
 export const REGION_TABLE: [string, string[]][] = [
@@ -83,7 +83,8 @@ export function postingScope(p: RegionPosting): string[] {
   if (isRemotePosting(p)) {
     for (const part of postingPlaces(loc)) if (part.remote && part.country === "us") out.add("us");
     // "Remote - Canada", "Spain (Remote)", "Remote (US, Canada)": the names beside the word remote.
-    for (const seg of loc.split(/[;|•·\n]/)) if (/\bremote\b/i.test(seg)) for (const k of regionsOf(seg.replace(/\bremote\b/gi, " "))) out.add(k);
+    // Round 3 (2026-11-03): only a code that is two places at once beside it ("Remote - IN": Indiana or India) names none.
+    for (const seg of loc.split(/[;|•·\n]/)) if (/\bremote\b/i.test(seg) && !unsettledRemoteCode(seg.replace(/\bremote\b/gi, " "))) for (const k of regionsOf(seg.replace(/\bremote\b/gi, " "))) out.add(k);
   }
   for (const k of restrictionsOf(p.description ?? p.jd_text ?? "")) out.add(k);
   return [...out];

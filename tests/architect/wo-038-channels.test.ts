@@ -58,6 +58,7 @@ function harness(o: { env?: Record<string, string>; tgFail?: (body: any) => Resp
     throw new Error(`unexpected fetch ${url}`);
   }) as unknown as typeof fetch;
   const vars: Record<string, string> = {
+    CAREER_TEXTING_NATIVE: "off", // the release config turns the voice on by itself (D-036); these shapes are the plain ones
     TRAINEE_INBOUND_SECRET: SECRET, LOOPMESSAGE_API_KEY: "fake-loop-key", TRAINEE_SIGNUP: "open",
     TELEGRAM_BOT_TOKEN: TG_TOKEN, TELEGRAM_WEBHOOK_SECRET: TG_SECRET, TELEGRAM_BOT_USERNAME: "TraineeTestBot",
     WHATSAPP_TOKEN: WA_TOKEN, WHATSAPP_PHONE_NUMBER_ID: PNID, WHATSAPP_APP_SECRET: WA_APP, WHATSAPP_VERIFY_TOKEN: WA_VERIFY, WHATSAPP_TEMPLATE_UPDATES: "trainee_updates",
@@ -528,9 +529,10 @@ Deno.test("WO-038/L1 Connect Telegram: a single-use 10-minute link, sent on the 
   await h.text("telegram", "7001", `/start ${link[1]}`);
   eq(h.read("7001", t), [TELEGRAM_LINK_CONFIRM_REPLY]);
   eq(h.userOf("tg:7001"), null, "not linked before the YES");
-  eq(h.read(ADDR.imessage, t), [telegramLinkAskText(null)]);
+  const asked = h.read(ADDR.imessage, t);
+  eq(asked.map((x) => x.replace(/reply LINK [0-9]{4} /, "reply LINK {code} ")), [telegramLinkAskText(null, "tg:7001")]);
   const y = h.mark();
-  await h.text("imessage", ADDR.imessage, "yes");
+  await h.text("imessage", ADDR.imessage, `LINK ${/reply LINK ([0-9]{4}) /.exec(asked[0] ?? "")?.[1] ?? "none"}`);
   eq(h.read("7001", y), [LINKED_HERE_REPLY]);
   eq(h.userOf("tg:7001"), u, "the chat joined the account the link was made for");
   await h.text("telegram", "7001", "find me data analyst jobs");

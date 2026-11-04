@@ -125,6 +125,10 @@ async function attempt(browser, p, opts, timing) {
       throw e;
     }
     if (fr.invalid.length) { const e = new NeedsUser("field_not_filled", fr.invalid[0].name); e.needs = fr.invalid.map((n) => ({ label: n.name, reason: "form_rejects_value" })); throw e; }
+    // An optional question whose approved answer could not be set and read back (readback_mismatch, fill_error) is not a
+    // question to skip: the field may hold something the person never approved. Handed back like a required one; nothing is sent
+    // (independent review of #340: Submit used to go with such a field).
+    if (fr.failed && fr.failed.length) { const e = new NeedsUser("field_not_filled", fr.failed[0].label); e.needs = fr.failed.map((n) => ({ label: n.label, reason: n.reason })); throw e; }
     const filled = fr.filled.map((f) => ({ field: f.label, source: f.source }));
     timing.fill = Date.now() - t1;
     // Last checks before the click, on what is actually on the page now: still an allowed host, no bot check that appeared

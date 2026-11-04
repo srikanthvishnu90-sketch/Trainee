@@ -16,16 +16,18 @@
 # 4. Waits for that run to finish and prints its conclusion. The score is judged by deploy-standard.ts S3, not here.
 #
 # Spend: the run is capped by brain-eval.yml's EVAL_BUDGET_USD (the owner's ceiling); the router brain makes no model call,
-# only the two judges do (about $0.02 a pass, $0.10 for five; run 41226453344). Five passes: brain-eval.yml refuses any
+# only the two judges do (about $0.02 a pass, $0.10 for five; run 41226453344). The staged brain (D-035) also calls the
+# brain's model on question and advice turns; the same cap stops it. Five passes: brain-eval.yml refuses any
 # other count (the owner's rule), and S3 compares means, which one pass cannot resolve (16-18 points pass to pass).
-# Env: GITHUB_REPOSITORY, GH_TOKEN (contents: write for the push, actions: write for the dispatch); MEASURE_BRAINS
-# (default: DEPLOY_STANDARD_BRAIN or router); MEASURE_WAIT_MIN (default 80). Never prints the token.
+# Env: GITHUB_REPOSITORY, GH_TOKEN (contents: write for the push, actions: write for the dispatch); MEASURE_BRAINS (the
+# brain the measured SHA serves, as deploy-standard.ts --missing-measurement prints it: brain=<router|staged>; default
+# router); MEASURE_WAIT_MIN (default 80). Never prints the token.
 # Exit 0: the run finished (any conclusion; S3 reads the score log). 1: it could not be started or did not finish.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 export GIT_AUTHOR_NAME="deploy-standard[ci]" GIT_AUTHOR_EMAIL="deploy-standard@users.noreply.github.com"
 export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
-BRAINS="${MEASURE_BRAINS:-${DEPLOY_STANDARD_BRAIN:-router}}"
+BRAINS="${MEASURE_BRAINS:-router}"
 
 # The measurement commit for $1 on tip $2, printed (written to the object store, pushed nowhere). Fails when its reply code
 # is not $1's file for file.

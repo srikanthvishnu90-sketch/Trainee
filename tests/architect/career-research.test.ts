@@ -3,7 +3,7 @@
 import assertNode from "node:assert/strict";
 import { FIELDS, GK_TERMS, OVERLAYS } from "../../supabase/functions/_shared/agent/research/fields.ts";
 import { acceptFacts, specifics, unsupported } from "../../supabase/functions/_shared/agent/research/guard.ts";
-import { groundFor, cacheKey, memoryGroundCache, openAiGroundSearch, type GroundSearch } from "../../supabase/functions/_shared/agent/research/ground.ts";
+import { groundFor, cacheKey, memoryGroundCache, gatewayGroundSearch, type GroundSearch } from "../../supabase/functions/_shared/agent/research/ground.ts";
 import { researchCareerQuestion } from "../../supabase/functions/_shared/agent/research/index.ts";
 import { lintChat, CHAT_MAX_WORDS } from "../../supabase/functions/_shared/agent/research/chat.ts";
 import { buildContextPack } from "../../supabase/functions/_shared/agent/knowledge/context_pack.ts";
@@ -144,19 +144,16 @@ Deno.test("no field: one question, no search; a state-licensed field with no sta
   eq(e.ask, null, "the person said Ohio: nothing to ask");
 });
 
-Deno.test("OpenAI search path: reserved in the day's budget at the worst case first; parsed facts carry the returned URLs; a spent budget sends nothing", async () => {
-  const body = { output: [{ type: "web_search_call", action: { sources: [{ url: "https://www.bls.gov/ooh/x.htm" }] } }, { type: "message", content: [{ text: JSON.stringify({ facts: [{ kind: "pay", text: "The median wage was $61,590.", quote: "The median annual wage was $61,590.", url: "https://www.bls.gov/ooh/x.htm" }, { kind: "pay", text: "x", quote: "y", url: "https://elsewhere.example/" }] }), annotations: [] }] }], usage: { input_tokens: 9000, output_tokens: 300 } };
-  let sent = 0, reqBody: any = null;
-  const fetchOk = (async (_u: string, init: any) => { sent++; reqBody = JSON.parse(init.body); return new Response(JSON.stringify(body), { status: 200 }); }) as unknown as typeof fetch;
-  const gate = memoryBudgetGate(20_000_000);
-  const out = await openAiGroundSearch({ apiKey: "k", model: DEFAULT_SEARCH_MODEL, fetch: fetchOk, budget: gate })({ q: "electricians pay", kinds: ["pay"] }, { field: "trades", stage: "x", geo: "us" });
-  ok(out.status === "ok" && out.facts.length === 2 && out.cost_usd! > 0.025);
-  eq(reqBody.max_tool_calls, 1); ok(reqBody.tools[0].filters.blocked_domains.length >= 3, "LinkedIn and Indeed stay blocked");
-  const snap = gate.snapshot(); ok(snap.spent > 0 && snap.reserved === 0, "settled");
-  if (out.status === "ok") eq(acceptFacts(out.facts, out.urls).kept.length, 1, "the fact whose URL the search did not return is dropped");
-  const tiny = memoryBudgetGate(1000);
-  const blocked = await openAiGroundSearch({ apiKey: "k", model: DEFAULT_SEARCH_MODEL, fetch: fetchOk, budget: tiny })({ q: "x", kinds: ["pay"] }, { field: "trades", stage: "x", geo: "us" });
-  eq([blocked.status, sent], ["blocked", 1], "the budget refused before any request");
+Deno.test("dark search: the gateway searcher says it is not available and sends nothing; groundFor reports the search as not completed", async () => {
+  const origFetch = globalThis.fetch; let sent = 0;
+  globalThis.fetch = (() => { sent++; return Promise.reject(new Error("no network in this test")); }) as typeof fetch;
+  try {
+    const out = await gatewayGroundSearch()({ q: "electricians pay", kinds: ["pay"] }, { field: "trades", stage: "x", geo: "us" });
+    ok(out.status === "error" && /not available/.test(out.detail), "dark: not available");
+    const g = await groundFor({ u: { field: { id: "trades", label: "trades", queries: [{ q: "q {field}", kinds: ["pay"] }] }, stage: "x", stageLabel: "x", geo: "the US", geoKey: "us", year: null } as any, search: gatewayGroundSearch(), now: NOW });
+    eq([g.facts.length, g.cost_usd], [0, 0]); ok(g.notes.some((n) => /not completed/.test(n)));
+    eq(sent, 0, "nothing was sent anywhere");
+  } finally { globalThis.fetch = origFetch; }
 });
 
 Deno.test("tool wiring: research_career_question exists only when research is configured", () => {

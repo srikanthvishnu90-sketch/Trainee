@@ -5,8 +5,8 @@
 #   GAUNTLET_PASSWORD='...'                 the password of gauntlet-test@upmore.test (mints a fresh 1-hour JWT here;
 #                                           the JWT goes into this process's environment only, never a file)
 #   ALPACA_OAUTH_CLIENT_ID / ALPACA_OAUTH_CLIENT_SECRET   optional: set as function secrets for Brokerage connect
-#   OPENAI_API_KEY='...'                    the model key, set as a function secret (OpenAI gpt-5-nano; the app runs on
-#                                           OpenAI only and never falls back to Anthropic). Skip it only if already set. Type it without shell history: read -rs OPENAI_API_KEY; export OPENAI_API_KEY
+#   ANTHROPIC_API_KEY='...'                 the model key, set as a function secret (Claude only, owner 2026-11-02: no OpenAI
+#                                           key is asked for or set). Skip it only if already set. Type it without shell history: read -rs ANTHROPIC_API_KEY; export ANTHROPIC_API_KEY
 #   HEALTH_CHECK_TOKEN='...'                optional: the model-health token; generated (and kept in ~/.upmore/health-token,
 #                                           0600) when not given and not already saved
 #   bash scripts/launch/go-live.sh [--no-wait]
@@ -14,7 +14,7 @@
 # Needs: the supabase CLI logged in (`supabase login`), psql, node 18+, curl, jq. Stops at the first failure.
 #   0. preflight: clean tree, the exact commit, the local checks green (node tests, bundle current)
 #   1. migrations: only those not yet in the live ledger (--pending), ONE transaction; a re-run applies nothing
-#   2. secrets: the OpenAI key, the health token and the Alpaca OAuth pair, each only if given (values via a 0600 temp
+#   2. secrets: the Anthropic key, the health token and the Alpaca OAuth pair, each only if given (values via a 0600 temp
 #      file, never echoed)
 #   3. deploy: agent-chat, broker-oauth-start, broker-oauth-callback, model-health, agent-proactive, exec-vault-store,
 #      agent-exec (no password storage, decision 1) and manual-connect (the live sign-in window, JWT on); broker-oauth-callback, model-health and agent-proactive are
@@ -58,7 +58,7 @@ NEW_TOKEN=""
 if [[ -z "${HEALTH_CHECK_TOKEN:-}" ]]; then HEALTH_CHECK_TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"; NEW_TOKEN=1; fi
 NAMES=(); LINES=()
 add() { NAMES+=("$1"); LINES+=("$1=$2"); }
-if [[ -n "${OPENAI_API_KEY:-}" ]]; then add OPENAI_API_KEY "$OPENAI_API_KEY"; add MODEL_PROVIDER openai; else echo "skipped: no OPENAI_API_KEY given (an already-set secret stays as it is)"; fi
+if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then add ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"; else echo "skipped: no ANTHROPIC_API_KEY given (an already-set secret stays as it is)"; fi
 if [[ -n "${ALPACA_OAUTH_CLIENT_ID:-}" && -n "${ALPACA_OAUTH_CLIENT_SECRET:-}" ]]; then add ALPACA_OAUTH_CLIENT_ID "$ALPACA_OAUTH_CLIENT_ID"; add ALPACA_OAUTH_CLIENT_SECRET "$ALPACA_OAUTH_CLIENT_SECRET"
 else echo "skipped: no Alpaca OAuth pair given; Connect will say it isn't switched on yet (honest, 503)"; fi
 add HEALTH_CHECK_TOKEN "$HEALTH_CHECK_TOKEN"

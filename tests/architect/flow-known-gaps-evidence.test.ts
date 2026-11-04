@@ -25,7 +25,7 @@ const CI = Deno.env.get("CI") === "true";
 const PERSON = (n: number) => `7b0f8f8e-6a43-4a49-9d2c-00000000e8${String(n).padStart(2, "0")}`;
 const STATED = "I am a junior majoring in computer science";
 const STATED_VIA = "router: stated by the person in chat";
-const ENV_OFF = ["CAREER_BRAIN", "CAREER_KNOWLEDGE", "CAREER_BRAIN_ROUTER_INTENTS", "CAREER_ACCOUNT_MEMORY", "OPENAI_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL",
+const ENV_OFF = ["CAREER_BRAIN", "CAREER_KNOWLEDGE", "CAREER_BRAIN_ROUTER_INTENTS", "CAREER_ACCOUNT_MEMORY", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL",
   "CAREER_REPLY_WRITER", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "TRAINEE_FILE_BASE_URL", "CAREER_JUDGE", "CAREER_APPLY_LINK"];
 
 Deno.test({ name: "known gaps (1): a fact stated in chat writes its evidence with the save or not at all", sanitizeResources: false, sanitizeOps: false, async fn(t) {

@@ -151,13 +151,23 @@ const REPLIES: { cat: string; text: (f: string, firm: string, domain: string) =>
   { cat: "near-miss", text: () => "Thanks so much for the note! Interested to hear more about your background." },
 ];
 // Return dates: [what the message says, the date it means] in forms the product reads; [text, null] for forms it does not.
-function returnPhrase(r: R, fixed?: number): [string, string | null] {
-  const day = fixed ?? 2 + Math.floor(r() * 26); // Nov 2..27, 2026 (always after NOW)
-  const iso = new Date(Date.UTC(2026, 10, day)).toISOString();
-  const M = pick(r, ["November", "Nov", "Nov."]);
+// The dates are counted from `base` (UTC midnight of "the 1st"), never from the real clock inside the generator: the default
+// base is Nov 1 2026 (so day 2..27 is Nov 2..27, always after NOW, which Part 1 pins), and the end-to-end part passes the day
+// its own clock starts on, so a return date is always in the future of the clock that sends (2026-11-03: a fixed "Nov 2"
+// was already past, the product rightly sent that follow-up at once, and the test said it should wait).
+export const BASE = Date.UTC(2026, 10, 1);
+const DAY_MS = 86_400_000;
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const MONTH_SV = ["januari", "februari", "mars", "april", "maj", "juni", "juli", "augusti", "september", "oktober", "november", "december"];
+function returnPhrase(r: R, base: number, fixed?: number): [string, string | null] {
+  const n = fixed ?? 2 + Math.floor(r() * 26); // the day of the month counted from base: 2..27 (base is the 1st)
+  const at = new Date(base + (n - 1) * DAY_MS), day = at.getUTCDate(), mon = at.getUTCMonth(), year = at.getUTCFullYear();
+  const iso = at.toISOString();
+  const full = MONTH_NAMES[mon], short = full.slice(0, 3);
+  const M = pick(r, [full, short, `${short}.`]);
   return pick(r, [
-    [`until ${M} ${day}`, iso], [`until ${M} ${day}th`, iso], [`and will be back on Monday, November ${day}`, iso], [`and will return on ${M} ${day}`, iso],
-    [`until 11/${day}`, iso], [`through 11/${day}/2026`, iso], [`until 2026-11-${String(day).padStart(2, "0")}`, iso], [`until ${day} November`, iso], [`and back on ${day} Nov`, iso],
+    [`until ${M} ${day}`, iso], [`until ${M} ${day}th`, iso], [`and will be back on Monday, ${full} ${day}`, iso], [`and will return on ${M} ${day}`, iso],
+    [`until ${mon + 1}/${day}`, iso], [`through ${mon + 1}/${day}/${year}`, iso], [`until ${year}-${String(mon + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`, iso], [`until ${day} ${full}`, iso], [`and back on ${day} ${short}`, iso],
     ["until next week", null], ["for a few days", null], ["", null],
   ]);
 }
@@ -168,9 +178,8 @@ const OOO_BODIES_EN = [
   (p: string) => `I am on vacation ${p} and will have no access to email.`.replace("vacation  and", "vacation and"),
   (p: string) => `I'm out of the office ${p}. Your email will not be forwarded.`.replace("office .", "office."),
 ];
-// returnAt: Swedish "till" is "until", and the product reads "till den 10 november" as November 10 (correctly).
-const NOV10 = new Date(Date.UTC(2026, 10, 10)).toISOString();
-const OOO_OTHER: { lang: string; subject: (s: string) => string; body: string; returnAt?: string }[] = [
+// returnAt: Swedish "till" is "until", and the product reads "till den 10 november" as November 10 (correctly); the 10th counted from base.
+const OOO_OTHER = (base: number): { lang: string; subject: (s: string) => string; body: string; returnAt?: string }[] => [
   { lang: "de", subject: (s) => `Abwesenheitsnotiz: ${s}`, body: "Vielen Dank für Ihre Nachricht. Ich bin bis zum 10.11.2026 nicht im Büro und habe keinen Zugriff auf meine E-Mails." },
   { lang: "de", subject: (s) => `Automatische Antwort: ${s}`, body: "Ich bin derzeit nicht im Büro. Ihre E-Mail wird nicht weitergeleitet." },
   { lang: "fr", subject: (s) => `Réponse automatique : ${s}`, body: "Je suis absent du bureau jusqu'au 10 novembre. Je répondrai à votre message dès mon retour." },
@@ -180,7 +189,7 @@ const OOO_OTHER: { lang: string; subject: (s: string) => string; body: string; r
   { lang: "it", subject: (s) => `Risposta automatica: ${s}`, body: "Sono fuori ufficio fino al 10 novembre." },
   { lang: "nl", subject: (s) => `Automatisch antwoord: ${s}`, body: "Ik ben afwezig tot 10 november." },
   { lang: "pt", subject: (s) => `Resposta automática: ${s}`, body: "Estou fora do escritório até 10 de novembro." },
-  { lang: "sv", subject: (s) => `Autosvar: ${s}`, body: "Jag är på semester till den 10 november.", returnAt: NOV10 },
+  { lang: "sv", subject: (s) => `Autosvar: ${s}`, body: `Jag är på semester till den ${new Date(base + 9 * DAY_MS).getUTCDate()} ${MONTH_SV[new Date(base + 9 * DAY_MS).getUTCMonth()]}.`, returnAt: new Date(base + 9 * DAY_MS).getUTCMonth() === 4 ? undefined : new Date(base + 9 * DAY_MS).toISOString() }, // "maj" is not a month the product reads
 ];
 const OOO_SUBJECTS_EN = [(s: string) => `Automatic reply: ${s}`, (s: string) => `Out of Office: ${s}`, () => "Out of office", (s: string) => `OOO: ${s}`, (s: string) => `AutoReply: ${s}`,
   (s: string) => `Auto-Reply: ${s}`, (s: string) => `[Auto-Reply] ${s}`, (s: string) => `Autoreply: ${s}`, () => "Out of the office", (s: string) => `Auto Response: ${s}`,
@@ -242,7 +251,9 @@ const DELAYS: Mta[] = [
   { name: "generic-dsn-delay", from: (d) => `Mail Delivery System <mailer-daemon@${d}>`, subject: () => "Delivery Status Notification", body: (to) => `THIS IS A WARNING MESSAGE ONLY. Delivery to ${to} has been delayed. Delivery will continue to be attempted.`, headers: () => REPORT },
 ];
 
-export function generate(o: { seed?: number; count?: number } = {}): Scenario[] {
+export function generate(o: { seed?: number; count?: number; base?: number } = {}): Scenario[] {
+  const base = o.base ?? BASE;
+  const oooOther = OOO_OTHER(base);
   const r = rng(o.seed ?? 20261029);
   const count = o.count ?? 10_000;
   const out: Scenario[] = [];
@@ -268,16 +279,16 @@ export function generate(o: { seed?: number; count?: number } = {}): Scenario[] 
     } else if (cls === "ooo") {
       const other = chance(r, 0.3);
       if (other) {
-        const m = pick(r, OOO_OTHER);
+        const m = pick(r, oooOther);
         s.category = `ooo/${m.lang}`;
         s.subject = m.subject(ourSubject);
         s.text = m.body;
         s.returnAt = m.returnAt ?? null;
         // Bilingual auto-replies carry the English too, often with a date the product reads (the same date: November 10).
-        if (chance(r, 0.4)) { const [p, at] = returnPhrase(r, 10); s.text += `\n\n${OOO_BODIES_EN[0](p)}`; s.returnAt = at ?? s.returnAt; s.category += "+en"; }
+        if (chance(r, 0.4)) { const [p, at] = returnPhrase(r, base, 10); s.text += `\n\n${OOO_BODIES_EN[0](p)}`; s.returnAt = at ?? s.returnAt; s.category += "+en"; }
       } else {
         const subj = pick(r, OOO_SUBJECTS_EN);
-        const [p, at] = returnPhrase(r);
+        const [p, at] = returnPhrase(r, base);
         s.subject = subj(ourSubject);
         s.text = pick(r, OOO_BODIES_EN)(p);
         s.returnAt = at;

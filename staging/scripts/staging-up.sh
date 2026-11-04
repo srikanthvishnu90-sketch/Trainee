@@ -31,13 +31,13 @@ SB="${SB_PY:-$HOME/workspace/skills/supabase/bin/sb.py}"
 # Required secret NAMES on the staging project (derived from the deployed code's
 # env reads — staging/README.md §Secrets). Values are the owner's; this package
 # never invents, sets, or prints one.
-#   OPENAI_API_KEY            model gateway default provider (model_gateway.ts)
+#   ANTHROPIC_API_KEY         model gateway key (model_gateway.ts; Claude only)
 #   GOOGLE_OAUTH_CLIENT_ID    gmail-oauth career grant
 #   GOOGLE_OAUTH_CLIENT_SECRET gmail-oauth career grant
 #   OAUTH_STATE_SECRET        gmail-oauth HMAC state signing
 # Platform-provided on every Supabase project (never set by hand):
 #   SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
-REQUIRED_SECRETS=(OPENAI_API_KEY GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET OAUTH_STATE_SECRET)
+REQUIRED_SECRETS=(ANTHROPIC_API_KEY GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET OAUTH_STATE_SECRET)
 
 # --- production / safety guard (must stay in this file; verified by grep) ---
 if [ -z "$REF" ]; then

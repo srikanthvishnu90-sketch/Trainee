@@ -10,7 +10,7 @@ import type { FileService } from "../_shared/file_service.ts";
 import { careerSystemPrompt, shapeRulesFor } from "../_shared/agent/prompt.ts";
 import { alertLine, type MemoryStore, type Pipeline, personBlock, type Standing } from "../_shared/agent/memory.ts";
 import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/index.ts";
-import { enforceResearchReply } from "../_shared/agent/research/reply.ts";
+import { enforceResearchReply, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
 import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.ts";
 import { styleBlock } from "../_shared/agent/style.ts";
 import type { AlertStore } from "../_shared/career_alert_store.ts";
@@ -152,6 +152,8 @@ export async function agentTurn(o: {
     } });
     result = { ...result, reply: fixed.reply };
   }
+  // Not an open career question: any link the model wrote that the turn never saw is removed (links not on the turn's allow-list).
+  if (!trace.r && result.reply && result.stopped === "final") result = { ...result, reply: stripUnseenLinks(result.reply, [...(result.linksSeen ?? []), ...(result.fileLinks ?? [])]) };
   return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;
 }
 

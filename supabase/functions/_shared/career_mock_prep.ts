@@ -5,7 +5,7 @@
 //     skill words, each found in the posting's own text) pick the questions from the role's question bank, technical and
 //     behavioral in a mix that fits the role's sector.
 // (b) Each answer is graded on 127's rubric (structure, evidence, specificity) and against the question's answer key
-//     (the bank item's own key points) and the posting's requirement. With CAREER_MOCK_JUDGE=on an OpenAI model judges the
+//     (the bank item's own key points) and the posting's requirement. With CAREER_MOCK_JUDGE=on a Claude model judges the
 //     same answer against the same key (metered, rubric-anchored, only key points it was given, never a fact about the
 //     person); without it, or when it fails, the code check stands.
 // (c) Every finished mock writes one career_events row (kind mock_done) with each answer's skill and whether it was weak.
@@ -17,7 +17,8 @@
 import { CareerPrep } from "./router_core.career.js";
 import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 release flags
 import type { Debrief, MockAnswer, MockQuestion, MockState } from "./career_mock.ts";
-import { callModel, modelConfig, newMeter, openaiCareerModel } from "./model_gateway.ts";
+import { callModel, newMeter } from "./model_gateway.ts";
+import { readerModelConfig } from "./career_reader_model.ts";
 
 export const DRILL_MAX = 4;
 // 127's rubric is strict (a full situation-action-result story with a number scores about 8 of 15): a story answer under 6
@@ -507,7 +508,7 @@ export function supabaseMockPrep(admin: any, env: { get(k: string): string | und
 }
 
 // ---------- The model judge (CAREER_MOCK_JUDGE=on) ----------
-// OpenAI only (the gateway is pinned to it here whatever MODEL_PROVIDER says), CAREER_MODEL (default gpt-5-mini). Each
+// Claude only (Anthropic key, whatever MODEL_PROVIDER says), CAREER_MODEL when it names a Claude model (default claude-haiku-5-5). Each
 // call is metered and one agent_turn_costs row is written per judged answer. Any failure returns null and the code check
 // stands.
 export const JUDGE_SYSTEM = [
@@ -521,7 +522,7 @@ export const JUDGE_SYSTEM = [
 export function modelJudge(admin: any, env: { get(k: string): string | undefined }, o?: { call?: (payload: any, meter: any) => Promise<any>; callModel?: ModelCall }): Judge {
   return async ({ question, requirement, keys, answer, userId, threadId }) => {
     const meter = newMeter();
-    const cfg = { ...modelConfig({ get: (k: string) => (k === "MODEL_PROVIDER" ? "openai" : env.get(k)) }, "chat"), model: openaiCareerModel(env) };
+    const cfg = readerModelConfig(env);
     const payload = {
       system: JUDGE_SYSTEM,
       messages: [{ role: "user", content: JSON.stringify({ question, requirement, key_points: keys, answer: answer.slice(0, 2000) }) }],

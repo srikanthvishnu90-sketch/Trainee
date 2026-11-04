@@ -13,6 +13,7 @@
 // read. Taps at once are each judged against the list as it is when they run: an Apply that queued a row first changes the set
 // (the Apply to all then approves nothing and says so); an Apply to all that ran first leaves that Apply "Already in your
 // applications". Either way each posting is approved once.
+import { applyAllYesEnabled } from "../_shared/apply_all_yes_flag.ts";
 import { FILE_TTL_MS, verifyFileToken, type FileClaims } from "../_shared/file_link.ts";
 import { checkSession, CLEAR_LOGIN, CLEAR_SESSION, codeOf, LOGIN_TTL_MS, loginCookie, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, PAGE_TOKEN, pageTokenOf, sameToken, SESSION_ID, sessionCookie, sha256, startSession, type PhoneAuth, type SessionCheck, type SessionStore } from "../_shared/file_session.ts";
 import { verifyInitData } from "../_shared/telegram_webapp.ts";
@@ -20,7 +21,9 @@ import { BOOT_SCRIPT, cut, FEED_SCRIPT, fullOf, hostOf, renderBootstrap, renderF
 import { dayOf, BRAND, esc, layout, postedLine, webUrl } from "../_shared/file_page.ts";
 import { actOn, bodyHtml, COPY_SCRIPT, KIND_CSS, KIND_LABEL, textOf, type Effects, type FileRecord } from "../_shared/file_kinds.ts";
 import type { FileService } from "../_shared/file_service.ts";
+import { fetchLogo, memoryLogoCache, validDomain, type LogoCache } from "../_shared/logo_cache.ts";
 import { renderResults, renderThings, type PayFilter, type ResultRow, type ThingQuestion } from "../_shared/results_page.ts";
+import { parseStateFilter } from "../_shared/results_batch.ts";
 import { conversionNote, floorText, type Pay, payGroup, payText, startsBelow } from "../_shared/role_pay.ts";
 import { checkAnswer, type OpenQuestion, type QuestionStore } from "../_shared/career_apply_questions.ts";
 import { type PendingRow, pendingLine } from "../_shared/career_hosted_prepare.ts";
@@ -28,10 +31,10 @@ import { NO_RESUME_NEXT, NO_RESUME_REASON } from "../_shared/career_apply_from_c
 import { factType, NEVER_BY_TEXT } from "../_shared/question_map.ts";
 import { decodeRowQuestionType } from "../_shared/row_answer.ts";
 import { redactIdentity } from "../_shared/identity_redact.ts";
-import { freshnessStamp } from "../_shared/results_stamp.ts";
 import { coverage, countsOf, NOTHING_SENT, NOT_LISTED, renderExport, reqIdOf, roleIds, specOf } from "../_shared/results_spec.ts";
 import type { ListMeta } from "../_shared/telegram_jobs.ts";
-import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, logoUrl, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
+import { fileShellHtml, firstNameOf, freshnessStamp, madeForLine, stateHtml } from "../_shared/file_design.ts";
+import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
 
 export type { AppRow } from "../_shared/file_page.ts";
 export interface FileStore extends JobStore {
@@ -50,6 +53,8 @@ export interface FileDeps extends Omit<JobDeps, "store"> {
   phone?: PhoneAuth; // the account's confirmed phone and the texted code; absent, phone sign-in is off
   files?: FileService; // the other file kinds (introduction, proof, plan, comparison, draft, brief); an id not found there is a jobs list
   fileEffects?: Effects; // what Introduce really does (send); absent, an approved introduction says it was not sent
+  logoFetch?: typeof fetch; // TRAINEE_LOGO_URL=self: how the server fetches an employer's own logo (tests pass a fake; default fetch)
+  logoCache?: LogoCache; // and where it keeps them (default: one in-memory cache per instance)
   timeZone?: (userId: string) => Promise<string | null>; // the person's own zone (dates on the page are their day); absent or unknown, Chicago, said
   // The employer's open questions (career_apply_questions): a results card that isn't ready asks them on "A few things first", and
   // answers are checked (checkAnswer) and saved (store.answer) exactly as the chat saves them. Absent: the page asks nothing.
@@ -121,8 +126,17 @@ const kindScriptHash = (async () => `'sha256-${b64(await sha(KIND_SCRIPT))}'`)()
 // frame-ancestors: Telegram's own web clients only (the Mini App is a frame inside web.telegram.org); nothing else may frame the page.
 // img-src: the logo provider's origin only (computed from config), never every https host.
 const FRAMES = "https://web.telegram.org https://*.telegram.org";
+// Logos (audit R16, architect decision 2026-11-01): by DEFAULT from the employer's own domain, fetched by the server and served from
+// this page's own origin (logo_cache.ts), so img-src is 'self' and the reader's browser contacts no third party; no own domain, the
+// lettermark. A third-party logo service is never the default (Google's s2 favicons would tell Google which companies a person is
+// looking at): TRAINEE_LOGO_URL=google, or an explicit https template with {domain}, opts in; a non-https template means no logos.
+const S2 = "https://www.google.com/s2/favicons?sz=128&domain={domain}";
+const logoMode = (env: { get(k: string): string | undefined }): string => { const v = (env.get("TRAINEE_LOGO_URL") || "").trim(); return !v || v === "self" ? "self" : v === "google" ? S2 : v; };
+const selfLogos = (env: { get(k: string): string | undefined }) => logoMode(env) === "self";
+const LOGOS = memoryLogoCache();
 function logoOrigins(env: { get(k: string): string | undefined }): string {
-  const tpl = (env.get("TRAINEE_LOGO_URL") || "").trim() || "https://www.google.com/s2/favicons?sz=128&domain={domain}";
+  if (selfLogos(env)) return "'self'";
+  const tpl = logoMode(env);
   let origin = "";
   try { const u = new URL(tpl.split("{domain}").join("example.com")); if (u.protocol === "https:") origin = u.origin; } catch { /* no logo provider */ }
   return [origin, origin.includes("google.com") ? "https://*.gstatic.com" : ""].filter(Boolean).join(" ");
@@ -198,8 +212,9 @@ function sendOf(p: PreparedRow): { items: { label: string; value: string; needs?
 }
 // The logo only from the employer's own domain, through the configured provider, https only; the CSP allows that provider's origin only.
 function rowLogo(job: JobView, env: { get(k: string): string | undefined }): string | null {
-  const dom = logoDomain(job, env), u = logoUrl(job, env);
-  if (!dom || !u) return null;
+  if (selfLogos(env)) { const dom = logoDomain(job, env); return dom && validDomain(dom) ? `?logo=${encodeURIComponent(dom)}` : null; }
+  const dom = logoDomain(job, env), tpl = logoMode(env), u = dom ? tpl.split("{domain}").join(encodeURIComponent(dom)) : null;
+  if (!dom || !u || !/^https:\/\//.test(u)) return null;
   try {
     const x = new URL(u), allowed = logoOrigins(env).split(" ").filter(Boolean)[0];
     return x.protocol === "https:" && x.origin === allowed && u.includes(encodeURIComponent(dom)) ? u : null;
@@ -262,7 +277,11 @@ async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: R
   const n = rows.length;
   // The preview card is the brand card (static, nothing about the person in a public image) plus counts the page itself shows.
   const og = { title: `${n} match${n === 1 ? "" : "es"} for you`, description: "Tap Apply on any job. Opens in Trainee.", image: ogImage(d.env) };
-  return { token, rows, setHash, setSize: set.length, top, og, total: all.length };
+  // The File shell (file_design.ts): who it is for (a CONFIRMED name only, else "you"), and when the postings on it were last seen
+  // live on their boards (career_postings.last_seen_at), in the person's zone; none known, the page says the check time is unknown.
+  const shown = new Set(rows.map((r) => r.job.job_id));
+  const stamp = freshnessStamp("Postings checked", postings.filter((p) => shown.has(p.job_id)).map((p) => p.last_seen_at), { now: d.now(), tz });
+  return { token, rows, setHash, setSize: set.length, top, og, total: all.length, made: madeForLine(firstNameOf(facts), d.now(), tz), stamp };
 }
 
 // One Apply = one hash-bound approval through the Telegram Confirm path. Returns a note for the row when it did not go.
@@ -293,7 +312,11 @@ export async function handleFile(req: Request, d: FileDeps): Promise<Response> {
   try {
     return await handleFileOnce(req, d);
   } catch {
-    return new Response(renderLinkState("Couldn't open this just now", ["Nothing was opened and nothing was sent. Try again in a minute."]), { status: 503, headers: await headers("text/html; charset=utf-8", d.env) });
+    // The designed error state (brief P6.8): what happened, why, what happens next, and a retry that reopens this same page.
+    const here = (() => { try { return `/${new URL(req.url).pathname.replace(/^[\/\\]+/, "")}`; } catch { return "/"; } })();
+    const page = layout("Couldn't open this just now - Trainee", `<div id="root"><header class="fhead">${BRAND}</header><div class="fcard"><main id="main">${stateHtml({ kind: "error", title: "Couldn't open this just now",
+      reason: "Part of Trainee didn't answer. Nothing was opened and nothing was sent.", next: "Try again in a minute. Your link keeps working until it expires.", retry: { href: here, label: "Try again" } })}</main></div></div>`);
+    return new Response(page, { status: 503, headers: await headers("text/html; charset=utf-8", d.env) });
   }
 }
 
@@ -523,6 +546,8 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   }
   const claims = { u: s.userId, r: s.list, k: "s", j: "0".repeat(16), i: 0, e: Date.parse(s.row.expires_at) } as FileClaims;
   const { u } = claims;
+  // A logo for a row of THIS signed-in person's list, from that employer's own domain (TRAINEE_LOGO_URL=self). Any other domain: 404.
+  if (req.method === "GET" && url.searchParams.has("logo")) return await logoOf(url.searchParams.get("logo") ?? "", claims, d);
   if (d.files) {
     const g = await d.files.get(u, claims.r).catch(() => null);
     if (g && g.state !== "missing") return handleKind({ g, d, claims, token, action, fields, req, html, text, state });
@@ -607,12 +632,36 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
     rec = again.rec;
   }
   if (req.method === "GET" && fields.get("format") === "text") return o.text(textOf(rec, { now: d.now() }));
-  const title = esc(String(rec.data?.title ?? KIND_LABEL[rec.kind]));
-  const inner = `<div id="root"><header>${BRAND}<p class="eyebrow">${esc(KIND_LABEL[rec.kind])}</p><h1>${title}</h1></header><main id="main">${note ? `<p class="note-top" role="status">${esc(note)}</p>` : ""}${bodyHtml(rec, token)}</main>`
+  // The shared File shell (file_design.ts): "Made for <first name> · <date>" above one card; the title, then when its facts were read
+  // (the moment this File was built from them; an application proof reads the application record), in the person's zone.
+  const [tz, facts] = await Promise.all([d.timeZone ? d.timeZone(u).catch(() => null) : null, d.facts ? d.facts(u).then((f) => f ?? [], () => []) : []]);
+  const stampLabel = rec.kind === "application_proof" ? "Application record read" : "Facts as of";
+  const shots = evidenceOrigin(d.env);
+  const body = `${note ? `<p class="note-top" role="status">${esc(note)}</p>` : ""}${bodyHtml(rec, token, { tz, evidenceImage: (x) => !!shots && originOf(x) === shots })}`;
+  const inner = `<div id="root">${fileShellHtml({ made: madeForLine(firstNameOf(facts), rec.created_at, tz), eyebrow: KIND_LABEL[rec.kind], title: String(rec.data?.title ?? KIND_LABEL[rec.kind]), stamp: freshnessStamp(stampLabel, [rec.created_at], { now: d.now(), tz }), body })}`
     + `<footer class="foot"><p>Expires ${esc(new Date(rec.expires_at).toISOString().slice(0, 16).replace("T", " "))} UTC. <a href="?format=text">Plain text version</a></p><form method="post"><input type="hidden" name="t" value="${esc(token)}"><input type="hidden" name="action" value="remove"><button type="submit" class="lnk">Remove this file</button></form></footer></div>`;
-  const csp = (await headers("text/html", d.env))["content-security-policy"].replace("script-src ", `script-src ${await kindScriptHash} `);
+  let csp = (await headers("text/html", d.env))["content-security-policy"].replace("script-src ", `script-src ${await kindScriptHash} `);
+  // A confirmation screenshot is shown inline only from the project's own storage origin; img-src then allows exactly that origin.
+  if (shots) csp = csp.replace(/img-src ([^;]+)/, (_m, v: string) => `img-src ${v === "'none'" ? shots : `${v} ${shots}`}`);
   return o.html(layout(`${String(rec.data?.title ?? KIND_LABEL[rec.kind])} - Trainee`, inner, { script: KIND_SCRIPT, tg: true, css: KIND_CSS, og: { title: `${KIND_LABEL[rec.kind]} from Trainee`, description: "Open in Trainee.", image: ogImage(d.env) } }), 200, { "content-security-policy": csp });
 }
+async function logoOf(want: string, claims: FileClaims, d: FileDeps): Promise<Response> {
+  const none = () => new Response("", { status: 404, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+  const dom = want.trim().toLowerCase();
+  if (!selfLogos(d.env) || !validDomain(dom)) return none();
+  const refs = ((await d.store.recallList(claims.u, claims.r).catch(() => null)) ?? []).slice(0, MAX_ROWS);
+  const jobs = (await Promise.all(refs.map((r) => d.store.recall(claims.u, r).catch(() => null)))).filter(Boolean).map((c) => c!.job);
+  const posts = jobs.length ? await d.store.postings(jobs.map((j) => j.job_id)).catch(() => [] as PostingRow[]) : [];
+  const allowed = jobs.some((j) => logoDomain({ ...j, company_domain: j.company_domain ?? posts.find((p) => p.job_id === j.job_id)?.company_domain ?? null }, d.env) === dom);
+  if (!allowed) return none();
+  const logo = await fetchLogo(dom, { fetch: d.logoFetch ?? fetch, cache: d.logoCache ?? LOGOS, now: d.now() }).catch(() => null);
+  if (!logo) return none();
+  return new Response(logo.bytes as Uint8Array<ArrayBuffer>, { status: 200, headers: { "content-type": logo.type, "cache-control": "private, max-age=86400", "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; sandbox", "referrer-policy": "no-referrer", "cross-origin-resource-policy": "same-origin" } });
+}
+const originOf = (u: string) => { try { const x = new URL(u); return x.protocol === "https:" ? x.origin : null; } catch { return null; } };
+// The one origin a File may show evidence images from: the project's own storage (SUPABASE_URL), https only. Anything else is a link.
+const evidenceOrigin = (env: { get(k: string): string | undefined }) => originOf((env.get("SUPABASE_URL") || "").trim());
 export { FILE_TTL_MS, hostOf };
 
 // ---------------------------------------------------------------- a results list: one black Apply per card
@@ -621,6 +670,9 @@ const placeOf = (j: JobView) => {
   const parts = [j.location, j.remote === "remote" ? "Remote" : j.remote === "hybrid" ? "Hybrid" : j.remote === "onsite" ? "On-site" : ""].filter(Boolean);
   return parts.filter((w, i) => parts.findIndex((x) => x.toLowerCase() === w.toLowerCase()) === i).join(" · ");
 };
+// The roles "Apply to all N ready" approves: ready right now (prepared, its tag shown, no status, not by hand, not blocked), not dismissed.
+const readySet = (rows: Row[], dismissed: Set<string>) => rows.filter((r) => !dismissed.has(r.ref) && !r.status && !r.byHand && !r.blocked && !!r.tag);
+const setHashOf = async (rows: Row[]) => rows.length ? (await sha(`v1|${rows.map((r) => `${r.ref}:${r.tag}`).join(",")}`)).slice(0, 16) : "";
 const CHANGED = "Changed since you opened this page, so nothing was sent.";
 const SENT = "Approved. It's queued to be sent exactly as its card showed; the status here changes when the employer's site confirms it.";
 // How a question is asked: the employer's options, yes or no, a longer answer, or text. A secret (password, code, ID or bank number)
@@ -695,7 +747,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   }
 
   if (action) {
-    if (!["apply", "applysel", "answer", "refresh", "dismiss", "restore", "pause", "resume"].includes(action)) return o.state("Not done", ["That is not something this page can do. Nothing was sent."], 400);
+    if (!["apply", "applysel", "applyall", "answer", "refresh", "dismiss", "restore", "pause", "resume"].includes(action)) return o.state("Not done", ["That is not something this page can do. Nothing was sent."], 400);
     // Re-read the stored meta right before writing and change only this field, so two taps cannot overwrite each other.
     const saveMeta = async (patch: (m: ListMeta) => void) => {
       try {
@@ -721,7 +773,9 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
         else if (!(await saveMeta((m) => { const s2 = new Set(m.dismissed ?? []); if (action === "dismiss") s2.add(ref); else s2.delete(ref); m.dismissed = [...s2]; }))) top = "I couldn't save that just now. Nothing changed.";
         else notes[ref] = action === "dismiss" ? "Dismissed. Private to you; no application was touched. You can restore it at the bottom of the page." : "Restored to your list. No application was touched.";
       }
-    } else if ((action === "apply" || action === "applysel") && paused) {
+    } else if (action === "applyall" && !applyAllYesEnabled(d.env)) {
+      top = "Apply to all is turned off. Nothing was approved.";
+    } else if ((action === "apply" || action === "applysel" || action === "applyall") && paused) {
       top = "Paused. Nothing was approved or started from this tap. Tap Resume at the top to continue.";
     } else if (action === "apply" && marked.has(fields.get("ref") ?? "")) {
       notes[fields.get("ref") ?? ""] = "This role is dismissed. Restore it first. Nothing was sent.";
@@ -731,6 +785,17 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
       if ("things" in g) return thingsPage(g.things, g.qs);
       if ("note" in g) notes[ref] = g.note;
       else notes[ref] = (await approveOne(u, ref, tag, d)) ?? SENT;
+    } else if (action === "applyall") {
+      // Apply to all N ready (owner, 2026-11-02): exactly the set that was shown, bound to its hash. The set is the roles that are
+      // READY right now (prepared, tag shown, nothing marked needs) and not dismissed; each goes through the same hash-bound approval
+      // as its own Apply. If the set is not exactly what the page showed, nothing is approved.
+      const cur = await loadFeed(claims, token, d), now = readySet(cur?.rows ?? [], marked);
+      if (!cur || !now.length || (fields.get("set") ?? "") !== await setHashOf(now)) top = "This list changed since you opened it, so nothing was approved.";
+      else {
+        let sent = 0;
+        for (const r of now) { const n = await approveOne(u, r.ref, r.tag!, d); notes[r.ref] = n ?? SENT; if (!n) sent++; }
+        top = `${sent} of ${now.length} approved and queued, each exactly as its card showed.${sent < now.length ? ` ${now.length - sent} not approved; each says why.` : ""} Nothing else was sent.`;
+      }
     } else if (action === "applysel") {
       const want = picks().filter((p) => !marked.has(p.ref));
       if (!want.length) top = picks().length ? "Those roles are dismissed. Restore them first. Nothing was sent." : "Tick at least one role first. Nothing was sent.";
@@ -791,7 +856,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   const feed = await loadFeed(claims, token, d, notes);
   if (!feed) return o.state("This list is gone", ["It is no longer available. " + NEW_LINK], 404);
   if (o.req.method === "GET" && o.url.searchParams.get("format") === "text") return o.text(renderText(feed));
-  const pf = o.url.searchParams.get("pay") as PayFilter, filters = { pay: PAY_FILTERS.has(pf) ? pf : "any" as PayFilter, where: (o.url.searchParams.get("where") ?? "").trim().slice(0, 80) };
+  const pf = o.url.searchParams.get("pay") as PayFilter, filters = { pay: PAY_FILTERS.has(pf) ? pf : "any" as PayFilter, where: (o.url.searchParams.get("where") ?? "").trim().slice(0, 80), state: parseStateFilter(o.url.searchParams.get("state")) };
   const openNow = await readQs(), pend = d.pending ? await d.pending(u).catch(() => null) : null;
   // Stable ids over the WHOLE list (not the filter, not the sort, not what is dismissed).
   const rawRefs = (await d.store.recallList(u, claims.r).catch(() => null)) ?? feed.rows.map((r) => r.ref);
@@ -859,5 +924,6 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   ].filter(Boolean);
   return o.html(renderResults({ token, title, floor: fl, rows, coverRows: all, countRows: keep, total: all.length, filters, places, top, notes,
     madeFor: `Made for ${meta.name ?? "you"} · ${day}`, stamp: await stampOf(rows), caveat, quick,
-    paused: !!meta.paused, updated, dismissed: gone }));
+    paused: !!meta.paused, updated, dismissed: gone,
+    all: applyAllYesEnabled(d.env) && !meta.paused && readySet(keep, new Set()).length >= 2 ? { hash: await setHashOf(readySet(keep, new Set())), size: readySet(keep, new Set()).length, filtered: filters.pay !== "any" || !!filters.where } : null }));
 }

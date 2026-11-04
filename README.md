@@ -1,50 +1,49 @@
 # Trainee
 
-Trainee is a personal career agent. A job seeker texts it (Telegram, iMessage, WhatsApp) and it learns who they are,
-finds openings the minute they post, writes truthful tailored applications, applies at volume with one approval per
-batch, runs networking outreach, keeps the tracker, and tells them plainly where they stand. Live site:
-trainee-six.vercel.app (`/`, `/file`, `/connect`, `/privacy`, `/terms`).
+Trainee is a personal career agent for job seekers. Over text (Telegram, WhatsApp, iMessage/SMS) it learns who the
+person is from facts they confirm, finds matching openings, prepares tailored applications, and applies **only after
+the person says yes** to the exact application shown. It also drafts and, after approval, sends networking outreach
+from the person's own mailbox, tracks replies, and hosts shareable "File" pages. Every action ends with proof the
+person can see; the product never says something happened unless the employer's or provider's own record shows it.
 
-## What it does
+Who it is for: anybody looking for work (D-004). The product name is Trainee (D-005); some code identifiers still carry
+older names and are not renamed.
 
-- **Mass apply.** Matching postings are found from the job index, applications are prepared before the person asks
-  (answers only from confirmed facts, tailored resume), and one approval covers a batch. Submission runs through the
-  apply engine (`scripts/apply.ts`, `workers/`) or the browser extension (`extension/`).
-- **Networking.** Outreach and introduction drafts, follow-ups and reminders, sent only after the person approves the
-  exact message.
-- **Task intelligence.** The agent brain (`supabase/functions/agent-chat`, model plus tools, code-enforced rules)
-  answers questions, prepares interviews, negotiation and offers, and runs alerts, briefs and the tracker.
-- **Hosted File.** `/file` (`supabase/functions/trainee-file`, `api/file.js`) is the signed-link page where a person
-  sees their applications, results and documents. `/connect` links Gmail or Outlook.
+## What is in this repo
 
-## Layout
-
-| Path | What |
+| Path | What it is |
 |---|---|
-| `supabase/functions/` | Edge functions: `agent-chat`, `trainee-*` channels and pages, `career-*`, `stripe-webhook` (Trainee checkout), `delete-account` |
-| `supabase/migrations/` | Every database migration. Never delete or edit an applied one |
-| `packages/domain/` | Career domain modules (`12x` to `16x`), bundled for the edge by `scripts/build-router-core.py` |
-| `packages/career-data/`, `packages/extension/` | Company files, interview banks, datasets; extension shared code |
-| `workers/` | Apply browser worker (`career-browser`) and cloud runner (`career-cloud`) |
-| `extension/` | The browser extension |
-| `site/`, `api/`, `vercel.json` | What Vercel serves (Output Directory `site`; `api/` proxies `/file` and `/connect`) |
-| `tests/`, `evals/` | Gate tests, architect acceptance tests (`tests/architect`), database tests, evals |
-| `docs/architect/` | Architecture, decisions, features, work orders |
-| `src/`, `index.html`, `connect/`, `img/` | Web-app source and its build (see below) |
+| `supabase/functions/` | Edge functions. The Trainee ones: `agent-chat` (the conversation brain and handlers), `trainee-inbound`, `trainee-telegram`, `trainee-telegram-link`, `trainee-whatsapp`, `trainee-deliver`, `trainee-report`, `trainee-file`, `trainee-connect`, `career-ingest`, `career-proactive`, `career-send`, `career-cloud-runner`, `career-email-code`, `career-essay-draft`, `agent-exec`, `gmail-oauth`, `outlook-oauth`, `extension-sync`, `site-signup`, `site-careers`, `delete-account`, plus `_shared/`. |
+| `supabase/migrations/` | Database migrations (additive; applied only by the release path). |
+| `tests/architect/` | The architect's acceptance tests (Deno), one file per work order or behaviour. |
+| `tests/` (`career-*.test.cjs`, `tests/edge/`, `tests/db/`) | Node suites, edge tests, and SQL migration/RLS tests. |
+| `evals/career/` | The career eval harness, held-out sets and score log (`SCORE-LOG.md`). |
+| `site/`, `api/`, `vercel.json` | The public site (`site/index.html`, `site/privacy.html`), and the Vercel proxies for `/file` (`api/file.js`) and `/connect` (`api/connect.js`), wired by the rewrites in `vercel.json`. |
+| `extension/` | The browser extension that fills Greenhouse, Lever and Ashby applications in the person's own browser. |
+| `scripts/` , `scripts/launch/` | Gate, shard and build scripts; the owner's release and go-live scripts. |
+| `docs/architect/` | Architecture, `DECISIONS.md`, work orders, feature specs. |
+| `docs/launch/` | Go-live and owner runbooks. |
 
-## Web-app source
+## Where to start
 
-`src/upmore-app-template.html` plus `src/build-app.py` still build the root `index.html`, which carries the career
-dashboard and approval-card code that gated tests exercise. Vercel does not serve it. The finance parts of that
-template are dead code awaiting a split; do not build features there.
+- Architecture: `docs/architect/ARCHITECTURE.md`. Owner rulings: `docs/architect/DECISIONS.md`.
+- Feature specs: `docs/architect/specs/` (`MASS-APPLY-SPEC-2026-10-27.md`, `NETWORKING-SPEC-2026-10-27.md`,
+  `TASK-INTELLIGENCE-SPEC-2026-10-27.md`).
+- Work orders and the queue: `docs/architect/work-orders/README.md`.
+- Release: `docs/launch/TRAINEE-GO-LIVE.md` (owner only; agents never deploy).
+- Working rules for agents: `CLAUDE.md` (architect) and `AGENTS.md` (builders).
 
-## Commands
+## Checks
 
-See `CLAUDE.md` for the verified list. The one gate: `bash scripts/gate.sh` (needs Node 22, Deno 2.9, Python 3,
-`npm ci --prefix tools`).
+The CI gate is `bash scripts/gate.sh`; CI (`.github/workflows/ci.yml`) runs it partitioned (core, browser, architect,
+forms-ci coverage) plus the database job (`bash tests/db/run.sh`), the send-rail load test and the Telegram
+acceptance suite. See `CLAUDE.md` for the exact commands.
 
-## Rules
+## Upmore (removed)
 
-Owner rules live in `docs/architect/DECISIONS.md`. In short: external effects need the person's approval of the exact
-payload; facts about the person come only from what they confirmed; no LinkedIn or Indeed automation; no deploys,
-live migrations or spend without the owner.
+This repo began as Upmore, a finance agent. Trainee does not use the Upmore app (owner decision), and it was removed:
+its finance edge functions, finance domain modules, testing evidence, finance tests and evals, `UPMORE-APP-README.md`,
+`SPEC.md`, `BUILD_PLAN.md`, `PROMPT.md` and `LOOP.md`. What remains is not a product claim: the Trainee dashboard and
+approval-card code still lives in the old app shell (`src/`, the root `index.html`; Vercel serves `site/` instead), a
+few frozen history files (`docs/bug-ledger.md`, `docs/career/forbidden-rules.md`, `docs/instinct-spec-series/`), and
+Upmore-era names on Trainee code (for example `packages/domain/*-career-*.js`, `UPMORE_*` environment variable names).

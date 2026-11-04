@@ -29,7 +29,7 @@ type Env = { get(k: string): string | undefined };
 const envOf = (o: Record<string, string> = {}): Env => ({ get: (k) => o[k] });
 // Production as the deploy leaves it: none of these switches set (trainee-go-live.sh sets CAREER_OUTREACH_FOLLOWUPS=on,
 // the release value itself, and CAREER_BRAIN only with --brain).
-const PROD = envOf({ OPENAI_API_KEY: "sk-test-not-real" });
+const PROD = envOf({ ANTHROPIC_API_KEY: "sk-test-not-real" });
 
 // The decision's lists (docs/architect/RELEASE-FLAGS-2026-11-01.md). Changing what the release turns on changes these.
 const ON = ["CAREER_BRIEF_DIGEST", "CAREER_INTRO_REMINDERS", "CAREER_MAIL_TRACKING", "CAREER_MOCK_JUDGE", "CAREER_NETWORKING_DRAFT",

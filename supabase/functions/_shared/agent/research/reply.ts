@@ -10,8 +10,20 @@ type Ok = Extract<ResearchResult, { status: "ok" }>;
 // RESEARCH SCENARIOS (2026-10-29): every link the model wrote counts, not only http(s) ones: a markdown link, a "www."
 // address, a bare host with a path ("evil.example.com/apply") and a javascript:/data:/mailto: URI. The only link a reply
 // carries is the file link code adds (withLink strips every one the model wrote, of any shape).
-const MODEL_LINK = /\[([^\]]*)\]\([^)]*\)|[a-z][a-z0-9+.-]*:\/\/[^\s<>"')\]]+|\b(?:javascript|data|vbscript|mailto|file):[^\s<>"']+|\bwww\.[^\s<>"']+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\/[^\s<>"']*/gi;
+const MODEL_LINK = /\[([^\]]*)\]\((?:[^()]|\([^)]*\))*\)|[a-z][a-z0-9+.-]*:\/\/[^\s<>"')\]]+|\b(?:javascript|data|vbscript|mailto|file):[^\s<>"']+|\bwww\.[^\s<>"']+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\/[^\s<>"']*/gi;
 export const stripUrls = (s: string) => s.replace(MODEL_LINK, (_m, label) => label ?? "").replace(/\s+([.,;:!?])/g, "$1").replace(/\s{2,}/g, " ").replace(/[\s:]+$/, "").trim();
+// A model-written link survives only when the turn saw it (the person typed it or a tool returned it, exact match, any shape):
+// an invented or hostile one ("evil.example.com/apply", "www.", a markdown link, a javascript: URI) is removed, its label kept.
+// Applied to every final reply the agent brain writes, research or not (the research reply strips them all and adds its own file link).
+export function stripUnseenLinks(s: string, allowed: Iterable<string>): string {
+  const trim = (u: string) => u.replace(/[.,;:!?)\]]+$/, "");
+  const ok = new Set([...allowed].map(trim));
+  const kept = s.replace(MODEL_LINK, (m, label) => {
+    const url = m.startsWith("[") && label !== undefined ? (m.slice(m.indexOf("](") + 2, -1)) : m;
+    return ok.has(trim(url)) ? m : (label ?? "");
+  });
+  return kept === s ? s : kept.replace(/\s+([.,;:!?])/g, "$1").replace(/[ \t]{2,}/g, " ").trim();
+}
 const firstSentence = (s: string) => (s.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? s).trim();
 
 export function withLink(paragraph: string, url: string | null): string {

@@ -27,12 +27,18 @@ export interface MailStore {
 
 // Applications that reached the employer, or may have. One that never went (failed, not sent, still queued or waiting on
 // the person) has no mail to match.
+// Item 14: dated when it was sent (claimed_at: the drive or the send began), never when its row was last touched (a recorded
+// confirmation moves updated_at). The role is the application's own title, else its posting's (posting_title, read by
+// the store as the confirmation run reads it); with neither it stays unknown, never guessed.
 const WENT = new Set(["confirmed", "submitted_unconfirmed", "unknown_outcome"]);
 export function appsFromQueue(rows: any[]): TrackedApp[] {
-  return (rows ?? []).filter((r) => WENT.has(r.state) && r.company).map((r) => ({
-    ref: `job:${r.id}`, company: String(r.company), role: r.title ? String(r.title) : undefined, url: r.url ?? undefined,
-    applied_at: r.updated_at ?? r.created_at, stage: "Submitted", source: "queue" as const, events: [],
-  }));
+  return (rows ?? []).filter((r) => WENT.has(r.state) && r.company).map((r) => {
+    const role = r.title || r.posting_title;
+    return {
+      ref: `job:${r.id}`, company: String(r.company), role: role ? String(role) : undefined, url: r.url ?? undefined,
+      applied_at: r.claimed_at ?? r.created_at, stage: "Submitted", source: "queue" as const, events: [],
+    };
+  });
 }
 // The tracker's own words for what happened, as mail kinds; anything else is left out.
 const TRACK_KIND: Record<string, StatusEvent["kind"]> = {
@@ -128,8 +134,16 @@ export function supabaseMailStore(admin: any): MailStore {
       }).sort((a, b) => String(a.read_through ?? "").localeCompare(String(b.read_through ?? ""))).slice(0, limit);
     },
     async applications(u) {
-      const queue = must<any[]>(await admin.from("career_apply_jobs").select("id,company,url,state,created_at,updated_at,title:payload->>title")
+      const queue = must<any[]>(await admin.from("career_apply_jobs").select("id,job_id,company,url,state,created_at,claimed_at,title:payload->>title")
         .eq("user_id", u).order("created_at", { ascending: false }).limit(1000), "read applications") ?? [];
+      // Item 14: the payload Trainee sends carries no title (the cloud card's closed key set); without one, a hand-tracked
+      // application for another job at the same employer was merged away and its rejection moved Trainee's application.
+      const need = [...new Set(queue.filter((r) => !r.title && WENT.has(r.state) && r.job_id).map((r) => String(r.job_id)))];
+      if (need.length) {
+        const ps = must<any[]>(await admin.from("career_postings").select("job_id,title").in("job_id", need.slice(0, 100)), "read posting titles") ?? [];
+        const titles = new Map(ps.filter((x) => x.title).map((x) => [String(x.job_id), String(x.title)]));
+        for (const r of queue) if (!r.title && titles.has(String(r.job_id))) r.posting_title = titles.get(String(r.job_id));
+      }
       const threads = must<any[]>(await admin.from("agent_flow_state").select("rows:state->career->stores->trackStore->rows").eq("user_id", u).limit(200), "read the tracker") ?? [];
       const tracked = threads.flatMap((t) => (Array.isArray(t.rows) ? t.rows : []));
       return mergeApps(appsFromQueue(queue), appsFromTracker(tracked));

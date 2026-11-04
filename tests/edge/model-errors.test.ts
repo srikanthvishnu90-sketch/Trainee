@@ -11,11 +11,11 @@ const credit=()=>Response.json({type:"error",error:{type:"invalid_request_error"
 const KEY="sk-ant-test-key-should-never-appear";
 
 Deno.test("the planner model keeps the provider's error type and message, never the key",async()=>{
- const m=anthropicPlannerModel(admin(),user,"thread","model",KEY,async()=>credit());
+ const m=anthropicPlannerModel(admin(),user,"thread","claude-model",KEY,async()=>credit());
  let err:any=null;try{await m.complete({},0);}catch(e){err=e;}
  assert(err instanceof ModelUnavailableError,String(err));assert(err.status===400&&err.type==="invalid_request_error",JSON.stringify(err));
  assert(String(err.message).includes("model unavailable"),err.message);assert(/credit balance is too low/.test(err.detail),err.detail);
  assert(!String(err.message+err.detail).includes(KEY),"no key in the error");
- const garbage=anthropicPlannerModel(admin(),user,"thread","model",KEY,async()=>new Response("<html>bad gateway</html>",{status:502}));
+ const garbage=anthropicPlannerModel(admin(),user,"thread","claude-model",KEY,async()=>new Response("<html>bad gateway</html>",{status:502}));
  await rejects(()=>garbage.complete({},0),"HTTP 502");
 });

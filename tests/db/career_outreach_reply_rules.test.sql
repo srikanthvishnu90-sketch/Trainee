@@ -4,6 +4,9 @@
 -- not counted as sent. State is asserted on the rows.
 \set ON_ERROR_STOP on
 begin;
+-- The return date is a UTC calendar day (to_char on now() below, date_trunc in the assertion): pin the session zone so the
+-- test is the same at any hour of the day and on any server zone (it failed after 19:00 America/Chicago, when the UTC day has moved on).
+set local time zone 'UTC';
 reset role;
 insert into auth.users(id,email) values('00000000-0000-4000-8000-0000000c7a01','rr-a@example.test'),('00000000-0000-4000-8000-0000000c7a02','rr-b@example.test');
 insert into profiles(id) values('00000000-0000-4000-8000-0000000c7a01'),('00000000-0000-4000-8000-0000000c7a02');

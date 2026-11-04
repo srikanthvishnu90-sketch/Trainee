@@ -307,7 +307,7 @@ Deno.test("WO-039/9 the engine never sees the service key; a resume named facts.
   await Deno.chmod(fake, 0o755);
   Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", "TEST-SECRET-KEY");
   Deno.env.set("SUPABASE_URL", "https://example.test");
-  Deno.env.set("OPENAI_API_KEY", "TEST-OPENAI");
+  Deno.env.set("ANTHROPIC_API_KEY", "TEST-ANTHROPIC");
   try {
     const r = await cloudEngineRunner({ root: "/repo", evidenceRoot: dir, deno: fake })(["--url", "u"]);
     const names = String(r!.result.env).trim().split(/\s+/);
@@ -316,7 +316,7 @@ Deno.test("WO-039/9 the engine never sees the service key; a resume named facts.
   } finally {
     Deno.env.delete("SUPABASE_SERVICE_ROLE_KEY");
     Deno.env.delete("SUPABASE_URL");
-    Deno.env.delete("OPENAI_API_KEY");
+    Deno.env.delete("ANTHROPIC_API_KEY");
   }
   const j = await job("A", 12), { q, finished } = memQueue([j], { resume: () => ({ filename: "facts.json", sha256: RESUME_SHA, b64 }) }), seen: any[] = [];
   await runCloudJob(j, { queue: q, log: () => {}, runEngine: fakeEngine(() => sent, seen) });

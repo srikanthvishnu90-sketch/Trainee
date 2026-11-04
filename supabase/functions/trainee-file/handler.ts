@@ -13,14 +13,28 @@
 // read. Taps at once are each judged against the list as it is when they run: an Apply that queued a row first changes the set
 // (the Apply to all then approves nothing and says so); an Apply to all that ran first leaves that Apply "Already in your
 // applications". Either way each posting is approved once.
+import { applyAllYesEnabled } from "../_shared/apply_all_yes_flag.ts";
 import { FILE_TTL_MS, verifyFileToken, type FileClaims } from "../_shared/file_link.ts";
-import { checkSession, CLEAR_LOGIN, CLEAR_SESSION, codeOf, LOGIN_TTL_MS, loginCookie, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, SESSION_ID, sessionCookie, startSession, type PhoneAuth, type SessionStore } from "../_shared/file_session.ts";
+import { checkSession, CLEAR_LOGIN, CLEAR_SESSION, codeOf, LOGIN_TTL_MS, loginCookie, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, PAGE_TOKEN, pageTokenOf, sameToken, SESSION_ID, sessionCookie, sha256, startSession, type PhoneAuth, type SessionCheck, type SessionStore } from "../_shared/file_session.ts";
 import { verifyInitData } from "../_shared/telegram_webapp.ts";
 import { BOOT_SCRIPT, cut, FEED_SCRIPT, fullOf, hostOf, renderBootstrap, renderFeed, renderLinkState, renderPhoneLogin, renderPreview, renderText, signOutFoot, snippetOf, statusOf, type AppRow, type Feed, type Row } from "../_shared/file_page.ts";
-import { dayOf, BRAND, esc, layout } from "../_shared/file_page.ts";
+import { dayOf, BRAND, esc, layout, postedLine, webUrl } from "../_shared/file_page.ts";
 import { actOn, bodyHtml, COPY_SCRIPT, KIND_CSS, KIND_LABEL, textOf, type Effects, type FileRecord } from "../_shared/file_kinds.ts";
 import type { FileService } from "../_shared/file_service.ts";
-import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, logoUrl, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
+import { fetchLogo, memoryLogoCache, validDomain, type LogoCache } from "../_shared/logo_cache.ts";
+import { renderResults, renderThings, type PayFilter, type ResultRow, type ThingQuestion } from "../_shared/results_page.ts";
+import { parseStateFilter } from "../_shared/results_batch.ts";
+import { conversionNote, floorText, type Pay, payGroup, payText, startsBelow } from "../_shared/role_pay.ts";
+import { checkAnswer, type OpenQuestion, type QuestionStore } from "../_shared/career_apply_questions.ts";
+import { type PendingRow, pendingLine } from "../_shared/career_hosted_prepare.ts";
+import { NO_RESUME_NEXT, NO_RESUME_REASON } from "../_shared/career_apply_from_chat.ts";
+import { factType, NEVER_BY_TEXT } from "../_shared/question_map.ts";
+import { decodeRowQuestionType } from "../_shared/row_answer.ts";
+import { redactIdentity } from "../_shared/identity_redact.ts";
+import { coverage, countsOf, NOTHING_SENT, NOT_LISTED, renderExport, reqIdOf, roleIds, specOf } from "../_shared/results_spec.ts";
+import type { ListMeta } from "../_shared/telegram_jobs.ts";
+import { fileShellHtml, firstNameOf, freshnessStamp, madeForLine, stateHtml } from "../_shared/file_design.ts";
+import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
 
 export type { AppRow } from "../_shared/file_page.ts";
 export interface FileStore extends JobStore {
@@ -39,6 +53,67 @@ export interface FileDeps extends Omit<JobDeps, "store"> {
   phone?: PhoneAuth; // the account's confirmed phone and the texted code; absent, phone sign-in is off
   files?: FileService; // the other file kinds (introduction, proof, plan, comparison, draft, brief); an id not found there is a jobs list
   fileEffects?: Effects; // what Introduce really does (send); absent, an approved introduction says it was not sent
+  logoFetch?: typeof fetch; // TRAINEE_LOGO_URL=self: how the server fetches an employer's own logo (tests pass a fake; default fetch)
+  logoCache?: LogoCache; // and where it keeps them (default: one in-memory cache per instance)
+  timeZone?: (userId: string) => Promise<string | null>; // the person's own zone (dates on the page are their day); absent or unknown, Chicago, said
+  // The employer's open questions (career_apply_questions): a results card that isn't ready asks them on "A few things first", and
+  // answers are checked (checkAnswer) and saved (store.answer) exactly as the chat saves them. Absent: the page asks nothing.
+  questions?: QuestionStore;
+  // Prepare the person's queued applications again now that their questions are answered (career_hosted_prepare.ts). Absent: they
+  // wait in the queue and the page says so.
+  reprepare?: (userId: string) => Promise<"started" | "failed" | "off" | "skipped">;
+  // Whether the person has a confirmed resume (career_resume_on_file, the check the chat's apply turn makes). false: Apply asks for the
+  // resume first and queues nothing. null or absent: the queue is not held back here (the card still refuses a send without one).
+  resumeOnFile?: (userId: string) => Promise<boolean | null>;
+  // Where each queued posting stands (career_apply_pending_for), in the person's words. Absent: "getting it ready".
+  pending?: (userId: string) => Promise<PendingRow[] | null>;
+  // Every phone step (number, code) answers only after this resolves, given how long the step took: deps.ts pads to a floor
+  // (file_session.ts PHONE_STEP_FLOOR_MS) so time cannot tell whether the typed number is the account's. Absent: no padding.
+  pace?: (step: "phone_start" | "phone_verify", elapsedMs: number) => Promise<void>;
+  // Work that outlives the answer (the sign-in text): the edge runtime keeps it alive (EdgeRuntime.waitUntil). Absent: it runs on.
+  background?: (work: Promise<unknown>) => void;
+}
+// A form post is never bigger than this (a typed number or code, the Mini App's signed data, a short note): a bigger body is
+// refused without being read past it.
+export const MAX_BODY_BYTES = 64 * 1024;
+export const ALLOWED_METHODS = "GET, HEAD, POST";
+
+// A post that another site made the browser send (a cross-site form, with the person's cookies; SameSite stops neither a sibling
+// subdomain nor a browser that ignores it) changes nothing. The browser's own Sec-Fetch-Site decides when it is there; else the
+// Origin (this page's own origin, or the site's address in TRAINEE_FILE_BASE_URL, which the /file proxy serves it at); else the
+// Referer. A "null" origin passes only when the browser itself says the post is same-origin (a page under a no-referrer policy).
+// A request with none of them is not from a browser that sends cross-site forms (every current one sends Origin on a POST).
+export function crossSite(req: Request, env: { get(k: string): string | undefined }): boolean {
+  const own = new Set<string>();
+  try { own.add(new URL(req.url).origin); } catch { /* no own origin */ }
+  try { const b = new URL((env.get("TRAINEE_FILE_BASE_URL") || "").trim()); if (b.protocol === "https:") own.add(b.origin); } catch { /* not set */ }
+  const site = (req.headers.get("sec-fetch-site") ?? "").trim().toLowerCase();
+  if (site && site !== "same-origin" && site !== "none") return true;
+  const origin = req.headers.get("origin");
+  if (origin !== null) return origin.trim() === "null" ? !site : !own.has(origin.trim());
+  if (site) return false;
+  const ref = req.headers.get("referer");
+  if (ref) { try { return !own.has(new URL(ref).origin); } catch { return true; } }
+  return false;
+}
+// The body, read no further than `cap` bytes: null when it is bigger (an honest or a lying Content-Length alike).
+async function readCapped(req: Request, cap: number): Promise<string | null> {
+  const said = Number(req.headers.get("content-length") ?? "");
+  if (Number.isFinite(said) && said > cap) { await req.body?.cancel().catch(() => {}); return null; }
+  if (!req.body) return "";
+  const reader = req.body.getReader(), parts: Uint8Array[] = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.byteLength;
+    if (n > cap) { await reader.cancel().catch(() => {}); return null; }
+    parts.push(value);
+  }
+  const all = new Uint8Array(n);
+  let at = 0;
+  for (const p of parts) { all.set(p, at); at += p.byteLength; }
+  return new TextDecoder().decode(all);
 }
 export const MAX_ROWS = FEED_ROWS;
 
@@ -51,14 +126,25 @@ const kindScriptHash = (async () => `'sha256-${b64(await sha(KIND_SCRIPT))}'`)()
 // frame-ancestors: Telegram's own web clients only (the Mini App is a frame inside web.telegram.org); nothing else may frame the page.
 // img-src: the logo provider's origin only (computed from config), never every https host.
 const FRAMES = "https://web.telegram.org https://*.telegram.org";
+// Logos (audit R16, architect decision 2026-11-01): by DEFAULT from the employer's own domain, fetched by the server and served from
+// this page's own origin (logo_cache.ts), so img-src is 'self' and the reader's browser contacts no third party; no own domain, the
+// lettermark. A third-party logo service is never the default (Google's s2 favicons would tell Google which companies a person is
+// looking at): TRAINEE_LOGO_URL=google, or an explicit https template with {domain}, opts in; a non-https template means no logos.
+const S2 = "https://www.google.com/s2/favicons?sz=128&domain={domain}";
+const logoMode = (env: { get(k: string): string | undefined }): string => { const v = (env.get("TRAINEE_LOGO_URL") || "").trim(); return !v || v === "self" ? "self" : v === "google" ? S2 : v; };
+const selfLogos = (env: { get(k: string): string | undefined }) => logoMode(env) === "self";
+const LOGOS = memoryLogoCache();
 function logoOrigins(env: { get(k: string): string | undefined }): string {
-  const tpl = (env.get("TRAINEE_LOGO_URL") || "").trim() || "https://www.google.com/s2/favicons?sz=128&domain={domain}";
+  if (selfLogos(env)) return "'self'";
+  const tpl = logoMode(env);
   let origin = "";
   try { const u = new URL(tpl.split("{domain}").join("example.com")); if (u.protocol === "https:") origin = u.origin; } catch { /* no logo provider */ }
   return [origin, origin.includes("google.com") ? "https://*.gstatic.com" : ""].filter(Boolean).join(" ");
 }
 async function headers(type: string, env: { get(k: string): string | undefined }): Promise<Record<string, string>> {
-  return { "cache-control": "no-store", "referrer-policy": "no-referrer", "x-robots-tag": "noindex, nofollow", "x-content-type-options": "nosniff", "content-type": type,
+  // same-origin, not no-referrer: the page's own posts then carry its Origin (which the cross-site check reads; under no-referrer a
+  // browser sends "Origin: null"), and nothing is ever sent to another site.
+  return { "cache-control": "no-store", "referrer-policy": "same-origin", "x-robots-tag": "noindex, nofollow", "x-content-type-options": "nosniff", "content-type": type,
     "content-security-policy": `default-src 'none'; script-src ${await scriptHashes} https://telegram.org; connect-src 'self'; img-src ${logoOrigins(env) || "'none'"}; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors ${FRAMES}` };
 }
 const NEW_LINK = "Ask Trainee in Telegram for your jobs again and open the new link.";
@@ -126,8 +212,9 @@ function sendOf(p: PreparedRow): { items: { label: string; value: string; needs?
 }
 // The logo only from the employer's own domain, through the configured provider, https only; the CSP allows that provider's origin only.
 function rowLogo(job: JobView, env: { get(k: string): string | undefined }): string | null {
-  const dom = logoDomain(job, env), u = logoUrl(job, env);
-  if (!dom || !u) return null;
+  if (selfLogos(env)) { const dom = logoDomain(job, env); return dom && validDomain(dom) ? `?logo=${encodeURIComponent(dom)}` : null; }
+  const dom = logoDomain(job, env), tpl = logoMode(env), u = dom ? tpl.split("{domain}").join(encodeURIComponent(dom)) : null;
+  if (!dom || !u || !/^https:\/\//.test(u)) return null;
   try {
     const x = new URL(u), allowed = logoOrigins(env).split(" ").filter(Boolean)[0];
     return x.protocol === "https:" && x.origin === allowed && u.includes(encodeURIComponent(dom)) ? u : null;
@@ -146,6 +233,7 @@ async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: R
   const facts = d.facts ? await d.facts(claims.u).then((f) => f ?? [], () => []) : [];
   // The account's stamp, once (apply_trust.ts): a payload prepared under another account state is not offered.
   const account = d.account ? await d.account(claims.u).catch(() => "unreadable" as const) : undefined;
+  const tz = d.timeZone ? await d.timeZone(claims.u).catch(() => null) : null;
   const rows: Row[] = await Promise.all(got.map(async ({ ref, c }) => {
     const job = { ...c!.job }, post = postings.find((p) => p.job_id === job.job_id) ?? null;
     job.company_domain = job.company_domain ?? post?.company_domain ?? null;
@@ -174,7 +262,7 @@ async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: R
     // The short description and the key details: the stored posting's own words; a search-only detail only in the labelled line.
     const stated = { ...job, location: post?.location ?? "", remote: post ? job.remote : null };
     return { ref, job, logo: rowLogo(job, d.env), snippet: snippetOf(stated, post?.description), full: fullOf(post?.description),
-      status, inApps: !!app || away, tag, resume: app || away ? null : resumeOf(prep), byHand, blocked, note: notes[ref], ...metaOf(job, post), why: job.reasons.slice(0, 2),
+      status, inApps: !!app || away, tag, resume: app || away ? null : resumeOf(prep), byHand, blocked, note: notes[ref], ...metaOf(job, post), posted: postedLine({ posted_at: post?.posted_at ?? job.posted_at, first_seen_at: post?.first_seen_at ?? job.first_seen_at }, d.now(), tz), why: job.reasons.slice(0, 2),
       sends: sd && !sd.secret ? `Sends: ${[resumeOf(prep) ?? "no resume", sd.answers ? "your saved answers" : "", sd.cover ? "a cover note" : ""].filter(Boolean).join(" + ")}` : undefined, send: sd?.items };
   }));
   // The same posting twice on one list (the same link under two ids): only the first row offers Apply.
@@ -189,7 +277,11 @@ async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: R
   const n = rows.length;
   // The preview card is the brand card (static, nothing about the person in a public image) plus counts the page itself shows.
   const og = { title: `${n} match${n === 1 ? "" : "es"} for you`, description: "Tap Apply on any job. Opens in Trainee.", image: ogImage(d.env) };
-  return { token, rows, setHash, setSize: set.length, top, og, total: all.length };
+  // The File shell (file_design.ts): who it is for (a CONFIRMED name only, else "you"), and when the postings on it were last seen
+  // live on their boards (career_postings.last_seen_at), in the person's zone; none known, the page says the check time is unknown.
+  const shown = new Set(rows.map((r) => r.job.job_id));
+  const stamp = freshnessStamp("Postings checked", postings.filter((p) => shown.has(p.job_id)).map((p) => p.last_seen_at), { now: d.now(), tz });
+  return { token, rows, setHash, setSize: set.length, top, og, total: all.length, made: madeForLine(firstNameOf(facts), d.now(), tz), stamp };
 }
 
 // One Apply = one hash-bound approval through the Telegram Confirm path. Returns a note for the row when it did not go.
@@ -220,20 +312,35 @@ export async function handleFile(req: Request, d: FileDeps): Promise<Response> {
   try {
     return await handleFileOnce(req, d);
   } catch {
-    return new Response(renderLinkState("Couldn't open this just now", ["Nothing was opened and nothing was sent. Try again in a minute."]), { status: 503, headers: await headers("text/html; charset=utf-8", d.env) });
+    // The designed error state (brief P6.8): what happened, why, what happens next, and a retry that reopens this same page.
+    const here = (() => { try { return `/${new URL(req.url).pathname.replace(/^[\/\\]+/, "")}`; } catch { return "/"; } })();
+    const page = layout("Couldn't open this just now - Trainee", `<div id="root"><header class="fhead">${BRAND}</header><div class="fcard"><main id="main">${stateHtml({ kind: "error", title: "Couldn't open this just now",
+      reason: "Part of Trainee didn't answer. Nothing was opened and nothing was sent.", next: "Try again in a minute. Your link keeps working until it expires.", retry: { href: here, label: "Try again" } })}</main></div></div>`);
+    return new Response(page, { status: 503, headers: await headers("text/html; charset=utf-8", d.env) });
   }
 }
 
 async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   const html = async (body: string, status = 200, extra: Record<string, string> = {}) => new Response(body, { status, headers: { ...(await headers("text/html; charset=utf-8", d.env)), ...extra } });
   const text = async (body: string, status = 200) => new Response(body, { status, headers: await headers("text/plain; charset=utf-8", d.env) });
-  if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "POST") return html(renderLinkState("Not supported", ["This page only opens and answers."]), 405);
+  if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "POST") return html(renderLinkState("Not supported", ["This page only opens and answers."]), 405, { allow: ALLOWED_METHODS });
+  // A HEAD (a link scanner, a preview, a prefetch) reads nothing and changes nothing: it never begins a link's sign-in (whose
+  // 15 minutes would then run out before the person opens it) and never uses a link up (file page web-security round).
+  if (req.method === "HEAD") return html("", 200);
   const url = new URL(req.url);
   // Every redirect goes to this page's own path on this host: a path that starts with two slashes (or a backslash a browser reads as
   // one) would be a link to another host (file journey round 2: "//evil.example/?t=..." redirected there after the sign-in).
   const here = `/${url.pathname.replace(/^[\/\\]+/, "")}`;
   let fields: URLSearchParams = url.searchParams;
-  if (req.method === "POST") { try { fields = new URLSearchParams(await req.text()); } catch { fields = new URLSearchParams(); } }
+  if (req.method === "POST") {
+    // Another site's form changes nothing here (file page web-security round: a cross-site post with the person's cookies texted
+    // codes, checked guesses, reset the sign-in, and with the page's form value approved and signed out).
+    if (crossSite(req, d.env)) { await req.body?.cancel().catch(() => {}); return html(renderLinkState("This came from another site", ["Nothing was done and nothing was sent. Open the page itself and try again."]), 403); }
+    let body: string | null = "";
+    try { body = await readCapped(req, MAX_BODY_BYTES); } catch { body = ""; }
+    if (body === null) return html(renderLinkState("That was too large", ["Nothing was done and nothing was sent."]), 413);
+    fields = new URLSearchParams(body);
+  }
   const botUrl = (d.env.get("TRAINEE_BOT_URL") || "").trim();
   const bot = /^https:\/\//.test(botUrl) ? botUrl : null;
   const secret = d.env.get("TRAINEE_FILE_LINK_SECRET");
@@ -248,12 +355,22 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   const action = req.method === "POST" ? (fields.get("action") ?? "") : "";
   // A tap that reaches an ended sign-in says what became of it: nothing was approved (file journey round 2: an Apply after the session
   // expired or was signed out elsewhere only said "You were signed out", leaving whether it went unsaid).
-  const tapped = action === "apply" || action === "applyall" ? ["Nothing was approved or sent from this tap."] : [];
+  const tapped = action === "apply" || action === "applyall" || action === "applysel" || action === "answer" || action === "dismiss" || action === "restore" || action === "pause" || action === "resume" ? ["Nothing was approved or sent from this tap."] : [];
   const signedOut = (why: string) => why === "error" ? state("Couldn't open this just now", ["Nothing was sent. Try again in a minute."], 503)
     : why === "expired" ? state("You were signed out", [...tapped, "Sign-ins last two hours. " + NEW_LINK], 401)
     : why === "revoked" || why === "unbound" ? state("You were signed out", [...tapped, "This sign-in was ended. " + NEW_LINK], 401)
     : state("This link isn't valid", [...tapped, "It may be cut short or changed. " + NEW_LINK], 403);
-  const given = req.method === "GET" || req.method === "HEAD" ? (url.searchParams.get("t") ?? "") : "";
+  const given = req.method === "GET" ? (url.searchParams.get("t") ?? "") : "";
+  // The browser's own session: the tf_s cookie, and only ever a phone session (a Telegram session never lives in a cookie, so an id
+  // copied out of a Mini App page and planted as a cookie opens nothing).
+  const cookieSession = async (): Promise<SessionCheck> => {
+    const sc = await check(cookieOf(req, "tf_s"));
+    return sc.ok && sc.row.via !== "phone" ? { ok: false, why: "none" } : sc;
+  };
+  // A post whose form value is not backed by what only the session's own holder has (the cookie; for the Mini App, Telegram's fresh
+  // signed data for that Telegram user): a saved, copied, cached or shared page. Nothing is read, approved or changed.
+  const notHere = () => state("Sign in on this device", [...tapped, "This page works only in the browser or Telegram screen where you signed in, so nothing was opened, approved or changed.",
+    "If that is here, reload the page. Otherwise: " + NEW_LINK], 401);
 
   // ---- the link from the bot: says WHICH list, never WHO opened it. It opens a phone sign-in, never the list itself.
   if (given) {
@@ -267,9 +384,9 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
       if (g && g.state !== "missing") return html(layout("Trainee", `<header>${BRAND}<h1>A file from Trainee</h1></header><main id="main"><p>Open this link in your browser, or from Telegram.</p></main>`, { og: { title: `${KIND_LABEL[g.rec.kind]} from Trainee`, description: "Sign in to open it.", image: ogImage(d.env) } }));
       return html(renderPreview({ title: "Your jobs from Trainee", description: "Sign in with your phone number to see them.", image: ogImage(d.env) }));
     }
-    const cur = await check(cookieOf(req, "tf_s"));
+    const cur = await cookieSession();
     if (cur.ok && cur.userId !== c.claims.u) {
-      return html(layout("A different account - Trainee", `<header>${BRAND}<h1>This link is for a different Trainee account</h1></header><main id="main"><p>You are signed in as someone else here, so nothing from this link was opened. Sign out first, then open the link again.</p>${signOutFoot(cookieOf(req, "tf_s"))}</main>`), 403);
+      return html(layout("A different account - Trainee", `<header>${BRAND}<h1>This link is for a different Trainee account</h1></header><main id="main"><p>You are signed in as someone else here, so nothing from this link was opened. Sign out first, then open the link again.</p>${signOutFoot((await pageTokenOf(cur.idHash, secret)) ?? "")}</main>`), 403);
     }
     const row = await sessions.beginLogin({ jti: c.claims.j, userId: c.claims.u, list: c.claims.r, at: d.now(), expiresAt: Math.min(d.now() + LOGIN_TTL_MS, c.claims.e) }).catch(() => null);
     if (!row) return state("Couldn't open this just now", ["Nothing was used up. Try the link again in a minute."], 503);
@@ -286,7 +403,15 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
 
   const locked = () => state("Too many wrong codes", ["This link is locked so nobody can guess the code. " + NEW_LINK], 429);
   // ---- phone sign-in steps (the pending link is in the HttpOnly tf_l cookie)
-  if (action === "phone_start" || action === "phone_verify" || action === "phone_reset") return phoneStep(action);
+  if (action === "phone_reset") return phoneStep(action);
+  if (action === "phone_start" || action === "phone_verify") {
+    // Every answer of these two steps is paced to the same floor, whatever the number and whatever was refused, so the time an
+    // answer takes cannot say whether the typed number is the account's (only then is a code texted or checked).
+    const began = performance.now();
+    const res = await phoneStep(action);
+    if (d.pace) await d.pace(action, performance.now() - began).catch(() => {});
+    return res;
+  }
   async function phoneStep(step: string): Promise<Response> {
     const lt = await verifyFileToken(cookieOf(req, "tf_l"), secret, d.now());
     if (!lt.ok) return lt.why === "expired" ? bad("expired") : state("Open your link again", ["This sign-in isn't open any more. " + NEW_LINK], 403);
@@ -316,8 +441,13 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
         const counted = await sessions!.countSend(row.jti, MAX_CODE_SENDS).catch(() => null);
         if (counted === null) return down();
         if (counted) {
-          const sent = await d.phone.send(phone).catch(() => ({ ok: false as const, why: "refused" as const }));
-          if (!sent.ok) console.error(`trainee-file: the sign-in code was not texted (${sent.why})`);
+          // Sent in the background: the answer never waits for the provider, so its time is the same for any number.
+          let sending: Promise<void>;
+          try {
+            sending = d.phone.send(phone).then((sent) => { if (!sent.ok) console.error(`trainee-file: the sign-in code was not texted (${sent.why})`); },
+              () => console.error("trainee-file: the sign-in code was not texted (refused)"));
+          } catch { sending = Promise.resolve(); console.error("trainee-file: the sign-in code was not texted (refused)"); }
+          if (d.background) d.background(sending);
         }
       }
       return page("code");
@@ -339,8 +469,9 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
     return new Response("", { status: 303, headers: [...Object.entries(await headers("text/html; charset=utf-8", d.env)), ["location", here], ["set-cookie", sessionCookie(id)], ["set-cookie", CLEAR_LOGIN]] });
   }
 
+  // token: what this session's pages carry in their forms (a phone session's page token; a Mini App session's id, see file_session.ts).
   let token = "";
-  let checked: Awaited<ReturnType<typeof check>> | null = null;
+  let s: SessionCheck;
   if (req.method === "POST" && !fields.get("t")) {
     const list = fields.get("list") ?? "";
     if (!/^[0-9a-f]{10}$/.test(list) || !fields.get("init")) return state("This link isn't valid", ["It may be cut short or changed. " + NEW_LINK], 403);
@@ -355,12 +486,35 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
     if (!user) return state("This Telegram account isn't linked", ["Share your phone number with Trainee in the Telegram chat first, then open the list again."], 403);
     token = await startSession(sessions, { userId: user, via: "telegram", phone: null, telegramId: init.telegramId, list, now: d.now() }).catch(() => "");
     if (!token) return state("Couldn't open this just now", ["Nothing was sent. Try again in a minute."], 503);
+    s = await check(token);
   } else if (req.method === "POST") {
-    token = fields.get("t") ?? ""; // an action: the session's own value in the form (a cookie alone approves nothing)
+    const t = fields.get("t") ?? "";
+    if (PAGE_TOKEN.test(t)) {
+      // A phone session's page: the cookie is the session; the form's page token must be the one drawn for that very cookie.
+      const cookie = cookieOf(req, "tf_s");
+      if (!SESSION_ID.test(cookie)) return notHere();
+      const want = await pageTokenOf(await sha256(cookie), secret);
+      if (!want || !sameToken(t, want)) return notHere();
+      s = await check(cookie);
+      if (s.ok && s.row.via !== "phone") return notHere();
+    } else if (SESSION_ID.test(t)) {
+      // A Mini App session's page: the id in the form opens it only with Telegram's signed data, fresh, for the session's own
+      // Telegram user (the Mini App's script adds it to every post; it is never in the page).
+      if (!fields.get("init")) return notHere();
+      const init = await verifyInitData(fields.get("init"), d.env.get("TELEGRAM_BOT_TOKEN"), d.now());
+      if (!init.ok) {
+        if (init.why === "not_configured") return state("Sign-in isn't set up yet", ["Telegram sign-in isn't switched on yet, so nothing can be opened. Nothing was sent."], 503);
+        if (init.why === "stale") return state("This sign-in has expired", [...tapped, "Close this screen and open the list again from Telegram."], 410);
+        return state("Telegram couldn't verify this sign-in", [...tapped, "Nothing was opened. Open the list again from the button in Telegram."], 403);
+      }
+      s = await check(t);
+      if (s.ok && (s.row.via !== "telegram" || s.row.telegram_id !== init.telegramId)) return notHere();
+      token = t;
+    } else return notHere();
   } else {
     const list = url.searchParams.get("list") ?? "";
     if (/^[0-9a-f]{10}$/.test(list)) return html(renderBootstrap(list)); // the Mini App page: reads Telegram's signed data and posts it back
-    token = cookieOf(req, "tf_s");
+    const cookie = cookieOf(req, "tf_s");
     // A link opened on this browser that is waiting for the phone sign-in.
     const pending = async (): Promise<Response | null> => {
       const lt = await verifyFileToken(cookieOf(req, "tf_l"), secret, d.now());
@@ -369,20 +523,22 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
       if (row && !row.done_at && row.user_id === lt.claims.u && d.now() < Date.parse(row.expires_at)) return row.tries >= MAX_CODE_TRIES ? locked() : html(renderPhoneLogin({ step: row.phone ? "code" : "phone", botUrl: bot }));
       return null;
     };
-    if (!SESSION_ID.test(token)) return (await pending()) ?? state("This link isn't valid", ["It may be cut short or changed. " + NEW_LINK], 403);
+    if (!SESSION_ID.test(cookie)) return (await pending()) ?? state("This link isn't valid", ["It may be cut short or changed. " + NEW_LINK], 403);
     // An ended session's cookie (signed out elsewhere, expired, phone changed) must not hide the sign-in a NEW link opened:
     // the browser keeps tf_s until its Max-Age, and every read would say "signed out, open a new link" in a loop
     // (scenarios-file-signin.test.ts). The pending sign-in wins and the dead cookie is cleared.
-    checked = await check(token);
-    if (!checked.ok && checked.why !== "error") {
+    s = await cookieSession();
+    if (!s.ok && s.why !== "error") {
       const p = await pending();
       if (p) { p.headers.append("set-cookie", CLEAR_SESSION); return p; }
     }
   }
 
   // ---- every private read and action: the session again, checked against the account right now
-  const s = checked ?? await check(token);
   if (!s.ok) return signedOut(s.why);
+  // A phone session's pages carry its page token, never its id (the id is in the HttpOnly cookie only).
+  if (!token) token = (await pageTokenOf(s.idHash, secret)) ?? "";
+  if (!token) return state("Sign-in isn't set up yet", ["The jobs page isn't switched on yet, so nothing can be opened. Nothing was sent."], 503);
   if (action === "signout" || action === "signout_all") {
     const ok = await (action === "signout" ? sessions.revoke(s.idHash, d.now()) : sessions.revokeAll(s.userId, d.now())).then(() => true, () => false);
     if (!ok) return state("Couldn't sign out just now", ["You are still signed in. Try again in a minute."], 503);
@@ -390,10 +546,19 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   }
   const claims = { u: s.userId, r: s.list, k: "s", j: "0".repeat(16), i: 0, e: Date.parse(s.row.expires_at) } as FileClaims;
   const { u } = claims;
+  // A logo for a row of THIS signed-in person's list, from that employer's own domain (TRAINEE_LOGO_URL=self). Any other domain: 404.
+  if (req.method === "GET" && url.searchParams.has("logo")) return await logoOf(url.searchParams.get("logo") ?? "", claims, d);
   if (d.files) {
     const g = await d.files.get(u, claims.r).catch(() => null);
     if (g && g.state !== "missing") return handleKind({ g, d, claims, token, action, fields, req, html, text, state });
   }
+  // A results list (a role ask, role_results.ts): Apply on a prepared card approves what its "What will be sent" shows; on a card
+  // that isn't ready it asks for what's missing. Unreadable is not "a plain list": the page then offers nothing.
+  let meta: ListMeta | null = null;
+  if (d.store.recallListMeta) {
+    try { meta = await d.store.recallListMeta(u, claims.r); } catch { return state("Couldn't open this just now", ["Nothing was opened and nothing was sent. Try again in a minute."], 503); }
+  }
+  if (meta) return handleResults({ meta, d, claims, token, action, fields, url, req, html, text, state });
   const notes: Record<string, string> = {};
   let top: string | undefined;
 
@@ -467,10 +632,298 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
     rec = again.rec;
   }
   if (req.method === "GET" && fields.get("format") === "text") return o.text(textOf(rec, { now: d.now() }));
-  const title = esc(String(rec.data?.title ?? KIND_LABEL[rec.kind]));
-  const inner = `<div id="root"><header>${BRAND}<p class="eyebrow">${esc(KIND_LABEL[rec.kind])}</p><h1>${title}</h1></header><main id="main">${note ? `<p class="note-top" role="status">${esc(note)}</p>` : ""}${bodyHtml(rec, token)}</main>`
+  // The shared File shell (file_design.ts): "Made for <first name> · <date>" above one card; the title, then when its facts were read
+  // (the moment this File was built from them; an application proof reads the application record), in the person's zone.
+  const [tz, facts] = await Promise.all([d.timeZone ? d.timeZone(u).catch(() => null) : null, d.facts ? d.facts(u).then((f) => f ?? [], () => []) : []]);
+  const stampLabel = rec.kind === "application_proof" ? "Application record read" : "Facts as of";
+  const shots = evidenceOrigin(d.env);
+  const body = `${note ? `<p class="note-top" role="status">${esc(note)}</p>` : ""}${bodyHtml(rec, token, { tz, evidenceImage: (x) => !!shots && originOf(x) === shots })}`;
+  const inner = `<div id="root">${fileShellHtml({ made: madeForLine(firstNameOf(facts), rec.created_at, tz), eyebrow: KIND_LABEL[rec.kind], title: String(rec.data?.title ?? KIND_LABEL[rec.kind]), stamp: freshnessStamp(stampLabel, [rec.created_at], { now: d.now(), tz }), body })}`
     + `<footer class="foot"><p>Expires ${esc(new Date(rec.expires_at).toISOString().slice(0, 16).replace("T", " "))} UTC. <a href="?format=text">Plain text version</a></p><form method="post"><input type="hidden" name="t" value="${esc(token)}"><input type="hidden" name="action" value="remove"><button type="submit" class="lnk">Remove this file</button></form></footer></div>`;
-  const csp = (await headers("text/html", d.env))["content-security-policy"].replace("script-src ", `script-src ${await kindScriptHash} `);
+  let csp = (await headers("text/html", d.env))["content-security-policy"].replace("script-src ", `script-src ${await kindScriptHash} `);
+  // A confirmation screenshot is shown inline only from the project's own storage origin; img-src then allows exactly that origin.
+  if (shots) csp = csp.replace(/img-src ([^;]+)/, (_m, v: string) => `img-src ${v === "'none'" ? shots : `${v} ${shots}`}`);
   return o.html(layout(`${String(rec.data?.title ?? KIND_LABEL[rec.kind])} - Trainee`, inner, { script: KIND_SCRIPT, tg: true, css: KIND_CSS, og: { title: `${KIND_LABEL[rec.kind]} from Trainee`, description: "Open in Trainee.", image: ogImage(d.env) } }), 200, { "content-security-policy": csp });
 }
+async function logoOf(want: string, claims: FileClaims, d: FileDeps): Promise<Response> {
+  const none = () => new Response("", { status: 404, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+  const dom = want.trim().toLowerCase();
+  if (!selfLogos(d.env) || !validDomain(dom)) return none();
+  const refs = ((await d.store.recallList(claims.u, claims.r).catch(() => null)) ?? []).slice(0, MAX_ROWS);
+  const jobs = (await Promise.all(refs.map((r) => d.store.recall(claims.u, r).catch(() => null)))).filter(Boolean).map((c) => c!.job);
+  const posts = jobs.length ? await d.store.postings(jobs.map((j) => j.job_id)).catch(() => [] as PostingRow[]) : [];
+  const allowed = jobs.some((j) => logoDomain({ ...j, company_domain: j.company_domain ?? posts.find((p) => p.job_id === j.job_id)?.company_domain ?? null }, d.env) === dom);
+  if (!allowed) return none();
+  const logo = await fetchLogo(dom, { fetch: d.logoFetch ?? fetch, cache: d.logoCache ?? LOGOS, now: d.now() }).catch(() => null);
+  if (!logo) return none();
+  return new Response(logo.bytes as Uint8Array<ArrayBuffer>, { status: 200, headers: { "content-type": logo.type, "cache-control": "private, max-age=86400", "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; sandbox", "referrer-policy": "no-referrer", "cross-origin-resource-policy": "same-origin" } });
+}
+const originOf = (u: string) => { try { const x = new URL(u); return x.protocol === "https:" ? x.origin : null; } catch { return null; } };
+// The one origin a File may show evidence images from: the project's own storage (SUPABASE_URL), https only. Anything else is a link.
+const evidenceOrigin = (env: { get(k: string): string | undefined }) => originOf((env.get("SUPABASE_URL") || "").trim());
 export { FILE_TTL_MS, hostOf };
+
+// ---------------------------------------------------------------- a results list: one black Apply per card
+const PAY_FILTERS = new Set<PayFilter>(["any", "meets", "listed"]);
+const placeOf = (j: JobView) => {
+  const parts = [j.location, j.remote === "remote" ? "Remote" : j.remote === "hybrid" ? "Hybrid" : j.remote === "onsite" ? "On-site" : ""].filter(Boolean);
+  return parts.filter((w, i) => parts.findIndex((x) => x.toLowerCase() === w.toLowerCase()) === i).join(" · ");
+};
+// The roles "Apply to all N ready" approves: ready right now (prepared, its tag shown, no status, not by hand, not blocked), not dismissed.
+const readySet = (rows: Row[], dismissed: Set<string>) => rows.filter((r) => !dismissed.has(r.ref) && !r.status && !r.byHand && !r.blocked && !!r.tag);
+const setHashOf = async (rows: Row[]) => rows.length ? (await sha(`v1|${rows.map((r) => `${r.ref}:${r.tag}`).join(",")}`)).slice(0, 16) : "";
+const CHANGED = "Changed since you opened this page, so nothing was sent.";
+const SENT = "Approved. It's queued to be sent exactly as its card showed; the status here changes when the employer's site confirms it.";
+// How a question is asked: the employer's options, yes or no, a longer answer, or text. A secret (password, code, ID or bank number)
+// is never asked: the person does it on the employer's site.
+const kindOf = (q: OpenQuestion): ThingQuestion["kind"] => {
+  if (NEVER_BY_TEXT.test(q.label)) return "secret";
+  if (q.options.length) return "choice";
+  const type = decodeRowQuestionType(q.type)?.type ?? q.type;
+  if (/checkbox|boolean/.test(type) || q.kind === "consent" || (q.key.startsWith("fact:") && factType(q.key.slice(5)) === "yesno")) return "yesno";
+  return q.kind === "essay" ? "long" : "text";
+};
+const qsFor = (all: OpenQuestion[] | null, r: Row) => (all ?? []).filter((q) => q.job_ids.includes(r.job.job_id));
+
+async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaims; token: string; action: string; fields: URLSearchParams; url: URL; req: Request;
+  html: (b: string, s?: number, e?: Record<string, string>) => Promise<Response>; text: (b: string, s?: number) => Promise<Response>; state: (t: string, p: string[], s: number) => Promise<Response> }): Promise<Response> {
+  const { d, claims, token, action, fields } = o, u = claims.u;
+  let meta = o.meta;
+  const floor = meta.floor ? { amount: meta.floor.amount, period: meta.floor.period } : null;
+  const notes: Record<string, string> = {};
+  let top: string | undefined;
+  // The one checked-at line under each page's title: when the postings shown were last seen live on their boards (career_postings
+  // .last_seen_at), in the person's zone; none known (or unreadable): "Check time unknown", never an invented time.
+  const tzOf = async () => d.timeZone ? await d.timeZone(u).catch(() => null) : null;
+  const stampOf = async (rows: Row[]) => {
+    const ids = rows.map((r) => r.job.job_id);
+    const seen = ids.length ? await d.store.postings(ids).catch(() => [] as PostingRow[]) : [];
+    return freshnessStamp("Postings checked", seen.filter((p) => ids.includes(p.job_id)).map((p) => p.last_seen_at), { now: d.now(), tz: await tzOf() });
+  };
+  const readQs = async () => d.questions ? await d.questions.open(u, 500).catch(() => null) : null;
+  const thingsPage = async (row: Row, qs: OpenQuestion[], o2: { errs?: Record<string, string>; vals?: Record<string, string>; note?: string } = {}) =>
+    o.html(renderThings({ token, ref: row.ref, title: row.job.title, company: row.job.company, link: webUrl(row.job.url), stamp: await stampOf([row]), note: o2.note,
+      questions: qs.map((q) => ({ id: q.id, label: q.label, options: q.options, kind: kindOf(q), value: o2.vals?.[q.id], error: o2.errs?.[q.id] })) }));
+  // One row, judged now against the page as it is (the same screen the list ran): the row to approve, the questions it still needs
+  // answered, or why nothing goes for it. An unprepared row with no questions is queued to be prepared (nothing is sent by that).
+  type Gate = { row: Row } | { note: string } | { things: Row; qs: OpenQuestion[] };
+  const gate = async (feed: Feed | null, ref: string, tag: string, all: OpenQuestion[] | null): Promise<Gate> => {
+    const row = feed?.rows.find((r) => r.ref === ref);
+    if (!row) return { note: "This job isn't on this list any more. Nothing was sent." };
+    const asking = !row.byHand && !row.blocked && !row.tag && (!row.status || row.status.word === "preparing") ? qsFor(all, row) : [];
+    if (row.status && !asking.length) {
+      // A second tap on a role that is already sent shows the current state and the evidence the row holds, never a bare refusal (PRD 8.8).
+      const sp = specOf(row);
+      const proof = sp.sent ? ` Already submitted for this role. ${sp.evidence ? `Evidence: ${sp.evidence}.` : "No confirmation is on file yet, so it is still being checked."}` : "";
+      return { note: row.inApps ? `Already in your applications, so nothing more was sent.${proof} ${row.status.detail}` : `Nothing was approved: ${row.status.detail}` };
+    }
+    if (row.byHand) return { note: "Not applied for automatically on this site. Open it and apply there yourself." };
+    if (row.blocked) return { note: `Nothing was approved: ${row.blocked}` };
+    if (!row.tag) {
+      if (tag !== "none") return { note: CHANGED };
+      if (asking.length) return { things: row, qs: asking };
+      // No confirmed resume: ask for exactly that (as the chat does) instead of queueing a preparation that cannot start.
+      if (d.resumeOnFile && (await d.resumeOnFile(u).catch(() => null)) === false) return { note: `Not queued: ${NO_RESUME_REASON}. ${NO_RESUME_NEXT} Nothing was sent.` };
+      const w = await d.store.want(u, row.job, d.now()).catch(() => ({ result: "refused" as const, reason: "I couldn't save that just now." }));
+      if (w.result === "refused") return { note: `Not queued: ${w.reason ?? "I can't open that posting's application form yet."}` };
+      // The tap IS the person's ask to get this one ready: start preparing now (the queue holds only what they asked for). Preparing
+      // sends nothing; the Apply that sends comes after they see "What will be sent".
+      const k = d.reprepare ? await d.reprepare(u).catch(() => "failed" as const) : "off";
+      return { note: k === "failed" ? "Saved, but getting it ready didn't start. Tap Apply again in a minute. Nothing was sent." : "Getting your application ready. Nothing is sent until you check it here and tap Apply. Refresh in a minute." };
+    }
+    if (!/^[0-9a-f]{16}$/.test(tag) || tag !== row.tag) return { note: CHANGED };
+    return { row };
+  };
+  const picks = () => [...new Set(fields.getAll("pick"))].slice(0, MAX_ROWS).map((p) => { const [ref = "", tag = ""] = p.split(":"); return { ref, tag }; });
+
+  // A GET only shows: the questions of one role, drawn for the person to fill in. It saves and sends nothing.
+  const thingsRef = o.req.method === "GET" ? o.url.searchParams.get("things") : null;
+  if (thingsRef) {
+    const feed = await loadFeed(claims, token, d), all = await readQs(), row = feed?.rows.find((r) => r.ref === thingsRef);
+    const qs = row ? qsFor(all, row) : [];
+    if (row && qs.length && !row.byHand && !row.blocked && !row.tag) return thingsPage(row, qs);
+    top = "Nothing is waiting on you for that role. Nothing was sent.";
+  }
+
+  if (action) {
+    if (!["apply", "applysel", "applyall", "answer", "refresh", "dismiss", "restore", "pause", "resume"].includes(action)) return o.state("Not done", ["That is not something this page can do. Nothing was sent."], 400);
+    // Re-read the stored meta right before writing and change only this field, so two taps cannot overwrite each other.
+    const saveMeta = async (patch: (m: ListMeta) => void) => {
+      try {
+        const fresh = (await d.store.recallListMeta?.(u, claims.r).catch(() => null)) ?? meta;
+        patch(fresh); await d.store.rememberListMeta?.(u, claims.r, fresh); meta = fresh; return true;
+      } catch { return false; }
+    };
+    const paused = !!meta.paused, marked = new Set(meta.dismissed ?? []);
+    if (action === "refresh") { /* a fresh read below */ }
+    else if (action === "pause" || action === "resume") {
+      // Pause remaining (PRD 5, 7.10): this page only. It stops this page from approving or starting anything new; it cancels nothing
+      // already approved or in progress, and says so.
+      if (!(await saveMeta((m) => { m.paused = action === "pause" ? { at: d.now() } : null; }))) { top = "I couldn't save that just now. Nothing changed and nothing was sent."; }
+      else top = action === "pause" ? "Paused on this page. It will not approve or start anything new. Telegram buttons still work. Applications already approved or in progress are not cancelled and may still finish. Nothing else will start from here." : "Resumed. Nothing was sent by resuming; each Apply still needs your tap.";
+    } else if (action === "dismiss" || action === "restore") {
+      const ref = fields.get("ref") ?? "";
+      const on = (await d.store.recallList(u, claims.r).catch(() => null)) ?? [];
+      const rowNow = action === "dismiss" ? await loadFeed(claims, token, d) : null;
+      if (!on.includes(ref)) top = "That role isn't on this list. Nothing changed.";
+      else {
+        const sp = action === "dismiss" ? (() => { const r0 = rowNow?.rows.find((x) => x.ref === ref); return r0 ? specOf(r0) : null; })() : null;
+        if (sp && (sp.sent || sp.bucket === "progress" || sp.bucket === "done")) notes[ref] = "Not dismissed: this application is already approved, started or submitted, so it stays on your list. Nothing was changed.";
+        else if (!(await saveMeta((m) => { const s2 = new Set(m.dismissed ?? []); if (action === "dismiss") s2.add(ref); else s2.delete(ref); m.dismissed = [...s2]; }))) top = "I couldn't save that just now. Nothing changed.";
+        else notes[ref] = action === "dismiss" ? "Dismissed. Private to you; no application was touched. You can restore it at the bottom of the page." : "Restored to your list. No application was touched.";
+      }
+    } else if (action === "applyall" && !applyAllYesEnabled(d.env)) {
+      top = "Apply to all is turned off. Nothing was approved.";
+    } else if ((action === "apply" || action === "applysel" || action === "applyall") && paused) {
+      top = "Paused. Nothing was approved or started from this tap. Tap Resume at the top to continue.";
+    } else if (action === "apply" && marked.has(fields.get("ref") ?? "")) {
+      notes[fields.get("ref") ?? ""] = "This role is dismissed. Restore it first. Nothing was sent.";
+    } else if (action === "apply") {
+      const ref = fields.get("ref") ?? "", tag = fields.get("tag") ?? "";
+      const g = await gate(await loadFeed(claims, token, d), ref, tag, await readQs());
+      if ("things" in g) return thingsPage(g.things, g.qs);
+      if ("note" in g) notes[ref] = g.note;
+      else notes[ref] = (await approveOne(u, ref, tag, d)) ?? SENT;
+    } else if (action === "applyall") {
+      // Apply to all N ready (owner, 2026-11-02): exactly the set that was shown, bound to its hash. The set is the roles that are
+      // READY right now (prepared, tag shown, nothing marked needs) and not dismissed; each goes through the same hash-bound approval
+      // as its own Apply. If the set is not exactly what the page showed, nothing is approved.
+      const cur = await loadFeed(claims, token, d), now = readySet(cur?.rows ?? [], marked);
+      if (!cur || !now.length || (fields.get("set") ?? "") !== await setHashOf(now)) top = "This list changed since you opened it, so nothing was approved.";
+      else {
+        let sent = 0;
+        for (const r of now) { const n = await approveOne(u, r.ref, r.tag!, d); notes[r.ref] = n ?? SENT; if (!n) sent++; }
+        top = `${sent} of ${now.length} approved and queued, each exactly as its card showed.${sent < now.length ? ` ${now.length - sent} not approved; each says why.` : ""} Nothing else was sent.`;
+      }
+    } else if (action === "applysel") {
+      const want = picks().filter((p) => !marked.has(p.ref));
+      if (!want.length) top = picks().length ? "Those roles are dismissed. Restore them first. Nothing was sent." : "Tick at least one role first. Nothing was sent.";
+      else {
+        // Every ticked role is judged against the page as it is now; the ones that are ready go together, each bound to the exact
+        // payload tag its card showed. A role that isn't ready, or changed since, is skipped and says why.
+        const feed = await loadFeed(claims, token, d), all = await readQs();
+        const ready: Row[] = [];
+        let asked = 0;
+        for (const p of want) {
+          const g = await gate(feed, p.ref, p.tag, all);
+          if ("things" in g) { notes[p.ref] = "Needs a few answers first, so nothing was sent for it. Use Answer them now on its card."; asked++; }
+          else if ("note" in g) notes[p.ref] = g.note;
+          else ready.push(g.row);
+        }
+        let sent = 0;
+        for (const r of ready) { const n = await approveOne(u, r.ref, r.tag!, d); notes[r.ref] = n ?? SENT; if (!n) sent++; }
+        const skipped = want.length - sent - asked;
+        top = `${sent} of ${want.length} approved and queued, each exactly as its card showed.${asked ? ` ${asked} ${asked === 1 ? "needs" : "need"} a few answers first.` : ""}${skipped ? ` ${skipped} not approved; each says why.` : ""} Nothing else was sent.`;
+      }
+    } else {
+      // "A few things first": each answer is checked and saved the way the chat saves it; never guessed, defaulted or invented.
+      const ref = fields.get("ref") ?? "";
+      const feed = await loadFeed(claims, token, d), row = feed?.rows.find((r) => r.ref === ref), all = await readQs();
+      if (!row) top = "This job isn't on this list any more. Nothing was saved or sent.";
+      else if (!d.questions || !all) top = "I can't save answers from this page just now. Nothing was saved and nothing was sent.";
+      else {
+        const qs = qsFor(all, row), errs: Record<string, string> = {}, vals: Record<string, string> = {};
+        let saved = 0;
+        for (const q of qs) {
+          if (kindOf(q) === "secret") { errs[q.id] = "Trainee never collects this. Type it yourself on the employer's site."; continue; }
+          const raw = (fields.get(`q_${q.id}`) ?? "").trim();
+          // A password, a code or an ID/card number typed here is refused and not drawn back into the page (the chat never echoes one either).
+          vals[q.id] = redactIdentity(raw).removed.length ? "" : raw;
+          const c = checkAnswer(q, raw);
+          if (!c.ok) { errs[q.id] = c.skip ? "needs an answer here (to leave it for later, go back to the list)" : c.why === "had no answer" ? "needs an answer" : c.why; continue; }
+          try { await d.questions.answer(u, q.id, c.value); saved++; } catch { errs[q.id] = "couldn't be saved just now; nothing was lost, try again"; }
+        }
+        const still = qs.filter((q) => errs[q.id]);
+        if (!qs.length) notes[ref] = "Nothing is waiting on you for this role now. Refresh to see where it stands.";
+        else if (still.length) return thingsPage(row, still, { errs, vals, note: saved ? `Saved ${saved} ${saved === 1 ? "answer" : "answers"}. These still need you; nothing was sent.` : "Nothing was saved yet, and nothing was sent." });
+        else {
+          // Every question for this role is answered: it goes back in the queue and is prepared again with the answers. A fresh
+          // card, with every exact answer, comes back here; nothing is sent until its Apply is tapped.
+          if (paused) notes[ref] = "Saved. This page is paused, so nothing was queued or prepared. Resume to continue; nothing was sent.";
+          else {
+          const w = await d.store.want(u, row.job, d.now()).catch(() => ({ result: "refused" as const, reason: "I couldn't queue it just now." }));
+          const r = d.reprepare ? await d.reprepare(u).catch(() => "failed" as const) : "off";
+          notes[ref] = w.result === "refused" ? `Saved. It wasn't queued to prepare: ${w.reason ?? "I can't open that posting's form yet."} Nothing was sent.`
+            : r === "started" ? "Saved. Getting your application ready with your answers. Refresh in a minute to see exactly what will be sent; nothing is sent until you tap Apply."
+            : "Saved. Preparing it again hasn't started yet; it waits in your queue. Refresh in a minute. Nothing is sent until you tap Apply.";
+          }
+        }
+      }
+    }
+  }
+
+  const feed = await loadFeed(claims, token, d, notes);
+  if (!feed) return o.state("This list is gone", ["It is no longer available. " + NEW_LINK], 404);
+  if (o.req.method === "GET" && o.url.searchParams.get("format") === "text") return o.text(renderText(feed));
+  const pf = o.url.searchParams.get("pay") as PayFilter, filters = { pay: PAY_FILTERS.has(pf) ? pf : "any" as PayFilter, where: (o.url.searchParams.get("where") ?? "").trim().slice(0, 80), state: parseStateFilter(o.url.searchParams.get("state")) };
+  const openNow = await readQs(), pend = d.pending ? await d.pending(u).catch(() => null) : null;
+  // Stable ids over the WHOLE list (not the filter, not the sort, not what is dismissed).
+  const rawRefs = (await d.store.recallList(u, claims.r).catch(() => null)) ?? feed.rows.map((r) => r.ref);
+  const ids = roleIds(rawRefs);
+  const seenAt = new Map((await d.store.postings(feed.rows.map((r) => r.job.job_id)).catch(() => [] as PostingRow[])).map((p) => [p.job_id, p.last_seen_at]));
+  const checkedOf = (id: string) => freshnessStamp("Checked", [seenAt.get(id)], { now: d.now(), tz: ztz });
+  const ztz = await tzOf();
+  const all: ResultRow[] = feed.rows.map((r0) => {
+    // The numbers stored with the role when the list was made; the display text is never read back (it is not the posting's words).
+    const asking = !r0.byHand && !r0.blocked && !r0.tag && (!r0.status || r0.status.word === "preparing") ? qsFor(openNow, r0).length : 0;
+    const r: Row = asking ? { ...r0, status: null } : r0;
+    const where = pend?.find((p) => p.url === r.job.url || p.posting_key === r.job.job_id);
+    const guide = asking ? `${asking} ${asking === 1 ? "question needs" : "questions need"} your answer first.`
+      : r.status?.word === "preparing" ? (where ? pendingLine(where) : null)
+      : !r.status && !r.byHand && !r.blocked && !r.tag ? "Not prepared yet. Tap Apply and I'll start getting it ready; nothing is sent." : null;
+    const pay = (r.job.pay_parsed ?? null) as Pay | null, g = payGroup(pay, floor);
+    const other = g === "unchecked" && pay ? (pay.currency !== "USD" ? `in ${pay.currency === "unknown" ? "a currency it doesn't name" : pay.currency}` : "no period stated") : null;
+    const payNote = other && floor ? `${other}, not compared with your ${floorText(floor)}` : other ?? (g === "meets" && startsBelow(pay, floor) && floor ? `the range starts below ${floorText(floor)}` : null);
+    return { ...r, payShown: pay ? payText(pay) : null, payGroup: g, payNote, payConv: conversionNote(pay, floor), place: placeOf(r.job), guide, openQs: asking,
+      rid: ids.get(r.ref), reqId: reqIdOf(r.full), checked: checkedOf(r.job.job_id) };
+  });
+  const dismissedSet = new Set(meta.dismissed ?? []);
+  const gone = all.filter((r) => dismissedSet.has(r.ref));
+  const keep = all.filter((r) => !dismissedSet.has(r.ref));
+  const zoneNow = ztz && (() => { try { new Intl.DateTimeFormat("en-US", { timeZone: ztz }); return true; } catch { return false; } })() ? ztz : "America/Chicago";
+  const updated = new Intl.DateTimeFormat("en-US", { timeZone: zoneNow, month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(d.now()));
+  // The plain-text export (PRD 4.9): ?export=txt, behind the same session and list check as the page (it is drawn only from the
+  // feed loaded above), a GET that changes nothing. Real links only; never a made-up address.
+  if (o.req.method === "GET" && o.url.searchParams.get("export") === "txt") {
+    const roles = [...all].sort((a, b) => (a.rid ?? "") < (b.rid ?? "") ? -1 : 1).map((r) => ({ id: r.rid ?? "R-??", employer: r.job.company, title: r.job.title, reqId: r.reqId ?? null, place: r.place,
+      pay: r.payShown ? `${r.payShown} (as the posting lists it)` : "Pay not listed", source: r.job.source ?? "", url: r.job.url ?? null, checked: r.checked ?? null, spec: specOf(r), byHand: r.byHand, dismissed: dismissedSet.has(r.ref) }));
+    const act = keep;
+    return o.text(renderExport({ title: `${meta.what}${floor ? `, ${floorText(floor)} or more` : ""}`, updated, counts: countsOf(act), coverageLine: coverage(all), paused: !!meta.paused, roles }));
+  }
+  const rows = keep.filter((r) => (filters.pay === "meets" ? r.payGroup === "meets" : filters.pay === "listed" ? !!r.payShown : true)
+    && (!filters.where ? true : filters.where === "remote" ? r.job.remote === "remote" || /\bremote\b/i.test(r.job.location) : r.job.location.toLowerCase().includes(filters.where.toLowerCase())));
+  const places = [...new Set(all.map((r) => r.job.location.split(/[;|]/)[0].trim()).filter((p) => p && !/^remote$/i.test(p)))].slice(0, 8);
+  const title = `${meta.what}${floor ? `, ${floorText(floor)} or more` : ""}`;
+  // The file's header (Instinct-style, owner 2026-11-01): who it was made for and when, exactly what was read and when, what is not
+  // confirmed, and a quick read. Every number here is counted from the rows; the person's day and zone (else Chicago, said).
+  const tz = await tzOf();
+  const zone = tz && (() => { try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return true; } catch { return false; } })() ? tz : "America/Chicago";
+  const fmt = (ms: number, o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-US", { timeZone: zone, ...o }).format(new Date(ms));
+  const day = fmt(meta.at, { month: "short", day: "numeric", year: "numeric" });
+  const nSources = meta.sources ?? new Set(all.map((r) => r.job.source).filter(Boolean)).size;
+  const srcWord = `${nSources} ${nSources === 1 ? "source" : "sources"}`;
+  // Where the postings came from (the checked-at time itself is the stamp line, from the postings' own last_seen_at).
+  const fromWhere = meta.source === "snapshot"
+    ? `From a saved snapshot of job boards${meta.read ? ` read ${fmt(Date.parse(meta.read), { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}` : ""}, not the live board, so some may have closed; ${srcWord}.`
+    : `From ${srcWord} on the live board.`;
+  const nMeets = keep.filter((r) => r.payGroup === "meets").length, nUnlisted = keep.filter((r) => r.payGroup === "unlisted").length;
+  const nOther = keep.filter((r) => r.payGroup === "unchecked").length, nBelow = keep.filter((r) => r.payGroup === "below").length;
+  const fl = floor ? floorText(floor) : null;
+  const caveat = [
+    fromWhere,
+    `Pay is shown only where the posting lists it${nUnlisted ? `; ${nUnlisted} ${nUnlisted === 1 ? "role doesn't" : "roles don't"} list pay, so ${nUnlisted === 1 ? "it's" : "they're"} grouped separately` : ", and nothing is estimated"}.`,
+    nOther ? `${nOther} ${nOther === 1 ? "lists" : "list"} pay in another currency or without a period, so ${nOther === 1 ? "it wasn't" : "they weren't"} compared${fl ? ` with ${fl}` : ""}.` : "",
+    "Fit is judged only on what you've confirmed.",
+  ].filter(Boolean).join(" ");
+  const best = keep.filter((r) => r.payGroup === "meets").slice(0, 2).map((r) => `${r.job.title} at ${r.job.company}`);
+  const quick = [
+    best.length ? `Best ${best.length === 1 ? "match" : "matches"}: ${best.join("; ")}.` : keep.length ? `Closest by fit: ${keep[0].job.title} at ${keep[0].job.company}.` : "",
+    fl ? `${nMeets} of ${keep.length} list ${fl} or more${nUnlisted ? `; ${nUnlisted} ${nUnlisted === 1 ? "doesn't" : "don't"} list pay` : ""}${nOther ? `; ${nOther} can't be compared` : ""}${nBelow ? `; ${nBelow} now list less` : ""}.` : `${keep.length} ${keep.length === 1 ? "role" : "roles"}, sorted by fit.`,
+    `Next: tap Apply on a role. A ready one is sent exactly as its What will be sent shows; one that isn't ready asks for what it needs first. ${coverage(all) === NOTHING_SENT ? "Nothing is sent until you tap Apply." : "Each new send needs your tap on Apply."}`,
+  ].filter(Boolean);
+  return o.html(renderResults({ token, title, floor: fl, rows, coverRows: all, countRows: keep, total: all.length, filters, places, top, notes,
+    madeFor: `Made for ${meta.name ?? "you"} · ${day}`, stamp: await stampOf(rows), caveat, quick,
+    paused: !!meta.paused, updated, dismissed: gone,
+    all: applyAllYesEnabled(d.env) && !meta.paused && readySet(keep, new Set()).length >= 2 ? { hash: await setHashOf(readySet(keep, new Set())), size: readySet(keep, new Set()).length, filtered: filters.pay !== "any" || !!filters.where || !!filters.state } : null }));
+}

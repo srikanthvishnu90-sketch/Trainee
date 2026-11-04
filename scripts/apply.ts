@@ -324,6 +324,16 @@ function codeReader(mode: string | undefined, local: boolean, userId: string): C
       return { status: String(body.status), stop: String(body.stop || codeStop("not_yet", ats)) };
     }, { now: Date.now, maxWaitMs: wait });
 }
+// Which family's script-submitted application this run may bind (null: none, and a form with no bound form post stops at
+// SUBMIT_DESTINATION_NOT_BOUND). A local test page names the family it stands in for (--script-submit); a real posting
+// is its host's family, only with --script-submit naming it or the owner's switch UPMORE_SCRIPT_SUBMIT_LIVE=1 on the host
+// the engine runs on. Every real Ashby form (Ramp's included) has no <form> post, so without one of the two even the dry
+// run that prepares the card stops there. The person's own Submit binds nothing here.
+export function scriptSubmitFamily(o: { local: boolean; flag: string | null; live: boolean; family: unknown; personSubmits: boolean }) {
+  if (o.personSubmits) return null;
+  if (o.local) return isScriptFamily(o.flag) ? o.flag : null;
+  return (o.flag || o.live) && isScriptFamily(o.family) ? o.family : null;
+}
 export async function runApply(args: string[]) {
   const o = options(args);
   if ((o["cloud-authorize-stdio"] || o["cloud-authorize-nonce"]) &&
@@ -436,11 +446,8 @@ export async function runApply(args: string[]) {
   const personSubmits = !!o["person-submits"];
   // Script submit binding: where a script-submitted form's one application request may go. A local test page names the
   // family it stands in for; a real posting's family is its host's, and only with the owner's switch.
-  const scriptFamily = personSubmits ? null : target.local
-    ? (o["script-submit"] ?? null)
-    : (o["script-submit"] || Deno.env.get("UPMORE_SCRIPT_SUBMIT_LIVE") === "1") && isScriptFamily(family)
-    ? family
-    : null;
+  const scriptFamily = scriptSubmitFamily({ local: target.local, flag: o["script-submit"] ?? null,
+    live: Deno.env.get("UPMORE_SCRIPT_SUBMIT_LIVE") === "1", family, personSubmits });
   const scriptEndpoint: Endpoint | null = scriptFamily ? scriptSubmitEndpoint(scriptFamily, u, target.local) : null;
   // Every write stopped while the agent's submit was open (keys never kept, only where it went and why).
   const stopped: { method: string; url: string; why: string }[] = [];
@@ -873,6 +880,9 @@ export async function runApply(args: string[]) {
       // the seconds it asked for, or none: the default doubling).
       const refused = main && !allowSubmit ? pageRefusal(response.status(), response.headers()["retry-after"], Date.now()) : null;
       if (refused) evidence.rate_limited = refused;
+      // MASS APPLY (2026-11-01): the posting's own page answering 404/410 at the open, before anything was filled, is a
+      // closed posting: not sent, and not an error of the site (it must not pause the whole ATS for everyone's batch).
+      if (main && !allowSubmit && (response.status() === 404 || response.status() === 410)) evidence.closed = response.status();
       if (uploadReq) uploadEchoes.push((await response.text()).slice(0, 20000));
       if (response.status() >= 300 && response.status() < 400) {
         const targetURL = new URL(response.headers().location || "/", req.url());
@@ -896,6 +906,7 @@ export async function runApply(args: string[]) {
     if (evidence.rate_limited) {
       return write({ state: "not_submitted", reason: "HOST_RATE_LIMITED", status: evidence.rate_limited.status, retry_after_s: evidence.rate_limited.retry_after_s });
     }
+    if (evidence.closed) return write({ state: "not_submitted", reason: "POSTING_CLOSED", status: evidence.closed });
     if (opened.captcha && !(o.handoff && await handOff())) return write({ state: "needs_user", reason: "captcha" });
     const history: any = {}, values: any = {}, planned: any = {};
     for (let step = 0; step < 8; step++) {
@@ -1393,6 +1404,9 @@ export async function runApply(args: string[]) {
     const result = {
       state: sent ? "unknown_outcome" : "not_submitted",
       reason: sent ? "READBACK_REQUIRED" : notSentReason,
+      // MASS APPLY (2026-11-01): what the browser itself said when it failed (a crash, a timeout, out of memory), so a
+      // DRIVER_ERROR can be told apart and its cause found. The browser's own words only: no field value, no page text.
+      ...(notSentReason === "DRIVER_ERROR" ? { driver_error: String(e?.name || "Error").slice(0, 40) + ": " + String(e?.message || "").split("\n")[0].replace(/https?:\/\/\S+/g, "<url>").slice(0, 160) } : {}),
       ...(evidence.proof ? { proof: evidence.proof } : {}),
     };
     if (fenced) {

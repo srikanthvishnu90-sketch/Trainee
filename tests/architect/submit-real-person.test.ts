@@ -268,7 +268,7 @@ function fakeStore(rows: OpenQuestion[], statements: Said[]) {
 }
 async function say(store: ReturnType<typeof fakeStore>, message: string) {
   const r = await questionsTurn({ message, userId: PERSON, threadId: "t", now: T0, store });
-  if (r) store.setIntent(["shown", "partial"].includes(r.status) || r.status.startsWith("draft") ? QUESTIONS_INTENT : "career_apply_questions_answer");
+  if (r) store.setIntent(["shown", "partial", "answered_next"].includes(r.status) || r.status.startsWith("draft") ? QUESTIONS_INTENT : "career_apply_questions_answer");
   return r;
 }
 const day = (d: string) => `${d}T14:00:00.000Z`;
@@ -283,12 +283,19 @@ Deno.test("3. name, email and phone said in chat are offered back word for word,
     { text: "my email is jordan.rivera@example.test", at: day("2026-10-24") },
     { text: "my phone number is 312-555-0142", at: day("2026-10-25") },
   ]);
+  // One question per message (review of #360): each is offered with their own words as it is asked; "use 1" saves it.
   const r = await say(store, "what do you need from me");
   assert(r && r.status === "shown", JSON.stringify(r));
-  for (const q of [`"my name is Jordan Rivera"`, `"my email is jordan.rivera@example.test"`, `"my phone number is 312-555-0142"`]) assert(r.reply.includes(q), r.reply);
-  assert(/Oct 24/.test(r.reply) && /Oct 25/.test(r.reply), "the dates they said it: " + r.reply);
   eq(store.answers, [], "showing saves nothing");
-  for (const n of [1, 2, 3, 4]) assert(/Saved, as drafted/.test((await say(store, `use ${n}`))?.reply ?? ""), `use ${n}`);
+  const seen = [r.reply];
+  for (const n of [1, 2, 3, 4]) {
+    const u = await say(store, "use 1");
+    assert(/Saved, as drafted/.test(u?.reply ?? ""), `question ${n}: ${u?.reply}`);
+    seen.push(u!.reply);
+  }
+  const all = seen.join("\n");
+  for (const q of [`"my name is Jordan Rivera"`, `"my email is jordan.rivera@example.test"`, `"my phone number is 312-555-0142"`]) assert(all.includes(q), all);
+  assert(/Oct 24/.test(all) && /Oct 25/.test(all), "the dates they said it: " + all);
   eq(store.answers, [["q-first", "Jordan"], ["q-last", "Rivera"], ["q-email", "jordan.rivera@example.test"], ["q-phone", "312-555-0142"]]);
 });
 

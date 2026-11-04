@@ -45,11 +45,15 @@ export interface JobView {
   pay: string | null; level: string | null; remote: "remote" | "hybrid" | "onsite" | null;
   posted_at: string | null; first_seen_at: string | null; deadline: string | null; source: string | null;
   reasons: string[]; gaps: string[]; company_domain: string | null;
+  // A results list's role (role_results.ts): the pay the posting states, as numbers, with its period, currency and own words. The
+  // page renders from this, never by re-reading `pay` (which is display text).
+  pay_parsed?: { min: number; max: number; period: "hour" | "month" | "year" | null; currency: string; text: string; up_to?: boolean } | null;
 }
 export interface PostingRow {
   job_id: string; provider?: string | null; company?: string; title?: string; location?: string | null; url?: string; description?: string | null;
   remote?: string | null; seniority_band?: string | null; posted_at?: string | null; first_seen_at?: string | null; pay?: string | null; closed_at?: string | null;
   deadline?: string | null; company_domain?: string | null;
+  last_seen_at?: string | null; // when the ingest last saw the posting live on its board: the File's "Postings checked" stamp
 }
 export interface PreparedRow { id: string; job_id: string; company: string; url: string; payload: Record<string, unknown>; payload_hash: string; card_lines: string[]; state: string }
 
@@ -68,7 +72,17 @@ export interface JobStore {
   // application by): this posting's own application, one under another id whose link is the same posting, the browser extension's
   // report, a batch ledger. Absent: not checked here (the queue still refuses it).
   elsewhere?(userId: string, job: JobView): Promise<boolean>;
+  // A results list made from a role-and-pay ask on a texting channel (role_results.ts): what was asked, the pay floor, and that
+  // its page approves only after the exact application is shown and a code from the person's chat is typed. Absent: no such lists.
+  rememberListMeta?(userId: string, listId: string, meta: ListMeta): Promise<void>;
+  recallListMeta?(userId: string, listId: string): Promise<ListMeta | null>;
 }
+// name: the person's first name as their profile states it (null: "you"); source: where the postings were read (the live board at
+// `at`, or the saved snapshot read on `read`); sources: how many boards the roles came from.
+export interface ListMeta { kind: "results"; what: string; floor: { amount: number; period: "hour" | "year" } | null; at: number;
+  name?: string | null; source?: "live" | "snapshot" | null; read?: string | null; sources?: number;
+  // The person's own marks on this page (private, reversible; they touch no application): roles set aside, and "Pause remaining".
+  dismissed?: string[]; paused?: { at: number } | null }
 
 export interface JobDeps {
   store: JobStore;
@@ -410,6 +424,19 @@ export function secretFields(p: PreparedRow): string[] {
   (Array.isArray(p.card_lines) ? p.card_lines : []).forEach((l, i) => { if (secretLine(String(l ?? ""))) out.push(`card line ${i + 1}`); });
   return out;
 }
+// Why a batch yes (apply_all_yes.ts) must not approve this application on the person's behalf: a required field is blank (the page lists it
+// under "Left blank"; a field marked required:false is optional and does not count), or an answer is sensitive (a secret-looking field, or
+// a demographic, health, criminal-record or date-of-birth answer). The person reviews those one at a time on the page.
+const SENSITIVE_ANSWER = /\b(?:gender|sex\b|race|ethnic|hispanic|latino|veteran|disabilit|sexual|orientation|religio|pronoun|criminal|convict|felony|date of birth|birth ?date|dob|health|medical|pregnan|marital|visa|work(?:ing)? authori[sz]|authori[sz]ed to work|right to work|sponsor|citizen|nationalit|\\bssn\\b|social ?security|salary|compensation|pay expectation|desired pay|wage)/i;
+// A value that says nothing ("n/a", "none", "-", "tbd", "?", "null"...) is blank for a batch yes.
+const PLACEHOLDER = /^(?:n\/?a|na|none|-+|tbd|tba|\?+|null|undefined|not applicable|unknown)$/i;
+const blankValue = (v: unknown) => { const t = String(v ?? "").trim(); return !t || PLACEHOLDER.test(t); };
+export function batchHoldBack(p: PreparedRow): "blank" | "sensitive" | null {
+  const fields: any[] = Array.isArray((p.payload as any)?.fields) ? (p.payload as any).fields : [];
+  if (secretFields(p).length || fields.some((f) => isSecretField(f) || (!blankValue(f?.value) && SENSITIVE_ANSWER.test(`${f?.label ?? ""} ${f?.name ?? ""}`)))) return "sensitive";
+  if (fields.some((f) => blankValue(f?.value) && f?.required !== false)) return "blank";
+  return null;
+}
 // An answer carrying ANOTHER account's fact (its user_id is not the payload's): its value is never printed to this person
 // (apply round 3: the page's "What we send" and this card printed it). apply_trust.ts makes such an application unapprovable.
 export const foreignFact = (f: any, pl: any) => f?.user_id !== undefined && f.user_id !== pl?.user_id;
@@ -529,6 +556,16 @@ export async function tapJob(o: { userId: string; data: string; messageId: strin
   const got = await deps.store.recall(userId, t.ref).catch(() => null);
   if (!got) { await say(GONE_REPLY); return { toast: "Too old.", status: "gone" }; }
   const { job, shownAs } = got;
+  // The exact prepared application, whole, with Confirm bound to its hash (none when it cannot be approved here, and why).
+  const showPayload = async (prep: PreparedRow): Promise<JobTapResult> => {
+    const lines = pageLines(payloadLines(prep, job));
+    const needsYou = secretFields(prep).length > 0; // a secret-looking field with a value: shown as "needs you", never approvable here
+    const why = needsYou ? null : await unsendable(userId, prep, deps);
+    for (let i = 0; i < lines.length; i++) await send.text({ text: lines[i], buttons: i === lines.length - 1 && !needsYou && !why ? confirmButtons(t.ref, hashTag(prep.payload_hash)) : undefined });
+    if (why) { await say(`I can't offer this one for approval: ${why}.`); return { toast: "Not approvable.", status: "unsendable" }; }
+    if (needsYou) { await say(`I can't send this one from here: it has a field that needs you (a password, code or similar), and those never go through chat. Open the link and finish that part yourself:\n${prep.url}`); return { toast: "Needs you.", status: "needs_you" }; }
+    return { toast: "Check it, then Confirm.", status: "shown" };
+  };
 
   if (t.op === "details") {
     const rows = await deps.store.postings([job.job_id]).catch(() => [] as PostingRow[]);
@@ -573,13 +610,7 @@ export async function tapJob(o: { userId: string; data: string; messageId: strin
       await say(w.result === "already" ? `${NO_WORKER_REPLY(job.company, job.title)} (It was already waiting.)` : NO_WORKER_REPLY(job.company, job.title));
       return { toast: "Queued, not applied.", status: "queued_unprepared" };
     }
-    const lines = pageLines(payloadLines(prep, job));
-    const needsYou = secretFields(prep).length > 0; // a secret-looking field with a value: shown as "needs you", never approvable here
-    const why = needsYou ? null : await unsendable(userId, prep, deps);
-    for (let i = 0; i < lines.length; i++) await send.text({ text: lines[i], buttons: i === lines.length - 1 && !needsYou && !why ? confirmButtons(t.ref, hashTag(prep.payload_hash)) : undefined });
-    if (why) { await say(`I can't offer this one for approval: ${why}.`); return { toast: "Not approvable.", status: "unsendable" }; }
-    if (needsYou) { await say(`I can't send this one from here: it has a field that needs you (a password, code or similar), and those never go through chat. Open the link and finish that part yourself:\n${prep.url}`); return { toast: "Needs you.", status: "needs_you" }; }
-    return { toast: "Check it, then Confirm.", status: "shown" };
+    return await showPayload(prep);
   }
 
   // Confirm: the hash-bound approval. The payload is read again now; the tag on the button must be the tag of what is on file.
@@ -597,6 +628,17 @@ export async function tapJob(o: { userId: string; data: string; messageId: strin
     const prep = await deps.store.prepared(userId, job.job_id).catch(() => null);
     if (!prep || hashTag(prep.payload_hash) !== t.tag) {
       if (!prep && await applied()) return duplicate();
+      // TELEGRAM ROUND 3 (2026-10-31): a Confirm whose application changed since it was shown (an answer edited, the resume
+      // replaced) approved nothing and said "tap Apply on the card again", an extra round trip to see what changed (and the card
+      // may be far up the chat). The refusal stands; the current application is shown right under it, whole, with a Confirm
+      // bound to ITS hash (after the posting screen: a closed posting is said, never offered). Nothing is approved by this tap.
+      if (prep && !byHandUrl(job.url)) {
+        const screened = await screenedOut(userId, job, deps);
+        if (screened) { await say(`That application changed after I showed it, and nothing was approved: ${screened}`); return { toast: "Not approved.", status: "screened" }; }
+        await say(`That application changed after I showed it, so nothing was approved. Here is the current one: check it, then tap its Confirm.`);
+        const shown = await showPayload(prep);
+        return { toast: "Changed. Nothing approved.", status: shown.status === "shown" ? "changed" : shown.status };
+      }
       await say(`That application changed after I showed it, so nothing was approved. Tap Apply on the card again to see the current one.`);
       return { toast: "Changed. Nothing approved.", status: "changed" };
     }
@@ -696,9 +738,11 @@ export function supabaseJobStore(admin: any): JobStore {
     async recall(userId, ref) { const v = await get(userId, `tg:job:${ref}`); return v?.job ? { job: v.job, shownAs: v.shownAs === "photo" ? "photo" : "text" } : null; },
     async rememberList(userId, listId, refs) { await put(userId, `tg:list:${listId}`, refs); },
     async recallList(userId, listId) { const v = await get(userId, `tg:list:${listId}`); return Array.isArray(v) ? v.map(String) : null; },
+    async rememberListMeta(userId, listId, meta) { await put(userId, `tg:listmeta:${listId}`, meta); },
+    async recallListMeta(userId, listId) { const v = await get(userId, `tg:listmeta:${listId}`); return v && v.kind === "results" ? v as ListMeta : null; },
     async postings(ids) {
       if (!ids.length) return [];
-      return must(await admin.from("career_postings").select("job_id,provider,company,title,location,url,description,remote,seniority_band,posted_at,first_seen_at,pay,closed_at").in("job_id", ids), "read postings") ?? [];
+      return must(await admin.from("career_postings").select("job_id,provider,company,title,location,url,description,remote,seniority_band,posted_at,first_seen_at,last_seen_at,pay,closed_at").in("job_id", ids), "read postings") ?? [];
     },
     async save(userId, ref, job, at) {
       if (await get(userId, `tg:saved:${ref}`)) return "already";

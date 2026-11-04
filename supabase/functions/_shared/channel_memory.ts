@@ -5,11 +5,11 @@ import type { DeliveryMark, OutboxRow } from "./channel.ts";
 import type { DeliveryStore } from "./channel_store.ts";
 import { type Channel, channelOf } from "./channel_adapters.ts";
 import type { InboundStore, Person, Redeemed } from "./channel_inbound.ts";
-import { LINK_ASK_MS, LINK_NONCE_MS } from "./channel_inbound.ts";
+import { LINK_ASK_MS, LINK_CODE_ASK_MS, LINK_CODE_SLOT, LINK_NONCE_MS } from "./channel_inbound.ts";
 import { NO_CHANNEL_NOTE } from "./channel.ts";
 
 // refusedAt (IDENTITY SCENARIOS, 2026-10-30): channel_contacts.refused_at, the sign-up refusal said to this contact.
-export interface MemContact { contact: string; userId: string | null; threadId: string | null; optedOut: boolean; phone: string | null; alias: string | null; home: boolean; lastInboundAt: number | null; nudgedAt: number | null; createdAt: number; refusedAt?: number | null }
+export interface MemContact { contact: string; userId: string | null; threadId: string | null; optedOut: boolean; phone: string | null; alias: string | null; home: boolean; lastInboundAt: number | null; nudgedAt: number | null; createdAt: number; refusedAt?: number | null; optedOutAt?: number | null }
 export interface MemOutbox {
   id: string; userId: string; key: string; kind: string; text: string; deliverAt: number; channel: Channel | null; createdAt: number;
   status: "queued" | "sending" | "delivered" | "failed" | "skipped_opt_out" | "held"; attempts: number; retryAt: number | null;
@@ -29,7 +29,8 @@ export function memoryChannelWorld() {
   const claimedIds = new Set<string>();
   const paused = new Set<string>(); // WO-091c: accounts paused or erased (career:account paused), as career_user_quiet reads
   const nonces = new Map<string, { userId: string; expiresAt: number; usedAt: number | null }>();
-  const asks: { id: number; userId: string; contact: string; phone: string; askedOn: string; createdAt: number; expiresAt: number; answeredAt: number | null }[] = [];
+  // byCode (TELEGRAM LINK OWNERSHIP, 2026-10-31): the question a link code's opening asked (no number; channel_link_requests.by_code).
+  const asks: { id: number; userId: string; contact: string; phone: string | null; askedOn: string; createdAt: number; expiresAt: number; answeredAt: number | null; byCode?: boolean; replyCode?: string; wrongTries?: number }[] = [];
   let users = 0, seq = 0, asksSeq = 0;
   // IDENTITY SCENARIOS (2026-10-30): a Telegram contact keeps a number only from the person's own share (Telegram's verified
   // number, the only way one reaches Trainee there), as 20261030120000_channel_identity.sql allows.
@@ -105,8 +106,8 @@ export function memoryChannelWorld() {
     },
     async setThread(contact, threadId, userId) { for (const c of contacts.values()) if (userId ? c.userId === userId : c.contact === contact) c.threadId = threadId; },
     async setOptOut(contact, out, at) {
-      const c = upsert(contact, at, { optedOut: out });
-      if (!out && c.userId) for (const x of ofUser(c.userId)) x.optedOut = false;
+      const c = upsert(contact, at, { optedOut: out, optedOutAt: out ? at : null });
+      if (!out && c.userId) for (const x of ofUser(c.userId)) { x.optedOut = false; x.optedOutAt = null; }
     },
     async enqueueReply(userId, key, text, at, channel, part) { return enqueue(userId, { key, kind: "reply", text, at, channel: channel ?? null, part }); },
     async sawInbound(contact, at, o) {
@@ -137,15 +138,36 @@ export function memoryChannelWorld() {
       enqueue(a.userId, { key: `link:${id}`, kind: "link", text: a.text, at: a.at, channel: channelOf(a.askedOn) });
       return `link:${id}`;
     },
+    // TELEGRAM LINK REPLY CODE (review #348; 20261031063000): the plain yes never answers a link code's question.
     async confirmLink(a) {
-      const r = asks.filter((x) => x.userId === a.userId && x.askedOn === a.askedOn && x.answeredAt === null && x.expiresAt > a.at).sort((x, y) => y.createdAt - x.createdAt || y.id - x.id)[0];
+      const open = asks.filter((x) => !x.byCode && x.userId === a.userId && x.askedOn === a.askedOn && x.answeredAt === null && x.expiresAt > a.at).sort((x, y) => y.createdAt - x.createdAt || y.id - x.id);
+      const r = open[0];
       if (!r) return null;
+      // TELEGRAM LINK OWNERSHIP (2026-10-31; 20261031040000): two questions open, one a link code's: a yes cannot say which it
+      // meant, so neither is linked and both close; a code's question whose contact is stopped since links nothing.
+      if (open.length > 1 && open.some((x) => x.byCode)) { for (const x of open) x.answeredAt = a.at; return { ambiguous: true as const }; }
       r.answeredAt = a.at;
+      if (r.byCode && optedOut(a.askedOn)) return null;
       const other = contacts.get(r.contact)?.userId;
       if (other && other !== a.userId) return null;
       // IDENTITY SCENARIOS (2026-10-30): one contact per channel: the account's earlier chat on that channel is let go.
       for (const c of ofUser(a.userId)) if (channelOf(c.contact) === channelOf(r.contact) && c.contact !== r.contact) { c.userId = null; c.threadId = null; c.home = false; }
-      upsert(r.contact, a.at,{ userId: a.userId, threadId: contacts.get(a.askedOn)?.threadId ?? null, phone: r.phone });
+      upsert(r.contact, a.at, { userId: a.userId, threadId: contacts.get(a.askedOn)?.threadId ?? null, ...(r.phone ? { phone: r.phone } : {}) });
+      enqueue(a.userId, { key: `link:${r.id}:done`, kind: "link", text: a.notice, at: a.at, channel: channelOf(r.contact) });
+      return { contact: r.contact, key: `link:${r.id}:done` };
+    },
+    // TELEGRAM LINK REPLY CODE (review #348), as 20261031063000 channel_link_confirm_code: "LINK <code>" from the asked contact
+    // links the one request that code was made for, once, within its 15 minutes; five wrong codes close the contact's questions.
+    async confirmLinkCode(a) {
+      const open = asks.filter((x) => x.byCode && x.userId === a.userId && x.askedOn === a.askedOn && x.answeredAt === null && x.expiresAt > a.at);
+      const r = /^[0-9]{4}$/.test(a.code) ? open.filter((x) => x.replyCode === a.code).sort((x, y) => y.createdAt - x.createdAt || y.id - x.id)[0] : undefined;
+      if (!r) { for (const x of open) { x.wrongTries = (x.wrongTries ?? 0) + 1; if (x.wrongTries >= 5) x.answeredAt = a.at; } return null; }
+      r.answeredAt = a.at;
+      if (optedOut(a.askedOn)) return null;
+      const other = contacts.get(r.contact)?.userId;
+      if (other && other !== a.userId) return null;
+      for (const c of ofUser(a.userId)) if (channelOf(c.contact) === "telegram" && c.contact !== r.contact) { c.userId = null; c.threadId = null; c.home = false; }
+      upsert(r.contact, a.at, { userId: a.userId, threadId: contacts.get(a.askedOn)?.threadId ?? null });
       enqueue(a.userId, { key: `link:${r.id}:done`, kind: "link", text: a.notice, at: a.at, channel: channelOf(r.contact) });
       return { contact: r.contact, key: `link:${r.id}:done` };
     },
@@ -158,16 +180,37 @@ export function memoryChannelWorld() {
       nonces.set(await sha256(n), { userId, expiresAt: at + LINK_NONCE_MS, usedAt: null });
       return n;
     },
-    async redeemLinkNonce(nonce, contact, at): Promise<Redeemed> {
+    // TELEGRAM LINK OWNERSHIP (2026-10-31), as 20261031040000_telegram_link_confirm.sql channel_link_nonce_ask: opening a code
+    // links nothing new. It asks the account's own channel (a contact that is not stopped first, the one written from last),
+    // the code is used by that one question, and the chat is linked only on the YES there (confirmLink).
+    async redeemLinkNonce(nonce, contact, at, askText): Promise<Redeemed> {
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(nonce) || !/^tg:[1-9][0-9]{0,19}$/.test(contact)) return { ok: false, why: "invalid" };
       const row = nonces.get(await sha256(nonce));
       if (!row || row.usedAt !== null || row.expiresAt <= at) return { ok: false, why: "invalid" };
+      // TELEGRAM ROUND 3 (2026-10-31): a chat that is another account's links nothing and no longer uses the code up (as
+      // 20261031030000_telegram_link_code_kept.sql): the code's owner can still open it in their own chat.
+      const here = contacts.get(contact);
+      if (here?.userId && here.userId !== row.userId) return { ok: false, why: "linked_elsewhere" };
+      if (here?.userId === row.userId) { row.usedAt = at; return { ok: true, userId: row.userId, threadId: here.threadId }; }
+      const on = ofUser(row.userId).filter((c) => c.contact !== contact)
+        .sort((a, b) => Number(optedOut(a.contact)) - Number(optedOut(b.contact)) || (b.lastInboundAt ?? -Infinity) - (a.lastInboundAt ?? -Infinity) || a.createdAt - b.createdAt || a.contact.localeCompare(b.contact))[0];
+      if (!on || optedOut(on.contact)) return { ok: false, why: "cant_ask" };
+      // TELEGRAM LINK REPLY CODE (review #348; 20261031063000): the question must have a place for its reply code; at most 3
+      // code questions open per account; the code is 4 random digits not already open on that contact.
+      if (askText.split(LINK_CODE_SLOT).length !== 2) return { ok: false, why: "invalid" };
+      const openCode = asks.filter((x) => x.byCode && x.userId === row.userId && x.answeredAt === null && x.expiresAt > at);
+      if (openCode.length >= 3) return { ok: false, why: "busy" };
+      let replyCode = "";
+      do replyCode = String(crypto.getRandomValues(new Uint32Array(1))[0] % 10000).padStart(4, "0");
+      while (openCode.some((x) => x.askedOn === on.contact && x.replyCode === replyCode));
       row.usedAt = at;
-      const other = contacts.get(contact)?.userId;
-      if (other && other !== row.userId) return { ok: false, why: "linked_elsewhere" };
-      const thread = ofUser(row.userId).find((c) => c.threadId)?.threadId ?? null;
-      for (const c of ofUser(row.userId)) if (channelOf(c.contact) === "telegram" && c.contact !== contact) { c.userId = null; c.threadId = null; c.home = false; }
-      upsert(contact, at, { userId: row.userId, threadId: contacts.get(contact)?.threadId ?? thread, lastInboundAt: at });
-      return { ok: true, userId: row.userId, threadId: thread };
+      const id = ++asksSeq;
+      asks.push({ id, userId: row.userId, contact, phone: null, askedOn: on.contact, createdAt: at, expiresAt: at + LINK_CODE_ASK_MS, answeredAt: null, byCode: true, replyCode });
+      enqueue(row.userId, { key: `link:${id}`, kind: "link", text: askText.replace(LINK_CODE_SLOT, replyCode), at, channel: channelOf(on.contact) });
+      return { ok: false, why: "asked", userId: row.userId, key: `link:${id}` };
+    },
+    async pendingCodeLink(contact, at) {
+      return asks.some((x) => x.contact === contact && x.byCode && x.answeredAt === null && x.expiresAt > at);
     },
     // CHANNEL DELIVERY ROUND 2 (2026-10-30): as 20261030100000's career_outbox_rehold and career_outbox_fail_sent: the row
     // keeps what went before the failed message (sent_parts, the ids before it), so it resumes from that message and a late
@@ -220,6 +263,13 @@ export function memoryChannelWorld() {
         return out;
       },
       async optedOut(contact) { return optedOut(contact); },
+      // TELEGRAM ROUND 3: the time of the STOP, as channel_store.ts reads it (this contact, or any of its account's).
+      async optedOutAt(contact) {
+        const c = contacts.get(contact);
+        const rows = c?.userId ? ofUser(c.userId) : c ? [c] : [];
+        const at = rows.filter((x) => x.optedOut && typeof x.optedOutAt === "number").map((x) => x.optedOutAt as number);
+        return at.length ? Math.max(...at) : null;
+      },
       async stillTheirs(userId, contact) { return contacts.get(contact)?.userId === userId; },
       async quiet(userId) { return paused.has(userId) || ofUser(userId).some((c) => c.optedOut); },
       async setOptOut(contact, out, at) { await inbound.setOptOut(contact, out, at); },
@@ -230,7 +280,7 @@ export function memoryChannelWorld() {
         if (!o || o.status !== "sending") return;
         o.status = m.status; o.error = m.error ?? null; claimedIds.delete(id); mine.delete(id);
         if (m.sentParts !== undefined) { o.sentParts = m.sentParts; o.providerIds = m.providerIds?.length ? m.providerIds.slice(0, 10) : null; }
-        if (m.status === "delivered") { o.deliveredAt = m.at; o.providerId = m.providerId ?? null; o.providerIds = m.providerIds ?? (m.providerId ? [m.providerId] : null); o.retryAt = null; o.sentParts = 0; }
+        if (m.status === "delivered") { if (m.text !== undefined) o.text = m.text; o.deliveredAt = m.at; o.providerId = m.providerId ?? null; o.providerIds = m.providerIds ?? (m.providerId ? [m.providerId] : null); o.retryAt = null; o.sentParts = 0; }
         else if (m.status === "queued") { o.contact = null; o.retryAt = null; if (m.deliverAt !== undefined) o.deliverAt = m.deliverAt; }
         else if (m.status === "failed") { o.attempts++; o.retryAt = m.retryAt ?? null; }
         else o.retryAt = null;

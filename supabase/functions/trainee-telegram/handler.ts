@@ -14,7 +14,7 @@ import { fetchArtifactBytes } from "../_shared/channel_artifacts.ts";
 import { type JobDeps, type JobSender, sendJobCards, supabaseAccountStamp, supabaseConfirmedFacts, supabaseJobStore, tapJob } from "../_shared/telegram_jobs.ts";
 import { feedUrlsFor } from "../_shared/file_link.ts";
 import { supabaseCardStore } from "../_shared/career_apply_cards.ts";
-import { escapeHtml, textingNativeOn } from "../_shared/channel_voice.ts";
+import { escapeHtml, LATENCY_BUDGET, textingNativeOn } from "../_shared/channel_voice.ts";
 
 export interface ProviderWebhookDeps {
   env: { get(k: string): string | undefined };
@@ -25,6 +25,7 @@ export interface ProviderWebhookDeps {
   adapter?: (env: ProviderWebhookDeps["env"]) => ChannelAdapter; // tests inject one over a fake fetch
   // deno-lint-ignore no-explicit-any
   admin?: any; // FEATURE 16: the service client, for the resume file and the card's buttons
+  timers?: CoreDeps["timers"]; // N12: the clock the typing refresh and the interim run on (tests inject one)
 }
 // The adapter's sends, bound to one chat, as the job cards use them.
 // KNOWN GAPS (2026-10-30, #311): with the texting voice on, the adapter sends text as HTML; a card's text is the posting's
@@ -42,6 +43,10 @@ export function webhookDeps(adapter: ChannelAdapter, d: ProviderWebhookDeps): Co
   return {
     env: d.env, now: d.now, store: d.store(), render: adapter.render, chat: d.chat, deliver: d.deliver,
     reply: async (contact, bubbles, opts) => await adapter.send(addressOf(contact), bubbles, opts),
+    // N12/N13: typing at once and every typingEveryMs while a message is handled; one interim when a turn runs past the budget.
+    ...(adapter.typing ? { typing: async (address: string) => await adapter.typing!(address, null), typingEveryMs: adapter.typingEveryMs ?? LATENCY_BUDGET.typingEveryMs } : {}),
+    ackAfterMs: LATENCY_BUDGET.ackAfterMs,
+    ...(d.timers ? { timers: d.timers } : {}),
     ...(admin && adapter.fetchFile ? {
       resumeFile: async (a: Parameters<NonNullable<CoreDeps["resumeFile"]>>[0]) =>
         await ingestResumeFile({ userId: a.userId, channel: "telegram", doc: a.doc, fetchFile: (id, max) => adapter.fetchFile!(id, max), record: supabaseUploadRecorder(admin) }),

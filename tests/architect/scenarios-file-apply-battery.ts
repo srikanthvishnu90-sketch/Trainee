@@ -32,7 +32,7 @@ import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { postgrestDouble } from "../flow/postgrest.ts";
 import { PgConn } from "../flow/pgwire.ts";
 import { confirmedResumeSql } from "../flow/resume-seed.ts";
-import { signedIn } from "./file-session-fakes.ts";
+import { phonePost, signedIn } from "./file-session-fakes.ts";
 import { BY_HAND, descText, generate, HIT_LOCS, HIT_PAYS, type PayloadSpec, type PostingSpec, rng, ROW_LOCS, ROW_PAYS, sample, type Scenario, SECRET_MARK,
   type Step } from "./scenarios/file-apply-generator.ts";
 
@@ -420,7 +420,8 @@ function printReport(label: string, rep: Report): number {
   return failed;
 }
 
-const LOGO_SRC = (tpl: string, dom: string) => (tpl || "https://www.google.com/s2/favicons?sz=128&domain={domain}").split("{domain}").join(encodeURIComponent(dom));
+// R16: employer-domain default. With no provider configured the logo is the employer's own domain through the page's own origin.
+const LOGO_SRC = (tpl: string, dom: string) => tpl ? tpl.split("{domain}").join(encodeURIComponent(dom)) : `?logo=${encodeURIComponent(dom)}`;
 const ALLOWED_TAGS = new Set(["html", "head", "meta", "link", "title", "style", "body", "div", "header", "svg", "rect", "text", "span", "h1", "p", "form", "input", "button", "main", "ul", "li", "img", "details", "summary", "a", "strong", "footer", "script"]);
 const CODES = /\b(duplicate_job|daily_cap|no_resume|pace_unreadable|company_cooldown|not_submitted|needs_user|unknown_outcome|submitted_unconfirmed|invalid card)\b/;
 
@@ -547,7 +548,7 @@ async function runScenario(s: Scenario, w: World, rep: Report, tok: string, o: {
     rep.requests++; const t0 = performance.now();
     let res: Response;
     try {
-      res = f ? await handleFile(new Request("https://x.example/f", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", cookie: `tf_s=${tok}` }, body: new URLSearchParams({ t: tok, ...f }).toString() }), w.deps)
+      res = f ? await handleFile(new Request("https://x.example/f", await phonePost({ t: tok, ...f }, w.deps.env.get("TRAINEE_FILE_LINK_SECRET") ?? "")), w.deps)
         : await handleFile(new Request(`https://x.example/f${text ? "?format=text" : ""}`, { headers: { cookie: `tf_s=${tok}` } }), w.deps);
     } catch (e) { fail("handler: threw", `#${s.id}: ${String(e).slice(0, 120)}`); return { status: 0, html: "" }; }
     rep.statuses[res.status] = (rep.statuses[res.status] ?? 0) + 1;
@@ -718,7 +719,7 @@ later([1], { name: "file apply battery regressions: secrets, what we send, statu
       want: (seen, w) => [0, 1, 2].every((i) => rowOf(seen, i)?.link !== null && rowOf(seen, i)?.tag === null) && rowOf(seen, 3)?.link === null && !/javascript:/.test(seen!.html) && w.wantCalls.length === 0 },
     { name: "a posting on acme.bamboohr.com, on remoteok.com or news.ycombinator.com gets the lettermark; one on the employer's own careers host gets its logo (was: the ATS's or board's favicon)",
       s: SC(910_008, [POST(1, { url: "ats_other", slug: "marrowbyte" }), POST(2, { url: "board", boardHost: "news.ycombinator.com" }), POST(3, { url: "own_gh", slug: "oskarion" })], [{ k: "get" }]),
-      want: (seen) => rowOf(seen, 0)?.img === null && rowOf(seen, 1)?.img === null && /domain=oskarion\.com/.test(rowOf(seen, 2)?.img ?? "") },
+      want: (seen) => rowOf(seen, 0)?.img === null && rowOf(seen, 1)?.img === null && /(?:domain|logo)=oskarion\.com/.test(rowOf(seen, 2)?.img ?? "") },
     { name: "bidi overrides in a company, a title and a location never reach the page (was: rendered, reversing 'Reported, not verified')",
       s: SC(910_009, [POST(1, { company: "Evil‮gnp.exe Ltd", title: "Planner ‮reganam", rowLoc: "Lisbon ‮PT" })], [{ k: "get" }, { k: "text" }]),
       want: (seen) => !/[‪-‮⁦-⁩]/.test(seen!.html) && rowOf(seen, 0)!.name === "Evilgnp.exe Ltd" },

@@ -191,7 +191,7 @@ export function understandPayload(m: MailMsg, t: Pick<ThreadRow, "recipient_name
   const offered = (t.offered ?? []).map((s, i) => `${i + 1}. ${s.start}`).join("\n");
   const body = String(m.text ?? "").split(/\n\s*On .{0,120} wrote:\s*\n/i)[0].slice(0, 4000);
   return {
-    system: UNDERSTAND_SYSTEM, max_tokens: 500, store: false,
+    system: UNDERSTAND_SYSTEM, max_tokens: 500,
     tools: [UNDERSTAND_TOOL], tool_choice: { type: "tool", name: "record_email" },
     messages: [{ role: "user", content: [
       `Today: ${new Date(now).toISOString()}. Conversation with ${t.recipient_name}${t.recipient_firm ? ` (${t.recipient_firm})` : ""}, subject "${t.subject}".`,
@@ -1161,12 +1161,17 @@ export function supabaseRepliesStore(admin: any): RepliesStore {
     askDue: async (limit, now) => ((await rpc("career_outreach_followup_ask_due", { p_limit: limit, p_now: iso(now) }, "who to ask")) ?? []).map((x: any) => String(typeof x === "object" ? Object.values(x)[0] : x)),
     async prefs(u) { const r = must(await admin.from("career_outreach_followup_prefs").select("steps,off,asked_at").eq("user_id", u).maybeSingle(), "read follow-up settings"); return r ?? { steps: null, off: false, asked_at: null }; },
     async setPrefs(u, p) { must(await admin.from("career_outreach_followup_prefs").upsert({ user_id: u, ...p, updated_at: new Date().toISOString() }, { onConflict: "user_id" }), "save follow-up settings"); },
-    async saveActions(u, items, at) {
+    // 2026-10-31: created_at is the database's own clock at the insert (the column's default), never the caller's `at`.
+    // shownBatch below orders a batch against the chat message that showed it (agent_messages.created_at, also the
+    // database's clock): with the caller's time, a batch drafted by a run that started before "show outreach approvals"
+    // (its `at` the run's start) and saved after it read as shown, and so did one saved in the same millisecond as the
+    // message (the worker's millisecond against Postgres's microseconds; CI run 41154002130, B3: the newer batch approved).
+    async saveActions(u, items, _at) {
       const batch_id = crypto.randomUUID();
       const out: Action[] = [];
       let n = 0;
       for (const it of items) { // one by one: the one-follow-up-per-thread index refuses a second, and the rest still go in
-        const r = await admin.from("career_outreach_actions").insert({ user_id: u, thread_id: it.thread_id, kind: it.kind, step: it.step ?? null, batch_id, n: n + 1, payload: it.payload, hash: it.hash, created_at: new Date(at).toISOString() }).select(ACOLS);
+        const r = await admin.from("career_outreach_actions").insert({ user_id: u, thread_id: it.thread_id, kind: it.kind, step: it.step ?? null, batch_id, n: n + 1, payload: it.payload, hash: it.hash }).select(ACOLS);
         if (r.error && (r.error.code === "23505" || /duplicate key/i.test(r.error.message))) continue;
         out.push(...(must(r, "save an action") ?? [])); n++;
       }
@@ -1200,8 +1205,9 @@ export function supabaseRepliesStore(admin: any): RepliesStore {
     },
     // The batch a chat showed: the one the scheduled run pushed there (its outbox key names it), or, when the chat's last
     // word is an approvals reply ("show outreach approvals", a partial yes), the newest batch that existed when that reply
-    // was written: a batch drafted after it was never shown there. (An approvals message older than every batch, which
-    // only a hand-set clock makes, reads the newest batch, as before.)
+    // was written: a batch drafted after it was never shown there. Both times are the database's (saveActions above), so
+    // "after" is the order the rows went in. An approvals message older than every batch showed none: null (nothing is
+    // approved; the turn shows what is waiting and binds the next answer to it).
     async shownBatch(u, chat) {
       const last = must(await admin.from("agent_messages").select("meta,created_at").eq("thread_id", chat).eq("role", "assistant").order("id", { ascending: false }).limit(1), "read the last reply");
       const meta = last?.[0]?.meta ?? {};
@@ -1210,8 +1216,7 @@ export function supabaseRepliesStore(admin: any): RepliesStore {
       if (meta.intent !== ACTIONS_INTENT) return null;
       const newest = (q: any) => q.order("created_at", { ascending: false }).limit(1);
       const before = last?.[0]?.created_at ? must(await newest(admin.from("career_outreach_actions").select("batch_id").eq("user_id", u).lte("created_at", last[0].created_at)), "read the batch shown") : [];
-      if (before?.[0]?.batch_id) return before[0].batch_id;
-      return must(await newest(admin.from("career_outreach_actions").select("batch_id").eq("user_id", u)), "read the batch shown")?.[0]?.batch_id ?? null;
+      return before?.[0]?.batch_id ?? null;
     },
     batch: async (u, b) => must(await admin.from("career_outreach_actions").select(ACOLS).eq("user_id", u).eq("batch_id", b).order("n"), "read the batch") ?? [],
     async stopAddress(u, email) {

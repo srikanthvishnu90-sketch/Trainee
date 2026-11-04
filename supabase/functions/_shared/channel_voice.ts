@@ -9,10 +9,11 @@
 // CAREER_TEXTING_NATIVE=on; off, every adapter renders exactly as before.
 
 import { findUrls, safeCut, type UrlSpan, urlsOf } from "./channel_text.ts";
+import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 release flags
 import { toBubbles } from "./conversation.ts";
 
 export type VoiceChannel = "imessage" | "sms" | "whatsapp" | "telegram" | "web";
-export const textingNativeOn = (env: { get(k: string): string | undefined }) => env.get("CAREER_TEXTING_NATIVE") === "on";
+export const textingNativeOn = (env: { get(k: string): string | undefined }) => releaseFlagOn(env, "CAREER_TEXTING_NATIVE");
 
 // CHANNEL DELIVERY SCENARIOS (2026-10-29): links are found by channel_text.ts findUrls (a link's own brackets kept, the
 // sentence's punctuation and brackets left out), each link once per line, and removed from the line by its position, so a
@@ -292,8 +293,62 @@ export function ackFor(message: string): string {
   if (/\bapply\b/.test(m)) return "on it — getting that ready";
   if (/\bresume\b|\bcv\b/.test(m)) return "on it — reading that now";
   if (/\b(email|write|draft|message)\b/.test(m)) return "on it — writing that now";
-  if (/\b(interview|mock|prep|practice)\b/.test(m)) return "on it — one sec";
-  return "on it — one sec";
+  if (/\b(interview|mock|prep|practice)\b/.test(m)) return "on it — setting that up now";
+  // N12: the interim says what Trainee is doing, never just "one sec"; it claims no result.
+  return "on it — working on that now";
+}
+
+// N12/N13 LATENCY BUDGET (spec 16 speed): on a chat channel the typing indicator goes out as soon as a message arrives
+// and again every TYPING_EVERY_MS while Trainee works (Telegram clears it after about 5 s); a turn still running after
+// FAST_ACK_MS gets exactly one interim line (ackFor: what Trainee is doing, never a result), then the real answer.
+export const TYPING_EVERY_MS = 4000;
+export const FAST_ACK_MS = 6000;
+export const LATENCY_BUDGET = { typingEveryMs: TYPING_EVERY_MS, ackAfterMs: FAST_ACK_MS } as const;
+
+// The typing indicator from now until stop(): shown at once, then every everyMs; best effort (a failure never touches the
+// turn); stop() ends the refresh and waits for a call in flight, so nothing is shown after the answer.
+export function typingLoop(o: { typing: () => Promise<unknown>; everyMs?: number; setTimer?: (fn: () => void, ms: number) => unknown; clearTimer?: (h: unknown) => void }) {
+  const setT = o.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+  const clearT = o.clearTimer ?? ((h: unknown) => clearTimeout(h as number));
+  let done = false, timer: unknown = null;
+  const pending: Promise<unknown>[] = [];
+  const show = () => { try { pending.push(Promise.resolve(o.typing()).catch(() => {})); } catch { /* never fails the turn */ } };
+  const tick = () => { if (done) return; show(); timer = setT(tick, o.everyMs ?? TYPING_EVERY_MS); };
+  tick();
+  return {
+    async stop() {
+      done = true;
+      if (timer !== null) clearT(timer);
+      timer = null;
+      await Promise.all(pending);
+    },
+  };
+}
+
+// One interim at most, armed once: start() arms it (a second start() is a no-op), stop() disarms it and waits for an ack
+// already started, so it always reaches the person before the answer. Returns whether the ack went.
+export function ackOnce(o: { afterMs: number | null | undefined; ack: () => Promise<unknown>; setTimer?: (fn: () => void, ms: number) => unknown; clearTimer?: (h: unknown) => void }) {
+  const setT = o.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+  const clearT = o.clearTimer ?? ((h: unknown) => clearTimeout(h as number));
+  let armed = false, done = false, acked = false, timer: unknown = null, pending: Promise<unknown> | null = null;
+  return {
+    start() {
+      if (armed || done || o.afterMs === null || o.afterMs === undefined || !(o.afterMs >= 0)) return;
+      armed = true;
+      timer = setT(() => {
+        if (done || acked) return;
+        acked = true;
+        try { pending = Promise.resolve(o.ack()).catch(() => {}); } catch { /* never fails the turn */ }
+      }, o.afterMs);
+    },
+    async stop(): Promise<boolean> {
+      done = true;
+      if (timer !== null) clearT(timer);
+      timer = null;
+      if (pending) await pending;
+      return acked;
+    },
+  };
 }
 
 export interface WorkingOptions {

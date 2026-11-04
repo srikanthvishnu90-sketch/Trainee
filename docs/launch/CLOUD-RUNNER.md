@@ -23,7 +23,13 @@ pg_cron (every minute)
 ```
 
 - **Limits.** Global (`CLOUD_MAX_CONCURRENT`) and per portal family (`CLOUD_MAX_PER_PORTAL`) are enforced in SQL under one
-  dispatch lock, counted from what is `driving` inside the lease. Starts per tick: `CLOUD_MAX_STARTS_PER_TICK`.
+  dispatch lock, counted from what is `driving` inside the lease. Starts per tick: `CLOUD_MAX_STARTS_PER_TICK`. A number past what the
+  claims accept (500 starts, 10,000 running) is held to it in code, so a typo cannot make every tick claim nothing.
+- **Fair, parallel preparation.** `career_apply_prepare_request_claim` serves people in turns (20261102130000): a request's turn is its
+  position among that person's queued requests plus the number of theirs already running, so one person's 100 roles (four parts of 25)
+  take one slot before anyone else's first and never idle a free slot when nobody else waits. Inside a sandbox the part's postings are
+  prepared 4 at once (`PREPARE_PARALLEL`, at most 8), so 25 postings fit the 13-minute sandbox. Rollback:
+  `supabase/rollbacks/20261102130000_career_apply_prepare_fair_claim.down.sql`.
 - **The per-person cap is the SQL one.** `career_apply_cloud_refusal` decides every claim: the person's own pace (if
   set), one employer per 30 days on the one ledger, the opt-in, pauses, the gate or waiver, the kill switch.
 - **Retry and backoff.** The claim is one transaction: if it fails, nothing was claimed and the next tick asks again.
@@ -175,10 +181,12 @@ marker (`career_apply_cloud_text_claims`) the authorization requires. The gate, 
 | `CLOUD_RUNNER_SECRET`, `CLOUD_DISPATCH_SECRET`, `CAREER_PREPARE_AHEAD_TOKEN` | the job/request tokens' key, the ticks' header, the chat's kick | generated (48 characters) |
 | `CLOUD_BRIDGE_URL`, `CAREER_PREPARE_AHEAD_URL` | `<project>/functions/v1/career-cloud-runner` and `.../prepare` | derived, never asked |
 | `CLOUD_RUNNER_ENABLED`, `CLOUD_PREPARE_ENABLED` | `on` turns sending / preparation on | not touched: off |
-| `CLOUD_MAX_CONCURRENT`, `CLOUD_MAX_PER_PORTAL`, `CLOUD_MAX_STARTS_PER_TICK` | sending: global, per family, per tick | 2, 1, 2 (wave 1) |
+| `UPMORE_SCRIPT_SUBMIT_LIVE` | `1` binds a real Greenhouse, Ashby or Lever form's scripted Submit; handed to both sandboxes. Every Ashby form needs it (no `<form>` post) | Ashby postings stop at `SUBMIT_DESTINATION_NOT_BOUND`: no card, no send |
+| `CLOUD_MAX_CONCURRENT`, `CLOUD_MAX_PER_PORTAL`, `CLOUD_MAX_STARTS_PER_TICK` | sending: global, per family, per tick | 60, 20, 30 (was 2, 1, 2 in wave 1) |
 | `CLOUD_MAX_PER_PERSON_DAY`, `CLOUD_MAX_PER_SITE_MINUTE` | sending: per person per 24 h, per employer host per minute | no number (NO LIMITS) |
-| `CLOUD_PREPARE_MAX_CONCURRENT`, `CLOUD_PREPARE_STARTS_PER_TICK` | preparation: global, per tick | 2, 2 (wave 1) |
+| `CLOUD_PREPARE_MAX_CONCURRENT`, `CLOUD_PREPARE_STARTS_PER_TICK` | preparation: global, per tick | 60, 30 (was 2, 2 in wave 1) |
 | `CLOUD_PREPARE_PER_PERSON_DAY`, `CLOUD_PREPARE_PER_SITE_MINUTE` | preparation: postings per person per 24 h, postings per employer host per minute | no number (NO LIMITS) |
+| `CLOUD_DISPATCH_PARALLEL` | sandboxes one tick creates at once (send and preparation), 1 to 32 | 16 (was 8, not settable) |
 
 The database switches stay the owner's, by SQL: `insert into career_cloud_settings (key, value) values
 ('CAREER_AGENT_SUBMIT', 'on'), ('CAREER_CLOUD_APPLY', 'on'), ('CAREER_CLOUD_TEXT_CARDS', 'on') on conflict (key) do update set value = excluded.value;`
@@ -194,8 +202,9 @@ ends needs_user). The person's own pace, when they set one, still binds. What is
 
 | | Default | Larger pool | Why |
 |---|---|---|---|
-| `CLOUD_MAX_CONCURRENT` / `CLOUD_MAX_PER_PORTAL` | 2 / 1 | 5 / 2 | the 2 vCPU sandbox measured 3.5 s per application at 3 at a time on a local form; real forms are 30 to 90 s |
-| `CLOUD_PREPARE_MAX_CONCURRENT` | 2 | 5 | |
+| `CLOUD_MAX_CONCURRENT` / `CLOUD_MAX_PER_PORTAL` | 60 / 20 | 120 / 40 | the 2 vCPU sandbox measured 3.5 s per application at 3 at a time on a local form; real forms are 30 to 90 s. Defaults raised from 2 / 1 (scale audit, 2026-11-02); greenhouse, lever and ashby share the 60 |
+| `CLOUD_PREPARE_MAX_CONCURRENT` | 60 | 120 | was 2 |
+| `CLOUD_DISPATCH_PARALLEL` | 16 | 32 | the tick is 55 s; at 30 starts a tick, 16 at a time is two rounds of creates |
 
 `select career_apply_cloud_check_rates(7)` shows each host's `bot_check_rate` and `unconfirmed_after_24h` with their
 counts: what an outside system is refusing, which is what slows work down.
@@ -246,7 +255,7 @@ with no email after 24 hours (`unconfirmed_after_24h` in the rates).
 4. **Edge function secrets** (Supabase → Edge Functions → Secrets), by name:
    `CLOUD_RUNNER_SECRET` (random, ≥ 32 characters), `CLOUD_DISPATCH_SECRET` (random), `VERCEL_TOKEN`, `VERCEL_TEAM_ID`,
    `VERCEL_PROJECT_ID`, `CLOUD_SANDBOX_SNAPSHOT_ID`, `CLOUD_BRIDGE_URL` (`https://<project>.supabase.co/functions/v1/career-cloud-runner`),
-   and the limits only to raise them past wave 1 (unset, `CLOUD_MAX_CONCURRENT` 2, `CLOUD_MAX_PER_PORTAL` 1, `CLOUD_MAX_STARTS_PER_TICK` 2).
+   and the limits only to change them (unset: `CLOUD_MAX_CONCURRENT` 60, `CLOUD_MAX_PER_PORTAL` 20, `CLOUD_MAX_STARTS_PER_TICK` 30, as the sizing table below; a value already set on the project keeps winning).
    Optional: `CLOUD_SANDBOX_REGION` (iad1), `CLOUD_SANDBOX_VCPUS` (2). Then `CLOUD_RUNNER_ENABLED=on`.
 5. **Deploy** `supabase functions deploy career-cloud-runner --no-verify-jwt` (config.toml sets `verify_jwt = false`; the
    dispatcher checks its header secret, the bridge its per-job token).

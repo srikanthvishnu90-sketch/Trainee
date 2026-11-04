@@ -114,10 +114,7 @@ export function memoryAlertStore(initial?: MemoryAlerts): AlertStore & Outbox & 
       if (typeof row.prefs.min_fit === "number" && !(typeof m.fit === "number" && m.fit >= row.prefs.min_fit)) return "below_fit";
       const today = row.sent_on === c.day ? Math.max(0, row.instant_sent_today | 0) : 0;
       if (today >= Math.min(MAX_INSTANT_PER_DAY, Math.floor(Number(row.prefs.max_instant_per_day) || 0))) return "capped";
-      // Mirrors the database function career_alert_enqueue (20261030070000_proactive_r2.sql), which still holds a rolling-week
-      // count (max_per_week, default 15, at most 25). The planner (career_alerts.ts) no longer has one; this double stays faithful to the database.
-      const since = Date.parse(c.weekSince), weekCap = Math.max(0, Math.min(WEEKLY_MAX, Math.floor(Number(row.prefs.max_per_week ?? 15))));
-      if (st.outbox.filter((o) => o.userId === userId && o.kind === "alert" && o.at >= since).length >= weekCap) return "capped";
+      // No weekly count: owner rule "no caps"; career_alert_enqueue (20261030180000) dropped it. max_per_week is accepted and ignored.
       const was = { n: row.instant_sent_today, on: row.sent_on };
       row.instant_sent_today = today + 1;
       row.sent_on = c.day;

@@ -96,7 +96,16 @@ const CareerOnboarding = (() => {
     const p = profile || {}, cons = p.constraints || {}, prefs = p.preferences || {}, basics = p.basics || {};
     const hit = (answer, source) => ({ found: true, answer, source, reasked: false });
     const miss = (what) => ({ found: false, answer: null, reasked: true, ask: `I do not have your ${what} stored yet — what is it? I will save it and never ask again.` });
-    if (/graduat/.test(q)) return cons.graduationDate ? hit(`Your graduation date is ${cons.graduationDate}.`, "profile constraints.graduationDate (stored, ask-once)") : miss("graduation date");
+    if (/graduat/.test(q)) {
+      if (cons.graduationDate) return hit(`Your graduation date is ${cons.graduationDate}.`, "profile constraints.graduationDate (stored, ask-once)");
+      // ONBOARDING ROUND 3 (2026-11-01): "what's my graduation year?" with "..., May 2024" on the confirmed resume said "I do
+      // not have your graduation date stored yet". The confirmed education entry's own last date is read back, as written
+      // there (never a year guessed from a range's start, a month added, or an entry that shows none); two dated entries
+      // are both named.
+      const dated = confirmedEducation(p).map((f) => { const line = eduLine(f), ds = /\b(?:present|current|now|ongoing)\b/i.test(line) ? null : line.match(GRAD_DATE_G); return ds && { date: ds[ds.length - 1], school: eduSchool(f) }; }).filter(Boolean);
+      if (dated.length) return hit(`On your confirmed resume: ${dated.map((d) => `${d.date}${d.school ? ` (${d.school})` : ""}`).join("; ")}.`, "confirmed resume fact: education");
+      return miss("graduation date");
+    }
     if (/work authorization|authorised|authorized to work|sponsorship/.test(q)) return cons.workAuthorization ? hit(`Your saved work authorization: ${cons.workAuthorization}.`, "profile constraints.workAuthorization (stored, ask-once)") : miss("work authorization");
     if (/target companies|companies.*target/.test(q)) return (prefs.targetCompanies || []).length ? hit(`Your target companies: ${prefs.targetCompanies.join(", ")}.`, "profile preferences.targetCompanies (stored)") : miss("target companies");
     if (/what roles|roles?.*(?:looking|want|target)|looking for|what (?:jobs?|positions?|kind of)/.test(q)) return (prefs.roles || []).length ? hit(`You are looking for: ${prefs.roles.join(", ")}.`, "profile preferences.roles (stored)") : miss("target roles");
@@ -153,6 +162,7 @@ const CareerOnboarding = (() => {
   function confirmedEducation(p) {
     return ((p && p.facts) || []).filter((f) => f && f.kind === "education" && f.needs_confirmation !== true && (f.status == null || f.status === "confirmed"));
   }
+  const GRAD_DATE_G = /\b(?:(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|autumn|winter)\.?\s+)?(?:\d{1,2}\/)?(?:19|20)\d\d\b/gi;
   const eduLine = (f) => String(f.title || f.text || "").split("\n")[0].replace(/\s+/g, " ").trim();
   const eduSchool = (f) => (eduLine(f).split(/\s+[-–—]\s+|,/)[0] || "").trim();
 

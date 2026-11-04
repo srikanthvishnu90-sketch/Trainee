@@ -2,6 +2,14 @@
 # WO-001: career code and its shared boundaries; no live/provider calls.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+# The tests run with every release flag rolled back (release_config.ts: any value but the release value is "off"), so they
+# pin the behavior they were written for and a leaked model key cannot make a flag's model call reach a real host. A test of
+# a flag on sets it explicitly; tests/architect/release-flags.test.ts holds the committed defaults with its own environment.
+for _flag in CAREER_TEXTING_NATIVE CAREER_NETWORKING_DRAFT CAREER_TAILOR_REWRITE CAREER_MOCK_JUDGE CAREER_MAIL_TRACKING CAREER_BRIEF_DIGEST \
+  CAREER_OUTREACH_FOLLOWUPS CAREER_INTRO_REMINDERS UPMORE_SCRIPT_SUBMIT_LIVE CLOUD_RUNNER_ENABLED CLOUD_PREPARE_ENABLED \
+  CAREER_EMAIL_SEND CAREER_OUTREACH_SEND CAREER_SEND_RAIL; do
+  export "$_flag=off"
+done
 failed=0
 results=()
 details=()
@@ -118,6 +126,7 @@ edge_tests=(
   tests/edge/channel.test.ts
   tests/edge/channel-delivery.test.ts tests/edge/channel-integrity.test.ts
   tests/edge/channel-inbound.test.ts
+  tests/edge/telegram-link-reply-code.test.ts
   tests/edge/capability-journey.test.ts
   tests/edge/eval-judge.test.ts
   tests/edge/career-apply-store.test.ts
@@ -165,6 +174,8 @@ PY
 # (architect), with its companion Deno check of scripts/apply.ts. Core keeps every other step. Scheduling only,
 # as above: the steps and their commands are unchanged, and the union of core and architect is the old core.
 browser_node_tests=(
+  tests/career-apply-dryrun.test.cjs
+  tests/career-apply-exact-option.test.cjs
   tests/career-approval-card-browser.test.cjs
   tests/career-dashboard-browser.test.cjs
   tests/career-extension-agent-submits.test.cjs

@@ -180,7 +180,11 @@ function createWorker(o) {
     }
     if (res.status === "unknown_outcome") return void (await complete(row, "unknown_outcome", "application outcome unknown: " + String(res.reason || "").slice(0, 80), ev));
     // not_submitted
-    if (res.reason === "missing_required_answer") return void (await complete(row, "needs_user", "missing_required_answer", { ...ev, field: res.field, handed_back: "a required question has no confirmed answer" }));
+    // A required question the person has not answered (or one that could not be set and read back): handed back by name, never guessed.
+    if (res.reason === "missing_required_answer" || res.reason === "field_not_filled") {
+      const q = String(res.field || "").replace(/\s+/g, " ").slice(0, 80);
+      return void (await complete(row, "needs_user", `${res.reason}${q ? ": " + q : ""}`, { ...ev, nothing_sent: true, field: res.field, needs: res.needs || null, handed_back: res.reason === "missing_required_answer" ? "a required question has no confirmed answer" : "a required question could not be filled in and checked" }));
+    }
     if (res.reason === "retries_exhausted") {
       if (res.error === "page_load_429") await refused(row, "rate_limited", null);
       else if (/^page_load_5\d\d$/.test(res.error || "")) await refused(row, "server_busy", null);

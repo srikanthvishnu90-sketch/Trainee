@@ -22,7 +22,7 @@ export async function handleOps(req: Request, d: OpsDeps): Promise<Response> {
     const snap = await readSnapshot(d.admin, d.env, now, edge5xxFetcher(d.env, now, d.request));
     const alerts = evaluate(snap);
     const sent = await dispatch(d.admin, d.env, alerts, now, d.request);
-    const notMeasured = Object.entries({ ingest: snap.ingest, delivery: snap.delivery, apply_worker: snap.worker, budget_refusals: snap.refusals, spend: snap.spend, http_5xx: snap.http5xx, deploy_smoke: snap.deploySmoke, outbox: snap.outbox }).filter(([, v]) => v === null).map(([k]) => k);
+    const notMeasured = Object.entries({ ingest: snap.ingest, delivery: snap.delivery, apply_worker: snap.worker, budget_refusals: snap.refusals, spend: snap.spend, http_5xx: snap.http5xx, deploy_smoke: snap.deploySmoke, outbox: snap.outbox, approval_rate: snap.approval }).filter(([, v]) => v === null).map(([k]) => k);
     return json({ ok: true, evaluated: alerts.length, sent, not_measured: notMeasured });
   }
   if (mode === "digest") {

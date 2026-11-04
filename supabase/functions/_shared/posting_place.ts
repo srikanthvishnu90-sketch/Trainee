@@ -34,10 +34,21 @@ const NAMES_US =/^(us|u\.s\.?|usa|u\.s\.a\.?|united states( of america)?|america
 const WAY_OF_WORK = /^(remote|hybrid|on[- ]?site|in[- ]?office|office|anywhere|flexible|distributed|virtual|wfh|work from home|field|travel|multiple locations|various( locations)?|world ?wide|global|home based)$/i;
 
 export interface PlacePart { city: string; state: string; country: "us" | "abroad" | ""; remote: boolean }
+// 2026-11-03 (ingest round 3): a time zone is not a place. "Remote (PST)", "Remote - Pacific Time", "Remote (CET +/- 2)"
+// used to read the zone as a city ("pst", "pacific time"); "Remote - PT" as Portugal. A remote posting that names only a
+// zone names no place.
+const TIME_ZONE = /^(?:(?:[PMCEA][SD]?T|HST|AKST|AKDT|GMT|UTC|CET|CEST|EET|EEST|WET|WEST|BST|IST|SGT|JST|KST|AEST|AEDT|NZST|BRT|ART)(?:\s*(?:[+-−]|\+\/-)\s*\d{1,2}(?::?\d{2})?)?(?:\s+(?:time(?:\s*zones?)?|hours|overlap|preferred))?|(?:pacific|eastern|central|mountain|atlantic|alaska|hawaii)(?:\s+(?:standard|daylight))?(?:\s+time)?(?:\s*zones?)?(?:\s+hours)?|(?:us|north american?|european|americas?)\s+time\s*zones?|time\s*zones?.*|[+-]\s*\d{1,2}\s*(?:hours?|h)?)$/i;
+// A two-letter code that is a US time zone as often as a place ("Remote - PT": Pacific Time or Portugal; "Remote - CT"):
+// beside the word remote with no city, it settles nothing.
+const ZONE_OR_PLACE = new Set(["pt", "et", "ct", "mt"]);
+// A continent is not a city ("Remote - Americas").
+const CONTINENT = /^(?:the\s+)?(?:north\s+|south\s+|latin\s+|central\s+)?americas?$/i;
 
 // US state codes that are also countries' codes (DE Germany, IL Israel, CA Canada, IN India...): beside a city abroad
 // ("Tel Aviv, IL", "Berlin, DE") the code is the country's; beside any other city it is the state ("Melbourne, FL").
 const AMBIGUOUS_CODE = new Set(["al", "ar", "az", "ca", "co", "de", "ga", "id", "il", "in", "ky", "la", "ma", "md", "me", "mn", "mo", "ms", "mt", "nc", "ne", "pa", "sc", "sd", "tn", "va"]);
+// The text beside "remote" is only such a code ("Remote - IN", "Remote (PT)"): it names no region for sure.
+export const unsettledRemoteCode = (rest: string) => { const c = rest.replace(/[\s\-–—(),:;/]+/g, " ").trim(); return /^[A-Z]{2}$/.test(c) && (ZONE_OR_PLACE.has(c.toLowerCase()) || AMBIGUOUS_CODE.has(c.toLowerCase())); };
 // Country codes postings use beside a city ("GB-London", "HK - Hong Kong SAR", "Valencia (ES)", "Toronto, ON").
 const ABROAD_CODE = /^(GB|UK|HK|SG|ES|IE|NL|BE|CH|AT|SE|NO|DK|FI|PL|CZ|PT|IT|FR|CN|TW|JP|KR|AU|NZ|MX|BR|CL|PE|PH|MY|VN|TH|AE|SA|QA|ZA|NG|KE|EG|TR|BC|ON|QC|AB|NS|MB|SK|NB|NL)$/;
 // What a city's name carries that is not the city ("San Francisco HQ", "Greater Boston Area", "Los Angeles County").
@@ -51,13 +62,18 @@ export function postingPlaces(text: string): PlacePart[] {
     // "Mesa, AZ: Power Rd / Elliot Rd": what follows a colon is the street, not another place.
     const head = chunk.replace(/:.*$/, "");
     for (const seg of head.split(/\s+\/\s*|\s*\/\s+|(?<=[a-z])\/(?=[A-Z])|\s+or\s+|\s+&\s+/i)) {
-      let tokens = seg.split(/\s*(?:,|\(|\)|\s-\s|^([A-Z]{2})-|-(?=[A-Z][a-z]))\s*/).filter((t) => t && t.trim()).map((t) => t.replace(/\s+/g, " ").trim());
+      // Round 3: an en or em dash between two parts is the hyphen's job ("Remote – US", "Remote — United States").
+      let tokens = seg.split(/\s*(?:,|\(|\)|\s[-–—]\s|^([A-Z]{2})-|-(?=[A-Z][a-z]))\s*/).filter((t) => t && t.trim()).map((t) => t.replace(/\s+/g, " ").trim());
       // "Olathe KS", "Marinette, WI 54143", "Cambridge, MA USA": a state code, zip or country after the name, without a comma.
       tokens = tokens.flatMap((t) => {
         const x = t.replace(/\s+\d{5}(-\d{4})?$/, "");
+        // Round 3: "US Remote", "Texas Remote", "Canada Remote": the place, then the way of work (as "Remote - US" reads).
+        const r = /^(.*?\S)[\s-]+(remote|anywhere)$/i.exec(x);
+        if (r && !/^(fully|full|100%|partially|partly|hybrid|or|not|non|no|never|semi|mostly|largely|mainly|primarily|rarely|occasionally|limited|onsite|on-site|in-office|office)$/i.test(r[1])) return [r[1], r[2]]; // "Not Remote", "Mostly Remote", "Onsite Remote" say how the work is NOT done: never a remote posting (independent review of #455)
         const m = /^(.*?\S)\s+([A-Z]{2}|USA|US)$/.exec(x);
         return m && (STATE_NAMES[m[2].toLowerCase()] || NAMES_US.test(m[2])) && !/^(remote|anywhere)$/i.test(m[1]) ? [m[1], m[2]] : [x];
       });
+      tokens = tokens.filter((t) => !TIME_ZONE.test(t) && !CONTINENT.test(t));
       const places = tokens.filter((t) => !WAY_OF_WORK.test(t) && !/^(remote|anywhere)$/i.test(t));
       // "Seattle, San Francisco, New York City": a list of cities, each its own place.
       if (places.length >= 2 && places.every(knownCity)) {
@@ -70,13 +86,18 @@ export function postingPlaces(text: string): PlacePart[] {
       if (!tokens.length) continue;
       const p: PlacePart = { city: "", state: "", country: "", remote: false };
       let abroadCity = false, ambiguousState = "";
+      // Round 3: beside the word remote and no city, a code that is a state and a country ("Remote - DE": Delaware or
+      // Germany; "Remote - IN": Indiana or India) or a zone and a place ("Remote - PT") settles nothing.
+      const remoteOnly = tokens.some((t) => /^(remote|anywhere)\b/i.test(t)) && !tokens.some((t) => !/^(remote|anywhere)\b/i.test(t) && !/^[A-Z]{2}$/.test(t) && !NAMES_US.test(t) && !WAY_OF_WORK.test(t));
+      let unsettled = false;
       const isState = (t: string) => (/^[A-Z]{2}$/.test(t) && !!STATE_NAMES[t.toLowerCase()]) || !!STATE_BY_NAME[t.toLowerCase()];
       tokens.forEach((t, i) => {
         const low = t.toLowerCase();
         if (/^(remote|anywhere)\b/i.test(t)) {
           p.remote = true;
-          const rest = t.replace(/^(remote|anywhere)\b[\s:-]*(in\s+(the\s+)?)?/i, "");
+          const rest = t.replace(/^(remote|anywhere)\b[\s:–—-]*(in\s+(the\s+)?)?/i, "");
           if (rest && NAMES_US.test(rest)) p.country ||= "us";
+          else if (rest && STATE_BY_NAME[rest.toLowerCase()]) { p.state ||= STATE_BY_NAME[rest.toLowerCase()]; p.country ||= "us"; } // "Remote in Texas"
           else if (rest && (ABROAD.test(rest) || ABROAD_CODE.test(rest))) p.country = "abroad";
           return;
         }
@@ -84,6 +105,7 @@ export function postingPlaces(text: string): PlacePart[] {
         if (NAMES_US.test(t)) { p.country ||= "us"; return; }
         if (t === "SF") { p.city ||= "san francisco"; p.country ||= "us"; return; }
         if (/^[A-Z]{2}$/.test(t)) {
+          if (remoteOnly && (ZONE_OR_PLACE.has(low) || (AMBIGUOUS_CODE.has(low) && !tokens.some((x) => NAMES_US.test(x))))) { unsettled = true; return; }
           if (STATE_NAMES[low]) {
             p.state ||= low;
             if (AMBIGUOUS_CODE.has(low)) ambiguousState = low; else p.country ||= "us";
@@ -112,6 +134,7 @@ export function postingPlaces(text: string): PlacePart[] {
       if (abroadCity && p.country !== "us") p.country = "abroad";
       if (ambiguousState && p.country !== "abroad") p.country = abroadCity ? "abroad" : "us";
       if (p.city && !p.country && US_CITIES.has(p.city)) p.country = "us";
+      if (unsettled && !p.city && !p.state) p.country = "";
       if (p.city === "nyc") p.city = "new york";
       if (p.city === "sf") p.city = "san francisco";
       if (p.city || p.state || p.country || p.remote) out.push(p);

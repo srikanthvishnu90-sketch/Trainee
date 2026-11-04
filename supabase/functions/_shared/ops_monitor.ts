@@ -18,7 +18,12 @@ export interface Snapshot {
   // Optional so a caller that does not read them is unchanged (undefined = not measured, like null).
   deploySmoke?: { id: string; created_at: string; sha: string; fail: number; notRun: number } | null; // newest founder_alerts kind=deploy_smoke
   outbox?: { oldestPendingAt: string | null; pending: number } | null; // texts due but never delivered (career_outbox)
+  // approval_rate_v (rolling 7 days, per kind); undefined/null = not measured.
+  approval?: { kind: string; shown: number; approvedUnchanged: number }[] | null;
 }
+// The owner's quality line: of what Trainee shows the person, at least 95% is accepted as shown, once a kind has 20 or more shown.
+// A measurement, never a limit: it raises an alert to the owner and changes nothing a person is shown, asked, or sent.
+export const APPROVAL_TARGET_PCT = 95, APPROVAL_MIN_SHOWN = 20;
 export interface Spend { source: "model_budget" | "turn_costs"; day: string; spentMicros: number; reservedMicros: number; limitMicros: number }
 export interface Thresholds { ingestStaleMs: number; deliveryWindowMs: number; deliveryMinFailed: number; deliverySilentMs: number; workerQueuedMs: number; workerDrivingMs: number; http5xxMin: number; smokeFreshMs: number; outboxStuckMs: number }
 export const DEFAULTS: Thresholds = { ingestStaleMs: 2 * H, deliveryWindowMs: 30 * MIN, deliveryMinFailed: 3, deliverySilentMs: 10 * MIN, workerQueuedMs: 20 * MIN, workerDrivingMs: 30 * MIN, http5xxMin: 10, smokeFreshMs: 24 * H, outboxStuckMs: 30 * MIN };
@@ -81,6 +86,12 @@ export function evaluate(s: Snapshot, t: Thresholds = DEFAULTS): Alert[] {
   // Stuck queue: texts that were due long ago and were never delivered (the delivery runner can be "running" and still not draining).
   if (s.outbox && s.outbox.pending > 0 && s.outbox.oldestPendingAt && ago(s.now, s.outbox.oldestPendingAt) > t.outboxStuckMs) out.push({ kind: "outbox_stuck", key: "outbox_stuck", cooldownMs: 2 * H,
     text: `${s.outbox.pending} queued text(s) are past due and undelivered; the oldest has waited ${mins(ago(s.now, s.outbox.oldestPendingAt))}. The delivery queue is stuck.` });
+  for (const a of s.approval ?? []) {
+    if (a.shown < APPROVAL_MIN_SHOWN || a.approvedUnchanged * 100 >= APPROVAL_TARGET_PCT * a.shown) continue;
+    const kind = String(a.kind).replace(/[^a-z_]/g, "").slice(0, 40);
+    out.push({ kind: "approval_below_target", key: `approval_below_target:${kind}`, cooldownMs: 24 * H,
+      text: `Approval rate for ${kind.replace(/_/g, " ")} is ${(100 * a.approvedUnchanged / a.shown).toFixed(1)}% over the last 7 days (${a.approvedUnchanged} approved unchanged of ${a.shown} shown), under the ${APPROVAL_TARGET_PCT}% target. Read the edits and skips, then fix the cause.` });
+  }
   return out;
 }
 
@@ -147,6 +158,10 @@ export async function readSnapshot(admin: Admin, env: { get(k: string): string |
     outbox: await safe(async () => {
       const r = await admin.from("career_outbox").select("deliver_at").is("delivered_at", null).lt("deliver_at", iso(now - DEFAULTS.outboxStuckMs)).order("deliver_at", { ascending: true }).limit(500);
       return r.error ? null : { oldestPendingAt: r.data?.[0]?.deliver_at ?? null, pending: (r.data ?? []).length };
+    }),
+    approval: await safe(async () => {
+      const r = await admin.from("approval_rate_v").select("kind,shown,approved_unchanged");
+      return r.error ? null : (r.data ?? []).map((x: any) => ({ kind: String(x.kind), shown: Number(x.shown), approvedUnchanged: Number(x.approved_unchanged) }));
     }),
   };
 }

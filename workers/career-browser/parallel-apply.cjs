@@ -24,6 +24,7 @@
 //  - local only by default: only loopback hosts are driven. Real employer hosts need `allowHosts` from the caller
 //    (the owner-run approve-first path), and this module never discovers or logs in anywhere.
 const fs = require("node:fs");
+const { fillForm } = require("./ats-fill.cjs");
 const crypto = require("node:crypto");
 
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest("hex");
@@ -33,12 +34,6 @@ function payloadHash(p) {
   return sha256(canonical({ url: p.url, ats: p.ats, facts: p.facts, answers: p.answers || {}, resume: p.resume && p.resume.sha256 }));
 }
 
-// Which confirmed fact fills which control, by its label (deterministic; the order matters: first match wins).
-const FACT_RULES = [
-  [/^first name\b/i, "first_name"], [/^last name\b/i, "last_name"], [/^(full )?name\b/i, "full_name"],
-  [/^email\b/i, "email"], [/^phone\b/i, "phone"], [/^(current )?(company|employer)\b/i, "current_company"],
-  [/^linkedin\b/i, "linkedin_url"],
-];
 const BOT_RE = /verify\s+(?:that\s+)?you(?:\s+are|(?:'|\u2019|&#0*39;|&rsquo;|&apos;)re)\s+(?:a\s+)?(?:human|not a robot)|captcha|turnstile|challenges\.cloudflare\.com|are you a robot|not a robot/i;
 const DENY_HOSTS = ["linkedin.com", "indeed.com", "joinhandshake.com"];
 const LOOPBACK = ["127.0.0.1", "localhost", "::1", "[::1]"];
@@ -62,20 +57,7 @@ const hasApproval = (p) => !!p.approval && typeof p.approval.approval_id === "st
   && typeof p.approval.hash === "string" && p.approval.hash === payloadHash(p);
 const CONFIRM_RE = /thank you for applying|application (has been )?submitted|we['’]ve received your application/i;
 
-function valueFor(label, facts, answers) {
-  const clean = label.replace(/\s*\*\s*$/, "").trim();
-  if (answers && Object.prototype.hasOwnProperty.call(answers, clean)) return answers[clean];
-  if (/^first name/i.test(clean) && facts.first_name) return facts.first_name;
-  if (/^last name/i.test(clean) && facts.last_name) return facts.last_name;
-  for (const [re, key] of FACT_RULES) {
-    if (!re.test(clean)) continue;
-    if (key === "full_name") return facts.full_name || (facts.first_name && facts.last_name ? `${facts.first_name} ${facts.last_name}` : undefined);
-    return facts[key];
-  }
-  return undefined;
-}
-
-class NeedsUser extends Error { constructor(reason, field) { super(`${reason}${field ? `: ${field}` : ""}`); this.reason = reason; this.field = field; } }
+class NeedsUser extends Error { constructor(reason, field) { super(`${reason}${field ? `: ${field}` : ""}`); this.reason = reason; this.field = field; this.needs = null; } }
 
 function checkPayload(p, { allowHosts = [] } = {}) {
   if (!p || !p.url || !p.facts || !p.resume) throw new NeedsUser("invalid_payload");
@@ -132,26 +114,22 @@ async function attempt(browser, p, opts, timing) {
     if (await page.$('input[type="password"]')) throw new NeedsUser("login_required", p.url);
     timing.load = Date.now() - t0;
     const t1 = Date.now();
-    const controls = await page.$$eval("form input, form select, form textarea", (els) => els.filter((e) => !["hidden", "submit"].includes(e.type)).map((e) => {
-      const lab = (e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`)) || e.closest("label");
-      return { id: e.id, name: e.name, type: e.type, tag: e.tagName.toLowerCase(), required: e.required, label: lab ? lab.textContent.replace(/\s+/g, " ").trim() : e.name };
-    }));
-    if (!controls.length || !(await page.$('form button[type="submit"]'))) throw new NeedsUser("no_application_form_found", p.url);
-    const filled = [];
-    for (const c of controls) {
-      const sel = `[name="${c.name.replace(/"/g, '\\"')}"]`;
-      if (c.type === "file") {
-        await page.setInputFiles(sel, p.resume.path); filled.push({ field: c.label, source: "resume" }); continue;
-      }
-      const v = valueFor(c.label, p.facts, p.answers);
-      if (v === undefined || v === null || v === "") {
-        if (c.required) throw new NeedsUser("missing_required_answer", c.label);
-        continue;
-      }
-      if (c.tag === "select") await page.selectOption(sel, { label: String(v) });
-      else await page.fill(sel, String(v));
-      filled.push({ field: c.label, source: p.answers && Object.prototype.hasOwnProperty.call(p.answers, c.label.replace(/\s*\*\s*$/, "").trim()) ? "answer" : "fact" });
+    if (!(await page.$("form input, form select, form textarea")) || !(await page.$('form button[type="submit"]'))) throw new NeedsUser("no_application_form_found", p.url);
+    // The page's own questions, answered only from the approved facts / answers (ats-fill.cjs), each read back. A required
+    // question with no confirmed answer, or one that could not be set and checked, stops the run: the person is asked.
+    const fr = await fillForm(page, { ats: p.ats, facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path });
+    if (fr.needsUser.length) {
+      const first = fr.needsUser[0];
+      const e = new NeedsUser(first.reason === "no_confirmed_answer" || /^(agreement|eeo|upload)_/.test(first.reason) || first.reason === "no_resume" ? "missing_required_answer" : "field_not_filled", first.label);
+      e.needs = fr.needsUser.map((n) => ({ label: n.label, reason: n.reason }));
+      throw e;
     }
+    if (fr.invalid.length) { const e = new NeedsUser("field_not_filled", fr.invalid[0].name); e.needs = fr.invalid.map((n) => ({ label: n.name, reason: "form_rejects_value" })); throw e; }
+    // An optional question whose approved answer could not be set and read back (readback_mismatch, fill_error) is not a
+    // question to skip: the field may hold something the person never approved. Handed back like a required one; nothing is sent
+    // (independent review of #340: Submit used to go with such a field).
+    if (fr.failed && fr.failed.length) { const e = new NeedsUser("field_not_filled", fr.failed[0].label); e.needs = fr.failed.map((n) => ({ label: n.label, reason: n.reason })); throw e; }
+    const filled = fr.filled.map((f) => ({ field: f.label, source: f.source }));
     timing.fill = Date.now() - t1;
     // Last checks before the click, on what is actually on the page now: still an allowed host, no bot check that appeared
     // while filling, the form posts to an allowed host, and the payload still hashes to what was approved.
@@ -206,7 +184,7 @@ async function applyOne(browser, p, opts = {}) {
       const r = await attempt(browser, p, { ...opts, shotBefore: opts.shotDir && `${opts.shotDir}/${p.id}-1-filled.png`, shotAfter: opts.shotDir && `${opts.shotDir}/${p.id}-2-confirmation.png` }, t);
       return { ...out, ...r, timing: t, ms: Date.now() - started };
     } catch (e) {
-      if (e instanceof NeedsUser) return { ...out, status: e.reason === "bot_check" || e.reason === "login_required" ? "needs_user" : "not_submitted", reason: e.reason, field: e.field, ms: Date.now() - started };
+      if (e instanceof NeedsUser) return { ...out, status: e.reason === "bot_check" || e.reason === "login_required" ? "needs_user" : "not_submitted", reason: e.reason, field: e.field, needs: e.needs || undefined, ms: Date.now() - started };
       if (t.submitClicked) return { ...out, status: "unknown_outcome", reason: e.message, ms: Date.now() - started };
       out.lastError = e.message.split("\n")[0];
       if (out.lastError === "page_load_429") break; // the portal said slow down: not asked again by this run

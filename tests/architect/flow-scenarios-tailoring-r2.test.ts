@@ -16,7 +16,7 @@
 //   ask      questions the prepare path stored for them (workers/career-browser/ask-once.ts questionsToStore over an
 //            engine result: salary, notice period, years with a named tool, a clearance, a felony, a start date): "draft N"
 //            on one never calls the model and saves nothing; "N <answer>" is saved as typed; a secret never
-// The model is a fake OpenAI endpoint (no spend, no network): every other host is refused and recorded (asserted empty).
+// The model is a fake Anthropic endpoint (no spend, no network): every other host is refused and recorded (asserted empty).
 import assertNode from "node:assert/strict";
 import zlib from "node:zlib";
 import nodeCrypto from "node:crypto";
@@ -27,6 +27,8 @@ import { careerHandler, SUPABASE_URL, supabaseParity } from "../flow/handler.ts"
 import { CareerRender } from "../../supabase/functions/_shared/router_core.career.js";
 import { questionsToStore } from "../../workers/career-browser/ask-once.ts";
 import { leaks, type Poison, rng } from "./scenarios/tailoring-r2-generator.ts";
+import { askedPart } from "../helpers/one_question.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -87,9 +89,11 @@ Deno.test({
     if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 binaries in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
     if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (initdb)"); return; }
     const pg: Pg = await startPg();
-    const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "OPENAI_API_KEY", "CAREER_MODEL", "CAREER_TAILOR_REWRITE", "CAREER_HOSTED_PREPARE"];
+    const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "ANTHROPIC_API_KEY", "CAREER_MODEL", "CAREER_TAILOR_REWRITE", "CAREER_HOSTED_PREPARE"];
     const saved = Object.fromEntries(unset.map((k) => [k, Deno.env.get(k)]));
     for (const k of unset) Deno.env.delete(k);
+    // D-036: CAREER_MAIL_TRACKING is a release flag (on when unset): every mail path stays off only with "off".
+    Deno.env.set("CAREER_MAIL_TRACKING", "off");
     let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
     const realFetch = globalThis.fetch;
     let closeSession: (() => Promise<void>) | null = null;
@@ -110,7 +114,7 @@ Deno.test({
       let essay: string[] = [];
       const calls = { rewrite: 0, essay: 0, other: 0 };
       const answer = (content: string, model: string) => new Response(JSON.stringify({ id: "chatcmpl-test", model, choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }], usage: { prompt_tokens: 500, completion_tokens: 100 } }), { headers: { "content-type": "application/json" } });
-      const fakeOpenAI = (body: any): Response => {
+      const fakeModel = (body: any): Response => {
         const sys = String(body.messages?.find((m: any) => m.role === "system")?.content ?? "");
         const user = body.messages?.find((m: any) => m.role === "user");
         const text = typeof user?.content === "string" ? user.content : (user?.content ?? []).map((c: any) => c.text ?? "").join("");
@@ -127,12 +131,11 @@ Deno.test({
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
         const u = new URL(req.url);
-        if (u.host === "api.openai.com") return fakeOpenAI(await req.json());
+        if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
         if (u.origin !== new URL(SUPABASE_URL).origin) { outbound.push(`${req.method} ${u.host}`); throw new TypeError(`network refused: ${u.host}`); }
         return await viaDouble(req);
       }) as typeof fetch;
-      Deno.env.set("OPENAI_API_KEY", ["sk", "test", "fake"].join("-"));
-      Deno.env.set("CAREER_MODEL", "gpt-5-mini");
+      Deno.env.set("ANTHROPIC_API_KEY", ["sk", "test", "fake"].join("-"));
 
       const failures: string[] = [];
       const counts: Record<string, number> = {};
@@ -241,31 +244,36 @@ Deno.test({
               values ('${who}', '${sq(String(q.key))}', '${sq(String(q.kind))}', '${sq(String(q.label))}', '${sq(String(q.type))}', '${sq(JSON.stringify(q.options))}', array['${sq(res.posting)}'], '${sq(String(q.company))}')`);
           }
           const tag = `ask #${k}`;
+          // One question per message (review of #360): the first is shown; "skip" moves to the next.
           const list = await chat.say("what do you need from me");
           count("ask turns");
-          const order = qs.map((q) => q.label).sort((a, b) => list.reply.indexOf(a) - list.reply.indexOf(b));
-          if (qs.some((q) => !list.reply.includes(q.label))) { failures.push(`${tag}: not every question is listed: ${list.reply.slice(0, 300)}`); continue; }
-          // "draft N" on a question that is not a written answer: no model call, nothing saved.
-          const m = 1 + (k % qs.length);
+          const first = qs.find((q) => list.reply.includes(q.label));
+          if (!first || !new RegExp(`Question 1 of ${qs.length} `).test(list.reply) || qs.filter((q) => list.reply.includes(q.label)).length !== 1) {
+            failures.push(`${tag}: not one question of ${qs.length}: ${list.reply.slice(0, 300)}`); continue;
+          }
+          // "draft 1" on a question that is not a written answer: no model call, nothing saved.
           const before = calls.essay;
-          const d = await chat.say(`draft ${m}`);
+          const d = await chat.say("draft 1");
           count("ask turns");
-          if (calls.essay !== before) failures.push(`${tag}: "draft ${m}" (${order[m - 1]}) called the model`);
-          if (!/isn't a written answer/.test(d.reply)) failures.push(`${tag}: "draft ${m}" (${order[m - 1]}) -> ${d.reply.slice(0, 200)}`);
-          if (await answerOf(who)) failures.push(`${tag}: "draft ${m}" saved an answer`);
-          // A typed answer is saved as typed; a secret never.
-          const i = k % 2 === 0 ? 0 : 1;
-          const label = order[i];
+          if (calls.essay !== before) failures.push(`${tag}: "draft 1" (${first.label}) called the model`);
+          if (!/isn't a written answer/.test(d.reply)) failures.push(`${tag}: "draft 1" (${first.label}) -> ${d.reply.slice(0, 200)}`);
+          if (await answerOf(who)) failures.push(`${tag}: "draft 1" saved an answer`);
+          // A typed answer is saved as typed; a secret never. Odd scenarios answer the second question, after a "skip".
+          let shown = await chat.say("what do you need from me");
+          count("ask turns");
+          if (k % 2 === 1) { shown = await chat.say("skip"); count("ask turns"); }
+          const asked = qs.filter((q) => askedPart(shown.reply).includes(q.label));
+          if (asked.length !== 1) { failures.push(`${tag}: not one question shown: ${shown.reply.slice(0, 300)}`); continue; }
+          const label = asked[0].label;
           const typed = k % 4 === 3 ? "my ssn is 219-09-9999" : TYPED[qs.findIndex((q) => q.label === label)];
-          await chat.say("what do you need from me");
-          const a = await chat.say(`${i + 1} ${typed}`);
-          count("ask turns"); count("ask turns");
-          const key = qs.find((q) => q.label === label)!.key;
+          const a = await chat.say(typed);
+          count("ask turns");
+          const key = asked[0].key;
           const got = await answerOf(who, key);
           if (/ssn/.test(typed)) {
             if (got) failures.push(`${tag}: a secret saved as the answer to ${label}`);
             if (/219\D?09\D?9999/.test(await stored(who))) failures.push(`${tag}: the SSN is kept in a stored message`);
-          } else if (got !== typed) failures.push(`${tag}: "${i + 1} ${typed}" (${label}) -> saved ${JSON.stringify(got)}: ${a.reply.slice(0, 200)}`);
+          } else if (got !== typed) failures.push(`${tag}: "${typed}" (${label}) -> saved ${JSON.stringify(got)}: ${a.reply.slice(0, 200)}`);
         }
       });
 

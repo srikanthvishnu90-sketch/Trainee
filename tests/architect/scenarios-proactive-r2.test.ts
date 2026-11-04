@@ -211,7 +211,7 @@ async function checkOverlap(s: OverlapScenario): Promise<{ why: string | null; g
     for (const key of keys) if (!eligible.includes(key)) return { why: `${u.id}: an alert for a posting that is not news to them`, got: key };
     const ch = s.change?.who === k ? s.change : null;
     const cap = ch?.what === "cap_down" ? ch.to : u.cap;
-    const room = ch?.what === "alerts_off" ? 0 : Math.max(0, Math.min(cap - u.sentToday, u.week - u.sentWeek));
+    const room = ch?.what === "alerts_off" ? 0 : Math.max(0, cap - u.sentToday);
     const want = Math.min(room, eligible.length);
     if (mine.length > room) return { why: `${u.id}: ${mine.length} alerts queued today; room for ${room} (cap ${cap}${ch ? ` after "${ch.what}"` : ""}, ${u.sentToday} already today; week ${u.week}, ${u.sentWeek} already) across ${s.runs.length} runs at once`, got: keys };
     if (!ch && mine.length < want) return { why: `${u.id}: ${mine.length} alerts, ${want} were due (room ${room}, ${eligible.length} news)`, got: keys };
@@ -514,7 +514,7 @@ async function briefRun(s: BriefBudgetScenario, gate: BudgetGate | null, request
   let faulted = 0;
   const outbox = { enqueue: async (u: string, m: any) => { if (s.faultPart2 && faulted < 1 && /^brief:.*:2$/.test(m.key)) { faulted++; throw new Error("insert timed out"); } return box.enqueue(u, m); } };
   const mails = (u: string) => UNSURE.slice(0, s.perPerson).map(([subject, snippet], i) => ({ hash: `${u}-${i}`.padEnd(64, "e").replace(/[^0-9a-f]/g, "f"), from: "Asana Recruiting <recruiting@asana.com>", subject, snippet, date: iso(s.now - (10 - i) * MIN), auth: AUTH("asana.com") }));
-  const model = gate ? mailModelWiring({ get: (k: string) => (k === "OPENAI_API_KEY" ? "sk-test-not-a-real-key" : undefined) }, { from: () => ({ insert: async () => ({ error: null }) }) }, request) : null;
+  const model = gate ? mailModelWiring({ get: (k: string) => (k === "ANTHROPIC_API_KEY" ? "sk-test-not-a-real-key" : undefined) }, { from: () => ({ insert: async () => ({ error: null }) }) }, request) : null;
   resetLocalBudgetGate(gate);
   try {
     for (const now of [s.now, s.now + 5 * MIN]) {

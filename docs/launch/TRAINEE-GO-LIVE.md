@@ -111,7 +111,7 @@ read from the environment or asked on a hidden prompt; none is echoed, written t
 | `WHATSAPP_TEMPLATE_UPDATES`, `WHATSAPP_TEMPLATE_LANGUAGE` | the approved template's name (`trainee_updates`) and language (`en_US`). Unset: outside WhatsApp's 24-hour window nothing is sent; messages wait for the person's next message | function secrets |
 | `WHATSAPP_DAILY_TEMPLATES` | your WhatsApp messaging limit, templates a day (unset means 250, a new account's tier) | function secret |
 | `CAREER_PREPARE_AHEAD_URL`, `CAREER_PREPARE_AHEAD_TOKEN` (optional, both or neither) | the preparation host's door, `https://<host>/prepare`, and that host's own token (section "Running mass submission" below). Left empty, phone-only preparation stays `NOT_WIRED` and the smoke says so | function secrets (agent-chat kicks the host with them; the smoke reads the host's `/status`) |
-| `TRAINEE_FILE_LINK_SECRET`, `OPS_MONITOR_TOKEN` (set on the project by the owner, never by this script) | the signing secret of `trainee-file`'s hosted list page, and `ops-monitor`'s bearer token. Step 4 deploys `trainee-file` / `ops-monitor` (both `--no-verify-jwt`; the link or token authenticates) only when its secret is already among the project's function secrets (a dry run: given in the environment). Absent: it is skipped with a `gated: ... SKIPPED` log line, never a failure, and it is not in the provenance manifest | function secrets |
+| `TRAINEE_FILE_LINK_SECRET`, `OPS_MONITOR_TOKEN` (set on the project by the owner, never by this script) | the signing secret of `trainee-file`'s hosted list page, and `ops-monitor`'s bearer token. Step 4 deploys `trainee-file` / `trainee-connect` (the `/connect` page; gated on the same `TRAINEE_FILE_LINK_SECRET` because its links fall back to it) / `ops-monitor` (all `--no-verify-jwt`; the link or token authenticates) only when its secret is already among the project's function secrets (a dry run: given in the environment). Absent: it is skipped with a `gated: ... SKIPPED` log line, never a failure, and it is not in the provenance manifest | function secrets |
 
 Function secrets are project-wide in Supabase: every function sees every one.
 
@@ -210,7 +210,9 @@ Telegram works like iMessage once the person has pressed Start: no window, no co
 sends at most 1,500 and splits longer text on purpose, one message a second to one chat). The bot is never told a phone
 number, so a person reaches their account one of two ways: they text **connect telegram** where they already use Trainee
 (or tap Connect Telegram in the app, `channel_link_telegram_start()`, once the app has the button) and open the one-time
-link it sends; or, if their chat is on the allow list (`TRAINEE_ALLOWED_CONTACTS` entries like `telegram:<chat id>`) or
+link it sends, then reply **YES** where they already use Trainee when it asks "Someone wants to link Telegram @name to your
+Trainee" (opening the link alone links nothing: a forwarded or copied link is not proof of who opened it;
+20261031040000_telegram_link_confirm.sql); or, if their chat is on the allow list (`TRAINEE_ALLOWED_CONTACTS` entries like `telegram:<chat id>`) or
 sign-up is open, pressing Start makes a new account.
 
 1. In Telegram, message **@BotFather**: `/newbot`, a name (`Trainee`), a username ending in `bot`. BotFather shows the
@@ -306,7 +308,7 @@ given, derives `CLOUD_BRIDGE_URL` and `CAREER_PREPARE_AHEAD_URL` from the projec
 per-person or per-site number only when one is given (none by default: the owner's NO LIMITS rule, 2026-10-27), and schedules the two minute ticks (`scripts/launch/schedule-career-cloud.sql`). It never
 turns anything on by itself: `CLOUD_RUNNER_ENABLED=on` / `CLOUD_PREPARE_ENABLED=on` only when given, and the database's
 `CAREER_AGENT_SUBMIT` / `CAREER_CLOUD_APPLY` / `CAREER_CLOUD_TEXT_CARDS` only by the owner's SQL. Everything else (the route, the limits, the
-recommended first-wave numbers, the gate): docs/launch/CLOUD-RUNNER.md. The owner's first run: docs/launch/RAMP-FIRST-RUN.md.
+recommended first-wave numbers, the gate): docs/launch/CLOUD-RUNNER.md. `CAREER_CLOUD_TEXT_CARDS` is also in the release switch set (`release-db-switches.sql`): a plain go-live writes it `on` only when its row is missing and keeps an existing row, and with `CAREER_AGENT_SUBMIT` or `CAREER_CLOUD_APPLY` off the route stays closed. `trainee-go-live.sh --verify` and `secrets-audit.sh` end with a hosted-apply block (`scripts/launch/hosted-apply-setup.cjs`, names only): "off by design" when a switch is not `on`; "ON but NOT READY" (verify fails) when all three are on and a prerequisite is missing. The owner's first run: docs/launch/RAMP-FIRST-RUN.md.
 ## Running mass submission
 
 There is no volume number of Trainee's own (owner, 2026-10-27). Every executor runs as many applications as its machine

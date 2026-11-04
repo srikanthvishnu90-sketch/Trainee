@@ -9,6 +9,9 @@ import { CARD_NEEDS_REPLY_STATUS, needsReplyTextFor } from "./career_apply_cards
 // Linking never trusts message text alone:
 // - Telegram: "/start <nonce>" binds the chat only when the nonce was issued to a signed-in account (the app's Connect
 //   Telegram, or "connect telegram" texted on a channel already linked), unused, under 10 minutes old; stored hashed.
+//   TELEGRAM LINK OWNERSHIP (2026-10-31): and only on "LINK <code>" from the account's own channel (review #348: never a plain yes). Opening the link proves nothing
+//   about who opened it (it may be forwarded, pasted or leaked): it asks the channel the person already uses, and the new
+//   chat stays no one's (no private data, no approvals) until that YES (20261031040000_telegram_link_confirm.sql).
 // - Same phone on another channel (WhatsApp and iMessage): nothing is merged. The channel already linked is asked, and only
 //   a yes from it links the new one.
 import { channelCommand, CHANNEL_REPLIES } from "./channel.ts";
@@ -18,6 +21,7 @@ import { telegramDeepLink } from "./telegram.ts";
 import { deliverShaped, type ShapedFile } from "./channel_shape.ts";
 import { safeCut } from "./channel_text.ts";
 import { redactIdentity } from "./identity_redact.ts";
+import { ackFor, ackOnce, typingLoop } from "./channel_voice.ts";
 
 export const SIGNUP_CLOSED_REPLY = "Trainee is invite-only right now, so I can't set you up yet. Nothing about you was saved except that you texted.";
 // PHONE LOGIN (owner, 2026-10-28): Telegram's own verified number, shared with one tap. Trainee never asks for a password or a
@@ -50,6 +54,27 @@ export const ALREADY_TELEGRAM_REPLY = "This chat is already on Telegram, so ther
 export const TELEGRAM_LINKED_REPLY = "Telegram is linked to your Trainee account. Text here any time; Trainee answers on whichever channel you text.";
 export const TELEGRAM_LINK_INVALID_REPLY = "That link has expired or was already used. Text \"connect telegram\" to Trainee where you already use it for a new one.";
 export const TELEGRAM_LINKED_ELSEWHERE_REPLY = "This Telegram account is already linked to a different Trainee account, so nothing changed.";
+// TELEGRAM LINK OWNERSHIP (2026-10-31; owner rule of 2026-10-29: a forwarded or copied link must not let another person read
+// the account or act as it). Opening the link asks the account's own channel; this chat is linked only on the YES there.
+// Neither reply names that channel, a number or an email: whoever opened the link may not be the account's person.
+// TELEGRAM LINK REPLY CODE (review #348; 20261031063000_telegram_link_reply_code.sql): a plain yes never answers this question
+// (it was taken from a yes meant for an application card, linking a stranger who held a leaked code). The question carries a
+// 4-digit reply code made in the database for that one request ({code}, filled there), shown only on the owner's own channel;
+// only "LINK <code>" from that channel links the chat, once, within 15 minutes. Who asked is named by Telegram username, or
+// by Telegram id when there is none (never by display name: the opener writes that).
+export const LINK_CODE_ASK_MS = 15 * 60000; // the LINK reply counts for 15 minutes after the question
+export const LINK_CODE_SLOT = "{code}";
+export const telegramLinkAskText = (handle?: string | null, contact?: string | null) => {
+  const id = /^tg:([1-9][0-9]{0,19})$/.exec(String(contact ?? ""))?.[1];
+  const who = handle && /^[A-Za-z0-9_]{5,32}$/.test(handle) ? `@${handle}` : id ? `(no username; Telegram id ${id})` : "(an account with no username)";
+  return `Someone wants to link Telegram ${who} to your Trainee. To allow it, reply LINK ${LINK_CODE_SLOT} here within 15 minutes. A plain yes does not link it; ignore this if it wasn't you.`;
+};
+export const TELEGRAM_LINK_CONFIRM_REPLY = "Almost done. I sent a LINK code to the Trainee chat you already use: reply there with it within 15 minutes. Until then this chat can't see or do anything in a Trainee account.";
+export const TELEGRAM_LINK_WAITING_REPLY = "This chat isn't linked yet: it's waiting for the LINK code to be sent back in the Trainee chat you already use. Until then it can't see or do anything in a Trainee account.";
+export const TELEGRAM_LINK_BUSY_REPLY = "Too many Telegram link requests are waiting for this Trainee account, so I haven't asked again and this chat isn't linked. Try again in 15 minutes.";
+export const LINK_CODE_NO_MATCH_REPLY = "That LINK code doesn't match a Telegram link request waiting for your answer, so nothing was linked.";
+export const TELEGRAM_LINK_CANT_ASK_REPLY = "I couldn't ask for a YES in the Trainee chat you already use (there isn't one, or Trainee is stopped there), so this chat isn't linked. If you stopped Trainee there, text START there, then text \"connect telegram\" for a new link.";
+export const LINK_AMBIGUOUS_REPLY = "Two different chats asked to link to your Trainee account at the same time, so I linked neither. If one of them was you, text \"connect telegram\" for a new link and open it yourself.";
 export const FILE_NOT_READ_REPLY = "I can't open files sent here yet, so I haven't read that one. Paste your resume as text in this chat and I'll read it now.";
 // FEATURE 16 (Telegram, where a PDF or Word file is read): what a photo or a voice message is told instead.
 export const PHOTO_NOT_READ_REPLY = "I can't read photos, so I haven't read that one. Send your resume as a PDF or Word file, or paste the text here.";
@@ -81,6 +106,14 @@ export function forwardedMessage(from: string, text: string, max = CHAT_MAX): { 
   const body = cutForChat(String(text ?? "").replace(/["\u201c\u201d]/g, "'"), max - head.length - 1);
   return { text: `${head}${body.text}\u201d`, cut: body.cut };
 }
+// TELEGRAM ROUND 3 (2026-10-31): an edited message is never read again (Trainee acted on it as first sent); a decision edited
+// afterwards ("yes" into "no", "ok" into "stop") was ignored without a word, and read as taken back. It is answered once.
+export const EDIT_NOT_READ_REPLY = "I only read a message as it was first sent, so editing it didn't change anything I did. If you meant something else, send it as a new message.";
+const DECISION_EDIT = /^(?:y|n|yes|yeah|yep|yup|no|nope|nah|stop|cancel|confirm|approve|approved|decline|withdraw|unsubscribe|ok|okay|sure|go ahead|do it|send it|don'?t|do not|start|\/stop|\/start)\b/i;
+export const isDecisionEdit = (text: string) => { const t = String(text ?? "").trim().replace(/[.!?’']+$/g, ""); return t.length <= 40 && t.split(/\s+/).length <= 5 && DECISION_EDIT.test(t); };
+// TELEGRAM ROUND 3: "/start <code>" from a chat already linked to an account, with a code that is used, expired or forged, was
+// told to text "connect telegram" where they already use Trainee for a new link, though this chat already is their account.
+export const TELEGRAM_LINK_INVALID_LINKED_REPLY = "That link has expired or was already used, and this chat is already linked to your Trainee account, so nothing changed.";
 export const DOC_NOT_SENT_REPLY = "I couldn't attach the file here just now, so it wasn't sent. Ask me to send it again.";
 // FEATURE 16 (owner decision 2026-10-26): Telegram's own login links a chat to an account (TELEGRAM_LOGIN_URL: the web
 // page, telegram-link.html, on the domain set with BotFather /setdomain).
@@ -94,7 +127,10 @@ export const LINK_ASK_MS = 60 * 60000; // a yes counts for an hour after the que
 
 // alias (CHANNEL DELIVERY ROUND 2): the WhatsApp business-scoped id recorded for the contact, when there is one.
 export interface Person { userId: string; threadId: string | null; contact?: string; alias?: string | null }
-export type Redeemed = { ok: true; userId: string; threadId: string | null } | { ok: false; why: "invalid" | "linked_elsewhere" };
+// TELEGRAM LINK OWNERSHIP (2026-10-31): ok only when the chat already is the account's; "asked": the account's own channel was
+// asked (the question queued under key, for the account userId), and this chat is linked only on the YES there.
+export type Redeemed = { ok: true; userId: string; threadId: string | null } | { ok: false; why: "invalid" | "linked_elsewhere" | "cant_ask" | "busy" }
+  | { ok: false; why: "asked"; userId: string; key: string };
 export interface InboundStore {
   claimMessage(id: string, at: number, provider?: Provider): Promise<boolean>; // false: this provider's message id was handled before
   person(contact: string): Promise<Person | null>; // a linked account, if any (by contact key or recorded alias)
@@ -111,9 +147,14 @@ export interface InboundStore {
   // IDENTITY SCENARIOS (2026-10-30): the contact an open question for this (not yet linked) contact was asked on, if any.
   pendingLink?(contact: string, at: number): Promise<string | null>;
   askToLink?(a: { userId: string; contact: string; phone: string; askedOn: string; at: number; text: string }): Promise<string | null>; // the outbox key, or null: asked already
-  confirmLink?(a: { userId: string; askedOn: string; at: number; notice: string }): Promise<{ contact: string; key: string | null } | null>;
+  // ambiguous (TELEGRAM LINK OWNERSHIP): two questions were open on this contact, one a link code's: neither is linked.
+  confirmLink?(a: { userId: string; askedOn: string; at: number; notice: string }): Promise<{ contact: string; key: string | null } | { ambiguous: true } | null>;
+  // TELEGRAM LINK REPLY CODE (review #348): "LINK <code>" from the asked contact; null when it matches no open request.
+  confirmLinkCode?(a: { userId: string; askedOn: string; code: string; at: number; notice: string }): Promise<{ contact: string; key: string | null } | null>;
   issueLinkNonce?(userId: string, at: number): Promise<string>;
-  redeemLinkNonce?(nonce: string, contact: string, at: number): Promise<Redeemed>;
+  // askText: the question for the account's own channel (telegramLinkAskText), queued only when the chat is no one's.
+  redeemLinkNonce?(nonce: string, contact: string, at: number, askText: string): Promise<Redeemed>;
+  pendingCodeLink?(contact: string, at: number): Promise<boolean>; // a link code's question waits for its YES for this chat
   reholdSent?(providerMessageId: string, at: number, error: string): Promise<number>; // a sent message that failed for the window
   unlinkTelegram?(userId: string, at: number): Promise<number>; // FEATURE 16: "unlink telegram"; how many contacts let go
   // CHANNEL DELIVERY ROUND 2 (2026-10-30), optional:
@@ -158,6 +199,15 @@ export interface CoreDeps {
   sendFile?: (a: { contact: string; filename: string; mime: string; bytes: Uint8Array }) => Promise<{ ok: boolean }>;
   sendLink?: (a: { contact: string; url: string }) => Promise<{ ok: boolean }>;
   sendArtifacts?: (a: { userId: string; threadId: string | null; contact: string; artifacts: { ref: string; filename: string; mime: string }[] }) => Promise<{ sent: number; failed: number }>;
+  // N12/N13 (channel_voice.ts LATENCY_BUDGET; optional, so a channel without them runs unchanged):
+  // typing: the platform's typing indicator to this address, shown as soon as a message arrives and every typingEveryMs
+  //   while it is handled (best effort: a failure never touches the turn).
+  // ackAfterMs: a turn (reading a file, then the chat) still running after this long gets ONE interim line (ackFor), sent
+  //   straight out before the answer; null or absent: none. timers: the clock the two run on (tests inject one).
+  typing?: (address: string) => Promise<unknown>;
+  typingEveryMs?: number;
+  ackAfterMs?: number | null;
+  timers?: { set: (fn: () => void, ms: number) => unknown; clear: (h: unknown) => void };
 }
 type Out = { status: number; body: Record<string, unknown> };
 const ok = (body: Record<string, unknown>): Out => ({ status: 200, body: { ok: true, ...body } });
@@ -194,7 +244,8 @@ export async function turnKeyFor(messageId: string): Promise<string> {
 // LoopMessage keeps its keys (reply:<id>); the other providers' ids are namespaced, so a Telegram update id and a
 // LoopMessage id that happen to be equal never collide in one person's outbox.
 const scoped = (m: InboundMessage) => (m.provider === "loopmessage" ? m.messageId : `${m.provider === "telegram" ? "tg" : "wa"}:${m.messageId}`);
-const YES = /^yes[.!]*$/i, CONNECT_TELEGRAM = /^connect telegram[.!]*$/i;
+// LINK_REPLY (review of #363): "LINK", whitespace, the 4-digit code; any case, the message trimmed ("LINK1234" is not one).
+const YES = /^yes[.!]*$/i, LINK_REPLY = /^link\s+([0-9]{4})[.!]*$/i, CONNECT_TELEGRAM = /^connect telegram[.!]*$/i;
 
 // F09: the Yes / No buttons under the posting screen's yes/no question. Their callback data is scr:<question id>:yes|no, bound to the one
 // question that is open; a tap is an explicit screen answer (never a typed "yes" for another consumer).
@@ -205,6 +256,11 @@ const MORE_ONE_MESSAGE = 4000; // #301's second message, whole (Telegram takes 4
 export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out> {
   const now = d.now(), store = d.store;
   if (!(await store.claimMessage(msg.messageId, now, msg.provider))) return ok({ ignored: "duplicate webhook" });
+  // N12: the typing indicator goes out as soon as the message is claimed (a retried update shows nothing), and again every
+  // typingEveryMs until it is handled (the answer delivered). Not for a block or an edit, which answer nothing.
+  const typing = d.typing && (msg.kind === "text" || msg.kind === "callback" || (msg.kind === "seen" && !!(msg.file || msg.media)))
+    ? typingLoop({ typing: () => d.typing!(msg.address), everyMs: d.typingEveryMs, ...(d.timers ? { setTimer: d.timers.set, clearTimer: d.timers.clear } : {}) })
+    : null;
   let contact = msg.contact;
   // TELEGRAM ROUND 2 (2026-10-30): a fixed answer sent straight back (not through the outbox) that Telegram refused because
   // the person blocked the bot or deleted their account (403) is that person's STOP, as it is on the outbox's sends.
@@ -212,6 +268,13 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
     const r = await d.reply(to, bubbles, opts);
     if ((r as { optOut?: boolean }).optOut) await store.setOptOut(to, true, now).catch(() => {});
     return r;
+  };
+  // N12: the one interim line of a slow turn (armed by interim(), at most once per message; stopped before the answer).
+  let working: ReturnType<typeof ackOnce> | null = null;
+  const interim = (text: string) => {
+    const w = ackOnce({ afterMs: d.ackAfterMs, ack: () => say(contact, d.render(text)), ...(d.timers ? { setTimer: d.timers.set, clearTimer: d.timers.clear } : {}) });
+    w.start();
+    return w;
   };
   // A forwarded message, and the words sent with a photo or a video, are never the person's command, yes or link request.
   // IDENTITY SCENARIOS (2026-10-30): WhatsApp's forwarded flag (messages[].context.forwarded) too: a forwarded "yes" linked
@@ -237,6 +300,13 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
     if (msg.kind === "moved") {
       const moved = !!(person && msg.movedTo && store.movedNumber && await store.movedNumber(contact, `wa:${msg.movedTo}`, now));
       return ok({ moved, ...(moved ? {} : { ignored: "a number change for no account" }) });
+    }
+    // TELEGRAM ROUND 3: an edit is not a new message (it opens nothing and runs nothing); a decision edited after the fact is
+    // answered once with why nothing changed. The update is claimed above, so a retried edit is answered once too.
+    if (msg.kind === "edited") {
+      if (!person || !isDecisionEdit(msg.text)) return ok({ ignored: "an edited message (not read again)" });
+      const r = await say(contact, d.render(EDIT_NOT_READ_REPLY));
+      return ok({ edited: "answered", sent: r.ok });
     }
     // CHANNEL DELIVERY ROUND 2: WhatsApp's window runs from when the person sent the message (its timestamp), not from when
     // a retried webhook reached Trainee; never later than now (a phone's clock ahead of ours).
@@ -270,10 +340,19 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       return ok({ phone: "already_linked", sent: r.ok });
     }
     if (msg.startPayload && store.redeemLinkNonce) {
-      const r = await store.redeemLinkNonce(msg.startPayload, contact, now);
-      const text = r.ok ? TELEGRAM_LINKED_REPLY : r.why === "linked_elsewhere" ? TELEGRAM_LINKED_ELSEWHERE_REPLY : TELEGRAM_LINK_INVALID_REPLY;
+      // TELEGRAM LINK OWNERSHIP (2026-10-31): opening the link asks the account's own channel; nothing is linked here.
+      const r = await store.redeemLinkNonce(msg.startPayload, contact, now, telegramLinkAskText(msg.senderHandle, contact));
+      if (!r.ok && r.why === "asked") {
+        try { await d.deliver({ userId: r.userId, key: r.key, now }); } catch (e) { console.error("inbound: the link question waits in the outbox:", e instanceof Error ? e.message : String(e)); }
+        const s = await say(contact, d.render(TELEGRAM_LINK_CONFIRM_REPLY));
+        return ok({ link: "asked", sent: s.ok });
+      }
+      // The same chat opening its link again (or a used one) while its question waits is told what it waits for.
+      const waiting = !r.ok && r.why === "invalid" && !person && !!store.pendingCodeLink && await store.pendingCodeLink(contact, now);
+      const text = r.ok ? TELEGRAM_LINKED_REPLY : waiting ? TELEGRAM_LINK_WAITING_REPLY : r.why === "linked_elsewhere" ? TELEGRAM_LINKED_ELSEWHERE_REPLY
+        : r.why === "cant_ask" ? TELEGRAM_LINK_CANT_ASK_REPLY : r.why === "busy" ? TELEGRAM_LINK_BUSY_REPLY : person ? TELEGRAM_LINK_INVALID_LINKED_REPLY : TELEGRAM_LINK_INVALID_REPLY;
       const s = await say(contact, d.render(text));
-      return ok({ link: r.ok ? "linked" : r.why, sent: s.ok });
+      return ok({ link: r.ok ? "linked" : waiting ? "waiting" : r.why, sent: s.ok });
     }
     // CHANNEL DELIVERY ROUND 2: a LoopMessage text that came over SMS reads the carrier keywords (CANCEL, REVOKE, ARRET...).
     const command = passedOn ? null : msg.command ?? channelCommand(msg.text, msg.sms ? "sms" : msg.channel);
@@ -294,6 +373,13 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
     }
 
     if (!person) {
+      // TELEGRAM LINK OWNERSHIP (2026-10-31): a chat that opened a link code waits for the YES on the account's own channel: it
+      // reads nothing, signs up to nothing and approves nothing meanwhile; it is told what it waits for (STOP, above, still
+      // stops it).
+      if (msg.channel === "telegram" && store.pendingCodeLink && await store.pendingCodeLink(contact, now)) {
+        const r = await say(contact, d.render(TELEGRAM_LINK_WAITING_REPLY));
+        return ok({ link: "waiting", sent: r.ok });
+      }
       // IDENTITY SCENARIOS (2026-10-30): a Telegram chat waiting for its yes carries no number on a typed message (only the
       // share did): it went on to sign-up, a second account with sign-up open, and the yes then linked nothing. It is told
       // again where the yes goes.
@@ -420,13 +506,25 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
     let fileMessage: string | null = null;
     if (msg.document) {
       if (!d.resumeFile) return await answer(FILE_NOT_READ_REPLY, { ignored: "a file (not read here)" });
+      working = interim(ackFor("resume"));
       const got = await d.resumeFile({ userId: person.userId, doc: msg.document, now });
-      if (!got.ok) return await answer(got.reply, { file: "not read" });
+      if (!got.ok) { await working.stop(); return await answer(got.reply, { file: "not read" }); }
       fileMessage = got.message;
     }
-    // A yes to "Reply yes to link it", within the hour, on the channel that was asked.
+    // TELEGRAM LINK REPLY CODE (review #348): "LINK <code>" answers the one Telegram link request that code was made for (on
+    // this, the asked, contact); nothing else does. It never reaches the brain or a card.
+    const linkReply = !tapped && !passedOn && store.confirmLinkCode ? LINK_REPLY.exec(msg.text.trim()) : null;
+    if (linkReply) {
+      const linked = await store.confirmLinkCode!({ userId: person.userId, askedOn: contact, code: linkReply[1], at: now, notice: LINKED_HERE_REPLY });
+      if (!linked) return await answer(LINK_CODE_NO_MATCH_REPLY, { linked: null });
+      if (linked.key) { try { await d.deliver({ userId: person.userId, key: linked.key, now }); } catch { /* the outbox has it */ } }
+      return await answer(linkedReply(channelOf(linked.contact)), { linked: channelOf(linked.contact) });
+    }
+    // A yes to "Reply yes to link it" (a same-number question only; never a Telegram link code's), within the hour, on the
+    // channel that was asked.
     if (!tapped && !passedOn && YES.test(msg.text.trim()) && store.confirmLink) {
       const linked = await store.confirmLink({ userId: person.userId, askedOn: contact, at: now, notice: LINKED_HERE_REPLY });
+      if (linked && "ambiguous" in linked) return await answer(LINK_AMBIGUOUS_REPLY, { linked: null, ambiguous: true });
       if (linked) {
         if (linked.key) { try { await d.deliver({ userId: person.userId, key: linked.key, now }); } catch { /* the outbox has it */ } }
         return await answer(linkedReply(channelOf(linked.contact)), { linked: channelOf(linked.contact) });
@@ -469,6 +567,8 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       const fitted = !fileMessage && msg.forwardedFrom ? forwardedMessage(msg.forwardedFrom, said) : cutForChat(said);
       if (fitted.cut) notes.push(longCutNote(msg.forwardedFrom ? fitted.text.slice(0, -1) : fitted.text));
       if (msg.caption && msg.media && !fileMessage) notes.unshift(MEDIA_CAPTION_NOTE);
+      // N12: one interim if the turn runs past the budget (already armed when a file was being read: still one).
+      working ??= interim(ackFor(said));
       // The brain gets the person, the thread, the words and a turn key, and the reply-to id only when the platform gave one.
       const out = await d.chat({ userId: person.userId, threadId: person.threadId, message: fitted.text, turnKey, ...(msg.replyToMessageId ? { replyToMessageId: msg.replyToMessageId } : {}), ...(screenTap ? { screenTap } : {}) });
       reply = out.reply.trim() || CHAT_DOWN_REPLY;
@@ -496,6 +596,8 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       console.error("inbound: chat failed:", e instanceof Error ? e.message : String(e));
       reply = CHAT_DOWN_REPLY;
     }
+    // The turn is over: no interim after this point, and one already going reaches the person before the answer.
+    if (working) await working.stop();
     // The reply is queued; sending it now is a head start on the every-minute run, never a second path. A failure there may
     // come after the provider took it, so it must not reach the catch below (which would also say "couldn't answer").
     // A reply in parts is one row per part (reply:<id>:<n>), each whole, sent in order.
@@ -505,15 +607,26 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
     // Now the head is part 1 of the reply; when it went out, the rest goes as one message; when it did not, the rest waits
     // in the outbox as part 2, behind the head, in order (the outbox's own parts rule).
     const more = !parts && shape?.more?.length ? String(shape.more[0] ?? "").trim() : "";
+    // TELEGRAM ROUND 3 (2026-10-31): what follows the answer (the #301 rest, each file, each link) went straight out, each on
+    // its own: a rest or a link Telegram refused (a 429 asking to wait, a 502) was lost without a word, and with no rest an
+    // answer whose head Telegram refused had its links arrive first (the head a minute later). Now the head is part 1 of the
+    // reply whenever text or a link follows it; what follows goes out after it, in order, until one is refused, and that one
+    // and everything after it wait in the outbox as the next parts, behind what went (a refused file is said there instead).
+    // And the head start stops at the first part that did not go: the parts after it wait for the outbox, never overtaking it.
+    type Step = { kind: "more"; text: string } | { kind: "file"; file: ShapedFile } | { kind: "link"; url: string };
+    const shaping = !!shape && !!(d.sendFile || d.sendLink);
+    const steps: Step[] = [...(more ? [{ kind: "more" as const, text: more }] : []),
+      ...(shaping ? shape!.attachments.map((file) => ({ kind: "file" as const, file })) : []), ...(shaping ? shape!.links.map((url) => ({ kind: "link" as const, url })) : [])];
+    const chained = !!parts || steps.some((x) => x.kind !== "file");
     const rows = parts ? parts.map((text, i) => ({ key: `${key}:${i + 1}`, text, part: { of: key, n: i + 1 } as { of: string; n: number } | undefined }))
-      : more ? [{ key: `${key}:1`, text: fitReply(reply), part: { of: key, n: 1 } as { of: string; n: number } | undefined }]
+      : chained ? [{ key: `${key}:1`, text: fitReply(reply), part: { of: key, n: 1 } as { of: string; n: number } | undefined }]
       : [{ key, text: fitReply(reply), part: undefined }];
     for (const r of rows) await store.enqueueReply(person.userId, r.key, r.text, now, msg.channel, r.part, cardId);
     let headWent = true;
     try {
       for (const r of rows) {
         const went = await d.deliver({ userId: person.userId, key: r.key, now });
-        if (r === rows[0] && went && typeof went === "object" && "delivered" in went) headWent = Number((went as { delivered: unknown }).delivered) > 0;
+        if (went && typeof went === "object" && "delivered" in went && !(Number((went as { delivered: unknown }).delivered) > 0)) { headWent = false; break; }
       }
     } catch (e) { headWent = false; console.error("inbound: immediate send failed (the outbox has it):", e instanceof Error ? e.message : String(e)); }
     // F09: the screen's yes/no question gets Yes / No buttons where the channel has them (Telegram), else the plain words.
@@ -534,30 +647,50 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       docs = await d.sendArtifacts({ userId: person.userId, threadId: turnThread, contact, artifacts }).catch(() => ({ sent: 0, failed: artifacts.length }));
       if (docs.failed) await say(contact, d.render(DOC_NOT_SENT_REPLY)).catch(() => ({ ok: false }));
     }
-    // REPLY SHAPE: the answer went first; now each file, then each link, one message each, in that order. A step that fails is said.
+    // REPLY SHAPE: the answer went first; now the rest, each file, then each link, one message each, in that order.
     let shaped: { files: number; links: number } | null = null;
-    if (more && headWent) {
-      const bubbles = d.render(more), one = bubbles.join("\n\n");
-      await say(contact, bubbles.length > 1 && one.length <= MORE_ONE_MESSAGE ? [one] : bubbles).catch(() => ({ ok: false }));
-    } else if (more) {
-      // The head did not go out now: the rest and the answer's links wait behind it in the outbox, in order (a link sent now
-      // arrived before the answer it belongs to).
-      await store.enqueueReply(person.userId, `${key}:2`, fitReply(more), now, msg.channel, { of: key, n: 2 }, null);
-      let n = 2;
-      for (const url of shape?.links ?? []) { n++; await store.enqueueReply(person.userId, `${key}:${n}`, url, now, msg.channel, { of: key, n }, null); }
-    } else if (shape?.more?.length) for (const m of shape.more.slice(0, 1)) await say(contact, d.render(m)).catch(() => ({ ok: false }));
-    if (shape && (d.sendFile || d.sendLink)) {
-      const sf = d.sendFile, sl = d.sendLink;
-      const r = await deliverShaped({ answer: "", attachments: shape.attachments, links: more && !headWent ? [] : shape.links, notes: [] }, {
-        document: async (f) => sf ? await sf({ contact, ...f }) : { ok: false }, link: async (url) => sl ? await sl({ contact, url }) : { ok: false } }, { includeAnswer: false });
-      shaped = { files: r.files, links: r.links };
-      if (r.files < shape.attachments.length) await say(contact, d.render(DOC_NOT_SENT_REPLY)).catch(() => ({ ok: false }));
+    if (!more && shape?.more?.length) for (const m of shape.more.slice(0, 1)) await say(contact, d.render(m)).catch(() => ({ ok: false }));
+    if (steps.length) {
+      let n = rows.length, files = 0, links = 0, queued = !headWent, fileMissed = false;
+      // A refusal that said how long to wait (Telegram's 429 retry_after) holds what waits until then; the parts after it wait
+      // behind it (the outbox's parts rule).
+      let waitUntil = now;
+      const later = async (text: string) => { n++; await store.enqueueReply(person!.userId, `${key}:${n}`, text, waitUntil, msg.channel, { of: key, n }, null); };
+      for (const st of steps) {
+        if (st.kind === "file") {
+          if (queued && headWent) { if (!fileMissed) await later(DOC_NOT_SENT_REPLY); fileMissed = true; continue; }
+          const sf = d.sendFile;
+          const r = await deliverShaped({ answer: "", attachments: [st.file], links: [], notes: [] }, { document: async (f) => sf ? await sf({ contact, ...f }) : { ok: false }, link: async () => ({ ok: false }) }, { includeAnswer: false });
+          if (r.files) files++; else fileMissed = true;
+          continue;
+        }
+        if (queued) { await later(st.kind === "link" ? st.url : fitReply(st.text)); continue; }
+        let r: { ok: boolean; optOut?: boolean; sent?: number; retryAfterMs?: number };
+        if (st.kind === "link") r = await d.sendLink!({ contact, url: st.url }).catch(() => ({ ok: false }));
+        else {
+          const bubbles = d.render(st.text), one = bubbles.join("\n\n");
+          r = await say(contact, bubbles.length > 1 && one.length <= MORE_ONE_MESSAGE ? [one] : bubbles).catch(() => ({ ok: false }));
+        }
+        if (r.ok) { if (st.kind === "link") links++; continue; }
+        if (r.optOut) break; // blocked: nothing more goes, nothing waits
+        queued = true;
+        if (typeof r.retryAfterMs === "number" && r.retryAfterMs > 0) waitUntil = Math.max(now, d.now()) + r.retryAfterMs;
+        // A rest that went out in part (only one over 4,000 characters is sent as several messages) is not sent twice.
+        if (st.kind === "more" && (r.sent ?? 0) > 0) continue;
+        await later(st.kind === "link" ? st.url : fitReply(st.text));
+      }
+      if (fileMissed && !(queued && headWent)) await say(contact, d.render(DOC_NOT_SENT_REPLY)).catch(() => ({ ok: false }));
+      if (shaping) shaped = { files, links };
     }
     return ok({ replied: true, ...(shaped ? { shaped } : {}), ...(cardsShown ? { cards: cardsShown } : {}), ...(parts ? { parts: parts.length } : {}), ...(docs ? { documents: docs } : {}) });
   } catch (e) {
     console.error("inbound failed:", e instanceof Error ? e.message : String(e));
+    if (working) await working.stop();
     try { await say(contact, d.render(CHAT_DOWN_REPLY)); } catch { /* already logged */ }
     return { status: 500, body: { ok: false, error: "internal" } };
+  } finally {
+    if (working) await working.stop();
+    if (typing) await typing.stop();
   }
 }
 

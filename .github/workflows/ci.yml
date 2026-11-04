@@ -1,14 +1,20 @@
 name: ci
 on:
-  # Branches are checked through their pull request; a push runs only on trunk. Before 2026-10-26 every push to a PR
-  # branch ran the whole suite twice (push + pull_request), and runs for superseded heads held the queue: 111 queued,
-  # 52 of them for commits already replaced, with 6 running.
+  # Branches are checked through their pull request; a push runs only on trunk and release/production. Before 2026-10-26
+  # every push to a PR branch ran the whole suite twice (push + pull_request), and runs for superseded heads held the
+  # queue: 111 queued, 52 of them for commits already replaced, with 6 running.
+  # D-034 (the deploy standard): every job here is a required check on the exact SHA that deploys (S1; S4 reads
+  # "acceptance (telegram)"), so every SHA pushed to trunk or release/production gets its own full run. A commit pushed
+  # to release/production that never was a trunk head would otherwise have no checks at all.
   push:
-    branches: [trunk]
+    branches: [trunk, release/production]
   pull_request:
 concurrency:
-  # One run per PR (or per ref for trunk pushes); a newer head cancels the older run. Trunk runs are never cancelled.
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # One run per PR: a newer head cancels the older run. A push gets a group of its own SHA: GitHub keeps one pending run
+  # per group and cancels the older pending one when a newer arrives ("higher priority waiting request"), which left
+  # trunk SHAs merged in quick succession with no checks (e74c4b353 and f4b751948, 2026-10-31 05:14) and so unable to
+  # deploy. Pushes are never cancelled; a re-push of the same SHA waits for the run already going.
+  group: ci-${{ github.event.pull_request.number || format('{0}@{1}', github.ref, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
@@ -482,3 +488,24 @@ jobs:
         with: { deno-version: "v2.9.6" }
       - name: The sending rail under load
         run: PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH deno test -A --no-check tests/load/send-rail-load.test.ts
+  acceptance-telegram:
+    name: acceptance (telegram)
+    runs-on: ubuntu-24.04
+    # D-034, the deploy standard's S4: the Telegram acceptance suite on its own check, so the deploy standard can read its
+    # verdict on the exact SHA. It also runs inside an architect shard (every tests/architect file does); this job is the
+    # check scripts/launch/deploy-standard.ts reads. Real Postgres 16, the real webhook and agent-chat, a scripted model;
+    # nothing leaves the runner. KNOWN_GAP steps run and print their state; every other step must pass.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: Telegram acceptance suite
+        run: |
+          set -o pipefail
+          PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH deno test -A --no-check tests/architect/telegram-acceptance.test.ts 2>&1 | tee "$RUNNER_TEMP/acceptance.log"
+      - name: Each step's outcome
+        if: always()
+        run: |
+          test -f "$RUNNER_TEMP/acceptance.log" || exit 0
+          grep -E '^TELEGRAM_ACCEPTANCE ' "$RUNNER_TEMP/acceptance.log" | sed 's/\x1b\[[0-9;]*m//g' | tee -a "$GITHUB_STEP_SUMMARY"

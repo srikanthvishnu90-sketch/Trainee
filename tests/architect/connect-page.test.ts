@@ -107,7 +107,7 @@ Deno.test("the page: title, two plain lines, ONE primary button, Microsoft secon
   assert(/read/i.test(lines[0]) && /subject/i.test(lines[0]), lines[0]);
   assert(/approv/i.test(lines[1]) && /delet/i.test(lines[1]) && /exact/i.test(lines[1]), lines[1]);
   // The shell and tokens of the jobs page.
-  assert(html.includes("--accent:#4A2F5E") && html.includes("--bg:#FAF8F4") && html.includes("prefers-color-scheme:dark"), "plum accent, warm off-white, dark mode");
+  assert(html.includes("--accent:#5C2751") && html.includes("--bg:#FAF8F4") && html.includes("prefers-color-scheme:dark"), "plum accent, warm off-white, dark mode");
   assert(html.includes("Brygada+1918") && html.includes("Inter"), "Inter and Brygada 1918");
   assert(html.includes('class="mark"') && html.includes(">T</text>"), "the T mark");
   // The plum fill is only the main action: no other element may take the accent as a background.
@@ -278,7 +278,7 @@ Deno.test("after consent: a calm done state names the account and sends them bac
   assert(/nothing was (?:saved|connected)/i.test(failed) && !/Back to Telegram/.test(failed) && !/<a [^>]*href=""/.test(failed), "no dead link without a bot address");
   const xss = renderDone({ outcome: "connected", provider: "google", email: "<script>alert(1)</script>", botUrl: BOT_URL });
   assert(!xss.includes("<script>alert(1)"), "escaped");
-  assert(ok.includes("--accent:#4A2F5E") && ok.includes("prefers-color-scheme:dark"), "same shell, both themes");
+  assert(ok.includes("--accent:#5C2751") && ok.includes("prefers-color-scheme:dark"), "same shell, both themes");
 });
 
 Deno.test("the page's scripts are exactly the ones the CSP allows (hashes), and it can be framed only by Telegram", async () => {

@@ -100,6 +100,12 @@ export function supabaseInboundStore(admin: any): InboundStore {
     },
     async confirmLink(a) {
       const r = must<any>(await admin.rpc("channel_link_confirm", { p_user: a.userId, p_asked_on: a.askedOn, p_notice: a.notice, p_now: iso(a.at) }), "link the contact");
+      if (r?.error === "ambiguous") return { ambiguous: true as const }; // TELEGRAM LINK OWNERSHIP: two chats asked; neither linked
+      return r && typeof r.contact === "string" ? { contact: r.contact, key: typeof r.key === "string" ? r.key : null } : null;
+    },
+    // TELEGRAM LINK REPLY CODE (review #348): 20261031063000_telegram_link_reply_code.sql.
+    async confirmLinkCode(a) {
+      const r = must<any>(await admin.rpc("channel_link_confirm_code", { p_user: a.userId, p_asked_on: a.askedOn, p_code: a.code, p_notice: a.notice, p_now: iso(a.at) }), "link the chat");
       return r && typeof r.contact === "string" ? { contact: r.contact, key: typeof r.key === "string" ? r.key : null } : null;
     },
     async issueLinkNonce(userId, at) {
@@ -107,10 +113,16 @@ export function supabaseInboundStore(admin: any): InboundStore {
       if (typeof n !== "string" || !/^[A-Za-z0-9_-]{32}$/.test(n)) throw new Error("make a link: no link returned");
       return n;
     },
-    async redeemLinkNonce(nonce, contact, at) {
-      const r = must<any>(await admin.rpc("channel_link_nonce_redeem", { p_nonce: nonce, p_contact: contact, p_now: iso(at) }), "use a link");
-      if (r?.user_id) return { ok: true, userId: r.user_id, threadId: r.thread_id ?? null };
-      return { ok: false, why: r?.error === "linked_elsewhere" ? "linked_elsewhere" : "invalid" };
+    // TELEGRAM LINK OWNERSHIP (2026-10-31): 20261031040000_telegram_link_confirm.sql. Opening a code asks the account's own
+    // channel (the question queued under key); only a chat already the account's comes back linked.
+    async redeemLinkNonce(nonce, contact, at, askText) {
+      const r = must<any>(await admin.rpc("channel_link_nonce_ask", { p_nonce: nonce, p_contact: contact, p_text: askText, p_now: iso(at) }), "use a link");
+      if (r?.asked === true && typeof r.user_id === "string" && typeof r.key === "string") return { ok: false, why: "asked", userId: r.user_id, key: r.key };
+      if (r?.linked === true && typeof r.user_id === "string") return { ok: true, userId: r.user_id, threadId: r.thread_id ?? null };
+      return { ok: false, why: r?.error === "linked_elsewhere" ? "linked_elsewhere" : r?.error === "no_channel" || r?.error === "stopped" ? "cant_ask" : r?.error === "busy" ? "busy" : "invalid" };
+    },
+    async pendingCodeLink(contact, at) {
+      return must<boolean>(await admin.rpc("channel_link_code_pending", { p_contact: contact, p_now: iso(at) }), "read the link question") === true;
     },
     async unlinkTelegram(userId, at) {
       return Number(must<number>(await admin.rpc("channel_telegram_unlink_as", { p_user: userId, p_now: iso(at) }), "unlink Telegram")) || 0;

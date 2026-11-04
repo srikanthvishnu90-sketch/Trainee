@@ -17,7 +17,8 @@
 //   two       one number on two accounts: the third channel joins only the one that said yes; the two never merge;
 //   again     a second Telegram chat (or WhatsApp number) for an account that has one: the yes moves it (it raised a unique
 //             violation, and every yes read "I couldn't answer that");
-//   tokens    "connect telegram": single use, ten minutes, the issuing account's, a fourth burns the first;
+//   tokens    "connect telegram": single use, ten minutes, the issuing account's, a fourth burns the first; a chat is linked only
+//             on the YES of the account's own channel (TELEGRAM LINK OWNERSHIP, 2026-10-31);
 //   recycled  a WhatsApp number given to someone else: a fresh account for the new owner; a moved number keeps its person;
 //   deleted   an account deleted and the person back: fresh; a number that waited for a yes, and a Telegram chat unlinked
 //             from the web, are told about sign-up, never left in silence;
@@ -424,7 +425,18 @@ Deno.test({ name: "identity on Postgres: 80 multi-channel journeys through the r
           if (c === "another account's") { const B = await seed(n + 50, [{ c: Q(n) }]); N = await issue(B); want = B; }
           const m = sent.length;
           await tg(chat, `/start ${N}`);
-          J(read(`tg:${chat}`, m).includes(reply), `${c}: told ${JSON.stringify(read(`tg:${chat}`, m))}`);
+          // TELEGRAM LINK OWNERSHIP (2026-10-31): a chat that is no one's is linked only on the YES of the account's own channel
+          // (the contact the question was asked on, read back from the database).
+          if (reply === IN.TELEGRAM_LINKED_REPLY) {
+            J(read(`tg:${chat}`, m).includes(IN.TELEGRAM_LINK_CONFIRM_REPLY), `${c}: told ${JSON.stringify(read(`tg:${chat}`, m))}`);
+            J(!(await owner(`tg:${chat}`)), `${c}: linked before the YES`);
+            const on = (await rows<{ asked_on: string }>(db, `select asked_on from public.channel_link_requests where contact = ${q(`tg:${chat}`)} and by_code and answered_at is null`))[0]?.asked_on ?? "";
+            J(read(on, m).some((x) => /^Someone wants to link Telegram /.test(x)), `${c}: the account's channel ${on} was not asked`);
+            const y = sent.length;
+            const linkReply = `LINK ${/reply LINK ([0-9]{4}) /.exec(read(on, m).filter((x) => /^Someone wants to link Telegram /.test(x)).at(-1) ?? "")?.[1] ?? "none"}`;
+            if (on.startsWith("tg:")) await tg(Number(on.slice(3)), linkReply); else await lm(on, linkReply);
+            J(read(`tg:${chat}`, y).includes(IN.LINKED_HERE_REPLY), `${c}: after the YES told ${JSON.stringify(read(`tg:${chat}`, y))}`);
+          } else J(read(`tg:${chat}`, m).includes(reply), `${c}: told ${JSON.stringify(read(`tg:${chat}`, m))}`);
           J(await owner(`tg:${chat}`) === want, `${c}: the chat is ${await owner(`tg:${chat}`)}'s, want ${want}`);
           if (c === "twice") { const m2 = sent.length; await tg(chat2, `/start ${N}`); J(read(`tg:${chat2}`, m2).includes(IN.TELEGRAM_LINK_INVALID_REPLY) && !(await owner(`tg:${chat2}`)), "a used link worked again"); }
           if (c === "replace old chat") J(!(await owner(`tg:${chat2}`)), "the account kept two Telegram chats");
@@ -612,6 +624,11 @@ Deno.test({ name: "identity on Postgres: 80 multi-channel journeys through the r
         const u = await seed(n, [{ c: P(n) }], P(n));
         const N = (await rows<{ n: string }>(db, `select public.channel_link_nonce_issue(${q(u)}, ${q(iso(clock.t))}) as n`))[0].n;
         await Promise.all([tg(4100000 + n, `/start ${N}`), tg(4200000 + n, `/start ${N}`), tg(4300000 + n, `/start ${N}`)]);
+        // TELEGRAM LINK OWNERSHIP (2026-10-31): one question for one link, nothing linked before the account's YES, then one chat.
+        const early = [await owner(`tg:${4100000 + n}`), await owner(`tg:${4200000 + n}`), await owner(`tg:${4300000 + n}`)].filter(Boolean);
+        J(!early.length, `${early.length} chats linked before the YES`);
+        J((await rows(db, `select id from public.channel_link_requests where user_id = ${q(u)} and by_code`)).length === 1, "one link asked more than once");
+        await lm(P(n), `LINK ${/reply LINK ([0-9]{4}) /.exec(read(P(n)).filter((x) => /^Someone wants to link Telegram /.test(x)).at(-1) ?? "")?.[1] ?? "none"}`);
         const owners = [await owner(`tg:${4100000 + n}`), await owner(`tg:${4200000 + n}`), await owner(`tg:${4300000 + n}`)].filter(Boolean);
         J(owners.length === 1 && owners[0] === u, `${owners.length} chats linked by one link`);
       });

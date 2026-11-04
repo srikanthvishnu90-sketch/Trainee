@@ -21,6 +21,7 @@
 // work authorization come only from the person's own chat messages, through their own "use N".
 import { confirmedResumeSql } from "../flow/resume-seed.ts"; // OWNER RULE 2026-10-26: the person has a confirmed resume
 import assertNode from "node:assert/strict";
+import { answerOneByOne } from "../helpers/one_question.ts";
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const assertEquals = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 import { pgBinDir, startPg } from "../flow/pg.ts";
@@ -126,7 +127,7 @@ Deno.test({
       const say = async (message: string) => {
         const r = await questionsTurn({ message, userId: PERSON, threadId: THREAD, now: Date.now(), store });
         if (r) {
-          const intent = ["shown", "partial"].includes(r.status) || r.status.startsWith("draft") ? QUESTIONS_INTENT : "career_apply_questions_answer";
+          const intent = ["shown", "partial", "answered_next"].includes(r.status) || r.status.startsWith("draft") ? QUESTIONS_INTENT : "career_apply_questions_answer";
           await pg.sql(`insert into public.agent_messages (thread_id, role, content, meta) values ('${THREAD}', 'assistant', $r$${r.reply}$r$, '{"intent":"${intent}"}')`);
         }
         return r;
@@ -180,21 +181,13 @@ Deno.test({
       });
 
       await t.step("G2: each question carries the person's own words, with the date; nothing is saved until they say 'use N'", async () => {
-        const shown = await say("what do you need from me");
-        assertEquals(shown?.status, "shown", JSON.stringify(shown));
-        const text = shown!.reply;
+        // One question at a time (review of #360): each shown with their own words for it; "use 1" saves it.
+        const r = await answerOneByOne(async (m) => { const x = await say(m); return { reply: x!.reply, resultStatus: x!.status }; },
+          [[SPONSOR, "use 1"], [AUTH, "use 1"]]);
+        const text = r.shown;
         assert(text.includes(`"I don't need visa sponsorship"`) && /Oct 22/.test(text), text);
         assert(text.includes(`"I'm authorized to work in the US"`) && /Oct 20/.test(text), text);
-        assertEquals(await pg.sql(`select count(*) from public.career_apply_questions where user_id = '${PERSON}' and answer is not null`), "0", "showing saves nothing");
-        const n = (key: string) => {
-          const lines = text.split("\n");
-          const i = lines.findIndex((l) => key === "sponsorship" ? l.includes(SPONSOR) : l.includes(AUTH));
-          return Number(/^(\d+)\./.exec(lines[i])![1]);
-        };
-        for (const k of ["sponsorship", "work_authorization"]) {
-          const used = await say(`use ${n(k)}`);
-          assert(/Saved, as drafted/.test(used?.reply ?? ""), JSON.stringify(used));
-        }
+        assert((r.saved.match(/Saved, as drafted/g) ?? []).length === 2, r.saved);
         const saved = await pg.sql(`select string_agg(key || '=' || answer, ',' order by key) from public.career_apply_questions where user_id = '${PERSON}'`);
         assertEquals(saved, "fact:sponsorship=No,fact:work_authorization=Yes");
       });

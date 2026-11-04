@@ -12,7 +12,8 @@
 //     never on a forwarded contact card, a typed number, another person's yes, a late yes or the new chat's own yes;
 //   - a number is never two accounts' by Trainee's own doing: the account already on it is asked, or the person is told;
 //     a stopped account is never asked (the question would be held unseen) and never doubled;
-//   - link tokens are single use, ten minutes, bound to the account that issued them;
+//   - link tokens are single use, ten minutes, bound to the account that issued them, and link a chat only on that account's
+//     own YES on the channel it already uses (TELEGRAM LINK OWNERSHIP, 2026-10-31);
 //   - a person never reads another account's message, and no turn runs as anyone but the contact's owner;
 //   - a recycled number gets a fresh account; a deleted account comes back fresh; a refusal is said, never silence;
 //   - STOP is the person's (WO-038): a STOP on any channel holds what Trainee starts everywhere, an answer to a message
@@ -534,8 +535,17 @@ Deno.test({ name: `identity: "connect telegram" links are single use, ten minute
       token = await w.W.inbound.issueLinkNonce!(B, w.clock.t);
       expectOwner = B;
     }
+    // TELEGRAM LINK OWNERSHIP (2026-10-31): a link opened by a chat that is no one's links nothing yet: the issuing account's own
+    // channel is asked, and its YES binds the chat (a chat already the account's stays linked, as before).
+    const confirmVia = expectReply === IN.TELEGRAM_LINKED_REPLY && s.redeem !== "same_chat" ? (s.redeem === "other_account" ? phoneOf(s.id, 8100000) : home) : null;
     const r = await start(target, token);
-    if (!r.includes(expectReply)) whys.push(`${s.redeem}: told ${JSON.stringify(r)}, want ${expectReply}`);
+    if (confirmVia) {
+      if (!r.includes((IN as any).TELEGRAM_LINK_CONFIRM_REPLY)) whys.push(`${s.redeem}: told ${JSON.stringify(r)}, want the confirm reply`);
+      if (w.owner(`tg:${target}`)) whys.push(`${s.redeem}: the chat was linked before the YES`);
+      const m = w.mark();
+      await w.from(confirmVia, `LINK ${/reply LINK ([0-9]{4}) /.exec(w.read(confirmVia).filter((t) => /^Someone wants to link Telegram /.test(t)).at(-1) ?? "")?.[1] ?? "none"}`);
+      if (!w.read(`tg:${target}`, m).includes(IN.LINKED_HERE_REPLY)) whys.push(`${s.redeem}: after the YES the chat was told ${JSON.stringify(w.read(`tg:${target}`, m))}`);
+    } else if (!r.includes(expectReply)) whys.push(`${s.redeem}: told ${JSON.stringify(r)}, want ${expectReply}`);
     if (w.owner(`tg:${target}`) !== expectOwner) whys.push(`${s.redeem}: the chat is ${w.owner(`tg:${target}`)}'s, want ${expectOwner}`);
     if (s.redeem === "twice") {
       const r2 = await start(chat2, token);
@@ -895,9 +905,16 @@ Deno.test({ name: `identity: two chats redeeming the same link: one wins (cc/non
     const w = world({ signup: "closed" });
     const u = w.seed([{ c: P }], P);
     const N = await w.W.inbound.issueLinkNonce!(u, w.clock.t);
+    const m = w.mark();
     await Promise.all(Array.from({ length: s.chats }, (_, i) => w.tg(1800000 + s.id * 10 + i, `/start ${N}`)));
+    // TELEGRAM LINK OWNERSHIP (2026-10-31): one link asks one question; nothing is linked before the account's YES, then one chat.
+    const early = Array.from({ length: s.chats }, (_, i) => w.owner(`tg:${1800000 + s.id * 10 + i}`)).filter(Boolean);
+    const asked = w.read(P, m).filter((t) => /^Someone wants to link Telegram /.test(t)).length;
+    await w.from(P, `LINK ${/reply LINK ([0-9]{4}) /.exec(w.read(P, m).find((t) => /^Someone wants to link Telegram /.test(t)) ?? "")?.[1] ?? "none"}`);
     const owners = Array.from({ length: s.chats }, (_, i) => w.owner(`tg:${1800000 + s.id * 10 + i}`)).filter(Boolean);
     const whys = owners.length === 1 && owners[0] === u ? [] : [`${owners.length} chats linked by one link`];
+    if (early.length) whys.push(`${early.length} chats linked before the YES`);
+    if (asked !== 1) whys.push(`one link asked ${asked} times`);
     whys.push(...w.common());
     rep.grade(s, whys);
   }

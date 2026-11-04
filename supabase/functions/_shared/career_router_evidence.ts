@@ -35,7 +35,7 @@ export const RESUME_CONFIRM_PROVENANCE = "owner confirmed in chat the resume ent
 const CONFIRMING = new Set(["career_resume_ingest"]);
 
 export interface Shown { text: string; message_ids: string[] }
-export interface Upload { kind: "message" | "file"; ref: string; sha256: string; text: string }
+export interface Upload { kind: "message" | "file"; ref: string; sha256: string; text: string; at?: string | null }
 // held: the facts the router confirmed that could not be evidenced, put back to drafts (the host's record is the truth: a
 // fact no application may use is not called confirmed).
 export interface EvidenceResult { stamped: number; unshown: number; untraced: number; refused: number; held: string[] }
@@ -104,6 +104,47 @@ export async function evidenceResumeConfirmation(o: {
   return r;
 }
 
+// ONBOARDING ROUND 3 (2026-11-01): the person corrects one value of a confirmed resume entry in chat ("actually I
+// graduated 2023"; 142 handleResumeFieldCorrection). The entry's words changed, so the event that confirmed its old words
+// no longer evidences it. It gets its own fact_confirmed event (this person, their message's hash, the value they gave
+// and the one it replaced, the earlier event it supersedes) and an owner provenance, held for the turn's commit like the
+// resume's. Only an entry this turn changed, still confirmed, whose new value is in the person's own message this turn;
+// an entry that cannot be evidenced goes back to the words it had (nothing they did not confirm stands as confirmed).
+export const ENTRY_CORRECTION_PROVENANCE = "owner corrected in chat the confirmed resume entry";
+export const ENTRY_CORRECTION_VIA = "router: their correction of a confirmed resume entry";
+// deno-lint-ignore no-explicit-any
+export async function evidenceEntryCorrections(o: { userId: string; now: number; message: string; before: any; after: any; out: { intent?: string | null; resultStatus?: string | null } | null | undefined; events: EventStore | null | undefined }): Promise<{ stamped: number; reverted: number }> {
+  const r = { stamped: 0, reverted: 0 };
+  if (!o.out || o.out.intent !== "career_resume_correction" || o.out.resultStatus !== "completed") return r;
+  // deno-lint-ignore no-explicit-any
+  const had = new Map((Array.isArray(o.before?.facts) ? o.before.facts : []).filter((f: any) => f && f.id).map((f: any) => [f.id, f]));
+  const said = words(o.message), at = new Date(o.now).toISOString(), message_sha256 = await sha256Hex(String(o.message ?? ""));
+  for (const f of Array.isArray(o.after?.facts) ? o.after.facts : []) {
+    // deno-lint-ignore no-explicit-any
+    const was: any = f && had.get(f.id);
+    if (!f || !was || words(was.text) === words(f.text) || f.status !== "confirmed" || f.needs_confirmation !== false || !f.owner_corrected_at) continue;
+    const last = Array.isArray(f.corrections) && f.corrections.length ? f.corrections[f.corrections.length - 1] : null;
+    const event = crypto.randomUUID();
+    const kept = last && typeof last.to === "string" && words(last.to) && said.includes(words(last.to)) && was.status === "confirmed" && was.needs_confirmation === false
+      ? await recordEvent(o.events, {
+        user_id: o.userId, at: o.now, kind: "fact_confirmed", subject: String(f.text).slice(0, 300), source: "chat",
+        detail: { id: f.id, kind: f.kind ?? null, confirmation_event_id: event, message_sha256, corrected: { from: String(last.from).slice(0, 120), to: String(last.to).slice(0, 120) },
+          supersedes: was.confirmation_event_id ?? null, via: ENTRY_CORRECTION_VIA },
+      })
+      : false;
+    if (!kept) {
+      for (const k of Object.keys(f)) delete f[k];
+      Object.assign(f, JSON.parse(JSON.stringify(was)));
+      r.reverted++;
+      continue;
+    }
+    Object.assign(f, { provenance: `${ENTRY_CORRECTION_PROVENANCE} (${at})`, confirmation_event_id: event, confirmed_at: at });
+    r.stamped++;
+  }
+  return r;
+}
+export const correctionNotRecordedReply = "I couldn't record your correction just now, so your entry stays as you confirmed it before: nothing changed. Tell me again in a moment.";
+
 // The reply when some or all of the facts the router confirmed could not be evidenced and were held as drafts: what is
 // confirmed and what is not, and why, in place of the router's "confirmed" (null when nothing was held).
 export function heldReply(r: EvidenceResult): string | null {
@@ -168,7 +209,7 @@ export async function evidenceStatedFacts(o: {
 // What the person was shown and what they gave, from their thread's messages (newest first, as read): the assistant's
 // replies since their latest message that carries the confirmed entries' words, and that message, as their upload.
 // deno-lint-ignore no-explicit-any
-export async function resumeConfirmationContext(rows: { id: string | number; role: string; content: string }[], after: any): Promise<{ shown: Shown | null; upload: Upload | null; said: string }> {
+export async function resumeConfirmationContext(rows: { id: string | number; role: string; content: string; created_at?: string | null }[], after: any): Promise<{ shown: Shown | null; upload: Upload | null; said: string }> {
   // A corrected entry's lines are looked for as they were given (its corrections undone).
   // deno-lint-ignore no-explicit-any
   const lines: string[] = (Array.isArray(after?.facts) ? after.facts : []).flatMap((f: any) => [f?.title, ...(Array.isArray(f?.bullets) ? f.bullets : [])].map(words).filter(Boolean).map((l: string) => undo(l, correctionsOf(f))));
@@ -193,5 +234,5 @@ export async function resumeConfirmationContext(rows: { id: string | number; rol
   }
   const m = rows[best];
   return { shown: shownTexts.length ? { text: shownTexts.join("\n"), message_ids: ids } : null,
-    upload: { kind: "message", ref: `agent_messages:${m.id}`, sha256: await sha256Hex(String(m.content)), text: String(m.content) }, said: saidTexts.join("\n") };
+    upload: { kind: "message", ref: `agent_messages:${m.id}`, sha256: await sha256Hex(String(m.content)), text: String(m.content), ...(m.created_at ? { at: String(m.created_at) } : {}) }, said: saidTexts.join("\n") };
 }

@@ -19,6 +19,7 @@
 // Only private chats are read; a group's messages are ignored.
 import { equalSecret } from "./message_service.ts";
 import { type ChannelAdapter, type InboundMessage, packMessages, pacer, type ParseResult, type SendResult } from "./channel_adapters.ts";
+import type { SharedPace } from "./channel_pacer.ts";
 import { nativeRender, telegramPlain } from "./channel_voice.ts";
 import { safeSlice, utf8Bytes } from "./channel_text.ts";
 
@@ -63,7 +64,11 @@ export function telegramDeepLink(botUsername: string, nonce: string): string {
 // button spun until Telegram gave up. It is still never read (no account, no card, no data), but its callback is answered
 // with this line, which carries nothing of the person's.
 export const GROUP_TAP_ANSWER = "This button works in your private chat with me.";
-export function parseTelegramUpdate(u: any): { message: InboundMessage | null; ignored?: string; answerTap?: string } {
+// TELEGRAM ROUND 3 (2026-10-31): a tap whose sender is not the private chat its message is in (callback_query.from.id is not
+// message.chat.id) is not that chat's person tapping their own card. It ran as the chat's account: someone else's Confirm
+// approved the chat owner's application and the answer went to the owner. It is answered with this line and does nothing.
+export const NOT_YOUR_TAP_ANSWER = "That button isn't yours, so nothing was done.";
+export function parseTelegramUpdate(u: any): { message: InboundMessage | null; ignored?: string; answerTap?: string; answerText?: string } {
   if (!u || typeof u !== "object" || !Number.isSafeInteger(u.update_id)) return { message: null, ignored: "not a Telegram update" };
   const messageId = String(u.update_id);
   const member = u.my_chat_member;
@@ -86,12 +91,23 @@ export function parseTelegramUpdate(u: any): { message: InboundMessage | null; i
     const chat = cb.message?.chat;
     const chatId = chat ? (chat.type === "private" ? chat.id : null) : cb.from?.id;
     if (!Number.isSafeInteger(chatId) || chatId <= 0) return { message: null, ignored: "not a private chat", answerTap: String(cb.id).slice(0, 100) };
+    if (chat && cb.from?.id !== chatId) return { message: null, ignored: "a tap by someone other than the chat's person", answerTap: String(cb.id).slice(0, 100), answerText: NOT_YOUR_TAP_ANSWER };
     const data = typeof cb.data === "string" && cb.data.length <= 64 ? cb.data : "";
     return { message: { provider: "telegram", channel: "telegram", messageId, kind: "callback", contact: `tg:${chatId}`, address: String(chatId), text: "",
       callback: { id: String(cb.id).slice(0, 100), data, messageId: Number.isSafeInteger(cb.message?.message_id) ? String(cb.message.message_id) : null } } };
   }
+  // TELEGRAM ROUND 3 (2026-10-31): an edit (edited_message) was ignored without a word, so a "yes" edited into "no" after
+  // Trainee acted on the yes read as taken back. It is still never read as a message (no turn, no command, no yes); in a
+  // private chat it is passed on as an edit, and the inbound core answers a decision edited after the fact (channel_inbound.ts).
+  const e = u.edited_message;
+  if (e && typeof e === "object" && !u.message) {
+    if (e.chat?.type !== "private" || !Number.isSafeInteger(e.chat.id) || e.chat.id <= 0) return { message: null, ignored: "not a private chat" };
+    if (e.from?.is_bot || e.from?.id !== e.chat.id) return { message: null, ignored: "an edit by someone other than the chat's person" };
+    const t = typeof e.text === "string" ? e.text : typeof e.caption === "string" ? e.caption : "";
+    return { message: { provider: "telegram", channel: "telegram", messageId, kind: "edited", contact: `tg:${e.chat.id}`, address: String(e.chat.id), text: safeSlice(t, 200) } };
+  }
   const m = u.message;
-  if (!m || typeof m !== "object") return { message: null, ignored: "not a new message" }; // edits, channel posts
+  if (!m || typeof m !== "object") return { message: null, ignored: "not a new message" }; // channel posts
   if (m.chat?.type !== "private" || !Number.isSafeInteger(m.chat.id) || m.chat.id <= 0) return { message: null, ignored: "not a private chat" };
   if (m.from?.is_bot) return { message: null, ignored: "from a bot" };
   // SERIAL-1462: a reply in Telegram carries the replied-to message as message.reply_to_message (Bot API); its message_id
@@ -140,7 +156,10 @@ export function parseTelegramUpdate(u: any): { message: InboundMessage | null; i
   if (cmd) {
     const command = cmd[1].toLowerCase() as "start" | "stop" | "help";
     const payload = command === "start" && cmd[2] && /^[A-Za-z0-9_-]{1,64}$/.test(cmd[2]) ? cmd[2] : null;
-    return { message: { ...base, kind: "text", text: m.text, command, startPayload: payload } };
+    // TELEGRAM LINK OWNERSHIP (2026-10-31): who opened a link code, as Telegram names them (message.from.username), for the
+    // question asked on the account's own channel; anything not shaped like a username is left out (it is the opener's text).
+    const handle = payload && typeof m.from?.username === "string" && /^[A-Za-z0-9_]{5,32}$/.test(m.from.username) ? m.from.username : null;
+    return { message: { ...base, kind: "text", text: m.text, command, startPayload: payload, ...(handle ? { senderHandle: handle } : {}) } };
   }
   // TELEGRAM ROUND 2: "Apply here" as a link (a text_link entity: the words show, the URL rides beside them) reached the
   // brain as the bare words, the URL lost. Each such link is written after its words.
@@ -198,9 +217,18 @@ export function withLinks(text: string, entities: any): string {
 export function telegramAdapter(o: {
   token: string; webhookSecret?: string; fetch?: typeof fetch; timeoutMs?: number;
   clock?: () => number; sleep?: (ms: number) => Promise<void>; native?: boolean;
+  sharedPace?: SharedPace; // the database bucket every invocation shares (channel_pacer.ts); absent: this process only, as before
 }): ChannelAdapter {
   const f = o.fetch ?? fetch, timeout = o.timeoutMs ?? 15000;
-  const pace = pacer({ perChatMs: 1000, overallPerSecond: 30, clock: o.clock, sleep: o.sleep });
+  // With the shared bucket, the chat's one-a-second is its key there; the local pacer keeps only the process's overall gap.
+  const localPace = pacer({ perChatMs: o.sharedPace ? 0 : 1000, overallPerSecond: 30, clock: o.clock, sleep: o.sleep });
+  // Both: this process's own pacing, then the shared bucket. A refusal (the shared budget is spent for longer than a request
+  // should sleep) is reported by the caller as a retryable failure that waits retryAfterMs, nothing sent.
+  const pace = async (chat: string, urgent?: boolean): Promise<{ ok: true } | { ok: false; retryAfterMs: number }> => {
+    await localPace(chat);
+    return o.sharedPace ? await o.sharedPace(chat, urgent ? { urgent } : undefined) : { ok: true };
+  };
+  const paced = (g: { retryAfterMs: number }, why: string, retryable: boolean) => ({ ok: false as const, error: `Telegram pacing: ${why}`, retryable, retryAfterMs: g.retryAfterMs });
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   // The token rides in the URL; nothing that may be logged carries it.
   const redact = (s: string) => (o.token ? s.split(o.token).join("***") : s);
@@ -232,7 +260,7 @@ export function telegramAdapter(o: {
     ...(o.native ? { htmlText: true } : {}),
     typingEveryMs: 4000,
     async typing(address): Promise<boolean> {
-      const r = await call("sendChatAction", { chat_id: Number(address), action: "typing" });
+      const r = await call("sendChatAction", { chat_id: Number(address), action: "typing" }, 0); // N12: never waits on a 429
       return !("error" in r) && r.status === 200 && r.body?.ok === true;
     },
     async parseInbound(req): Promise<ParseResult> {
@@ -244,7 +272,7 @@ export function telegramAdapter(o: {
       const r = parseTelegramUpdate(await req.json().catch(() => null));
       // KNOWN GAPS (#311): a tap outside a private chat is answered (never left spinning), and nothing else is done with it.
       if (r.answerTap) {
-        const a = await call("answerCallbackQuery", { callback_query_id: r.answerTap, text: GROUP_TAP_ANSWER });
+        const a = await call("answerCallbackQuery", { callback_query_id: r.answerTap, text: r.answerText ?? GROUP_TAP_ANSWER });
         if ("error" in a || a.status !== 200) console.error("telegram: a tap outside a private chat was not answered:", "error" in a ? redact(String(a.error)).slice(0, 120) : `HTTP ${a.status}`);
       }
       return { messages: r.message ? [r.message] : [], ignored: r.ignored ? [r.ignored] : [] };
@@ -287,7 +315,7 @@ export function telegramAdapter(o: {
     // FEATURE 16: a document as a file (sendDocument, multipart; https://core.telegram.org/bots/api#senddocument, ASSUMED):
     // the bytes themselves, never a link to them.
     async sendDocument(address, doc): Promise<SendResult> {
-      await pace(address);
+      const g = await pace(address); if (!g.ok) return paced(g, "the shared send budget is spent; try again shortly", true);
       try {
         const form = new FormData();
         form.append("chat_id", String(Number(address)));
@@ -301,11 +329,13 @@ export function telegramAdapter(o: {
     // REPLY SHAPE: a link alone in its message, preview on for exactly that URL (link_preview_options {is_disabled:false, url};
     // https://core.telegram.org/bots/api#linkpreviewoptions, ASSUMED field names), so Telegram shows the title and image card.
     async sendLink(address, url): Promise<SendResult> {
-      await pace(address);
+      const g = await pace(address); if (!g.ok) return paced(g, "the shared send budget is spent; try again shortly", true);
       const r = await call("sendMessage", { chat_id: Number(address), text: safeSlice(url, TELEGRAM_CHARS), link_preview_options: { is_disabled: false, url, prefer_large_media: true } });
       if ("error" in r) return { ok: false, error: redact(`Telegram unreachable: ${r.error instanceof Error ? r.error.message : String(r.error)}`).slice(0, 200), retryable: false };
       if (r.status === 200 && r.body?.ok === true) return { ok: true, id: r.body?.result?.message_id != null ? String(r.body.result.message_id) : null };
-      return { ok: false, error: `Telegram sendLink HTTP ${r.status}: ${redact(String(r.body?.description ?? "")).slice(0, 120)}`, retryable: false };
+      // TELEGRAM ROUND 3: a 429 says how long to wait, so the link waits that long in the outbox (channel_inbound.ts).
+      const ra = r.status === 429 ? retryAfterOf(r.body) : null;
+      return { ok: false, error: `Telegram sendLink HTTP ${r.status}: ${redact(String(r.body?.description ?? "")).slice(0, 120)}`, retryable: false, ...(ra !== null ? { retryAfterMs: ra * 1000 } : {}) };
     },
     // FEATURE 16: every tap is answered once, so the person's button stops spinning (answerCallbackQuery; ASSUMED).
     async answerCallback(callbackId, text): Promise<boolean> {
@@ -316,7 +346,7 @@ export function telegramAdapter(o: {
     // at most 1,024 characters, plain text; https://core.telegram.org/bots/api#sendphoto, ASSUMED). A refusal (Telegram could
     // not fetch the logo) is a plain failure, and the caller sends the same card as text.
     async sendPhoto(address, p): Promise<SendResult> {
-      await pace(address);
+      const g = await pace(address); if (!g.ok) return paced(g, "the shared send budget is spent; try again shortly", true);
       const r = await call("sendPhoto", { chat_id: Number(address), photo: p.photoUrl, caption: safeSlice(p.caption, TELEGRAM_CAPTION),
         ...(keyboardOf(p.buttons) ? { reply_markup: keyboardOf(p.buttons) } : {}) });
       if ("error" in r) return { ok: false, error: redact(`Telegram unreachable: ${r.error instanceof Error ? r.error.message : String(r.error)}`).slice(0, 200), retryable: false };
@@ -342,7 +372,9 @@ export function telegramAdapter(o: {
       // after the pacing of the earlier ones.
       const now = o.clock ?? Date.now, t0 = now();
       for (let i = 0; i < bubbles.length; i++) {
-        await pace(address);
+        const gate = await pace(address, opts?.urgent);
+        // Nothing of this message went out: the rows already sent are reported (sent / sentIds) so the outbox resumes after them.
+        if (!gate.ok) return { ...paced(gate, `the shared send budget is spent${i ? ` (after ${i} of ${bubbles.length} messages went out)` : ""}`, true), ...(i ? { sent: i, sentIds: [...ids] } : {}) };
         const after = i ? ` after ${i} of ${bubbles.length} messages went out` : "";
         // FEATURE 16: buttons (the card's Approve and Decline) ride the last part, under the whole card.
         const last = i === bubbles.length - 1;
@@ -371,6 +403,11 @@ export function telegramAdapter(o: {
         const partial = i ? { sent: i, sentIds: [...ids] } : {};
         if ("error" in r) {
           const e = r.error, timedOut = e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError");
+          // TELEGRAM ROUND 3 (2026-10-31): a timeout on a message that is not the reply's last ended the reply there (failed,
+          // never retried), so every message after it was lost. The message that timed out most likely went out (Telegram
+          // took it and its answer never came back), so it is counted as sent, never sent twice, and the rest goes again
+          // from the next message (career_outbox.sent_parts). A timeout on the last message is still reported as is.
+          if (timedOut && i < bubbles.length - 1) return { ok: false, error: `Telegram timed out on message ${i + 1} of ${bubbles.length} (counted as delivered; the rest goes again)`, retryable: true, sent: i + 1, sentIds: [...ids] };
           return timedOut ? { ok: false, error: `Telegram timed out (it may have been delivered)${after}`, retryable: false, ...partial }
             : { ok: false, error: redact(`Telegram unreachable: ${e instanceof Error ? e.message : String(e)}`).slice(0, 200) + after, retryable: true, ...partial };
         }

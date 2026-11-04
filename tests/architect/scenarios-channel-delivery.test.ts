@@ -134,7 +134,7 @@ function wordsProblem(got: string[], want: string[], giant: string[]): string | 
 }
 
 const refuse = (async () => { throw new TypeError("network refused in the scenario run"); }) as unknown as typeof fetch;
-const wiring = (native: boolean) => adaptersFromEnv({ get: (k: string) => ({ LOOPMESSAGE_API_KEY: "k", TELEGRAM_BOT_TOKEN: "t", WHATSAPP_TOKEN: "w", WHATSAPP_PHONE_NUMBER_ID: "1", ...(native ? { CAREER_TEXTING_NATIVE: "on" } : {}) } as Record<string, string>)[k] }, { fetch: refuse, clock: () => NOW, sleep: async () => {} });
+const wiring = (native: boolean) => adaptersFromEnv({ get: (k: string) => ({ LOOPMESSAGE_API_KEY: "k", TELEGRAM_BOT_TOKEN: "t", WHATSAPP_TOKEN: "w", WHATSAPP_PHONE_NUMBER_ID: "1", CAREER_TEXTING_NATIVE: native ? "on" : "off" } as Record<string, string>)[k] }, { fetch: refuse, clock: () => NOW, sleep: async () => {} });
 const WIRED = { true: wiring(true), false: wiring(false) };
 
 // ------------------------------------------------------------------------------------------------ render + split
@@ -421,7 +421,9 @@ Deno.test(`channel delivery at scale, provider failures retried only when nothin
     // CHANNEL DELIVERY ROUND 2 (2026-10-30): a failure that certainly sent nothing of its bubble (429, 502, 503, a connection
     // that never opened) is retried on any bubble, from that bubble (career_outbox.sent_parts): it must then end delivered
     // with every bubble exactly once. It was final after the first bubble ("after n of m"), the rest never sent.
-    const retryable = s.mode !== "ok" && RETRY_FIRST[s.channel].has(s.mode);
+    // TELEGRAM ROUND 3 (2026-10-31): a Telegram timeout on a bubble that is not the last counts that bubble as sent (it most
+    // likely went) and the rest goes again from the next: delivered, every bubble once. On the last bubble it stays final.
+    const retryable = s.mode !== "ok" && (RETRY_FIRST[s.channel].has(s.mode) || (s.channel === "telegram" && s.mode === "timeout" && s.failAt < s.bubbles - 1));
     const blocked = s.channel === "telegram" && s.mode === "403";
     if (twice) why = `"${twice[0]}" may have reached the person ${twice[1]} times`;
     else if (s.mode === "ok" || retryable) { if (row.status !== "delivered" || bubbles.some((b) => out.get(b) !== 1)) why = `must end delivered, every bubble once (status ${row.status})`; }

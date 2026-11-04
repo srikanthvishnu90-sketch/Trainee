@@ -206,3 +206,27 @@ Deno.test("snapshot: reads the newest deploy_smoke row and the undelivered queue
   const empty = await readSnapshot(fakeDb({ founder_alerts: [] }), envOf(), NOW);
   assert(empty.deploySmoke!.fail === 0 && evaluate(empty).filter((x) => x.kind === "deploy_smoke_failed").length === 0);
 });
+
+Deno.test("approval rate: a kind under 95% with 20+ shown alerts once; under 20 shown, on the line, or not measured raises nothing", async () => {
+  const kinds = (a: { kind: string; shown: number; approvedUnchanged: number }[] | null | undefined) => evaluate(baseSnap({ approval: a })).filter((x) => x.kind === "approval_below_target");
+  const low = kinds([{ kind: "outreach_draft", shown: 21, approvedUnchanged: 19 }]); // 90.5%
+  assert(low.length === 1 && low[0].key === "approval_below_target:outreach_draft" && /90\.5%/.test(low[0].text) && /19 approved unchanged of 21 shown/.test(low[0].text), JSON.stringify(low));
+  assert(kinds([{ kind: "outreach_draft", shown: 20, approvedUnchanged: 19 }]).length === 0, "19 of 20 is exactly 95%: no alert");
+  assert(kinds([{ kind: "application_packet", shown: 19, approvedUnchanged: 0 }]).length === 0, "under the sample floor: no alert, however low");
+  assert(kinds([{ kind: "advice_answer", shown: 0, approvedUnchanged: 0 }]).length === 0, "no feedback source: nothing to alert");
+  assert(kinds(null).length === 0 && kinds(undefined).length === 0, "not measured raises no alert about itself");
+  assert(kinds([{ kind: "outreach_draft", shown: 40, approvedUnchanged: 40 }, { kind: "application_packet", shown: 25, approvedUnchanged: 20 }]).map((x) => x.key).join() === "approval_below_target:application_packet", "only the kind under the line");
+  // Through the reads and the dispatcher: approval_rate_v is read, the alert is stored once and not repeated inside its cooldown.
+  const db = fakeDb({ approval_rate_v: [{ kind: "outreach_draft", shown: 30, approved_unchanged: 24, rate_pct: 80, status: "below target" }], founder_alerts: [] });
+  const snap = await readSnapshot(db, envOf(), NOW);
+  assert(snap.approval?.[0].shown === 30 && snap.approval[0].approvedUnchanged === 24, JSON.stringify(snap.approval));
+  const alerts = evaluate({ ...snap, ingest: null, delivery: null, worker: null, refusals: null, spend: null, http5xx: null });
+  const env = envOf({ TELEGRAM_BOT_TOKEN: "123456:test-token-aaaaaaaaaaaaaaaaaaaa", OWNER_TELEGRAM_CHAT_ID: "1" });
+  const sentTo: string[] = [];
+  const req = (async (u: any) => { sentTo.push(String(u)); return new Response("{}", { status: 200 }); }) as typeof fetch;
+  const first = await dispatch(db, env, alerts, NOW, req), again = await dispatch(db, env, alerts, NOW + 3 * H, req);
+  assert(first.length === 1 && first[0].kind === "approval_below_target" && again.length === 0, JSON.stringify([first, again]));
+  // A table that is not there yet is "not measured", not zero.
+  const none = await readSnapshot(fakeDb({}), envOf(), NOW);
+  assert(none.approval === null, "approval_rate_v missing: not measured");
+});

@@ -8,7 +8,7 @@
 import type { JobView } from "./telegram_jobs.ts";
 import { reasonWords } from "./career_apply_status.ts";
 import { BODY_FONT, BRAND, DISABLED_CSS, FAVICON, FONT_LINKS, PLUM, TOKENS_CSS } from "./brand.ts";
-import { FILE_CSS, stampHtml } from "./file_design.ts";
+import { FILE_CSS, stampHtml, stateHtml } from "./file_design.ts";
 
 export type Word = "queued" | "preparing" | "sending" | "submitted" | "confirmed" | "failed" | "not submitted" | "needs you" | "unknown" | "in applications";
 export interface Status { word: Word; detail: string; sent?: boolean; evidence?: string | null } // evidence: what the row holds that shows the outcome (an employer reference, a confirmation email); null/absent: none on file
@@ -162,7 +162,7 @@ ul.rows{list-style:none;margin:0;padding:0}
 .act{flex:none;margin:0}
 .apply{display:inline-flex;align-items:center;justify-content:center;min-width:96px;min-height:48px;padding:6px 20px;border-radius:999px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:600;text-decoration:none;cursor:pointer}.apply:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
 .chip{flex:none;min-height:48px;display:inline-flex;align-items:center;justify-content:flex-end;font-weight:600;color:var(--mute)}
-.chip.queued,.chip.in-applications,.chip.sending,.chip.submitted,.chip.confirmed{color:var(--good)}.chip.failed,.chip.not-submitted,.chip.unknown{color:var(--bad)}.chip.needs-you{color:var(--warn)}
+.chip.in-applications,.chip.sending,.chip.submitted,.chip.confirmed{color:var(--good)}.chip.failed,.chip.not-submitted,.chip.unknown{color:var(--bad)}.chip.needs-you{color:var(--warn)}
 details{margin:4px 0 0 58px}summary{list-style:none;cursor:pointer;min-height:44px;padding:4px 0}
 summary::-webkit-details-marker{display:none}
 .role{display:block;font-weight:500;overflow-wrap:anywhere}.desc{overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--mute);font-size:16px}
@@ -228,6 +228,8 @@ function rowHtml(r: Row, token: string): string {
 <details><summary><span class="role">${esc(j.title)}</span><span class="desc">${esc(r.snippet)}</span></summary>${sendList}${more}</details>${meta}${posted}${sendsLine}${why}${note}</li>`;
 }
 
+// A list with no jobs says so, why, and what happens next (file_design.ts stateHtml), never a blank card.
+const EMPTY_FEED = stateHtml({ kind: "empty", title: "No jobs on this list yet", reason: "Nothing is listed here, so nothing is waiting for you to approve.", next: "Ask Trainee in your chat to find roles. Any it finds are listed here, and nothing is sent until you tap Apply." });
 export function renderFeed(f: Feed): string {
   const names = [...new Set(f.rows.map((r) => r.resume).filter(Boolean))] as string[];
   const withLine = names.length ? `<p class="with">Applying with: ${esc(names.join(", "))}</p>` : "";
@@ -235,7 +237,7 @@ export function renderFeed(f: Feed): string {
   const all = f.setHash && f.setSize >= 2 ? `<form method="post" class="ajax all">${hidden(f.token, "applyall", `<input type="hidden" name="set" value="${f.setHash}">`)}<button type="submit">Apply to all ${f.setSize}</button></form>` : "";
   const top = f.top ? `<p class="top-note" role="alert">${esc(f.top)} ${refresh(f.token)}</p>` : "";
   // The File shell (file_design.ts): the wordmark and who it was made for above one card; the title, its freshness stamp, then the rows.
-  const inner = `<div id="root"><header class="fhead">${BRAND}${f.made ? `<p class="made">${esc(f.made)}</p>` : ""}</header><div class="fcard"><h1 class="ftitle">Your jobs</h1>${stampHtml(f.stamp ?? null)}${withLine}${more}${all}<main id="main">${top}<ul class="rows">${f.rows.map((r) => rowHtml(r, f.token)).join("")}</ul></main></div>${signOutFoot(f.token)}</div><p id="live" class="sr" role="status" aria-live="polite"></p>`;
+  const inner = `<div id="root"><header class="fhead">${BRAND}${f.made ? `<p class="made">${esc(f.made)}</p>` : ""}</header><div class="fcard"><h1 class="ftitle">Your jobs</h1>${stampHtml(f.stamp ?? null)}${withLine}${more}${all}<main id="main">${top}${f.rows.length ? `<ul class="rows">${f.rows.map((r) => rowHtml(r, f.token)).join("")}</ul>` : EMPTY_FEED}</main></div>${signOutFoot(f.token)}</div><p id="live" class="sr" role="status" aria-live="polite"></p>`;
   return layout("Your jobs - Trainee", inner, { script: FEED_SCRIPT, tg: true, og: f.og });
 }
 // Sign out of this page here, or everywhere it is open (every session of the account ends; each needs a new sign-in).

@@ -224,9 +224,9 @@ export function telegramAdapter(o: {
   const localPace = pacer({ perChatMs: o.sharedPace ? 0 : 1000, overallPerSecond: 30, clock: o.clock, sleep: o.sleep });
   // Both: this process's own pacing, then the shared bucket. A refusal (the shared budget is spent for longer than a request
   // should sleep) is reported by the caller as a retryable failure that waits retryAfterMs, nothing sent.
-  const pace = async (chat: string): Promise<{ ok: true } | { ok: false; retryAfterMs: number }> => {
+  const pace = async (chat: string, urgent?: boolean): Promise<{ ok: true } | { ok: false; retryAfterMs: number }> => {
     await localPace(chat);
-    return o.sharedPace ? await o.sharedPace(chat) : { ok: true };
+    return o.sharedPace ? await o.sharedPace(chat, urgent ? { urgent } : undefined) : { ok: true };
   };
   const paced = (g: { retryAfterMs: number }, why: string, retryable: boolean) => ({ ok: false as const, error: `Telegram pacing: ${why}`, retryable, retryAfterMs: g.retryAfterMs });
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
@@ -372,7 +372,7 @@ export function telegramAdapter(o: {
       // after the pacing of the earlier ones.
       const now = o.clock ?? Date.now, t0 = now();
       for (let i = 0; i < bubbles.length; i++) {
-        const gate = await pace(address);
+        const gate = await pace(address, opts?.urgent);
         // Nothing of this message went out: the rows already sent are reported (sent / sentIds) so the outbox resumes after them.
         if (!gate.ok) return { ...paced(gate, `the shared send budget is spent${i ? ` (after ${i} of ${bubbles.length} messages went out)` : ""}`, true), ...(i ? { sent: i, sentIds: [...ids] } : {}) };
         const after = i ? ` after ${i} of ${bubbles.length} messages went out` : "";

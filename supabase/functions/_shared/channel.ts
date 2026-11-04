@@ -340,7 +340,7 @@ export async function deliverDue(o: {
     let res: SendResult;
     if (skip > 0 && !bubbles.length) res = { ok: true, id: before[0] ?? null, ids: [] };
     else {
-      try { res = await adapter.send(addressOf(m.contact), bubbles, m.buttons?.length ? { buttons: m.buttons } : undefined); }
+      try { res = await adapter.send(addressOf(m.contact), bubbles, m.buttons?.length || isReply(m.key) ? { ...(m.buttons?.length ? { buttons: m.buttons } : {}), ...(isReply(m.key) ? { urgent: true } : {}) } : undefined); }
       catch (e) { res = { ok: false, error: e instanceof Error ? e.message : String(e), retryable: true }; }
     }
     if (reserved) {

@@ -90,7 +90,9 @@ export interface InboundMessage {
 export interface Button { text: string; data?: string; loginUrl?: string; url?: string; webApp?: string }
 // shareContact: a one-tap "Share my phone number" button (Telegram's request_contact; the label); removeKeyboard: take that
 // button away again once the number arrived.
-export interface SendOptions { buttons?: Button[][]; shareContact?: string; removeKeyboard?: boolean }
+// urgent: an answer to a message the person just sent (the STOP confirmation, a crisis reply are such answers). A shared send budget
+// never sends it to the retry queue after a short wait: it waits for its token as long as the request can.
+export interface SendOptions { buttons?: Button[][]; shareContact?: string; removeKeyboard?: boolean; urgent?: boolean }
 // A WhatsApp status callback: a message we sent failed after Meta accepted it. hold: it failed for the window (131047)
 // or the per-user marketing limit (131049), so it goes back in the queue for the person's next message.
 // CHANNEL DELIVERY ROUND 2 (2026-10-30): every failure, not only the window's: retry (Meta's throughput and pair limits,

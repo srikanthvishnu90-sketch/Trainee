@@ -150,3 +150,27 @@ Deno.test("a link, a document or a photo refused for the shared budget is a retr
   for (const r of results) eq([r.ok, r.retryable, r.retryAfterMs], [false, true, 7000]);
   eq(fetched, 0, "nothing was sent");
 });
+
+Deno.test("an answer to the person's own message (STOP confirmation, crisis reply) waits for its token; a bulk send is told to retry", async () => {
+  // a bucket that is empty for 12 s: longer than a bulk send waits (8 s), shorter than an urgent one does (40 s)
+  let left = 12000;
+  const admin = { async rpc() { return { data: left > 0 ? Math.min(left, 3000) : 0, error: null }; } };
+  const pace = dbTelegramPacer(admin, { sleep: async (ms) => { left -= ms; }, random: () => 0 });
+  const bulk = await pace("1");
+  assert(!bulk.ok && bulk.retryAfterMs > 0, "a bulk send past its wait is sent back to the queue");
+  left = 12000;
+  eq(await pace("1", { urgent: true }), { ok: true }, "an urgent send waits as long as the request can and then goes");
+});
+
+Deno.test("the delivery loop marks a reply urgent, and only a reply", async () => {
+  const seen: unknown[] = [];
+  const { deliverDue } = await import("../../supabase/functions/_shared/channel.ts");
+  const row = (id: string, key: string) => ({ id, userId: "u", contact: "tg:5", key, text: "x", deliver_at: 0, attempts: 0 });
+  // deno-lint-ignore no-explicit-any
+  const store: any = { async due() { return [row("1", "reply:a"), row("2", "receipt:b")]; }, async optedOut() { return false; }, async sentTo() { return true; }, async contactsSentOn() { return 0; }, async mark() {}, async sweep() { return 0; }, async release() { return 0; }, async stillTheirs() { return true; }, async gone() { return false; }, async quiet() { return null; } };
+  // deno-lint-ignore no-explicit-any
+  const adapter: any = { channel: "telegram", limits: {}, render: (t: string) => [t], async send(_a: string, _b: string[], o: unknown) { seen.push(o); return { ok: true, id: "1" }; } };
+  await deliverDue({ store, adapters: { telegram: adapter }, now: 1000 });
+  eq(seen[0], { urgent: true }, "the reply is urgent");
+  assert(seen[1] === undefined, "a receipt is not");
+});

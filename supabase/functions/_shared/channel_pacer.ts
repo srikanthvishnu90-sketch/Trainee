@@ -10,7 +10,7 @@
 // If the database cannot answer (the function is not applied yet, a network error) the send goes ahead on the in-process pacer
 // and the failure is logged: Telegram's own 429 (honoured in telegram.ts) is the backstop. A wait longer than maxWaitMs is
 // not slept in the request: the caller is told to retry after that long (the outbox keeps the message).
-export type SharedPace = (chat: string) => Promise<{ ok: true } | { ok: false; retryAfterMs: number }>;
+export type SharedPace = (chat: string, o?: { urgent?: boolean }) => Promise<{ ok: true } | { ok: false; retryAfterMs: number }>;
 type Rpc = { rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: { message: string } | null }> };
 type Env = { get(k: string): string | undefined };
 
@@ -19,13 +19,14 @@ export const TELEGRAM_GLOBAL_BURST = 5;
 export const TELEGRAM_BUCKET = "telegram:global";
 
 export function dbTelegramPacer(admin: Rpc, o: {
-  rate?: number; burst?: number; perChatRate?: number; maxWaitMs?: number; sleep?: (ms: number) => Promise<void>; random?: () => number; log?: (m: string) => void;
+  rate?: number; burst?: number; perChatRate?: number; maxWaitMs?: number; urgentMaxWaitMs?: number; sleep?: (ms: number) => Promise<void>; random?: () => number; log?: (m: string) => void;
 } = {}): SharedPace {
   const rate = o.rate ?? TELEGRAM_GLOBAL_RATE, burst = o.burst ?? TELEGRAM_GLOBAL_BURST, chatRate = o.perChatRate ?? 1;
-  const maxWait = o.maxWaitMs ?? 8000, random = o.random ?? Math.random, log = o.log ?? ((m) => console.error(m));
+  const maxWait = o.maxWaitMs ?? 8000, urgentWait = o.urgentMaxWaitMs ?? 40000, random = o.random ?? Math.random, log = o.log ?? ((m) => console.error(m));
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  return async (chat) => {
+  return async (chat, how) => {
     let waited = 0;
+    const limit = how?.urgent ? Math.max(maxWait, urgentWait) : maxWait; // an answer to the person's own message (STOP, a crisis reply) waits for its token rather than being queued a minute later
     for (;;) {
       let ms: number;
       try {
@@ -37,7 +38,7 @@ export function dbTelegramPacer(admin: Rpc, o: {
         return { ok: true };
       }
       if (ms <= 0) return { ok: true };
-      if (waited + ms > maxWait) return { ok: false, retryAfterMs: ms };
+      if (waited + ms > limit) return { ok: false, retryAfterMs: ms };
       const nap = ms + Math.floor(random() * Math.max(1, ms / 4)); // spread the callers that were told the same wait
       await sleep(nap); waited += nap;
     }

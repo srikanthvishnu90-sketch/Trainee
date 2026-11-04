@@ -1,11 +1,12 @@
 // WO-040: mail accuracy. The rules on the labeled synthetic set (tuned on dev only), the guards that keep a wrong status
 // text from ever reaching the person (architect review: look-alike senders, shop and calendar mail, sales reps,
 // auto-replies, a different job's rejection), and the optional model second pass (CAREER_MAIL_MODEL=on), tested with stub
-// models through the real gateway and a fake OpenAI. No network, no database, no key.
+// models through the real gateway and a fake Anthropic Messages wire. No network, no database, no key.
 // Run: deno test --no-check tests/architect/wo-040-mail-accuracy.test.ts
 import { classifyMail, type MailIn, planUpdates, type TrackedApp } from "../../supabase/functions/_shared/career_mail.ts";
 import { MAIL_MODEL_MAX_CALLS, MAIL_MODEL_MAX_RUN_CALLS, MAIL_MODEL_MIN_CONFIDENCE, mailModelConfig, mailModelPayload, mailModelWiring, readVerdict, secondPass, toAsk } from "../../supabase/functions/_shared/career_mail_model.ts";
-import { toOpenAI } from "../../supabase/functions/_shared/model_gateway.ts";
+import { toAnthropic } from "../../supabase/functions/_shared/model_gateway.ts";
+import { fakeAnthropic } from "./helpers/fake_anthropic.ts";
 import { readMailSince } from "../../supabase/functions/_shared/career_mail_gmail.ts";
 import { memoryMailStore } from "../../supabase/functions/_shared/career_mail_store.ts";
 import { memoryAlertStore } from "../../supabase/functions/_shared/career_alert_store.ts";
@@ -181,19 +182,9 @@ Deno.test("WO-040/S5 a rejection for a different job at the same company leaves 
 });
 
 // ------------------------------------------------------------------------------------------------ the second pass
-// A fake OpenAI: each request's body is kept; the answer is whatever the test says, with usage so the cost is metered.
-function fakeOpenAI(answer: (body: any) => string | Error) {
-  const bodies: any[] = [];
-  const request = (async (_url: string | URL | Request, init?: RequestInit) => {
-    const body = JSON.parse(String(init?.body ?? "{}"));
-    bodies.push(body);
-    const a = answer(body);
-    if (a instanceof Error) return new Response(JSON.stringify({ error: { type: "server_error", message: a.message } }), { status: 500 });
-    return new Response(JSON.stringify({ id: "x", model: body.model, choices: [{ message: { content: a }, finish_reason: "stop" }], usage: { prompt_tokens: 320, completion_tokens: 18 } }), { status: 200 });
-  }) as typeof fetch;
-  return { request, bodies };
-}
-const ENV = (more: Record<string, string> = {}) => ({ get: (k: string) => ({ OPENAI_API_KEY: "sk-test-not-real", CAREER_MODEL: "gpt-5-mini", ...more } as Record<string, string>)[k] });
+// A fake Anthropic Messages wire: each request's body is kept; the answer is whatever the test says, with usage so the cost is metered.
+const fakeModel = (answer: (body: any) => string | Error) => fakeAnthropic(answer);
+const ENV = (more: Record<string, string> = {}) => ({ get: (k: string) => ({ ANTHROPIC_API_KEY: "sk-ant-test-not-real", CAREER_MODEL: "claude-haiku-5-5", ...more } as Record<string, string>)[k] });
 function costSink() {
   const rows: any[] = [];
   const admin = { from: (t: string) => ({ insert: async (row: any) => { rows.push({ table: t, ...row }); return { error: null }; } }) };
@@ -205,7 +196,7 @@ const ASANA = [app("job:9", "Asana", { role: "Account Manager", url: "https://bo
 const VAGUE = mailIn("v1", "Asana <no-reply@greenhouse.io>", "Asana - update on your application", "Hi Sam, thanks for your patience. We have news about the Account Manager role; please see the portal.");
 const CLEAR = mailIn("c1", "Asana <no-reply@greenhouse.io>", "Your Asana application", "Unfortunately, we have decided not to move forward with your application.");
 
-Deno.test("WO-040/M1 what goes to OpenAI: From, Subject and snippet only, numbers and addresses masked, store false; no body, date or hash", async () => {
+Deno.test("WO-040/M1 what goes to Claude: From, Subject and snippet only, numbers and addresses masked; no body, date or hash", async () => {
   assert(classifyMail(VAGUE).ambiguous === true && classifyMail(VAGUE).kind === "other", "the vague one is ambiguous");
   assert(!classifyMail(CLEAR).ambiguous, "a clear rejection is not");
   const seen: any[] = [];
@@ -217,8 +208,9 @@ Deno.test("WO-040/M1 what goes to OpenAI: From, Subject and snippet only, number
   assert(!JSON.stringify(seen).includes(VAGUE.date) && !JSON.stringify(seen).includes("\"v1\""), "no date, no hash");
   const masked = seen[1].messages[0].content as string;
   assert(!/4829137|99887766|0199|jo\.smith@/.test(masked) && /\[number\]/.test(masked) && /\[email\]/.test(masked), masked);
-  eq([seen[0].store, toOpenAI(seen[0], mailModelConfig(ENV())).store], [false, false], "store: false reaches OpenAI's request");
-  eq(Object.keys(mailModelPayload(VAGUE)).sort(), ["max_tokens", "messages", "store", "system"]);
+  const wire = toAnthropic(seen[0], mailModelConfig(ENV()));
+  eq([wire.model, "store" in wire, wire.messages.length], ["claude-haiku-5-5", false, 1], "the Anthropic request has no store flag: there is none");
+  eq(Object.keys(mailModelPayload(VAGUE)).sort(), ["max_tokens", "messages", "system"]);
 });
 
 Deno.test("WO-040/M2 guardrails: garbage, a kind outside the list, a string or out-of-range confidence, or under the threshold is 'none'", async () => {
@@ -255,13 +247,15 @@ Deno.test("WO-040/M4 the model never writes what the person reads: extra fields 
   assert(!/Evil|CONGRATS|x\.example/.test(JSON.stringify(plan)), "no model words anywhere in the plan");
 });
 
-Deno.test("WO-040/M5 OpenAI only, off by default: CAREER_MAIL_MODEL=on wires it; MODEL_PROVIDER=anthropic is ignored; no key is NOT_WIRED", () => {
-  eq(mailModelConfig(ENV({ MODEL_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "a" })).provider, "openai");
-  eq(mailModelConfig(ENV()).model, "gpt-5-mini");
+Deno.test("WO-040/M5 Claude only, off by default: CAREER_MAIL_MODEL=on wires it; MODEL_PROVIDER=openai and a gpt id in CAREER_MODEL are ignored; no key is NOT_WIRED", () => {
+  eq(mailModelConfig(ENV({ MODEL_PROVIDER: "openai", OPENAI_API_KEY: "o" })).provider, "anthropic");
+  eq(mailModelConfig(ENV()).model, "claude-haiku-5-5");
+  eq([mailModelConfig(ENV({ CAREER_MODEL: "gpt-5-mini" })).provider, mailModelConfig(ENV({ CAREER_MODEL: "gpt-5-mini" })).model], ["anthropic", "claude-haiku-5-5"], "a gpt id left in CAREER_MODEL never moves the reader off Claude");
+  eq(mailModelConfig({ get: (k: string) => ({ OPENAI_API_KEY: "o" } as Record<string, string>)[k] }).apiKey, "", "an OpenAI key alone is not a key: not configured");
   const none = mailModelWiring({ get: () => undefined }, costSink().admin);
   eq(none.status, "NOT_WIRED");
-  assert(none.status === "NOT_WIRED" && none.ask.length < 160 && /OPENAI_API_KEY/.test(none.ask), "a one-line ask");
-  assert(!/anthropic/i.test(MODEL_SRC), "no Anthropic anywhere in the second pass");
+  assert(none.status === "NOT_WIRED" && none.ask.length < 160 && /ANTHROPIC_API_KEY/.test(none.ask) && !/OPENAI/i.test(none.ask), "a one-line ask");
+  assert(!/openai|gpt-|api\.openai/i.test(MODEL_SRC.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n")), "no OpenAI anywhere in the second pass");
   assert(/model: Deno\.env\.get\("CAREER_MAIL_MODEL"\) === "on" \? \(\) => mailModelWiring\(Deno\.env, admin\) : undefined/.test(INDEX_SRC), "wired only on CAREER_MAIL_MODEL=on");
 });
 
@@ -310,7 +304,7 @@ const queued = (company: string, title: string, id = 7) => ({ id, company, title
 function harness(o: { msgs: FakeMsg[]; people?: string[]; env?: ReturnType<typeof ENV> | null; answer?: (b: any) => string | Error }) {
   const people = o.people ?? ["U1"];
   const store = memoryMailStore({ people: people.map((u) => ({ user_id: u, read_through: iso(NOW - 3600000) })), queue: Object.fromEntries(people.map((u) => [u, [queued("Asana", "Account Manager")]])) });
-  const gmail = fakeGmail(o.msgs), outbox = memoryAlertStore(), ai = fakeOpenAI(o.answer ?? (() => '{"kind":"none","confidence":0.9}')), costs = costSink();
+  const gmail = fakeGmail(o.msgs), outbox = memoryAlertStore(), ai = fakeModel(o.answer ?? (() => '{"kind":"none","confidence":0.9}')), costs = costSink();
   const run = async (at = NOW) => {
     const res = await handleProactive(new Request("https://x/", { method: "POST", headers: { "x-trainee-proactive-secret": SECRET } }), {
       env: { get: (k: string) => (k === "CAREER_PROACTIVE_SECRET" ? SECRET : undefined) }, store: () => outbox,
@@ -333,10 +327,10 @@ Deno.test("WO-040/W1 the run with the second pass: the model's confident reading
   eq([body.mail_model, body.mail_model_calls, body.mail_model_decided, body.statuses], ["on", 1, 1, 1]);
   eq(h.outbox().length, 1);
   assert(h.outbox()[0].text.startsWith("Asana (Account Manager) wants to interview you"), h.outbox()[0].text);
-  eq([h.ai.bodies.map((b) => b.model), h.ai.bodies[0].store], [["gpt-5-mini"], false], "one call, on the career model, not stored");
+  eq([h.ai.bodies.map((b) => b.model), h.ai.onlyAnthropic(), h.ai.hosts()], [["claude-haiku-5-5"], true, ["api.anthropic.com"]], "one call, on the Claude reader model, to api.anthropic.com only");
   eq(h.costs.rows.length, 1);
   const c = h.costs.rows[0];
-  eq([c.table, c.user_id, c.thread_id, c.provider, c.calls, c.input_tokens, c.output_tokens], ["agent_turn_costs", "U1", null, "openai", 1, 320, 18]);
+  eq([c.table, c.user_id, c.thread_id, c.provider, c.calls, c.input_tokens, c.output_tokens], ["agent_turn_costs", "U1", null, "anthropic", 1, 320, 18]);
   assert(c.usd_micros > 0, "priced from the gateway's table");
 });
 
@@ -347,7 +341,7 @@ Deno.test("WO-040/W2 off by default and NOT_WIRED without a key: no model call, 
   const nokey = harness({ msgs: [VAGUE_MSG], env: { get: () => undefined } as any });
   const b2 = await nokey.run();
   eq([b2.mail_model, nokey.ai.bodies.length, nokey.costs.rows.length, nokey.outbox().length], ["NOT_WIRED", 0, 0, 0]);
-  assert(/OPENAI_API_KEY/.test(b2.mail_model_ask), "the one-line ask is in the run's answer");
+  assert(/ANTHROPIC_API_KEY/.test(b2.mail_model_ask), "the one-line ask is in the run's answer");
 });
 
 Deno.test("WO-040/W3 read-only: with the second pass on, every Gmail request is a GET of metadata; nothing is sent, no body is read", async () => {

@@ -20,7 +20,7 @@ import { supabaseTapStore } from "../../supabase/functions/_shared/channel_card_
 import { supabaseCardStore } from "../../supabase/functions/_shared/career_apply_cards.ts";
 import { hashTag, supabaseAccountStamp, supabaseConfirmedFacts, tapJob } from "../../supabase/functions/_shared/telegram_jobs.ts";
 import { SESSION_TTL_MS, startSession } from "../../supabase/functions/_shared/file_session.ts";
-import { fakePhone } from "./file-session-fakes.ts";
+import { fakePhone, phonePost } from "./file-session-fakes.ts";
 import { CATS, type Mut, sample, type Scenario } from "./scenarios/apply-r3-generator.ts";
 import { eq, newReport, payloadOf, type Post, postOf, printReport, RESUME_A, runScenario, SCENARIOS, SECRET_LINK, stampOf, type Truth, V, type World } from "./scenarios-apply-r3-battery.ts";
 
@@ -148,14 +148,14 @@ Deno.test({ name: `apply r3 on real Postgres: ${PER_CAT} scenarios of each categ
     const w = await pgWorld(s0, pg, admin, ++n);
     const page = await (await handleFile(new Request("https://trainee.example/file", { headers: { cookie: `tf_s=${w.tokens.A}` } }), w.deps)).text();
     const tag = /name="tag" value="([0-9a-f]{16})"/.exec(page)?.[1] ?? "";
-    await handleFile(new Request("https://trainee.example/file", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ t: w.tokens.A, action: "apply", ref: w.posts[0].ref, tag }).toString() }), w.deps);
+    await handleFile(new Request("https://trainee.example/file", await phonePost({ t: w.tokens.A, action: "apply", ref: w.posts[0].ref, tag }, SECRET_LINK)), w.deps);
     eq((await w.truth()).apps.map((a) => a.state), ["queued"], "approved and waiting before the account is deleted");
     await w.mutate({ m: "erase" });
     eq(await pg.sql(`select count(*) from public.career_apply_jobs where user_id = '${w.u}'`), "0", "the queue row went with the account");
     eq(await pg.sql(`select count(*) from public.career_apply_prepared where user_id = '${w.u}'`), "0", "the prepared rows went with the account");
     eq(await pg.sql(`select count(*) from public.trainee_file_sessions where user_id = '${w.u}'`), "0", "the page's sessions went with the account");
     eq(await pg.sql(`select count(*) from public.career_apply_jobs where state = 'queued' and user_id not in (select id from public.profiles)`), "0", "nothing of a deleted account is left to claim");
-    const after = await handleFile(new Request("https://trainee.example/file", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ t: w.tokens.A, action: "apply", ref: w.posts[1].ref, tag }).toString() }), w.deps);
+    const after = await handleFile(new Request("https://trainee.example/file", await phonePost({ t: w.tokens.A, action: "apply", ref: w.posts[1].ref, tag }, SECRET_LINK)), w.deps);
     eq(after.status >= 400, true, "the deleted account's page session approves nothing");
     const said: string[] = [];
     await tapJob({ userId: w.u, data: `jca:${w.posts[1].ref}`, messageId: null, deps: w.deps, send: { photo: async () => ({ ok: true }), text: async (a: { text: string }) => { said.push(a.text); return { ok: true, id: null }; } } as never });

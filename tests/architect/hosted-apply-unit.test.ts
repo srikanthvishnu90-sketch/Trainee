@@ -103,7 +103,7 @@ Deno.test("F17 bridge: the token binds request, lease and sandbox; the person an
     secret: SECRET, readRequest: async () => row,
     rpc: async (name: string, args: any) => {
       calls.push({ name, args });
-      if (name === "career_apply_prepare_candidates") return [{ user_id: U, job_id: "ashby:ramp:1" }, { user_id: U, job_id: "ashby:other:9" }, { user_id: OTHER, job_id: "ashby:ramp:1" }];
+      if (name === "career_apply_prepare_candidates_for") return [{ user_id: U, job_id: "ashby:ramp:1" }, { user_id: U, job_id: "ashby:other:9" }, { user_id: OTHER, job_id: "ashby:ramp:1" }];
       if (name === "career_apply_prepare_request_posting") return args.p_posting === "ashby:ramp:1" ? { job_id: "ashby:ramp:1", url: RAMP_URL, company: "Ramp" } : null;
       if (name === "career_apply_cloud_resume_kept_for") return { filename: "Vishnu_Srikanth_Resume.pdf", sha256: "a".repeat(64), b64: "" };
       return { ok: true };
@@ -218,18 +218,21 @@ Deno.test("F17 runner routes: each door checks its own secret; preparation off a
     fn(new Request(`https://x/functions/v1/career-cloud-runner${path}`, { method: "POST", headers, body: JSON.stringify(body) }));
   const kick = { user_id: U, job_ids: ["ashby:ramp:1"] };
   eq((await post(h(env), "/prepare", { authorization: "Bearer wrong" }, kick)).status, 401);
-  eq((await post(h(env), "/prepare", { authorization: `Bearer ${"K".repeat(40)}` }, kick)).status, 503, "preparation off: the kick is not taken");
+  // D-037: CLOUD_PREPARE_ENABLED is a release flag (on when unset); "off" is its rollback.
+  eq((await post(h({ ...env, CLOUD_PREPARE_ENABLED: "off" }), "/prepare", { authorization: `Bearer ${"K".repeat(40)}` }, kick)).status, 503, "preparation off: the kick is not taken");
   const on = { ...env, CLOUD_PREPARE_ENABLED: "on" };
   eq((await post(h(on), "/prepare", { authorization: `Bearer ${"K".repeat(40)}` }, kick)).status, 202);
   eq((await post(h(on), "/prepare-dispatch", { "x-cloud-dispatch-secret": "wrong" })).status, 401);
   eq((await post(h(on), "/prepare-dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) })).status, 200);
-  eq((await post(h(env), "/dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) })).status, 200);
-  eq(await (await post(h(env), "/dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) })).json(), { skipped: "CLOUD_RUNNER_ENABLED is not on" });
+  // D-037: CLOUD_RUNNER_ENABLED is a release flag (on when unset); "off" is its rollback.
+  const sendOff = { ...env, CLOUD_RUNNER_ENABLED: "off" };
+  eq((await post(h(sendOff), "/dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) })).status, 200);
+  eq(await (await post(h(sendOff), "/dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) })).json(), { skipped: "CLOUD_RUNNER_ENABLED is not on" });
   await post(h({ ...env, CLOUD_RUNNER_ENABLED: "on", CLOUD_MAX_PER_PERSON_DAY: "3", CLOUD_MAX_PER_SITE_MINUTE: "1" }), "/dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) });
-  eq(JSON.parse(seen.at(-1)!), { p_want: 2, p_global: 2, p_per_portal: 1, p_per_person_day: 3, p_per_site_minute: 1 }, "the send numbers from the env, the runner's sizing defaults for the rest");
+  eq(JSON.parse(seen.at(-1)!), { p_want: LIMIT_DEFAULTS.CLOUD_MAX_STARTS_PER_TICK, p_global: LIMIT_DEFAULTS.CLOUD_MAX_CONCURRENT, p_per_portal: LIMIT_DEFAULTS.CLOUD_MAX_PER_PORTAL, p_per_person_day: 3, p_per_site_minute: 1 }, "the send numbers from the env, the runner's sizing defaults for the rest");
   // NO LIMITS (owner, 2026-10-27): with no per-person or per-site number given, none is sent (null), never a default.
   await post(h({ ...env, CLOUD_RUNNER_ENABLED: "on" }), "/dispatch", { "x-cloud-dispatch-secret": "D".repeat(40) });
-  eq(JSON.parse(seen.at(-1)!), { p_want: 2, p_global: 2, p_per_portal: 1, p_per_person_day: null, p_per_site_minute: null }, "no number of Trainee's own");
+  eq(JSON.parse(seen.at(-1)!), { p_want: LIMIT_DEFAULTS.CLOUD_MAX_STARTS_PER_TICK, p_global: LIMIT_DEFAULTS.CLOUD_MAX_CONCURRENT, p_per_portal: LIMIT_DEFAULTS.CLOUD_MAX_PER_PORTAL, p_per_person_day: null, p_per_site_minute: null }, "no number of Trainee's own");
   eq((await post(h({ ...env, CLOUD_RUNNER_SECRET: "short" }), "/dispatch")).status, 503, "no runner secret: not configured");
   eq(runnerLimits({ get: () => undefined }).send.perPersonDay, null, "unset: no per-person number");
   eq(runnerLimits({ get: () => undefined }).prepare.perPersonDay, null, "unset: no per-person number for preparation");
@@ -374,7 +377,7 @@ Deno.test("F2 the runner's default sizing is exactly as the launch doc tells the
     const values = cells[2].split("/").map((v) => Number(v.trim()));
     if (names.length === values.length && values.every((v) => Number.isInteger(v))) names.forEach((n, i) => (wave1[n] = values[i]));
   }
-  const want = ["CLOUD_MAX_CONCURRENT", "CLOUD_MAX_PER_PORTAL", "CLOUD_PREPARE_MAX_CONCURRENT"];
+  const want = ["CLOUD_MAX_CONCURRENT", "CLOUD_MAX_PER_PORTAL", "CLOUD_PREPARE_MAX_CONCURRENT", "CLOUD_DISPATCH_PARALLEL"];
   eq(Object.keys(wave1).sort(), [...want].sort(), "the sizing table names each number once");
   for (const k of want) eq(LIMIT_DEFAULTS[k as keyof typeof LIMIT_DEFAULTS], wave1[k], k);
   for (const k of ["CLOUD_MAX_PER_PERSON_DAY", "CLOUD_MAX_PER_SITE_MINUTE", "CLOUD_PREPARE_PER_PERSON_DAY", "CLOUD_PREPARE_PER_SITE_MINUTE"]) {

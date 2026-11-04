@@ -134,7 +134,7 @@ function wordsProblem(got: string[], want: string[], giant: string[]): string | 
 }
 
 const refuse = (async () => { throw new TypeError("network refused in the scenario run"); }) as unknown as typeof fetch;
-const wiring = (native: boolean) => adaptersFromEnv({ get: (k: string) => ({ LOOPMESSAGE_API_KEY: "k", TELEGRAM_BOT_TOKEN: "t", WHATSAPP_TOKEN: "w", WHATSAPP_PHONE_NUMBER_ID: "1", ...(native ? { CAREER_TEXTING_NATIVE: "on" } : {}) } as Record<string, string>)[k] }, { fetch: refuse, clock: () => NOW, sleep: async () => {} });
+const wiring = (native: boolean) => adaptersFromEnv({ get: (k: string) => ({ LOOPMESSAGE_API_KEY: "k", TELEGRAM_BOT_TOKEN: "t", WHATSAPP_TOKEN: "w", WHATSAPP_PHONE_NUMBER_ID: "1", CAREER_TEXTING_NATIVE: native ? "on" : "off" } as Record<string, string>)[k] }, { fetch: refuse, clock: () => NOW, sleep: async () => {} });
 const WIRED = { true: wiring(true), false: wiring(false) };
 
 // ------------------------------------------------------------------------------------------------ render + split

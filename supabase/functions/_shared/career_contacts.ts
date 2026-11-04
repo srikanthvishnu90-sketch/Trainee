@@ -37,6 +37,7 @@ export interface ContactRow {
   // them, or inferred from the company's email format. The draft card says which (2026-10-29).
   address?: "published" | "inferred";
   discovered?: true; // found by web discovery: someone a draft may reach, never someone the person "knows"
+  seen_at?: string | null; // when this row was read from its source (import, page, Gmail): which of two rows of one person is newer
 }
 export type SourceResult =
   | { status: "ok"; source: string; kind: "own_export" | "vendor"; vendor: string | null; rows: ContactRow[]; duplicates: number; skipped: { row: number; why: string }[]; cost_usd: number }

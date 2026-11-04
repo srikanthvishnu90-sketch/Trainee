@@ -17,7 +17,7 @@
 // part checked as in the pure battery (tests/architect/scenarios/research-check.ts). A report with no thread to file
 // under is not saved, and the answer says so.
 //
-// No model (CAREER_BRAIN, OPENAI_API_KEY unset), no Stripe, no web: every host but the Supabase double and the fake
+// No model (CAREER_BRAIN, ANTHROPIC_API_KEY unset), no Stripe, no web: every host but the Supabase double and the fake
 // Stripe is refused and listed. Instants are fixed where the product takes `now` (the report store and the report),
 // nothing depends on the time of day, and every environment variable set here is restored. About 220 handler turns (130
 // billing scenarios) and 58 research scenarios, about 40 s.
@@ -68,7 +68,7 @@ Deno.test({
     const RES = researchScenarios(20261031, 400).filter((_, i) => i % 7 === 0).slice(0, 60);
     const people: Record<string, string> = {};
     for (let i = 1; i <= BILL.length + 2; i++) people[`tok-br-${i}`] = uidOf(i);
-    const unset = ["CAREER_BRAIN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "STRIPE_SECRET_KEY", "CAREER_RESEARCH_REPLY", "TRAINEE_REPORT_SECRET"];
+    const unset = ["CAREER_BRAIN", "ANTHROPIC_API_KEY", "STRIPE_SECRET_KEY", "CAREER_RESEARCH_REPLY", "TRAINEE_REPORT_SECRET"];
     const saved = Object.fromEntries(unset.map((k) => [k, Deno.env.get(k)]));
     for (const k of unset) Deno.env.delete(k);
     const pg: Pg = await startPg();

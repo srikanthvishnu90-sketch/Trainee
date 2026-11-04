@@ -107,6 +107,12 @@ class MemQ {
   select(_c?: string) { if (this.op !== "select") this.returning = true; return this; }
   eq(c: string, v: unknown) { this.filters.push((r) => r[c] === v); return this; }
   in(c: string, vs: unknown[]) { this.filters.push((r) => vs.includes(r[c])); return this; }
+  // PostgREST's is.null and ilike (case-insensitive; % any run, _ any one character), for the send consent's revoke check.
+  is(c: string, v: null) { this.filters.push((r) => (r[c] ?? null) === v); return this; }
+  ilike(c: string, p: string) {
+    const re = new RegExp(`^${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*").replace(/_/g, ".")}$`, "i");
+    this.filters.push((r) => typeof r[c] === "string" && re.test(r[c])); return this;
+  }
   order() { return this; }
   limit(n: number) { this.lim = n; return this; }
   maybeSingle() { this.single = true; return this; }

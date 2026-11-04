@@ -12,7 +12,7 @@
 //   - forget everything: the settings removed.
 // What a watch carries over: its role's title terms (keywords) and blockers (exclude_words), its places and remote, its
 // bands (intern, new grad) as levels, its firms (only these), the firms it and the opt-out exclude.
-import { type AlertInterest, type AlertPrefs, DEFAULT_PREFS, matchPosting, MAX_INSTANT_PER_DAY } from "./career_alerts.ts";
+import { type AlertInterest, type AlertPrefs, alertText, DEFAULT_PREFS, matchPosting, MAX_INSTANT_PER_DAY, postingLine } from "./career_alerts.ts";
 import { type AlertRow, type AlertStore, startWatching, validPrefs } from "./career_alert_store.ts";
 import { type Floor, validFloor } from "./career_floor.ts";
 
@@ -97,16 +97,60 @@ export async function syncWatchAlerts(o: {
 // longer fits (gone, closed, or a watch stopped since): not sent. Nothing that cannot be shown to fit is sent.
 export const isAlertKey = (key: string) => /^(alert|report):/.test(String(key ?? ""));
 export function alertStillWanted(key: string, now: { row: Pick<AlertRow, "prefs"> | null; record: unknown; posting?: unknown }): boolean {
+  const prefs = prefsNow(now);
+  if (!prefs) return false;
+  if (String(key).startsWith("alert:")) return !!now.posting && matchPosting(now.posting, prefs);
+  return isAlertKey(key);
+}
+// The person's alert settings as they are now, their watches the record's; null: nothing is wanted (off, gone, paused).
+function prefsNow(now: { row: Pick<AlertRow, "prefs"> | null; record: unknown }): AlertPrefs | null {
   const row = now.row;
-  if (!row || !row.prefs?.on) return false;
+  if (!row || !row.prefs?.on) return null;
   let prefs = row.prefs;
   if (prefs.interests?.length) {
     const wp: any = now.record ?? null, interests = interestsFromWatch(wp);
-    if (!interests.length || wp?.opt_out?.global) return false;
+    if (!interests.length || wp?.opt_out?.global) return null;
     prefs = { ...prefs, interests };
   }
-  if (String(key).startsWith("alert:")) return !!now.posting && matchPosting(now.posting, prefs);
-  return isAlertKey(key);
+  return prefs;
+}
+
+// PROACTIVE SCENARIOS ROUND 3 (2026-11-01): the words of a queued job alert or daily report as they are true when it goes.
+// An alert waits in the outbox (quiet hours, a delivery run behind) while its posting changes: its title ("Data Analyst"
+// became "Senior Data Analyst"), its place, its company's name, its link; and its "first seen 3 min ago" grows old. A
+// report waits while the person changes their search ("only remote now", another title): its lines were the old search's.
+// So at delivery: an alert says its posting as it is now, with its age now; a report keeps the lines whose postings still
+// fit the person's search (each said as it is now; a closed one is kept as written, for the delivery to say it closed),
+// and says how many those are; nothing of the old search's is said. null: nothing of it is still true for the person (the
+// posting gone, or no line of the report still theirs); it is not sent. `postings`: by job id (an alert) or by link (a
+// report's lines). The settings and the watch record are read as alertStillWanted reads them.
+export function freshAlertText(key: string, text: string, now: { row: Pick<AlertRow, "prefs"> | null; record: unknown; postings: Map<string, any>; at: number }): string | null {
+  const prefs = prefsNow(now);
+  if (!prefs) return null;
+  if (String(key).startsWith("alert:")) {
+    const p = now.postings.get(String(key).slice("alert:".length));
+    return p && matchPosting(p, prefs) ? alertText(p, now.at) : null;
+  }
+  if (!String(key).startsWith("report:")) return text;
+  const lines = String(text).split("\n");
+  if (!/^Your daily job report: \d+ match(es)? in the last day/.test(lines[0] ?? "")) return text; // "no new matches": nothing to check
+  const items: { line: string; url: string }[] = [];
+  let dropped = 0;
+  for (let i = 1; i < lines.length; i++) {
+    const m = /^ {2}(https:\/\/\S+)$/.exec(lines[i] ?? "");
+    if (!m || !lines[i - 1].startsWith("- ")) continue;
+    const p = now.postings.get(m[1]);
+    if (p && p.closed_at) { items.push({ line: lines[i - 1], url: m[1] }); continue; } // said closed at delivery
+    if (p && matchPosting(p, prefs)) { items.push({ line: `- ${postingLine(p)}`, url: m[1] }); continue; }
+    dropped++;
+  }
+  if (!items.length) return null;
+  const more = lines.find((l) => /^…and \d+ more\. Ask me for the rest\.$/.test(l));
+  // The count said is the lines kept when any were dropped (the ones not listed were the old search's, unseen here).
+  const head = dropped
+    ? `Your daily job report: ${items.length} match${items.length === 1 ? "" : "es"} in the last day that still fit${items.length === 1 ? "s" : ""} your search.`
+    : lines[0];
+  return [head, ...items.map((x) => `${x.line}\n  ${x.url}`), ...(more && !dropped ? [more] : [])].join("\n");
 }
 // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): a queued job alert against the person's fit floor and daily cap as they are
 // now. An alert waits in the outbox (quiet hours, a delivery run behind) after it is planned; a person who raised their

@@ -209,7 +209,10 @@ Deno.test({
         const shown = yesNo.has(f.name) ? (/^(yes|true)$/i.test(String(f.value)) ? ["Yes (checked)", "Yes"] : ["No"]) : [opt ? String(opt.label) : String(f.value)];
         assert(card.some((l) => shown.some((v) => l.endsWith(`${f.label}: ${v}`))), `the card shows ${f.label} as sent (${shown}): ${card.join(" | ")}`);
       }
-      eq(card.slice(1).filter((l) => !/^(Resume: |Sends to |Also sent, |The page runs )/.test(l)).length, approvedFields.length,
+      // Discovery is read-only: the card says it is planned, never that the form was filled or checked.
+      assert(card.some((l) => l.startsWith("Planned from your answers; the form is not filled yet.")), `the card says it is planned, not filled: ${card.join(" | ")}`);
+      eq(payload.preparation?.verification, "planned_not_fill_verified");
+      eq(card.slice(1).filter((l) => !/^(Resume: |Sends to |Also sent, |The page runs |Planned from your answers; )/.test(l)).length, approvedFields.length,
         "one card line per answer sent, no more");
     } finally {
       await site.close();

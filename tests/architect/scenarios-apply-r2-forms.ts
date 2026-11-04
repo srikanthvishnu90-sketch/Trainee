@@ -98,12 +98,25 @@ export async function runForm(c: FormCase, root: string, rep: Report) {
     if (c.twist === "password") check(rep, !asked.some((l) => /password/i.test(l)), "a password asked by text", () => `${name()} -> asked ${JSON.stringify(asked)}`);
     if (c.twist === "honeypot_words") check(rep, !asked.includes(c.extraLabel!), "a honeypot asked of the person", () => `${name()} -> asked ${JSON.stringify(asked)}`);
   }
+  // Discovery is read-only (docs/architect/DISCOVERY-DEFAULT-DENY-2026-10-24.md): a form with a step before its last page is not
+  // prepared. It stops, named, before any later page is read, nothing typed, clicked or sent. So a stop the form would have
+  // reached on a later page (an identity number, a password box) is, on such a form, this named stop instead. A single-page
+  // form is never stopped this way.
+  const multiStepStop = c.pages > 1 && !prep.ready && prepResult?.reason === "MULTI_STEP_NEEDS_APPROVAL";
+  if (!prep.ready && String(prepResult?.reason ?? "").split(":")[0] === "MULTI_STEP_NEEDS_APPROVAL") {
+    check(rep, c.pages > 1, "a single-page form was stopped as multi-step", () => `${name()} -> ${JSON.stringify(prepResult)}`);
+  }
   if (c.twist === "identity" || c.twist === "password") {
     check(rep, !prep.ready, `${c.twist}: a card was made for a form that asks for it`, () => `${name()} -> ${JSON.stringify(prep.ready ? (prep as any).payload.fields.map((f: any) => f.label) : prepResult)}`);
-    if (c.twist === "identity") check(rep, prepResult?.reason === "IDENTITY_NUMBER_REQUESTED", "identity: the engine did not stop on the identity number", () => `${name()} -> ${JSON.stringify({ reason: prepResult?.reason, questions: prepResult?.questions?.map((q: any) => q.label) })}`);
-    if (c.twist === "password") check(rep, prepResult?.reason === "ACCOUNT_LOGIN_REQUIRED", "password: the engine did not stop on the password box", () => `${name()} -> ${JSON.stringify(prepResult?.reason)}`);
+    if (c.twist === "identity") check(rep, prepResult?.reason === "IDENTITY_NUMBER_REQUESTED" || multiStepStop, "identity: the engine did not stop on the identity number", () => `${name()} -> ${JSON.stringify({ reason: prepResult?.reason, questions: prepResult?.questions?.map((q: any) => q.label) })}`);
+    if (c.twist === "password") check(rep, prepResult?.reason === "ACCOUNT_LOGIN_REQUIRED" || multiStepStop, "password: the engine did not stop on the password box", () => `${name()} -> ${JSON.stringify(prepResult?.reason)}`);
   }
-  if (c.twist === "maxlength" || c.twist === "reformat") check(rep, !prep.ready, `${c.twist}: approved an answer the page does not keep as given`, () => `${name()} -> ${JSON.stringify((prep as any).card)}`);
+  // The page that cuts or reformats an answer is found when the form is filled. Discovery does not fill it, so the card is
+  // made but says it is planned, not fill-verified; the approved run then reads every answer back and sends nothing (below).
+  if (c.twist === "maxlength" || c.twist === "reformat") {
+    check(rep, !prep.ready || (prep as any).payload?.preparation?.verification === "planned_not_fill_verified",
+      `${c.twist}: approved an answer the page does not keep as given`, () => `${name()} -> ${JSON.stringify((prep as any).card)}`);
+  }
   if (c.twist === "captcha_open") check(rep, !prep.ready && prepResult?.state === "needs_user" && prepResult?.reason === "captcha", "captcha at open: not handed to the person", () => `${name()} -> ${JSON.stringify(prepResult)}`);
   if (c.twist === "redirect_open") check(rep, !prep.ready && prepResult?.reason === "HOST_REDIRECT_REFUSED", "redirect at open: not refused", () => `${name()} -> ${JSON.stringify(prepResult)}`);
   if (c.twist === "refuse_open") {
@@ -158,6 +171,9 @@ export async function runForm(c: FormCase, root: string, rep: Report) {
     rep.counts[cloud ? "cloud" : "own"] = (rep.counts[cloud ? "cloud" : "own"] ?? 0) + 1;
     // 3. The employer's record against the approved card.
     check(rep, w.posts.length <= 1, "the employer got the application more than once", () => `${name()} -> ${w.posts.length} bodies, final ${final.state}`);
+    if (c.twist === "maxlength" || c.twist === "reformat") {
+      check(rep, w.posts.length === 0 && final.state === "not_submitted", `${c.twist}: an answer the page does not keep as given was sent`, () => `${name()} -> final ${final.state} ${final.reason}; body ${JSON.stringify(w.posts[0]?.entries)}`);
+    }
     if (STOPS.has(c.twist)) check(rep, w.posts.length === 0, `${c.twist}: sent anyway`, () => `${name()} -> final ${final.state} ${final.reason}; body ${JSON.stringify(w.posts[0]?.entries)}`);
     if (c.twist === "none" && c.lang === "en") check(rep, w.posts.length === 1, "none: a plain approved application was not sent", () => `${name()} -> ${final.state} ${final.reason}`);
     const body = w.posts[0];
@@ -201,7 +217,7 @@ export async function runForm(c: FormCase, root: string, rep: Report) {
     rep.counts.not_ready = (rep.counts.not_ready ?? 0) + 1;
     const why = `not_ready:${String(prepResult?.reason ?? "").split(":")[0]}`;
     rep.counts[why] = (rep.counts[why] ?? 0) + 1;
-    if (c.twist === "none" && c.lang === "en") check(rep, false, "none: a plain form was not prepared", () => `${name()} -> ${JSON.stringify(prepResult)}`);
+    if (c.twist === "none" && c.lang === "en" && !multiStepStop) check(rep, false, "none: a plain form was not prepared", () => `${name()} -> ${JSON.stringify(prepResult)}`);
   }
   await Deno.remove(w.dir, { recursive: true }).catch(() => {});
   void handBack; void isBotCheck; void settle;

@@ -8,7 +8,7 @@
 // (APPROVED_APPLICATION_CHANGED, nothing sent). The outcome goes back with career_apply_finish; an engine that gave no
 // result is recorded unknown_outcome and never retried.
 import { mapQuestion } from "../../supabase/functions/_shared/question_map.ts";
-import { CARD_MARK, resumeCardLine as sharedResumeCardLine } from "../../supabase/functions/_shared/career_prepared_card.ts";
+import { CARD_MARK, lookupCardLine, PLANNED_CARD_LINE, resumeCardLine as sharedResumeCardLine } from "../../supabase/functions/_shared/career_prepared_card.ts";
 import { createRequire } from "node:module";
 import { normLabel, questionFieldType } from "../../supabase/functions/_shared/career_apply.ts";
 import { hashApplyPayload } from "../../supabase/functions/_shared/career_apply_store.ts";
@@ -150,10 +150,8 @@ export async function prepare(o: {
     `Sends to ${payload.destination}`,
     ...(payload.preparation
       ? [
-        "Planned from your answers; the form is not filled yet. It is filled and every answer checked on the form only after you say yes. If the form then differs or asks something this card does not show, nothing is sent and you are asked.",
-        ...(ev.discovery.lookups as any[]).map((l: any) =>
-          `${l.label}: the employer's own suggestion for it is picked only after you say yes; if none matches, nothing is sent.`
-        ),
+        PLANNED_CARD_LINE,
+        ...(ev.discovery.lookups as any[]).map((l: any) => lookupCardLine(String(l.label))),
       ]
       : []),
   ];

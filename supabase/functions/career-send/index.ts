@@ -5,7 +5,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { careerTokenFor, type TokenDeps } from "../_shared/career_mail_gmail.ts";
 import { supabaseOutreachStore } from "../_shared/career_outreach.ts";
 import { handleSend } from "./handler.ts";
-import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
 
 // The career Google grant (vault oauth_google_career_<uid>), read the same way as mail tracking and outreach.
 const grant = (admin: any): TokenDeps => ({
@@ -20,7 +19,10 @@ const grant = (admin: any): TokenDeps => ({
     if (error) throw new Error("read the career grant's vault entry");
     return data ? String(data) : null;
   },
-  writeVault: (name, secret) => vaultRefreshWrite(admin, name, secret, "save the refreshed career grant"),
+  writeVault: async (name, secret) => {
+    const { error } = await admin.rpc("oauth_vault_store", { p_name: name, p_secret: secret });
+    if (error) throw new Error("save the refreshed career grant");
+  },
 });
 
 serve((req) => {

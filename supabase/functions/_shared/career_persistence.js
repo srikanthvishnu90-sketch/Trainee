@@ -21,16 +21,13 @@ export function createCareerPersistence(client) {
       else if(!Number.isSafeInteger(data.revision)||data.revision<0||!Number.isSafeInteger(data.accountVersion)||data.accountVersion<0||!record(data.account)||!record(data.watchState)||!Array.isArray(data.reminders)||(data.snapshot!==null&&!record(data.snapshot)))unavailable();
       return data;
     },
-    async commit({ userId, threadId, turnKey, requestHash, revision, accountVersion, snapshot, patch, input, response, taskIntent, batchIntent, events }) {
+    async commit({ userId, threadId, turnKey, requestHash, revision, accountVersion, snapshot, patch, input, response, taskIntent, batchIntent }) {
       const base={
         p_user:userId,p_thread:threadId,p_key:turnKey,p_hash:requestHash,
         p_revision:revision,p_account_version:accountVersion,
         p_snapshot:snapshot,p_patch:patch||{},p_input:input,p_response:response,
       };
-      // RESUME CONFIRM RACE (2026-10-30): a turn that confirmed resume entries commits their fact_confirmed events with the
-      // save itself (career_host_commit_evidenced, 20261030060000): both, or neither when the save is refused.
-      const data=Array.isArray(events)&&events.length?await call('career_host_commit_evidenced',{p_base:base,p_events:events,p_task:taskIntent&&!batchIntent?taskIntent:null,p_batch:batchIntent||null})
-        :batchIntent?await call('career_batch_turn_commit_v1',{p_base:base,p_intent:batchIntent}):taskIntent?await call('career_task_turn_commit_v1',{p_base:base,p_intent:taskIntent}):await call('career_host_commit',base);
+      const data=batchIntent?await call('career_batch_turn_commit_v1',{p_base:base,p_intent:batchIntent}):taskIntent?await call('career_task_turn_commit_v1',{p_base:base,p_intent:taskIntent}):await call('career_host_commit',base);
       if(!validResponse(data.response,threadId,turnKey,userId))unavailable();
       return data;
     },

@@ -4,27 +4,20 @@
 // catch-all reply). Every action stays code's: the code-first turns, the host's controls, structured task and batch
 // requests, and every router turn that is not on the list below. The router still answers when the model fails, and the
 // owner keeps any turn class on the router by naming it in CAREER_BRAIN_ROUTER_INTENTS (comma separated; "unclaimed"
-// is the class of turns no module claimed). D-035 (owner, 2026-11-01: "Ship staged brain"): which brain is served is the
-// committed release config (release_config.ts PRODUCTION_BRAIN, now "staged"), so CAREER_BRAIN unset serves it; the
-// environment only rolls back: CAREER_BRAIN=router (the kill switch, or any value but the release brain) makes nothing
-// here true, and the router answers every turn exactly as before. CAREER_BRAIN=agent stays pinned off by AGENT_BRAIN_RELEASED.
+// is the class of turns no module claimed). Unset, or CAREER_BRAIN=router (the kill switch), nothing here is true and
+// the router answers every turn exactly as before. CAREER_BRAIN=agent stays pinned off by AGENT_BRAIN_RELEASED.
 //
 // How a turn is classed: the router runs once on a disposable copy of the turn's state (no I/O; the real state is not
 // touched), and its intent decides. A turn the brain does not take runs through the router again on the real state, as
 // it does today, so what the router saves is exactly what it saved before.
 
-import { servedBrain } from "./release_config.ts";
-import { crisisReply } from "./crisis.ts";
-
 type Env = { get(k: string): string | undefined };
 type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler: string | null; contained?: boolean; result?: any }; isHostControlled(text: string, ctx: any): boolean };
 
-import { correctedAsk } from "../_shared/search_correction.ts";
 export type BrainMode = "router" | "agent" | "staged";
-// The served brain (release_config.ts): the committed PRODUCTION_BRAIN unless CAREER_BRAIN rolls it back to the router.
-// "agent" is never served from here (the full brain stays pinned off in career_brain.ts).
 export function brainMode(env: Env): BrainMode {
-  return servedBrain(env);
+  const v = (env.get("CAREER_BRAIN") ?? "").trim().toLowerCase();
+  return v === "staged" ? "staged" : v === "agent" ? "agent" : "router";
 }
 
 // The pseudo-intent of a turn that no module claimed (the router's "I didn't catch that").
@@ -48,17 +41,13 @@ export const STAGED_BRAIN_INTENTS: readonly string[] = [
 // a company come only from a sourced record. Two intents are judged by what they carry: company_intel is the brain's
 // only when no company is named and no file or library figure stands behind it (a general question the router took
 // for a company ask: grad school, a certificate, a role it has no figures for); negotiation_advice only when no offer
-// is on record and the benchmark found no figures. A pay question at a firm with no file is the brain's too (below).
+// is on record and the benchmark found no figures.
 const PRODUCT_KEYS = ["payload", "artifact", "bench", "offer", "draft", "ai_answer", "comparison", "documents", "document", "company"];
 const has = (r: Record<string, unknown>, k: string) => r[k] !== undefined && r[k] !== null;
 export function codeProduct(intent: string, result: unknown): boolean {
   if (!result || typeof result !== "object") return false;
   const r = result as Record<string, any>;
   if (intent === "company_intel") {
-    // ROUTER ROUTING ROUND (2026-11-02): a pay question at a firm with no file. The router's answer is "X has no company
-    // file yet", with no figure in it; the brain reads the firm's postings (get_posting, search_jobs) and sources under the
-    // figure checks, so the question gets an answer instead of stopping there. Any other no-file question stays the router's.
-    if (r.payload?.kind === "company_file_absent" && r.payload?.topic === "pay") return false;
     if (has(r, "company") || has(r, "comparison")) return true;
     const kind = String(r.payload?.kind ?? "");
     return !(has(r, "guidance") || /_absent$/.test(kind));
@@ -108,108 +97,15 @@ export function probeCtx<T extends Record<string, unknown>>(ctx: T): T {
 // is a researched answer for this person, so with CAREER_KNOWLEDGE=on (the research tool exists) the brain takes it and calls
 // research_career_question. Company-specific asks never match here: the router gives them a company file or a campaign, and
 // a result carrying a company stays code's. "What do data analyst postings require?" is not an entry question: library.
-const ENTRY_VERB = String.raw`(?:get\s+hired|get\s+a\s+job|get\s+an?\s+(?:internship|offer|entry)|get\s+into|get\s+started\s+(?:as|in)|break\s+into|breaking\s+into|become|becoming|be\s+an?|work\s+as|work\s+in|go\s+into|enter|pursue|qualify\s+as|train\s+as|switch\s+(?:in)?to|land\s+an?|start\s+a\s+career)`;
-const OPEN_ENTRY_RES: RegExp[] = [
-  // "how do I get hired as ...", "how to break into ...", "what should I do to land a job as ..."
-  new RegExp(String.raw`\b(?:how\s+(?:do|can|would|should|could)\s+(?:i|we|someone|a\s+\w+)|how\s+to|what(?:'s|\s+is)\s+the\s+(?:best\s+)?way\s+to|what\s+should\s+i\s+do\s+to|where\s+do\s+i\s+(?:even\s+)?start\s+(?:to|if\s+i\s+want\s+to))\b[^?.!]*\b${ENTRY_VERB}\b`, "i"),
-  // "what does it take to become ...", "how long does it take to become ...", "what's the path to becoming ..."
-  new RegExp(String.raw`\b(?:what\s+(?:does|would|will)\s+it\s+take|how\s+(?:long|hard|much\s+school)\s+(?:does|would|will|is)\s+it(?:\s+take)?|what(?:'s|\s+is)\s+the\s+(?:best\s+)?(?:path|route|road|process|steps?))\b[^?.!]*\b(?:to|into)\s+${ENTRY_VERB}\b`, "i"),
-  new RegExp(String.raw`\bwhat(?:'s|\s+is)\s+the\s+(?:best\s+)?(?:path|route|road|process)\s+(?:to|into)\b[^?.!]*\b(?:becoming|being|a\s+career|an?\s+\w+)`, "i"),
-  // "where do I even start if I want to be a nurse", "I want to become a nurse, where do I start"
-  /\bwhere\s+(?:do\s+i|should\s+i)\s+(?:even\s+)?(?:start|begin)\b[^?.!]*\b(?:want\s+to|trying\s+to|hoping\s+to)\s+(?:be|become|work|get|break)\b/i,
-  new RegExp(String.raw`\b(?:want|wanna|hoping|planning|trying|thinking\s+(?:of|about))\s+(?:to\s+)?${ENTRY_VERB}\b[^?.!]*[?.!]?\s*(?:where|how|what)\b[^?.!]*\b(?:start|begin|first|next)\b`, "i"),
-  // "do I need a degree to be a ...", "is it too late for me to become ...", "how many years of school to be ..."
-  new RegExp(String.raw`\b(?:do\s+i\s+(?:really\s+)?need|does\s+it\s+take|is\s+it\s+too\s+late(?:\s+for\s+me)?|am\s+i\s+too\s+(?:old|late))\b[^?.!]*\bto\s+${ENTRY_VERB}\b`, "i"),
-  // "is nursing worth it", "is a career in law a good bet", "is it worth becoming an electrician"
-  /\bis\s+(?:a\s+career\s+in\s+|being\s+an?\s+|becoming\s+an?\s+)?[a-z][^?.!,]{1,50}?\s+(?:worth\s+(?:it|doing|pursuing)|a\s+good\s+(?:career|field|major|bet|path|choice|job|profession))\b/i,
-  /\bis\s+it\s+worth\s+(?:it\s+)?(?:to\s+)?(?:becoming|become|being|going\s+into|studying|majoring)\b/i,
-  // "should I major in X", "should I go into X", "should I become X"
-  /\bshould\s+i\s+(?:still\s+)?(?:major|minor|study|specialize|concentrate)\s+in\b/i,
-  new RegExp(String.raw`\bshould\s+i\s+(?:still\s+)?(?:go\s+(?:into|to\s+school\s+for)|pursue|become|be\s+an?|enter|switch\s+(?:in)?to|train\s+as)\b`, "i"),
-];
-// The broad shapes ("be a ...", "is ... worth it", "should I go into ...") also fit "be a Googler" and "work at Stripe". A
-// capitalized name is a COMPANY only when (a) it is a known employer or brand, or (b) it follows at/for/with/from and is not a
-// place, school or service branch. Everything else (a state, a city we never listed, "nurse in Wichita Falls", "nursing at Ohio
-// State", "pharmacist in Puerto Rico") stays an open question: when we cannot tell, the brain takes it, and the research tool and
-// the source guard make that safe (no company fact comes from the model). The router still claims real company asks first.
-const words = (s: string) => new Set(s.toLowerCase().split(/\s+/).filter(Boolean));
-const KNOWN_COMPANIES = words(("google alphabet amazon apple microsoft meta facebook instagram whatsapp netflix tesla spacex nvidia intel amd qualcomm broadcom cisco ibm oracle sap salesforce adobe intuit uber lyft doordash instacart airbnb stripe square block paypal venmo coinbase robinhood plaid ramp brex palantir snowflake databricks datadog mongodb openai anthropic deepmind spotify twitter linkedin snap snapchat pinterest reddit tiktok bytedance dropbox slack zoom shopify twilio cloudflare atlassian github gitlab figma notion canva asana okta splunk vmware dell hp lenovo samsung sony ibm " +
-  "goldman sachs morgan stanley jpmorgan chase citi citigroup citibank wells fargo barclays deutsche ubs lazard evercore moelis centerview blackstone kkr carlyle apollo citadel jane street blackrock vanguard fidelity schwab visa mastercard amex capital one mckinsey bain bcg deloitte pwc kpmg accenture capgemini booz allen oliver wyman kearney guidehouse " +
-  "lockheed boeing raytheon northrop grumman spacex airbus ford toyota honda gm chevrolet bmw volkswagen walmart target costco kroger walgreens cvs home depot lowes nike adidas starbucks mcdonalds disney comcast verizon att tmobile " +
-  "unitedhealth kaiser mayo hca cigna aetna humana pfizer moderna merck johnson abbvie genentech exxon chevron shell bp conocophillips ge honeywell caterpillar deere fedex ups usps " +
-  "googler googlers amazonian amazonians microsoftie facebooker stripe stripes metamate").replace(/ (?=\w)/g, " "));
-const SCHOOL_WORD = /^(?:university|college|institute|academy|school|state|tech|polytechnic|seminary|conservatory|cc)$/i;
-const PLACE_WORDS = words(("alabama alaska arizona arkansas california colorado connecticut delaware florida georgia hawaii idaho illinois indiana iowa kansas kentucky louisiana maine maryland massachusetts michigan minnesota mississippi missouri montana nebraska nevada hampshire jersey mexico york carolina dakota ohio oklahoma oregon pennsylvania rhode island tennessee texas utah vermont virginia washington wisconsin wyoming columbia puerto rico guam " +
-  "canada ontario toronto vancouver montreal quebec alberta britain england scotland wales ireland london india australia germany france spain italy china japan korea singapore nigeria brazil netherlands europe asia africa america american canadian british indian united states kingdom emirates zealand philippines pakistan kenya ghana israel turkey poland sweden norway denmark finland switzerland " +
-  "atlanta austin boston chicago dallas denver detroit houston miami nashville orlando philadelphia phoenix pittsburgh portland sacramento seattle tampa angeles francisco diego jose vegas orleans louis paul antonio baltimore charlotte columbus cleveland minneapolis brooklyn manhattan queens bronx fresno wichita falls tucson omaha raleigh richmond memphis louisville milwaukee albuquerque oakland tulsa honolulu anchorage boise spokane tacoma madison buffalo rochester albany syracuse cincinnati indianapolis kansas lincoln lexington savannah charleston jacksonville tallahassee birmingham mobile jackson shreveport lubbock amarillo laredo reno provo salt lake cheyenne billings fargo sioux bismarck duluth akron toledo dayton scranton harrisburg hartford providence newark trenton stamford bridgeport worcester springfield manchester burlington bangor " +
-  "army navy marines marine force guard coast air space military").replace(/\s+/g, " "));
-const CAP_SEQ = /\b[A-Z][a-z]+[A-Z]?\w*(?:\s+(?:of\s+)?[A-Z][a-z]+\w*)*/g;
-// A place, a school or a service branch ("Ohio State", "Puerto Rico", "University of Texas"), never a known employer.
-export function placeOrSchool(name: string): boolean {
-  const toks = name.split(/\s+/).filter((t) => t && t.toLowerCase() !== "of");
-  const lower = toks.map((t) => t.toLowerCase());
-  if (lower.some((t) => KNOWN_COMPANIES.has(t))) return false;
-  return lower.some((t) => PLACE_WORDS.has(t)) || toks.some((t) => SCHOOL_WORD.test(t)) || /\bof\b/i.test(name);
-}
-export function namesSomeone(span: string): boolean {
-  const rest = span.replace(/^\S+\s*/, "");
-  for (const m of rest.matchAll(CAP_SEQ)) {
-    const seq = m[0], toks = seq.split(/\s+/).filter((t) => t !== "of");
-    if (toks.every((t) => t.length < 3)) continue;
-    const lower = toks.map((t) => t.toLowerCase());
-    const stem = (t: string) => t.replace(/(?:ers|er|s)$/, "");
-    if (lower.some((t) => KNOWN_COMPANIES.has(t) || KNOWN_COMPANIES.has(stem(t)))) return true;
-    const before = rest.slice(0, m.index).trimEnd().split(/\s+/).pop()?.toLowerCase() ?? "";
-    const afterPrep = /^(?:at|for|with|from)$/.test(before);
-    if (afterPrep && !placeOrSchool(seq)) return true;
-  }
-  return false;
-}
-const OPEN_ENTRY = { test: (m: string) => OPEN_ENTRY_RES.some((r) => { const x = r.exec(m); return !!x && !namesSomeone(m.slice(x.index).split(/[?.!]/)[0]); }) };
+const OPEN_ENTRY = /\b(?:how\s+(?:do|can|would|should|could)\s+(?:i|we|someone|a\s+\w+)|how\s+to|what(?:'s|\s+is)\s+the\s+(?:best\s+)?way\s+to|what\s+should\s+i\s+do\s+to|where\s+do\s+i\s+start\s+to)\b[^?.!]*\b(?:get\s+hired|get\s+a\s+job|get\s+an?\s+(?:internship|offer|entry)|get\s+into|break\s+into|breaking\s+into|become|land\s+an?|start\s+a\s+career)\b/i;
 const OPEN_ENTRY_KINDS = new Set(["role_kb_stats", "role_kb_absent", "plan_paths"]);
 export function openCareerQuestion(env: Env, message: string, intent: string, result: unknown): boolean {
   if (env.get("CAREER_KNOWLEDGE") !== "on") return false;
-  // career_os_plan ("the path from freshman to null") and profile_recall (a self-statement such as "I'm on F-1" swallows the
-  // question) are the router's generic misses on the same open questions: they carry no library answer, so the brain takes them.
-  const GENERIC_MISS = intent === "career_os_plan" || intent === "profile_recall";
-  if (intent !== "company_intel" && intent !== "path_plan" && !GENERIC_MISS) return false;
+  if (intent !== "company_intel" && intent !== "path_plan") return false;
   if (!OPEN_ENTRY.test(message)) return false;
   const r = (result && typeof result === "object" ? result : {}) as Record<string, any>;
-  // The router sometimes reads "at home" or "at night" as a company ("home has no company file yet"). A company the person never
-  // capitalized and that is an everyday word is not one: the question is still open.
-  const co = typeof r.company === "string" ? r.company : null;
-  const spurious = !!co && String(r.payload?.kind ?? "") === "company_file_absent" && (
-    (co === co.toLowerCase() && /^[a-z]{2,12}$/.test(co) && !new RegExp(`\\b${co[0].toUpperCase()}${co.slice(1)}`).test(message)) || placeOrSchool(co));
-  if ((has(r, "company") && !spurious) || has(r, "comparison") || has(r, "offer")) return false;
-  if (GENERIC_MISS || spurious) return true;
+  if (has(r, "company") || has(r, "comparison") || has(r, "offer")) return false;
   return OPEN_ENTRY_KINDS.has(String(r.payload?.kind ?? r.artifact?.kind ?? ""));
-}
-
-// ADVICE QUESTIONS (2026-11-01, the 1v1's outreach and prep turns): a QUESTION about networking or interviews ("how do I
-// network into banking with no connections", "what's a good subject line for a cold email", "what should I ask at the end of
-// an interview") is advice, but the router reads it as work: outreach_clarification starts a campaign plan for a list nobody
-// asked for, and prep_brief answers with a template brief. Neither carries anything the person approved or that sends. These
-// go to the brain, which answers the question asked. Instructions stay code's: building a list ("find me engineers at X to
-// reach out to"), drafting or sending to someone, a prep brief for a company or posting the person named, and a mock or
-// drill that is running. The brain cannot send, apply or save on its own (STAGED_WITHHELD_TOOLS; every external effect needs
-// the person's approval of the exact payload on code's path).
-const ADVICE_INTENTS = new Set(["outreach_clarification", "prep_brief"]);
-const QUESTION_LEAD = /^\s*(?:(?:so|ok|okay|hey|also|and|but|quick question)[,:]?\s+)?(?:how|what|whats|what's|which|when|why|where|who|should|is|are|do|does|did|would|could|any|tips?\b|advice\b|best way)\b/i;
-const ASK_TO_ACT = /^\s*(?:can|could|would|will)\s+(?:you|u)\s+(?:please\s+)?(?:send|email|message|text|dm|reach|contact|find|build|make|get|pull|list|draft|write|apply|submit|queue|save|set|start|run|mock|quiz|drill)\b/i;
-const LIST_OR_SEND = /\b(?:find|build|pull|get|make|compile)\b[^?.!]*\b(?:list|people|contacts?|names|engineers|analysts|bankers|associates|recruiters|alumni|alums|managers)\b|^\s*(?:please\s+)?(?:send|email|message|text|dm|reach out|contact|apply|submit|queue)\b/i;
-export function adviceQuestion(message: string, intent: string | null, result: unknown): boolean {
-  if (!intent || !ADVICE_INTENTS.has(intent)) return false;
-  const m = String(message ?? "").replace(/[’`]/g, "'").trim();
-  if (!(QUESTION_LEAD.test(m) || /\?\s*$/.test(m)) || ASK_TO_ACT.test(m) || LIST_OR_SEND.test(m)) return false;
-  // A company or a posting the person named gets code's product for it (the firm's file, the posting's brief).
-  if (namesSomeone(m)) return false;
-  const r = (result && typeof result === "object" ? result : {}) as Record<string, any>;
-  if (has(r, "draft") || has(r, "documents") || has(r, "document") || has(r, "offer") || has(r, "company") || (r.sends ?? 0) > 0) return false;
-  // A mock, drill or answer score in progress is code's session.
-  if (r.resultStatus === "running" || has(r, "question")) return false;
-  const kind = String(r.payload?.kind ?? r.artifact?.kind ?? "");
-  if (intent === "outreach_clarification") return !kind || kind === "campaign_plan";
-  return !/mock|drill|answer_score|session/i.test(kind);
 }
 
 export type StagedDecision = { brain: boolean; mode: BrainMode; intent: string | null; reason: string };
@@ -220,11 +116,6 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (mode !== "staged") return { brain: false, mode, intent: null, reason: "not_staged" };
   if (o.structured) return { brain: false, mode, intent: null, reason: "structured_request" };
   if (o.host.isHostControlled(o.message, o.ctx)) return { brain: false, mode, intent: null, reason: "host_control" };
-  // Crisis text is code's (crisis.ts): never the brain's, whatever the router would class it as.
-  if (crisisReply(o.message) !== null) return { brain: false, mode, intent: null, reason: "crisis" };
-  // Spec 2.3: a correction to the last search ("remote only", "only individual-contributor roles") changes its constraints in
-  // code (search_correction.ts) and the next results use them; it is not a question for the brain.
-  if (correctedAsk(o.message, o.ctx.discovery)) return { brain: false, mode, intent: null, reason: "search_correction" };
   let probe, records: any[] = [];
   try { const copy = probeCtx(o.ctx); probe = o.host.runTurn(o.message, copy); records = Array.isArray(copy.containmentRecords) ? copy.containmentRecords as any[] : []; }
   catch { return { brain: false, mode, intent: null, reason: "probe_failed" }; }
@@ -238,7 +129,6 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (!intent) return { brain: false, mode, intent: null, reason: "router_claimed" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
   if (openCareerQuestion(o.env, o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "open_career_question" };
-  if (adviceQuestion(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "advice_question" };
   if (!STAGED_BRAIN_INTENTS.includes(intent)) return { brain: false, mode, intent, reason: "action" };
   if (codeProduct(intent, probe.result)) return { brain: false, mode, intent, reason: "code_product" };
   return { brain: true, mode, intent, reason: "question" };

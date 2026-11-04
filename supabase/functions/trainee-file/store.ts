@@ -12,11 +12,10 @@ export function supabaseFileStore(admin: any): FileStore {
   return {
     ...base,
     // By the posting's id, else by its link: the same posting found under another id is already in the applications (each posting
-    // goes at most once), and the row says where it stands instead of offering Apply again. Newest first: a posting re-prepared
-    // after needs_answers (20261101130000) has a history row and a live row, and the live (newer) one is what the page says.
+    // goes at most once), and the row says where it stands instead of offering Apply again.
     async appRow(u, jobId, url) {
       const cols = "id,state,reason,confirmation_id,created_at,updated_at,email_confirmed_at,payload,company,url";
-      const rows = must(await admin.from("career_apply_jobs").select(cols).eq("user_id", u).eq("job_id", jobId).order("created_at", { ascending: false }).limit(1), "read the application");
+      const rows = must(await admin.from("career_apply_jobs").select(cols).eq("user_id", u).eq("job_id", jobId).limit(1), "read the application");
       if (rows?.[0] || !url) return rows?.[0] ?? null;
       const byLink = must(await admin.from("career_apply_jobs").select(cols).eq("user_id", u).eq("url", url).order("created_at", { ascending: false }).limit(1), "read the application");
       return byLink?.[0] ?? null;
@@ -106,20 +105,5 @@ export function supabasePhoneAuth(admin: any, o: { url: string; anon: string | u
       if (j?.access_token) await auth("logout", {}, j.access_token).then((x) => x.body?.cancel(), () => {});
       return typeof j?.user?.id === "string" ? j.user.id : null;
     },
-  };
-}
-
-// The person's own time zone, for the days the page shows: the one they set for their weekly digest, else the one on their job
-// alerts (both are the person's settings, career_digest_prefs.tz and career_alert_prefs.tz). Null when neither is set or readable;
-// the page then reads days in Chicago and says so (file_page.ts postedLine).
-// deno-lint-ignore no-explicit-any
-export function supabaseTimeZone(admin: any): (userId: string) => Promise<string | null> {
-  return async (userId: string) => {
-    for (const table of ["career_digest_prefs", "career_alert_prefs"]) {
-      let tz: unknown = null;
-      try { const r = await admin.from(table).select("tz").eq("user_id", userId).maybeSingle(); tz = r?.error ? null : r?.data?.tz; } catch { tz = null; }
-      if (typeof tz === "string" && tz.trim()) return tz.trim();
-    }
-    return null;
   };
 }

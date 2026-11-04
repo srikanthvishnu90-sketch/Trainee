@@ -1,6 +1,6 @@
 // PEOPLE DISCOVERY AT SCALE (D-MN-3 as REPLACED by the owner, 2026-10-27 21:32: "don't use Hunter or Apollo ... so we can
 // do it with anyone"). No paid people/email provider. One adapter interface (PeopleProvider), one implementation (web):
-//   1. search    a web search through the gateway (DARK: not available yet, so discovery answers "not set up"),
+//   1. search    OpenAI's web_search tool (Responses API, through the gateway's OpenAI config: modelConfig, OpenAI only),
 //                with the search recipe below (company + role + "team", engineering blog, campus recruiting, speakers). Only
 //                the result URLs are used: what the model writes is never taken as a fact about anyone.
 //   2. read      each result page with N1's SSRF-guarded page reader (career_people_page.ts readPage: HTTPS only, public
@@ -20,15 +20,17 @@
 // everyone inside the cache window. Docs: docs/architect/PEOPLE-PROVIDER-2026-10-27.md.
 import { chatAsk, cleanCell, cleanEmail, companyKey, isFormula, readsAsInstruction } from "./career_people_import.ts";
 import { neverOpen } from "./career_people_sites.ts";
-import { formerTitle, type PageRead, readPage, type Resolver } from "./career_people_page.ts";
+import { type PageRead, readPage, type Resolver } from "./career_people_page.ts";
 import { domainLabelOf, registrable } from "./career_people_gmail.ts";
 import { dohMx, isRoleAddress, isTeamName, type MxResolver } from "./career_contacts.ts";
-import { CLAUDE_DEFAULT_MODEL, modelConfig, WEB_SEARCH_AVAILABLE, webSearch } from "./model_gateway.ts";
+import { costMicros, modelConfig, responsesCall } from "./model_gateway.ts";
+import { type BudgetGate } from "./model_budget.ts";
+import { ModelBudgetBlockedError } from "./model_calls.ts";
 
 export type ProviderName = "web";
 export const LABEL: Record<ProviderName, string> = { web: "web search" };
 export const DEFAULT_CACHE_DAYS = 30;
-export const DEFAULT_SEARCH_MODEL = CLAUDE_DEFAULT_MODEL;
+export const DEFAULT_SEARCH_MODEL = "gpt-4.1-mini"; // listed for the Responses web_search tool (OpenAI's guide, 2026-10-27)
 // Hosts the search is told to leave out (and that are never fetched if they come back anyway).
 // Built from the never-open labels, so no such host is written in fetch code (WO-037/D7's scan).
 export const BLOCKED_SEARCH_DOMAINS = [["linkedin", "com"], ["indeed", "com"], ["joinhandshake", "com"], ["lnkd", "in"]].map((p) => p.join("."));
@@ -49,12 +51,12 @@ export interface PeopleProvider { name: ProviderName; supportsSchool: false; fin
 // ------------------------------------------------------------------------------------------------ config
 export interface ProviderConfig { provider: ProviderName | null; apiKey: string | null; model: string; cacheSeconds: number; leaseSeconds: number; switchedOn: boolean }
 // CAREER_PEOPLE_SEARCH=on switches discovery on (model spend: the owner's to approve); the key is the gateway's own
-// (ANTHROPIC_API_KEY through modelConfig), and nothing runs while the gateway's web search is not available. CAREER_PEOPLE_SEARCH_MODEL picks the model; CAREER_PEOPLE_CACHE_DAYS
+// (OPENAI_API_KEY through modelConfig, OpenAI only). CAREER_PEOPLE_SEARCH_MODEL picks the model; CAREER_PEOPLE_CACHE_DAYS
 // (default 30) is how long one company's discovery is reused for everyone.
 export function providerConfig(env: (k: string) => string | undefined): ProviderConfig {
   const switchedOn = (env("CAREER_PEOPLE_SEARCH") ?? "").trim().toLowerCase() === "on";
   const gw = modelConfig({ get: env });
-  const key = WEB_SEARCH_AVAILABLE && gw.apiKey ? gw.apiKey : null;
+  const key = gw.provider === "openai" && gw.apiKey ? gw.apiKey : null;
   const days = Number(env("CAREER_PEOPLE_CACHE_DAYS"));
   return {
     provider: switchedOn && key ? "web" : null, apiKey: switchedOn ? key : null, switchedOn,
@@ -97,12 +99,43 @@ export function searchRecipe(company: string, titles: string[]): string[] {
   const roles = titles.length ? titles.map((t) => `${c} ${cleanCell(t, 80)}`) : [`${c} team`];
   return [...new Set([...roles, `${c} team page`, `${c} engineering blog author`, `${c} campus recruiting recruiter`, `${c} conference speaker`, `${c} press contact`])];
 }
-// The search is dark (owner directive 2026-11-02: Claude-only; Claude web search is not verified on these models). The
-// gateway's web-search door answers "not available", nothing is sent or spent, and the provider reports not_wired.
-export function gatewaySearch(): SearchFn {
-  return async () => {
-    const r = await webSearch();
-    return { status: "not_wired", reason: r.detail };
+// OpenAI's web_search tool through the Responses API (https://developers.openai.com/api/docs/guides/tools-web-search):
+// POST /v1/responses { model, tools: [{ type: "web_search", filters: { blocked_domains } }], tool_choice: "required",
+// include: ["web_search_call.action.sources"], input }. URLs come from web_search_call.action.sources[].url and the
+// message's url_citation annotations. 429 insufficient_quota: out of credits; other 429: rate limit; 401/403: key refused.
+// Every search is a paid call: it goes through the gateway's responsesCall, which reserves the day's budget before sending.
+export function openAiWebSearch(o: { fetch: typeof fetch; apiKey: string; model: string; budget?: BudgetGate }): SearchFn {
+  return async (query) => {
+    let r: Response;
+    try {
+      r = await responsesCall({
+        apiKey: o.apiKey, model: o.model, request: o.fetch, budget: o.budget, timeoutMs: 45_000,
+        body: {
+          tool_choice: "required", max_tool_calls: 1, max_output_tokens: 400, include: ["web_search_call.action.sources"],
+          tools: [{ type: "web_search", filters: { blocked_domains: BLOCKED_SEARCH_DOMAINS } }],
+          input: `Search the web for public pages that name people who work at this company, for: ${query}\nList the pages you found.`,
+        },
+      });
+    } catch (e) {
+      if (e instanceof ModelBudgetBlockedError) return { status: "out_of_credits", detail: `search: ${e.detail}` };
+      return { status: "error", detail: `search: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) }; }
+    if (!r.ok) {
+      const body = (await r.text().catch(() => "")).slice(0, 800);
+      if (r.status === 429 && /insufficient_quota|exceeded your current quota|billing/i.test(body)) return { status: "out_of_credits", detail: "search: HTTP 429 (quota)" };
+      if (r.status === 429) return { status: "rate_limited", retry_after_s: Math.max(1, Math.min(Number(r.headers.get("retry-after")) || 60, 86400)), detail: "search: HTTP 429" };
+      if (r.status === 401 || r.status === 403) return { status: "not_wired", reason: `the AI service refused the key (HTTP ${r.status})` };
+      return { status: "error", detail: `search: HTTP ${r.status}` };
+    }
+    const j: any = await r.json().catch(() => null);
+    const urls: { url: string; title: string }[] = [];
+    for (const item of Array.isArray(j?.output) ? j.output : []) {
+      if (item?.type === "web_search_call") for (const s of Array.isArray(item?.action?.sources) ? item.action.sources : []) if (s?.url) urls.push({ url: String(s.url), title: "" });
+      if (item?.type === "message") for (const c of Array.isArray(item.content) ? item.content : []) for (const a of Array.isArray(c?.annotations) ? c.annotations : []) {
+        if (a?.type === "url_citation" && a.url) urls.push({ url: String(a.url), title: cleanCell(a.title, 200) });
+      }
+    }
+    const micros = costMicros(o.model, j?.usage);
+    return { status: "ok", urls, cost_usd: micros === null ? null : micros / 1e6 };
   };
 }
 
@@ -153,20 +186,11 @@ export function webProvider(o: { search: SearchFn; fetch: typeof fetch; resolve?
           // Their own worksFor decides when they have one (a speakers page lists several companies); else the page's.
           const employer = x.company ? companyKey(x.company) === key : (onDomain || orgIs);
           if (!employer) continue;
-          // NETWORKING R2 (2026-10-30): someone the page says has left ("Former Recruiter", "ex-Stripe, now at Ramp",
-          // "Recruiter (until 2024)", a worksFor role with an end date, the company as their alumniOf) is not someone who
-          // works there now. Before, they were listed and drafted to as a current employee.
-          if (x.former || formerTitle(x.title) || (x.school && companyKey(x.school) === key)) continue;
           let email = cleanEmail(x.email);
           if (email && isRoleAddress(email)) {
             if (x.how === "mailto link") continue; // "Careers Team" <careers@>: an inbox, not a person
             email = null;
           }
-          // NETWORKING R2 (2026-10-30): an address on another domain than the company's is not their work address: a
-          // look-alike (str1pe.com, stripe.com.evil.io, stripe-careers.com) or a personal mailbox (gmail.com). It was kept as
-          // "published", could never be sent to (the database checks the domain), and won over the same person's real
-          // address published on another page. It is dropped here, so the on-domain one (or the domain's format) is used.
-          if (email && domain && registrable(email.split("@")[1] ?? "").full !== domain) email = null;
           const pid = `${domain || key}:${nameKey(name)}`.slice(0, 300);
           const prev = byId.get(pid);
           if (prev && (prev.email || !email)) continue;
@@ -185,7 +209,7 @@ export function webProvider(o: { search: SearchFn; fetch: typeof fetch; resolve?
 }
 export function makeProvider(c: ProviderConfig, f: typeof fetch, o: { resolve?: Resolver; mx?: MxResolver; search?: SearchFn } = {}): PeopleProvider | null {
   if (c.provider !== "web" || !c.apiKey) return null;
-  return webProvider({ search: o.search ?? gatewaySearch(), fetch: f, resolve: o.resolve, mx: o.mx });
+  return webProvider({ search: o.search ?? openAiWebSearch({ fetch: f, apiKey: c.apiKey, model: c.model }), fetch: f, resolve: o.resolve, mx: o.mx });
 }
 
 // ------------------------------------------------------------------------------------------------ the store (RPC only)
@@ -195,8 +219,6 @@ export interface Candidate {
   source_ref: string; source_url: string | null; provider: ProviderName | null; provider_id: string | null; domain: string | null; email_status: string | null;
   email_evidence: number | null; email_confidence: number | null; mx: string | null; sendable: boolean; fetched_at: string | null; same_as: number | null;
   connected_on: string | null; profile_text: string | null;
-  // NETWORKING R2 (2026-10-30, 20261030090000): the address opted out with anyone, or bounced for anyone.
-  blocked?: boolean;
 }
 export interface ProviderStore {
   request(userId: string, provider: ProviderName, key: string, query: FindQuery, cacheSeconds: number): Promise<{ state: "cached" | "queued"; job_id?: number; inserted?: number; already_known?: number }>;
@@ -285,21 +307,6 @@ function rolesOf(phrase: string): { titles: string[]; seniority: string[] } {
 // A company as typed: letters (any script), digits, spaces and . , & ' ’ - (so "L’Oréal", "AT&T", "Stripe, Inc."), and never
 // with " at " or " from " inside it ("find alumni from DePaul at Ramp" searches Ramp, not a company "DePaul at Ramp").
 const CO = String.raw`[\p{L}\p{N}](?:(?!\s(?:at|from)\s)[\p{L}\p{N} .,&'’-]){0,80}`;
-// One typed slip (a letter dropped, doubled, swapped or changed) on a word of four or more letters (ROUTER ROUTING ROUND,
-// 2026-11-02): the role nouns and outreach verbs below are never read as a person's title because of a typo.
-const ROLE_NOUNS = ["roles", "positions", "openings", "postings", "listings", "internships", "internship", "vacancies", "jobs"];
-const OUTREACH_VERBS = ["email", "reach", "message", "write", "draft", "contact", "connect", "ping"];
-const firstWord = (p: string) => p.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
-const lastWord = (p: string) => p.trim().split(/\s+/).pop()?.toLowerCase() ?? "";
-function near1(a: string, b: string): boolean {
-  if (a === b) return true;
-  if (Math.abs(a.length - b.length) > 1) return false;
-  let i = 0;
-  while (i < a.length && i < b.length && a[i] === b[i]) i++;
-  if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1) || (a[i] === b[i + 1] && a[i + 1] === b[i] && a.slice(i + 2) === b.slice(i + 2));
-  return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
-}
-const nearAny = (w: string, words: string[]) => w.length >= 4 && words.some((x) => near1(w, x));
 // "people at every company I applied to", "engineering managers at every company I've applied to", "engineering managers
 // at Stripe", "find recruiters at Ramp", "alumni of DePaul at Stripe", "DePaul alumni at Stripe". Anything else: null.
 export function parseTargetAsk(message: string): TargetAsk | null {
@@ -316,12 +323,6 @@ export function parseTargetAsk(message: string): TargetAsk | null {
   if (m && m[1].trim().split(/\s+/).length <= 3 && !/\b(?:i|me|my|you|apply|applied|send|email|message|role|job|position)\b/i.test(m[1])) {
     return { kind: "role_at", titles: [cleanCell(m[1], 80).toLowerCase()], seniority: [], company: cleanCell(m[2], 120) };
   }
-  // ROUTER ROUTING ROUND (2026-11-02): "who works at People Inc.", "find people who work at Stripe", "employees at Jobber" ask
-  // for everyone at the firm, with no title filter. Trunk searched for people titled "who work" (matching no one) or left
-  // the ask to the router's campaign plan.
-  m = new RegExp(`${lead}(?:who\\s+(?:works?|is\\s+working)|(?:the\\s+)?(?:people|folks|employees|staff|everyone|anyone|someone)\\s+(?:who\\s+(?:works?|is\\s+working|are\\s+working)|working))\\s+(?:at|for)\\s+(${CO})$`, "iu").exec(t)
-    ?? new RegExp(`${lead}(?:the\\s+)?(?:employees|staff)\\s+(?:at|of|from)\\s+(${CO})$`, "iu").exec(t);
-  if (m && !/^(?:my|your|our)\b/i.test(m[1])) return { kind: "role_at", titles: [], seniority: [], company: cleanCell(m[1], 120) };
   m = new RegExp(`${lead}(.+?)\\s+(?:at|from)\\s+(${CO})$`, "iu").exec(t);
   // ROUTING SCENARIOS (2026-10-29): without "find" / "show" / "who are" in front, the words before "at" must name people
   // (a plural, or a role word): "withdraw from Stripe" and "aply to the analyst role at Figma" are not searches for a
@@ -333,12 +334,6 @@ export function parseTargetAsk(message: string): TargetAsk | null {
   // the networking turn's draft or who; it is never a search for a title "reach out to engineer" (2026-10-29).
   if (m && !/\b(i|me|my|you|work|working|apply|applying|applied|jobs?|roles?\s+open|send|email|e-mail|draft|write|message|msg|dm|ping|reach|contact|connect|touch|network|introduce|intro(?:duction)?s?|contacts?|know)\b/i.test(m[1]) && m[1].split(/\s+/).length <= 8 &&
     !/\b(?:withdraw\w*|cancel\w*|remove|delete|forget|stop|don'?t|do not|status|where|what|how|did|has|have|any|role|position|opening|posting|application)\b/i.test(m[1]) &&
-    // ROUTER ROUTING ROUND (2026-11-02): "data analyst roles at Applebee's", "openings at Jobber", "nurse positions at X",
-    // "internships at Stripe" ask for work there (the role search), never for people titled "data analyst role".
-    !/\b(?:roles|positions|openings|postings|listings|vacanc(?:y|ies)|internships?|opportunit(?:y|ies)|gigs?|careers|job\s+ads?)\b/i.test(m[1]) &&
-    // The same words typed with one slip ("data analyst rles", "nurse oepnings", "emil the recruiter", "recah out to
-    // engineers"): the head noun of a role search, or the outreach verb that opens the ask.
-    !nearAny(lastWord(m[1]), ROLE_NOUNS) && !nearAny(firstWord(m[1]), OUTREACH_VERBS) &&
     (led.trim() !== "" || peopleWords(m[1])) && !/^(?:my|your|our)\b/i.test(m[2])) {
     const r = rolesOf(m[1]);
     if (r.titles.length) return { kind: "role_at", ...r, company: cleanCell(m[2], 120) };
@@ -349,7 +344,7 @@ export function parseTargetAsk(message: string): TargetAsk | null {
 export type AddressLabel = "published" | "known" | "inferred" | null;
 export interface Target {
   id: number; name: string; title: string; company: string; email: string | null; address: AddressLabel; evidence: number | null;
-  sendable: boolean; source: string; source_url: string | null; reason: string; blocked?: boolean;
+  sendable: boolean; source: string; source_url: string | null; reason: string;
 }
 export interface TargetsResult {
   status: "ok" | "NOT_WIRED" | "waiting" | "refused" | "none" | "no_companies";
@@ -369,8 +364,7 @@ function titleMatch(title: string, ask: { titles: string[] }): string | null {
 }
 const labelOf = (c: Candidate): AddressLabel => !c.email ? null : c.source !== "provider" ? "known" : c.email_status === "inferred" ? "inferred" : c.email_status === "published" ? "published" : null;
 const addressLine = (c: Candidate, l: AddressLabel) =>
-  c.blocked && c.email ? "they asked not to be contacted, or their address bounced: not used"
-  : l === "published" ? `email published on that page${c.sendable ? "" : c.mx === "fail" ? " (its domain has no mail server: not used)" : ""}`
+  l === "published" ? `email published on that page${c.sendable ? "" : c.mx === "fail" ? " (its domain has no mail server: not used)" : ""}`
   : l === "inferred" ? `email inferred from ${c.domain}'s format (${c.email_evidence} addresses seen there)${c.sendable ? ", sent only if you approve it" : c.mx === "fail" ? " (its domain has no mail server: not used)" : ""}`
   : l === "known" ? "email from your own contacts"
   : c.email_status === "bounced" ? "their address bounced before: not used" : "no email address";
@@ -419,14 +413,14 @@ export async function findTargets(userId: string, ask: TargetAsk, d: TargetDeps)
       if (own) {
         if (!own.email && c.email) {
           const l = labelOf(c);
-          Object.assign(own, { email: c.email, address: l, evidence: c.email_evidence, sendable: c.sendable && !c.blocked, source_url: c.source_url, reason: `${own.reason.replace(/\.$/, "")}; ${addressLine(c, l)}, ${fromLine(c)}.` });
+          Object.assign(own, { email: c.email, address: l, evidence: c.email_evidence, sendable: c.sendable, source_url: c.source_url, reason: `${own.reason.replace(/\.$/, "")}; ${addressLine(c, l)}, ${fromLine(c)}.` });
         }
         continue;
       }
       if (!why) continue;
       const l = labelOf(c);
       const t: Target = { id: c.id, name: c.name ?? c.email ?? "", title: c.position, company: c.company, email: c.email, address: l, evidence: c.email_evidence,
-        sendable: c.sendable && !c.blocked, ...(c.blocked ? { blocked: true } : {}), source: c.source, source_url: c.source_url,
+        sendable: c.sendable, source: c.source, source_url: c.source_url,
         reason: `${c.position ? `${c.position} at ${c.company}` : `at ${c.company}`}; ${why}; ${fromLine(c)}; ${addressLine(c, l)}.` };
       byId.set(c.id, t);
       out.push(t);
@@ -441,7 +435,7 @@ export async function findTargets(userId: string, ask: TargetAsk, d: TargetDeps)
     else if (s.waiting) notes.push(`${s.waiting} ${s.waiting === 1 ? "search is" : "searches are"} still running; ask again shortly for the rest.`);
     if (s.failed.length) notes.push(`${s.failed.length} ${s.failed.length === 1 ? "search" : "searches"} couldn't be done.`);
   }
-  const sendable = out.filter((x) => !x.blocked && (x.sendable || x.address === "known")).length;
+  const sendable = out.filter((x) => x.sendable || x.address === "known").length;
   const head = out.length
     ? `${out.length} ${out.length === 1 ? "person" : "people"} at ${companies.length === 1 ? companies[0] : `${companies.length} companies`}, ${sendable} with an address I could use (each one labeled published, known or inferred).`
     : `No one matching at ${companies.length === 1 ? companies[0] : `${companies.length} companies`} yet.`;

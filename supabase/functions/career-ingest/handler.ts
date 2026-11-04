@@ -13,20 +13,15 @@
 // returns and records a report with coverage fractions (career_ingest_runs): boards read of those due, failures by
 // reason, postings new/seen/closed, links refused by the URL-shape guard, and how many boards of the lane and of the
 // directory were read within the window. ?posting_budget=P stops starting boards once P postings were parsed (CPU).
-// 2026-10-30 (production: ~20% of lane runs stopped by the platform's memory / CPU limits, three lanes stuck for hours on
-// the same boards, and no log row for any of them): the run's log row is written when it starts and completed when it
-// ends (failed runs carry their error); the run claims its boards before reading (a stopped run no longer pins its
-// lane); outcomes are recorded 20 at a time; a board larger than the posting budget is read in parts over several runs.
 import { equalSecret } from "../_shared/message_service.ts";
 import { ingestBoards, type Board, type BoardOutcome, type FetchFeed, type IngestRunRow, type IngestStats, type PostingsDb } from "../_shared/career_ingest.ts";
-import { boardKey, type BoardState, type BoardStateDb, bucketOf, capacityPer, claimable, goneReadsOf, laneBuckets, rereadGapMs } from "../_shared/career_shards.ts";
+import { boardKey, type BoardState, type BoardStateDb, bucketOf, capacityPer, laneBuckets } from "../_shared/career_shards.ts";
 import { runReport } from "../_shared/career_ingest_lanes.mjs";
 
 export interface IngestDeps {
   env: { get(k: string): string | undefined };
   boards: Board[];
-  db: () => PostingsDb & { recordRun(stats: IngestStats, at: string): Promise<void>; recordLaneRun?(row: IngestRunRow): Promise<void>;
-    startLaneRun?(row: { at: string; lane: number; lanes: number; window_min: number }): Promise<number | null>; finishLaneRun?(id: number, row: IngestRunRow): Promise<void> };
+  db: () => PostingsDb & { recordRun(stats: IngestStats, at: string): Promise<void>; recordLaneRun?(row: IngestRunRow): Promise<void> };
   fetchFeed: (userAgent: string) => FetchFeed;
   now: () => number;
   state?: () => BoardStateDb; // WO-037: present -> sharded scheduling; absent -> the rotating cursor
@@ -50,13 +45,8 @@ export async function handleIngest(req: Request, d: IngestDeps): Promise<Respons
   const contact = d.env.get("INGEST_CONTACT_EMAIL") || "";
   if (!contact) return json({ error: "not configured: INGEST_CONTACT_EMAIL is not set (boards are told who is reading them)" }, 503);
   const started = d.now();
-  const at = new Date(started).toISOString();
   const db = d.db();
   const q = new URL(req.url).searchParams;
-  // 2026-10-30: what a failed run must still leave behind: its log row (started at the run's start, so a run the platform
-  // stops shows too), and the boards it claimed but never reached handed back to the queue.
-  let laneCtx: { at: string; lane: number; lanes: number; window_min: number } | null = null, runId: number | null = null, dueCount = 0, leftClosed = 0;
-  let unclaim: (() => Promise<void>) | null = null;
   try {
     const common = { db, now: started, fetchFeed: d.fetchFeed(`Trainee job alerts (contact: ${contact})`),
       concurrency: int(d.env.get("INGEST_CONCURRENCY"), 8, 1, 16), deadline: started + 100000, clock: d.now, touchAfterMs: 6 * 3600000 };
@@ -68,8 +58,6 @@ export async function handleIngest(req: Request, d: IngestDeps): Promise<Respons
       const intervalMs = int(d.env.get("INGEST_EVERY_MIN"), 5, 1, 60) * 60000;
       const windowMin = int(q.get("window_min"), int(d.env.get("INGEST_WINDOW_MIN"), int(d.env.get("INGEST_WINDOW_HOURS"), 6, 1, 48) * 60, 15, 2880), 15, 2880);
       const windowMs = windowMin * 60000;
-      laneCtx = { at, lane, lanes, window_min: windowMin };
-      if (db.startLaneRun) runId = await db.startLaneRun(laneCtx).catch(() => null);
       // WO-044: the lane's own share, not an even split. The 64 buckets are uneven (the heaviest of 4 lanes held 24% more
       // than a quarter in the WO-044/R1 simulation, enough to miss the 6 hours), so a lane takes enough for its own boards.
       const { byKey, buckets } = prep(d.boards);
@@ -78,70 +66,25 @@ export async function handleIngest(req: Request, d: IngestDeps): Promise<Respons
       for (const b of buckets) if (mine.has(b)) laneBoards++;
       const cap = Math.min(int(d.env.get("INGEST_MAX_BOARDS"), 400, 1, 2000),
         Math.max(capacityPer({ boards: d.boards.length, windowMs, intervalMs, lanes }), capacityPer({ boards: laneBoards, windowMs, intervalMs, lanes: 1 })));
-      // 2026-10-30 (round 2): seeded whenever the store's count is not the directory's (a board renamed in the directory
-      // left the count equal, so the new name was never seeded and never read).
-      if ((await st.count()) !== d.boards.length) await st.seed(d.boards);
-      // 2026-10-30: the run claims its boards before reading any (attempted now, status "reading"). A run the platform stops
-      // (memory, CPU) used to leave them oldest, so every later run of the lane took the same boards and was stopped the
-      // same way; now they wait their turn, and one that stays "reading" names the board a stopped run was on.
-      // Round 2: the claim is one step in the store (two runs of a lane used to both read the same due list and both
-      // claim it), and a board in its failure backoff (career_shards.ts retryAfterMs) is not taken.
-      // 2026-10-31: and a board attempted less than the re-read gap ago (half the headroom's slack: window / 6; career_shards.ts
-      // rereadGapMs says why every board is still read within the window) is not taken: a read that had just finished was
-      // due again at once, so an overlapping run, or the next tick, re-read every board of a small lane.
-      const nowMs = Date.parse(at), gapMs = rereadGapMs({ windowMs });
-      let claimed = st.claim ? await st.claim(laneList, cap, at, gapMs) : null;
-      if (claimed === null) {
-        claimed = (await st.due(laneList, cap * 2)).filter((s) => claimable(s, nowMs, gapMs)).slice(0, cap);
-        await st.record(claimed.filter((s) => byKey.has(boardKey(s))).map((s) => ({ ...s, last_attempt_at: at, last_status: "reading" })));
-      }
-      // A board that left the directory (removed, or renamed): its open postings are no longer read, so they are closed,
-      // and its row is forgotten (it used to be skipped, never recorded, and so taken first, and skipped, every run).
-      const due = claimed.filter((s) => byKey.has(boardKey(s)));
-      dueCount = due.length;
+      if ((await st.count()) < d.boards.length) await st.seed(d.boards);
+      const due = (await st.due(laneList, cap)).filter((s) => byKey.has(boardKey(s))); // a board left the directory: skip it
       const was = new Map(due.map((s) => [boardKey(s), s]));
-      const done = new Set<string>();
-      unclaim = async () => { const back = due.filter((s) => !done.has(boardKey(s))); if (back.length) await st.record(back); };
-      const left = claimed.filter((s) => !byKey.has(boardKey(s)));
-      for (const s of left) {
-        const open = (await db.openForBoard({ company: s.board, provider: s.provider, board: s.board })).map((p) => p.job_id);
-        if (open.length) { await db.close(open, at); leftClosed += open.length; }
-      }
-      if (left.length) {
-        if (st.forget) await st.forget(left);
-        else await st.record(left.map((s) => ({ ...s, last_attempt_at: at, last_status: "left the directory" })));
-        await st.seed(d.boards); // a renamed board's new name is read from the next run
-      }
-      // Each board's outcome is recorded as the run goes, 20 at a time: what a stopped run finished is kept.
-      const pending: BoardState[] = [];
-      const flush = async () => { if (pending.length) await st.record(pending.splice(0)); };
-      const rowOf = (s: BoardState, r: BoardOutcome): BoardState => {
-        const ok = r.status !== "failed";
-        return { ...s, last_attempt_at: at, last_ok_at: ok ? at : s.last_ok_at,
-          // Round 2: a read that answered 404 / 410 says how many in a row ("[gone x2]"; the count the next read goes on from)
-          // and, once the board is taken as gone, how many open postings that closed.
-          last_status: r.status === "failed" ? `failed: ${String(r.error).slice(0, 120)}${r.gone_reads ? ` [gone x${r.gone_reads}]` : ""}${r.gone_closed ? `; ${r.gone_closed} open postings closed` : ""}`
-            : r.status === "partial" && r.next_offset ? `partial: next part from ${r.next_offset}` : r.status,
-          etag: r.status === "not_modified" ? s.etag : ok ? r.etag ?? null : s.etag, last_modified: r.status === "not_modified" ? s.last_modified : ok ? r.last_modified ?? null : s.last_modified,
-          fail_count: ok ? 0 : s.fail_count + 1,
-          // Feature 6: the body a full read answered (a partial read's body proves nothing: not kept).
-          body_sha: r.status === "ok" ? r.body_sha ?? null : r.status === "not_modified" ? r.body_sha ?? s.body_sha ?? null : r.status === "partial" ? null : s.body_sha ?? null,
-          // 2026-10-30: a board read in parts: where its next part starts; a failed read leaves the pass where it was.
-          pass_offset: ok ? r.next_offset ?? 0 : s.pass_offset ?? 0,
-          pass_started_at: ok ? (r.next_offset ? r.pass_started_at ?? at : null) : s.pass_started_at ?? null,
-          // Round 2: a board taken as gone had its postings closed: the validators of its last full read no longer describe
-          // the table, so they go (the same body coming back used to read as "not modified" and its postings stayed closed).
-          ...(r.gone_closed !== undefined ? { etag: null, last_modified: null, body_sha: null } : {}) };
-      };
+      const outcomes = new Map<string, BoardOutcome>();
       // Feature 6: the run's CPU bound, as postings parsed (?posting_budget= from the schedule, or INGEST_POSTING_BUDGET).
       const postingBudget = int(q.get("posting_budget"), int(d.env.get("INGEST_POSTING_BUDGET"), 0, 0, 1000000), 0, 1000000) || undefined;
       stats = await ingestBoards({ ...common, useCursor: false, maxBoards: due.length, postingBudget,
-        boards: due.map((s) => ({ ...byKey.get(boardKey(s))!, etag: s.etag, last_modified: s.last_modified, body_sha: s.body_sha ?? null, offset: s.pass_offset ?? 0, pass_started_at: s.pass_started_at ?? null, gone_reads: goneReadsOf(s) })),
-        onBoard: async (b, r) => { const k = boardKey(b); done.add(k); pending.push(rowOf(was.get(k)!, r)); if (pending.length >= 20) await flush(); } });
-      if (leftClosed) { stats.closed += leftClosed; stats.boards_left_directory = left.length; }
-      await flush();
-      await unclaim(); // boards the run did not reach (the deadline, the posting budget) keep their place in the queue
-      unclaim = null;
+        boards: due.map((s) => ({ ...byKey.get(boardKey(s))!, etag: s.etag, last_modified: s.last_modified, body_sha: s.body_sha ?? null })),
+        onBoard: (b, r) => outcomes.set(boardKey(b), r) });
+      const at = new Date(started).toISOString();
+      const rows: BoardState[] = [...outcomes].map(([k, r]) => {
+        const s = was.get(k)!, ok = r.status !== "failed";
+        return { ...s, last_attempt_at: at, last_ok_at: ok ? at : s.last_ok_at, last_status: r.status === "failed" ? `failed: ${String(r.error).slice(0, 120)}` : r.status,
+          etag: r.status === "not_modified" ? s.etag : ok ? r.etag ?? null : s.etag, last_modified: r.status === "not_modified" ? s.last_modified : ok ? r.last_modified ?? null : s.last_modified,
+          fail_count: ok ? 0 : s.fail_count + 1,
+          // Feature 6: the body a full read answered (a partial read's body proves nothing: not kept).
+          body_sha: r.status === "ok" ? r.body_sha ?? null : r.status === "not_modified" ? r.body_sha ?? s.body_sha ?? null : r.status === "partial" ? null : s.body_sha ?? null };
+      });
+      await st.record(rows);
       shard = { lane, lanes, capacity: cap, due: due.length, window_min: windowMin, ...(postingBudget ? { posting_budget: postingBudget } : {}) };
       // Coverage after this run's writes. A store that cannot count reports none (never a guess).
       const since = new Date(started - windowMs).toISOString();
@@ -159,31 +102,12 @@ export async function handleIngest(req: Request, d: IngestDeps): Promise<Respons
     }
     const ms = d.now() - started;
     const result = { ...stats, directory: d.boards.length, ...(shard ? { shard } : {}), report, ms };
-    await db.recordRun(result as IngestStats, at);
-    if (laneRun && runId !== null && db.finishLaneRun) await db.finishLaneRun(runId, { ...laneRun, ms, report: report.text, status: "done" });
-    else if (laneRun && db.recordLaneRun) await db.recordLaneRun({ ...laneRun, ms, report: report.text });
+    await db.recordRun(result as IngestStats, new Date(started).toISOString());
+    if (laneRun && db.recordLaneRun) await db.recordLaneRun({ ...laneRun, ms, report: report.text });
     return json(result);
   } catch (e) {
     // A storage failure is reported, never a partial success; the cursor and postings stay as the last good write left them.
-    // 2026-10-30: and it is recorded: the lane's log row says the run failed and why (a failed run used to leave no row).
-    const detail = e instanceof Error ? e.message : String(e);
-    console.error("career-ingest failed:", detail);
-    try { if (unclaim) await unclaim(); } catch { /* the claim stands: those boards wait one turn */ }
-    try {
-      const ms = Math.max(0, d.now() - started);
-      if (laneCtx) {
-        const row: IngestRunRow = { ...laneCtx, ms, boards_due: dueCount, boards_read: 0, boards_ok: 0, boards_failed: 0, boards_not_modified: 0,
-          postings_new: 0, postings_seen: 0, postings_reopened: 0, postings_closed: 0, url_rejected: 0,
-          lane_fresh: null, lane_total: null, directory_fresh: null, directory_total: null, failures: [],
-          report: `lane ${laneCtx.lane} of ${laneCtx.lanes}: run failed: ${detail}`.slice(0, 2000), status: "failed", error: detail.slice(0, 1000) };
-        if (runId !== null && db.finishLaneRun) await db.finishLaneRun(runId, row);
-        else if (db.recordLaneRun) await db.recordLaneRun(row);
-      } else {
-        await db.recordRun({ boards_ok: 0, boards_failed: 0, boards_partial: 0, new: 0, seen: 0, reopened: 0, closed: 0, failures: [], large_closes: [], error: detail.slice(0, 1000) } as IngestStats, at);
-      }
-    } catch (e2) {
-      console.error("career-ingest: the failed run could not be recorded:", e2 instanceof Error ? e2.message : e2);
-    }
-    return json({ error: "ingest failed", detail }, 500);
+    console.error("career-ingest failed:", e instanceof Error ? e.message : e);
+    return json({ error: "ingest failed", detail: e instanceof Error ? e.message : String(e) }, 500);
   }
 }

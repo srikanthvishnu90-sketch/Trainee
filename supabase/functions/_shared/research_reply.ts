@@ -17,8 +17,6 @@
 // The model writes the draft (composeResearchDraft) only with CAREER_RESEARCH_REPLY=on; off, nothing here runs a model.
 import { isBlockedHost, isHttps, normalizeUrl, type SourcePage, urlsIn, verifiedLinkGuard } from "./research_sources.ts";
 import { type ReportStore, storeReport } from "./research_report_store.ts";
-import { dropHalfRange } from "./agent/research/reply.ts";
-import { numbersIn, numEq } from "./agent/research/guard.ts";
 import type { ChannelAdapter } from "./channel_adapters.ts";
 
 export const researchReplyOn = (env: { get(k: string): string | undefined }) => env.get("CAREER_RESEARCH_REPLY") === "on";
@@ -101,7 +99,7 @@ const shown = (s: string, max: number, put = " ") => {
   const t = squash(withoutLinks(String(s ?? "").replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, " "), put));
   return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
 };
-const cleanText = (s: string) => sentenceSplit(withoutUrls(s)).filter((x) => !DELIVERY_CLAIM.test(x)).join(" ");
+const cleanPart = (s: string) => sentenceSplit(withoutUrls(s)).filter((x) => !DELIVERY_CLAIM.test(x)).join(" ");
 const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return "a site"; } };
 const norm = (s: string) => squash(String(s ?? "").normalize("NFC")).toLowerCase().replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
 
@@ -143,12 +141,6 @@ export async function buildResearchReply(i: BuildInput): Promise<ResearchReply> 
     return !!page && squash(x.quote).length >= 8 && norm(page.text).includes(norm(x.quote));
   }).map((x) => ({ text: shown(x.text, 300), quote: shown(x.quote, 400, " [link removed] "), url: byUrl.get(normalizeUrl(x.url))!.url }))
     .filter((x) => x.text && x.quote);
-  // RESEARCH ROUND 3 (2026-11-02): the bubble's own sentences were never checked against the pages, only the report's
-  // details were: a draft's "they are hiring 500 people this quarter" or "pay is $250,000" reached the person when no page
-  // said it. A sentence of the facts, the interpretation or the limits stands only when every number in it is on a page read.
-  const pageNums = verified.flatMap((v) => numbersIn(String(v.text ?? "").slice(0, 20000)));
-  const onPages = (x: string) => numbersIn(x).every((n) => pageNums.some((p) => numEq(p, n)));
-  const cleanPart = (s: string) => cleanText(s).split(/(?<=[.!?]["”’)]*)\s+/).filter((x) => x && onPages(x)).join(" ");
   const facts = cleanPart(d?.facts ?? ""), limits = cleanPart(d?.limits ?? "");
   // No grounded point, or no facts and limits to say: nothing verified to answer with.
   if (!d || !details.length || !facts || !limits) return none(UNSUPPORTED);
@@ -173,8 +165,7 @@ export async function buildResearchReply(i: BuildInput): Promise<ResearchReply> 
   // Concise: facts first, interpretation, the evidence limit; facts lose trailing sentences first when it runs long
   // (the longer detail is the report's).
   // Each part has its own cap, so even one very long sentence never makes the bubble run past ANSWER_MAX.
-  // RESEARCH ROUND 3: a cut never leaves half a range ("from $153,000 to…" said as $153,000): the cut figure goes too.
-  const clip = (s: string, max: number) => s.length <= max ? s : `${dropHalfRange(s.slice(0, max - 1).replace(/\s+\S*$/, ""), s)}…`;
+  const clip = (s: string, max: number) => s.length <= max ? s : `${s.slice(0, max - 1).replace(/\s+\S*$/, "")}…`;
   const tail = [clip(interp, 220), clip(endStop(limits), 220), sources.length === 1 ? ONE_SOURCE : ""].filter(Boolean).join(" ");
   const notes = [reportWhy ? REPORT_NOT_SAVED : "", dropNote].filter(Boolean).join(" ");
   const factSentences = sentenceSplit(facts);

@@ -9,11 +9,10 @@
 // CAREER_TEXTING_NATIVE=on; off, every adapter renders exactly as before.
 
 import { findUrls, safeCut, type UrlSpan, urlsOf } from "./channel_text.ts";
-import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 release flags
 import { toBubbles } from "./conversation.ts";
 
 export type VoiceChannel = "imessage" | "sms" | "whatsapp" | "telegram" | "web";
-export const textingNativeOn = (env: { get(k: string): string | undefined }) => releaseFlagOn(env, "CAREER_TEXTING_NATIVE");
+export const textingNativeOn = (env: { get(k: string): string | undefined }) => env.get("CAREER_TEXTING_NATIVE") === "on";
 
 // CHANNEL DELIVERY SCENARIOS (2026-10-29): links are found by channel_text.ts findUrls (a link's own brackets kept, the
 // sentence's punctuation and brackets left out), each link once per line, and removed from the line by its position, so a
@@ -90,15 +89,10 @@ function closerOf(s: string, from: number, d: string, urls: Map<number, UrlSpan>
   }
   return -1;
 }
-// CHANNEL DELIVERY ROUND 2 (2026-10-30): crossing emphasis. "**a *b** c*" (the italic opens inside the bold and closes
-// after it) showed its asterisks on every channel ("a *b c*" on iMessage). It is read as properly nested pieces: bold "a
-// " with italic "b" inside, then italic " c" (Telegram <b>a <i>b</i></b><i> c</i>; plain "a b c").
-const parseInline = (s: string): Seg[] => parseInlineX(s).segs;
-function parseInlineX(s: string): { segs: Seg[]; open: { at: number; d: string } | null } {
+function parseInline(s: string): Seg[] {
   const segs: Seg[] = [];
   const urls = new Map(findUrls(s).map((u) => [u.start, u]));
-  let buf = "", i = 0, open: { at: number; d: string } | null = null;
-  const node = (d: string, kids: Seg[]): Seg => (d === "***" ? { t: "b", kids: [{ t: "i", kids }] } : { t: d === "~~" ? "s" : d.length === 2 ? "b" : "i", kids });
+  let buf = "", i = 0;
   const flush = () => { if (buf) { segs.push({ t: "text", s: buf }); buf = ""; } };
   while (i < s.length) {
     const u = urls.get(i);
@@ -114,32 +108,20 @@ function parseInlineX(s: string): { segs: Seg[]; open: { at: number; d: string }
       const j = opens ? closerOf(s, i + d.length + 1, d, urls) : -1;
       if (j > 0) {
         flush();
-        const inner = s.slice(i + d.length, j), x = parseInlineX(inner);
-        // An emphasis opened inside and never closed there, closed after this one: both close here, it opens again after.
-        if (x.open && x.open.d !== d) {
-          const rest = s.slice(j + d.length), d2 = x.open.d;
-          const k = closerOf(rest, 1, d2, new Map(findUrls(rest).map((u) => [u.start, u])));
-          if (k > 0 && !isSpace(rest[k - 1])) {
-            segs.push(node(d, [...parseInline(inner.slice(0, x.open.at)), node(d2, parseInline(inner.slice(x.open.at + d2.length)))]));
-            segs.push(node(d2, parseInline(rest.slice(0, k))));
-            i = j + d.length + k + d2.length;
-            continue;
-          }
-        }
-        segs.push(node(d, x.segs));
+        const kids = parseInline(s.slice(i + d.length, j));
+        segs.push(d === "***" ? { t: "b", kids: [{ t: "i", kids }] } : { t: d === "~~" ? "s" : d.length === 2 ? "b" : "i", kids });
         i = j + d.length;
         continue;
       }
-      if (opens && open === null) open = { at: i, d };
       buf += d; i += d.length; // not formatting: the person's characters, all of them
       continue;
     }
     buf += ch; i++;
   }
   flush();
-  return { segs, open };
+  return segs;
 }
-export const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 type Mode = "plain" | "telegram" | "whatsapp";
 function renderSegs(segs: Seg[], mode: Mode): string {
   return segs.map((g) => {
@@ -150,10 +132,7 @@ function renderSegs(segs: Seg[], mode: Mode): string {
     const inner = renderSegs(g.kids, mode);
     if (mode === "plain") return inner;
     if (mode === "telegram") return g.t === "b" ? `<b>${inner}</b>` : g.t === "i" ? `<i>${inner}</i>` : `<s>${inner}</s>`;
-    // WhatsApp reads a mark only against a non-space character: spaces at a piece's edge go outside its marks.
-    const m = g.t === "b" ? "*" : g.t === "i" ? "_" : "~", lead = /^\s*/.exec(inner)![0], trail = /\s*$/.exec(inner.slice(lead.length))![0];
-    const core = inner.slice(lead.length, inner.length - trail.length);
-    return core ? `${lead}${m}${core}${m}${trail}` : inner;
+    return g.t === "b" ? `*${inner}*` : g.t === "i" ? `_${inner}_` : `~${inner}~`;
   }).join("");
 }
 // A heading is bold as a whole; bold inside it is just its text (WhatsApp's "**Title**" was a heading with bold in it).
@@ -293,62 +272,8 @@ export function ackFor(message: string): string {
   if (/\bapply\b/.test(m)) return "on it — getting that ready";
   if (/\bresume\b|\bcv\b/.test(m)) return "on it — reading that now";
   if (/\b(email|write|draft|message)\b/.test(m)) return "on it — writing that now";
-  if (/\b(interview|mock|prep|practice)\b/.test(m)) return "on it — setting that up now";
-  // N12: the interim says what Trainee is doing, never just "one sec"; it claims no result.
-  return "on it — working on that now";
-}
-
-// N12/N13 LATENCY BUDGET (spec 16 speed): on a chat channel the typing indicator goes out as soon as a message arrives
-// and again every TYPING_EVERY_MS while Trainee works (Telegram clears it after about 5 s); a turn still running after
-// FAST_ACK_MS gets exactly one interim line (ackFor: what Trainee is doing, never a result), then the real answer.
-export const TYPING_EVERY_MS = 4000;
-export const FAST_ACK_MS = 6000;
-export const LATENCY_BUDGET = { typingEveryMs: TYPING_EVERY_MS, ackAfterMs: FAST_ACK_MS } as const;
-
-// The typing indicator from now until stop(): shown at once, then every everyMs; best effort (a failure never touches the
-// turn); stop() ends the refresh and waits for a call in flight, so nothing is shown after the answer.
-export function typingLoop(o: { typing: () => Promise<unknown>; everyMs?: number; setTimer?: (fn: () => void, ms: number) => unknown; clearTimer?: (h: unknown) => void }) {
-  const setT = o.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
-  const clearT = o.clearTimer ?? ((h: unknown) => clearTimeout(h as number));
-  let done = false, timer: unknown = null;
-  const pending: Promise<unknown>[] = [];
-  const show = () => { try { pending.push(Promise.resolve(o.typing()).catch(() => {})); } catch { /* never fails the turn */ } };
-  const tick = () => { if (done) return; show(); timer = setT(tick, o.everyMs ?? TYPING_EVERY_MS); };
-  tick();
-  return {
-    async stop() {
-      done = true;
-      if (timer !== null) clearT(timer);
-      timer = null;
-      await Promise.all(pending);
-    },
-  };
-}
-
-// One interim at most, armed once: start() arms it (a second start() is a no-op), stop() disarms it and waits for an ack
-// already started, so it always reaches the person before the answer. Returns whether the ack went.
-export function ackOnce(o: { afterMs: number | null | undefined; ack: () => Promise<unknown>; setTimer?: (fn: () => void, ms: number) => unknown; clearTimer?: (h: unknown) => void }) {
-  const setT = o.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
-  const clearT = o.clearTimer ?? ((h: unknown) => clearTimeout(h as number));
-  let armed = false, done = false, acked = false, timer: unknown = null, pending: Promise<unknown> | null = null;
-  return {
-    start() {
-      if (armed || done || o.afterMs === null || o.afterMs === undefined || !(o.afterMs >= 0)) return;
-      armed = true;
-      timer = setT(() => {
-        if (done || acked) return;
-        acked = true;
-        try { pending = Promise.resolve(o.ack()).catch(() => {}); } catch { /* never fails the turn */ }
-      }, o.afterMs);
-    },
-    async stop(): Promise<boolean> {
-      done = true;
-      if (timer !== null) clearT(timer);
-      timer = null;
-      if (pending) await pending;
-      return acked;
-    },
-  };
+  if (/\b(interview|mock|prep|practice)\b/.test(m)) return "on it — one sec";
+  return "on it — one sec";
 }
 
 export interface WorkingOptions {

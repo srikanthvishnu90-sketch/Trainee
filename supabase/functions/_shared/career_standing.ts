@@ -177,7 +177,7 @@ function followupsText(s: Standing): string {
 }
 
 // One chat turn: null when the text is not one of these asks (nothing is read); the one model otherwise.
-export async function standingTurn(o: { message: string; userId: string; now: number; read: ReadStanding }): Promise<{ reply: string; status: string; intent: string; summary?: import("./apply_status_summary.ts").ApplySummary } | null> {
+export async function standingTurn(o: { message: string; userId: string; now: number; read: ReadStanding }): Promise<{ reply: string; status: string; intent: string } | null> {
   const ask = standingAsk(o.message);
   if (!ask) return null;
   let s: Standing;
@@ -188,7 +188,7 @@ export async function standingTurn(o: { message: string; userId: string; now: nu
   }
   if (ask.kind === "status") {
     const base = statusReply(o.message, s.jobs, o.now) ?? statusReply(ask.company ? `did my application to ${ask.company} go through` : "where are my applications", s.jobs, o.now);
-    return { reply: statusText(o.message, s, ask.company, o.now), status: base?.status ?? "shown", intent: STANDING_INTENT, ...(base?.summary ? { summary: base.summary } : {}) };
+    return { reply: statusText(o.message, s, ask.company, o.now), status: base?.status ?? "shown", intent: STANDING_INTENT };
   }
   if (ask.kind === "inbox") return { reply: inboxText(s, ask.company), status: s.mail === null ? "unreadable" : "shown", intent: INBOX_INTENT };
   return { reply: followupsText(s), status: s.mail === null ? "unreadable" : s.drafts.length || s.due.length ? "shown" : "none", intent: FOLLOWUPS_INTENT };

@@ -15,7 +15,6 @@ serve((req) => {
     db: () => supabasePostingsDb(admin),
     state: () => supabaseBoardState(admin), // WO-037: sharded, every board within 6 hours
     // Feature 6: a body equal to the board's last full read is not parsed again (most of a read's CPU).
-    // 2026-10-30: `stream`: a board is read and written a batch at a time, never held whole (the memory-limit stops).
-    fetchFeed: (userAgent) => boardFetchFeed(fetch, { userAgent, bodyHash: true, stream: true }),
+    fetchFeed: (userAgent) => boardFetchFeed(fetch, { userAgent, bodyHash: true }),
   });
 });

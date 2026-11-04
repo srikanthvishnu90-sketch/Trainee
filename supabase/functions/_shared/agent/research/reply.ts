@@ -7,23 +7,7 @@ import { lintChat } from "./chat.ts";
 import type { ResearchResult } from "./index.ts";
 
 type Ok = Extract<ResearchResult, { status: "ok" }>;
-// RESEARCH SCENARIOS (2026-10-29): every link the model wrote counts, not only http(s) ones: a markdown link, a "www."
-// address, a bare host with a path ("evil.example.com/apply") and a javascript:/data:/mailto: URI. The only link a reply
-// carries is the file link code adds (withLink strips every one the model wrote, of any shape).
-const MODEL_LINK = /\[([^\]]*)\]\((?:[^()]|\([^)]*\))*\)|[a-z][a-z0-9+.-]*:\/\/[^\s<>"')\]]+|\b(?:javascript|data|vbscript|mailto|file):[^\s<>"']+|\bwww\.[^\s<>"']+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\/[^\s<>"']*/gi;
-export const stripUrls = (s: string) => s.replace(MODEL_LINK, (_m, label) => label ?? "").replace(/\s+([.,;:!?])/g, "$1").replace(/\s{2,}/g, " ").replace(/[\s:]+$/, "").trim();
-// A model-written link survives only when the turn saw it (the person typed it or a tool returned it, exact match, any shape):
-// an invented or hostile one ("evil.example.com/apply", "www.", a markdown link, a javascript: URI) is removed, its label kept.
-// Applied to every final reply the agent brain writes, research or not (the research reply strips them all and adds its own file link).
-export function stripUnseenLinks(s: string, allowed: Iterable<string>): string {
-  const trim = (u: string) => u.replace(/[.,;:!?)\]]+$/, "");
-  const ok = new Set([...allowed].map(trim));
-  const kept = s.replace(MODEL_LINK, (m, label) => {
-    const url = m.startsWith("[") && label !== undefined ? (m.slice(m.indexOf("](") + 2, -1)) : m;
-    return ok.has(trim(url)) ? m : (label ?? "");
-  });
-  return kept === s ? s : kept.replace(/\s+([.,;:!?])/g, "$1").replace(/[ \t]{2,}/g, " ").trim();
-}
+export const stripUrls = (s: string) => s.replace(/https?:\/\/\S+/g, "").replace(/\s{2,}/g, " ").replace(/[\s:]+$/, "").trim();
 const firstSentence = (s: string) => (s.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? s).trim();
 
 export function withLink(paragraph: string, url: string | null): string {
@@ -34,50 +18,12 @@ export function withLink(paragraph: string, url: string | null): string {
 export function problemsIn(paragraph: string, r: Ok, message: string): string[] {
   return lintChat(withLink(paragraph, r.file_url), { link: r.file_url, noLink: !r.file_url, facts: r.facts, person: r.person, message });
 }
-// Plain, short, true: what is realistic now and later (the brief's verdict lines), one thing to do this week, and the link.
-// Each part is cut at a clause boundary so the paragraph is a Telegram message (about 60 to 90 words), not the brief's prose.
-const lowerFirst = (s: string) => (/^[A-Z][a-z]/.test(s) ? s[0].toLowerCase() + s.slice(1) : s);
-const cap1 = (s: string) => s[0].toUpperCase() + s.slice(1);
-const wc = (s: string) => (s.match(/\S+/g) ?? []).length;
-export function clip(text: string, max: number): string {
-  let t = firstSentence(text).replace(/[.]+$/, "");
-  if (wc(t) <= max) return t;
-  const head = t.split(/\s*[;:]\s+/)[0];
-  if (wc(head) >= 8 && wc(head) <= max) return head;
-  t = head;
-  const words = t.split(/\s+/);
-  let cut = words.slice(0, max).join(" ");
-  const i = Math.max(cut.lastIndexOf(", and "), cut.lastIndexOf(", "));
-  if (i > 30) cut = cut.slice(0, i);
-  return dropHalfRange(cut, t).replace(/[,\s]+(?:and|or|but|with|of|to|the|a|an)?$/i, "");
-}
-// RESEARCH ROUND 3 (2026-11-02): a cut never leaves half a range. "pay runs from $80,000 to $95,000" cut after "to" read
-// "pay runs from $80,000" (one end, said as if it were the pay). The figure whose range was cut goes with it.
-const RANGE_CONN = /\s*(?:-|–|—|\bto|\band|\bthrough)$/i;
-const NUM_TAIL = /(?:\s+(?:from|between|of|is|was|at|around|about))?\s*(?:[A-Z]{0,2}[$€£¥₹])?\d[\d,.]*(?:\s?(?:k|m|bn|thousand|million|billion))?(?:\s?%)?$/i;
-export function dropHalfRange(cut: string, full: string): string {
-  let c = cut.replace(/[\s,;:]+$/, "");
-  if (RANGE_CONN.test(c)) {
-    const before = c.replace(RANGE_CONN, "");
-    if (NUM_TAIL.test(before)) c = before.replace(NUM_TAIL, "");
-  } else if (NUM_TAIL.test(c) && full.startsWith(c) && /^\s*(?:-|–|—|to|and|through)\s*(?:[A-Z]{0,2}[$€£¥₹])?\d/i.test(full.slice(c.length))) c = c.replace(NUM_TAIL, "");
-  return c.trimEnd();
-}
+// Plain, short, true: what is realistic now and later (the brief's verdict lines), nothing about a file.
+// The first action and the code-minted file link are added when they exist: a failed lint never costs the person the plan.
 export function fallbackVerdict(r: Ok): string {
-  const name = r.name ?? "";
-  const lead = (t: string) => (/\bnow\b|\brealistic/i.test(t.slice(0, 80)) ? t : `Right now, ${lowerFirst(t)}`);
-  const sNow = r.short?.now;
-  // hand-written lines start "right now ..." and are named here; the template already names the occupation
-  const now = sNow ? (name && !sNow.toLowerCase().includes(name.toLowerCase()) ? `Right now, for ${name}, ${sNow.replace(/^right now\s+/i, "")}` : cap1(sNow)) : lead(clip(r.verdict.now, 26));
-  const later = r.short?.later ?? clip(r.verdict.later, 24), act = r.short?.act ?? (r.first_action ? clip(r.first_action, 22) : "");
-  // An asked "is it worth it" / "do I need a degree" gets its direct answer as the verdict (first sentence); the route sentence
-  // then yields to it, since the brief carries the route.
-  const parts = r.answer ? [`Realistically, ${name && !r.answer.toLowerCase().includes(name.toLowerCase().replace(/^the /, "")) ? `for ${name}, ` : ""}${lowerFirst(r.answer)}`] : [`${now}.`];
-  parts.push(`Later, ${lowerFirst(later)}.`);
-  if (act) parts.push(`This week: ${lowerFirst(act)}.`);
-  if (r.lead && wc(parts.join(" ")) + wc(r.lead) <= 88) parts.splice(parts.length - 1, 0, r.lead);
-  const body = parts.join(" ");
-  return r.file_url ? `${body} The full plan and honest odds: ${r.file_url}` : body;
+  const act = r.first_action ? ` This week: ${firstSentence(r.first_action).replace(/[.]+$/, "")}.` : "";
+  const body = `${firstSentence(r.verdict.now)} ${firstSentence(r.verdict.later)}${act}`;
+  return r.file_url ? `${body} The full plan, timeline and honest odds: ${r.file_url}` : body;
 }
 export interface Enforced { reply: string; action: "kept" | "regenerated" | "fallback"; problems: string[] }
 export async function enforceResearchReply(o: { reply: string; result: Ok; message: string; regenerate: (problems: string[]) => Promise<string | null> }): Promise<Enforced> {

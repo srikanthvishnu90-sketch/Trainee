@@ -19,12 +19,7 @@ export const PAGE_MAX_BYTES = 2_000_000, PAGE_TIMEOUT_MS = 8_000, MAX_REDIRECTS 
 export const UA = "TraineeBot/1.0 (reads one page a person sent; no crawling)";
 
 export type PageWhy = "bad_url" | "not_https" | "blocked_site" | "private_host" | "robots" | "too_large" | "not_html" | "http" | "timeout" | "network" | "redirects";
-// former: the page itself says they no longer hold the role (a title "Former ...", "ex-...", "Previously ...", "until 2024",
-// "now at ..."; a worksFor role with an end date). NETWORKING R2 (2026-10-30).
-export interface PagePerson { name: string | null; title: string; company: string; school: string; email: string | null; how: "schema.org Person" | "mailto link"; former?: boolean }
-// Words in a title that say the role is over (dated evidence included: "until 2024", "2019-2023", "left in 2025").
-export const FORMER_TITLE = /(?:^|[\s(,;\/|-])(?:former(?:ly)?|ex[- ](?=\p{L})|previously|retired|left (?:in |the company|\p{Lu})|until (?:\w+ )?(?:19|20)\d{2}|(?:19|20)\d{2}\s*[-–—]\s*(?:19|20)\d{2}|now (?:at|with|leading|heading)\b|no longer)/iu;
-export const formerTitle = (t: unknown) => FORMER_TITLE.test(String(t ?? ""));
+export interface PagePerson { name: string | null; title: string; company: string; school: string; email: string | null; how: "schema.org Person" | "mailto link" }
 export type PageRead = { ok: true; url: string; people: PagePerson[]; org: string | null } | { ok: false; why: PageWhy; detail?: string };
 // Every address a host name resolves to (A and AAAA). Throws, or returns none, when the name doesn't resolve.
 export type Resolver = (host: string) => Promise<string[]>;
@@ -297,13 +292,11 @@ export async function readPage(get: PageGet, raw: string, resolve: Resolver = dn
 }
 
 // A page's field, cleaned; one that reads as an instruction to a reader (readsAsInstruction) is dropped, never kept.
-// NETWORKING R2 (2026-10-30): read as written too, before cleaning: "<|im_start|>system" lost its markup to the cleaner and
-// was kept as a title "system".
 const str = (v: unknown, max: number): string => {
-  const raw = typeof v === "string" ? v : v && typeof v === "object" && typeof (v as any).name === "string" ? (v as any).name : null;
-  if (raw === null) return Array.isArray(v) ? str(v[0], max) : "";
-  const s = cleanCell(raw, max);
-  return readsAsInstruction(raw) || readsAsInstruction(s) ? "" : s;
+  const s = typeof v === "string" ? cleanCell(v, max)
+    : v && typeof v === "object" && typeof (v as any).name === "string" ? cleanCell((v as any).name, max)
+    : Array.isArray(v) ? str(v[0], max) : "";
+  return readsAsInstruction(s) ? "" : s;
 };
 const isType = (o: any, t: string) => { const x = o?.["@type"]; return Array.isArray(x) ? x.includes(t) : x === t; };
 const NAME_LIKE = /^\p{Lu}[\p{L}'’.-]+(?:\s+\p{Lu}[\p{L}'’.-]*){1,3}$/u;
@@ -329,13 +322,7 @@ export function peopleOnPage(html: string): { people: PagePerson[]; org: string 
         // inbox, never that person's address: the person is kept, without it.
         const found = cleanEmail(String(o.email ?? "").replace(/^mailto:/i, ""));
         const email = found && !isRoleAddress(found) ? found : null;
-        // A worksFor that is a dated role (schema.org OrganizationRole / EmployeeRole with an endDate) is a past job; its
-        // organization is the one inside it. A company named as their alumniOf is a former employer.
-        const roles = (Array.isArray(o.worksFor) ? o.worksFor : [o.worksFor]).filter((x: any) => x && typeof x === "object");
-        const ended = roles.some((x: any) => (isType(x, "OrganizationRole") || isType(x, "EmployeeRole") || isType(x, "Role")) && typeof x.endDate === "string" && x.endDate.trim());
-        const roleOrg = roles.map((x: any) => (x.worksFor ?? x.memberOf ?? null)).find((x: any) => x) ?? null;
-        const company = str(roleOrg ?? o.worksFor, 200), title = str(o.jobTitle ?? roles.map((x: any) => x.roleName).find((x: any) => typeof x === "string"), 300);
-        add({ name, title, company, school: str(o.alumniOf, 200), email, how: "schema.org Person", ...(ended || formerTitle(title) ? { former: true } : {}) });
+        add({ name, title: str(o.jobTitle, 300), company: str(o.worksFor, 200), school: str(o.alumniOf, 200), email, how: "schema.org Person" });
       }
     }
     for (const [k, v] of Object.entries(o)) if (k !== "@context" && typeof v === "object") walk(v, depth + 1);

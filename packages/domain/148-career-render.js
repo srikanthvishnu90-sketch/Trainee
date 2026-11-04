@@ -754,119 +754,7 @@ const CareerRender = (() => {
     return streams;
   }
   function readPdfLiteral(s, i) {
-    const [bytes, ni] = readPdfLiteralBytes(s, i);
-    return [decodeWinAnsi(Bytes.from(bytes)), ni];
-  }
-  // KNOWN GAPS (2026-10-30, #317): text written as hex strings ("<48656C6C6F> Tj", and every string of a font whose codes
-  // are two bytes: Word's and Google Docs' embedded fonts, CID fonts with Identity-H) was never read, so a resume saved
-  // that way was told "it may be a scan". A hex string's bytes, or null when "<" does not open one (a "<<" dictionary).
-  function readPdfHexBytes(s, i) {
-    const end = s.indexOf(">", i + 1);
-    if (end < 0 || end - i > 32768) return null;
-    const h = s.slice(i + 1, end);
-    if (!/^[0-9A-Fa-f\s]*$/.test(h)) return null;
-    const hex = h.replace(/\s+/g, "");
-    const even = hex.length % 2 ? `${hex}0` : hex;
-    const bytes = [];
-    for (let k = 0; k < even.length; k += 2) bytes.push(parseInt(even.slice(k, k + 2), 16));
-    return [bytes, end + 1];
-  }
-  // A font's ToUnicode CMap (the PDF's own map from its codes to text): bfchar and bfrange entries, and the code width its
-  // codespace names (two bytes for a CID font).
-  function parseToUnicode(t) {
-    const map = new Map();
-    let width = 0;
-    const cs = String(t || "").match(/begincodespacerange\s*<([0-9A-Fa-f]+)>/);
-    if (cs) width = Math.max(1, Math.min(4, Math.floor(cs[1].length / 2)));
-    const utf16 = (hex) => {
-      const h = String(hex).replace(/\s+/g, "");
-      let out = "";
-      for (let k = 0; k + 4 <= h.length; k += 4) out += String.fromCharCode(parseInt(h.slice(k, k + 4), 16));
-      if (h.length % 4 === 2) out += String.fromCharCode(parseInt(h.slice(-2), 16));
-      return out;
-    };
-    for (const blk of String(t || "").matchAll(/beginbfchar([\s\S]*?)endbfchar/g)) {
-      for (const e of blk[1].matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]*)>/g)) { if (!width) width = Math.max(1, Math.floor(e[1].length / 2)); if (map.size < 200000) map.set(parseInt(e[1], 16), utf16(e[2])); }
-    }
-    for (const blk of String(t || "").matchAll(/beginbfrange([\s\S]*?)endbfrange/g)) {
-      for (const e of blk[1].matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(?:<([0-9A-Fa-f]*)>|\[([^\]]*)\])/g)) {
-        const lo = parseInt(e[1], 16), hi = parseInt(e[2], 16);
-        if (!width) width = Math.max(1, Math.floor(e[1].length / 2));
-        if (!(hi >= lo) || hi - lo > 65535 || map.size > 200000) continue;
-        if (e[3] !== undefined) {
-          const base = utf16(e[3]);
-          if (!base) continue;
-          const head = base.slice(0, -1), last = base.charCodeAt(base.length - 1);
-          for (let c = lo; c <= hi; c++) map.set(c, head + String.fromCharCode(last + (c - lo)));
-        } else {
-          const each = [...e[4].matchAll(/<([0-9A-Fa-f]*)>/g)].map((x) => utf16(x[1]));
-          for (let c = lo; c <= hi && c - lo < each.length; c++) map.set(c, each[c - lo]);
-        }
-      }
-    }
-    return { map, width };
-  }
-  // The page fonts by their resource names (/F1 ...), each with its code width and its ToUnicode map (null: none). Read from
-  // the PDF's objects: a /Font resource dictionary (inline or by reference), each font object, its /ToUnicode stream.
-  // A PDF with no ToUnicode and no Type0 font reads exactly as before (an empty map: every string is WinAnsi).
-  function pdfFontMaps(buf) {
-    const out = new Map();
-    let s;
-    try { s = buf.toString("latin1"); } catch { return out; }
-    if (s.indexOf("/ToUnicode") < 0 && s.indexOf("/Type0") < 0) return out;
-    const objAt = new Map();
-    const objRe = /(\d+)\s+(\d+)\s+obj\b/g;
-    let m;
-    while ((m = objRe.exec(s)) && objAt.size < 20000) objAt.set(m[1], m.index + m[0].length);
-    const bodyOf = (n) => { const at = objAt.get(String(n)); if (at === undefined) return ""; const end = s.indexOf("endobj", at); return s.slice(at, end < 0 ? Math.min(s.length, at + 65536) : end); };
-    const streamOf = (n) => {
-      const at = objAt.get(String(n));
-      if (at === undefined || !zlib) return "";
-      const end = s.indexOf("endobj", at), st = s.indexOf("stream", at);
-      if (st < 0 || (end >= 0 && st > end)) return "";
-      let start = st + 6;
-      if (s[start] === "\r" && s[start + 1] === "\n") start += 2; else if (s[start] === "\n") start += 1;
-      const en = s.indexOf("endstream", start);
-      if (en < 0) return "";
-      const raw = buf.subarray(start, en);
-      try { return /\/FlateDecode/.test(s.slice(at, st)) ? zlib.inflateSync(raw, { maxOutputLength: PART_MAX }).toString("latin1") : raw.toString("latin1"); } catch { return ""; }
-    };
-    const entries = [];
-    const fontRe = /\/Font\s*(?:<<([\s\S]*?)>>|(\d+)\s+\d+\s+R)/g;
-    while ((m = fontRe.exec(s)) && entries.length < 2000) {
-      const dict = m[1] !== undefined ? m[1] : bodyOf(m[2]);
-      for (const e of dict.matchAll(/\/([^\s/<>[\]()]+)\s+(\d+)\s+\d+\s+R/g)) entries.push([e[1], e[2]]);
-    }
-    const cmaps = new Map();
-    for (const [name, n] of entries) {
-      if (out.has(name)) continue;
-      const body = bodyOf(n);
-      if (!/\/Type\s*\/Font\b/.test(body)) continue;
-      const type0 = /\/Subtype\s*\/Type0\b/.test(body);
-      const tu = body.match(/\/ToUnicode\s+(\d+)\s+\d+\s+R/);
-      let cmap = null;
-      if (tu) { if (!cmaps.has(tu[1])) cmaps.set(tu[1], parseToUnicode(streamOf(tu[1]))); cmap = cmaps.get(tu[1]); }
-      const map = cmap && cmap.map.size ? cmap.map : null;
-      out.set(name, { width: map && cmap.width ? cmap.width : (type0 ? 2 : 1), map });
-    }
-    return out;
-  }
-  // A string's bytes as text in its font: through the font's ToUnicode map when it has one (a code it lacks is WinAnsi in a
-  // one-byte font, nothing in a two-byte one), else WinAnsi; a two-byte font without a map names glyphs, not text: nothing.
-  function decodeInFont(bytes, f) {
-    if (!f) return decodeWinAnsi(Bytes.from(bytes));
-    if (!f.map) return f.width === 1 ? decodeWinAnsi(Bytes.from(bytes)) : "";
-    let out = "";
-    for (let k = 0; k + f.width <= bytes.length; k += f.width) {
-      let code = 0;
-      for (let j = 0; j < f.width; j++) code = code * 256 + bytes[k + j];
-      const u = f.map.get(code);
-      out += u !== undefined ? u : f.width === 1 ? decodeWinAnsi(Bytes.from([code])) : "";
-    }
-    return out;
-  }
-  function readPdfLiteralBytes(s, i) {
-    // s[i] === '(' ; returns [bytes, nextIndex]
+    // s[i] === '(' ; returns [decodedString, nextIndex]
     const bytes = [];
     let depth = 1; i++;
     while (i < s.length && depth > 0) {
@@ -883,7 +771,7 @@ const CareerRender = (() => {
       else if (c === ")") { depth--; if (depth > 0) bytes.push(41); i++; }
       else { bytes.push(s.charCodeAt(i) & 0xff); i++; }
     }
-    return [bytes, i];
+    return [decodeWinAnsi(Bytes.from(bytes)), i];
   }
   // Full operator walk: returns [{ text, x, y, size, font, page }] in
   // reading order (page order, then y descending, then x ascending).
@@ -891,48 +779,21 @@ const CareerRender = (() => {
     const runs = [];
     if (!Bytes.isBuffer(buf) || !zlib) return runs;
     const streams = pdfStreams(buf);
-    const fonts = pdfFontMaps(buf);
     streams.forEach((streamBuf, page) => {
       const s = streamBuf.toString("latin1");
       let font = null, size = 0, x = 0, y = 0, pendingText = null;
-      // ONBOARDING ROUND 2 (2026-10-30): a resume saved as a PDF by Word or Google Docs writes most lines as TJ arrays
-      // ("[(Data)-250(Analyst)-250(Intern)] TJ"); every string but the array's last was dropped, so "Data Analyst Intern,
-      // Northwind" read as "Northwind" and the person was shown entries that were not theirs. An array's strings are one
-      // run, with a space where the array moves the next string a word's width or more. T* and ' move to the next line
-      // (by the leading TL, TD's, or the font size), and Td / TD move from the line's start in the text matrix's scale.
-      let inArray = false, ma = 1, md = 1, lineX = 0, lineY = 0, lead = 0;
       let i = 0;
       const numBefore = (pos) => { const m = s.slice(Math.max(0, pos - 40), pos).match(/(-?[\d.]+)\s*(-?[\d.]+)\s*$/); return m ? [parseFloat(m[1]), parseFloat(m[2])] : null; };
-      const opAt = (k, op) => s.startsWith(op, k) && !/[A-Za-z0-9*]/.test(s[k + op.length] || " ") && !/[A-Za-z0-9]/.test(s[k - 1] || " ");
-      const nextLine = () => { lineY -= (lead || size * 1.2) * md; x = lineX; y = lineY; };
       while (i < s.length) {
         const c = s[i];
-        // KNOWN GAPS (#317): a "<<" dictionary is stepped over whole (its second "<" never opens a hex string).
-        if (c === "<" && s[i + 1] === "<") { i += 2; continue; }
-        const got = c === "(" ? readPdfLiteralBytes(s, i) : c === "<" ? readPdfHexBytes(s, i) : null;
-        if (got) {
-          const [bytes, ni] = got;
-          const txt = decodeInFont(bytes, font ? fonts.get(font) : null);
-          if (inArray && pendingText !== null) {
-            const gap = s.slice(i - 30 < 0 ? 0 : i - 30, i).match(/[)>]\s*(-?[\d.]+)\s*$/);
-            const space = gap && parseFloat(gap[1]) <= -180 && !/\s$/.test(pendingText) && !/^\s/.test(txt);
-            pendingText += (space ? " " : "") + txt;
-          } else pendingText = txt;
-          i = ni; continue;
-        }
-        if (c === "[") { inArray = true; pendingText = null; i++; continue; }
-        if (c === "]") { inArray = false; i++; continue; }
+        if (c === "(") { const [txt, ni] = readPdfLiteral(s, i); pendingText = txt; i = ni; continue; }
         if (c === "/" ) { const m = s.slice(i).match(/^\/(\S+)\s+([\d.]+)\s+Tf/); if (m) { font = m[1]; size = parseFloat(m[2]); i += m[0].length; continue; } i++; continue; }
-        if (opAt(i, "BT")) { x = y = lineX = lineY = 0; ma = md = 1; i += 2; continue; }
-        if (opAt(i, "TL")) { const m = s.slice(Math.max(0, i - 20), i).match(/(-?[\d.]+)\s*$/); if (m) lead = parseFloat(m[1]); i += 2; continue; }
-        if (opAt(i, "T*")) { nextLine(); i += 2; continue; }
         if (s.startsWith("Tj", i) || s.startsWith("TJ", i) || s.startsWith("'", i) || s.startsWith('"', i)) {
-          if (c === "'" || c === '"') nextLine();
-          if (pendingText !== null && pendingText !== "") runs.push({ text: pendingText, x, y, size: size * Math.abs(ma || 1), font, page });
-          pendingText = null; inArray = false; i += c === "'" || c === '"' ? 1 : 2; continue;
+          if (pendingText !== null && pendingText !== "") runs.push({ text: pendingText, x, y, size, font, page });
+          pendingText = null; i += 2; continue;
         }
-        if (s.startsWith("Tm", i)) { const nums = s.slice(Math.max(0, i - 60), i).match(/(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s*$/); if (nums) { ma = parseFloat(nums[1]) || 1; md = parseFloat(nums[4]) || 1; x = lineX = parseFloat(nums[5]); y = lineY = parseFloat(nums[6]); } i += 2; continue; }
-        if (s.startsWith("Td", i) || s.startsWith("TD", i)) { const pair = numBefore(i); if (pair) { lineX += pair[0] * ma; lineY += pair[1] * md; x = lineX; y = lineY; if (s[i + 1] === "D") lead = -pair[1]; } i += 2; continue; }
+        if (s.startsWith("Tm", i)) { const nums = s.slice(Math.max(0, i - 60), i).match(/(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s*$/); if (nums) { x = parseFloat(nums[5]); y = parseFloat(nums[6]); } i += 2; continue; }
+        if (s.startsWith("Td", i) || s.startsWith("TD", i)) { const pair = numBefore(i); if (pair) { x += pair[0]; y += pair[1]; } i += 2; continue; }
         i++;
       }
     });

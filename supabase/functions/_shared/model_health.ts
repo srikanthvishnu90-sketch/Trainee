@@ -7,7 +7,6 @@
 // Access: the HEALTH_CHECK_TOKEN secret, as the x-health-token header or ?token= (most monitors can only set a URL).
 import { callModel, modelConfig, adminHealthSink, providerName } from "./model_gateway.ts";
 import { ModelUnavailableError } from "./model_calls.ts";
-import { budgetLimits } from "./model_budget.ts";
 
 type Env = { get(name: string): string | undefined };
 export interface HealthDeps { env: Env; admin: any; request?: typeof fetch; now?: () => number }
@@ -35,19 +34,11 @@ export async function handleHealth(req: Request, d: HealthDeps): Promise<Respons
     }
   }
   const v = await d.admin.rpc("model_health", { p_minutes: 15 });
-  if (v.error) return json({ status: "unknown", provider: providerName(cfg), model: cfg.model, probe, budget: null, error: "health table unreadable" }, 503);
+  if (v.error) return json({ status: "unknown", provider: providerName(cfg), model: cfg.model, probe, error: "health table unreadable" }, 503);
   const verdict = v.data || {};
-  // The total model budget (owner, 2026-11-02): spent against MODEL_BUDGET_TARGET_USD and MODEL_BUDGET_HARD_USD, with the 80% warning and over-target flags. Informational:
-  // a missing or failing budget read never changes the verdict.
-  let budget: unknown = null;
-  try {
-    const cap = budgetLimits(d.env.get.bind(d.env));
-    const b = cap === null ? null : await d.admin.rpc("model_budget_total_status", { p_target_limit_micros: cap.target, p_hard_limit_micros: cap.hard });
-    if (b && !b.error && b.data) budget = b.data;
-  } catch (_) { /* informational only */ }
   // A failed probe is down on its own: the very next real message would fail the same way.
   const status = probe && !probe.ok ? "down" : verdict.status;
-  const body = { status, provider: providerName(cfg), model: cfg.model, probe, budget, window: verdict };
+  const body = { status, provider: providerName(cfg), model: cfg.model, probe, window: verdict };
   if (status === "down" || status === "degraded") {
     try {
       const since = new Date((d.now || Date.now)() - 3600000).toISOString();

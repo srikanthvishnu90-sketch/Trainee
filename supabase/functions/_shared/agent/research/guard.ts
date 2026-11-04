@@ -11,7 +11,6 @@
 import { PLAYBOOKS } from "../knowledge/playbooks.generated.ts";
 import { FIELDS, GK_PHRASES, GK_TERMS, OVERLAYS } from "./fields.ts";
 import type { Fact } from "./ground.ts";
-import { readsAsInstruction } from "../../career_people_import.ts";
 
 // Folding comes first, everywhere: full-width and other compatibility forms become plain ASCII (NFKC), invisible characters go, and
 // look-alike Cyrillic and Greek letters become the Latin letters they imitate, so "Gооgle" is read as Google and "８４,２００" as 84,200.
@@ -44,24 +43,13 @@ const FRAC: Record<string, number> = { half: 0.5, halves: 0.5, quarter: 0.25, qu
 const NUMWORD = new Set([...Object.keys(ONES), ...Object.keys(TENS), ...Object.keys(SCALE), "and", "a", "an"]);
 const isNumWord = (w: string) => w in ONES || w in TENS || w in SCALE;
 const TIME_UNIT = /^(?:days?|weeks?|months?|years?)\b/;
-const MONEY_UNIT = /^(?:dollars?|usd|eur|gbp|cad|aud|chf|inr|jpy|bucks|euros?|pounds?|rupees?|yen)\b/;
-// RESEARCH ROUND 3 (2026-11-02): a money figure keeps its currency. "Analysts earn a median of €99,890" was accepted on a
-// quote saying "$99,890" (every currency read as one "usd" unit), and "CA$120,000" matched "$120,000".
-const CUR_PRE: Record<string, string> = { "$": "usd", "€": "eur", "£": "gbp", "¥": "jpy", "₹": "inr" };
-const CUR_DOLLAR: Record<string, string> = { us: "usd", ca: "cad", c: "cad", a: "aud", au: "aud", nz: "nzd", hk: "hkd", s: "sgd", sg: "sgd", mx: "mxn", r: "brl" };
-const CUR_AFTER: [RegExp, string][] = [[/^(?:dollars?|usd|bucks)\b/, "usd"], [/^(?:eur|euros?)\b/, "eur"], [/^(?:gbp|pounds?)\b/, "gbp"], [/^(?:inr|rupees?)\b/, "inr"], [/^(?:jpy|yen)\b/, "jpy"], [/^cad\b/, "cad"], [/^aud\b/, "aud"], [/^chf\b/, "chf"]];
-function currencyOf(pre: string, before: string, rest: string): string | undefined {
-  if (pre === "$") { const c = /(?<![a-z])(us|ca|c|au|a|nz|hk|sg|s|mx|r)$/.exec(before)?.[1]; return c ? CUR_DOLLAR[c] : "usd"; }
-  if (pre && CUR_PRE[pre]) return CUR_PRE[pre];
-  const r = rest.trimStart();
-  return CUR_AFTER.find(([re]) => re.test(r))?.[1];
-}
+const MONEY_UNIT = /^(?:dollars?|usd|eur|gbp|bucks|euros?|pounds?|rupees?|yen)\b/;
 const PCT_UNIT = /^(?:percent|per cent|percentage points?|%)/;
 
 // kind: what the number counts. pct, usd, yrs (years), dur (other spans of time), cnt (a plain thing: "6 openings"), or "" when
 // nothing follows to say. A claim's kind must equal the kind of the number it matches in the source.
 export type Kind = "pct" | "usd" | "yrs" | "dur" | "cnt" | "";
-export interface Num { v: number; unit: "pct" | "usd" | ""; raw: string; word?: string; date?: boolean; kind?: Kind; cur?: string }
+export interface Num { v: number; unit: "pct" | "usd" | ""; raw: string; word?: string; date?: boolean; kind?: Kind }
 // All the numbers in a text. Spelled numbers up to ten are ordinary counting ("one question", "two or three samples") and are
 // ignored unless they carry a percent, a money unit or a time span ("five years").
 const NOT_A_THING = new Set(("median average mean total typical annual annually monthly weekly daily yearly overall roughly approximately nationally nationwide " +
@@ -83,13 +71,9 @@ export function numbersIn(text: string): Num[] {
   const unitAfter = (rest: string, pre: string): "pct" | "usd" | "" => (/[$€£¥₹]$/.test(pre) || MONEY_UNIT.test(rest.trimStart()) ? "usd" : PCT_UNIT.test(rest.trimStart()) ? "pct" : "");
   t = t.replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (m) => { out.push({ v: Date.parse(m) || 0, unit: "", raw: m, date: true }); return " "; });
   // ratios and fractions first: "one in three", "3 out of 10", "3/4"
-  t = t.replace(/\b(\d+|[a-z]+)\s+(?:in|out of)\s+(\d+|[a-z]+)\b/g, (m, a, b, at: number) => {
+  t = t.replace(/\b(\d+|[a-z]+)\s+(?:in|out of)\s+(\d+|[a-z]+)\b/g, (m, a, b) => {
     const x = /^\d+$/.test(a) ? +a : ONES[a], y = /^\d+$/.test(b) ? +b : ONES[b];
     if (x === undefined || y === undefined || !y) return m;
-    // RESEARCH ROUND 3 (2026-11-02): "$56,000 in 2019" is a figure and a year, not the ratio 56000/2019 (which dropped the
-    // currency and let "€56,000 in 2019" pass on "$56,000 in 2019"). A ratio is a part of a whole: never more than the
-    // whole, never "in" a year, never money.
-    if (x > y || (/^\d{4}$/.test(b) && y >= 1900 && y <= 2100) || /[$€£¥₹]\s*$/.test(t.slice(0, at))) return m;
     out.push({ v: x / y, unit: "", raw: m }); return " ";
   }).replace(/\b(\d+)\/(\d+)\b/g, (m, a, b) => { if (+b) out.push({ v: +a / +b, unit: "", raw: m }); return " "; });
   const re = /([$€£¥₹]?)(\d+(?:\.\d+)?)(?:st|nd|rd|th)?\s?(k|m|b|bn|thousand|million|billion)?\b|([a-z]+(?:-[a-z]+)*)/g;
@@ -99,7 +83,7 @@ export function numbersIn(text: string): Num[] {
     const rest = t.slice(re.lastIndex);
     if (m[2] !== undefined) {
       const sc = m[3] ? { k: 1e3, m: 1e6, b: 1e9, bn: 1e9, thousand: 1e3, million: 1e6, billion: 1e9 }[m[3]]! : 1;
-      toks.push({ n: { v: +m[2] * sc, unit: unitAfter(rest, m[1] + (m[0].endsWith("%") ? "" : "")), raw: m[0].trim(), cur: currencyOf(m[1], t.slice(0, m.index), rest) }, scaled: sc > 1, at: m.index, end: re.lastIndex });
+      toks.push({ n: { v: +m[2] * sc, unit: unitAfter(rest, m[1] + (m[0].endsWith("%") ? "" : "")), raw: m[0].trim() }, scaled: sc > 1, at: m.index, end: re.lastIndex });
       if (t[re.lastIndex] === "%") toks[toks.length - 1].n.unit = "pct";
       continue;
     }
@@ -121,7 +105,7 @@ export function numbersIn(text: string): Num[] {
     re.lastIndex = j;
     let total = 0, cur = 0;
     for (const w of run) { if (w in ONES) cur += ONES[w]; else if (w in TENS) cur += TENS[w]; else if (w === "hundred") cur = (cur || 1) * 100; else if (w in SCALE) { total += (cur || 1) * SCALE[w]; cur = 0; } }
-    toks.push({ n: { v: total + cur, unit: unitAfter(t.slice(j), ""), raw: run.join(" "), cur: currencyOf("", "", t.slice(j)) }, scaled: run.some((w) => w in SCALE && w !== "hundred"), at: m.index, end: j });
+    toks.push({ n: { v: total + cur, unit: unitAfter(t.slice(j), ""), raw: run.join(" ") }, scaled: run.some((w) => w in SCALE && w !== "hundred"), at: m.index, end: j });
   }
   for (let i = 0; i < toks.length; i++) {
     const { n } = toks[i], next = t.slice(toks[i].end).trimStart(), prevText = t.slice(i ? toks[i - 1].end : 0, toks[i].at);
@@ -133,20 +117,18 @@ export function numbersIn(text: string): Num[] {
     // a range inherits the kind of its far end: "5 to 10 percent"
     n.kind = kindOf(n, next);
     if (n.kind === "" && nx && /^\s*(?:to|-|or|and)\s*$/.test(t.slice(toks[i].end, nx.at))) n.kind = kindOf(nx.n, t.slice(nx.end).trimStart());
-    // A range is in one currency: "€60,000 to 75,000", "60 to 75 thousand euros".
-    if (nx && /^\s*(?:to|-|–|—|or|and)\s*$/.test(t.slice(toks[i].end, nx.at))) { if (n.cur && !nx.n.cur) nx.n.cur = n.cur; else if (!n.cur && nx.n.cur) n.cur = nx.n.cur; }
     if (significant) out.push(n);
   }
   return out;
 }
-export const numEq = (s: Num, n: Num) => (s.v === n.v || Math.abs(s.v - n.v) <= 1e-9 * Math.max(1, Math.abs(n.v)))
+const numEq = (s: Num, n: Num) => (s.v === n.v || Math.abs(s.v - n.v) <= 1e-9 * Math.max(1, Math.abs(n.v)))
   && (n.unit !== "pct" || s.unit === "pct") && (n.unit !== "usd" || s.unit !== "pct")
-  && (!n.kind || !s.kind || n.kind === s.kind) && (!n.cur || !s.cur || n.cur === s.cur);
+  && (!n.kind || !s.kind || n.kind === s.kind);
 
 // ---------------------------------------------------------------------------------------------- words
 const STOP = new Set(("the a an and or but of in on at to for from with by as is are was were be been being it its this that these those there their they them you your we our i me my he she his her not no do does did can could will would should may might must have has had over under about into than then also only just more most less very much many some any each every per via out up down off such so if when while which who whom what how why where all both other another same own after before between during through against among within without across around toward until since because is's").split(" "));
 const stem = (w: string) => w.replace(/ies$/, "y").replace(/(?:ss|x|ch|sh)es$/, (m) => m.slice(0, -2)).replace(/s$/, "").replace(/(?:ing|ed|ly)$/, "").replace(/e$/, "");
-export const contentWords = (s: string) => new Set((norm(s).match(/[a-z][a-z'-]{2,}/g) ?? []).filter((w) => !STOP.has(w) && !isNumWord(w) && !(w in FRAC) && !VAGUE.has(w) && !(w in ORD) && !/^(?:percent|dollars?|usd|euros?|eur|pounds?|gbp|rupees?|inr|yen|jpy|cad|aud|chf|bucks)$/.test(w)).map(stem));
+export const contentWords = (s: string) => new Set((norm(s).match(/[a-z][a-z'-]{2,}/g) ?? []).filter((w) => !STOP.has(w) && !isNumWord(w) && !(w in FRAC) && !VAGUE.has(w) && !(w in ORD) && !/^(?:percent|dollars?|usd)$/.test(w)).map(stem));
 // Subject words: the occupation, group or thing a number is ABOUT. Measure words ("median", "wage", "earned", "grow"), verbs and
 // generic time words say what kind of number it is, not whose it is, so they never count as the subject.
 const MEASURE = new Set(("median mean average typical annual yearly monthly weekly hourly daily wage wages pay paid salary salaries income incomes compensation earn earns earned earning earnings make makes made rate rates percent percentage growth grow grows grew grown growing increase increases increased decrease decreased decline declined rise rose fall fell project projected projects employment expected expect expects reach reached range ranges ranged around about roughly nearly approximately over under least most recent latest year years decade survey report reports reported according data source number numbers total amount figure figures value level levels cost costs last lasts hire hires hired work works worked get gets got receive receives received see sees saw need needs must may require requires required typically usually often will would should can could pass passes finish finishes stay stays remain remains offer offers").split(" ").map(stem));
@@ -182,30 +164,20 @@ function nearSubject(passage: string, n: Num, subj: Set<string>): boolean {
 
 export interface Specifics { numbers: string[]; names: string[] }
 const COMMON = new Set(["i", "i'm", "i'll", "i've", "i'd", ...STOP, "ask", "use", "get", "take", "keep", "build", "apply", "start", "look", "add", "write", "finish", "check", "learn", "join", "move", "plan", "pick", "practice", "replace", "translate", "update", "target", "choose", "confirm", "complete", "pass", "become", "have", "now", "later", "first", "second", "once", "assuming", "treat", "usually", "rarely", "often", "hi", "thanks", "source", "sources", "general", "knowledge", "retrieved", "none", "nothing", "right", "realistic", "written", "what", "which", "who", "how", "why"]);
-// RESEARCH ROUND 3 (2026-11-02): a name is read in any script ("Société Générale" was read as "Soci", "G", "rale"). And
-// a retrieved fact (acceptFacts: a paraphrase checked against its own quote) counts its first word too: "Metabase cut 3,700
-// jobs" was accepted on a quote saying "Nestlé cut 3,700 jobs", the lone capitalized first word taken for an ordinary
-// opener. In a fact a first word the writing vocabulary does not know (and that does not read as an English word) must be
-// in the quote too (any case).
-function capitalizedNames(t: string, openers = false): string[] {
-  const names = new Set<string>(), re = /\p{L}[\p{L}\p{N}&'’.-]*/gu, words: { w: string; start: boolean }[] = [];
+function capitalizedNames(t: string): string[] {
+  const names = new Set<string>(), re = /[A-Za-z][A-Za-z0-9&'’.-]*/g, words: { w: string; start: boolean }[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(t))) words.push({ w: m[0].replace(/[.'’-]+$/, ""), start: /(^|[.?!:"“—–(]|\n)\s*$/.test(t.slice(0, m.index)) });
   for (let i = 0; i < words.length; i++) {
     const { w, start } = words[i];
-    if (w.length < 2 || !/^\p{Lu}/u.test(w)) continue;
-    const next = words[i + 1], acronym = /^\p{Lu}[\p{Lu}\p{N}&-]{1,}$/u.test(w);
-    if (start && !acronym && !(next && !next.start && /^\p{Lu}/u.test(next.w) && !COMMON.has(next.w.toLowerCase())) && !(openers && nameLikeOpener(w))) continue;
+    if (w.length < 2 || !/^[A-Z]/.test(w)) continue;
+    const next = words[i + 1], acronym = /^[A-Z][A-Z0-9&-]{1,}$/.test(w);
+    if (start && !acronym && !(next && !next.start && /^[A-Z]/.test(next.w) && !COMMON.has(next.w.toLowerCase()))) continue;
     if (COMMON.has(w.toLowerCase())) continue;
     names.add(w);
   }
   return [...names];
 }
-const nameLikeOpener = (w: string) => {
-  const lw = w.toLowerCase();
-  return lw.length >= 3 && !COMMON.has(lw) && !STOP.has(lw) && !lw.split("-").every((x) => isNumWord(x)) && !vocab().has(stem(lw)) && !MEASURE.has(stem(lw)) && !GK_TERMS.has(lw)
-    && !/^[a-z]+(?:ly|ing|ed|ion|ions|ers?|ists?|ance|ence|ment|ments|ity|ness|ships?|ies|al|ive|ous|es)$/.test(lw);
-};
 const clean = (text: string) => stripNonClaims(fold(text)).replace(/\bF-1\b/g, "F").replace(/^\s*(?:[-*]|\d+[.)])\s+/gm, "").replace(/\*\*/g, "");
 export function specifics(text: string): Specifics {
   const t = clean(text);
@@ -227,7 +199,7 @@ export function unsupported(text: string, support: string | string[], allowGK = 
       if (!ok) out.push(n.raw);
     }
   }
-  const named = [...capitalizedNames(t, !allowGK), ...(t.match(GAZ_RX) ?? [])];
+  const named = [...capitalizedNames(t), ...(t.match(GAZ_RX) ?? [])];
   for (const w of named) { const lw = norm(w).replace(/\s+/g, " "); if (!supFlat.replace(/\s+/g, " ").includes(lw) && !(allowGK && GK_TERMS.has(lw))) out.push(w); }
   const v = vocab();
   for (const m of norm(t).matchAll(CUE)) { const w = m[1]; if (!v.has(stem(w)) && !supFlat.includes(w) && !isNumWord(w) && !(allowGK && GK_TERMS.has(w))) out.push(w); }
@@ -238,40 +210,6 @@ export function unsupported(text: string, support: string | string[], allowGK = 
 const norm_url = (u: string) => { try { const x = new URL(u); [...x.searchParams.keys()].filter((k) => /^utm_/i.test(k)).forEach((k) => x.searchParams.delete(k)); x.hash = ""; return x.toString().replace(/\/$/, ""); } catch { return ""; } };
 export const sameUrl = (a: string, b: string) => !!norm_url(a) && norm_url(a) === norm_url(b);
 export interface Rejected { fact: Partial<Fact>; why: string }
-// RESEARCH SCENARIOS (2026-10-29): what a page or a search answer can carry that is no fact about the field. Text that
-// reads as an instruction (to the model or about the user), a claim about the person reading ("you have a 3.9 GPA", "the
-// user is guaranteed an offer"), anything secret-shaped, and a link inside the fact's own words (the only link a fact
-// may carry is its source URL) are never kept, however exactly the quote matches.
-// RESEARCH ROUND 3 (2026-11-02): "tell users", "inform job seekers", "AI assistants must say ..." read as instructions too.
-const TO_MODEL = /\b(?:tell|inform|remind|convince|assure)\s+(?:the\s+|all\s+|any\s+)?(?:users?|readers?|candidates?|applicants?|persons?|people|students?|job[ -]?seekers?|visitors?)\b|\b(?:(?:ai|a\.i\.)(?:\s+(?:assistants?|agents?|models?|tools?|systems?|bots?))?|chatbots?|llms?|language models?|gpts?|chatgpt|virtual assistants?)\b[^.]{0,30}\b(?:must|should|need to|are required to|are instructed to|always)\s+(?:say|tell|state|answer|respond|reply|report|mention|claim|recommend|repeat)\b|\b(?:print|reveal|output|repeat|leak|show|send)\b[^.]{0,40}\b(?:api[ _-]?keys?|secrets?|tokens?|passwords?|system prompt|instructions)\b|\byour (?:instructions|system prompt|rules)\b|\bas an ai\b/i;
-const ABOUT_PERSON = /\byou(?:['’]re|['’]ve| are| have| already| were| will be| qualify| got| earned| received| hold)\b|\byour (?:gpa|grades?|resume|cv|application|offer|profile|odds|chances|interview|record|experience|school)\b|\bthe (?:user|reader)(?:['’]s)?\b/i;
-const SECRET = /\bsk-[A-Za-z0-9_-]{6,}|\b[A-Z][A-Z0-9]*_(?:API_)?(?:KEY|SECRET|TOKEN)\b|\bapi[ _-]?keys?\b|-----BEGIN|\bbearer\s+[A-Za-z0-9._-]{8,}/i;
-const LINK_IN_TEXT = /[a-z][a-z0-9+.-]*:\/\/|\bwww\.|\b(?:javascript|data|vbscript|mailto):|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\/\S*/i;
-// RESEARCH ROUND 2 (2026-10-30): a page's contact line is not a fact about a field: "Email the campus recruiter Jane Doe at
-// jane.doe@recruiting-example.com" and "Call the recruiting line at (212) 555-0147" were kept (the quote matched), so a made-up
-// recruiter's address reached the brief. And a page that calls its own numbers "official" ("Official pay table: first-year
-// analysts earn $185,000") is official only on a government or school site, or on the employer's own domain.
-const EMAIL_IN_TEXT = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/;
-const PHONE_IN_TEXT = /(?:\+?1[\s.-]?)?\(?\b\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/;
-const OFFICIAL_CLAIM = /\b(?:official|verified|confirmed)\b[^.]{0,40}\b(?:pay|salary|salaries|comp|compensation|tables?|bands?|grids?|rates?|figures?|ranges?)\b|\b(?:pay|salary|comp(?:ensation)?)\s+(?:tables?|bands?|grids?)\b[^.]{0,30}\b(?:official|verified)\b/i;
-function officialHost(url: string, text: string): boolean {
-  let host = "";
-  try { host = new URL(url).hostname.toLowerCase(); } catch { return false; }
-  if (/\.(?:gov|edu|mil)$|\.gov\.[a-z]{2}$|\.ac\.[a-z]{2}$/.test(host)) return true;
-  // The employer's own site: a firm the fact names whose name is the site's registered name (stripe.com, not stripe-salaries.example.net).
-  const site = host.replace(/^www\./, "").split(".").slice(-2)[0] ?? "";
-  return (text.match(GAZ_RX) ?? []).some((n) => n.toLowerCase().replace(/[^a-z0-9]/g, "") === site);
-}
-export function notAFact(f: { text?: string; quote?: string; url?: string }): string | null {
-  const text = fold(String(f.text ?? "")), quote = fold(String(f.quote ?? ""));
-  if (readsAsInstruction(text) || readsAsInstruction(quote) || TO_MODEL.test(text) || TO_MODEL.test(quote)) return "reads as an instruction, not a fact";
-  if (SECRET.test(text) || SECRET.test(quote)) return "carries something secret-shaped";
-  if (ABOUT_PERSON.test(text)) return "a claim about the person, not the field";
-  if (LINK_IN_TEXT.test(text)) return "a link inside the fact's words";
-  if (EMAIL_IN_TEXT.test(text) || PHONE_IN_TEXT.test(text)) return "a contact address or number, not a fact";
-  if ((OFFICIAL_CLAIM.test(text) || OFFICIAL_CLAIM.test(quote)) && !officialHost(String(f.url ?? ""), `${text} ${quote}`)) return "says it is official, but its source is not a government, school or employer page";
-  return null;
-}
 // A retrieved fact stays only if: its URL is one the search returned; it carries a verbatim quote; and every number in the fact's
 // text is in a quote passage that shares the claim's subject words, and every name is in the quote. The model's paraphrase can
 // drop words but cannot add a figure, change a number's subject, or introduce an employer.
@@ -281,17 +219,12 @@ export function acceptFacts(facts: Fact[], returnedUrls: string[]): { kept: Fact
     const bad = (why: string) => rejected.push({ fact: f, why });
     if (!f || typeof f.text !== "string" || !f.text.trim()) { bad("empty"); continue; }
     if (!/^https:\/\//i.test(String(f.url ?? ""))) { bad("no https source URL"); continue; }
-    const source = returnedUrls.find((u) => sameUrl(u, f.url));
-    if (!source) { bad("URL not among the sources the search returned"); continue; }
-    if (!/^https:\/\//i.test(source)) { bad("no https source URL"); continue; }
+    if (!returnedUrls.some((u) => sameUrl(u, f.url))) { bad("URL not among the sources the search returned"); continue; }
     if (!f.quote || f.quote.trim().length < 8) { bad("no quote from the source"); continue; }
     if (f.text.length > 320) { bad("too long to verify"); continue; }
-    const not = notAFact(f);
-    if (not) { bad(not); continue; }
     const extra = unsupported(f.text, [f.quote], false);
     if (extra.length) { bad(`not in the quote: ${extra.join(", ")}`); continue; }
-    // The link shown is the source's own URL, exactly as the search returned it (never the model's copy, never rewritten).
-    kept.push({ ...f, url: source });
+    kept.push({ ...f, url: norm_url(f.url) || f.url });
   }
   return { kept, rejected };
 }

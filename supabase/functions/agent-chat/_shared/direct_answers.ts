@@ -106,8 +106,8 @@ const WHO_SEES = [
   /\b(?:are|is) my (?:messages|chats?|texts|conversations?|data|info|information) (?:private|safe|secure|shared|encrypted|being (?:read|shared|sold))\b/i,
   /\b(?:do|does|will) (?:you|upmore|anyone(?: else)?|anybody(?: else)?|a human|humans|people|someone) (?:sell|share|read|see|train on|use)\b[^?.!]{0,12}?\bmy (?:messages|chats?|texts|conversations?|data|info|information)\b/i,
 ];
-export function whoSeesReply(provider: "anthropic"): string {
-  const ai = "Anthropic (Claude)";
+export function whoSeesReply(provider: "openai" | "anthropic"): string {
+  const ai = provider === "anthropic" ? "Anthropic (Claude)" : "OpenAI";
   return `Your messages are stored in your own Upmore account so the conversation keeps its thread; database access is restricted so only your account can read its rows. To write each answer they're sent to Upmore's AI provider, which is ${ai} right now; under its API terms, data sent through the API isn't used to train its models by default. Nobody else: Upmore never sells your data and has no ads or third-party trackers. Deleting your account (You, then Delete data) erases your chats.\nFrom Upmore's privacy policy, updated Oct 11, 2026 (You, then Privacy Policy).`;
 }
 const PHONE_CHANGE = /\b(?:change|update|edit|switch|replace|fix)\b[^?.!]{0,12}?\bmy (?:phone(?: number)?|cell(?: phone)?(?: number)?|mobile(?: number)?|number)\b(?! (?:plan|bill|carrier|provider|company|payment))|\bi (?:got|have) a new (?:phone )?number\b/i;
@@ -129,7 +129,7 @@ const FEES = [
 ];
 export const FEES_REPLY =
   "Upmore costs $10 a month once billing launches; billing isn't live yet, so nothing is charged today. Cancel anytime from You, then Upmore subscription. Upmore adds no fee of its own to an order, a payment or a cancellation; anything a broker or payment service charges is on the card before you say yes (on a sale in your Alpaca account, the SEC and FINRA fees Alpaca passes through). Referral credits only lower your Upmore bill; they aren't cash.\nFrom Upmore's Terms of Service (v1.0, Sep 27, 2026), section 4.";
-export function accountPrivacyReply(message: string, provider: "anthropic"): string | null {
+export function accountPrivacyReply(message: string, provider: "openai" | "anthropic"): string | null {
   const m = String(message || "");
   if (FEES.some((re) => re.test(m))) return FEES_REPLY;
   if (ACCOUNT_NUMBER.some((re) => re.test(m))) return ACCOUNT_NUMBER_NONE;

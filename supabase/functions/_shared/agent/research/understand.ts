@@ -2,7 +2,7 @@
 // the field, the stage, the place, the kind of question, and whether ONE question is worth asking. Everything the pack does not
 // say becomes a stated assumption in the brief; nothing is inferred by a model.
 import type { ContextPack } from "../knowledge/context_pack.ts";
-import { FIELDS, genericField, HS_SELF, OVERLAYS, type Field, type Overlay } from "./fields.ts";
+import { FIELDS, genericField, OVERLAYS, type Field, type Overlay } from "./fields.ts";
 import type { Derived } from "./derive.ts";
 
 export type StageGroup = "early_student" | "late_student" | "new_grad" | "grad_student" | "switcher" | "displaced" | "experienced" | "unknown";
@@ -24,34 +24,12 @@ export function detectField(message: string, extra: string[] = []): Field | null
   const score = (text: string) => FIELDS.map((f) => ({ f, n: (text.match(new RegExp(f.detect.source, "gi")) ?? []).length })).filter((x) => x.n > 0).sort((a, b) => b.n - a.n)[0]?.f ?? null;
   return score(targetClause(message)) ?? score(message) ?? score(extra.join(" . "));
 }
-// What the message itself says about stage when the pack could not tell (age, high school, leaving the military, returning to work,
-// a master's or doctoral program). Only the person's own words; a stated age under 19 is a school-age student, 30 and over with no
-// student cue is someone changing fields (the question is "how do I become X").
-const AGE = /\b(?:i'?m|i am|age[d]?|turning|im)\s+(\d{2})\b|\b(\d{2})[- ]?(?:year[- ]old|yo|y\/o)\b/i;
-export function ageIn(m: string): number | null { const a = AGE.exec(m); const n = a ? Number(a[1] ?? a[2]) : NaN; if (Number.isFinite(n) && n >= 13 && n <= 80) return n; const d = /\bin my (early |mid |late )?(20|30|40|50|60)s\b/i.exec(m); return d ? Number(d[2]) + (d[1]?.trim() === "late" ? 8 : d[1]?.trim() === "mid" ? 5 : 2) : null; }
-const SCHOOL_AGE = HS_SELF;
-const MIL_EXIT = /\b(?:left|leaving|separating|separated|getting out|got out|retired|retiring|discharged|transitioning|exiting|out)\s+(?:from\s+|of\s+)?the\s+(?:army|navy|air force|marines?|marine corps|coast guard|military|national guard|space force|service)\b|\bmilitary (?:veteran|background|spouse)\b|\bformer (?:soldier|marine|sailor|airman)\b|\bex-?(?:army|navy|marine|military)\b/i;
-const RETURNER = /\b(?:returning to work|back to work|re-?enter(?:ing)? the (?:workforce|job market)|career break|stay-?at-?home|time off to raise|after (?:raising|caring for))\b/i;
-const GRAD = /\b(?:master'?s|masters)\b|\bph\.?d\b|\bdoctoral\b|\bgrad(?:uate)? (?:school|program|student)\b/i;
-function msgStage(m: string): StageGroup {
-  if (SCHOOL_AGE.test(m)) return "early_student";
-  const age = ageIn(m);
-  if (age !== null && age <= 18) return "early_student";
-  if (MIL_EXIT.test(m)) return "experienced";
-  if (RETURNER.test(m)) return "switcher";
-  if (GRAD.test(m)) return "grad_student";
-  if (/\bi'?m (?:a )?(?:freshman|sophomore)\b|\bfirst[- ]year (?:student|in college)\b/i.test(m)) return "early_student";
-  if (/\bi'?m (?:a )?(?:junior|senior)\b/i.test(m)) return "late_student";
-  if (age !== null && age >= 30) return "switcher";
-  return "unknown";
-}
 function stageOf(pack: ContextPack, message: string): StageGroup {
   const tags = new Set(pack.overlays.map((o) => o.tag));
-  if (SCHOOL_AGE.test(message) || ((ageIn(message) ?? 99) <= 18 && !tags.has("stage:military"))) return "early_student";   // "junior in high school" is not a college junior
   if (tags.has("stage:career_changer")) return "switcher";
   if (tags.has("stage:laid_off") || /laid off|layoff|let go|redundan|downsiz/i.test(message)) return "displaced";
   if (/\bmba\b/i.test(message)) return "grad_student";
-  if (/\bapprentice\b|\bveteran\b/i.test(message) || MIL_EXIT.test(message)) return "experienced";
+  if (/\bapprentice\b|\bveteran\b/i.test(message)) return "experienced";
   switch (pack.stage.value) {
     case "freshman": case "sophomore": return "early_student";
     case "junior": case "senior": return "late_student";
@@ -63,7 +41,7 @@ function stageOf(pack: ContextPack, message: string): StageGroup {
   if (/\bmba\b/i.test(message)) return "grad_student";
   if (/\bapprentice\b|\bveteran\b/i.test(message)) return "experienced";
   if (/\b(?:community college|transfer)\b/i.test(message)) return "early_student";
-  return msgStage(message);
+  return "unknown";
 }
 function qtypeOf(m: string): QType {
   if (/\b(?:switch|change careers?|career change|pivot|transition|move (?:out of|into))\b/i.test(m)) return "switch";

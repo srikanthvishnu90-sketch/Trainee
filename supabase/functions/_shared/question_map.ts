@@ -287,13 +287,8 @@ const RULES: Rule[] = [
   ["essay_other", /\?|\bwhat\b|\bhow\b/, (q) => LONG_TYPES.has(String(q.type))],
 ];
 
-// A field a form keeps for robots and tells people to leave alone ("Website (leave blank)", "If you are human, leave this
-// empty", "Do not fill this in"): never mapped to a fact (round 2 of the apply scenarios, 2026-10-30: the person's website
-// and phone went into such boxes, which marks the application as a robot's).
-export const HONEYPOT = /\bleave (this |it )?(field |box |blank:? |empty:? )?(blank|empty)\b|\b(leave|keep) (this |it )?(field )?(blank|empty)\b|\b(do not|don'?t) (fill|enter|complete|type)\b|\b(blank|empty) if you(?:'| a)re human\b|\bif you(?:'| a)re (a )?human\b/i;
 export function mapQuestion(q: Question): MappedQuestion {
   const t = norm(q.label);
-  if (HONEYPOT.test(t)) return { fact: "unknown", kind: "unknown", why: "a field the form asks people to leave blank" };
   for (const [fact, test, when] of RULES) {
     if (!test.test(t)) continue;
     if (when && !when(q, t)) continue;
@@ -306,12 +301,8 @@ export const RULE_COUNT = RULES.length;
 // A question that asks for an identity number, a bank or card number or a secret is never asked by text, stored or held:
 // the person types it on the form (standing rules: no full ID or card numbers, no passwords, anywhere). The engine
 // already stops on identity numbers before planning (scripts/apply.ts IDENTITY_NUMBER); this is the texting side's own.
-// Round 2 of the apply scenarios (2026-10-30): the identity numbers of other countries and the ways forms write "number"
-// ("Social Insurance Number (SIN)", "Aadhaar number", "PESEL", "CURP", "DNI / NIE", "Tax File Number (TFN)", "Passport #",
-// "Identity card no.", "Government-issued ID number", "IBAN") were asked by text; the extension already knew them
-// (extension/src/apply_core.ts IDENTITY_EXTRA). A bare "sin" is Spanish for "without": only the number's own forms count.
 export const NEVER_BY_TEXT =
-  /social security|\bssn\b|passport\s*(#|no\b|num|number)|driver'?s'? licen[cs]e\s*(#|no\b|num|number)|licen[cs]e\s*(#|number)|national (id|identification|identity|insurance)\b|\btax(payer)? id|\btax identification|\bitin\b|alien (registration )?number|\ba-number\b|bank account|routing number|card number|\bpassword\b|\bpin\b|social insurance|\(sin\)|^\s*sin\b(?!\s+(?:experiencia|patrocinio|visa|embargo))|\bsin\s*(#|no\b|num|number)|\b(your|enter|provide) sin\b|\bni (number|no\b)|\bnin\b|tax file number|\btfn\b|aadhaa?r|\bpan (card )?(number|no\b|#)|government[- ]issued( photo)? id|personnummer|\bcpf\b|\bcurp\b|\bpesel\b|\bnric\b|\bbsn\b|\bdni\b|\bnie\b|\bpps (number|no\b)|\b(id|identity|identification) (card |document )?(number|no\b|#)|\biban\b|sort code|account number|\bcvv\b/i;
+  /social security|\bssn\b|passport (number|no\b)|driver'?s licen[cs]e (number|no\b)|national (id|insurance) number|\btax(payer)? id|\bitin\b|alien (registration )?number|\ba-number\b|bank account|routing number|card number|\bpassword\b|\bpin\b/i;
 
 // 64-bit FNV-1a of the words, as 16 hex digits: a key for any language's wording.
 function h16(s: string): string {

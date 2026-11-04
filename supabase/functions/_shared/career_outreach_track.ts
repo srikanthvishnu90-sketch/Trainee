@@ -18,10 +18,9 @@
 // The reminder fires from runOutreachFollowups (the scheduled run): once, to the person's outbox, only while no reply is
 // on record. Every record is the person's own (by user id); a name matches only someone they wrote to through Trainee.
 import type { Outbox } from "./career_alert_store.ts";
-import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 release flags
 import { neverOpen } from "./career_people_sites.ts";
 import type { EventStore } from "./agent/timeline.ts";
-import { batchMessages, blockedAddresses, confirmed, draftFor, emailHash, type Followup, FOLLOWUP_DAYS, footerOf, messageOf, type ModelFn, OUTREACH_INTENT,
+import { batchMessages, confirmed, draftFor, emailHash, type Followup, FOLLOWUP_DAYS, footerOf, messageOf, type ModelFn, OUTREACH_INTENT,
   type OutreachDraft, type OutreachStore, payloadHash, recordOutreach } from "./career_outreach.ts";
 
 export const TRACK_INTENT = "career_outreach_track";
@@ -366,9 +365,7 @@ async function followTurn(o: TrackDeps, name: string, rows: OutreachDraft[], fol
   // The waiting follow-up stays the thread's last word when it is the newest batch, so "send 1" or "send none" answers it.
   if (pendingFollow) return { reply: `You already have a follow-up to ${who(d)} waiting (draft ${pendingFollow.n}, ${pendingFollow.status === "shown" ? "not approved yet" : "approved, not sent"}). Nothing new was drafted.${pendingFollow.batch_id === rows[0].batch_id && pendingFollow.status === "shown" ? ` Say "send ${pendingFollow.n}" to approve it as shown, or "send none".` : ""}`,
     intent: pendingFollow.batch_id === rows[0].batch_id ? OUTREACH_INTENT : TRACK_INTENT, status: "already" };
-  // OUTREACH SCENARIOS (2026-10-30): anyone's opt-out list and the bounce list, not only the person's own.
-  const blocked = (await blockedAddresses(o.store, o.userId, [d.recipient.email])).get(d.recipient.email.trim().toLowerCase());
-  if (blocked) return { reply: blocked === "bounced" ? `${who(d)}'s address bounced before, so no one emails it again; nothing was drafted.` : `${who(d)} asked not to be contacted, so nothing was drafted.`, intent: TRACK_INTENT, status: "do_not_contact" };
+  if ((await o.store.dnc(o.userId)).has(await emailHash(d.recipient.email))) return { reply: `${who(d)} asked not to be contacted, so nothing was drafted.`, intent: TRACK_INTENT, status: "do_not_contact" };
   const facts = confirmed(o.facts as unknown[]);
   if (!facts.length) return { reply: "I write only from facts you've confirmed, and there are none on record, so nothing was drafted. Paste your resume here and confirm it, then ask again.", intent: TRACK_INTENT, status: "no_facts" };
   if (!o.model) return { reply: `Drafting emails isn't switched on here yet, so no follow-up was written or sent. Your first email to ${who(d)} went on ${shortDay(Date.parse(d.sent_at ?? "") || o.now)} ("${d.subject}").`, intent: TRACK_INTENT, status: "drafting_off" };
@@ -473,6 +470,6 @@ export async function runOutreachFollowups(o: RunOpts) {
 // outbox row is queued and no reminder is marked fired, however many are due. Sending has its own switch
 // (CAREER_OUTREACH_SEND); the reminders need no Gmail, so this gate stands on its own.
 export async function runOutreachFollowupsGated(env: { get(k: string): string | undefined }, o: RunOpts) {
-  if (!releaseFlagOn(env, "CAREER_OUTREACH_FOLLOWUPS")) return undefined;
+  if (env.get("CAREER_OUTREACH_FOLLOWUPS") !== "on") return undefined;
   return await runOutreachFollowups(o);
 }

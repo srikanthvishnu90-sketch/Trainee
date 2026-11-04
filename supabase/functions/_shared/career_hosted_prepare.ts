@@ -9,15 +9,12 @@ import { kickPrepare, prepareConfigured } from "./career_apply_from_chat.ts";
 const ON_COMPUTER = /(They go on the forms|It goes on the form) the next time you prepare applications on your computer\./;
 
 // deno-lint-ignore no-explicit-any
-export async function prepareAfterAnswers(asked: { reply: string; status?: string } | null, o: { admin: any; userId: string; env: { get(k: string): string | undefined }; fetch: typeof fetch;
-  // The results page answers one role at a time: that role is prepared again when ITS questions are done, whatever other roles still ask.
-  // The preparation leaves a posting alone while a question of its own is open (career_apply_prepare_candidates*: an "asked" try stands).
-  roleDone?: boolean }): Promise<"started" | "failed" | "off" | "skipped"> {
+export async function prepareAfterAnswers(asked: { reply: string; status?: string } | null, o: { admin: any; userId: string; env: { get(k: string): string | undefined }; fetch: typeof fetch }): Promise<"started" | "failed" | "off" | "skipped"> {
   if (!asked || asked.status !== "answered" || !ON_COMPUTER.test(asked.reply)) return "skipped";
   if (!prepareConfigured(o.env)) return "off";
   const open = await o.admin.rpc("career_apply_questions_open_as", { p_user: o.userId, p_limit: 1 });
   if (open.error) return "skipped";
-  if ((open.data ?? []).length && !o.roleDone) {
+  if ((open.data ?? []).length) {
     // More are waiting: the application is prepared again here once those are answered, not "on your computer".
     asked.reply = asked.reply.replace(ON_COMPUTER, "Once the rest are answered, I'll prepare your application again here.");
     return "skipped";
@@ -41,12 +38,6 @@ export async function prepareAfterAnswers(asked: { reply: string; status?: strin
   return k;
 }
 
-// The results page (trainee-file) answers the employer's questions itself; when the last one for a role is saved it prepares the
-// person's queued applications again through this same door. Nothing is approved, queued for sending or sent by it.
-// deno-lint-ignore no-explicit-any
-export const reprepareQueued = (o: { admin: any; userId: string; env: { get(k: string): string | undefined }; fetch: typeof fetch }) =>
-  prepareAfterAnswers({ reply: "They go on the forms the next time you prepare applications on your computer.", status: "answered" }, { ...o, roleDone: true });
-
 // ------------------------------------------------------------------------------------------------ follow-through
 // Where a posting they asked for stands before it is on the queue (career_apply_pending_for), in their words.
 export interface PendingRow { posting_key: string; company: string; title: string; url: string; stage: string; detail: string | null; open_questions: number; at: string }
@@ -61,8 +52,7 @@ export function pendingLine(p: PendingRow): string {
     case "starting": return `${name}: waiting its turn to be prepared (within minutes); nothing is sent until you approve its card.`;
     case "waiting_on_you": return `${name}: waiting on your answer to ${p.open_questions === 1 ? "1 question" : `${p.open_questions} questions`}; say "what do you need from me". Nothing was sent.`;
     case "no_resume": return `${name}: not prepared: I don't have your resume file to attach. Send it here as a PDF or Word file. Nothing was sent.`;
-    case "refused": if (/^sensitive_question/.test(p.detail ?? "")) return `${name}: not prepared: the form asks for something like an ID number, password or code, which I can't take in a message, here or on your page. Fill that one in on the employer's site yourself. Nothing was sent.`;
-      return `${name}: not prepared: the employer's form could not be filled ahead of time. Nothing was sent.`;
+    case "refused": return `${name}: not prepared: the employer's form could not be filled ahead of time. Nothing was sent.`;
     case "error": return `${name}: not prepared: preparing it failed on my side. Nothing was sent.`;
     default: return `${name}: in your queue, not prepared yet. Nothing was sent.`;
   }

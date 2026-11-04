@@ -10,7 +10,6 @@
 // '_' || user_id and derives the vault name the same way on row delete, so "google_career" is the only
 // provider value whose career vault entry the existing guard accepts and the cascade cleanup can find.
 
-import { FONT_CSP, systemPage } from "../_shared/brand.ts";
 export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 export const CALENDAR_FREEBUSY_SCOPE = "https://www.googleapis.com/auth/calendar.freebusy";
@@ -68,47 +67,36 @@ function hmacKey(secret: string): Promise<CryptoKey> {
     { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"],
   );
 }
-// D-037 (review of #407): the send consent's state is bound to the Google account already connected: `bind` is
-// emailBind(that address), signed into the state, so the callback refuses any other account (oauth_connect.ts).
-export async function emailBind(email: string): Promise<string> {
-  const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(email ?? "").trim().toLowerCase()));
-  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-const BIND = /^[0-9a-f]{64}$/;
-
 export async function issueState(
-  userId: string, purpose: Purpose, secret: string, now: number = Date.now(), bind?: string,
+  userId: string, purpose: Purpose, secret: string, now: number = Date.now(),
 ): Promise<string> {
   const exp = now + 10 * 60 * 1000;
-  if (bind !== undefined && (purpose !== "career" || !BIND.test(bind))) throw new Error("bad state binding");
-  const payload = bind ? `${userId}.${exp}.${purpose}.${bind}` : `${userId}.${exp}.${purpose}`;
+  const payload = `${userId}.${exp}.${purpose}`;
   const sig = await crypto.subtle.sign("HMAC", await hmacKey(secret), new TextEncoder().encode(payload));
   return `${payload}.${b64url(new Uint8Array(sig))}`;
 }
 export async function verifyState(
   state: string, secret: string, now: number = Date.now(),
-): Promise<{ userId: string; purpose: Purpose; bind?: string }> {
+): Promise<{ userId: string; purpose: Purpose }> {
   const parts = String(state || "").split(".");
-  let userId = "", expS = "", purpose: Purpose = "gmail", sigB64 = "", bind = "";
+  let userId = "", expS = "", purpose: Purpose = "gmail", sigB64 = "";
   if (parts.length === 3) [userId, expS, sigB64] = parts; // legacy, pre-career
-  else if (parts.length === 4 || parts.length === 5) {
+  else if (parts.length === 4) {
     let p = "";
-    if (parts.length === 4) [userId, expS, p, sigB64] = parts;
-    else [userId, expS, p, bind, sigB64] = parts; // D-037: a send consent bound to the connected account
+    [userId, expS, p, sigB64] = parts;
     if (!(PURPOSES as string[]).includes(p)) throw new Error("bad state purpose");
     purpose = p as Purpose;
-    if (parts.length === 5 && (purpose !== "career" || !BIND.test(bind))) throw new Error("bad state binding");
   } else throw new Error("bad state");
   const exp = Number(expS);
   if (!userId || !Number.isFinite(exp) || now > exp) throw new Error("expired state");
-  const payload = parts.length === 3 ? `${userId}.${exp}` : parts.length === 4 ? `${userId}.${exp}.${purpose}` : `${userId}.${exp}.${purpose}.${bind}`;
+  const payload = parts.length === 3 ? `${userId}.${exp}` : `${userId}.${exp}.${purpose}`;
   const sig = unb64url(sigB64);
   const ok = await crypto.subtle.verify("HMAC", await hmacKey(secret), sig, new TextEncoder().encode(payload));
   if (!ok) throw new Error("bad state signature");
   // Canonical-encoding check: a base64url signature's last char carries spare bits, so a different string can
   // decode to the same bytes; re-encoding must reproduce the exact segment or the state is a forgery twin.
   if (b64url(sig) !== sigB64) throw new Error("bad state signature");
-  return bind ? { userId, purpose, bind } : { userId, purpose };
+  return { userId, purpose };
 }
 
 // ---- Scopes / status (ACCS-002) ----
@@ -225,14 +213,14 @@ export const LEGACY_OFF_MESSAGE = "The read-only Gmail connection for Upmore's c
 
 // Where Google's callback sends the person. The career (Trainee) grant ends on a plain page of its own, never on the
 // Upmore app; the legacy grant keeps Upmore's landing.
-// say: the plain reason a connect was refused (connectors round 3: an address another Trainee account holds, a sign-in used
-// twice); absent, the general words.
-export function careerLanding(ok: boolean, say?: string): Response {
+export function careerLanding(ok: boolean): Response {
   const title = ok ? "Gmail connected" : "Gmail wasn't connected";
-  const line = ok ? "You can close this tab and go back to your chat with Trainee." : say || "Nothing was saved. Text \"connect gmail\" to Trainee to try again.";
+  const line = ok ? "You can close this tab and go back to your chat with Trainee." : "Nothing was saved. Text \"connect gmail\" to Trainee to try again.";
   return new Response(
-    systemPage(title, [line]),
-    { status: ok ? 200 : 400, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer", "content-security-policy": `default-src 'none'; style-src 'unsafe-inline' ${FONT_CSP.style}; font-src ${FONT_CSP.font}; img-src data:; frame-ancestors 'none'` } },
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>` +
+      `<style>body{font:16px/1.5 system-ui,sans-serif;background:#F5F4F7;color:#141414;margin:0;padding:16px}main{max-width:480px;margin:48px auto;background:#fff;border-radius:12px;padding:24px}h1{font-size:20px;margin:0 0 12px;color:#4A2F5E}</style>` +
+      `</head><body><main><h1>${title}</h1><p>${line}</p></main></body></html>`,
+    { status: ok ? 200 : 400, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer" } },
   );
 }
 
@@ -245,11 +233,7 @@ export function redirectUriFrom(env: { get(k: string): string | undefined }): st
 
 // Google's consent URL: the one place the query is built (the page's Continue button, the chat's one-time link and the
 // legacy start all use it), so the scopes the page states are the scopes asked.
-// incremental (D-037): Google keeps what the person already granted and adds these scopes (include_granted_scopes).
-// loginHint (D-037): the send consent names the connected account, so Google offers that one.
-export function googleConsentUrl(o: { clientId: string; redirectUri: string; state: string; scopes: string[]; incremental?: boolean; loginHint?: string }): string {
+export function googleConsentUrl(o: { clientId: string; redirectUri: string; state: string; scopes: string[] }): string {
   const q = new URLSearchParams({ client_id: o.clientId, redirect_uri: o.redirectUri, response_type: "code", scope: o.scopes.join(" "), access_type: "offline", prompt: "consent", state: o.state });
-  if (o.incremental) q.set("include_granted_scopes", "true");
-  if (o.loginHint) q.set("login_hint", o.loginHint);
   return "https://accounts.google.com/o/oauth2/v2/auth?" + q.toString();
 }

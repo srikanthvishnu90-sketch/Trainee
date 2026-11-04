@@ -69,41 +69,18 @@ export function parseWhatsAppBody(b: any, phoneNumberId?: string): { messages: I
           replyToMessageId: typeof m?.context?.id === "string" && m.context.id ? m.context.id.slice(0, 200) : null,
           aliases: waId && bsuid ? [`wa:${bsuid}`] : [], alias: waId && bsuid ? bsuid : null,
           phone: waId && waId.length >= 8 && waId.length <= 15 ? `+${waId}` : null,
-          // IDENTITY SCENARIOS (2026-10-30): messages[].context.forwarded / frequently_forwarded (Cloud API): someone else's
-          // words, never the person's answer to "Reply yes to link it".
-          ...(m?.context?.forwarded === true || m?.context?.frequently_forwarded === true ? { forwarded: true } : {}),
         };
-        // CHANNEL DELIVERY ROUND 2 (2026-10-30): the person's own time for the message (messages[].timestamp, Unix seconds;
-        // VERIFIED-S: webhooks/components), so WhatsApp's window is counted from it and not from a retried webhook's arrival.
-        const ts = Number(m?.timestamp);
-        const sentAt = Number.isFinite(ts) && ts > 0 ? ts * 1000 : null;
-        // CHANNEL DELIVERY ROUND 2: the person changed their WhatsApp number (type "system", system.type
-        // "user_changed_number", system.wa_id the new number; SECONDARY: webhooks/components). Their account follows them to
-        // the new number; the old one is let go (a carrier gives it to someone else in time).
-        if (m.type === "system") {
-          const to = typeof m.system?.wa_id === "string" && /^[0-9]{6,20}$/.test(m.system.wa_id) ? m.system.wa_id : null;
-          if (m.system?.type === "user_changed_number" && to && waId && to !== waId) messages.push({ ...base, kind: "moved", text: "", movedTo: to, sentAt });
-          else ignored.push("a system message");
-          continue;
-        }
         // A typed message, a tap on a template's quick reply, a tap on a reply button or a list row: all read as text.
         const text = m.type === "text" ? m.text?.body : m.type === "button" ? m.button?.text
           : m.type === "interactive" ? (m.interactive?.button_reply?.title ?? m.interactive?.list_reply?.title) : null;
-        if (typeof text === "string" && text.trim()) messages.push({ ...base, kind: "text", text, sentAt });
-        else {
-          // CHANNEL DELIVERY ROUND 2: a voice note, audio or video is told what to do instead, as on Telegram (it got
-          // silence); a photo or a file as before; a sticker, a reaction or a location is left alone.
-          const media = m.type === "audio" || m.type === "video" ? "voice" as const : m.type === "image" ? "photo" as const : m.type === "document" ? "file" as const : undefined;
-          messages.push({ ...base, kind: "seen", text: "", file: m.type === "document" || m.type === "image", ...(media ? { media } : {}), sentAt });
-          ignored.push(`a ${String(m.type ?? "message").slice(0, 20)} message (not read yet)`);
-        }
+        if (typeof text === "string" && text.trim()) messages.push({ ...base, kind: "text", text });
+        else { messages.push({ ...base, kind: "seen", text: "", file: m.type === "document" || m.type === "image" }); ignored.push(`a ${String(m.type ?? "message").slice(0, 20)} message (not read yet)`); }
       }
       for (const s of Array.isArray(v.statuses) ? v.statuses : []) {
         if (s?.status !== "failed" || typeof s.id !== "string") continue;
         const err = Array.isArray(s.errors) ? s.errors[0] : null;
         const code = Number.isInteger(err?.code) ? err.code : null;
-        statuses.push({ providerMessageId: s.id.slice(0, 200), code, hold: code !== null && HOLD_CODES.has(code), retry: code !== null && RETRY_CODES.has(code),
-          error: `WhatsApp ${code ?? "failed"}: ${String(err?.title ?? err?.message ?? "").slice(0, 120)}` });
+        statuses.push({ providerMessageId: s.id.slice(0, 200), code, hold: code !== null && HOLD_CODES.has(code), error: `WhatsApp ${code ?? "failed"}: ${String(err?.title ?? err?.message ?? "").slice(0, 120)}` });
       }
     }
   }
@@ -185,14 +162,11 @@ export function whatsappAdapter(o: {
         const after = i ? ` after ${i} of ${bubbles.length} messages went out` : "";
         const r = await post({ ...target(address), type: "text", text: { preview_url: true, body: safeSlice(bubbles[i], WHATSAPP_CHARS) } });
         if (r.ok) { if (r.id) ids.push(r.id); continue; }
-        // The window closed or the marketing limit held it: nothing of this message went out, so the row waits for the
-        // person's next message. CHANNEL DELIVERY ROUND 2 (2026-10-30): after a first message went out, what went is
-        // reported (sent, sentIds) and the row resumes from this message (career_outbox.sent_parts); it was final ("after 1
-        // of 2 messages went out") and the rest was never sent. The same for a throughput refusal (130429, 429...).
-        const partial = i ? { sent: i, sentIds: [...ids] } : {};
-        if (r.code !== null && HOLD_CODES.has(r.code)) return { ok: false, error: r.error + after, retryable: false, hold: true, ...partial };
-        const retry = r.network || (r.code !== null && RETRY_CODES.has(r.code)) || r.status === 429 || r.status === 502 || r.status === 503;
-        return { ok: false, error: r.error + after, retryable: retry, ...partial };
+        // The window closed or the marketing limit held it: nothing of this message went out, so the whole row waits for
+        // the person's next message. (After a first message went out, the rest would duplicate it: final, as LoopMessage.)
+        if (r.code !== null && HOLD_CODES.has(r.code) && i === 0) return { ok: false, error: r.error, retryable: false, hold: true };
+        const retry = i === 0 && (r.network || (r.code !== null && RETRY_CODES.has(r.code)) || r.status === 429 || r.status === 502 || r.status === 503);
+        return { ok: false, error: r.error + after, retryable: retry };
       }
       return { ok: true, id: ids[0] ?? null, ids };
     },

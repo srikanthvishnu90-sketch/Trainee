@@ -8,7 +8,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { corsFor } from "../agent-chat/_shared/chat_cors.ts";
 import { careerCodeMailbox, fetchVerificationCode, handleEmailCode } from "../_shared/career_email_code.ts";
 import type { TokenDeps } from "../_shared/career_mail_gmail.ts";
-import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
 
 serve((req) => {
   const url = Deno.env.get("SUPABASE_URL"), anon = Deno.env.get("SUPABASE_ANON_KEY"), key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -36,7 +35,10 @@ serve((req) => {
       if (error) throw new Error("read the career grant's vault entry");
       return data ? String(data) : null;
     },
-    writeVault: (name, secret) => vaultRefreshWrite(admin, name, secret, "save the refreshed career grant"),
+    writeVault: async (name, secret) => {
+      const { error } = await admin.rpc("oauth_vault_store", { p_name: name, p_secret: secret });
+      if (error) throw new Error("save the refreshed career grant");
+    },
   };
   return handleEmailCode(req, {
     cors,

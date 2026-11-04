@@ -66,29 +66,24 @@ export function spendCap(o: { read: () => Promise<DailySpend>; limits: SpendLimi
   const meters = new Set<TurnMeter>();
   let refused: ReturnType<SpendCap["refused"]> = null;
   let globalBlock: BudgetBlock | null = null;
-  let inflight = 0;
   const call: Call = async (cfg, payload, opts = {}) => {
     base ??= o.read().catch((e) => { console.error("career spend cap:", (e as Error)?.message ?? e); return null; });
     const b = await base;
     if (!b) { refused = "unread"; throw new ModelUnavailableError(0, "spend_unread", "today's model spend could not be read"); }
     let usd = b.usd_micros, calls = b.calls;
     for (const m of meters) { usd += m.usd_micros; calls += m.calls; }
-    // PEOPLE DRAFTS R3 (2026-11-02): calls already sent and not yet answered count too. A batch of drafts calls the model
-    // five at a time, and a meter counts a call only once it is answered, so five calls started together each saw the
-    // same total and the day's ceiling was passed by up to four calls every time.
-    if (usd >= o.limits.usdMicros || calls + inflight >= o.limits.calls) {
+    if (usd >= o.limits.usdMicros || calls >= o.limits.calls) {
       refused = refused ?? "limit";
       throw new ModelUnavailableError(429, "daily_limit", "the person's daily model limit is reached");
     }
     if (opts.meter) meters.add(opts.meter);
-    inflight++;
     try { return await o.call(cfg, payload, opts); }
     catch (e) {
       // The product-wide daily budget said no (or could not be checked): no request was made; the reply says so in plain words.
       const block = e instanceof ModelUnavailableError ? budgetBlockOfType(e.type) : null;
       if (block) { globalBlock = globalBlock ?? block; refused = refused ?? (block === "limit" ? "global" : block === "paused" ? "global_paused" : "global_unavailable"); }
       throw e;
-    } finally { inflight--; }
+    }
   };
   return {
     call,

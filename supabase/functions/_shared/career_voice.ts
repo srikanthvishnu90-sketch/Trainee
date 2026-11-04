@@ -1,9 +1,30 @@
-// WO-035, switched OFF (owner directive 2026-11-02 18:38 CT: Trainee is Claude-only, no OpenAI calls anywhere, voice stays
-// off). There is no voice provider, so the voice mock cannot run: "start" always answers NOT_WIRED (reason: "voice is off:
-// no provider"), the link is never used up, and the page offers the text mock. Nothing here mints a client secret, opens a
-// realtime session, or contacts any host. What stays: the signed-link checks, the text-mock fallback, the debrief scorer and
-// the session store, so the database and the text mock are untouched; nothing can issue a call token, so "finish" is
-// unreachable in practice. Logic and tests: tests/architect/wo-035-voice-mock.test.ts.
+// WO-035: the voice mock's server side, as a function of its inputs so it is testable without a database, OpenAI or a
+// browser. The career-voice function (supabase/functions/career-voice) wires it. Three actions, each authorized by a
+// signed token (career_voice_link.ts), never by anything else in the request:
+//   start     the link's one use: mints a short-lived OpenAI Realtime client secret with the server's OPENAI_API_KEY and
+//             returns that secret (never the key) with the call token. Without the key: NOT_WIRED, and the link stays
+//             unused so the page can still move to the text mock.
+//   finish    the transcript (the Realtime API's text events, never audio) comes in once; it is scored in memory with the
+//             text mock's rubric (career_mock.ts voiceDebrief), the debrief is written into the person's thread and
+//             queued to their texting thread, and the transcript is dropped. Nothing else is stored.
+//   fallback  the text mock in one tap (microphone blocked, WebRTC failed, voice not wired): the same role and company,
+//             started as a text mock in the person's thread.
+//
+// The OpenAI Realtime API, as used here (sources: OpenAI's published OpenAPI spec, github.com/openai/openai-openapi,
+// master/openapi.yaml, paths /realtime/client_secrets and /realtime/calls and the Realtime server events; and OpenAI's
+// reference app github.com/openai/openai-realtime-console, server.js and client/components/App.jsx; both read 2026-10-20.
+// platform.openai.com could not be opened from the build sandbox):
+//   - POST https://api.openai.com/v1/realtime/client_secrets, Authorization: Bearer <OPENAI_API_KEY>, JSON body
+//     { expires_after: { anchor: "created_at", seconds }, session: { type: "realtime", model, instructions, audio } };
+//     the response is { value: "ek_...", expires_at, session }. A secret can open sessions until it expires, so it lives
+//     60 seconds (the spec allows 10 to 7200).
+//   - The browser POSTs its SDP offer to https://api.openai.com/v1/realtime/calls with Authorization: Bearer <value> and
+//     Content-Type: application/sdp, and gets the SDP answer; events flow on the "oai-events" data channel.
+//   - audio.input.transcription { model } turns on the transcript of the person's speech
+//     (conversation.item.input_audio_transcription.completed); the interviewer's words arrive as
+//     response.output_audio_transcript.done. audio.input.turn_detection { type: "semantic_vad" | "server_vad" } decides
+//     when the person has finished speaking (input_audio_buffer.speech_stopped); output_audio_buffer.started marks the
+//     first audio of the reply (WebRTC only), which the page's latency harness uses.
 import {
   companyRecords,
   firms,
@@ -15,8 +36,29 @@ import {
   validState,
   voiceDebrief,
 } from "./career_mock.ts";
-import { type TokenKind, verifyToken, voiceWired } from "./career_voice_link.ts";
-export const CALL_GRACE_MIN = 15; // kept for the session row's window (career_voice_start); no call can start
+import { signToken, type TokenKind, verifyToken, voiceWired } from "./career_voice_link.ts";
+
+import { type BudgetGate, budgetPausedByEnv, budgetReply, type ReserveResult, resolveBudgetGate } from "./model_budget.ts";
+// Worst case a minute of a realtime call can cost, in micro-USD, by model. OpenAI publishes tokens, not minutes, so this is an
+// ASSUMPTION, not a verified price. Audio token rates for the minute are not published on the pages read on 2026-10-28; this
+// assumes 50 audio tokens a second each way (3,000 a minute, five times the 10 a second commonly quoted) and the audio prices read on
+// a third-party table for gpt-realtime-mini ($10 in, $20 out per 1M): 3,000 x $10 + 3,000 x $20 = $0.09 a minute, rounded up to $0.10 to cover
+// the conversation text being re-read each turn. gpt-realtime was not read at all today: three times the mini figure. Unknown model:
+// the dearer figure. The reservation is kept as spent once a key goes out. The owner can change these numbers here.
+export const VOICE_WORST_CASE_MICROS_PER_MINUTE_BY_MODEL: Record<string, number> = { "gpt-realtime-mini": 100_000, "gpt-realtime": 300_000 };
+export const VOICE_WORST_CASE_MICROS_PER_MINUTE = 300_000; // unknown model
+export const VOICE_SESSION_MAX_MINUTES = 30;
+export const voiceWorstCaseMicros = (model: string, plannedMinutes: number) =>
+  Math.min(VOICE_SESSION_MAX_MINUTES, plannedMinutes + CALL_GRACE_MIN) * (VOICE_WORST_CASE_MICROS_PER_MINUTE_BY_MODEL[model] ?? VOICE_WORST_CASE_MICROS_PER_MINUTE);
+export const REALTIME_CLIENT_SECRETS_URL = "https://api.openai.com/v1/realtime/client_secrets";
+export const REALTIME_CALLS_URL = "https://api.openai.com/v1/realtime/calls";
+// The model and voice are the owner's to change (CAREER_VOICE_MODEL). gpt-realtime-mini is in the spec's model list and
+// is the cheaper one; gpt-realtime is the one OpenAI's reference app uses.
+export const DEFAULT_MODEL = "gpt-realtime-mini";
+export const DEFAULT_VOICE = "marin";
+export const TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe";
+export const SECRET_TTL_S = 60;
+export const CALL_GRACE_MIN = 15; // the call token outlives the planned minutes by this much, for a late hang-up
 export const MAX_TURNS = 300;
 export const MAX_TURN_CHARS = 4000;
 export const MAX_TRANSCRIPT_CHARS = 80_000;
@@ -61,6 +103,47 @@ export function interviewerInstructions(s: MockState, o: { lib?: any[]; firms?: 
     "Speak in short turns, in a calm, professional voice, in English unless the person speaks another language.",
   );
   return lines.join("\n");
+}
+
+export function realtimeSecretRequest(s: MockState, o: { model?: string; voice?: string; lib?: any[]; firms?: any[]; checks?: unknown } = {}) {
+  return {
+    expires_after: { anchor: "created_at", seconds: SECRET_TTL_S },
+    session: {
+      type: "realtime",
+      model: o.model || DEFAULT_MODEL,
+      instructions: interviewerInstructions(s, o),
+      audio: {
+        input: {
+          transcription: { model: TRANSCRIBE_MODEL },
+          // Semantic VAD waits through an "uhm" instead of cutting in; the latency harness measures what it costs.
+          turn_detection: { type: "semantic_vad", eagerness: "auto" },
+        },
+        output: { voice: o.voice || DEFAULT_VOICE },
+      },
+    },
+  };
+}
+
+export type Mint = (body: unknown) => Promise<{ ok: true; value: string; expires_at: number } | { ok: false; status: number }>;
+// The one call that uses the real key. Its answer is read for the client secret only; the key never leaves this call.
+export function openaiMint(apiKey: string, f: typeof fetch = fetch): Mint {
+  return async (body) => {
+    let res: Response;
+    try {
+      res = await f(REALTIME_CLIENT_SECRETS_URL, {
+        method: "POST", signal: AbortSignal.timeout(15000),
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      return { ok: false, status: 0 };
+    }
+    if (!res.ok) return { ok: false, status: res.status };
+    const j = await res.json().catch(() => null) as { value?: unknown; expires_at?: unknown } | null;
+    const value = typeof j?.value === "string" ? j.value : "";
+    if (!/^ek_[A-Za-z0-9_-]{4,200}$/.test(value)) return { ok: false, status: 502 };
+    return { ok: true, value, expires_at: Number(j?.expires_at) || 0 };
+  };
 }
 
 // ---------- The session store ----------
@@ -130,10 +213,14 @@ export interface VoiceDeps {
   now: () => number;
   cors: Record<string, string>;
   sessions: VoiceSessions;
+  mint: (apiKey: string) => Mint;
+  // The global daily budget (model_budget.ts). A voice call is paid by the minute in the person's browser, so the whole
+  // call's worst case is reserved before the key is minted and is never refunded once a key has gone out.
+  budget?: BudgetGate;
   deliver?: (userId: string, key: string) => Promise<void>; // send the debrief now instead of at the next delivery run
   log?: (line: string) => void;
 }
-export const NOT_WIRED_TEXT = "Voice is not available. Want the text mock instead? Tap below and it starts in your messages.";
+export const NOT_WIRED_TEXT = "Voice mocks aren't on yet. Want the text mock instead? Tap below and it starts in your messages.";
 const REFUSAL: Record<string, string> = {
   bad_link: "This link isn't valid. Text \"start a voice mock\" for a new one.",
   expired: "This link has expired (links last 10 minutes). Text \"start a voice mock\" for a new one.",
@@ -164,10 +251,41 @@ export async function handleVoice(req: Request, d: VoiceDeps): Promise<Response>
   const { s: id, u: userId } = v.claims;
 
   if (action === "start") {
-    // Voice is off for good (no provider): the link is not used up, so the page can still start the text mock with it.
+    // Not wired (no OpenAI key, or the owner has not turned voice on): the link is not used up, so the page can still
+    // start the text mock with it.
     const wired = voiceWired(d.env);
-    d.log?.(`career-voice: NOT_WIRED (${wired.reason})`);
-    return json({ status: "NOT_WIRED", message: NOT_WIRED_TEXT, text_mock: true });
+    if (!wired.ok) {
+      d.log?.(`career-voice: NOT_WIRED (${wired.missing.join(", ")} missing)`);
+      return json({ status: "NOT_WIRED", message: NOT_WIRED_TEXT, text_mock: true });
+    }
+    const key = d.env("OPENAI_API_KEY")!;
+    const row = await d.sessions.read(userId, id);
+    if (!row) return json({ status: "REFUSED", reason: "bad_link", message: REFUSAL.bad_link }, 401);
+    const minutes = Math.max(5, Math.min(30, Number(row.state.minutes) || 20));
+    // Reserve first: over the day's budget the key is never minted and the link is not used up.
+    const gate = budgetPausedByEnv(d.env) ? null : resolveBudgetGate(d.budget);
+    const worst = voiceWorstCaseMicros(d.env("CAREER_VOICE_MODEL") || DEFAULT_MODEL, minutes);
+    const got: ReserveResult = budgetPausedByEnv(d.env) ? { ok: false, reason: "paused" } : gate ? await gate.reserve(worst, { model: d.env("CAREER_VOICE_MODEL") || DEFAULT_MODEL, role: "voice" }) : { ok: false, reason: "unavailable" };
+    if (!got.ok) {
+      d.log?.(`career-voice: budget ${got.reason}; no key minted`);
+      return json({ status: "REFUSED", reason: "budget", message: budgetReply(got.reason), text_mock: true }, 429);
+    }
+    const st = await d.sessions.start(userId, id, now, minutes + CALL_GRACE_MIN);
+    if (!st) { await gate!.release(got.id); return json({ status: "REFUSED", reason: "used", message: REFUSAL.used }, 410); }
+    const callExp = now + (minutes + CALL_GRACE_MIN) * 60_000;
+    const call_token = await signToken({ s: id, u: userId, k: "call", exp: callExp }, secret);
+    const model = d.env("CAREER_VOICE_MODEL") || DEFAULT_MODEL;
+    const minted = await d.mint(key)(realtimeSecretRequest(st, { model }));
+    if (!minted.ok) {
+      await gate!.release(got.id); // no key reached the browser: proven no call
+      d.log?.(`career-voice: client secret not minted (HTTP ${minted.status})`);
+      return json({ status: "UPSTREAM_ERROR", message: "The voice service did not answer. You can switch to the text mock.", call_token, text_mock: true }, 502);
+    }
+    await gate!.settle(got.id, null); // a key went out: the browser's call cannot be metered here, so the worst case is spent
+    return json({
+      status: "OK", client_secret: minted.value, expires_at: minted.expires_at, model, calls_url: REALTIME_CALLS_URL,
+      call_token, minutes, questions: st.questions.length, what: `${st.role || "general"} mock${st.company ? ` for ${st.company}` : ""}`,
+    });
   }
 
   if (action === "finish") {

@@ -81,8 +81,7 @@ export function lineProblems(text: string, rec: Record_, factIds?: string[]): st
   }
   // TAILORING SCENARIOS (2026-10-29): the claims the checks above do not see (a degree written out, a spelled-out or
   // multiplied metric, "40+" for 40, work authorization, how the person identifies, a lower-case employer, a secret).
-  // TAILORING ROUND 2: a name after "at", "for", "with", "from" or "by" in a printed line, in any case ("at hooli").
-  reasons.push(...claimProblems(t, { record: [rec.text], line: true }));
+  reasons.push(...claimProblems(t, { record: [rec.text] }));
   return [...new Set(reasons)];
 }
 

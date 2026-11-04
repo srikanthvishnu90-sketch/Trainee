@@ -116,8 +116,7 @@ export interface TokenDeps {
   now: () => number;
   connection: (userId: string) => Promise<{ vault_name: string; scopes?: string | null } | null>;
   readVault: (name: string) => Promise<string | null>;
-  // false: the connection went while the token was refreshed (oauth_vault_refresh wrote nothing): the token is not used.
-  writeVault: (name: string, secret: string) => Promise<void | boolean>;
+  writeVault: (name: string, secret: string) => Promise<void>;
   // needs_reconnect: the grant was refused by Microsoft (invalid_grant, a 401); the person must connect again.
   markReconnect: (userId: string, reason: string) => Promise<void>;
   // Records the new expiry (career_outlook_state.token_expires_at), so the refresh batch knows when to come back.
@@ -152,8 +151,7 @@ export async function outlookToken(d: TokenDeps, userId: string, scope: string, 
     return { status: "ERROR", detail: `refresh: HTTP ${r.status}` };
   }
   const expiresAt = d.now() + (Number(nt.expires_in) || 3600) * 1000;
-  const kept = await d.writeVault(name, JSON.stringify({ ...tok, access_token: nt.access_token, refresh_token: nt.refresh_token || tok.refresh_token, expires_at: expiresAt }));
-  if (kept === false) return { status: "NOT_WIRED", reason: "Outlook is not connected" }; // disconnected while this refresh ran
+  await d.writeVault(name, JSON.stringify({ ...tok, access_token: nt.access_token, refresh_token: nt.refresh_token || tok.refresh_token, expires_at: expiresAt }));
   await d.noteExpiry?.(userId, expiresAt);
   return { status: "ok", token: String(nt.access_token) };
 }

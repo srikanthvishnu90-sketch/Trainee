@@ -292,26 +292,9 @@ export function degreeOptionFor(factValue: string, label: string): boolean {
   const re = EDUCATION[v.replace(/'s|s$/g, "").replace(/ degree$/, "")] ?? EDUCATION[v];
   if (!re) return false;
   const t = low(label);
-  // ROUND 3: an MBA is one particular master's; a master's the person did not say was an MBA is never put on it.
-  if (/\bmba\b|\bm\.b\.a\b|business administration/.test(t) && !/\bmba\b|\bm\.b\.a\b|business/.test(v)) return false;
   return re.test(t) && !/in progress|pursuing|currently enrolled|incomplete|candidate|expected/.test(t);
 }
 
-// ROUND 3 (2026-11-02): an option that holds the person's answer inside other words is a different answer, not theirs:
-// "Female" holds "male", "Top Secret" holds "secret", "Business Economics" holds "economics", "Senior Engineer" holds
-// "engineer", "Indiana" begins with "india", "Dominican Republic" with "dominica", "University of Michigan - Dearborn"
-// with "university of michigan". The answer is theirs on an option only as the option's whole text, or followed by a
-// clarification in brackets ("Computer Science (BS)", "Asian (Not Hispanic or Latino)") or an "or" naming the same answer
-// ("Black or African American"); a country also by its comma form ("Iran, Islamic Republic of"). Anything else is asked.
-export function sameAnswerOption(value: string, label: string, comma = false): boolean {
-  const v = low(value), l = low(label);
-  if (!v || !l.startsWith(v)) return false;
-  const rest = l.slice(v.length).trim();
-  // A bracket that qualifies the answer ("Secret (interim)", "Bachelor's (in progress)") makes it another answer.
-  if (QUALIFIER.test(rest)) return false;
-  return rest === "" || /^\([^()]*\)$/.test(rest) || /^or\b/.test(rest) || (comma && /^,/.test(rest));
-}
-const QUALIFIER = /\b(interim|in progress|pending|expired|inactive|lapsed|former|previous|previously|incomplete|expected|pursuing|current|currently|not|non|no|partial|provisional|temporary)\b/;
 export function chooseOption(fact: string, value: string, options: Opt[], question = ""): string | null {
   if (!options.length) return null;
   const v = low(value);
@@ -394,8 +377,6 @@ export function chooseOption(fact: string, value: string, options: Opt[], questi
       // the first. "Bachelor of Arts" and "Bachelor of Science" differ in meaning, and the person is asked.
       // WO-052: "Bachelor's in a relevant engineering or science discipline" asks whether the field fits this job too.
       if (options.some((o) => /\brelevant\b|\brelated\b|\bdiscipline\b|\bfield\b/.test(low(o.label)))) return null;
-      // ROUND 3: an MBA among the options, for a master's the person did not say was an MBA: which master's is theirs to say.
-      if (!/\bmba\b|business/.test(v) && options.some((o) => re.test(low(o.label)) && /\bmba\b|\bm\.b\.a\b|business administration/.test(low(o.label)))) return null;
       const hits = options.filter((o) => degreeOptionFor(value, o.label));
       const core = (l: string) => low(l).replace(/'s\b|\bdegree\b|[^a-z]/g, "").replace(/s$/, "");
       if (hits.length > 1 && hits.every((o) => core(o.label) === core(hits[0].label))) return (hits.find((o) => low(o.label) === v) ?? hits.find((o) => /\bdegree\b/.test(low(o.label))) ?? hits[0]).value;
@@ -415,9 +396,6 @@ export function chooseOption(fact: string, value: string, options: Opt[], questi
       // is stated; "North Chicago" or "Chicago Heights" is another city. Only one such place, or nothing (WO-042).
       const [city, st] = v.split(/\s*,\s*/);
       if (!city) return null;
-      // ROUND 3: a city stated with no state ("Portland") is never put on a place that names one ("Portland, Maine"):
-      // which Portland is the person's to say (career_apply.ts reads it with their location's state when they gave one).
-      if (fact === "city" && !st) return null;
       const full = st ? STATES[st] ?? st : null;
       return only(options.filter((o) => {
         const parts = low(o.label).split(/\s*,\s*/);
@@ -436,14 +414,7 @@ export function chooseOption(fact: string, value: string, options: Opt[], questi
         if (whole.length === 1 && options.filter((o) => /^united states\b/.test(low(o.label))).length > 1) return whole[0].value;
         return only(options.filter((o) => US.test(low(o.label)) || /^united states\b|u\.?s\.? citizen/.test(low(o.label)))) ?? usCitizenChoice(v, options);
       }
-      // ROUND 3: "India" is never "Indiana", "Niger" never "Nigeria", "Dominica" never "Dominican Republic".
-      return only(options.filter((o) => sameAnswerOption(v, o.label, true)));
-    case "gpa": {
-      // The stated GPA (a 4.0 scale) onto its own option, written on that scale ("3.6 out of 4.0", "3.6/4.0"): never a
-      // range or another scale's number.
-      const g = /^\d(?:\.\d{1,2})?$/.test(v) ? v : null;
-      return g ? only(options.filter((o) => new RegExp(`^${g.replace(".", "\\.")}\\s*(?:/|out of)\\s*4(?:\\.0+)?$`).test(low(o.label)) || sameAnswerOption(g, o.label))) : null;
-    }
+      return only(options.filter((o) => low(o.label).startsWith(v)));
     case "notice_period":
     case "start_date":
       return bySpan(value, options, "weeks");
@@ -457,11 +428,10 @@ export function chooseOption(fact: string, value: string, options: Opt[], questi
     }
     case "security_clearance":
       if (/^(none|no|n\/a)$/.test(v)) return only(options.filter((o) => /^none\b|do not.*(hold|have)|never held|not.*hold|^n\/a|^no\b/.test(low(o.label))));
-      // ROUND 3: "Secret" is never "Top Secret".
-      return only(options.filter((o) => sameAnswerOption(v, o.label)));
+      return only(options.filter((o) => low(o.label).includes(v)));
   }
   const yn = yesNoOf(v);
   if (yn) return byYesNo(yn, options);
-  // The one option that is the answer whole (round 3: never one that only contains it among other words).
-  return only(options.filter((o) => v.length >= 2 && sameAnswerOption(v, o.label)));
+  // One option that contains the answer whole (a city in "Yes - Boston, MA" is not this; that has a yes first).
+  return only(options.filter((o) => low(o.label).includes(v) && v.length >= 3));
 }

@@ -1,6 +1,5 @@
 // career-proactive (WO-007b): the scheduled job-alerts run. Logic and tests: ./handler.ts, tests/edge/career-proactive.test.ts.
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-import { proactiveSwitches } from "./switches.ts"; // D-036 release flags (each gate below reads one switch)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { supabaseAlertStore } from "../_shared/career_alert_store.ts";
 import { supabasePostingsDb } from "../_shared/career_ingest.ts";
@@ -16,8 +15,7 @@ import { peopleSink, supabasePeopleDeps } from "../_shared/career_people.ts";
 import { gmailSender, gmailThreadReader } from "../_shared/career_outreach_gmail.ts";
 import { runOutreachFollowupsGated } from "../_shared/career_outreach_track.ts";
 import { runRepliesLane } from "../_shared/career_outreach_replies.ts";
-import { readerCall } from "../_shared/career_reader_model.ts";
-import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
+import { callModel, modelConfig } from "../_shared/model_gateway.ts";
 
 // The career Google grant (vault oauth_google_career_<uid>), read the same way by mail tracking and outreach.
 const grant = (admin: any): TokenDeps => ({
@@ -32,7 +30,10 @@ const grant = (admin: any): TokenDeps => ({
     if (error) throw new Error("read the career grant's vault entry");
     return data ? String(data) : null;
   },
-  writeVault: (name, secret) => vaultRefreshWrite(admin, name, secret, "save the refreshed career grant"),
+  writeVault: async (name, secret) => {
+    const { error } = await admin.rpc("oauth_vault_store", { p_name: name, p_secret: secret });
+    if (error) throw new Error("save the refreshed career grant");
+  },
 });
 
 serve((req) => {
@@ -83,18 +84,18 @@ serve((req) => {
     // cannot start. The host that has the engine runs the same rail (career_proactive_run.ts runPrepareAhead) with
     // `deno run -A workers/career-browser/prepare-ahead.ts daily` under CAREER_PREPARE_AHEAD=on.
     // Mail tracking (WO-024) reads people's mail, so it runs only once the owner turns it on at deploy.
-    mail: proactiveSwitches(Deno.env).mail ? {
+    mail: Deno.env.get("CAREER_MAIL_TRACKING") === "on" ? {
       store: () => supabaseMailStore(admin),
       confirm: () => supabaseConfirmStore(admin),
       read: (userId, since, now) => readMailSince({ fetch, token: careerToken(grant(admin)) }, userId, since, now),
-      // WO-040: the model's second look at ambiguous mail (Claude, through the gateway), only once the owner turns it on.
+      // WO-040: the model's second look at ambiguous mail (OpenAI, CAREER_MODEL), only once the owner turns it on.
       model: Deno.env.get("CAREER_MAIL_MODEL") === "on" ? () => mailModelWiring(Deno.env, admin) : undefined,
     } : undefined,
     // Outreach (WO-033) sends from people's own Gmail, so it runs only once the owner turns it on (CAREER_OUTREACH_SEND=on):
     // one approved send per person per run, then the replies on threads already sent ("stop", bounces, answers).
     // FAMILY NETWORKING: follow-up reminders on networking mail the person sent (career_outreach_track.ts), once each, to
     // their outbox; they need no Gmail, so they run with CAREER_OUTREACH_FOLLOWUPS=on even while sending is off.
-    outreach: proactiveSwitches(Deno.env).outreachSend || proactiveSwitches(Deno.env).outreachFollowups ? async (now) => {
+    outreach: Deno.env.get("CAREER_OUTREACH_SEND") === "on" || Deno.env.get("CAREER_OUTREACH_FOLLOWUPS") === "on" ? async (now) => {
       const store = supabaseOutreachStore(admin);
       const quiet = async (ids: string[]) => {
         const { data, error } = await admin.rpc("career_quiet_users", { p_users: ids });
@@ -102,7 +103,7 @@ serve((req) => {
         return new Set<string>((data ?? []).map((r: any) => String(r.user_id ?? r)));
       };
       const followups = await runOutreachFollowupsGated(Deno.env, { store, outbox: supabaseAlertStore(admin), now, quiet }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
-      if (!proactiveSwitches(Deno.env).outreachSend) return { followups };
+      if (Deno.env.get("CAREER_OUTREACH_SEND") !== "on") return { followups };
       const events = supabaseEventStore(admin), deps = grant(admin);
       const token = (u: string, scope: string) => careerTokenFor(deps, scope)(u);
       const tz = async (u: string) => { const { data } = await admin.from("career_alert_prefs").select("tz").eq("user_id", u).maybeSingle(); return data?.tz ?? undefined; };
@@ -115,18 +116,18 @@ serve((req) => {
     // MASS NETWORKING M5: replies on sent outreach (Gmail; Outlook once M4's ports are passed), follow-ups after the
     // person's own interval, and calls from their calendar, every send and event only from an approved exact payload. On
     // only when the owner turns it on (CAREER_OUTREACH_REPLIES=on); the model reads replies and drafts only with
-    // CAREER_OUTREACH_REPLIES_MODEL=on (Claude through the gateway; no other spend).
+    // CAREER_OUTREACH_REPLIES_MODEL=on (OpenAI through the gateway; no other spend).
     replies: Deno.env.get("CAREER_OUTREACH_REPLIES") === "on" ? async (now) => {
       const deps = grant(admin);
       const model = Deno.env.get("CAREER_OUTREACH_REPLIES_MODEL") === "on"
-        ? readerCall(Deno.env) : null;
+        ? (payload: any) => callModel({ ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" }, payload, { role: "chat" }) : null;
       return await runRepliesLane({ admin, fetch, token: (u, scope) => careerTokenFor(deps, scope)(u), outbox: supabaseAlertStore(admin), model, now });
     } : undefined,
     // Introduction reminders (D-033) queue the reminder a person asked for to the outbox at its date; the run record's
     // count needs 20261027020000_career_intro_reminder_push.sql, so this runs only once the owner turns it on at
     // deploy, after that migration. The chat reads the same switch for its words (supabasePeopleDeps' introPush, wired in
     // agent-chat), and both read the same texting-channel check: a person with no texting channel is never queued.
-    introReminders: proactiveSwitches(Deno.env).introReminders ? (() => {
+    introReminders: Deno.env.get("CAREER_INTRO_REMINDERS") === "on" ? (() => {
       const deps = supabasePeopleDeps(admin, { fetch, token: async () => null, introPush: true });
       const people = deps.store;
       return { due: (nowIso: string) => people.dueIntros(nowIso), canText: deps.canText,
@@ -141,7 +142,7 @@ serve((req) => {
     })() : undefined,
     // Briefs, interview drafts and the weekly digest (WO-034) need 20261021050000_career_brief_digest.sql, so they run only
     // once the owner turns them on at deploy, after that migration.
-    briefs: proactiveSwitches(Deno.env).briefs ? {
+    briefs: Deno.env.get("CAREER_BRIEF_DIGEST") === "on" ? {
       interviews: () => supabaseInterviewStore(admin), drafts: () => supabaseMailStore(admin), digest: () => supabaseDigestStore(admin),
     } : undefined,
     // WO-032: which application an employer's email confirms, when two fit, asked once.
@@ -199,8 +200,8 @@ serve((req) => {
         questions: r.questions ?? 0, confirmations: r.confirmations ?? 0, asks: r.asks ?? 0, ms: r.ms, error: r.error };
       // WO-091c: every rail's failure, by rail (the column is 20261022120000_career_control_state.sql's).
       if (r.errors) row.errors = r.errors;
-      if (proactiveSwitches(Deno.env).briefs) Object.assign(row, { briefs: r.briefs ?? 0, brief_ms_max: r.brief_ms_max ?? null, digests: r.digests ?? 0 });
-      if (proactiveSwitches(Deno.env).introReminders) row.intro_reminders = r.intro_reminders ?? 0;
+      if (Deno.env.get("CAREER_BRIEF_DIGEST") === "on") Object.assign(row, { briefs: r.briefs ?? 0, brief_ms_max: r.brief_ms_max ?? null, digests: r.digests ?? 0 });
+      if (Deno.env.get("CAREER_INTRO_REMINDERS") === "on") row.intro_reminders = r.intro_reminders ?? 0;
       if (Deno.env.get("CAREER_PEOPLE_SWEEP") === "on") row.people_sweeps = r.people_sweeps ?? 0;
       const { error } = await admin.from("career_proactive_runs").insert(row);
       if (error) throw new Error(`record run: ${error.message}`);

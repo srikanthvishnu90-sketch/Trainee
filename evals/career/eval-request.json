@@ -3,7 +3,7 @@
  "action": "eval",
  "set": "dev",
  "brains": [
-  "staged"
+  "router"
  ],
  "passes": 5
 }

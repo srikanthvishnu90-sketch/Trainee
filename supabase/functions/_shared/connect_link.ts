@@ -14,8 +14,6 @@ export const REASONS: Record<string, string> = {
   codes: "read the security code an employer emails you",
   send: "send the emails you approve",
   calendar: "find interview times that fit your calendar",
-  // An employer's confirmation email is what moves a submitted application to "Submitted - confirmed" (results_spec.ts).
-  confirm: "see the employer's confirmation email and mark an application Submitted - confirmed",
 };
 export const DEFAULT_REASON = "replies";
 export const reasonKey = (k: unknown): string => (typeof k === "string" && Object.hasOwn(REASONS, k) ? k : DEFAULT_REASON);

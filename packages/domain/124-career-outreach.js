@@ -7,7 +7,7 @@
    unaffected. Mocks live only in tests.
    OWNER RULES (decided 2026-10-12, not provisional): send only from the user's own Gmail via OAuth;
    caps start 10-15/day, ramp +5 per 2-3 days, ceiling 30/day, and the agent REFUSES to raise caps;
-   per-domain throttle 3-5/day; (per-firm cap: removed 2026-10-30, owner NO LIMITS 2026-10-27 — no per-firm limit anywhere); per-person 1 initial + max 2 follow-ups
+   per-domain throttle 3-5/day; per-firm cap 15 per 30 days; per-person 1 initial + max 2 follow-ups
    per 6 months; follow-up waves need a continue tap; EU/UK recipients are EXCLUDED in v1; NO LinkedIn
    scraping or automation of any kind (user-owned export data only); suppression is shared cross-user
    (only the opt-out fact is shared, campaign data stays per-user) and a suppression failure is severity-1. */
@@ -38,7 +38,7 @@ const CareerOutreach = (() => {
   const CAPS = Object.freeze({
     channel: "gmail_oauth_only", startPerDay: 12, startRange: [10, 15], rampStep: 5, rampEveryDays: 3,
     ceilingPerDay: 30, userCanRaise: false, perDomainPerDay: 4, perDomainRange: [3, 5],
-    perPersonInitial: 1, perPersonMaxFollowUps: 2, perPersonWindowDays: 183,
+    perFirmPer30Days: 15, perPersonInitial: 1, perPersonMaxFollowUps: 2, perPersonWindowDays: 183,
     riskyMaxFraction: 0.10, gapMinutes: [2, 8], bounceBreakerRate: 0.03, hostileBreakerCount: 2,
     wave1Size: 40, maxWords: 120, maxLinks: 1,
   });
@@ -82,9 +82,7 @@ const CareerOutreach = (() => {
   // the lexicon, a known abbreviation, or (for short tokens like UPS)
   // the raw capital form, so "follow-ups" never yields UPS.
   const FIRM_TOKEN_STOP = new Set(["bank", "capital", "partners", "group", "global", "financial", "first", "national", "american", "united", "new", "city", "general", "white", "black", "real", "estate", "property", "securities", "management", "international", "holdings", "company", "fund", "funds", "chicago", "boston", "austin", "dallas", "houston", "seattle", "denver", "atlanta", "miami", "phoenix", "portland", "london", "toronto", "york"]);
-  // RESEARCH ROUND 2 (2026-10-30): "find analysts at JP Morgan" was planned as "analysts at Morgan Stanley": the spaced and
-  // dotted forms of JPMorgan are JPMorgan, and a firm's first word written as the end of another name is not that firm.
-  const FIRM_ABBREV = { bcg: "Boston Consulting Group", "jp morgan": "JPMorgan", "j p morgan": "JPMorgan", "jpmorgan chase": "JPMorgan", "jp morgan chase": "JPMorgan" };
+  const FIRM_ABBREV = { bcg: "Boston Consulting Group" };
   const firmLexicon = () => { const names = []; for (const set of Object.values(firmSets().sets || {})) for (const f of set.firms || []) if (f && f.name && !names.includes(f.name)) names.push(f.name); return names; };
   function extractNamedFirms(raw, w) {
     const _firmLexicon = firmLexicon();
@@ -131,9 +129,7 @@ const CareerOutreach = (() => {
         // rule above already applies.
         if (tok && tok.length >= 4 && firstTokenCount[tok] === 1 && !FIRM_TOKEN_STOP.has(tok)) {
           const rawTok = name.split(" ")[0].replace(/[^A-Za-z]/g, "");
-          // Never the end of another name ("JP Morgan", "J.P. Morgan" are JPMorgan, not Morgan Stanley).
-          const standsAlone = rawTok && [...raw.matchAll(new RegExp("\\b" + rawTok + "\\b", "g"))].some((m) => !/(?:\b[A-Z][A-Za-z]*\.?|\b[A-Z]\.)\s*$/.test(raw.slice(0, m.index)));
-          if (standsAlone) idx = w.indexOf(" " + tok + " ");
+          if (rawTok && new RegExp("\\b" + rawTok + "\\b").test(raw)) idx = w.indexOf(" " + tok + " ");
         }
       }
       if (idx >= 0) hits.push({ name, idx, nn });
@@ -504,6 +500,7 @@ const CareerOutreach = (() => {
     for (const c of kept) {
       const fk = norm(c.current_firm);
       if (selected.length < want) {
+        if ((firmCount[fk] || 0) >= CAPS.perFirmPer30Days) { reserve.push(c); continue; }
         firmCount[fk] = (firmCount[fk] || 0) + 1; selected.push(c);
       } else reserve.push(c);
     }
@@ -1162,6 +1159,9 @@ const CareerOutreach = (() => {
       if (touch > CAPS.perPersonMaxFollowUps) { reject("per_person_cap"); continue; }
       if (touch > 0 && !opts.isFollowUp) { /* a re-enqueue of an already-touched person counts as a follow-up */ }
       if ((e.touch || 0) > 0 && !campaign.followups_continue_tap && !opts.continueTap) { reject("followup_needs_continue_tap"); continue; }
+      const firmRecent = (campaign.firmWindow || []).filter((f) => f.firm === norm(c.current_firm)).length;
+      const firmQueued = campaign.items.filter((i) => i.status === "queued" && norm(i.candidate.current_firm) === norm(c.current_firm)).length;
+      if (firmRecent + firmQueued >= CAPS.perFirmPer30Days) { reject("per_firm_cap_15_per_30d"); continue; }
       const item = Object.assign({}, base, { id: `item-${campaign.items.length + results.length + 1}`, touch, status: "queued",
         idempotencyKey: `${campaign.id}:${base.person_id || base.email}:${touch}`, domain: emailDomain(base.email), scheduledAt: null });
       campaign.items.push(item); results.push(item);
@@ -1676,7 +1676,7 @@ const CareerOutreach = (() => {
     opts = opts || {}; const start = opts.startDateIso ? Date.parse(opts.startDateIso) : Date.now();
     const days = plan && plan.days ? plan.days : 0; const finish = new Date(start + Math.max(0, days - 1) * 86400000).toISOString().slice(0, 10);
     return { channel: CAPS.channel, daily_cap_start: dailyCapForDay(0), daily_cap_ceiling: CAPS.ceilingPerDay, ramp: `+${CAPS.rampStep} every ${CAPS.rampEveryDays} days, never above ${CAPS.ceilingPerDay}`,
-      per_domain_per_day: CAPS.perDomainPerDay, per_firm_per_30_days: null, per_person: `${CAPS.perPersonInitial} initial + max ${CAPS.perPersonMaxFollowUps} follow-ups per ${CAPS.perPersonWindowDays} days`,
+      per_domain_per_day: CAPS.perDomainPerDay, per_firm_per_30_days: CAPS.perFirmPer30Days, per_person: `${CAPS.perPersonInitial} initial + max ${CAPS.perPersonMaxFollowUps} follow-ups per ${CAPS.perPersonWindowDays} days`,
       scheduled: plan ? plan.scheduled : 0, deferred: plan ? plan.deferred.length : 0, days, start_date: new Date(start).toISOString().slice(0, 10), finish_date: finish,
       stop_rules: [`Bounce rate over ${CAPS.bounceBreakerRate * 100}% pauses the campaign`, `${CAPS.hostileBreakerCount} hostile/spam signals pause the campaign`, "Any provider warning pauses the campaign", "Any opt-out suppresses that person instantly, everywhere, forever", "Follow-up waves send only after your continue tap"],
       // SERIAL-1511: an approval covers only the exact messages the person reviewed, within the scope they approved, until

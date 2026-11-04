@@ -96,16 +96,7 @@ const CareerOnboarding = (() => {
     const p = profile || {}, cons = p.constraints || {}, prefs = p.preferences || {}, basics = p.basics || {};
     const hit = (answer, source) => ({ found: true, answer, source, reasked: false });
     const miss = (what) => ({ found: false, answer: null, reasked: true, ask: `I do not have your ${what} stored yet — what is it? I will save it and never ask again.` });
-    if (/graduat/.test(q)) {
-      if (cons.graduationDate) return hit(`Your graduation date is ${cons.graduationDate}.`, "profile constraints.graduationDate (stored, ask-once)");
-      // ONBOARDING ROUND 3 (2026-11-01): "what's my graduation year?" with "..., May 2024" on the confirmed resume said "I do
-      // not have your graduation date stored yet". The confirmed education entry's own last date is read back, as written
-      // there (never a year guessed from a range's start, a month added, or an entry that shows none); two dated entries
-      // are both named.
-      const dated = confirmedEducation(p).map((f) => { const line = eduLine(f), ds = /\b(?:present|current|now|ongoing)\b/i.test(line) ? null : line.match(GRAD_DATE_G); return ds && { date: ds[ds.length - 1], school: eduSchool(f) }; }).filter(Boolean);
-      if (dated.length) return hit(`On your confirmed resume: ${dated.map((d) => `${d.date}${d.school ? ` (${d.school})` : ""}`).join("; ")}.`, "confirmed resume fact: education");
-      return miss("graduation date");
-    }
+    if (/graduat/.test(q)) return cons.graduationDate ? hit(`Your graduation date is ${cons.graduationDate}.`, "profile constraints.graduationDate (stored, ask-once)") : miss("graduation date");
     if (/work authorization|authorised|authorized to work|sponsorship/.test(q)) return cons.workAuthorization ? hit(`Your saved work authorization: ${cons.workAuthorization}.`, "profile constraints.workAuthorization (stored, ask-once)") : miss("work authorization");
     if (/target companies|companies.*target/.test(q)) return (prefs.targetCompanies || []).length ? hit(`Your target companies: ${prefs.targetCompanies.join(", ")}.`, "profile preferences.targetCompanies (stored)") : miss("target companies");
     if (/what roles|roles?.*(?:looking|want|target)|looking for|what (?:jobs?|positions?|kind of)/.test(q)) return (prefs.roles || []).length ? hit(`You are looking for: ${prefs.roles.join(", ")}.`, "profile preferences.roles (stored)") : miss("target roles");
@@ -116,25 +107,6 @@ const CareerOnboarding = (() => {
       // The confirmed resume's education entry, as written there ("..., GPA 3.7, ..."); a draft is never read.
       const g = confirmedEducation(p).map((f) => { const m = /\bGPA\b[:\s]*([0-4]\.\d{1,2})\b/i.exec(eduLine(f)); return m && { gpa: m[1], school: eduSchool(f) }; }).find(Boolean);
       return g ? hit(`Your GPA on your confirmed resume: ${g.gpa}${g.school ? ` (${g.school})` : ""}.`, "confirmed resume fact: education") : miss("GPA");
-    }
-    // ONBOARDING ROUND 2 (2026-10-30): "where have I worked?" with a confirmed resume was answered "No employer is on your
-    // record yet ... the record holds only what you state" (142 read stated facts only), and "what's on my resume?" fell to
-    // the catch-all. Both are read from the confirmed resume, as the person confirmed it; a draft is never read back.
-    if (EMPLOYER_ASK.test(q)) {
-      const exp = confirmedEntries(p, ["experience"]);
-      if (!exp.length) return { found: false, answer: null, reasked: false, ask: null };
-      return hit(`From your confirmed resume: ${exp.map(eduLine).join("; ")}.`, "confirmed resume fact: experience");
-    }
-    if (RESUME_ASK.test(q)) {
-      const all = confirmedEntries(p, ["experience", "education", "project", "leadership", "award", "certification", "skill"]);
-      if (!all.length) {
-        const drafts = ((p && p.facts) || []).some((f) => f && f.source === "resume-ingest" && f.needs_confirmation === true);
-        return { found: false, answer: null, reasked: true, ask: drafts ? "Nothing from your resume is confirmed yet: its entries are drafts waiting for your yes, and nothing uses a draft. Reply \"yes, that's my resume\" if the entries I showed you are right, or tell me what to fix."
-          : "No resume of yours is confirmed yet, so nothing from one is on your record. Paste it or send the file and I'll show you each entry for your yes." };
-      }
-      const skills = all.filter((f) => f.kind === "skill").map((f) => String(f.name || f.title));
-      const rest = all.filter((f) => f.kind !== "skill").map(eduLine);
-      return hit(`From your confirmed resume: ${[...rest, ...(skills.length ? [`skills: ${skills.join(", ")}`] : [])].join("; ")}.`, "confirmed resume facts");
     }
     if (SCHOOL_ASK.test(q)) {
       const edu = confirmedEducation(p);
@@ -150,19 +122,10 @@ const CareerOnboarding = (() => {
   const recallText = (t) => t.replace(/\bwher\b/g, "where").replace(/\b(?:waht|wht|wat|whta)\b/g, "what").replace(/\bwhats\b/g, "what's").replace(/\b(?:schol|shcool|scool)\b/g, "school");
   // School asks: "where did I go to school?", "what school do I go to?", "what is my school / university / degree?".
   const SCHOOL_ASK = /\bwhere (?:did|do) i (?:go to |attend )?(?:school|college|university|study)\b|\bwhat (?:school|college|university) (?:did|do) i (?:go to|attend)\b|\bwhat(?:'?s| is) my (?:school|college|university|alma mater|degree)\b/;
-  const EMPLOYER_ASK = /\bwhere (?:have|did) i (?:ever )?(?:worked|work|interned|intern)\b|\bwhere i(?:'ve| have) worked\b|\bwhat (?:jobs?|companies|internships?|roles|positions|work experience|experience) (?:have i (?:had|done|held)|did i (?:have|do|hold)|do i have)\b|\bwho (?:have|did) i (?:ever )?work(?:ed)? for\b|\bwhat(?:'?s| is) my (?:work )?experience\b|\b(?:list|show me) my (?:jobs|work experience|experience)\b/;
-  const RESUME_ASK = /\bwhat(?:'?s| is) (?:on|in) my (?:resume|cv|record|profile)\b|\bwhat do you have (?:on|about) me\b|\bshow (?:me )?my (?:resume|cv|entries|confirmed entries)\b|\bread (?:me )?(?:back )?my (?:resume|cv|entries)\b|\bwhat (?:did|have) i confirm(?:ed)?\b/;
-  // Entries the person confirmed on a real profile (never the per-turn bridge of things they stated in chat, which 142's
-  // own recall reads back as stated).
-  function confirmedEntries(p, kinds) {
-    if (!p || p._fromStatedFacts) return [];
-    return (p.facts || []).filter((f) => f && kinds.includes(f.kind) && !String(f.id || "").startsWith("stated-") && f.needs_confirmation !== true && (f.status == null || f.status === "confirmed"));
-  }
   // Confirmed education entries only (the person's yes on the resume); a draft or a quarantined entry is never read back.
   function confirmedEducation(p) {
     return ((p && p.facts) || []).filter((f) => f && f.kind === "education" && f.needs_confirmation !== true && (f.status == null || f.status === "confirmed"));
   }
-  const GRAD_DATE_G = /\b(?:(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|autumn|winter)\.?\s+)?(?:\d{1,2}\/)?(?:19|20)\d\d\b/gi;
   const eduLine = (f) => String(f.title || f.text || "").split("\n")[0].replace(/\s+/g, " ").trim();
   const eduSchool = (f) => (eduLine(f).split(/\s+[-–—]\s+|,/)[0] || "").trim();
 
@@ -609,7 +572,7 @@ const CareerOnboarding = (() => {
     const tq = recallText(t);
     // With no profile at all the answer is the same honest ask, never the catch-all (flow-scenarios-safety.test.ts: "what's
     // my GPA?" from a person with nothing on file got "I may have missed what you meant").
-    if (/^(what'?s|what is) my\b/.test(tq) || SCHOOL_ASK.test(tq) || RECALL_ASK.test(tq) || EMPLOYER_ASK.test(tq) || RESUME_ASK.test(tq)) {
+    if (/^(what'?s|what is) my\b/.test(tq) || SCHOOL_ASK.test(tq) || RECALL_ASK.test(tq)) {
       const r = answerFromProfile(c.profile || {}, tq);
       // Not saved here, but maybe on the record elsewhere: work authorization (a sponsorship answer, a confirmed resume
       // line or a stated fact: 142's eligibility read-back), a location or a role the person stated in chat (142's

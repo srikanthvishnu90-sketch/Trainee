@@ -1,13 +1,9 @@
-// Step 2: ground. Current real data through OpenAI's web_search tool (the repo's responsesCall: OpenAI only, the worst case is
-// reserved in the day's model budget BEFORE the call, settled after). Three limits keep it cheap:
+// Step 2: ground. Current real data through a web search (dark for now: see gatewayGroundSearch). Three limits keep it cheap:
 //   cache      keyed by (field, stage, geography) with a TTL, so many similar questions share one set of searches; concurrent
 //              identical misses share one in-flight run;
 //   per answer at most MAX_SEARCHES searches and ANSWER_COST_CAP_USD counted at the worst case per search;
 //   daily      the gateway's reserve refuses a search when the day's cap is used up (the answer then says what it could not verify).
-import { costMicros, responsesCall, WEB_SEARCH_FEE_MICROS } from "../../model_gateway.ts";
-import { ModelBudgetBlockedError } from "../../model_calls.ts";
-import type { BudgetGate } from "../../model_budget.ts";
-import { BLOCKED_SEARCH_DOMAINS } from "../../career_people_provider.ts";
+import { webSearch } from "../../model_gateway.ts";
 import type { Kind } from "./fields.ts";
 import type { Understanding } from "./understand.ts";
 import { acceptFacts, type Rejected } from "./guard.ts";
@@ -71,38 +67,13 @@ export async function groundFor(o: { u: Understanding; search: GroundSearch; cac
   try { return await run; } finally { inflight.delete(key); }
 }
 
-// ------------------------------------------------------------------------------------------------ the OpenAI searcher
-const labelOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
-export function openAiGroundSearch(o: { fetch?: typeof fetch; apiKey: string; model: string; budget?: BudgetGate }): GroundSearch {
-  return async (plan, ctx) => {
-    let r: Response;
-    try {
-      r = await responsesCall({
-        apiKey: o.apiKey, model: o.model, request: o.fetch, budget: o.budget, timeoutMs: 45_000, role: "chat",
-        body: {
-          tool_choice: "required", max_tool_calls: 1, max_output_tokens: 1400, include: ["web_search_call.action.sources"],
-          tools: [{ type: "web_search", filters: { blocked_domains: BLOCKED_SEARCH_DOMAINS } }],
-          input: `Search: ${plan.q}\nPrefer government statistics (BLS, O*NET), licensing boards, industry bodies and the employers' own pages. Return ONLY JSON: {"facts":[{"kind":"${plan.kinds.join("|")}","text":"one plain sentence stating one fact","quote":"the exact words on the page that say it","url":"the page URL"}]}. At most 6 facts. Every number, date and name in text must appear in quote. If the page does not say it, leave it out. No opinions.`,
-        },
-      });
-    } catch (e) {
-      if (e instanceof ModelBudgetBlockedError) return { status: "blocked", detail: e.detail };
-      return { status: "error", detail: e instanceof Error ? e.message.slice(0, 120) : "search failed" };
-    }
-    if (!r.ok) return { status: r.status === 429 ? "blocked" : "error", detail: `HTTP ${r.status}` };
-    const j: any = await r.json().catch(() => null);
-    const urls: string[] = [];
-    let text = "";
-    for (const item of Array.isArray(j?.output) ? j.output : []) {
-      if (item?.type === "web_search_call") for (const s of item?.action?.sources ?? []) if (s?.url) urls.push(String(s.url));
-      if (item?.type === "message") for (const c of item.content ?? []) { text += c?.text ?? ""; for (const a of c?.annotations ?? []) if (a?.type === "url_citation" && a.url) urls.push(String(a.url)); }
-    }
-    let parsed: any = null;
-    try { parsed = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)); } catch { /* no facts */ }
-    const facts: Fact[] = (Array.isArray(parsed?.facts) ? parsed.facts : []).slice(0, 6)
-      .filter((f: any) => f && plan.kinds.includes(f.kind))
-      .map((f: any) => ({ id: "", kind: f.kind, text: String(f.text ?? ""), quote: String(f.quote ?? ""), url: String(f.url ?? ""), label: labelOf(String(f.url ?? "")) }));
-    const micros = costMicros(o.model, j?.usage);
-    return { status: "ok", facts, urls, cost_usd: micros === null ? null : (micros + WEB_SEARCH_FEE_MICROS) / 1e6 };
+// ------------------------------------------------------------------------------------------------ the searcher
+// Research ships DARK (owner directive 2026-11-02: Claude-only; Claude web search is not verified on these models). The one
+// searcher asks the gateway's web-search door, which answers "not available": nothing is reserved, sent or spent, and groundFor
+// reports the search as not completed. The caller does not even offer research while WEB_SEARCH_AVAILABLE is false.
+export function gatewayGroundSearch(): GroundSearch {
+  return async () => {
+    const r = await webSearch();
+    return { status: "error", detail: r.detail.slice(0, 120) };
   };
 }

@@ -40,6 +40,9 @@ export interface FeedSpec {
   id(job: any): string;
   toGreenhouse(job: any, board: string): GhJob;
   company(data: unknown): string | null;
+  // 2026-10-30: where a one-request JSON feed's job array is (a root key, or null: the root is the array), so a body too
+  // large to hold is read element by element; absent: not streamable (XML, paged).
+  arrayKey?: string | null;
 }
 
 // ------------------------------------------------------------------------------------------------ a small XML reader
@@ -98,6 +101,7 @@ export function workdayParts(board: string): { tenant: string; wd: string; site:
 export const FEEDS: Record<MoreProvider, FeedSpec> = {
   workable: {
     ...one,
+    arrayKey: "jobs",
     request: (b, _p, probe) => get(`https://apply.workable.com/api/v1/widget/accounts/${encodeURIComponent(b)}${probe ? "" : "?details=true"}`),
     parse: json,
     shape: (d: any) => (d && typeof d === "object" && Array.isArray(d.jobs) && typeof d.name === "string" ? { postings: d.jobs.length, name: d.name } : null),
@@ -113,6 +117,7 @@ export const FEEDS: Record<MoreProvider, FeedSpec> = {
   },
   recruitee: {
     ...one,
+    arrayKey: "offers",
     request: (b) => get(`https://${b}.recruitee.com/api/offers/`),
     parse: json,
     shape: (d: any) => (d && typeof d === "object" && Array.isArray(d.offers) ? { postings: d.offers.length, name: null } : null),
@@ -124,6 +129,7 @@ export const FEEDS: Record<MoreProvider, FeedSpec> = {
   },
   bamboohr: {
     ...one,
+    arrayKey: "result",
     request: (b) => get(`https://${b}.bamboohr.com/careers/list`),
     parse: json,
     shape: (d: any) => (d && typeof d === "object" && Array.isArray(d.result) && d.meta && typeof d.meta === "object" ? { postings: d.result.length, name: null } : null),
@@ -163,6 +169,7 @@ export const FEEDS: Record<MoreProvider, FeedSpec> = {
   },
   breezy: {
     ...one,
+    arrayKey: null,
     request: (b) => get(`https://${b}.breezy.hr/json`),
     parse: json,
     shape: (d: any) => (Array.isArray(d) && d.every((x) => x && typeof x === "object" && "name" in x && "id" in x) ? { postings: d.length, name: null } : null),
@@ -180,6 +187,9 @@ export const FEEDS: Record<MoreProvider, FeedSpec> = {
     request: (b) => get(`https://${b}.jobs.personio.de/xml`, "application/xml, text/xml"),
     parse: (text) => {
       if (!isRoot(text, "workzag-jobs")) return undefined;
+      // 2026-10-30 (ingest round 2): a feed cut off before its end is not the list (its whole positions used to be read
+      // as the complete board, and every position past the cut closed).
+      if (!/<\/workzag-jobs>\s*$/.test(text)) return undefined;
       return { positions: xmlBlocks(text, "position").map((p) => ({
         id: xmlField(p, "id"), name: xmlField(p, "name"), office: xmlField(p, "office"), subcompany: xmlField(p, "subcompany"),
         department: xmlField(p, "department"), createdAt: xmlField(p, "createdAt"), schedule: xmlField(p, "schedule"),

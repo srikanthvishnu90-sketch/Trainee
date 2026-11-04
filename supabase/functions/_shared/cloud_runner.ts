@@ -222,6 +222,10 @@ export function vercelSandboxHost(o: {
   vcpus?: number;
   timeoutMs?: number;
   repoDir?: string;
+  // The owner's switch UPMORE_SCRIPT_SUBMIT_LIVE=1 (a secret of this function): handed to both runner scripts so the engine
+  // binds a real Greenhouse, Ashby or Lever form's scripted Submit (scripts/apply.ts scriptSubmitFamily). Without it every
+  // Ashby posting, Ramp's included, stops at SUBMIT_DESTINATION_NOT_BOUND in the preparation and in the send.
+  scriptSubmitLive?: boolean;
   fetch?: typeof fetch;
 }): SandboxHost {
   const f = o.fetch ?? fetch, api = "https://api.vercel.com";
@@ -251,7 +255,8 @@ export function vercelSandboxHost(o: {
       await call(`/v2/sandboxes/sessions/${encodeURIComponent(sandbox)}/cmd`, {
         command: "bash", cwd: dir,
         args: ["-c", `exec deno run -A --no-check ${script} > /tmp/runner.log 2>&1`],
-        env: { ...env, PLAYWRIGHT_BROWSERS_PATH: "/vercel/.cache/ms-playwright", UPMORE_PLAYWRIGHT_PATH: `${dir}/tools/node_modules/playwright` },
+        env: { ...env, PLAYWRIGHT_BROWSERS_PATH: "/vercel/.cache/ms-playwright", UPMORE_PLAYWRIGHT_PATH: `${dir}/tools/node_modules/playwright`,
+          ...(o.scriptSubmitLive ? { UPMORE_SCRIPT_SUBMIT_LIVE: "1" } : {}) },
       });
     },
     async stop(sandbox) {

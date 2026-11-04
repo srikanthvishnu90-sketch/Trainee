@@ -13,6 +13,9 @@ export interface InterviewStore {
   save(userId: string, row: InterviewRow): Promise<boolean>;
   list(userId: string): Promise<InterviewRow[]>;
   briefed(userId: string, key: string, at: number, ms: number | null): Promise<void>;
+  // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): a stored interview moved to another time or cancelled by a later email.
+  // Absent: neither is recorded (and a thank-you can still be drafted for it).
+  mark?(userId: string, key: string, m: { moved_at?: string; cancelled_at?: string }): Promise<void>;
   // People with an interview dated in [from, to], for the thank-you and nudge run.
   dated(fromDate: string, toDate: string): Promise<InterviewPerson[]>;
 }
@@ -46,6 +49,10 @@ export function memoryBriefStores(init: Partial<MemoryBriefs> = {}): { interview
       const r = (st.interviews[u] ?? []).find((x) => x.key === key);
       if (r) { r.brief_at = new Date(at).toISOString(); r.brief_ms = ms; }
     },
+    async mark(u, key, m) {
+      const r = (st.interviews[u] ?? []).find((x) => x.key === key);
+      if (r) Object.assign(r, copy(m));
+    },
     async dated(from, to) {
       return Object.entries(st.interviews).filter(([, rs]) => rs.some((r) => r.date && r.date >= from && r.date <= to)).map(([u]) => copy(person(u)));
     },
@@ -75,6 +82,7 @@ const fromRow = (r: any): InterviewRow => ({
   when_said: Array.isArray(r.when_said) ? r.when_said : [], date: r.interview_date ?? null, time: r.interview_time ?? null, zone: r.zone ?? null,
   starts_at: r.starts_at ?? null, format: r.format ?? null, interviewers: Array.isArray(r.interviewers) ? r.interviewers : [],
   mail_at: r.mail_at ?? null, seen_at: r.seen_at, brief_at: r.brief_at ?? null, brief_ms: r.brief_ms ?? null,
+  ...(r.moved_at ? { moved_at: r.moved_at } : {}), ...(r.cancelled_at ? { cancelled_at: r.cancelled_at } : {}),
 });
 // deno-lint-ignore no-explicit-any
 export function supabaseInterviewStore(admin: any): InterviewStore {
@@ -94,6 +102,10 @@ export function supabaseInterviewStore(admin: any): InterviewStore {
     },
     async briefed(u, key, at, ms) {
       must(await admin.from("career_interviews").update({ brief_at: new Date(at).toISOString(), brief_ms: ms === null ? null : Math.max(0, Math.round(ms)) }).eq("user_id", u).eq("invite_key", key), "record the brief");
+    },
+    // moved_at and cancelled_at are 20261030070000_proactive_r2.sql's.
+    async mark(u, key, m) {
+      must(await admin.from("career_interviews").update(m).eq("user_id", u).eq("invite_key", key), "record that the interview moved or was cancelled");
     },
     async dated(from, to) {
       const rows = must<any[]>(await admin.from("career_interviews").select("user_id").gte("interview_date", from).lte("interview_date", to).limit(5000), "read dated interviews") ?? [];
@@ -141,7 +153,7 @@ export function supabaseDigestStore(admin: any): DigestStore {
     },
     async rows(u, sinceIso) {
       const [queue, threads, mail, interviews, drafts, alerts, events] = await Promise.all([
-        admin.from("career_apply_jobs").select("id,company,url,state,created_at,updated_at,title:payload->>title").eq("user_id", u).order("created_at", { ascending: false }).limit(1000),
+        admin.from("career_apply_jobs").select("id,company,url,state,created_at,claimed_at,updated_at,title:payload->>title").eq("user_id", u).order("created_at", { ascending: false }).limit(1000),
         admin.from("agent_flow_state").select("rows:state->career->stores->trackStore->rows").eq("user_id", u).limit(200),
         admin.from("career_mail_events").select("application_ref,kind,company,role,stage,flagged,evidence,message_hash,mail_at").eq("user_id", u).order("mail_at", { ascending: true }).limit(2000),
         admin.from("career_interviews").select("*").eq("user_id", u).order("seen_at", { ascending: false }).limit(200),

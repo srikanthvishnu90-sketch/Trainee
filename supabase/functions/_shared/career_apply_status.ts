@@ -10,6 +10,7 @@
 //   - a record that cannot be read is said so; nothing is guessed.
 // Anything that is not a question about where applications stand returns null, and the turn goes on as before.
 import { sameCompany } from "./career_mail.ts";
+import { type ApplySummary, applySummary } from "./apply_status_summary.ts";
 
 export const STATUS_INTENT = "career_apply_status";
 const MAX_LISTED = 8, RECENT_DAYS = 30;
@@ -18,6 +19,7 @@ const MAX_LISTED = 8, RECENT_DAYS = 30;
 export interface AppRow {
   id: string; company: string; state: string; reason?: string | null; confirmation_id?: string | null;
   email_confirmed_at?: string | null; created_at: string; updated_at: string; title?: string | null; url?: string | null;
+  job_id?: string | null;
 }
 export type ReadApplications = (userId: string) => Promise<AppRow[]>;
 
@@ -25,7 +27,7 @@ export type ReadApplications = (userId: string) => Promise<AppRow[]>;
 // deno-lint-ignore no-explicit-any
 export function supabaseApplications(admin: any): ReadApplications {
   return async (userId) => {
-    const r = await admin.from("career_apply_jobs").select("id,company,url,state,reason,confirmation_id,email_confirmed_at,created_at,updated_at,title:payload->>title")
+    const r = await admin.from("career_apply_jobs").select("id,job_id,company,url,state,reason,confirmation_id,email_confirmed_at,created_at,updated_at,title:payload->>title")
       .eq("user_id", userId).order("updated_at", { ascending: false }).limit(500);
     if (r.error) throw new Error(`read the applications: ${r.error.message}`);
     return (r.data ?? []) as AppRow[];
@@ -66,6 +68,69 @@ export function statusAsk(message: string): { company: string | null; latest?: t
 
 const date = (iso: string | null | undefined) =>
   iso && Number.isFinite(Date.parse(iso)) ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : null;
+// What a stop that needs the person is, in their words (the queue keeps a code).
+export const NEEDS_YOU_WORDS: Record<string, string> = {
+  captcha: "a verification check on the employer's page, which Trainee never solves; finish it yourself at the link",
+  bot_check: "a verification check on the employer's page, which Trainee never solves; finish it yourself at the link",
+  login_required: "the employer's site asks you to sign in to an account first; Trainee never signs in for you",
+  needs_answers: "the form asks a question you haven't answered yet; Trainee asked you instead of guessing",
+};
+// Submit worker round (2026-10-31): the queue keeps the worker's reason codes (HOST_RATE_LIMITED, RESUME_CHANGED,
+// CARD_CLOUD_AUTHORIZATION_REFUSED, needs_answers, worker_stopping, ...), and "where are my applications" printed them as
+// they are: "not sent (HOST_RATE_LIMITED)", "not sent (not sent: the posting closed ...)", "it needs you (needs_answers)".
+// Every ended application now says why in the person's words; a code this table does not know says what its state means,
+// never the code. Each says nothing was sent only where nothing was (a stop before the engine's Submit).
+const NOTHING_SENT = "nothing was sent";
+const CODE_WORDS: [RegExp, string][] = [
+  [/^(HOST_RATE_LIMITED|rate_limited|DRIVER_HOST_REFUSED|HOST_HELD)$/, `the employer's site kept asking us to slow down; ${NOTHING_SENT}`],
+  [/^(CAPTCHA_AT_SUBMIT|captcha|bot_check)$/, "the employer's page showed a verification check, which Trainee never solves; finish it yourself at the link"],
+  [/^(login_required|ACCOUNT_LOGIN_REQUIRED|SIGNED_OUT|SIGN_IN_TIMEOUT|EMAIL_CODE_NEEDS_SIGN_IN)$/, "the employer's site asks you to sign in first; Trainee never signs in for you"],
+  [/^needs_answers$/, `the form asks a question you haven't answered yet; Trainee asked you instead of guessing, and ${NOTHING_SENT}`],
+  [/^(APPROVED_APPLICATION_CHANGED|APPROVED_BODY_MISMATCH|APPROVED_MANIFEST_CHANGED|INVALID_APPROVED_SCHEMA|CONTRACT_REFUSED|CONFLICTING_APPROVED_ANSWERS|PAYLOAD_CHANGED_BEFORE_CLICK|CODE_REQUEST_CHANGED_APPLICATION|FACTS_CHANGED|FORM_SCHEMA_CHANGED|POSTING_BINDING_MISMATCH|STATE_BINDING_MISMATCH|APPROVED_SOURCE_WITHDRAWN|approval_changed)$/, `the application or the form changed after you approved it, so it was not sent as approved; ${NOTHING_SENT}`],
+  [/^(RESUME_CHANGED|RESUME_NOT_IN_CLOUD|NO_RESUME|RESUME_SHA_MISMATCH|resume_not_in_cloud|RESUME_INPUT_NOT_OBSERVED)$/, `the resume you approved could not be attached exactly as approved; ${NOTHING_SENT}`],
+  [/^(FACTS_EXPIRED|approval_expired)$/, `your approval expired before it could be sent; ${NOTHING_SENT}`],
+  [/^(ACCOUNT_PAUSED|person_paused)$/, `Trainee is paused for you; ${NOTHING_SENT}`],
+  [/^FACTS_ERASED$/, `your Trainee data was erased; ${NOTHING_SENT}`],
+  [/^(FACT_OWNER_MISMATCH|CONFIRMED_FACT_OWNER_REQUIRED)$/, `an answer was not one of your own confirmed facts, so it was not sent; ${NOTHING_SENT}`],
+  [/^(duplicate_job|duplicate_posting)$/, `you already applied to this exact posting; ${NOTHING_SENT}`],
+  [/^POSTING_CLOSED$/, `this posting closed before it could be submitted; ${NOTHING_SENT}`],
+  [/^(daily_cap|daily_limit)$/, `you had reached the daily pace you set; ${NOTHING_SENT}`],
+  [/^IDENTITY_NUMBER_REQUESTED$/, `the form asks for an identity number, which only you type; ${NOTHING_SENT}`],
+  [/^(UNCONFIRMED_HIDDEN_FIELD|UNSUPPORTED_FILE_ARTIFACT|SUBMIT_DESTINATION_NOT_BOUND|SUBMIT_DESTINATION_UNEXPECTED|SUBMIT_DESTINATION_CHANGED|SCRIPT_SUBMIT_FAMILY_MISMATCH|HOST_REDIRECT_REFUSED|portal_not_cloud|person_submits)$/, `the employer's form works in a way Trainee does not submit for you; finish it at the link. ${NOTHING_SENT[0].toUpperCase()}${NOTHING_SENT.slice(1)}`],
+  [/^(PERSON_SUBMITS_NEEDS_HEADED|HANDOFF_NEEDS_HEADED|PERSON_DID_NOT_SUBMIT|user_declined)$/, `this one is yours to submit at the link; ${NOTHING_SENT}`],
+  [/^(CARD_CLOUD_[A-Z_]+|NO_ENGINE_APPROVAL|NOT_APPROVED|not_approved|stale|INCOMPLETE_CLOUD_CARD|posting_closed)$/, `the last check before Submit did not pass (your approval, your account or the posting changed); ${NOTHING_SENT}`],
+  [/^(worker_stopping|WORKER_STOPPING|not_started_in_lease|NOT_STARTED_IN_LEASE|host_held|journal_unwritable|JOURNAL_BAD_ID|APPLY_CLAIM_CLOSED)$/, `it could not start in time; ${NOTHING_SENT}`],
+];
+// The apply VM worker's own stop codes (workers/career-browser): a required question it will not guess (the question follows the
+// code: "missing_required_answer: Why Acme?"), a page it could not read or is not allowed to send to. Nothing was sent for any.
+CODE_WORDS.push(
+  [/^missing_required_answer$/, `the form asks a required question you have not answered; Trainee asked you instead of guessing, and ${NOTHING_SENT}`],
+  [/^field_not_filled$/, `a required question could not be filled in and checked on the employer's form; Trainee did not guess, and ${NOTHING_SENT}`],
+  [/^(host_not_allowed|host_denied|site_not_supported|invalid_url)$/, `Trainee does not apply on this site; ${NOTHING_SENT}`],
+  [/^no_application_form_found$/, `no application form was found on the employer's page; ${NOTHING_SENT}`],
+  [/^(retries_exhausted|page_load_\d+)$/, `the employer's page did not load; ${NOTHING_SENT}`],
+  [/^WORKER_ERROR$/, `something went wrong on our side before it was sent; ${NOTHING_SENT}`],
+  [/^(redirect_not_allowed|form_action_not_allowed)$/, `the employer's page pointed somewhere Trainee does not send to; ${NOTHING_SENT}`],
+  [/^(resume_mismatch|invalid_payload)$/, `what was approved could not be read back exactly; ${NOTHING_SENT}`],
+);
+const NAMES_THE_QUESTION = /^(missing_required_answer|field_not_filled)$/;
+const RAW_CODE = /\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b|^[a-z]+(?:_[a-z0-9]+)+$/;
+// Why an application ended, in the person's words (no trailing period); `state` decides what a code nobody named means.
+export function reasonWords(state: string, reason: string | null | undefined): string {
+  const r = String(reason ?? "").replace(/\s+/g, " ").trim();
+  const code = r.split(/[:\s]/)[0];
+  for (const [re, words] of CODE_WORDS) {
+    if (!(re.test(code) || re.test(r))) continue;
+    // The question the worker would not guess is named: required question "Why do you want to work at Acme?".
+    const q = NAMES_THE_QUESTION.test(code) ? r.slice(code.length).replace(/^:\s*/, "").slice(0, 90) : "";
+    return q ? `${words} (the question: "${q}")` : words;
+  }
+  // Already prose (the database's own reasons): kept, without a "not sent:" the line already says.
+  if (r && /\s/.test(r) && !RAW_CODE.test(r)) return r.replace(/^not sent:\s*/i, "").replace(/[.\s]+$/, "");
+  if (state === "failed") return "the employer's site did not accept it";
+  if (state === "needs_user") return "it needs you at the employer's page; it was not sent";
+  return `it stopped before it could be sent; ${NOTHING_SENT}`;
+}
 export function statusLine(a: AppRow): string {
   const who = a.company || "An employer", name = `${who}${a.title ? ` (${a.title})` : ""}`, on = date(a.updated_at), conf = a.confirmation_id;
   switch (a.state) {
@@ -76,10 +141,13 @@ export function statusLine(a: AppRow): string {
     case "unknown_outcome":
       return `${name}: I can't tell whether it reached ${who}. It will not be sent again.`;
     case "needs_user":
-      return `${name}: stopped before it was sent; it needs you (${a.reason ?? "no reason recorded"}).`;
+      // Round 2 of the apply scenarios (2026-10-30): an emailed code is asked AFTER the application went (the receipt says
+      // so); "stopped before it was sent" was untrue for it, and the reason was the queue's own code ("email_code").
+      if (a.reason === "email_code") return `${name}: sent, but not finished: ${who} emailed you a code to finish it. Type it on their page yourself; it will not be sent again.`;
+      return `${name}: stopped before it was sent; it needs you (${NEEDS_YOU_WORDS[String(a.reason)] ?? reasonWords(a.state, a.reason)}).`;
     case "failed":
     case "not_submitted":
-      return `${name}: not sent (${a.reason ?? "no reason recorded"}).`;
+      return `${name}: not sent (${reasonWords(a.state, a.reason)}).`;
     case "queued":
       // A site that asked us to slow down before anything was sent: the same application waits and goes by itself
       // (20261029180000 writes the reason, with when).
@@ -92,10 +160,23 @@ export function statusLine(a: AppRow): string {
 }
 
 // The reply to a status question, from the rows (null: they could not be read). Null when the text is not one.
-export function statusReply(message: string, rows: AppRow[] | null, now: number): { reply: string; status: string; intent: string } | null {
+// (B) 20261101130000: an application stopped for a question the form added after the approval (not_submitted,
+// needs_answers) is history once the same posting (job_id, as career_apply_status_for matches) has a newer row
+// (re-prepared, approved again): only the newer is said.
+export function liveRows(rows: AppRow[]): AppRow[] {
+  const history = (a: AppRow) => a.state === "not_submitted" && a.reason === "needs_answers";
+  return rows.filter((a) => !(history(a) && !!a.job_id && rows.some((b) => b !== a && b.job_id === a.job_id && Date.parse(b.created_at) > Date.parse(a.created_at))));
+}
+export function statusReply(message: string, rows: AppRow[] | null, now: number): { reply: string; status: string; intent: string; summary?: ApplySummary } | null {
   const ask = statusAsk(message);
   if (!ask) return null;
   if (!rows) return { reply: "I couldn't read your applications just now, so I can't say whether any were sent. Ask me again in a minute.", status: "unreadable", intent: STATUS_INTENT };
+  rows = liveRows(rows);
+  const r = statusReplyFor(ask, rows, now);
+  // Spec 6.5: the counts a reply may state, from the rows' own states (all of the person's live rows; "applied" only for a confirmed one).
+  return { ...r, summary: applySummary(rows) };
+}
+function statusReplyFor(ask: NonNullable<ReturnType<typeof statusAsk>>, rows: AppRow[], now: number): { reply: string; status: string; intent: string } {
   if (ask.latest) {
     const last = [...rows].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0];
     if (!last) return { reply: "I have no application on record for you, so nothing was sent through Trainee.", status: "none", intent: STATUS_INTENT };
@@ -111,7 +192,31 @@ export function statusReply(message: string, rows: AppRow[] | null, now: number)
   const recent = rows.filter((a) => Date.parse(a.updated_at) >= now - RECENT_DAYS * 86_400_000 || ["queued", "driving", "needs_user"].includes(a.state));
   if (!recent.length) return { reply: `No applications are on record from the last ${RECENT_DAYS} days: nothing was sent for you through Trainee.`, status: "none", intent: STATUS_INTENT };
   const more = recent.length > MAX_LISTED ? `\n…and ${recent.length - MAX_LISTED} more.` : "";
-  return { reply: `Your applications, newest first:\n${recent.slice(0, MAX_LISTED).map((a) => `- ${statusLine(a)}`).join("\n")}${more}`, status: "shown", intent: STATUS_INTENT };
+  // MASS APPLY (2026-11-01): a batch is summed up first, every application counted by what happened, and the ones waiting
+  // on the person listed first, so none of those is ever below the cut.
+  const head = recent.length > 1 ? `${countsLine(recent)}\n` : "";
+  const waiting = (a: AppRow) => (a.state === "needs_user" ? 0 : 1);
+  const listed = [...recent].sort((a, b) => waiting(a) - waiting(b));
+  return { reply: `${head}Your applications, ${recent.some((a) => a.state === "needs_user") ? "the ones waiting on you first, then " : ""}newest first:\n${listed.slice(0, MAX_LISTED).map((a) => `- ${statusLine(a)}`).join("\n")}${more}`, status: "shown", intent: STATUS_INTENT };
+}
+
+// "12 applications: 7 submitted, 1 waiting on you, 3 not sent, 1 approved and not sent yet." (states as recorded).
+export function countsLine(rows: AppRow[]): string {
+  const n = (f: (a: AppRow) => boolean) => rows.filter(f).length;
+  const parts: [number, string][] = [
+    [n((a) => a.state === "confirmed"), "confirmed by the employer"],
+    [n((a) => a.state === "submitted_unconfirmed"), "submitted"],
+    [n((a) => a.state === "unknown_outcome"), "may have gone (unknown)"],
+    [n((a) => a.state === "needs_user"), "waiting on you"],
+    [n((a) => a.state === "not_submitted"), "not sent"],
+    [n((a) => a.state === "queued" || a.state === "driving"), "approved and not sent yet"],
+    [n((a) => a.state === "failed"), "turned down by the employer's form"],
+  ];
+  // Every row is counted once: a state not named above is said as "other", so the counts always add up to the total.
+  const named = parts.reduce((k, [x]) => k + x, 0);
+  if (named < rows.length) parts.push([rows.length - named, "other"]);
+  const said = parts.filter(([k]) => k > 0).map(([k, w]) => `${k} ${w}`);
+  return `${rows.length} applications: ${said.join(", ")}.`;
 }
 
 // One chat turn: the read only for a status question; a read that fails is said, never guessed.

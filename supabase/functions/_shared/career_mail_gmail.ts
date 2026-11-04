@@ -114,7 +114,8 @@ export async function readMailSince(
 export interface TokenDeps {
   connection: (userId: string) => Promise<{ vault_name: string; scopes?: string | string[] | null } | null>;
   readVault: (name: string) => Promise<string | null>;
-  writeVault: (name: string, secret: string) => Promise<void>;
+  // false: the connection went while the token was refreshed (oauth_vault_refresh wrote nothing): the token is not used.
+  writeVault: (name: string, secret: string) => Promise<void | boolean>;
   fetch: typeof fetch;
   env: { get(k: string): string | undefined };
   now: () => number;
@@ -146,7 +147,8 @@ export function careerTokenFor(d: TokenDeps, scope: string): (userId: string) =>
       if (r.status === 400 || r.status === 401) return null; // invalid_grant: revoked; the person reconnects in the app
       throw new Error(`refresh the career grant: HTTP ${r.status}`);
     }
-    await d.writeVault(name, JSON.stringify({ ...tok, access_token: nt.access_token, refresh_token: nt.refresh_token || tok.refresh_token, expires_at: d.now() + (Number(nt.expires_in) || 3600) * 1000 }));
+    const kept = await d.writeVault(name, JSON.stringify({ ...tok, access_token: nt.access_token, refresh_token: nt.refresh_token || tok.refresh_token, expires_at: d.now() + (Number(nt.expires_in) || 3600) * 1000 }));
+    if (kept === false) return null; // disconnected (or the account deleted) while this refresh ran: nothing is read or sent with it
     return String(nt.access_token);
   };
 }

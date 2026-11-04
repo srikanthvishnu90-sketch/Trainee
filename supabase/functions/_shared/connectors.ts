@@ -19,12 +19,16 @@
 // Microsoft (outlook_graph.ts) and Google are the only network peers, both faked at the HTTP boundary in tests.
 // deno-lint-ignore-file no-explicit-any
 import { connectLine, connectUrlsFor } from "./connect_link.ts";
+import { FONT_CSP, systemPage } from "./brand.ts";
 import { careerTokenFor, CAREER_READ_SCOPE, CAREER_SEND_SCOPE } from "./career_mail_gmail.ts";
 import { disconnectGoogle, disconnectReply, revokeWords } from "./google_disconnect.ts";
 import { askWords, disconnectOf, gmailConnectOf, whatsConnectedOf } from "./connector_words.ts";
 import { consentNotice, GMAIL_READONLY, GMAIL_SEND, requestableScopes } from "./google_scopes.ts";
 import { channelOf, disconnectOutlook, disconnectWords, linkBase as outlookLinkBase, MICROSOFT_NOTE, outlookFor, RECONNECT_REPLY, TELEGRAM_BROWSER, tokenDeps as msTokenDeps } from "./outlook_connector.ts";
 import { ENV as MS_ENV, hasScope, outlookToken, PROVIDER as MS_PROVIDER } from "./outlook_graph.ts";
+import { vaultRefreshWrite } from "./oauth_vault_refresh.ts";
+import { missingWords, PARTIAL_WORDS } from "./oauth_connect.ts";
+export { missingWords, PARTIAL_WORDS };
 
 type Admin = any;
 export interface Env { get(k: string): string | undefined }
@@ -109,7 +113,7 @@ const gmail: Connector = {
       const tok = await careerTokenFor({
         fetch: d.fetch, env: d.env, now: d.now, connection: async () => conn,
         readVault: async (n) => { const v = must(await d.admin.rpc("oauth_vault_read", { p_name: n }), "read the Gmail access"); return v ? String(v) : null; },
-        writeVault: async (n, s) => { must(await d.admin.rpc("oauth_vault_store", { p_name: n, p_secret: s }), "save the refreshed Gmail access"); },
+        writeVault: (n, s) => vaultRefreshWrite(d.admin, n, s, "save the refreshed Gmail access"),
       }, scope)(userId);
       return tok ? { status: "ok", token: tok } : { status: "needs_reconnect" };
     } catch (e) { return { status: "error", detail: String((e as Error)?.message ?? e).slice(0, 120) }; }
@@ -291,6 +295,23 @@ async function connectPageReply(d: Deps, o: { userId: string; channel: string; r
   return { reply: connectLine(o.reason, u.url), meta: o.channel === "telegram" ? { link_button: { text: "Connect email", url: u.url } } : null };
 }
 
+// Why an application stays "submitted" and not "Submitted - confirmed": only the employer's own confirmation email (or the reference
+// their page showed) moves it, and the email is read from the person's mailbox. When a status answer has applications waiting on that
+// and no mailbox is connected, the answer carries the connect page's link (reason "confirm") and says why, in plain words. Null when
+// nothing waits, a mailbox is connected, or nothing can be connected yet. The link is the same signed, single-use, one-hour link.
+export async function confirmMailAsk(d: Deps, o: { userId: string; channel: string; unconfirmed: number }): Promise<{ text: string; meta: Record<string, unknown> | null } | null> {
+  const n = Math.floor(Number(o.unconfirmed) || 0);
+  if (n < 1) return null;
+  if ((await statuses(d, o.userId)).some((x) => x.state === "connected")) return null;
+  const u = await connectUrlsFor(d.env, o.userId, "confirm", d.now(), /^[a-z]{3,16}$/.test(o.channel) ? o.channel : "web");
+  const mailWired = gmail.wired(d.env) || outlook.wired(d.env);
+  if (!u.url && !mailWired) return null;
+  const which = n === 1 ? "1 of your applications is" : `${n} of your applications are`;
+  const why = `${which} submitted, but the employer hasn't confirmed ${n === 1 ? "it" : "them"} yet. Only the employer's confirmation email can mark ${n === 1 ? "it" : "one"} Submitted - confirmed, so I need your email connected to see it (just the sender, subject and a short preview; I never send anything you haven't approved).`;
+  if (!u.url) return { text: `${why} Say "${gmail.connectAsk}" and I'll send you a link.`, meta: null };
+  return { text: `${why} Connect it here: ${u.url}`, meta: o.channel === "telegram" ? { link_button: { text: "Connect email", url: u.url } } : null };
+}
+
 // When the turn itself failed (a database read refused): the person still gets a plain, true answer, never the router's.
 export function connectorFailure(message: string): ChatOut | null {
   const a = connectorAsk(message);
@@ -329,8 +350,11 @@ export async function connectorChatTurn(d: TurnIn): Promise<ChatOut | null> {
     const outlookOnly = ask.need === "outlook" || (ask.need === "mail" && s.find((x) => x.id === "gmail")!.state !== "connected");
     if (!outlookOnly) return null; // Gmail is connected: career_inbox_followups reads it
     const read = d.readOutlook ?? ((u: string) => outlookFor(d.admin, d.env, d.fetch, { now: d.now }).readInbox(u));
-    const r = await read(d.userId).catch((e) => ({ status: "ERROR", stored: 0, detail: String((e as Error)?.message ?? e) }));
-    const reply = r.status === "ok" ? `I read your Outlook: ${r.stored === 0 ? "no new messages" : r.stored === 1 ? "1 new message" : `${r.stored} new messages`} since I last looked (sender, subject and preview only).`
+    const r: { status: string; stored: number; detail?: string } = await read(d.userId).catch((e) => ({ status: "ERROR", stored: 0, detail: String((e as Error)?.message ?? e) }));
+    // CONNECTORS ROUND 3 (2026-10-31): a grant without Mail.Read (the box left unticked at Microsoft) was answered "ask me
+    // again in a minute", which never helps; and a disconnect while the inbox was read is not a failure to retry.
+    const reply = r.status === "NOT_WIRED" ? (/does not allow/i.test(String(r.detail ?? "")) ? PARTIAL_WORDS.outlook.read : "Outlook isn't connected any more, so nothing was read or kept. Text \"connect my outlook\" to connect it again.")
+      : r.status === "ok" ? `I read your Outlook: ${r.stored === 0 ? "no new messages" : r.stored === 1 ? "1 new message" : `${r.stored} new messages`} since I last looked (sender, subject and preview only).`
       : r.status === "NEEDS_RECONNECT" ? RECONNECT_REPLY
       : r.status === "RATE_LIMITED" ? `Microsoft asked Trainee to wait before reading more of your Outlook${r.stored ? `; I read ${r.stored} new message${r.stored === 1 ? "" : "s"} first` : ""}. I'll carry on as soon as it allows.`
       : "I couldn't finish reading your Outlook just now. What I read before is kept; ask me again in a minute.";
@@ -363,7 +387,7 @@ export interface AfterDeps extends Deps {
   // Re-runs a parked task's ask as the person (agent-chat's service-role path, chatThroughAgent), with a stable turn key,
   // so a retried resume replays instead of acting twice. persisted: the turn wrote its own reply into the thread.
   runTurn: (a: { userId: string; threadId: string | null; message: string; turnKey: string }) => Promise<TurnResult>;
-  deliver?: (a: { userId: string; key: string; now: number }) => Promise<void>;
+  deliver?: (a: { userId: string; key: string; now: number }) => Promise<unknown>;
   log?: (l: string) => void;
 }
 // Says something in the place a link or a task came from: the web thread, or the channel's outbox.
@@ -408,11 +432,23 @@ export async function afterConnect(d: AfterDeps, userId: string, id: ConnectorId
     if (!link.error && link.data?.link_id) {
       const uses = c.uses(o.scopes ?? []);
       await tell(d, { user_id: userId, channel: link.data.channel, thread_id: link.data.thread_id }, `connect:${link.data.link_id}`,
-        `Gmail connected: ${o.email ?? "your account"}.${uses.length ? ` You allowed me to ${uses.join(", and to ")}.` : ""} Say "${c.disconnectAsk}" any time to remove it.`);
+        [`Gmail connected: ${o.email ?? "your account"}.${uses.length ? ` You allowed me to ${uses.join(", and to ")}.` : ""}`,
+          missingWords("gmail", o.scopes ?? [], { sendAsked: requestableScopes([GMAIL_READONLY, GMAIL_SEND], d.env).scopes.includes(GMAIL_SEND) }),
+          `Say "${c.disconnectAsk}" any time to remove it.`].filter(Boolean).join(" "));
     }
   }
   const claimed = must(await d.admin.rpc("career_parked_claim", { p_user: userId, p_needs: needsFor(id), p_now: at(d.now()), p_lease_seconds: 300 }), "claim the waiting tasks") ?? [];
   return await runClaimed(d, claimed as any[]);
+}
+
+// CONNECTORS ROUND 3 (2026-10-31): a Gmail connect the database refused (oauth_connect_commit 'taken': the address is
+// another Trainee account's). The link is finished and the person told why, in the chat it came from; nothing resumes.
+export async function refusedConnect(d: Omit<AfterDeps, "runTurn">, userId: string, id: ConnectorId, words: string): Promise<boolean> {
+  if (id !== "gmail") return false; // Outlook's callback finishes and tells on its own link table
+  const link = await d.admin.rpc("career_connector_link_finish", { p_user: userId, p_connector: "gmail", p_outcome: "error", p_now: at(d.now()) });
+  if (link.error || !link.data?.link_id) return false;
+  await tell(d as AfterDeps, { user_id: userId, channel: link.data.channel, thread_id: link.data.thread_id }, `connect:${link.data.link_id}`, words);
+  return true;
 }
 
 // A sweeper's batch (many run at once): tasks whose connector is connected but whose resume failed or never ran.
@@ -422,16 +458,11 @@ export async function resumeDue(d: AfterDeps, batch: number) {
 }
 
 // ------------------------------------------------------------------------------------------------ the Gmail link's page
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 const HEADERS = { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer", "x-frame-options": "DENY",
-  "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://accounts.google.com; frame-ancestors 'none'" };
+  "content-security-policy": `default-src 'none'; style-src 'unsafe-inline' ${FONT_CSP.style}; font-src ${FONT_CSP.font}; img-src data:; form-action 'self' https://accounts.google.com; frame-ancestors 'none'` };
+// On the shared Trainee shell (brand.ts systemPage): ink text on the warm ground, plum only on the one button (Q564, Q575).
 export function page(title: string, body: string[], status = 200, form?: { action: string; token: string; label: string }): Response {
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title>` +
-    `<style>body{font:16px/1.5 system-ui,sans-serif;background:#F2F2F4;color:#4A2F5E;margin:0;padding:24px}main{max-width:480px;margin:0 auto;background:#fff;border-radius:12px;padding:24px}` +
-    `button{font:inherit;background:#4A2F5E;color:#fff;border:0;border-radius:8px;padding:10px 16px}</style></head><body><main><p><b>Trainee</b></p><h1>${esc(title)}</h1>` +
-    body.map((p) => `<p>${esc(p)}</p>`).join("") +
-    (form ? `<form method="post" action="${esc(form.action)}"><input type="hidden" name="t" value="${esc(form.token)}"><button type="submit">${esc(form.label)}</button></form>` : "") +
-    `</main></body></html>`;
+  const html = systemPage(title, body, form);
   return new Response(html, { status, headers: HEADERS });
 }
 const GONE: Record<string, string> = {

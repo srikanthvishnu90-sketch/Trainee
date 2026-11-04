@@ -26,7 +26,7 @@ export const newTurnEffects = (): TurnEffects => ({ on: false, writes: new Set()
 // cost meter, and the rpcs that only read (PostgREST calls every rpc with POST).
 const BOOKKEEPING = new Set([
   "rpc:career_turn_gate_enter", "rpc:career_turn_gate_ready", "rpc:career_turn_gate_leave",
-  "rpc:career_host_load", "rpc:career_host_commit", "rpc:career_task_turn_commit_v1", "rpc:career_batch_turn_commit_v1",
+  "rpc:career_host_load", "rpc:career_host_commit", "rpc:career_host_commit_evidenced", "rpc:career_task_turn_commit_v1", "rpc:career_batch_turn_commit_v1",
   "rpc:career_task_result_v1", "rpc:career_batch_result_v1", "table:agent_turn_costs",
 ]);
 const READ_RPC = /^rpc:(career_[a-z_]*(_read|_get|_state|_ledger|_daily_limit|_for_read|_open_as|_sources|_read_own|_profile_for)|career_apply_ledger)$/;

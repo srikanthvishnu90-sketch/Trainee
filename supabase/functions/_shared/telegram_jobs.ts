@@ -769,7 +769,7 @@ export function supabaseJobStore(admin: any): JobStore {
       // on file) for Telegram's Apply and the jobs page's Apply too. The chat's apply turn refused ("no resume on file") while
       // the same person's Apply tap queued the posting with "When it's ready I'll show you the exact application to approve",
       // which never came: nothing is prepared or carded without a resume. Not readable: refused, never queued on a guess.
-      const onFile = await admin.rpc("career_resume_on_file", { p_user: userId }).then((r: any) => (r?.error ? null : r?.data === true), () => null);
+      const onFile = await admin.rpc("career_resume_on_file", { p_user: userId }).then((r: any) => (r?.error || typeof r?.data !== "boolean" ? null : r.data), () => null);
       if (onFile !== true) return { result: "refused", reason: onFile === false ? NO_RESUME_TAP_REASON : "I couldn't check your resume just now. Tap Apply again in a minute." };
       // WHOLE JOURNEYS R2: the account's pause holds on every door. The chat answered "Career work is paused, so I didn't start
       // anything" while the same person's Apply tap and the jobs page's Apply queued postings to be prepared. Unreadable: refused.

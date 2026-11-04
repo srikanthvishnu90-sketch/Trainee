@@ -23,6 +23,7 @@
 // A failure names the journey's seed and index and the steps so far, so it can be replayed alone (JR2_ONLY=<index>).
 // deno-lint-ignore-file no-explicit-any
 import { type Person, POSTINGS, connectionsCsv, emailOf, resumeOf, type World, lit as q } from "./journeys-r2-world.ts";
+import { isApplyAllYes } from "../../../supabase/functions/_shared/apply_all_yes.ts";
 
 // The words of a page (the jobs page's HTML), for the checks a reply gets.
 export const textOf = (html: string) => html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/g, " ").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, " ").trim();
@@ -172,6 +173,22 @@ export class Runner {
       // A plain yes while this thread's last word is the card answers the card, whatever the person had in mind.
       if (V.card && /^(?:yes\b|yep\b|go ahead\b|approve them\b|send them\b)/i.test(text) && !/\?\s*$/.test(text)) approvedNow.apps.push(...V.card.items.map((it) => `${it.job_id}|${it.payload_hash}`));
       if (V.drafts && /^(?:yes\b|yep\b|go ahead\b|approve them\b|send them\b)/i.test(text) && !/\?\s*$/.test(text)) approvedNow.drafts.push(...V.drafts.map((d) => `${d.id}|${d.hash}`));
+      // Apply all by yes (apply_all_yes.ts, owner 2026-11-02): while the results message's offer ("Reply yes and I'll apply to all N
+      // shown. Each application's exact answers are on the page") is this thread's last word, a bare yes approves exactly the
+      // applications it offered, each under the tag it showed. Those payloads are the ones the person saw and said yes to.
+      if (isApplyAllYes(text)) {
+        const where = s.tg ? (p.web.thread ? `t.id <> ${q(p.web.thread)}` : "true") : p.web.thread ? `t.id = ${q(p.web.thread)}` : "false";
+        const offers = await w.json(`select m.meta->'apply_all_offer' as offer from public.agent_threads t
+          join lateral (select role, meta from public.agent_messages where thread_id = t.id order by id desc limit 1) m on true
+          where t.user_id = ${q(p.uid)} and ${where} and m.role = 'assistant' and m.meta ? 'apply_all_offer'`);
+        for (const o of offers as { offer: { jobs?: { job_id: string; tag: string | null }[] } }[]) {
+          for (const j of o.offer?.jobs ?? []) {
+            if (!j?.tag || !/^[0-9a-f]{16}$/.test(j.tag)) continue;
+            const prep = (await w.json(`select job_id, payload_hash from public.career_apply_prepared where user_id = ${q(p.uid)} and job_id = ${q(j.job_id)} and left(payload_hash, 16) = ${q(j.tag)}`))[0];
+            if (prep) approvedNow.apps.push(`${prep.job_id}|${prep.payload_hash}`);
+          }
+        }
+      }
       if (s.tg && !extra.attachments) {
         personSpoke = true;
         const t = await w.tg(p, text);
@@ -599,7 +616,10 @@ export class Runner {
       const sent = after.queue.filter((x) => x.state === "sent").length;
       if (n !== sent && !/\b0 emails? sent\b/.test(said)) F("I8", `said ${n} email(s) sent; ${sent} sent on record: ${said.slice(0, 200)}`);
     }
-    const claims = said.split(/(?<=[.!?\n])\s+/).filter((x) => /\bsubmitted\b/i.test(x) && !/\b(?:not|nothing|never|no|until|before|once|when|after|if|unless|only|isn't|hasn't|won't|wasn't|aren't|haven't)\b/i.test(x));
+    const claims = said.split(/(?<=[.!?\n])\s+/).filter((x) => /\bsubmitted\b/i.test(x) && !/\b(?:not|nothing|never|no|until|before|once|when|after|if|unless|only|isn't|hasn't|won't|wasn't|aren't|haven't)\b/i.test(x)
+      // A count of roles in any of several states ("1 role is already approved, started or submitted", the results page's lead,
+      // results_spec.ts) says none of them is submitted: it is not a claim that one was.
+      && !/\b(?:or submitted|submitted or)\b/i.test(x));
     if (claims.length && after.jobs.every((x) => x.state !== "submitted")) F("I8", `the reply says submitted; nothing is submitted: ${claims[0].slice(0, 200)}`);
     // Before any resume is confirmed (or after it is forgotten): an application is refused, never queued.
     if (!after.on_file && after.wanted.length > before.wanted.length) F("I3", `a posting queued for applying without a confirmed resume on file: ${said.slice(0, 200)}`);

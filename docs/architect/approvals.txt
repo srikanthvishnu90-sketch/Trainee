@@ -116,3 +116,5 @@
 469 8840311e284c753e9dac75fa7274b3b96c3dab05 independent-review-agent-rv44 risk=low note=release-merge-tree-identical-to-approved-trunk-head
 474 7731d4d259bf788d3787c619866b4d55dcb54a1a independent-review-agent-rv44 risk=low note=release-merge-tree-identical-to-approved-trunk-head
 479 90320f93a1eb5ead4f0d1a6d80b01fd16f30733d independent-review-agent-rv44 risk=low note=release-merge-tree-identical-to-approved-trunk-head
+445 fa6c2e4614091e39b4f87ec9370ef413a382cc18 independent-review-agent-rv45 risk=medium note=approve-delivery-throughput-sql-read-not-run-pg-tests-not-run-locally
+475 706e82025f518512bc282ca5c03ea4416218355f independent-review-agent-rv46 risk=low note=approve-situational-examples-analog-of-dev-cases-watch-leakage

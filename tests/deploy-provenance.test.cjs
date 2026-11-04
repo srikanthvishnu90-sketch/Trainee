@@ -46,7 +46,7 @@ const MIGRATIONS = arrayOf('MIGRATIONS'), MARKS = arrayOf('MIGRATION_MARK');
 
 function stageHead(sha = HEAD) {
   const dir = tmp('wo093-stage-');
-  execFileSync('bash', ['-c', `git archive --format=tar ${sha} -- supabase scripts packages corpus | tar -x -C "${dir}"`], { cwd: root });
+  execFileSync('bash', ['-c', `git archive --format=tar ${sha} -- supabase scripts packages | tar -x -C "${dir}"`], { cwd: root });
   return dir;
 }
 function migrationTsv(dir) {
@@ -129,7 +129,7 @@ test('a stale router bundle in the staged commit is refused (either check), befo
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /Router bundle is stale/);
     assert.match(r.out, new RegExp(`FAILED: the router bundle at ${HEAD} is stale`));
-    assert.match(r.calls, new RegExp(`git archive --format=tar ${HEAD} -- supabase scripts packages corpus`), 'checked in the staged commit');
+    assert.match(r.calls, new RegExp(`git archive --format=tar ${HEAD} -- supabase scripts packages`), 'checked in the staged commit');
     assert.doesNotMatch(r.calls, /secrets set|functions deploy|psql/);
   }
 });

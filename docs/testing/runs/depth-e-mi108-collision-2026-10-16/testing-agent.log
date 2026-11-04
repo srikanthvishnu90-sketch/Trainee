@@ -1,1 +1,0 @@
-docs/testing/agent-report.md or docs/capability-list/flow-evidence.md is stale: run deno run -A evals/agent/run.ts

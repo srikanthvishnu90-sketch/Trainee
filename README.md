@@ -39,11 +39,11 @@ The CI gate is `bash scripts/gate.sh`; CI (`.github/workflows/ci.yml`) runs it p
 forms-ci coverage) plus the database job (`bash tests/db/run.sh`), the send-rail load test and the Telegram
 acceptance suite. See `CLAUDE.md` for the exact commands.
 
-## Upmore (removed / frozen archive)
+## Upmore (removed)
 
-This repo began as Upmore, a finance agent. Trainee does not use the Upmore app (owner decision). Upmore's code,
-specs and docs (for example `src/`, the root `index.html`, `UPMORE-APP-README.md`, `SPEC.md`, `BUILD_PLAN.md`,
-`PROMPT.md`, `LOOP.md`, finance modules under `packages/domain/`, and most of `docs/` older than 2026-10-18) are a
-frozen archive: do not build on them, and do not treat them as describing Trainee. Some Trainee code still lives in
-files that carry Upmore-era names (for example `packages/domain/*-career-*.js`), and `UPMORE_*` environment variable
-names remain in places; these are identifiers, not product claims.
+This repo began as Upmore, a finance agent. Trainee does not use the Upmore app (owner decision), and it was removed:
+its finance edge functions, finance domain modules, testing evidence, finance tests and evals, `UPMORE-APP-README.md`,
+`SPEC.md`, `BUILD_PLAN.md`, `PROMPT.md` and `LOOP.md`. What remains is not a product claim: the Trainee dashboard and
+approval-card code still lives in the old app shell (`src/`, the root `index.html`; Vercel serves `site/` instead), a
+few frozen history files (`docs/bug-ledger.md`, `docs/career/forbidden-rules.md`, `docs/instinct-spec-series/`), and
+Upmore-era names on Trainee code (for example `packages/domain/*-career-*.js`, `UPMORE_*` environment variable names).

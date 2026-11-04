@@ -45,8 +45,11 @@ builds and follows `AGENTS.md`. The owner (Vishnu) decides product, credentials,
 - Feature specs: `docs/architect/specs/` (MASS-APPLY, NETWORKING, TASK-INTELLIGENCE). Work orders: `docs/architect/work-orders/`.
 - Release flags: `supabase/functions/agent-chat/release_config.ts` (D-035 to D-037); `docs/architect/RELEASE-FLAGS-2026-11-01.md`.
 
-## Upmore: removed / frozen archive
-Trainee does not use the Upmore finance app (owner decision). Upmore's rules (the $5 order cap, brokerage and Alpaca
-rails, money paths, finance connectors and logos) do not apply to Trainee and were removed from this file. Its code
-and docs (`src/`, root `index.html`, `UPMORE-APP-README.md`, `SPEC.md`, `BUILD_PLAN.md`, `docs/instinct-spec-series/`,
-`docs/bug-ledger.md`, `docs/career/forbidden-rules.md`) are a frozen archive (D-006): no new entries, no new work.
+## Upmore: removed
+Trainee does not use the Upmore finance app (owner decision), and the app was removed from this repo: its finance edge
+functions, finance domain modules, testing evidence, finance tests and evals, and the root docs `UPMORE-APP-README.md`,
+`SPEC.md` and `BUILD_PLAN.md`. Upmore's rules (the $5 order cap, brokerage and Alpaca rails, money paths, finance
+connectors and logos) do not apply to Trainee. Two things remain on purpose. (1) The Trainee dashboard and approval-card
+code still lives in the old app shell (`src/`, root `index.html`), which Vercel does not serve (Output Directory is
+`site`); splitting it out is a follow-up. (2) The frozen history files (D-006: `docs/bug-ledger.md`,
+`docs/career/forbidden-rules.md`, `docs/instinct-spec-series/`) stay as records: no new entries, no new work.

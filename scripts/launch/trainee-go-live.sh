@@ -470,7 +470,7 @@ for fn in "${DEPLOY_FNS[@]}"; do
 done
 LEGACY_CRON_SQL=scripts/launch/unschedule-legacy-finance.sql
 # WO-093: what is staged from `git archive <sha>`: everything a deploy, a migration, a schedule or the smoke reads.
-STAGE_PATHS=(supabase scripts packages corpus)
+STAGE_PATHS=(supabase scripts packages)
 PROV="$REPO/scripts/launch/deploy-provenance.cjs"
 
 CUR=""; REPORTED=""; ENVF=""; STAGE=""; WORK=""

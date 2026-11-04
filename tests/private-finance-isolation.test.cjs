@@ -1,6 +1,6 @@
 // Executes the actual built app with synthetic records and no provider network.
 const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
-const {buildContext}=require('./agent100/harness/stubs');
+const {buildContext}=require('./helpers/app-stubs');
 const ownerA='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',ownerB='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const defer=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 function fixture(){

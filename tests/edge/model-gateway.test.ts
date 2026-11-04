@@ -5,9 +5,6 @@
 import { modelConfig, modelConfigFor, providerFor, toAnthropic, fromAnthropic, callModel, chatReply, plannerModel, costMicros, newMeter, meterAdd, OUTAGE_REPLY, CLAUDE_DEFAULT_MODEL, webSearch } from "../../supabase/functions/_shared/model_gateway.ts";
 import { ModelUnavailableError } from "../../supabase/functions/_shared/model_calls.ts";
 import { memoryBudgetGate } from "../../supabase/functions/_shared/model_budget.ts";
-import { routeExtractor } from "../../supabase/functions/_shared/flow_router.ts";
-import { runFinancialPlanner } from "../../supabase/functions/_shared/financial_planner.ts";
-import { fixture, user } from "./lib/financial_fixture.ts";
 function assert(v: unknown, m = "assertion failed") { if (!v) throw new Error(m); }
 const eq = (a: unknown, b: unknown, m = "") => assert(JSON.stringify(a) === JSON.stringify(b), `${m} ${JSON.stringify(a)} !== ${JSON.stringify(b)}`);
 const env = (o: Record<string, string>) => ({ get: (k: string) => o[k] });
@@ -114,34 +111,6 @@ Deno.test("chat: a Claude reply comes back as text with its cost; a dead provide
   assert(!dead.ok); eq((dead as any).reply, OUTAGE_REPLY);
   assert(/overloaded_error/.test((dead as any).model_error), (dead as any).model_error);
   assert(!/payment|plan|bill/i.test(OUTAGE_REPLY.replace("I can't answer", "")), "the outage sentence has no payment words");
-});
-
-Deno.test("router through Claude: one forced route_message call, the extraction comes back, usage is recorded against the reserved slot", async () => {
-  const a = admin(); let body: any = null;
-  const x = routeExtractor(a, user, "thread", HAIKU, { ...gate(), request: (async (_u: string, init: any) => { body = JSON.parse(init.body); return message([toolUse("c1", "route_message", { intent: "send_money", amount_span: "$40", recipient_span: "sam" })], undefined, "tool_use"); }) as any });
-  eq(await x("send sam $40"), { intent: "send_money", amount_span: "$40", recipient_span: "sam" });
-  eq(body.tool_choice, { type: "tool", name: "route_message" }); eq(body.model, "claude-haiku-5-5");
-  eq(a.calls.map(c => c.name), ["agent_model_call_reserve", "agent_model_call_record"]);
-  eq(a.calls[1].args.p_usage, { input_tokens: 800, output_tokens: 500, cache_read_tokens: 200, cache_write_tokens: 0 });
-  const dead = routeExtractor(admin(), user, "thread", HAIKU, { ...gate(), request: (async () => new Response("upstream", { status: 503 })) as any });
-  let err: any = null; try { await dead("send sam $40"); } catch (e) { err = e; } assert(/router model HTTP 503/.test(String(err)), String(err));
-});
-
-Deno.test("planner through Claude: the tool loop runs on tool_use blocks and a dead provider gives the outage sentence, never payment wording", async () => {
-  const f = fixture(); const bodies: any[] = []; let n = 0;
-  const steps = [[toolUse("call_a", "finish_financial_reply", { evidence_ids: [], questions: ["connect_bank"] })]];
-  const m = plannerModel(admin(), user, "thread", HAIKU, { ...gate(), request: (async (_u: string, init: any) => { bodies.push(JSON.parse(init.body)); return message(steps[Math.min(n++, steps.length - 1)], undefined, "tool_use"); }) as any });
-  const r = await runFinancialPlanner(f.session, m, "what's my balance");
-  eq(bodies[0].tool_choice, { type: "any" }); assert(bodies[0].tools.some((t: any) => t.name === "finish_financial_reply"));
-  assert(!JSON.stringify(bodies[0].system).includes("STYLE EXAMPLES"), "no style block unless one is passed");
-  const styled: any[] = [];
-  const sm = plannerModel(admin(), user, "thread", HAIKU, { ...gate(), style: "STYLE EXAMPLES: copy the mannerisms, not the words", request: (async (_u: string, init: any) => { styled.push(JSON.parse(init.body)); return message(steps[0], undefined, "tool_use"); }) as any });
-  await runFinancialPlanner(fixture().session, sm, "what's my balance");
-  assert(typeof styled[0].system === "string" && /You are Upmore's financial tool planner[\s\S]*\n\nSTYLE EXAMPLES: copy the mannerisms/.test(styled[0].system), "the style block follows the planner's own rules");
-  eq(r.reply, "Connect your bank and refresh it so I can see current cash evidence."); assert(!r.incomplete, JSON.stringify(r));
-  const dead = plannerModel(admin(), user, "thread", HAIKU, { ...gate(), request: (async () => Response.json({ type: "error", error: { type: "authentication_error", message: "invalid x-api-key: sk-ant-abc" } }, { status: 401 })) as any });
-  const d = await runFinancialPlanner(fixture().session, dead, "what's my balance");
-  eq(d.failure_code, "model_unavailable"); eq(d.reply, OUTAGE_REPLY); assert(!String(d.model_error).includes("sk-ant"), d.model_error);
 });
 
 Deno.test("cost per call: tokens times the model's price (D-038), in micro-dollars; an unpriced model is counted as unpriced, never as free", () => {

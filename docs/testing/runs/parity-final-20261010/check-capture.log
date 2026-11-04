@@ -1,9 +1,0 @@
-test_complete_report_and_successful_process_are_both_required (__main__.OutcomeChecks.test_complete_report_and_successful_process_are_both_required) ... ok
-test_exit_zero_does_not_hide_failed_agent_outcomes (__main__.OutcomeChecks.test_exit_zero_does_not_hide_failed_agent_outcomes) ... ok
-test_missing_summary_cannot_pass (__main__.OutcomeChecks.test_missing_summary_cannot_pass) ... ok
-test_no_selected_agents_cannot_pass (__main__.OutcomeChecks.test_no_selected_agents_cannot_pass) ... ok
-
-----------------------------------------------------------------------
-Ran 4 tests in 0.000s
-
-OK

@@ -19,9 +19,10 @@ function profileFor(c) {
 }
 function deps(m) { return Object.fromEntries(["CareerAccess", "CareerOnboarding", "CareerRouter", "CareerDoorstep", "CareerReply", "CareerContainment"].map((n) => [n, m[n]])); }
 
-test("C2 bundle: all 120 resumes traverse generated career and full bundles identically", async () => {
+test("C2 bundle: all 120 resumes traverse the generated career bundle and the source modules identically", async () => {
   const career = await import(path.join(ROOT, "supabase/functions/_shared/router_core.career.js"));
-  const full = await import(path.join(ROOT, "supabase/functions/_shared/router_core.js"));
+  const DOMAIN = path.join(ROOT, "packages/domain");
+  const full = { CareerAccess: require(path.join(DOMAIN, "120-career-access.js")), CareerOnboarding: require(path.join(DOMAIN, "130-career-onboarding.js")), CareerRouter: require(path.join(DOMAIN, "142-career-router.js")), CareerDoorstep: require(path.join(DOMAIN, "141-career-doorstep.js")), CareerReply: require(path.join(DOMAIN, "140-career-reply.js")), CareerContainment: require(path.join(DOMAIN, "143-career-containment.js")) };
   const hosts = [career, full].map((m) => CareerHost.createCareerHost(deps(m)));
   for (const c of cases) {
     const results = hosts.map((h) => h.runTurn("Based on my resume, recommend roles", h.createTurnCtx({ userId: "synthetic-" + c.id, profile: profileFor(c), now: NOW })));

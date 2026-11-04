@@ -1,6 +1,0 @@
-running 1 test from ./tests/edge/message-service.test.ts
-provider metadata cannot choose a financial owner or approve an action ... ok (688µs)
-
-ok | 1 passed | 0 failed | 8 filtered out (3ms)
-
-Check tests/edge/message-service.test.ts

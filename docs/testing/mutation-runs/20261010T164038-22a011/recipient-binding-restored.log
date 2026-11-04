@@ -1,5 +1,0 @@
-running 1 test from ./tests/edge/message-delivery.test.ts
-provider acceptance with another recipient or missing ID is not a verified receipt ... ok (11ms)
-
-ok | 1 passed | 0 failed | 7 filtered out (13ms)
-

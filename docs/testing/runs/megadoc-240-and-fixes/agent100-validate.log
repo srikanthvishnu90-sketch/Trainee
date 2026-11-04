@@ -1,5 +1,0 @@
-
-> upmore-agent100@1.0.0 validate
-> node validate-agents.js
-
-OK: 100 agents valid, 10 lanes x 10, no clones

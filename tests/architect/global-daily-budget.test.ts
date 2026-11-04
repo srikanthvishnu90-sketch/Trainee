@@ -238,7 +238,7 @@ Deno.test("gateway source: the only send is in callModel, after its reservation,
   // Every production caller of the model goes through callModel (directly or via chatReply/plannerModel).
   const files = await productionSources();
   const callers = Object.entries(files).filter(([p, t]) => /\bcallModel\(|\bchatReply\(|\bplannerModel\(/.test(t) && !p.endsWith("model_gateway.ts")).map(([p]) => p);
-  assert(callers.length >= 6, `callers found: ${callers.join(", ")}`);
+  assert(callers.length >= 5, `callers found: ${callers.join(", ")}`);
   for (const p of callers) assert(!/\bfrom ["'][^"']*model_budget\.ts["']/.test(files[p]) || /career_voice|financial_planner|career_spend_cap|model_health/.test(p), `${p} does not hand-roll a gate`);
 });
 

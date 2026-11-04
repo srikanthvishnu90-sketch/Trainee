@@ -28,7 +28,7 @@ Deno.test("the chat input carries only the redacted text, and the person is told
   assertEquals(redactionNote([]), null);
   assertEquals(redactionNote(["ssn", "card"]), "(I removed the Social Security number and card number from your message and didn't keep it. Upmore never needs it here.)");
 });
-// The handler wiring is checked in tests/model-guards-wiring.test.cjs (it reads the source; edge tests run without permissions).
+// The finance handler wiring check (tests/model-guards-wiring.test.cjs) was removed with that handler on 2026-10-28.
 
 // Secrets never travel through chat (owner, 2026-10-11, decision 1). Test-only values, assembled at run time.
 const PW = ["hun", "ter", "2"].join(""), CODE = ["482", "913"].join("");

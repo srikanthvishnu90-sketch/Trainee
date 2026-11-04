@@ -1,6 +1,0 @@
-running 1 test from ./tests/edge/financial-tools.test.ts
-server-role ownership bypass cannot leak another owner's bill ... ok (1ms)
-
-ok | 1 passed | 0 failed | 16 filtered out (3ms)
-
-Check tests/edge/financial-tools.test.ts

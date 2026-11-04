@@ -37,7 +37,6 @@ three functions deploy to staging v1:
 | --- | --- | --- | --- |
 | `agent-chat` | The chat entry: `POST /functions/v1/agent-chat {message}` → `{thread_id, reply, action}`. The career chain (packages/domain modules 120–143) is bundled into `_shared/router_core.js` by `scripts/build-router-core.py` and imported from there. | **Whole-tree** with the entrypoint workaround (below) | `true` |
 | `gmail-oauth` | The career grant flow: `start_career`, purpose-routed callback, per-source `status`/`disconnect` (`supabase/functions/gmail-oauth/career.ts`, consumed by `120-career-access.js`). Provider row `google_career`, vault name `oauth_google_career_<uid>` — no migration needed for it (see `docs/career/deploy-checklist-access.md`). | Per-directory, stock `sb.py` | `true` |
-| `agent-exec` | Runtime dependency of the chat path: `agent-chat/_shared/capabilities.ts` `callExec()` POSTs to `/functions/v1/agent-exec` with the user's JWT. | Per-directory, stock `sb.py` | `true` |
 
 JWT settings are stated as data in `deploy-functions.sh` and copied from the
 production configuration documented in `docs/career/phase-a-audit-2026-10-13.md`
@@ -60,13 +59,12 @@ ships inside the `agent-chat` whole-tree bundle.
 `deploy-functions.sh`):** stock `sb.py` hardcodes
 `"entrypoint_path": "index.ts"`, so it cannot deploy a function whose entry is
 reached as `<slug>/index.ts` from the `supabase/functions` root — and
-`agent-chat` must deploy from that root, because it imports `../_shared/*` and
-`../agent-exec/merchant-catalog.ts`. The documented workaround (access
+`agent-chat` must deploy from that root, because it imports `../_shared/*`. The documented workaround (access
 checklist, TOOLS.md 2026-10-12): copy `sb.py` to `/tmp`, change that one field
 to `<slug>/index.ts` in the copy, deploy with the copy passing
 `supabase/functions` as the directory. The script does exactly this, verifies
 the rewrite landed before deploying, and never modifies the installed `sb.py`.
-`gmail-oauth` and `agent-exec` import only `./` siblings plus remote modules
+`gmail-oauth` imports only `./` siblings plus remote modules
 (verified: zero `../` imports), so stock per-directory deploy is correct for
 them — the same conclusion the access checklist reaches for `gmail-oauth`.
 
@@ -117,7 +115,7 @@ unset — defaults to OpenAI; the owner ruled 2026-10-12 that this app runs on
 OpenAI only, `model_gateway.ts`), `OPENAI_MODEL` / `OPENAI_ROUTER_MODEL` /
 `OPENAI_REASONING_EFFORT` (code defaults exist), `ANTHROPIC_API_KEY` (only read
 if `MODEL_PROVIDER=anthropic` — do not set), `BROWSERBASE_API_KEY` /
-`BROWSERBASE_PROJECT_ID` (read by `agent-exec` for browser execution; the chat
+`BROWSERBASE_PROJECT_ID` (browser execution, formerly read by the removed `agent-exec`; the chat
 smoke and reply grading do not need them — add only when doorstep/apply flows
 are graded at STAGING tier).
 
@@ -144,8 +142,8 @@ the worst possible staging property. So:
    edit `index.html` directly).
 3. Serve the repo root at `http://localhost:8000` (`python3 -m http.server
    8000`). Port 8000 is not arbitrary: `localhost:8000` is in the hardcoded
-   CORS allowlists of all three deployed functions (`agent-chat/_shared/
-   chat_cors.ts`, `gmail-oauth/index.ts`, `agent-exec/index.ts`).
+   CORS allowlists of both deployed functions (`agent-chat/_shared/
+   chat_cors.ts`, `gmail-oauth/index.ts`).
 
 The graded runner does not need the frontend at all — it talks HTTP to
 `agent-chat` directly (see `RUNNER-REPOINT.md`). The frontend is only for the

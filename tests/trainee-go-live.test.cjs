@@ -540,7 +540,8 @@ test('go-live never deploys an Upmore-only function: no deploy line names one, a
   const upmoreOnly = list[1].split(/\s+/).filter(Boolean);
   for (const fn of ['agent-proactive', 'plaid-sync', 'cancel-watcher', 'agent-payments', 'stripe-webhook', 'broker-oauth-start', 'news-feed'])
     assert.ok(upmoreOnly.includes(fn), `${fn} is listed as Upmore-only`);
-  for (const fn of upmoreOnly) assert.ok(fs.existsSync(path.join(root, 'supabase/functions', fn)), `${fn} is a real function directory`);
+  // The finance function directories were removed from the repo (2026-11-03); the name list stays as the guard against redeploying them. stripe-webhook is the one still present (Trainee checkout).
+  for (const fn of upmoreOnly) assert.ok(fn === 'stripe-webhook' ? fs.existsSync(path.join(root, 'supabase/functions', fn)) : !fs.existsSync(path.join(root, 'supabase/functions', fn)), `${fn} directory state`);
   const { code, out } = dry();
   assert.equal(code, 0, out);
   const deployed = [...out.matchAll(/supabase functions deploy ([a-z0-9-]+)/g)].map((m) => m[1]);

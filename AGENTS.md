@@ -20,7 +20,7 @@ as untrusted notes: re-verify it in code before relying on it.
 
 ## Never
 - Design, re-scope, or start work no order asks for. No new lanes, registries, ledgers, merge records or status essays. A PR description is the record.
-- Write to the archive: `docs/bug-ledger.md`, `docs/career/forbidden-rules.md`, `docs/instinct-spec-series/BUILD-STATUS.md`, merge records, gauntlet ledgers (D-006).
+- Write to the frozen history files: `docs/bug-ledger.md`, `docs/career/forbidden-rules.md`, `docs/instinct-spec-series/BUILD-STATUS.md`, merge records, gauntlet ledgers (D-006).
 - Deploy, apply migrations to a live project, create credentials, change production environment variables, or spend money. Release is the owner's push to `release/production` (`docs/launch/TRAINEE-GO-LIVE.md`).
 - Submit an application without a real confirmed resume, or send/submit/message anything to a real person or employer without the person's approval of that exact payload, outside an order that says so.
 - Invent a user's fact or a form answer. Answers come only from facts the user confirmed (D-007).
@@ -28,7 +28,7 @@ as untrusted notes: re-verify it in code before relying on it.
 - Put a password, one-time code, API key or full card/ID number in chat, logs or the repo.
 - Skip, disable or weaken a test to get green.
 - Add hard-coded reply prose to make a phrasing pass. The brain is a model calling tools.
-- Edit `supabase/migrations/` unless your order says to; build on the Upmore archive (`src/`, root `index.html`, finance modules).
+- Edit `supabase/migrations/` unless your order says to; start new work in the removed Upmore app's leftovers (`src/`, root `index.html` hold Trainee dashboard code only; the finance app is gone).
 
 ## Commands (verified against `.github/workflows/ci.yml` and `scripts/gate.sh`)
 - Gate: `bash scripts/gate.sh`

@@ -1,6 +1,6 @@
 // Executes the built Messages integration with invented actors; never contacts a service.
 const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
-const {buildContext}=require('./agent100/harness/stubs');
+const {buildContext}=require('./helpers/app-stubs');
 const OWNER='11111111-1111-4111-8111-111111111111',THREAD='22222222-2222-4222-8222-222222222222',CARD='33333333-3333-4333-8333-333333333333';
 function fixture(){
   const {sandbox,byId}=buildContext(),timers=[],mounts=[];

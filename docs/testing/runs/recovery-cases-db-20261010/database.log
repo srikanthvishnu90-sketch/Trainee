@@ -1,5 +1,0 @@
-psql:/Users/vishnusrikanth/upmore-production-integration/tests/db/stubs.sql:49: WARNING:  wal_level is insufficient to publish logical changes
-HINT:  Set wal_level to "logical" before creating subscriptions.
-psql:/Users/vishnusrikanth/upmore-production-integration/supabase/migrations/20261010190000_recovery_cases.sql:159: ERROR:  syntax error at end of input
-LINE 10: ...h(p_evidence)<>case when p_kind='duplicate_charge' then 2 el...
-                                                              ^

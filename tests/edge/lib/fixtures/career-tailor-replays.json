@@ -1,0 +1,94 @@
+{
+ "about": "The two live career_tailor failures (MUSE-F-011, v246, 2026-10-21), replayed by tests/edge/career-tailor-realm.test.ts through the staged career bundle in a Buffer-free Deno realm. Kept from the finance-era live-failure replay file when that file was removed (2026-10-28).",
+ "fixtures": [
+  {
+   "key": "dd76-a534-1a53-d319",
+   "kind": "career_tailor",
+   "suite": "battery-14",
+   "id": "F-011-T1",
+   "text": "tailor my resume for the Junior Software Engineer role at PolicyMe",
+   "media": null,
+   "context": [],
+   "checks": {},
+   "observed": {
+    "reply": "Something went wrong on my end",
+    "route": null,
+    "error": "ReferenceError: Buffer is not defined (router_core.career.js:337:4661 via handleTailor → tailorResume → render → renderPdf; source packages/domain/148-career-render.js:542)",
+    "failure_code": null
+   },
+   "reasons": [
+    "Live tailor turn (role-name entry) on v246, owner test 2026-10-21 + Muse diagnosis repro: the reply was the containment generic 'Something went wrong on my end' and no artifact was produced (channel_artifacts stayed empty). Root cause MUSE-F-011: module 148 reads the bare Node Buffer global in ~30 places; the Deno edge runtime (2.1.4) has no such global, so renderPdf throws ReferenceError before any bytes exist and module 143's containment serves the generic. Node and Deno 2.9.7 both expose a Buffer global, which masked it in every local test."
+   ],
+   "label": "owner-live-test-2026-10-21",
+   "first_seen": "2026-10-21T05:30:00Z",
+   "last_label": "f011-diagnosis-2026-10-21",
+   "last_seen": "2026-10-21T05:40:00Z",
+   "times": 2,
+   "world": {
+    "user_id": "2e8cb31d-59ab-4b2c-99bb-d4c5de8613a3",
+    "persona": "packages/career-data/fixtures/test-persona.json",
+    "drop_fact_names": [
+     "Rust"
+    ],
+    "now": "2026-10-21T05:40:00.000Z",
+    "posting": {
+     "id": "jobicy:https://jobicy.com/jobs/153164-junior-software-engineer-2",
+     "corpus_id": "jobicy:https://jobicy.com/jobs/153164-junior-software-engineer-2",
+     "title": "Junior Software Engineer",
+     "company": "PolicyMe",
+     "jd_text": "Overview of the role We’re on a mission to modernize insurance, making it simpler, more accessible, and customer-first. The insurance industry is a $1T market that’s remained largely untouched by the digital revolution, and PolicyMe is here to change that. As a remote-first, Toronto-based startup with big ambitions, we’re building the future of insurance in Canada and beyond. We're building a groundbreaking new product line that will transform the insurance broker experience through AI and machine learning. As an AI-Driven Full Stack Engineer, you'll be part of a team charting new territory - designing and implementing intelligent systems that automate manual processes and unlock powerful data-driven insights. You will work across the stack, contributing to front end, back end, and AI/ML initiatives, while also participating in architecture discussions, release planning, and company-wide engineering initiatives. Our core stack includes Python, React, Redux, PostgreSQL, n8n, LangChain/LangGraph and AWS , and we are always open to adopting new tools and technologies that help us deliver better results. What you'll be doing: Develop full stack features for our AI-powered web application using Python, React, Redux, PostgreSQL and AWS Integrate AI models and APIs for tasks like document processing, data extraction, recommendation engines etc. Work closely with Sr. Engineers experienced in AI to seamlessly integrate models into production Stay current on emerging AI technologies/fr",
+     "source": "jobicy (hired-research corpus pull2-nonats.jsonl, fetched 2026-10-14)",
+     "location": "Canada",
+     "url": "https://jobicy.com/jobs/153164-junior-software-engineer-2"
+    }
+   },
+   "triage": {
+    "verdict": "fixed",
+    "note": "Fixed on branch muse/2026-10-21-tailor-buffer-fix (MUSE-F-011): module 148's byte layer only — one module-local Bytes helper over Uint8Array/DataView (the platform Buffer where the global exists, the shim where it does not) routes every bare-Buffer site in 148; no require, no node:buffer import. The replay for this fixture runs the exact live turn through the staged bundle in a child Deno process with globalThis.Buffer removed (tests/edge/lib/career-replay-child.ts) and asserts intent career_tailor, not contained, artifact.pdf non-null. Live re-proof is owed on the next deploy's gauntlet (the harness guard proves the tree; only a live run closes it on the deployed surface).",
+    "by": "FIX ROUND 1 lane (Muse crew), 2026-10-21",
+    "test_ref": "tests/edge/live-replays.test.ts"
+   }
+  },
+  {
+   "key": "9721-feb4-a9fc-6db7",
+   "kind": "career_tailor",
+   "suite": "battery-14",
+   "id": "F-011-T2",
+   "text": "tailor my resume for this posting",
+   "media": null,
+   "context": [
+    "'Junior Data Analyst, ExampleCo — ExampleCo is hiring a Junior Data Analyst for the product analytics team in Chicago, IL. Responsibilities: build dashboards in Python and SQL, automate weekly reports from PostgreSQL, and analyse product data for the team. Requirements: Python, SQL, Excel, PostgreSQL, Git. You will present findings to stakeholders every week.'"
+   ],
+   "checks": {},
+   "observed": {
+    "reply": "Something went wrong on my end",
+    "route": null,
+    "error": "ReferenceError: Buffer is not defined (router_core.career.js:337:4661 via handleTailor → tailorResume → render → renderPdf; source packages/domain/148-career-render.js:542)",
+    "failure_code": null
+   },
+   "reasons": [
+    "Live tailor turn (pasted-posting entry) on v246, owner test 2026-10-21 + Muse diagnosis repro: the reply was the containment generic 'Something went wrong on my end' and no artifact was produced (channel_artifacts stayed empty). Entry shape: the paste stages the posting through 142's quoted-block capture (BUG-173), the tailor ask then binds it — the context turn is the paste verbatim, the fixture turn is the ask. Root cause MUSE-F-011: module 148 reads the bare Node Buffer global in ~30 places; the Deno edge runtime (2.1.4) has no such global, so renderPdf throws ReferenceError before any bytes exist and module 143's containment serves the generic. Node and Deno 2.9.7 both expose a Buffer global, which masked it in every local test."
+   ],
+   "label": "owner-live-test-2026-10-21",
+   "first_seen": "2026-10-21T05:30:00Z",
+   "last_label": "f011-diagnosis-2026-10-21",
+   "last_seen": "2026-10-21T05:40:00Z",
+   "times": 2,
+   "world": {
+    "user_id": "2e8cb31d-59ab-4b2c-99bb-d4c5de8613a3",
+    "persona": "packages/career-data/fixtures/test-persona.json",
+    "drop_fact_names": [
+     "Rust"
+    ],
+    "now": "2026-10-21T05:40:00.000Z",
+    "posting": null
+   },
+   "triage": {
+    "verdict": "fixed",
+    "note": "Fixed on branch muse/2026-10-21-tailor-buffer-fix (MUSE-F-011): module 148's byte layer only — one module-local Bytes helper over Uint8Array/DataView (the platform Buffer where the global exists, the shim where it does not) routes every bare-Buffer site in 148; no require, no node:buffer import. The replay for this fixture runs the exact live turn through the staged bundle in a child Deno process with globalThis.Buffer removed (tests/edge/lib/career-replay-child.ts) and asserts intent career_tailor, not contained, artifact.pdf non-null. Live re-proof is owed on the next deploy's gauntlet (the harness guard proves the tree; only a live run closes it on the deployed surface).",
+    "by": "FIX ROUND 1 lane (Muse crew), 2026-10-21",
+    "test_ref": "tests/edge/live-replays.test.ts"
+   }
+  }
+ ]
+}

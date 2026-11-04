@@ -4,7 +4,7 @@
 #   0. secret-name presence check (names only, via sb.py secrets-list — values
 #      are never read, printed, or set by this package)
 #   1. migrate.sh            (bootstrap + all migrations, in ls order)
-#   2. deploy-functions.sh   (agent-chat, gmail-oauth, agent-exec)
+#   2. deploy-functions.sh   (agent-chat, gmail-oauth)
 #   3. seed.sh               (gauntlet test user + profiles row)
 #   4. smoke.sh              (one career message -> oracle-checked reply)
 #

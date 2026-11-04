@@ -1,5 +1,0 @@
-running 1 test from ./tests/edge/biller-service.test.ts
-revoked connection does not call a provider even when adapter is registered ... ok (352µs)
-
-ok | 1 passed | 0 failed | 4 filtered out (1ms)
-

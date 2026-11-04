@@ -1,9 +1,0 @@
-﹣ owned Chromium: conditional multi-page form, actual uploaded file hash, explicit approval and causal local receipt (220.744651ms) # BROWSER_SANDBOX_UNAVAILABLE: installed chrome-sandbox is not root-owned/configured; user namespaces also unavailable in this executor
-ℹ tests 1
-ℹ suites 0
-ℹ pass 0
-ℹ fail 0
-ℹ cancelled 0
-ℹ skipped 1
-ℹ todo 0
-ℹ duration_ms 952.542027

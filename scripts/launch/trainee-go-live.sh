@@ -1180,6 +1180,15 @@ for v in "${SCHED_VARS[@]}" TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET WHATSAPP_
 done
 SMOKE_ARGS=()
 [[ -n "$ALLOW_SEND" ]] && SMOKE_ARGS+=(--allow-send)
+# --only-smoke skips step 3, which is where a secret not given is found to be kept on the project. Without this the S6 smoke
+# of deploy-production.yml ran with those secrets missing, answered "NOT RUN", and rolled back a deploy that had succeeded
+# (runs 41775410502, 41769271910, 41716253003). Same rule as step 3: given wins; else set on the project = kept (its gate NOT RUN).
+if [[ -n "$ONLY_SMOKE" && -z "$DRY" ]]; then
+  for v in "${SCHED_VARS[@]}"; do
+    [[ -n "${!v:-}" ]] && continue
+    if live_has "$v"; then KEEP_LIVE+=("$v"); echo "  kept: $v (not given; set on the project, so its smoke gate is NOT RUN)"; fi
+  done
+fi
 # A function secret kept on the project is not known here: the smoke reports its gate NOT RUN instead of refusing to run.
 (( ${#KEEP_LIVE[@]} )) && SMOKE_ARGS+=(--kept "$(IFS=,; echo "${KEEP_LIVE[*]}")")
 # Right after scheduling, the jobs have not fired yet: wait for each to fire once (ingest and alerts run every 5 minutes).

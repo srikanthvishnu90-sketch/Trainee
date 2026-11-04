@@ -50,6 +50,23 @@ export function overviewText(s: Situation, now: number): string {
   const tracked = T.filter((t) => t.kind === "tracked");
   const L: string[] = [];
   L.push(`Status as of now: ${confirmed.length} confirmed by the employer, ${unconfirmed.length + unknown.length} sent but not confirmed, ${running.length} in progress, ${blocked.length + (questions.length ? 1 : 0)} waiting on you.`);
+  // PARITY R09: what has NOT happened, said only from records that were read. Two kinds of record (architect rule, review of
+  // #399): Trainee's own (the apply queue, sends, receipts, the mail threads it tracks) say what Trainee did; the person's
+  // tracker says what they told Trainee, and is said as that. A negative is never said where the tracker says otherwise, and
+  // never from a source named in unreadable.
+  const unread = new Set(s.unreadable);
+  const queueRead = !["jobs", "prepared", "wanted"].some((k) => unread.has(k));
+  const sentApps = confirmed.length + unconfirmed.length + unknown.length;
+  const anyApps = apps.length + T.filter((t) => t.kind === "apply_request").length;
+  const told = unread.has("threads") ? [] : tracked;
+  const toldInterview = told.some((t) => /interview/i.test(String(t.evidence?.stage ?? "")));
+  const not: string[] = [];
+  if (queueRead && anyApps && !sentApps) not.push("Trainee hasn't sent an application");
+  if (queueRead && sentApps && !confirmed.length) not.push("no employer has confirmed one Trainee sent");
+  if (sentApps && !interviews.length && !toldInterview && !unread.has("interviews") && !unread.has("threads")) not.push("no interview coming up on record");
+  const awaiting = s.mail_threads?.awaiting ?? 0;
+  if (awaiting) not.push(`${awaiting} email${awaiting === 1 ? "" : "s"} Trainee sent ${awaiting === 1 ? "has" : "have"} no reply on record`);
+  if (not.length) L.push(`Not yet: ${not.join("; ")}.${told.length ? ` From what you told me: ${told.slice(0, 3).map((t) => `${name(t)}, ${String(t.evidence?.stage ?? "Submitted").toLowerCase()} stage`).join("; ")}.` : ""}`);
   if (confirmed.length) L.push("Confirmed by the employer:", ...confirmed.map((t) => `- ${name(t)}${t.evidence.confirmation_id ? `, confirmation ${t.evidence.confirmation_id}` : ""}${t.since ? ` (${day(t.since)})` : ""}`));
   if (unconfirmed.length || unknown.length) L.push("Sent, not confirmed by the employer yet:", ...unconfirmed.map((t) => `- ${name(t)}: sent${t.since ? ` ${day(t.since)}` : ""}, no confirmation from them yet`), ...unknown.map((t) => `- ${name(t)}: I can't tell whether it reached them; it will not be sent again`));
   if (running.length) L.push("In progress:", ...running.map((t) => `- ${name(t)}: ${t.state === "driving" ? "being sent now" : t.state === "waiting_extension" ? "asked for, not prepared yet" : t.kind === "outreach" ? "approved, sends on the schedule" : "approved, waiting to run"}${t.blocker && t.blocker.who !== "person" && t.blocker.how !== "nothing for you to do" && t.blocker.how !== "nothing yet" ? ` (${t.blocker.what}; ${t.blocker.how})` : ""}`));

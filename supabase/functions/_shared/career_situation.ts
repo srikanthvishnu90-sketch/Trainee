@@ -26,6 +26,9 @@ export interface Situation {
   next: { who: Actor; what: string; say?: string; task_id?: string }[];
   capabilities: Capability[];
   unreadable: string[];
+  // PARITY R09 (review of #399): the outreach mail threads Trainee tracks (career_outreach_threads, last 14 days): how many it
+  // sent and how many have no reply recorded. null: not read (absent, or named in unreadable as "replies").
+  mail_threads?: { sent: number; awaiting: number } | null;
 }
 type Rows = any[];
 // What readSituation read, one field per source (a source that failed is empty and named in unreadable).
@@ -34,6 +37,7 @@ export interface SituationRows {
   alerts: { prefs: any; tz?: string } | null; standing: { text: string }[]; daily_limit?: unknown;
   threads: { thread_id?: string; rows?: Rows | null }[]; connections: Connection[]; cloud: { enabled: boolean } | null;
   channel: { opted_out: boolean } | null; last_search: { at: string; subject: string; detail: any } | null; unreadable: string[];
+  replies?: Rows | null; // career_outreach_threads (PARITY R09)
 }
 
 const DAY = 86400000;
@@ -122,6 +126,8 @@ export function situationFrom(r: SituationRows, now: number): Situation {
     last_shown: ls && Array.isArray(ls.detail?.shown) ? { at: ls.at, query: ls.subject, items: ls.detail.shown } : null,
     next: nextSteps(tasks, prefs),
     capabilities, unreadable: r.unreadable,
+    mail_threads: Array.isArray(r.replies) && !r.unreadable.includes("replies")
+      ? { sent: r.replies.length, awaiting: r.replies.filter((x: any) => x && !x.replied_at && (x.status ?? "awaiting") === "awaiting").length } : null,
   };
 }
 
@@ -168,6 +174,8 @@ export async function readSituation(admin: any, userId: string, now: number): Pr
     connections: q("user_oauth_connections").select("provider,scopes,connected_at").eq("user_id", userId).limit(20),
     cloud: q("career_apply_cloud_optin").select("enabled").eq("user_id", userId).maybeSingle(),
     channel: q("channel_contacts").select("opted_out").eq("user_id", userId).maybeSingle(),
+    // PARITY R09: the mail threads Trainee tracks for the emails it sent (whether each got a reply).
+    replies: q("career_outreach_threads").select("draft_id,status,replied_at,sent_at").eq("user_id", userId).gte("sent_at", since).limit(200),
     last_search: q("career_events").select("at,subject,detail").eq("user_id", userId).eq("kind", "search").order("at", { ascending: false }).limit(1),
   };
   const keys = Object.keys(reads);
@@ -181,7 +189,7 @@ export async function readSituation(admin: any, userId: string, now: number): Pr
     mail_drafts: d.mail_drafts ?? [], interviews: d.interviews ?? [], alerts: one(d.alerts), standing: kv("career:standing")?.items ?? [],
     daily_limit: kv("career:account")?.daily_limit, threads: d.threads ?? [],
     connections: (d.connections ?? []).map((c: any) => ({ provider: String(c.provider), connected_at: c.connected_at ?? null, scopes: Array.isArray(c.scopes) ? c.scopes : String(c.scopes ?? "").split(/[\s,]+/).filter(Boolean) })),
-    cloud: one(d.cloud), channel: one(d.channel), last_search: one(d.last_search), unreadable,
+    cloud: one(d.cloud), channel: one(d.channel), last_search: one(d.last_search), unreadable, replies: d.replies ?? null,
   }, now);
 }
 

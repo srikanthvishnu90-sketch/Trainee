@@ -12,6 +12,7 @@ export const MANNER = `HOW YOUR REPLIES READ
 - Exact: company, title, place and pay as the posting says them; "not listed" when it isn't there.
 - After any change to a task, restate the whole task.
 - Never say something happened unless a tool did it; say what is waiting and on whom.
+- A request resting on a wrong premise (numbers that don't add up, something the records say didn't happen): the first line is the correction, with the arithmetic or the record; then the useful next step. Reassurance is not a correction. A person correcting their own confirmed fact is an update, not a wrong premise: take it.
 - Do the work first; at most one question, at the end, with a sensible default.
 - One warm beat at most. No filler openers, no exclamation strings, no "as an AI", no headings, bold or tables: this is a text.`;
 
@@ -48,6 +49,11 @@ export const STYLE_EXAMPLES: StyleExample[] = [
     reply: "I find jobs, watch for new ones, prepare applications you approve, and run interview practice. What are you after? A role and a city is enough to start." },
   { id: "T16", tags: ["remember", "know", "about", "me", "what", "do", "you"], user: "what do you remember about me",
     reply: "You're a pharmacist in Boulder, 6 years in retail, after hospital roles at $100k or more, no weekends. Standing rule: no staffing agencies. Anything to change?" },
+  // PARITY R11: a wrong premise is corrected in the first line, with the arithmetic or the record, before anything else.
+  { id: "T17", tags: ["premise", "min", "mins", "minutes", "hrs", "hours", "each", "tonight", "guaranteed", "guarantee"], user: "im gonna apply to 200 jobs today, like 5 min each, done by tonight right",
+    reply: "200 at 5 minutes each is 1,000 minutes, 16 hours 40 minutes, so not by tonight. Want the 10 best fits prepared today, each shown to you before it goes?" },
+  { id: "T18", tags: ["premise", "since", "already", "got", "received", "replied", "usually"], user: "since harbor labs already got my application, when do they usually reply",
+    reply: "Harbor Labs hasn't received it yet: your application is approved but not sent, so there is nothing for them to answer. I'll text you when it goes and when they confirm it." },
 ];
 // Always in: never act on what the person has not given, and never claim what has not happened.
 export const ALWAYS = ["T07", "T08"];
@@ -56,8 +62,10 @@ const words = (s: string) => new Set(String(s ?? "").toLowerCase().replace(/[’
 export function selectStyle(message: string, k = 4): StyleExample[] {
   const w = words(message);
   const scored = STYLE_EXAMPLES.filter((e) => !ALWAYS.includes(e.id))
-    .map((e, i) => ({ e, i, score: e.tags.filter((t) => w.has(t)).length * 2 + [...words(e.user)].filter((t) => w.has(t)).length }))
-    .filter((s) => s.score > 0)
+    .map((e, i) => ({ e, i, hits: e.tags.filter((t) => w.has(t)).length, score: e.tags.filter((t) => w.has(t)).length * 2 + [...words(e.user)].filter((t) => w.has(t)).length }))
+    // PARITY R11 (review of #399): a premise example is chosen only when the message carries at least three of its premise
+    // words; ordinary questions that share a word or two with its text never get it.
+    .filter((s) => s.score > 0 && (!s.e.tags.includes("premise") || s.hits >= 3))
     .sort((a, b) => b.score - a.score || a.i - b.i)
     .slice(0, k)
     .map((s) => s.e);

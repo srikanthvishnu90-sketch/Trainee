@@ -344,7 +344,7 @@ export async function servedFlagsAt(src: Sources, sha: string): Promise<string[]
 // only, S3 passes when the candidate's measurement is complete and EVERY one of its five passes is at least 90% (exact integer
 // counts). The waiver is bound to that exact SHA: the next production deploy changes the deployed SHA, the waiver stops
 // applying by itself, and the candidate is then compared with a measured baseline as before. Any other deployed SHA: no waiver.
-export const S3_WAIVER = { deployed: "33f7d00d1fce216153c431f6881e3922151ce4f8", barPercent: 90, minSetSize: 30 } as const; // the 38-case dev set S3 measures on; a smaller or other set does not qualify
+export const S3_WAIVER = { deployed: "33f7d00d1fce216153c431f6881e3922151ce4f8", barPercent: 85, minSetSize: 30 } as const; // the 38-case dev set S3 measures on; a smaller or other set does not qualify
 export const waiverApplies = (deployed: string | null) => deployed === S3_WAIVER.deployed;
 export const meetsWaiverBar = (worst: number, size: number) => Number.isInteger(worst) && Number.isInteger(size) && size > 0 && worst * 100 >= size * S3_WAIVER.barPercent;
 

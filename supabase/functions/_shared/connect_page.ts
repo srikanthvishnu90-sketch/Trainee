@@ -38,30 +38,44 @@ function extraReach(scopes: string[], than: string[]): string | null {
 }
 
 // ---------------------------------------------------------------- html
-const CSS = `
-.sub{margin:8px 0 22px;color:var(--mute);font-size:18px}
-.line{margin:0 0 14px;font-size:17px}
-.actions{margin-top:30px;display:flex;flex-direction:column;gap:12px}.actions form{margin:0}
-.primary,.secondary{display:flex;width:100%;align-items:center;justify-content:center;min-height:54px;padding:8px 22px;border-radius:999px;font:inherit;font-weight:600;text-decoration:none;cursor:pointer}
+// The page keeps Trainee's one visual identity (brand.ts tokens, checked in a real browser by design-pages-browser.test.ts): the
+// shared ground and ink, plum ONLY on the one primary action and links, Inter + Brygada 1918, dark scheme. On top of that the
+// results page's habits: 16px body, nothing under 14px, 44px+ tap targets, cards for accounts, and states in words ("Connected",
+// "Needs reconnecting"), never colour alone. tests/architect/connect-page-design.test.ts computes every size and contrast pair.
+export const CONNECT_CSS = `
+.wrap:has(>.connect){padding-left:calc(16px + env(safe-area-inset-left));padding-right:calc(16px + env(safe-area-inset-right))}
+.connect{font-size:16px;line-height:1.5;overflow-wrap:anywhere}
+.connect .lede{margin:8px 0 0;font-size:16px;color:var(--mute)}
+.line{margin:0 0 12px;font-size:16px}
+.actions{margin-top:20px;display:flex;flex-direction:column;gap:10px}.actions form{margin:0}
+.primary,.secondary,.notnow,.back,.lnk{font:inherit;cursor:pointer}
+.primary,.secondary{display:flex;width:100%;align-items:center;justify-content:center;text-align:center;text-decoration:none;min-height:48px;padding:6px 22px;border-radius:999px;font-size:17px;font-weight:600}
 .primary{background:var(--accent);border:1px solid var(--accent);color:var(--accent-ink)}.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
-.secondary{background:transparent;border:1px solid var(--line);color:var(--ink)}.secondary:hover{border-color:var(--mute)}
-.notnow{display:flex;align-items:center;justify-content:center;min-height:48px;color:var(--mute);font-size:15px;text-decoration:underline}
-.fine{margin:2px 4px 0;font-size:14px;color:var(--mute)}
-.acct{margin:0 0 6px;padding:18px 0;border-top:1px solid var(--line)}.acct p{margin:0}.acct .who{font-weight:600}.acct .muted{margin-top:4px;font-size:15px;color:var(--mute)}
-.alert{margin:0 0 6px;color:var(--warn)}
-.lnk.danger{color:var(--bad);margin-top:6px;padding:0}
-.ok{color:var(--good)}
-.back{display:flex;align-items:center;justify-content:center;min-height:44px;color:var(--link);text-decoration:underline}
+.primary:disabled{background:var(--disabled-bg);border-color:var(--disabled-bg);color:var(--disabled-ink);cursor:default}
+.secondary{background:transparent;border:1px solid var(--ink);color:var(--ink)}.secondary:hover{border-color:var(--mute)}
+.secondary:disabled{color:var(--mute);cursor:default}
+.notnow,.back{display:flex;align-items:center;justify-content:center;min-height:44px;font-size:16px;text-decoration:underline}
+.notnow{color:var(--mute)}.back{color:var(--link)}
+.fine{margin:0 4px;font-size:14px;color:var(--mute)}
+.acct{margin:0 0 10px;padding:12px 14px;border-radius:14px;border:1px solid var(--line);background:var(--panel)}.acct p{margin:0}
+.acct .who{font-size:16px;font-weight:600;color:var(--ink)}.acct .muted{margin-top:6px;font-size:14px;color:var(--mute)}
+.chip{display:inline-flex;align-items:center;margin:0 0 8px;padding:3px 10px;border-radius:999px;font-size:14px;line-height:1.4;font-weight:600;border:1px solid currentColor;background:var(--bg)}
+.chip::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;margin-right:6px;flex:none}
+.chip.t-confirmed{color:var(--good)}.chip.t-attention{color:var(--warn)}
+.alert{margin:0 0 12px;padding:12px 14px;border-radius:14px;border:1px solid var(--line);border-left:4px solid var(--warn);background:var(--panel);color:var(--ink)}.alert .chip{display:flex;width:fit-content}
+.lnk{display:inline-flex;align-items:center;min-height:44px;padding:0 4px;border:0;background:none;text-decoration:underline;font-size:16px}
+.lnk.danger{color:var(--bad);margin-top:2px}
+.ok{font-weight:600;color:var(--good)}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 `;
-const style = `<style>${CSS}</style>`;
 
 export const CONNECT_SCRIPT = `(function(){${TG_READY}var w=window.Telegram&&window.Telegram.WebApp;var inTg=!!(w&&w.initData);function open(u){if(inTg&&w.openLink){w.openLink(u)}else{location.href=u}}document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a.notnow,a.tgback");if(a&&inTg&&w.close){e.preventDefault();w.close()}});document.addEventListener("submit",function(e){var f=e.target;if(!f.classList||!f.classList.contains("go")||!window.fetch)return;e.preventDefault();var b=f.querySelector("button");if(b)b.disabled=true;fetch(f.action||location.href,{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded",accept:"application/json"},body:new URLSearchParams(new FormData(f)).toString(),credentials:"same-origin"}).then(function(r){return r.ok?r.json():null}).then(function(j){if(j&&j.url){open(j.url);if(b)b.disabled=false}else{f.submit()}}).catch(function(){f.submit()})})})();`;
 export const CONNECT_BOOT = `(function(){${TG_READY}var p=new URLSearchParams(location.hash.slice(1)),d=p.get("tgWebAppData");if(!d){document.getElementById("nodata").hidden=false;return}var f=document.createElement("form");f.method="post";function a(n,v){var i=document.createElement("input");i.type="hidden";i.name=n;i.value=v;f.appendChild(i)}a("init",d);a("w",document.body.getAttribute("data-w"));document.body.appendChild(f);f.submit()})();`;
 
 const hidden = (token: string, action: string, provider: string) => `<input type="hidden" name="t" value="${esc(token)}"><input type="hidden" name="action" value="${action}"><input type="hidden" name="provider" value="${provider}">`;
 const back = (botUrl: string | null, cls = "primary") => (botUrl ? `<a class="${cls}${cls === "primary" ? "" : " tgback"}" href="${esc(botUrl)}" rel="noopener noreferrer">Back to Telegram</a>` : "");
-const page = (title: string, inner: string, o: { og?: Og; script?: string; tg?: boolean } = {}) =>
-  layout(`${title} - Trainee`, `<div id="root"><header>${BRAND}<h1>${esc(title)}</h1></header><main id="main">${inner}</main></div>${style}`, { script: o.script, tg: o.tg, og: o.og });
+const page = (title: string, inner: string, o: { og?: Og; script?: string; tg?: boolean; lede?: string; bodyAttrs?: string } = {}) =>
+  layout(`${title} - Trainee`, `<div id="root" class="connect"><header>${BRAND}<h1>${esc(title)}</h1>${o.lede ? `<p class="lede">${esc(o.lede)}</p>` : ""}</header><main id="main">${inner}</main></div>`, { script: o.script, tg: o.tg, og: o.og, bodyAttrs: o.bodyAttrs, css: CONNECT_CSS });
 
 export function renderConnect(m: ConnectModel): string {
   const reason = REASONS[reasonKey(m.reason)];
@@ -74,10 +88,10 @@ export function renderConnect(m: ConnectModel): string {
     return page("Not available yet", `<p class="line">Connecting your email isn't switched on yet, so nothing can be connected. Nothing was read or sent.</p><div class="actions">${back(m.botUrl, "back")}</div>`, { script: CONNECT_SCRIPT, tg: true });
   }
   const disc = (p: ProviderView) => `<form method="post" class="disc">${hidden(m.token, "disconnect", p.id)}<button type="submit" class="lnk danger" aria-label="Disconnect ${NAMES[p.id].mail}">Disconnect</button></form>`;
-  const acct = (p: ProviderView) => `<section class="acct"><p class="who">Connected as ${esc(p.email ?? NAMES[p.id].mail)}</p><p class="muted">${NAMES[p.id].mail}. Disconnecting removes Trainee's access and what it read from it.</p>${disc(p)}</section>`;
+  const acct = (p: ProviderView) => `<section class="acct"><span class="chip t-confirmed">Connected</span><p class="who">Connected as ${esc(p.email ?? NAMES[p.id].mail)}</p><p class="muted">${NAMES[p.id].mail}. Disconnecting removes Trainee's access and what it read from it.</p>${disc(p)}</section>`;
   if (revoked.length) {
     const p = revoked[0], n = NAMES[p.id];
-    const alert = `<p class="alert" role="status">${n.brand} access${p.email ? ` to ${esc(p.email)}` : ""} stopped working. Trainee can't read anything from it until you reconnect.</p>`;
+    const alert = `<p class="alert" role="status"><span class="chip t-attention">Needs reconnecting</span>${n.brand} access${p.email ? ` to ${esc(p.email)}` : ""} stopped working. Trainee can't read anything from it until you reconnect.</p>`;
     const act = `<form method="post" class="go">${hidden(m.token, "start", p.id)}<button type="submit" class="primary">Reconnect ${n.brand}</button></form>`;
     return page("Reconnect your email", `${alert}<div class="actions">${act}${back(m.botUrl, "notnow")}</div>${connected.map(acct).join("")}`, { script: CONNECT_SCRIPT, tg: true });
   }
@@ -91,7 +105,7 @@ export function renderConnect(m: ConnectModel): string {
     return `<form method="post" class="go">${hidden(m.token, "start", p.id)}<button type="submit" class="${i === 0 ? "primary" : "secondary"}">Continue with ${n.brand}</button></form>${extra ? `<p class="fine">${esc(extra)}</p>` : ""}`;
   }).join("");
   const notnow = m.botUrl ? `<a class="notnow" href="${esc(m.botUrl)}" rel="noopener noreferrer">Not now</a>` : "";
-  return page("Connect your email", `<p class="sub">So I can ${esc(reason)}.</p><p class="line">${esc(one)}</p><p class="line">${esc(two)}</p><div class="actions">${buttons}${notnow}</div>`, { script: CONNECT_SCRIPT, tg: true, og: previewOg(m.reason) });
+  return page("Connect your email", `<p class="line">${esc(one)}</p><p class="line">${esc(two)}</p><div class="actions">${buttons}${notnow}</div>`, { script: CONNECT_SCRIPT, tg: true, og: previewOg(m.reason), lede: `So I can ${reason}.` });
 }
 
 // After consent (the OAuth callback's landing), or after a disconnect: one calm state and the way back.
@@ -111,11 +125,11 @@ export function renderState(title: string, paras: string[], botUrl: string | nul
 }
 
 export function renderBootstrap(reason: string): string {
-  return layout("Opening - Trainee", `<header>${BRAND}<h1>Connect your email</h1></header><main id="main"><p>Signing you in with Telegram.</p><p id="nodata" hidden>Open this page from the button in Telegram, or use the link Trainee sent you.</p><noscript><p>This needs JavaScript. Use the link Trainee sent you instead.</p></noscript></main>`, { script: CONNECT_BOOT, tg: true, bodyAttrs: `data-w="${esc(reasonKey(reason))}"` });
+  return page("Connect your email", `<p class="line">Signing you in with Telegram.</p><p class="line" id="nodata" hidden>Open this page from the button in Telegram, or use the link Trainee sent you.</p><noscript><p class="line">This needs JavaScript. Use the link Trainee sent you instead.</p></noscript>`, { script: CONNECT_BOOT, tg: true, bodyAttrs: `data-w="${esc(reasonKey(reason))}"` });
 }
 
 // The preview card a chat shows under the link: the brand and the reason; nothing about any person.
 export const previewOg = (reason: string, image: string | null = null): Og => ({ title: "Connect your email to Trainee", description: `So I can ${REASONS[reasonKey(reason)]}. One tap; nothing is sent without your approval.`, image });
 export function renderPreview(og: Og): string {
-  return layout("Connect your email - Trainee", `<header>${BRAND}<h1>Connect your email</h1></header><main id="main"><p>${esc(og.description)}</p><p>Open this link in your browser, or from Telegram.</p></main>`, { og });
+  return page("Connect your email", `<p class="line">${esc(og.description)}</p><p class="line">Open this link in your browser, or from Telegram.</p>`, { og });
 }

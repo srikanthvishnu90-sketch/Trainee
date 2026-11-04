@@ -3,7 +3,7 @@
 // passes the reply-shape link filter exactly (a cut-off copy of it does not). Memory stores, fake transports, no network.
 import assertNode from "node:assert/strict";
 import { feedUrlsFor } from "../../supabase/functions/_shared/file_link.ts";
-import { signedIn } from "./file-session-fakes.ts";
+import { signedIn, phonePost } from "./file-session-fakes.ts";
 const A = signedIn();
 import { handleFile, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
 import { jobViewOf, refOf, sendJobCards, hashTag, type PreparedRow } from "../../supabase/functions/_shared/telegram_jobs.ts";
@@ -41,7 +41,7 @@ async function page(o: { preparedFor?: number[] }) {
     tap: { async card(_u, id) { return { id, items: [{ n: 1, prepared_id: pid(1), payload_hash: H }], state: "open", user_id: U } as any; }, async prepared(_u, _ids) { return [{ id: pid(1), payload_hash: H, company: "Co1" }]; },
       async answer(_u, _c, approve) { log.answered++; return approve.length ? [{ n: 1, company: "Co1", result: "queued" }] : []; } } };
   const t = await A.tok(U, LIST, NOW);
-  const post = (f: Record<string, string>) => handleFile(new Request("https://x.example/f", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ t, ...f }).toString() }), d);
+  const post = async (f: Record<string, string>) => handleFile(new Request("https://x.example/f", await phonePost({ t, ...f }, SECRET)), d);
   return { d, log, refs, post };
 }
 const plain = (h: string) => h.replace(/<style[\s\S]*?<\/style>/g, " ").replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/\s+/g, " ");

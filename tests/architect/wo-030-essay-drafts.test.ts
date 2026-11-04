@@ -286,9 +286,9 @@ Deno.test("WO-030/5 the model only through the gateway: a failure says it couldn
   eq(store.answers, []);
   eq(await store.countOpen("u"), 2);
   // The real gateway with no key (none here): not configured, before any network; the turn still answers.
-  const noKey = modelConfig({ get: (k: string) => ({ CAREER_MODEL: "gpt-5-mini" } as Record<string, string>)[k] });
-  eq(noKey.provider, "openai", "OpenAI only; never Anthropic by accident");
-  const r2 = await say(store, "draft 1", { model: (p: any) => callModel({ ...noKey, model: "gpt-5-mini" }, p) });
+  const noKey = modelConfig({ get: (k: string) => ({ CAREER_MODEL: "claude-haiku-5-5" } as Record<string, string>)[k] });
+  eq([noKey.provider, noKey.apiKey], ["anthropic", ""], "Claude only; no key in this test");
+  const r2 = await say(store, "draft 1", { model: (p: any) => callModel(noKey, p) });
   eq(r2!.status, "draft_model");
   // The question is still answered the usual way afterwards.
   const r3 = await say(store, "Ramp's tools are what I wished I had as a controller");
@@ -419,7 +419,7 @@ Deno.test("WO-030/8 wired: drafts persist on the account, the handler passes the
   assert(typeof s.onPostings === "function", "the service store reads a posting's questions");
   // The handler: the brain's gateway and model, drafts keep the questions as the last word.
   assert(/draft: \{ model: \(payload\) => callModel\(draftCfg, payload, \{ meter: draftMeter, role: "chat" \}\), facts: \(\) => \(\(ctx as any\)\.profile\?\.facts \?\? \[\]\) \}/.test(HANDLER));
-  assert(HANDLER.includes(`const draftCfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };`));
+  assert(HANDLER.includes(`const draftCfg = careerModelConfig(Deno.env);`));
   assert(HANDLER.includes(`asked.status.startsWith("draft")`));
   assert(/await ledger\.record\(draftMeter\)/.test(HANDLER), "a draft's cost is recorded like the brain's");
   assert(APPLY.includes("aiPolicyStatements(current.schema.map((f: any) => f.label))"), "the engine carries the whole form's AI words");

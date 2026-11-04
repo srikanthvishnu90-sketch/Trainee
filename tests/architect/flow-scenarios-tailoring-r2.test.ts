@@ -16,7 +16,7 @@
 //   ask      questions the prepare path stored for them (workers/career-browser/ask-once.ts questionsToStore over an
 //            engine result: salary, notice period, years with a named tool, a clearance, a felony, a start date): "draft N"
 //            on one never calls the model and saves nothing; "N <answer>" is saved as typed; a secret never
-// The model is a fake OpenAI endpoint (no spend, no network): every other host is refused and recorded (asserted empty).
+// The model is a fake Anthropic endpoint (no spend, no network): every other host is refused and recorded (asserted empty).
 import assertNode from "node:assert/strict";
 import zlib from "node:zlib";
 import nodeCrypto from "node:crypto";
@@ -28,6 +28,7 @@ import { CareerRender } from "../../supabase/functions/_shared/router_core.caree
 import { questionsToStore } from "../../workers/career-browser/ask-once.ts";
 import { leaks, type Poison, rng } from "./scenarios/tailoring-r2-generator.ts";
 import { askedPart } from "../helpers/one_question.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -88,9 +89,11 @@ Deno.test({
     if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 binaries in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
     if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (initdb)"); return; }
     const pg: Pg = await startPg();
-    const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "OPENAI_API_KEY", "CAREER_MODEL", "CAREER_TAILOR_REWRITE", "CAREER_HOSTED_PREPARE"];
+    const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "ANTHROPIC_API_KEY", "CAREER_MODEL", "CAREER_TAILOR_REWRITE", "CAREER_HOSTED_PREPARE"];
     const saved = Object.fromEntries(unset.map((k) => [k, Deno.env.get(k)]));
     for (const k of unset) Deno.env.delete(k);
+    // D-036: CAREER_MAIL_TRACKING is a release flag (on when unset): every mail path stays off only with "off".
+    Deno.env.set("CAREER_MAIL_TRACKING", "off");
     let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
     const realFetch = globalThis.fetch;
     let closeSession: (() => Promise<void>) | null = null;
@@ -111,7 +114,7 @@ Deno.test({
       let essay: string[] = [];
       const calls = { rewrite: 0, essay: 0, other: 0 };
       const answer = (content: string, model: string) => new Response(JSON.stringify({ id: "chatcmpl-test", model, choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }], usage: { prompt_tokens: 500, completion_tokens: 100 } }), { headers: { "content-type": "application/json" } });
-      const fakeOpenAI = (body: any): Response => {
+      const fakeModel = (body: any): Response => {
         const sys = String(body.messages?.find((m: any) => m.role === "system")?.content ?? "");
         const user = body.messages?.find((m: any) => m.role === "user");
         const text = typeof user?.content === "string" ? user.content : (user?.content ?? []).map((c: any) => c.text ?? "").join("");
@@ -128,12 +131,12 @@ Deno.test({
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
         const u = new URL(req.url);
-        if (u.host === "api.openai.com") return fakeOpenAI(await req.json());
+        if (u.pathname === "/v1/moderations" || (await req.clone().text()).includes("TRAINEE_CRISIS_SCREEN")) return Response.json({ id: "screen", model: "screen", results: [{ flagged: false, categories: {} }], choices: [{ index: 0, message: { role: "assistant", content: "NO" }, finish_reason: "stop" }], content: [{ type: "text", text: "NO" }], stop_reason: "end_turn", usage: { prompt_tokens: 1, completion_tokens: 1, input_tokens: 1, output_tokens: 1 } }); // #354: the crisis screen's moderation and classifier calls, not counted (architect OK 2026-11-02)
+        if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
         if (u.origin !== new URL(SUPABASE_URL).origin) { outbound.push(`${req.method} ${u.host}`); throw new TypeError(`network refused: ${u.host}`); }
         return await viaDouble(req);
       }) as typeof fetch;
-      Deno.env.set("OPENAI_API_KEY", ["sk", "test", "fake"].join("-"));
-      Deno.env.set("CAREER_MODEL", "gpt-5-mini");
+      Deno.env.set("ANTHROPIC_API_KEY", ["sk", "test", "fake"].join("-"));
 
       const failures: string[] = [];
       const counts: Record<string, number> = {};

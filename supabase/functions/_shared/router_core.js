@@ -26124,8 +26124,10 @@ const CareerIntel = (() => {
   // ---------- INTL-004 / Q30: fabrication & cheating refusal, distress protocol ----------
   function respondToRequest(text) {
     const t = String(text || "");
-    if (/(kill myself|end my life|self[- ]?harm|suicidal|don't want to (be alive|live))/.test(t.toLowerCase())) {
-      return { action: "support", text: "I hear you, and the career stuff can wait. Please reach out now: in the US you can call or text 988 (Suicide and Crisis Lifeline) any time, or text HOME to 741741. If you might act on this, call 911. You matter more than any application. When you're ready, I'm here — no grilling, at your pace." };
+    // The one distress detector (139 CareerSafety.isDistress; its policy is written there), never a list of our own.
+    const Safety = typeof CareerSafety !== "undefined" ? CareerSafety : require("./139-career-safety.js");
+    if (Safety.isDistress(t)) {
+      return { action: "support", text: "I want to check in, because what you wrote sounded really heavy. If you're thinking about hurting yourself, you can call or text 988 any time (US), or text HOME to 741741, and if you're in danger right now, call 911. I'm here and glad to keep talking. If I read that wrong, just tell me and we'll pick up where you left off." };
     }
     if (/(i'?m a failure|i feel like a failure|everyone is ahead of me|i'?ll never get in|hopeless about)/i.test(t)) {
       return { action: "support", text: "You're not a failure — you're early in a process whose timelines are genuinely brutal and mostly hidden. Honest version: your current position is a starting point, not a verdict, and there are routes from it. So the plan shrinks to one doable step, and here it is, picked: today, write down the one role you want next and the one person who could open a door to it. That is the whole task for today — small, real, and it counts." };
@@ -31947,18 +31949,181 @@ const CareerSafety = (() => {
       note: "The answer discloses the AI help that actually happened (tailoring/proofreading) and claims nothing that did not." };
   }
 
+  // ---------- Distress detector: THE one list (#354 safety follow-up, 2026-11-01) ----------
+  // Every path reads this: the trust turn (supabase/functions/_shared/career_trust_turn.ts), 125's request screen
+  // (respondToRequest), this module's distress protocol and the router's first check (142 handleChat / dispatchChat).
+  // Four separate lists each missed what another caught ("kms", "i took too many pills", "i have a plan to end it").
+  //
+  // POLICY. A false alarm costs one kind check-in; a miss can cost a life. So a message that MIGHT be about ending one's
+  // life or self-harm gets the check-in, hyperbole included ("i'd kill myself if i bombed it", "i'm not suicidal, just
+  // tired"). Only idioms that are plainly about work or about something else stay with the router, and each is named
+  // below (BENIGN, or a pattern's own guard): "this job is killing me", "kill it in the interview", "career suicide",
+  // "my career is dead in the water", "i'll die on this hill", "12 kms from the office", "end it with a strong closing
+  // line", "take my life in a new direction". Frustration without self-harm words ("this market is brutal", "i'm a
+  // failure") is not a crisis here: 125's own support line answers the second.
+  //
+  // This list is the deterministic layer. In agent-chat a second layer runs beside it on every inbound message: OpenAI's
+  // moderation endpoint (self-harm, self-harm/intent, self-harm/instructions; supabase/functions/_shared/career_crisis_screen.ts).
+  // Either layer flagging gives the crisis reply; a moderation error or timeout leaves this list's answer, never a block.
+  // Re-review of #354 (2026-11-01) widened it: method and lethality questions, any overdose or count of pills (named
+  // drugs too), "off my balcony", rope and noose, a weapon on oneself, cutting and burning, worthlessness ("don't deserve
+  // to live"), not existing or not waking up, "time to end it", and core Spanish, French and German phrases.
+  //
+  // How it reads: lower case, curly quotes straightened, apostrophes dropped (dont / don't, im / i'm read the same),
+  // "2" between words read as "to"; the message is split into clauses at . ! ? , ; : and new lines, the benign idioms
+  // are cut out of each clause, and each clause is tested on its own (so "$" below means the end of a clause).
+  const BENIGN = [
+    /\b(?:career|professional|social|political|commercial|financial|resume) suicide\b/g,
+    /\bsuicide (?:prevention|squad)\b/g,
+    /\b\d+(?:\.\d+)? ?kms\b/g,                                        // a distance
+    /\bdie on (?:this|that|the) hill\b/g,
+    /\b(?:if you |if someone |if somebody )?(?:put|had|held) a gun to my head\b/g,   // "gun to my head, i'd pick stripe"
+    /\bgun to my head i(?:d| would)\b/g,
+    /\blearn(?:ing|ed)? the ropes\b/g, /\bpoint of life insurance\b/g,
+  ];
+  // Pills and drugs as a person names them (a count of three or more of any of them, or a bottle, is an overdose's words).
+  const DRUG = String.raw`(?:sleeping |sleep |pain )?(?:pills?|tablets?|meds|medication|medicine|painkillers?|tylenol|acetaminophen|paracetamol|advil|ibuprofen|aspirin|aleve|motrin|xanax|valium|klonopin|benadryl|ambien|melatonin|oxy\w*|percocet|vicodin|codeine|morphine|fentanyl|insulin|antidepressants?|sertraline|zoloft|prozac|lexapro|lithium|adderall|heroin)`;
+  const MANY = String.raw`(?:(?:like|about|around|maybe|over|almost|at least|nearly|roughly|probably) )?(?:too many|too much|a bunch of|a lot of|all (?:of )?(?:my|the)|a whole (?:bottle|pack|box|strip) of|the whole (?:bottle|pack|box|strip) of|a (?:bottle|handful|fistful) of|(?:my|the) (?:whole )?bottle of|so many|lots of|extra|[3-9]|\d{2,}|three|four|five|six|seven|eight|nine|ten|twenty|thirty|fifty|a hundred)`;
+  const SELF = String.raw`(?:my ?self|my ?slef|myslef|mself)`;
+  // What may follow "take my life" / "end my life" in a crisis: nothing, a time, or the next clause's start.
+  const AFTER = String.raw`(?=$| (?:tonight|today|now|soon|anymore|already|someday|eventually|and|because|cause|cuz|bc|lol|i|if|tbh|honestly|so|but|when|after|before)\b)`;
+  const DISTRESS_PATTERNS = [
+    /\bsu[iy]?c[iy]?d\w*/, /\bsuis?id\w*/,                              // suicide, suicidal, sucide, suicde, suiside
+    /\bsewer ?slide\b/, /\bself ?delet\w*/, /\bun ?aliv\w*/,             // slang
+    /\bkms+\b/, /\bk m s\b/,
+    new RegExp(String.raw`\bkil+(?:l?ing|l?ed|s)? ?${SELF}`),           // kill myself, killing myself, kil my self, killmyself
+    /(?:^|\b(?:just|please|pls|plz|someone|somebody|want (?:someone )?to|wish (?:someone|something) would|could someone)) kill me\b/,
+    new RegExp(String.raw`\b(?:hurt|harm|cut|hang|shoot|drown|poison|starve|stab|suffocate|strangle)(?:t?ing|ed|s)? ${SELF}`),
+    new RegExp(String.raw`\bburn(?:s|ed|t|ing)? ${SELF}(?! out\b)`),                   // "burn myself out" is work
+    /\b(?:i|ive|i have|im|i am|been|started|start|keep|kept|back to|relapsed)(?: been| started)? (?:cutting|self harming|burning)(?: again)?(?: (?:lately|recently|tonight|today))?$/,
+    /\bcutting (?:my )?(?:arms?|legs?|thighs?|skin|wrists?)\b/, /\brelapsed\b.{0,20}\b(?:cutting|self harm)/,
+    /\bself ?(?:harm|injur|hurt)\w*/, /\b(?:slit|slitting|cut|cutting|slash\w*) (?:my )?wrists?\b/,
+    new RegExp(String.raw`\b(?:end|ending|take|taking|took) my (?:own )?(?:life|lyfe|lyf)${AFTER}`),
+    /\bend(?:ing)? (?:it all|everything|all of it)\b/, /\btime to end it(?: all)?$/,
+    // "end it" as a plan; "end it with a closing line", "end it here" are an email's or a call's end.
+    /\b(?:want|wanna|going|gonna|plan|planning|ready|thinking about|thought about|decided|deciding|try|trying|need|about|how) (?:to )?end(?:ing)? it(?: (?:all|tonight|today|now|soon|for good|already|forever))?$/,
+    /\b(?:want|wish|need)(?:ed)? (?:it|it all|everything|this all|all of this|all this|my life) (?:all )?(?:to )?(?:just )?(?:end|be over)\b/,
+    /\b(?:want|wish|need)(?:ed)? (?:it all|everything|all of this|all this) (?:to )?(?:just )?stop\b/,
+    /\bmy life is (?:over|done|finished|pointless|meaningless|worthless)\b/,
+    /\bhate (?:being alive|living|existing|my life|my existence)\b/,
+    /\b(?:dont|do not|dont even) deserve (?:to )?(?:live|be alive|exist|be here|life)\b/, /\bdeserve to (?:die|be dead)\b/,
+    /\bshould(?:nt| not) (?:be alive|exist|be here anymore|have been born)\b/, /\bshould(?:nt| not) be here$/,
+    /\b(?:whats|what is|wheres|where is|is there|theres|there is) (?:the |even a |any |no )?point (?:of|in|to) (?:living|life|being alive|going on|existing|anything|any of (?:it|this))\b/,
+    // "I'd rather die than miss this" weighs two things a person wants: an idiom. "Rather die than keep living like this"
+    // and every "rather be dead" stay distress (#406 review).
+    /\brather (?:be dead|not be alive|not exist|not wake up)\b/,
+    /\brather die\b(?! than (?!(?:keep|go on|going on|live|living|be alive|be here|continue|wake up|face)\b))/,
+    /\bstop (?:existing|being alive)\b/, /\bstop living\b(?! (?:paycheck|like|in|with|at|for|on|off|under|out|from))/, /\bcease to exist\b/, /\b(?:want|wish|need)(?:ed)? (?:to )?(?:not exist|cease to exist|vanish forever|not be alive)\b/,
+    /\b(?:hope|hopefully|wish|praying|pray) (?:that )?i (?:dont|never|do not|wont|will not) wake up\b/,
+    /\b(?:life|living) (?:is|isnt|is not|aint) (?:not )?worth (?:it|living)\b/, /\bnot worth living\b/,
+    /\b(?:want|wanna|wan|wnt|ready|deserve|should|wish i could) (?:to )?(?:just )?di+e+\b/,
+    /\b(?:going|gonna) (?:to )?di+e+(?: (?:tonight|today|soon|anyway))?$/,
+    /\bwish i (?:was|were|was just|were just) dead\b/,
+    /\bwish i (?:wasnt|werent|was not|were not) (?:alive|here|around|born|living)\b/,
+    /\bwish i (?:had never been|hadnt been|was never|were never|never was) born\b/,
+    /\bbetter off (?:dead|without me|if i (?:was|were) (?:gone|dead)|if i (?:wasnt|werent) here)\b/,
+    /\b(?:no ?one|nobody) would (?:miss me|notice if i (?:died|was gone|were gone)|care if i (?:died|was gone|were gone|disappeared|wasnt here))\b/,
+    /\b(?:dont|do not|dnt|never) (?:want|wanna) (?:to )?(?:live|be alive|exist|wake up|be around anymore|go on|keep living)\b/,
+    /\b(?:dont|do not|dnt) (?:want|wanna) (?:to )?be here(?: anymore)?$/,
+    /\b(?:want|wanna|wish|need)(?: to)? (?:just )?not be (?:here|around)(?: anymore)?$/, /\b(?:want|wanna|wish|need)(?: to)? (?:just )?not be alive\b/,
+    /\b(?:no|zero) (?:reason|point) (?:to|in|of) (?:live|living|going on|being alive|be alive|life)\b/, /\bnothing (?:left )?to live for\b/,
+    /\bcant (?:keep living|live like this)\b/, /\bcant go on(?: (?:anymore|like this|living))?$/,
+    /\b(?:tired|sick) of (?:living|being alive|life|existing)\b/, /\bdone (?:with life|living)\b/, /\bgive up on life\b/,
+    /\b(?:sleep|go to sleep|fall asleep) and (?:never|not) wake up\b/, /\bnever wake up\b/, /\bhope i (?:dont|never|do not) wake up\b/,
+    /\b(?:jump|jumping|jumped|throw myself|throwing myself|step|stepping|walk|walking|drive|driving) (?:off|off of|from|in front of|into) (?:a |the |some |my |our |this |that )?(?:\w+ )?(?:bridge|building|roof|rooftop|cliff|balcony|ledge|train|bus|car|traffic|truck|window|tower|overpass|parking garage)\b/,
+    new RegExp(String.raw`\b(?:took|take|taken|taking|swallowed|swallow|swallowing|downed|down|ate|chugged|popped|pop|popping) ${MANY} (?:(?:my|his|her|their|the) (?:\w+ )?)?${DRUG}\b`),
+    new RegExp(String.raw`\b(?:how many|how much)\b.{0,40}\b(?:to (?:die|kill (?:me|myself|someone|a person)|overdose|od)|(?:is|are|would be) (?:lethal|fatal|deadly|enough to die)|(?:would|will|does it take to|it takes to|to) (?:kill (?:me|you|someone|a person)|die))\b`),
+    /\b(?:lethal|fatal|deadly) (?:dose|amount|overdose|combination|mix)\b/,
+    /\b(?:painless|easiest|easy|quickest|quick|fastest|best|surest|least painful|most painless|simplest) (?:way|ways|method|methods) (?:to|of) (?:die|dying|kill myself|killing myself|end it|end my life|commit suicide)\b/,
+    /\bways to (?:die|kill myself|end my life)\b/,
+    /\b(?:want|wanna|going|gonna|plan|planning|thinking (?:about|of)|try|tried|trying|about|ready|decided) (?:to )?(?:od|oding|odd)\b/, /\b(?:i|just|almost|nearly) (?:odd|oded|od)(?: last night| tonight|$)/,
+    new RegExp(String.raw`\bod(?:d|ing|ed)? on\b(?! (?:coffee|caffeine|sugar|meetings|work|info|information|netflix|tv|memes)\b)`),
+    new RegExp(String.raw`\boverdos\w*\b(?! (?:of|on|from) (?!(?:my |the |some |all |a bottle of )?${DRUG})\w)`),          // never "overdose of coffee"
+    /\b(?:tie|tied|tying|make|made|making|got|have|bought|buy) (?:a |the |my )?noose\b/, /\bnoose\b/,
+    /\b(?:bought|buy|got|get|have|found) (?:a |some |the )?rope\b(?! access)/, /\brope\b.{0,30}\b(?:neck|hang|ceiling|beam|closet)\b/,
+    /\b(?:gun|pistol|rifle|firearm|knife|blade|razor)\b.{0,60}\b(?:on myself|to my (?:head|wrist|throat|chest)|in my mouth|end it|kill myself|use it on me)\b/,
+    /\buse (?:it|that|this|the gun|the knife) on myself\b/, /\bgun to my head\b/, /\bblow my (?:brains|head) out\b/, /\bdisappear forever\b/, /\bmy (?:last|final) goodbye\b/,
+    // Re-review 2 (2026-11-01): method, intent and time cues.
+    new RegExp(String.raw`\b(?:off|offing|offed) ${SELF}`),
+    /\bbullet (?:in|into|through) my (?:head|brain|skull|mouth)\b/, /\bput a (?:bullet|gun) (?:in|to) my (?:head|brain|mouth)\b/,
+    /\b(?:how|best way|ways?|easiest way|painless(?:ly)?|quickest way|fastest way|surest way) (?:to |do (?:i|you) )?(?:kill|hang|shoot|drown|poison|off|cut) (?:yourself|myself|urself|oneself|ur self|your self)\b/,
+    /\b(?:going to|gonna|gon|will|plan to|planning to|about to|ready to|want to|wanna|im gonna|ima|imma) (?:jump|hang|rope)(?: (?:myself|tonight|today|now|soon|off something))*$/,
+    /\b(?:going to|gonna|will|plan to|planning to|about to|ready to|want to|wanna|imma) end(?:ing)? things(?: (?:tonight|today|now|soon|for good|this week|this weekend|forever))?$/,
+    /\b(?:end|ending) things (?:tonight|today|this week|this weekend|for good|forever)\b/, /\bi(?:ll| will) end things(?: soon| tonight)?$/,
+    /\bhope i (?:die|dont wake up|never wake up|just die)\b(?! laughing| of laughter)/, /\bi (?:want|wanna) (?:to )?be dead\b/, /\b(?:just )?let me die\b/,
+    /\b(?:pills?|meds|tablets) to end it\b/, /\bbought (?:pills|a gun|rope|a rope|a razor|razor blades) (?:to|so i can) (?:end|die|kill)/,
+    /\b(?:bath|bathtub|tub|shower)\b.{0,30}\b(?:razor|blade|knife)\b/, /\b(?:razor|blade|knife)\b.{0,30}\b(?:bath|bathtub|tub|wrists?)\b/,
+    /\bkills? (?:you|me|a person|someone|people)$/,
+    // Italian, Portuguese, Dutch, Polish, Turkish, Indonesian, Tagalog, Hindi (romanized), Vietnamese, Swedish (Latin script, accents dropped).
+    /\b(?:voglio|vorrei) (?:morire|uccidermi|ammazzarmi|farla finita)\b/, /\bmi voglio (?:uccidere|ammazzare)\b/, /\bnon voglio piu vivere\b/, /\bla faccio finita\b/,
+    /\bquero (?:morrer|me matar|me suicidar|sumir para sempre)\b/, /\bnao quero mais viver\b/, /\bvou me (?:matar|suicidar)\b/,
+    /\bik wil (?:dood|sterven|niet meer leven|zelfmoord)\b/, /\bzelfmoord\b/, /\bvan kant maken\b/,
+    /\bchce (?:umrzec|sie zabic|zabic sie)\b/, /\bnie chce (?:juz )?zyc\b/, /\bsamoboj\w*/,
+    /\bolmek istiyorum\b/, /\bkendimi oldur\w*/, /\bintihar\w*/, /\byasamak istemiyorum\b/,
+    /\b(?:ingin|mau|pengen|pingin) mati\b/, /\bbunuh diri\b/, /\btidak mau hidup lagi\b/,
+    /\b(?:mamatay|magpakamatay|magpapakamatay)\b/, /\bayoko nang mabuhay\b/,
+    /\bmarna (?:chahta|chahti|hai|chahiye)\b/, /\b(?:khudkushi|aatmahatya|atmahatya)\b/, /\bjeena nahi\b/,
+    /\bmuon (?:chet|tu tu)\b/, /\btu sat\b/,
+    /\bvill (?:do|inte leva)\b/, /\bta livet av mig\b/, /\bsjalvmord\b/,
+    // Spanish, French, German: the core phrases (accents are dropped before reading).
+    /\b(?:quiero|quisiera|voy a|me voy a|ganas de) (?:morir(?:me)?|matarme|suicidarme|quitarme la vida|desaparecer para siempre)\b/,
+    /\bme (?:quiero|voy a) (?:morir|matar|suicidar)\b/, /\bno quiero (?:vivir|seguir viviendo|estar viva?|despertar)\b/,
+    /\b(?:acabar|terminar) con mi vida\b/, /\bno vale la pena vivir\b/,
+    /\b(?:je veux|j ai envie de|envie de|je vais) (?:mourir|me tuer|me suicider|en finir|disparaitre)\b/, /\bje (?:ne )?veux plus vivre\b/, /\b(?:envie|veux) d ?en finir\b/,
+    /\bmettre fin a mes jours\b/, /\bme (?:tuer|suicider)\b/,
+    /\bich (?:will|mochte|moechte|werde) (?:sterben|mich umbringen|mich toten|mich toeten|nicht mehr leben)\b/, /\bmich umbringen\b/,
+    /\bich bring(?:e)? mich um\b/, /\bselbstmord\w*/, /\bsuizid\w*/, /\bnicht mehr leben\b/, /\bmein leben beenden\b/,
+  ];
+  // Normalizing (re-review 2): a word mixing letters and digits is leetspeak (mys3lf, d13, k1ll; a pure number stays a
+  // number, so "30 advil" keeps its count); "*" inside a word is a censored letter (k*ll, f***ing); a letter typed three
+  // or more times is one (diiiie, suuuicidal); three or more single letters in a row are one word (k i l l); inserted
+  // profanity and fillers are dropped (fucking, fr, ngl, deadass); common misspellings of "myself" are mended.
+  const LEET = { 0: "o", 1: "i", 3: "e", 4: "a", 5: "s", 7: "t", 8: "b", 9: "g" };
+  const FILLER = /\b(?:fucking|fuckin|fking|fkn|fcking|freaking|frickin|effing|f+ing|goddamn|damn|bloody|literally|honestly|lowkey|highkey|ngl|fr|tbh|deadass|on god|ong|rn|lol|lmao)\b/g;
+  function distressClauses(text) {
+    const t = String(text == null ? "" : text).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\u00df/g, "ss").toLowerCase()
+      .replace(/[‘’ʼ`´]/g, "'").replace(/'/g, "")
+      .replace(/(\w)-(\w)/g, "$1 $2")
+      .replace(/\b(?=[a-z0-9@$*]*[a-z])(?=[a-z0-9@$*]*[0-9@$])[a-z0-9@$*]+\b/g, (w) => w.replace(/[0-9]/g, (d) => LEET[d] ?? d).replace(/@/g, "a").replace(/\$/g, "s"))
+      .replace(/\bk\*+ll/g, "kill").replace(/\bf\*+(?:ing|in|k)\b/g, "fucking").replace(/\*/g, "")
+      .replace(/([a-z])\1{2,}/g, "$1");
+    return t.split(/[.!?,;:\n]+/).map((c) => {
+      let x = c.replace(/[^a-z0-9 ]+/g, " ").replace(/\b2\b/g, "to").replace(/\s+/g, " ").trim();
+      x = x.replace(/\b(?:[a-z] ){2,}[a-z]\b/g, (m) => m.replace(/ /g, ""));
+      x = x.replace(FILLER, " ").replace(/\bmy ?(?:slf|slef|sef|sefl|elf|selfe)\b/g, "myself").replace(/\s+/g, " ").trim();
+      for (const b of BENIGN) x = x.replace(b, " ").replace(/\s+/g, " ").trim();
+      return x;
+    }).filter(Boolean);
+  }
+  // Scripts the normalizer cannot keep (Cyrillic, Japanese, Korean, Chinese, Arabic): read on the raw text.
+  const NON_LATIN = [/умер(?:еть|ти)/, /покончить с собой/, /самоубийств/, /не хочу (?:больше )?жить/, /убить себя/,
+    /死にたい/, /自殺/, /生きていたくない/, /消えたい/, /죽고 ?싶/, /자살/, /살고 ?싶지 ?않/, /想死/, /自杀/, /不想活/,
+    /أموت/, /انتحار/, /أقتل نفسي/, /لا أريد أن أعيش/];
+  // The message with its distress clauses taken out: what else the person asked, resumed after a check-in they answer
+  // with "i'm fine" (142 resumeAfterCheckin). Empty when the whole message was the distress.
+  function withoutDistress(text) {
+    return String(text == null ? "" : text).split(/[.!?;\n]+|,\s*/).map((c) => c.trim()).filter((c) => c && !isDistress(c)).join(". ");
+  }
+  // A reply to the check-in saying they are fine or were misread.
+  const FINE_RE = /^(?:(?:no|nah|nope|haha|lol|oh|sorry|honestly)[,! ]+)*(?:(?:i'?m|im|i am)\s+(?:fine|ok(?:ay)?|good|alright|all right|safe|not suicidal|okay now)|(?:you )?misread(?: me)?|false alarm|(?:i was |i'?m |im )?(?:just )?(?:venting|joking|kidding|exaggerating)|not like that|all good|i didn'?t mean it like that|it was (?:a )?(?:joke|figure of speech))\b/i;
+  const isFineReply = (text) => FINE_RE.test(String(text == null ? "" : text).trim().replace(/[’‘]/g, "'"));
+  function isDistress(text) {
+    const raw = String(text == null ? "" : text).normalize("NFC").toLowerCase();
+    if (NON_LATIN.some((p) => p.test(raw))) return true;
+    return distressClauses(text).some((c) => DISTRESS_PATTERNS.some((p) => p.test(c)));
+  }
+
   // ---------- Distress protocol (T-82) ----------
-  const CRISIS_RE = /\b(kill myself|end it all|self[- ]?harm|suicide|don't want to (?:live|be here)|no reason to (?:live|go on))\b/i;
   function distressResponse(input) {
     const o = input || {}, text = String(o.text || "");
-    const crisis = CRISIS_RE.test(text);
+    const crisis = isDistress(text);
     const facts = o.profileFacts || [];
     const grounding = facts.length ? `Here is what is also true, from your own record: ${facts[0]}.` : "Here is what is also true: one rough stretch is not a verdict on you.";
     return {
       protocol: "distress", crisis,
       warmth_first: true, honesty_kept: true,
       text: crisis
-        ? `I'm really glad you told me. Please reach out right now to someone who can help in person — in the US you can call or text 988 (Suicide and Crisis Lifeline) any time, or text HOME to 741741. You matter more than any job search; everything here can wait. ${grounding}`
+        ? `I'm really glad you told me. If you're thinking about hurting yourself, you can call or text 988 (Suicide and Crisis Lifeline) any time in the US, or text HOME to 741741. I'm here, and everything else can wait. ${grounding}`
         : `That sounds genuinely rough, and I'm not going to pretend a pep talk fixes it. ${grounding} Not everything is working — some of it is a brutal market for interns right now, and that's real, not a character flaw. Let's make today tiny: one step, then stop.`,
       one_step: o.oneStep || "Send the one follow-up email that's already drafted — two minutes, then you're done for today.",
       resources: crisis ? ["988 Suicide and Crisis Lifeline (US): call or text 988", "Crisis Text Line: text HOME to 741741"] : [],
@@ -31990,7 +32155,7 @@ const CareerSafety = (() => {
       text: `Stopped everything. ${report.sent_confirmed} already-sent item(s) stay sent (they were provider-confirmed). ${report.aborted_not_sent} in-flight item(s) had no confirmation and are marked NOT sent — nothing is half-sent. ${report.queued_halted} queued item(s) are halted and will not move until you say resume.` };
   }
 
-  return { DAILY_START, DAILY_CEILING, keyOf, createSuppressionStore, suppress, isSuppressed, applySuppression, forceOptOut, sendSchedule, planSendRequest, referralClaimCheck, assessmentRequest, aiUseAnswer, distressResponse, createQueueState, stopEverything };
+  return { DAILY_START, DAILY_CEILING, keyOf, createSuppressionStore, suppress, isSuppressed, applySuppression, forceOptOut, sendSchedule, planSendRequest, referralClaimCheck, assessmentRequest, aiUseAnswer, isDistress, withoutDistress, isFineReply, distressResponse, createQueueState, stopEverything };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerSafety;
 
@@ -36719,7 +36884,11 @@ const CareerRouter = (() => {
     // DEPTH LANE A: the words of a self-description — a typo'd class year
     // or major ("sophmore", "finace") must repair before fact capture
     // reads the turn, or the fact is lost for the whole thread.
-    "sophomore", "junior", "freshman", "semester", "recruiting", "majors", "major", "studying", "economics", "engineering", "geography", "deadline", "rejection", "pipeline"]);
+    "sophomore", "junior", "freshman", "semester", "recruiting", "majors", "major", "studying", "economics", "engineering", "geography", "deadline", "rejection", "pipeline",
+    // ROUTER ROUTING ROUND (2026-11-02): the words that tell a role search, a pay question and an application status apart
+    // ("any nurse oepnings at Gap?", "salarry at Shell", "what happeneed with my application"). Singular and plural are both
+    // listed, so neither is ever "corrected" into the other; the real words one edit from "hiring" are in REAL_WORD_NEIGHBORS.
+    "opening", "openings", "position", "positions", "salary", "salaries", "application", "applications", "happened", "hiring"]);
   function _dlWithin1(a, b) {
     if (a === b) return true;
     const la = a.length, lb = b.length;
@@ -36740,6 +36909,12 @@ const CareerRouter = (() => {
     }
     return true;
   }
+  // ROUTER ROUTING ROUND (2026-11-02): a role noun typed with one slip ("data analyst psotings at Square", "nurse listngs")
+  // still names work, not people: the people-list plan never reads it as "analysts at Square". Words of six or more
+  // letters only (no common English word is one edit from these).
+  function roleNounSlip(t) {
+    return String(t || "").split(/[^a-z]+/).some((w) => w.length >= 6 && ["postings", "listings", "openings", "positions", "internships", "vacancies"].some((x) => _dlWithin1(w, x)));
+  }
   // REAL-WORD GUARD: a typo repair may only fire on a NON-word. A
   // token that is itself ordinary English is never "repaired" —
   // without this guard the distance-1 rule corrupts real words that
@@ -36752,7 +36927,7 @@ const CareerRouter = (() => {
   // "analysis" -> "analysts" sent "get into data analysis" to the banking outreach plan, "fine" -> "find" and "states" ->
   // "status" did the same elsewhere. Generated from a 20k common-English word list against ROUTE_VOCAB: every collision
   // that is a real word with a different meaning. Inflections of a routing word and plain misspellings still correct.
-  const REAL_WORD_NEIGHBORS = new Set(["became", "alain", "alt", "analyse", "analyses", "analysis", "baker", "banner", "banners", "barker", "bender", "bind", "bound", "bout", "bright", "bunker", "caves", "champaign", "closer", "cock", "contracts", "cores", "counted", "crack", "cracker", "crafts", "dairy", "daisy", "daly", "dave", "director", "directors", "dock", "drift", "eight", "fave", "fellow", "fender", "fight", "films", "fine", "finn", "finnish", "fires", "fist", "forma", "gail", "gain", "gender", "hale", "hart", "hast", "hat", "headline", "heap", "helm", "hemp", "holes", "hollow", "holt", "hound", "hummer", "intra", "jacket", "jules", "kraft", "lender", "light", "lit", "lock", "loft", "mack", "manor", "mayor", "mick", "mind", "monk", "mound", "neat", "nest", "net", "nitro", "normal", "officer", "ounce", "packed", "parse", "pocket", "poles", "pound", "rack", "rave", "reader", "resumed", "rock", "rolex", "rolls", "ropes", "roses", "ruler", "rulers", "safely", "sailor", "sampler", "saves", "scopes", "sender", "sensor", "shalt", "shooter", "shores", "sight", "sind", "sound", "states", "stats", "statue", "stores", "tack", "taylor", "tee", "tender", "thee", "theo", "thy", "tie", "tight", "toe", "trace", "tract", "tracy", "trick", "truck", "vice", "wade", "wages", "waive", "wales", "walt", "weave", "wight", "wind", "wives", "wound", "wright"]);
+  const REAL_WORD_NEIGHBORS = new Set([/* ROUTER ROUTING ROUND 2026-11-02: real words one edit from "hiring" */ "hiding", "hiking", "firing", "wiring", "airing", "tiring", "siring", "haring", "became", "alain", "alt", "analyse", "analyses", "analysis", "baker", "banner", "banners", "barker", "bender", "bind", "bound", "bout", "bright", "bunker", "caves", "champaign", "closer", "cock", "contracts", "cores", "counted", "crack", "cracker", "crafts", "dairy", "daisy", "daly", "dave", "director", "directors", "dock", "drift", "eight", "fave", "fellow", "fender", "fight", "films", "fine", "finn", "finnish", "fires", "fist", "forma", "gail", "gain", "gender", "hale", "hart", "hast", "hat", "headline", "heap", "helm", "hemp", "holes", "hollow", "holt", "hound", "hummer", "intra", "jacket", "jules", "kraft", "lender", "light", "lit", "lock", "loft", "mack", "manor", "mayor", "mick", "mind", "monk", "mound", "neat", "nest", "net", "nitro", "normal", "officer", "ounce", "packed", "parse", "pocket", "poles", "pound", "rack", "rave", "reader", "resumed", "rock", "rolex", "rolls", "ropes", "roses", "ruler", "rulers", "safely", "sailor", "sampler", "saves", "scopes", "sender", "sensor", "shalt", "shooter", "shores", "sight", "sind", "sound", "states", "stats", "statue", "stores", "tack", "taylor", "tee", "tender", "thee", "theo", "thy", "tie", "tight", "toe", "trace", "tract", "tracy", "trick", "truck", "vice", "wade", "wages", "waive", "wales", "walt", "weave", "wight", "wind", "wives", "wound", "wright"]);
   function detypo(text) {
     return s(text).replace(/[A-Za-z]{3,}/g, (w) => {
       const lw = w.toLowerCase();
@@ -36864,14 +37039,18 @@ const CareerRouter = (() => {
     const m = s(gd).match(/(20\d\d)/) || profileFactsText(profile).match(/graduating[^0-9]*(20\d\d)/i);
     return m ? Number(m[1]) : null;
   }
+  // UNKNOWN EXPERIENCE (2026-11-01): years of experience come only from dated experience entries on the profile. With none
+  // (nothing on file, or entries without dates) the years are UNKNOWN (null), never 0: a person who has told us nothing is not
+  // screened out of "2+ years" postings, and 121 already reads null as "cannot decide, does not fire" (hardFilters,
+  // evidencedFullTimeYears).
   function experienceYearsOf(profile) {
-    let months = 0;
+    let months = 0, dated = 0;
     for (const f of ((profile && profile.facts) || [])) {
       if (f.kind !== "experience" || !f.start) continue;
       const a = Date.parse(`${f.start}-01T00:00:00Z`), b = f.end ? Date.parse(`${f.end}-01T00:00:00Z`) : a;
-      if (Number.isFinite(a) && Number.isFinite(b) && b >= a) months += Math.round((b - a) / 2592000000) + 1;
+      if (Number.isFinite(a) && Number.isFinite(b) && b >= a) { months += Math.round((b - a) / 2592000000) + 1; dated += 1; }
     }
-    return Math.floor(months / 12);
+    return dated ? Math.floor(months / 12) : null;
   }
   // 121's hardFilters treat profile preference locations as a hard filter and
   // its graduation regex reads only the FIRST year of a range; the router owns
@@ -36956,7 +37135,7 @@ const CareerRouter = (() => {
     // production Java"), not only in 121's narrower "years of experience" form
     const yearsReq = [...allText.matchAll(/\b(\d+)\+?\s*years?\b/gi)].map((m) => Number(m[1])).filter((n) => n >= 2);
     const myYears = experienceYearsOf(profile);
-    if (yearsReq.length && myYears + 1 < Math.max(...yearsReq)) reasons.push(`experience: the posting asks ${Math.max(...yearsReq)}+ years; your profile shows about ${myYears}`);
+    if (yearsReq.length && myYears != null && myYears + 1 < Math.max(...yearsReq)) reasons.push(`experience: the posting asks ${Math.max(...yearsReq)}+ years; your profile shows about ${myYears}`);
     // graduation windows, ranges read whole ("graduating May 2026–May 2027")
     const gy = gradYearOf(profile);
     if (gy) {
@@ -37092,6 +37271,11 @@ const CareerRouter = (() => {
   }
   const familyLabel = (f) => FAMILY_LABELS[f] || lc(f);
 
+  // The same employer by its whole name: case, punctuation, accents and a legal suffix aside ("Applebee's" is "applebees",
+  // "People Inc." is "People"); "Apple" is never "Applebee's" and "Meta" is never "Metabase".
+  const employerKey = (x) => lc(s(x)).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/['’]/g, "").replace(/[^a-z0-9]+/g, " ")
+    .replace(/\b(?:inc|llc|ltd|co|corp|corporation|company|the|plc|gmbh|sa)\b/g, " ").replace(/\s+/g, " ").trim();
+  function sameEmployer(a, b) { const x = employerKey(a), y = employerKey(b); return !!x && x === y; }
   function handleDiscovery(text, ctx, opts) {
     const o = opts || {};
     const profile = ctx.profile;
@@ -37099,7 +37283,12 @@ const CareerRouter = (() => {
     const countM = t.match(/(\d+)\s*(?:roles|jobs|internships)/);
     const limit = o.limit || (countM ? Number(countM[1]) : 5);
     const fams = o.families !== undefined ? o.families : discoveryFamilies(text);
-    const { ranked, excluded, dedupedTo, family } = rankedShortlist(profile, ctx, Object.assign({}, o, { askFamilies: fams && fams.length ? fams : null }));
+    const shortlisted = rankedShortlist(profile, ctx, Object.assign({}, o, { askFamilies: fams && fams.length ? fams : null }));
+    const { excluded, dedupedTo, family } = shortlisted;
+    // ROUTER ROUTING ROUND (2026-11-02): a search at a named employer ("any jobs at Applebee's?", "is Jobber hiring?") lists
+    // that employer's roles only, matched on the whole name (Apple is not Applebee's); none on the list is said plainly,
+    // and no other employer's role stands in for it.
+    const ranked = o.employer ? shortlisted.ranked.filter((r) => sameEmployer(r.company || (r.posting && r.posting.company), o.employer)) : shortlisted.ranked;
     // COMPLEXITY WAVE (BUG-173): remember the search's parameters —
     // a follow-up ("remote ones too", "I meant data science", "what
     // did you find") is answered against THIS record by the delta
@@ -37136,6 +37325,10 @@ const CareerRouter = (() => {
       ranked: ranked.map((r) => ({ id: r.id, title: r.title, company: r.company, url: r.url || null, score: r.score, reason: r.reason, caveat: r.caveat })),
       excluded, resultStatus: "prepared",
     };
+    if (o.employer && !ranked.length && dedupedTo > 0) {
+      const reply = compose({ headline: `No open roles at ${o.employer} on my list right now.`, facts: [`I won't make any up, and I haven't put other employers' roles in their place.`], nextStep: `Want me to look for the same kind of role at other employers?` });
+      return Object.assign({ intent: o.intent || "career_discovery", reply, requested_families: fams || [], employer: o.employer }, publicFacts);
+    }
     if (!top.length && dedupedTo === 0 && !ranked.length) {
       // COMPLEXITY WAVE (BUG-173): an EMPTY pool is its own truth —
       // the branches below would otherwise blame "your profile's hard
@@ -37193,7 +37386,7 @@ const CareerRouter = (() => {
   }
 
   // ---------- C01-style internship discovery ----------
-  function handleInternship(text, ctx) {
+  function handleInternship(text, ctx, more) {
     const now = nowOf(ctx);
     const d = new Date(now);
     const summerYear = d.getUTCMonth() >= 8 ? d.getUTCFullYear() + 1 : d.getUTCFullYear();
@@ -37207,7 +37400,7 @@ const CareerRouter = (() => {
     const headline = ctx.profile
       ? `For Summer ${summerYear}, using the profile you already gave me${gy ? ` (graduating ${gy}${skills ? `, ${skills}` : ""})` : ""}, these are the internship and new-grad roles that fit best.`
       : `For Summer ${summerYear}, these are the internship and new-grad roles that fit best — searched with no profile on file yet, so nothing about you is assumed.`;
-    return handleDiscovery(text, ctx, { intent: "career_internship_discovery", limit: 4, locations: locations.size ? locations : null, bands, headline, nextStep: "Want me to tailor your resume for the first one?" });
+    return handleDiscovery(text, ctx, { employer: (more && more.employer) || null, intent: "career_internship_discovery", limit: 4, locations: locations.size ? locations : null, bands, headline, nextStep: "Want me to tailor your resume for the first one?" });
   }
 
   // COMPLEXITY WAVE (BUG-173): discovery follow-ups. A search's
@@ -37987,7 +38180,7 @@ const CareerRouter = (() => {
       return { intent: "people_matching_stop", reply, resultStatus: "awaiting_user", sends: 0 };
     }
     if (/\bgive me the (email|names? and contacts|contacts)\b|\bjust give me the email of\b|\bshare my resume with your (whole )?network\b|\bnames and contacts of\b/.test(t)) {
-      const reply = compose({ headline: "I don't have people's contact details to hand out — and I won't guess them.", facts: ["No people database or email-finder is connected to this product, so there are no names or addresses on file to give you. An inferred or invented address is exactly how outreach lands in a stranger's inbox, so this product only ever uses addresses that come from a real source with the person attached.", "Your resume is likewise never broadcast: it travels one approved draft at a time, to a named person, on your approval."], nextStep: alt });
+      const reply = compose({ headline: "I don't have people's contact details to hand out — and I won't guess them.", facts: ["No people database or email-finder is connected to this product, so there are no names or addresses on file to give you. An inferred or invented address is exactly how outreach lands in a stranger's inbox, so this product only ever uses addresses that come from a real source with the person attached.", "Your resume is likewise never broadcast: it travels one approved draft at a time, to a named person, and I ask for your yes every time."].concat(/don'?t ask me|do not ask me|each time|every time|standing (?:yes|ok|approval)|without (?:asking|checking)|always (?:ok|approve)/.test(t) ? ["\"Don't ask me each time\" is a standing yes I will not keep: I ask for your yes every time."] : []), nextStep: alt });
       return { intent: "people_matching_stop", reply, resultStatus: "awaiting_user", sends: 0 };
     }
     if (/\bbuild my match profile\b|\bwhat do you know about me that you'?d use for matching\b/.test(t)) {
@@ -38141,8 +38334,41 @@ const CareerRouter = (() => {
   // router closure (LF-07 lane): sampleDraftText's held-draft
   // subject must speak the same labels, never the raw set key.
   const SET_LABELS = { bulge_bracket: "bulge bracket", elite_boutique: "elite boutique", middle_market: "middle-market and boutique", mbb: "MBB", faang_plus: "FAANG-plus tech", quant: "quant and prop-trading", big4: "Big Four", mega_fund_pe: "mega-fund private equity", big_law: "Big Law", academic_medical: "academic medical center", cpg: "consumer packaged goods", infrastructure_eng: "infrastructure engineering", venture_midwest: "Midwest venture", logistics: "logistics", real_estate_pe: "real-estate private equity" };
+  // The one firm an outreach ask names after at / from, in the person's own spelling: a capitalized name ("Monster",
+  // "People Inc.", "Applied Materials"), never a place the parser read as the geography, a set or category word, or a
+  // pronoun. Null when there is none.
+  const NOT_A_FIRM = /^(?:I|A|An|The|My|Our|Your|Their|Every|All|Each|Any|Some|Big|Top|Tier|Bulge|Elite|Boutique|Boutiques|Banks?|Firms?|Companies|Startups?|Fintechs?|Funds?|Schools?|Home|Work|Night|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|LinkedIn|Linkedin|Indeed|Handshake|FAANG|MBB|Gmail|Outlook)$/;
+  function firmAsTyped(text, q) {
+    const raw = s(text).replace(/(?:[\s,]+(?:lol|thx|thanks|pls|plz|please|asap)|[\s,]*[^\p{L}\p{N}\s'’.&)]+)+$/u, "").trim();
+    let m = raw.match(/\b(?:at|from|AT|FROM|At|From)\s+([A-Z][A-Za-z0-9&'’.-]*(?:\s+(?:[A-Z][A-Za-z0-9&'’.-]*|&|of)){0,3})/);
+    // Typed in lower case at the end of the ask ("someone at people inc."), when the alternative is the parser's invented
+    // default set: the name is shown capitalised, never replaced.
+    if (!m && q && q.vague) {
+      const lm = raw.match(/\b(?:at|from)\s+([a-z0-9][a-z0-9&'’.-]*(?:\s+[a-z0-9&'’.-]+){0,2})[.!?]*$/);
+      if (lm && !/^(?:the|a|an|my|our|your|their|every|all|each|any|some|big|top|home|work|school|night|once|startups?|fintechs?|banks?|firms?|companies|funds?|places?|boutiques?|linkedin|indeed|handshake)\b/.test(lm[1])) m = [lm[0], lm[1].replace(/\b[a-z]/g, (ch) => ch.toUpperCase())];
+    }
+    if (!m) return null;
+    const firm = m[1].replace(/[.,!?]+$/, "").replace(/\s+(?:&|of)$/, "").trim();
+    if (!firm || NOT_A_FIRM.test(firm.split(/\s+/)[0]) || NOT_A_FIRM.test(firm)) return null;
+    if (q && q.geography && lc(s(q.geography)).indexOf(lc(firm)) >= 0) return null;
+    if (/\b(?:school|university|college|institute)\b/i.test(firm)) return null;
+    return /\bInc$/.test(firm) ? `${firm}.` : firm;
+  }
   function handleCampaignPlan(text, ctx) {
     const q = Outreach && Outreach.parseTarget ? Outreach.parseTarget(text, ctx.profile || {}) : null;
+    // ROUTER ROUTING ROUND (2026-11-02): an ask that names one firm the outreach library does not know ("draft an email to
+    // people at Monster", "write a cold email to someone at People Inc.") was planned as "investment bankers" at the bulge
+    // bracket set: "You named no firms". The person named one: the plan is that firm as typed, and the role the vague-ask
+    // default filled in is dropped (the person never said "investment bankers"). Nothing is drafted or sent before the
+    // person approves the plan, as for any named firm.
+    if (q && !q.firms_named && q.firms_source !== "set" && !(q.proposed_default && q.proposed_default.kind === "category") && !(ctx.plan && /\b(?:there|that firm|same firm|same place)\b/i.test(s(text)))) {
+      const named = firmAsTyped(text, q);
+      if (named) {
+        const d = q.proposed_default;
+        if (d && q.role_family === d.role_family) { q.role_family = null; q.industry = null; if (q.seniority_band === d.seniority_band) q.seniority_band = null; }
+        q.firms = [named]; q.firms_named = true; q.firms_source = "named"; q.firm_set = null; q.proposed_default = null; q.vague = false;
+      }
+    }
     // DEPTH WAVE (BUG-214 / FR-371): the plan is composed from the
     // THREAD's facts before any generic set — a firm, city, or level
     // the user named earlier in this conversation (or in this turn's
@@ -39003,6 +39229,22 @@ const CareerRouter = (() => {
     if (Array.isArray(f.bullets)) f.bullets = f.bullets.map(swap);
     if (Array.isArray(f.skills)) f.skills = f.skills.map(swap);
   }
+  // TRUNK FIX (#350 x #372, 2026-11-02): whether this turn is a graduation-date correction of the person's OWN resume
+  // entries (shown drafts, or confirmed entries) that handleResumeFieldCorrection answers. #350's chat graduation fact
+  // (captureStatedFacts) and its unsaved-graduation reply (handleUnsavedGraduation) stand down for it: "actually I
+  // graduated 2022" with an education entry on the resume changes that entry (or says it changed nothing), and is not
+  // also written as a separate chat fact or answered "I haven't taken that as your graduation date".
+  function resumeGraduationCorrection(text, ctx) {
+    const raw = s(text).trim();
+    if (!raw || raw.length > 200 || /\n/.test(raw) || /\?/.test(raw) || !ProfileMod || typeof ProfileMod.fieldCorrectionOf !== "function") return false;
+    const profile = ctx && ctx.profile && typeof ctx.profile === "object" && !ctx.profile._fromStatedFacts ? ctx.profile : null;
+    if (!profile || !Array.isArray(profile.facts)) return false;
+    const field = ProfileMod.fieldCorrectionOf(raw);
+    if (!field || field.field !== "graduation") return false;
+    if (resumeDraftsPending(ctx).length) return true;
+    return profile.facts.some((f) => f && f.source === "resume-ingest" && RESUME_ENTRY_KINDS.has(f.kind) && f.needs_confirmation === false && f.status === "confirmed"
+      && !(ProfileMod.quarantinedFact && ProfileMod.quarantinedFact(f)));
+  }
   function handleResumeFieldCorrection(text, ctx) {
     const raw = s(text).trim();
     if (!raw || raw.length > 200 || /\n/.test(raw) || /\?/.test(raw)) return null;
@@ -39194,7 +39436,7 @@ const CareerRouter = (() => {
   // the reply says so on topic (it was answered as an eligibility question, "your graduation date is not stated"). The
   // person's own date is asked for once per thread, and only while none is on record; their answer is saved as said.
   function handleUnsavedGraduation(text, ctx) {
-    if (!ctx._gradUnsavedThisTurn) return null;
+    if (!ctx._gradUnsavedThisTurn || resumeGraduationCorrection(text, ctx)) return null;
     const own = statedFactsOf(ctx).find((f) => f.kind === "graduation");
     const wm = threadMirrorForWrite(ctx);
     const ask = !own && !(wm && wm.gradAskedAt);
@@ -39773,8 +40015,12 @@ const CareerRouter = (() => {
       if (wmir) delete wmir.disclosure;
       return { intent: "conversation_ack", resultStatus: "awaiting_user", reply: compose({ headline: "Dropped — nothing was sent, and nothing will be.", facts: ["The disclosure ask is closed. No message went to anyone, and none leaves this conversation without your approval on the exact words."], nextStep: "Say what you want to work on instead and it starts there." }) };
     }
-    const thirdParty = /\b(my )?(boss|manager|employer|supervisor)\b/.test(t);
-    const discloseVerb = /\b(tell|message|email|text|inform|let)\b/.test(t);
+    // ROUTER ROUTING ROUND (2026-11-02): a hiring, product or other titled manager at a firm is not the person's own
+    // manager, and "tell me" / "let me know" are not a message to anyone. Trunk asked "your direct manager, or someone
+    // else?" to "draft a message to the hiring manager at Google" and to "find product manager jobs at Hired and tell me
+    // what they pay".
+    const thirdParty = /\b(boss|employer|supervisor)\b/.test(t) || (/\bmanager\b/.test(t) && !/\b(?:hiring|product|project|program|account|engineering|marketing|general|case|office|store|restaurant|community|brand|sales|operations|ops|data|it|hr|people|team|talent|recruiting|finance|assistant|senior|junior|associate|shift|kitchen|social media|content|portfolio|property|nurse|practice)\s+managers?\b/.test(t));
+    const discloseVerb = /\b(tell|message|email|text|inform|let)\b(?!\s+(?:me|us)\b)/.test(t);
     // Disclosure CONTENT (looking / leaving / interviewing) or a
     // short direct ask — a longer turn that merely mentions a boss
     // (a raise draft, a project update) keeps its own route.
@@ -41707,7 +41953,9 @@ const CareerRouter = (() => {
     if (!list.length) {
       const goal = statedFactsOf(ctx).find((f) => f.kind === "goal");
       if (goal) offerNext(ctx, `find ${goal.value}`);
-      return done("I haven't shown you a list of roles yet, so there's nothing to pick from.", [], goal ? `Want me to search for ${goal.value} now?` : "What role should I search for, and which city or remote?");
+      // A pick of a role with no list behind it also says plainly that nothing is prepared (eval H029: "walk me through what
+      // you will submit for the first one" needs "nothing has been prepared or submitted yet", not only "no list").
+      return done("I haven't shown you a list of roles yet, so there's nothing to pick from.", moreAsk ? [] : ["There is no list, so nothing has been prepared from one."], goal ? `Want me to search for ${goal.value} now?` : "What role should I search for, and which city or remote?");
     }
     if (moreAsk) {
       const more = Array.isArray(disc.lastMore) ? disc.lastMore.filter((r) => r && r.title) : [];
@@ -43170,7 +43418,9 @@ const CareerRouter = (() => {
       // companyFromText is shared by state-writing handlers, where a
       // wider net would mint companies the user never named.
       if (!comp) { const om = s(text).match(/\bon\s+([A-Z][A-Za-z0-9&.'-]+(?:\s+(?:[A-Z][A-Za-z0-9&.'-]+|Capital|Partners|Securities|Bank|Group|International|Labs|Technologies))?)/); if (om && !/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|January|February|March|April|May|June|July|August|September|October|November|December)$/.test(om[1])) comp = om[1].replace(/[?.!,]+$/, ""); }
-      if (!comp) { const hm = s(text).match(/\bhave on\s+([a-z][a-z0-9&.'-]{2,})\b/i); if (hm && !/^(file|files|record|records|me|this|that|today|tomorrow|average|hand|him|her|them|it|my|your|tap|deck|deck,|it,)$/i.test(hm[1])) comp = hm[1].replace(/[?.!,]+$/, ""); }
+      // ROUTER ROUTING ROUND (2026-11-02): the whole name when it ends the ask ("what do you have on status labs?" was
+      // answered "status has no company file yet").
+      if (!comp) { const hm = s(text).match(/\bhave on\s+([a-z][a-z0-9&.'-]{2,}(?:\s+(?!(?:for|me|my|about|the|on|in|at|to|and|or|you|your|it|this|that|file|record|now|today)\b)[a-z0-9&.'-]+){0,3})\s*[?.!]*\s*$/i) || s(text).match(/\bhave on\s+([a-z][a-z0-9&.'-]{2,})\b/i); if (hm && !/^(file|files|record|records|me|this|that|today|tomorrow|average|hand|him|her|them|it|my|your|tap|deck|deck,|it,)$/i.test(hm[1].split(/\s+/)[0])) comp = hm[1].replace(/[?.!,]+$/, ""); }
       // "What does Databricks look for in data analysts?" — the firm
       // sits after does/do with no preposition frame at all; the
       // no-file branch is the only place this frame is read, so a
@@ -43257,7 +43507,12 @@ const CareerRouter = (() => {
         } catch { /* the no-file answer stands on its own */ }
       }
       const reply = compose({ headline: `${comp} has no company file yet — here is what that means, plainly.`, facts, nextStep: `Want prep for ${comp} built from its public postings instead, or a firm whose file exists?` });
-      return { intent: "company_intel", reply, resultStatus: "awaiting_user", sends: 0, company: comp, payload: { kind: "company_file_absent", company: comp }, artifact: { kind: "company_file_absent", company: comp } };
+      // ROUTER ROUTING ROUND (2026-11-02): a PAY question at a firm with no file ("what does Applebee's pay?", "how much do
+      // nurses make at Jobber?") is marked as one. This answer has no figure to give, so the staged brain takes the turn
+      // (career_staged.ts codeProduct): it reads the firm's postings and sources under the figure checks. Under the router
+      // alone, this honest no-file answer stands.
+      const absent = () => (PAY_ASK_RE.test(lc(s(text))) ? { kind: "company_file_absent", company: comp, topic: "pay" } : { kind: "company_file_absent", company: comp });
+      return { intent: "company_intel", reply, resultStatus: "awaiting_user", sends: 0, company: comp, payload: absent(), artifact: absent() };
     }
     const name = cirShortName(cir);
     try { ctx.discovery = Object.assign({}, ctx.discovery || {}, { lastIntelCompany: name }); } catch { /* memo only */ }
@@ -46559,6 +46814,15 @@ const CareerRouter = (() => {
   // feedback line would be truncated mid-thought behind the question
   // prefix. Null when the record holds no weak answer: nothing is
   // invented, and the weakest-area line then stands alone.
+  // The person's own recorded answer to question q (or the first one when q is null), trimmed to a quotable length. Their
+  // words only: nothing is added to it.
+  function quotedAnswer(m, q) {
+    const list = m && Array.isArray(m.answers) ? m.answers : [];
+    const a = q == null ? list[0] : list.find((x) => x && x.q === q);
+    const txt = a ? s(a.answer).replace(/\s+/g, " ").trim() : "";
+    if (!txt) return null;
+    return txt.length > 160 ? txt.slice(0, 157).trimEnd() + "..." : txt;
+  }
   function mockImprovement(summary) {
     if (!summary || !Array.isArray(summary.what_didnt)) return null;
     let weakest = null;
@@ -46661,6 +46925,11 @@ const CareerRouter = (() => {
       `Honest verdict: your weakest area is ${summary ? summary.fix_first : "structure"} — that is the one to drill before the real round.`];
     if (summary && Array.isArray(summary.what_didnt) && summary.what_didnt.length) facts.push(`The answer that needs work first: "${s(summary.what_didnt[0].q).slice(0, 90)}".`);
     const imp = mockImprovement(summary);
+    // The feedback is on THEIR words: the recorded answer is quoted back (what they typed, trimmed), so the debrief reads as
+    // feedback on that answer and not as a score card for a question title (eval H011: judges read "Tell me about yourself"
+    // as the wrong answer when the person had answered with a different topic).
+    const said = imp ? quotedAnswer(m, imp.q) : (answered === 1 ? quotedAnswer(m, null) : null);
+    if (said) facts.push(`Your answer, as I recorded it: "${said}"`);
     if (imp) facts.push(`One concrete improvement, on your answer to "${s(imp.q).slice(0, 90)}": ${imp.line}`);
     const reply = compose({ headline: "Your debrief — scored from this session's record.", facts, nextStep: "Want to retry your weakest answer once more, or run a fresh mock?" });
     return { intent: "prep_mock_debrief", reply, resultStatus: "prepared", sends: 0, summary };
@@ -48433,6 +48702,101 @@ const CareerRouter = (() => {
   // when its shape is absent, so what is still unknown keeps the tail's fallback.
   const FAM_CAREER = /\b(jobs?|careers?|resumes?|cv|interviews?|applications?|apply|applied|applying|internships?|intern|roles?|positions?|openings?|hiring|recruiters?|salary|offers?|employers?|compan(?:y|ies)|cover letter|networking|degree|major|graduat\w*)\b/;
   const FAM_ROLE_NOUN = /\b(jobs?|roles?|internships?|positions?|openings?|gigs?)\b/;
+  // ROUTER ROUTING ROUND (2026-11-02): a role search at a named employer, said as a command, a bare noun phrase or a
+  // question: "find me data analyst roles at Applebee's", "any openings at Jobber?", "got any nurse roles at Teamworks?",
+  // "does Target have any accountant jobs?", "what nurse jobs does Stripe have?", "search Stripe jobs", "is Jobber hiring
+  // right now?". The employer's name is set aside before the other-topic words are read, so an employer called People Inc.,
+  // Status Labs or Applied Materials is still searched. Any other topic in the rest of the message (pay, culture, an
+  // interview, people, an application, a watch, a cancel, advice) keeps that topic's own route.
+  const JOB_AT_NOUN = String.raw`(?:jobs?|roles?|openings?|positions?|postings?|internships?|vacanc(?:y|ies)|listings?|opportunit(?:y|ies)|gigs?)`;
+  const JOB_AT_OTHER = /\b(?:pay|pays|paid|paying|salary|salaries|comp|compensation|make|makes|earn|earns|wages?|culture|interview\w*|process|apply|applied|applying|application\w*|tailor\w*|resume|cv|cover letter|prep\w*|referr\w*|recruiters?|hiring managers?|who|whom|people|employees|staff|contacts?|e-?mail\w*|message\w*|draft\w*|write|reach|status|stand|happened|hear back|heard back|worth|benefits|reviews?|layoffs?|visa|sponsor\w*|requirements?|require\w*|qualif\w*|degree|gpa|deadlines?|timeline|watch\w*|alerts?|remind\w*|notify|cancel\w*|withdraw\w*|remove|stop|don'?t|never|not|my|fit|suit\w*|recommend\w*|tips?|advice|how|why|should|could i|vs|versus|compare|better)\b|\blooks? for in\b|\btell me about\b|\blike to work\b|\bdo you have on\b/;
+  // ROUTER ROUTING ROUND (2026-11-02): a message in another language ("¿cuánto paga Stripe?", "wo ist meine Bewerbung bei
+  // Google?", "qui travaille chez Notion ?"). The company-file gate claimed any question that named a firm, so these got
+  // the English company file whatever they asked (a status, people, pay). Two or more words that are not English, and
+  // no English question word, mark it (or one word no English career question uses); the router then leaves it to the
+  // brain, which reads it in that language.
+  const FOREIGN_WORDS_RE = /(?:^|[^\p{L}])(qu[ée]|cu[áa]nto|cu[áa]l|qui[ée]n|c[óo]mo|d[óo]nde|trabaja|trabajo|empleo|solicitud|sueldo|salario|paga|pagan|busco|buscando|vagas?|quanto|qual|onde|est[áa]|minha|salaire|travaille|chez|emploi|cherche|o[ùu]|combien|ma|candidature|wo|ist|meine|bei|zahlt|bewerbung|gehalt|arbeitet|stelle|stellen|kitna|karta|kya|hai|naukri|mera|meri)(?=$|[^\p{L}])/giu;
+  const FOREIGN_STRONG_RE = /(?:^|[^\p{L}])(?:cu[áa]nto|qui[ée]n|trabaja|solicitud|sueldo|busco|vagas|quanto|salaire|travaille|emploi|candidature|zahlt|bewerbung|gehalt|arbeitet|kitna|naukri)(?=$|[^\p{L}])/iu;
+  function looksForeign(text) {
+    const raw = s(text).toLowerCase();
+    if (/[¿¡]/.test(raw) || FOREIGN_STRONG_RE.test(raw)) return true;
+    const hits = new Set((raw.match(FOREIGN_WORDS_RE) || []).map((w) => w.replace(/^[^\p{L}]/u, "")));
+    if (hits.size < 2) return false;
+    return !/\b(?:what|how|who|where|when|why|which|does|do|is|are|can|could|tell|find|show|my|the)\b/.test(raw);
+  }
+  // ROUTER ROUTING ROUND (2026-11-02): a command to write to someone ("draft a message to the hiring manager at Notion",
+  // "help me write to a recruiter at McKinsey", typed with a slip: "darft", "wrrite") is never a company-file question;
+  // the company-file gate stands aside and the outreach owners (or the brain) take it.
+  const OUTREACH_CMD = ["draft", "write", "email", "message", "reach"];
+  const OUTREACH_CMD_REAL = new Set(["drift", "craft", "graft", "white", "wrote", "writ", "wire", "rite", "trite", "emails", "teach", "beach", "peach", "react", "ready", "leach", "massage", "messages"]);
+  function outreachCommand(text) {
+    const t = lc(s(text)).replace(/[’]/g, "'").replace(/^[^\p{L}]+/u, "")
+      .replace(/^(?:(?:hey|hi|yo|ok|okay|so|please|pls|plz|quick q(?:uestion)?:?|can you|could you|would you|help me|i want to|i need to|let's)[\s,:]+)+/, "");
+    const w = (t.match(/^[a-z]+/) || [""])[0];
+    if (w.length < 4 || OUTREACH_CMD_REAL.has(w) || !OUTREACH_CMD.some((x) => _dlWithin1(w, x))) return false;
+    return /\b(?:to|at|from|with)\b/.test(t) && !/\?\s*$/.test(t);
+  }
+  // A question about what an employer pays (the no-file intel answer marks it; see handleIntel).
+  const PAY_ASK_RE = /\b(?:pay|pays|paid|paying|salar(?:y|ies)|comp|compensation|wages?|hourly rate|base pay|total comp)\b|\bhow much\b[^?.!]*\b(?:make|makes|earn|earns|get paid|pay)\b|\bwhat (?:does|do|would|will) (?:an?|the) [a-z' -]{2,40}\b(?:at|for|with)\b[^?!]*\b(?:make|earn)\b/;
+  const JOB_AT_LEAD =String.raw`^(?:(?:hey|hi|hello|yo|ok|okay|so|please|pls|plz|quick q|q)\b[\s,:;!-]*)*`;
+  const JOB_AT_SHAPES = [
+    // "find me data analyst roles at Applebee's", "any openings at Jobber", "are there roles at X", "nurse jobs at X"
+    // ("are the ... roles at X": the routing copy's detypo reads a slipped "are thre" as "are the")
+    new RegExp(`${JOB_AT_LEAD}(?<verb>(?:can you |could you |would you )?(?:find|show|search(?: for)?|list|get|pull up|look(?:ing)? for|look up)(?: me)?\\s+|any\\s+|got any\\s+|are (?:there|the)(?: any)?\\s+|is there(?: an?| any)?\\s+|i (?:want|need|'?m looking for|am looking for)\\s+|looking for\\s+)?(?<pre>(?:an?\\s+|some\\s+|open\\s+|new\\s+)?[a-z0-9 &/+'.-]{0,40}?)\\b(?<noun>${JOB_AT_NOUN})\\s+(?:at|with)\\s+(?<co>[a-z0-9].*)$`),
+    // "does Jobber have any data analyst jobs", "what nurse jobs does Stripe have"
+    new RegExp(`${JOB_AT_LEAD}(?:does|do)\\s+(?<co>.{2,40}?)\\s+have\\s+(?:any\\s+)?(?:open\\s+)?[a-z0-9 &/+'.-]{0,40}?\\b(?<noun>${JOB_AT_NOUN})$`),
+    new RegExp(`${JOB_AT_LEAD}what\\s+[a-z0-9 &/+'.-]{0,40}?\\b(?<noun>${JOB_AT_NOUN})\\s+(?:does|do)\\s+(?<co>.{2,40}?)\\s+have$`),
+    // "search Stripe jobs", "show me Applebee's openings"
+    new RegExp(`${JOB_AT_LEAD}(?:find|show|search|list|get)(?: me)?\\s+(?<co>[a-z0-9&.'-]+(?:\\s+[a-z0-9&.'-]+){0,3})\\s+(?<noun>${JOB_AT_NOUN})$`),
+    // "is Teamworks hiring", "is Teamworks hiring right now", "is Stripe hiring data analysts"
+    new RegExp(`${JOB_AT_LEAD}(?:is|are)\\s+(?<co>.{2,40}?)\\s+(?:still\\s+)?hiring(?:\\s+(?:right\\s+now|now|at the moment|currently|this (?:year|summer|fall|spring)|[a-z ]{2,40}?))?$`),
+  ];
+  // Not an employer: a pronoun, an article or a kind of place ("jobs at a startup", "roles at big banks", "find me jobs").
+  const JOB_AT_NOT_EMPLOYER = /^(?:me|us|you|u|my|our|your|their|his|her|a|an|some|any|all|more|other|new|good|better|best|cool|big|small|large|top|local|startups?|companies|company|firms?|banks?|hospitals?|schools?|universities|agencies|nonprofits?|home|night|nights|weekends?|remote)\b/i;
+  const JOB_AT_FIX = ["roles", "openings", "positions", "postings", "listings", "internships", "there"];
+  // Real words one edit from those: never "corrected".
+  const JOB_AT_SLIPS = new Set(["role", "rules", "roses", "holes", "poles", "moles", "rolls", "robes", "roes", "rotes", "toles", "opening", "position", "posting", "listing", "internship",
+    "three", "where", "their", "theme", "then", "thee", "the", "these", "those", "here", "therm", "thru", "tree", "ether", "other", "they", "them", "hosting", "costing", "pasting", "lasting", "listening"]);
+  function jobSearchAtEmployer(text) {
+    // An emoji, "lol", "thx" or "pls" around the ask is not part of it.
+    const t = lc(s(text)).replace(/[’]/g, "'")
+      .replace(/^[^\p{L}\p{N}]+/u, "")
+      .replace(/(?:[\s,]+(?:lol|lmao|thx|thanks|thank you|ty|pls|plz|please|asap)|[\s,]*[^\p{L}\p{N}\s'.&)]+)+$/u, "")
+      .replace(/[\s?!.]+$/, "").trim()
+      // One slip on a role noun or on "there" ("ux designer rles", "are thre any roles") reads as the word meant.
+      .replace(/\b[a-z]{3,12}\b/g, (w) => JOB_AT_SLIPS.has(w) ? w : (JOB_AT_FIX.find((x) => _dlWithin1(w, x)) || w));
+    if (!t || t.length > 160) return null;
+    for (const re of JOB_AT_SHAPES) {
+      const m = re.exec(t);
+      if (!m) continue;
+      const co = (m.groups && m.groups.co) || "";
+      // Without a search verb the words before the role noun only name the role: "I got the job at Stripe", "the analyst
+      // role at Ramp", "she works jobs at X" are news or a reference, never a search.
+      if (m.groups && m.groups.pre !== undefined && !m.groups.verb && /\b(?:i|i'm|im|we|he|she|they|got|landed|lost|quit|left|accepted|offered|took|start\w*|had|has|have|was|were|am|is|work\w*|interned|did|do|doing|the|that|this|those|these|your|their|his|her|its)\b/.test(m.groups.pre)) continue;
+      // A second ask after the employer ("... at Jobber and what they pay") keeps the other topic's route.
+      const tail = /\b(?:and|but|also|then|plus)\b|,/.test(co) ? co : "";
+      if (JOB_AT_OTHER.test(t.replace(co, " ")) || (tail && JOB_AT_OTHER.test(tail))) continue;
+      if (!/[a-z0-9]/.test(co) || /^(?:it|this|that|they|them|anyone|someone|anybody|somebody|everyone|you|u)$/.test(co.trim())) continue;
+      // "find me data roles and internships" names no employer: the words before the noun are the role, not a firm.
+      if (re === JOB_AT_SHAPES[3] && /\b(?:and|or|remote|entry|level|new|grad|summer|senior|junior|part|time|full)\b/.test(co)) continue;
+      // The head noun decides the route, as findHeadNoun does for a bare find: "internships at X" is the internship search.
+      // The employer is the name before a place, a level or a second ask ("at Jobber in Chicago", "at Stripe for new grads"),
+      // in the person's own spelling.
+      const name = co.replace(/\s+(?:in|near|around|for|with|remote|that|who|which|and|or|paying|this|next|right|now|currently|starting|hiring)\b.*$/, "").replace(/[\s,.;:!?]+$/, "").trim();
+      const at = name ? s(text).toLowerCase().indexOf(name) : -1;
+      const typed = at >= 0 ? s(text).slice(at, at + name.length) : name;
+      // A capitalized name is the person's own employer name ("Best Buy", "The Home Depot"), whatever its first word.
+      if (!name || (!/^[A-Z0-9]/.test(typed) && JOB_AT_NOT_EMPLOYER.test(name)) || /^(?:me|us|you|u)$/i.test(name)) {
+        if (re === JOB_AT_SHAPES[3]) continue;
+        return { noun: (m.groups && m.groups.noun) || "jobs", employer: null };
+      }
+      // "find nursing jobs", "search tech jobs": a lower-case word before the noun is the kind of job, not an employer; the
+      // search runs without one, as the find gate's does.
+      if (re === JOB_AT_SHAPES[3] && typed === typed.toLowerCase()) return { noun: (m.groups && m.groups.noun) || "jobs", employer: null };
+      return { noun: (m.groups && m.groups.noun) || "jobs", employer: typed };
+    }
+    return null;
+  }
   // What the product needs from the person to start: asked of the product itself ("what do you need from me", "how
   // do I get started with you"). Runs ahead of the guidance engine, whose path and skill-gap shapes otherwise claim
   // these asks; a start asked about a FIELD ("how do I get started in banking") is not this shape and keeps guidance.
@@ -49304,9 +49668,40 @@ const CareerRouter = (() => {
       reply: `You don't have a batch in flight right now — no application batch has been queued on this account that I can read back. Say "apply to N <role> roles" and I'll start one.` };
   }
 
+  // #354 SAFETY (2026-11-01): the router's crisis check is its FIRST check, on the person's own words (before detypo
+  // can rewrite one), through the one shared detector (139 CareerSafety.isDistress, which the trust turn and 125's
+  // screen also read). Before, it sat in handleAppendixSafety behind dozens of routes and its own short list, so "kms"
+  // or "i took too many pills" reached the fallback. The reply is 125's crisis answer, word for word.
+  // #354 re-review 2: the check-in remembers what else the person asked; "i'm fine" (or "you misread me") within two hours
+  // resumes it (resumeAfterCheckin). The handler notes it too when its trust turn answers first (noteCrisisCheckin).
+  function noteCrisisCheckin(ctx, rawText) {
+    const m = threadMirrorForWrite(ctx);
+    if (m) m.crisisCheckin = { ask: s(rawText).slice(0, 600), at: nowOf(ctx) };
+  }
+  function resumeAfterCheckin(rawText, c) {
+    const m = threadMirrorOf(c), ck = m && m.crisisCheckin;
+    if (!ck) return null;
+    delete threadMirrorForWrite(c).crisisCheckin; // one answer only: anything else said next simply goes on
+    if (!(Safety && Safety.isFineReply && Safety.isFineReply(rawText)) || Safety.isDistress(s(rawText)) || nowOf(c) - Number(ck.at || 0) > 2 * 3600 * 1000) return null;
+    const rest = Safety.withoutDistress ? Safety.withoutDistress(ck.ask) : "";
+    if (rest && rest.trim()) {
+      const r = dispatchChat(rest, c);
+      if (r && r.intent !== "career_fallback") return r;
+    }
+    return { intent: "conversation_ack", reply: "Thanks for telling me. I'm here whenever you need me. What should we work on?", resultStatus: "completed", sends: 0 };
+  }
+  function distressFirst(rawText, ctx) {
+    if (!(Safety && Safety.isDistress && Safety.isDistress(s(rawText)))) return null;
+    if (ctx) noteCrisisCheckin(ctx, rawText);
+    const r = Intel && Intel.respondToRequest ? Intel.respondToRequest(s(rawText)) : null;
+    let support = null;
+    try { support = Safety.distressResponse ? Safety.distressResponse({ text: s(rawText), profileFacts: [] }) : null; } catch { support = null; }
+    return { intent: "safety_support", reply: r && r.action === "support" ? r.text : support.text, resultStatus: "completed", sends: 0, support };
+  }
   function dispatchChat(text, ctx) {
     const c = ctx || {};
     const rawText = text;
+    { const d = distressFirst(rawText, c); if (d) return d; }
     text = expandShorthand(detypo(text)); // routing copy only — records keep the original (ROUTER DEAD ENDS 2026-10-31: shorthand too)
     const t = lc(text);
     if (!t) return null;
@@ -49523,6 +49918,21 @@ const CareerRouter = (() => {
     { const ri = routeResumeItem(text, c); if (ri) return ri; }
     { const ru = routeResumeUpdate(text, c); if (ru) return ru; }
     { const cg = routeCoverLetterGuidance(text, c); if (cg) return cg; }
+    // ROUTER ROUTING ROUND (2026-11-02): a role search at a named employer ("any data analyst openings at Applebee's?",
+    // "got any nurse roles at Jobber?", "is Teamworks hiring right now?", "search Stripe jobs") is the role search. Trunk
+    // answered these with the company file ("Teamworks has no company file yet"), the current-openings recommendation
+    // ("Which employer source ... should we check next?", after the person named one) or the catch-all. A pay, culture,
+    // interview, people or application question at the same employer keeps its own route (jobSearchAtEmployer).
+    {
+      const jobAt = jobSearchAtEmployer(text);
+      if (jobAt) {
+        // The same owners as the find gate below: a board with no live registry is said plainly (handleDeadBoard).
+        const dead = profile ? handleDeadBoard(text, c) : null;
+        if (dead) return dead;
+        if (/^internships?$/.test(jobAt.noun)) return handleInternship(text, c, { employer: jobAt.employer });
+        return handleDiscovery(text, c, { employer: jobAt.employer });
+      }
+    }
     // Capability 2 owns read-only resume/role, gap, location and current-source
     // recommendations. It takes only host-injected profile/postings; it never
     // falls back to the filesystem corpus or touches alert/browser state.
@@ -49922,7 +50332,7 @@ const CareerRouter = (() => {
       && /\b(bankers?|analysts?|associates?|people|persons|contacts?|founders?|recruiters?|traders?|lawyers?|alumni|engineers?|designers?|scientists?|consultants?|residents?|developers?|researchers?|product managers?|pms|swes)\b/.test(t)
       && !/\bwhat does it take\b|\bget hired as\b|\bhiring bar\b|\bwhat (do|does) (postings|employers|companies|firms) (require|look for|want|expect)\b|\bpostings (name|ask|require|usually|emphasize)\b/.test(t)
       && !/\binterviews?\b[^.]*\b(prepar\w*|get ready|getting ready|prep)\b|\b(prepar\w*|get ready|getting ready)\b[^.]*\binterviews?\b/.test(t)
-      && !/\b(roles?|jobs?|internships?|positions?|openings?)\b/.test(t)
+      && !/\b(roles?|jobs?|internships?|positions?|openings?|postings?|listings?)\b/.test(t) && !roleNounSlip(t)
       // RESEARCH ROUND 2 (2026-10-30): "how much do analysts get paid at Microsoft" is a pay question, not a people list
       // ("Building the list now: analysts at Microsoft").
       && !(RS2_PAY_ASK.test(t) && /\bhow much\b|\bget paid\b|\bwhat (?:do|does)\b/.test(t))
@@ -50376,7 +50786,8 @@ const CareerRouter = (() => {
       // company file because the intel dispatch ran first and the
       // status branch's patterns never matched a company name
       // sitting between "my" and "application".
-      if (/\bmy application\b[^.]*\b(status|stage|happened|update)\b|\bwhat happened with my\b[^.]*\bapplication\b|\bapplication status\b|\bstatus of my\b[^.]*\bapplication\b/.test(t)) {
+      // ROUTER ROUTING ROUND (2026-11-02): "where's my application to Goldman Sachs?" too (it got the Goldman file).
+      if (/\bwhere(?:'s| is)? my application\b|\bmy application\b[^.]*\b(status|stage|happened|update)\b|\bwhat happened with my\b[^.]*\bapplication\b|\bapplication status\b|\bstatus of my\b[^?!]*\bapplication\b/.test(t)) {
         const sa = handleApplicationStatus(text, c);
         if (sa) return sa;
       }
@@ -50406,7 +50817,7 @@ const CareerRouter = (() => {
       // "should I become a lawyer or a doctor?" about lawyers alone).
       { const fd = routeFieldDecision(text, c); if (fd) return fd; }
       { const od = routeOfferDecision(text, c); if (od) return od; }
-      const iq = (/\?/.test(s(text)) || /\b(tell me|what|how|look for|hiring|comp|culture|interview process|file built|compare|pay|stats|statistics|library|headcount|revenue|valuation|acceptance rate|recruiting timeline)\b/.test(t) || ((RS_TIMELINE_ASK.test(t) || RS2_TOPIC_ANY.test(t) || /\bresearch\b/.test(t)) && !!cirFor(text, c)) || (RS2_COMPARE.test(t) && namedCompaniesOf(text, c).filter((h) => h.cir).length >= 2)) ? handleIntel(text, c) : null;
+      const iq = !looksForeign(text) && !outreachCommand(text) && (/\?/.test(s(text)) || /\b(tell me|what|how|look for|hiring(?! managers?\b)|comp|culture|interview process|file built|compare|pay|stats|statistics|library|headcount|revenue|valuation|acceptance rate|recruiting timeline)\b/.test(t) || ((RS_TIMELINE_ASK.test(t) || RS2_TOPIC_ANY.test(t) || /\bresearch\b/.test(t)) && !!cirFor(text, c)) || (RS2_COMPARE.test(t) && namedCompaniesOf(text, c).filter((h) => h.cir).length >= 2)) ? handleIntel(text, c) : null;
       if (iq) return iq;
       // ROUTING FAMILIES (2026-10-23): an onboarding ask aimed at the product ("how do I get started with you") is not
       // a path ask; it is answered before this gate's "how do i get" shape can claim it.
@@ -50435,7 +50846,7 @@ const CareerRouter = (() => {
       const tl = handleTrackLog(text, c);
       if (tl) return tl;
     }
-    if (/\bmy application\b[^.]*\b(status|stage|happened|update)\b|\bwhat happened with my\b[^.]*\bapplication\b|\bapplication status\b|\bstatus of my\b[^.]*\bapplication\b|\bdid\b[^.]*\b(reject|respond|get back)\b/.test(t)) {
+    if (/\bmy application\b[^.]*\b(status|stage|happened|update)\b|\bwhat happened with my\b[^.]*\bapplication\b|\bapplication status\b|\bstatus of my\b[^?!]*\bapplication\b|\bdid\b[^.]*\b(reject|respond|get back)\b/.test(t)) {
       const sa = handleApplicationStatus(text, c);
       if (sa) return sa;
     }
@@ -51279,7 +51690,7 @@ const CareerRouter = (() => {
       // a materials instruction ("put on my cover letter that my GPA is 3.9") is not the person stating a fact (BUG-177)
       const materialsAsk = /\b(put|write|add|say|state|claim|list|mark|include|change|make)\b[^.]*\b(resume|cv|cover letter|application|form|letter|profile)\b/i.test(u);
       // a short chat line only: a pasted resume's "graduating May 2028" is a document entry, read by resume intake
-      if (u.length <= 200 && u.split(/\n/).length <= 2 && !materialsAsk && !/\?/.test(u)) {
+      if (u.length <= 200 && u.split(/\n/).length <= 2 && !materialsAsk && !/\?/.test(u) && !resumeGraduationCorrection(raw, ctx)) {
         // REVIEW #350 (D-007): a fact is the PERSON's only when they are the subject of its own sentence ("my brother will
         // graduate in may 2027", "my friend said i graduate ..." are not), and only when definite: a negation ("i dont
         // graduate in 2027") or a hypothetical ("if i graduate", "i might graduate") records nothing.
@@ -53099,6 +53510,9 @@ const CareerRouter = (() => {
   }
   function handleChat(text, ctx) {
     const c = ctx || {};
+    // #354 SAFETY: distress is answered before anything else reads the message (no part queued, no nudge appended).
+    { const d = distressFirst(text, c); if (d) return d; }
+    { const back = resumeAfterCheckin(text, c); if (back) { try { syncThreadOut(c); } catch { /* the resumed turn stands */ } return back; } }
     // COMPLEXITY WAVE (BUG-179): multi-intent accounting wraps the
     // dispatch — the parts are detected from the ORIGINAL text, the
     // dispatch serves what it serves, and whatever it did not serve
@@ -53203,7 +53617,7 @@ const CareerRouter = (() => {
       if (m && m.resumeIngest && typeof m.resumeIngest === "object" && intent !== "career_resume_ingest") m.resumeIngest.stale = true;
     } catch { /* a mark never breaks a turn */ }
   }
-  return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf };
+  return { handleChat, noteCrisisCheckin, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerRouter;
 

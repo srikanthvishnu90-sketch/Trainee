@@ -2,7 +2,7 @@
 // 2026-10-21 live test, on the agent brain. Every message goes in the way Telegram delivers it (channel_inbound.runInbound),
 // then through the code before the brain that agent-chat runs (the mock interview), then agentTurn with the same tools
 // production passes: today's postings read from the real boards, every shown link checked against its board, the apply
-// queue, the person's situation. Nothing is faked: no OPENAI_API_KEY, no run. The person is the synthetic test persona
+// queue, the person's situation. Nothing is faked: no ANTHROPIC_API_KEY, no run. The person is the synthetic test persona
 // (Maya), never a real one. What this cannot show: the deployed function itself, Supabase, Telegram's servers.
 //   deno run -A evals/career/slice.ts --out evals/career/results/slice-<label>.md [--boards 60]
 import boards from "../../supabase/functions/career-ingest/boards.json" with { type: "json" };
@@ -12,7 +12,8 @@ import { memoryChannelWorld } from "../../supabase/functions/_shared/channel_mem
 import { telegramAdapter } from "../../supabase/functions/_shared/telegram.ts";
 import { mockTurn, type MockState, type MockStore } from "../../supabase/functions/_shared/career_mock.ts";
 import { agentTurn } from "../../supabase/functions/agent-chat/career_brain.ts";
-import { callModel, modelConfig, newMeter } from "../../supabase/functions/_shared/model_gateway.ts";
+import { callModel, modelConfigFor, newMeter } from "../../supabase/functions/_shared/model_gateway.ts";
+import { careerModelConfig } from "../../supabase/functions/agent-chat/release_model.ts";
 import { memoryAlertStore } from "../../supabase/functions/_shared/career_alert_store.ts";
 import { memoryWantStore } from "../../supabase/functions/_shared/career_apply_want.ts";
 import { linkChecker } from "../../supabase/functions/_shared/link_check.ts";
@@ -21,7 +22,7 @@ import * as core from "../../supabase/functions/_shared/router_core.career.js";
 import { CareerHost } from "../../supabase/functions/_shared/career_host.js";
 
 const args = Deno.args, opt = (n: string) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] ?? null : null; };
-if (!Deno.env.get("OPENAI_API_KEY")) { console.log("NOT RUN: no OPENAI_API_KEY. A transcript is never faked."); Deno.exit(2); }
+if (!Deno.env.get("ANTHROPIC_API_KEY")) { console.log("NOT RUN: no ANTHROPIC_API_KEY. A transcript is never faked."); Deno.exit(2); }
 const out: string[] = [];
 const say = (s = "") => { out.push(s); console.log(s); };
 
@@ -36,7 +37,7 @@ const linkCheck = linkChecker(fetch, { userAgent: `Trainee job link check (conta
 
 // 2. The pieces agent-chat passes, in memory.
 const host = CareerHost.createCareerHost({ CareerAccess: core.CareerAccess, CareerOnboarding: core.CareerOnboarding, CareerRouter: core.CareerRouter, CareerDoorstep: core.CareerDoorstep, CareerReply: core.CareerReply, CareerContainment: core.CareerContainment });
-const cfg = { ...modelConfig(Deno.env, "chat"), model: Deno.env.get("CAREER_MODEL") || "gpt-5-mini" };
+const cfg = careerModelConfig(Deno.env);
 const meter = newMeter();
 const wants = memoryWantStore(), alerts = memoryAlertStore();
 interface Person { snapshot: any; history: { role: "user" | "assistant"; content: string }[]; last: string | null; mock: Map<string, MockState>; tools: string[] }

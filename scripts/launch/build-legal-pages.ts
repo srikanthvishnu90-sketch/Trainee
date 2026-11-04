@@ -170,8 +170,12 @@ const THREADS = `var THREADS = {
 
 // The homepage's legal links and help pages, pointed at the published pages. Each edit must find its text exactly once
 // (a homepage that moved on fails the build instead of shipping half-edited).
-export function patchHome(home: string, inputs: OwnerInputs): string {
-  let s = home.replaceAll('href="#product/privacy"', 'href="/privacy"').replaceAll('href="#product/terms"', 'href="/terms"');
+//
+// `inputs` null is the interim build (live-site fixes, 2026-11-03): the owner has not given LEGAL_NAME, SUPPORT_EMAIL and
+// GOVERNING_STATE, so no Trainee privacy or terms page exists. Everything that needs one of them is removed, not guessed: the
+// Privacy and Terms help pages and their links, every support and careers mailto, and the owner-only sections cut below.
+export function patchHome(home: string, inputs: OwnerInputs | null): string {
+  let s = inputs ? home.replaceAll('href="#product/privacy"', 'href="/privacy"').replaceAll('href="#product/terms"', 'href="/terms"') : home;
   const once = (from: string, to: string) => {
     const n = s.split(from).length - 1;
     if (n !== 1) throw new Error(`homepage: expected one "${from.slice(0, 60)}", found ${n}`);
@@ -179,7 +183,7 @@ export function patchHome(home: string, inputs: OwnerInputs): string {
   };
   const i = s.indexOf("{ slug:'privacy', group:'Trust & Legal'"), k = s.indexOf("{ slug:'sms-terms', group:'Trust & Legal'");
   if (i < 0 || k < i) throw new Error("homepage: the privacy and terms help pages were not found");
-  s = s.slice(0, i) + `{ slug:'privacy', group:'Trust & Legal', title:'Privacy Policy',
+  s = s.slice(0, i) + (inputs ? `{ slug:'privacy', group:'Trust & Legal', title:'Privacy Policy',
   desc:'What we collect, why, and the choices you have.',
   html:\`
 <p>Trainee's Privacy Policy, including how it uses data from a Google account you connect (Google API Services User Data Policy, Limited Use), is at <a href="/privacy">/privacy</a>.</p>
@@ -190,12 +194,16 @@ export function patchHome(home: string, inputs: OwnerInputs): string {
   html:\`
 <p>Trainee's Terms of Service are at <a href="/terms">/terms</a>.</p>\`},
 
-` + s.slice(k);
+` : "") + s.slice(k);
   once("<p>[Describe encryption in transit and at rest, where data is hosted, and who on your team can access it.]</p>",
     "<p>Information is sent over encrypted connections. Each person can read only their own records, and the tokens of accounts you connect are kept in an encrypted secret store that only Trainee's servers use.</p>");
   once("<p>[Describe how connections are authorized, for example through OAuth, and that passwords are never stored.]</p>",
     "<p>Google is connected on Google's own page, so Trainee never sees your Google password. Saying \"disconnect gmail\" revokes Trainee's access at Google and deletes what it kept. See <a href=\"/google\">what Trainee reads in Gmail</a>.</p>");
-  once("supportEmail: 'support@example.com',", `supportEmail: '${inputs.SUPPORT_EMAIL.trim().replace(/'/g, "")}',`);
+  if (inputs) once("supportEmail: 'support@example.com',", `supportEmail: '${inputs.SUPPORT_EMAIL.trim().replace(/'/g, "")}',`);
+  else once("    supportEmail: 'support@example.com',\n    careersEmail: 'careers@example.com',\n", "");
+  // Unused sample numbers (nothing reads them); the WhatsApp button pointed at Twilio's shared sandbox ("join basic-rocket"),
+  // which is not Trainee's number, so it goes in both builds.
+  once("    agentNumber: '+10000000000',      // the number your agent texts from (E.164)\n    agentNumberPretty: '+1 (000) 000-0000',\n", "");
   // Review of #196, blocker 1: nothing the owner still has to write ships. Each piece below is a section of template text
   // (a price, a launch date, a founder story, a bio): it is removed, never filled in with a guess. Add it back when the
   // owner has the real words; the build then refuses nothing, because nothing is left to refuse.
@@ -206,6 +214,13 @@ export function patchHome(home: string, inputs: OwnerInputs): string {
     if (a < 0 || b < 0) throw new Error(`homepage: the block around "${marker.slice(0, 60)}" was not found`);
     s = s.slice(0, a) + s.slice(b + end.length);
   };
+  { // the hero button (inline, after the Telegram one, with the comment that promised its return) and the "Start chatting" one
+    const h = s.indexOf(' <a href="https://wa.me/14155238886'), he = s.indexOf("Chat on WhatsApp</a>", h);
+    if (h < 0 || he < 0 || s.split("wa.me/14155238886").length !== 3) throw new Error("homepage: the two WhatsApp buttons were not found");
+    s = s.slice(0, h) + s.slice(he + "Chat on WhatsApp</a>".length);
+    once("          <!-- WHATSAPP BUTTON: restored with the real sandbox link when the Twilio setup lands -->\n", "");
+    cut("wa.me/14155238886", "        <a href=", "</a>\n");
+  }
   cut("[Launch timing]", "        <details>", "</details>\n");
   cut("[YOUR PRICE]. Cancel anytime.", "        <details>", "</details>\n");
   cut("[Paragraph 1:", '  <section class="dark">', "  </section>\n");
@@ -265,10 +280,34 @@ export function patchHome(home: string, inputs: OwnerInputs): string {
   once('<strong>Books coffee chats</strong><span>Finds people and writes the email.</span>', "<strong>Coffee chat notes</strong><span>Drafts notes to people you know.</span>");
   // Round 3, item 1: no example address anywhere. Applications for jobs at Trainee go to the support address the owner gave;
   // the sign-up field's hint is words, not an address.
-  once("careersEmail: 'careers@example.com',", `careersEmail: '${inputs.SUPPORT_EMAIL.trim().replace(/'/g, "")}',`);
+  if (inputs) once("careersEmail: 'careers@example.com',", `careersEmail: '${inputs.SUPPORT_EMAIL.trim().replace(/'/g, "")}',`);
   once('placeholder="you@example.com"', 'placeholder="Your email"');
   once('<div class="note"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-warning"/></svg></i><p>Template. Carriers review this page when you register your texting number, so keep it accurate.</p></div>\n', "");
+  if (!inputs) interim(once, cut);
   return s;
+}
+
+// The part of the interim build that needs no owner input: the pages and links that would point at a Trainee privacy policy,
+// terms or support address that does not exist yet are taken out. Each edit must find its text exactly once.
+function interim(once: (from: string, to: string) => void, cut: (marker: string, start: string, end: string) => void): void {
+  cut('id="careersMail"', '  <section class="dark center">', "  </section>\n"); // "Email us" (careers address)
+  once("  $('careersMail').href = 'mailto:' + C.careersEmail;\n", "");
+  once("      <a href=\"#product/privacy\">Privacy</a>\n      <a href=\"#product/terms\">Terms</a>\n", "");
+  once('See the <a href="#product/sms-terms">SMS Terms</a>, <a href="#product/terms">Terms</a> and <a href="#product/privacy">Privacy Policy</a>.', 'See the <a href="#product/sms-terms">SMS Terms</a>.');
+  once("<h2>Reporting a problem</h2>\n<p>Email <a class=\"js-support\" href=\"#\">support</a> to report a security concern.</p>", "<h2>Reporting a problem</h2>\n<p>Text <code>HELP</code> to Trainee and say it is a security concern.</p>");
+  once("<p>Text <code>HELP</code> for help, or contact <a class=\"js-support\" href=\"#\">support</a>.</p>", "<p>Text <code>HELP</code> for help.</p>");
+  once("<h2>Privacy</h2>\n<p>See our <a href=\"#product/privacy\">Privacy Policy</a>.</p>", "");
+  once("<h2>Email</h2>\n<p>Email <a class=\"js-support\" href=\"#\">our support team</a> with your name and the phone number you signed up with.</p>\n", "");
+  once("If it still doesn't work, email support.", "If it still doesn't work, text <code>HELP</code> to Trainee.");
+  once("<h3>How do I delete my data?</h3>\n<p>Email support and we'll delete your account and data. See the <a href=\"#product/privacy\">Privacy Policy</a>.</p>", "");
+  // No address to open a mail window to: the careers list shows roles as plain cards, and there is no support mailto handler.
+  once("  document.addEventListener('click', function (e) {\n    var a = e.target.closest && e.target.closest('.js-support');\n    if (a) { e.preventDefault(); location.href = 'mailto:' + C.supportEmail; }\n  });\n", "");
+  once(`return '<a class="role reveal" href="mailto:' + C.careersEmail + '?subject=' + encodeURIComponent(r.title) + '">' +`, `return '<div class="role reveal">' +`);
+  once(`'<span class="go">Apply<i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-arrow-right"/></svg></i></span></a>';`, `'</div>';`);
+  // The Gmail pages the full build publishes (/google, /privacy#google) do not exist in the interim build.
+  once(' What it reads and keeps is listed in the <a href="/google">notice shown before you connect</a> and in the <a href="/privacy#google">Privacy Policy</a>.', "");
+  once(' See <a href="/google">what Trainee reads in Gmail</a>.', "");
+  once("desc:'We usually reply within one business day.',", "desc:'How to get help with Trainee.',");
 }
 
 export interface Built { files: Record<string, string> }
@@ -283,18 +322,31 @@ export function buildLegal(raw: Record<string, unknown> | null, t: { privacy: st
   return { ok: true, built: { files } };
 }
 
+// The homepage with nothing the owner still has to supply (no legal pages, no support address). Refuses on any leftover.
+export function buildInterim(home: string): { ok: true; html: string } | { ok: false; left: string[] } {
+  const html = patchHome(home, null), left = placeholdersIn(html);
+  return left.length ? { ok: false, left } : { ok: true, html };
+}
+
 if (import.meta.main) {
   const arg = (n: string) => { const i = Deno.args.indexOf(n); return i >= 0 ? Deno.args[i + 1] : undefined; };
   const root = new URL("../../", import.meta.url);
   const src = new URL("docs/launch/legal-pages/", root);
   const inputsPath = arg("--inputs") ?? new URL("owner-inputs.json", src).pathname;
   const out = arg("--out") ?? new URL("site/", root).pathname;
+  if (Deno.args.includes("--interim")) { // deno run -A scripts/launch/build-legal-pages.ts --interim  -> site/index.html only
+    const r = buildInterim(Deno.readTextFileSync(new URL("home.template.html", src)));
+    if (!r.ok) { console.error(`REFUSED: placeholders left: ${r.left.join(", ")}. Nothing was written.`); Deno.exit(1); }
+    Deno.writeTextFileSync(`${out.replace(/\/$/, "")}/index.html`, r.html);
+    console.log(`wrote index.html (interim, no owner inputs) to ${out}`);
+    Deno.exit(0);
+  }
   let raw: Record<string, unknown> | null = null;
   try { raw = JSON.parse(Deno.readTextFileSync(inputsPath)); } catch (e) { console.error(`cannot read ${inputsPath}: ${(e as Error).message}`); }
   const r = buildLegal(raw, {
     privacy: Deno.readTextFileSync(new URL("privacy.template.html", src)),
     terms: Deno.readTextFileSync(new URL("terms.template.html", src)),
-    home: Deno.readTextFileSync(new URL("site/index.html", root)),
+    home: Deno.readTextFileSync(new URL("home.template.html", src)),
   });
   if (!r.ok) {
     if (r.missing.length) console.error(`REFUSED: owner inputs missing or invalid: ${r.missing.join(", ")} (in ${inputsPath}). Nothing was written.`);

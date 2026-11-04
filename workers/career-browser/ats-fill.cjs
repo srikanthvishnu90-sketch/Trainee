@@ -168,10 +168,14 @@ const FACT_RULES = [
   [/^(current )?(job )?title\b/, "current_title"],
   [/linkedin/, "linkedin_url"], [/github/, "github_url"],
   [/^(portfolio|website|personal (site|website)|your website)\b/, "website_url"],
-  [/^(current )?location\b|^city\b/, "location"],
+  [/^(current |your )?(location|city)( of residence)?$|^where are you (currently )?(located|based)$/, "location"],
 ];
+// ROUND 3: the person's own contact facts never answer a question about someone else ("Phone number of your reference",
+// "Email of the person who referred you"): the same rule as career_apply.ts SOMEONE_ELSE.
+const SOMEONE_ELSE = /\breferr|\breferen|\bteam member|\breferee|\bemergency|\bmanager|\bsupervisor|\brecruiter|\bspouse|\bparent|\bguardian|\bemployee who/;
 function factValue(label, facts) {
   const n = norm(label);
+  if (SOMEONE_ELSE.test(n)) return undefined;
   for (const [re, key] of FACT_RULES) {
     if (!re.test(n)) continue;
     if (key === "full_name") return facts.full_name || (facts.first_name && facts.last_name ? `${facts.first_name} ${facts.last_name}` : undefined);
@@ -185,20 +189,38 @@ function answerFor(label, answers) {
   return undefined;
 }
 const DECLINE = /decline|prefer not|do(?: not|n t) wish|choose not|not to (?:answer|disclose|say|identify|specify)|i do(?: not|n t) want/;
-const YES = /^(yes|y|true)$/, NO = /^(no|n|false)$/;
+const YES = /^(yes|y|true)$/; // an agreement checkbox only
+const NO = /^(no|n|false)$/;
 const blank = (v) => v === undefined || v === null || String(v).trim() === "";
 
 // Pick the option an answer means. One clear match or an error: no_matching_option / ambiguous_option. Never "closest".
+// ROUND 3 (2026-11-02): an option that only contains the approved answer among other words is another answer ("Java" is not
+// "JavaScript", "Male" not "Female", "Secret" not "Top Secret", "Master" not "Master of Business Administration", "United
+// States" not "United States Minor Outlying Islands"), and a yes or a no with a qualifier of its own ("No, but I will
+// require sponsorship in the future") says more than the approved "No". The approved answer goes on an option only as its
+// whole text, a yes or no option with no qualifier, or the option's text followed only by a bracketed clarification.
+const QUALIFIED = /\b(but|however|although|except|unless|in the future)\b/;
+const lowRaw = (s) => String(s == null ? "" : s).toLowerCase().replace(/[*✱]/g, " ").replace(/\s+/g, " ").trim();
+function sameWithClarification(raw, value) {
+  const words = norm(value).split(" ").filter(Boolean);
+  if (!words.length) return false;
+  const m = new RegExp(`^[^a-z0-9]*${words.join("[^a-z0-9]+")}(?![a-z0-9])`).exec(lowRaw(raw));
+  if (!m) return false;
+  const rest = lowRaw(raw).slice(m[0].length).trim();
+  // A bracket that qualifies the answer ("Secret (interim)", "Bachelor's (in progress)") makes it another answer.
+  if (/\b(interim|in progress|pending|expired|inactive|lapsed|former|previous|previously|incomplete|expected|pursuing|current|currently|not|non|no|partial|provisional|temporary)\b/.test(rest)) return false;
+  return rest === "" || /^\([^()]*\)$/.test(rest);
+}
 function matchOption(labels, value) {
   const v = norm(value), ns = labels.map(norm);
-  const one = (pred) => { const ix = ns.map((l, i) => (pred(l) ? i : -1)).filter((i) => i >= 0); return ix.length === 1 ? { index: ix[0] } : ix.length > 1 ? { error: "ambiguous_option" } : null; };
+  const one = (pred) => { const ix = ns.map((l, i) => (pred(l, i) ? i : -1)).filter((i) => i >= 0); return ix.length === 1 ? { index: ix[0] } : ix.length > 1 ? { error: "ambiguous_option" } : null; };
   const exact = ns.map((l, i) => (l === v ? i : -1)).filter((i) => i >= 0);
   if (exact.length === 1) return { index: exact[0] };
-  if (YES.test(v)) { const r = one((l) => /^yes\b/.test(l)); if (r) return r; }
-  if (NO.test(v)) { const r = one((l) => /^no\b/.test(l)); if (r) return r; }
-  // A prefix counts only at a word boundary ("No" for "No, I do not need it"; never "Not applicable" for "No").
-  if (v.length >= 2) { const r = one((l) => l.startsWith(v + " ") || (l.length >= 2 && v.startsWith(l + " "))); if (r) return r; }
-  if (v.length >= 4) { const r = one((l) => l.includes(v)); if (r) return r; }
+  // #340 (kept over round 3's yes-like rule): a "Yes" or a "No" is never an option that merely STARTS with it ("Yes, with
+  // sponsorship", "No, I need work authorization"): those are other answers, so the question goes back to the person.
+  // The option's own text with only a bracketed clarification after it ("Computer Science (BS)"); or an approved answer
+  // that is the option followed by more of the person's words ("No, I do not need it" onto "No").
+  if (v.length >= 2) { const r = one((l, i) => sameWithClarification(labels[i], value) || (l.length >= 2 && !/^(yes|no)$/.test(l) && v.startsWith(l + " ") && !QUALIFIED.test(v))); if (r) return r; }
   return { error: exact.length > 1 ? "ambiguous_option" : "no_matching_option" };
 }
 
@@ -269,6 +291,7 @@ async function fillCombo(page, d, value, pick) {
   return s.filled && norm(s.text) === norm(list[m.index]) ? { ok: true } : { ok: false, reason: "readback_mismatch" };
 }
 
+const labelCounts = (qs) => { const m = new Map(); for (const d of qs) if (d.kind !== "file") m.set(norm(d.label), (m.get(norm(d.label)) || 0) + 1); return m; };
 // Decide what to do with one question. status: fill | ask | skip. Never invents a value.
 function decide(d, ctx) {
   const { facts, answers, resumePath } = ctx;
@@ -277,6 +300,9 @@ function decide(d, ctx) {
     if (d.required) return { status: "ask", reason: d.role === "resume" ? "no_resume" : "upload_needs_you" };
     return { status: "skip", reason: "optional_upload_left_empty" };
   }
+  // ROUND 3: one label on two questions of this form (a second "Phone" in a references block): the approved answer belongs
+  // to at most one of them, so neither is filled from it; the person is asked (as the extension's planForm does).
+  if (ctx.labelCount && (ctx.labelCount.get(norm(d.label)) || 0) > 1 && (!blank(answerFor(d.label, answers)) || !blank(factValue(d.label, facts || {})))) return { status: "ask", reason: "label_on_form_twice" };
   const a = answerFor(d.label, answers);
   if (!blank(a)) return { status: "fill", value: String(a), source: "answer" };
   if (d.eeo) {
@@ -316,6 +342,7 @@ async function fillForm(page, ctx0) {
   const handled = new Set();
   for (let pass = 0; pass < 3; pass++) {
     const qs = await page.evaluate(EXTRACT);
+    ctx.labelCount = labelCounts(qs);
     const fresh = qs.filter((d) => !handled.has(`${d.label}|${d.kind}|${d.name}`));
     if (!fresh.length) break;
     for (const d of fresh) {
@@ -339,11 +366,15 @@ async function fillForm(page, ctx0) {
         }
         continue;
       }
-      entry.status = d.required ? "needs_user" : "failed";
+      // #340: an approved answer or fact that is not exactly one of the page's options is handed back even when the question is
+      // optional: leaving it out, or picking another option, would post something other than what was approved.
+      const notOffered = (r.reason === "no_matching_option" || r.reason === "ambiguous_option");
+      const ask = d.required || notOffered;
+      entry.status = ask ? "needs_user" : "failed";
       entry.reason = r.reason;
       if (r.detail) entry.detail = r.detail;
       // A required question we could not set is handed back with the reason; the person is asked, nothing is guessed.
-      (d.required ? needsUser : failed).push({ label: d.label, reason: r.reason, ...(r.options ? { options: r.options } : {}) });
+      (ask ? needsUser : failed).push({ label: d.label, reason: r.reason, ...(r.options ? { options: r.options } : {}) });
     }
   }
   // Sweep: a required question still empty that we did not already account for is handed back, not ignored.
@@ -358,4 +389,4 @@ async function fillForm(page, ctx0) {
   return { map, filled, needsUser, failed, invalid };
 }
 
-module.exports = { fillForm, matchOption, factValue, answerFor, norm, EXTRACT, STATE, DECLINE };
+module.exports = { fillForm, matchOption, factValue, answerFor, decide, labelCounts, norm, EXTRACT, STATE, DECLINE };

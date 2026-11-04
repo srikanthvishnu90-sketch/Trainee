@@ -19,6 +19,8 @@ import { crisisReply } from "./crisis.ts";
 type Env = { get(k: string): string | undefined };
 type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler: string | null; contained?: boolean; result?: any }; isHostControlled(text: string, ctx: any): boolean };
 
+import { correctedAsk } from "../_shared/search_correction.ts";
+import { askFor } from "../_shared/career_search_judge.ts";
 export type BrainMode = "router" | "agent" | "staged";
 // The served brain (release_config.ts): the committed PRODUCTION_BRAIN unless CAREER_BRAIN rolls it back to the router.
 // "agent" is never served from here (the full brain stays pinned off in career_brain.ts).
@@ -47,13 +49,17 @@ export const STAGED_BRAIN_INTENTS: readonly string[] = [
 // a company come only from a sourced record. Two intents are judged by what they carry: company_intel is the brain's
 // only when no company is named and no file or library figure stands behind it (a general question the router took
 // for a company ask: grad school, a certificate, a role it has no figures for); negotiation_advice only when no offer
-// is on record and the benchmark found no figures.
+// is on record and the benchmark found no figures. A pay question at a firm with no file is the brain's too (below).
 const PRODUCT_KEYS = ["payload", "artifact", "bench", "offer", "draft", "ai_answer", "comparison", "documents", "document", "company"];
 const has = (r: Record<string, unknown>, k: string) => r[k] !== undefined && r[k] !== null;
 export function codeProduct(intent: string, result: unknown): boolean {
   if (!result || typeof result !== "object") return false;
   const r = result as Record<string, any>;
   if (intent === "company_intel") {
+    // ROUTER ROUTING ROUND (2026-11-02): a pay question at a firm with no file. The router's answer is "X has no company
+    // file yet", with no figure in it; the brain reads the firm's postings (get_posting, search_jobs) and sources under the
+    // figure checks, so the question gets an answer instead of stopping there. Any other no-file question stays the router's.
+    if (r.payload?.kind === "company_file_absent" && r.payload?.topic === "pay") return false;
     if (has(r, "company") || has(r, "comparison")) return true;
     const kind = String(r.payload?.kind ?? "");
     return !(has(r, "guidance") || /_absent$/.test(kind));
@@ -180,6 +186,74 @@ export function openCareerQuestion(env: Env, message: string, intent: string, re
   return OPEN_ENTRY_KINDS.has(String(r.payload?.kind ?? r.artifact?.kind ?? ""));
 }
 
+// ADVICE QUESTIONS (2026-11-01, the 1v1's outreach and prep turns): a QUESTION about networking or interviews ("how do I
+// network into banking with no connections", "what's a good subject line for a cold email", "what should I ask at the end of
+// an interview") is advice, but the router reads it as work: outreach_clarification starts a campaign plan for a list nobody
+// asked for, and prep_brief answers with a template brief. Neither carries anything the person approved or that sends. These
+// go to the brain, which answers the question asked. Instructions stay code's: building a list ("find me engineers at X to
+// reach out to"), drafting or sending to someone, a prep brief for a company or posting the person named, and a mock or
+// drill that is running. The brain cannot send, apply or save on its own (STAGED_WITHHELD_TOOLS; every external effect needs
+// the person's approval of the exact payload on code's path).
+const ADVICE_INTENTS = new Set(["outreach_clarification", "prep_brief"]);
+const QUESTION_LEAD = /^\s*(?:(?:so|ok|okay|hey|also|and|but|quick question)[,:]?\s+)?(?:how|what|whats|what's|which|when|why|where|who|should|is|are|do|does|did|would|could|any|tips?\b|advice\b|best way)\b/i;
+const ASK_TO_ACT = /^\s*(?:can|could|would|will)\s+(?:you|u)\s+(?:please\s+)?(?:send|email|message|text|dm|reach|contact|find|build|make|get|pull|list|draft|write|apply|submit|queue|save|set|start|run|mock|quiz|drill)\b/i;
+const LIST_OR_SEND = /\b(?:find|build|pull|get|make|compile)\b[^?.!]*\b(?:list|people|contacts?|names|engineers|analysts|bankers|associates|recruiters|alumni|alums|managers)\b|^\s*(?:please\s+)?(?:send|email|message|text|dm|reach out|contact|apply|submit|queue)\b/i;
+export function adviceQuestion(message: string, intent: string | null, result: unknown): boolean {
+  if (!intent || !ADVICE_INTENTS.has(intent)) return false;
+  const m = String(message ?? "").replace(/[’`]/g, "'").trim();
+  if (!(QUESTION_LEAD.test(m) || /\?\s*$/.test(m)) || ASK_TO_ACT.test(m) || LIST_OR_SEND.test(m)) return false;
+  // A company or a posting the person named gets code's product for it (the firm's file, the posting's brief).
+  if (namesSomeone(m)) return false;
+  const r = (result && typeof result === "object" ? result : {}) as Record<string, any>;
+  if (has(r, "draft") || has(r, "documents") || has(r, "document") || has(r, "offer") || has(r, "company") || (r.sends ?? 0) > 0) return false;
+  // A mock, drill or answer score in progress is code's session.
+  if (r.resultStatus === "running" || has(r, "question")) return false;
+  const kind = String(r.payload?.kind ?? r.artifact?.kind ?? "");
+  if (intent === "outreach_clarification") return !kind || kind === "campaign_plan";
+  return !/mock|drill|answer_score|session/i.test(kind);
+}
+
+// A File page ask ("show me a File page for getting started with job applications. Do not apply or submit anything") is not a
+// job search, but the router reads its words as one: the "role" it searches for is "file page getting started applications do
+// submit anything", the list is empty, and the person is told "Nothing to show yet" with no page. When every word the search
+// would use is a File-page or process word, and the ask states no place, pay, level, company, season, sponsorship or remote
+// limit, there is no search to run: the brain (which can make the page, create_file, and cannot apply: STAGED_WITHHELD_TOOLS)
+// takes it. An ask that names any role ("a File page of data analyst jobs") or any limit stays a search, on code's path.
+const FILE_PAGE_ASK = /\b(?:show|open|give|send|make|create|build|get|share|see)\b[^.?!]{0,40}\bfile page\b|\bfile page\b[^.?!]{0,60}\b(?:for|about|on|to)\b/i;
+const FILE_PAGE_WORDS = new Set(("file page pages a an the my me us our your for of on about to with and or in into from by at as is it this that these those please can could would will you i " +
+  "show open give send make create build get see share start started starting getting begin beginning guide intro introduction overview basics steps how help new first " +
+  "job jobs application applications apply applying submit submitting submission anything nothing do does not dont don't never without any all no and").split(/\s+/));
+const SEARCH_LIKE = new Set(["career_discovery", "career_internship_discovery"]);
+export function filePageAsk(message: string, ask: { role?: string; place?: string | null; remote?: boolean; remoteOnly?: boolean; limits?: object } | null | undefined): boolean {
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'");
+  if (!FILE_PAGE_ASK.test(m)) return false;
+  if (!ask) return true;
+  const L = (ask.limits ?? {}) as Record<string, unknown>;
+  const limited = Object.values(L).some((v) => Array.isArray(v) ? v.length > 0 : !!v);
+  if (ask.place || ask.remote || ask.remoteOnly || limited) return false;
+  return String(ask.role ?? "").toLowerCase().split(/[^a-z']+/).filter(Boolean).every((w) => FILE_PAGE_WORDS.has(w));
+}
+
+// A CAREER SWITCHER'S OPEN ASK ("can u look at jobs for me im a cashier wanna do something w computers"): the person names the
+// work they do now and a field they want to move toward, but no role. The router reads it as a job search with no role, finds
+// an empty pool and answers "Nothing to show yet" (asking for a resume), which names no way in: the person asked where to
+// start and got a dead end (eval H034, failing 5 of 5 passes). With no role to search for, there is nothing for code to run:
+// the brain takes it, names realistic entry roles from the work they do now (prompt.ts, "A change with no target role named
+// yet"), reads real postings with search_jobs, and asks which to pursue. Both halves must be in the words (where they are now,
+// where they want to go) and the router's own result must be empty with no role family asked: a search that found or asked
+// for anything stays code's.
+const SWITCH_FROM = /\b(?:i'?m|im|i\s+am|i\s+work\s+as|i\s+worked\s+as|i\s+used\s+to\s+(?:be|work\s+as))\s+(?:a|an)\s+[a-z][a-z -]{1,30}/i;
+const SWITCH_TO = /\b(?:wanna|want\s+to|trying\s+to|hoping\s+to|looking\s+to|like\s+to|would\s+like\s+to|thinking\s+of|ready\s+to)\s+(?:do|work|get\s+into|move\s+(?:in)?to|switch\s+(?:in)?to|go\s+into|try|change)\s+(?:something|anything|stuff|work)\s+(?:with|w|w\/|in|involving|around|using|related\s+to)\s+(?:computers?|tech(?:nology)?|data|software|coding|code|programming|design|health(?:care)?|finance|marketing|science|engineering|cars?|music|art|writing)\b|\bcareer\s+(?:change|switch|pivot)\b|\bchange\s+careers\b|\bswitch\s+careers\b/i;
+export function careerSwitcherOpenAsk(message: string, intent: string | null, result: unknown): boolean {
+  if (!intent || !SEARCH_LIKE.has(intent)) return false;
+  const m = String(message ?? "").replace(/[’`]/g, "'");
+  if (!SWITCH_FROM.test(m) || !SWITCH_TO.test(m)) return false;
+  const r = (result && typeof result === "object" ? result : {}) as Record<string, any>;
+  if (Array.isArray(r.shortlist) ? r.shortlist.length > 0 : has(r, "shortlist")) return false;
+  if (Array.isArray(r.requested_families) && r.requested_families.length > 0) return false;
+  return true;
+}
+
 export type StagedDecision = { brain: boolean; mode: BrainMode; intent: string | null; reason: string };
 
 // Whether this turn goes to the brain in staged mode. Called only after every code-first turn has passed on it.
@@ -190,6 +264,9 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (o.host.isHostControlled(o.message, o.ctx)) return { brain: false, mode, intent: null, reason: "host_control" };
   // Crisis text is code's (crisis.ts): never the brain's, whatever the router would class it as.
   if (crisisReply(o.message) !== null) return { brain: false, mode, intent: null, reason: "crisis" };
+  // Spec 2.3: a correction to the last search ("remote only", "only individual-contributor roles") changes its constraints in
+  // code (search_correction.ts) and the next results use them; it is not a question for the brain.
+  if (correctedAsk(o.message, o.ctx.discovery)) return { brain: false, mode, intent: null, reason: "search_correction" };
   let probe, records: any[] = [];
   try { const copy = probeCtx(o.ctx); probe = o.host.runTurn(o.message, copy); records = Array.isArray(copy.containmentRecords) ? copy.containmentRecords as any[] : []; }
   catch { return { brain: false, mode, intent: null, reason: "probe_failed" }; }
@@ -202,7 +279,10 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   } else intent = probe.intent ?? null;
   if (!intent) return { brain: false, mode, intent: null, reason: "router_claimed" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
+  if (SEARCH_LIKE.has(intent) && filePageAsk(o.message, askFor(o.message, { intent, resultStatus: probe.result?.resultStatus }, o.ctx.discovery)?.ask)) return { brain: true, mode, intent, reason: "file_page_ask" };
+  if (careerSwitcherOpenAsk(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "career_switcher_open_ask" };
   if (openCareerQuestion(o.env, o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "open_career_question" };
+  if (adviceQuestion(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "advice_question" };
   if (!STAGED_BRAIN_INTENTS.includes(intent)) return { brain: false, mode, intent, reason: "action" };
   if (codeProduct(intent, probe.result)) return { brain: false, mode, intent, reason: "code_product" };
   return { brain: true, mode, intent, reason: "question" };
@@ -216,7 +296,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
 export const STAGED_WITHHELD_TOOLS: readonly string[] = ["queue_applications", "set_job_alerts", "stop_job_alerts", "verify_contacts"];
 export const STAGED_PROMPT_NOTE = "In this conversation you answer questions and give advice. Applying to a posting, starting or stopping job alerts, " +
   "and checking contacts are done by code when the person asks for them in their own words, for example \"apply to the <role> role at <company>\" " +
-  "or \"watch <role> roles in <city>\". You cannot do those here; say so plainly when asked, and never say they were done.";
+  "or \"watch <role> roles in <city>\". You cannot do those here; say so plainly when asked, after any acknowledgement the person needs and alongside the part you can do now (search, shortlist, explain), and never say they were done.";
 export const STAGED_TOOL_POLICY = { withhold: STAGED_WITHHELD_TOOLS, note: STAGED_PROMPT_NOTE } as const;
 
 // Lazy and memoized: the probe runs only when the handler reaches the brain test, at most once a turn.

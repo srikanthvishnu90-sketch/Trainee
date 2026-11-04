@@ -1,0 +1,42 @@
+# #354 safety (architect decision 2026-11-02): the crisis screen measured on the real thing. Both layers (the word list
+# and OpenAI's moderation endpoint through model_gateway.ts moderate(); free) over the sealed corpus (never used to tune
+# the list) and the dev corpus, reporting recall and false positives per layer and combined (evals/crisis/run.ts).
+# Needs the repository secret OPENAI_API_KEY; without it the run prints NOT RUN and fails: a score is never faked.
+# The numbers are reported in the job summary and uploaded as an artifact; --enforce fails the job below the targets
+# (sealed combined recall >= 98%, false positives <= 2%).
+name: crisis-eval
+on:
+  pull_request:
+    paths:
+      - .github/workflows/crisis-eval.yml
+      - evals/crisis/**
+      - packages/domain/139-career-safety.js
+      - supabase/functions/_shared/career_crisis_screen.ts
+      - supabase/functions/_shared/model_gateway.ts
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: crisis-eval-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  eval:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: The key is present
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then echo "NOT RUN: the OPENAI_API_KEY secret is not set"; exit 2; fi
+      - name: Both layers over the sealed and dev corpora
+        run: deno run -A --no-check evals/crisis/run.ts --label "ci-${{ github.run_id }}" --enforce
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: crisis-eval
+          path: evals/crisis/results/
+          retention-days: 30

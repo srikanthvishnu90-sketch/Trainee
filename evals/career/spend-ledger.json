@@ -1,0 +1,6 @@
+{
+ "note": "All-time eval spend that no result file in a checkout records (2026-10-26). The result files of every run before 2026-10-26 were never on trunk and are no longer on ci/brain-eval, so the cap in run.ts summed only the files present: run 40371458562 recorded spent_before_usd 0 against EVAL_BUDGET_USD 35.50. baseline_usd is the recorded all-time spend in the SCORE-LOG close line of 2026-10-21 15:10 UTC ($15.508 recorded all-time); every result file run after baseline_as_of is added to it by run.ts and rejudge.ts. The owner's ceiling (workflow EVAL_BUDGET_USD) is unchanged.",
+ "baseline_usd": 15.508,
+ "baseline_as_of": "2026-10-21T15:10:00Z",
+ "source": "evals/career/SCORE-LOG.md on ci/brain-eval, line '2026-10-21 15:10:00 | CLOSE'"
+}

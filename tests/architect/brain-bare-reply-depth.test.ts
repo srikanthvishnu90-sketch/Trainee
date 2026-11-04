@@ -1,6 +1,6 @@
 // Provider-completion regressions. All conversations, providers and effects are local synthetic fixtures.
 import { runAgentTurn, type ToolSpec } from "../../supabase/functions/_shared/agent/loop.ts";
-import { callModel, fromOpenAI, newMeter } from "../../supabase/functions/_shared/model_gateway.ts";
+import { callModel, fromAnthropic, newMeter } from "../../supabase/functions/_shared/model_gateway.ts";
 
 function eq(got: unknown, expected: unknown, why = "") {
   if (JSON.stringify(got) !== JSON.stringify(expected)) throw new Error(`${why}: got ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
@@ -9,11 +9,10 @@ function ok(value: unknown, why: string): asserts value { if (!value) throw new 
 const QUESTION = "Compare the two postings by responsibilities and schedule.";
 const COMPLETE = "The first posting focuses on reporting on weekdays. The second focuses on payroll on weekends.";
 const text = (reply: string, reason = "end_turn") => ({ content: [{ type: "text", text: reply }], stop_reason: reason });
-const cut = (reply: string) => fromOpenAI({ choices: [{ message: { content: reply }, finish_reason: "length" }] });
+const USAGE = { input_tokens: 100, output_tokens: 50 };
+const cut = (reply: string) => fromAnthropic({ type: "message", content: [{ type: "text", text: reply }], stop_reason: "max_tokens", usage: USAGE });
 const call = () => ({ content: [{ type: "tool_use", id: "save-fixture", name: "save_fixture", input: {} }], stop_reason: "tool_use" });
-const gatewayCall = (reason: string) => fromOpenAI({ choices: [{ message: { content: "", tool_calls: [
-  { id: "save-fixture", type: "function", function: { name: "save_fixture", arguments: "{}" } },
-] }, finish_reason: reason }] });
+const gatewayCall = (reason: string) => fromAnthropic({ type: "message", content: [{ type: "tool_use", id: "save-fixture", name: "save_fixture", input: {} }], stop_reason: reason, usage: USAGE });
 async function run(responses: any[], options: { maxSteps?: number; show?: boolean } = {}) {
   let saves = 0;
   const payloads: any[] = [];
@@ -56,16 +55,16 @@ Deno.test("reply depth: a truncated provider response cannot execute embedded to
   eq(result.reply, COMPLETE); eq(payloads.length, 2); eq(saves, 0); eq(result.tool_calls, []); eq(result.pending_approvals, []);
 });
 
-Deno.test("reply depth: OpenAI length remains truncated even beside a fully parsed tool call", async () => {
-  const truncated = gatewayCall("length");
+Deno.test("reply depth: a max_tokens stop remains truncated even beside a fully parsed tool call", async () => {
+  const truncated = gatewayCall("max_tokens");
   eq(truncated.stop_reason, "max_tokens"); eq(truncated.content, [], "other gateway callers cannot consume even a parsed truncated call");
   const { result, payloads, saves } = await run([truncated, text(COMPLETE)]);
   eq(result.reply, COMPLETE); eq(result.stopped, "final"); eq(payloads.length, 2); eq(saves, 0);
   eq(result.tool_calls, []); eq(result.pending_approvals, []); eq(payloads[1].tool_choice, { type: "none" });
 });
 
-Deno.test("reply depth: an OpenAI completed tool call still executes once", async () => {
-  const { result, payloads, saves } = await run([gatewayCall("tool_calls"), text(COMPLETE)]);
+Deno.test("reply depth: a completed tool call still executes once", async () => {
+  const { result, payloads, saves } = await run([gatewayCall("tool_use"), text(COMPLETE)]);
   eq(result.reply, COMPLETE); eq(result.stopped, "final"); eq(payloads.length, 2); eq(saves, 1);
   eq(result.tool_calls.length, 1); eq(result.tool_calls[0].ok, true);
 });
@@ -82,10 +81,10 @@ Deno.test("reply depth: completed short text and explicit refusal are not trunca
   }
 });
 
-const wireCall = (name: string, args: string) => ({ id: name, type: "function", function: { name, arguments: args } });
+const wireCall = (name: string, input: unknown = {}) => ({ type: "tool_use", id: name, name, input });
 const wire = (reason: string, calls: any[] = [], reply: string | null = null) => ({
-  model: "gpt-5-mini", choices: [{ finish_reason: reason, message: { content: reply, tool_calls: calls } }],
-  usage: { prompt_tokens: 100, completion_tokens: 50 },
+  id: "msg_fixture", type: "message", role: "assistant", model: "claude-haiku-5-5", stop_reason: reason,
+  content: [...(reply ? [{ type: "text", text: reply }] : []), ...calls], usage: { input_tokens: 100, output_tokens: 50 },
 });
 async function providerRun(responses: any[], show = false) {
   let saves = 0, external = 0;
@@ -98,7 +97,7 @@ async function providerRun(responses: any[], show = false) {
   ];
   const result = await runAgentTurn({ system: "Use supplied synthetic posting information only.", history: [], message: QUESTION, tools,
     ctx: { userId: "SYNTHETIC-DEPTH-OWNER", threadId: "SYNTHETIC-DEPTH-THREAD", now: 0, state: {} },
-    model: async (p) => callModel({ provider: "openai", model: "gpt-5-mini", apiKey: "synthetic-unusable-key", reasoningEffort: "minimal" }, p, {
+    model: async (p) => callModel({ provider: "anthropic", model: "claude-haiku-5-5", apiKey: "synthetic-unusable-key", reasoningEffort: "low" }, p, {
       meter, health: (e) => { health.push(e); }, request: (async (_url, init) => {
         payloads.push(JSON.parse(String(init!.body)));
         return Response.json(responses[Math.min(payloads.length - 1, responses.length - 1)]);
@@ -108,47 +107,39 @@ async function providerRun(responses: any[], show = false) {
   return { result, payloads, saves, external, health, meter };
 }
 
-Deno.test("reply depth: partial tool JSON under length is discarded before decode and both wire calls remain metered", async () => {
+Deno.test("reply depth: a tool call under max_tokens is discarded and both wire calls remain metered", async () => {
   const { result, payloads, saves, health, meter } = await providerRun([
-    wire("length", [wireCall("save_fixture", '{"note":"unfinished')]), wire("stop", [], COMPLETE),
+    wire("max_tokens", [wireCall("save_fixture", { note: "unfinished" })]), wire("end_turn", [], COMPLETE),
   ]);
-  eq(result.reply, COMPLETE); eq(result.stopped, "final"); eq(payloads.length, 2); eq(payloads[1].tool_choice, "none");
+  eq(result.reply, COMPLETE); eq(result.stopped, "final"); eq(payloads.length, 2); eq(payloads[1].tool_choice, { type: "none" });
   eq(saves, 0); eq(result.tool_calls, []); eq(result.pending_approvals, []);
-  eq([meter.calls, meter.failed, meter.input_tokens, meter.output_tokens, meter.usd_micros], [2, 0, 200, 100, 250]);
+  eq([meter.calls, meter.failed, meter.input_tokens, meter.output_tokens, meter.usd_micros], [2, 0, 200, 100, 70]);
   eq(health.map((e) => [e.ok, e.error_type]), [[true, null], [true, null]]);
 });
 
-Deno.test("reply depth: mixed complete and partial tool JSON under length cannot execute or enqueue either call", async () => {
+Deno.test("reply depth: tool calls under max_tokens cannot execute or enqueue either call", async () => {
   const { result, payloads, saves, external } = await providerRun([
-    wire("length", [wireCall("save_fixture", "{}"), wireCall("external_fixture", '{"to":')]), wire("stop", [], COMPLETE),
+    wire("max_tokens", [wireCall("save_fixture"), wireCall("external_fixture", { to: "x" })]), wire("end_turn", [], COMPLETE),
   ]);
   eq(result.reply, COMPLETE); eq(payloads.length, 2);
   eq([saves, external, result.tool_calls.length, result.pending_approvals.length], [0, 0, 0, 0]);
 });
 
-Deno.test("reply depth: repeated partial tool JSON gets one repair and an honest incomplete result", async () => {
+Deno.test("reply depth: repeated max_tokens tool calls gets one repair and an honest incomplete result", async () => {
   const { result, payloads, saves, external, meter } = await providerRun([
-    wire("length", [wireCall("save_fixture", '{"note":')]),
+    wire("max_tokens", [wireCall("save_fixture", { note: "u" })]),
   ]);
-  eq(result.stopped, "incomplete_reply"); eq(payloads.length, 2); eq(payloads[1].tool_choice, "none");
+  eq(result.stopped, "incomplete_reply"); eq(payloads.length, 2); eq(payloads[1].tool_choice, { type: "none" });
   eq([saves, external, result.tool_calls.length, result.pending_approvals.length], [0, 0, 0, 0]);
-  eq(meter.usd_micros, 250, "failed completion does not erase provider token cost");
+  eq(meter.usd_micros, 70, "failed completion does not erase provider token cost");
 });
 
-Deno.test("reply depth: malformed completed tool JSON is a provider error with no effects or blind retry", async () => {
-  const { result, payloads, saves, external, health } = await providerRun([
-    wire("tool_calls", [wireCall("save_fixture", "{}"), wireCall("external_fixture", '{"to":')]), wire("stop", [], COMPLETE),
-  ]);
-  eq(result.stopped, "model_error"); eq(payloads.length, 1); eq(health[0].error_type, "bad_tool_call");
-  eq([saves, external, result.tool_calls.length, result.pending_approvals.length], [0, 0, 0, 0]);
-});
-
-Deno.test("reply depth: malformed truncated retelling preserves an existing exact preview and its single save", async () => {
+Deno.test("reply depth: truncated retelling preserves an existing exact preview and its single save", async () => {
   const { result, payloads, saves, meter } = await providerRun([
-    wire("tool_calls", [wireCall("save_fixture", "{}")]), wire("length", [wireCall("save_fixture", '{"note":')]),
+    wire("tool_use", [wireCall("save_fixture")]), wire("max_tokens", [wireCall("save_fixture", { note: "u" })]),
   ], true);
   eq(result.reply, "Synthetic exact preview."); eq(result.stopped, "final"); eq(payloads.length, 2); eq(saves, 1);
-  eq(meter.usd_micros, 250, "preview delivery retains both provider calls' usage");
+  eq(meter.usd_micros, 70, "preview delivery retains both provider calls' usage");
 });
 
 async function placeholderTurn(message: string, replies: string[]) {

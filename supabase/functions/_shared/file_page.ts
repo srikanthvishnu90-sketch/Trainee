@@ -8,9 +8,10 @@
 import type { JobView } from "./telegram_jobs.ts";
 import { reasonWords } from "./career_apply_status.ts";
 import { BODY_FONT, BRAND, DISABLED_CSS, FAVICON, FONT_LINKS, PLUM, TOKENS_CSS } from "./brand.ts";
+import { FILE_CSS, stampHtml, stateHtml } from "./file_design.ts";
 
 export type Word = "queued" | "preparing" | "sending" | "submitted" | "confirmed" | "failed" | "not submitted" | "needs you" | "unknown" | "in applications";
-export interface Status { word: Word; detail: string }
+export interface Status { word: Word; detail: string; sent?: boolean; evidence?: string | null } // evidence: what the row holds that shows the outcome (an employer reference, a confirmation email); null/absent: none on file
 export interface AppRow {
   id: string; state: string; reason: string | null; confirmation_id: string | null; created_at: string; updated_at: string;
   email_confirmed_at: string | null; payload: Record<string, unknown>; company: string; url: string;
@@ -27,7 +28,9 @@ export interface Row {
   posted?: string | null; // "Posted 3 d ago (Oct 28)" from the posting's own date (postedLine), else when Trainee first saw it
 }
 // total: how many postings the list holds; the page shows the first rows.length of them and says so when that is fewer.
-export interface Feed { og?: Og; token: string; rows: Row[]; setHash: string | null; setSize: number; top?: string; botUrl?: string | null; total?: number }
+// made: "Made for Ada · Nov 1, 2026" above the card; stamp: "Postings checked ..." from the postings' own check times (file_design.ts
+// freshnessStamp), null when none is known (the page then says the check time is unknown, as a value).
+export interface Feed { og?: Og; token: string; rows: Row[]; setHash: string | null; setSize: number; top?: string; botUrl?: string | null; total?: number; made?: string; stamp?: string | null }
 
 // Bidi overrides and isolates (U+202A-E, U+2066-9) in a company, title or location would reverse the text after them on the page,
 // a provenance label included; they are dropped, never rendered.
@@ -101,13 +104,14 @@ export function statusOf(o: { app: AppRow | null; wanted: boolean }): Status | n
   const a = o.app, who = a?.company || "The employer";
   if (a) {
     switch (a.state) {
-      case "confirmed": return { word: "confirmed", detail: `${who} confirmed it${a.confirmation_id ? ` (${a.confirmation_id})` : ""}.` };
+      case "confirmed": return { word: "confirmed", detail: `${who} confirmed it${a.confirmation_id ? ` (${a.confirmation_id})` : ""}.`,
+        evidence: a.confirmation_id ? `Employer reference ${a.confirmation_id}` : a.email_confirmed_at ? `Confirmation email received ${String(a.email_confirmed_at).slice(0, 10)} (UTC date)` : null };
       case "submitted_unconfirmed": return { word: "submitted", detail: `${who} hasn't confirmed it yet.` };
       case "queued": return { word: "queued", detail: "We haven't started it yet." };
       case "driving": return { word: "sending", detail: "Being sent now; not submitted yet." };
       // An emailed code is asked after the application went; the other stops are before it (round 2, 2026-10-30: the
       // detail was the queue's own code, "email_code" or "bot_check").
-      case "needs_user": return { word: "needs you", detail: a.reason === "email_code" ? `Sent, but not finished: ${who} emailed you a code to finish it. Type it on their page yourself.`
+      case "needs_user": return { word: "needs you", sent: a.reason === "email_code", detail: a.reason === "email_code" ? `Sent, but not finished: ${who} emailed you a code to finish it. Type it on their page yourself.`
         : a.reason === "captcha" || a.reason === "bot_check" ? `Stopped before it was sent: a verification check on ${who}'s page. Trainee never solves one; finish it yourself at the link.`
         : a.reason === "login_required" ? `Stopped before it was sent: ${who}'s site asks you to sign in first. Trainee never signs in for you.`
         : a.reason ? `Stopped before it was sent: ${reasonWords(a.state, a.reason)}.` : "It stopped and needs you." };
@@ -158,7 +162,7 @@ ul.rows{list-style:none;margin:0;padding:0}
 .act{flex:none;margin:0}
 .apply{display:inline-flex;align-items:center;justify-content:center;min-width:96px;min-height:48px;padding:6px 20px;border-radius:999px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:600;text-decoration:none;cursor:pointer}.apply:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
 .chip{flex:none;min-height:48px;display:inline-flex;align-items:center;justify-content:flex-end;font-weight:600;color:var(--mute)}
-.chip.queued,.chip.in-applications,.chip.sending,.chip.submitted,.chip.confirmed{color:var(--good)}.chip.failed,.chip.not-submitted,.chip.unknown{color:var(--bad)}.chip.needs-you{color:var(--warn)}
+.chip.in-applications,.chip.sending,.chip.submitted,.chip.confirmed{color:var(--good)}.chip.failed,.chip.not-submitted,.chip.unknown{color:var(--bad)}.chip.needs-you{color:var(--warn)}
 details{margin:4px 0 0 58px}summary{list-style:none;cursor:pointer;min-height:44px;padding:4px 0}
 summary::-webkit-details-marker{display:none}
 .role{display:block;font-weight:500;overflow-wrap:anywhere}.desc{overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--mute);font-size:16px}
@@ -170,17 +174,18 @@ details[open] .desc{display:block;-webkit-line-clamp:unset}
 .note a,details a,.top-note a{color:var(--link)}main p>a:not(.apply){display:inline-flex;align-items:center;min-height:44px}.lnk{display:inline;min-height:44px;padding:0 4px;border:0;background:none;color:var(--link);font:inherit;text-decoration:underline;cursor:pointer}.sendh{margin:8px 0 2px;font-weight:600;font-size:15px}.send{margin:0 0 8px;padding-left:20px;font-size:15px;color:var(--mute)}.send li{margin:2px 0;overflow-wrap:anywhere}
 :focus-visible{outline:3px solid var(--accent);outline-offset:3px;border-radius:8px}
 ${DISABLED_CSS}
+${FILE_CSS}
 .foot{margin-top:24px;padding-top:14px;border-top:1px solid var(--line);font-size:15px;color:var(--mute)}
 @media (max-width:360px){details,.meta,.why,.note{margin-left:0}.apply{min-width:80px;padding:6px 12px}}
 `;
 export interface Og { title: string; description: string; image: string | null }
 const ogTags = (o: Og) => `<meta property="og:type" content="website"><meta property="og:site_name" content="Trainee"><meta property="og:title" content="${esc(o.title)}"><meta property="og:description" content="${esc(o.description)}">${o.image ? `<meta property="og:image" content="${esc(o.image)}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${esc(o.image)}">` : `<meta name="twitter:card" content="summary">`}<meta name="twitter:title" content="${esc(o.title)}"><meta name="twitter:description" content="${esc(o.description)}">`;
 const OG_DEFAULT: Og = { title: "Your jobs on Trainee", description: "Tap Apply on any job.", image: null };
-export function layout(title: string, inner: string, o: { script?: string; bodyAttrs?: string; og?: Og; tg?: boolean; css?: string } = {}): string {
+export function layout(title: string, inner: string, o: { script?: string; bodyAttrs?: string; og?: Og; tg?: boolean; css?: string; head?: string } = {}): string {
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer"><meta name="theme-color" content="${PLUM}" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">${ogTags(o.og ?? OG_DEFAULT)}
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="robots" content="noindex,nofollow"><meta name="referrer" content="same-origin"><meta name="theme-color" content="${PLUM}" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">${ogTags(o.og ?? OG_DEFAULT)}
 ${FAVICON}
-${FONT_LINKS}
+${FONT_LINKS}${o.head ?? ""}
 <title>${esc(clip(title, 90))}</title><style>${CSS}${o.css ?? ""}</style></head>
 <body${o.bodyAttrs ? " " + o.bodyAttrs : ""}><div class="wrap">${inner}</div>${o.tg ? `<script src="https://telegram.org/js/telegram-web-app.js"></script>` : ""}${o.script ? `<script>${o.script}</script>` : ""}</body></html>`;
 }
@@ -191,7 +196,10 @@ export const TG_READY = `var w=window.Telegram&&window.Telegram.WebApp;if(w){try
 // else its summary), or to the note on top, and what changed is read out through the page's one live region (#live, outside #root, so
 // it is there before the change). A response that is not the list (signed out, an error page) is shown as it came, never posted again:
 // the same one request the plain form makes without script.
-export const FEED_SCRIPT = `(function(){${TG_READY}var r=document.getElementById("root");if(!r||!window.fetch||!window.DOMParser)return;var lv=document.getElementById("live");r.addEventListener("submit",function(e){var f=e.target;if(!f.classList||!f.classList.contains("ajax"))return;e.preventDefault();var b=f.querySelector("button");if(b)b.disabled=true;var li=f.closest?f.closest("li.row"):null,id=li?li.id:"";fetch(location.href,{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams(new FormData(f)).toString()}).then(function(x){return x.text()},function(){f.submit();return null}).then(function(t){if(t===null)return;var p=new DOMParser().parseFromString(t,"text/html"),d=p.getElementById("root"),g=null,s="";if(!d){document.title=p.title;document.body.innerHTML=p.body.innerHTML;g=document.querySelector("h1");if(g){g.setAttribute("tabindex","-1");g.focus()}return}r.innerHTML=d.innerHTML;var n=id?document.getElementById(id):null,top=r.querySelector(".top-note");if(n){var m=n.querySelector(".note")||n.querySelector(".chip");s=m?m.textContent:"";g=n.querySelector("button.apply,a.apply,summary")}if(top){s=top.textContent;g=top;top.setAttribute("tabindex","-1")}if(!g){g=r.querySelector("h1");if(g)g.setAttribute("tabindex","-1")}if(lv)lv.textContent=s.replace(/\\s+/g," ").trim();if(g)g.focus()})})})();`;
+// In the Telegram Mini App every post also carries Telegram's signed initData (window.Telegram.WebApp.initData, which Telegram hands
+// the script; it is never written into the page's HTML): the Mini App session's id in a form opens nothing without it, fresh and
+// for that session's Telegram user (file_session.ts, PAGE_TOKEN). Outside Telegram initData is empty and nothing is added.
+export const FEED_SCRIPT = `(function(){${TG_READY}var r=document.getElementById("root");if(!r||!window.fetch||!window.DOMParser)return;var lv=document.getElementById("live");function ii(f){if(w&&w.initData&&!f.querySelector('input[name="init"]')){var i=document.createElement("input");i.type="hidden";i.name="init";i.value=w.initData;f.appendChild(i)}}r.addEventListener("submit",function(e){var f=e.target;if(!f.classList||!f.classList.contains("ajax")){if(f.tagName==="FORM")ii(f);return}e.preventDefault();var b=f.querySelector("button");if(b)b.disabled=true;var li=f.closest?f.closest("li.row"):null,id=li?li.id:"",q=new URLSearchParams(new FormData(f));if(w&&w.initData)q.set("init",w.initData);fetch(location.href,{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:q.toString()}).then(function(x){return x.text()},function(){ii(f);f.submit();return null}).then(function(t){if(t===null)return;var p=new DOMParser().parseFromString(t,"text/html"),d=p.getElementById("root"),g=null,s="";if(!d){document.title=p.title;document.body.innerHTML=p.body.innerHTML;g=document.querySelector("h1");if(g){g.setAttribute("tabindex","-1");g.focus()}return}r.innerHTML=d.innerHTML;var n=id?document.getElementById(id):null,top=r.querySelector(".top-note");if(n){var m=n.querySelector(".note")||n.querySelector(".chip");s=m?m.textContent:"";g=n.querySelector("button.apply,a.apply,summary")}if(top){s=top.textContent;g=top;top.setAttribute("tabindex","-1")}if(!g){g=r.querySelector("h1");if(g)g.setAttribute("tabindex","-1")}if(lv)lv.textContent=s.replace(/\\s+/g," ").trim();if(g)g.focus()})})})();`;
 export const BOOT_SCRIPT = `(function(){${TG_READY}var p=new URLSearchParams(location.hash.slice(1)),d=p.get("tgWebAppData");if(!d){document.getElementById("nodata").hidden=false;return}var f=document.createElement("form");f.method="post";function a(n,v){var i=document.createElement("input");i.type="hidden";i.name=n;i.value=v;f.appendChild(i)}a("init",d);a("list",document.body.getAttribute("data-list"));document.body.appendChild(f);f.submit()})();`;
 
 export { BRAND };
@@ -220,13 +228,16 @@ function rowHtml(r: Row, token: string): string {
 <details><summary><span class="role">${esc(j.title)}</span><span class="desc">${esc(r.snippet)}</span></summary>${sendList}${more}</details>${meta}${posted}${sendsLine}${why}${note}</li>`;
 }
 
+// A list with no jobs says so, why, and what happens next (file_design.ts stateHtml), never a blank card.
+const EMPTY_FEED = stateHtml({ kind: "empty", title: "No jobs on this list yet", reason: "Nothing is listed here, so nothing is waiting for you to approve.", next: "Ask Trainee in your chat to find roles. Any it finds are listed here, and nothing is sent until you tap Apply." });
 export function renderFeed(f: Feed): string {
   const names = [...new Set(f.rows.map((r) => r.resume).filter(Boolean))] as string[];
   const withLine = names.length ? `<p class="with">Applying with: ${esc(names.join(", "))}</p>` : "";
   const more = f.total && f.total > f.rows.length ? `<p class="with">Showing the first ${f.rows.length} of ${f.total}. Ask Trainee in Telegram for the rest.</p>` : "";
   const all = f.setHash && f.setSize >= 2 ? `<form method="post" class="ajax all">${hidden(f.token, "applyall", `<input type="hidden" name="set" value="${f.setHash}">`)}<button type="submit">Apply to all ${f.setSize}</button></form>` : "";
   const top = f.top ? `<p class="top-note" role="alert">${esc(f.top)} ${refresh(f.token)}</p>` : "";
-  const inner = `<div id="root"><header>${BRAND}<h1>Your jobs</h1>${withLine}${more}${all}</header><main id="main">${top}<ul class="rows">${f.rows.map((r) => rowHtml(r, f.token)).join("")}</ul></main>${signOutFoot(f.token)}</div><p id="live" class="sr" role="status" aria-live="polite"></p>`;
+  // The File shell (file_design.ts): the wordmark and who it was made for above one card; the title, its freshness stamp, then the rows.
+  const inner = `<div id="root"><header class="fhead">${BRAND}${f.made ? `<p class="made">${esc(f.made)}</p>` : ""}</header><div class="fcard"><h1 class="ftitle">Your jobs</h1>${stampHtml(f.stamp ?? null)}${withLine}${more}${all}<main id="main">${top}${f.rows.length ? `<ul class="rows">${f.rows.map((r) => rowHtml(r, f.token)).join("")}</ul>` : EMPTY_FEED}</main></div>${signOutFoot(f.token)}</div><p id="live" class="sr" role="status" aria-live="polite"></p>`;
   return layout("Your jobs - Trainee", inner, { script: FEED_SCRIPT, tg: true, og: f.og });
 }
 // Sign out of this page here, or everywhere it is open (every session of the account ends; each needs a new sign-in).

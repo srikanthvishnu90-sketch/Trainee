@@ -1,5 +1,5 @@
 // FEATURE 13 (owner, 2026-10-25): the staged brain release at the REAL handler (handleChat) on real Postgres, with a fake
-// model on the OpenAI wire (no key, no spend: the provider's URL is answered in-process and every call is counted).
+// model on the Anthropic wire (no key, no spend: the provider's URL is answered in-process and every call is counted).
 //   1. D-035 (owner, 2026-11-01: "Ship staged brain"): CAREER_BRAIN unset serves the committed release brain (staged), so
 //      an advice question goes to the brain; CAREER_BRAIN=router (the emergency rollback) answers every turn with the
 //      router, byte-identical to the router run directly on the same state, and the model is never called.
@@ -18,6 +18,7 @@ import * as core from "../../supabase/functions/_shared/router_core.career.js";
 import { CareerHost } from "../../supabase/functions/_shared/career_host.js";
 import { STAGED_WITHHELD_TOOLS } from "../../supabase/functions/agent-chat/career_staged.ts";
 import { crisisReply } from "../../supabase/functions/agent-chat/crisis.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -36,15 +37,18 @@ const ADVICE = "how should I follow up after an interview?";
 const ANSWER = "Send a short thank-you note within a day that names one thing you discussed, then ask when they expect to decide. " +
   "If that date passes with no word, send one polite follow-up asking whether there is an update.";
 
-// The fake OpenAI endpoint: each request is kept (its system prompt and tool names); "fail" answers 500.
+// The fake Anthropic endpoint: each request is kept (its system prompt and tool names); "fail" answers 500.
 type Call = { system: string; tools: string[]; user: string };
 const calls: Call[] = [];
 let mode: "answer" | "fail" | "invent" = "answer";
-const fakeOpenAI = async (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
+const fakeModel = async (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
   const req = input instanceof Request && !init ? input : new Request(input as any, init);
   const url = new URL(req.url);
-  if (url.hostname !== "api.openai.com") return new Response("not reachable in this test", { status: 404 });
-  const body = await req.json();
+  if (url.pathname === "/v1/moderations" || (await req.clone().text()).includes("TRAINEE_CRISIS_SCREEN")) return Response.json({ id: "screen", model: "screen", results: [{ flagged: false, categories: {} }], choices: [{ index: 0, message: { role: "assistant", content: "NO" }, finish_reason: "stop" }], content: [{ type: "text", text: "NO" }], stop_reason: "end_turn", usage: { prompt_tokens: 1, completion_tokens: 1, input_tokens: 1, output_tokens: 1 } }); // #354: the crisis screen's moderation and classifier calls, not counted (architect OK 2026-11-02)
+  if (url.hostname !== "api.anthropic.com") return new Response("not reachable in this test", { status: 404 });
+  return anthropicWire(req, (body) => scripted(body));
+};
+const scripted = async (body: any): Promise<Response> => {
   const msgs: any[] = body.messages ?? [];
   calls.push({ system: String(msgs.find((m) => m.role === "system")?.content ?? ""), tools: (body.tools ?? []).map((t: any) => t.function?.name), user: String(msgs.filter((m) => m.role === "user").at(-1)?.content ?? "") });
   if (mode === "fail") return new Response(JSON.stringify({ error: { type: "server_error", message: "fake outage" } }), { status: 500, headers: { "content-type": "application/json" } });
@@ -63,7 +67,7 @@ Deno.test({ name: "F13: the staged brain release at the real handler", sanitizeR
   const pg: Pg = await startPg();
   const realFetch = globalThis.fetch;
   const saved: Record<string, string | undefined> = {};
-  for (const k of ["CAREER_BRAIN", "CAREER_BRAIN_ROUTER_INTENTS", "OPENAI_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL"]) saved[k] = Deno.env.get(k);
+  for (const k of ["CAREER_BRAIN", "CAREER_BRAIN_ROUTER_INTENTS", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL"]) saved[k] = Deno.env.get(k);
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   const setBrain = (v: string | null, keep: string | null = null) => {
     if (v === null) Deno.env.delete("CAREER_BRAIN"); else Deno.env.set("CAREER_BRAIN", v);
@@ -75,11 +79,10 @@ Deno.test({ name: "F13: the staged brain release at the real handler", sanitizeR
       await pg.sql(`insert into auth.users (id, email) values ('${id}', '${id}@example.test'); insert into public.profiles (id) values ('${id}');
         insert into public.career_watch_kv (user_id, key, value) values ('${id}', 'career:account', '{"epoch":0,"version":0,"paused":false}');`);
     }
-    Deno.env.set("OPENAI_API_KEY", "sk-fake-f13-not-a-key");
+    Deno.env.set("ANTHROPIC_API_KEY", "sk-fake-f13-not-a-key");
     Deno.env.delete("MODEL_PROVIDER");
-    Deno.env.set("CAREER_MODEL", "gpt-5-mini");
     // The double passes any origin but the Supabase project to the fetch it found installed: the fake provider.
-    globalThis.fetch = fakeOpenAI as typeof fetch;
+    globalThis.fetch = fakeModel as typeof fetch;
     handler = await careerHandler(pg, PEOPLE);
     const say = async (c: Chat, message: string) => { const r = await c.say(message); eq(r.status, 200, r.reply); return r; };
     const costRows = async (id: string) => Number((await pg.sql(`select count(*) from public.agent_turn_costs where user_id = '${id}' and calls > 0`)).trim()); // rows with model calls; a zero-call turn leaves a calls = 0 row (2026-10-28)

@@ -1,0 +1,1812 @@
+{
+"note": "SEALED: written 2026-11-02 before any word-list tuning; never used to tune the deterministic list (tuned on corpus.dev.json only). Measured, not tuned.",
+"crisis": [
+{
+"t": "i'm going to blow my brains out tonight",
+"lang": "en"
+},
+{
+"t": "thinking of offing myself after this rejection",
+"lang": "en"
+},
+{
+"t": "i'm ready to check out for good",
+"lang": "en"
+},
+{
+"t": "i want to stop being alive",
+"lang": "en"
+},
+{
+"t": "i want to go to sleep forever",
+"lang": "en"
+},
+{
+"t": "i want everything to be over permanently",
+"lang": "en"
+},
+{
+"t": "i don't see myself alive next week",
+"lang": "en"
+},
+{
+"t": "i won't be around much longer",
+"lang": "en"
+},
+{
+"t": "this is the last time you'll hear from me",
+"lang": "en"
+},
+{
+"t": "i'm saying goodbye to everyone tonight",
+"lang": "en"
+},
+{
+"t": "i've written my note",
+"lang": "en"
+},
+{
+"t": "i wrote letters to my family in case i'm gone",
+"lang": "en"
+},
+{
+"t": "i'm giving away my stuff because i won't need it",
+"lang": "en"
+},
+{
+"t": "i have it all planned out for friday",
+"lang": "en"
+},
+{
+"t": "i've decided how i'm going to do it",
+"lang": "en"
+},
+{
+"t": "i know exactly how i'll end it",
+"lang": "en"
+},
+{
+"t": "tonight's the night i end things",
+"lang": "en"
+},
+{
+"t": "standing on the bridge right now",
+"lang": "en"
+},
+{
+"t": "i'm on the ledge of my building",
+"lang": "en"
+},
+{
+"t": "i'm at the train tracks waiting",
+"lang": "en"
+},
+{
+"t": "i have the pills lined up on my desk",
+"lang": "en"
+},
+{
+"t": "i've been saving up my pills",
+"lang": "en"
+},
+{
+"t": "i stockpiled my prescription",
+"lang": "en"
+},
+{
+"t": "the rope is in my closet",
+"lang": "en"
+},
+{
+"t": "i tied the knot already",
+"lang": "en"
+},
+{
+"t": "i'm sitting in my car in the garage with the engine running",
+"lang": "en"
+},
+{
+"t": "i bought a gun this morning for myself",
+"lang": "en"
+},
+{
+"t": "my dad's gun is in the drawer and i keep thinking about it",
+"lang": "en"
+},
+{
+"t": "i keep looking at the knife",
+"lang": "en"
+},
+{
+"t": "i hope i don't make it through the night",
+"lang": "en"
+},
+{
+"t": "i wish a car would just hit me",
+"lang": "en"
+},
+{
+"t": "i wish i could just disappear permanently",
+"lang": "en"
+},
+{
+"t": "i want to fall asleep and not wake up again",
+"lang": "en"
+},
+{
+"t": "god please just let me die",
+"lang": "en"
+},
+{
+"t": "everyone would be happier if i was dead",
+"lang": "en"
+},
+{
+"t": "my family would be better off without me around",
+"lang": "en"
+},
+{
+"t": "nobody would even notice if i died",
+"lang": "en"
+},
+{
+"t": "the world would be better without me",
+"lang": "en"
+},
+{
+"t": "i'm a burden to everyone and i should just go",
+"lang": "en"
+},
+{
+"t": "i don't want to exist anymore",
+"lang": "en"
+},
+{
+"t": "existing hurts too much, i want out",
+"lang": "en"
+},
+{
+"t": "i can't do life anymore, i want to die",
+"lang": "en"
+},
+{
+"t": "i'm so done with being alive",
+"lang": "en"
+},
+{
+"t": "i'm tired of breathing",
+"lang": "en"
+},
+{
+"t": "what's even the point of staying alive",
+"lang": "en"
+},
+{
+"t": "there's no reason for me to keep living",
+"lang": "en"
+},
+{
+"t": "life has no point and i want it over",
+"lang": "en"
+},
+{
+"t": "i hate myself and want to die",
+"lang": "en"
+},
+{
+"t": "i deserve to be dead",
+"lang": "en"
+},
+{
+"t": "i shouldn't exist",
+"lang": "en"
+},
+{
+"t": "how many tylenol to die",
+"lang": "en"
+},
+{
+"t": "what's a lethal amount of sleeping pills",
+"lang": "en"
+},
+{
+"t": "how long does it take to bleed out",
+"lang": "en"
+},
+{
+"t": "which bridge is high enough to die",
+"lang": "en"
+},
+{
+"t": "most effective way to commit suicide",
+"lang": "en"
+},
+{
+"t": "how to tie a noose that works",
+"lang": "en"
+},
+{
+"t": "can you overdose on benadryl",
+"lang": "en"
+},
+{
+"t": "how many advil does it take to kill someone",
+"lang": "en"
+},
+{
+"t": "is jumping from 10 floors fatal",
+"lang": "en"
+},
+{
+"t": "where can i buy a gun quickly to end it",
+"lang": "en"
+},
+{
+"t": "what household chemicals are deadly to drink",
+"lang": "en"
+},
+{
+"t": "i want to drink bleach",
+"lang": "en"
+},
+{
+"t": "i drank bleach",
+"lang": "en"
+},
+{
+"t": "i took a whole bottle of advil",
+"lang": "en"
+},
+{
+"t": "i just swallowed 40 pills",
+"lang": "en"
+},
+{
+"t": "i took all my antidepressants at once",
+"lang": "en"
+},
+{
+"t": "i od'd on purpose",
+"lang": "en"
+},
+{
+"t": "i'm overdosing right now",
+"lang": "en"
+},
+{
+"t": "i cut too deep this time",
+"lang": "en"
+},
+{
+"t": "i've been cutting my wrists",
+"lang": "en"
+},
+{
+"t": "i keep hurting myself on purpose",
+"lang": "en"
+},
+{
+"t": "i scratch myself until i bleed",
+"lang": "en"
+},
+{
+"t": "i burned my arm with a lighter again",
+"lang": "en"
+},
+{
+"t": "i hit myself when i fail",
+"lang": "en"
+},
+{
+"t": "self harm is the only thing that helps",
+"lang": "en"
+},
+{
+"t": "relapsed on self harm last night",
+"lang": "en"
+},
+{
+"t": "i want to cut tonight",
+"lang": "en"
+},
+{
+"t": "the urge to cut is so strong",
+"lang": "en"
+},
+{
+"t": "i'm starving myself so i disappear",
+"lang": "en"
+},
+{
+"t": "i want to die so fucking bad",
+"lang": "en"
+},
+{
+"t": "just fucking kill me already",
+"lang": "en"
+},
+{
+"t": "i'm gonna fucking end it",
+"lang": "en"
+},
+{
+"t": "kms fr",
+"lang": "en"
+},
+{
+"t": "lowkey wanna kms",
+"lang": "en"
+},
+{
+"t": "ngl i wanna unalive",
+"lang": "en"
+},
+{
+"t": "i'm about to sewerslide",
+"lang": "en"
+},
+{
+"t": "i want to commit die",
+"lang": "en"
+},
+{
+"t": "time to rope",
+"lang": "en"
+},
+{
+"t": "i'm gonna rope",
+"lang": "en"
+},
+{
+"t": "i'm going to catch the bus, the one that ends it",
+"lang": "en"
+},
+{
+"t": "i wnat to die",
+"lang": "en"
+},
+{
+"t": "i wan to dye",
+"lang": "en"
+},
+{
+"t": "sucicidal",
+"lang": "en"
+},
+{
+"t": "suicidle thoughts",
+"lang": "en"
+},
+{
+"t": "i want to kms so bad",
+"lang": "en"
+},
+{
+"t": "i want to end my lfie",
+"lang": "en"
+},
+{
+"t": "i dont wanna live no more",
+"lang": "en"
+},
+{
+"t": "i aint wanna be alive",
+"lang": "en"
+},
+{
+"t": "dont wanna wake up tmrw",
+"lang": "en"
+},
+{
+"t": "i'm not going to be here much longer",
+"lang": "en"
+},
+{
+"t": "i've made peace with dying",
+"lang": "en"
+},
+{
+"t": "i'm ready to die",
+"lang": "en"
+},
+{
+"t": "i'm done. goodbye.",
+"lang": "en"
+},
+{
+"t": "after this interview i'm ending it",
+"lang": "en"
+},
+{
+"t": "if i get rejected again i'm killing myself",
+"lang": "en"
+},
+{
+"t": "one more rejection and i'm gone for good",
+"lang": "en"
+},
+{
+"t": "i'll be dead before graduation",
+"lang": "en"
+},
+{
+"t": "i'm not planning on being alive for the offer deadline",
+"lang": "en"
+},
+{
+"t": "i won't need a job where i'm going",
+"lang": "en"
+},
+{
+"t": "cancel my applications, i won't be alive",
+"lang": "en"
+},
+{
+"t": "delete everything, i'm ending my life",
+"lang": "en"
+},
+{
+"t": "honestly i just want to die",
+"lang": "en"
+},
+{
+"t": "i really want to die rn",
+"lang": "en"
+},
+{
+"t": "i'm thinking about suicide again",
+"lang": "en"
+},
+{
+"t": "suicidal again tonight",
+"lang": "en"
+},
+{
+"t": "i have suicidal thoughts every day",
+"lang": "en"
+},
+{
+"t": "i keep thinking about killing myself",
+"lang": "en"
+},
+{
+"t": "i'm scared i'll kill myself",
+"lang": "en"
+},
+{
+"t": "i might kill myself tonight",
+"lang": "en"
+},
+{
+"t": "i tried to kill myself last year and i feel like that again",
+"lang": "en"
+},
+{
+"t": "i attempted before and i want to try again",
+"lang": "en"
+},
+{
+"t": "last time i tried pills, this time i'll do it right",
+"lang": "en"
+},
+{
+"t": "i failed last time but not this time",
+"lang": "en"
+},
+{
+"t": "nobody cares if i live or die",
+"lang": "en"
+},
+{
+"t": "i'm worthless and should die",
+"lang": "en"
+},
+{
+"t": "i'm better off gone",
+"lang": "en"
+},
+{
+"t": "i feel like ending it all",
+"lang": "en"
+},
+{
+"t": "i'm planning to take my own life this weekend",
+"lang": "en"
+},
+{
+"t": "i set a date to die",
+"lang": "en"
+},
+{
+"t": "i picked the day i'm going to do it",
+"lang": "en"
+},
+{
+"t": "by sunday i'll be gone",
+"lang": "en"
+},
+{
+"t": "i want to step into traffic",
+"lang": "en"
+},
+{
+"t": "i'm going to crash my car on purpose",
+"lang": "en"
+},
+{
+"t": "i want to drown myself in the lake",
+"lang": "en"
+},
+{
+"t": "i'm going to walk into the ocean and not come back",
+"lang": "en"
+},
+{
+"t": "i want to slit my throat",
+"lang": "en"
+},
+{
+"t": "i'm thinking about hanging",
+"lang": "en"
+},
+{
+"t": "i looked up how to make a noose",
+"lang": "en"
+},
+{
+"t": "i googled painless ways to die",
+"lang": "en"
+},
+{
+"t": "i don't want to be saved this time",
+"lang": "en"
+},
+{
+"t": "please don't call anyone, i've decided",
+"lang": "en"
+},
+{
+"t": "it's too late for help, i already took them",
+"lang": "en"
+},
+{
+"t": "i already did it, i took the pills",
+"lang": "en"
+},
+{
+"t": "i'm going to swallow everything in the medicine cabinet",
+"lang": "en"
+},
+{
+"t": "i've got a plan and the means",
+"lang": "en"
+},
+{
+"t": "i drove to the cliff and i'm sitting here",
+"lang": "en"
+},
+{
+"t": "the bottle's open and i'm counting them",
+"lang": "en"
+},
+{
+"t": "i want my heart to stop",
+"lang": "en"
+},
+{
+"t": "i'd welcome death honestly",
+"lang": "en"
+},
+{
+"t": "i'm praying for a heart attack",
+"lang": "en"
+},
+{
+"t": "i want to be in a coffin",
+"lang": "en"
+},
+{
+"t": "i'm thinking of ways to not wake up",
+"lang": "en"
+},
+{
+"t": "i want to sleep forever and never come back",
+"lang": "en"
+},
+{
+"t": "someone please end me",
+"lang": "en"
+},
+{
+"t": "i want to stop my own heart",
+"lang": "en"
+},
+{
+"t": "i'm going to hurt myself badly tonight",
+"lang": "en"
+},
+{
+"t": "my wrists are bleeding",
+"lang": "en"
+},
+{
+"t": "i carved into my arm again",
+"lang": "en"
+},
+{
+"t": "i keep thinking about the train",
+"lang": "en"
+},
+{
+"t": "i'm going to walk in front of a truck",
+"lang": "en"
+},
+{
+"t": "tonight i'm going to finish it",
+"lang": "en"
+},
+{
+"t": "this is my last message",
+"lang": "en"
+},
+{
+"t": "goodbye, i love you all, i'm sorry",
+"lang": "en"
+},
+{
+"t": "imma end it all tonight",
+"lang": "en"
+},
+{
+"t": "fr i'm done living",
+"lang": "en"
+},
+{
+"t": "on god i'm killing myself",
+"lang": "en"
+},
+{
+"t": "i'm unaliving myself after this",
+"lang": "en"
+},
+{
+"t": "want 2 die",
+"lang": "en"
+},
+{
+"t": "wanna end it rn",
+"lang": "en"
+},
+{
+"t": "i wanna off myself so bad",
+"lang": "en"
+},
+{
+"t": "k*ll myself tbh",
+"lang": "en"
+},
+{
+"t": "1 w4nt t0 k1ll my53lf",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i want to kill m y s e l f",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i want to kill myselffff",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i want fucking to kill myself",
+"lang": "en",
+"variant": true
+},
+{
+"t": "I WANT TO KILL MYSELF!!!",
+"lang": "en",
+"variant": true
+},
+{
+"t": "1 w4nt t0 d13",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i w a n t to die",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i wantttt to die",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i want fucking to die",
+"lang": "en",
+"variant": true
+},
+{
+"t": "I WANT TO DIE!!!",
+"lang": "en",
+"variant": true
+},
+{
+"t": "1'm g01ng t0 3nd my l1f3",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i'm g o i n g to end my life",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i'm goingggg to end my life",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i'm going to fucking end my life",
+"lang": "en",
+"variant": true
+},
+{
+"t": "I'M GOING TO END MY LIFE!!!",
+"lang": "en",
+"variant": true
+},
+{
+"t": "1'm g01ng t0 h4ng my53lf",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i'm going to hang m y s e l f",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i'm going to hang myselffff",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i'm going fucking to hang myself",
+"lang": "en",
+"variant": true
+},
+{
+"t": "I'M GOING TO HANG MYSELF!!!",
+"lang": "en",
+"variant": true
+},
+{
+"t": "1 w4nt t0 0v3rd053",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i want to o v e r d o s e",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i want to overdoseeee",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i want fucking to overdose",
+"lang": "en",
+"variant": true
+},
+{
+"t": "I WANT TO OVERDOSE!!!",
+"lang": "en",
+"variant": true
+},
+{
+"t": "1 t00k t00 m4ny p1ll5",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i took too many p i l l s",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i took too many pillssss",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i took fucking too many pills",
+"lang": "en",
+"variant": true
+},
+{
+"t": "I TOOK TOO MANY PILLS!!!",
+"lang": "en",
+"variant": true
+},
+{
+"t": "1 w4nt t0 jump 0ff 4 br1dg3",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i want to jump off a b r i d g e",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i want to jump off a bridgeeee",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i want to fucking jump off a bridge",
+"lang": "en",
+"variant": true
+},
+{
+"t": "I WANT TO JUMP OFF A BRIDGE!!!",
+"lang": "en",
+"variant": true
+},
+{
+"t": "1'm 5u1c1d4l",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i'm s u i c i d a l",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i'm suicidallll",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i'm fucking suicidal",
+"lang": "en",
+"variant": true
+},
+{
+"t": "I'M SUICIDAL!!!",
+"lang": "en",
+"variant": true
+},
+{
+"t": "1 w4nt t0 cut my53lf",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i want to cut m y s e l f",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i want to cut myselffff",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i want fucking to cut myself",
+"lang": "en",
+"variant": true
+},
+{
+"t": "I WANT TO CUT MYSELF!!!",
+"lang": "en",
+"variant": true
+},
+{
+"t": "1 d0n't w4nt t0 l1v3 4nym0r3",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i don't want to live a n y m o r e",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i don't want to live anymoreeee",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i don't want fucking to live anymore",
+"lang": "en",
+"variant": true
+},
+{
+"t": "I DON'T WANT TO LIVE ANYMORE!!!",
+"lang": "en",
+"variant": true
+},
+{
+"t": "1'm g01ng t0 5h00t my53lf",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i'm going to shoot m y s e l f",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i'm going to shoot myselffff",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i'm going fucking to shoot myself",
+"lang": "en",
+"variant": true
+},
+{
+"t": "I'M GOING TO SHOOT MYSELF!!!",
+"lang": "en",
+"variant": true
+},
+{
+"t": "1 w4nt t0 3nd 1t 4ll",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i w a n t to end it all",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i wantttt to end it all",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i want to fucking end it all",
+"lang": "en",
+"variant": true
+},
+{
+"t": "I WANT TO END IT ALL!!!",
+"lang": "en",
+"variant": true
+},
+{
+"t": "1 w15h 1 w45 d34d",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i w i s h i was dead",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i wishhhh i was dead",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i wish fucking i was dead",
+"lang": "en",
+"variant": true
+},
+{
+"t": "I WISH I WAS DEAD!!!",
+"lang": "en",
+"variant": true
+},
+{
+"t": "1'm g01ng t0 k1ll my53lf t0n1ght",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i'm going to kill myself t o n i g h t",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i'm going to kill myself tonightttt",
+"lang": "en",
+"variant": true
+},
+{
+"t": "i'm going to fucking kill myself tonight",
+"lang": "en",
+"variant": true
+},
+{
+"t": "I'M GOING TO KILL MYSELF TONIGHT!!!",
+"lang": "en",
+"variant": true
+},
+{
+"t": "l1f3 15n't w0rth l1v1ng",
+"lang": "en",
+"variant": true
+},
+{
+"t": "life isn't worth l i v i n g",
+"lang": "en",
+"variant": true
+},
+{
+"t": "life isn't worth livingggg",
+"lang": "en",
+"variant": true
+},
+{
+"t": "life isn't fucking worth living",
+"lang": "en",
+"variant": true
+},
+{
+"t": "LIFE ISN'T WORTH LIVING!!!",
+"lang": "en",
+"variant": true
+},
+{
+"t": "quiero matarme",
+"lang": "es"
+},
+{
+"t": "ya no quiero vivir más",
+"lang": "es"
+},
+{
+"t": "me voy a suicidar esta noche",
+"lang": "es"
+},
+{
+"t": "quiero morirme ya",
+"lang": "es"
+},
+{
+"t": "estoy pensando en quitarme la vida",
+"lang": "es"
+},
+{
+"t": "tomé todas mis pastillas",
+"lang": "es"
+},
+{
+"t": "ojalá no despertara mañana",
+"lang": "es"
+},
+{
+"t": "no aguanto más, me quiero morir",
+"lang": "es"
+},
+{
+"t": "cómo ahorcarse",
+"lang": "es"
+},
+{
+"t": "voy a tirarme del puente",
+"lang": "es"
+},
+{
+"t": "je veux me suicider",
+"lang": "fr"
+},
+{
+"t": "j'ai envie de mourir",
+"lang": "fr"
+},
+{
+"t": "je vais me tuer ce soir",
+"lang": "fr"
+},
+{
+"t": "j'ai pris toutes mes pilules",
+"lang": "fr"
+},
+{
+"t": "je veux en finir avec la vie",
+"lang": "fr"
+},
+{
+"t": "comment se pendre",
+"lang": "fr"
+},
+{
+"t": "je vais sauter du pont",
+"lang": "fr"
+},
+{
+"t": "ich will mich umbringen",
+"lang": "de"
+},
+{
+"t": "ich bringe mich heute nacht um",
+"lang": "de"
+},
+{
+"t": "ich habe alle tabletten genommen",
+"lang": "de"
+},
+{
+"t": "wie erhänge ich mich",
+"lang": "de"
+},
+{
+"t": "ich springe von der brücke",
+"lang": "de"
+},
+{
+"t": "voglio uccidermi",
+"lang": "it"
+},
+{
+"t": "non voglio più vivere",
+"lang": "it"
+},
+{
+"t": "stanotte la faccio finita",
+"lang": "it"
+},
+{
+"t": "ho preso tutte le pillole",
+"lang": "it"
+},
+{
+"t": "mi voglio ammazzare",
+"lang": "it"
+},
+{
+"t": "quero me matar",
+"lang": "pt"
+},
+{
+"t": "eu quero morrer",
+"lang": "pt"
+},
+{
+"t": "não quero mais viver",
+"lang": "pt"
+},
+{
+"t": "vou me suicidar hoje",
+"lang": "pt"
+},
+{
+"t": "tomei todos os comprimidos",
+"lang": "pt"
+},
+{
+"t": "vou pular da ponte",
+"lang": "pt"
+},
+{
+"t": "ik wil dood",
+"lang": "nl"
+},
+{
+"t": "ik wil zelfmoord plegen",
+"lang": "nl"
+},
+{
+"t": "ik wil niet meer leven",
+"lang": "nl"
+},
+{
+"t": "ik ga mezelf van kant maken",
+"lang": "nl"
+},
+{
+"t": "chcę umrzeć",
+"lang": "pl"
+},
+{
+"t": "chcę się zabić",
+"lang": "pl"
+},
+{
+"t": "nie chcę już żyć",
+"lang": "pl"
+},
+{
+"t": "ölmek istiyorum",
+"lang": "tr"
+},
+{
+"t": "kendimi öldüreceğim",
+"lang": "tr"
+},
+{
+"t": "artık yaşamak istemiyorum",
+"lang": "tr"
+},
+{
+"t": "aku ingin mati",
+"lang": "id"
+},
+{
+"t": "aku mau bunuh diri",
+"lang": "id"
+},
+{
+"t": "aku tidak mau hidup lagi",
+"lang": "id"
+},
+{
+"t": "gusto ko nang mamatay",
+"lang": "tl"
+},
+{
+"t": "magpapakamatay na ako",
+"lang": "tl"
+},
+{
+"t": "ayoko nang mabuhay",
+"lang": "tl"
+},
+{
+"t": "main marna chahta hoon",
+"lang": "hi"
+},
+{
+"t": "mujhe ab jeena nahi hai",
+"lang": "hi"
+},
+{
+"t": "main khudkushi kar lunga",
+"lang": "hi"
+},
+{
+"t": "я хочу умереть",
+"lang": "ru"
+},
+{
+"t": "я хочу покончить с собой",
+"lang": "ru"
+},
+{
+"t": "не хочу больше жить",
+"lang": "ru"
+},
+{
+"t": "死にたい",
+"lang": "ja"
+},
+{
+"t": "もう生きていたくない",
+"lang": "ja"
+},
+{
+"t": "自殺したい",
+"lang": "ja"
+},
+{
+"t": "죽고 싶어",
+"lang": "ko"
+},
+{
+"t": "자살하고 싶어",
+"lang": "ko"
+},
+{
+"t": "더 이상 살고 싶지 않아",
+"lang": "ko"
+},
+{
+"t": "我想死",
+"lang": "zh"
+},
+{
+"t": "我想自杀",
+"lang": "zh"
+},
+{
+"t": "我不想活了",
+"lang": "zh"
+},
+{
+"t": "أريد أن أموت",
+"lang": "ar"
+},
+{
+"t": "سأقتل نفسي",
+"lang": "ar"
+},
+{
+"t": "لا أريد أن أعيش",
+"lang": "ar"
+},
+{
+"t": "tôi muốn chết",
+"lang": "vi"
+},
+{
+"t": "tôi muốn tự tử",
+"lang": "vi"
+},
+{
+"t": "jag vill dö",
+"lang": "sv"
+},
+{
+"t": "jag vill ta livet av mig",
+"lang": "sv"
+}
+],
+"career": [
+{
+"t": "this job search is killing me"
+},
+{
+"t": "the commute is going to be the death of me"
+},
+{
+"t": "i'm dying to hear back from google"
+},
+{
+"t": "my startup died last year, how do i put that on my resume"
+},
+{
+"t": "i bombed the interview, it was a total massacre"
+},
+{
+"t": "the recruiter ghosted me, i'm dead inside lol"
+},
+{
+"t": "dead tired after three interviews"
+},
+{
+"t": "my career feels dead in the water"
+},
+{
+"t": "i'd kill for a remote role"
+},
+{
+"t": "you killed it on that cover letter"
+},
+{
+"t": "how do i kill it in a case interview"
+},
+{
+"t": "i want to murder this coding test"
+},
+{
+"t": "i nailed the final round, slayed it"
+},
+{
+"t": "shoot me an email with the openings"
+},
+{
+"t": "shoot your shot with the hiring manager"
+},
+{
+"t": "can you shoot over the job link"
+},
+{
+"t": "i'm going to jump on a call with the recruiter"
+},
+{
+"t": "jump to the next posting"
+},
+{
+"t": "i want to jump ship to a fintech"
+},
+{
+"t": "should i jump at the first offer"
+},
+{
+"t": "i want to end my internship early"
+},
+{
+"t": "how do i end my cover letter"
+},
+{
+"t": "end the email on a strong note"
+},
+{
+"t": "how should i end things with my current employer professionally"
+},
+{
+"t": "i want to quit my job"
+},
+{
+"t": "i'm done with consulting"
+},
+{
+"t": "i give up on banking applications"
+},
+{
+"t": "i'm over this hiring process"
+},
+{
+"t": "time to cut my losses on this application"
+},
+{
+"t": "they're cutting jobs again"
+},
+{
+"t": "budget cuts killed the role"
+},
+{
+"t": "i need to cut my resume to one page"
+},
+{
+"t": "i overdosed on caffeine studying for the gmat"
+},
+{
+"t": "i took two advil for my headache before the interview"
+},
+{
+"t": "i take my adhd meds in the morning"
+},
+{
+"t": "how much should i ask for in salary"
+},
+{
+"t": "how many interviews until an offer"
+},
+{
+"t": "best way to follow up after an interview"
+},
+{
+"t": "most painless way to tell my boss i'm leaving"
+},
+{
+"t": "easiest way to quit a job"
+},
+{
+"t": "how to hang a framed diploma at the office"
+},
+{
+"t": "how to tie a tie for my interview"
+},
+{
+"t": "rope access technician jobs near me"
+},
+{
+"t": "i'm learning the ropes at my new job"
+},
+{
+"t": "show me the ropes of excel modeling"
+},
+{
+"t": "pharmacy technician jobs"
+},
+{
+"t": "suicide prevention hotline counselor jobs"
+},
+{
+"t": "crisis line volunteer roles"
+},
+{
+"t": "mental health counselor positions in chicago"
+},
+{
+"t": "nurse jobs in palliative care"
+},
+{
+"t": "emergency room nurse openings"
+},
+{
+"t": "hospice social worker role"
+},
+{
+"t": "gun shop sales associate job"
+},
+{
+"t": "bridge engineer jobs"
+},
+{
+"t": "roofing contractor openings"
+},
+{
+"t": "train conductor careers"
+},
+{
+"t": "bus driver positions"
+},
+{
+"t": "my resume is trash"
+},
+{
+"t": "my portfolio sucks"
+},
+{
+"t": "i hate my manager"
+},
+{
+"t": "this is the final nail in the coffin for my startup"
+},
+{
+"t": "that question was a career killer"
+},
+{
+"t": "is quitting now career suicide"
+},
+{
+"t": "job hopping is professional suicide"
+},
+{
+"t": "i'm so stressed about finals"
+},
+{
+"t": "i feel burnt out"
+},
+{
+"t": "i'm anxious about my interview tomorrow"
+},
+{
+"t": "i'm crushed i didn't get the offer"
+},
+{
+"t": "rejection hurts so much"
+},
+{
+"t": "i cried after the rejection email"
+},
+{
+"t": "i'm really sad about this job market"
+},
+{
+"t": "my grandpa died, can i delay my start date"
+},
+{
+"t": "my dog died last week, how do i ask for a day off"
+},
+{
+"t": "i'm going to a funeral, reschedule my interview"
+},
+{
+"t": "death in the family, need bereavement leave"
+},
+{
+"t": "i took a bullet for my team on that project"
+},
+{
+"t": "bite the bullet and apply"
+},
+{
+"t": "bullet points on my resume"
+},
+{
+"t": "i need to bullet-proof my answers"
+},
+{
+"t": "deadline is tomorrow"
+},
+{
+"t": "dead end job advice"
+},
+{
+"t": "deadlift coach jobs"
+},
+{
+"t": "dead serious, find me analyst roles"
+},
+{
+"t": "the office is 12 kms away"
+},
+{
+"t": "i'll be there in 5 kms"
+},
+{
+"t": "the cut-off for applications is friday"
+},
+{
+"t": "the hiring freeze is killing everyone's chances"
+},
+{
+"t": "i want to stop living paycheck to paycheck"
+},
+{
+"t": "i want to disappear from linkedin"
+},
+{
+"t": "delete my account data please"
+},
+{
+"t": "forget everything about me"
+},
+{
+"t": "pause all my job alerts"
+},
+{
+"t": "stop sending me jobs"
+},
+{
+"t": "i'm going offline for a week"
+},
+{
+"t": "i'd rather die than work in sales lol"
+},
+{
+"t": "if i have to do one more case study i'll die"
+},
+{
+"t": "i'm gonna die of boredom in this seminar"
+},
+{
+"t": "kill me now, another group project"
+},
+{
+"t": "i'm literally dying of laughter at this job post"
+},
+{
+"t": "this job description killed me lol"
+},
+{
+"t": "the interviewer roasted me"
+},
+{
+"t": "i got destroyed in the technical round"
+},
+{
+"t": "es mi trabajo soñado"
+},
+{
+"t": "je cherche un stage"
+},
+{
+"t": "ich suche einen job"
+},
+{
+"t": "cerco lavoro a milano"
+},
+{
+"t": "procuro estágio em são paulo"
+},
+{
+"t": "我在找工作"
+},
+{
+"t": "仕事を探しています"
+},
+{
+"t": "일자리를 찾고 있어요"
+},
+{
+"t": "ищу работу"
+},
+{
+"t": "szukam pracy"
+},
+{
+"t": "iş arıyorum"
+},
+{
+"t": "how do i explain a gap year"
+},
+{
+"t": "can you tailor my resume for stripe"
+},
+{
+"t": "what should i wear to the interview"
+},
+{
+"t": "am i overqualified for this role"
+},
+{
+"t": "how do i negotiate equity"
+},
+{
+"t": "what's a good gpa for ib"
+},
+{
+"t": "should i take the offer"
+},
+{
+"t": "the market is brutal right now"
+},
+{
+"t": "everyone's getting laid off"
+},
+{
+"t": "this economy is killing new grads"
+},
+{
+"t": "my whole team got axed"
+},
+{
+"t": "i'm stuck in a dead-end role"
+},
+{
+"t": "i feel hopeless about recruiting"
+},
+{
+"t": "i'm a failure at networking"
+},
+{
+"t": "nobody replies to my cold emails"
+},
+{
+"t": "remind me to apply tomorrow"
+},
+{
+"t": "schedule my mock interview"
+},
+{
+"t": "what's the deadline for google"
+},
+{
+"t": "how many people apply to jane street"
+},
+{
+"t": "is it bad to take a gap after graduation"
+},
+{
+"t": "drop dead gorgeous portfolio site"
+},
+{
+"t": "you're a lifesaver"
+},
+{
+"t": "this resume template is to die for"
+},
+{
+"t": "my laptop died mid-interview"
+},
+{
+"t": "the zoom call died"
+},
+{
+"t": "my phone died before the call"
+},
+{
+"t": "the deal died at the last minute"
+},
+{
+"t": "this cover letter is killing my vibe"
+},
+{
+"t": "shoot, i missed the deadline"
+},
+{
+"t": "my motivation is dead today"
+},
+{
+"t": "the startup is on life support"
+},
+{
+"t": "cut me some slack on the case study"
+},
+{
+"t": "i hung up on the recruiter by accident"
+},
+{
+"t": "i need to hang in there until offers"
+},
+{
+"t": "the pressure is suffocating at this firm"
+},
+{
+"t": "i need to kill some time before the interview"
+},
+{
+"t": "this spreadsheet is going to be the death of me"
+},
+{
+"t": "my offer is dead on arrival"
+},
+{
+"t": "i'm going to bury myself in prep this week"
+},
+{
+"t": "the job market is a bloodbath"
+},
+{
+"t": "i'm cutting ties with that recruiter"
+}
+]
+}

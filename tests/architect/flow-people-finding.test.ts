@@ -1,13 +1,14 @@
 // PEOPLE FINDING and INTRODUCTIONS (D-033) through the REAL handler (agent-chat/handler-career.ts handleChat) on real
 // Postgres, as new people use it on the web (their app's request, with `attachments`) and through the texting bridge
 // (Telegram and SMS turns arrive as the service-role call with `as_user_id`, exactly as channel_runtime sends them).
-// Every step asserts the database, and that the reply says no more than the database holds. The model (OpenAI), Gmail
+// Every step asserts the database, and that the reply says no more than the database holds. The model (the model), Gmail
 // and one company website are scripted fakes at their real URLs; any other host fails the test. Nothing is sent: no
 // request to Gmail's send endpoint, no outreach row, no outbox row; nothing is fetched from LinkedIn, Indeed or Handshake.
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, SERVICE_KEY, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
 import { fakeNet, HANDSHAKE_HTML, http, INDEED_HTML, zipOf } from "./people-finding-fixtures.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 const MAX_INFLATE = 20_000_000; // career_people_import.ts MAX_INFLATE: one ZIP entry inflates to at most this
 
 function assert(v: unknown, m?: string): asserts v { assertNode.ok(v, m); }
@@ -25,7 +26,7 @@ const sha = async (s: string) => [...new Uint8Array(await crypto.subtle.digest("
 
 // ------------------------------------------------------------------------------------------------ the fakes
 let modelCalls = 0;
-function fakeOpenAI(body: any): Response {
+function fakeModel(body: any): Response {
   modelCalls++;
   const user = String((body.messages ?? []).find((m: any) => m.role === "user")?.content ?? "");
   const first = /- name: (\S+)/.exec(user)?.[1] ?? "there";
@@ -69,7 +70,9 @@ Deno.test({ name: "people finding and intros at the real handler: import, who, a
   if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
   const pg: Pg = await startPg();
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
-  const env = { CAREER_NETWORKING_DRAFT: "on", OPENAI_API_KEY: "sk-test-not-real", CAREER_MODEL: "gpt-5-mini" };
+  // D-036: CAREER_INTRO_REMINDERS is a release flag (on when unset); this file's off steps run it rolled back ("off").
+  const env = { CAREER_NETWORKING_DRAFT: "on", ANTHROPIC_API_KEY: "sk-test-not-real", CAREER_MODEL: "claude-haiku-5-5", CAREER_INTRO_REMINDERS: "off" };
+  const savedEnv = Object.fromEntries(Object.keys(env).map((k) => [k, Deno.env.get(k)]));
   for (const [k, v] of Object.entries(env)) Deno.env.set(k, v);
   const outside: string[] = [];
   let restoreDns = () => {};
@@ -86,7 +89,8 @@ Deno.test({ name: "people finding and intros at the real handler: import, who, a
       const u = new URL(req.url);
       if (u.origin === new URL(SUPABASE_URL).origin) return await viaDouble(req);
       outside.push(`${req.method} ${u.host}${u.pathname}${u.search}`);
-      if (u.host === "api.openai.com") return fakeOpenAI(await req.json());
+      if (u.pathname === "/v1/moderations" || (await req.clone().text()).includes("TRAINEE_CRISIS_SCREEN")) return Response.json({ id: "screen", model: "screen", results: [{ flagged: false, categories: {} }], choices: [{ index: 0, message: { role: "assistant", content: "NO" }, finish_reason: "stop" }], content: [{ type: "text", text: "NO" }], stop_reason: "end_turn", usage: { prompt_tokens: 1, completion_tokens: 1, input_tokens: 1, output_tokens: 1 } }); // #354: the crisis screen's moderation and classifier calls, not counted (architect OK 2026-11-02)
+      if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
       if (u.host === "gmail.googleapis.com") return fakeGmail(u);
       return new Response("not faked", { status: 599 });
     }) as typeof fetch;
@@ -354,7 +358,7 @@ Deno.test({ name: "people finding and intros at the real handler: import, who, a
         const t2 = await say(`remind me about intro ${n} in 5 days`);
         assert(/I'll text you a reminder then/.test(t2.reply), t2.reply);
         await pg.sql(`delete from public.channel_contacts where user_id = '${A}'; update public.career_intro_requests set follow_up_at = null, follow_up_days = null where user_id = '${A}' and n = ${n}`);
-      } finally { Deno.env.delete("CAREER_INTRO_REMINDERS"); }
+      } finally { Deno.env.set("CAREER_INTRO_REMINDERS", "off"); }
     });
 
     await t.step("forget: LinkedIn contacts (every copy, in every chat of theirs), job emails, intro requests; Gmail disconnect; forget everything", async () => {
@@ -403,12 +407,13 @@ Deno.test({ name: "people finding and intros at the real handler: import, who, a
       eq([...new Set(outside.filter((c) => c.startsWith("DNS ")).map((c) => c.split(" ")[1].split("/")[0]))], ["rampfixture.com"], "only the page's own name was resolved");
       eq([...new Set(site.log.connect)], ["93.184.215.14"], "the page reader connected only to the address it checked (pinned)");
       eq([...new Set(site.log.sni)], ["rampfixture.com"], "and did TLS for the page's own name");
-      eq(hosts, ["api.openai.com", "gmail.googleapis.com", "rampfixture.com"], outside.join("\n"));
+      eq(hosts, ["api.anthropic.com", "gmail.googleapis.com", "rampfixture.com"], outside.join("\n"));
       assert(!outside.some((c) => /\/send|messages\/send/.test(c)), "nothing sent");
     });
     eq(await q(`select count(*) from public.career_outreach_drafts`), 0, "no outreach drafts: intros never ride the sender");
   } finally {
     handler?.restore();
+    for (const [k, v] of Object.entries(savedEnv)) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v);
     restoreDns();
     await pg.stop();
   }

@@ -7,14 +7,15 @@
 //      would help (whatWouldHelp).
 //   3. Every checkable item in the draft traces to a confirmed fact or the posting (factLock); a draft that does not is
 //      written again once and then not shown. The form's limit is met by writing again, never by cutting.
-//   4. The model is OpenAI only, through the gateway's callModel (essayModelConfig ignores MODEL_PROVIDER).
+//   4. The model is Claude (Anthropic), through the gateway's callModel (essayModelConfig ignores MODEL_PROVIDER).
 //   5. At most 60 drafts a person in 24 hours, counted here (one per draft that reached the model, however many tries),
 //      and said plainly when reached.
 // The draft is returned whole for the person to read and edit; nothing is saved or filled here. Only the card's "Use this"
 // puts it on the form, and only the person's approval of the exact payload sends it.
 import { type DraftOutcome, draftEssay, type EssayQuestion, factText, MIN_FACTS, type ModelFn, whatWouldHelp } from "./essay_draft.ts";
 import { mapQuestion } from "./question_map.ts";
-import { type ModelConfig, modelConfig } from "./model_gateway.ts";
+import type { ModelConfig } from "./model_gateway.ts";
+import { readerModelConfig } from "./career_reader_model.ts";
 
 export const DAILY_DRAFTS = 60;
 export const DAY_MS = 24 * 3600_000;
@@ -96,7 +97,7 @@ export interface DraftCounter {
 }
 export interface EssayCardDeps {
   facts(userId: string): Promise<unknown[]>; // the person's facts, read on the server
-  model: ModelFn; // OpenAI, through the gateway (a stub in tests)
+  model: ModelFn; // Claude, through the gateway (a stub in tests)
   counter: DraftCounter;
   now(): number;
   cap?: number;
@@ -141,13 +142,11 @@ export async function essayCardDraft(userId: string, body: unknown, deps: EssayC
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// OpenAI only (owner rule): the gateway's config with MODEL_PROVIDER pinned, whatever the environment says. The model is
-// CAREER_MODEL when set (as the chat's drafts), else the gateway's own default.
+// Claude only (owner directive 2026-11-02): Anthropic's key, whatever MODEL_PROVIDER says. The model is CAREER_MODEL when it
+// names a Claude model, else the reader default (career_reader_model.ts).
 type Env = { get(name: string): string | undefined };
 export function essayModelConfig(env: Env): ModelConfig {
-  const pinned: Env = { get: (k) => (k === "MODEL_PROVIDER" ? "openai" : env.get(k)) };
-  const cfg = modelConfig(pinned, "chat");
-  return { ...cfg, model: env.get("CAREER_MODEL") || cfg.model };
+  return readerModelConfig(env);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

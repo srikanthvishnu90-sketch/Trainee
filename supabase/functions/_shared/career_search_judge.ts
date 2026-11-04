@@ -21,6 +21,7 @@
 // Nothing here sends, applies or writes anywhere but the person's own cache and standing instructions.
 import { searchPostings, type SearchHit } from "./career_search.ts";
 import { searchWords, wordStem } from "./career_ingest.ts";
+import { correctedAsk } from "./search_correction.ts";
 import { hasLimits, type Limits, limitsLine, outsideLimits, REASON_WORDS, type Reason, searchTextOf, statedBand, statedPay } from "./posting_constraints.ts";
 import { CareerPool } from "./career_pool.js";
 import { CareerProfile } from "./router_core.career.js";
@@ -326,10 +327,13 @@ export function supabaseSearchSources(admin: any, o: { window?: any[]; jobs?: an
 export interface ShortlistEntry { id: string | null; title: string; company: string | null; location: string | null; url: string | null }
 // limits: the level, pay floor, employer, season and sponsorship the person stated (posting_constraints.ts); remoteOnly: they
 // asked for remote alone, not "this city or remote".
-export interface SearchAsk { role: string; place: string | null; remote: boolean; remoteOnly?: boolean; limits?: Limits }
+export interface SearchAsk { role: string; place: string | null; remote: boolean; remoteOnly?: boolean; limits?: Limits; prevPlace?: string | null }
 export interface SearchJudgeResult {
   reply: string; status: "ranked" | "judged" | "none"; source: "live" | "snapshot" | "none";
   shortlist: ShortlistEntry[]; accounting: Accounting | null; modelCalled: boolean;
+  // Every row the reply would rank (judged-in or not judged), in its order, with the posting it came from: the results page's
+  // list (role_results.ts), which holds more than the reply shows.
+  picked?: { hit: SearchHit; posting: SourcePosting | null }[];
 }
 export const SEARCH_INTENTS = new Set(["career_discovery", "career_internship_discovery"]);
 // The ask, as the router parsed it this turn (discovery.lastParams, written by its handleDiscovery for this very text).
@@ -363,7 +367,10 @@ const ALSO = new Set(["career_goal_record", "intent_sensitive_correction", "prof
 const SEARCH_CUE = /\b(?:find|search|show|looking|look|want|need|seeking|hiring|openings?|jobs?|roles?|positions?|interns?(?:hips?)?|new[- ]?grad|entry[- ]level|remote)\b|\$\s?\d/i;
 export function searchAskFromMessage(message: string, routerOut: { intent?: string; resultStatus?: string } | null): { ask: SearchAsk; append: boolean } | null {
   const intent = String(routerOut?.intent ?? "");
-  const open = UNCLAIMED.has(intent), also = ALSO.has(intent) && String(routerOut?.resultStatus ?? "") === "completed";
+  // ROUTER ROUTING ROUND (2026-11-02): a search the router ran on its routing copy (a trailing "please" dropped, a typo
+  // repaired, shorthand spelled out) records that copy, not the message, so askFromRouter does not match it: the message is
+  // read here instead ("data analyst jobs at Generali please" searched nothing once the router took it as a search).
+  const open = UNCLAIMED.has(intent) || SEARCH_INTENTS.has(intent), also = ALSO.has(intent) && String(routerOut?.resultStatus ?? "") === "completed";
   if (!open && !also) return null;
   const text = String(message ?? "").trim();
   if (!text || text.length > 200 || /\?\s*$/.test(text)) return null;
@@ -500,13 +507,18 @@ export async function searchJudgeTurn(o: {
   if (more > 0) lines.push(`${more} more ${more === 1 ? "is" : "are"} not shown.`);
   lines.push(listed.length ? `Say "apply to these" to queue the ${listed.length === 1 ? "one" : listed.length} listed, or name one to tailor your resume for.` : "Widen the role or the place and I'll search again.");
   const shortlist = listed.map((r) => ({ id: r.h.job_id, title: r.h.title, company: r.h.company || null, location: where(r.h) || null, url: r.h.url || null }));
-  return { reply: lines.join("\n"), status: account ? "judged" : "ranked", source, shortlist, accounting: account, modelCalled };
+  const picked = rows.slice(0, 25).map((r) => ({ hit: r.h, posting: byId.get(r.h.job_id) ?? null }));
+  return { reply: lines.join("\n"), status: account ? "judged" : "ranked", source, shortlist, accounting: account, modelCalled, picked };
 }
 
 // The ask for this turn: the router's search with the message's own parameters added; a search the router ran but named no
 // role for ("SWE internship Chicago summer 2027"); or a search the router did not run (searchAskFromMessage). `append`: the
 // router's own reply stays and the search follows it.
 export function askFor(message: string, routerOut: { intent?: string; resultStatus?: string } | null, discovery: any): { ask: SearchAsk; append: boolean } | null {
+  // Spec 2.3: a correction ("remote only", "only individual-contributor roles") replaces the constraint of the last search;
+  // the router's own reading of it (a search for the role "remote only") is not used.
+  const fixed = correctedAsk(message, discovery);
+  if (fixed) return { ask: fixed.ask, append: false };
   const router = askFromRouter(message, routerOut, discovery);
   if (router) return { ask: enrich(message, router) ?? router, append: false };
   const p = discovery?.lastParams;

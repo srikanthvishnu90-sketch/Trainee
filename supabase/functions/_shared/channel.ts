@@ -127,7 +127,14 @@ export const MAX_ATTEMPTS = 3;
 // Trainee, not a failure of the message. It counted as one of the 3 attempts, so a chat rate-limited three times in a row lost
 // that part of the answer for good, and the parts after it then went out without it. Such a row is tried up to this many times,
 // each no sooner than the platform asked.
-export const MAX_PACED_ATTEMPTS = 12;
+// OUTBOX ATTEMPTS CAP (2026-11-05): career_outbox's check allows attempts between 0 and 10, and this was 12. A row paced ten
+// times was refused the write recording its 11th attempt; the row had been handed to the provider, so it stayed "sending"
+// and the sweep failed it as "delivery outcome unknown" although a 429 sends nothing, and the run stopped there. No path
+// records more than OUTBOX_MAX_ATTEMPTS: a paced row ends failed with its reason on its 10th attempt, a run failure on the
+// 10th is the last (deliverDue), and the store never writes more (channel_store.ts mark, for a row an older build left
+// waiting at 10).
+export const OUTBOX_MAX_ATTEMPTS = 10;
+export const MAX_PACED_ATTEMPTS = OUTBOX_MAX_ATTEMPTS;
 const BACKOFF_MS = [60000, 5 * 60000, 30 * 60000]; // after attempt 1, 2, 3
 const utcDay = (t: number) => new Date(t).toISOString().slice(0, 10);
 export const HELD_NOTE = "held: outside WhatsApp's 24-hour window; it goes out whole when the person next writes";
@@ -478,7 +485,7 @@ export async function deliverDue(o: {
     const said = (e: unknown) => e instanceof Error ? e.message : String(e);
     for (const m of due.filter((x) => own.has(x.id))) {
       const attempt = m.attempts + 1;
-      const last = attempt >= MAX_ATTEMPTS && (m.lastError === undefined || m.lastError === RUN_FAILED_NOTE);
+      const last = attempt >= OUTBOX_MAX_ATTEMPTS || (attempt >= MAX_ATTEMPTS && (m.lastError === undefined || m.lastError === RUN_FAILED_NOTE));
       await o.store.mark(m.id, { status: "failed", at: o.now, error: RUN_FAILED_NOTE, ...(last ? {} : { retryAt: o.now + BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length) - 1] }) })
         .catch((e) => console.error("deliver: a row whose handling failed could not be recorded (the sweep fails it):", said(e)));
     }

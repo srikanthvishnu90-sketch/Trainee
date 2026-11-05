@@ -76,6 +76,8 @@ const CareerRouter = (() => {
   // 152 follows the router in the generated bundle. Resolve lazily after
   // initialization; direct Node consumers retain their guarded fallback.
   const getAssign = () => { try { return typeof CareerAssign !== "undefined" ? CareerAssign : req("./152-career-assign.js"); } catch { return req("./152-career-assign.js"); } };
+  // 154-career-writing precedes the router in the bundle; Node consumers require it.
+  const getWriting = () => { try { return typeof CareerWriting !== "undefined" ? CareerWriting : req("./154-career-writing.js"); } catch { return null; } };
   const nodeFs = (() => { try { return typeof require !== "undefined" ? require("fs") : null; } catch { return null; } })();
 
   const s = (v) => String(v == null ? "" : v);
@@ -7851,9 +7853,287 @@ const CareerRouter = (() => {
     return { intent: "negotiation_advice", reply, resultStatus: "awaiting_user", sends: 0 };
   }
 
+  // ---------- DRAFT DELIVERABLES (beta 2026-11-04: C04, A16.2-A16.4, A7, A12) ----------
+  // A request for a draft gets the draft; a "should I counter?" gets an answer. The decisions live in the domain
+  // modules (128 counterPlan: the counter figure, the employer, the verdict and the missing terms; 154 word-budget
+  // drafting: the written answer, the networking email and the exact word count); these functions only read the
+  // thread's record, call them, record what the person stated, and lay the reply out. Every draft is held for review
+  // and nothing here sends.
+  //
+  // The reply composer speaks a bounded number of sentences per bubble and moves a long body into a document the chat
+  // turn never carries, so a draft squeezed into it arrived cut ("Subject: Offer — Northwind Health." and nothing
+  // else). The draft rides verbatim between the composed lead and the next step.
+  function draftReplyText(lead, draftText, nextStep) {
+    const head = Reply ? Reply.composeResult(lead).bubbles.join("\n") : [lead.headline, ...(lead.facts || [])].filter(Boolean).join(" ");
+    return [head, s(draftText).trim(), s(nextStep).trim()].filter(Boolean).join("\n\n");
+  }
+  function counterAskOf(text) {
+    const t = lc(text).replace(/[’]/g, "'");
+    if (/\bextension\b|\bmore time\b|\bdecline\b|\bturn (it|them|the offer) down\b|\bgrant\b|\b409a\b/.test(t)) return null;
+    const question = /\bshould i (counter|negotiate|ask for (more|a raise|a higher)|push back)\b|\bis it worth (countering|negotiating|a counter)\b|\bdo i (counter|negotiate)\b|\b(?:can|could|should) i (?:just |still |simply )?counter\b|\bcounter at the same\b|\bcounter or (accept|take)\b|\b(accept|take) (it|the offer|this) or counter\b|\bworth (a|making a) counter\b|\bcan i counter\b/.test(t);
+    const negDraft = /\b(don'?t|do not|no need to|never)\s+(draft|write)\b/.test(t);
+    const draft = !negDraft && /\b(draft|write|compose|prepare|put together)\b/.test(t) && /\bcounter(?:\s?-?offer)?\b|\bnegotiat\w*\s+(email|letter|message|reply|note)\b/.test(t);
+    const terms = /\b(benefits?|schedule|start date)\b/.test(t) && /\b(no|don'?t|do not|haven'?t|have not|not yet|yet|missing|unknown)\b/.test(t) && /\b(details?|info|information|yet|any)\b/.test(t);
+    if (!question && !draft && !terms) return null;
+    return { question, draft, terms };
+  }
+  // The offer the counter runs on, from this turn's words and the thread's record, in the offer's own units.
+  function counterOfferOf(text, ctx) {
+    const th = negotiationThreadOf(ctx);
+    const off = (ctx.offer && typeof ctx.offer === "object") ? ctx.offer : {};
+    const offerCue = /\boffer(ed|s)?\b|\bpays?\b|\bpaying\b|\bthey'?re giving\b/i.test(s(text));
+    let unit = null, rate = null, rateLow = null, unclear = null;
+    // The offer in this turn, in the person's own unit (hour, week, month, year) and as a range when given as one
+    // (128 statedPayOf skips signing bonuses and figures framed as the person's ask, "counter at $27"). A figure with
+    // no stated period that is not plainly a salary is not guessed at: the reply asks which period it is.
+    const sp = Negotiation && Negotiation.statedPayOf ? Negotiation.statedPayOf(text) : null;
+    // An offer this route read earlier (th.pay: kept for units and ranges the legacy record has no field for) stands
+    // while the legacy record holds no other figure.
+    const pay = th.pay && typeof th.pay === "object" && Number(th.pay.rate) > 0 ? th.pay : null;
+    const payStands = pay && (pay.unit === "hour" ? !th.hourly || Number(th.hourly) === Number(pay.rate) : pay.unit === "year" ? !th.amount || Number(th.amount) === Number(pay.rate) : !th.hourly && !th.amount);
+    let fromText = false, ambiguous = null, currentPay = sp && Array.isArray(sp.current) ? sp.current : [];
+    let textCompany = null, competing = [];
+    if (sp && sp.ambiguous) ambiguous = sp.ambiguous;
+    else if (sp && offerCue) {
+      if (sp.unit) { unit = sp.unit; rate = sp.rate; rateLow = sp.low; fromText = true; textCompany = sp.company || null; competing = Array.isArray(sp.competing) ? sp.competing : []; } else unclear = sp;
+    } else if (payStands) { unit = pay.unit; rate = Number(pay.rate); rateLow = pay.low != null ? Number(pay.low) : null; textCompany = pay.company || null; competing = Array.isArray(pay.competing) ? pay.competing : []; }
+    else if (th.hourly || off.hourly_rate) { unit = "hour"; rate = Number(th.hourly || off.hourly_rate); }
+    else if (th.amount || off.base_salary) { unit = "year"; rate = Number(th.amount || off.base_salary); }
+    let role = th.role || off.role || null;
+    if (!role) {
+      const STOP = /^(counter|counteroffer|new|good|great|verbal|written|formal|final|first|second|another|real|actual|this|that|job|full-time|part-time)$/;
+      const m = s(text).match(/\b(?:a|an|the|my|this)\s+((?:[a-z][a-z-]*\s){0,2}[a-z][a-z-]*)\s+(?:job|role|position|offer)\b/);
+      if (m && !m[1].split(/\s+/).some((w) => STOP.test(w))) role = m[1];
+    }
+    const rec = th.counter && typeof th.counter === "object" ? th.counter : {};
+    return {
+      unclear, fromText, ambiguous, currentPay, competing,
+      // The employer: named with this offer's own figure ("$24/hour by Acme"), else the record's. 128 employerName
+      // rejects pronouns and generic words, so "They offered me" names no one and the reply asks (D-007).
+      offer: { company: (Negotiation && Negotiation.employerName ? Negotiation.employerName(textCompany) || Negotiation.employerName(th.firm) || Negotiation.employerName(off.company) : textCompany || th.firm || off.company) || null, role, rate, rate_low: rateLow, unit: unit || "year", signing: th.signing || off.signing_bonus || null, benefits: off.benefits || null, schedule: th.schedule || off.schedule || null, start_date: off.start_date || null, deadline: th.deadline || null },
+      recordedTarget: unit === "hour" ? (rec.hourly || null) : unit === "year" ? (rec.amount || null) : null,
+    };
+  }
+  // A sourced benchmark in the offer's units: a host-provided public-pay benchmark (ctx.payBenchmark, already cited),
+  // else the company file's own figure for a yearly offer. Company files carry no hourly figures (128 excludes them).
+  function counterBenchmarkOf(text, ctx, unit) {
+    const pb = ctx.payBenchmark && typeof ctx.payBenchmark === "object" ? ctx.payBenchmark : null;
+    if (pb && (pb.unit || "year") === unit && pb.cite && pb.as_of) return pb;
+    if (unit !== "year" || !Negotiation || !Negotiation.benchmark) return null;
+    let bench = null;
+    try { bench = Negotiation.benchmark(ctx.cir || cirFor(text, ctx) || null, {}); } catch { bench = null; }
+    const f = bench && bench.figures && bench.figures[0];
+    if (!f || !f.source_url || !f.as_of) return null;
+    return { low: f.low, high: f.high, unit: "year", cite: `the company file's compensation notes (${f.source_url})`, as_of: f.as_of, reported: !!f.anecdotal };
+  }
+  function handleCounterTurn(text, ctx) {
+    if (!Negotiation || !Negotiation.counterPlan) return null;
+    const ask = counterAskOf(text);
+    if (!ask) return null;
+    const pg = inheritedOfferGate(text, ctx);
+    if (pg) return pg;
+    const { offer, recordedTarget, unclear, fromText, ambiguous, currentPay, competing } = counterOfferOf(text, ctx);
+    const th = negotiationThreadOf(ctx);
+    const onRecord = !!(th.firm || th.amount || th.hourly || th.deadline || (ctx.offer && typeof ctx.offer === "object" && (ctx.offer.company || ctx.offer.base_salary || ctx.offer.hourly_rate)));
+    // "I have no benefits details yet" is the negotiation's only on an offer thread.
+    if (!ask.question && !ask.draft && !onRecord) return null;
+    // An offer record this reader cannot place a figure on (an account seed in another shape) stays with the legacy
+    // negotiation path, which reads it; with no offer on record at all, the figure is asked for.
+    // Two figures that could each be the offer: asked, never guessed (D-007).
+    if (ambiguous && ambiguous.length > 1) {
+      const list = ambiguous.length === 2 ? `${ambiguous[0]} or ${ambiguous[1]}` : `${ambiguous.slice(0, -1).join(", ")} or ${ambiguous[ambiguous.length - 1]}`;
+      const reply = compose({
+        headline: `Which figure is the offer you're deciding on: ${list}?`,
+        facts: ["A counter is measured against the offer itself, so I won't pick one of these for you."],
+        nextStep: "Tell me which one they offered (and who offered it, if there are two employers) and I'll answer whether to counter and draft it.",
+      });
+      return { intent: "negotiation_advice", reply, resultStatus: "needs_context", sends: 0, payload: { kind: "counter_needs_offer_choice", figures: ambiguous } };
+    }
+    if (unclear) {
+      const reply = compose({
+        headline: `Is ${unclear.text} an hourly, weekly, monthly or yearly figure?`,
+        facts: ["A counter has to be stated in the same unit as the offer, and I won't guess which one they meant."],
+        nextStep: `Tell me the period (for example "${unclear.text} a month") and I'll answer whether to counter and draft it.`,
+      });
+      return { intent: "negotiation_advice", reply, resultStatus: "needs_context", sends: 0, payload: { kind: "counter_needs_unit" } };
+    }
+    if (offer.rate == null && onRecord) return null;
+    if (offer.rate == null) {
+      const reply = compose({
+        headline: ask.draft ? "I can write the counter once I know the offer it answers." : "Whether to counter depends on what they offered.",
+        facts: ["No offer figure is on this conversation's record, and a counter written without one would be a guess."],
+        nextStep: "Tell me the employer, the role and the pay exactly as they stated it (hourly or yearly), and I'll answer and draft it.",
+      });
+      return { intent: "negotiation_advice", reply, resultStatus: "needs_context", sends: 0, payload: { kind: "counter_needs_offer" } };
+    }
+    // The offer read from this turn's words is kept on the thread, in its own unit, for the next turn's question.
+    if (fromText) { try { const thw = negotiationThreadForWrite(ctx); thw.pay = { rate: offer.rate, low: offer.rate_low != null ? offer.rate_low : null, unit: offer.unit, company: offer.company || null, competing: competing || [] }; } catch { /* the answer stands */ } }
+    const keepSigning = /\bkeep\b[^.]*\bsigning\b|\bsigning bonus as is\b/i.test(s(text));
+    const facts0 = statedFactsOf(ctx);
+    const senderName = (ctx.profile && ctx.profile.basics && ctx.profile.basics.name) || ((facts0.find((f) => f.kind === "name") || {}).value) || null;
+    const plan = Negotiation.counterPlan(offer, { text, current: currentPay, competing, target: recordedTarget, benchmark: counterBenchmarkOf(text, ctx, offer.unit), keepSigning, senderName });
+    // The person's own target, stated this turn, becomes the standing counter (in the offer's units).
+    const stated = Negotiation.counterTargetOf(text, offer.unit);
+    if (stated != null && plan.target === stated) {
+      try { const thw = negotiationThreadForWrite(ctx); const pc = (thw.counter && typeof thw.counter === "object") ? thw.counter : {}; if (offer.unit === "hour" || offer.unit === "year") { thw.counter = Object.assign({}, pc, offer.unit === "hour" ? { hourly: stated } : { amount: stated }); thw.topic = "counter"; } } catch { /* the draft stands */ }
+    }
+    const wantsDraft = ask.draft || ask.terms;
+    const draft = wantsDraft ? plan.draft : null;
+    const facts = [];
+    let headline;
+    const termsOnly = ask.terms && !ask.question && !ask.draft;
+    if (termsOnly) { headline = plan.terms.headline; if (plan.terms.line) facts.push(plan.terms.line); }
+    else if (ask.question || !draft) { headline = plan.answer.verdict; facts.push(...plan.answer.reasons); }
+    if (draft) {
+      const fig = plan.counterText || null;
+      const what = termsOnly ? `An email that asks for them${fig ? ` (and for ${fig})` : " (and whether the pay can move)"}`
+        : plan.counter ? `The counter email, asking for ${draft.counter_basis === "sourced_range" ? `the top of the sourced range (${fig})` : draft.counter_basis === "judgment" ? `${fig}, my suggested figure` : draft.counter_basis === "competing_offer" ? `${fig}, matching your other offer` : `your figure (${fig})`}` : "A counter email that asks whether the pay can move, without naming a number";
+      if (!headline) headline = `${what} — held for your review, nothing sent.`;
+      else facts.push(`${what} — held for your review, nothing sent.`);
+      if (!plan.counter) facts.push("It names no figure because you haven't told me your target, and I won't make one up.");
+      // The draft's structure rides with it, so "shorten it to N words" re-fits this same draft (154 refitDraft) and keeps
+      // the ask; a later draft replaces it (budgetFrameOf binds a re-fit to the thread's latest draft only).
+      try { markFrame(ctx, "budgetDraft", { kind: "counter_email", units: draft.units || null, subject: draft.subject || null, text: s(draft.body).slice(0, 1500), intent: "negotiation_draft" }); } catch { /* the draft stands */ }
+    }
+    if (plan.companyQuestion && plan.targetQuestion) facts.push(plan.companyQuestion);
+    const nextStep = plan.targetQuestion || plan.companyQuestion || (draft ? "Approve it as written or tell me what to change; it goes nowhere until you do." : "Want the counter email drafted for your review?");
+    const reply = draft ? draftReplyText({ headline, facts }, draft.body, nextStep) : compose({ headline, facts, nextStep });
+    const payload = { kind: "counter_plan", offer: plan.offerText, company: plan.company, counter: plan.counter, missing: plan.missing.map((m) => m.key), needs: plan.needs, sends: false };
+    const out = { intent: draft ? "negotiation_draft" : "negotiation_advice", reply, resultStatus: "awaiting_user", sends: 0, counter_plan: payload, payload };
+    if (draft) { out.draft = Object.assign({}, draft); delete out.draft.units; }
+    return out;
+  }
+
+  // Written answers and outreach drafts with a word budget, and the follow-ups that re-fit or show the held draft.
+  function confirmedDraftFacts(ctx) {
+    const out = [];
+    const prof = ctx.profile && typeof ctx.profile === "object" && !ctx.profile._fromStatedFacts ? ctx.profile : null;
+    for (const f of (prof && Array.isArray(prof.facts) ? prof.facts : [])) {
+      if (!f || typeof f !== "object" || f.needs_confirmation || (f.status && f.status !== "confirmed")) continue;
+      try { if (ProfileMod && ProfileMod.quarantinedFact && ProfileMod.quarantinedFact(f)) continue; } catch { /* keep the fact */ }
+      if (f.kind === "skill" || f.unproven === true) continue;
+      if (!/^(experience|project|education|work|volunteer|leadership|award|activity)$/.test(s(f.kind))) continue;
+      out.push({ kind: f.kind, text: f.text || f.detail || null, title: f.title || null, org: f.org || f.company || null });
+    }
+    // Facts the person stated in chat, in their own first person.
+    for (const f of statedFactsOf(ctx)) {
+      if (!f) continue;
+      if (f.kind === "experience") out.push({ kind: "stated", text: `I ${experienceLine(f).replace(/^you\s+/, "")}` });
+      else if (f.kind === "school") out.push({ kind: "stated", text: `I go to ${f.value}` });
+      else if (f.kind === "majors") out.push({ kind: "stated", text: `I study ${f.value}` });
+    }
+    return out;
+  }
+  function draftRoleOf(text, ctx) {
+    const m = s(text).match(/\bfor (?:the |a |an |this )?([A-Za-z][\w /&+-]{1,40}?) (?:role|job|position)\b(?:\s+at\s+([A-Z][\w&.'-]*(?:\s[A-Z][\w&.'-]*){0,3}))?/);
+    const facts = statedFactsOf(ctx);
+    const tr = facts.find((f) => f.kind === "target_role");
+    const th = negotiationThreadOf(ctx);
+    const posting = ctx.posting && typeof ctx.posting === "object" ? ctx.posting : null;
+    const role = (m && !/^(this|that|the|a|an)$/i.test(m[1]) ? m[1].trim() : null) || (posting && posting.title) || (tr && tr.value) || th.role || null;
+    const company = (m && m[2]) || (posting && posting.company) || th.firm || null;
+    return { role: role ? s(role).trim() : null, company: company ? s(company).trim() : null };
+  }
+  function budgetFrameOf(ctx) {
+    const frames = frameMarksOf(ctx);
+    const dr = frames.draft && typeof frames.draft === "object" ? frames.draft : null;
+    const bd = frames.budgetDraft && typeof frames.budgetDraft === "object" ? frames.budgetDraft : null;
+    // The budgeted structure applies only while it is still the thread's latest draft.
+    const live = bd && dr && s(dr.text).slice(0, 200) === s(bd.text).slice(0, 200) ? bd : null;
+    return { dr, bd: live };
+  }
+  function budgetedResult(W, ctx, d, intent, lead, nextStep) {
+    try { markFrame(ctx, "budgetDraft", { kind: d.kind, units: d.units || null, subject: d.subject || null, text: s(d.text).slice(0, 1500), intent }); } catch { /* the draft stands */ }
+    const reply = draftReplyText(lead, d.text, nextStep);
+    return { intent, reply, resultStatus: "awaiting_user", sends: 0, draft: { kind: d.kind, text: d.text, body: d.text, words: d.words, status: "held", sent: false, requires_approval: true } };
+  }
+  function wordCountLine(d) {
+    if (!d.target) return `${d.words} words.`;
+    if (d.exact) return `Exactly ${d.target.mode === "max" ? d.words : d.target.words} words, counted on the text below${/^Subject:/.test(s(d.text)) ? " (the subject line is not counted)" : ""}.`;
+    if (d.already) return `It is already ${d.words} words, within ${d.target.stated || d.target.words}, so nothing was cut.`;
+    if (d.floor) return d.method === "sentences"
+      ? `${d.words} words, not ${d.target.words}: this is the shortest it goes by cutting whole sentences while keeping the opening, ${d.ask ? "the ask" : "the close"} and the sign-off.`
+      : `${d.words} words, not ${d.target.words}: this is the shortest it goes without dropping the greeting, the ask or the sign-off.`;
+    if (d.target.mode === "max" && d.words <= d.target.words) return `${d.words} words, within the ${d.target.stated} you set.`;
+    if (d.method === "units" && d.words <= d.target.words && d.kind === "counter_email") return `${d.words} words, within ${d.target.words}: no wording of this draft's own lines lands on exactly ${d.target.words}, and I won't pad it.`;
+    return d.method === "sentences"
+      ? `${d.words} words, not ${d.target.words}: I cut whole sentences only, and hitting ${d.target.words} exactly would mean breaking one.`
+      : `${d.words} words, not ${d.target.words}: your record doesn't hold enough confirmed facts to fill ${d.target.words} words, and I won't pad it with claims you haven't made.`;
+  }
+  function handleBudgetedDraft(text, ctx) {
+    const W = getWriting();
+    if (!W || !W.composeBudgetedDraft) return null;
+    // The person's own words: the typo normalizer reads "shorten" as "shorter".
+    const t = lc(text).replace(/[’]/g, "'");
+    if (/\b(don'?t|do not|never)\s+(draft|write|shorten)\b/.test(t)) return null;
+    const target = W.wordTargetOf(text);
+    const { dr, bd } = budgetFrameOf(ctx);
+    // 1. Re-fit the held draft: "shorten that answer to 50 words", "shorten the draft to 80 words", "make it 60 words".
+    const refitAsk = target && (/\b(shorten|cut|trim|tighten|condense|reduce|rewrite|redo|bring)\b/.test(t) || /\bmake (it|that|this|the \w+)\b/.test(t)) && !/\bwhy\b[^.?]{0,30}\b(role|job|position|company)\b[^.?]*\b(draft|write)\b/.test(t);
+    if (refitAsk) {
+      if (!dr || !s(dr.text).trim()) {
+        const reply = compose({ headline: "There's no draft on this conversation to shorten yet.", facts: ["Nothing has been drafted here, so there is no text to cut, and I won't rewrite one from memory."], nextStep: "Paste the draft, or ask me to write one and give the word count you want." });
+        return { intent: "outreach_clarification", reply, resultStatus: "needs_context", sends: 0 };
+      }
+      const d = W.refitDraft(bd ? { kind: bd.kind, units: bd.units, subject: bd.subject, text: dr.text } : { kind: dr.kind, text: dr.text }, target);
+      if (!d) return null;
+      const intent = (bd && bd.intent) || (/^negotiation_/.test(s(dr.intent)) ? "negotiation_draft" : "outreach_draft");
+      const lead = d.already
+        ? { headline: "The held draft already fits — unchanged, still held for your review.", facts: [wordCountLine(d)] }
+        : { headline: "The same draft, re-fit — still held for your review.", facts: [wordCountLine(d), d.method === "sentences"
+          ? (d.ask ? "Whole sentences were cut, nothing reworded; the ask is kept word for word." : "Whole sentences were cut, nothing reworded.")
+          : "Only the length changed; the facts and the ask are the held draft's own."] };
+      return budgetedResult(W, ctx, Object.assign({ kind: dr.kind || "draft" }, d), intent, lead, "Approve this version or tell me what to change; nothing is used or sent until you do.");
+    }
+    // 2. "Show the final answer before it is used": read the held draft back.
+    if (/^(show|read|let me see|can i see|what does)\b[^.?]{0,40}\b(draft|answer|email|version)\b/.test(t) && dr && s(dr.text).trim()) {
+      const reply = draftReplyText({ headline: "Here is the held draft, exactly as it stands — not used or sent." , facts: [`${W.draftWordCount(dr.text)} words.`] }, dr.text, "Approve it, or tell me what to change.");
+      return { intent: /^negotiation_/.test(s(dr.intent)) ? "negotiation_draft" : "outreach_draft", reply, resultStatus: "awaiting_user", sends: 0 };
+    }
+    const writeVerb = /\b(draft|write|compose|prepare|give me|help me (write|with))\b/.test(t);
+    // 3. A "why this role" answer.
+    if (writeVerb && /\bwhy\b[^.?]{0,30}\b(this|the|that|your)\s+(role|job|position|company|team)\b|\bwhy[- ]this[- ](role|job|company)\b|\bwhy (do )?i want (this|the)\b/.test(t)) {
+      const { role, company } = draftRoleOf(text, ctx);
+      if (!role) {
+        const reply = compose({ headline: "Which role is the answer for?", facts: ["A why-this-role answer has to name the role, and none is on this conversation's record."], nextStep: "Name the role (and the company, if you have one) and I'll write it from your confirmed record, held for your review." });
+        return { intent: "outreach_clarification", reply, resultStatus: "needs_context", sends: 0 };
+      }
+      const facts = confirmedDraftFacts(ctx);
+      if (!facts.length) {
+        const reply = compose({ headline: `I can write the answer for the ${role} role once your record has something to stand on.`, facts: ["Your record holds no confirmed experience, education or project yet, and an answer without one would be invented."], nextStep: "Paste your resume, or tell me one or two things you've actually done, and I'll write it to the word count you want." });
+        return { intent: "outreach_clarification", reply, resultStatus: "needs_context", sends: 0 };
+      }
+      const d = W.composeBudgetedDraft("why_role_answer", { role, company, facts }, target);
+      return budgetedResult(W, ctx, d, "outreach_draft", { headline: `Your "why this role" answer for the ${role} role${company ? ` at ${company}` : ""} — held for your review.`, facts: [wordCountLine(d), "Every fact in it comes from your confirmed record; the reasons are wording for you to check, so change anything that isn't how you'd say it."] }, "Want it shorter, or a line changed? Nothing is used or sent until you approve it.");
+    }
+    // 4. A networking email with no recipient named (a named person or company is the single-draft route's).
+    if (writeVerb && /\bnetworking (email|message|note)\b|\b(cold|intro(duction)?|coffee[- ]chat) (email|message|note|request)\b/.test(t) && !/\b(?:to|at|for|with|from)\s+(?!(?:review|me|my review|approval|now|later|learn|ask|get|find|see|understand)\b)[a-z0-9]/i.test(s(text))) {
+      // Any recipient, person or firm, in any case ("to someone at people inc."), belongs to the outreach route.
+      const sf = statedFactsOf(ctx);
+      const get = (k) => (sf.find((f) => f.kind === k) || {}).value || null;
+      const name = (ctx.profile && ctx.profile.basics && ctx.profile.basics.name) || get("name");
+      const year = get("year"), school = get("school"), majors = get("majors");
+      const intro = [year ? `${/^[aeiou]/i.test(year) ? "an" : "a"} ${year}` : null, school ? `at ${school}` : null, majors ? `studying ${majors}` : null].filter(Boolean).join(" ") || null;
+      const field = get("target_role") || get("goal") || null;
+      const facts = confirmedDraftFacts(ctx).filter((f) => f.kind !== "stated" || /^I (worked|interned|work|intern)\b/.test(f.text));
+      if (!name && !intro && !field && !facts.length) {
+        const reply = compose({ headline: "Who is the email to, and what should it ask for?", facts: ["Your record holds nothing about you yet (school, work or the field you're aiming at), and a networking email made of placeholders would read as one."], nextStep: "Tell me the person or company, and one or two things about you, and I'll draft it for your review." });
+        return { intent: "outreach_clarification", reply, resultStatus: "needs_context", sends: 0 };
+      }
+      const d = W.composeBudgetedDraft("networking_email", { senderName: name, intro, field, facts, subject: field ? `Learning about ${field} work` : "A quick question" }, target);
+      return budgetedResult(W, ctx, d, "outreach_draft", { headline: "A networking email from your record — held for your review, nothing sent.", facts: [wordCountLine(d), "It names no recipient because you haven't told me who it's for; nothing goes out without an address and your yes."] }, "Who is it for? Name the person and company and I'll address it to them.");
+    }
+    return null;
+  }
+  function handleDraftDeliverables(text, ctx) {
+    try { return handleCounterTurn(text, ctx) || handleBudgetedDraft(text, ctx); } catch { return null; }
+  }
+
   function handleNegotiation(text, ctx) {
     const provGate = inheritedOfferGate(text, ctx);
     if (provGate) return provGate;
+    // C04: a counter question or a counter draft ask is answered by 128's counterPlan, on every path into negotiation.
+    { let ct = null; try { ct = handleCounterTurn(text, ctx); } catch { ct = null; } if (ct) return ct; }
     // IB-TN-8: plumb the offer + the company file from wherever the
     // turn carries them — ctx fields, or the ask itself when it quotes
     // the offer. 128's bench/strat text carries the CIR's own source
@@ -7932,16 +8212,20 @@ const CareerRouter = (() => {
         if (!extensionContext && (thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || parseOfferFigures(text).hourly)) {
           const askFigs = parseOfferFigures(text);
           const hourlyBase = thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || null;
-          const company = offerObj.company || thread.descriptor || "the firm";
+          // C04: never "the firm" or a bracket placeholder; an employer not on the record is left out and asked for.
+          const company = (Negotiation && Negotiation.employerName ? Negotiation.employerName(offerObj.company) : offerObj.company) || null;
           const role = offerObj.role || null;
           const signing = thread.signing || (ctx.offer && ctx.offer.signing_bonus) || null;
-          if (askFigs.hourly) {
+          if (askFigs.hourly && (hourlyBase == null || Number(askFigs.hourly) > Number(hourlyBase))) {
             try { const thw = negotiationThreadForWrite(ctx); const pc = (thw.counter && typeof thw.counter === "object") ? thw.counter : {}; thw.counter = Object.assign({}, pc, { hourly: askFigs.hourly }); thw.topic = "counter"; } catch { /* the draft stands */ }
           }
-          const counterFig = askFigs.hourly || (thread.counter && thread.counter.hourly) || null;
+          // C04: a figure at or below the offer is the offer restated, not an ask ("$24/hour" on a $24 offer asked for $24).
+          const above = (v) => (v != null && Number(v) > 0 && (hourlyBase == null || Number(v) > Number(hourlyBase)) ? v : null);
+          const counterFig = above(askFigs.hourly) || above(thread.counter && thread.counter.hourly) || null;
           const keepSigning = /\bkeep\b[^.]*\bsigning\b|\bsigning bonus as is\b/i.test(tt);
           const restate = `${hourlyBase ? `$${Number(hourlyBase)} an hour` : "the rate as stated"}${signing ? `, plus a $${Number(signing).toLocaleString()} signing bonus` : ""}`;
-          const body = `Subject: ${role ? `${role.charAt(0).toUpperCase() + role.slice(1)} offer` : "Offer"} — ${company}\n\nDear ${company} team,\n\nThank you for the offer — ${restate}${role ? ` for the ${role}` : ""}. I am excited about the role and the team.\n\n${counterFig ? `Would you be able to meet me at $${Number(counterFig)} an hour? ` : "Would you be open to discussing the hourly rate? "}${keepSigning && signing ? "The signing bonus as it stands works for me. " : ""}With that, I am ready to sign${thread.deadline ? ` ahead of the ${thread.deadline} deadline` : ""}.\n\nThank you again for the opportunity — I look forward to your reply.\n\n[Your name]`;
+          const senderName = (ctx.profile && ctx.profile.basics && ctx.profile.basics.name) || null;
+          const body = `Subject: ${role ? `${role.charAt(0).toUpperCase() + role.slice(1)} offer` : "Offer"}${company ? ` — ${company}` : ""}\n\n${company ? `Dear ${company} team,` : "Hi,"}\n\nThank you for the offer — ${restate}${role ? ` for the ${role}` : ""}. I am excited about the role and the team.\n\n${counterFig ? `Would you be able to meet me at $${Number(counterFig)} an hour? ` : "Would you be open to discussing the hourly rate? "}${keepSigning && signing ? "The signing bonus as it stands works for me. " : ""}With that, I am ready to sign${thread.deadline ? ` ahead of the ${thread.deadline} deadline` : ""}.\n\nThank you again for the opportunity — I look forward to your reply.${senderName ? `\n\n${senderName}` : ""}`;
           const facts = ["The counter email itself, composed from your offer record — held on its card, nothing sent:", body];
           if (counterFig) facts.push(`It asks for $${Number(counterFig)} an hour${keepSigning && signing ? ` and keeps the $${Number(signing).toLocaleString()} signing bonus as is, exactly as you set it` : ""} — the ask is your figure, in your units, never converted to an annual number.`);
           const reply = compose({ headline: "The counter email, written out — the real words, held for your approval.", facts, nextStep: "Approve it as written, or tell me the figure or the tone to change." });
@@ -13144,6 +13428,11 @@ const CareerRouter = (() => {
     // stop here, before recommendations/fallback can claim them.
     const pmStop = handlePeopleMatchingStop(text, c);
     if (pmStop) return pmStop;
+    // BETA C04/A7/A12: counter questions and drafts, word-budget answers and outreach, and their re-fit follow-ups
+    // (see handleDraftDeliverables).
+    // The person's own words (the typo pass rewrites "shorten" to "shorter").
+    const deliverable = handleDraftDeliverables(rawText, c);
+    if (deliverable) return deliverable;
     // LANE A v2 ITEM 1 (CB-0443): a memory question that resolves
     // against the stated record is claimed HERE — with a profile
     // standing, the company-intel branch otherwise reads "what do
@@ -15271,8 +15560,10 @@ const CareerRouter = (() => {
         if (/\bgot an offer\b|\bgot the offer\b|\boffered me\b|\boffer came\b|\boffer'?s here\b|\bi have an offer\b|\breceived an offer\b/i.test(cl)) sawOfferEvent = true;
         let m;
         const cln = typoNorm(cl);
-        if ((m = cl.match(/\b([A-Z][A-Za-z0-9&.]+(?:\s+[A-Z][A-Za-z0-9&.]+){0,2})(?:\s+(?:just|has|have|had))?\s+offered me\b/))) rec.firm = m[1].trim();
-        else if ((m = cl.match(/\boffer\b[^.!?]*?\b(?:from|at)\s+([A-Z][A-Za-z0-9&.]+(?:\s+[A-Z][A-Za-z0-9&.]+){0,2})/)) && !NOT_A_FIRM.test(m[1].trim())) rec.firm = m[1].trim();
+        // C04 r3: "They offered me $24" names no firm: 128 employerName rejects pronouns, function words and roles.
+        const firmOk = (v) => (Negotiation && Negotiation.employerName ? Negotiation.employerName(v) : v);
+        if ((m = cl.match(/\b([A-Z][A-Za-z0-9&.]+(?:\s+[A-Z][A-Za-z0-9&.]+){0,2})(?:\s+(?:just|has|have|had))?\s+offered me\b/)) && firmOk(m[1].trim())) rec.firm = firmOk(m[1].trim());
+        else if ((m = cl.match(/\boffer\b[^.!?]*?\b(?:from|at)\s+([A-Z][A-Za-z0-9&.]+(?:\s+[A-Z][A-Za-z0-9&.]+){0,2})/)) && !NOT_A_FIRM.test(m[1].trim()) && firmOk(m[1].trim())) rec.firm = firmOk(m[1].trim());
         if (!rec.firm && !rec.descriptor && (m = cl.match(/\boffer\b[^.!?]*?\bfrom\s+an?\s+([a-z][a-z -]{1,28}?\b(?:startup|company|firm|bank|fund|agency|studio|shop|co|insurer|practice|group))\b/i))) rec.descriptor = m[1].trim();
         // MI-123 (mechanism 2): figures land BY KIND — an hourly rate
         // is recorded as a rate, a signing figure as the bonus, an
@@ -15282,17 +15573,32 @@ const CareerRouter = (() => {
         // captured as one. The legacy patterns below run only for the
         // forms the kind parse does not carry (the $-less k forms:
         // "85k", "came back at 120k").
-        const askFramed = /\bask(?:ing)? for\s+(?:a\s+|an\s+)?\$?\s?\d|\bcounter\s+(?:at|of|to)\s+\$?\s?\d|\bmake it\s+\$?\s?\d/i.test(cl);
+        // C04: "my target is $27 an hour" is the person's target too (128 counterTargetOf's frames).
+        const askFramed = /\bask(?:ing)? for\s+(?:a\s+|an\s+)?\$?\s?\d|\bcounter\s+(?:at|of|to)\s+\$?\s?\d|\bmake it\s+\$?\s?\d/i.test(cl)
+          || !!(Negotiation && Negotiation.counterTargetOf && (Negotiation.counterTargetOf(cl, "hour") != null || Negotiation.counterTargetOf(cl, "year") != null));
         const figs = askFramed ? { hourly: null, signing: null, annual: null } : parseOfferFigures(cl);
+        // C04 r2: "I make $20/hour now and a support job offered $24/hour" — the first figure is current pay, not the
+        // offer. When the turn names current or past pay, or two candidate offers, the offer figure comes from 128
+        // statedPayOf (the figure in the offer's clause) or is not recorded at all; current pay is never recorded as one.
+        let payCtx = false;
+        if (!askFramed && Negotiation && Negotiation.statedPayFigures) {
+          const pf = Negotiation.statedPayFigures(cl);
+          if (pf.some((f) => f.role === "current") || pf.filter((f) => f.role === "offer").length > 1) {
+            payCtx = true;
+            const sp = Negotiation.statedPayOf(cl);
+            figs.hourly = sp && !sp.ambiguous && sp.unit === "hour" ? sp.rate : null;
+            figs.annual = sp && !sp.ambiguous && sp.unit === "year" ? sp.rate : null;
+          }
+        }
         if (figs.hourly) rec.hourly = figs.hourly;
         if (figs.signing) rec.signing = figs.signing;
         if (figs.annual) rec.amount = figs.annual;
         if ((m = cl.match(/\bcame back\s+(?:at\s+)?\$?(\d{2,3})\s?k\b/i))) rec.amount = Number(m[1]) * 1000;
-        if (!figs.annual && !figs.signing && !figs.hourly) {
+        if (!payCtx && !figs.annual && !figs.signing && !figs.hourly) {
           if ((m = cl.match(/\boffer\w*\b[^.]*?\$\s?(\d{2,3})\s?k\b/i)) || (m = cl.match(/\b(\d{2,3})\s?k\b[^.]*\boffer/i))) rec.amount = Number(m[1]) * 1000;
           else if ((m = cl.match(/\$\s?(\d[\d,]{3,})/))) rec.amount = Number(m[1].replace(/,/g, ""));
         }
-        if (rec.amount == null && !figs.annual && !/\bsigning\b/i.test(cl) && (/\boffer|base|salary|came back\b/i.test(cl) || /\boffer/i.test(raw)) && (m = cl.match(/\b(\d{2,3}(?:\.\d)?)\s?k\b/i))) rec.amount = Number(m[1]) * 1000;
+        if (!payCtx && rec.amount == null && !figs.annual && !/\bsigning\b/i.test(cl) && (/\boffer|base|salary|came back\b/i.test(cl) || /\boffer/i.test(raw)) && (m = cl.match(/\b(\d{2,3}(?:\.\d)?)\s?k\b/i))) rec.amount = Number(m[1]) * 1000;
         if (!figs.signing && ((m = cl.match(/\bsigning(?:\s+bonus)?\s*(?:of\s*)?\$?(\d{1,3})\s?k\b/i)) || (m = cl.match(/\$\s?(\d{1,3})\s?k\s+signing\b/i)))) rec.signing = Number(m[1]) * 1000;
         if ((m = cl.match(/\b([\d,]{3,})\s+shares\b/i))) rec.shares = m[1];
         if ((m = cl.match(/\bstarts?\s+(?:on\s+)?([A-Z][a-z]+\s+\d{1,2})\b/))) rec.start = m[1];

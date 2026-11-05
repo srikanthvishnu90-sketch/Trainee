@@ -122,6 +122,7 @@ edge_tests=(
   tests/edge/career-ingest-scale.test.ts
   tests/edge/career-ingest-bounded.test.ts
   tests/edge/career-alerts.test.ts
+  tests/edge/career-offer-counter-c04.test.ts
   tests/edge/career-proactive.test.ts
   tests/edge/channel.test.ts
   tests/edge/channel-delivery.test.ts tests/edge/channel-integrity.test.ts

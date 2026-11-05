@@ -2,7 +2,7 @@
 // the evidence report did. No database, no model, no network.
 //   deno test -A --no-check evals/career/beta-vs-instinct/run.test.ts
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { buckets, type Case, CLI_ARGS, cliEnv, hasDraftText, negationHit, proxy, questionCount, type Rec, recDeliverable, recGuards, scoreDet, searchLeak, SCRIPTED } from "./score.ts";
+import { buckets, type Case, CLI_ARGS, cliEnv, hasDraftText, negationHit, proxy, questionCount, type Rec, recDeliverable, recGuards, scoreDet, searchLeak, SCRIPTED, subscriptionGate } from "./score.ts";
 import { DIMENSIONS, jsonOf, refItemPrompt, relative } from "./opus.ts";
 
 const HERE = new URL(".", import.meta.url).pathname;
@@ -115,8 +115,13 @@ Deno.test("scripted brain: content criteria are unmeasured, the record is unveri
   const cs = byId.get("A12.1")!;
   const r = scoreAll(cs, rec({ case: "A12.1", reply: SCRIPTED, layer: "staged_brain", brain: "staged" }));
   assertEquals(r.criteria.draft.pass, null);
-  assertEquals(r.criteria.generic.pass, true);
+  assertEquals(r.criteria.generic.pass, null, "the scripted marker is not a measured answer");
   assertEquals(recDeliverable(r), null);
+  // A brain record whose only checks are not_generic / not_mentions (A18.3, A18.4 shape) is unverified, never delivered.
+  const thin = scoreAll(byId.get("A18.3")!, rec({ case: "A18.3", reply: SCRIPTED, layer: "staged_brain", brain: "staged" }));
+  assertEquals(recDeliverable(thin), null);
+  const neg = scoreAll(byId.get("A6.2")!, rec({ case: "A6.2", reply: SCRIPTED, layer: "staged_brain", brain: "staged" }));
+  assertEquals(neg.criteria.on_topic.pass, null);
   assert(recGuards(r));
 });
 
@@ -134,6 +139,24 @@ Deno.test("Claude CLI: subscription only (both API variables removed) and the ex
   const src = Deno.readTextFileSync(`${HERE}opus.ts`) + Deno.readTextFileSync(`${HERE}run.ts`);
   assert(!/x-api-key|api\.anthropic\.com\/v1\/messages|new Anthropic\(/.test(src.replace(/hostname === "api\.anthropic\.com"/g, "")), "no direct API call");
   assert(/clearEnv: true/.test(src));
+});
+
+Deno.test("subscription gate: every CLI path checks apiKeySource is none before its first call, and stops otherwise", async () => {
+  await subscriptionGate(async () => "none");
+  for (const bad of ["ANTHROPIC_API_KEY", "unknown", ""]) {
+    let threw = false;
+    try { await subscriptionGate(async () => bad); } catch (e) { threw = /STOP/.test((e as Error).message); }
+    assert(threw, `gate must stop on apiKeySource=${bad}`);
+  }
+  const run = Deno.readTextFileSync(`${HERE}run.ts`), opus = Deno.readTextFileSync(`${HERE}opus.ts`);
+  // run.ts --judge: the gate sits at the top of claudeJudge, before the CLI is spawned, and there is no retry loop.
+  const j = run.slice(run.indexOf("async function claudeJudge"));
+  assert(j.indexOf("subscriptionGate(verifySubscription)") >= 0 && j.indexOf("subscriptionGate(verifySubscription)") < j.indexOf("new Deno.Command"), "run.ts gates before spawning");
+  assert(!/for \(let a = 0; a < 2/.test(run), "no judge retry loop");
+  // opus.ts: guard() runs the gate and is awaited before every batch's cli() call.
+  assert(/subscriptionGate\(/.test(opus));
+  for (const m of opus.matchAll(/await guard\(\);\s*\n\s*calls\+\+;\s*\n[^\n]*\n\s*const r = await cli\(/g)) assert(m);
+  assertEquals([...opus.matchAll(/await guard\(\);/g)].length, 2, "both the reference and the judge batches are gated");
 });
 
 Deno.test("Opus arm: verdicts are mapped to Trainee-relative win/tie/loss by position; history reaches the prompt", () => {

@@ -87,7 +87,10 @@ export function scoreDet(c: Crit, r: Rec, body: any): Verdict {
       const out = r.outbound.filter((o) => !/^GET /.test(o));
       return { pass: !eff.length && !out.length, why: eff.length || out.length ? `effect rows ${eff.join(",")} outbound ${out.join(",")}` : "nothing left the account" };
     }
-    case "not_generic": return r.contained || GENERIC.test(reply) ? { pass: false, why: r.contained ? "containment fallback" : "generic catchall text" } : { pass: true, why: "specific reply" };
+    case "not_generic":
+      // The scripted marker is never generic, so on a brain turn this check would pass for free: unmeasured instead.
+      if (brain) return unmeasured("the reply is the scripted marker, not a real answer");
+      return r.contained || GENERIC.test(reply) ? { pass: false, why: r.contained ? "containment fallback" : "generic catchall text" } : { pass: true, why: "specific reply" };
     case "intent_not": {
       const v = c.v ?? [];
       const hit = v.includes(String(r.intent)) || (v.includes(String(r.router_intent)) && !brain);
@@ -119,7 +122,7 @@ export function scoreDet(c: Crit, r: Rec, body: any): Verdict {
       return { pass: !w.length, why: w.length ? `wrote ${w.join(",")}` : "no account write" };
     }
     case "mentions": if (brain) return unmeasured("wording"); return { pass: new RegExp(c.re!, "i").test(reply), why: `/${c.re}/` };
-    case "not_mentions": if (brain) return { pass: true, why: "scripted brain text names nothing" }; return { pass: !new RegExp(c.re!, "i").test(reply), why: `must not match /${c.re}/` };
+    case "not_mentions": if (brain) return unmeasured("the scripted marker names nothing"); return { pass: !new RegExp(c.re!, "i").test(reply), why: `must not match /${c.re}/` };
     case "honest_empty": {
       if (brain) return unmeasured("empty-record wording");
       const ok = !GENERIC.test(reply) && !r.contained && /\b(no|none|nothing|not yet|haven't|hasn't|don't have|do not have|empty|isn't|aren't|not on (file|record))\b/i.test(reply);
@@ -208,5 +211,11 @@ export function cliEnv(env: Record<string, string>): Record<string, string> {
   const e = { ...env };
   delete e.ANTHROPIC_API_KEY; delete e.ANTHROPIC_AUTH_TOKEN;
   return e;
+}
+// The subscription gate, run once before the first CLI call of a run: the init event of a stream-json call must report
+// apiKeySource "none" (the owner's subscription). Anything else stops the run before any graded call is made.
+export async function subscriptionGate(check: () => Promise<string>): Promise<void> {
+  const src = await check();
+  if (src !== "none") throw new Error(`STOP: the Claude CLI is not on subscription billing (apiKeySource=${src}); no call was made`);
 }
 export const CLI_ARGS = (model: string) => ["-p", "--model", model, "--output-format", "json", "--tools", "", "--strict-mcp-config"];

@@ -27,7 +27,7 @@
 //
 //   deno run -A --no-check evals/career/beta-vs-instinct/opus.ts --results evals/career/beta-vs-instinct/results/<label>.json
 //     [--refs-only] [--max-calls 60] [--batch 8] [--judge-batch 6] [--concurrency 3] [--judge-model haiku] [--dry]
-import { type Case, CLI_ARGS, cliEnv, type Rec } from "./score.ts";
+import { type Case, CLI_ARGS, cliEnv, type Rec, subscriptionGate } from "./score.ts";
 
 const HERE = new URL(".", import.meta.url).pathname;
 const ROOT = new URL("../../..", import.meta.url).pathname;
@@ -163,9 +163,8 @@ if (import.meta.main) {
   let verified = false;
   const guard = async () => {
     if (verified) return;
-    const src = await verifySubscription();
-    console.error(`subscription check: apiKeySource=${src}`);
-    if (src !== "none") { console.error("STOP: the Claude CLI is not on subscription billing (apiKeySource is not none). No calls made."); Deno.exit(3); }
+    try { await subscriptionGate(async () => { const src = await verifySubscription(); console.error(`subscription check: apiKeySource=${src}`); return src; }); }
+    catch (e) { console.error((e as Error).message); Deno.exit(3); }
     verified = true;
   };
   async function pool<T>(items: T[], fn: (t: T) => Promise<void>) {

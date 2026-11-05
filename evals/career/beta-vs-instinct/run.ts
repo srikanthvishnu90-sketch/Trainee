@@ -26,7 +26,8 @@ import { pgBinDir, type Pg, startPg } from "../../../tests/flow/pg.ts";
 import { careerHandler, type Chat, supabaseParity } from "../../../tests/flow/handler.ts";
 import { anthropicWire } from "../../../tests/architect/helpers/anthropic_wire.ts";
 import { CareerHost } from "../../../supabase/functions/_shared/career_host.js";
-import { buckets, type Case, CLI_ARGS, cliEnv, type Crit, EFFECT_TABLES, IGNORE_KV, IGNORE_WRITE, type Rec, recDeliverable, recGuards, recPass, recScore, SCRIPTED, scoreDet, URLS } from "./score.ts";
+import { buckets, type Case, CLI_ARGS, cliEnv, type Crit, EFFECT_TABLES, IGNORE_KV, IGNORE_WRITE, type Rec, recDeliverable, recGuards, recPass, recScore, SCRIPTED, scoreDet, subscriptionGate, URLS } from "./score.ts";
+import { verifySubscription } from "./opus.ts";
 
 const HERE = new URL(".", import.meta.url).pathname;
 const ROOT = new URL("../../..", import.meta.url).pathname;
@@ -199,7 +200,13 @@ try { cache = JSON.parse(await Deno.readTextFile(cachePath)); } catch { cache = 
 async function sha(s: string) { return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s))), (b) => b.toString(16).padStart(2, "0")).join(""); }
 export const JUDGE_PROMPT = `You are grading one reply from a career assistant against yes/no checks. Be strict and literal: answer yes only when the reply itself plainly does what the check asks. For every check give a short verbatim quote from the reply that is your evidence (copied exactly), or "" if the answer is no.
 Return ONLY JSON: {"checks":[{"id":"<id>","pass":true|false,"quote":"<verbatim>"}]}`;
+// --judge: the subscription gate runs once, before the first judge call; a run that is not on the subscription stops.
+let judgeGated = false;
 async function claudeJudge(prompt: string): Promise<any> {
+  if (!judgeGated) {
+    try { await subscriptionGate(verifySubscription); } catch (e) { console.error((e as Error).message); Deno.exit(3); }
+    judgeGated = true;
+  }
   const env = cliEnv(Deno.env.toObject());
   const p = new Deno.Command("claude", { args: CLI_ARGS("haiku"), stdin: "piped", stdout: "piped", stderr: "piped", env, clearEnv: true, cwd: "/tmp" }).spawn();
   const w = p.stdin.getWriter(); await w.write(new TextEncoder().encode(prompt)); await w.close();
@@ -214,7 +221,8 @@ async function judgeRec(r: Rec, cs: Case, crits: Crit[]) {
   const prompt = `${JUDGE_PROMPT}\n\nTHE PERSON SAID:\n${r.input}\n\nTHE REPLY:\n${r.reply}\n\nCHECKS:\n${crits.map((c) => `- ${c.id}: ${c.q}`).join("\n")}`;
   const key = await sha(prompt);
   if (!cache[key]) {
-    for (let a = 0; a < 2 && !cache[key]; a++) { try { cache[key] = await claudeJudge(prompt); } catch (e) { if (a) cache[key] = { error: String((e as Error).message ?? e) }; } }
+    // One attempt per prompt: a failure is recorded as no verdict, never retried in a loop.
+    try { cache[key] = await claudeJudge(prompt); } catch (e) { cache[key] = { error: String((e as Error).message ?? e) }; }
   }
   const got = cache[key];
   for (const c of crits) {

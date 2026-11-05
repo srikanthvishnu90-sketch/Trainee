@@ -1,6 +1,6 @@
 # Fundamental issues, 2026-11-04
 
-This is a ranked list of the product's fundamental issues on trunk `e6696cb`. "Fundamental" means the issue stops a
+This is a ranked list of the product's fundamental issues on trunk `3defbcf`. "Fundamental" means the issue stops a
 real person from finding roles, applying at volume, networking, connecting accounts, getting a File or link, or getting
 a reply that answers what they asked. Cosmetic issues are not listed. The list has **59 issues**; it is not padded, and
 some issues group several symptoms that share one root cause.
@@ -9,15 +9,15 @@ The bar is the owner's: comprehension, answer quality and design that compete wi
 the way Instinct or Muse do them.
 
 
-> **Baseline at two SHAs.** Recorded on trunk `e6696cb` and again on `4158a1a` (after #493, the CPU fix, merged). Every number is the same on both: `results/trunk-e6696cb.md` and `.opus.md` (scorecards), `results/trunk-4158a1a.*` (scorecards and full records). File:line references are as of `e6696cb`. #493 shifts `handler-career.ts` and `142-career-router.js` by up to about 130 lines, so search by the function name.
+> **Baseline.** Recorded on trunk `3defbcf` (`results/trunk-3defbcf.*`, scorecards and full records). Earlier runs on `e6696cb` and `4158a1a` gave the same records. File:line references are as of `e6696cb`; #493 (the CPU fix, merged since) shifts `handler-career.ts` and `142-career-router.js` by up to about 130 lines, so search by the function name. **Scoring rule (review of #516):** on a staged-brain record, `not_generic` and `not_mentions` are unmeasured, so a brain record is never counted as delivered. This took A18.3 and A18.4 out of "delivered", in both states.
 
 ## The numbers behind it
 
 Benchmark: `evals/career/beta-vs-instinct/`. It runs the 104 beta inputs through the real handler, in two account
 states, with no paid call.
 
-- **Task completion (primary metric).** 24.0% (empty account) and 20.2% (seeded). That is 25 and 21 of 104 prompts
-  with every requested deliverable verifiably produced. 17 and 23 failed one. 62 and 60 were answered by the staged
+- **Task completion (primary metric).** 22.1% (empty account) and 18.3% (seeded). That is 23 and 19 of 104 prompts
+  with every requested deliverable verifiably produced. 17 and 23 failed one. 64 and 62 were answered by the staged
   brain and can't be verified offline. Guards (nothing sent, nothing written, profile unchanged) held on 208 of 208.
 - **Quality against Opus 5.5 (quality metric).** On code-answered turns, Trainee won 1, tied 1 and lost 80 of 82. The
   Opus references are cached in `opus-refs.json`. The judge was Haiku, pairwise and position-balanced, through the
@@ -34,7 +34,7 @@ states, with no paid call.
   All 26 feature groups lose or have no comparable turn. The 126 brain turns are not compared, because offline they
   carry scripted text.
 - **Live beta (report).** 0 of 4 full passes. 1 of 4 died on CPU.
-- Per-record detail: `evals/career/beta-vs-instinct/results/trunk-e6696cb.md` and `.opus.md`. Grouped failures:
+- Per-record detail: `evals/career/beta-vs-instinct/results/trunk-3defbcf.md` and `.opus.md`. Grouped failures:
   `docs/architect/BETA-FAILURE-MAP-2026-11-04.md`.
 
 ## Legend
@@ -175,7 +175,7 @@ Merge in this order, with a bundle rebuild between merges:
 1. MASS: the largest measured gain, +11 prompts per state.
 2. PREP: C03 and A15.1 fully delivered.
 3. C04: C04, A7.1, A7.3 and A12.2.
-4. CPU: **merged as #493** while this was written. No deliverable change on the benchmark (`trunk-4158a1a` equals `trunk-e6696cb`).
+4. CPU: **merged as #493** while this was written. No deliverable change on the benchmark.
 5. PRE last, and only after F59 is fixed. As measured, it hands C03, C04 and A15.1 to the brain and would undo PREP and
    C04. Its C01 change lists unrelated roles.
 
@@ -231,18 +231,22 @@ Snapshot SHAs:
 - PREP `dbbf0e34`
 - PRE and C04: the agents' uncommitted working trees on `7aea15ee`, copied into scratch worktrees without being changed
 
+The branch rows below were re-scored from each branch's saved records under the corrected rule (brain records are
+never delivered). The branches were not re-run. A branch's replies don't depend on the scoring rule, so a re-run
+would give the same records.
+
 | branch | task completion empty | seeded | prompts newly delivered (both states unless marked) | regressions / notes |
 |---|---|---|---|---|
-| trunk `e6696cb` | 24.0% | 20.2% | (baseline) | |
-| MASS | **34.6%** | **30.8%** | A2.1, A2.2, A2.3, A3.3, A3.4, A14.4, A23.4, A24.1, A24.2, A24.3, A24.4 (22 records, all moved from the brain to code) | none |
-| C04 (snapshot) | 27.9% | 24.0% | C04, A7.1, A7.3, A12.2 | none |
-| PREP | 26.9% | 23.1% | C03, A15.1 (File minted, 5 questions, a 30-minute plan), A15.2 | none |
-| CPU | 24.0% | 20.2% | none (by design) | none. C01 CPU locally was 281 ms (empty) and 126 ms (seeded), against 428-790 ms on trunk; local CPU is noisy, and the live 546 needs the live isolate to prove |
-| PRE (snapshot) | 24.0% | 20.2% | none. C01 now lists 5 roles, all wrong (F59) | C02, C03, C04, A15.1 and A20.2 moved to the brain. C03 and A15.1 there have no File tool |
+| trunk `3defbcf` | 22.1% | 18.3% | (baseline) | |
+| MASS | **32.7%** | **28.8%** | A2.1, A2.2, A2.3, A3.3, A3.4, A14.4, A23.4, A24.1, A24.2, A24.3, A24.4 (22 records, all moved from the brain to code) | none |
+| C04 (snapshot) | 26.0% | 22.1% | C04, A7.1, A7.3, A12.2 | none |
+| PREP | 25.0% | 21.2% | C03, A15.1 (File minted, 5 questions, a 30-minute plan), A15.2 | none |
+| CPU | 22.1% | 18.3% | none (by design) | none. C01 CPU locally was 281 ms (empty) and 126 ms (seeded), against 428-790 ms on trunk; local CPU is noisy, and the live 546 needs the live isolate to prove |
+| PRE (snapshot) | 22.1% | 18.3% | none. C01 now lists 5 roles, all wrong (F59) | C02, C03, C04, A15.1 and A20.2 moved to the brain. C03 and A15.1 there have no File tool |
 
-Combined, the four clean branches (MASS, C04, PREP, CPU) cover 24 prompts per state, about +23 points over trunk. That
-estimate assumes no overlap; it holds, because their fixed sets are disjoint. That would put task completion near 47% /
-43%, still under half. The largest remaining blocks are:
+Combined, the four clean branches (MASS, C04, PREP, CPU) add about 18 prompts per state, about +17 points over trunk.
+That estimate assumes no overlap; it holds, because their fixed sets are disjoint. That would put task completion near
+40% / 36%, still under half. The largest remaining blocks are:
 - F01-F03: search. C01, A1.1 and A9.1 still fail on every branch.
 - F06: 51-62 prompts per state still go to the brain and are unverifiable offline.
 - F51: voice. Every code reply lost to Opus on "texting".

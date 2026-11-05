@@ -1,7 +1,7 @@
 # Beta failure map, 2026-11-04
 
 This map covers the 4 live beta cases (C01-C04) and the 100 offline checks (A1.1-A25.4) from the interim beta evidence
-report (release `03edad4`). Each case was replayed through the real career handler on current trunk `e6696cb`, in two
+report (release `03edad4`). Each case was replayed through the real career handler on trunk `3defbcf`, in two
 account states, using `evals/career/beta-vs-instinct/`. Failures are grouped below by root cause, with counts and
 file:line locations.
 
@@ -19,20 +19,20 @@ Chicago customer-support roles, 6 remote support roles and 6 Chicago healthcare 
 stand-in served in-process, so no model call leaves the machine.
 
 
-> **Baseline at two SHAs.** Recorded on trunk `e6696cb` and again on `4158a1a` (after #493, the CPU fix, merged). Every number is the same on both: `results/trunk-e6696cb.md` and `.opus.md` (scorecards), `results/trunk-4158a1a.*` (scorecards and full records). File:line references are as of `e6696cb`. #493 shifts `handler-career.ts` and `142-career-router.js` by up to about 130 lines, so search by the function name.
+> **Baseline.** Recorded on trunk `3defbcf` (`results/trunk-3defbcf.*`, scorecards and full records). Earlier runs on `e6696cb` and `4158a1a` gave the same records. File:line references are as of `e6696cb`; #493 (the CPU fix, merged since) shifts `handler-career.ts` and `142-career-router.js` by up to about 130 lines, so search by the function name. **Scoring rule (review of #516):** on a staged-brain record, `not_generic` and `not_mentions` are unmeasured, so a brain record is never counted as delivered. This took A18.3 and A18.4 out of "delivered", in both states.
 
-## Baseline (trunk `e6696cb`)
+## Baseline (trunk `3defbcf`)
 
-The full scorecards are `results/trunk-e6696cb.md` (task completion) and `results/trunk-e6696cb.opus.md` (quality).
+The full scorecards are `results/trunk-3defbcf.md` (task completion) and `results/trunk-3defbcf.opus.md` (quality).
 
 | metric | empty account | seeded account |
 |---|---|---|
-| **Task completion, strict.** Every requested deliverable verifiably produced. | **24.0%** (25/104) | **20.2%** (21/104) |
+| **Task completion, strict.** Every requested deliverable verifiably produced. | **22.1%** (23/104) | **18.3%** (19/104) |
 | Failed at least one requested deliverable | 17 | 23 |
-| Unverified: the staged brain answered, so the content can't be measured offline | 62 | 60 |
+| Unverified: the staged brain answered, so the content can't be measured offline | 64 | 62 |
 | Guards held: nothing sent, nothing written, profile unchanged | 104/104 | 104/104 |
 | Answered by the router / code-first / staged brain | 32 / 8 / 64 | 34 / 8 / 62 |
-| With the in-flight branches measured (see FUNDAMENTAL-ISSUES, last section) | MASS 34.6%, C04 27.9%, PREP 26.9%, CPU 24.0%, PRE 24.0% | 30.8%, 24.0%, 23.1%, 20.2%, 20.2% |
+| With the in-flight branches measured (see FUNDAMENTAL-ISSUES, last section) | MASS 32.7%, C04 26.0%, PREP 25.0%, CPU 22.1%, PRE 22.1% | 28.8%, 22.1%, 21.2%, 18.3%, 18.3% |
 | **Quality vs Opus 5.5 reference.** Pairwise, Haiku judge, position-balanced, code-answered turns only: win / tie / loss | **0 / 1 / 39** of 40 | **1 / 0 / 41** of 42 |
 | Not compared (scripted brain) | 64 | 62 |
 | Turns that died on CPU (546) | 0 of 208 (local CPU at most about 800 ms; live C01 died at 2,142 ms) | |
@@ -160,7 +160,7 @@ the person asked for is never parsed, so it is never produced.
   (`142-career-router.js:3508`).
 - With a key, the brain answers, but its tools are withheld: `queue_applications`, `set_job_alerts`, `stop_job_alerts`
   and `verify_contacts` (`career_staged.ts:296`). Nor does it have any approve, pending-approvals, batch, export or
-  File tool (observed tool list in `results/trunk-e6696cb.json`). So "show my pending approvals", "approve the second
+  File tool (observed tool list in `results/trunk-3defbcf.json`). So "show my pending approvals", "approve the second
   application", "how do I export my data" and "draft an application email" have **no code path that can complete
   them**, whoever answers.
 - Offline this can't be scored for quality. The Opus arm compares only code-answered turns.

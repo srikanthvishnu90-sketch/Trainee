@@ -1,0 +1,70 @@
+{
+ "version": 1,
+ "note": "Two synthetic people (TEST values, example.test addresses, 555 numbers). `confirmed` is every fact the person has confirmed, exactly what the planner may answer from (D-007). Anything not listed is NOT confirmed and must be asked, never guessed. Persona B is the knockout persona: on F-1 OPT, so currently authorized to work in the US but needing sponsorship, not a U.S. person for export control, and without most standing consents.",
+ "personas": {
+  "A": {
+   "name": "Maya (US citizen, Chicago, analyst; most facts and standing consents confirmed)",
+   "resume_sha256": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+   "confirmed": {
+    "full_name": "Maya Chen",
+    "legal_name": "Maya Chen",
+    "first_name": "Maya",
+    "last_name": "Chen",
+    "preferred_name": "Maya",
+    "email": "maya.chen@example.test",
+    "phone": "+1 312 555 0142",
+    "street_address": "200 W Madison St",
+    "full_address": "200 W Madison St, Chicago, IL 60606",
+    "city": "Chicago",
+    "state": "IL",
+    "postal_code": "60606",
+    "country": "United States",
+    "location": "Chicago, IL",
+    "linkedin": "https://www.linkedin.com/in/maya-chen-example",
+    "current_employer": "Northwind Analytics",
+    "current_title": "Senior Data Analyst",
+    "former_employers": "Northwind Analytics; Contoso Retail",
+    "school": "University of Illinois Chicago",
+    "education_level": "bachelor",
+    "languages": "English",
+    "work_authorization": "Yes",
+    "sponsorship": "No",
+    "citizenship": "United States",
+    "us_person": "Yes",
+    "over_18": "Yes",
+    "relocation": "No",
+    "security_clearance": "None",
+    "government_employment": "No",
+    "eeo": "decline",
+    "privacy_ack": "I agree",
+    "certify_true": "I agree",
+    "sms_opt_in": "No",
+    "marketing_opt_in": "No",
+    "resume": "@resume"
+   }
+  },
+  "B": {
+   "name": "Arjun (F-1 OPT in Austin; needs sponsorship; not a U.S. person; few facts, no standing consents)",
+   "resume_sha256": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+   "confirmed": {
+    "full_name": "Arjun Rao",
+    "legal_name": "Arjun Rao",
+    "first_name": "Arjun",
+    "last_name": "Rao",
+    "email": "arjun.rao@example.test",
+    "phone": "+1 512 555 0199",
+    "city": "Austin",
+    "state": "TX",
+    "country": "United States",
+    "location": "Austin, TX",
+    "languages": "English, Hindi",
+    "work_authorization": "Yes",
+    "sponsorship": "Yes",
+    "citizenship": "India",
+    "us_person": "No",
+    "over_18": "Yes",
+    "resume": "@resume"
+   }
+  }
+ }
+}

@@ -10,6 +10,7 @@
 //      answer, so it is not read. If it looks at all (or the probe fails), the pool is read and the turn runs on it.
 // No list of intents is kept here: the router's own behavior on the message decides.
 import { deepTurnCopy } from "./career_staged.ts";
+import { NO_CLOCK, type TurnClock } from "./turn_clock.ts";
 
 type Host = { runTurn(text: string, ctx: any): unknown };
 
@@ -20,13 +21,14 @@ export function trackedEmptyPool(): { pool: unknown[]; reads: () => number } {
   return { pool, reads: () => n };
 }
 
-export function poolNeeded(o: { host: Host; message: string; ctx: Record<string, unknown> }): { needed: boolean; reason: "router_reads_pool" | "router_ignores_pool" | "probe_failed" } {
+export function poolNeeded(o: { host: Host; message: string; ctx: Record<string, unknown>; clock?: TurnClock }): { needed: boolean; reason: "router_reads_pool" | "router_ignores_pool" | "probe_failed" } {
   try {
-    const copy = deepTurnCopy(o.ctx) as Record<string, unknown>;
+    const clock = o.clock ?? NO_CLOCK;
+    const copy = clock.sync("pool_probe_copy", () => deepTurnCopy(o.ctx)) as Record<string, unknown>;
     copy.containmentRecords = [];
     const t = trackedEmptyPool();
     copy.postings = t.pool;
-    o.host.runTurn(o.message, copy);
+    clock.sync("pool_probe_router", () => o.host.runTurn(o.message, copy));
     return t.reads() > 0 ? { needed: true, reason: "router_reads_pool" } : { needed: false, reason: "router_ignores_pool" };
   } catch {
     return { needed: true, reason: "probe_failed" };

@@ -4948,6 +4948,22 @@ const CareerRouter = (() => {
   const ltClean = (v) => s(v).split(/\s+—\s+|\s+-\s+/)[0].replace(/\s*\([^)]*\)\s*/g, " ").replace(/,?\s+(?:Inc\.?|LLC|Ltd\.?|Corp\.?)$/i, "").replace(/\s+/g, " ").trim();
   const ltIsPlace = (v) => LT_CITIES.has(ltPlain(v).replace(/[.,]/g, ""));
   const ltIsSchool = (v) => LT_SCHOOL_WORD.test(s(v)) || LT_SCHOOLS.has(ltPlain(v).replace(/[.,]/g, ""));
+  // C01 (beta 2026-11-04, HTTP 546): a name-match pass over the lexicon built one regex per form per call (600+ posting
+  // companies, several calls a turn). A form whose first literal word is not in the text cannot match, so it is skipped
+  // before any regex is built; the regex of a form that may match is compiled once (matchAll copies it, so its lastIndex is
+  // never shared). Same pattern, same matches.
+  const _ltFormRes = new Map();
+  function ltFormMatches(raw, lowRaw, form) {
+    const first = s(form).split(/[\s&]+/).filter(Boolean)[0] || "";
+    if (/^[\x20-\x7e]+$/.test(first) && !lowRaw.includes(first.toLowerCase())) return [];
+    let re = _ltFormRes.get(form);
+    if (!re) {
+      re = new RegExp(`(?<![A-Za-z0-9])${ltEsc(form).replace(/&/g, "(?:&|and)")}(?![A-Za-z0-9])`, "gi");
+      if (_ltFormRes.size > 5000) _ltFormRes.clear();
+      _ltFormRes.set(form, re);
+    }
+    return raw.matchAll(re);
+  }
   function ltLexicon(ctx) {
     const out = [];
     let cirs = [];
@@ -4964,9 +4980,12 @@ const CareerRouter = (() => {
       if (words.length > 1 && tok.length >= 4 && firstCount[ltPlain(words[0])] === 1 && !LT_TOKEN_AMBIG.has(tok) && !LT_CITIES.has(tok) && !LT_SCHOOLS.has(tok)) forms.add(words[0]);
       out.push({ name, cir: x, forms: [...forms] });
     }
+    // C01: the names already in, as a set (it was a scan of the whole list per posting: 600 postings, ~180,000 compares).
+    const have = new Set(out.map((e) => ltPlain(e.name)));
     for (const p of postingsFromCtx(ctx || {})) {
       const name = ltClean(s(p.company).replace(/\s*\(fictional\)\s*/gi, " "));
-      if (!name || ltIsPlace(name) || ltIsSchool(name) || out.some((e) => ltPlain(e.name) === ltPlain(name))) continue;
+      if (!name || ltIsPlace(name) || ltIsSchool(name) || have.has(ltPlain(name))) continue;
+      have.add(ltPlain(name));
       out.push({ name, cir: null, forms: [name] });
     }
     return out;
@@ -5046,13 +5065,12 @@ const CareerRouter = (() => {
   // The employer a letter or tailoring ask names, or null. Exported for the scenario battery
   // (tests/architect/scenarios-letter-target.test.ts).
   function letterTargetOf(text, ctx) {
-    const raw = s(text);
+    const raw = s(text), lowRaw = raw.toLowerCase();
     const hits = [];
     for (const e of ltLexicon(ctx || {})) {
       for (const form of e.forms) {
-        const re = new RegExp(`(?<![A-Za-z0-9])${ltEsc(form).replace(/&/g, "(?:&|and)")}(?![A-Za-z0-9])`, "gi");
         const full = ltPlain(form) === ltPlain(e.name) || form.trim().split(/\s+/).length > 1 || /^[A-Z]{2,5}$/.test(form);
-        for (const m of raw.matchAll(re)) {
+        for (const m of ltFormMatches(raw, lowRaw, form)) {
           if (ltOccurrenceOk(raw, m.index, m.index + m[0].length, full)) { hits.push({ name: e.name, cir: e.cir, idx: m.index, typed: m[0] }); break; }
         }
       }
@@ -5121,13 +5139,12 @@ const CareerRouter = (() => {
   }
   // The companies a research ask names, in order: { name, cir, idx, typed }; a company file's name over a posting's.
   function namedCompaniesOf(text, ctx) {
-    const raw = s(text);
+    const raw = s(text), lowRaw = raw.toLowerCase();
     const hits = [];
     for (const e of ltLexicon(ctx || {})) {
       for (const form of e.forms) {
-        const re = new RegExp(`(?<![A-Za-z0-9])${ltEsc(form).replace(/&/g, "(?:&|and)")}(?![A-Za-z0-9])`, "gi");
         let found = false;
-        for (const m of raw.matchAll(re)) {
+        for (const m of ltFormMatches(raw, lowRaw, form)) {
           if (rsOccurrenceOk(raw, m.index, m.index + m[0].length)) { hits.push({ name: e.name, cir: e.cir, idx: m.index, typed: m[0] }); found = true; break; }
         }
         if (found) break;
@@ -16885,6 +16902,8 @@ const CareerRouter = (() => {
       if (m && m.resumeIngest && typeof m.resumeIngest === "object" && intent !== "career_resume_ingest") m.resumeIngest.stale = true;
     } catch { /* a mark never breaks a turn */ }
   }
-  return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf };
+  return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf,
+    // C01: the name-match internals, for the old-vs-new equivalence test (tests/career-c01-cpu-hot-path.test.cjs) only.
+    _c01NameMatch: { ltLexicon, ltFormMatches, ltEsc, ltPlain, ltClean, ltIsPlace, ltIsSchool, postingsFromCtx } };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerRouter;

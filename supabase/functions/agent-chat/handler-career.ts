@@ -52,6 +52,7 @@ import { gatewayGroundSearch, memoryGroundCache } from "../_shared/agent/researc
 const researchCache = memoryGroundCache();
 import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWindow, summaryFor } from "./career_brain.ts";
 import { brainMode, STAGED_TOOL_POLICY, stagedRoute } from "./career_staged.ts";
+import { turnClock } from "./turn_clock.ts";
 import { CRISIS_INTENT, crisisReply } from "./crisis.ts";
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
 import { CARD_NEEDS_REPLY_STATUS, cardIntent, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
@@ -399,9 +400,13 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       },
       jobs: { roleFamily: CareerJobs.roleFamily, seniorityBand: CareerJobs.seniorityBand, stripHtml: CareerJobs.stripHtml },
     });
+    // C01 (beta 2026-11-04): the turn's stage clock (turn_clock.ts). One log line per turn names the CPU each synchronous stage
+    // spent; past half the Edge CPU limit each stage is logged as it starts, so a 546 names the stage it died in.
+    const clock = turnClock();
+    let clockTag: Record<string, string | null> = {};
     try {
       gate = await enterTurnGate(admin, user.id, turnKey, { thread: tid });
-      const loaded = await persistence.load({ userId: user.id, threadId: tid, turnKey, requestHash });
+      const loaded = await clock.wait("load", () => persistence.load({ userId: user.id, threadId: tid, turnKey, requestHash }));
       turnEffects.on = true;
       if (loaded.replay) { ledger.skip(); flowCtx.note = null; return json(cors, loaded.replay, 200); }
       // LAUNCH READINESS X3: the pool is read only on a turn that reaches the router and whose message the router answers
@@ -413,9 +418,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // `message` inside readPool is the text the pool is read for: this turn's message, or a planned step's own words.
       const readPool = async (message: string) => {
         if (poolRead) return;
-        if (!poolNeeded({ host, message, ctx: ctx as unknown as Record<string, unknown> }).needed) return;
+        if (!poolNeeded({ host, message, ctx: ctx as unknown as Record<string, unknown>, clock }).needed) return;
         poolRead = true;
-        const pool = await poolLoader.loadPool();
+        const pool = await clock.wait("pool_load", () => poolLoader.loadPool());
         if (pool.error) console.error("career pool load failed:", pool.error);
         // V240 LIVE-FIX (probe f2): the window is a discovery slice,
         // not the shelf — when the turn names a specific company/title
@@ -430,7 +435,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         try {
           const target = typeof (CareerRouter as any).namedRoleTargetOf === "function" ? (CareerRouter as any).namedRoleTargetOf(message, null) : null;
           if (target && target.company) {
-            const extra = await poolLoader.loadTargeted(target);
+            const extra = await clock.wait("pool_load_targeted", () => poolLoader.loadTargeted(target));
             if (extra.postings.length) {
               const seen = new Set(postings.map((p: any) => p.job_id));
               postings = postings.concat(extra.postings.filter((p: any) => !seen.has(p.job_id)));
@@ -455,7 +460,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         textingLinked = r && !r.error && Array.isArray(r.data) ? r.data.length > 0 : null;
       } catch { textingLinked = null; }
       const personMemory = accountMemoryOn(Deno.env, { textingLinked, accountHasMemory: !!(loaded.account as any)?.memory && typeof (loaded.account as any).memory === "object" });
-      const ctx = host.createTurnCtx({ userId: user.id, threadId: tid, now: Date.now(), accountPersistence: true, accountMemory: personMemory /* ROOT CAUSE 3 */, snapshot: loaded.snapshot, account: loaded.account, watchState: loaded.watchState, postings: [], batchRunRecord }) as ReturnType<typeof host.createTurnCtx> & {
+      const ctx = clock.sync("ctx_build", () => host.createTurnCtx({ userId: user.id, threadId: tid, now: Date.now(), accountPersistence: true, accountMemory: personMemory /* ROOT CAUSE 3 */, snapshot: loaded.snapshot, account: loaded.account, watchState: loaded.watchState, postings: [], batchRunRecord })) as ReturnType<typeof host.createTurnCtx> & {
         _hostPatch?: Record<string, unknown>; batchApplyState?: unknown; statusRecords?: unknown; alertWatchState?: Record<string, unknown>;
       };
       // WO-100: module 120's "what's connected" reads the live grants, the extension and the phone link (no address).
@@ -548,7 +553,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
               const r = await admin.from("agent_messages").select("meta").eq("thread_id", tid).eq("role", "assistant").order("id", { ascending: false }).limit(1);
               return r.error ? null : ((r.data?.[0]?.meta as any)?.intent ?? null);
             },
-            router: async (text) => { await ensurePool(text); return host.runTurn(text, ctx) as any; },
+            router: async (text) => { await ensurePool(text); return clock.sync("router", () => host.runTurn(text, ctx)) as any; },
             apply: (text, shortlist) => applyTurn({ ...pF1.apply, message: text, userId: user.id, now: Date.now(), postings: pPostings, wants: supabaseWantStore(admin),
               apps: () => supabaseApplications(admin)(user.id), facts: chatScreenFacts(CareerProfile.confirmedFacts((ctx as any).profile ?? {}), ((ctx as any).statedFacts?.facts ?? []) as any[]),
               shortlist: shortlist as any, limits: paceReader(admin, user.id), employerAnswers: () => pAsk.answers(tid) }) as any,
@@ -934,7 +939,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // rollback, and then it is never taken and the router answers exactly as before. Read lazily, only when the brain
       // test below is reached. With no model key configured the staged brain is never tried: the router answers, as it
       // does when the model fails (D-035).
-      const staged = stagedRoute({ env: Deno.env, message, ctx: ctx as unknown as Record<string, unknown>, host, structured: !!(careerTask || careerBatch) });
+      const staged = stagedRoute({ env: Deno.env, message, ctx: ctx as unknown as Record<string, unknown>, host, structured: !!(careerTask || careerBatch), clock });
       // A "judge prompt: ..." instruction is code's (judgePromptTurn), and without a model key the brain is never tried.
       const stagedReady = !isJudgePromptAsk(message) && !!careerModelConfig(Deno.env).apiKey;
       // FEATURE GV (Google verification, 2026-10-26): "disconnect gmail" is answered by the connector framework above
@@ -1091,7 +1096,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (turn.stopped === "model_error" && !turn.tool_calls.some((t) => t.ok && t.effect === "write_own")) {
           console.error("agent brain: model unavailable, answering with the router");
           await ensurePool();
-          out = host.runTurn(message, ctx);
+          out = clock.sync("router", () => host.runTurn(message, ctx));
         } else {
           // A batch of outreach drafts is shown by code, and its intent makes the next text an answer to it.
           turnPostings = Array.isArray(turn.postings) ? turn.postings : [];
@@ -1112,7 +1117,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (!f5Prompt) await ensurePool();
         out = f5Prompt
           ? { reply: f5Prompt.reply, intent: f5Prompt.intent, resultStatus: f5Prompt.status, contained: false, handler: "judge_prompt" }
-          : host.runTurn(message, ctx);
+          : clock.sync("router", () => host.runTurn(message, ctx));
         // askFor: the router's search plus the parameters the message states (level, pay, season, employer, sponsorship), or a
         // role search the router did not run at all (posting_constraints.ts reads it from the message itself).
         const f5Said = f5Free && !f5Prompt ? askFor(message, out, (ctx as any).discovery) : null;
@@ -1122,10 +1127,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           const f5Meter = ledger.track(newMeter());
           const f5Cfg = careerModelConfig(Deno.env);
           try {
-            const found = await searchJudgeTurn({ message, ask: f5Ask, userId: user.id, now: Date.now(), profile: (ctx as any).profile ?? null,
+            const found = await clock.wait("search_judge", () => searchJudgeTurn({ message, ask: f5Ask, userId: user.id, now: Date.now(), profile: (ctx as any).profile ?? null,
               sources: supabaseSearchSources(admin, { window: postings, jobs: { roleFamily: CareerJobs.roleFamily, seniorityBand: CareerJobs.seniorityBand, stripHtml: CareerJobs.stripHtml } }),
               judge: { on: f5JudgeOn, model: (payload) => callModel(f5Cfg, payload, { meter: f5Meter, role: "chat" }), cache: supabaseJudgeCache(admin),
-                n: Number(Deno.env.get("CAREER_JUDGE_N")) || undefined, standing: () => supabaseMemoryStore(admin).standing(user.id) } });
+                n: Number(Deno.env.get("CAREER_JUDGE_N")) || undefined, standing: () => supabaseMemoryStore(admin).standing(user.id) } }));
             if (found) {
               // ONBOARDING ROUND 2: the router's line that nothing is sent before the resume is confirmed (an apply ask with
               // no confirmed resume) stays with the search's own reply.
@@ -1149,11 +1154,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
               // configured, nothing kept), the list above stands. "I want X that pays $Y" is also recorded as the person's goal by
               // the router (append): that record stands, and the reply is still the short one (the goal's long acknowledgment would
               // be the wall of text this replaces).
-              if (found.picked?.length) {
-                const made = await resultsFile({ userId: user.id, now: Date.now(), what: whatOf(f5Ask), floor: f5Ask.limits?.pay ?? null, picked: found.picked, store: supabaseJobStore(admin),
+              const picked = found.picked;
+              if (picked?.length) {
+                const made = await clock.wait("results_page", () => resultsFile({ userId: user.id, now: Date.now(), what: whatOf(f5Ask), floor: f5Ask.limits?.pay ?? null, picked, store: supabaseJobStore(admin),
                   name: prof?.basics?.name ?? null, source: found.source === "none" ? null : found.source,
-                  read: found.source === "snapshot" ? found.picked.map((x) => String(x.posting?.fetched_on ?? "")).filter(Boolean).sort().at(-1) ?? null : null,
-                  links: (u, l) => feedUrlsFor(Deno.env, u, l, Date.now()) }).catch((e) => { console.error("results page: the list stands:", (e as Error)?.message ?? e); return null; });
+                  read: found.source === "snapshot" ? picked.map((x) => String(x.posting?.fetched_on ?? "")).filter(Boolean).sort().at(-1) ?? null : null,
+                  links: (u, l) => feedUrlsFor(Deno.env, u, l, Date.now()) })).catch((e) => { console.error("results page: the list stands:", (e as Error)?.message ?? e); return null; });
                 if (made) {
                   out = { ...out, reply: made.reply + resumeLine, parts: [made.parts[0], ...(resumeLine ? [resumeLine.trim()] : []), made.parts[1]] };
                   agentMeta = { ...(agentMeta || {}), results_file: made.listId };
@@ -1396,7 +1402,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const parts = out.parts ? [...(flowCtx.note ? [flowCtx.note] : []), ...out.parts, ...(artifactNote ? [artifactNote] : []), ...reminderLines] : null;
         return { thread_id: tid, reply: visibleReply, action: null, capabilities: out.capabilities, turn_key: turnKey, reminders, ...(out.task ? { task: out.task } : {}), ...(out.batch ? { batch: out.batch } : {}), ...(parts ? { parts } : {}), ...(artifactsField ? { artifacts: artifactsField } : {}), ...(turnPostings.length ? { postings: turnPostings } : {}), ...(shapeField ? { shape: shapeField } : {}), meta: { career: true, intent: out.intent, result_status: out.resultStatus, contained: out.contained, ...(agentMeta || {}) } };
       };
-      const commitTurn = (events: unknown[]) => persistence.commit({ userId: user.id, threadId: tid, turnKey, requestHash, revision: loaded.revision, accountVersion: loaded.accountVersion, snapshot: host.extractSnapshot(ctx), patch: ctx._hostPatch, input: userContent, response: respond(), taskIntent, batchIntent, events });
+      const commitTurn = (events: unknown[]) => clock.wait("commit", () => persistence.commit({ userId: user.id, threadId: tid, turnKey, requestHash, revision: loaded.revision, accountVersion: loaded.accountVersion, snapshot: clock.sync("snapshot_extract", () => host.extractSnapshot(ctx)), patch: ctx._hostPatch, input: userContent, response: clock.sync("respond", respond), taskIntent, batchIntent, events }));
+      clockTag = { intent: out.intent ?? null, handler: out.handler ?? null };
       const confirmRows = confirmEvents.rows();
       let saved;
       try {
@@ -1453,6 +1460,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         turn_effects: turnEffects.writes.size > 0 || turnEffects.queued > 0 || turnEffects.sent > 0 || turnEffects.sendUnknown > 0 }, conflict ? 409 : 503);
     } finally {
       await ledger.finish().catch((e) => console.error("turn cost ledger:", e?.message ?? e));
+      clock.flush(clockTag);
       await gate?.leave();
     }
   } catch (e) {

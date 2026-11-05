@@ -341,7 +341,8 @@ export function planProactive(o: { users: PlanUser[]; postings: any[]; now: numb
       const held = new Set(u.held || []);
       const listed = new Map<string, Set<string>>();
       // A morning message (prefs.digest) lists only what is new since the last one: what was held since (every match is
-      // held when there are no instant alerts) and what this run found; never the day before's again.
+      // held when there are no instant alerts) and what this run found; never the day before's again. One line per job, by
+      // the same round-3 twin closure as the instant alerts above (one job on several boards is listed once).
       const day = o.postings
         .filter((p) => matchPosting(p, prefs) && floorOk(p) && (prefs.digest
           ? held.has(p.job_id) || (ms(p.first_seen_at) >= since && freshWhenSeen(p))

@@ -161,7 +161,11 @@ const UNCLEAR = [
   // a yes carrying more
   "yes but", "yes except the dates", "yeah mostly", "yes, one thing though", "yes, though the dates are off", "yes and no",
 ];
-const NO = ["no", "No.", "nope", "NOPE", "nah", "that's wrong", "not mine", "that's not my resume", "wrong", "incorrect", "not quite", "no, that's wrong", "not right"];
+// ONBOARDING ROUND 4 (2026-11-05): "not mine" and "that's not my resume" left this list. They say the resume is not the
+// person's, and the round-4 fix sets it aside (its drafts removed, no later yes confirms them: scenarios-onboarding-r4.test.ts
+// disown); this model kept them as drafts a later yes confirmed. Two other plain no's take their places (same list length,
+// so every seeded journey is otherwise the same).
+const NO = ["no", "No.", "nope", "NOPE", "nah", "that's wrong", "not correct", "that's not right", "wrong", "incorrect", "not quite", "no, that's wrong", "not right"];
 const OTHER = ["find data analyst jobs in Chicago", "what jobs are open at Northwind?", "how do I prep for a case interview?", "write a cover letter for Contoso Labs",
   "apply to the analyst job at Fabrikam", "tell me about Litware", "what can you do?", "show me remote internships", "remind me tomorrow to follow up", "track my application to Ramp"];
 // Corrections: {to} is what it should say, {from} what it says now.

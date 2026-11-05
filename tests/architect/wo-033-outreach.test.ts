@@ -337,9 +337,13 @@ Deno.test("WO-033/O1 a 'stop' or 'unsubscribe' reply puts them on the do-not-con
   const again: any = { ...d1, n: 1, status: "shown", approved_hash: null, approved_at: null, sent_at: null, created_at: new Date(OCT14 + 86400_000 * 30).toISOString() };
   again.hash = await payloadHash(messageOf(again));
   await store.saveBatch(U, TH, [again], OCT14 + 86400_000 * 30); store.setIntent(TH, OUTREACH_INTENT);
-  await turn(store, "send all", OCT14 + 86400_000 * 30);
+  const said = await turn(store, "send all", OCT14 + 86400_000 * 30);
   const s = await runOutreachSends({ store, sender: gmail, now: OCT14 + 86400_000 * 30 });
-  eq([s.sent, s.refused.do_not_contact], [0, 1]);
+  // OUTREACH R4 (2026-11-05): refused at the approval itself (whatever would send it, the person's own mail app included:
+  // no ready-to-send link to someone who asked not to be contacted), so the send run never sees it approved.
+  eq([s.sent, s.refused.do_not_contact ?? 0], [0, 0]);
+  assert(/Won't be sent: 1 \(/.test(said?.reply ?? ""), `said as won't be sent: ${said?.reply}`);
+  eq((await store.latestBatch(U)).map((d) => [d.status, d.result]), [["skipped", "opted_out"]]);
 });
 
 // One recipient, many Trainee users: the owner removed the cross-person count (2026-10-27 20:40 CDT: no "3 emails per

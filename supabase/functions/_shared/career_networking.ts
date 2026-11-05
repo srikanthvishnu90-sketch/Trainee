@@ -660,14 +660,21 @@ async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>
   const live = (email: string) => hist.filter((d) => d.recipient.email.toLowerCase() === email && d.status !== "skipped");
   const replace: OutreachDraft[] = [];
   const pick: ContactRow[] = [], held: { name: string; why: string }[] = [];
+  // OUTREACH R4 (2026-11-05, tests/architect/scenarios-outreach-r4.test.ts): one address, one draft per batch. Two rows
+  // with the same address under different names ("Jon Smith" and "Jonathan Smith" at Stripe, from two lists, or one
+  // written in another case) were both picked: the batch said "Drafted 2/2" and showed two emails to one address, and
+  // "send all" approved both (the rail then refused the second as already emailed).
+  const picked = new Map<string, string>();
   for (const r of pool) {
     if (pick.length >= want) break;
+    const addr = String(r.email ?? "").trim().toLowerCase();
+    if (addr && picked.has(addr)) { held.push({ name: r.name, why: `same address as ${picked.get(addr)} (${addr}), written to once` }); continue; }
     let why = await heldWhy(r, contacted, dnc, blocked);
     const mine = r.email ? live(r.email.toLowerCase()) : [];
     if (why === CONTACTED && t.by === "name" && mine.length && mine.every((d) => d.status === "shown")) { replace.push(...mine); why = null; }
     else if (why === CONTACTED && mine.some((d) => d.status === "approved")) why = `you approved an email to them that isn't sent yet (draft ${mine.find((d) => d.status === "approved")!.n}; say "cancel ${mine.find((d) => d.status === "approved")!.n}" to write a new one)`;
     else if (why === CONTACTED && mine.some((d) => ["sent", "replied"].includes(d.status))) why = `you already emailed them; say "follow up with ${r.name.split(" ")[0]}" for a follow-up`;
-    if (why) held.push({ name: r.name, why }); else pick.push(r);
+    if (why) held.push({ name: r.name, why }); else { pick.push(r); if (addr) picked.set(addr, r.name); }
   }
   const considered = pick.length + held.length;
   const heldLine = held.length ? `Not drafted: ${held.map((h) => `${h.name} (${h.why})`).join("; ")}.` : "";

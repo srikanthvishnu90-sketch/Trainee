@@ -8,7 +8,7 @@
 // the outbox and deliverDue in channel.ts, runInbound in channel_inbound.ts). It is switched on per deploy with
 // CAREER_TEXTING_NATIVE=on; off, every adapter renders exactly as before.
 
-import { findUrls, safeCut, type UrlSpan, urlsOf } from "./channel_text.ts";
+import { FENCE, fenceChunks, findUrls, paragraphsOf, safeCut, type UrlSpan, urlsOf } from "./channel_text.ts";
 import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 release flags
 import { toBubbles } from "./conversation.ts";
 
@@ -25,7 +25,10 @@ const MD_LINK = /!?\[([^\]\n]+)\]\((https?:\/\/[^\s()]*(?:\([^\s()]*\)[^\s()]*)*
 // label is the link itself).
 export function linksOnOwnLine(text: string): string {
   const out: string[] = [];
+  let fenced = false; // TELEGRAM ROUND 4: a line of a fenced code block is code, kept exactly as written (its links too)
   for (const raw of String(text ?? "").split("\n")) {
+    if (FENCE.test(raw)) { fenced = !fenced; out.push(raw); continue; }
+    if (fenced) { out.push(raw); continue; }
     const line = raw.replace(MD_LINK, (_m, label: string, url: string) => {
       const l = label.trim();
       return l === url || urlsOf(l)[0] === url ? url : `${l} ${url}`;
@@ -237,10 +240,11 @@ export function splitNatural(text: string, max: number): string[] {
   if (clean.length <= max) return [clean];
   // Units in reading order, each with the separator that joins it to the one before when they share a message.
   const units: { s: string; sep: string }[] = [];
-  const paras = clean.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
-  paras.forEach((p, pi) => {
+  // TELEGRAM ROUND 4: a fenced code block is one paragraph, kept whole while it fits and otherwise sent as whole blocks.
+  paragraphsOf(clean).forEach(({ s: p, code }, pi) => {
     const paraSep = pi === 0 ? "" : "\n\n";
     if (p.length <= max) { units.push({ s: p, sep: paraSep }); return; }
+    if (code) { fenceChunks(p, max).forEach((c, ci) => units.push({ s: c, sep: ci === 0 ? paraSep : "\n" })); return; }
     p.split("\n").map((l) => l.trim()).filter(Boolean).forEach((l, li) => {
       const lineSep = li === 0 ? paraSep : "\n";
       if (l.length <= max) { units.push({ s: l, sep: lineSep }); return; }

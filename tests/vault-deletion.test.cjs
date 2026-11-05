@@ -28,6 +28,13 @@ const WRITERS = {
   "20261012010000_manual_connections.sql": [{ secret: "manual_<uid>_<platform>", out: "trigger", trigger: "manual_connections_vault_cleanup" }],
   // oauth_vault_refresh: a refreshed token, written only while its connection row exists (and under that row's lock).
   "20261030050000_account_erase_r2.sql": [{ secret: "oauth_<provider>_<uid>, refreshed", out: "trigger", trigger: "user_oauth_connections_vault_cleanup", rpc: "oauth_vault_delete" }],
+  // oauth_connect_commit: a connect's tokens, written with the connection row in one transaction (the row's delete removes them).
+  "20261031060000_connectors_r3.sql": [{ secret: "oauth_<provider>_<uid>, connected", out: "trigger", trigger: "user_oauth_connections_vault_cleanup", rpc: "oauth_vault_delete" }],
+  // Round 4 redefines both (the connect stamps its grant; a refresh writes only over the grant it read).
+  "20261105130000_connectors_r4.sql": [
+    { secret: "oauth_<provider>_<uid>, connected (stamped)", out: "trigger", trigger: "user_oauth_connections_vault_cleanup", rpc: "oauth_vault_delete" },
+    { secret: "oauth_<provider>_<uid>, refreshed (same grant)", out: "trigger", trigger: "user_oauth_connections_vault_cleanup", rpc: "oauth_vault_delete" },
+  ],
 };
 
 test("every vault.create_secret in a migration is declared with its way out", () => {

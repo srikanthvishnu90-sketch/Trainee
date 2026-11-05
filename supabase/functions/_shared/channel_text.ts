@@ -87,3 +87,46 @@ export const safeSlice = (s: string, n: number): string => String(s ?? "").slice
 
 const enc = new TextEncoder();
 export const utf8Bytes = (s: string): number => enc.encode(String(s ?? "")).length;
+
+// TELEGRAM ROUND 4 (2026-11-05): a fenced code block (``` ... ```) is one block of text, never cut like prose. A long answer
+// was split on its blank lines and trimmed line by line, so a code block with a blank line in it, or one that straddled a
+// message boundary, arrived as half a block: the next message's code read as prose (a "*" in it turned italic), its closing
+// fence opened a new block that swallowed the prose after it, and every line lost its indentation.
+export const FENCE = /^\s*```/;
+// The text's paragraphs in order (split on blank lines, each trimmed), with every fenced code block kept whole as one
+// paragraph, its lines exactly as written (an unclosed fence runs to the end of the text, as the renderer reads it).
+export function paragraphsOf(text: string): { s: string; code: boolean }[] {
+  const out: { s: string; code: boolean }[] = [];
+  let prose: string[] = [], code: string[] | null = null;
+  const flush = () => {
+    for (const p of prose.join("\n").split(/\n\s*\n/)) { const t = p.trim(); if (t) out.push({ s: t, code: false }); }
+    prose = [];
+  };
+  for (const line of String(text ?? "").split("\n")) {
+    if (code) { code.push(line); if (FENCE.test(line)) { out.push({ s: code.join("\n"), code: true }); code = null; } continue; }
+    if (FENCE.test(line)) { flush(); code = [line]; continue; }
+    prose.push(line);
+  }
+  if (code) out.push({ s: code.join("\n").replace(/\s+$/, ""), code: true });
+  flush();
+  return out;
+}
+// A code block in pieces of at most `max` characters, each piece a whole block of its own (its opening fence, whole lines,
+// a closing fence), so every message renders as code. A single line longer than a whole piece is cut, never inside a character.
+export function fenceChunks(block: string, max: number): string[] {
+  if (block.length <= max) return [block];
+  const lines = block.split("\n");
+  const open = FENCE.test(lines[0]) ? lines.shift()!.trim() : "```";
+  if (lines.length && FENCE.test(lines[lines.length - 1])) lines.pop();
+  const close = "```", room = Math.max(1, max - open.length - close.length - 2);
+  const out: string[] = [];
+  let buf: string[] = [], len = 0;
+  const push = () => { if (buf.length) out.push(`${open}\n${buf.join("\n")}\n${close}`); buf = []; len = 0; };
+  for (let line of lines) {
+    while (line.length > room) { const c = safeCut(line, room) || room; if (buf.length) push(); buf = [line.slice(0, c)]; push(); line = line.slice(c); }
+    if (buf.length && len + 1 + line.length > room) push();
+    len += (buf.length ? 1 : 0) + line.length; buf.push(line);
+  }
+  push();
+  return out.length ? out : [block];
+}

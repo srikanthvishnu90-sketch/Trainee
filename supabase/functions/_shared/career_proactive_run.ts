@@ -7,7 +7,7 @@
 // own gate again at the moment of queuing (matchPosting: their keywords, place and relevance floor; and news, not
 // backlog), so nothing below the person's threshold is ever sent; the planner holds no alert for a weekly count (but see the
 // database's career_alert_enqueue, which still does). Each alert carries its posting's first_seen_at, for the latency report.
-import { DEFAULT_PREFS, fitFloorOk, localDay, matchPosting, planProactive, quietAt, twinKeys, zoneOr } from "./career_alerts.ts";
+import { DEFAULT_PREFS, dayCount, fitFloorOk, localDay, matchPosting, planProactive, quietAt, twinKeys, zoneOr } from "./career_alerts.ts";
 const TWIN_LOOKBACK_MS = 72 * 3600000; // how far back an alert makes the same job on another board not news
 import { alertFits } from "./career_alert_fit.ts";
 import { freshWhenSeen } from "./career_fresh.ts";
@@ -118,10 +118,21 @@ export async function runAlerts(o: {
   // The postings of the alerts already queued that this run did not read (older than its window): for their jobs only.
   const alertedIds = [...new Set([...(queued?.values() ?? [])].flatMap((ks) => [...ks]).map((k) => k.slice("alert:".length)))].filter((id) => !byId.has(id));
   const alerted = new Map(byId);
+  // PROACTIVE SCENARIOS ROUND 4 (2026-11-05): the jobs each person already applied to through Trainee, with their postings
+  // (for the same job on other boards). A store that cannot say keeps the old behaviour; a read that fails stops the run,
+  // as the alerted postings' read does: never "New match" on a guess that they have not applied.
+  const applied = o.store.appliedJobs ? await o.store.appliedJobs(rows.map((r) => r.id)) : new Map<string, Set<string>>();
+  const appliedIds = [...new Set([...applied.values()].flatMap((s) => [...s]))].filter((id) => !byId.has(id));
   // A read that fails stops the run (as the held postings' read does): never an alert on a guess that it is not a twin.
-  if (alertedIds.length) for (const p of await o.postingsById(alertedIds.slice(0, 2000))) alerted.set(p.job_id, p);
-  const users: AlertRow[] = rows.map((r) => ({ ...r, instant_sent_today: (r.sent_on === localDate(o.now, r.tz) ? r.instant_sent_today : 0) + (atomic ? 0 : counted.get(r.id)!.size),
-    alerted_twins: [...(queued?.get(r.id) ?? [])].map((k) => alerted.get(k.slice("alert:".length))).filter(Boolean).flatMap(twinKeys) }));
+  const wanted = [...new Set([...alertedIds, ...appliedIds])];
+  if (wanted.length) for (const p of await o.postingsById(wanted.slice(0, 4000))) alerted.set(p.job_id, p);
+  const users: AlertRow[] = rows.map((r) => {
+    const day = dayCount(r.sent_on, r.instant_sent_today, localDate(o.now, r.tz));
+    const mine = [...(applied.get(r.id) ?? [])];
+    return { ...r, instant_sent_today: day.count + (atomic ? 0 : counted.get(r.id)!.size), sent_on: day.on,
+      alerted_twins: [...(queued?.get(r.id) ?? [])].map((k) => alerted.get(k.slice("alert:".length))).filter(Boolean).flatMap(twinKeys),
+      ...(mine.length ? { applied: mine, applied_twins: mine.map((id) => alerted.get(id)).filter(Boolean).flatMap(twinKeys) } : {}) };
+  });
   // F7: the fit to each matching posting, for people whose watch record carries their confirmed facts; ranked and floored
   // by the planner, and the floor checked again below at the moment of queuing.
   const fits = await alertFits({ users, postings, profiles, full: o.postingsById });
@@ -160,11 +171,18 @@ export async function runAlerts(o: {
         // An alert already queued, not counted above (a run alongside this one queued it after this run read the outbox, or
         // the store cannot list them), counts against today's cap too.
         if (!fresh) { stats.duplicates++; if (p.kind === "alert" && !counted.get(u.id)!.has(p.key)) sent++; continue; }
-        if (p.kind === "alert") { sent++; stats.alerts++; } else { reported = true; stats.reports++; }
+        if (p.kind === "alert") { sent++; stats.alerts++; } else {
+          reported = true; stats.reports++;
+          // PROACTIVE SCENARIOS ROUND 4 (2026-11-05): one daily report waiting at a time. Delivery that fell behind (a channel
+          // down for a day, a window held) sent yesterday's report, which said "in the last day" of a day long gone, and today's
+          // one after the other. Yesterday's, not yet sent, is set aside with why; today's lists what is still news.
+          if (o.outbox.supersede) await o.outbox.supersede(u.id, "report", p.key).catch((e) => console.error("alerts: an older report was not set aside:", errText(e)));
+        }
       }
       const counters = {
         last_checked_at: new Date(o.now).toISOString(),
-        instant_sent_today: u.instant_sent_today + sent, sent_on: today,
+        // PROACTIVE SCENARIOS ROUND 4: the later of the day counted and today (dayCount), so a move west keeps the count.
+        instant_sent_today: u.instant_sent_today + sent, sent_on: u.sent_on && u.sent_on > today ? u.sent_on : today,
         held: reported ? [] : [...held], // a report lists what was held; after it, nothing is held
         last_report_on: reported ? today : u.last_report_on,
       };
@@ -172,7 +190,7 @@ export async function runAlerts(o: {
       // alerts" that lands while the run is going stays stopped. A store without saveCounters writes the whole row.
       // Every alert counted as it was queued (enqueueAlert): the day's count is the store's, never this run's copy of it.
       if (o.store.saveCounters) await o.store.saveCounters(u.id, counters, legacy ? undefined : { counted: true });
-      else { const { alerted_twins: _twins, ...row } = u; await o.store.save({ ...row, ...counters }); }
+      else { const { alerted_twins: _twins, applied: _applied, applied_twins: _appliedTwins, ...row } = u; await o.store.save({ ...row, ...counters }); }
     } catch (e) {
       failed.push(errText(e));
     }
@@ -341,7 +359,8 @@ export const BRIEF_AGAIN_MS = 7 * 86400000;
 //   - an email that moves the interview to a stated new time is said, once, with that time ("Interview update: ...").
 //     It was stored and not briefed again, so the person was never told the new time by Trainee, and the thank-you was
 //     still drafted for the date it moved away from (now marked moved).
-async function briefMail(o: { outbox: Outbox; now: number; briefs: InterviewStore }, userId: string, e: StatusEvent, m: MailIn, had: InterviewRow[], at: number, tz: string | null): Promise<{ ms: number; row: InterviewRow } | null> {
+async function briefMail(o: { outbox: Outbox; now: number; briefs: InterviewStore }, userId: string, e: StatusEvent, m: MailIn, had: InterviewRow[], at: number, tz: string | null, mailbox?: string): Promise<{ ms: number; row: InterviewRow } | null> {
+  const mb = mailbox === undefined ? {} : { mailbox };
   const sent = Date.parse(m.date) || o.now;
   const inv = extractInvite({ text: m.snippet, subject: m.subject, from: m.from, sentAt: sent, company: e.company, role: e.role ?? null });
   const row = interviewRow(inv, { key: e.hash, source: "mail", ref: e.ref, mail_at: new Date(sent).toISOString(), seen_at: o.now });
@@ -351,22 +370,37 @@ async function briefMail(o: { outbox: Outbox; now: number; briefs: InterviewStor
   const movedFrom = inv.when.date && MOVES_INTERVIEW.test(`${m.subject}\n${m.snippet}`)
     ? prior.filter((r) => r.date && (r.date !== inv.when.date || (r.time ?? null) !== (inv.when.time ?? null)) && Date.parse(r.mail_at ?? r.seen_at) <= sent) : [];
   const ms = Math.max(0, o.now - sent);
+  // PROACTIVE SCENARIOS ROUND 4 (2026-11-05): an interview already over is not briefed. Mail read late (the first read looks
+  // back 3 days; a run that was down reads up to 14) found an invite for an interview that had already happened, and the
+  // person got "Interview brief" and a 10-point plan for it. The invite is stored and its status text still says it; only
+  // the brief (and an update to a time already past) is not sent.
+  if (interviewOver(inv.when, o.now, tz)) {
+    for (const r of movedFrom) { await o.briefs.mark?.(userId, r.key, { moved_at: new Date(o.now).toISOString() }); r.moved_at = new Date(o.now).toISOString(); }
+    return null;
+  }
   if (prior.some((r) => r.brief_at && o.now - Date.parse(r.brief_at) < BRIEF_AGAIN_MS)) {
     if (!movedFrom.length) return null;
     const who = clip(inv.company ?? e.company, 80), what = inv.role ? ` for ${clip(inv.role, 80)}` : "";
     const text = `Interview update: ${who} moved your interview${what}. ${whenLine(inv, tz).replace(/^When:/, "New time:")}`;
-    await o.outbox.enqueue(userId, { key: `brief:${e.hash}:moved`, kind: "brief", text, at });
+    await o.outbox.enqueue(userId, { key: `brief:${e.hash}:moved`, kind: "brief", text, at, ...mb });
     for (const r of movedFrom) { await o.briefs.mark?.(userId, r.key, { moved_at: new Date(o.now).toISOString() }); r.moved_at = new Date(o.now).toISOString(); }
     await o.briefs.briefed(userId, e.hash, o.now, ms);
     return { ms, row: { ...row, brief_at: new Date(o.now).toISOString(), brief_ms: ms } };
   }
   const b = inviteBrief(inv, { now: o.now, tz });
   let queued = 0;
-  for (const [i, text] of b.texts.entries()) if (await o.outbox.enqueue(userId, { key: `brief:${e.hash}:${i + 1}`, kind: "brief", text, at })) queued++;
+  for (const [i, text] of b.texts.entries()) if (await o.outbox.enqueue(userId, { key: `brief:${e.hash}:${i + 1}`, kind: "brief", text, at, ...mb })) queued++;
   for (const r of movedFrom) { await o.briefs.mark?.(userId, r.key, { moved_at: new Date(o.now).toISOString() }); r.moved_at = new Date(o.now).toISOString(); }
   if (!queued && !unfinished) return null;
   await o.briefs.briefed(userId, e.hash, o.now, ms);
   return { ms, row: { ...row, brief_at: new Date(o.now).toISOString(), brief_ms: ms } };
+}
+// An interview whose stated start has passed, or whose stated day is before today on the person's clock. Nothing stated:
+// not over (the brief says what the invite leaves out).
+export function interviewOver(when: { date?: string | null; starts_at?: string | null }, now: number, tz: string | null): boolean {
+  const start = when.starts_at ? Date.parse(when.starts_at) : NaN;
+  if (Number.isFinite(start)) return start <= now;
+  return !!when.date && /^\d{4}-\d{2}-\d{2}$/.test(when.date) && when.date < localDay(now, tz);
 }
 const withInterviews = (apps: TrackedApp[], rows: InterviewRow[]) =>
   apps.map((a) => { const r = rows.find((x) => x.date && inviteRef(x) === a.ref); return r ? { ...a, interview_on: r.date! } : a; });
@@ -424,6 +458,9 @@ export async function runMail(o: {
     // since the run began (career_mail_record_events); then nothing read is said either (an interview brief included).
     if (await gone()) { stats.disconnected = (stats.disconnected ?? 0) + 1; return; }
     const at = awake(o.now, p.tz, p);
+    // CONNECTORS ROUND 4 (2026-11-05): every text made from this mail names the mailbox it was read from; it is queued only
+    // while that is still the one connected (career_mail_text_enqueue).
+    const mb = p.mailbox === undefined ? {} : { mailbox: p.mailbox };
     // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): an employer's email that cancels an interview on file. It was read as
     // nothing ("other"), so the person was never told, and the thank-you for the interview that never happened was still
     // drafted. Said once (status:<message>), from the employer's own mail only, and the interview is marked cancelled.
@@ -438,7 +475,7 @@ export async function runMail(o: {
     }
     for (const t of plan.texts) {
       if (cancels.has(t.hash)) continue; // said below, as a cancellation
-      if (fresh.has(t.hash) && await o.outbox.enqueue(p.user_id, { key: t.key, kind: "status", text: t.text, at })) stats.statuses++;
+      if (fresh.has(t.hash) && await o.outbox.enqueue(p.user_id, { key: t.key, kind: "status", text: t.text, at, ...mb })) stats.statuses++;
     }
     if (o.briefs) {
       const byHash = new Map(r.mails.map((m) => [m.hash, m]));
@@ -448,7 +485,7 @@ export async function runMail(o: {
         // Read again after a run that died part way (its cursor not saved): an invite stored and not briefed, or not stored
         // at all, is taken up again; one already briefed is not.
         if (!fresh.has(e.hash) && had.some((x) => x.key === e.hash && x.brief_at)) continue;
-        const done = await briefMail({ outbox: o.outbox, now: o.now, briefs: o.briefs }, p.user_id, e, m, had, at, p.tz && zoneOr(p.tz, "") ? zoneOr(p.tz) : null);
+        const done = await briefMail({ outbox: o.outbox, now: o.now, briefs: o.briefs }, p.user_id, e, m, had, at, p.tz && zoneOr(p.tz, "") ? zoneOr(p.tz) : null, p.mailbox);
         if (!done) continue;
         stats.briefs++;
         stats.brief_ms_max = Math.max(stats.brief_ms_max ?? 0, done.ms);
@@ -461,13 +498,13 @@ export async function runMail(o: {
         const on = rows.filter((x) => x.date && inviteRef(x) === app.ref && !x.moved_at && Date.parse(x.mail_at ?? x.seen_at) <= sentAt);
         const days = [...new Set(on.map((x) => x.date!))].sort().map((d) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" }));
         const text = `${clip(app.company, 80)} cancelled your interview${app.role ? ` for ${clip(app.role, 80)}` : ""}${days.length ? ` on ${days.join(" and ")}` : ""} (email ${new Date(sentAt).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}). I won't draft a thank-you for it. Email: "${clip(m.subject, 120)}"`;
-        if (await o.outbox.enqueue(p.user_id, { key: `status:${hash}`, kind: "status", text, at })) stats.statuses++;
+        if (await o.outbox.enqueue(p.user_id, { key: `status:${hash}`, kind: "status", text, at, ...mb })) stats.statuses++;
         for (const x of on) if (!x.cancelled_at) await o.briefs.mark?.(p.user_id, x.key, { cancelled_at: new Date(o.now).toISOString() });
       }
     }
     if (await gone()) { stats.disconnected = (stats.disconnected ?? 0) + 1; return; }
     for (const d of plan.drafts) {
-      if (await o.store.saveDraft(p.user_id, d) && await o.outbox.enqueue(p.user_id, { key: `followup:${d.key}`, kind: "followup", text: draftOffer(d), at })) stats.followups++;
+      if (await o.store.saveDraft(p.user_id, d) && await o.outbox.enqueue(p.user_id, { key: `followup:${d.key}`, kind: "followup", text: draftOffer(d), at, ...mb })) stats.followups++;
     }
     // WO-032: the same mail confirms applications in the queue, only on the stricter match in career_apply_confirm.ts.
     // A received email that confirms one is said once (status:confirmed:<application>); a rejection, interview or offer
@@ -479,7 +516,7 @@ export async function runMail(o: {
         stats.confirmations++;
         if (c.mail_kind !== "received") continue;
         const text = receiptText({ company: c.company, url: c.url, state: "confirmed", email_confirmed_at: c.mail_at, tz: p.tz ? zoneOr(p.tz) : p.tz });
-        if (await o.outbox.enqueue(p.user_id, { key: `status:confirmed:${c.id}`, kind: "status", text, at })) stats.statuses++;
+        if (await o.outbox.enqueue(p.user_id, { key: `status:confirmed:${c.id}`, kind: "status", text, at, ...mb })) stats.statuses++;
       }
     }
     if (r.readThrough !== null && !(await gone())) await o.store.saveCursor(p.user_id, r.readThrough);
@@ -531,7 +568,12 @@ export async function runDigest(o: { outbox: Outbox; now: number; store: DigestS
     if (!due) continue;
     try {
       const d = buildDigest(await o.store.rows(p.user_id, new Date(o.now - 7 * 86400000).toISOString()), { now: o.now, tz });
-      if (d && await o.outbox.enqueue(p.user_id, { key: `digest:${week}`, kind: "digest", text: d.text, at: awake(o.now, tz, p) })) n++;
+      if (d && await o.outbox.enqueue(p.user_id, { key: `digest:${week}`, kind: "digest", text: d.text, at: awake(o.now, tz, p) })) {
+        n++;
+        // PROACTIVE SCENARIOS ROUND 4 (2026-11-05): last week's digest still waiting (delivery behind) is set aside, not sent
+        // beside this one: two weekly digests at once, the older one's "coming up" interviews long past.
+        if (o.outbox.supersede) await o.outbox.supersede(p.user_id, "digest", `digest:${week}`).catch((e) => console.error("digest: an older digest was not set aside:", e instanceof Error ? e.message : String(e)));
+      }
     } catch (e) {
       failed.push(e instanceof Error ? e.message : String(e));
     }

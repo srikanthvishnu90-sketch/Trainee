@@ -275,6 +275,8 @@ MIGRATIONS=(
   20261102160000_model_budget_total_cap.sql
   20261102180000_delivery_throughput.sql
   20261103100000_google_disconnect_erase_outbox.sql
+  20261104010000_site_waitlist_survey.sql
+  20261105100000_career_outreach_r4.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -419,6 +421,8 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'model_budget_total_status') and exists (select 1 from pg_proc where proname = 'model_budget_reserve' and pronargs = 6)"
   "exists (select 1 from pg_proc where proname = 'career_outbox_claim_lane') and exists (select 1 from pg_proc where proname = 'channel_rate_acquire') and to_regclass('public.channel_rate_buckets') is not null"
   "exists (select 1 from pg_proc where proname = 'google_career_disconnect_erase' and prosrc like '%status:deadline:%')"
+  "to_regclass('public.site_waitlist_survey') is not null"
+  "exists (select 1 from pg_proc where proname = 'career_outreach_claim' and prosrc like '%on_rail%' and prosrc like '%career_send_bad_addresses%')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql

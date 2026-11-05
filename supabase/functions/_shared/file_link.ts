@@ -35,10 +35,17 @@ const LIST = /^[0-9a-f]{10}$/;
 // null when no secret is configured (the bot then shows no link at all).
 export async function mintFileToken(o: { secret: string | undefined; userId: string; list: string; now: number; ttlMs?: number; kind?: TokenKind }): Promise<string | null> {
   if (!o.secret || o.secret.length < SECRET_MIN || !o.userId || !LIST.test(o.list)) return null;
-  const j = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
-  const claims: FileClaims = { u: o.userId, r: o.list, k: o.kind ?? "s", j, i: o.now, e: o.now + Math.min(o.ttlMs ?? FILE_TTL_MS, MAX_LINK_SPAN_MS) };
-  const body = b64(enc.encode(JSON.stringify(claims)));
-  return `v1.${body}.${await sign(o.secret, `v1.${body}`)}`;
+  // The link is sent alone on texting channels (SMS, iMessage, WhatsApp, Telegram), where "__" reads as emphasis markup
+  // (role_pay.ts MARKDOWN). About 1 token in 100 has "__" in its base64url claims or signature, so a fresh random id is drawn
+  // until the token has none (bounded: 8 draws all having one is about 1 in 10^16).
+  let t = "";
+  for (let n = 0; n < 8 && (!t || t.includes("__")); n++) {
+    const j = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const claims: FileClaims = { u: o.userId, r: o.list, k: o.kind ?? "s", j, i: o.now, e: o.now + Math.min(o.ttlMs ?? FILE_TTL_MS, MAX_LINK_SPAN_MS) };
+    const body = b64(enc.encode(JSON.stringify(claims)));
+    t = `v1.${body}.${await sign(o.secret, `v1.${body}`)}`;
+  }
+  return t;
 }
 
 export async function verifyFileToken(token: unknown, secret: string | undefined, now: number): Promise<FileTokenCheck> {

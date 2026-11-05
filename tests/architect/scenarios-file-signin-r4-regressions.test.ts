@@ -78,12 +78,17 @@ Deno.test("file sign-in r4: the erase migration is wired everywhere a migration 
   ok(read(`supabase/rollbacks/20261105150000_trainee_file_erase_r4.down.sql`).includes("drop function if exists public.trainee_file_erase_on_epoch()"));
   const golive = read("scripts/launch/trainee-go-live.sh");
   const migs = golive.slice(golive.indexOf("MIGRATIONS=("), golive.indexOf("MIGRATION_MARK=(")).match(/^\s+(\d{14}_[a-z0-9_]+\.sql)$/gm)!.map((x) => x.trim());
-  eq(migs.at(-1), f, "the last migration go-live applies");
-  ok(golive.includes("tgname = 'trainee_file_erase_on_epoch'"), "its live mark");
+  // present once, at its date-ordered place (later migrations may follow it), and its live mark at the same index
+  eq(migs.filter((x) => x === f).length, 1, "go-live applies it once");
+  const at = migs.indexOf(f);
+  ok(migs.slice(0, at).every((x) => x < f) && migs.slice(at + 1).every((x) => x > f), "in date order among go-live's migrations");
+  const marks = golive.slice(golive.indexOf("MIGRATION_MARK=("), golive.indexOf("\n)", golive.indexOf("MIGRATION_MARK=("))).match(/^\s+".*"$/gm)!;
+  eq(marks.length, migs.length, "one mark per migration");
+  ok(marks[at].includes("tgname = 'trainee_file_erase_on_epoch'"), "its live mark, at its index");
   const run = read("tests/db/run.sh");
   eq((run.match(/20261105150000_trainee_file_erase_r4\.sql"/g) ?? []).length, 3, "applied twice, then again after its rollback");
   ok(run.includes(`"$t" == "$HERE/trainee_file_erase_r4.test.sql"`) && run.includes(`-f "$HERE/trainee_file_erase_r4.test.sql"`));
-  ok(/LIVE_MISSING_DEFAULT="[^"]*20261105150000_trainee_file_erase_r4\.sql"/.test(read("tests/db/rehearse_live_migrations.sh")));
+  ok(/LIVE_MISSING_DEFAULT="[^"]*\b20261105150000_trainee_file_erase_r4\.sql[ "]/.test(read("tests/db/rehearse_live_migrations.sh")), "the rehearsal applies it (later migrations may follow)");
 });
 
 Deno.test("file sign-in r4: the memory twin's erase does what the migration does (sessions gone, sign-ins used up, numbers cleared, counts kept)", async () => {

@@ -79,6 +79,9 @@ function fakeModel(body: any): Response {
 
 // ------------------------------------------------------------------------------------------------ the world
 let priorKey: string | undefined; // the model key as it was: a key left set would reach later test files in the same process
+// The release flags as this process had them (the gate sets them "off"; unset is "on"): put back exactly, never deleted.
+const FLAGS_AT_START = Object.fromEntries(["CAREER_TAILOR_REWRITE", "CAREER_ACCOUNT_MEMORY"].map((k) => [k, Deno.env.get(k)]));
+const restoreFlag = (k: string) => { const v = FLAGS_AT_START[k]; if (v === undefined) Deno.env.delete(k); else Deno.env.set(k, v); };
 let pg: Pg | null = null, handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
 const timings: number[] = [];
 async function world() {
@@ -281,7 +284,7 @@ Deno.test({ name: "materials (3): an invented employer, number or date in a rewr
     assert(!/Google|2019|Eligibility verdict/.test(g.pdfText), g.pdfText);
     eq(untraced(g.docxLines), [], "every line is the person's own words");
   } finally {
-    Deno.env.delete("CAREER_TAILOR_REWRITE");
+    restoreFlag("CAREER_TAILOR_REWRITE");
     answer = (b) => b;
   }
 } });
@@ -336,8 +339,12 @@ Deno.test({ name: "materials: measured turns, wall time and model calls (printed
   const xs = [...timings].sort((a, b) => a - b);
   const q = (p: number) => xs.length ? Math.round(xs[Math.min(xs.length - 1, Math.ceil(p * xs.length) - 1)]) : 0;
   console.log(`MATERIALS MEASURE: turns=${xs.length} p50_ms=${q(0.5)} p95_ms=${q(0.95)} max_ms=${Math.round(xs.at(-1) ?? 0)} model_calls=${calls.length}`);
-  assert(xs.length >= 9, "the flows above ran (5 + 4 turns)");
-  handler?.restore();
-  if (priorKey === undefined) Deno.env.delete("ANTHROPIC_API_KEY"); else Deno.env.set("ANTHROPIC_API_KEY", priorKey);
-  await pg?.stop();
+  try {
+    assert(xs.length >= 9, "the flows above ran (5 + 4 turns)");
+  } finally {
+    handler?.restore();
+    if (priorKey === undefined) Deno.env.delete("ANTHROPIC_API_KEY"); else Deno.env.set("ANTHROPIC_API_KEY", priorKey);
+    for (const k of Object.keys(FLAGS_AT_START)) restoreFlag(k);
+    await pg?.stop();
+  }
 } });

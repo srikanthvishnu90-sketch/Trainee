@@ -128,9 +128,13 @@ footer.site .copy{color:var(--muted-dark);font-size:15px}
 <script>
 (function () {
   var SURVEY_ENDPOINT = 'https://mrwngntwmnaqrqhupvlt.supabase.co/functions/v1/site-survey';
-  var params = new URLSearchParams(location.search);
-  var name = (params.get('n') || '').trim();
-  var phone = (params.get('p') || '').trim();
+  // Who joined comes from the signup page through this tab's sessionStorage (read once, then cleared), never the URL.
+  var saved = {};
+  try { saved = JSON.parse(sessionStorage.getItem('trainee-survey') || '{}') || {}; sessionStorage.removeItem('trainee-survey'); } catch (e) { saved = {}; }
+  // An old link may still carry ?n=&p=: drop it from the address bar and history without reading it.
+  if (location.search) { try { history.replaceState(null, '', location.pathname); } catch (e) {} }
+  var name = String(saved.n || '').trim();
+  var phone = String(saved.p || '').trim();
   var form = document.getElementById('surveyForm');
   var err = document.getElementById('sv-err');
   var btn = document.getElementById('sv-btn');
@@ -165,14 +169,16 @@ footer.site .copy{color:var(--muted-dark);font-size:15px}
     btn.disabled = true;
     fetch(SURVEY_ENDPOINT, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: n, phone: p, q1: q1, q2: q2, q3: q3, source: location.href })
+      body: JSON.stringify({ name: n, phone: p, q1: q1, q2: q2, q3: q3, source: location.pathname })
     }).then(function (r) {
+      if (r.status === 403) throw new Error('That number is not on the waitlist. Use the mobile number you joined with.');
+      if (r.status === 409) throw new Error('We already have your answers for this number.');
       if (!r.ok) throw new Error();
       form.hidden = true;
       document.getElementById('sv-done').hidden = false;
       window.scrollTo({ top: 0, behavior: 'smooth' });
-    }).catch(function () {
-      fail('Something went wrong saving your answers. Try again in a moment.');
+    }).catch(function (x) {
+      fail(x && x.message ? x.message : 'Something went wrong saving your answers. Try again in a moment.');
     }).then(function () { btn.disabled = false; });
   });
 })();

@@ -300,7 +300,7 @@ async function lifecycle(r: R, i: number, rep: Report) {
   if (sentDrafts.length && store.saveFollowups) {
     await store.saveFollowups(u, sentDrafts.map((d) => ({ draft_id: d.id, name: d.recipient.name, firm: d.recipient.firm, email: d.recipient.email, subject: d.subject, sent_at: d.sent_at!, due_at: new Date(Date.parse(d.sent_at!) + 7 * DAY).toISOString(), set_at: d.sent_at!, fired_at: null, asked: false })));
     const queued: { key: string }[] = [];
-    await runOutreachFollowups({ store, outbox: { enqueue: async (_x, m) => { queued.push(m); return true; } }, now: clock + 8 * DAY } as any);
+    await runOutreachFollowups({ store, outbox: { enqueue: async (_x: string, m: { key: string }) => { queued.push(m); return true; } }, now: clock + 8 * DAY } as any);
     for (const q of queued) {
       const d = sentDrafts.find((x) => q.key.endsWith(x.id))!;
       const to = d.recipient.email.trim().toLowerCase();

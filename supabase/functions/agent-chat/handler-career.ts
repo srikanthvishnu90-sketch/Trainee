@@ -26,7 +26,7 @@
 // "unrecorded" when the sink failed. A missing row is never a zero.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
-import { chatSwitches } from "./chat_switches.ts"; // D-036 release flags (each gate below reads one switch)
+import { chatSwitches, liveSwitches } from "./chat_switches.ts"; // D-036 release flags (each gate below reads one switch)
 import { connectUrlsFor } from "../_shared/connect_link.ts"; // D-037: the send consent link
 import { looksLikePendingSecret, redactionNote, redactPending, secretLeadIn } from "../_shared/identity_redact.ts";
 import { corsFor } from "./_shared/chat_cors.ts";
@@ -66,7 +66,7 @@ import { standingTurn, supabaseStanding } from "../_shared/career_standing.ts";
 import { receiptTurn, supabaseReceipts } from "../_shared/career_apply_receipt_read.ts";
 import { chatScreenFacts } from "../_shared/career_apply_gate.ts";
 import { screenAnswerTurn, screenMeta, screenTapTurn, TAP_INTENT, TAP_STALE_REPLY } from "../_shared/career_apply_screen_answer.ts";
-import { APPLY_QUEUE_INTENT, applyTurn, EMPLOYER_ANSWER_INTENT, EMPLOYER_ASK_INTENT, employerAnswerTurn, paceReader, paceTurn, supabaseEmployerAskStore } from "../_shared/career_apply_chat.ts";
+import { APPLY_QUEUE_INTENT, applyManyAsk, applyTurn, EMPLOYER_ANSWER_INTENT, EMPLOYER_ASK_INTENT, employerAnswerTurn, paceReader, paceTurn, supabaseEmployerAskStore } from "../_shared/career_apply_chat.ts";
 import { confirmNotRecordedReply, correctionNotRecordedReply, type EvidenceResult, evidenceEntryCorrections, evidenceResumeConfirmation, heldEvents, heldReply, resumeConfirmationContext } from "../_shared/career_router_evidence.ts";
 // FEATURE 9: account memory (stated-fact provenance, standing needs on the router path).
 import { accountMemoryAfterTurn, accountMemoryOn, statedFactsBefore } from "../_shared/career_account_memory.ts";
@@ -146,7 +146,20 @@ async function careerGrantHas(admin: any, userId: string, scope: string): Promis
 export { CONFLICT_REPLY, refusedSaveReply };
 
 export const UNSAVED_REPLY = "I couldn't confirm this reply was saved. Send your message again; nothing goes to an employer or a contact until you approve exactly what is sent.";
-export const BATCH_NOT_STARTED_REPLY = "I haven't started that batch: nothing was searched, prepared or sent. Applying runs in the Trainee extension in your browser, one posting at a time, and it shows you each filled application before anything is sent. Tell me the role and city, and I'll find live postings you can pick from.";
+// MASS APPLY END TO END (2026-11-04): the batch stack's executor is not deployed (CAREER_BATCH_EXECUTOR, D-037), so its ask is
+// not started, said plainly; the reply names the ask that does run on the deployed path (the queue, server preparation, the
+// card, the person's yes to its exact payload, the cloud submitter: D-041), in the person's own words where it can. The old
+// text sent people to the browser extension, which is no longer the only way an application is prepared or sent.
+export const BATCH_NOT_STARTED_REPLY = "I haven't started that batch: nothing was searched, prepared or sent, because the runner for that kind of ask is not switched on. What does run: say \"apply to the top 10 <role> jobs in <city>\", or pick from a list I showed (\"apply to all of them\", \"apply to 1 and 3\"), and I put those postings on your apply list; each one is prepared, shown to you exactly as it would be sent, and goes to the employer only after your yes to that card.";
+// The same, with the ask that runs written from theirs ("apply to 15 software engineering intern roles" -> "apply to the top
+// 15 software engineering intern roles"), offered only when the deployed parser takes it as a search.
+export function batchNotStartedReply(message: string): string {
+  const m = /^\s*(?:please\s+|can you\s+|could you\s+)?apply\s+(?:me\s+)?(?:to|for)\s+(\d{1,3})\s+(.{3,120}?)\s*[.!]*\s*$/i.exec(String(message ?? ""));
+  const said = m ? `apply to the top ${m[1]} ${m[2].trim()}` : null;
+  const ask = said ? applyManyAsk(said) : null;
+  if (!said || !ask || ask.kind !== "first" || !ask.what) return BATCH_NOT_STARTED_REPLY;
+  return `I haven't started that batch: nothing was searched, prepared or sent, because the runner for that kind of ask is not switched on. What does run: say "${said}" and I search the postings on file and put the best fits on your apply list; each one is prepared, shown to you exactly as it would be sent, and goes to the employer only after your yes to that card.`;
+}
 const MAX_MESSAGE_LEN = 4000; // M2: cap input size (same cap as handler.ts)
 
 type TurnCtx = { note: string | null; user: string | null; thread: string | null };
@@ -459,6 +472,13 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       };
       // WO-100: module 120's "what's connected" reads the live grants, the extension and the phone link (no address).
       if (situation) ctx.statusRecords = statusRecordsFrom(situation.capabilities);
+      // MASS APPLY STATE (2026-11-04; packages/domain/157-career-apply-ledger.js): the router's approval and submission
+      // answers ("show my pending approvals", "was it actually submitted?") read the records this turn already read (the
+      // queue, the prepared applications, every thread's tracker), and say only what the live switches serve. Runtime
+      // only: neither key is a STATE_KEYS entry, so no snapshot carries them. No situation: no ledger, and the router says
+      // nothing it cannot read.
+      (ctx as any).liveSwitches = liveSwitches(Deno.env);
+      if (situation) (ctx as any).applyLedger = { asOf: situation.as_of, tasks: situation.tasks.filter((t) => t.kind === "application" || t.kind === "apply_request" || t.kind === "tracked"), unreadable: situation.unreadable.filter((u) => ["jobs", "wanted", "prepared", "threads"].includes(u)) };
       // WO-002 (D-008): the agent brain answers when CAREER_BRAIN=agent; structured task/batch requests stay on the
       // router path. A model failure falls back to the router so an outage never leaves the person with nothing.
       let out: CareerTurnResult;
@@ -1307,7 +1327,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         // it), so the batch sat "queued" forever. Until CAREER_BATCH_EXECUTOR=on says an executor drains the intents,
         // nothing is committed, the run is not kept, and the reply says exactly what happened and where applying runs.
         delete (ctx as any).batchApplyState;
-        out = { ...out, reply: BATCH_NOT_STARTED_REPLY, resultStatus: "not_started" };
+        out = { ...out, reply: batchNotStartedReply(message), resultStatus: "not_started" };
       }
       // V1 TEXTING VOICE (_shared/career_reply_writer.ts; PRODUCT AUDIT 2026-10-28): the final reply, written in Trainee's
       // texting voice and checked against this turn's facts (D-007); a rejected or failed write falls back to today's reply

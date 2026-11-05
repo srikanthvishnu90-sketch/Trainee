@@ -14614,8 +14614,66 @@ const CareerRouter = (() => {
     if (Array.isArray(mir.resumeIngest.entries)) for (const e of mir.resumeIngest.entries) if (e && e.id === f.id) e.sha256 = sha256(s(f.text || ""));
     return { hits, order, fact: f };
   }
+  const KIN = "(?:friend|sister|brother|sibling|mom|mum|mother|dad|father|parent|wife|husband|partner|roommate|flatmate|cousin|colleague|co-?worker|boss|son|daughter|girlfriend|boyfriend|classmate|aunt|uncle|niece|nephew|fianc[eé]e?)";
+  const RNOUN = "(?:resume|r[eé]sum[eé]|cv|file|document|doc|pdf|attachment)";
+  const DISOWN = [
+    new RegExp(`\\b(?:that|this|it)(?:'s| is| was|s)? (?:not|n't) (?:my ${RNOUN}|mine)\\b`),
+    new RegExp(`\\b(?:that|this|it) (?:isn't|wasn't|aint|ain't) (?:my ${RNOUN}|mine)\\b`),
+    new RegExp(`^(?:no[,.!]? ?|nope[,.!]? ?|oops[,.!]? ?|sorry[,.!]? ?)*(?:not mine|not my ${RNOUN})\\b`),
+    new RegExp(`\\b(?:that|this|it)(?:'s| is| was|s) (?:my |a |the )?${KIN}'?s(?: ${RNOUN})?(?: not mine)?$`),
+    new RegExp(`\\b(?:that|this|it)(?:'s| is| was|s) (?:my |a |the )?${KIN}'?s ${RNOUN}\\b`),
+    new RegExp(`\\b(?:sent|uploaded|attached|forwarded|pasted|gave you) (?:you )?(?:the |a )?wrong (?:one|${RNOUN})\\b`),
+    new RegExp(`^(?:oops[,.!]? ?|sorry[,.!]? ?|no[,.!]? ?)*(?:that was |that's |it's |that is )?(?:the )?wrong (?:one|${RNOUN})\\b`),
+    new RegExp(`\\b(?:that|this|it)(?:'s| is| was|s) (?:somebody|someone|some1) else'?s\\b`),
+    new RegExp(`\\bsome(?:one|body) else'?s ${RNOUN}\\b`),
+    new RegExp(`\\b(?:that|this|it)(?:'s| is| was|s) (?:not|n't) me\\b`),
+  ];
+  function resumeDisowned(text) {
+    let t = s(text).normalize("NFKC").toLowerCase().replace(/[’‘`]/g, "'").replace(/\s+/g, " ").trim();
+    if (!t || t.length > 140 || /\?/.test(t)) return false;
+    const FILL = "(?:oops|whoops|sorry|wait|ah+|oh+|hmm+|uh+|um+|ugh|no|nope|nah|my bad|lol|haha|sry|soz)";
+    for (let k = 0; k < 4; k++) t = t.replace(new RegExp(`^${FILL}\\b[,.!:;\\s-]*`), "").replace(new RegExp(`[,.!:;\\s-]*\\b${FILL}$`), "").replace(/[.!,;\s]+$/, "").trim();
+    if (!t) return false;
+    t = t.replace(/\bthats\b/g, "that's").replace(/\bisnt\b/g, "isn't").replace(/\bwasnt\b/g, "wasn't").replace(/\bits (not|my|the|some)\b/g, "it's $1");
+    if (new RegExp(`\\bnot (?:my |a |the )?${KIN}'?s\\b|\\bnot (?:somebody|someone) else'?s\\b`).test(t)) return false;
+    return DISOWN.some((re) => re.test(t));
+  }
+  function handleResumeDisowned(text, ctx) {
+    if (!resumeDisowned(text)) return null;
+    const profile = ctx.profile && typeof ctx.profile === "object" ? ctx.profile : null;
+    if (!profile) return null;
+    const mir = threadMirrorOf(ctx);
+    const confirmedNow = (profile.facts || []).some((f) => f && f.source === "resume-ingest" && !f.needs_confirmation);
+    if (mir && mir.resumeIngest) {
+      const ids = new Set(Array.isArray(mir.resumeIngest.factIds) ? mir.resumeIngest.factIds : []);
+      const gone = (profile.facts || []).filter((f) => f && f.source === "resume-ingest" && f.needs_confirmation && (!ids.size || ids.has(f.id)));
+      if (gone.length) {
+        const goneIds = new Set(gone.map((f) => f.id));
+        profile.facts = profile.facts.filter((f) => !(f && goneIds.has(f.id)));
+        if (ProfileMod && typeof ProfileMod.refreshSkillFlags === "function") { try { ProfileMod.refreshSkillFlags(profile); } catch {   } }
+        profile.profile_ingest_audit = [...(profile.profile_ingest_audit || []), { at: nowOf(ctx) || null, outcome: "disowned_by_person", removed_fact_ids: [...goneIds] }];
+      }
+      const wm = threadMirrorForWrite(ctx);
+      if (wm) delete wm.resumeIngest;
+      const n = gone.length;
+      return { intent: "career_resume_disowned", resultStatus: "completed", sends: 0, resume_ingest: { confirmed: 0, removed: n },
+        reply: compose({ headline: "Understood — that resume is set aside, and nothing from it is on your record.",
+          facts: [`I removed the ${n === 1 ? "entry" : `${n} entries`} I read from it; none was confirmed, and nothing is tailored, put on a form or sent from ${n === 1 ? "it" : "them"}.`,
+            ...(confirmedNow ? ["The resume you confirmed earlier is unchanged and stays the one I use."] : [])],
+          nextStep: "Send your own resume (or the same one again, if I misread it) as a PDF or Word file, or paste it here, and I'll show you every entry for your yes." }) };
+    }
+    if (confirmedNow && new RegExp(`${RNOUN}|${KIN}|some(?:one|body) else`).test(s(text).toLowerCase())) {
+      return { intent: "career_resume_disowned", resultStatus: "awaiting_user", sends: 0, resume_ingest: { confirmed: 0, removed: 0 },
+        reply: compose({ headline: "The resume you confirmed is still the one on file — nothing changed.",
+          facts: ["If it isn't yours, tell me to delete my resume and I remove it; no application is prepared or sent until you send your own and confirm it."],
+          nextStep: "Or send your own resume now; once you confirm it, it replaces that one." }) };
+    }
+    return null;
+  }
   function handleResumeIngestConfirm(text, ctx) {
     const mir = threadMirrorOf(ctx);
+    const disowned = handleResumeDisowned(text, ctx);
+    if (disowned) return disowned;
     if (!mir || !mir.resumeIngest) return null;
     const raw = s(text).trim();
     const profile = ctx.profile && typeof ctx.profile === "object" ? ctx.profile : null;
@@ -14686,7 +14744,7 @@ const CareerRouter = (() => {
         return chained;
       }
     }
-    const reply = compose({ headline: "Confirmed — your resume facts are on your record.", facts: [`${confirmed} fact${confirmed === 1 ? "" : "s"} from the resume you pasted are confirmed, in your own words — tailoring, packets, and answers now run on them.`, ...(superseded.length ? ["It replaces your earlier resume: nothing from that one is used any more."] : [])], nextStep: "Name a role (or paste a posting) and the tailoring runs on them." });
+    const reply = compose({ headline: "Confirmed — your resume facts are on your record.", facts: [`${confirmed} fact${confirmed === 1 ? "" : "s"} from the resume you pasted are confirmed, in your own words — tailoring, packets, and answers now run on them.`, ...(superseded.length ? ["It replaces your earlier resume: no application is prepared or sent with that one from now on."] : [])], nextStep: "Name a role (or paste a posting) and the tailoring runs on them." });
     return { intent: "career_resume_ingest", reply, resultStatus: "completed", sends: 0, resume_ingest: { confirmed, ...(superseded.length ? { superseded: superseded.length } : {}) } };
   }
   const RESUME_FRAME = /^\s*(?:(?:here'?s|here is|this is|attached is|sending)\s+my\s+(?:updated\s+|new\s+|current\s+)?(?:resume|cv|r[ée]sum[ée])|my\s+(?:resume|cv)\s*:)/i;
@@ -15515,7 +15573,12 @@ const CareerRouter = (() => {
   function catchAllReply(raw, ctx) {
     const t = lc(raw).replace(/[!?.]+$/, "").trim();
     const hasResume = resumeOnRecord(ctx);
-    const next = hasResume
+    const mirP = threadMirrorOf(ctx);
+    const waiting = !!(mirP && mirP.resumeIngest && ctx && ctx.profile && Array.isArray(ctx.profile.facts)
+      && ctx.profile.facts.some((f) => f && f.source === "resume-ingest" && f.needs_confirmation));
+    const next = waiting
+      ? "The resume you sent is still waiting for your word: if every entry I showed you is right, reply \"yes, that's my resume\"."
+      : hasResume
       ? "Want me to find roles that fit your resume?"
       : "Want to start by sending me your resume? Paste the text here or attach the file.";
     const say = (text, nextStep) => { const [h, ...rest] = String(text).split(/(?<=[.!?])\s+/); return compose({ headline: h, facts: rest, nextStep }); };
@@ -15527,7 +15590,7 @@ const CareerRouter = (() => {
       return say("Anytime.", next);
     }
     if (/^(yes|yeah|yep|yup|sure|no|nope|nah|idk|i don'?t know|not sure|maybe)\b/.test(t)) {
-      return say("No problem — there's nothing waiting on your answer right now.", next);
+      return say(waiting ? "I didn't take that as confirming anything — your resume's entries are still drafts." : "No problem — there's nothing waiting on your answer right now.", next);
     }
     if (/\b(?:my|ur|your)\s+(?:\w+\s+)?gpa\b|\bgpa\s+(?:is|was|of)\b/.test(t) && !/\?\s*$/.test(raw)) {
       let onResume = null;
@@ -23140,7 +23203,8 @@ const CareerRouter = (() => {
         if (!/^(not|a|an|the|looking|trying|here)$/i.test(name.split(" ")[0])) push("name", name, nm[0].trim());
       }
     }
-    const pushMajors = (value, clause) => { const v = _cleanFactVal(value); if (v && !_spanIsFragment(v)) push("majors", v, clause); };
+    const NOT_A_MAJOR = /^(?:wrong|incorrect|right|correct|off|fine|ok|okay|missing|a typo|typo|mistaken|outdated|old|yes|yeah|yep|no|nope|not\b.*|wrong .*|undecided yet)$/i;
+    const pushMajors = (value, clause) => { const v = _cleanFactVal(value); if (v && !_spanIsFragment(v) && !NOT_A_MAJOR.test(String(v).trim())) push("majors", v, clause); };
     {
       const u = unquotedText(raw);
       const corr = u.match(/\b(?:make it|shift it to|change it to|switch it to|move it to)\s+([A-Z][A-Za-z]+(?:\s[A-Z][A-Za-z]+)?)\s*,?\s+not\s+([A-Z][A-Za-z]+(?:\s[A-Z][A-Za-z]+)?)\b/)
@@ -23392,7 +23456,8 @@ const CareerRouter = (() => {
       if ((m = cl.match(/\b(?:i\s+)?(?:study|studying|majoring in|major in)\s+([a-z][a-z &]{2,40})/i))) pushMajors(m[1], m[0]);
       else if ((m = cl.match(/\bmy majors?\s+(?:is|are)\s+([a-z][a-z &,]{2,40})/i))) pushMajors(m[1], m[0]);
       else if ((m = cl.match(/^([a-z][a-z &,]{2,40}?)\s+(?:is|are)\s+my\s+majors?\b/i))) pushMajors(m[1], m[0]);
-      else if ((m = cl.match(/\b([a-z][a-z &]{2,30}?)\s+major\b/i)) && !/^(what|which|the|a|my)\b/i.test(m[1].trim())) pushMajors(m[1].replace(/^(a|the|my)\s+/i, ""), m[0]);
+      else if ((m = cl.match(/\b([a-z][a-z &]{2,30}?)\s+major\b/i)) && !/^(what|which|the|a|my)\b/i.test(m[1].trim())
+        && !/\b(?:my|your|his|her|their|our|the|a|an|this|that)\s*$/i.test(m[1].trim()) && !/\b(?:not|isn'?t|wasn'?t|aren'?t|wrong|incorrect|never)\b/i.test(cl)) pushMajors(m[1].replace(/^(a|the|my)\s+/i, ""), m[0]);
       if ((m = cl.match(/\btargeting\s+([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\b/)) && FACT_CITIES.some((ct) => lc(ct) === lc(m[1]))) push("geography", m[1], m[0]);
       else if ((m = cl.match(/\baiming\s+(?:at|for)\s+([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s+firms\b/)) && FACT_CITIES.some((ct) => lc(ct) === lc(m[1]))) push("geography", m[1], m[0]);
       else if ((m = cl.match(/\btargeting\s+([a-z]+)\s+firms\b/i)) && FACT_CITIES.some((ct) => lc(ct) === lc(m[1]))) push("geography", m[1].charAt(0).toUpperCase() + m[1].slice(1), m[0]);

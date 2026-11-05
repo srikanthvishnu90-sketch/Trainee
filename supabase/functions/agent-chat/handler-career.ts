@@ -111,6 +111,7 @@ import { rewriteOn, tailorRewriteTurn } from "../_shared/career_tailor_rewrite.t
 import { careerGrant, followupTurn, gmailReadGrant, gmailReadNow, mailNow, supabaseFollowupStores } from "../_shared/career_inbox_followups.ts";
 import { gmailSender } from "../_shared/career_outreach_gmail.ts";
 import { fileUploadFor } from "../_shared/channel_resume_upload.ts"; // FEATURE 16
+import { replacedResumeLines, replacedResumeStops } from "../_shared/career_resume_replace.ts"; // ONBOARDING ROUND 4
 import { outlookAsk, outlookChatTurn } from "../_shared/outlook_connector.ts"; // M4: Outlook
 import { chunkSentences, PAGE_CHUNK_CHARS, PAGE_MAX_CHUNKS, shapeForTurn, splitLongAnswer, withoutLinks } from "../_shared/channel_shape.ts"; // REPLY SHAPE
 import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a pasted link or "apply to this" -> one line + one Apply button
@@ -1232,6 +1233,13 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // A confirmation the host could not evidence is not claimed: those facts are drafts again, and the reply says so.
           const held = heldReply(ev);
           if (held) out = { ...out, reply: held, resultStatus: ev.stamped ? "partial" : "not_confirmed" };
+          // ONBOARDING ROUND 4 (career_resume_replace.ts): a resume replacing the one on file stops, in this turn's commit,
+          // the applications made with the earlier one; the reply says which, and the one being sent that can't be stopped.
+          else if (ev.stamped && seen.upload) {
+            const stops = await replacedResumeStops(admin, user.id, { sha256: seen.upload.sha256, kind: seen.upload.kind === "file" ? "file" : "paste" })
+              .catch((e) => { console.error("career resume replace: not read:", (e as Error)?.message ?? e); return null; });
+            if (stops) out = { ...out, reply: [out.reply, ...replacedResumeLines(stops)].join("\n"), parts: undefined };
+          }
         }
       }
       // ONBOARDING ROUND 3: a confirmed entry the person corrected in chat gets its own held confirmation event; one that

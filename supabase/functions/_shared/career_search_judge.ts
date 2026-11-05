@@ -22,7 +22,7 @@
 import { searchPostings, type SearchHit } from "./career_search.ts";
 import { searchWords, wordStem } from "./career_ingest.ts";
 import { correctedAsk } from "./search_correction.ts";
-import { hasLimits, type Limits, limitsLine, outsideLimits, REASON_WORDS, type Reason, searchTextOf, statedBand, statedPay } from "./posting_constraints.ts";
+import { hasLimits, type Limits, limitsLine, outsideLimits, REASON_WORDS, type Reason, searchTextOf, statedBand, statedPay, withoutAskNoise } from "./posting_constraints.ts";
 import { CareerPool } from "./career_pool.js";
 import { CareerProfile } from "./router_core.career.js";
 import { addStanding, type MemoryStore, type Standing } from "./agent/memory.ts";
@@ -273,13 +273,15 @@ export async function judgePostings(o: {
 // ------------------------------------------------------------------------------------------------ the sources
 // A posting as searchPostings reads it, with where it came from.
 export interface SourcePosting { job_id: string; company: string; title: string; location: string; url: string; description: string; first_seen_at: string | null; closed_at?: string | null; fetched_on?: string | null; pay?: string | null }
+// mode (F02): "all" (the default) every word must match; "any" at least one, and the turn ranks by how many the title carries.
+export type MatchMode = "all" | "any";
 export interface SearchSources {
   // Open career_postings rows matching the words (the live board), newest first.
-  live(words: string[], limit: number): Promise<SourcePosting[]>;
+  live(words: string[], limit: number, mode?: MatchMode): Promise<SourcePosting[]>;
   // Whether the live board holds any open posting at all.
   liveHasRows(): Promise<boolean>;
-  // Snapshot rows whose title carries every role word and whose location carries the place, newest first.
-  snapshot(roleWords: string[], place: string | null, limit: number): Promise<SourcePosting[]>;
+  // Snapshot rows whose title carries every role word (or, "any", one of them) and whose location carries the place, newest first.
+  snapshot(roleWords: string[], place: string | null, limit: number, mode?: MatchMode): Promise<SourcePosting[]>;
 }
 export function fromKbPosting(p: any): SourcePosting | null {
   if (!p || !p.job_id || !p.title) return null;
@@ -290,11 +292,11 @@ const like = (w: string) => `%${String(w).replace(/[%_\\]/g, "")}%`;
 // the router was given) merged under the targeted snapshot read.
 export function supabaseSearchSources(admin: any, o: { window?: any[]; jobs?: any } = {}): SearchSources {
   return {
-    async live(words, limit) {
+    async live(words, limit, mode = "all") {
       const base = () => admin.from("career_postings").select("*").is("closed_at", null);
       const lexemes = words.map((w) => w.replace(/[^a-z0-9]/g, "")).filter(Boolean);
       if (!lexemes.length) return [];
-      const r = await base().textSearch("search", lexemes.join(" "), { type: "websearch", config: "english" }).order("first_seen_at", { ascending: false }).limit(limit);
+      const r = await base().textSearch("search", lexemes.join(mode === "any" ? " or " : " "), { type: "websearch", config: "english" }).order("first_seen_at", { ascending: false }).limit(limit);
       if (r.error) throw new Error(`search the live board: ${r.error.message}`);
       return (r.data ?? []) as SourcePosting[];
     },
@@ -303,13 +305,15 @@ export function supabaseSearchSources(admin: any, o: { window?: any[]; jobs?: an
       if (r.error) throw new Error(`read the live board: ${r.error.message}`);
       return (r.data ?? []).length > 0;
     },
-    async snapshot(roleWords, place, limit) {
+    async snapshot(roleWords, place, limit, mode = "all") {
       // The targeted read reaches past the window; when it fails, the window the router was given still answers, and
       // with nothing in the window the failure is thrown, so the turn says the source could not be read.
       let read: SourcePosting[] = [], failure: string | null = null;
       try {
         let q: any = admin.from(CareerPool.KB_POSTINGS_TABLE).select(CareerPool.KB_POSTINGS_COLUMNS);
-        for (const w of roleWords) q = q.ilike("title", like(w));
+        const titleWords = roleWords.map((w) => w.replace(/[^a-z0-9+#]/g, "")).filter(Boolean);
+        if (mode === "any" && titleWords.length) q = q.or(titleWords.map((w) => `title.ilike.${like(w)}`).join(","));
+        else for (const w of roleWords) q = q.ilike("title", like(w));
         if (place) q = q.ilike("location", like(place));
         const r = await q.order("posted_at", { ascending: false, nullsFirst: false }).limit(limit);
         if (r.error) throw new Error(r.error.message);
@@ -327,7 +331,8 @@ export function supabaseSearchSources(admin: any, o: { window?: any[]; jobs?: an
 export interface ShortlistEntry { id: string | null; title: string; company: string | null; location: string | null; url: string | null }
 // limits: the level, pay floor, employer, season and sponsorship the person stated (posting_constraints.ts); remoteOnly: they
 // asked for remote alone, not "this city or remote".
-export interface SearchAsk { role: string; place: string | null; remote: boolean; remoteOnly?: boolean; limits?: Limits; prevPlace?: string | null }
+// count: how many postings the person asked for (F03), null or absent when they named no number.
+export interface SearchAsk { role: string; place: string | null; remote: boolean; remoteOnly?: boolean; limits?: Limits; prevPlace?: string | null; count?: number | null }
 export interface SearchJudgeResult {
   reply: string; status: "ranked" | "judged" | "none"; source: "live" | "snapshot" | "none";
   shortlist: ShortlistEntry[]; accounting: Accounting | null; modelCalled: boolean;
@@ -342,6 +347,9 @@ export const SEARCH_INTENTS = new Set(["career_discovery", "career_internship_di
 // openings" and a place only when capitalized after "in"; level, pay, employer, season and sponsorship were never carried.
 // askFromRouter stays the router's own parse; askFor (below) reads the message again (posting_constraints.ts searchTextOf):
 // what the message states wins, the router's parse fills what it does not say.
+// F30 (2026-11-05, beta C01): the router read "customer support" and this read the polluted role, and this reply replaced the
+// router's. searchTextOf is now the ONE reading of {role, place, level, count, constraints} for every search reply: the
+// router's parse is used only for what the message's reading leaves empty (a role, a place), never mixed word by word.
 function enrich(message: string, base: SearchAsk | null): SearchAsk | null {
   const st = searchTextOf(message);
   const role = st.role || base?.role || "";
@@ -349,13 +357,14 @@ function enrich(message: string, base: SearchAsk | null): SearchAsk | null {
   const orRemote = /\b(?:or|and|\/)\s*remote\b|\bremote\s*(?:or|and|\/)\s|\bhybrid\b/i.test(message);
   // The router's own spelling of the place ("Chicago") is kept when the message's reading is the same place in lower case.
   const place = base?.place && st.place && base.place.toLowerCase() === st.place.toLowerCase() ? base.place : st.place ?? base?.place ?? null, remote = st.remote || !!base?.remote;
-  return { role, place, remote, remoteOnly: remote && !orRemote, limits: st.limits };
+  return { role, place, remote, remoteOnly: remote && !orRemote, limits: st.limits, count: st.count ?? base?.count ?? null };
 }
 export function askFromRouter(message: string, routerOut: { intent?: string } | null, discovery: any): SearchAsk | null {
   if (!routerOut || !SEARCH_INTENTS.has(String(routerOut.intent ?? ""))) return null;
   const p = discovery?.lastParams;
   if (!p || typeof p.ask !== "string" || p.ask !== String(message ?? "").slice(0, 200)) return null;
-  const role = typeof p.roleText === "string" ? p.roleText : "";
+  // F30: the router's role without the count and hedge words it may have kept ("ten customer support", "only current").
+  const role = typeof p.roleText === "string" ? withoutAskNoise(p.roleText) : "";
   if (!searchWords(role).length) return null;
   return { role, place: typeof p.whereText === "string" && p.whereText.trim() ? p.whereText.trim() : null, remote: !!p.remote };
 }
@@ -405,6 +414,22 @@ function holdToLimits(pool: SourcePosting[], limits: Limits | undefined): { kept
   for (const p of pool) { const r = outsideLimits(p, limits); if (r) dropped[r] = (dropped[r] ?? 0) + 1; else kept.push(p); }
   return { kept, dropped, noPay: limits.pay ? kept.filter((p) => !statedPay(p)).length : 0 };
 }
+// The most a reply lists (a stated count above it lists this many and says how many more matched).
+export const MAX_SHOWN = 25;
+// F02: the largest set of role words some posting's TITLE carries (the most postings breaking a tie, then the words' order),
+// or null when no title carries any. A word only the description or the place carries never makes a posting the role.
+export function bestWords(pool: { title?: string }[], words: string[]): string[] | null {
+  const tally = new Map<string, { words: string[]; n: number }>();
+  for (const p of pool) {
+    const t = String(p.title ?? "").toLowerCase();
+    const has = words.filter((w) => t.includes(w) || t.includes(wordStem(w)));
+    if (!has.length) continue;
+    const k = has.join(" "), e = tally.get(k);
+    tally.set(k, { words: has, n: (e?.n ?? 0) + 1 });
+  }
+  const best = [...tally.values()].sort((a, b) => b.words.length - a.words.length || b.n - a.n)[0];
+  return best ? best.words : null;
+}
 const droppedLine = (d: Partial<Record<Reason, number>>) => Object.entries(d).map(([r, n]) => `${n} ${REASON_WORDS[r as Reason]}`).join(", ");
 
 export async function searchJudgeTurn(o: {
@@ -412,34 +437,52 @@ export async function searchJudgeTurn(o: {
   judge: { on: boolean; model?: Model | null; cache?: JudgeCache | null; n?: number; standing?: () => Promise<Standing[]> };
   show?: number;
 }): Promise<SearchJudgeResult | null> {
-  const ask = o.ask, roleWords = roleWordsOf(ask.role), placeWords = ask.place ? searchWords(ask.place) : [];
-  const show = Math.max(1, Math.min(12, o.show ?? 8));
-  const N = Math.max(1, Math.min(JUDGE_MAX_N, Math.floor(Number(o.judge.n) || JUDGE_DEFAULT_N)));
+  const ask = o.ask, placeWords = ask.place ? searchWords(ask.place) : [];
+  let roleWords = roleWordsOf(ask.role);
+  // F03: the number asked for ("find three", "ten roles") is how many are listed; 8 when none was named.
+  const want = typeof ask.count === "number" && ask.count >= 1 ? Math.min(MAX_SHOWN, Math.floor(ask.count)) : null;
+  const show = Math.max(1, Math.min(MAX_SHOWN, o.show ?? want ?? 8));
+  const N = Math.min(JUDGE_MAX_N, Math.max(show, Math.floor(Number(o.judge.n) || JUDGE_DEFAULT_N)));
   // 1. The source: the live board when it has a match, else the snapshot. A read that fails is said, never guessed.
-  let source: "live" | "snapshot" | "none" = "none", pool: SourcePosting[] = [], liveNote = "";
-  let liveRows: boolean | null = null;
-  // What the person's stated limits (level, pay, season, employer, sponsorship) left out of the source used, and of the one
-  // that matched the role and place but nothing after the limits.
-  let held = holdToLimits([], ask.limits), heldAny: ReturnType<typeof holdToLimits> | null = null;
-  try {
-    const liveAll = (await o.sources.live([...searchWords(ask.role), ...placeWords], 300)).filter((p) => !p.closed_at && inPlace(p, ask));
-    const h = holdToLimits(liveAll, ask.limits);
-    if (liveAll.length && !h.kept.length) heldAny = h;
-    if (h.kept.length) { source = "live"; pool = h.kept; held = h; }
-    else liveRows = await o.sources.liveHasRows();
-  } catch (e) { console.error("career search: live board", (e as Error)?.message ?? e); liveNote = "the live board could not be read just now"; }
-  let snapshotFailed = false;
-  if (source === "none") {
+  // mode "all": every role word must match (the precise read); "any": any one of them (F02's fallback, ranked below).
+  const read = async (words: string[], mode: "all" | "any") => {
+    let source: "live" | "snapshot" | "none" = "none", pool: SourcePosting[] = [], liveNote = "", liveRows: boolean | null = null;
+    // What the person's stated limits (level, pay, season, employer, sponsorship) left out of the source used, and of the one
+    // that matched the role and place but nothing after the limits.
+    let held = holdToLimits([], ask.limits), heldAny: ReturnType<typeof holdToLimits> | null = null;
     try {
-      const snapAll = (await o.sources.snapshot(roleWords.map(wordStem), ask.place, 300)).filter((p) => inPlace(p, ask));
-      const h = holdToLimits(snapAll, ask.limits);
-      if (snapAll.length && !h.kept.length) heldAny ??= h;
-      if (h.kept.length) { source = "snapshot"; pool = h.kept; held = h; }
-    } catch (e) { snapshotFailed = true; console.error("career search: snapshot", (e as Error)?.message ?? e); }
-  }
-  if (!liveNote && source !== "live") liveNote = liveRows ? "the live board has no match for it" : "the live board has no postings yet";
+      const liveWords = mode === "all" ? [...searchWords(ask.role), ...placeWords] : words;
+      const liveAll = (await o.sources.live(liveWords, 300, mode)).filter((p) => !p.closed_at && inPlace(p, ask));
+      const h = holdToLimits(liveAll, ask.limits);
+      if (liveAll.length && !h.kept.length) heldAny = h;
+      if (h.kept.length) { source = "live"; pool = h.kept; held = h; }
+      else liveRows = await o.sources.liveHasRows();
+    } catch (e) { console.error("career search: live board", (e as Error)?.message ?? e); liveNote = "the live board could not be read just now"; }
+    let snapshotFailed = false;
+    if (source === "none") {
+      try {
+        const snapAll = (await o.sources.snapshot(words.map(wordStem), ask.place, 300, mode)).filter((p) => inPlace(p, ask));
+        const h = holdToLimits(snapAll, ask.limits);
+        if (snapAll.length && !h.kept.length) heldAny ??= h;
+        if (h.kept.length) { source = "snapshot"; pool = h.kept; held = h; }
+      } catch (e) { snapshotFailed = true; console.error("career search: snapshot", (e as Error)?.message ?? e); }
+    }
+    if (!liveNote && source !== "live") liveNote = liveRows ? "the live board has no match for it" : "the live board has no postings yet";
+    return { source, pool, liveNote, liveRows, held, heldAny, snapshotFailed };
+  };
+  let r = await read(roleWords, "all");
   // 2. The pre-filter: role first, then goal and fit to confirmed facts, then newest.
-  const found = searchPostings(pool, roleWords.join(" "), o.profile, 50);
+  let found = searchPostings(r.pool, roleWords.join(" "), o.profile, 50);
+  // F02 (2026-11-05, beta C01): every word had to match, so one stray word emptied the search. When nothing carries every
+  // word, the postings whose TITLE carries the most of them are offered instead, and the reply names the words they match.
+  let partial: string | null = null;
+  if (!found.postings.length && roleWords.length > 1 && !r.snapshotFailed && !(r.source === "none" && r.liveRows === null)) {
+    const r2 = await read(roleWords, "any");
+    const best = bestWords(r2.pool, roleWords);
+    const f2 = best ? searchPostings(r2.pool, best.join(" "), o.profile, 50) : null;
+    if (best && f2?.postings.length) { r = r2; found = f2; partial = best.join(" "); roleWords = best; }
+  }
+  const { source, pool, liveNote, liveRows, held, heldAny, snapshotFailed } = r;
   const hits: SearchHit[] = found.postings;
   if (!hits.length) {
     // A source that could not be read is not evidence of no postings: the router's own reply stands.
@@ -497,6 +540,9 @@ export async function searchJudgeTurn(o: {
   const listed = rows.slice(0, show);
   const more = rows.length - listed.length;
   const lines = [freshness];
+  if (want && ask.count! > MAX_SHOWN && listed.length === want) lines.push(`You asked for ${Math.floor(ask.count!)}; a list holds at most ${MAX_SHOWN}.`);
+  if (partial) lines.push(`No posting matched every word of "${ask.role}", so these match "${partial}".`);
+  if (want && listed.length < want) lines.push(`You asked for ${Math.floor(ask.count!)}; ${listed.length === 0 ? "none" : listed.length === 1 ? "only one" : `only ${listed.length}`} came out.`);
   if (ask.limits && hasLimits(ask.limits)) {
     const out = droppedLine(held.dropped);
     lines.push(`Held to what you asked (${limitsLine(ask.limits)}).${out ? ` Left out: ${out}.` : ""}${held.noPay ? ` ${held.noPay} of those list no pay, so the floor could not be checked on them.` : ""}`);
@@ -507,7 +553,8 @@ export async function searchJudgeTurn(o: {
   if (more > 0) lines.push(`${more} more ${more === 1 ? "is" : "are"} not shown.`);
   lines.push(listed.length ? `Say "apply to these" to queue the ${listed.length === 1 ? "one" : listed.length} listed, or name one to tailor your resume for.` : "Widen the role or the place and I'll search again.");
   const shortlist = listed.map((r) => ({ id: r.h.job_id, title: r.h.title, company: r.h.company || null, location: where(r.h) || null, url: r.h.url || null }));
-  const picked = rows.slice(0, 25).map((r) => ({ hit: r.h, posting: byId.get(r.h.job_id) ?? null }));
+  // F03: a stated count is the whole list ("find 3" puts three on the results page, so "apply to all those" means three).
+  const picked = rows.slice(0, want ?? 25).map((r) => ({ hit: r.h, posting: byId.get(r.h.job_id) ?? null }));
   return { reply: lines.join("\n"), status: account ? "judged" : "ranked", source, shortlist, accounting: account, modelCalled, picked };
 }
 

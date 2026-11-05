@@ -19,7 +19,8 @@ export interface Limits {
   needsSponsor: boolean;              // "I need visa sponsorship"
   notBands?: BandName[];              // levels ruled out by a correction ("only individual-contributor roles": manager, director)
 }
-export interface SearchText { role: string; place: string | null; remote: boolean; limits: Limits }
+// count: how many postings the person asked for ("find three", "10 SWE roles", "a few"), or null when they named no number.
+export interface SearchText { role: string; place: string | null; remote: boolean; limits: Limits; count: number | null }
 export const NO_LIMITS: Limits = { bands: null, pay: null, company: null, term: null, needsSponsor: false };
 const HOURS_PER_YEAR = 2080;
 const SEASON = "spring|summer|fall|autumn|winter";
@@ -78,7 +79,45 @@ function placeOf(t: string): string | null {
 }
 const CUE = /^(?:(?:please|hey|hi|ok|okay|so|and|also|can you|could you|can u|would you)\s+)*(?:(?:find|show|get|give|search(?: for)?|look(?:ing)? for|help me find|pull up|list)(?:\s+me)?|i(?:'m| am)? ?(?:looking for|searching for|seeking|want|need|would like|'d like)|i(?:'d| would) like|my goal is|any|are there any|do you have)\s*/i;
 const EXPAND: Record<string, string> = { swe: "software engineer", sde: "software engineer", pm: "product manager", ml: "machine learning", ds: "data science" };
-const ROLE_NOISE = new Set(["me", "some", "any", "a", "an", "the", "jobs", "job", "roles", "role", "positions", "position", "openings", "opening", "opportunities", "opportunity", "work", "to", "i", "im", "am", "my", "of", "for", "paying", "pay", "pays", "salary", "make", "making", "earn", "at", "least", "over", "above", "under", "minimum", "min", "more", "or", "and", "in", "near", "around", "with", "no", "not", "non", "need", "needed", "visa", "sponsorship", "sponsor", "remote", "please", "per", "an", "hr", "hour", "hourly", "year", "yearly", "starting", "start", "season", "that", "are", "is", "will", "be", "who", "which", "interested", "good", "fit", "fits", "career", "new", "level", "grad", "graduate", "recent", "entry", "early", "junior", "jr", "senior", "sr", "intern", "interns", "internship", "internships", "coop", "co-op", "wage", "hiring"]);
+// F01/F03 (2026-11-05, beta C01, A1.1, A9.1): how many postings were asked for, and the words that say so. "Find three
+// realistic entry-level customer support jobs in Chicago and send me the links. Do not apply, send or contact anyone."
+// searched the role "three realistic entry-level customer support send links do contact anyone"; "ten customer support"
+// and "three entry-level support" found nothing either. A number counts only where it counts postings: right after the
+// ask ("find 3", "show me the top 5") or a few words before a posting word ("10 SWE intern roles"), never pay, a year,
+// "3+ years" or a figure with a unit.
+const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, fifteen: 15, twenty: 20, couple: 2, few: 3, dozen: 12 };
+const NUM = `(\\d{1,2}|${Object.keys(NUMBER_WORDS).filter((w) => !["couple", "few", "dozen"].includes(w)).join("|")}|a\\s+couple(?:\\s+of)?|a\\s+few|a\\s+dozen)`;
+const NOT_A_COUNT = String.raw`(?!\s*(?:\+|%|\$|\/|k\b|years?\b|yrs?\b|months?\b|weeks?\b|days?\b|hours?\b|hrs?\b|am\b|pm\b|st\b|nd\b|rd\b|th\b))`;
+const POSTING_WORD = String.raw`(?:jobs?|roles?|positions?|openings?|postings?|listings?|internships?|opportunities|options|matches|links|results|ones)\b`;
+const COUNT_AFTER_ASK = new RegExp(String.raw`(?:^|[^$\w])(?:find|show|get|give|list|send|pull up|search for|look for|looking for|need|want)(?:\s+me)?(?:\s+(?:the|my))?(?:\s+(?:top|best|first))?\s+${NUM}\b${NOT_A_COUNT}`);
+const COUNT_BEFORE_NOUN = new RegExp(String.raw`(?:^|[^$\w.,])(?:top\s+|best\s+|first\s+)?${NUM}\b${NOT_A_COUNT}(?:\s+[a-z][\w+#/-]*){0,5}?\s+${POSTING_WORD}`);
+function countOf(t: string): number | null {
+  const m = COUNT_AFTER_ASK.exec(t) ?? COUNT_BEFORE_NOUN.exec(t);
+  if (!m) return null;
+  const w = m[1].replace(/\s+/g, " ").replace(/^a /, "").replace(/ of$/, "");
+  const n = /^\d+$/.test(w) ? Number(w) : NUMBER_WORDS[w] ?? null;
+  return n != null && n >= 1 && n <= 50 ? n : null;
+}
+// Sentences and clauses that are instructions about the search, not the role: what not to do ("Do not apply, send or
+// contact anyone"), how to deliver it ("and send me the links"), and level words written with a hyphen ("entry-level").
+const NOT_ROLE = [
+  /\b(?:please\s+)?(?:do not|don'?t|dont|never|no need to|without)\s+(?:yet\s+)?(?:apply|applying|send|sending|contact|contacting|message|messaging|email|emailing|submit|submitting|reach out|text|call)\b[^.;!?]*/g,
+  /\b(?:and\s+)?(?:please\s+)?(?:send|text|give|share|email|dm|paste|include)\s+(?:me\s+)?(?:the\s+|their\s+|its\s+)?(?:links?|urls?|list)\b(?:\s+(?:to|for)\s+(?:them|each|those|it))?/g,
+  /\b(?:with|and)\s+(?:the\s+|their\s+)?(?:links?|urls?)\b/g,
+  /\b(?:entry|mid|senior|junior|early|new|exec(?:utive)?)[- ](?:level|career|grad(?:uate)?s?)\b/g,
+  /\b\d{1,2}\s*\+?\s*(?:(?:-|to)\s*\d{1,2}\s*)?(?:years?|yrs?)\b(?:\s+of)?(?:\s+experience)?/g, // "5 years experience", "3+ years"
+];
+// Words that hedge or count the ask ("realistic", "current", "only", "three", "a few"), never a role word.
+const ASK_NOISE = ["realistic", "actual", "actually", "current", "currently", "available", "legit", "legitimate", "decent", "solid",
+  "great", "best", "top", "only", "just", "latest", "right", "now", "today", "them", "those", "these", "all", "each", "you", "can", "could",
+  "would", "should", "really", "also", "there", "do", "postings", "posting", "listings", "listing", "links", "link", "list", "anyone",
+  "anybody", "contact", "send", "show", "find", "get", "give", "first", "couple", "few", "several", "dozen", "handful", "open", "other", "ones", "results", "matches", "options",
+  ...Object.keys(NUMBER_WORDS)];
+const ASK_NOISE_SET = new Set(ASK_NOISE);
+// A role read elsewhere (the router's parse) without the counting and hedging words above; its other words are kept as they are.
+export const withoutAskNoise = (role: string) => String(role ?? "").split(/\s+/).filter((w) => w && !ASK_NOISE_SET.has(w.toLowerCase()) && !/^\d+$/.test(w)).join(" ");
+const ROLE_NOISE = new Set([...ASK_NOISE, "me", "some", "any", "a", "an", "the", "jobs", "job", "roles", "role", "positions", "position", "openings", "opening", "opportunities", "opportunity", "work", "to", "i", "im", "am", "my", "of", "for", "paying", "pay", "pays", "salary", "make", "making", "earn", "at", "least", "over", "above", "under", "minimum", "min", "more", "or", "and", "in", "near", "around", "with", "no", "not", "non", "need", "needed", "visa", "sponsorship", "sponsor", "remote", "please", "per", "an", "hr", "hour", "hourly", "year", "yearly", "starting", "start", "season", "that", "are", "is", "will", "be", "who", "which", "interested", "good", "fit", "fits", "career", "new", "level", "grad", "graduate", "recent", "entry", "early", "junior", "jr", "senior", "sr", "intern", "interns", "internship", "internships", "coop", "co-op", "wage", "hiring"]);
 
 // What a search message states: the role (level, pay, place, term and sponsorship words taken out), the place, remote,
 // and the limits. The role is empty when the message names none ("find me something remote").
@@ -88,8 +127,10 @@ export function searchTextOf(message: string): SearchText {
   const limits: Limits = { bands: bandsOf(t), pay: payOf(raw.replace(/,(?=\d{3})/g, ",")), company: companyOf(raw), term: termOf(t), needsSponsor: sponsorOf(t) };
   const place = placeOf(t);
   const remote = /\bremote(?:ly)?\b|\bwork from home\b|\bwfh\b/.test(t);
-  // The role: what is left when everything that is a parameter is taken out.
-  t = t.replace(CUE, "").replace(CUE, "");
+  const count = countOf(t);
+  // The role: what is left when everything that is a parameter or an instruction about the search is taken out.
+  for (const re of NOT_ROLE) t = t.replace(re, " ");
+  t = t.trim().replace(CUE, "").replace(CUE, "");
   // KNOWN GAPS (2026-10-30, #317): the ask to apply is not part of the role. "apply to jobs for me" was searched as the role
   // "apply", and "apply to data analyst jobs" as "apply data analyst". ("applied scientist" is a role: only the verb goes.)
   t = t.replace(/\b(?:and\s+)?(?:please\s+)?(?:apply|applying|submit(?:ting)? (?:my )?applications?)(?:\s+me)?(?:\s+(?:to|for|on|at))?(?:\s+(?:them|these|those|it|all of them|each))?\b/g, " ");
@@ -103,7 +144,7 @@ export function searchTextOf(message: string): SearchText {
   if (place) t = t.replace(new RegExp(`\\b(?:in|near|around|based in|located in)\\s+${place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"), " ").replace(new RegExp(`\\b${place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"), " ");
   for (const [k, v] of Object.entries(ALIAS)) if (v === place) t = t.replace(new RegExp(`\\b${k}\\b`, "g"), " ");
   const words = t.split(/[^a-z0-9+#-]+/).filter((w) => w && !ROLE_NOISE.has(w) && !/^\d+$/.test(w)).map((w) => EXPAND[w] ?? w);
-  return { role: [...new Set(words.join(" ").split(" "))].join(" ").trim(), place, remote, limits };
+  return { role: [...new Set(words.join(" ").split(" "))].join(" ").trim(), place, remote, limits, count };
 }
 
 export function limitsLine(l: Limits): string {

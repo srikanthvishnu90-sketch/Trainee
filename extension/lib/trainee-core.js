@@ -2799,11 +2799,13 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   function postingKey(url) {
     const m = /^https?:\/\/([^/?#@]+)([^?#]*)(\?[^#]*)?/.exec(String(url ?? "").trim().toLowerCase());
     if (!m) return null;
-    const h = m[1].replace(/^www\./, "").replace(/:(80|443)$/, "");
+    const h = m[1].replace(/^www\./, "").replace(/:(80|443)$/, "").replace(/^jobs\.eu\.lever\.co$/, "jobs.lever.co");
     let p = (m[2] ?? "").replace(/\/+$/, "");
     if (/^\/[^/]+\/.+\/(apply|application)$/.test(p)) p = p.replace(/\/(apply|application)$/, "").replace(/\/+$/, "");
+    const ghJid = /[?&]gh_jid=([0-9]+)(&|$)/.exec(m[3] ?? "")?.[1];
+    if (ghJid) return "greenhouse.io/jobs/" + ghJid;
     if (/(^|\.)greenhouse\.io$/.test(h)) {
-      const jid = /[?&]gh_jid=([0-9]+)/.exec(m[3] ?? "")?.[1] ?? /\/jobs\/([0-9]+)$/.exec(p)?.[1];
+      const jid = /\/jobs\/([0-9]+)$/.exec(p)?.[1] ?? (/^\/embed\//.test(p) ? /[?&]token=([0-9]+)(&|$)/.exec(m[3] ?? "")?.[1] : void 0);
       if (jid) return "greenhouse.io/jobs/" + jid;
     }
     const q = (m[3] ?? "").slice(1).split("&").filter((x) => x !== "" && !/^(utm_[a-z_]*|gh_src|src|source|ref|referrer|lever-[a-z-]*)(=|$)/.test(x)).sort((a, b) => a < b ? -1 : a > b ? 1 : 0).join("&");
@@ -2818,9 +2820,11 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     }
     const mine = log.filter((x) => x.user_id === a.user_id && COUNTED.has(x.state));
     const key = postingKey(a.url);
-    if (mine.some((x) => x.job_id === a.job_id || key !== null && postingKey(x.url) === key)) return {
+    const earlier = mine.find((x) => x.job_id === a.job_id || key !== null && postingKey(x.url) === key);
+    if (earlier) return {
       ok: false,
-      reason: "duplicate_job"
+      reason: "duplicate_job",
+      earlier
     };
     if (limits?.unreadable !== void 0 || Number.isNaN(dailyLimit(limits))) return {
       ok: false,
@@ -4441,7 +4445,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     if (!p) return null;
     const u = new URL(href), seg = u.pathname.split("/").filter(Boolean);
     if (p.family === "greenhouse") {
-      const tenant = u.searchParams.get("for") || seg[0] || "", id = u.pathname.match(/\/jobs\/(\d+)/)?.[1] || u.searchParams.get("token");
+      const tenant = u.searchParams.get("for") || seg[0] || "", id = u.pathname.match(/\/jobs\/(\d+)/)?.[1] || u.searchParams.get("token") || u.searchParams.get("gh_jid");
       return tenant && id && /^\d+$/.test(id) ? `greenhouse:${tenant}:${id}` : null;
     }
     if (p.family === "lever" || p.family === "ashby") {

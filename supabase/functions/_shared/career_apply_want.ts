@@ -3,7 +3,7 @@
 // shows a card; nothing reaches an employer before they approve that card. A posting is keyed exactly as the extension
 // keys it (posting_key.ts), so the same posting is queued once and the extension's own queue never holds it twice.
 import { applyUrl, detectPortal, formUrlFor, postingKey } from "./posting_key.ts";
-import { COMPANY_COOLDOWN_DAYS, dailyLimit, type Limits, normCompany } from "./career_apply.ts";
+import { COMPANY_COOLDOWN_DAYS, dailyLimit, type Limits, normCompany, postingKey as canonicalKey } from "./career_apply.ts";
 import { sameCompany, type TrackedApp } from "./career_mail.ts";
 import { contentOf, type GateResult, gatePicks } from "./career_apply_gate.ts";
 
@@ -293,10 +293,17 @@ export function screenPicks(picks: Pick[], o: { message?: string; before?: strin
     // A different posting at the same company is allowed, at any date. A recorded application to this exact
     // posting is still a duplicate. Only compare real URLs: employer name alone never identifies a posting.
     // The posting by its id when it has one (its board's form), else by its link; compared without case (samePosting).
-    const key = samePosting(postingKey(pickLink(p)));
-    const prior = key && (o.apps ?? []).find((a) => a.stage !== "Saved" && a.url && samePosting(postingKey(a.url)) === key);
+    // 20261105190000: and by the queue's own canonical identity (career_apply.ts postingKey, the database's
+    // career_apply_posting_key), so a Greenhouse job on the employer's careers page (?gh_jid=N) is the board's job N.
+    const key = samePosting(postingKey(pickLink(p))), canon = canonicalKey(pickLink(p));
+    const prior = (key || canon) && (o.apps ?? []).find((a) => a.stage !== "Saved" && a.url &&
+      ((key && samePosting(postingKey(a.url)) === key) || (canon !== null && canonicalKey(a.url) === canon)));
     if (prior) {
-      refused.push(refusal(p, `${what} is already in their applications as the same posting; nothing was queued`, `${what} is already in your applications as the same posting; nothing was queued`));
+      // The earlier application, named: which one is already there, where it stands, since when.
+      const since = prior.applied_at ? `, applied ${String(prior.applied_at).slice(0, 10)}` : "";
+      const earlier = `${prior.role ? `${prior.role} at ` : ""}${prior.company || co || "this employer"} (${prior.url}), ${prior.stage}${since}`;
+      refused.push(refusal(p, `${what} is already in their applications as the same posting: ${earlier}; nothing was queued`,
+        `${what} is already in your applications as the same posting: ${earlier}; nothing was queued`));
       continue;
     }
     passed.push(p);

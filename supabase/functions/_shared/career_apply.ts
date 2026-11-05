@@ -110,19 +110,26 @@ export const dailyLimit = (l?: Limits): number => {
   return st.state === "set" ? st.pace : st.state === "none" ? Infinity : NaN;
 };
 
-// A job link as one posting: the SQL's career_apply_posting_key (20261027140000), rule for rule (tests/architect/
-// mass-submit-posting-key.test.ts compares them). Lower case; the host without www. and without a default port, any other
+// A job link as one posting: the SQL's career_apply_posting_key (20261027141000, then 20261105190000), rule for rule
+// (tests/architect/flow-scenarios-apply-r4.test.ts phase D compares them on Postgres). Lower case; the host without www. and without a default port, any other
 // port kept; the path without trailing slashes, and without a final /apply or /application when two or more segments come
 // before it; the query kept, sorted, without tracking parameters; any Greenhouse link naming a job number is that number.
 // Null when it is not a web link.
+// 20261105190000 (the eval's duplicates 0/14 on Greenhouse): a Greenhouse job number is global, so the number names the
+// posting on any host: ?gh_jid=N on the employer's own careers page (company.com/careers?gh_jid=N) is the same posting as
+// boards.greenhouse.io/<board>/jobs/N, job-boards.greenhouse.io/<board>/jobs/N and the embedded form (embed/job_app?for=
+// <board>&token=N or &gh_jid=N). Lever's EU host (jobs.eu.lever.co) is the same board as jobs.lever.co. Lever and Ashby
+// postings stay keyed by board and id: the same id on another board is not taken for the same posting.
 export function postingKey(url: unknown): string | null {
   const m = /^https?:\/\/([^/?#@]+)([^?#]*)(\?[^#]*)?/.exec(String(url ?? "").trim().toLowerCase());
   if (!m) return null;
-  const h = m[1].replace(/^www\./, "").replace(/:(80|443)$/, "");
+  const h = m[1].replace(/^www\./, "").replace(/:(80|443)$/, "").replace(/^jobs\.eu\.lever\.co$/, "jobs.lever.co");
   let p = (m[2] ?? "").replace(/\/+$/, "");
   if (/^\/[^/]+\/.+\/(apply|application)$/.test(p)) p = p.replace(/\/(apply|application)$/, "").replace(/\/+$/, "");
+  const ghJid = /[?&]gh_jid=([0-9]+)(&|$)/.exec(m[3] ?? "")?.[1];
+  if (ghJid) return "greenhouse.io/jobs/" + ghJid;
   if (/(^|\.)greenhouse\.io$/.test(h)) {
-    const jid = /[?&]gh_jid=([0-9]+)/.exec(m[3] ?? "")?.[1] ?? /\/jobs\/([0-9]+)$/.exec(p)?.[1];
+    const jid = /\/jobs\/([0-9]+)$/.exec(p)?.[1] ?? (/^\/embed\//.test(p) ? /[?&]token=([0-9]+)(&|$)/.exec(m[3] ?? "")?.[1] : undefined);
     if (jid) return "greenhouse.io/jobs/" + jid;
   }
   const q = (m[3] ?? "").slice(1).split("&")
@@ -133,17 +140,33 @@ export function postingKey(url: unknown): string | null {
 export interface LogRow { user_id: string; job_id: string; company: string; at: number; state: string; url?: string }
 // D-MS-3: refused only when this exact posting (its job id, or its canonical link) is already sent or in flight for this
 // person. Two roles at one company are two postings. D-MS-2: no product daily number; only a pace the person set.
-export function admitApplication(log: LogRow[], a: { user_id: string; job_id: string; company: string; url?: string; approval_hash?: string; payload_hash?: string }, now: number, limits?: Limits): { ok: boolean; reason: string | null } {
+// A duplicate names the earlier application it repeats (`earlier`), so the reply can say which one is already there.
+export function admitApplication(log: LogRow[], a: { user_id: string; job_id: string; company: string; url?: string; approval_hash?: string; payload_hash?: string }, now: number, limits?: Limits): { ok: boolean; reason: string | null; earlier?: LogRow } {
   if (a.approval_hash !== undefined || a.payload_hash !== undefined) {
     if (!a.approval_hash || a.approval_hash !== a.payload_hash) return { ok: false, reason: "not_approved" };
   }
   const mine = log.filter((x) => x.user_id === a.user_id && COUNTED.has(x.state));
   const key = postingKey(a.url);
-  if (mine.some((x) => x.job_id === a.job_id || (key !== null && postingKey(x.url) === key))) return { ok: false, reason: "duplicate_job" };
+  const earlier = mine.find((x) => x.job_id === a.job_id || (key !== null && postingKey(x.url) === key));
+  if (earlier) return { ok: false, reason: "duplicate_job", earlier };
   if (limits?.unreadable !== undefined || Number.isNaN(dailyLimit(limits))) return { ok: false, reason: 'pace_unreadable' } as any;
   const own = dailyLimit(limits);
   if (Number.isFinite(own) && mine.filter((x) => x.at > now - DAY).length >= own) return { ok: false, reason: "daily_cap" };
   return { ok: true, reason: null };
+}
+// The honest refusal of a second application to one posting: it names the earlier application (its employer, its link,
+// where it stands and since when), never only a code. Words for the person ("you"); nothing was queued or sent.
+const EARLIER_STATE: Record<string, string> = {
+  queued: "approved and waiting to send", driving: "being sent now", submitting: "being sent now", confirmed: "sent and confirmed by the employer",
+  submitted_unconfirmed: "sent, not yet confirmed by the employer", unknown_outcome: "sent or possibly sent (the result was not seen)",
+  needs_user: "waiting on you",
+};
+export function duplicateReply(earlier: Pick<LogRow, "company" | "state" | "at" | "url" | "job_id">): string {
+  const when = Number.isFinite(earlier.at) ? ` on ${new Date(earlier.at).toISOString().slice(0, 10)}` : "";
+  const where = earlier.url ? ` (${earlier.url})` : "";
+  const state = EARLIER_STATE[earlier.state] ?? earlier.state;
+  return `you already have an application to this posting at ${earlier.company || "this employer"}${where}, started${when} and ${state}; ` +
+    "each posting goes once, so nothing new was queued or sent";
 }
 
 // ------------------------------------------------------------------------------------------------ preparing

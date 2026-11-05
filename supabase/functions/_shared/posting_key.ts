@@ -33,7 +33,7 @@ export function postingKey(href: string): string | null {
   if (!p) return null;
   const u = new URL(href), seg = u.pathname.split("/").filter(Boolean);
   if (p.family === "greenhouse") {
-    const tenant = u.searchParams.get("for") || seg[0] || "", id = u.pathname.match(/\/jobs\/(\d+)/)?.[1] || u.searchParams.get("token");
+    const tenant = u.searchParams.get("for") || seg[0] || "", id = u.pathname.match(/\/jobs\/(\d+)/)?.[1] || u.searchParams.get("token") || u.searchParams.get("gh_jid");
     return tenant && id && /^\d+$/.test(id) ? `greenhouse:${tenant}:${id}` : null;
   }
   if (p.family === "lever" || p.family === "ashby") {

@@ -256,7 +256,7 @@ const CareerTailor = (() => {
   // parse is a pure function of the text, so it is kept: a bounded memo by the exact text (oldest dropped past
   // PARSE_MEMO_MAX), and every caller gets its own copy of the result (fresh arrays and knockout records), so a caller that
   // edits what it got can never change what the next caller reads.
-  const PARSE_MEMO_MAX = 2000;
+  const PARSE_MEMO_MAX = 800; // the 600-posting pool plus headroom; ~a few MB at most
   const _parseMemo = new Map();
   const _parseStats = { parsed: 0 };
   const copyParse = (p) => Object.assign({}, p, { mustHaveSkills: p.mustHaveSkills.slice(), niceToHaveSkills: p.niceToHaveSkills.slice(), keywords: p.keywords.slice(), knockouts: p.knockouts.map((k) => Object.assign({}, k)) });

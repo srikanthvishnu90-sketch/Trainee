@@ -1451,8 +1451,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       return json(cors, { error: code, reply: conflict ? refusedSaveReply(code, turnEffects) : UNSAVED_REPLY, action: null, turn_key: turnKey,
         turn_effects: turnEffects.writes.size > 0 || turnEffects.queued > 0 || turnEffects.sent > 0 || turnEffects.sendUnknown > 0 }, conflict ? 409 : 503);
     } finally {
-      clock.flush(clockTag);
       await ledger.finish().catch((e) => console.error("turn cost ledger:", e?.message ?? e));
+      clock.flush(clockTag);
       await gate?.leave();
     }
   } catch (e) {

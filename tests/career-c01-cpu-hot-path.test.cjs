@@ -78,8 +78,8 @@ test("C01 parseJD: the memo is bounded, and parseMemoStats counts the texts pars
   for (let i = 0; i < 2600; i++) Tailor.parseJD(`Requirements: ${i} years of SQL.`);
   const st = Tailor.parseMemoStats();
   assert.equal(st.parsed, 2600);
-  assert.ok(st.held <= 2000, `held ${st.held}`);
-  Tailor.parseJD("Requirements: 2599 years of SQL.");
+  assert.ok(st.held <= 800, `held ${st.held}`);
+  Tailor.parseJD("Requirements: 2599 years of SQL."); // among the last 800, so still held
   assert.equal(Tailor.parseMemoStats().parsed, 2600, "a held text is not parsed again");
 });
 
@@ -115,4 +115,56 @@ test("C01 statesInText (through profileResidence): the compiled-once patterns fi
   }
   // Called twice on the same text: no regex state carried between calls.
   assert.deepEqual(Jobs.profileResidence({ residence: "Chicago, IL" }), Jobs.profileResidence({ residence: "Chicago, IL" }));
+});
+
+// ---- 142: the company-name match (ltFormMatches) and the posting-name dedupe (a Set), against the code they replaced
+const Router = require("../packages/domain/142-career-router.js");
+const NM = Router._c01NameMatch;
+// The replaced per-call regex, verbatim (letterTargetOf / namedCompaniesOf before C01).
+const formMatchesRef = (raw, form) => [...raw.matchAll(new RegExp(`(?<![A-Za-z0-9])${NM.ltEsc(form).replace(/&/g, "(?:&|and)")}(?![A-Za-z0-9])`, "gi"))];
+const sig = (ms) => [...ms].map((m) => [m.index, m[0]]);
+// The replaced posting loop, verbatim (an out.some scan per posting), after the same company-file entries.
+function lexiconRef(ctx) {
+  const out = NM.ltLexicon({ ...(ctx || {}), postings: [] }).filter((e) => e.cir !== null);
+  for (const p of NM.postingsFromCtx(ctx || {})) {
+    const name = NM.ltClean(String(p.company ?? "").replace(/\s*\(fictional\)\s*/gi, " "));
+    if (!name || NM.ltIsPlace(name) || NM.ltIsSchool(name) || out.some((e) => NM.ltPlain(e.name) === NM.ltPlain(name))) continue;
+    out.push({ name, cir: null, forms: [name] });
+  }
+  return out;
+}
+const NAMES = ["Acme Analytics", "acme analytics", "  Acme   Analytics ", "Acme Analytics, Inc.", "AT&T", "Ernst & Young", "J.P. Morgan", "C++ Labs", "L’Oréal", "L'Oréal",
+  "Société Générale", "Nestlé", "東京エレクトロン", "Zürich Insurance", "Chicago", "Northwestern University", "", null, undefined, "Acme Analytics (fictional)", "Deloitte", "deloitte", "McKinsey & Company",
+  "O'Neil & Sons", "3M", "X", "Ünited Ölfield", "Bain", "Bain & Company"];
+const TEXTS_142 = ["", "write a cover letter for Acme Analytics", "tailor my resume to AT and T", "prep me for AT&T", "Ernst and Young interview tomorrow", "help with my J.P. Morgan letter",
+  "C++ Labs role", "L’Oréal and L'Oréal", "société générale please", "SOCIÉTÉ GÉNÉRALE", "Nestlé or nestle", "東京エレクトロン の面接", "zürich insurance cover letter", "chicago jobs",
+  "deloitte vs McKinsey & Company", "o'neil & sons", "3M and 3m and 3Ms", "x marks X", "ünited ölfield", "Bain & Company or bain and company", "AcmeAnalytics", "acme-analytics", "acme\nanalytics",
+  "ſony and Kelvin Kelvin", "\u0000 null byte Acme Analytics"];
+
+test("C01 142 ltFormMatches: the skipped-and-compiled-once match finds exactly what the per-call regex found (empty, null, non-ASCII)", () => {
+  const forms = [...NAMES.map((n) => NM.ltClean(String(n ?? ""))), "Kelvin", "Sony", "& Co", " Acme", "", "AT&T Mobility", "東京"];
+  for (const ctx of [{}, { postings: NAMES.map((company, i) => ({ job_id: `n${i}`, company, title: "Analyst", location: "Remote", url: `https://x.test/${i}` })) }]) {
+    for (const e of NM.ltLexicon(ctx)) forms.push(...e.forms);
+  }
+  let n = 0;
+  for (const raw of [...TEXTS_142, ...TEXTS.slice(0, 300)]) {
+    const r = String(raw);
+    for (const form of forms) {
+      // twice: a compiled-once regex must carry no lastIndex between calls
+      for (let k = 0; k < 2; k++) assert.deepEqual(sig(NM.ltFormMatches(r, r.toLowerCase(), form)), sig(formMatchesRef(r, form)), `${JSON.stringify(form)} in ${JSON.stringify(r).slice(0, 120)}`);
+      n++;
+    }
+  }
+  assert.ok(n > 10000, `pairs checked: ${n}`);
+});
+
+test("C01 142 ltLexicon: the Set dedupe keeps exactly the names, order and forms the out.some scan kept", () => {
+  const ctxs = [{}, null, { postings: [] }, { postings: [{ job_id: "a", company: null }, { job_id: "b" }, { job_id: "c", company: "" }] }];
+  let seed = 11;
+  const rnd = (k) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % k; };
+  for (let t = 0; t < 40; t++) {
+    const n = 1 + rnd(120);
+    ctxs.push({ postings: Array.from({ length: n }, (_, i) => ({ job_id: `p${t}-${i}`, company: NAMES[rnd(NAMES.length)], title: "Data Analyst", location: "Remote", url: `https://x.test/${t}/${i}` })) });
+  }
+  for (const ctx of ctxs) assert.deepEqual(NM.ltLexicon(ctx), lexiconRef(ctx), JSON.stringify(ctx).slice(0, 200));
 });

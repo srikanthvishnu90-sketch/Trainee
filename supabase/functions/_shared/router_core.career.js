@@ -1892,7 +1892,7 @@ const CareerTailor = (() => {
     }
     return out;
   }
-  const PARSE_MEMO_MAX = 2000;
+  const PARSE_MEMO_MAX = 800;
   const _parseMemo = new Map();
   const _parseStats = { parsed: 0 };
   const copyParse = (p) => Object.assign({}, p, { mustHaveSkills: p.mustHaveSkills.slice(), niceToHaveSkills: p.niceToHaveSkills.slice(), keywords: p.keywords.slice(), knockouts: p.knockouts.map((k) => Object.assign({}, k)) });
@@ -24613,7 +24613,8 @@ const CareerRouter = (() => {
       if (m && m.resumeIngest && typeof m.resumeIngest === "object" && intent !== "career_resume_ingest") m.resumeIngest.stale = true;
     } catch {   }
   }
-  return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf };
+  return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf,
+    _c01NameMatch: { ltLexicon, ltFormMatches, ltEsc, ltPlain, ltClean, ltIsPlace, ltIsSchool, postingsFromCtx } };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerRouter;
 

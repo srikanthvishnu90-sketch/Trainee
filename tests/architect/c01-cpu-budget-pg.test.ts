@@ -126,41 +126,49 @@ export const C01_ASKS = [
 Deno.test({ name: "c01: a three-job-links turn on a 600-posting pool stays inside the CPU budget, and every stage is named", ...T, async fn() {
   if (skip()) return;
   const h = await world();
+  // The model key and the brain flags are this test's own: saved here and put back in the finally, so a later file in the
+  // same process never sees them (tests/architect/test-env-hygiene.test.ts).
+  const ENV_KEYS = ["ANTHROPIC_API_KEY", "CAREER_BRAIN", "CAREER_JUDGE"];
+  const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, Deno.env.get(k)]));
   Deno.env.set("ANTHROPIC_API_KEY", "test-key");
   Deno.env.delete("CAREER_BRAIN");
   Deno.env.delete("CAREER_JUDGE");
-  const chat = h.chat("c01-1");
-  for (const m of HISTORY) { const t = await chat.say(m); assert(t.status === 200, `history turn answered: ${t.status} ${t.reply}`); }
-  const report: string[] = [];
-  let worst = 0, parsedCold = 0;
-  for (const ask of C01_ASKS) {
-    // Once to compile the code path (V8's first call is not the turn's work), then measured: "cold" with the posting parse
-    // memos emptied, as a fresh Edge isolate starts (the budget holds the least of COLD_RUNS, so a busy machine's one slow
-    // sample is not read as the turn's cost), and "warm" with the memos as the cold turn left them.
-    await chat.say(ask);
-    let coldMin = Infinity;
-    for (const kind of [...Array(COLD_RUNS).fill("cold"), "warm"]) {
-      if (kind === "cold") (CareerTailor as any).resetParseMemos();
-      lines.length = 0;
-      const t = await chat.say(ask);
-      assert(t.status === 200, `the C01 turn answered: ${t.status} ${t.reply}`);
-      const line = lines.at(-1);
-      assert(line, "the turn logged its stage line (agent_chat_cpu)");
-      if (kind === "cold") coldMin = Math.min(coldMin, line!.sync_ms);
-      // Bounded work, whatever the machine: a cold turn parses each posting text at most once, a warm turn parses none.
-      const parsed = (CareerTailor as any).parseMemoStats().parsed;
-      if (kind === "cold") assert(parsed <= POOL, `a cold C01 turn parsed ${parsed} posting texts, more than the ${POOL} in the pool`);
-      else assert(parsed === parsedCold, `a warm C01 turn parsed ${parsed - parsedCold} posting texts again`);
-      parsedCold = parsed;
-      report.push(`${kind} ${line!.sync_ms.toFixed(1).padStart(7)} ms sync  intent=${line!.intent} handler=${line!.handler}  stages=${JSON.stringify(line!.stages)} waits=${JSON.stringify(line!.waits)}`);
-      // The line names stages only: no message words, no posting.
-      const raw = JSON.stringify(line);
-      assert(!/realistic|Chicago|TEST Employer|resume/i.test(raw), `the stage line carries no message or posting text: ${raw}`);
+  try {
+    const chat = h.chat("c01-1");
+    for (const m of HISTORY) { const t = await chat.say(m); assert(t.status === 200, `history turn answered: ${t.status} ${t.reply}`); }
+    const report: string[] = [];
+    let worst = 0, parsedCold = 0;
+    for (const ask of C01_ASKS) {
+      // Once to compile the code path (V8's first call is not the turn's work), then measured: "cold" with the posting parse
+      // memos emptied, as a fresh Edge isolate starts (the budget holds the least of COLD_RUNS, so a busy machine's one slow
+      // sample is not read as the turn's cost), and "warm" with the memos as the cold turn left them.
+      await chat.say(ask);
+      let coldMin = Infinity;
+      for (const kind of [...Array(COLD_RUNS).fill("cold"), "warm"]) {
+        if (kind === "cold") (CareerTailor as any).resetParseMemos();
+        lines.length = 0;
+        const t = await chat.say(ask);
+        assert(t.status === 200, `the C01 turn answered: ${t.status} ${t.reply}`);
+        const line = lines.at(-1);
+        assert(line, "the turn logged its stage line (agent_chat_cpu)");
+        if (kind === "cold") coldMin = Math.min(coldMin, line!.sync_ms);
+        // Bounded work, whatever the machine: a cold turn parses each posting text at most once, a warm turn parses none.
+        const parsed = (CareerTailor as any).parseMemoStats().parsed;
+        if (kind === "cold") assert(parsed <= POOL, `a cold C01 turn parsed ${parsed} posting texts, more than the ${POOL} in the pool`);
+        else assert(parsed === parsedCold, `a warm C01 turn parsed ${parsed - parsedCold} posting texts again`);
+        parsedCold = parsed;
+        report.push(`${kind} ${line!.sync_ms.toFixed(1).padStart(7)} ms sync  intent=${line!.intent} handler=${line!.handler}  stages=${JSON.stringify(line!.stages)} waits=${JSON.stringify(line!.waits)}`);
+        // The line names stages only: no message words, no posting.
+        const raw = JSON.stringify(line);
+        assert(!/realistic|Chicago|TEST Employer|resume/i.test(raw), `the stage line carries no message or posting text: ${raw}`);
+      }
+      worst = Math.max(worst, coldMin);
     }
-    worst = Math.max(worst, coldMin);
+    rawLog(`C01 CPU per turn (budget ${BUDGET_FRACTION * EDGE_CPU_LIMIT_MS} ms of ${EDGE_CPU_LIMIT_MS}):\n${report.join("\n")}`);
+    assert(worst <= BUDGET_FRACTION * EDGE_CPU_LIMIT_MS, `a C01 turn spent ${worst.toFixed(1)} ms of synchronous work, over ${BUDGET_FRACTION * EDGE_CPU_LIMIT_MS} ms (${BUDGET_FRACTION} of the ${EDGE_CPU_LIMIT_MS} ms Edge limit):\n${report.join("\n")}`);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) Deno.env.delete(k); else Deno.env.set(k, v); }
   }
-  rawLog(`C01 CPU per turn (budget ${BUDGET_FRACTION * EDGE_CPU_LIMIT_MS} ms of ${EDGE_CPU_LIMIT_MS}):\n${report.join("\n")}`);
-  assert(worst <= BUDGET_FRACTION * EDGE_CPU_LIMIT_MS, `a C01 turn spent ${worst.toFixed(1)} ms of synchronous work, over ${BUDGET_FRACTION * EDGE_CPU_LIMIT_MS} ms (${BUDGET_FRACTION} of the ${EDGE_CPU_LIMIT_MS} ms Edge limit):\n${report.join("\n")}`);
 } });
 
 Deno.test("c01: the stage clock logs one line per turn, starts are logged past the progress mark, a nested stage counts once", () => {

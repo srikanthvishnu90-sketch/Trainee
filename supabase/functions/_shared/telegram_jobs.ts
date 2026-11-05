@@ -382,7 +382,10 @@ const secretValue = (v: unknown): boolean => {
   if (!t) return false;
   if (/\b\d{3}-\d{2}-\d{4}\b/.test(t)) return true; // an SSN
   if (/^bearer\s+\S{8,}/i.test(t) || /^(?:sk|pk|rk|ghp|gho|xox[abprs]|eyJ)[-_A-Za-z0-9.]{16,}$/.test(t)) return true; // a token / key
-  for (const m of t.matchAll(/(?:\d[ -]?){13,19}/g)) { const d = m[0].replace(/\D/g, ""); if (d.length >= 13 && d.length <= 19 && luhn(d)) return true; } // a card number
+  // A UUID is an id, never a card number: one with 13 or more digits in a row (dashes between) passes the card check about one
+  // time in ten, so an application whose fact sources carry a few UUIDs (evidence.replay_sources) was "needs you" about one
+  // time in seventy (missing-info-e2e.test.ts failed in CI on #499 and #503). UUIDs are taken out before the card check.
+  for (const m of t.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, " ").matchAll(/(?:\d[ -]?){13,19}/g)) { const d = m[0].replace(/\D/g, ""); if (d.length >= 13 && d.length <= 19 && luhn(d)) return true; } // a card number
   return false;
 };
 const hasValue = (v: unknown) => v !== null && v !== undefined && (typeof v === "string" ? v.trim() !== "" : typeof v === "object" ? Object.keys(v as object).length > 0 : true);

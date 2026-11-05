@@ -71,6 +71,7 @@ Deno.test({ name: "FAMILY networking and outreach: a new person, end to end, on 
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   // D-036: CAREER_OUTREACH_FOLLOWUPS is a release flag (on when unset); this file's off steps run it rolled back ("off").
   const env = { CAREER_NETWORKING_DRAFT: "on", ANTHROPIC_API_KEY: "sk-test-not-real", CAREER_MODEL: "claude-haiku-5-5", CAREER_OUTREACH_FOLLOWUPS: "off" };
+  const savedEnv = Object.fromEntries(Object.keys(env).map((k) => [k, Deno.env.get(k)])); // put back as it was, never deleted
   for (const [k, v] of Object.entries(env)) Deno.env.set(k, v);
   const outside = { google: 0, linkedin: 0 };
   try {
@@ -394,7 +395,7 @@ Deno.test({ name: "FAMILY networking and outreach: a new person, end to end, on 
     console.log(`FAMILY-NETWORKING-MEASURE ${JSON.stringify({ turns: samples.length, p50_ms: Math.round(pct(all, 50)), p95_ms: Math.round(pct(all, 95)), model_calls_seen: modelCalls, metered: c, by_task: table })}`);
     eq(Number(c.calls), modelCalls, "every model call is metered");
   } finally {
-    for (const k of Object.keys(env)) Deno.env.delete(k);
+    for (const [k, v] of Object.entries(savedEnv)) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v);
     handler?.restore();
     await pg.stop();
   }

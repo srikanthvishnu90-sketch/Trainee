@@ -1396,7 +1396,7 @@
     ],
     [
       "eeo",
-      /\btransitioning service member\b|\bveteran\b|\bdisability\b|\bgender\b|\bethnicity\b|\brace\b|\bhispanic\b|\blatin[oax]\b|\bsexual orientation\b|\bgender identity\b|\btransgender\b|^tu es\b/
+      /\btransitioning service member\b|\bveteran\b|\bdisability\b|\bgender\b|\bethnicity\b|\brace\b|\bhispanic\b|\blatin[oax]\b|\bsexual orientation\b|\bgender identity\b|\btransgender\b|^tu es\b|\blgbtq|\blgbt\b|\bheterosexual\b|\bbisexual\b|\bqueer\b/
     ],
     // Legal attestations.
     // WO-052: the person's "no" to criminal history is about convictions. Drug use, a court order, a commitment, a
@@ -1668,6 +1668,7 @@
     const job = `job:${h16(`${jobId}
 ${words}`)}`, wording = `label:${h16(words)}`;
     if (m.kind === "fact") {
+      if (m.fact === "eeo") return job;
       if (o.here) return job;
       if (AUTH_FACTS.has(m.fact) && RELATIVE_PLACE.test(q.label)) return job;
       if (AUTH_FACTS.has(m.fact) && FOREIGN.test(q.label) && (m.fact === "sponsorship" || !NAMES_US.test(q.label))) return wording;
@@ -2916,7 +2917,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       "salary_expectation"
     ],
     [
-      /gender|race|ethnicity|veteran|disability|hispanic|latino/i,
+      /gender|race|ethnicity|veteran|disability|hispanic|latino|lgbt|sexual orientation|heterosexual|bisexual|queer/i,
       "eeo"
     ]
   ];
@@ -2966,7 +2967,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     const base = /^(.+)_text$/.exec(String(f.name || ""))?.[1];
     return !!base && !/file/.test(f.type) && fields.some((x) => x.name === base && /file/.test(x.type));
   }
-  var normLabel = (l) => String(l || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  var normLabel = (l) => String(l || "").toLowerCase().replace(/\+\+/g, " plusplus ").replace(/\+/g, " plus ").replace(/#/g, " sharp ").replace(/\$/g, " usd ").replace(/€/g, " eur ").replace(/£/g, " gbp ").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
   var yesNo = (v) => /^(y|yes|true)$/i.test(v.trim()) ? "yes" : /^(n|no|false)$/i.test(v.trim()) ? "no" : null;
   function matchOption(value, options) {
     const v = value.trim().toLowerCase();
@@ -3094,6 +3095,21 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         "government_employment"
       ],
       /\brepresentative of\b|\bpolitical party\b/i
+    ],
+    // ROUND 4 (2026-11-05): a yes to one thing is no yes to two. "Do you have a valid driver's license and reliable
+    // transportation?", "... with a clean driving record?", "Are you at least 18 and able to lift 50 pounds?" ask more than the
+    // fact says; a commercial licence (CDL, Class A/B/C) or a motorcycle endorsement is another licence.
+    [
+      [
+        "drivers_license"
+      ],
+      /\bcommercial\b|\bcdl\b|\bclass [abcm]\b|\bchauffeur|\bmotorcycle\b|\bendorsement|\b(?:and|with|plus|as well as|along with)\b[^?]{0,60}\b(?:transportation|vehicle|car|insurance|record|history|points|violations?|accidents?|own)\b/i
+    ],
+    [
+      [
+        "over_18"
+      ],
+      /\b(?:and|as well as|plus|along with)\b(?!\s+(?:older|over|above|up)\b)\s+\S/i
     ],
     [
       [
@@ -3313,6 +3329,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       };
     }
     if (!a) return null;
+    if (m.fact === "eeo" && yesNoOf(a.value)) return null;
     const choice = f.options.length ? chooseOption(...placeFact(m.fact, String(a.value), answers), f.options, f.label) : null;
     if (f.options.length) return choice === null ? null : {
       value: choice,

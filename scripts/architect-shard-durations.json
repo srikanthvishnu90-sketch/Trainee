@@ -178,6 +178,7 @@
     "tests/architect/flow-scenarios-people-drafts-r3.test.ts": 12,
     "tests/architect/flow-scenarios-proactive-r2.test.ts": 11,
     "tests/architect/flow-scenarios-proactive-r3.test.ts": 9,
+    "tests/architect/flow-scenarios-proactive-r4.test.ts": 8,
     "tests/architect/flow-scenarios-proactive.test.ts": 11,
     "tests/architect/flow-scenarios-research-r2.test.ts": 14,
     "tests/architect/flow-scenarios-research-r3.test.ts": 8,
@@ -187,6 +188,7 @@
     "tests/architect/flow-scenarios-submit-worker.test.ts": 10,
     "tests/architect/flow-scenarios-tailoring-r2.test.ts": 16,
     "tests/architect/flow-scenarios-tailoring-r3.test.ts": 12,
+    "tests/architect/flow-scenarios-tailoring-r4.test.ts": 12,
     "tests/architect/flow-scenarios-tailoring.test.ts": 16,
     "tests/architect/flow-scenarios-telegram-link-owner.test.ts": 9,
     "tests/architect/flow-scenarios-telegram-r2.test.ts": 150,
@@ -348,6 +350,8 @@
     "tests/architect/scenarios-people-drafts-r3.test.ts": 12.8,
     "tests/architect/scenarios-proactive-r2.test.ts": 11.1,
     "tests/architect/scenarios-proactive-r3.test.ts": 14.9,
+    "tests/architect/scenarios-proactive-r4-catchup.test.ts": 27,
+    "tests/architect/scenarios-proactive-r4.test.ts": 30,
     "tests/architect/scenarios-proactive.test.ts": 31.4,
     "tests/architect/scenarios-replies.test.ts": 15.2,
     "tests/architect/scenarios-research-r2.test.ts": 40.1,
@@ -360,6 +364,7 @@
     "tests/architect/scenarios-submit-worker.test.ts": 5,
     "tests/architect/scenarios-tailoring-r2.test.ts": 12.1,
     "tests/architect/scenarios-tailoring-r3.test.ts": 5.5,
+    "tests/architect/scenarios-tailoring-r4.test.ts": 9,
     "tests/architect/scenarios-tailoring.test.ts": 9,
     "tests/architect/scenarios-telegram-link-owner.test.ts": 2,
     "tests/architect/scenarios-telegram-r2.test.ts": 10.3,
@@ -510,6 +515,12 @@
     "tests/architect/journeys-r2-f.test.ts": 160,
     "tests/architect/journeys-r2-g.test.ts": 160,
     "tests/architect/journeys-r2-h.test.ts": 160,
-    "tests/architect/journeys-r2-regressions.test.ts": 20
+    "tests/architect/journeys-r2-regressions.test.ts": 20,
+    "tests/architect/scenarios-file-signin-r4.test.ts": 18,
+    "tests/architect/scenarios-file-signin-r4-2.test.ts": 18,
+    "tests/architect/scenarios-file-signin-r4-3.test.ts": 18,
+    "tests/architect/scenarios-file-signin-r4-4.test.ts": 18,
+    "tests/architect/scenarios-file-signin-r4-regressions.test.ts": 0.2,
+    "tests/architect/flow-scenarios-file-signin-r4.test.ts": 14
   }
 }

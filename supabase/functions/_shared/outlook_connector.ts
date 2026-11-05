@@ -98,12 +98,13 @@ export function outlookFor(admin: Admin, env: Env, f: typeof fetch, o: { now?: (
 // delta link kept. A rate limit keeps the place it reached and the time Microsoft asked to wait.
 export async function syncInbox(admin: Admin, call: any, userId: string, now: number): Promise<{ status: string; stored: number; detail?: string; patch: Record<string, unknown> }> {
   const st = must(await admin.from("career_outlook_state").select("delta_link,synced_at").eq("user_id", userId).maybeSingle(), "read the Outlook state");
-  const conn = must(await admin.from("user_oauth_connections").select("connected_at").eq("user_id", userId).eq("provider", PROVIDER).maybeSingle(), "read the Outlook connection");
+  const conn = must(await admin.from("user_oauth_connections").select("connected_at,email").eq("user_id", userId).eq("provider", PROVIDER).maybeSingle(), "read the Outlook connection");
   if (!conn) return { status: "NOT_WIRED", stored: 0, patch: {} };
   // CONNECTORS ROUND 3 (2026-10-31): the erase epoch before the mail is read. What was read is written only while the
   // connection is there and no "forget everything" came since (career_outlook_store_messages, 20261031060000); before, a
   // sync that read the inbox before "disconnect outlook" or an erase committed wrote the messages after it.
   const epoch = await eraseEpoch(admin, userId);
+  const mailbox = String(conn.email ?? "").trim().toLowerCase();
   const since = st?.synced_at ?? conn.connected_at ?? at(now);
   const r = await readInboxDelta(call, userId, { deltaLink: st?.delta_link ?? null, sinceIso: new Date(since).toISOString() });
   let withdrawn = false;
@@ -111,7 +112,10 @@ export async function syncInbox(admin: Admin, call: any, userId: string, now: nu
     if (!mails.length) return 0;
     const rows = mails.map((m) => ({ message_hash: m.hash, conversation_hash: m.conversationHash ?? null, from_address: String(m.fromAddress ?? "").slice(0, 320),
       subject: m.subject ?? null, preview: m.snippet ?? null, received_at: m.date }));
-    const ins = await admin.rpc("career_outlook_store_messages", { p_user: userId, p_rows: rows, p_epoch: epoch });
+    // CONNECTORS ROUND 4 (2026-11-05): and only while the connection is still the Microsoft account this sync read (one
+    // connected instead while it read is the old mailbox's disconnect: what was read from it is not written for the new one).
+    let ins = await admin.rpc("career_outlook_store_messages", { p_user: userId, p_rows: rows, p_epoch: epoch, p_mailbox: mailbox });
+    if (ins.error && missingFn(ins.error, "career_outlook_store_messages")) ins = await admin.rpc("career_outlook_store_messages", { p_user: userId, p_rows: rows, p_epoch: epoch });
     if (ins.error && missingFn(ins.error, "career_outlook_store_messages")) {
       // A project without 20261031060000: the old writes.
       for (const row of rows) must(await admin.from("career_outlook_messages").upsert({ user_id: userId, ...row }, { onConflict: "user_id,message_hash" }), "store an Outlook message");

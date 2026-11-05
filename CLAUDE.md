@@ -17,6 +17,7 @@ builds and follows `AGENTS.md`. The owner (Vishnu) decides product, credentials,
 1. Keep the queue (`docs/architect/work-orders/README.md`) two orders ahead of Codex, ordered by the critical path in ARCHITECTURE section 5.
 2. Every order: why, exact files, exact interfaces, acceptance tests written first in `tests/architect/pending/`, a demo the owner can run, out of scope, a size cap.
 3. Review every Codex PR against its order: scope (files), tests unedited, gate green, demo transcript, no canned reply prose, no invented facts. Merge into `trunk` when green.
+   Write the S2 approval when you merge, not at release (`docs/architect/PROCESS.md`, which holds the flow rules).
 4. Measure: eval pass rate (`evals/career/`), live transcripts, real outcomes. Change the plan when numbers say so.
 
 ## Verified commands (taken from `.github/workflows/ci.yml` and `scripts/gate.sh`)

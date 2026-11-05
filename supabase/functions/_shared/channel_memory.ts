@@ -6,7 +6,7 @@ import type { DeliveryStore } from "./channel_store.ts";
 import { type Channel, channelOf } from "./channel_adapters.ts";
 import type { InboundStore, Person, Redeemed } from "./channel_inbound.ts";
 import { LINK_ASK_MS, LINK_CODE_ASK_MS, LINK_CODE_SLOT, LINK_NONCE_MS } from "./channel_inbound.ts";
-import { NO_CHANNEL_NOTE } from "./channel.ts";
+import { NO_CHANNEL_NOTE, OUTBOX_MAX_ATTEMPTS } from "./channel.ts";
 
 // refusedAt (IDENTITY SCENARIOS, 2026-10-30): channel_contacts.refused_at, the sign-up refusal said to this contact.
 export interface MemContact { contact: string; userId: string | null; threadId: string | null; optedOut: boolean; phone: string | null; alias: string | null; home: boolean; lastInboundAt: number | null; nudgedAt: number | null; createdAt: number; refusedAt?: number | null; optedOutAt?: number | null }
@@ -282,7 +282,7 @@ export function memoryChannelWorld() {
         if (m.sentParts !== undefined) { o.sentParts = m.sentParts; o.providerIds = m.providerIds?.length ? m.providerIds.slice(0, 10) : null; }
         if (m.status === "delivered") { if (m.text !== undefined) o.text = m.text; o.deliveredAt = m.at; o.providerId = m.providerId ?? null; o.providerIds = m.providerIds ?? (m.providerId ? [m.providerId] : null); o.retryAt = null; o.sentParts = 0; }
         else if (m.status === "queued") { o.contact = null; o.retryAt = null; if (m.deliverAt !== undefined) o.deliverAt = m.deliverAt; }
-        else if (m.status === "failed") { o.attempts++; o.retryAt = m.retryAt ?? null; }
+        else if (m.status === "failed") { o.attempts = Math.min(o.attempts + 1, OUTBOX_MAX_ATTEMPTS); o.retryAt = m.retryAt ?? null; }
         else o.retryAt = null;
       },
       // CHANNEL DELIVERY ROUND 2: what waits for the person on WhatsApp: held, and still to go (a run takes 20 at a time).

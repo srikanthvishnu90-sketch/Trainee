@@ -268,12 +268,21 @@ MIGRATIONS=(
   20261101120000_career_apply_cloud_throttle_sample.sql
   20261101121000_career_apply_prepare_error_retry.sql
   20261101130000_career_apply_reprepare_needs_answers.sql
+  20261102000000_career_correction_stops_stale.sql
   20261102120000_career_apply_prepare_candidates_for.sql
   20261102130000_career_apply_prepare_fair_claim.sql
   20261102140000_career_apply_resume_file_restarts_preparation.sql
   20261102160000_model_budget_total_cap.sql
   20261102180000_delivery_throughput.sql
   20261103100000_google_disconnect_erase_outbox.sql
+  20261104010000_site_waitlist_survey.sql
+  20261105100000_career_outreach_r4.sql
+  20261105120000_career_apply_submit_r4.sql
+  20261105130000_connectors_r4.sql
+  20261105150000_trainee_file_erase_r4.sql
+  20261105160000_channel_delivery_r4.sql
+  20261105170000_proactive_r4.sql
+  20261105180000_career_claim_deadlock.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -411,12 +420,21 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'career_apply_cloud_throttle' and prosrc like '%consecutive_errors%')"
   "exists (select 1 from pg_proc where proname = 'career_apply_prepare_candidates' and prosrc like '%30 minutes%')"
   "exists (select 1 from pg_trigger where tgname = 'career_apply_reprepare_on_needs_answers' and tgrelid = 'public.career_apply_jobs'::regclass) and exists (select 1 from pg_trigger where tgname = 'career_apply_history_approval_guard' and tgrelid = 'public.career_apply_jobs'::regclass)"
+  "exists (select 1 from pg_trigger where tgname = 'career_correction_stop_stale' and tgrelid = 'public.career_events'::regclass) and exists (select 1 from pg_proc where proname = 'career_correction_stop_stale')"
   "exists (select 1 from pg_proc where proname = 'career_apply_prepare_candidates_for')"
   "exists (select 1 from pg_proc where proname = 'career_apply_prepare_request_claim' and prosrc like '%order by q.turn%')"
   "exists (select 1 from pg_proc where proname = 'career_apply_resume_file_restarts')"
   "exists (select 1 from pg_proc where proname = 'model_budget_total_status') and exists (select 1 from pg_proc where proname = 'model_budget_reserve' and pronargs = 6)"
   "exists (select 1 from pg_proc where proname = 'career_outbox_claim_lane') and exists (select 1 from pg_proc where proname = 'channel_rate_acquire') and to_regclass('public.channel_rate_buckets') is not null"
   "exists (select 1 from pg_proc where proname = 'google_career_disconnect_erase' and prosrc like '%status:deadline:%')"
+  "to_regclass('public.site_waitlist_survey') is not null"
+  "exists (select 1 from pg_proc where proname = 'career_outreach_claim' and prosrc like '%on_rail%' and prosrc like '%career_send_bad_addresses%')"
+  "exists (select 1 from pg_proc where proname = 'career_apply_cloud_text_refusal' and prosrc like '%duplicate_job%' and prosrc like '%resume_gone%') and exists (select 1 from pg_proc where proname = 'career_apply_vm_heartbeat' and prosrc like '%posting_closed%')"
+  "exists (select 1 from pg_proc where proname = 'career_mail_text_enqueue') and exists (select 1 from pg_proc where proname = 'google_career_disconnect_erase' and prosrc like '%career_mail_text_key%') and exists (select 1 from pg_proc where proname = 'oauth_vault_refresh' and prosrc like '%held_grant%')"
+  "exists (select 1 from pg_trigger where tgname = 'trainee_file_erase_on_epoch' and tgrelid = 'public.career_watch_kv'::regclass) and exists (select 1 from pg_proc where proname = 'trainee_file_erase_on_epoch' and prosrc like '%trainee_file_logins%')"
+  "exists (select 1 from pg_trigger where tgname = 'channel_contacts_keep_stop' and tgrelid = 'public.channel_contacts'::regclass)"
+  "exists (select 1 from pg_proc where proname = 'career_alert_enqueue' and prosrc like '%r.sent_on >= p_day%' and prosrc like '%greatest(r.sent_on, p_day)%')"
+  "exists (select 1 from pg_proc where proname = 'career_outreach_action_claim' and prosrc like '%career_outreach_action_claim:%' and prosrc like '%ok_threads%')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql

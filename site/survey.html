@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Earn another week free — Trainee</title>
+<meta name="description" content="Answer 3 quick questions and earn another week free of Trainee.">
+<meta name="theme-color" content="#4A2F5E">
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234A2F5E'/%3E%3Ctext x='32' y='45' font-family='Georgia,serif' font-size='40' font-weight='700' text-anchor='middle' fill='%23fff'%3Es%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Brygada+1918:ital,wght@0,400..700;1,400..700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ============ BRAND TOKENS (same as index.html) ============ */
+:root{
+  --plum:#4A2F5E; --plum-hover:#5C3B74; --plum-light:#D4C2E2;
+  --white:#FFFFFF; --black:#000000; --ink:#141414;
+  --muted:#4F4F57; --muted-dark:#C2C2CA;
+  --line:#E6E6EA; --line-dark:#26262B; --soft:#F5F4F7;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--white);color:var(--ink);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-size:16px;letter-spacing:-.005em;-webkit-font-smoothing:antialiased}
+h1,h2{font-family:'Brygada 1918',Georgia,serif;font-weight:500;margin:0}
+p{margin:0}
+a{color:inherit;text-decoration:none}
+a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--plum);outline-offset:3px;border-radius:8px}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+.muted{color:var(--muted)}
+
+/* ============ NAV (same as index.html) ============ */
+.nav{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.97);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.nav .wrap{display:flex;align-items:center;justify-content:space-between;height:64px;gap:16px}
+.logo{font-family:'Brygada 1918',Georgia,serif;font-size:24px;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
+.nav .back{font-size:15px;font-weight:500}
+.nav .back:hover{color:var(--plum)}
+
+/* ============ SURVEY ============ */
+.survey{max-width:680px;margin:0 auto;padding:72px 24px 96px}
+.survey h1{font-size:clamp(30px,3.6vw,42px);line-height:1.15;letter-spacing:-.01em}
+.survey .sub{font-size:17px;line-height:1.6;margin-top:16px}
+.survey .who{margin:28px 0 4px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--soft);font-size:15px}
+form{margin-top:28px}
+.field{margin-top:26px}
+.field label{display:block;font-weight:600;font-size:16px;line-height:1.45;margin-bottom:10px}
+.input{height:52px;border:1px solid #CFCFD6;border-radius:12px;padding:0 14px;font-size:17px;color:var(--ink);background:#fff;width:100%;font-family:inherit}
+textarea.input{height:auto;min-height:96px;padding:12px 14px;line-height:1.5;resize:vertical}
+.btn{font-family:inherit;font-weight:600;color:#FFFFFF;display:inline-flex;align-items:center;justify-content:center;gap:10px;background:var(--plum);padding:13px 22px;border-radius:999px;font-size:18px;border:1px solid var(--plum);cursor:pointer;transition:background .2s;width:100%;height:60px;margin-top:34px}
+.btn:hover{background:var(--plum-hover)}
+.btn:disabled{opacity:.6;cursor:default}
+.err{color:#B3261E;font-size:15px;margin-top:16px;min-height:20px}
+.done{margin-top:28px;padding:22px;border:1px solid var(--line);border-radius:16px;background:var(--soft)}
+.done h2{font-size:26px;margin-bottom:10px}
+.done p{line-height:1.6}
+
+/* ============ FOOTER (same family as index.html) ============ */
+footer.site{background:var(--black);color:var(--white);padding:56px 0}
+footer.site .wrap{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+footer.site .logo{color:var(--white)}
+footer.site nav{display:flex;gap:22px;font-size:15px;color:var(--muted-dark)}
+footer.site nav a:hover{color:var(--white)}
+footer.site .copy{color:var(--muted-dark);font-size:15px}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a href="/" class="logo">trainee</a>
+    <a href="/" class="back">&larr; Back to home</a>
+  </div>
+</header>
+
+<main class="survey">
+  <h1>Earn another week free of Trainee</h1>
+  <p class="sub muted">Three quick questions — under a minute. Your answers shape what Trainee builds first, and the extra free week is added to your waitlist spot.</p>
+
+  <p class="who" id="whoLine" hidden></p>
+
+  <form id="surveyForm" novalidate>
+    <div id="identityFields" hidden>
+      <div class="field">
+        <label for="sv-name">Your name</label>
+        <input class="input" id="sv-name" type="text" autocomplete="name" placeholder="Your name">
+      </div>
+      <div class="field">
+        <label for="sv-phone">Mobile number you joined the waitlist with</label>
+        <input class="input" id="sv-phone" type="tel" autocomplete="tel" placeholder="(312) 555-0123">
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="sv-q1">What are some issues you've had managing your career?</label>
+      <textarea class="input" id="sv-q1" rows="3" placeholder="Finding roles, tailoring resumes, keeping track of applications…"></textarea>
+    </div>
+    <div class="field">
+      <label for="sv-q2">What are your issues with the current career platforms like LinkedIn, Indeed, etc.?</label>
+      <textarea class="input" id="sv-q2" rows="3" placeholder="What frustrates you most about them?"></textarea>
+    </div>
+    <div class="field">
+      <label for="sv-q3">If Trainee could do one thing for your career right now, what would it be?</label>
+      <textarea class="input" id="sv-q3" rows="3" placeholder="The one thing that would help most"></textarea>
+    </div>
+
+    <p class="err" id="sv-err" role="alert"></p>
+    <button class="btn" type="submit" id="sv-btn">Claim my extra week free</button>
+  </form>
+
+  <div class="done" id="sv-done" hidden>
+    <h2>You're all set.</h2>
+    <p>Your extra week free is locked in with your waitlist spot. We'll text you the moment your spot opens — thanks for helping us build Trainee right.</p>
+    <p style="margin-top:14px"><a href="/" style="color:var(--plum);font-weight:600">Back to Trainee &rarr;</a></p>
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <a href="/" class="logo">trainee</a>
+    <nav aria-label="Footer">
+      <a href="/">Home</a>
+      <a href="/privacy">Privacy</a>
+    </nav>
+    <span class="copy">&copy; 2026 Trainee</span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var SURVEY_ENDPOINT = 'https://mrwngntwmnaqrqhupvlt.supabase.co/functions/v1/site-survey';
+  // Who joined comes from the signup page through this tab's sessionStorage (read once, then cleared), never the URL.
+  var saved = {};
+  try { saved = JSON.parse(sessionStorage.getItem('trainee-survey') || '{}') || {}; sessionStorage.removeItem('trainee-survey'); } catch (e) { saved = {}; }
+  // An old link may still carry ?n=&p=: drop it from the address bar and history without reading it.
+  if (location.search) { try { history.replaceState(null, '', location.pathname); } catch (e) {} }
+  var name = String(saved.n || '').trim();
+  var phone = String(saved.p || '').trim();
+  var form = document.getElementById('surveyForm');
+  var err = document.getElementById('sv-err');
+  var btn = document.getElementById('sv-btn');
+
+  if (name && phone) {
+    var who = document.getElementById('whoLine');
+    who.textContent = 'Joined as ' + name + ' · ' + phone;
+    who.hidden = false;
+  } else {
+    document.getElementById('identityFields').hidden = false;
+  }
+
+  function fail(msg, el) { err.textContent = msg; if (el) el.focus(); }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    err.textContent = '';
+    var n = name, p = phone;
+    if (!n || !p) {
+      n = document.getElementById('sv-name').value.trim();
+      p = document.getElementById('sv-phone').value.trim();
+      if (!n) return fail('Enter your name.', document.getElementById('sv-name'));
+      if (!p) return fail('Enter the mobile number you joined with.', document.getElementById('sv-phone'));
+    }
+    var q1 = document.getElementById('sv-q1').value.trim();
+    var q2 = document.getElementById('sv-q2').value.trim();
+    var q3 = document.getElementById('sv-q3').value.trim();
+    if (!q1) return fail('Answer the first question — it can be one line.', document.getElementById('sv-q1'));
+    if (!q2) return fail('Answer the second question — it can be one line.', document.getElementById('sv-q2'));
+    if (!q3) return fail('Answer the third question — it can be one line.', document.getElementById('sv-q3'));
+
+    btn.disabled = true;
+    fetch(SURVEY_ENDPOINT, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: n, phone: p, q1: q1, q2: q2, q3: q3, source: location.pathname })
+    }).then(function (r) {
+      if (r.status === 403) throw new Error('That number is not on the waitlist. Use the mobile number you joined with.');
+      if (r.status === 409) throw new Error('We already have your answers for this number.');
+      if (!r.ok) throw new Error();
+      form.hidden = true;
+      document.getElementById('sv-done').hidden = false;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }).catch(function (x) {
+      fail(x && x.message ? x.message : 'Something went wrong saving your answers. Try again in a moment.');
+    }).then(function () { btn.disabled = false; });
+  });
+})();
+</script>
+</body>
+</html>

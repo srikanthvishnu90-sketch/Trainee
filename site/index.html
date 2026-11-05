@@ -698,6 +698,8 @@ kbd{font-family:inherit;font-size:12px;border:1px solid var(--d-line);border-rad
           <div class="kicker"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-check-circle"/></svg></i>You're in</div>
           <h2 tabindex="-1" id="step2Title">You're on the waitlist.</h2>
           <p class="sub muted">We'll text <strong id="su-shown"></strong> from Trainee as soon as your spot opens.</p>
+          <a class="btn" id="su-survey" href="/survey" style="height:64px;padding:0 28px;font-size:21px;font-weight:600;width:100%;margin-bottom:10px">Earn another week free of Trainee</a>
+          <p class="muted" style="font-size:14px;margin:0 0 22px">Three quick questions — under a minute.</p>
           <button class="btn" type="button" id="su-share" style="height:52px;padding:0 24px"><i class="ph" aria-hidden="true"><svg class="ic"><use href="#i-share-network"/></svg></i>Share Trainee with a friend</button>
           <p style="margin-top:16px"><button class="linkbtn" type="button" id="su-back">Use a different number</button></p>
         </div>
@@ -1676,6 +1678,8 @@ var PAGES = [
   });
   function showStep2(name, cc, digits) {
     $('su-shown').textContent = cc === '+1' ? cc + ' (' + digits.slice(0, 3) + ') ' + digits.slice(3, 6) + '-' + digits.slice(6) : cc + ' ' + digits;
+    // The survey page reads who joined from this tab's sessionStorage and clears it: no name or number in the URL.
+    try { sessionStorage.setItem('trainee-survey', JSON.stringify({ n: name, p: cc + digits })); } catch (e) {}
     $('step1').hidden = true; $('step2').hidden = false;
     $('bar2').classList.add('on');
     $('step2Title').focus();

@@ -8,7 +8,7 @@
 import type { ChannelStore, DeliveryMark, OutboxRow } from "./channel.ts";
 import type { Channel } from "./channel_adapters.ts";
 import { alertStillWanted, alertWithinLimits, freshAlertText } from "./career_watch_alerts.ts";
-import { briefStillTrue } from "./channel.ts";
+import { briefStillTrue, OUTBOX_MAX_ATTEMPTS } from "./channel.ts";
 import { localDayStart, zoneOr } from "./career_alerts.ts";
 import { buttonsForRows } from "./channel_card_tap.ts"; // FEATURE 16
 
@@ -92,6 +92,15 @@ export function supabaseChannelStore(admin: any, o: {
           if (r && Number(x.sent_parts) > 0) { r.sentParts = Number(x.sent_parts); r.sentIds = Array.isArray(x.provider_ids) ? x.provider_ids.map(String) : []; const c = claimed.get(r.id); if (c) c.parts = r.sentParts; }
         }
       }
+      // CHANNEL R4 FLAKE (2026-11-05): the reason a row tried before last recorded (the claim keeps it), so a run that fails on
+      // it can tell its own repeated failure from one refused read (deliverDue, RUN_FAILED_NOTE). A read that fails leaves it
+      // unknown (as before: the failure counts against the row's attempts).
+      const tried = out.filter((r) => r.attempts > 0).map((r) => r.id);
+      if (tried.length) {
+        const le = await Promise.resolve().then(() => admin.from("career_outbox").select("id,error").in("id", tried))
+          .catch((e: unknown) => ({ data: null, error: { message: e instanceof Error ? e.message : String(e) } }));
+        if (le && !le.error) for (const x of le.data ?? []) { const r = out.find((y) => y.id === String(x.id)); if (r) r.lastError = x.error ?? null; }
+      }
       // FEATURE 16: a Telegram row that carries an open card goes out with the card's Approve and Decline buttons, bound
       // to that card and its items' hashes (channel_card_tap.ts). A read that fails sends the text without them: the
       // card can still be answered by a reply to it, or in the app.
@@ -170,6 +179,12 @@ export function supabaseChannelStore(admin: any, o: {
     // PROACTIVE SCENARIOS ROUND 3 (2026-11-01): a queued interview brief whose interview a later email cancelled or moved
     // (career_interviews.cancelled_at / moved_at, 20261030070000_proactive_r2.sql). brief:<invite>:<n>; the ":moved" brief
     // is the new time's and goes unless that one was cancelled too. A project without the columns sends it, as before.
+    // CONNECTORS ROUND 4 (2026-11-05): the row is still in the outbox (a disconnect deletes the undelivered texts made from
+    // that mailbox, 20261105130000). A read that fails throws: the row waits, never sent on a guess.
+    async stillQueued(m) {
+      const r = must<any[]>(await admin.from("career_outbox").select("id").eq("id", m.id).limit(1), "read the queued text");
+      return (r ?? []).length > 0;
+    },
     async briefWanted(m) {
       const k = /^brief:([^:]+):(.+)$/.exec(m.key);
       if (!k) return true;
@@ -236,7 +251,8 @@ export function supabaseChannelStore(admin: any, o: {
       // PROACTIVE SCENARIOS ROUND 3: a row delivery wrote anew keeps the words that went.
       const patch = m.status === "delivered" ? { ...base, ...(m.text !== undefined ? { text: m.text } : {}), delivered_at: iso(m.at), provider_id: m.providerId ? m.providerId.slice(0, 200) : null, retry_at: null,
           ...(ids.length ? { provider_ids: ids } : { provider_ids: null }), ...(m.sentParts !== undefined || (c?.parts ?? 0) > 0 ? { sent_parts: 0 } : {}) }
-        : m.status === "failed" ? { ...base, attempts: (c?.attempts ?? 0) + 1, retry_at: m.retryAt ? iso(m.retryAt) : null, ...progress }
+        // (never past career_outbox's check: a refused write would leave the row "sending" for the sweep)
+        : m.status === "failed" ? { ...base, attempts: Math.min((c?.attempts ?? 0) + 1, OUTBOX_MAX_ATTEMPTS), retry_at: m.retryAt ? iso(m.retryAt) : null, ...progress }
         // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): put back for later (quiet hours on the person's clock now).
         : m.status === "queued" ? { ...base, status: "queued", contact: null, retry_at: null, ...(m.deliverAt ? { deliver_at: iso(m.deliverAt) } : {}) }
         : { ...base, retry_at: null, ...progress };
@@ -265,6 +281,19 @@ export function supabaseChannelStore(admin: any, o: {
     },
     async setNudged(contact, at) {
       must(await admin.from("channel_contacts").update({ nudged_at: iso(at) }).eq("contact", contact), "record the template");
+    },
+    // CHANNEL DELIVERY ROUND 4 (2026-11-05): of the rows this store claimed, put back those named (deliverDue: a run that failed
+    // part way, the rows no provider was asked to send), exactly as release() does; still "sending" only (a row a run marked is
+    // never touched again). The others stay claimed, for the sweep.
+    async putBack(ids) {
+      let n = 0;
+      for (const id of ids) {
+        const c = claimed.get(id);
+        if (!c) continue;
+        must(await admin.from("career_outbox").update({ status: c.prior, claimed_at: null, contact: null }).eq("id", id).eq("status", "sending"), "put back a claimed message");
+        claimed.delete(id); n++;
+      }
+      return n;
     },
     async release() {
       let n = 0;

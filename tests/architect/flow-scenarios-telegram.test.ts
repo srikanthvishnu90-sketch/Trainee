@@ -23,6 +23,7 @@
 // Run: deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/flow-scenarios-telegram.test.ts
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
+import { virtualClock } from "../flow/virtual-clock.ts";
 import { careerHandler, SERVICE_KEY, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
 import { confirmedResumeSql } from "../flow/resume-seed.ts";
 import { generate, rng, pick } from "./scenarios/telegram-generator.ts";
@@ -69,7 +70,8 @@ Deno.test({
       await supabaseParity(pg);
       h = await careerHandler(pg, {});
       const { handleChat } = await import("../../supabase/functions/agent-chat/handler-career.ts");
-      const bot = fakeBot({ token: TOKEN, now: Date.now });
+      const pace = virtualClock(); // the send pacing's clock (tests/flow/virtual-clock.ts): Telegram's one-a-second per chat is still computed and waited, on this clock, not the wall
+      const bot = fakeBot({ token: TOKEN, now: pace.clock });
       const openai = { chat: 0, responses: 0 };
       const viaDouble = globalThis.fetch, outbound: string[] = [];
       // ---------------------------------------------------------------------------------------- the scripted Anthropic wire
@@ -120,7 +122,7 @@ Deno.test({
         const id = o.id ?? ++upd;
         const headers: Record<string, string> = { "content-type": "application/json" };
         if (o.secret !== null) headers["x-telegram-bot-api-secret-token"] = o.secret ?? SECRET;
-        const deliverNow = deliverer(admin, Deno.env);
+        const deliverNow = deliverer(admin, Deno.env, pace);
         const res = await handleTelegram(new Request(`${SUPABASE_URL}/functions/v1/trainee-telegram`, { method: "POST", headers, body: JSON.stringify({ update_id: id, ...body }) }),
           { env: Deno.env, now: Date.now, store: () => supabaseInboundStore(admin), chat: chatThroughAgent(SUPABASE_URL, SERVICE_KEY, { channel: "telegram" }), admin,
             deliver: (a) => deliverNow({ userId: a.userId, key: a.key, now: a.now }) });

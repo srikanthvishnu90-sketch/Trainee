@@ -12,7 +12,7 @@ export function memSessions() {
   const born = new Map<string, number>();
   const account = (r: LoginRow, k: "sends" | "tries") => [...logins.values()]
     .filter((x) => x.user_id === r.user_id && x.matched && Math.abs((born.get(x.jti) ?? 0) - (born.get(r.jti) ?? 0)) < ACCOUNT_WINDOW_MS).reduce((a, x) => a + x[k], 0);
-  const store: SessionStore = {
+  const store: SessionStore & { eraseAccount(u: string, at: number): void } = {
     async createSession(x) { sessions.set(x.idHash, { user_id: x.userId, via: x.via, phone: x.phone, telegram_id: x.telegramId, list: x.list, expires_at: iso(x.expiresAt), revoked_at: null }); },
     async session(h) { const r = sessions.get(h); return r ? { ...r } : null; },
     async setList(h, list) { const r = sessions.get(h); if (r && !r.revoked_at) r.list = list; },
@@ -23,6 +23,11 @@ export function memSessions() {
     async setPhone(j, phone, matched) { const r = logins.get(j); if (r && !r.done_at) { r.phone = phone; r.matched = matched; } },
     async countSend(j, max) { const r = logins.get(j); if (!r || r.done_at || r.sends >= max || (r.matched && account(r, "sends") >= ACCOUNT_MAX_SENDS)) return false; r.sends++; return true; },
     async countTry(j, max) { const r = logins.get(j); if (!r || r.done_at || r.tries >= max || (r.matched && account(r, "tries") >= ACCOUNT_MAX_TRIES)) return false; r.tries++; return true; },
+    // As supabaseSessionStore.accountTries: the tries of every sign-in of the account begun within the window of this one.
+    async accountTries(j) { const r = logins.get(j); if (!r) return 0; return [...logins.values()].filter((x) => x.user_id === r.user_id && Math.abs((born.get(x.jti) ?? 0) - (born.get(r.jti) ?? 0)) < ACCOUNT_WINDOW_MS).reduce((a, x) => a + x.tries, 0); },
+    // As 20261105150000_trainee_file_erase_r4.sql does on "forget everything": the account's sessions deleted, every sign-in of it
+    // used up with its typed number cleared (its counts kept).
+    eraseAccount(u: string, at: number) { for (const [h, x] of sessions) if (x.user_id === u) sessions.delete(h); for (const x of logins.values()) if (x.user_id === u) { x.phone = null; x.done_at ??= iso(at); } },
     async finishLogin(j, at) { const r = logins.get(j); if (!r || r.done_at) return false; r.done_at = iso(at); return true; },
   };
   return { store, sessions, logins };

@@ -13,6 +13,8 @@
 //   - STOP while parts are queued, Telegram unlinked mid-conversation, a chat blocked (403) or migrated (400): nothing after
 //     STOP or to a chat that is not the person's; every part at most once and in order; nothing left "sending";
 //   - no recorded reason carries a message's words or a credential.
+// And, on its own with nothing left to chance (the CI flake of 2026-11-05): a row the provider refused twice whose STOP read is
+// then refused on its third try is tried again and delivered, not failed for good.
 // Run: deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/flow-scenarios-channel-r4.test.ts
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import assertNode from "node:assert/strict";
@@ -26,7 +28,7 @@ import { adaptersFromEnv } from "../../supabase/functions/_shared/channel_regist
 import { telegramPacerFromEnv } from "../../supabase/functions/_shared/channel_pacer.ts";
 import { deliverer } from "../../supabase/functions/_shared/channel_runtime.ts";
 import { loopSend } from "../../supabase/functions/_shared/loopmessage.ts";
-import { RUN_FAILED_NOTE } from "../../supabase/functions/_shared/channel.ts";
+import { deliverDue, MAX_ATTEMPTS, RUN_FAILED_NOTE } from "../../supabase/functions/_shared/channel.ts";
 import { supabaseInboundStore } from "../../supabase/functions/trainee-inbound/store.ts";
 import { rng } from "./scenarios-channel-r4-battery.ts";
 
@@ -152,7 +154,8 @@ Deno.test({ name: "channel delivery round 4 end to end on Postgres: provider err
       });
       return await res.json();
     };
-    const head = deliverer(admin, E, { clock: vc.clock, sleep: vc.sleep });
+    // (the head start sends through the same fake providers: before, it had no fetch and called the real provider APIs)
+    const head = deliverer(admin, E, { clock: vc.clock, sleep: vc.sleep, fetch: providers });
 
     await t.step("the runs: faults at the providers and in the database, STOP, unlink, a credential outage", async () => {
       await queue(vc.clock() - MIN);
@@ -232,6 +235,47 @@ Deno.test({ name: "channel delivery round 4 end to end on Postgres: provider err
       ok(runs.every((x) => x.error === null || /connection reset/.test(x.error)), "a run fails only on the refused write");
       console.log(`[channel-r4 flow] ${out.length} rows ${JSON.stringify(counts)}, ${calls.length} provider calls, ${runs.length} runs, ${Date.now() - started} ms`);
     });
+  } finally {
+    await db.stop();
+  }
+} });
+
+Deno.test({ name: "channel delivery round 4 on Postgres: a row the provider refused twice is not lost to one refused STOP read on its third try", sanitizeResources: false, sanitizeOps: false, async fn() {
+  // Before: the refused read counted as the row's last attempt and the row ended "failed" (RUN_FAILED_NOTE, no retry), never
+  // sent. The main test above hit this only when its random faults gave the row of the refused read two provider refusals first.
+  if (!haveDb()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
+  const db = await railDb();
+  try {
+    await supabaseParity(db.pg as any);
+    const double = postgrestDouble(db.pg as any, { url: "http://supabase.test", serviceKey: "service-test-key", users: {} });
+    let refuseOptOut = 1;
+    const flaky = (async (input: Request | URL | string, init?: RequestInit) => {
+      const u = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (refuseOptOut > 0 && u.includes("/rest/v1/rpc/channel_opted_out")) { refuseOptOut--; return new Response(JSON.stringify({ message: "connection reset by peer" }), { status: 503 }); }
+      return await double.fetch(input as any, init);
+    }) as typeof fetch;
+    const admin = createClient("http://supabase.test", "service-test-key", { global: { fetch: flaky }, auth: { persistSession: false, autoRefreshToken: false } });
+    const T = Date.parse("2026-11-05T15:00:00Z"), u = uid(99), contact = "+15550079999";
+    await db.sql.query(`insert into auth.users(id, email) values (${q(u)}, 'r4c99@example.test');
+      insert into public.profiles(id) values (${q(u)});
+      insert into public.career_watch_kv(user_id, key, value) values (${q(u)}, 'career:account', '{"epoch":0,"version":0,"paused":false}');
+      insert into public.channel_contacts(contact, user_id, last_inbound_at, created_at, home) values (${q(contact)}, ${q(u)}, ${q(iso(T - HOUR))}, ${q(iso(T - 48 * HOUR))}, true);
+      insert into public.career_outbox(user_id, key, kind, text, deliver_at, status, attempts, error, retry_at)
+        values (${q(u)}, 'status:r4c99-1', 'status', 'your application was viewed', ${q(iso(T - HOUR))}, 'failed', ${MAX_ATTEMPTS - 1}, 'LoopMessage HTTP 502', ${q(iso(T - MIN))})`);
+    const sent: string[] = [];
+    const send = async (to: string, bubbles: string[]) => { sent.push(`${to}|${bubbles.join("/")}`); return { ok: true as const, id: `lm-${sent.length}` }; };
+    const run = (now: number) => deliverDue({ store: supabaseChannelStore(admin, { lanes: true }), send, now });
+    const row = async () => (await rows<{ status: string; attempts: number; error: string | null; retry_at: string | null }>(db, `select status, attempts, error, retry_at::text from public.career_outbox where key = 'status:r4c99-1'`))[0];
+    let threw = "";
+    try { await run(T); } catch (e) { threw = (e as Error).message; }
+    ok(/read opt-out/.test(threw), `the run fails on the refused STOP read: ${threw}`);
+    const a = await row();
+    eq([a.status, a.attempts, a.error], ["failed", MAX_ATTEMPTS, RUN_FAILED_NOTE], "the run failure is recorded as one attempt");
+    ok(a.retry_at !== null && Date.parse(a.retry_at) > T, `and the row is tried again, not failed for good: ${JSON.stringify(a)}`);
+    eq(sent, [], "nothing went in the failed run");
+    await run(Date.parse(a.retry_at!));
+    eq((await row()).status, "delivered", "the next run after the backoff delivers it");
+    eq(sent, [`${contact}|your application was viewed`], "once");
   } finally {
     await db.stop();
   }

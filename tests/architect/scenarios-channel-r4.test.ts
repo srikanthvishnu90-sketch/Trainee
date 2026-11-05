@@ -81,6 +81,28 @@ Deno.test("R1 the row whose own handling failed before any send counts one attem
   eq([m2.rows[0].status, m2.rows[0].retryAt, m2.rows[0].error], ["failed", null, RUN_FAILED_NOTE]);
 });
 
+Deno.test("R1b a row the provider refused twice is not lost to one refused STOP read on its third try; it goes on the next run", async () => {
+  // Before (CI flake of flow-scenarios-channel-r4, 2026-11-05): the run failure counted as the row's third and last attempt,
+  // so a WhatsApp alert refused with a 502 and a 429 was failed for good with RUN_FAILED_NOTE when the database refused one
+  // read on its third try: lost, never sent. Every scenario here is fixed; nothing depends on timing.
+  for (const prior of ["WhatsApp HTTP 502: ", "LoopMessage HTTP 429 after 1 of 5 bubbles went out"]) {
+    const m = mkModel([{ status: "failed", attempts: MAX_ATTEMPTS - 1, retryAt: T0 - MIN, error: prior }, { key: "status:2" }], [["+15550000001", "u1"]]);
+    m.faults.readFails = 1; // the STOP read of row 1 is refused
+    const sent: string[] = [];
+    await deliverDue({ store: modelStore(m), send: sendOk(sent), now: T0 }).catch(() => {});
+    eq([m.rows[0].status, m.rows[0].attempts, m.rows[0].error], ["failed", MAX_ATTEMPTS, RUN_FAILED_NOTE], `${prior}: the run failure is recorded`);
+    ok(m.rows[0].retryAt !== null && m.rows[0].retryAt > T0, `${prior}: and the row is tried again, not failed for good`);
+    eq(m.rows[1].status, "queued", "row 2 went back untouched");
+    await deliverDue({ store: modelStore(m), send: sendOk(sent), now: m.rows[0].retryAt! });
+    eq(m.rows.map((o) => o.status), ["delivered", "delivered"], `${prior}: both went`);
+    eq(sent.length, 2, "each once");
+  }
+  // Still bounded: a row whose own handling fails in two runs in a row once its attempts are used ends failed with the reason.
+  const m = mkModel([{ status: "failed", attempts: MAX_ATTEMPTS - 1, retryAt: T0 - MIN, error: "WhatsApp HTTP 502: " }], [["+15550000001", "u1"]]);
+  for (let i = 0; i < 2; i++) { m.faults.readFails = 1; await deliverDue({ store: modelStore(m), send: sendOk([]), now: T0 + i * 3600000 }).catch(() => {}); }
+  eq([m.rows[0].status, m.rows[0].attempts, m.rows[0].retryAt, m.rows[0].error], ["failed", MAX_ATTEMPTS + 1, null, RUN_FAILED_NOTE], "failed with the reason on the second run failure in a row");
+});
+
 const SECRET = "s".repeat(40);
 const j = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status });
 Deno.test("R2 a provider refusing Trainee's credentials (Telegram 401/404, WhatsApp 401/190, LoopMessage 401) fails nothing; one try per channel per run; they go once the secret works", async () => {

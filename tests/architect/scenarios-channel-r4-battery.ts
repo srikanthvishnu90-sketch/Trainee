@@ -66,7 +66,8 @@ export function modelStore(m: Model, scope: { only?: { userId: string; key: stri
         const c = m.contacts.get(o.contact!)!;
         const wa = o.contact!.startsWith("wa:");
         return { id: o.id, userId: o.userId, contact: o.contact!, key: o.key, text: o.text, deliver_at: o.deliverAt, attempts: o.attempts,
-          ...(wa ? { lastInboundAt: c.lastInboundAt, nudgedAt: c.nudgedAt, heldAt: o.heldAt } : {}), ...(o.sentParts > 0 ? { sentParts: o.sentParts, sentIds: [...o.providerIds] } : {}) } as OutboxRow;
+          ...(wa ? { lastInboundAt: c.lastInboundAt, nudgedAt: c.nudgedAt, heldAt: o.heldAt } : {}), ...(o.sentParts > 0 ? { sentParts: o.sentParts, sentIds: [...o.providerIds] } : {}),
+          ...(o.attempts > 0 ? { lastError: o.error } : {}) } as OutboxRow; // as supabaseChannelStore reads it for a row tried before
       });
     },
     async optedOut(contact) {

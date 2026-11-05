@@ -168,3 +168,65 @@ test("prepFilePlan adds up exactly for every length and count it accepts", () =>
     assert.ok(plan[1].min >= n, "a minute a question out loud");
   }
 });
+
+/* Review of PR #494 (2026-11-04): a refusal of the File, "file" as a verb, and lengths said as compound words or hour
+   phrases. The claim is dispatched early, so every message that is not a prep File ask must reach the route it reached
+   without the claim (checked by running the same turn with prepFileRequest switched off). */
+const withoutClaim = (fn) => { const real = Prep.prepFileRequest; Prep.prepFileRequest = () => null; try { return fn(); } finally { Prep.prepFileRequest = real; } };
+
+test("review 1: a refusal of the File makes no File; five questions asked are answered as text, exactly five", () => {
+  const { out } = turn("Don't make a file, just give me five interview questions");
+  assert.equal(out.result && out.result.file, undefined, out.reply);
+  assert.equal(out.result.sends, 0);
+  const lines = out.reply.split("\n").filter((l) => /^\d+\. \S/.test(l));
+  assert.equal(lines.length, 5, out.reply);
+  assert.match(out.reply, /No File was made/);
+  for (const m of ["I don't want a file for my interview, just tell me what to expect", "Stop. Do not create a prep file for the interview.", "No file please, just give me 3 interview questions", "Skip the one-pager and give me two interview questions"]) {
+    const r = turn(m).out;
+    assert.ok(!(r.result && r.result.file), `${m}: no File (${r.intent})`);
+    assert.notEqual(r.result && r.result.payload && r.result.payload.kind, "prep_file", m);
+  }
+  const three = turn("No file please, just give me 3 interview questions").out;
+  assert.equal(three.reply.split("\n").filter((l) => /^\d+\. \S/.test(l)).length, 3, three.reply);
+  // A plain "not" about something else is not a refusal of the File.
+  assertPrepFile(turn("Make a one-page interview prep file with five questions, not a long doc, and a 30 minute plan").out, 5, 30);
+});
+
+test("review 2: 'file' as a verb is never a File ask, and no role is read from it", () => {
+  for (const m of ["I need to file my W-2 before the interview", "I need to file my expenses from the interview trip", "Can I file a complaint about the interview?", "I'll file the interview notes later", "should I file for unemployment while I wait to hear back from my interview?"]) {
+    assert.equal(Prep.prepFileRequest(m), null, m);
+    const r = turn(m).out;
+    assert.ok(!(r.result && r.result.file), `${m}: no File`);
+    assert.ok(!/expenses from the/.test(JSON.stringify(r)), `${m}: no invented role`);
+  }
+  assert.equal(Prep.prepFileStated("I need to file my expenses from the interview trip", null).role, undefined);
+  assert.equal(Prep.prepFileStated("my trip to the interview", null).role, undefined);
+  assert.equal(Prep.prepFileStated("make a prep file for my data analyst interview", null).role, "data analyst");
+});
+
+test("review 3: lengths and counts in compound words and hour phrases are read exactly, and a refusal quotes them right", () => {
+  const minutes = { "an hour and a half": 90, "one and a half hours": 90, "1.5 hours": 90, "two and a half hours": 150, "twenty-five minute": 25, "twenty five minutes": 25, "forty-five minutes": 45, "fifty five mins": 55,
+    "half an hour": 30, "a half-hour": 30, "a quarter of an hour": 15, "quarter-hour": 15, "three quarters of an hour": 45, "an hour": 60, "two hours": 120, "ninety minutes": 90, "an hour and a quarter": 75, "35 min": 35 };
+  for (const [p, want] of Object.entries(minutes)) assert.equal(Prep.prepFileMinutes(p), want, p);
+  for (const [m, n, min] of [["Make an interview prep file with 4 questions and an hour and a half plan", 4, 90], ["Make an interview prep file with 6 questions and a twenty-five minute plan", 6, 25],
+    ["Make an interview prep file with seven questions for a quarter of an hour", 7, 15], ["Make an interview prep file with 2 questions, forty five minutes", 2, 45]]) assertPrepFile(turn(m).out, n, min);
+  const q = turn("Make a one-page interview prep File with twenty-five questions and a 30-minute plan").out;
+  assert.equal(q.result.payload.problem, "questions");
+  assert.equal(q.result.payload.questions, 25);
+  assert.match(q.reply, /you asked for 25\b/);
+  const m = turn("Make a one-page interview prep File with five questions and a three hour and a half plan").out;
+  assert.equal(m.result.payload.minutes, 210);
+  assert.match(m.reply, /\b210 minutes is outside/);
+});
+
+test("review 4: messages mentioning 'file' or 'interview' that are not prep File asks reach their normal routes", () => {
+  for (const m of ["I need to file my W-2 before the interview", "I need to file my expenses from the interview trip", "I don't want a file for my interview, just tell me what to expect",
+    "what's on file for me?", "what goes in an interview prep file?", "how should I prepare for my interview tomorrow?", "give me a practice question for my interview",
+    "I have an interview tomorrow; do not invent company facts", "tailor my resume and send me the PDF file in this chat", "did I upload my resume file?", "mock interview please",
+    "I have a phone interview with Acme on Friday", "how did my interview go? I think it went badly"]) {
+    const a = turn(m).out, b = withoutClaim(() => turn(m).out);
+    assert.ok(!(a.result && a.result.file), `${m}: no File`);
+    assert.equal(a.intent, b.intent, `${m}: same route as without the prep File claim`);
+    assert.equal(a.reply, b.reply, `${m}: same reply as without the prep File claim`);
+  }
+});

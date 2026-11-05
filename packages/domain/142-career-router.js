@@ -5620,6 +5620,17 @@ const CareerRouter = (() => {
     if (!Prep || typeof Prep.prepFileRequest !== "function") return null;
     const req = Prep.prepFileRequest(text);
     if (!req) return null;
+    // The person said not to make a File (BETA C03 review): none is made. Questions asked with a count are answered here as
+    // text, the exact number asked; with no count, the ask goes on to the routes that answer it.
+    if (req.noFile) {
+      const n = req.questions;
+      if (!Number.isFinite(n) || n < 1 || n > Prep.PREP_FILE_MAX_QUESTIONS) return null;
+      const st = prepFileStatedOf(text, null);
+      const qs = typeof Prep.prepFileQuestionList === "function" ? Prep.prepFileQuestionList(n, st.role) : [];
+      if (qs.length !== n) return null;
+      const reply = [`Here ${n === 1 ? "is 1 practice question" : `are ${n} practice questions`}, as text. No File was made.`, ...qs.map((q, i) => `${i + 1}. ${q}`), "", "Want to answer question 1 out loud here?"].join("\n");
+      return { intent: "prep_brief", reply, resultStatus: "awaiting_user", sends: 0, payload: { kind: "prep_questions_text", questions: n, no_file: true } };
+    }
     if (!req.ok) {
       const why = req.problem === "questions"
         ? `A one-page File holds 1 to ${Prep.PREP_FILE_MAX_QUESTIONS} questions, and you asked for ${req.questions}, so I didn't make one with fewer than you asked.`

@@ -279,6 +279,7 @@ MIGRATIONS=(
   20261105100000_career_outreach_r4.sql
   20261105120000_career_apply_submit_r4.sql
   20261105130000_connectors_r4.sql
+  20261105160000_channel_delivery_r4.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -427,6 +428,7 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'career_outreach_claim' and prosrc like '%on_rail%' and prosrc like '%career_send_bad_addresses%')"
   "exists (select 1 from pg_proc where proname = 'career_apply_cloud_text_refusal' and prosrc like '%duplicate_job%' and prosrc like '%resume_gone%') and exists (select 1 from pg_proc where proname = 'career_apply_vm_heartbeat' and prosrc like '%posting_closed%')"
   "exists (select 1 from pg_proc where proname = 'career_mail_text_enqueue') and exists (select 1 from pg_proc where proname = 'google_career_disconnect_erase' and prosrc like '%career_mail_text_key%') and exists (select 1 from pg_proc where proname = 'oauth_vault_refresh' and prosrc like '%held_grant%')"
+  "exists (select 1 from pg_trigger where tgname = 'channel_contacts_keep_stop' and tgrelid = 'public.channel_contacts'::regclass)"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql

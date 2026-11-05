@@ -3,7 +3,7 @@
 // with career_alerts.ts, writes the outbox (one row per person and key, ever) and saves the counters. Delivery from the
 // outbox is the texting channel's job (WO-013); the simulator drains its own in-memory queue.
 // Tables: supabase/migrations/20261019010001_career_alerts.sql.
-import { DEFAULT_PREFS, MAX_INSTANT_PER_DAY, WEEKLY_MAX, type AlertPrefs, type PlanUser } from "./career_alerts.ts";
+import { dayCount, DEFAULT_PREFS, MAX_INSTANT_PER_DAY, WEEKLY_MAX, type AlertPrefs, type PlanUser } from "./career_alerts.ts";
 import { validFloor } from "./career_floor.ts";
 import { mailTextKey } from "./channel.ts";
 
@@ -25,7 +25,13 @@ export interface AlertStore {
   // was queued), by person, so alerts a run queued before dying (its counters never saved) count against the person's day
   // (career_proactive_run.ts runAlerts).
   alertKeysSince?(sinceIso: string): Promise<Map<string, Set<string>>>;
+  // PROACTIVE SCENARIOS ROUND 4 (2026-11-05): the jobs each of these people applied to, or is applying to, through Trainee
+  // (career_apply_jobs: queued, being sent, sent, or waiting on them), by person: never alerted as news. Absent: none known.
+  appliedJobs?(userIds: string[]): Promise<Map<string, Set<string>>>;
 }
+// The states of career_apply_jobs in which the person has applied or is applying (failed and not_submitted are neither).
+export const APPLIED_STATES = ["queued", "driving", "confirmed", "submitted_unconfirmed", "needs_user", "unknown_outcome"] as const;
+export const SUPERSEDED_NOTE = { report: "not sent: a newer daily report took its place", digest: "not sent: a newer weekly digest took its place" } as const;
 // first_seen_at (WO-037, alerts only): when Trainee first saw the posting, kept with the alert so the latency from
 // first seen to delivered can be reported (career_alert_latency).
 export interface Outbox {
@@ -40,6 +46,9 @@ export interface Outbox {
   // "capped" (no room today or this week), "below_fit", "off" (alerts off, settings gone, or the account paused),
   // "unsupported" (the store cannot do it; the caller queues with enqueue and keeps the count itself).
   enqueueAlert?(userId: string, m: { key: string; text: string; at: number; first_seen_at?: string; fit: number | null }, c: { day: string; weekSince: string }): Promise<AlertQueued>;
+  // PROACTIVE SCENARIOS ROUND 4 (2026-11-05): the person's other rows of this kind not yet sent, and not being sent now, are
+  // set aside with why (SUPERSEDED_NOTE): a newer daily report or weekly digest takes their place. How many.
+  supersede?(userId: string, kind: "report" | "digest", keep: string): Promise<number>;
 }
 export type AlertQueued = "queued" | "duplicate" | "capped" | "below_fit" | "off" | "unsupported";
 
@@ -89,9 +98,13 @@ export function startWatching(prev: AlertRow | null, o: { userId: string; prefs:
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: o.tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" }).formatToParts(new Date(o.now));
   const g = (t: string) => parts.find((x) => x.type === t)?.value ?? "0";
   const today = `${g("year")}-${g("month")}-${g("day")}`, hour = Number(g("hour")) % 24;
+  // PROACTIVE SCENARIOS ROUND 4 (2026-11-05): a new zone further west goes back a date. The day's alerts already counted,
+  // and the report already sent for the later date, stay counted (dayCount): moving from Tokyo to Los Angeles started a new
+  // day's allowance of alerts on top of the one just used, and a report for the day before.
+  const day = dayCount(prev?.sent_on, prev?.instant_sent_today ?? 0, today), last = prev?.last_report_on ?? null;
   return { id: o.userId, tz: o.tz, prefs: o.prefs, last_checked_at: new Date(o.now).toISOString(),
-    instant_sent_today: prev?.sent_on === today ? prev.instant_sent_today : 0, sent_on: today,
-    last_report_on: hour >= o.prefs.report_hour ? today : (prev?.last_report_on ?? null), held: prev?.held ?? [] };
+    instant_sent_today: day.count, sent_on: day.on,
+    last_report_on: hour >= o.prefs.report_hour && !(last && last > today) ? today : last, held: prev?.held ?? [] };
 }
 
 // ------------------------------------------------------------------------------------------------ memory
@@ -114,12 +127,12 @@ export function memoryAlertStore(initial?: MemoryAlerts): AlertStore & Outbox & 
       if (!row || !row.prefs?.on) return "off";
       if (st.outbox.some((o) => o.userId === userId && o.key === m.key)) return "duplicate";
       if (typeof row.prefs.min_fit === "number" && !(typeof m.fit === "number" && m.fit >= row.prefs.min_fit)) return "below_fit";
-      const today = row.sent_on === c.day ? Math.max(0, row.instant_sent_today | 0) : 0;
+      const counted = dayCount(row.sent_on, row.instant_sent_today, c.day), today = counted.count;
       if (today >= Math.min(MAX_INSTANT_PER_DAY, Math.floor(Number(row.prefs.max_instant_per_day) || 0))) return "capped";
       // No weekly count: owner rule "no caps"; career_alert_enqueue (20261030180000) dropped it. max_per_week is accepted and ignored.
       const was = { n: row.instant_sent_today, on: row.sent_on };
       row.instant_sent_today = today + 1;
-      row.sent_on = c.day;
+      row.sent_on = counted.on;
       let ok = false;
       try {
         ok = await this.enqueue(userId, { key: m.key, kind: "alert", text: m.text, at: m.at, ...(m.first_seen_at ? { first_seen_at: m.first_seen_at } : {}), ...(m.fit !== null ? { fit: m.fit } : {}) } as any);
@@ -202,6 +215,23 @@ export function supabaseAlertStore(admin: any): AlertStore & Outbox {
         for (const r of got) { if (!out.has(r.user_id)) out.set(r.user_id, new Set()); out.get(r.user_id)!.add(String(r.key)); }
         if (got.length < PAGE) return out;
       }
+    },
+    async appliedJobs(ids) {
+      const out = new Map<string, Set<string>>();
+      for (let i = 0; i < ids.length; i += 200) {
+        const part = ids.slice(i, i + 200);
+        for (let from = 0; ; from += PAGE) {
+          const got = must<any[]>(await admin.from("career_apply_jobs").select("user_id,job_id").in("user_id", part).in("state", [...APPLIED_STATES]).order("id").range(from, from + PAGE - 1), "read the applications sent") || [];
+          for (const r of got) { if (!out.has(r.user_id)) out.set(r.user_id, new Set()); out.get(r.user_id)!.add(String(r.job_id)); }
+          if (got.length < PAGE) break;
+        }
+      }
+      return out;
+    },
+    async supersede(userId, kind, keep) {
+      const got = must<any[]>(await admin.from("career_outbox").update({ status: "skipped_opt_out", error: SUPERSEDED_NOTE[kind], claimed_at: null })
+        .eq("user_id", userId).eq("kind", kind).neq("key", keep).is("delivered_at", null).in("status", ["queued", "failed", "held"]).eq("sent_parts", 0).select("id"), "set an older text aside") || [];
+      return got.length;
     },
     async enqueue(userId, m) {
       // CONNECTORS ROUND 4 (2026-11-05): a text made from the person's mail is queued only while their career Google grant is

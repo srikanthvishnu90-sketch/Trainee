@@ -221,7 +221,35 @@ export function resumeMessage(text: string): string {
   return redactIdentity(`${head}${body}`.trim()).text;
 }
 
-export type ResumeFileResult = { ok: true; message: string; uploadId: string; sha256: string } | { ok: false; reply: string; why: string };
+// ONBOARDING ROUND 4 (2026-11-05, tests/architect/scenarios-onboarding-r4.test.ts): a file's text longer than the chat reads
+// at once (a dense two-page resume) was cut at 4,000 characters without a word: the person was shown the entries before
+// the cut, confirmed them as "your resume", and never learned the rest of their jobs and skills were not read. A pasted
+// message cut the same way is told (channel_inbound.ts longCutNote); a file now is too, with where the reading stopped.
+export function resumeMessageCut(text: string): boolean {
+  return "here is my resume:\n".length + String(text ?? "").trim().length > MAX_MESSAGE;
+}
+export function fileCutNote(message: string): string {
+  const last = String(message ?? "").trim().split("\n").map((l) => l.trim()).filter(Boolean).pop() ?? "";
+  const tail = last.length > 60 ? `…${last.slice(-60).trim()}` : last;
+  return `Your file's text is longer than the 4,000 characters I can read at once, so I read it only up to "${tail}". Nothing after that is on your record or in the entries below. If an entry you need is missing, send a shorter version (one or two pages) as a PDF or Word file.`;
+}
+// ONBOARDING ROUND 4: the name the file is stored and later attached under. A long Telegram file name was cut at 200
+// characters (telegram.ts), so the file was kept, and attached to applications, with no extension ("My Resume Final ...
+// My Resum"); a name over 200 characters reaching this function failed the upload's own check ("couldn't save it just
+// now", for ever); a name with a line break or a path ("../../x.pdf") was stored as sent; and a PDF named "resume.docx" was
+// kept, and attached, as a Word file. The name now has no control characters or path, at most 120 characters, and the
+// extension and type of what the bytes are.
+export function storedFilename(name: string, kind: FileKind): string {
+  const ext = kind === "pdf" ? ".pdf" : ".docx";
+  let base = String(name ?? "").normalize("NFC").replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ").replace(/[\/\\]/g, " ")
+    .replace(/\s+/g, " ").trim();
+  base = base.replace(/\.(?:pdf|docx?|rtf|odt|txt|pages|png|jpe?g|gif|heic|webp|zip)$/i, "").replace(/^[.\s]+/, "").trim();
+  if ([...base].length > 120) base = [...base].slice(0, 120).join("").trim();
+  return `${base || "resume"}${ext}`;
+}
+export const KIND_MIME: Record<FileKind, string> = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" };
+
+export type ResumeFileResult = { ok: true; message: string; uploadId: string; sha256: string; note?: string } | { ok: false; reply: string; why: string };
 export async function ingestResumeFile(o: {
   userId: string; channel: "telegram"; doc: { fileId: string; uniqueId: string; name: string; mime: string; size: number | null };
   fetchFile: (fileId: string, maxBytes: number) => Promise<{ ok: true; bytes: Uint8Array } | { ok: false; error: string }>;
@@ -255,13 +283,13 @@ export async function ingestResumeFile(o: {
   const sha256 = await sha256Bytes(got.bytes);
   let uploadId: string;
   try {
-    uploadId = await o.record({ userId: o.userId, channel: o.channel, ref: `${o.channel}:${o.doc.uniqueId}`, filename: o.doc.name, mime: o.doc.mime || (kind === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    uploadId = await o.record({ userId: o.userId, channel: o.channel, ref: `${o.channel}:${o.doc.uniqueId}`, filename: storedFilename(o.doc.name, kind), mime: KIND_MIME[kind],
       bytes: got.bytes.length, sha256, content_b64: b64(got.bytes), message_sha256: await sha256Text(message) });
   } catch (e) {
     console.error("resume file: not stored:", (e as Error)?.message ?? e);
     return { ok: false, reply: FILE_SAVE_REPLY, why: "store" };
   }
-  return { ok: true, message, uploadId, sha256 };
+  return { ok: true, message, uploadId, sha256, ...(resumeMessageCut(text) ? { note: fileCutNote(message) } : {}) };
 }
 
 // deno-lint-ignore no-explicit-any

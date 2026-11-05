@@ -184,7 +184,7 @@ export interface CoreDeps {
   // FEATURE 16 (Telegram; optional, so the other channels run unchanged):
   // resumeFile: a document the person sent, downloaded, read and stored as their upload (channel_resume_upload.ts); ok
   //   gives the message the chat receives for it, else the plain reply to say. Absent: the file is not read (WO-106 reply).
-  resumeFile?: (a: { userId: string; doc: NonNullable<InboundMessage["document"]>; now: number }) => Promise<{ ok: true; message: string } | { ok: false; reply: string }>;
+  resumeFile?: (a: { userId: string; doc: NonNullable<InboundMessage["document"]>; now: number }) => Promise<{ ok: true; message: string; note?: string } | { ok: false; reply: string }>;
   // cardTap: a button tap on a card (channel_card_tap.ts tapCard); answerCallback: the tap answered once on the button.
   cardTap?: (a: { userId: string; data: string; now: number }) => Promise<{ toast: string; reply: string; status: string; parts?: string[] }>;
   answerCallback?: (callbackId: string, text: string) => Promise<boolean>;
@@ -234,6 +234,16 @@ export function replyParts(raw: unknown): string[] | null {
   const parts = raw.filter((p): p is string => typeof p === "string").map((p) => p.trim()).filter(Boolean)
     .flatMap((p) => (p.length <= OUTBOX_CHARS ? [p] : packMessages(p, OUTBOX_CHARS)));
   return parts.length < 2 ? null : parts;
+}
+// The notes (a long message cut, a file read only in part, a caption) before the answer. ONBOARDING ROUND 4
+// (scenarios-onboarding-r4.test.ts): a note put before a first part that was already near the outbox's 4,000 characters
+// made a part the outbox refuses (career_outbox text 1..4000), and the person got "I couldn't answer that just now"
+// instead of their answer. Every part is packed again to fit.
+export function notesFirst(notes: string[], reply: string, parts: string[] | null): { reply: string; parts: string[] | null } {
+  const withReply = notes.length ? [...notes, reply].join("\n\n") : reply;
+  if (!parts) return { reply: withReply, parts: null };
+  const joined = notes.length ? [[...notes, parts[0]].join("\n\n"), ...parts.slice(1)] : parts;
+  return { reply: withReply, parts: replyParts(joined) ?? joined };
 }
 // A provider id becomes a chat turn key the chat accepts (letters, digits, - and _), so agent-chat's own replay guard sees
 // a retry of the same message as the same turn.
@@ -503,13 +513,15 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
     }
     // FEATURE 16: a document (a resume as a PDF or Word file): downloaded, read and stored as the person's upload; the
     // chat then reads its text as a pasted resume. Not wired, or not readable: said plainly, and no turn runs.
-    let fileMessage: string | null = null;
+    let fileMessage: string | null = null, fileNote: string | null = null;
     if (msg.document) {
       if (!d.resumeFile) return await answer(FILE_NOT_READ_REPLY, { ignored: "a file (not read here)" });
       working = interim(ackFor("resume"));
       const got = await d.resumeFile({ userId: person.userId, doc: msg.document, now });
       if (!got.ok) { await working.stop(); return await answer(got.reply, { file: "not read" }); }
       fileMessage = got.message;
+      // ONBOARDING ROUND 4: a file whose text was cut to what the chat reads at once is said so, with where it stopped.
+      fileNote = got.note ?? null;
     }
     // TELEGRAM LINK REPLY CODE (review #348): "LINK <code>" answers the one Telegram link request that code was made for (on
     // this, the asked, contact); nothing else does. It never reaches the brain or a card.
@@ -566,6 +578,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       // and the answer says the picture was not.
       const fitted = !fileMessage && msg.forwardedFrom ? forwardedMessage(msg.forwardedFrom, said) : cutForChat(said);
       if (fitted.cut) notes.push(longCutNote(msg.forwardedFrom ? fitted.text.slice(0, -1) : fitted.text));
+      if (fileNote) notes.push(fileNote);
       if (msg.caption && msg.media && !fileMessage) notes.unshift(MEDIA_CAPTION_NOTE);
       // N12: one interim if the turn runs past the budget (already armed when a file was being read: still one).
       working ??= interim(ackFor(said));
@@ -587,10 +600,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
         reply = `${CHANNEL_REPLIES.start}\n\n${reply}`;
         if (parts) parts = [`${CHANNEL_REPLIES.start}\n\n${parts[0]}`, ...parts.slice(1)];
       }
-      if (notes.length) {
-        reply = [...notes, reply].join("\n\n");
-        if (parts) parts = [[...notes, parts[0]].join("\n\n"), ...parts.slice(1)];
-      }
+      ({ reply, parts } = notesFirst(notes, reply, parts));
       if (out.threadId && out.threadId !== person.threadId) await store.setThread(contact, out.threadId, person.userId);
     } catch (e) {
       console.error("inbound: chat failed:", e instanceof Error ? e.message : String(e));

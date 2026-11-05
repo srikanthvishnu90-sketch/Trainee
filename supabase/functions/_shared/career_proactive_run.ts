@@ -341,7 +341,8 @@ export const BRIEF_AGAIN_MS = 7 * 86400000;
 //   - an email that moves the interview to a stated new time is said, once, with that time ("Interview update: ...").
 //     It was stored and not briefed again, so the person was never told the new time by Trainee, and the thank-you was
 //     still drafted for the date it moved away from (now marked moved).
-async function briefMail(o: { outbox: Outbox; now: number; briefs: InterviewStore }, userId: string, e: StatusEvent, m: MailIn, had: InterviewRow[], at: number, tz: string | null): Promise<{ ms: number; row: InterviewRow } | null> {
+async function briefMail(o: { outbox: Outbox; now: number; briefs: InterviewStore }, userId: string, e: StatusEvent, m: MailIn, had: InterviewRow[], at: number, tz: string | null, mailbox?: string): Promise<{ ms: number; row: InterviewRow } | null> {
+  const mb = mailbox === undefined ? {} : { mailbox };
   const sent = Date.parse(m.date) || o.now;
   const inv = extractInvite({ text: m.snippet, subject: m.subject, from: m.from, sentAt: sent, company: e.company, role: e.role ?? null });
   const row = interviewRow(inv, { key: e.hash, source: "mail", ref: e.ref, mail_at: new Date(sent).toISOString(), seen_at: o.now });
@@ -355,14 +356,14 @@ async function briefMail(o: { outbox: Outbox; now: number; briefs: InterviewStor
     if (!movedFrom.length) return null;
     const who = clip(inv.company ?? e.company, 80), what = inv.role ? ` for ${clip(inv.role, 80)}` : "";
     const text = `Interview update: ${who} moved your interview${what}. ${whenLine(inv, tz).replace(/^When:/, "New time:")}`;
-    await o.outbox.enqueue(userId, { key: `brief:${e.hash}:moved`, kind: "brief", text, at });
+    await o.outbox.enqueue(userId, { key: `brief:${e.hash}:moved`, kind: "brief", text, at, ...mb });
     for (const r of movedFrom) { await o.briefs.mark?.(userId, r.key, { moved_at: new Date(o.now).toISOString() }); r.moved_at = new Date(o.now).toISOString(); }
     await o.briefs.briefed(userId, e.hash, o.now, ms);
     return { ms, row: { ...row, brief_at: new Date(o.now).toISOString(), brief_ms: ms } };
   }
   const b = inviteBrief(inv, { now: o.now, tz });
   let queued = 0;
-  for (const [i, text] of b.texts.entries()) if (await o.outbox.enqueue(userId, { key: `brief:${e.hash}:${i + 1}`, kind: "brief", text, at })) queued++;
+  for (const [i, text] of b.texts.entries()) if (await o.outbox.enqueue(userId, { key: `brief:${e.hash}:${i + 1}`, kind: "brief", text, at, ...mb })) queued++;
   for (const r of movedFrom) { await o.briefs.mark?.(userId, r.key, { moved_at: new Date(o.now).toISOString() }); r.moved_at = new Date(o.now).toISOString(); }
   if (!queued && !unfinished) return null;
   await o.briefs.briefed(userId, e.hash, o.now, ms);
@@ -424,6 +425,9 @@ export async function runMail(o: {
     // since the run began (career_mail_record_events); then nothing read is said either (an interview brief included).
     if (await gone()) { stats.disconnected = (stats.disconnected ?? 0) + 1; return; }
     const at = awake(o.now, p.tz, p);
+    // CONNECTORS ROUND 4 (2026-11-05): every text made from this mail names the mailbox it was read from; it is queued only
+    // while that is still the one connected (career_mail_text_enqueue).
+    const mb = p.mailbox === undefined ? {} : { mailbox: p.mailbox };
     // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): an employer's email that cancels an interview on file. It was read as
     // nothing ("other"), so the person was never told, and the thank-you for the interview that never happened was still
     // drafted. Said once (status:<message>), from the employer's own mail only, and the interview is marked cancelled.
@@ -438,7 +442,7 @@ export async function runMail(o: {
     }
     for (const t of plan.texts) {
       if (cancels.has(t.hash)) continue; // said below, as a cancellation
-      if (fresh.has(t.hash) && await o.outbox.enqueue(p.user_id, { key: t.key, kind: "status", text: t.text, at })) stats.statuses++;
+      if (fresh.has(t.hash) && await o.outbox.enqueue(p.user_id, { key: t.key, kind: "status", text: t.text, at, ...mb })) stats.statuses++;
     }
     if (o.briefs) {
       const byHash = new Map(r.mails.map((m) => [m.hash, m]));
@@ -448,7 +452,7 @@ export async function runMail(o: {
         // Read again after a run that died part way (its cursor not saved): an invite stored and not briefed, or not stored
         // at all, is taken up again; one already briefed is not.
         if (!fresh.has(e.hash) && had.some((x) => x.key === e.hash && x.brief_at)) continue;
-        const done = await briefMail({ outbox: o.outbox, now: o.now, briefs: o.briefs }, p.user_id, e, m, had, at, p.tz && zoneOr(p.tz, "") ? zoneOr(p.tz) : null);
+        const done = await briefMail({ outbox: o.outbox, now: o.now, briefs: o.briefs }, p.user_id, e, m, had, at, p.tz && zoneOr(p.tz, "") ? zoneOr(p.tz) : null, p.mailbox);
         if (!done) continue;
         stats.briefs++;
         stats.brief_ms_max = Math.max(stats.brief_ms_max ?? 0, done.ms);
@@ -461,13 +465,13 @@ export async function runMail(o: {
         const on = rows.filter((x) => x.date && inviteRef(x) === app.ref && !x.moved_at && Date.parse(x.mail_at ?? x.seen_at) <= sentAt);
         const days = [...new Set(on.map((x) => x.date!))].sort().map((d) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" }));
         const text = `${clip(app.company, 80)} cancelled your interview${app.role ? ` for ${clip(app.role, 80)}` : ""}${days.length ? ` on ${days.join(" and ")}` : ""} (email ${new Date(sentAt).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}). I won't draft a thank-you for it. Email: "${clip(m.subject, 120)}"`;
-        if (await o.outbox.enqueue(p.user_id, { key: `status:${hash}`, kind: "status", text, at })) stats.statuses++;
+        if (await o.outbox.enqueue(p.user_id, { key: `status:${hash}`, kind: "status", text, at, ...mb })) stats.statuses++;
         for (const x of on) if (!x.cancelled_at) await o.briefs.mark?.(p.user_id, x.key, { cancelled_at: new Date(o.now).toISOString() });
       }
     }
     if (await gone()) { stats.disconnected = (stats.disconnected ?? 0) + 1; return; }
     for (const d of plan.drafts) {
-      if (await o.store.saveDraft(p.user_id, d) && await o.outbox.enqueue(p.user_id, { key: `followup:${d.key}`, kind: "followup", text: draftOffer(d), at })) stats.followups++;
+      if (await o.store.saveDraft(p.user_id, d) && await o.outbox.enqueue(p.user_id, { key: `followup:${d.key}`, kind: "followup", text: draftOffer(d), at, ...mb })) stats.followups++;
     }
     // WO-032: the same mail confirms applications in the queue, only on the stricter match in career_apply_confirm.ts.
     // A received email that confirms one is said once (status:confirmed:<application>); a rejection, interview or offer
@@ -479,7 +483,7 @@ export async function runMail(o: {
         stats.confirmations++;
         if (c.mail_kind !== "received") continue;
         const text = receiptText({ company: c.company, url: c.url, state: "confirmed", email_confirmed_at: c.mail_at, tz: p.tz ? zoneOr(p.tz) : p.tz });
-        if (await o.outbox.enqueue(p.user_id, { key: `status:confirmed:${c.id}`, kind: "status", text, at })) stats.statuses++;
+        if (await o.outbox.enqueue(p.user_id, { key: `status:confirmed:${c.id}`, kind: "status", text, at, ...mb })) stats.statuses++;
       }
     }
     if (r.readThrough !== null && !(await gone())) await o.store.saveCursor(p.user_id, r.readThrough);

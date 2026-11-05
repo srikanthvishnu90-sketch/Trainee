@@ -5,7 +5,9 @@
 import { type Draft, mergeApps, type StatusEvent, type TrackedApp } from "./career_mail.ts";
 import { MAIL_MODEL_DAILY_CAP } from "./career_mail_model.ts";
 
-export interface MailPerson { user_id: string; read_through: string | null; tz?: string | null; quiet_start?: number; quiet_end?: number }
+// mailbox (CONNECTORS ROUND 4): the address the person's mail is read from, as the run found it (lowercase; "" when the
+// connection has none). Texts made from that mail are queued only while it is still the connected one.
+export interface MailPerson { user_id: string; read_through: string | null; tz?: string | null; quiet_start?: number; quiet_end?: number; mailbox?: string }
 export interface MailStore {
   // People with the career Google grant, the least recently read first.
   people(limit: number): Promise<MailPerson[]>;
@@ -112,12 +114,25 @@ function must<T>(r: { data: T | null; error: { message: string } | null }, what:
 const missingFn = (e: any, fn: string) => { const s = `${e?.code ?? ""} ${e?.message ?? ""}`; return (s.includes(fn) || /PGRST202/.test(s)) && /exist|find|no function|PGRST202/i.test(s); };
 export function supabaseMailStore(admin: any): MailStore {
   const epochs = new Map<string, number>();
+  // CONNECTORS ROUND 4 (2026-11-05): the address each person's mail is read from, as it was when the run began. A person who
+  // connected another Google account while the run read the first one (the row's address changed: the old mailbox's
+  // disconnect, 20261030050000) is no longer connected for this run: nothing read from the old mailbox is kept or said.
+  const mailbox = new Map<string, string>();
+  const addr = (e: unknown) => String(e ?? "").trim().toLowerCase();
+  // Round 3's writes with the address the run read (20261105130000's overloads, refused for another address); a project
+  // without them gets round 3's call.
+  const bound = async (fn: string, args: Record<string, unknown>, u: string) => {
+    if (!mailbox.has(u)) return await admin.rpc(fn, args);
+    const g = await admin.rpc(fn, { ...args, p_mailbox: mailbox.get(u) });
+    return g.error && missingFn(g.error, fn) ? await admin.rpc(fn, args) : g;
+  };
   // People whose mail this store recorded: their drafts come from that mail. An interview's thank-you (runInterviewDrafts)
   // is made for anyone, mail grant or not, and is written as before.
   const fromMail = new Set<string>();
   return {
     async people(limit) {
-      const conns = must<any[]>(await admin.from("user_oauth_connections").select("user_id").eq("provider", "google_career").limit(5000), "read career grants") ?? [];
+      const conns = must<any[]>(await admin.from("user_oauth_connections").select("user_id,email").eq("provider", "google_career").limit(5000), "read career grants") ?? [];
+      for (const c of conns) mailbox.set(c.user_id, addr(c.email));
       const ids = [...new Set(conns.map((c) => c.user_id))];
       if (!ids.length) return [];
       const acct = await admin.from("career_watch_kv").select("user_id,value").eq("key", "career:account").in("user_id", ids);
@@ -130,7 +145,7 @@ export function supabaseMailStore(admin: any): MailStore {
       const at = new Map(cur.map((c) => [c.user_id, c.read_through])), pref = new Map(prefs.map((p) => [p.user_id, p]));
       return ids.map((u) => {
         const p: any = pref.get(u);
-        return { user_id: u, read_through: at.get(u) ?? null, tz: p?.tz ?? null, quiet_start: p?.prefs?.quiet_start, quiet_end: p?.prefs?.quiet_end };
+        return { user_id: u, read_through: at.get(u) ?? null, tz: p?.tz ?? null, quiet_start: p?.prefs?.quiet_start, quiet_end: p?.prefs?.quiet_end, ...(mailbox.has(u) ? { mailbox: mailbox.get(u) } : {}) };
       }).sort((a, b) => String(a.read_through ?? "").localeCompare(String(b.read_through ?? ""))).slice(0, limit);
     },
     async applications(u) {
@@ -159,7 +174,8 @@ export function supabaseMailStore(admin: any): MailStore {
       fromMail.add(u);
       if (!evs.length) return new Set();
       const rows = evs.map((e) => ({ user_id: u, application_ref: e.ref, kind: e.kind, company: e.company.slice(0, 200), role: e.role?.slice(0, 200) ?? null, stage: e.stage, flagged: e.flagged, evidence: e.evidence, message_hash: e.hash, mail_at: e.at }));
-      const g = await admin.rpc("career_mail_record_events", { p_user: u, p_rows: rows.map(({ user_id: _u, ...r }) => r), p_epoch: epochs.get(u) ?? null });
+      const args = { p_user: u, p_rows: rows.map(({ user_id: _u, ...r }) => r), p_epoch: epochs.get(u) ?? null };
+      const g = await bound("career_mail_record_events", args, u);
       if (g.error && missingFn(g.error, "career_mail_record_events")) {
         const got = must<any[]>(await admin.from("career_mail_events").upsert(rows, { onConflict: "user_id,message_hash", ignoreDuplicates: true }).select("message_hash"), "record status events") ?? [];
         return new Set(got.map((r) => r.message_hash));
@@ -169,8 +185,8 @@ export function supabaseMailStore(admin: any): MailStore {
       return new Set((Array.isArray(out.stored) ? out.stored : []).map(String));
     },
     async saveDraft(u, d) {
-      const g = !fromMail.has(u) ? null : await admin.rpc("career_mail_save_draft", { p_user: u, p_row: { draft_key: d.key, application_ref: d.ref, kind: d.kind, company: d.company.slice(0, 200), role: d.role?.slice(0, 200) ?? null, text: d.text, basis: d.basis },
-        p_epoch: epochs.has(u) && Number.isFinite(epochs.get(u)!) ? epochs.get(u) : null });
+      const g = !fromMail.has(u) ? null : await bound("career_mail_save_draft", { p_user: u, p_row: { draft_key: d.key, application_ref: d.ref, kind: d.kind, company: d.company.slice(0, 200), role: d.role?.slice(0, 200) ?? null, text: d.text, basis: d.basis },
+        p_epoch: epochs.has(u) && Number.isFinite(epochs.get(u)!) ? epochs.get(u) : null }, u);
       if (g && !(g.error && missingFn(g.error, "career_mail_save_draft"))) return must<string>(g, "save a draft") === "saved";
       const r = await admin.from("career_mail_drafts").insert({ user_id: u, draft_key: d.key, application_ref: d.ref, kind: d.kind, company: d.company.slice(0, 200), role: d.role?.slice(0, 200) ?? null, text: d.text, basis: d.basis });
       if (r.error && (r.error.code === "23505" || /duplicate key/i.test(r.error.message))) return false;
@@ -178,15 +194,16 @@ export function supabaseMailStore(admin: any): MailStore {
       return true;
     },
     async saveCursor(u, at) {
-      const g = await admin.rpc("career_mail_save_cursor", { p_user: u, p_read_through: new Date(at).toISOString() });
+      const g = await bound("career_mail_save_cursor", { p_user: u, p_read_through: new Date(at).toISOString() }, u);
       if (!(g.error && missingFn(g.error, "career_mail_save_cursor"))) { must(g, "save the mail cursor"); return; }
       must(await admin.from("career_mail_cursors").upsert({ user_id: u, read_through: new Date(at).toISOString(), updated_at: new Date().toISOString() }, { onConflict: "user_id" }), "save the mail cursor");
     },
     async stillConnected(u) {
       // A write the database refused (disconnected or erased since the run began): nothing more of this run is kept or said.
       if (epochs.get(u) === Number.POSITIVE_INFINITY) return false;
-      const r = must<any[]>(await admin.from("user_oauth_connections").select("provider").eq("user_id", u).eq("provider", "google_career").limit(1), "read the career grant") ?? [];
+      const r = must<any[]>(await admin.from("user_oauth_connections").select("provider,email").eq("user_id", u).eq("provider", "google_career").limit(1), "read the career grant") ?? [];
       if (!r.length) return false;
+      if (mailbox.has(u) && addr(r[0].email) !== mailbox.get(u)) { epochs.set(u, Number.POSITIVE_INFINITY); return false; }
       if (epochs.has(u)) {
         const a = await admin.from("career_watch_kv").select("value").eq("user_id", u).eq("key", "career:account").maybeSingle();
         if (!a.error && Number(a.data?.value?.epoch ?? 0) > (epochs.get(u) ?? 0)) return false;

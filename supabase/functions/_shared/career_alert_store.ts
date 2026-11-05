@@ -5,6 +5,7 @@
 // Tables: supabase/migrations/20261019010001_career_alerts.sql.
 import { DEFAULT_PREFS, MAX_INSTANT_PER_DAY, WEEKLY_MAX, type AlertPrefs, type PlanUser } from "./career_alerts.ts";
 import { validFloor } from "./career_floor.ts";
+import { mailTextKey } from "./channel.ts";
 
 export interface AlertRow extends PlanUser { sent_on: string | null } // sent_on: the local day instant_sent_today counts
 export type AlertCounters = Pick<AlertRow, "last_checked_at" | "instant_sent_today" | "sent_on" | "held" | "last_report_on">;
@@ -28,7 +29,8 @@ export interface AlertStore {
 // first_seen_at (WO-037, alerts only): when Trainee first saw the posting, kept with the alert so the latency from
 // first seen to delivered can be reported (career_alert_latency).
 export interface Outbox {
-  enqueue(userId: string, m: { key: string; kind: "alert" | "report" | "receipt" | "status" | "followup" | "brief" | "digest"; text: string; at: number; first_seen_at?: string }): Promise<boolean>; // false: that key was already queued or sent
+  // mailbox (CONNECTORS ROUND 4): for a text made from mail, the address the mail was read from (MailPerson.mailbox).
+  enqueue(userId: string, m: { key: string; kind: "alert" | "report" | "receipt" | "status" | "followup" | "brief" | "digest"; text: string; at: number; first_seen_at?: string; mailbox?: string }): Promise<boolean>; // false: that key was already queued or sent
   // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): one job alert, queued only if the person's settings as they are at that
   // moment still have room for it, with the count kept in the same step, one person at a time. Two runs at once that
   // read the boards at different moments each planned the person's whole day from the same counters and queued it: a cap
@@ -202,6 +204,21 @@ export function supabaseAlertStore(admin: any): AlertStore & Outbox {
       }
     },
     async enqueue(userId, m) {
+      // CONNECTORS ROUND 4 (2026-11-05): a text made from the person's mail is queued only while their career Google grant is
+      // there, holding it until the row is written (career_mail_text_enqueue, 20261105130000). The mail run checks the grant,
+      // then queues: a "disconnect gmail" in between left the texts read from that mailbox queued after the disconnect had
+      // deleted the rest; a run that read one account's mail while the person connected another queued it for the new one.
+      // "gone": nothing queued. A project without the function inserts as before.
+      if (mailTextKey(m.key)) {
+        const g = await admin.rpc("career_mail_text_enqueue", { p_user: userId, p_key: m.key, p_kind: m.kind, p_text: m.text, p_at: new Date(m.at).toISOString(), p_mailbox: m.mailbox ?? null });
+        const said = `${(g.error as any)?.code ?? ""} ${g.error?.message ?? ""}`;
+        if (!(g.error && /career_mail_text_enqueue|PGRST202/i.test(said) && /exist|find|no function|PGRST202/i.test(said))) {
+          const v = String(must<any>(g, "queue a mail text") ?? "");
+          if (v === "queued") return true;
+          if (v === "duplicate" || v === "gone") return false;
+          throw new Error(`queue a mail text: ${v || "no answer"}`);
+        }
+      }
       const r = await admin.from("career_outbox").insert({ user_id: userId, key: m.key, kind: m.kind, text: m.text, deliver_at: new Date(m.at).toISOString(),
         ...(m.first_seen_at ? { posting_first_seen_at: m.first_seen_at } : {}) });
       if (r.error && (r.error.code === "23505" || /duplicate key/i.test(r.error.message))) return false; // queued or sent before: once per key, ever

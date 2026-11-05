@@ -170,6 +170,12 @@ export function supabaseChannelStore(admin: any, o: {
     // PROACTIVE SCENARIOS ROUND 3 (2026-11-01): a queued interview brief whose interview a later email cancelled or moved
     // (career_interviews.cancelled_at / moved_at, 20261030070000_proactive_r2.sql). brief:<invite>:<n>; the ":moved" brief
     // is the new time's and goes unless that one was cancelled too. A project without the columns sends it, as before.
+    // CONNECTORS ROUND 4 (2026-11-05): the row is still in the outbox (a disconnect deletes the undelivered texts made from
+    // that mailbox, 20261105130000). A read that fails throws: the row waits, never sent on a guess.
+    async stillQueued(m) {
+      const r = must<any[]>(await admin.from("career_outbox").select("id").eq("id", m.id).limit(1), "read the queued text");
+      return (r ?? []).length > 0;
+    },
     async briefWanted(m) {
       const k = /^brief:([^:]+):(.+)$/.exec(m.key);
       if (!k) return true;

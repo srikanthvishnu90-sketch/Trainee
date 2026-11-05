@@ -91,6 +91,10 @@ export interface ChannelStore {
   // PROACTIVE SCENARIOS ROUND 3 (2026-11-01): a queued interview brief (brief:<invite>:<n>) whose interview a later email
   // cancelled or moved: false (not sent, BRIEF_GONE_NOTE). Absent: not checked.
   briefWanted?(row: OutboxRow): Promise<boolean>;
+  // CONNECTORS ROUND 4 (2026-11-05): is a text made from the person's mail (mailboxText) still queued? "disconnect gmail" (or
+  // connecting another Google account) deletes every such undelivered row (20261105130000); a run that had claimed one before
+  // that sent it after. false: the row is gone (not sent). Absent: not checked.
+  stillQueued?(row: OutboxRow): Promise<boolean>;
   // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): the person's zone and quiet hours as they are now (their alert settings),
   // null when they have none on file. Absent: not checked (the time a row was planned for stands).
   quietHours?(userId: string): Promise<{ tz: string | null; quiet_start?: number; quiet_end?: number } | null>;
@@ -155,6 +159,16 @@ const reminderZoneOf = (key: string) => { const z = /^status:reminder:[^:]+:([A-
 export const LIMITS_NOTE = "not sent: under the fit floor the person set, or past the alerts a day they asked for, since it was queued";
 export const CLOSED_SINCE =" (this posting has closed since this report was written)";
 // CHANNEL DELIVERY ROUND 2 (2026-10-30): a row bound to a channel the person no longer has, and no other channel to send it on.
+// CONNECTORS ROUND 4 (2026-11-05): the keys of texts made from a person's mail by the scheduled Gmail run, as the database
+// knows them (career_mail_text_key, 20261105130000): a status read from an email (status:<message hash>), a deadline reminder
+// (status:deadline:<message hash>), an application an email confirmed (status:confirmed:<application>), the "which
+// application?" ask (status:which:<message hash>), an interview brief (brief:<message hash>:<n|moved>). Not the daily brief
+// (brief:<day>), not a reminder set in chat (status:reminder:...), not a connector's own status.
+export const MAIL_TEXT_KEY = /^(status:([0-9a-f]{64}|deadline:[0-9a-f]{64}|confirmed:[^:]+|which:[0-9a-f]{64})|brief:[0-9a-f]{64}:[^:]+)$/;
+export const mailTextKey = (key: string) => MAIL_TEXT_KEY.test(String(key ?? ""));
+// What "disconnect gmail" deletes from the outbox: those texts, and the offers of the drafts it deletes with the mail
+// (followup:followup:<ref>, followup:thank_you:<ref>:<day>, career_mail_drafts), whose "yes" would find nothing.
+export const mailboxText = (key: string) => mailTextKey(key) || /^followup:(followup|thank_you):/.test(String(key ?? ""));
 export const NO_CHANNEL_NOTE = "not sent: the channel this answers was unlinked and the person has no other texting channel";
 
 // budgetMs: a run that has used its time stops before the next row (a long card is many bubbles, each paced by the
@@ -248,6 +262,16 @@ export async function deliverDue(o: {
       if (g === null) { r.deferred++; return; }
       if (g) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: GONE_NOTE }); r.skipped_opt_out++; return; }
     }
+    // CONNECTORS ROUND 4 (2026-11-05): and any later row of a person this run already looked at. The pause (which counts a
+    // deleted account as quiet) is read once per person per run, so an account deleted while the run held several of the
+    // person's rows (a job alert, a receipt, the rest of a card) got every row after the first: the auth user's delete
+    // cascaded their outbox rows, and the run sent from what it held. A look that cannot be made leaves the row to the pause
+    // read for this run, as before.
+    if (!isReply(m.key) && quiet.has(m.userId) && o.store.gone) {
+      let g: boolean | null;
+      try { g = await o.store.gone(m.userId); } catch { g = null; }
+      if (g) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: GONE_NOTE }); r.skipped_opt_out++; return; }
+    }
     // WO-091c: the same for a pause or an erase that came after the row was queued, checked now, at delivery. A pause that
     // cannot be read leaves the row claimed and untouched (the run's release puts it back), never sent on a guess.
     if (!isReply(m.key)) {
@@ -318,6 +342,15 @@ export async function deliverDue(o: {
           text = lines.join("\n");
         }
       }
+    }
+    // CONNECTORS ROUND 4 (2026-11-05): a text made from the person's mail, looked at again right before it goes. The person
+    // said "disconnect gmail" (or connected another Google account) after this run claimed it: the disconnect deleted it
+    // with every other undelivered text from that mailbox, and it is not sent. A look that cannot be made leaves it.
+    if (mailboxText(m.key) && o.store.stillQueued) {
+      let there: boolean | null;
+      try { there = await o.store.stillQueued(m); } catch (e) { console.error("deliver: the queued mail text could not be read:", e instanceof Error ? e.message : String(e)); there = null; }
+      if (there === null) { r.deferred++; return; }
+      if (!there) { r.skipped_opt_out++; return; }
     }
     const window = adapter.limits.windowMs ?? null;
     const stall = () => { if (isReply(m.key)) stalled.add(lane(m)); };

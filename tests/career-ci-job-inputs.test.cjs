@@ -16,7 +16,15 @@ test("the list names only paths that exist, and ci.yml has a skippable job for e
   for (const p of [...SPEC.always, ...Object.values(SPEC.jobs).flat()]) assert.ok(fs.existsSync(path.join(ROOT, p)), `${p} does not exist`);
   assert.deepEqual(JOBS.sort(), ["coverage", "database"]);
   const ci = fs.readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
-  for (const j of JOBS) assert.match(ci, new RegExp(`needs\\.changes\\.outputs\\.${j} (!=|==) 'false'`), `ci.yml does not gate on ${j}`);
+  // coverage: the shards skip at job level on the `changes` job's output; database decides in its own first step, so it
+  // never waits on `changes` (a run cancelled while it waited would leave it skipped, which reads as passing).
+  assert.match(ci, /\n  gate-coverage-shard:\n[\s\S]*?\n    if: \$\{\{ !cancelled\(\) && needs\.changes\.outputs\.draft != 'true' && needs\.changes\.outputs\.coverage != 'false' \}\}\n/, "ci.yml does not gate on coverage");
+  const db = /\n  database:\n[\s\S]*?\n  send-rail-load:\n/.exec(ci);
+  assert.ok(db, "the database job");
+  assert.ok(!/\n    needs:/.test(db[0]), "database must not wait on another job");
+  assert.match(db[0], /id: inputs\n[\s\S]*?node scripts\/ci\/job-inputs\.cjs changes \| tee -a "\$GITHUB_OUTPUT"/);
+  assert.match(db[0], /if: steps\.inputs\.outputs\.database == 'false'\n/);
+  assert.match(db[0], /Migrations, RLS and SQL tests[^\n]*\n        if: steps\.inputs\.outputs\.database != 'false'\n/, "ci.yml does not gate on database");
   assert.match(ci, /node scripts\/ci\/job-inputs\.cjs verify coverage/);
   assert.match(ci, /node scripts\/ci\/job-inputs\.cjs verify database/);
 });

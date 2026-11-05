@@ -8,10 +8,17 @@ on:
   # to release/production that never was a trunk head would otherwise have no checks at all.
   push:
     branches: [trunk, release/production]
-  # ready_for_review: a draft runs nothing past the `changes` job (see it below); marking it ready runs the full suite on
-  # the same head, and a draft cannot be merged.
+  # ready_for_review: a draft runs no suite (each suite job skips on github.event.pull_request.draft; gate (core) then
+  # fails, fail-closed); marking it ready runs the full suite on the same head, and a draft cannot be merged.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  # Merge-queue readiness (docs/architect/PROCESS.md): when the owner turns on a merge queue for trunk, the queue tests
+  # each entry on a gh-readonly-queue/trunk/* commit and waits for the required checks there; without this trigger none
+  # would ever report and the queue would stall. Every job runs on it (no job filters on the event), so the commit the
+  # queue lands on trunk already carries every check S1 reads, under the same names. Its concurrency group is its own SHA
+  # (no pull_request number), and it is never cancelled, as for a push. Until a queue exists this trigger never fires.
+  merge_group:
+    types: [checks_requested]
 concurrency:
   # One run per PR: a newer head cancels the older run. A push gets a group of its own SHA: GitHub keeps one pending run
   # per group and cancels the older pending one when a newer arrives ("higher priority waiting request"), which left
@@ -46,7 +53,9 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           DRAFT: ${{ github.event.pull_request.draft }}
-        run: node scripts/ci/job-inputs.cjs changes | tee -a "$GITHUB_OUTPUT"
+        run: |
+          set -o pipefail
+          node scripts/ci/job-inputs.cjs changes | tee -a "$GITHUB_OUTPUT"
   gate-core-shard:
     name: gate (core shard ${{ matrix.shard }}/2)
     runs-on: ubuntu-24.04
@@ -100,8 +109,9 @@ jobs:
     # 2026-11-01: 20 minutes (was 30). Over 263 green shard runs of 2026-10-30..11-01 the job's p99 was 8.0 min and its
     # max 9.2; the 30-minute cap let a hung shard burn 30 billed minutes (two did). Still >2x the slowest green run.
     timeout-minutes: 20
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' }}
+    # Drafts skip it (github.event.pull_request.draft; empty off a pull request). It does not wait on `changes`, so it
+    # starts at once as before: a cancelled run ends it as cancelled, never as a skipped (passing) required check.
+    if: ${{ github.event.pull_request.draft != true }}
     strategy:
       fail-fast: false
       matrix:
@@ -166,8 +176,9 @@ jobs:
     runs-on: ubuntu-24.04
     # The required check (name unchanged). Passes only when every core shard succeeded and the shards still partition the
     # core node suites exactly. always() so a failed or cancelled shard fails this check rather than skipping it.
-    needs: [changes, gate-core-shard]
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' }}
+    # On a draft the shards are skipped, so this fails (fail-closed); marking the PR ready runs everything.
+    needs: gate-core-shard
+    if: always()
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -188,8 +199,9 @@ jobs:
     # it did inside the single job.
     # 2026-11-01: 20 minutes (was 30): p99 8.7 / max 8.8 min over 162 green runs.
     timeout-minutes: 20
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' }}
+    # Drafts skip it (github.event.pull_request.draft; empty off a pull request). It does not wait on `changes`, so it
+    # starts at once as before: a cancelled run ends it as cancelled, never as a skipped (passing) required check.
+    if: ${{ github.event.pull_request.draft != true }}
     env:
       GATE_PARTITION: browser
     steps:
@@ -262,8 +274,9 @@ jobs:
     # backstop, not a target. The required check name `gate (architect)` is the aggregate job below.
     # 2026-11-01: 25 minutes (was 45): p99 11.7 / max 13.3 min over 894 green shard runs.
     timeout-minutes: 25
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' }}
+    # Drafts skip it (github.event.pull_request.draft; empty off a pull request). It does not wait on `changes`, so it
+    # starts at once as before: a cancelled run ends it as cancelled, never as a skipped (passing) required check.
+    if: ${{ github.event.pull_request.draft != true }}
     strategy:
       fail-fast: false
       matrix:
@@ -343,8 +356,8 @@ jobs:
     runs-on: ubuntu-24.04
     # The required check (name unchanged). Passes only when every architect shard succeeded and the shards still
     # partition tests/architect exactly. always() so a failed or cancelled shard fails this check rather than skipping it.
-    needs: [changes, gate-architect-shard]
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' }}
+    needs: gate-architect-shard
+    if: ${{ always() && github.event.pull_request.draft != true }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -500,7 +513,7 @@ jobs:
     # shards were skipped for exactly that reason) it passes without the suite, saying so; in every other case,
     # including a failed `changes` job, it passes only as before.
     needs: [changes, gate-coverage-shard]
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' }}
+    if: ${{ always() && needs.changes.outputs.draft != 'true' }}
     timeout-minutes: 10
     steps:
       - name: Inputs unchanged, or every coverage shard succeeded
@@ -529,32 +542,41 @@ jobs:
   database:
     runs-on: ubuntu-24.04
     # 2026-11-01: a 30-minute cap (it had none, so GitHub's 360 applied): p99 17.5 / max 19.6 min over 150 green runs.
-    # On a pull request that changes none of its inputs (`changes` job, scripts/ci/job-inputs.json "database") its steps
-    # are skipped and the check passes saying so; every push runs it. Whenever it runs, tests/db/run.sh runs under
+    # On a pull request that changes none of its inputs (scripts/ci/job-inputs.json "database", decided in its first
+    # steps) its remaining steps are skipped and the check passes saying so; every push runs it. Whenever it runs, tests/db/run.sh runs under
     # scripts/ci/trace-opens.py and the job fails if it opened a tracked file outside that list.
     timeout-minutes: 30
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' }}
+    # Drafts skip it. It decides its own inputs in its first steps (the same scripts/ci/job-inputs.cjs as the `changes`
+    # job) instead of waiting on `changes`, so a cancelled run ends it as cancelled, never as a skipped required check.
+    if: ${{ github.event.pull_request.draft != true }}
     steps:
-      - name: Inputs unchanged
-        if: needs.changes.outputs.database == 'false'
-        run: echo "::notice title=database not run::this pull request changes no input of the database suite (scripts/ci/job-inputs.json); every push to trunk runs it"
       - uses: actions/checkout@v4
-        if: needs.changes.outputs.database != 'false'
+        with: { fetch-depth: 2 }
+      - name: Which inputs this pull request changes
+        id: inputs
+        env:
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          set -o pipefail
+          node scripts/ci/job-inputs.cjs changes | tee -a "$GITHUB_OUTPUT"
+      - name: Inputs unchanged
+        if: steps.inputs.outputs.database == 'false'
+        run: echo "::notice title=database not run::this pull request changes no input of the database suite (scripts/ci/job-inputs.json); every push to trunk runs it"
       - name: Room for the open trace (inotify watches and queue)
-        if: needs.changes.outputs.database != 'false'
+        if: steps.inputs.outputs.database != 'false'
         run: sudo sysctl -w fs.inotify.max_user_watches=524288 fs.inotify.max_queued_events=1048576
       - name: Migrations, RLS and SQL tests on a throwaway Postgres 16, plus the migration ledger
-        if: needs.changes.outputs.database != 'false'
+        if: steps.inputs.outputs.database != 'false'
         run: |
           set -o pipefail
           PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH python3 scripts/ci/trace-opens.py "$RUNNER_TEMP/db-opens.txt" -- bash tests/db/run.sh 2>&1 | tee "$RUNNER_TEMP/db.log"
       - name: The suite opened nothing outside its inputs (scripts/ci/job-inputs.json)
-        if: ${{ (success() || failure()) && needs.changes.outputs.database != 'false' }}
+        if: ${{ (success() || failure()) && steps.inputs.outputs.database != 'false' }}
         run: node scripts/ci/job-inputs.cjs verify database "$RUNNER_TEMP/db-opens.txt"
       # The failing lines as annotations, readable through the checks API where the raw log is not.
       - name: Failure lines as annotations
-        if: ${{ failure() && needs.changes.outputs.database != 'false' }}
+        if: ${{ failure() && steps.inputs.outputs.database != 'false' }}
         run: echo "::error::$(tail -n 60 "$RUNNER_TEMP/db.log" | grep -v '^  ok ' | tail -n 30 | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')"
   send-rail-load:
     name: load (send rail)
@@ -564,8 +586,9 @@ jobs:
     # spent on it; it fails the run like any other job. The measured numbers are printed (SEND RAIL LOAD ...).
     # 2026-11-01: 15 minutes (was 60): p99 6.0 / max 6.0 min over 161 green runs.
     timeout-minutes: 15
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' }}
+    # Drafts skip it (github.event.pull_request.draft; empty off a pull request). It does not wait on `changes`, so it
+    # starts at once as before: a cancelled run ends it as cancelled, never as a skipped (passing) required check.
+    if: ${{ github.event.pull_request.draft != true }}
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2
@@ -581,8 +604,9 @@ jobs:
     # nothing leaves the runner. KNOWN_GAP steps run and print their state; every other step must pass.
     # 2026-11-01: 10 minutes (was 20): max 0.5 min over 80 green runs.
     timeout-minutes: 10
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' }}
+    # Drafts skip it (github.event.pull_request.draft; empty off a pull request). It does not wait on `changes`, so it
+    # starts at once as before: a cancelled run ends it as cancelled, never as a skipped (passing) required check.
+    if: ${{ github.event.pull_request.draft != true }}
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2

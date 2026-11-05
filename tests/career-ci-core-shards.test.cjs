@@ -53,10 +53,8 @@ test("the workflow runs COUNT core shards and its aggregate verifies COUNT", () 
   assert.match(job[0], new RegExp(`name: gate \\(core shard \\$\\{\\{ matrix\\.shard \\}\\}/${COUNT}\\)`));
   const agg = /\n  gate:\n    name: gate \(core\)\n[\s\S]*?\n  gate-browser:\n/.exec(yml);
   assert.ok(agg, "the required check name gate (core) is the aggregate");
-  // It runs after a failed shard (always(), or !cancelled() since the 2026-11-01 draft skip, which also needs `changes`),
-  // so a failed shard fails this check rather than skipping it.
-  assert.match(agg[0], /needs: (gate-core-shard|\[changes, gate-core-shard\])\n/);
-  assert.match(agg[0], /if: (always\(\)|\$\{\{ !cancelled\(\) && needs\.changes\.outputs\.draft != 'true' \}\})\n/);
+  assert.match(agg[0], /needs: gate-core-shard\n/);
+  assert.match(agg[0], /if: always\(\)\n/);
   assert.match(agg[0], /test "\$\{\{ needs\.gate-core-shard\.result \}\}" = success/);
   assert.match(agg[0], new RegExp(`GATE_PARTITION=core GATE_CORE_VERIFY=${COUNT} bash scripts/gate.sh`));
 });

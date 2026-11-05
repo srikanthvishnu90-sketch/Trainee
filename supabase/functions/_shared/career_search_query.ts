@@ -18,17 +18,32 @@ const norm = (s: unknown) => String(s ?? "").toLowerCase().replace(/[‘’]/g, 
 // ------------------------------------------------------------------------------------------------ level
 export const INTERN_RE = /\b(?:interns?|internships?|co-?ops?|co op)\b/;
 const NEWGRAD_RE = /\b(?:new[- ]?grads?|new graduates?|recent graduates?|entry[- ]level|early[- ]career|university graduates?|graduate (?:program|scheme|engineer|developer|analyst)|campus hires?|junior|associate)\b/;
-const SENIOR_RE = /\b(?:senior|sr\.?|staff|principal|lead|director|vp|vice president|head of|chief|distinguished|fellow)\b/;
+// Review 2026-11-05: "staff" is a level only in the engineering ladder ("Staff Software Engineer"); "Staff Accountant",
+// "Staff Nurse" and "Staff Writer" are entry roles. "Fellow" alone is no level (fellowships are often early-career).
+const STAFF_LADDER = /\bstaff (?:[a-z/&+-]+ ){0,3}(?:engineer|engineering|scientist|developer|designer|architect|sre|swe|researcher|product manager|data analyst|analyst)\b/;
+const SENIOR_RE = /\b(?:senior|sr\.?|principal|lead|director|vp|vice president|head of|chief|distinguished)\b/;
+const isSenior = (t: string) => SENIOR_RE.test(t) || STAFF_LADDER.test(t);
+// A posting that says in its own description that it IS an internship or co-op ("This is a 12-week summer internship",
+// "Our internship program"), not one that mentions interns ("mentor our interns").
+const INTERN_SAYS = /\b(?:this|the) (?:role|position|job|opportunity|posting) is an? (?:[a-z0-9-]+ ){0,3}(?:internship|co-?op)\b|\b(?:this|our|the) (?:[a-z0-9-]+ ){0,3}(?:internship|co-?op)(?: program(?:me)?)? (?:is|runs|lasts|will run|offers|starts|begins)\b|\b(?:\d{1,2}|eight|ten|twelve)[- ]week (?:[a-z-]+ ){0,2}(?:internship|co-?op)\b|\bthis is an? (?:[a-z0-9-]+ ){0,3}(?:internship|co-?op)\b|\bpaid (?:summer |fall |spring |winter )?(?:internship|co-?op)\b/;
 const LEVEL_QUERY: [Level, RegExp][] = [["intern", /\b(?:interns?|internships?|co-?ops?|co op)\b/], ["new_grad", /\b(?:new[- ]?grads?|new graduates?|recent graduates?|entry[- ]level|early[- ]career|graduate roles?|campus)\b/]];
 // The level a posting is: its own seniority band when the store set one, else read from its title.
 export function postingLevel(p: { title?: string; seniority_band?: string | null }): Level | "senior" | "other" {
   const t = norm(p.title), band = norm(p.seniority_band);
   if (INTERN_RE.test(t) || /\b(?:summer|winter)\s+(?:business\s+)?(?:analyst|associate)\b/.test(t) && !/manager|director/.test(t)) return "intern";
-  if (SENIOR_RE.test(t) && !/\bintern/.test(t)) return "senior";
+  if (isSenior(t) && !/\bintern/.test(t)) return "senior";
   if (band === "intern") return "intern";
   if (NEWGRAD_RE.test(t) || band === "new_grad" || band === "junior") return "new_grad";
   if (band === "senior" || band === "staff" || band === "director") return "senior";
   return "other";
+}
+// The intern filter's answer: an intern title or band, or a non-senior posting whose own description says it is an
+// internship (review 2026-11-05: the title alone hid "Software Engineering, Summer 2027" whose text says "internship").
+export function isInternPosting(p: { title?: string; seniority_band?: string | null; description?: string }): boolean {
+  const lv = postingLevel(p);
+  if (lv === "intern") return true;
+  if (lv === "senior") return false;
+  return INTERN_SAYS.test(norm(String(p.description ?? "").slice(0, 3000)));
 }
 
 // ------------------------------------------------------------------------------------------------ place
@@ -62,11 +77,31 @@ export function placeFit(location: unknown, places: Place[], remoteOk: boolean):
 
 // ------------------------------------------------------------------------------------------------ term
 const SEASONS = ["spring", "summer", "fall", "autumn", "winter"];
-const TERM_RE = /\b(spring|summer|fall|autumn|winter)\s*(?:of\s*|,?\s*)?(?:'(\d{2})|(20\d{2}))\b/g;
+// A season and a year, and (review 2026-11-05) any further years joined to it: "Summer 2026 & 2027", "Summer 2026/2027",
+// "Summer 2026 or '27" are two terms, so a posting is past only when every one of them is.
+const YEAR = "(?:'\\d{2}|20\\d{2})";
+const TERM_RE = new RegExp(`\\b(spring|summer|fall|autumn|winter)\\s*(?:of\\s*|,?\\s*)?(${YEAR}(?:\\s*(?:&|and|\\/|-|–|or|,)\\s*${YEAR})*)\\b`, "g");
+const yearOf = (y: string) => (y.startsWith("'") ? 2000 + Number(y.slice(1)) : Number(y));
 export function termsIn(text: unknown): Term[] {
   const t = norm(text), out: Term[] = [];
-  for (const m of t.matchAll(TERM_RE)) out.push({ season: m[1] === "autumn" ? "fall" : m[1], year: m[3] ? Number(m[3]) : 2000 + Number(m[2]) });
+  for (const m of t.matchAll(TERM_RE)) {
+    const season = m[1] === "autumn" ? "fall" : m[1];
+    for (const y of m[2].match(new RegExp(YEAR, "g")) ?? []) out.push({ season, year: yearOf(y) });
+  }
   return out;
+}
+// The term a posting states for ITSELF (review 2026-11-05): its title's, else a description sentence that names the
+// internship's own period ("The internship runs Summer 2027"). A sentence about the applicant ("graduating in Spring 2028",
+// "enrolled through Fall 2027", "class of 2028") is never the posting's term. `sure` is false for a description-read term:
+// it may rank a posting, never hide it.
+const PERIOD_SENT = /\b(?:internships?|co-?ops?|program(?:me)?|cohort|placement|start(?:s|ing)?|runs?|dates?|period|session|term)\b/;
+const ABOUT_APPLICANT = /\b(?:graduat\w*|grads?|eligib\w*|enrolled|enrollment|pursuing|degree|class of|expected|student|students|returning|remaining|completed?|candidates?|applicants?|you)\b/;
+export function postingTerms(p: { title?: string; description?: string }): { terms: Term[]; sure: boolean } {
+  const own = termsIn(p.title);
+  if (own.length) return { terms: own, sure: true };
+  const sents = norm(String(p.description ?? "").slice(0, 3000)).split(/(?<=[.!?\n;])\s+/);
+  const terms = sents.filter((s) => PERIOD_SENT.test(s) && !ABOUT_APPLICANT.test(s)).flatMap((s) => termsIn(s));
+  return { terms, sure: false };
 }
 const SEASON_END_MONTH: Record<string, number> = { spring: 5, summer: 8, fall: 11, winter: 2 }; // 0-based month the season ends (winter: Feb of the year after its label)
 // A term wholly in the past is not a posting anyone can still join ("Summer 2025 Internship" in October 2026).
@@ -118,6 +153,8 @@ const STATUS = new RegExp(`^(?:note:? |update:? |notice:? )?(?:(?:this|the) ${NO
   `|(?:applications?|applicants?) (?:for this ${NOUN} )?(?:are|is|have been|has been) (?:now )?closed` +
   `|no longer accepting (?:any )?(?:more |new )?applications?(?: for this ${NOUN})?)$`);
 const LOOSE = /\b(?:no longer (?:accepting|taking|open|available|active)|(?:position|role|job|posting|requisition|vacancy) (?:has been|is|was)? ?(?:now )?(?:filled|closed|cancel+ed|withdrawn|expired|on hold)|applications? (?:are |is |have )?(?:now |been )?closed|not accepting)\b/;
+// Review 2026-11-05: these are SEARCH-TIME hides (searchPostings) and ingest FLAGS only (career_ingest.ts counts them,
+// stores the row, closes nothing and ends no queued application) until their false-positive rate is measured.
 export type Status = { open: true; flags?: string[] } | { open: false; reason: "closed_text" | "expired_term" | "scam" };
 const sentences = (t: string) => t.split(/(?<=[.!?\n])\s+/).map((x) => x.trim()).filter(Boolean);
 const clauses = (sent: string) => sent.replace(/[.!\s]+$/, "").split(/\s+(?:and|&)\s+|;\s*/);
@@ -137,47 +174,49 @@ export function postingStatus(p: { title?: string; description?: string; posted_
   if (c === "closed") return { open: false, reason: "closed_text" };
   const own = termsIn(p.title);
   if (own.length && own.every((t) => termExpired(t, now))) return { open: false, reason: "expired_term" };
-  if (isScam(p)) return { open: false, reason: "scam" };
-  return c === "unclear" ? { open: true, flags: ["closed_wording_unclear"] } : { open: true };
+  const sig = scamSignals(p);
+  if (sig.length >= 2) return { open: false, reason: "scam" };
+  const flags = [...(c === "unclear" ? ["closed_wording_unclear"] : []), ...(sig.length ? ["possible_scam"] : [])];
+  return flags.length ? { open: true, flags } : { open: true };
 }
 // A real employer's posting never asks the applicant to pay, to cash a cheque, or to move to a chat app to be hired. But an
 // employer's own warning says exactly those words ("never pay a fee, never buy gift cards"): sentences that warn or negate
-// are not read. One signal drops a posting only when it is an unambiguous request for payment; otherwise two independent ones.
+// are not read. Review 2026-11-05: a posting is hidden as a scam only on TWO independent signals; one is a flag. And money
+// is an ask only when the APPLICANT pays (an imperative "Pay a $150 fee", "you must pay / send", "pay us"), never when the
+// employer pays ("We pay a $2,000 housing deposit for every intern", "we cover the background check fee").
 const WARNS = /\b(?:never|do not|don'?t|does not|doesn'?t|will not|won'?t|not ask|no fee|free of charge|beware|warning|scam|scammers?|fraud(?:ulent)?|phishing|impersonat\w*|be aware|stay safe|report (?:any|suspicious)|if (?:anyone|someone|you are asked|you're asked)|legitimate)\b/;
-const SCAM_ASK = [
-  /\bpay (?:a |an |the )?(?:one[- ]time )?\$\d[\d,]*\s?(?:[a-z-]+ ){0,3}(?:fee|deposit)\b/,
-  /\b(?:you (?:must|will need to|need to|have to)|applicants? (?:must|need to|will need to)) (?:pay|send|wire|deposit)\b[^.]{0,40}\b(?:fee|deposit)\b/,
-  /\b(?:we|company) will (?:send|mail|deposit) (?:you )?a (?:cashier'?s? )?che(?:que|ck)\b[^.]{0,60}\b(?:purchase|buy|equipment|supplies)\b/,
-];
-const SCAM_SIGNALS: [string, RegExp][] = [
-  ["asks for money", /\b(?:pay|send|wire|deposit)\b[^.]{0,40}\b(?:registration|training|application|processing|starter kit|equipment|background check|security deposit|onboarding) (?:fee|cost|charge|payment|deposit)s?\b/],
+const EMPLOYER_PAYS = /\b(?:we|company|employer|our team|the firm) (?:will |also |fully )?(?:pay|cover|reimburse|provide|offer|fund)\b|\b(?:pays|covers|reimburses|provides|offers|funds)\b|\breimburs\w*|\bat (?:our|no) (?:own )?(?:expense|cost)\b|\bpaid (?:for )?by (?:us|the company)\b/;
+const APPLICANT_PAYS = /(?:^|[:;,]\s*)(?:please )?(?:pay|send|wire|deposit|transfer)\b|\b(?:you|applicants?|candidates?|interns?|new hires?|hires?) (?:must|will need to|need to|have to|are required to|will be required to|should|are expected to) (?:first )?(?:pay|send|wire|deposit|transfer)\b|\bpay us\b/;
+const MONEY_WORD = /\b(?:fees?|deposits?|costs?|charges?|payments?|\$\s?\d)/;
+const applicantPays = (sent: string) => APPLICANT_PAYS.test(sent) && MONEY_WORD.test(sent) && !EMPLOYER_PAYS.test(sent);
+const SCAM_SIGNALS: [string, RegExp | ((sent: string) => boolean)][] = [
+  ["asks for money", applicantPays],
   ["cheque or gift cards", /\b(?:(?:buy|purchase|send)\b[^.]{0,30}\bgift cards?|western union|moneygram|cashier'?s? che(?:que|ck)|(?:we|company) will (?:send|mail|deposit) (?:you )?a che(?:que|ck)|purchase (?:your )?own equipment)\b/],
   ["chat-app hiring", /\b(?:contact|message|reach|text|add) (?:us|our (?:hr|recruiter|manager|agent)|the (?:hr|recruiter|manager))[^.]{0,40}\b(?:on |via |through |at )?(?:whatsapp|telegram|signal|wechat|line app)\b|\b(?:interview|hiring) (?:is |will be )?(?:conducted |held )?(?:on|via|through) (?:whatsapp|telegram|signal|google hangouts?)\b/],
   ["guaranteed income", /\b(?:earn|make) \$?\d[\d,]{2,}(?:\s?(?:-|to)\s?\$?\d[\d,]{2,})? (?:per|a|\/) ?(?:day|week)\b[^.]{0,60}\b(?:no experience|work from home|immediately)\b|\bno (?:experience|interview) (?:needed|required|necessary)[^.]{0,60}\b(?:hired|start) (?:immediately|today|same day)\b/],
 ];
-const unwarned = (p: { title?: string; description?: string }) => norm(`${p.title ?? ""}. ${p.description ?? ""}`).split(/(?<=[.!?\n])\s+/).filter((x) => !WARNS.test(x)).join(" ");
+const unwarnedSentences = (p: { title?: string; description?: string }) => norm(`${p.title ?? ""}. ${p.description ?? ""}`).split(/(?<=[.!?\n])\s+/).map((x) => x.trim()).filter((x) => x && !WARNS.test(x));
 export function scamSignals(p: { title?: string; description?: string; apply_email?: string | null }): string[] {
-  const t = unwarned(p);
-  const out = SCAM_SIGNALS.filter(([, re]) => re.test(t)).map(([n]) => n);
+  const sents = unwarnedSentences(p), t = sents.join(" ");
+  const out = SCAM_SIGNALS.filter(([, m]) => sents.some((s) => (typeof m === "function" ? m(s) : m.test(s)))).map(([n]) => n);
   if (/@(?:gmail|yahoo|outlook|hotmail|aol|proton(?:mail)?)\.[a-z.]+$/.test(norm(p.apply_email)) && /\b(?:payment processing|reship|package forwarding|data entry from home|personal assistant to the ceo)\b/.test(t)) out.push("free-mail recruiter on a payments job");
   return out;
 }
 export function isScam(p: { title?: string; description?: string; apply_email?: string | null }): boolean {
-  const t = unwarned(p);
-  return SCAM_ASK.some((re) => re.test(t)) || scamSignals(p).length >= 2;
+  return scamSignals(p).length >= 2;
 }
 
 // ------------------------------------------------------------------------------------------------ duplicates
-const squash = (s: unknown) => norm(s).replace(/\([^)]*\)/g, " ").replace(/[^a-z0-9]+/g, " ").replace(/\b(?:inc|llc|ltd|corp|co|the)\b/g, " ").replace(/\s+/g, " ").trim();
 export function canonicalUrl(u: unknown): string {
   try { const x = new URL(String(u)); x.hash = ""; for (const k of [...x.searchParams.keys()]) if (/^(?:utm_|gh_src|lever-source|source|src|ref|refid|trk|campaign)/i.test(k)) x.searchParams.delete(k); return `${x.hostname.toLowerCase().replace(/^www\./, "")}${x.pathname.replace(/\/+$/, "")}${x.search}`; }
   catch { return norm(u).trim(); }
 }
-// Two rows are the same job when they share a link, or a company + title + place (a job re-posted under a new requisition
-// id, or listed on two boards of one employer).
-export function dupKeys(p: { company?: string; title?: string; location?: string; url?: string }): string[] {
-  const keys = [`t:${squash(p.company)}|${squash(p.title)}|${squash(p.location)}`];
-  // A link is a job's identity only when it carries one (a long id or a uuid); a shared careers-page link is not.
+// Review 2026-11-05: two rows are the same job only on a stable identity: the same posting id, or the same link when the
+// link carries an id (a long number or a uuid; a shared careers-page link is not one job). Company + title + place is NOT
+// an identity: "Software Engineer (Backend)" and "(Frontend)" are two jobs, and so are two requisitions with one title.
+export function dupKeys(p: { job_id?: string; company?: string; title?: string; location?: string; url?: string }): string[] {
+  const keys: string[] = [];
+  if (p.job_id) keys.push(`id:${p.job_id}`);
   if (p.url && /\d{5,}|[0-9a-f]{8}-[0-9a-f]{4}-/i.test(canonicalUrl(p.url))) keys.push(`u:${canonicalUrl(p.url)}`);
   return keys;
 }

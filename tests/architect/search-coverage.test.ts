@@ -1,9 +1,9 @@
 // SEARCH COVERAGE: every board type ingest reads yields open rows from its fixture board; the open / closed / expired /
 // scam screens, the duplicate collapse and the level + place + term filters behave on "software engineering internship
 // Chicago summer 2027". Offline: readers and logic only (scripts/career/coverage-report.ts prints the same table).
-import { matchesWords, memoryPostingsDb, searchWords, titleTier } from "../../supabase/functions/_shared/career_ingest.ts";
+import { ingestBoards, matchesWords, memoryPostingsDb, searchWords, titleTier } from "../../supabase/functions/_shared/career_ingest.ts";
 import { searchPostings } from "../../supabase/functions/_shared/career_search.ts";
-import { canonicalUrl, dupKeys, parseSearchQuery, placeFit, postingLevel, postingStatus, scamSignals, termExpired, termsIn } from "../../supabase/functions/_shared/career_search_query.ts";
+import { canonicalUrl, dupKeys, isInternPosting, parseSearchQuery, placeFit, postingLevel, postingStatus, postingTerms, scamSignals, termExpired, termsIn } from "../../supabase/functions/_shared/career_search_query.ts";
 import { coverage, QUERY } from "../../scripts/career/coverage-report.ts";
 
 function assert(v: unknown, m = "assertion failed"): asserts v { if (!v) throw new Error(m); }
@@ -16,11 +16,13 @@ Deno.test("SC/1 every one of the 11 board types, whole and streamed, yields open
   for (const l of lines) {
     assert(l.failures.length === 0, `${l.provider}/${l.mode} failed: ${l.failures}`);
     assert(l.open > 0, `${l.provider}/${l.mode} has no open rows`);
-    // Text-visible providers drop the expired term, the filled posting and the scam; the three whose list carries no text keep the latter two.
-    eq(l.open, l.text_visible ? 5 : 7, `${l.provider}/${l.mode} open rows`);
+    // Review 2026-11-05: ingest stores every posting (a screen is a count, never a skip or a close); the expired term, the
+    // filled posting and the scam are counted where the list carries text, and hidden at SEARCH time. Two requisitions with
+    // one title are two jobs. Text-visible: the Summer 2027 Chicago intern twice; no text: also the filled one it cannot see.
+    eq(l.open, 8, `${l.provider}/${l.mode} open rows: nothing skipped at ingest`);
     eq(l.url_unknown, 0, `${l.provider}/${l.mode} every posting link has a recognized shape`);
-    eq(l.screened.expired_term, 1, `${l.provider}/${l.mode} expired term`);
-    eq(l.search_hits, l.text_visible ? 1 : 2, `${l.provider}/${l.mode} hits for the sentence`);
+    eq(l.screened, l.text_visible ? { expired_term: 1, closed_text: 1, scam: 1 } : { expired_term: 1 }, `${l.provider}/${l.mode} counted screens`);
+    eq(l.search_hits, l.text_visible ? 2 : 3, `${l.provider}/${l.mode} hits for the sentence`);
   }
   for (const p of ["workable", "recruitee", "teamtailor", "personio", "workday", "smartrecruiters"]) assert(lines.some((l) => l.provider === p && l.open > 0), p);
 });
@@ -97,7 +99,9 @@ Deno.test("SC/6 term: read, expired against the clock", () => {
 Deno.test("SC/7 status: closed wording, expired term, scam; an ordinary posting stays open", () => {
   eq(postingStatus({ title: "Intern", description: "We are no longer accepting applications for this role." }, NOW), { open: false, reason: "closed_text" });
   eq(postingStatus({ title: "Intern, Summer 2025", description: "" }, NOW), { open: false, reason: "expired_term" });
-  eq(postingStatus({ title: "Assistant", description: "Pay a $99 training fee before you start." }, NOW), { open: false, reason: "scam" });
+  // Review 2026-11-05: one signal (even a plain request for payment) is a flag; a scam is hidden on two.
+  eq(postingStatus({ title: "Assistant", description: "Pay a $99 training fee before you start." }, NOW), { open: true, flags: ["possible_scam"] });
+  eq(postingStatus({ title: "Assistant", description: "Pay a $99 training fee before you start. Interview via Telegram." }, NOW), { open: false, reason: "scam" });
   eq(postingStatus({ title: "Support", description: "Interview via Telegram. Contact our manager on Telegram." }, NOW).open, true, "one soft signal is not enough");
   eq(postingStatus({ title: "Support", description: "Interview via Telegram. Earn $900 per week, no experience needed. Buy gift cards for clients and send the codes." }, NOW), { open: false, reason: "scam" });
   eq(postingStatus({ title: "Software Engineer", description: "We pay competitive salaries, a relocation bonus and offer a gift card program for referrals and a crypto wallet product to build.", apply_email: null }, NOW).open, true);
@@ -107,7 +111,78 @@ Deno.test("SC/7 status: closed wording, expired term, scam; an ordinary posting 
 
 Deno.test("SC/8 duplicates: tracking params and trailing slashes do not make a different link", () => {
   eq(canonicalUrl("https://www.Example.com/jobs/1/?utm_source=x&gh_src=y#top"), "example.com/jobs/1");
-  eq(dupKeys({ company: "Acme, Inc.", title: "Intern (Summer)", location: "Chicago, IL", url: "https://a.com/x" })[0], dupKeys({ company: "Acme", title: "Intern", location: "Chicago IL" })[0]);
+  // Review 2026-11-05: identity is the posting id or a link that carries an id, never company + title + place.
+  eq(dupKeys({ job_id: "greenhouse:acme:1", url: "https://boards.greenhouse.io/acme/jobs/4012345?gh_src=li" }), ["id:greenhouse:acme:1", "u:boards.greenhouse.io/acme/jobs/4012345"]);
+  eq(dupKeys({ company: "Acme", title: "Intern", location: "Chicago IL", url: "https://a.com/x" }), []);
+});
+
+// ------------------------------------------------------------------------------------------------ review 2026-11-05
+const R = (id: string, title: string, description = "", extra: Record<string, unknown> = {}) => ({ job_id: id, provider: "greenhouse", board: "acme", company: "Acme", title, location: "Chicago, IL", url: `https://boards.greenhouse.io/acme/jobs/${4000000 + [...id].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 900000, 7)}`, description, seniority_band: null, apply_email: null, first_seen_at: "2026-10-20T00:00:00Z", last_seen_at: "2026-10-20T00:00:00Z", closed_at: null, ...extra });
+
+Deno.test("SC/R1 a graduation or eligibility line is not the posting's term; a description term never hides", () => {
+  const grad = R("g1", "Software Engineering Intern", "About you: Currently pursuing a BS in Computer Science, graduating in Spring 2028. Our interns build real services with mentors.");
+  const elig = R("g2", "Software Engineer Intern", "Eligibility: You must be enrolled in a degree program through Fall 2027. Apply by December 1.");
+  const runs = R("g3", "Software Engineer Intern", "The internship runs Fall 2027 for twelve weeks on our payments team.");
+  const r = searchPostings([grad, elig, runs], QUERY, null, 10, { now: NOW });
+  eq(r.postings.map((p) => p.job_id).sort(), ["g1", "g2", "g3"], "real Chicago internships stay for 'summer 2027'");
+  eq(postingTerms(grad).terms, [], "graduating in Spring 2028 is the applicant's, not the posting's");
+  eq(postingTerms(runs), { terms: [{ season: "fall", year: 2027 }], sure: false });
+  // A title that states another term is still not offered.
+  eq(searchPostings([R("g4", "Software Engineering Intern, Fall 2027")], QUERY, null, 10, { now: NOW }).postings.length, 0);
+});
+
+Deno.test("SC/R2 Backend and Frontend, and two requisitions with one title, are separate jobs; the same link once", () => {
+  const be = R("b1", "Software Engineer (Backend)"), fe = R("b22", "Software Engineer (Frontend)");
+  const req1 = R("r1", "Software Engineer", "", { url: "https://acme.example/careers" }), req2 = R("r22", "Software Engineer", "", { url: "https://acme.example/careers" });
+  const tracked = { ...be, job_id: "b1-copy", url: `${be.url}?gh_src=linkedin` };
+  const r = searchPostings([be, fe, req1, req2, tracked], "software engineer", null, 10, { now: NOW });
+  eq(r.postings.map((p) => p.job_id).sort(), ["b1", "b22", "r1", "r22"]);
+  eq(r.duplicates, 1, "only the same link with a tracking parameter collapses");
+});
+
+Deno.test("SC/R3 'Summer 2026 & 2027 Internship' is two terms and not expired; ingest stores and keeps screened rows", async () => {
+  eq(termsIn("Software Engineering Intern - Summer 2026 & 2027"), [{ season: "summer", year: 2026 }, { season: "summer", year: 2027 }]);
+  eq(termsIn("Summer 2026/2027 Analyst Program"), [{ season: "summer", year: 2026 }, { season: "summer", year: 2027 }]);
+  eq(postingStatus({ title: "Software Engineering Intern - Summer 2026 & 2027", description: "" }, NOW), { open: true });
+  eq(searchPostings([R("m1", "Software Engineering Intern - Summer 2026 & 2027")], QUERY, null, 10, { now: NOW }).postings.length, 1);
+  // A screen at ingest is a count: the row is stored, and one already stored is neither closed nor its queue ended.
+  const db = memoryPostingsDb();
+  const feed = (list: any[]) => async () => ({ postings: list, complete: true });
+  const filled = { ...R("x1", "Software Engineering Intern", "This position has been filled."), ats_id: "x1" };
+  const past = { ...R("x22", "Software Engineering Intern, Summer 2025"), ats_id: "x22" };
+  const board = { company: "Acme", provider: "greenhouse", board: "acme" };
+  const openFirst = { ...filled, description: "Build services with our platform team." };
+  const s0 = await ingestBoards({ boards: [board], fetchFeed: feed([openFirst]) as any, db, now: NOW, useCursor: false });
+  eq([s0.new, s0.screened], [1, undefined]);
+  // The stored posting now reads as filled, and a past-term one appears: both counted, neither skipped nor closed.
+  const s1 = await ingestBoards({ boards: [board], fetchFeed: feed([filled, past]) as any, db, now: NOW + 86_400_000, useCursor: false });
+  eq(s1.screened, { closed_text: 1, expired_term: 1 });
+  eq(s1.closed, 0, "a parse never closes a stored row (closing would end its queued applications)");
+  eq((await db.open()).map((p: any) => p.job_id).sort(), ["x1", "x22"], "stored, not skipped");
+  // Hidden at search time instead.
+  eq(searchPostings(await db.open(), QUERY, null, 10, { now: NOW }).postings.length, 0);
+});
+
+Deno.test("SC/R4 an employer paying a deposit is not a scam ask; one signal is a flag, never a hide", () => {
+  for (const d of ["We pay a $2,000 housing deposit for every intern.", "We cover the $40 background check fee for every hire.", "Acme pays a $500 relocation deposit and reimburses travel."]) {
+    eq(scamSignals({ title: "Software Engineering Intern", description: d }), [], d);
+    eq(postingStatus({ title: "Software Engineering Intern", description: d }, NOW), { open: true }, d);
+  }
+  eq(postingStatus({ title: "Assistant", description: "Contact our manager on Telegram for your interview." }, NOW), { open: true, flags: ["possible_scam"] });
+  eq(searchPostings([R("s1", "Software Engineering Intern, Summer 2027", "Interview via Telegram.")], QUERY, null, 10, { now: NOW }).postings.length, 1, "a flag is not a hide");
+});
+
+Deno.test("SC/R5 Staff Accountant is not senior; Staff Software Engineer is; an internship said only in the description is an intern posting", () => {
+  eq(postingLevel({ title: "Staff Accountant" }), "other");
+  eq(postingLevel({ title: "Staff Nurse" }), "other");
+  eq(postingLevel({ title: "Data Science Fellow" }), "other");
+  eq(postingLevel({ title: "Staff Software Engineer" }), "senior");
+  eq(searchPostings([{ ...R("a1", "Staff Accountant"), location: "New York, NY" }], "new grad accountant new york", null, 5, { now: NOW }).postings.length, 1);
+  const desc = R("i1", "Software Engineering, Summer 2027", "This is a 12-week paid summer internship on our infrastructure team.");
+  eq(isInternPosting(desc), true);
+  eq(searchPostings([desc], QUERY, null, 5, { now: NOW }).postings.map((p) => p.job_id), ["i1"]);
+  eq(isInternPosting(R("i2", "Senior Software Engineer", "You will mentor our summer internship cohort.")), false);
+  eq(isInternPosting(R("i3", "Software Engineer", "You will mentor our interns.")), false, "mentioning interns is not being an internship");
 });
 
 Deno.test("SC/8b a link shared by many postings (a careers page) is not one job's identity", () => {
@@ -139,8 +214,10 @@ Deno.test("SC/10 reviewer probes: closed wording that is not a status stays open
 Deno.test("SC/11 reviewer probes: an employer's own scam warning is not a scam; a plain request for payment is", () => {
   for (const d of ["Never pay a registration fee or send a cheque to anyone claiming to hire for us.", "We will never ask you to buy gift cards. Beware of scammers: our process is free of charge.", "Do not send money or pay a $50 fee; that is a scam, report it."])
     eq(postingStatus({ title: "Analyst", description: d + " Join our analytics team." }, NOW).open, true, d);
-  eq(postingStatus({ title: "Analyst", description: "You must pay a registration fee before your first day." }, NOW), { open: false, reason: "scam" });
-  eq(postingStatus({ title: "Analyst", description: "Pay a $120 onboarding fee to begin." }, NOW), { open: false, reason: "scam" });
+  // Review 2026-11-05: a plain request for payment is one signal (flagged); with a second (a cheque to buy equipment) it is hidden.
+  eq(postingStatus({ title: "Analyst", description: "You must pay a registration fee before your first day." }, NOW), { open: true, flags: ["possible_scam"] });
+  eq(postingStatus({ title: "Analyst", description: "Pay a $120 onboarding fee to begin." }, NOW), { open: true, flags: ["possible_scam"] });
+  eq(postingStatus({ title: "Analyst", description: "Pay a $120 onboarding fee to begin. We will send you a cheque to purchase your own equipment." }, NOW), { open: false, reason: "scam" });
 });
 
 Deno.test("SC/12 reviewer probes: Portland, bare LA, Winter 2026, managers at new grad", () => {

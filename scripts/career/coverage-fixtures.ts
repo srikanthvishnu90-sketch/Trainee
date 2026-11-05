@@ -3,7 +3,7 @@
 // hosts). Every board lists the same eight jobs, so a provider that reads fewer open rows than the others is a reader bug,
 // not a data difference. `text` is whether the provider's LIST carries the posting's description (SmartRecruiters, BambooHR
 // and Workday lists do not): a "filled" or scam wording in a description cannot be seen where there is none.
-export interface Row { n: number; title: string; place: string; city: string; region: string; body: string; posted: string; tag: "open" | "expired_term" | "closed_text" | "scam" | "senior" | "dup" }
+export interface Row { n: number; title: string; place: string; city: string; region: string; body: string; posted: string; tag: "open" | "expired_term" | "closed_text" | "scam" | "senior" | "same_title" }
 export const ROWS: Row[] = [
   { n: 1, title: "Software Engineering Intern, Summer 2027", place: "Chicago, IL", city: "Chicago", region: "Illinois", body: "Build services with our platform team.", posted: "2026-10-20T12:00:00Z", tag: "open" },
   { n: 2, title: "Software Engineering Intern, Summer 2026", place: "Chicago, IL", city: "Chicago", region: "Illinois", body: "Build services with our platform team.", posted: "2026-01-20T12:00:00Z", tag: "expired_term" },
@@ -12,7 +12,7 @@ export const ROWS: Row[] = [
   { n: 5, title: "Data Analyst Intern", place: "Remote, US", city: "", region: "", body: "Analyze product data.", posted: "2026-10-17T12:00:00Z", tag: "open" },
   { n: 6, title: "Software Engineering Internship", place: "Chicago, IL", city: "Chicago", region: "Illinois", body: "Thank you for your interest. This position has been filled and applications are now closed.", posted: "2026-09-02T12:00:00Z", tag: "closed_text" },
   { n: 7, title: "Remote Data Entry Assistant", place: "Chicago, IL", city: "Chicago", region: "Illinois", body: "Earn $900 per week, no experience needed. Pay a $150 training fee to start; we will send you a cheque to purchase your own equipment. Message our manager on Telegram.", posted: "2026-10-21T12:00:00Z", tag: "scam" },
-  { n: 8, title: "Software Engineering Intern, Summer 2027", place: "Chicago, IL", city: "Chicago", region: "Illinois", body: "Build services with our platform team.", posted: "2026-10-21T12:00:00Z", tag: "dup" },
+  { n: 8, title: "Software Engineering Intern, Summer 2027", place: "Chicago, IL", city: "Chicago", region: "Illinois", body: "Build services with our platform team.", posted: "2026-10-21T12:00:00Z", tag: "same_title" }, // review 2026-11-05: another requisition with the same title is another job (kept)
 ];
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const id = (n: number) => 7000000 + n;

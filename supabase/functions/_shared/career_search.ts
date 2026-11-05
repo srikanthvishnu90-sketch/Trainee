@@ -7,7 +7,7 @@ import { matchesWords, searchWords, titleTier, wordStem } from "./career_ingest.
 import { payFrom } from "./posting_pay.ts";
 import { formUrlFor } from "./posting_key.ts";
 import { personalSourceGuard } from "./personal_fact_source.ts";
-import { dupKeys, parseSearchQuery, placeFit, postingLevel, postingStatus, termsIn, type Term } from "./career_search_query.ts";
+import { dupKeys, isInternPosting, parseSearchQuery, placeFit, postingLevel, postingStatus, postingTerms, type Term } from "./career_search_query.ts";
 
 export interface Fit { score: number | null; bucket: string | null; excluded: boolean; reasons: string[]; gaps: string[] }
 export interface SearchHit { job_id: string; company: string; title: string; location: string; url: string; first_seen_at: string | null; fit: Fit | null; pay: string | null; role_match: boolean }
@@ -65,12 +65,15 @@ export function fitOf(p: any, sp: any): Fit {
   return { score: f.score, bucket: f.bucket, excluded: !!f.excluded, reasons: (f.reasons || []).slice(0, 4), gaps: (f.gaps || []).slice(0, 3) };
 }
 
-// How a posting's own stated term sits against the term asked: 0 states it, 1 states none, 2 states another (never offered).
+// How a posting's own stated term sits against the term asked: 0 states it, 1 states none (or only an unsure one that
+// differs), 2 its TITLE states another (never offered). Review 2026-11-05: the term is the posting's own (career_search_query.ts
+// postingTerms), never a graduation or eligibility line, and a term read from the description only ranks, never hides.
 function termRank(p: any, want: Term | null): 0 | 1 | 2 {
   if (!want) return 0;
-  const own = termsIn(`${p.title ?? ""} . ${String(p.description ?? "").slice(0, 1200)}`);
-  if (!own.length) return 1;
-  return own.some((t) => (want.year === null || t.year === want.year) && (!want.season || t.season === want.season)) ? 0 : 2;
+  const { terms, sure } = postingTerms(p);
+  if (!terms.length) return 1;
+  if (terms.some((t) => (want.year === null || t.year === want.year) && (!want.season || t.season === want.season))) return 0;
+  return sure ? 2 : 1;
 }
 export interface SearchOpts { now?: number }
 export function searchPostings(pool: any[], query: unknown, profile: any, limit = 10, opts: SearchOpts = {}): { postings: SearchHit[]; total: number; title_matches: number; ranked_by: "goal" | "fit" | "newest"; goal: Goal | null; screened?: Record<string, number>; duplicates?: number; asked?: { level: string | null; places: string[]; term: Term | null } } {
@@ -84,10 +87,8 @@ export function searchPostings(pool: any[], query: unknown, profile: any, limit 
     if (!p || p.closed_at || !matchesWords(p, words)) return false;
     const sv = postingStatus(p, now);
     if (!sv.open) { screened[sv.reason] = (screened[sv.reason] ?? 0) + 1; return false; }
-    if (pq.level) {
-      const lv = postingLevel(p);
-      if (pq.level === "intern" ? lv !== "intern" : lv === "senior" || lv === "intern") return false;
-    }
+    if (pq.level === "intern" && !isInternPosting(p)) return false;
+    if (pq.level === "new_grad") { const lv = postingLevel(p); if (lv === "senior" || lv === "intern") return false; }
     const pf = placeFit(p.location, pq.places, pq.remote);
     if (pf === "no") return false;
     const tr = termRank(p, pq.term);
@@ -115,7 +116,7 @@ export function searchPostings(pool: any[], query: unknown, profile: any, limit 
     }
     return newest(a, b);
   });
-  // The same job twice (one link, or one company + title + place): the better-ranked row is kept.
+  // The same job twice (one posting id, or one link that carries an id): the better-ranked row is kept.
   const seenKeys = new Set<string>(), uniq: any[] = [];
   for (const x of scored) { const ks = dupKeys(x.p); if (ks.some((k) => seenKeys.has(k))) continue; ks.forEach((k) => seenKeys.add(k)); uniq.push(x); }
   const duplicates = scored.length - uniq.length;

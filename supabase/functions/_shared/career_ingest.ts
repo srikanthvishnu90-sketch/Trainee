@@ -89,7 +89,7 @@ export interface PostingsDb {
 }
 export interface IngestStats {
   flagged?: number; // kept postings whose wording may say closed without being a status (held, not dropped)
-  screened?: Record<string, number>; // postings left out for their own words: closed_text, expired_term, scam
+  screened?: Record<string, number>; // postings whose own words read as closed_text / expired_term / scam: stored, counted, hidden only at search
   boards_ok: number; boards_failed: number; boards_partial: number; new: number; seen: number; reopened: number; closed: number;
   boards_not_modified?: number; // WO-037: answered 304 to a conditional request
   // Feature 6: postings refused at ingest because their link is never a posting (a data/API endpoint, a discussion
@@ -210,11 +210,12 @@ export async function ingestBoards(o: { boards: Board[]; fetchFeed: FetchFeed; d
         // Feature 6: a link that is never a posting never enters the table (and one stored before is closed below, since a
         // complete read no longer carries it). "unknown" is kept and counted: the guard never promotes or drops a guess.
         // SEARCH COVERAGE: a posting that says in its own words it is closed or filled, a term wholly past, or the shape of a
-        // fee / cheque / chat-app scam is not an open job: it is not stored, and one stored before closes below, since a
-        // complete read no longer carries it.
+        // fee / cheque / chat-app scam is COUNTED here and hidden at search time (career_search.ts), never skipped: review
+        // 2026-11-05, until the screens' false-positive rate is measured a parse must not close a stored row or end the
+        // applications queued for it. The row is stored exactly as any other.
         const sv = postingStatus(p, o.now);
         if (sv.open && sv.flags) st.flagged = (st.flagged ?? 0) + 1; // kept: wording that may mean closed but is not a status
-        if (!sv.open) { const sc = (st.screened ??= {}); sc[sv.reason] = (sc[sv.reason] ?? 0) + 1; continue; }
+        if (!sv.open) { const sc = (st.screened ??= {}); sc[sv.reason] = (sc[sv.reason] ?? 0) + 1; }
         const v = urlShape(p.url);
         if (v.verdict === "not_posting") {
           st.url_rejected = (st.url_rejected ?? 0) + 1;

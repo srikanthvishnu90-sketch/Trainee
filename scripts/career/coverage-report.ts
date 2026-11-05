@@ -1,5 +1,5 @@
 // SEARCH COVERAGE report: for every job-board type ingest reads, the open rows its reader produces from a fixture board,
-// what the screens left out and why, and what the search sentence "software engineering internship Chicago summer 2027"
+// what the screens counted and why (stored at ingest, hidden only at search: review 2026-11-05), and what the search sentence "software engineering internship Chicago summer 2027"
 // finds. Offline (no network): it proves the READERS and the open/closed/search logic per provider, never a live board.
 //   deno run -A scripts/career/coverage-report.ts [--json]
 import { boardFetchFeed, ingestBoards, INGEST_PROVIDERS, memoryPostingsDb } from "../../supabase/functions/_shared/career_ingest.ts";

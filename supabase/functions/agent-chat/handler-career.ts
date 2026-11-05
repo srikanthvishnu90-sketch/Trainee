@@ -465,6 +465,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       };
       // WO-100: module 120's "what's connected" reads the live grants, the extension and the phone link (no address).
       if (situation) ctx.statusRecords = statusRecordsFrom(situation.capabilities);
+      // STATUS FROM THE SITUATION (2026-11-01): the router's status answer reads every task in flight (queue, prepared
+      // applications, open questions, drafts), not only this thread's tracker. Turn-only: not a snapshot key, never persisted.
+      if (situation) (ctx as Record<string, unknown>).situation = situation;
       // WO-002 (D-008): the agent brain answers when CAREER_BRAIN=agent; structured task/batch requests stay on the
       // router path. A model failure falls back to the router so an outage never leaves the person with nothing.
       let out: CareerTurnResult;

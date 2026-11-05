@@ -151,4 +151,5 @@ export function resultsParts(o: { what: What; floor: Floor | null; meets: number
   return [`${first} ${tail}`, o.url];
 }
 // The reply may carry nothing a texting app would show as formatting: no markdown emphasis, headings, bullets or link syntax.
-export const MARKDOWN = /\*\*|__|^\s*[#>*-]\s|\[[^\]]*\]\([^)]*\)|`/m;
+// `__` inside a link (a signed token is base64url and can contain it) is not emphasis.
+export const MARKDOWN = /\*\*|(?<!https?:\/\/\S*)__|^\s*[#>*-]\s|\[[^\]]*\]\([^)]*\)|`/m;

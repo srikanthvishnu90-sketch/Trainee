@@ -278,11 +278,50 @@ test("re-review 2: 'a couple (of) questions' is 2 and 'a few questions' is 3; 's
 });
 
 test("re-review 3: a count-less 'no file' interview prep ask gets the prep brief with no File, never the catch-all", () => {
-  for (const m of ["I don't want a file for my interview, just tell me what to expect", "Make me interview questions, no file needed", "Stop. Do not create a prep file for the interview."]) {
+  for (const m of ["I don't want a file for my interview, just tell me what to expect", "Make me interview questions, no file needed"]) {
     const out = turn(m).out;
     assert.equal(out.intent, "prep_brief", `${m}: ${out.intent} ${out.reply}`);
     assert.ok(!(out.result && out.result.file), `${m}: no File`);
     assert.match(out.reply, /^No File was made, as you asked\./, m);
     assert.equal(out.result.sends, 0);
+  }
+  // Third review: one whose route without the claim is already the brief keeps that route and reply exactly.
+  const stop = "Stop. Do not create a prep file for the interview.";
+  const a = turn(stop).out, b = withoutClaim(() => turn(stop).out);
+  assert.equal(a.intent, "prep_brief");
+  assert.ok(!(a.result && a.result.file));
+  assert.equal(a.reply, b.reply);
+});
+
+/* Third review of PR #494 (2026-11-04): a count-less "no file" message is routed as the original message, with the prep File
+   claim off, so the real ask keeps its route (a mock, a pay question, a cancel, a send). Only when that route is the generic
+   catch-all and the rest of the message is itself an interview prep ask does the interview brief answer it. */
+test("third review: a 'no file' message with another ask keeps the route it has without the prep File claim", () => {
+  for (const m of [
+    "Don't make a file for my mock interview, start a mock interview",
+    "No file, but how much does Google pay interns? I have an interview",
+    "I don't need a document, I have an interview tomorrow, what should I wear?",
+    "I don't want a file, I want to cancel my interview with Acme",
+    "no file. send my application to Acme before the interview",
+    "No file please, can you run a mock interview with me?",
+    "I don't want a doc; what is the interview process at Goldman Sachs?",
+    "Skip the file, I have an interview tomorrow; do not invent company facts",
+  ]) {
+    const a = turn(m).out, b = withoutClaim(() => turn(m).out);
+    assert.ok(!(a.result && a.result.file), `${m}: no File`);
+    assert.equal(a.intent, b.intent, `${m}: same route as without the prep File claim`);
+    assert.equal(a.reply, b.reply, `${m}: same reply as without the prep File claim`);
+  }
+  // The three named in the review, by route.
+  assert.equal(turn("Don't make a file for my mock interview, start a mock interview").out.intent, "prep_mock_start");
+  assert.equal(turn("No file, but how much does Google pay interns? I have an interview").out.intent, "company_intel");
+  const wear = turn("I don't need a document, I have an interview tomorrow, what should I wear?").out;
+  assert.ok(!/^No File was made, as you asked/.test(wear.reply), wear.reply);
+  // A pure prep ask whose route without the claim is the catch-all gets the brief, and only then.
+  for (const m of ["I don't want a file for my interview, just tell me what to expect", "Make me interview questions, no file needed"]) {
+    assert.equal(withoutClaim(() => turn(m).out).intent, "career_catchall", `${m}: the catch-all without the claim`);
+    const out = turn(m).out;
+    assert.equal(out.intent, "prep_brief", m);
+    assert.match(out.reply, /^No File was made, as you asked\./, m);
   }
 });

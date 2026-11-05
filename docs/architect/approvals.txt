@@ -144,3 +144,5 @@
 510 97925046743979f4e7177158b14e2b28b1bace70 independent-review-agent-rv56 risk=low note=architect-shard-timeout-45-admin-key-header-only-constant-time-no-store-survey-pii-out-of-url-waitlist-and-duplicate-guard
 506 26bf0eb9573a6d75915fb73ae6659adfbf63511b independent-review-agent-rv57 risk=medium note=per-person-claim-lock-deferred-thread-update-rollback-exact-wiring-ok
 511 51f3e5bc6baa6d4fd11af9cc88574ba4d9ffb2f4 independent-review-agent-rv57 risk=low note=outbox-attempts-capped-at-10-paced-final-no-unknown-outcome-supersede-keeps-final
+514 6c03c4787f983ce77ad1c30aa296caa9a6a8c2e7 independent-review-agent-rv58 risk=medium note=identity-and-screening-claims-refused-in-any-phrasing-with-production-03edad41f-floor-on-claimProblems-factLock-checkDraft-draftEssay-no-regression-vs-production
+507 66faf5c328b790d7bbc6c3cea70ed6cff5bec97e independent-review-agent-rv58 risk=medium note=tailoring-round-4-identity-screening-false-accepts-and-factLock-decimal-change-floored-by-production-baseline-reviewed-after-merge-2026-11-05-fixed-forward-by-514

@@ -120,6 +120,9 @@ const NAME_STOP = new Set([
   "please", "yes", "no", "yet", "now", "sure", "so", "really", "everything", "i", "you",
   "approve", "send", "submit", "apply", "confirm", "go", "go ahead",
 ]);
+const ORDINAL_WORD: Record<string, number> = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10 };
+// A number said as a position ("#3", "number 3", "the 3rd", "the third") is clear; one bare number may be a count.
+const MARKED_NUMBER = /(?:#|\bnumber\b|\bno\.|\b\d{1,4}(?:st|nd|rd|th)\b|\b(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b)/;
 const NAME_DESCRIBES = new Set(["one", "ones", "in", "at", "from", "with", "that", "which", "where", "first", "last", "other", "whatever", "something", "remote", "onsite"]);
 
 // "1, 2 and 5", "3-5", "#2", "numbers 1 and 3", "acme and beta", "the acme one": numbers and employer names; null when
@@ -139,6 +142,12 @@ export function parseSelection(raw: string): { nums: number[]; names: string[] }
     let m = /^#?\s*(\d{1,4})(?:st|nd|rd|th)?$/.exec(piece);
     if (m) {
       nums.push(Number(m[1]));
+      continue;
+    }
+    // MASS APPLY END TO END (2026-11-04): "approve the second one", "just the first and third": a card position in words
+    // is that number on the card, never an employer called "second" (which matched no item and approved nothing).
+    if (ORDINAL_WORD[piece]) {
+      nums.push(ORDINAL_WORD[piece]);
       continue;
     }
     m = /^(\d{1,4})\s*(?:-|–|to|through|thru)\s*(\d{1,4})$/.exec(piece);
@@ -231,7 +240,7 @@ export function parseCardReply(text: string): CardReply | null {
     if (only && !s) return { kind: "unclear" };
     // One unmarked number without "only"/"just" ("yes 3", "send 3") may be a count or a number: unclear. "#3",
     // "number 3" and "only 3" are clear.
-    if (s && !only && !s.names.length && s.nums.length === 1 && !/(?:#|\bnumber\b|\bno\.)/.test(body)) return { kind: "unclear" };
+    if (s && !only && !s.names.length && s.nums.length === 1 && !MARKED_NUMBER.test(body)) return { kind: "unclear" };
     // A named employer after a bare "yes" ("yes acme") is not clear enough: unclear, never approved. A yes followed by a
     // sentence ("yes, that's my resume", "yes I want alerts for data jobs") is not about the card at all: the brain's.
     if (s && bare && s.names.length) {

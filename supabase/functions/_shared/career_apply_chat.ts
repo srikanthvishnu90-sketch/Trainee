@@ -53,7 +53,9 @@ export type ListFilter = { remote: boolean; words: string[]; said: string };
 // message (`what`): the role words, read against the title, and the place, read against the location. Without `what`,
 // "the top N" is the thread's last list, as before.
 export interface ManyWhat { role: string; words: string[]; place: string | null; company?: string | null }
-export type ManyAsk = { kind: "all"; filter?: ListFilter } | { kind: "first"; n: number; what?: ManyWhat } | { kind: "nth"; i: number } | { kind: "pick"; is: number[] };
+// MASS APPLY END TO END (2026-11-04): `good` is "apply to the good ones": the listed postings their confirmed facts fit
+// (fit bucket Match or Safety, not knocked out), never a guess when their facts can't rank them.
+export type ManyAsk = { kind: "all"; filter?: ListFilter; good?: true } | { kind: "first"; n: number; what?: ManyWhat } | { kind: "nth"; i: number } | { kind: "pick"; is: number[] };
 // Short forms a person types for a role family, read against the listed titles.
 const ROLE_ALIASES: Record<string, string[]> = {
   swe: ["software engineer", "software engineering", "software developer", "swe"],
@@ -239,6 +241,10 @@ export function applyManyAsk(message: string): ManyAsk | null {
   // engineering intern roles") is the broad ask, the batch delegation's (career_batch_apply), never this turn's.
   m = after.match(/^(?:all\s+)?(\d{1,3}|two|three|four|five|six|seven|eight|nine|ten)\s+(?:roles?|jobs?|postings?|positions?|internships?|openings?|of (?:them|these|those))\b/);
   if (m) return { kind: "first", n: numOf(m[1]) };
+  // MASS APPLY END TO END: "the good ones", "the ones that fit me", "the best matches": the listed postings their confirmed
+  // facts fit. "the best 3" is a count (above); this is the list, filtered by fit.
+  if (/^(?:all\s+(?:of\s+)?)?the\s+(?:good|best|strong|strongest|great|right|better)\s+(?:ones?|matches|fits?|roles?|jobs?|postings?|picks?)(?:\s+(?:you (?:just )?(?:found|listed|showed)(?: me)?|for me|on (?:the|that) list|please))*$/.test(after)
+    || /^(?:all\s+(?:of\s+)?)?the\s+ones?\s+(?:that|which|i'?m|i am|you think)\s+(?:fits?|matche?s?|(?:a\s+)?(?:good|strong)\s+(?:fit|match)(?:\s+for)?|(?:are\s+)?(?:good|best|right)(?:\s+for me)?|i (?:fit|match|qualify for))(?:\s+(?:me|well|best))?(?:\s+please)?$/.test(after)) return { kind: "all", good: true };
   // D-MS-2: "all remote ones", "every SWE intern role you found": the listed postings that match, as one batch.
   if (!/^(?:all\s+(?:of\s+)?)?(?:these|those|them|both)\b/.test(after)) {
     const filter = listFilterOf(after);
@@ -528,6 +534,16 @@ export async function applyManyTurn(o: ApplyChatDeps): Promise<ApplyChatResult |
     if (!inRange.length) return { reply: `I listed ${list.length}, so there is no ${outRange.map((i) => `#${i}`).join(" or ")}; nothing was queued. Say which of the ${list.length} you mean.`, status: "none", intent };
     slice = inRange.map((i) => list[i - 1]);
     for (const i of outRange) missing.push({ job_id: null, company: "", title: `#${i}`, reason: `not on the list I showed (I listed ${list.length})` });
+  } else if (ask.good) {
+    // MASS APPLY END TO END: "the good ones": only what their confirmed facts fit, by the same fit the search ranks by. With
+    // no confirmed facts to rank against, nothing is guessed: nothing is queued and the reply says how to answer instead.
+    const sp = (() => { try { return scoringProfileFor({ facts: o.facts ?? [] }); } catch { return null; } })();
+    if (!sp) return { reply: `I can't tell which of the ${list.length} I listed fit you: none of your facts are confirmed yet, so I have nothing to rank them against and I won't guess; nothing was queued. Say "apply to all of them", or name which ones ("apply to 1 and 3").`, status: "none", intent, queued: [], refused: [] };
+    const recs = await Promise.all(list.map(async (e) => { try { return e.id && o.posting ? await o.posting(String(e.id)) : null; } catch { return null; } }));
+    const fits = list.map((e, i) => { try { return fitOf({ ...(recs[i] ?? {}), title: recs[i]?.title ?? e.title, company: recs[i]?.company ?? e.company, location: recs[i]?.location ?? e.location }, sp); } catch { return null; } });
+    slice = list.filter((_, i) => { const f = fits[i]; return !!f && !f.excluded && (f.bucket === "Match" || f.bucket === "Safety"); });
+    if (!slice.length) return { reply: `None of the ${list.length} I listed is a strong fit for your confirmed facts, so nothing was queued. Say "apply to all of them", or name which ones ("apply to 1 and 3").`, status: "none", intent, queued: [], refused: [] };
+    note = `${slice.length} of the ${list.length} I listed fit your confirmed facts (a match or better, nothing that rules you out): those ${slice.length === 1 ? "one" : String(slice.length)}. `;
   } else if (ask.filter) {
     // D-MS-2: "all remote ones": the listed postings that match, all of them, as one batch; none matching queues nothing.
     slice = list.filter((e) => matchesFilter(e, ask.filter!));

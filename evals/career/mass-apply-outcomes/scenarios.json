@@ -1,0 +1,64 @@
+{
+ "version": 1,
+ "note": "The downstream half of each application, after preparation. Every expectation here is written from the rules (D-MS-1 card grammar, D-MS-3 exact duplicates, D-024 proof, outcomeAfterSend's comment in career_apply.ts, the finish contract in 20261021075000_career_apply_ops.sql), not from the code's output.",
+ "now": "2026-11-05T15:00:00Z",
+ "card": {
+  "A": [
+   {"say": "show my applications", "status": "shown"},
+   {"say": "maybe", "status": "unclear", "approves": "none"},
+   {"mutate": 1, "why": "the posting added a question after the card was shown, so item 1's payload hash changed"},
+   {"say": "yes except 2", "status": "answered", "approves": "all_except", "except": [2]}
+  ],
+  "B": [
+   {"say": "show my applications", "status": "shown"},
+   {"say": "yes send all 999", "status": "count_mismatch", "approves": "none"},
+   {"say": "yes", "status": "answered", "approves": "all"}
+  ]
+ },
+ "duplicates": {
+  "note": "The same posting reached by another link (and recorded under another job id, as a second source would): D-MS-3 refuses it as an exact duplicate. Each variant names how a real link differs.",
+  "greenhouse": [
+   {"id": "other board host + tracking", "url": "https://boards.greenhouse.io/{board}/jobs/{jid}?gh_src=newsletter"},
+   {"id": "employer careers page with gh_jid", "url": "https://careers.example.test/jobs?gh_jid={jid}"}
+  ],
+  "lever": [
+   {"id": "tracking parameter", "url": "https://jobs.lever.co/{board}/{jid}?lever-source=LinkedIn"},
+   {"id": "posting page without /apply", "url": "https://jobs.lever.co/{board}/{jid}/"}
+  ],
+  "ashby": [
+   {"id": "tracking parameter", "url": "https://jobs.ashbyhq.com/{board}/{jid}?utm_source=alert"},
+   {"id": "posting page without /application", "url": "https://jobs.ashbyhq.com/{board}/{jid}/"}
+  ]
+ },
+ "portal": [
+  {"id": "thanks_with_id", "posted": true, "obs": {"form_present_after": false, "url_changed": true, "page_text": "Thank you for applying! Your application ID is APP-48213."},
+   "state": "submitted_unconfirmed", "page_confirmation": true, "resend": "refuse",
+   "receipt": {"must": ["^Sent to "], "must_not": ["confirmed by", "^Applied to", "Nothing reached"]}},
+  {"id": "same_page_after_send", "posted": true, "obs": {"form_present_after": true, "url_changed": false, "page_text": ""},
+   "state": "unknown_outcome", "resend": "refuse",
+   "receipt": {"must": ["cannot tell", "will not send it again"], "must_not": ["^Sent to", "^Applied to", "Nothing reached"]}},
+  {"id": "captcha_before_submit", "posted": false, "obs": {"captcha": true, "form_present_after": true, "url_changed": false, "page_text": ""},
+   "state": "needs_user", "reason": "captcha", "resend": "refuse",
+   "receipt": {"must": ["not finished"], "must_not": ["^Sent to", "^Applied to", "confirmed"]}},
+  {"id": "moved_silent", "posted": true, "obs": {"form_present_after": false, "url_changed": true, "page_text": ""},
+   "state": "submitted_unconfirmed", "resend": "refuse",
+   "receipt": {"must": ["^Sent to ", "not confirmed"], "must_not": ["confirmed by", "^Applied to", "Nothing reached"]}},
+  {"id": "already_on_file_after_send", "posted": true, "obs": {"form_present_after": false, "url_changed": false, "page_text": "You have already applied to this job. We have received your application."},
+   "state": "unknown_outcome", "resend": "refuse",
+   "receipt": {"must": ["cannot tell"], "must_not": ["^Sent to", "^Applied to", "Nothing reached"]}},
+  {"id": "validation_error_after_send", "posted": true, "obs": {"form_present_after": true, "url_changed": false, "validation_errors": ["Phone is invalid"], "page_text": ""},
+   "state": "failed", "resend": "allow",
+   "receipt": {"must": ["did not accept it"], "must_not": ["^Sent to", "^Applied to", "confirmed"]}},
+  {"id": "thanks_no_id_other_language", "posted": true, "obs": {"form_present_after": true, "url_changed": false, "page_text": "Vielen Dank für Ihre Bewerbung."},
+   "state": "unknown_outcome", "resend": "refuse",
+   "receipt": {"must": ["cannot tell"], "must_not": ["^Sent to", "^Applied to", "Nothing reached"]}},
+  {"id": "error_after_send", "posted": true, "obs": {"form_present_after": false, "url_changed": true, "page_text": "Thank you for applying. Unfortunately an error occurred and your application could not be submitted."},
+   "state": "unknown_outcome", "resend": "refuse",
+   "receipt": {"must": ["cannot tell"], "must_not": ["^Sent to", "^Applied to", "Nothing reached"]}}
+ ],
+ "mail": {
+  "note": "Per person and form family, for the first application recorded as sent: the employer's own authenticated 'we received your application' email (must confirm exactly that one). For the second: the same words from a look-alike free-mail sender (must confirm nothing).",
+  "authentic": {"from": "{Company} Recruiting <no-reply@{domain}>", "subject": "Thank you for applying to {Company}", "snippet": "Hi, thank you for your application to {Company}. We have received your application and our team will review it."},
+  "lookalike": {"from": "{Company} Careers <{slug}.careers.team@gmail.com>", "subject": "Thank you for applying to {Company}", "snippet": "Hi, thank you for your application to {Company}. We have received your application and our team will review it."}
+ }
+}

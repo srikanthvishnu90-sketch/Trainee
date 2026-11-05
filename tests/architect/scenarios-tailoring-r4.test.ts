@@ -428,3 +428,86 @@ Deno.test("review of #507: an identity or a screening answer is never written in
     assertNode.notDeepEqual(claimProblems(d.text, { record: recordOf(d.record) }), [], `${d.why}: ${JSON.stringify(d.text)} passed on ${JSON.stringify(d.record)}`);
   }
 });
+
+// Review of #512 (2026-11-05, architect decision, D-007): "As a / I am a <identity>" missed every other way of saying who
+// the person is, the record-word exemption still let "As a Hispanic analyst" through on "Member, Hispanic Scholarship Fund",
+// screening answers in other words got through, and honest work lines were refused for their topic words. Each claim below
+// was shown at #512's head (19c8c2888) on at least one record, several only once an honest on-record decimal ("My GPA was
+// 3.4.") is in the same draft. Never written in prose, whatever the record holds: race or ethnicity, religion, sexual
+// orientation or gender identity, immigration or national origin, family or parental status, first-generation status, and
+// every screening answer. Disability, veteran status and work rights still follow the record (unchanged).
+export const R512_CLAIMS: { text: string; why: "identity" | "screening" }[] = [
+  ...[
+    "I am Black and I care about fairness.", "Being a Black woman in data, I bring a different lens.", "As someone who is Black, I bring a different lens.",
+    "As a proud Black analyst, I bring a different lens.", "As a young Asian woman, I bring a different lens.", "I'm a proud immigrant.",
+    "As a single mother, I am resilient.", "As a working mom, I plan my weeks with care.", "I'm Jewish and I value learning.",
+    "As the daughter of immigrants, I learned resilience.", "I am the first in my family to attend college.", "I identify as queer.",
+    "I identify as nonbinary.", "As a person of color, I bring a different lens.", "As a Latina in data, I bring a different lens.",
+    "As a Hispanic analyst, I bring a different lens.", "As a gay man, I bring a different lens.", "As an LGBTQ engineer, I bring a different lens.",
+  ].map((text) => ({ text, why: "identity" as const })),
+  ...[
+    "I'd relocate for this role.", "I am open to relocation.", "I will pass any background screening.", "I have never been charged with a crime.",
+    "I have no prior offenses.", "I have no criminal records.", "I'm drug-free.", "My expected salary is $120,000.", "My desired salary is $120,000.",
+    "My target compensation is $150k.", "I'm looking for $120,000.", "I can start in 2 weeks.", "I could begin in two weeks.",
+  ].map((text) => ({ text, why: "screening" as const })),
+];
+// The records each claim is tried on: none, look-alike words, the claim's own numbers, the identity words on an
+// organisation, and the claim itself in the person's own words.
+export const R512_RECORDS = (claim: string): string[] => [
+  "", "Six Sigma Black Belt certification", "Black and white film photography", "Skills: Python, Black, Ruff, mypy",
+  "Chair, Black, Asian and Minority Ethnic staff network", "Raised $120,000 and $150k for the food bank in 2 weeks",
+  "Member, Hispanic Scholarship Fund", "Latina Leadership Network", "Volunteer, Jewish Community Center; Gay-Straight Alliance mentor", claim,
+];
+// Work the person did, on their record: never a screening answer, never refused for its topic words.
+export const R512_WORK: { text: string; record: string }[] = [
+  { text: "I ran background checks for 300 new hires.", record: "Ran background checks for 300 new hires" },
+  { text: "I built a salary range model.", record: "Built a salary range model" },
+  { text: "I prosecuted felony cases in the Felony Trial Unit.", record: "Prosecuted felony cases in the Felony Trial Unit" },
+  { text: "I coordinated drug testing for 300 drivers.", record: "Coordinated drug testing for 300 drivers" },
+  { text: "I managed the office relocation.", record: "Managed the office relocation" },
+  { text: "I analyzed crime data for the city.", record: "Analyzed crime data for the city" },
+  // look-alike words that are no identity: a compound, an organisation the person named
+  { text: "As a Six Sigma Black Belt, I cut waste.", record: "Six Sigma Black Belt certification; cut waste" },
+  { text: "I used white-box testing on our APIs.", record: "White and gray box testing of APIs" },
+  { text: "As a Girl Scout leader, I taught budgeting.", record: "Girl Scout leader; taught budgeting" },
+];
+Deno.test("review of #512: identity and screening answers in any phrasing are never written; work the person did is", async () => {
+  const conf = { status: "confirmed", needs_confirmation: false, source: "user" };
+  const base = [{ id: "F-1", kind: "experience", title: "Data Analyst, Acme Corp, 2019-2022", org: "Acme Corp", role: "Data Analyst", start: "2019", end: "2022",
+    bullets: ["Built Tableau dashboards for 40 sales reps"], ...conf },
+    { id: "F-2", kind: "education", title: "B.S. Statistics, Ridgeview University, 2018", school: "Ridgeview University", degree: "B.S. Statistics", text: "GPA 3.4/4.0", ...conf }];
+  // an honest on-record decimal in the same draft (#507 fixed decimals, which unmasked several of these)
+  const tail = " At Acme Corp, I built Tableau dashboards for 40 sales reps. My GPA was 3.4.";
+  const draft = async (text: string, record: string) => {
+    const facts = record ? [...base, { id: "F-3", kind: "other", title: "How I describe myself", text: record, ...conf }] : base;
+    const a = await checkDraft({ q: essayQ("Tell us about yourself.", "Larkspur Health"), siblingLabels: [], deps: { facts: () => facts }, text: `${text}${tail}` });
+    assertNode.notEqual(a.ok ? "" : a.why, "thin", `${JSON.stringify(text)}: too few facts to judge`);
+    return a;
+  };
+  const recordOf = (record: string) => ["Data Analyst, Acme Corp, 2019-2022; Built Tableau dashboards for 40 sales reps", "B.S. Statistics, Ridgeview University, 2018; GPA 3.4/4.0", record].filter(Boolean);
+  const named = (why: string) => why === "identity" ? /how you identify/ : /answered on the application form/;
+  // the control: the honest draft alone is shown on every record
+  for (const r of R512_RECORDS("")) assertNode.equal((await draft("", r)).ok, true, `the honest draft was refused on ${JSON.stringify(r)}`);
+  const missed: string[] = [];
+  for (const c of R512_CLAIMS) {
+    for (const r of R512_RECORDS(c.text)) {
+      const tag = `${c.why}: ${JSON.stringify(c.text)} on ${JSON.stringify(r)}`;
+      const a = await draft(c.text, r);
+      if (a.ok) missed.push(`checkDraft shown, ${tag}`);
+      else if (!a.detail.some((x) => named(c.why).test(x))) missed.push(`checkDraft refused for another reason (${a.detail.join("; ")}), ${tag}`);
+      if (!claimProblems(c.text, { record: recordOf(r) }).some((x) => named(c.why).test(x))) missed.push(`claimProblems passed, ${tag}`);
+      if (!claimProblems(c.text, { record: [r], line: true }).some((x) => named(c.why).test(x))) missed.push(`claimProblems (line) passed, ${tag}`);
+    }
+  }
+  assertNode.deepEqual(missed, []);
+  for (const w of R512_WORK) {
+    const a = await draft(w.text, w.record);
+    assertNode.equal(a.ok, true, `${JSON.stringify(w.text)} refused: ${a.ok ? "" : a.detail.join("; ")}`);
+    assertNode.deepEqual(claimProblems(w.text, { record: recordOf(w.record) }), []);
+    assertNode.deepEqual(claimProblems(w.text.replace(/^I (\w)/, (_, x) => x.toUpperCase()).replace(/\.$/, ""), { record: [w.record], line: true }), []);
+  }
+  // the same words as the person's own answer are still refused
+  assertNode.equal((await draft("I passed a background check.", "Ran background checks for 300 new hires")).ok, false);
+  assertNode.equal((await draft("I have never failed a drug test.", "Coordinated drug testing for 300 drivers")).ok, false);
+  assertNode.equal((await draft("I prosecuted felony cases, and I have no felony convictions.", "Prosecuted felony cases in the Felony Trial Unit")).ok, false);
+});

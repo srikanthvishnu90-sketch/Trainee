@@ -193,6 +193,7 @@ export function cardText(d: OutreachDraft, c: Card, sends = true): string {
 const ADMIT: Record<Exclude<Admit, "ok">, string> = {
   not_approved: "the approval was not recorded", changed: "the email changed after you saw it", expired: "the approval is too old",
   paused: "your account is paused", do_not_contact: "that address asked not to be contacted",
+  bad_address: "that address bounced before, so no one emails it again", on_rail: "it is already on its way from your Gmail",
 };
 
 // Someone the person wrote to through Trainee (their own outreach drafts), by full name or first name.

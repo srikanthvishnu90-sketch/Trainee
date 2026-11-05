@@ -7,6 +7,7 @@ import { matchesWords, searchWords, titleTier, wordStem } from "./career_ingest.
 import { payFrom } from "./posting_pay.ts";
 import { formUrlFor } from "./posting_key.ts";
 import { personalSourceGuard } from "./personal_fact_source.ts";
+import { dupKeys, isInternPosting, parseSearchQuery, placeFit, postingLevel, postingStatus, postingTerms, type Term } from "./career_search_query.ts";
 
 export interface Fit { score: number | null; bucket: string | null; excluded: boolean; reasons: string[]; gaps: string[] }
 export interface SearchHit { job_id: string; company: string; title: string; location: string; url: string; first_seen_at: string | null; fit: Fit | null; pay: string | null; role_match: boolean }
@@ -64,18 +65,49 @@ export function fitOf(p: any, sp: any): Fit {
   return { score: f.score, bucket: f.bucket, excluded: !!f.excluded, reasons: (f.reasons || []).slice(0, 4), gaps: (f.gaps || []).slice(0, 3) };
 }
 
-export function searchPostings(pool: any[], query: unknown, profile: any, limit = 10): { postings: SearchHit[]; total: number; title_matches: number; ranked_by: "goal" | "fit" | "newest"; goal: Goal | null } {
-  const words = searchWords(query);
-  const matched = pool.filter((p) => p && !p.closed_at && matchesWords(p, words));
+// How a posting's own stated term sits against the term asked: 0 states it, 1 states none (or only an unsure one that
+// differs), 2 its TITLE states another (never offered). Review 2026-11-05: the term is the posting's own (career_search_query.ts
+// postingTerms), never a graduation or eligibility line, and a term read from the description only ranks, never hides.
+function termRank(p: any, want: Term | null): 0 | 1 | 2 {
+  if (!want) return 0;
+  const { terms, sure } = postingTerms(p);
+  if (!terms.length) return 1;
+  if (terms.some((t) => (want.year === null || t.year === want.year) && (!want.season || t.season === want.season))) return 0;
+  return sure ? 2 : 1;
+}
+export interface SearchOpts { now?: number }
+export function searchPostings(pool: any[], query: unknown, profile: any, limit = 10, opts: SearchOpts = {}): { postings: SearchHit[]; total: number; title_matches: number; ranked_by: "goal" | "fit" | "newest"; goal: Goal | null; screened?: Record<string, number>; duplicates?: number; asked?: { level: string | null; places: string[]; term: Term | null } } {
+  // SEARCH COVERAGE (career_search_query.ts): the sentence is read as role words + level + place + term. Level and place are
+  // filters; a term filters only against a posting that states another; closed / past-term / scam postings are not offered;
+  // one job listed twice is offered once.
+  const pq = parseSearchQuery(query), words = pq.roleWords, now = opts.now ?? Date.now();
+  const screened: Record<string, number> = {};
+  const rank = new Map<any, { place: number; term: number }>();
+  const matched = pool.filter((p) => {
+    if (!p || p.closed_at || !matchesWords(p, words)) return false;
+    const sv = postingStatus(p, now);
+    if (!sv.open) { screened[sv.reason] = (screened[sv.reason] ?? 0) + 1; return false; }
+    if (pq.level === "intern" && !isInternPosting(p)) return false;
+    if (pq.level === "new_grad") { const lv = postingLevel(p); if (lv === "senior" || lv === "intern") return false; }
+    const pf = placeFit(p.location, pq.places, pq.remote);
+    if (pf === "no") return false;
+    const tr = termRank(p, pq.term);
+    if (tr === 2) return false;
+    rank.set(p, { place: pf === "yes" ? 0 : 1, term: tr });
+    return true;
+  });
   // WO-073: the role first. While any title carries a query word, a posting that only mentions the words elsewhere is not
   // offered; every word in the title ranks above some of them; fit and then newest order postings within a tier.
   const anyTitle = matched.some((p) => titleTier(p, words) < 2);
   const hits = anyTitle ? matched.filter((p) => titleTier(p, words) < 2) : matched;
   const sp = scoringProfileFor(profile), goal = goalOf(profile);
-  const scored = hits.map((p) => ({ p, tier: titleTier(p, words), fit: sp ? fitOf(p, sp) : null, goal: goalScore(p, goal) }));
+  let scored: any[] = hits.map((p) => ({ p, tier: titleTier(p, words), fit: sp ? fitOf(p, sp) : null, goal: goalScore(p, goal) }));
   const newest = (a: any, b: any) => String(b.p.first_seen_at || "").localeCompare(String(a.p.first_seen_at || ""));
   scored.sort((a, b) => {
     if (a.tier !== b.tier) return a.tier - b.tier;
+    const ra = rank.get(a.p)!, rb = rank.get(b.p)!;
+    if (ra.place !== rb.place) return ra.place - rb.place;
+    if (ra.term !== rb.term) return ra.term - rb.term;
     if (a.goal !== b.goal) return b.goal - a.goal;
     if (a.fit && b.fit) {
       if (a.fit.excluded !== b.fit.excluded) return a.fit.excluded ? 1 : -1;
@@ -84,6 +116,11 @@ export function searchPostings(pool: any[], query: unknown, profile: any, limit 
     }
     return newest(a, b);
   });
+  // The same job twice (one posting id, or one link that carries an id): the better-ranked row is kept.
+  const seenKeys = new Set<string>(), uniq: any[] = [];
+  for (const x of scored) { const ks = dupKeys(x.p); if (ks.some((k) => seenKeys.has(k))) continue; ks.forEach((k) => seenKeys.add(k)); uniq.push(x); }
+  const duplicates = scored.length - uniq.length;
+  scored = uniq;
   const n = Math.max(1, Math.min(50, Math.floor(Number(limit) || 10)));
   return {
     // WO-068: the pay the posting itself states (posting_pay.ts), or null: never an estimate.
@@ -92,7 +129,8 @@ export function searchPostings(pool: any[], query: unknown, profile: any, limit 
     // is said to be related.
     postings: scored.slice(0, n).map(({ p, fit, tier }) => ({ job_id: p.job_id, company: p.company, title: p.title, location: p.location || "", url: p.url || formUrlFor(String(p.job_id ?? "")) || "", first_seen_at: p.first_seen_at ?? null, fit, pay: p.pay ?? payFrom(p.description),
       role_match: goal && goal.roles.length ? goal.roles.every((w) => searchWords(p.title).map(wordStem).includes(wordStem(w))) : tier === 0 })),
-    total: hits.length, title_matches: scored.filter((x) => x.tier === 0).length, ranked_by: goal ? "goal" : sp ? "fit" : "newest",
+    total: scored.length, ...(Object.keys(screened).length ? { screened } : {}), ...(duplicates ? { duplicates } : {}),
+    asked: { level: pq.level, places: pq.places.map((x) => x.label), term: pq.term }, title_matches: scored.filter((x) => x.tier === 0).length, ranked_by: goal ? "goal" : sp ? "fit" : "newest",
     goal: goal ? { roles: goal.roles, places: goal.places, remote: goal.remote } : null,
   };
 }

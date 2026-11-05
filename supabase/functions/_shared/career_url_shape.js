@@ -40,6 +40,13 @@
     { re: /(^|\.)lever\.co$/, path: new RegExp("/[^/]+/" + UUID), why: "Lever posting (company + job uuid)" },
     { re: /(^|\.)myworkdayjobs\.com$/, path: /\/job\//, why: "Workday posting (/job/ path)" },
     { re: /(^|\.)smartrecruiters\.com$/, path: /\/[^/]+\/\d{6,}/, why: "SmartRecruiters posting (company + numeric id)" },
+    // SEARCH COVERAGE: the posting links of the other ATS boards ingest reads (they were all "unknown").
+    { re: /(^|\.)workable\.com$/, path: /^\/j\/[A-Za-z0-9]{6,}/, why: "Workable posting (/j/<shortcode>)" },
+    { re: /(^|\.)recruitee\.com$/, path: /^\/o\/[^/]+/, why: "Recruitee posting (/o/<slug>)" },
+    { re: /(^|\.)personio\.(de|com)$/, path: /^\/job\/\d+/, why: "Personio posting (/job/<id>)" },
+    { re: /(^|\.)teamtailor\.com$/, path: /^\/jobs\/\d+/, why: "Teamtailor posting (/jobs/<id>)" },
+    { re: /(^|\.)breezy\.hr$/, path: /^\/p\/[0-9a-f]{8,}/, why: "Breezy posting (/p/<id>)" },
+    { re: /(^|\.)bamboohr\.com$/, path: /^\/careers\/\d+/, why: "BambooHR posting (/careers/<id>)" },
     { re: /(^|\.)themuse\.com$/, path: /^\/jobs\/[^/]+\/[^/]+/, why: "The Muse posting (company + slug)" },
     { re: /(^|\.)arbeitnow\.[a-z.]+$/, path: /^\/jobs\/companies\/[^/]+\/[^/]+-\d{4,}$/, why: "Arbeitnow posting (company + slug-id)" },
     { re: /(^|\.)jobicy\.com$/, path: /^\/jobs\/\d{4,}(-|$)/, why: "Jobicy posting (numeric id)" },

@@ -22,7 +22,12 @@ deno run --allow-read --allow-run=claude --allow-env evals/career/mass-apply-out
 
 The gate test is a **ratchet**, not a frozen snapshot: it fails when wrong answers, unsafe-ready applications,
 unidentifiable answers or required gaps rise, when correct fills fall, or when any downstream check fails more often than
-in the baseline. A PR that improves a number refreshes the baseline with `--write`.
+in the baseline. A PR that improves a number refreshes the baseline with `--write`. Each downstream check also ratchets its denominator
+(no fewer applications may reach it), so making applications unpreparable cannot pass by shrinking what is checked.
+
+**Reviewer checklist.** A PR that edits `gold.json` (or `personas.json` / `scenarios.json`) together with
+`results/baseline.json` can move the bar it is measured against: review both diffs, and check every changed label against
+the field's own wording and the person's confirmed facts, never against the planner's output.
 
 ## What each application goes through
 
@@ -74,8 +79,13 @@ a required question no confirmed fact answers.
 challenged; it never changes the score. Owner rule: it calls only the `claude` CLI (`claude -p --model haiku
 --output-format stream-json --verbose --tools "" --strict-mcp-config`, prompt on stdin) with `ANTHROPIC_API_KEY` and
 `ANTHROPIC_AUTH_TOKEN` removed from the child's environment, and refuses any answer whose init event does not report
-`apiKeySource: "none"` (subscription billing). CI never runs it. On the baseline it agreed with 2 of the 3 wrong answers
-and was unsure about the CesiumAstro one (see SCORECARD failure class 2).
+`apiKeySource: "none"` (subscription billing). Before the first call, a preflight reads the CLI's settings
+(`~/.claude/settings.json`, `~/.claude/settings.local.json`, `~/.claude.json`, and the project's `.claude/settings*.json`)
+and refuses the whole run if any sets `apiKeyHelper`, holds `primaryApiKey`, or puts either key in its `env`, or cannot be
+parsed. CI never runs it. On the first baseline it agreed with 2 of the then 3 wrong answers and
+was unsure about CesiumAstro's "U.S. Person or eligible to obtain an export license". That field is now labeled `ask` and
+contested: "No" from `us_person` alone is unsupported, but reading it as "are you a U.S. person" makes "No" plausible, so it
+is reported, not counted wrong.
 
 ## Files
 

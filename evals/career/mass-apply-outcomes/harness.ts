@@ -92,13 +92,25 @@ export function shownValue(f: Field, value: string, p: Persona): { text: string 
     if (hits.length > 1) return { text: null, unverifiable: true };
     if (hits.length === 1) return { text: hits[0], unverifiable: false };
     const byLabel = f.options.find((o) => norm(o.label) === norm(value));
-    return { text: byLabel ? byLabel.label : value, unverifiable: false };
+    if (byLabel) return { text: byLabel.label, unverifiable: false };
+    // A multi-select answer ("English, Hindi" or "id1,id2"): each part as its option label.
+    const parts = value.split(/\s*[,;|]\s*/).filter(Boolean);
+    if (parts.length > 1) {
+      const labels = parts.map((x) => f.options.find((o) => o.value === x)?.label ?? f.options.find((o) => norm(o.label) === norm(x))?.label ?? x);
+      return { text: labels.join(", "), unverifiable: false };
+    }
+    return { text: value, unverifiable: false };
   }
   return { text: value, unverifiable: false };
 }
 
 export function accepts(f: Field, shown: string, accept: string[], p: Persona): boolean {
   const box = f.type === "checkbox" && !f.options.length;
+  // A multi-select answer is right when every part it picks is an accepted value (and it is not one option's own label).
+  if (f.options.length && !f.options.some((o) => norm(o.label) === norm(shown)) && /[,;|]/.test(shown)) {
+    const parts = shown.split(/\s*[,;|]\s*/).filter(Boolean);
+    if (parts.length > 1) return parts.every((x) => accepts(f, x, accept, p));
+  }
   for (const raw of accept) {
     if (raw === "*") return true;
     const a = resolveAccept(raw, p);

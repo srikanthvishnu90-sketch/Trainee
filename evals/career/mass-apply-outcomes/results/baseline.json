@@ -6,21 +6,21 @@
   "verdict": "FAIL",
   "overall": {
    "applications": 48,
-   "applications_clean": 24,
+   "applications_clean": 25,
    "fields_graded": 710,
    "fills_expected": 341,
    "fills_correct": 337,
-   "fills_correct_any": 378,
-   "wrong_answers": 3,
+   "fills_correct_any": 376,
+   "wrong_answers": 4,
    "unverifiable_answers": 10,
-   "contested_fills": 0,
+   "contested_fills": 1,
    "questions_asked": 125,
    "questions_genuinely_unanswerable": 123,
    "questions_answerable_from_facts": 2,
    "optional_missed": 0,
    "required_silent_gaps": 0,
    "knockout_fields": 94,
-   "knockout_correct": 88,
+   "knockout_correct": 87,
    "knockout_wrong": 3,
    "prepared_state": {
     "ok": 47,
@@ -77,8 +77,8 @@
     "fields_graded": 216,
     "fills_expected": 131,
     "fills_correct": 129,
-    "fills_correct_any": 138,
-    "wrong_answers": 1,
+    "fills_correct_any": 137,
+    "wrong_answers": 2,
     "unverifiable_answers": 0,
     "contested_fills": 0,
     "questions_asked": 48,
@@ -87,8 +87,8 @@
     "optional_missed": 0,
     "required_silent_gaps": 0,
     "knockout_fields": 30,
-    "knockout_correct": 28,
-    "knockout_wrong": 1,
+    "knockout_correct": 27,
+    "knockout_wrong": 2,
     "prepared_state": {
      "ok": 15,
      "of": 16
@@ -139,14 +139,14 @@
    },
    "lever": {
     "applications": 16,
-    "applications_clean": 14,
+    "applications_clean": 15,
     "fields_graded": 296,
     "fills_expected": 121,
     "fills_correct": 121,
     "fills_correct_any": 148,
-    "wrong_answers": 2,
+    "wrong_answers": 1,
     "unverifiable_answers": 0,
-    "contested_fills": 0,
+    "contested_fills": 1,
     "questions_asked": 49,
     "questions_genuinely_unanswerable": 49,
     "questions_answerable_from_facts": 0,
@@ -154,7 +154,7 @@
     "required_silent_gaps": 0,
     "knockout_fields": 34,
     "knockout_correct": 32,
-    "knockout_wrong": 2,
+    "knockout_wrong": 1,
     "prepared_state": {
      "ok": 16,
      "of": 16
@@ -209,8 +209,8 @@
     "fields_graded": 198,
     "fills_expected": 89,
     "fills_correct": 87,
-    "fills_correct_any": 92,
-    "wrong_answers": 0,
+    "fills_correct_any": 91,
+    "wrong_answers": 1,
     "unverifiable_answers": 10,
     "contested_fills": 0,
     "questions_asked": 28,
@@ -277,8 +277,8 @@
     "fields_graded": 355,
     "fills_expected": 201,
     "fills_correct": 198,
-    "fills_correct_any": 229,
-    "wrong_answers": 0,
+    "fills_correct_any": 228,
+    "wrong_answers": 1,
     "unverifiable_answers": 9,
     "contested_fills": 0,
     "questions_asked": 47,
@@ -339,21 +339,21 @@
    },
    "B": {
     "applications": 24,
-    "applications_clean": 12,
+    "applications_clean": 13,
     "fields_graded": 355,
     "fills_expected": 140,
     "fills_correct": 139,
-    "fills_correct_any": 149,
+    "fills_correct_any": 148,
     "wrong_answers": 3,
     "unverifiable_answers": 1,
-    "contested_fills": 0,
+    "contested_fills": 1,
     "questions_asked": 78,
     "questions_genuinely_unanswerable": 78,
     "questions_answerable_from_facts": 0,
     "optional_missed": 0,
     "required_silent_gaps": 0,
     "knockout_fields": 47,
-    "knockout_correct": 43,
+    "knockout_correct": 42,
     "knockout_wrong": 3,
     "prepared_state": {
      "ok": 24,
@@ -425,11 +425,18 @@
     "example": "B/greenhouse-datadog-8257324#11 \"Are you legally authorised to work full-time in the country where this\" got \"Yes, no restriction.\"; gold either:Yes, but I will need sponsorship*"
    },
    {
-    "cls": "wrong answer: us_person put on a knockout question no confirmed fact answers",
+    "cls": "wrong answer: government_employment put on a question no confirmed fact answers",
     "stage": "prepare",
     "count": 1,
     "applications": 1,
-    "example": "B/lever-cesiumastro-a49693f9-2066-43b3-972a-cdd3a62fbbce#7 \"As a result of the work performed by CesiumAstro, all eligible candida\" got \"No\"; gold ask:"
+    "example": "A/ashby-saronic-d3ad80db-8508-4677-95d6-93c5d7a33815#7 \"Are you currently, or have you previously served (within the past five\" got \"no\"; gold ask:"
+   },
+   {
+    "cls": "wrong answer: sponsorship put on a knockout question no confirmed fact answers",
+    "stage": "prepare",
+    "count": 1,
+    "applications": 1,
+    "example": "B/greenhouse-doordashusa-8139265#10 \"Will you now require immigration sponsorship by our company to attain \" got \"Yes\"; gold ask:"
    },
    {
     "cls": "a second application to the same greenhouse posting was admitted: employer careers page with gh_jid",
@@ -4818,9 +4825,9 @@
      "i": 7,
      "label": "Are you currently, or have you previously served (within the past five years), as a United States Government (USG) offic",
      "required": true,
-     "expect": "either:No",
+     "expect": "ask",
      "ko": false,
-     "verdict": "correct_fill",
+     "verdict": "wrong",
      "shown": "no",
      "fact": "government_employment",
      "product_fact": "government_employment"
@@ -5811,9 +5818,9 @@
      "i": 10,
      "label": "Will you now require immigration sponsorship by our company to attain or maintain your employment eligibility (e.g., H-1",
      "required": true,
-     "expect": "either:Yes",
+     "expect": "ask",
      "ko": true,
-     "verdict": "correct_fill",
+     "verdict": "wrong",
      "shown": "Yes",
      "fact": "sponsorship",
      "product_fact": "sponsorship"
@@ -8209,7 +8216,7 @@
      "required": true,
      "expect": "ask",
      "ko": true,
-     "verdict": "wrong",
+     "verdict": "contested_fill",
      "shown": "No",
      "fact": "us_person",
      "product_fact": "us_person"
@@ -10457,6 +10464,12 @@
   },
   {
    "stage": "prepare",
+   "cls": "wrong answer: government_employment put on a question no confirmed fact answers",
+   "app": "A/ashby-saronic-d3ad80db-8508-4677-95d6-93c5d7a33815#7",
+   "detail": "\"Are you currently, or have you previously served (within the past five\" got \"no\"; gold ask:"
+  },
+  {
+   "stage": "prepare",
    "cls": "unidentifiable answer: the prepared payload records a value every option shares (Ashby radio \"on\"), so the approved payload does not say which option",
    "app": "A/ashby-saronic-d3ad80db-8508-4677-95d6-93c5d7a33815#12",
    "detail": "\"Hispanic or Latino\" value \"on\" (eeo)"
@@ -10523,6 +10536,12 @@
   },
   {
    "stage": "prepare",
+   "cls": "wrong answer: sponsorship put on a knockout question no confirmed fact answers",
+   "app": "B/greenhouse-doordashusa-8139265#10",
+   "detail": "\"Will you now require immigration sponsorship by our company to attain \" got \"Yes\"; gold ask:"
+  },
+  {
+   "stage": "prepare",
    "cls": "wrong answer: work_authorization put on a knockout question it answers wrongly",
    "app": "B/greenhouse-datadog-8257324#11",
    "detail": "\"Are you legally authorised to work full-time in the country where this\" got \"Yes, no restriction.\"; gold either:Yes, but I will need sponsorship*"
@@ -10532,12 +10551,6 @@
    "cls": "wrong answer: work_authorization put on a knockout question it answers wrongly",
    "app": "B/lever-veeva-9ac55b31-df46-4acb-b305-2c0b7ed56027#8",
    "detail": "\"Do you have the unrestricted right to work in the United States?\" got \"Yes\"; gold either:No"
-  },
-  {
-   "stage": "prepare",
-   "cls": "wrong answer: us_person put on a knockout question no confirmed fact answers",
-   "app": "B/lever-cesiumastro-a49693f9-2066-43b3-972a-cdd3a62fbbce#7",
-   "detail": "\"As a result of the work performed by CesiumAstro, all eligible candida\" got \"No\"; gold ask:"
   },
   {
    "stage": "prepare",

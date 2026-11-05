@@ -2,7 +2,7 @@
 // is itself the proof that the deterministic mode calls no model and reaches no site:
 //   deno test --allow-read --no-check evals/career/mass-apply-outcomes/outcomes.test.ts
 import { accepts, expectFor, HERE, loadInputs, norm, type Persona, type Posting, prepare, runAll, score, shownValue, validateGold, variantsOf } from "./harness.ts";
-import { CLAUDE_ARGS, childEnv, readStream } from "./judge.ts";
+import { CLAUDE_ARGS, childEnv, readStream, settingsRefusal } from "./judge.ts";
 
 function eq(a: unknown, b: unknown, m = "") { const x = JSON.stringify(a), y = JSON.stringify(b); if (x !== y) throw new Error(`${m}\n  got:  ${x}\n  want: ${y}`); }
 function ok(v: unknown, m = "") { if (!v) throw new Error(m || "expected true"); }
@@ -39,6 +39,12 @@ Deno.test("grader: option prefixes, yes/no boxes, phone numbers, the resume and 
   const radio = f("Male", { type: "radio", options: [{ label: "Male", value: "on" }, { label: "Decline to self-identify", value: "on" }] });
   eq(shownValue(radio, "on", P), { text: null, unverifiable: true });
   eq(norm("  I am a “U.S. Person”. "), 'i am a "u.s. person"');
+  // A multi-select: every part picked must be accepted; an option whose own label has a comma is one part.
+  const langs = f("Languages you speak fluently", { type: "multi_value_multi_select", options: [{ label: "English", value: "11" }, { label: "Hindi", value: "12" }, { label: "Spanish", value: "13" }, { label: "Hispanic, Latino, or Spanish origin", value: "14" }] });
+  eq(shownValue(langs, "11,12", P).text, "English, Hindi");
+  ok(accepts(langs, "English, Hindi", ["English", "Hindi"], P), "both languages the person confirmed");
+  ok(!accepts(langs, "English, Spanish", ["English", "Hindi"], P), "a language the person never confirmed is wrong");
+  ok(accepts(langs, "Hispanic, Latino, or Spanish origin", ["Hispanic, Latino, or Spanish origin"], P));
 });
 
 Deno.test("grader: a fill on a question no confirmed fact answers is WRONG; an answerable question asked is unneeded", () => {
@@ -84,9 +90,16 @@ Deno.test("the run is deterministic and never worse than the committed baseline 
   ok(s.overall.unverifiable_answers <= base.overall.unverifiable_answers, "more unidentifiable answers");
   ok(s.overall.required_silent_gaps <= base.overall.required_silent_gaps, "more required fields neither filled nor asked");
   ok(s.overall.fills_correct >= base.overall.fills_correct, `correct fills fell: ${s.overall.fills_correct} < ${base.overall.fills_correct}`);
-  for (const k of ["hash_honoured", "changed_not_queued", "stale_hash_refused", "duplicates_refused", "other_role_admitted", "submitted_state", "resend_guard", "receipt_truthful", "proof", "proof_receipt"]) {
+  ok(s.overall.preparable_after_answers >= base.overall.preparable_after_answers, `fewer applications preparable: ${s.overall.preparable_after_answers} < ${base.overall.preparable_after_answers}`);
+  ok(s.overall.questions_answerable_from_facts <= base.overall.questions_answerable_from_facts, "more questions asked that confirmed facts answer");
+  ok(s.overall.contested_fills <= base.overall.contested_fills, "more contested fills");
+  // Each downstream check: no more failures AND no fewer applications reaching it (a regression that makes applications
+  // unpreparable shrinks the denominator; it must not pass by doing so).
+  for (const k of ["prepared_state", "hash_honoured", "changed_not_queued", "stale_hash_refused", "duplicates_refused", "other_role_admitted", "submitted_state", "resend_guard", "receipt_truthful", "proof", "proof_receipt"]) {
     const now = s.overall[k as keyof typeof s.overall] as any, was = base.overall[k];
+    ok(now.of >= was.of, `${k}: only ${now.of} applications reached it, baseline ${was.of}`);
     ok(now.of - now.ok <= was.of - was.ok, `${k}: ${now.of - now.ok} failing, baseline ${was.of - was.ok}`);
+    ok(now.ok >= was.ok, `${k}: ${now.ok} passing, baseline ${was.ok}`);
   }
   eq(s.cards.every((c: any) => c.ok === c.steps), true, "a card reply approved a different set than named");
 });
@@ -112,4 +125,13 @@ Deno.test("judge (off by default): the claude CLI child never sees an API key, a
   ok(!/from\s+["'][^"']*judge\.ts|import\(|Deno\.Command|\bfetch\(/.test(harness), "the harness must not reach a model or the network");
   const run = await Deno.readTextFile(new URL("run.ts", HERE));
   ok(/if \(flag\("--judge"\)\)[\s\S]*await import\("\.\/judge\.ts"\)/.test(run) && !/^import .*judge/m.test(run), "the judge is a lazy import behind --judge");
+});
+
+Deno.test("judge preflight: a CLI settings file that supplies a key or a key helper stops the judge before any call", () => {
+  eq(settingsRefusal({ "/h/.claude/settings.json": '{"theme":"dark"}', "/h/.claude.json": '{"oauthAccount":{"emailAddress":"x@example.test"}}' }), null);
+  ok(/apiKeyHelper/.test(settingsRefusal({ "/h/.claude/settings.json": '{"apiKeyHelper":"/bin/echo TEST"}' }) ?? ""));
+  ok(/ANTHROPIC_API_KEY/.test(settingsRefusal({ "/p/.claude/settings.local.json": '{"env":{"ANTHROPIC_API_KEY":"TEST"}}' }) ?? ""));
+  ok(/ANTHROPIC_AUTH_TOKEN/.test(settingsRefusal({ "/p/.claude/settings.json": '{"env":{"ANTHROPIC_AUTH_TOKEN":"TEST"}}' }) ?? ""));
+  ok(/primaryApiKey/.test(settingsRefusal({ "/h/.claude.json": '{"primaryApiKey":"TEST"}' }) ?? ""));
+  ok(/unreadable/.test(settingsRefusal({ "/h/.claude/settings.json": "{not json" }) ?? ""), "a settings file that cannot be read fails closed");
 });

@@ -50,7 +50,9 @@ export const STAGED_BRAIN_INTENTS: readonly string[] = [
 // only when no company is named and no file or library figure stands behind it (a general question the router took
 // for a company ask: grad school, a certificate, a role it has no figures for); negotiation_advice only when no offer
 // is on record and the benchmark found no figures. A pay question at a firm with no file is the brain's too (below).
-const PRODUCT_KEYS = ["payload", "artifact", "bench", "offer", "draft", "ai_answer", "comparison", "documents", "document", "company"];
+// "file": a File page code built this turn (the interview prep File, 142 handlePrepFile): the handler stores it and sends its link,
+// so the turn is code's whatever its intent (BETA C03, 2026-11-04).
+const PRODUCT_KEYS = ["payload", "artifact", "bench", "offer", "draft", "ai_answer", "comparison", "documents", "document", "company", "file"];
 const has = (r: Record<string, unknown>, k: string) => r[k] !== undefined && r[k] !== null;
 export function codeProduct(intent: string, result: unknown): boolean {
   if (!result || typeof result !== "object") return false;
@@ -205,7 +207,8 @@ export function adviceQuestion(message: string, intent: string | null, result: u
   // A company or a posting the person named gets code's product for it (the firm's file, the posting's brief).
   if (namesSomeone(m)) return false;
   const r = (result && typeof result === "object" ? result : {}) as Record<string, any>;
-  if (has(r, "draft") || has(r, "documents") || has(r, "document") || has(r, "offer") || has(r, "company") || (r.sends ?? 0) > 0) return false;
+  // A File page code built for the ask (BETA C03: "could you make me a one-page prep File?") is an instruction carried out, not advice.
+  if (has(r, "draft") || has(r, "documents") || has(r, "document") || has(r, "file") || has(r, "offer") || has(r, "company") || (r.sends ?? 0) > 0) return false;
   // A mock, drill or answer score in progress is code's session.
   if (r.resultStatus === "running" || has(r, "question")) return false;
   const kind = String(r.payload?.kind ?? r.artifact?.kind ?? "");

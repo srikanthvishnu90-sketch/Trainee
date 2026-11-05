@@ -1260,7 +1260,174 @@ const CareerPrep = (() => {
       survival_rules: ["Depth over breadth in the final round: follow-ups on your own resume are the test, per the CIR stage record", "If a technical stalls, state your structure out loud and work it — silent freezing is the failure mode, not a wrong first step", "Names + one specific per interviewer, written down immediately"], sources: [{ type: "CIR", company_id: n.company_id, as_of: n.as_of }] };
   }
 
-  return { normalizeCir, findCir, cirLibrary, interviewPatterns,jdKeywords, composeBrief, questionBank, videoInterviewPractice, takeHomePlan, finalRoundDelta, salaryDeflectionScripts, questionsToAsk, failureStoryFromFacts, structureDrill, dayOfChecklist, debriefRetro, superdayPlan,
+  // ---------- PREP FILE (beta C03 / A15.1, 2026-11-04): the one-page interview prep File, built from code ----------
+  // "Make a one-page interview prep File with five questions and a 30-minute plan" was answered with chat text (one
+  // question, "tonight, then stop") and no File: no prep path produced a page. These two pure functions are that path.
+  //   prepFileRequest(text)  -> null (not a prep File ask) | { ok, questions, minutes, defaults, problem? }
+  //   prepFileData(opts)     -> plan_review data (variant interview_prep) for file_kinds.ts, built only from:
+  //       the question bank above (generic + the named role's sector bank), a timed plan whose blocks add up to exactly
+  //       the minutes asked, the interview details the person stated in this message, and their CONFIRMED profile facts.
+  // Nothing about a company is written (a named company is repeated as the person said it, and its absence of a file is
+  // said); what is not known (company, when, where) is listed as not on file, never filled in. One page: at most
+  // PREP_FILE_MAX_QUESTIONS questions, at most 5 plan blocks, 3 facts, 4 gaps, short lines, no images.
+  const PREP_FILE_MAX_QUESTIONS = 10;
+  const PREP_FILE_MIN_MINUTES = 5, PREP_FILE_MAX_MINUTES = 180;
+  const PREP_FILE_SOURCE = "Made by Trainee"; // file_kinds.ts MADE: allowed only on code-built (trusted) data
+  // More general questions past the five in GENERIC_BEHAVIORAL: role-agnostic, about no company.
+  const PREP_FILE_EXTRA = [
+    "Tell me about a time you had to learn something new quickly.",
+    "Tell me about a time you handled a difficult customer, classmate or coworker.",
+    "Tell me about feedback you received and what you did with it.",
+    "What would you focus on in your first 30 days in this role?",
+    "Where do you want to be in two or three years?",
+    "Tell me about a time you had to prioritize several things at once.",
+    "What is something you are proud of, and why?",
+  ];
+  // A support, service or retail role gets customer-facing practice questions (general ones, about no company).
+  const PREP_FILE_CUSTOMER = [
+    "Tell me about a time you turned an upset customer around.",
+    "What do you do when a customer asks something you don't know the answer to?",
+    "How do you handle several people needing help at the same time?",
+  ];
+  const andList = (xs) => (xs.length <= 1 ? s(xs[0] || "") : xs.length === 2 ? `${xs[0]} and ${xs[1]}` : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+  const NUM_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, "forty-five": 45, fortyfive: 45, sixty: 60, ninety: 90 };
+  const numOf = (w) => { const x = lc(w).replace(/\s+/g, "-"); if (/^\d+$/.test(x)) return Number(x); return NUM_WORDS[x] !== undefined ? NUM_WORDS[x] : null; };
+  const NUM = String.raw`(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty[- ]?five|forty|sixty|ninety)`;
+  // A prep File ask: a page/File/one-pager/sheet, an interview, and a making verb (or the noun phrase alone). Questions
+  // ABOUT a prep file ("what goes in a prep file?") and the person's own record ("what's on file") are not asks.
+  function prepFileRequest(text) {
+    const raw = s(text).replace(/[’`]/g, "'");
+    const t = lc(raw);
+    if (!/\binterview/.test(t)) return null;
+    const doc = /\b(?:prep|preparation|interview)[- ](?:file|page|sheet|doc|document|one[- ]pager)\b|\bone[- ]pag(?:e|er)\b[^.?!]{0,60}\b(?:prep|interview)|\b(?:prep|interview)\b[^.?!]{0,40}\bone[- ]pag(?:e|er)\b|\bcheat[- ]?sheet\b|\bfile\b/.test(t)
+      && !/\bon file\b|\bfile (?:a|my|an) (?:complaint|claim|report|taxes)\b/.test(t.replace(/\bprep file\b/g, ""));
+    if (!doc) return null;
+    if (!/\b(?:make|create|build|put together|give|send|draft|write|prepare|generate|get|need|want|turn|do)\b/.test(t) && !/^\s*(?:an?\s+)?one[- ]page\b/.test(t)) return null;
+    if (/^\s*(?:what|how|why|which|should|is|are|does|do)\b/.test(t) && !/\b(?:make|create|build|give|send|put together|generate)\s+(?:me|us)\b/.test(t)) return null;
+    const qm = t.match(new RegExp(String.raw`\b${NUM}\s+(?:practice\s+|interview\s+|behaviou?ral\s+|mock\s+|likely\s+|common\s+|sample\s+|key\s+)*questions?\b`)) || t.match(/\b(a dozen|a couple of|a few)\s+(?:\w+\s+)?questions?\b/);
+    const mm = t.match(new RegExp(String.raw`\b${NUM}[- ]?(?:minutes?|mins?)\b`)) || t.match(/\b(half[- ]an?[- ]hour|half[- ]hour|an hour|one hour|1 hour|two hours|2 hours|an hour and a half|1\.5 hours?)\b/);
+    let questions = 5, minutes = 30;
+    const defaults = [];
+    if (qm) { const w = lc(qm[1]); questions = w === "a dozen" ? 12 : w === "a couple of" ? 2 : w === "a few" ? 3 : numOf(w); } else defaults.push("questions");
+    if (mm) {
+      const w = lc(mm[1]);
+      minutes = /half/.test(w) && /hour/.test(w) && !/and a half/.test(w) ? 30 : /and a half|1\.5/.test(w) ? 90 : /two|^2/.test(w) && /hour/.test(w) ? 120 : /hour/.test(w) ? 60 : numOf(w);
+    } else defaults.push("minutes");
+    if (!Number.isFinite(questions) || questions < 1 || questions > PREP_FILE_MAX_QUESTIONS) return { ok: false, questions, minutes, defaults, problem: "questions" };
+    if (!Number.isFinite(minutes) || minutes < PREP_FILE_MIN_MINUTES || minutes > PREP_FILE_MAX_MINUTES) return { ok: false, questions, minutes, defaults, problem: "minutes" };
+    if (minutes < questions + 2) return { ok: false, questions, minutes, defaults, problem: "fit" };
+    return { ok: true, questions, minutes, defaults };
+  }
+  // The timed plan: blocks whose minutes add up to exactly `minutes`, each at least one minute. The out-loud block gets
+  // at least one minute per question; the warm-up, logistics, questions-to-ask and last-pass blocks are a share of the
+  // rest and appear only when the time allows them.
+  function prepFilePlan(minutes, questions, o) {
+    o = o || {};
+    const M = minutes, N = questions;
+    let warm = Math.max(1, Math.round(M * 0.1));
+    let logistics = M >= 10 ? Math.max(1, Math.round(M * 0.1)) : 0;
+    let ask = M >= 15 ? Math.max(1, Math.round(M * 0.1)) : 0;
+    let last = M >= 20 ? Math.max(1, Math.round(M * 0.15)) : 0;
+    // Give back from the optional blocks until the out-loud block has a minute a question.
+    const outLoud = () => M - warm - logistics - ask - last;
+    for (const take of ["last", "ask", "logistics", "warm"]) {
+      while (outLoud() < N) {
+        if (take === "last" && last > 0) last -= 1; else if (take === "ask" && ask > 0) ask -= 1; else if (take === "logistics" && logistics > 0) logistics -= 1; else if (take === "warm" && warm > 1) warm -= 1; else break;
+      }
+    }
+    const P = outLoud();
+    const per = Math.floor(P / N), extra = P % N;
+    const perText = extra === 0 ? `${per} min each` : extra === 1 ? `${per + 1} min for question 1, ${per} min each for the rest` : `${per + 1} min each for questions 1 to ${extra}, ${per} min each for the rest`;
+    const blocks = [];
+    blocks.push({ min: warm, text: o.facts ? "Read this page; pick one real example from your record below for the \"tell me about a time\" questions." : "Read this page; jot down one real example from work, school or volunteering for the \"tell me about a time\" questions." });
+    blocks.push({ min: P, text: `Answer the ${N === 1 ? "question" : `${N} questions`} out loud, ${N === 1 ? `${P} min` : perText}: the situation, what you did, how it turned out.` });
+    if (logistics) blocks.push({ min: logistics, text: o.gaps && o.gaps.length ? `Find ${andList(o.gaps)} in your invite, or ask the recruiter.` : "Re-read your invite: the time, the place or call link, and who you are meeting." });
+    if (ask) blocks.push({ min: ask, text: "Write two questions to ask them (e.g. what a strong first month looks like)." });
+    if (last) blocks.push({ min: last, text: "Redo your weakest answer, shorter. Then stop." });
+    let at = 0;
+    return blocks.map((b) => { const from = at; at += b.min; return { from, to: at, min: b.min, text: b.text }; });
+  }
+  // The interview details the person stated in this message: when, where/how, the role, the company. Each is the
+  // person's own words, never a lookup.
+  function prepFileStated(text, named) {
+    const raw = s(text).replace(/[’`]/g, "'");
+    const t = lc(raw);
+    const out = {};
+    const when = t.match(/\b(today|tonight|tomorrow(?: morning| afternoon| evening)?|(?:this |next )?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?: morning| afternoon| evening)?|on (?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.? \d{1,2})\b(?:\s+at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?/);
+    if (when) out.when = when[0].replace(/^on /, "");
+    const how = t.match(/\b(phone screen|phone interview|phone call|video call|video interview|zoom|teams call|google meet|on[- ]?site|in[- ]person|virtual)\b/);
+    if (how) out.format = how[1];
+    const role = raw.match(/\b(?:for|as)\s+(?:an?|the|my)\s+([A-Za-z][A-Za-z /&+-]{2,40}?)\s+(?:role|job|position|interview|internship)\b/i) || raw.match(/\b(?:my|an?|the)\s+([A-Za-z][A-Za-z /&+-]{2,40}?)\s+interview\b/i);
+    if (role) {
+      const r = role[1].trim().replace(/^(?:one[- ]page|first[- ]round|final[- ]round|phone|video|virtual|in[- ]person|onsite|on-site)\s+/i, "");
+      if (r && !/^(?:one[- ]page|first|final|second|third|next|upcoming|big|real|job|prep|practice|mock|the|this|that|phone|video)$/i.test(r) && !/\b(?:prep|file|page|questions?|plan|round|screen)\b/i.test(r)) out.role = r.toLowerCase();
+    }
+    if (named && named.company) out.company = s(named.company);
+    return out;
+  }
+  // The person's confirmed facts: a fact still awaiting their word (needs_confirmation, or a status other than
+  // confirmed) is never used. A profile built from chat statements is "From you"; a resume's is "From your resume".
+  function prepFileFacts(profile) {
+    const p = profile && typeof profile === "object" ? profile : null;
+    if (!p || !Array.isArray(p.facts)) return [];
+    const fromChat = p._fromStatedFacts === true;
+    const kindLabel = { experience: "Experience", project: "Project", leadership: "Leadership", education: "Education", skill: "Skills", school: "School", majors: "Study", year: "Year" };
+    const order = { experience: 0, project: 1, leadership: 2, education: 3, school: 3, majors: 4, skill: 5, year: 6 };
+    return p.facts
+      .filter((f) => f && typeof f === "object" && f.needs_confirmation !== true && (f.status == null || f.status === "confirmed") && kindLabel[f.kind])
+      .map((f) => ({ kind: f.kind, label: kindLabel[f.kind], text: s(f.text || (f.title ? `${f.title}${f.action ? `: ${f.action}` : ""}` : "") || f.value || "").replace(/\s+/g, " ").trim() }))
+      .filter((f) => f.text.length > 3)
+      .sort((a, b) => order[a.kind] - order[b.kind])
+      .slice(0, 3)
+      .map((f) => ({ label: f.label, value: f.text.length > 170 ? `${f.text.slice(0, 168).replace(/\s+\S*$/, "")}…` : f.text, source: fromChat ? "From you" : "From your resume" }));
+  }
+  function prepFileQuestions(n, o) {
+    o = o || {};
+    let bank = null;
+    try { bank = questionBank({ role: o.role || undefined, roleFamily: o.role || undefined }); } catch { bank = null; }
+    const norm = (q) => lc(q).replace(/[^a-z0-9]+/g, " ").trim();
+    const generic = new Set(GENERIC_BEHAVIORAL.map(norm));
+    const roleQs = ((bank && bank.questions) || []).map((x) => s(x.q)).filter((q) => q && !generic.has(norm(q)) && q.length <= 220);
+    if (/\b(?:support|customer|service|retail|cashier|call center|help ?desk|front desk|reception|barista|server|sales associate)\b/i.test(s(o.role))) roleQs.unshift(...PREP_FILE_CUSTOMER);
+    const pool = [GENERIC_BEHAVIORAL[0], ...roleQs.slice(0, Math.max(0, n - 2)), ...GENERIC_BEHAVIORAL.slice(1), ...PREP_FILE_EXTRA];
+    const seen = new Set(), out = [];
+    for (const q of pool) { const k = norm(q); if (!q || seen.has(k)) continue; if (!o.company && /^why this company/i.test(q)) continue; seen.add(k); out.push(q); if (out.length === n) break; }
+    return { questions: out, roleBank: roleQs.length > 0 };
+  }
+  function prepFileData(opts) {
+    opts = opts || {};
+    const N = opts.questions, M = opts.minutes;
+    const stated = opts.stated || {};
+    const facts = prepFileFacts(opts.profile);
+    const gaps = [];
+    if (!stated.company) gaps.push("the company");
+    if (!stated.when) gaps.push("the date and time");
+    if (!stated.format) gaps.push("where it is or how you join");
+    if (!stated.role) gaps.push("the role");
+    const qs = prepFileQuestions(N, { role: stated.role, company: stated.company });
+    if (qs.questions.length !== N) return null;
+    const plan = prepFilePlan(M, N, { facts: facts.length > 0, gaps: gaps.filter((g) => g !== "the role").slice(0, 3) });
+    const said = [];
+    if (stated.role) said.push({ label: "Role", value: stated.role, source: "From you" });
+    if (stated.company) said.push({ label: "Company", value: `${stated.company}. Nothing on this page is about how ${stated.company} interviews${opts.companyFile ? "" : ": no company file is on record for it"}.`, source: "From you" });
+    if (stated.when) said.push({ label: "When", value: stated.when, source: "From you" });
+    if (stated.format) said.push({ label: "Format", value: stated.format, source: "From you" });
+    const GAP_LABEL = { "the company": "Company", "the date and time": "When", "where it is or how you join": "Where", "the role": "Role" };
+    const sections = [];
+    if (said.length) sections.push({ heading: "Your interview, as you said it", items: said });
+    sections.push({ heading: `${N} practice ${N === 1 ? "question" : "questions"}`, items: qs.questions.map((q, i) => ({ label: `Question ${i + 1}`, value: q, source: PREP_FILE_SOURCE })) });
+    sections.push({ heading: `Your ${M}-minute plan`, items: plan.map((b) => ({ label: `Minute ${b.from} to ${b.to} (${b.min} min)`, value: b.text, source: PREP_FILE_SOURCE })) });
+    if (facts.length) sections.push({ heading: "From your record (confirmed facts only)", items: facts });
+    if (gaps.length) sections.push({ heading: "Not on file yet", items: gaps.slice(0, 4).map((g) => ({ label: GAP_LABEL[g], value: g === "the company" ? "You didn't name it, so nothing here is about a specific company." : g === "the role" ? "Not named, so the questions are general." : g === "the date and time" ? "You didn't say when." : "You didn't say where or how you join.", source: PREP_FILE_SOURCE })) });
+    const title = `Interview prep: ${N} ${N === 1 ? "question" : "questions"}, ${M} minutes`;
+    return {
+      data: { title, variant: "interview_prep", period: "General practice, not facts about any company.", sections },
+      summary: { questions: N, minutes: M, plan_minutes: plan.map((b) => b.min), facts: facts.length, gaps: gaps.slice(0, 4), role_bank: qs.roleBank, defaults: opts.defaults || [] },
+    };
+  }
+
+  return { normalizeCir, findCir, cirLibrary, interviewPatterns,jdKeywords, composeBrief, questionBank,
+    prepFileRequest, prepFileData, prepFilePlan, prepFileStated, prepFileAndList: andList, PREP_FILE_MAX_QUESTIONS, PREP_FILE_MIN_MINUTES, PREP_FILE_MAX_MINUTES, PREP_FILE_SOURCE, videoInterviewPractice, takeHomePlan, finalRoundDelta, salaryDeflectionScripts, questionsToAsk, failureStoryFromFacts, structureDrill, dayOfChecklist, debriefRetro, superdayPlan,
     makePrepStore, mineStories, captureStory, findStories, buildStoryBank, storyTags,
     scoreAnswer, startMock, answerMock, answerProbe, mockSummary,
     domainCheck, frameworkCheck, generateVariant, answerVariant, checkAnswerClaims, detectContradiction,

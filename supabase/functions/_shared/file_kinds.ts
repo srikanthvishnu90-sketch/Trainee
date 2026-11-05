@@ -11,9 +11,14 @@ import { evidenceHtml, unknown, UNKNOWN, valueHtml } from "./file_design.ts";
 import { cap1, esc } from "./file_page.ts";
 
 export const SOURCES = ["From the posting", "From your resume", "From you", "Reported, not verified"] as const;
-export type Source = typeof SOURCES[number] | "From Trainee's records";
+export type Source = typeof SOURCES[number] | "From Trainee's records" | "Made by Trainee";
 // Counts and statuses that Trainee itself recorded (applications, interviews). Allowed on plan reviews and application proofs only.
 const RECORDS: Source = "From Trainee's records";
+// BETA C03 (2026-11-04): what Trainee itself wrote on a page code built (an interview prep File's practice questions, its timed plan
+// and its "not on file" lines; career-prep 127 prepFileData). It says plainly that the line is not a fact about the person or a company.
+// Accepted only on trusted (code-built) plan reviews: a model's create_file can never label its own text this way.
+export const MADE: Source = "Made by Trainee";
+const MADE_OK = new Set<string>(["plan_review"]);
 export const KIND_IDS = ["job_list", "introduction", "application_proof", "plan_review", "comparison", "draft", "research_brief"] as const;
 export type KindId = typeof KIND_IDS[number];
 export const KIND_LABEL: Record<KindId, string> = { job_list: "Your jobs", introduction: "Introduction", application_proof: "Application proof", plan_review: "Plan review", comparison: "Comparison", draft: "Draft", research_brief: "Research brief" };
@@ -60,7 +65,7 @@ const clean = (s: string, multi = false) => (multi ? s.replace(/\r\n?/g, "\n").r
 class V {
   errors: string[] = [];
   trusted = false;
-  constructor(private records: boolean, private now: number | null = null) {}
+  constructor(private records: boolean, private now: number | null = null, private made = false) {}
   err(path: string, why: string) { this.errors.push(`${path}: ${why}`); }
   obj(v: unknown, path: string): Record<string, any> { if (!isObj(v)) { this.err(path, "must be an object"); return {}; } return v; }
   str(v: unknown, path: string, o: { max?: number; opt?: boolean; multi?: boolean; fact?: boolean; links?: boolean; templ?: boolean } = {}): string | undefined {
@@ -81,8 +86,8 @@ class V {
     return v as T;
   }
   src(v: unknown, path: string, records = this.records): Source | undefined {
-    const ok = typeof v === "string" && ((SOURCES as readonly string[]).includes(v) || (records && v === RECORDS));
-    if (!ok) { this.err(path, `source is missing or not one of: ${[...SOURCES, ...(records ? [RECORDS] : [])].join(" / ")}. A fact without a source is not accepted`); return undefined; }
+    const ok = typeof v === "string" && ((SOURCES as readonly string[]).includes(v) || (records && v === RECORDS) || (this.made && v === MADE));
+    if (!ok) { this.err(path, `source is missing or not one of: ${[...SOURCES, ...(records ? [RECORDS] : []), ...(this.made ? [MADE] : [])].join(" / ")}. A fact without a source is not accepted`); return undefined; }
     return v as Source;
   }
   list(v: unknown, path: string, min: number, max: number): any[] {
@@ -176,7 +181,7 @@ export function validateKind(kind: string, raw: unknown, o: { trusted?: boolean;
   const fn = (KINDS as Record<string, (r: unknown, v: V) => any>)[kind];
   if (!fn) return { ok: false, errors: [`unknown kind "${kind}"; use one of: ${MODEL_KINDS.join(", ")}`] };
   if (!isObj(raw)) return { ok: false, errors: ["data: must be an object"] };
-  const v = new V(!!o.trusted && RECORDS_OK.has(kind), o.now ?? null);
+  const v = new V(!!o.trusted && RECORDS_OK.has(kind), o.now ?? null, !!o.trusted && MADE_OK.has(kind));
   v.trusted = !!o.trusted;
   let data: any;
   try { data = fn(raw, v); } catch (e) { return { ok: false, errors: [`data: could not be read (${e instanceof Error ? e.message : String(e)})`] }; }
@@ -192,10 +197,10 @@ export async function tagOf(kind: string, data: any): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------- render helpers (a stored fact with no valid source is skipped)
-const hasSrc = (f: any, records = false) => !!f && typeof f.source === "string" && ((SOURCES as readonly string[]).includes(f.source) || (records && f.source === RECORDS)) && typeof (f.value ?? f.text ?? f.answer) === "string" && !!String(f.value ?? f.text ?? f.answer).trim();
+const hasSrc = (f: any, records = false, made = false) => !!f && typeof f.source === "string" && ((SOURCES as readonly string[]).includes(f.source) || (records && f.source === RECORDS) || (made && f.source === MADE)) && typeof (f.value ?? f.text ?? f.answer) === "string" && !!String(f.value ?? f.text ?? f.answer).trim();
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const when = (t: string | number | null | undefined) => { const n = typeof t === "number" ? t : Date.parse(String(t ?? "")); if (Number.isNaN(n)) return ""; const d = new Date(n); return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")} UTC`; };
-const Fs = (xs: any[] | undefined, records = false) => (xs ?? []).filter((f) => hasSrc(f, records));
+const Fs = (xs: any[] | undefined, records = false, made = false) => (xs ?? []).filter((f) => hasSrc(f, records, made));
 const src = (s: string) => `<span class="src">${esc(s)}</span>`;
 const factHtml = (f: any, label?: string) => `<div class="fact">${label ? `<dt>${esc(label)}</dt>` : ""}<dd>${esc(f.value ?? f.text ?? f.answer)} ${src(f.source)}</dd></div>`;
 const factText = (f: any, label?: string) => `- ${label ? `${label}: ` : ""}${f.value ?? f.text ?? f.answer} [${f.source}]`;
@@ -310,7 +315,8 @@ export function bodyHtml(rec: FileRecord, token: string, o: { tz?: string | null
       break;
     }
     case "plan_review":
-      main = (d.period ? `<p class="meta">${esc(d.period)}</p>` : "") + (d.sections ?? []).map((s: any) => sec(s.heading, dl(Fs(s.items).map((f) => factHtml(f, f.label)).join("")))).join("");
+      // A stored plan review was validated when it was made, so a "Made by Trainee" line on it came from code (MADE_OK, trusted only).
+      main = (d.period ? `<p class="meta">${esc(d.period)}</p>` : "") + (d.sections ?? []).map((s: any) => sec(s.heading, dl(Fs(s.items, false, true).map((f) => factHtml(f, f.label)).join("")))).join("");
       break;
     case "comparison": {
       const opts = (d.options ?? []).map((o: any) => o.name);
@@ -357,7 +363,7 @@ export function textOf(rec: FileRecord, o: { now: number; url?: string }): strin
     }
     case "plan_review":
       if (d.period) L.push(d.period, "");
-      for (const s of d.sections ?? []) { h(s.heading); Fs(s.items).forEach((f) => L.push(factText(f, f.label))); L.push(""); }
+      for (const s of d.sections ?? []) { h(s.heading); Fs(s.items, false, true).forEach((f) => L.push(factText(f, f.label))); L.push(""); }
       break;
     case "comparison": {
       const opts = (d.options ?? []).map((o: any) => o.name);
@@ -397,4 +403,6 @@ ul.why{margin:0;padding-left:20px}ul.why li{margin:0 0 8px;overflow-wrap:anywher
 label,.lbl{display:block;margin:8px 0 4px;font-size:15px;color:var(--mute)}
 textarea{width:100%;min-height:96px;padding:10px 12px;border:1px solid var(--mute);border-radius:10px;background:transparent;color:var(--ink);font:inherit;font-size:16px}textarea.draft{min-height:240px}
 .foot{margin-top:24px;padding-top:14px;border-top:1px solid var(--line);font-size:15px;color:var(--mute)}.foot a{color:var(--link)}
+/* BETA C03 (2026-11-04): the footer link was 40 px tall at 360 px; every tap target is 44 px (tests/architect/prep-file.test.ts PF-6). */
+.foot a{display:inline-flex;align-items:center;min-height:44px}
 `;

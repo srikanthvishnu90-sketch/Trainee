@@ -5600,12 +5600,58 @@ const CareerRouter = (() => {
     try { const ck = Prep && Prep.dayOfChecklist ? (firmName ? Prep.dayOfChecklist({ company: firmName, cir: firmCir || undefined }, {}) : Prep.dayOfChecklist(ctx.profile || {}, {})) : null; const rawItems = (ck && (ck.items || ck.checklist || ck.steps)) || []; items = rawItems.map((i) => s(typeof i === "string" ? i : (i && (i.text || i.label || i.item)) || "")).filter(Boolean); } catch { items = []; }
     let q = null;
     try { const bank = Prep.questionBank({ roleFamily: /\bfinance|banking|dcf\b/.test(t) ? "finance" : null, cir: firmCir || undefined }); const qs = (bank && (bank.questions || bank.items)) || []; if (qs.length) q = s(qs[0].q || qs[0].question || qs[0].text); } catch { q = null; }
-    const facts = ["Tonight is for light reps, not cramming: one pass over your story, one question out loud, then stop — sleep is a scored input tomorrow, and a tired brain drops more points than one un-drilled question ever would."];
+    // BETA C03 (2026-11-04): "sleep is a scored input" was an unsupported claim (no interview scores sleep); the advice stands without it.
+    const facts = ["Tonight is for light reps, not cramming: one pass over your story, one question out loud, then rest."];
     if (firmName && !firmCir) facts.push(`${firmName} has no company file here, so nothing in this plan is about how ${firmName} interviews.`);
     if (items.length) facts.push(`The logistics, settled tonight so tomorrow is only the interview: ${items.slice(0, 3).join("; ")}.`);
     if (q) facts.push(`Your one out-loud rep: ${q}`);
     const reply = compose({ headline: "You have a plan for tonight — and it ends early, on purpose.", facts, nextStep: q ? "Answer that one question out loud now; I will score it, and then we stop for the night." : "Tell me the company and round, and I will pick the one question worth rehearsing tonight." });
     return { intent: "prep_brief", reply, resultStatus: "running", sends: 0 };
+  }
+  // BETA C03 / A15.1 (2026-11-04): THE PREP FILE. "Make a one-page interview prep File with five questions and a 30-minute
+  // plan" was answered by the night-before template or the brief (one question, no plan) and NO File: no prep route had an
+  // artifact path; Files were made only by the brain's create_file and the search results page. This claim builds the File's
+  // data in code (127 prepFileData: the asked number of questions, a plan adding up to exactly the asked minutes, what the
+  // person said in this message, their confirmed facts only, what is not on file named) and returns it as result.file; the
+  // agent-chat handler stores it as a plan_review File and sends its link (agent-chat/career_prep_file.ts). Nothing is sent
+  // and nothing about a company is written. Dispatched early in dispatchChat, ahead of the prep, delivery and mock routes
+  // that each read part of the ask. A count or length a one-page File cannot honor is said, with nothing made.
+  function handlePrepFile(text, ctx) {
+    if (!Prep || typeof Prep.prepFileRequest !== "function") return null;
+    const req = Prep.prepFileRequest(text);
+    if (!req) return null;
+    if (!req.ok) {
+      const why = req.problem === "questions"
+        ? `A one-page File holds 1 to ${Prep.PREP_FILE_MAX_QUESTIONS} questions, and you asked for ${req.questions}, so I didn't make one with fewer than you asked.`
+        : req.problem === "minutes"
+          ? `The plan can run ${Prep.PREP_FILE_MIN_MINUTES} to ${Prep.PREP_FILE_MAX_MINUTES} minutes, and ${req.minutes} minutes is outside that, so I didn't make one with a different length.`
+          : `${req.minutes} minutes is too short to answer ${req.questions} questions out loud at a minute each plus a minute to read, so I didn't change either number for you.`;
+      const reply = compose({ headline: "I didn't make the File yet.", facts: [why, "Nothing was sent."], nextStep: req.problem === "questions" ? `Want ${Prep.PREP_FILE_MAX_QUESTIONS} questions instead, or a shorter set?` : "What count and length should I use?" });
+      return { intent: "prep_brief", reply, resultStatus: "awaiting_user", sends: 0, payload: { kind: "prep_file_refused", problem: req.problem, questions: req.questions, minutes: req.minutes } };
+    }
+    const named = (() => {
+      const n = namedCompanyOf(text, ctx);
+      if (n) return n;
+      const lt = letterTargetOf(text, ctx);
+      return lt && !lt.cir ? lt : null;
+    })();
+    // A capitalized word of the ask itself ("prep File", "Make") is not a company.
+    const company = named && !/^(?:file|files|make|prep|interview|one|page|no|plan|questions?)$/i.test(s(named.company).trim()) ? named : null;
+    const built = Prep.prepFileData({ questions: req.questions, minutes: req.minutes, defaults: req.defaults, profile: ctx.profile || null,
+      stated: prepFileStatedOf(text, company), companyFile: !!(company && company.cir) });
+    if (!built) return null;
+    const sm = built.summary;
+    const facts = [];
+    facts.push(`It holds ${sm.questions} practice ${sm.questions === 1 ? "question" : "questions"} and a plan whose blocks add up to exactly ${sm.minutes} minutes (${sm.plan_minutes.join(" + ")}).`);
+    if (sm.defaults.length) facts.push(`You didn't say ${sm.defaults.map((d) => (d === "questions" ? "how many questions" : "how long")).join(" or ")}, so I used ${sm.defaults.map((d) => (d === "questions" ? `${sm.questions} questions` : `${sm.minutes} minutes`)).join(" and ")}.`);
+    if (sm.gaps.length) facts.push(`Not on file, so nothing about ${sm.gaps.length === 1 ? "it" : "them"} is assumed: ${Prep.prepFileAndList(sm.gaps)}.`);
+    facts.push(sm.facts ? `Your side comes only from ${sm.facts} confirmed ${sm.facts === 1 ? "fact" : "facts"} on your record.` : "No confirmed facts about you are on your record, so the page fills in nothing about you.");
+    facts.push("Nothing was sent.");
+    const reply = compose({ headline: `Your one-page interview prep File: ${sm.questions} ${sm.questions === 1 ? "question" : "questions"} and a ${sm.minutes}-minute plan.`, facts, nextStep: "Want to practice question 1 here now?" });
+    return { intent: "prep_brief", reply, resultStatus: "prepared", sends: 0, file: { kind: "plan_review", data: built.data }, payload: { kind: "prep_file", ...sm } };
+  }
+  function prepFileStatedOf(text, company) {
+    return Prep && typeof Prep.prepFileStated === "function" ? Prep.prepFileStated(text, company) : {};
   }
   // COMPLEXITY WAVE (BUG-173): the honest profile-less prep answer —
   // a prep ask whose product genuinely needs the user's own record
@@ -12939,6 +12985,8 @@ const CareerRouter = (() => {
     // networking plan (which read it back as the stopped batch, or planned bankers at firms never named).
     { const re = handleRecruiterEmailAsk(text, c); if (re) return re; }
     { const ac = handleAuthorityClaim(text, c); if (ac) return ac; }
+    // BETA C03 / A15.1 (2026-11-04): a one-page interview prep File ask is a File, not a brief or a night-before template.
+    { const pf = handlePrepFile(rawText, c); if (pf) return pf; }
     // DEPTH LANE A (LF-01h): an explicit memory invocation — "draft
     // it from what you know about me" — is the most specific claim a
     // turn can carry: the user is ordering the record's USE. It is

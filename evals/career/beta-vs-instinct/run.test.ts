@@ -2,7 +2,7 @@
 // the evidence report did. No database, no model, no network.
 //   deno test -A --no-check evals/career/beta-vs-instinct/run.test.ts
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { buckets, type Case, CLI_ARGS, cliEnv, hasDraftText, negationHit, proxy, questionCount, type Rec, recDeliverable, recGuards, scoreDet, searchLeak, SCRIPTED, subscriptionGate } from "./score.ts";
+import { buckets, type Case, CLI_ARGS, cliEnv, hasDraftText, negationHit, pageRoles, proxy, questionCount, type Rec, recDeliverable, recGuards, scoreDet, searchLeak, SCRIPTED, subscriptionGate } from "./score.ts";
 import { DIMENSIONS, jsonOf, refItemPrompt, relative } from "./opus.ts";
 
 const HERE = new URL(".", import.meta.url).pathname;
@@ -100,6 +100,18 @@ Deno.test("a File's content counts: labelled questions and its own length", () =
   const cs = byId.get("C03")!;
   const r = scoreAll(cs, rec({ case: "C03", reply: "Your one-page interview prep File: 5 questions and a 30-minute plan.\nhttps://trainee.test/file?t=x", files: ["plan_review:prep"] }), { __fileText: file });
   for (const k of ["file", "five_q", "plan30", "one_page"]) assertEquals(r.criteria[k].pass, true, k);
+});
+
+Deno.test("the results page counts: its tg:list array of refs and their tg:job rows; relevance reads the rows", () => {
+  const jobs = Object.fromEntries([1, 2, 3].map((i) => [`r${i}`, { job: { title: "Customer Support Specialist (Entry Level)", company: `Co ${i} (TEST)`, location: "Chicago, IL", url: `https://boards.greenhouse.io/co${i}/jobs/${i}` }, shownAs: "text" }]));
+  const page = pageRoles(["r1", "r2", "r3", "r4"], jobs);
+  assertEquals(page.refs.length, 4, "every ref on the page counts, even one whose row is gone");
+  assertEquals(page.rows.length, 3);
+  assertEquals(pageRoles({ picked: [] }, {}).refs.length, 0, "an object is not the page's list");
+  const cs = byId.get("C01")!;
+  const r = scoreAll(cs, rec({ case: "C01", reply: "From 14 live postings for customer support in Chicago. The list: https://trainee.test/file?t=x", roles: page.refs.length, files: ["results"] }), { __fileText: `Results page:\n${page.rows.join("\n")}` });
+  assertEquals(r.criteria.links3.pass, true);
+  assertEquals(r.criteria.relevant.pass, true);
 });
 
 Deno.test("guards: bookkeeping writes are not account writes; a real watch row is", () => {

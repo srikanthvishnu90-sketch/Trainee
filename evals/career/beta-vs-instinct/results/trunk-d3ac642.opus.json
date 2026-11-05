@@ -1,7 +1,7 @@
 {
- "label": "trunk-3defbcf",
- "sha": "a2e7524bd067df42a5e1ee5cf520f004eabd8b98",
- "at": "2026-11-05T20:39:53.572Z",
+ "label": "trunk-d3ac642",
+ "sha": "10eeabc36e92bc1c41af3e6708126ef6856bd665",
+ "at": "2026-11-05T23:31:46.647Z",
  "ref_model": "claude-opus-5-5 via claude CLI (subscription)",
  "judge_model": "haiku via claude CLI (subscription)",
  "calls_this_run": 0,

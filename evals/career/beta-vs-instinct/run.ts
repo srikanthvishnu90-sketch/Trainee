@@ -26,7 +26,7 @@ import { pgBinDir, type Pg, startPg } from "../../../tests/flow/pg.ts";
 import { careerHandler, type Chat, supabaseParity } from "../../../tests/flow/handler.ts";
 import { anthropicWire } from "../../../tests/architect/helpers/anthropic_wire.ts";
 import { CareerHost } from "../../../supabase/functions/_shared/career_host.js";
-import { buckets, type Case, CLI_ARGS, cliEnv, type Crit, EFFECT_TABLES, IGNORE_KV, IGNORE_WRITE, type Rec, recDeliverable, recGuards, recPass, recScore, SCRIPTED, scoreDet, subscriptionGate, URLS } from "./score.ts";
+import { buckets, type Case, CLI_ARGS, cliEnv, type Crit, EFFECT_TABLES, IGNORE_KV, IGNORE_WRITE, type Rec, recDeliverable, recGuards, pageRoles, recPass, recScore, SCRIPTED, scoreDet, subscriptionGate, URLS } from "./score.ts";
 import { verifySubscription } from "./opus.ts";
 
 const HERE = new URL(".", import.meta.url).pathname;
@@ -303,6 +303,13 @@ for (const p of plan) {
     if (meta.results_file) {
       const v = await pg.sql(`select value::text from public.career_watch_kv where user_id = '${p.id}' and value::text like '%${esc(String(meta.results_file))}%' limit 1`).catch(() => "");
       try { const j = JSON.parse(v || "null"); const arr = j?.picked ?? j?.roles ?? j?.jobs ?? j?.items ?? j?.list ?? null; listed = Array.isArray(arr) ? arr.length : (v.match(/boards\.greenhouse\.io/g) ?? []).length; } catch { listed = (v.match(/boards\.greenhouse\.io/g) ?? []).length; }
+      // The page's own list: "tg:list:<id>" is an array of refs, each row under "tg:job:<ref>" (score.ts pageRoles).
+      const listV = JSON.parse(await pg.sql(`select coalesce((select value from public.career_watch_kv where user_id = '${p.id}' and key = 'tg:list:${esc(String(meta.results_file))}'), 'null'::jsonb)::text`).catch(() => "null"));
+      const refs: string[] = Array.isArray(listV) ? listV.map(String) : [];
+      const jobs: Record<string, unknown> = refs.length ? JSON.parse(await pg.sql(`select coalesce(json_object_agg(substr(key, 8), value), '{}') from public.career_watch_kv where user_id = '${p.id}' and key in (${refs.map((r) => `'tg:job:${esc(r)}'`).join(",")})`)) : {};
+      const page = pageRoles(listV, jobs);
+      listed = Math.max(listed, page.refs.length);
+      if (page.rows.length) body.__fileText = [body.__fileText, `Results page:\n${page.rows.join("\n")}`].filter(Boolean).join("\n\n");
     }
     const roles = Math.max(Array.isArray(body.postings) ? body.postings.length : 0, urls.filter((u) => /greenhouse|lever|ashby|workday/.test(u)).length, listed, Array.isArray(meta.apply_all_offer?.jobs) ? meta.apply_all_offer.jobs.length : 0);
     const brainCall = calls.find((c) => c.tools.length);

@@ -16,7 +16,8 @@ serve((req) => {
   const deliverNow = deliverer(admin, Deno.env);
   return handleInbound(req, {
     env: Deno.env, now: Date.now, store: () => supabaseInboundStore(admin), send: (apiKey) => loopSend({ apiKey }),
-    chat: chatThroughAgent(url, key),
+    // CHANNEL PARITY (2026-11-05): each webhook names its channel, as Telegram's does (connect links, the readiness ask).
+    chat: chatThroughAgent(url, key, { channel: "imessage" }),
     // The answer, or a link question to another channel, through whichever adapters are wired.
     deliverReply: (a) => deliverNow({ userId: a.userId, key: a.key, now: a.now }),
   });

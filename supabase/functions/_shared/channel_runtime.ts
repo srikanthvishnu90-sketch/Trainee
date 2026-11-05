@@ -7,7 +7,9 @@ import { shapeReply } from "./channel_shape.ts";
 import { telegramPacerFromEnv } from "./channel_pacer.ts"; // every Telegram send takes its token from the one shared bucket
 
 // The turn runs as the person through agent-chat's service-role path, so history, erase, the host's STOP and pause,
-// persistence and the hourly turn limit are the chat's own. The channel is never sent: the brain is channel-blind.
+// persistence and the hourly turn limit are the chat's own. The brain is never told the channel per turn; the webhook names
+// its own channel once (o.channel: every webhook since CHANNEL PARITY, 2026-11-05), and agent-chat reads it only where
+// tests/edge/channel-parity.test.ts lists (transport formatting, and Telegram's APPLY HERE, an open decision).
 // agent-chat may answer with `parts` (a reply in several messages, each at most 4,000 characters: channel_inbound.ts
 // replyParts); they are passed on as they are.
 // LAUNCH READINESS R1 (2026-10-26): agent-chat runs one person's turns one at a time (career_turn_gate.ts). If a turn still

@@ -36,6 +36,10 @@ export function loopMessageAdapter(o: { apiKey: string; inboundSecret?: string; 
       if (!msg.messageId) return { messages: [], ignored: ["no message id, so a retry could not be told apart; nothing was run"] };
       let contact: string;
       try { contact = normalizeContact(msg.sender); } catch { return { messages: [], ignored: ["not a phone number or address"] }; }
+      // CHANNEL PARITY (2026-11-05): a file with no words is "seen" with a file, as WhatsApp's document is (the core tells a known
+      // person what to send instead; nothing is read).
+      if (msg.kind === "file") return { messages: [{ provider: "loopmessage", channel: "imessage", messageId: msg.messageId, kind: "seen", file: true, contact, address: contact, replyToMessageId: null,
+        phone: contact.startsWith("+") ? contact : null, text: "", ...(msg.sms ? { sms: true } : {}) }] };
       return { messages: [{ provider: "loopmessage", channel: "imessage", messageId: msg.messageId, kind: "text", contact, address: contact, replyToMessageId: null, /* SERIAL-1462/1480: no verified reply-id path in this integration */
         phone: contact.startsWith("+") ? contact : null, text: msg.text, ...(msg.sms ? { sms: true } : {}) }] };
     },

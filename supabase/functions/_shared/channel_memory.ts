@@ -5,7 +5,7 @@ import type { DeliveryMark, OutboxRow } from "./channel.ts";
 import type { DeliveryStore } from "./channel_store.ts";
 import { type Channel, channelOf } from "./channel_adapters.ts";
 import type { InboundStore, Person, Redeemed } from "./channel_inbound.ts";
-import { LINK_ASK_MS, LINK_CODE_ASK_MS, LINK_CODE_SLOT, LINK_NONCE_MS } from "./channel_inbound.ts";
+import { GREETING_KEY, LINK_ASK_MS, LINK_CODE_ASK_MS, LINK_CODE_SLOT, LINK_NONCE_MS } from "./channel_inbound.ts";
 import { NO_CHANNEL_NOTE, OUTBOX_MAX_ATTEMPTS } from "./channel.ts";
 
 // refusedAt (IDENTITY SCENARIOS, 2026-10-30): channel_contacts.refused_at, the sign-up refusal said to this contact.
@@ -23,7 +23,9 @@ async function sha256(s: string) {
 }
 const NONCE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
-export function memoryChannelWorld() {
+// greeting (GREETING, owner 2026-11-05): the store greets a new conversation as the database's does (greetOnce, the outbox
+// row GREETING_KEY); off by default, so a world built before it behaves exactly as it did.
+export function memoryChannelWorld(o: { greeting?: boolean } = {}) {
   const contacts = new Map<string, MemContact>();
   const outbox: MemOutbox[] = [];
   const claimedIds = new Set<string>();
@@ -110,6 +112,7 @@ export function memoryChannelWorld() {
       if (!out && c.userId) for (const x of ofUser(c.userId)) { x.optedOut = false; x.optedOutAt = null; }
     },
     async enqueueReply(userId, key, text, at, channel, part) { return enqueue(userId, { key, kind: "reply", text, at, channel: channel ?? null, part }); },
+    ...(o.greeting ? { async greetOnce(userId: string, at: number, channel: Channel, text: string) { return enqueue(userId, { key: GREETING_KEY, kind: "reply", text, at, channel }) ? GREETING_KEY : null; } } : {}),
     async sawInbound(contact, at, o) {
       const c = contacts.get(contact);
       if (!c) return;

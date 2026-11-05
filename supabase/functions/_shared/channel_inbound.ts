@@ -122,6 +122,17 @@ export const TELEGRAM_LINK_REPLY = "To use Trainee in this chat, link your Train
 export const TELEGRAM_UNLINKED_REPLY = "Telegram is unlinked from your Trainee account. Nothing from this chat reaches that account now.";
 export const TELEGRAM_CHANNEL_ONLY_REPLY = "This chat is your Trainee account, so it can't be unlinked. Nothing changed.";
 const LINK_ASK = /^(link|connect) (my (trainee )?account|telegram|this chat)[.!]*$/i, UNLINK_ASK = /^unlink (telegram|this chat|my account)[.!]*$/i;
+// GREETING (owner, 2026-11-05): the first words Trainee texts in a new conversation, on every channel, exactly these. It is a
+// reply to the person's own first message (so it is inside WhatsApp's window and goes as an answer through the outbox, where
+// pacing, the at-most-once key and the STOP rules apply). One per person: the outbox row's key is the person's own, unique
+// (career_outbox_once), so a second /start, a retried webhook or a message on a second channel never greets again. A new
+// conversation is a person with no thread yet (no turn has run for them on any channel). An open with no words (a bare
+// /start, Telegram's shared phone) gets the greeting alone; a first message that says anything gets the greeting and then
+// the answer to it, in that order, in the same turn.
+export const GREETING = "Hey I'm Trainee, your personal career assistant, how can I help you?";
+export const GREETING_KEY = "reply:greeting";
+// An open is a first message with no words of the person's own (what the core hands the brain for it is "/start" or nothing).
+export const isBareOpen = (said: string) => /^\s*(?:\/start)?\s*$/i.test(String(said ?? ""));
 export const LINK_NONCE_MS = 10 * 60000;
 export const LINK_ASK_MS = 60 * 60000; // a yes counts for an hour after the question
 
@@ -166,6 +177,9 @@ export interface InboundStore {
   failSent?(providerMessageId: string, at: number, error: string, retry: boolean): Promise<number>;
   releaseContact?(contact: string, at: number): Promise<void>;
   movedNumber?(from: string, to: string, at: number): Promise<boolean>;
+  // GREETING (owner, 2026-11-05; optional, so a store written before it runs unchanged): queue GREETING for this person, once
+  // ever (the outbox row GREETING_KEY), as an answer on this channel. The key when it was queued now, null when it already was.
+  greetOnce?(userId: string, at: number, channel: Channel, text: string): Promise<string | null>;
 }
 export interface CoreDeps {
   env: { get(k: string): string | undefined };
@@ -563,6 +577,25 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       return await answer(text, { connect: "telegram" });
     }
 
+    // GREETING (owner, 2026-11-05): a new conversation's first message is answered first with the greeting, sent at once (it
+    // waits for no model). An open with no words gets the greeting alone; anything else goes on to its answer below. A tap,
+    // a LINK reply, a yes to a link question and "connect telegram" never open a conversation (not text, or answered above).
+    const opening = fileMessage ?? (msg.text || (command ? `/${command}` : msg.sharedPhone === "own" ? "/start" : ""));
+    let greeted = false;
+    if (!tapped && msg.kind === "text" && person.threadId === null && store.greetOnce && command !== "help") {
+      const gk = await store.greetOnce(person.userId, now, msg.channel, GREETING);
+      if (gk) {
+        greeted = true;
+        try { await d.deliver({ userId: person.userId, key: gk, now }); }
+        catch (e) { console.error("inbound: the greeting waits in the outbox:", e instanceof Error ? e.message : String(e)); }
+        if (!fileMessage && isBareOpen(opening)) {
+          // A known person's /start after STOP still says they are back on (its fixed words), after the greeting.
+          if (toBrain && command === "start") return await answer(CHANNEL_REPLIES.start, { greeted: true, command });
+          return ok({ greeted: true });
+        }
+      }
+    }
+
     let postings: unknown[] = [], cardsShown = 0, screenQidOut: string | null = null, shape: { attachments: ShapedFile[]; links: string[]; more?: string[] } | null = null;
     const notes: string[] = [];
     let reply: string, parts: string[] | null = null, artifacts: { ref: string; filename: string; mime: string }[] = [], turnThread: string | null = person.threadId;
@@ -572,7 +605,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       // TELEGRAM SCENARIOS (2026-10-30): a shared phone that made the account (sign-up open, or the number allow-listed) has no
       // words at all; the turn ran with an empty message, agent-chat refused it, and the person read "I couldn't answer that
       // just now" for their first tap. It is their first message, as a first /start is.
-      const said = fileMessage ?? (msg.text || (command ? `/${command}` : msg.sharedPhone === "own" ? "/start" : ""));
+      const said = opening;
       // TELEGRAM ROUND 2: a forwarded message is framed as someone else's words; a message over agent-chat's 4,000 characters
       // is cut on a whole word and the answer says where reading stopped; the words sent with a photo or a video are read,
       // and the answer says the picture was not.
@@ -692,7 +725,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       if (fileMissed && !(queued && headWent)) await say(contact, d.render(DOC_NOT_SENT_REPLY)).catch(() => ({ ok: false }));
       if (shaping) shaped = { files, links };
     }
-    return ok({ replied: true, ...(shaped ? { shaped } : {}), ...(cardsShown ? { cards: cardsShown } : {}), ...(parts ? { parts: parts.length } : {}), ...(docs ? { documents: docs } : {}) });
+    return ok({ replied: true, ...(greeted ? { greeted: true } : {}), ...(shaped ? { shaped } : {}), ...(cardsShown ? { cards: cardsShown } : {}), ...(parts ? { parts: parts.length } : {}), ...(docs ? { documents: docs } : {}) });
   } catch (e) {
     console.error("inbound failed:", e instanceof Error ? e.message : String(e));
     if (working) await working.stop();

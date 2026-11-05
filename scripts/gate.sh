@@ -126,6 +126,7 @@ edge_tests=(
   tests/edge/channel.test.ts
   tests/edge/channel-delivery.test.ts tests/edge/channel-integrity.test.ts
   tests/edge/channel-inbound.test.ts
+  tests/edge/channel-greeting.test.ts tests/edge/channel-parity.test.ts
   tests/edge/telegram-link-reply-code.test.ts
   tests/edge/capability-journey.test.ts
   tests/edge/eval-judge.test.ts

@@ -8,7 +8,7 @@
 import type { ChannelStore, DeliveryMark, OutboxRow } from "./channel.ts";
 import type { Channel } from "./channel_adapters.ts";
 import { alertStillWanted, alertWithinLimits, freshAlertText } from "./career_watch_alerts.ts";
-import { briefStillTrue } from "./channel.ts";
+import { briefStillTrue, OUTBOX_MAX_ATTEMPTS } from "./channel.ts";
 import { localDayStart, zoneOr } from "./career_alerts.ts";
 import { buttonsForRows } from "./channel_card_tap.ts"; // FEATURE 16
 
@@ -251,7 +251,8 @@ export function supabaseChannelStore(admin: any, o: {
       // PROACTIVE SCENARIOS ROUND 3: a row delivery wrote anew keeps the words that went.
       const patch = m.status === "delivered" ? { ...base, ...(m.text !== undefined ? { text: m.text } : {}), delivered_at: iso(m.at), provider_id: m.providerId ? m.providerId.slice(0, 200) : null, retry_at: null,
           ...(ids.length ? { provider_ids: ids } : { provider_ids: null }), ...(m.sentParts !== undefined || (c?.parts ?? 0) > 0 ? { sent_parts: 0 } : {}) }
-        : m.status === "failed" ? { ...base, attempts: (c?.attempts ?? 0) + 1, retry_at: m.retryAt ? iso(m.retryAt) : null, ...progress }
+        // (never past career_outbox's check: a refused write would leave the row "sending" for the sweep)
+        : m.status === "failed" ? { ...base, attempts: Math.min((c?.attempts ?? 0) + 1, OUTBOX_MAX_ATTEMPTS), retry_at: m.retryAt ? iso(m.retryAt) : null, ...progress }
         // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): put back for later (quiet hours on the person's clock now).
         : m.status === "queued" ? { ...base, status: "queued", contact: null, retry_at: null, ...(m.deliverAt ? { deliver_at: iso(m.deliverAt) } : {}) }
         : { ...base, retry_at: null, ...progress };

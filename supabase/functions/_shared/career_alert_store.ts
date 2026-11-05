@@ -229,8 +229,10 @@ export function supabaseAlertStore(admin: any): AlertStore & Outbox {
       return out;
     },
     async supersede(userId, kind, keep) {
+      // A failed row only while it waits for a retry: a final failure keeps the reason it failed with (review of #505).
       const got = must<any[]>(await admin.from("career_outbox").update({ status: "skipped_opt_out", error: SUPERSEDED_NOTE[kind], claimed_at: null })
-        .eq("user_id", userId).eq("kind", kind).neq("key", keep).is("delivered_at", null).in("status", ["queued", "failed", "held"]).eq("sent_parts", 0).select("id"), "set an older text aside") || [];
+        .eq("user_id", userId).eq("kind", kind).neq("key", keep).is("delivered_at", null).in("status", ["queued", "failed", "held"]).or("status.neq.failed,retry_at.not.is.null")
+        .eq("sent_parts", 0).select("id"), "set an older text aside") || [];
       return got.length;
     },
     async enqueue(userId, m) {

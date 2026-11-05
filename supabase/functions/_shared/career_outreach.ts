@@ -25,6 +25,9 @@ import { secretIn } from "./agent/reply_guards.ts";
 import { redactIdentity } from "./identity_redact.ts";
 import { langOf } from "./career_mail_langs.ts";
 import { readsAsInstruction } from "./career_people_import.ts";
+// OUTREACH R4: the one set of rules for what comes back on a thread (the rail's reply check reads them too). Functions only:
+// career_send_rail.ts imports this module back, and neither reads the other at load time.
+import { autoReply, deliveryNotice, newText, optedOut } from "./career_send_rail.ts";
 
 export type ModelFn = (payload: any) => Promise<any>;
 export interface Recipient { name: string; firm: string; title: string; school: string; email: string; source: string; prior_firms?: string[]; address?: "published" | "inferred" }
@@ -37,7 +40,9 @@ export interface OutreachDraft {
   shared?: Shared[];
 }
 // WO-091c: "expired" (approved more than APPROVAL_TTL_MS ago) and "paused" (the account is paused, opted out or erased).
-export type Admit = "ok" | "not_approved" | "changed" | "expired" | "paused" | "do_not_contact";
+// OUTREACH R4 (20261105100000): "bad_address" (the address bounced for anyone, career_send_bad_addresses) and "on_rail" (the
+// sending rail has this draft: it is the one sender of it, never this older run as well).
+export type Admit = "ok" | "not_approved" | "changed" | "expired" | "paused" | "do_not_contact" | "bad_address" | "on_rail";
 // A "stop" to any Trainee user stops every Trainee user's drafts to that address (do-not-contact is checked across
 // people, never only the sender's own). There is no count of emails per recipient (owner: the cross-person 3-in-30-days
 // rule is removed); the person's own duplicate guard is the already-contacted set and the send rail's already_emailed.
@@ -86,6 +91,8 @@ export interface OutreachStore {
   // dnc(userId) above is the person's own list only; drafting read only that, so someone who told another person "stop"
   // was drafted to, approved, and then refused by the rail while the person was told it was going.
   blocked?(emails: string[]): Promise<Map<string, "opted_out" | "bounced">>;
+  // OUTREACH R4: an address that bounced, for everyone (career_send_bad_addresses), as the rail's reply check records one.
+  addBounced?(email: string, at: number): Promise<void>;
   // A batch shown again in another chat moves to that chat: only the chat that shows a batch last can approve it.
   moveBatch?(userId: string, batchId: string, threadId: string): Promise<void>;
 }
@@ -709,14 +716,16 @@ export function parseBatchYes(text: string): Extract<OutreachReply, { kind: "sen
 // ------------------------------------------------------------------------------------------------ admission
 // The one admission rule (the database's career_outreach_claim checks the same): the exact approval, its 7-day life, pause
 // and do-not-contact. No volume number of Trainee's own (NO LIMITS).
-export function admitSend(o: { draft: OutreachDraft; hash: string; now: number; dnc: boolean; quiet?: boolean }): Admit {
+export function admitSend(o: { draft: OutreachDraft; hash: string; now: number; dnc: boolean; quiet?: boolean; bad?: boolean; onRail?: boolean }): Admit {
   if (o.draft.status !== "approved" || !o.draft.approved_hash) return "not_approved";
+  if (o.onRail) return "on_rail";
   if (o.draft.approved_hash !== o.hash || o.draft.hash !== o.hash) return "changed";
   // The database's anchor (career_outreach_claim): the later of the approval and the draft.
   const anchor = Math.max(...[o.draft.approved_at, o.draft.created_at].map((t) => Date.parse(String(t ?? ""))).filter(Number.isFinite));
   if (Number.isFinite(anchor) && anchor < o.now - APPROVAL_TTL_MS) return "expired";
   if (o.quiet) return "paused";
   if (o.dnc) return "do_not_contact";
+  if (o.bad) return "bad_address";
   return "ok";
 }
 export const dayStartOf = (now: number, tz?: string) => { const [y, m, d] = dayIn(now, tz).split("-").map(Number); return localMidnight(y, m, d, tz || "America/New_York"); };
@@ -852,7 +861,20 @@ export async function outreachTurn(o: {
     } else not.push(`${n} (changed since it was shown)`);
   }
   const items: ApprovedItem[] = approved.map((d) => ({ draftId: d.id, approvalHash: d.hash, n: d.n, batchId: d.batch_id, to: d.recipient.email }));
-  const notTaken = items.length && o.onApproved ? (await o.onApproved(o.userId, items).catch((e) => { console.error("outreach: hand-off of approved drafts:", e instanceof Error ? e.message : e); })) || [] : [];
+  // OUTREACH R4 (2026-11-05): an address that opted out or bounced for anyone since the draft was written is refused here,
+  // whatever sends it. Before, only the rail refused it, and the rail is asked only once Gmail can send: with Gmail not
+  // connected the reply handed the person a ready-to-send link to someone who had asked not to be contacted.
+  const stopped = await blockedAddresses(o.store, o.userId, approved.map((d) => d.recipient.email)).catch(() => new Map<string, "opted_out" | "bounced">());
+  const refusedHere: { draftId: string; reason: string }[] = [];
+  for (const d of approved) {
+    const why = stopped.get(d.recipient.email.trim().toLowerCase());
+    if (!why) continue;
+    const reason = why === "bounced" ? "bad_address" : "opted_out";
+    await o.store.update(o.userId, { ...d, status: "skipped", approved_hash: null, approved_at: null, result: reason }, { status: "approved" });
+    refusedHere.push({ draftId: d.id, reason });
+  }
+  const toRail = items.filter((x) => !refusedHere.some((y) => y.draftId === x.draftId));
+  const notTaken = [...refusedHere, ...(toRail.length && o.onApproved ? (await o.onApproved(o.userId, toRail).catch((e) => { console.error("outreach: hand-off of approved drafts:", e instanceof Error ? e.message : e); })) || [] : [])];
   const left = numbers.filter((n) => !want.includes(n) && byN.get(n)!.status === "shown");
   const prefs = await o.store.prefs(o.userId).catch(() => ({ daily_cap: null, signature: null }));
   const lines = [approved.length ? `Approved ${approved.length}, exactly as shown: ${listOf(approved)}.` : "Nothing new was approved."];
@@ -868,7 +890,7 @@ export async function outreachTurn(o: {
     if (connected) lines.push(`They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. ${LAPSE_NOTE}`);
     // FAMILY NETWORKING: no promise of a send that can't happen. Sending from the person's own address is not available
     // (gmail.send is deferred), so the reply says nothing went, and gives the ways to send it themselves, exactly as approved.
-    else lines.push(`Nothing has gone out. Nothing can go out until your Gmail is connected for sending, and sending from your own address isn't available in Trainee yet.\n\n${sendYourselfText(approved)}${o.connectAsk ? `\n\n${o.connectAsk}` : ""}`);
+    else lines.push(`Nothing has gone out. Nothing can go out until your Gmail is connected for sending, and sending from your own address isn't available in Trainee yet.\n\n${sendYourselfText(approved.filter((d) => !wont.some((x) => x.d === d)))}${o.connectAsk ? `\n\n${o.connectAsk}` : ""}`);
   }
   return { reply: lines.join(" ").replace(/ \n\n/, "\n\n"), status: approved.length ? "approved" : "none_approved", intent: left.length ? OUTREACH_INTENT : "career_outreach_answer", ...(items.length ? { approved: items } : {}) };
 }
@@ -960,7 +982,8 @@ async function sendOne(o: SendRun, stats: SendStats, user_id: string, draft: Out
   const admit = await o.store.claim(user_id, draft, hash, o.now, dayStartOf(o.now, tz));
   if (admit !== "ok") {
     stats.refused[admit] = (stats.refused[admit] ?? 0) + 1;
-    if (admit === "changed" || admit === "do_not_contact" || admit === "expired") await o.store.update(user_id, { ...draft, status: admit === "changed" ? "shown" : "skipped", approved_hash: null, approved_at: null, result: admit }, { status: "approved" });
+    // on_rail: the sending rail has it (OUTREACH R4): left exactly as it is, for the rail alone.
+    if (admit === "changed" || admit === "do_not_contact" || admit === "expired" || admit === "bad_address") await o.store.update(user_id, { ...draft, status: admit === "changed" ? "shown" : "skipped", approved_hash: null, approved_at: null, result: admit }, { status: "approved" });
     // A paused account keeps its approval: a resume inside the 7 days lets it go, and nothing older ever does.
     return admit === "paused" ? "wait" : "done";
   }
@@ -981,14 +1004,22 @@ async function sendOne(o: SendRun, stats: SendStats, user_id: string, draft: Out
   return "done";
 }
 
-const BOUNCE_FROM = /\b(mailer-daemon|postmaster|mail delivery (subsystem|system))\b/i;
-const BOUNCE_SUBJECT = /(delivery status notification|undeliverable|undelivered mail|delivery has failed|mail delivery failed|returned mail|failure notice|address not found)/i;
-const STOP = /^\s*(stop|unsubscribe|remove me|opt out|please stop|stop emailing me|do not contact me)\b|\b(unsubscribe|stop (?:emailing|contacting|writing to) me|remove me from|take me off|do not (?:contact|email) me|don'?t (?:contact|email) me|opt me out|opt out)\b/i;
 export const addressOf = (from: string) => (/<([^>]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
+// OUTREACH R4 (2026-11-05, tests/architect/scenarios-outreach-r4.test.ts): this run's reader had rules of its own, older than
+// the rail's (career_send_rail.ts classifyIncoming), and the two read the same threads differently. A delay warning
+// ("Delivery Status Notification (Delay)": the mail system is still trying) marked the draft bounced; an out-of-office or
+// a read receipt from the contact marked it replied (their follow-up reminder never came); "Not interested, thanks" and
+// every opt-out outside a few English words was a plain reply, so the address never reached the do-not-contact list.
+// Now the rail's rules decide, as the rail reads them: a failure notice is a bounce; a delay, a receipt and an automatic
+// reply are nothing; the contact's own new words (never the quoted history) decide stop or reply. Someone else on the
+// thread is still no answer here (WO-033: only the recipient opts themselves out).
 export function classifyReply(m: ReplyMail, recipient: string): "bounce" | "stop" | "reply" | "other" {
-  if (BOUNCE_FROM.test(m.from) || BOUNCE_SUBJECT.test(m.subject)) return "bounce";
+  const notice = deliveryNotice({ from: m.from, subject: m.subject, text: m.snippet });
+  if (notice === "bounce") return "bounce";
+  if (notice) return "other";
   if (addressOf(m.from) !== recipient.toLowerCase()) return "other";
-  return STOP.test(`${m.snippet}`) || STOP.test(m.subject.replace(/^re:\s*/i, "")) ? "stop" : "reply";
+  if (autoReply({ subject: m.subject, text: m.snippet })) return "other";
+  return optedOut(newText(m.snippet)) || optedOut(m.subject.replace(/^\s*(?:re|aw|antw|sv)\s*:\s*/i, "")) ? "stop" : "reply";
 }
 // What came back on the threads Trainee started: a bounce marks the draft bounced; a "stop" or "unsubscribe" from the
 // recipient puts them on the do-not-contact list forever; any other answer is a reply. All on the timeline.
@@ -996,6 +1027,9 @@ export async function recordReply(o: { store: OutreachStore; userId: string; dra
   const kind = classifyReply(o.mail, o.draft.recipient.email);
   if (kind === "other") return kind;
   if (kind === "stop") await o.store.addDnc(o.userId, await emailHash(o.draft.recipient.email), "recipient asked to stop", o.now);
+  // OUTREACH R4: a bounce this reader read marked only the draft; the address stayed open to every other draft and person
+  // (the rail's reader puts it on the bounce list, which drafting, the rail and the older claim all read).
+  if (kind === "bounce") await o.store.addBounced?.(o.draft.recipient.email, o.now);
   await o.store.update(o.userId, { ...o.draft, status: kind === "bounce" ? "bounced" : "replied", result: kind }, { status: "sent" });
   await recordOutreach(o.events, o.userId, kind === "bounce" ? "outreach_bounced" : "outreach_replied", o.draft, Date.parse(o.mail.at) || o.now, kind === "stop" ? { stop: true } : {});
   return kind;
@@ -1044,13 +1078,14 @@ const mergeRows = (a: { row_key: string; data: ContactRow }[], b: { row_key: str
   for (const r of [...a, ...b]) m.set(r.row_key, r.data);
   return [...m.entries()].sort(([x], [y]) => x.localeCompare(y)).map(([, d]) => d);
 };
-export function memoryOutreachStore(): OutreachStore & { dump(): { drafts: (OutreachDraft & { user_id: string })[]; dnc: Record<string, string[]>; prefs: Record<string, Prefs> }; setIntent(threadId: string, intent: string | null): void; setQuiet(userId: string, on: boolean): void; setEpoch(userId: string, epoch: number): void; allContacts(userId: string): ContactRow[]; forgotten(userId: string): string[]; markBounced(email: string): void } {
+export function memoryOutreachStore(): OutreachStore & { dump(): { drafts: (OutreachDraft & { user_id: string })[]; dnc: Record<string, string[]>; prefs: Record<string, Prefs> }; setIntent(threadId: string, intent: string | null): void; setQuiet(userId: string, on: boolean): void; setEpoch(userId: string, epoch: number): void; allContacts(userId: string): ContactRow[]; forgotten(userId: string): string[]; markBounced(email: string): void; markOnRail(id: string): void } {
   const drafts: (OutreachDraft & { user_id: string })[] = [], dnc: Record<string, Set<string>> = {}, prefs: Record<string, Prefs> = {}, intents: Record<string, string | null> = {};
   const follow: Record<string, Followup[]> = {}, leases: Record<string, number> = {};
   const book: Record<string, Map<string, KeyedContact>> = {}, forgottenByUser: Record<string, Set<string>> = {}, epochByUser: Record<string, number> = {};
   const rowsOf = (u: string) => [...(book[u]?.values() ?? [])].sort((a, z) => a.row_key.localeCompare(z.row_key));
   const quiet = new Set<string>(); // paused, opted out or erased (career_user_quiet in the database)
   const bad = new Set<string>(); // bounced for anyone (career_send_bad_addresses)
+  const railed = new Set<string>(); // drafts the sending rail has (a career_send_queue row of theirs)
   let seq = 0;
   const copy = <T>(x: T): T => JSON.parse(JSON.stringify(x));
   const self: any = {
@@ -1088,7 +1123,7 @@ export function memoryOutreachStore(): OutreachStore & { dump(): { drafts: (Outr
       const cur = drafts.find((x) => x.id === draft.id && x.user_id === u);
       if (!cur) return "not_approved";
       const h = await emailHash(cur.recipient.email);
-      const admit = admitSend({ draft: cur, hash, now, dnc: Object.values(dnc).some((set) => set.has(h)), quiet: quiet.has(u) });
+      const admit = admitSend({ draft: cur, hash, now, dnc: Object.values(dnc).some((set) => set.has(h)), quiet: quiet.has(u), bad: bad.has(cur.recipient.email.trim().toLowerCase()), onRail: railed.has(cur.id) });
       if (admit === "ok") { cur.status = "sending"; cur.sent_at = new Date(now).toISOString(); }
       return admit;
     },
@@ -1150,6 +1185,9 @@ export function memoryOutreachStore(): OutreachStore & { dump(): { drafts: (Outr
     async moveBatch(u: string, b: string, t: string) { for (const d of drafts) if (d.user_id === u && d.batch_id === b) d.thread_id = t; },
     // Test seam: an address that bounced for anyone (career_send_bad_addresses).
     markBounced(email: string) { bad.add(email.trim().toLowerCase()); },
+    async addBounced(email: string) { bad.add(email.trim().toLowerCase()); },
+    // Test seam: a draft the sending rail has queued (career_send_queue), which this store's claim then leaves to the rail.
+    markOnRail(id: string) { railed.add(id); },
     // Test seams: the account's privacy epoch (an erase bumps it), and a write by "another thread" between a read and a save.
     setEpoch(u: string, e: number) { epochByUser[u] = e; },
     allContacts(u: string) { return copy(rowsOf(u).map((r) => r.data)); },
@@ -1300,6 +1338,9 @@ export function supabaseOutreachStore(admin: any): OutreachStore {
     },
     async moveBatch(u, b, t) {
       must(await admin.from("career_outreach_drafts").update({ thread_id: t }).eq("user_id", u).eq("batch_id", b), "move the batch to this chat");
+    },
+    async addBounced(email, at) {
+      must(await admin.from("career_send_bad_addresses").upsert({ email_hash: await emailHash(email), reason: "bounced", at: new Date(at).toISOString() }, { onConflict: "email_hash", ignoreDuplicates: true }), "add to the bounce list");
     },
     async addDnc(u, h, reason, at) {
       must(await admin.from("career_outreach_dnc").upsert({ user_id: u, email_hash: h, reason: reason.slice(0, 120), at: new Date(at).toISOString() }, { onConflict: "user_id,email_hash", ignoreDuplicates: true }), "add to the do-not-contact list");

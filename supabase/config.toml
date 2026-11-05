@@ -55,6 +55,15 @@ verify_jwt = false
 [functions.site-careers]
 verify_jwt = false
 
+# Waitlist survey: public capture like site-signup (no credentials on the
+# page). site-admin is the owner-only viewer: verify_jwt off because the
+# SITE_ADMIN_KEY secret checked inside the handler is the credential.
+[functions.site-survey]
+verify_jwt = false
+
+[functions.site-admin]
+verify_jwt = false
+
 # F-RUNNER: the dispatcher (shared secret header) and the job bridge (per-job HMAC token) authenticate themselves.
 [functions.career-cloud-runner]
 verify_jwt = false

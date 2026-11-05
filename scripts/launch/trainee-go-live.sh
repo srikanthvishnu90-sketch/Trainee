@@ -275,6 +275,7 @@ MIGRATIONS=(
   20261102170000_inbound_turn_queue.sql
   20261102180000_delivery_throughput.sql
   20261103100000_google_disconnect_erase_outbox.sql
+  20261104010000_site_waitlist_survey.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -419,6 +420,7 @@ MIGRATION_MARK=(
   "to_regclass('public.inbound_turn_queue') is not null and exists (select 1 from pg_proc where proname = 'inbound_turn_claim')"
   "exists (select 1 from pg_proc where proname = 'career_outbox_claim_lane') and exists (select 1 from pg_proc where proname = 'channel_rate_acquire') and to_regclass('public.channel_rate_buckets') is not null"
   "exists (select 1 from pg_proc where proname = 'google_career_disconnect_erase' and prosrc like '%status:deadline:%')"
+  "to_regclass('public.site_waitlist_survey') is not null"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql

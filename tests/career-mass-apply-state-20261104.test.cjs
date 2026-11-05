@@ -229,9 +229,14 @@ test("A2/A3: queue records: pending approvals, the second one bound by position,
   const pick = turn("Approve the second application", { ledger: LEDGER }).out;
   assert.equal(pick.result.target.company, "Brightdesk");
   assert.equal(sendsOf(pick), 0);
-  const acct = turn("The portal requires an account", { ledger: LEDGER }).out;
+  // With no profile on record the ledger answers the account step from the records; with one, the governed portal-account
+  // flow keeps the ask (IB-AP-8 / SC-081: its typed step, committed:false), unchanged by this module.
+  const acct = turn("The portal requires an account", { ledger: LEDGER, profile: null }).out;
   assert.match(acct.reply, /Waiting on a sign-in now: Support Analyst at Fjord Systems/);
-  const pw = turn("The portal asks for another account's password", { ledger: LEDGER }).out;
+  const governed = turn("The portal requires an account", { ledger: LEDGER }).out;
+  assert.equal(governed.intent, "portal_account", governed.reply);
+  assert.equal(((governed.result && governed.result.payload) || governed.payload || {}).committed, false, JSON.stringify(Object.keys(governed.result || {})));
+  const pw = turn("The portal asks for another account's password", { ledger: LEDGER, profile: null }).out;
   assert.equal(pw.intent, "career_portal_account");
   assert.match(pw.reply, /never take a password/);
   const chg = turn("Change the answer after approval", { ledger: LEDGER }).out;

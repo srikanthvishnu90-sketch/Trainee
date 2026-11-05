@@ -49662,11 +49662,16 @@ const CareerRouter = (() => {
   // Read only, like the batch status: nothing here approves, prepares beyond that seam, submits or sends; an approval
   // still arrives only as the card's structured tap or the card's own text answer (D-MS-1), never from these words.
   const getApplyLedger = () => { try { return typeof CareerApplyLedger !== "undefined" ? CareerApplyLedger : req("./157-career-apply-ledger.js"); } catch { return req("./157-career-apply-ledger.js"); } };
+  // IB-AP-8 (SC-081): the governed portal-account flow's own matcher (dispatchChat, below); one definition for both seams.
+  const PORTAL_ACCOUNT_ASK = /\bportal\b[^.]*\baccount\b|\bworkday\b[^.]*\baccount\b|\bcreate\b[^.]*\b(alias|account|password|vault)\b|\b(alias email|vault password)\b|\bconfirm\b[^.]*\bportal\b/;
   function handleMassApplyState(text, c) {
     const Ledger = getApplyLedger();
     if (!Ledger) return null;
     const ask = Ledger.askOf(text);
     if (!ask) return null;
+    // A portal-account ask the governed flow takes (a profile on record and its matcher) stays that flow's: it carries the
+    // typed portal_account_step (committed:false) and the approval path; the ledger answers only what it would not.
+    if (ask.kind === "portal_account" && c.profile && PORTAL_ACCOUNT_ASK.test(lc(text))) return null;
     if (ask.kind === "list_apply_all") {
       const bound = handleShortlistApply("apply to all of them", c);
       if (bound) return bound;
@@ -50241,7 +50246,7 @@ const CareerRouter = (() => {
     // IB-AP-8: the portal-account branch sits BEFORE the people-ask
     // matchers — "email" + no job noun used to route a credential ask
     // into the campaign plan (SC-081).
-    if (/\bportal\b[^.]*\baccount\b|\bworkday\b[^.]*\baccount\b|\bcreate\b[^.]*\b(alias|account|password|vault)\b|\b(alias email|vault password)\b|\bconfirm\b[^.]*\bportal\b/.test(t) && profile) {
+    if (PORTAL_ACCOUNT_ASK.test(t) && profile) {
       const pa = handlePortalAccountAsk(text, c);
       if (pa) return pa;
     }

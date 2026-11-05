@@ -282,6 +282,7 @@ MIGRATIONS=(
   20261105150000_trainee_file_erase_r4.sql
   20261105160000_channel_delivery_r4.sql
   20261105170000_proactive_r4.sql
+  20261105180000_career_claim_deadlock.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -433,6 +434,7 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_trigger where tgname = 'trainee_file_erase_on_epoch' and tgrelid = 'public.career_watch_kv'::regclass) and exists (select 1 from pg_proc where proname = 'trainee_file_erase_on_epoch' and prosrc like '%trainee_file_logins%')"
   "exists (select 1 from pg_trigger where tgname = 'channel_contacts_keep_stop' and tgrelid = 'public.channel_contacts'::regclass)"
   "exists (select 1 from pg_proc where proname = 'career_alert_enqueue' and prosrc like '%r.sent_on >= p_day%' and prosrc like '%greatest(r.sent_on, p_day)%')"
+  "exists (select 1 from pg_proc where proname = 'career_outreach_action_claim' and prosrc like '%career_outreach_action_claim:%' and prosrc like '%ok_threads%')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql

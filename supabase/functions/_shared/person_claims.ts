@@ -33,6 +33,7 @@
 //     holder", "as an American", "a U.S. person"), military service ("served in the army"), awards and publications, and
 //     fractions ("by a third").
 import { redactIdentity } from "./identity_redact.ts";
+import { claimProblems as baselineClaimProblems } from "./person_claims_baseline.ts";
 
 // company: the posting's own company, whose name is never a claim ("why Visa", "why Stripe", "why 23andMe") unless it is
 // said as where the person worked or studied.
@@ -137,11 +138,64 @@ const DEMOGRAPHIC = [
   /\bqueer\b/, /\blgbtq?i?a?\+?(?![a-z])/, /\bhispanic\b/, /\blatin[oax]s?\b/, /\bafrican[- ]american\b/, /\bnative american\b/,
   /\bpacific islander\b/, /\balaska native\b/, /\bpronouns?\b/, /\b(?:she|he|they)\/(?:her|him|them)\b/,
   /\bmy (?:gender|race|ethnicity|religion|sexual orientation|national origin)\b/,
-  /\b(?:i am|i'm|as) an? (?:black|white|asian|indigenous|woman|man|female|male|mother|father|immigrant|muslim|christian|jewish|hindu|first[- ]generation)\b/,
   // Round 2: military service said without the word "veteran".
   /\bserved in the (?:u\.?s\.? )?(?:army|navy|marines?|marine corps|air force|coast guard|military|armed forces|national guard|space force|reserves?)\b/,
   /\b(?:active[- ]duty|military service|military spouse|reservist)\b/,
 ];
+// "As a Black woman, ...", "I am an immigrant": who the person says they are. A record of strings cannot tell a confirmed
+// identity answer from free text ("Six Sigma Black Belt", "Black and white film photography", "White and gray box testing",
+// "Taught English to immigrant families", "Mentor, First-Generation Student Program", "Skills: Python, Black"), and every
+// word match round 4 tried accepted some of them (review of #507). So it is never written: how a person identifies is
+// asked by the form's own voluntary question, which they answer themselves.
+// PHRASINGS (review of #512, 2026-11-05): "As a / I am a <word>" missed every other way of saying it ("I am Black and ...",
+// "Being a Black woman", "As someone who is Black", "As a proud Black analyst", "As a young Asian woman", "I'm a proud
+// immigrant", "As a single mother", "As a working mom", "I'm Jewish and", "As the daughter of immigrants", "the first in my
+// family to attend college", "I identify as ..."), and the DEMOGRAPHIC loop let "As a Hispanic analyst" through on a record
+// that says "Hispanic Scholarship Fund". Policy (D-007): race or ethnicity, religion, sexual orientation or gender identity,
+// immigration or national origin, family or parental status and first-generation status are never written about the
+// person, whatever the record holds; disability, veteran status and work rights still follow the record (DEMOGRAPHIC,
+// veteranProblems, AUTHORIZATION). An identity word is a claim when it is said of the person: after "I am", "I'm", "as",
+// "being", "as someone who is", "I consider myself", "proud to be" ..., with up to three describing words between ("a proud
+// Black analyst"), not after a preposition ("I volunteered with the Hispanic Scholarship Fund" names an organisation, held
+// to the record by DEMOGRAPHIC), and not as part of a compound ("Six Sigma Black Belt", "white-box testing", "Black Friday").
+const ID_WORDS = [
+  // race and ethnicity
+  "black", "white", "asian", "indigenous", "hispanic", "latin[oax]s?", "latine", "chican[oax]", "african[- ]american", "native american",
+  "pacific islander", "alaska native", "biracial", "multiracial", "mixed[- ]race", "(?:person|woman|man|people|women|men) of colou?r", "poc", "bipoc", "arab",
+  "[a-z]+-american",
+  // religion
+  "muslim", "christian", "jewish", "jew", "hindu", "sikh", "buddhist", "catholic", "protestant", "mormon", "evangelical", "atheist", "agnostic",
+  // sexual orientation and gender identity
+  "gay", "lesbian", "bisexual", "queer", "lgbtq?(?:ia)?\\+?", "transgender", "trans", "non-?binary", "genderqueer", "genderfluid", "cisgender",
+  "woman", "man", "female", "male", "girl",
+  // immigration and national origin
+  "immigrant", "refugee", "asylee", "undocumented", "dreamer", "daca recipient",
+  "(?:daughter|son|child|children|kid|grandchild|granddaughter|grandson)s? of (?:an? )?(?:[a-z-]+ )?(?:immigrants?|refugees?)",
+  // first-generation status
+  "first[- ]gen(?:eration)?",
+  // family and parental status
+  "(?:mother|father|mom|mum|dad|parent)s?-to-be", "expectant (?:mother|father|parent)",
+  "mother", "father", "mom", "mum", "dad", "parent", "stepmother", "stepfather", "stepmom", "stepdad", "wife", "husband", "widow", "widower", "pregnant",
+].join("|");
+const ID_FRAME = "i am|i'm|im|i was|i've been|i have been|as|being|i consider myself|i see myself as|proud to be|as someone who is|as someone who's|as somebody who is|as a person who is|as one who is|as someone who identifies as";
+const ID_FILL = "(?:(?!(?:to|with|for|from|by|under|of|about|and|or|on|at|in|who|that|which|the|a|an|my|our|your|their|his|her|its|this|these|those|such)\\b)[a-z-]+\\s+){0,3}?";
+// The word goes on into another word ("black-box", "Black Belt", "white paper", "male-dominated", "the parent company", "a
+// Girl Scout leader"): no identity. REVIEW OF #514 (2026-11-05): an organisation after the identity word, said of the person
+// ("As a Muslim community center volunteer", "As a Jewish foundation fellow", "As a Black network founder", "As a Black
+// scholarship recipient"), says who they are all the same: no longer exempt.
+const ID_COMPOUND = "(?![a-z0-9]|-[a-z]|\\s+(?:belts?|box|boxes|papers?|hats?|collar|boards?|space|list|listed|labels?|gloves?|sigma|holes?|swans?|friday|tie|water|noise|house|hat|ops|pages?|goods?|sox|ink|scouts?|company|companies|entity|node)\\b)";
+const SELF_ID = new RegExp(`\\b(?:${ID_FRAME})\\s+(?:(?:a|an|the|one)\\s+)?${ID_FILL}(?:${ID_WORDS})${ID_COMPOUND}`);
+// REVIEW OF #514 (2026-11-05, D-007): other ways of saying it: "a woman-identifying engineer", "Black-identifying",
+// "gay-identifying"; "a member of the Black community"; "Black and proud"; "My family came here as refugees".
+const SELF_ID_MORE = new RegExp([
+  `\\b(?:${ID_WORDS})[- ](?:identifying|identified|presenting)\\b`,
+  `\\b(?:member|members|part) of (?:the|my|our|a) (?:(?:local|wider|broader) )?(?:${ID_WORDS}) (?:community|communities|diaspora|faith|congregation)\\b`,
+  `\\b(?:${ID_WORDS}) (?:and|&) proud\\b|\\bproudly (?:${ID_WORDS})${ID_COMPOUND}`,
+  `\\bmy (?:parents|family|grandparents|mother|father|mom|mum|dad)\\b[^.!?]{0,40}\\b(?:refugees?|immigrants?|asylum|asylees?|fled|immigrated|emigrated)\\b`,
+  `\\b(?:came|arrived|fled)\\b[^.!?]{0,40}\\bas (?:an? )?(?:refugees?|immigrants?|asylum seekers?|asylees?)\\b`,
+].join("|"));
+// Said of the person whatever the frame: who they say they are, their pronouns, their family.
+const SELF_ID_ALWAYS = /\bi identify as\b|\bi self[- ]identify\b|\bmy (?:gender(?: identity)?|race|ethnicity|ethnic background|religion|faith|sexual orientation|sexuality|national origin|immigration status|heritage|pronouns?)\b|\b(?:she|he|they)\/(?:her|him|them)\b|\bfirst (?:person )?in (?:my|our) family\b|\bmy (?:kids|children|son|sons|daughter|daughters|husband|wife|spouse|toddler|baby)\b|\bi have (?:a|an|one|two|three|four|five|\d+) (?:young |little |small )?(?:kids?|children|child|sons?|daughters?|toddlers?|babies|baby)\b|\bi (?:immigrated|emigrated)\b|\bmy (?:parents|family) (?:immigrated|emigrated|came to this country|were immigrants|are immigrants|fled)\b/;
 const MILITARY = "army|navy|marines?|marine corps|air force|coast guard|military|armed forces|national guard|space force|reserves?|war|combat|service";
 // Leadership, by family: a fact that says the same family of word (a noun that only shares the stem, "the management
 // team", "the leadership team", is no claim to have managed or led anyone). `role`: the match is a role noun, a claim only
@@ -340,17 +394,38 @@ function titleProblems(t: string, rec: string, add: (s: string) => void) {
     add(`the title "${m[0].trim()}" is not on your confirmed record`);
   }
 }
-// Screening answers said in prose: each family's own words must be on the record.
-const SCREENING: { said: RegExp; on: RegExp; what: string }[] = [
-  { said: /\b(?:convicted|convictions?|felony|felonies|misdemeanou?rs?|criminal (?:record|history|background|charges?|convictions?)|clean (?:criminal )?(?:record|background)|arrested|background checks?)\b/,
-    on: /\b(?:convict\w*|felon\w*|misdemeanou?r\w*|criminal|arrest\w*|background check\w*)\b/, what: "criminal history or a background check" },
-  { said: /\bdrug (?:tests?|screens?|screening|testing)\b/, on: /\bdrug (?:test|screen)/, what: "a drug test" },
-  { said: /\b(?:willing|able|happy|open|ready|glad|prepared|free) to (?:relocate|move)\b|\b(?:can|will|would|could) (?:relocate|move) (?:to|for|anywhere)\b/, on: /\breloca\w*|\bwilling to move\b/, what: "willingness to relocate" },
-  { said: /\b(?:start|begin|join|available) (?:immediately|right away|asap|straight away|next week|next month|within (?:a|one|two|three|\d+) (?:days?|weeks?|months?))\b|\bavailable (?:to start|to begin|from|starting)\b|\b(?:two|2|four|4|one|1) weeks'? notice\b|\bnotice period\b/,
-    on: /\b(?:start date|available|availability|notice)\b/, what: "when you can start" },
-  { said: /\b(?:five|six|seven|low six|mid six|high six|low five|high five)[- ]figures?\b|\b(?:salary|pay|compensation) (?:expectations?|requirements?|range|target|of)\b|\b(?:expect|expecting|seeking|looking for|targeting|asking for|ask for|need|require)\b[^.!?;]{0,25}\b(?:salary|base pay|base salary|compensation|pay)\b/,
-    on: /\b(?:salary|compensation|pay)\b/, what: "a salary expectation" },
+// Screening answers said in prose (criminal history, a background check, a drug test, relocation, a start date, pay):
+// never written. The form asks each on its own and the person answers it there (review of #507: no record word, "B.A.
+// Criminal Justice", "Available from June", "Not willing to relocate", "Compensation range analysis", is their answer).
+// PHRASINGS (review of #512): "I'd relocate", "open to relocation", "any background screening", "never been charged",
+// "no prior offenses", "criminal records", "drug-free", "expected / desired / target salary", "I'm looking for $120,000",
+// "I can start in 2 weeks", "I could begin in two weeks" got through; and work the person did ("I ran background checks for
+// 300 new hires", "I built a salary range model", "I prosecuted felony cases", "I coordinated drug testing for 300 drivers")
+// was refused for its topic words. A screening word is no answer when it is the object of work the person did: said after
+// "I <past action verb>" (or a bullet that opens with one), not negated, its words on the record (workDone).
+const TIME_WORD = "\\d+|a|an|one|two|three|four|five|six|a few|a couple of|couple of|next|this|early|mid|late|january|february|march|april|may|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|q[1-4]";
+const SCREENING: { said: RegExp; what: string }[] = [
+  { said: /\b(?:convicted|convictions?|felony|felonies|misdemeanou?rs?|criminal(?!\s+(?:justice|law|procedure|psychology|defen[cs]e|investigations?)\b)(?: (?:records?|history|background|charges?|convictions?|offen[cs]es?))?|clean (?:criminal )?(?:records?|background)|arrested|arrests?|charged with|(?:prior|criminal|past) offen[cs]es?|offen[cs]es|crimes?|jail|prison|incarcerat\w*|background (?:checks?|screens?|screenings?|investigations?|checked))\b|\b(?:my )?(?:criminal |police |legal |personal )?record (?:is|was|has been|remains|stays) (?:spotless|clean|clear|unblemished|perfect|blank)\b|\b(?:spotless|unblemished) (?:criminal |police |legal )?record\b|\btrouble with (?:the )?(?:law|police|cops|authorities)\b|\brun-?ins? with (?:the )?(?:law|police|cops|authorities)\b|\bnever (?:been )?(?:in|into|in any) (?:legal )?trouble\b/, what: "criminal history or a background check" },
+  { said: /\bdrug (?:tests?|screens?|screening|screenings|testing)\b|\bdrug[- ]free\b|\b(?:tested|test) (?:negative|clean)\b|\bclean (?:drug )?(?:test|screen)\b/, what: "a drug test" },
+  { said: /\b(?:willing|able|happy|open|ready|glad|prepared|free|eager|excited|planning|plan|intend|intending) to (?:relocate|move|relocating|relocation|moving)\b|\bopen to (?:relocation|relocating|moving)\b|\brelocat(?:e|ing|ion)\b|\b(?:can|will|would|could|i'd|i'll) (?:\w+ )?move (?:to|for|anywhere|across)\b|\bi(?:'m| am) moving to\b|\b(?:i|we)(?: have| had|'ve)? (?:relocated|moved) (?:for|to|across|cities|states|countries|abroad)\b[^.!?]{0,60}\b(?:would|will|could|happy|willing|again)\b/, what: "willingness to relocate" },
+  { said: new RegExp(`\\b(?:start|begin|join|available) (?:immediately|right away|asap|straight away|next week|next month|within (?:a|one|two|three|\\d+) (?:days?|weeks?|months?))\\b|\\bavailable (?:to start|to begin|from|starting)\\b|\\b(?:two|2|four|4|one|1) weeks'? notice\\b|\\bnotice period\\b|\\bmy (?:current |contractual |required )?notice\\b|\\b(?:can|could|will|would|able to|ready to|available to|i'd|i'll) (?:start|begin|join|onboard)(?: work| working| the role| with you)? (?:on|in|by|within|from|after|as of|as soon as) (?:${TIME_WORD})\\b|\\b(?:my|earliest|possible|available|proposed|expected) start date\\b|\\bstart date (?:is|of|would)\\b`), what: "when you can start" },
+  { said: /\b(?:five|six|seven|low six|mid six|high six|low five|high five)[- ]figures?\b|\b(?:salary|pay|compensation|comp) (?:expectations?|requirements?|range|target|of|is|would be)\b|\b(?:expect\w*|desired?|target(?:ed|ing)?|requested|ideal|minimum|asking|seeking|looking for|ask for|need|require)\b[^.!?;]{0,25}\b(?:salary|base pay|base salary|compensation|comp|pay|rate|package|ote)\b|\b(?:looking for|seeking|asking for|expect\w*|want|need|require|targeting|aiming for)\b[^.!?;]{0,20}\$\s?\d/, what: "a salary expectation" },
 ];
+// What a person did, not what they are: "I ran", "I built", "Coordinated" (a bullet). Verbs that say what happened to them
+// (passed, cleared, underwent, was, been, got, relocated, started ...) are their answer, not their work.
+const NOT_WORK = new Set("passed failed cleared completed underwent undergone took taken had has have got gotten received been was were am is are convicted charged arrested tested screened submitted consented agreed signed relocated moved started began joined expected requested earned asked sought wanted needed required hoped planned intended said stated declared answered disclosed told reported confirmed attested certified volunteered welcomed accepted offered invited embraced underwent".split(" "));
+const IRREGULAR_DONE = new Set("ran built led wrote drove oversaw taught set sent kept held brought sold found made rebuilt rewrote ran upheld undertook won spun stood shipped".split(" "));
+function workDone(t: string, at: number, said: string, rec: string): boolean {
+  const before = sentenceBefore(t, at);
+  const subj = [...before.matchAll(/(?:^\s*(?!i\s)|\bi\s+)(?:also\s+|then\s+|personally\s+|successfully\s+|independently\s+)?([a-z']+)\s/g)].pop();
+  if (!subj) return false;
+  const verb = subj[1];
+  if (NOT_WORK.has(verb) || !(IRREGULAR_DONE.has(verb) || /^[a-z]{3,}ed$/.test(verb))) return false;
+  const between = before.slice(subj.index! + subj[0].length);
+  if (/\b(?:never|not|no|without|myself|me|my|pass|passed|clear|cleared|complete|undergo|take|took|fail|failed)\b|n't\b/.test(between)) return false;
+  // Its words on the record (a plural, a tense, aside): "background checks" on "Ran background checks for ...".
+  return said.split(/\s+/).filter((w) => w.length >= 4).every((w) => new RegExp(`(?<![a-z])${esc(w.replace(/(?:s|es|ed|ing)$/, ""))}`).test(rec));
+}
 // The names a posting (its question, its company) gives: capitalized inside a sentence, or an acronym. A question written
 // in title case ("Tell Us About A Time You Led A Project") names nothing by its capitals: only its acronyms count there.
 function postingNames(mentionRaw: string, company: string): string[] {
@@ -425,7 +500,17 @@ function gpaProblems(t: string, rec: string, add: (s: string) => void) {
   for (const g of gpasOf(t)) if (!on.has(g)) add(`a GPA of ${g} is not the GPA on your confirmed record`);
 }
 
+// RELEASE 2 FLOOR (architect, 2026-11-05; D-007): this release refuses every text production (03edad41f) refuses. The
+// problems are the current checks' and the frozen production checks' (person_claims_baseline.ts), together, each once.
+// Every caller (essay_draft.ts, career_materials_guard.ts, career_tailor_rewrite.ts, ...) gets the union through here.
+// Remove only with an architect decision.
 export function claimProblems(text: string, o: ClaimInput): string[] {
+  const out = currentClaimProblems(text, o);
+  for (const p of baselineClaimProblems(text, o)) if (!out.includes(p)) out.push(p);
+  return out;
+}
+
+function currentClaimProblems(text: string, o: ClaimInput): string[] {
   const raw = String(text ?? "");
   if (!raw.trim()) return [];
   const out: string[] = [];
@@ -449,15 +534,19 @@ export function claimProblems(text: string, o: ClaimInput): string[] {
   { const m = NATIONALITY.exec(t); if (m && !hasPhrase(rec, (m[1] || m[2] || m[3]))) add(`a nationality ("${m[0].trim()}") is not on your confirmed record`); }
   for (const re of DEMOGRAPHIC) {
     const m = re.exec(t);
-    // ROUND 4: what they said they are ("first-generation") is the claim; "as a" or "I am a" around it is not.
-    if (m && !hasPhrase(rec, m[0].trim()) && !hasPhrase(rec, m[0].trim().replace(/^(?:i am|i'm|as) an? /, ""))) add(`"${m[0].trim()}" (how you identify) is not on your confirmed record`);
+    if (m && !hasPhrase(rec, m[0].trim())) add(`"${m[0].trim()}" (how you identify) is not on your confirmed record`);
   }
+  // Review of #507: how the person identifies is never written for them, whatever the record holds (SELF_ID).
+  for (const re of [SELF_ID, SELF_ID_ALWAYS, SELF_ID_MORE]) { const m = re.exec(t); if (m) add(`"${m[0].trim()}" (how you identify) is not written into an answer: the form asks it on its own`); }
   veteranProblems(t, rec, add);
   // ROUND 4: a title, a screening answer, a date on a named entry, a GPA (see above).
   titleProblems(t, lower(recordRaw.replace(/\n|;/g, " | ")), add);
   for (const sc of SCREENING) {
-    const m = sc.said.exec(t);
-    if (m && !sc.on.test(rec)) add(`${sc.what} ("${m[0].trim()}") is not on your confirmed record`);
+    for (const m of t.matchAll(all(sc.said))) {
+      if (workDone(t, m.index!, m[0].trim(), rec)) continue;
+      add(`${sc.what} ("${m[0].trim()}") is answered on the application form, not in writing`);
+      break;
+    }
   }
   dateProblems(scrub, (o.record || []).filter(Boolean), add);
   gpaProblems(t, rec, add);

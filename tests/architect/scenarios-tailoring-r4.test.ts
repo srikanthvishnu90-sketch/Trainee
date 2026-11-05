@@ -11,7 +11,7 @@
 //              tailored line (guardMaterials); the record's own title, degree, GPA and dates: shown
 //   screening  prose answering what the person never answered (criminal history, a background check, a drug test,
 //              relocation, a start date, a salary, sponsorship, work rights, disability, how they identify): never shown;
-//              the same words on their record: shown
+//              sponsorship, work rights, disability on their record: shown; the rest never, the form asks (review of #507)
 //   batch      a cover letter drafted for one posting of a batch, checked for another posting of it (the prepare-ahead
 //              re-check): never shown when it names the other employer or role; the posting's own letter always is
 //   eeo        a texted answer to one voluntary question (disability, veteran, ethnicity, gender identity) never answers
@@ -29,6 +29,7 @@ import assertNode from "node:assert/strict";
 import * as core from "../../supabase/functions/_shared/router_core.career.js";
 import { checkDraft, draftEssay, draftReply, type DraftOutcome } from "../../supabase/functions/_shared/essay_draft.ts";
 import { guardMaterials } from "../../supabase/functions/_shared/career_materials_guard.ts";
+import { claimProblems } from "../../supabase/functions/_shared/person_claims.ts";
 import { factStaysHere, normLabel, planBatch, type FormField } from "../../supabase/functions/_shared/career_apply.ts";
 import { answerKey } from "../../supabase/functions/_shared/question_map.ts";
 import { factsWithTextAnswers, questionsToStore } from "../../workers/career-browser/ask-once.ts";
@@ -41,6 +42,8 @@ const SEED = 20261105;
 const NOW = Date.parse("2026-11-05T15:00:00Z");
 type Fails = Map<string, string[]>;
 const fail = (f: Fails, family: string, line: string) => { if (!f.has(family)) f.set(family, []); f.get(family)!.push(line); };
+import { R4_DECOYS, R512_CLAIMS, R512_RECORDS, R512_WORK } from "./scenarios/tailoring-r4-claims.ts";
+export { R4_DECOYS, R512_CLAIMS, R512_RECORDS, R512_WORK };
 export const TOTALS: Record<string, number> = {};
 function report(f: Fails, total: number, what: string, extra = "") {
   const n = [...f.values()].reduce((a, b) => a + b.length, 0);
@@ -72,21 +75,31 @@ function toldProblems(n: number, q: ReturnType<typeof essayQ>, d: DraftOutcome, 
   return out;
 }
 
-async function draftBattery(name: string, cases: DraftCase[], f: Fails) {
-  let shown = 0, refused = 0, thin = 0, drafted = 0;
+// RELEASE 2 FLOOR (architect, 2026-11-05; D-007): release 2 refuses every draft production (03edad41f) refuses, and
+// production refuses an honest decimal ("a 3.6 GPA" read as "3." and "6"). An honest draft holding a decimal is counted
+// (deferred), not failed, while the floor stands; strict = true is the "after release 2" check (ignored tests below).
+const honestDecimal = (text: string) => /\d\.\d/.test(text);
+async function draftBattery(name: string, cases: DraftCase[], f: Fails, strict = false) {
+  let shown = 0, refused = 0, thin = 0, drafted = 0, deferred = 0;
   for (const [i, c] of cases.entries()) {
     const q = essayQ(c.label, c.company);
     const a = await checkDraft({ q, siblingLabels: [], deps: { facts: () => c.p.facts }, text: c.text });
     if (!a.ok && a.why === "thin") { thin++; continue; }
     const tag = `${JSON.stringify(c.text.slice(0, 200))} for ${JSON.stringify(c.label)}`;
     if (c.bad && a.ok) fail(f, `${c.family}:shown`, `${tag} (${c.bad} is not on the record)`);
-    if (!c.bad && !a.ok) fail(f, `${c.family}:honest-refused`, `${tag} -> ${a.why}: ${a.detail.join("; ")}`);
+    if (!c.bad && !a.ok) {
+      if (!strict && honestDecimal(c.text)) deferred++;
+      else fail(f, `${c.family}:honest-refused`, `${tag} -> ${a.why}: ${a.detail.join("; ")}`);
+    }
     if (a.ok) shown++; else refused++;
     if (c.bad && i % 3 === 0) {
       // the drafter: the planted draft first, an honest one after; only the honest one is ever shown
       const d = await draftEssay({ q, siblingLabels: [], deps: { model: fakeModel([c.text, c.honest]).model, facts: () => c.p.facts } });
       if (d.ok && d.text !== c.honest) fail(f, `${c.family}:drafted`, `${tag} -> shown ${JSON.stringify(d.text.slice(0, 160))}`);
-      if (!d.ok && d.why !== "thin") fail(f, `${c.family}:honest-retry-refused`, `${tag} -> ${d.why}: ${d.detail.join("; ")}`);
+      if (!d.ok && d.why !== "thin") {
+        if (!strict && honestDecimal(c.honest)) deferred++;
+        else fail(f, `${c.family}:honest-retry-refused`, `${tag} -> ${d.why}: ${d.detail.join("; ")}`);
+      }
       if (d.ok) drafted++;
       // told: the planted draft twice, so nothing passes
       const twice = await draftEssay({ q, siblingLabels: [], deps: { model: fakeModel([c.text, c.text]).model, facts: () => c.p.facts } });
@@ -94,7 +107,8 @@ async function draftBattery(name: string, cases: DraftCase[], f: Fails) {
       else for (const x of toldProblems(i % 9 + 1, q, twice, c.text)) fail(f, `${c.family}:told`, `${tag}: ${x}`);
     }
   }
-  return `${shown} shown, ${refused} refused, ${thin} too thin, ${drafted} honest retries shown`;
+  return `${shown} shown, ${refused} refused, ${thin} too thin, ${drafted} honest retries shown` +
+    (deferred ? `, ${deferred} honest drafts with a decimal refused by the release 2 floor (shown after release 2)` : "");
 }
 
 Deno.test("echo: the question's own words are never said as the person's experience; named otherwise, they pass", async () => {
@@ -127,6 +141,13 @@ Deno.test("upgrade: a title, degree, GPA or date never moves past the record, in
   TOTALS.upgrade = cases.length;
   assertNode.equal(report(f, cases.length, "upgrades", `${extra}; ${lines} tailored entries checked`), 0);
 });
+
+Deno.test({ name: "after release 2: honest decimals in the upgrade battery are shown (#507)", ignore: true, fn: async () => {
+  const cases = upgradeCases(rng(SEED + 1), 2000);
+  const f: Fails = new Map();
+  const extra = await draftBattery("upgrade", cases, f, true);
+  assertNode.equal(report(f, cases.length, "upgrades (strict, after release 2)", extra), 0);
+} });
 
 Deno.test("screening: criminal history, relocation, a start date, pay, work rights or identity only as the person said it", async () => {
   const cases = screeningCases(rng(SEED + 2), 1500);
@@ -346,10 +367,12 @@ Deno.test("round 4 regressions: one case per bug, each as trunk got it wrong", a
   assertNode.equal(await shown("Tell us about yourself.", `I worked at Acme Corp from 2018 to 2022, where I built Tableau dashboards for 40 sales reps.`), false);
   assertNode.equal(await shown("Tell us about yourself.", `I graduated from Ridgeview University with a 3.8 GPA.${tail}`), false);
   assertNode.equal(await shown("Tell us about yourself.", `I hold a Master of Science in Statistics from Ridgeview University.${tail}`), false);
-  // essay_draft.ts: an honest decimal (the record's own GPA) was read as two numbers and refused
-  assertNode.equal(await shown("Tell us about yourself.", `I graduated from Ridgeview University with a 3.4 GPA.${tail}`), true);
-  // person_claims.ts: how they identify, on the record, said "as a ..." was refused
-  assertNode.equal(await shown("Tell us about yourself.", `As a first-generation college student, I worked hard.${tail}`), true);
+  // essay_draft.ts: an honest decimal (the record's own GPA) was read as two numbers and refused. RELEASE 2 FLOOR (D-007):
+  // production refuses it, so release 2 does too (the check that it is shown is the ignored "after release 2" test below).
+  assertNode.equal(await shown("Tell us about yourself.", `I graduated from Ridgeview University with a 3.4 GPA.${tail}`), false);
+  // person_claims.ts: how they identify said "as a ..." (review of #507: never written, even with the fact on record; the
+  // form's own voluntary question asks it)
+  assertNode.equal(await shown("Tell us about yourself.", `As a first-generation college student, I worked hard.${tail}`), false);
   // question_map.ts / career_apply.ts: one voluntary answer filled every other voluntary question
   const dis = field("Do you have a disability?", ["Yes", "No", "I don't wish to answer"]);
   assertNode.ok(answerKey(dis, "jobA").startsWith("job:"));
@@ -371,3 +394,103 @@ Deno.test("round 4 regressions: one case per bug, each as trunk got it wrong", a
   const cpp = plan([field("Years of experience with C#", [])], { ...BASE }, { [normLabel("Years of experience with C++")]: { value: "6", factId: "text-answer:x" } });
   assertNode.equal(cpp.ready.length, 0);
 });
+
+Deno.test({ name: "after release 2: an honest decimal (the record's own GPA) is shown (#507)", ignore: true, fn: async () => {
+  const conf = { status: "confirmed", needs_confirmation: false, source: "user" };
+  const facts = [
+    { id: "F-1", kind: "experience", title: "Data Analyst, Acme Corp, 2019-2022", org: "Acme Corp", role: "Data Analyst", start: "2019", end: "2022",
+      bullets: ["Built Tableau dashboards for 40 sales reps", "Presented weekly findings to senior leadership", "Owned the master data cleanup for the CRM", "Cut dashboard load time by 3.8 seconds"], ...conf },
+    { id: "F-2", kind: "education", title: "B.S. Statistics, Ridgeview University, 2018", school: "Ridgeview University", degree: "B.S. Statistics", text: "GPA 3.4/4.0", ...conf },
+  ];
+  const text = "I graduated from Ridgeview University with a 3.4 GPA. At Acme Corp, I built Tableau dashboards for 40 sales reps.";
+  assertNode.equal((await checkDraft({ q: essayQ("Tell us about yourself.", "Larkspur Health"), siblingLabels: [], deps: { facts: () => facts }, text })).ok, true);
+} });
+
+// Review of #507 (2026-11-05, architect decision on rv57): round 4's fixes for an honest identity and for screening answers
+// accepted a word on the record in another sense, and every word match tried after them accepted others. A record of strings
+// cannot tell a confirmed identity answer from free text, so "As a / I am a <identity>" is never written; a screening answer
+// (criminal history, a background check, a drug test, relocation, a start date, pay) is never written either: the form asks
+// each on its own. Each decoy below was shown at #507's head (66faf5c32) or at #512's first head (6e8db93bd).
+Deno.test("review of #507: an identity or a screening answer is never written into prose, whatever the record holds", async () => {
+  const conf = { status: "confirmed", needs_confirmation: false, source: "user" };
+  const base = [{ id: "F-1", kind: "experience", title: "Data Analyst, Acme Corp, 2019-2022", org: "Acme Corp", role: "Data Analyst", start: "2019", end: "2022",
+    bullets: ["Built Tableau dashboards for 40 sales reps"], ...conf },
+    { id: "F-2", kind: "education", title: "B.S. Statistics, Ridgeview University, 2018", school: "Ridgeview University", degree: "B.S. Statistics", text: "GPA 3.4/4.0", ...conf }];
+  const tail = " At Acme Corp, I built Tableau dashboards for 40 sales reps.";
+  const shown = async (text: string, record: string) => {
+    const a = await checkDraft({ q: essayQ("Tell us about yourself.", "Larkspur Health"), siblingLabels: [],
+      deps: { facts: () => [...base, { id: "F-3", kind: "other", title: "How I describe myself", text: record, ...conf }] }, text: `${text}${tail}` });
+    assertNode.notEqual(a.ok ? "" : a.why, "thin", `${JSON.stringify(text)}: too few facts to judge`);
+    return a.ok;
+  };
+  const recordOf = (record: string) => ["Data Analyst, Acme Corp, 2019-2022; Built Tableau dashboards for 40 sales reps", "B.S. Statistics, Ridgeview University, 2018; GPA 3.4/4.0", record];
+  // the control: the honest line alone is shown, so a refusal below is the claim's
+  assertNode.equal(await shown(tail.trim(), "Black and white film photography"), true);
+  for (const d of R4_DECOYS) {
+    assertNode.equal(await shown(d.text, d.record), false, `${d.why}: ${JSON.stringify(d.text)} shown on ${JSON.stringify(d.record)}`);
+    assertNode.notDeepEqual(claimProblems(d.text, { record: recordOf(d.record) }), [], `${d.why}: ${JSON.stringify(d.text)} passed on ${JSON.stringify(d.record)}`);
+  }
+});
+
+// Review of #512 (2026-11-05, architect decision, D-007): "As a / I am a <identity>" missed every other way of saying who
+// the person is, the record-word exemption still let "As a Hispanic analyst" through on "Member, Hispanic Scholarship Fund",
+// screening answers in other words got through, and honest work lines were refused for their topic words. Each claim below
+// was shown at #512's head (19c8c2888) on at least one record, several only once an honest on-record decimal ("My GPA was
+// 3.4.") is in the same draft. Never written in prose, whatever the record holds: race or ethnicity, religion, sexual
+// orientation or gender identity, immigration or national origin, family or parental status, first-generation status, and
+// every screening answer. Disability, veteran status and work rights still follow the record (unchanged).
+// The records each claim is tried on: none, look-alike words, the claim's own numbers, the identity words on an
+// organisation, and the claim itself in the person's own words.
+// Work the person did, on their record: never a screening answer, never refused for its topic words.
+// RELEASE 2 FLOOR (architect, 2026-11-05; D-007): release 2 refuses every draft production (03edad41f) refuses, and
+// production refuses an honest on-record decimal ("My GPA was 3.4." splits into "3." and "4"). So for release 2 the claims
+// below are refused with and without the decimal tail, and the honest drafts and work lines are shown without it; with it,
+// they are shown only after release 2 (the ignored test below, kept so the loosening comes back with its proof).
+const R512_TAIL_DECIMAL = " At Acme Corp, I built Tableau dashboards for 40 sales reps. My GPA was 3.4.";
+const R512_TAIL_PLAIN = " At Acme Corp, I built Tableau dashboards for 40 sales reps.";
+Deno.test("review of #512: identity and screening answers in any phrasing are never written; work the person did is", async () => {
+  for (const tail of [R512_TAIL_DECIMAL, R512_TAIL_PLAIN]) await review512(tail, { refusals: true, accepts: tail === R512_TAIL_PLAIN });
+});
+Deno.test({ name: "after release 2: with an honest on-record decimal in the draft, the honest draft and work lines are shown (#507, #514)", ignore: true, fn: async () => {
+  await review512(R512_TAIL_DECIMAL, { refusals: false, accepts: true });
+} });
+async function review512(tail: string, run: { refusals: boolean; accepts: boolean }) {
+  const conf = { status: "confirmed", needs_confirmation: false, source: "user" };
+  const base = [{ id: "F-1", kind: "experience", title: "Data Analyst, Acme Corp, 2019-2022", org: "Acme Corp", role: "Data Analyst", start: "2019", end: "2022",
+    bullets: ["Built Tableau dashboards for 40 sales reps"], ...conf },
+    { id: "F-2", kind: "education", title: "B.S. Statistics, Ridgeview University, 2018", school: "Ridgeview University", degree: "B.S. Statistics", text: "GPA 3.4/4.0", ...conf }];
+  // tail: R512_TAIL_DECIMAL holds an honest on-record decimal (#507 fixed decimals, which unmasked several of these)
+  const draft = async (text: string, record: string) => {
+    const facts = record ? [...base, { id: "F-3", kind: "other", title: "How I describe myself", text: record, ...conf }] : base;
+    const a = await checkDraft({ q: essayQ("Tell us about yourself.", "Larkspur Health"), siblingLabels: [], deps: { facts: () => facts }, text: `${text}${tail}` });
+    assertNode.notEqual(a.ok ? "" : a.why, "thin", `${JSON.stringify(text)}: too few facts to judge`);
+    return a;
+  };
+  const recordOf = (record: string) => ["Data Analyst, Acme Corp, 2019-2022; Built Tableau dashboards for 40 sales reps", "B.S. Statistics, Ridgeview University, 2018; GPA 3.4/4.0", record].filter(Boolean);
+  const named = (why: string) => why === "identity" ? /how you identify/ : /answered on the application form/;
+  // the control: the honest draft alone is shown on every record
+  if (run.accepts) for (const r of R512_RECORDS("")) assertNode.equal((await draft("", r)).ok, true, `the honest draft was refused on ${JSON.stringify(r)}`);
+  const missed: string[] = [];
+  for (const c of run.refusals ? R512_CLAIMS : []) {
+    for (const r of R512_RECORDS(c.text)) {
+      const tag = `${c.why}: ${JSON.stringify(c.text)} on ${JSON.stringify(r)}`;
+      const a = await draft(c.text, r);
+      if (a.ok) missed.push(`checkDraft shown, ${tag}`);
+      else if (!a.detail.some((x) => named(c.why).test(x))) missed.push(`checkDraft refused for another reason (${a.detail.join("; ")}), ${tag}`);
+      if (!claimProblems(c.text, { record: recordOf(r) }).some((x) => named(c.why).test(x))) missed.push(`claimProblems passed, ${tag}`);
+      if (!claimProblems(c.text, { record: [r], line: true }).some((x) => named(c.why).test(x))) missed.push(`claimProblems (line) passed, ${tag}`);
+    }
+  }
+  assertNode.deepEqual(missed, []);
+  for (const w of run.accepts ? R512_WORK : []) {
+    const a = await draft(w.text, w.record);
+    assertNode.equal(a.ok, true, `${JSON.stringify(w.text)} refused: ${a.ok ? "" : a.detail.join("; ")}`);
+    assertNode.deepEqual(claimProblems(w.text, { record: recordOf(w.record) }), []);
+    assertNode.deepEqual(claimProblems(w.text.replace(/^I (\w)/, (_, x) => x.toUpperCase()).replace(/\.$/, ""), { record: [w.record], line: true }), []);
+  }
+  // the same words as the person's own answer are still refused
+  if (!run.refusals) return;
+  assertNode.equal((await draft("I passed a background check.", "Ran background checks for 300 new hires")).ok, false);
+  assertNode.equal((await draft("I have never failed a drug test.", "Coordinated drug testing for 300 drivers")).ok, false);
+  assertNode.equal((await draft("I prosecuted felony cases, and I have no felony convictions.", "Prosecuted felony cases in the Felony Trial Unit")).ok, false);
+}

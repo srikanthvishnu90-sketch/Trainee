@@ -123,7 +123,7 @@ import { writeReadinessAsk } from "../_shared/readiness_ask.ts";
 import { summaryFacts } from "../_shared/apply_status_summary.ts"; // SPEC 6.5
 import { resultsFile, whatOf } from "../_shared/role_results.ts"; // ROLE + PAY RESULTS PAGE
 import { supabaseAccountStamp, supabaseConfirmedFacts, supabaseJobStore, type JobDeps } from "../_shared/telegram_jobs.ts";
-import { APPLY_ALL_INTENT, type ApplyAllOffer, applyAllYesTurn, isApplyAllYes, isConditionalYes, liveOfferRow, readOffer } from "../_shared/apply_all_yes.ts"; // apply all by yes
+import { APPLY_ALL_INTENT, type ApplyAllOffer, applyAllYesTurn, isApplyAllYes, isConditionalYes, liveOfferRow, readOffer, supabaseStoppedAt } from "../_shared/apply_all_yes.ts"; // apply all by yes
 import { applyAllYesOn } from "./release_config.ts";
 import { supabaseTapStore } from "../_shared/channel_card_tap.ts";
 import { feedUrlsFor } from "../_shared/file_link.ts";
@@ -677,7 +677,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           const rd = applyReadiness({ profile: (ctx as any).profile ?? null, ask: (ctx as any).discovery?.lastAsk ?? null });
           // The resume must be on file with its confirmation events (career_resume_on_file, the card's rule); unknown counts as none.
           const onFile = (await resumeOnFileReader(admin, user.id)()) === true;
-          const res = await applyAllYesTurn({ message, userId: user.id, now: Date.now(), last, deps: jobDeps, questions: supabaseQuestionStore(admin), resumeConfirmed: onFile,
+          const res = await applyAllYesTurn({ message, userId: user.id, now: Date.now(), last, deps: jobDeps, questions: supabaseQuestionStore(admin), resumeConfirmed: onFile, stoppedAt: supabaseStoppedAt(admin),
             prepare: (u) => reprepareQueued({ admin, userId: u, env: Deno.env, fetch: (i: any, init: any) => fetch(i, init) }) });
           if (!res) return null;
           // What it still needs from the person, asked ONE at a time and in the model's words (readiness_ask.ts, D-007), never code's:

@@ -274,6 +274,22 @@ export interface OfferResult {
   draft: { email: string; call: string; sent: false } | null;
   messages: string[];
 }
+// C04 (beta 2026-11-04): the counter comes with a direct answer to "should I counter?" and the package terms nobody has
+// stated yet. The answer says what it stands on: a competing offer the person stated, a sourced median above the base, a
+// sourced median at or below it, or nothing sourced (then it is said to be judgment). No outcome is promised.
+export function counterAnswer(o: { base: number | null; competing?: { company: string | null; base: number }[] }, bench: { median: number; cite: string } | null, text = ""): string[] {
+  const base = o.base;
+  const best = (o.competing || []).filter((c) => c && Number.isFinite(c.base)).sort((a, b) => b.base - a.base)[0] || null;
+  const lines: string[] = [];
+  if (base != null && best && best.base > base) lines.push(`Should you counter? Yes, once, in writing: the other offer you told me about${best.company ? ` (${best.company})` : ""} has a base of ${usd(best.base)}, above this one, so the draft asks them to match it.`);
+  else if (base != null && bench && bench.median > base) lines.push(`Should you counter? Yes, once, in writing: ${bench.cite} puts the median at ${usd(bench.median)}, above your ${usd(base)}, so the draft asks them to move toward it.`);
+  else if (base != null && bench) lines.push(`Should you counter? On pay alone, probably not: your base is at or above the median I have (${usd(bench.median)}, ${bench.cite}), so the draft asks about flexibility instead of citing it, and the terms below may matter more.`);
+  else lines.push("Should you counter? In my judgment, yes: asking once whether the pay can move is reasonable. That is judgment, not market data; I have no sourced number for this offer, so the draft names none.");
+  lines.push("I can't promise how they will react: the answer can be a yes, a smaller move or a no.");
+  const missing = ((CareerNegotiation as any).missingTermsOf ? (CareerNegotiation as any).missingTermsOf({}, text) : []) as { label: string }[];
+  if (missing.length) lines.push(`Worth asking about before you decide: ${missing.map((m) => m.label).join("; ")}. None of them is in what you told me, and the pay alone can't tell you whether the offer is a good one.`);
+  return lines;
+}
 export function offerReply(o: Offer, notGiven: Field[], data: OfferData = payData()): OfferResult {
   const bench = benchmarks(o, data);
   const parts = [o.company, o.role, o.city === "remote" ? "remote" : o.metro_label, o.base != null ? `base ${usd(o.base)}${o.hourly ? ` (${usd(o.hourly)} an hour x 2,080 hours)` : ""}` : null,
@@ -297,11 +313,12 @@ export function offerReply(o: Offer, notGiven: Field[], data: OfferData = payDat
   const shown = bench.filter((b) => b.shown);
   if (o.occupation && !shown.length) lines.push("", "So I have no public number to place your offer against yet, and I won't make one up.");
   const firstUp = shown.find((b) => b.median != null);
-  const script = (CareerNegotiation as any).factScript({ company: o.company, role: o.role, base: o.base, signing: o.signing },
+  const script = (CareerNegotiation as any).factScript({ company: o.company, role: o.role, base: o.base, hourly: o.hourly, signing: o.signing },
     { competing: o.competing.map((c) => ({ ...c })), deadline: o.deadline, benchmark: firstUp ? { median: firstUp.median, cite: firstUp.cite } : null });
   const uniq = [...new Set(urls)];
   if (uniq.length) lines.push("", "Sources:", ...uniq);
-  const draftLines = ["A counter you could send. Nothing is sent: edit it and send it yourself.", "", script.email, "", "On a call:", script.call];
+  const answerLines = counterAnswer(o, firstUp ? { median: firstUp.median!, cite: firstUp.cite } : null);
+  const draftLines = [...answerLines, "", "A counter you could send. Nothing is sent: edit it and send it yourself.", "", script.email, "", "On a call:", script.call];
   return {
     status: "benchmarked", offer: o, missing: notGiven, ask: null, benchmarks: bench,
     draft: { email: script.email, call: script.call, sent: false },

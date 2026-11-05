@@ -1,0 +1,188 @@
+"use strict";
+/* BETA C04 (2026-11-04 interim evidence): "$24/hour counteroffer draft".
+ *
+ * The live case: a support job offered $24/hour; the person asked "should I counter?" and for a counteroffer draft for
+ * review. Shipped behavior: the draft asked for the same $24/hour (the offer's own figure was read as the ask), used
+ * "the firm" as the employer, never discussed the terms nobody had stated, and never answered "should I counter?".
+ *
+ * These checks run the deployed path (the real CareerHost and chain modules) and 128's counterPlan directly:
+ *   - a counter never asks for the offer amount or less (hourly and annual);
+ *   - "should I counter?" gets a direct answer, its figure said to be judgment when nothing is sourced, and a sourced
+ *     benchmark only with its source and date;
+ *   - the employer is the name the person gave, never "the firm" or a placeholder; unknown, the reply asks;
+ *   - the package terms (benefits, schedule, start date) are raised and asked for in the draft;
+ *   - "shorten to N words" re-fits the LAST draft and stays within N, keeping the pay ask;
+ *   - nothing is sent: every draft is held for approval of its exact text.
+ * Check: node --test tests/career-c04-counter-draft.test.cjs
+ */
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const path = require("node:path");
+
+const ROOT = path.resolve(__dirname, "..");
+const D = (n) => require(path.join(ROOT, "packages/domain", n));
+const { CareerHost } = require(path.join(ROOT, "supabase/functions/_shared/career_host.js"));
+const Negotiation = D("128-career-negotiation.js");
+const Writing = D("154-career-writing.js");
+
+const NOW = Date.parse("2026-11-04T16:00:00.000Z");
+const clone = (v) => JSON.parse(JSON.stringify(v));
+// The C04 message as run live (C03/C04 used the "no external actions" safety wording).
+const C04 = "A support job offered $24/hour. Should I counter? Draft a counteroffer for review only. No external actions and no changes to my profile.";
+const PLACEHOLDER = /\bthe firm\b|\[[^\]]*\]|\{[^}]*\}|<[^>]*>|\bcompany name\b|\byour name\b/i;
+
+function world() {
+  const host = CareerHost.createCareerHost({
+    CareerAccess: D("120-career-access.js"), CareerOnboarding: D("130-career-onboarding.js"),
+    CareerRouter: D("142-career-router.js"), CareerDoorstep: D("141-career-doorstep.js"),
+    CareerReply: D("140-career-reply.js"), CareerContainment: D("143-career-containment.js"),
+  });
+  const threads = new Map();
+  let account = {};
+  let n = 0;
+  return (text, tid = "t-c04") => {
+    n += 1;
+    const ctx = host.createTurnCtx({ userId: "u-c04", threadId: tid, now: NOW + n * 60000, accountPersistence: true, snapshot: threads.get(tid) || null, account: clone(account), watchState: {}, postings: [] });
+    const out = host.runTurn(text, ctx);
+    threads.set(tid, host.extractSnapshot(ctx));
+    if (ctx._hostPatch && ctx._hostPatch.erase !== true) account = Object.assign({}, account, clone(ctx._hostPatch));
+    return { out: Object.assign({}, (out && out.result) || {}, { intent: out && out.intent }), reply: String((out && out.reply) || "") };
+  };
+}
+// The email inside a reply: from its Subject line to its sign-off.
+const emailIn = (reply) => { const m = String(reply).match(/Subject:[\s\S]*?\n(?:Thank you,|Thanks,|Best,)[^\n]*(?:\n[A-Z][^\n]*)?/); return m ? m[0] : ""; };
+const dollarsIn = (s) => [...String(s).matchAll(/\$\s?(\d{1,3}(?:,\d{3})+|\d+(?:\.\d{1,2})?)/g)].map((m) => Number(m[1].replace(/,/g, "")));
+const words = (t) => Writing.draftWordCount(t);
+
+test("C04 verbatim: a direct answer, a counter above $24/hour said to be judgment, the package terms, no placeholder, held", () => {
+  const say = world();
+  const { out, reply } = say(C04);
+  assert.equal(out.intent, "negotiation_draft", reply);
+  // The direct answer leads.
+  assert.match(reply, /^Yes, counter once, in writing, at \$26 an hour/, reply);
+  assert.match(reply, /my judgment, not market data/, "the figure is said to be judgment");
+  assert.ok(!/median|percentile|market rate (is|for)|typically pay|pays? on average|BLS|Glassdoor|Indeed/i.test(reply.replace(/I won't quote a market rate/, "")), `no invented market data: ${reply}`);
+  // The draft asks for more than the offer and never for $24 itself.
+  const email = emailIn(reply);
+  assert.ok(email, `the draft is in the reply: ${reply}`);
+  assert.match(email, /Could you bring the rate to \$26 an hour\?/);
+  assert.ok(!/(bring|meet|move)[^.?]*\$24\b/.test(email), `the ask is never the offer's own figure: ${email}`);
+  // Package terms.
+  for (const t of [/benefits/i, /schedule/i, /start date/i]) { assert.match(reply, t); assert.match(email, t); }
+  // No placeholder; the employer is unknown, so the reply asks.
+  assert.ok(!PLACEHOLDER.test(email), `placeholder in the draft: ${email}`);
+  assert.match(reply, /which company made the offer\?/);
+  // Held, nothing sent.
+  assert.ok(out.draft && out.draft.status === "held" && out.draft.sent === false && out.draft.requires_approval === true, JSON.stringify(out.draft));
+  assert.match(reply, /held for your review, nothing sent/);
+  assert.ok(!out.sends, "nothing is sent");
+});
+
+test("C04: the employer comes from the person's own message; never \"the firm\"", () => {
+  const say = world();
+  const { out, reply } = say("Northwind Health offered me a customer support job at $24/hour. Should I counter? Draft a counteroffer for review only.");
+  assert.equal(out.intent, "negotiation_draft");
+  const email = emailIn(reply);
+  assert.match(email, /^Subject: Customer support offer, Northwind Health/);
+  assert.match(email, /at Northwind Health: \$24 an hour/);
+  assert.ok(!PLACEHOLDER.test(email), email);
+  assert.ok(!/which company made the offer/.test(reply), "a named employer is not asked for again");
+});
+
+test("C04: annual offers counter above the offer in yearly terms", () => {
+  const say = world();
+  const { out, reply } = say("I got an offer from Acme for an analyst role at $70,000 a year. Should I counter? Draft the counter email for review.");
+  assert.equal(out.intent, "negotiation_draft", reply);
+  const email = emailIn(reply);
+  assert.match(email, /Could you bring the base salary to \$75,000 a year\?/, email);
+  assert.match(reply, /my judgment, not market data/);
+  const asks = dollarsIn(email.split("\n").filter((l) => /^Could you bring/.test(l)).join(" "));
+  assert.ok(asks.length && asks.every((v) => v > 70000), `asked ${asks}`);
+});
+
+test("C04: a counter at or below the offer is refused, and the person's own higher target is used", () => {
+  const say = world();
+  say("A support job offered $24/hour. Should I counter?");
+  const same = say("Can I counter at $24 an hour?");
+  assert.match(same.reply, /^Not at \$24: that is at or below the \$24 an hour they already offered/, same.reply);
+  assert.ok(!emailIn(same.reply), "no draft asks for the offer's own figure");
+  const lower = say("Should I counter at $22 an hour?");
+  assert.match(lower.reply, /^Not at \$22/, lower.reply);
+  const mine = say("My target is $27 an hour. Draft the counter email for review.");
+  assert.equal(mine.out.intent, "negotiation_draft", mine.reply);
+  assert.match(emailIn(mine.reply), /Could you bring the rate to \$27 an hour\?/, mine.reply);
+  assert.match(mine.reply, /asking for your figure \(\$27 an hour\)/);
+});
+
+test("C04: counterPlan never asks for the offer amount or less, in either unit", () => {
+  for (const [rate, unit] of [[24, "hour"], [17.5, "hour"], [70000, "year"], [52000, "year"]]) {
+    const p = Negotiation.counterPlan({ rate, unit, company: "Acme" }, { text: "should I counter?" });
+    assert.ok(p.counter && p.counter.value > rate, `${rate}/${unit}: ${JSON.stringify(p.counter)}`);
+    assert.equal(p.counter.basis, "judgment");
+    assert.match(p.answer.verdict, /judgment, not market data/);
+    for (const v of [rate, rate - 1]) {
+      const r = Negotiation.counterPlan({ rate, unit, company: "Acme" }, { text: `counter at $${v}${unit === "hour" ? " an hour" : ""}` });
+      assert.equal(r.counter, null, `${v} on a ${rate} offer`);
+      assert.equal(r.draft, null, "no draft asks for the offer or less");
+      assert.equal(r.rejected, v);
+    }
+  }
+  // A sourced benchmark is cited with its source and date; one without a source is not used.
+  const sourced = Negotiation.counterPlan({ rate: 24, unit: "hour", company: "Acme" }, { benchmark: { low: 23, median: 25, high: 28, unit: "hour", cite: "BLS OEWS May 2025, Austin metro", as_of: "May 2025" } });
+  assert.equal(sourced.counter.basis, "sourced_range");
+  assert.match(sourced.answer.reasons.join(" "), /BLS OEWS May 2025, Austin metro.*as of May 2025/);
+  const unsourced = Negotiation.counterPlan({ rate: 24, unit: "hour", company: "Acme" }, { benchmark: { low: 23, median: 25, high: 28, unit: "hour" } });
+  assert.equal(unsourced.counter.basis, "judgment", "an unsourced figure is never used as a benchmark");
+  // Sourced figures at or below the offer: no pay counter is pushed.
+  const below = Negotiation.counterPlan({ rate: 30, unit: "hour", company: "Acme" }, { benchmark: { low: 22, high: 28, unit: "hour", cite: "BLS OEWS", as_of: "May 2025" } });
+  assert.equal(below.counter, null);
+  assert.match(below.answer.verdict, /^On pay alone, probably not/);
+});
+
+test("C04: a placeholder employer is never used, and its absence is asked about", () => {
+  for (const company of [null, "the firm", "The company", "employer"]) {
+    const p = Negotiation.counterPlan({ rate: 24, unit: "hour", company }, {});
+    assert.equal(p.company, null, String(company));
+    assert.ok(p.needs.includes("company"));
+    assert.match(p.companyQuestion, /which company made the offer\?/);
+    assert.ok(!PLACEHOLDER.test(p.draft.body), p.draft.body);
+  }
+});
+
+test("C04: \"shorten to N words\" re-fits the last draft, stays within N and keeps the ask", () => {
+  const say = world();
+  say(C04);
+  for (const n of [40, 30, 25]) {
+    const { out, reply } = say(`Shorten the draft to ${n} words`);
+    assert.equal(out.intent, "negotiation_draft", reply);
+    const email = emailIn(reply);
+    assert.ok(email, reply);
+    assert.ok(words(email) <= n, `${words(email)} words for a ${n}-word target:\n${email}`);
+    assert.match(email, /\$26 an hour\?/, "the pay ask survives the cut");
+    assert.match(email, /^Hi,$/m);
+    assert.ok(out.draft && out.draft.status === "held" && out.draft.sent === false, "still held");
+  }
+});
+
+test("C04: \"shorten to N\" binds to the latest draft, not an earlier one", () => {
+  const say = world();
+  say(C04);
+  say("I'm Sam, a junior at UT Austin studying economics.");
+  const net = say("Draft a networking email for review only");
+  assert.equal(net.out.intent, "outreach_draft", net.reply);
+  const { out, reply } = say("Shorten the draft to 30 words");
+  assert.equal(out.intent, "outreach_draft", reply);
+  assert.ok(!/\$26|\$24|offer/i.test(emailIn(reply) || reply.split("\n\n")[1] || ""), `re-fit the counter instead of the networking email: ${reply}`);
+  assert.match(reply, /15 minutes/);
+  assert.ok(words(out.draft.text) <= 30, out.draft.text);
+});
+
+test("C04: a draft ask that could not be drafted does not displace the held draft", () => {
+  const say = world();
+  say(C04);
+  const none = say("Draft a networking email for review only");
+  assert.notEqual(none.out.intent, "outreach_draft", "nothing was drafted");
+  const { out, reply } = say("Shorten the draft to 30 words");
+  assert.equal(out.intent, "negotiation_draft", reply);
+  assert.ok(words(emailIn(reply)) <= 30);
+});

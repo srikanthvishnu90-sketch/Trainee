@@ -279,7 +279,11 @@ const CareerNegotiation = (() => {
     opts = opts || {};
     const usd = (n) => "$" + Math.round(n).toLocaleString("en-US");
     const o = offer || {};
-    const role = o.role || "role";
+    const role = o.role ? String(o.role) : null;
+    // C04: an hourly offer is restated and asked in the person's units ("$24 an hour"); an annual figure (a benchmark, a
+    // competing base) is converted at 2,080 hours with the conversion said, never silently.
+    const hourly = Number.isFinite(Number(o.hourly)) && Number(o.hourly) > 0 ? Number(o.hourly) : null;
+    const perHour = (n) => "$" + (Math.round((n / 2080) * 100) / 100).toFixed(2) + " an hour";
     const competing = (opts.competing || []).filter((c) => c && c.said && Number.isFinite(c.base));
     const best = competing.slice().sort((a, b) => b.base - a.base)[0] || null;
     const bench = opts.benchmark && Number.isFinite(opts.benchmark.median) ? opts.benchmark : null;
@@ -288,23 +292,26 @@ const CareerNegotiation = (() => {
     let ask, askSay, because = [];
     if (best && base != null && best.base > base) {
       because.push(`I have another offer${best.company ? ` from ${best.company}` : ""} with a base of ${usd(best.base)}.`);
-      ask = `Could you bring the base to ${usd(best.base)}?`; askSay = `Ask them to bring the base to ${usd(best.base)}.`;
+      if (hourly) { ask = `Could you bring the rate to ${perHour(best.base)} (${usd(best.base)} a year at 2,080 hours)?`; askSay = `Ask them to bring the rate to ${perHour(best.base)}.`; }
+      else { ask = `Could you bring the base to ${usd(best.base)}?`; askSay = `Ask them to bring the base to ${usd(best.base)}.`; }
     } else if (bench && base != null && bench.median > base) {
-      because.push(`${bench.cite} shows a median of ${usd(bench.median)}.`);
-      ask = `Could you bring the base closer to ${usd(bench.median)}?`; askSay = `Ask them to bring the base closer to ${usd(bench.median)}.`;
+      because.push(`${bench.cite} shows a median of ${usd(bench.median)}${hourly ? ` a year, about ${perHour(bench.median)} at 2,080 hours` : ""}.`);
+      if (hourly) { ask = `Could you bring the rate closer to ${perHour(bench.median)}?`; askSay = `Ask them to bring the rate closer to ${perHour(bench.median)}.`; }
+      else { ask = `Could you bring the base closer to ${usd(bench.median)}?`; askSay = `Ask them to bring the base closer to ${usd(bench.median)}.`; }
     } else {
       if (best) because.push(`I have another offer${best.company ? ` from ${best.company}` : ""} with a base of ${usd(best.base)}.`);
-      ask = "Is there flexibility on the base or the signing bonus?"; askSay = "Ask whether the base or the signing bonus can move.";
+      ask = hourly ? "Is there flexibility on the hourly rate or a signing bonus?" : "Is there flexibility on the base or the signing bonus?";
+      askSay = hourly ? "Ask whether the hourly rate or a signing bonus can move." : "Ask whether the base or the signing bonus can move.";
     }
     const fallback = o.signing != null ? `If the base is set, a higher signing bonus than ${usd(o.signing)} would also help.` : "If the base is set, a signing bonus would also help.";
     const deadline = opts.deadline && opts.deadline.text ? String(opts.deadline.text) : null;
-    const stated = [base != null ? `a base of ${usd(base)}` : null, o.signing != null ? `a ${usd(o.signing)} signing bonus` : null].filter(Boolean).join(" and ");
+    const stated = [hourly ? `${"$" + (Number.isInteger(hourly) ? hourly : hourly.toFixed(2))} an hour` : base != null ? `a base of ${usd(base)}` : null, o.signing != null ? `a ${usd(o.signing)} signing bonus` : null].filter(Boolean).join(" and ");
     const email = [
-      `Subject: ${role[0].toUpperCase() + role.slice(1)} offer${o.company ? `, ${o.company}` : ""}`,
+      `Subject: ${role ? `${role[0].toUpperCase() + role.slice(1)} offer` : "Your offer"}${o.company ? `, ${o.company}` : ""}`,
       "",
       "Hi,",
       "",
-      `Thank you for the offer for the ${role} role${stated ? `, with ${stated}` : ""}. Before I decide, I'd like to talk about the pay.`,
+      `Thank you for the offer${role ? ` for the ${role} role` : ""}${stated ? `, with ${stated}` : ""}. Before I decide, I'd like to talk about the pay.`,
       ...because,
       `${ask} ${fallback}`,
       deadline ? `I'll get back to you by ${deadline}.` : null,
@@ -321,6 +328,228 @@ const CareerNegotiation = (() => {
     return { email, call, sends: false, used: { competing: best ? [best] : [], deadline, benchmark: bench ? bench.cite : null } };
   }
 
-  return { DISCLAIMER, payData, factScript, createStore, parseOffer, parseDate, parseMoney, storeOffer, extractFigures, benchmark, totalComp, compareOffers, bonusAmount, approvalCard, counterStrategy, roleplayTurn, extensionDraft, trackExtension, declineDraft, deadlinePlan };
+  // ---------- C04 (beta 2026-11-04): "should I counter?" and the counter the person can stand behind ----------
+  // The live case: a $24/hour support offer, "should I counter?" and "draft a counteroffer for review". The shipped draft
+  // asked for the same $24 (the offer's own figure was read as the ask), named "the firm" as the employer, never answered
+  // the question and never raised the terms nobody had stated. counterPlan is the one place that decides, from the
+  // record alone:
+  //   - the counter figure: the person's own stated target when it is above the offer; otherwise the top of a range
+  //     derived from a SOURCED benchmark in the offer's own units (labelled with its source and date); otherwise none,
+  //     and the person is asked for their target with the reason shown. A figure at or below the offer is never asked for.
+  //   - the employer: the name the person gave, or none (the draft leaves it out and the reply asks). Never "the firm".
+  //   - a direct answer to "should I counter?", with its reasons, and the terms not on the record (benefits, schedule,
+  //     start date) listed and asked for in the draft.
+  // Nothing is sent: the draft is held ({ status: "held", sent: false, requires_approval: true }).
+  const COUNTER_TERMS = [
+    { key: "benefits", label: "benefits (health coverage, paid time off, any retirement plan)", ask: "what benefits come with the role (health coverage, paid time off and any retirement plan)" },
+    { key: "schedule", label: "the schedule (hours a week, shift times, weekends)", ask: "the schedule (hours a week, shift times and whether weekends are included)" },
+    { key: "start_date", label: "the start date", ask: "the start date you have in mind" },
+  ];
+  const rateText = (n, unit) => {
+    if (n == null || !Number.isFinite(Number(n))) return null;
+    const v = Number(n);
+    if (unit === "hour") return `$${Number.isInteger(v) ? v : v.toFixed(2)} an hour`;
+    return `$${Math.round(v).toLocaleString("en-US")} a year`;
+  };
+  const rateShort = (n, unit) => (unit === "hour" ? `$${Number.isInteger(Number(n)) ? Number(n) : Number(n).toFixed(2)}` : `$${Math.round(Number(n)).toLocaleString("en-US")}`);
+  // The person's own target, read from their words: a figure framed as the ask ("counter at $27", "ask for $27 an
+  // hour", "my target is $27", "I want $27/hr"). A bare figure is the offer, not an ask — that misread
+  // is exactly how the shipped draft asked for $24 on a $24 offer.
+  function counterTargetOf(text, unit) {
+    const t = s(text).replace(/[’]/g, "'").replace(/,(?=\d{3}\b)/g, "");
+    const fig = "\\$\\s?(\\d+(?:\\.\\d{1,2})?)\\s?(k)?";
+    const frames = [
+      new RegExp(`\\bcounter(?:\\s?offer)?\\s+(?:at|with|of|to|for)\\s+${fig}`, "i"),
+      new RegExp(`\\b(?:ask(?:ing)?|aim(?:ing)?|hoping|push(?:ing)?)\\s+(?:them\\s+)?(?:for|at|to)\\s+${fig}`, "i"),
+      new RegExp(`\\b(?:my\\s+)?(?:target|goal|number|floor|minimum)\\s+(?:is|was|of|would be|=)\\s+${fig}`, "i"),
+      new RegExp(`\\bi\\s+(?:want|need|would like|'d like)\\s+(?:to (?:get|ask for|make)\\s+)?${fig}`, "i"),
+      new RegExp(`\\b(?:bring|get|move|raise)\\s+(?:it|the (?:rate|pay|base|offer|salary))\\s+(?:up\\s+)?to\\s+${fig}`, "i"),
+    ];
+    for (const re of frames) {
+      const m = t.match(re);
+      if (!m) continue;
+      let v = Number(m[1]);
+      if (m[2]) v *= 1000;
+      if (!Number.isFinite(v) || v <= 0) continue;
+      // Units follow the offer: "$27" on an hourly offer is $27 an hour; "$70k" on a yearly offer is $70,000.
+      if (unit === "year" && v < 1000) continue;
+      if (unit === "hour" && v >= 1000) continue;
+      return v;
+    }
+    return null;
+  }
+  // Which of the three terms the record (or this turn) already holds. A term the person says they do not have yet is
+  // missing; a term stated nowhere is missing.
+  function missingTermsOf(offer, text) {
+    const o = offer || {};
+    const t = s(text).toLowerCase();
+    const has = {
+      benefits: Array.isArray(o.benefits) ? o.benefits.length > 0 : !!o.benefits,
+      schedule: !!o.schedule,
+      start_date: !!o.start_date,
+    };
+    const deniedTerm = (re) => re.test(t) && /\b(no|not|don'?t|do not|haven'?t|have not|without|yet|unknown|missing)\b/.test(t);
+    if (deniedTerm(/\bbenefits?\b/)) has.benefits = false;
+    if (deniedTerm(/\bschedule|hours\b|shifts?\b/)) has.schedule = false;
+    if (deniedTerm(/\bstart(ing)? date\b/)) has.start_date = false;
+    return COUNTER_TERMS.filter((x) => !has[x.key]);
+  }
+  // A sourced benchmark is usable only in the offer's own units and only with its source and date.
+  function usableBenchmark(b, unit) {
+    if (!b || typeof b !== "object") return null;
+    const high = Number(b.high), low = Number(b.low != null ? b.low : b.high);
+    if (!Number.isFinite(high) || !Number.isFinite(low) || high <= 0) return null;
+    if ((b.unit || "year") !== unit) return null;
+    if (!b.cite || !b.as_of) return null;
+    return { low: Math.min(low, high), high: Math.max(low, high), median: Number.isFinite(Number(b.median)) ? Number(b.median) : null, cite: String(b.cite), as_of: String(b.as_of), reported: !!b.reported };
+  }
+  function listJoin(items) {
+    const a = items.filter(Boolean);
+    if (a.length <= 1) return a.join("");
+    if (a.length === 2) return `${a[0]} and ${a[1]}`;
+    return `${a.slice(0, -1).join(", ")} and ${a[a.length - 1]}`;
+  }
+  // The counter email as UNITS (154 fitUnits): each unit lists wordings of the same content, fullest first, "" where the
+  // unit may be left out. The greeting, the pay ask and the sign-off are never left out, so "shorten it to N words"
+  // re-fits the same draft and keeps the ask. Layout (154 renderParts "counter_email" is the same): subject, greeting,
+  // one line per body unit, sign-off.
+  const TERM_SHORT = { benefits: "benefits", schedule: "schedule", start_date: "start date" };
+  function counterDraftUnits(i) {
+    const roleAt = `${i.role ? ` for the ${i.role} role` : ""}${i.company ? ` at ${i.company}` : ""}`;
+    const signingTxt = Number.isFinite(Number(i.signing)) && Number(i.signing) > 0 ? `, plus the $${Math.round(Number(i.signing)).toLocaleString("en-US")} signing bonus` : "";
+    const missing = i.missing || [];
+    const before = `Before I accept, I'd like to ask about the pay${missing.length ? " and a few details" : ""}.`;
+    const units = [{ id: "greet", variants: ["Hi,"] }];
+    // [wording, weight] pairs, fullest first; a repeated wording keeps its first (higher) weight. The weights decide what
+    // goes first when a re-fit has to cut: the courtesy line, then the terms ask; the pay ask keeps its fullest wording.
+    const mk = (id, pairs) => {
+      const seen = new Set(), variants = [], weights = [];
+      for (const [v, w] of pairs) { if (seen.has(v)) continue; seen.add(v); variants.push(v); weights.push(w); }
+      return { id, variants, weights };
+    };
+    units.push(mk("thanks", [
+      [`Thank you for the offer${roleAt}: ${i.offerText}${signingTxt}. ${before}`, 20],
+      [`Thank you for the offer${roleAt}: ${i.offerText}${signingTxt}.`, 16],
+      [`Thank you for the offer of ${i.offerText}.`, 14],
+      ["Thank you for the offer.", 12],
+    ]));
+    const rateWord = i.unit === "hour" ? "rate" : "base salary";
+    if (i.counter) {
+      const fig = rateText(i.counter.value, i.unit);
+      const why = i.counter.basis === "sourced_range" && i.range ? ` Public pay data for this role (${i.range.cite}, as of ${i.range.as_of}) runs up to ${rateShort(i.range.high, i.unit)}.` : "";
+      const keep = i.keepSigning && signingTxt ? " The signing bonus as offered works for me." : "";
+      units.push(mk("ask", [[`Could you bring the ${rateWord} to ${fig}?${why}${keep}`, 60], [`Could you bring the ${rateWord} to ${fig}?${keep}`, 55], [`Could you bring the ${rateWord} to ${fig}?`, 50], [`Could you do ${fig}?`, 30]]));
+    } else {
+      units.push(mk("ask", [[`Is there room to move the ${i.unit === "hour" ? "hourly rate" : "base salary"} above ${i.offerText}?`, 60], [`Can the ${rateWord} go above ${i.offerText}?`, 30]]));
+    }
+    if (missing.length) {
+      const short = listJoin(missing.map((m) => TERM_SHORT[m.key] || m.key));
+      units.push(mk("terms", [[`Could you also send me ${listJoin(missing.map((m) => m.ask))}?`, 24], [`Could you also send me the ${short} details?`, 20], [`What are the ${short}?`, 18], ["", 0]]));
+    }
+    if (i.deadline) units.push(mk("deadline", [[`I'll get back to you by ${i.deadline}.`, 10], ["", 0]]));
+    units.push({ id: "sign", variants: [i.senderName ? `Thank you,\n${s(i.senderName)}` : "Thank you,"] });
+    return units;
+  }
+  function renderCounterUnits(parts, subject) {
+    const p = parts.filter((x) => x && String(x).trim());
+    return [subject ? `Subject: ${subject}` : null, subject ? "" : null, p[0], "", ...p.slice(1, -1), "", p[p.length - 1]].filter((x) => x !== null).join("\n");
+  }
+  // offer: { company, role, rate, unit ("hour" | "year"), signing, benefits, schedule, start_date, deadline }
+  // opts:  { text (this turn's words), target (a target already on the record), benchmark ({ low, high, median, unit,
+  //          cite, as_of, reported }), keepSigning, senderName }
+  function counterPlan(offer, opts) {
+    opts = opts || {};
+    const o = offer || {};
+    const unit = o.unit === "hour" ? "hour" : "year";
+    const rate = Number.isFinite(Number(o.rate)) && Number(o.rate) > 0 ? Number(o.rate) : null;
+    const clean = (v) => s(v).trim().replace(/[\s.,;:!?]+$/, "");
+    const company = o.company && clean(o.company) && !/^(the )?(firm|company|employer|team|recruiter)$/i.test(clean(o.company)) ? clean(o.company) : null;
+    // "customer support job" is the role "customer support": the noun the role was named with is not part of it.
+    const role = o.role && clean(o.role) ? clean(o.role).replace(/\s+(job|role|position|offer)$/i, "").trim() || null : null;
+    const roleRef = role ? `${/^[aeiou]/i.test(role) ? "an" : "a"} ${role} role` : "this role";
+    const offerText = rateText(rate, unit);
+    const stated = counterTargetOf(opts.text, unit);
+    const recorded = Number.isFinite(Number(opts.target)) && Number(opts.target) > 0 ? Number(opts.target) : null;
+    let target = null, rejected = null;
+    if (stated != null) { if (rate != null && stated <= rate) rejected = stated; else target = stated; }
+    else if (recorded != null && (rate == null || recorded > rate)) target = recorded;
+    const bench = usableBenchmark(opts.benchmark, unit);
+    let range = null;
+    if (bench && rate != null && bench.high > rate) {
+      // The range starts at the first sourced figure above the offer (the median, else the low end); when only the top
+      // is above the offer, the range is "above the offer, up to the top".
+      const low = [bench.median, bench.low].find((x) => x != null && x > rate);
+      range = { low: low != null ? low : null, high: bench.high, cite: bench.cite, as_of: bench.as_of, reported: bench.reported };
+    }
+    // With no figure of the person's and no sourced range, a counter is still worth asking for (unless sourced figures
+    // sit at or below the offer): the suggestion is a modest step above the offer, said to be judgment, never market
+    // data. About 8% on an hourly rate, rounded up to a whole dollar ($24 -> $26); about 7% on a salary, rounded up to
+    // the next $1,000 ($70,000 -> $75,000). Always above the offer.
+    const benchBelow = !!(bench && rate != null && bench.high <= rate);
+    let judgment = null;
+    if (target == null && !range && rate != null && rejected == null && !benchBelow) {
+      const v = unit === "hour" ? Math.ceil(rate * 1.08) : Math.ceil((rate * 1.07) / 1000) * 1000;
+      judgment = v > rate ? v : null;
+    }
+    const counter = target != null ? { value: target, basis: "person_target" } : range ? { value: range.high, basis: "sourced_range" } : judgment != null ? { value: judgment, basis: "judgment" } : null;
+    const missing = missingTermsOf(o, opts.text);
+    const needs = [];
+    if (rate == null) needs.push("offer_figure");
+    if (!company) needs.push("company");
+    if (!counter && rate != null) needs.push("target");
+
+    // The direct answer to "should I counter?" — a verdict first, then its reasons. No outcome is promised.
+    const reasons = [];
+    let verdict;
+    const risk = "One polite counter is, in my judgment, a normal part of accepting an offer, but I can't promise how this employer will react: the answer can be a yes, a smaller move or a no, and in rare cases an offer is withdrawn.";
+    if (rate == null) {
+      verdict = "I can answer that once I know the figure they offered.";
+    } else if (rejected != null) {
+      verdict = `Not at ${rateShort(rejected, unit)}: that is at or below the ${offerText} they already offered, so it asks for nothing.`;
+      reasons.push(`A counter has to be above ${offerText}. Tell me the ${unit === "hour" ? "hourly rate" : "salary"} you'd actually want, or accept the offer as it stands.`);
+    } else if (counter && counter.basis === "judgment") {
+      const pct = Math.round(((counter.value - rate) / rate) * 100);
+      verdict = `Yes, counter once, in writing, at ${rateText(counter.value, unit)}, a figure that is my judgment, not market data.`;
+      reasons.push(`I have no sourced pay figure for ${roleRef}${company ? ` at ${company}` : ""}, so I won't quote a market rate. ${rateText(counter.value, unit)} is a modest step, about ${pct}% above the ${offerText} on the table: enough to be worth asking for, small enough to be a reasonable first ask. If you have a number of your own, I'll use yours.`);
+      reasons.push(risk);
+    } else if (counter) {
+      verdict = `Yes, counter once, in writing, at ${rateText(counter.value, unit)}.`;
+      if (counter.basis === "person_target") reasons.push(`${rateText(counter.value, unit)} is the figure you named, and it is above the ${offerText} on the table.`);
+      else reasons.push(`It is the top of a range derived from ${range.cite}${range.reported ? " (a reported figure, not a measured one)" : ""}, as of ${range.as_of}: ${range.low != null ? `${rateShort(range.low, unit)} to ${rateShort(range.high, unit)}` : `above ${rateShort(rate, unit)}, up to ${rateShort(range.high, unit)}`}${unit === "hour" ? " an hour" : " a year"}.`);
+      reasons.push(risk);
+    } else if (benchBelow) {
+      verdict = `On pay alone, probably not: the sourced figures (${bench.cite}, as of ${bench.as_of}) top out at ${rateShort(bench.high, unit)}, at or below ${offerText}.`;
+      reasons.push("If you counter anyway, put the ask on the terms (start date, schedule) rather than the rate, or name a figure of your own and say why.");
+    } else {
+      verdict = `Yes, it's reasonable to ask whether the pay can move; that is my judgment, and I have no sourced pay figure for ${roleRef}${company ? ` at ${company}` : ""}.`;
+      reasons.push(risk);
+    }
+    const termsLine = missing.length ? `Before you decide, get the rest of the package: ${listJoin(missing.map((m) => m.label))} ${missing.length === 1 ? "is" : "are"} not on your record yet, and ${offerText || "the pay"} alone can't tell you whether the offer is a good one.` : null;
+    if (termsLine) reasons.push(termsLine);
+    const targetQuestion = rate != null && !counter
+      ? `To name a figure in the draft, it has to be yours and above ${offerText}: what ${unit === "hour" ? "hourly rate" : "salary"} would make this an easy yes for you?`
+      : counter && counter.basis === "judgment"
+        ? `Keep ${rateText(counter.value, unit)} in the draft, or tell me your own figure (it has to be above ${offerText}).`
+        : null;
+    const companyQuestion = !company ? "I'll put the employer's name in the draft rather than a placeholder: which company made the offer?" : null;
+
+    // The draft: held, never sent. With no counter figure it asks whether the rate can move (no number is invented)
+    // and asks for the missing terms; with one it asks for that figure.
+    let draft = null;
+    if (rate != null && rejected == null) {
+      const cap = (x) => x.charAt(0).toUpperCase() + x.slice(1);
+      const subject = `${role ? `${cap(role)} offer` : "Your offer"}${company ? `, ${company}` : ""}`;
+      const units = counterDraftUnits({ role, company, offerText, unit, signing: o.signing, keepSigning: !!opts.keepSigning, counter, range, rate, missing, deadline: o.deadline || null, senderName: opts.senderName || null });
+      const body = renderCounterUnits(units.map((u) => u.variants[0]), subject);
+      draft = { kind: "counter_email", body, text: body, subject, units, company, status: "held", sent: false, requires_approval: true, counter_figure: counter ? counter.value : null, counter_basis: counter ? counter.basis : null, asks_terms: missing.map((m) => m.key) };
+    }
+    // "I have no benefits or schedule details yet": the terms answer on its own.
+    const terms = missing.length
+      ? { headline: `Then get ${listJoin(missing.map((m) => m.key === "start_date" ? "the start date" : m.key))} in writing before you decide — they are part of what ${offerText || "the offer"} is worth.`, line: termsLine }
+      : { headline: "Benefits, schedule and start date are all on your record, so the offer can be judged as a whole.", line: null };
+    return { sends: false, unit, rate, offerText, company, role, target, rejected, range, counter, missing: missing.map((m) => ({ key: m.key, label: m.label })), needs, answer: { verdict, reasons }, terms, targetQuestion, companyQuestion, draft };
+  }
+
+  return { DISCLAIMER, payData, factScript, createStore, counterPlan, counterTargetOf, missingTermsOf, counterDraftUnits, renderCounterUnits, COUNTER_TERMS, parseOffer, parseDate, parseMoney, storeOffer, extractFigures, benchmark, totalComp, compareOffers, bonusAmount, approvalCard, counterStrategy, roleplayTurn, extensionDraft, trackExtension, declineDraft, deadlinePlan };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerNegotiation;

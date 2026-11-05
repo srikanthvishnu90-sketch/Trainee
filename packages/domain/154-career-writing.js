@@ -1057,7 +1057,218 @@ Read it aloud in your head. If it sounds like a press release, a template, or a 
     return { drafts, verdict, recycled, pass: verdict.pass };
   }
 
+  // ---------------- word-budget drafting (beta 2026-11-04: A7, A12, C04) ----------------
+  // "Draft a 100-word why this role answer", "Shorten that answer to 50 words", "Draft a networking email for review
+  // only", "Shorten the draft to 80 words" all fell to the catchall: nothing composed a written answer from the record,
+  // and nothing held a draft's structure so a follow-up could re-fit it to a word count.
+  //
+  // A budgeted draft is a list of UNITS; each unit is a list of VARIANTS (alternative wordings of the same content,
+  // "" where the unit may be left out). fitUnits picks one variant per unit so the total word count is EXACTLY the
+  // target when any combination reaches it (and otherwise the largest total under it, reported as such — never padded
+  // with a claim the person did not make). Every person-fact in a variant comes from a confirmed fact; the connective
+  // wording is the only text added. The units ride with the held draft, so "shorten to N" re-fits the same draft.
+  // Counted words: tokens holding a letter or digit (a dash is not a word); an email's "Subject:" line is not counted.
+  function countWords(text) {
+    return String(text || "").split(/\s+/).filter((w) => /[A-Za-z0-9]/.test(w)).length;
+  }
+  function draftWordCount(text) {
+    const lines = String(text || "").split("\n");
+    const body = /^subject:/i.test((lines[0] || "").trim()) ? lines.slice(1).join("\n") : lines.join("\n");
+    return countWords(body);
+  }
+  // The word target a request states: "100-word", "100 word", "to 50 words", "in 80 words" (exact); "under 80 words",
+  // "at most 80 words", "no more than 80 words", "max 80 words" (a ceiling). null when none is stated.
+  function wordTargetOf(text) {
+    const t = String(text || "").toLowerCase().replace(/[‐-―]/g, "-");
+    let m = t.match(/\b(?:under|fewer than|less than)\s+(\d{1,4})\s*-?\s*words?\b/);
+    if (m) return { words: Math.max(1, Number(m[1]) - 1), mode: "max", stated: Number(m[1]) };
+    m = t.match(/\b(?:at most|no more than|max(?:imum)?(?: of)?|up to|within)\s+(\d{1,4})\s*-?\s*words?\b/);
+    if (m) return { words: Number(m[1]), mode: "max", stated: Number(m[1]) };
+    m = t.match(/\b(\d{1,4})\s*-?\s*words?\b/);
+    if (m && Number(m[1]) > 0) return { words: Number(m[1]), mode: "exact", stated: Number(m[1]) };
+    return null;
+  }
+  // units: [{ id, variants: [string], weights?: [number] }]. Returns { picks, text parts, words, exact }.
+  function fitUnits(units, target) {
+    const U = (units || []).map((u) => ({ id: u.id, variants: (u.variants || []).map(String), weights: u.weights || null }));
+    const N = Math.max(0, Math.floor(Number(target) || 0));
+    // dp[w] = { score, picks } for the best way to reach exactly w words with the units seen so far.
+    let dp = new Map([[0, { score: 0, picks: [] }]]);
+    for (const u of U) {
+      const next = new Map();
+      for (const [w, st] of dp) {
+        u.variants.forEach((v, vi) => {
+          const nw = w + countWords(v);
+          if (nw > N) return;
+          // Weight: an earlier variant is the fuller wording (preferred); a non-empty variant beats leaving it out.
+          const weight = u.weights ? Number(u.weights[vi]) || 0 : (v ? 10 + (u.variants.length - vi) : 0);
+          const sc = st.score + weight;
+          const cur = next.get(nw);
+          if (!cur || sc > cur.score) next.set(nw, { score: sc, picks: st.picks.concat(vi) });
+        });
+      }
+      dp = next;
+      if (!dp.size) break;
+    }
+    if (!dp.size) return { picks: null, words: 0, exact: false, parts: [] };
+    const best = dp.has(N) ? N : Math.max(...dp.keys());
+    const picks = dp.get(best).picks;
+    const parts = picks.map((vi, i) => U[i].variants[vi]);
+    return { picks, words: best, exact: best === N, parts };
+  }
+  // The natural (unbudgeted) length: each unit's first non-empty variant.
+  function defaultFit(units) {
+    const parts = (units || []).map((u) => (u.variants || []).find((v) => v) || "");
+    return { picks: null, parts, words: parts.reduce((n, p) => n + countWords(p), 0), exact: false };
+  }
+  const capFirst = (x) => { const t = String(x || "").trim(); return t ? t.charAt(0).toUpperCase() + t.slice(1) : ""; };
+  const endStop = (x) => { const t = String(x || "").trim().replace(/[\s;,:]+$/, ""); return t ? (/[.!?]$/.test(t) ? t : t + ".") : ""; };
+  const article = (w) => (/^[aeiou]/i.test(String(w || "")) ? "an" : "a");
+  // A confirmed fact as first-person sentences, shortest to fullest — the fact's own words only.
+  const PAST_VERB = /^(led|built|ran|made|wrote|taught|sold|kept|handled|managed|answered|resolved|trained|helped|served|supported|created|designed|organized|coordinated|processed|performed|launched|improved|reduced|increased|cut|grew|analyzed|developed|tutored|volunteered|worked|assisted|scheduled|maintained|prepared|reviewed|tracked|delivered|opened|closed|cleaned|cooked|drove|counted|stocked|greeted|planned|ran)\b/i;
+  function factVariants(f) {
+    const text = String((f && (f.text || f.detail || f.value)) || "").trim().replace(/\.$/, "");
+    const title = String((f && f.title) || "").trim();
+    const org = String((f && (f.org || f.company)) || "").trim();
+    if (!text && !title) return [];
+    const out = [];
+    if (text && PAST_VERB.test(text)) {
+      const vp = text.charAt(0).toLowerCase() + text.slice(1);
+      if (title && org) out.push(`As ${article(title)} ${title} at ${org}, I ${vp}.`);
+      if (org) out.push(`At ${org}, I ${vp}.`);
+      if (title) out.push(`As ${article(title)} ${title}, I ${vp}.`);
+      out.push(`I ${vp}.`);
+    } else if (f && f.kind === "education") {
+      const what = title || text;
+      const verb = /^(a|an|the)\s/i.test(what) ? "I studied for" : "I studied";
+      if (org) out.push(`${verb} ${what} at ${org}.`);
+      out.push(`${verb} ${what}.`);
+    } else {
+      out.push(endStop(capFirst(text || title)));
+    }
+    return [...new Set(out)];
+  }
+  // A "why this role" answer. input: { role, company, facts (confirmed only), words (target), mode }
+  function whyRoleUnits(input) {
+    const i = input || {};
+    const role = String(i.role || "").trim();
+    const at = i.company ? ` at ${i.company}` : "";
+    const facts = (i.facts || []).slice(0, 5);
+    const units = [];
+    units.push({ id: "open", variants: [
+      `I want the ${role} role${at} because it builds directly on work I have already done.`,
+      `I want the ${role} role${at} because it builds on work I have done.`,
+      `I want the ${role} role${at} because it fits work I have done.`,
+      `I want this ${role} role${at}.`,
+      `I want this role.`,
+    ], weights: [60, 59, 58, 57, 1] });
+    units.push({ id: "bridge", variants: ["Here is why, from what I have actually done so far.", "Here is why, from my own record.", "Here is why.", ""] });
+    facts.forEach((f, k) => { const v = factVariants(f); if (v.length) units.push({ id: `fact${k}`, variants: v.concat(""), weights: v.map((_, vi) => 40 + (v.length - vi)).concat(0) }); });
+    units.push({ id: "close", variants: [
+      `That is the work I want to keep doing, and the ${role} role${at} is where I want to do it next.`,
+      `That is the work I want to keep doing, and this role is where I want to do it next.`,
+      "That is the work I want to keep doing.",
+      "I want to keep doing that work.",
+    ] });
+    units.push({ id: "commit", variants: ["I would bring the same effort to it from my first week.", "I would bring the same effort to it.", ""] });
+    return units;
+  }
+  // A networking email with no recipient named: an introduction and a 15-minute ask, from the person's record.
+  // input: { senderName, intro (a confirmed school/year/major line), field (their stated target), facts }
+  function networkingUnits(input) {
+    const i = input || {};
+    const name = String(i.senderName || "").trim();
+    const intro = String(i.intro || "").trim();
+    const field = String(i.field || "").trim();
+    const units = [{ id: "greet", variants: ["Hi,"] }];
+    const introV = [];
+    if (name && intro) introV.push(`I'm ${name}, ${intro}.`);
+    if (name) introV.push(`I'm ${name}.`);
+    if (!name && intro) introV.push(`I'm ${intro}.`);
+    if (introV.length) units.push({ id: "intro", variants: introV });
+    (i.facts || []).slice(0, 2).forEach((f, k) => { const v = factVariants(f); if (v.length) units.push({ id: `fact${k}`, variants: v.concat(""), weights: v.map((_, vi) => 40 + (v.length - vi)).concat(0) }); });
+    units.push({ id: "purpose", variants: field
+      ? [`I'm exploring ${field} work and trying to learn how people in it actually got started.`, `I'm exploring ${field} work and learning how people got started.`, `I'm exploring ${field} work.`]
+      : ["I'm working out my next step and trying to learn how people in your line of work got started.", "I'm learning how people in your line of work got started."] });
+    units.push({ id: "ask", variants: [
+      "Would you be open to a 15-minute call in the next couple of weeks to tell me how you got into your role?",
+      "Would you have 15 minutes for a short call about how you got started?",
+      "Could we talk for 15 minutes?",
+    ] });
+    units.push({ id: "thanks", variants: ["Thank you for reading, and no worries if the timing doesn't work.", "Thank you for reading.", ""] });
+    units.push({ id: "sign", variants: [name ? `Best,\n${name}` : "Best,"] });
+    return units;
+  }
+  // Paragraphing for a fitted email: greeting, body, sign-off on their own lines.
+  function renderParts(kind, parts, subject) {
+    const p = parts.filter((x) => x && String(x).trim());
+    if (kind === "networking_email") {
+      const greet = p[0] || "Hi,";
+      const sign = p[p.length - 1];
+      const body = p.slice(1, -1).join(" ");
+      return [subject ? `Subject: ${subject}` : null, subject ? "" : null, greet, "", body, "", sign].filter((x) => x !== null).join("\n");
+    }
+    // 128 counterDraftUnits: one line per body unit (128 renderCounterUnits lays the first draft out the same way).
+    if (kind === "counter_email") {
+      return [subject ? `Subject: ${subject}` : null, subject ? "" : null, p[0], "", ...p.slice(1, -1), "", p[p.length - 1]].filter((x) => x !== null).join("\n");
+    }
+    return p.join(" ");
+  }
+  // Compose a budgeted draft. kind: "why_role_answer" | "networking_email".
+  function composeBudgetedDraft(kind, input, target) {
+    const units = kind === "networking_email" ? networkingUnits(input) : whyRoleUnits(input);
+    const tgt = target && Number(target.words) > 0 ? target : null;
+    let fit = tgt ? fitUnits(units, tgt.words) : defaultFit(units);
+    // A target below the shortest form: the shortest form (never an empty draft), reported by its real count.
+    if (tgt && !fit.picks) fit = { parts: units.map((u) => (u.variants || []).reduce((x, v) => (countWords(v) < countWords(x) ? v : x), (u.variants || [""])[0])) };
+    const subject = kind === "networking_email" ? (input && input.subject) || null : null;
+    const text = renderParts(kind, fit.parts, subject);
+    return { kind, text, units, subject, words: draftWordCount(text), target: tgt, exact: tgt ? draftWordCount(text) === tgt.words : null };
+  }
+  // Re-fit a held draft to a new word target. With its units (a budgeted draft) the result is exact whenever any
+  // combination reaches the target. A draft without units (written by another route) is cut by whole sentences only:
+  // the opening and the closing ask stay, middle sentences go from the end, and the reply reports the real count —
+  // no sentence is broken and nothing is added.
+  function refitDraft(draft, target) {
+    const d = draft || {};
+    const tgt = target && Number(target.words) > 0 ? target : null;
+    if (!tgt) return null;
+    if (Array.isArray(d.units) && d.units.length) {
+      let fit = fitUnits(d.units, tgt.words);
+      // N below the draft's shortest form (greeting, ask and sign-off kept): the shortest form, reported as such.
+      const floor = !fit.picks;
+      if (floor) fit = { parts: d.units.map((u) => (u.variants || []).reduce((a, v) => (countWords(v) < countWords(a) ? v : a), (u.variants || [""])[0])) };
+      const text = renderParts(d.kind, fit.parts, d.subject || null);
+      return { kind: d.kind, text, units: d.units, subject: d.subject || null, words: draftWordCount(text), target: tgt, exact: draftWordCount(text) === tgt.words, method: "units", floor };
+    }
+    const src = String(d.text || "");
+    const before = draftWordCount(src);
+    if (before <= tgt.words) return { kind: d.kind || "draft", text: src, words: before, target: tgt, exact: before === tgt.words, method: "unchanged", already: true };
+    const lines = src.split("\n");
+    const subject = /^subject:/i.test((lines[0] || "").trim()) ? lines[0] : null;
+    const rest = (subject ? lines.slice(1) : lines).join("\n");
+    const paras = splitParagraphs(rest);
+    const isGreet = (p) => /^(hi|hello|hey|dear)\b[^.!?\n]{0,40},?$/i.test(p.trim());
+    const isSign = (p) => /^(thanks|thank you|best|sincerely|regards|warmly|cheers)\b[^.!?]{0,40}(,|\n|$)/i.test(p.trim()) && countWords(p) <= 6;
+    const head = paras.length && isGreet(paras[0]) ? paras[0] : null;
+    const tail = paras.length > 1 && isSign(paras[paras.length - 1]) ? paras[paras.length - 1] : null;
+    const core = paras.slice(head ? 1 : 0, tail ? -1 : undefined);
+    const sents = core.flatMap((p, pi) => splitSentences(p).map((x) => ({ x, pi })));
+    const fixed = countWords(head || "") + countWords(tail || "");
+    const keep = sents.map(() => true);
+    const total = () => fixed + sents.reduce((n, s0, k) => n + (keep[k] ? countWords(s0.x) : 0), 0);
+    for (let k = sents.length - 2; k >= 1 && total() > tgt.words; k--) keep[k] = false;
+    for (let k = 1; k < sents.length && total() < tgt.words; k++) { if (!keep[k]) { keep[k] = true; if (total() > tgt.words) keep[k] = false; } }
+    const byPara = new Map();
+    sents.forEach((s0, k) => { if (keep[k]) byPara.set(s0.pi, (byPara.get(s0.pi) || []).concat(s0.x)); });
+    const body = [...byPara.keys()].sort((a, b) => a - b).map((pi) => byPara.get(pi).join(" "));
+    const text = [subject, subject ? "" : null, head, head ? "" : null, body.join("\n\n"), tail ? "" : null, tail].filter((x) => x !== null).join("\n");
+    const words = draftWordCount(text);
+    return { kind: d.kind || "draft", text, words, target: tgt, exact: words === tgt.words, method: "sentences" };
+  }
+
   return {
+    countWords, draftWordCount, wordTargetOf, fitUnits, factVariants, whyRoleUnits, networkingUnits, composeBudgetedDraft, refitDraft,
     resolvePolicy, gate0, POLICY_REGISTRY, KIND_DEFAULTS,
     assembleWave,
     extractVoiceProfile, voiceTargetsText, sampleStructuralSeed, openerClass,

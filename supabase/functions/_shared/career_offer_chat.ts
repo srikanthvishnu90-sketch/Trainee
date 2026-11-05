@@ -13,7 +13,7 @@
 //   - No cost-of-living dataset is on file, so two places are never adjusted; the reply says so.
 //   - Nothing is sent. The counter is a draft on a card (requires_approval, sent: false) bound to its exact text by hash;
 //     there is no send path for it.
-import { type Bench, benchmarks, type Field, hasWord, MAX_MESSAGE, mergeOffers, MIN_N, type Offer, type OfferData, parseOfferWords, payData } from "./career_offer.ts";
+import { type Bench, benchmarks, counterAnswer, type Field, hasWord, MAX_MESSAGE, mergeOffers, MIN_N, type Offer, type OfferData, parseOfferWords, payData } from "./career_offer.ts";
 import { CareerNegotiation, CareerPaths } from "./router_core.career.js";
 import { searchWords } from "./career_ingest.ts";
 
@@ -204,7 +204,7 @@ async function counterOf(f: OnFile, m: Market, state: OfferChatState, _now: numb
   // Other offers the person told this thread about (company and base in their words) are competing offers.
   const competing = [...o.competing, ...state.offers.filter((x) => x !== f && !sameCompany(x.offer.company, o.company) && x.offer.base != null && x.offer.company)
     .map((x) => ({ company: x.offer.company, base: x.offer.base!, said: x.said }))];
-  const script = (CareerNegotiation as any).factScript({ company: o.company, role: o.role, base: o.base, signing: o.signing }, { competing, deadline: o.deadline, benchmark: bench ? { median: bench.median, cite: bench.cite } : null });
+  const script = (CareerNegotiation as any).factScript({ company: o.company, role: o.role, base: o.base, hourly: o.hourly, signing: o.signing }, { competing, deadline: o.deadline, benchmark: bench ? { median: bench.median, cite: bench.cite } : null });
   let email: string = script.email;
   // A competing offer leads the ask; the benchmark is still cited beside it when it is above the base.
   if (bench && o.base != null && bench.median > o.base && !email.includes(bench.cite)) {
@@ -219,7 +219,9 @@ async function counterOf(f: OnFile, m: Market, state: OfferChatState, _now: numb
   const why = cited ? `It cites ${cited}: median ${usd(bench!.median)}.`
     : bench ? `Your base is already at or above the market median I have (${usd(bench.median)}, ${bench.cite}), so the draft asks for flexibility instead of citing it.`
     : "I have no market number with enough data behind it, so the draft cites none and asks for flexibility.";
-  const groups = [...lead, [`A counter for ${o.company || "your offer"}, on a card for your review. ${why}`, "", email], ["On a call:", script.call],
+  // C04: a direct answer to "should I counter?" and the package terms not yet stated, before the draft.
+  const answerLines = counterAnswer({ base: o.base, competing }, bench ? { median: bench.median, cite: bench.cite } : null, f.said || "");
+  const groups = [...lead, answerLines, [`A counter for ${o.company || "your offer"}, on a card for your review. ${why}`, "", email], ["On a call:", script.call],
     ["Nothing is sent: Trainee has no send for this draft. Edit it, then send it from your own email."]];
   return answer(OFFER_INTENT.counter, "drafted", groups, card);
 }

@@ -1,7 +1,8 @@
 -- OUTREACH R4 (20261105100000_career_outreach_r4.sql), in the database alone: the older one-at-a-time outreach claim
--- (career_outreach_claim) leaves a draft the sending rail has to the rail ('on_rail': queued, handed back for a retry after
--- a 5xx, or cancelled there for an opt-out or a bounce), never sends to an address that bounced for anyone ('bad_address'),
--- and still claims a draft that never reached the rail (approved before Gmail could send). Service only. Rolled back.
+-- (career_outreach_claim) leaves a draft the sending rail has to the rail ('on_rail': queued, handed back, or cancelled there
+-- for an opt-out or a bounce), never sends to an address that bounced for anyone ('bad_address'), and still claims a draft
+-- that never reached the rail (approved before Gmail could send); a rail try Gmail may have taken (a 5xx) keeps its draft
+-- 'sending' for the rail (career_send_complete_one). Service only. Rolled back.
 \set ON_ERROR_STOP on
 begin;
 reset role;
@@ -9,7 +10,7 @@ do $$
 declare
   a uuid := '00000000-0000-4000-8000-0000000c4001';
   d1 uuid := '00000000-0000-4000-8000-0000000c4d01'; d2 uuid := '00000000-0000-4000-8000-0000000c4d02';
-  d3 uuid := '00000000-0000-4000-8000-0000000c4d03'; d4 uuid := '00000000-0000-4000-8000-0000000c4d04';
+  d3 uuid := '00000000-0000-4000-8000-0000000c4d03'; d4 uuid := '00000000-0000-4000-8000-0000000c4d04'; d5 uuid := '00000000-0000-4000-8000-0000000c4d05';
   r jsonb; c jsonb; it jsonb; x text;
 begin
   insert into auth.users(id, email) values (a, 'r4-a@example.test');
@@ -19,27 +20,38 @@ begin
     (d1, a, gen_random_uuid(), 1, '{}', 'queued@example.test', 'S', 'B', 'F', repeat('a', 64), 'approved', repeat('a', 64), now()),
     (d2, a, gen_random_uuid(), 1, '{}', 'offrail@example.test', 'S', 'B', 'F', repeat('b', 64), 'approved', repeat('b', 64), now()),
     (d3, a, gen_random_uuid(), 1, '{}', 'bounced@example.test', 'S', 'B', 'F', repeat('c', 64), 'approved', repeat('c', 64), now()),
-    (d4, a, gen_random_uuid(), 1, '{}', 'retried@example.test', 'S', 'B', 'F', repeat('d', 64), 'approved', repeat('d', 64), now());
+    (d4, a, gen_random_uuid(), 1, '{}', 'retried@example.test', 'S', 'B', 'F', repeat('d', 64), 'approved', repeat('d', 64), now()),
+    (d5, a, gen_random_uuid(), 1, '{}', 'untried@example.test', 'S', 'B', 'F', repeat('e', 64), 'approved', repeat('e', 64), now());
 
   -- (1) Queued on the rail (the chat's hand-off): the older claim leaves it, and the draft is untouched.
   r := public.career_send_enqueue(jsonb_build_object('user', a, 'items', jsonb_build_array(
     jsonb_build_object('kind', 'outreach', 'source_id', d1, 'approval_hash', repeat('a', 64), 'to', 'queued@example.test', 'subject', 'S', 'body', 'B'),
-    jsonb_build_object('kind', 'outreach', 'source_id', d4, 'approval_hash', repeat('d', 64), 'to', 'retried@example.test', 'subject', 'S', 'body', 'B'))));
-  if r->0->>'status' <> 'queued' or r->1->>'status' <> 'queued' then raise exception 'FAIL setup: %', r; end if;
+    jsonb_build_object('kind', 'outreach', 'source_id', d4, 'approval_hash', repeat('d', 64), 'to', 'retried@example.test', 'subject', 'S', 'body', 'B'),
+    jsonb_build_object('kind', 'outreach', 'source_id', d5, 'approval_hash', repeat('e', 64), 'to', 'untried@example.test', 'subject', 'S', 'body', 'B'))));
+  if r->0->>'status' <> 'queued' or r->1->>'status' <> 'queued' or r->2->>'status' <> 'queued' then raise exception 'FAIL setup: %', r; end if;
   x := public.career_outreach_claim(a, d1, repeat('a', 64), now(), now());
   if x <> 'on_rail' then raise exception 'FAIL a draft queued on the rail is the rail''s: %', x; end if;
   if (select status || '|' || coalesce(sent_at::text, '-') from public.career_outreach_drafts where id = d1) <> 'approved|-' then raise exception 'FAIL the draft on the rail is untouched'; end if;
   raise notice 'ok a draft queued on the rail is left to the rail';
 
-  -- (2) The rail tried it, Gmail answered 5xx (it may have gone): the draft is 'approved' again for the retry. Still the rail's.
+  -- (2) The rail tries them. d4: Gmail answered 5xx (it may have gone): its draft stays the rail's ('sending'), so neither
+  -- the person nor the older claim can act on it before the next try looks in Sent. d5 and d1: handed back untried (a
+  -- pause, a last check that said wait): 'approved' again, and still the rail's.
   c := public.career_send_claim(jsonb_build_object('worker', 'w1', 'accounts', 10, 'per_account', 10, 'lease_seconds', 60));
-  select i into it from jsonb_array_elements(c->'accounts'->0->'items') i where i->>'source_id' = d4::text;
-  if it is null then raise exception 'FAIL setup claim: %', c; end if;
-  perform public.career_send_complete(jsonb_build_object('worker', 'w1', 'id', it->>'id', 'outcome', 'retry', 'detail', 'HTTP 503', 'retry_at', now() + interval '1 minute'));
-  if (select status from public.career_outreach_drafts where id = d4) <> 'approved' then raise exception 'FAIL setup: the retried draft is approved again'; end if;
+  for it in select i from jsonb_array_elements(c->'accounts'->0->'items') i loop
+    perform public.career_send_complete(jsonb_build_object('worker', 'w1', 'id', it->>'id', 'outcome', 'retry', 'detail', 'HTTP 503', 'retry_at', now() + interval '1 minute',
+      'untried', (it->>'source_id')::uuid <> d4));
+  end loop;
+  if jsonb_array_length(c->'accounts'->0->'items') <> 3 then raise exception 'FAIL setup claim: %', c; end if;
+  if (select status || '|' || result from public.career_outreach_drafts where id = d4) <> 'sending|send_rail' then
+    raise exception 'FAIL a try Gmail may have taken leaves its draft the rail''s: %', (select status || '|' || coalesce(result, '-') from public.career_outreach_drafts where id = d4);
+  end if;
   x := public.career_outreach_claim(a, d4, repeat('d', 64), now(), now());
-  if x <> 'on_rail' then raise exception 'FAIL a draft the rail is retrying is never sent by the older claim as well: %', x; end if;
-  raise notice 'ok a draft the rail is retrying after a 5xx is not sent a second time by the older claim';
+  if x = 'ok' then raise exception 'FAIL a draft the rail is retrying after a 5xx was claimed by the older sender as well'; end if;
+  if (select status || '|' || result from public.career_outreach_drafts where id = d5) <> 'approved|queued' then raise exception 'FAIL an untried hand-back is approved again'; end if;
+  x := public.career_outreach_claim(a, d5, repeat('e', 64), now(), now());
+  if x <> 'on_rail' then raise exception 'FAIL a draft handed back untried is still the rail''s: %', x; end if;
+  raise notice 'ok a try Gmail may have taken keeps its draft the rail''s; a hand-back stays on the rail; the older claim sends neither';
 
   -- (3) Cancelled on the rail for a bounce of its address: neither sender writes to it.
   insert into public.career_send_bad_addresses(email_hash) values (public.career_send_email_hash('queued@example.test'));

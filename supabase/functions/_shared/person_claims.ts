@@ -95,8 +95,10 @@ export function postingClause(clause: string): boolean {
 // ------------------------------------------------------------------ kinds of claim, each with what evidences it
 // A degree or honour: the same kind must be on the record (a "BS" evidences "bachelor's", "MBA" a master's).
 const DEGREE: { said: RegExp; on: RegExp; what: string }[] = [
-  { said: /\bph\.?\s?d\b|\bdoctorates?\b|\bdoctoral\b/, on: /\bph\.?\s?d\b|\bdoctor(?:ate|al)?\b/, what: "a doctorate" },
-  { said: /\bmaster'?s\b|\bmasters\b|\bmaster of\b/, on: /\bmaster|\bm\.?sc?\b|\bm\.a\.|\bmeng\b|\bmba\b|\bm\.b\.a/, what: "a master's degree" },
+  // ROUND 4: a degree only from a degree's own words: "the master data cleanup", "Scrum Master", "mastered SQL" or "every
+  // doctor at the clinic" evidence no master's degree or doctorate.
+  { said: /\bph\.?\s?d\b|\bdoctorates?\b|\bdoctoral\b/, on: /\bph\.?\s?d\b|\bdoctorate\b|\bdoctoral\b|\bdoctor of\b/, what: "a doctorate" },
+  { said: /\bmaster'?s\b|\bmasters\b|\bmaster of\b/, on: /\bmaster'?s\b|\bmasters\b|\bmaster of\b|\bm\.?sc?\b|\bm\.a\.|\bmeng\b|\bmba\b|\bm\.b\.a/, what: "a master's degree" },
   { said: /\bmba\b|\bm\.b\.a\b/, on: /\bmba\b|\bm\.b\.a|business administration/, what: "an MBA" },
   { said: /\bbachelor'?s?\b|\bbachelors\b|\bundergraduate degree\b/, on: /\bbachelor|\bb\.?sc?\b|\bb\.?a\.?\b|\bbeng\b|\bb\.?tech\b|\bbba\b/, what: "a bachelor's degree" },
   { said: /\bassociate'?s degree\b|\bassociate degree\b/, on: /\bassociate'?s? (?:degree|of)\b|\ba\.?a\.?s?\b/, what: "an associate's degree" },
@@ -303,6 +305,126 @@ const ROLE_WORDS = new Set(["engineer", "engineering manager", "manager", "direc
   "coordinator", "administrator", "officer", "fellow", "supervisor", "leader", "lead"]);
 export const isRoleWord = (w: string) => ROLE_WORDS.has(String(w).toLowerCase());
 
+// ------------------------------------------------------------------ ROUND 4 (architect, 2026-11-05)
+// tests/architect/scenarios-tailoring-r4.test.ts found five kinds of claim that passed every check above:
+//   - a title upgraded with a word the record holds elsewhere: "As a Senior Data Analyst" for a Data Analyst whose bullet
+//     says "presented to senior leadership" ("senior" was on the record, so the title passed). A seniority word before a
+//     role noun, said of the person, is a title: the record must hold that title (the word, then up to three words, then
+//     the same role noun).
+//   - the question's own words said as the person's experience: "Describe your experience with Fivetran" answered "At Acme
+//     Corp, I used Fivetran to load CRM data", "in a HIPAA-regulated environment", "pulled data from Epic and Cerner". A
+//     name the posting gives (a capitalized word, or an acronym, that the record does not hold) may be named in a clause
+//     about the posting, a wish ("I want to learn Fivetran") or the posting's own team ("your Fivetran stack"), never in a
+//     clause that says what the person did or has.
+//   - screening answers said in prose: criminal history ("I have never been convicted", "I pass background checks"), a
+//     drug test, willingness to relocate, when they can start, a salary expectation ("the low six figures"): each only
+//     as the record says it.
+//   - a date moved onto another employer: "I worked at Acme Corp from 2018 to 2022" for a job the record dates 2019-2022
+//     (2018 was the person's graduation year, so the number was "on the record"). A year said as a span of a named entry
+//     must be on an entry the same clause names.
+//   - a GPA moved: "a 3.8 GPA" for a person whose record says "GPA 3.4/4.0" and "3.8" elsewhere. A number said as a GPA
+//     must be one the record says as a GPA.
+const SENIORITY = "senior|sr\\.?|lead|principal|staff|chief";
+const ROLE_NOUNS = "engineer|analyst|scientist|designer|developer|manager|consultant|accountant|architect|researcher|specialist|director|officer|administrator|coordinator|recruiter|strategist|economist|statistician|auditor|programmer|technician|nurse|counsel|attorney|editor|writer|producer|planner|buyer|controller";
+const TITLE_SAID = new RegExp(`(?<![a-z0-9])(${SENIORITY})\\s+((?:[a-z&/-]+\\s+){0,3}?)(${ROLE_NOUNS})s?(?![a-z0-9])`, "g");
+const ROLE_OF_SELF = /\b(?:my|our) (?:role|title|position|job) (?:as|of|was|is)\s+(?:an?\s+|the\s+)?(?:[a-z&/-]+\s+){0,3}$/;
+// `rec` keeps where one fact, line or bullet ends ("|"): "senior leadership" closing one entry and "Operations Analyst"
+// opening the next are no title.
+function titleProblems(t: string, rec: string, add: (s: string) => void) {
+  for (const m of t.matchAll(TITLE_SAID)) {
+    const before = sentenceBefore(t, m.index!);
+    if (roleFraming(before) === "other" && !ROLE_OF_SELF.test(before)) continue;
+    const mod = m[1].replace(/\.$/, ""), noun = m[3];
+    const modRe = mod === "senior" || mod === "sr" ? "(?:senior|sr\\.?)" : esc(mod);
+    if (new RegExp(`(?<![a-z0-9])${modRe}\\s+(?:[a-z&/,-]+\\s+){0,3}?${esc(noun)}s?(?![a-z0-9])`).test(rec)) continue;
+    add(`the title "${m[0].trim()}" is not on your confirmed record`);
+  }
+}
+// Screening answers said in prose: each family's own words must be on the record.
+const SCREENING: { said: RegExp; on: RegExp; what: string }[] = [
+  { said: /\b(?:convicted|convictions?|felony|felonies|misdemeanou?rs?|criminal (?:record|history|background|charges?|convictions?)|clean (?:criminal )?(?:record|background)|arrested|background checks?)\b/,
+    on: /\b(?:convict\w*|felon\w*|misdemeanou?r\w*|criminal|arrest\w*|background check\w*)\b/, what: "criminal history or a background check" },
+  { said: /\bdrug (?:tests?|screens?|screening|testing)\b/, on: /\bdrug (?:test|screen)/, what: "a drug test" },
+  { said: /\b(?:willing|able|happy|open|ready|glad|prepared|free) to (?:relocate|move)\b|\b(?:can|will|would|could) (?:relocate|move) (?:to|for|anywhere)\b/, on: /\breloca\w*|\bwilling to move\b/, what: "willingness to relocate" },
+  { said: /\b(?:start|begin|join|available) (?:immediately|right away|asap|straight away|next week|next month|within (?:a|one|two|three|\d+) (?:days?|weeks?|months?))\b|\bavailable (?:to start|to begin|from|starting)\b|\b(?:two|2|four|4|one|1) weeks'? notice\b|\bnotice period\b/,
+    on: /\b(?:start date|available|availability|notice)\b/, what: "when you can start" },
+  { said: /\b(?:five|six|seven|low six|mid six|high six|low five|high five)[- ]figures?\b|\b(?:salary|pay|compensation) (?:expectations?|requirements?|range|target|of)\b|\b(?:expect|expecting|seeking|looking for|targeting|asking for|ask for|need|require)\b[^.!?;]{0,25}\b(?:salary|base pay|base salary|compensation|pay)\b/,
+    on: /\b(?:salary|compensation|pay)\b/, what: "a salary expectation" },
+];
+// The names a posting (its question, its company) gives: capitalized inside a sentence, or an acronym. A question written
+// in title case ("Tell Us About A Time You Led A Project") names nothing by its capitals: only its acronyms count there.
+function postingNames(mentionRaw: string, company: string): string[] {
+  const out = new Set<string>();
+  const comp = flat(company);
+  for (const line of mentionRaw.split(/\n/)) {
+    const toks = [...line.matchAll(/(?<![A-Za-z0-9'’])([A-Z][A-Za-z0-9&+]*[A-Za-z0-9+])/g)];
+    const inner = toks.filter((m) => !/(^|[.!?:;]\s*|^\s*)$/.test(line.slice(0, m.index)));
+    const words = line.split(/\s+/).filter((w) => /^[A-Za-z]/.test(w)).length;
+    const titleCase = words > 2 && inner.length >= (words - 1) * 0.5;
+    for (const m of toks) {
+      const w = m[1];
+      const acronym = /^[A-Z][A-Z0-9&+]{1,}$/.test(w);
+      if (!acronym && (titleCase || !inner.includes(m))) continue;
+      const lw = w.toLowerCase();
+      if (NAME_STOP.has(lw) || GENERIC_PLACE.has(lw) || isRoleWord(lw) || hasPhrase(comp, lw) || /^(?:ai|us|usa|u\.s|eeo|faq|n\/a|na)$/.test(lw)) continue;
+      out.add(w);
+    }
+  }
+  return [...out];
+}
+const PERSON_DID = /\b(?:i|i've|i'm|me)\b|\bmy\b/;
+const NOT_A_CLAIM = /\b(?:want|wants|hope|hoping|eager|excited|keen|look(?:ing)? forward|would|could|love to|like to|learn|learning|apply|applying|interested|drawn|admire|curious|plan|aim|wish|join|joining|i'd|new to|never|not)\b|n't\b/;
+function echoProblems(scrub: string, recFlat: string, mentionRaw: string, company: string, add: (s: string) => void) {
+  const names = postingNames(mentionRaw, company).filter((w) => !hasPhrase(recFlat, w.toLowerCase()));
+  if (!names.length) return;
+  // A clause, and each part of it joined by "and", "but", "while" ("Your team runs on Fivetran, and at Acme I built ...").
+  for (const clause of clausesOf(scrub).flatMap((x) => x.split(/,\s+(?=(?:and|but|so|while|whereas|where)\b)/))) {
+    const c = lower(clause);
+    if (postingClause(clause) || !PERSON_DID.test(c) || NOT_A_CLAIM.test(c)) continue;
+    for (const w of names) {
+      const re = new RegExp(`(?<![A-Za-z0-9])${esc(w)}(?![A-Za-z0-9])`, "gi");
+      for (const m of clause.matchAll(re)) {
+        // The posting's own team, stack or role ("your Fivetran stack", "the Population Health role") names the posting.
+        const left = clause.slice(0, m.index).replace(/(?:[A-Z][A-Za-z0-9&+-]*\s+)*$/, "");
+        const right = clause.slice(m.index! + m[0].length).replace(/^(?:\s+[A-Z][A-Za-z0-9&+-]*)*/, "");
+        if (/\b(?:your|the company'?s?|their)\s+$/i.test(left) || /^\s+(?:role|position|opening|posting|listing|job description|req)\b/i.test(right)) continue;
+        add(`"${w}" is the posting's word, not on your confirmed record`);
+        break;
+      }
+    }
+  }
+}
+const YEAR_SPAN = /\b(?:from|since|between|starting in|started in|joined in|until|through|in)\s+(?:(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\s+)?((?:19|20)\d\d)\b|\b((?:19|20)\d\d)\s*(?:-|–|to|until|through)\s*(?:(?:19|20)\d\d|present|now|today)\b|\b(?:19|20)\d\d\s*(?:-|–|to|until|through)\s*((?:19|20)\d\d)\b/gi;
+// A month names no entry ("from June 2024": every internship ran from June).
+const MONTH_WORDS = new Set("january february march april may june july august september october november december jan feb mar apr jun jul aug sep sept oct nov dec monday tuesday wednesday thursday friday saturday sunday spring summer fall autumn winter".split(" "));
+function dateProblems(scrub: string, record: string[], add: (s: string) => void) {
+  if (record.length < 2) return; // one record string (a tailored line's whole record, a rewrite's entry): its own numbers check
+  for (const clause of clausesOf(scrub)) {
+    if (postingClause(clause)) continue;
+    const years = [...clause.matchAll(YEAR_SPAN)].map((m) => m[1] ?? m[2] ?? m[3]).filter(Boolean);
+    if (!years.length) continue;
+    const named = new Set<number>();
+    for (const m of clause.matchAll(/(?<![A-Za-z0-9'’])([A-Z][A-Za-z0-9&'’.-]*(?:\s+(?:of|and|&|de|the)?\s*[A-Z][A-Za-z0-9&'’.-]*)*)/g)) {
+      const run = m[1].trim();
+      if (run === "I" || (!/\s/.test(run) && /(^|[.!?:;]\s*)$/.test(clause.slice(0, m.index)))) continue;
+      const words = flat(run).trim().split(" ").filter((w) => w.length >= 3 && !NAME_STOP.has(w) && !GENERIC_PLACE.has(w) && !MONTH_WORDS.has(w));
+      if (!words.length) continue;
+      record.forEach((r, i) => { if (words.every((w) => hasPhrase(flat(r), w))) named.add(i); });
+    }
+    if (!named.size) continue;
+    const on = new Set<string>();
+    for (const i of named) for (const n of numbersOf(record[i])) on.add(n);
+    for (const y of years) if (!on.has(y)) add(`the date "${y}" is not on the entry you named`);
+  }
+}
+const GPA_NUM = /(\d\.\d{1,2})\s*(?:\/\s*\d(?:\.\d+)?\s*)?(?:(?:cumulative|overall|undergraduate|major|final)\s+)?(?:gpa|grade point average)\b|\b(?:gpa|grade point average)\s*(?:of|was|is|:|-|=)?\s*(?:an?\s+|about\s+|around\s+)?(\d\.\d{1,2})/g;
+const gpasOf = (s: string) => new Set([...s.matchAll(GPA_NUM)].map((m) => m[1] ?? m[2]));
+function gpaProblems(t: string, rec: string, add: (s: string) => void) {
+  const on = gpasOf(rec);
+  if (!on.size) return;
+  for (const g of gpasOf(t)) if (!on.has(g)) add(`a GPA of ${g} is not the GPA on your confirmed record`);
+}
+
 export function claimProblems(text: string, o: ClaimInput): string[] {
   const raw = String(text ?? "");
   if (!raw.trim()) return [];
@@ -327,9 +449,18 @@ export function claimProblems(text: string, o: ClaimInput): string[] {
   { const m = NATIONALITY.exec(t); if (m && !hasPhrase(rec, (m[1] || m[2] || m[3]))) add(`a nationality ("${m[0].trim()}") is not on your confirmed record`); }
   for (const re of DEMOGRAPHIC) {
     const m = re.exec(t);
-    if (m && !hasPhrase(rec, m[0].trim())) add(`"${m[0].trim()}" (how you identify) is not on your confirmed record`);
+    // ROUND 4: what they said they are ("first-generation") is the claim; "as a" or "I am a" around it is not.
+    if (m && !hasPhrase(rec, m[0].trim()) && !hasPhrase(rec, m[0].trim().replace(/^(?:i am|i'm|as) an? /, ""))) add(`"${m[0].trim()}" (how you identify) is not on your confirmed record`);
   }
   veteranProblems(t, rec, add);
+  // ROUND 4: a title, a screening answer, a date on a named entry, a GPA (see above).
+  titleProblems(t, lower(recordRaw.replace(/\n|;/g, " | ")), add);
+  for (const sc of SCREENING) {
+    const m = sc.said.exec(t);
+    if (m && !sc.on.test(rec)) add(`${sc.what} ("${m[0].trim()}") is not on your confirmed record`);
+  }
+  dateProblems(scrub, (o.record || []).filter(Boolean), add);
+  gpaProblems(t, rec, add);
   for (const l of LEADERSHIP) {
     if (l.on.test(rec)) continue;
     for (const m of t.matchAll(all(l.said))) {
@@ -378,6 +509,7 @@ export function claimProblems(text: string, o: ClaimInput): string[] {
     add(`the name "${name}" is not on your confirmed record`);
   }
   employerProblems(tRaw, recFlat, add);
+  if (mentionRaw) echoProblems(scrub, recFlat, mentionRaw, company, add);
   if (o.line) employerProblems(tRaw, recFlat, add, LINE_FRAME);
   // Each capitalized word the posting gave and the record does not have; the words of a longer name before it ("Goldman"
   // in "worked at Goldman Sachs") are part of the name, not of what comes before it.

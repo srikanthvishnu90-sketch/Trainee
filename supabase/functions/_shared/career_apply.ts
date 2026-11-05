@@ -191,7 +191,7 @@ const KEYS: [RegExp, string][] = [
   [/^(current\s*)?(location|city)|where are you (located|based)/i, "location"],
   [/start\s*date|when can you start|earliest.*start/i, "start_date"],
   [/salary|compensation\s*expectation|desired\s*pay/i, "salary_expectation"],
-  [/gender|race|ethnicity|veteran|disability|hispanic|latino/i, "eeo"],
+  [/gender|race|ethnicity|veteran|disability|hispanic|latino|lgbt|sexual orientation|heterosexual|bisexual|queer/i, "eeo"],
 ];
 // What a person was paid before, which only their own answer to that question may fill.
 export const PAY_HISTORY = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
@@ -260,7 +260,9 @@ export interface PlannedField { name: string; label: string; value: string; fact
 // location: the posting's own location text as the employer wrote it (WO-053); without it, a question that depends on
 // where the job is (an office with no place named, work rights "in the country where this job is located") is asked.
 export interface PlanPosting { job_id: string; company: string; title: string; fields: FormField[]; location?: string; url?: string }
-export const normLabel = (l: string) => String(l || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+// ROUND 4 (2026-11-05): the signs that change what is asked are kept as words: "C++" / "C#" (both were "c"), "($)" / "(€)" / "(£)".
+export const normLabel = (l: string) => String(l || "").toLowerCase().replace(/\+\+/g, " plusplus ").replace(/\+/g, " plus ").replace(/#/g, " sharp ")
+  .replace(/\$/g, " usd ").replace(/€/g, " eur ").replace(/£/g, " gbp ").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
 const yesNo = (v: string) => (/^(y|yes|true)$/i.test(v.trim()) ? "yes" : /^(n|no|false)$/i.test(v.trim()) ? "no" : null);
 
 // A select is answered only with one of the employer's own options, matched exactly (or yes/no to Yes/No). Never forced.
@@ -339,6 +341,11 @@ const BEYOND_FACT: [string[], RegExp][] = [
   [["government_employment"], /\bif you('ve| have)? (previously |ever )?served\b|\bauthori[sz]e the release\b/i],
   // WO-057: acting for a political party is not employment the person's list records.
   [["worked_here_before", "government_employment"], /\brepresentative of\b|\bpolitical party\b/i],
+  // ROUND 4 (2026-11-05): a yes to one thing is no yes to two. "Do you have a valid driver's license and reliable
+  // transportation?", "... with a clean driving record?", "Are you at least 18 and able to lift 50 pounds?" ask more than the
+  // fact says; a commercial licence (CDL, Class A/B/C) or a motorcycle endorsement is another licence.
+  [["drivers_license"], /\bcommercial\b|\bcdl\b|\bclass [abcm]\b|\bchauffeur|\bmotorcycle\b|\bendorsement|\b(?:and|with|plus|as well as|along with)\b[^?]{0,60}\b(?:transportation|vehicle|car|insurance|record|history|points|violations?|accidents?|own)\b/i],
+  [["over_18"], /\b(?:and|as well as|plus|along with)\b(?!\s+(?:older|over|above|up)\b)\s+\S/i],
   [["applied_before"], /\banother\b|\baffiliat|\bsubsidiar|\bsister compan|\bgroup compan|\bany of (our|its)\b/i],
 ];
 // An answer to a question the person's fact does not answer at this posting (above) is this posting's alone: it is stored
@@ -541,6 +548,9 @@ function byMeaning(f: FormField, company: string, answers: Record<string, Answer
     if (c !== null) return { value: c, factId: answers.citizenship.factId };
   }
   if (!a) return null;
+  // ROUND 4: a bare yes or no kept as the voluntary-answers fact says nothing about which question it answered ("No" to a
+  // disability question is no answer to a veteran or ethnicity one): never put on a voluntary question by meaning.
+  if (m.fact === "eeo" && yesNoOf(a.value)) return null;
   const choice = f.options.length ? chooseOption(...placeFact(m.fact, String(a.value), answers), f.options, f.label) : null;
   if (f.options.length) return choice === null ? null : { value: choice, factId: a.factId };
   if (f.type === "checkbox") {

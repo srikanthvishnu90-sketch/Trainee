@@ -148,8 +148,13 @@ export function factLock(text: string, sources: string[]): Lock {
   for (const m of raw.matchAll(/\d[\d,]*(?:\.\d+)?/g)) nums.add(m[0].replace(/,/g, ""));
   const untraced: string[] = [];
   const miss = (v: string) => { if (!untraced.some((u) => norm(u) === norm(v))) untraced.push(v); };
+  // ROUND 4 (2026-11-05): 154's sentence splitter breaks a decimal at its point ("a 3.6 GPA" was "a 3." and "6 GPA.", two
+  // numbers no record holds), so an honest GPA, "2.5 hours" or "$1.2M" was never shown. A decimal is checked here whole,
+  // and 154 reads the text with each decimal held as one placeholder word.
+  for (const m of text.matchAll(/\d[\d,]*\.\d+/g)) if (!nums.has(m[0].replace(/,/g, "")) && !hasWords(corpus, m[0])) miss(m[0]);
+  const whole = text.replace(/\d[\d,]*\.\d+/g, "decimalnumber");
   // 154's checkables: numbers (digits and spelled with a unit), dates, capitalized names.
-  for (const c of W.extractCheckables(text) as { type: string; value: string; numeric?: number; sentence: string }[]) {
+  for (const c of W.extractCheckables(whole) as { type: string; value: string; numeric?: number; sentence: string }[]) {
     if (c.type === "entity" && !c.value.includes(" ") && STARTERS.has(c.value.toLowerCase()) && c.sentence.trim().startsWith(c.value)) continue;
     if (c.type === "number") {
       // TAILORING ROUND 2: 154 reads "thirty-three percent" as "three percent"; the number said is the whole compound.
@@ -169,7 +174,7 @@ export function factLock(text: string, sources: string[]): Lock {
   // Possessive names, which 154's run splitter drops ("Stripe's" is not a capitalized word to it), and any capitalized
   // word inside a sentence, which it drops when punctuation sticks to it ("an MBA from Stanford.").
   for (const m of text.matchAll(/\b([A-Z][A-Za-z&.]+)['’]s\b/g)) if (!hasWords(corpus, m[1])) miss(m[1]);
-  for (const s of W.splitSentences(text) as string[]) {
+  for (const s of W.splitSentences(whole) as string[]) {
     for (const m of s.matchAll(/(?<=\s)([A-Z][A-Za-z&]*[A-Za-z])(?![A-Za-z'’])/g)) {
       if (m[1] !== "I" && !hasWords(corpus, m[1])) miss(m[1]);
     }

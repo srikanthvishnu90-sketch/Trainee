@@ -25,6 +25,7 @@
 // Run: deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/flow-scenarios-telegram-r2.test.ts
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
+import { virtualClock } from "../flow/virtual-clock.ts";
 import { psqlSession } from "../flow/psql-session.ts";
 import { careerHandler, SERVICE_KEY, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
 import { APPLY_LINKS, EMOJI_ONLY, FORWARDED_POSTS, LANG_TEXTS, ORIGINS, rng, TYPO_TEXTS } from "./scenarios/telegram-r2-generator.ts";
@@ -77,7 +78,8 @@ Deno.test({
       const fast: Pg = { ...pg, sql: async (text: string) => (await session.q(text)).join("\n").trim() };
       h = await careerHandler(fast, {});
       const { handleChat } = await import("../../supabase/functions/agent-chat/handler-career.ts");
-      const bot = fakeBot({ token: TOKEN, now: Date.now });
+      const pace = virtualClock(); // the send pacing's clock (tests/flow/virtual-clock.ts): Telegram's one-a-second per chat is still computed and waited, on this clock, not the wall
+      const bot = fakeBot({ token: TOKEN, now: pace.clock });
       const files = new Map<string, { bytes: Uint8Array; size: number }>();
       const openai = { chat: 0, responses: 0 };
       const viaDouble = globalThis.fetch, outbound: string[] = [];
@@ -153,7 +155,7 @@ Deno.test({
         const id = again ?? ++upd;
         const raw = again ? raws.get(again)! : JSON.stringify({ update_id: id, ...body });
         raws.set(id, raw);
-        const deliverNow = deliverer(admin, Deno.env);
+        const deliverNow = deliverer(admin, Deno.env, pace);
         const res = await handleTelegram(new Request(`${SUPABASE_URL}/functions/v1/trainee-telegram`, { method: "POST", headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": SECRET }, body: raw }),
           { env: Deno.env, now: Date.now, store: () => supabaseInboundStore(admin), chat: chatThroughAgent(SUPABASE_URL, SERVICE_KEY, { channel: "telegram" }), admin,
             deliver: (a) => deliverNow({ userId: a.userId, key: a.key, now: a.now }) });
@@ -337,9 +339,11 @@ Deno.test({
         if (open !== "0") fail("budget", `${open} micro-USD left reserved`);
         const secrets = logged.filter((l) => l.includes(TOKEN) || l.includes(SECRET));
         if (secrets.length) fail("logs", `${secrets.length} log lines carry a secret`);
+        // The shared pacer still spaced a chat's messages (one a second): its waits were taken, on the injected clock.
+        if (!pace.waits.length) fail("pacing", "no send waited for its chat's token: the shared pacer did not pace");
       });
       for (const k of Object.keys(realLog) as (keyof typeof realLog)[]) console[k] = realLog[k];
-      console.log(`[flow-telegram-r2] ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(", ")}; ${bot.msgs.length} messages, ${bot.answers.length} taps answered; the model chat ${openai.chat}, searches ${openai.responses}; ${failures.length} failures`);
+      console.log(`[flow-telegram-r2] ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(", ")}; ${bot.msgs.length} messages, ${bot.answers.length} taps answered; the model chat ${openai.chat}, searches ${openai.responses}; ${pace.waits.length} pacing waits (${Math.round(pace.ahead / 1000)} s on the injected clock); ${failures.length} failures`);
       if (failures.length) {
         // by what broke, and how many people it happened to
         const tally = new Map<string, Set<string>>();

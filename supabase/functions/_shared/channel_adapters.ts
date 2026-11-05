@@ -7,6 +7,7 @@
 // primary key of channel_contacts and what career_outbox.contact records; the database derives channel and address
 // from it (20261021070000_channel_parity.sql), so the two can never disagree.
 import { normalizeContact, splitLong, toBubbles } from "./conversation.ts";
+import { fenceChunks, paragraphsOf } from "./channel_text.ts";
 
 export type Channel = "imessage" | "whatsapp" | "telegram";
 export type Provider = "loopmessage" | "whatsapp" | "telegram";
@@ -103,7 +104,10 @@ export type ParseResult = { messages: InboundMessage[]; statuses?: StatusEvent[]
 
 export type SendResult =
   | { ok: true; id: string | null; ids?: string[] }
-  | { ok: false; error: string; retryable: boolean; hold?: boolean; optOut?: boolean; retryAfterMs?: number; sent?: number; sentIds?: string[] }; // retryAfterMs: the provider's own "wait this long" (Telegram's 429)
+  | { ok: false; error: string; retryable: boolean; hold?: boolean; optOut?: boolean; retryAfterMs?: number; sent?: number; sentIds?: string[]; unauthorized?: boolean }; // retryAfterMs: the provider's own "wait this long" (Telegram's 429)
+// CHANNEL DELIVERY ROUND 4 (2026-11-05): unauthorized: the provider refused Trainee's own credentials (an HTTP 401; Telegram's 404
+// for a bot token it does not know; WhatsApp's code 190, an expired access token). The request was refused, not the message:
+// nothing of it went out, and the channel is down until the secret is fixed (channel.ts deliverDue).
 // CHANNEL DELIVERY ROUND 2 (2026-10-30): sent / sentIds on a failure: how many of the bubbles went out before it, and their
 // ids. A retryable (or held) failure after some went out resumes from the first that did not (career_outbox.sent_parts), so
 // nothing is sent twice and the rest is not lost; retryable is set only when nothing of the failing bubble went out.
@@ -161,8 +165,9 @@ export function packMessages(text: string, max: number): string[] {
   if (clean.length <= max) return [clean];
   const out: string[] = [];
   let buf = "";
-  for (const para of clean.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean)) {
-    for (const piece of para.length <= max ? [para] : splitLong(para, max)) {
+  // TELEGRAM ROUND 4 (channel_text.ts paragraphsOf): a fenced code block is one paragraph, its lines as written, sent as whole blocks.
+  for (const { s: para, code } of paragraphsOf(clean)) {
+    for (const piece of para.length <= max ? [para] : code ? fenceChunks(para, max) : splitLong(para, max)) {
       if (buf && buf.length + 2 + piece.length <= max) buf += `\n\n${piece}`;
       else { if (buf) out.push(buf); buf = piece; }
     }

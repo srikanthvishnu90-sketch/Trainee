@@ -32,6 +32,13 @@ jobs:
   dry-run:
     name: go-live dry run (PR head)
     runs-on: ubuntu-24.04
+    # 2026-11-01: one run per PR, like ci.yml: a newer head cancels this job for the older one (it had no group, so every
+    # push to a PR touching supabase/ queued another full preflight: 241 runs in 2.3 days, ~40 of the 94 queued runs on
+    # 2026-11-01 were superseded heads). Off a pull request (trunk push, dispatch, the deploy's workflow_call) the group
+    # is the run's own id, so nothing is ever cancelled or queued behind another run there.
+    concurrency:
+      group: deploy-preflight-dry-run-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -52,6 +59,13 @@ jobs:
   rehearsal:
     name: migration rehearsal (live-shaped schema)
     runs-on: ubuntu-24.04
+    # 2026-11-01: one run per PR, like ci.yml: a newer head cancels this job for the older one (it had no group, so every
+    # push to a PR touching supabase/ queued another full preflight: 241 runs in 2.3 days, ~40 of the 94 queued runs on
+    # 2026-11-01 were superseded heads). Off a pull request (trunk push, dispatch, the deploy's workflow_call) the group
+    # is the run's own id, so nothing is ever cancelled or queued behind another run there.
+    concurrency:
+      group: deploy-preflight-rehearsal-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

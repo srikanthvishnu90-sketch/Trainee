@@ -55,6 +55,8 @@ export interface OutboxRow {
   // CHANNEL DELIVERY ROUND 2 (2026-10-30): how many of this row's messages (its rendered bubbles) already went out in an
   // earlier attempt, and their provider ids; the row resumes after them. Absent or 0: none went.
   sentParts?: number; sentIds?: string[];
+  // CHANNEL R4 FLAKE (2026-11-05): the reason the row's last attempt recorded (a row tried before); absent: the store cannot say.
+  lastError?: string | null;
 }
 // "queued" with deliverAt: put back for a later time (the person's quiet hours on their clock as it is now).
 // sentParts (CHANNEL DELIVERY ROUND 2): on a failed or held row, how many of its messages went out so far (providerIds then
@@ -91,6 +93,10 @@ export interface ChannelStore {
   // PROACTIVE SCENARIOS ROUND 3 (2026-11-01): a queued interview brief (brief:<invite>:<n>) whose interview a later email
   // cancelled or moved: false (not sent, BRIEF_GONE_NOTE). Absent: not checked.
   briefWanted?(row: OutboxRow): Promise<boolean>;
+  // CONNECTORS ROUND 4 (2026-11-05): is a text made from the person's mail (mailboxText) still queued? "disconnect gmail" (or
+  // connecting another Google account) deletes every such undelivered row (20261105130000); a run that had claimed one before
+  // that sent it after. false: the row is gone (not sent). Absent: not checked.
+  stillQueued?(row: OutboxRow): Promise<boolean>;
   // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): the person's zone and quiet hours as they are now (their alert settings),
   // null when they have none on file. Absent: not checked (the time a row was planned for stands).
   quietHours?(userId: string): Promise<{ tz: string | null; quiet_start?: number; quiet_end?: number } | null>;
@@ -101,6 +107,9 @@ export interface ChannelStore {
   claimTemplate?(contact: string, day: string, cap: number, at: number): Promise<boolean | null>;
   unclaimTemplate?(contact: string, at: number): Promise<void>;
   setOptOut(contact: string, out: boolean, at: number): Promise<void>;
+  // CHANNEL DELIVERY ROUND 4 (2026-11-05): put back, exactly as they were, claimed rows this run never handed to a provider
+  // (a run that failed part way: see deliverDue). Absent: they wait for the sweep, as before.
+  putBack?(ids: string[]): Promise<number>;
   contactsSentOn(day: string, channel?: Channel): Promise<number>; // distinct contacts sent to on a UTC day (on one channel, if named)
   sentTo(contact: string, day: string): Promise<boolean>;
   mark(id: string, r: DeliveryMark): Promise<void>; // a retry is status "failed" with retryAt set and attempts + 1
@@ -109,7 +118,7 @@ export interface ChannelStore {
   nudgesOn?(day: string): Promise<number>;
   setNudged?(contact: string, at: number): Promise<void>;
 }
-export type Send = (contact: string, bubbles: string[]) => Promise<{ ok: true; id: string | null; ids?: string[] } | { ok: false; error: string; retryable: boolean; sent?: number; sentIds?: string[] }>;
+export type Send = (contact: string, bubbles: string[]) => Promise<{ ok: true; id: string | null; ids?: string[] } | { ok: false; error: string; retryable: boolean; sent?: number; sentIds?: string[]; unauthorized?: boolean }>;
 
 // The answer to a message the person sent (trainee-inbound queues it as reply:<provider message id>).
 export const isReply = (key: string) => String(key ?? "").startsWith("reply:");
@@ -118,7 +127,14 @@ export const MAX_ATTEMPTS = 3;
 // Trainee, not a failure of the message. It counted as one of the 3 attempts, so a chat rate-limited three times in a row lost
 // that part of the answer for good, and the parts after it then went out without it. Such a row is tried up to this many times,
 // each no sooner than the platform asked.
-export const MAX_PACED_ATTEMPTS = 12;
+// OUTBOX ATTEMPTS CAP (2026-11-05): career_outbox's check allows attempts between 0 and 10, and this was 12. A row paced ten
+// times was refused the write recording its 11th attempt; the row had been handed to the provider, so it stayed "sending"
+// and the sweep failed it as "delivery outcome unknown" although a 429 sends nothing, and the run stopped there. No path
+// records more than OUTBOX_MAX_ATTEMPTS: a paced row ends failed with its reason on its 10th attempt, a run failure on the
+// 10th is the last (deliverDue), and the store never writes more (channel_store.ts mark, for a row an older build left
+// waiting at 10).
+export const OUTBOX_MAX_ATTEMPTS = 10;
+export const MAX_PACED_ATTEMPTS = OUTBOX_MAX_ATTEMPTS;
 const BACKOFF_MS = [60000, 5 * 60000, 30 * 60000]; // after attempt 1, 2, 3
 const utcDay = (t: number) => new Date(t).toISOString().slice(0, 10);
 export const HELD_NOTE = "held: outside WhatsApp's 24-hour window; it goes out whole when the person next writes";
@@ -155,6 +171,24 @@ const reminderZoneOf = (key: string) => { const z = /^status:reminder:[^:]+:([A-
 export const LIMITS_NOTE = "not sent: under the fit floor the person set, or past the alerts a day they asked for, since it was queued";
 export const CLOSED_SINCE =" (this posting has closed since this report was written)";
 // CHANNEL DELIVERY ROUND 2 (2026-10-30): a row bound to a channel the person no longer has, and no other channel to send it on.
+// CONNECTORS ROUND 4 (2026-11-05): the keys of texts made from a person's mail by the scheduled Gmail run, as the database
+// knows them (career_mail_text_key, 20261105130000): a status read from an email (status:<message hash>), a deadline reminder
+// (status:deadline:<message hash>), an application an email confirmed (status:confirmed:<application>), the "which
+// application?" ask (status:which:<message hash>), an interview brief (brief:<message hash>:<n|moved>). Not the daily brief
+// (brief:<day>), not a reminder set in chat (status:reminder:...), not a connector's own status.
+export const MAIL_TEXT_KEY = /^(status:([0-9a-f]{64}|deadline:[0-9a-f]{64}|confirmed:[^:]+|which:[0-9a-f]{64})|brief:[0-9a-f]{64}:[^:]+)$/;
+export const mailTextKey = (key: string) => MAIL_TEXT_KEY.test(String(key ?? ""));
+// What "disconnect gmail" deletes from the outbox: those texts, and the offers of the drafts it deletes with the mail
+// (followup:followup:<ref>, followup:thank_you:<ref>:<day>, career_mail_drafts), whose "yes" would find nothing.
+export const mailboxText = (key: string) => mailTextKey(key) || /^followup:(followup|thank_you):/.test(String(key ?? ""));
+// CHANNEL DELIVERY ROUND 4 (2026-11-05): a row whose handling failed before anything of it was sent (a read or a write the
+// database refused): one attempt, tried again with the backoff, failed with this reason after MAX_ATTEMPTS.
+// CHANNEL R4 FLAKE (2026-11-05): ... only when the row's own handling failed this way in its last attempt too. A row whose
+// first two attempts the provider refused (a 502, a 429) and whose third run had one read refused (the STOP read) was failed
+// for good on that one refusal: an answer lost to a database blip it had nothing to do with. Now such a row is tried again
+// (the run failure still counts an attempt, so the provider's own refusals stay bounded); a row whose handling fails in two
+// runs in a row once its attempts are used is still failed with the reason, never retried forever.
+export const RUN_FAILED_NOTE = "not sent yet: the delivery run failed before sending it (a database read or write was refused)";
 export const NO_CHANNEL_NOTE = "not sent: the channel this answers was unlinked and the person has no other texting channel";
 
 // budgetMs: a run that has used its time stops before the next row (a long card is many bubbles, each paced by the
@@ -168,6 +202,8 @@ export const NO_CHANNEL_NOTE = "not sent: the channel this answers was unlinked 
 export async function deliverDue(o: {
   store: ChannelStore; send?: Send; adapters?: Partial<Record<Channel, DeliveryAdapter>>; now: number; limit?: number;
   dailyContactCap?: number; clock?: () => number; budgetMs?: number; concurrency?: number;
+  // CHANNEL DELIVERY ROUND 4: the channels whose provider refused Trainee's own credentials, shared by the rounds of one run.
+  down?: Set<Channel>;
 }) {
   const r = { delivered: 0, failed: 0, retried: 0, skipped_opt_out: 0, capped: 0, deferred: 0, held: 0, nudged: 0, not_wired: 0 };
   const day = utcDay(o.now);
@@ -180,6 +216,18 @@ export async function deliverDue(o: {
     return contacts.get(ch)!;
   };
   const inflightNew = new Map<Channel, number>();
+  // CHANNEL DELIVERY ROUND 4 (2026-11-05): a provider that refuses Trainee's own credentials (Telegram's 401 for a revoked bot
+  // token, WhatsApp's 401 / code 190 for an expired access token, LoopMessage's 401) refused the request, not the message:
+  // nothing of it went out, and the next message will be refused the same way. Each such refusal was a final failure, so one
+  // expired token failed every queued message of that channel, run after run, until the secret was fixed: every answer,
+  // alert and card lost. Now the channel is down for the run: the row goes back untouched (as for a channel not wired) and no
+  // other row of that channel is tried this run; the rows go out once the credentials work again.
+  const down = o.down ?? new Set<Channel>();
+  // CHANNEL DELIVERY ROUND 4 (2026-11-05): the rows a provider was asked to send (or may have been). A run that fails part
+  // way (a write the database refused, a read that threw) left every row it had claimed "sending", and the sweep later
+  // failed each one as "delivery outcome unknown; not resent": the rows it never reached were never sent, yet were lost the
+  // same way (one refused write lost up to a whole batch of answers). Only a row in `handed` may be with the provider.
+  const handed = new Set<string>();
   const toNudge = new Map<string, { row: OutboxRow; adapter: DeliveryAdapter }>();
   const hold = async (m: OutboxRow, adapter: DeliveryAdapter, error: string, optedOut = false, sent?: { parts: number; ids: string[] }) => {
     await o.store.mark(m.id, { status: "held", at: o.now, error: error.slice(0, 500), ...(sent && sent.parts ? { sentParts: sent.parts, providerIds: sent.ids } : {}) });
@@ -213,7 +261,7 @@ export async function deliverDue(o: {
     if (o.clock && o.budgetMs !== undefined && o.clock() - o.now >= o.budgetMs) { r.deferred++; return; }
     if (isReply(m.key) && stalled.has(lane(m))) { r.deferred++; return; }
     const channel = channelOf(m.contact), adapter = adapterFor(channel);
-    if (!adapter) { r.not_wired++; return; } // claimed but untouched: the run's release puts it back, queued
+    if (!adapter || down.has(channel)) { r.not_wired++; return; } // claimed but untouched: the run's release puts it back, queued
     // IDENTITY SCENARIOS (2026-10-30): a run claims up to a hundred rows at once, each with the contact it targeted then. A
     // Telegram chat unlinked, a WhatsApp number shown to be someone else's, or a chat moved by a link while the run was
     // sending got the rest of the claimed rows anyway (the rest of a long answer went to the chat just unlinked). Each row is
@@ -246,6 +294,16 @@ export async function deliverDue(o: {
       let g: boolean | null;
       try { g = await o.store.gone(m.userId); } catch (e) { console.error("deliver: the account could not be read:", e instanceof Error ? e.message : String(e)); g = null; }
       if (g === null) { r.deferred++; return; }
+      if (g) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: GONE_NOTE }); r.skipped_opt_out++; return; }
+    }
+    // CONNECTORS ROUND 4 (2026-11-05): and any later row of a person this run already looked at. The pause (which counts a
+    // deleted account as quiet) is read once per person per run, so an account deleted while the run held several of the
+    // person's rows (a job alert, a receipt, the rest of a card) got every row after the first: the auth user's delete
+    // cascaded their outbox rows, and the run sent from what it held. A look that cannot be made leaves the row to the pause
+    // read for this run, as before.
+    if (!isReply(m.key) && quiet.has(m.userId) && o.store.gone) {
+      let g: boolean | null;
+      try { g = await o.store.gone(m.userId); } catch { g = null; }
       if (g) { await o.store.mark(m.id, { status: "skipped_opt_out", at: o.now, error: GONE_NOTE }); r.skipped_opt_out++; return; }
     }
     // WO-091c: the same for a pause or an erase that came after the row was queued, checked now, at delivery. A pause that
@@ -319,6 +377,15 @@ export async function deliverDue(o: {
         }
       }
     }
+    // CONNECTORS ROUND 4 (2026-11-05): a text made from the person's mail, looked at again right before it goes. The person
+    // said "disconnect gmail" (or connected another Google account) after this run claimed it: the disconnect deleted it
+    // with every other undelivered text from that mailbox, and it is not sent. A look that cannot be made leaves it.
+    if (mailboxText(m.key) && o.store.stillQueued) {
+      let there: boolean | null;
+      try { there = await o.store.stillQueued(m); } catch (e) { console.error("deliver: the queued mail text could not be read:", e instanceof Error ? e.message : String(e)); there = null; }
+      if (there === null) { r.deferred++; return; }
+      if (!there) { r.skipped_opt_out++; return; }
+    }
     const window = adapter.limits.windowMs ?? null;
     const stall = () => { if (isReply(m.key)) stalled.add(lane(m)); };
     // An opted-out person's held answer waits for their next message; Trainee never starts a template to them.
@@ -340,6 +407,7 @@ export async function deliverDue(o: {
     let res: SendResult;
     if (skip > 0 && !bubbles.length) res = { ok: true, id: before[0] ?? null, ids: [] };
     else {
+      handed.add(m.id);
       try { res = await adapter.send(addressOf(m.contact), bubbles, m.buttons?.length || isReply(m.key) ? { ...(m.buttons?.length ? { buttons: m.buttons } : {}), ...(isReply(m.key) ? { urgent: true } : {}) } : undefined); }
       catch (e) { res = { ok: false, error: e instanceof Error ? e.message : String(e), retryable: true }; }
     }
@@ -355,6 +423,14 @@ export async function deliverDue(o: {
     }
     const went = res.sent && res.sent > 0 ? { parts: skip + res.sent, ids: [...before, ...(res.sentIds ?? [])] } : skip > 0 ? { parts: skip, ids: before } : undefined;
     const progress = went ? { sentParts: went.parts, providerIds: went.ids } : {};
+    if (res.unauthorized) {
+      if (!down.has(channel)) console.error(`deliver: ${channel} refused Trainee's credentials; its messages wait until they work:`, res.error);
+      down.add(channel);
+      // Nothing went in this attempt (parts sent by an earlier attempt stay recorded as they are): the row is untouched and
+      // goes back, no attempt counted. Part of it went now (the credentials stopped working mid-row): the rest waits like any
+      // temporary failure, from the message that did not go.
+      if (!(res.sent && res.sent > 0)) { handed.delete(m.id); stall(); r.not_wired++; return; }
+    }
     // WhatsApp refused it for the window or the per-user limit: nothing of that message went out, so it waits for the next
     // message (from the first message that did not go).
     stall();
@@ -367,11 +443,12 @@ export async function deliverDue(o: {
       return;
     }
     const attempt = m.attempts + 1;
+    const retryable = res.retryable || res.unauthorized === true;
     // TELEGRAM SCENARIOS (2026-10-30): never sooner than the provider asked (Telegram's 429 retry_after). CHANNEL DELIVERY
     // ROUND 2: counted from when the 429 came (the run's clock), not the run's start: a 429 on a row's 2nd message, a paced
     // second later, was retried that much early.
     const paced = res.retryAfterMs !== undefined;
-    if (res.retryable && (attempt < MAX_ATTEMPTS || (paced && attempt < MAX_PACED_ATTEMPTS))) {
+    if (retryable && (attempt < MAX_ATTEMPTS || (paced && attempt < MAX_PACED_ATTEMPTS))) {
       const backoff = paced ? BACKOFF_MS[0] : BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length) - 1];
       await o.store.mark(m.id, { status: "failed", at: o.now, error: res.error, retryAt: Math.max(o.now + backoff, (o.clock ? Math.max(o.now, o.clock()) : o.now) + (res.retryAfterMs ?? 0)), ...progress }); r.retried++;
     }
@@ -382,14 +459,39 @@ export async function deliverDue(o: {
   // default) is the old single file, row by row.
   const due = await o.store.due(o.now, o.limit ?? 100);
   const workers = Math.max(1, Math.min(64, Math.floor(o.concurrency ?? 1)));
-  if (workers === 1) for (const m of due) await handle(m);
+  // CHANNEL DELIVERY ROUND 4 (2026-11-05): the first failure stops the run: no row is started after it (with concurrency, the
+  // other workers finish the row they are on and stop; before, Promise.all gave up on them while they went on sending). A row
+  // that was handed to a provider stays "sending" for the sweep, never resent (at most once). The row whose own handling
+  // failed before any send counts the failure as one attempt (RUN_FAILED_NOTE; a failure that is that row's own would
+  // otherwise stop every run at it, the rows behind it never sent); every other row no provider was asked to send goes back
+  // as it was (putBack). Then the failure is thrown, as before.
+  let failure: { e: unknown } | null = null;
+  const own = new Set<string>();
+  const step = async (m: OutboxRow) => {
+    if (failure) return;
+    try { await handle(m); } catch (e) { failure ??= { e }; if (!handed.has(m.id)) own.add(m.id); }
+  };
+  if (workers === 1) for (const m of due) await step(m);
   else {
     const lanes = new Map<string, OutboxRow[]>();
     for (const m of due) { const k = lane(m); (lanes.get(k) ?? lanes.set(k, []).get(k)!).push(m); }
     const queue = [...lanes.values()];
     await Promise.all(Array.from({ length: Math.min(workers, queue.length) }, async () => {
-      for (let next = queue.shift(); next; next = queue.shift()) for (const m of next) await handle(m);
+      for (let next = queue.shift(); next && !failure; next = queue.shift()) for (const m of next) await step(m);
     }));
+  }
+  const failed = failure as { e: unknown } | null; // set inside the workers
+  if (failed) {
+    const said = (e: unknown) => e instanceof Error ? e.message : String(e);
+    for (const m of due.filter((x) => own.has(x.id))) {
+      const attempt = m.attempts + 1;
+      const last = attempt >= OUTBOX_MAX_ATTEMPTS || (attempt >= MAX_ATTEMPTS && (m.lastError === undefined || m.lastError === RUN_FAILED_NOTE));
+      await o.store.mark(m.id, { status: "failed", at: o.now, error: RUN_FAILED_NOTE, ...(last ? {} : { retryAt: o.now + BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length) - 1] }) })
+        .catch((e) => console.error("deliver: a row whose handling failed could not be recorded (the sweep fails it):", said(e)));
+    }
+    const untouched = due.filter((m) => !handed.has(m.id) && !own.has(m.id)).map((m) => m.id);
+    if (untouched.length && o.store.putBack) await o.store.putBack(untouched).catch((e) => console.error("deliver: claimed rows could not be put back (the sweep fails them):", said(e)));
+    throw failed.e;
   }
   // After every row of the run is held, so the count is whole ("Trainee has 3 new update(s) for you").
   let templates: number | null = null;

@@ -1800,7 +1800,8 @@ var PAGES = [
   });
   function showStep2(name, cc, digits) {
     $('su-shown').textContent = cc === '+1' ? cc + ' (' + digits.slice(0, 3) + ') ' + digits.slice(3, 6) + '-' + digits.slice(6) : cc + ' ' + digits;
-    $('su-survey').href = '/survey?n=' + encodeURIComponent(name) + '&p=' + encodeURIComponent(cc + digits);
+    // The survey page reads who joined from this tab's sessionStorage and clears it: no name or number in the URL.
+    try { sessionStorage.setItem('trainee-survey', JSON.stringify({ n: name, p: cc + digits })); } catch (e) {}
     $('step1').hidden = true; $('step2').hidden = false;
     $('bar2').classList.add('on');
     $('step2Title').focus();

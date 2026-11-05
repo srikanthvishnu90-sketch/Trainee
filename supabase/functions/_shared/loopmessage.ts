@@ -40,7 +40,9 @@ export function loopSend(o: { apiKey: string; fetch?: typeof fetch; pauseMs?: nu
       }
       if (!res.ok) {
         await res.body?.cancel();
-        return { ok: false, error: `LoopMessage HTTP ${res.status}${after}`, retryable: RETRYABLE_STATUS.has(res.status), ...partial };
+        // CHANNEL DELIVERY ROUND 4 (2026-11-05): 401, the API key was refused: nothing went out, and the channel waits for the key
+        // (channel.ts deliverDue keeps the row) instead of every queued message failing for good.
+        return { ok: false, error: `LoopMessage HTTP ${res.status}${after}`, retryable: RETRYABLE_STATUS.has(res.status), ...(res.status === 401 ? { unauthorized: true } : {}), ...partial };
       }
       const body = await res.json().catch(() => null) as Record<string, unknown> | null;
       const got = body?.message_id ?? body?.id;

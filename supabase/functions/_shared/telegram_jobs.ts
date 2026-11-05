@@ -382,7 +382,10 @@ const secretValue = (v: unknown): boolean => {
   if (!t) return false;
   if (/\b\d{3}-\d{2}-\d{4}\b/.test(t)) return true; // an SSN
   if (/^bearer\s+\S{8,}/i.test(t) || /^(?:sk|pk|rk|ghp|gho|xox[abprs]|eyJ)[-_A-Za-z0-9.]{16,}$/.test(t)) return true; // a token / key
-  for (const m of t.matchAll(/(?:\d[ -]?){13,19}/g)) { const d = m[0].replace(/\D/g, ""); if (d.length >= 13 && d.length <= 19 && luhn(d)) return true; } // a card number
+  // A UUID is an id, never a card number: one with 13 or more digits in a row (dashes between) passes the card check about one
+  // time in ten, so an application whose fact sources carry a few UUIDs (evidence.replay_sources) was "needs you" about one
+  // time in seventy (missing-info-e2e.test.ts failed in CI on #499 and #503). UUIDs are taken out before the card check.
+  for (const m of t.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, " ").matchAll(/(?:\d[ -]?){13,19}/g)) { const d = m[0].replace(/\D/g, ""); if (d.length >= 13 && d.length <= 19 && luhn(d)) return true; } // a card number
   return false;
 };
 const hasValue = (v: unknown) => v !== null && v !== undefined && (typeof v === "string" ? v.trim() !== "" : typeof v === "object" ? Object.keys(v as object).length > 0 : true);
@@ -456,7 +459,15 @@ export function payloadLines(p: PreparedRow, job: JobView | null): string[] {
   const answers = fields.filter((f) => f !== cover && !looksSecret(f) && has(f));
   const blank = fields.filter((f) => !looksSecret(f) && !has(f));
   const shown = new Set(["fields", "resume_sha256", "resume_name", "resume_file", "title"]);
-  const extraAll = Object.entries(pl).filter(([k]) => !shown.has(k));
+  // TELEGRAM ROUND 4 (2026-11-05): the payload's own bookkeeping (whose account, which posting by its internal id, which version of
+  // the account and of the rules it was prepared under) is never sent to the employer, and it was printed to the person as
+  // "• user_id: <their account id>", "• job_id: greenhouse:acme:1", "• privacy_epoch: 0". It stays in the hash and is checked at
+  // Confirm (apply_trust.ts); here it is said in words: the company and link only when they differ from the lines above, and the
+  // expiry as the time the approval works until.
+  const INTERNAL = new Set(["version", "user_id", "job_id", "privacy_epoch", "account_version", "authority_version", "quarantine_version", "kind"]);
+  const sameAs = (k: string, v: unknown) => (k === "company" && String(v ?? "") === String(p.company ?? "")) || (k === "url" && String(v ?? "") === String(p.url ?? ""));
+  const until = Date.parse(String(pl.expires_at ?? ""));
+  const extraAll = Object.entries(pl).filter(([k, v]) => !shown.has(k) && !INTERNAL.has(k) && !sameAs(k, v) && !(k === "expires_at" && !Number.isNaN(until)));
   const extraSecret: string[] = [];
   const extra = extraAll.filter(([k, v]) => { const sub: string[] = []; if (SECRETISH.test(k) && hasValue(v)) sub.push(k); else if (!BOOKKEEPING.has(k)) secretPaths(v, k, sub); if (sub.length) { extraSecret.push(...sub); return false; } return true; });
   const cardLines = (Array.isArray(p.card_lines) ? p.card_lines : []).map((l) => String(l ?? ""));
@@ -475,6 +486,7 @@ export function payloadLines(p: PreparedRow, job: JobView | null): string[] {
     ...(blank.length ? [`Left blank: ${blank.map(name).join("; ")}`] : []),
     ...(needsYou.length ? ["Needs you (I never type or send these; fill them in yourself on the employer's form):", ...needsYou.map((x) => `• ${x}`)] : []),
     ...(extra.length ? ["Also in this application:", ...extra.map(([k, v]) => `• ${clean(k, 80)}: ${val(v)}`)] : []),
+    ...(!Number.isNaN(until) ? [`This approval works until ${new Date(until).toISOString().slice(0, 16).replace("T", " ")} UTC.`] : []),
     ...(cardLines.filter((l) => !secretLine(l)).length ? ["", "As the card reads:", ...cardLines.filter((l) => !secretLine(l)).map((l) => `• ${l}`)] : []),
     "", "Nothing is sent until you tap Confirm. Edit changes it; Cancel drops it.",
   ];
@@ -500,6 +512,9 @@ export interface JobTapResult { toast: string; status: string }
 // A posting already in the applications is "in your applications", never "applied": it may be queued and not sent yet (file journey
 // round 2: the Telegram button's toast said "Already applied." for an application that was only queued).
 export const ALREADY_TOAST = "Already in your applications.";
+// The Apply tap's refusal without a confirmed resume (the chat's own reason, career_apply_chat.ts "no resume on file").
+export const PAUSED_TAP_REASON = "career work is paused, so I didn't start anything. Text \"resume career work\" to pick back up, then tap Apply again.";
+export const NO_RESUME_TAP_REASON ="no resume on file: I have no confirmed resume to prepare it from. Send me your resume (a PDF or Word file, or paste it), say it's yours, then tap Apply again.";
 export const BLOCKED_HOST = /(^|\.)(linkedin\.com|indeed\.com|joinhandshake\.com)$/i;
 export const GONE_REPLY = "That card is too old for me to open. Ask me for the postings again and I'll send fresh ones.";
 export const NO_WORKER_REPLY = (company: string, title: string) =>
@@ -762,6 +777,18 @@ export function supabaseJobStore(admin: any): JobStore {
       return must(await admin.rpc("career_apply_posting_sent", { p_user: userId, p_job_id: job.job_id, p_url: job.url, p_except: null, p_queued: true }), "read the applications") === true;
     },
     async want(userId, job, at) {
+      // WHOLE JOURNEYS R2 (2026-11-02): the owner rule (20261026210016: queued, prepared or carded only with a confirmed resume
+      // on file) for Telegram's Apply and the jobs page's Apply too. The chat's apply turn refused ("no resume on file") while
+      // the same person's Apply tap queued the posting with "When it's ready I'll show you the exact application to approve",
+      // which never came: nothing is prepared or carded without a resume. Not readable: refused, never queued on a guess.
+      const onFile = await admin.rpc("career_resume_on_file", { p_user: userId }).then((r: any) => (r?.error || typeof r?.data !== "boolean" ? null : r.data), () => null);
+      if (onFile !== true) return { result: "refused", reason: onFile === false ? NO_RESUME_TAP_REASON : "I couldn't check your resume just now. Tap Apply again in a minute." };
+      // WHOLE JOURNEYS R2: the account's pause holds on every door. The chat answered "Career work is paused, so I didn't start
+      // anything" while the same person's Apply tap and the jobs page's Apply queued postings to be prepared. Unreadable: refused.
+      const acct = await admin.from("career_watch_kv").select("value").eq("user_id", userId).eq("key", "career:account").maybeSingle()
+        .then((r: any) => (r?.error ? null : r?.data?.value ?? {}), () => null);
+      if (acct === null) return { result: "refused", reason: "I couldn't check your account just now. Tap Apply again in a minute." };
+      if (acct?.paused === true) return { result: "refused", reason: PAUSED_TAP_REASON };
       const { wantsFrom, supabaseWantStore } = await import("./career_apply_want.ts");
       const w = wantsFrom([{ url: job.url, job_id: job.job_id, company: job.company, title: job.title }], at);
       if (w.refused.length) return { result: "refused", reason: w.refused[0].reason };

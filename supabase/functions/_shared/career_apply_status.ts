@@ -48,7 +48,9 @@ const ONE = [
   /^ did (?:the|my) (.+?) application (?:go through|get sent|get submitted|submit) $/,
 ];
 // FEATURE 16: "did it go through?", "did that get sent?", "has it been submitted yet": the person's latest application.
-const LATEST = /^ (?:so |and |ok |okay )?(?:did|has|have|was) (?:it|that|this|that one|that application|my application|the application) (?:go through|gone through|get sent|been sent|get submitted|been submitted|sent|submitted|send|submit|work|land)(?: yet)? $/;
+// MASS APPLY STATE (2026-11-04, beta A3.4): "was the application actually submitted?" is the same question with a doubt
+// word in it; it fell to the catch-all before.
+const LATEST = /^ (?:so |and |ok |okay )?(?:did|has|have|was) (?:it|that|this|that one|that application|my application|the application) (?:(?:actually|really|truly|definitely) )?(?:go through|gone through|get sent|been sent|get submitted|been submitted|sent|submitted|send|submit|work|land)(?: yet)? $/;
 // The question, if this text is one: every application, or the ones to one employer (named as the person typed it), or
 // the latest one ("did it go through?").
 export function statusAsk(message: string): { company: string | null; latest?: true } | null {

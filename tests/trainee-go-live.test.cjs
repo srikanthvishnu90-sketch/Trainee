@@ -314,7 +314,7 @@ function stubbed(env) {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'trainee-go-live-bin-'));
   const calls = path.join(bin, 'calls.log');
   const stub = (name, body) => { fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\necho "${name} $*" >> "${calls}"\n${body}\n`); fs.chmodSync(path.join(bin, name), 0o755); };
-  stub('supabase', 'if [[ "$1 $2" == "secrets list" ]]; then printf "NAME | DIGEST\\nTRAINEE_INBOUND_SECRET | 0f0f\\n"; fi; exit 0');
+  stub('supabase', 'if [[ "$1 $2" == "secrets list" ]]; then printf "NAME | DIGEST\\nTRAINEE_INBOUND_SECRET | zzNOTAHEXDIGESTzz\\n"; fi; exit 0');
   stub('psql', 'exit 0'); stub('deno', 'exit 0');
   // WO-093: a real run ships exactly --sha (HEAD here) from git archive, so git and node are the real ones, but for a
   // clean tree (this checkout may have edits) and the smoke (no network in a test).
@@ -342,7 +342,7 @@ function nonint(args, env, { live = ['TRAINEE_INBOUND_SECRET'], listFails = fals
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'trainee-go-live-nonint-'));
   const calls = path.join(bin, 'calls.log');
   const stub = (name, body) => { fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\necho "${name} $*" >> "${calls}"\n${body}\n`); fs.chmodSync(path.join(bin, name), 0o755); };
-  const rows = live.map((n) => `${n} | 0f0f`).join('\\n');
+  const rows = live.map((n) => `${n} | zzNOTAHEXDIGESTzz`).join('\\n');
   stub('supabase', `if [[ "$1 $2" == "secrets list" ]]; then ${listFails ? 'echo "Access token not provided" >&2; exit 1' : `printf "NAME | DIGEST\\n${rows}\\n"`}; fi; exit 0`);
   stub('psql', 'exit 0'); stub('deno', 'exit 0');
   if (bundleOk) stub('python3', 'exit 0'); // the router-bundle freshness check is not what this case tests
@@ -389,7 +389,7 @@ test('--non-interactive: a function secret set on the project is kept (never gen
   assert.match(r.calls, /trainee-smoke\.cjs --kept CAREER_INGEST_SECRET,TRAINEE_INBOUND_SECRET --wait-runs 420/);
   assert.equal((r.calls.match(/secrets list/g) || []).length, 1, 'the names are read once');
   for (const v of [...SECRET_VALUES, CI_ENV.SUPABASE_ACCESS_TOKEN]) assert.ok(!r.out.includes(v) && !r.log.includes(v), `${v.slice(0, 12)}… is not printed or logged`);
-  assert.doesNotMatch(r.out + r.log, /0f0f/, 'the secrets list itself is never printed');
+  assert.doesNotMatch(r.out + r.log, /zzNOTAHEXDIGESTzz/, 'the secrets list itself is never printed');
 });
 
 test('--non-interactive: a secret that also lives outside the project is never generated; an unreadable secrets list stops the run', () => {

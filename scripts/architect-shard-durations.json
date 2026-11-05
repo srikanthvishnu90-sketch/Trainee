@@ -491,6 +491,15 @@
     "tests/architect/yes-approves-batch-handler.test.ts": 11.2,
     "tests/architect/yes-approves-batch.test.ts": 0.2,
     "tests/architect/flow-scenarios-telegram-r4.test.ts": 12,
-    "tests/architect/scenarios-telegram-r4.test.ts": 16
+    "tests/architect/scenarios-telegram-r4.test.ts": 16,
+    "tests/architect/journeys-r2-a.test.ts": 160,
+    "tests/architect/journeys-r2-b.test.ts": 160,
+    "tests/architect/journeys-r2-c.test.ts": 160,
+    "tests/architect/journeys-r2-d.test.ts": 160,
+    "tests/architect/journeys-r2-e.test.ts": 160,
+    "tests/architect/journeys-r2-f.test.ts": 160,
+    "tests/architect/journeys-r2-g.test.ts": 160,
+    "tests/architect/journeys-r2-h.test.ts": 160,
+    "tests/architect/journeys-r2-regressions.test.ts": 20
   }
 }

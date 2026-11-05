@@ -509,6 +509,9 @@ export interface JobTapResult { toast: string; status: string }
 // A posting already in the applications is "in your applications", never "applied": it may be queued and not sent yet (file journey
 // round 2: the Telegram button's toast said "Already applied." for an application that was only queued).
 export const ALREADY_TOAST = "Already in your applications.";
+// The Apply tap's refusal without a confirmed resume (the chat's own reason, career_apply_chat.ts "no resume on file").
+export const PAUSED_TAP_REASON = "career work is paused, so I didn't start anything. Text \"resume career work\" to pick back up, then tap Apply again.";
+export const NO_RESUME_TAP_REASON ="no resume on file: I have no confirmed resume to prepare it from. Send me your resume (a PDF or Word file, or paste it), say it's yours, then tap Apply again.";
 export const BLOCKED_HOST = /(^|\.)(linkedin\.com|indeed\.com|joinhandshake\.com)$/i;
 export const GONE_REPLY = "That card is too old for me to open. Ask me for the postings again and I'll send fresh ones.";
 export const NO_WORKER_REPLY = (company: string, title: string) =>
@@ -771,6 +774,18 @@ export function supabaseJobStore(admin: any): JobStore {
       return must(await admin.rpc("career_apply_posting_sent", { p_user: userId, p_job_id: job.job_id, p_url: job.url, p_except: null, p_queued: true }), "read the applications") === true;
     },
     async want(userId, job, at) {
+      // WHOLE JOURNEYS R2 (2026-11-02): the owner rule (20261026210016: queued, prepared or carded only with a confirmed resume
+      // on file) for Telegram's Apply and the jobs page's Apply too. The chat's apply turn refused ("no resume on file") while
+      // the same person's Apply tap queued the posting with "When it's ready I'll show you the exact application to approve",
+      // which never came: nothing is prepared or carded without a resume. Not readable: refused, never queued on a guess.
+      const onFile = await admin.rpc("career_resume_on_file", { p_user: userId }).then((r: any) => (r?.error || typeof r?.data !== "boolean" ? null : r.data), () => null);
+      if (onFile !== true) return { result: "refused", reason: onFile === false ? NO_RESUME_TAP_REASON : "I couldn't check your resume just now. Tap Apply again in a minute." };
+      // WHOLE JOURNEYS R2: the account's pause holds on every door. The chat answered "Career work is paused, so I didn't start
+      // anything" while the same person's Apply tap and the jobs page's Apply queued postings to be prepared. Unreadable: refused.
+      const acct = await admin.from("career_watch_kv").select("value").eq("user_id", userId).eq("key", "career:account").maybeSingle()
+        .then((r: any) => (r?.error ? null : r?.data?.value ?? {}), () => null);
+      if (acct === null) return { result: "refused", reason: "I couldn't check your account just now. Tap Apply again in a minute." };
+      if (acct?.paused === true) return { result: "refused", reason: PAUSED_TAP_REASON };
       const { wantsFrom, supabaseWantStore } = await import("./career_apply_want.ts");
       const w = wantsFrom([{ url: job.url, job_id: job.job_id, company: job.company, title: job.title }], at);
       if (w.refused.length) return { result: "refused", reason: w.refused[0].reason };

@@ -212,7 +212,7 @@ const RULES: Rule[] = [
   // A generic label over a disclosure's own list ("Please select one of the options below:" above veteran classes) is that
   // disclosure (WO-048, Workday's Voluntary Disclosures).
   ["eeo", /^please (select|check|choose) (one|any|all) of the (options|boxes|following)\b/, (q) => /veteran|disabilit|gender|hispanic|latino|\brace\b|ethnicit/.test(opts(q))],
-  ["eeo", /\btransitioning service member\b|\bveteran\b|\bdisability\b|\bgender\b|\bethnicity\b|\brace\b|\bhispanic\b|\blatin[oax]\b|\bsexual orientation\b|\bgender identity\b|\btransgender\b|^tu es\b/],
+  ["eeo", /\btransitioning service member\b|\bveteran\b|\bdisability\b|\bgender\b|\bethnicity\b|\brace\b|\bhispanic\b|\blatin[oax]\b|\bsexual orientation\b|\bgender identity\b|\btransgender\b|^tu es\b|\blgbtq|\blgbt\b|\bheterosexual\b|\bbisexual\b|\bqueer\b/],
 
   // Legal attestations.
   // WO-052: the person's "no" to criminal history is about convictions. Drug use, a court order, a commitment, a
@@ -346,6 +346,11 @@ export function answerKey(q: Question, jobId: string, o: { haveFact?: boolean; h
   const words = norm(q.label);
   const job = `job:${h16(`${jobId}\n${words}`)}`, wording = `label:${h16(words)}`;
   if (m.kind === "fact") {
+    // ROUND 4 (2026-11-05): a self-identification answer (gender, race, ethnicity, veteran or disability status) is given to
+    // one employer (extension apply_core.ts staysWithPosting). Kept as the one `fact:eeo`, a "No" to "Do you have a
+    // disability?" filled "Are you Hispanic or Latino?", "Are you a protected veteran?" and "Do you identify as transgender?"
+    // at the next employer, and the form's second voluntary question was never asked (one key per form).
+    if (m.fact === "eeo") return job;
     // WO-055: where the planner would not use the person's fact here (a job abroad, a question beyond what the fact says;
     // career_apply.ts factStaysHere), the answer is this posting's, never the person's fact or a wording that travels.
     if (o.here) return job;

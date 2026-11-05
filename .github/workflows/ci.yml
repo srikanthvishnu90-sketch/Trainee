@@ -8,8 +8,8 @@ on:
   # to release/production that never was a trunk head would otherwise have no checks at all.
   push:
     branches: [trunk, release/production]
-  # ready_for_review: a draft runs no suite (each suite job skips on github.event.pull_request.draft; gate (core) then
-  # fails, fail-closed); marking it ready runs the full suite on the same head, and a draft cannot be merged.
+  # ready_for_review: a draft skips only the forms-ci coverage shards (`changes` job); every other suite runs on drafts
+  # as on trunk. Marking it ready runs the full suite on the same head, and a draft cannot be merged.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   # Merge-queue readiness (docs/architect/PROCESS.md): when the owner turns on a merge queue for trunk, the queue tests
@@ -109,9 +109,8 @@ jobs:
     # 2026-11-01: 20 minutes (was 30). Over 263 green shard runs of 2026-10-30..11-01 the job's p99 was 8.0 min and its
     # max 9.2; the 30-minute cap let a hung shard burn 30 billed minutes (two did). Still >2x the slowest green run.
     timeout-minutes: 20
-    # Drafts skip it (github.event.pull_request.draft; empty off a pull request). It does not wait on `changes`, so it
-    # starts at once as before: a cancelled run ends it as cancelled, never as a skipped (passing) required check.
-    if: ${{ github.event.pull_request.draft != true }}
+    # It does not wait on `changes` (and runs on drafts, as on trunk), so it starts at once: a cancelled run ends it as
+    # cancelled, never as a skipped (passing) required check.
     strategy:
       fail-fast: false
       matrix:
@@ -176,7 +175,6 @@ jobs:
     runs-on: ubuntu-24.04
     # The required check (name unchanged). Passes only when every core shard succeeded and the shards still partition the
     # core node suites exactly. always() so a failed or cancelled shard fails this check rather than skipping it.
-    # On a draft the shards are skipped, so this fails (fail-closed); marking the PR ready runs everything.
     needs: gate-core-shard
     if: always()
     timeout-minutes: 10
@@ -199,9 +197,8 @@ jobs:
     # it did inside the single job.
     # 2026-11-01: 20 minutes (was 30): p99 8.7 / max 8.8 min over 162 green runs.
     timeout-minutes: 20
-    # Drafts skip it (github.event.pull_request.draft; empty off a pull request). It does not wait on `changes`, so it
-    # starts at once as before: a cancelled run ends it as cancelled, never as a skipped (passing) required check.
-    if: ${{ github.event.pull_request.draft != true }}
+    # It does not wait on `changes` (and runs on drafts, as on trunk), so it starts at once: a cancelled run ends it as
+    # cancelled, never as a skipped (passing) required check.
     env:
       GATE_PARTITION: browser
     steps:
@@ -274,9 +271,8 @@ jobs:
     # backstop, not a target. The required check name `gate (architect)` is the aggregate job below.
     # 2026-11-01: 25 minutes (was 45): p99 11.7 / max 13.3 min over 894 green shard runs.
     timeout-minutes: 25
-    # Drafts skip it (github.event.pull_request.draft; empty off a pull request). It does not wait on `changes`, so it
-    # starts at once as before: a cancelled run ends it as cancelled, never as a skipped (passing) required check.
-    if: ${{ github.event.pull_request.draft != true }}
+    # It does not wait on `changes` (and runs on drafts, as on trunk), so it starts at once: a cancelled run ends it as
+    # cancelled, never as a skipped (passing) required check.
     strategy:
       fail-fast: false
       matrix:
@@ -357,7 +353,7 @@ jobs:
     # The required check (name unchanged). Passes only when every architect shard succeeded and the shards still
     # partition tests/architect exactly. always() so a failed or cancelled shard fails this check rather than skipping it.
     needs: gate-architect-shard
-    if: ${{ always() && github.event.pull_request.draft != true }}
+    if: always()
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -546,9 +542,8 @@ jobs:
     # steps) its remaining steps are skipped and the check passes saying so; every push runs it. Whenever it runs, tests/db/run.sh runs under
     # scripts/ci/trace-opens.py and the job fails if it opened a tracked file outside that list.
     timeout-minutes: 30
-    # Drafts skip it. It decides its own inputs in its first steps (the same scripts/ci/job-inputs.cjs as the `changes`
-    # job) instead of waiting on `changes`, so a cancelled run ends it as cancelled, never as a skipped required check.
-    if: ${{ github.event.pull_request.draft != true }}
+    # It decides its own inputs in its first steps (the same scripts/ci/job-inputs.cjs as the `changes` job) instead of
+    # waiting on `changes`, so a cancelled run ends it as cancelled, never as a skipped required check.
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 2 }
@@ -586,9 +581,8 @@ jobs:
     # spent on it; it fails the run like any other job. The measured numbers are printed (SEND RAIL LOAD ...).
     # 2026-11-01: 15 minutes (was 60): p99 6.0 / max 6.0 min over 161 green runs.
     timeout-minutes: 15
-    # Drafts skip it (github.event.pull_request.draft; empty off a pull request). It does not wait on `changes`, so it
-    # starts at once as before: a cancelled run ends it as cancelled, never as a skipped (passing) required check.
-    if: ${{ github.event.pull_request.draft != true }}
+    # It does not wait on `changes` (and runs on drafts, as on trunk), so it starts at once: a cancelled run ends it as
+    # cancelled, never as a skipped (passing) required check.
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2
@@ -604,9 +598,8 @@ jobs:
     # nothing leaves the runner. KNOWN_GAP steps run and print their state; every other step must pass.
     # 2026-11-01: 10 minutes (was 20): max 0.5 min over 80 green runs.
     timeout-minutes: 10
-    # Drafts skip it (github.event.pull_request.draft; empty off a pull request). It does not wait on `changes`, so it
-    # starts at once as before: a cancelled run ends it as cancelled, never as a skipped (passing) required check.
-    if: ${{ github.event.pull_request.draft != true }}
+    # It does not wait on `changes` (and runs on drafts, as on trunk), so it starts at once: a cancelled run ends it as
+    # cancelled, never as a skipped (passing) required check.
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2

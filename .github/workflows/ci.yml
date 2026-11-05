@@ -9,6 +9,13 @@ on:
   push:
     branches: [trunk, release/production]
   pull_request:
+  # Merge-queue readiness (docs/architect/PROCESS.md): when the owner turns on a merge queue for trunk, the queue tests
+  # each entry on a gh-readonly-queue/trunk/* commit and waits for the required checks there; without this trigger none
+  # would ever report and the queue would stall. Every job runs on it (no job filters on the event), so the commit the
+  # queue lands on trunk already carries every check S1 reads, under the same names. Its concurrency group is its own SHA
+  # (no pull_request number), and it is never cancelled, as for a push. Until a queue exists this trigger never fires.
+  merge_group:
+    types: [checks_requested]
 concurrency:
   # One run per PR: a newer head cancels the older run. A push gets a group of its own SHA: GitHub keeps one pending run
   # per group and cancels the older pending one when a newer arrives ("higher priority waiting request"), which left

@@ -456,7 +456,15 @@ export function payloadLines(p: PreparedRow, job: JobView | null): string[] {
   const answers = fields.filter((f) => f !== cover && !looksSecret(f) && has(f));
   const blank = fields.filter((f) => !looksSecret(f) && !has(f));
   const shown = new Set(["fields", "resume_sha256", "resume_name", "resume_file", "title"]);
-  const extraAll = Object.entries(pl).filter(([k]) => !shown.has(k));
+  // TELEGRAM ROUND 4 (2026-11-05): the payload's own bookkeeping (whose account, which posting by its internal id, which version of
+  // the account and of the rules it was prepared under) is never sent to the employer, and it was printed to the person as
+  // "• user_id: <their account id>", "• job_id: greenhouse:acme:1", "• privacy_epoch: 0". It stays in the hash and is checked at
+  // Confirm (apply_trust.ts); here it is said in words: the company and link only when they differ from the lines above, and the
+  // expiry as the time the approval works until.
+  const INTERNAL = new Set(["version", "user_id", "job_id", "privacy_epoch", "account_version", "authority_version", "quarantine_version", "kind"]);
+  const sameAs = (k: string, v: unknown) => (k === "company" && String(v ?? "") === String(p.company ?? "")) || (k === "url" && String(v ?? "") === String(p.url ?? ""));
+  const until = Date.parse(String(pl.expires_at ?? ""));
+  const extraAll = Object.entries(pl).filter(([k, v]) => !shown.has(k) && !INTERNAL.has(k) && !sameAs(k, v) && !(k === "expires_at" && !Number.isNaN(until)));
   const extraSecret: string[] = [];
   const extra = extraAll.filter(([k, v]) => { const sub: string[] = []; if (SECRETISH.test(k) && hasValue(v)) sub.push(k); else if (!BOOKKEEPING.has(k)) secretPaths(v, k, sub); if (sub.length) { extraSecret.push(...sub); return false; } return true; });
   const cardLines = (Array.isArray(p.card_lines) ? p.card_lines : []).map((l) => String(l ?? ""));
@@ -475,6 +483,7 @@ export function payloadLines(p: PreparedRow, job: JobView | null): string[] {
     ...(blank.length ? [`Left blank: ${blank.map(name).join("; ")}`] : []),
     ...(needsYou.length ? ["Needs you (I never type or send these; fill them in yourself on the employer's form):", ...needsYou.map((x) => `• ${x}`)] : []),
     ...(extra.length ? ["Also in this application:", ...extra.map(([k, v]) => `• ${clean(k, 80)}: ${val(v)}`)] : []),
+    ...(!Number.isNaN(until) ? [`This approval works until ${new Date(until).toISOString().slice(0, 16).replace("T", " ")} UTC.`] : []),
     ...(cardLines.filter((l) => !secretLine(l)).length ? ["", "As the card reads:", ...cardLines.filter((l) => !secretLine(l)).map((l) => `• ${l}`)] : []),
     "", "Nothing is sent until you tap Confirm. Edit changes it; Cancel drops it.",
   ];

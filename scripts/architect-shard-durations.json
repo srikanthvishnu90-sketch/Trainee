@@ -493,6 +493,8 @@
     "tests/architect/wo-107-standing.test.ts": 0.1,
     "tests/architect/yes-approves-batch-handler.test.ts": 11.2,
     "tests/architect/yes-approves-batch.test.ts": 0.2,
+    "tests/architect/flow-scenarios-telegram-r4.test.ts": 12,
+    "tests/architect/scenarios-telegram-r4.test.ts": 16,
     "tests/architect/journeys-r2-a.test.ts": 160,
     "tests/architect/journeys-r2-b.test.ts": 160,
     "tests/architect/journeys-r2-c.test.ts": 160,

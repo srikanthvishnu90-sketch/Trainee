@@ -97,7 +97,14 @@ export interface ApplyAllDeps {
   // Whether the person has a confirmed resume on file (apply_readiness.ts "resume"). false: nothing is approved or prepared and the
   // handler asks for the resume through the readiness path. Absent: not checked here.
   resumeConfirmed?: boolean;
+  // TELEGRAM ROUND 4 (2026-11-05): when the person's STOP (on any of their chats) was recorded, while it still holds (null: not
+  // stopped). A STOP sent after the offer ends it: the STOP never reaches the thread (its fixed reply goes straight out), so the
+  // offer still read as the thread's last word, and a "yes" typed after the STOP approved every role in it. A read that fails
+  // approves nothing. Absent: not checked here.
+  stoppedAt?: (userId: string) => Promise<number | null>;
 }
+export const PAUSED_NOTE = "Trainee is paused for you, so nothing was approved or started: say \"resume\" first, then ask me for the list again.";
+export const STOPPED_AFTER_OFFER_REPLY = "You sent STOP after I offered those roles, so that offer ended and nothing was approved. Text START to turn my messages back on, then ask me for the list again.";
 
 const sink = (said: string[]): JobSender => ({ photo: async () => ({ ok: true }), text: async (a) => { said.push(a.text); return { ok: true, id: null }; } });
 const names = (xs: string[]) => { const u = [...new Set(xs.filter(Boolean))]; return u.length <= 4 ? u.join(", ") : `${u.slice(0, 4).join(", ")} and ${u.length - 4} more`; };
@@ -117,6 +124,11 @@ export async function applyAllYesTurn(o: ApplyAllDeps): Promise<ApplyAllResult |
     return { reply, status, intent: APPLY_ALL_INTENT, summary, counts, asks: { questions: 0, unprepared: 0, ...extra },
       meta: keepOffer ? { apply_all_offer: offer } : { apply_all_done: { list: offer.list, at: o.now, ...counts } } };
   };
+  if (o.stoppedAt) {
+    let at: number | null;
+    try { at = await o.stoppedAt(userId); } catch { return done("I couldn't check whether you'd turned my messages off, so nothing was approved. Say yes again in a minute.", "unreadable", {}, true); }
+    if (typeof at === "number" && !Number.isNaN(at) && at >= offer.at) return done(STOPPED_AFTER_OFFER_REPLY, "stopped");
+  }
   if (conditional) return done(`I haven't approved anything. The offer to apply to all ${offer.jobs.length} shown is still open: reply just "yes" to approve exactly those, or use Apply on the list for one at a time.`, "not_plain", {}, true);
   if (o.resumeConfirmed === false) return done("I don't have a confirmed resume on file, so nothing was approved or prepared.", "no_resume", { unprepared: 1 });
   // The list and the person's own marks on its page. Unreadable or gone: fail closed, nothing approved.
@@ -137,6 +149,10 @@ export async function applyAllYesTurn(o: ApplyAllDeps): Promise<ApplyAllResult |
     gettingReady: string[] = [], skippedBlank: string[] = [], skippedSensitive: string[] = [], needsInfo: string[] = [], leftOut: string[] = [];
   const open = o.questions ? await o.questions.open(userId, 500).catch(() => null) : null;
   const toPrepare: JobView[] = [];
+  // TELEGRAM ROUND 4 (2026-11-05): a paused account ("pause", "stop everything", an erase) starts nothing from a yes. Each prepared role
+  // was already refused by its Confirm (apply_trust.ts), but every role not prepared yet was still queued and its preparation kicked
+  // while paused, and the reply never said why nothing was approved. An account that cannot be read is left to each role's own check.
+  const paused = deps.account ? (await deps.account(userId).catch(() => null))?.paused === true : false;
   let kicked: "started" | "failed" | "off" | "skipped" | "none" = "none";
   for (const j of offer.jobs) {
     const got = onList.has(j.ref) ? await deps.store.recall(userId, j.ref).catch(() => null) : null;
@@ -163,6 +179,7 @@ export async function applyAllYesTurn(o: ApplyAllDeps): Promise<ApplyAllResult |
     if (await deps.store.applied(userId, job.job_id).catch(() => false) || (deps.store.elsewhere && await deps.store.elsewhere(userId, job).catch(() => false))) { already.push(name); continue; }
     const prepNow = await deps.store.prepared(userId, job.job_id).catch(() => null);
     if (prepNow) { readySince.push(name); continue; }
+    if (paused) { blocked.push(name); continue; } // nothing is queued while the account is paused
     // The posting screen the page's Apply runs before it queues a posting to prepare: closed, stale, scam-looking, a knock-out.
     if (await screenedOut(userId, job, deps)) { blocked.push(name); continue; }
     if (open && open.some((q) => q.job_ids.includes(job.job_id))) { needsInfo.push(name); continue; }
@@ -188,6 +205,7 @@ export async function applyAllYesTurn(o: ApplyAllDeps): Promise<ApplyAllResult |
   if (readySince.length) L.push(`${names(readySince)} got ready after I offered ${readySince.length === 1 ? "it" : "them"}, so I left ${readySince.length === 1 ? "it" : "them"} for you to check on the list first.`);
   if (gettingReady.length) L.push(`${plural(gettingReady.length, "role is", "roles are")} getting ready (${names(gettingReady)}); ${kicked === "started" || kicked === "none" ? "nothing is sent for them until you see and approve what's prepared" : "preparing hasn't started yet, so they wait in your queue; nothing is sent for them"}.`);
   if (needsInfo.length) L.push(`${names(needsInfo)} ${needsInfo.length === 1 ? "needs" : "need"} an answer from you first, so none of ${needsInfo.length === 1 ? "that one was" : "those were"} queued.`);
+  if (paused) L.push(PAUSED_NOTE);
   if (leftOut.length) L.push(`${plural(leftOut.length, "role", "roles")} you dismissed on the list ${leftOut.length === 1 ? "was" : "were"} left out.`);
   const res = done(L.join(" "), approved.length ? (approved.length === offer.jobs.length ? "approved" : "partial") : (skippedBlank.length + skippedSensitive.length ? "skipped" : "none"), { questions: needsInfo.length, unprepared: gettingReady.length + blocked.length });
   // Counts from the taps' own results: approved rows are "approved" (queued); what is prepared but not approved is "prepared".
@@ -208,4 +226,17 @@ export async function liveOfferRow(admin: any, threadId: string): Promise<{ id: 
   if (u.error) throw new Error(`read the thread's later turns: ${u.error.message}`);
   if (u.data?.length) return null;
   return { id: row.id, intent: row.meta?.intent ?? null, meta: row.meta ?? {} };
+}
+
+// When the person's STOP was recorded, while it still holds (any of their chats; the newest), for applyAllYesTurn's stoppedAt. `admin`
+// is a supabase client; a read that fails throws (the yes then approves nothing).
+// deno-lint-ignore no-explicit-any
+export function supabaseStoppedAt(admin: any): (userId: string) => Promise<number | null> {
+  return async (userId) => {
+    const r = await admin.from("channel_contacts").select("opted_out_at").eq("user_id", userId).eq("opted_out", true);
+    if (r.error) throw new Error(`read the opt-out: ${r.error.message}`);
+    // deno-lint-ignore no-explicit-any
+    const at = (r.data ?? []).map((x: any) => Date.parse(String(x?.opted_out_at ?? ""))).filter(Number.isFinite);
+    return at.length ? Math.max(...at) : (r.data?.length ? Number.POSITIVE_INFINITY : null); // stopped with no time recorded: after any offer
+  };
 }

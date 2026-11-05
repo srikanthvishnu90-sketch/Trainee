@@ -7,6 +7,7 @@
 // primary key of channel_contacts and what career_outbox.contact records; the database derives channel and address
 // from it (20261021070000_channel_parity.sql), so the two can never disagree.
 import { normalizeContact, splitLong, toBubbles } from "./conversation.ts";
+import { fenceChunks, paragraphsOf } from "./channel_text.ts";
 
 export type Channel = "imessage" | "whatsapp" | "telegram";
 export type Provider = "loopmessage" | "whatsapp" | "telegram";
@@ -161,8 +162,9 @@ export function packMessages(text: string, max: number): string[] {
   if (clean.length <= max) return [clean];
   const out: string[] = [];
   let buf = "";
-  for (const para of clean.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean)) {
-    for (const piece of para.length <= max ? [para] : splitLong(para, max)) {
+  // TELEGRAM ROUND 4 (channel_text.ts paragraphsOf): a fenced code block is one paragraph, its lines as written, sent as whole blocks.
+  for (const { s: para, code } of paragraphsOf(clean)) {
+    for (const piece of para.length <= max ? [para] : code ? fenceChunks(para, max) : splitLong(para, max)) {
       if (buf && buf.length + 2 + piece.length <= max) buf += `\n\n${piece}`;
       else { if (buf) out.push(buf); buf = piece; }
     }

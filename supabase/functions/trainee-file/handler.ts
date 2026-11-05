@@ -15,7 +15,7 @@
 // applications". Either way each posting is approved once.
 import { applyAllYesEnabled } from "../_shared/apply_all_yes_flag.ts";
 import { FILE_TTL_MS, verifyFileToken, type FileClaims } from "../_shared/file_link.ts";
-import { checkSession, CLEAR_LOGIN, CLEAR_SESSION, codeOf, LOGIN_TTL_MS, loginCookie, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, PAGE_TOKEN, pageTokenOf, sameToken, SESSION_ID, sessionCookie, sha256, startSession, type PhoneAuth, type SessionCheck, type SessionStore } from "../_shared/file_session.ts";
+import { ACCOUNT_MAX_TRIES, checkSession, CLEAR_LOGIN, CLEAR_SESSION, codeOf, LOGIN_TTL_MS, loginCookie, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, PAGE_TOKEN, pageTokenOf, sameToken, SESSION_ID, sessionCookie, sha256, startSession, type PhoneAuth, type SessionCheck, type SessionStore } from "../_shared/file_session.ts";
 import { verifyInitData } from "../_shared/telegram_webapp.ts";
 import { BOOT_SCRIPT, cut, FEED_SCRIPT, fullOf, hostOf, renderBootstrap, renderFeed, renderLinkState, renderPhoneLogin, renderPreview, renderText, signOutFoot, snippetOf, statusOf, type AppRow, type Feed, type Row } from "../_shared/file_page.ts";
 import { dayOf, BRAND, esc, layout, postedLine, webUrl } from "../_shared/file_page.ts";
@@ -454,6 +454,14 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
     }
     // phone_verify
     if (!row.phone) return page("phone");
+    // Locked once the account's sign-ins (all of them, whatever number each holds) have used the account's tries, whatever number
+    // this one holds: the database's cap counts only sign-ins holding the account's number, and on its own it answered "Too many
+    // wrong codes" for the account's number where any other number got "That code didn't work" (file page sign-in round 4).
+    if (sessions!.accountTries) {
+      const used = await sessions!.accountTries(row.jti).catch(() => null);
+      if (used === null) return down();
+      if (used >= ACCOUNT_MAX_TRIES) return locked();
+    }
     const tried = await sessions!.countTry(row.jti, MAX_CODE_TRIES).catch(() => null);
     if (tried === null) return down();
     if (!tried) return locked();
@@ -646,7 +654,7 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
   return o.html(layout(`${String(rec.data?.title ?? KIND_LABEL[rec.kind])} - Trainee`, inner, { script: KIND_SCRIPT, tg: true, css: KIND_CSS, og: { title: `${KIND_LABEL[rec.kind]} from Trainee`, description: "Open in Trainee.", image: ogImage(d.env) } }), 200, { "content-security-policy": csp });
 }
 async function logoOf(want: string, claims: FileClaims, d: FileDeps): Promise<Response> {
-  const none = () => new Response("", { status: 404, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+  const none = async () => new Response("", { status: 404, headers: await headers("text/plain; charset=utf-8", d.env) });
   const dom = want.trim().toLowerCase();
   if (!selfLogos(d.env) || !validDomain(dom)) return none();
   const refs = ((await d.store.recallList(claims.u, claims.r).catch(() => null)) ?? []).slice(0, MAX_ROWS);
@@ -656,7 +664,9 @@ async function logoOf(want: string, claims: FileClaims, d: FileDeps): Promise<Re
   if (!allowed) return none();
   const logo = await fetchLogo(dom, { fetch: d.logoFetch ?? fetch, cache: d.logoCache ?? LOGOS, now: d.now() }).catch(() => null);
   if (!logo) return none();
-  return new Response(logo.bytes as Uint8Array<ArrayBuffer>, { status: 200, headers: { "content-type": logo.type, "cache-control": "private, max-age=86400", "x-content-type-options": "nosniff",
+  // no-store like every page: which employers' logos a browser kept would tell the next person on that device which companies were
+  // on the list, after sign-out (file page sign-in round 4: logos were cached for a day; the server keeps its own cache, logo_cache.ts).
+  return new Response(logo.bytes as Uint8Array<ArrayBuffer>, { status: 200, headers: { "content-type": logo.type, "cache-control": "no-store", "x-content-type-options": "nosniff",
     "content-security-policy": "default-src 'none'; sandbox", "referrer-policy": "no-referrer", "cross-origin-resource-policy": "same-origin" } });
 }
 const originOf = (u: string) => { try { const x = new URL(u); return x.protocol === "https:" ? x.origin : null; } catch { return null; } };

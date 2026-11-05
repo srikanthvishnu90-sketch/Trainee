@@ -157,6 +157,7 @@
     "tests/architect/flow-scenarios-billing-research.test.ts": 16,
     "tests/architect/flow-scenarios-channel-delivery.test.ts": 9,
     "tests/architect/flow-scenarios-channel-r2.test.ts": 7,
+    "tests/architect/flow-scenarios-channel-r4.test.ts": 10,
     "tests/architect/flow-scenarios-connectors-r3.test.ts": 10,
     "tests/architect/flow-scenarios-connectors-r4.test.ts": 12,
     "tests/architect/flow-scenarios-connectors.test.ts": 42,
@@ -308,6 +309,8 @@
     "tests/architect/scenarios-billing-research.test.ts": 4,
     "tests/architect/scenarios-channel-delivery.test.ts": 1.9,
     "tests/architect/scenarios-channel-r2.test.ts": 8.3,
+    "tests/architect/scenarios-channel-r4.test.ts": 16,
+    "tests/architect/scenarios-channel-r4b.test.ts": 12,
     "tests/architect/scenarios-connectors-r3.test.ts": 1.1,
     "tests/architect/scenarios-connectors-r4.test.ts": 3,
     "tests/architect/scenarios-connectors.test.ts": 0.6,
@@ -510,6 +513,12 @@
     "tests/architect/journeys-r2-f.test.ts": 160,
     "tests/architect/journeys-r2-g.test.ts": 160,
     "tests/architect/journeys-r2-h.test.ts": 160,
-    "tests/architect/journeys-r2-regressions.test.ts": 20
+    "tests/architect/journeys-r2-regressions.test.ts": 20,
+    "tests/architect/scenarios-file-signin-r4.test.ts": 18,
+    "tests/architect/scenarios-file-signin-r4-2.test.ts": 18,
+    "tests/architect/scenarios-file-signin-r4-3.test.ts": 18,
+    "tests/architect/scenarios-file-signin-r4-4.test.ts": 18,
+    "tests/architect/scenarios-file-signin-r4-regressions.test.ts": 0.2,
+    "tests/architect/flow-scenarios-file-signin-r4.test.ts": 14
   }
 }

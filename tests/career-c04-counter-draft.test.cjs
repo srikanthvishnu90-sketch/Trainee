@@ -222,7 +222,7 @@ test("C04 r1: a pay range is read, and any counter clears its top", () => {
 
 test("C04 r1: statedPayOf reads the person's unit and skips bonuses and asks", () => {
   const P = Negotiation.statedPayOf;
-  assert.deepEqual(P("A support job offered $24/hour."), { rate: 24, low: null, unit: "hour", text: "$24/hour" });
+  assert.deepEqual(P("A support job offered $24/hour."), { rate: 24, low: null, unit: "hour", text: "$24/hour", current: [] });
   assert.equal(P("They offered $4,000 a month").unit, "month");
   assert.equal(P("offer $1,200 per week plus a $2,000 signing bonus").rate, 1200);
   assert.deepEqual([P("offered $70-80k").low, P("offered $70-80k").rate, P("offered $70-80k").unit], [70000, 80000, "year"]);
@@ -253,4 +253,48 @@ test("C04 r1: package terms the person stated are not called missing", () => {
   assert.deepEqual(keys("benefits include health insurance and it starts on Dec 1"), ["schedule"]);
   assert.deepEqual(keys("I have no benefits or schedule details yet"), ["benefits", "schedule", "start_date"]);
   assert.deepEqual(keys("full-time, Monday to Friday, with health insurance; start date unknown"), ["start_date"]);
+});
+
+/* Review round 2 (PR #517): current or past pay is context, never the offer or a floor; two candidate offers are
+ * asked about; "counter at the same rate" is answered. */
+const offerAsks = (reply) => dollarsIn(emailIn(reply).split("\n").filter((l) => /^Could you bring/.test(l)).join(" "));
+for (const [name, msg] of [
+  ["current pay first, joined by and", "I make $20/hour now and a support job offered $24/hour. Should I counter? Draft a counteroffer."],
+  ["current pay in its own sentence", "My current job pays $20 an hour. A new support job offered $24 an hour. Should I counter? Draft a counteroffer."],
+  ["reversed order", "They offered $24 an hour for a support job, I make $20 an hour. Should I counter? Draft a counteroffer."],
+  ["three figures: current, offer and the person's own ask", "I make $20/hour, a support job offered $24/hour, and I want $27/hour. Should I counter? Draft a counteroffer."],
+]) {
+  test(`C04 r2: ${name}: the counter is measured against the $24 offer, never the $20 current pay`, () => {
+    const say = world();
+    const { out, reply } = say(msg);
+    assert.equal(out.intent, "negotiation_draft", reply);
+    assert.ok(!/\$20 an hour on the table|above the \$20|offer(?:ed)?:? \$20|for the offer[^.]*\$20/i.test(reply), `the current pay was read as the offer: ${reply}`);
+    assert.match(emailIn(reply), /Thank you for the offer[^\n]*\$24 an hour/);
+    const asks = offerAsks(reply);
+    assert.ok(asks.length && asks.every((v) => v > 24), `asked ${asks}`);
+    if (/I want \$27/.test(msg)) assert.deepEqual(asks, [27], "the person's own figure");
+    assert.match(reply, /\$20(?:\/hour| an hour) as what you make now; that's context/);
+    // The thread keeps $24, not $20, for the next turn.
+    const next = say("Should I counter at $22 an hour?");
+    assert.match(next.reply, /^Not at \$22: that is at or below the \$24 an hour/, next.reply);
+  });
+}
+
+test("C04 r2: two candidate offers in the same unit are asked about, not guessed", () => {
+  const say = world();
+  const { out, reply } = say("Acme offered $24/hour and Beta offered $26/hour. Should I counter? Draft a counteroffer.");
+  assert.match(reply, /^Which figure is the offer you're deciding on: \$24\/hour or \$26\/hour\?/, reply);
+  assert.ok(!out.draft && !emailIn(reply), "no draft on a guessed offer");
+  const P = Negotiation.statedPayOf;
+  assert.deepEqual(P("I earn $20 an hour and I saw $24 and $26 posted").ambiguous, ["$24", "$26"]);
+  assert.equal(P("I make $20 an hour right now"), null, "current pay alone is no offer");
+});
+
+test("C04 r2: \"counter at the same rate\" is answered: no counter at the offer, and the accept-and-ask-terms option", () => {
+  const say = world();
+  say("A support job offered $24/hour. Should I counter?");
+  const { out, reply } = say("Can I just counter at the same rate?");
+  assert.match(reply, /^Countering at the same \$24 an hour asks for nothing new/, reply);
+  assert.match(reply, /accepts \$24 an hour and asks about the terms/);
+  assert.ok(!out.draft && !emailIn(reply));
 });

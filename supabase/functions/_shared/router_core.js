@@ -28801,11 +28801,31 @@ const CareerNegotiation = (() => {
     if (n == null || !Number.isFinite(Number(n))) return null;
     return `${rateShort(n, unit)} ${UNIT_PHRASE[unit] || UNIT_PHRASE.year}`;
   };
-  // The offer's pay as the person stated it: { rate, low, unit, text } or null. A range ("$22-24/hour") keeps both
-  // ends; its top is the offer for the never-at-or-below rule. unit is null when no period is stated and the figure
-  // is not plainly a salary (a bare "$4,000"): the caller asks rather than guess a unit. Signing bonuses and figures
-  // framed as the person's own ask ("counter at $27") are not the offer.
+  // The offer's pay as the person stated it: { rate, low, unit, text, current } or null. A range ("$22-24/hour") keeps
+  // both ends; its top is the offer for the never-at-or-below rule. unit is null when no period is stated and the
+  // figure is not plainly a salary (a bare "$4,000"): the caller asks rather than guess a unit. Signing bonuses and
+  // figures framed as the person's own ask ("counter at $27") are not the offer.
+  // Each figure is read in its own clause. A figure in a clause about the person's current or past pay ("I make $20
+  // an hour now", "my current job pays $20") is context (`current`), never the offer and never a floor. A figure in a
+  // clause with an offer cue ("offered", "the offer is", "they'd pay") is the offer. Two different offer figures, or
+  // two uncued figures with no offer cue on either, are not guessed between: { ambiguous: [texts] }.
   function statedPayOf(text) {
+    const found = statedPayFigures(text);
+    if (!found.length) return null;
+    const current = found.filter((f) => f.role === "current");
+    const offers = found.filter((f) => f.role === "offer");
+    const neutral = found.filter((f) => f.role === "neutral");
+    const distinct = (list) => list.filter((f, i) => list.findIndex((g) => g.rate === f.rate && g.unit === f.unit && g.low === f.low) === i);
+    const pick = (f) => ({ rate: f.rate, low: f.low, unit: f.unit, text: f.text, current: current.map((c) => ({ rate: c.rate, unit: c.unit, text: c.text })) });
+    const off = distinct(offers);
+    if (off.length === 1) return pick(off[0]);
+    if (off.length > 1) return { ambiguous: off.map((f) => f.text), current: current.map((c) => c.text) };
+    const neu = distinct(neutral);
+    if (neu.length === 1) return pick(neu[0]);
+    if (neu.length > 1) return { ambiguous: neu.map((f) => f.text), current: current.map((c) => c.text) };
+    return null; // only current or past pay: no offer was stated
+  }
+  function statedPayFigures(text) {
     const raw = s(text).replace(/[’]/g, "'").replace(/[‐-―]/g, "-");
     const num = (v, k) => { const n = Number(String(v).replace(/,/g, "")); return k ? n * 1000 : n; };
     const PERIOD = "(hours?|hrs?|hourly|h|weeks?|wks?|weekly|months?|mos?|monthly|years?|yrs?|yearly|annual(?:ly)?|annum)";
@@ -28818,6 +28838,20 @@ const CareerNegotiation = (() => {
       if (/^(mos?|months?|monthly)$/.test(w)) return "month";
       return "year";
     };
+    // A clause: the text between sentence or clause breaks (. ; ! ? , and the joins "and", "but", "while", "whereas").
+    const BREAK = /[.;!?](?=\s|$)|,|\s(?:and|but|while|whereas|though)\s/gi;
+    const breaks = [0];
+    let bm;
+    while ((bm = BREAK.exec(raw))) breaks.push(bm.index, bm.index + bm[0].length);
+    breaks.push(raw.length);
+    const clauseAt = (start, end) => {
+      let lo = 0, hi = raw.length;
+      for (const b of breaks) { if (b <= start && b > lo) lo = b; if (b >= end && b < hi) hi = b; }
+      return raw.slice(lo, hi).toLowerCase();
+    };
+    const CURRENT = /\b(i\s+(?:make|earn|get paid|get|am making|'m making|was making|made|earned)|i'm\s+(?:making|earning|paid|getting)|currently|right now|at the moment|my (?:current|old|last|previous|present) (?:job|role|employer|position|pay|rate|salary|wage)|(?:current|last|previous|old|present) (?:job|role|employer|position)|i'm (?:on|at) \$|now\b)/;
+    const OFFER = /\b(offer(?:ed|ing|s)?|they'?(?:d| would| will| are|'re)? (?:pay|paying|give|giving)|would pay|will pay|pays? for (?:this|the) (?:role|job|position)|the role pays|this job pays|the job pays|position pays)\b/;
+    const out = [];
     let m;
     while ((m = re.exec(raw))) {
       const before = raw.slice(Math.max(0, m.index - 30), m.index).toLowerCase();
@@ -28831,9 +28865,12 @@ const CareerNegotiation = (() => {
       const lo = b != null && Number.isFinite(b) && b > a ? a : null;
       let unit = toUnit(m[5]);
       if (!unit && hi >= 20000) unit = "year";
-      return { rate: hi, low: lo, unit, text: m[0].trim() };
+      // The clause without the figure itself ("$24/hour" must not read as "hour ... now").
+      const clause = clauseAt(m.index, m.index + m[0].length).replace(m[0].toLowerCase(), " ");
+      const role = CURRENT.test(clause) && !/\boffer(?:ed|ing|s)?\b/.test(clause) ? "current" : OFFER.test(clause) ? "offer" : "neutral";
+      out.push({ rate: hi, low: lo, unit, text: m[0].trim(), role });
     }
-    return null;
+    return out;
   }
   // The person's own target, read from their words: a figure framed as the ask ("counter at $27", "ask for $27 an
   // hour", "my target is $27", "I want $27/hr"). A bare figure is the offer, not an ask — that misread
@@ -28964,7 +29001,10 @@ const CareerNegotiation = (() => {
     const stated = counterTargetOf(opts.text, unit);
     const recorded = Number.isFinite(Number(opts.target)) && Number(opts.target) > 0 ? Number(opts.target) : null;
     let target = null, rejected = null;
+    // "Counter at the same rate" / "ask for the same amount": a counter at the offer itself asks for nothing.
+    const sameRate = rate != null && /\b(?:counter|ask(?:ing)?(?: them)?(?: for)?|stick|keep it|go back)\b[^.?!]{0,30}\b(?:same|current|their|that|the offered)\s+(?:rate|pay|amount|figure|number|salary|offer)\b/i.test(s(opts.text));
     if (stated != null) { if (rate != null && stated <= rate) rejected = stated; else target = stated; }
+    else if (sameRate) rejected = rate;
     else if (recorded != null && (rate == null || recorded > rate)) target = recorded;
     const bench = usableBenchmark(opts.benchmark, unit);
     let range = null;
@@ -28999,7 +29039,8 @@ const CareerNegotiation = (() => {
       verdict = "I can answer that once I know the figure they offered.";
     } else if (rejected != null) {
       verdict = `Not at ${rateShort(rejected, unit)}: that is at or below the ${offerText} they already offered, so it asks for nothing.`;
-      reasons.push(`A counter has to be above ${offerText}. Tell me the ${UNIT_NOUN[unit]} you'd actually want, or accept the offer as it stands.`);
+      if (sameRate && stated == null) verdict = `Countering at the same ${offerText} asks for nothing new, so it isn't a counter; if ${offerText} works for you, accepting it and asking about the terms is the stronger email.`;
+      reasons.push(`A counter has to be above ${offerText}.`);
     } else if (counter && counter.basis === "judgment") {
       const pct = Math.round(((counter.value - rate) / rate) * 100);
       verdict = `Yes, counter once, in writing, at ${rateText(counter.value, unit)}, a figure that is my judgment, not market data.`;
@@ -29019,7 +29060,12 @@ const CareerNegotiation = (() => {
     }
     const termsLine = missing.length ? `Before you decide, get the rest of the package: ${listJoin(missing.map((m) => m.label))} ${missing.length === 1 ? "is" : "are"} not on your record yet, and ${offerText || "the pay"} alone can't tell you whether the offer is a good one.` : null;
     if (termsLine) reasons.push(termsLine);
-    const targetQuestion = rate != null && !counter
+    // Current or past pay the person mentioned is context only: the counter is measured against the offer.
+    const cur = Array.isArray(opts.current) ? opts.current.filter((c) => c && c.text) : [];
+    if (cur.length && rate != null) reasons.push(`You mentioned ${cur.map((c) => c.text).join(" and ")} as what you make now; that's context, and the counter is measured against the ${offerText} offer.`);
+    const targetQuestion = rejected != null
+      ? `Want an email that accepts ${offerText} and asks about the terms, or a counter at a figure above it?`
+      : rate != null && !counter
       ? `To name a figure in the draft, it has to be yours and above ${offerText}: what ${UNIT_NOUN[unit]} would make this an easy yes for you?`
       : counter && counter.basis === "judgment"
         ? `Keep ${rateText(counter.value, unit)} in the draft, or tell me your own figure (it has to be above ${offerText}).`
@@ -29043,7 +29089,7 @@ const CareerNegotiation = (() => {
     return { sends: false, unit, rate, rateLow, offerText, counterText: counter ? rateText(counter.value, unit) : null, company, role, target, rejected, range, counter, missing: missing.map((m) => ({ key: m.key, label: m.label })), needs, answer: { verdict, reasons }, terms, targetQuestion, companyQuestion, draft };
   }
 
-  return { DISCLAIMER, payData, factScript, createStore, counterPlan, counterTargetOf, statedPayOf, missingTermsOf, counterDraftUnits, renderCounterUnits, COUNTER_TERMS, parseOffer, parseDate, parseMoney, storeOffer, extractFigures, benchmark, totalComp, compareOffers, bonusAmount, approvalCard, counterStrategy, roleplayTurn, extensionDraft, trackExtension, declineDraft, deadlinePlan };
+  return { DISCLAIMER, payData, factScript, createStore, counterPlan, counterTargetOf, statedPayOf, statedPayFigures, missingTermsOf, counterDraftUnits, renderCounterUnits, COUNTER_TERMS, parseOffer, parseDate, parseMoney, storeOffer, extractFigures, benchmark, totalComp, compareOffers, bonusAmount, approvalCard, counterStrategy, roleplayTurn, extensionDraft, trackExtension, declineDraft, deadlinePlan };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerNegotiation;
 
@@ -45039,7 +45085,7 @@ const CareerRouter = (() => {
   function counterAskOf(text) {
     const t = lc(text).replace(/[’]/g, "'");
     if (/\bextension\b|\bmore time\b|\bdecline\b|\bturn (it|them|the offer) down\b|\bgrant\b|\b409a\b/.test(t)) return null;
-    const question = /\bshould i (counter|negotiate|ask for (more|a raise|a higher)|push back)\b|\bis it worth (countering|negotiating|a counter)\b|\bdo i (counter|negotiate)\b|\bcounter or (accept|take)\b|\b(accept|take) (it|the offer|this) or counter\b|\bworth (a|making a) counter\b|\bcan i counter\b/.test(t);
+    const question = /\bshould i (counter|negotiate|ask for (more|a raise|a higher)|push back)\b|\bis it worth (countering|negotiating|a counter)\b|\bdo i (counter|negotiate)\b|\b(?:can|could|should) i (?:just |still |simply )?counter\b|\bcounter at the same\b|\bcounter or (accept|take)\b|\b(accept|take) (it|the offer|this) or counter\b|\bworth (a|making a) counter\b|\bcan i counter\b/.test(t);
     const negDraft = /\b(don'?t|do not|no need to|never)\s+(draft|write)\b/.test(t);
     const draft = !negDraft && /\b(draft|write|compose|prepare|put together)\b/.test(t) && /\bcounter(?:\s?-?offer)?\b|\bnegotiat\w*\s+(email|letter|message|reply|note)\b/.test(t);
     const terms = /\b(benefits?|schedule|start date)\b/.test(t) && /\b(no|don'?t|do not|haven'?t|have not|not yet|yet|missing|unknown)\b/.test(t) && /\b(details?|info|information|yet|any)\b/.test(t);
@@ -45060,8 +45106,9 @@ const CareerRouter = (() => {
     // while the legacy record holds no other figure.
     const pay = th.pay && typeof th.pay === "object" && Number(th.pay.rate) > 0 ? th.pay : null;
     const payStands = pay && (pay.unit === "hour" ? !th.hourly || Number(th.hourly) === Number(pay.rate) : pay.unit === "year" ? !th.amount || Number(th.amount) === Number(pay.rate) : !th.hourly && !th.amount);
-    let fromText = false;
-    if (sp && offerCue) {
+    let fromText = false, ambiguous = null, currentPay = sp && Array.isArray(sp.current) ? sp.current : [];
+    if (sp && sp.ambiguous) ambiguous = sp.ambiguous;
+    else if (sp && offerCue) {
       if (sp.unit) { unit = sp.unit; rate = sp.rate; rateLow = sp.low; fromText = true; } else unclear = sp;
     } else if (payStands) { unit = pay.unit; rate = Number(pay.rate); rateLow = pay.low != null ? Number(pay.low) : null; }
     else if (th.hourly || off.hourly_rate) { unit = "hour"; rate = Number(th.hourly || off.hourly_rate); }
@@ -45074,7 +45121,7 @@ const CareerRouter = (() => {
     }
     const rec = th.counter && typeof th.counter === "object" ? th.counter : {};
     return {
-      unclear, fromText,
+      unclear, fromText, ambiguous, currentPay,
       offer: { company: th.firm || off.company || null, role, rate, rate_low: rateLow, unit: unit || "year", signing: th.signing || off.signing_bonus || null, benefits: off.benefits || null, schedule: th.schedule || off.schedule || null, start_date: off.start_date || null, deadline: th.deadline || null },
       recordedTarget: unit === "hour" ? (rec.hourly || null) : unit === "year" ? (rec.amount || null) : null,
     };
@@ -45097,13 +45144,23 @@ const CareerRouter = (() => {
     if (!ask) return null;
     const pg = inheritedOfferGate(text, ctx);
     if (pg) return pg;
-    const { offer, recordedTarget, unclear, fromText } = counterOfferOf(text, ctx);
+    const { offer, recordedTarget, unclear, fromText, ambiguous, currentPay } = counterOfferOf(text, ctx);
     const th = negotiationThreadOf(ctx);
     const onRecord = !!(th.firm || th.amount || th.hourly || th.deadline || (ctx.offer && typeof ctx.offer === "object" && (ctx.offer.company || ctx.offer.base_salary || ctx.offer.hourly_rate)));
     // "I have no benefits details yet" is the negotiation's only on an offer thread.
     if (!ask.question && !ask.draft && !onRecord) return null;
     // An offer record this reader cannot place a figure on (an account seed in another shape) stays with the legacy
     // negotiation path, which reads it; with no offer on record at all, the figure is asked for.
+    // Two figures that could each be the offer: asked, never guessed (D-007).
+    if (ambiguous && ambiguous.length > 1) {
+      const list = ambiguous.length === 2 ? `${ambiguous[0]} or ${ambiguous[1]}` : `${ambiguous.slice(0, -1).join(", ")} or ${ambiguous[ambiguous.length - 1]}`;
+      const reply = compose({
+        headline: `Which figure is the offer you're deciding on: ${list}?`,
+        facts: ["A counter is measured against the offer itself, so I won't pick one of these for you."],
+        nextStep: "Tell me which one they offered (and who offered it, if there are two employers) and I'll answer whether to counter and draft it.",
+      });
+      return { intent: "negotiation_advice", reply, resultStatus: "needs_context", sends: 0, payload: { kind: "counter_needs_offer_choice", figures: ambiguous } };
+    }
     if (unclear) {
       const reply = compose({
         headline: `Is ${unclear.text} an hourly, weekly, monthly or yearly figure?`,
@@ -45126,7 +45183,7 @@ const CareerRouter = (() => {
     const keepSigning = /\bkeep\b[^.]*\bsigning\b|\bsigning bonus as is\b/i.test(s(text));
     const facts0 = statedFactsOf(ctx);
     const senderName = (ctx.profile && ctx.profile.basics && ctx.profile.basics.name) || ((facts0.find((f) => f.kind === "name") || {}).value) || null;
-    const plan = Negotiation.counterPlan(offer, { text, target: recordedTarget, benchmark: counterBenchmarkOf(text, ctx, offer.unit), keepSigning, senderName });
+    const plan = Negotiation.counterPlan(offer, { text, current: currentPay, target: recordedTarget, benchmark: counterBenchmarkOf(text, ctx, offer.unit), keepSigning, senderName });
     // The person's own target, stated this turn, becomes the standing counter (in the offer's units).
     const stated = Negotiation.counterTargetOf(text, offer.unit);
     if (stated != null && plan.target === stated) {
@@ -52680,15 +52737,28 @@ const CareerRouter = (() => {
         const askFramed = /\bask(?:ing)? for\s+(?:a\s+|an\s+)?\$?\s?\d|\bcounter\s+(?:at|of|to)\s+\$?\s?\d|\bmake it\s+\$?\s?\d/i.test(cl)
           || !!(Negotiation && Negotiation.counterTargetOf && (Negotiation.counterTargetOf(cl, "hour") != null || Negotiation.counterTargetOf(cl, "year") != null));
         const figs = askFramed ? { hourly: null, signing: null, annual: null } : parseOfferFigures(cl);
+        // C04 r2: "I make $20/hour now and a support job offered $24/hour" — the first figure is current pay, not the
+        // offer. When the turn names current or past pay, or two candidate offers, the offer figure comes from 128
+        // statedPayOf (the figure in the offer's clause) or is not recorded at all; current pay is never recorded as one.
+        let payCtx = false;
+        if (!askFramed && Negotiation && Negotiation.statedPayFigures) {
+          const pf = Negotiation.statedPayFigures(cl);
+          if (pf.some((f) => f.role === "current") || pf.filter((f) => f.role === "offer").length > 1) {
+            payCtx = true;
+            const sp = Negotiation.statedPayOf(cl);
+            figs.hourly = sp && !sp.ambiguous && sp.unit === "hour" ? sp.rate : null;
+            figs.annual = sp && !sp.ambiguous && sp.unit === "year" ? sp.rate : null;
+          }
+        }
         if (figs.hourly) rec.hourly = figs.hourly;
         if (figs.signing) rec.signing = figs.signing;
         if (figs.annual) rec.amount = figs.annual;
         if ((m = cl.match(/\bcame back\s+(?:at\s+)?\$?(\d{2,3})\s?k\b/i))) rec.amount = Number(m[1]) * 1000;
-        if (!figs.annual && !figs.signing && !figs.hourly) {
+        if (!payCtx && !figs.annual && !figs.signing && !figs.hourly) {
           if ((m = cl.match(/\boffer\w*\b[^.]*?\$\s?(\d{2,3})\s?k\b/i)) || (m = cl.match(/\b(\d{2,3})\s?k\b[^.]*\boffer/i))) rec.amount = Number(m[1]) * 1000;
           else if ((m = cl.match(/\$\s?(\d[\d,]{3,})/))) rec.amount = Number(m[1].replace(/,/g, ""));
         }
-        if (rec.amount == null && !figs.annual && !/\bsigning\b/i.test(cl) && (/\boffer|base|salary|came back\b/i.test(cl) || /\boffer/i.test(raw)) && (m = cl.match(/\b(\d{2,3}(?:\.\d)?)\s?k\b/i))) rec.amount = Number(m[1]) * 1000;
+        if (!payCtx && rec.amount == null && !figs.annual && !/\bsigning\b/i.test(cl) && (/\boffer|base|salary|came back\b/i.test(cl) || /\boffer/i.test(raw)) && (m = cl.match(/\b(\d{2,3}(?:\.\d)?)\s?k\b/i))) rec.amount = Number(m[1]) * 1000;
         if (!figs.signing && ((m = cl.match(/\bsigning(?:\s+bonus)?\s*(?:of\s*)?\$?(\d{1,3})\s?k\b/i)) || (m = cl.match(/\$\s?(\d{1,3})\s?k\s+signing\b/i)))) rec.signing = Number(m[1]) * 1000;
         if ((m = cl.match(/\b([\d,]{3,})\s+shares\b/i))) rec.shares = m[1];
         if ((m = cl.match(/\bstarts?\s+(?:on\s+)?([A-Z][a-z]+\s+\d{1,2})\b/))) rec.start = m[1];

@@ -359,11 +359,31 @@ const CareerNegotiation = (() => {
     if (n == null || !Number.isFinite(Number(n))) return null;
     return `${rateShort(n, unit)} ${UNIT_PHRASE[unit] || UNIT_PHRASE.year}`;
   };
-  // The offer's pay as the person stated it: { rate, low, unit, text } or null. A range ("$22-24/hour") keeps both
-  // ends; its top is the offer for the never-at-or-below rule. unit is null when no period is stated and the figure
-  // is not plainly a salary (a bare "$4,000"): the caller asks rather than guess a unit. Signing bonuses and figures
-  // framed as the person's own ask ("counter at $27") are not the offer.
+  // The offer's pay as the person stated it: { rate, low, unit, text, current } or null. A range ("$22-24/hour") keeps
+  // both ends; its top is the offer for the never-at-or-below rule. unit is null when no period is stated and the
+  // figure is not plainly a salary (a bare "$4,000"): the caller asks rather than guess a unit. Signing bonuses and
+  // figures framed as the person's own ask ("counter at $27") are not the offer.
+  // Each figure is read in its own clause. A figure in a clause about the person's current or past pay ("I make $20
+  // an hour now", "my current job pays $20") is context (`current`), never the offer and never a floor. A figure in a
+  // clause with an offer cue ("offered", "the offer is", "they'd pay") is the offer. Two different offer figures, or
+  // two uncued figures with no offer cue on either, are not guessed between: { ambiguous: [texts] }.
   function statedPayOf(text) {
+    const found = statedPayFigures(text);
+    if (!found.length) return null;
+    const current = found.filter((f) => f.role === "current");
+    const offers = found.filter((f) => f.role === "offer");
+    const neutral = found.filter((f) => f.role === "neutral");
+    const distinct = (list) => list.filter((f, i) => list.findIndex((g) => g.rate === f.rate && g.unit === f.unit && g.low === f.low) === i);
+    const pick = (f) => ({ rate: f.rate, low: f.low, unit: f.unit, text: f.text, current: current.map((c) => ({ rate: c.rate, unit: c.unit, text: c.text })) });
+    const off = distinct(offers);
+    if (off.length === 1) return pick(off[0]);
+    if (off.length > 1) return { ambiguous: off.map((f) => f.text), current: current.map((c) => c.text) };
+    const neu = distinct(neutral);
+    if (neu.length === 1) return pick(neu[0]);
+    if (neu.length > 1) return { ambiguous: neu.map((f) => f.text), current: current.map((c) => c.text) };
+    return null; // only current or past pay: no offer was stated
+  }
+  function statedPayFigures(text) {
     const raw = s(text).replace(/[’]/g, "'").replace(/[‐-―]/g, "-");
     const num = (v, k) => { const n = Number(String(v).replace(/,/g, "")); return k ? n * 1000 : n; };
     const PERIOD = "(hours?|hrs?|hourly|h|weeks?|wks?|weekly|months?|mos?|monthly|years?|yrs?|yearly|annual(?:ly)?|annum)";
@@ -376,6 +396,20 @@ const CareerNegotiation = (() => {
       if (/^(mos?|months?|monthly)$/.test(w)) return "month";
       return "year";
     };
+    // A clause: the text between sentence or clause breaks (. ; ! ? , and the joins "and", "but", "while", "whereas").
+    const BREAK = /[.;!?](?=\s|$)|,|\s(?:and|but|while|whereas|though)\s/gi;
+    const breaks = [0];
+    let bm;
+    while ((bm = BREAK.exec(raw))) breaks.push(bm.index, bm.index + bm[0].length);
+    breaks.push(raw.length);
+    const clauseAt = (start, end) => {
+      let lo = 0, hi = raw.length;
+      for (const b of breaks) { if (b <= start && b > lo) lo = b; if (b >= end && b < hi) hi = b; }
+      return raw.slice(lo, hi).toLowerCase();
+    };
+    const CURRENT = /\b(i\s+(?:make|earn|get paid|get|am making|'m making|was making|made|earned)|i'm\s+(?:making|earning|paid|getting)|currently|right now|at the moment|my (?:current|old|last|previous|present) (?:job|role|employer|position|pay|rate|salary|wage)|(?:current|last|previous|old|present) (?:job|role|employer|position)|i'm (?:on|at) \$|now\b)/;
+    const OFFER = /\b(offer(?:ed|ing|s)?|they'?(?:d| would| will| are|'re)? (?:pay|paying|give|giving)|would pay|will pay|pays? for (?:this|the) (?:role|job|position)|the role pays|this job pays|the job pays|position pays)\b/;
+    const out = [];
     let m;
     while ((m = re.exec(raw))) {
       const before = raw.slice(Math.max(0, m.index - 30), m.index).toLowerCase();
@@ -389,9 +423,12 @@ const CareerNegotiation = (() => {
       const lo = b != null && Number.isFinite(b) && b > a ? a : null;
       let unit = toUnit(m[5]);
       if (!unit && hi >= 20000) unit = "year";
-      return { rate: hi, low: lo, unit, text: m[0].trim() };
+      // The clause without the figure itself ("$24/hour" must not read as "hour ... now").
+      const clause = clauseAt(m.index, m.index + m[0].length).replace(m[0].toLowerCase(), " ");
+      const role = CURRENT.test(clause) && !/\boffer(?:ed|ing|s)?\b/.test(clause) ? "current" : OFFER.test(clause) ? "offer" : "neutral";
+      out.push({ rate: hi, low: lo, unit, text: m[0].trim(), role });
     }
-    return null;
+    return out;
   }
   // The person's own target, read from their words: a figure framed as the ask ("counter at $27", "ask for $27 an
   // hour", "my target is $27", "I want $27/hr"). A bare figure is the offer, not an ask — that misread
@@ -522,7 +559,10 @@ const CareerNegotiation = (() => {
     const stated = counterTargetOf(opts.text, unit);
     const recorded = Number.isFinite(Number(opts.target)) && Number(opts.target) > 0 ? Number(opts.target) : null;
     let target = null, rejected = null;
+    // "Counter at the same rate" / "ask for the same amount": a counter at the offer itself asks for nothing.
+    const sameRate = rate != null && /\b(?:counter|ask(?:ing)?(?: them)?(?: for)?|stick|keep it|go back)\b[^.?!]{0,30}\b(?:same|current|their|that|the offered)\s+(?:rate|pay|amount|figure|number|salary|offer)\b/i.test(s(opts.text));
     if (stated != null) { if (rate != null && stated <= rate) rejected = stated; else target = stated; }
+    else if (sameRate) rejected = rate;
     else if (recorded != null && (rate == null || recorded > rate)) target = recorded;
     const bench = usableBenchmark(opts.benchmark, unit);
     let range = null;
@@ -557,7 +597,8 @@ const CareerNegotiation = (() => {
       verdict = "I can answer that once I know the figure they offered.";
     } else if (rejected != null) {
       verdict = `Not at ${rateShort(rejected, unit)}: that is at or below the ${offerText} they already offered, so it asks for nothing.`;
-      reasons.push(`A counter has to be above ${offerText}. Tell me the ${UNIT_NOUN[unit]} you'd actually want, or accept the offer as it stands.`);
+      if (sameRate && stated == null) verdict = `Countering at the same ${offerText} asks for nothing new, so it isn't a counter; if ${offerText} works for you, accepting it and asking about the terms is the stronger email.`;
+      reasons.push(`A counter has to be above ${offerText}.`);
     } else if (counter && counter.basis === "judgment") {
       const pct = Math.round(((counter.value - rate) / rate) * 100);
       verdict = `Yes, counter once, in writing, at ${rateText(counter.value, unit)}, a figure that is my judgment, not market data.`;
@@ -577,7 +618,12 @@ const CareerNegotiation = (() => {
     }
     const termsLine = missing.length ? `Before you decide, get the rest of the package: ${listJoin(missing.map((m) => m.label))} ${missing.length === 1 ? "is" : "are"} not on your record yet, and ${offerText || "the pay"} alone can't tell you whether the offer is a good one.` : null;
     if (termsLine) reasons.push(termsLine);
-    const targetQuestion = rate != null && !counter
+    // Current or past pay the person mentioned is context only: the counter is measured against the offer.
+    const cur = Array.isArray(opts.current) ? opts.current.filter((c) => c && c.text) : [];
+    if (cur.length && rate != null) reasons.push(`You mentioned ${cur.map((c) => c.text).join(" and ")} as what you make now; that's context, and the counter is measured against the ${offerText} offer.`);
+    const targetQuestion = rejected != null
+      ? `Want an email that accepts ${offerText} and asks about the terms, or a counter at a figure above it?`
+      : rate != null && !counter
       ? `To name a figure in the draft, it has to be yours and above ${offerText}: what ${UNIT_NOUN[unit]} would make this an easy yes for you?`
       : counter && counter.basis === "judgment"
         ? `Keep ${rateText(counter.value, unit)} in the draft, or tell me your own figure (it has to be above ${offerText}).`
@@ -601,6 +647,6 @@ const CareerNegotiation = (() => {
     return { sends: false, unit, rate, rateLow, offerText, counterText: counter ? rateText(counter.value, unit) : null, company, role, target, rejected, range, counter, missing: missing.map((m) => ({ key: m.key, label: m.label })), needs, answer: { verdict, reasons }, terms, targetQuestion, companyQuestion, draft };
   }
 
-  return { DISCLAIMER, payData, factScript, createStore, counterPlan, counterTargetOf, statedPayOf, missingTermsOf, counterDraftUnits, renderCounterUnits, COUNTER_TERMS, parseOffer, parseDate, parseMoney, storeOffer, extractFigures, benchmark, totalComp, compareOffers, bonusAmount, approvalCard, counterStrategy, roleplayTurn, extensionDraft, trackExtension, declineDraft, deadlinePlan };
+  return { DISCLAIMER, payData, factScript, createStore, counterPlan, counterTargetOf, statedPayOf, statedPayFigures, missingTermsOf, counterDraftUnits, renderCounterUnits, COUNTER_TERMS, parseOffer, parseDate, parseMoney, storeOffer, extractFigures, benchmark, totalComp, compareOffers, bonusAmount, approvalCard, counterStrategy, roleplayTurn, extensionDraft, trackExtension, declineDraft, deadlinePlan };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerNegotiation;

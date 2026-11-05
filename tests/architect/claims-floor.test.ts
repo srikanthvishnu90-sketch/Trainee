@@ -6,11 +6,15 @@
 //            too, naming the identity or screening reason), and the round 2 honest corpus;
 //   records  none, every R512 record (the claim's own words included), an HR and legal record full of look-alike words;
 //   tails    without and with " My GPA was 3.4." (3.4 on the record);
-//   checks   checkDraft, claimProblems over the whole record, claimProblems in line mode (a tailored line).
+//   checks   checkDraft, claimProblems over the whole record, claimProblems in line mode (a tailored line), and factLock
+//            (review rv58: the chat reply guard agent/reply_guards.ts untracedFacts and the outreach lock
+//            career_outreach.ts outreachLock call factLock directly).
 // Property: wherever production refuses, release 2 refuses (and claimProblems holds every production problem).
 import assertNode from "node:assert/strict";
-import { checkDraft, factText } from "../../supabase/functions/_shared/essay_draft.ts";
-import { checkDraft as prodCheckDraft } from "../../supabase/functions/_shared/essay_draft_baseline.ts";
+import { checkDraft, factLock, factText, norm } from "../../supabase/functions/_shared/essay_draft.ts";
+import { checkDraft as prodCheckDraft, factLock as prodFactLock } from "../../supabase/functions/_shared/essay_draft_baseline.ts";
+import { untracedFacts } from "../../supabase/functions/_shared/agent/reply_guards.ts";
+import { outreachLock } from "../../supabase/functions/_shared/career_outreach.ts";
 import { claimProblems } from "../../supabase/functions/_shared/person_claims.ts";
 import { claimProblems as prodClaimProblems } from "../../supabase/functions/_shared/person_claims_baseline.ts";
 import { R4_DECOYS, R512_CLAIMS, R512_RECORDS, R512_WORK } from "./scenarios/tailoring-r4-claims.ts";
@@ -64,6 +68,12 @@ async function floorCell(t: Tally, tag: string, q: ReturnType<typeof essayQ>, fa
   const [now, prod] = [await checkDraft({ q, siblingLabels: [], deps, text }), await prodCheckDraft({ q, siblingLabels: [], deps, text } as any)];
   if (!prod.ok) t.prodRefused++;
   if (!prod.ok && now.ok) t.violations.push(`checkDraft shown, production refused (${prod.detail.join("; ")}): ${tag}`);
+  // factLock: every item production's lock cannot trace is untraced by release 2's (the record alone, and with the posting).
+  for (const sources of [record, [...record, q.company ?? "", q.label]]) {
+    const n = factLock(text, sources), p = prodFactLock(text, sources);
+    if (!p.pass && n.pass) t.violations.push(`factLock passed, production refused (${p.untraced.join("; ")}): ${tag}`);
+    for (const u of p.untraced) if (!n.untraced.some((x) => norm(x) === norm(u))) { t.violations.push(`factLock lost production's "${u}": ${tag}`); break; }
+  }
   for (const [mode, o] of [["record", { record }], ["line", { record: line, line: true }]] as const) {
     const n = claimProblems(text, o), p = prodClaimProblems(text, o);
     if (p.length && !n.length) t.violations.push(`claimProblems (${mode}) passed, production refused (${p.join("; ")}): ${tag}`);
@@ -85,7 +95,7 @@ Deno.test("release 2 floor: wherever production refuses a draft, release 2 refus
       }
     }
   }
-  console.log(`[claims-floor] fixed drafts: ${texts.length} texts, ${t.cells} cells x 3 checks, production refused ${t.prodRefused}, ${t.violations.length} floor violations`);
+  console.log(`[claims-floor] fixed drafts: ${texts.length} texts, ${t.cells} cells x 5 checks, production refused ${t.prodRefused}, ${t.violations.length} floor violations`);
   assertNode.deepEqual(t.violations.slice(0, 20), []);
 });
 
@@ -102,7 +112,7 @@ Deno.test("release 2 floor: the round 2 honest corpus on every record, with and 
       }
     }
   }
-  console.log(`[claims-floor] honest corpus: ${cases.length} drafts, ${t.cells} cells x 3 checks, production refused ${t.prodRefused}, ${t.violations.length} floor violations`);
+  console.log(`[claims-floor] honest corpus: ${cases.length} drafts, ${t.cells} cells x 5 checks, production refused ${t.prodRefused}, ${t.violations.length} floor violations`);
   assertNode.deepEqual(t.violations.slice(0, 20), []);
 });
 
@@ -128,4 +138,39 @@ Deno.test("#514 review: each phrasing is refused by the CURRENT rules for its ow
   }
   console.log(`[claims-floor] #514 phrasings: ${REVIEW_514.length} phrasings, ${cells} cells, ${missed.length} missed`);
   assertNode.deepEqual(missed, []);
+});
+
+// Review rv58 of #514: the chat reply guard and the outreach lock read factLock directly; production flags the "4" of
+// "3.4 years" on this record (its lock splits the decimal), so release 2 must too.
+Deno.test("rv58: the chat reply guard (untracedFacts) flags what production's fact lock flags: \"You worked 3.4 years\"", () => {
+  const record = ["Shipped version 3.4 of the app", "GPA 3.4/4.0"];
+  const reply = "You worked 3.4 years at Acme Corp.";
+  assertNode.ok(prodFactLock(reply, record).untraced.includes("4"), "production flags 4");
+  assertNode.ok(factLock(reply, record).untraced.includes("4"), "release 2's factLock flags 4");
+  const flagged = untracedFacts(reply, record);
+  assertNode.ok(flagged.some((u) => u.kind === "number" && u.word === "4"), JSON.stringify(flagged));
+});
+Deno.test("rv58: the outreach lock reads the floored factLock, and on an outreach-shaped corpus production's untraced items stay untraced", () => {
+  // outreachLock's code is production's (its filter over factLock's items is unchanged since 03edad41f), so with the union
+  // fed in, every item production's outreach lock refused is refused again. Checked here on the lock it is given.
+  const src = Deno.readTextFileSync(new URL("../../supabase/functions/_shared/career_outreach.ts", import.meta.url));
+  assertNode.match(src, /import \{ factLock \} from "\.\/essay_draft\.ts";/);
+  const guards = Deno.readTextFileSync(new URL("../../supabase/functions/_shared/agent/reply_guards.ts", import.meta.url));
+  assertNode.match(guards, /\bfactLock\b[^;]*from "\.\.\/essay_draft\.ts";/);
+  const facts = ["Shipped version 3.4 of the app", "GPA 3.4/4.0", "Data Analyst, Acme Corp, 2019-2022"];
+  const recipient = { name: "Ana Lee", firm: "Beta Inc", title: "Data Lead" } as any;
+  const all = [facts.join(" \n "), [recipient.name, recipient.firm, recipient.title].join(" \n "), "", ""].join(" \n ");
+  const texts = [
+    "Hi Ana, I worked 3.4 years at Acme Corp. Would you have 15 minutes to talk?",
+    "Hi Ana, I graduated with a 3.6 GPA and built dashboards at Acme Corp. Could we talk?",
+    "Hi Ana, as a Senior Data Analyst at Acme Corp I cut costs by 40%. Would you be open to a chat?",
+    "Hi Ana, I led a team of 12 at Acme Corp in 2018. Would you have time this week?",
+  ];
+  for (const text of texts) {
+    const n = factLock(text, [all]), p = prodFactLock(text, [all]);
+    for (const u of p.untraced) assertNode.ok(n.untraced.some((x) => norm(x) === norm(u)), `${JSON.stringify(text)}: lost "${u}"`);
+  }
+  // and the lock still refuses an off-record claim in an outreach email (the honest decimal one passes, as in production:
+  // its own number check reads "3.4" whole, and production's split digits trace to the facts' own digits).
+  for (const text of texts.slice(1)) assertNode.equal(outreachLock(text, { facts, recipient, shared: [] }).pass, false, text);
 });

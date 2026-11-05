@@ -142,7 +142,17 @@ export const SCALE = ["doubled", "tripled", "quadrupled", "halved", "tenfold", "
 const STARTERS = new Set("leading managing owning shipping designing running teaching selling scaling launching across through during outside beyond together ultimately early lately later most much both since before after over three four five".split(" "));
 
 export interface Lock { pass: boolean; untraced: string[] }
+// RELEASE 2 FLOOR (architect, 2026-11-05; D-007; review rv58 of #514): every caller of factLock (judge below, the chat
+// reply guard agent/reply_guards.ts untracedFacts, the outreach fact lock career_outreach.ts) gets the union: an item
+// production's factLock (essay_draft_baseline.ts, 03edad41f) cannot trace is untraced here too, so "You worked 3.4 years"
+// on a record of "version 3.4" and "GPA 3.4/4.0" is flagged as production flags it. Remove only with an architect decision.
 export function factLock(text: string, sources: string[]): Lock {
+  const now = currentFactLock(text, sources), prod = baselineFactLock(text, sources);
+  const untraced = [...now.untraced];
+  for (const u of prod.untraced) if (!untraced.some((x) => norm(x) === norm(u))) untraced.push(u);
+  return { pass: now.pass && prod.pass && untraced.length === 0, untraced };
+}
+function currentFactLock(text: string, sources: string[]): Lock {
   const raw = sources.join(" \n ");
   const corpus = norm(raw);
   const nums = new Set<string>();
@@ -345,13 +355,9 @@ export function targetProblems(text: string, company: string | null, label = "")
 }
 const CLAIM_VOCAB = [...TOOLS, ...TITLES, ...DEGREES, ...SCALE];
 function judge(text: string, cut: boolean, sources: { facts: string[]; posting: string[] }, limit: Limit): Judged {
-  // RELEASE 2 FLOOR (D-007): an item production's factLock (essay_draft_baseline.ts, 03edad41f) cannot trace is untraced
-  // here too, so a draft is shown only if both the current and production's checks pass it (claimProblems is the union).
-  const now = factLock(text, [...sources.facts, ...sources.posting]);
-  const prod = baselineFactLock(text, [...sources.facts, ...sources.posting]);
-  const untracedBoth = [...now.untraced];
-  for (const u of prod.untraced) if (!untracedBoth.some((x) => norm(x) === norm(u))) untracedBoth.push(u);
-  const traced: Lock = { pass: now.pass && prod.pass, untraced: untracedBoth };
+  // RELEASE 2 FLOOR (D-007): factLock is the union of the current and production's (03edad41f) fact locks, and
+  // claimProblems the union of their claim checks, so a draft is shown only if both pass it.
+  const traced = factLock(text, [...sources.facts, ...sources.posting]);
   // The company's own name is never a claim, even when it is also a tool's or a word's ("why Stripe", "why Visa").
   const claims = claimProblems(text, { record: sources.facts, mentionable: sources.posting, vocab: CLAIM_VOCAB, company: sources.posting[0] });
   // A secret in the text is named as one, never quoted: its digits or words are not repeated in the reply the person

@@ -33,7 +33,7 @@ export const SHARED_REPLY_MODULES = [
   "career_materials_guard.ts", "career_mock.ts", "career_mock_prep.ts", "career_reader_model.ts", "career_offer.ts", "career_outreach.ts",
   "career_outreach_gmail.ts", "career_outreach_replies.ts", "career_path.ts", "career_people_gmail.ts",
   "career_people_import.ts", "career_people_page.ts", "career_people_provider.ts", "career_people_sites.ts",
-  "career_referrals.ts", "career_router_evidence.ts", "career_search.ts", "career_send_rail.ts", "career_situation.ts",
+  "career_referrals.ts", "career_router_evidence.ts", "career_search.ts", "career_search_query.ts", "career_send_rail.ts", "career_situation.ts",
   "career_staffing_agencies.ts", "career_tailor.ts", "career_url_shape.js", "career_voice_link.ts", "channel.ts",
   "channel_adapters.ts", "channel_card_tap.ts", "channel_shape.ts", "channel_text.ts", "conversation.ts", "essay_draft.ts",
   "fact_quarantine.ts", "fact_schema.ts", "file_design.ts", "file_kinds.ts", "file_link.ts", "file_page.ts", "file_service.ts",

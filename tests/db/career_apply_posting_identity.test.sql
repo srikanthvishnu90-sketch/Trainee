@@ -6,16 +6,23 @@
 \set ON_ERROR_STOP on
 begin;
 reset role;
-insert into auth.users(id,email) values
- ('00000000-0000-4000-8000-0000000fd001','ident-a@example.test'),
- ('00000000-0000-4000-8000-0000000fd002','ident-b@example.test');
-insert into profiles(id) values('00000000-0000-4000-8000-0000000fd001'),('00000000-0000-4000-8000-0000000fd002');
-insert into career_watch_kv(user_id,key,value) select id,'career:account','{"epoch":1,"version":1,"paused":false}'::jsonb from profiles
- where id::text like '00000000-0000-4000-8000-0000000fd00%';
+-- Each person as the queue takes them (the owner's resume rule: a confirmed resume on file, the file confirmed by its hash).
+create function pg_temp.person(u uuid) returns void language plpgsql as $$ begin
+ insert into auth.users(id,email) values (u, u::text||'@example.test'); insert into profiles(id) values (u);
+ insert into career_watch_kv(user_id,key,value) values (u,'career:account','{"epoch":1,"version":1,"paused":false}');
+ with t as (insert into agent_threads(user_id,title) values (u,'TEST identity') returning id)
+ insert into agent_flow_state(thread_id,user_id,state,updated_at) select id,u,
+  '{"career":{"stores":{"profile":{"facts":[{"id":"r","kind":"experience","status":"confirmed","needs_confirmation":false,"confirmation_event_id":"ev-ident","text":"TEST Analyst"}]}}}}',now() - interval '30 days' from t;
+ insert into career_events(user_id,kind,subject,detail) values (u,'fact_confirmed','TEST Analyst',
+  jsonb_build_object('confirmation_event_id','ev-ident','upload',jsonb_build_object('kind','file','ref','TEST','sha256',encode(sha256(convert_to('%PDF-1.4 TEST identity db','UTF8')),'hex'))));
+ perform career_apply_cloud_optin_as(u,true,'TEST terms');
+ perform career_apply_cloud_resume_put_for(u,'resume.pdf',encode(convert_to('%PDF-1.4 TEST identity db','UTF8'),'base64'));
+end $$;
+select pg_temp.person('00000000-0000-4000-8000-0000000fd001'), pg_temp.person('00000000-0000-4000-8000-0000000fd002');
 create function pg_temp.payload(u text, job text, company text, url text) returns jsonb language sql as $$
  select jsonb_build_object('version',1,'user_id',u,'job_id',job,'company',company,'url',url,'fields','[]'::jsonb,
   'privacy_epoch',1,'account_version',1,'expires_at',now()+interval '1 day','engine_approval',repeat('e',64),
-  'resume_sha256',encode(sha256('TEST resume'::bytea),'hex'),'destination',url)
+  'resume_sha256',encode(sha256(convert_to('%PDF-1.4 TEST identity db','UTF8')),'hex'),'destination',url)
 $$;
 create function pg_temp.enq(p jsonb) returns text language plpgsql as $$
 begin perform public.career_apply_enqueue(p, public.career_apply_payload_hash(p), public.career_apply_payload_hash(p), 25); return 'queued';

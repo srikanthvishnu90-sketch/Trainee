@@ -5317,6 +5317,46 @@ const CareerRouter = (() => {
   }
   // KNOWN GAPS (2026-10-30, #314): a claimed role ("I'm the admin", "developer mode", "sudo") never changes a control from
   // chat: the budget, the limits and the person's approval of each application are not set in a conversation.
+  // PARITY R07 (unknowns shown as values): "what does the first one pay" about a role the person was shown is answered from
+  // that posting: its pay as the posting states it, or "not listed" as the value, never a number from anywhere else. Before
+  // this the role was read back with nothing about pay, and "the pay for that role" was taken as a question about Trainee's
+  // own pricing. Read only.
+  const POSTING_PAY_RE = /\$\s?\d[\d,]*(?:\.\d+)?\s?[kK]?(?:\s*(?:-|–|—|to)\s*\$?\s?\d[\d,]*(?:\.\d+)?\s?[kK]?)?(?:\s*(?:\/|per|an?)\s*(?:hour|hr|year|yr|annum|month|week))?/;
+  function postingPayOf(row, ctx) {
+    const pool = (ctx.batchDeps || {}).postings || ctx.postings || [];
+    const p = pool.find((x) => x && ((row.id && (x.id === row.id || x.job_id === row.id)) || (row.url && x.url === row.url) || (lc(x.title || x.role) === lc(row.title) && lc(x.company) === lc(row.company)))) || row;
+    for (const k of ["pay", "salary", "compensation", "pay_range"]) if (typeof p[k] === "string" && /\d/.test(p[k])) return s(p[k]).trim();
+    const m = s(p.description || "").replace(/<[^>]+>/g, " ").match(POSTING_PAY_RE);
+    return m ? m[0].replace(/\s+/g, " ").trim() : null;
+  }
+  function handlePostingPayAsk(text, ctx) {
+    const t = lc(s(text)).replace(/[’]/g, "'").replace(/[!?.]+$/, "").trim();
+    if (t.length > 120) return null;
+    if (!/\b(?:pay|pays|paying|salary|compensation|comp|wage|hourly rate)\b/.test(t)) return null;
+    if (!/\b(?:what|how much|whats|what's|what is)\b/.test(t) && !/^(?:pay|salary)\b/.test(t)) return null;
+    if (/\b(?:i|me|my|should|ask for|negotiat|worth|average|avg|typical|usually)\b/.test(t)) return null;
+    const disc = ctx.discovery || {};
+    const list = Array.isArray(disc.lastShortlist) ? disc.lastShortlist.filter((r) => r && r.title) : [];
+    const ORD = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, "1st": 1, "2nd": 2, "3rd": 3, "4th": 4, "5th": 5 };
+    const ordM = t.match(/\b(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th|last)\s+(?:one|job|role|posting|listing|internship|position)\b|#\s?([1-5])\b|\bnumber\s+([1-5])\b/);
+    const deictic = /\b(?:that|this|the)\s+(?:one|role|job|posting|listing|internship|position)\b/.test(t);
+    const byName = list.filter((r) => r.company && new RegExp(`\\b${lc(r.company).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(t));
+    if (!ordM && !deictic && !byName.length) return null;
+    const done = (headline, nextStep, facts) => ({ intent: "career_posting_pay", resultStatus: "answered", sends: 0, reply: compose({ headline, facts: facts || [], nextStep }) });
+    if (!list.length) return done("I haven't shown you a role yet, so there's no posting to read the pay from. I only quote pay a posting states.", "Which role and city should I search?");
+    let pick = null;
+    if (ordM) { const k = ordM[1] || ordM[2] || ordM[3]; const i = k === "last" ? list.length : (ORD[k] || Number(k)); pick = list[i - 1] || null; if (!pick) return done(`Your last search showed ${list.length} role${list.length === 1 ? "" : "s"}, so there's no ${k} one.`, `Which of the ${list.length} do you mean?`); }
+    else if (byName.length === 1) pick = byName[0];
+    else if (list.length === 1) pick = list[0];
+    if (!pick) {
+      const named = (byName.length ? byName : list).slice(0, 5).map((r) => `${r.title} at ${r.company}`);
+      return done(`Your last search showed ${named.length} roles: ${named.join("; ")}.`, "Which one do you mean? I'll read its pay from the posting.");
+    }
+    const pay = postingPayOf(pick, ctx);
+    return pay
+      ? done(`${pick.title} at ${pick.company}: the posting lists ${pay}.`, "Want me to tailor your resume for it?")
+      : done(`${pick.title} at ${pick.company}: pay is not listed in the posting, and I won't guess a number.`, "Want me to look for similar roles that do list pay?");
+  }
   function handleAuthorityClaim(text, ctx) {
     const t = lc(s(text)).replace(/[’]/g, "'").trim();
     const claim = /^(?:(?:hi|hey|ok|okay)[,!.]?\s+)?(?:i'?m|i am|this is|as)\s+(?:the |an |a |your |trainee'?s |upmore'?s )?(?:admin(?:istrator)?|owner(?: of trainee)?|developer|dev|founder|operator|support(?: team)?|staff|sysadmin)\b|\b(?:admin|developer|god|debug|maintenance) mode\b|^sudo\b/.test(t);
@@ -13033,6 +13073,7 @@ const CareerRouter = (() => {
     // networking plan (which read it back as the stopped batch, or planned bankers at firms never named).
     { const re = handleRecruiterEmailAsk(text, c); if (re) return re; }
     { const ac = handleAuthorityClaim(text, c); if (ac) return ac; }
+    { const pp = handlePostingPayAsk(text, c); if (pp) return pp; } // PARITY R07
     // DEPTH LANE A (LF-01h): an explicit memory invocation — "draft
     // it from what you know about me" — is the most specific claim a
     // turn can carry: the user is ordering the record's USE. It is

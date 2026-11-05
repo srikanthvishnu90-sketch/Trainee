@@ -148,3 +148,8 @@
 507 66faf5c328b790d7bbc6c3cea70ed6cff5bec97e independent-review-agent-rv58 risk=medium note=tailoring-round-4-identity-screening-false-accepts-and-factLock-decimal-change-floored-by-production-baseline-reviewed-after-merge-2026-11-05-fixed-forward-by-514
 493 ea7989373ad424f1d43100c73231e5e15a1822f1 independent-review-agent-rv53 risk=low note=C01-ledger-finish-restored-env-restored-142-equiv-tested-bundles-faithful-CI-cold-161-172ms
 520 3defbcfb1afd0665b067a57d0cdeec87e268d4a8 independent-review-agent-rv59 risk=medium note=release-tree-identical-to-trunk-3defbcf-S2-pass-9-migrations
+496 e24f20a3376a2a9e1cdd53ca61a7710d9b4a29b6 independent-review-agent-rv56 risk=low note=portal-asks-back-to-governed-flow-ledger-only-answers-the-rest
+519 5d060294ea207d660f1d780eef7593312fd46634 independent-review-agent-rv61 risk=low note=gold-fixed-ratchet-defeat-attempt-caught-judge-preflight-ok
+516 d7ca89ba207e3be163fdb453366ade3eaa91c229 independent-review-agent-rv57 risk=low note=brain-never-delivered-22.1-18.3-reproduced-judge-gated-no-retry
+497 b93c364a4fc2f062487486e4f21acd1cde5dcaf0 independent-review-agent-rv62 risk=low note=md-check-skips-__-only-inside-a-url-token-all-else-still-flagged
+495 43743fde408c1a3ceccc97f8ddbb41eb3fb34bd9 independent-review-agent-rv62 risk=low note=fake-digest-is-non-hex-assertion-unchanged-false-positive-gone

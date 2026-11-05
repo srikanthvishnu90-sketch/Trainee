@@ -39,6 +39,19 @@ export type ConfirmPlan =
 const clip = (s: unknown, n: number) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
 export const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
+// Apply round 4 (2026-11-05): most rejections name their role as "your interest in the Data Analyst role/position", which the
+// mail reader's role reading (career_mail.ts roleOf, frozen by WO-051's readings) does not take. Read here too, for the
+// match only: without it a rejection for one role confirmed the person's application to another role at that employer.
+const INTEREST_ROLE = /\binterest in the ([A-Z0-9][A-Za-z0-9 ,&/()'’.+-]{2,70}?)\s+(?:role|position|program|programme)\b/;
+function roleNamed(m: MailIn, read: string | undefined): string | undefined {
+  if (read) return read;
+  for (const t of [m.snippet, m.subject]) {
+    const r = INTEREST_ROLE.exec(String(t ?? ""))?.[1]?.trim();
+    if (r && !/^(the|a|an|this|your|our|position|role)$/i.test(r)) return r.replace(/\s+/g, " ");
+  }
+  return undefined;
+}
+
 export function planConfirmations(mails: MailIn[], queue: QueueRow[]): ConfirmPlan[] {
   const rows = queue.map((r) => ({ ...r }));
   const out: ConfirmPlan[] = [];
@@ -48,11 +61,12 @@ export function planConfirmations(mails: MailIn[], queue: QueueRow[]): ConfirmPl
     if (rows.some((r) => r.confirmation_hash === m.hash)) continue; // this message confirmed one already
     const at = Date.parse(m.date);
     if (!Number.isFinite(at)) continue;
+    const role = roleNamed(m, c.role);
     const hits = rows.filter((r) => {
       const sent = Date.parse(r.submitted_at);
       return OPEN.has(r.state) && !r.confirmation_hash && fromEmployer(c, { company: r.company, url: r.url ?? undefined }, m.from, m.auth) &&
         Number.isFinite(sent) && sent <= at && at - sent <= CONFIRM_WINDOW_DAYS * DAY &&
-        (!c.role || !r.title || roleOverlap(r.title, c.role) >= 0.5);
+        (!role || !r.title || roleOverlap(r.title, role) >= 0.5);
     });
     const base: Base = { hash: m.hash, company: hits[0]?.company ?? c.company ?? "", mail_kind: c.kind as ConfirmKind, evidence: c.evidence, mail_at: new Date(at).toISOString() };
     if (hits.length === 1) {

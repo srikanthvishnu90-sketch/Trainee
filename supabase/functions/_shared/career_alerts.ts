@@ -38,6 +38,11 @@ export interface PlanUser {
   // PROACTIVE SCENARIOS ROUND 2 (2026-10-30): the jobs (twinKeys) of alerts already queued for the person: the same job
   // seen again on another board is not news.
   alerted_twins?: string[];
+  // PROACTIVE SCENARIOS ROUND 4 (2026-11-05): the jobs the person already applied to (or is applying to) through Trainee
+  // (career_apply_jobs), by job_id, and the names they go by (twinKeys of their postings). Neither the job nor the same job
+  // on another board is news to them, in an alert or in the daily report.
+  applied?: string[];
+  applied_twins?: string[];
 }
 export type Planned =
   | { userId: string; kind: "alert"; key: string; at: number; job_id: string; text: string }
@@ -203,6 +208,14 @@ export function zoneOr(tz: unknown, fallback = DEFAULT_ZONE): string {
   }
   return ok ? tz : fallback;
 }
+// PROACTIVE SCENARIOS ROUND 4 (2026-11-05): the alerts already counted against a local day, read on the day it is now. A
+// person who moves west goes back a date (5 November in Tokyo is still 4 November in Los Angeles): the count kept for the
+// later date still holds until that date has passed on their new clock, so moving never starts a fresh day's allowance on
+// top of the one just used. The same rule as career_alert_enqueue (20261105170000).
+export function dayCount(sentOn: string | null | undefined, count: number, today: string): { count: number; on: string } {
+  const n = Math.max(0, Number(count) | 0);
+  return sentOn && sentOn >= today ? { count: n, on: sentOn } : { count: 0, on: today };
+}
 // The person's local date (YYYY-MM-DD) at an instant, in their zone (zoneOr).
 export const localDay = (at: number, tz: unknown) => local(at, zoneOr(tz)).date;
 // The first instant of the person's local day (on the minute; a day that starts inside a daylight-saving jump starts at
@@ -269,8 +282,14 @@ export function planProactive(o: { users: PlanUser[]; postings: any[]; now: numb
     // Instant alerts: postings first seen at or after the last check, best fit first (then freshest), up to the cap left
     // today. "At or after": a posting first seen at the very instant of a check would otherwise be skipped forever; the
     // outbox's once-per-key rule keeps the rare re-plan from ever sending twice.
+    // PROACTIVE SCENARIOS ROUND 4 (2026-11-05): a job the person already applied to is not news. Real submission is on
+    // (D-041): an application sent this morning, then the same posting held for the report (or its copy on an aggregator an
+    // hour later), came back as "New match" and as a line of the daily report.
+    const applied = new Set(u.applied ?? []), mineApplied = new Map<string, Set<string>>();
+    take(mineApplied, closeTwins(u.applied_twins ?? [], idx));
+    const notApplied = (p: any) => !applied.has(p.job_id) && !twinOf(mineApplied, keysOf(p));
     const fresh = o.postings
-      .filter((p) => ms(p.first_seen_at) >= since && freshWhenSeen(p) && matchPosting(p, prefs) && floorOk(p))
+      .filter((p) => ms(p.first_seen_at) >= since && freshWhenSeen(p) && matchPosting(p, prefs) && floorOk(p) && notApplied(p))
       .sort(byFit(fits));
     const dayRoom = Math.min(MAX_INSTANT_PER_DAY, Math.floor(prefs.max_instant_per_day)) - Math.max(0, u.instant_sent_today | 0);
     let room = Math.max(0, dayRoom);
@@ -293,11 +312,14 @@ export function planProactive(o: { users: PlanUser[]; postings: any[]; now: numb
       out.push({ userId: u.id, kind: "alert", key: `alert:${p.job_id}`, at, job_id: p.job_id, text: alertText(p, o.now) });
     }
     // The daily report: once per local day, at or after the person's hour.
-    if (l.hour >= prefs.report_hour && u.last_report_on !== l.date) {
+    // PROACTIVE SCENARIOS ROUND 4 (2026-11-05): and never for a day earlier than the last one reported. A person who moved
+    // west (Tokyo to Los Angeles) had their Tokyo report for 5 November and then, the same afternoon, a second report for 4
+    // November, the day it still was in Los Angeles: two daily reports hours apart. Dates as YYYY-MM-DD compare as strings.
+    if (l.hour >= prefs.report_hour && !(u.last_report_on && u.last_report_on >= l.date)) {
       const held = new Set(u.held || []);
       const listed = new Map<string, Set<string>>();
       const day = o.postings
-        .filter((p) => matchPosting(p, prefs) && floorOk(p) && ((ms(p.first_seen_at) > o.now - DAY && freshWhenSeen(p)) || held.has(p.job_id)))
+        .filter((p) => matchPosting(p, prefs) && floorOk(p) && notApplied(p) && ((ms(p.first_seen_at) > o.now - DAY && freshWhenSeen(p)) || held.has(p.job_id)))
         .sort(byFit(fits))
         .filter((p) => { if (twinOf(listed, keysOf(p))) return false; take(listed, closeTwins(keysOf(p), idx)); return true; });
       const text = day.length

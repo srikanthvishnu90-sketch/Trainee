@@ -20751,11 +20751,14 @@ const CareerJobs = (() => {
   const US_STATES = [["Alabama", "AL"], ["Alaska", "AK"], ["Arizona", "AZ"], ["Arkansas", "AR"], ["California", "CA"], ["Colorado", "CO"], ["Connecticut", "CT"], ["Delaware", "DE"], ["District of Columbia", "DC"], ["Florida", "FL"], ["Georgia", "GA"], ["Hawaii", "HI"], ["Idaho", "ID"], ["Illinois", "IL"], ["Indiana", "IN"], ["Iowa", "IA"], ["Kansas", "KS"], ["Kentucky", "KY"], ["Louisiana", "LA"], ["Maine", "ME"], ["Maryland", "MD"], ["Massachusetts", "MA"], ["Michigan", "MI"], ["Minnesota", "MN"], ["Mississippi", "MS"], ["Missouri", "MO"], ["Montana", "MT"], ["Nebraska", "NE"], ["Nevada", "NV"], ["New Hampshire", "NH"], ["New Jersey", "NJ"], ["New Mexico", "NM"], ["New York", "NY"], ["North Carolina", "NC"], ["North Dakota", "ND"], ["Ohio", "OH"], ["Oklahoma", "OK"], ["Oregon", "OR"], ["Pennsylvania", "PA"], ["Rhode Island", "RI"], ["South Carolina", "SC"], ["South Dakota", "SD"], ["Tennessee", "TN"], ["Texas", "TX"], ["Utah", "UT"], ["Vermont", "VT"], ["Virginia", "VA"], ["Washington", "WA"], ["West Virginia", "WV"], ["Wisconsin", "WI"], ["Wyoming", "WY"]];
   const _STATE_BY_NAME = new Map(US_STATES.map(([n, a]) => [n.toLowerCase(), { name: n, abbr: a }]));
   const _STATE_BY_ABBR = new Map(US_STATES.map(([n, a]) => [a, { name: n, abbr: a }]));
+  // C01 (beta 2026-11-04): compiled once, not 102 times a call (once per posting per search turn); same patterns, no g flag,
+  // so a .test() keeps no state between calls.
+  const _STATE_RES = US_STATES.map(([name, abbr]) => [name, abbr, new RegExp(`\\b${name}\\b`, "i"), new RegExp(`,\\s*${abbr}\\b`)]);
   function statesInText(text) {
     const found = [], seen = new Set();
     const t = ` ${s(text)} `;
-    for (const [name, abbr] of US_STATES) {
-      if (new RegExp(`\\b${name}\\b`, "i").test(t) || new RegExp(`,\\s*${abbr}\\b`).test(t)) {
+    for (const [name, abbr, byName, byAbbr] of _STATE_RES) {
+      if (byName.test(t) || byAbbr.test(t)) {
         if (!seen.has(abbr)) { seen.add(abbr); found.push({ name, abbr }); }
       }
     }
@@ -22467,15 +22470,38 @@ const CareerTailor = (() => {
     "Argus", "NOI", "DSC", "DSCR", "IRR", "Cap Rate", "Underwriting", "Rent Roll", "CoStar", "Asset Management", "Escrow", "Pro Forma", "Salesforce", "Real Estate License", "Real Estate",
     "User Stories", "Agile", "Jira", "Confluence", "Requirements Analysis", "Stakeholder Management", "Business Analysis", "Consulting", "Change Management", "Project Management"];
   const _lexLower = new Map(SKILL_LEXICON.map((s) => [s.toLowerCase(), s]));
+  // C01 (beta 2026-11-04): the lexicon's needles are made once, and a text's skills are kept by the exact text (bounded): a
+  // posting's parse asks this of every sentence once per candidate skill, and boilerplate sentences repeat across postings.
+  // Each caller gets its own array.
+  const _lexNeedles = SKILL_LEXICON.map((s) => { const l = s.toLowerCase(); return [s, ` ${l} `, ` ${l},`, ` ${l}.`, /^[a-z0-9+#.]+$/.test(l) ? l : null]; });
+  const SKILLS_MEMO_MAX = 5000, SKILLS_MEMO_KEY_MAX = 400; // sentences only: at most ~2 MB held
+  const _skillsMemo = new Map();
   function skillsInText(text) {
-    const t = ` ${String(text || "").toLowerCase().replace(/[^a-z0-9+#. ]/g, " ")} `;
-    const found = [];
-    for (const s of SKILL_LEXICON) {
-      const needle = ` ${s.toLowerCase()} `;
-      // single-letter / dotted skills need token care; substring on padded text is the deterministic rule here.
-      if (t.includes(needle) || t.includes(` ${s.toLowerCase()},`) || t.includes(` ${s.toLowerCase()}.`)) if (!found.includes(s)) found.push(s);
+    const key = String(text || "");
+    const memo = key.length <= SKILLS_MEMO_KEY_MAX;
+    const hit = memo ? _skillsMemo.get(key) : undefined;
+    if (hit) return hit.slice();
+    const t = ` ${key.toLowerCase().replace(/[^a-z0-9+#. ]/g, " ")} `;
+    // The padded text's words (it has no other separator than the space) and each word's part before any of its dots: a
+    // one-word skill's " x " is a word equal to x and its " x." a word that starts "x." (the text holds no commas), so a
+    // lookup answers what the three substring scans of the whole text answered. A skill with a space or another character
+    // keeps the scans.
+    const words = new Set(), dotted = new Set();
+    for (const w of t.split(" ")) {
+      if (!w) continue;
+      words.add(w);
+      for (let i = w.indexOf("."); i > 0; i = w.indexOf(".", i + 1)) dotted.add(w.slice(0, i));
     }
-    return found;
+    const found = [];
+    for (const [s, a, b, c, l] of _lexNeedles) {
+      // single-letter / dotted skills need token care; substring on padded text is the deterministic rule here.
+      const hit = l !== null ? words.has(l) || dotted.has(l) : t.includes(a) || t.includes(b) || t.includes(c);
+      if (hit && !found.includes(s)) found.push(s);
+    }
+    if (!memo) return found;
+    if (_skillsMemo.size >= SKILLS_MEMO_MAX) _skillsMemo.delete(_skillsMemo.keys().next().value);
+    _skillsMemo.set(key, found);
+    return found.slice();
   }
   const numbersIn = (text) => (String(text || "").match(/\d[\d,.]*%?/g) || []).map((x) => x.replace(/,/g, ""));
 
@@ -22560,23 +22586,49 @@ const CareerTailor = (() => {
     const out = [];
     for (const sent of sentencesOf(text)) {
       const sl = sent.toLowerCase();
-      const lic = sl.match(/([a-z][a-z&' -]{0,44}?)\s(licen[cs]e|licensure)\b/);
+      // C01: each pattern runs only on a sentence holding its literal word ("licen", "certific", "year"): the lazy prefix
+      // made these the costliest regexes of a posting's parse, and a sentence without the word can never match them.
+      const lic = sl.includes("licen") ? sl.match(/([a-z][a-z&' -]{0,44}?)\s(licen[cs]e|licensure)\b/) : null;
       if (lic && /(active|unrestricted|current|valid|must|required|hold|maintain|possess|eligib|requirements?\s*:)/.test(sl)) out.push({ type: "license", requirement: `${lic[1].trim().split(/\s+/).slice(-4).join(" ")} license`, evidence: sent.slice(0, 220) });
       // Named certification knockouts (BUG-209): 121's detectKnockouts has
       // always caught this class ("Medical Assistant Certification" under a
       // Requirements heading); 123's extractor missed it, so a certification
       // knockout could be silently dropped by the tailor even though the
       // jobs module would have flagged it. Same pattern family as 121.
-      const cert = sl.match(/([a-z][a-z&' -]{0,44}?)\s(certification|certificate)\b/);
+      const cert = sl.includes("certific") ? sl.match(/([a-z][a-z&' -]{0,44}?)\s(certification|certificate)\b/) : null;
       if (cert && /(requirements?\s*:|required|must (hold|have|possess|maintain|be)|certification\s*$|certification\s+\d)/.test(sl) && !/degree|bachelor|master/.test(sl)) out.push({ type: "certification", requirement: `${cert[1].trim().split(/\s+/).slice(-3).join(" ")} certification`, evidence: sent.slice(0, 220) });
       if (/\bjd\b/.test(sl) && /(law school|juris|from a|degree)/.test(sl)) out.push({ type: "degree", level: "jd", requirement: "JD (Juris Doctor) degree", evidence: sent.slice(0, 220) });
       else if (/\bdegree\b/.test(sl) && /(required|must (hold|have|possess)|is required)/.test(sl) && !/(graduating|pursuing|currently enrolled|rising (senior|junior|sophomore))/.test(sl)) out.push({ type: "degree", level: /master/.test(sl) ? "master" : /associate/.test(sl) ? "associate" : "bachelor", requirement: "conferred degree", evidence: sent.slice(0, 220) });
-      const ym = sl.match(/(?:minimum|min\.?|at least)\s*(?:of\s*)?(\d+)(?:\s*[-–]\s*\d+)?\s*\+?\s*years?\b[^.;]{0,40}?experience/) || sl.match(/(\d+)\s*\+\s*years?\s+of\s+[^.;]{0,90}?experience/) || sl.match(/(\d+)\s*[-–]\s*\d+\s*years?\s+of\s+[^.;]{0,60}?experience/);
+      const ym = sl.includes("year") && (sl.match(/(?:minimum|min\.?|at least)\s*(?:of\s*)?(\d+)(?:\s*[-–]\s*\d+)?\s*\+?\s*years?\b[^.;]{0,40}?experience/) || sl.match(/(\d+)\s*\+\s*years?\s+of\s+[^.;]{0,90}?experience/) || sl.match(/(\d+)\s*[-–]\s*\d+\s*years?\s+of\s+[^.;]{0,60}?experience/));
       if (ym) out.push({ type: "min_experience", min_years: Number(ym[1]), requirement: `at least ${ym[1]} years of experience`, evidence: sent.slice(0, 220) });
     }
     return out;
   }
+  // C01 (beta 2026-11-04, HTTP 546 CPU Time exceeded): the router ranks every posting in the 600-posting pool on every
+  // search turn and parses each one's text here, several times a turn and again on the next turn, for the same text. The
+  // parse is a pure function of the text, so it is kept: a bounded memo by the exact text (oldest dropped past
+  // PARSE_MEMO_MAX), and every caller gets its own copy of the result (fresh arrays and knockout records), so a caller that
+  // edits what it got can never change what the next caller reads.
+  const PARSE_MEMO_MAX = 800; // the 600-posting pool plus headroom; ~a few MB at most
+  const _parseMemo = new Map();
+  const _parseStats = { parsed: 0 };
+  const copyParse = (p) => Object.assign({}, p, { mustHaveSkills: p.mustHaveSkills.slice(), niceToHaveSkills: p.niceToHaveSkills.slice(), keywords: p.keywords.slice(), knockouts: p.knockouts.map((k) => Object.assign({}, k)) });
   function parseJD(text) {
+    const key = String(text || "");
+    let hit = _parseMemo.get(key);
+    if (!hit) {
+      _parseStats.parsed++;
+      hit = parseJDUncached(key);
+      if (_parseMemo.size >= PARSE_MEMO_MAX) _parseMemo.delete(_parseMemo.keys().next().value);
+      _parseMemo.set(key, hit);
+    }
+    return copyParse(hit);
+  }
+  // Empties both memos: what a fresh Edge isolate starts with (the CPU budget test measures that turn).
+  function resetParseMemos() { _parseMemo.clear(); _skillsMemo.clear(); _parseStats.parsed = 0; }
+  // How many posting texts were parsed (memo misses) since the last reset: the CPU budget test's machine-independent bound.
+  function parseMemoStats() { return { parsed: _parseStats.parsed, held: _parseMemo.size }; }
+  function parseJDUncached(text) {
     const raw = String(text || "");
     const low = raw.toLowerCase();
     const niceIdx = low.search(/nice to have|preferred qualifications|bonus points|plus(es)?[:\s]|preferred[:\s]/);
@@ -23593,7 +23645,7 @@ const CareerTailor = (() => {
     return { ok: true, mode: "full", resume: assembled, rendered, coverLetter: cover, audit: auditResult, diff, version, gaps, requiredGaps, preferredGaps, eligibilityVerdict: verdict };
   }
 
-  return { BANNED_PHRASES, bannedPhrasesIn, SKILL_LEXICON, skillsInText, parseJD, detectFamily, FAMILIES, FAMILY_SKILLS, extractKnockouts, jdSegments, scoreFact, selectFacts, provenSkills, derivedSkillNames, skillFactProven, computeGaps, eligibilityVerdictFor, personaLevelOf, auditResume, audit, diffResume, render, generateCoverLetter, coverOutline, buildAnswerBank, tailorResume, wordCount };
+  return { BANNED_PHRASES, bannedPhrasesIn, SKILL_LEXICON, skillsInText, parseJD, resetParseMemos, parseMemoStats, detectFamily, FAMILIES, FAMILY_SKILLS, extractKnockouts, jdSegments, scoreFact, selectFacts, provenSkills, derivedSkillNames, skillFactProven, computeGaps, eligibilityVerdictFor, personaLevelOf, auditResume, audit, diffResume, render, generateCoverLetter, coverOutline, buildAnswerBank, tailorResume, wordCount };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerTailor;
 
@@ -38805,8 +38857,77 @@ const CareerRouter = (() => {
     if (Array.isArray(mir.resumeIngest.entries)) for (const e of mir.resumeIngest.entries) if (e && e.id === f.id) e.sha256 = sha256(s(f.text || ""));
     return { hits, order, fact: f };
   }
+  // ONBOARDING ROUND 4 (2026-11-05, tests/architect/scenarios-onboarding-r4.test.ts; D-007): the person says the resume
+  // they sent is not theirs ("that's not my resume", "oops wrong file", "this is my friend's resume"). Before this, the
+  // reply was "Nothing is confirmed ... if every entry I showed you is right, reply yes", the drafts stayed, and the next
+  // bare "yes" confirmed someone else's jobs and school as the person's own. Now the entries read from it are removed (none
+  // was confirmed), the ask ends, so no later yes confirms them, and the person is told so. Said of a resume already
+  // confirmed, nothing changes by itself: they are told it is on file and how to remove it ("delete my resume").
+  const KIN = "(?:friend|sister|brother|sibling|mom|mum|mother|dad|father|parent|wife|husband|partner|roommate|flatmate|cousin|colleague|co-?worker|boss|son|daughter|girlfriend|boyfriend|classmate|aunt|uncle|niece|nephew|fianc[eé]e?)";
+  const RNOUN = "(?:resume|r[eé]sum[eé]|cv|file|document|doc|pdf|attachment)";
+  const DISOWN = [
+    new RegExp(`\\b(?:that|this|it)(?:'s| is| was|s)? (?:not|n't) (?:my ${RNOUN}|mine)\\b`),
+    new RegExp(`\\b(?:that|this|it) (?:isn't|wasn't|aint|ain't) (?:my ${RNOUN}|mine)\\b`),
+    new RegExp(`^(?:no[,.!]? ?|nope[,.!]? ?|oops[,.!]? ?|sorry[,.!]? ?)*(?:not mine|not my ${RNOUN})\\b`),
+    new RegExp(`\\b(?:that|this|it)(?:'s| is| was|s) (?:my |a |the )?${KIN}'?s(?: ${RNOUN})?(?: not mine)?$`),
+    new RegExp(`\\b(?:that|this|it)(?:'s| is| was|s) (?:my |a |the )?${KIN}'?s ${RNOUN}\\b`),
+    new RegExp(`\\b(?:sent|uploaded|attached|forwarded|pasted|gave you) (?:you )?(?:the |a )?wrong (?:one|${RNOUN})\\b`),
+    new RegExp(`^(?:oops[,.!]? ?|sorry[,.!]? ?|no[,.!]? ?)*(?:that was |that's |it's |that is )?(?:the )?wrong (?:one|${RNOUN})\\b`),
+    new RegExp(`\\b(?:that|this|it)(?:'s| is| was|s) (?:somebody|someone|some1) else'?s\\b`),
+    new RegExp(`\\bsome(?:one|body) else'?s ${RNOUN}\\b`),
+    new RegExp(`\\b(?:that|this|it)(?:'s| is| was|s) (?:not|n't) me\\b`),
+  ];
+  function resumeDisowned(text) {
+    let t = s(text).normalize("NFKC").toLowerCase().replace(/[’‘`]/g, "'").replace(/\s+/g, " ").trim();
+    if (!t || t.length > 140 || /\?/.test(t)) return false;
+    // The words around it ("oops", "ah", "wait", "sorry", "lol", "my bad") say nothing either way.
+    const FILL = "(?:oops|whoops|sorry|wait|ah+|oh+|hmm+|uh+|um+|ugh|no|nope|nah|my bad|lol|haha|sry|soz)";
+    for (let k = 0; k < 4; k++) t = t.replace(new RegExp(`^${FILL}\\b[,.!:;\\s-]*`), "").replace(new RegExp(`[,.!:;\\s-]*\\b${FILL}$`), "").replace(/[.!,;\s]+$/, "").trim();
+    if (!t) return false;
+    // Written without apostrophes, as texts often are.
+    t = t.replace(/\bthats\b/g, "that's").replace(/\bisnt\b/g, "isn't").replace(/\bwasnt\b/g, "wasn't").replace(/\bits (not|my|the|some)\b/g, "it's $1");
+    // "that's my resume, not my friend's" / "it's mine, not my sister's": theirs.
+    if (new RegExp(`\\bnot (?:my |a |the )?${KIN}'?s\\b|\\bnot (?:somebody|someone) else'?s\\b`).test(t)) return false;
+    return DISOWN.some((re) => re.test(t));
+  }
+  function handleResumeDisowned(text, ctx) {
+    if (!resumeDisowned(text)) return null;
+    const profile = ctx.profile && typeof ctx.profile === "object" ? ctx.profile : null;
+    if (!profile) return null;
+    const mir = threadMirrorOf(ctx);
+    const confirmedNow = (profile.facts || []).some((f) => f && f.source === "resume-ingest" && !f.needs_confirmation);
+    if (mir && mir.resumeIngest) {
+      const ids = new Set(Array.isArray(mir.resumeIngest.factIds) ? mir.resumeIngest.factIds : []);
+      const gone = (profile.facts || []).filter((f) => f && f.source === "resume-ingest" && f.needs_confirmation && (!ids.size || ids.has(f.id)));
+      if (gone.length) {
+        const goneIds = new Set(gone.map((f) => f.id));
+        profile.facts = profile.facts.filter((f) => !(f && goneIds.has(f.id)));
+        if (ProfileMod && typeof ProfileMod.refreshSkillFlags === "function") { try { ProfileMod.refreshSkillFlags(profile); } catch { /* flags are derived */ } }
+        profile.profile_ingest_audit = [...(profile.profile_ingest_audit || []), { at: nowOf(ctx) || null, outcome: "disowned_by_person", removed_fact_ids: [...goneIds] }];
+      }
+      const wm = threadMirrorForWrite(ctx);
+      if (wm) delete wm.resumeIngest;
+      const n = gone.length;
+      return { intent: "career_resume_disowned", resultStatus: "completed", sends: 0, resume_ingest: { confirmed: 0, removed: n },
+        reply: compose({ headline: "Understood — that resume is set aside, and nothing from it is on your record.",
+          facts: [`I removed the ${n === 1 ? "entry" : `${n} entries`} I read from it; none was confirmed, and nothing is tailored, put on a form or sent from ${n === 1 ? "it" : "them"}.`,
+            ...(confirmedNow ? ["The resume you confirmed earlier is unchanged and stays the one I use."] : [])],
+          nextStep: "Send your own resume (or the same one again, if I misread it) as a PDF or Word file, or paste it here, and I'll show you every entry for your yes." }) };
+    }
+    // With no resume waiting, only a sentence that names the resume (or whose it is) is about it: a bare "not me" or
+    // "wrong one" answers something else.
+    if (confirmedNow && new RegExp(`${RNOUN}|${KIN}|some(?:one|body) else`).test(s(text).toLowerCase())) {
+      return { intent: "career_resume_disowned", resultStatus: "awaiting_user", sends: 0, resume_ingest: { confirmed: 0, removed: 0 },
+        reply: compose({ headline: "The resume you confirmed is still the one on file — nothing changed.",
+          facts: ["If it isn't yours, tell me to delete my resume and I remove it; no application is prepared or sent until you send your own and confirm it."],
+          nextStep: "Or send your own resume now; once you confirm it, it replaces that one." }) };
+    }
+    return null;
+  }
   function handleResumeIngestConfirm(text, ctx) {
     const mir = threadMirrorOf(ctx);
+    const disowned = handleResumeDisowned(text, ctx);
+    if (disowned) return disowned;
     if (!mir || !mir.resumeIngest) return null;
     const raw = s(text).trim();
     const profile = ctx.profile && typeof ctx.profile === "object" ? ctx.profile : null;
@@ -38906,7 +39027,7 @@ const CareerRouter = (() => {
         return chained;
       }
     }
-    const reply = compose({ headline: "Confirmed — your resume facts are on your record.", facts: [`${confirmed} fact${confirmed === 1 ? "" : "s"} from the resume you pasted are confirmed, in your own words — tailoring, packets, and answers now run on them.`, ...(superseded.length ? ["It replaces your earlier resume: nothing from that one is used any more."] : [])], nextStep: "Name a role (or paste a posting) and the tailoring runs on them." });
+    const reply = compose({ headline: "Confirmed — your resume facts are on your record.", facts: [`${confirmed} fact${confirmed === 1 ? "" : "s"} from the resume you pasted are confirmed, in your own words — tailoring, packets, and answers now run on them.`, ...(superseded.length ? ["It replaces your earlier resume: no application is prepared or sent with that one from now on."] : [])], nextStep: "Name a role (or paste a posting) and the tailoring runs on them." });
     return { intent: "career_resume_ingest", reply, resultStatus: "completed", sends: 0, resume_ingest: { confirmed, ...(superseded.length ? { superseded: superseded.length } : {}) } };
   }
   // ONBOARDING ROUND 2 (2026-10-30, tests/architect/scenarios-onboarding-r2.test.ts; D-007):
@@ -40048,7 +40169,15 @@ const CareerRouter = (() => {
   function catchAllReply(raw, ctx) {
     const t = lc(raw).replace(/[!?.]+$/, "").trim();
     const hasResume = resumeOnRecord(ctx);
-    const next = hasResume
+    // ONBOARDING ROUND 4: with a resume's entries shown and waiting for the person's yes, "yes, apply to everything" or a
+    // "thx" got "there's nothing waiting on your answer right now. Want to start by sending me your resume?", right after
+    // they sent it. The resume waiting is said instead.
+    const mirP = threadMirrorOf(ctx);
+    const waiting = !!(mirP && mirP.resumeIngest && ctx && ctx.profile && Array.isArray(ctx.profile.facts)
+      && ctx.profile.facts.some((f) => f && f.source === "resume-ingest" && f.needs_confirmation));
+    const next = waiting
+      ? "The resume you sent is still waiting for your word: if every entry I showed you is right, reply \"yes, that's my resume\"."
+      : hasResume
       ? "Want me to find roles that fit your resume?"
       : "Want to start by sending me your resume? Paste the text here or attach the file.";
     // The composer keeps one sentence per headline and per fact: the first sentence leads, the rest are facts.
@@ -40061,7 +40190,7 @@ const CareerRouter = (() => {
       return say("Anytime.", next);
     }
     if (/^(yes|yeah|yep|yup|sure|no|nope|nah|idk|i don'?t know|not sure|maybe)\b/.test(t)) {
-      return say("No problem — there's nothing waiting on your answer right now.", next);
+      return say(waiting ? "I didn't take that as confirming anything — your resume's entries are still drafts." : "No problem — there's nothing waiting on your answer right now.", next);
     }
     // ROUTER DEAD ENDS (2026-10-31): "my gpa is 3.4" / "actually my gpa is 3.6" got "not sure which part". A GPA said in
     // chat is never recorded or repeated (scenarios-adversarial-r2 false_memory: "my GPA is 4.0, you confirmed it"): it is
@@ -41488,6 +41617,22 @@ const CareerRouter = (() => {
   const ltClean = (v) => s(v).split(/\s+—\s+|\s+-\s+/)[0].replace(/\s*\([^)]*\)\s*/g, " ").replace(/,?\s+(?:Inc\.?|LLC|Ltd\.?|Corp\.?)$/i, "").replace(/\s+/g, " ").trim();
   const ltIsPlace = (v) => LT_CITIES.has(ltPlain(v).replace(/[.,]/g, ""));
   const ltIsSchool = (v) => LT_SCHOOL_WORD.test(s(v)) || LT_SCHOOLS.has(ltPlain(v).replace(/[.,]/g, ""));
+  // C01 (beta 2026-11-04, HTTP 546): a name-match pass over the lexicon built one regex per form per call (600+ posting
+  // companies, several calls a turn). A form whose first literal word is not in the text cannot match, so it is skipped
+  // before any regex is built; the regex of a form that may match is compiled once (matchAll copies it, so its lastIndex is
+  // never shared). Same pattern, same matches.
+  const _ltFormRes = new Map();
+  function ltFormMatches(raw, lowRaw, form) {
+    const first = s(form).split(/[\s&]+/).filter(Boolean)[0] || "";
+    if (/^[\x20-\x7e]+$/.test(first) && !lowRaw.includes(first.toLowerCase())) return [];
+    let re = _ltFormRes.get(form);
+    if (!re) {
+      re = new RegExp(`(?<![A-Za-z0-9])${ltEsc(form).replace(/&/g, "(?:&|and)")}(?![A-Za-z0-9])`, "gi");
+      if (_ltFormRes.size > 5000) _ltFormRes.clear();
+      _ltFormRes.set(form, re);
+    }
+    return raw.matchAll(re);
+  }
   function ltLexicon(ctx) {
     const out = [];
     let cirs = [];
@@ -41504,9 +41649,12 @@ const CareerRouter = (() => {
       if (words.length > 1 && tok.length >= 4 && firstCount[ltPlain(words[0])] === 1 && !LT_TOKEN_AMBIG.has(tok) && !LT_CITIES.has(tok) && !LT_SCHOOLS.has(tok)) forms.add(words[0]);
       out.push({ name, cir: x, forms: [...forms] });
     }
+    // C01: the names already in, as a set (it was a scan of the whole list per posting: 600 postings, ~180,000 compares).
+    const have = new Set(out.map((e) => ltPlain(e.name)));
     for (const p of postingsFromCtx(ctx || {})) {
       const name = ltClean(s(p.company).replace(/\s*\(fictional\)\s*/gi, " "));
-      if (!name || ltIsPlace(name) || ltIsSchool(name) || out.some((e) => ltPlain(e.name) === ltPlain(name))) continue;
+      if (!name || ltIsPlace(name) || ltIsSchool(name) || have.has(ltPlain(name))) continue;
+      have.add(ltPlain(name));
       out.push({ name, cir: null, forms: [name] });
     }
     return out;
@@ -41586,13 +41734,12 @@ const CareerRouter = (() => {
   // The employer a letter or tailoring ask names, or null. Exported for the scenario battery
   // (tests/architect/scenarios-letter-target.test.ts).
   function letterTargetOf(text, ctx) {
-    const raw = s(text);
+    const raw = s(text), lowRaw = raw.toLowerCase();
     const hits = [];
     for (const e of ltLexicon(ctx || {})) {
       for (const form of e.forms) {
-        const re = new RegExp(`(?<![A-Za-z0-9])${ltEsc(form).replace(/&/g, "(?:&|and)")}(?![A-Za-z0-9])`, "gi");
         const full = ltPlain(form) === ltPlain(e.name) || form.trim().split(/\s+/).length > 1 || /^[A-Z]{2,5}$/.test(form);
-        for (const m of raw.matchAll(re)) {
+        for (const m of ltFormMatches(raw, lowRaw, form)) {
           if (ltOccurrenceOk(raw, m.index, m.index + m[0].length, full)) { hits.push({ name: e.name, cir: e.cir, idx: m.index, typed: m[0] }); break; }
         }
       }
@@ -41661,13 +41808,12 @@ const CareerRouter = (() => {
   }
   // The companies a research ask names, in order: { name, cir, idx, typed }; a company file's name over a posting's.
   function namedCompaniesOf(text, ctx) {
-    const raw = s(text);
+    const raw = s(text), lowRaw = raw.toLowerCase();
     const hits = [];
     for (const e of ltLexicon(ctx || {})) {
       for (const form of e.forms) {
-        const re = new RegExp(`(?<![A-Za-z0-9])${ltEsc(form).replace(/&/g, "(?:&|and)")}(?![A-Za-z0-9])`, "gi");
         let found = false;
-        for (const m of raw.matchAll(re)) {
+        for (const m of ltFormMatches(raw, lowRaw, form)) {
           if (rsOccurrenceOk(raw, m.index, m.index + m[0].length)) { hits.push({ name: e.name, cir: e.cir, idx: m.index, typed: m[0] }); found = true; break; }
         }
         if (found) break;
@@ -51149,7 +51295,10 @@ const CareerRouter = (() => {
     }
     // FIX LANE T3: majors frames record only complete phrases —
     // a fragment span (see _spanIsFragment) records nothing.
-    const pushMajors = (value, clause) => { const v = _cleanFactVal(value); if (v && !_spanIsFragment(v)) push("majors", v, clause); };
+    // ONBOARDING ROUND 4 (2026-11-05): "yes but my major is wrong" recorded the major "wrong" ("On record so far: you study
+    // wrong"), and a reply word ("yes") was recorded as one too. A word that judges the value, or answers a question, is no major.
+    const NOT_A_MAJOR = /^(?:wrong|incorrect|right|correct|off|fine|ok|okay|missing|a typo|typo|mistaken|outdated|old|yes|yeah|yep|no|nope|not\b.*|wrong .*|undecided yet)$/i;
+    const pushMajors = (value, clause) => { const v = _cleanFactVal(value); if (v && !_spanIsFragment(v) && !NOT_A_MAJOR.test(String(v).trim())) push("majors", v, clause); };
     // (0) Explicit corrections REPLACE the fact they correct — the
     // correction clause itself is the assertion ("make it Chicago
     // not New York", "actually Denver, not Boston").
@@ -51547,7 +51696,11 @@ const CareerRouter = (() => {
       // DEPTH LANE A: the inverted statement ("finance and computer
       // science are my majors") names the same fact subject-last.
       else if ((m = cl.match(/^([a-z][a-z &,]{2,40}?)\s+(?:is|are)\s+my\s+majors?\b/i))) pushMajors(m[1], m[0]);
-      else if ((m = cl.match(/\b([a-z][a-z &]{2,30}?)\s+major\b/i)) && !/^(what|which|the|a|my)\b/i.test(m[1].trim())) pushMajors(m[1].replace(/^(a|the|my)\s+/i, ""), m[0]);
+      // ONBOARDING ROUND 4 (2026-11-05): "yes though my major isn't right" (a reply to resume entries shown) recorded the
+      // major "yes" ("On record so far: you study yes"): the frame read every word before "major" as one. The words right
+      // before "major" naming whose it is ("my major", "the major"), or a clause that says it is wrong, state no major.
+      else if ((m = cl.match(/\b([a-z][a-z &]{2,30}?)\s+major\b/i)) && !/^(what|which|the|a|my)\b/i.test(m[1].trim())
+        && !/\b(?:my|your|his|her|their|our|the|a|an|this|that)\s*$/i.test(m[1].trim()) && !/\b(?:not|isn'?t|wasn'?t|aren'?t|wrong|incorrect|never)\b/i.test(cl)) pushMajors(m[1].replace(/^(a|the|my)\s+/i, ""), m[0]);
       // LF-08 (BUG-270 / FR-425): this frame was the one proper-name
       // geography frame with NO city gate — "targeting Meridian
       // Capital" filed a FIRM name as geography (the reply then
@@ -53418,7 +53571,9 @@ const CareerRouter = (() => {
       if (m && m.resumeIngest && typeof m.resumeIngest === "object" && intent !== "career_resume_ingest") m.resumeIngest.stale = true;
     } catch { /* a mark never breaks a turn */ }
   }
-  return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf };
+  return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf,
+    // C01: the name-match internals, for the old-vs-new equivalence test (tests/career-c01-cpu-hot-path.test.cjs) only.
+    _c01NameMatch: { ltLexicon, ltFormMatches, ltEsc, ltPlain, ltClean, ltIsPlace, ltIsSchool, postingsFromCtx } };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerRouter;
 

@@ -156,6 +156,10 @@ export function createRunnerHandler(o: {
     if (m) {
       let body: unknown = null;
       try { body = await req.json(); } catch { return json(400, { error: "invalid request" }); }
+      // Apply round 4 (2026-11-05): CLOUD_RUNNER_ENABLED rolled back while sandboxes are running stops their Submits too. The
+      // authorization is asked before the engine and again right before the one Submit; while sending is off it is refused
+      // (nothing goes to the employer), and every other step still answers so each started application records its outcome.
+      if (m[1] === "authorize" && releaseValue(o.env, "CLOUD_RUNNER_ENABLED") !== "on") return json(409, { error: "cloud sending is off" });
       const readJob = async (id: string) => {
         const r = await f(`${rest}/career_apply_jobs?id=eq.${encodeURIComponent(id)}&select=id,lease_token,user_id,company,url,payload,payload_hash,approval_hash,job_id,state,source`, { headers });
         if (!r.ok) throw Error(`read ${r.status}`);

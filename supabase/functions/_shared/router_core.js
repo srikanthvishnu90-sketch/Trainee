@@ -28403,29 +28403,61 @@ const CareerPrep = (() => {
     "How do you handle several people needing help at the same time?",
   ];
   const andList = (xs) => (xs.length <= 1 ? s(xs[0] || "") : xs.length === 2 ? `${xs[0]} and ${xs[1]}` : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
-  const NUM_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, "forty-five": 45, fortyfive: 45, sixty: 60, ninety: 90 };
-  const numOf = (w) => { const x = lc(w).replace(/\s+/g, "-"); if (/^\d+$/.test(x)) return Number(x); return NUM_WORDS[x] !== undefined ? NUM_WORDS[x] : null; };
-  const NUM = String.raw`(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty[- ]?five|forty|sixty|ninety)`;
-  // A prep File ask: a page/File/one-pager/sheet, an interview, and a making verb (or the noun phrase alone). Questions
-  // ABOUT a prep file ("what goes in a prep file?") and the person's own record ("what's on file") are not asks.
+  // Number words, including compounds ("twenty-five", "forty five"): a count or length is read exactly as the person said it.
+  const UNITS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9 };
+  const TEENS = { ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19 };
+  const TENS = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+  const NUM_WORDS = { ...UNITS, ...TEENS, ...TENS, a: 1, an: 1 };
+  for (const [t, tv] of Object.entries(TENS)) for (const [u, uv] of Object.entries(UNITS)) NUM_WORDS[`${t}-${u}`] = tv + uv;
+  const numOf = (w) => { const x = lc(w).trim().replace(/[\s-]+/g, "-"); if (/^\d+$/.test(x)) return Number(x); return NUM_WORDS[x] !== undefined ? NUM_WORDS[x] : null; };
+  const NUM_WORD_RE = `(?:${Object.keys(TENS).join("|")})(?:[- ](?:${Object.keys(UNITS).join("|")}))?|${Object.keys(TEENS).join("|")}|${Object.keys(UNITS).join("|")}`;
+  const NUM = String.raw`(\d{1,3}|${NUM_WORD_RE})`;
+  // The plan's length, longest phrase first ("an hour and a half" before "an hour"). null = not said.
+  function prepFileMinutes(t) {
+    const H = String.raw`(\d{1,2}|${NUM_WORD_RE}|an?)`;
+    let m;
+    if ((m = t.match(new RegExp(String.raw`\b${H}\s+(?:and\s+a\s+half\s+hours?|hours?\s+and\s+a\s+half)\b`)))) return numOf(m[1]) * 60 + 30;
+    if ((m = t.match(new RegExp(String.raw`\b${H}\s+(?:and\s+a\s+quarter\s+hours?|hours?\s+and\s+a\s+quarter)\b`)))) return numOf(m[1]) * 60 + 15;
+    if ((m = t.match(/\b(\d{1,2})\.5\s*(?:hours?|hrs?)\b/))) return Number(m[1]) * 60 + 30;
+    if (/\bthree[- ]quarters?\s+of\s+an\s+hour\b/.test(t)) return 45;
+    if (/\b(?:a\s+)?quarter(?:[- ]of)?[- ](?:an[- ])?hour\b/.test(t)) return 15;
+    if (/\bhalf[- ](?:an?[- ])?hour\b/.test(t)) return 30;
+    if ((m = t.match(new RegExp(String.raw`\b${NUM}[- ]?(?:minutes?|mins?)\b`)))) return numOf(m[1]);
+    if ((m = t.match(new RegExp(String.raw`\b${H}[- ]?(?:hours?|hrs?)\b`)))) return numOf(m[1]) * 60;
+    return null;
+  }
+  // A prep File ask: the person asks for a page (a prep/interview File, page, sheet or doc, a one-pager or cheat sheet, or a File
+  // as the object of make/create/build/give me/send me) about an interview. Not an ask (BETA C03 review, 2026-11-04):
+  //   - a question ABOUT a prep file ("what goes in a prep file?") or the person's record ("what's on file");
+  //   - "file" as a verb ("I need to file my W-2 before the interview", "file my expenses from the interview trip");
+  //   - a refusal of the File ("don't make a file, just give me five questions", "I don't want a file", "do not create a prep
+  //     file"). That one returns { ok:false, noFile:true, questions? } so the questions asked are answered as text, File-free.
+  const DOC = String.raw`(?:file|page|sheet|doc|document|one[- ]pager|cheat[- ]?sheet|pdf)`;
   function prepFileRequest(text) {
     const raw = s(text).replace(/[’`]/g, "'");
     const t = lc(raw);
     if (!/\binterview/.test(t)) return null;
-    const doc = /\b(?:prep|preparation|interview)[- ](?:file|page|sheet|doc|document|one[- ]pager)\b|\bone[- ]pag(?:e|er)\b[^.?!]{0,60}\b(?:prep|interview)|\b(?:prep|interview)\b[^.?!]{0,40}\bone[- ]pag(?:e|er)\b|\bcheat[- ]?sheet\b|\bfile\b/.test(t)
-      && !/\bon file\b|\bfile (?:a|my|an) (?:complaint|claim|report|taxes)\b/.test(t.replace(/\bprep file\b/g, ""));
-    if (!doc) return null;
-    if (!/\b(?:make|create|build|put together|give|send|draft|write|prepare|generate|get|need|want|turn|do)\b/.test(t) && !/^\s*(?:an?\s+)?one[- ]page\b/.test(t)) return null;
+    // "file" used as a verb is never a File ask.
+    const fileVerb = /\b(?:to|will|must|should|gotta|can|could|i|we|and|then|please|also)\s+(?:re)?file\b(?!\s*(?:with|for)\s+(?:my|the|this)?\s*interview)/.test(t) && !/\b(?:a|an|the|my|this|that|prep|interview|one[- ]page|one)\s+file\b/.test(t);
+    const qualified = new RegExp(String.raw`\b(?:prep|preparation|interview|interview[- ]prep|one[- ]page)[- ]${DOC}\b|\bone[- ]pager\b|\bcheat[- ]?sheet\b`).test(t);
+    const asObject = new RegExp(String.raw`\b(?:make|create|build|generate|draft|write|put together|prepare|give|send|show)\s+(?:me|us)?\s*(?:an?|the|my|one)?\s*(?:[a-z-]+\s+){0,3}?${DOC}\b`).test(t);
+    const onePageAbout = /\bone[- ]pag(?:e|er)\b[^.?!]{0,60}\b(?:prep|interview)|\b(?:prep|interview)\b[^.?!]{0,40}\bone[- ]pag(?:e|er)\b/.test(t);
+    if (fileVerb && !qualified) return null;
+    const qm = t.match(new RegExp(String.raw`\b${NUM}\s+(?:practice\s+|interview\s+|behaviou?ral\s+|mock\s+|likely\s+|common\s+|sample\s+|key\s+|good\s+|real\s+)*questions?\b`)) || t.match(/\b(a dozen|a couple of|a few)\s+(?:\w+\s+)?questions?\b/);
+    const askedQuestions = qm ? (() => { const w = lc(qm[1]); return w === "a dozen" ? 12 : w === "a couple of" ? 2 : w === "a few" ? 3 : numOf(w); })() : null;
+    // A refusal of the File itself: nothing is made. The questions asked, if a count was given, are answered as text.
+    const NEGV = String.raw`(?:don't|dont|do not|never|no need to|stop|please don't|you don't need to)\s+(?:\w+\s+){0,2}?(?:make|create|build|send|give|write|generate|do|put together|prepare|draft|want|need)`;
+    const neg = new RegExp(String.raw`\b${NEGV}\b[^.?!]{0,30}?\b${DOC}\b|\b(?:no|without|skip(?:ping)?|instead of|rather than)\s+(?:a|an|the|any)?\s*(?:[a-z-]+\s+){0,2}?${DOC}\b|\b${DOC}\b[^.?!]{0,15}\b(?:isn't|is not|not) (?:needed|necessary)\b`).test(t);
+    if (neg) return { ok: false, noFile: true, questions: askedQuestions, minutes: null, defaults: [], problem: "no_file" };
+    if (/\bon file\b/.test(t.replace(/\b(?:prep|interview) file\b/g, "")) && !qualified && !asObject) return null;
+    if (!qualified && !asObject && !onePageAbout) return null;
+    if (!/\b(?:make|create|build|put together|give|send|draft|write|prepare|generate|get|need|want|turn|do|show)\b/.test(t) && !/^\s*(?:an?\s+)?one[- ]page\b/.test(t)) return null;
     if (/^\s*(?:what|how|why|which|should|is|are|does|do)\b/.test(t) && !/\b(?:make|create|build|give|send|put together|generate)\s+(?:me|us)\b/.test(t)) return null;
-    const qm = t.match(new RegExp(String.raw`\b${NUM}\s+(?:practice\s+|interview\s+|behaviou?ral\s+|mock\s+|likely\s+|common\s+|sample\s+|key\s+)*questions?\b`)) || t.match(/\b(a dozen|a couple of|a few)\s+(?:\w+\s+)?questions?\b/);
-    const mm = t.match(new RegExp(String.raw`\b${NUM}[- ]?(?:minutes?|mins?)\b`)) || t.match(/\b(half[- ]an?[- ]hour|half[- ]hour|an hour|one hour|1 hour|two hours|2 hours|an hour and a half|1\.5 hours?)\b/);
     let questions = 5, minutes = 30;
     const defaults = [];
-    if (qm) { const w = lc(qm[1]); questions = w === "a dozen" ? 12 : w === "a couple of" ? 2 : w === "a few" ? 3 : numOf(w); } else defaults.push("questions");
-    if (mm) {
-      const w = lc(mm[1]);
-      minutes = /half/.test(w) && /hour/.test(w) && !/and a half/.test(w) ? 30 : /and a half|1\.5/.test(w) ? 90 : /two|^2/.test(w) && /hour/.test(w) ? 120 : /hour/.test(w) ? 60 : numOf(w);
-    } else defaults.push("minutes");
+    if (askedQuestions !== null) questions = askedQuestions; else defaults.push("questions");
+    const said = prepFileMinutes(t);
+    if (said !== null) minutes = said; else defaults.push("minutes");
     if (!Number.isFinite(questions) || questions < 1 || questions > PREP_FILE_MAX_QUESTIONS) return { ok: false, questions, minutes, defaults, problem: "questions" };
     if (!Number.isFinite(minutes) || minutes < PREP_FILE_MIN_MINUTES || minutes > PREP_FILE_MAX_MINUTES) return { ok: false, questions, minutes, defaults, problem: "minutes" };
     if (minutes < questions + 2) return { ok: false, questions, minutes, defaults, problem: "fit" };
@@ -28473,7 +28505,9 @@ const CareerPrep = (() => {
     const role = raw.match(/\b(?:for|as)\s+(?:an?|the|my)\s+([A-Za-z][A-Za-z /&+-]{2,40}?)\s+(?:role|job|position|interview|internship)\b/i) || raw.match(/\b(?:my|an?|the)\s+([A-Za-z][A-Za-z /&+-]{2,40}?)\s+interview\b/i);
     if (role) {
       const r = role[1].trim().replace(/^(?:one[- ]page|first[- ]round|final[- ]round|phone|video|virtual|in[- ]person|onsite|on-site)\s+/i, "");
-      if (r && !/^(?:one[- ]page|first|final|second|third|next|upcoming|big|real|job|prep|practice|mock|the|this|that|phone|video)$/i.test(r) && !/\b(?:prep|file|page|questions?|plan|round|screen)\b/i.test(r)) out.role = r.toLowerCase();
+      // A role is a short noun phrase: never a clause ("expenses from the", "trip to the"), never a pronoun or a preposition.
+      if (r && !/^(?:one[- ]page|first|final|second|third|next|upcoming|big|real|job|prep|practice|mock|the|this|that|phone|video)$/i.test(r) && !/\b(?:prep|file|page|questions?|plan|round|screen)\b/i.test(r)
+        && !/\b(?:from|to|of|for|with|at|in|on|by|about|after|before|the|my|your|his|her|their|our|a|an|this|that|expenses?|trip|receipts?|taxes|w-?2)\b/i.test(r) && r.split(/\s+/).length <= 4) out.role = r.toLowerCase();
     }
     if (named && named.company) out.company = s(named.company);
     return out;
@@ -28540,7 +28574,7 @@ const CareerPrep = (() => {
   }
 
   return { normalizeCir, findCir, cirLibrary, interviewPatterns,jdKeywords, composeBrief, questionBank,
-    prepFileRequest, prepFileData, prepFilePlan, prepFileStated, prepFileAndList: andList, PREP_FILE_MAX_QUESTIONS, PREP_FILE_MIN_MINUTES, PREP_FILE_MAX_MINUTES, PREP_FILE_SOURCE, videoInterviewPractice, takeHomePlan, finalRoundDelta, salaryDeflectionScripts, questionsToAsk, failureStoryFromFacts, structureDrill, dayOfChecklist, debriefRetro, superdayPlan,
+    prepFileRequest, prepFileData, prepFilePlan, prepFileMinutes, prepFileQuestionList: (n, role) => prepFileQuestions(n, { role }).questions, prepFileStated, prepFileAndList: andList, PREP_FILE_MAX_QUESTIONS, PREP_FILE_MIN_MINUTES, PREP_FILE_MAX_MINUTES, PREP_FILE_SOURCE, videoInterviewPractice, takeHomePlan, finalRoundDelta, salaryDeflectionScripts, questionsToAsk, failureStoryFromFacts, structureDrill, dayOfChecklist, debriefRetro, superdayPlan,
     makePrepStore, mineStories, captureStory, findStories, buildStoryBank, storyTags,
     scoreAnswer, startMock, answerMock, answerProbe, mockSummary,
     domainCheck, frameworkCheck, generateVariant, answerVariant, checkAnswerClaims, detectContradiction,
@@ -42404,6 +42438,17 @@ const CareerRouter = (() => {
     if (!Prep || typeof Prep.prepFileRequest !== "function") return null;
     const req = Prep.prepFileRequest(text);
     if (!req) return null;
+    // The person said not to make a File (BETA C03 review): none is made. Questions asked with a count are answered here as
+    // text, the exact number asked; with no count, the ask goes on to the routes that answer it.
+    if (req.noFile) {
+      const n = req.questions;
+      if (!Number.isFinite(n) || n < 1 || n > Prep.PREP_FILE_MAX_QUESTIONS) return null;
+      const st = prepFileStatedOf(text, null);
+      const qs = typeof Prep.prepFileQuestionList === "function" ? Prep.prepFileQuestionList(n, st.role) : [];
+      if (qs.length !== n) return null;
+      const reply = [`Here ${n === 1 ? "is 1 practice question" : `are ${n} practice questions`}, as text. No File was made.`, ...qs.map((q, i) => `${i + 1}. ${q}`), "", "Want to answer question 1 out loud here?"].join("\n");
+      return { intent: "prep_brief", reply, resultStatus: "awaiting_user", sends: 0, payload: { kind: "prep_questions_text", questions: n, no_file: true } };
+    }
     if (!req.ok) {
       const why = req.problem === "questions"
         ? `A one-page File holds 1 to ${Prep.PREP_FILE_MAX_QUESTIONS} questions, and you asked for ${req.questions}, so I didn't make one with fewer than you asked.`

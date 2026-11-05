@@ -760,7 +760,11 @@ later([1], "secretFields: a resume hash or an account id with a long card-like r
 });
 
 later([1], "want: the queue's refusal codes reach the person as words, never as a code (was: 'Not queued: duplicate_job')", async () => {
-  const admin = { rpc: async () => ({ data: { added: [], refused: [{ posting_key: "greenhouse:acme:1", reason: "duplicate_job" }] }, error: null }) };
+  // The person has a confirmed resume and the account is not paused (the tap's own checks before the queue, journeys r2), so the
+  // queue's answer is what reaches them.
+  const kv = { select: () => kv, eq: () => kv, maybeSingle: async () => ({ data: { value: { paused: false } }, error: null }) };
+  const admin = { from: () => kv, rpc: async (name: string) => name === "career_resume_on_file" ? { data: true, error: null }
+    : ({ data: { added: [], refused: [{ posting_key: "greenhouse:acme:1", reason: "duplicate_job" }] }, error: null }) };
   const store = supabaseJobStore(admin);
   const r = await store.want(U, { job_id: "greenhouse:acme:1", url: "https://boards.greenhouse.io/acme/jobs/1", company: "Acme", title: "Analyst" } as JobView, T0);
   eq(r.result, "refused");

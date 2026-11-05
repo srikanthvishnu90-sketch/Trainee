@@ -15,7 +15,13 @@ const THREADS: Record<string, string> = { "tok-t": "7b0f8f8e-6a43-4a49-9d2c-0000
 const CONTACT: Record<string, string> = { "tok-t": "tg:7700", "tok-i": "+15557770003", "tok-h": "wa:15557770004" };
 
 Deno.test({ name: "Task 3 through the real handler: what's connected, ask once, on web and every channel", ignore: !pgBinDir() && !CI, sanitizeOps: false, sanitizeResources: false }, async (t) => {
-  for (const [k, v] of Object.entries({ MICROSOFT_OAUTH_CLIENT_ID: "fake-ms-client-0000", MICROSOFT_OAUTH_CLIENT_SECRET: "fake-ms-secret-0000", OAUTH_STATE_SECRET: "fake-state-secret-0000-xxxxxxxx", OUTLOOK_LINK_BASE: "https://proj.example.test/functions/v1/outlook-oauth" })) Deno.env.set(k, v);
+  // The environment is shared by every later test file in the same `deno test` run (a CI shard): these connector settings are
+  // put back as they were when this test ends. Left behind, they made Outlook look switched on to every later file, and the
+  // status answer in tests/architect/handler-submit-path.test.ts (d2) then carried the connect-email ask (CI, #435 and #503).
+  const ENV = { MICROSOFT_OAUTH_CLIENT_ID: "fake-ms-client-0000", MICROSOFT_OAUTH_CLIENT_SECRET: "fake-ms-secret-0000", OAUTH_STATE_SECRET: "fake-state-secret-0000-xxxxxxxx", OUTLOOK_LINK_BASE: "https://proj.example.test/functions/v1/outlook-oauth" };
+  const savedEnv = Object.fromEntries(Object.keys(ENV).map((k) => [k, Deno.env.get(k)]));
+  const restoreEnv = () => { for (const [k, v] of Object.entries(savedEnv)) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v); };
+  for (const [k, v] of Object.entries(ENV)) Deno.env.set(k, v);
   const pg = await startPg();
   await supabaseParity(pg);
   for (const [tok, u] of Object.entries(PEOPLE)) {
@@ -71,5 +77,5 @@ Deno.test({ name: "Task 3 through the real handler: what's connected, ask once, 
       eq(await pg.sql(`select count(*) from public.user_oauth_connections where user_id = '${PEOPLE["tok-w"]}'`), "0", "the row is gone");
       eq(revoked.length, 1, "revoked at (fake) Google once");
     });
-  } finally { h.restore(); globalThis.fetch = real; await pg.stop(); }
+  } finally { h.restore(); globalThis.fetch = real; restoreEnv(); await pg.stop(); }
 });

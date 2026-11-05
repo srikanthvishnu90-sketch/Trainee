@@ -316,10 +316,12 @@ Deno.test({ name: `erase r2 end to end on Postgres: ${N} people delete their acc
     });
 
     // ---------------------------------------------------------------------------------------------- 2. the asks
-    type Done = { p: Person; result?: any; words?: string; results?: any[]; at: number; fpBefore: Record<string, number>; qBefore: any[]; vaultBefore: string[]; mid?: any };
+    type Done = { p: Person; result?: any; words?: string; results?: any[]; at: number; fpBefore: Record<string, number>; qBefore: any[]; vaultBefore: string[]; loginsBefore: any[]; mid?: any };
     const done = new Map<string, Done>();
+    // The person's file-page pending sign-ins, every column (forget everything may change exactly two of them; see step 3).
+    const fileLogins = async (u: string) => await rows(`select * from public.trainee_file_logins where user_id = ${q(u)} order by jti`);
     const vaultNames = async (u: string) => (await rows(`select name from vault.secrets where name like ${q(`%${u}%`)} order by name`)).map((r) => r.name);
-    const ask = async (p: Person): Promise<Omit<Done, "fpBefore" | "qBefore" | "vaultBefore">> => {
+    const ask = async (p: Person): Promise<Omit<Done, "fpBefore" | "qBefore" | "vaultBefore" | "loginsBefore">> => {
       const u = p.uid;
       if (p.action === "delete_account") {
         const deps = () => restDeps(SUPABASE_URL, SERVICE_KEY, projectFetch, { sleep: async () => {} });
@@ -344,8 +346,8 @@ Deno.test({ name: `erase r2 end to end on Postgres: ${N} people delete their acc
       }
       return { p, at: ++seq };
     };
-    const record = async (p: Person, run: () => Promise<Omit<Done, "fpBefore" | "qBefore" | "vaultBefore">>) => {
-      const before = { fpBefore: await fp(p.uid), qBefore: await queueStates(p.uid), vaultBefore: await vaultNames(p.uid) };
+    const record = async (p: Person, run: () => Promise<Omit<Done, "fpBefore" | "qBefore" | "vaultBefore" | "loginsBefore">>) => {
+      const before = { fpBefore: await fp(p.uid), qBefore: await queueStates(p.uid), vaultBefore: await vaultNames(p.uid), loginsBefore: await fileLogins(p.uid) };
       const d = await run();
       done.set(p.uid, { ...before, ...d });
     };
@@ -444,10 +446,21 @@ Deno.test({ name: `erase r2 end to end on Postgres: ${N} people delete their acc
         if (myRevokes.length && p.action !== "disconnect_gmail") why = "only a deletion or a Gmail disconnect revokes at Google";
         else if (p.action === "forget_everything") {
           const left = Object.keys(after).filter((k) => eraseTables.has(k.split(".")[1]) && k.startsWith("public."));
-          const kept = ["public.user_oauth_connections", "public.agent_threads", "public.trainee_file_sessions", "public.trainee_file_logins", "public.channel_contacts", "vault", "storage"];
+          // Forget everything ends the person's own file-page sign-ins and clears the phone numbers typed on their links (#503,
+          // migration 20261105150000_trainee_file_erase_r4: it erases what the person shared; the account stays and they can
+          // sign in again). So, for this person only: trainee_file_sessions may be emptied, and each trainee_file_logins row
+          // stays (its counts are the text and code-try limits an erase must not reset) with exactly two changes: phone
+          // cleared and the link used up (done_at set, an earlier done_at kept). Nothing else of the account may go.
+          const kept = ["public.user_oauth_connections", "public.agent_threads", "public.trainee_file_logins", "public.channel_contacts", "vault", "storage"];
           const lost = kept.filter((k) => Object.keys(d.fpBefore).some((x) => x === k || x.startsWith(`${k}.`)) && !Object.keys(after).some((x) => x === k || x.startsWith(`${k}.`)));
+          const sessionsLeft = after["public.trainee_file_sessions.user_id"] ?? 0;
+          const loginsAfter = await fileLogins(u);
+          const wantLogins = d.loginsBefore.map((r) => ({ ...r, phone: null, done_at: r.done_at ?? loginsAfter.find((x) => x.jti === r.jti)?.done_at ?? "set" }));
           if (left.length) why = `forget everything left career records: ${left.join(", ")}`;
           else if (lost.length) why = `forget everything is not account deletion: it removed ${lost.join(", ")}`;
+          else if (sessionsLeft) why = `forget everything left ${sessionsLeft} file-page sign-in(s) open`;
+          else if (loginsAfter.some((r) => r.done_at === null)) why = "forget everything left a file-page link that can still sign in";
+          else if (JSON.stringify(loginsAfter) !== JSON.stringify(wantLogins)) why = `forget everything changed the file-page sign-in limits: ${JSON.stringify(d.loginsBefore)} -> ${JSON.stringify(loginsAfter)}`;
           else if (JSON.stringify(vAfter) !== JSON.stringify(d.vaultBefore)) why = "forget everything keeps the connections' tokens";
           else if (!(await one(`select exists (select 1 from auth.users where id = ${q(u)}) as k`)).k) why = "the account stays";
         } else if (p.action === "disconnect_gmail" || p.action === "switch_gmail" || p.action === "disconnect_outlook" || p.action === "switch_outlook") {

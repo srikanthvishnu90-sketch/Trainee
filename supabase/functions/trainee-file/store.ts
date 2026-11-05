@@ -70,6 +70,17 @@ export function supabaseSessionStore(admin: any): SessionStore {
     async setPhone(jti, phone, matched) { must(await admin.from("trainee_file_logins").update({ phone, matched }).eq("jti", jti).is("done_at", null), "record the number"); },
     async countSend(jti, max) { return must(await admin.rpc("trainee_file_login_count", { p_jti: jti, p_what: "send", p_max: max }), "count the text") === true; },
     async countTry(jti, max) { return must(await admin.rpc("trainee_file_login_count", { p_jti: jti, p_what: "try", p_max: max }), "count the try") === true; },
+    // The tries of every sign-in of the account begun within the hour of this one (this one included, whatever number each holds):
+    // the window trainee_file_login_count uses (20261031100000_trainee_file_signin_limits.sql).
+    async accountTries(jti) {
+      const me = must(await admin.from("trainee_file_logins").select("user_id,created_at").eq("jti", jti).maybeSingle(), "read the sign-in");
+      if (!me) return 0;
+      const at = Date.parse(me.created_at);
+      const rows = must(await admin.from("trainee_file_logins").select("tries").eq("user_id", me.user_id)
+        .gt("created_at", iso(at - 3600_000)).lt("created_at", iso(at + 3600_000)), "count the account's tries") ?? [];
+      // deno-lint-ignore no-explicit-any
+      return rows.reduce((a: number, x: any) => a + Number(x.tries ?? 0), 0);
+    },
     async finishLogin(jti, at) { return must(await admin.rpc("trainee_file_login_finish", { p_jti: jti, p_at: iso(at) }), "use the link") === true; },
   };
 }

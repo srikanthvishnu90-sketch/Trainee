@@ -6745,13 +6745,49 @@ const CareerNegotiation = (() => {
     { key: "schedule", label: "the schedule (hours a week, shift times, weekends)", ask: "the schedule (hours a week, shift times and whether weekends are included)" },
     { key: "start_date", label: "the start date", ask: "the start date you have in mind" },
   ];
+  const PAY_UNITS = ["hour", "week", "month", "year"];
+  const UNIT_PHRASE = { hour: "an hour", week: "a week", month: "a month", year: "a year" };
+  const UNIT_NOUN = { hour: "hourly rate", week: "weekly pay", month: "monthly pay", year: "salary" };
+  const UNIT_RATE_WORD = { hour: "rate", week: "weekly pay", month: "monthly pay", year: "base salary" };
+  const rateShort = (n, unit) => {
+    const v = Number(n);
+    if (unit === "hour") return `$${Number.isInteger(v) ? v : v.toFixed(2)}`;
+    return `$${(Number.isInteger(v) ? v : Math.round(v * 100) / 100).toLocaleString("en-US")}`;
+  };
   const rateText = (n, unit) => {
     if (n == null || !Number.isFinite(Number(n))) return null;
-    const v = Number(n);
-    if (unit === "hour") return `$${Number.isInteger(v) ? v : v.toFixed(2)} an hour`;
-    return `$${Math.round(v).toLocaleString("en-US")} a year`;
+    return `${rateShort(n, unit)} ${UNIT_PHRASE[unit] || UNIT_PHRASE.year}`;
   };
-  const rateShort = (n, unit) => (unit === "hour" ? `$${Number.isInteger(Number(n)) ? Number(n) : Number(n).toFixed(2)}` : `$${Math.round(Number(n)).toLocaleString("en-US")}`);
+  function statedPayOf(text) {
+    const raw = s(text).replace(/[’]/g, "'").replace(/[‐-―]/g, "-");
+    const num = (v, k) => { const n = Number(String(v).replace(/,/g, "")); return k ? n * 1000 : n; };
+    const PERIOD = "(hours?|hrs?|hourly|h|weeks?|wks?|weekly|months?|mos?|monthly|years?|yrs?|yearly|annual(?:ly)?|annum)";
+    const re = new RegExp(`\\$\\s?(\\d[\\d,]*(?:\\.\\d+)?)\\s?(k)?(?:\\s*(?:-|to)\\s*\\$?\\s?(\\d[\\d,]*(?:\\.\\d+)?)\\s?(k)?)?(?:\\s*(?:\\/\\s*|an?\\s+|per\\s+|each\\s+)?${PERIOD}\\b)?`, "gi");
+    const toUnit = (p) => {
+      if (!p) return null;
+      const w = p.toLowerCase();
+      if (/^(h|hrs?|hours?|hourly)$/.test(w)) return "hour";
+      if (/^(wks?|weeks?|weekly)$/.test(w)) return "week";
+      if (/^(mos?|months?|monthly)$/.test(w)) return "month";
+      return "year";
+    };
+    let m;
+    while ((m = re.exec(raw))) {
+      const before = raw.slice(Math.max(0, m.index - 30), m.index).toLowerCase();
+      const after = raw.slice(m.index + m[0].length, m.index + m[0].length + 25).toLowerCase();
+      if (/\b(signing|sign-on|sign on|relocation|bonus|stipend)\b[^$]*$/.test(before) || /^\s*(signing|sign-on|sign on|relocation|bonus|stipend)\b/.test(after)) continue;
+      if (/\b(counter(?:\s?offer)?\s+(?:at|with|of|to|for)|ask(?:ing)?\s+(?:them\s+)?(?:for|at|to)|target|goal|i\s+(?:want|need|would like|'d like)(?:\s+to\s+(?:get|ask for|make))?|bring\s+(?:it|the \w+)\s+(?:up\s+)?to)\s*$/.test(before)) continue;
+      const a = num(m[1], m[2] || (m[4] && Number(String(m[1]).replace(/,/g, "")) < 1000 ? "k" : null));
+      const b = m[3] != null ? num(m[3], m[4] || (m[2] && !m[4] && num(m[3]) < 1000 ? "k" : null)) : null;
+      if (!Number.isFinite(a) || a <= 0) continue;
+      const hi = b != null && Number.isFinite(b) && b > a ? b : a;
+      const lo = b != null && Number.isFinite(b) && b > a ? a : null;
+      let unit = toUnit(m[5]);
+      if (!unit && hi >= 20000) unit = "year";
+      return { rate: hi, low: lo, unit, text: m[0].trim() };
+    }
+    return null;
+  }
   function counterTargetOf(text, unit) {
     const t = s(text).replace(/[’]/g, "'").replace(/,(?=\d{3}\b)/g, "");
     const fig = "\\$\\s?(\\d+(?:\\.\\d{1,2})?)\\s?(k)?";
@@ -6770,6 +6806,7 @@ const CareerNegotiation = (() => {
       if (!Number.isFinite(v) || v <= 0) continue;
       if (unit === "year" && v < 1000) continue;
       if (unit === "hour" && v >= 1000) continue;
+      if ((unit === "week" || unit === "month") && v < 50) continue;
       return v;
     }
     return null;
@@ -6782,10 +6819,14 @@ const CareerNegotiation = (() => {
       schedule: !!o.schedule,
       start_date: !!o.start_date,
     };
-    const deniedTerm = (re) => re.test(t) && /\b(no|not|don'?t|do not|haven'?t|have not|without|yet|unknown|missing)\b/.test(t);
-    if (deniedTerm(/\bbenefits?\b/)) has.benefits = false;
-    if (deniedTerm(/\bschedule|hours\b|shifts?\b/)) has.schedule = false;
-    if (deniedTerm(/\bstart(ing)? date\b/)) has.start_date = false;
+    const TERM_RE = { benefits: "benefits?|health (?:insurance|coverage)|pto|paid time off|401\\(?k\\)?", schedule: "schedule|shifts?|hours a week|full[- ]time|part[- ]time|mon(?:day)?\\s*(?:-|to|through)\\s*fri(?:day)?", start_date: "start(?:ing)? date|start(?:s|ing)? (?:on|in)\\b" };
+    const NEG = "(?:no|not|don'?t|do not|haven'?t|have not|without|any|none)";
+    for (const key of Object.keys(TERM_RE)) {
+      const term = new RegExp(`\\b(?:${TERM_RE[key]})`);
+      if (!term.test(t)) continue;
+      const denied = new RegExp(`\\b${NEG}\\b(?:[ \\t/-]+[\\w'-]+){0,4}?[ \\t/-]+(?:${TERM_RE[key]})|(?:${TERM_RE[key]})(?:[ \\t]+[\\w'-]+){0,3}?[ \\t]+(?:yet|unknown|missing|tbd|unclear)\\b`).test(t);
+      has[key] = !denied;
+    }
     return COUNTER_TERMS.filter((x) => !has[x.key]);
   }
   function usableBenchmark(b, unit) {
@@ -6820,20 +6861,20 @@ const CareerNegotiation = (() => {
       [`Thank you for the offer of ${i.offerText}.`, 14],
       ["Thank you for the offer.", 12],
     ]));
-    const rateWord = i.unit === "hour" ? "rate" : "base salary";
+    const rateWord = UNIT_RATE_WORD[i.unit] || UNIT_RATE_WORD.year;
     if (i.counter) {
       const fig = rateText(i.counter.value, i.unit);
       const why = i.counter.basis === "sourced_range" && i.range ? ` Public pay data for this role (${i.range.cite}, as of ${i.range.as_of}) runs up to ${rateShort(i.range.high, i.unit)}.` : "";
       const keep = i.keepSigning && signingTxt ? " The signing bonus as offered works for me." : "";
       units.push(mk("ask", [[`Could you bring the ${rateWord} to ${fig}?${why}${keep}`, 60], [`Could you bring the ${rateWord} to ${fig}?${keep}`, 55], [`Could you bring the ${rateWord} to ${fig}?`, 50], [`Could you do ${fig}?`, 30]]));
     } else {
-      units.push(mk("ask", [[`Is there room to move the ${i.unit === "hour" ? "hourly rate" : "base salary"} above ${i.offerText}?`, 60], [`Can the ${rateWord} go above ${i.offerText}?`, 30]]));
+      units.push(mk("ask", [[`Is there room to move the ${i.unit === "year" ? "base salary" : UNIT_NOUN[i.unit] || "pay"} above ${i.offerText}?`, 60], [`Can the ${rateWord} go above ${i.offerText}?`, 30]]));
     }
     if (missing.length) {
       const short = listJoin(missing.map((m) => TERM_SHORT[m.key] || m.key));
       units.push(mk("terms", [[`Could you also send me ${listJoin(missing.map((m) => m.ask))}?`, 24], [`Could you also send me the ${short} details?`, 20], [`What are the ${short}?`, 18], ["", 0]]));
     }
-    if (i.deadline) units.push(mk("deadline", [[`I'll get back to you by ${i.deadline}.`, 10], ["", 0]]));
+    if (i.deadline) units.push(mk("deadline", [[`I'll get back to you by ${String(i.deadline).replace(/^(mon|tues|wednes|thurs|fri|satur|sun)day\b/i, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())}.`, 10], ["", 0]]));
     units.push({ id: "sign", variants: [i.senderName ? `Thank you,\n${s(i.senderName)}` : "Thank you,"] });
     return units;
   }
@@ -6844,13 +6885,14 @@ const CareerNegotiation = (() => {
   function counterPlan(offer, opts) {
     opts = opts || {};
     const o = offer || {};
-    const unit = o.unit === "hour" ? "hour" : "year";
+    const unit = PAY_UNITS.includes(o.unit) ? o.unit : "year";
+    const rateLow = Number.isFinite(Number(o.rate_low)) && Number(o.rate_low) > 0 ? Number(o.rate_low) : null;
     const rate = Number.isFinite(Number(o.rate)) && Number(o.rate) > 0 ? Number(o.rate) : null;
     const clean = (v) => s(v).trim().replace(/[\s.,;:!?]+$/, "");
     const company = o.company && clean(o.company) && !/^(the )?(firm|company|employer|team|recruiter)$/i.test(clean(o.company)) ? clean(o.company) : null;
     const role = o.role && clean(o.role) ? clean(o.role).replace(/\s+(job|role|position|offer)$/i, "").trim() || null : null;
     const roleRef = role ? `${/^[aeiou]/i.test(role) ? "an" : "a"} ${role} role` : "this role";
-    const offerText = rateText(rate, unit);
+    const offerText = rate != null && rateLow != null && rateLow < rate ? `${rateShort(rateLow, unit)} to ${rateText(rate, unit)}` : rateText(rate, unit);
     const stated = counterTargetOf(opts.text, unit);
     const recorded = Number.isFinite(Number(opts.target)) && Number(opts.target) > 0 ? Number(opts.target) : null;
     let target = null, rejected = null;
@@ -6865,7 +6907,7 @@ const CareerNegotiation = (() => {
     const benchBelow = !!(bench && rate != null && bench.high <= rate);
     let judgment = null;
     if (target == null && !range && rate != null && rejected == null && !benchBelow) {
-      const v = unit === "hour" ? Math.ceil(rate * 1.08) : Math.ceil((rate * 1.07) / 1000) * 1000;
+      const v = unit === "hour" ? Math.ceil(rate * 1.08) : unit === "week" ? Math.ceil((rate * 1.07) / 10) * 10 : unit === "month" ? Math.ceil((rate * 1.07) / 50) * 50 : Math.ceil((rate * 1.07) / 1000) * 1000;
       judgment = v > rate ? v : null;
     }
     const counter = target != null ? { value: target, basis: "person_target" } : range ? { value: range.high, basis: "sourced_range" } : judgment != null ? { value: judgment, basis: "judgment" } : null;
@@ -6882,7 +6924,7 @@ const CareerNegotiation = (() => {
       verdict = "I can answer that once I know the figure they offered.";
     } else if (rejected != null) {
       verdict = `Not at ${rateShort(rejected, unit)}: that is at or below the ${offerText} they already offered, so it asks for nothing.`;
-      reasons.push(`A counter has to be above ${offerText}. Tell me the ${unit === "hour" ? "hourly rate" : "salary"} you'd actually want, or accept the offer as it stands.`);
+      reasons.push(`A counter has to be above ${offerText}. Tell me the ${UNIT_NOUN[unit]} you'd actually want, or accept the offer as it stands.`);
     } else if (counter && counter.basis === "judgment") {
       const pct = Math.round(((counter.value - rate) / rate) * 100);
       verdict = `Yes, counter once, in writing, at ${rateText(counter.value, unit)}, a figure that is my judgment, not market data.`;
@@ -6891,7 +6933,7 @@ const CareerNegotiation = (() => {
     } else if (counter) {
       verdict = `Yes, counter once, in writing, at ${rateText(counter.value, unit)}.`;
       if (counter.basis === "person_target") reasons.push(`${rateText(counter.value, unit)} is the figure you named, and it is above the ${offerText} on the table.`);
-      else reasons.push(`It is the top of a range derived from ${range.cite}${range.reported ? " (a reported figure, not a measured one)" : ""}, as of ${range.as_of}: ${range.low != null ? `${rateShort(range.low, unit)} to ${rateShort(range.high, unit)}` : `above ${rateShort(rate, unit)}, up to ${rateShort(range.high, unit)}`}${unit === "hour" ? " an hour" : " a year"}.`);
+      else reasons.push(`It is the top of a range derived from ${range.cite}${range.reported ? " (a reported figure, not a measured one)" : ""}, as of ${range.as_of}: ${range.low != null ? `${rateShort(range.low, unit)} to ${rateShort(range.high, unit)}` : `above ${rateShort(rate, unit)}, up to ${rateShort(range.high, unit)}`} ${UNIT_PHRASE[unit]}.`);
       reasons.push(risk);
     } else if (benchBelow) {
       verdict = `On pay alone, probably not: the sourced figures (${bench.cite}, as of ${bench.as_of}) top out at ${rateShort(bench.high, unit)}, at or below ${offerText}.`;
@@ -6903,7 +6945,7 @@ const CareerNegotiation = (() => {
     const termsLine = missing.length ? `Before you decide, get the rest of the package: ${listJoin(missing.map((m) => m.label))} ${missing.length === 1 ? "is" : "are"} not on your record yet, and ${offerText || "the pay"} alone can't tell you whether the offer is a good one.` : null;
     if (termsLine) reasons.push(termsLine);
     const targetQuestion = rate != null && !counter
-      ? `To name a figure in the draft, it has to be yours and above ${offerText}: what ${unit === "hour" ? "hourly rate" : "salary"} would make this an easy yes for you?`
+      ? `To name a figure in the draft, it has to be yours and above ${offerText}: what ${UNIT_NOUN[unit]} would make this an easy yes for you?`
       : counter && counter.basis === "judgment"
         ? `Keep ${rateText(counter.value, unit)} in the draft, or tell me your own figure (it has to be above ${offerText}).`
         : null;
@@ -6920,10 +6962,10 @@ const CareerNegotiation = (() => {
     const terms = missing.length
       ? { headline: `Then get ${listJoin(missing.map((m) => m.key === "start_date" ? "the start date" : m.key))} in writing before you decide — they are part of what ${offerText || "the offer"} is worth.`, line: termsLine }
       : { headline: "Benefits, schedule and start date are all on your record, so the offer can be judged as a whole.", line: null };
-    return { sends: false, unit, rate, offerText, company, role, target, rejected, range, counter, missing: missing.map((m) => ({ key: m.key, label: m.label })), needs, answer: { verdict, reasons }, terms, targetQuestion, companyQuestion, draft };
+    return { sends: false, unit, rate, rateLow, offerText, counterText: counter ? rateText(counter.value, unit) : null, company, role, target, rejected, range, counter, missing: missing.map((m) => ({ key: m.key, label: m.label })), needs, answer: { verdict, reasons }, terms, targetQuestion, companyQuestion, draft };
   }
 
-  return { DISCLAIMER, payData, factScript, createStore, counterPlan, counterTargetOf, missingTermsOf, counterDraftUnits, renderCounterUnits, COUNTER_TERMS, parseOffer, parseDate, parseMoney, storeOffer, extractFigures, benchmark, totalComp, compareOffers, bonusAmount, approvalCard, counterStrategy, roleplayTurn, extensionDraft, trackExtension, declineDraft, deadlinePlan };
+  return { DISCLAIMER, payData, factScript, createStore, counterPlan, counterTargetOf, statedPayOf, missingTermsOf, counterDraftUnits, renderCounterUnits, COUNTER_TERMS, parseOffer, parseDate, parseMoney, storeOffer, extractFigures, benchmark, totalComp, compareOffers, bonusAmount, approvalCard, counterStrategy, roleplayTurn, extensionDraft, trackExtension, declineDraft, deadlinePlan };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerNegotiation;
 
@@ -12464,14 +12506,20 @@ Read it aloud in your head. If it sounds like a press release, a template, or a 
     const fixed = countWords(head || "") + countWords(tail || "");
     const keep = sents.map(() => true);
     const total = () => fixed + sents.reduce((n, s0, k) => n + (keep[k] ? countWords(s0.x) : 0), 0);
-    for (let k = sents.length - 2; k >= 1 && total() > tgt.words; k--) keep[k] = false;
+    const isQ = (x) => /\?\s*$/.test(x);
+    let askIdx = sents.findIndex((s0) => isQ(s0.x) && /\$\s?\d/.test(s0.x));
+    if (askIdx < 0) askIdx = sents.findIndex((s0) => isQ(s0.x));
+    const fixedIdx = (k) => k === 0 || k === sents.length - 1 || k === askIdx;
+    for (let k = sents.length - 2; k >= 1 && total() > tgt.words; k--) if (!fixedIdx(k)) keep[k] = false;
     for (let k = 1; k < sents.length && total() < tgt.words; k++) { if (!keep[k]) { keep[k] = true; if (total() > tgt.words) keep[k] = false; } }
+    const floor = total() > tgt.words;
+    const askKept = askIdx < 0 ? null : keep[askIdx];
     const byPara = new Map();
     sents.forEach((s0, k) => { if (keep[k]) byPara.set(s0.pi, (byPara.get(s0.pi) || []).concat(s0.x)); });
     const body = [...byPara.keys()].sort((a, b) => a - b).map((pi) => byPara.get(pi).join(" "));
     const text = [subject, subject ? "" : null, head, head ? "" : null, body.join("\n\n"), tail ? "" : null, tail].filter((x) => x !== null).join("\n");
     const words = draftWordCount(text);
-    return { kind: d.kind || "draft", text, words, target: tgt, exact: words === tgt.words, method: "sentences" };
+    return { kind: d.kind || "draft", text, words, target: tgt, exact: words === tgt.words, method: "sentences", floor, askKept, ask: askIdx < 0 ? null : sents[askIdx].x };
   }
 
   return {
@@ -19057,13 +19105,15 @@ const CareerRouter = (() => {
   function counterOfferOf(text, ctx) {
     const th = negotiationThreadOf(ctx);
     const off = (ctx.offer && typeof ctx.offer === "object") ? ctx.offer : {};
-    const figs = parseOfferFigures(text);
     const offerCue = /\boffer(ed|s)?\b|\bpays?\b|\bpaying\b|\bthey'?re giving\b/i.test(s(text));
-    let unit = null, rate = null;
-    const textUnit = figs.hourly ? "hour" : figs.annual ? "year" : null;
-    const textRate = figs.hourly || figs.annual || null;
-    const textTarget = textUnit && Negotiation && Negotiation.counterTargetOf ? Negotiation.counterTargetOf(text, textUnit) : null;
-    if (textRate && offerCue && textTarget !== textRate) { unit = textUnit; rate = textRate; }
+    let unit = null, rate = null, rateLow = null, unclear = null;
+    const sp = Negotiation && Negotiation.statedPayOf ? Negotiation.statedPayOf(text) : null;
+    const pay = th.pay && typeof th.pay === "object" && Number(th.pay.rate) > 0 ? th.pay : null;
+    const payStands = pay && (pay.unit === "hour" ? !th.hourly || Number(th.hourly) === Number(pay.rate) : pay.unit === "year" ? !th.amount || Number(th.amount) === Number(pay.rate) : !th.hourly && !th.amount);
+    let fromText = false;
+    if (sp && offerCue) {
+      if (sp.unit) { unit = sp.unit; rate = sp.rate; rateLow = sp.low; fromText = true; } else unclear = sp;
+    } else if (payStands) { unit = pay.unit; rate = Number(pay.rate); rateLow = pay.low != null ? Number(pay.low) : null; }
     else if (th.hourly || off.hourly_rate) { unit = "hour"; rate = Number(th.hourly || off.hourly_rate); }
     else if (th.amount || off.base_salary) { unit = "year"; rate = Number(th.amount || off.base_salary); }
     let role = th.role || off.role || null;
@@ -19074,8 +19124,9 @@ const CareerRouter = (() => {
     }
     const rec = th.counter && typeof th.counter === "object" ? th.counter : {};
     return {
-      offer: { company: th.firm || off.company || null, role, rate, unit: unit || "year", signing: th.signing || off.signing_bonus || null, benefits: off.benefits || null, schedule: th.schedule || off.schedule || null, start_date: off.start_date || null, deadline: th.deadline || null },
-      recordedTarget: unit === "hour" ? (rec.hourly || null) : (rec.amount || null),
+      unclear, fromText,
+      offer: { company: th.firm || off.company || null, role, rate, rate_low: rateLow, unit: unit || "year", signing: th.signing || off.signing_bonus || null, benefits: off.benefits || null, schedule: th.schedule || off.schedule || null, start_date: off.start_date || null, deadline: th.deadline || null },
+      recordedTarget: unit === "hour" ? (rec.hourly || null) : unit === "year" ? (rec.amount || null) : null,
     };
   }
   function counterBenchmarkOf(text, ctx, unit) {
@@ -19094,10 +19145,18 @@ const CareerRouter = (() => {
     if (!ask) return null;
     const pg = inheritedOfferGate(text, ctx);
     if (pg) return pg;
-    const { offer, recordedTarget } = counterOfferOf(text, ctx);
+    const { offer, recordedTarget, unclear, fromText } = counterOfferOf(text, ctx);
     const th = negotiationThreadOf(ctx);
     const onRecord = !!(th.firm || th.amount || th.hourly || th.deadline || (ctx.offer && typeof ctx.offer === "object" && (ctx.offer.company || ctx.offer.base_salary || ctx.offer.hourly_rate)));
     if (!ask.question && !ask.draft && !onRecord) return null;
+    if (unclear) {
+      const reply = compose({
+        headline: `Is ${unclear.text} an hourly, weekly, monthly or yearly figure?`,
+        facts: ["A counter has to be stated in the same unit as the offer, and I won't guess which one they meant."],
+        nextStep: `Tell me the period (for example "${unclear.text} a month") and I'll answer whether to counter and draft it.`,
+      });
+      return { intent: "negotiation_advice", reply, resultStatus: "needs_context", sends: 0, payload: { kind: "counter_needs_unit" } };
+    }
     if (offer.rate == null && onRecord) return null;
     if (offer.rate == null) {
       const reply = compose({
@@ -19107,13 +19166,14 @@ const CareerRouter = (() => {
       });
       return { intent: "negotiation_advice", reply, resultStatus: "needs_context", sends: 0, payload: { kind: "counter_needs_offer" } };
     }
+    if (fromText) { try { const thw = negotiationThreadForWrite(ctx); thw.pay = { rate: offer.rate, low: offer.rate_low != null ? offer.rate_low : null, unit: offer.unit }; } catch {   } }
     const keepSigning = /\bkeep\b[^.]*\bsigning\b|\bsigning bonus as is\b/i.test(s(text));
     const facts0 = statedFactsOf(ctx);
     const senderName = (ctx.profile && ctx.profile.basics && ctx.profile.basics.name) || ((facts0.find((f) => f.kind === "name") || {}).value) || null;
     const plan = Negotiation.counterPlan(offer, { text, target: recordedTarget, benchmark: counterBenchmarkOf(text, ctx, offer.unit), keepSigning, senderName });
     const stated = Negotiation.counterTargetOf(text, offer.unit);
     if (stated != null && plan.target === stated) {
-      try { const thw = negotiationThreadForWrite(ctx); const pc = (thw.counter && typeof thw.counter === "object") ? thw.counter : {}; thw.counter = Object.assign({}, pc, offer.unit === "hour" ? { hourly: stated } : { amount: stated }); thw.topic = "counter"; } catch {   }
+      try { const thw = negotiationThreadForWrite(ctx); const pc = (thw.counter && typeof thw.counter === "object") ? thw.counter : {}; if (offer.unit === "hour" || offer.unit === "year") { thw.counter = Object.assign({}, pc, offer.unit === "hour" ? { hourly: stated } : { amount: stated }); thw.topic = "counter"; } } catch {   }
     }
     const wantsDraft = ask.draft || ask.terms;
     const draft = wantsDraft ? plan.draft : null;
@@ -19123,8 +19183,7 @@ const CareerRouter = (() => {
     if (termsOnly) { headline = plan.terms.headline; if (plan.terms.line) facts.push(plan.terms.line); }
     else if (ask.question || !draft) { headline = plan.answer.verdict; facts.push(...plan.answer.reasons); }
     if (draft) {
-      const cv = plan.counter ? Number(plan.counter.value) : null;
-      const fig = cv == null ? null : plan.unit === "hour" ? `$${Number.isInteger(cv) ? cv : cv.toFixed(2)} an hour` : `$${Math.round(cv).toLocaleString("en-US")} a year`;
+      const fig = plan.counterText || null;
       const what = termsOnly ? `An email that asks for them${fig ? ` (and for ${fig})` : " (and whether the pay can move)"}`
         : plan.counter ? `The counter email, asking for ${draft.counter_basis === "sourced_range" ? `the top of the sourced range (${fig})` : draft.counter_basis === "judgment" ? `${fig}, my suggested figure` : `your figure (${fig})`}` : "A counter email that asks whether the pay can move, without naming a number";
       if (!headline) headline = `${what} — held for your review, nothing sent.`;
@@ -19185,7 +19244,9 @@ const CareerRouter = (() => {
     if (!d.target) return `${d.words} words.`;
     if (d.exact) return `Exactly ${d.target.mode === "max" ? d.words : d.target.words} words, counted on the text below${/^Subject:/.test(s(d.text)) ? " (the subject line is not counted)" : ""}.`;
     if (d.already) return `It is already ${d.words} words, within ${d.target.stated || d.target.words}, so nothing was cut.`;
-    if (d.floor) return `${d.words} words, not ${d.target.words}: this is the shortest it goes without dropping the greeting, the ask or the sign-off.`;
+    if (d.floor) return d.method === "sentences"
+      ? `${d.words} words, not ${d.target.words}: this is the shortest it goes by cutting whole sentences while keeping the opening, ${d.ask ? "the ask" : "the close"} and the sign-off.`
+      : `${d.words} words, not ${d.target.words}: this is the shortest it goes without dropping the greeting, the ask or the sign-off.`;
     if (d.target.mode === "max" && d.words <= d.target.words) return `${d.words} words, within the ${d.target.stated} you set.`;
     if (d.method === "units" && d.words <= d.target.words && d.kind === "counter_email") return `${d.words} words, within ${d.target.words}: no wording of this draft's own lines lands on exactly ${d.target.words}, and I won't pad it.`;
     return d.method === "sentences"
@@ -19210,7 +19271,9 @@ const CareerRouter = (() => {
       const intent = (bd && bd.intent) || (/^negotiation_/.test(s(dr.intent)) ? "negotiation_draft" : "outreach_draft");
       const lead = d.already
         ? { headline: "The held draft already fits — unchanged, still held for your review.", facts: [wordCountLine(d)] }
-        : { headline: "The same draft, re-fit — still held for your review.", facts: [wordCountLine(d), "Only the length changed; the facts and the ask are the held draft's own."] };
+        : { headline: "The same draft, re-fit — still held for your review.", facts: [wordCountLine(d), d.method === "sentences"
+          ? (d.ask ? "Whole sentences were cut, nothing reworded; the ask is kept word for word." : "Whole sentences were cut, nothing reworded.")
+          : "Only the length changed; the facts and the ask are the held draft's own."] };
       return budgetedResult(W, ctx, Object.assign({ kind: dr.kind || "draft" }, d), intent, lead, "Approve this version or tell me what to change; nothing is used or sent until you do.");
     }
     if (/^(show|read|let me see|can i see|what does)\b[^.?]{0,40}\b(draft|answer|email|version)\b/.test(t) && dr && s(dr.text).trim()) {
@@ -19232,7 +19295,7 @@ const CareerRouter = (() => {
       const d = W.composeBudgetedDraft("why_role_answer", { role, company, facts }, target);
       return budgetedResult(W, ctx, d, "outreach_draft", { headline: `Your "why this role" answer for the ${role} role${company ? ` at ${company}` : ""} — held for your review.`, facts: [wordCountLine(d), "Every fact in it comes from your confirmed record; the reasons are wording for you to check, so change anything that isn't how you'd say it."] }, "Want it shorter, or a line changed? Nothing is used or sent until you approve it.");
     }
-    if (writeVerb && /\bnetworking (email|message|note)\b|\b(cold|intro(duction)?|coffee[- ]chat) (email|message|note|request)\b/.test(t) && !/\b(to|at|for)\s+[A-Z][a-z]/.test(s(text).replace(/^[A-Z]/, ""))) {
+    if (writeVerb && /\bnetworking (email|message|note)\b|\b(cold|intro(duction)?|coffee[- ]chat) (email|message|note|request)\b/.test(t) && !/\b(?:to|at|for|with|from)\s+(?!(?:review|me|my review|approval|now|later|learn|ask|get|find|see|understand)\b)[a-z0-9]/i.test(s(text))) {
       const sf = statedFactsOf(ctx);
       const get = (k) => (sf.find((f) => f.kind === k) || {}).value || null;
       const name = (ctx.profile && ctx.profile.basics && ctx.profile.basics.name) || get("name");

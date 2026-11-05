@@ -287,10 +287,11 @@ export function counterAnswer(o: { base: number | null; competing?: { company: s
   else lines.push("Should you counter? In my judgment, yes: asking once whether the pay can move is reasonable. That is judgment, not market data; I have no sourced number for this offer, so the draft names none.");
   lines.push("I can't promise how they will react: the answer can be a yes, a smaller move or a no.");
   const missing = ((CareerNegotiation as any).missingTermsOf ? (CareerNegotiation as any).missingTermsOf({}, text) : []) as { label: string }[];
-  if (missing.length) lines.push(`Worth asking about before you decide: ${missing.map((m) => m.label).join("; ")}. None of them is in what you told me, and the pay alone can't tell you whether the offer is a good one.`);
+  if (missing.length) lines.push(`Worth asking about before you decide: ${missing.map((m) => m.label).join("; ")}. None of them is in what you've told me so far, and the pay alone can't tell you whether the offer is a good one.`);
   return lines;
 }
-export function offerReply(o: Offer, notGiven: Field[], data: OfferData = payData()): OfferResult {
+// said: the person's own words for this offer, so terms they stated (benefits, schedule, start date) are not called missing.
+export function offerReply(o: Offer, notGiven: Field[], data: OfferData = payData(), said = ""): OfferResult {
   const bench = benchmarks(o, data);
   const parts = [o.company, o.role, o.city === "remote" ? "remote" : o.metro_label, o.base != null ? `base ${usd(o.base)}${o.hourly ? ` (${usd(o.hourly)} an hour x 2,080 hours)` : ""}` : null,
     o.signing != null ? `signing ${usd(o.signing)}` : null, o.bonus != null ? `bonus ${usd(o.bonus)}` : null, o.bonus_pct != null ? `target bonus ${o.bonus_pct}%` : null].filter(Boolean);
@@ -317,7 +318,7 @@ export function offerReply(o: Offer, notGiven: Field[], data: OfferData = payDat
     { competing: o.competing.map((c) => ({ ...c })), deadline: o.deadline, benchmark: firstUp ? { median: firstUp.median, cite: firstUp.cite } : null });
   const uniq = [...new Set(urls)];
   if (uniq.length) lines.push("", "Sources:", ...uniq);
-  const answerLines = counterAnswer(o, firstUp ? { median: firstUp.median!, cite: firstUp.cite } : null);
+  const answerLines = counterAnswer(o, firstUp ? { median: firstUp.median!, cite: firstUp.cite } : null, said);
   const draftLines = [...answerLines, "", "A counter you could send. Nothing is sent: edit it and send it yourself.", "", script.email, "", "On a call:", script.call];
   return {
     status: "benchmarked", offer: o, missing: notGiven, ask: null, benchmarks: bench,
@@ -346,7 +347,7 @@ export function offerTurn(o: { words: string; pending: OfferPending | null; now:
     return { result: { status: "ask", offer, missing, ask, benchmarks: [], draft: null, messages: [ask] }, pending: { v: 1, pieces, asked: missing, at: o.now } };
   }
   // Asked once already: what is still missing is said, never asked again.
-  return { result: offerReply(offer, missing, data), pending: null };
+  return { result: offerReply(offer, missing, data, pieces.join(" ")), pending: null };
 }
 // The words must be the person's own, from this turn's message.
 export function saidIn(message: string, words: string): boolean {

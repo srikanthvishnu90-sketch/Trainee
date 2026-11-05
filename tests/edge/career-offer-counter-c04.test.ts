@@ -49,3 +49,13 @@ Deno.test("C04/O3 offerTurn and offerChatTurn: the answer and the terms lead the
   eq(c.answer!.card!.sent, false);
   eq(c.answer!.card!.requires_approval, true);
 });
+
+Deno.test("C04/O4 terms the person stated are not listed as missing (D-007)", () => {
+  const lines = counterAnswer({ base: 90000 }, null, "Acme offered 90k, full benefits with health insurance, starts on Jan 5").join("\n");
+  assert(/Worth asking about before you decide: the schedule/.test(lines) && !/benefits \(health/.test(lines) && !/the start date/.test(lines), lines);
+  const all = counterAnswer({ base: 90000 }, null, "benefits include health insurance, full-time Monday to Friday, start date is Jan 5").join("\n");
+  assert(!/Worth asking about/.test(all), all);
+  const r = offerTurn({ words: "JPM offered 110k base, 15k signing, NYC, analyst, with health insurance benefits", pending: null, now: NOW }).result;
+  const msg = r.messages.join("\n");
+  assert(/Worth asking about before you decide: the schedule/.test(msg) && !/benefits \(health/.test(msg), msg);
+});

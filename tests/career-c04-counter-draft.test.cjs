@@ -186,3 +186,71 @@ test("C04: a draft ask that could not be drafted does not displace the held draf
   assert.equal(out.intent, "negotiation_draft", reply);
   assert.ok(words(emailIn(reply)) <= 30);
 });
+
+/* Review round 1 (PR #517): monthly/weekly pay, unclear units, ranges, shortened legacy drafts, lower-case recipients,
+ * and stated package terms. */
+test("C04 r1: a monthly offer is countered in months, never restated as a year", () => {
+  const say = world();
+  const { out, reply } = say("They offered $4,000 a month for an analyst job. Should I counter? Draft a counteroffer.");
+  assert.equal(out.intent, "negotiation_draft", reply);
+  assert.ok(!/a year|annual|salary/i.test(reply), `a unit the person never used: ${reply}`);
+  assert.match(reply, /^Yes, counter once, in writing, at \$4,300 a month/);
+  assert.match(emailIn(reply), /Could you bring the monthly pay to \$4,300 a month\?/);
+  const weekly = say("They offered $1,200 a week. Should I counter?", "t-week");
+  assert.match(weekly.reply, /at \$1,290 a week/, weekly.reply);
+  assert.ok(!/a year|a month/.test(weekly.reply), weekly.reply);
+});
+
+test("C04 r1: a figure with no period is not guessed at", () => {
+  const say = world();
+  const { out, reply } = say("They offered me $4,000 for the analyst job. Should I counter? Draft a counteroffer.");
+  assert.match(reply, /^Is \$4,000 an hourly, weekly, monthly or yearly figure\?/, reply);
+  assert.ok(!out.draft, "no draft without the unit");
+  assert.ok(!/counter once|a year/.test(reply), reply);
+});
+
+test("C04 r1: a pay range is read, and any counter clears its top", () => {
+  const say = world();
+  const { reply } = say("They offered $22-24/hour for a support job. Should I counter? Draft a counteroffer for review.");
+  assert.ok(!/No offer figure/i.test(reply), reply);
+  assert.match(reply, /\$22 to \$24 an hour/);
+  const asks = dollarsIn(emailIn(reply).split("\n").filter((l) => /^Could you bring/.test(l)).join(" "));
+  assert.ok(asks.length && asks.every((v) => v > 24), `asked ${asks}`);
+  const r = say("Should I counter at $23 an hour?");
+  assert.match(r.reply, /^Not at \$23/, r.reply);
+});
+
+test("C04 r1: statedPayOf reads the person's unit and skips bonuses and asks", () => {
+  const P = Negotiation.statedPayOf;
+  assert.deepEqual(P("A support job offered $24/hour."), { rate: 24, low: null, unit: "hour", text: "$24/hour" });
+  assert.equal(P("They offered $4,000 a month").unit, "month");
+  assert.equal(P("offer $1,200 per week plus a $2,000 signing bonus").rate, 1200);
+  assert.deepEqual([P("offered $70-80k").low, P("offered $70-80k").rate, P("offered $70-80k").unit], [70000, 80000, "year"]);
+  assert.equal(P("offered $4,000").unit, null);
+  assert.equal(P("counter at $27 an hour, they offered $24 an hour").rate, 24);
+  assert.equal(P("a $5,000 signing bonus"), null);
+});
+
+test("C04 r1: shortening a draft without units keeps the ask sentence and never claims a cut it did not make", () => {
+  const body = "Subject: Offer — Lincoln International\n\nDear Lincoln International team,\n\nThank you for the offer — $52 an hour, plus a $4,000 signing bonus for the summer analyst internship. I am excited about the role and the team.\n\nWould you be able to meet me at $56 an hour? The signing bonus as it stands works for me. With that, I am ready to sign ahead of the Friday deadline.\n\nThank you again for the opportunity — I look forward to your reply.";
+  for (const n of [60, 40, 12]) {
+    const d = Writing.refitDraft({ kind: "counter_email", text: body }, { words: n, mode: "exact" });
+    assert.match(d.text, /Would you be able to meet me at \$56 an hour\?/, `the ask survives a ${n}-word cut:\n${d.text}`);
+    assert.equal(d.askKept, true);
+    if (d.words > n) assert.equal(d.floor, true, "over the target is reported as the floor, never as met");
+    else assert.ok(d.words <= n);
+  }
+});
+
+test("C04 r1: an outreach ask naming a lower-case firm is not taken by the no-recipient networking draft", () => {
+  const say = world();
+  const { reply } = say("write a cold email to someone at people inc.");
+  assert.ok(!/^Who is the email to/.test(reply), reply);
+});
+
+test("C04 r1: package terms the person stated are not called missing", () => {
+  const keys = (t) => Negotiation.missingTermsOf({}, t).map((m) => m.key);
+  assert.deepEqual(keys("benefits include health insurance and it starts on Dec 1"), ["schedule"]);
+  assert.deepEqual(keys("I have no benefits or schedule details yet"), ["benefits", "schedule", "start_date"]);
+  assert.deepEqual(keys("full-time, Monday to Friday, with health insurance; start date unknown"), ["start_date"]);
+});

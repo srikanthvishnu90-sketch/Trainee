@@ -1257,14 +1257,23 @@ Read it aloud in your head. If it sounds like a press release, a template, or a 
     const fixed = countWords(head || "") + countWords(tail || "");
     const keep = sents.map(() => true);
     const total = () => fixed + sents.reduce((n, s0, k) => n + (keep[k] ? countWords(s0.x) : 0), 0);
-    for (let k = sents.length - 2; k >= 1 && total() > tgt.words; k--) keep[k] = false;
+    // The ask is never cut: a question that names a figure ("Could you meet me at $56 an hour?"), else the first
+    // question. With the ask kept, a target below what remains is reported by its real count (floor), never met by
+    // dropping the ask.
+    const isQ = (x) => /\?\s*$/.test(x);
+    let askIdx = sents.findIndex((s0) => isQ(s0.x) && /\$\s?\d/.test(s0.x));
+    if (askIdx < 0) askIdx = sents.findIndex((s0) => isQ(s0.x));
+    const fixedIdx = (k) => k === 0 || k === sents.length - 1 || k === askIdx;
+    for (let k = sents.length - 2; k >= 1 && total() > tgt.words; k--) if (!fixedIdx(k)) keep[k] = false;
     for (let k = 1; k < sents.length && total() < tgt.words; k++) { if (!keep[k]) { keep[k] = true; if (total() > tgt.words) keep[k] = false; } }
+    const floor = total() > tgt.words;
+    const askKept = askIdx < 0 ? null : keep[askIdx];
     const byPara = new Map();
     sents.forEach((s0, k) => { if (keep[k]) byPara.set(s0.pi, (byPara.get(s0.pi) || []).concat(s0.x)); });
     const body = [...byPara.keys()].sort((a, b) => a - b).map((pi) => byPara.get(pi).join(" "));
     const text = [subject, subject ? "" : null, head, head ? "" : null, body.join("\n\n"), tail ? "" : null, tail].filter((x) => x !== null).join("\n");
     const words = draftWordCount(text);
-    return { kind: d.kind || "draft", text, words, target: tgt, exact: words === tgt.words, method: "sentences" };
+    return { kind: d.kind || "draft", text, words, target: tgt, exact: words === tgt.words, method: "sentences", floor, askKept, ask: askIdx < 0 ? null : sents[askIdx].x };
   }
 
   return {

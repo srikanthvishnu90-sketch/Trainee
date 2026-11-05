@@ -345,13 +345,54 @@ const CareerNegotiation = (() => {
     { key: "schedule", label: "the schedule (hours a week, shift times, weekends)", ask: "the schedule (hours a week, shift times and whether weekends are included)" },
     { key: "start_date", label: "the start date", ask: "the start date you have in mind" },
   ];
+  // Pay periods a counter can be stated in. Every figure is said in the unit the person used; nothing is converted.
+  const PAY_UNITS = ["hour", "week", "month", "year"];
+  const UNIT_PHRASE = { hour: "an hour", week: "a week", month: "a month", year: "a year" };
+  const UNIT_NOUN = { hour: "hourly rate", week: "weekly pay", month: "monthly pay", year: "salary" };
+  const UNIT_RATE_WORD = { hour: "rate", week: "weekly pay", month: "monthly pay", year: "base salary" };
+  const rateShort = (n, unit) => {
+    const v = Number(n);
+    if (unit === "hour") return `$${Number.isInteger(v) ? v : v.toFixed(2)}`;
+    return `$${(Number.isInteger(v) ? v : Math.round(v * 100) / 100).toLocaleString("en-US")}`;
+  };
   const rateText = (n, unit) => {
     if (n == null || !Number.isFinite(Number(n))) return null;
-    const v = Number(n);
-    if (unit === "hour") return `$${Number.isInteger(v) ? v : v.toFixed(2)} an hour`;
-    return `$${Math.round(v).toLocaleString("en-US")} a year`;
+    return `${rateShort(n, unit)} ${UNIT_PHRASE[unit] || UNIT_PHRASE.year}`;
   };
-  const rateShort = (n, unit) => (unit === "hour" ? `$${Number.isInteger(Number(n)) ? Number(n) : Number(n).toFixed(2)}` : `$${Math.round(Number(n)).toLocaleString("en-US")}`);
+  // The offer's pay as the person stated it: { rate, low, unit, text } or null. A range ("$22-24/hour") keeps both
+  // ends; its top is the offer for the never-at-or-below rule. unit is null when no period is stated and the figure
+  // is not plainly a salary (a bare "$4,000"): the caller asks rather than guess a unit. Signing bonuses and figures
+  // framed as the person's own ask ("counter at $27") are not the offer.
+  function statedPayOf(text) {
+    const raw = s(text).replace(/[’]/g, "'").replace(/[‐-―]/g, "-");
+    const num = (v, k) => { const n = Number(String(v).replace(/,/g, "")); return k ? n * 1000 : n; };
+    const PERIOD = "(hours?|hrs?|hourly|h|weeks?|wks?|weekly|months?|mos?|monthly|years?|yrs?|yearly|annual(?:ly)?|annum)";
+    const re = new RegExp(`\\$\\s?(\\d[\\d,]*(?:\\.\\d+)?)\\s?(k)?(?:\\s*(?:-|to)\\s*\\$?\\s?(\\d[\\d,]*(?:\\.\\d+)?)\\s?(k)?)?(?:\\s*(?:\\/\\s*|an?\\s+|per\\s+|each\\s+)?${PERIOD}\\b)?`, "gi");
+    const toUnit = (p) => {
+      if (!p) return null;
+      const w = p.toLowerCase();
+      if (/^(h|hrs?|hours?|hourly)$/.test(w)) return "hour";
+      if (/^(wks?|weeks?|weekly)$/.test(w)) return "week";
+      if (/^(mos?|months?|monthly)$/.test(w)) return "month";
+      return "year";
+    };
+    let m;
+    while ((m = re.exec(raw))) {
+      const before = raw.slice(Math.max(0, m.index - 30), m.index).toLowerCase();
+      const after = raw.slice(m.index + m[0].length, m.index + m[0].length + 25).toLowerCase();
+      if (/\b(signing|sign-on|sign on|relocation|bonus|stipend)\b[^$]*$/.test(before) || /^\s*(signing|sign-on|sign on|relocation|bonus|stipend)\b/.test(after)) continue;
+      if (/\b(counter(?:\s?offer)?\s+(?:at|with|of|to|for)|ask(?:ing)?\s+(?:them\s+)?(?:for|at|to)|target|goal|i\s+(?:want|need|would like|'d like)(?:\s+to\s+(?:get|ask for|make))?|bring\s+(?:it|the \w+)\s+(?:up\s+)?to)\s*$/.test(before)) continue;
+      const a = num(m[1], m[2] || (m[4] && Number(String(m[1]).replace(/,/g, "")) < 1000 ? "k" : null));
+      const b = m[3] != null ? num(m[3], m[4] || (m[2] && !m[4] && num(m[3]) < 1000 ? "k" : null)) : null;
+      if (!Number.isFinite(a) || a <= 0) continue;
+      const hi = b != null && Number.isFinite(b) && b > a ? b : a;
+      const lo = b != null && Number.isFinite(b) && b > a ? a : null;
+      let unit = toUnit(m[5]);
+      if (!unit && hi >= 20000) unit = "year";
+      return { rate: hi, low: lo, unit, text: m[0].trim() };
+    }
+    return null;
+  }
   // The person's own target, read from their words: a figure framed as the ask ("counter at $27", "ask for $27 an
   // hour", "my target is $27", "I want $27/hr"). A bare figure is the offer, not an ask — that misread
   // is exactly how the shipped draft asked for $24 on a $24 offer.
@@ -374,6 +415,7 @@ const CareerNegotiation = (() => {
       // Units follow the offer: "$27" on an hourly offer is $27 an hour; "$70k" on a yearly offer is $70,000.
       if (unit === "year" && v < 1000) continue;
       if (unit === "hour" && v >= 1000) continue;
+      if ((unit === "week" || unit === "month") && v < 50) continue;
       return v;
     }
     return null;
@@ -388,10 +430,17 @@ const CareerNegotiation = (() => {
       schedule: !!o.schedule,
       start_date: !!o.start_date,
     };
-    const deniedTerm = (re) => re.test(t) && /\b(no|not|don'?t|do not|haven'?t|have not|without|yet|unknown|missing)\b/.test(t);
-    if (deniedTerm(/\bbenefits?\b/)) has.benefits = false;
-    if (deniedTerm(/\bschedule|hours\b|shifts?\b/)) has.schedule = false;
-    if (deniedTerm(/\bstart(ing)? date\b/)) has.start_date = false;
+    // A term the person states ("benefits include health insurance", "starts on Dec 1", "Mon-Fri 9-5") is on the
+    // record; one they say they lack ("no benefits details yet", "start date unknown") is missing.
+    const TERM_RE = { benefits: "benefits?|health (?:insurance|coverage)|pto|paid time off|401\\(?k\\)?", schedule: "schedule|shifts?|hours a week|full[- ]time|part[- ]time|mon(?:day)?\\s*(?:-|to|through)\\s*fri(?:day)?", start_date: "start(?:ing)? date|start(?:s|ing)? (?:on|in)\\b" };
+    const NEG = "(?:no|not|don'?t|do not|haven'?t|have not|without|any|none)";
+    for (const key of Object.keys(TERM_RE)) {
+      const term = new RegExp(`\\b(?:${TERM_RE[key]})`);
+      if (!term.test(t)) continue;
+      // Within one clause only: "health insurance; start date unknown" denies the start date, not the benefits.
+      const denied = new RegExp(`\\b${NEG}\\b(?:[ \\t/-]+[\\w'-]+){0,4}?[ \\t/-]+(?:${TERM_RE[key]})|(?:${TERM_RE[key]})(?:[ \\t]+[\\w'-]+){0,3}?[ \\t]+(?:yet|unknown|missing|tbd|unclear)\\b`).test(t);
+      has[key] = !denied;
+    }
     return COUNTER_TERMS.filter((x) => !has[x.key]);
   }
   // A sourced benchmark is usable only in the offer's own units and only with its source and date.
@@ -433,20 +482,20 @@ const CareerNegotiation = (() => {
       [`Thank you for the offer of ${i.offerText}.`, 14],
       ["Thank you for the offer.", 12],
     ]));
-    const rateWord = i.unit === "hour" ? "rate" : "base salary";
+    const rateWord = UNIT_RATE_WORD[i.unit] || UNIT_RATE_WORD.year;
     if (i.counter) {
       const fig = rateText(i.counter.value, i.unit);
       const why = i.counter.basis === "sourced_range" && i.range ? ` Public pay data for this role (${i.range.cite}, as of ${i.range.as_of}) runs up to ${rateShort(i.range.high, i.unit)}.` : "";
       const keep = i.keepSigning && signingTxt ? " The signing bonus as offered works for me." : "";
       units.push(mk("ask", [[`Could you bring the ${rateWord} to ${fig}?${why}${keep}`, 60], [`Could you bring the ${rateWord} to ${fig}?${keep}`, 55], [`Could you bring the ${rateWord} to ${fig}?`, 50], [`Could you do ${fig}?`, 30]]));
     } else {
-      units.push(mk("ask", [[`Is there room to move the ${i.unit === "hour" ? "hourly rate" : "base salary"} above ${i.offerText}?`, 60], [`Can the ${rateWord} go above ${i.offerText}?`, 30]]));
+      units.push(mk("ask", [[`Is there room to move the ${i.unit === "year" ? "base salary" : UNIT_NOUN[i.unit] || "pay"} above ${i.offerText}?`, 60], [`Can the ${rateWord} go above ${i.offerText}?`, 30]]));
     }
     if (missing.length) {
       const short = listJoin(missing.map((m) => TERM_SHORT[m.key] || m.key));
       units.push(mk("terms", [[`Could you also send me ${listJoin(missing.map((m) => m.ask))}?`, 24], [`Could you also send me the ${short} details?`, 20], [`What are the ${short}?`, 18], ["", 0]]));
     }
-    if (i.deadline) units.push(mk("deadline", [[`I'll get back to you by ${i.deadline}.`, 10], ["", 0]]));
+    if (i.deadline) units.push(mk("deadline", [[`I'll get back to you by ${String(i.deadline).replace(/^(mon|tues|wednes|thurs|fri|satur|sun)day\b/i, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())}.`, 10], ["", 0]]));
     units.push({ id: "sign", variants: [i.senderName ? `Thank you,\n${s(i.senderName)}` : "Thank you,"] });
     return units;
   }
@@ -460,14 +509,16 @@ const CareerNegotiation = (() => {
   function counterPlan(offer, opts) {
     opts = opts || {};
     const o = offer || {};
-    const unit = o.unit === "hour" ? "hour" : "year";
+    const unit = PAY_UNITS.includes(o.unit) ? o.unit : "year";
+    const rateLow = Number.isFinite(Number(o.rate_low)) && Number(o.rate_low) > 0 ? Number(o.rate_low) : null;
     const rate = Number.isFinite(Number(o.rate)) && Number(o.rate) > 0 ? Number(o.rate) : null;
     const clean = (v) => s(v).trim().replace(/[\s.,;:!?]+$/, "");
     const company = o.company && clean(o.company) && !/^(the )?(firm|company|employer|team|recruiter)$/i.test(clean(o.company)) ? clean(o.company) : null;
     // "customer support job" is the role "customer support": the noun the role was named with is not part of it.
     const role = o.role && clean(o.role) ? clean(o.role).replace(/\s+(job|role|position|offer)$/i, "").trim() || null : null;
     const roleRef = role ? `${/^[aeiou]/i.test(role) ? "an" : "a"} ${role} role` : "this role";
-    const offerText = rateText(rate, unit);
+    // A range is restated as the person gave it; its top is what any counter must clear.
+    const offerText = rate != null && rateLow != null && rateLow < rate ? `${rateShort(rateLow, unit)} to ${rateText(rate, unit)}` : rateText(rate, unit);
     const stated = counterTargetOf(opts.text, unit);
     const recorded = Number.isFinite(Number(opts.target)) && Number(opts.target) > 0 ? Number(opts.target) : null;
     let target = null, rejected = null;
@@ -488,7 +539,7 @@ const CareerNegotiation = (() => {
     const benchBelow = !!(bench && rate != null && bench.high <= rate);
     let judgment = null;
     if (target == null && !range && rate != null && rejected == null && !benchBelow) {
-      const v = unit === "hour" ? Math.ceil(rate * 1.08) : Math.ceil((rate * 1.07) / 1000) * 1000;
+      const v = unit === "hour" ? Math.ceil(rate * 1.08) : unit === "week" ? Math.ceil((rate * 1.07) / 10) * 10 : unit === "month" ? Math.ceil((rate * 1.07) / 50) * 50 : Math.ceil((rate * 1.07) / 1000) * 1000;
       judgment = v > rate ? v : null;
     }
     const counter = target != null ? { value: target, basis: "person_target" } : range ? { value: range.high, basis: "sourced_range" } : judgment != null ? { value: judgment, basis: "judgment" } : null;
@@ -506,7 +557,7 @@ const CareerNegotiation = (() => {
       verdict = "I can answer that once I know the figure they offered.";
     } else if (rejected != null) {
       verdict = `Not at ${rateShort(rejected, unit)}: that is at or below the ${offerText} they already offered, so it asks for nothing.`;
-      reasons.push(`A counter has to be above ${offerText}. Tell me the ${unit === "hour" ? "hourly rate" : "salary"} you'd actually want, or accept the offer as it stands.`);
+      reasons.push(`A counter has to be above ${offerText}. Tell me the ${UNIT_NOUN[unit]} you'd actually want, or accept the offer as it stands.`);
     } else if (counter && counter.basis === "judgment") {
       const pct = Math.round(((counter.value - rate) / rate) * 100);
       verdict = `Yes, counter once, in writing, at ${rateText(counter.value, unit)}, a figure that is my judgment, not market data.`;
@@ -515,7 +566,7 @@ const CareerNegotiation = (() => {
     } else if (counter) {
       verdict = `Yes, counter once, in writing, at ${rateText(counter.value, unit)}.`;
       if (counter.basis === "person_target") reasons.push(`${rateText(counter.value, unit)} is the figure you named, and it is above the ${offerText} on the table.`);
-      else reasons.push(`It is the top of a range derived from ${range.cite}${range.reported ? " (a reported figure, not a measured one)" : ""}, as of ${range.as_of}: ${range.low != null ? `${rateShort(range.low, unit)} to ${rateShort(range.high, unit)}` : `above ${rateShort(rate, unit)}, up to ${rateShort(range.high, unit)}`}${unit === "hour" ? " an hour" : " a year"}.`);
+      else reasons.push(`It is the top of a range derived from ${range.cite}${range.reported ? " (a reported figure, not a measured one)" : ""}, as of ${range.as_of}: ${range.low != null ? `${rateShort(range.low, unit)} to ${rateShort(range.high, unit)}` : `above ${rateShort(rate, unit)}, up to ${rateShort(range.high, unit)}`} ${UNIT_PHRASE[unit]}.`);
       reasons.push(risk);
     } else if (benchBelow) {
       verdict = `On pay alone, probably not: the sourced figures (${bench.cite}, as of ${bench.as_of}) top out at ${rateShort(bench.high, unit)}, at or below ${offerText}.`;
@@ -527,7 +578,7 @@ const CareerNegotiation = (() => {
     const termsLine = missing.length ? `Before you decide, get the rest of the package: ${listJoin(missing.map((m) => m.label))} ${missing.length === 1 ? "is" : "are"} not on your record yet, and ${offerText || "the pay"} alone can't tell you whether the offer is a good one.` : null;
     if (termsLine) reasons.push(termsLine);
     const targetQuestion = rate != null && !counter
-      ? `To name a figure in the draft, it has to be yours and above ${offerText}: what ${unit === "hour" ? "hourly rate" : "salary"} would make this an easy yes for you?`
+      ? `To name a figure in the draft, it has to be yours and above ${offerText}: what ${UNIT_NOUN[unit]} would make this an easy yes for you?`
       : counter && counter.basis === "judgment"
         ? `Keep ${rateText(counter.value, unit)} in the draft, or tell me your own figure (it has to be above ${offerText}).`
         : null;
@@ -547,9 +598,9 @@ const CareerNegotiation = (() => {
     const terms = missing.length
       ? { headline: `Then get ${listJoin(missing.map((m) => m.key === "start_date" ? "the start date" : m.key))} in writing before you decide — they are part of what ${offerText || "the offer"} is worth.`, line: termsLine }
       : { headline: "Benefits, schedule and start date are all on your record, so the offer can be judged as a whole.", line: null };
-    return { sends: false, unit, rate, offerText, company, role, target, rejected, range, counter, missing: missing.map((m) => ({ key: m.key, label: m.label })), needs, answer: { verdict, reasons }, terms, targetQuestion, companyQuestion, draft };
+    return { sends: false, unit, rate, rateLow, offerText, counterText: counter ? rateText(counter.value, unit) : null, company, role, target, rejected, range, counter, missing: missing.map((m) => ({ key: m.key, label: m.label })), needs, answer: { verdict, reasons }, terms, targetQuestion, companyQuestion, draft };
   }
 
-  return { DISCLAIMER, payData, factScript, createStore, counterPlan, counterTargetOf, missingTermsOf, counterDraftUnits, renderCounterUnits, COUNTER_TERMS, parseOffer, parseDate, parseMoney, storeOffer, extractFigures, benchmark, totalComp, compareOffers, bonusAmount, approvalCard, counterStrategy, roleplayTurn, extensionDraft, trackExtension, declineDraft, deadlinePlan };
+  return { DISCLAIMER, payData, factScript, createStore, counterPlan, counterTargetOf, statedPayOf, missingTermsOf, counterDraftUnits, renderCounterUnits, COUNTER_TERMS, parseOffer, parseDate, parseMoney, storeOffer, extractFigures, benchmark, totalComp, compareOffers, bonusAmount, approvalCard, counterStrategy, roleplayTurn, extensionDraft, trackExtension, declineDraft, deadlinePlan };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerNegotiation;

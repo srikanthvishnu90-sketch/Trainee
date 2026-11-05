@@ -125,3 +125,41 @@ Deno.test("MASS-E2E/3 the not-started batch reply: says nothing was searched, pr
   eq([ask?.kind, ask?.n, ask?.what?.words], ["first", 15, ["software", "engineering", "intern"]], "the named ask is one the deployed path takes as a search");
   eq(batchNotStartedReply("do the batch"), BATCH_NOT_STARTED_REPLY, "no count in their words: the general reply");
 });
+
+// ------------------------------------------------------------------------------------------------ 4. what a reply may claim (review of #496)
+// The claim "real submission is on" follows the gates the submitter itself reads: the release flags, the database's switch
+// rows (career_cloud_settings) and the person's cloud opt-in. Unless every one is known on, no "on" claim is made.
+Deno.test("MASS-E2E/4 liveSwitches: 'on' only with every gate known on; a DB row off, missing, mis-cased or unreadable, or no opt-in, is no claim; a flag off is off", async () => {
+  const { liveSwitches, readSubmitSettings, SUBMIT_DB_SWITCHES } = await import("../../supabase/functions/agent-chat/chat_switches.ts");
+  const env = (o: Record<string, string> = {}) => ({ get: (k: string) => o[k] });
+  const ON = Object.fromEntries(SUBMIT_DB_SWITCHES.map((k) => [k, "on"]));
+  const base = { settings: ON, cloudOptIn: "on", gmailSend: "on" };
+  eq(liveSwitches(env(), base).employerSubmit, true, "every gate on");
+  for (const k of SUBMIT_DB_SWITCHES) {
+    eq(liveSwitches(env(), { ...base, settings: { ...ON, [k]: "off" } }).employerSubmit, null, `${k} off: no 'on' claim`);
+    const missing = { ...ON } as Record<string, string>; delete missing[k];
+    eq(liveSwitches(env(), { ...base, settings: missing }).employerSubmit, null, `${k} missing: the database reads it as off`);
+    eq(liveSwitches(env(), { ...base, settings: { ...ON, [k]: "ON" } }).employerSubmit, null, `${k}='ON': the database reads only 'on'`);
+  }
+  eq(liveSwitches(env(), { ...base, settings: null }).employerSubmit, null, "rows unreadable: no claim");
+  for (const opt of ["off", "unknown", null, undefined]) eq(liveSwitches(env(), { ...base, cloudOptIn: opt as any }).employerSubmit, null, `opt-in ${opt}: no claim`);
+  eq(liveSwitches(env({ UPMORE_SCRIPT_SUBMIT_LIVE: "off" }), base).employerSubmit, false, "a release flag off: nothing submits for anyone");
+  eq(liveSwitches(env({ CLOUD_RUNNER_ENABLED: "off" }), base).employerSubmit, false);
+  eq(liveSwitches(env(), base).emailSend, true);
+  for (const g of ["not_connected", "off", "unknown", null]) eq(liveSwitches(env(), { ...base, gmailSend: g as any }).emailSend, null, `gmail send ${g}: no claim`);
+  eq(liveSwitches(env({ CAREER_SEND_RAIL: "off" }), base).emailSend, false);
+  eq(liveSwitches(env({ CAREER_EMAIL_SEND: "off" }), base).emailSend, false);
+  // The reader: exactly the stored values; a failed read is null, never "on".
+  const rows = (data: any, error: any = null) => ({ from: () => ({ select: () => ({ in: async () => ({ data, error }) }) }) });
+  eq(await readSubmitSettings(rows([{ key: "CAREER_AGENT_SUBMIT", value: "on" }, { key: "CAREER_CLOUD_APPLY", value: " on" }])), { CAREER_AGENT_SUBMIT: "on", CAREER_CLOUD_APPLY: " on" });
+  eq(await readSubmitSettings(rows(null, { message: "down" })), null);
+  eq(await readSubmitSettings({ from: () => { throw new Error("boom"); } }), null);
+});
+
+Deno.test("MASS-E2E/4 the receipts reader: rows as stored, a failed read is null (said as unreadable, never as no receipts)", async () => {
+  const { readLedgerReceipts } = await import("../../supabase/functions/agent-chat/handler-career.ts");
+  const chain = (res: any) => ({ from: () => ({ select: () => ({ eq: () => ({ order: () => ({ limit: async () => res }) }) }) }) });
+  const row = { application_id: "a1", reached_employer: "yes", clicked_at: "2026-11-04T10:00:00Z", finished_at: "2026-11-04T10:00:05Z", confirmation_id: null };
+  eq(await readLedgerReceipts(chain({ data: [row], error: null }), "u1"), [row]);
+  eq(await readLedgerReceipts(chain({ data: null, error: { message: "x" } }), "u1"), null);
+});

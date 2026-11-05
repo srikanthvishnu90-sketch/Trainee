@@ -58,3 +58,21 @@ test("LinkedIn, Indeed and Handshake postings never enter a batch pool", () => {
   ]);
   assert.deepEqual(kept.map((p) => p.id), [1, 5]);
 });
+
+// Review of #496: D-037/1e scans the production roots for loads of batch-executor.cjs; the entry point sits in scripts/career,
+// which that scan does not walk. This holds the other half: nothing that runs in production names the entry point, so the
+// executor is started only by the owner's deploy (which, in the same change, must move CAREER_BATCH_EXECUTOR into RELEASE_FLAGS).
+test("nothing in production runs the entry point: no workflow, function, worker, launch or other script names batch-executor-main", () => {
+  const { execFileSync } = require("node:child_process");
+  const files = execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" }).split("\n").filter(Boolean);
+  const PROD = /^(?:supabase\/functions\/|scripts\/|\.github\/workflows\/|workers\/|api\/|extension\/|package\.json$|vercel\.json$|Dockerfile|docker-compose|Procfile|.*\.service$)/;
+  const self = "scripts/career/batch-executor-main.cjs";
+  const fs = require("node:fs");
+  const hits = files.filter((f) => PROD.test(f) && f !== self && fs.existsSync(path.join(root, f)) && /batch-executor-main/.test(fs.readFileSync(path.join(root, f), "utf8")));
+  assert.deepEqual(hits, [], "a production entry point names the executor's entry point: move CAREER_BATCH_EXECUTOR into RELEASE_FLAGS in the same change");
+  // Mutation check: the scan sees a real mention.
+  assert.ok(/batch-executor-main/.test('run: node scripts/career/batch-executor-main.cjs'));
+  // And the entry point itself is the only loader of the executor outside workers/ and tests.
+  const loaders = files.filter((f) => /^scripts\//.test(f) && f !== self && fs.existsSync(path.join(root, f)) && /require\(\s*[^)]*batch-executor|from\s+["'][^"']*batch-executor/.test(fs.readFileSync(path.join(root, f), "utf8")));
+  assert.deepEqual(loaders, []);
+});

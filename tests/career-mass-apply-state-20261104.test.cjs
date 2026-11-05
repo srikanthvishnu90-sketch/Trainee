@@ -157,9 +157,9 @@ test("A2/A3: before the hash-bound approval nothing is submitted; after it the s
   for (const m of ["Was the application actually submitted?", "What did you send today?"]) {
     const o = turn(m, { snapshot: snap, log }).out;
     assert.equal(FALLBACK(o), false, o.reply);
-    assert.doesNotMatch(o.reply, /applications? (?:have|has) a submission receipt/, `${m}: no receipt before the approval: ${o.reply}`);
+    assert.doesNotMatch(o.reply, /(?:is|are) recorded as submitted;|\d+ applications? (?:was|were) sent/, `${m}: no receipt before the approval: ${o.reply}`);
   }
-  assert.match(turn("Was the application actually submitted?", { snapshot: snap, log }).out.reply, /None of your applications is on record with a submission receipt/);
+  assert.match(turn("Was the application actually submitted?", { snapshot: snap, log }).out.reply, /None of your applications is recorded as submitted/);
   // A typed yes alone never approves (the card's structured approval does).
   const yes = turn("yes go ahead and submit them", { snapshot: snap, log });
   assert.equal(submitted(log), 0, `a typed yes submitted something: ${yes.out.reply}`);
@@ -170,9 +170,11 @@ test("A2/A3: before the hash-bound approval nothing is submitted; after it the s
   assert.ok(n >= 1, `the approved card submitted: ${ap.out.reply}`);
   const after = turn("Was the application actually submitted?", { snapshot: ap.snap, log }).out;
   assert.equal(after.intent, "career_submission_check", after.reply);
-  assert.match(after.reply, /submission receipt on record/);
+  assert.match(after.reply, /recorded as submitted/);
+  assert.match(after.reply, /no receipt is on record yet/);
+  assert.doesNotMatch(after.reply, /(?:its|their) receipts? (?:is|are) on record|\d+ with the receipt on record/, "a batch run has no database receipt, so none is claimed");
   const states = turn("Can you distinguish prepared from submitted?", { snapshot: ap.snap, log }).out;
-  assert.match(states.reply, /submitted with a receipt/);
+  assert.match(states.reply, /\d+ submitted \(none with the receipt on record\)/);
   assert.equal(submitted(log), n, "reads submit nothing more");
 });
 test("A2: a payload changed after the card is refused by 155's hash check; the read routes never approve around it", () => {
@@ -196,13 +198,16 @@ const LEDGER = { asOf: ISO(NOW), unreadable: [], tasks: [
   { id: "job:5", kind: "application", company: "Echo Care", title: "Care Specialist", state: "confirmed", since: ISO(NOW - 5 * 86400e3), evidence: { confirmation_id: "EC-77" }, source: "career_apply_jobs" },
   { id: "job:6", kind: "application", company: "Fjord Systems", title: "Support Analyst", state: "needs_user", since: ISO(NOW - 900e3), evidence: { reason: "login_required" }, source: "career_apply_jobs" },
   { id: "track:7", kind: "tracked", company: "Gamma Retail", title: "Associate", state: "tracked", since: "2026-10-20", evidence: { stage: "Submitted" }, source: "tracker (they told Trainee)" },
+], receipts: [
+  { application_id: "4", reached_employer: "yes", clicked_at: ISO(NOW - 7200e3), finished_at: ISO(NOW - 7190e3), confirmation_id: null },
+  { application_id: "5", reached_employer: "yes", clicked_at: ISO(NOW - 5 * 86400e3), finished_at: ISO(NOW - 5 * 86400e3 + 10e3), confirmation_id: null },
 ] };
 test("A14: queue records: prepared, approved, submitted and confirmed are told apart, each from its own record", () => {
   const o = turn("Can you distinguish prepared from submitted?", { ledger: LEDGER }).out;
   assert.equal(o.intent, "career_status_states", o.reply);
   assert.match(o.reply, /2 prepared and waiting for your approval/);
   assert.match(o.reply, /1 approved, not sent yet/);
-  assert.match(o.reply, /2 submitted with a receipt \(1 confirmed by the employer\)/);
+  assert.match(o.reply, /2 submitted \(1 confirmed by the employer, 2 with the receipt on record\)/);
   assert.match(o.reply, /1 on your tracker that you applied to yourself/);
   lintClean(o);
   const today = turn("What did you send today?", { ledger: LEDGER }).out;
@@ -215,7 +220,7 @@ test("A14: queue records: prepared, approved, submitted and confirmed are told a
   assert.match(status.reply, /Calm Co \(?|Support Rep at Calm Co: approved by you, not sent yet/);
   const latest = turn("Was the application actually submitted?", { ledger: LEDGER }).out;
   assert.equal(latest.intent, "career_submission_check");
-  assert.match(latest.reply, /2 applications have a submission receipt on record/);
+  assert.match(latest.reply, /2 applications are recorded as submitted; their receipts are on record/);
 });
 test("A2/A3: queue records: pending approvals, the second one bound by position, the account step handed to the person", () => {
   const pend = turn("Show my pending approvals", { ledger: LEDGER }).out;
@@ -236,6 +241,61 @@ test("A2/A3: queue records: pending approvals, the second one bound by position,
 test("an unreadable record is said, never counted as nothing", () => {
   const o = turn("What did you send today?", { ledger: { asOf: ISO(NOW), tasks: [], unreadable: ["jobs"] } }).out;
   assert.match(o.reply, /could not be read just now \(jobs\)/);
+});
+
+// ---------------------------------------------------------------- review of #496: proof, send time, positions
+test("#496/2 'submitted' from the queue state alone never claims a receipt; only the database's receipt that reached the employer does", () => {
+  const tasks = [{ id: "job:9", kind: "application", company: "Hollow Co", title: "Agent", state: "submitted_unconfirmed", since: ISO(NOW - 600e3), evidence: {} }];
+  const none = turn("Was the application actually submitted?", { ledger: { asOf: ISO(NOW), unreadable: [], tasks } }).out;
+  assert.match(none.reply, /1 application is recorded as submitted; no receipt is on record yet/);
+  assert.match(none.reply, /Hollow Co: submitted; the employer hasn't confirmed it yet; no receipt is on record yet/);
+  const unsure = turn("Was the application actually submitted?", { ledger: { asOf: ISO(NOW), unreadable: [], tasks, receipts: [{ application_id: "9", reached_employer: "unknown", clicked_at: ISO(NOW - 500e3), finished_at: ISO(NOW - 400e3) }] } }).out;
+  assert.match(unsure.reply, /no receipt is on record yet/, "a receipt that does not say it reached the employer is not proof");
+  const yes = turn("Was the application actually submitted?", { ledger: { asOf: ISO(NOW), unreadable: [], tasks, receipts: [{ application_id: "9", reached_employer: "yes", clicked_at: ISO(NOW - 500e3), finished_at: ISO(NOW - 400e3) }] } }).out;
+  assert.match(yes.reply, /1 application is recorded as submitted; its receipt is on record/);
+  const lost = turn("Was the application actually submitted?", { ledger: { asOf: ISO(NOW), unreadable: ["receipts"], tasks, receipts: [] } }).out;
+  assert.match(lost.reply, /could not be read just now \(receipts\)/);
+});
+test("#496/3 'what did you send today?' windows on the receipt's send time, never on the row's updated_at", () => {
+  const tasks = [
+    { id: "job:1", kind: "application", company: "Old Send Co", title: null, state: "submitted_unconfirmed", since: ISO(NOW - 60e3), evidence: {} },   // touched a minute ago
+    { id: "job:2", kind: "application", company: "No Receipt Co", title: null, state: "submitted_unconfirmed", since: ISO(NOW - 60e3), evidence: {} },
+    { id: "job:3", kind: "application", company: "Fresh Co", title: null, state: "submitted_unconfirmed", since: ISO(NOW - 9 * 86400e3), evidence: {} }, // row old, send today
+  ];
+  const receipts = [
+    { application_id: "1", reached_employer: "yes", clicked_at: ISO(NOW - 3 * 86400e3), finished_at: ISO(NOW - 3 * 86400e3) },
+    { application_id: "3", reached_employer: "yes", clicked_at: ISO(NOW - 3600e3), finished_at: ISO(NOW - 3590e3) },
+  ];
+  const o = turn("What did you send today?", { ledger: { asOf: ISO(NOW), unreadable: [], tasks, receipts } }).out;
+  assert.match(o.reply, /1 application was sent in the last 24 hours/);
+  assert.match(o.reply, /Fresh Co/);
+  assert.doesNotMatch(o.reply, /Old Send Co/, "sent three days ago, whatever its updated_at says");
+  assert.match(o.reply, /1 sent application has no send time on record, so I left it out of the window/);
+  const week = turn("What did you send this week?", { ledger: { asOf: ISO(NOW), unreadable: [], tasks, receipts } }).out;
+  assert.match(week.reply, /2 applications were sent in the last 7 days/);
+});
+test("#496/4 'approve the second application': named oldest first, never given as the card's number; the card answer by name", () => {
+  const tasks = [
+    { id: "prep:b", kind: "application", company: "Brightdesk", title: null, state: "awaiting_approval", since: ISO(NOW - 1800e3), evidence: {} },
+    { id: "prep:a", kind: "application", company: "Acme Support", title: null, state: "awaiting_approval", since: ISO(NOW - 3600e3), evidence: {} },
+  ];
+  const pend = turn("Show my pending approvals", { ledger: { asOf: ISO(NOW), unreadable: [], tasks } }).out;
+  assert.match(pend.reply, /oldest first: \(1\) Acme Support; \(2\) Brightdesk/);
+  const pick = turn("Approve the second application", { ledger: { asOf: ISO(NOW), unreadable: [], tasks } }).out;
+  assert.equal(pick.result.target.company, "Brightdesk");
+  assert.doesNotMatch(pick.reply, /Number 2\b/);
+  assert.match(pick.reply, /the card may number it differently/);
+  assert.match(pick.reply, /reply "only brightdesk"/);
+  assert.equal(sendsOf(pick), 0);
+});
+test("#496/1 no reading of the switches (null): no claim either way, and never 'not wired'", () => {
+  const live = { employerSubmit: null, emailSend: null, batchExecutor: false };
+  const r = turn("I said no, nothing should be sent", { live }).out;
+  assert.doesNotMatch(r.reply, /Real submission to employers is on|switched off right now|not wired/);
+  const m = turn("Who is the email sent from?", { live }).out;
+  assert.doesNotMatch(m.reply, /Sending is on|switched off right now/);
+  const named = turn("can you apply to the Support Rep role at Calm Co for me", { live }).out;
+  assert.doesNotMatch(named.reply, /not wired|can't do in this conversation: send an application myself/);
 });
 
 // ---------------------------------------------------------------- the live switches (A2.4)

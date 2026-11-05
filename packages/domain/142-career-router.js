@@ -12364,7 +12364,7 @@ const CareerRouter = (() => {
       const role = (target && target.role) || (nctx && nctx.role) || (ctx.posting && ctx.posting.title) || null;
       const worker = ctx.workerCapabilities && ctx.workerCapabilities.portal_browser;
       const facts = ["What I can do: put a role you name on your apply list; the Trainee extension on your computer prepares the application with a resume tailored to it, shows you the exact answers on a card, and sends it only after you tap approve."];
-      { const L = getApplyLedger(); const f = L && L.submitFact(ctx); if (f) facts.push(f); else if (worker && worker.status === "NOT_WIRED" && !(ctx.liveSwitches && typeof ctx.liveSwitches.employerSubmit === "boolean")) facts.push("What I can't do in this conversation: send an application myself, so each one waits for your tap on its card."); }
+      { const L = getApplyLedger(); const f = L && L.submitFact(ctx); if (f) facts.push(f); else if (worker && worker.status === "NOT_WIRED" && !ctx.liveSwitches) facts.push("What I can't do in this conversation: send an application myself, so each one waits for your tap on its card."); }
       if (co) {
         const found = resolveNamedPosting(target || { company: co, role }, ctx);
         facts.push(found ? `The ${role || "role"} at ${co} is on record as a posting I can prepare from.` : `The ${role || "role you named"} at ${co} is not in the postings I have on file — paste the posting or its link and I will work from that instead.`);
@@ -12393,7 +12393,7 @@ const CareerRouter = (() => {
       if (tgt.company) { const mir = threadMirrorForWrite(ctx); if (mir) mir.namedApply = { company: tgt.company, role: tgt.role || null }; }
       const worker = ctx.workerCapabilities && ctx.workerCapabilities.portal_browser;
       const facts = [`I can apply only to a posting I have on file or one you paste. The ${tgt.role || "role"} posting at ${tgt.company || "that company"} is not on file, and I won't make one up.`];
-      { const L = getApplyLedger(); const f = L && L.submitFact(ctx); if (!f && worker && worker.status === "NOT_WIRED" && !(ctx.liveSwitches && typeof ctx.liveSwitches.employerSubmit === "boolean")) facts.push("The browser worker that executes applications is also not wired in this handler — even a listed role would stop at preparation here."); }
+      { const L = getApplyLedger(); const f = L && L.submitFact(ctx); if (!f && worker && worker.status === "NOT_WIRED" && !ctx.liveSwitches) facts.push("The browser worker that executes applications is also not wired in this handler — even a listed role would stop at preparation here."); }
       const reply = compose({ headline: `I can't apply to the ${tgt.role || "role"} at ${tgt.company || "that company"} yet — that posting is not in the list I can work from.`, facts, nextStep: "Paste the posting or its link and I will prepare the application from it in this turn." });
       return { intent: "named_role_apply", reply, resultStatus: "blocked", sends: 0 };
     }

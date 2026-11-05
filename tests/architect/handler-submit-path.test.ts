@@ -35,8 +35,14 @@ for (let i = 1; i <= 11; i++) PEOPLE[`tok-${i}`] = `7b0f8f8e-6a43-4a49-9d2c-0000
 const SAVED_CLAIM = /\b(saved|recorded|on file|on your record|stored)\b/i;
 
 let pg: Pg | null = null, handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
+// These tests are written for a project with no mailbox connector configured (as locally and in the gate). The environment
+// is shared by every test file of a `deno test` run, so connector settings an earlier file left behind (CI, #435 and #503:
+// connector-framework-handler.test.ts's Outlook settings) are cleared for this file and put back at teardown.
+const CONNECTOR_ENV = ["GOOGLE_OAUTH_CLIENT_ID", "MICROSOFT_OAUTH_CLIENT_ID", "OAUTH_STATE_SECRET", "GMAIL_LINK_BASE", "OUTLOOK_LINK_BASE", "TRAINEE_CONNECT_BASE_URL"];
+const connectorEnvBefore = Object.fromEntries(CONNECTOR_ENV.map((k) => [k, Deno.env.get(k)]));
 async function world() {
   if (handler) return { pg: pg!, handler };
+  for (const k of CONNECTOR_ENV) Deno.env.delete(k);
   pg = await startPg();
   await supabaseParity(pg);
   for (const id of Object.values(PEOPLE)) {
@@ -278,5 +284,6 @@ Deno.test({ name: "handler (d3): when career_apply_jobs cannot be read, the repl
 
 Deno.test({ name: "handler: teardown", sanitizeResources: false, sanitizeOps: false, async fn() {
   handler?.restore();
+  for (const [k, v] of Object.entries(connectorEnvBefore)) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v);
   if (pg) await pg.stop();
 } });

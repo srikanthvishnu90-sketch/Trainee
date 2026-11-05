@@ -475,11 +475,12 @@ const CareerJobs = (() => {
   const US_STATES = [["Alabama", "AL"], ["Alaska", "AK"], ["Arizona", "AZ"], ["Arkansas", "AR"], ["California", "CA"], ["Colorado", "CO"], ["Connecticut", "CT"], ["Delaware", "DE"], ["District of Columbia", "DC"], ["Florida", "FL"], ["Georgia", "GA"], ["Hawaii", "HI"], ["Idaho", "ID"], ["Illinois", "IL"], ["Indiana", "IN"], ["Iowa", "IA"], ["Kansas", "KS"], ["Kentucky", "KY"], ["Louisiana", "LA"], ["Maine", "ME"], ["Maryland", "MD"], ["Massachusetts", "MA"], ["Michigan", "MI"], ["Minnesota", "MN"], ["Mississippi", "MS"], ["Missouri", "MO"], ["Montana", "MT"], ["Nebraska", "NE"], ["Nevada", "NV"], ["New Hampshire", "NH"], ["New Jersey", "NJ"], ["New Mexico", "NM"], ["New York", "NY"], ["North Carolina", "NC"], ["North Dakota", "ND"], ["Ohio", "OH"], ["Oklahoma", "OK"], ["Oregon", "OR"], ["Pennsylvania", "PA"], ["Rhode Island", "RI"], ["South Carolina", "SC"], ["South Dakota", "SD"], ["Tennessee", "TN"], ["Texas", "TX"], ["Utah", "UT"], ["Vermont", "VT"], ["Virginia", "VA"], ["Washington", "WA"], ["West Virginia", "WV"], ["Wisconsin", "WI"], ["Wyoming", "WY"]];
   const _STATE_BY_NAME = new Map(US_STATES.map(([n, a]) => [n.toLowerCase(), { name: n, abbr: a }]));
   const _STATE_BY_ABBR = new Map(US_STATES.map(([n, a]) => [a, { name: n, abbr: a }]));
+  const _STATE_RES = US_STATES.map(([name, abbr]) => [name, abbr, new RegExp(`\\b${name}\\b`, "i"), new RegExp(`,\\s*${abbr}\\b`)]);
   function statesInText(text) {
     const found = [], seen = new Set();
     const t = ` ${s(text)} `;
-    for (const [name, abbr] of US_STATES) {
-      if (new RegExp(`\\b${name}\\b`, "i").test(t) || new RegExp(`,\\s*${abbr}\\b`).test(t)) {
+    for (const [name, abbr, byName, byAbbr] of _STATE_RES) {
+      if (byName.test(t) || byAbbr.test(t)) {
         if (!seen.has(abbr)) { seen.add(abbr); found.push({ name, abbr }); }
       }
     }
@@ -1795,14 +1796,30 @@ const CareerTailor = (() => {
     "Argus", "NOI", "DSC", "DSCR", "IRR", "Cap Rate", "Underwriting", "Rent Roll", "CoStar", "Asset Management", "Escrow", "Pro Forma", "Salesforce", "Real Estate License", "Real Estate",
     "User Stories", "Agile", "Jira", "Confluence", "Requirements Analysis", "Stakeholder Management", "Business Analysis", "Consulting", "Change Management", "Project Management"];
   const _lexLower = new Map(SKILL_LEXICON.map((s) => [s.toLowerCase(), s]));
+  const _lexNeedles = SKILL_LEXICON.map((s) => { const l = s.toLowerCase(); return [s, ` ${l} `, ` ${l},`, ` ${l}.`, /^[a-z0-9+#.]+$/.test(l) ? l : null]; });
+  const SKILLS_MEMO_MAX = 5000, SKILLS_MEMO_KEY_MAX = 400;
+  const _skillsMemo = new Map();
   function skillsInText(text) {
-    const t = ` ${String(text || "").toLowerCase().replace(/[^a-z0-9+#. ]/g, " ")} `;
-    const found = [];
-    for (const s of SKILL_LEXICON) {
-      const needle = ` ${s.toLowerCase()} `;
-      if (t.includes(needle) || t.includes(` ${s.toLowerCase()},`) || t.includes(` ${s.toLowerCase()}.`)) if (!found.includes(s)) found.push(s);
+    const key = String(text || "");
+    const memo = key.length <= SKILLS_MEMO_KEY_MAX;
+    const hit = memo ? _skillsMemo.get(key) : undefined;
+    if (hit) return hit.slice();
+    const t = ` ${key.toLowerCase().replace(/[^a-z0-9+#. ]/g, " ")} `;
+    const words = new Set(), dotted = new Set();
+    for (const w of t.split(" ")) {
+      if (!w) continue;
+      words.add(w);
+      for (let i = w.indexOf("."); i > 0; i = w.indexOf(".", i + 1)) dotted.add(w.slice(0, i));
     }
-    return found;
+    const found = [];
+    for (const [s, a, b, c, l] of _lexNeedles) {
+      const hit = l !== null ? words.has(l) || dotted.has(l) : t.includes(a) || t.includes(b) || t.includes(c);
+      if (hit && !found.includes(s)) found.push(s);
+    }
+    if (!memo) return found;
+    if (_skillsMemo.size >= SKILLS_MEMO_MAX) _skillsMemo.delete(_skillsMemo.keys().next().value);
+    _skillsMemo.set(key, found);
+    return found.slice();
   }
   const numbersIn = (text) => (String(text || "").match(/\d[\d,.]*%?/g) || []).map((x) => x.replace(/,/g, ""));
 
@@ -1864,18 +1881,35 @@ const CareerTailor = (() => {
     const out = [];
     for (const sent of sentencesOf(text)) {
       const sl = sent.toLowerCase();
-      const lic = sl.match(/([a-z][a-z&' -]{0,44}?)\s(licen[cs]e|licensure)\b/);
+      const lic = sl.includes("licen") ? sl.match(/([a-z][a-z&' -]{0,44}?)\s(licen[cs]e|licensure)\b/) : null;
       if (lic && /(active|unrestricted|current|valid|must|required|hold|maintain|possess|eligib|requirements?\s*:)/.test(sl)) out.push({ type: "license", requirement: `${lic[1].trim().split(/\s+/).slice(-4).join(" ")} license`, evidence: sent.slice(0, 220) });
-      const cert = sl.match(/([a-z][a-z&' -]{0,44}?)\s(certification|certificate)\b/);
+      const cert = sl.includes("certific") ? sl.match(/([a-z][a-z&' -]{0,44}?)\s(certification|certificate)\b/) : null;
       if (cert && /(requirements?\s*:|required|must (hold|have|possess|maintain|be)|certification\s*$|certification\s+\d)/.test(sl) && !/degree|bachelor|master/.test(sl)) out.push({ type: "certification", requirement: `${cert[1].trim().split(/\s+/).slice(-3).join(" ")} certification`, evidence: sent.slice(0, 220) });
       if (/\bjd\b/.test(sl) && /(law school|juris|from a|degree)/.test(sl)) out.push({ type: "degree", level: "jd", requirement: "JD (Juris Doctor) degree", evidence: sent.slice(0, 220) });
       else if (/\bdegree\b/.test(sl) && /(required|must (hold|have|possess)|is required)/.test(sl) && !/(graduating|pursuing|currently enrolled|rising (senior|junior|sophomore))/.test(sl)) out.push({ type: "degree", level: /master/.test(sl) ? "master" : /associate/.test(sl) ? "associate" : "bachelor", requirement: "conferred degree", evidence: sent.slice(0, 220) });
-      const ym = sl.match(/(?:minimum|min\.?|at least)\s*(?:of\s*)?(\d+)(?:\s*[-–]\s*\d+)?\s*\+?\s*years?\b[^.;]{0,40}?experience/) || sl.match(/(\d+)\s*\+\s*years?\s+of\s+[^.;]{0,90}?experience/) || sl.match(/(\d+)\s*[-–]\s*\d+\s*years?\s+of\s+[^.;]{0,60}?experience/);
+      const ym = sl.includes("year") && (sl.match(/(?:minimum|min\.?|at least)\s*(?:of\s*)?(\d+)(?:\s*[-–]\s*\d+)?\s*\+?\s*years?\b[^.;]{0,40}?experience/) || sl.match(/(\d+)\s*\+\s*years?\s+of\s+[^.;]{0,90}?experience/) || sl.match(/(\d+)\s*[-–]\s*\d+\s*years?\s+of\s+[^.;]{0,60}?experience/));
       if (ym) out.push({ type: "min_experience", min_years: Number(ym[1]), requirement: `at least ${ym[1]} years of experience`, evidence: sent.slice(0, 220) });
     }
     return out;
   }
+  const PARSE_MEMO_MAX = 2000;
+  const _parseMemo = new Map();
+  const _parseStats = { parsed: 0 };
+  const copyParse = (p) => Object.assign({}, p, { mustHaveSkills: p.mustHaveSkills.slice(), niceToHaveSkills: p.niceToHaveSkills.slice(), keywords: p.keywords.slice(), knockouts: p.knockouts.map((k) => Object.assign({}, k)) });
   function parseJD(text) {
+    const key = String(text || "");
+    let hit = _parseMemo.get(key);
+    if (!hit) {
+      _parseStats.parsed++;
+      hit = parseJDUncached(key);
+      if (_parseMemo.size >= PARSE_MEMO_MAX) _parseMemo.delete(_parseMemo.keys().next().value);
+      _parseMemo.set(key, hit);
+    }
+    return copyParse(hit);
+  }
+  function resetParseMemos() { _parseMemo.clear(); _skillsMemo.clear(); _parseStats.parsed = 0; }
+  function parseMemoStats() { return { parsed: _parseStats.parsed, held: _parseMemo.size }; }
+  function parseJDUncached(text) {
     const raw = String(text || "");
     const low = raw.toLowerCase();
     const niceIdx = low.search(/nice to have|preferred qualifications|bonus points|plus(es)?[:\s]|preferred[:\s]/);
@@ -2574,7 +2608,7 @@ const CareerTailor = (() => {
     return { ok: true, mode: "full", resume: assembled, rendered, coverLetter: cover, audit: auditResult, diff, version, gaps, requiredGaps, preferredGaps, eligibilityVerdict: verdict };
   }
 
-  return { BANNED_PHRASES, bannedPhrasesIn, SKILL_LEXICON, skillsInText, parseJD, detectFamily, FAMILIES, FAMILY_SKILLS, extractKnockouts, jdSegments, scoreFact, selectFacts, provenSkills, derivedSkillNames, skillFactProven, computeGaps, eligibilityVerdictFor, personaLevelOf, auditResume, audit, diffResume, render, generateCoverLetter, coverOutline, buildAnswerBank, tailorResume, wordCount };
+  return { BANNED_PHRASES, bannedPhrasesIn, SKILL_LEXICON, skillsInText, parseJD, resetParseMemos, parseMemoStats, detectFamily, FAMILIES, FAMILY_SKILLS, extractKnockouts, jdSegments, scoreFact, selectFacts, provenSkills, derivedSkillNames, skillFactProven, computeGaps, eligibilityVerdictFor, personaLevelOf, auditResume, audit, diffResume, render, generateCoverLetter, coverOutline, buildAnswerBank, tailorResume, wordCount };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerTailor;
 
@@ -16524,6 +16558,18 @@ const CareerRouter = (() => {
   const ltClean = (v) => s(v).split(/\s+—\s+|\s+-\s+/)[0].replace(/\s*\([^)]*\)\s*/g, " ").replace(/,?\s+(?:Inc\.?|LLC|Ltd\.?|Corp\.?)$/i, "").replace(/\s+/g, " ").trim();
   const ltIsPlace = (v) => LT_CITIES.has(ltPlain(v).replace(/[.,]/g, ""));
   const ltIsSchool = (v) => LT_SCHOOL_WORD.test(s(v)) || LT_SCHOOLS.has(ltPlain(v).replace(/[.,]/g, ""));
+  const _ltFormRes = new Map();
+  function ltFormMatches(raw, lowRaw, form) {
+    const first = s(form).split(/[\s&]+/).filter(Boolean)[0] || "";
+    if (/^[\x20-\x7e]+$/.test(first) && !lowRaw.includes(first.toLowerCase())) return [];
+    let re = _ltFormRes.get(form);
+    if (!re) {
+      re = new RegExp(`(?<![A-Za-z0-9])${ltEsc(form).replace(/&/g, "(?:&|and)")}(?![A-Za-z0-9])`, "gi");
+      if (_ltFormRes.size > 5000) _ltFormRes.clear();
+      _ltFormRes.set(form, re);
+    }
+    return raw.matchAll(re);
+  }
   function ltLexicon(ctx) {
     const out = [];
     let cirs = [];
@@ -16540,9 +16586,11 @@ const CareerRouter = (() => {
       if (words.length > 1 && tok.length >= 4 && firstCount[ltPlain(words[0])] === 1 && !LT_TOKEN_AMBIG.has(tok) && !LT_CITIES.has(tok) && !LT_SCHOOLS.has(tok)) forms.add(words[0]);
       out.push({ name, cir: x, forms: [...forms] });
     }
+    const have = new Set(out.map((e) => ltPlain(e.name)));
     for (const p of postingsFromCtx(ctx || {})) {
       const name = ltClean(s(p.company).replace(/\s*\(fictional\)\s*/gi, " "));
-      if (!name || ltIsPlace(name) || ltIsSchool(name) || out.some((e) => ltPlain(e.name) === ltPlain(name))) continue;
+      if (!name || ltIsPlace(name) || ltIsSchool(name) || have.has(ltPlain(name))) continue;
+      have.add(ltPlain(name));
       out.push({ name, cir: null, forms: [name] });
     }
     return out;
@@ -16611,13 +16659,12 @@ const CareerRouter = (() => {
     return hits;
   }
   function letterTargetOf(text, ctx) {
-    const raw = s(text);
+    const raw = s(text), lowRaw = raw.toLowerCase();
     const hits = [];
     for (const e of ltLexicon(ctx || {})) {
       for (const form of e.forms) {
-        const re = new RegExp(`(?<![A-Za-z0-9])${ltEsc(form).replace(/&/g, "(?:&|and)")}(?![A-Za-z0-9])`, "gi");
         const full = ltPlain(form) === ltPlain(e.name) || form.trim().split(/\s+/).length > 1 || /^[A-Z]{2,5}$/.test(form);
-        for (const m of raw.matchAll(re)) {
+        for (const m of ltFormMatches(raw, lowRaw, form)) {
           if (ltOccurrenceOk(raw, m.index, m.index + m[0].length, full)) { hits.push({ name: e.name, cir: e.cir, idx: m.index, typed: m[0] }); break; }
         }
       }
@@ -16664,13 +16711,12 @@ const CareerRouter = (() => {
     return /^\s*(?:$|[.!?,;:)]|(?:please|pls|plz|thanks|thank you|thx|ty|and|or|vs\.?|versus|for|in|this|next|now|today)\b)/i.test(after);
   }
   function namedCompaniesOf(text, ctx) {
-    const raw = s(text);
+    const raw = s(text), lowRaw = raw.toLowerCase();
     const hits = [];
     for (const e of ltLexicon(ctx || {})) {
       for (const form of e.forms) {
-        const re = new RegExp(`(?<![A-Za-z0-9])${ltEsc(form).replace(/&/g, "(?:&|and)")}(?![A-Za-z0-9])`, "gi");
         let found = false;
-        for (const m of raw.matchAll(re)) {
+        for (const m of ltFormMatches(raw, lowRaw, form)) {
           if (rsOccurrenceOk(raw, m.index, m.index + m[0].length)) { hits.push({ name: e.name, cir: e.cir, idx: m.index, typed: m[0] }); found = true; break; }
         }
         if (found) break;

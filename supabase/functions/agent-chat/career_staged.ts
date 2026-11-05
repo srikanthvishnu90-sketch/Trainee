@@ -14,6 +14,7 @@
 // it does today, so what the router saves is exactly what it saved before.
 
 import { servedBrain } from "./release_config.ts";
+import { NO_CLOCK, type TurnClock } from "./turn_clock.ts";
 import { crisisReply } from "./crisis.ts";
 
 type Env = { get(k: string): string | undefined };
@@ -257,7 +258,8 @@ export function careerSwitcherOpenAsk(message: string, intent: string | null, re
 export type StagedDecision = { brain: boolean; mode: BrainMode; intent: string | null; reason: string };
 
 // Whether this turn goes to the brain in staged mode. Called only after every code-first turn has passed on it.
-export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean }): StagedDecision {
+export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock }): StagedDecision {
+  const clock = o.clock ?? NO_CLOCK;
   const mode = brainMode(o.env);
   if (mode !== "staged") return { brain: false, mode, intent: null, reason: "not_staged" };
   if (o.structured) return { brain: false, mode, intent: null, reason: "structured_request" };
@@ -268,7 +270,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   // code (search_correction.ts) and the next results use them; it is not a question for the brain.
   if (correctedAsk(o.message, o.ctx.discovery)) return { brain: false, mode, intent: null, reason: "search_correction" };
   let probe, records: any[] = [];
-  try { const copy = probeCtx(o.ctx); probe = o.host.runTurn(o.message, copy); records = Array.isArray(copy.containmentRecords) ? copy.containmentRecords as any[] : []; }
+  try { const copy = clock.sync("staged_probe_copy", () => probeCtx(o.ctx)); probe = clock.sync("staged_probe_router", () => o.host.runTurn(o.message, copy)); records = Array.isArray(copy.containmentRecords) ? copy.containmentRecords as any[] : []; }
   catch { return { brain: false, mode, intent: null, reason: "probe_failed" }; }
   let intent: string | null;
   if (probe.contained) {
@@ -300,7 +302,7 @@ export const STAGED_PROMPT_NOTE = "In this conversation you answer questions and
 export const STAGED_TOOL_POLICY = { withhold: STAGED_WITHHELD_TOOLS, note: STAGED_PROMPT_NOTE } as const;
 
 // Lazy and memoized: the probe runs only when the handler reaches the brain test, at most once a turn.
-export function stagedRoute(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean }) {
+export function stagedRoute(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock }) {
   let d: StagedDecision | null = null;
   return {
     toBrain(): boolean { d ??= stagedDecision(o); return d.brain; },

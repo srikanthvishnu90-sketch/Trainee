@@ -117,15 +117,38 @@ const CareerTailor = (() => {
     "Argus", "NOI", "DSC", "DSCR", "IRR", "Cap Rate", "Underwriting", "Rent Roll", "CoStar", "Asset Management", "Escrow", "Pro Forma", "Salesforce", "Real Estate License", "Real Estate",
     "User Stories", "Agile", "Jira", "Confluence", "Requirements Analysis", "Stakeholder Management", "Business Analysis", "Consulting", "Change Management", "Project Management"];
   const _lexLower = new Map(SKILL_LEXICON.map((s) => [s.toLowerCase(), s]));
+  // C01 (beta 2026-11-04): the lexicon's needles are made once, and a text's skills are kept by the exact text (bounded): a
+  // posting's parse asks this of every sentence once per candidate skill, and boilerplate sentences repeat across postings.
+  // Each caller gets its own array.
+  const _lexNeedles = SKILL_LEXICON.map((s) => { const l = s.toLowerCase(); return [s, ` ${l} `, ` ${l},`, ` ${l}.`, /^[a-z0-9+#.]+$/.test(l) ? l : null]; });
+  const SKILLS_MEMO_MAX = 5000, SKILLS_MEMO_KEY_MAX = 400; // sentences only: at most ~2 MB held
+  const _skillsMemo = new Map();
   function skillsInText(text) {
-    const t = ` ${String(text || "").toLowerCase().replace(/[^a-z0-9+#. ]/g, " ")} `;
-    const found = [];
-    for (const s of SKILL_LEXICON) {
-      const needle = ` ${s.toLowerCase()} `;
-      // single-letter / dotted skills need token care; substring on padded text is the deterministic rule here.
-      if (t.includes(needle) || t.includes(` ${s.toLowerCase()},`) || t.includes(` ${s.toLowerCase()}.`)) if (!found.includes(s)) found.push(s);
+    const key = String(text || "");
+    const memo = key.length <= SKILLS_MEMO_KEY_MAX;
+    const hit = memo ? _skillsMemo.get(key) : undefined;
+    if (hit) return hit.slice();
+    const t = ` ${key.toLowerCase().replace(/[^a-z0-9+#. ]/g, " ")} `;
+    // The padded text's words (it has no other separator than the space) and each word's part before any of its dots: a
+    // one-word skill's " x " is a word equal to x and its " x." a word that starts "x." (the text holds no commas), so a
+    // lookup answers what the three substring scans of the whole text answered. A skill with a space or another character
+    // keeps the scans.
+    const words = new Set(), dotted = new Set();
+    for (const w of t.split(" ")) {
+      if (!w) continue;
+      words.add(w);
+      for (let i = w.indexOf("."); i > 0; i = w.indexOf(".", i + 1)) dotted.add(w.slice(0, i));
     }
-    return found;
+    const found = [];
+    for (const [s, a, b, c, l] of _lexNeedles) {
+      // single-letter / dotted skills need token care; substring on padded text is the deterministic rule here.
+      const hit = l !== null ? words.has(l) || dotted.has(l) : t.includes(a) || t.includes(b) || t.includes(c);
+      if (hit && !found.includes(s)) found.push(s);
+    }
+    if (!memo) return found;
+    if (_skillsMemo.size >= SKILLS_MEMO_MAX) _skillsMemo.delete(_skillsMemo.keys().next().value);
+    _skillsMemo.set(key, found);
+    return found.slice();
   }
   const numbersIn = (text) => (String(text || "").match(/\d[\d,.]*%?/g) || []).map((x) => x.replace(/,/g, ""));
 
@@ -210,23 +233,49 @@ const CareerTailor = (() => {
     const out = [];
     for (const sent of sentencesOf(text)) {
       const sl = sent.toLowerCase();
-      const lic = sl.match(/([a-z][a-z&' -]{0,44}?)\s(licen[cs]e|licensure)\b/);
+      // C01: each pattern runs only on a sentence holding its literal word ("licen", "certific", "year"): the lazy prefix
+      // made these the costliest regexes of a posting's parse, and a sentence without the word can never match them.
+      const lic = sl.includes("licen") ? sl.match(/([a-z][a-z&' -]{0,44}?)\s(licen[cs]e|licensure)\b/) : null;
       if (lic && /(active|unrestricted|current|valid|must|required|hold|maintain|possess|eligib|requirements?\s*:)/.test(sl)) out.push({ type: "license", requirement: `${lic[1].trim().split(/\s+/).slice(-4).join(" ")} license`, evidence: sent.slice(0, 220) });
       // Named certification knockouts (BUG-209): 121's detectKnockouts has
       // always caught this class ("Medical Assistant Certification" under a
       // Requirements heading); 123's extractor missed it, so a certification
       // knockout could be silently dropped by the tailor even though the
       // jobs module would have flagged it. Same pattern family as 121.
-      const cert = sl.match(/([a-z][a-z&' -]{0,44}?)\s(certification|certificate)\b/);
+      const cert = sl.includes("certific") ? sl.match(/([a-z][a-z&' -]{0,44}?)\s(certification|certificate)\b/) : null;
       if (cert && /(requirements?\s*:|required|must (hold|have|possess|maintain|be)|certification\s*$|certification\s+\d)/.test(sl) && !/degree|bachelor|master/.test(sl)) out.push({ type: "certification", requirement: `${cert[1].trim().split(/\s+/).slice(-3).join(" ")} certification`, evidence: sent.slice(0, 220) });
       if (/\bjd\b/.test(sl) && /(law school|juris|from a|degree)/.test(sl)) out.push({ type: "degree", level: "jd", requirement: "JD (Juris Doctor) degree", evidence: sent.slice(0, 220) });
       else if (/\bdegree\b/.test(sl) && /(required|must (hold|have|possess)|is required)/.test(sl) && !/(graduating|pursuing|currently enrolled|rising (senior|junior|sophomore))/.test(sl)) out.push({ type: "degree", level: /master/.test(sl) ? "master" : /associate/.test(sl) ? "associate" : "bachelor", requirement: "conferred degree", evidence: sent.slice(0, 220) });
-      const ym = sl.match(/(?:minimum|min\.?|at least)\s*(?:of\s*)?(\d+)(?:\s*[-–]\s*\d+)?\s*\+?\s*years?\b[^.;]{0,40}?experience/) || sl.match(/(\d+)\s*\+\s*years?\s+of\s+[^.;]{0,90}?experience/) || sl.match(/(\d+)\s*[-–]\s*\d+\s*years?\s+of\s+[^.;]{0,60}?experience/);
+      const ym = sl.includes("year") && (sl.match(/(?:minimum|min\.?|at least)\s*(?:of\s*)?(\d+)(?:\s*[-–]\s*\d+)?\s*\+?\s*years?\b[^.;]{0,40}?experience/) || sl.match(/(\d+)\s*\+\s*years?\s+of\s+[^.;]{0,90}?experience/) || sl.match(/(\d+)\s*[-–]\s*\d+\s*years?\s+of\s+[^.;]{0,60}?experience/));
       if (ym) out.push({ type: "min_experience", min_years: Number(ym[1]), requirement: `at least ${ym[1]} years of experience`, evidence: sent.slice(0, 220) });
     }
     return out;
   }
+  // C01 (beta 2026-11-04, HTTP 546 CPU Time exceeded): the router ranks every posting in the 600-posting pool on every
+  // search turn and parses each one's text here, several times a turn and again on the next turn, for the same text. The
+  // parse is a pure function of the text, so it is kept: a bounded memo by the exact text (oldest dropped past
+  // PARSE_MEMO_MAX), and every caller gets its own copy of the result (fresh arrays and knockout records), so a caller that
+  // edits what it got can never change what the next caller reads.
+  const PARSE_MEMO_MAX = 2000;
+  const _parseMemo = new Map();
+  const _parseStats = { parsed: 0 };
+  const copyParse = (p) => Object.assign({}, p, { mustHaveSkills: p.mustHaveSkills.slice(), niceToHaveSkills: p.niceToHaveSkills.slice(), keywords: p.keywords.slice(), knockouts: p.knockouts.map((k) => Object.assign({}, k)) });
   function parseJD(text) {
+    const key = String(text || "");
+    let hit = _parseMemo.get(key);
+    if (!hit) {
+      _parseStats.parsed++;
+      hit = parseJDUncached(key);
+      if (_parseMemo.size >= PARSE_MEMO_MAX) _parseMemo.delete(_parseMemo.keys().next().value);
+      _parseMemo.set(key, hit);
+    }
+    return copyParse(hit);
+  }
+  // Empties both memos: what a fresh Edge isolate starts with (the CPU budget test measures that turn).
+  function resetParseMemos() { _parseMemo.clear(); _skillsMemo.clear(); _parseStats.parsed = 0; }
+  // How many posting texts were parsed (memo misses) since the last reset: the CPU budget test's machine-independent bound.
+  function parseMemoStats() { return { parsed: _parseStats.parsed, held: _parseMemo.size }; }
+  function parseJDUncached(text) {
     const raw = String(text || "");
     const low = raw.toLowerCase();
     const niceIdx = low.search(/nice to have|preferred qualifications|bonus points|plus(es)?[:\s]|preferred[:\s]/);
@@ -1243,6 +1292,6 @@ const CareerTailor = (() => {
     return { ok: true, mode: "full", resume: assembled, rendered, coverLetter: cover, audit: auditResult, diff, version, gaps, requiredGaps, preferredGaps, eligibilityVerdict: verdict };
   }
 
-  return { BANNED_PHRASES, bannedPhrasesIn, SKILL_LEXICON, skillsInText, parseJD, detectFamily, FAMILIES, FAMILY_SKILLS, extractKnockouts, jdSegments, scoreFact, selectFacts, provenSkills, derivedSkillNames, skillFactProven, computeGaps, eligibilityVerdictFor, personaLevelOf, auditResume, audit, diffResume, render, generateCoverLetter, coverOutline, buildAnswerBank, tailorResume, wordCount };
+  return { BANNED_PHRASES, bannedPhrasesIn, SKILL_LEXICON, skillsInText, parseJD, resetParseMemos, parseMemoStats, detectFamily, FAMILIES, FAMILY_SKILLS, extractKnockouts, jdSegments, scoreFact, selectFacts, provenSkills, derivedSkillNames, skillFactProven, computeGaps, eligibilityVerdictFor, personaLevelOf, auditResume, audit, diffResume, render, generateCoverLetter, coverOutline, buildAnswerBank, tailorResume, wordCount };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerTailor;

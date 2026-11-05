@@ -510,6 +510,12 @@
     "tests/architect/journeys-r2-f.test.ts": 160,
     "tests/architect/journeys-r2-g.test.ts": 160,
     "tests/architect/journeys-r2-h.test.ts": 160,
-    "tests/architect/journeys-r2-regressions.test.ts": 20
+    "tests/architect/journeys-r2-regressions.test.ts": 20,
+    "tests/architect/scenarios-file-signin-r4.test.ts": 18,
+    "tests/architect/scenarios-file-signin-r4-2.test.ts": 18,
+    "tests/architect/scenarios-file-signin-r4-3.test.ts": 18,
+    "tests/architect/scenarios-file-signin-r4-4.test.ts": 18,
+    "tests/architect/scenarios-file-signin-r4-regressions.test.ts": 0.2,
+    "tests/architect/flow-scenarios-file-signin-r4.test.ts": 14
   }
 }

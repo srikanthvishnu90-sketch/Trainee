@@ -32,6 +32,7 @@ Deno.test({ name: "M1 flow: chat approval -> send rail queue -> one send from th
   const pg: Pg = await startPg();
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   const env = { CAREER_NETWORKING_DRAFT: "on", ANTHROPIC_API_KEY: "sk-test-not-real", CAREER_MODEL: "claude-haiku-5-5", CAREER_SEND_RAIL: "on" };
+  const savedEnv = Object.fromEntries(Object.keys(env).map((k) => [k, Deno.env.get(k)])); // put back as it was, never deleted
   for (const [k, v] of Object.entries(env)) Deno.env.set(k, v);
   const me = PEOPLE["tok-s"];
   try {
@@ -93,7 +94,7 @@ Deno.test({ name: "M1 flow: chat approval -> send rail queue -> one send from th
       eq((await queue()).length, 1);
     });
   } finally {
-    for (const k of Object.keys(env)) Deno.env.delete(k);
+    for (const [k, v] of Object.entries(savedEnv)) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v);
     handler?.restore();
     await pg.stop();
   }

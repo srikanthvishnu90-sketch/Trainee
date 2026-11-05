@@ -35,9 +35,9 @@ export const SHARED_REPLY_MODULES = [
   "career_people_import.ts", "career_people_page.ts", "career_people_provider.ts", "career_people_sites.ts",
   "career_referrals.ts", "career_router_evidence.ts", "career_search.ts", "career_send_rail.ts", "career_situation.ts",
   "career_staffing_agencies.ts", "career_tailor.ts", "career_url_shape.js", "career_voice_link.ts", "channel.ts",
-  "channel_adapters.ts", "channel_card_tap.ts", "channel_shape.ts", "channel_text.ts", "conversation.ts", "essay_draft.ts",
+  "channel_adapters.ts", "channel_card_tap.ts", "channel_shape.ts", "channel_text.ts", "conversation.ts", "essay_draft.ts", "essay_draft_baseline.ts",
   "fact_quarantine.ts", "fact_schema.ts", "file_design.ts", "file_kinds.ts", "file_link.ts", "file_page.ts", "file_service.ts",
-  "identity_redact.ts", "length_limit.ts", "link_check.ts", "model_budget.ts", "model_calls.ts", "model_gateway.ts", "person_claims.ts",
+  "identity_redact.ts", "length_limit.ts", "link_check.ts", "model_budget.ts", "model_calls.ts", "model_gateway.ts", "person_claims.ts", "person_claims_baseline.ts",
   "personal_fact_source.ts", "posting_key.ts", "posting_pay.ts", "posting_place.ts", "posting_region.ts", "posting_text.ts", "question_map.ts",
   "brand.ts", "row_answer.ts", "telegram_jobs.ts", "apply_all_yes.ts", "apply_all_yes_flag.ts", "role_results.ts", "career_resume_replace.ts",
 ] as const;

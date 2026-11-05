@@ -55,6 +55,7 @@
     "tests/architect/claude-only-link-guard.test.ts": 0.1,
     "tests/architect/claude-only-no-openai.test.ts": 0.1,
     "tests/architect/claude-only-readers.test.ts": 0.1,
+    "tests/architect/claims-floor.test.ts": 24,
     "tests/architect/clock-sweep-pg.test.ts": 10,
     "tests/architect/clock-sweep-property.test.ts": 0.1,
     "tests/architect/cloud-engine-input.test.ts": 0.1,

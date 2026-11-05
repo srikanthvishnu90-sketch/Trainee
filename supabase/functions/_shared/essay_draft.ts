@@ -16,6 +16,7 @@ import { type AiPolicy, instructsAi, readAiPolicy } from "./ai_policy.ts";
 import { claimProblems, selfRole } from "./person_claims.ts";
 import { redactIdentity } from "./identity_redact.ts";
 import { statedLimit } from "./length_limit.ts";
+import { checkDraft as baselineCheckDraft, factLock as baselineFactLock } from "./essay_draft_baseline.ts";
 
 export type ModelFn = (payload: any) => Promise<any>;
 export interface DraftDeps {
@@ -344,7 +345,13 @@ export function targetProblems(text: string, company: string | null, label = "")
 }
 const CLAIM_VOCAB = [...TOOLS, ...TITLES, ...DEGREES, ...SCALE];
 function judge(text: string, cut: boolean, sources: { facts: string[]; posting: string[] }, limit: Limit): Judged {
-  const traced = factLock(text, [...sources.facts, ...sources.posting]);
+  // RELEASE 2 FLOOR (D-007): an item production's factLock (essay_draft_baseline.ts, 03edad41f) cannot trace is untraced
+  // here too, so a draft is shown only if both the current and production's checks pass it (claimProblems is the union).
+  const now = factLock(text, [...sources.facts, ...sources.posting]);
+  const prod = baselineFactLock(text, [...sources.facts, ...sources.posting]);
+  const untracedBoth = [...now.untraced];
+  for (const u of prod.untraced) if (!untracedBoth.some((x) => norm(x) === norm(u))) untracedBoth.push(u);
+  const traced: Lock = { pass: now.pass && prod.pass, untraced: untracedBoth };
   // The company's own name is never a claim, even when it is also a tool's or a word's ("why Stripe", "why Visa").
   const claims = claimProblems(text, { record: sources.facts, mentionable: sources.posting, vocab: CLAIM_VOCAB, company: sources.posting[0] });
   // A secret in the text is named as one, never quoted: its digits or words are not repeated in the reply the person
@@ -371,6 +378,19 @@ const failed = (j: Judged | null, policy: AiPolicy, tries: number): DraftOutcome
 // every check draftEssay makes: the employer's policy (with the posting's questions as they are now) and the person's
 // confirmed facts as they are now (a fact they have since removed or not confirmed supports nothing). No model is called.
 export async function checkDraft(o: {
+  q: EssayQuestion; siblingLabels: string[]; deps: Pick<DraftDeps, "facts">; text: string; limitText?: string;
+}): Promise<DraftOutcome> {
+  // RELEASE 2 FLOOR (architect, 2026-11-05; D-007): a draft is shown only if BOTH this check and production's (03edad41f,
+  // essay_draft_baseline.ts, decimals included) show it. Facts are read once and given to both. Remove only with an
+  // architect decision.
+  let read: Promise<unknown[]> | null = null;
+  const facts = () => (read ??= Promise.resolve().then(() => o.deps.facts()));
+  const current = await currentCheckDraft({ ...o, deps: { facts } });
+  if (!current.ok) return current;
+  const prod = await baselineCheckDraft({ ...o, deps: { facts } } as any) as DraftOutcome;
+  return prod.ok ? current : prod;
+}
+async function currentCheckDraft(o: {
   q: EssayQuestion; siblingLabels: string[]; deps: Pick<DraftDeps, "facts">; text: string; limitText?: string;
 }): Promise<DraftOutcome> {
   const { policy, gate } = employerGate(o.q, o.siblingLabels);

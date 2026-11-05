@@ -42598,7 +42598,8 @@ const CareerRouter = (() => {
   // and nothing about a company is written. Dispatched early in dispatchChat, ahead of the prep, delivery and mock routes
   // that each read part of the ask. A count or length a one-page File cannot honor is said, with nothing made.
   function handlePrepFile(text, ctx) {
-    if (!Prep || typeof Prep.prepFileRequest !== "function") return null;
+    // The no-count "no file" pass below routes the message with this claim switched off (a loop guard, and trunk's routing).
+    if (!Prep || typeof Prep.prepFileRequest !== "function" || (ctx && ctx._prepFileNoFileDepth)) return null;
     const req = Prep.prepFileRequest(text);
     if (!req) return null;
     // The person said not to make a File (BETA C03 review): none is made. Questions asked with a count are answered here as
@@ -42606,14 +42607,16 @@ const CareerRouter = (() => {
     if (req.noFile) {
       const n = req.questions;
       if (!Number.isFinite(n) || n < 1 || n > Prep.PREP_FILE_MAX_QUESTIONS) {
-        // No count (re-review): the interview prep itself, the brief, with no File; never the generic catch-all.
-        if (ctx && ctx._prepFileNoFileDepth) return null;
-        const co = namedCompanyOf(text, ctx);
-        const ask = `prepare me for my interview${co && co.company ? ` at ${s(co.company)}` : ""}`;
-        let r = null;
-        try { ctx._prepFileNoFileDepth = 1; r = dispatchChat(ask, ctx); } finally { if (ctx) delete ctx._prepFileNoFileDepth; }
-        if (!r || r.intent !== "prep_brief" || r.file || (r.result && r.result.file)) return null;
-        return { ...r, reply: `No File was made, as you asked.\n\n${s(r.reply)}`, sends: 0, payload: r.payload ? { ...r.payload, no_file: true } : { kind: "prep_brief_text", no_file: true } };
+        // No count (third review, 2026-11-04): the claim steps aside and this same pass routes the message exactly as it would
+        // without it, so a mock, a pay question, a cancel or a send keeps its own route (re-dispatching the message ran the
+        // routes before this one twice, and they are not all side-effect free). Only when that route is the generic catch-all
+        // AND what remains once the refusal of the File is taken out is itself an interview prep ask ("just tell me what to
+        // expect", "make me interview questions"), handleChat answers with the interview brief instead (prepFileNoFileBrief).
+        const rest = lc(text).replace(/[’`]/g, "'").replace(/\b(?:don't|dont|do not|never|no need to|stop|please don't|i don't|we don't)\s+(?:\w+\s+){0,2}?(?:make|create|build|send|give|write|generate|do|put together|prepare|draft|want|need)\b[^.,;!?]*?\b(?:file|page|sheet|doc|document|one[- ]pager|cheat[- ]?sheet|pdf)\b|\b(?:no|without|skip(?:ping)?|instead of|rather than)\s+(?:a|an|the|any)?\s*(?:[a-z-]+\s+){0,2}?(?:file|page|sheet|doc|document|one[- ]pager|cheat[- ]?sheet|pdf)\b(?:\s+(?:needed|necessary|please))?/g, " ");
+        const purePrep = /\binterview/.test(rest) && /\b(?:expect|prep|prepare|preparing|ready|practice|questions?|brief|tips|go over|get ready)\b/.test(rest)
+          && !/\b(?:cancel|reschedul|send|apply|pay|salary|comp|wear|mock|withdraw|decline|accept|email|message)\w*/.test(rest);
+        if (purePrep && ctx) { const co = namedCompanyOf(text, ctx); ctx._prepFileNoFileBrief = { company: co && co.company ? s(co.company) : null }; }
+        return null;
       }
       const st = prepFileStatedOf(text, null);
       const qs = typeof Prep.prepFileQuestionList === "function" ? Prep.prepFileQuestionList(n, st.role) : [];
@@ -53758,6 +53761,16 @@ const CareerRouter = (() => {
     c.posting = posting;
     c.pastedText = quoted.slice(0, 4000);
   }
+  // The interview brief for a count-less "no file" prep ask that the normal routes left to the catch-all (handlePrepFile). The
+  // brief route is reached with the prep File claim switched off (a loop guard), and the reply says no File was made.
+  function prepFileNoFileBrief(c) {
+    const want = c && c._prepFileNoFileBrief;
+    if (!want) return null;
+    let r = null;
+    try { c._prepFileNoFileDepth = 1; r = dispatchChat(`prepare me for my interview${want.company ? ` at ${want.company}` : ""}`, c); } catch { r = null; } finally { delete c._prepFileNoFileDepth; }
+    if (!r || r.intent !== "prep_brief" || r.file) return null;
+    return { ...r, reply: `No File was made, as you asked.\n\n${s(r.reply)}`, sends: 0, payload: r.payload ? { ...r.payload, no_file: true } : { kind: "prep_brief_text", no_file: true } };
+  }
   function handleChat(text, ctx) {
     const c = ctx || {};
     // COMPLEXITY WAVE (BUG-179): multi-intent accounting wraps the
@@ -53767,7 +53780,9 @@ const CareerRouter = (() => {
     // career build gets the honest scope answer.
     const parts = intentPartsOf(text);
     const multi = parts.length >= 2 && (multiMarkerOf(text) || parts.length >= 3 || /\band\b|;/.test(lc(text)));
-    const res = dispatchChat(text, c);
+    delete c._prepFileNoFileBrief;
+    let res = dispatchChat(text, c);
+    if (c._prepFileNoFileBrief) { if (res && res.intent === "career_catchall") { const b = prepFileNoFileBrief(c); if (b) res = b; } delete c._prepFileNoFileBrief; }
     // W-NEXTSTEP: work actually served this turn becomes the
     // thread's active work (mirrored out by syncThreadOut below),
     // so a later noun-less follow-up can be answered from it.

@@ -6,8 +6,8 @@
 //              degree upgraded past a look-alike word ("master data"), a GPA moved onto another number on the record, an
 //              employer's dates moved onto another entry's year: never shown; the record's own title, degree, GPA, dates: shown
 //   screening  prose that answers what the person never answered (criminal history, a background check, a drug test,
-//              relocation, a start date, a salary, sponsorship, disability, how they identify): never shown; the same words
-//              when the person's record holds them: shown
+//              relocation, a start date, a salary, sponsorship, disability, how they identify): never shown; sponsorship,
+//              work rights and disability when the person's record holds them: shown; the rest never (review of #507)
 //   batch      a cover letter drafted for one posting of a batch, checked for another posting of the same batch: never
 //              shown when it names the other employer or the other role; the posting's own letter is
 // Plus the form side (eeo, compound, reuse), whose cases are built in the test from the label lists below.
@@ -163,6 +163,7 @@ const SCREEN: [string, string, string][] = [
   ["disability", "I do not have a disability.", "Does not have a disability"],
   ["identity", "As a first-generation college student, I worked through school.", "First-generation college student"],
 ];
+const NEVER_WRITTEN = new Set(["criminal", "drug", "relocate", "start", "salary", "identity"]);
 export function screeningCases(r: R, n: number): DraftCase[] {
   const out: DraftCase[] = [];
   const LABEL = ["Is there anything else you would like us to know?", "Tell us about yourself.", "Why are you a good fit for this position?", "Additional information"];
@@ -172,7 +173,10 @@ export function screeningCases(r: R, n: number): DraftCase[] {
     const p = person(r, on ? { extra: { [`${what} (stated by the person)`]: fact } } : {});
     const honest = honestLine(p);
     const text = r.next() < 0.5 ? `${honest} ${prose}` : `${prose} ${honest}`;
-    out.push({ family: `screening:${what}:${on ? "on-record" : "planted"}`, label: r.pick(LABEL), company: r.pick(COMPANIES), text, bad: on ? null : prose, p, honest });
+    // Review of #507: a screening answer or how the person identifies is never written into prose, even on the record (the
+    // form asks it); work rights, sponsorship and a disability still may be, as the record says them.
+    const never = NEVER_WRITTEN.has(what);
+    out.push({ family: `screening:${what}:${on ? "on-record" : "planted"}`, label: r.pick(LABEL), company: r.pick(COMPANIES), text, bad: on && !never ? null : prose, p, honest });
   }
   return out;
 }

@@ -11,7 +11,7 @@
 //              tailored line (guardMaterials); the record's own title, degree, GPA and dates: shown
 //   screening  prose answering what the person never answered (criminal history, a background check, a drug test,
 //              relocation, a start date, a salary, sponsorship, work rights, disability, how they identify): never shown;
-//              the same words on their record: shown
+//              sponsorship, work rights, disability on their record: shown; the rest never, the form asks (review of #507)
 //   batch      a cover letter drafted for one posting of a batch, checked for another posting of it (the prepare-ahead
 //              re-check): never shown when it names the other employer or role; the posting's own letter always is
 //   eeo        a texted answer to one voluntary question (disability, veteran, ethnicity, gender identity) never answers
@@ -349,8 +349,9 @@ Deno.test("round 4 regressions: one case per bug, each as trunk got it wrong", a
   assertNode.equal(await shown("Tell us about yourself.", `I hold a Master of Science in Statistics from Ridgeview University.${tail}`), false);
   // essay_draft.ts: an honest decimal (the record's own GPA) was read as two numbers and refused
   assertNode.equal(await shown("Tell us about yourself.", `I graduated from Ridgeview University with a 3.4 GPA.${tail}`), true);
-  // person_claims.ts: how they identify, on the record, said "as a ..." was refused
-  assertNode.equal(await shown("Tell us about yourself.", `As a first-generation college student, I worked hard.${tail}`), true);
+  // person_claims.ts: how they identify said "as a ..." (review of #507: never written, even with the fact on record; the
+  // form's own voluntary question asks it)
+  assertNode.equal(await shown("Tell us about yourself.", `As a first-generation college student, I worked hard.${tail}`), false);
   // question_map.ts / career_apply.ts: one voluntary answer filled every other voluntary question
   const dis = field("Do you have a disability?", ["Yes", "No", "I don't wish to answer"]);
   assertNode.ok(answerKey(dis, "jobA").startsWith("job:"));
@@ -373,48 +374,57 @@ Deno.test("round 4 regressions: one case per bug, each as trunk got it wrong", a
   assertNode.equal(cpp.ready.length, 0);
 });
 
-// Review of #507 (2026-11-05): round 4's fixes for an honest identity and for screening answers accepted a word that is on
-// the record in another sense. An identity ("As a Black woman", "As an immigrant") is said only when the record states it
-// OF THE PERSON; a screening answer only when the record holds the person's own answer to that question. Each decoy below
-// was shown at 66faf5c32 and refused at its parent e1b9bff58; each must-accept is a confirmed fact said as it is.
+// Review of #507 (2026-11-05, architect decision on rv57): round 4's fixes for an honest identity and for screening answers
+// accepted a word on the record in another sense, and every word match tried after them accepted others. A record of strings
+// cannot tell a confirmed identity answer from free text, so "As a / I am a <identity>" is never written; a screening answer
+// (criminal history, a background check, a drug test, relocation, a start date, pay) is never written either: the form asks
+// each on its own. Each decoy below was shown at #507's head (66faf5c32) or at #512's first head (6e8db93bd).
 export const R4_DECOYS: { text: string; record: string; why: string }[] = [
   { text: "As a Black woman in data, I bring a different lens.", record: "Six Sigma Black Belt certification", why: "identity" },
   { text: "As a white man in tech, I know my privilege.", record: "Wrote white papers on caching", why: "identity" },
   { text: "As an immigrant, I learned resilience.", record: "Taught English to immigrant families as a volunteer", why: "identity" },
   { text: "As a first-generation college student, I worked through school.", record: "Mentor, First-Generation Student Program at State University", why: "identity" },
+  { text: "As a Black woman in data, I bring a different lens.", record: "Black and white film photography", why: "identity" },
+  { text: "As a Black woman in data, I bring a different lens.", record: "Chair, Black, Asian and Minority Ethnic staff network", why: "identity" },
+  { text: "As a white man in tech, I know my privilege.", record: "White and gray box testing of APIs", why: "identity" },
+  { text: "As an Asian woman in finance, I bring a different lens.", record: "Asian and European equities desk", why: "identity" },
+  { text: "As a woman in healthcare, I bring a different lens.", record: "Woman and Child Health Initiative volunteer", why: "identity" },
+  { text: "As a man in nursing, I bring a different lens.", record: "Man and Van moving company owner", why: "identity" },
+  { text: "As a Black engineer, I bring a different lens.", record: "Skills: Python, Black, Ruff, mypy", why: "identity" },
   { text: "I have never been convicted of a crime.", record: "B.A. Criminal Justice, State University", why: "criminal history" },
   { text: "I can start immediately.", record: "Made sales dashboards available to the whole team", why: "start date" },
   { text: "I am seeking a base salary in the low six figures.", record: "Built a salary benchmarking model", why: "salary" },
+  { text: "I am happy to relocate for this role.", record: "Not willing to relocate", why: "relocation" },
+  { text: "I have never been convicted of a crime.", record: "Has a misdemeanor conviction", why: "criminal history" },
+  { text: "I can start immediately.", record: "Available from June", why: "start date" },
+  { text: "I can start next week.", record: "Notice period negotiated with HR", why: "start date" },
+  { text: "I have no felony convictions.", record: "Felony Trial Unit, District Attorney's Office", why: "criminal history" },
+  { text: "I will pass a drug test.", record: "Drug testing lab technician", why: "drug test" },
+  { text: "My salary expectations are flexible.", record: "Compensation range analysis for new roles", why: "salary" },
+  { text: "I have no criminal record.", record: "Responsible for criminal background checks", why: "criminal history" },
+  // a confirmed answer in the person's own words is still not written into prose: the form asks it
+  { text: "As a first-generation college student, I worked through school.", record: "I am a first-generation college student", why: "identity (confirmed)" },
+  { text: "I have never been convicted of a crime.", record: "Has never been convicted of a crime", why: "criminal history (confirmed)" },
+  { text: "I can start immediately.", record: "Available to start immediately", why: "start date (confirmed)" },
+  { text: "I am seeking a base salary in the low six figures.", record: "Looking for a salary in the low six figures", why: "salary (confirmed)" },
 ];
-export const R4_CONFIRMED: { text: string; record: string }[] = [
-  { text: "As a first-generation college student, I worked through school.", record: "First-generation college student" },
-  { text: "As a first-generation college student, I worked through school.", record: "I am a first-generation college student" },
-  { text: "As a Black woman in data, I bring a different lens.", record: "Black woman" },
-  { text: "As an immigrant, I learned resilience.", record: "I am an immigrant" },
-  { text: "I have never been convicted of a crime.", record: "Has never been convicted of a crime" },
-  { text: "I can start immediately.", record: "Available to start immediately" },
-  { text: "I am seeking a base salary in the low six figures.", record: "Looking for a salary in the low six figures" },
-];
-Deno.test("review of #507: an identity or a screening answer is never supported by the same word in another sense", async () => {
+Deno.test("review of #507: an identity or a screening answer is never written into prose, whatever the record holds", async () => {
   const conf = { status: "confirmed", needs_confirmation: false, source: "user" };
   const base = [{ id: "F-1", kind: "experience", title: "Data Analyst, Acme Corp, 2019-2022", org: "Acme Corp", role: "Data Analyst", start: "2019", end: "2022",
     bullets: ["Built Tableau dashboards for 40 sales reps"], ...conf },
     { id: "F-2", kind: "education", title: "B.S. Statistics, Ridgeview University, 2018", school: "Ridgeview University", degree: "B.S. Statistics", text: "GPA 3.4/4.0", ...conf }];
   const tail = " At Acme Corp, I built Tableau dashboards for 40 sales reps.";
-  // a confirmed fact as the person gave it: "How I identify myself" and their own words
-  const shown = async (text: string, record: string, title = record) => {
+  const shown = async (text: string, record: string) => {
     const a = await checkDraft({ q: essayQ("Tell us about yourself.", "Larkspur Health"), siblingLabels: [],
-      deps: { facts: () => [...base, { id: "F-3", kind: "other", title, text: record, ...conf }] }, text: `${text}${tail}` });
+      deps: { facts: () => [...base, { id: "F-3", kind: "other", title: "How I describe myself", text: record, ...conf }] }, text: `${text}${tail}` });
     assertNode.notEqual(a.ok ? "" : a.why, "thin", `${JSON.stringify(text)}: too few facts to judge`);
     return a.ok;
   };
   const recordOf = (record: string) => ["Data Analyst, Acme Corp, 2019-2022; Built Tableau dashboards for 40 sales reps", "B.S. Statistics, Ridgeview University, 2018; GPA 3.4/4.0", record];
+  // the control: the honest line alone is shown, so a refusal below is the claim's
+  assertNode.equal(await shown(tail.trim(), "Black and white film photography"), true);
   for (const d of R4_DECOYS) {
     assertNode.equal(await shown(d.text, d.record), false, `${d.why}: ${JSON.stringify(d.text)} shown on ${JSON.stringify(d.record)}`);
     assertNode.notDeepEqual(claimProblems(d.text, { record: recordOf(d.record) }), [], `${d.why}: ${JSON.stringify(d.text)} passed on ${JSON.stringify(d.record)}`);
-  }
-  for (const c of R4_CONFIRMED) {
-    assertNode.equal(await shown(c.text, c.record, "How I identify myself"), true, `${JSON.stringify(c.text)} refused on ${JSON.stringify(c.record)}`);
-    assertNode.deepEqual(claimProblems(c.text, { record: recordOf(c.record) }), [], `${JSON.stringify(c.text)} refused on ${JSON.stringify(c.record)}`);
   }
 });

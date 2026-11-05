@@ -1,0 +1,2254 @@
+{
+ "label": "trunk-3defbcf",
+ "sha": "a2e7524bd067df42a5e1ee5cf520f004eabd8b98",
+ "at": "2026-11-05T20:39:53.572Z",
+ "ref_model": "claude-opus-5-5 via claude CLI (subscription)",
+ "judge_model": "haiku via claude CLI (subscription)",
+ "calls_this_run": 0,
+ "call_cap": 0,
+ "stopped": null,
+ "partial": false,
+ "errors": [],
+ "references": {
+  "have": 208,
+  "of": 208
+ },
+ "overall": {
+  "empty": {
+   "win": 0,
+   "tie": 1,
+   "loss": 39,
+   "judged": 40
+  },
+  "seeded": {
+   "win": 1,
+   "tie": 0,
+   "loss": 41,
+   "judged": 42
+  }
+ },
+ "dims": {
+  "ask": {
+   "win": 1,
+   "tie": 23,
+   "loss": 58
+  },
+  "delivered": {
+   "win": 3,
+   "tie": 21,
+   "loss": 58
+  },
+  "correct": {
+   "win": 3,
+   "tie": 16,
+   "loss": 63
+  },
+  "texting": {
+   "win": 9,
+   "tie": 11,
+   "loss": 62
+  },
+  "next": {
+   "win": 13,
+   "tie": 17,
+   "loss": 52
+  }
+ },
+ "not_comparable": 126,
+ "rows": [
+  {
+   "case": "A2.1",
+   "state": "empty",
+   "feature": "A2",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A2.2",
+   "state": "empty",
+   "feature": "A2",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A2.3",
+   "state": "empty",
+   "feature": "A2",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A3.3",
+   "state": "empty",
+   "feature": "A3",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A3.4",
+   "state": "empty",
+   "feature": "A3",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A4.1",
+   "state": "empty",
+   "feature": "A4",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A4.3",
+   "state": "empty",
+   "feature": "A4",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A4.4",
+   "state": "empty",
+   "feature": "A4",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A5.2",
+   "state": "empty",
+   "feature": "A5",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A5.3",
+   "state": "empty",
+   "feature": "A5",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A6.3",
+   "state": "empty",
+   "feature": "A6",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A7.1",
+   "state": "empty",
+   "feature": "A7",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A7.2",
+   "state": "empty",
+   "feature": "A7",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A7.3",
+   "state": "empty",
+   "feature": "A7",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A7.4",
+   "state": "empty",
+   "feature": "A7",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A8.1",
+   "state": "empty",
+   "feature": "A8",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A8.2",
+   "state": "empty",
+   "feature": "A8",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A8.3",
+   "state": "empty",
+   "feature": "A8",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A9.3",
+   "state": "empty",
+   "feature": "A9",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A10.1",
+   "state": "empty",
+   "feature": "A10",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A10.2",
+   "state": "empty",
+   "feature": "A10",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A10.4",
+   "state": "empty",
+   "feature": "A10",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A11.2",
+   "state": "empty",
+   "feature": "A11",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A11.3",
+   "state": "empty",
+   "feature": "A11",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A11.4",
+   "state": "empty",
+   "feature": "A11",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A12.2",
+   "state": "empty",
+   "feature": "A12",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A12.4",
+   "state": "empty",
+   "feature": "A12",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A13.1",
+   "state": "empty",
+   "feature": "A13",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A13.2",
+   "state": "empty",
+   "feature": "A13",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A13.3",
+   "state": "empty",
+   "feature": "A13",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A13.4",
+   "state": "empty",
+   "feature": "A13",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A14.4",
+   "state": "empty",
+   "feature": "A14",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A16.2",
+   "state": "empty",
+   "feature": "A16",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A16.3",
+   "state": "empty",
+   "feature": "A16",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A16.4",
+   "state": "empty",
+   "feature": "A16",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A17.1",
+   "state": "empty",
+   "feature": "A17",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A17.2",
+   "state": "empty",
+   "feature": "A17",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A17.3",
+   "state": "empty",
+   "feature": "A17",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A18.2",
+   "state": "empty",
+   "feature": "A18",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A18.3",
+   "state": "empty",
+   "feature": "A18",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A18.4",
+   "state": "empty",
+   "feature": "A18",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A19.2",
+   "state": "empty",
+   "feature": "A19",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A19.3",
+   "state": "empty",
+   "feature": "A19",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A19.4",
+   "state": "empty",
+   "feature": "A19",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A20.1",
+   "state": "empty",
+   "feature": "A20",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A20.3",
+   "state": "empty",
+   "feature": "A20",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A20.4",
+   "state": "empty",
+   "feature": "A20",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A21.2",
+   "state": "empty",
+   "feature": "A21",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A21.3",
+   "state": "empty",
+   "feature": "A21",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A21.4",
+   "state": "empty",
+   "feature": "A21",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A22.1",
+   "state": "empty",
+   "feature": "A22",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A22.2",
+   "state": "empty",
+   "feature": "A22",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A22.3",
+   "state": "empty",
+   "feature": "A22",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A23.1",
+   "state": "empty",
+   "feature": "A23",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A23.2",
+   "state": "empty",
+   "feature": "A23",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A23.3",
+   "state": "empty",
+   "feature": "A23",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A23.4",
+   "state": "empty",
+   "feature": "A23",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A24.1",
+   "state": "empty",
+   "feature": "A24",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A24.2",
+   "state": "empty",
+   "feature": "A24",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A24.3",
+   "state": "empty",
+   "feature": "A24",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A24.4",
+   "state": "empty",
+   "feature": "A24",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A25.2",
+   "state": "empty",
+   "feature": "A25",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A25.3",
+   "state": "empty",
+   "feature": "A25",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A25.4",
+   "state": "empty",
+   "feature": "A25",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A2.1",
+   "state": "seeded",
+   "feature": "A2",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A2.2",
+   "state": "seeded",
+   "feature": "A2",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A2.3",
+   "state": "seeded",
+   "feature": "A2",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A3.4",
+   "state": "seeded",
+   "feature": "A3",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A4.1",
+   "state": "seeded",
+   "feature": "A4",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A4.3",
+   "state": "seeded",
+   "feature": "A4",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A4.4",
+   "state": "seeded",
+   "feature": "A4",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A5.2",
+   "state": "seeded",
+   "feature": "A5",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A5.3",
+   "state": "seeded",
+   "feature": "A5",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A6.3",
+   "state": "seeded",
+   "feature": "A6",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A7.1",
+   "state": "seeded",
+   "feature": "A7",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A7.2",
+   "state": "seeded",
+   "feature": "A7",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A7.3",
+   "state": "seeded",
+   "feature": "A7",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A7.4",
+   "state": "seeded",
+   "feature": "A7",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A8.1",
+   "state": "seeded",
+   "feature": "A8",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A8.2",
+   "state": "seeded",
+   "feature": "A8",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A8.3",
+   "state": "seeded",
+   "feature": "A8",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A9.3",
+   "state": "seeded",
+   "feature": "A9",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A10.1",
+   "state": "seeded",
+   "feature": "A10",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A10.2",
+   "state": "seeded",
+   "feature": "A10",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A10.4",
+   "state": "seeded",
+   "feature": "A10",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A11.2",
+   "state": "seeded",
+   "feature": "A11",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A11.3",
+   "state": "seeded",
+   "feature": "A11",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A11.4",
+   "state": "seeded",
+   "feature": "A11",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A12.2",
+   "state": "seeded",
+   "feature": "A12",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A12.4",
+   "state": "seeded",
+   "feature": "A12",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A13.1",
+   "state": "seeded",
+   "feature": "A13",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A13.2",
+   "state": "seeded",
+   "feature": "A13",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A13.3",
+   "state": "seeded",
+   "feature": "A13",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A13.4",
+   "state": "seeded",
+   "feature": "A13",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A14.4",
+   "state": "seeded",
+   "feature": "A14",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A16.2",
+   "state": "seeded",
+   "feature": "A16",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A16.3",
+   "state": "seeded",
+   "feature": "A16",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A16.4",
+   "state": "seeded",
+   "feature": "A16",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A17.1",
+   "state": "seeded",
+   "feature": "A17",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A17.2",
+   "state": "seeded",
+   "feature": "A17",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A17.3",
+   "state": "seeded",
+   "feature": "A17",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A18.2",
+   "state": "seeded",
+   "feature": "A18",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A18.3",
+   "state": "seeded",
+   "feature": "A18",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A18.4",
+   "state": "seeded",
+   "feature": "A18",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A19.2",
+   "state": "seeded",
+   "feature": "A19",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A19.3",
+   "state": "seeded",
+   "feature": "A19",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A19.4",
+   "state": "seeded",
+   "feature": "A19",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A20.1",
+   "state": "seeded",
+   "feature": "A20",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A20.3",
+   "state": "seeded",
+   "feature": "A20",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A20.4",
+   "state": "seeded",
+   "feature": "A20",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A21.2",
+   "state": "seeded",
+   "feature": "A21",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A21.3",
+   "state": "seeded",
+   "feature": "A21",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A21.4",
+   "state": "seeded",
+   "feature": "A21",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A22.1",
+   "state": "seeded",
+   "feature": "A22",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A22.2",
+   "state": "seeded",
+   "feature": "A22",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A22.3",
+   "state": "seeded",
+   "feature": "A22",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A23.1",
+   "state": "seeded",
+   "feature": "A23",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A23.2",
+   "state": "seeded",
+   "feature": "A23",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A23.3",
+   "state": "seeded",
+   "feature": "A23",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A24.1",
+   "state": "seeded",
+   "feature": "A24",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A24.2",
+   "state": "seeded",
+   "feature": "A24",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A24.3",
+   "state": "seeded",
+   "feature": "A24",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A24.4",
+   "state": "seeded",
+   "feature": "A24",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A25.2",
+   "state": "seeded",
+   "feature": "A25",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A25.3",
+   "state": "seeded",
+   "feature": "A25",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "A25.4",
+   "state": "seeded",
+   "feature": "A25",
+   "layer": "staged_brain",
+   "status": "not comparable (scripted brain)"
+  },
+  {
+   "case": "C01",
+   "state": "empty",
+   "feature": "C",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B gives three real Chicago board links, while Reply A is garbled and wrongly says no postings exist."
+  },
+  {
+   "case": "C02",
+   "state": "empty",
+   "feature": "C",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "win"
+   },
+   "overall": "loss",
+   "why": "Reply B lists six real Chicago healthcare roles and training options, while Reply A talks about a company file and answers a different question."
+  },
+  {
+   "case": "C03",
+   "state": "empty",
+   "feature": "C",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B delivers the requested one-page File with five questions and a 30-minute plan and confirms the profile was unchanged, while Reply A delivers only three questions and a mock offer."
+  },
+  {
+   "case": "C04",
+   "state": "empty",
+   "feature": "C",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B answers whether to counter and gives a clear draft for review, while Reply A is an unfilled template with 'the firm' placeholders and no answer."
+  },
+  {
+   "case": "A1.1",
+   "state": "empty",
+   "feature": "A1",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A lists ten real Chicago board links that match the request, while Reply B wrongly claims no postings exist."
+  },
+  {
+   "case": "A1.2",
+   "state": "empty",
+   "feature": "A1",
+   "layer": "code_first",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "tie",
+    "correct": "tie",
+    "texting": "win",
+    "next": "tie"
+   },
+   "overall": "loss",
+   "why": "Both correctly refuse to apply with no saved list, but Reply A also states the resume requirement and the per-item approval rule."
+  },
+  {
+   "case": "A1.3",
+   "state": "empty",
+   "feature": "A1",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "tie",
+    "correct": "tie",
+    "texting": "loss",
+    "next": "tie"
+   },
+   "overall": "loss",
+   "why": "Both correctly say there is no list to skip, but A repeats the no-list point twice while B is tighter and clearly says nothing was changed."
+  },
+  {
+   "case": "A1.4",
+   "state": "empty",
+   "feature": "A1",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "tie",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "tie"
+   },
+   "overall": "loss",
+   "why": "A says it will start a batch without noting that no resume exists, and uses jargon like 'read back'; B states the account is empty and names the resume and roles needed."
+  },
+  {
+   "case": "A2.4",
+   "state": "empty",
+   "feature": "A2",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "tie",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "win"
+   },
+   "overall": "loss",
+   "why": "B directly acknowledges the 'no' and says it stays unsent, while A is longer and drifts into process claims, though A ends with a useful question."
+  },
+  {
+   "case": "A3.1",
+   "state": "empty",
+   "feature": "A3",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "tie",
+    "texting": "win",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "B covers both missing inputs (posting and resume), the confirmed-facts rule, and the approval gate, while A is shorter but asks for less."
+  },
+  {
+   "case": "A3.2",
+   "state": "empty",
+   "feature": "A3",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "tie",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "A invents a handoff-link and ticket mechanism and uses jargon, while B correctly says nothing is in progress and asks for the posting."
+  },
+  {
+   "case": "A4.2",
+   "state": "empty",
+   "feature": "A4",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "B directly answers that applications run in the cloud browser with the stated limits, while A answers a LinkedIn question that was not asked and invents a sign-in step."
+  },
+  {
+   "case": "A5.1",
+   "state": "empty",
+   "feature": "A5",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "loss",
+    "correct": "tie",
+    "texting": "tie",
+    "next": "win"
+   },
+   "overall": "loss",
+   "why": "B gives a fuller, accurate field list and states that no answers are saved, while A's list is thinner but ends with a clear next step."
+  },
+  {
+   "case": "A5.4",
+   "state": "empty",
+   "feature": "A5",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "B invents a packet to hold and jargon about a record write, while A correctly says nothing is saved and asks for the answer."
+  },
+  {
+   "case": "A6.1",
+   "state": "empty",
+   "feature": "A6",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "loss",
+    "correct": "tie",
+    "texting": "tie",
+    "next": "tie"
+   },
+   "overall": "loss",
+   "why": "B explains there is nothing to tailor, asks for the resume, and accurately points to real Chicago and remote board roles, which A omits."
+  },
+  {
+   "case": "A6.2",
+   "state": "empty",
+   "feature": "A6",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "B answers an imagined outreach question with invented product claims and a shortlist offer, while A directly confirms SQL will not be added unless the person confirms it."
+  },
+  {
+   "case": "A6.4",
+   "state": "empty",
+   "feature": "A6",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "tie",
+    "correct": "tie",
+    "texting": "tie",
+    "next": "tie"
+   },
+   "overall": "loss",
+   "why": "Both say no PDF exists yet, but B states the review-and-approve order and avoids A's redundant request to name the role again."
+  },
+  {
+   "case": "A8.4",
+   "state": "empty",
+   "feature": "A8",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "B claims a live and snapshot search that cannot happen in this text-only turn, while A honestly says open status cannot be confirmed and asks for the role."
+  },
+  {
+   "case": "A9.1",
+   "state": "empty",
+   "feature": "A9",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A lists three real Chicago entry-level postings with URLs, while Reply B wrongly says the board has no match even though several exist."
+  },
+  {
+   "case": "A9.2",
+   "state": "empty",
+   "feature": "A9",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A gives real remote (US) support postings with URLs, while Reply B wrongly says the board has no remote match and garbles the request."
+  },
+  {
+   "case": "A9.4",
+   "state": "empty",
+   "feature": "A9",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A correctly says no postings exist for ZZZSynthetic999 and offers real alternatives, while Reply B mangles the company name and gives an irrelevant template."
+  },
+  {
+   "case": "A10.3",
+   "state": "empty",
+   "feature": "A10",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "tie",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A directly explains how to pause alerts and that none exist yet, while Reply B mostly explains how to create a watch and uses jargon like 'watch profile'."
+  },
+  {
+   "case": "A11.1",
+   "state": "empty",
+   "feature": "A11",
+   "layer": "code_first",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "tie",
+    "texting": "win",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A clearly says alumni search is not possible and offers a workable review-first alternative, while Reply B only asks for a school and never addresses the request."
+  },
+  {
+   "case": "A12.1",
+   "state": "empty",
+   "feature": "A12",
+   "layer": "code_first",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "tie",
+    "texting": "win",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A delivers a review-only placeholder draft and asks for details, while Reply B refuses to draft at all and adds unrequested LinkedIn export steps."
+  },
+  {
+   "case": "A12.3",
+   "state": "empty",
+   "feature": "A12",
+   "layer": "code_first",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "tie",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "win"
+   },
+   "overall": "loss",
+   "why": "Reply B acknowledges the no-email constraint and states nothing was sent, while Reply A ignores it, pivots to adding contacts, and cites an unverified LinkedIn menu path."
+  },
+  {
+   "case": "A14.1",
+   "state": "empty",
+   "feature": "A14",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "tie",
+    "correct": "tie",
+    "texting": "tie",
+    "next": "tie"
+   },
+   "overall": "tie",
+   "why": "Both correctly report an empty tracker and offer a clear next step, with comparable brevity and no invented facts."
+  },
+  {
+   "case": "A14.2",
+   "state": "empty",
+   "feature": "A14",
+   "layer": "code_first",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B invents a product name ('Trainee') and a 30-day window, while Reply A accurately describes the empty state and gives a concrete next step."
+  },
+  {
+   "case": "A14.3",
+   "state": "empty",
+   "feature": "A14",
+   "layer": "code_first",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "tie",
+    "correct": "tie",
+    "texting": "loss",
+    "next": "tie"
+   },
+   "overall": "loss",
+   "why": "Reply B answers the question directly in a few sentences, whereas Reply A buries the answer under a long, jargon-heavy counting methodology."
+  },
+  {
+   "case": "A15.1",
+   "state": "empty",
+   "feature": "A15",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A delivers the requested five questions and 30-minute plan as inline content and honestly notes no File link exists, while Reply B gives only a few questions, no plan, and uses internal jargon."
+  },
+  {
+   "case": "A15.2",
+   "state": "empty",
+   "feature": "A15",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "win",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "tie"
+   },
+   "overall": "loss",
+   "why": "Reply A invents product behavior ('sleep is a scored input', 'I will score it') and uses jargon, while Reply B honors the no-invention constraint and asks the one needed question about the company and role."
+  },
+  {
+   "case": "A15.3",
+   "state": "empty",
+   "feature": "A15",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "tie",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Both explain that voice is unavailable and offer a text mock, but B adds internal build detail ('no speech path in this build') and A's closing question moves the session forward."
+  },
+  {
+   "case": "A15.4",
+   "state": "empty",
+   "feature": "A15",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "tie",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "tie"
+   },
+   "overall": "loss",
+   "why": "B gives a concrete practice question and a clear reply instruction, while A asks for an answer 'out loud' in a text chat."
+  },
+  {
+   "case": "A16.1",
+   "state": "empty",
+   "feature": "A16",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "tie",
+    "next": "tie"
+   },
+   "overall": "loss",
+   "why": "A lists the real board postings with URLs, whereas B cites an unseen 'knowledge base' source and gives no postings."
+  },
+  {
+   "case": "A17.4",
+   "state": "empty",
+   "feature": "A17",
+   "layer": "code_first",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "tie",
+    "correct": "loss",
+    "texting": "tie",
+    "next": "win"
+   },
+   "overall": "loss",
+   "why": "A honestly notes there is no earlier request on this empty account, while B concedes a miss it cannot verify, though B's next question is more specific."
+  },
+  {
+   "case": "A18.1",
+   "state": "empty",
+   "feature": "A18",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "tie",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "A says nothing is saved and offers to read facts back for confirmation first, while B claims facts are recorded immediately, which conflicts with the approval rule."
+  },
+  {
+   "case": "A19.1",
+   "state": "empty",
+   "feature": "A19",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "tie",
+    "correct": "tie",
+    "texting": "loss",
+    "next": "tie"
+   },
+   "overall": "loss",
+   "why": "A's numbered two-item list is cleaner and easier to scan than B's dense paragraph with filler."
+  },
+  {
+   "case": "A20.2",
+   "state": "empty",
+   "feature": "A20",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B answers whether the search can continue and asks for role and location; Reply A talks about a company-file library the person never asked about."
+  },
+  {
+   "case": "A21.1",
+   "state": "empty",
+   "feature": "A21",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "tie"
+   },
+   "overall": "loss",
+   "why": "Reply A explains what a weekly digest contains; Reply B shows an empty digest with counts instead of answering the question."
+  },
+  {
+   "case": "A22.4",
+   "state": "empty",
+   "feature": "A22",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "tie",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "win"
+   },
+   "overall": "loss",
+   "why": "Both explain deletion without doing it, but Reply A adds an unsupported claim about transcripts and uses more jargon, while Reply B is shorter and accurately notes the account is empty."
+  },
+  {
+   "case": "A25.1",
+   "state": "empty",
+   "feature": "A25",
+   "layer": "code_first",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "tie"
+   },
+   "overall": "loss",
+   "why": "Reply A gives a direct zero count; Reply B buries it in a long, filler-heavy explanation of its counting method."
+  },
+  {
+   "case": "C01",
+   "state": "seeded",
+   "feature": "C",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B lists three real Chicago customer support links and respects the no-contact limit; Reply A is garbled and wrongly claims no matches exist."
+  },
+  {
+   "case": "C02",
+   "state": "seeded",
+   "feature": "C",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "win",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A gives the healthcare links, training ideas, and a resume-gap question; Reply B is garbled, starts mid-sentence, and talks about a company file instead."
+  },
+  {
+   "case": "C03",
+   "state": "seeded",
+   "feature": "C",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "win",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B delivers the requested one-page File with five questions and a 30-minute plan, while Reply A gives only three questions and offers a mock instead."
+  },
+  {
+   "case": "C04",
+   "state": "seeded",
+   "feature": "C",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A answers whether to counter and gives a usable draft held for approval, while Reply B is garbled and its draft asks for $24 rather than a counter."
+  },
+  {
+   "case": "A1.1",
+   "state": "seeded",
+   "feature": "A1",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "tie",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B lists ten real Chicago postings with URLs, whereas Reply A wrongly says the board has no matches despite several Chicago customer support roles."
+  },
+  {
+   "case": "A1.2",
+   "state": "seeded",
+   "feature": "A1",
+   "layer": "code_first",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A respects the approval constraint and asks about Northwind, while Reply B claims 8 queued from a 10-role list and is dense with jargon."
+  },
+  {
+   "case": "A1.3",
+   "state": "seeded",
+   "feature": "A1",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "tie",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B actually removes Lakeview and lists the remaining nine roles, while Reply A ignores the skip and offers to tailor for Lakeview."
+  },
+  {
+   "case": "A1.4",
+   "state": "seeded",
+   "feature": "A1",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "tie",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A shows per-role progress consistent with the prior nine-role batch, while Reply B says no batch can be found and shows nothing."
+  },
+  {
+   "case": "A2.4",
+   "state": "seeded",
+   "feature": "A2",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A acknowledges the stop, confirms the held $27 draft was not sent, and asks whether to keep or delete it, while Reply B ignores the draft and gives a generic process explanation."
+  },
+  {
+   "case": "A3.1",
+   "state": "seeded",
+   "feature": "A3",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A invents a 'backend role' the person never mentioned, while Reply B accurately lists the three roles from the board with URLs and asks which one to prepare."
+  },
+  {
+   "case": "A3.2",
+   "state": "seeded",
+   "feature": "A3",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "tie",
+    "correct": "win",
+    "texting": "loss",
+    "next": "tie"
+   },
+   "overall": "loss",
+   "why": "Reply A is long and full of internal jargon (ticket, handoff link, minted), while Reply B briefly states the CAPTCHA rule and that the person completes it themselves."
+  },
+  {
+   "case": "A3.3",
+   "state": "seeded",
+   "feature": "A3",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A keeps the person in control of sign-in and says no passwords in chat, whereas Reply B has the agent create accounts and vault passwords in jargon-heavy language that conflicts with the rule that the person signs in themselves."
+  },
+  {
+   "case": "A4.2",
+   "state": "seeded",
+   "feature": "A4",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B directly answers 'yes' and explains the cloud-browser flow with the approval and sign-in limits, while Reply A is garbled, talks about connecting LinkedIn, and never answers the question."
+  },
+  {
+   "case": "A5.1",
+   "state": "seeded",
+   "feature": "A5",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "loss",
+    "correct": "tie",
+    "texting": "win",
+    "next": "win"
+   },
+   "overall": "loss",
+   "why": "Reply A gives a fuller, resume-grounded list of typical fields, while Reply B is shorter, opens with an awkward echo fragment, and ends with a clear question to the person."
+  },
+  {
+   "case": "A5.4",
+   "state": "seeded",
+   "feature": "A5",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B correctly notes no sponsorship answer is saved yet and asks a clear yes/no question, while Reply A invents a prepared packet to hold and uses jargon like 'record write'."
+  },
+  {
+   "case": "A6.1",
+   "state": "seeded",
+   "feature": "A6",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B tailors for customer support from confirmed facts, while Reply A tailors for an unrelated Synthco software role and invents a PDF, parse check, and posting details."
+  },
+  {
+   "case": "A6.2",
+   "state": "seeded",
+   "feature": "A6",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B honors the 'do not invent SQL' constraint and cites the real PostgreSQL lines, while Reply A refuses and then drifts into outreach and Gmail talk unrelated to the resume."
+  },
+  {
+   "case": "A6.4",
+   "state": "seeded",
+   "feature": "A6",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "win"
+   },
+   "overall": "loss",
+   "why": "Reply A honestly says it cannot make a PDF and provides the tailored resume inline as a File, while Reply B claims a PDF is attached when none exists."
+  },
+  {
+   "case": "A8.4",
+   "state": "seeded",
+   "feature": "A8",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A lists the Chicago postings from the board and honestly says it cannot re-verify they are open, while Reply B falsely claims a live board and snapshot check and returns nothing."
+  },
+  {
+   "case": "A9.1",
+   "state": "seeded",
+   "feature": "A9",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B lists three real Chicago entry-level postings from the board with URLs, while Reply A wrongly claims the board has no matches."
+  },
+  {
+   "case": "A9.2",
+   "state": "seeded",
+   "feature": "A9",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A honours the remote-only constraint with three board links, offers the rest, and flags the on-site Chicago roles; Reply B claims unverified pay details, says \"Apply on each\" when nothing was prepared or approved, and gives an unexplained File link instead of the list."
+  },
+  {
+   "case": "A9.4",
+   "state": "seeded",
+   "feature": "A9",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "tie",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "tie"
+   },
+   "overall": "loss",
+   "why": "Reply B garbles the company name (\"company does exist zzzsynthetic999\"), adds an unrequested \"in Chicago\" constraint and an unsupported snapshot claim, whereas Reply A plainly says no such company is on the board and offers clear alternatives."
+  },
+  {
+   "case": "A10.3",
+   "state": "seeded",
+   "feature": "A10",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "tie",
+    "texting": "loss",
+    "next": "win"
+   },
+   "overall": "loss",
+   "why": "Reply A directly explains how to pause alerts and notes none exist, while Reply B never answers how to pause and uses internal jargon like \"watch profile\", though Reply B gives a clearer next step."
+  },
+  {
+   "case": "A11.1",
+   "state": "seeded",
+   "feature": "A11",
+   "layer": "code_first",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "win",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B asks which company is meant and stays brief, while Reply A adds unverifiable specifics (72-hour link, 40 rows per message, no attachments) and a long multi-step export walkthrough."
+  },
+  {
+   "case": "A12.1",
+   "state": "seeded",
+   "feature": "A12",
+   "layer": "code_first",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "win",
+    "texting": "tie",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B delivers a review-only networking draft with placeholders and resume facts, though it wrongly says 'last summer' for a summer 2025 internship, whereas Reply A refuses to draft at all."
+  },
+  {
+   "case": "A12.3",
+   "state": "seeded",
+   "feature": "A12",
+   "layer": "code_first",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "win"
+   },
+   "overall": "loss",
+   "why": "Reply B directly confirms that nothing is sent and that the counter stays an unsent draft, while Reply A ignores the 'no email should be sent' constraint and only repeats the CSV request."
+  },
+  {
+   "case": "A14.1",
+   "state": "seeded",
+   "feature": "A14",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "loss",
+    "correct": "tie",
+    "texting": "win",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "A gives the full status with counts and a clear follow-up question; B is shorter, but its 'say find jobs' next step is stale because the search has already run."
+  },
+  {
+   "case": "A14.2",
+   "state": "seeded",
+   "feature": "A14",
+   "layer": "code_first",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "tie",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "A answers narrowly, leaves out the offer, counter draft and next step, and invents a 30-day scope and a 'Trainee' product name; B covers the real status accurately and ends with clear options."
+  },
+  {
+   "case": "A14.3",
+   "state": "seeded",
+   "feature": "A14",
+   "layer": "code_first",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "A directly answers 'nothing sent' and notes the pending counter email is unsent; B adds an invented counting methodology (queues, receipts, UTC day) that is not in the record and is a wall of text."
+  },
+  {
+   "case": "A15.1",
+   "state": "seeded",
+   "feature": "A15",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A delivers the requested one-page File with five questions and a 30-minute plan, grounded in the resume. Reply B gives a jargon-heavy brief with no File, no five-question set, and an unsupported claim that the profile holds no usable stories."
+  },
+  {
+   "case": "A15.2",
+   "state": "seeded",
+   "feature": "A15",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "win",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A correctly asks for the missing company, role, and format and promises no invented facts, while Reply B delivers more but adds unsupported claims like 'sleep is a scored input' and 'drops more points', and is harder to read as a text."
+  },
+  {
+   "case": "A15.3",
+   "state": "seeded",
+   "feature": "A15",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "tie",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Both clearly say voice mocks aren't available and offer a text mock, but B avoids internal jargon ('this build') and claims about scoring that A asserts without basis, and B's follow-up ties the offer to the on-record Northwind Health role."
+  },
+  {
+   "case": "A15.4",
+   "state": "seeded",
+   "feature": "A15",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "tie",
+    "correct": "tie",
+    "texting": "loss",
+    "next": "tie"
+   },
+   "overall": "loss",
+   "why": "Reply A's question is tailored to customer support and grounded in the resume, while Reply B's generic question comes wrapped in jargon like 'rubric' and 'drill'."
+  },
+  {
+   "case": "A16.1",
+   "state": "seeded",
+   "feature": "A16",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply A honestly flags that the resume shows no retail work and gives board links, while Reply B invents a source citation and date and cites no postings."
+  },
+  {
+   "case": "A17.4",
+   "state": "seeded",
+   "feature": "A17",
+   "layer": "code_first",
+   "status": "judged",
+   "dims": {
+    "ask": "win",
+    "delivered": "tie",
+    "correct": "win",
+    "texting": "win",
+    "next": "win"
+   },
+   "overall": "win",
+   "why": "Reply A admits the miss and asks what was wanted without guessing, while Reply B presumes an interpretation and re-lists jobs the person already saw."
+  },
+  {
+   "case": "A18.1",
+   "state": "seeded",
+   "feature": "A18",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B answers about the person's job preferences from the chat, while Reply A recounts resume entry counts, repeats itself, and ignores the preferences."
+  },
+  {
+   "case": "A19.1",
+   "state": "seeded",
+   "feature": "A19",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B correctly notes the confirmed resume already exists and lists the real missing inputs, while Reply A asks the person to paste a resume they already confirmed."
+  },
+  {
+   "case": "A20.2",
+   "state": "seeded",
+   "feature": "A20",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "tie"
+   },
+   "overall": "loss",
+   "why": "Reply A directly confirms the saved search and held counter draft, while Reply B answers an unrelated question about company files."
+  },
+  {
+   "case": "A21.1",
+   "state": "seeded",
+   "feature": "A21",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "win"
+   },
+   "overall": "loss",
+   "why": "Reply A explains what a digest contains, while Reply B reports a digest with counts even though no digest or applications exist on record."
+  },
+  {
+   "case": "A22.4",
+   "state": "seeded",
+   "feature": "A22",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "win"
+   },
+   "overall": "loss",
+   "why": "Reply A names the specific items a delete would remove, while Reply B invents erase semantics such as transcript and audit-record exclusion and uses internal jargon."
+  },
+  {
+   "case": "A23.4",
+   "state": "seeded",
+   "feature": "A23",
+   "layer": "router",
+   "status": "judged",
+   "dims": {
+    "ask": "loss",
+    "delivered": "loss",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Reply B gives the right safety answer (don't enter another person's password, verify the real site, sign in with your own account), while Reply A talks about creating an account with invented vault and alias mechanics."
+  },
+  {
+   "case": "A25.1",
+   "state": "seeded",
+   "feature": "A25",
+   "layer": "code_first",
+   "status": "judged",
+   "dims": {
+    "ask": "tie",
+    "delivered": "tie",
+    "correct": "loss",
+    "texting": "loss",
+    "next": "loss"
+   },
+   "overall": "loss",
+   "why": "Both answer zero, but Reply A pads the answer with an invented counting methodology while Reply B is brief and points to the unsent draft awaiting review, though it ends with a stray sentence."
+  }
+ ]
+}

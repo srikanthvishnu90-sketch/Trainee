@@ -298,3 +298,44 @@ test("C04 r2: \"counter at the same rate\" is answered: no counter at the offer,
   assert.match(reply, /accepts \$24 an hour and asks about the terms/);
   assert.ok(!out.draft && !emailIn(reply));
 });
+
+/* Review round 3 (PR #517): no pronoun or generic word is ever an employer; past pay is said as past; two named offers
+ * with one named to counter use the other as the person's own leverage. */
+test("C04 r3: \"They offered me\" names no employer: no \"They\" in the draft, the employer is asked for", () => {
+  const say = world();
+  const { out, reply } = say("They offered me $24 an hour. Last job was $18 an hour. Should I counter? Draft a counteroffer.");
+  assert.equal(out.intent, "negotiation_draft", reply);
+  const email = emailIn(reply);
+  assert.ok(!/\bThey\b(?! offered)|at They|Dear They|, They\b/.test(email), `a pronoun as the employer: ${email}`);
+  assert.match(email, /^Subject: Your offer$/m);
+  assert.match(reply, /which company made the offer\?/);
+  assert.ok(!/this role at They|offer at They/.test(reply), reply);
+  for (const v of ["They", "them", "We", "Someone", "the recruiter", "The hiring manager", "Last", "My", "the firm"]) assert.equal(Negotiation.employerName(v), null, v);
+  for (const v of ["Acme", "Northwind Health", "people inc."]) assert.ok(Negotiation.employerName(v), v);
+});
+
+test("C04 r3: past pay is said as past, never as what the person makes now", () => {
+  const say = world();
+  const { reply } = say("They offered me $24 an hour. Last job was $18 an hour. Should I counter? Draft a counteroffer.");
+  assert.match(reply, /\$18 an hour as what you made at your last job; that's context/, reply);
+  assert.ok(!/\$18 an hour as what you make now/.test(reply), reply);
+  const now = say("I make $20 an hour now and they offered $24 an hour. Should I counter?", "t-now");
+  assert.match(now.reply, /\$20 an hour as what you make now/, now.reply);
+  const before = say("I used to make $19 an hour. A support job offered $24 an hour. Should I counter?", "t-before");
+  assert.match(before.reply, /\$19 an hour as what you made before/, before.reply);
+});
+
+test("C04 r3: two named offers, one named to counter: that employer, countered at the other offer the person holds", () => {
+  const say = world();
+  const { out, reply } = say("I was offered $24/hour by Acme and $26/hour by Beta. Should I counter Acme? Draft the counteroffer.");
+  assert.equal(out.intent, "negotiation_draft", reply);
+  assert.ok(!/which company made the offer/.test(reply), "Acme was named");
+  assert.match(reply, /^Yes, counter once, in writing, at \$26 an hour: that is the other offer you told me about \(Beta\), so it is your own leverage, not market data\./, reply);
+  const email = emailIn(reply);
+  assert.match(email, /^Subject: Your offer, Acme/);
+  assert.match(email, /Could you bring the rate to \$26 an hour\? I have another offer at \$26 an hour\./);
+  assert.ok(!/Beta/.test(email), "the competitor is not named in the email to Acme");
+  // No target named: asked, never guessed.
+  const ask = say("I was offered $24/hour by Acme and $26/hour by Beta. Should I counter?", "t-two");
+  assert.match(ask.reply, /^Which figure is the offer you're deciding on/, ask.reply);
+});

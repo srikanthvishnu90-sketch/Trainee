@@ -7892,10 +7892,11 @@ const CareerRouter = (() => {
     const pay = th.pay && typeof th.pay === "object" && Number(th.pay.rate) > 0 ? th.pay : null;
     const payStands = pay && (pay.unit === "hour" ? !th.hourly || Number(th.hourly) === Number(pay.rate) : pay.unit === "year" ? !th.amount || Number(th.amount) === Number(pay.rate) : !th.hourly && !th.amount);
     let fromText = false, ambiguous = null, currentPay = sp && Array.isArray(sp.current) ? sp.current : [];
+    let textCompany = null, competing = [];
     if (sp && sp.ambiguous) ambiguous = sp.ambiguous;
     else if (sp && offerCue) {
-      if (sp.unit) { unit = sp.unit; rate = sp.rate; rateLow = sp.low; fromText = true; } else unclear = sp;
-    } else if (payStands) { unit = pay.unit; rate = Number(pay.rate); rateLow = pay.low != null ? Number(pay.low) : null; }
+      if (sp.unit) { unit = sp.unit; rate = sp.rate; rateLow = sp.low; fromText = true; textCompany = sp.company || null; competing = Array.isArray(sp.competing) ? sp.competing : []; } else unclear = sp;
+    } else if (payStands) { unit = pay.unit; rate = Number(pay.rate); rateLow = pay.low != null ? Number(pay.low) : null; textCompany = pay.company || null; competing = Array.isArray(pay.competing) ? pay.competing : []; }
     else if (th.hourly || off.hourly_rate) { unit = "hour"; rate = Number(th.hourly || off.hourly_rate); }
     else if (th.amount || off.base_salary) { unit = "year"; rate = Number(th.amount || off.base_salary); }
     let role = th.role || off.role || null;
@@ -7906,8 +7907,10 @@ const CareerRouter = (() => {
     }
     const rec = th.counter && typeof th.counter === "object" ? th.counter : {};
     return {
-      unclear, fromText, ambiguous, currentPay,
-      offer: { company: th.firm || off.company || null, role, rate, rate_low: rateLow, unit: unit || "year", signing: th.signing || off.signing_bonus || null, benefits: off.benefits || null, schedule: th.schedule || off.schedule || null, start_date: off.start_date || null, deadline: th.deadline || null },
+      unclear, fromText, ambiguous, currentPay, competing,
+      // The employer: named with this offer's own figure ("$24/hour by Acme"), else the record's. 128 employerName
+      // rejects pronouns and generic words, so "They offered me" names no one and the reply asks (D-007).
+      offer: { company: (Negotiation && Negotiation.employerName ? Negotiation.employerName(textCompany) || Negotiation.employerName(th.firm) || Negotiation.employerName(off.company) : textCompany || th.firm || off.company) || null, role, rate, rate_low: rateLow, unit: unit || "year", signing: th.signing || off.signing_bonus || null, benefits: off.benefits || null, schedule: th.schedule || off.schedule || null, start_date: off.start_date || null, deadline: th.deadline || null },
       recordedTarget: unit === "hour" ? (rec.hourly || null) : unit === "year" ? (rec.amount || null) : null,
     };
   }
@@ -7929,7 +7932,7 @@ const CareerRouter = (() => {
     if (!ask) return null;
     const pg = inheritedOfferGate(text, ctx);
     if (pg) return pg;
-    const { offer, recordedTarget, unclear, fromText, ambiguous, currentPay } = counterOfferOf(text, ctx);
+    const { offer, recordedTarget, unclear, fromText, ambiguous, currentPay, competing } = counterOfferOf(text, ctx);
     const th = negotiationThreadOf(ctx);
     const onRecord = !!(th.firm || th.amount || th.hourly || th.deadline || (ctx.offer && typeof ctx.offer === "object" && (ctx.offer.company || ctx.offer.base_salary || ctx.offer.hourly_rate)));
     // "I have no benefits details yet" is the negotiation's only on an offer thread.
@@ -7964,11 +7967,11 @@ const CareerRouter = (() => {
       return { intent: "negotiation_advice", reply, resultStatus: "needs_context", sends: 0, payload: { kind: "counter_needs_offer" } };
     }
     // The offer read from this turn's words is kept on the thread, in its own unit, for the next turn's question.
-    if (fromText) { try { const thw = negotiationThreadForWrite(ctx); thw.pay = { rate: offer.rate, low: offer.rate_low != null ? offer.rate_low : null, unit: offer.unit }; } catch { /* the answer stands */ } }
+    if (fromText) { try { const thw = negotiationThreadForWrite(ctx); thw.pay = { rate: offer.rate, low: offer.rate_low != null ? offer.rate_low : null, unit: offer.unit, company: offer.company || null, competing: competing || [] }; } catch { /* the answer stands */ } }
     const keepSigning = /\bkeep\b[^.]*\bsigning\b|\bsigning bonus as is\b/i.test(s(text));
     const facts0 = statedFactsOf(ctx);
     const senderName = (ctx.profile && ctx.profile.basics && ctx.profile.basics.name) || ((facts0.find((f) => f.kind === "name") || {}).value) || null;
-    const plan = Negotiation.counterPlan(offer, { text, current: currentPay, target: recordedTarget, benchmark: counterBenchmarkOf(text, ctx, offer.unit), keepSigning, senderName });
+    const plan = Negotiation.counterPlan(offer, { text, current: currentPay, competing, target: recordedTarget, benchmark: counterBenchmarkOf(text, ctx, offer.unit), keepSigning, senderName });
     // The person's own target, stated this turn, becomes the standing counter (in the offer's units).
     const stated = Negotiation.counterTargetOf(text, offer.unit);
     if (stated != null && plan.target === stated) {
@@ -7984,7 +7987,7 @@ const CareerRouter = (() => {
     if (draft) {
       const fig = plan.counterText || null;
       const what = termsOnly ? `An email that asks for them${fig ? ` (and for ${fig})` : " (and whether the pay can move)"}`
-        : plan.counter ? `The counter email, asking for ${draft.counter_basis === "sourced_range" ? `the top of the sourced range (${fig})` : draft.counter_basis === "judgment" ? `${fig}, my suggested figure` : `your figure (${fig})`}` : "A counter email that asks whether the pay can move, without naming a number";
+        : plan.counter ? `The counter email, asking for ${draft.counter_basis === "sourced_range" ? `the top of the sourced range (${fig})` : draft.counter_basis === "judgment" ? `${fig}, my suggested figure` : draft.counter_basis === "competing_offer" ? `${fig}, matching your other offer` : `your figure (${fig})`}` : "A counter email that asks whether the pay can move, without naming a number";
       if (!headline) headline = `${what} — held for your review, nothing sent.`;
       else facts.push(`${what} — held for your review, nothing sent.`);
       if (!plan.counter) facts.push("It names no figure because you haven't told me your target, and I won't make one up.");
@@ -8210,7 +8213,7 @@ const CareerRouter = (() => {
           const askFigs = parseOfferFigures(text);
           const hourlyBase = thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || null;
           // C04: never "the firm" or a bracket placeholder; an employer not on the record is left out and asked for.
-          const company = offerObj.company || null;
+          const company = (Negotiation && Negotiation.employerName ? Negotiation.employerName(offerObj.company) : offerObj.company) || null;
           const role = offerObj.role || null;
           const signing = thread.signing || (ctx.offer && ctx.offer.signing_bonus) || null;
           if (askFigs.hourly && (hourlyBase == null || Number(askFigs.hourly) > Number(hourlyBase))) {
@@ -15507,8 +15510,10 @@ const CareerRouter = (() => {
         if (/\bgot an offer\b|\bgot the offer\b|\boffered me\b|\boffer came\b|\boffer'?s here\b|\bi have an offer\b|\breceived an offer\b/i.test(cl)) sawOfferEvent = true;
         let m;
         const cln = typoNorm(cl);
-        if ((m = cl.match(/\b([A-Z][A-Za-z0-9&.]+(?:\s+[A-Z][A-Za-z0-9&.]+){0,2})(?:\s+(?:just|has|have|had))?\s+offered me\b/))) rec.firm = m[1].trim();
-        else if ((m = cl.match(/\boffer\b[^.!?]*?\b(?:from|at)\s+([A-Z][A-Za-z0-9&.]+(?:\s+[A-Z][A-Za-z0-9&.]+){0,2})/)) && !NOT_A_FIRM.test(m[1].trim())) rec.firm = m[1].trim();
+        // C04 r3: "They offered me $24" names no firm: 128 employerName rejects pronouns, function words and roles.
+        const firmOk = (v) => (Negotiation && Negotiation.employerName ? Negotiation.employerName(v) : v);
+        if ((m = cl.match(/\b([A-Z][A-Za-z0-9&.]+(?:\s+[A-Z][A-Za-z0-9&.]+){0,2})(?:\s+(?:just|has|have|had))?\s+offered me\b/)) && firmOk(m[1].trim())) rec.firm = firmOk(m[1].trim());
+        else if ((m = cl.match(/\boffer\b[^.!?]*?\b(?:from|at)\s+([A-Z][A-Za-z0-9&.]+(?:\s+[A-Z][A-Za-z0-9&.]+){0,2})/)) && !NOT_A_FIRM.test(m[1].trim()) && firmOk(m[1].trim())) rec.firm = firmOk(m[1].trim());
         if (!rec.firm && !rec.descriptor && (m = cl.match(/\boffer\b[^.!?]*?\bfrom\s+an?\s+([a-z][a-z -]{1,28}?\b(?:startup|company|firm|bank|fund|agency|studio|shop|co|insurer|practice|group))\b/i))) rec.descriptor = m[1].trim();
         // MI-123 (mechanism 2): figures land BY KIND — an hourly rate
         // is recorded as a rate, a signing figure as the bonus, an

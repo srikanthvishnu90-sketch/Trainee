@@ -8,7 +8,17 @@ on:
   # to release/production that never was a trunk head would otherwise have no checks at all.
   push:
     branches: [trunk, release/production]
+  # ready_for_review: a draft skips only the forms-ci coverage shards (`changes` job); every other suite runs on drafts
+  # as on trunk. Marking it ready runs the full suite on the same head, and a draft cannot be merged.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # Merge-queue readiness (docs/architect/PROCESS.md): when the owner turns on a merge queue for trunk, the queue tests
+  # each entry on a gh-readonly-queue/trunk/* commit and waits for the required checks there; without this trigger none
+  # would ever report and the queue would stall. Every job runs on it (no job filters on the event), so the commit the
+  # queue lands on trunk already carries every check S1 reads, under the same names. Its concurrency group is its own SHA
+  # (no pull_request number), and it is never cancelled, as for a push. Until a queue exists this trigger never fires.
+  merge_group:
+    types: [checks_requested]
 concurrency:
   # One run per PR: a newer head cancels the older run. A push gets a group of its own SHA: GitHub keeps one pending run
   # per group and cancels the older pending one when a newer arrives ("higher priority waiting request"), which left
@@ -19,6 +29,33 @@ concurrency:
 permissions:
   contents: read
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    # Actions spend (2026-11-01): the account's metered minutes ran out in about a day (~9,200 billable minutes in the
+    # 24 h before; a full ci run is ~149 billable minutes, ~52 of them the five forms-ci coverage shards, which only ~1
+    # PR in 9 touches). This job decides, for a pull request only, which jobs' inputs the PR changes
+    # (scripts/ci/job-inputs.cjs, list scripts/ci/job-inputs.json): the tested merge commit against its base parent,
+    # renames counted as delete + add. A push (trunk, release/production) gets every job true, so every SHA that can
+    # deploy still has every check run in full (D-034 S1). Whatever it cannot read makes every job true, and if this job
+    # fails its outputs are empty, which every job below reads as "run". A job that is skipped this way is still proven:
+    # whenever it does run, it traces the files it opened and fails on one outside its list (trace-opens.py).
+    timeout-minutes: 5
+    outputs:
+      draft: ${{ steps.decide.outputs.draft }}
+      coverage: ${{ steps.decide.outputs.coverage }}
+      database: ${{ steps.decide.outputs.database }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 2 }
+      - name: Which inputs this pull request changes
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          set -o pipefail
+          node scripts/ci/job-inputs.cjs changes | tee -a "$GITHUB_OUTPUT"
   gate-core-shard:
     name: gate (core shard ${{ matrix.shard }}/2)
     runs-on: ubuntu-24.04
@@ -69,7 +106,11 @@ jobs:
     # longest-first packing as the architect shards); the non-node core steps run in shard 1. Same command, flags and
     # --test-concurrency=2 in each shard; tests/career-ci-core-shards.test.cjs proves the shards partition the core
     # selection. The required check name `gate (core)` is the aggregate job below.
-    timeout-minutes: 30
+    # 2026-11-01: 20 minutes (was 30). Over 263 green shard runs of 2026-10-30..11-01 the job's p99 was 8.0 min and its
+    # max 9.2; the 30-minute cap let a hung shard burn 30 billed minutes (two did). Still >2x the slowest green run.
+    timeout-minutes: 20
+    # It does not wait on `changes` (and runs on drafts, as on trunk), so it starts at once: a cancelled run ends it as
+    # cancelled, never as a skipped (passing) required check.
     strategy:
       fail-fast: false
       matrix:
@@ -154,7 +195,10 @@ jobs:
     # and scripts/gate.sh's partition note; the forms-ci coverage suite has its own job, gate-coverage).
     # Runs in parallel with gate (core); neither job is advisory, and a failure here fails the run exactly as
     # it did inside the single job.
-    timeout-minutes: 30
+    # 2026-11-01: 20 minutes (was 30): p99 8.7 / max 8.8 min over 162 green runs.
+    timeout-minutes: 20
+    # It does not wait on `changes` (and runs on drafts, as on trunk), so it starts at once: a cancelled run ends it as
+    # cancelled, never as a skipped (passing) required check.
     env:
       GATE_PARTITION: browser
     steps:
@@ -225,7 +269,10 @@ jobs:
     # instead of by sorted-file index, which had left them at 354-651 s of tests on trunk; each shard reports its files'
     # durations as a notice so the table can be refreshed (`architect-shards.ts update`). The 45-minute cap is a
     # backstop, not a target. The required check name `gate (architect)` is the aggregate job below.
-    timeout-minutes: 45
+    # 2026-11-01: 25 minutes (was 45): p99 11.7 / max 13.3 min over 894 green shard runs.
+    timeout-minutes: 25
+    # It does not wait on `changes` (and runs on drafts, as on trunk), so it starts at once: a cancelled run ends it as
+    # cancelled, never as a skipped (passing) required check.
     strategy:
       fail-fast: false
       matrix:
@@ -337,8 +384,14 @@ jobs:
     # started (shards 668 / 619 / 793 / 616 s of tests; their sum, 2,696 s, matches the single job's 2,676-2,683 s,
     # and all 27 of the suite's tests passed). Four shards cannot go below ~790 s (the WPP-redriving guard and EOS
     # must share one), so the table moved to five shards, whose floor is Anduril's own 668 s drive.
-    # The 60-minute budget is unchanged (headroom, not a target).
-    timeout-minutes: 60
+    # 2026-11-01: 25 minutes (was 60): p99 12.0 / max 12.2 min over 790 green shard runs.
+    # On a pull request the shards run only when the PR changes an input of the suite (`changes` job above, list
+    # scripts/ci/job-inputs.json "coverage"); every push runs them. Whenever they run, the suite runs under
+    # scripts/ci/trace-opens.py and the job fails if the suite opened a tracked file outside that list, so the list
+    # cannot silently miss an input.
+    timeout-minutes: 25
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' && needs.changes.outputs.coverage != 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -346,6 +399,7 @@ jobs:
     env:
       GATE_PARTITION: coverage
       GATE_COVERAGE_SHARD: ${{ matrix.shard }}/5
+      GATE_TRACE_OPENS: /tmp/coverage-opens.txt
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -382,6 +436,8 @@ jobs:
         # available there (its use at job level invalidated the whole workflow
         # at 3d870456/c18462d1 — zero jobs ran).
         run: echo "FORMS_CI_COVERAGE_DIAG=$RUNNER_TEMP/forms-ci-coverage-diag.jsonl" >> "$GITHUB_ENV"
+      - name: Room for the open trace (inotify watches and queue)
+        run: sudo sysctl -w fs.inotify.max_user_watches=524288 fs.inotify.max_queued_events=1048576
       - name: Career gate
         # The gate's result is also written as annotations (readable through the checks API, where a job log may not
         # be): the step summary lines, then the failing tests' names.
@@ -416,6 +472,11 @@ jobs:
             node scripts/forms-ci-diag-annotations.cjs "$FORMS_CI_COVERAGE_DIAG" || true
           fi
           exit 0
+      - name: The suite opened nothing outside its inputs (scripts/ci/job-inputs.json)
+        if: success() || failure()
+        run: |
+          test -f "$GATE_TRACE_OPENS" || { echo "::error title=coverage inputs::no open trace was written"; exit 1; }
+          node scripts/ci/job-inputs.cjs verify coverage "$GATE_TRACE_OPENS"
       - name: Report the tests this shard ran
         # The names (and seconds) of the suite's tests that passed or failed in this shard, from the gate log's TAP
         # lines, for the aggregate job's completeness check; also printed as a notice for rebalancing the table.
@@ -443,37 +504,74 @@ jobs:
     runs-on: ubuntu-24.04
     # The required check. It passes only when every coverage shard above succeeded AND every test the suite defines
     # passed in some shard (scripts/forms-ci-shards.cjs verify lists the suite's tests statically and compares them
-    # with the shards' reports). always() so a failed or cancelled shard fails this check rather than skipping it.
-    needs: gate-coverage-shard
-    if: always()
+    # with the shards' reports). It runs after a failed shard, so a failed shard fails this check rather than skipping it.
+    # 2026-11-01: on a pull request that changes none of the suite's inputs (`changes` said coverage=false and the
+    # shards were skipped for exactly that reason) it passes without the suite, saying so; in every other case,
+    # including a failed `changes` job, it passes only as before.
+    needs: [changes, gate-coverage-shard]
+    if: ${{ always() && needs.changes.outputs.draft != 'true' }}
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: "22.23.3" }
-      - name: Every coverage shard succeeded
+      - name: Inputs unchanged, or every coverage shard succeeded
+        id: verdict
         run: |
-          echo "coverage shards: ${{ needs.gate-coverage-shard.result }}"
+          echo "changes: ${{ needs.changes.result }}, coverage inputs changed: ${{ needs.changes.outputs.coverage }}; coverage shards: ${{ needs.gate-coverage-shard.result }}"
+          if [ "${{ needs.changes.result }}" = success ] && [ "${{ needs.changes.outputs.coverage }}" = false ] && [ "${{ needs.gate-coverage-shard.result }}" = skipped ]; then
+            echo "::notice title=forms-ci coverage not run::this pull request changes no input of the suite (scripts/ci/job-inputs.json); every push to trunk runs it"
+            echo "unchanged=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           test "${{ needs.gate-coverage-shard.result }}" = success
+      - uses: actions/checkout@v4
+        if: ${{ always() && steps.verdict.outputs.unchanged != 'true' }}
+      - uses: actions/setup-node@v4
+        if: ${{ always() && steps.verdict.outputs.unchanged != 'true' }}
+        with: { node-version: "22.23.3" }
       - uses: actions/download-artifact@v4
-        if: always()
+        if: ${{ always() && steps.verdict.outputs.unchanged != 'true' }}
         with:
           pattern: forms-ci-coverage-shard-*
           path: ${{ runner.temp }}/shard-reports
       - name: Every test of the suite passed in some shard
-        if: always()
+        if: ${{ always() && steps.verdict.outputs.unchanged != 'true' }}
         run: node scripts/forms-ci-shards.cjs verify "$RUNNER_TEMP/shard-reports"
   database:
     runs-on: ubuntu-24.04
+    # 2026-11-01: a 30-minute cap (it had none, so GitHub's 360 applied): p99 17.5 / max 19.6 min over 150 green runs.
+    # On a pull request that changes none of its inputs (scripts/ci/job-inputs.json "database", decided in its first
+    # steps) its remaining steps are skipped and the check passes saying so; every push runs it. Whenever it runs, tests/db/run.sh runs under
+    # scripts/ci/trace-opens.py and the job fails if it opened a tracked file outside that list.
+    timeout-minutes: 30
+    # It decides its own inputs in its first steps (the same scripts/ci/job-inputs.cjs as the `changes` job) instead of
+    # waiting on `changes`, so a cancelled run ends it as cancelled, never as a skipped required check.
     steps:
       - uses: actions/checkout@v4
-      - name: Migrations, RLS and SQL tests on a throwaway Postgres 16, plus the migration ledger
+        with: { fetch-depth: 2 }
+      - name: Which inputs this pull request changes
+        id: inputs
+        env:
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
         run: |
           set -o pipefail
-          PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH bash tests/db/run.sh 2>&1 | tee "$RUNNER_TEMP/db.log"
+          node scripts/ci/job-inputs.cjs changes | tee -a "$GITHUB_OUTPUT"
+      - name: Inputs unchanged
+        if: steps.inputs.outputs.database == 'false'
+        run: echo "::notice title=database not run::this pull request changes no input of the database suite (scripts/ci/job-inputs.json); every push to trunk runs it"
+      - name: Room for the open trace (inotify watches and queue)
+        if: steps.inputs.outputs.database != 'false'
+        run: sudo sysctl -w fs.inotify.max_user_watches=524288 fs.inotify.max_queued_events=1048576
+      - name: Migrations, RLS and SQL tests on a throwaway Postgres 16, plus the migration ledger
+        if: steps.inputs.outputs.database != 'false'
+        run: |
+          set -o pipefail
+          PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH python3 scripts/ci/trace-opens.py "$RUNNER_TEMP/db-opens.txt" -- bash tests/db/run.sh 2>&1 | tee "$RUNNER_TEMP/db.log"
+      - name: The suite opened nothing outside its inputs (scripts/ci/job-inputs.json)
+        if: ${{ (success() || failure()) && steps.inputs.outputs.database != 'false' }}
+        run: node scripts/ci/job-inputs.cjs verify database "$RUNNER_TEMP/db-opens.txt"
       # The failing lines as annotations, readable through the checks API where the raw log is not.
       - name: Failure lines as annotations
-        if: failure()
+        if: ${{ failure() && steps.inputs.outputs.database != 'false' }}
         run: echo "::error::$(tail -n 60 "$RUNNER_TEMP/db.log" | grep -v '^  ok ' | tail -n 30 | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')"
   send-rail-load:
     name: load (send rail)
@@ -481,7 +579,10 @@ jobs:
     # Mass networking (lane M1, owner's scale rule 2026-10-27): 10,000 people x 50 approved emails plus one heavy
     # sender, 20 concurrent sender sessions, real Postgres 16, Gmail faked. Its own job so the gate's time caps are not
     # spent on it; it fails the run like any other job. The measured numbers are printed (SEND RAIL LOAD ...).
-    timeout-minutes: 60
+    # 2026-11-01: 15 minutes (was 60): p99 6.0 / max 6.0 min over 161 green runs.
+    timeout-minutes: 15
+    # It does not wait on `changes` (and runs on drafts, as on trunk), so it starts at once: a cancelled run ends it as
+    # cancelled, never as a skipped (passing) required check.
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2
@@ -495,7 +596,10 @@ jobs:
     # verdict on the exact SHA. It also runs inside an architect shard (every tests/architect file does); this job is the
     # check scripts/launch/deploy-standard.ts reads. Real Postgres 16, the real webhook and agent-chat, a scripted model;
     # nothing leaves the runner. KNOWN_GAP steps run and print their state; every other step must pass.
-    timeout-minutes: 20
+    # 2026-11-01: 10 minutes (was 20): max 0.5 min over 80 green runs.
+    timeout-minutes: 10
+    # It does not wait on `changes` (and runs on drafts, as on trunk), so it starts at once: a cancelled run ends it as
+    # cancelled, never as a skipped (passing) required check.
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2

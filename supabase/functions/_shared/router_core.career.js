@@ -6448,6 +6448,10 @@ const CareerPrep = (() => {
     if ((m = t.match(new RegExp(String.raw`\b${H}\s+(?:and\s+a\s+half\s+hours?|hours?\s+and\s+a\s+half)\b`)))) return numOf(m[1]) * 60 + 30;
     if ((m = t.match(new RegExp(String.raw`\b${H}\s+(?:and\s+a\s+quarter\s+hours?|hours?\s+and\s+a\s+quarter)\b`)))) return numOf(m[1]) * 60 + 15;
     if ((m = t.match(/\b(\d{1,2})\.5\s*(?:hours?|hrs?)\b/))) return Number(m[1]) * 60 + 30;
+    if (/\b(?:a\s+)?couple(?:\s+of)?\s+(?:hours?|hrs?)\b/.test(t)) return 120;
+    if (/\ba\s+few\s+(?:hours?|hrs?)\b/.test(t)) return 180;
+    if (/\b(?:a\s+)?couple(?:\s+of)?\s+(?:minutes?|mins?)\b/.test(t)) return 2;
+    if (/\ba\s+few\s+(?:minutes?|mins?)\b/.test(t)) return 3;
     if (/\bthree[- ]quarters?\s+of\s+an\s+hour\b/.test(t)) return 45;
     if (/\b(?:a\s+)?quarter(?:[- ]of)?[- ](?:an[- ])?hour\b/.test(t)) return 15;
     if (/\bhalf[- ](?:an?[- ])?hour\b/.test(t)) return 30;
@@ -6455,6 +6459,9 @@ const CareerPrep = (() => {
     if ((m = t.match(new RegExp(String.raw`\b${H}[- ]?(?:hours?|hrs?)\b`)))) return numOf(m[1]) * 60;
     return null;
   }
+  const LEN_PHRASE = new RegExp(String.raw`\b(?:(?:an?|of|and|half|quarters?|three|couple|few|several|some|many|lots|bunch|handful|little|\d{1,3}(?:\.\d)?|${NUM_WORD_RE})[- ]){1,5}(?:minutes?|mins?|hours?|hrs?)\b`);
+  const lengthPhrase = (t) => { const m = t.match(LEN_PHRASE); return m ? m[0].replace(/^(?:and|of)\s+/, "").replace(/^an?\s+(?=\d)/, "").trim() : null; };
+  const COUNT_PHRASE = /\b(?:a\s+)?(?:several|some|many|lots\s+of|a\s+lot\s+of|a\s+bunch\s+of|bunch\s+of|handful\s+of|a\s+handful\s+of|couple(?:\s+of)?|few|dozen|more|extra)\s+(?:[a-z-]+\s+){0,2}?questions?\b/;
   const DOC = String.raw`(?:file|page|sheet|doc|document|one[- ]pager|cheat[- ]?sheet|pdf)`;
   function prepFileRequest(text) {
     const raw = s(text).replace(/[’`]/g, "'");
@@ -6465,8 +6472,9 @@ const CareerPrep = (() => {
     const asObject = new RegExp(String.raw`\b(?:make|create|build|generate|draft|write|put together|prepare|give|send|show)\s+(?:me|us)?\s*(?:an?|the|my|one)?\s*(?:[a-z-]+\s+){0,3}?${DOC}\b`).test(t);
     const onePageAbout = /\bone[- ]pag(?:e|er)\b[^.?!]{0,60}\b(?:prep|interview)|\b(?:prep|interview)\b[^.?!]{0,40}\bone[- ]pag(?:e|er)\b/.test(t);
     if (fileVerb && !qualified) return null;
-    const qm = t.match(new RegExp(String.raw`\b${NUM}\s+(?:practice\s+|interview\s+|behaviou?ral\s+|mock\s+|likely\s+|common\s+|sample\s+|key\s+|good\s+|real\s+)*questions?\b`)) || t.match(/\b(a dozen|a couple of|a few)\s+(?:\w+\s+)?questions?\b/);
-    const askedQuestions = qm ? (() => { const w = lc(qm[1]); return w === "a dozen" ? 12 : w === "a couple of" ? 2 : w === "a few" ? 3 : numOf(w); })() : null;
+    const qm = t.match(new RegExp(String.raw`\b${NUM}\s+(?:practice\s+|interview\s+|behaviou?ral\s+|mock\s+|likely\s+|common\s+|sample\s+|key\s+|good\s+|real\s+)*questions?\b`)) || t.match(/\b(a dozen|a couple(?: of)?|a few)\s+(?:[a-z-]+\s+){0,2}?questions?\b/);
+    const askedQuestions = qm ? (() => { const w = lc(qm[1]); return w === "a dozen" ? 12 : /^a couple/.test(w) ? 2 : w === "a few" ? 3 : numOf(w); })() : null;
+    const questionsPhrase = qm ? qm[0] : (t.match(COUNT_PHRASE) || [null])[0];
     const NEGV = String.raw`(?:don't|dont|do not|never|no need to|stop|please don't|you don't need to)\s+(?:\w+\s+){0,2}?(?:make|create|build|send|give|write|generate|do|put together|prepare|draft|want|need)`;
     const neg = new RegExp(String.raw`\b${NEGV}\b[^.?!]{0,30}?\b${DOC}\b|\b(?:no|without|skip(?:ping)?|instead of|rather than)\s+(?:a|an|the|any)?\s*(?:[a-z-]+\s+){0,2}?${DOC}\b|\b${DOC}\b[^.?!]{0,15}\b(?:isn't|is not|not) (?:needed|necessary)\b`).test(t);
     if (neg) return { ok: false, noFile: true, questions: askedQuestions, minutes: null, defaults: [], problem: "no_file" };
@@ -6475,14 +6483,18 @@ const CareerPrep = (() => {
     if (!/\b(?:make|create|build|put together|give|send|draft|write|prepare|generate|get|need|want|turn|do|show)\b/.test(t) && !/^\s*(?:an?\s+)?one[- ]page\b/.test(t)) return null;
     if (/^\s*(?:what|how|why|which|should|is|are|does|do)\b/.test(t) && !/\b(?:make|create|build|give|send|put together|generate)\s+(?:me|us)\b/.test(t)) return null;
     let questions = 5, minutes = 30;
-    const defaults = [];
-    if (askedQuestions !== null) questions = askedQuestions; else defaults.push("questions");
+    const defaults = [], unclear = {};
+    const minutesPhrase = lengthPhrase(t);
+    if (askedQuestions !== null && Number.isFinite(askedQuestions)) questions = askedQuestions;
+    else if (questionsPhrase) unclear.questions = questionsPhrase; else defaults.push("questions");
     const said = prepFileMinutes(t);
-    if (said !== null) minutes = said; else defaults.push("minutes");
-    if (!Number.isFinite(questions) || questions < 1 || questions > PREP_FILE_MAX_QUESTIONS) return { ok: false, questions, minutes, defaults, problem: "questions" };
-    if (!Number.isFinite(minutes) || minutes < PREP_FILE_MIN_MINUTES || minutes > PREP_FILE_MAX_MINUTES) return { ok: false, questions, minutes, defaults, problem: "minutes" };
-    if (minutes < questions + 2) return { ok: false, questions, minutes, defaults, problem: "fit" };
-    return { ok: true, questions, minutes, defaults };
+    if (said !== null && Number.isFinite(said)) minutes = said;
+    else if (minutesPhrase) unclear.minutes = minutesPhrase; else defaults.push("minutes");
+    const said_ = { questionsPhrase: askedQuestions !== null ? questionsPhrase : null, minutesPhrase: said !== null ? minutesPhrase : null, unclear };
+    if (!Number.isFinite(questions) || questions < 1 || questions > PREP_FILE_MAX_QUESTIONS) return { ok: false, questions, minutes, defaults, problem: "questions", ...said_ };
+    if (!Number.isFinite(minutes) || minutes < PREP_FILE_MIN_MINUTES || minutes > PREP_FILE_MAX_MINUTES) return { ok: false, questions, minutes, defaults, problem: "minutes", ...said_ };
+    if (minutes < questions + 2) return { ok: false, questions, minutes, defaults, problem: "fit", ...said_ };
+    return { ok: true, questions, minutes, defaults, ...said_ };
   }
   function prepFilePlan(minutes, questions, o) {
     o = o || {};
@@ -6581,7 +6593,7 @@ const CareerPrep = (() => {
     const title = `Interview prep: ${N} ${N === 1 ? "question" : "questions"}, ${M} minutes`;
     return {
       data: { title, variant: "interview_prep", period: "General practice, not facts about any company.", sections },
-      summary: { questions: N, minutes: M, plan_minutes: plan.map((b) => b.min), facts: facts.length, gaps: gaps.slice(0, 4), role_bank: qs.roleBank, defaults: opts.defaults || [] },
+      summary: { questions: N, minutes: M, plan_minutes: plan.map((b) => b.min), facts: facts.length, gaps: gaps.slice(0, 4), role_bank: qs.roleBank, defaults: opts.defaults || [], unclear: opts.unclear || {} },
     };
   }
 
@@ -17256,7 +17268,15 @@ const CareerRouter = (() => {
     if (!req) return null;
     if (req.noFile) {
       const n = req.questions;
-      if (!Number.isFinite(n) || n < 1 || n > Prep.PREP_FILE_MAX_QUESTIONS) return null;
+      if (!Number.isFinite(n) || n < 1 || n > Prep.PREP_FILE_MAX_QUESTIONS) {
+        if (ctx && ctx._prepFileNoFileDepth) return null;
+        const co = namedCompanyOf(text, ctx);
+        const ask = `prepare me for my interview${co && co.company ? ` at ${s(co.company)}` : ""}`;
+        let r = null;
+        try { ctx._prepFileNoFileDepth = 1; r = dispatchChat(ask, ctx); } finally { if (ctx) delete ctx._prepFileNoFileDepth; }
+        if (!r || r.intent !== "prep_brief" || r.file || (r.result && r.result.file)) return null;
+        return { ...r, reply: `No File was made, as you asked.\n\n${s(r.reply)}`, sends: 0, payload: r.payload ? { ...r.payload, no_file: true } : { kind: "prep_brief_text", no_file: true } };
+      }
       const st = prepFileStatedOf(text, null);
       const qs = typeof Prep.prepFileQuestionList === "function" ? Prep.prepFileQuestionList(n, st.role) : [];
       if (qs.length !== n) return null;
@@ -17264,11 +17284,13 @@ const CareerRouter = (() => {
       return { intent: "prep_brief", reply, resultStatus: "awaiting_user", sends: 0, payload: { kind: "prep_questions_text", questions: n, no_file: true } };
     }
     if (!req.ok) {
+      const qWords = req.questionsPhrase && !/^\d/.test(req.questionsPhrase) ? ` ("${req.questionsPhrase}")` : "";
+      const mWords = req.minutesPhrase && !/^\d/.test(req.minutesPhrase) ? `you said "${req.minutesPhrase}", and ` : "";
       const why = req.problem === "questions"
-        ? `A one-page File holds 1 to ${Prep.PREP_FILE_MAX_QUESTIONS} questions, and you asked for ${req.questions}, so I didn't make one with fewer than you asked.`
+        ? `A one-page File holds 1 to ${Prep.PREP_FILE_MAX_QUESTIONS} questions, and you asked for ${req.questions}${qWords}, so I didn't make one with fewer than you asked.`
         : req.problem === "minutes"
-          ? `The plan can run ${Prep.PREP_FILE_MIN_MINUTES} to ${Prep.PREP_FILE_MAX_MINUTES} minutes, and ${req.minutes} minutes is outside that, so I didn't make one with a different length.`
-          : `${req.minutes} minutes is too short to answer ${req.questions} questions out loud at a minute each plus a minute to read, so I didn't change either number for you.`;
+          ? `The plan can run ${Prep.PREP_FILE_MIN_MINUTES} to ${Prep.PREP_FILE_MAX_MINUTES} minutes; ${mWords}${req.minutes} minutes is outside that, so I didn't make one with a different length.`
+          : `${mWords ? `You said "${req.minutesPhrase}": ` : ""}${req.minutes} minutes is too short to answer ${req.questions} questions out loud at a minute each plus a minute to read, so I didn't change either number for you.`;
       const reply = compose({ headline: "I didn't make the File yet.", facts: [why, "Nothing was sent."], nextStep: req.problem === "questions" ? `Want ${Prep.PREP_FILE_MAX_QUESTIONS} questions instead, or a shorter set?` : "What count and length should I use?" });
       return { intent: "prep_brief", reply, resultStatus: "awaiting_user", sends: 0, payload: { kind: "prep_file_refused", problem: req.problem, questions: req.questions, minutes: req.minutes } };
     }
@@ -17279,13 +17301,16 @@ const CareerRouter = (() => {
       return lt && !lt.cir ? lt : null;
     })();
     const company = named && !/^(?:file|files|make|prep|interview|one|page|no|plan|questions?)$/i.test(s(named.company).trim()) ? named : null;
-    const built = Prep.prepFileData({ questions: req.questions, minutes: req.minutes, defaults: req.defaults, profile: ctx.profile || null,
+    const built = Prep.prepFileData({ questions: req.questions, minutes: req.minutes, defaults: req.defaults, unclear: req.unclear, profile: ctx.profile || null,
       stated: prepFileStatedOf(text, company), companyFile: !!(company && company.cir) });
     if (!built) return null;
     const sm = built.summary;
     const facts = [];
     facts.push(`It holds ${sm.questions} practice ${sm.questions === 1 ? "question" : "questions"} and a plan whose blocks add up to exactly ${sm.minutes} minutes (${sm.plan_minutes.join(" + ")}).`);
     if (sm.defaults.length) facts.push(`You didn't say ${sm.defaults.map((d) => (d === "questions" ? "how many questions" : "how long")).join(" or ")}, so I used ${sm.defaults.map((d) => (d === "questions" ? `${sm.questions} questions` : `${sm.minutes} minutes`)).join(" and ")}.`);
+    const uc = sm.unclear || {};
+    if (uc.questions) facts.push(`You said "${uc.questions}", which isn't an exact number, so I read it as ${sm.questions} questions. Tell me the number to change it.`);
+    if (uc.minutes) facts.push(`You said "${uc.minutes}", which isn't an exact length, so I read it as ${sm.minutes} minutes. Tell me the minutes to change it.`);
     if (sm.gaps.length) facts.push(`Not on file, so nothing about ${sm.gaps.length === 1 ? "it" : "them"} is assumed: ${Prep.prepFileAndList(sm.gaps)}.`);
     facts.push(sm.facts ? `Your side comes only from ${sm.facts} confirmed ${sm.facts === 1 ? "fact" : "facts"} on your record.` : "No confirmed facts about you are on your record, so the page fills in nothing about you.");
     facts.push("Nothing was sent.");

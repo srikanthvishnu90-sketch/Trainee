@@ -5624,7 +5624,16 @@ const CareerRouter = (() => {
     // text, the exact number asked; with no count, the ask goes on to the routes that answer it.
     if (req.noFile) {
       const n = req.questions;
-      if (!Number.isFinite(n) || n < 1 || n > Prep.PREP_FILE_MAX_QUESTIONS) return null;
+      if (!Number.isFinite(n) || n < 1 || n > Prep.PREP_FILE_MAX_QUESTIONS) {
+        // No count (re-review): the interview prep itself, the brief, with no File; never the generic catch-all.
+        if (ctx && ctx._prepFileNoFileDepth) return null;
+        const co = namedCompanyOf(text, ctx);
+        const ask = `prepare me for my interview${co && co.company ? ` at ${s(co.company)}` : ""}`;
+        let r = null;
+        try { ctx._prepFileNoFileDepth = 1; r = dispatchChat(ask, ctx); } finally { if (ctx) delete ctx._prepFileNoFileDepth; }
+        if (!r || r.intent !== "prep_brief" || r.file || (r.result && r.result.file)) return null;
+        return { ...r, reply: `No File was made, as you asked.\n\n${s(r.reply)}`, sends: 0, payload: r.payload ? { ...r.payload, no_file: true } : { kind: "prep_brief_text", no_file: true } };
+      }
       const st = prepFileStatedOf(text, null);
       const qs = typeof Prep.prepFileQuestionList === "function" ? Prep.prepFileQuestionList(n, st.role) : [];
       if (qs.length !== n) return null;
@@ -5632,11 +5641,14 @@ const CareerRouter = (() => {
       return { intent: "prep_brief", reply, resultStatus: "awaiting_user", sends: 0, payload: { kind: "prep_questions_text", questions: n, no_file: true } };
     }
     if (!req.ok) {
+      // The person's own words are quoted beside the number they were read as, so a refusal never misquotes them.
+      const qWords = req.questionsPhrase && !/^\d/.test(req.questionsPhrase) ? ` ("${req.questionsPhrase}")` : "";
+      const mWords = req.minutesPhrase && !/^\d/.test(req.minutesPhrase) ? `you said "${req.minutesPhrase}", and ` : "";
       const why = req.problem === "questions"
-        ? `A one-page File holds 1 to ${Prep.PREP_FILE_MAX_QUESTIONS} questions, and you asked for ${req.questions}, so I didn't make one with fewer than you asked.`
+        ? `A one-page File holds 1 to ${Prep.PREP_FILE_MAX_QUESTIONS} questions, and you asked for ${req.questions}${qWords}, so I didn't make one with fewer than you asked.`
         : req.problem === "minutes"
-          ? `The plan can run ${Prep.PREP_FILE_MIN_MINUTES} to ${Prep.PREP_FILE_MAX_MINUTES} minutes, and ${req.minutes} minutes is outside that, so I didn't make one with a different length.`
-          : `${req.minutes} minutes is too short to answer ${req.questions} questions out loud at a minute each plus a minute to read, so I didn't change either number for you.`;
+          ? `The plan can run ${Prep.PREP_FILE_MIN_MINUTES} to ${Prep.PREP_FILE_MAX_MINUTES} minutes; ${mWords}${req.minutes} minutes is outside that, so I didn't make one with a different length.`
+          : `${mWords ? `You said "${req.minutesPhrase}": ` : ""}${req.minutes} minutes is too short to answer ${req.questions} questions out loud at a minute each plus a minute to read, so I didn't change either number for you.`;
       const reply = compose({ headline: "I didn't make the File yet.", facts: [why, "Nothing was sent."], nextStep: req.problem === "questions" ? `Want ${Prep.PREP_FILE_MAX_QUESTIONS} questions instead, or a shorter set?` : "What count and length should I use?" });
       return { intent: "prep_brief", reply, resultStatus: "awaiting_user", sends: 0, payload: { kind: "prep_file_refused", problem: req.problem, questions: req.questions, minutes: req.minutes } };
     }
@@ -5648,13 +5660,17 @@ const CareerRouter = (() => {
     })();
     // A capitalized word of the ask itself ("prep File", "Make") is not a company.
     const company = named && !/^(?:file|files|make|prep|interview|one|page|no|plan|questions?)$/i.test(s(named.company).trim()) ? named : null;
-    const built = Prep.prepFileData({ questions: req.questions, minutes: req.minutes, defaults: req.defaults, profile: ctx.profile || null,
+    const built = Prep.prepFileData({ questions: req.questions, minutes: req.minutes, defaults: req.defaults, unclear: req.unclear, profile: ctx.profile || null,
       stated: prepFileStatedOf(text, company), companyFile: !!(company && company.cir) });
     if (!built) return null;
     const sm = built.summary;
     const facts = [];
     facts.push(`It holds ${sm.questions} practice ${sm.questions === 1 ? "question" : "questions"} and a plan whose blocks add up to exactly ${sm.minutes} minutes (${sm.plan_minutes.join(" + ")}).`);
     if (sm.defaults.length) facts.push(`You didn't say ${sm.defaults.map((d) => (d === "questions" ? "how many questions" : "how long")).join(" or ")}, so I used ${sm.defaults.map((d) => (d === "questions" ? `${sm.questions} questions` : `${sm.minutes} minutes`)).join(" and ")}.`);
+    // Words that are not an exact number are quoted and the reading said; they are never called unsaid (re-review, 2026-11-04).
+    const uc = sm.unclear || {};
+    if (uc.questions) facts.push(`You said "${uc.questions}", which isn't an exact number, so I read it as ${sm.questions} questions. Tell me the number to change it.`);
+    if (uc.minutes) facts.push(`You said "${uc.minutes}", which isn't an exact length, so I read it as ${sm.minutes} minutes. Tell me the minutes to change it.`);
     if (sm.gaps.length) facts.push(`Not on file, so nothing about ${sm.gaps.length === 1 ? "it" : "them"} is assumed: ${Prep.prepFileAndList(sm.gaps)}.`);
     facts.push(sm.facts ? `Your side comes only from ${sm.facts} confirmed ${sm.facts === 1 ? "fact" : "facts"} on your record.` : "No confirmed facts about you are on your record, so the page fills in nothing about you.");
     facts.push("Nothing was sent.");

@@ -69,11 +69,13 @@ export function chatThroughAgent(url: string, key: string, o: { retryDelayMs?: n
 // pacing (one message a second to a chat) instead of each part starting a fresh clock.
 // key: one row (a reply, or one part of it); wholeUser: everything due for the person, oldest first (WhatsApp: what
 // waited for the window, then the answer).
+// clock/sleep (tests only): the pacing's clock, in process and in the shared bucket (channel_pacer.ts `now`); the index files
+// pass neither, so production paces on the wall clock and the database's clock.
 // deno-lint-ignore no-explicit-any
-export function deliverer(admin: any, env: { get(k: string): string | undefined }) {
+export function deliverer(admin: any, env: { get(k: string): string | undefined }, o: { clock?: () => number; sleep?: (ms: number) => Promise<void> } = {}) {
   let adapters: ReturnType<typeof adaptersFromEnv> | null = null;
   return async (a: { userId: string; key?: string; now: number; wholeUser?: boolean }) => {
-    adapters ??= adaptersFromEnv(env, { sharedPace: telegramPacerFromEnv(env, admin) });
+    adapters ??= adaptersFromEnv(env, { clock: o.clock, sleep: o.sleep, sharedPace: telegramPacerFromEnv(env, admin, { sleep: o.sleep, now: o.clock }) });
     const store = supabaseChannelStore(admin, a.wholeUser ? { user: a.userId } : { only: { userId: a.userId, key: a.key! } });
     const r = await deliverDue({ store, adapters, now: a.now, limit: a.wholeUser ? 40 : 1 });
     await store.release();

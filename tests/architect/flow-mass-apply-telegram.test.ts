@@ -29,6 +29,7 @@
 // Run (as an unprivileged user): deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/flow-mass-apply-telegram.test.ts
 import assertNode from "node:assert/strict";
 import { pgBinDir, startPg } from "../flow/pg.ts";
+import { virtualClock } from "../flow/virtual-clock.ts";
 import { careerHandler, SERVICE_KEY, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
 import { engineRunner } from "../../workers/career-browser/approve-first.ts";
 import { prepareBridge, runPrepareRequest } from "../../workers/career-cloud/prepare-runner.ts";
@@ -228,9 +229,10 @@ Deno.test({
       const json = async (s: string) => JSON.parse((await q1(`select coalesce(json_agg(x), '[]') from (${s}) x`)) || "[]");
 
       // ---------------------------------------------------------------------------------------------- Telegram, both ways
+      const pace = virtualClock(); // the send pacing's clock (tests/flow/virtual-clock.ts): Telegram's one-a-second per chat is still computed and waited, on this clock, not the wall
       let update = 7000, msgId = 100;
       const post = async (body: Record<string, unknown>, id = ++update) => {
-        const deliverNow = deliverer(admin, Deno.env);
+        const deliverNow = deliverer(admin, Deno.env, pace);
         const res = await handleTelegram(new Request(`${SUPABASE_URL}/functions/v1/trainee-telegram`, {
           method: "POST", headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": TG_SECRET }, body: JSON.stringify({ update_id: id, ...body }),
         }), { env: Deno.env, now: Date.now, store: () => supabaseInboundStore(admin), chat: chatThroughAgent(SUPABASE_URL, SERVICE_KEY, { channel: "telegram" }), admin,

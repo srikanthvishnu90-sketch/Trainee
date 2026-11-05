@@ -104,7 +104,10 @@ export type ParseResult = { messages: InboundMessage[]; statuses?: StatusEvent[]
 
 export type SendResult =
   | { ok: true; id: string | null; ids?: string[] }
-  | { ok: false; error: string; retryable: boolean; hold?: boolean; optOut?: boolean; retryAfterMs?: number; sent?: number; sentIds?: string[] }; // retryAfterMs: the provider's own "wait this long" (Telegram's 429)
+  | { ok: false; error: string; retryable: boolean; hold?: boolean; optOut?: boolean; retryAfterMs?: number; sent?: number; sentIds?: string[]; unauthorized?: boolean }; // retryAfterMs: the provider's own "wait this long" (Telegram's 429)
+// CHANNEL DELIVERY ROUND 4 (2026-11-05): unauthorized: the provider refused Trainee's own credentials (an HTTP 401; Telegram's 404
+// for a bot token it does not know; WhatsApp's code 190, an expired access token). The request was refused, not the message:
+// nothing of it went out, and the channel is down until the secret is fixed (channel.ts deliverDue).
 // CHANNEL DELIVERY ROUND 2 (2026-10-30): sent / sentIds on a failure: how many of the bubbles went out before it, and their
 // ids. A retryable (or held) failure after some went out resumes from the first that did not (career_outbox.sent_parts), so
 // nothing is sent twice and the rest is not lost; retryable is set only when nothing of the failing bubble went out.

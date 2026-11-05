@@ -137,11 +137,38 @@ const DEMOGRAPHIC = [
   /\bqueer\b/, /\blgbtq?i?a?\+?(?![a-z])/, /\bhispanic\b/, /\blatin[oax]s?\b/, /\bafrican[- ]american\b/, /\bnative american\b/,
   /\bpacific islander\b/, /\balaska native\b/, /\bpronouns?\b/, /\b(?:she|he|they)\/(?:her|him|them)\b/,
   /\bmy (?:gender|race|ethnicity|religion|sexual orientation|national origin)\b/,
-  /\b(?:i am|i'm|as) an? (?:black|white|asian|indigenous|woman|man|female|male|mother|father|immigrant|muslim|christian|jewish|hindu|first[- ]generation)\b/,
   // Round 2: military service said without the word "veteran".
   /\bserved in the (?:u\.?s\.? )?(?:army|navy|marines?|marine corps|air force|coast guard|military|armed forces|national guard|space force|reserves?)\b/,
   /\b(?:active[- ]duty|military service|military spouse|reservist)\b/,
 ];
+// "As a Black woman, ...", "I am an immigrant": who the person says they are. Never a bare word match on the record: "Six
+// Sigma Black Belt", "white papers", "taught English to immigrant families", "Mentor, First-Generation Student Program"
+// say nothing of who the person is (round 4 accepted all four; review of #507). Only a clause of the record that states it
+// OF THE PERSON (selfIdentified) supports it.
+const SELF_ID = /\b(?:i am|i'm|as) an? (black|white|asian|indigenous|woman|man|female|male|mother|father|immigrant|muslim|christian|jewish|hindu|first[- ]generation)\b/g;
+// A record clause's lead-in that says the rest is the person's own identity: "I am a ...", "I identify as ...", "As a ...",
+// or a label ("Gender: woman", "Ethnicity: Black").
+const SELF_LEAD = /^(?:(?:i am|i'm|i identify as|identify as|identifies as|self-identif(?:y|ies|ied) as|as|gender identity|gender|race|ethnicity|religion|heritage|identity|demographics?)\s+)?(?:an?\s+|the\s+)?/;
+const idNorm = (s: string) => flat(s).trim().replace(/\bfirst generation\b/g, "first-generation");
+// The words the text says the person is ("black woman in data"): what follows "as a" up to the end of the clause.
+function identityPhrase(t: string, at: number): string {
+  const rest = t.slice(at).split(/[,.;:!?()\n]| and | who | but | so /)[0];
+  return idNorm(rest).split(" ").slice(0, 8).join(" ");
+}
+// Is the identity `phrase` (from the text) stated of the person by a clause of the record? The clause, after its lead-in,
+// must BE the identity (or its first words: "Black" for "Black woman"), starting with the identity word itself: a clause
+// that only holds the word inside something else ("Black Belt", "immigrant families", "First-Generation Student Program")
+// states nothing of who the person is.
+function selfIdentified(phrase: string, word: string, record: string[]): boolean {
+  for (const line of record) {
+    for (const part of String(line ?? "").split(/[\n;|•,]+|\.(?=\s|$)| and /i)) {
+      const c = idNorm(part).replace(SELF_LEAD, "").trim();
+      if (!c || !c.startsWith(word)) continue;
+      if (phrase === c || phrase.startsWith(`${c} `)) return true;
+    }
+  }
+  return false;
+}
 const MILITARY = "army|navy|marines?|marine corps|air force|coast guard|military|armed forces|national guard|space force|reserves?|war|combat|service";
 // Leadership, by family: a fact that says the same family of word (a noun that only shares the stem, "the management
 // team", "the leadership team", is no claim to have managed or led anyone). `role`: the match is a role noun, a claim only
@@ -340,17 +367,31 @@ function titleProblems(t: string, rec: string, add: (s: string) => void) {
     add(`the title "${m[0].trim()}" is not on your confirmed record`);
   }
 }
-// Screening answers said in prose: each family's own words must be on the record.
-const SCREENING: { said: RegExp; on: RegExp; what: string }[] = [
-  { said: /\b(?:convicted|convictions?|felony|felonies|misdemeanou?rs?|criminal (?:record|history|background|charges?|convictions?)|clean (?:criminal )?(?:record|background)|arrested|background checks?)\b/,
-    on: /\b(?:convict\w*|felon\w*|misdemeanou?r\w*|criminal|arrest\w*|background check\w*)\b/, what: "criminal history or a background check" },
-  { said: /\bdrug (?:tests?|screens?|screening|testing)\b/, on: /\bdrug (?:test|screen)/, what: "a drug test" },
-  { said: /\b(?:willing|able|happy|open|ready|glad|prepared|free) to (?:relocate|move)\b|\b(?:can|will|would|could) (?:relocate|move) (?:to|for|anywhere)\b/, on: /\breloca\w*|\bwilling to move\b/, what: "willingness to relocate" },
-  { said: /\b(?:start|begin|join|available) (?:immediately|right away|asap|straight away|next week|next month|within (?:a|one|two|three|\d+) (?:days?|weeks?|months?))\b|\bavailable (?:to start|to begin|from|starting)\b|\b(?:two|2|four|4|one|1) weeks'? notice\b|\bnotice period\b/,
-    on: /\b(?:start date|available|availability|notice)\b/, what: "when you can start" },
-  { said: /\b(?:five|six|seven|low six|mid six|high six|low five|high five)[- ]figures?\b|\b(?:salary|pay|compensation) (?:expectations?|requirements?|range|target|of)\b|\b(?:expect|expecting|seeking|looking for|targeting|asking for|ask for|need|require)\b[^.!?;]{0,25}\b(?:salary|base pay|base salary|compensation|pay)\b/,
-    on: /\b(?:salary|compensation|pay)\b/, what: "a salary expectation" },
+// Screening answers said in prose: on the record only as the person's own answer (answeredOnRecord).
+const SCREENING: { said: RegExp; what: string }[] = [
+  { said: /\b(?:convicted|convictions?|felony|felonies|misdemeanou?rs?|criminal (?:record|history|background|charges?|convictions?)|clean (?:criminal )?(?:record|background)|arrested|background checks?)\b/, what: "criminal history or a background check" },
+  { said: /\bdrug (?:tests?|screens?|screening|testing)\b/, what: "a drug test" },
+  { said: /\b(?:willing|able|happy|open|ready|glad|prepared|free) to (?:relocate|move)\b|\b(?:can|will|would|could) (?:relocate|move) (?:to|for|anywhere)\b/, what: "willingness to relocate" },
+  { said: /\b(?:start|begin|join|available) (?:immediately|right away|asap|straight away|next week|next month|within (?:a|one|two|three|\d+) (?:days?|weeks?|months?))\b|\bavailable (?:to start|to begin|from|starting)\b|\b(?:two|2|four|4|one|1) weeks'? notice\b|\bnotice period\b/, what: "when you can start" },
+  { said: /\b(?:five|six|seven|low six|mid six|high six|low five|high five)[- ]figures?\b|\b(?:salary|pay|compensation) (?:expectations?|requirements?|range|target|of)\b|\b(?:expect|expecting|seeking|looking for|targeting|asking for|ask for|need|require)\b[^.!?;]{0,25}\b(?:salary|base pay|base salary|compensation|pay)\b/, what: "a salary expectation" },
 ];
+// A screening answer is on the record only as the person's own answer to that question: a clause of the record that says
+// the same kind of thing the text says ("Has never been convicted of a crime", "Available to start immediately", "Looking
+// for a salary in the low six figures"), not a word of it in a line about work. Round 4 tested only for a word ("criminal",
+// "available", "salary"), so "B.A. Criminal Justice" let "I have never been convicted" through, "Made dashboards available
+// to the team" let "I can start immediately", and "Built a salary benchmarking model" counted as a salary expectation
+// (review of #507). A clause that opens with what the person did at work ("Built", "Ran", "Conducted ...") answers nothing.
+const WORK_LEAD = /^(?:[a-z]+ed|built|ran|wrote|made|led|taught|oversaw|drove|won|grew|sold|kept|held|gave|took|did|began|spoke|met|brought|found|sent|spent|paid|cut|put|set|run|build|make|write|teach|lead|manage|conduct|perform|process|review|handle|own)\b/;
+function answeredOnRecord(said: RegExp, record: string[]): boolean {
+  for (const line of record) {
+    for (const part of String(line ?? "").split(/[\n;|•]+|[.!](?=\s|$)/)) {
+      const c = lower(part).trim();
+      if (!c || WORK_LEAD.test(c)) continue;
+      if (said.test(` ${c} `)) return true;
+    }
+  }
+  return false;
+}
 // The names a posting (its question, its company) gives: capitalized inside a sentence, or an acronym. A question written
 // in title case ("Tell Us About A Time You Led A Project") names nothing by its capitals: only its acronyms count there.
 function postingNames(mentionRaw: string, company: string): string[] {
@@ -449,15 +490,20 @@ export function claimProblems(text: string, o: ClaimInput): string[] {
   { const m = NATIONALITY.exec(t); if (m && !hasPhrase(rec, (m[1] || m[2] || m[3]))) add(`a nationality ("${m[0].trim()}") is not on your confirmed record`); }
   for (const re of DEMOGRAPHIC) {
     const m = re.exec(t);
-    // ROUND 4: what they said they are ("first-generation") is the claim; "as a" or "I am a" around it is not.
-    if (m && !hasPhrase(rec, m[0].trim()) && !hasPhrase(rec, m[0].trim().replace(/^(?:i am|i'm|as) an? /, ""))) add(`"${m[0].trim()}" (how you identify) is not on your confirmed record`);
+    if (m && !hasPhrase(rec, m[0].trim())) add(`"${m[0].trim()}" (how you identify) is not on your confirmed record`);
+  }
+  // ROUND 4 (fixed after review of #507): "As a first-generation college student" is said when the record states that the
+  // person IS one (a confirmed identity fact), never because the word is somewhere on the record.
+  for (const m of t.matchAll(SELF_ID)) {
+    if (!selfIdentified(identityPhrase(t, m.index! + m[0].length - m[1].length), idNorm(m[1]), o.record || []))
+      add(`"${m[0].trim()}" (how you identify) is not on your confirmed record`);
   }
   veteranProblems(t, rec, add);
   // ROUND 4: a title, a screening answer, a date on a named entry, a GPA (see above).
   titleProblems(t, lower(recordRaw.replace(/\n|;/g, " | ")), add);
   for (const sc of SCREENING) {
     const m = sc.said.exec(t);
-    if (m && !sc.on.test(rec)) add(`${sc.what} ("${m[0].trim()}") is not on your confirmed record`);
+    if (m && !answeredOnRecord(sc.said, o.record || [])) add(`${sc.what} ("${m[0].trim()}") is not on your confirmed record`);
   }
   dateProblems(scrub, (o.record || []).filter(Boolean), add);
   gpaProblems(t, rec, add);

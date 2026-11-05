@@ -29,6 +29,7 @@ import assertNode from "node:assert/strict";
 import * as core from "../../supabase/functions/_shared/router_core.career.js";
 import { checkDraft, draftEssay, draftReply, type DraftOutcome } from "../../supabase/functions/_shared/essay_draft.ts";
 import { guardMaterials } from "../../supabase/functions/_shared/career_materials_guard.ts";
+import { claimProblems } from "../../supabase/functions/_shared/person_claims.ts";
 import { factStaysHere, normLabel, planBatch, type FormField } from "../../supabase/functions/_shared/career_apply.ts";
 import { answerKey } from "../../supabase/functions/_shared/question_map.ts";
 import { factsWithTextAnswers, questionsToStore } from "../../workers/career-browser/ask-once.ts";
@@ -370,4 +371,50 @@ Deno.test("round 4 regressions: one case per bug, each as trunk got it wrong", a
   assertNode.notEqual(normLabel("Desired salary ($)"), normLabel("Desired salary (€)"));
   const cpp = plan([field("Years of experience with C#", [])], { ...BASE }, { [normLabel("Years of experience with C++")]: { value: "6", factId: "text-answer:x" } });
   assertNode.equal(cpp.ready.length, 0);
+});
+
+// Review of #507 (2026-11-05): round 4's fixes for an honest identity and for screening answers accepted a word that is on
+// the record in another sense. An identity ("As a Black woman", "As an immigrant") is said only when the record states it
+// OF THE PERSON; a screening answer only when the record holds the person's own answer to that question. Each decoy below
+// was shown at 66faf5c32 and refused at its parent e1b9bff58; each must-accept is a confirmed fact said as it is.
+export const R4_DECOYS: { text: string; record: string; why: string }[] = [
+  { text: "As a Black woman in data, I bring a different lens.", record: "Six Sigma Black Belt certification", why: "identity" },
+  { text: "As a white man in tech, I know my privilege.", record: "Wrote white papers on caching", why: "identity" },
+  { text: "As an immigrant, I learned resilience.", record: "Taught English to immigrant families as a volunteer", why: "identity" },
+  { text: "As a first-generation college student, I worked through school.", record: "Mentor, First-Generation Student Program at State University", why: "identity" },
+  { text: "I have never been convicted of a crime.", record: "B.A. Criminal Justice, State University", why: "criminal history" },
+  { text: "I can start immediately.", record: "Made sales dashboards available to the whole team", why: "start date" },
+  { text: "I am seeking a base salary in the low six figures.", record: "Built a salary benchmarking model", why: "salary" },
+];
+export const R4_CONFIRMED: { text: string; record: string }[] = [
+  { text: "As a first-generation college student, I worked through school.", record: "First-generation college student" },
+  { text: "As a first-generation college student, I worked through school.", record: "I am a first-generation college student" },
+  { text: "As a Black woman in data, I bring a different lens.", record: "Black woman" },
+  { text: "As an immigrant, I learned resilience.", record: "I am an immigrant" },
+  { text: "I have never been convicted of a crime.", record: "Has never been convicted of a crime" },
+  { text: "I can start immediately.", record: "Available to start immediately" },
+  { text: "I am seeking a base salary in the low six figures.", record: "Looking for a salary in the low six figures" },
+];
+Deno.test("review of #507: an identity or a screening answer is never supported by the same word in another sense", async () => {
+  const conf = { status: "confirmed", needs_confirmation: false, source: "user" };
+  const base = [{ id: "F-1", kind: "experience", title: "Data Analyst, Acme Corp, 2019-2022", org: "Acme Corp", role: "Data Analyst", start: "2019", end: "2022",
+    bullets: ["Built Tableau dashboards for 40 sales reps"], ...conf },
+    { id: "F-2", kind: "education", title: "B.S. Statistics, Ridgeview University, 2018", school: "Ridgeview University", degree: "B.S. Statistics", text: "GPA 3.4/4.0", ...conf }];
+  const tail = " At Acme Corp, I built Tableau dashboards for 40 sales reps.";
+  // a confirmed fact as the person gave it: "How I identify myself" and their own words
+  const shown = async (text: string, record: string, title = record) => {
+    const a = await checkDraft({ q: essayQ("Tell us about yourself.", "Larkspur Health"), siblingLabels: [],
+      deps: { facts: () => [...base, { id: "F-3", kind: "other", title, text: record, ...conf }] }, text: `${text}${tail}` });
+    assertNode.notEqual(a.ok ? "" : a.why, "thin", `${JSON.stringify(text)}: too few facts to judge`);
+    return a.ok;
+  };
+  const recordOf = (record: string) => ["Data Analyst, Acme Corp, 2019-2022; Built Tableau dashboards for 40 sales reps", "B.S. Statistics, Ridgeview University, 2018; GPA 3.4/4.0", record];
+  for (const d of R4_DECOYS) {
+    assertNode.equal(await shown(d.text, d.record), false, `${d.why}: ${JSON.stringify(d.text)} shown on ${JSON.stringify(d.record)}`);
+    assertNode.notDeepEqual(claimProblems(d.text, { record: recordOf(d.record) }), [], `${d.why}: ${JSON.stringify(d.text)} passed on ${JSON.stringify(d.record)}`);
+  }
+  for (const c of R4_CONFIRMED) {
+    assertNode.equal(await shown(c.text, c.record, "How I identify myself"), true, `${JSON.stringify(c.text)} refused on ${JSON.stringify(c.record)}`);
+    assertNode.deepEqual(claimProblems(c.text, { record: recordOf(c.record) }), [], `${JSON.stringify(c.text)} refused on ${JSON.stringify(c.record)}`);
+  }
 });

@@ -378,6 +378,7 @@
     "tests/architect/shared-eval-ledger.test.ts": 0.1,
     "tests/architect/site-pages.test.ts": 4.1,
     "tests/architect/site-refusal.test.ts": 0.1,
+    "tests/architect/site-waitlist-functions.test.ts": 0.1,
     "tests/architect/situation-knowledge.test.ts": 0.1,
     "tests/architect/spec-b-brain.test.ts": 0.1,
     "tests/architect/staged-advice-questions.test.ts": 0.2,

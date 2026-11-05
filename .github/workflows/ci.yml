@@ -269,8 +269,12 @@ jobs:
     # instead of by sorted-file index, which had left them at 354-651 s of tests on trunk; each shard reports its files'
     # durations as a notice so the table can be refreshed (`architect-shards.ts update`). The 45-minute cap is a
     # backstop, not a target. The required check name `gate (architect)` is the aggregate job below.
-    # 2026-11-01: 25 minutes (was 45): p99 11.7 / max 13.3 min over 894 green shard runs.
-    timeout-minutes: 25
+    # 2026-11-01 cut this to 25 minutes citing "max 13.3 min over 894 green shard runs"; that figure was wrong: green
+    # shard 5/6 runs took 24.8, 27.8 and 28.6 min before later speed-ups, and the 25-minute cap cancelled a shard on
+    # #414's own head and shard 5/6 on trunk 8e1bf843 (run 41972399047, at 25.2 min). Measured 2026-11-05 on four recent
+    # trunk runs (42054532667, 42052325477, 42045333459, 42020912793): green shards took 10.7-17.3 min, slowest shard 5/6.
+    # Back to 45 minutes (review of #414): a backstop with headroom over the slowest observed green shard, not a target.
+    timeout-minutes: 45
     # It does not wait on `changes` (and runs on drafts, as on trunk), so it starts at once: a cancelled run ends it as
     # cancelled, never as a skipped (passing) required check.
     strategy:

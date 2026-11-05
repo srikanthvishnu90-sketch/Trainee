@@ -125,7 +125,7 @@ export function whatsappAdapter(o: {
   // (its exact rate is UNKNOWN; 131056 is retried on the first message only).
   const pace = pacer({ perChatMs: 1000, overallPerSecond: 50, clock: o.clock, sleep: o.sleep });
   const target = (address: string) => (/^[0-9]{6,20}$/.test(address) ? { to: address } : { recipient: address });
-  const post = async (body: Record<string, unknown>): Promise<{ ok: true; id: string | null } | { ok: false; error: string; code: number | null; status: number; network: boolean; timedOut: boolean }> => {
+  const post = async (body: Record<string, unknown>): Promise<{ ok: true; id: string | null } | { ok: false; error: string; code: number | null; status: number; network: boolean; timedOut: boolean; unauthorized?: boolean }> => {
     let res: Response;
     try {
       res = await f(`${WHATSAPP_GRAPH}/${version}/${o.phoneNumberId}/messages`, {
@@ -138,8 +138,13 @@ export function whatsappAdapter(o: {
     }
     const b = await res.json().catch(() => null) as any;
     if (res.ok && Array.isArray(b?.messages)) return { ok: true, id: typeof b.messages[0]?.id === "string" ? b.messages[0].id : null };
+    // CHANNEL DELIVERY ROUND 4 (2026-11-05): a 2xx whose body could not be read (cut short, not JSON) and says no error is Meta
+    // having accepted the message. It was a final failure: recorded failed although sent, and the row's later messages lost.
+    if (res.ok && !(b && typeof b === "object" && b.error)) return { ok: true, id: null };
     const code = Number.isInteger(b?.error?.code) ? b.error.code : null;
-    return { ok: false, error: `WhatsApp HTTP ${res.status}${code !== null ? ` (${code})` : ""}: ${String(b?.error?.message ?? "").slice(0, 120)}`, code, status: res.status, network: false, timedOut: false };
+    // CHANNEL DELIVERY ROUND 4: the access token was refused (401; code 190, an expired or revoked token): nothing went out.
+    const unauthorized = res.status === 401 || code === 190;
+    return { ok: false, error: `WhatsApp HTTP ${res.status}${code !== null ? ` (${code})` : ""}: ${String(b?.error?.message ?? "").slice(0, 120)}`, code, status: res.status, network: false, timedOut: false, ...(unauthorized ? { unauthorized } : {}) };
   };
   return {
     channel: "whatsapp", provider: "whatsapp",
@@ -192,7 +197,7 @@ export function whatsappAdapter(o: {
         const partial = i ? { sent: i, sentIds: [...ids] } : {};
         if (r.code !== null && HOLD_CODES.has(r.code)) return { ok: false, error: r.error + after, retryable: false, hold: true, ...partial };
         const retry = r.network || (r.code !== null && RETRY_CODES.has(r.code)) || r.status === 429 || r.status === 502 || r.status === 503;
-        return { ok: false, error: r.error + after, retryable: retry, ...partial };
+        return { ok: false, error: r.error + after, retryable: retry, ...(r.unauthorized ? { unauthorized: true } : {}), ...partial };
       }
       return { ok: true, id: ids[0] ?? null, ids };
     },

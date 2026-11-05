@@ -376,8 +376,10 @@ const RESULT: Record<string, string> = {
 export function answerText(results: CardResult[], o: { declined?: "left_out" | "said_no" } = {}): string {
   const queued = results.filter((r) => r.result === "queued").length;
   const notSent = results.length - queued;
+  // WHOLE JOURNEYS R2: an item whose prepared application is gone (a newer resume or a corrected entry discarded it after the
+  // card was shown) has no company in the database's result; it read "1. null: not sent: ...". Said plainly instead.
   const lines = results.map((r) =>
-    `${r.n}. ${String(r.company).replace(/\s+/g, " ").slice(0, 80)}: ${
+    `${r.n}. ${(r.company === null || r.company === undefined ? "" : String(r.company)).replace(/\s+/g, " ").trim().slice(0, 80) || "An application no longer on file"}: ${
       r.result === "declined" && o.declined ? RESULT[o.declined] : RESULT[r.result] ?? RESULT.refused
     }`
   );
@@ -439,6 +441,14 @@ export const UNCLEAR_TEXT = (count: number) => `I couldn't tell which ones you m
 // The statuses after which the card is still waiting for its answer: the handler keeps it the thread's last word, with
 // its id on the reply, so the next "yes" answers it. "card_outdated" waits only when it carries the current card's id.
 export const CARD_WAITING = ["shown", "not_on_card", "change", "hold", "unclear", "not_named", "count_mismatch", "nothing_left", "confirm_except"];
+// WHOLE JOURNEYS R2 (2026-11-02): "show my applications" that showed no card (nothing ready, no resume on file, one too long
+// to show, the resume check not made) is not a card's answer. It was recorded as CARD_ANSWER_INTENT, so the person's next
+// "yes" was told "That card was already answered. Nothing more was sent." about a card that never existed. Its own intent.
+export const CARD_NONE_INTENT = "career_apply_card_none";
+export const CARD_NONE = ["empty", "no_resume", "resume_unreadable", "too_long"];
+export function cardIntent(r: { status: string; card_id?: string }): string {
+  return cardWaiting(r) ? CARD_INTENT : CARD_NONE.includes(r.status) ? CARD_NONE_INTENT : CARD_ANSWER_INTENT;
+}
 export function cardWaiting(r: { status: string; card_id?: string }): boolean {
   return CARD_WAITING.includes(r.status) || (r.status === "card_outdated" && !!r.card_id);
 }

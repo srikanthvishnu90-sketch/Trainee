@@ -94,7 +94,9 @@ const CODE_WORDS: [RegExp, string][] = [
   [/^(ACCOUNT_PAUSED|person_paused)$/, `Trainee is paused for you; ${NOTHING_SENT}`],
   [/^FACTS_ERASED$/, `your Trainee data was erased; ${NOTHING_SENT}`],
   [/^(FACT_OWNER_MISMATCH|CONFIRMED_FACT_OWNER_REQUIRED)$/, `an answer was not one of your own confirmed facts, so it was not sent; ${NOTHING_SENT}`],
-  [/^(duplicate_job|duplicate_posting)$/, `you already applied to this exact posting; ${NOTHING_SENT}`],
+  // Apply round 4 (2026-11-05): the other application to this posting may be in flight, unconfirmed or of unknown outcome, so it
+  // is never called "applied" here (only an employer-confirmed application is).
+  [/^(duplicate_job|duplicate_posting)$/, `another application to this exact posting is already on record; ${NOTHING_SENT}`],
   [/^POSTING_CLOSED$/, `this posting closed before it could be submitted; ${NOTHING_SENT}`],
   [/^(daily_cap|daily_limit)$/, `you had reached the daily pace you set; ${NOTHING_SENT}`],
   [/^IDENTITY_NUMBER_REQUESTED$/, `the form asks for an identity number, which only you type; ${NOTHING_SENT}`],

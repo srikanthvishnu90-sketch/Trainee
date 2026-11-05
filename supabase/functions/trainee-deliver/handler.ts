@@ -81,12 +81,14 @@ export async function handleDeliver(req: Request, d: DeliverDeps): Promise<Respo
     // Each round puts back what it claimed and did not send (capped rows, rows of a channel not wired) before the next, and a
     // round that moved nothing ends the run (those rows would only be claimed again).
     const r = { delivered: 0, failed: 0, retried: 0, skipped_opt_out: 0, capped: 0, deferred: 0, held: 0, nudged: 0, not_wired: 0 };
+    const down = new Set<Channel>(); // CHANNEL DELIVERY ROUND 4: a channel whose credentials were refused is not tried again this run
     for (let round = 1; round <= (maxRounds as number); round++) {
       const t0 = d.now(), left = RUN_BUDGET_MS - (t0 - started);
       if (round > 1 && left < 10_000) break;
-      const x = await deliverDue({ store, adapters, now: t0, limit: batch as number, clock: d.now, budgetMs: left, concurrency: concurrency as number });
+      const x = await deliverDue({ store, adapters, now: t0, limit: batch as number, clock: d.now, budgetMs: left, concurrency: concurrency as number, down });
       // Only a run that finished puts back what it claimed and did not send. After a failure mid-run a claimed row may already
-      // be with the provider, so it stays "sending" and the next sweep fails it instead of resending it.
+      // be with the provider, so it stays "sending" and the next sweep fails it instead of resending it. (CHANNEL DELIVERY ROUND
+      // 4: deliverDue itself puts back, before it throws, every row no provider was asked to send.)
       await store.release();
       for (const k of Object.keys(r) as (keyof typeof r)[]) r[k] += x[k];
       const claimed = x.delivered + x.failed + x.retried + x.skipped_opt_out + x.capped + x.deferred + x.held + x.not_wired;

@@ -1,0 +1,34 @@
+{
+  "_": "The inputs of each ci.yml job a pull request may skip. A path ending in / is a directory (everything under it), any other is one file. On a pull request a job runs when a changed file (git diff --no-renames of the tested merge commit against its base parent) is in `always` or in its list; pushes to trunk and release/production always run every job. Whenever such a job runs, scripts/ci/trace-opens.py records what it opened and `node scripts/ci/job-inputs.cjs verify <job>` fails it on any tracked file outside its list, so a list that misses an input goes red instead of skipping silently.",
+  "always": [
+    ".github/workflows/ci.yml",
+    "scripts/ci/",
+    "scripts/gate.sh"
+  ],
+  "jobs": {
+    "coverage": [
+      "tests/career-forms-ci-coverage.test.cjs",
+      "tests/fixtures/forms-ci/",
+      "tests/fixtures/forms-ci-coverage-expected.json",
+      "scripts/career/",
+      "workers/career-browser/",
+      "packages/domain/149-career-portal-apply.js",
+      "extension/lib/",
+      "scripts/forms-ci-shards.cjs",
+      "scripts/forms-ci-diag-annotations.cjs",
+      "scripts/node-test-durations.mjs",
+      "tools/package.json",
+      "tools/package-lock.json",
+      "packages/extension/tools/package.json",
+      "packages/extension/tools/package-lock.json"
+    ],
+    "database": [
+      "tests/db/",
+      "tests/fixtures/export-tables.json",
+      "tests/fixtures/card-cloud-db-20261021/",
+      "supabase/migrations/",
+      "supabase/rollbacks/",
+      "scripts/launch/"
+    ]
+  }
+}

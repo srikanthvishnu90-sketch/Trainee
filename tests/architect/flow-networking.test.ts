@@ -37,6 +37,7 @@ Deno.test({ name: "F10: networking emails from chat at the real handler: import,
   const pg: Pg = await startPg();
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   const env = { CAREER_NETWORKING_DRAFT: "on", ANTHROPIC_API_KEY: "sk-test-not-real", CAREER_MODEL: "claude-haiku-5-5" };
+  const savedEnv = Object.fromEntries(Object.keys(env).map((k) => [k, Deno.env.get(k)])); // put back as it was, never deleted
   for (const [k, v] of Object.entries(env)) Deno.env.set(k, v);
   try {
     await supabaseParity(pg);
@@ -162,7 +163,7 @@ Deno.test({ name: "F10: networking emails from chat at the real handler: import,
       eq(JSON.parse(await pg.sql(`select count(*) from public.career_outreach_drafts where user_id = '${PEOPLE["tok-x"]}'`)), 0);
     });
   } finally {
-    for (const k of Object.keys(env)) Deno.env.delete(k);
+    for (const [k, v] of Object.entries(savedEnv)) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v);
     handler?.restore();
     await pg.stop();
   }

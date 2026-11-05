@@ -45,6 +45,12 @@ export interface SessionStore {
   // is not changed
   countSend(jti: string, max: number): Promise<boolean>;
   countTry(jti: string, max: number): Promise<boolean>; // false: locked (the link's tries, or the account's)
+  // The code tries of ALL the account's sign-ins begun within ACCOUNT_WINDOW_MS of this one, this one included, whatever number
+  // each holds. The page locks a sign-in once this reaches ACCOUNT_MAX_TRIES, before countTry, whatever number it holds (file page
+  // sign-in round 4: the account's cap counted only sign-ins holding the account's number, so with four forwarded links the
+  // fourth answered "Too many wrong codes" for the account's number and "That code didn't work" for any other: whether a typed
+  // number is the account's was readable from the answer). countTry's own caps are unchanged. Absent: no such check.
+  accountTries?(jti: string): Promise<number>;
   finishLogin(jti: string, at: number): Promise<boolean>; // true only the first time (the link is used up)
 }
 export interface PhoneAuth {

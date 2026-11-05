@@ -3,9 +3,11 @@
   "files": {
     "tests/architect/account-memory-unit.test.ts": 0.1,
     "tests/architect/advice-wide.test.ts": 5,
+    "tests/architect/alerts-cadence-words.test.ts": 0.1,
     "tests/architect/alerts-chain-pg.test.ts": 10,
     "tests/architect/alerts-owner-pins.test.ts": 0.2,
     "tests/architect/alerts-remote-region.test.ts": 0.1,
+    "tests/architect/alerts-telegram-morning-pg.test.ts": 120,
     "tests/architect/apply-chat-employer.test.ts": 0.1,
     "tests/architect/apply-chat-many.test.ts": 0.1,
     "tests/architect/apply-chat-pace-set.test.ts": 0.1,

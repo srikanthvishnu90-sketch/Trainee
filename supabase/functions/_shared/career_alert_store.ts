@@ -73,7 +73,9 @@ export function validPrefs(input: Record<string, unknown>, base: AlertPrefs = DE
   const fl = input.floor === undefined ? { ok: true as const, floor: base.floor } : validFloor(input.floor);
   if (!fl.ok) return { ok: false, error: fl.error };
   const floor = fl.floor && Object.keys(fl.floor).length ? fl.floor : undefined;
+  // A new whole hour from a tool replaces the saved minute too (the minute belongs to the hour it was said with).
   const { min_fit: _was, ...kept } = base;
+  if (input.report_hour !== undefined) delete (kept as Partial<AlertPrefs>).report_minute;
   return { ok: true, prefs: { ...kept, on: true, keywords, locations, remote_ok: input.remote_ok === undefined ? base.remote_ok : input.remote_ok as boolean, report_hour, quiet_start, quiet_end, max_instant_per_day: cap, floor, ...(week !== undefined ? { max_per_week: week } : {}), ...(minFit !== undefined ? { min_fit: minFit } : {}) } };
 }
 export function validZone(tz: unknown): string | null {
@@ -84,12 +86,13 @@ export function validZone(tz: unknown): string | null {
 // Turning alerts on (or changing them) starts watching now: postings already on the boards are never alerted, and if
 // today's report hour has passed, the first report is tomorrow's, not one sent minutes after the person asked.
 export function startWatching(prev: AlertRow | null, o: { userId: string; prefs: AlertPrefs; tz: string; now: number }): AlertRow {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: o.tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" }).formatToParts(new Date(o.now));
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: o.tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(o.now));
   const g = (t: string) => parts.find((x) => x.type === t)?.value ?? "0";
-  const today = `${g("year")}-${g("month")}-${g("day")}`, hour = Number(g("hour")) % 24;
+  const today = `${g("year")}-${g("month")}-${g("day")}`, hour = Number(g("hour")) % 24, minute = Number(g("minute"));
+  const past = hour * 60 + minute >= o.prefs.report_hour * 60 + (o.prefs.report_minute ?? 0);
   return { id: o.userId, tz: o.tz, prefs: o.prefs, last_checked_at: new Date(o.now).toISOString(),
     instant_sent_today: prev?.sent_on === today ? prev.instant_sent_today : 0, sent_on: today,
-    last_report_on: hour >= o.prefs.report_hour ? today : (prev?.last_report_on ?? null), held: prev?.held ?? [] };
+    last_report_on: past ? today : (prev?.last_report_on ?? null), held: prev?.held ?? [] };
 }
 
 // ------------------------------------------------------------------------------------------------ memory

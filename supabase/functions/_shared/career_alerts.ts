@@ -27,7 +27,20 @@ export interface AlertPrefs {
   // fits one watch whole (its role, its places, its floor, its firms), never one watch's role in another's city.
   // Present, these decide the match and `keywords` only lists their words (the table's shape).
   interests?: AlertInterest[];
+  // JOB ALERTS AS A REAL OUTCOME (2026-10-31): "every morning" (career_watch_alerts.ts cadenceFrom). One message a day at
+  // report_hour with only the matches new since the last one, numbered, and nothing on a day without any (Q326, Q336);
+  // the bridge sets max_instant_per_day to 0 with it, so nothing goes out between.
+  digest?: boolean;
+  // Re-review of PR #365: the minute of the daily message ("7:30 PM"; absent: on the hour), and "every weekday" (no message
+  // on Saturday or Sunday in the person's zone; what matched over the weekend goes in Monday's).
+  report_minute?: number;
+  weekdays_only?: boolean;
+  // The person's "less like N" / "more like N" on a delivered alert (career_alert_feedback.ts), standing rules (Q498): a
+  // posting like a "less" one (its company, or a distinct word of its title) is never news unless it is also like a
+  // "more" one; one like a "more" one goes first.
+  feedback?: { less?: AlertSignal[]; more?: AlertSignal[] };
 }
+export interface AlertSignal { company: string; terms: string[] }
 // home (SERIAL-1530): the person's stated location, as they said it, for a posting's stated country or region restriction.
 export interface AlertInterest { keywords: string[]; locations: string[]; remote_ok: boolean; floor?: Floor; companies?: string[]; home?: string }
 export interface PlanUser {
@@ -42,7 +55,8 @@ export interface PlanUser {
 export type Planned =
   | { userId: string; kind: "alert"; key: string; at: number; job_id: string; text: string }
   | { userId: string; kind: "held"; job_id: string }
-  | { userId: string; kind: "report"; key: string; at: number; text: string };
+  | { userId: string; kind: "report"; key: string; at: number; text: string }
+  | { userId: string; kind: "report_empty"; date: string };
 
 // F7: a posting's fit to the person (career_alert_fit.ts), by job_id. Null score: scoreFit could not score it.
 export interface AlertFit { score: number | null; excluded: boolean; reasons: string[] }
@@ -54,8 +68,12 @@ export function fitFloorOk(fit: AlertFit | null | undefined, prefs: Pick<AlertPr
   return !!fit && fit.score !== null && fit.score >= prefs.min_fit;
 }
 // Best fit first (an unscored posting after every scored one), then freshest.
-function byFit(fits: Map<string, AlertFit> | undefined) {
+function byFit(fits: Map<string, AlertFit> | undefined, prefs?: Pick<AlertPrefs, "feedback">) {
   return (a: any, b: any) => {
+    if (prefs?.feedback) {
+      const ba = feedbackOf(a, prefs).boost, bb = feedbackOf(b, prefs).boost;
+      if (ba !== bb) return bb - ba;
+    }
     if (fits) {
       const fa = fits.get(a.job_id)?.score ?? -1, fb = fits.get(b.job_id)?.score ?? -1;
       if (fa !== fb) return fb - fa;
@@ -74,7 +92,27 @@ const DAY = 86400000;
 // right-to-left override (U+202E) in a title turned "gnp.exe" into "exe.png" on the person's screen inside an alert.
 const FORMAT_CHARS = /[­​-‏‪-‮⁠-⁤⁦-⁩﻿]/g;
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
-const words = (s: unknown) => String(s ?? "").replace(FORMAT_CHARS, "").toLowerCase().split(/[^a-z0-9+#]+/).filter(Boolean);
+export const words = (s: unknown) => String(s ?? "").replace(FORMAT_CHARS, "").toLowerCase().split(/[^a-z0-9+#]+/).filter(Boolean);
+// A title's words, with each two neighbours also read as one ("Front-End" and "Front End" are "frontend"; "Full Stack" is
+// "fullstack"), so a watch's one-word term matches the title however the board spells it.
+export function titleWords(s: unknown): Set<string> {
+  const ws = words(s), out = new Set(ws);
+  for (let i = 0; i + 1 < ws.length; i++) out.add(ws[i] + ws[i + 1]);
+  return out;
+}
+// How a posting stands with the person's feedback: dropped (like a "less" one and like no "more" one), or how many "more"
+// ones it is like (they go first).
+function likeSignal(p: any, s: AlertSignal): boolean {
+  if (s.company && sameCompany(p?.company, s.company)) return true;
+  const t = titleWords(p?.title);
+  return (s.terms ?? []).some((x) => t.has(x));
+}
+export function feedbackOf(p: any, prefs: Pick<AlertPrefs, "feedback">): { drop: boolean; boost: number } {
+  const f = prefs.feedback;
+  if (!f) return { drop: false, boost: 0 };
+  const boost = (f.more ?? []).filter((s) => likeSignal(p, s)).length;
+  return { drop: !boost && (f.less ?? []).some((s) => likeSignal(p, s)), boost };
+}
 // Postgres hands timestamps back as "+00:00", the feed as "Z": compare instants, never strings.
 const ms = (t: unknown) => { const n = Date.parse(String(t ?? "")); return Number.isFinite(n) ? n : NaN; };
 // Posting fields are other people's text: one line, bounded, before they go into a message. PROACTIVE SCENARIOS ROUND 2
@@ -168,6 +206,7 @@ const httpsUrl = (u: unknown) => (/^https:\/\/\S+$/.test(String(u ?? "")) ? Stri
 
 export function matchPosting(p: any, prefs: AlertPrefs): boolean {
   if (!p || p.closed_at || !httpsUrl(p.url)) return false;
+  if (feedbackOf(p, prefs).drop) return false;
   if (prefs.floor && !relevanceFloor(p, prefs.floor).pass) return false;
   if (prefs.interests?.length) return prefs.interests.some((i) => fits(p, i));
   return fits(p, prefs);
@@ -179,7 +218,7 @@ function fits(p: any, w: { keywords: string[]; locations: string[]; remote_ok: b
   if (w.companies?.length && !w.companies.some((c) => sameCompany(p.company, c))) return false;
   // A keyword matches when every one of its words is a whole word of the title ("data analyst" matches
   // "Analyst, Data Platform", never "Metadata Analyst" for "data"). No keywords means no alerts, never everything.
-  const title = new Set(words(p.title));
+  const title = titleWords(p.title);
   if (!w.keywords.some((k) => { const ws = words(k); return ws.length > 0 && ws.every((x) => title.has(x)); })) return false;
   // SERIAL-1530: the remote preference, the watched places and the posting's stated country or region against the
   // person's stated location, one rule (posting_region.ts); a restriction with no location on record is held, not passed.
@@ -232,6 +271,11 @@ function local(at: number, tz: string): { date: string; hour: number; minute: nu
   const g = (t: string) => parts.find((x) => x.type === t)?.value ?? "0";
   return { date: `${g("year")}-${g("month")}-${g("day")}`, hour: Number(g("hour")) % 24, minute: Number(g("minute")) };
 }
+// At or after the person's report time on their clock; with weekdays_only, never on a Saturday or Sunday.
+export function reportDue(l: { date: string; hour: number; minute: number }, p: Pick<AlertPrefs, "report_hour" | "report_minute" | "weekdays_only">): boolean {
+  if (p.weekdays_only) { const wd = new Date(`${l.date}T12:00:00Z`).getUTCDay(); if (wd === 0 || wd === 6) return false; }
+  return l.hour * 60 + l.minute >= p.report_hour * 60 + (p.report_minute ?? 0);
+}
 const isQuiet = (hour: number, p: AlertPrefs) =>
   p.quiet_start === p.quiet_end ? false : p.quiet_start > p.quiet_end ? hour >= p.quiet_start || hour < p.quiet_end : hour >= p.quiet_start && hour < p.quiet_end;
 // Whether an instant falls in the person's quiet hours, in their zone.
@@ -271,7 +315,7 @@ export function planProactive(o: { users: PlanUser[]; postings: any[]; now: numb
     // outbox's once-per-key rule keeps the rare re-plan from ever sending twice.
     const fresh = o.postings
       .filter((p) => ms(p.first_seen_at) >= since && freshWhenSeen(p) && matchPosting(p, prefs) && floorOk(p))
-      .sort(byFit(fits));
+      .sort(byFit(fits, prefs));
     const dayRoom = Math.min(MAX_INSTANT_PER_DAY, Math.floor(prefs.max_instant_per_day)) - Math.max(0, u.instant_sent_today | 0);
     let room = Math.max(0, dayRoom);
     const at = isQuiet(l.hour, prefs) ? nextAwake(o.now, u.tz, prefs) : o.now;
@@ -292,14 +336,30 @@ export function planProactive(o: { users: PlanUser[]; postings: any[]; now: numb
       room--;
       out.push({ userId: u.id, kind: "alert", key: `alert:${p.job_id}`, at, job_id: p.job_id, text: alertText(p, o.now) });
     }
-    // The daily report: once per local day, at or after the person's hour.
-    if (l.hour >= prefs.report_hour && u.last_report_on !== l.date) {
+    // The daily report: once per local day, at or after the person's hour and minute (and, weekdays only, Monday to Friday).
+    if (reportDue(l, prefs) && u.last_report_on !== l.date) {
       const held = new Set(u.held || []);
       const listed = new Map<string, Set<string>>();
+      // A morning message (prefs.digest) lists only what is new since the last one: what was held since (every match is
+      // held when there are no instant alerts) and what this run found; never the day before's again. One line per job, by
+      // the same round-3 twin closure as the instant alerts above (one job on several boards is listed once).
       const day = o.postings
-        .filter((p) => matchPosting(p, prefs) && floorOk(p) && ((ms(p.first_seen_at) > o.now - DAY && freshWhenSeen(p)) || held.has(p.job_id)))
-        .sort(byFit(fits))
+        .filter((p) => matchPosting(p, prefs) && floorOk(p) && (prefs.digest
+          ? held.has(p.job_id) || (ms(p.first_seen_at) >= since && freshWhenSeen(p))
+          : (ms(p.first_seen_at) > o.now - DAY && freshWhenSeen(p)) || held.has(p.job_id)))
+        .sort(byFit(fits, prefs))
         .filter((p) => { if (twinOf(listed, keysOf(p))) return false; take(listed, closeTwins(keysOf(p), idx)); return true; });
+      if (prefs.digest) {
+        // Q326: a day with nothing new sends nothing; the day is still marked done, so a match found later that day waits
+        // for the next morning instead of going out in the afternoon.
+        out.push(day.length
+          ? { userId: u.id, kind: "report", key: `report:${l.date}`, at, text: [`Your morning job matches: ${day.length} new.`,
+              ...day.slice(0, REPORT_LIMIT).map((p, i) => `${i + 1}. ${line(p)}\n   ${httpsUrl(p.url)}`),
+              ...(day.length > REPORT_LIMIT ? [`…and ${day.length - REPORT_LIMIT} more. Ask me for the rest.`] : []),
+              `Reply "less like 2" or "more like 1" to tune these, or "stop" to stop them.`].join("\n") }
+          : { userId: u.id, kind: "report_empty", date: l.date });
+        continue;
+      }
       const text = day.length
         ? [`Your daily job report: ${day.length} match${day.length === 1 ? "" : "es"} in the last day.`,
            ...day.slice(0, REPORT_LIMIT).map((p) => `- ${line(p)}\n  ${httpsUrl(p.url)}`),

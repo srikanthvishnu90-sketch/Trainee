@@ -138,6 +138,7 @@ export async function runAlerts(o: {
       const today = localDate(o.now, u.tz), weekSince = new Date(o.now - 7 * 86400000).toISOString();
       for (const p of mine) {
         if (p.kind === "held") { held.add(p.job_id); stats.held++; continue; }
+        if (p.kind === "report_empty") { reported = true; continue; } // a morning with nothing new: nothing sent, the day done
         let firstSeen: string | undefined;
         if (p.kind === "alert") {
           const posting = byId.get(p.job_id);

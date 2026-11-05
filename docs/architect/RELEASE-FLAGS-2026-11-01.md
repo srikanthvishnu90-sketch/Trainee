@@ -39,8 +39,24 @@ Columns: default before D-036 → served now; what it enables; what it needs; ri
 | Switch | Enables | Waits for |
 |---|---|---|
 | `CAREER_PLANNER` | compound asks ("find 5, tailor 2, apply, remind me Friday") planned into steps over existing code paths | the task eval (`brain-eval` suite=tasks), planner on against off, no worse; and #371's fix (a crisis message with two asks gets the 988 reply before the planner; planner reminders are delivered) |
-| `CAREER_BATCH_EXECUTOR` | batch asks handed to the worker's executor | the executor deployed: nothing in production loads `workers/career-browser/batch-executor.cjs`, so a batch ask would commit an intent nobody runs (D-007, WO-106) |
+| `CAREER_BATCH_EXECUTOR` | batch asks handed to the worker's executor | the executor deployed: nothing in production loads `workers/career-browser/batch-executor.cjs`, so a batch ask would commit an intent nobody runs (D-007, WO-106). The entry point now exists (`scripts/career/batch-executor-main.cjs`, 2026-11-04) but nothing in production runs it; until it does, a batch ask commits no intent and the reply says the batch was not started and names the ask that runs on the deployed path ("apply to the top N <role> in <city>", or a pick from a list). Owner's switch: see "Turning on the batch executor" below |
 | `CAREER_CRISIS_MODERATION` | the gateway's moderation screen on each turn (second crisis layer; code's `agent-chat/crisis.ts` is always on) | its reader, which lands with #354 (no code reads it at this SHA) |
+
+### Turning on the batch executor (owner only; MASS APPLY END TO END, 2026-11-04)
+
+Nothing here is done by an agent. Every guard still decides each application: the exact card set hash on the approve
+intent (`APPROVAL_SET_CHANGED` otherwise), 149's re-verify of each payload at click time, captchas handed to the person,
+LinkedIn, Indeed and Handshake dropped from the pool and refused by 149, the database kill switches.
+1. On the worker host (beside the board service), with its own environment: `CAREER_BATCH_EXECUTOR=on`, `SUPABASE_URL`,
+   `SUPABASE_SERVICE_ROLE_KEY`, `UPMORE_CAREER_WORKER_URL`, `UPMORE_CAREER_WORKER_SECRET` (optional
+   `BATCH_EXECUTOR_INTERVAL_MS`, default 15000; `0` drains once), then run `node scripts/career/batch-executor-main.cjs`
+   as a service. Without `CAREER_BATCH_EXECUTOR=on` it exits having claimed nothing; a missing setting stops it at start.
+2. In the same release commit, wire that service into a production entry point (a `workers/` service file or workflow) and
+   move `CAREER_BATCH_EXECUTOR` from `RELEASE_PENDING` into `RELEASE_FLAGS` (`release_config.ts`).
+   `tests/architect/d037-live-effects.test.ts` (D-037/1e) fails until both are true together, by design.
+3. Release through `release/production` (D-034). Rollback: `supabase secrets set CAREER_BATCH_EXECUTOR=off` for agent-chat
+   (no new intents; batch asks get the not-started reply again) and stop the service (SIGTERM: no new claims; an execute
+   intent in flight finishes and is recorded, never re-driven).
 
 ## (a2) ON by D-037 (owner, 2026-11-01 20:04 CT: "turn these on: Real submissions … Sending email as the person … Reply rewriters")
 

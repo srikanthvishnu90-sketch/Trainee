@@ -268,6 +268,7 @@ MIGRATIONS=(
   20261101120000_career_apply_cloud_throttle_sample.sql
   20261101121000_career_apply_prepare_error_retry.sql
   20261101130000_career_apply_reprepare_needs_answers.sql
+  20261102000000_career_correction_stops_stale.sql
   20261102120000_career_apply_prepare_candidates_for.sql
   20261102130000_career_apply_prepare_fair_claim.sql
   20261102140000_career_apply_resume_file_restarts_preparation.sql
@@ -414,6 +415,7 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'career_apply_cloud_throttle' and prosrc like '%consecutive_errors%')"
   "exists (select 1 from pg_proc where proname = 'career_apply_prepare_candidates' and prosrc like '%30 minutes%')"
   "exists (select 1 from pg_trigger where tgname = 'career_apply_reprepare_on_needs_answers' and tgrelid = 'public.career_apply_jobs'::regclass) and exists (select 1 from pg_trigger where tgname = 'career_apply_history_approval_guard' and tgrelid = 'public.career_apply_jobs'::regclass)"
+  "exists (select 1 from pg_trigger where tgname = 'career_correction_stop_stale' and tgrelid = 'public.career_events'::regclass) and exists (select 1 from pg_proc where proname = 'career_correction_stop_stale')"
   "exists (select 1 from pg_proc where proname = 'career_apply_prepare_candidates_for')"
   "exists (select 1 from pg_proc where proname = 'career_apply_prepare_request_claim' and prosrc like '%order by q.turn%')"
   "exists (select 1 from pg_proc where proname = 'career_apply_resume_file_restarts')"

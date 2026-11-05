@@ -92,6 +92,15 @@ export function supabaseChannelStore(admin: any, o: {
           if (r && Number(x.sent_parts) > 0) { r.sentParts = Number(x.sent_parts); r.sentIds = Array.isArray(x.provider_ids) ? x.provider_ids.map(String) : []; const c = claimed.get(r.id); if (c) c.parts = r.sentParts; }
         }
       }
+      // CHANNEL R4 FLAKE (2026-11-05): the reason a row tried before last recorded (the claim keeps it), so a run that fails on
+      // it can tell its own repeated failure from one refused read (deliverDue, RUN_FAILED_NOTE). A read that fails leaves it
+      // unknown (as before: the failure counts against the row's attempts).
+      const tried = out.filter((r) => r.attempts > 0).map((r) => r.id);
+      if (tried.length) {
+        const le = await Promise.resolve().then(() => admin.from("career_outbox").select("id,error").in("id", tried))
+          .catch((e: unknown) => ({ data: null, error: { message: e instanceof Error ? e.message : String(e) } }));
+        if (le && !le.error) for (const x of le.data ?? []) { const r = out.find((y) => y.id === String(x.id)); if (r) r.lastError = x.error ?? null; }
+      }
       // FEATURE 16: a Telegram row that carries an open card goes out with the card's Approve and Decline buttons, bound
       // to that card and its items' hashes (channel_card_tap.ts). A read that fails sends the text without them: the
       // card can still be answered by a reply to it, or in the app.

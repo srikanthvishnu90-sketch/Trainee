@@ -55,6 +55,8 @@ export interface OutboxRow {
   // CHANNEL DELIVERY ROUND 2 (2026-10-30): how many of this row's messages (its rendered bubbles) already went out in an
   // earlier attempt, and their provider ids; the row resumes after them. Absent or 0: none went.
   sentParts?: number; sentIds?: string[];
+  // CHANNEL R4 FLAKE (2026-11-05): the reason the row's last attempt recorded (a row tried before); absent: the store cannot say.
+  lastError?: string | null;
 }
 // "queued" with deliverAt: put back for a later time (the person's quiet hours on their clock as it is now).
 // sentParts (CHANNEL DELIVERY ROUND 2): on a failed or held row, how many of its messages went out so far (providerIds then
@@ -174,6 +176,11 @@ export const mailTextKey = (key: string) => MAIL_TEXT_KEY.test(String(key ?? "")
 export const mailboxText = (key: string) => mailTextKey(key) || /^followup:(followup|thank_you):/.test(String(key ?? ""));
 // CHANNEL DELIVERY ROUND 4 (2026-11-05): a row whose handling failed before anything of it was sent (a read or a write the
 // database refused): one attempt, tried again with the backoff, failed with this reason after MAX_ATTEMPTS.
+// CHANNEL R4 FLAKE (2026-11-05): ... only when the row's own handling failed this way in its last attempt too. A row whose
+// first two attempts the provider refused (a 502, a 429) and whose third run had one read refused (the STOP read) was failed
+// for good on that one refusal: an answer lost to a database blip it had nothing to do with. Now such a row is tried again
+// (the run failure still counts an attempt, so the provider's own refusals stay bounded); a row whose handling fails in two
+// runs in a row once its attempts are used is still failed with the reason, never retried forever.
 export const RUN_FAILED_NOTE = "not sent yet: the delivery run failed before sending it (a database read or write was refused)";
 export const NO_CHANNEL_NOTE = "not sent: the channel this answers was unlinked and the person has no other texting channel";
 
@@ -471,7 +478,8 @@ export async function deliverDue(o: {
     const said = (e: unknown) => e instanceof Error ? e.message : String(e);
     for (const m of due.filter((x) => own.has(x.id))) {
       const attempt = m.attempts + 1;
-      await o.store.mark(m.id, { status: "failed", at: o.now, error: RUN_FAILED_NOTE, ...(attempt < MAX_ATTEMPTS ? { retryAt: o.now + BACKOFF_MS[attempt - 1] } : {}) })
+      const last = attempt >= MAX_ATTEMPTS && (m.lastError === undefined || m.lastError === RUN_FAILED_NOTE);
+      await o.store.mark(m.id, { status: "failed", at: o.now, error: RUN_FAILED_NOTE, ...(last ? {} : { retryAt: o.now + BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length) - 1] }) })
         .catch((e) => console.error("deliver: a row whose handling failed could not be recorded (the sweep fails it):", said(e)));
     }
     const untouched = due.filter((m) => !handed.has(m.id) && !own.has(m.id)).map((m) => m.id);

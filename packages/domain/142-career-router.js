@@ -12594,9 +12594,11 @@ const CareerRouter = (() => {
     if ((/\b(send|sends|sent|submit|submits|submitted|apply|applies|applied|email|emails|emailed|message|messages|messaged|reach out|contact|post)\b/.test(t)
         && /\bwithout (?:asking|checking|telling|me\b|my (?:permission|approval|ok|okay|consent|say[- ]so|yes|go[- ]ahead))|\bon (?:your|its) own\b|\bautomatically\b|\bbehind my back\b|\bbefore i (?:say yes|approve|agree|ok|okay|confirm|see)\b|\b(?:unless|until) i (?:approve|say|confirm|ok|okay|agree)\b/.test(t))
         || /\bnothing (?:goes|gets|is|should be|will be|should go|can go)\b[^.]*\b(?:sent|submitted|out)\b/.test(t)) {
-      const worker = ctx.workerCapabilities && ctx.workerCapabilities.portal_browser;
       const facts = ["Every application, email, or message is shown to you first, the exact form or text, and it goes only after you approve it.", "If anything in it changes after you approve, it stops and comes back to you."];
-      if (worker && worker.status === "NOT_WIRED") facts.push("Submitting to employers is not wired in this conversation, so a prepared application stops at your approval.");
+      // MASS APPLY STATE (2026-11-04): what is said about submission comes from the live switches the composition root
+      // reads (ctx.liveSwitches), never from the in-turn browser stamp, which is NOT_WIRED on every Edge turn even with real
+      // submission on (D-041). Unknown switches: no claim either way.
+      { const L = getApplyLedger(); const f = L && L.submitFact(ctx); if (f) facts.push(f); }
       const reply = compose({ headline: "Nothing goes out without your approval.", facts, nextStep: "Want me to start by finding roles that fit you?" });
       return { intent: "career_approval_rule", reply, resultStatus: "awaiting_user", sends: 0 };
     }
@@ -12740,7 +12742,7 @@ const CareerRouter = (() => {
       const role = (target && target.role) || (nctx && nctx.role) || (ctx.posting && ctx.posting.title) || null;
       const worker = ctx.workerCapabilities && ctx.workerCapabilities.portal_browser;
       const facts = ["What I can do: put a role you name on your apply list; the Trainee extension on your computer prepares the application with a resume tailored to it, shows you the exact answers on a card, and sends it only after you tap approve."];
-      if (worker && worker.status === "NOT_WIRED") facts.push("What I can't do here today: send an application myself, so each one waits for the extension and your tap on its card.");
+      { const L = getApplyLedger(); const f = L && L.submitFact(ctx); if (f) facts.push(f); else if (worker && worker.status === "NOT_WIRED" && !ctx.liveSwitches) facts.push("What I can't do in this conversation: send an application myself, so each one waits for your tap on its card."); }
       if (co) {
         const found = resolveNamedPosting(target || { company: co, role }, ctx);
         facts.push(found ? `The ${role || "role"} at ${co} is on record as a posting I can prepare from.` : `The ${role || "role you named"} at ${co} is not in the postings I have on file — paste the posting or its link and I will work from that instead.`);
@@ -12769,7 +12771,7 @@ const CareerRouter = (() => {
       if (tgt.company) { const mir = threadMirrorForWrite(ctx); if (mir) mir.namedApply = { company: tgt.company, role: tgt.role || null }; }
       const worker = ctx.workerCapabilities && ctx.workerCapabilities.portal_browser;
       const facts = [`I can apply only to a posting I have on file or one you paste. The ${tgt.role || "role"} posting at ${tgt.company || "that company"} is not on file, and I won't make one up.`];
-      if (worker && worker.status === "NOT_WIRED") facts.push("The browser worker that executes applications is also not wired in this handler — even a listed role would stop at preparation here.");
+      { const L = getApplyLedger(); const f = L && L.submitFact(ctx); if (!f && worker && worker.status === "NOT_WIRED" && !ctx.liveSwitches) facts.push("The browser worker that executes applications is also not wired in this handler — even a listed role would stop at preparation here."); }
       const reply = compose({ headline: `I can't apply to the ${tgt.role || "role"} at ${tgt.company || "that company"} yet — that posting is not in the list I can work from.`, facts, nextStep: "Paste the posting or its link and I will prepare the application from it in this turn." });
       return { intent: "named_role_apply", reply, resultStatus: "blocked", sends: 0 };
     }
@@ -13264,6 +13266,50 @@ const CareerRouter = (() => {
       reply: `You don't have a batch in flight right now — no application batch has been queued on this account that I can read back. Say "apply to N <role> roles" and I'll start one.` };
   }
 
+  // ---------- MASS APPLY STATE (2026-11-04; module 157) ----------
+  // The beta evidence of 2026-11-04 (A1/A2/A3/A14/A24): "apply to all those roles" fell to the catch-all (the shortlist
+  // seam knew only "all of them" / "them all"), and every ask about approvals and submissions ("show my pending
+  // approvals", "approve the second application", "change the answer after approval", "the portal requires an account",
+  // "was the application actually submitted?", "what did you send today?", "can you distinguish prepared from
+  // submitted?") reached the generic fallback because no route read the approval and submission records. Module 157 reads
+  // them (the handler's situation of the queue, the 155 batch run, this thread's tracker) and answers from them; here the
+  // list reference is bound to the shortlist seam itself, so the run is the SAME batch path with its exact-payload card.
+  // Read only, like the batch status: nothing here approves, prepares beyond that seam, submits or sends; an approval
+  // still arrives only as the card's structured tap or the card's own text answer (D-MS-1), never from these words.
+  const getApplyLedger = () => { try { return typeof CareerApplyLedger !== "undefined" ? CareerApplyLedger : req("./157-career-apply-ledger.js"); } catch { return req("./157-career-apply-ledger.js"); } };
+  // IB-AP-8 (SC-081): the governed portal-account flow's own matcher (dispatchChat, below); one definition for both seams.
+  const PORTAL_ACCOUNT_ASK = /\bportal\b[^.]*\baccount\b|\bworkday\b[^.]*\baccount\b|\bcreate\b[^.]*\b(alias|account|password|vault)\b|\b(alias email|vault password)\b|\bconfirm\b[^.]*\bportal\b/;
+  function handleMassApplyState(text, c) {
+    const Ledger = getApplyLedger();
+    if (!Ledger) return null;
+    const ask = Ledger.askOf(text);
+    if (!ask) return null;
+    // A portal-account ask the governed flow takes (a profile on record and its matcher) stays that flow's: it carries the
+    // typed portal_account_step (committed:false) and the approval path; the ledger answers only what it would not.
+    if (ask.kind === "portal_account" && c.profile && PORTAL_ACCOUNT_ASK.test(lc(text))) return null;
+    if (ask.kind === "list_apply_all") {
+      const bound = handleShortlistApply("apply to all of them", c);
+      if (bound) return bound;
+      const list = c.discovery && Array.isArray(c.discovery.lastShortlist) ? c.discovery.lastShortlist : [];
+      const say = (headline, nextStep, code) => ({ intent: "career_list_reference", resultStatus: list.length ? "blocked" : "awaiting_user", code, sends: 0, reply: compose({ headline, facts: [], nextStep }) });
+      if (!list.length) return say("I haven't shown you a list of roles yet, so \"those\" doesn't point at anything; nothing was prepared or sent.", "What role should I search for, and which city or remote?", "NO_LIST");
+      if (!c.profile) return say(`The ${list.length === 1 ? "role" : `${list.length} roles`} I listed are the ones you mean, but I can't prepare an application without your resume; nothing was prepared or sent.`, "Paste your resume here or attach the file, and I'll prepare them.", "NO_PROFILE");
+      return say(`I can't find the postings from the list I showed you on file right now, so nothing was prepared or sent.`, "Want me to run that search again?", "LIST_POSTINGS_UNRESOLVED");
+    }
+    const store = c.trackStore || (c.profile && c.profile._careerTrackStore) || null;
+    const a = Ledger.answer(ask, c, store && Array.isArray(store.rows) ? store.rows : []);
+    if (!a) return null;
+    const { headline, facts, nextStep } = a;
+    // Every fact is said whole: compose() keeps one sentence per fact and at most six, which cut the list of pending
+    // applications at its first number and dropped "nothing was approved or sent". A sentence the lint refuses is left
+    // out, as compose() would leave it out.
+    const clean = (x) => { const t = s(x).trim(); return t && (!Reply || Reply.lint(t).ok) ? t : ""; };
+    const body = [clean(headline), facts.map(clean).filter(Boolean).join(" "), clean(nextStep)].filter(Boolean).join("\n");
+    const res = Object.assign({}, a, { reply: Reply ? ensureNextStepText(body) : body });
+    delete res.headline; delete res.facts; delete res.nextStep;
+    return res;
+  }
+
   function dispatchChat(text, ctx) {
     const c = ctx || {};
     const rawText = text;
@@ -13350,6 +13396,10 @@ const CareerRouter = (() => {
     // to the discovery's retained list, never to a family parse.
     const shortlistRes = handleShortlistApply(text, c);
     if (shortlistRes) return shortlistRes;
+    // MASS APPLY STATE (2026-11-04): the list reference ("apply to all those roles") and the approval / submission reads,
+    // answered from the records (see handleMassApplyState); ahead of the batch seam's conversational yes and its parse.
+    const massState = handleMassApplyState(text, c);
+    if (massState) return massState;
     const batchRes = handleBatchApply(text, c);
     if (batchRes) return batchRes;
     // MUSE-F-002: a plain-words batch status ask ("what's the batch status", "where is my batch") is answered from the
@@ -13816,7 +13866,7 @@ const CareerRouter = (() => {
     // IB-AP-8: the portal-account branch sits BEFORE the people-ask
     // matchers — "email" + no job noun used to route a credential ask
     // into the campaign plan (SC-081).
-    if (/\bportal\b[^.]*\baccount\b|\bworkday\b[^.]*\baccount\b|\bcreate\b[^.]*\b(alias|account|password|vault)\b|\b(alias email|vault password)\b|\bconfirm\b[^.]*\bportal\b/.test(t) && profile) {
+    if (PORTAL_ACCOUNT_ASK.test(t) && profile) {
       const pa = handlePortalAccountAsk(text, c);
       if (pa) return pa;
     }

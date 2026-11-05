@@ -18,6 +18,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { pgBinDir, type Pg, startPg } from "../../flow/pg.ts";
 import { psqlSession } from "../../flow/psql-session.ts";
+import { anthropicWire } from "../helpers/anthropic_wire.ts";
 import { careerHandler, SERVICE_KEY, SUPABASE_URL, supabaseParity, type Turn } from "../../flow/handler.ts";
 import { PgConn, serviceRpc } from "../../flow/pgwire.ts";
 import { FakeGmail } from "../../flow/send-rail-fixture.ts";
@@ -191,6 +192,8 @@ export async function startWorld(o: { tokens: Record<string, string> }): Promise
       return await viaDouble(req);
     }
     if (u.host === "api.openai.com") return fakeOpenAI(await req.json());
+    // The career model is Claude (D-038a): the same scripted writer answers on Anthropic's wire.
+    if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeOpenAI(chat));
     // Telegram's file download (the resume a person sends as a PDF), then the Bot API.
     if (u.host === "api.telegram.org" && u.pathname === `/bot${TG_TOKEN}/getFile`) {
       const id = String((await req.json()).file_id), f = files.get(id);
@@ -216,7 +219,7 @@ export async function startWorld(o: { tokens: Record<string, string> }): Promise
   // The deployment's settings (restored by stop()).
   const vars: Record<string, string> = {
     TELEGRAM_BOT_TOKEN: TG_TOKEN, TELEGRAM_WEBHOOK_SECRET: TG_SECRET, TELEGRAM_BOT_USERNAME: "TraineeJourneysBot", TRAINEE_SIGNUP: "closed",
-    TRAINEE_DELIVER_SECRET: DELIVER_SECRET, CAREER_NETWORKING_DRAFT: "on", OPENAI_API_KEY: MODEL_KEY, CAREER_MODEL: "gpt-5-mini", CAREER_SEND_RAIL: "on",
+    TRAINEE_DELIVER_SECRET: DELIVER_SECRET, CAREER_NETWORKING_DRAFT: "on", OPENAI_API_KEY: MODEL_KEY, ANTHROPIC_API_KEY: MODEL_KEY, CAREER_MODEL: "gpt-5-mini", CAREER_SEND_RAIL: "on",
     CAREER_MAIL_TRACKING: "off", STRIPE_SECRET_KEY: STRIPE_KEY, TRAINEE_FILE_BASE_URL: FILE_BASE, TRAINEE_FILE_LINK_SECRET: FILE_SECRET, TRAINEE_BOT_URL: "https://t.me/TraineeJourneysBot",
   };
   const unset = ["CAREER_BRAIN", "CAREER_KNOWLEDGE", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_ACCOUNT_MEMORY", "CAREER_TEXTING_NATIVE", "LOOPMESSAGE_API_KEY", "WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "TRAINEE_ALLOWED_CONTACTS", "CAREER_REPLY_WRITER"];

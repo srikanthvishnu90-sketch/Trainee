@@ -412,7 +412,14 @@ export function telegramAdapter(o: {
             : { ok: false, error: redact(`Telegram unreachable: ${e instanceof Error ? e.message : String(e)}`).slice(0, 200) + after, retryable: true, ...partial };
         }
         if (r.status === 200 && r.body?.ok === true) { const id = r.body?.result?.message_id; if (id !== undefined && id !== null) ids.push(String(id)); continue; }
+        // CHANNEL DELIVERY ROUND 4 (2026-11-05): a 200 whose body could not be read (cut short on the way back, not JSON) is
+        // Telegram having taken the message; only a body that says ok:false is a refusal. It was a final failure: the row was
+        // recorded failed although the message arrived, and every later message of the row was never sent.
+        if (r.status >= 200 && r.status < 300 && (r.body === null || typeof r.body !== "object" || r.body.ok !== false)) continue;
         const desc = redact(String(r.body?.description ?? "")).slice(0, 120);
+        // CHANNEL DELIVERY ROUND 4: the bot token was refused (401; 404 is the Bot API's answer to a token it does not know):
+        // nothing went out, and nothing will until the secret is fixed (channel.ts deliverDue keeps the row).
+        if (r.status === 401 || r.status === 404) return { ok: false, error: `Telegram HTTP ${r.status}${desc ? `: ${desc}` : ""}: the bot token was refused${after}`, retryable: false, unauthorized: true, ...partial };
         if (r.status === 403 && /blocked|deactivated/i.test(desc)) return { ok: false, error: `Telegram 403: ${desc}${after}`, retryable: false, optOut: true, ...partial };
         const ra = r.status === 429 ? retryAfterOf(r.body) : null;
         return { ok: false, error: `Telegram HTTP ${r.status}${desc ? `: ${desc}` : ""}${after}`, retryable: r.status === 429 || r.status === 502 || r.status === 503, ...(ra !== null ? { retryAfterMs: ra * 1000 + Math.max(0, now() - t0) } : {}), ...partial };

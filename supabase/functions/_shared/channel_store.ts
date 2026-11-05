@@ -272,6 +272,19 @@ export function supabaseChannelStore(admin: any, o: {
     async setNudged(contact, at) {
       must(await admin.from("channel_contacts").update({ nudged_at: iso(at) }).eq("contact", contact), "record the template");
     },
+    // CHANNEL DELIVERY ROUND 4 (2026-11-05): of the rows this store claimed, put back those named (deliverDue: a run that failed
+    // part way, the rows no provider was asked to send), exactly as release() does; still "sending" only (a row a run marked is
+    // never touched again). The others stay claimed, for the sweep.
+    async putBack(ids) {
+      let n = 0;
+      for (const id of ids) {
+        const c = claimed.get(id);
+        if (!c) continue;
+        must(await admin.from("career_outbox").update({ status: c.prior, claimed_at: null, contact: null }).eq("id", id).eq("status", "sending"), "put back a claimed message");
+        claimed.delete(id); n++;
+      }
+      return n;
+    },
     async release() {
       let n = 0;
       for (const [id, c] of claimed) {

@@ -86,7 +86,7 @@ function scripted(texts: string[], seenInputs: string[]) {
   let i = 0;
   return async (req: any) => { seenInputs.push(JSON.stringify(req)); const t = texts[Math.min(i++, texts.length - 1)]; return { content: [{ type: "text", text: t }], stop_reason: "end_turn" }; };
 }
-const run = (model: any) => (runAgentTurn as any)({ system: "s", history: [], message: "I feel overwhelmed, find me software intern roles", tools: [], model, ctx: { userId: "u", threadId: "t", now: 0, state: {} }, maxSteps: 4 });
+const run = (model: any) => (runAgentTurn as any)({ system: "s", history: [], message: "find me software intern roles", tools: [], model, ctx: { userId: "u", threadId: "t", now: 0, state: {} }, maxSteps: 4 });
 Deno.test("BR-6: the loop asks the model once, then keeps a standing draft unchanged", async () => {
   const seen: string[] = [];
   const two = "Nothing matched. I'll set a job alert for you.\n\nWhat city should I search? Do you have a school I should use?";

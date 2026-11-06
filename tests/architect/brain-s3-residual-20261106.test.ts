@@ -59,3 +59,14 @@ Deno.test("S3-6: the rewrite carries the ack instruction once; a standing violat
   assertNode.equal(i, 2);
   assertNode.ok(seen.some((x) => /open with one short, warm sentence acknowledging that/.test(x)));
 });
+
+Deno.test("S3-7: a blunt reply with two asks to a distressed person is rewritten once, with both flags", async () => {
+  const seen: string[] = [];
+  const bad = "Nothing matched.\n\nWhat city should I search? Do you have a school I should use?";
+  const model = async (req: any) => { seen.push(JSON.stringify(req)); return { content: [{ type: "text", text: bad }], stop_reason: "end_turn" }; };
+  const r: any = await (runAgentTurn as any)({ system: "s", history: [], message: "I'm overwhelmed, just apply me to 3 roles", tools: [], model, ctx: { userId: "u", threadId: "t", now: 0, state: {} }, maxSteps: 4 });
+  assertNode.equal(seen.length, 2, "one rewrite request, not two");
+  assertNode.equal(r.reply, bad);
+  assertNode.deepEqual([...r.flags].sort(), ["many_asks", "missing_ack"]);
+  assertNode.ok(/more than one thing/.test(seen[1]) && /warm sentence acknowledging/.test(seen[1]));
+});

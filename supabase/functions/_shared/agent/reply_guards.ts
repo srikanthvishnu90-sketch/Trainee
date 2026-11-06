@@ -524,7 +524,7 @@ export function unbackedPromises(reply: string, calls: { name: string; ok: boole
 
 // S3 residual (H025): a person who says they are overwhelmed or stressed is acknowledged in the reply's FIRST sentence.
 // Flag only: the loop asks the model once; a draft that still lacks it is kept and recorded as "missing_ack".
-const ACK = /\b(?:that|this)\s+(?:sounds|is|feels)\b|\ba lot\b|\bi hear\b|\bunderstand\b|\bmakes sense\b|\btough\b|\bhard\b|\bstressful\b|\boverwhelm/i;
+const ACK = /\bsounds like\b|\bthat'?s a lot\b|\ba lot to (?:carry|handle)\b|\bi hear you\b|\bi'?m sorry\b|\byou'?re not alone\b|\btake a breath\b|\b(?:totally|completely) normal\b|\bmakes sense (?:to feel|that you)\b|\b(?:tough|hard|stressful|overwhelming) (?:spot|time|place|search|stretch)\b|\boverwhelm/i;
 export const missingAck = (userMessage: string, reply: string): boolean => {
   if (!DISTRESS.test(String(userMessage ?? ""))) return false;
   const first = pieces(String(reply ?? "").trim())[0]?.text ?? "";

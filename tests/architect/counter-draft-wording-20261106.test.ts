@@ -633,6 +633,26 @@ Deno.test("CDW an offer figure in the same clause as the ask is the offer; the o
     offerIs(prior, "They're matching the industry standard $26/hour offer. Draft a counter at $30/hour", 26, 30);
   }
   offerIs(OFFER, "They offered $26/hour while competitors offer $28/hour. Draft a counter at $30/hour", 26, 30);
+  // A comparison with the market describes the employer's figure; it does not make it the market's (Greptile on 9b394f8e).
+  for (const prior of [OFFER, null]) {
+    offerIs(prior, "They offered a below market rate of $26/hour; draft a counter at $30/hour", 26, 30);
+    offerIs(prior, "A below market $26/hour offer came in; draft a counter at $30/hour", 26, 30);
+    offerIs(prior, "They came back with an above-market $26/hour offer; draft a counter at $30/hour", 26, 30);
+    offerIs(prior, "The offer is a below-average $26/hour; draft a counter at $30/hour", 26, 30);
+  }
+  offerIs(OFFER, "Their $26/hour offer is below market, the market pays $28/hour; draft a counter at $30/hour", 26, 30);
+  // The offer word belongs to an earlier figure only right after it; a comma and a market phrase before this figure's own
+  // amount leave the figure the employer's (review of f1120410).
+  for (const prior of [OFFER, null]) {
+    offerIs(prior, "The offer, at the market rate of $26/hour, is fine. Draft a counter at $30/hour", 26, 30);
+    offerIs(prior, "Their offer, above the market average: $26/hour. Draft a counter at $30/hour", 26, 30);
+    offerIs(prior, "They offered a raise, to the market median of $26/hour. Draft a counter at $30/hour", 26, 30);
+    offerIs(prior, "They offered, in line with the market $26/hour. Draft a counter at $30/hour", 26, 30);
+  }
+  offerIs(OFFER, "Their $26/hour offer, the market average is $28/hour. Draft a counter at $30/hour", 26, 30);
+  offerIs(OFFER, "Their $26/hour offer, though the market average is $28/hour. Draft a counter at $30/hour", 26, 30);
+  keep("Glassdoor shows us competitors offer $28/hour. Draft a counter at $30/hour", 30);
+  keep("We checked and the market offers $28/hour. Draft a counter at $30/hour", 30);
   for (const msg of ["Competitors offer $28/hour.", "Others offer $28/hour.", "The median offer is $28/hour.", "The industry offers $28/hour.", "Payscale says the average pay is $28/hour."]) {
     keep(`${msg} Draft a counter at $30/hour`, 30);
   }

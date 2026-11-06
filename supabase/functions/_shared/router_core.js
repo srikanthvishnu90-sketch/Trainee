@@ -40695,10 +40695,14 @@ const CareerRouter = (() => {
     // paying $28", "the median offer is $28"). "They offer the market rate of $26", "the company's average offer is $26" and
     // "the recruiter said the market is tight and offered $26" name the employer: their figure is the employer's.
     const THIRD_PARTY = /\b(?:market|glassdoor|levels(?:\.fyi)?|salary\.com|payscale|indeed|average|median|typical|others|other\s+(?:companies|employers|firms|places|roles)|competitors?|similar\s+roles?|industry)\b/ig;
-    const OWN_EMPLOYER = /\b(?:they|their|them|company|employer|recruiter|firm|hiring\s+manager|hr|we|us)\b/ig;
+    const OWN_EMPLOYER = /\b(?:they|their|them|company|employer|recruiter|firm|hiring\s+manager|hr)\b/ig;
+    // A comparison with the market ("a below market rate of $26", "an above-average $26 offer") describes the figure; it does
+    // not attribute it to the market. Masked (same length, so indexes hold) before either market check reads the words.
+    const COMPARISON = /\b(?:below|above|under|over|at|near|beneath|beyond|than|vs\.?|versus)[\s-]+(?:the\s+)?(?:market|average|median|typical|industry)(?:[\s-]+(?:rate|range|pay|average|standard|level))?\b/ig;
+    const maskComparison = (t) => t.replace(COMPARISON, (x) => " ".repeat(x.length));
     const thirdPartySays = (text, cueIdx) => {
       if (cueIdx < 0) return false;
-      const pre = text.slice(0, cueIdx), t = lastIdx(THIRD_PARTY, pre);
+      const pre = maskComparison(text.slice(0, cueIdx)), t = lastIdx(THIRD_PARTY, pre);
       if (t < 0) return false;
       // the employer named in an earlier thought ("the $26/hour they offered even though the market offers $28") does not count
       const lj = lastIdx(/,|\b(?:even\s+though|although|though|but|while|whereas|and|plus|since|because)\b/ig, pre.slice(0, t));
@@ -40763,9 +40767,12 @@ const CareerRouter = (() => {
       if (role === "employer" && ei >= 0 && thirdPartySays(seg, ei)) role = "unknown";
       // The offer word belongs to an earlier figure when a comma and a third party follow it ("their $26/hour offer, the market
       // average is $28/hour"): this figure is the third party's, unless the employer is named again after the comma.
-      if (role === "employer" && ei >= 0) {
+      // Only that shape: the offer word follows the previous figure within three words, no comma between, same sentence.
+      const cueOfPrev = prevEnd > 0 && !/[.?!;\n]/.test(src.slice(prevEnd, start)) &&
+        !/,/.test(seg.slice(0, ei)) && seg.slice(0, ei).replace(/^\s*(?:\/\s?h(?:ou)?r|\/\s?hr|an?\s+hour|per\s+hour|hourly)/i, "").trim().split(/\s+/).filter(Boolean).length <= 3;
+      if (role === "employer" && ei >= 0 && cueOfPrev) {
         const post = seg.slice(ei), cut = post.lastIndexOf(",");
-        if (cut >= 0 && lastIdx(THIRD_PARTY, post.slice(cut)) >= 0 && lastIdx(OWN_EMPLOYER, post.slice(cut)) < 0) role = "unknown";
+        if (cut >= 0 && lastIdx(THIRD_PARTY, maskComparison(post.slice(cut))) >= 0 && lastIdx(OWN_EMPLOYER, post.slice(cut)) < 0) role = "unknown";
       }
       // An ask cue carries across "and" / "plus" / "," inside the same clause ("ask for $500 relocation and $28 an hour").
       if (role === "unknown" && prevRole === "ask" && !/[.?!;\n]/.test(src.slice(prevEnd, start)) && /(?:\band\b|\bplus\b|&|,)\s*$/i.test(seg)) role = "ask";
@@ -40786,7 +40793,7 @@ const CareerRouter = (() => {
         const tail = rest.slice(mm[0].length);
         const stop = [tail.search(/\$\s?\d/), tail.search(/\b(?:even\s+though|although|though|but|while|whereas|and|plus|since|because)\b/i)].filter((i) => i >= 0);
         const cs = left + (stop.length ? rest.slice(0, mm[0].length + Math.min(...stop)) : rest);
-        if ((/\boffer(?:ed|ing|s)?\b/i.test(cs.replace(/counter[ -]?offers?/ig, "")) || (hint && hint.offerSentence)) && lastIdx(user, cs) < 0 && lastIdx(current, cs) < 0 && !/\b(?:market|glassdoor|average|typical|range|says|salary\.com|levels)\b/i.test(cs) &&
+        if ((/\boffer(?:ed|ing|s)?\b/i.test(cs.replace(/counter[ -]?offers?/ig, "")) || (hint && hint.offerSentence)) && lastIdx(user, cs) < 0 && lastIdx(current, cs) < 0 && !/\b(?:market|glassdoor|average|typical|range|says|salary\.com|levels)\b/i.test(maskComparison(cs)) &&
           !thirdPartySays(cs, cs.replace(/counter[ -]?offers?/ig, (x) => " ".repeat(x.length)).search(/\boffer(?:ed|ing|s)?\b/i))) role = "employer";
       }
       prevRole = role;

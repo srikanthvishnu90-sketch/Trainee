@@ -118,6 +118,7 @@ import { chunkSentences, PAGE_CHUNK_CHARS, PAGE_MAX_CHUNKS, shapeForTurn, splitL
 import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a pasted link or "apply to this" -> one line + one Apply button
 import { supabaseFileStore } from "../trainee-file/store.ts";
 import { createFileService, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
+import { prepFileTurn } from "./career_prep_file.ts"; // BETA C03: the interview prep File
 import { factsForTurn, replyWriterOn, writable, writeReply, writerChannel } from "../_shared/career_reply_writer.ts"; // V1 TEXTING VOICE
 import { correctedAsk } from "../_shared/search_correction.ts"; // SPEC 2.3
 import { applyReadiness } from "../_shared/apply_readiness.ts"; // SPEC 2.2
@@ -1329,6 +1330,13 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (mem?.patch) out = { ...out, ...mem.patch };
       }
       // END FEATURE 9
+      // BETA C03 / A15.1 (career_prep_file.ts): the router's interview prep File (result.file) is stored as a File for this person
+      // and its signed link is sent after the summary; when it cannot be made, the reply says so and gives the page as text.
+      if (out.handler !== "agent" && !careerTask && !careerBatch) {
+        const pf = await prepFileTurn({ out: out as any, userId: user.id, files: createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }) })
+          .catch((e) => { console.error("prep file:", (e as Error)?.message ?? e); return null; });
+        if (pf) { out = pf.out as typeof out; agentMeta = { ...(agentMeta || {}), ...pf.meta }; }
+      }
       let taskIntent = null;
       let batchIntent = null;
       const pausedReadback = careerTask && ["status", "reconcile"].includes(careerTask.action) && out.intent === "career_paused" && !ctx._hostPatch;

@@ -21,6 +21,7 @@ import { BOOT_SCRIPT, cut, FEED_SCRIPT, fullOf, hostOf, renderBootstrap, renderF
 import { dayOf, BRAND, esc, layout, postedLine, webUrl } from "../_shared/file_page.ts";
 import { actOn, bodyHtml, COPY_SCRIPT, KIND_CSS, KIND_LABEL, textOf, type Effects, type FileRecord } from "../_shared/file_kinds.ts";
 import type { FileService } from "../_shared/file_service.ts";
+import { atsLogoUrl } from "../_shared/page_csp.ts";
 import { fetchLogo, memoryLogoCache, validDomain, type LogoCache } from "../_shared/logo_cache.ts";
 import { renderResults, renderThings, type PayFilter, type ResultRow, type ThingQuestion } from "../_shared/results_page.ts";
 import { parseStateFilter } from "../_shared/results_batch.ts";
@@ -147,6 +148,13 @@ async function headers(type: string, env: { get(k: string): string | undefined }
   return { "cache-control": "no-store", "referrer-policy": "same-origin", "x-robots-tag": "noindex, nofollow", "x-content-type-options": "nosniff", "content-type": type,
     "content-security-policy": `default-src 'none'; script-src ${await scriptHashes} https://telegram.org; connect-src 'self'; img-src ${logoOrigins(env) || "'none'"}; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors ${FRAMES}` };
 }
+// A page with rows that show an ATS-published logo: its img-src gains exactly those logos' hosts (and nothing else, on no other page).
+async function logoCsp(env: { get(k: string): string | undefined }, logos: Array<string | null | undefined>): Promise<Record<string, string>> {
+  const hosts = [...new Set(logos.map((l) => { const a = atsLogoUrl(l); return a ? new URL(a).hostname : ""; }).filter(Boolean))].map((h) => `https://${h}`);
+  if (!hosts.length) return {};
+  const csp = (await headers("text/html", env))["content-security-policy"];
+  return { "content-security-policy": csp.replace(/img-src ([^;]+)/, (_m, v: string) => `img-src ${v === "'none'" ? hosts.join(" ") : `${v} ${hosts.join(" ")}`}`) };
+}
 const NEW_LINK = "Ask Trainee in Telegram for your jobs again and open the new link.";
 
 const resumeOf = (p: PreparedRow | null): string | null => {
@@ -212,6 +220,9 @@ function sendOf(p: PreparedRow): { items: { label: string; value: string; needs?
 }
 // The logo only from the employer's own domain, through the configured provider, https only; the CSP allows that provider's origin only.
 function rowLogo(job: JobView, env: { get(k: string): string | undefined }): string | null {
+  // First choice: the logo the ATS itself published for this posting's board (never built from the company's name).
+  const ats = atsLogoUrl(job.logo_url);
+  if (ats) return ats;
   if (selfLogos(env)) { const dom = logoDomain(job, env); return dom && validDomain(dom) ? `?logo=${encodeURIComponent(dom)}` : null; }
   const dom = logoDomain(job, env), tpl = logoMode(env), u = dom ? tpl.split("{domain}").join(encodeURIComponent(dom)) : null;
   if (!dom || !u || !/^https:\/\//.test(u)) return null;
@@ -237,6 +248,7 @@ async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: R
   const rows: Row[] = await Promise.all(got.map(async ({ ref, c }) => {
     const job = { ...c!.job }, post = postings.find((p) => p.job_id === job.job_id) ?? null;
     job.company_domain = job.company_domain ?? post?.company_domain ?? null;
+    job.logo_url = job.logo_url ?? post?.logo_url ?? null;
     const [app, prep] = await Promise.all([d.store.appRow(claims.u, job.job_id, job.url).catch(() => null), d.store.prepared(claims.u, job.job_id).catch(() => null)]);
     // Sent or on its way by another path (the extension, a batch, the same posting under another id): the row says so and offers
     // nothing (apply round 3: such a row offered Apply, and the tap could only be refused as a duplicate).
@@ -615,7 +627,7 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   const feed = await loadFeed(claims, token, d, notes, top);
   if (!feed) return state("This list is gone", ["It is no longer available. " + NEW_LINK], 404);
   if (req.method === "GET" && fields.get("format") === "text") return text(renderText(feed));
-  return html(renderFeed(feed));
+  return html(renderFeed(feed), 200, await logoCsp(d.env, feed.rows.map((r) => r.logo)));
 }
 
 // ---------------------------------------------------------------- the other kinds: one shell, the kind's body, the kind's actions
@@ -935,5 +947,5 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   return o.html(renderResults({ token, title, floor: fl, rows, coverRows: all, countRows: keep, total: all.length, filters, places, top, notes,
     madeFor: `Made for ${meta.name ?? "you"} · ${day}`, stamp: await stampOf(rows), caveat, quick,
     paused: !!meta.paused, updated, dismissed: gone,
-    all: applyAllYesEnabled(d.env) && !meta.paused && readySet(keep, new Set()).length >= 2 ? { hash: await setHashOf(readySet(keep, new Set())), size: readySet(keep, new Set()).length, filtered: filters.pay !== "any" || !!filters.where || !!filters.state } : null }));
+    all: applyAllYesEnabled(d.env) && !meta.paused && readySet(keep, new Set()).length >= 2 ? { hash: await setHashOf(readySet(keep, new Set())), size: readySet(keep, new Set()).length, filtered: filters.pay !== "any" || !!filters.where || !!filters.state } : null }), 200, await logoCsp(d.env, all.map((r) => r.logo)));
 }

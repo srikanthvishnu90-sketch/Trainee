@@ -10,6 +10,13 @@
 export const PAGE_CSP_HEADER = "x-trainee-csp";
 const FRAMES = "https://web.telegram.org https://*.telegram.org";
 export const FALLBACK_PAGE_CSP = `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors ${FRAMES}`;
+// The ATS image hosts a page's img-src may gain (a copy of ATS_LOGO_HOSTS in supabase/functions/_shared/page_csp.ts; a test keeps them equal).
+export const ATS_LOGO_HOSTS = [
+  "s101-recruiting.cdn.greenhouse.io",
+  "lever-client-logos.s3.us-west-2.amazonaws.com",
+  "app.ashbyhq.com",
+  "c.smartrecruiters.com",
+];
 // An image (an employer's logo) is never a document: no script, no style, no form, sandboxed.
 export const IMAGE_CSP = "default-src 'none'; sandbox";
 // The function's policies all start by denying everything and say who may frame the page; one line, printable ASCII, bounded.

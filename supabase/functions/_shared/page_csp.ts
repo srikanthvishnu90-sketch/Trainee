@@ -16,3 +16,22 @@ export function relayPageCsp(res: Response): Response {
   h.set(PAGE_CSP_HEADER, csp);
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
 }
+
+// Employer logos the applicant-tracking systems themselves publish for a board (a posting's `logo_url`), shown straight from the
+// ATS's image host. The exact hosts below are the only ones a page's img-src ever gains, and only on a page that has a row using one
+// (trainee-file/handler.ts logoCsp); an image from any other host is dropped and the row draws its initials. api/_page_csp.js
+// carries the same list (tests/architect/file-logos-20261106.test.ts keeps them equal).
+export const ATS_LOGO_HOSTS = [
+  "s101-recruiting.cdn.greenhouse.io", // Greenhouse board logos
+  "lever-client-logos.s3.us-west-2.amazonaws.com", // Lever
+  "app.ashbyhq.com", // Ashby org logos
+  "c.smartrecruiters.com", // SmartRecruiters company logos
+];
+// The logo URL as an https image on one of those hosts (no credentials, no port, bounded), else null.
+export function atsLogoUrl(v: unknown): string | null {
+  if (typeof v !== "string" || v.length > 500 || /[\s"'<>]/.test(v)) return null;
+  try {
+    const u = new URL(v);
+    return u.protocol === "https:" && !u.username && !u.password && !u.port && ATS_LOGO_HOSTS.includes(u.hostname) ? u.href : null;
+  } catch { return null; }
+}

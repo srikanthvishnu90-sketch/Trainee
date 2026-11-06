@@ -881,3 +881,28 @@ Deno.test("CDW market exit: any 'indeed' in the figure's sentence holds the turn
     heldForBrain(ctx, host.runTurn(msg, ctx), before, msg);
   }
 });
+
+// Greptile on c77cbd78: a named market job title of up to three words is the employer's role ("a market data engineer role");
+// pay, statistics and reporting words inside it are not a title ("the market rate for this role" still holds).
+Deno.test("CDW market exit: a named market job title is the employer's role; a market rate phrased around a role still holds", () => {
+  for (const msg of [
+    "They offered $26/hour for a market data engineer role. Draft a counter at $30/hour",
+    "They offered me a market access lead position at $26/hour. Draft a counter at $30/hour",
+    "They offered $26/hour for the market research analyst role. Draft a counter at $30/hour",
+  ]) {
+    const ctx = fresh();
+    host.runTurn(OFFER, ctx);
+    const r = host.runTurn(msg, ctx);
+    eq(recorded(ctx).hourly, 26, msg);
+    assert(/Thank you for the offer — \$26 an hour/.test(String(r.result?.draft?.body ?? "")), `${msg}: drafted`);
+  }
+  for (const prior of [OFFER, null]) for (const row of [
+    "The market rate for this role is $28/hour", "The market pay for a data engineer role is $28/hour", "The market average for this job is $28/hour",
+  ]) {
+    const msg = `${row}. Draft a counter at $30/hour`;
+    const ctx = fresh();
+    if (prior) host.runTurn(prior, ctx);
+    const before = recorded(ctx).hourly;
+    heldForBrain(ctx, host.runTurn(msg, ctx), before, msg);
+  }
+});

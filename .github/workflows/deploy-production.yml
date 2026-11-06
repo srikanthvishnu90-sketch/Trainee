@@ -79,7 +79,8 @@ jobs:
     # Runs when the measurement failed too: S3 then says what is missing. A failed preflight still stops it.
     if: ${{ !cancelled() && needs.preflight.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    # 150: S1's 90-minute wait for CI (--wait-checks 90) + S2's 30-minute ledger wait (--wait-ledger 30) + 30 for S1-S4 themselves.
+    timeout-minutes: 150
     outputs:
       deployed_sha: ${{ steps.judge.outputs.deployed_sha }}
     steps:

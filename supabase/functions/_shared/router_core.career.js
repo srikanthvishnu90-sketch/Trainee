@@ -17419,7 +17419,6 @@ const CareerRouter = (() => {
     if (uc.questions) facts.push(`You said "${uc.questions}", which isn't an exact number, so I read it as ${sm.questions} questions. Tell me the number to change it.`);
     if (uc.minutes) facts.push(`You said "${uc.minutes}", which isn't an exact length, so I read it as ${sm.minutes} minutes. Tell me the minutes to change it.`);
     if (sm.gaps.length) facts.push(`Not on file, so nothing about ${sm.gaps.length === 1 ? "it" : "them"} is assumed: ${Prep.prepFileAndList(sm.gaps)}.`);
-    facts.push(sm.facts ? `Your side comes only from ${sm.facts} confirmed ${sm.facts === 1 ? "fact" : "facts"} on your record.` : "No confirmed facts about you are on your record, so the page fills in nothing about you.");
     facts.push("Nothing was sent.");
     const reply = compose({ headline: `Your one-page interview prep File: ${sm.questions} ${sm.questions === 1 ? "question" : "questions"} and a ${sm.minutes}-minute plan.`, facts, nextStep: "Want to practice question 1 here now?" });
     return { intent: "prep_brief", reply, resultStatus: "prepared", sends: 0, file: { kind: "plan_review", data: built.data }, payload: { kind: "prep_file", ...sm } };

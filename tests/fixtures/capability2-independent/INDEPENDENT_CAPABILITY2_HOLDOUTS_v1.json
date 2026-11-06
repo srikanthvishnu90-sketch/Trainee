@@ -1,0 +1,737 @@
+{
+  "cohort": "INDEPENDENT_CAPABILITY2_HOLDOUTS_v1",
+  "version": 1,
+  "source_sha": "3157b65c84a4108f5320b2b91cd6f8a3ac577078",
+  "now": "2026-10-15T12:00:00Z",
+  "case_count": 22,
+  "cases": [
+    {
+      "id": "H01",
+      "rule": "A scheduling mention of Python engineers is not evidence that the scheduler can program",
+      "kind": "evidence_not_present",
+      "skill": "Python",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-SCHED",
+            "kind": "experience",
+            "text": "Scheduled interviews for Python engineers and maintained the hiring calendar",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ]
+      }
+    },
+    {
+      "id": "H02",
+      "rule": "Zero experience is negative evidence, not demonstrated experience",
+      "kind": "evidence_not_present",
+      "skill": "Python",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-ZERO",
+            "kind": "experience",
+            "text": "I have zero Python experience",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ]
+      }
+    },
+    {
+      "id": "H03",
+      "rule": "An ordinary negative contraction cannot prove a skill",
+      "kind": "evidence_not_present",
+      "skill": "SQL",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-NEG",
+            "kind": "experience",
+            "text": "I haven't used SQL",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ]
+      }
+    },
+    {
+      "id": "H04",
+      "rule": "An unresolved newer explicit denial must not leave old skill evidence unqualified",
+      "kind": "evidence_not_present",
+      "skill": "Python",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-OLD",
+            "kind": "experience",
+            "text": "Built Python scripts",
+            "status": "confirmed",
+            "source": "synthetic-independent-review",
+            "confirmed_at": "2025-01-01T00:00:00Z"
+          },
+          {
+            "id": "I-CORRECT",
+            "kind": "experience",
+            "text": "No Python experience; the old resume statement was inaccurate",
+            "status": "confirmed",
+            "source": "synthetic-independent-review",
+            "confirmed_at": "2026-10-15T11:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "id": "H05",
+      "rule": "A concrete confirmed project can support evidence",
+      "kind": "evidence_present",
+      "skill": "Rust",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-RUST",
+            "kind": "project",
+            "text": "Built a Rust command-line parser with runnable tests",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ]
+      }
+    },
+    {
+      "id": "H06",
+      "rule": "An extracted draft cannot support skill evidence",
+      "kind": "evidence_not_present",
+      "skill": "Rust",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-DRAFT",
+            "kind": "project",
+            "text": "Built a Rust parser",
+            "status": "draft",
+            "source": "synthetic-independent-review",
+            "needs_confirmation": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "H07",
+      "rule": "Duplicate IDs cannot establish one canonical supporting fact",
+      "kind": "evidence_not_present",
+      "skill": "Rust",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-DUP",
+            "kind": "project",
+            "text": "Built Rust parser",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          },
+          {
+            "id": "I-DUP",
+            "kind": "experience",
+            "text": "Reviewed fictional Rust documentation",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ]
+      }
+    },
+    {
+      "id": "H08",
+      "rule": "Legacy stable fact_id identifiers must survive non-mutating resume adaptation",
+      "kind": "legacy_ingest_id",
+      "profile": {
+        "facts": [
+          {
+            "fact_id": "LEGACY-STABLE-901",
+            "kind": "experience",
+            "title": "Quality reviewer",
+            "text": "Validated production records with Excel",
+            "source": "synthetic-independent-review",
+            "status": "confirmed"
+          }
+        ]
+      },
+      "resume": "EXPERIENCE\nLibrary assistant, SYNTHETIC library, 2024 - 2026\n- Organized public records\nSKILLS\nrecord keeping\n"
+    },
+    {
+      "id": "H09",
+      "rule": "Fresh remote openings require known hiring geography even with no preferred city",
+      "kind": "no_openings",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-OPS",
+            "kind": "experience",
+            "text": "Scheduled manufacturing shifts and maintained inventory records using Excel",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ],
+        "constraints": {
+          "remoteOnly": true
+        }
+      },
+      "postings": [
+        {
+          "id": "independent-seat",
+          "title": "Operations coordinator",
+          "company": "SYNTHETIC INDEPENDENT EMPLOYER",
+          "location": null,
+          "mode": "remote",
+          "status": "open",
+          "source_kind": "live_public",
+          "source_url": "https://careers.holdout.invalid/jobs/independent-seat",
+          "observed_at": "2026-10-15T11:00:00Z",
+          "requirements": [
+            {
+              "skill": "Excel",
+              "level": "required",
+              "text": "The posting explicitly requires Excel"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "H10",
+      "rule": "Known location constraints exclude unknown remote geography",
+      "kind": "no_openings",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-OPS",
+            "kind": "experience",
+            "text": "Scheduled manufacturing shifts and maintained inventory records using Excel",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ],
+        "preferences": {
+          "locations": [
+            "Chicago, IL"
+          ]
+        },
+        "constraints": {
+          "remoteOnly": true
+        }
+      },
+      "postings": [
+        {
+          "id": "independent-seat",
+          "title": "Operations coordinator",
+          "company": "SYNTHETIC INDEPENDENT EMPLOYER",
+          "location": null,
+          "mode": "remote",
+          "status": "open",
+          "source_kind": "live_public",
+          "source_url": "https://careers.holdout.invalid/jobs/independent-seat",
+          "observed_at": "2026-10-15T11:00:00Z",
+          "requirements": [
+            {
+              "skill": "Excel",
+              "level": "required",
+              "text": "The posting explicitly requires Excel"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "H11",
+      "rule": "A newer closed observation supersedes an older open observation of the same requisition",
+      "kind": "no_openings",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-OPS",
+            "kind": "experience",
+            "text": "Scheduled manufacturing shifts and maintained inventory records using Excel",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ],
+        "preferences": {
+          "locations": [
+            "Chicago, IL"
+          ]
+        }
+      },
+      "postings": [
+        {
+          "id": "independent-seat",
+          "title": "Operations coordinator",
+          "company": "SYNTHETIC INDEPENDENT EMPLOYER",
+          "location": "Chicago, IL",
+          "mode": "onsite",
+          "status": "open",
+          "source_kind": "live_public",
+          "source_url": "https://careers.holdout.invalid/jobs/independent-seat",
+          "observed_at": "2026-10-15T11:00:00Z",
+          "requirements": [
+            {
+              "skill": "Excel",
+              "level": "required",
+              "text": "The posting explicitly requires Excel"
+            }
+          ]
+        },
+        {
+          "id": "independent-seat",
+          "title": "Operations coordinator",
+          "company": "SYNTHETIC INDEPENDENT EMPLOYER",
+          "location": "Chicago, IL",
+          "mode": "onsite",
+          "status": "closed",
+          "source_kind": "live_public",
+          "source_url": "https://careers.holdout.invalid/jobs/independent-seat",
+          "observed_at": "2026-10-15T11:59:00Z",
+          "requirements": [
+            {
+              "skill": "Excel",
+              "level": "required",
+              "text": "The posting explicitly requires Excel"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "H12",
+      "rule": "An explicitly closed sole posting cannot be current",
+      "kind": "no_openings",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-OPS",
+            "kind": "experience",
+            "text": "Scheduled manufacturing shifts and maintained inventory records using Excel",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ],
+        "preferences": {
+          "locations": [
+            "Chicago, IL"
+          ]
+        }
+      },
+      "postings": [
+        {
+          "id": "independent-seat",
+          "title": "Operations coordinator",
+          "company": "SYNTHETIC INDEPENDENT EMPLOYER",
+          "location": "Chicago, IL",
+          "mode": "onsite",
+          "status": "closed",
+          "source_kind": "live_public",
+          "source_url": "https://careers.holdout.invalid/jobs/independent-seat",
+          "observed_at": "2026-10-15T11:00:00Z",
+          "requirements": [
+            {
+              "skill": "Excel",
+              "level": "required",
+              "text": "The posting explicitly requires Excel"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "H13",
+      "rule": "Old source observations cannot be current",
+      "kind": "no_openings",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-OPS",
+            "kind": "experience",
+            "text": "Scheduled manufacturing shifts and maintained inventory records using Excel",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ],
+        "preferences": {
+          "locations": [
+            "Chicago, IL"
+          ]
+        }
+      },
+      "postings": [
+        {
+          "id": "independent-seat",
+          "title": "Operations coordinator",
+          "company": "SYNTHETIC INDEPENDENT EMPLOYER",
+          "location": "Chicago, IL",
+          "mode": "onsite",
+          "status": "open",
+          "source_kind": "live_public",
+          "source_url": "https://careers.holdout.invalid/jobs/independent-seat",
+          "observed_at": "2026-09-01T00:00:00Z",
+          "requirements": [
+            {
+              "skill": "Excel",
+              "level": "required",
+              "text": "The posting explicitly requires Excel"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "H14",
+      "rule": "Recognized fixture flags cannot become current openings",
+      "kind": "no_openings",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-OPS",
+            "kind": "experience",
+            "text": "Scheduled manufacturing shifts and maintained inventory records using Excel",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ],
+        "preferences": {
+          "locations": [
+            "Chicago, IL"
+          ]
+        }
+      },
+      "postings": [
+        {
+          "id": "independent-seat",
+          "title": "Operations coordinator",
+          "company": "SYNTHETIC INDEPENDENT EMPLOYER",
+          "location": "Chicago, IL",
+          "mode": "onsite",
+          "status": "open",
+          "source_kind": "live_public",
+          "source_url": "https://careers.holdout.invalid/jobs/independent-seat",
+          "observed_at": "2026-10-15T11:00:00Z",
+          "requirements": [
+            {
+              "skill": "Excel",
+              "level": "required",
+              "text": "The posting explicitly requires Excel"
+            }
+          ],
+          "isTestFixture": true
+        }
+      ]
+    },
+    {
+      "id": "H15",
+      "rule": "Reserved example.org sources are examples, not current openings",
+      "kind": "freshness_false",
+      "posting": {
+        "id": "independent-seat",
+        "title": "Operations coordinator",
+        "company": "SYNTHETIC INDEPENDENT EMPLOYER",
+        "location": "Chicago, IL",
+        "mode": "onsite",
+        "status": "open",
+        "source_kind": "live_public",
+        "source_url": "https://jobs.example.org/careers/42",
+        "observed_at": "2026-10-15T11:00:00Z",
+        "requirements": [
+          {
+            "skill": "Excel",
+            "level": "required",
+            "text": "The posting explicitly requires Excel"
+          }
+        ]
+      }
+    },
+    {
+      "id": "H16",
+      "rule": "A normalized fresh matching observation with an explicit geography remains available for review",
+      "kind": "one_opening",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-OPS",
+            "kind": "experience",
+            "text": "Scheduled manufacturing shifts and maintained inventory records using Excel",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ],
+        "preferences": {
+          "locations": [
+            "Chicago, IL"
+          ]
+        }
+      },
+      "postings": [
+        {
+          "id": "independent-seat",
+          "title": "Operations coordinator",
+          "company": "SYNTHETIC INDEPENDENT EMPLOYER",
+          "location": "Chicago, IL",
+          "mode": "onsite",
+          "status": "open",
+          "source_kind": "live_public",
+          "source_url": "https://careers.holdout.invalid/jobs/independent-seat",
+          "observed_at": "2026-10-15T11:00:00Z",
+          "requirements": [
+            {
+              "skill": "Excel",
+              "level": "required",
+              "text": "The posting explicitly requires Excel"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "H17",
+      "rule": "The actual chat route must retain an explicitly named missing skill",
+      "kind": "named_skill_route",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-OPS",
+            "kind": "experience",
+            "text": "Scheduled manufacturing shifts and maintained inventory records using Excel",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ],
+        "preferences": {
+          "locations": [
+            "Chicago, IL"
+          ]
+        }
+      },
+      "message": "What SQL skill gaps should I close? I can spend one hour per week.",
+      "skill": "SQL"
+    },
+    {
+      "id": "H18",
+      "rule": "The actual chat route must retain an explicit one-hour weekly budget rather than silently substitute role recipes",
+      "kind": "budget_route",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-OPS",
+            "kind": "experience",
+            "text": "Scheduled manufacturing shifts and maintained inventory records using Excel",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ],
+        "preferences": {
+          "locations": [
+            "Chicago, IL"
+          ]
+        }
+      },
+      "message": "What SQL skill gaps should I close? I can spend one hour per week.",
+      "expected_minutes": 60
+    },
+    {
+      "id": "H19",
+      "rule": "A stable in-place correction must remove old positive evidence",
+      "kind": "inplace_correction",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-CANON",
+            "kind": "experience",
+            "text": "Built Python scripts",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ]
+      },
+      "fact_id": "I-CANON",
+      "corrected_text": "No Python experience",
+      "skill": "Python"
+    },
+    {
+      "id": "H20",
+      "rule": "Canonical correction state cannot cross authenticated owners that share a default profile ID",
+      "kind": "cross_owner_correction",
+      "user_a": "independent-owner-A",
+      "user_b": "independent-owner-B"
+    },
+    {
+      "id": "H21",
+      "rule": "A global capability alias should not silently erase an explicit per-skill employer requirement",
+      "kind": "posting_requirement_route",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-OPS",
+            "kind": "experience",
+            "text": "Scheduled manufacturing shifts and maintained inventory records using Excel",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ],
+        "preferences": {
+          "locations": [
+            "Chicago, IL"
+          ]
+        }
+      },
+      "message": "What SQL skill gaps should I close?",
+      "posting": {
+        "id": "independent-seat",
+        "title": "Operations coordinator",
+        "company": "SYNTHETIC INDEPENDENT EMPLOYER",
+        "location": "Chicago, IL",
+        "mode": "onsite",
+        "status": "open",
+        "source_kind": "live_public",
+        "source_url": "https://careers.holdout.invalid/jobs/independent-seat",
+        "observed_at": "2026-10-15T11:00:00Z",
+        "requirements": [
+          {
+            "skill": "SQL",
+            "level": "required",
+            "text": "SQL is required for this job"
+          }
+        ]
+      },
+      "skill": "SQL"
+    },
+    {
+      "id": "H22",
+      "rule": "Known paid-only constraints exclude unspecified compensation",
+      "kind": "no_openings",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-OPS",
+            "kind": "experience",
+            "text": "Scheduled manufacturing shifts and maintained inventory records using Excel",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ],
+        "preferences": {
+          "locations": [
+            "Chicago, IL"
+          ]
+        },
+        "constraints": {
+          "needsIncome": true
+        }
+      },
+      "postings": [
+        {
+          "id": "independent-seat",
+          "title": "Operations coordinator",
+          "company": "SYNTHETIC INDEPENDENT EMPLOYER",
+          "location": "Chicago, IL",
+          "mode": "onsite",
+          "status": "open",
+          "source_kind": "live_public",
+          "source_url": "https://careers.holdout.invalid/jobs/independent-seat",
+          "observed_at": "2026-10-15T11:00:00Z",
+          "requirements": [
+            {
+              "skill": "Excel",
+              "level": "required",
+              "text": "The posting explicitly requires Excel"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "coverage_observations": [
+    {
+      "id": "D01",
+      "label": "mechanical engineer",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-MECH",
+            "kind": "experience",
+            "text": "Designed hydraulic actuators using CAD and verified load calculations",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          },
+          {
+            "id": "I-MECH-ED",
+            "kind": "education",
+            "text": "BEng Mechanical Engineering",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ]
+      }
+    },
+    {
+      "id": "D02",
+      "label": "electrician",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-ELEC",
+            "kind": "experience",
+            "text": "Installed residential circuits and diagnosed electrical faults under licensed supervision",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          },
+          {
+            "id": "I-ELEC-CERT",
+            "kind": "certification",
+            "text": "Electrical apprenticeship certificate",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ]
+      }
+    },
+    {
+      "id": "D03",
+      "label": "teacher",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-TEACH",
+            "kind": "experience",
+            "text": "Taught algebra to secondary school students and assessed learning outcomes",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          },
+          {
+            "id": "I-EDUCATION",
+            "kind": "education",
+            "text": "Master of Education",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ]
+      }
+    },
+    {
+      "id": "D04",
+      "label": "graphic designer",
+      "profile": {
+        "facts": [
+          {
+            "id": "I-DESIGN",
+            "kind": "experience",
+            "text": "Created vector illustrations and accessibility-tested publication layouts for public exhibits",
+            "status": "confirmed",
+            "source": "synthetic-independent-review"
+          }
+        ]
+      }
+    }
+  ],
+  "not_original_private_50": true,
+  "not_a_launch_or_quality_score": true,
+  "rules_authored_before_execution": true,
+  "source_profiles": "all synthetic; no applicant record or lost private expectations"
+}

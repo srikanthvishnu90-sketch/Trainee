@@ -328,8 +328,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       }
     }
     // ONE-TIME CODES AND PASSWORDS IN CHAT (_shared/career_code_in_chat.ts; offline registry A23): a code or password the person
-    // shared is answered below by code's fixed safety text (codeChatText), and a code-shaped token still next to a code word
-    // ("Workday sent me 739201") is removed here like a labeled one, before anything stores the text or a model reads it.
+    // shared in a chat-length message is answered below by code's fixed safety text (codeChatText, codeShared.reply), and a
+    // code-shaped token still next to a code word ("Workday sent me 739201") is removed here like a labeled one, in a message
+    // of any accepted length, before anything stores the text or a model reads it.
     const codeShared = codeInChat(message, { userContent, removed: removedNow, codePending: codePending(situation) });
     if (codeShared) {
       message = codeShared.text; userContent = codeShared.userContent;
@@ -554,7 +555,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // "disconnect outlook" (revoke where possible, erase, cancel pending sends, read back), and a task that needs a
       // connector not connected ("check my outlook"): asked once with the link, parked, resumed by the connect callback.
       // A one-time code or a password shared in chat (codeShared) is code's safety turn before every turn here (codeChatText).
-      const codeFirst = !!codeShared && !tapIn && !careerTask && !careerBatch && !host.isHostControlled(message, ctx);
+      const codeFirst = !!codeShared?.reply && !tapIn && !careerTask && !careerBatch && !host.isHostControlled(message, ctx);
       const connAns = !codeFirst && !tapIn && !careerTask && !careerBatch && connectorAsk(message)
         ? await connectorChatTurn({ admin, env: Deno.env, fetch, now: Date.now, message, userId: user.id, threadId: tid, bridge: isBridgeCall })
           .catch((e) => { console.error("connector turn:", e?.message ?? e); return connectorFailure(message); })

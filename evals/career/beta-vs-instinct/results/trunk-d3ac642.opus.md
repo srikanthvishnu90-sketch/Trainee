@@ -1,6 +1,6 @@
-# Trainee vs Opus 5.5 reference: trunk-3defbcf
+# Trainee vs Opus 5.5 reference: trunk-d3ac642
 
-SHA `a2e7524bd067df42a5e1ee5cf520f004eabd8b98` · references 208/208 · judge haiku (claude CLI, subscription) · 0 CLI calls this run (cap 0)
+SHA `10eeabc36e92bc1c41af3e6708126ef6856bd665` · references 208/208 · judge haiku (claude CLI, subscription) · 0 CLI calls this run (cap 0)
 
 > Quality metric. Win = Trainee's reply judged better than the Opus 5.5 reference overall; loss = worse. Only turns answered by code (router or code-first) are compared: a staged-brain turn carries the benchmark's scripted text, so it is "not comparable" here.
 

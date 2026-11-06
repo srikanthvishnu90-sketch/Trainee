@@ -45,6 +45,13 @@ const STAGE_MEANING: [RegExp, string][] = [
   [/\bscreen|\brecruiter\b|\bphone call\b/i, "Recruiter screen"], [/\bassessment|\boa\b|\btest\b|\btake-?home\b|\bchallenge\b/i, "OA/assessment"],
   [/\bappl(?:ied|ication)|\bsubmitted\b|\bsent\b/i, "Submitted"], [/\bsaved?\b|\bbookmark/i, "Saved"],
 ];
+
+// How an empty search_jobs result is used in the reply (guidance for the model, not reply text).
+export const EMPTY_SEARCH_NOTE = "No postings matched. The person sees only the reply you write after this result, nothing you wrote " +
+  "before it: restate in this reply any roles or routes you named. An empty search is never the reply's first sentence when " +
+  "the person said they are overwhelmed, stressed or stuck (acknowledge that first) or asked where to start in a new field " +
+  "(name two to four roles they could get hired into first, one line each). Then say in one short line that nothing matched, " +
+  "and ask at most ONE question, the one thing that most changes the next search; never \"two things would help\".";
 export function trackerStage(label: unknown): string | null {
   const l = String(label ?? "").trim(), stages = CareerTrack.STAGES as string[];
   const exact = stages.find((x) => x.toLowerCase() === l.toLowerCase());
@@ -477,7 +484,13 @@ export function careerTools(deps: {
         const words = asked.split(/\s+/).filter(Boolean);
         while (!pool.length && words.length > 1) { words.pop(); query = words.join(" "); pool = await deps.postings(query); }
         const relaxed = query !== asked ? { relaxed_to: query, note: `nothing matched every word of "${asked}"; these match "${query}"` } : {};
-        if (!pool.length) { await record(c, "search", query, { results: 0, source: "none" }); return { postings: [], total: 0, source: "none" }; }
+        // Dev-set H025/H034/H035 (run 42133215450): after an empty search the reply led with the empty result, asked two
+        // or three things at once, and pointed at "the role names above" that the person never saw (only the text after
+        // the last tool result is delivered). The empty result says how it is used, beside the data, where the model reads it.
+        if (!pool.length) {
+          await record(c, "search", query, { results: 0, source: "none" });
+          return { postings: [], total: 0, source: "none", note: EMPTY_SEARCH_NOTE };
+        }
         // C-04: the person's saved floor (and, always, closed postings and the same job on another board) before any
         // ranking; what was hidden is counted by reason so the reply can say it ("7 senior roles, 5 contract").
         const saved = deps.alerts ? await deps.alerts.get(c.userId).catch(() => null) : null;

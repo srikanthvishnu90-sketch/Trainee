@@ -18,7 +18,9 @@ export interface ApplicationRow { state: string; reason: string | null; confirma
 export interface Records { application(userId: string, id: string): Promise<ApplicationRow | null> }
 export type Env = { get(k: string): string | undefined };
 export interface FileService {
-  create(userId: string, kind: string, data: unknown): Promise<{ ok: true; id: string; kind: KindId; title: string; url: string | null; webApp: string | null } | { ok: false; error: string }>;
+  // o.trusted: the data was built by code, never by a model (the agent's create_file never passes it). Only then may a plan review
+  // carry "Made by Trainee" lines (file_kinds.ts MADE): the interview prep File (agent-chat/career_prep_file.ts).
+  create(userId: string, kind: string, data: unknown, o?: { trusted?: boolean }): Promise<{ ok: true; id: string; kind: KindId; title: string; url: string | null; webApp: string | null } | { ok: false; error: string }>;
   get(userId: string, id: string): Promise<FileRead>;
   patchState(userId: string, id: string, state: Record<string, unknown>): Promise<void>;
   revoke(userId: string, id: string): Promise<boolean>;
@@ -49,10 +51,11 @@ export function createFileService(o: { store: FileKindStore; env: Env; now: () =
   const ttlHours = () => { const n = Number(o.env.get("TRAINEE_FILE_TTL_HOURS")); return Number.isFinite(n) && n >= 1 && n <= 720 ? Math.floor(n) : DEFAULT_TTL_HOURS; };
   return {
     ttlHours,
-    async create(userId, kind, data) {
+    async create(userId, kind, data, c) {
       if (!userId) return { ok: false, error: "not created: no person to make it for" };
       const now = o.now();
-      let v = validateKind(kind, data, { now });
+      // application_proof is never trusted on the way in: its record is read below and only that is trusted.
+      let v = validateKind(kind, data, { now, trusted: c?.trusted === true && kind !== "application_proof" });
       if (!v.ok) return { ok: false, error: `not created: ${v.errors.join("; ")}` };
       if (kind === "application_proof") {
         // The record is read server-side; if it can't be read, there is no file (nothing is guessed or filled in).

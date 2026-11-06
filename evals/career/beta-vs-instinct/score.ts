@@ -138,6 +138,19 @@ export function scoreDet(c: Crit, r: Rec, body: any): Verdict {
   return { pass: null, why: `unknown kind ${c.k}` };
 }
 
+// The role-results page (role_results.ts, telegram_jobs.ts store): its list is an ARRAY of job refs under
+// "tg:list:<results_file>", and each row is "tg:job:<ref>" = { job: { title, company, location, url }, shownAs }. The
+// rows are the page's content: counted as roles, and scored like a File's text (relevance, links).
+export function pageRoles(list: unknown, jobs: Record<string, unknown>): { refs: string[]; rows: string[] } {
+  const refs = Array.isArray(list) ? list.map(String) : [];
+  const rows: string[] = [];
+  for (const ref of refs) {
+    const j = (jobs[ref] as any)?.job;
+    if (j && typeof j === "object") rows.push(`${j.title ?? "?"} at ${j.company ?? "?"} — ${j.location ?? "?"} (${j.url ?? ""})`);
+  }
+  return { refs, rows };
+}
+
 // Guards are the "did nothing it should not" checks; everything else is a deliverable the prompt asked for (an answer at
 // all, the right route, links, a File, a count, a draft, the asked-for content).
 export const GUARD_KINDS = new Set(["no_effect", "no_write", "no_profile_change"]);

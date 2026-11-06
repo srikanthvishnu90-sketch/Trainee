@@ -1,6 +1,6 @@
 # Fundamental issues, 2026-11-04
 
-This is a ranked list of the product's fundamental issues on trunk `3defbcf`. "Fundamental" means the issue stops a
+This is a ranked list of the product's fundamental issues on trunk `d3ac642`. "Fundamental" means the issue stops a
 real person from finding roles, applying at volume, networking, connecting accounts, getting a File or link, or getting
 a reply that answers what they asked. Cosmetic issues are not listed. The list has **59 issues**; it is not padded, and
 some issues group several symptoms that share one root cause.
@@ -9,7 +9,7 @@ The bar is the owner's: comprehension, answer quality and design that compete wi
 the way Instinct or Muse do them.
 
 
-> **Baseline.** Recorded on trunk `3defbcf` (`results/trunk-3defbcf.*`, scorecards and full records). Earlier runs on `e6696cb` and `4158a1a` gave the same records. File:line references are as of `e6696cb`; #493 (the CPU fix, merged since) shifts `handler-career.ts` and `142-career-router.js` by up to about 130 lines, so search by the function name. **Scoring rule (review of #516):** on a staged-brain record, `not_generic` and `not_mentions` are unmeasured, so a brain record is never counted as delivered. This took A18.3 and A18.4 out of "delivered", in both states.
+> **Baseline.** Recorded on trunk `d3ac642` (`results/trunk-d3ac642.*`, scorecards and full records). Earlier runs on `e6696cb`, `4158a1a` and `3defbcf` gave the same headline. **Role counter (follow-up to #516):** the role-results page is stored as an array of refs under `tg:list:<id>`, with its rows under `tg:job:<ref>`. The counter used to expect an object and read 0 roles, so it now reads the stored rows (`score.ts pageRoles`), and the relevance check reads them as page content. On trunk this changes only A9.2 seeded (0 to 6 roles; it was already delivered). File:line references are as of `e6696cb`; #493 (the CPU fix, merged since) shifts `handler-career.ts` and `142-career-router.js` by up to about 130 lines, so search by the function name. **Scoring rule (review of #516):** on a staged-brain record, `not_generic` and `not_mentions` are unmeasured, so a brain record is never counted as delivered. This took A18.3 and A18.4 out of "delivered", in both states.
 
 ## The numbers behind it
 
@@ -34,7 +34,7 @@ states, with no paid call.
   All 26 feature groups lose or have no comparable turn. The 126 brain turns are not compared, because offline they
   carry scripted text.
 - **Live beta (report).** 0 of 4 full passes. 1 of 4 died on CPU.
-- Per-record detail: `evals/career/beta-vs-instinct/results/trunk-3defbcf.md` and `.opus.md`. Grouped failures:
+- Per-record detail: `evals/career/beta-vs-instinct/results/trunk-d3ac642.md` and `.opus.md`. Grouped failures:
   `docs/architect/BETA-FAILURE-MAP-2026-11-04.md`.
 
 ## Legend
@@ -61,7 +61,7 @@ states, with no paid call.
 
 | # | title | user-visible symptom | root cause (file:line) | evidence | impact | effort | in flight |
 |---|---|---|---|---|---|---|---|
-| F01 | The search role keeps count, constraint and filler words | "Find three … jobs … Do not apply" gets "I found no posting for three realistic … send links do contact anyone", while 14 matches exist | `_s/posting_constraints.ts:81` (`ROLE_NOISE` lacks counts, "only", constraint verbs), `:85-106` (`searchTextOf` strips only "apply"), `_s/career_search_judge.ts:448` | C01, A1.1, A9.1 (both states), A8.4, A9.2; judge loss on all of them | R A | S | — (measured: no branch fixes C01, A1.1 or A9.1) |
+| F01 | The search role keeps count, constraint and filler words | "Find three … jobs … Do not apply" gets "I found no posting for three realistic … send links do contact anyone", while 14 matches exist | `_s/posting_constraints.ts:81` (`ROLE_NOISE` lacks counts, "only", constraint verbs), `:85-106` (`searchTextOf` strips only "apply"), `_s/career_search_judge.ts:448` | C01, A1.1, A9.1 (both states), A8.4, A9.2; judge loss on all of them | R A | S | #522 `fix/search-terms-count-F01-F03` (measured: C01, A1.1, A9.1 and A8.4 delivered) |
 | F02 | One junk word empties the whole search | Every word must match, so any leftover word gives zero rows; the reply says the board "has no match" | `_s/career_search_judge.ts:293-297` (websearch AND of every lexeme), `:306-314` (one `ilike` per word) | C01; Opus reference lists 3 real board links for the same input | R | S | — |
 | F03 | The requested count is ignored | "find 3" lists 8; "ten" is read as a role word; "apply to all those" then queues 8 | `_s/career_search_judge.ts:416` (`show` default 8), `ac/handler-career.ts:1124` (no `show` passed), `142:501-502` (digit needed before "jobs"), `_s/posting_constraints.ts:105` (digits dropped) | seed turn 6, A1.1, A1.2 seeded "8/8 queued" | R A | S | — |
 | F04 | Negation is never read when routing | "Do not apply/contact/invent" triggers the forbidden thing's handler: application fields (live C02), a fabrication refusal (A6.2), company "and" (C02 trunk) | `142:12232` (`career_application_fields` bag of words), `142:4413` (`handleRefusal`), `142:4643-4644` (`companyFromText` "contact anyone"), `_s/posting_constraints.ts:81` ("not" dropped as noise) | live C02, C02, A6.2, A9.4 | T R | M | PRE (scope) |
@@ -237,7 +237,8 @@ would give the same records.
 
 | branch | task completion empty | seeded | prompts newly delivered (both states unless marked) | regressions / notes |
 |---|---|---|---|---|
-| trunk `3defbcf` | 22.1% | 18.3% | (baseline) | |
+| trunk `d3ac642` | 22.1% | 18.3% | (baseline) | |
+| #522 search, `d5b952a` (measured with this scoring) | 25.0% | 22.1% | C01 (3 Chicago support roles with links), A1.1 (10), A9.1 (3) in both states; A8.4 seeded | none |
 | MASS | **32.7%** | **28.8%** | A2.1, A2.2, A2.3, A3.3, A3.4, A14.4, A23.4, A24.1, A24.2, A24.3, A24.4 (22 records, all moved from the brain to code) | none |
 | C04 (snapshot) | 26.0% | 22.1% | C04, A7.1, A7.3, A12.2 | none |
 | PREP | 25.0% | 21.2% | C03, A15.1 (File minted, 5 questions, a 30-minute plan), A15.2 | none |

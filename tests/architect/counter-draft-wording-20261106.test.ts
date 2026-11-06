@@ -653,6 +653,18 @@ Deno.test("CDW an offer figure in the same clause as the ask is the offer; the o
   offerIs(OFFER, "Their $26/hour offer, though the market average is $28/hour. Draft a counter at $30/hour", 26, 30);
   keep("Glassdoor shows us competitors offer $28/hour. Draft a counter at $30/hour", 30);
   keep("We checked and the market offers $28/hour. Draft a counter at $30/hour", 30);
+  // An employer who only reports what the market pays is not the subject of the offer word (Greptile on f1120410).
+  keep("They said the market offers $28/hour. Draft a counter at $30/hour", 30);
+  keep("They said others are paying $28/hour. Draft a counter at $30/hour", 30);
+  keep("The company says the market pays $28/hour. Draft a counter at $30/hour", 30);
+  keep("The recruiter told me competitors offer $28/hour. Draft a counter at $30/hour", 30);
+  offerIs(OFFER, "They said they offered $26/hour because the market pays that. Draft a counter at $30/hour", 26, 30);
+  offerIs(OFFER, "They told me the offer is $26/hour. Draft a counter at $30/hour", 26, 30);
+  offerIs(OFFER, "They said the offer is $26/hour. Draft a counter at $30/hour", 26, 30);
+  // Bare plural employers are other employers (review of 32c35b74).
+  keep("Looking at the market average, employers offer $28/hour. Draft a counter at $30/hour", 30);
+  keep("Employers offer $28/hour. Draft a counter at $30/hour", 30);
+  keep("Other places pay $28/hour. Draft a counter at $30/hour", 30);
   for (const msg of ["Competitors offer $28/hour.", "Others offer $28/hour.", "The median offer is $28/hour.", "The industry offers $28/hour.", "Payscale says the average pay is $28/hour."]) {
     keep(`${msg} Draft a counter at $30/hour`, 30);
   }

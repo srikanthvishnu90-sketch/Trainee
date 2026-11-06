@@ -3807,7 +3807,7 @@ const CareerRouter = (() => {
     // naming this employer anywhere before it ("the market offers $28", "competitors offer $28", "glassdoor says others are
     // paying $28", "the median offer is $28"). "They offer the market rate of $26", "the company's average offer is $26" and
     // "the recruiter said the market is tight and offered $26" name the employer: their figure is the employer's.
-    const THIRD_PARTY = /\b(?:market|glassdoor|levels(?:\.fyi)?|salary\.com|payscale|indeed|average|median|typical|others|other\s+(?:companies|employers|firms|places|roles)|competitors?|similar\s+roles?|industry)\b/ig;
+    const THIRD_PARTY = /\b(?:market|glassdoor|levels(?:\.fyi)?|salary\.com|payscale|indeed|average|median|typical|others|other\s+(?:companies|employers|firms|places|roles)|competitors?|similar\s+roles?|industry|(?<!\b(?:the|this|that|my|their|our|its)\s+)(?:employers|companies|places|firms))\b/ig;
     const OWN_EMPLOYER = /\b(?:they|their|them|company|employer|recruiter|firm|hiring\s+manager|hr)\b/ig;
     // A comparison with the market ("a below market rate of $26", "an above-average $26 offer") describes the figure; it does
     // not attribute it to the market. Masked (same length, so indexes hold) before either market check reads the words.
@@ -3819,9 +3819,14 @@ const CareerRouter = (() => {
       if (t < 0) return false;
       // the employer named in an earlier thought ("the $26/hour they offered even though the market offers $28") does not count
       const lj = lastIdx(/,|\b(?:even\s+though|although|though|but|while|whereas|and|plus|since|because)\b/ig, pre.slice(0, t));
-      if (lastIdx(OWN_EMPLOYER, pre.slice(Math.max(lj, 0))) >= 0) return false;
+      // an employer who only REPORTS what the third party pays ("they said the market offers $28", "the company says others are
+      // paying $28") is not the subject of the offer word: that reporting phrase is masked before the employer-word check
+      const reported = pre.slice(Math.max(lj, 0)).replace(new RegExp(`(?:${OWN_EMPLOYER.source})\\s+(?:\\w+\\s+){0,2}?(?:said|say|says|told\\s+me|tells\\s+me|mentioned|mentions|noted|notes|claimed|claims|explained|admitted|think|thinks|believe|believes)\\s+(?:that\\s+)?`, "ig"), (x) => " ".repeat(x.length));
+      if (lastIdx(OWN_EMPLOYER, reported) >= 0) return false;
       const gap = pre.slice(t);
-      return !/[,$]/.test(gap) && gap.trim().split(/\s+/).length <= 5;
+      // a joining word between the third party and the offer word starts another thought, whose subject is not the third party
+      // ("the recruiter said the market is tight and offered $26")
+      return !/[,$]/.test(gap) && !/\b(?:and|but|while|whereas|though|although|since|because|plus)\b/i.test(gap) && gap.trim().split(/\s+/).length <= 5;
     };
     // A unit/purpose word attaches to a figure only as its adjacent noun phrase ("$500 relocation allowance", "$2,000 signing bonus")
     // or as "<noun> of $X"; a later word in the sentence, a connector, or a negation ("with no relocation allowance") never does.

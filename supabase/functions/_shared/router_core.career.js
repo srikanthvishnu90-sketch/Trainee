@@ -16006,7 +16006,7 @@ const CareerRouter = (() => {
     const user = /\b(?:counter(?:ing|ed)?(?:\s+(?:email|letter|message|proposal))?(?:\s+(?:at|to|with|for|asking(?:\s+for)?))?|ask(?:ing)?(?:\s+for)?|propos(?:e|ing)(?:\s+(?:a|an|that))?|meet\s+me\s+at|want(?:ing)?|target(?:ing)?|looking\s+for|hop(?:e|ing)\s+for|make\s+it|change\s+(?:it|the\s+\w+)\s+to|need|request(?:ing)?|push\s+for|go\s+for|would\s+like|['’]d\s+like|(?:draft|write|compose|send)\b[^.?!]{0,50}?\b(?:at|with|for))\b/ig;
     const current = /\b(?:i\s+(?:(?:now|currently)\s+)?(?:make|earn|get\s+paid|am\s+paid)|i['\u2019]m\s+(?:paid|at)|currently\s+(?:(?:make|earn|paid|get|at)\b|\$)|(?:my|the)\s+(?:current|present)\s+(?:\w+\s+)?(?:pay|pays|rate|wage|job\s+pays)|current\s+(?:pay|rate|wage)|(?:my\s+(?:job|work|employer)|they)\s+(?:(?:now|currently)\s+)?pays?\s+me|(?:currently|now)\s+pays?\s+me|my\s+(?:job|work|employer)\s+(?:(?:now|currently)\s+)?pays?)\b/ig;
     const lastIdx = (re, str) => { let i = -1, mm; re.lastIndex = 0; while ((mm = re.exec(str))) i = mm.index; return i; };
-    const THIRD_PARTY = /\b(?:market|glassdoor|levels(?:\.fyi)?|salary\.com|payscale|indeed|average|median|typical|others|other\s+(?:companies|employers|firms|places|roles)|competitors?|similar\s+roles?|industry)\b/ig;
+    const THIRD_PARTY = /\b(?:market|glassdoor|levels(?:\.fyi)?|salary\.com|payscale|indeed|average|median|typical|others|other\s+(?:companies|employers|firms|places|roles)|competitors?|similar\s+roles?|industry|(?<!\b(?:the|this|that|my|their|our|its)\s+)(?:employers|companies|places|firms))\b/ig;
     const OWN_EMPLOYER = /\b(?:they|their|them|company|employer|recruiter|firm|hiring\s+manager|hr)\b/ig;
     const COMPARISON = /\b(?:below|above|under|over|at|near|beneath|beyond|than|vs\.?|versus)[\s-]+(?:the\s+)?(?:market|average|median|typical|industry)(?:[\s-]+(?:rate|range|pay|average|standard|level))?\b/ig;
     const maskComparison = (t) => t.replace(COMPARISON, (x) => " ".repeat(x.length));
@@ -16015,9 +16015,10 @@ const CareerRouter = (() => {
       const pre = maskComparison(text.slice(0, cueIdx)), t = lastIdx(THIRD_PARTY, pre);
       if (t < 0) return false;
       const lj = lastIdx(/,|\b(?:even\s+though|although|though|but|while|whereas|and|plus|since|because)\b/ig, pre.slice(0, t));
-      if (lastIdx(OWN_EMPLOYER, pre.slice(Math.max(lj, 0))) >= 0) return false;
+      const reported = pre.slice(Math.max(lj, 0)).replace(new RegExp(`(?:${OWN_EMPLOYER.source})\\s+(?:\\w+\\s+){0,2}?(?:said|say|says|told\\s+me|tells\\s+me|mentioned|mentions|noted|notes|claimed|claims|explained|admitted|think|thinks|believe|believes)\\s+(?:that\\s+)?`, "ig"), (x) => " ".repeat(x.length));
+      if (lastIdx(OWN_EMPLOYER, reported) >= 0) return false;
       const gap = pre.slice(t);
-      return !/[,$]/.test(gap) && gap.trim().split(/\s+/).length <= 5;
+      return !/[,$]/.test(gap) && !/\b(?:and|but|while|whereas|though|although|since|because|plus)\b/i.test(gap) && gap.trim().split(/\s+/).length <= 5;
     };
     const NOUN = "relocation|moving|signing|sign-on|bonus|allowance|stipend|equity|stock|shares|reimbursement|budget|salary|annual|yearly|days?|equipment|training|tuition|commute|parking|childcare|travel";
     const BLOCK = /^(?:and|with|plus|no|without|not|or|but|also|to|if|then)$/i;

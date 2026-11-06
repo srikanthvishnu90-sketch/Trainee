@@ -458,3 +458,49 @@ export function waiverSolicits(reply: string, refuse: (text: string) => string |
 const SAVE_WORDS = /\b(?:sav(?:e|ed|ing)|keep(?:s|ing)?|kept|remember(?:ed|ing)?|stor(?:e|ed|ing)|record(?:ed|ing)?|note (?:it|that|this) down)\b/i;
 const CONFIRM_AFTER_REFUSAL = /^(?:(?:is|does|would|will|are|was)\s+(?:that|this|it|everything|all of that)\b[^?]{0,50}|(?:sounds?|ok|okay|good|alright|all right|fair|agreed|deal)\b[^?]{0,20}|.{0,30}\bwhat you(?:'d| would)? (?:like|want)\b[^?]{0,20})\?$/i;
 
+
+// ------------------------------------------------------------------------------------------------ one ask, no promises
+// BRAIN ONE-ASK (2026-11-06, release 7 S3: H001, H025, H035): the prompt says one question for one thing, and the model
+// sometimes asks two ("What city, and do you have a school?") or one conjoined ask ("What role and city"). Also H025: "I'll
+// set a job alert" when no alert was set. Code finds them; the loop puts them to the model once, and what stands is
+// trimmed (extra questions) or dropped (promises). No wording here is ever shown to the person.
+const LISTY = /^\s*(?:[-*•]|\d+[.)])\s+|^\s{2,}|^["“']/;
+// A question about the person, joined by "and" between two things asked for ("what role and city are you after", "your
+// school and graduation date"). Lists inside a question about the world ("pros and cons") do not match: it must address "you".
+const CONJOINED = /\b(?:what|which|where|when|who)\b[^?.!]{0,40}?\b\w+ (?:and|&|plus) (?:the |your |a |an )?\w+\b[^?.!]{0,40}\b(?:you|your)\b|\b(?:your|you have|you have a) \w+(?: \w+)? (?:and|&|plus) (?:your |a |an )?\w+ (?:date|city|location|school|title|salary|number)\b/i;
+export function multiAsk(reply: string): { extra: number[]; conjoined: number[] } {
+  const ps = pieces(reply), asks: number[] = [], conjoined: number[] = [];
+  ps.forEach((p, i) => {
+    // pieces() splits "1. Why?" into "1." and "Why?": a bare marker before a piece makes it a list item.
+    if (LISTY.test(p.text) || (i > 0 && /^(?:\d+[.)]|[-*•])$/.test(ps[i - 1].text.trim())) || !isQuestion(p.text)) return;
+    asks.push(i);
+    if (CONJOINED.test(plainQuotes(p.text))) conjoined.push(i);
+  });
+  return { extra: asks.slice(1), conjoined };
+}
+// Trim to the first question: later question sentences go, the rest of the reply stays.
+export function trimToOneAsk(reply: string): string {
+  const { extra } = multiAsk(reply);
+  return extra.length ? rebuild(pieces(reply), new Set(extra)) : reply;
+}
+// A promise of an alert or watch this turn did not set (sends are always the person's to approve, so they are not promises here): first-person future ("I'll set an alert", "I'll text you when", "I will
+// watch for new roles"). A condition or offer before it ("if you want, I'll", "once you tell me") and a negation clear it.
+const PROMISES: { kind: string; by: string[]; said: RegExp }[] = [
+  { kind: "an alert promised", by: ["set_job_alerts"], said: /\bi(?:'ll| will) (?:also |then |go ahead and |now )?(?:set(?: up)?|create|turn on|switch on|start|put in|add)\s+(?:an? |the |your |new |these |those )?(?:job |daily |instant )?(?:alerts?|watch(?:es)?)\b|\bi(?:'ll| will) (?:also |then )?(?:text|message|notify|email|ping|alert) you\b|\bi(?:'ll| will) (?:also |then )?(?:keep an eye|watch|monitor)\b/i },
+];
+const PROMISE_CLEARED = /\b(?:if|unless|once|when|after|until|want me|should i|shall i|do you want|would you like|nothing|not|never)\b|n't\b/i;
+export function unbackedPromises(reply: string, calls: { name: string; ok: boolean }[]): { index: number; kind: string }[] {
+  const out: { index: number; kind: string }[] = [];
+  pieces(reply).forEach((p, index) => {
+    const x = plainQuotes(p.text);
+    if (isQuestion(x)) return;
+    for (const c of PROMISES) {
+      const m = c.said.exec(x);
+      if (!m || PROMISE_CLEARED.test(x.slice(0, m.index))) continue;
+      if (c.by.length && calls.some((t) => t.ok && c.by.includes(t.name))) continue;
+      out.push({ index, kind: c.kind });
+      return;
+    }
+  });
+  return out;
+}

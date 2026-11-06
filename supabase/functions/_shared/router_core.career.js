@@ -16006,8 +16006,8 @@ const CareerRouter = (() => {
     const user = /\b(?:counter(?:ing|ed)?(?:\s+(?:email|letter|message|proposal))?(?:\s+(?:at|to|with|for|asking(?:\s+for)?))?|ask(?:ing)?(?:\s+for)?|propos(?:e|ing)(?:\s+(?:a|an|that))?|meet\s+me\s+at|want(?:ing)?|target(?:ing)?|looking\s+for|hop(?:e|ing)\s+for|make\s+it|change\s+(?:it|the\s+\w+)\s+to|need|request(?:ing)?|push\s+for|go\s+for|would\s+like|['’]d\s+like|(?:draft|write|compose|send)\b[^.?!]{0,50}?\b(?:at|with|for))\b/ig;
     const current = /\b(?:i\s+(?:currently\s+|now\s+)?(?:make|earn|get|am\s+paid)|currently\s+(?:make|earn|get|paid|at)|(?:my|the)\s+(?:current|present)\s+(?:\w+\s+)?(?:pay|pays|rate|wage|job\s+pays)|current\s+(?:pay|rate|wage)|(?:my\s+)?(?:job|work)\s+(?:now\s+)?pays)\b/ig;
     const lastIdx = (re, str) => { let i = -1, mm; re.lastIndex = 0; while ((mm = re.exec(str))) i = mm.index; return i; };
-    const NOUN = "relocation|moving|signing|sign-on|bonus|allowance|stipend|equity|stock|shares|reimbursement|budget|salary|annual|yearly|days?";
-    const BLOCK = /^(?:and|with|plus|no|without|not|or|but|also|for|to|if|then)$/i;
+    const NOUN = "relocation|moving|signing|sign-on|bonus|allowance|stipend|equity|stock|shares|reimbursement|budget|salary|annual|yearly|days?|equipment|training|tuition|commute|parking|childcare|travel";
+    const BLOCK = /^(?:and|with|plus|no|without|not|or|but|also|to|if|then)$/i;
     const attached = (after, before) => {
       const aw = after.trim().split(/\s+/).slice(0, 3);
       for (let i = 0; i < aw.length; i++) { if (BLOCK.test(aw[i])) break; if (new RegExp("^(?:" + NOUN + ")$", "i").test(aw[i])) return true; }
@@ -16040,7 +16040,7 @@ const CareerRouter = (() => {
         else if (role === "employer") out.offer = v;
         else if (role === "current") out.current = v;
         else if (out.unknown == null) out.unknown = v;
-      } else if (unit === "none" && role === "ask" && v < 1000 && out.askBare == null) out.askBare = v;
+      } else if (unit === "none" && role === "ask" && v <= 300 && !(hint && hint.recorded != null && v > 3 * Number(hint.recorded)) && out.askBare == null) out.askBare = v;
     }
     return out;
   }

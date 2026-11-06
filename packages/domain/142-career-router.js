@@ -3803,8 +3803,8 @@ const CareerRouter = (() => {
     const lastIdx = (re, str) => { let i = -1, mm; re.lastIndex = 0; while ((mm = re.exec(str))) i = mm.index; return i; };
     // A unit/purpose word attaches to a figure only as its adjacent noun phrase ("$500 relocation allowance", "$2,000 signing bonus")
     // or as "<noun> of $X"; a later word in the sentence, a connector, or a negation ("with no relocation allowance") never does.
-    const NOUN = "relocation|moving|signing|sign-on|bonus|allowance|stipend|equity|stock|shares|reimbursement|budget|salary|annual|yearly|days?";
-    const BLOCK = /^(?:and|with|plus|no|without|not|or|but|also|for|to|if|then)$/i;
+    const NOUN = "relocation|moving|signing|sign-on|bonus|allowance|stipend|equity|stock|shares|reimbursement|budget|salary|annual|yearly|days?|equipment|training|tuition|commute|parking|childcare|travel";
+    const BLOCK = /^(?:and|with|plus|no|without|not|or|but|also|to|if|then)$/i;
     const attached = (after, before) => {
       const aw = after.trim().split(/\s+/).slice(0, 3);
       for (let i = 0; i < aw.length; i++) { if (BLOCK.test(aw[i])) break; if (new RegExp("^(?:" + NOUN + ")$", "i").test(aw[i])) return true; }
@@ -3839,7 +3839,7 @@ const CareerRouter = (() => {
         else if (role === "employer") out.offer = v;
         else if (role === "current") out.current = v;
         else if (out.unknown == null) out.unknown = v;
-      } else if (unit === "none" && role === "ask" && v < 1000 && out.askBare == null) out.askBare = v;
+      } else if (unit === "none" && role === "ask" && v <= 300 && !(hint && hint.recorded != null && v > 3 * Number(hint.recorded)) && out.askBare == null) out.askBare = v; // plausible as an hourly rate only
     }
     return out;
   }

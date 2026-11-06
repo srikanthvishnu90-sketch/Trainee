@@ -222,6 +222,22 @@ Deno.test("CDW 'They pay $24/hour' then '$26/hour' alone keeps 24 (unclear, not 
   eq(recorded(ctx).hourly, 24);
   eq(recorded(ctx).offerRate ?? 24, 24);
 });
+Deno.test("CDW a purpose amount is never the hourly ask ('for relocation', no 'for', 'for moving costs')", () => {
+  const cases: Array<[string, number | null]> = [
+    ["Draft a counter email asking for $500 for relocation", null],
+    ["Draft a counter email asking for $5,000 relocation", null],
+    ["Draft a counter email asking for $500 for moving costs and $28/hour", 28],
+    ["Draft a counter email asking for $900", null],
+    ["Draft a counter at $30", 30],
+  ];
+  for (const [msg, ask] of cases) {
+    const ctx = fresh();
+    host.runTurn(OFFER, ctx);
+    step(ctx, msg, 24, ask);
+    step(ctx, "Draft the counter email.", 24, ask);
+    assert(!/\$(?:500|5,?000|900) an hour/.test(host.runTurn("Draft the counter email.", ctx).result.draft.body), msg);
+  }
+});
 Deno.test("CDW the C04 message verbatim still blanks the ask and keeps the offer", () => {
   const C04 = "Fictional beta scenario, not my profile. Jordan Lee has two years of retail customer-service experience and Excel skills. No external actions and no changes to my profile. A customer support job offered Jordan $24/hour, with no other terms provided. Should Jordan counter, and how? Draft a short counter email for review only. Separate advice from unverified market claims.";
   const ctx = fresh();

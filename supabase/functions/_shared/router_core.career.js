@@ -15998,7 +15998,7 @@ const CareerRouter = (() => {
     const reply = compose({ headline: `The decline for ${offer.company || "the firm"} is drafted — warm, final, and held.`, facts: [dd.draft, "It declines on fit, thanks the team specifically, and leaves the door open — the three moves that keep a relationship alive after a no. It sends only when you approve it, like every other send."], nextStep: "Want the tone warmer, firmer, or shorter before it is held for your approval?" });
     return { intent: "negotiation_draft", reply, resultStatus: "awaiting_user", sends: 0, draft: dd, decline: { company: offer.company, role: offer.role } };
   }
-  function counterFigures(text) {
+  function counterFigures(text, hint) {
     const out = { offer: null, ask: null, unknown: null, askBare: null, current: null, mentions: [] };
     const src = s(text).replace(/\bcounter[ -]?offers?\b/ig, "counter-proposal");
     const reM = /\$\s?(\d[\d,]*(?:\.\d{1,2})?)(\s?k\b)?/ig;
@@ -16007,6 +16007,7 @@ const CareerRouter = (() => {
     const current = /\b(?:i\s+(?:currently\s+|now\s+)?(?:make|earn|get|am\s+paid)|currently\s+(?:make|earn|get|paid|at)|(?:my|the)\s+(?:current|present)\s+(?:\w+\s+)?(?:pay|pays|rate|wage|job\s+pays)|current\s+(?:pay|rate|wage)|(?:my\s+)?(?:job|work)\s+(?:now\s+)?pays)\b/ig;
     const lastIdx = (re, str) => { let i = -1, mm; re.lastIndex = 0; while ((mm = re.exec(str))) i = mm.index; return i; };
     const oneTime = /\b(?:relocation|moving|signing|sign-on|bonus|allowance|stipend|equity|stock|shares|reimbursement|budget)\b/i;
+    const hourCtx = !!(hint && hint.hourly) || /\$\s?\d[\d,.]*\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)|\bhourly\b/i.test(src);
     let prevEnd = 0, mm;
     while ((mm = reM.exec(src))) {
       const start = mm.index, end = start + mm[0].length;
@@ -16020,10 +16021,11 @@ const CareerRouter = (() => {
       else if (mm[2] || /^\s*(?:per\s+|an?\s+|\/\s?)(?:year|yr)|^\s*(?:annual|yearly|salary)/i.test(after) || /,\d{3}/.test(mm[1]) && Number(mm[1].replace(/,/g, "")) >= 1000 && !oneTime.test(after)) unit = "year";
       if (unit !== "hour" && (oneTime.test(after.split(/\band\b/i)[0].slice(0, 28)) || oneTime.test(before.slice(-22)))) unit = "one-time";
       else if (unit === "none" && /^\s*(?:\w+\s+){0,2}?(?:relocation|moving|signing|sign-on|bonus|allowance|stipend|salary|annual|yearly|equity|stock|days?)\b/i.test(after)) unit = "one-time";
-      const ui = lastIdx(user, seg), ei = lastIdx(employer, seg);
       const ci = lastIdx(current, seg);
-      const role = ci >= 0 && ci >= ui && ci >= ei - 12 ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
+      const ui = lastIdx(user, seg), ei = lastIdx(employer, seg.replace(current, (x) => " ".repeat(x.length)));
+      const role = ci >= 0 && ci >= ui && ci >= ei ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
       const v = Number(mm[1].replace(/,/g, ""));
+      if (unit === "none" && role === "employer" && v < 1000 && hourCtx) unit = "hour";
       out.mentions.push({ value: v, unit, role });
       prevEnd = end;
       if (unit === "hour") {
@@ -16035,7 +16037,7 @@ const CareerRouter = (() => {
     }
     return out;
   }
-  function parseOfferFigures(text) {
+  function parseOfferFigures(text, hint) {
     const out = { hourly: null, hourlyText: null, annual: null, annualText: null, signing: null, signingText: null };
     let work = s(text);
     const num = (v) => Number(String(v).replace(/,/g, ""));
@@ -16048,7 +16050,7 @@ const CareerRouter = (() => {
     }
     m = work.match(/\$\s?(\d{1,3}(?:\.\d{1,2})?)\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)/i);
     {
-      const cf = counterFigures(work);
+      const cf = counterFigures(work, hint);
       out.recHourly = cf.offer != null ? cf.offer : (cf.ask == null && cf.askBare == null && cf.current == null ? cf.unknown : null);
       out.askHourly = cf.ask; out.offerHourly = cf.offer; out.reportedHourly = cf.offer; out.unknownHourly = cf.unknown; out.askBare = cf.askBare;
     }
@@ -22745,7 +22747,8 @@ const CareerRouter = (() => {
       }
     }
     const recommendations = typeof CareerRecommendations !== "undefined" ? CareerRecommendations : req("./154-career-recommendations.js");
-    const recommendationIntent = recommendations && recommendations.intentFor(text);
+    const counterDraftWithOffer = /\b(?:draft|write|compose)\b[^.?!]*\bcounter\b/i.test(s(text)) && /\boffer/i.test(s(text));
+    const recommendationIntent = !counterDraftWithOffer && recommendations && recommendations.intentFor(text);
     if (recommendationIntent) {
       const rec = recommendations.recommend(Object.assign({}, c, { recommendationIntent, text: s(text) }));
       return { intent: "career_recommendations", reply: rec.text, resultStatus: "prepared", sends: 0, guidance: rec, payload: rec, artifact: rec };
@@ -23920,7 +23923,7 @@ const CareerRouter = (() => {
         else if ((m = cl.match(/\boffer\b[^.!?]*?\b(?:from|at)\s+([A-Z][A-Za-z0-9&.]+(?:\s+[A-Z][A-Za-z0-9&.]+){0,2})/)) && !NOT_A_FIRM.test(m[1].trim())) rec.firm = m[1].trim();
         if (!rec.firm && !rec.descriptor && (m = cl.match(/\boffer\b[^.!?]*?\bfrom\s+an?\s+([a-z][a-z -]{1,28}?\b(?:startup|company|firm|bank|fund|agency|studio|shop|co|insurer|practice|group))\b/i))) rec.descriptor = m[1].trim();
         const askFramed = /\bask(?:ing)? for\s+(?:a\s+|an\s+)?\$?\s?\d|\bcounter\s+(?:at|of|to)\s+\$?\s?\d|\bmake it\s+\$?\s?\d/i.test(cl);
-        const figs0 = parseOfferFigures(cl);
+        const figs0 = parseOfferFigures(cl, { hourly: /\$\s?\d[\d,.]*\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)|\bhourly\b/i.test(raw) });
         const figs = askFramed ? { hourly: null, signing: null, annual: null } : figs0;
         const counterDraftReq = /\b(?:draft|write|compose|prepare)\b[^.?!]*\bcounter\b|\bcounter\s+(?:email|offer|letter|message)\b|\bpropos(?:e|ing)\s+\$|\bask(?:ing)?\s+(?:for\s+)?\$/i.test(cl);
         figs.hourly = figs0.recHourly;

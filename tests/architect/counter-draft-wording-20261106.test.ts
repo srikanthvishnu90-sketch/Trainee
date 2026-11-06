@@ -180,6 +180,14 @@ Deno.test("CDW '$22 now; they offered $24; counter at $27' reaches the negotiati
   eq(r.intent, "negotiation_draft");
   assert(/Thank you for the offer — \$24 an hour/.test(r.result.draft.body) && /meet me at \$27 an hour\?/.test(r.result.draft.body), r.result.draft.body);
 });
+Deno.test("CDW current pay is never saved as the offer, unitless or /hour, over two turns", () => {
+  for (const first of ["my current job pays $22/hour; they offered $24; draft a counter at $27/hour", "my current job pays $22/hour; they offered $24/hour; draft a counter at $27/hour"]) {
+    const ctx = fresh();
+    step(ctx, first, 24, 27);
+    step(ctx, "Draft the counter email.", 24, 27);
+    eq(recorded(ctx).offerRate, 24, first);
+  }
+});
 Deno.test("CDW the C04 message verbatim still blanks the ask and keeps the offer", () => {
   const C04 = "Fictional beta scenario, not my profile. Jordan Lee has two years of retail customer-service experience and Excel skills. No external actions and no changes to my profile. A customer support job offered Jordan $24/hour, with no other terms provided. Should Jordan counter, and how? Draft a short counter email for review only. Separate advice from unverified market claims.";
   const ctx = fresh();

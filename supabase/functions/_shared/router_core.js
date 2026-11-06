@@ -40680,7 +40680,7 @@ const CareerRouter = (() => {
   //      it). ask = the user's hourly figure, the one in the counter request when there are several. An unitless figure after
   //      an ask cue is `askBare`, used only where an hourly offer is on record. An unknown figure is returned as `unknown`
   //      and never guessed into either role.
-  function counterFigures(text) {
+  function counterFigures(text, hint) {
     const out = { offer: null, ask: null, unknown: null, askBare: null, current: null, mentions: [] };
     const src = s(text).replace(/\bcounter[ -]?offers?\b/ig, "counter-proposal");
     const reM = /\$\s?(\d[\d,]*(?:\.\d{1,2})?)(\s?k\b)?/ig;
@@ -40689,6 +40689,7 @@ const CareerRouter = (() => {
     const current = /\b(?:i\s+(?:currently\s+|now\s+)?(?:make|earn|get|am\s+paid)|currently\s+(?:make|earn|get|paid|at)|(?:my|the)\s+(?:current|present)\s+(?:\w+\s+)?(?:pay|pays|rate|wage|job\s+pays)|current\s+(?:pay|rate|wage)|(?:my\s+)?(?:job|work)\s+(?:now\s+)?pays)\b/ig;
     const lastIdx = (re, str) => { let i = -1, mm; re.lastIndex = 0; while ((mm = re.exec(str))) i = mm.index; return i; };
     const oneTime = /\b(?:relocation|moving|signing|sign-on|bonus|allowance|stipend|equity|stock|shares|reimbursement|budget)\b/i;
+    const hourCtx = !!(hint && hint.hourly) || /\$\s?\d[\d,.]*\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)|\bhourly\b/i.test(src);
     let prevEnd = 0, mm;
     while ((mm = reM.exec(src))) {
       const start = mm.index, end = start + mm[0].length;
@@ -40702,10 +40703,13 @@ const CareerRouter = (() => {
       else if (mm[2] || /^\s*(?:per\s+|an?\s+|\/\s?)(?:year|yr)|^\s*(?:annual|yearly|salary)/i.test(after) || /,\d{3}/.test(mm[1]) && Number(mm[1].replace(/,/g, "")) >= 1000 && !oneTime.test(after)) unit = "year";
       if (unit !== "hour" && (oneTime.test(after.split(/\band\b/i)[0].slice(0, 28)) || oneTime.test(before.slice(-22)))) unit = "one-time";
       else if (unit === "none" && /^\s*(?:\w+\s+){0,2}?(?:relocation|moving|signing|sign-on|bonus|allowance|stipend|salary|annual|yearly|equity|stock|days?)\b/i.test(after)) unit = "one-time";
-      const ui = lastIdx(user, seg), ei = lastIdx(employer, seg);
       const ci = lastIdx(current, seg);
-      const role = ci >= 0 && ci >= ui && ci >= ei - 12 ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
+      // an employer word inside the current-pay phrase ("my current job pays") is not an employer cue
+      const ui = lastIdx(user, seg), ei = lastIdx(employer, seg.replace(current, (x) => " ".repeat(x.length)));
+      const role = ci >= 0 && ci >= ui && ci >= ei ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
       const v = Number(mm[1].replace(/,/g, ""));
+      // a unitless figure the employer reported ("they offered $24"), in a message that is otherwise about hourly pay, is hourly
+      if (unit === "none" && role === "employer" && v < 1000 && hourCtx) unit = "hour";
       out.mentions.push({ value: v, unit, role });
       prevEnd = end;
       if (unit === "hour") {
@@ -40717,7 +40721,7 @@ const CareerRouter = (() => {
     }
     return out;
   }
-  function parseOfferFigures(text) {
+  function parseOfferFigures(text, hint) {
     const out = { hourly: null, hourlyText: null, annual: null, annualText: null, signing: null, signingText: null };
     let work = s(text);
     const num = (v) => Number(String(v).replace(/,/g, ""));
@@ -40734,7 +40738,7 @@ const CareerRouter = (() => {
     // classified by the words before it: an ask cue (counter at, ask for, meet me at, want, target, make it) makes it the
     // ASK; any other hourly figure is the OFFER. `hourly` stays the first figure, for the callers that record an offer.
     {
-      const cf = counterFigures(work);
+      const cf = counterFigures(work, hint);
       out.recHourly = cf.offer != null ? cf.offer : (cf.ask == null && cf.askBare == null && cf.current == null ? cf.unknown : null);
       out.askHourly = cf.ask; out.offerHourly = cf.offer; out.reportedHourly = cf.offer; out.unknownHourly = cf.unknown; out.askBare = cf.askBare;
     }
@@ -50338,7 +50342,10 @@ const CareerRouter = (() => {
     // recommendations. It takes only host-injected profile/postings; it never
     // falls back to the filesystem corpus or touches alert/browser state.
     const recommendations = typeof CareerRecommendations !== "undefined" ? CareerRecommendations : req("./154-career-recommendations.js");
-    const recommendationIntent = recommendations && recommendations.intentFor(text);
+    // A counter-drafting request that reports an offer ("my current job pays $22/hour; they offered $24; draft a counter at $27/hour")
+    // is the negotiation's, not a "current job" recommendation ask.
+    const counterDraftWithOffer = /\b(?:draft|write|compose)\b[^.?!]*\bcounter\b/i.test(s(text)) && /\boffer/i.test(s(text));
+    const recommendationIntent = !counterDraftWithOffer && recommendations && recommendations.intentFor(text);
     if (recommendationIntent) {
       const rec = recommendations.recommend(Object.assign({}, c, { recommendationIntent, text: s(text) }));
       return { intent: "career_recommendations", reply: rec.text, resultStatus: "prepared", sends: 0, guidance: rec, payload: rec, artifact: rec };
@@ -52353,7 +52360,7 @@ const CareerRouter = (() => {
         // forms the kind parse does not carry (the $-less k forms:
         // "85k", "came back at 120k").
         const askFramed = /\bask(?:ing)? for\s+(?:a\s+|an\s+)?\$?\s?\d|\bcounter\s+(?:at|of|to)\s+\$?\s?\d|\bmake it\s+\$?\s?\d/i.test(cl);
-        const figs0 = parseOfferFigures(cl);
+        const figs0 = parseOfferFigures(cl, { hourly: /\$\s?\d[\d,.]*\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)|\bhourly\b/i.test(raw) });
         const figs = askFramed ? { hourly: null, signing: null, annual: null } : figs0;
         // G3: a counter-drafting request ("draft the counter email at $28/hour", "propose $28/hour") carries the ASK; its hourly
         // figure re-bases the recorded offer only when the same message REPORTS an offer ("they offered $26/hour now").

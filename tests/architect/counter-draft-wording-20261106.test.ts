@@ -6,7 +6,7 @@
 import assertNode from "node:assert/strict";
 import * as core from "../../supabase/functions/_shared/router_core.career.js";
 import { CareerHost } from "../../supabase/functions/_shared/career_host.js";
-import { stagedDecision } from "../../supabase/functions/agent-chat/career_staged.ts";
+import { stagedDecision, counterAmbiguousAsk } from "../../supabase/functions/agent-chat/career_staged.ts";
 const STAGED = { get: (k: string) => (k === "CAREER_BRAIN" ? "staged" : undefined) };
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -529,8 +529,35 @@ Deno.test("CDW a trailing current-job phrase applies only to the nearest figure 
     eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [offer, ask], msg);
     assert(recorded(t.ctx).hourly !== 22 && recorded(t.ctx).offerRate !== 22, msg);
   };
-  ok("They pay $26/hr vs $22/hr at my job; draft a counter at $30/hr", 26, 30);
-  ok("They pay $26/hr; I get $22/hr at my current job; counter at $30/hr", 26, 30);
-  ok("$22/hr at my job, they pay $26/hr; counter at $30/hr", 26, 30);
+  // The first three shapes ("$26 vs $22 at my job", "$26; I get $22 at my current job", "$22 at my job, they pay $26") are now AMBIGUOUS (see the ambiguity test below): held for the brain, not drafted.
   ok("They pay $26/hour at my current job; counter at $30/hour", 24, 30);
+});
+
+Deno.test("CDW ambiguous figures (current-job phrase, two pay figures, no offer word): nothing saved, no draft, the brain asks", () => {
+  for (const msg of ["They pay $26/hr plus a $50 bonus at my job; draft a counter at $30/hr", "They pay $26/hr vs $22/hr at my job; draft a counter at $30/hr", "They pay $26/hr; I get $22/hr at my current job; counter at $30/hr", "$22/hr at my job, they pay $26/hr; counter at $30/hr"]) {
+    const ctx = fresh();
+    host.runTurn(OFFER, ctx);
+    const r = host.runTurn(msg, ctx);
+    assert(!r.result?.draft, `${msg}: drafted`);
+    eq(r.result?.sends ?? 0, 0);
+    assert(counterAmbiguousAsk(r.intent, r.result), `${msg}: ${r.intent}`);
+    eq([recorded(ctx).hourly, recorded(ctx).counter, recorded(ctx).offerRate ?? 24], [24, null, 24], msg);
+    const ctx2 = fresh();
+    host.runTurn(OFFER, ctx2);
+    const d = stagedDecision({ env: STAGED, message: msg, ctx: ctx2, host, structured: false });
+    eq([d.brain, d.reason], [true, "counter_ambiguous_figures"], msg);
+  }
+  // not ambiguous: an explicit offer word, or current pay with no competing employer figure
+  const ok = (msg: string, offer: number, ask: number) => {
+    const ctx = fresh();
+    host.runTurn(OFFER, ctx);
+    const r = host.runTurn(msg, ctx);
+    const body: string = r.result?.draft?.body ?? "";
+    assert(new RegExp(`Thank you for the offer — \\$${offer} an hour`).test(body) && new RegExp(`meet me at \\$${ask} an hour\\?`).test(body), `${msg}: ${body}`);
+    eq([recorded(ctx).hourly, recorded(ctx).counter], [offer, ask], msg);
+  };
+  ok("they offered $26/hr, more than the $22/hr at my job; counter at $30/hr", 26, 30);
+  ok("They pay $26/hour at my current job; counter at $30/hour", 24, 30);
+  ok("my job now pays $26/hour; counter at $30/hour", 24, 30);
+  ok("Draft a counter at $28/hour right now", 24, 28);
 });

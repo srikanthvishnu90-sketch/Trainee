@@ -15999,7 +15999,7 @@ const CareerRouter = (() => {
     return { intent: "negotiation_draft", reply, resultStatus: "awaiting_user", sends: 0, draft: dd, decline: { company: offer.company, role: offer.role } };
   }
   function counterFigures(text, hint) {
-    const out = { offer: null, ask: null, unknown: null, askBare: null, current: null, mentions: [] };
+    const out = { offer: null, ask: null, unknown: null, askBare: null, current: null, ambiguous: false, mentions: [] };
     const src = s(text).replace(/\bcounter[ -]?offers?\b/ig, "counter-proposal");
     const reM = /\$\s?(\d[\d,]*(?:\.\d{1,2})?)(\s?k\b)?/ig;
     const employer = /\b(?:offer(?:ed|ing|s)?|proposed|came\s+back|(?:is|are|was|were)\s+paying|pay(?:s|ing)|(?:they|company|employer|recruiter|firm)\s+(?:will\s+)?pay|quoted|countered|comes\s+to)\b/ig;
@@ -16063,13 +16063,20 @@ const CareerRouter = (() => {
         else if (out.unknown == null) out.unknown = v;
       } else if (unit === "none" && role === "ask" && out.askBare == null && unitlessHourly(v, end)) out.askBare = v;
     }
+    {
+      const plain = src.replace(/counter[ -]?offers?/ig, "");
+      const currentPhrase = /\bat\s+my\s+(?:current\s+|present\s+)?(?:job|employer|company|role)\b|\bwhere\s+i\s+work(?:\s+now)?\b|\bi\s+(?:(?:now|currently)\s+)?(?:make|earn|get\s+paid|am\s+paid)\b|\bmy\s+(?:job|work|employer)\s+(?:(?:now|currently)\s+)?pays?\b|\bcurrently\b/i.test(plain);
+      const offerWord = /\boffer(?:ed|ing|s)?\b|\bproposed\b|\bcame\s+back\b|\bquoted\b/i.test(plain);
+      const nonAsk = out.mentions.filter((m) => m.role !== "ask");
+      out.ambiguous = currentPhrase && !offerWord && nonAsk.length >= 2 && out.mentions.some((m) => m.role === "employer");
+    }
     return out;
   }
   function offerHint(text, ctx) {
     let recorded = null;
     try { const th = negotiationThreadOf(ctx); recorded = (th && th.hourly) || (ctx && ctx.offer && typeof ctx.offer === "object" && ctx.offer.hourly_rate) || null; } catch { recorded = null; }
     const t = s(text);
-    return { recorded, draft: /\b(?:draft|write|compose|prepare)\b[^.?!]*\bcounter\b|\bcounter\s+(?:email|offer|letter|message)\b/i.test(t) };
+    return { recorded, ambiguous: !!counterFigures(t, { recorded }).ambiguous, draft: /\b(?:draft|write|compose|prepare)\b[^.?!]*\bcounter\b|\bcounter\s+(?:email|offer|letter|message)\b/i.test(t) };
   }
   function parseOfferFigures(text, hint) {
     const out = { hourly: null, hourlyText: null, annual: null, annualText: null, signing: null, signingText: null };
@@ -16088,7 +16095,7 @@ const CareerRouter = (() => {
       if (hint && hint.draft && cf.unknown != null) {
         if (hint.recorded != null) { if (Number(cf.unknown) !== Number(hint.recorded) && cf.ask == null && cf.askBare == null) cf.ask = cf.unknown; cf.unknown = null; }
       }
-      out.recHourly = cf.offer;
+      out.recHourly = (cf.ambiguous || (hint && hint.ambiguous)) ? null : cf.offer;
       out.askHourly = cf.ask; out.offerHourly = cf.offer; out.reportedHourly = cf.offer; out.unknownHourly = cf.unknown; out.askBare = cf.askBare;
     }
     if (m) { out.hourly = Number(m[1]); out.hourlyText = m[0].replace(/\s+/g, " ").trim(); work = work.replace(m[0], " "); }
@@ -19008,6 +19015,13 @@ const CareerRouter = (() => {
   function handleNegotiation(text, ctx) {
     const provGate = inheritedOfferGate(text, ctx);
     if (provGate) return provGate;
+    if (/\bcounter\b|\boffer\b|\bdraft\b/i.test(s(text))) {
+      const hintA = offerHint(text, ctx);
+      if (hintA.ambiguous) {
+        const reply = compose({ headline: "I can't tell which figure is the new offer.", facts: ["Your message names more than one pay figure, and none is stated as the employer's offer, so I have not changed the offer on record and I have not drafted anything."], nextStep: "Which figure is the employer's new offer?" });
+        return { intent: "negotiation_draft", reply, resultStatus: "awaiting_user", sends: 0, awaiting: "which_figure_is_offer", counterAmbiguous: true };
+      }
+    }
     let offerText = ctx.offerText || (ctx.offer && typeof ctx.offer === "string" ? ctx.offer : null);
     if (!offerText && Negotiation && Negotiation.parseOffer && /\$\s?\d|\boffer letter\b|\bbase salary\b|\bsigning bonus\b/i.test(s(text))) {
       try { const probe = Negotiation.parseOffer(s(text), {}); if (probe && (probe.base || probe.company || probe.total)) offerText = s(text); } catch {   }
@@ -23964,7 +23978,7 @@ const CareerRouter = (() => {
         const clp = cutAt >= 0 && /\$\s?\d{1,3}\s*$/.test(cl) && /^,\d{3}\b/.test(raw.slice(cutAt + cl.length)) ? cl.replace(/\$\s?\d{1,3}\s*$/, "") : cl;
         const sentOf = s(raw).split(/(?<=[.!?])\s+|\n/).find((x) => x.includes(cl)) || "";
         const sentBefore = sentOf.slice(0, Math.max(0, sentOf.indexOf(cl)));
-        const figs0 = parseOfferFigures(clp, { offerSentence: sentOf.replace(/counter[ -]?offers?/ig, "").search(/\boffer(?:ed|ing|s)?\b/i) >= 0 && !/\bask(?:ing)?\b|\bcounter|\bpropos|\bwant|\bmeet\s+me|\btarget|\bneed\b/i.test(sentBefore.replace(/counter[ -]?offers?/ig, "")), recorded: offerHint(raw, ctx).recorded, draft: offerHint(raw, ctx).draft });
+        const figs0 = parseOfferFigures(clp, { offerSentence: sentOf.replace(/counter[ -]?offers?/ig, "").search(/\boffer(?:ed|ing|s)?\b/i) >= 0 && !/\bask(?:ing)?\b|\bcounter|\bpropos|\bwant|\bmeet\s+me|\btarget|\bneed\b/i.test(sentBefore.replace(/counter[ -]?offers?/ig, "")), recorded: offerHint(raw, ctx).recorded, draft: offerHint(raw, ctx).draft, ambiguous: offerHint(raw, ctx).ambiguous });
         const figs = askFramed ? { hourly: null, signing: null, annual: null } : figs0;
         const counterDraftReq = /\b(?:draft|write|compose|prepare)\b[^.?!]*\bcounter\b|\bcounter\s+(?:email|offer|letter|message)\b|\bpropos(?:e|ing)\s+\$|\bask(?:ing)?\s+(?:for\s+)?\$/i.test(cl);
         figs.hourly = figs0.recHourly;

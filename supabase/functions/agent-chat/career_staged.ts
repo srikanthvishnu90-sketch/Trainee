@@ -243,6 +243,14 @@ export function adviceQuestion(message: string, intent: string | null, result: u
 // target_hourly_rate) that it cannot approve: it never decides whether to counter. That turn goes to the brain, which
 // answers the decision from the offer, the confirmed facts and its read tools, and cannot send (STAGED_WITHHELD_TOOLS). The
 // router's held draft is the fallback when the brain is not served. A counter with a figure the person named stays code's.
+// Figures the router cannot attribute (a current-job phrase, two pay figures, no offer word): it saves and drafts nothing and holds the
+// turn (counterAmbiguous); the brain asks which figure is the employer's new offer.
+export function counterAmbiguousAsk(intent: string | null, result: unknown): boolean {
+  if (intent !== "negotiation_draft" || !result || typeof result !== "object") return false;
+  const r = result as Record<string, any>;
+  return r.counterAmbiguous === true && (r.sends ?? 0) === 0 && !r.draft;
+}
+
 export function counterDecisionAsk(message: string, intent: string | null, result: unknown): boolean {
   if (intent !== "negotiation_draft" || !result || typeof result !== "object") return false;
   const r = result as Record<string, any>;
@@ -320,6 +328,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (careerSwitcherOpenAsk(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "career_switcher_open_ask" };
   if (openCareerQuestion(o.env, o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "open_career_question" };
   if (adviceQuestion(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "advice_question", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
+  if (counterAmbiguousAsk(intent, probe.result)) return { brain: true, mode, intent, reason: "counter_ambiguous_figures" };
   if (counterDecisionAsk(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "counter_decision" };
   if (!STAGED_BRAIN_INTENTS.includes(intent)) {
     // Before the list: a turn that asks or forbids is the brain's unless its intent is code's own work (questionTurn).

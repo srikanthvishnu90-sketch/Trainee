@@ -45,6 +45,8 @@ Deno.test("S3-5: missingAck", () => {
   assertNode.equal(missingAck(d, "Nothing has been sent. Nothing matched. Which city?"), true);
   assertNode.equal(missingAck(d, "That sounds like a lot, and you don't have to carry it alone. Which city?"), false);
   assertNode.equal(missingAck(d, "I hear you. Which city?"), false);
+  for (const t of ["That is not on file yet.", "This is the list of roles I found", "That is a good question.", "It is hard to find jobs."]) assertNode.equal(missingAck(d, t), true, t);
+  for (const t of ["You're not alone in this.", "I'm sorry you're dealing with this.", "Take a breath.", "That sounds like a lot."]) assertNode.equal(missingAck(d, t), false, t);
   assertNode.equal(missingAck("find me intern roles", "Nothing has been sent. Which city?"), false);
 });
 
@@ -57,7 +59,7 @@ Deno.test("S3-6: the rewrite carries the ack instruction once; a standing violat
   assertNode.equal(r.reply, bad);
   assertNode.deepEqual(r.flags, ["missing_ack"]);
   assertNode.equal(i, 2);
-  assertNode.ok(seen.some((x) => /open with one short, warm sentence acknowledging that/.test(x)));
+  assertNode.ok(seen.some((x) => /Your first sentence was: \\"Nothing has been sent\./.test(x) && /nothing-sent line comes after it/.test(x)));
 });
 
 Deno.test("S3-7: a blunt reply with two asks to a distressed person is rewritten once, with both flags", async () => {
@@ -68,5 +70,13 @@ Deno.test("S3-7: a blunt reply with two asks to a distressed person is rewritten
   assertNode.equal(seen.length, 2, "one rewrite request, not two");
   assertNode.equal(r.reply, bad);
   assertNode.deepEqual([...r.flags].sort(), ["many_asks", "missing_ack"]);
-  assertNode.ok(/more than one thing/.test(seen[1]) && /warm sentence acknowledging/.test(seen[1]));
+  assertNode.ok(/more than one thing/.test(seen[1]) && /warm sentence acknowledging how they feel/.test(seen[1]));
+});
+
+Deno.test("S3-8: attached file text never counts as the person's words", async () => {
+  const seen: string[] = [];
+  const model = async (req: any) => { seen.push(JSON.stringify(req)); return { content: [{ type: "text", text: "Got your resume. What role are you after?" }], stop_reason: "end_turn" }; };
+  const r: any = await (runAgentTurn as any)({ system: "s", history: [], message: "here is my resume\nHandled stressful situations", said: "here is my resume", tools: [], model, ctx: { userId: "u", threadId: "t", now: 0, state: {} }, maxSteps: 4 });
+  assertNode.equal(seen.length, 1);
+  assertNode.equal(r.flags, undefined);
 });

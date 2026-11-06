@@ -40,7 +40,7 @@ const ANSWER = "Send a short thank-you note within a day that names one thing yo
 // The fake Anthropic endpoint: each request is kept (its system prompt and tool names); "fail" answers 500.
 type Call = { system: string; tools: string[]; user: string };
 const calls: Call[] = [];
-let mode: "answer" | "fail" | "invent" = "answer";
+let mode: "answer" | "fail" | "invent" | "ack" = "answer";
 const fakeModel = async (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
   const req = input instanceof Request && !init ? input : new Request(input as any, init);
   const url = new URL(req.url);
@@ -51,7 +51,7 @@ const scripted = async (body: any): Promise<Response> => {
   const msgs: any[] = body.messages ?? [];
   calls.push({ system: String(msgs.find((m) => m.role === "system")?.content ?? ""), tools: (body.tools ?? []).map((t: any) => t.function?.name), user: String(msgs.filter((m) => m.role === "user").at(-1)?.content ?? "") });
   if (mode === "fail") return new Response(JSON.stringify({ error: { type: "server_error", message: "fake outage" } }), { status: 500, headers: { "content-type": "application/json" } });
-  return new Response(JSON.stringify({ id: "fake-1", model: body.model, choices: [{ index: 0, message: { role: "assistant", content: mode === "invent" ? INVENTED : ANSWER }, finish_reason: "stop" }], usage: { prompt_tokens: 100, completion_tokens: 40 } }), { status: 200, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify({ id: "fake-1", model: body.model, choices: [{ index: 0, message: { role: "assistant", content: mode === "invent" ? INVENTED : mode === "ack" ? "That sounds like a lot. " + ANSWER : ANSWER }, finish_reason: "stop" }], usage: { prompt_tokens: 100, completion_tokens: 40 } }), { status: 200, headers: { "content-type": "application/json" } });
 };
 
 // The router run directly on a fresh account's first turn, as the handler builds it (empty pool, account persistence).
@@ -167,8 +167,10 @@ Deno.test({ name: "F13: the staged brain release at the real handler", sanitizeR
       assert(/Applying to a posting, starting or stopping job alerts/.test(call.system), "the staged note is in the system prompt");
       eq(await costRows(PEOPLE["tok-f13c"]), 1, "the brain's turn is metered");
       // Another phrasing: a turn no module claims.
+      mode = "ack";
       const o = await say(chat, "I'm so overwhelmed with all of this");
-      eq([o.reply, o.body.meta.brain, o.body.meta.router_intent], [ANSWER, "staged", "unclaimed"]);
+      mode = "answer";
+      eq([o.reply, o.body.meta.brain, o.body.meta.router_intent], ["That sounds like a lot. " + ANSWER, "staged", "unclaimed"]);
       eq(calls.length, n + 2);
     });
 

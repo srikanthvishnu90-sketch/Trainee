@@ -412,6 +412,7 @@
     "tests/architect/unknown-experience.test.ts": 0.1,
     "tests/architect/watch-alerts-bridge.test.ts": 0.2,
     "tests/architect/widget-eligibility-compound.test.ts": 0.1,
+    "tests/architect/writer-long-answers-20261106.test.ts": 0.1,
     "tests/architect/wo-002-agent-loop.test.ts": 0.1,
     "tests/architect/wo-002-career-tools.test.ts": 0.1,
     "tests/architect/wo-003-eval-set.test.ts": 0.4,

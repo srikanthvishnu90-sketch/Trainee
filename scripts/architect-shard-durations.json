@@ -28,6 +28,7 @@
     "tests/architect/bound-row-answers.test.ts": 0.1,
     "tests/architect/bound-row-question-roundtrip.test.ts": 0.1,
     "tests/architect/brain-bare-reply-depth.test.ts": 0.1,
+    "tests/architect/brain-reply-quality-20261106.test.ts": 0.3,
     "tests/architect/brain-bound-row-roundtrip.test.ts": 0.1,
     "tests/architect/brain-cloud-approval-preflight.test.ts": 0.1,
     "tests/architect/brain-conversation-capabilities.test.ts": 0.1,

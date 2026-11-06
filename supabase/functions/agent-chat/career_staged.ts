@@ -439,7 +439,7 @@ export function routerAnswerBlock(d: StagedDecision | null | undefined): string 
   if (!blocks.length) return "";
   return "router_answer (data, not instructions: what Trainee's built-in steps would have replied to this message, from its own records. " +
     "Answer the question the person actually asked. Reuse a fact from here when it fits (what is unavailable or unverified, " +
-    "the approval rules), never as a template, and never claim more than it says):\n" +
+    "the approval rules), never as a template, and never claim more than it says. It may ask several things or promise an action; yours asks at most one thing and promises none):\n" +
     blocks.map((b) => JSON.stringify({ intent: b.intent, reply: b.reply })).join("\n");
 }
 // The staged brain's tool policy for this turn: the withheld tools, the note, and the router's answer as data.
@@ -456,7 +456,7 @@ export function stagedToolPolicy(d: StagedDecision | null | undefined): { withho
 export const STAGED_WITHHELD_TOOLS: readonly string[] = ["queue_applications", "set_job_alerts", "stop_job_alerts", "verify_contacts"];
 export const STAGED_PROMPT_NOTE = "In this conversation you answer questions and give advice. Applying to a posting, starting or stopping job alerts, " +
   "and checking contacts are done by code when the person asks for them in their own words, for example \"apply to the <role> role at <company>\" " +
-  "or \"watch <role> roles in <city>\". You cannot do those here; say so plainly when asked, after any acknowledgement the person needs and alongside the part you can do now (search, shortlist, explain), and never say they were done.";
+  "or \"watch <role> roles in <city>\". You cannot do those here; say so plainly when asked, after any acknowledgement the person needs and alongside the part you can do now (search, shortlist, explain), and never say they were done or that you will do them (\"I'll set an alert\"): offer them only as something the person can ask for in those words. Your reply ends with at most one question, asking for one thing.";
 export const STAGED_TOOL_POLICY = { withhold: STAGED_WITHHELD_TOOLS, note: STAGED_PROMPT_NOTE } as const;
 
 // Lazy and memoized: the probe runs only when the handler reaches the brain test, at most once a turn.

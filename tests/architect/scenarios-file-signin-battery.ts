@@ -70,7 +70,11 @@ const PEOPLE = {
 };
 const privateOf = (p: typeof PEOPLE.u) => [...p.companies, ...p.titles, p.resume, p.first, p.last].map((s) => s.toLowerCase());
 const PRIV = { u: privateOf(PEOPLE.u), v: privateOf(PEOPLE.v) };
-const phoneLeak = (body: string, phone: string) => {
+// A random id or token (a session id is fs1. + 64 hex) can hold any 7 digits by chance: one did, failing CI on #557.
+// The check reads the page as a person would, so opaque runs are taken out first; every phone form is still looked for.
+const opaqueOut = (s: string) => s.replace(/[0-9a-f]{16,}/gi, " ").replace(/[A-Za-z0-9_-]{32,}/g, " ");
+const phoneLeak = (raw: string, phone: string) => {
+  const body = opaqueOut(raw);
   const d = phone.replace(/[^0-9]/g, ""), d10 = d.slice(-10), last4 = d.slice(-4);
   return body.includes(phone) || body.includes(d10) || body.includes(d10.slice(3)) || new RegExp(`(?<![0-9A-Za-z])${last4}(?![0-9A-Za-z])`).test(body);
 };

@@ -296,6 +296,16 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     let removedNow = [...input.redacted];
     // Card or bank details in chat (battery 2026-10-30): removed above, never stored; the person is told where paying goes.
     if (flowCtx.note && input.redacted.some((r: string) => r === "card" || r === "account")) flowCtx.note = `${flowCtx.note} ${PAY_BY_CHECKOUT}`;
+    // The safety reply's 400-character limit counts what the person typed, not the longer text with its removal markers.
+    const originalLen = typeof rawMessage === "string" ? rawMessage.trim().length : 0;
+    // The thread's title is the first 60 characters of the first message (chat_session.ts ownerThread), and the request hash
+    // digests the text: a code-shaped token next to a code word is removed BEFORE both ("The Workday portal sent me 739201"
+    // must not become a thread title). The same call runs again below, after the split-secret step, on the redacted text.
+    {
+      const early = codeInChat(message, { userContent, removed: removedNow, codePending: codePending(situation), originalLength: originalLen });
+      if (early) { message = early.text; userContent = early.userContent; }
+    }
+    const hashedMessage = message;
     // L4: thread_id must be a string when provided (non-string truthy values
     // would otherwise cause a DB error → noisy 500).
     if (thread_id !== undefined && thread_id !== null && typeof thread_id !== "string")
@@ -330,7 +340,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // ONE-TIME CODES AND PASSWORDS IN CHAT (_shared/career_code_in_chat.ts; offline registry A23): a code or password the person
     // shared is answered below by code's fixed safety text (codeChatText), and a code-shaped token still next to a code word
     // ("Workday sent me 739201") is removed here like a labeled one, before anything stores the text or a model reads it.
-    const codeShared = codeInChat(message, { userContent, removed: removedNow, codePending: codePending(situation) });
+    const codeShared = codeInChat(message, { userContent, removed: removedNow, codePending: codePending(situation), originalLength: originalLen });
     if (codeShared) {
       message = codeShared.text; userContent = codeShared.userContent;
       removedNow = [...new Set([...removedNow, ...codeShared.removed])];
@@ -390,7 +400,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     let careerBatch;
     try { careerBatch = normalizeCareerBatchRequest(body.career_batch); }
     catch (_) { return json(cors, { error: "invalid_career_batch", action: null, turn_key: turnKey }, 400); }
-    const requestHash = await careerRequestHash(rawMessage, imageBlocks, careerTask ?? (careerBatch ? { batch: careerBatch } : null));
+    const requestHash = await careerRequestHash(hashedMessage, imageBlocks, careerTask ?? (careerBatch ? { batch: careerBatch } : null));
     const persistence = createCareerPersistence(admin);
     // POOL LOADER (Lane E, Feature Depth Program v2 — closes the gap
     // diagnosed in the Lane D operator checklist §8): ctx.postings is

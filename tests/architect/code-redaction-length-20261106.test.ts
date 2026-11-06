@@ -125,6 +125,7 @@ Deno.test({ name: "CRL-4 the real handler: stored row, model requests, thread an
       assert(/\[(?:code|password) removed\]/.test(await lastUserRow(id)), `${label}: stored message has the marker`);
       for (const c of calls.slice(n)) assert(!c.body.includes(token), `${label}: a model request carried it`);
       assert(!(await allRows(id)).includes(token), `${label}: thread or state kept it`);
+      assert(!(await pg.sql(`select coalesce(string_agg(title, ' || '), '') from public.agent_threads where user_id = '${id}'`)).includes(token), `${label}: thread title kept it`);
       if (len <= 400) { eq(r.intent, CODE_IN_CHAT_INTENT, label); assert(r.reply.includes(CODE_IN_CHAT_REPLY), label); eq(calls.length, n, `${label}: no model call`); }
       else assert(r.intent !== CODE_IN_CHAT_INTENT, `${label}: a long message keeps its normal turn (${r.intent})`);
     }
@@ -133,6 +134,72 @@ Deno.test({ name: "CRL-4 the real handler: stored row, model requests, thread an
     const r = await say(handler.chat("tok-crl-8"), ctl);
     assert(r.intent !== CODE_IN_CHAT_INTENT, r.intent);
     eq(await lastUserRow(PEOPLE["tok-crl-8"]), ctl, "stored as typed");
+  } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) Deno.env.delete(k); else Deno.env.set(k, v); }
+    handler?.restore();
+    globalThis.fetch = realFetch;
+    await pg.stop();
+  }
+} });
+
+const GAPS: [string, string][] = [
+  ["The Workday portal sent me 739 201, can you enter it?", "739 201"], ["The Workday portal sent me 739-201, can you enter it?", "739-201"],
+  ["Lever texted me 739 201.", "739 201"], ["Plaid emailed me 739-201 just now.", "739-201"],
+  ["Verification code: 739\n201", "739\n201"], ["The portal sent a code. It is 739201.", "739201"],
+  ["Workday sent a verification code. The code is 739201, please enter it.", "739201"], ["I got a one-time code from Lever. Here's 739201.", "739201"],
+];
+Deno.test("CRL-5 split codes, a code across a line break and a code in the next sentence are removed, at every length", () => {
+  for (const len of [60, 399, 401, 1000, 3900]) for (const where of ["start", "middle", "end"] as Where[]) for (const [sentence, token] of GAPS) {
+    const m = len === 60 ? sentence : place(sentence, len, where);
+    const t = turn(m);
+    const digits = token.replace(/\D/g, "");
+    assert(!t.message.replace(/\D/g, "").includes(digits) && !t.stored.replace(/\D/g, "").includes(digits), `${len}/${where} ${JSON.stringify(sentence)}: ${t.stored.slice(0, 120)}`);
+    assert(/\[code removed\]/.test(t.stored), `${len}/${where} ${JSON.stringify(sentence)}: marker`);
+  }
+});
+
+// Numbers that look like a split code but are not one stay as typed, with and without a cue word in front.
+const KEEP = ["Call me at 415-555-1234.", "My number is 415 555 1234.", "My number is (415) 555-1234.", "The meeting is at 9:30.", "I want 3-5 years of growth.",
+  "The pay is $24-26 an hour.", "My zip is 94107-1234.", "The offer letter is dated 11-06-2026.", "The office is in room 739 201.",
+  "The portal phone is 415-555-1234.", "The portal says call 415 555 1234.", "The portal lists (415) 555-1234.", "The portal opens at 9:30.", "The portal asked for 3-5 years.",
+  "The portal shows $24-26.", "The portal shows 94107-1234.", "The portal shows 11-06-2026.", "I learned to code. It was 2019.", "I wrote some code. It is 5000 lines.", "My zip code is 94107. It is 94107-1234."];
+Deno.test("CRL-6 phones, times, ranges, zip+4, dates and years are never redacted, at every length", () => {
+  for (const len of [60, 399, 401, 1000, 3900]) for (const where of ["start", "middle", "end"] as Where[]) for (const s of KEEP) {
+    const m = len === 60 ? s : place(s, len, where);
+    const t = turn(m);
+    eq(t.c, null, `${len}/${where} ${s}`);
+    assert(t.message.includes(s.replace(/\.$/, "")), `${len}/${where} ${s}: kept`);
+  }
+});
+
+Deno.test({ name: "CRL-7 the real handler: a first message never puts a code in the thread title", sanitizeResources: false, sanitizeOps: false, async fn() {
+  if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
+  const pg: Pg = await startPg();
+  const realFetch = globalThis.fetch;
+  const saved: Record<string, string | undefined> = {};
+  for (const k of ["CAREER_BRAIN", "CAREER_BRAIN_ROUTER_INTENTS", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "CAREER_REPLY_WRITER"]) saved[k] = Deno.env.get(k);
+  let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
+  try {
+    await supabaseParity(pg);
+    for (const id of Object.values(PEOPLE)) {
+      await pg.sql(`insert into auth.users (id, email) values ('${id}', '${id}@example.test'); insert into public.profiles (id) values ('${id}');
+        insert into public.career_watch_kv (user_id, key, value) values ('${id}', 'career:account', '{"epoch":0,"version":0,"paused":false}');`);
+    }
+    for (const k of ["CAREER_BRAIN", "CAREER_BRAIN_ROUTER_INTENTS", "MODEL_PROVIDER", "CAREER_REPLY_WRITER"]) Deno.env.delete(k);
+    Deno.env.set("ANTHROPIC_API_KEY", "sk-fake-crl-not-a-key");
+    globalThis.fetch = fakeModel as typeof fetch;
+    handler = await careerHandler(pg, PEOPLE);
+    const cases: [string, string][] = [["The Workday portal sent me 739201, can you enter it?", "739201"], ["The Workday portal sent me 739 201, can you enter it?", "739 201"],
+      ["The portal sent a code. It is 739201.", "739201"], ["Greenhouse sent me code 482913", "482913"]];
+    for (const [i, [m, token]] of cases.entries()) {
+      const tok = `tok-crl-${i + 1}`, id = PEOPLE[tok], n = calls.length;
+      const r = await handler.chat(tok).say(m);
+      eq(r.status, 200, r.reply);
+      const everything = await pg.sql(`select coalesce(string_agg(title, ' || '), '') from public.agent_threads where user_id = '${id}'`)
+        + await pg.sql(`select coalesce(string_agg(content, ' || '), '') from public.agent_messages m join public.agent_threads th on th.id = m.thread_id where th.user_id = '${id}'`);
+      assert(!everything.replace(/\D/g, "").includes(token.replace(/\D/g, "")), `${m}: title or thread kept it: ${everything}`);
+      for (const c of calls.slice(n)) assert(!c.body.includes(token), `${m}: a model request carried it`);
+    }
   } finally {
     for (const [k, v] of Object.entries(saved)) { if (v === undefined) Deno.env.delete(k); else Deno.env.set(k, v); }
     handler?.restore();

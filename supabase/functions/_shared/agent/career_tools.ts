@@ -4,7 +4,7 @@
 import { conversationFor, type RepliesStore } from "../career_outreach_replies.ts";
 import { CareerProfile, CareerTrack, CareerPrep, CareerPaths } from "../router_core.career.js";
 import { AskPerson, type ToolSpec, type ToolCtx } from "./loop.ts";
-import { searchPostings } from "../career_search.ts";
+import { type FitCache, newFitCache, searchPostings } from "../career_search.ts";
 import { searchWords, wordStem } from "../career_ingest.ts";
 import { liveOnly, type LinkCheck } from "../link_check.ts";
 import { startWatching, validPrefs, validZone, type AlertStore } from "../career_alert_store.ts";
@@ -157,6 +157,9 @@ export function offRole(picks: WantPick[], message: string | undefined): { ok: W
   }
   return { ok, refused };
 }
+// D6: one turn's fit scores (the ToolCtx is made per turn and dropped with it), so a posting the model searches for twice is scored once.
+const FIT_CACHES = new WeakMap<object, FitCache>();
+const fitCacheOf = (c: ToolCtx): FitCache => { let f = FIT_CACHES.get(c); if (!f) FIT_CACHES.set(c, f = newFitCache()); return f; };
 const profileOf = (c: ToolCtx) => ((c.state.profile as any) ??= CareerProfile.createProfile({}));
 const CONTACTS_ASK = "Send me a CSV of the people you want to reach (your LinkedIn connections export, or a list you have) and I'll check every address in it.";
 const trackOf = (c: ToolCtx) => ((c.state.trackStore as any) ??= CareerTrack.createMemoryStore([]));
@@ -499,7 +502,7 @@ export function careerTools(deps: {
         // WO-106 (F4): never a job without its own link, and every link checked just before it is shown: a dead one is
         // dropped (and counted), the next best takes its place; one the check could not reach is shown marked so.
         const want = Math.max(1, Math.min(20, Number(i.limit) || 10));
-        const r = searchPostings(kept, query, c.state.profile, Math.min(50, want * 3));
+        const r = searchPostings(kept, query, c.state.profile, Math.min(50, want * 3), fitCacheOf(c));
         const withLink = r.postings.filter((p) => /^https?:\/\//i.test(String(p.url ?? "")));
         const checked = await liveOnly(withLink, deps.linkCheck, want);
         const found: any[] = checked.shown;

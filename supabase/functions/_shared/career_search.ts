@@ -52,7 +52,26 @@ export function scoringProfileFor(profile: any): any | null {
   return sp;
 }
 
-export function fitOf(p: any, sp: any): Fit {
+// D6: how many postings this isolate has really scored (121 scoreFit through fitOf), logged on the turn's agent_chat_cpu line
+// as scored_n (a count, never content). A cache hit is not a score.
+let scoredCount = 0;
+export const scoredN = () => scoredCount;
+// D6: one turn's scores. Made by the caller per turn (never module-level, so nothing crosses people) and keyed by the scoring
+// profile's own content, so a cache filled for one profile is never read for another. A posting asked twice in one turn
+// (the agent's tool loop searches again) is scored once.
+export interface FitCache { byProfile: Map<string, Map<string, Fit>> }
+export const newFitCache = (): FitCache => ({ byProfile: new Map() });
+const postingKey = (p: any) => `${p?.job_id ?? ""}\u0001${p?.title ?? ""}\u0001${p?.location ?? ""}\u0001${p?.company ?? ""}\u0001${String(p?.description ?? "").length}\u0001${p?.role_family ?? ""}\u0001${p?.seniority_band ?? ""}\u0001${p?.remote ?? ""}`;
+
+export function fitOf(p: any, sp: any, cache?: Map<string, Fit>): Fit {
+  const key = cache ? postingKey(p) : "";
+  if (cache) { const hit = cache.get(key); if (hit) return hit; }
+  const fit = scoreOne(p, sp);
+  if (cache) cache.set(key, fit);
+  return fit;
+}
+function scoreOne(p: any, sp: any): Fit {
+  scoredCount++;
   const posting = {
     job_id: p.job_id, company: p.company, title: p.title || "", location: p.location || "", jd_text: p.description || "",
     role_family: p.role_family || CareerJobs.roleFamily(p.title || "", p.description || ""),
@@ -64,7 +83,7 @@ export function fitOf(p: any, sp: any): Fit {
   return { score: f.score, bucket: f.bucket, excluded: !!f.excluded, reasons: (f.reasons || []).slice(0, 4), gaps: (f.gaps || []).slice(0, 3) };
 }
 
-export function searchPostings(pool: any[], query: unknown, profile: any, limit = 10): { postings: SearchHit[]; total: number; title_matches: number; ranked_by: "goal" | "fit" | "newest"; goal: Goal | null } {
+export function searchPostings(pool: any[], query: unknown, profile: any, limit = 10, cache?: FitCache): { postings: SearchHit[]; total: number; title_matches: number; ranked_by: "goal" | "fit" | "newest"; goal: Goal | null } {
   const words = searchWords(query);
   const matched = pool.filter((p) => p && !p.closed_at && matchesWords(p, words));
   // WO-073: the role first. While any title carries a query word, a posting that only mentions the words elsewhere is not
@@ -72,7 +91,9 @@ export function searchPostings(pool: any[], query: unknown, profile: any, limit 
   const anyTitle = matched.some((p) => titleTier(p, words) < 2);
   const hits = anyTitle ? matched.filter((p) => titleTier(p, words) < 2) : matched;
   const sp = scoringProfileFor(profile), goal = goalOf(profile);
-  const scored = hits.map((p) => ({ p, tier: titleTier(p, words), fit: sp ? fitOf(p, sp) : null, goal: goalScore(p, goal) }));
+  let fits: Map<string, Fit> | undefined;
+  if (cache && sp) { const k = JSON.stringify(sp); fits = cache.byProfile.get(k); if (!fits) cache.byProfile.set(k, fits = new Map()); }
+  const scored = hits.map((p) => ({ p, tier: titleTier(p, words), fit: sp ? fitOf(p, sp, fits) : null, goal: goalScore(p, goal) }));
   const newest = (a: any, b: any) => String(b.p.first_seen_at || "").localeCompare(String(a.p.first_seen_at || ""));
   scored.sort((a, b) => {
     if (a.tier !== b.tier) return a.tier - b.tier;

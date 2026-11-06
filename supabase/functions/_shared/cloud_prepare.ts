@@ -253,7 +253,7 @@ const NOT_READY: Record<string, string> = {
 export function notPreparedText(outcomes: { outcome: string }[]): string {
   const whys = [...new Set(outcomes.filter((o) => o.outcome !== "ready" && o.outcome !== "asked").map((o) => NOT_READY[o.outcome] ?? NOT_READY.error))];
   if (!outcomes.length) {
-    return "I couldn't prepare the application you asked for: it is no longer open on file, it was already prepared or tried this week, or you applied to that employer in the last 30 days. Nothing was sent.";
+    return "I couldn't prepare the application you asked for, and I don't know why: nothing was tried and I did not check the reason. It may be no longer open on file, already prepared or tried, or applied to in the last 30 days, but I have not confirmed which. Nothing was sent.";
   }
   return `I couldn't prepare the application you asked for: ${whys.join("; ") || NOT_READY.error}. Nothing was sent.`;
 }

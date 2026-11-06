@@ -40,6 +40,8 @@ export const SHARED_REPLY_MODULES = [
   "identity_redact.ts", "length_limit.ts", "link_check.ts", "model_budget.ts", "model_calls.ts", "model_gateway.ts", "person_claims.ts", "person_claims_baseline.ts",
   "personal_fact_source.ts", "posting_key.ts", "posting_pay.ts", "posting_place.ts", "posting_region.ts", "posting_text.ts", "question_map.ts",
   "brand.ts", "row_answer.ts", "telegram_jobs.ts", "apply_all_yes.ts", "apply_all_yes_flag.ts", "role_results.ts", "career_resume_replace.ts",
+  // 2026-11-06: the staged decision reads the writer's PAYLOAD_INTENTS; the code-in-chat safety turn (handler-career.ts).
+  "career_reply_writer.ts", "career_code_in_chat.ts",
 ] as const;
 
 // D-036 (release flags, agent-chat/release_config.ts RELEASE_FLAGS): the code behind every flag the release serves ON that

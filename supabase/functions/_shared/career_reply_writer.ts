@@ -70,8 +70,10 @@ export function writable(out: { intent?: string | null; reply?: string; parts?: 
 // passed the loop's reply guards (agent/reply_guards.ts); a restate-only checker can only take from it (beta C12). The shape
 // (channel_shape.ts) still uses writable(): a brain reply is still laid out for the channel.
 export const BRAIN_HANDLER = "agent";
+// PR-5: the daily-cap views (agent-chat/cap_views.ts) are fixed safety text; the writer never rewrites them.
+export const CAP_VIEW_HANDLER = "cap_view";
 export function rewrites(out: { intent?: string | null; reply?: string; parts?: unknown; handler?: string | null }, meta: Record<string, unknown> | null, o: { structured: boolean }): boolean {
-  return out.handler !== BRAIN_HANDLER && writable(out, meta, o);
+  return out.handler !== BRAIN_HANDLER && out.handler !== CAP_VIEW_HANDLER && writable(out, meta, o);
 }
 
 import { type ApplySummary, overclaims } from "./apply_status_summary.ts";

@@ -301,6 +301,8 @@ if [[ -f "$BRIDGE_PATH" ]]; then
     # 20261105180000 (the outreach claim deadlock) redefines 20261027240000's action claim: applied after it, before the M5
     # load test (below), and again last, twice, with its tests.
     [[ "$(basename "$file")" == 20261105180000_* ]] && continue
+    # 20261106120000 (a missing account row is not paused) redefines the two candidate reads 20261101130000 and 20261102120000 define (both deferred above) and the resume functions 20261026120018 and 20261026230017 define: applied after them, below, twice, with its test.
+    [[ "$(basename "$file")" == 20261106120000_* ]] && continue
     cp "$file" "$PENDING_ROOT/supabase/migrations/"
   done
 fi
@@ -957,6 +959,10 @@ echo "== trainee_file_signin_limits.test.sql (texts and tries capped per account
 # 20261102120000: the same selection per person (reads 130000's career_apply_job_history), so it follows it. Twice (idempotent).
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102120000_career_apply_prepare_candidates_for.sql"
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102120000_career_apply_prepare_candidates_for.sql"
+# 20261106120000: a person with no 'career:account' row is not paused (the candidate reads inner-joined it: 34 of 37 live profiles had no candidates).
+# Redefines both reads (so it follows 20261102120000) and gives every profile the account row (backfill + career_account_row_ensure). Twice (idempotent); its test is tests/architect/prepare-candidates-missing-account-row.test.ts.
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261106120000_career_apply_candidates_missing_account_row.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261106120000_career_apply_candidates_missing_account_row.sql"
 # 20261102130000: the preparation claim in turns per person (replaces 20261026230017's oldest-first body, which career_cloud_hosted_apply.test.sql
 # above tested as it was). Twice (idempotent), then its test; the rollback is applied and the oldest-first body is proven back, then re-applied.
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102130000_career_apply_prepare_fair_claim.sql"

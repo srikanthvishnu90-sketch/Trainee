@@ -17,11 +17,15 @@ export const CODE_IN_CHAT_REPLY = "Please don't share one-time codes or password
   "If your Gmail is connected, Trainee reads an employer's emailed code itself, and only during an application you approved. " +
   "Otherwise, type the code into the employer's portal yourself, and sign in there with your own password.";
 
-export type CodeInChat = { text: string; userContent: string; removed: ("code" | "password")[] };
+// reply: whether this turn is answered with CODE_IN_CHAT_REPLY. Redaction (text, userContent) covers every message chat
+// accepts; only the safety reply is for chat-length messages.
+export type CodeInChat = { text: string; userContent: string; removed: ("code" | "password")[]; reply: boolean };
 
-// A message longer than this is a pasted document (a resume, a posting): identity_redact.ts has already taken any secret
-// out of it, and its own turn (the resume read) answers it.
-const MAX_CHAT_LEN = 400;
+// A message longer than this is a pasted document (a resume, a posting) or a longer ask: its own turn (the resume read)
+// answers it, so it never gets the fixed safety reply. Its code-shaped tokens next to a code word are still removed, at any
+// length chat accepts (Greptile P1 on release PR #549, 2026-11-06: identity_redact.ts needs a code label, so an unlabeled
+// "the Workday portal sent me 739201" in a message over this limit was stored as typed).
+export const CODE_REPLY_MAX_LEN = 400;
 const MARKER = /\[(code|password) removed\]/g;
 // A code word before the token, in the same sentence. Strong words name a code; weak ones ("portal", "sent me") only say
 // something was handed over, so a 4-digit year after them stays a year.
@@ -77,10 +81,12 @@ function tokensIn(sentence: string): { start: number; end: number }[] {
 
 // The turn's message after chat_input.ts (identity_redact.ts) took the labeled secrets out, and what it removed. Returns the
 // text to store and answer with (any code-shaped token left next to a code word removed too), or null when the message
-// shares no code or password.
+// shares no code or password. A message over CODE_REPLY_MAX_LEN returns only when this module removed a token itself
+// (reply false): identity_redact.ts's own removals in it are already in the text and its note.
 export function codeInChat(message: string, o: { userContent?: string; removed?: readonly string[]; codePending?: boolean } = {}): CodeInChat | null {
   const msg = String(message ?? "");
-  if (!msg.trim() || msg.length > MAX_CHAT_LEN || o.codePending) return null;
+  if (!msg.trim() || o.codePending) return null;
+  const reply = msg.length <= CODE_REPLY_MAX_LEN;
   const removed = new Set<"code" | "password">();
   for (const r of o.removed ?? []) if (r === "code" || r === "password") removed.add(r);
   for (const m of msg.matchAll(MARKER)) removed.add(m[1] as "code" | "password");
@@ -93,10 +99,10 @@ export function codeInChat(message: string, o: { userContent?: string; removed?:
     return s;
   }).join("");
   if (values.length) removed.add("code");
-  if (!removed.size) return null;
+  if (!removed.size || (!reply && !values.length)) return null;
   let userContent = String(o.userContent ?? msg);
   for (const v of values) userContent = userContent.split(v).join("[code removed]");
-  return { text, userContent, removed: [...removed] };
+  return { text, userContent, removed: [...removed], reply };
 }
 
 // redactionNote's own "never send passwords or codes in a message ..." sentence repeats CODE_IN_CHAT_REPLY; on this turn the

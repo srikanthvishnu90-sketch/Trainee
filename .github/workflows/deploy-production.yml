@@ -79,7 +79,8 @@ jobs:
     # Runs when the measurement failed too: S3 then says what is missing. A failed preflight still stops it.
     if: ${{ !cancelled() && needs.preflight.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    # 150: S1's 90-minute wait for CI (--wait-checks 90) + S2's 30-minute ledger wait (--wait-ledger 30) + 30 for S1-S4 themselves.
+    timeout-minutes: 150
     outputs:
       deployed_sha: ${{ steps.judge.outputs.deployed_sha }}
     steps:
@@ -99,7 +100,7 @@ jobs:
         id: judge
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: deno run -A scripts/launch/deploy-standard.ts --sha "$GITHUB_SHA" --checks S1,S2,S3,S4 --exclude-run "$GITHUB_RUN_ID" --wait-checks 90
+        run: deno run -A scripts/launch/deploy-standard.ts --sha "$GITHUB_SHA" --checks S1,S2,S3,S4 --exclude-run "$GITHUB_RUN_ID" --wait-checks 90 --wait-ledger 30
   deploy:
     name: deploy (production)
     needs: standard

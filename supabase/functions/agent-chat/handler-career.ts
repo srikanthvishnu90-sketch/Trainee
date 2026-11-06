@@ -51,9 +51,10 @@ import { modelDerive } from "../_shared/agent/research/derive.ts";
 import { gatewayGroundSearch, memoryGroundCache } from "../_shared/agent/research/ground.ts";
 const researchCache = memoryGroundCache();
 import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWindow, summaryFor } from "./career_brain.ts";
-import { brainMode, STAGED_TOOL_POLICY, stagedRoute } from "./career_staged.ts";
+import { brainMode, stagedRoute, stagedToolPolicy } from "./career_staged.ts";
 import { turnClock } from "./turn_clock.ts";
 import { CRISIS_INTENT, crisisReply } from "./crisis.ts";
+import { CODE_IN_CHAT_INTENT, CODE_IN_CHAT_REPLY, codeInChat, noteForCodeTurn } from "../_shared/career_code_in_chat.ts";
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
 import { CARD_NEEDS_REPLY_STATUS, cardIntent, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
 import { billingTurn, PAY_BY_CHECKOUT, stripeFromEnv, supabaseBillingStore } from "../_shared/career_billing.ts";
@@ -289,6 +290,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     let { message, userContent } = input;
     const { imageBlocks } = input;
     flowCtx.note = redactionNote(input.redacted);
+    let removedNow = [...input.redacted];
     // Card or bank details in chat (battery 2026-10-30): removed above, never stored; the person is told where paying goes.
     if (flowCtx.note && input.redacted.some((r: string) => r === "card" || r === "account")) flowCtx.note = `${flowCtx.note} ${PAY_BY_CHECKOUT}`;
     // L4: thread_id must be a string when provided (non-string truthy values
@@ -318,8 +320,19 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const red = lead ? redactPending(message, lead) : null;
       if (red) {
         message = red.text; userContent = red.text;
-        flowCtx.note = redactionNote([...new Set([...input.redacted, ...red.removed])]);
+        removedNow = [...new Set([...removedNow, ...red.removed])];
+        flowCtx.note = redactionNote(removedNow);
       }
+    }
+    // ONE-TIME CODES AND PASSWORDS IN CHAT (_shared/career_code_in_chat.ts; offline registry A23): a code or password the person
+    // shared is answered below by code's fixed safety text (codeChatText), and a code-shaped token still next to a code word
+    // ("Workday sent me 739201") is removed here like a labeled one, before anything stores the text or a model reads it.
+    const codeShared = codeInChat(message, { userContent, removed: removedNow, codePending: codePending(situation) });
+    if (codeShared) {
+      message = codeShared.text; userContent = codeShared.userContent;
+      removedNow = [...new Set([...removedNow, ...codeShared.removed])];
+      flowCtx.note = redactionNote(removedNow);
+      if (flowCtx.note && removedNow.some((r: string) => r === "card" || r === "account")) flowCtx.note = `${flowCtx.note} ${PAY_BY_CHECKOUT}`;
     }
 
     // GO-LIVE FLIP (2026-10-13, owner ruling: "the career version is the
@@ -535,19 +548,21 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // its state and use, and what waits on it), "connect gmail" (a one-time link from any channel), "disconnect gmail" /
       // "disconnect outlook" (revoke where possible, erase, cancel pending sends, read back), and a task that needs a
       // connector not connected ("check my outlook"): asked once with the link, parked, resumed by the connect callback.
-      const connAns = !tapIn && !careerTask && !careerBatch && connectorAsk(message)
+      // A one-time code or a password shared in chat (codeShared) is code's safety turn before every turn here (codeChatText).
+      const codeFirst = !!codeShared && !tapIn && !careerTask && !careerBatch && !host.isHostControlled(message, ctx);
+      const connAns = !codeFirst && !tapIn && !careerTask && !careerBatch && connectorAsk(message)
         ? await connectorChatTurn({ admin, env: Deno.env, fetch, now: Date.now, message, userId: user.id, threadId: tid, bridge: isBridgeCall })
           .catch((e) => { console.error("connector turn:", e?.message ?? e); return connectorFailure(message); })
         : null;
       // OWNER RULE: never LinkedIn, Indeed or Handshake. An ask to apply, message or act on one of them, or a link to one,
       // is declined plainly, naming the site, before every other turn (no card, question, apply, link read or batch sees
       // it): nothing is queued and nothing is left waiting for a later "yes" (career_networking.ts siteRefusedTurn).
-      const siteNo = !tapIn && !connAns && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const siteNo = !codeFirst && !tapIn && !connAns && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await siteRefusedTurn({ message, userId: user.id, threadId: tid, now: Date.now(), state: ctx as unknown as Record<string, unknown>,
             store: supabaseOutreachStore(admin), events, model: null })
           .catch((e) => { console.error("site refusal turn:", e?.message ?? e); return null; })
         : null;
-      const outlookAns = !tapIn && !connAns && !siteNo && !careerTask && !careerBatch && outlookAsk(message)
+      const outlookAns = !codeFirst && !tapIn && !connAns && !siteNo && !careerTask && !careerBatch && outlookAsk(message)
         ? await outlookChatTurn({ admin, message, userId: user.id, threadId: tid, bridge: isBridgeCall, now: Date.now(), env: Deno.env })
           .catch((e) => { console.error("outlook turn:", e?.message ?? e); return null; })
         : null;
@@ -578,8 +593,15 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // guarded by !planned is skipped and nothing is queued, drafted or set on this turn. The rollback (router) is as before.
       const crisisText = brainMode(Deno.env) === "staged" && !tapIn && !careerTask && !careerBatch && !host.isHostControlled(message, ctx) ? crisisReply(message) : null;
       if (crisisText) planned = { claimed: true, reply: crisisText, intent: CRISIS_INTENT, resultStatus: "completed", parts: undefined, documents: [], meta: null } as unknown as Extract<PlannerTurn, { claimed: true }>;
+      // A one-time code or a password shared in chat (codeShared, above): code's fixed safety text, next to crisis and in the
+      // same slot, on every brain setting; no planner, router or model runs on this turn, and crisis text wins. A prompt that
+      // is waiting for this very answer keeps it (the card, the mock, and an open application question below, which refuses a
+      // secret as an answer and asks again): the value is already removed either way.
+      const codeChatText = !crisisText && codeFirst && !card && !mock ? CODE_IN_CHAT_REPLY : null;
+      let codeTurn = !!codeChatText;
+      if (codeChatText) planned = { claimed: true, reply: codeChatText, intent: CODE_IN_CHAT_INTENT, resultStatus: "completed", parts: undefined, documents: [], meta: null } as unknown as Extract<PlannerTurn, { claimed: true }>;
       // The planner calls the model: without a model key it is never tried (no failing call, no cost row), as the brain.
-      if (!crisisText && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && plannerOn(Deno.env, user.id) && !!careerModelConfig(Deno.env).apiKey && !host.isHostControlled(message, ctx)) {
+      if (!crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && plannerOn(Deno.env, user.id) && !!careerModelConfig(Deno.env).apiKey && !host.isHostControlled(message, ctx)) {
         const pMeter = ledger.track(newMeter()), pCfg = careerModelConfig(Deno.env);
         const pModel = (payload: any) => callModel(pCfg, payload, { meter: pMeter, role: "chat" });
         try {
@@ -626,10 +648,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // D-037: the "allow sending" link (incremental gmail.send consent), offered only when a send was refused for want of it.
       const sendConsentFor = async (u: string) => (await connectUrlsFor(Deno.env, u, "send", Date.now(), writerChannel((body as any)?.channel))).url;
       const draftCfg = careerModelConfig(Deno.env);
-      const asked = !tapIn && !card && !mock && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const asked = !tapIn && !card && !mock && !siteNo && (!planned || codeTurn) && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await questionsTurn({ message, userId: user.id, threadId: tid, now: Date.now(), store: supabaseQuestionStore(admin), situation,
           draft: { model: (payload) => callModel(draftCfg, payload, { meter: draftMeter, role: "chat" }), facts: () => ((ctx as any).profile?.facts ?? []) } })
         : null;
+      // An open application question was waiting for this answer: it refuses the secret and asks again (codeChatText, above).
+      if (asked && codeTurn) { planned = null; codeTurn = false; }
       // FEATURE 17: hosted preparation. Their answers saved and nothing left open: their queued postings are prepared
       // again now (the hosted door), and the reply says that instead of "on your computer" (career_hosted_prepare.ts).
       if (asked) await prepareAfterAnswers(asked, { admin, userId: user.id, env: Deno.env, fetch: (i, init) => fetch(i, init) })
@@ -994,7 +1018,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         out = { reply: outlookAns.reply, intent: outlookAns.intent, resultStatus: outlookAns.resultStatus, contained: false, handler: outlookAns.handler };
         if (outlookAns.meta) agentMeta = { ...(agentMeta || {}), ...outlookAns.meta };
       } else if (planned) { // TASK PLANNER: each step's own reply, in order; a waiting prompt a step left is the thread's last word
-        out = { reply: planned.reply, intent: planned.intent, resultStatus: planned.resultStatus, contained: false, handler: crisisText ? "crisis" : "planner", parts: planned.parts,
+        if (codeTurn) flowCtx.note = noteForCodeTurn(flowCtx.note); // the safety text says "never in chat" once
+        out = { reply: planned.reply, intent: planned.intent, resultStatus: planned.resultStatus, contained: false, handler: crisisText ? "crisis" : codeTurn ? "code_in_chat" : "planner", parts: planned.parts,
           ...(planned.documents.length ? { result: { documents: planned.documents } } : {}) };
         agentMeta = planned.meta;
       } else if (card) {
@@ -1125,7 +1150,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // WO-106 (F4): each job link is checked against its board just before it is shown.
           linkCheck: linkChecker(fetch, { userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
           // FEATURE 13: the staged brain answers with the actions that have a code-first owner withheld.
-          toolPolicy: staged.chosen ? STAGED_TOOL_POLICY : null,
+          toolPolicy: staged.chosen ? stagedToolPolicy(staged.decision) : null,
           // Situation knowledge: the context pack and playbooks (CAREER_KNOWLEDGE=on; off by default).
           knowledge: knowledgeOn(Deno.env),
           // Open career questions: cached, capped web search. DARK: offered only when the gateway's web search is available (WEB_SEARCH_AVAILABLE, false until a live call proves it). The cache is per instance
@@ -1376,7 +1401,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // payload the person approves are never rewritten. Nothing upstream changes.
       // WRITER ROOT CAUSES (beta C12, 2026-11-06): the staged brain's own reply (handler "agent") is never rewritten: it already
       // passed the loop's reply guards, and the restate-only checker could only cut it (rewrites()).
-      if (replyWriterOn(Deno.env) && rewrites(out, agentMeta, { structured: !!(careerTask || careerBatch) })) {
+      // The code-in-chat safety text is fixed words (career_code_in_chat.ts): never rewritten either.
+      if (replyWriterOn(Deno.env) && out.handler !== "code_in_chat" && rewrites(out, agentMeta, { structured: !!(careerTask || careerBatch) })) {
         const wMeter = ledger.track(newMeter());
         const wCfg = careerModelConfig(Deno.env);
         const written = await writeReply({ on: true, message, handler: out.handler ?? null, channel: writerChannel((body as any)?.channel),

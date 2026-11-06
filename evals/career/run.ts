@@ -154,7 +154,7 @@ export async function makeBrain(o: { name: BrainName; model: ModelFn | null; env
   const core = await import("../../supabase/functions/_shared/router_core.career.js");
   const { CareerHost } = await import("../../supabase/functions/_shared/career_host.js");
   const { agentTurn } = await import("../../supabase/functions/agent-chat/career_brain.ts");
-  const { stagedDecision, STAGED_TOOL_POLICY } = await import("../../supabase/functions/agent-chat/career_staged.ts");
+  const { stagedDecision, stagedToolPolicy } = await import("../../supabase/functions/agent-chat/career_staged.ts");
   const { memoryAlertStore } = await import("../../supabase/functions/_shared/career_alert_store.ts");
   const { situationFrom } = await import("../../supabase/functions/_shared/career_situation.ts");
   const { memoryBriefStores } = await import("../../supabase/functions/_shared/career_brief_store.ts");
@@ -205,7 +205,7 @@ export async function makeBrain(o: { name: BrainName; model: ModelFn | null; env
           memory, wants, posting: (id: string) => board.get(id), postings: (q: string) => board.search(searchWords(q), 150),
           outreach: { store: outreach, model } as any,
           known: { standing: await memory.standing(a.userId), alerts: row ? { prefs: row.prefs, tz: row.tz } : null, pipeline: null, situation },
-          ...(stagedPick ? { toolPolicy: STAGED_TOOL_POLICY } : {}) });
+          ...(stagedPick ? { toolPolicy: stagedToolPolicy(stagedPick) } : {}) });  // as the handler: the router's answer rides as data
         BRAIN_TURN_MS.push(Math.round(performance.now() - t0));
         trace.push({ stopped: String(t.stopped), steps: Number(t.steps ?? 0), tools: (t.tool_calls ?? []).map((c: any) => ({ name: c.name, ok: !!c.ok, ...(c.error ? { error: String(c.error).slice(0, 200) } : {}) })), ...(errors.length ? { errors } : {}),
           ...(stagedPick ? { route: "brain", intent: stagedPick.intent } : {}) });

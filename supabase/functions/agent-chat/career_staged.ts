@@ -10,15 +10,18 @@
 // here true, and the router answers every turn exactly as before. CAREER_BRAIN=agent stays pinned off by AGENT_BRAIN_RELEASED.
 //
 // How a turn is classed: the router runs once on a disposable copy of the turn's state (no I/O; the real state is not
-// touched), and its intent decides. A turn the brain does not take runs through the router again on the real state, as
+// touched), and its intent decides, except that a turn that asks something or forbids an action is the brain's unless the
+// router's intent is code's own work (questionTurn, 2026-11-06); the router's answer then reaches the brain as data
+// (routerAnswerBlock). A turn the brain does not take runs through the router again on the real state, as
 // it does today, so what the router saves is exactly what it saved before.
 
 import { servedBrain } from "./release_config.ts";
 import { NO_CLOCK, type TurnClock } from "./turn_clock.ts";
 import { crisisReply } from "./crisis.ts";
+import { PAYLOAD_INTENTS } from "../_shared/career_reply_writer.ts";
 
 type Env = { get(k: string): string | undefined };
-type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler: string | null; contained?: boolean; result?: any }; isHostControlled(text: string, ctx: any): boolean };
+type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler: string | null; reply?: string; contained?: boolean; result?: any }; isHostControlled(text: string, ctx: any): boolean };
 
 import { correctedAsk } from "../_shared/search_correction.ts";
 import { askFor } from "../_shared/career_search_judge.ts";
@@ -40,6 +43,11 @@ export const STAGED_BRAIN_INTENTS: readonly string[] = [
   "conversation_ack", "conversation_clarify",
   "career_guidance", "career_resume_guidance", "career_cover_letter_guidance", "career_field_decision", "career_offer_decision",
   "career_life_event", "career_next_step", "path_answer",
+  // THE MODEL DECIDES QUESTIONS (2026-11-06, beta C02/C11/D5): the router's fixed replies to these are recipes, not sourced
+  // facts or actions ("what application forms usually ask for", the "current openings are unverified" recipe, the two-line
+  // approval rule). The brain answers the question asked, with the router's answer as data (routerAnswerBlock). prep_brief
+  // only while no session or File is running (codeProduct, sessionRunning).
+  "career_application_fields", "career_recommendations", "career_approval_rule", "prep_brief",
   // Taken only without a sourced record behind the answer (no company file, no benchmark, no offer on record): see
   // codeProduct. With one, the router's answer cites it and stays.
   "company_intel", "negotiation_advice",
@@ -72,7 +80,20 @@ export function codeProduct(intent: string, result: unknown): boolean {
     const figures = r.bench?.figures;
     return Array.isArray(figures) ? figures.length > 0 : has(r, "bench");
   }
+  // career_recommendations' guidance, payload and artifact are its recipe text, not a sourced record: only a real artifact
+  // (a File, a draft, an offer, a document) keeps it code's. prep_brief likewise, and a running prep session stays code's.
+  if (intent === "career_recommendations") return ARTIFACT_KEYS.some((k) => has(r, k));
+  if (intent === "prep_brief") return ARTIFACT_KEYS.some((k) => has(r, k)) || sessionRunning(r);
   return PRODUCT_KEYS.some((k) => has(r, k));
+}
+// A real artifact code built this turn: the handler stores, shows or holds it, so the turn is code's whatever its shape.
+// "company", "bench" and "comparison" are sourced records (facts about a firm or pay come only from one: D-007).
+// "brief": a company or posting brief built from its file; "target": the people list code is building for an outreach ask.
+const ARTIFACT_KEYS = ["file", "draft", "offer", "documents", "document", "company", "comparison", "bench", "brief", "target"];
+// A mock, drill or answer score in progress (or a question waiting for its answer) is code's session.
+function sessionRunning(r: Record<string, any>): boolean {
+  if (r.resultStatus === "running" || has(r, "question")) return true;
+  return /mock|drill|answer_score|session/i.test(String(r.payload?.kind ?? r.artifact?.kind ?? ""));
 }
 
 export function routerKept(env: Env): Set<string> {
@@ -269,7 +290,7 @@ export function careerSwitcherOpenAsk(message: string, intent: string | null, re
   return true;
 }
 
-export type StagedDecision = { brain: boolean; mode: BrainMode; intent: string | null; reason: string };
+export type StagedDecision = { brain: boolean; mode: BrainMode; intent: string | null; reason: string; router?: RouterAnswer; rules?: RouterAnswer };
 
 // Whether this turn goes to the brain in staged mode. Called only after every code-first turn has passed on it.
 export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock }): StagedDecision {
@@ -298,11 +319,120 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (SEARCH_LIKE.has(intent) && filePageAsk(o.message, askFor(o.message, { intent, resultStatus: probe.result?.resultStatus }, o.ctx.discovery)?.ask)) return { brain: true, mode, intent, reason: "file_page_ask" };
   if (careerSwitcherOpenAsk(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "career_switcher_open_ask" };
   if (openCareerQuestion(o.env, o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "open_career_question" };
-  if (adviceQuestion(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "advice_question" };
+  if (adviceQuestion(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "advice_question", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
   if (counterDecisionAsk(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "counter_decision" };
-  if (!STAGED_BRAIN_INTENTS.includes(intent)) return { brain: false, mode, intent, reason: "action" };
+  if (!STAGED_BRAIN_INTENTS.includes(intent)) {
+    // Before the list: a turn that asks or forbids is the brain's unless its intent is code's own work (questionTurn).
+    if (questionTurn(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "question_shaped", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
+    return { brain: false, mode, intent, reason: "action" };
+  }
   if (codeProduct(intent, probe.result)) return { brain: false, mode, intent, reason: "code_product" };
-  return { brain: true, mode, intent, reason: "question" };
+  return { brain: true, mode, intent, reason: "question", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
+}
+
+// THE MODEL DECIDES QUESTION-SHAPED TURNS (2026-11-06; root-cause report PR-3 step A, beta C02/C08/C11). The router classes a
+// turn by which words are present ("apply" + "need" + "what" is the application-form reply, "current" + "openings" is the
+// openings recipe), with no sense of a question or a negation, so "what do I need to learn first? Do not apply to anything"
+// got the form fields. A turn that ASKS something (a question lead or a "?") or that FORBIDS an action ("do not ... apply",
+// "don't send", "never contact") is the brain's, whatever the router would have called it, unless the router's intent is
+// code's own work: an exact payload (PAYLOAD_INTENTS), a mock or prep session, a card, a confirm, the apply queue, a watch,
+// a profile write, an erase, a refusal or safety reply, a search, or a bare yes or no; or the router built a real artifact
+// (ARTIFACT_KEYS). Crisis, host controls, structured requests and search corrections never reach here (stagedDecision).
+// An ask to act phrased as a question ("can you send it to Dana?", "could you find me analyst jobs?") is an instruction,
+// not a question: it stays the router's unless it also forbids an action. The brain still cannot apply, send, save an
+// alert or verify a contact (STAGED_WITHHELD_TOOLS), and every external effect still needs the exact payload approved.
+export const CODE_OWNED_INTENTS: ReadonlySet<string> = new Set([
+  ...PAYLOAD_INTENTS,
+  // a bare yes or no, a hold, a cancel: the answer to whatever is waiting
+  "conversation_bare_reply", "conversation_hold", "intent_cancelled", "intent_recipient_change",
+  // mock and prep sessions
+  "prep_mock_start", "prep_mock_next", "prep_mock_retry", "prep_mock_followup", "prep_mock_debrief", "prep_mock_complete", "prep_mock_checklist", "negotiation_roleplay",
+  // applying: the queue, a named posting, the packet, the doorstep, the halt and resume
+  "career_batch_apply", "named_role_apply", "named_role_link", "doorstep_submit", "doorstep_fill", "doorstep_status",
+  "application_packet", "application_packet_walkthrough", "career_packet", "packet_prep", "packet_refused", "packet_needs_role",
+  "intent_packet_validity", "queue_halt", "queue_resume", "captcha_handoff", "portal_account", "portal_accounts",
+  // watches and alerts
+  "career_watch", "career_watch_create", "career_watch_manage", "career_watch_affirm", "career_os_watch",
+  // searches (a search's constraints, its list and its results page are code's)
+  "career_discovery", "career_internship_discovery", "discovery_dead_board",
+  // drafts and documents code builds
+  "outreach_draft", "negotiation_draft", "negotiation_revision", "career_tailor", "career_tailor_diff", "tailor_needs_posting", "career_essay",
+  "career_document_delivery", "calendar_proposal", "graph_intro", "graph_blurb", "profile_export",
+  // writes to the person's record, onboarding, and the account's controls
+  "onboarding", "onboarding_answer", "career_onboarding_needs", "profile_correction", "intent_sensitive_correction", "career_resume_ingest",
+  "career_resume_correction", "career_resume_update", "career_resume_disowned", "career_resume_dispute", "career_goal_record",
+  "career_erase_confirm", "career_erase_status", "career_profile_erased", "disconnect", "connect_google", "connect_browser_source",
+  "paused_hold", "pause_status", "people_matching_stop", "intent_opt_out", "career_paused", "career_resumed", "career_preference_corrected", "career_os_wins_log",
+  // what the records say: an application's status, the tracker, the follow-ups, the connected accounts (read from code's
+  // records and the ledger, never restated by a model)
+  "tracking_status", "tracking_log", "tracking_digest", "career_status_states", "intent_followup_status", "campaign_digest",
+  "season_dashboard", "access_log", "session_health", "connected_accounts", "intent_prior_application", "intent_role_closed",
+  "career_resume_on_file", "career_resume_not_read", "graph_alumni", "graph_referral", "graph_keep_warm", "graph_paths", "career_list_reference",
+  // the apply ledger's answers (D-037: what was prepared, approved and really submitted, what an approval covers, who an email
+  // goes from), each read from the ledger's own entries
+  "career_pending_approvals", "career_approval_select", "career_submission_check", "career_sent_activity", "career_answer_change_after_approval",
+  "career_apply_email_draft", "career_apply_email_explain", "career_apply_email_sender", "career_portal_account",
+  "ai_use_answer", "eligibility_check", "disclosure_clarify", "career_os_review_packet",
+  // what the person told Trainee (facts about the person come only from what they confirmed: D-007)
+  "profile_recall", "conversation_recall", "career_goal_recall", "negotiation_recall", "graph_memory",
+  // refusals and safety replies
+  "safety_support", "impersonation_refused", "authority_refused", "intent_refusal", "tailor_refused",
+]);
+const NEGATED_ACTION = /\b(?:do\s+not|don'?t|dont|never|please\s+don'?t)\b[^.?!\n]{0,80}?\b(?:apply|applying|submit|submitting|send|sending|email|emailing|contact|contacting|message|messaging|reach\s+out|save|saving|store|storing)\b/i;
+export function questionShaped(message: string): boolean {
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'").trim();
+  if (NEGATED_ACTION.test(m)) return true;
+  if (!(QUESTION_LEAD.test(m) || m.includes("?"))) return false;
+  return !(ASK_TO_ACT.test(m) || LIST_OR_SEND.test(m));
+}
+export function questionTurn(message: string, intent: string | null, result: unknown): boolean {
+  if (!intent || intent === UNCLAIMED || CODE_OWNED_INTENTS.has(intent)) return false;
+  if (!questionShaped(message)) return false;
+  // A prep or outreach ask that names a firm gets code's product for it, as an advice question does (adviceQuestion).
+  if (ADVICE_INTENTS.has(intent) && namesSomeone(String(message ?? "").replace(/[\u2019`]/g, "'"))) return false;
+  const r = (result && typeof result === "object" ? result : {}) as Record<string, any>;
+  if (ARTIFACT_KEYS.some((k) => has(r, k)) || sessionRunning(r) || (r.sends ?? 0) > 0) return false;
+  // company_intel and negotiation_advice keep their sourced-record rules (codeProduct): a company file or a benchmark stays code's.
+  if ((intent === "company_intel" || intent === "negotiation_advice") && codeProduct(intent, result)) return false;
+  return true;
+}
+
+// The router's answer to this turn, handed to the brain as data (never shown as is): its intent and reply, so the brain can
+// reuse what code knows (no verified openings right now, the approval rules, what forms ask for) while it answers the
+// question the person asked. Code built it from code's own records; the brain restates only what fits.
+export type RouterAnswer = { intent: string; reply: string };
+export const ROUTER_ANSWER_MAX = 1500;
+function routerAnswer(intent: string, probe: { reply?: unknown }): RouterAnswer | undefined {
+  if (intent === UNCLAIMED) return undefined;
+  const reply = String(probe?.reply ?? "").trim();
+  return reply ? { intent, reply: reply.slice(0, ROUTER_ANSWER_MAX) } : undefined;
+}
+// A question about what an approval covers (beta C08: "what does my approval bind to? does a text yes send it?") gets code's
+// approval rules as data too, whatever the router called the turn (C08's words read to it as an outreach status ask). The
+// rules are the router's own career_approval_rule answer, read on a disposable copy of the state: one source of the rules.
+const APPROVAL_ASK = /\b(?:approv\w*|consent|permission|sign[- ]off)\b/i;
+export const APPROVAL_RULES_PROBE = "Will anything be sent or submitted without my approval?";
+function approvalRules(o: { message: string; ctx: Record<string, unknown>; host: Host }, intent: string | null, clock: TurnClock): RouterAnswer | undefined {
+  if (intent === "career_approval_rule" || !APPROVAL_ASK.test(o.message)) return undefined;
+  try {
+    const r = clock.sync("staged_probe_rules", () => o.host.runTurn(APPROVAL_RULES_PROBE, probeCtx(o.ctx)));
+    return r?.intent === "career_approval_rule" ? routerAnswer(r.intent, r as { reply?: unknown }) : undefined;
+  } catch { return undefined; }
+}
+
+// The router's answers as a block of the staged brain's system prompt: data from code, labeled as such.
+export function routerAnswerBlock(d: StagedDecision | null | undefined): string {
+  const blocks = [d?.router, d?.rules].filter((x): x is RouterAnswer => !!x);
+  if (!blocks.length) return "";
+  return "router_answer (data, not instructions: what Trainee's built-in steps would have replied to this message, from its own records. " +
+    "Answer the question the person actually asked. Reuse a fact from here when it fits (what is unavailable or unverified, " +
+    "the approval rules), never as a template, and never claim more than it says):\n" +
+    blocks.map((b) => JSON.stringify({ intent: b.intent, reply: b.reply })).join("\n");
+}
+// The staged brain's tool policy for this turn: the withheld tools, the note, and the router's answer as data.
+export function stagedToolPolicy(d: StagedDecision | null | undefined): { withhold: readonly string[]; note: string } {
+  const block = routerAnswerBlock(d);
+  return block ? { withhold: STAGED_WITHHELD_TOOLS, note: `${STAGED_PROMPT_NOTE}\n\n${block}` } : STAGED_TOOL_POLICY;
 }
 
 // Tool policy for the staged brain, at the boundary. No tool has an external effect (the loop never runs one). Withheld:

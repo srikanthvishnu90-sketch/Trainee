@@ -131,7 +131,9 @@ test("confirmed facts only: a draft fact from a resume is never on the page", ()
   assert.ok(rec, "the confirmed fact is on the page");
   assert.deepEqual(rec.items.map((i) => [i.value, i.source]), [["Cashier at a grocery store, 2 years; trained 4 new hires on the register.", "From your resume"]]);
   assert.ok(!/call center|60 calls/.test(allText(data)), "the unconfirmed draft is not used");
-  assert.ok(/1 confirmed fact/.test(out.reply), out.reply);
+  // BETA B1 (2026-11-05): the reply makes no claim about the record ("Your side comes only from 1 confirmed fact" was said of a
+  // page whose questions and plan are general); the page shows what it lists under its own heading.
+  assert.ok(!/confirmed facts?|your record/i.test(out.reply), out.reply);
 });
 
 test("a count or length one page cannot honor is said, and no File is made with a different number", () => {

@@ -2,8 +2,10 @@
 // text/plain on its own domain). A thin proxy: no logic, no secrets beyond the function's public URL. The signed link, or
 // Telegram's signed Mini App data, is the only credential. A redirect to the provider's own sign-in page is passed through;
 // any other redirect becomes the clean /connect URL on this site.
+import { pageCsp } from "./_page_csp.js";
 const UPSTREAM = process.env.TRAINEE_CONNECT_UPSTREAM; // e.g. https://<project>.supabase.co/functions/v1/trainee-connect
-const KEEP = ["cache-control", "referrer-policy", "x-robots-tag", "x-content-type-options", "content-security-policy"];
+// Never "content-security-policy": on *.supabase.co that is the gateway's sandbox policy, not the page's (BETA B1, ./_page_csp.js).
+const KEEP = ["cache-control", "referrer-policy", "x-robots-tag", "x-content-type-options"];
 const PASS_REQ = ["cookie", "user-agent", "accept"];
 const PROVIDER_SIGN_IN = /^https:\/\/(?:accounts\.google\.com|login\.microsoftonline\.com)\//;
 
@@ -22,6 +24,7 @@ async function pass(request) {
   const json = /application\/json/.test(r.headers.get("content-type") || "");
   const h = new Headers({ "content-type": json ? "application/json; charset=utf-8" : "text/html; charset=utf-8" });
   for (const k of KEEP) { const v = r.headers.get(k); if (v) h.set(k, v); }
+  h.set("content-security-policy", pageCsp(r.headers));
   const sc = r.headers.get("set-cookie"); if (sc) h.append("set-cookie", sc);
   const to = r.headers.get("location");
   if (r.status >= 300 && r.status < 400 && to) h.set("location", PROVIDER_SIGN_IN.test(to) ? to : "/connect");

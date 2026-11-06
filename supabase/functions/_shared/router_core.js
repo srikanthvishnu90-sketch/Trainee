@@ -40685,9 +40685,19 @@ const CareerRouter = (() => {
     const src = s(text).replace(/\bcounter[ -]?offers?\b/ig, "counter-proposal");
     const reM = /\$\s?(\d[\d,]*(?:\.\d{1,2})?)(\s?k\b)?/ig;
     const employer = /\b(?:offer(?:ed|ing|s)?|proposed|came\s+back|(?:is|are|was|were)\s+paying|pay(?:s|ing)|quoted|countered|comes\s+to)\b/ig;
-    const user = /\b(?:counter(?:ing|ed)?(?:\s+(?:email|letter|message|proposal))?(?:\s+(?:at|to|with|for|asking(?:\s+for)?))?|ask(?:ing)?(?:\s+for)?|propos(?:e|ing)(?:\s+(?:a|an|that))?|meet\s+me\s+at|want(?:ing)?|target(?:ing)?|looking\s+for|hop(?:e|ing)\s+for|make\s+it|change\s+(?:it|the\s+\w+)\s+to|need|request(?:ing)?|push\s+for|go\s+for|would\s+like|['’]d\s+like|(?:a\s+)?rate\s+of|(?:draft|write|compose|send)\b[^.?!]{0,50}?\b(?:at|with|for))\b/ig;
+    const user = /\b(?:counter(?:ing|ed)?(?:\s+(?:email|letter|message|proposal))?(?:\s+(?:at|to|with|for|asking(?:\s+for)?))?|ask(?:ing)?(?:\s+for)?|propos(?:e|ing)(?:\s+(?:a|an|that))?|meet\s+me\s+at|want(?:ing)?|target(?:ing)?|looking\s+for|hop(?:e|ing)\s+for|make\s+it|change\s+(?:it|the\s+\w+)\s+to|need|request(?:ing)?|push\s+for|go\s+for|would\s+like|['’]d\s+like|(?:draft|write|compose|send)\b[^.?!]{0,50}?\b(?:at|with|for))\b/ig;
     const current = /\b(?:i\s+(?:currently\s+|now\s+)?(?:make|earn|get|am\s+paid)|currently\s+(?:make|earn|get|paid|at)|(?:my|the)\s+(?:current|present)\s+(?:\w+\s+)?(?:pay|pays|rate|wage|job\s+pays)|current\s+(?:pay|rate|wage)|(?:my\s+)?(?:job|work)\s+(?:now\s+)?pays)\b/ig;
     const lastIdx = (re, str) => { let i = -1, mm; re.lastIndex = 0; while ((mm = re.exec(str))) i = mm.index; return i; };
+    // A unit/purpose word attaches to a figure only as its adjacent noun phrase ("$500 relocation allowance", "$2,000 signing bonus")
+    // or as "<noun> of $X"; a later word in the sentence, a connector, or a negation ("with no relocation allowance") never does.
+    const NOUN = "relocation|moving|signing|sign-on|bonus|allowance|stipend|equity|stock|shares|reimbursement|budget|salary|annual|yearly|days?";
+    const BLOCK = /^(?:and|with|plus|no|without|not|or|but|also|for|to|if|then)$/i;
+    const attached = (after, before) => {
+      const aw = after.trim().split(/\s+/).slice(0, 3);
+      for (let i = 0; i < aw.length; i++) { if (BLOCK.test(aw[i])) break; if (new RegExp("^(?:" + NOUN + ")$", "i").test(aw[i])) return true; }
+      const bm = before.match(new RegExp("(?:^|\\s)((?:" + NOUN + ")(?:\\s+\\w+){0,2})\\s*(?:of|is|at|:|=)?\\s*$", "i"));
+      return !!bm && !/\b(?:no|without|not|zero|never)\b/i.test(before.slice(0, bm.index + bm[0].length - bm[1].length).split(/[,;.]/).pop().slice(-12));
+    };
     const oneTime = /\b(?:relocation|moving|signing|sign-on|bonus|allowance|stipend|equity|stock|shares|reimbursement|budget)\b/i;
     const hourCtx = !!(hint && hint.hourly) || /\$\s?\d[\d,.]*\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)|\bhourly\b/i.test(src);
     let prevEnd = 0, mm;
@@ -40700,13 +40710,12 @@ const CareerRouter = (() => {
       if (/^\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour|hourly|\/\s?hr)/i.test(after)) unit = "hour";
       else if (/^\s*(?:per\s+|an?\s+|\/\s?)(?:week|wk)|^\s*weekly/i.test(after)) unit = "week";
       else if (/^\s*(?:per\s+|an?\s+|\/\s?)(?:month|mo)\b|^\s*monthly/i.test(after)) unit = "month";
-      else if (mm[2] || /^\s*(?:per\s+|an?\s+|\/\s?)(?:year|yr)|^\s*(?:annual|yearly|salary)/i.test(after) || /,\d{3}/.test(mm[1]) && Number(mm[1].replace(/,/g, "")) >= 1000 && !oneTime.test(after)) unit = "year";
-      if (unit !== "hour" && (oneTime.test(after.split(/\band\b/i)[0].slice(0, 28)) || oneTime.test(before.slice(-22)))) unit = "one-time";
-      else if (unit === "none" && /^\s*(?:\w+\s+){0,2}?(?:relocation|moving|signing|sign-on|bonus|allowance|stipend|salary|annual|yearly|equity|stock|days?)\b/i.test(after)) unit = "one-time";
+      else if (mm[2] || /^\s*(?:per\s+|an?\s+|\/\s?)(?:year|yr)|^\s*(?:annual|yearly|salary)/i.test(after) || /,\d{3}/.test(mm[1]) && Number(mm[1].replace(/,/g, "")) >= 1000 && !attached(after, before)) unit = "year";
+      if (unit !== "hour" && attached(after, before)) unit = "one-time";
       const ci = lastIdx(current, seg);
       // an employer word inside the current-pay phrase ("my current job pays") is not an employer cue
       const ui = lastIdx(user, seg), ei = lastIdx(employer, seg.replace(current, (x) => " ".repeat(x.length)));
-      const role = ci >= 0 && ci >= ui && ci >= ei ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
+      const role = ci >= 0 && ci >= ui && ci >= ei ? "current" : ui < 0 && ei < 0 ? (/\brate\s+of\s*$/i.test(seg) ? "ask" : "unknown") : ui >= ei ? "ask" : "employer";
       const v = Number(mm[1].replace(/,/g, ""));
       // a unitless figure the employer reported ("they offered $24"), in a message that is otherwise about hourly pay, is hourly
       if (unit === "none" && role === "employer" && v < 1000 && hourCtx) unit = "hour";

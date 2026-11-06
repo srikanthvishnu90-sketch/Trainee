@@ -188,6 +188,23 @@ Deno.test("CDW current pay is never saved as the offer, unitless or /hour, over 
     eq(recorded(ctx).offerRate, 24, first);
   }
 });
+Deno.test("CDW 'a rate of' after the employer's verb stays the offer; a unit word must attach to its figure; negations never attach", () => {
+  const cases: Array<[string, number, number, boolean]> = [
+    // [first message, offer, ask, fresh thread (no $24 on record)]
+    ["They offered a rate of $26/hour; draft a counter at $30/hour", 26, 30, false],
+    ["They offered a rate of $26/hour and a $1,000 bonus; counter at $30/hour", 26, 30, false],
+    ["Draft a counter at $28 with no relocation allowance", 24, 28, false],
+    ["Draft a counter at $28/hour, no signing bonus needed", 24, 28, false],
+    ["They offered $24/hour. Draft a counter at $28 without a signing bonus.", 24, 28, true],
+  ];
+  for (const [msg, offer, ask, isFresh] of cases) {
+    const ctx = fresh();
+    if (!isFresh) host.runTurn(OFFER, ctx);
+    step(ctx, msg, offer, ask);
+    step(ctx, "Draft the counter email.", offer, ask);
+    assert(!/\$1,?000 an hour/.test(host.runTurn("Draft the counter email.", ctx).result.draft.body), msg);
+  }
+});
 Deno.test("CDW the C04 message verbatim still blanks the ask and keeps the offer", () => {
   const C04 = "Fictional beta scenario, not my profile. Jordan Lee has two years of retail customer-service experience and Excel skills. No external actions and no changes to my profile. A customer support job offered Jordan $24/hour, with no other terms provided. Should Jordan counter, and how? Draft a short counter email for review only. Separate advice from unverified market claims.";
   const ctx = fresh();

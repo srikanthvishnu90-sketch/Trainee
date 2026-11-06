@@ -74,7 +74,7 @@ Deno.test("BR-5: the prompt carries the new instructions", () => {
   assert(/never "X and Y"/.test(p), "no conjoined ask");
   assert(/State only what happened this turn/.test(p) && /I'll set a job alert/.test(p), "no promises");
   assert(/nothing goes out without their yes/.test(p), "says nothing sent");
-  assert(/With no resume on file, never present gaps as findings/.test(p) && /common gaps for this role/.test(p), "no resume gaps");
+  assert(/With no resume on file, never present gaps as findings/.test(p) && /List NO gaps/.test(p) && !/common gaps/.test(p), "no resume gaps");
   assert(/Interview prep/.test(p) && /timeline/.test(p) && /before any clarifying question/.test(p), "prep plan first");
   assert(!/the role and city they are after/.test(p), "the role-and-city line is gone");
   assert(/never say they were done or that you will do them/.test(STAGED_PROMPT_NOTE) && /at most one question/.test(STAGED_PROMPT_NOTE));
@@ -86,7 +86,7 @@ function scripted(texts: string[], seenInputs: string[]) {
   let i = 0;
   return async (req: any) => { seenInputs.push(JSON.stringify(req)); const t = texts[Math.min(i++, texts.length - 1)]; return { content: [{ type: "text", text: t }], stop_reason: "end_turn" }; };
 }
-const run = (model: any) => (runAgentTurn as any)({ system: "s", history: [], message: "I feel overwhelmed, find me software intern roles", tools: [], model, ctx: { userId: "u", threadId: "t", now: 0, state: {} }, maxSteps: 4 });
+const run = (model: any) => (runAgentTurn as any)({ system: "s", history: [], message: "find me software intern roles", tools: [], model, ctx: { userId: "u", threadId: "t", now: 0, state: {} }, maxSteps: 4 });
 Deno.test("BR-6: the loop asks the model once, then keeps a standing draft unchanged", async () => {
   const seen: string[] = [];
   const two = "Nothing matched. I'll set a job alert for you.\n\nWhat city should I search? Do you have a school I should use?";

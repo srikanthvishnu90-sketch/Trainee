@@ -16002,7 +16002,7 @@ const CareerRouter = (() => {
     const out = { offer: null, ask: null, unknown: null, askBare: null, current: null, mentions: [] };
     const src = s(text).replace(/\bcounter[ -]?offers?\b/ig, "counter-proposal");
     const reM = /\$\s?(\d[\d,]*(?:\.\d{1,2})?)(\s?k\b)?/ig;
-    const employer = /\b(?:offer(?:ed|ing|s)?|proposed|came\s+back|(?:is|are|was|were)\s+paying|pay(?:s|ing)|quoted|countered|comes\s+to)\b/ig;
+    const employer = /\b(?:offer(?:ed|ing|s)?|proposed|came\s+back|(?:is|are|was|were)\s+paying|pay(?:s|ing)|(?:they|company|employer|recruiter|firm)\s+(?:will\s+)?pay|quoted|countered|comes\s+to)\b/ig;
     const user = /\b(?:counter(?:ing|ed)?(?:\s+(?:email|letter|message|proposal))?(?:\s+(?:at|to|with|for|asking(?:\s+for)?))?|ask(?:ing)?(?:\s+for)?|propos(?:e|ing)(?:\s+(?:a|an|that))?|meet\s+me\s+at|want(?:ing)?|target(?:ing)?|looking\s+for|hop(?:e|ing)\s+for|make\s+it|change\s+(?:it|the\s+\w+)\s+to|need|request(?:ing)?|push\s+for|go\s+for|would\s+like|['’]d\s+like|(?:draft|write|compose|send)\b[^.?!]{0,50}?\b(?:at|with|for))\b/ig;
     const current = /\b(?:i\s+(?:currently\s+|now\s+)?(?:make|earn|get|am\s+paid)|currently\s+(?:make|earn|get|paid|at)|(?:my|the)\s+(?:current|present)\s+(?:\w+\s+)?(?:pay|pays|rate|wage|job\s+pays)|current\s+(?:pay|rate|wage)|(?:my\s+)?(?:job|work)\s+(?:now\s+)?pays)\b/ig;
     const lastIdx = (re, str) => { let i = -1, mm; re.lastIndex = 0; while ((mm = re.exec(str))) i = mm.index; return i; };
@@ -16023,9 +16023,9 @@ const CareerRouter = (() => {
     };
     const oneTime = /\b(?:relocation|moving|signing|sign-on|bonus|allowance|stipend|equity|stock|shares|reimbursement|budget)\b/i;
     const TOK = "(?:an?\\s+hour|\\/\\s?h(?:ou)?r|per\\s+hour|hourly|for\\s+(?:the|this)\\s+(?:role|position|job)|instead|please|if\\s+possible|then|now)";
-    const unitlessHourly = (v, end) => !!(hint && hint.recorded != null && v <= 3 * Number(hint.recorded)
+    const unitlessHourly = (v, end) => !!(hint && hint.recorded != null && v <= 3 * Number(hint.recorded) && v >= Number(hint.recorded) / 3
       && new RegExp("^(?:" + TOK + "\\s*)*$", "i").test(src.slice(end).split(/[.,;!?\n]|\band\b|\bbut\b/i)[0].trim()));
-    let prevEnd = 0, mm;
+    let prevEnd = 0, prevRole = null, mm;
     while ((mm = reM.exec(src))) {
       const start = mm.index, end = start + mm[0].length;
       const seg = src.slice(prevEnd, start).split(/[.?!;\n]/).pop();
@@ -16043,9 +16043,12 @@ const CareerRouter = (() => {
       if (unit !== "hour" && attached(after, before)) unit = "one-time";
       const ci = lastIdx(current, seg);
       const ui = lastIdx(user, seg), ei = lastIdx(employer, seg.replace(current, (x) => " ".repeat(x.length)));
-      const role = ci >= 0 && ci >= ui && ci >= ei ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
+      let role = ci >= 0 && ci >= ui && ci >= ei ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
+      if (role === "unknown" && prevRole === "ask" && !/[.?!;\n]/.test(src.slice(prevEnd, start)) && /(?:\band\b|\bplus\b|&|,)\s*$/i.test(seg)) role = "ask";
       const v = Number(mm[1].replace(/,/g, ""));
       if (unit === "none" && role === "employer" && unitlessHourly(v, end)) unit = "hour";
+      if (role === "unknown" && unit !== "none" && /(?:hourly|annual|yearly)\s+(?:offer|rate|pay|wage|salary|base)(?:\s+rate)?\s*(?:is|of|at|=|:|was|will\s+be)?\s*$/i.test(seg)) role = "employer";
+      prevRole = role;
       out.mentions.push({ value: v, unit, role });
       prevEnd = end;
       if (unit === "hour") {
@@ -16080,7 +16083,7 @@ const CareerRouter = (() => {
       if (hint && hint.draft && cf.unknown != null) {
         if (hint.recorded != null) { if (Number(cf.unknown) !== Number(hint.recorded) && cf.ask == null && cf.askBare == null) cf.ask = cf.unknown; cf.unknown = null; }
       }
-      out.recHourly = cf.offer != null ? cf.offer : (cf.ask == null && cf.askBare == null && cf.current == null && !(hint && (hint.draft || hint.recorded != null)) ? cf.unknown : null);
+      out.recHourly = cf.offer;
       out.askHourly = cf.ask; out.offerHourly = cf.offer; out.reportedHourly = cf.offer; out.unknownHourly = cf.unknown; out.askBare = cf.askBare;
     }
     if (m) { out.hourly = Number(m[1]); out.hourlyText = m[0].replace(/\s+/g, " ").trim(); work = work.replace(m[0], " "); }
@@ -19044,7 +19047,7 @@ const CareerRouter = (() => {
         }
         if (!extensionContext && (thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || parseOfferFigures(text).hourly)) {
           const askFigs = parseOfferFigures(text, { recorded: thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || null, draft: true });
-          const hourlyBase = askFigs.offerHourly || thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || askFigs.unknownHourly || null;
+          const hourlyBase = askFigs.offerHourly || thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || null;
           askFigs.ask = askFigs.askHourly != null ? askFigs.askHourly : askFigs.askBare != null ? askFigs.askBare : null;
           if (askFigs.offerHourly != null) { try { ctx.offer = Object.assign({}, (ctx.offer && typeof ctx.offer === "object") ? ctx.offer : {}, { hourly_rate: askFigs.offerHourly }); negotiationThreadForWrite(ctx).hourly = askFigs.offerHourly; } catch {   } }
           if (askFigs.ask != null && hourlyBase && Number(askFigs.ask) <= Number(hourlyBase)) askFigs.ask = null;

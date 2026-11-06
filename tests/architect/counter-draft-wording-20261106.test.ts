@@ -194,6 +194,8 @@ Deno.test("CDW current pay is never saved as the offer, unitless or /hour, over 
       eq(r.intent, "negotiation_draft");
       assert(!/Thank you for the offer — \$22 an hour/.test(r.result.draft.body), r.result.draft.body);
       assert(recorded(ctx).hourly !== 22 && recorded(ctx).offerRate !== 22, JSON.stringify(recorded(ctx)));
+      assert(/meet me at \$27 an hour\?/.test(r.result.draft.body), "the explicit $27/hour ask is in the draft: " + r.result.draft.body);
+      eq(recorded(ctx).counter, 27);
     }
   }
 });
@@ -412,4 +414,35 @@ Deno.test("CDW the unit-before-amount rule is an exact pattern: 'hourly staff ge
   t = run("hourly rate for nights is $30; counter at $35/hour");
   eq(recorded(t.ctx).hourly, null); // intervening words: unitless, no recorded offer, fail-safe
   assert(!/Thank you for the offer — \$30 an hour/.test(t.body), t.body);
+});
+
+Deno.test("CDW an ask cue carries across 'and' in a clause; the thanks figure is only ever an employer-cued or recorded offer", () => {
+  const ask = (body: string) => /meet me at \$28 an hour\?/.test(body);
+  for (const off of ["$52,000 a year", "$2,000 signing bonus", "$3,000 relocation", "$60,000 total comp"]) {
+    const ctx = fresh();
+    const r = host.runTurn(`They offered ${off} (ask for $500 relocation and $28 an hour). Draft the counter email.`, ctx);
+    const body: string = r.result.draft.body;
+    assert(ask(body), `${off}: ${askLine(body)}`);
+    assert(!/Thank you for the offer — \$28 an hour/.test(body), `${off}: thanks for the ask: ${body}`);
+    eq(recorded(ctx).hourly, null, off);
+    eq(recorded(ctx).counter, 28, off);
+  }
+  const ctx = fresh();
+  host.runTurn(OFFER, ctx);
+  step(ctx, "the hourly wage was $24 — ask for $500 relocation and $28 an hour. Draft the counter email.", 24, 28);
+  for (const off of ["$2,000 signing bonus", "$3,000 relocation", "$60,000 total comp"]) {
+    const c2 = fresh();
+    host.runTurn(OFFER, c2);
+    step(c2, `the hourly wage was $24 — ask for $500 relocation and $28 an hour. They also offered ${off}. Draft the counter email.`, 24, 28);
+  }
+});
+Deno.test("CDW the unitless-hourly window is [O/3, 3xO] of the recorded offer", () => {
+  const hi = fresh();
+  host.runTurn("I got an offer of $300/hour.", hi);
+  host.runTurn("I got an offer of $26", hi);
+  eq(recorded(hi).hourly, 300); // $26 is below 300/3: not hourly, the offer is unchanged
+  const lo = fresh();
+  host.runTurn(OFFER, lo);
+  host.runTurn("I got an offer of $26", lo);
+  eq(recorded(lo).hourly, 26); // within [8, 72] of $24: by design
 });

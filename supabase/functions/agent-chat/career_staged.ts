@@ -217,6 +217,17 @@ export function adviceQuestion(message: string, intent: string | null, result: u
   return !/mock|drill|answer_score|session/i.test(kind);
 }
 
+// COUNTER DECISION (BETA C04, 2026-11-06): "They offered me $24/hour. Should I counter? If yes, draft the email" is a decision
+// question first. The router can only draft, and with no ask figure from the person it drafts around a blank (awaiting
+// target_hourly_rate) that it cannot approve: it never decides whether to counter. That turn goes to the brain, which
+// answers the decision from the offer, the confirmed facts and its read tools, and cannot send (STAGED_WITHHELD_TOOLS). The
+// router's held draft is the fallback when the brain is not served. A counter with a figure the person named stays code's.
+export function counterDecisionAsk(message: string, intent: string | null, result: unknown): boolean {
+  if (intent !== "negotiation_draft" || !result || typeof result !== "object") return false;
+  const r = result as Record<string, any>;
+  return r.awaiting === "target_hourly_rate" && r.counterDecision === true && (r.sends ?? 0) === 0 && /\bshould\b|\bworth\b/i.test(String(message ?? ""));
+}
+
 // A File page ask ("show me a File page for getting started with job applications. Do not apply or submit anything") is not a
 // job search, but the router reads its words as one: the "role" it searches for is "file page getting started applications do
 // submit anything", the list is empty, and the person is told "Nothing to show yet" with no page. When every word the search
@@ -288,6 +299,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (careerSwitcherOpenAsk(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "career_switcher_open_ask" };
   if (openCareerQuestion(o.env, o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "open_career_question" };
   if (adviceQuestion(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "advice_question" };
+  if (counterDecisionAsk(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "counter_decision" };
   if (!STAGED_BRAIN_INTENTS.includes(intent)) return { brain: false, mode, intent, reason: "action" };
   if (codeProduct(intent, probe.result)) return { brain: false, mode, intent, reason: "code_product" };
   return { brain: true, mode, intent, reason: "question" };

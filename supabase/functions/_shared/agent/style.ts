@@ -60,7 +60,7 @@ export const ALWAYS = ["T07", "T08"];
 // SITUATIONAL examples: the person's state decides them, because the closest-by-words example can pull the wrong way (an
 // "apply for me" message from a distressed person is nearest the apply example, which has no acknowledgement). They go in
 // after the two guards, so they are the last thing the model reads before the person's message.
-const DISTRESS = /\b(?:overwhelm(?:ed|ing)?|stress(?:ed|ful)?|scared|terrified|anxious|panick\w*|drowning|burn(?:ed|t)\s*out|exhausted|hopeless|discouraged|desperate|freaking\s+out|stuck|can'?t\s+(?:cope|take\s+(?:this|it)|handle\s+(?:this|it)))\b/i;
+export const DISTRESS = /\b(?:overwhelm(?:ed|ing)?|stress(?:ed|ful)?|scared|terrified|anxious|panick\w*|drowning|burn(?:ed|t)\s*out|exhausted|hopeless|discouraged|desperate|freaking\s+out|stuck|can'?t\s+(?:cope|take\s+(?:this|it)|handle\s+(?:this|it)))\b/i;
 const FIELD_MOVE = /\b(?:wanna|want\s+to|trying\s+to|hoping\s+to|looking\s+to|ready\s+to|thinking\s+(?:of|about))\s+(?:get\s+into|move\s+(?:in)?to|switch\s+(?:in)?to|go\s+into|break\s+into|change\s+to|do\s+something)\b|\bcareer\s+(?:change|switch|pivot)\b|\b(?:change|switch)\s+careers\b/i;
 export const SITUATIONAL: { id: string; when: RegExp }[] = [{ id: "T17", when: DISTRESS }, { id: "T18", when: FIELD_MOVE }];
 const situational = (message: string) => SITUATIONAL.filter((s) => s.when.test(String(message ?? "").replace(/[\u2019`]/g, "'"))).map((s) => STYLE_EXAMPLES.find((e) => e.id === s.id)!);

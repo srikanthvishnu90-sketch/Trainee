@@ -7,6 +7,7 @@
 //   leaks   no tool name, raw job id, uuid or JSON field name reaches the person.
 // Each finder returns what it found (for the one rewrite the loop asks for) and a fixer applies code's last resort.
 import { DEGREES, factLock, factText, norm, SCALE, TITLES, TOOLS } from "../essay_draft.ts";
+import { DISTRESS } from "./style.ts";
 import { personalSourceDenied as sourceDenied, personalSourceGuard } from "../personal_fact_source.ts";
 
 // ------------------------------------------------------------------------------------------------ sentences
@@ -520,3 +521,12 @@ export function unbackedPromises(reply: string, calls: { name: string; ok: boole
   });
   return out;
 }
+
+// S3 residual (H025): a person who says they are overwhelmed or stressed is acknowledged in the reply's FIRST sentence.
+// Flag only: the loop asks the model once; a draft that still lacks it is kept and recorded as "missing_ack".
+const ACK = /\b(?:that|this)\s+(?:sounds|is|feels)\b|\ba lot\b|\bi hear\b|\bunderstand\b|\bmakes sense\b|\btough\b|\bhard\b|\bstressful\b|\boverwhelm/i;
+export const missingAck = (userMessage: string, reply: string): boolean => {
+  if (!DISTRESS.test(String(userMessage ?? ""))) return false;
+  const first = pieces(String(reply ?? "").trim())[0]?.text ?? "";
+  return !ACK.test(first);
+};

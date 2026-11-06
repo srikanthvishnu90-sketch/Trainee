@@ -129,6 +129,7 @@ import { applyReadiness } from "../_shared/apply_readiness.ts"; // SPEC 2.2
 import { writeReadinessAsk } from "../_shared/readiness_ask.ts";
 import { summaryFacts } from "../_shared/apply_status_summary.ts"; // SPEC 6.5
 import { resultsFile, whatOf } from "../_shared/role_results.ts"; // ROLE + PAY RESULTS PAGE
+import { askedCount, type FilePrep, prepareFileRows, prepareOn, prepLine, rowsAsShortlist, wantsApply } from "../_shared/many_roles.ts"; // MANY ROLES, ONE FILE
 import { supabaseAccountStamp, supabaseConfirmedFacts, supabaseJobStore, type JobDeps } from "../_shared/telegram_jobs.ts";
 import { APPLY_ALL_INTENT, type ApplyAllOffer, applyAllYesTurn, isApplyAllYes, isConditionalYes, liveOfferRow, readOffer, supabaseStoppedAt } from "../_shared/apply_all_yes.ts"; // apply all by yes
 import { applyAllYesOn } from "./release_config.ts";
@@ -175,6 +176,14 @@ export function batchNotStartedReply(message: string): string {
   const ask = said ? applyManyAsk(said) : null;
   if (!said || !ask || ask.kind !== "first" || !ask.what) return BATCH_NOT_STARTED_REPLY;
   return `I haven't started that batch: nothing was searched, prepared or sent, because the runner for that kind of ask is not switched on. What does run: say "${said}" and I search the postings on file and put the best fits on your apply list; each one is prepared, shown to you exactly as it would be sent, and goes to the employer only after your yes to that card.`;
+}
+// MANY ROLES (many_roles.ts): what preparing a results File's roles came to, kept on the File's own record so the page says it.
+// deno-lint-ignore no-explicit-any
+async function keepFilePrep(admin: any, userId: string, listId: string, prep: FilePrep): Promise<void> {
+  try {
+    const store = supabaseJobStore(admin), meta = await store.recallListMeta?.(userId, listId);
+    if (meta) await store.rememberListMeta?.(userId, listId, { ...meta, prep });
+  } catch (e) { console.error("many roles: the File's preparation line was not kept:", (e as Error)?.message ?? e); }
 }
 const MAX_MESSAGE_LEN = 4000; // M2: cap input size (same cap as handler.ts)
 
@@ -1084,6 +1093,17 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const asking = !!queued.ask?.length;
         out = { reply: queued.reply, intent: asking ? EMPLOYER_ASK_INTENT : queued.intent, resultStatus: queued.status, contained: false, handler: "apply_queue" };
         if (asking) agentMeta = { employer_question: queued.ask };
+        // MANY ROLES (many_roles.ts): "apply to these" over the results File this thread last made queued its roles: the File's link
+        // follows as its own message, and the File says whether they are being prepared.
+        const lastFile = (loaded.snapshot as any)?.stores?.discovery?.lastResults;
+        const many = applyManyAsk(message);
+        if (typeof lastFile === "string" && many && !("what" in many && many.what) && (queued.status === "queued" || queued.status === "already")) {
+          const { prep } = await prepareFileRows({ on: true, total: queued.coverage?.total ?? 0, now: Date.now(), run: async () => queued });
+          await keepFilePrep(admin, user.id, lastFile, prep);
+          const link = await feedUrlsFor(Deno.env, user.id, lastFile, Date.now()).catch(() => ({ url: null }));
+          if (link.url) out = { ...out, reply: `${queued.reply}\n${link.url}`, parts: [queued.reply, link.url] };
+          agentMeta = { ...(agentMeta ?? {}), results_file: lastFile, file_prep: prep };
+        }
         // F09: the screen's question for a fact not confirmed rides the reply, so the next message can answer it.
         const sm = screenMeta(queued.screen);
         if (sm) agentMeta = { ...(agentMeta ?? {}), ...sm };
@@ -1205,8 +1225,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           : clock.sync("router", () => host.runTurn(message, ctx));
         // askFor: the router's search plus the parameters the message states (level, pay, season, employer, sponsorship), or a
         // role search the router did not run at all (posting_constraints.ts reads it from the message itself).
-        const f5Said = f5Free && !f5Prompt ? askFor(message, out, (ctx as any).discovery) : null;
+        // MANY ROLES (many_roles.ts): "apply to 15 data analyst roles" is the router's batch ask. With no batch executor running it
+        // is read as a search for that many roles: its File is made and, below, its roles are prepared (never a batch nobody runs).
+        const f5Batch = f5Free && !f5Prompt && out.intent === "career_batch_apply" && !(delegateBatch && batchExecutorLive) && wantsApply(message);
+        const f5Said = f5Free && !f5Prompt ? askFor(message, out, (ctx as any).discovery) ?? (f5Batch ? askFor(message, { intent: "career_discovery" }, (ctx as any).discovery) : null) : null;
         const f5Ask = f5Said?.ask ?? null;
+        const f5Want = f5Ask ? askedCount(message) : null; // "find me 50 ...": the File holds up to that many (RESULTS_FILE_MAX)
         let f5Offer: { offer: ApplyAllOffer; ask: string; resumeLine: boolean } | null = null; // the yes the results message ends with (apply_all_yes.ts)
         if (f5Ask) {
           const f5Meter = ledger.track(newMeter());
@@ -1215,14 +1239,19 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             const found = await clock.wait("search_judge", () => searchJudgeTurn({ clock, message, ask: f5Ask, userId: user.id, now: Date.now(), profile: (ctx as any).profile ?? null,
               sources: supabaseSearchSources(admin, { cpu: (stage, fn) => clock.sync(stage, fn), window: postings, jobs: { roleFamily: CareerJobs.roleFamily, seniorityBand: CareerJobs.seniorityBand, stripHtml: CareerJobs.stripHtml } }),
               judge: { on: f5JudgeOn, model: (payload) => callModel(f5Cfg, payload, { meter: f5Meter, role: "chat" }), cache: supabaseJudgeCache(admin),
-                n: Number(Deno.env.get("CAREER_JUDGE_N")) || undefined, standing: () => supabaseMemoryStore(admin).standing(user.id) } }));
+                n: Number(Deno.env.get("CAREER_JUDGE_N")) || undefined, standing: () => supabaseMemoryStore(admin).standing(user.id) }, want: f5Want }));
+            if (found && f5Batch) {
+              // The router's batch run for this ask is not kept: the search below answers it (as the not-started branch drops it).
+              delete (ctx as any).batchApplyState;
+              out = { ...out, intent: "career_discovery", result: undefined };
+            }
             if (found) {
               // ONBOARDING ROUND 2: the router's line that nothing is sent before the resume is confirmed (an apply ask with
               // no confirmed resume) stays with the search's own reply.
               const prof = (ctx as any).profile, facts: any[] = Array.isArray(prof?.facts) && !prof?._fromStatedFacts ? prof.facts : [];
               const confirmedResume = facts.some((f) => f && ["education", "experience", "project", "leadership", "skill"].includes(f.kind) && f.needs_confirmation !== true && (f.status == null || f.status === "confirmed"));
               const askText = String(message ?? "").toLowerCase();
-              const applyAsk = !/\?\s*$/.test(askText) && /\bapply\s+(?:to|for|at|me|on|now)\b|\bapply\b[^.?!]{0,40}\b(?:jobs?|roles?|postings?|positions?|internships?|openings?)\b|\bsubmit (?:my|an?) applications?\b/.test(askText);
+              const applyAsk = wantsApply(askText); // also "... and apply" (many_roles.ts)
               const resumeLine = f5Said?.append || confirmedResume || !applyAsk || /\bresume\b/i.test(found.reply) ? ""
                 : facts.some((f) => f && f.source === "resume-ingest" && f.needs_confirmation === true)
                 ? "\n\nAnd nothing is sent anywhere before your resume is confirmed: its entries are waiting for your word (reply \"yes, that's my resume\" if they're right)."
@@ -1244,9 +1273,27 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                 const made = await clock.wait("results_page", () => resultsFile({ userId: user.id, now: Date.now(), what: whatOf(f5Ask), floor: f5Ask.limits?.pay ?? null, picked, store: supabaseJobStore(admin),
                   name: prof?.basics?.name ?? null, source: found.source === "none" ? null : found.source,
                   read: found.source === "snapshot" ? picked.map((x) => String(x.posting?.fetched_on ?? "")).filter(Boolean).sort().at(-1) ?? null : null,
-                  links: (u, l) => feedUrlsFor(Deno.env, u, l, Date.now()) })).catch((e) => { console.error("results page: the list stands:", (e as Error)?.message ?? e); return null; });
+                  links: (u, l) => feedUrlsFor(Deno.env, u, l, Date.now()), asked: f5Want })).catch((e) => { console.error("results page: the list stands:", (e as Error)?.message ?? e); return null; });
                 if (made) {
-                  out = { ...out, reply: made.reply + resumeLine, parts: [made.parts[0], ...(resumeLine ? [resumeLine.trim()] : []), made.parts[1]] };
+                  // MANY ROLES: "apply to these" next means the roles on this File (the chat lists none of them), and the File is kept.
+                  (ctx as any).discovery = { ...(ctx as any).discovery, lastShortlist: rowsAsShortlist(made.rows), lastResults: made.listId };
+                  // "... and apply" / "apply to 15 ... roles": every role on the File goes on their apply queue and is prepared, through the
+                  // apply turn's own screens, resume check, pace and prepare door. Preparing sends nothing: each still needs their tap on its card.
+                  let prepSaid = "";
+                  if (applyAsk) {
+                    const { prep, result } = await prepareFileRows({ on: prepareOn(Deno.env), total: made.rows.length, now: Date.now(),
+                      run: () => applyTurn({ ...feature1.apply, message: "apply to all of them", userId: user.id, now: Date.now(), postings: supabasePostingsDb(admin), wants: supabaseWantStore(admin),
+                        apps: () => supabaseApplications(admin)(user.id), facts: screenFacts, limits: paceReader(admin, user.id), employerAnswers: () => employerAsk.answers(tid),
+                        shortlist: rowsAsShortlist(made.rows) }) });
+                    await keepFilePrep(admin, user.id, made.listId, prep);
+                    prepSaid = result?.ask?.length ? result.reply : prepLine(prep, result, { resumeSaid: !!resumeLine });
+                    agentMeta = { ...(agentMeta || {}), file_prep: prep, ...(result?.ask?.length ? { employer_question: result.ask } : {}) };
+                    if (result?.ask?.length) out = { ...out, intent: EMPLOYER_ASK_INTENT };
+                    else if (prep.queued) out = { ...out, intent: APPLY_QUEUE_INTENT };
+                  }
+                  const said = prepSaid ? `${made.parts[0]} ${prepSaid}` : made.parts[0];
+                  const sent = [said, ...(resumeLine ? [resumeLine.trim()] : []), made.parts[1]];
+                  out = { ...out, reply: prepSaid ? sent.join("\n") : made.reply + resumeLine, parts: sent };
                   agentMeta = { ...(agentMeta || {}), results_file: made.listId };
                   f5Offer = { offer: made.offer, ask: made.offerAsk, resumeLine: !!resumeLine };
                 }

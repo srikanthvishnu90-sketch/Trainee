@@ -241,6 +241,9 @@ export function applyManyAsk(message: string): ManyAsk | null {
   // engineering intern roles") is the broad ask, the batch delegation's (career_batch_apply), never this turn's.
   m = after.match(/^(?:all\s+)?(\d{1,3}|two|three|four|five|six|seven|eight|nine|ten)\s+(?:roles?|jobs?|postings?|positions?|internships?|openings?|of (?:them|these|those))\b/);
   if (m) return { kind: "first", n: numOf(m[1]) };
+  // MANY ROLES (2026-11-06): "these 20 roles", "those 12": a count of the listed postings, the first that many (was: read as all).
+  m = after.match(/^(?:all\s+(?:of\s+)?)?(?:these|those)\s+(\d{1,3})(?:\s+(?:roles?|jobs?|postings?|positions?|internships?|openings?|ones?))?(?:\s+please)?$/);
+  if (m) return { kind: "first", n: numOf(m[1]) };
   // MASS APPLY END TO END: "the good ones", "the ones that fit me", "the best matches": the listed postings their confirmed
   // facts fit. "the best 3" is a count (above); this is the list, filtered by fit.
   if (/^(?:all\s+(?:of\s+)?)?the\s+(?:good|best|strong|strongest|great|right|better)\s+(?:ones?|matches|fits?|roles?|jobs?|postings?|picks?)(?:\s+(?:you (?:just )?(?:found|listed|showed)(?: me)?|for me|on (?:the|that) list|please))*$/.test(after)

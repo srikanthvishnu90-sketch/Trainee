@@ -79,10 +79,15 @@ export interface JobStore {
 }
 // name: the person's first name as their profile states it (null: "you"); source: where the postings were read (the live board at
 // `at`, or the saved snapshot read on `read`); sources: how many boards the roles came from.
+// An apply ask made a results File (many_roles.ts): whether preparing its roles started (or the switch is off, the kick failed, or
+// nothing was queued), and how many of how many.
+export interface FilePrep { state: "started" | "off" | "failed" | "not_queued"; queued: number; total: number; at: number }
 export interface ListMeta { kind: "results"; what: string; floor: { amount: number; period: "hour" | "year" } | null; at: number;
   name?: string | null; source?: "live" | "snapshot" | null; read?: string | null; sources?: number;
   // The person's own marks on this page (private, reversible; they touch no application): roles set aside, and "Pause remaining".
-  dismissed?: string[]; paused?: { at: number } | null }
+  dismissed?: string[]; paused?: { at: number } | null;
+  // An apply ask made this File (many_roles.ts): whether preparing its roles started, and how many. Absent: nothing was asked.
+  prep?: FilePrep | null }
 
 export interface JobDeps {
   store: JobStore;

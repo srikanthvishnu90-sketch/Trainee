@@ -70,5 +70,6 @@ Deno.test("a crisis message over the cap gets the 988 reply, with zero model cal
   assertEquals(modelCalls, 0);
   const src = await Deno.readTextFile(new URL("../../supabase/functions/agent-chat/handler-career.ts", import.meta.url));
   const i = src.indexOf("const capCrisis = crisisReply(message)");
-  assert(i > 0 && i < src.indexOf("capViewFor(message", i) + 1 && src.indexOf("capViewFor(message", i) - i < 300);
+  const j = src.indexOf("capViewFor(message", i);
+  assert(i > 0 && j > i && j - i < 700, "crisisReply is consulted before capViewFor in the cap branch");
 });

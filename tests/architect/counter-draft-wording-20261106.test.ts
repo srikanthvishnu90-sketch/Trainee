@@ -485,3 +485,21 @@ Deno.test("CDW a comma-split clause keeps the ask cue of its sentence: '(ask for
   assert(/meet me at \$28 an hour\?/.test(body) && !/Thank you for the offer — \$28 an hour/.test(body), body);
   eq([recorded(ctx).hourly, recorded(ctx).counter], [null, 28]);
 });
+
+Deno.test("CDW timing words ('now', 'right now') are never a current-pay cue", () => {
+  const go = (msg: string, prior: boolean) => { const ctx = fresh(); if (prior) host.runTurn(OFFER, ctx); const r = host.runTurn(msg, ctx); return { ctx, body: String(r.result?.draft?.body ?? "") }; };
+  let t = go("Draft a counter at $28/hour right now", true);
+  assert(/meet me at \$28 an hour\?/.test(t.body), t.body);
+  eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [24, 28]);
+  t = go("They offered $26/hour right now.", false);
+  eq(recorded(t.ctx).hourly, 26);
+  t = go("I make $22/hour now and they offered $24/hour; counter at $28/hour", false);
+  assert(/Thank you for the offer — \$24 an hour/.test(t.body) && /meet me at \$28 an hour\?/.test(t.body), t.body);
+  eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [24, 28]);
+  t = go("currently I earn $20/hour; counter at $27/hour", true);
+  assert(/Thank you for the offer — \$24 an hour/.test(t.body) && /meet me at \$27 an hour\?/.test(t.body), t.body);
+  eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [24, 27]);
+  t = go("counter at $30/hour now", true);
+  assert(/meet me at \$30 an hour\?/.test(t.body), t.body);
+  eq(recorded(t.ctx).counter, 30);
+});

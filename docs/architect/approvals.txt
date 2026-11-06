@@ -159,3 +159,5 @@
 530 e5198d59cb36302fb5b743c45e9710c7a94ecd3f independent-review-agent-rv67 risk=low note=personsFriday-matches-product-every-minute-incl-9am-and-dst-only-turn-latency-race-left
 494 15c71848c77a5959e7b9798ef87abf740f5ef586 independent-review-agent-rv69 risk=low note=prep-chips-on-label-row-all-visible-360-light-dark-only-red-was-trunk-clock-bomb-530
 532 9469676235ec0a66787cd06372046122501493e1 independent-review-agent-rv70 risk=medium note=tree-identical-to-trunk-9469676-s2-pass-9-migrations-494-reply-code-unmeasured
+534 514a455af75f695d4f7cda9e2f6760494028449e independent-review-agent-rv71 risk=low note=prompt-only-one-question-opener-and-which-ones-list-ref-S3-187of190-ci-green
+535 f922e0a5bc35f8b58c5f90134c71a6147bc92e75 independent-review-agent-rv72 risk=medium note=tree-identical-to-trunk-f922e0a-r4-plus-534-prompt-only-s2-ok-pending-534-535-9-migrations-s3-remeasure-on-merge

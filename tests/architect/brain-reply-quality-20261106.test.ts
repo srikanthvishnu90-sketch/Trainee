@@ -74,7 +74,7 @@ Deno.test("BR-5: the prompt carries the new instructions", () => {
   assert(/never "X and Y"/.test(p), "no conjoined ask");
   assert(/State only what happened this turn/.test(p) && /I'll set a job alert/.test(p), "no promises");
   assert(/nothing goes out without their yes/.test(p), "says nothing sent");
-  assert(/With no resume on file, never present gaps as findings/.test(p) && /common gaps for this role/.test(p), "no resume gaps");
+  assert(/With no resume on file, never present gaps as findings/.test(p) && /List NO gaps/.test(p) && !/common gaps/.test(p), "no resume gaps");
   assert(/Interview prep/.test(p) && /timeline/.test(p) && /before any clarifying question/.test(p), "prep plan first");
   assert(!/the role and city they are after/.test(p), "the role-and-city line is gone");
   assert(/never say they were done or that you will do them/.test(STAGED_PROMPT_NOTE) && /at most one question/.test(STAGED_PROMPT_NOTE));

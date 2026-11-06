@@ -5,7 +5,7 @@
 //   external   touches the world (send, submit, message); NEVER runs here. It becomes a pending approval the
 //              person approves on its exact payload (WO-005), and the model is told it is waiting.
 // Messages use the Anthropic block shape (text / tool_use / tool_result); _shared/model_gateway.ts converts to OpenAI.
-import { bracketUntraced, factSources, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, closedNotes, unsourcedFigures, untracedFacts, waiverSolicits } from "./reply_guards.ts";
+import { bracketUntraced, factSources, multiAsk, unbackedPromises, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, closedNotes, unsourcedFigures, untracedFacts, waiverSolicits } from "./reply_guards.ts";
 import { urlsIn } from "../channel_shape.ts";
 import { STANDING_REFUSED, standingRefusal } from "./memory.ts";
 export type Effect = "read" | "write_own" | "external";
@@ -33,6 +33,8 @@ export interface TurnResult {
   tool_calls: { name: string; ok: boolean; effect: Effect | null; error?: string }[];
   pending_approvals: { tool: string; input: unknown; summary: string }[];
   stopped: "final" | "max_steps" | "model_error" | "incomplete_reply";
+  // Meta only, never changes the reply: a final draft that still asked several things or promised an alert after the one rewrite.
+  flags?: string[];
   show?: { intent: string; text: string; parts?: string[] };
   // JOB CARDS: the postings the turn's last successful search_jobs returned, for channels that show them as cards.
   postings?: unknown[];
@@ -325,16 +327,19 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       const leak = { tools: toolNames, typed, postings: postingsOf(seen) };
       // ADVERSARIAL ROUND 2: a GPA traces only to the person's own words and facts, never to what a tool read this turn.
       const personal = factSources({ state: o.ctx.state, message: said, history: o.history, results: [] });
-      const claims = unbackedClaims(reply, tool_calls), leaks = leakedWords(reply, leak), facts = untracedFacts(reply, sources, personal);
+      const claims = unbackedClaims(reply, tool_calls), promises = unbackedPromises(reply, tool_calls), leaks = leakedWords(reply, leak), facts = untracedFacts(reply, sources, personal);
       const money = unsourcedFigures(reply, [typed, ...seen, ...sources]);
       const waiver = waiverSolicits(reply, standingRefusal, o.message);
-      if ((claims.length || leaks.length || facts.length || money.length || waiver.length) && !checked && !repairing && steps < max) {
+      // FLAG ONLY (#540: code never cuts the model's answer): asked once; a draft that still violates is kept as written.
+      const manyAsks = multiAsk(reply) || promises.length > 0;
+      if ((claims.length || leaks.length || facts.length || money.length || waiver.length || manyAsks) && !checked && !repairing && steps < max) {
         checked = true;
         const told = [
           claims.length ? `Your reply says ${[...new Set(claims.map((c) => c.kind))].join(" and ")}, but no tool that does that succeeded this turn. Either call the tool now, or rewrite the reply without saying it happened.` : "",
           leaks.length ? `Your reply shows internal words the person must never see: ${leaks.join(", ")}. Say it in plain words; name a posting by its title and company.` : "",
           money.length ? `Your reply states pay, money or count figures that no tool returned this turn and they did not say: ${[...new Set(money.map((m) => m.figure))].join(", ")}. Remove them, and say you don't have a verified figure for that unless a tool returned it.` : "",
           waiver.length ? "Your reply offers them wording to send, offers to save something, or asks them to confirm something, after they asked to waive their yes or grant a standing permission. Never propose that wording, offer to save it or ask them to confirm it: say plainly it can't be kept, because every application and message still needs their yes on its card." : "",
+          manyAsks ? "Your reply asks more than one thing. End with at most ONE question, asking for ONE thing (never \"X and Y\", never a second question); state a sensible default for anything else instead of asking. Never promise an action this reply did not take (an alert, a text); say only what happened. Keep everything else in your answer." : "",
           facts.length ? `Your reply states things about the person that are not in their confirmed facts, their own messages or this turn's tool results: ${facts.map((f) => f.word).join(", ")}. Answer from supported facts, or ask a concrete question for what is missing. Only if they requested a draft or template, mark missing facts with fill-in brackets; a placeholder is not an answer to an informational question.` : "",
         ].filter(Boolean).join(" ");
         // WO-106 (eval run 39535880905: E009 saved this note as the person's standing instruction, E032 and E050 answered
@@ -373,7 +378,8 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         if (!out.trim()) repairNote = "Your last answer was empty. " + COMPLETENESS_REPAIR;
         continue;
       }
-      return { reply: out, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "final" };
+      const flags = [...(multiAsk(out) ? ["many_asks"] : []), ...(unbackedPromises(out, tool_calls).length ? ["unbacked_promise"] : [])];
+      return { reply: out, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), ...(flags.length ? { flags } : {}), stopped: "final" };
     }
     const pre = content.filter((b: any) => b && b.type === "text").map((b: any) => String(b.text ?? "")).join("").trim();
     if (pre) earlier.push(pre);

@@ -251,7 +251,7 @@ with no email after 24 hours (`unconfirmed_after_24h` in the rates).
    `select public.career_apply_cloud_runner_missing();` reads `{}`.
 3. **Snapshot.** `VERCEL_TOKEN=… VERCEL_TEAM_ID=team_mn5D4XBK4MgqL0KgNlzvzfky VERCEL_PROJECT_ID=prj_wU2a8WhzB8x1qIbqx3ChnhAVCIGv
    deno run -A scripts/cloud-runner/build-snapshot.ts <trunk commit>` prints `SNAPSHOT snap_…`. Rebuild on every engine
-   change. Snapshots expire 30 days after last use.
+   change. The script asks for a snapshot that never expires (`expiration: 0`); the API default is 7 days.
 4. **Edge function secrets** (Supabase → Edge Functions → Secrets), by name:
    `CLOUD_RUNNER_SECRET` (random, ≥ 32 characters), `CLOUD_DISPATCH_SECRET` (random), `VERCEL_TOKEN`, `VERCEL_TEAM_ID`,
    `VERCEL_PROJECT_ID`, `CLOUD_SANDBOX_SNAPSHOT_ID`, `CLOUD_BRIDGE_URL` (`https://<project>.supabase.co/functions/v1/career-cloud-runner`),

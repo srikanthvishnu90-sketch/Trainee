@@ -633,6 +633,7 @@ test('FEATURE 17: the cloud schedule reads CLOUD_DISPATCH_SECRET into Vault and 
   }
   const snap = fs.readFileSync(path.join(root, 'scripts/cloud-runner/build-snapshot.ts'), 'utf8');
   assert.match(snap, /deno cache [^"]*workers\/career-cloud\/prepare-runner\.ts/, 'the snapshot caches the preparation runner too');
+  assert.match(snap, /\/snapshot`, \{ expiration: 0 \}\)/, 'the snapshot never expires (the 7-day default deleted the last one)');
 });
 
 // trainee-file (hosted list page) and ops-monitor are public (verify_jwt = false in supabase/config.toml) and secret-gated:

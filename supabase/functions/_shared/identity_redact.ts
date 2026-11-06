@@ -63,7 +63,9 @@ const DATE_LIKE = /^(?:19|20)\d\d-\d\d?-\d\d?$/;
 const CVV_LABELED = /\b(cvv2?|cvc2?|csc|cvn|cid)(\s*(?:code|number)?\s*(?:is|=|:)?\s*)(\d{3,4})\b/gi;
 // Battery 2026-10-30 (scenarios-billing-cancel.test.ts): a card's security code by its other names ("security code is
 // 123", "the 3 digits on the back are 123"), and an IBAN, were kept word for word.
-const CVV_NAMED = /\b((?:card )?(?:security|verification) code|(?:three|3)[- ]digits? on the back(?: of (?:my|the) card)?)(\s*(?:is|are|=|:)?\s*)(\d{3,4})\b(?![-.\/]?\d|[ \n]+\d)/gi;
+const CVV_NAMED = /\b((?:card )?(?:security|verification) code|(?:three|3)[- ]digits? on the back(?: of (?:my|the) card)?)(\s*(?:is|are|=|:)?\s*)(\d{3,4})\b(?![-.\/]?\d)([ \n]+\d{3,4}\b(?![-.\/]?\d))?/gi;
+// A bare "security code" or "verification code" may be a code in two groups ("739\n201"): the second group goes too. Whatever the
+// first regex matched is removed, whatever follows it; a card label ("card security code", "3 digits on the back") keeps the group.
 const IBAN = /\b([A-Za-z]{2}\d{2}(?:[ ]?[A-Za-z0-9]{4}){2,7}(?:[ ]?[A-Za-z0-9]{1,4})?)\b/g;
 function ibanOk(raw: string) {
   const s = raw.replace(/ /g, "").toUpperCase();
@@ -134,7 +136,7 @@ export function redactIdentity(input: string, o: { codePending?: boolean } = {})
     removed.add("password"); return `${label}${sp}[password removed]`;
   });
   t = t.replace(CVV_LABELED, (_m, label, sep) => { removed.add("card"); return `${label}${sep}[security code removed]`; });
-  t = t.replace(CVV_NAMED, (_m, label, sep) => { removed.add("card"); return `${label}${sep}[security code removed]`; });
+  t = t.replace(CVV_NAMED, (_m, label: string, sep, _digits, more?: string) => { removed.add("card"); return `${label}${sep}[security code removed]${more && /card|digit/i.test(label) ? more : ""}`; });
   t = t.replace(IBAN, (m) => { if (!ibanOk(m)) return m; removed.add("account"); return "[number removed]"; });
   if (o.codePending) t = t.replace(BARE_CODE, () => { removed.add("code"); return "[code removed]"; });
   t = t.replace(KEY_SHAPED, () => { removed.add("key"); return "[key removed]"; });

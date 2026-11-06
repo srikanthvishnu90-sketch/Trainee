@@ -14,6 +14,8 @@ import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, supabaseParity } from "../flow/handler.ts";
 import { CODE_IN_CHAT_INTENT, CODE_IN_CHAT_REPLY, codeInChat } from "../../supabase/functions/_shared/career_code_in_chat.ts";
 import { chatInput } from "../../supabase/functions/agent-chat/_shared/chat_input.ts";
+import { redactIdentity } from "../../supabase/functions/_shared/identity_redact.ts";
+import { redactIdentity as trunkRedact } from "./helpers/identity_redact_trunk_e3da539.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -207,3 +209,21 @@ Deno.test({ name: "CRL-7 the real handler: a first message never puts a code in 
     await pg.stop();
   }
 } });
+
+// Greptile P1 on 80f645f: a labeled security code must be removed whatever follows it. The branch may remove MORE than trunk
+// ("Security code\n123\n456 Oak St" loses 456), never less: every digit run trunk removed is removed here too.
+const LABELED_CVV = ["The 3 digits on the back are 123\n2024 was the year I opened the account", "The 3 digits on the back are 123 2024 was the year", "The 3 digits on the back of my card are 123\n456 Oak St",
+  "My card security code is 123\n2024 is when I opened it", "Card security code: 4821 2024", "cvv 123\n2024", "CVV: 123 and the zip is 94107", "cvc2 is 123 2024",
+  "Security code 123\n456 Oak St", "Verification code: 739\n201", "Verification code: 739 201", "verification code is 739 2024", "security code: 739\n2024 was a good year",
+  "The security code is 123. 2024 was the year.", "OTP 123456\n2024", "one-time code 482913 2024", "Greenhouse sent me code 482913\n2024", "pin: 4821\n94107", "code is 4821 1200 jobs"];
+Deno.test("CRL-8 a labeled code or security code is removed whatever follows it: never weaker than trunk", () => {
+  for (const base of LABELED_CVV) for (const [pre, post] of [["", ""], ["Hello there. ", ""], ["", " Thanks!"], ["Line one\n", "\nLine three 2024"]]) {
+    const m = `${pre}${base}${post}`;
+    const t = trunkRedact(m).text, n = redactIdentity(m).text;
+    for (const tok of new Set(m.match(/\d+/g) ?? [])) if (!t.includes(tok)) assert(!n.includes(tok), `${JSON.stringify(m)}: trunk removed ${tok}, the branch kept it: ${JSON.stringify(n)}`);
+  }
+  for (const m of ["The 3 digits on the back are 123\n2024 was the year I opened the account", "Verification code: 739\n201"]) {
+    const n = redactIdentity(m).text;
+    assert(!n.includes("123") && !n.includes("739") && !n.includes("201"), n);
+  }
+});

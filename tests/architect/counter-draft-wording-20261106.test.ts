@@ -906,3 +906,24 @@ Deno.test("CDW market exit: a named market job title is the employer's role; a m
     heldForBrain(ctx, host.runTurn(msg, ctx), before, msg);
   }
 });
+
+// Review of 1275f3d5: the job title is an allowlist (market + research/data/analytics/access/making/insights/intelligence and/or a
+// job noun + a singular role noun). Comparison and benchmark words are never a title, and "elsewhere" is a third party.
+Deno.test("CDW market exit: market comparisons are never a job title; 'elsewhere' is a third party", () => {
+  for (const prior of [OFFER, null]) for (const row of [
+    "The market equivalent role pays $28/hour", "The market equivalent role offers $28/hour", "The market comparable position pays $28/hour",
+    "The market benchmark job pays $28/hour", "The market entry-level job pays $28/hour", "A market data engineer role elsewhere pays $28/hour",
+  ]) {
+    const msg = `${row}. Draft a counter at $30/hour`;
+    const ctx = fresh();
+    if (prior) host.runTurn(prior, ctx);
+    const before = recorded(ctx).hourly;
+    heldForBrain(ctx, host.runTurn(msg, ctx), before, msg);
+  }
+  for (const msg of ["Their market data engineer role offers $26/hour. Draft a counter at $30/hour", "They offered $26/hour for a market data engineer role. Draft a counter at $30/hour"]) {
+    const ctx = fresh();
+    host.runTurn(OFFER, ctx);
+    host.runTurn(msg, ctx);
+    eq(recorded(ctx).hourly, 26, msg);
+  }
+});

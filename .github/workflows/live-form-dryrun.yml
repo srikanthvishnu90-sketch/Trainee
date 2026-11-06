@@ -1,0 +1,63 @@
+# R4 of the test ladder (docs/architect/TEST-STRATEGY-2026-11-01.md): once a day, three REAL public application forms (one each
+# Greenhouse, Lever, Ashby; the biggest boards' first postings from packages/career-data/board-directory.json, so the same
+# employers day to day) are filled by the apply worker's own fill code with a synthetic person's facts, screenshotted and
+# STOPPED before the submit button (scripts/launch/live-form-dryrun.ts: reads only on the network, a submit guard in the page,
+# no click/press/submit in its source; tests/architect/live-form-dryrun.test.ts). Form-schema drift fails this run; it is
+# not a required check and never blocks a merge or a deploy. Yesterday's field sets come from the cache to detect change.
+# Cost: ~3-5 runner minutes a day (no model, no Vercel Sandbox, no secret).
+name: live-form-dryrun
+on:
+  schedule:
+    - cron: "17 11 * * *"
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: live-form-dryrun
+  cancel-in-progress: false
+jobs:
+  dryrun:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: Playwright and the runner's Chrome
+        run: |
+          npm install --prefix "$RUNNER_TEMP/tools" --no-audit --no-fund playwright@1.64.1
+          echo "UPMORE_PLAYWRIGHT_PATH=$RUNNER_TEMP/tools/node_modules/playwright" >> "$GITHUB_ENV"
+          echo "UPMORE_CHROMIUM_PATH=$(command -v google-chrome)" >> "$GITHUB_ENV"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Pick one real posting per ATS (read-only list GETs)
+        run: node scripts/career/pick-form-sources.cjs "$RUNNER_TEMP/live-form/sources.json" greenhouse=1,lever=1,ashby=1
+      - name: Yesterday's field sets
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/live-form/baseline
+          key: live-form-schema-${{ github.run_id }}
+          restore-keys: live-form-schema-
+      - name: Fill to the submit button, never press it
+        run: |
+          mkdir -p "$RUNNER_TEMP/live-form/baseline"
+          deno run -A scripts/launch/live-form-dryrun.ts --sources "$RUNNER_TEMP/live-form/sources.json" --out "$RUNNER_TEMP/live-form/out" --baseline "$RUNNER_TEMP/live-form/baseline/schema.json"
+      - name: Keep today's field sets for tomorrow
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/live-form/baseline"
+          if [ -f "$RUNNER_TEMP/live-form/out/schema.json" ]; then cp "$RUNNER_TEMP/live-form/out/schema.json" "$RUNNER_TEMP/live-form/baseline/schema.json"; fi
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ${{ runner.temp }}/live-form/baseline
+          key: live-form-schema-${{ github.run_id }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-form-dryrun-${{ github.run_id }}
+          path: ${{ runner.temp }}/live-form/out
+          if-no-files-found: warn
+          retention-days: 14

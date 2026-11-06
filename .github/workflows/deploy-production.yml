@@ -12,8 +12,9 @@
 # successful deploy approved at its merged head; reply quality not below the deployed SHA's; the Telegram acceptance suite
 # passed and its KNOWN_GAP list did not grow). S3's measurements are made first when missing (job "measure"). Any FAIL ends the run here: the deploy job never starts, so there is nothing
 # to approve. Inside the production environment, before go-live, the standard runs again with S5 (no feature enabled and
-# NOT_WIRED), which needs the environment's secrets. After go-live, S6: the live smoke runs again on its own; if go-live or
-# the smoke fails, the previous deployed SHA is deployed again (--skip-migrations: migrations are additive) and the run fails.
+# NOT_WIRED), which needs the environment's secrets. After go-live, S6: the live smoke runs again on its own, then the live
+# synthetic journeys (scripts/launch/live-journeys.ts, R3 of docs/architect/TEST-STRATEGY-2026-11-01.md); if go-live, the
+# smoke or the journeys fail, the previous deployed SHA is deployed again (--skip-migrations: migrations are additive) and the run fails.
 # The environment's required reviewers stay: a run that meets the standard still waits for that approval.
 name: deploy-production
 on:
@@ -199,10 +200,15 @@ jobs:
           bash scripts/launch/trainee-go-live.sh --sha "$GITHUB_SHA" --non-interactive --label "$TRAINEE_DEPLOY_LABEL"
       # S6: the live smoke again, on its own, after go-live finished (go-live's step 6 already ran it once): the health of
       # every function, trainee-telegram's webhook, and one synthetic "hi" turn of agent-chat for the test account
-      # (UPMORE_TEST_JWT). Its FAIL rolls back below.
+      # (UPMORE_TEST_JWT). Then, in the same step (so the rollback below covers it with no new condition), R3 of
+      # docs/architect/TEST-STRATEGY-2026-11-01.md: scripts/launch/live-journeys.ts --live, the synthetic Telegram journeys
+      # (signed webhook updates for one marked synthetic account: hi, resume, search, fit, card, approve against a sandbox
+      # employer on a .invalid host, status, outreach draft never sent, reminder, alerts watch, STOP), the production database
+      # read back through queries scoped to that account, everything it made erased at the end. Its FAIL rolls back below;
+      # NOT RUN (exit 2: an input missing) is a warning, never a pass and never a rollback.
       - name: S6 live smoke after deploy
         id: smoke
-        timeout-minutes: 15
+        timeout-minutes: 30
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
@@ -215,10 +221,20 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
           WHATSAPP_VERIFY_TOKEN: ${{ secrets.WHATSAPP_VERIFY_TOKEN }}
+          LIVE_JOURNEY_ENABLED: ${{ secrets.LIVE_JOURNEY_ENABLED }}
+          LIVE_JOURNEY_TELEGRAM_CHAT_ID: ${{ secrets.LIVE_JOURNEY_TELEGRAM_CHAT_ID }}
           TRAINEE_GO_LIVE_LOG: ${{ runner.temp }}/go-live/smoke.log
         run: |
           set -o pipefail
           bash scripts/launch/trainee-go-live.sh --sha "$GITHUB_SHA" --only-smoke --no-wait --non-interactive --label "github-actions run ${{ github.run_id }} smoke"
+          # R3: the live synthetic journeys (exit 0 PASS, 1 FAIL, 2 NOT RUN, 3 PASS with clean-up incomplete).
+          set +e
+          timeout 20m deno run -A scripts/launch/live-journeys.ts --live 2>&1 | tee "$RUNNER_TEMP/go-live/journeys.log"
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" = 2 ]; then echo "::warning title=S6 live journeys NOT RUN::an input is missing (docs/architect/TEST-STRATEGY-2026-11-01.md, owner inputs)"; exit 0; fi
+          if [ "$code" = 3 ]; then echo "::warning title=S6 live journeys passed; clean-up incomplete::the next run's preflight erases the synthetic account's leftovers"; exit 0; fi
+          exit "$code"
       # Rollback: go-live started and the commit did not end live and smoked (go-live or the smoke failed, was cancelled or
       # timed out) after the standard passed. The previous successful production deploy's SHA
       # (the standard job read it from this workflow's runs) is deployed again from its own checkout, exactly as
@@ -280,10 +296,11 @@ jobs:
           MASK_20: ${{ secrets.CAREER_PREPARE_AHEAD_TOKEN }}
           MASK_21: ${{ secrets.VERCEL_TOKEN }}
           MASK_22: ${{ secrets.CAREER_PREPARE_AHEAD_URL }}
+          MASK_23: ${{ secrets.LIVE_JOURNEY_TELEGRAM_CHAT_ID }}
         run: |
           out="$RUNNER_TEMP/deploy-artifacts"; mkdir -p "$out"
           cp "$RUNNER_TEMP/go-live/go-live.log" "$out/" 2>/dev/null || echo "no log was written"
-          cp "$RUNNER_TEMP/go-live/smoke.log" "$RUNNER_TEMP/go-live/rollback.log" "$out/" 2>/dev/null || true
+          cp "$RUNNER_TEMP/go-live/smoke.log" "$RUNNER_TEMP/go-live/journeys.log" "$RUNNER_TEMP/go-live/rollback.log" "$out/" 2>/dev/null || true
           cp "$HOME"/trainee-provenance/manifest-*.json "$out/" 2>/dev/null || echo "no provenance manifest was written"
           if [ -d "$HOME/trainee-rollback" ]; then cp -r "$HOME/trainee-rollback" "$out/rollback"; fi
           # Defence in depth over the script's own mask: every secret value (and the database password on its own) is

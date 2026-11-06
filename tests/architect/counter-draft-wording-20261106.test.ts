@@ -851,3 +851,22 @@ Deno.test("CDW market exit: cited sources hold the turn; only an auxiliary 'inde
     heldForBrain(ctx, host.runTurn(msg, ctx), before, msg);
   }
 });
+
+// Review of 76313b47: a market role name is incidental only as one named role ("a/the market research analyst role"); plural
+// generic roles ("market research analyst positions usually offer $28/hour") are a market claim and hold the turn.
+Deno.test("CDW market exit: a named market role is the employer's; plural market roles are a market claim", () => {
+  for (const prior of [OFFER, null]) for (const row of ["Market research analyst positions usually offer $28/hour", "Market research analyst jobs offer $28/hour"]) {
+    const msg = `${row}. Draft a counter at $30/hour`;
+    const ctx = fresh();
+    if (prior) host.runTurn(prior, ctx);
+    const before = recorded(ctx).hourly;
+    heldForBrain(ctx, host.runTurn(msg, ctx), before, msg);
+  }
+  for (const msg of ["They offered me a market research analyst role at $26/hour. Draft a counter at $30/hour", "The market research analyst role offers $26/hour. Draft a counter at $30/hour"]) {
+    const ctx = fresh();
+    host.runTurn(OFFER, ctx);
+    const r = host.runTurn(msg, ctx);
+    eq(recorded(ctx).hourly, 26, msg);
+    assert(/Thank you for the offer — \$26 an hour/.test(String(r.result?.draft?.body ?? "")), `${msg}: drafted`);
+  }
+});

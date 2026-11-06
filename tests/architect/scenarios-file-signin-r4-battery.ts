@@ -36,6 +36,7 @@
 // approval is of the payload's current hash, equal to the tag the tapped tab showed, for the account whose session tapped it,
 // once. The oracle never asks the product whether a request was allowed. No network: the phone and its texts are fakes.
 import assertNode from "node:assert/strict";
+import { phoneLeak as sharedPhoneLeak } from "./phone-leak.ts";
 import { handleFile, type AppRow, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
 import { hashTag, jobViewOf, refOf, type JobView, type ListMeta, type PreparedRow } from "../../supabase/functions/_shared/telegram_jobs.ts";
 import { mintFileToken } from "../../supabase/functions/_shared/file_link.ts";
@@ -86,10 +87,7 @@ const PEOPLE = {
 export type Who = "u" | "v";
 const privOf = (p: typeof PEOPLE.u) => [...p.companies, ...p.titles, p.resume, p.first, p.last].map((s) => s.toLowerCase());
 const PRIV: Record<Who, string[]> = { u: privOf(PEOPLE.u), v: privOf(PEOPLE.v) };
-// A random id or token (a session id is fs1. + 64 hex) can hold any 7 digits by chance: one did, failing CI on #557.
-// The check reads the page as a person would, so opaque runs are taken out first; every phone form is still looked for.
-const opaqueOut = (s: string) => s.replace(/[0-9a-f]{16,}/gi, " ").replace(/[A-Za-z0-9_-]{32,}/g, " ");
-const phoneLeak = (raw: string, phone: string) => { const body = opaqueOut(raw); const d10 = phone.replace(/[^0-9]/g, "").slice(-10); return body.includes(phone) || body.includes(d10) || body.includes(d10.slice(3)); };
+const phoneLeak = (body: string, phone: string) => sharedPhoneLeak(body, phone);
 const QUESTION = "Years of pricing analytics in a regulated market";
 
 // ---------------------------------------------------------------- the report

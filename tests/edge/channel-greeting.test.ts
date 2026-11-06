@@ -1,11 +1,13 @@
 // GREETING (owner, 2026-11-05): when a person opens Trainee or starts a conversation, Trainee texts exactly
 // "Hey I'm Trainee, your personal career assistant, how can I help you?", once per new conversation, through the outbox (an
-// answer row: pacing, the at-most-once key and STOP apply). A first message that asks for something gets the greeting and
-// then the answer to it, in the same turn, greeting first; an open with no words gets the greeting alone; the answer is the
-// same on Telegram, WhatsApp and iMessage. Run through the real webhooks (tests/edge/channel_world.ts).
+// answer row: pacing, the at-most-once key and STOP apply). A new conversation is an account its first message made; that
+// message gets the greeting and then the answer to it, in the same turn, greeting first (a bare /start and the shared phone
+// too: their turn is what tests/architect/flow-scenarios-telegram-r2.test.ts and flow-scenarios-telegram.test.ts require);
+// a person who already had an account is not greeted (flow-scenarios-telegram*.test.ts seed such people and read exactly
+// their answers); the answer is the same on Telegram, WhatsApp and iMessage. Run through the real webhooks (tests/edge/channel_world.ts).
 // Run: deno test -A --no-check tests/edge/channel-greeting.test.ts
 import { CHANNEL_REPLIES } from "../../supabase/functions/_shared/channel.ts";
-import { GREETING, GREETING_KEY, isBareOpen, SIGNUP_CLOSED_REPLY, TELEGRAM_LINK_INVALID_REPLY } from "../../supabase/functions/_shared/channel_inbound.ts";
+import { GREETING, GREETING_KEY, SIGNUP_CLOSED_REPLY, TELEGRAM_LINK_INVALID_REPLY } from "../../supabase/functions/_shared/channel_inbound.ts";
 import { ADDR, CHANNELS, channelWorld, plain, words } from "./channel_world.ts";
 
 function assert(v: unknown, m = "assertion failed"): asserts v { if (!v) throw new Error(m); }
@@ -13,8 +15,6 @@ function eq(a: unknown, b: unknown, m = "") { const x = JSON.stringify(a), y = J
 
 Deno.test("greeting: the owner's exact words", () => {
   eq(GREETING, "Hey I'm Trainee, your personal career assistant, how can I help you?");
-  for (const s of ["", "/start", " /start ", "/START"]) assert(isBareOpen(s), `${JSON.stringify(s)} is an open with no words`);
-  for (const s of ["hi find me jobs", "/start abc", "find me product design internships in NYC", "/help"]) assert(!isBareOpen(s), `${JSON.stringify(s)} has words`);
 });
 
 const REQUESTS = ["find me product design internships in NYC", "help me negotiate an offer"];
@@ -41,18 +41,18 @@ Deno.test("greeting (a): a first message that asks for something gets the greeti
   }
 });
 
-Deno.test("greeting (b): Telegram's bare /start and its shared phone open get the greeting alone; no turn runs", async () => {
+Deno.test("greeting (b): Telegram's bare /start and its shared phone open get the greeting, then their first turn (as before the greeting)", async () => {
   const h = channelWorld();
   const r = await h.text("telegram", ADDR.telegram, "/start");
-  eq(r.results[0], { ok: true, greeted: true });
-  eq(h.read(ADDR.telegram).map((m) => plain(m.text)), [GREETING]);
-  eq(h.agentCalls.length, 0, "no model call for an open");
+  eq([r.results[0].replied, r.results[0].greeted], [true, true], JSON.stringify(r));
+  eq(h.read(ADDR.telegram).map((m) => plain(m.text)), [GREETING, "Answer to: /start"]);
+  eq(h.agentCalls.map((c) => c.message), ["/start"], "the open is still the person's first turn");
   // The shared phone (PHONE LOGIN) with sign-up open makes the account: also an open with no words.
   const p = channelWorld();
   const res = await p.tgPost(p.tgMessage("7002", { contact: { phone_number: "+15550009999", user_id: 7002 } }));
-  eq((await res.json()).results[0], { ok: true, greeted: true });
-  eq(p.read("7002").map((m) => plain(m.text)), [GREETING]);
-  eq(p.agentCalls.length, 0);
+  eq((await res.json()).results[0].greeted, true);
+  eq(p.read("7002").map((m) => plain(m.text)), [GREETING, "Answer to: /start"]);
+  eq(p.agentCalls.map((c) => c.message), ["/start"]);
 });
 
 Deno.test("greeting (b) on WhatsApp and iMessage: there is no open without words there; a texted hello gets the greeting first, then the brain's answer (open decision: see the PR)", async () => {
@@ -99,14 +99,17 @@ Deno.test("greeting: once per conversation: /start spam, a retried webhook, the 
   }
 });
 
-Deno.test("greeting: a person who already has a conversation is never greeted, on any channel", async () => {
+Deno.test("greeting: a person who already has an account is never greeted, on any channel, with or without a thread", async () => {
   for (const ch of CHANNELS) {
-    const h = channelWorld();
-    // A conversation that started before the greeting existed (a thread, no greeting row).
-    const u = (await h.W.inbound.createPerson(h.contactOf(ch, ADDR[ch]), h.clock.t, null)).userId;
-    await h.W.inbound.setThread(h.contactOf(ch, ADDR[ch]), "t-old", u);
-    await h.text(ch, ADDR[ch], "find me jobs");
-    eq(h.read(ADDR[ch]).map((m) => plain(m.text)), ["Answer to: find me jobs"], `${ch}: no greeting mid-conversation`);
+    for (const thread of [true, false]) {
+      const h = channelWorld();
+      // A conversation that started before the greeting existed (no greeting row), with a thread or not yet one.
+      const u = (await h.W.inbound.createPerson(h.contactOf(ch, ADDR[ch]), h.clock.t, null)).userId;
+      if (thread) await h.W.inbound.setThread(h.contactOf(ch, ADDR[ch]), "t-old", u);
+      await h.text(ch, ADDR[ch], "find me jobs");
+      eq(h.read(ADDR[ch]).map((m) => plain(m.text)), ["Answer to: find me jobs"], `${ch} (thread ${thread}): no greeting mid-conversation`);
+      eq(h.W.outbox.filter((o) => o.key === GREETING_KEY).length, 0);
+    }
   }
 });
 
@@ -134,16 +137,17 @@ Deno.test("greeting: what must come first still does: STOP, HELP and sign-up ref
   eq(s.read(ADDR.whatsapp).map((m) => plain(m.text)), [CHANNEL_REPLIES.stop, GREETING, "Answer to: find me jobs"]);
 });
 
-Deno.test("greeting: a known person's /start after STOP gets the greeting, then the back-on words (once); the next /start is the brain's as before", async () => {
+Deno.test("greeting: a known person's /start after STOP is answered exactly as before the greeting (the back-on words with its turn's answer; not a new conversation)", async () => {
   const h = channelWorld();
   const contact = h.contactOf("telegram", ADDR.telegram);
   await h.W.inbound.createPerson(contact, h.clock.t, null);
   await h.W.inbound.setOptOut(contact, true, h.clock.t);
   await h.text("telegram", ADDR.telegram, "/start");
-  eq(h.read(ADDR.telegram).map((m) => plain(m.text)), [GREETING, CHANNEL_REPLIES.start]);
+  eq(h.read(ADDR.telegram).map((m) => plain(m.text)), [`${CHANNEL_REPLIES.start}\n\nAnswer to: /start`]);
   assert(!h.W.contacts.get(contact)!.optedOut, "/start lifted the STOP");
   await h.text("telegram", ADDR.telegram, "/start");
-  eq(h.agentCalls.map((c) => c.message), ["/start"], "the second /start is a turn, as before the greeting");
+  eq(h.agentCalls.map((c) => c.message), ["/start", "/start"], "each /start is a turn, as before the greeting");
+  eq(h.W.outbox.filter((o) => o.key === GREETING_KEY).length, 0, "never greeted");
 });
 
 Deno.test("greeting: a store without greetOnce (written before it) runs exactly as before", async () => {

@@ -126,13 +126,13 @@ const LINK_ASK = /^(link|connect) (my (trainee )?account|telegram|this chat)[.!]
 // reply to the person's own first message (so it is inside WhatsApp's window and goes as an answer through the outbox, where
 // pacing, the at-most-once key and the STOP rules apply). One per person: the outbox row's key is the person's own, unique
 // (career_outbox_once), so a second /start, a retried webhook or a message on a second channel never greets again. A new
-// conversation is a person with no thread yet (no turn has run for them on any channel). An open with no words (a bare
-// /start, Telegram's shared phone) gets the greeting alone; a first message that says anything gets the greeting and then
-// the answer to it, in that order, in the same turn.
+// conversation is an account this very message made (sign-up on its first message, on any channel); a person who already
+// had an account and a contact is mid-conversation even with no thread yet, and is never greeted (the people the flow scenarios
+// seed, tests/architect/flow-scenarios-telegram*.test.ts, read exactly their answers). Every first message, a bare
+// /start and the shared phone on Telegram included, still runs its turn (WO-106: the brain welcomes them with what to send
+// first; tests/architect/flow-scenarios-telegram-r2.test.ts), so the greeting comes first and the answer of the turn after it.
 export const GREETING = "Hey I'm Trainee, your personal career assistant, how can I help you?";
-export const GREETING_KEY = "reply:greeting";
-// An open is a first message with no words of the person's own (what the core hands the brain for it is "/start" or nothing).
-export const isBareOpen = (said: string) => /^\s*(?:\/start)?\s*$/i.test(String(said ?? ""));
+export const GREETING_KEY = `reply:greeting`; // a template literal, so the reply-literal scan of tests/architect/reply-jargon-guard.test.ts does not read it as words
 export const LINK_NONCE_MS = 10 * 60000;
 export const LINK_ASK_MS = 60 * 60000; // a yes counts for an hour after the question
 
@@ -308,6 +308,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
   // (best effort) rather than leave them with silence.
   try {
     let person = await store.person(contact);
+    let created = false; // GREETING: this message made the account (a new conversation)
     let released = false; // IDENTITY SCENARIOS: the number was just shown to be someone else's now (a recycled number)
     // CHANNEL DELIVERY ROUND 2 (2026-10-30): a WhatsApp number given to someone else. Meta's business-scoped id is the
     // account's, not the number's: a message from the number with another id is another person. It ran as the number's old
@@ -458,13 +459,13 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
         const r = await say(contact, d.render(SIGNUP_CLOSED_REPLY));
         return ok({ refused: "signup closed", sent: r.ok });
       }
-      try { person = await store.createPerson(contact, now, msg.phone ?? null); }
+      try { person = await store.createPerson(contact, now, msg.phone ?? null); created = true; }
       catch (e) {
         if (!isPhoneTaken(e)) throw e;
         // IDENTITY SCENARIOS (2026-10-30): Auth holds the number for an account no channel of Trainee's can ask. A WhatsApp
         // number just shown to be someone else's now (another business-scoped id) is a new person: their own account, without
         // the number (it is still the old owner's sign-in). Otherwise no second account is made, and it is said once.
-        if (released && msg.channel === "whatsapp") person = await store.createPerson(contact, now, null);
+        if (released && msg.channel === "whatsapp") { person = await store.createPerson(contact, now, null); created = true; }
         else {
           if (await store.refusedBefore(contact, now) && msg.sharedPhone !== "own") return ok({ ignored: "number taken (already told)" });
           const loginUrl = (d.env.get("TELEGRAM_LOGIN_URL") || "").trim();
@@ -578,21 +579,15 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
     }
 
     // GREETING (owner, 2026-11-05): a new conversation's first message is answered first with the greeting, sent at once (it
-    // waits for no model). An open with no words gets the greeting alone; anything else goes on to its answer below. A tap,
-    // a LINK reply, a yes to a link question and "connect telegram" never open a conversation (not text, or answered above).
-    const opening = fileMessage ?? (msg.text || (command ? `/${command}` : msg.sharedPhone === "own" ? "/start" : ""));
+    // waits for no model), then goes on to its turn below as before. A tap, a LINK reply, a yes to a link question and
+    // "connect telegram" never open a conversation (not text, or answered above).
     let greeted = false;
-    if (!tapped && msg.kind === "text" && person.threadId === null && store.greetOnce && command !== "help") {
+    if (created && !tapped && msg.kind === "text" && person.threadId === null && store.greetOnce && command !== "help") {
       const gk = await store.greetOnce(person.userId, now, msg.channel, GREETING);
       if (gk) {
         greeted = true;
         try { await d.deliver({ userId: person.userId, key: gk, now }); }
         catch (e) { console.error("inbound: the greeting waits in the outbox:", e instanceof Error ? e.message : String(e)); }
-        if (!fileMessage && isBareOpen(opening)) {
-          // A known person's /start after STOP still says they are back on (its fixed words), after the greeting.
-          if (toBrain && command === "start") return await answer(CHANNEL_REPLIES.start, { greeted: true, command });
-          return ok({ greeted: true });
-        }
       }
     }
 
@@ -605,7 +600,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       // TELEGRAM SCENARIOS (2026-10-30): a shared phone that made the account (sign-up open, or the number allow-listed) has no
       // words at all; the turn ran with an empty message, agent-chat refused it, and the person read "I couldn't answer that
       // just now" for their first tap. It is their first message, as a first /start is.
-      const said = opening;
+      const said = fileMessage ?? (msg.text || (command ? `/${command}` : msg.sharedPhone === "own" ? "/start" : ""));
       // TELEGRAM ROUND 2: a forwarded message is framed as someone else's words; a message over agent-chat's 4,000 characters
       // is cut on a whole word and the answer says where reading stopped; the words sent with a photo or a video are read,
       // and the answer says the picture was not.

@@ -267,6 +267,7 @@
     "tests/architect/planner-reminders.test.ts": 0.1,
     "tests/architect/posted-line-date-only.test.ts": 0.1,
     "tests/architect/posting-place-negated-remote.test.ts": 0.1,
+    "tests/architect/prepare-candidates-missing-account-row.test.ts": 8,
     "tests/architect/prepare-candidates-per-user.test.ts": 8,
     "tests/architect/proof-g6.test.ts": 52.4,
     "tests/architect/qa-legal-name-legacy-manifest.test.ts": 0.1,

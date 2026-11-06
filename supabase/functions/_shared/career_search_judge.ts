@@ -19,7 +19,8 @@
 // The person's own judge instructions ("judge prompt: ..."), kept as a standing instruction (career:standing, wiped by
 // an erase), go to the judge with every search. They can shape a verdict, never the grounding rule or the scale.
 // Nothing here sends, applies or writes anywhere but the person's own cache and standing instructions.
-import { searchPostings, type SearchHit } from "./career_search.ts";
+import { newFitCache, searchPostings, type SearchHit } from "./career_search.ts";
+import { NO_CLOCK, type TurnClock } from "../agent-chat/turn_clock.ts";
 import { searchWords, wordStem } from "./career_ingest.ts";
 import { correctedAsk } from "./search_correction.ts";
 import { hasLimits, type Limits, limitsLine, outsideLimits, REASON_WORDS, type Reason, searchTextOf, statedBand, statedPay } from "./posting_constraints.ts";
@@ -288,7 +289,7 @@ export function fromKbPosting(p: any): SourcePosting | null {
 const like = (w: string) => `%${String(w).replace(/[%_\\]/g, "")}%`;
 // The production sources: the service-role client the handler already holds, and the turn's snapshot window (the pool
 // the router was given) merged under the targeted snapshot read.
-export function supabaseSearchSources(admin: any, o: { window?: any[]; jobs?: any } = {}): SearchSources {
+export function supabaseSearchSources(admin: any, o: { window?: any[]; jobs?: any; cpu?: <T>(stage: string, fn: () => T) => T } = {}): SearchSources {
   return {
     async live(words, limit) {
       const base = () => admin.from("career_postings").select("*").is("closed_at", null);
@@ -313,7 +314,7 @@ export function supabaseSearchSources(admin: any, o: { window?: any[]; jobs?: an
         if (place) q = q.ilike("location", like(place));
         const r = await q.order("posted_at", { ascending: false, nullsFirst: false }).limit(limit);
         if (r.error) throw new Error(r.error.message);
-        read = (r.data ?? []).map((row: any) => fromKbPosting(CareerPool.mapKbPosting(row, o.jobs ?? null))).filter(Boolean) as SourcePosting[];
+        read = (o.cpu ?? ((_s: string, fn: () => SourcePosting[]) => fn()))("sj_snapshot_map", () => (r.data ?? []).map((row: any) => fromKbPosting(CareerPool.mapKbPosting(row, o.jobs ?? null))).filter(Boolean) as SourcePosting[]);
       } catch (e) { failure = `search the snapshot: ${(e as Error)?.message ?? e}`; console.error("career search:", failure); }
       const seen = new Set(read.map((p) => p.job_id));
       const win = (o.window ?? []).map(fromKbPosting).filter((p): p is SourcePosting => !!p && !seen.has(p.job_id));
@@ -411,7 +412,10 @@ export async function searchJudgeTurn(o: {
   message: string; ask: SearchAsk; userId: string; now: number; profile: any; sources: SearchSources;
   judge: { on: boolean; model?: Model | null; cache?: JudgeCache | null; n?: number; standing?: () => Promise<Standing[]> };
   show?: number;
+  // D6: the turn's stage clock, so the CPU spent ranking (scoring each posting) is counted as CPU, not as I/O wait.
+  clock?: TurnClock;
 }): Promise<SearchJudgeResult | null> {
+  const clock = o.clock ?? NO_CLOCK;
   const ask = o.ask, roleWords = roleWordsOf(ask.role), placeWords = ask.place ? searchWords(ask.place) : [];
   const show = Math.max(1, Math.min(12, o.show ?? 8));
   const N = Math.max(1, Math.min(JUDGE_MAX_N, Math.floor(Number(o.judge.n) || JUDGE_DEFAULT_N)));
@@ -423,7 +427,7 @@ export async function searchJudgeTurn(o: {
   let held = holdToLimits([], ask.limits), heldAny: ReturnType<typeof holdToLimits> | null = null;
   try {
     const liveAll = (await o.sources.live([...searchWords(ask.role), ...placeWords], 300)).filter((p) => !p.closed_at && inPlace(p, ask));
-    const h = holdToLimits(liveAll, ask.limits);
+    const h = clock.sync("sj_limits", () => holdToLimits(liveAll, ask.limits));
     if (liveAll.length && !h.kept.length) heldAny = h;
     if (h.kept.length) { source = "live"; pool = h.kept; held = h; }
     else liveRows = await o.sources.liveHasRows();
@@ -432,14 +436,14 @@ export async function searchJudgeTurn(o: {
   if (source === "none") {
     try {
       const snapAll = (await o.sources.snapshot(roleWords.map(wordStem), ask.place, 300)).filter((p) => inPlace(p, ask));
-      const h = holdToLimits(snapAll, ask.limits);
+      const h = clock.sync("sj_limits", () => holdToLimits(snapAll, ask.limits));
       if (snapAll.length && !h.kept.length) heldAny ??= h;
       if (h.kept.length) { source = "snapshot"; pool = h.kept; held = h; }
     } catch (e) { snapshotFailed = true; console.error("career search: snapshot", (e as Error)?.message ?? e); }
   }
   if (!liveNote && source !== "live") liveNote = liveRows ? "the live board has no match for it" : "the live board has no postings yet";
   // 2. The pre-filter: role first, then goal and fit to confirmed facts, then newest.
-  const found = searchPostings(pool, roleWords.join(" "), o.profile, 50);
+  const found = clock.sync("sj_rank", () => searchPostings(pool, roleWords.join(" "), o.profile, 50, newFitCache()));
   const hits: SearchHit[] = found.postings;
   if (!hits.length) {
     // A source that could not be read is not evidence of no postings: the router's own reply stands.

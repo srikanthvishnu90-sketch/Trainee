@@ -37284,11 +37284,32 @@ const CareerRouter = (() => {
   }
 
   // ---------- discovery / shortlist (131 plan + 121 scoring) ----------
+  // D6 (Telegram HTTP 546, CPU time): the ask's own cheap filters (company, place, level) run BEFORE the expensive per-posting
+  // preCheck + scoreFit + parseJD, so a search "in Chicago" scores only the Chicago/remote postings. `ranked` is the same list in
+  // the same order as scoring everything and filtering after (those filters only remove rows; ghostGuard and the sort are
+  // per-row / stable). When the filtered pool leaves nothing (or the ask names an employer) the full pass runs instead, so the
+  // honest-empty reply's counters (family.*, excluded) are exactly what they were. On a non-empty answer `excluded` and
+  // `family.hard/scoredOut/company/location/band` cover the scored postings only: nothing reads them unless the list is empty.
   function rankedShortlist(profile, ctx, opts) {
     const o = opts || {};
-    const now = nowOf(ctx || {});
+    const hasLoc = !!(o.locations && o.locations.size);
+    if (o.employer || !(o.company || hasLoc || o.bands)) return rankedShortlistFull(profile, ctx, o);
     const adapted = postingsFromCtx(ctx);
     const deduped = Jobs && Jobs.dedupe ? Jobs.dedupe(adapted) : adapted;
+    const passes = (p) => (!o.company || lc(p.company).includes(o.company))
+      && (!hasLoc || o.locations.has(lc((p.location || "").split(",")[0].split("—")[0].trim())) || (o.locations.has("remote") && p.remote === "remote"))
+      && (!o.bands || o.bands.has(p.seniority_band));
+    const r = rankedShortlistFull(profile, ctx, o, { adapted, deduped, scoreSet: deduped.filter(passes) });
+    return r.ranked.length ? r : rankedShortlistFull(profile, ctx, o);
+  }
+  // D6: postings the router has run through scoreFit in this isolate (logged as scored_n on the turn's CPU line).
+  let routerScored = 0;
+  const scoredCount = () => routerScored;
+  function rankedShortlistFull(profile, ctx, opts, pre) {
+    const o = opts || {};
+    const now = nowOf(ctx || {});
+    const adapted = pre ? pre.adapted : postingsFromCtx(ctx);
+    const deduped = pre ? pre.deduped : (Jobs && Jobs.dedupe ? Jobs.dedupe(adapted) : adapted);
     const sp = scoringProfile(profile);
     const excluded = [], scored = [];
     // MUSE-F-006: where the asked families' own postings went, filter by filter, so an empty answer can say the true
@@ -37296,12 +37317,13 @@ const CareerRouter = (() => {
     const famSet = o.askFamilies && o.askFamilies.length ? new Set(o.askFamilies) : null;
     const inFam = (p) => !!famSet && famSet.has(p && p.role_family);
     const family = { onList: famSet ? deduped.filter(inFam).length : null, hard: 0, scoredOut: 0, company: 0, location: 0, band: 0, firstHardReason: null };
-    for (const posting of deduped) {
-      const pre = preCheck(posting, profile, now);
-      if (pre.length) { excluded.push({ id: posting.corpus_id, reasons: pre }); if (inFam(posting)) { family.hard++; family.firstHardReason = family.firstHardReason || pre[0]; } continue; }
+    for (const posting of (pre ? pre.scoreSet : deduped)) {
+      const pre0 = preCheck(posting, profile, now);
+      if (pre0.length) { excluded.push({ id: posting.corpus_id, reasons: pre0 }); if (inFam(posting)) { family.hard++; family.firstHardReason = family.firstHardReason || pre0[0]; } continue; }
       // A6: when the caller carries the ASK's role families, 121's opt-in
       // exclusion drops cross-family postings here — they can never surface
       // as a "closest fit" for a different-domain ask (SC-065).
+      routerScored++;
       const fit = Jobs.scoreFit(posting, sp, null, o.askFamilies && o.askFamilies.length ? { askFamilies: o.askFamilies } : undefined);
       if (fit.excluded) { excluded.push({ id: posting.corpus_id, reasons: fit.reasons }); if (inFam(posting)) family.scoredOut++; continue; }
       const jdSkills = Tailor ? Tailor.parseJD(posting.jd_text || "") : { mustHaveSkills: [] };
@@ -53966,7 +53988,7 @@ const CareerRouter = (() => {
   }
   return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf,
     // C01: the name-match internals, for the old-vs-new equivalence test (tests/career-c01-cpu-hot-path.test.cjs) only.
-    _c01NameMatch: { ltLexicon, ltFormMatches, ltEsc, ltPlain, ltClean, ltIsPlace, ltIsSchool, postingsFromCtx } };
+    _d6Full: rankedShortlistFull, scoredCount, _c01NameMatch: { ltLexicon, ltFormMatches, ltEsc, ltPlain, ltClean, ltIsPlace, ltIsSchool, postingsFromCtx } };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerRouter;
 

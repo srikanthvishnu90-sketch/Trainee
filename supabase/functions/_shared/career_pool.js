@@ -131,6 +131,9 @@ const CareerPool = (() => {
     const d = deps || {};
     if (typeof d.readRows !== "function") throw new Error("career pool: a readRows(spec) function is required — the loader never invents a data source");
     const jobs = d.jobs || null;
+    // D6: an optional (stage, fn) => fn() wrapper the composition root binds to its turn clock, so the CPU of mapping the rows
+    // (HTML strip + classifiers, per row) is counted as CPU and not as the read's I/O wait. Absent: the bare call.
+    const cpu = typeof d.cpu === "function" ? d.cpu : (_stage, fn) => fn();
     const limit = Number.isSafeInteger(d.limit) && d.limit > 0 ? d.limit : DEFAULT_LIMIT;
     async function loadPool() {
       let rows;
@@ -147,12 +150,14 @@ const CareerPool = (() => {
       if (!Array.isArray(rows)) return { postings: [], fetchedOn: null, error: "KB_POOL_READ_FAILED" };
       const postings = [];
       let fetchedOn = null;
-      for (const row of rows) {
-        const p = mapKbPosting(row, jobs);
-        if (!p) continue;
-        postings.push(p);
-        if (p.fetched_on && (!fetchedOn || p.fetched_on > fetchedOn)) fetchedOn = p.fetched_on;
-      }
+      cpu("pool_map", () => {
+        for (const row of rows) {
+          const p = mapKbPosting(row, jobs);
+          if (!p) continue;
+          postings.push(p);
+          if (p.fetched_on && (!fetchedOn || p.fetched_on > fetchedOn)) fetchedOn = p.fetched_on;
+        }
+      });
       return { postings, fetchedOn, error: null };
     }
     // V240 LIVE-FIX (probe f2): the recency window is a discovery
@@ -184,10 +189,7 @@ const CareerPool = (() => {
       }
       if (!Array.isArray(rows)) return { postings: [], error: "KB_POOL_READ_FAILED" };
       const postings = [];
-      for (const row of rows) {
-        const p = mapKbPosting(row, jobs);
-        if (p) postings.push(p);
-      }
+      cpu("pool_map", () => { for (const row of rows) { const p = mapKbPosting(row, jobs); if (p) postings.push(p); } });
       return { postings, error: null };
     }
     return { loadPool, loadTargeted };

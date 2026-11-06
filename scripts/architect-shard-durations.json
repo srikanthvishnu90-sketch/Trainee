@@ -298,6 +298,7 @@
     "tests/architect/routing-scenarios.test.ts": 1.7,
     "tests/architect/scale-fairness-pg.test.ts": 8,
     "tests/architect/scale-fairness.test.ts": 0.2,
+    "tests/architect/search-cpu-20261106.test.ts": 1.5,
     "tests/architect/scenarios-adversarial-r2.test.ts": 6.2,
     "tests/architect/scenarios-apply-r2-forms-2.test.ts": 13,
     "tests/architect/scenarios-apply-r2-forms.test.ts": 11,

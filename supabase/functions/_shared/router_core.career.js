@@ -13618,17 +13618,32 @@ const CareerRouter = (() => {
 
   function rankedShortlist(profile, ctx, opts) {
     const o = opts || {};
-    const now = nowOf(ctx || {});
+    const hasLoc = !!(o.locations && o.locations.size);
+    if (o.employer || !(o.company || hasLoc || o.bands)) return rankedShortlistFull(profile, ctx, o);
     const adapted = postingsFromCtx(ctx);
     const deduped = Jobs && Jobs.dedupe ? Jobs.dedupe(adapted) : adapted;
+    const passes = (p) => (!o.company || lc(p.company).includes(o.company))
+      && (!hasLoc || o.locations.has(lc((p.location || "").split(",")[0].split("—")[0].trim())) || (o.locations.has("remote") && p.remote === "remote"))
+      && (!o.bands || o.bands.has(p.seniority_band));
+    const r = rankedShortlistFull(profile, ctx, o, { adapted, deduped, scoreSet: deduped.filter(passes) });
+    return r.ranked.length ? r : rankedShortlistFull(profile, ctx, o);
+  }
+  let routerScored = 0;
+  const scoredCount = () => routerScored;
+  function rankedShortlistFull(profile, ctx, opts, pre) {
+    const o = opts || {};
+    const now = nowOf(ctx || {});
+    const adapted = pre ? pre.adapted : postingsFromCtx(ctx);
+    const deduped = pre ? pre.deduped : (Jobs && Jobs.dedupe ? Jobs.dedupe(adapted) : adapted);
     const sp = scoringProfile(profile);
     const excluded = [], scored = [];
     const famSet = o.askFamilies && o.askFamilies.length ? new Set(o.askFamilies) : null;
     const inFam = (p) => !!famSet && famSet.has(p && p.role_family);
     const family = { onList: famSet ? deduped.filter(inFam).length : null, hard: 0, scoredOut: 0, company: 0, location: 0, band: 0, firstHardReason: null };
-    for (const posting of deduped) {
-      const pre = preCheck(posting, profile, now);
-      if (pre.length) { excluded.push({ id: posting.corpus_id, reasons: pre }); if (inFam(posting)) { family.hard++; family.firstHardReason = family.firstHardReason || pre[0]; } continue; }
+    for (const posting of (pre ? pre.scoreSet : deduped)) {
+      const pre0 = preCheck(posting, profile, now);
+      if (pre0.length) { excluded.push({ id: posting.corpus_id, reasons: pre0 }); if (inFam(posting)) { family.hard++; family.firstHardReason = family.firstHardReason || pre0[0]; } continue; }
+      routerScored++;
       const fit = Jobs.scoreFit(posting, sp, null, o.askFamilies && o.askFamilies.length ? { askFamilies: o.askFamilies } : undefined);
       if (fit.excluded) { excluded.push({ id: posting.corpus_id, reasons: fit.reasons }); if (inFam(posting)) family.scoredOut++; continue; }
       const jdSkills = Tailor ? Tailor.parseJD(posting.jd_text || "") : { mustHaveSkills: [] };
@@ -24978,7 +24993,7 @@ const CareerRouter = (() => {
     } catch {   }
   }
   return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf,
-    _c01NameMatch: { ltLexicon, ltFormMatches, ltEsc, ltPlain, ltClean, ltIsPlace, ltIsSchool, postingsFromCtx } };
+    _d6Full: rankedShortlistFull, scoredCount, _c01NameMatch: { ltLexicon, ltFormMatches, ltEsc, ltPlain, ltClean, ltIsPlace, ltIsSchool, postingsFromCtx } };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerRouter;
 

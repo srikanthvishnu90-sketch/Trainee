@@ -142,6 +142,9 @@ function logoOrigins(env: { get(k: string): string | undefined }): string {
   try { const u = new URL(tpl.split("{domain}").join("example.com")); if (u.protocol === "https:") origin = u.origin; } catch { /* no logo provider */ }
   return [origin, origin.includes("google.com") ? "https://*.gstatic.com" : ""].filter(Boolean).join(" ");
 }
+// Logos off (a TRAINEE_LOGO_URL that is not "self", "google" or an https template): no logo of any kind, an ATS one included, and
+// img-src stays 'none'.
+const logosOff = (env: { get(k: string): string | undefined }) => !selfLogos(env) && !logoOrigins(env);
 async function headers(type: string, env: { get(k: string): string | undefined }): Promise<Record<string, string>> {
   // same-origin, not no-referrer: the page's own posts then carry its Origin (which the cross-site check reads; under no-referrer a
   // browser sends "Origin: null"), and nothing is ever sent to another site.
@@ -150,6 +153,7 @@ async function headers(type: string, env: { get(k: string): string | undefined }
 }
 // A page with rows that show an ATS-published logo: its img-src gains exactly those logos' hosts (and nothing else, on no other page).
 async function logoCsp(env: { get(k: string): string | undefined }, logos: Array<string | null | undefined>): Promise<Record<string, string>> {
+  if (logosOff(env)) return {};
   const hosts = [...new Set(logos.map((l) => { const a = atsLogoUrl(l); return a ? new URL(a).hostname : ""; }).filter(Boolean))].map((h) => `https://${h}`);
   if (!hosts.length) return {};
   const csp = (await headers("text/html", env))["content-security-policy"];
@@ -220,6 +224,7 @@ function sendOf(p: PreparedRow): { items: { label: string; value: string; needs?
 }
 // The logo only from the employer's own domain, through the configured provider, https only; the CSP allows that provider's origin only.
 function rowLogo(job: JobView, env: { get(k: string): string | undefined }): string | null {
+  if (logosOff(env)) return null; // off means no logos at all, checked before the ATS logo, so it adds no host to the CSP either
   // First choice: the logo the ATS itself published for this posting's board (never built from the company's name).
   const ats = atsLogoUrl(job.logo_url);
   if (ats) return ats;

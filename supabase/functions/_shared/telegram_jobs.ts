@@ -45,7 +45,7 @@ export interface JobView {
   pay: string | null; level: string | null; remote: "remote" | "hybrid" | "onsite" | null;
   posted_at: string | null; first_seen_at: string | null; deadline: string | null; source: string | null;
   reasons: string[]; gaps: string[]; company_domain: string | null;
-  logo_url?: string | null; // a logo the ATS itself published for this posting's board (an https image on a page_csp.ts ATS_LOGO_HOSTS host)
+  logo_url?: string | null; // a logo the ATS itself published for this posting's board (an https image matching a page_csp.ts ATS_LOGO_RULES rule)
   // A results list's role (role_results.ts): the pay the posting states, as numbers, with its period, currency and own words. The
   // page renders from this, never by re-reading `pay` (which is display text).
   pay_parsed?: { min: number; max: number; period: "hour" | "month" | "year" | null; currency: string; text: string; up_to?: boolean } | null;

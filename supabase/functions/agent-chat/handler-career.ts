@@ -1149,13 +1149,15 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       } else if (capHeld) {
         // PR-5 (2026-11-06): the allowance is spent, so the brain is not tried (zero model calls): code's views (cap_views.ts).
         const at = { now: Date.now(), unread: capHeld === "unread" };
-        let view = capViewFor(message, at);
+        // A crisis message is code's 988 reply first, as in the router else-block below (crisis.ts).
+        const capCrisis = crisisReply(message);
+        let view = capCrisis ? { reply: capCrisis, intent: CRISIS_INTENT, status: "completed" as const } : capViewFor(message, at);
         if (!view) {
           await ensurePool();
           out = clock.sync("router", () => host.runTurn(message, ctx));
           if (!out.intent || CAP_REPLACED_INTENTS.includes(out.intent)) view = capPausedView(at);
         }
-        if (view) out = { reply: view.reply, intent: view.intent, resultStatus: view.status, contained: false, handler: "cap_view" };
+        if (view) out = { reply: view.reply, intent: view.intent, resultStatus: view.status, contained: false, handler: capCrisis ? "crisis" : "cap_view" };
         agentMeta = { ...(agentMeta || {}), model_limit: capHeld };
       } else {
         // FEATURE 5: job search ranked by fit and judged (_shared/career_search_judge.ts). "judge prompt: ..." keeps the

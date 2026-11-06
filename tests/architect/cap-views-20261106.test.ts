@@ -61,3 +61,14 @@ Deno.test("the handler asks exhausted() before trying the brain", async () => {
   assert(i > 0 && i < src.indexOf("const meter = ledger.track(newMeter())", i - 200) + 1);
   assertStringIncludes(src, "capViewFor(message");
 });
+
+Deno.test("a crisis message over the cap gets the 988 reply, with zero model calls", async () => {
+  const { crisisReply } = await import("../../supabase/functions/agent-chat/crisis.ts");
+  const text = "I don't want to live anymore";
+  assert(crisisReply(text));
+  assertEquals(await capped(50_000).exhausted(), "limit");
+  assertEquals(modelCalls, 0);
+  const src = await Deno.readTextFile(new URL("../../supabase/functions/agent-chat/handler-career.ts", import.meta.url));
+  const i = src.indexOf("const capCrisis = crisisReply(message)");
+  assert(i > 0 && i < src.indexOf("capViewFor(message", i) + 1 && src.indexOf("capViewFor(message", i) - i < 300);
+});

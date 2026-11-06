@@ -40686,7 +40686,7 @@ const CareerRouter = (() => {
     const reM = /\$\s?(\d[\d,]*(?:\.\d{1,2})?)(\s?k\b)?/ig;
     const employer = /\b(?:offer(?:ed|ing|s)?|proposed|came\s+back|(?:is|are|was|were)\s+paying|pay(?:s|ing)|(?:they|company|employer|recruiter|firm)\s+(?:will\s+)?pay|quoted|countered|comes\s+to)\b/ig;
     const user = /\b(?:counter(?:ing|ed)?(?:\s+(?:email|letter|message|proposal))?(?:\s+(?:at|to|with|for|asking(?:\s+for)?))?|ask(?:ing)?(?:\s+for)?|propos(?:e|ing)(?:\s+(?:a|an|that))?|meet\s+me\s+at|want(?:ing)?|target(?:ing)?|looking\s+for|hop(?:e|ing)\s+for|make\s+it|change\s+(?:it|the\s+\w+)\s+to|need|request(?:ing)?|push\s+for|go\s+for|would\s+like|['’]d\s+like|(?:draft|write|compose|send)\b[^.?!]{0,50}?\b(?:at|with|for))\b/ig;
-    const current = /\b(?:i\s+(?:currently\s+|now\s+)?(?:make|earn|get|am\s+paid)|currently\s+(?:make|earn|get|paid|at)|(?:my|the)\s+(?:current|present)\s+(?:\w+\s+)?(?:pay|pays|rate|wage|job\s+pays)|current\s+(?:pay|rate|wage)|(?:my\s+)?(?:job|work)\s+(?:now\s+)?pays)\b/ig;
+    const current = /\b(?:i\s+(?:currently\s+|now\s+)?(?:make|earn|get|am\s+paid|get\s+paid)|i['’]m\s+at|currently\b|now\s+pay\s+me|pays\s+me\s+now|currently\s+(?:make|earn|get|paid|at)|(?:my|the)\s+(?:current|present)\s+(?:\w+\s+)?(?:pay|pays|rate|wage|job\s+pays)|current\s+(?:pay|rate|wage)|(?:my\s+)?(?:job|work)\s+(?:now\s+)?pays)\b/ig;
     const lastIdx = (re, str) => { let i = -1, mm; re.lastIndex = 0; while ((mm = re.exec(str))) i = mm.index; return i; };
     // A unit/purpose word attaches to a figure only as its adjacent noun phrase ("$500 relocation allowance", "$2,000 signing bonus")
     // or as "<noun> of $X"; a later word in the sentence, a connector, or a negation ("with no relocation allowance") never does.
@@ -40738,7 +40738,8 @@ const CareerRouter = (() => {
       const ci = lastIdx(current, seg);
       // an employer word inside the current-pay phrase ("my current job pays") is not an employer cue
       const ui = lastIdx(user, seg), ei = lastIdx(employer, seg.replace(current, (x) => " ".repeat(x.length)));
-      let role = ci >= 0 && ci >= ui && ci >= ei ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
+      const trailingCurrent = /^[^.?!;,\n]{0,24}?\b(?:at|in|from)\s+my\s+(?:current|present)\b|^[^.?!;,\n]{0,24}?\b(?:right\s+now|currently)\b/i.test(after);
+      let role = (ci >= 0 && ci >= ui && ci >= ei) || trailingCurrent ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
       // An ask cue carries across "and" / "plus" / "," inside the same clause ("ask for $500 relocation and $28 an hour").
       if (role === "unknown" && prevRole === "ask" && !/[.?!;\n]/.test(src.slice(prevEnd, start)) && /(?:\band\b|\bplus\b|&|,)\s*$/i.test(seg)) role = "ask";
       const v = Number(mm[1].replace(/,/g, ""));
@@ -40746,6 +40747,12 @@ const CareerRouter = (() => {
       if (unit === "none" && role === "employer" && unitlessHourly(v, end)) unit = "hour";
       // the exact pay-noun pattern ("the hourly offer is $24") states the offer itself
       if (role === "unknown" && unit !== "none" && /(?:hourly|annual|yearly)\s+(?:offer|rate|pay|wage|salary|base)(?:\s+rate)?\s*(?:is|of|at|=|:|was|will\s+be)?\s*$/i.test(seg)) role = "employer";
+      // An EXPLICIT hourly figure in a clause that has an offer word (before or after it) is the employer's offer, provided the
+      // clause carries no ask, current-pay or market cue. Unitless figures never become the offer this way.
+      if (role === "unknown" && unit === "hour") {
+        const cs = src.slice(0, start).split(/[.?!;,\n]/).pop() + src.slice(start).split(/[.?!;,\n]/)[0];
+        if ((/\boffer(?:ed|ing|s)?\b/i.test(cs.replace(/counter[ -]?offers?/ig, "")) || (hint && hint.offerSentence)) && lastIdx(user, cs) < 0 && lastIdx(current, cs) < 0 && !/\b(?:market|glassdoor|average|typical|range|says|salary\.com|levels)\b/i.test(cs)) role = "employer";
+      }
       prevRole = role;
       out.mentions.push({ value: v, unit, role });
       prevEnd = end;
@@ -40966,7 +40973,7 @@ const CareerRouter = (() => {
     // G3: "counter email asking $28/hour" and "propose $28/hour" ask for the counter with no drafting verb.
     // A question asking for advice ("should I propose $28/hour?", "would $28 be too much?") is the decision path's, never a draft.
     const adviceQ = /^\s*(?:what|how|why|when|who|which|explain|tell me|define)\b|\?|\bshould\b|\bis it (?:ok|okay|fine|alright)\b|\bwould\b|\bcould\b|\bdo you think\b|\bcan i\b|\bwhether\b/.test(t);
-    const verbless = !adviceQ && (/\bcounter\s+(?:email|offer|letter|message)\b/.test(t) || /\bpropos(?:e|ing)\s+\$\s?\d/.test(t));
+    const verbless = !adviceQ && (/\bcounter\s+(?:email|offer|letter|message)\b/.test(t) || /\bpropos(?:e|ing)\s+\$\s?\d/.test(t) || /\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d/.test(t));
     if (!/\b(draft|write|compose)\b/.test(t) && !verbless) return null;
     if (!/\bcounter\b|\bextension\b/.test(t) && !/\b(email|letter)\b/.test(t) && !verbless) return null;
     // PROBE D DRAFT-BINDING (LF-02 class; live v229 ad53453 and
@@ -50394,7 +50401,7 @@ const CareerRouter = (() => {
     const recommendations = typeof CareerRecommendations !== "undefined" ? CareerRecommendations : req("./154-career-recommendations.js");
     // A counter-drafting request that reports an offer ("my current job pays $22/hour; they offered $24; draft a counter at $27/hour")
     // is the negotiation's, not a "current job" recommendation ask.
-    const counterDraftWithOffer = /\b(?:draft|write|compose)\b[^.?!]*\bcounter\b/i.test(s(text)) && /\boffer/i.test(s(text));
+    const counterDraftWithOffer = (/\b(?:draft|write|compose)\b[^.?!]*\bcounter\b/i.test(s(text)) && /\boffer/i.test(s(text))) || /\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d/i.test(s(text));
     const recommendationIntent = !counterDraftWithOffer && recommendations && recommendations.intentFor(text);
     if (recommendationIntent) {
       const rec = recommendations.recommend(Object.assign({}, c, { recommendationIntent, text: s(text) }));
@@ -52410,15 +52417,15 @@ const CareerRouter = (() => {
         // forms the kind parse does not carry (the $-less k forms:
         // "85k", "came back at 120k").
         const askFramed = /\bask(?:ing)? for\s+(?:a\s+|an\s+)?\$?\s?\d|\bcounter\s+(?:at|of|to)\s+\$?\s?\d|\bmake it\s+\$?\s?\d/i.test(cl);
-        const figs0 = parseOfferFigures(cl, { recorded: offerHint(raw, ctx).recorded, draft: offerHint(raw, ctx).draft });
+        // a comma-split clause that cuts a thousands figure ("$60 an hour plus a $5" of "$5,000 signing bonus") drops only the cut stub
+        const cutAt = raw.indexOf(cl);
+        const clp = cutAt >= 0 && /\$\s?\d{1,3}\s*$/.test(cl) && /^,\d{3}\b/.test(raw.slice(cutAt + cl.length)) ? cl.replace(/\$\s?\d{1,3}\s*$/, "") : cl;
+        const figs0 = parseOfferFigures(clp, { offerSentence: (s(raw).split(/(?<=[.!?])\s+|\n/).find((x) => x.includes(cl)) || "").replace(/counter[ -]?offers?/ig, "").search(/\boffer(?:ed|ing|s)?\b/i) >= 0, recorded: offerHint(raw, ctx).recorded, draft: offerHint(raw, ctx).draft });
         const figs = askFramed ? { hourly: null, signing: null, annual: null } : figs0;
         // G3: a counter-drafting request ("draft the counter email at $28/hour", "propose $28/hour") carries the ASK; its hourly
         // figure re-bases the recorded offer only when the same message REPORTS an offer ("they offered $26/hour now").
         const counterDraftReq = /\b(?:draft|write|compose|prepare)\b[^.?!]*\bcounter\b|\bcounter\s+(?:email|offer|letter|message)\b|\bpropos(?:e|ing)\s+\$|\bask(?:ing)?\s+(?:for\s+)?\$/i.test(cl);
-        // a comma-split clause that cuts a thousands figure ("They offered $1" of "$1,000 a week") carries no whole figure
-        const cutAt = raw.indexOf(cl);
-        const cutNum = cutAt >= 0 && /\$\s?\d{1,3}$/.test(cl.trim()) && /^,\d{3}\b/.test(raw.slice(cutAt + cl.length));
-        figs.hourly = cutNum ? null : figs0.recHourly; // only the employer-role figure is the offer
+        figs.hourly = figs0.recHourly; // only the employer-role figure is the offer
         if (figs.hourly) rec.hourly = figs.hourly;
         if (figs.signing) rec.signing = figs.signing;
         if (figs.annual) rec.amount = figs.annual;

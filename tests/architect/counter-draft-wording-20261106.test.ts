@@ -446,3 +446,34 @@ Deno.test("CDW the unitless-hourly window is [O/3, 3xO] of the recorded offer", 
   host.runTurn("I got an offer of $26", lo);
   eq(recorded(lo).hourly, 26); // within [8, 72] of $24: by design
 });
+
+Deno.test("CDW an explicit hourly figure in an offer clause is the offer; market and ask figures are not", () => {
+  const run = (msg: string) => { const ctx = fresh(); const r = host.runTurn(msg, ctx); return { ctx, body: String(r.result?.draft?.body ?? "") }; };
+  let t = run("$24/hour is what they offered, counter at $28/hour");
+  assert(/Thank you for the offer — \$24 an hour/.test(t.body) && /meet me at \$28 an hour\?/.test(t.body), t.body);
+  eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [24, 28]);
+  t = run("I got an offer — $60 an hour plus a $5,000 signing bonus.");
+  eq(recorded(t.ctx).hourly, 60);
+  t = run("the market rate is $30/hour; draft a counter at $28/hour");
+  eq(recorded(t.ctx).hourly, null);
+  assert(!/Thank you for the offer — \$30 an hour/.test(t.body), t.body);
+  t = run("Glassdoor says $29/hour; counter at $28/hour");
+  eq(recorded(t.ctx).hourly, null);
+  t = run("I want $30/hour but they offered $24/hour");
+  eq(recorded(t.ctx).hourly, 24);
+});
+
+Deno.test("CDW a current-pay figure never becomes or replaces the offer", () => {
+  const rec = (msg: string, offer: number, ask: number, prior: boolean) => {
+    const ctx = fresh();
+    if (prior) host.runTurn(OFFER, ctx);
+    const r = host.runTurn(msg, ctx);
+    const body: string = r.result.draft.body;
+    assert(new RegExp(`Thank you for the offer — \\$${offer} an hour`).test(body) && new RegExp(`meet me at \\$${ask} an hour\\?`).test(body), `${msg}: ${body}`);
+    eq([recorded(ctx).hourly, recorded(ctx).counter, recorded(ctx).offerRate ?? offer], [offer, ask, offer], msg);
+  };
+  rec("my current job pays $26/hour; counter at $30/hour", 24, 30, true);
+  rec("I make $22/hour now and they offered $24/hour; counter at $28/hour", 24, 28, false);
+  rec("I'm at $26 an hour at my current job, draft a counter at $30/hour", 24, 30, true);
+  rec("currently $20/hour, the offer is $24/hour, counter at $27/hour", 24, 27, false);
+});

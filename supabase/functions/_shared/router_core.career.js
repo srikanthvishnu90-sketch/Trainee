@@ -16047,7 +16047,11 @@ const CareerRouter = (() => {
         else if (role === "employer") out.offer = v;
         else if (role === "current") out.current = v;
         else if (out.unknown == null) out.unknown = v;
-      } else if (unit === "none" && role === "ask" && (hint && hint.recorded != null ? v <= 3 * Number(hint.recorded) : v <= 300) && out.askBare == null) out.askBare = v;
+      } else if (unit === "none" && role === "ask" && out.askBare == null && hint && hint.recorded != null && v <= 3 * Number(hint.recorded)) {
+        const tail = src.slice(end).split(/[.,;!?\n]|\band\b|\bbut\b/i)[0].trim();
+        const TOK = "(?:an?\\s+hour|\\/\\s?h(?:ou)?r|per\\s+hour|hourly|for\\s+(?:the|this)\\s+(?:role|position|job)|instead|please|if\\s+possible|then)";
+        if (new RegExp("^(?:" + TOK + "\\s*)*$", "i").test(tail)) out.askBare = v;
+      }
     }
     return out;
   }

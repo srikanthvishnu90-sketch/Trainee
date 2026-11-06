@@ -189,13 +189,13 @@ Deno.test("CDW current pay is never saved as the offer, unitless or /hour, over 
   }
 });
 Deno.test("CDW 'a rate of' after the employer's verb stays the offer; a unit word must attach to its figure; negations never attach", () => {
-  const cases: Array<[string, number, number, boolean]> = [
+  const cases: Array<[string, number, number | null, boolean]> = [
     // [first message, offer, ask, fresh thread (no $24 on record)]
     ["They offered a rate of $26/hour; draft a counter at $30/hour", 26, 30, false],
     ["They offered a rate of $26/hour and a $1,000 bonus; counter at $30/hour", 26, 30, false],
-    ["Draft a counter at $28 with no relocation allowance", 24, 28, false],
+    ["Draft a counter at $28 with no relocation allowance", 24, null, false], // allowlist: unitless + unlisted tail fails safe
     ["Draft a counter at $28/hour, no signing bonus needed", 24, 28, false],
-    ["They offered $24/hour. Draft a counter at $28 without a signing bonus.", 24, 28, true],
+    ["They offered $24/hour. Draft a counter at $28 without a signing bonus.", 24, null, true], // fails safe
   ];
   for (const [msg, offer, ask, isFresh] of cases) {
     const ctx = fresh();
@@ -248,9 +248,10 @@ Deno.test("CDW an explicit ask always beats an unlabelled earlier figure", () =>
 });
 Deno.test("CDW job wording ('for a childcare role') does not hide the counter; payment purposes still do", () => {
   const cases: Array<[string, number | null]> = [
-    ["Draft a counter at $28 for a childcare role", 28],
-    ["counter at $28 for a childcare position", 28],
-    ["counter at $30 for a travel nurse role", 30],
+    // Unitless figures now fail safe (placeholder) when the tail is not on the allowlist; explicit hourly units keep the job-wording rule.
+    ["Draft a counter at $28 for a childcare role", null],
+    ["counter at $28/hour for a childcare position", 28],
+    ["counter at $30/hour for a travel nurse role", 30],
     ["Draft a counter at $28 and $300 for childcare costs", 28],
     ["Draft a counter asking for $500 for relocation", null],
   ];
@@ -304,8 +305,8 @@ Deno.test("CDW 'for a <purpose noun>' is one-time money; 'for a <noun> role' des
   withOffer(HI, "Draft a counter asking for $500 for a relocation allowance", null);
   withOffer(HI, "counter at $300 for a signing bonus", null);
   withOffer(HI, "counter at $350 for the role", 350);
-  withOffer(OFFER, "counter at $28 for a childcare role", 28);
-  withOffer(OFFER, "counter at $30 for a travel nurse role", 30);
+  withOffer(OFFER, "counter at $28 for a childcare role", null); // unitless + role wording fails safe
+  withOffer(OFFER, "counter at $30/hour for a travel nurse role", 30);
 });
 Deno.test("CDW the C04 message verbatim still blanks the ask and keeps the offer", () => {
   const C04 = "Fictional beta scenario, not my profile. Jordan Lee has two years of retail customer-service experience and Excel skills. No external actions and no changes to my profile. A customer support job offered Jordan $24/hour, with no other terms provided. Should Jordan counter, and how? Draft a short counter email for review only. Separate advice from unverified market claims.";
@@ -314,4 +315,26 @@ Deno.test("CDW the C04 message verbatim still blanks the ask and keeps the offer
   assert(/\[your target hourly rate\]/.test(r.result.draft.body) && /Thank you for the offer — \$24 an hour/.test(r.result.draft.body));
   eq(r.result.sends, 0);
   eq([recorded(ctx).hourly, recorded(ctx).counter], [24, null]);
+});
+
+Deno.test("CDW allowlist: a cued unitless figure is hourly only with an empty or hourly/filler tail", () => {
+  const run = (offer: string, msg: string) => { const ctx = fresh(); host.runTurn(offer, ctx); const r = host.runTurn(msg, ctx); return { ctx, body: String(r.result?.draft?.body ?? "") }; };
+  for (const msg of ["counter at $60 on top for relocation", "counter at $30 to cover tuition", "counter at $40 for the first month's rent", "counter at $50 for each shift", "counter at $28 every week"]) {
+    const { ctx, body } = run(OFFER, msg);
+    assert(!/meet me at \$\d+ an hour/.test(body), `${msg}: ${askLine(body)}`);
+    assert(/\[your target hourly rate\]/.test(body), `${msg}: placeholder expected`);
+    eq(recorded(ctx).counter, null, msg);
+    eq(recorded(ctx).hourly, 24, msg);
+  }
+  for (const msg of ["counter at $28", "counter at $28.", "counter at $28 an hour", "counter at $28 for the role", "counter at $28 please", "counter at $30/hour for a travel nurse role"]) {
+    const { ctx, body } = run(OFFER, msg);
+    const want = msg.includes("$30") ? 30 : 28;
+    assert(new RegExp(`meet me at \\$${want} an hour\\?`).test(body), `${msg}: ${askLine(body)}`);
+    eq(recorded(ctx).counter, want, msg);
+  }
+  const hi = run("I got an offer of $300/hour.", "counter at $350");
+  assert(/meet me at \$350 an hour\?/.test(hi.body), askLine(hi.body));
+  const rel = run("I got an offer of $300/hour.", "counter at $500 for a relocation allowance");
+  assert(!/meet me at \$500 an hour/.test(rel.body), askLine(rel.body));
+  eq(recorded(rel.ctx).counter, null);
 });

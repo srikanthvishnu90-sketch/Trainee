@@ -3928,7 +3928,7 @@ const CareerRouter = (() => {
           !thirdPartySays(cs, cs.replace(/counter[ -]?offers?/ig, (x) => " ".repeat(x.length)).search(/\boffer(?:ed|ing|s)?\b/i))) role = "employer";
       }
       prevRole = role;
-      out.mentions.push({ value: v, unit, role });
+      out.mentions.push({ value: v, unit, role, at: start });
       prevEnd = end;
       if (unit === "hour") {
         if (role === "ask") { if (out.ask == null) out.ask = v; }
@@ -3946,6 +3946,16 @@ const CareerRouter = (() => {
       const offerWord = /\boffer(?:ed|ing|s)?\b|\bproposed\b|\bcame\s+back\b|\bquoted\b/i.test(plain);
       const nonAsk = out.mentions.filter((m) => m.role !== "ask");
       out.ambiguous = currentPhrase && !offerWord && nonAsk.length >= 2 && out.mentions.some((m) => m.role === "employer");
+      // MARKET EXIT: a message that names a third party (the market, competitors, others, the industry, averages, salary sites,
+      // other employers) and carries a pay figure that is not the ask. Who that figure belongs to is a question about the
+      // person's words, which code cannot settle reliably (five review rounds on #557 each found a new phrasing it got wrong).
+      // Code saves and drafts nothing; the brain reads the message and asks which figure is the employer's offer (D-007).
+      // Only within one sentence: the third party and the figure must share it ("Separate advice from unverified market claims"
+      // after the offer is not about any figure).
+      const THIRD_WORD = /\b(?:market|competitors?|others|industry|average|median|typical|glassdoor|levels\.fyi|payscale|salary\.com|indeed|employers|companies|other\s+(?:places|firms|roles|jobs|offers))\b/i;
+      const sentenceOf = (at) => { const a = Math.max(...[".", "?", "!", ";", "\n"].map((c) => src.lastIndexOf(c, at - 1))) + 1; const ends = [".", "?", "!", ";", "\n"].map((c) => { let i = src.indexOf(c, at); while (i >= 0 && c === "." && /\d/.test(src[i + 1] || "")) i = src.indexOf(c, i + 1); return i; }).filter((i) => i >= 0); return src.slice(a, ends.length ? Math.min(...ends) : src.length).replace(/counter[ -]?offers?/ig, ""); };
+      const marketFig = nonAsk.some((m) => (m.unit === "hour" || m.unit === "none") && m.value !== (hint && hint.recorded) && THIRD_WORD.test(sentenceOf(m.at)));
+      if (marketFig) { out.ambiguous = true; out.marketAmbiguous = true; }
     }
     return out;
   }

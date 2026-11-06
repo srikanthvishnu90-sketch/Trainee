@@ -22,6 +22,25 @@ const recorded = (ctx: any) => {
   return { hourly: th.hourly ?? null, counter: th.counter?.hourly ?? null, offerRate: ctx.offer?.hourly_rate ?? null };
 };
 
+// The market exit (#557 review rounds; D-007): a pay figure that shares a sentence with a third party (the market, competitors,
+// others, the industry, averages, salary sites, other employers) is not attributed by code. Nothing is saved or drafted and the
+// turn is held for the brain, which asks which figure is the employer's offer. Spec side of that rule:
+const THIRD_SPEC = /\b(?:market|competitors?|others|industry|average|median|typical|glassdoor|levels\.fyi|payscale|salary\.com|indeed|employers|companies|other\s+(?:places|firms|roles|jobs|offers))\b/i;
+const namesThird = (msg: string) => msg.split(/[?!;\n]|\.(?!\d)/).some((x) => THIRD_SPEC.test(x.replace(/counter[ -]?offers?/ig, "")) && /\$\s?\d/.test(x));
+const ASKS: (string | null | undefined)[] = ["outreach_clarification", "career_catchall", null, undefined];
+// Held: no figure from this message is saved (the recorded offer stays, or a different-company thread starts empty), nothing
+// is drafted or sent, and the turn asks: it is flagged for the brain, or routed to a clarifying question.
+const heldForBrain = (ctx: any, r: any, before: number | null, msg: string) => {
+  const figs = [...msg.matchAll(/\$\s?(\d+(?:\.\d+)?)/g)].map((m) => Number(m[1]));
+  const h = recorded(ctx).hourly;
+  assert(h === before || h === null, `${msg}: held, the offer on record is not replaced (${h})`);
+  assert(!figs.includes(h as number) || h === before, `${msg}: held, no figure from the message saved (${h})`);
+  eq(recorded(ctx).counter, null, `${msg}: held, no counter saved`);
+  assert(!r.result?.draft?.body, `${msg}: held, no draft`);
+  assert(r.result?.counterAmbiguous === true || ASKS.includes(r.intent), `${msg}: held, it asks (${r.intent})`);
+  eq(r.result?.sends ?? 0, 0, `${msg}: nothing sent`);
+};
+
 for (const msg of ["Draft the counter email at $28/hour", "write the counter at $28 an hour", "counter email asking $28/hour", "propose $28/hour"]) {
   Deno.test(`CDW the offer stays $24 and $28 is the ask: "${msg}"`, () => {
     const ctx = fresh();
@@ -597,6 +616,7 @@ Deno.test("CDW an offer figure in the same clause as the ask is the offer; the o
   const go = (prior: string | null, msg: string) => { const ctx = fresh(); if (prior) host.runTurn(prior, ctx); const r = host.runTurn(msg, ctx); return { ctx, r, body: String(r.result?.draft?.body ?? "") }; };
   const offerIs = (prior: string | null, msg: string, offer: number, ask: number) => {
     const t = go(prior, msg);
+    if (namesThird(msg)) return heldForBrain(t.ctx, t.r, prior ? 24 : null, msg);
     eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [offer, ask], `${msg}: saved`);
     assert(new RegExp(`Thank you for the offer — \\$${offer} an hour`).test(t.body), `${msg}: thanks ${t.body}`);
     assert(new RegExp(`meet me at \\$${ask} an hour\\?`).test(t.body), `${msg}: ask ${t.body}`);
@@ -611,6 +631,7 @@ Deno.test("CDW an offer figure in the same clause as the ask is the offer; the o
   // Still not the offer: a figure whose own words carry the ask, current pay, or a market cue.
   const keep = (msg: string, ask: number) => {
     const t = go(OFFER, msg);
+    if (namesThird(msg)) return heldForBrain(t.ctx, t.r, 24, msg);
     eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [24, ask], `${msg}: the recorded $24 stays`);
     assert(/Thank you for the offer — \$24 an hour/.test(t.body), `${msg}: ${t.body}`);
   };
@@ -693,7 +714,7 @@ Deno.test("CDW an offer figure in the same clause as the ask is the offer; the o
 // The same shape at scale: 5 asks x 6 offer phrasings x 2 orders x 3 market remarks x 3 figure sets x (offer on record or not)
 // = 1,080 turns. Every one saves the stated offer and the ask, thanks for the stated offer, never the market figure, sends nothing.
 // (At 1419359c, 660 of these were wrong.)
-Deno.test("CDW same-clause battery: ask, offer and a market figure in one message, 1,080 turns, the stated offer every time", () => {
+Deno.test("CDW same-clause battery: ask and offer in one message, 1,080 turns: the stated offer every time; with a market figure in the sentence, held for the brain", () => {
   const asks = ["Draft a counter at $A/hour", "Write the counter at $A an hour", "Draft the counter email asking $A/hour", "Counter at $A per hour", "Draft a counter proposing $A/hr"];
   const links = ["against their $O/hour offer", "against their new $O/hour offer", "to their $O an hour offer", "vs their $O/hour offer", "versus the $O/hour they offered", "over their offered $O/hour"];
   const orders = [(a: string, l: string) => `${a} ${l}`, (a: string, l: string) => `${l.replace(/^(against|to|vs|versus|over) /, "Given ")}, ${a[0].toLowerCase() + a.slice(1)}`];
@@ -707,6 +728,9 @@ Deno.test("CDW same-clause battery: ask, offer and a market figure in one messag
     const r = host.runTurn(msg, ctx);
     total++;
     const rec = recorded(ctx), body = String(r.result?.draft?.body ?? "");
+    if (namesThird(msg)) { if (![prior ? 24 : null, null].includes(rec.hourly) || rec.counter !== null || body || !(r.result?.counterAmbiguous === true || ASKS.includes(r.intent)) || (r.result?.sends ?? 0) !== 0) wrong.push(`HELD ${prior ? "P" : "-"} ${msg} => offer ${rec.hourly}, ask ${rec.counter}`);
+      else { const c2 = fresh(); if (prior) host.runTurn(prior, c2); const d = stagedDecision({ env: STAGED, message: msg, ctx: c2, host, structured: false }); if (!d.brain) wrong.push(`STAGED ${prior ? "P" : "-"} ${msg} => ${d.reason}`); }
+      continue; }
     if (rec.hourly !== O || rec.counter !== A || !body.includes(`Thank you for the offer — $${O} an hour`) || (r.result?.sends ?? 0) !== 0) wrong.push(`${prior ? "P" : "-"} ${msg} => offer ${rec.hourly}, ask ${rec.counter}`);
   }
   eq(total, 1080);
@@ -715,7 +739,7 @@ Deno.test("CDW same-clause battery: ask, offer and a market figure in one messag
 
 // Who a figure belongs to, at scale: 5 reporting prefixes x 3 asks x (18 employer phrasings that must become the offer + 13
 // third-party phrasings that must never replace it) = 465 turns (review rounds on #557; 150 were wrong at 1419359c).
-Deno.test("CDW attribution battery: the employer's figure becomes the offer, a third party's never does, 465 turns", () => {
+Deno.test("CDW attribution battery, 465 turns: the employer's own figure becomes the offer; any figure in a sentence naming a third party is held for the brain, never saved", () => {
   const reporters = ["", "they said ", "the recruiter told me ", "HR mentioned that ", "I heard "];
   // employer's own figure: must become the offer (26)
   const employer = [
@@ -738,15 +762,43 @@ Deno.test("CDW attribution battery: the employer's figure becomes the offer, a t
       const msg = (r + e).replace("$X", "$26") + a; const m = msg[0].toUpperCase() + msg.slice(1);
       const ctx = fresh(); host.runTurn("They offered me $24/hour for the warehouse job.", ctx); const res = host.runTurn(m, ctx); total++;
       const th = ctx.negotiationThread ?? {};
+      if (namesThird(m)) { if ((th.hourly ?? null) !== 24 || th.counter?.hourly != null || res?.result?.draft?.body || res?.result?.counterAmbiguous !== true || (res?.result?.sends ?? 0) !== 0) wrong.push(`HELD ${m} => offer=${th.hourly} counter=${th.counter?.hourly}`); continue; }
       if (th.hourly !== 26 || th.counter?.hourly !== 30 || (res?.result?.sends ?? 0) !== 0) wrong.push(`EMP ${m} => offer=${th.hourly} counter=${th.counter?.hourly}`);
     }
     for (const t of third) {
       const msg = (r + t).replace("$X", "$28") + a; const m = msg[0].toUpperCase() + msg.slice(1);
       const ctx = fresh(); host.runTurn("They offered me $24/hour for the warehouse job.", ctx); const res = host.runTurn(m, ctx); total++;
       const th = ctx.negotiationThread ?? {};
+      if (namesThird(m)) { if ((th.hourly ?? null) !== 24 || th.counter?.hourly != null || res?.result?.draft?.body || res?.result?.counterAmbiguous !== true || (res?.result?.sends ?? 0) !== 0) wrong.push(`HELD ${m} => offer=${th.hourly} counter=${th.counter?.hourly}`); continue; }
       if (th.hourly !== 24 || th.counter?.hourly !== 30 || (res?.result?.sends ?? 0) !== 0) wrong.push(`3RD ${m} => offer=${th.hourly} counter=${th.counter?.hourly}`);
     }
   }
   eq(total, 465);
   eq(wrong.slice(0, 10), [], `${wrong.length} wrong`);
+});
+
+// Review of bfc4c9d3 and Greptile on ca432b99: every one of these names a third party in the figure's sentence. Code does not
+// attribute the figure: nothing saved, no draft (never a silent draft with the stale $24), and staged mode hands it to the brain.
+Deno.test("CDW market exit: a third party in the figure's sentence holds the turn for the brain, with or without an offer on record", () => {
+  const rows = [
+    "They offered what the market pays: $26/hour", "They're paying what the industry pays — $26/hour", "Indeed offered me $26/hour", "Glassdoor offered me $26/hour",
+    "They're offering the typical offer: $26/hour", "The median offer they made was $26/hour", "The market offer letter says $26/hour",
+    "Competitors are hiring and paying $28/hour", "Both companies offered me $26/hour", "They offered a below market rate of $26/hour",
+  ];
+  for (const prior of [OFFER, null]) for (const row of rows) {
+    const msg = `${row}. Draft a counter at $30/hour`;
+    const ctx = fresh();
+    if (prior) host.runTurn(prior, ctx);
+    const before = recorded(ctx).hourly;
+    const r = host.runTurn(msg, ctx);
+    heldForBrain(ctx, r, before, msg);
+    const d = stagedDecision({ env: STAGED as any, message: msg, ctx: (() => { const c = fresh(); if (prior) host.runTurn(prior, c); return c; })(), host, structured: false });
+    eq(d.brain, true, `${msg}: staged goes to the brain (${d.reason})`);
+    if (r.result?.counterAmbiguous) eq(d.reason, "counter_ambiguous_figures", msg);
+  }
+  // A market remark in another sentence does not hold the turn; a plain offer still drafts.
+  const ctx = fresh(); host.runTurn(OFFER, ctx);
+  const r = host.runTurn("They came back with $26/hour. The market is tight. Draft a counter at $30/hour", ctx);
+  eq([recorded(ctx).hourly, recorded(ctx).counter], [26, 30]);
+  assert(/Thank you for the offer — \$26 an hour/.test(String(r.result?.draft?.body ?? "")));
 });

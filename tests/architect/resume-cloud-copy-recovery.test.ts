@@ -75,9 +75,33 @@ Deno.test({
       // A paused account's same-hash re-upload does not write a copy.
       await pg.sql(`select public.career_resume_put('${paused}', '${hex}', 'file', 'ref', 'r.pdf', convert_to('hello', 'UTF8'), 'evt-again')`);
       eq(await copies(paused), "0|-1");
+      // The chat path: career_resume_take of the resume that is already theirs also repairs the copy (it returned before career_resume_put).
+      await pg.sql(`delete from public.career_apply_cloud_resumes where user_id = '${live}'`);
+      const detail = JSON.stringify({ via: "router: their yes to the resume entries shown to them", confirmation_event_id: "evt-chat", upload: { sha256: hex, kind: "file", ref: "ref" } });
+      eq((await pg.sql(`select public.career_resume_take('${live}', '${detail}'::jsonb)`)).trim(), "f", "returns false as before");
+      eq(await copies(live), "1|0", "chat confirmation of the same resume put the copy back");
+      eq(await snap(live), before);
+      // The recovery re-reads consent, pause and epoch per person under the lock: a change committed between the candidate scan and the
+      // insert is seen by the helper (simulated by flipping the state, then calling the helper for the person the scan had picked).
+      await pg.sql(`delete from public.career_apply_cloud_resumes where user_id = '${live}'`);
+      eq((await pg.sql(`select public.career_resume_cloud_copy_recover('${live}')`)).trim(), "t", "eligible: restored");
+      eq(await copies(live), "1|0");
+      eq((await pg.sql(`select public.career_resume_cloud_copy_recover('${live}')`)).trim(), "f", "already has a copy: nothing");
+      await pg.sql(`delete from public.career_apply_cloud_resumes where user_id = '${live}';
+        insert into public.career_apply_cloud_optin (user_id, enabled, terms, terms_sha256, daily, privacy_epoch, turned_off_at)
+         values ('${live}', false, 't', encode(sha256(convert_to('t', 'UTF8')), 'hex'), 5, 0, now());`);
+      eq((await pg.sql(`select public.career_resume_cloud_copy_recover('${live}')`)).trim(), "f", "opt-out committed before: not restored");
+      await pg.sql(`delete from public.career_apply_cloud_optin where user_id = '${live}';
+        update public.career_watch_kv set value = value || '{"paused":true}' where user_id = '${live}' and key = 'career:account'`);
+      eq((await pg.sql(`select public.career_resume_cloud_copy_recover('${live}')`)).trim(), "f", "pause committed before: not restored");
+      await pg.sql(`update public.career_watch_kv set value = value || '{"paused":false,"epoch":1}' where user_id = '${live}' and key = 'career:account'`);
+      eq((await pg.sql(`select public.career_resume_cloud_copy_recover('${live}')`)).trim(), "f", "erase committed before: not restored");
+      eq(await copies(live), "0|-1");
+      const sql2 = Deno.readTextFileSync(`${ROOT}/supabase/migrations/${M2}`);
+      assert(/career_resume_cloud_copy_recover[\s\S]*pg_advisory_xact_lock_shared\(hashtextextended\('career-card-cloud-bridge-maintenance-v1', 0\)\);\s*perform pg_advisory_xact_lock\(hashtextextended\(p_user::text, 0\)\);\s*insert into public\.career_apply_cloud_resumes/.test(sql2), "the helper takes the opt-out lock before it reads and inserts");
       // Idempotent: the recovery never duplicates or overwrites an existing copy.
       await pg.sql(Deno.readTextFileSync(`${ROOT}/supabase/migrations/${M2}`));
-      eq(await copies(live), "1|0");
+      eq(await copies(live), "0|-1", "(live is now erased: the rerun does not revive it)");
     } finally { await pg.stop(); }
   },
 });

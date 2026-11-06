@@ -183,12 +183,40 @@ Deno.test("CDW '$22 now; they offered $24; counter at $27' reaches the negotiati
 Deno.test("CDW current pay is never saved as the offer, unitless or /hour, over two turns", () => {
   for (const first of ["my current job pays $22/hour; they offered $24; draft a counter at $27/hour", "my current job pays $22/hour; they offered $24/hour; draft a counter at $27/hour"]) {
     const ctx = fresh();
-    // a unitless offer takes its unit from the RECORDED offer only (never from another figure in the message), so record it first
-    host.runTurn(OFFER, ctx);
-    step(ctx, first, 24, 27);
-    step(ctx, "Draft the counter email.", 24, 27);
-    eq(recorded(ctx).offerRate, 24, first);
+    if (/\$24\/hour/.test(first)) {
+      step(ctx, first, 24, 27);
+      step(ctx, "Draft the counter email.", 24, 27);
+      eq(recorded(ctx).offerRate, 24, first);
+    } else {
+      // Unitless "$24" in a fresh thread: no recorded offer to take a unit from, so it fails safe (the offer is not recorded as
+      // hourly). The invariant this test owns still holds: current pay ($22) is never the offer, and the ask $27 stays.
+      const r = host.runTurn(first, ctx);
+      eq(r.intent, "negotiation_draft");
+      assert(!/Thank you for the offer — \$22 an hour/.test(r.result.draft.body), r.result.draft.body);
+      assert(recorded(ctx).hourly !== 22 && recorded(ctx).offerRate !== 22, JSON.stringify(recorded(ctx)));
+    }
   }
+});
+Deno.test("CDW current pay is never saved as the offer: unitless offer after the offer is recorded", () => {
+  const ctx = fresh();
+  host.runTurn(OFFER, ctx);
+  step(ctx, "my current job pays $22/hour; they offered $24; draft a counter at $27/hour", 24, 27);
+  step(ctx, "Draft the counter email.", 24, 27);
+});
+Deno.test("CDW a unit word before the amount is an explicit unit ('The hourly offer is $24'), no recorded offer needed", () => {
+  const run = (msg: string) => { const ctx = fresh(); const r = host.runTurn(msg, ctx); return { ctx, body: String(r.result?.draft?.body ?? "") }; };
+  let t = run("The hourly offer is $24; draft a counter at $28/hour");
+  assert(/Thank you for the offer — \$24 an hour/.test(t.body) && /meet me at \$28 an hour\?/.test(t.body), t.body);
+  eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [24, 28]);
+  t = run("Their hourly rate of $26, I want to counter at $30/hour");
+  assert(/Thank you for the offer — \$26 an hour/.test(t.body) && /meet me at \$30 an hour\?/.test(t.body), t.body);
+  eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [26, 30]);
+  t = run("the hourly offer is $24 plus $200 for each shift; counter at $28/hour");
+  assert(/Thank you for the offer — \$24 an hour/.test(t.body) && !/\$200 an hour/.test(t.body), t.body);
+  eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [24, 28]);
+  t = run("they offered $24; counter at $28/hour");
+  assert(!/Thank you for the offer — \$24 an hour/.test(t.body), "unitless with no recorded offer fails safe: " + t.body);
+  eq(recorded(t.ctx).hourly, null);
 });
 Deno.test("CDW 'a rate of' after the employer's verb stays the offer; a unit word must attach to its figure; negations never attach", () => {
   const cases: Array<[string, number, number | null, boolean]> = [

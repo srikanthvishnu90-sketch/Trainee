@@ -40727,11 +40727,17 @@ const CareerRouter = (() => {
       else if (/^\s*(?:per\s+|an?\s+|\/\s?)(?:week|wk)|^\s*weekly/i.test(after)) unit = "week";
       else if (/^\s*(?:per\s+|an?\s+|\/\s?)(?:month|mo)\b|^\s*monthly/i.test(after)) unit = "month";
       else if (mm[2] || /^\s*(?:per\s+|an?\s+|\/\s?)(?:year|yr)|^\s*(?:annual|yearly|salary)/i.test(after) || /,\d{3}/.test(mm[1]) && Number(mm[1].replace(/,/g, "")) >= 1000 && !attached(after, before)) unit = "year";
+      // A unit word BEFORE the amount, in the same clause within about four words and with no figure between ("the hourly offer is
+      // $24", "annual salary of $90,000"), is an explicit unit, like "$24/hour"; it needs no recorded offer.
+      if (unit === "none") {
+        if (/\bhourly\b(?:\s+[\w'-]+){0,3}\s*(?:is|of|at|was|:|=)?\s*$/i.test(seg)) unit = "hour";
+        else if (/\b(?:annual|yearly)\b(?:\s+[\w'-]+){0,3}\s*(?:is|of|at|was|:|=)?\s*$/i.test(seg)) unit = "year";
+      }
       if (unit !== "hour" && attached(after, before)) unit = "one-time";
       const ci = lastIdx(current, seg);
       // an employer word inside the current-pay phrase ("my current job pays") is not an employer cue
       const ui = lastIdx(user, seg), ei = lastIdx(employer, seg.replace(current, (x) => " ".repeat(x.length)));
-      const role = ci >= 0 && ci >= ui && ci >= ei ? "current" : ui < 0 && ei < 0 ? (/\brate\s+of\s*$/i.test(seg) ? "ask" : "unknown") : ui >= ei ? "ask" : "employer";
+      const role = ci >= 0 && ci >= ui && ci >= ei ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
       const v = Number(mm[1].replace(/,/g, ""));
       // a unitless figure the employer reported ("they offered $24"), in a message that is otherwise about hourly pay, is hourly
       if (unit === "none" && role === "employer" && unitlessHourly(v, end)) unit = "hour";
@@ -44983,7 +44989,7 @@ const CareerRouter = (() => {
         || (!/^\s*(?:what|how|why|when|who|which|explain|tell me|define)\b|\?|\bshould\b|\bis it (?:ok|okay|fine|alright)\b|\bwould\b|\bcould\b|\bdo you think\b|\bcan i\b|\bwhether\b/.test(tt) && /\bcounter\s+(?:email|offer|letter|message)\b|\bpropos(?:e|ing)\s+\$\s?\d/.test(tt))
         || (/\b(draft|write|compose)\b[^.]{0,40}\b(it|that|this|the email|the letter|an email|a reply)\b/.test(tt) && !!(negotiationThreadOf(ctx).topic || negotiationThreadOf(ctx).amount || negotiationThreadOf(ctx).firm))
         // PR-4: "counter at $27/hour" on a thread that holds an hourly offer names the ask: the email is the deliverable.
-        || (!/^\s*(?:what|how|why|when|who|which|explain|tell me|define)\b|\?|\bshould\b|\bis it (?:ok|okay|fine|alright)\b|\bwould\b|\bcould\b|\bdo you think\b|\bcan i\b|\bwhether\b/.test(tt) && /\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d{1,3}(?:\.\d{1,2})?(?![\d,]|\s?k\b)(?:\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour))?(?!\s*(?:per|a|an|\/)\s*(?:week|wk|month|mo|year|yr))/.test(tt) && !!(negotiationThreadOf(ctx).hourly || (ctx.offer && ctx.offer.hourly_rate)));
+        || (!/^\s*(?:what|how|why|when|who|which|explain|tell me|define)\b|\?|\bshould\b|\bis it (?:ok|okay|fine|alright)\b|\bwould\b|\bcould\b|\bdo you think\b|\bcan i\b|\bwhether\b/.test(tt) && /\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d{1,3}(?:\.\d{1,2})?(?![\d,]|\s?k\b)(?:\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour))?(?!\s*(?:per|a|an|\/)\s*(?:week|wk|month|mo|year|yr))/.test(tt) && !!(negotiationThreadOf(ctx).hourly || (ctx.offer && ctx.offer.hourly_rate) || (() => { const f = parseOfferFigures(text); return f.askHourly != null && (f.offerHourly != null || f.unknownHourly != null); })()));
       if (wantsDraftText && Negotiation) {
         const thread = negotiationThreadOf(ctx);
         let offerObj = null;

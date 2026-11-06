@@ -16036,10 +16036,14 @@ const CareerRouter = (() => {
       else if (/^\s*(?:per\s+|an?\s+|\/\s?)(?:week|wk)|^\s*weekly/i.test(after)) unit = "week";
       else if (/^\s*(?:per\s+|an?\s+|\/\s?)(?:month|mo)\b|^\s*monthly/i.test(after)) unit = "month";
       else if (mm[2] || /^\s*(?:per\s+|an?\s+|\/\s?)(?:year|yr)|^\s*(?:annual|yearly|salary)/i.test(after) || /,\d{3}/.test(mm[1]) && Number(mm[1].replace(/,/g, "")) >= 1000 && !attached(after, before)) unit = "year";
+      if (unit === "none") {
+        if (/\bhourly\b(?:\s+[\w'-]+){0,3}\s*(?:is|of|at|was|:|=)?\s*$/i.test(seg)) unit = "hour";
+        else if (/\b(?:annual|yearly)\b(?:\s+[\w'-]+){0,3}\s*(?:is|of|at|was|:|=)?\s*$/i.test(seg)) unit = "year";
+      }
       if (unit !== "hour" && attached(after, before)) unit = "one-time";
       const ci = lastIdx(current, seg);
       const ui = lastIdx(user, seg), ei = lastIdx(employer, seg.replace(current, (x) => " ".repeat(x.length)));
-      const role = ci >= 0 && ci >= ui && ci >= ei ? "current" : ui < 0 && ei < 0 ? (/\brate\s+of\s*$/i.test(seg) ? "ask" : "unknown") : ui >= ei ? "ask" : "employer";
+      const role = ci >= 0 && ci >= ui && ci >= ei ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
       const v = Number(mm[1].replace(/,/g, ""));
       if (unit === "none" && role === "employer" && unitlessHourly(v, end)) unit = "hour";
       out.mentions.push({ value: v, unit, role });
@@ -19012,7 +19016,7 @@ const CareerRouter = (() => {
         || (/\b(draft|write|compose)\b/.test(tt) && /\bcounter\b|\bextension\b|\bdecline\b|\breply\b/.test(tt))
         || (!/^\s*(?:what|how|why|when|who|which|explain|tell me|define)\b|\?|\bshould\b|\bis it (?:ok|okay|fine|alright)\b|\bwould\b|\bcould\b|\bdo you think\b|\bcan i\b|\bwhether\b/.test(tt) && /\bcounter\s+(?:email|offer|letter|message)\b|\bpropos(?:e|ing)\s+\$\s?\d/.test(tt))
         || (/\b(draft|write|compose)\b[^.]{0,40}\b(it|that|this|the email|the letter|an email|a reply)\b/.test(tt) && !!(negotiationThreadOf(ctx).topic || negotiationThreadOf(ctx).amount || negotiationThreadOf(ctx).firm))
-        || (!/^\s*(?:what|how|why|when|who|which|explain|tell me|define)\b|\?|\bshould\b|\bis it (?:ok|okay|fine|alright)\b|\bwould\b|\bcould\b|\bdo you think\b|\bcan i\b|\bwhether\b/.test(tt) && /\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d{1,3}(?:\.\d{1,2})?(?![\d,]|\s?k\b)(?:\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour))?(?!\s*(?:per|a|an|\/)\s*(?:week|wk|month|mo|year|yr))/.test(tt) && !!(negotiationThreadOf(ctx).hourly || (ctx.offer && ctx.offer.hourly_rate)));
+        || (!/^\s*(?:what|how|why|when|who|which|explain|tell me|define)\b|\?|\bshould\b|\bis it (?:ok|okay|fine|alright)\b|\bwould\b|\bcould\b|\bdo you think\b|\bcan i\b|\bwhether\b/.test(tt) && /\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d{1,3}(?:\.\d{1,2})?(?![\d,]|\s?k\b)(?:\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour))?(?!\s*(?:per|a|an|\/)\s*(?:week|wk|month|mo|year|yr))/.test(tt) && !!(negotiationThreadOf(ctx).hourly || (ctx.offer && ctx.offer.hourly_rate) || (() => { const f = parseOfferFigures(text); return f.askHourly != null && (f.offerHourly != null || f.unknownHourly != null); })()));
       if (wantsDraftText && Negotiation) {
         const thread = negotiationThreadOf(ctx);
         let offerObj = null;

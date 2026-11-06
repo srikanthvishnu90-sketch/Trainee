@@ -16010,15 +16010,24 @@ const CareerRouter = (() => {
       work = work.replace(m[0], " ");
     }
     m = work.match(/\$\s?(\d{1,3}(?:\.\d{1,2})?)\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)/i);
-    out.askHourly = null; out.offerHourly = null;
+    out.askHourly = null; out.offerHourly = null; out.reportedHourly = null; out.askBare = null;
     {
       const reH = /\$\s?(\d{1,3}(?:\.\d{1,2})?)\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)/ig;
-      const askCue = /(?:\bcounter(?:ing|ed)?(?:\s+(?:at|to|with|for))?|\bask(?:ing)?\s+for|\bmeet\s+me\s+at|\bwant(?:ing)?|\btarget(?:ing)?|\blooking\s+for|\bhop(?:e|ing)\s+for|\bmake\s+it|\bchange\s+(?:it|the\s+\w+)\s+to|\bneed|\brequest(?:ing)?|\bpush\s+for|\bgo\s+for|\bwould\s+like|['’]d\s+like)\W{0,3}(?:(?:something\s+like|about|around|at|to|up\s+to)\W{0,3})?$/i;
+      const askCue = /(?:\bcounter(?:ing|ed)?(?:\s+(?:email|offer|letter|message))?(?:\s+(?:at|to|with|for|asking(?:\s+for)?))?|\bask(?:ing)?(?:\s+for)?|\bpropos(?:e|ing|ed)(?:\s+(?:a|an|that))?|\bmeet\s+me\s+at|\bwant(?:ing)?|\btarget(?:ing)?|\blooking\s+for|\bhop(?:e|ing)\s+for|\bmake\s+it|\bchange\s+(?:it|the\s+\w+)\s+to|\bneed|\brequest(?:ing)?|\bpush\s+for|\bgo\s+for|\bwould\s+like|['’]d\s+like)\W{0,3}(?:(?:something\s+like|about|around|at|to|up\s+to)\W{0,3})?$/i;
+      const offerCue = /\boffer(?:ed|ing|s)?\b|\bpay(?:s|ing)\b|\bcame\s+back\s+(?:with|at)\b|\bcomes\s+to\b/i;
       let h;
       while ((h = reH.exec(work))) {
         const clause = work.slice(0, h.index).split(/[.?!]/).pop();
         const v = Number(h[1]);
-        if (askCue.test(clause)) { if (out.askHourly == null) out.askHourly = v; } else if (out.offerHourly == null) out.offerHourly = v;
+        if (askCue.test(clause)) { if (out.askHourly == null) out.askHourly = v; } else {
+          if (out.offerHourly == null) out.offerHourly = v;
+          if (out.reportedHourly == null && offerCue.test(clause)) out.reportedHourly = v;
+        }
+      }
+      const reB = /\$\s?(\d{1,3}(?:\.\d{1,2})?)(?![\d,]|\s?k\b|\.\d)(?!\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour))/ig;
+      let b;
+      while (out.askBare == null && (b = reB.exec(work))) {
+        if (askCue.test(work.slice(0, b.index).split(/[.?!]/).pop())) out.askBare = Number(b[1]);
       }
     }
     if (m) { out.hourly = Number(m[1]); out.hourlyText = m[0].replace(/\s+/g, " ").trim(); work = work.replace(m[0], " "); }
@@ -16125,8 +16134,9 @@ const CareerRouter = (() => {
 
   function handleCounterDraftAsk(text, ctx) {
     const t = lc(text);
-    if (!/\b(draft|write|compose)\b/.test(t)) return null;
-    if (!/\bcounter\b|\bextension\b/.test(t) && !/\b(email|letter)\b/.test(t)) return null;
+    const verbless = /\bcounter\s+(?:email|offer|letter|message)\b/.test(t) || /\bpropos(?:e|ing)\s+\$\s?\d/.test(t);
+    if (!/\b(draft|write|compose)\b/.test(t) && !verbless) return null;
+    if (!/\bcounter\b|\bextension\b/.test(t) && !/\b(email|letter)\b/.test(t) && !verbless) return null;
     if (!/\bcounter\b|\bextension\b/.test(t) && ctx.plan && ctx.plan.kind === "campaign_plan") return null;
     const th = negotiationThreadOf(ctx);
     const off = (ctx.offer && typeof ctx.offer === "object") ? ctx.offer : {};
@@ -18950,6 +18960,7 @@ const CareerRouter = (() => {
       const tt = typoNorm(text);
       const wantsDraftText = (/\b(draft|write|compose)\b[^.]{0,60}\b(email|letter|words|it|that)\b/.test(tt) && /\bemail|letter|actual|real words|word for word\b/.test(tt)) || /\bactual email\b|\bthe real words\b|\bemail itself\b/.test(tt)
         || (/\b(draft|write|compose)\b/.test(tt) && /\bcounter\b|\bextension\b|\bdecline\b|\breply\b/.test(tt))
+        || /\bcounter\s+(?:email|offer|letter|message)\b|\bpropos(?:e|ing)\s+\$\s?\d/.test(tt)
         || (/\b(draft|write|compose)\b[^.]{0,40}\b(it|that|this|the email|the letter|an email|a reply)\b/.test(tt) && !!(negotiationThreadOf(ctx).topic || negotiationThreadOf(ctx).amount || negotiationThreadOf(ctx).firm))
         || (/\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d{1,3}(?:\.\d{1,2})?\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)/.test(tt) && !!(negotiationThreadOf(ctx).hourly || (ctx.offer && ctx.offer.hourly_rate)));
       if (wantsDraftText && Negotiation) {
@@ -18981,6 +18992,7 @@ const CareerRouter = (() => {
           const askFigs = parseOfferFigures(text);
           const hourlyBase = askFigs.offerHourly || thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || null;
           askFigs.ask = askFigs.askHourly != null ? askFigs.askHourly
+            : askFigs.askBare != null ? askFigs.askBare
             : (askFigs.offerHourly == null && askFigs.hourly && hourlyBase && Number(askFigs.hourly) !== Number(hourlyBase) ? askFigs.hourly : null);
           if (askFigs.ask != null && hourlyBase && Number(askFigs.ask) <= Number(hourlyBase)) askFigs.ask = null;
           const company = offerObj.company || thread.descriptor || "the firm";
@@ -23886,7 +23898,10 @@ const CareerRouter = (() => {
         else if ((m = cl.match(/\boffer\b[^.!?]*?\b(?:from|at)\s+([A-Z][A-Za-z0-9&.]+(?:\s+[A-Z][A-Za-z0-9&.]+){0,2})/)) && !NOT_A_FIRM.test(m[1].trim())) rec.firm = m[1].trim();
         if (!rec.firm && !rec.descriptor && (m = cl.match(/\boffer\b[^.!?]*?\bfrom\s+an?\s+([a-z][a-z -]{1,28}?\b(?:startup|company|firm|bank|fund|agency|studio|shop|co|insurer|practice|group))\b/i))) rec.descriptor = m[1].trim();
         const askFramed = /\bask(?:ing)? for\s+(?:a\s+|an\s+)?\$?\s?\d|\bcounter\s+(?:at|of|to)\s+\$?\s?\d|\bmake it\s+\$?\s?\d/i.test(cl);
-        const figs = askFramed ? { hourly: null, signing: null, annual: null } : parseOfferFigures(cl);
+        const figs0 = parseOfferFigures(cl);
+        const figs = askFramed ? { hourly: null, signing: null, annual: null } : figs0;
+        const counterDraftReq = /\b(?:draft|write|compose|prepare)\b[^.?!]*\bcounter\b|\bcounter\s+(?:email|offer|letter|message)\b|\bpropos(?:e|ing)\s+\$|\bask(?:ing)?\s+(?:for\s+)?\$/i.test(cl);
+        if (askFramed || counterDraftReq) { figs.hourly = figs0.reportedHourly; }
         if (figs.hourly) rec.hourly = figs.hourly;
         if (figs.signing) rec.signing = figs.signing;
         if (figs.annual) rec.amount = figs.annual;

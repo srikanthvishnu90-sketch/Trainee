@@ -40685,15 +40685,27 @@ const CareerRouter = (() => {
     // counter?" names the OFFER, and the counter email asked the employer to "meet me at $24". Every hourly figure is
     // classified by the words before it: an ask cue (counter at, ask for, meet me at, want, target, make it) makes it the
     // ASK; any other hourly figure is the OFFER. `hourly` stays the first figure, for the callers that record an offer.
-    out.askHourly = null; out.offerHourly = null;
+    out.askHourly = null; out.offerHourly = null; out.reportedHourly = null; out.askBare = null;
     {
       const reH = /\$\s?(\d{1,3}(?:\.\d{1,2})?)\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)/ig;
-      const askCue = /(?:\bcounter(?:ing|ed)?(?:\s+(?:at|to|with|for))?|\bask(?:ing)?\s+for|\bmeet\s+me\s+at|\bwant(?:ing)?|\btarget(?:ing)?|\blooking\s+for|\bhop(?:e|ing)\s+for|\bmake\s+it|\bchange\s+(?:it|the\s+\w+)\s+to|\bneed|\brequest(?:ing)?|\bpush\s+for|\bgo\s+for|\bwould\s+like|['’]d\s+like)\W{0,3}(?:(?:something\s+like|about|around|at|to|up\s+to)\W{0,3})?$/i;
+      const askCue = /(?:\bcounter(?:ing|ed)?(?:\s+(?:email|offer|letter|message))?(?:\s+(?:at|to|with|for|asking(?:\s+for)?))?|\bask(?:ing)?(?:\s+for)?|\bpropos(?:e|ing|ed)(?:\s+(?:a|an|that))?|\bmeet\s+me\s+at|\bwant(?:ing)?|\btarget(?:ing)?|\blooking\s+for|\bhop(?:e|ing)\s+for|\bmake\s+it|\bchange\s+(?:it|the\s+\w+)\s+to|\bneed|\brequest(?:ing)?|\bpush\s+for|\bgo\s+for|\bwould\s+like|['’]d\s+like)\W{0,3}(?:(?:something\s+like|about|around|at|to|up\s+to)\W{0,3})?$/i;
+      const offerCue = /\boffer(?:ed|ing|s)?\b|\bpay(?:s|ing)\b|\bcame\s+back\s+(?:with|at)\b|\bcomes\s+to\b/i;
       let h;
       while ((h = reH.exec(work))) {
         const clause = work.slice(0, h.index).split(/[.?!]/).pop();
         const v = Number(h[1]);
-        if (askCue.test(clause)) { if (out.askHourly == null) out.askHourly = v; } else if (out.offerHourly == null) out.offerHourly = v;
+        if (askCue.test(clause)) { if (out.askHourly == null) out.askHourly = v; } else {
+          if (out.offerHourly == null) out.offerHourly = v;
+          // G3: only a message that REPORTS the offer (offered, offer is/of, paying, came back with) re-bases the record.
+          if (out.reportedHourly == null && offerCue.test(clause)) out.reportedHourly = v;
+        }
+      }
+      // G3: in an hourly thread a counter request often names the ask with no unit ("draft a counter at $30"). That bare
+      // dollar figure, right after an ask cue, is the ask; the caller uses it only when an hourly offer is on record.
+      const reB = /\$\s?(\d{1,3}(?:\.\d{1,2})?)(?![\d,]|\s?k\b|\.\d)(?!\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour))/ig;
+      let b;
+      while (out.askBare == null && (b = reB.exec(work))) {
+        if (askCue.test(work.slice(0, b.index).split(/[.?!]/).pop())) out.askBare = Number(b[1]);
       }
     }
     if (m) { out.hourly = Number(m[1]); out.hourlyText = m[0].replace(/\s+/g, " ").trim(); work = work.replace(m[0], " "); }
@@ -40867,8 +40879,10 @@ const CareerRouter = (() => {
   // record) carries a negotiation context; stands down otherwise.
   function handleCounterDraftAsk(text, ctx) {
     const t = lc(text);
-    if (!/\b(draft|write|compose)\b/.test(t)) return null;
-    if (!/\bcounter\b|\bextension\b/.test(t) && !/\b(email|letter)\b/.test(t)) return null;
+    // G3: "counter email asking $28/hour" and "propose $28/hour" ask for the counter with no drafting verb.
+    const verbless = /\bcounter\s+(?:email|offer|letter|message)\b/.test(t) || /\bpropos(?:e|ing)\s+\$\s?\d/.test(t);
+    if (!/\b(draft|write|compose)\b/.test(t) && !verbless) return null;
+    if (!/\bcounter\b|\bextension\b/.test(t) && !/\b(email|letter)\b/.test(t) && !verbless) return null;
     // PROBE D DRAFT-BINDING (LF-02 class; live v229 ad53453 and
     // v230 6bc96af, the custom battery's Probe D verbatim): an ask
     // naming NEITHER the counter nor the extension is not the
@@ -44893,6 +44907,7 @@ const CareerRouter = (() => {
         // the product itself set — a bare "write it / draft it" are
         // draft asks too; the email is the deliverable either way.
         || (/\b(draft|write|compose)\b/.test(tt) && /\bcounter\b|\bextension\b|\bdecline\b|\breply\b/.test(tt))
+        || /\bcounter\s+(?:email|offer|letter|message)\b|\bpropos(?:e|ing)\s+\$\s?\d/.test(tt)
         || (/\b(draft|write|compose)\b[^.]{0,40}\b(it|that|this|the email|the letter|an email|a reply)\b/.test(tt) && !!(negotiationThreadOf(ctx).topic || negotiationThreadOf(ctx).amount || negotiationThreadOf(ctx).firm))
         // PR-4: "counter at $27/hour" on a thread that holds an hourly offer names the ask: the email is the deliverable.
         || (/\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d{1,3}(?:\.\d{1,2})?\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)/.test(tt) && !!(negotiationThreadOf(ctx).hourly || (ctx.offer && ctx.offer.hourly_rate)));
@@ -44941,6 +44956,7 @@ const CareerRouter = (() => {
           // differs from the offer on record, with no offer figure in this message, is a revision's new number. The
           // offered figure itself is never the ask: a counter at or below the offer is no counter, so it is dropped.
           askFigs.ask = askFigs.askHourly != null ? askFigs.askHourly
+            : askFigs.askBare != null ? askFigs.askBare
             : (askFigs.offerHourly == null && askFigs.hourly && hourlyBase && Number(askFigs.hourly) !== Number(hourlyBase) ? askFigs.hourly : null);
           if (askFigs.ask != null && hourlyBase && Number(askFigs.ask) <= Number(hourlyBase)) askFigs.ask = null;
           const company = offerObj.company || thread.descriptor || "the firm";
@@ -52305,7 +52321,12 @@ const CareerRouter = (() => {
         // forms the kind parse does not carry (the $-less k forms:
         // "85k", "came back at 120k").
         const askFramed = /\bask(?:ing)? for\s+(?:a\s+|an\s+)?\$?\s?\d|\bcounter\s+(?:at|of|to)\s+\$?\s?\d|\bmake it\s+\$?\s?\d/i.test(cl);
-        const figs = askFramed ? { hourly: null, signing: null, annual: null } : parseOfferFigures(cl);
+        const figs0 = parseOfferFigures(cl);
+        const figs = askFramed ? { hourly: null, signing: null, annual: null } : figs0;
+        // G3: a counter-drafting request ("draft the counter email at $28/hour", "propose $28/hour") carries the ASK; its hourly
+        // figure re-bases the recorded offer only when the same message REPORTS an offer ("they offered $26/hour now").
+        const counterDraftReq = /\b(?:draft|write|compose|prepare)\b[^.?!]*\bcounter\b|\bcounter\s+(?:email|offer|letter|message)\b|\bpropos(?:e|ing)\s+\$|\bask(?:ing)?\s+(?:for\s+)?\$/i.test(cl);
+        if (askFramed || counterDraftReq) { figs.hourly = figs0.reportedHourly; }
         if (figs.hourly) rec.hourly = figs.hourly;
         if (figs.signing) rec.signing = figs.signing;
         if (figs.annual) rec.amount = figs.annual;

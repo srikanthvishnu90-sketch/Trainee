@@ -246,6 +246,25 @@ Deno.test("CDW an explicit ask always beats an unlabelled earlier figure", () =>
     step(ctx, "Draft the counter email.", 24, ask);
   }
 });
+Deno.test("CDW job wording ('for a childcare role') does not hide the counter; payment purposes still do", () => {
+  const cases: Array<[string, number | null]> = [
+    ["Draft a counter at $28 for a childcare role", 28],
+    ["counter at $28 for a childcare position", 28],
+    ["counter at $30 for a travel nurse role", 30],
+    ["Draft a counter at $28 and $300 for childcare costs", 28],
+    ["Draft a counter asking for $500 for relocation", null],
+  ];
+  for (const [msg, ask] of cases) {
+    const ctx = fresh();
+    host.runTurn(OFFER, ctx);
+    step(ctx, msg, 24, ask);
+    step(ctx, "Draft the counter email.", 24, ask);
+    assert(!/\$(?:300|500) an hour/.test(host.runTurn("Draft the counter email.", ctx).result.draft.body), msg);
+  }
+  const ctx = fresh();
+  host.runTurn(OFFER, ctx);
+  step(ctx, "Their rate is $26/hour; draft a counter at $30", 24, 30);
+});
 Deno.test("CDW the C04 message verbatim still blanks the ask and keeps the offer", () => {
   const C04 = "Fictional beta scenario, not my profile. Jordan Lee has two years of retail customer-service experience and Excel skills. No external actions and no changes to my profile. A customer support job offered Jordan $24/hour, with no other terms provided. Should Jordan counter, and how? Draft a short counter email for review only. Separate advice from unverified market claims.";
   const ctx = fresh();

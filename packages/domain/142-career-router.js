@@ -3807,7 +3807,14 @@ const CareerRouter = (() => {
     const BLOCK = /^(?:and|with|plus|no|without|not|or|but|also|to|if|then)$/i;
     const attached = (after, before) => {
       const aw = after.trim().split(/\s+/).slice(0, 3);
-      for (let i = 0; i < aw.length; i++) { if (BLOCK.test(aw[i])) break; if (new RegExp("^(?:" + NOUN + ")$", "i").test(aw[i])) return true; }
+      // "for a childcare role" describes the JOB, not a payment purpose: an article right after "for", or a role word right
+      // after the noun, means the figure is not one-time money.
+      const ROLE = /^(?:role|job|position|gig|opening|posting|work|company|family|team)s?$/i;
+      for (let i = 0; i < aw.length; i++) {
+        if (BLOCK.test(aw[i])) break;
+        if (/^for$/i.test(aw[i]) && /^an?$/i.test(aw[i + 1] || "")) break;
+        if (new RegExp("^(?:" + NOUN + ")$", "i").test(aw[i])) { if (ROLE.test(aw[i + 1] || "")) break; return true; }
+      }
       const bm = before.match(new RegExp("(?:^|\\s)((?:" + NOUN + ")(?:\\s+\\w+){0,2})\\s*(?:of|is|at|:|=)?\\s*$", "i"));
       return !!bm && !/\b(?:no|without|not|zero|never)\b/i.test(before.slice(0, bm.index + bm[0].length - bm[1].length).split(/[,;.]/).pop().slice(-12));
     };

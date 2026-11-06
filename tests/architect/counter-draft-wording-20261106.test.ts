@@ -477,3 +477,11 @@ Deno.test("CDW a current-pay figure never becomes or replaces the offer", () => 
   rec("I'm at $26 an hour at my current job, draft a counter at $30/hour", 24, 30, true);
   rec("currently $20/hour, the offer is $24/hour, counter at $27/hour", 24, 27, false);
 });
+
+Deno.test("CDW a comma-split clause keeps the ask cue of its sentence: '(ask for a $2,000 signing bonus and $28/hour)' is an ask, not the offer", () => {
+  const ctx = fresh();
+  const r = host.runTurn("They offered $75/day (ask for a $2,000 signing bonus and $28/hour). Draft the counter email.", ctx);
+  const body: string = r.result.draft.body;
+  assert(/meet me at \$28 an hour\?/.test(body) && !/Thank you for the offer — \$28 an hour/.test(body), body);
+  eq([recorded(ctx).hourly, recorded(ctx).counter], [null, 28]);
+});

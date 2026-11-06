@@ -15533,7 +15533,11 @@ const CareerRouter = (() => {
         // a comma-split clause that cuts a thousands figure ("$60 an hour plus a $5" of "$5,000 signing bonus") drops only the cut stub
         const cutAt = raw.indexOf(cl);
         const clp = cutAt >= 0 && /\$\s?\d{1,3}\s*$/.test(cl) && /^,\d{3}\b/.test(raw.slice(cutAt + cl.length)) ? cl.replace(/\$\s?\d{1,3}\s*$/, "") : cl;
-        const figs0 = parseOfferFigures(clp, { offerSentence: (s(raw).split(/(?<=[.!?])\s+|\n/).find((x) => x.includes(cl)) || "").replace(/counter[ -]?offers?/ig, "").search(/\boffer(?:ed|ing|s)?\b/i) >= 0, recorded: offerHint(raw, ctx).recorded, draft: offerHint(raw, ctx).draft });
+        // the sentence this clause sits in: an offer word anywhere in it lets an explicit hourly figure be the offer, but an ask cue
+        // EARLIER in that sentence (a comma split can leave the cue in the previous clause) withholds that
+        const sentOf = s(raw).split(/(?<=[.!?])\s+|\n/).find((x) => x.includes(cl)) || "";
+        const sentBefore = sentOf.slice(0, Math.max(0, sentOf.indexOf(cl)));
+        const figs0 = parseOfferFigures(clp, { offerSentence: sentOf.replace(/counter[ -]?offers?/ig, "").search(/\boffer(?:ed|ing|s)?\b/i) >= 0 && !/\bask(?:ing)?\b|\bcounter|\bpropos|\bwant|\bmeet\s+me|\btarget|\bneed\b/i.test(sentBefore.replace(/counter[ -]?offers?/ig, "")), recorded: offerHint(raw, ctx).recorded, draft: offerHint(raw, ctx).draft });
         const figs = askFramed ? { hourly: null, signing: null, annual: null } : figs0;
         // G3: a counter-drafting request ("draft the counter email at $28/hour", "propose $28/hour") carries the ASK; its hourly
         // figure re-bases the recorded offer only when the same message REPORTS an offer ("they offered $26/hour now").

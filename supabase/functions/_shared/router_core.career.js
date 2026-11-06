@@ -23962,7 +23962,9 @@ const CareerRouter = (() => {
         const askFramed = /\bask(?:ing)? for\s+(?:a\s+|an\s+)?\$?\s?\d|\bcounter\s+(?:at|of|to)\s+\$?\s?\d|\bmake it\s+\$?\s?\d/i.test(cl);
         const cutAt = raw.indexOf(cl);
         const clp = cutAt >= 0 && /\$\s?\d{1,3}\s*$/.test(cl) && /^,\d{3}\b/.test(raw.slice(cutAt + cl.length)) ? cl.replace(/\$\s?\d{1,3}\s*$/, "") : cl;
-        const figs0 = parseOfferFigures(clp, { offerSentence: (s(raw).split(/(?<=[.!?])\s+|\n/).find((x) => x.includes(cl)) || "").replace(/counter[ -]?offers?/ig, "").search(/\boffer(?:ed|ing|s)?\b/i) >= 0, recorded: offerHint(raw, ctx).recorded, draft: offerHint(raw, ctx).draft });
+        const sentOf = s(raw).split(/(?<=[.!?])\s+|\n/).find((x) => x.includes(cl)) || "";
+        const sentBefore = sentOf.slice(0, Math.max(0, sentOf.indexOf(cl)));
+        const figs0 = parseOfferFigures(clp, { offerSentence: sentOf.replace(/counter[ -]?offers?/ig, "").search(/\boffer(?:ed|ing|s)?\b/i) >= 0 && !/\bask(?:ing)?\b|\bcounter|\bpropos|\bwant|\bmeet\s+me|\btarget|\bneed\b/i.test(sentBefore.replace(/counter[ -]?offers?/ig, "")), recorded: offerHint(raw, ctx).recorded, draft: offerHint(raw, ctx).draft });
         const figs = askFramed ? { hourly: null, signing: null, annual: null } : figs0;
         const counterDraftReq = /\b(?:draft|write|compose|prepare)\b[^.?!]*\bcounter\b|\bcounter\s+(?:email|offer|letter|message)\b|\bpropos(?:e|ing)\s+\$|\bask(?:ing)?\s+(?:for\s+)?\$/i.test(cl);
         figs.hourly = figs0.recHourly;

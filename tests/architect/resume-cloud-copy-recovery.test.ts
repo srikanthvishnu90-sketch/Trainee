@@ -81,6 +81,19 @@ Deno.test({
       eq((await pg.sql(`select public.career_resume_take('${live}', '${detail}'::jsonb)`)).trim(), "f", "returns false as before");
       eq(await copies(live), "1|0", "chat confirmation of the same resume put the copy back");
       eq(await snap(live), before);
+      // Explicit opt-out: neither the chat path nor a new upload brings the copy back; opting back in does.
+      await pg.sql(`delete from public.career_apply_cloud_resumes where user_id = '${live}';
+        insert into public.career_apply_cloud_optin (user_id, enabled, terms, terms_sha256, daily, privacy_epoch, turned_off_at)
+         values ('${live}', false, 't', encode(sha256(convert_to('t', 'UTF8')), 'hex'), 5, 0, now());`);
+      await pg.sql(`select public.career_resume_take('${live}', '${detail}'::jsonb)`);
+      eq(await copies(live), "0|-1", "opted out: same file via take leaves no copy");
+      await pg.sql(`select public.career_resume_put('${live}', encode(sha256(convert_to('other', 'UTF8')), 'hex'), 'file', 'ref', 'o.pdf', convert_to('other', 'UTF8'), 'evt-new')`);
+      eq(await copies(live), "0|-1", "opted out: a new file keeps no copy either");
+      await pg.sql(`select public.career_resume_put('${live}', '${hex}', 'file', 'ref', 'r.pdf', convert_to('hello', 'UTF8'), 'evt-back')`);
+      await pg.sql(`update public.career_apply_cloud_optin set enabled = true, turned_off_at = null, turned_on_at = now() where user_id = '${live}'`);
+      await pg.sql(`select public.career_resume_take('${live}', '${detail}'::jsonb)`);
+      eq(await copies(live), "1|0", "opted back in: the same file via take restores it");
+      await pg.sql(`delete from public.career_apply_cloud_optin where user_id = '${live}'; delete from public.career_apply_cloud_resumes where user_id = '${live}'`);
       // The recovery re-reads consent, pause and epoch per person under the lock: a change committed between the candidate scan and the
       // insert is seen by the helper (simulated by flipping the state, then calling the helper for the person the scan had picked).
       await pg.sql(`delete from public.career_apply_cloud_resumes where user_id = '${live}'`);

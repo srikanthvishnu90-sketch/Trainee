@@ -10,6 +10,10 @@
 --     still 0 (an erase or revocation raises it and deletes the copies; nobody who erased is revived), and the person did not turn the cloud
 --     off (career_apply_cloud_optin enabled = false deletes the copies on purpose). Written at the account's current epoch. Idempotent.
 -- (3) career_resume_take routes an already-confirmed hash through that repair (one line changed). (4) The recovery runs per person under the opt-out/account lock.
+-- (5) An explicit cloud opt-out (career_apply_cloud_optin.enabled = false, which deletes the copies) is respected by BOTH career_resume_put paths:
+--     the new-hash path wrote the copy regardless (pre-existing), so did the same-hash repair. Opting back in (enabled = true) lifts it.
+--     The recovery loop takes the per-person locks in user_id order (as career_apply_cloud_text_claim_at does); they are held to the end of this
+--     migration's transaction (a migration cannot commit per person): a short window, one tiny insert per affected person, and writers wait, not fail.
 -- Service_role only. Rollback: supabase/rollbacks/20261106130000_career_resume_cloud_copy_recovery.down.sql
 
 create or replace function public.career_resume_put(p_user uuid, p_sha256 text, p_kind text, p_ref text, p_filename text, p_bytes bytea,
@@ -28,6 +32,7 @@ begin
   a := public.career_account_row_ensure(p_user);
   if r.kind = 'file' and r.bytes is not null and octet_length(r.bytes) <= 5242880 and a is not null
    and coalesce(a->>'paused', 'false') <> 'true'
+   and not exists (select from public.career_apply_cloud_optin o where o.user_id = p_user and o.enabled = false)
    and not exists (select from public.career_apply_cloud_resumes c where c.user_id = p_user and c.sha256 = r.sha256) then
    insert into public.career_apply_cloud_resumes (user_id, sha256, filename, bytes, privacy_epoch)
    values (p_user, r.sha256, coalesce(r.filename, 'resume'), r.bytes, coalesce((a->>'epoch')::bigint, 0))
@@ -49,7 +54,8 @@ begin
  -- The cloud attaches only this file: kept for the account as it is now (its epoch), every other kept file removed.
  delete from public.career_apply_cloud_resumes where user_id = p_user and sha256 <> p_sha256;
  a := public.career_account_row_ensure(p_user);
- if r.kind = 'file' and r.bytes is not null and octet_length(r.bytes) <= 5242880 and a is not null then
+ if r.kind = 'file' and r.bytes is not null and octet_length(r.bytes) <= 5242880 and a is not null
+  and not exists (select from public.career_apply_cloud_optin o where o.user_id = p_user and o.enabled = false) then
   insert into public.career_apply_cloud_resumes (user_id, sha256, filename, bytes, privacy_epoch)
   values (p_user, r.sha256, coalesce(r.filename, 'resume'), r.bytes, coalesce((a->>'epoch')::bigint, 0))
   on conflict (user_id, sha256) do update set filename = excluded.filename, bytes = excluded.bytes, privacy_epoch = excluded.privacy_epoch;
@@ -136,6 +142,7 @@ begin
  for u in select r.user_id from public.career_resume_record r
   where r.state = 'confirmed' and r.kind = 'file' and r.bytes is not null
    and not exists (select from public.career_apply_cloud_resumes c where c.user_id = r.user_id)
+  order by r.user_id
  loop
   perform public.career_resume_cloud_copy_recover(u);
  end loop;

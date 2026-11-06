@@ -72,3 +72,17 @@ Deno.test("CO-5 the offer is never the ask, even when the person names it as the
     assert(/\[your target hourly rate\]/.test(body), m);
   }
 });
+
+Deno.test("CO-6 the offer stays $24 when the person states the ask in the same message (want / I'd like / meet me at)", () => {
+  for (const ask28 of ["I want $28/hour.", "I'd like $28/hour.", "Would you meet me at $28 an hour?"]) {
+    const m = `They offered me $24/hour for a support role. Draft a counter email. ${ask28}`;
+    const body: string = host.runTurn(m, fresh()).result.draft.body;
+    assert(/Thank you for the offer — \$24 an hour/.test(body), `${m}: offer restated wrongly`);
+    assert(/meet me at \$28 an hour\?/.test(body), `${m}: ${ask(body)}`);
+  }
+});
+
+Deno.test("CO-7 the blank is not claimed to be code-blocked: the reply says it is not ready to send", () => {
+  const res = host.runTurn(C04, fresh()).result;
+  assert(!/cannot be approved|not approvable/i.test(res.reply), res.reply);
+});

@@ -476,7 +476,7 @@ export function beforeDraft(reply: string): string {
   return m ? t.slice(0, m.index) : t;
 }
 export const hasDraft = (reply: string): boolean => DRAFT_CUE.test(String(reply ?? ""));
-const QUESTION_LABEL = /\b(?:practice|practise|prepare|prep|rehearse|drill|mock|sample|example|likely|typical|questions?|ask(?:ed)?|try|these|try these)\b/i;
+const QUESTION_LABEL = /\b(?:practi[sc]e|rehearse|drill|mock)\b|\b(?:sample|likely|common|typical|interview|behavioral|behavioural|technical) questions\b|\bthey (?:may|might|could|will|can) ask\b|\btry these\b|\bquestions to (?:practi[sc]e|prepare|expect|rehearse)\b/i;
 export function endAsks(reply: string): { asks: number; conjoined: boolean } {
   if (hasDraft(reply)) return { asks: 0, conjoined: false };
   const paras = String(reply ?? "").trim().split(/\n\s*\n/);

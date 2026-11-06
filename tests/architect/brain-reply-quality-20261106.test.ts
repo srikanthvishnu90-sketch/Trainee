@@ -17,6 +17,8 @@ const KEEP = [
   "Practice out loud:\nWhy this firm?\nWhy this role?\nWhat is your biggest weakness?",
   "Practice out loud:\nWhat motivates you?\nHow do you handle conflict?",
   "Practice out loud:\nWhat motivates you?\nHow do you handle conflict?\n\nWhich do you want to start with?",
+  "Sample questions:\nWhat motivates you?\nHow do you handle conflict?",
+  "Questions to practice:\nWhat motivates you?\nHow do you handle conflict?",
   "They may ask:\nWhy do you want this role?\nWhat is your biggest weakness?",
   "Try: Why this firm? Why this role? What is your biggest weakness?",
   "Worried about gaps? Many people are. What role are you after?",
@@ -37,6 +39,7 @@ Deno.test("BR-2 true positives: a conjoined or doubled ask at the end of the rep
   assert(multiAsk("The search came back empty.\n\nWhat city should I search? Do you have a school I should use?"));
   assert(multiAsk("Do you have a school and graduation date I should use?"));
   assert(multiAsk("What city are you targeting?\nWhat school are you at?"), "unlabeled lines");
+  for (const l of ["A few questions:", "Quick questions:", "Questions:", "I need two things:"]) assert(multiAsk(`${l}\nWhat city are you targeting?\nWhat school are you at?`), l);
   assert(multiAsk("Nothing matched.\n\nWhat city are you targeting?\nDo you have a school I should use?"), "two closing lines");
 });
 

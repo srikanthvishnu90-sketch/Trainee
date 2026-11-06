@@ -207,3 +207,11 @@ language sql stable security definer set search_path = public, pg_temp as $$
  order by r.created_at desc limit 1
 $$;
 
+
+-- Replaced definer functions keep exactly the access they had: service_role only (same-file revoke, as the scan requires).
+revoke all on function public.career_resume_put(uuid, text, text, text, text, bytea, text) from public, anon, authenticated;
+grant execute on function public.career_resume_put(uuid, text, text, text, text, bytea, text) to service_role;
+revoke all on function public.career_apply_cloud_resume_put_for(uuid, text, text) from public, anon, authenticated;
+grant execute on function public.career_apply_cloud_resume_put_for(uuid, text, text) to service_role;
+revoke all on function public.career_apply_cloud_resume_kept_for(uuid) from public, anon, authenticated;
+grant execute on function public.career_apply_cloud_resume_kept_for(uuid) to service_role;

@@ -40742,6 +40742,14 @@ const CareerRouter = (() => {
       const trailingCurrent = /^[^.?!;,\n]{0,24}?\b(?:at\s+my\s+(?:current\s+|present\s+)?(?:job|employer|company|role)|(?:in|from)\s+my\s+(?:current|present)\b|where\s+i\s+work(?:\s+now)?)\b/i.test(after.split("$")[0]); // the scan stops at the next money figure
       // an explicit ask cue or an employer offer cue on the figure always beats a current-pay cue
       let role = (ci >= 0 && ci >= ui && ci >= ei) || (trailingCurrent && ui < 0 && lastIdx(/\b(?:offer(?:ed|ing|s)?|proposed|came\s+back|quoted|countered|comes\s+to)\b/ig, seg) < 0) ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
+      // An offer or pay word whose subject is the market, a salary site or other employers ("the market offers $28/hour",
+      // "glassdoor says others are paying $28") is a market figure, never this employer's offer: unless the employer is named
+      // after that third party ("the market is $28 but they offered $26" is decided by $26's own words).
+      if (role === "employer") {
+        const third = lastIdx(/\b(?:market|glassdoor|levels(?:\.fyi)?|salary\.com|payscale|indeed|average|median|typical|others|other\s+(?:companies|employers|firms|places|roles)|competitors?|similar\s+roles?|industry)\b/ig, seg);
+        const own = lastIdx(/\b(?:they|their|them|company|employer|recruiter|firm|hiring\s+manager|hr)\b/ig, seg);
+        if (third >= 0 && third > own) role = "unknown";
+      }
       // An ask cue carries across "and" / "plus" / "," inside the same clause ("ask for $500 relocation and $28 an hour").
       if (role === "unknown" && prevRole === "ask" && !/[.?!;\n]/.test(src.slice(prevEnd, start)) && /(?:\band\b|\bplus\b|&|,)\s*$/i.test(seg)) role = "ask";
       const v = Number(mm[1].replace(/,/g, ""));
@@ -40749,10 +40757,18 @@ const CareerRouter = (() => {
       if (unit === "none" && role === "employer" && unitlessHourly(v, end)) unit = "hour";
       // the exact pay-noun pattern ("the hourly offer is $24") states the offer itself
       if (role === "unknown" && unit !== "none" && /(?:hourly|annual|yearly)\s+(?:offer|rate|pay|wage|salary|base)(?:\s+rate)?\s*(?:is|of|at|=|:|was|will\s+be)?\s*$/i.test(seg)) role = "employer";
-      // An EXPLICIT hourly figure in a clause that has an offer word (before or after it) is the employer's offer, provided the
-      // clause carries no ask, current-pay or market cue. Unitless figures never become the offer this way.
+      // An EXPLICIT hourly figure whose own words have an offer word (before or after it) is the employer's offer, provided those
+      // words carry no ask, current-pay or market cue. A figure's own words are its clause cut at the neighbouring money figures,
+      // so another figure's cue does not decide it: in "draft a counter at $30/hour against their $26/hour offer" the ask cue
+      // belongs to $30 and $26 is the offer. Unitless figures never become the offer this way.
       if (role === "unknown" && unit === "hour") {
-        const cs = src.slice(0, start).split(/[.?!;,\n]/).pop() + src.slice(start).split(/[.?!;,\n]/)[0];
+        const left = src.slice(prevEnd, start).split(/[.?!;,\n]/).pop();
+        const rest = src.slice(start).split(/[.?!;,\n]/)[0];
+        // The right side also stops at a joining word that starts another thought ("…their $26/hour offer even though the
+        // market offers $28/hour"): the market cue there is the next figure's, not this one's.
+        const tail = rest.slice(mm[0].length);
+        const stop = [tail.search(/\$\s?\d/), tail.search(/\b(?:even\s+though|although|though|but|while|whereas|and|plus|since|because)\b/i)].filter((i) => i >= 0);
+        const cs = left + (stop.length ? rest.slice(0, mm[0].length + Math.min(...stop)) : rest);
         if ((/\boffer(?:ed|ing|s)?\b/i.test(cs.replace(/counter[ -]?offers?/ig, "")) || (hint && hint.offerSentence)) && lastIdx(user, cs) < 0 && lastIdx(current, cs) < 0 && !/\b(?:market|glassdoor|average|typical|range|says|salary\.com|levels)\b/i.test(cs)) role = "employer";
       }
       prevRole = role;

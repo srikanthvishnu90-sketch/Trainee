@@ -590,3 +590,60 @@ Deno.test("CDW the ambiguous fallback gives no call script, no commit wording an
   const r = host.runTurn("my offer is $24/hour, what should I say on the call to counter?", ctx);
   assert(/call script|word for word|OPEN:/i.test(String(r.result?.reply ?? "")), "an unambiguous ask still gets its script: " + String(r.result?.reply ?? "").slice(0, 120));
 });
+
+// Greptile P1 on 1419359c: an offer figure that shares a clause with the ask ("a counter at $30/hour against their $26/hour
+// offer") was dropped because the ask cue of $30 was read as $26's. Each figure's own words now decide it.
+Deno.test("CDW an offer figure in the same clause as the ask is the offer; the other figure's cue does not decide it", () => {
+  const go = (prior: string | null, msg: string) => { const ctx = fresh(); if (prior) host.runTurn(prior, ctx); const r = host.runTurn(msg, ctx); return { ctx, r, body: String(r.result?.draft?.body ?? "") }; };
+  const offerIs = (prior: string | null, msg: string, offer: number, ask: number) => {
+    const t = go(prior, msg);
+    eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [offer, ask], `${msg}: saved`);
+    assert(new RegExp(`Thank you for the offer — \\$${offer} an hour`).test(t.body), `${msg}: thanks ${t.body}`);
+    assert(new RegExp(`meet me at \\$${ask} an hour\\?`).test(t.body), `${msg}: ask ${t.body}`);
+    eq(t.r.result?.sends ?? 0, 0, `${msg}: nothing sent`);
+  };
+  for (const prior of [OFFER, null]) {
+    offerIs(prior, "Draft a counter at $30/hour against their $26/hour offer", 26, 30);
+    offerIs(prior, "Draft a counter at $30/hour against their new $26/hour offer", 26, 30);
+    offerIs(prior, "Write the counter at $30 an hour to their $26 an hour offer", 26, 30);
+    offerIs(prior, "Counter at $30/hour since the market average is $28/hour vs their $26/hour offer", 26, 30);
+  }
+  // Still not the offer: a figure whose own words carry the ask, current pay, or a market cue.
+  const keep = (msg: string, ask: number) => {
+    const t = go(OFFER, msg);
+    eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [24, ask], `${msg}: the recorded $24 stays`);
+    assert(/Thank you for the offer — \$24 an hour/.test(t.body), `${msg}: ${t.body}`);
+  };
+  keep("Draft a counter asking $30/hour plus $28/hour overtime offer", 30);
+  keep("Draft a counter at $30/hour and mention I make $22/hour at my current job offer", 30);
+  keep("Draft a counter at $30/hour, the market offers $28/hour", 30);
+  keep("Draft a counter at $30/hour. The market offers $28/hour", 30);
+  keep("Glassdoor says others are paying $28/hour, draft a counter at $30/hour", 30);
+  keep("Draft a counter at $30/hour", 30);
+  // The employer named after the market decides its own figure; an offer followed by a market remark is still the offer.
+  offerIs(OFFER, "The market is $28/hour but they offered $26/hour, draft a counter at $30/hour", 26, 30);
+  offerIs(OFFER, "They offered $26/hour which is below market. Draft a counter at $30/hour", 26, 30);
+});
+
+// The same shape at scale: 5 asks x 6 offer phrasings x 2 orders x 3 market remarks x 3 figure sets x (offer on record or not)
+// = 1,080 turns. Every one saves the stated offer and the ask, thanks for the stated offer, never the market figure, sends nothing.
+// (At 1419359c, 660 of these were wrong.)
+Deno.test("CDW same-clause battery: ask, offer and a market figure in one message, 1,080 turns, the stated offer every time", () => {
+  const asks = ["Draft a counter at $A/hour", "Write the counter at $A an hour", "Draft the counter email asking $A/hour", "Counter at $A per hour", "Draft a counter proposing $A/hr"];
+  const links = ["against their $O/hour offer", "against their new $O/hour offer", "to their $O an hour offer", "vs their $O/hour offer", "versus the $O/hour they offered", "over their offered $O/hour"];
+  const orders = [(a: string, l: string) => `${a} ${l}`, (a: string, l: string) => `${l.replace(/^(against|to|vs|versus|over) /, "Given ")}, ${a[0].toLowerCase() + a.slice(1)}`];
+  const market = ["", " even though the market offers $M/hour", ", the market average is $M/hour"];
+  const wrong: string[] = [];
+  let total = 0;
+  for (const prior of [OFFER, null]) for (const a of asks) for (const l of links) for (const o of orders) for (const m of market) for (const [A, O, M] of [[30, 26, 28], [32, 27, 29], [35, 28, 31]]) {
+    const msg = (o(a, l) + m).replace(/\$A/g, "$" + A).replace(/\$O/g, "$" + O).replace(/\$M/g, "$" + M);
+    const ctx = fresh();
+    if (prior) host.runTurn(prior, ctx);
+    const r = host.runTurn(msg, ctx);
+    total++;
+    const rec = recorded(ctx), body = String(r.result?.draft?.body ?? "");
+    if (rec.hourly !== O || rec.counter !== A || !body.includes(`Thank you for the offer — $${O} an hour`) || (r.result?.sends ?? 0) !== 0) wrong.push(`${prior ? "P" : "-"} ${msg} => offer ${rec.hourly}, ask ${rec.counter}`);
+  }
+  eq(total, 1080);
+  eq(wrong.slice(0, 10), [], `${wrong.length} wrong`);
+});

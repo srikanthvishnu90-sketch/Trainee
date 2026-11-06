@@ -17,10 +17,13 @@ export const CODE_IN_CHAT_REPLY = "Please don't share one-time codes or password
   "If your Gmail is connected, Trainee reads an employer's emailed code itself, and only during an application you approved. " +
   "Otherwise, type the code into the employer's portal yourself, and sign in there with your own password.";
 
-export type CodeInChat = { text: string; userContent: string; removed: ("code" | "password")[] };
+// reply: true when the fixed safety text answers the turn; false for a long pasted document, which keeps its own turn (its
+// token is removed all the same).
+export type CodeInChat = { text: string; userContent: string; removed: ("code" | "password")[]; reply: boolean };
 
-// A message longer than this is a pasted document (a resume, a posting): identity_redact.ts has already taken any secret
-// out of it, and its own turn (the resume read) answers it.
+// A message longer than this is a pasted document (a resume, a posting): its own turn (the resume read) answers it instead
+// of the safety text. Only the REPLY is limited by this: a code-shaped token next to a code word is removed from a message of
+// any accepted length (Greptile P1 on PR #549: a 480-character message used to keep "Workday sent me 739201").
 const MAX_CHAT_LEN = 400;
 const MARKER = /\[(code|password) removed\]/g;
 // A code word before the token, in the same sentence. Strong words name a code; weak ones ("portal", "sent me") only say
@@ -75,7 +78,7 @@ function tokensIn(sentence: string): { start: number; end: number }[] {
 // shares no code or password.
 export function codeInChat(message: string, o: { userContent?: string; removed?: readonly string[]; codePending?: boolean } = {}): CodeInChat | null {
   const msg = String(message ?? "");
-  if (!msg.trim() || msg.length > MAX_CHAT_LEN || o.codePending) return null;
+  if (!msg.trim() || o.codePending) return null;
   const removed = new Set<"code" | "password">();
   for (const r of o.removed ?? []) if (r === "code" || r === "password") removed.add(r);
   for (const m of msg.matchAll(MARKER)) removed.add(m[1] as "code" | "password");
@@ -91,7 +94,7 @@ export function codeInChat(message: string, o: { userContent?: string; removed?:
   if (!removed.size) return null;
   let userContent = String(o.userContent ?? msg);
   for (const v of values) userContent = userContent.split(v).join("[code removed]");
-  return { text, userContent, removed: [...removed] };
+  return { text, userContent, removed: [...removed], reply: msg.length <= MAX_CHAT_LEN };
 }
 
 // redactionNote's own "never send passwords or codes in a message ..." sentence repeats CODE_IN_CHAT_REPLY; on this turn the

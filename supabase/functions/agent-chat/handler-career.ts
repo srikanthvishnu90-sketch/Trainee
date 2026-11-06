@@ -554,7 +554,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // "disconnect outlook" (revoke where possible, erase, cancel pending sends, read back), and a task that needs a
       // connector not connected ("check my outlook"): asked once with the link, parked, resumed by the connect callback.
       // A one-time code or a password shared in chat (codeShared) is code's safety turn before every turn here (codeChatText).
-      const codeFirst = !!codeShared && !tapIn && !careerTask && !careerBatch && !host.isHostControlled(message, ctx);
+      const codeFirst = !!codeShared?.reply && !tapIn && !careerTask && !careerBatch && !host.isHostControlled(message, ctx);
       const connAns = !codeFirst && !tapIn && !careerTask && !careerBatch && connectorAsk(message)
         ? await connectorChatTurn({ admin, env: Deno.env, fetch, now: Date.now, message, userId: user.id, threadId: tid, bridge: isBridgeCall })
           .catch((e) => { console.error("connector turn:", e?.message ?? e); return connectorFailure(message); })

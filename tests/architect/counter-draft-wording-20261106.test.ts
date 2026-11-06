@@ -567,3 +567,26 @@ Deno.test("CDW ambiguous figures (current-job phrase, two pay figures, no offer 
   ok("my job now pays $26/hour; counter at $30/hour", 24, 30);
   ok("Draft a counter at $28/hour right now", 24, 28);
 });
+
+Deno.test("CDW the ambiguous fallback gives no call script, no commit wording and no figure but the recorded offer; a clear ask still gets its script", () => {
+  for (const msg of ["They pay $26/hr vs $22/hr at my job; draft the counter email and tell me what to say on the call.", "They pay $26/hr plus a $50 bonus at my job; draft a counter at $30/hr and tell me what to say on the call.", "They pay $26/hr vs $22/hr at my job; counter scripts: what should I say on the call?"]) {
+    const ctx = fresh();
+    host.runTurn(OFFER, ctx);
+    const r = host.runTurn(msg, ctx);
+    const reply = String(r.result?.reply ?? "");
+    assert(r.result.counterAmbiguous === true && !r.result.draft, msg);
+    assert(!/call script|word for word|OPEN:|ANCHOR:|IF PUSHED|your words for the call|verbatim/i.test(reply), `${msg}: script in the fallback: ${reply}`);
+    assert(!/\b(?:accept|commit|sign today|stop (?:other|all)|yes today|say yes)\b/i.test(reply), `${msg}: commit wording: ${reply}`);
+    const figs = [...reply.matchAll(/\$\s?([\d,]+(?:\.\d+)?)/g)].map((m) => m[1]);
+    assert(figs.every((f) => f === "24"), `${msg}: figures ${figs.join(",")}`);
+    eq(recorded(ctx).hourly, 24);
+    const ctx2 = fresh();
+    host.runTurn(OFFER, ctx2);
+    const d = stagedDecision({ env: STAGED, message: msg, ctx: ctx2, host, structured: false });
+    eq([d.brain, d.reason], [true, "counter_ambiguous_figures"], msg);
+  }
+  const ctx = fresh();
+  host.runTurn(OFFER, ctx);
+  const r = host.runTurn("my offer is $24/hour, what should I say on the call to counter?", ctx);
+  assert(/call script|word for word|OPEN:/i.test(String(r.result?.reply ?? "")), "an unambiguous ask still gets its script: " + String(r.result?.reply ?? "").slice(0, 120));
+});

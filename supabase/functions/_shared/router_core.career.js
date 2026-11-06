@@ -19128,7 +19128,7 @@ const CareerRouter = (() => {
         return { intent: "negotiation_plan", reply, resultStatus: "prepared", sends: 0, offer, strategy: strat, bench, payload: offer };
       } catch {   }
     }
-    if ((/\bcounter scripts?\b|\bscripts?\b[^.]*\bcounter\b/i.test(s(text)) || (/\bcounter\b/i.test(s(text)) && /\b(exact words|word[ -]for[ -]word|email version|phone version|call version)\b/i.test(s(text)))) && Negotiation && Negotiation.counterStrategy) {
+    if (!ctx._ambiguousCounter && (/\bcounter scripts?\b|\bscripts?\b[^.]*\bcounter\b/i.test(s(text)) || (/\bcounter\b/i.test(s(text)) && /\b(exact words|word[ -]for[ -]word|email version|phone version|call version)\b/i.test(s(text)))) && Negotiation && Negotiation.counterStrategy) {
       try {
         const offer = offerText ? Negotiation.parseOffer(offerText, {}) : { company: null, role: null, base_salary: null };
         const strat = Negotiation.counterStrategy(offer, bench, {});
@@ -19265,7 +19265,7 @@ const CareerRouter = (() => {
         facts.push(srcLine("the counter-strategy product and your stated range"));
         return { headline: "Not capped — the range you blurted is an anchor, and the package still negotiates.", facts, nextStep: "Want the exact words for the call — the counter, word for word?" };
       }
-      if (/\bwhat do i say\b|\bwhat should i say\b|\bsay on the call\b|\bwords for\b/.test(t) && Negotiation && Negotiation.counterStrategy) {
+      if (/\bwhat do i say\b|\bwhat should i say\b|\bsay on the call\b|\bwords for\b/.test(t) && Negotiation && Negotiation.counterStrategy && !ctx._ambiguousCounter) {
         let callScript = null, stratTxt = null;
         try {
           const offerObj = { company: th.firm || (ctx.offer && ctx.offer.company) || null, role: th.role || null, base_salary: th.amount || (ctx.offer && ctx.offer.base_salary) || null, signing_bonus: th.signing || null };

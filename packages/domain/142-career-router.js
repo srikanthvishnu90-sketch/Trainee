@@ -8259,7 +8259,7 @@ const CareerRouter = (() => {
     // COMPLEXITY WAVE: "script" was the only dialect the branch heard;
     // the genuine phrasing asks for "the exact words — an email
     // version and a phone version", which is the same ask.
-    if ((/\bcounter scripts?\b|\bscripts?\b[^.]*\bcounter\b/i.test(s(text)) || (/\bcounter\b/i.test(s(text)) && /\b(exact words|word[ -]for[ -]word|email version|phone version|call version)\b/i.test(s(text)))) && Negotiation && Negotiation.counterStrategy) {
+    if (!ctx._ambiguousCounter && (/\bcounter scripts?\b|\bscripts?\b[^.]*\bcounter\b/i.test(s(text)) || (/\bcounter\b/i.test(s(text)) && /\b(exact words|word[ -]for[ -]word|email version|phone version|call version)\b/i.test(s(text)))) && Negotiation && Negotiation.counterStrategy) {
       try {
         const offer = offerText ? Negotiation.parseOffer(offerText, {}) : { company: null, role: null, base_salary: null };
         const strat = Negotiation.counterStrategy(offer, bench, {});
@@ -8475,7 +8475,7 @@ const CareerRouter = (() => {
       }
       // (d) What do I say — the call script, word for word, from
       // 128's counter strategy run on the thread's offer.
-      if (/\bwhat do i say\b|\bwhat should i say\b|\bsay on the call\b|\bwords for\b/.test(t) && Negotiation && Negotiation.counterStrategy) {
+      if (/\bwhat do i say\b|\bwhat should i say\b|\bsay on the call\b|\bwords for\b/.test(t) && Negotiation && Negotiation.counterStrategy && !ctx._ambiguousCounter) {
         let callScript = null, stratTxt = null;
         try {
           const offerObj = { company: th.firm || (ctx.offer && ctx.offer.company) || null, role: th.role || null, base_salary: th.amount || (ctx.offer && ctx.offer.base_salary) || null, signing_bonus: th.signing || null };

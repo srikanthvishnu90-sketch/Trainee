@@ -480,17 +480,20 @@ export function endAsks(reply: string): { asks: number; conjoined: boolean } {
   if (hasDraft(reply)) return { asks: 0, conjoined: false };
   const paras = String(reply ?? "").trim().split(/\n\s*\n/);
   const last = paras[paras.length - 1] ?? "";
-  if (/\n/.test(last.trim()) || LISTLINE.test(last)) return { asks: 0, conjoined: false }; // a list or bare lines of items
+  const lines = last.trim().split("\n").filter((l) => l.trim());
+  // Marked list items, and three or more bare question lines (a practice list), are items, not asks of the person.
+  if (lines.some((l) => LISTLINE.test(l)) || (lines.length >= 3 && lines.every((l) => isQuestion(l)))) return { asks: 0, conjoined: false };
   const ps = pieces(unquoted(last));
   const tail: string[] = [];
   for (let i = ps.length - 1; i >= 0 && isQuestion(ps[i].text); i--) tail.unshift(ps[i].text);
+  if (tail.length >= 3) return { asks: 0, conjoined: false };
   const direct = tail.filter((q) => TO_USER.test(q));
   return { asks: direct.length, conjoined: direct.some((q) => CONJOINED.test(q)) };
 }
 export const multiAsk = (reply: string): boolean => { const a = endAsks(reply); return a.asks >= 2 || a.conjoined; };
 // A promise of an alert or watch this turn did not set: only the plain first-person forms ("I'll set a job alert", "I'll text
 // you", "I'll watch for postings"). A condition or offer before it, and a negation, clear it. Sends are the person's to approve.
-const PROMISE = /\bi(?:'ll| will) (?:also |then |go ahead and |now )?(?:(?:set(?: up)?|create) (?:an? |the |your |new |these |those )?(?:job |daily |instant )?(?:alerts?|watch(?:es)?)\b|(?:text|notify|message) you\b|watch (?:for|the) (?:new )?postings?\b)/i;
+const PROMISE = /\bi(?:'ll| will) (?:also |then |go ahead and |now )?(?:(?:set(?: up)?|create|start|turn on) (?:an? |the |your |new |these |those )?(?:job |daily |instant )?(?:alerts?|watch(?:es)?)\b|(?:text|notify|message) you\b|watch (?:for|the) (?:new |open )?(?:roles?|jobs?|postings?)\b)/i;
 // A condition or offer anywhere before the promise clears it ("if you want, I'll ..."); a negation clears it only in the
 // promise's own clause ("I won't ..."), so "Nothing matched, so I'll set an alert" stands.
 const PROMISE_COND = /\b(?:if|unless|once|when|after|until|want me|should i|shall i|do you want|would you like)\b/i;

@@ -33,6 +33,7 @@ Deno.test("BR-2 true positives: a conjoined or doubled ask at the end of the rep
   assert(multiAsk("Hi, I'm Trainee. What role and city are you after?"));
   assert(multiAsk("The search came back empty.\n\nWhat city should I search? Do you have a school I should use?"));
   assert(multiAsk("Do you have a school and graduation date I should use?"));
+  assert(multiAsk("Nothing matched.\n\nWhat city are you targeting?\nDo you have a school I should use?"), "two closing lines");
 });
 
 Deno.test("BR-3: a promise is judged in its own clause; a draft's content is never checked", () => {
@@ -47,6 +48,11 @@ Deno.test("BR-3: a promise is judged in its own clause; a draft's content is nev
 Deno.test("BR-4: an alert promise with no matching tool result is flagged; a backed one, an offer, a negation, a question are not", () => {
   eq(unbackedPromises("I'll set a job alert for you.", []).map((c) => c.kind), ["an alert promised"]);
   eq(unbackedPromises("I'll text you when they appear.", []).length, 1);
+  eq(unbackedPromises("I'll watch for new roles.", []).length, 1);
+  eq(unbackedPromises("I'll start job alerts for these.", []).length, 1);
+  eq(unbackedPromises("Here's the email:\n\nHi Dana, I'll start job alerts for you.", []).length, 0);
+  eq(unbackedPromises("I won't watch for new roles.", []).length, 0);
+  eq(unbackedPromises("If you want, I'll start job alerts.", []).length, 0);
   eq(unbackedPromises("I'll watch for postings like this.", []).length, 1);
   eq(unbackedPromises("I'll set a job alert for these roles.", [{ name: "set_job_alerts", ok: true }]).length, 0);
   eq(unbackedPromises("I'll set a job alert for these roles.", [{ name: "set_job_alerts", ok: false }]).length, 1);

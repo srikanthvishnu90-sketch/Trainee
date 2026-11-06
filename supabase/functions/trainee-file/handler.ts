@@ -27,6 +27,7 @@ import { parseStateFilter } from "../_shared/results_batch.ts";
 import { conversionNote, floorText, type Pay, payGroup, payText, startsBelow } from "../_shared/role_pay.ts";
 import { checkAnswer, type OpenQuestion, type QuestionStore } from "../_shared/career_apply_questions.ts";
 import { type PendingRow, pendingLine } from "../_shared/career_hosted_prepare.ts";
+import { prepTop, RESULTS_FILE_MAX } from "../_shared/many_roles.ts";
 import { NO_RESUME_NEXT, NO_RESUME_REASON } from "../_shared/career_apply_from_chat.ts";
 import { factType, NEVER_BY_TEXT } from "../_shared/question_map.ts";
 import { decodeRowQuestionType } from "../_shared/row_answer.ts";
@@ -221,9 +222,9 @@ function rowLogo(job: JobView, env: { get(k: string): string | undefined }): str
   } catch { return null; }
 }
 
-async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: Record<string, string> = {}, top?: string): Promise<Feed | null> {
+async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: Record<string, string> = {}, top?: string, max: number = MAX_ROWS): Promise<Feed | null> {
   const all = (await d.store.recallList(claims.u, claims.r).catch(() => null)) ?? [];
-  const refs = all.slice(0, MAX_ROWS);
+  const refs = all.slice(0, max);
   const got = (await Promise.all(refs.map(async (ref) => ({ ref, c: await d.store.recall(claims.u, ref).catch(() => null) })))).filter((x) => x.c);
   if (!got.length) return null;
   const postings = await d.store.postings(got.map((x) => x.c!.job.job_id)).catch(() => [] as PostingRow[]);
@@ -657,7 +658,9 @@ async function logoOf(want: string, claims: FileClaims, d: FileDeps): Promise<Re
   const none = async () => new Response("", { status: 404, headers: await headers("text/plain; charset=utf-8", d.env) });
   const dom = want.trim().toLowerCase();
   if (!selfLogos(d.env) || !validDomain(dom)) return none();
-  const refs = ((await d.store.recallList(claims.u, claims.r).catch(() => null)) ?? []).slice(0, MAX_ROWS);
+  // A results list holds up to RESULTS_FILE_MAX roles (role_results.ts); any other list shows MAX_ROWS.
+  const results = d.store.recallListMeta ? await d.store.recallListMeta(claims.u, claims.r).catch(() => null) : null;
+  const refs = ((await d.store.recallList(claims.u, claims.r).catch(() => null)) ?? []).slice(0, results ? RESULTS_FILE_MAX : MAX_ROWS);
   const jobs = (await Promise.all(refs.map((r) => d.store.recall(claims.u, r).catch(() => null)))).filter(Boolean).map((c) => c!.job);
   const posts = jobs.length ? await d.store.postings(jobs.map((j) => j.job_id)).catch(() => [] as PostingRow[]) : [];
   const allowed = jobs.some((j) => logoDomain({ ...j, company_domain: j.company_domain ?? posts.find((p) => p.job_id === j.job_id)?.company_domain ?? null }, d.env) === dom);
@@ -745,12 +748,12 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
     if (!/^[0-9a-f]{16}$/.test(tag) || tag !== row.tag) return { note: CHANGED };
     return { row };
   };
-  const picks = () => [...new Set(fields.getAll("pick"))].slice(0, MAX_ROWS).map((p) => { const [ref = "", tag = ""] = p.split(":"); return { ref, tag }; });
+  const picks = () => [...new Set(fields.getAll("pick"))].slice(0, RESULTS_FILE_MAX).map((p) => { const [ref = "", tag = ""] = p.split(":"); return { ref, tag }; });
 
   // A GET only shows: the questions of one role, drawn for the person to fill in. It saves and sends nothing.
   const thingsRef = o.req.method === "GET" ? o.url.searchParams.get("things") : null;
   if (thingsRef) {
-    const feed = await loadFeed(claims, token, d), all = await readQs(), row = feed?.rows.find((r) => r.ref === thingsRef);
+    const feed = await loadFeed(claims, token, d, {}, undefined, RESULTS_FILE_MAX), all = await readQs(), row = feed?.rows.find((r) => r.ref === thingsRef);
     const qs = row ? qsFor(all, row) : [];
     if (row && qs.length && !row.byHand && !row.blocked && !row.tag) return thingsPage(row, qs);
     top = "Nothing is waiting on you for that role. Nothing was sent.";
@@ -775,7 +778,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
     } else if (action === "dismiss" || action === "restore") {
       const ref = fields.get("ref") ?? "";
       const on = (await d.store.recallList(u, claims.r).catch(() => null)) ?? [];
-      const rowNow = action === "dismiss" ? await loadFeed(claims, token, d) : null;
+      const rowNow = action === "dismiss" ? await loadFeed(claims, token, d, {}, undefined, RESULTS_FILE_MAX) : null;
       if (!on.includes(ref)) top = "That role isn't on this list. Nothing changed.";
       else {
         const sp = action === "dismiss" ? (() => { const r0 = rowNow?.rows.find((x) => x.ref === ref); return r0 ? specOf(r0) : null; })() : null;
@@ -791,7 +794,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
       notes[fields.get("ref") ?? ""] = "This role is dismissed. Restore it first. Nothing was sent.";
     } else if (action === "apply") {
       const ref = fields.get("ref") ?? "", tag = fields.get("tag") ?? "";
-      const g = await gate(await loadFeed(claims, token, d), ref, tag, await readQs());
+      const g = await gate(await loadFeed(claims, token, d, {}, undefined, RESULTS_FILE_MAX), ref, tag, await readQs());
       if ("things" in g) return thingsPage(g.things, g.qs);
       if ("note" in g) notes[ref] = g.note;
       else notes[ref] = (await approveOne(u, ref, tag, d)) ?? SENT;
@@ -799,7 +802,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
       // Apply to all N ready (owner, 2026-11-02): exactly the set that was shown, bound to its hash. The set is the roles that are
       // READY right now (prepared, tag shown, nothing marked needs) and not dismissed; each goes through the same hash-bound approval
       // as its own Apply. If the set is not exactly what the page showed, nothing is approved.
-      const cur = await loadFeed(claims, token, d), now = readySet(cur?.rows ?? [], marked);
+      const cur = await loadFeed(claims, token, d, {}, undefined, RESULTS_FILE_MAX), now = readySet(cur?.rows ?? [], marked);
       if (!cur || !now.length || (fields.get("set") ?? "") !== await setHashOf(now)) top = "This list changed since you opened it, so nothing was approved.";
       else {
         let sent = 0;
@@ -812,7 +815,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
       else {
         // Every ticked role is judged against the page as it is now; the ones that are ready go together, each bound to the exact
         // payload tag its card showed. A role that isn't ready, or changed since, is skipped and says why.
-        const feed = await loadFeed(claims, token, d), all = await readQs();
+        const feed = await loadFeed(claims, token, d, {}, undefined, RESULTS_FILE_MAX), all = await readQs();
         const ready: Row[] = [];
         let asked = 0;
         for (const p of want) {
@@ -829,7 +832,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
     } else {
       // "A few things first": each answer is checked and saved the way the chat saves it; never guessed, defaulted or invented.
       const ref = fields.get("ref") ?? "";
-      const feed = await loadFeed(claims, token, d), row = feed?.rows.find((r) => r.ref === ref), all = await readQs();
+      const feed = await loadFeed(claims, token, d, {}, undefined, RESULTS_FILE_MAX), row = feed?.rows.find((r) => r.ref === ref), all = await readQs();
       if (!row) top = "This job isn't on this list any more. Nothing was saved or sent.";
       else if (!d.questions || !all) top = "I can't save answers from this page just now. Nothing was saved and nothing was sent.";
       else {
@@ -863,7 +866,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
     }
   }
 
-  const feed = await loadFeed(claims, token, d, notes);
+  const feed = await loadFeed(claims, token, d, notes, undefined, RESULTS_FILE_MAX);
   if (!feed) return o.state("This list is gone", ["It is no longer available. " + NEW_LINK], 404);
   if (o.req.method === "GET" && o.url.searchParams.get("format") === "text") return o.text(renderText(feed));
   const pf = o.url.searchParams.get("pay") as PayFilter, filters = { pay: PAY_FILTERS.has(pf) ? pf : "any" as PayFilter, where: (o.url.searchParams.get("where") ?? "").trim().slice(0, 80), state: parseStateFilter(o.url.searchParams.get("state")) };
@@ -877,7 +880,10 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   const all: ResultRow[] = feed.rows.map((r0) => {
     // The numbers stored with the role when the list was made; the display text is never read back (it is not the posting's words).
     const asking = !r0.byHand && !r0.blocked && !r0.tag && (!r0.status || r0.status.word === "preparing") ? qsFor(openNow, r0).length : 0;
-    const r: Row = asking ? { ...r0, status: null } : r0;
+    // The apply ask that made this File found preparation switched off (many_roles.ts): a queued role says so, never "getting it ready".
+    const r: Row = asking ? { ...r0, status: null }
+      : meta.prep?.state === "off" && r0.status?.word === "preparing" ? { ...r0, status: { word: "queued", detail: "On your apply list, but preparation isn't running right now, so it isn't being prepared. Nothing has been sent." } }
+      : r0;
     const where = pend?.find((p) => p.url === r.job.url || p.posting_key === r.job.job_id);
     const guide = asking ? `${asking} ${asking === 1 ? "question needs" : "questions need"} your answer first.`
       : r.status?.word === "preparing" ? (where ? pendingLine(where) : null)
@@ -932,6 +938,8 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
     fl ? `${nMeets} of ${keep.length} list ${fl} or more${nUnlisted ? `; ${nUnlisted} ${nUnlisted === 1 ? "doesn't" : "don't"} list pay` : ""}${nOther ? `; ${nOther} can't be compared` : ""}${nBelow ? `; ${nBelow} now list less` : ""}.` : `${keep.length} ${keep.length === 1 ? "role" : "roles"}, sorted by fit.`,
     `Next: tap Apply on a role. A ready one is sent exactly as its What will be sent shows; one that isn't ready asks for what it needs first. ${coverage(all) === NOTHING_SENT ? "Nothing is sent until you tap Apply." : "Each new send needs your tap on Apply."}`,
   ].filter(Boolean);
+  // An apply ask made this File: whether its roles are being prepared, said at the top (never "getting ready" when preparation is off).
+  top ??= prepTop(meta.prep) ?? undefined;
   return o.html(renderResults({ token, title, floor: fl, rows, coverRows: all, countRows: keep, total: all.length, filters, places, top, notes,
     madeFor: `Made for ${meta.name ?? "you"} · ${day}`, stamp: await stampOf(rows), caveat, quick,
     paused: !!meta.paused, updated, dismissed: gone,

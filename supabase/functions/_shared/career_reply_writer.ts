@@ -21,6 +21,19 @@
 // Off by default (CAREER_REPLY_WRITER=on turns it on): off, today's reply goes out exactly as before. Turns that show an
 // exact payload the person approves (a card, an email or outreach draft, an offer counter, a mock question, a structured
 // task or batch, a reply in parts) are never rewritten: the words the person approves are the words that are sent.
+//
+// WRITER ROOT CAUSES (beta C11/C12, 2026-11-06; rootcause-report PR-1). The writer was destroying good answers:
+//   (a) it re-judged the staged brain's own replies (handler "agent"), which had already passed the loop's reply guards
+//       (agent/reply_guards.ts); now the brain's reply is never rewritten (rewrites(), and writeReply's own `handler` check);
+//   (b) a rewrite that named the person's own words ("QA analyst" in "compare software QA analyst and IT help desk") was
+//       rejected as an invented name, because the message was not in the facts. The message is now an allowed-words source
+//       for names and role nouns only (Ledger.userWords): it never counts as evidence for a status, a promise or a new
+//       number; a number from the message may be restated as it is, never changed;
+//   (c) a checklist of questions broke "at most one question"; only questions outside list items count now, and a rewrite
+//       may be up to 20% longer than today's reply;
+//   (d) on rejection the template deleted every question but the last, so checklist items vanished. A list item is never
+//       deleted now, and a rejected (or failed) write of a turn that is not a payload intent returns today's reply as it
+//       was, with only its internal words taken out (withoutInternal).
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The flag and which turns are written.
@@ -42,7 +55,7 @@ export const PAYLOAD_INTENTS: ReadonlySet<string> = new Set([
 // results_file: the reply carries the results page's link, minted by code (role_results.ts); its words and link stay as they are.
 const PAYLOAD_META = ["card_id", "email_card", "offer_card", "open_card", "career_approval_card_id", "employer_question", "screen_ask", "results_file", "apply_all_offer", "apply_all_done"];
 
-export function writable(out: { intent?: string | null; reply?: string; parts?: unknown }, meta: Record<string, unknown> | null, o: { structured: boolean }): boolean {
+export function writable(out: { intent?: string | null; reply?: string; parts?: unknown; handler?: string | null }, meta: Record<string, unknown> | null, o: { structured: boolean }): boolean {
   if (o.structured) return false;
   if (Array.isArray(out.parts) && out.parts.length) return false;
   if (out.intent && PAYLOAD_INTENTS.has(out.intent)) return false;
@@ -52,6 +65,13 @@ export function writable(out: { intent?: string | null; reply?: string; parts?: 
   // A draft shown in any turn (its subject line) is its exact words.
   if (/^\s*Subject:/im.test(text)) return false;
   return true;
+}
+// The writer runs only on a writable turn that is not the brain's own reply: the staged brain's text (handler "agent") already
+// passed the loop's reply guards (agent/reply_guards.ts); a restate-only checker can only take from it (beta C12). The shape
+// (channel_shape.ts) still uses writable(): a brain reply is still laid out for the channel.
+export const BRAIN_HANDLER = "agent";
+export function rewrites(out: { intent?: string | null; reply?: string; parts?: unknown; handler?: string | null }, meta: Record<string, unknown> | null, o: { structured: boolean }): boolean {
+  return out.handler !== BRAIN_HANDLER && writable(out, meta, o);
 }
 
 import { type ApplySummary, overclaims } from "./apply_status_summary.ts";
@@ -90,18 +110,23 @@ export function factsForTurn(o: { needs?: string | null; counts?: string | null;
 }
 
 // Everything the facts establish, as sets the check compares against.
-interface Ledger { text: string; numbers: Set<string>; links: Set<string>; emails: Set<string>; claims: Set<string>; verbs: string }
+// userWords / userNumbers: the person's own message this turn. Allowed for names and role nouns (the capitalized-name and
+// after-preposition rules) and for restating their own numbers as they are; never evidence for a status or a promise.
+interface Ledger { text: string; numbers: Set<string>; links: Set<string>; emails: Set<string>; claims: Set<string>; verbs: string; userWords: Set<string>; userNumbers: Set<string> }
 function factsText(f: TurnFacts): string {
   return [f.said, f.needs ?? "", f.counts ?? "", ...f.tasks.map((t) => [t.company, t.title, t.state].filter(Boolean).join(" ")), ...f.next.map((n) => `${n.what} ${n.say ?? ""}`)].join("\n");
 }
-function ledgerOf(f: TurnFacts): Ledger {
+const wordsOf = (text: string) => new Set((String(text ?? "").replace(URL_RX, " ").replace(EMAIL_RX, " ").toLowerCase().match(/[a-z0-9][a-z0-9&'’.-]*[a-z0-9]|[a-z0-9]/g) ?? [])
+  .flatMap((w) => [w, w.replace(/['’]s$/, ""), ...w.split(/[-.]/)]).filter(Boolean));
+function ledgerOf(f: TurnFacts, message = ""): Ledger {
   const text = factsText(f);
   const claims = positiveClaims(text);
   if (f.effects.sent > 0) claims.add("sent");
   if (f.effects.queued > 0) claims.add("queued");
   // A task's own state is a fact about it ("sent", "queued", "needs_user" ...).
   for (const t of f.tasks) for (const c of positiveClaims(t.state.replace(/_/g, " "))) claims.add(c);
-  return { text: text.toLowerCase(), numbers: numbersIn(text), links: new Set(linksIn(text)), emails: new Set(emailsIn(text)), claims, verbs: text.toLowerCase() };
+  return { text: text.toLowerCase(), numbers: numbersIn(text), links: new Set(linksIn(text)), emails: new Set(emailsIn(text)), claims, verbs: text.toLowerCase(),
+    userWords: wordsOf(message), userNumbers: numbersIn(String(message ?? "")) };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -189,9 +214,11 @@ which what who whom whose how where when why there here then now`.split(/\s+/).f
 
 // Every number, name, company, link, address, status and promise in `text` must come from the facts. Returns the
 // violations in plain words (for logs and the turn's meta); empty means the text adds or changes nothing.
-export function factCheck(text: string, f: TurnFacts): string[] {
-  const L = ledgerOf(f), out: string[] = [];
-  for (const n of numbersIn(text)) if (!L.numbers.has(n)) out.push(`number ${n} is not in the facts`);
+// `message`: the person's own words this turn (optional): an allowed-words source for names and role nouns and for their own
+// numbers restated as they are; it never makes a status ("sent", "applied" ...) or a promise ("I'll ...") a fact.
+export function factCheck(text: string, f: TurnFacts, message = ""): string[] {
+  const L = ledgerOf(f, message), out: string[] = [];
+  for (const n of numbersIn(text)) if (!L.numbers.has(n) && !L.userNumbers.has(n)) out.push(`number ${n} is not in the facts`);
   for (const u of linksIn(text)) if (!L.links.has(u)) out.push(`link ${u} is not in the facts`);
   for (const e of emailsIn(text)) if (!L.emails.has(e)) out.push(`address ${e} is not in the facts`);
   const plain = String(text).replace(URL_RX, " ").replace(EMAIL_RX, " ");
@@ -199,12 +226,12 @@ export function factCheck(text: string, f: TurnFacts): string[] {
   for (const m of plain.matchAll(/(?<![A-Za-z0-9'’])[A-Z][A-Za-z0-9&'’.-]*[A-Za-z0-9]|(?<![A-Za-z0-9'’])[A-Z](?![A-Za-z0-9])/g)) {
     const w = m[0].replace(/['’]s$/, "").replace(/\.+$/, "");
     if (!w || /^\d/.test(w)) continue;
-    if (COMMON.has(w.toLowerCase()) || known(w)) continue;
+    if (COMMON.has(w.toLowerCase()) || known(w) || L.userWords.has(w.toLowerCase())) continue;
     out.push(`name "${w}" is not in the facts`);
   }
   for (const m of plain.matchAll(/\b(?:at|from|with)\s+([a-z][a-z0-9&-]*)|\b(?:sent|send|applied|apply|emailed|email|submitted|wrote|write|reached out|reach out|introduced?(?: you)?)\s+(?:it\s+|them\s+|this\s+)?to\s+([a-z][a-z0-9&-]*)/g)) {
     const w = (m[1] ?? m[2] ?? "").toLowerCase();
-    if (!w || AFTER_PREP.has(w) || COMMON.has(w) || known(w)) continue;
+    if (!w || AFTER_PREP.has(w) || COMMON.has(w) || known(w) || L.userWords.has(w)) continue;
     out.push(`"${w}" after "${m[0].split(/\s+/)[0]}" reads as a name that is not in the facts`);
   }
   for (const c of positiveClaims(text)) if (!L.claims.has(c)) out.push(`says "${c}" but the facts do not`);
@@ -230,6 +257,14 @@ const INTERNAL: RegExp[] = [
 export function cannedIn(text: string): string[] { return CANNED.filter((r) => r.test(text)).map((r) => r.source); }
 export function internalIn(text: string): string[] { return INTERNAL.map((r) => String(text).match(r)?.[0]).filter((x): x is string => !!x); }
 
+// A list item: a numbered ("1." "2)") or bulleted ("-" "*" "•") line, or one item of an inline numbered list on a line.
+const LIST_ITEM_RX = /^\s*(?:\d{1,2}[.)]|[-*•])\s/;
+const isListLine = (line: string) => LIST_ITEM_RX.test(line);
+// The text outside list items (an inline numbered list "1) Is it accredited? 2) ..." counts as items too).
+function proseOf(text: string): string {
+  return String(text ?? "").split("\n").filter((l) => !isListLine(l))
+    .map((l) => l.split(/\s+(?=\d{1,2}[.)]\s)/).filter((seg, i) => i === 0 && !LIST_ITEM_RX.test(seg)).join(" ")).join("\n");
+}
 export function voiceCheck(text: string, f: TurnFacts): string[] {
   const out: string[] = [];
   const t = String(text ?? "").trim();
@@ -237,9 +272,10 @@ export function voiceCheck(text: string, f: TurnFacts): string[] {
   for (const c of cannedIn(t)) out.push(`canned phrase /${c}/`);
   for (const j of internalIn(t)) out.push(`internal word "${j}"`);
   if (/^\s{0,3}#{1,6}\s/m.test(t)) out.push("a header in a text");
-  if ((t.replace(URL_RX, " ").match(/\?/g) ?? []).length > 1) out.push("more than one question");
+  // Questions count only outside list items: a checklist of questions is content, not a pile of asks (beta C12).
+  if ((proseOf(t).replace(URL_RX, " ").match(/\?/g) ?? []).length > 1) out.push("more than one question");
   if (/^\s*\(?\d+\s*\/\s*\d+\)\s|\(\d+\s*\/\s*\d+\)\s*$/m.test(t)) out.push("a part counter");
-  const room = Math.max(280, f.said.trim().length);
+  const room = Math.max(280, Math.ceil(f.said.trim().length * 1.2)); // today's reply plus a 20% margin
   if (t.length > room) out.push(`longer than today's reply (${t.length} > ${room})`);
   for (const u of linksIn(f.said)) if (!t.includes(u)) out.push(`drops the link ${u}`);
   return out;
@@ -276,20 +312,45 @@ export function templateReply(f: TurnFacts): string {
   if (!said) return said;
   const lines = said.split("\n").map((l) => l.replace(/^\s{0,3}#{1,6}\s+/, "").trimEnd());
   const kept: string[][] = lines.map((l) => (l.trim() ? sentencesOf(l) : []));
-  // Drop boilerplate (unless it carries a number or says nothing was sent) and every sentence with an internal word.
-  for (const ss of kept) {
+  // Drop boilerplate (unless it carries a number or says nothing was sent) and every sentence with an internal word. A list
+  // item is never deleted: its internal words are taken out of it instead (beta C12).
+  kept.forEach((ss, li) => {
+    if (!isListLine(lines[li])) return;
+    for (let i = 0; i < ss.length; i++) ss[i] = stripInternal(ss[i]);
+  });
+  for (const [li, ss] of kept.entries()) {
+    if (isListLine(lines[li])) continue;
     for (let i = ss.length - 1; i >= 0; i--) {
       const s = ss[i], safety = SAFETY.test(s);
       const canned = CANNED.some((r) => r.test(s)), boiler = BOILER.some((r) => r.test(s)) && !/\d/.test(s);
       if (internalIn(s).length || ((canned || boiler) && !safety)) ss.splice(i, 1);
     }
   }
-  // At most one question: the last one, the next step.
+  // At most one question outside list items: the last one, the next step. A list item that is a question is content and stays.
   const qs: [number, number][] = [];
-  kept.forEach((ss, li) => ss.forEach((s, si) => { if (/\?["”’)]*$/.test(s)) qs.push([li, si]); }));
+  kept.forEach((ss, li) => { if (!isListLine(lines[li])) ss.forEach((s, si) => { if (/\?["”’)]*$/.test(s)) qs.push([li, si]); }); });
   for (const [li, si] of qs.slice(0, -1).reverse()) kept[li].splice(si, 1);
   const out = kept.map((ss) => ss.join(" ")).filter((l) => l.trim()).join("\n").replace(/\n{3,}/g, "\n\n").trim();
   return out || said;
+}
+// An internal word taken out of a sentence (for a list item, which is never deleted).
+function stripInternal(s: string): string {
+  let t = s;
+  for (const r of INTERNAL) t = t.replace(new RegExp(r.source, r.flags.includes("g") ? r.flags : r.flags + "g"), " ");
+  return t.replace(/[ \t]{2,}/g, " ").replace(/\s+([.,;:!?])/g, "$1").trim();
+}
+// Today's reply unchanged but for its internal words: what a rejected (or failed) write of a turn that is not a payload intent
+// returns (beta C11/C12: the template's cuts lost real answers). A prose sentence that carries an internal word goes (the words
+// alone would leave a broken sentence); a list item keeps its place with only the internal word taken out. Nothing is added.
+export function withoutInternal(said: string): string {
+  const text = String(said ?? "").replace(/<!--[\s\S]*?-->/g, "").trim();
+  if (!internalIn(text).length) return text;
+  const out = text.split("\n").map((line) => {
+    if (!line.trim() || !internalIn(line).length) return line;
+    if (isListLine(line)) return stripInternal(line).replace(/^/, line.match(/^\s*/)![0]);
+    return sentencesOf(line).filter((s) => !internalIn(s).length).join(" ");
+  }).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return out || text;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -298,7 +359,7 @@ export function templateReply(f: TurnFacts): string {
 export const VOICE_RULES = [
   "You are Trainee, a career agent, texting one person about their job search. Rewrite REPLY in Trainee's voice: how a capable friend who happens to be great at job searching texts — natural, warm, direct, short.",
   "Facts: use ONLY what REPLY and SITUATION say. Every number, name, company, link, email address, status (sent, submitted, applied, queued, scheduled, confirmed, connected) and promise (\"I'll ...\") in your text must appear there, exactly. Never say something was sent, submitted or applied unless REPLY says it was. Never add a fact, an estimate or an example.",
-  "Shape: the first line answers or says what happened. Then only what they need. End with one clear next step. At most one question. Keep every link from REPLY, each on its own line.",
+  "Shape: the first line answers or says what happened. Then only what they need. End with one clear next step. At most one question of your own; a list in REPLY keeps every item, questions included. Keep every link from REPLY, each on its own line.",
   "Voice: lowercase-friendly but correct; plain words; mirror their register (casual if they are casual, careful if they are upset); use their words for things. If something went wrong or Trainee made a mistake, say so plainly in one line. No \"Great question\", no \"As an AI\", no \"I hope this helps\", no headers, no internal codes or system words, no part counters.",
   "Never longer than REPLY. Write only the text to send.",
 ].join("\n");
@@ -327,21 +388,27 @@ export function writerPayload(f: TurnFacts, message: string, channel: WriterChan
 
 // deno-lint-ignore no-explicit-any
 export type ModelFn = (payload: any) => Promise<any>;
-export interface Written { text: string; source: "off" | "model" | "template"; rejected: string[] }
+export interface Written { text: string; source: "off" | "skipped" | "model" | "template"; rejected: string[] }
 // deno-lint-ignore no-explicit-any
 const textOf = (msg: any) => Array.isArray(msg?.content) ? msg.content.filter((b: any) => b?.type === "text").map((b: any) => String(b.text ?? "")).join("") : typeof msg?.content === "string" ? msg.content : "";
 
-export async function writeReply(o: { on: boolean; facts: TurnFacts; message: string; channel?: WriterChannel; model: ModelFn | null }): Promise<Written> {
+// `handler`: the turn's handler; the staged brain's own reply ("agent") is never rewritten (it already passed the reply guards).
+// The fallback, when the write is refused or fails: for a payload intent the template; for every other turn today's reply as
+// it was, internal words out (withoutInternal), so no answer is cut by the writer.
+export async function writeReply(o: { on: boolean; facts: TurnFacts; message: string; channel?: WriterChannel; model: ModelFn | null; handler?: string | null }): Promise<Written> {
   if (!o.on) return { text: o.facts.said, source: "off", rejected: [] };
-  const template = templateReply(o.facts);
+  if (o.handler === BRAIN_HANDLER) return { text: o.facts.said, source: "skipped", rejected: [] };
+  const template = o.facts.intent && PAYLOAD_INTENTS.has(o.facts.intent) ? templateReply(o.facts) : withoutInternal(o.facts.said);
   if (!o.model) return { text: template, source: "template", rejected: ["no model"] };
-  let text = "";
+  let text = "", cut = false;
   try {
-    text = textOf(await o.model(writerPayload(o.facts, o.message, o.channel ?? "web"))).trim().replace(/^["“](.*)["”]$/s, "$1").trim();
+    const res = await o.model(writerPayload(o.facts, o.message, o.channel ?? "web"));
+    cut = res?.stop_reason === "max_tokens"; // a write the output cap cut off is never served (it would drop the end of the answer)
+    text = textOf(res).trim().replace(/^["“](.*)["”]$/s, "$1").trim();
   } catch (e) {
     return { text: template, source: "template", rejected: [`model unavailable: ${(e as Error)?.message ?? String(e)}`.slice(0, 160)] };
   }
-  const rejected = [...factCheck(text, o.facts), ...voiceCheck(text, o.facts)];
+  const rejected = [...(cut ? ["cut off at the output cap"] : []), ...factCheck(text, o.facts, o.message), ...voiceCheck(text, o.facts)];
   if (rejected.length) return { text: template, source: "template", rejected };
   return { text, source: "model", rejected: [] };
 }

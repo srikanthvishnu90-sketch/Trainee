@@ -1,7 +1,7 @@
 // BRAIN ONE-ASK (release 7 S3: H001, H025, H035, H021, H027). Offline: no model, no network. The real measurement is S3.
 //   deno test -A --no-check tests/architect/brain-reply-quality-20261106.test.ts
 import assertNode from "node:assert/strict";
-import { multiAsk, trimToOneAsk, unbackedPromises } from "../../supabase/functions/_shared/agent/reply_guards.ts";
+import { multiAsk, unbackedPromises } from "../../supabase/functions/_shared/agent/reply_guards.ts";
 import { careerSystemPrompt } from "../../supabase/functions/_shared/agent/prompt.ts";
 import { STAGED_PROMPT_NOTE, routerAnswerBlock } from "../../supabase/functions/agent-chat/career_staged.ts";
 import { runAgentTurn } from "../../supabase/functions/_shared/agent/loop.ts";
@@ -9,30 +9,34 @@ import { runAgentTurn } from "../../supabase/functions/_shared/agent/loop.ts";
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 
-Deno.test("BR-1 H025: two questions in one reply are reduced to the first", () => {
-  const r = "The search came back empty.\n\nWhat city or remote setting should I search? Do you have a school or graduation date I should use?";
-  eq(multiAsk(r).extra.length, 1);
-  const t = trimToOneAsk(r);
-  eq((t.match(/\?/g) || []).length, 1);
-  assert(t.includes("What city or remote setting should I search?") && t.includes("came back empty"));
+// Replies the guard must never flag (and the loop never alters): quoted interview questions, practice lists (bulleted, numbered,
+// bare lines, inline), rhetorical openers, reflective questions earlier in the reply, a single ask.
+const KEEP = [
+  'For a final round they may ask "why us?" and "why this role?". Prepare a story for each. Which round is it?',
+  "Practice these:\n1. Tell me about yourself?\n2. Why this firm?\n\nWhich one first?",
+  "Practice out loud:\nWhy this firm?\nWhy this role?\nWhat is your biggest weakness?",
+  "Try: Why this firm? Why this role? What is your biggest weakness?",
+  "Worried about gaps? Many people are. What role are you after?",
+  "Should you take it? What would you give up? Those decide it.\n\nWhich offer is it?",
+  "What are the pros and cons of a PhD? Both matter here.",
+  "Nothing matched. What city or remote setting should I search?",
+  "I'll keep an eye on it while we talk. Which role?",
+];
+Deno.test("BR-1: a reviewer's must-not-change inputs are not flagged", () => {
+  for (const r of KEEP) assert(!multiAsk(r), r);
+  for (const r of KEEP) eq(unbackedPromises(r, []).length, 0, r);
 });
 
-Deno.test("BR-2 H001: a conjoined ask is flagged, a single ask is not", () => {
-  eq(multiAsk("Hi, I'm Trainee. What role and city are you after?").conjoined.length, 1);
-  eq(multiAsk("Hi, I'm Trainee. What role are you after?").conjoined.length, 0);
-  eq(multiAsk("Do you have a school and graduation date I should use?").conjoined.length, 1);
-  eq(multiAsk("What are the pros and cons of a PhD?").conjoined.length, 0);
+Deno.test("BR-2 true positives: a conjoined or doubled ask at the end of the reply is flagged", () => {
+  assert(multiAsk("Hi, I'm Trainee. What role and city are you after?"));
+  assert(multiAsk("The search came back empty.\n\nWhat city should I search? Do you have a school I should use?"));
+  assert(multiAsk("Do you have a school and graduation date I should use?"));
 });
 
-Deno.test("BR-3: list items and quoted drafts are not counted as extra asks", () => {
-  const r = "Practice these:\n1. Tell me about yourself?\n2. Why this firm?\n\nWhich one first?";
-  eq(multiAsk(r).extra.length, 0);
-  eq(trimToOneAsk(r), r);
-});
-
-Deno.test("BR-4 H025/H035: a promise with no matching tool result is flagged; a backed one, an offer and a negation are not", () => {
-  eq(unbackedPromises("I'll set a job alert for these roles so new postings reach you.", []).map((c) => c.kind), ["an alert promised"]);
+Deno.test("BR-4: an alert promise with no matching tool result is flagged; a backed one, an offer, a negation, a question are not", () => {
+  eq(unbackedPromises("I'll set a job alert for you.", []).map((c) => c.kind), ["an alert promised"]);
   eq(unbackedPromises("I'll text you when they appear.", []).length, 1);
+  eq(unbackedPromises("I'll watch for postings like this.", []).length, 1);
   eq(unbackedPromises("I'll set a job alert for these roles.", [{ name: "set_job_alerts", ok: true }]).length, 0);
   eq(unbackedPromises("I'll set a job alert for these roles.", [{ name: "set_job_alerts", ok: false }]).length, 1);
   eq(unbackedPromises("If you want, I'll set a job alert.", []).length, 0);
@@ -53,17 +57,24 @@ Deno.test("BR-5: the prompt carries the new instructions", () => {
   assert(/yours asks at most one thing and promises none/.test(routerAnswerBlock({ brain: true, router: { intent: "x", reply: "r" } } as any)));
 });
 
-// The loop: a two-question final gets one rewrite request; if it stands, the extra question is trimmed.
+// The loop: a flagged draft gets one rewrite request; if it stands, it is kept byte-for-byte.
 function scripted(texts: string[], seenInputs: string[]) {
   let i = 0;
   return async (req: any) => { seenInputs.push(JSON.stringify(req)); const t = texts[Math.min(i++, texts.length - 1)]; return { content: [{ type: "text", text: t }], stop_reason: "end_turn" }; };
 }
-Deno.test("BR-6: the loop asks the model once, then trims a standing second question", async () => {
+const run = (model: any) => (runAgentTurn as any)({ system: "s", history: [], message: "I feel overwhelmed, find me software intern roles", tools: [], model, ctx: { userId: "u", threadId: "t", now: 0, state: {} }, maxSteps: 4 });
+Deno.test("BR-6: the loop asks the model once, then keeps a standing draft unchanged", async () => {
   const seen: string[] = [];
-  const two = "Nothing matched. What city should I search? Do you have a school I should use?";
-  const model = scripted([two, two], seen);
-  const r: any = await (runAgentTurn as any)({ system: "s", history: [], message: "I feel overwhelmed, find me software intern roles", tools: [], model, ctx: { userId: "u", threadId: "t", now: 0, state: {} }, maxSteps: 4 });
-  eq((String(r.reply).match(/\?/g) || []).length, 1, r.reply);
-  assert(seen.length >= 2, "one rewrite was requested");
+  const two = "Nothing matched. I'll set a job alert for you.\n\nWhat city should I search? Do you have a school I should use?";
+  const r: any = await run(scripted([two, two], seen));
+  eq(r.reply, two);
+  eq(seen.length, 2, "one rewrite was requested");
   assert(seen.some((x) => /more than one thing/.test(x)));
+});
+Deno.test("BR-7: the rewrite replaces the draft when the model fixes it; unflagged replies make no extra call", async () => {
+  const seen: string[] = [];
+  const r: any = await run(scripted(["What role and city are you after?", "What role are you after?"], seen));
+  eq(r.reply, "What role are you after?");
+  const seen2: string[] = [];
+  for (const k of KEEP) { seen2.length = 0; const q: any = await run(scripted([k], seen2)); eq(q.reply, k); eq(seen2.length, 1); }
 });

@@ -460,47 +460,36 @@ const CONFIRM_AFTER_REFUSAL = /^(?:(?:is|does|would|will|are|was)\s+(?:that|this
 
 
 // ------------------------------------------------------------------------------------------------ one ask, no promises
-// BRAIN ONE-ASK (2026-11-06, release 7 S3: H001, H025, H035): the prompt says one question for one thing, and the model
-// sometimes asks two ("What city, and do you have a school?") or one conjoined ask ("What role and city"). Also H025: "I'll
-// set a job alert" when no alert was set. Code finds them; the loop puts them to the model once, and what stands is
-// trimmed (extra questions) or dropped (promises). No wording here is ever shown to the person.
-const LISTY = /^\s*(?:[-*•]|\d+[.)])\s+|^\s{2,}|^["“']/;
-// A question about the person, joined by "and" between two things asked for ("what role and city are you after", "your
-// school and graduation date"). Lists inside a question about the world ("pros and cons") do not match: it must address "you".
-const CONJOINED = /\b(?:what|which|where|when|who)\b[^?.!]{0,40}?\b\w+ (?:and|&|plus) (?:the |your |a |an )?\w+\b[^?.!]{0,40}\b(?:you|your)\b|\b(?:your|you have|you have a) \w+(?: \w+)? (?:and|&|plus) (?:your |a |an )?\w+ (?:date|city|location|school|title|salary|number)\b/i;
-export function multiAsk(reply: string): { extra: number[]; conjoined: number[] } {
-  const ps = pieces(reply), asks: number[] = [], conjoined: number[] = [];
-  ps.forEach((p, i) => {
-    // pieces() splits "1. Why?" into "1." and "Why?": a bare marker before a piece makes it a list item.
-    if (LISTY.test(p.text) || (i > 0 && /^(?:\d+[.)]|[-*•])$/.test(ps[i - 1].text.trim())) || !isQuestion(p.text)) return;
-    asks.push(i);
-    if (CONJOINED.test(plainQuotes(p.text))) conjoined.push(i);
-  });
-  return { extra: asks.slice(1), conjoined };
+// BRAIN ONE-ASK (2026-11-06, release 7 S3: H001, H025, H035). FLAG ONLY: these finders never change a reply. The loop puts a
+// flag to the model once (the existing single rewrite request); if the draft still violates, it is kept as written (D: code
+// never cuts the model's answer, #540). They look at the end of the reply only: the final paragraph's trailing questions.
+const LISTLINE = /^\s*(?:[-*•]|\d+[.)])\s+/;
+const unquoted = (t: string) => plainQuotes(t).replace(/"[^"\n]*"/g, " ");
+const TO_USER = /\b(?:you|your|you're|you've)\b|\bshould i\b|\btell me\b/i;
+// A question about the person joined by "and" between two things asked for ("what role and city are you after").
+const CONJOINED = /\b(?:what|which|where|when)\b[^?.!]{0,40}?\b\w+ (?:and|&|plus) (?:the |your |a |an )?\w+\b[^?.!]{0,40}\b(?:you|your)\b|\b(?:your|you have|you have a) \w+(?: \w+)? (?:and|&|plus) (?:your |a |an )?\w+ (?:date|city|location|school|title|salary|number)\b/i;
+export function endAsks(reply: string): { asks: number; conjoined: boolean } {
+  const paras = String(reply ?? "").trim().split(/\n\s*\n/);
+  const last = paras[paras.length - 1] ?? "";
+  if (/\n/.test(last.trim()) || LISTLINE.test(last)) return { asks: 0, conjoined: false }; // a list or bare lines of items
+  const ps = pieces(unquoted(last));
+  const tail: string[] = [];
+  for (let i = ps.length - 1; i >= 0 && isQuestion(ps[i].text); i--) tail.unshift(ps[i].text);
+  const direct = tail.filter((q) => TO_USER.test(q));
+  return { asks: direct.length, conjoined: direct.some((q) => CONJOINED.test(q)) };
 }
-// Trim to the first question: later question sentences go, the rest of the reply stays.
-export function trimToOneAsk(reply: string): string {
-  const { extra } = multiAsk(reply);
-  return extra.length ? rebuild(pieces(reply), new Set(extra)) : reply;
-}
-// A promise of an alert or watch this turn did not set (sends are always the person's to approve, so they are not promises here): first-person future ("I'll set an alert", "I'll text you when", "I will
-// watch for new roles"). A condition or offer before it ("if you want, I'll", "once you tell me") and a negation clear it.
-const PROMISES: { kind: string; by: string[]; said: RegExp }[] = [
-  { kind: "an alert promised", by: ["set_job_alerts"], said: /\bi(?:'ll| will) (?:also |then |go ahead and |now )?(?:set(?: up)?|create|turn on|switch on|start|put in|add)\s+(?:an? |the |your |new |these |those )?(?:job |daily |instant )?(?:alerts?|watch(?:es)?)\b|\bi(?:'ll| will) (?:also |then )?(?:text|message|notify|email|ping|alert) you\b|\bi(?:'ll| will) (?:also |then )?(?:keep an eye|watch|monitor)\b/i },
-];
+export const multiAsk = (reply: string): boolean => { const a = endAsks(reply); return a.asks >= 2 || a.conjoined; };
+// A promise of an alert or watch this turn did not set: only the plain first-person forms ("I'll set a job alert", "I'll text
+// you", "I'll watch for postings"). A condition or offer before it, and a negation, clear it. Sends are the person's to approve.
+const PROMISE = /\bi(?:'ll| will) (?:also |then |go ahead and |now )?(?:(?:set(?: up)?|create) (?:an? |the |your |new |these |those )?(?:job |daily |instant )?(?:alerts?|watch(?:es)?)\b|(?:text|notify|message) you\b|watch (?:for|the) (?:new )?postings?\b)/i;
 const PROMISE_CLEARED = /\b(?:if|unless|once|when|after|until|want me|should i|shall i|do you want|would you like|nothing|not|never)\b|n't\b/i;
 export function unbackedPromises(reply: string, calls: { name: string; ok: boolean }[]): { index: number; kind: string }[] {
+  if (calls.some((t) => t.ok && t.name === "set_job_alerts")) return [];
   const out: { index: number; kind: string }[] = [];
   pieces(reply).forEach((p, index) => {
     const x = plainQuotes(p.text);
-    if (isQuestion(x)) return;
-    for (const c of PROMISES) {
-      const m = c.said.exec(x);
-      if (!m || PROMISE_CLEARED.test(x.slice(0, m.index))) continue;
-      if (c.by.length && calls.some((t) => t.ok && c.by.includes(t.name))) continue;
-      out.push({ index, kind: c.kind });
-      return;
-    }
+    const m = isQuestion(x) ? null : PROMISE.exec(x);
+    if (m && !PROMISE_CLEARED.test(x.slice(0, m.index))) out.push({ index, kind: "an alert promised" });
   });
   return out;
 }

@@ -57,6 +57,9 @@ export interface SpendCap {
   refused(): "limit" | "unread" | "global" | "global_paused" | "global_unavailable" | null;
   // The sentence the reply carries when a call was refused, or null.
   note(): string | null;
+  // PR-5 (2026-11-06): is today's allowance already spent (or unreadable)? Reads the spend once, makes no model call, so a
+  // turn can serve code views instead of trying a brain that is certain to be refused.
+  exhausted(): Promise<"limit" | "unread" | null>;
 }
 
 // One per turn. read: the spend recorded before this turn (read once, at the first model call). The meters this turn's
@@ -67,9 +70,9 @@ export function spendCap(o: { read: () => Promise<DailySpend>; limits: SpendLimi
   let refused: ReturnType<SpendCap["refused"]> = null;
   let globalBlock: BudgetBlock | null = null;
   let inflight = 0;
+  const readBase = () => base ??= o.read().catch((e) => { console.error("career spend cap:", (e as Error)?.message ?? e); return null; });
   const call: Call = async (cfg, payload, opts = {}) => {
-    base ??= o.read().catch((e) => { console.error("career spend cap:", (e as Error)?.message ?? e); return null; });
-    const b = await base;
+    const b = await readBase();
     if (!b) { refused = "unread"; throw new ModelUnavailableError(0, "spend_unread", "today's model spend could not be read"); }
     let usd = b.usd_micros, calls = b.calls;
     for (const m of meters) { usd += m.usd_micros; calls += m.calls; }
@@ -93,6 +96,11 @@ export function spendCap(o: { read: () => Promise<DailySpend>; limits: SpendLimi
   return {
     call,
     refused: () => refused,
+    exhausted: async () => {
+      const b = await readBase();
+      if (!b) return "unread";
+      return b.usd_micros >= o.limits.usdMicros || b.calls >= o.limits.calls ? "limit" : null;
+    },
     note: () => globalBlock ? budgetReply(globalBlock) : refused === "limit" ? LIMIT_NOTE : refused === "unread" ? SPEND_UNREAD_NOTE : null,
   };
 }

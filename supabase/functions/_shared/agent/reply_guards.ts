@@ -468,7 +468,16 @@ const unquoted = (t: string) => plainQuotes(t).replace(/"[^"\n]*"/g, " ");
 const TO_USER = /\b(?:you|your|you're|you've)\b|\bshould i\b|\btell me\b/i;
 // A question about the person joined by "and" between two things asked for ("what role and city are you after").
 const CONJOINED = /\b(?:what|which|where|when)\b[^?.!]{0,40}?\b\w+ (?:and|&|plus) (?:the |your |a |an )?\w+\b[^?.!]{0,40}\b(?:you|your)\b|\b(?:your|you have|you have a) \w+(?: \w+)? (?:and|&|plus) (?:your |a |an )?\w+ (?:date|city|location|school|title|salary|number)\b/i;
+// A requested draft (an email, a note, a letter) is the person's text, not the agent's own asks or promises: from its lead-in
+// ("Here's the email:", "Draft:", "Subject:", a salutation, a code fence or a quoted block) on, nothing is checked.
+const DRAFT_CUE = /(?:^|\n)\s*(?:(?:here(?:'s| is)|below is|i(?:'ve| have) drafted)\b[^\n]{0,60}\b(?:draft|email|e-mail|message|note|letter|reply|text|cover letter|post)\b|(?:draft|email|message|subject|cover letter)\s*:|subject:|dear\b|```|>\s)/i;
+export function beforeDraft(reply: string): string {
+  const t = String(reply ?? ""), m = DRAFT_CUE.exec(t);
+  return m ? t.slice(0, m.index) : t;
+}
+export const hasDraft = (reply: string): boolean => DRAFT_CUE.test(String(reply ?? ""));
 export function endAsks(reply: string): { asks: number; conjoined: boolean } {
+  if (hasDraft(reply)) return { asks: 0, conjoined: false };
   const paras = String(reply ?? "").trim().split(/\n\s*\n/);
   const last = paras[paras.length - 1] ?? "";
   if (/\n/.test(last.trim()) || LISTLINE.test(last)) return { asks: 0, conjoined: false }; // a list or bare lines of items
@@ -482,14 +491,24 @@ export const multiAsk = (reply: string): boolean => { const a = endAsks(reply); 
 // A promise of an alert or watch this turn did not set: only the plain first-person forms ("I'll set a job alert", "I'll text
 // you", "I'll watch for postings"). A condition or offer before it, and a negation, clear it. Sends are the person's to approve.
 const PROMISE = /\bi(?:'ll| will) (?:also |then |go ahead and |now )?(?:(?:set(?: up)?|create) (?:an? |the |your |new |these |those )?(?:job |daily |instant )?(?:alerts?|watch(?:es)?)\b|(?:text|notify|message) you\b|watch (?:for|the) (?:new )?postings?\b)/i;
-const PROMISE_CLEARED = /\b(?:if|unless|once|when|after|until|want me|should i|shall i|do you want|would you like|nothing|not|never)\b|n't\b/i;
+// A condition or offer anywhere before the promise clears it ("if you want, I'll ..."); a negation clears it only in the
+// promise's own clause ("I won't ..."), so "Nothing matched, so I'll set an alert" stands.
+const PROMISE_COND = /\b(?:if|unless|once|when|after|until|want me|should i|shall i|do you want|would you like)\b/i;
+const PROMISE_NEG = /\b(?:not|never|no|nothing)\b|n't\b/i;
+const CLAUSE_START = /(?:,|;|[—–]|\b(?:so|and|but|then|yet)\b)\s*/gi;
+const ownClause = (lead: string): string => { let at = 0; for (const b of lead.matchAll(CLAUSE_START)) at = (b.index ?? 0) + b[0].length; return lead.slice(at); };
 export function unbackedPromises(reply: string, calls: { name: string; ok: boolean }[]): { index: number; kind: string }[] {
   if (calls.some((t) => t.ok && t.name === "set_job_alerts")) return [];
   const out: { index: number; kind: string }[] = [];
+  const cut = beforeDraft(reply).length;
+  let pos = 0;
   pieces(reply).forEach((p, index) => {
+    const start = pos; pos += p.text.length + p.sep.length;
+    if (start >= cut) return;
     const x = plainQuotes(p.text);
     const m = isQuestion(x) ? null : PROMISE.exec(x);
-    if (m && !PROMISE_CLEARED.test(x.slice(0, m.index))) out.push({ index, kind: "an alert promised" });
+    const lead = m ? x.slice(0, m.index) : "";
+    if (m && !PROMISE_COND.test(lead) && !PROMISE_NEG.test(ownClause(lead))) out.push({ index, kind: "an alert promised" });
   });
   return out;
 }

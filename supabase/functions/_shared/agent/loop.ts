@@ -33,6 +33,8 @@ export interface TurnResult {
   tool_calls: { name: string; ok: boolean; effect: Effect | null; error?: string }[];
   pending_approvals: { tool: string; input: unknown; summary: string }[];
   stopped: "final" | "max_steps" | "model_error" | "incomplete_reply";
+  // Meta only, never changes the reply: a final draft that still asked several things or promised an alert after the one rewrite.
+  flags?: string[];
   show?: { intent: string; text: string; parts?: string[] };
   // JOB CARDS: the postings the turn's last successful search_jobs returned, for channels that show them as cards.
   postings?: unknown[];
@@ -359,7 +361,6 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         // and nothing left says it is still needed, code says it first.
         if (stillWaiver.length && standingRefusal(o.message) && !/\b(your yes|your approval|without (asking|approval|your)|needs? (your|their) (yes|ok|okay|approval)|not kept|can'?t keep|won'?t (share|send|apply|skip))\b/i.test(out)) out = `${STANDING_REFUSED}\n\n${out}`;
       }
-      if (manyAsks) console.warn("brain_reply_flag: one-ask or unbacked-promise draft kept as written");
       if (leakedWords(out, leak).length) out = stripLeaks(out, leak);
       // RESEARCH ROUND 3: a posting read as closed this turn is never left sounding open.
       const closed = closedNotes(out, seen);
@@ -377,7 +378,8 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         if (!out.trim()) repairNote = "Your last answer was empty. " + COMPLETENESS_REPAIR;
         continue;
       }
-      return { reply: out, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "final" };
+      const flags = [...(multiAsk(out) ? ["many_asks"] : []), ...(unbackedPromises(out, tool_calls).length ? ["unbacked_promise"] : [])];
+      return { reply: out, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), ...(flags.length ? { flags } : {}), stopped: "final" };
     }
     const pre = content.filter((b: any) => b && b.type === "text").map((b: any) => String(b.text ?? "")).join("").trim();
     if (pre) earlier.push(pre);

@@ -114,12 +114,12 @@ import { gmailSender } from "../_shared/career_outreach_gmail.ts";
 import { fileUploadFor } from "../_shared/channel_resume_upload.ts"; // FEATURE 16
 import { replacedResumeLines, replacedResumeStops } from "../_shared/career_resume_replace.ts"; // ONBOARDING ROUND 4
 import { outlookAsk, outlookChatTurn } from "../_shared/outlook_connector.ts"; // M4: Outlook
-import { chunkSentences, PAGE_CHUNK_CHARS, PAGE_MAX_CHUNKS, shapeForTurn, splitLongAnswer, withoutLinks } from "../_shared/channel_shape.ts"; // REPLY SHAPE
+import { shapeForTurn } from "../_shared/channel_shape.ts"; // REPLY SHAPE
 import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a pasted link or "apply to this" -> one line + one Apply button
 import { supabaseFileStore } from "../trainee-file/store.ts";
 import { createFileService, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
 import { prepFileTurn } from "./career_prep_file.ts"; // BETA C03: the interview prep File
-import { factsForTurn, replyWriterOn, writable, writeReply, writerChannel } from "../_shared/career_reply_writer.ts"; // V1 TEXTING VOICE
+import { factsForTurn, replyWriterOn, rewrites, writable, writeReply, writerChannel } from "../_shared/career_reply_writer.ts"; // V1 TEXTING VOICE
 import { correctedAsk } from "../_shared/search_correction.ts"; // SPEC 2.3
 import { applyReadiness } from "../_shared/apply_readiness.ts"; // SPEC 2.2
 import { writeReadinessAsk } from "../_shared/readiness_ask.ts";
@@ -1374,10 +1374,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // texting voice and checked against this turn's facts (D-007); a rejected or failed write falls back to today's reply
       // with its boilerplate and internal sentences taken out. CAREER_REPLY_WRITER=on only; turns that show an exact
       // payload the person approves are never rewritten. Nothing upstream changes.
-      if (replyWriterOn(Deno.env) && writable(out, agentMeta, { structured: !!(careerTask || careerBatch) })) {
+      // WRITER ROOT CAUSES (beta C12, 2026-11-06): the staged brain's own reply (handler "agent") is never rewritten: it already
+      // passed the loop's reply guards, and the restate-only checker could only cut it (rewrites()).
+      if (replyWriterOn(Deno.env) && rewrites(out, agentMeta, { structured: !!(careerTask || careerBatch) })) {
         const wMeter = ledger.track(newMeter());
         const wCfg = careerModelConfig(Deno.env);
-        const written = await writeReply({ on: true, message, channel: writerChannel((body as any)?.channel),
+        const written = await writeReply({ on: true, message, handler: out.handler ?? null, channel: writerChannel((body as any)?.channel),
           facts: factsForTurn({ reply: out.reply, intent: out.intent, resultStatus: out.resultStatus ?? null, effects: turnEffects, situation,
             counts: (agentMeta as any)?.apply_summary ? summaryFacts((agentMeta as any).apply_summary) : null,
             appliedOk: (agentMeta as any)?.apply_summary ? (agentMeta as any).apply_summary.applied_ok : null }),
@@ -1391,24 +1393,16 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       }
       // REPLY SHAPE (_shared/channel_shape.ts): on Telegram with the writer on, the answer is one short paragraph, detail rides as
       // files and links as their own messages (the channel sends them in that order). A turn that shows an exact payload is untouched.
-      let shapeField: { attachments: { filename: string; content: string }[]; links: string[]; more?: string[] } | null = null;
+      // LONG ANSWERS WHOLE (beta C12, 2026-11-06): a long answer is sent as whole-sentence parts (the parts contract,
+      // channel_inbound.ts replyParts), and out.reply stays the WHOLE answer, so the stored reply (agent_messages) holds all of
+      // it. The overflow page (a research_brief needing a source link the turn had) and the one capped second message, whose
+      // tail was dropped and never stored, are gone.
+      let shapeField: { attachments: { filename: string; content: string }[]; links: string[] } | null = null;
       {
-        // OVERFLOW (owner, 2026-10-29): never a downloaded file. With the hosted-file service configured (TRAINEE_FILE_BASE_URL) the rest of
-        // a long answer is a research_brief page, sent as a link; it needs a source the turn really had. Anything else: a second message.
-        let overflowLink: string | null = null;
-        const longRest = replyWriterOn(Deno.env) && writerChannel((body as any)?.channel) === "telegram" ? splitLongAnswer(withoutLinks(out.reply)) : null;
-        const src = (turnLinks ?? []).find((u) => /^https:\/\//.test(u));
-        if (longRest?.full && src && (Deno.env.get("TRAINEE_FILE_BASE_URL") || "").trim()) {
-          const made = await createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }).create(user.id, "research_brief", {
-            title: "More on your question", subject: "Your question", findings: chunkSentences(longRest.full, PAGE_CHUNK_CHARS, PAGE_MAX_CHUNKS).chunks.map((value, i) => ({ label: i ? `The rest of the answer (${i + 1})` : "The rest of the answer", value, source: "Reported, not verified" })), sources: [{ title: new URL(src).hostname, url: src }] }).catch(() => null);
-          // TELEGRAM SCENARIOS (2026-10-30): only the signed link. A Mini App URL (webApp) opens only from Telegram's own button;
-          // sent as a plain link it opened in the browser signed out, and the rest of the answer (not sent as a second message)
-          // was lost. Without the signed link the rest goes as the second message.
-          if (made && made.ok && made.url) overflowLink = made.url;
-        }
-        const sh = shapeForTurn({ overflowLink, on: replyWriterOn(Deno.env), channel: writerChannel((body as any)?.channel), reply: out.reply, attachments: turnAttachments, allowedLinks: turnLinks,
+        const sh = shapeForTurn({ on: replyWriterOn(Deno.env), channel: writerChannel((body as any)?.channel), reply: out.reply, attachments: turnAttachments, allowedLinks: turnLinks,
           writable: writable(out, agentMeta, { structured: !!(careerTask || careerBatch) }) });
         if (sh.reply !== out.reply) out = { ...out, reply: sh.reply };
+        if (sh.parts) out = { ...out, parts: sh.parts };
         shapeField = sh.shape;
         // FILE KINDS: the links to the pages create_file made were minted by code; they are sent after the answer whatever the shape decided.
         if (turnFileLinks.length) shapeField = { attachments: shapeField?.attachments ?? [], links: [...(shapeField?.links ?? []), ...turnFileLinks.filter((l) => !(shapeField?.links ?? []).includes(l))] };

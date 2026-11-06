@@ -72,3 +72,20 @@ export async function feedUrlsFor(env: { get(k: string): string | undefined }, u
   const t = await mintFileToken({ secret: env.get("TRAINEE_FILE_LINK_SECRET"), userId, list, now, kind: "l" });
   return { webApp: env.get("TELEGRAM_BOT_TOKEN") ? `${base}?list=${list}` : null, url: t ? `${base}?t=${t}` : null };
 }
+
+// BETA B1 (2026-11-05): a File sent in Telegram was only its signed link, and the link opens a PHONE sign-in; a person who uses
+// Trainee only in Telegram has no confirmed phone, so the code could never be sent and the File never opened. Telegram's own
+// login (the Mini App, signed initData mapped to the linked account: trainee-file handler) is that person's way in, and it opens
+// only from a web_app button. So, on Telegram, a message that is exactly one of OUR File links (signature checked, a link token,
+// not expired) also gets a button whose Mini App URL names the same list. The Mini App URL is not a credential: it signs in
+// whoever opens it as THEIR OWN linked Telegram account, and a list is read only for the signed-in account (files.get(user, list)),
+// so a forwarded button opens nothing of the sender's. Null for any other text, or when Telegram sign-in is not configured.
+export async function fileAppFor(env: { get(k: string): string | undefined }, text: string, now: number): Promise<string | null> {
+  const base = (env.get("TRAINEE_FILE_BASE_URL") || "").trim();
+  if (!/^https:\/\/[^\s?#]+$/.test(base) || !env.get("TELEGRAM_BOT_TOKEN")) return null;
+  const t = String(text ?? "").trim();
+  if (!t.startsWith(`${base}?t=`)) return null;
+  const c = await verifyFileToken(t.slice(base.length + 3), env.get("TRAINEE_FILE_LINK_SECRET"), now);
+  if (!c.ok || c.claims.k !== "l") return null;
+  return `${base}?list=${c.claims.r}`;
+}

@@ -450,7 +450,7 @@ EARLIER_MARK=("to_regclass('public.career_kb_roles') is not null"
   "to_regclass('public.career_task_intents_v1') is not null"
   "to_regclass('public.career_batch_ledgers_v1') is not null"
   "exists (select 1 from pg_proc where proname = 'career_host_commit' and prosrc like '%stated_facts%')")
-SCHEDULED=(career-ingest career-proactive trainee-deliver trainee-inbound career-form-schema)
+SCHEDULED=(career-ingest career-proactive trainee-deliver trainee-inbound)
 SCHED_VARS=(CAREER_INGEST_SECRET CAREER_PROACTIVE_SECRET TRAINEE_DELIVER_SECRET TRAINEE_INBOUND_SECRET)
 # WO-038: the Telegram and WhatsApp webhooks (deployed always; without their secrets they answer 503 NOT_WIRED).
 CHANNEL_FNS=(trainee-telegram trainee-whatsapp)

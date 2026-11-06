@@ -3800,7 +3800,7 @@ const CareerRouter = (() => {
     const employer = /\b(?:offer(?:ed|ing|s)?|proposed|came\s+back|(?:is|are|was|were)\s+paying|pay(?:s|ing)|(?:they|company|employer|recruiter|firm)\s+(?:will\s+)?pay|quoted|countered|comes\s+to)\b/ig;
     const user = /\b(?:counter(?:ing|ed)?(?:\s+(?:email|letter|message|proposal))?(?:\s+(?:at|to|with|for|asking(?:\s+for)?))?|ask(?:ing)?(?:\s+for)?|propos(?:e|ing)(?:\s+(?:a|an|that))?|meet\s+me\s+at|want(?:ing)?|target(?:ing)?|looking\s+for|hop(?:e|ing)\s+for|make\s+it|change\s+(?:it|the\s+\w+)\s+to|need|request(?:ing)?|push\s+for|go\s+for|would\s+like|['’]d\s+like|(?:draft|write|compose|send)\b[^.?!]{0,50}?\b(?:at|with|for))\b/ig;
     // CURRENT-PAY cues: the text must say it is THEIR pay. A bare "now" / "right now" is a timing word, never a cue.
-    const current = /\b(?:i\s+(?:currently\s+)?(?:make|earn|get\s+paid|am\s+paid)|i['\u2019]m\s+(?:paid|at)|currently\s+(?:(?:make|earn|paid|get|at)\b|\$)|(?:my|the)\s+(?:current|present)\s+(?:\w+\s+)?(?:pay|pays|rate|wage|job\s+pays)|current\s+(?:pay|rate|wage)|(?:my\s+(?:job|work|employer)|they)\s+(?:currently\s+)?pays?\s+me|my\s+(?:job|work)\s+pays)\b/ig;
+    const current = /\b(?:i\s+(?:(?:now|currently)\s+)?(?:make|earn|get\s+paid|am\s+paid)|i['\u2019]m\s+(?:paid|at)|currently\s+(?:(?:make|earn|paid|get|at)\b|\$)|(?:my|the)\s+(?:current|present)\s+(?:\w+\s+)?(?:pay|pays|rate|wage|job\s+pays)|current\s+(?:pay|rate|wage)|(?:my\s+(?:job|work|employer)|they)\s+(?:(?:now|currently)\s+)?pays?\s+me|(?:currently|now)\s+pays?\s+me|my\s+(?:job|work|employer)\s+(?:(?:now|currently)\s+)?pays?)\b/ig;
     const lastIdx = (re, str) => { let i = -1, mm; re.lastIndex = 0; while ((mm = re.exec(str))) i = mm.index; return i; };
     // A unit/purpose word attaches to a figure only as its adjacent noun phrase ("$500 relocation allowance", "$2,000 signing bonus")
     // or as "<noun> of $X"; a later word in the sentence, a connector, or a negation ("with no relocation allowance") never does.
@@ -3852,9 +3852,9 @@ const CareerRouter = (() => {
       const ci = lastIdx(current, seg);
       // an employer word inside the current-pay phrase ("my current job pays") is not an employer cue
       const ui = lastIdx(user, seg), ei = lastIdx(employer, seg.replace(current, (x) => " ".repeat(x.length)));
-      const trailingCurrent = /^[^.?!;,\n]{0,24}?\b(?:at|in|from)\s+my\s+(?:current|present)\b/i.test(after);
+      const trailingCurrent = /^[^.?!;,\n]{0,24}?\b(?:at\s+my\s+(?:current\s+|present\s+)?(?:job|employer|company|role)|(?:in|from)\s+my\s+(?:current|present)\b|where\s+i\s+work(?:\s+now)?)\b/i.test(after);
       // an explicit ask cue or an employer offer cue on the figure always beats a current-pay cue
-      let role = (ci >= 0 && ci >= ui && ci >= ei) || (trailingCurrent && ui < 0 && ei < 0) ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
+      let role = (ci >= 0 && ci >= ui && ci >= ei) || (trailingCurrent && ui < 0 && lastIdx(/\b(?:offer(?:ed|ing|s)?|proposed|came\s+back|quoted|countered|comes\s+to)\b/ig, seg) < 0) ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
       // An ask cue carries across "and" / "plus" / "," inside the same clause ("ask for $500 relocation and $28 an hour").
       if (role === "unknown" && prevRole === "ask" && !/[.?!;\n]/.test(src.slice(prevEnd, start)) && /(?:\band\b|\bplus\b|&|,)\s*$/i.test(seg)) role = "ask";
       const v = Number(mm[1].replace(/,/g, ""));

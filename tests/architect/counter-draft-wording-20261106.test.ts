@@ -503,3 +503,20 @@ Deno.test("CDW timing words ('now', 'right now') are never a current-pay cue", (
   assert(/meet me at \$30 an hour\?/.test(t.body), t.body);
   eq(recorded(t.ctx).counter, 30);
 });
+
+Deno.test("CDW 'now' inside a current-pay phrase is a cue; explicit current-job wording beats a generic pay word, never an offer word", () => {
+  const go = (msg: string) => { const ctx = fresh(); host.runTurn(OFFER, ctx); const r = host.runTurn(msg, ctx); return { ctx, body: String(r.result?.draft?.body ?? "") }; };
+  const ok = (msg: string, offer: number, ask: number) => {
+    const t = go(msg);
+    assert(new RegExp(`Thank you for the offer — \\$${offer} an hour`).test(t.body) && new RegExp(`meet me at \\$${ask} an hour\\?`).test(t.body), `${msg}: ${t.body}`);
+    eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [offer, ask], msg);
+  };
+  ok("my job now pays $26/hour; counter at $30/hour", 24, 30);
+  ok("I now earn $25/hour; counter at $30/hour", 24, 30);
+  ok("They pay $26/hour at my current job; counter at $30/hour", 24, 30);
+  ok("they offered $26/hour, more than at my current job; counter at $30/hour", 26, 30);
+  const a = go("Draft a counter at $28/hour right now");
+  assert(/meet me at \$28 an hour\?/.test(a.body), a.body);
+  const b = fresh(); host.runTurn("They offered $26/hour right now.", b);
+  eq(recorded(b).hourly, 26);
+});

@@ -3832,7 +3832,7 @@ const CareerRouter = (() => {
         const owner = words[i - 1] || "";
         return !(/['’]s$/.test(owner) || /^(?:their|our|its|his|her|my|your)$/.test(owner));
       }
-      while (i >= 0 && /^(?:are|is|was|were|now|also|typically|usually|currently|generally|all|still|will|would|can|could|often|do|does)$/.test(words[i])) i--;
+      while (i >= 0 && /^(?:are|is|was|were|now|also|typically|usually|currently|generally|all|still|will|would|can|could|often|do|does|did|indeed|really|actually)$/.test(words[i])) i--;
       if (i < 0) return false;
       const subj = words[i];
       if (/^(?:ours|theirs|mine|yours)$/.test(subj)) return false;
@@ -3953,8 +3953,11 @@ const CareerRouter = (() => {
       // Only within one sentence: the third party and the figure must share it ("Separate advice from unverified market claims"
       // after the offer is not about any figure).
       const THIRD_WORD = /\b(?:market|competitors?|others|industry|average|median|typical|glassdoor|levels\.fyi|payscale|salary\.com|indeed|employers|companies|other\s+(?:places|firms|roles|jobs|offers))\b/i;
-      const sentenceOf = (at) => { const a = Math.max(...[".", "?", "!", ";", "\n"].map((c) => src.lastIndexOf(c, at - 1))) + 1; const ends = [".", "?", "!", ";", "\n"].map((c) => { let i = src.indexOf(c, at); while (i >= 0 && c === "." && /\d/.test(src[i + 1] || "")) i = src.indexOf(c, i + 1); return i; }).filter((i) => i >= 0); return src.slice(a, ends.length ? Math.min(...ends) : src.length).replace(/counter[ -]?offers?/ig, ""); };
-      const marketFig = nonAsk.some((m) => (m.unit === "hour" || m.unit === "none") && m.value !== (hint && hint.recorded) && THIRD_WORD.test(sentenceOf(m.at)));
+      // incidental uses that name no third party: "indeed" as an adverb, "market" inside a role or team name
+      const INCIDENTAL = /\b(?:did|does|do|is|was|are|were|will|would|could|can|very|and)\s+indeed\b|\bindeed\s*,|\bmarket\s+(?:research|researcher|analyst|analytics|data|intelligence|access|maker|making)\b|\b(?:go-to-|capital\s+|stock\s+|equity\s+)market\b/ig;
+      const startOf = (at) => { let a = -1; for (const c of [".", "?", "!", ";", "\n"]) { let i = src.lastIndexOf(c, at - 1); while (i >= 0 && c === "." && /\d/.test(src[i + 1] || "") && /\d/.test(src[i - 1] || "")) i = src.lastIndexOf(c, i - 1); a = Math.max(a, i); } return a + 1; };
+      const sentenceOf = (at) => { const a = startOf(at); const ends = [".", "?", "!", ";", "\n"].map((c) => { let i = src.indexOf(c, at); while (i >= 0 && c === "." && /\d/.test(src[i + 1] || "")) i = src.indexOf(c, i + 1); return i; }).filter((i) => i >= 0); return src.slice(a, ends.length ? Math.min(...ends) : src.length).replace(/counter[ -]?offers?/ig, ""); };
+      const marketFig = nonAsk.some((m) => !(m.unit === "hour" && m.value === (hint && hint.recorded)) && THIRD_WORD.test(sentenceOf(m.at).replace(INCIDENTAL, " ")));
       if (marketFig) { out.ambiguous = true; out.marketAmbiguous = true; }
     }
     return out;
@@ -3991,6 +3994,7 @@ const CareerRouter = (() => {
       }
       // the offer comes ONLY from an employer-role figure: never from an ask-cued or an uncued one
       out.recHourly = (cf.ambiguous || (hint && hint.ambiguous)) ? null : cf.offer;
+      out._held = !!(cf.ambiguous || (hint && hint.ambiguous));
       out.askHourly = cf.ask; out.offerHourly = cf.offer; out.reportedHourly = cf.offer; out.unknownHourly = cf.unknown; out.askBare = cf.askBare;
     }
     if (m) { out.hourly = Number(m[1]); out.hourlyText = m[0].replace(/\s+/g, " ").trim(); work = work.replace(m[0], " "); }
@@ -3998,6 +4002,9 @@ const CareerRouter = (() => {
     if (mk) out.annual = Number(mk[1]) * 1000;
     else { const mp = work.match(/\$\s?([\d,]{4,})/); if (mp) out.annual = num(mp[1]); }
     if (out.annual) out.annualText = `$${out.annual.toLocaleString()}`;
+    // a held turn (ambiguous or market figures) attributes no figure at all: no bonus and no annual amount either
+    if (out._held) { out.signing = null; out.signingText = null; out.annual = null; out.annualText = null; }
+    delete out._held;
     return out;
   }
   // The offer's headline figure in the USER'S OWN units — the phrase
@@ -15644,13 +15651,15 @@ const CareerRouter = (() => {
         if (figs.hourly) rec.hourly = figs.hourly;
         if (figs.signing) rec.signing = figs.signing;
         if (figs.annual) rec.amount = figs.annual;
-        if ((m = cl.match(/\bcame back\s+(?:at\s+)?\$?(\d{2,3})\s?k\b/i))) rec.amount = Number(m[1]) * 1000;
-        if (!figs.annual && !figs.signing && !figs.hourly) {
+        // a held turn (ambiguous or market figures) records no amount from the message either
+        const heldTurn = offerHint(raw, ctx).ambiguous;
+        if (!heldTurn && (m = cl.match(/\bcame back\s+(?:at\s+)?\$?(\d{2,3})\s?k\b/i))) rec.amount = Number(m[1]) * 1000;
+        if (!heldTurn && !figs.annual && !figs.signing && !figs.hourly) {
           if ((m = cl.match(/\boffer\w*\b[^.]*?\$\s?(\d{2,3})\s?k\b/i)) || (m = cl.match(/\b(\d{2,3})\s?k\b[^.]*\boffer/i))) rec.amount = Number(m[1]) * 1000;
           else if ((m = cl.match(/\$\s?(\d[\d,]{3,})/))) rec.amount = Number(m[1].replace(/,/g, ""));
         }
-        if (rec.amount == null && !figs.annual && !/\bsigning\b/i.test(cl) && (/\boffer|base|salary|came back\b/i.test(cl) || /\boffer/i.test(raw)) && (m = cl.match(/\b(\d{2,3}(?:\.\d)?)\s?k\b/i))) rec.amount = Number(m[1]) * 1000;
-        if (!figs.signing && ((m = cl.match(/\bsigning(?:\s+bonus)?\s*(?:of\s*)?\$?(\d{1,3})\s?k\b/i)) || (m = cl.match(/\$\s?(\d{1,3})\s?k\s+signing\b/i)))) rec.signing = Number(m[1]) * 1000;
+        if (!heldTurn && rec.amount == null && !figs.annual && !/\bsigning\b/i.test(cl) && (/\boffer|base|salary|came back\b/i.test(cl) || /\boffer/i.test(raw)) && (m = cl.match(/\b(\d{2,3}(?:\.\d)?)\s?k\b/i))) rec.amount = Number(m[1]) * 1000;
+        if (!heldTurn && !figs.signing && ((m = cl.match(/\bsigning(?:\s+bonus)?\s*(?:of\s*)?\$?(\d{1,3})\s?k\b/i)) || (m = cl.match(/\$\s?(\d{1,3})\s?k\s+signing\b/i)))) rec.signing = Number(m[1]) * 1000;
         if ((m = cl.match(/\b([\d,]{3,})\s+shares\b/i))) rec.shares = m[1];
         if ((m = cl.match(/\bstarts?\s+(?:on\s+)?([A-Z][a-z]+\s+\d{1,2})\b/))) rec.start = m[1];
         if ((m = cl.match(/\b(?:said|told them|quoted|gave|expect(?:ed|ing)?)\s+(?:them\s+)?\$?(\d{2,3})\s?[-–]\s?\$?(\d{2,3})\s?k\b/i))) rec.expectation = `${m[1]}-${m[2]}k`;

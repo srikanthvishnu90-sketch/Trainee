@@ -802,3 +802,36 @@ Deno.test("CDW market exit: a third party in the figure's sentence holds the tur
   eq([recorded(ctx).hourly, recorded(ctx).counter], [26, 30]);
   assert(/Thank you for the offer — \$26 an hour/.test(String(r.result?.draft?.body ?? "")));
 });
+
+// Review of 201c435c: the market exit covers every unit (a third party's bonus or annual figure is not the employer's), a held
+// turn records no bonus or amount from the message, decimals do not split sentences, and incidental words do not hold.
+Deno.test("CDW market exit, every unit: a third party's bonus or salary is never saved; incidental words do not hold the turn", () => {
+  const run = (prior: string | null, msg: string) => { const ctx = fresh(); if (prior) host.runTurn(prior, ctx); const r = host.runTurn(msg, ctx); return { ctx, r, th: ctx.negotiationThread ?? {} }; };
+  for (const prior of [OFFER, null]) {
+    for (const msg of [
+      "Competitors offer a $5,000 signing bonus. Draft a counter at $30/hour",
+      "Competitors offer a $5k signing bonus. Draft a counter at $30/hour",
+      "The market pays $60k a year and they offered $55k. Draft a counter at $30/hour",
+    ]) {
+      const { ctx, r, th } = run(prior, msg);
+      eq([th.signing ?? null, th.amount ?? ctx.offer?.amount ?? null], [null, null], `${msg}: no bonus or amount recorded`);
+      assert(!r.result?.draft?.body && r.result?.counterAmbiguous === true && (r.result?.sends ?? 0) === 0, `${msg}: held`);
+      eq(recorded(ctx).hourly, prior ? 24 : null, `${msg}: offer unchanged`);
+    }
+  }
+  // a decimal in an earlier figure does not cut the sentence: the market word still shares it
+  const d = run(OFFER, "Per the market average I'd ask for $29.50/hour but they offered $28/hour. Draft a counter at $30/hour");
+  assert(!d.r.result?.draft?.body && recorded(d.ctx).hourly === 24, "decimal: held, $24 stays");
+  // incidental words name no third party: the plain offer still saves and drafts
+  for (const [msg, offer] of [
+    ["They offered $26/hour for a market research role. Draft a counter at $30/hour", 26],
+    ["They did indeed offer $26/hour. Draft a counter at $30/hour", 26],
+    ["They offered $26 an hour plus a $2,000 signing bonus. Draft a counter at $30/hour", 26],
+  ] as const) {
+    const { ctx, r } = run(OFFER, msg);
+    eq(recorded(ctx).hourly, offer, msg);
+    assert(new RegExp(`Thank you for the offer — \\$${offer} an hour`).test(String(r.result?.draft?.body ?? "")), `${msg}: drafted`);
+  }
+  const b = run(OFFER, "They offered $26 an hour plus a $2,000 signing bonus. Draft a counter at $30/hour");
+  eq(b.th.signing, 2000, "the employer's own bonus is still recorded");
+});

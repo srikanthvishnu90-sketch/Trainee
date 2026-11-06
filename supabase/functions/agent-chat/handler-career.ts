@@ -53,6 +53,7 @@ const researchCache = memoryGroundCache();
 import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWindow, summaryFor } from "./career_brain.ts";
 import { brainMode, STAGED_TOOL_POLICY, stagedRoute } from "./career_staged.ts";
 import { turnClock } from "./turn_clock.ts";
+let isolateTurns = 0; // D6: turns this isolate has served, so the log can tell a cold start from a warm one
 import { CRISIS_INTENT, crisisReply } from "./crisis.ts";
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
 import { CARD_NEEDS_REPLY_STATUS, cardIntent, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
@@ -97,6 +98,7 @@ import { hunterVerifier, supabaseCheckCache } from "../_shared/career_contacts.t
 import { GMAIL_SEND_SCOPE } from "../_shared/career_outreach_gmail.ts";
 import { missingIntegration } from "../_shared/agent/integrations.ts";
 import { documentsOf, materializeArtifacts } from "../_shared/channel_artifacts.ts";
+import { scoredN } from "../_shared/career_search.ts";
 import { askFor, isJudgePromptAsk, judgePromptTurn, searchJudgeTurn, supabaseJudgeCache, supabaseSearchSources } from "../_shared/career_search_judge.ts"; // FEATURE 5
 import { offerChatTurn } from "../_shared/career_offer_chat.ts"; // FEATURE 12
 import { activityAsk, activityTurn, supabaseActivity } from "../_shared/career_activity.ts"; // REQS DOC 1: Q21, Q249, Q34
@@ -422,11 +424,13 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         return data ?? [];
       },
       jobs: { roleFamily: CareerJobs.roleFamily, seniorityBand: CareerJobs.seniorityBand, stripHtml: CareerJobs.stripHtml },
+      // D6: the row mapping is CPU; the clock (made just below) counts it apart from the read's I/O wait.
+      cpu: (stage: string, fn: () => unknown) => clock.sync(stage, fn),
     });
     // C01 (beta 2026-11-04): the turn's stage clock (turn_clock.ts). One log line per turn names the CPU each synchronous stage
     // spent; past half the Edge CPU limit each stage is logged as it starts, so a 546 names the stage it died in.
     const clock = turnClock();
-    let clockTag: Record<string, string | null> = {};
+    let clockTag: Record<string, string | number | boolean | null> = {};
     try {
       gate = await enterTurnGate(admin, user.id, turnKey, { thread: tid });
       const loaded = await clock.wait("load", () => persistence.load({ userId: user.id, threadId: tid, turnKey, requestHash }));
@@ -1167,8 +1171,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           const f5Meter = ledger.track(newMeter());
           const f5Cfg = careerModelConfig(Deno.env);
           try {
-            const found = await clock.wait("search_judge", () => searchJudgeTurn({ message, ask: f5Ask, userId: user.id, now: Date.now(), profile: (ctx as any).profile ?? null,
-              sources: supabaseSearchSources(admin, { window: postings, jobs: { roleFamily: CareerJobs.roleFamily, seniorityBand: CareerJobs.seniorityBand, stripHtml: CareerJobs.stripHtml } }),
+            const found = await clock.wait("search_judge", () => searchJudgeTurn({ clock, message, ask: f5Ask, userId: user.id, now: Date.now(), profile: (ctx as any).profile ?? null,
+              sources: supabaseSearchSources(admin, { cpu: (stage, fn) => clock.sync(stage, fn), window: postings, jobs: { roleFamily: CareerJobs.roleFamily, seniorityBand: CareerJobs.seniorityBand, stripHtml: CareerJobs.stripHtml } }),
               judge: { on: f5JudgeOn, model: (payload) => callModel(f5Cfg, payload, { meter: f5Meter, role: "chat" }), cache: supabaseJudgeCache(admin),
                 n: Number(Deno.env.get("CAREER_JUDGE_N")) || undefined, standing: () => supabaseMemoryStore(admin).standing(user.id) } }));
             if (found) {
@@ -1501,7 +1505,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         turn_effects: turnEffects.writes.size > 0 || turnEffects.queued > 0 || turnEffects.sent > 0 || turnEffects.sendUnknown > 0 }, conflict ? 409 : 503);
     } finally {
       await ledger.finish().catch((e) => console.error("turn cost ledger:", e?.message ?? e));
-      clock.flush(clockTag);
+      // D6: counts only (never content): postings scored this isolate (router + search), and whether this was its first turn.
+      clock.flush({ ...clockTag, scored_n: ((CareerRouter as any).scoredCount?.() ?? 0) + scoredN(), cold: isolateTurns++ === 0 });
       await gate?.leave();
     }
   } catch (e) {

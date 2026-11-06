@@ -40710,7 +40710,12 @@ const CareerRouter = (() => {
       return !!bm && !/\b(?:no|without|not|zero|never)\b/i.test(before.slice(0, bm.index + bm[0].length - bm[1].length).split(/[,;.]/).pop().slice(-12));
     };
     const oneTime = /\b(?:relocation|moving|signing|sign-on|bonus|allowance|stipend|equity|stock|shares|reimbursement|budget)\b/i;
-    const hourCtx = !!(hint && hint.hourly) || /\$\s?\d[\d,.]*\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)|\bhourly\b/i.test(src);
+    // ALLOWLIST (shared by the offer and the ask): a unitless figure may take the recorded offer's hourly unit only when an offer is
+    // recorded, it is within 3x that offer, and nothing but an hourly or filler phrase follows it in its clause. It never inherits a
+    // unit from another figure in the message.
+    const TOK = "(?:an?\\s+hour|\\/\\s?h(?:ou)?r|per\\s+hour|hourly|for\\s+(?:the|this)\\s+(?:role|position|job)|instead|please|if\\s+possible|then|now)";
+    const unitlessHourly = (v, end) => !!(hint && hint.recorded != null && v <= 3 * Number(hint.recorded)
+      && new RegExp("^(?:" + TOK + "\\s*)*$", "i").test(src.slice(end).split(/[.,;!?\n]|\band\b|\bbut\b/i)[0].trim()));
     let prevEnd = 0, mm;
     while ((mm = reM.exec(src))) {
       const start = mm.index, end = start + mm[0].length;
@@ -40729,7 +40734,7 @@ const CareerRouter = (() => {
       const role = ci >= 0 && ci >= ui && ci >= ei ? "current" : ui < 0 && ei < 0 ? (/\brate\s+of\s*$/i.test(seg) ? "ask" : "unknown") : ui >= ei ? "ask" : "employer";
       const v = Number(mm[1].replace(/,/g, ""));
       // a unitless figure the employer reported ("they offered $24"), in a message that is otherwise about hourly pay, is hourly
-      if (unit === "none" && role === "employer" && v < 1000 && hourCtx) unit = "hour";
+      if (unit === "none" && role === "employer" && unitlessHourly(v, end)) unit = "hour";
       out.mentions.push({ value: v, unit, role });
       prevEnd = end;
       if (unit === "hour") {
@@ -40737,14 +40742,7 @@ const CareerRouter = (() => {
         else if (role === "employer") out.offer = v;
         else if (role === "current") out.current = v;
         else if (out.unknown == null) out.unknown = v;
-      } else if (unit === "none" && role === "ask" && out.askBare == null && hint && hint.recorded != null && v <= 3 * Number(hint.recorded)) {
-        // ALLOWLIST: a cued unitless figure takes the recorded offer's hourly unit only when nothing but an hourly or filler
-        // phrase follows it in its clause. Any other tail ("on top", "to cover tuition", "for each shift", "every week") fails safe:
-        // no hourly ask, the draft keeps its fill-in.
-        const tail = src.slice(end).split(/[.,;!?\n]|\band\b|\bbut\b/i)[0].trim();
-        const TOK = "(?:an?\\s+hour|\\/\\s?h(?:ou)?r|per\\s+hour|hourly|for\\s+(?:the|this)\\s+(?:role|position|job)|instead|please|if\\s+possible|then)";
-        if (new RegExp("^(?:" + TOK + "\\s*)*$", "i").test(tail)) out.askBare = v;
-      }
+      } else if (unit === "none" && role === "ask" && out.askBare == null && unitlessHourly(v, end)) out.askBare = v;
     }
     return out;
   }
@@ -52399,12 +52397,15 @@ const CareerRouter = (() => {
         // forms the kind parse does not carry (the $-less k forms:
         // "85k", "came back at 120k").
         const askFramed = /\bask(?:ing)? for\s+(?:a\s+|an\s+)?\$?\s?\d|\bcounter\s+(?:at|of|to)\s+\$?\s?\d|\bmake it\s+\$?\s?\d/i.test(cl);
-        const figs0 = parseOfferFigures(cl, { recorded: offerHint(raw, ctx).recorded, draft: offerHint(raw, ctx).draft, hourly: /\$\s?\d[\d,.]*\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)|\bhourly\b/i.test(raw) });
+        const figs0 = parseOfferFigures(cl, { recorded: offerHint(raw, ctx).recorded, draft: offerHint(raw, ctx).draft });
         const figs = askFramed ? { hourly: null, signing: null, annual: null } : figs0;
         // G3: a counter-drafting request ("draft the counter email at $28/hour", "propose $28/hour") carries the ASK; its hourly
         // figure re-bases the recorded offer only when the same message REPORTS an offer ("they offered $26/hour now").
         const counterDraftReq = /\b(?:draft|write|compose|prepare)\b[^.?!]*\bcounter\b|\bcounter\s+(?:email|offer|letter|message)\b|\bpropos(?:e|ing)\s+\$|\bask(?:ing)?\s+(?:for\s+)?\$/i.test(cl);
-        figs.hourly = figs0.recHourly; // only the employer-role figure is the offer
+        // a comma-split clause that cuts a thousands figure ("They offered $1" of "$1,000 a week") carries no whole figure
+        const cutAt = raw.indexOf(cl);
+        const cutNum = cutAt >= 0 && /\$\s?\d{1,3}$/.test(cl.trim()) && /^,\d{3}\b/.test(raw.slice(cutAt + cl.length));
+        figs.hourly = cutNum ? null : figs0.recHourly; // only the employer-role figure is the offer
         if (figs.hourly) rec.hourly = figs.hourly;
         if (figs.signing) rec.signing = figs.signing;
         if (figs.annual) rec.amount = figs.annual;

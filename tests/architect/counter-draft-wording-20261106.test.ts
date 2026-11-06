@@ -183,6 +183,8 @@ Deno.test("CDW '$22 now; they offered $24; counter at $27' reaches the negotiati
 Deno.test("CDW current pay is never saved as the offer, unitless or /hour, over two turns", () => {
   for (const first of ["my current job pays $22/hour; they offered $24; draft a counter at $27/hour", "my current job pays $22/hour; they offered $24/hour; draft a counter at $27/hour"]) {
     const ctx = fresh();
+    // a unitless offer takes its unit from the RECORDED offer only (never from another figure in the message), so record it first
+    host.runTurn(OFFER, ctx);
     step(ctx, first, 24, 27);
     step(ctx, "Draft the counter email.", 24, 27);
     eq(recorded(ctx).offerRate, 24, first);
@@ -347,4 +349,22 @@ Deno.test("CDW '$50 for travel to work' is not an hourly ask: placeholder, nothi
   assert(/\[your target hourly rate\]/.test(body) && !/meet me at \$50 an hour/.test(body), askLine(body));
   eq(recorded(ctx).counter, null);
   eq(recorded(ctx).hourly, 24);
+});
+
+Deno.test("CDW a unitless employer figure never inherits its unit from another figure (allowlist applies to offers too)", () => {
+  const go = (msg: string) => { const ctx = fresh(); host.runTurn(OFFER, ctx); const r = host.runTurn(msg, ctx); return { ctx, body: String(r.result?.draft?.body ?? "") }; };
+  // tail "for each shift" is off the allowlist: the recorded offer stays and is what the draft thanks for
+  let t = go("They offered $200 for each shift; draft a counter at $28/hour");
+  assert(/Thank you for the offer — \$24 an hour/.test(t.body) && /meet me at \$28 an hour\?/.test(t.body), t.body);
+  eq([recorded(t.ctx).hourly, recorded(t.ctx).counter, recorded(t.ctx).offerRate], [24, 28, 24]);
+  // clean tail, within 3x of the recorded $24: takes the recorded offer's hourly unit, so the offer is $26/hour
+  t = go("They offered $26; counter at $30/hour");
+  assert(/Thank you for the offer — \$26 an hour/.test(t.body) && /meet me at \$30 an hour\?/.test(t.body), t.body);
+  eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [26, 30]);
+  t = go("They offered $26/hour now; counter at $30");
+  assert(/Thank you for the offer — \$26 an hour/.test(t.body) && /meet me at \$30 an hour\?/.test(t.body), t.body);
+  eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [26, 30]);
+  t = go("They offered $1,000 a week; counter at $30/hour");
+  assert(/Thank you for the offer — \$24 an hour/.test(t.body) && /meet me at \$30 an hour\?/.test(t.body), t.body);
+  eq([recorded(t.ctx).hourly, recorded(t.ctx).counter, recorded(t.ctx).offerRate], [24, 30, 24]);
 });

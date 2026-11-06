@@ -24,6 +24,7 @@ import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, supabaseParity } from "../flow/handler.ts";
 import { calls, clearOracle, fakeAnthropic, setOracle } from "../../evals/career/tasks/fake_model.ts";
 import { dueDate } from "../../supabase/functions/_shared/task/plan.ts";
+import { DEFAULT_ZONE } from "../../supabase/functions/_shared/career_alerts.ts";
 import { brainMode } from "../../supabase/functions/agent-chat/career_staged.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -124,7 +125,10 @@ Deno.test({ name: "TASK PLANNER: compound asks complete at the real handler, thr
       // the two queued are the two the search listed first (the thread's own list, code's record)
       const list = JSON.parse(await sql(`select (state->'career'->'stores'->'discovery'->'lastShortlist')::text from public.agent_flow_state where user_id = '${people[tok]}' order by updated_at desc limit 1`));
       eq(q2, list.slice(0, 2).map((p: any) => p.company).sort());
-      eq((await reminders(tok)).map((x) => x.due_date), [dueDate("Friday", Date.now(), null)]);
+      // "Friday" is the person's Friday: with no zone saved the reminder goes out at 9 AM in DEFAULT_ZONE (Eastern), so the
+      // expected day is computed there. Computed in UTC it named next week's Friday from 00:00 UTC Friday until midnight
+      // Eastern, and the test failed every week in that window (trunk 2026-11-06 00:08 UTC: got 11-06, expected 11-13).
+      eq((await reminders(tok)).map((x) => x.due_date), [dueDate("Friday", Date.now(), DEFAULT_ZONE)]);
       assert(!/don't send reminder texts/i.test(r.reply) && /I'll text you/.test(r.reply), `the reply says it will be delivered: ${r.reply}`);
       assert(await tailored(tok) >= 1 && new Set(r.body.meta.planner.steps[1].detail.tailored).size === 2, JSON.stringify(r.body.meta.planner.steps[1]));
       assert(/Not done|Not started/.test(r.reply) === false, r.reply);

@@ -8086,18 +8086,26 @@ const CareerRouter = (() => {
     return { intent: "negotiation_advice", reply, resultStatus: "awaiting_user", sends: 0 };
   }
 
+  // AMBIGUOUS FIGURES (see counterFigures): nothing is saved and nothing is drafted. The result carries only structured state (no
+  // prose of its own): counterAmbiguous, awaiting, and the figures without roles. In staged mode the brain asks which figure is the new
+  // offer (counter_ambiguous_figures); without the brain the turn takes the ordinary negotiation-advice path, with no draft.
   function handleNegotiation(text, ctx) {
-    const provGate = inheritedOfferGate(text, ctx);
-    if (provGate) return provGate;
-    // AMBIGUOUS FIGURES (see counterFigures): nothing is saved, nothing is drafted; the turn is held for the brain to ask which
-    // figure is the new offer. The recorded offer stays as it is.
     if (/\bcounter\b|\boffer\b|\bdraft\b/i.test(s(text))) {
       const hintA = offerHint(text, ctx);
       if (hintA.ambiguous) {
-        const reply = compose({ headline: "I can't tell which figure is the new offer.", facts: ["Your message names more than one pay figure, and none is stated as the employer's offer, so I have not changed the offer on record and I have not drafted anything."], nextStep: "Which figure is the employer's new offer?" });
-        return { intent: "negotiation_draft", reply, resultStatus: "awaiting_user", sends: 0, awaiting: "which_figure_is_offer", counterAmbiguous: true };
+        const figures = counterFigures(s(text), { recorded: hintA.recorded }).mentions.map((m) => ({ value: m.value, unit: m.unit }));
+        ctx._ambiguousCounter = true;
+        let res;
+        try { res = handleNegotiationCore(text, ctx); } finally { ctx._ambiguousCounter = false; }
+        if (res && typeof res === "object") { delete res.draft; delete res.strategy; res.counterAmbiguous = true; res.awaiting = "which_figure_is_offer"; res.figures = figures; res.sends = 0; }
+        return res;
       }
     }
+    return handleNegotiationCore(text, ctx);
+  }
+  function handleNegotiationCore(text, ctx) {
+    const provGate = inheritedOfferGate(text, ctx);
+    if (provGate) return provGate;
     // IB-TN-8: plumb the offer + the company file from wherever the
     // turn carries them — ctx fields, or the ask itself when it quotes
     // the offer. 128's bench/strat text carries the CIR's own source
@@ -8138,7 +8146,7 @@ const CareerRouter = (() => {
         || (/\b(draft|write|compose)\b[^.]{0,40}\b(it|that|this|the email|the letter|an email|a reply)\b/.test(tt) && !!(negotiationThreadOf(ctx).topic || negotiationThreadOf(ctx).amount || negotiationThreadOf(ctx).firm))
         // PR-4: "counter at $27/hour" on a thread that holds an hourly offer names the ask: the email is the deliverable.
         || (!/^\s*(?:what|how|why|when|who|which|explain|tell me|define)\b|\?|\bshould\b|\bis it (?:ok|okay|fine|alright)\b|\bwould\b|\bcould\b|\bdo you think\b|\bcan i\b|\bwhether\b/.test(tt) && /\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d{1,3}(?:\.\d{1,2})?(?![\d,]|\s?k\b)(?:\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour))?(?!\s*(?:per|a|an|\/)\s*(?:week|wk|month|mo|year|yr))/.test(tt) && !!(negotiationThreadOf(ctx).hourly || (ctx.offer && ctx.offer.hourly_rate) || (() => { const f = parseOfferFigures(text); return f.askHourly != null && (f.offerHourly != null || f.unknownHourly != null); })()));
-      if (wantsDraftText && Negotiation) {
+      if (wantsDraftText && Negotiation && !ctx._ambiguousCounter) {
         const thread = negotiationThreadOf(ctx);
         let offerObj = null;
         if (offerText && Negotiation.parseOffer) { try { offerObj = Negotiation.parseOffer(offerText, {}); } catch { offerObj = null; } }

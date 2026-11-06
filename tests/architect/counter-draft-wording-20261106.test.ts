@@ -6,7 +6,7 @@
 import assertNode from "node:assert/strict";
 import * as core from "../../supabase/functions/_shared/router_core.career.js";
 import { CareerHost } from "../../supabase/functions/_shared/career_host.js";
-import { stagedDecision, counterAmbiguousAsk } from "../../supabase/functions/agent-chat/career_staged.ts";
+import { stagedDecision, counterAmbiguousAsk, routerAnswerBlock } from "../../supabase/functions/agent-chat/career_staged.ts";
 const STAGED = { get: (k: string) => (k === "CAREER_BRAIN" ? "staged" : undefined) };
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -540,12 +540,18 @@ Deno.test("CDW ambiguous figures (current-job phrase, two pay figures, no offer 
     const r = host.runTurn(msg, ctx);
     assert(!r.result?.draft, `${msg}: drafted`);
     eq(r.result?.sends ?? 0, 0);
+    // structured state only: the branch writes no reply prose of its own (the advice path's reply is the fallback), no draft, no save
+    eq([r.result.counterAmbiguous, r.result.awaiting, Array.isArray(r.result.figures)], [true, "which_figure_is_offer", true], msg);
+    assert(r.result.figures.every((f: any) => Object.keys(f).sort().join() === "unit,value"), "figures carry no roles");
+    assert(!/can't tell which figure|Which figure is the employer's new offer/i.test(String(r.result.reply ?? "")), `${msg}: canned clarification prose`);
     assert(counterAmbiguousAsk(r.intent, r.result), `${msg}: ${r.intent}`);
     eq([recorded(ctx).hourly, recorded(ctx).counter, recorded(ctx).offerRate ?? 24], [24, null, 24], msg);
     const ctx2 = fresh();
     host.runTurn(OFFER, ctx2);
     const d = stagedDecision({ env: STAGED, message: msg, ctx: ctx2, host, structured: false });
     eq([d.brain, d.reason], [true, "counter_ambiguous_figures"], msg);
+    assert(Array.isArray(d.ambiguousFigures) && d.ambiguousFigures.length >= 2, `${msg}: the figures reach the brain`);
+    assert(routerAnswerBlock(d).includes("ambiguous_figures") && routerAnswerBlock(d).includes('"value"'), msg);
   }
   // not ambiguous: an explicit offer word, or current pay with no competing employer figure
   const ok = (msg: string, offer: number, ask: number) => {

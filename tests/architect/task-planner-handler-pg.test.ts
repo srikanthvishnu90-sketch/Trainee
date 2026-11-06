@@ -23,10 +23,17 @@ import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, supabaseParity } from "../flow/handler.ts";
 import { calls, clearOracle, fakeAnthropic, setOracle } from "../../evals/career/tasks/fake_model.ts";
-import { dueDate } from "../../supabase/functions/_shared/task/plan.ts";
+import { dueDate, localDate } from "../../supabase/functions/_shared/task/plan.ts";
 import { DEFAULT_ZONE } from "../../supabase/functions/_shared/career_alerts.ts";
 import { brainMode } from "../../supabase/functions/agent-chat/career_staged.ts";
 
+// The day "remind me Friday" names for a person with no saved zone: 9 AM Friday in DEFAULT_ZONE, today if that is still
+// ahead, else the next Friday (dueDate's "a weekday said on that weekday is the next one").
+function personsFriday(now: number): string {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: DEFAULT_ZONE, weekday: "short", hour: "numeric", hourCycle: "h23" })
+    .formatToParts(new Date(now)).map((p) => [p.type, p.value]));
+  return parts.weekday === "Fri" && Number(parts.hour) < 9 ? localDate(now, DEFAULT_ZONE) : dueDate("Friday", now, DEFAULT_ZONE)!;
+}
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 const CI = Deno.env.get("CI") === "true";
@@ -125,10 +132,11 @@ Deno.test({ name: "TASK PLANNER: compound asks complete at the real handler, thr
       // the two queued are the two the search listed first (the thread's own list, code's record)
       const list = JSON.parse(await sql(`select (state->'career'->'stores'->'discovery'->'lastShortlist')::text from public.agent_flow_state where user_id = '${people[tok]}' order by updated_at desc limit 1`));
       eq(q2, list.slice(0, 2).map((p: any) => p.company).sort());
-      // "Friday" is the person's Friday: with no zone saved the reminder goes out at 9 AM in DEFAULT_ZONE (Eastern), so the
-      // expected day is computed there. Computed in UTC it named next week's Friday from 00:00 UTC Friday until midnight
-      // Eastern, and the test failed every week in that window (trunk 2026-11-06 00:08 UTC: got 11-06, expected 11-13).
-      eq((await reminders(tok)).map((x) => x.due_date), [dueDate("Friday", Date.now(), DEFAULT_ZONE)]);
+      // "Friday" is the person's Friday: with no zone saved the reminder goes out at 9 AM on Friday in DEFAULT_ZONE (Eastern):
+      // this Friday until its 9 AM has passed there, otherwise next Friday. Computed in UTC, the expectation named next
+      // week's Friday from 00:00 UTC Friday to 09:00 Eastern and the test failed every week in that window (trunk
+      // 2026-11-06 00:08 UTC: got 11-06, expected 11-13).
+      eq((await reminders(tok)).map((x) => x.due_date), [personsFriday(Date.now())]);
       assert(!/don't send reminder texts/i.test(r.reply) && /I'll text you/.test(r.reply), `the reply says it will be delivered: ${r.reply}`);
       assert(await tailored(tok) >= 1 && new Set(r.body.meta.planner.steps[1].detail.tailored).size === 2, JSON.stringify(r.body.meta.planner.steps[1]));
       assert(/Not done|Not started/.test(r.reply) === false, r.reply);

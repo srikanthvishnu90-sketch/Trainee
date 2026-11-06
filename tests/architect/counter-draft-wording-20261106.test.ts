@@ -623,6 +623,19 @@ Deno.test("CDW an offer figure in the same clause as the ask is the offer; the o
   // The employer named after the market decides its own figure; an offer followed by a market remark is still the offer.
   offerIs(OFFER, "The market is $28/hour but they offered $26/hour, draft a counter at $30/hour", 26, 30);
   offerIs(OFFER, "They offered $26/hour which is below market. Draft a counter at $30/hour", 26, 30);
+  // A third party is the source only as the subject of the offer word (review of 9b394f8e): naming the employer first keeps
+  // the figure the employer's, and a market-only figure is never promoted back by the explicit-hourly rule.
+  for (const prior of [OFFER, null]) {
+    offerIs(prior, "They offer the market rate of $26/hour. Draft a counter at $30/hour", 26, 30);
+    offerIs(prior, "The company's average offer is $26/hour. Draft a counter at $30/hour", 26, 30);
+    offerIs(prior, "The recruiter said the market is tight and offered $26/hour. Draft a counter at $30/hour", 26, 30);
+    offerIs(prior, "Given the industry average, Acme offered $26/hour. Draft a counter at $30/hour", 26, 30);
+    offerIs(prior, "They're matching the industry standard $26/hour offer. Draft a counter at $30/hour", 26, 30);
+  }
+  offerIs(OFFER, "They offered $26/hour while competitors offer $28/hour. Draft a counter at $30/hour", 26, 30);
+  for (const msg of ["Competitors offer $28/hour.", "Others offer $28/hour.", "The median offer is $28/hour.", "The industry offers $28/hour.", "Payscale says the average pay is $28/hour."]) {
+    keep(`${msg} Draft a counter at $30/hour`, 30);
+  }
 });
 
 // The same shape at scale: 5 asks x 6 offer phrasings x 2 orders x 3 market remarks x 3 figure sets x (offer on record or not)

@@ -40689,6 +40689,23 @@ const CareerRouter = (() => {
     // CURRENT-PAY cues: the text must say it is THEIR pay. A bare "now" / "right now" is a timing word, never a cue.
     const current = /\b(?:i\s+(?:(?:now|currently)\s+)?(?:make|earn|get\s+paid|am\s+paid)|i['\u2019]m\s+(?:paid|at)|currently\s+(?:(?:make|earn|paid|get|at)\b|\$)|(?:my|the)\s+(?:current|present)\s+(?:\w+\s+)?(?:pay|pays|rate|wage|job\s+pays)|current\s+(?:pay|rate|wage)|(?:my\s+(?:job|work|employer)|they)\s+(?:(?:now|currently)\s+)?pays?\s+me|(?:currently|now)\s+pays?\s+me|my\s+(?:job|work|employer)\s+(?:(?:now|currently)\s+)?pays?)\b/ig;
     const lastIdx = (re, str) => { let i = -1, mm; re.lastIndex = 0; while ((mm = re.exec(str))) i = mm.index; return i; };
+    // A third party (the market, a salary site, other employers) is the source of a figure only when it is the subject of the
+    // offer or pay word: it comes before the word, within a few words, with no comma or money figure between, and no word
+    // naming this employer anywhere before it ("the market offers $28", "competitors offer $28", "glassdoor says others are
+    // paying $28", "the median offer is $28"). "They offer the market rate of $26", "the company's average offer is $26" and
+    // "the recruiter said the market is tight and offered $26" name the employer: their figure is the employer's.
+    const THIRD_PARTY = /\b(?:market|glassdoor|levels(?:\.fyi)?|salary\.com|payscale|indeed|average|median|typical|others|other\s+(?:companies|employers|firms|places|roles)|competitors?|similar\s+roles?|industry)\b/ig;
+    const OWN_EMPLOYER = /\b(?:they|their|them|company|employer|recruiter|firm|hiring\s+manager|hr|we|us)\b/ig;
+    const thirdPartySays = (text, cueIdx) => {
+      if (cueIdx < 0) return false;
+      const pre = text.slice(0, cueIdx), t = lastIdx(THIRD_PARTY, pre);
+      if (t < 0) return false;
+      // the employer named in an earlier thought ("the $26/hour they offered even though the market offers $28") does not count
+      const lj = lastIdx(/,|\b(?:even\s+though|although|though|but|while|whereas|and|plus|since|because)\b/ig, pre.slice(0, t));
+      if (lastIdx(OWN_EMPLOYER, pre.slice(Math.max(lj, 0))) >= 0) return false;
+      const gap = pre.slice(t);
+      return !/[,$]/.test(gap) && gap.trim().split(/\s+/).length <= 5;
+    };
     // A unit/purpose word attaches to a figure only as its adjacent noun phrase ("$500 relocation allowance", "$2,000 signing bonus")
     // or as "<noun> of $X"; a later word in the sentence, a connector, or a negation ("with no relocation allowance") never does.
     const NOUN = "relocation|moving|signing|sign-on|bonus|allowance|stipend|equity|stock|shares|reimbursement|budget|salary|annual|yearly|days?|equipment|training|tuition|commute|parking|childcare|travel";
@@ -40742,13 +40759,13 @@ const CareerRouter = (() => {
       const trailingCurrent = /^[^.?!;,\n]{0,24}?\b(?:at\s+my\s+(?:current\s+|present\s+)?(?:job|employer|company|role)|(?:in|from)\s+my\s+(?:current|present)\b|where\s+i\s+work(?:\s+now)?)\b/i.test(after.split("$")[0]); // the scan stops at the next money figure
       // an explicit ask cue or an employer offer cue on the figure always beats a current-pay cue
       let role = (ci >= 0 && ci >= ui && ci >= ei) || (trailingCurrent && ui < 0 && lastIdx(/\b(?:offer(?:ed|ing|s)?|proposed|came\s+back|quoted|countered|comes\s+to)\b/ig, seg) < 0) ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
-      // An offer or pay word whose subject is the market, a salary site or other employers ("the market offers $28/hour",
-      // "glassdoor says others are paying $28") is a market figure, never this employer's offer: unless the employer is named
-      // after that third party ("the market is $28 but they offered $26" is decided by $26's own words).
-      if (role === "employer") {
-        const third = lastIdx(/\b(?:market|glassdoor|levels(?:\.fyi)?|salary\.com|payscale|indeed|average|median|typical|others|other\s+(?:companies|employers|firms|places|roles)|competitors?|similar\s+roles?|industry)\b/ig, seg);
-        const own = lastIdx(/\b(?:they|their|them|company|employer|recruiter|firm|hiring\s+manager|hr)\b/ig, seg);
-        if (third >= 0 && third > own) role = "unknown";
+      // An offer or pay word whose subject is a third party (thirdPartySays) is a market figure, never this employer's offer.
+      if (role === "employer" && ei >= 0 && thirdPartySays(seg, ei)) role = "unknown";
+      // The offer word belongs to an earlier figure when a comma and a third party follow it ("their $26/hour offer, the market
+      // average is $28/hour"): this figure is the third party's, unless the employer is named again after the comma.
+      if (role === "employer" && ei >= 0) {
+        const post = seg.slice(ei), cut = post.lastIndexOf(",");
+        if (cut >= 0 && lastIdx(THIRD_PARTY, post.slice(cut)) >= 0 && lastIdx(OWN_EMPLOYER, post.slice(cut)) < 0) role = "unknown";
       }
       // An ask cue carries across "and" / "plus" / "," inside the same clause ("ask for $500 relocation and $28 an hour").
       if (role === "unknown" && prevRole === "ask" && !/[.?!;\n]/.test(src.slice(prevEnd, start)) && /(?:\band\b|\bplus\b|&|,)\s*$/i.test(seg)) role = "ask";
@@ -40769,7 +40786,8 @@ const CareerRouter = (() => {
         const tail = rest.slice(mm[0].length);
         const stop = [tail.search(/\$\s?\d/), tail.search(/\b(?:even\s+though|although|though|but|while|whereas|and|plus|since|because)\b/i)].filter((i) => i >= 0);
         const cs = left + (stop.length ? rest.slice(0, mm[0].length + Math.min(...stop)) : rest);
-        if ((/\boffer(?:ed|ing|s)?\b/i.test(cs.replace(/counter[ -]?offers?/ig, "")) || (hint && hint.offerSentence)) && lastIdx(user, cs) < 0 && lastIdx(current, cs) < 0 && !/\b(?:market|glassdoor|average|typical|range|says|salary\.com|levels)\b/i.test(cs)) role = "employer";
+        if ((/\boffer(?:ed|ing|s)?\b/i.test(cs.replace(/counter[ -]?offers?/ig, "")) || (hint && hint.offerSentence)) && lastIdx(user, cs) < 0 && lastIdx(current, cs) < 0 && !/\b(?:market|glassdoor|average|typical|range|says|salary\.com|levels)\b/i.test(cs) &&
+          !thirdPartySays(cs, cs.replace(/counter[ -]?offers?/ig, (x) => " ".repeat(x.length)).search(/\boffer(?:ed|ing|s)?\b/i))) role = "employer";
       }
       prevRole = role;
       out.mentions.push({ value: v, unit, role });

@@ -238,6 +238,14 @@ Deno.test("CDW a purpose amount is never the hourly ask ('for relocation', no 'f
     assert(!/\$(?:500|5,?000|900) an hour/.test(host.runTurn("Draft the counter email.", ctx).result.draft.body), msg);
   }
 });
+Deno.test("CDW an explicit ask always beats an unlabelled earlier figure", () => {
+  for (const [msg, ask] of [["$26/hour was the earlier number; draft the counter at $30", 30], ["$26/hour was mentioned earlier, counter at $30/hour", 30]] as Array<[string, number]>) {
+    const ctx = fresh();
+    host.runTurn(OFFER, ctx);
+    step(ctx, msg, 24, ask);
+    step(ctx, "Draft the counter email.", 24, ask);
+  }
+});
 Deno.test("CDW the C04 message verbatim still blanks the ask and keeps the offer", () => {
   const C04 = "Fictional beta scenario, not my profile. Jordan Lee has two years of retail customer-service experience and Excel skills. No external actions and no changes to my profile. A customer support job offered Jordan $24/hour, with no other terms provided. Should Jordan counter, and how? Draft a short counter email for review only. Separate advice from unverified market claims.";
   const ctx = fresh();

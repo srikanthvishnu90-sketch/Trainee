@@ -3871,7 +3871,7 @@ const CareerRouter = (() => {
     {
       const cf = counterFigures(work, hint);
       if (hint && hint.draft && cf.unknown != null) {
-        if (hint.recorded != null) { if (Number(cf.unknown) !== Number(hint.recorded) && cf.ask == null) cf.ask = cf.unknown; cf.unknown = null; }
+        if (hint.recorded != null) { if (Number(cf.unknown) !== Number(hint.recorded) && cf.ask == null && cf.askBare == null) cf.ask = cf.unknown; cf.unknown = null; }
       }
       out.recHourly = cf.offer != null ? cf.offer : (cf.ask == null && cf.askBare == null && cf.current == null && !(hint && (hint.draft || hint.recorded != null)) ? cf.unknown : null);
       out.askHourly = cf.ask; out.offerHourly = cf.offer; out.reportedHourly = cf.offer; out.unknownHourly = cf.unknown; out.askBare = cf.askBare;

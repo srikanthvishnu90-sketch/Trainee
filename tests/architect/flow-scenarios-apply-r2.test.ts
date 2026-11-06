@@ -80,7 +80,16 @@ Deno.test({
           const name = `#${c.n} ${c.twist}/${c.after}`;
           const prep = await prepare({ url: c.posting, factsPath: w.factsPath, resumePath: w.resumePath, account: { epoch: 0, version: 0 }, now: Date.now(), runEngine: engine });
           bump("A");
-          if (!prep.ready) { bump("A_not_ready"); if (c.twist === "none") fail(`A ${name}: a plain form was not prepared: ${JSON.stringify(prep.result).slice(0, 200)}`); continue; }
+          if (!prep.ready) {
+            bump("A_not_ready");
+            // Discovery is read-only (docs/architect/DISCOVERY-DEFAULT-DENY-2026-10-24.md): a form with a step before its last page
+            // is not prepared before the approval; it stops, named, with nothing typed, clicked or sent. A single-page form is
+            // never stopped this way, so a plain one must still be prepared.
+            const multiStep = c.pages > 1 && (prep.result as any)?.reason === "MULTI_STEP_NEEDS_APPROVAL";
+            if (multiStep) { bump("A_multi_step_stopped"); if (w.posts.length !== 0) fail(`A ${name}: a multi-step form was stopped but ${w.posts.length} bodies reached the employer`); continue; }
+            if (c.twist === "none") fail(`A ${name}: a plain form was not prepared: ${JSON.stringify(prep.result).slice(0, 200)}`);
+            continue;
+          }
           const payload: any = prep.payload;
           const q = await enqueue(pg, payload);
           if (q !== "queued") { fail(`A ${name}: the approval was not queued: ${q}`); continue; }

@@ -12,6 +12,8 @@
 //   "Also sent, set by the employer's page, unchanged: <names>" when the payload names page fields
 //   "The page runs a verification check (<kinds>); its token carries none of your answers" when there is one
 //   "Sends to <destination>"
+//   when the payload says it was prepared read-only (payload.preparation, the discovery boundary): PLANNED_CARD_LINE, then
+//     one lookup line per entry of preparation.lookups (a hidden-companion field the page fills only after the yes)
 //   "Cover note: <payload.cover_note.text>" when the payload carries a cover note
 // What the server cannot check: which option code of a select stands for the answer shown (only the page knows); the
 // shown text is held to the person's own answer for that field, never free text.
@@ -25,6 +27,11 @@ export function resumeCardLine(filename: string, sha256: string, tag?: ResumeTag
     ? `Resume: ${tag.persona ?? "your base resume"}, tailored for this role (${sha256.slice(0, 12)})`
     : `Resume: ${filename} (${sha256.slice(0, 12)})`;
 }
+// A read-only preparation says on the card that the form has not been filled (docs/architect/DISCOVERY-DEFAULT-DENY-2026-10-24.md).
+export const PLANNED_CARD_LINE =
+  "Planned from your answers; the form is not filled yet. It is filled and every answer checked on the form only after you say yes. If the form then differs or asks something this card does not show, nothing is sent and you are asked.";
+export const lookupCardLine = (label: string) => `${label}: the employer's own suggestion for it is picked only after you say yes; if none matches, nothing is sent.`;
+const LOOKUP_LINE_END = ": the employer's own suggestion for it is picked only after you say yes; if none matches, nothing is sent.";
 const VERIFY = /^The page runs a verification check \(([a-z0-9 ,._-]{1,120})\); its token carries none of your answers$/i;
 const norm = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
 const BOOL_ON = new Set(["true", "on", "1", "yes", "checked"]);
@@ -64,6 +71,14 @@ export function preparedCardProblem(payload: any, lines: unknown, kept: { filena
   if (pageFields.length && next() !== `Also sent, set by the employer's page, unchanged: ${pageFields.join(", ")}`) return "the card leaves out what the page sets";
   if (L[i] !== undefined && VERIFY.test(L[i])) i++;
   if (next() !== `Sends to ${String(payload.destination ?? "")}`) return "the card does not say where it is sent";
+  if (payload.preparation && typeof payload.preparation === "object") {
+    if (next() !== PLANNED_CARD_LINE) return "the card does not say the form is planned, not filled";
+    const lookups = Array.isArray(payload.preparation.lookups) ? payload.preparation.lookups.length : 0;
+    for (let k = 0; k < lookups; k++) {
+      const line = next();
+      if (typeof line !== "string" || !line.endsWith(LOOKUP_LINE_END) || line.length === LOOKUP_LINE_END.length) return "the card leaves out a field the page fills only after the yes";
+    }
+  }
   const note = payload.cover_note && typeof payload.cover_note === "object" ? String(payload.cover_note.text ?? "") : "";
   if (note && next() !== `Cover note: ${note}`) return "the card's cover note is not the one sent";
   if (i !== L.length) return "the card says more than the application carries";

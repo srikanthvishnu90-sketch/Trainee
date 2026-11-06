@@ -158,6 +158,10 @@ function options(args: string[]) {
     else if (k === "--application-id" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(args[i + 1] || "")) {
       o["application-id"] = args[++i];
     }
+    // --discovery-fill: discovery fills the form, under its per-class network guards, before any approval. Local test
+    // pages only (they witness those guards). A real employer is never filled before the person approves: discovery
+    // there only reads the page (DISCOVERY-DEFAULT-DENY-2026-10-24.md, "The boundary").
+    else if (k === "--discovery-fill") o["discovery-fill"] = true;
     // --approved <hash>: the person already approved this exact application (the approval hash a dry run printed, or
     // a texted yes on its card). The run fills and reads back as always and submits without asking again only if the
     // application is still exactly the one approved; any difference stops it with nothing sent.
@@ -352,6 +356,7 @@ export async function runApply(args: string[]) {
       if (o["script-submit"] && !target.local && o["script-submit"] !== hostAllowed(u.href).atsFamily) {
         throw fail("SCRIPT_SUBMIT_FAMILY_MISMATCH");
       }
+      if (o["discovery-fill"] && (o.submit || !target.local)) throw fail("DISCOVERY_FILL_LOCAL_ONLY");
       // The loopback stand-in for Gmail is for the local test pages; a real employer's code comes from the real mailbox.
       if (o["email-code"] === "local-gmail" && !target.local) throw fail("LOCAL_GMAIL_LOCAL_ONLY");
     })(),
@@ -428,6 +433,8 @@ export async function runApply(args: string[]) {
     denied = false,
     allowSubmit = false,
     populated = false,
+    stopCount = 0,
+    navigationStopped = false,
     mutations = 0,
     postStatus = 0,
     destination = "",
@@ -484,6 +491,62 @@ export async function runApply(args: string[]) {
       run_id: runId, application_id: o["application-id"] ?? null, ...extra,
     });
   };
+  // Discovery: the stops still in progress (teardown waits for them before the page is closed).
+  const held = new Set<Promise<unknown>>();
+  const hold = (p: Promise<unknown>) => { held.add(p); return p.finally(() => held.delete(p)); };
+  // Discovery: one stopped request, by kind, origin and path only (never its query, fragment or body).
+  const discoveryStop = (req: any, kind: string) => {
+    stopCount++;
+    const list = evidence.discovery?.stopped;
+    if (!Array.isArray(list) || list.length >= 200) return;
+    let origin = "", p = "";
+    try { const x = new URL(req.url()); origin = x.origin; p = x.pathname.slice(0, 200); } catch { origin = "unparsed"; }
+    if (!list.some((s: any) => s.kind === kind && s.origin === origin && s.path === p && s.method === req.method())) {
+      list.push({ kind, method: req.method(), origin, path: p });
+    }
+  };
+  // Discovery: the page is shut where it is. Its scripts are turned off in every frame of every page (a cross-site frame
+  // runs in its own process, with its own session), the stops in progress are waited for, and then every frame's renderer
+  // is crashed (CDP Page.crash). A document the engine lets go of any other way runs on out of its reach for a moment: once
+  // DevTools leaves it (the page closing, or the browser's error page committing elsewhere), its routes, the offline
+  // switch and scripts-off go too, and what it sends then passes unrouted (dry-run-deny: a timer's request, 3 of 40 runs
+  // on 141 and 1 of 15 on 156, with scripts off and the page closed in place). A crashed renderer runs nothing: no timer,
+  // no unload handler. (The browser still sends a document's fetchLater when its renderer dies; discovery removes it.)
+  // Then the pages are closed. Returns the frames that could not be shut.
+  let shut: Promise<number> | null = null;
+  const shutPage = () => shut ??= (async () => {
+    const context = page.context();
+    let unshut = 0;
+    const sessions: any[] = [];
+    for (const p of context.pages()) {
+      for (const f of p.frames()) {
+        try {
+          const cdp = await context.newCDPSession(f === p.mainFrame() ? p : f);
+          await cdp.send("Emulation.setScriptExecutionDisabled", { value: true });
+          sessions.push(cdp);
+        } catch (e: any) {
+          // A frame in its parent's process is covered by its parent's session.
+          if (!/part of the parent frame's session/.test(String(e?.message))) unshut++;
+        }
+      }
+    }
+    // Quiet for two checks in a row (no new stop, none in progress), at most one second.
+    for (let quiet = 0, seen = -1, i = 0; quiet < 2 && i < 20; i++) {
+      await new Promise((ok) => setTimeout(ok, 50));
+      await Promise.allSettled([...held]);
+      if (stopCount === seen && !held.size) quiet++;
+      else { quiet = 0; seen = stopCount; }
+    }
+    // The crash answers with the target gone, so its error is the expected reply.
+    await Promise.all(sessions.map((cdp) =>
+      Promise.race([cdp.send("Page.crash").catch(() => {}), new Promise((ok) => setTimeout(ok, 1000))])
+    ));
+    // Then closed: a command still waiting on a crashed page fails only when the page closes.
+    for (const p of context.pages()) {
+      await Promise.race([p.close({ runBeforeUnload: false }).catch(() => {}), new Promise((ok) => setTimeout(ok, 3000))]);
+    }
+    return unshut;
+  })();
   const write = (raw: any) => {
     const result = typedCode ? JSON.parse(redactCode(JSON.stringify(raw), typedCode)) : raw;
     evidence.result = result;
@@ -531,6 +594,20 @@ export async function runApply(args: string[]) {
       if (opt) f.optionValue = opt.value;
     }
     return { ...bind(r.fields), raw: r.fields, observation: r.observation };
+  }
+  // A lookup whose typed text is not its answer: a visible field with a hidden companion that only the employer's own
+  // suggestion fills (Lever: location-input -> selectedLocation). field name -> the companion's name.
+  async function lookupCompanions(names: string[]): Promise<Record<string, string>> {
+    return await page.evaluate((names: string[]) => {
+      const d = (globalThis as any).document, out: Record<string, string> = {};
+      const hidden = Array.from(d.querySelectorAll("input[type=hidden]")).map((e: any) => String(e.name || "")).filter(Boolean);
+      for (const n of names) {
+        const low = n.toLowerCase();
+        const c = hidden.find((h: string) => [`selected${low}`, `${low}_selected`, `selected_${low}`].includes(h.toLowerCase()));
+        if (c) out[n] = c;
+      }
+      return out;
+    }, names).catch(() => ({}));
   }
   function expected(field: any, b: any) {
     if (b.inputType === "file") return artifact;
@@ -623,9 +700,87 @@ export async function runApply(args: string[]) {
   try {
     session = await helper.createSession();
     page = await session.page();
+    // Discovery (a run without --submit: preparing, and G4's prepare before the person asked) sends nothing of the person's
+    // to anyone before their approval. Default deny: from the moment the first of their values goes into the page
+    // (populated), nothing leaves the page, of any kind and to any origin: no fetch or XHR, no image, script or style, no
+    // beacon or ping, no navigation or redirect, no worker's request, no WebSocket message, nothing from a popup. Nothing
+    // is inspected for what it carries, so an encoded, shortened or transformed value is stopped the same as a plain one.
+    // Before it, the page holds nothing of theirs (a fresh browser context, service workers blocked), and reading it
+    // (loading the page, its resources, the employer's GraphQL read queries) goes on as before. What is stopped is kept in
+    // the evidence by kind, origin and path (never a query or body). An approved run (--submit) is not discovery: the
+    // person approved exactly what goes to this employer.
+    // Local fixtures only (a loopback posting): every page the route serves is answered by the engine, so Chromium does
+    // not count it as local, and its local network checks (Chromium 156) refuse the page's own loopback socket. A real
+    // employer is never loopback; nothing changes for it.
+    if (target.local) await page.context().grantPermissions(["local-network-access"]).catch(() => {});
+    const discovery = !o.submit;
+    // The boundary: before the person's approval nothing of theirs goes into the page. Discovery reads the form and
+    // plans every answer off the page; the approved run is the first to fill it. (Filled discovery is for the local
+    // test pages only, --discovery-fill.)
+    const readsOnly = discovery && !o["discovery-fill"];
+    if (discovery) {
+      evidence.discovery = { stopped: [], read_only: readsOnly };
+      // A shared worker's requests are seen by neither request routing nor the offline switch (dry-run-deny-classes caught
+      // one going out), so a discovery page cannot make one: the constructor is gone from every frame before any of the
+      // page's own scripts run. (A page that needs one does not work in discovery.) The same for fetchLater: the browser
+      // itself sends a deferred request when the page goes, past the routes and the offline switch.
+      // What a page sends while it is being unloaded passes the routes and the offline switch too (Chromium 156), and a
+      // page can unload itself without a request the routes would see (location = "about:blank"). So none of the page's
+      // own unload handlers runs: in every frame, before any of its scripts, the first listener on the window for each of
+      // these events stops the event there (a capturing listener on the window runs before every other one, an
+      // onpagehide attribute's included).
+      await page.context().addInitScript(() => {
+        for (const name of ["SharedWorker", "fetchLater"]) {
+          try { Object.defineProperty(globalThis, name, { value: undefined, configurable: false, writable: false }); } catch { /* already gone */ }
+        }
+        for (const type of ["beforeunload", "pagehide", "unload", "visibilitychange", "freeze", "pageswap"]) {
+          try { globalThis.addEventListener(type, (e: Event) => e.stopImmediatePropagation(), { capture: true }); } catch { /* not a window */ }
+        }
+      });
+      // Any other page of this context (a popup, a new tab) is not this posting: nothing it asks for goes out.
+      await page.context().route("**/*", async (route: any) => {
+        try { discoveryStop(route.request(), "popup"); } catch { /* the record is best effort */ }
+        await hold(route.abort("blockedbyclient").catch(() => {}));
+      });
+      // A socket opened before the first value stays open, but nothing the page sends on it after that goes out; a
+      // socket opened after it (its address can carry the value) is never connected.
+      await page.routeWebSocket(/.*/, (ws: any) => {
+        if (populated) {
+          discoveryStop({ url: () => ws.url(), method: () => "WS", resourceType: () => "websocket" }, "websocket");
+          ws.close();
+          return;
+        }
+        const server = ws.connectToServer();
+        ws.onMessage((m: unknown) => {
+          if (populated) { discoveryStop({ url: () => ws.url(), method: () => "WS", resourceType: () => "websocket" }, "websocket"); return; }
+          server.send(m);
+        });
+      });
+    }
     await page.route("**/*", async (route: any) => {
-      const req = route.request(),
-        url = new URL(req.url()),
+      const req = route.request();
+      // First, before anything that can throw: a request from a frame being torn down makes req.frame() throw, and a
+      // handler that throws does not stop its request (tests/architect/dry-run-deny.test.ts caught one going out). The
+      // page leaving the form while it holds the person's values (a script's navigation, a form sent by GET, a redirect)
+      // is not followed either: the browser then shows its own error page in place of the form, so the run ends, named
+      // (this posting cannot be prepared before the person approves it).
+      if (discovery && populated) {
+        let main = false;
+        try { main = req.isNavigationRequest() && req.frame() === page.mainFrame(); } catch { /* a detached frame */ }
+        try { discoveryStop(req, main ? "navigation" : String(req.resourceType())); } catch { /* the record is best effort */ }
+        if (main) {
+          // Not aborted: an aborted navigation shows the browser's error page in its own process, and the form, unloading
+          // in the old one, is out of the engine's reach while it goes (a page timer's request reached the employer in
+          // that window, about 1 run in 15, on Chromium 141). The run ends here anyway, so the page is shut where it is,
+          // as at teardown, with the navigation never let through. The command in progress fails, and the run ends, named.
+          navigationStopped = true;
+          await shutPage().catch(() => 0);
+          return;
+        }
+        await hold(route.abort("blockedbyclient").catch(() => {}));
+        return;
+      }
+      const url = new URL(req.url()),
         main = req.isNavigationRequest() && req.frame() === page.mainFrame();
       const same = url.origin === u.origin;
       const sameTenant = target.local || url.pathname.split("/").filter(Boolean)[0] === target.tenant;
@@ -974,60 +1129,100 @@ export async function runApply(args: string[]) {
         // never values).
         const contract = p.needs.filter((n) => n.why).map((n) => ({ label: n.label, why: n.why }));
         evidence.trust = trustRecord(manifest);
-        return write({ state: "not_submitted", reason: "needs_answers", posting: target.key, company: target.employer, location, fields: p.needs.map((n: any) => n.label), questions, ...(contract.length ? { contract } : {}), ...(ai_policy.length ? { ai_policy } : {}) });
+        // A question that appeared only once the form was filled (a conditional one, or a later section): the
+        // application was incomplete as prepared, and the record says so.
+        const afterFill = populated ? { after_fill: true } : {};
+        return write({ state: "not_submitted", reason: "needs_answers", posting: target.key, company: target.employer, location, fields: p.needs.map((n: any) => n.label), questions, ...afterFill, ...(contract.length ? { contract } : {}), ...(ai_policy.length ? { ai_policy } : {}) });
       }
       const fields = p.fields, before = await hashApplyPayload(current.schema);
-      for (const f of fields) {
-        populated = true;
-        const b = current.bindings[f.name];
-        if (b.inputType === "file" && classifyField(f.label, "file") !== "resume") {
-          throw fail("UNSUPPORTED_FILE_ARTIFACT: " + f.label);
+      if (readsOnly) {
+        // Read-only discovery: every answer is planned against the form as it stands, and nothing is typed, chosen,
+        // attached or clicked. A form that shows more only after something is filled or a step is taken cannot be read
+        // whole this way: it is not prepared before the person approves.
+        const controls = current.observation?.controls || [];
+        if (controls.some((c: any) => c.kind === "next")) throw fail("MULTI_STEP_NEEDS_APPROVAL");
+        if (!controls.some((c: any) => c.kind === "submit")) throw fail("FINAL_REVIEW_NOT_OBSERVED");
+        for (const f of fields) {
+          const b = current.bindings[f.name];
+          if (b.inputType === "file" && classifyField(f.label, "file") !== "resume") {
+            throw fail("UNSUPPORTED_FILE_ARTIFACT: " + f.label);
+          }
+          planned[f.name] = f;
+          values[f.name] = expected(f, b);
+          history[f.name] = b;
         }
-        if (planned[f.name] && planned[f.name].label !== f.label) throw fail("FIELD_MEANING_CHANGED: " + f.name);
-        const v = b.inputType === "file" ? artifact : b.inputType === "checkbox" ? yesish(f.value) : f.value;
-        const filled = await send({
-          type: "fill",
-          binding: b,
-          value: v,
-          ...(b.inputType === "file" ? { filePath: o.resume } : {}),
+        // What the card shows is what the answer will read as on this form (a select's own label), as planned: the
+        // approved run reads it back before the click, and a difference stops it with nothing sent.
+        evidence.readback = Object.fromEntries(fields.map((f: any) => [f.name, values[f.name]]));
+        await unconfirmed(current, planned);
+        // What this preparation is, and is not: planned against the form as it first stands, never filled or checked
+        // on it. Whether the form asks more once filled is unknown until the approved run fills it.
+        const companions = await lookupCompanions(fields.filter((f: any) => current.bindings[f.name]?.inputType === "text").map((f: any) => f.name));
+        evidence.discovery.verification = "planned_not_fill_verified";
+        evidence.discovery.completeness = "unknown_until_filled";
+        evidence.discovery.lookups = fields.filter((f: any) => companions[f.name])
+          .map((f: any) => ({ field: f.name, label: f.label, companion: companions[f.name] }));
+      } else {
+        for (const f of fields) {
+          // The first of the person's values goes into the page now. Discovery takes the whole context offline first, so
+          // even what request routing does not see (a shared worker's requests, found by dry-run-deny-classes) has no
+          // network; the routes still stop and record everything they do see.
+          if (discovery && !populated) await page.context().setOffline(true);
+          populated = true;
+          const b = current.bindings[f.name];
+          if (b.inputType === "file" && classifyField(f.label, "file") !== "resume") {
+            throw fail("UNSUPPORTED_FILE_ARTIFACT: " + f.label);
+          }
+          if (planned[f.name] && planned[f.name].label !== f.label) throw fail("FIELD_MEANING_CHANGED: " + f.name);
+          const v = b.inputType === "file" ? artifact : b.inputType === "checkbox" ? yesish(f.value) : f.value;
+          const stopsBefore = stopCount;
+          const filled = await send({
+            type: "fill",
+            binding: b,
+            value: v,
+            ...(b.inputType === "file" ? { filePath: o.resume } : {}),
+          });
+          // A field the page completes by looking up what was typed (a location or school search) cannot be filled without
+          // sending that to the employer: before the person's approval it is not sent, and the field is theirs to approve.
+          if (filled.filled !== true && discovery && stopCount > stopsBefore) throw fail("LOOKUP_NEEDS_APPROVAL: " + f.label);
+          if (filled.filled !== true) throw fail("FIELD_DID_NOT_PERSIST: " + f.label);
+          planned[f.name] = f;
+          values[f.name] = expected(f, b);
+          history[f.name] = b;
+          wire[f.name] = b.inputType === "file"
+            ? artifact
+            : b.inputType === "checkbox"
+            ? (v ? (current.raw.find((x: any) => (x.name || x.id) === f.name)?.optionValue || "on") : null)
+            : f.value;
+        }
+        current = await observe();
+        if (await hashApplyPayload(current.schema) !== before) continue;
+        for (const f of fields) history[f.name] = current.bindings[f.name];
+        const read = await send({ type: "readback", bindings: Object.values(history) });
+        evidence.readback = read.answers;
+        for (const [name, value] of Object.entries(values)) {
+          if (!matches(read.answers[name], value)) throw fail("READBACK_MISMATCH: " + name);
+        }
+        await unconfirmed(current, planned);
+        const review = await send({
+          type: "review",
+          // A field on the page now that was not there at this observation is new; an optional field the engine leaves
+          // alone on purpose (no name, id or field path) is not, or the run would loop on it until FORM_DID_NOT_SETTLE.
+          knownSelectors: [
+            ...Object.values(current.bindings).flatMap((b: any) =>
+              b.options?.length && ["radio_group", "checkbox_group"].includes(b.inputType)
+                ? b.options.map((x: any) => x.selector)
+                : [b.selector]
+            ),
+            ...current.raw.map((f: any) => f.selector),
+          ].filter(Boolean),
         });
-        if (filled.filled !== true) throw fail("FIELD_DID_NOT_PERSIST: " + f.label);
-        planned[f.name] = f;
-        values[f.name] = expected(f, b);
-        history[f.name] = b;
-        wire[f.name] = b.inputType === "file"
-          ? artifact
-          : b.inputType === "checkbox"
-          ? (v ? (current.raw.find((x: any) => (x.name || x.id) === f.name)?.optionValue || "on") : null)
-          : f.value;
+        if (denied || review.blockedNavigation) throw fail("HOST_REDIRECT_REFUSED");
+        if (review.captcha && !(o.handoff && await handOff())) return write({ state: "needs_user", reason: "captcha" });
+        if (review.code) throw fail(review.code);
+        if (review.advanced || review.needsFields) continue;
+        if (!review.atFinalReview) throw fail("FINAL_REVIEW_NOT_OBSERVED");
       }
-      current = await observe();
-      if (await hashApplyPayload(current.schema) !== before) continue;
-      for (const f of fields) history[f.name] = current.bindings[f.name];
-      const read = await send({ type: "readback", bindings: Object.values(history) });
-      evidence.readback = read.answers;
-      for (const [name, value] of Object.entries(values)) {
-        if (!matches(read.answers[name], value)) throw fail("READBACK_MISMATCH: " + name);
-      }
-      await unconfirmed(current, planned);
-      const review = await send({
-        type: "review",
-        // A field on the page now that was not there at this observation is new; an optional field the engine leaves
-        // alone on purpose (no name, id or field path) is not, or the run would loop on it until FORM_DID_NOT_SETTLE.
-        knownSelectors: [
-          ...Object.values(current.bindings).flatMap((b: any) =>
-            b.options?.length && ["radio_group", "checkbox_group"].includes(b.inputType)
-              ? b.options.map((x: any) => x.selector)
-              : [b.selector]
-          ),
-          ...current.raw.map((f: any) => f.selector),
-        ].filter(Boolean),
-      });
-      if (denied || review.blockedNavigation) throw fail("HOST_REDIRECT_REFUSED");
-      if (review.captcha && !(o.handoff && await handOff())) return write({ state: "needs_user", reason: "captcha" });
-      if (review.code) throw fail(review.code);
-      if (review.advanced || review.needsFields) continue;
-      if (!review.atFinalReview) throw fail("FINAL_REVIEW_NOT_OBSERVED");
       if (
         !Object.values(values).some((v: any) =>
           v && typeof v === "object" && v.filename === artifact.filename && v.sha256 === artifact.sha256
@@ -1132,6 +1327,16 @@ export async function runApply(args: string[]) {
       }
       const verified = await send({ type: "verify_payload", bindings: Object.values(history), payload: values });
       if (!verified.matches) throw fail("PAYLOAD_CHANGED_BEFORE_CLICK");
+      // A lookup whose typed text persisted while its hidden companion stayed empty was never resolved by the
+      // employer's own suggestion: it is not sent so.
+      const companions = await lookupCompanions(Object.keys(planned).filter((n) => history[n]?.inputType === "text"));
+      for (const [name, companion] of Object.entries(companions)) {
+        const set = await page.evaluate((c: string) => {
+          const e = (globalThis as any).document.querySelector(`input[type=hidden][name="${c.replace(/"/g, "")}"]`);
+          return !!e && String(e.value || "").trim() !== "";
+        }, companion).catch(() => false);
+        if (!set) throw fail("LOOKUP_UNRESOLVED: " + (planned[name]?.label || name));
+      }
       store.withLock(ownerLock, () => {
         const prior = store.get(id);
         if (prior && prior.state !== "not_sent") throw fail("duplicate_job");
@@ -1400,7 +1605,8 @@ export async function runApply(args: string[]) {
     // Fenced and nothing left the browser (the one POST was refused or never made): not sent, and the posting may be
     // tried again. Fenced and the POST went out: unknown until the employer's record says otherwise; never resent.
     const sent = fenced && mutations > 0;
-    const notSentReason = evidence.transport_rejection || (denied ? "HOST_REDIRECT_REFUSED" : e.code || "DRIVER_ERROR");
+    const notSentReason = evidence.transport_rejection ||
+      (denied ? "HOST_REDIRECT_REFUSED" : navigationStopped ? "DISCOVERY_NAVIGATION_STOPPED" : e.code || "DRIVER_ERROR");
     const result = {
       state: sent ? "unknown_outcome" : "not_submitted",
       reason: sent ? "READBACK_REQUIRED" : notSentReason,
@@ -1417,6 +1623,19 @@ export async function runApply(args: string[]) {
     }
     return write(result);
   } finally {
+    // Discovery: the page is shut down before the session is, and nothing of it runs while it goes. Leaving or closing a
+    // page runs its pagehide, unload and visibilitychange handlers, in the page and in every frame, and what they send
+    // then (a beacon, a keepalive fetch) passes the routes and the offline switch: the employer received them on Chromium
+    // 156 (coordinator, at 1bd25593), and a cross-site frame's on Chromium 141 too (dry-run-deny-classes). So, with the
+    // routes and the offline switch kept in place, the page is shut (shutPage: scripts off, the stops in progress
+    // waited for, every renderer crashed, then closed), never navigated away.
+    // (Read-only discovery put nothing of the person's into the page, so it closes as any session does.)
+    if (session && !o.submit && page && o["discovery-fill"]) {
+      const context = page.context();
+      await context.setOffline(true).catch(() => {});
+      const unshut = await shutPage().catch(() => 1);
+      if (unshut) console.error(`DISCOVERY_TEARDOWN: scripts not turned off in ${unshut} frame(s)`);
+    }
     if (session) await session.close().catch(() => {});
   }
 }

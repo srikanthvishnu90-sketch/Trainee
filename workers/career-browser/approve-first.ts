@@ -8,7 +8,7 @@
 // (APPROVED_APPLICATION_CHANGED, nothing sent). The outcome goes back with career_apply_finish; an engine that gave no
 // result is recorded unknown_outcome and never retried.
 import { mapQuestion } from "../../supabase/functions/_shared/question_map.ts";
-import { CARD_MARK, resumeCardLine as sharedResumeCardLine } from "../../supabase/functions/_shared/career_prepared_card.ts";
+import { CARD_MARK, lookupCardLine, PLANNED_CARD_LINE, resumeCardLine as sharedResumeCardLine } from "../../supabase/functions/_shared/career_prepared_card.ts";
 import { createRequire } from "node:module";
 import { normLabel, questionFieldType } from "../../supabase/functions/_shared/career_apply.ts";
 import { hashApplyPayload } from "../../supabase/functions/_shared/career_apply_store.ts";
@@ -26,6 +26,7 @@ export interface EngineResult {
     confirmation_id?: string | null;
     evidence_path?: string;
     fields?: string[];
+    retry_after_s?: number;
     // D-024: the engine's proof of a click (scripts/apply.ts), kept with the queue's record.
     proof?: Record<string, unknown>;
   };
@@ -117,6 +118,13 @@ export async function prepare(o: {
     ...(o.resumeTag?.tailored
       ? { resume_tailored: true, ...(o.resumeTag.persona ? { resume_persona: o.resumeTag.persona } : {}) }
       : {}),
+    // What this preparation is: planned against the form as it first stood, never filled or checked on it before the
+    // approval (the discovery boundary). The approved run fills it, reads every answer back and stops before the click
+    // on any difference; a question the form shows only once filled makes the application incomplete, never assumed.
+    ...(ev.discovery?.read_only
+      ? { preparation: { verification: "planned_not_fill_verified", completeness: "unknown_until_filled",
+        lookups: Array.isArray(ev.discovery.lookups) ? ev.discovery.lookups.map((l: any) => String(l.field)) : [] } }
+      : {}),
   };
   // What the person reads before the yes: every answer as the form itself shows it (the engine's readback, so a select
   // reads "Yes", never its internal value "1"), the resume once by name, and where it goes. Nothing on the card that the
@@ -140,6 +148,12 @@ export async function prepare(o: {
       ]
       : []),
     `Sends to ${payload.destination}`,
+    ...(payload.preparation
+      ? [
+        PLANNED_CARD_LINE,
+        ...(ev.discovery.lookups as any[]).map((l: any) => lookupCardLine(String(l.label))),
+      ]
+      : []),
   ];
   let approved_snapshot: { schema: any[]; original: typeof payload } | undefined;
   if (Array.isArray(ev.schema)) {
@@ -409,6 +423,10 @@ export async function runApproved(d: {
           // long as it asked (mass-run.ts refusal), not the default doubling.
           ...(typeof run.result.retry_after_s === "number" ? { retry_after_s: run.result.retry_after_s } : {}),
           ...(bound ? { proof } : proof ? { proof_refused: "PROOF_NOT_THIS_APPLICATION" } : {}),
+          // The form asked something more once it was filled: the application, prepared without it, was incomplete.
+          ...((run.result as any).after_fill
+            ? { incomplete: "QUESTION_APPEARED_AFTER_FILL", questions: ((run.result as any).fields ?? []).map(String).slice(0, 20) }
+            : {}),
         };
         // FEATURE 14: the pictures and the page's text go to the receipt store, never into the row's evidence (hashes only).
         if (bound && d.attach) await attachProof(job, proof, run.result.evidence_path, d.attach, confirmationText(state, run.evidence));

@@ -58,7 +58,10 @@ export async function prepareCloudCard(o: CloudCardPreparation, d: {
         now: (d.now ?? Date.now)(), runEngine: async (...args) => { dry = await d.runEngine(...args); return dry; } });
       if (!p.ready) {
         const result = dry?.result;
-        if (result?.reason !== "needs_answers") return { ready: false as const, reason: "PREPARATION_REFUSED", result: p.result };
+        // What stopped it is named, the field included (MULTI_STEP_NEEDS_APPROVAL, "LOOKUP_NEEDS_APPROVAL: Location").
+        if (result?.reason !== "needs_answers") {
+          return { ready: false as const, reason: "PREPARATION_REFUSED", stopped: String(result?.reason ?? result?.state ?? "ENGINE_NO_RESULT").slice(0, 200), result: p.result };
+        }
         const { posting, questions: q } = questionsToStore(result, { facts: manifest.answers,
           answered: new Set(input.facts.text_answers.map((row) => row.key)) });
         if (!posting) fail("ENGINE_POSTING_MISSING");

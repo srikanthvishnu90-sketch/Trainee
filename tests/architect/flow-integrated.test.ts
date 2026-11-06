@@ -120,7 +120,9 @@ Deno.test({
       await Deno.writeTextFile(factsPath, JSON.stringify(FACTS));
       await Deno.writeFile(resumePath, new TextEncoder().encode("%PDF-1.4\n% synthetic integrated-test resume\n%%EOF\n"));
       const person = pg.asPerson(PERSON);
-      const runEngine = engineRunner({ root: ROOT });
+      // The engine's own record of what it sent (its daily limit counts it) lives in this run's directory, never in a home
+      // directory that earlier runs filled.
+      const runEngine = engineRunner({ root: ROOT, extra: ["--state-dir", `${work}/engine-state`] });
       const account = (await person.rpc("career_apply_account_own")).data;
       const store = supabaseQuestionStore(restAdmin(pg));
       // The chat host records each reply with its intent; the questions read it to know they are the thread's last word.

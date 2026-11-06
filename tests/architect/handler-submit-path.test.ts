@@ -109,7 +109,12 @@ Deno.test({ name: "handler (a1): the router's reply shows each entry's words; th
   ok(yes);
   eq(await count(`select count(*) from public.career_events where user_id = '${person}' and kind = 'fact_confirmed' and detail->'upload'->>'ref' like 'agent_messages:%'`), facts.length,
     `one provenance event per entry, naming the upload: ${yes.reply}`);
-  eq(await executorFacts(person), facts.length, "the executor's facts are exactly those entries");
+  // Every entry is confirmed and evidenced (the events above). The executor gets exactly those the trust contract lets reach an
+  // employer: all but an entry flagged `unproven` (a skill no fact evidences), the projection's own denial added by 81cc8727
+  // (trust-parity.test.ts). Only skills are ever unproven here.
+  const unproven = facts.filter((f: any) => f.unproven === true);
+  assert(unproven.every((f: any) => f.kind === "skill"), "only skills are ever flagged unproven here");
+  eq(await executorFacts(person), facts.length - unproven.length, "the executor's facts are exactly those entries that are not flagged unproven");
 } });
 
 Deno.test({ name: "handler (a3): entries shown, the event write broken: nothing is confirmed and the reply says so", sanitizeResources: false, sanitizeOps: false, async fn() {

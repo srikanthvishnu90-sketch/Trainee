@@ -1,7 +1,7 @@
 # Beta failure map, 2026-11-04
 
 This map covers the 4 live beta cases (C01-C04) and the 100 offline checks (A1.1-A25.4) from the interim beta evidence
-report (release `03edad4`). Each case was replayed through the real career handler on trunk `3defbcf`, in two
+report (release `03edad4`). Each case was replayed through the real career handler on trunk `d3ac642`, in two
 account states, using `evals/career/beta-vs-instinct/`. Failures are grouped below by root cause, with counts and
 file:line locations.
 
@@ -19,11 +19,11 @@ Chicago customer-support roles, 6 remote support roles and 6 Chicago healthcare 
 stand-in served in-process, so no model call leaves the machine.
 
 
-> **Baseline.** Recorded on trunk `3defbcf` (`results/trunk-3defbcf.*`, scorecards and full records). Earlier runs on `e6696cb` and `4158a1a` gave the same records. File:line references are as of `e6696cb`; #493 (the CPU fix, merged since) shifts `handler-career.ts` and `142-career-router.js` by up to about 130 lines, so search by the function name. **Scoring rule (review of #516):** on a staged-brain record, `not_generic` and `not_mentions` are unmeasured, so a brain record is never counted as delivered. This took A18.3 and A18.4 out of "delivered", in both states.
+> **Baseline.** Recorded on trunk `d3ac642` (`results/trunk-d3ac642.*`, scorecards and full records). Earlier runs on `e6696cb`, `4158a1a` and `3defbcf` gave the same headline. **Role counter (follow-up to #516):** the role-results page is stored as an array of refs under `tg:list:<id>`, with its rows under `tg:job:<ref>`. The counter used to expect an object and read 0 roles, so it now reads the stored rows (`score.ts pageRoles`), and the relevance check reads them as page content. On trunk this changes only A9.2 seeded (0 to 6 roles; it was already delivered). File:line references are as of `e6696cb`; #493 (the CPU fix, merged since) shifts `handler-career.ts` and `142-career-router.js` by up to about 130 lines, so search by the function name. **Scoring rule (review of #516):** on a staged-brain record, `not_generic` and `not_mentions` are unmeasured, so a brain record is never counted as delivered. This took A18.3 and A18.4 out of "delivered", in both states.
 
-## Baseline (trunk `3defbcf`)
+## Baseline (trunk `d3ac642`)
 
-The full scorecards are `results/trunk-3defbcf.md` (task completion) and `results/trunk-3defbcf.opus.md` (quality).
+The full scorecards are `results/trunk-d3ac642.md` (task completion) and `results/trunk-d3ac642.opus.md` (quality).
 
 | metric | empty account | seeded account |
 |---|---|---|
@@ -68,7 +68,7 @@ Counts are failed records out of 208 (104 prompts × 2 states). One record can h
   puts this in place of the router's reply.
 - Affected: C01 (both states), A1.1 (both), A9.1 (both), A8.4 seeded, and A9.2 empty ("no posting for remote only").
   A9.4 passes but reads back "company does exist zzzsynthetic999".
-- In flight, measured: no branch fixes it. The PRE snapshot makes C01 list 5 roles, but they are "Accounting
+- In flight, measured: PR #522 (`fix/search-terms-count-F01-F03`, `d5b952a`) delivers C01, A1.1 and A9.1 in both states, and A8.4 seeded: 25.0% / 22.1%. The five original branches do not fix it. The PRE snapshot makes C01 list 5 roles, but they are "Accounting
   Assistant … remote", so the relevance check fails (FUNDAMENTAL-ISSUES F59). PRE does not touch
   `posting_constraints.ts` or `career_search_judge.ts`.
 
@@ -160,7 +160,7 @@ the person asked for is never parsed, so it is never produced.
   (`142-career-router.js:3508`).
 - With a key, the brain answers, but its tools are withheld: `queue_applications`, `set_job_alerts`, `stop_job_alerts`
   and `verify_contacts` (`career_staged.ts:296`). Nor does it have any approve, pending-approvals, batch, export or
-  File tool (observed tool list in `results/trunk-3defbcf.json`). So "show my pending approvals", "approve the second
+  File tool (observed tool list in `results/trunk-d3ac642.json`). So "show my pending approvals", "approve the second
   application", "how do I export my data" and "draft an application email" have **no code path that can complete
   them**, whoever answers.
 - Offline this can't be scored for quality. The Opus arm compares only code-answered turns.

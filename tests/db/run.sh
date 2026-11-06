@@ -303,6 +303,8 @@ if [[ -f "$BRIDGE_PATH" ]]; then
     [[ "$(basename "$file")" == 20261105180000_* ]] && continue
     # 20261106120000 (a missing account row is not paused) redefines the two candidate reads 20261101130000 and 20261102120000 define (both deferred above) and the resume functions 20261026120018 and 20261026230017 define: applied after them, below, twice, with its test.
     [[ "$(basename "$file")" == 20261106120000_* ]] && continue
+    # 20261106130000 (cloud copy recovery) redefines career_resume_put as 20261106120000 leaves it: applied right after it, below, twice.
+    [[ "$(basename "$file")" == 20261106130000_* ]] && continue
     cp "$file" "$PENDING_ROOT/supabase/migrations/"
   done
 fi
@@ -963,6 +965,9 @@ echo "== trainee_file_signin_limits.test.sql (texts and tries capped per account
 # Redefines both reads (so it follows 20261102120000) and gives every profile the account row (backfill + career_account_row_ensure). Twice (idempotent); its test is tests/architect/prepare-candidates-missing-account-row.test.ts.
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261106120000_career_apply_candidates_missing_account_row.sql"
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261106120000_career_apply_candidates_missing_account_row.sql"
+# 20261106130000: the same-hash resume re-upload repairs a missing cloud copy; one-time recovery of the copies the account-row gap left missing. Twice (idempotent); its test is tests/architect/resume-cloud-copy-recovery.test.ts.
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261106130000_career_resume_cloud_copy_recovery.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261106130000_career_resume_cloud_copy_recovery.sql"
 # 20261102130000: the preparation claim in turns per person (replaces 20261026230017's oldest-first body, which career_cloud_hosted_apply.test.sql
 # above tested as it was). Twice (idempotent), then its test; the rollback is applied and the oldest-first body is proven back, then re-applied.
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102130000_career_apply_prepare_fair_claim.sql"

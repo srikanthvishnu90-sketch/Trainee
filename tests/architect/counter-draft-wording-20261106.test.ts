@@ -665,6 +665,26 @@ Deno.test("CDW an offer figure in the same clause as the ask is the offer; the o
   keep("Looking at the market average, employers offer $28/hour. Draft a counter at $30/hour", 30);
   keep("Employers offer $28/hour. Draft a counter at $30/hour", 30);
   keep("Other places pay $28/hour. Draft a counter at $30/hour", 30);
+  // Greptile on 32c35b74: a longer description between an earlier figure and its offer word, and a pasted employer reply in
+  // the first person ("we have a market-rate offer of $26/hour").
+  offerIs(OFFER, "Their $26/hour starting customer support role offer, the market average is $28/hour. Draft a counter at $30/hour", 26, 30);
+  offerIs(OFFER, "Their $26/hour offer and the market pays $28/hour. Draft a counter at $30/hour", 26, 30);
+  for (const prior of [OFFER, null]) {
+    offerIs(prior, "We have a market-rate offer of $26/hour. Draft a counter at $30/hour", 26, 30);
+    offerIs(prior, "We are offering $26/hour. Draft a counter at $30/hour", 26, 30);
+  }
+  // The offer word itself decides (review of ca432b99): a market word in front of the NOUN describes the employer's offer; a
+  // third party is the source only as the subject of the VERB, or as a statistical word right before the noun.
+  for (const prior of [OFFER, null]) {
+    offerIs(prior, "They said the market-rate offer is $26/hour. Draft a counter at $30/hour", 26, 30);
+    offerIs(prior, "The recruiter said an industry-standard offer of $26/hour. Draft a counter at $30/hour", 26, 30);
+    offerIs(prior, "HR told me the market-adjusted offer is $26/hour. Draft a counter at $30/hour", 26, 30);
+    offerIs(prior, "They said market conditions forced an offer of $26/hour. Draft a counter at $30/hour", 26, 30);
+    offerIs(prior, "The recruiter said companies like ours offer $26/hour. Draft a counter at $30/hour", 26, 30);
+    offerIs(prior, "They said their market offer is $26/hour. Draft a counter at $30/hour", 26, 30);
+  }
+  keep("Most places near the market median offer $28/hour. Draft a counter at $30/hour", 30);
+  keep("At the market level, typical offers are $28/hour. Draft a counter at $30/hour", 30);
   for (const msg of ["Competitors offer $28/hour.", "Others offer $28/hour.", "The median offer is $28/hour.", "The industry offers $28/hour.", "Payscale says the average pay is $28/hour."]) {
     keep(`${msg} Draft a counter at $30/hour`, 30);
   }
@@ -690,5 +710,43 @@ Deno.test("CDW same-clause battery: ask, offer and a market figure in one messag
     if (rec.hourly !== O || rec.counter !== A || !body.includes(`Thank you for the offer — $${O} an hour`) || (r.result?.sends ?? 0) !== 0) wrong.push(`${prior ? "P" : "-"} ${msg} => offer ${rec.hourly}, ask ${rec.counter}`);
   }
   eq(total, 1080);
+  eq(wrong.slice(0, 10), [], `${wrong.length} wrong`);
+});
+
+// Who a figure belongs to, at scale: 5 reporting prefixes x 3 asks x (18 employer phrasings that must become the offer + 13
+// third-party phrasings that must never replace it) = 465 turns (review rounds on #557; 150 were wrong at 1419359c).
+Deno.test("CDW attribution battery: the employer's figure becomes the offer, a third party's never does, 465 turns", () => {
+  const reporters = ["", "they said ", "the recruiter told me ", "HR mentioned that ", "I heard "];
+  // employer's own figure: must become the offer (26)
+  const employer = [
+    "they offered $X/hour", "the company offered $X/hour", "the recruiter offered $X/hour", "they are offering $X/hour", "we are offering $X/hour",
+    "they came back with $X/hour", "their offer is $X/hour", "the offer is $X/hour", "they offered a market-rate $X/hour", "they offered a below market $X/hour",
+    "they made a market-rate offer of $X/hour", "their industry-standard offer is $X/hour", "the market-adjusted offer is $X/hour", "they offer the market rate of $X/hour",
+    "we have a market-rate offer of $X/hour", "the company's average offer is $X/hour", "their offer, at the market rate, is $X/hour", "companies like ours offer $X/hour",
+  ];
+  // third party's figure: must never become the offer (recorded 24 stays)
+  const third = [
+    "the market offers $X/hour", "the market pays $X/hour", "competitors offer $X/hour", "others are paying $X/hour", "employers offer $X/hour", "most places offer $X/hour",
+    "the industry pays $X/hour", "glassdoor says others pay $X/hour", "the median offer is $X/hour", "the average pay is $X/hour", "typical offers are $X/hour",
+    "other companies pay $X/hour", "competitors are now offering $X/hour",
+  ];
+  const asks = [". Draft a counter at $30/hour", ", draft a counter at $30/hour", ". Write the counter at $30 an hour"];
+  let total = 0;
+  const wrong: string[] = [];
+  for (const r of reporters) for (const a of asks) {
+    for (const e of employer) {
+      const msg = (r + e).replace("$X", "$26") + a; const m = msg[0].toUpperCase() + msg.slice(1);
+      const ctx = fresh(); host.runTurn("They offered me $24/hour for the warehouse job.", ctx); const res = host.runTurn(m, ctx); total++;
+      const th = ctx.negotiationThread ?? {};
+      if (th.hourly !== 26 || th.counter?.hourly !== 30 || (res?.result?.sends ?? 0) !== 0) wrong.push(`EMP ${m} => offer=${th.hourly} counter=${th.counter?.hourly}`);
+    }
+    for (const t of third) {
+      const msg = (r + t).replace("$X", "$28") + a; const m = msg[0].toUpperCase() + msg.slice(1);
+      const ctx = fresh(); host.runTurn("They offered me $24/hour for the warehouse job.", ctx); const res = host.runTurn(m, ctx); total++;
+      const th = ctx.negotiationThread ?? {};
+      if (th.hourly !== 24 || th.counter?.hourly !== 30 || (res?.result?.sends ?? 0) !== 0) wrong.push(`3RD ${m} => offer=${th.hourly} counter=${th.counter?.hourly}`);
+    }
+  }
+  eq(total, 465);
   eq(wrong.slice(0, 10), [], `${wrong.length} wrong`);
 });

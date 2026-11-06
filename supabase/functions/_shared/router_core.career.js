@@ -16007,18 +16007,27 @@ const CareerRouter = (() => {
     const current = /\b(?:i\s+(?:(?:now|currently)\s+)?(?:make|earn|get\s+paid|am\s+paid)|i['\u2019]m\s+(?:paid|at)|currently\s+(?:(?:make|earn|paid|get|at)\b|\$)|(?:my|the)\s+(?:current|present)\s+(?:\w+\s+)?(?:pay|pays|rate|wage|job\s+pays)|current\s+(?:pay|rate|wage)|(?:my\s+(?:job|work|employer)|they)\s+(?:(?:now|currently)\s+)?pays?\s+me|(?:currently|now)\s+pays?\s+me|my\s+(?:job|work|employer)\s+(?:(?:now|currently)\s+)?pays?)\b/ig;
     const lastIdx = (re, str) => { let i = -1, mm; re.lastIndex = 0; while ((mm = re.exec(str))) i = mm.index; return i; };
     const THIRD_PARTY = /\b(?:market|glassdoor|levels(?:\.fyi)?|salary\.com|payscale|indeed|average|median|typical|others|other\s+(?:companies|employers|firms|places|roles)|competitors?|similar\s+roles?|industry|(?<!\b(?:the|this|that|my|their|our|its)\s+)(?:employers|companies|places|firms))\b/ig;
-    const OWN_EMPLOYER = /\b(?:they|their|them|company|employer|recruiter|firm|hiring\s+manager|hr)\b/ig;
-    const COMPARISON = /\b(?:below|above|under|over|at|near|beneath|beyond|than|vs\.?|versus)[\s-]+(?:the\s+)?(?:market|average|median|typical|industry)(?:[\s-]+(?:rate|range|pay|average|standard|level))?\b/ig;
+    const OWN_EMPLOYER = /\b(?:they|their|them|company|employer|recruiter|firm|hiring\s+manager|hr|we(?=\s+(?:have|are|can|could|would|will|offer|propose|['’](?:d|re|ll|ve)|re\b)))\b/ig;
+    const COMPARISON = /\b(?:market|industry)[\s-]+(?:rate|level|standard|competitive)(?=[\s-]+(?:offer|pay|salary|wage|rate|package|base)\b)|\b(?:below|above|under|over|at|near|beneath|beyond|than|vs\.?|versus)[\s-]+(?:the\s+)?(?:market|average|median|typical|industry)(?:[\s-]+(?:rate|range|pay|average|standard|level))?\b/ig;
     const maskComparison = (t) => t.replace(COMPARISON, (x) => " ".repeat(x.length));
     const thirdPartySays = (text, cueIdx) => {
       if (cueIdx < 0) return false;
-      const pre = maskComparison(text.slice(0, cueIdx)), t = lastIdx(THIRD_PARTY, pre);
-      if (t < 0) return false;
-      const lj = lastIdx(/,|\b(?:even\s+though|although|though|but|while|whereas|and|plus|since|because)\b/ig, pre.slice(0, t));
-      const reported = pre.slice(Math.max(lj, 0)).replace(new RegExp(`(?:${OWN_EMPLOYER.source})\\s+(?:\\w+\\s+){0,2}?(?:said|say|says|told\\s+me|tells\\s+me|mentioned|mentions|noted|notes|claimed|claims|explained|admitted|think|thinks|believe|believes)\\s+(?:that\\s+)?`, "ig"), (x) => " ".repeat(x.length));
-      if (lastIdx(OWN_EMPLOYER, reported) >= 0) return false;
-      const gap = pre.slice(t);
-      return !/[,$]/.test(gap) && !/\b(?:and|but|while|whereas|though|although|since|because|plus)\b/i.test(gap) && gap.trim().split(/\s+/).length <= 5;
+      const word = (text.slice(cueIdx).match(/^[a-z]+/i) || [""])[0].toLowerCase();
+      const words = maskComparison(text.slice(0, cueIdx)).replace(/[^\w'’-]+/g, " ").trim().split(/\s+/).filter(Boolean).map((w) => w.toLowerCase());
+      const STAT = /^(?:median|average|typical|mean)$/;
+      let i = words.length - 1;
+      const nounUse = /^(?:offer|pay)$/.test(word) && (i < 0 || /^(?:the|a|an|their|our|his|her|its|this|that|new|final|first|starting|initial|written|formal|verbal|best|top|base|hourly|annual|which|whose)$/.test(words[i]) || STAT.test(words[i]) || /-/.test(words[i]) || /^(?:offer|pay)\s+(?:of|is|was|at|:)/i.test(text.slice(cueIdx)));
+      if (nounUse) {
+        if (i < 0 || !STAT.test(words[i])) return false;
+        const owner = words[i - 1] || "";
+        return !(/['’]s$/.test(owner) || /^(?:their|our|its|his|her|my|your)$/.test(owner));
+      }
+      while (i >= 0 && /^(?:are|is|was|were|now|also|typically|usually|currently|generally|all|still|will|would|can|could|often|do|does)$/.test(words[i])) i--;
+      if (i < 0) return false;
+      const subj = words[i];
+      if (/^(?:ours|theirs|mine|yours)$/.test(subj)) return false;
+      if (/^(?:employers|companies|places|firms)$/.test(subj)) return !/^(?:the|these|those|my|their|our|its)$/.test(words[i - 1] || "");
+      return /^(?:market|glassdoor|levels|levels\.fyi|salary\.com|payscale|indeed|others|competitors?|industry|median|average|typical|roles)$/.test(subj);
     };
     const NOUN = "relocation|moving|signing|sign-on|bonus|allowance|stipend|equity|stock|shares|reimbursement|budget|salary|annual|yearly|days?|equipment|training|tuition|commute|parking|childcare|travel";
     const BLOCK = /^(?:and|with|plus|no|without|not|or|but|also|to|if|then)$/i;
@@ -16061,7 +16070,8 @@ const CareerRouter = (() => {
       let role = (ci >= 0 && ci >= ui && ci >= ei) || (trailingCurrent && ui < 0 && lastIdx(/\b(?:offer(?:ed|ing|s)?|proposed|came\s+back|quoted|countered|comes\s+to)\b/ig, seg) < 0) ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
       if (role === "employer" && ei >= 0 && thirdPartySays(seg, ei)) role = "unknown";
       const cueOfPrev = prevEnd > 0 && !/[.?!;\n]/.test(src.slice(prevEnd, start)) &&
-        !/,/.test(seg.slice(0, ei)) && seg.slice(0, ei).replace(/^\s*(?:\/\s?h(?:ou)?r|\/\s?hr|an?\s+hour|per\s+hour|hourly)/i, "").trim().split(/\s+/).filter(Boolean).length <= 3;
+        !/,|\b(?:and|but|while|whereas|though|although|since|because|plus)\b/i.test(seg.slice(0, ei)) &&
+        seg.slice(0, ei).replace(/^\s*(?:\/\s?h(?:ou)?r|\/\s?hr|an?\s+hour|per\s+hour|hourly)/i, "").trim().split(/\s+/).filter(Boolean).length <= 8;
       if (role === "employer" && ei >= 0 && cueOfPrev) {
         const post = seg.slice(ei), cut = post.lastIndexOf(",");
         if (cut >= 0 && lastIdx(THIRD_PARTY, maskComparison(post.slice(cut))) >= 0 && lastIdx(OWN_EMPLOYER, post.slice(cut)) < 0) role = "unknown";

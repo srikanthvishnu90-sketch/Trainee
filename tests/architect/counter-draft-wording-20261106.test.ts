@@ -286,6 +286,27 @@ Deno.test("CDW a unitless cued ask takes the recorded offer's unit up to 3x it; 
   const r = host.runTurn("counter at $350", c);
   assert(!/meet me at \$350 an hour/.test(r.result?.draft?.body ?? ""), "no offer recorded: the $300 cap holds");
 });
+Deno.test("CDW 'for a <purpose noun>' is one-time money; 'for a <noun> role' describes the job", () => {
+  const withOffer = (offer: string, msg: string, ask: number | null) => {
+    const ctx = fresh();
+    host.runTurn(offer, ctx);
+    const r = host.runTurn(msg, ctx);
+    const body: string = r.result?.draft?.body ?? "";
+    if (ask == null) {
+      assert(!/meet me at \$\d+ an hour\?/.test(body), `${msg}: ${askLine(body)}`);
+      eq(recorded(ctx).counter, null, `${msg}: saved as counter`);
+    } else {
+      assert(new RegExp(`meet me at \\$${ask} an hour\\?`).test(body), `${msg}: ${askLine(body)}`);
+      eq(recorded(ctx).counter, ask);
+    }
+  };
+  const HI = "I got an offer of $300/hour.";
+  withOffer(HI, "Draft a counter asking for $500 for a relocation allowance", null);
+  withOffer(HI, "counter at $300 for a signing bonus", null);
+  withOffer(HI, "counter at $350 for the role", 350);
+  withOffer(OFFER, "counter at $28 for a childcare role", 28);
+  withOffer(OFFER, "counter at $30 for a travel nurse role", 30);
+});
 Deno.test("CDW the C04 message verbatim still blanks the ask and keeps the offer", () => {
   const C04 = "Fictional beta scenario, not my profile. Jordan Lee has two years of retail customer-service experience and Excel skills. No external actions and no changes to my profile. A customer support job offered Jordan $24/hour, with no other terms provided. Should Jordan counter, and how? Draft a short counter email for review only. Separate advice from unverified market claims.";
   const ctx = fresh();

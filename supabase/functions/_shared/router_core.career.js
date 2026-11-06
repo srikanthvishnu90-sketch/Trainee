@@ -16009,12 +16009,14 @@ const CareerRouter = (() => {
     const NOUN = "relocation|moving|signing|sign-on|bonus|allowance|stipend|equity|stock|shares|reimbursement|budget|salary|annual|yearly|days?|equipment|training|tuition|commute|parking|childcare|travel";
     const BLOCK = /^(?:and|with|plus|no|without|not|or|but|also|to|if|then)$/i;
     const attached = (after, before) => {
-      const aw = after.trim().split(/\s+/).slice(0, 3);
-      const ROLE = /^(?:role|job|position|gig|opening|posting|work|company|family|team)s?$/i;
-      for (let i = 0; i < aw.length; i++) {
+      const aw = after.trim().split(/\s+/).slice(0, 6);
+      const ROLE = /^(?:role|job|position|gig|opening|posting|work|company|family|team|nurse)s?$/i;
+      const NOUN_RE = new RegExp("^(?:" + NOUN + ")$", "i");
+      let start = 0;
+      if (/^for$/i.test(aw[0] || "")) start = /^(?:an?|the|my)$/i.test(aw[1] || "") ? 2 : 1;
+      for (let i = start; i < Math.min(aw.length, start + 3); i++) {
         if (BLOCK.test(aw[i])) break;
-        if (/^for$/i.test(aw[i]) && /^an?$/i.test(aw[i + 1] || "")) break;
-        if (new RegExp("^(?:" + NOUN + ")$", "i").test(aw[i])) { if (ROLE.test(aw[i + 1] || "")) break; return true; }
+        if (NOUN_RE.test(aw[i])) { if (ROLE.test(aw[i + 1] || "") || ROLE.test(aw[i + 2] || "")) break; return true; }
       }
       const bm = before.match(new RegExp("(?:^|\\s)((?:" + NOUN + ")(?:\\s+\\w+){0,2})\\s*(?:of|is|at|:|=)?\\s*$", "i"));
       return !!bm && !/\b(?:no|without|not|zero|never)\b/i.test(before.slice(0, bm.index + bm[0].length - bm[1].length).split(/[,;.]/).pop().slice(-12));

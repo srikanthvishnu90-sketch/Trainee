@@ -99,7 +99,7 @@ jobs:
         id: judge
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: deno run -A scripts/launch/deploy-standard.ts --sha "$GITHUB_SHA" --checks S1,S2,S3,S4 --exclude-run "$GITHUB_RUN_ID" --wait-checks 90
+        run: deno run -A scripts/launch/deploy-standard.ts --sha "$GITHUB_SHA" --checks S1,S2,S3,S4 --exclude-run "$GITHUB_RUN_ID" --wait-checks 90 --wait-ledger 30
   deploy:
     name: deploy (production)
     needs: standard

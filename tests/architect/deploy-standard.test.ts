@@ -7,7 +7,7 @@ import assertNode from "node:assert/strict";
 import { parse as parseYaml } from "npm:yaml@2.9.1";
 import {
   ACCEPTANCE_CHECK, ACCEPTANCE_FILE, type CheckId, type CheckRun, evaluate, jobCheckNames, knownGaps, LEDGER, parseLedger, parseScoreLog, prOf, type PullFile, report, type Review,
-  ledgerApproves, ledgerOnly, S3_WAIVER, type Sources, stepIds,
+  ledgerApproves, ledgerOnly, S3_WAIVER, s2, type Sources, stepIds,
 } from "../../scripts/launch/deploy-standard.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -240,6 +240,66 @@ Deno.test("S2 mutation: a PR whose files cannot be read (404, an error, an empty
     w.prFiles[3] = f as any;
     await onlyFails(w, "S2", /#3: PR 3 files unreadable/);
   }
+});
+
+// --wait-ledger (release 5, run 42151624479: S2 read the ledger at 02:41, #535's line merged at 02:44). A fake clock that the
+// injected sleep advances, and a ledger that changes between reads: no network, no real sleeping.
+function ledgerWorld(reads: (string | null)[]) {
+  const w = base(); w.ledger = "# PR SHA reviewer [note]\n";
+  let t = 0, n = 0;
+  const slept: number[] = [], printed: string[] = [];
+  const src: Sources = { ...sources(w), ledgerAgain: async () => reads[Math.min(n++, reads.length - 1)] };
+  const wait = { minutes: 30, sleep: async (ms: number) => { slept.push(ms); t += ms; }, now: () => t, log: (l: string) => printed.push(l) };
+  return { w, src, wait, slept, printed, reads: () => n };
+}
+const LINE2 = `# PR SHA reviewer [note]\n2 ${H2} architect-claude reviewed against WO-200\n`;
+Deno.test("S2 --wait-ledger: a missing line that appears on the 2nd re-read passes, each re-read printed and in the evidence", async () => {
+  const x = ledgerWorld(["# PR SHA reviewer [note]\n", LINE2]);
+  const r = await s2(x.src, C, D, x.wait);
+  const text = r.summary + "\n" + r.evidence.join("\n");
+  eq(r.pass, true, text);
+  eq([x.reads(), x.slept], [2, [30_000, 30_000]], text);
+  ok(/waiting up to 30 min for docs\/architect\/approvals\.txt lines on the trunk tip: #2/.test(text), text);
+  ok(/re-read 1 \(30 s\): nothing new; still missing #2/.test(text) && /re-read 2 \(60 s\): appeared #2 \(reviewer architect-claude\); every missing line is in/.test(text), text);
+  ok(/ok   #2 head 2222222222: docs\/architect\/approvals\.txt, reviewer architect-claude: reviewed against WO-200 \(appeared on re-read 2\)/.test(text), text);
+  eq(x.printed.length, 3, x.printed.join("\n"));
+});
+Deno.test("S2 --wait-ledger: a line that never appears fails after the whole wait (60 re-reads in 30 min)", async () => {
+  const x = ledgerWorld(["# PR SHA reviewer [note]\n"]);
+  const r = await s2(x.src, C, D, x.wait);
+  const text = r.summary + "\n" + r.evidence.join("\n");
+  eq(r.pass, false, text);
+  eq(x.reads(), 60, text);
+  eq(x.slept.reduce((a, b) => a + b, 0), 30 * 60_000, text);
+  ok(/1\/2 merges since dddddddddd lack an approval at their merged head: #2/.test(r.summary) && /waited 30 min; still no docs\/architect\/approvals\.txt line for #2/.test(text), text);
+});
+Deno.test("S2 --wait-ledger: a wrong-head line fails at once (no wait); one appearing during the wait at a wrong head ends the wait", async () => {
+  const x = ledgerWorld([LINE2]); x.w.ledger = `2 ${"3".repeat(40)} architect-claude an earlier push\n`;
+  const r = await s2(x.src, C, D, x.wait);
+  eq([r.pass, x.reads(), x.slept.length], [false, 0, 0], r.evidence.join("\n"));
+  ok(/approvals\.txt names 3333333333, not the merged head/.test(r.evidence.join("\n")));
+  // Any other S2 failure beside the missing line: no wait either.
+  const y = ledgerWorld([LINE2]); y.w.commits.push({ sha: A, subject: "direct push to trunk" });
+  const r2 = await s2(y.src, C, D, y.wait);
+  eq([r2.pass, y.reads()], [false, 0], r2.evidence.join("\n"));
+  // A line that lands at another head, or names the merger, during the wait: fail on that read.
+  for (const late of [`2 ${"3".repeat(40)} architect-claude\n`, `2 ${H2} owner-acct\n`]) {
+    const z = ledgerWorld(["# none\n", late, LINE2]);
+    const r3 = await s2(z.src, C, D, z.wait);
+    const text = r3.evidence.join("\n");
+    eq([r3.pass, z.reads()], [false, 2], text);
+    ok(/re-read 2 \(60 s\): the line for #2 appeared but .*: no more waiting/.test(text), text);
+  }
+});
+Deno.test("S2 without --wait-ledger (the default): no re-read, no sleep, the same verdict as before", async () => {
+  for (const wait of [undefined, { minutes: 0 }]) {
+    const x = ledgerWorld([LINE2]);
+    const r = await s2(x.src, C, D, wait && { ...wait, sleep: x.wait.sleep, now: x.wait.now, log: x.wait.log });
+    eq([r.pass, x.reads(), x.slept.length, x.printed.length], [false, 0, 0, 0], r.evidence.join("\n"));
+    ok(/#2 head 2222222222: no independent approval at the merged head, and no/.test(r.evidence.join("\n")));
+  }
+  const { results } = await evaluate({ ...sources(base()), ledgerAgain: async () => { throw new Error("never read"); } }, C);
+  eq(results.find((r) => r.id === "S2")!.pass, true);
 });
 
 // ------------------------------------------------------------------------------------------------ S3

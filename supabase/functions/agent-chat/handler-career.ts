@@ -40,6 +40,7 @@ import { createCareerPersistence, careerRequestHash } from "../_shared/career_pe
 import { callModel as callModelUncapped, newMeter, turnLedger, WEB_SEARCH_AVAILABLE } from "../_shared/model_gateway.ts";
 import { careerModelConfig } from "./release_model.ts";
 // LAUNCH READINESS (2026-10-26): the daily model ceiling, the per-person turn order, the pool read only when used.
+import { CAP_REPLACED_INTENTS, capPausedView, capViewFor } from "./cap_views.ts";
 import { spendCap, spendLimitsFromEnv, supabaseDailySpend } from "../_shared/career_spend_cap.ts";
 import { enterTurnGate, type TurnGate } from "../_shared/career_turn_gate.ts";
 import { CONFLICT_CODES, CONFLICT_REPLY, countSend, newTurnEffects, refusedSaveReply, trackTurnEffects } from "../_shared/career_save_replies.ts";
@@ -979,6 +980,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // rollback, and then it is never taken and the router answers exactly as before. Read lazily, only when the brain
       // test below is reached. With no model key configured the staged brain is never tried: the router answers, as it
       // does when the model fails (D-035).
+      let capHeld: "limit" | "unread" | null = null;
       const staged = stagedRoute({ env: Deno.env, message, ctx: ctx as unknown as Record<string, unknown>, host, structured: !!(careerTask || careerBatch), clock });
       // A "judge prompt: ..." instruction is code's (judgePromptTurn), and without a model key the brain is never tried.
       const stagedReady = !isJudgePromptAsk(message) && !!careerModelConfig(Deno.env).apiKey;
@@ -1086,7 +1088,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (offerAns.card) agentMeta = { offer_card: offerAns.card };
       } else if (outreachStatus) {
         out = { reply: outreachStatus.reply, intent: outreachStatus.intent, resultStatus: outreachStatus.status, contained: false, handler: "outreach_status" };
-      } else if (!careerTask && !careerBatch && ((AGENT_BRAIN_RELEASED && chooseBrain(Deno.env) === "agent") || (stagedReady && staged.toBrain())) && !host.isHostControlled(message, ctx)) {
+      } else if (!careerTask && !careerBatch && ((AGENT_BRAIN_RELEASED && chooseBrain(Deno.env) === "agent") || (stagedReady && staged.toBrain())) && !host.isHostControlled(message, ctx) && !(capHeld = await spend.exhausted())) {
         const meter = ledger.track(newMeter());
         const cfg = careerModelConfig(Deno.env);
         // WO-027 (B5): the last 40 messages after the latest erase; one more row says whether the thread is longer.
@@ -1144,6 +1146,17 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           out = { reply: turn.reply, intent: turn.show?.intent ?? "agent", resultStatus: turn.stopped, contained: false, handler: "agent", ...(turn.show?.parts ? { parts: turn.show.parts } : {}) };
           agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}) };
         }
+      } else if (capHeld) {
+        // PR-5 (2026-11-06): the allowance is spent, so the brain is not tried (zero model calls): code's views (cap_views.ts).
+        const at = { now: Date.now(), unread: capHeld === "unread" };
+        let view = capViewFor(message, at);
+        if (!view) {
+          await ensurePool();
+          out = clock.sync("router", () => host.runTurn(message, ctx));
+          if (!out.intent || CAP_REPLACED_INTENTS.includes(out.intent)) view = capPausedView(at);
+        }
+        if (view) out = { reply: view.reply, intent: view.intent, resultStatus: view.status, contained: false, handler: "cap_view" };
+        agentMeta = { ...(agentMeta || {}), model_limit: capHeld };
       } else {
         // FEATURE 5: job search ranked by fit and judged (_shared/career_search_judge.ts). "judge prompt: ..." keeps the
         // person's own judging instructions (a standing instruction). After the router decides a turn is a role search

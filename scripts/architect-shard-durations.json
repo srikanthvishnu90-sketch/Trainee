@@ -67,6 +67,7 @@
     "tests/architect/connector-framework-handler.test.ts": 10,
     "tests/architect/connector-framework.test.ts": 7,
     "tests/architect/connector-guards.test.ts": 8,
+    "tests/architect/counter-offer-20261106.test.ts": 0.3,
     "tests/architect/d007-drafters.test.ts": 0.1,
     "tests/architect/d007-quarantine.test.ts": 0.1,
     "tests/architect/d037-live-effects.test.ts": 8.2,

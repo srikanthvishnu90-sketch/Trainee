@@ -1,0 +1,171 @@
+{
+ "version": 1,
+ "author": "independent judge (held-out)",
+ "note": "SYNTHETIC person. Rohan Mehta, software engineer in Seattle on an H-1B (needs a transfer); minimum $150,000; remote or hybrid; Gmail connected; one recruiter draft waiting; one application card ready; active subscription.",
+ "now": "2026-10-28T15:00:00Z",
+ "postings": [
+  {
+   "job_id": "greenhouse:stratuspay:9201001",
+   "company": "Stratus Pay",
+   "title": "Senior Software Engineer, Payments",
+   "location": "Seattle, WA (hybrid, 3 days)",
+   "url": "https://job-boards.greenhouse.io/stratuspay/jobs/9201001",
+   "description": "Senior software engineer on the payments team. Go and PostgreSQL. Hybrid, 3 days a week in Seattle. $165,000-$195,000. H-1B transfers are supported.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:fernhill:9202002",
+   "company": "Fernhill",
+   "title": "Staff Software Engineer",
+   "location": "Remote - US",
+   "url": "https://job-boards.greenhouse.io/fernhill/jobs/9202002",
+   "description": "Staff software engineer, fully remote in the US. $200,000-$240,000. We cannot sponsor or transfer work visas.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:copperleaf:9203003",
+   "company": "Copperleaf",
+   "title": "Software Engineer, Platform",
+   "location": "Remote - US",
+   "url": "https://job-boards.greenhouse.io/copperleaf/jobs/9203003",
+   "description": "Remote platform software engineer. Go. $125,000-$145,000. Visa sponsorship is available.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:orcashealth:9204004",
+   "company": "Orcas Health",
+   "title": "Senior Software Engineer, Data Services",
+   "location": "Bellevue, WA (hybrid, 2 days)",
+   "url": "https://job-boards.greenhouse.io/orcashealth/jobs/9204004",
+   "description": "Senior software engineer for data services. Hybrid, 2 days a week in Bellevue. $170,000-$190,000. H-1B transfer sponsorship is available.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:quarry:9205005",
+   "company": "Quarry",
+   "title": "Senior Platform Engineer",
+   "location": "Austin, TX",
+   "url": "https://job-boards.greenhouse.io/quarry/jobs/9205005",
+   "description": "On-site senior platform engineer in Austin, 5 days a week. $160,000-$180,000. Sponsorship is available.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  }
+ ],
+ "apply_jobs": [],
+ "wanted": [],
+ "prepared": [
+  {
+   "id": "p-stratus",
+   "job_id": "greenhouse:stratuspay:9201001",
+   "company": "Stratus Pay",
+   "url": "https://job-boards.greenhouse.io/stratuspay/jobs/9201001",
+   "state": "ready",
+   "card_lines": [
+    "Stratus Pay - Senior Software Engineer, Payments (Seattle, WA, hybrid)",
+    "Resume: base. Answers: 12 filled from your facts, 0 open."
+   ],
+   "created_at": "2026-10-27T16:00:00.000Z"
+  }
+ ],
+ "questions": [],
+ "outreach": [
+  {
+   "n": 1,
+   "recipient": {
+    "name": "Maren Holt",
+    "email": "maren.holt@stratuspay.example.test",
+    "firm": "Stratus Pay",
+    "title": "Recruiting Partner"
+   },
+   "subject": "Senior Software Engineer application",
+   "body": "Hi Maren, I applied for the Senior Software Engineer role on the payments team. I have five years building Go and PostgreSQL services and I am on an H-1B, so a transfer would be needed. I would be glad to talk this week.",
+   "footer": "Sent by TEST person",
+   "hash": "3333333333333333333333333333333333333333333333333333333333333333",
+   "status": "shown",
+   "approved_hash": null,
+   "approved_at": null,
+   "sent_at": null,
+   "shared": [],
+   "created_at": "2026-10-27T17:00:00.000Z"
+  }
+ ],
+ "connections": [
+  {
+   "provider": "google_career",
+   "scopes": [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send"
+   ],
+   "connected_at": "2026-10-10T12:00:00.000Z"
+  }
+ ],
+ "cloud": null,
+ "channel": {
+  "opted_out": false
+ },
+ "standing": [
+  {
+   "id": "S-001",
+   "text": "Needs H-1B transfer sponsorship",
+   "said": "I'm on an H-1B so any new employer has to transfer it",
+   "at": "2026-10-14T15:00:00.000Z"
+  },
+  {
+   "id": "S-002",
+   "text": "Minimum base salary $150,000",
+   "said": "I won't look at anything under 150",
+   "at": "2026-10-14T15:00:00.000Z"
+  },
+  {
+   "id": "S-003",
+   "text": "Remote or hybrid, no 5-day on-site",
+   "said": "no five days in an office",
+   "at": "2026-10-14T15:00:00.000Z"
+  }
+ ],
+ "alerts": {
+  "input": {
+   "keywords": [
+    "senior software engineer"
+   ],
+   "locations": [
+    "seattle"
+   ],
+   "remote_ok": true
+  },
+  "tz": "America/Los_Angeles",
+  "since": "2026-10-14T15:00:00Z"
+ },
+ "facts": [
+  {
+   "kind": "experience",
+   "text": "Software engineer with 5 years of Go and PostgreSQL at Brightwave"
+  },
+  {
+   "kind": "location",
+   "text": "Based in Seattle, Washington"
+  },
+  {
+   "kind": "preference",
+   "text": "On an H-1B at the current employer, so a new employer must transfer it"
+  },
+  {
+   "kind": "preference",
+   "text": "Minimum base salary $150,000, remote or hybrid only"
+  }
+ ],
+ "tracked": [],
+ "subscription": {
+  "status": "active",
+  "plan": "monthly",
+  "price_cents": 1000,
+  "current_period_end": "2026-11-14T00:00:00.000Z",
+  "stripe_customer_id": "cus_TESTHELD",
+  "stripe_subscription_id": "sub_TESTHELD",
+  "cancel_at_period_end": false
+ }
+}

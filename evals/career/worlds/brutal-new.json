@@ -1,0 +1,52 @@
+{
+ "version": 1,
+ "author": "architect (task-context-brutal)",
+ "note": "SYNTHETIC person with nothing on file: a first conversation. Everything the agent knows must come from the chat.",
+ "now": "2026-10-20T15:00:00Z",
+ "postings": [
+  {
+   "job_id": "greenhouse:austinregional:8301001",
+   "company": "Austin Regional",
+   "title": "Registered Nurse, Night Shift",
+   "location": "Austin, TX",
+   "url": "https://job-boards.greenhouse.io/austinregional/jobs/8301001",
+   "description": "RN on nights, Austin. Active Texas RN license. $40-$52 per hour.",
+   "posted_at": "2026-10-18T14:00:00Z",
+   "first_seen_at": "2026-10-18T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:capitalhealth:8302002",
+   "company": "Capital Health",
+   "title": "ICU RN (Nights)",
+   "location": "Austin, TX",
+   "url": "https://job-boards.greenhouse.io/capitalhealth/jobs/8302002",
+   "description": "ICU RN nights. BSN. $43-$57 per hour.",
+   "posted_at": "2026-10-18T14:00:00Z",
+   "first_seen_at": "2026-10-18T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:lonestar:8303003",
+   "company": "Lone Star Clinics",
+   "title": "Clinic Nurse (Days)",
+   "location": "Austin, TX",
+   "url": "https://job-boards.greenhouse.io/lonestar/jobs/8303003",
+   "description": "Clinic RN, days only. $36-$44 per hour.",
+   "posted_at": "2026-10-18T14:00:00Z",
+   "first_seen_at": "2026-10-18T15:00:00Z"
+  }
+ ],
+ "apply_jobs": [],
+ "wanted": [],
+ "prepared": [],
+ "questions": [],
+ "outreach": [],
+ "connections": [],
+ "cloud": null,
+ "channel": {
+  "opted_out": false
+ },
+ "standing": [],
+ "alerts": null,
+ "facts": [],
+ "tracked": []
+}

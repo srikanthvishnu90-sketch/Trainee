@@ -47,7 +47,9 @@ try {
     if (exit !== 0) throw Error(`setup failed (exit ${exit}); read its logs: GET /v2/sandboxes/sessions/${sid}/cmd/${cmdId}/logs`);
     break;
   }
-  const snap = await api("POST", `/v3/sandboxes/sessions/${sid}/snapshot`, {});
+  // expiration 0 = never expires. The v3 default is 7 days, which deleted the last snapshot and turned every claim into
+  // 503 needs setup without anyone noticing (fix brief B2, 2026-11-06).
+  const snap = await api("POST", `/v3/sandboxes/sessions/${sid}/snapshot`, { expiration: 0 });
   console.log(`SNAPSHOT ${snap.snapshot.id} (${Math.round(snap.snapshot.sizeBytes / 1e6)} MB)`);
 } catch (e) {
   await api("POST", `/v2/sandboxes/sessions/${sid}/stop`, {}).catch(() => {});

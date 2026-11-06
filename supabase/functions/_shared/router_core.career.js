@@ -16014,11 +16014,12 @@ const CareerRouter = (() => {
     {
       const reH = /\$\s?(\d{1,3}(?:\.\d{1,2})?)\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)/ig;
       const askCue = /(?:\bcounter(?:ing|ed)?(?:\s+(?:at|to|with|for))?|\bask(?:ing)?\s+for|\bmeet\s+me\s+at|\bwant(?:ing)?|\btarget(?:ing)?|\blooking\s+for|\bhop(?:e|ing)\s+for|\bmake\s+it|\bchange\s+(?:it|the\s+\w+)\s+to|\bneed|\brequest(?:ing)?|\bpush\s+for|\bgo\s+for|\bwould\s+like|['’]d\s+like)\W{0,3}(?:(?:something\s+like|about|around|at|to|up\s+to)\W{0,3})?$/i;
+      const draftCue = /\b(?:draft|write|compose|redraft|rewrite|redo)\b(?![^$]*\b(?:offer(?:ed|s)?|came\s+back|come\s+back|countered|gave|giving|pays?|paying)\b)[^$]*\bat\W{0,3}$/i;
       let h;
       while ((h = reH.exec(work))) {
         const clause = work.slice(0, h.index).split(/[.?!]/).pop();
         const v = Number(h[1]);
-        if (askCue.test(clause)) { if (out.askHourly == null) out.askHourly = v; } else if (out.offerHourly == null) out.offerHourly = v;
+        if (askCue.test(clause) || draftCue.test(clause)) { if (out.askHourly == null) out.askHourly = v; } else if (out.offerHourly == null) out.offerHourly = v;
       }
     }
     if (m) { out.hourly = Number(m[1]); out.hourlyText = m[0].replace(/\s+/g, " ").trim(); work = work.replace(m[0], " "); }
@@ -16027,6 +16028,9 @@ const CareerRouter = (() => {
     else { const mp = work.match(/\$\s?([\d,]{4,})/); if (mp) out.annual = num(mp[1]); }
     if (out.annual) out.annualText = `$${out.annual.toLocaleString()}`;
     return out;
+  }
+  function reportsNewOffer(text) {
+    return /\boffered\b|\boffer\s+(?:is|was)\s+(?:now\s+)?\$|\boffer\s+(?:is\s+)?now\b|\b(?:new|revised|updated|better|higher)\s+offer\b|\boffer\s+of\s+\$|\bgot\s+(?:an|the)\s+offer\b|\breceived\s+(?:an|the)\s+offer\b|\b(?:came|come|coming)\s+back\s+(?:with|at|to)\b|\b(?:they|employer|recruiter)\s+(?:countered|raised|bumped|upped|moved)\b/i.test(s(text));
   }
   function offerFigureText(thread, offer) {
     const th = thread || {};
@@ -18979,7 +18983,9 @@ const CareerRouter = (() => {
         }
         if (!extensionContext && (thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || parseOfferFigures(text).hourly)) {
           const askFigs = parseOfferFigures(text);
-          const hourlyBase = askFigs.offerHourly || thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || null;
+          const recordedHourly = thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || null;
+          if (askFigs.offerHourly != null && recordedHourly && !reportsNewOffer(text)) askFigs.offerHourly = null;
+          const hourlyBase = askFigs.offerHourly || recordedHourly || null;
           askFigs.ask = askFigs.askHourly != null ? askFigs.askHourly
             : (askFigs.offerHourly == null && askFigs.hourly && hourlyBase && Number(askFigs.hourly) !== Number(hourlyBase) ? askFigs.hourly : null);
           if (askFigs.ask != null && hourlyBase && Number(askFigs.ask) <= Number(hourlyBase)) askFigs.ask = null;
@@ -23887,6 +23893,8 @@ const CareerRouter = (() => {
         if (!rec.firm && !rec.descriptor && (m = cl.match(/\boffer\b[^.!?]*?\bfrom\s+an?\s+([a-z][a-z -]{1,28}?\b(?:startup|company|firm|bank|fund|agency|studio|shop|co|insurer|practice|group))\b/i))) rec.descriptor = m[1].trim();
         const askFramed = /\bask(?:ing)? for\s+(?:a\s+|an\s+)?\$?\s?\d|\bcounter\s+(?:at|of|to)\s+\$?\s?\d|\bmake it\s+\$?\s?\d/i.test(cl);
         const figs = askFramed ? { hourly: null, signing: null, annual: null } : parseOfferFigures(cl);
+        const recordedRate = (() => { try { const th = negotiationThreadOf(ctx); return (th && th.hourly) || (ctx.offer && ctx.offer.hourly_rate) || null; } catch { return null; } })();
+        if (figs.hourly && ((figs.offerHourly == null && figs.askHourly != null) || (recordedRate && !reportsNewOffer(raw)))) figs.hourly = null;
         if (figs.hourly) rec.hourly = figs.hourly;
         if (figs.signing) rec.signing = figs.signing;
         if (figs.annual) rec.amount = figs.annual;

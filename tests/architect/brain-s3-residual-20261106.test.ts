@@ -80,3 +80,10 @@ Deno.test("S3-8: attached file text never counts as the person's words", async (
   assertNode.equal(seen.length, 1);
   assertNode.equal(r.flags, undefined);
 });
+
+Deno.test("S3-9: overwhelmed with no city asks the city before searching; with a city, search as normal", () => {
+  const r = rule(/They say they are overwhelmed/);
+  assertNode.ok(/no city or remote preference is known \(none in\s+their message, none on file\), do not call search_jobs this turn/.test(r), "no-city branch");
+  assertNode.ok(/I can search\s+for <role> and shortlist three/.test(r) && /ask the one question \(the city\)/.test(r));
+  assertNode.ok(/When a city\s+is known, search as normal; the acknowledgement still comes first/.test(r), "city-known branch");
+});

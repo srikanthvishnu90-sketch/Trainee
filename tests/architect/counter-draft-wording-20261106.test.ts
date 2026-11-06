@@ -60,3 +60,80 @@ Deno.test("CDW existing CO control: 'counter at $28/hour' after $24 still works"
   assert(/Thank you for the offer — \$24 an hour/.test(body) && /meet me at \$28 an hour\?/.test(body), body);
   eq([recorded(ctx).hourly, recorded(ctx).counter], [24, 28]);
 });
+
+// Greptile P1s on PR #557.
+Deno.test("CDW an advice question about a figure is not a draft: nothing is drafted and no counter is saved", () => {
+  for (const msg of ["Should I propose $28/hour?", "is it ok to propose $28/hour?", "would a counter email asking $28/hour be too much?"]) {
+    const ctx = fresh();
+    host.runTurn(OFFER, ctx);
+    const r = host.runTurn(msg, ctx);
+    assert(r.intent !== "negotiation_draft", `${msg}: drafted (${r.intent})`);
+    assert(!r.result?.draft, `${msg}: carries a draft`);
+    eq(recorded(ctx).counter, null, `${msg}: counter saved`);
+    eq(recorded(ctx).hourly, 24, `${msg}: offer changed`);
+    eq(r.result?.sends ?? 0, 0);
+  }
+});
+
+Deno.test("CDW a bare dollar figure with another purpose is never the hourly ask", () => {
+  for (const msg of ["Draft a counter email asking for $500 relocation allowance", "Draft a counter email asking for a relocation allowance of $500", "Draft a counter email asking for $5000 per year more"]) {
+    const ctx = fresh();
+    host.runTurn(OFFER, ctx);
+    const r = host.runTurn(msg, ctx);
+    const body: string = r.result?.draft?.body ?? "";
+    assert(!/\$\s?(500|5000)\s+an hour/.test(body), `${msg}: ${askLine(body)}`);
+    assert(recorded(ctx).counter !== 500 && recorded(ctx).counter !== 5000, `${msg}: saved as hourly counter`);
+    eq(recorded(ctx).hourly, 24);
+  }
+});
+
+Deno.test("CDW '$28/hour and a $2,000 signing bonus' keeps 28 as the hourly ask and the bonus is not turned into hourly", () => {
+  const ctx = fresh();
+  host.runTurn(OFFER, ctx);
+  const r = host.runTurn("Draft a counter asking for $28/hour and a $2,000 signing bonus", ctx);
+  const body: string = r.result.draft.body;
+  assert(/meet me at \$28 an hour\?/.test(body), askLine(body));
+  assert(!/\$2,?000 an hour/.test(body), body);
+  eq([recorded(ctx).hourly, recorded(ctx).counter], [24, 28]);
+});
+
+// Round 3 (Greptile on #557): who said the figure, and in what unit, decides its role.
+const TABLE: Array<[string, number, number | null]> = [
+  // [message after a $24/hour offer on record, offer kept, ask]
+  ["They proposed $26/hour and I want you to draft a counter at $30/hour", 26, 30],
+  ["Draft a counter at $950 per week", 24, null],
+  ["Draft the counter email with a rate of $28/hour", 24, 28],
+  ["Draft a counter email asking for $500 relocation allowance", 24, null],
+  ["Draft a counter asking for $28/hour and a $2,000 signing bonus", 24, 28],
+];
+for (const [msg, offer, ask] of TABLE) {
+  Deno.test(`CDW roles: "${msg}"`, () => {
+    const ctx = fresh();
+    host.runTurn(OFFER, ctx);
+    const r = host.runTurn(msg, ctx);
+    eq(r.intent, "negotiation_draft");
+    const body: string = r.result.draft.body;
+    assert(new RegExp(`Thank you for the offer — \\$${offer} an hour`).test(body), `offer: ${body}`);
+    if (ask != null) assert(new RegExp(`meet me at \\$${ask} an hour\\?`).test(body), `ask: ${askLine(body)}`);
+    else assert(/\[your target hourly rate\]/.test(body), `placeholder expected: ${askLine(body)}`);
+    assert(!/\$(?:950|500|2,?000) an hour/.test(body), body);
+    eq(r.result.sends, 0);
+    eq([recorded(ctx).hourly, recorded(ctx).counter], [offer, ask]);
+  });
+}
+Deno.test("CDW 'What is a counter offer?' is a question: no draft, no saved counter", () => {
+  const ctx = fresh();
+  host.runTurn(OFFER, ctx);
+  const r = host.runTurn("What is a counter offer?", ctx);
+  assert(r.intent !== "negotiation_draft" && !r.result?.draft, `${r.intent}`);
+  eq(recorded(ctx).counter, null);
+  eq(r.result?.sends ?? 0, 0);
+});
+Deno.test("CDW the C04 message verbatim still blanks the ask and keeps the offer", () => {
+  const C04 = "Fictional beta scenario, not my profile. Jordan Lee has two years of retail customer-service experience and Excel skills. No external actions and no changes to my profile. A customer support job offered Jordan $24/hour, with no other terms provided. Should Jordan counter, and how? Draft a short counter email for review only. Separate advice from unverified market claims.";
+  const ctx = fresh();
+  const r = host.runTurn(C04, ctx);
+  assert(/\[your target hourly rate\]/.test(r.result.draft.body) && /Thank you for the offer — \$24 an hour/.test(r.result.draft.body));
+  eq(r.result.sends, 0);
+  eq([recorded(ctx).hourly, recorded(ctx).counter], [24, null]);
+});

@@ -825,7 +825,6 @@ Deno.test("CDW market exit, every unit: a third party's bonus or salary is never
   // incidental words name no third party: the plain offer still saves and drafts
   for (const [msg, offer] of [
     ["They offered $26/hour for a market research role. Draft a counter at $30/hour", 26],
-    ["They did indeed offer $26/hour. Draft a counter at $30/hour", 26],
     ["They offered $26 an hour plus a $2,000 signing bonus. Draft a counter at $30/hour", 26],
   ] as const) {
     const { ctx, r } = run(OFFER, msg);
@@ -868,5 +867,17 @@ Deno.test("CDW market exit: a named market role is the employer's; plural market
     const r = host.runTurn(msg, ctx);
     eq(recorded(ctx).hourly, 26, msg);
     assert(/Thank you for the offer — \$26 an hour/.test(String(r.result?.draft?.body ?? "")), `${msg}: drafted`);
+  }
+});
+
+// Greptile on 76313b47: "indeed" is never treated as an adverb; the salary site and the adverb cannot be told apart, so the turn
+// is held (an extra question, never a wrong offer).
+Deno.test("CDW market exit: any 'indeed' in the figure's sentence holds the turn", () => {
+  for (const prior of [OFFER, null]) for (const row of ["It was Indeed that quoted $28/hour", "They did indeed offer $26/hour", "Indeed quoted $28/hour"]) {
+    const msg = `${row}. Draft a counter at $30/hour`;
+    const ctx = fresh();
+    if (prior) host.runTurn(prior, ctx);
+    const before = recorded(ctx).hourly;
+    heldForBrain(ctx, host.runTurn(msg, ctx), before, msg);
   }
 });

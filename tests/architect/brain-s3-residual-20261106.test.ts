@@ -80,3 +80,13 @@ Deno.test("S3-8: attached file text never counts as the person's words", async (
   assertNode.equal(seen.length, 1);
   assertNode.equal(r.flags, undefined);
 });
+
+Deno.test("S3-9: the no-search exception is narrow: overwhelmed + hand-off cue + no city; otherwise search as normal", () => {
+  const r = rule(/They say they are overwhelmed/);
+  assertNode.ok(/Exception to "search and shortlist" above/.test(r), "marked as an exception to the search line");
+  assertNode.ok(/OVERWHELMED\s+\(that word, not stressed, scared or stuck\)/.test(r), "names overwhelmed only");
+  assertNode.ok(/"apply me", "apply for me",\s+"handle the rest", "do it for me", "take care of it"/.test(r), "hand-off cue");
+  assertNode.ok(/none in this chat,\s+none on file\), do not call search_jobs this turn/.test(r), "no city anywhere");
+  assertNode.ok(/I can search for <role> and\s+shortlist three/.test(r) && /the city or remote/.test(r));
+  assertNode.ok(/Otherwise\s+search as normal, acknowledgement first/.test(r), "otherwise search");
+});

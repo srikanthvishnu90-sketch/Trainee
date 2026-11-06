@@ -6,6 +6,8 @@
 import assertNode from "node:assert/strict";
 import * as core from "../../supabase/functions/_shared/router_core.career.js";
 import { CareerHost } from "../../supabase/functions/_shared/career_host.js";
+import { stagedDecision } from "../../supabase/functions/agent-chat/career_staged.ts";
+const STAGED = { get: (k: string) => (k === "CAREER_BRAIN" ? "staged" : undefined) };
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -128,6 +130,55 @@ Deno.test("CDW 'What is a counter offer?' is a question: no draft, no saved coun
   assert(r.intent !== "negotiation_draft" && !r.result?.draft, `${r.intent}`);
   eq(recorded(ctx).counter, null);
   eq(r.result?.sends ?? 0, 0);
+});
+// Round 4: every write of the recorded offer takes ONLY the employer-role figure; the ask goes to the counter.
+const step = (ctx: any, msg: string, offer: number, ask: number | null) => {
+  const r = host.runTurn(msg, ctx);
+  eq(r.intent, "negotiation_draft", msg);
+  const body: string = r.result.draft.body;
+  assert(new RegExp(`Thank you for the offer — \\$${offer} an hour`).test(body), `${msg}: ${body}`);
+  if (ask != null) assert(new RegExp(`meet me at \\$${ask} an hour\\?`).test(body), `${msg}: ${askLine(body)}`);
+  eq(r.result.sends, 0);
+  const st = recorded(ctx);
+  eq([st.hourly, st.counter, st.offerRate ?? offer], [offer, ask, offer], `${msg}: saved state ${JSON.stringify(st)}`);
+};
+Deno.test("CDW offer and ask in one message, then plain and 'ask for $30' follow-ups, keep $24 as the offer", () => {
+  const ctx = fresh();
+  step(ctx, "They offered $24/hour. I want $28/hour. Draft the counter email.", 24, 28);
+  step(ctx, "Now draft the counter email", 24, 28);
+  step(ctx, "Now draft the counter email, ask for $30", 24, 30);
+});
+Deno.test("CDW current pay is neither the offer nor the ask", () => {
+  const a = fresh();
+  host.runTurn(OFFER, a);
+  step(a, "I make $22/hour now, draft the counter email at $28/hour", 24, 28);
+  const b = fresh();
+  step(b, "They offered $24/hour and I make $22/hour now. Draft a counter at $27/hour.", 24, 27);
+  const c = fresh();
+  step(c, "I currently earn $22/hour. They offered $24/hour. Draft a counter at $27/hour.", 24, 27);
+});
+Deno.test("CDW a new employer offer updates the saved offer (thread and ctx.offer), not just the draft", () => {
+  const ctx = fresh();
+  host.runTurn(OFFER, ctx);
+  step(ctx, "They came back and offered $26/hour, draft a counter at $30", 26, 30);
+  eq(recorded(ctx).offerRate, 26);
+});
+Deno.test("CDW 'Should I counter at $28/hour?' is a decision, not a draft", () => {
+  const ctx = fresh();
+  host.runTurn(OFFER, ctx);
+  const r = host.runTurn("Should I counter at $28/hour?", ctx);
+  assert(!r.result?.draft, `drafted: ${r.intent}`);
+  eq(recorded(ctx).counter, null);
+  eq(recorded(ctx).hourly, 24);
+  eq(r.result?.sends ?? 0, 0);
+  const d = stagedDecision({ env: STAGED, message: "Should I counter at $28/hour?", ctx, host, structured: false });
+  assert(d.brain, `brain=${d.brain} reason=${d.reason}`);
+});
+Deno.test("CDW '$22 now; they offered $24; counter at $27' reaches the negotiation path with offer 24 and ask 27", () => {
+  const ctx = fresh();
+  const r = host.runTurn("$22 now; they offered $24/hour; counter at $27", ctx);
+  eq(r.intent, "negotiation_draft");
+  assert(/Thank you for the offer — \$24 an hour/.test(r.result.draft.body) && /meet me at \$27 an hour\?/.test(r.result.draft.body), r.result.draft.body);
 });
 Deno.test("CDW the C04 message verbatim still blanks the ask and keeps the offer", () => {
   const C04 = "Fictional beta scenario, not my profile. Jordan Lee has two years of retail customer-service experience and Excel skills. No external actions and no changes to my profile. A customer support job offered Jordan $24/hour, with no other terms provided. Should Jordan counter, and how? Draft a short counter email for review only. Separate advice from unverified market claims.";

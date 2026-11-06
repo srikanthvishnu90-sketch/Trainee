@@ -15,6 +15,9 @@ const KEEP = [
   'For a final round they may ask "why us?" and "why this role?". Prepare a story for each. Which round is it?',
   "Practice these:\n1. Tell me about yourself?\n2. Why this firm?\n\nWhich one first?",
   "Practice out loud:\nWhy this firm?\nWhy this role?\nWhat is your biggest weakness?",
+  "Practice out loud:\nWhat motivates you?\nHow do you handle conflict?",
+  "Practice out loud:\nWhat motivates you?\nHow do you handle conflict?\n\nWhich do you want to start with?",
+  "They may ask:\nWhy do you want this role?\nWhat is your biggest weakness?",
   "Try: Why this firm? Why this role? What is your biggest weakness?",
   "Worried about gaps? Many people are. What role are you after?",
   "Should you take it? What would you give up? Those decide it.\n\nWhich offer is it?",
@@ -33,6 +36,7 @@ Deno.test("BR-2 true positives: a conjoined or doubled ask at the end of the rep
   assert(multiAsk("Hi, I'm Trainee. What role and city are you after?"));
   assert(multiAsk("The search came back empty.\n\nWhat city should I search? Do you have a school I should use?"));
   assert(multiAsk("Do you have a school and graduation date I should use?"));
+  assert(multiAsk("What city are you targeting?\nWhat school are you at?"), "unlabeled lines");
   assert(multiAsk("Nothing matched.\n\nWhat city are you targeting?\nDo you have a school I should use?"), "two closing lines");
 });
 

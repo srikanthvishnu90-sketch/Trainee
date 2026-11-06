@@ -476,14 +476,19 @@ export function beforeDraft(reply: string): string {
   return m ? t.slice(0, m.index) : t;
 }
 export const hasDraft = (reply: string): boolean => DRAFT_CUE.test(String(reply ?? ""));
+const QUESTION_LABEL = /\b(?:practice|practise|prepare|prep|rehearse|drill|mock|sample|example|likely|typical|questions?|ask(?:ed)?|try|these|try these)\b/i;
 export function endAsks(reply: string): { asks: number; conjoined: boolean } {
   if (hasDraft(reply)) return { asks: 0, conjoined: false };
   const paras = String(reply ?? "").trim().split(/\n\s*\n/);
   const last = paras[paras.length - 1] ?? "";
-  const lines = last.trim().split("\n").filter((l) => l.trim());
+  // Question lines under a label that introduces practice questions ("Practice out loud:", "They may ask:") are material, not asks.
+  const all = last.trim().split("\n").filter((l) => l.trim());
+  const label = all.findIndex((l) => /:\s*$/.test(l.trim()) && QUESTION_LABEL.test(l));
+  const lines = label >= 0 ? all.slice(0, label) : all;
+  if (!lines.length) return { asks: 0, conjoined: false };
   // Marked list items, and three or more bare question lines (a practice list), are items, not asks of the person.
   if (lines.some((l) => LISTLINE.test(l)) || (lines.length >= 3 && lines.every((l) => isQuestion(l)))) return { asks: 0, conjoined: false };
-  const ps = pieces(unquoted(last));
+  const ps = pieces(unquoted(lines.join("\n")));
   const tail: string[] = [];
   for (let i = ps.length - 1; i >= 0 && isQuestion(ps[i].text); i--) tail.unshift(ps[i].text);
   if (tail.length >= 3) return { asks: 0, conjoined: false };

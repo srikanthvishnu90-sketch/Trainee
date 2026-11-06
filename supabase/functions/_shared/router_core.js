@@ -40733,7 +40733,7 @@ const CareerRouter = (() => {
         else if (role === "employer") out.offer = v;
         else if (role === "current") out.current = v;
         else if (out.unknown == null) out.unknown = v;
-      } else if (unit === "none" && role === "ask" && v <= 300 && !(hint && hint.recorded != null && v > 3 * Number(hint.recorded)) && out.askBare == null) out.askBare = v; // plausible as an hourly rate only
+      } else if (unit === "none" && role === "ask" && (hint && hint.recorded != null ? v <= 3 * Number(hint.recorded) : v <= 300) && out.askBare == null) out.askBare = v; // plausible as an hourly rate only
     }
     return out;
   }

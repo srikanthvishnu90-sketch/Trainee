@@ -265,6 +265,27 @@ Deno.test("CDW job wording ('for a childcare role') does not hide the counter; p
   host.runTurn(OFFER, ctx);
   step(ctx, "Their rate is $26/hour; draft a counter at $30", 24, 30);
 });
+Deno.test("CDW a unitless cued ask takes the recorded offer's unit up to 3x it; the $300 cap applies only with no offer", () => {
+  const hi = (msg: string, ask: number) => {
+    const ctx = fresh();
+    host.runTurn("I got an offer of $300/hour.", ctx);
+    const r = host.runTurn(msg, ctx);
+    assert(new RegExp(`meet me at \\$${ask} an hour\\?`).test(r.result.draft.body), `${msg}: ${askLine(r.result.draft.body)}`);
+    eq(recorded(ctx).counter, ask);
+    eq(recorded(ctx).hourly, 300);
+  };
+  hi("Draft a counter at $350", 350);
+  hi("counter at $400", 400);
+  const a = fresh();
+  host.runTurn(OFFER, a);
+  step(a, "counter at $500 for relocation", 24, null);
+  const b = fresh();
+  host.runTurn(OFFER, b);
+  step(b, "counter at $28", 24, 28);
+  const c = fresh();
+  const r = host.runTurn("counter at $350", c);
+  assert(!/meet me at \$350 an hour/.test(r.result?.draft?.body ?? ""), "no offer recorded: the $300 cap holds");
+});
 Deno.test("CDW the C04 message verbatim still blanks the ask and keeps the offer", () => {
   const C04 = "Fictional beta scenario, not my profile. Jordan Lee has two years of retail customer-service experience and Excel skills. No external actions and no changes to my profile. A customer support job offered Jordan $24/hour, with no other terms provided. Should Jordan counter, and how? Draft a short counter email for review only. Separate advice from unverified market claims.";
   const ctx = fresh();

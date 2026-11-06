@@ -316,6 +316,14 @@ export function bodyHtml(rec: FileRecord, token: string, o: { tz?: string | null
     }
     case "plan_review":
       // A stored plan review was validated when it was made, so a "Made by Trainee" line on it came from code (MADE_OK, trusted only).
+      // BETA C03 (2026-11-04): an interview prep File is one phone-sized sheet. Each line keeps its own source chip, but the chip sits on
+      // the line's label row (which has room) instead of wrapping under the text, and the blocks are spaced tighter (.prep in KIND_CSS).
+      // Every question and plan block stays visible; nothing is collapsed or hidden (tests/architect/prep-file.test.ts PF-6).
+      if (d.variant === "interview_prep") {
+        const row = (f: any) => `<div class="fact"><dt><span>${esc(f.label ?? "")}</span>${src(f.source)}</dt><dd>${esc(f.value ?? f.text ?? f.answer)}</dd></div>`;
+        main = `<div class="prep">${d.period ? `<p class="meta">${esc(d.period)}</p>` : ""}${(d.sections ?? []).map((s: any) => sec(s.heading, dl(Fs(s.items, false, true).map(row).join("")))).join("")}</div>`;
+        break;
+      }
       main = (d.period ? `<p class="meta">${esc(d.period)}</p>` : "") + (d.sections ?? []).map((s: any) => sec(s.heading, dl(Fs(s.items, false, true).map((f) => factHtml(f, f.label)).join("")))).join("");
       break;
     case "comparison": {
@@ -405,4 +413,8 @@ textarea{width:100%;min-height:96px;padding:10px 12px;border:1px solid var(--mut
 .foot{margin-top:24px;padding-top:14px;border-top:1px solid var(--line);font-size:15px;color:var(--mute)}.foot a{color:var(--link)}
 /* BETA C03 (2026-11-04): the footer link was 40 px tall at 360 px; every tap target is 44 px (tests/architect/prep-file.test.ts PF-6). */
 .foot a{display:inline-flex;align-items:center;min-height:44px}
+/* BETA C03: the interview prep File, compact at 360 px (bodyHtml plan_review interview_prep). */
+.prep .blk{padding:12px 0}.prep .blk h2{margin:0 0 6px}.prep .fact{margin:0 0 8px}.prep .fact:last-child{margin-bottom:0}
+.prep .fact dt{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.prep .fact dt .src{margin-left:0;font-size:13px;padding:0 7px}
+.prep .fact dd{font-size:17px;line-height:1.4}.fcard:has(.prep){padding:20px 14px 20px}
 `;

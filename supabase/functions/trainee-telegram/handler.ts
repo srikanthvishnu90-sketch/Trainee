@@ -12,7 +12,7 @@ import { supabaseTapStore, tapCard } from "../_shared/channel_card_tap.ts";
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
 import { fetchArtifactBytes } from "../_shared/channel_artifacts.ts";
 import { type JobDeps, type JobSender, sendJobCards, supabaseAccountStamp, supabaseConfirmedFacts, supabaseJobStore, tapJob } from "../_shared/telegram_jobs.ts";
-import { feedUrlsFor } from "../_shared/file_link.ts";
+import { fileAppFor, feedUrlsFor } from "../_shared/file_link.ts";
 import { supabaseCardStore } from "../_shared/career_apply_cards.ts";
 import { escapeHtml, LATENCY_BUDGET, textingNativeOn } from "../_shared/channel_voice.ts";
 
@@ -84,6 +84,7 @@ export function webhookDeps(adapter: ChannelAdapter, d: ProviderWebhookDeps): Co
 export async function handleTelegram(req: Request, d: ProviderWebhookDeps): Promise<Response> {
   // KNOWN GAPS (2026-10-30, #311): the webhook's own replies (a fixed answer, the #301 second message, job cards) get the
   // texting voice too when CAREER_TEXTING_NATIVE=on, like the outbox's delivery (channel_registry.ts); off, unchanged.
-  const adapter = d.adapter ? d.adapter(d.env) : telegramAdapter({ token: d.env.get("TELEGRAM_BOT_TOKEN") || "", webhookSecret: d.env.get("TELEGRAM_WEBHOOK_SECRET") || "", native: textingNativeOn(d.env) });
+  const adapter = d.adapter ? d.adapter(d.env) : telegramAdapter({ token: d.env.get("TELEGRAM_BOT_TOKEN") || "", webhookSecret: d.env.get("TELEGRAM_WEBHOOK_SECRET") || "", native: textingNativeOn(d.env),
+    fileApp: (text) => fileAppFor(d.env, text, d.now()) }); // BETA B1: a File link gets Telegram's sign-in button (file_link.ts)
   return await handleChannelWebhook(req, adapter, webhookDeps(adapter, d));
 }

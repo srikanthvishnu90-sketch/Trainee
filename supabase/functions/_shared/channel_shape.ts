@@ -21,7 +21,9 @@ export const MAX_FILES = 5; // per reply
 export const MAX_LINKS = 5; // per reply, each its own message
 
 export interface ShapedFile { filename: string; content: string; mime: string; bytes: number }
-export interface ShapedReply { answer: string; attachments: ShapedFile[]; links: string[]; notes: string[]; more?: string[] } // more: the one follow-up message
+// parts: a long answer's messages in order (parts[0] is `answer`), each whole sentences, each at most PART_MAX_CHARS; absent for a
+// short answer. (The old `more`, one capped follow-up whose tail was dropped, is gone: beta C12, 2026-11-06.)
+export interface ShapedReply { answer: string; attachments: ShapedFile[]; links: string[]; notes: string[]; parts?: string[] }
 export interface RawShape { answer?: unknown; attachments?: unknown; links?: unknown }
 
 const enc = new TextEncoder();
@@ -79,71 +81,70 @@ export function fileParts(filename: unknown, content: unknown): ShapedFile[] {
   return parts.map((p, i) => ({ filename: parts.length === 1 ? name : `${stem}-${i + 1}-of-${parts.length}${ext}`, content: p, mime, bytes: byteLength(p) }));
 }
 
-const sentences = (s: string) => s.split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter(Boolean);
 
-// A long answer (owner, 2026-10-29: nobody downloads anything; no .md/.txt for advice overflow, on any channel). The reply is its
-// leading COMPLETE sentences up to ANSWER_MAX_CHARS, never cut mid-sentence and never ending on a dangling list ("...these five
-// things: 1) Pick..."): a sentence that opens a list (ends with ":") or is a list item goes to the rest with its list. The rest is
-// whole sentences too, at most MORE_MAX_CHARS; what is beyond that is skipped (a hosted page carries it when one is configured).
-export const MORE_MAX_CHARS = 3000; // the one follow-up message (Telegram allows 4096)
-export const PAGE_CHUNK_CHARS = 580; // one finding on the hosted page; the page holds 12
-export const PAGE_MAX_CHUNKS = 12;
+// LONG ANSWERS WHOLE (beta C12, 2026-11-06; rootcause-report PR-2). A long answer was a ~700-character head plus ONE follow-up capped
+// at 3,000 characters whose tail was dropped, and only the head was stored, so later turns could not see or resend the rest. Now
+// a long answer is sent as whole-sentence parts (answerParts below), each at most PART_MAX_CHARS (the outbox's own limit,
+// conversation.ts OUTBOX_CHARS), nothing cut, through the parts contract (channel_inbound.ts replyParts); the stored reply is the
+// whole answer. Up to MAX_ANSWER_PARTS parts; an answer longer than that ends the last part on a whole sentence with an honest
+// note (PARTS_LEFT_NOTE), and the whole answer is still stored. (A hosted page is not used for this: the research_brief page
+// needs a source link, file_kinds.ts, and an advice answer has none to give it.)
 const LIST_ITEM = /^(?:\d{1,2}[.)]|[-*•])\s/;
-const endsClean = (t: string) => /[.!?]["')\]]?$/.test(t);
-// Sentences, with an inline numbered list ("1) Pick one. 2) Do two.") kept as items of their own.
-function pieces(text: string): string[] {
-  const out: string[] = [];
-  for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
-    const t = line.trim();
-    if (!t) continue;
-    out.push(...t.replace(/\s+(?=\d{1,2}[.)]\s+[A-Z])/g, "\n").split("\n").flatMap((x) => sentences(x)));
+const endsClean = (t: string) => /[.!?]["')\]”’]?$/.test(t);
+export const PART_MAX_CHARS = 4000; // = conversation.ts OUTBOX_CHARS (not imported: this module stays pure); a test checks they match
+export const MAX_ANSWER_PARTS = 4;
+export const PARTS_LEFT_NOTE = "This answer is longer than 4 messages, so it stops here. All of it is saved in this chat; ask for the rest and it comes next.";
+// Where text may be cut: at a run of whitespace that holds a line break, or that follows the end of a sentence; failing those, any
+// whitespace. Each part is an exact slice of the text (trimmed), so the parts together are the text, in order.
+function cutsIn(text: string): { at: number; next: number; kind: "line" | "sentence" | "word" }[] {
+  const out: { at: number; next: number; kind: "line" | "sentence" | "word" }[] = [];
+  for (const m of text.matchAll(/\s+/g)) {
+    const at = m.index!, next = at + m[0].length;
+    if (at === 0 || next >= text.length) continue;
+    const before = text.slice(Math.max(0, at - 6), at);
+    // a list marker ("1." "2)") is not the end of a sentence: never cut between it and its item
+    const marker = /(?:^|\s)\d{1,2}[.)]$/.test(before) || (at <= 3 && /^\d{1,2}[.)]$/.test(before));
+    out.push({ at, next, kind: m[0].includes("\n") ? "line" : !marker && /[.!?]["'”’)\]]*$/.test(before) ? "sentence" : "word" });
   }
   return out;
 }
-const cleanEnd = (t: string) => { const x = t.trim().replace(/[\s,;:–—-]+$/, ""); return endsClean(x) ? x : `${x}.`; };
-// Whole sentences packed into pieces of at most `max` chars (a sentence longer than `max` is cut at a clause or word, ending with a full stop).
-export function chunkSentences(text: string, max: number, limit = Infinity): { chunks: string[]; trimmed: boolean } {
-  const chunks: string[] = [];
-  let cur = "";
-  const push = () => { if (cur) { chunks.push(cur); cur = ""; } };
-  for (let s of pieces(text)) {
-    while (s.length > max) { const c = s.slice(0, max), at = Math.max(c.lastIndexOf(", "), c.lastIndexOf("; ")), w = (at > max / 2 ? c.slice(0, at) : c.replace(/\s+\S*$/, "")).trim(); push(); chunks.push(cleanEnd(w)); s = s.slice(w.length).replace(/^[\s,;]+/, ""); }
-    if (cur && cur.length + 1 + s.length > max) push();
-    cur = cur ? `${cur} ${s}` : s;
+// The head (the first part) is at most ANSWER_MAX_CHARS and never ends on a sentence that opens a list (":") or inside a list.
+const lastLine = (t: string) => t.slice(t.lastIndexOf("\n") + 1).trim();
+const headOk = (before: string) => { const t = before.trim(), l = lastLine(t); return endsClean(t) && !/:$/.test(t) && !LIST_ITEM.test(l) && !/(?:^|\s)\d{1,2}[.)]\s[^\n]*$/.test(l); };
+export function answerParts(answer: string, o: { headMax?: number; max?: number; limit?: number } = {}): { parts: string[]; left: string } {
+  const text = String(answer ?? "").replace(/\r\n/g, "\n").trim();
+  const headMax = o.headMax ?? ANSWER_MAX_CHARS, max = o.max ?? PART_MAX_CHARS, limit = o.limit ?? MAX_ANSWER_PARTS;
+  if (!text) return { parts: [], left: "" };
+  const cuts = cutsIn(text);
+  const parts: string[] = [];
+  let start = 0;
+  // the head: the last clean sentence or line end within headMax (none: no short head, the first part is a full one)
+  const head = cuts.filter((c) => c.at <= headMax && c.kind !== "word" && headOk(text.slice(0, c.at))).pop();
+  if (head && text.length > headMax) { parts.push(text.slice(0, head.at).trim()); start = head.next; }
+  while (start < text.length) {
+    const last = parts.length === limit - 1;
+    const room = last ? max - PARTS_LEFT_NOTE.length - 2 : max;
+    if (text.length - start <= max) { parts.push(text.slice(start).trim()); start = text.length; break; }
+    const inside = cuts.filter((c) => c.at > start && c.at - start <= room);
+    const line = inside.filter((c) => c.kind === "line").pop(), sentence = inside.filter((c) => c.kind !== "word").pop(), word = inside.pop();
+    const pick = line && line.at - start >= room / 2 ? line : sentence ?? (last ? undefined : word);
+    if (!pick) {
+      if (last) break; // the last part ends on a whole sentence or not at all: what is left is said, never cut
+      // one unbroken run longer than a part: split on code points (never inside a character)
+      let chunk = "";
+      for (const ch of text.slice(start, start + max)) { if (chunk.length + ch.length > max) break; chunk += ch; }
+      parts.push(chunk); start += chunk.length; continue;
+    }
+    parts.push(text.slice(start, pick.at).trim()); start = pick.next;
+    if (last) break;
   }
-  push();
-  return { chunks: chunks.slice(0, limit), trimmed: chunks.length > limit };
-}
-export function splitLongAnswer(answer: string): { head: string; rest: string; full: string; trimmed: boolean } | null {
-  const text = answer.trim();
-  if (text.length <= ANSWER_MAX_CHARS) return null;
-  const ps = pieces(text);
-  let n = 0, len = 0;
-  while (n < ps.length) {
-    const add = (n ? 1 : 0) + ps[n].length;
-    if (len + add > ANSWER_MAX_CHARS) break;
-    len += add; n++;
-  }
-  // never end on the sentence that opens a list or on a list item: that goes on to the rest
-  while (n > 1 && (/:$/.test(ps[n - 1]) || LIST_ITEM.test(ps[n - 1]) || !endsClean(ps[n - 1]))) n--;
-  let head = ps.slice(0, n).join(" ");
-  let rest = ps.slice(n);
-  if (n === 1 && (/:$/.test(ps[0]) || LIST_ITEM.test(ps[0]))) { head = ""; rest = ps; }
-  if (!head) { // the first sentence alone is too long: end at a clause, else at a word, with a full stop
-    const first = ps[0] ?? text;
-    const cut = first.slice(0, ANSWER_MAX_CHARS);
-    const clause = Math.max(cut.lastIndexOf(", "), cut.lastIndexOf("; "));
-    const w = (clause > ANSWER_MAX_CHARS / 2 ? cut.slice(0, clause) : cut.replace(/\s+\S*$/, "")).trim();
-    head = cleanEnd(w);
-    rest = [first.slice(w.length).replace(/^[\s,;]+/, "").trim(), ...ps.slice(1)].filter(Boolean);
-  }
-  const more: string[] = [];
-  let used = 0;
-  for (const r of rest) { if (used + r.length + 1 > MORE_MAX_CHARS) break; more.push(r); used += r.length + 1; }
-  while (more.length && (/:$/.test(more[more.length - 1]) || !endsClean(more[more.length - 1]))) more.pop();
-  return { head, rest: more.join(" "), full: rest.join(" "), trimmed: more.length < rest.length };
+  const left = start < text.length ? text.slice(start).trim() : "";
+  if (left && parts.length) parts[parts.length - 1] = `${parts[parts.length - 1]}\n\n${PARTS_LEFT_NOTE}`;
+  return { parts: parts.filter(Boolean), left };
 }
 
+// (Before 2026-11-06 the head was cut at ANSWER_MAX_CHARS by splitLongAnswer and the rest went as one message of at most 3,000
+// characters, MORE_MAX_CHARS, past which it was dropped; the page path chunked it for a research_brief page. Both are gone.)
 // The answer text with every URL taken out (a line that was only a link goes, a link inside a sentence leaves the sentence).
 export function withoutLinks(text: string): string {
   return String(text ?? "").replace(/<!--[\s\S]*?-->/g, "").split("\n").map((line) => {
@@ -154,7 +155,7 @@ export function withoutLinks(text: string): string {
 
 // The shape of one reply. `allowedLinks`: the URLs the turn may show (those a tool returned or the person typed); null: the
 // caller vouches for every link (the code-written replies). A link that is not allowed is dropped from links and answer.
-export function shapeReply(raw: RawShape, o: { allowedLinks?: Iterable<string> | null; overflowLink?: string | null } = {}): ShapedReply {
+export function shapeReply(raw: RawShape, o: { allowedLinks?: Iterable<string> | null } = {}): ShapedReply {
   const notes: string[] = [];
   const allowed = o.allowedLinks ? new Set([...o.allowedLinks].map(trimUrl)) : null;
   let answer = String(raw.answer ?? "").replace(/<!--[\s\S]*?-->/g, "").trim();
@@ -187,16 +188,16 @@ export function shapeReply(raw: RawShape, o: { allowedLinks?: Iterable<string> |
     if (!parts.length) { notes.push("file dropped (empty)"); continue; }
     add(parts);
   }
-  // A long answer is never a file: its head is the reply; the rest is the hosted page's link (code-minted, only when configured),
-  // else one short second message. At most 2 messages.
-  const long = splitLongAnswer(answer);
-  const more: string[] = [];
-  if (long) {
-    answer = long.head;
-    if (o.overflowLink && /^https:\/\//.test(o.overflowLink)) { if (!links.includes(o.overflowLink) && links.length < MAX_LINKS) links.push(o.overflowLink); notes.push("long answer: rest on a page"); }
-    else { if (long.rest) more.push(long.rest); notes.push(long.trimmed ? "long answer: rest in a second message, ended on a sentence; the end was left out (over the 2-message budget)" : "long answer: rest in a second message"); }
+  // A long answer is never a file: it goes as whole-sentence parts (answerParts), the head first, nothing cut (beta C12).
+  let parts: string[] | undefined;
+  if (answer.length > ANSWER_MAX_CHARS) {
+    const p = answerParts(answer);
+    if (p.parts.length > 1) {
+      parts = p.parts; answer = p.parts[0];
+      notes.push(p.left ? `long answer: ${p.parts.length} parts; ${p.left.length} characters past the last part were not sent (the stored reply has them)` : `long answer: ${p.parts.length} parts, whole`);
+    }
   }
-  return { answer, attachments: files, links, notes, ...(more.length ? { more } : {}) };
+  return { answer, attachments: files, links, notes, ...(parts ? { parts } : {}) };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -206,7 +207,7 @@ export type SendStep = { kind: "answer"; text: string } | { kind: "document"; fi
 export function planSends(s: ShapedReply, o: { includeAnswer?: boolean } = {}): SendStep[] {
   return [
     ...(o.includeAnswer !== false && s.answer ? [{ kind: "answer" as const, text: s.answer }] : []),
-    ...(s.more ?? []).map((text) => ({ kind: "answer" as const, text })),
+    ...(s.parts ?? []).slice(1).map((text) => ({ kind: "answer" as const, text })),
     ...s.attachments.map((file) => ({ kind: "document" as const, file })),
     ...s.links.map((url) => ({ kind: "link" as const, url })),
   ];
@@ -230,10 +231,18 @@ export async function deliverShaped(s: ShapedReply, io: ShapeIO, o: { includeAns
 
 // The turn's decision (agent-chat): shape only a Telegram turn, only with CAREER_REPLY_WRITER on, only a turn whose words are
 // not an exact payload the person approves. Anything else is returned untouched and carries no shape.
-export function shapeForTurn(o: { on: boolean; channel: string; writable: boolean; reply: string; attachments?: unknown; allowedLinks?: Iterable<string> | null; overflowLink?: string | null }):
-  { reply: string; shape: { attachments: { filename: string; content: string }[]; links: string[]; more?: string[] } | null; notes: string[] } {
-  if (!o.on || o.channel !== "telegram" || !o.writable) return { reply: o.reply, shape: null, notes: [] };
-  const s = shapeReply({ answer: o.reply, attachments: o.attachments }, { allowedLinks: o.allowedLinks, overflowLink: o.overflowLink });
-  if (!s.answer && !s.attachments.length) return { reply: o.reply, shape: null, notes: s.notes }; // nothing left to say: today's reply stands
-  return { reply: s.answer || o.reply, shape: s.attachments.length || s.links.length || s.more?.length ? { attachments: s.attachments.map((f) => ({ filename: f.filename, content: f.content })), links: s.links, ...(s.more?.length ? { more: s.more } : {}) } : null, notes: s.notes };
+// A long answer comes back as `parts` (the delivery shape, through the parts contract) and `reply` is the WHOLE answer (with the
+// links it shows, each on its own line), so the stored reply (agent_messages) holds everything that was said and more turns can
+// see it (beta C12: only the head was stored).
+export function shapeForTurn(o: { on: boolean; channel: string; writable: boolean; reply: string; attachments?: unknown; allowedLinks?: Iterable<string> | null }):
+  { reply: string; parts: string[] | null; shape: { attachments: { filename: string; content: string }[]; links: string[] } | null; notes: string[] } {
+  if (!o.on || o.channel !== "telegram" || !o.writable) return { reply: o.reply, parts: null, shape: null, notes: [] };
+  const s = shapeReply({ answer: o.reply, attachments: o.attachments }, { allowedLinks: o.allowedLinks });
+  if (!s.answer && !s.attachments.length) return { reply: o.reply, parts: null, shape: null, notes: s.notes }; // nothing left to say: today's reply stands
+  const shape = s.attachments.length || s.links.length ? { attachments: s.attachments.map((f) => ({ filename: f.filename, content: f.content })), links: s.links } : null;
+  if (s.parts) {
+    const whole = withoutLinks(String(o.reply ?? "").replace(/<!--[\s\S]*?-->/g, "")).trim();
+    return { reply: [whole, ...s.links].join("\n"), parts: s.parts, shape, notes: s.notes };
+  }
+  return { reply: s.answer || o.reply, parts: null, shape, notes: s.notes };
 }

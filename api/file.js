@@ -1,8 +1,10 @@
 // /file -> the trainee-file edge function, served as a real HTML page. Supabase answers an edge function's HTML as
 // text/plain on its own domain, so this thin proxy (no logic, no secrets beyond the function's public URL) returns the same
 // body as HTML with the page's security headers. The function signs people in itself (phone code or Telegram).
+import { IMAGE_CSP, pageCsp } from "./_page_csp.js";
 const UPSTREAM = process.env.TRAINEE_FILE_UPSTREAM; // e.g. https://<project>.supabase.co/functions/v1/trainee-file
-const KEEP = ["cache-control", "referrer-policy", "x-robots-tag", "x-content-type-options", "content-security-policy", "allow", "cross-origin-resource-policy"];
+// Never "content-security-policy": on *.supabase.co that is the gateway's sandbox policy, not the page's (BETA B1, ./_page_csp.js).
+const KEEP = ["cache-control", "referrer-policy", "x-robots-tag", "x-content-type-options", "allow", "cross-origin-resource-policy"];
 // An employer's logo (the page's img src "?logo=<domain>", served by the function from its own cache): raster bytes, passed on as
 // bytes with the function's own image type. Read as text and labelled text/html, every logo was mangled (file page sign-in round 4)
 // and the employer's bytes were served on this site as a document. Only these types; anything else is the page's text.
@@ -24,6 +26,7 @@ async function pass(request) {
   if (r.status === 200 && src.searchParams.has("logo") && IMAGE.test(upType)) {
     const img = new Headers({ "content-type": upType });
     for (const k of KEEP) { const v = r.headers.get(k); if (v) img.set(k, v); }
+    img.set("content-security-policy", pageCsp(r.headers, IMAGE_CSP));
     return new Response(await r.arrayBuffer(), { status: 200, headers: img });
   }
   const body = await r.text();
@@ -32,6 +35,7 @@ async function pass(request) {
   const wantsText = src.searchParams.get("format") === "text";
   const h = new Headers({ "content-type": wantsText ? "text/plain; charset=utf-8" : "text/html; charset=utf-8" });
   for (const k of KEEP) { const v = r.headers.get(k); if (v) h.set(k, v); }
+  h.set("content-security-policy", pageCsp(r.headers));
   // Each cookie as its own header (a sign-in sets the session and clears the pending link in one answer; joined, both break).
   const cookies = typeof r.headers.getSetCookie === "function" ? r.headers.getSetCookie() : [r.headers.get("set-cookie")].filter(Boolean);
   for (const c of cookies) h.append("set-cookie", c);

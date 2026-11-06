@@ -262,7 +262,11 @@ const YES = /^yes[.!]*$/i, LINK_REPLY = /^link\s+([0-9]{4})[.!]*$/i, CONNECT_TEL
 export const screenButtons = (qid: string) => [[{ text: "Yes", data: `scr:${qid}:yes` }, { text: "No", data: `scr:${qid}:no` }]];
 export const SCREEN_TAP = /^scr:([0-9a-f]{8}):(yes|no)$/;
 export const SCREEN_REPLY_YES_NO = "Reply yes or no.";
-const MORE_ONE_MESSAGE = 4000; // #301's second message, whole (Telegram takes 4,096; channel_shape.ts MORE_MAX_CHARS is 3,000)
+// #301's second message, whole (Telegram takes 4,096). LONG ANSWERS WHOLE (beta C12, 2026-11-06): agent-chat no longer sends a
+// long answer's rest as shape.more (one capped message whose tail was dropped); it sends the answer as `parts` (the parts
+// contract above, each at most OUTBOX_CHARS, all delivered) with the whole answer as `reply`. shape.more is still honoured
+// here for a caller that sends it.
+const MORE_ONE_MESSAGE = 4000;
 export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out> {
   const now = d.now(), store = d.store;
   if (!(await store.claimMessage(msg.messageId, now, msg.provider))) return ok({ ignored: "duplicate webhook" });

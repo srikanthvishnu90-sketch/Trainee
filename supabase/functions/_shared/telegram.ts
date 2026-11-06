@@ -25,6 +25,8 @@ import { safeSlice, utf8Bytes } from "./channel_text.ts";
 
 export const TELEGRAM_API = "https://api.telegram.org";
 export const TELEGRAM_CHARS = 4096;
+// BETA B1: the label of the web_app button under a File link (opens the File signed in with Telegram, no phone needed).
+export const FILE_APP_BUTTON = "Open in Telegram";
 export const TELEGRAM_CAPTION = 1024; // a photo's caption
 // deno-lint-ignore no-explicit-any
 // CHANNEL DELIVERY SCENARIOS (2026-10-29): a button's callback_data is 1 to 64 BYTES (Bot API, InlineKeyboardButton). It is
@@ -218,6 +220,9 @@ export function telegramAdapter(o: {
   token: string; webhookSecret?: string; fetch?: typeof fetch; timeoutMs?: number;
   clock?: () => number; sleep?: (ms: number) => Promise<void>; native?: boolean;
   sharedPace?: SharedPace; // the database bucket every invocation shares (channel_pacer.ts); absent: this process only, as before
+  // BETA B1: the Mini App URL for a message that is exactly one of Trainee's File links (file_link.ts fileAppFor); that message
+  // then carries a FILE_APP_BUTTON web_app button, Telegram's own sign-in. Absent, or null for the text: the message as before.
+  fileApp?: (text: string) => Promise<string | null>;
 }): ChannelAdapter {
   const f = o.fetch ?? fetch, timeout = o.timeoutMs ?? 15000;
   // With the shared bucket, the chat's one-a-second is its key there; the local pacer keeps only the process's overall gap.
@@ -230,6 +235,12 @@ export function telegramAdapter(o: {
   };
   const paced = (g: { retryAfterMs: number }, why: string, retryable: boolean) => ({ ok: false as const, error: `Telegram pacing: ${why}`, retryable, retryAfterMs: g.retryAfterMs });
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  // BETA B1: a File link alone in its message gets Telegram's own sign-in button under it (a failed lookup: no button).
+  const appKeyboard = async (text: string) => {
+    if (!o.fileApp) return null;
+    const app = await o.fileApp(text).catch(() => null);
+    return app && /^https:\/\//.test(app) ? keyboardOf([[{ text: FILE_APP_BUTTON, webApp: app }]]) : null;
+  };
   // The token rides in the URL; nothing that may be logged carries it.
   const redact = (s: string) => (o.token ? s.split(o.token).join("***") : s);
   // TELEGRAM SCENARIOS (2026-10-30): a 429 says how long to wait (parameters.retry_after, seconds). It was never read: the row
@@ -330,7 +341,8 @@ export function telegramAdapter(o: {
     // https://core.telegram.org/bots/api#linkpreviewoptions, ASSUMED field names), so Telegram shows the title and image card.
     async sendLink(address, url): Promise<SendResult> {
       const g = await pace(address); if (!g.ok) return paced(g, "the shared send budget is spent; try again shortly", true);
-      const r = await call("sendMessage", { chat_id: Number(address), text: safeSlice(url, TELEGRAM_CHARS), link_preview_options: { is_disabled: false, url, prefer_large_media: true } });
+      const app = await appKeyboard(url);
+      const r = await call("sendMessage", { chat_id: Number(address), text: safeSlice(url, TELEGRAM_CHARS), link_preview_options: { is_disabled: false, url, prefer_large_media: true }, ...(app ? { reply_markup: app } : {}) });
       if ("error" in r) return { ok: false, error: redact(`Telegram unreachable: ${r.error instanceof Error ? r.error.message : String(r.error)}`).slice(0, 200), retryable: false };
       if (r.status === 200 && r.body?.ok === true) return { ok: true, id: r.body?.result?.message_id != null ? String(r.body.result.message_id) : null };
       // TELEGRAM ROUND 3: a 429 says how long to wait, so the link waits that long in the outbox (channel_inbound.ts).
@@ -383,7 +395,8 @@ export function telegramAdapter(o: {
         const keyboard = last && opts?.shareContact
           ? { reply_markup: { keyboard: [[{ text: opts.shareContact.slice(0, 64), request_contact: true }]], resize_keyboard: true, one_time_keyboard: true } }
           : last && opts?.removeKeyboard ? { reply_markup: { remove_keyboard: true } }
-          : last && keyboardOf(opts?.buttons) ? { reply_markup: keyboardOf(opts?.buttons) } : {};
+          : last && keyboardOf(opts?.buttons) ? { reply_markup: keyboardOf(opts?.buttons) }
+          : await appKeyboard(telegramPlain(bubbles[i])).then((k) => (k ? { reply_markup: k } : {}));
         const wait = i ? WAIT_MID_REPLY_S : WAIT_IN_PLACE_S;
         // TELEGRAM ROUND 2 (2026-10-30): HTML longer than 4,096 (a job page of 3,600-3,800 characters whose "&" and "<" were
         // escaped: "R&D" is "R&amp;D") was cut at 4,096: inside an entity (Telegram refuses it: a 400, then the plain resend)

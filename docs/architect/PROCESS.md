@@ -54,6 +54,9 @@ judges S2 itself at release; nothing here replaces it.
 - Why 10: S3 lets a reply measurement stand for a candidate whose first-parent ancestors within 10 commits have the same
   reply code. A release of a few merges with no reply-code change reuses the last measurement (no eval spend, no 80-minute
   wait); a 100-merge batch never can, and a failure in it cannot be pinned to one change.
+- The release PR's ledger line (`docs/architect/approvals.txt`) merges on trunk BEFORE the release PR merges (and before
+  the push to `release/production`). S2 waits up to 30 minutes (`--wait-ledger 30`) for a line that is still landing, but
+  that is a safety net, not the process.
 - A failed release is not retried with more merges stacked on it: fix forward with one PR, or release the previous green SHA.
 
 ## Shipping a presentation-only change fast, inside the standard

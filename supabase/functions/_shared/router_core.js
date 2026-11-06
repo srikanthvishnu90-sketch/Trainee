@@ -40730,6 +40730,15 @@ const CareerRouter = (() => {
     }
     return out;
   }
+  // The recorded hourly offer and whether the message is a counter-drafting request: the two facts that decide what an
+  // UNLABELLED hourly figure is. Only employer-cued figures replace a recorded offer; an unlabelled one becomes the offer only
+  // when none is recorded and the message is no counter request; in a counter request it is the ask (equal to the offer: ignored).
+  function offerHint(text, ctx) {
+    let recorded = null;
+    try { const th = negotiationThreadOf(ctx); recorded = (th && th.hourly) || (ctx && ctx.offer && typeof ctx.offer === "object" && ctx.offer.hourly_rate) || null; } catch { recorded = null; }
+    const t = s(text);
+    return { recorded, draft: /\b(?:draft|write|compose|prepare)\b[^.?!]*\bcounter\b|\bcounter\s+(?:email|offer|letter|message)\b/i.test(t) };
+  }
   function parseOfferFigures(text, hint) {
     const out = { hourly: null, hourlyText: null, annual: null, annualText: null, signing: null, signingText: null };
     let work = s(text);
@@ -40748,7 +40757,10 @@ const CareerRouter = (() => {
     // ASK; any other hourly figure is the OFFER. `hourly` stays the first figure, for the callers that record an offer.
     {
       const cf = counterFigures(work, hint);
-      out.recHourly = cf.offer != null ? cf.offer : (cf.ask == null && cf.askBare == null && cf.current == null ? cf.unknown : null);
+      if (hint && hint.draft && cf.unknown != null) {
+        if (hint.recorded != null) { if (Number(cf.unknown) !== Number(hint.recorded) && cf.ask == null) cf.ask = cf.unknown; cf.unknown = null; }
+      }
+      out.recHourly = cf.offer != null ? cf.offer : (cf.ask == null && cf.askBare == null && cf.current == null && !(hint && (hint.draft || hint.recorded != null)) ? cf.unknown : null);
       out.askHourly = cf.ask; out.offerHourly = cf.offer; out.reportedHourly = cf.offer; out.unknownHourly = cf.unknown; out.askBare = cf.askBare;
     }
     if (m) { out.hourly = Number(m[1]); out.hourlyText = m[0].replace(/\s+/g, " ").trim(); work = work.replace(m[0], " "); }
@@ -40814,7 +40826,7 @@ const CareerRouter = (() => {
     // deadline, a role, a detail of the standing offer — still
     // merges exactly as before.
     const namedFirm = (offeredM && offeredM[1].trim()) || (firmM && !/^(a|an|the)$/i.test(firmM[1].trim()) ? firmM[1].trim() : null);
-    const figs = parseOfferFigures(s(text));
+    const figs = parseOfferFigures(s(text), offerHint(text, ctx));
     const seededPrior = (() => { try { const th = negotiationThreadOf(ctx); return !!(th && th.fromAccount); } catch { return false; } })();
     const merged = (namedFirm || ((figs.signing || figs.hourly || figs.annual) && seededPrior)) ? {} : Object.assign({}, prev);
     if (firmM && !/^(a|an|the)$/i.test(firmM[1].trim())) { merged.company_description = firmM[1].trim(); if (!merged.company) merged.company = firmM[1].trim(); }
@@ -44995,7 +45007,7 @@ const CareerRouter = (() => {
         // counter), the signing bonus kept where the user said keep
         // it, and the deadline the record carries.
         if (!extensionContext && (thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || parseOfferFigures(text).hourly)) {
-          const askFigs = parseOfferFigures(text);
+          const askFigs = parseOfferFigures(text, { recorded: thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || null, draft: true });
           // G3: the offer is the employer-reported figure of this message, else the one on record; a figure the person puts in a
           // counter request never replaces it. An unlabelled figure is only a base when nothing is on record.
           const hourlyBase = askFigs.offerHourly || thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || askFigs.unknownHourly || null;
@@ -52369,7 +52381,7 @@ const CareerRouter = (() => {
         // forms the kind parse does not carry (the $-less k forms:
         // "85k", "came back at 120k").
         const askFramed = /\bask(?:ing)? for\s+(?:a\s+|an\s+)?\$?\s?\d|\bcounter\s+(?:at|of|to)\s+\$?\s?\d|\bmake it\s+\$?\s?\d/i.test(cl);
-        const figs0 = parseOfferFigures(cl, { hourly: /\$\s?\d[\d,.]*\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)|\bhourly\b/i.test(raw) });
+        const figs0 = parseOfferFigures(cl, { recorded: offerHint(raw, ctx).recorded, draft: offerHint(raw, ctx).draft, hourly: /\$\s?\d[\d,.]*\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)|\bhourly\b/i.test(raw) });
         const figs = askFramed ? { hourly: null, signing: null, annual: null } : figs0;
         // G3: a counter-drafting request ("draft the counter email at $28/hour", "propose $28/hour") carries the ASK; its hourly
         // figure re-bases the recorded offer only when the same message REPORTS an offer ("they offered $26/hour now").

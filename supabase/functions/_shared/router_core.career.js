@@ -16044,6 +16044,12 @@ const CareerRouter = (() => {
     }
     return out;
   }
+  function offerHint(text, ctx) {
+    let recorded = null;
+    try { const th = negotiationThreadOf(ctx); recorded = (th && th.hourly) || (ctx && ctx.offer && typeof ctx.offer === "object" && ctx.offer.hourly_rate) || null; } catch { recorded = null; }
+    const t = s(text);
+    return { recorded, draft: /\b(?:draft|write|compose|prepare)\b[^.?!]*\bcounter\b|\bcounter\s+(?:email|offer|letter|message)\b/i.test(t) };
+  }
   function parseOfferFigures(text, hint) {
     const out = { hourly: null, hourlyText: null, annual: null, annualText: null, signing: null, signingText: null };
     let work = s(text);
@@ -16058,7 +16064,10 @@ const CareerRouter = (() => {
     m = work.match(/\$\s?(\d{1,3}(?:\.\d{1,2})?)\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)/i);
     {
       const cf = counterFigures(work, hint);
-      out.recHourly = cf.offer != null ? cf.offer : (cf.ask == null && cf.askBare == null && cf.current == null ? cf.unknown : null);
+      if (hint && hint.draft && cf.unknown != null) {
+        if (hint.recorded != null) { if (Number(cf.unknown) !== Number(hint.recorded) && cf.ask == null) cf.ask = cf.unknown; cf.unknown = null; }
+      }
+      out.recHourly = cf.offer != null ? cf.offer : (cf.ask == null && cf.askBare == null && cf.current == null && !(hint && (hint.draft || hint.recorded != null)) ? cf.unknown : null);
       out.askHourly = cf.ask; out.offerHourly = cf.offer; out.reportedHourly = cf.offer; out.unknownHourly = cf.unknown; out.askBare = cf.askBare;
     }
     if (m) { out.hourly = Number(m[1]); out.hourlyText = m[0].replace(/\s+/g, " ").trim(); work = work.replace(m[0], " "); }
@@ -16090,7 +16099,7 @@ const CareerRouter = (() => {
     const firmM = s(text).match(/\boffer is from\s+(?:a\s+|an\s+|the\s+)?(.+?)(?:,|\s+deadline|\s+role|\s*$)/i);
     const offeredM = s(text).match(/\b([A-Z][A-Za-z0-9&.]+(?:\s+[A-Z][A-Za-z0-9&.]+){0,2})(?:\s+(?:just|has|have|had))?\s+offered me\b/);
     const namedFirm = (offeredM && offeredM[1].trim()) || (firmM && !/^(a|an|the)$/i.test(firmM[1].trim()) ? firmM[1].trim() : null);
-    const figs = parseOfferFigures(s(text));
+    const figs = parseOfferFigures(s(text), offerHint(text, ctx));
     const seededPrior = (() => { try { const th = negotiationThreadOf(ctx); return !!(th && th.fromAccount); } catch { return false; } })();
     const merged = (namedFirm || ((figs.signing || figs.hourly || figs.annual) && seededPrior)) ? {} : Object.assign({}, prev);
     if (firmM && !/^(a|an|the)$/i.test(firmM[1].trim())) { merged.company_description = firmM[1].trim(); if (!merged.company) merged.company = firmM[1].trim(); }
@@ -19021,7 +19030,7 @@ const CareerRouter = (() => {
           } catch {   }
         }
         if (!extensionContext && (thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || parseOfferFigures(text).hourly)) {
-          const askFigs = parseOfferFigures(text);
+          const askFigs = parseOfferFigures(text, { recorded: thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || null, draft: true });
           const hourlyBase = askFigs.offerHourly || thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || askFigs.unknownHourly || null;
           askFigs.ask = askFigs.askHourly != null ? askFigs.askHourly : askFigs.askBare != null ? askFigs.askBare : null;
           if (askFigs.offerHourly != null) { try { ctx.offer = Object.assign({}, (ctx.offer && typeof ctx.offer === "object") ? ctx.offer : {}, { hourly_rate: askFigs.offerHourly }); negotiationThreadForWrite(ctx).hourly = askFigs.offerHourly; } catch {   } }
@@ -23930,7 +23939,7 @@ const CareerRouter = (() => {
         else if ((m = cl.match(/\boffer\b[^.!?]*?\b(?:from|at)\s+([A-Z][A-Za-z0-9&.]+(?:\s+[A-Z][A-Za-z0-9&.]+){0,2})/)) && !NOT_A_FIRM.test(m[1].trim())) rec.firm = m[1].trim();
         if (!rec.firm && !rec.descriptor && (m = cl.match(/\boffer\b[^.!?]*?\bfrom\s+an?\s+([a-z][a-z -]{1,28}?\b(?:startup|company|firm|bank|fund|agency|studio|shop|co|insurer|practice|group))\b/i))) rec.descriptor = m[1].trim();
         const askFramed = /\bask(?:ing)? for\s+(?:a\s+|an\s+)?\$?\s?\d|\bcounter\s+(?:at|of|to)\s+\$?\s?\d|\bmake it\s+\$?\s?\d/i.test(cl);
-        const figs0 = parseOfferFigures(cl, { hourly: /\$\s?\d[\d,.]*\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)|\bhourly\b/i.test(raw) });
+        const figs0 = parseOfferFigures(cl, { recorded: offerHint(raw, ctx).recorded, draft: offerHint(raw, ctx).draft, hourly: /\$\s?\d[\d,.]*\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)|\bhourly\b/i.test(raw) });
         const figs = askFramed ? { hourly: null, signing: null, annual: null } : figs0;
         const counterDraftReq = /\b(?:draft|write|compose|prepare)\b[^.?!]*\bcounter\b|\bcounter\s+(?:email|offer|letter|message)\b|\bpropos(?:e|ing)\s+\$|\bask(?:ing)?\s+(?:for\s+)?\$/i.test(cl);
         figs.hourly = figs0.recHourly;

@@ -205,6 +205,23 @@ Deno.test("CDW 'a rate of' after the employer's verb stays the offer; a unit wor
     assert(!/\$1,?000 an hour/.test(host.runTurn("Draft the counter email.", ctx).result.draft.body), msg);
   }
 });
+Deno.test("CDW an unlabelled hourly figure never replaces a recorded offer: in a counter request it is the ask", () => {
+  for (const msg of ["a relocation allowance of $500 and $28/hour; draft the counter", "$28/hour please, draft the counter"]) {
+    const ctx = fresh();
+    host.runTurn("They offered $24/hour.", ctx);
+    eq(recorded(ctx).hourly, 24);
+    step(ctx, msg, 24, 28);
+    step(ctx, "Draft the counter email.", 24, 28);
+  }
+});
+Deno.test("CDW 'They pay $24/hour' then '$26/hour' alone keeps 24 (unclear, not a silent replace)", () => {
+  const ctx = fresh();
+  host.runTurn("They pay $24/hour.", ctx);
+  eq(recorded(ctx).hourly, 24);
+  host.runTurn("$26/hour", ctx);
+  eq(recorded(ctx).hourly, 24);
+  eq(recorded(ctx).offerRate ?? 24, 24);
+});
 Deno.test("CDW the C04 message verbatim still blanks the ask and keeps the offer", () => {
   const C04 = "Fictional beta scenario, not my profile. Jordan Lee has two years of retail customer-service experience and Excel skills. No external actions and no changes to my profile. A customer support job offered Jordan $24/hour, with no other terms provided. Should Jordan counter, and how? Draft a short counter email for review only. Separate advice from unverified market claims.";
   const ctx = fresh();

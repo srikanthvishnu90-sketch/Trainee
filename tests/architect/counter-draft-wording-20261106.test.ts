@@ -396,3 +396,20 @@ Deno.test("CDW a unitless employer figure never inherits its unit from another f
   assert(/Thank you for the offer — \$24 an hour/.test(t.body) && /meet me at \$30 an hour\?/.test(t.body), t.body);
   eq([recorded(t.ctx).hourly, recorded(t.ctx).counter, recorded(t.ctx).offerRate], [24, 30, 24]);
 });
+
+Deno.test("CDW the unit-before-amount rule is an exact pattern: 'hourly staff get a $500 bonus' is no offer", () => {
+  const run = (msg: string) => { const ctx = fresh(); const r = host.runTurn(msg, ctx); return { ctx, r, body: String(r.result?.draft?.body ?? "") }; };
+  let t = run("hourly staff get a $500 bonus");
+  eq([recorded(t.ctx).hourly, recorded(t.ctx).offerRate ?? null], [null, null]);
+  assert(!/\$500 an hour/.test(t.body + String(t.r.result?.reply ?? "")), "500 is not hourly");
+  t = run("hourly bonus of $500; counter at $28/hour");
+  eq(recorded(t.ctx).hourly, null);
+  assert(!/\$500 an hour/.test(t.body), t.body);
+  assert(t.body === "" || /meet me at \$28 an hour\?/.test(t.body), t.body);
+  t = run("the hourly pay is $25; counter at $29/hour");
+  assert(/Thank you for the offer — \$25 an hour/.test(t.body) && /meet me at \$29 an hour\?/.test(t.body), t.body);
+  eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [25, 29]);
+  t = run("hourly rate for nights is $30; counter at $35/hour");
+  eq(recorded(t.ctx).hourly, null); // intervening words: unitless, no recorded offer, fail-safe
+  assert(!/Thank you for the offer — \$30 an hour/.test(t.body), t.body);
+});

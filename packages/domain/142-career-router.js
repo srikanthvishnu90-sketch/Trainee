@@ -3840,11 +3840,12 @@ const CareerRouter = (() => {
       else if (/^\s*(?:per\s+|an?\s+|\/\s?)(?:week|wk)|^\s*weekly/i.test(after)) unit = "week";
       else if (/^\s*(?:per\s+|an?\s+|\/\s?)(?:month|mo)\b|^\s*monthly/i.test(after)) unit = "month";
       else if (mm[2] || /^\s*(?:per\s+|an?\s+|\/\s?)(?:year|yr)|^\s*(?:annual|yearly|salary)/i.test(after) || /,\d{3}/.test(mm[1]) && Number(mm[1].replace(/,/g, "")) >= 1000 && !attached(after, before)) unit = "year";
-      // A unit word BEFORE the amount, in the same clause within about four words and with no figure between ("the hourly offer is
-      // $24", "annual salary of $90,000"), is an explicit unit, like "$24/hour"; it needs no recorded offer.
+      // A unit word BEFORE the amount is an explicit unit only in this exact shape, with the amount immediately after:
+      //   [the|their] (hourly|annual|yearly) (offer|rate|pay|wage|salary|base) [rate] [is|of|at|=|:|was|will be] $X
+      // Anything else between the unit word and the amount ("hourly staff get a $500 bonus") leaves the figure unitless.
       if (unit === "none") {
-        if (/\bhourly\b(?:\s+[\w'-]+){0,3}\s*(?:is|of|at|was|:|=)?\s*$/i.test(seg)) unit = "hour";
-        else if (/\b(?:annual|yearly)\b(?:\s+[\w'-]+){0,3}\s*(?:is|of|at|was|:|=)?\s*$/i.test(seg)) unit = "year";
+        const pm = seg.match(/(?:^|\b)(?:(?:the|their)\s+)?(hourly|annual|yearly)\s+(?:offer|rate|pay|wage|salary|base)(?:\s+rate)?\s*(?:is|of|at|=|:|was|will\s+be)?\s*$/i);
+        if (pm) unit = /^hourly$/i.test(pm[1]) ? "hour" : "year";
       }
       if (unit !== "hour" && attached(after, before)) unit = "one-time";
       const ci = lastIdx(current, seg);

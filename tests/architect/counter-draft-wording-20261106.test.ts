@@ -835,3 +835,19 @@ Deno.test("CDW market exit, every unit: a third party's bonus or salary is never
   const b = run(OFFER, "They offered $26 an hour plus a $2,000 signing bonus. Draft a counter at $30/hour");
   eq(b.th.signing, 2000, "the employer's own bonus is still recorded");
 });
+
+// Review of 77c02aad: a cited source is a third party even in a compound ("market data", "market intelligence", "stock market
+// jobs") or after a comma ("Indeed, similar jobs offer"); only an auxiliary "indeed" and a role/team name ("a market research
+// role") are incidental.
+Deno.test("CDW market exit: cited sources hold the turn; only an auxiliary 'indeed' and a market role name are incidental", () => {
+  for (const prior of [OFFER, null]) for (const row of [
+    "Market data puts offers at $28/hour", "On Indeed, similar jobs offer $28/hour", "Indeed, similar jobs offer $28/hour",
+    "Per market intelligence, roles like this offer $28/hour", "Stock market jobs offer $28/hour", "Similar roles offer $28/hour",
+  ]) {
+    const msg = `${row}. Draft a counter at $30/hour`;
+    const ctx = fresh();
+    if (prior) host.runTurn(prior, ctx);
+    const before = recorded(ctx).hourly;
+    heldForBrain(ctx, host.runTurn(msg, ctx), before, msg);
+  }
+});

@@ -980,7 +980,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // rollback, and then it is never taken and the router answers exactly as before. Read lazily, only when the brain
       // test below is reached. With no model key configured the staged brain is never tried: the router answers, as it
       // does when the model fails (D-035).
-      let capHeld: "limit" | "unread" | null = null;
+      let capHeld = null as "limit" | "unread" | null; // cast: an initialiser of null would narrow every later read to never
       const staged = stagedRoute({ env: Deno.env, message, ctx: ctx as unknown as Record<string, unknown>, host, structured: !!(careerTask || careerBatch), clock });
       // A "judge prompt: ..." instruction is code's (judgePromptTurn), and without a model key the brain is never tried.
       const stagedReady = !isJudgePromptAsk(message) && !!careerModelConfig(Deno.env).apiKey;
@@ -1151,13 +1151,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const at = { now: Date.now(), unread: capHeld === "unread" };
         // A crisis message is code's 988 reply first, as in the router else-block below (crisis.ts).
         const capCrisis = crisisReply(message);
-        let view = capCrisis ? { reply: capCrisis, intent: CRISIS_INTENT, status: "completed" as const } : capViewFor(message, at);
-        if (!view) {
+        const capShown = (v: { reply: string; intent: string; status: "completed" }): typeof out => ({ reply: v.reply, intent: v.intent, resultStatus: v.status, contained: false, handler: capCrisis ? "crisis" : "cap_view" });
+        const view = capCrisis ? { reply: capCrisis, intent: CRISIS_INTENT, status: "completed" as const } : capViewFor(message, at);
+        if (view) out = capShown(view);
+        else {
           await ensurePool();
           out = clock.sync("router", () => host.runTurn(message, ctx));
-          if (!out.intent || CAP_REPLACED_INTENTS.includes(out.intent)) view = capPausedView(at);
+          if (!out.intent || CAP_REPLACED_INTENTS.includes(out.intent)) out = capShown(capPausedView(at));
         }
-        if (view) out = { reply: view.reply, intent: view.intent, resultStatus: view.status, contained: false, handler: capCrisis ? "crisis" : "cap_view" };
         agentMeta = { ...(agentMeta || {}), model_limit: capHeld };
       } else {
         // FEATURE 5: job search ranked by fit and judged (_shared/career_search_judge.ts). "judge prompt: ..." keeps the

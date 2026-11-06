@@ -76,5 +76,5 @@ export function capViewFor(message: string, o: { now: number; unread?: boolean }
 // The router had nothing for this turn: say so plainly instead of "I'm not sure which part".
 export function capPausedView(o: { now: number; unread?: boolean }): CapView {
   const until = o.unread ? "I can check today's usage again" : capResetAt(o.now);
-  return { reply: `AI answers are paused until ${until}; these still work: ${STILL_WORKS}`, intent: CAP_VIEW_INTENT, status: "completed" };
+  return { reply: `AI answers are paused until ${until}; these still work: ${STILL_WORKS}\n${o.unread ? SPEND_UNREAD_NOTE : LIMIT_NOTE}`, intent: CAP_VIEW_INTENT, status: "completed" };
 }

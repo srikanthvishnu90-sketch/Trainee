@@ -338,3 +338,13 @@ Deno.test("CDW allowlist: a cued unitless figure is hourly only with an empty or
   assert(!/meet me at \$500 an hour/.test(rel.body), askLine(rel.body));
   eq(recorded(rel.ctx).counter, null);
 });
+
+Deno.test("CDW '$50 for travel to work' is not an hourly ask: placeholder, nothing saved as the counter", () => {
+  const ctx = fresh();
+  host.runTurn(OFFER, ctx);
+  const r = host.runTurn("Draft a counter email asking for $50 for travel to work", ctx);
+  const body: string = r.result.draft.body;
+  assert(/\[your target hourly rate\]/.test(body) && !/meet me at \$50 an hour/.test(body), askLine(body));
+  eq(recorded(ctx).counter, null);
+  eq(recorded(ctx).hourly, 24);
+});

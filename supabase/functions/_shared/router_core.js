@@ -40704,7 +40704,7 @@ const CareerRouter = (() => {
       if (/^for$/i.test(aw[0] || "")) start = /^(?:an?|the|my)$/i.test(aw[1] || "") ? 2 : 1;
       for (let i = start; i < Math.min(aw.length, start + 3); i++) {
         if (BLOCK.test(aw[i])) break;
-        if (NOUN_RE.test(aw[i])) { if (ROLE.test(aw[i + 1] || "") || ROLE.test(aw[i + 2] || "")) break; return true; }
+        if (NOUN_RE.test(aw[i])) { if (ROLE.test(aw[i + 1] || "")) break; return true; }
       }
       const bm = before.match(new RegExp("(?:^|\\s)((?:" + NOUN + ")(?:\\s+\\w+){0,2})\\s*(?:of|is|at|:|=)?\\s*$", "i"));
       return !!bm && !/\b(?:no|without|not|zero|never)\b/i.test(before.slice(0, bm.index + bm[0].length - bm[1].length).split(/[,;.]/).pop().slice(-12));

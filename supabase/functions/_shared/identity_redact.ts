@@ -53,17 +53,19 @@ const NOT_A_BARE_PASSWORD = /^(?:is|was|for|to|of|on|in|at|and|or|the|a|an|my|yo
 // research / design" are no pair.
 const SIGN_IN_WAY = /^(?:sso|saml|oauth2?|openid|oidc|google|apple|github|gitlab|microsoft|azure|okta|facebook|linkedin|email|phone|sms|passkeys?|face ?id|touch ?id|biometrics?|magic link|ldap|kerberos|face|fingerprint|pin|device|passcode|password|touch|voice)$/i;
 const SIGN_IN_PAIR = /\b(login|log-in|sign[- ]?in with|creds|credentials|user ?name)((?:\s+(?:for|to|on)\s+[^/:\n]{1,30}?)?\s*(?:\bis\b|\bare\b|=|:|-)\s*|(?<=with)\s+)([^\s/:]+\s*\/\s*)([^\s/]{3,})/gi;
-const CODE_LABELED = /\b((?:one[- ]time|verification|security|sign[- ]?in|login|log[- ]in|2fa|mfa|otp|auth(?:entication)?)\s*(?:code|pin|passcode|number)?)(\s*(?:is|=|:|#)?\s*)(\d(?:[ -]?\d){3,7})\b/gi;
+const CODE_LABELED = /\b((?:one[- ]time|verification|security|sign[- ]?in|login|log[- ]in|2fa|mfa|otp|auth(?:entication)?)\s*(?:code|pin|passcode|number)?)(\s*(?:is|=|:|#)?\s*)(\d(?:[ \n-]?\d){3,7})\b/gi;
 // "code is 4821", "here's the code: 482 913", "sms code 4821", "pin: 4821", "the code they texted me is 482-913": a code or
 // PIN, unless the code is named as something else (a zip, area, promo, course, error, referral ... code).
 const NAMED_CODE = String.raw`(?<!\b(?:zip|postal|post|area|country|promo|promotional|discount|coupon|referral|course|class|error|status|dial|tax|product|source|job|dress|invite|invitation|gift|reference|ref|airport|naics|sic|cpt|icd|sort|swift|bank|routing|color|colour|style|item|sku|morse|qr|bar|req|requisition|position|posting|role|department|dept|cost|budget|project|program|module|unit|soc|fips|vendor|supplier|ticket|order|voucher|offer|event|building|naics|source|zip\+4)[\s-])`;
-const CODE_ANY = new RegExp(String.raw`${NAMED_CODE}\b(code|pin(?: code| number)?)(\s*(?:\bis\b|=|:|#)\s*|\s+)(\d(?:[ -]?\d){3,7})\b(?![-.\/]?\d)`, "gi");
+const CODE_ANY = new RegExp(String.raw`${NAMED_CODE}\b(code|pin(?: code| number)?)(\s*(?:\bis\b|=|:|#)\s*|\s+)(\d(?:[ \n-]?\d){3,7})\b(?![-.\/]?\d)`, "gi");
 const CODE_LOOSE = new RegExp(String.raw`${NAMED_CODE}\b(code\b[^.\n\d]{1,40}?\s(?:is|was|=|:)\s*)(\d(?:[ -]?\d){3,7})\b(?![-.\/]?\d)`, "gi");
 const DATE_LIKE = /^(?:19|20)\d\d-\d\d?-\d\d?$/;
 const CVV_LABELED = /\b(cvv2?|cvc2?|csc|cvn|cid)(\s*(?:code|number)?\s*(?:is|=|:)?\s*)(\d{3,4})\b/gi;
 // Battery 2026-10-30 (scenarios-billing-cancel.test.ts): a card's security code by its other names ("security code is
 // 123", "the 3 digits on the back are 123"), and an IBAN, were kept word for word.
-const CVV_NAMED = /\b((?:card )?(?:security|verification) code|(?:three|3)[- ]digits? on the back(?: of (?:my|the) card)?)(\s*(?:is|are|=|:)?\s*)(\d{3,4})\b(?![-.\/]?\d)/gi;
+const CVV_NAMED = /\b((?:card )?(?:security|verification) code|(?:three|3)[- ]digits? on the back(?: of (?:my|the) card)?)(\s*(?:is|are|=|:)?\s*)(\d{3,4})\b(?![-.\/]?\d)([ \n]+\d{3,4}\b(?![-.\/]?\d))?/gi;
+// A bare "security code" or "verification code" may be a code in two groups ("739\n201"): the second group goes too. Whatever the
+// first regex matched is removed, whatever follows it; a card label ("card security code", "3 digits on the back") keeps the group.
 const IBAN = /\b([A-Za-z]{2}\d{2}(?:[ ]?[A-Za-z0-9]{4}){2,7}(?:[ ]?[A-Za-z0-9]{1,4})?)\b/g;
 function ibanOk(raw: string) {
   const s = raw.replace(/ /g, "").toUpperCase();
@@ -134,7 +136,7 @@ export function redactIdentity(input: string, o: { codePending?: boolean } = {})
     removed.add("password"); return `${label}${sp}[password removed]`;
   });
   t = t.replace(CVV_LABELED, (_m, label, sep) => { removed.add("card"); return `${label}${sep}[security code removed]`; });
-  t = t.replace(CVV_NAMED, (_m, label, sep) => { removed.add("card"); return `${label}${sep}[security code removed]`; });
+  t = t.replace(CVV_NAMED, (_m, label: string, sep, _digits, more?: string) => { removed.add("card"); return `${label}${sep}[security code removed]${more && /card|digit/i.test(label) ? more : ""}`; });
   t = t.replace(IBAN, (m) => { if (!ibanOk(m)) return m; removed.add("account"); return "[number removed]"; });
   if (o.codePending) t = t.replace(BARE_CODE, () => { removed.add("code"); return "[code removed]"; });
   t = t.replace(KEY_SHAPED, () => { removed.add("key"); return "[key removed]"; });

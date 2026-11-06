@@ -16043,7 +16043,7 @@ const CareerRouter = (() => {
       if (unit !== "hour" && attached(after, before)) unit = "one-time";
       const ci = lastIdx(current, seg);
       const ui = lastIdx(user, seg), ei = lastIdx(employer, seg.replace(current, (x) => " ".repeat(x.length)));
-      const trailingCurrent = /^[^.?!;,\n]{0,24}?\b(?:at\s+my\s+(?:current\s+|present\s+)?(?:job|employer|company|role)|(?:in|from)\s+my\s+(?:current|present)\b|where\s+i\s+work(?:\s+now)?)\b/i.test(after);
+      const trailingCurrent = /^[^.?!;,\n]{0,24}?\b(?:at\s+my\s+(?:current\s+|present\s+)?(?:job|employer|company|role)|(?:in|from)\s+my\s+(?:current|present)\b|where\s+i\s+work(?:\s+now)?)\b/i.test(after.split("$")[0]);
       let role = (ci >= 0 && ci >= ui && ci >= ei) || (trailingCurrent && ui < 0 && lastIdx(/\b(?:offer(?:ed|ing|s)?|proposed|came\s+back|quoted|countered|comes\s+to)\b/ig, seg) < 0) ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
       if (role === "unknown" && prevRole === "ask" && !/[.?!;\n]/.test(src.slice(prevEnd, start)) && /(?:\band\b|\bplus\b|&|,)\s*$/i.test(seg)) role = "ask";
       const v = Number(mm[1].replace(/,/g, ""));

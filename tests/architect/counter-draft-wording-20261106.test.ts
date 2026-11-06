@@ -520,3 +520,17 @@ Deno.test("CDW 'now' inside a current-pay phrase is a cue; explicit current-job 
   const b = fresh(); host.runTurn("They offered $26/hour right now.", b);
   eq(recorded(b).hourly, 26);
 });
+
+Deno.test("CDW a trailing current-job phrase applies only to the nearest figure before it", () => {
+  const go = (msg: string) => { const ctx = fresh(); host.runTurn(OFFER, ctx); const r = host.runTurn(msg, ctx); return { ctx, body: String(r.result?.draft?.body ?? "") }; };
+  const ok = (msg: string, offer: number, ask: number) => {
+    const t = go(msg);
+    assert(new RegExp(`Thank you for the offer — \\$${offer} an hour`).test(t.body) && new RegExp(`meet me at \\$${ask} an hour\\?`).test(t.body), `${msg}: ${t.body}`);
+    eq([recorded(t.ctx).hourly, recorded(t.ctx).counter], [offer, ask], msg);
+    assert(recorded(t.ctx).hourly !== 22 && recorded(t.ctx).offerRate !== 22, msg);
+  };
+  ok("They pay $26/hr vs $22/hr at my job; draft a counter at $30/hr", 26, 30);
+  ok("They pay $26/hr; I get $22/hr at my current job; counter at $30/hr", 26, 30);
+  ok("$22/hr at my job, they pay $26/hr; counter at $30/hr", 26, 30);
+  ok("They pay $26/hour at my current job; counter at $30/hour", 24, 30);
+});

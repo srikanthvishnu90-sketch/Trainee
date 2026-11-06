@@ -40739,7 +40739,7 @@ const CareerRouter = (() => {
       const ci = lastIdx(current, seg);
       // an employer word inside the current-pay phrase ("my current job pays") is not an employer cue
       const ui = lastIdx(user, seg), ei = lastIdx(employer, seg.replace(current, (x) => " ".repeat(x.length)));
-      const trailingCurrent = /^[^.?!;,\n]{0,24}?\b(?:at\s+my\s+(?:current\s+|present\s+)?(?:job|employer|company|role)|(?:in|from)\s+my\s+(?:current|present)\b|where\s+i\s+work(?:\s+now)?)\b/i.test(after);
+      const trailingCurrent = /^[^.?!;,\n]{0,24}?\b(?:at\s+my\s+(?:current\s+|present\s+)?(?:job|employer|company|role)|(?:in|from)\s+my\s+(?:current|present)\b|where\s+i\s+work(?:\s+now)?)\b/i.test(after.split("$")[0]); // the scan stops at the next money figure
       // an explicit ask cue or an employer offer cue on the figure always beats a current-pay cue
       let role = (ci >= 0 && ci >= ui && ci >= ei) || (trailingCurrent && ui < 0 && lastIdx(/\b(?:offer(?:ed|ing|s)?|proposed|came\s+back|quoted|countered|comes\s+to)\b/ig, seg) < 0) ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
       // An ask cue carries across "and" / "plus" / "," inside the same clause ("ask for $500 relocation and $28 an hour").

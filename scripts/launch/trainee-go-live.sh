@@ -451,7 +451,7 @@ EARLIER_MARK=("to_regclass('public.career_kb_roles') is not null"
   "to_regclass('public.career_batch_ledgers_v1') is not null"
   "exists (select 1 from pg_proc where proname = 'career_host_commit' and prosrc like '%stated_facts%')")
 SCHEDULED=(career-ingest career-proactive trainee-deliver trainee-inbound career-form-schema)
-SCHED_VARS=(CAREER_INGEST_SECRET CAREER_PROACTIVE_SECRET TRAINEE_DELIVER_SECRET TRAINEE_INBOUND_SECRET CAREER_FORM_SCHEMA_SECRET)
+SCHED_VARS=(CAREER_INGEST_SECRET CAREER_PROACTIVE_SECRET TRAINEE_DELIVER_SECRET TRAINEE_INBOUND_SECRET)
 # WO-038: the Telegram and WhatsApp webhooks (deployed always; without their secrets they answer 503 NOT_WIRED).
 CHANNEL_FNS=(trainee-telegram trainee-whatsapp)
 # M4: the Outlook connect link and Microsoft's redirect (public: the one-time link, the signed state and the jobs secret
@@ -1187,8 +1187,6 @@ else
   sched CAREER_INGEST_SECRET career-ingest scripts/launch/schedule-career-ingest.sql
   sched CAREER_PROACTIVE_SECRET career-proactive scripts/launch/schedule-career-proactive.sql
   sched TRAINEE_DELIVER_SECRET trainee-deliver scripts/launch/schedule-trainee-deliver.sql
-  # WO-121: each new Greenhouse, Lever and Ashby posting's form, read once (every minute).
-  sched CAREER_FORM_SCHEMA_SECRET career-form-schema scripts/launch/schedule-career-form-schema.sql
   # Removing a schedule is the owner's call, by exact name: with no --unschedule-cron, nothing is removed.
   if [[ -z "$UNSCHEDULE_CRON" ]]; then echo "  kept: every other pg_cron job (none named with --unschedule-cron)"
   else

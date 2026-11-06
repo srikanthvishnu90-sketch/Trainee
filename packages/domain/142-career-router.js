@@ -3802,11 +3802,14 @@ const CareerRouter = (() => {
     {
       const reH = /\$\s?(\d{1,3}(?:\.\d{1,2})?)\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)/ig;
       const askCue = /(?:\bcounter(?:ing|ed)?(?:\s+(?:at|to|with|for))?|\bask(?:ing)?\s+for|\bmeet\s+me\s+at|\bwant(?:ing)?|\btarget(?:ing)?|\blooking\s+for|\bhop(?:e|ing)\s+for|\bmake\s+it|\bchange\s+(?:it|the\s+\w+)\s+to|\bneed|\brequest(?:ing)?|\bpush\s+for|\bgo\s+for|\bwould\s+like|['’]d\s+like)\W{0,3}(?:(?:something\s+like|about|around|at|to|up\s+to)\W{0,3})?$/i;
+      // Greptile P1 on #549: draft-rate wording names the ASK too ("Draft the counter email at $28/hour", "write it at $28"),
+      // unless the clause itself reports the employer's figure ("draft a reply: they came back at $26/hour").
+      const draftCue = /\b(?:draft|write|compose|redraft|rewrite|redo)\b(?![^$]*\b(?:offer(?:ed|s)?|came\s+back|come\s+back|countered|gave|giving|pays?|paying)\b)[^$]*\bat\W{0,3}$/i;
       let h;
       while ((h = reH.exec(work))) {
         const clause = work.slice(0, h.index).split(/[.?!]/).pop();
         const v = Number(h[1]);
-        if (askCue.test(clause)) { if (out.askHourly == null) out.askHourly = v; } else if (out.offerHourly == null) out.offerHourly = v;
+        if (askCue.test(clause) || draftCue.test(clause)) { if (out.askHourly == null) out.askHourly = v; } else if (out.offerHourly == null) out.offerHourly = v;
       }
     }
     if (m) { out.hourly = Number(m[1]); out.hourlyText = m[0].replace(/\s+/g, " ").trim(); work = work.replace(m[0], " "); }
@@ -3815,6 +3818,12 @@ const CareerRouter = (() => {
     else { const mp = work.match(/\$\s?([\d,]{4,})/); if (mp) out.annual = num(mp[1]); }
     if (out.annual) out.annualText = `$${out.annual.toLocaleString()}`;
     return out;
+  }
+  // Greptile P1 on #549: does the message REPORT an offer (a new or changed one: "they offered", "the offer is now", "they came
+  // back with", "I got an offer of")? Only such a message replaces an offer figure already on record; a draft or a counter
+  // request names the person's own number.
+  function reportsNewOffer(text) {
+    return /\boffered\b|\boffer\s+(?:is|was)\s+(?:now\s+)?\$|\boffer\s+(?:is\s+)?now\b|\b(?:new|revised|updated|better|higher)\s+offer\b|\boffer\s+of\s+\$|\bgot\s+(?:an|the)\s+offer\b|\breceived\s+(?:an|the)\s+offer\b|\b(?:came|come|coming)\s+back\s+(?:with|at|to)\b|\b(?:they|employer|recruiter)\s+(?:countered|raised|bumped|upped|moved)\b/i.test(s(text));
   }
   // The offer's headline figure in the USER'S OWN units — the phrase
   // every reply quotes, so an hourly offer is never restated as an
@@ -8049,7 +8058,12 @@ const CareerRouter = (() => {
         // it, and the deadline the record carries.
         if (!extensionContext && (thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || parseOfferFigures(text).hourly)) {
           const askFigs = parseOfferFigures(text);
-          const hourlyBase = askFigs.offerHourly || thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || null;
+          // Greptile P1 on #549: an hourly figure in this message replaces the offer ON RECORD only when the message reports a
+          // new offer ("they offered", "the offer is now", "they came back with"). Otherwise the recorded offer stands and the
+          // figure is the person's own number (the ask, by the rule below), never thanked for as the employer's offer.
+          const recordedHourly = thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || null;
+          if (askFigs.offerHourly != null && recordedHourly && !reportsNewOffer(text)) askFigs.offerHourly = null;
+          const hourlyBase = askFigs.offerHourly || recordedHourly || null;
           // PR-4: the ask is the figure the person put after an ask cue ("counter at $27/hour"). An uncued figure that
           // differs from the offer on record, with no offer figure in this message, is a revision's new number. The
           // offered figure itself is never the ask: a counter at or below the offer is no counter, so it is dropped.
@@ -15419,6 +15433,10 @@ const CareerRouter = (() => {
         // "85k", "came back at 120k").
         const askFramed = /\bask(?:ing)? for\s+(?:a\s+|an\s+)?\$?\s?\d|\bcounter\s+(?:at|of|to)\s+\$?\s?\d|\bmake it\s+\$?\s?\d/i.test(cl);
         const figs = askFramed ? { hourly: null, signing: null, annual: null } : parseOfferFigures(cl);
+        // Greptile P1 on #549: an hourly figure the clause frames as the ask ("Draft the counter email at $28/hour") is not the
+        // offer's rate, and with a rate already on record only a message that REPORTS a new offer replaces it.
+        const recordedRate = (() => { try { const th = negotiationThreadOf(ctx); return (th && th.hourly) || (ctx.offer && ctx.offer.hourly_rate) || null; } catch { return null; } })();
+        if (figs.hourly && ((figs.offerHourly == null && figs.askHourly != null) || (recordedRate && !reportsNewOffer(raw)))) figs.hourly = null;
         if (figs.hourly) rec.hourly = figs.hourly;
         if (figs.signing) rec.signing = figs.signing;
         if (figs.annual) rec.amount = figs.annual;

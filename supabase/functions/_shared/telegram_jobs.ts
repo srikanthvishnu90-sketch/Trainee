@@ -385,7 +385,11 @@ const secretValue = (v: unknown): boolean => {
   // A UUID is an id, never a card number: one with 13 or more digits in a row (dashes between) passes the card check about one
   // time in ten, so an application whose fact sources carry a few UUIDs (evidence.replay_sources) was "needs you" about one
   // time in seventy (missing-info-e2e.test.ts failed in CI on #499 and #503). UUIDs are taken out before the card check.
-  for (const m of t.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, " ").matchAll(/(?:\d[ -]?){13,19}/g)) { const d = m[0].replace(/\D/g, ""); if (d.length >= 13 && d.length <= 19 && luhn(d)) return true; } // a card number
+  // A hex digest (a sha256 such as the payload's engine_approval, schema_hash, manifest_hash, or a fact id that carries one) is
+  // a hash, never a card number: a random 64-character one holds a Luhn-valid run of 13 to 19 digits about one time in two
+  // hundred, so a prepared application was "\"engine_approval\" needs you" and unapprovable at random (missing-info-e2e.test.ts
+  // step 7 failed in CI on #546 and #548). A run of 32 or more hex characters with at least one letter in it is taken out too.
+  for (const m of t.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, " ").replace(/\b(?=[0-9]*[a-f])[0-9a-f]{32,}\b/gi, " ").matchAll(/(?:\d[ -]?){13,19}/g)) { const d = m[0].replace(/\D/g, ""); if (d.length >= 13 && d.length <= 19 && luhn(d)) return true; } // a card number
   return false;
 };
 const hasValue = (v: unknown) => v !== null && v !== undefined && (typeof v === "string" ? v.trim() !== "" : typeof v === "object" ? Object.keys(v as object).length > 0 : true);

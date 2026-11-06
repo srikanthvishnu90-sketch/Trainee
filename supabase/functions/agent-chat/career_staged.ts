@@ -379,8 +379,21 @@ export const CODE_OWNED_INTENTS: ReadonlySet<string> = new Set([
   "safety_support", "impersonation_refused", "authority_refused", "intent_refusal", "tailor_refused",
 ]);
 const NEGATED_ACTION = /\b(?:do\s+not|don'?t|dont|never|please\s+don'?t)\b[^.?!\n]{0,80}?\b(?:apply|applying|submit|submitting|send|sending|email|emailing|contact|contacting|message|messaging|reach\s+out|save|saving|store|storing)\b/i;
+// AN ASK TO SEE THE DRAFT (2026-11-06, side effect of #544): "Don't send it, just show me the draft" forbids a send but asks
+// for the held draft, which is code's product (the draft, held unsent until its exact payload is approved). It is an
+// instruction, not a question, whatever forbids what around it; "don't email anyone, just show me how networking works" or
+// "don't send it. why does the draft mention Acme?" are not asks to see a draft and stay question-shaped.
+const SHOW_VERB = String.raw`(?:show(?:\s+me)?|let\s+me\s+(?:see|read|look\s+at|review)|(?:can|could|may)\s+i\s+(?:see|read|look\s+at|review)|(?:can|could|would|will)\s+(?:you|u)\s+(?:please\s+)?show(?:\s+me)?|i\s+(?:just\s+|only\s+)?(?:want|need|'d\s+like|would\s+like)\s+to\s+(?:see|read|review)|preview|read\s+(?:me\s+)?(?:it|the\s+draft)\s+back)`;
+const SHOW_OBJECT = String.raw`(?:(?:the|my|your|that|this)\s+(?:[\w-]+\s+){0,3}?(?:draft|email|e-mail|letter|message|note|text|version)|it|that|this|what\s+you\s+(?:wrote|drafted|have))`;
+const SHOW_DRAFT = new RegExp(String.raw`\b${SHOW_VERB}\s+${SHOW_OBJECT}(?![\w-])`, "i");
+const DRAFT_WORD = /\b(?:draft|drafted|email|e-mail|letter|message|note|wrote)\b|\b(?:send|submit|email|message)\s+(?:it|that|this)\b/i;
+export function showDraftAsk(message: string): boolean {
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'");
+  return SHOW_DRAFT.test(m) && DRAFT_WORD.test(m);
+}
 export function questionShaped(message: string): boolean {
   const m = String(message ?? "").replace(/[\u2019`]/g, "'").trim();
+  if (showDraftAsk(m)) return false;
   if (NEGATED_ACTION.test(m)) return true;
   if (!(QUESTION_LEAD.test(m) || m.includes("?"))) return false;
   return !(ASK_TO_ACT.test(m) || LIST_OR_SEND.test(m));

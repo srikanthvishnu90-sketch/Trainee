@@ -37,6 +37,9 @@ const COUNT_AFTER = /^\s*(?:k\b|\+|%|usd|dollars?|bucks|years?|yrs?|months?|week
 const ALNUM = /(?<![\w$-])(?=[A-Za-z0-9]{5,10}(?![\w-]))(?=(?:[A-Za-z]*\d){2})(?=(?:\d*[A-Za-z]){2})[A-Za-z0-9]{5,10}(?![\w-])/g;
 const UNIT_LIKE = /^\d+(?:am|pm|min|mins|hr|hrs|h|k|th|st|nd|rd|yrs?|gb|mb|kb|px|mph|kg|lbs?)$/i;
 const YEAR = /^(?:19|20)\d\d$/;
+// What leads a year: a date preposition, or a month or season (2026-11-06, side effect of #544: only "in", "since" and "of"
+// counted, so "my verification from 2019" lost its year).
+const YEAR_LEAD = /\b(?:in|since|of|from|during|until|till|thru|through|by|before|after|around|circa|between|early|mid|late|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|autumn|winter)\.?,?\s+$|\bmid-$/i;
 
 function contextEnds(sentence: string, re: RegExp): number[] {
   const out: number[] = [];
@@ -59,7 +62,9 @@ function tokensIn(sentence: string): { start: number; end: number }[] {
     if (!isStrong && !near(at, weak)) continue;
     // Weak context: only a plain run of 4-8 digits that is not a year.
     if (!isStrong && (/[ -]/.test(tok) || YEAR.test(tok))) continue;
-    if (isStrong && YEAR.test(tok) && /\bin\s+$|\bsince\s+$|\bof\s+$/i.test(sentence.slice(0, at))) continue;
+    // A year in a year context ("verification from 2019", "in March 2024", "back in 2021") is a year; a year-shaped number
+    // right after "code" or "verification" with no such lead ("code 2024", "verification code is 2019") stays removed.
+    if (isStrong && YEAR.test(tok) && YEAR_LEAD.test(sentence.slice(0, at))) continue;
     hits.push({ start: at, end: at + tok.length });
   }
   for (const m of sentence.matchAll(ALNUM)) {

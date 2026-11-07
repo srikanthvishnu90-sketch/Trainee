@@ -101,11 +101,12 @@ const BARE_SPLIT_CODE = /(?<![\d$€£.,:/#-]|\d(?:[ \t]{1,8}|[ \t]{0,8}[\n\-][ 
 // same rules as "739 201". chat_input.ts and channel_resume_upload.ts resumeMessage both use it, so a file's message hash
 // equals the hash of the text the thread stores (Greptile and review on #567).
 // Every Unicode space separator (en, em, thin, hair, ideographic ...) is a space and a zero-width space is nothing; a hyphen,
-// non-breaking hyphen, figure dash, minus sign, fullwidth hyphen or middle dot between digits is a hyphen ("739\u2212201",
+// non-breaking hyphen, figure dash, minus sign or fullwidth hyphen between digits, with or without a space either side, is a
+// hyphen ("739\u2212201", "739 \u2212 201",
 // "739\u2002201"; Greptile inventory, separator residuals).
 export function normalizeChatText(text: string): string {
   return String(text ?? "").replace(/\r\n?/g, "\n").replace(/[\u200b\u2060\ufeff]/g, "").replace(/[^\S\n ]|[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g, " ")
-    .replace(/(\d)[\u2010-\u2015\u2212\ufe63\uff0d\u00b7](?=\d)/g, "$1-");
+    .replace(/(\d[ ]?)[\u2010-\u2015\u2212\ufe63\uff0d](?=[ ]?\d)/g, "$1-");
 }
 
 // A code on its own line followed by a count on the next ("my code is 739201\n2 minutes ago"): the count is not part of the
@@ -116,8 +117,9 @@ function countTail(code: string, after: string): string {
   const i = code.search(/[\r\n]/);
   if (i < 0) return "";
   const first = code.slice(0, i).replace(/\D+$/, "");
-  if (first.replace(/\D/g, "").length < 4 || !COUNT_TAIL.test(after)) return "";
-  return code.slice(first.length);
+  const rest = code.slice(first.length);
+  if (first.replace(/\D/g, "").length < 4 || !/^[ \t]*[\r\n]+[ \t]*\d{1,3}$/.test(rest) || !COUNT_TAIL.test(after)) return "";
+  return rest;
 }
 export function redactIdentity(input: string, o: { codePending?: boolean } = {}): Redaction {
   const removed = new Set<Redaction["removed"][number]>();

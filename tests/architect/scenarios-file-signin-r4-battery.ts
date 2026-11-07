@@ -61,14 +61,14 @@ export const CATEGORIES = ["two_devices", "split_code", "lockout_oracle", "accou
 export type Category = typeof CATEGORIES[number];
 const WEIGHTS: Record<Category, number> = { two_devices: 14, split_code: 12, lockout_oracle: 7, account_change: 13, stale_tab: 15, csrf_forms: 11, cache_referrer: 9, host_spoof: 8, long_query: 11 };
 
-// A texted code shown on a page. Only the page's random tokens are masked first, each a proven false positive (CI run
-// 42348230248, scenario #2664: "165736" inside one): a fp1./fs1. token, a UUID, and a run of 12+ hex characters with both a
-// letter a-f and a digit (ids), and the value of the hidden "t", "set", "tag" and "ref" inputs (12-16 hex, sometimes all
-// digits). Everything else is checked as before, as a substring, so a visible code glued to words ("Your code165736", "165736is your code") is still caught, and so is a code split in two
-// groups ("165 736", "165-736").
-const RANDOM_TOKEN = /\b(?:f[sp]1\.[0-9a-f]{16,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})|(?<![0-9A-Za-z])(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{12,}(?![0-9A-Za-z])/g;
+// A texted code shown on a page. Only the page's own random tokens, in their exact formats, are masked first; each is a proven
+// false positive (CI run 42348230248, scenario #2664: "165736" inside one). They are: an fp1./fs1. token (64 hex), the hidden
+// "t" (fp1. token), "set" and "tag" (16 hex) and "ref" (12 hex) input values, and the 16-hex Application tag after
+// "<dt>Application</dt>". Everything else is checked as before, as a substring, so a visible code anywhere else (glued to
+// words, in an attribute, a URL or a script) is still caught, and so is a code split in two groups ("165 736", "165-736").
+const RANDOM_TOKEN = /\bf[sp]1\.[0-9a-f]{64}\b|(<input type="hidden" name="(?:set|tag)" value=")[0-9a-f]{16}"|(<input type="hidden" name="ref" value=")[0-9a-f]{12}"|(<dt>Application<\/dt><dd>)[0-9a-f]{16}<\/dd>/g;
 export function codeShown(body: string, code: string): boolean {
-  const seen = body.replace(/(<input type="hidden" name="(?:t|set|tag|ref)" value=")[0-9a-f.]+"/g, '$1"').replace(RANDOM_TOKEN, " ");
+  const seen = body.replace(RANDOM_TOKEN, (_m, a?: string, b?: string, c?: string) => a ? `${a}"` : b ? `${b}"` : c ? `${c}</dd>` : " ");
   return seen.includes(code) || new RegExp(`${code.slice(0, 3)}[\\s\\-\u2013\u00a0]${code.slice(3)}`).test(seen);
 }
 export function rng(seed: number) {

@@ -44,6 +44,9 @@ const YEAR = /^(?:19|20)\d\d$/;
 // Sentence boundaries, captured, so split() keeps the spaces between sentences: never between two digit groups split by a line
 // break and spaces ("739\n  201" is one token; Greptile on #568).
 const SENTENCE_SPLIT = /((?<=[.!?\n])(?![ \t\u00a0\u2007\u2009\u202f]*\d)\s+|(?<=[.!?]|[^\d\s]\n)\s+)/;
+const DOTTED_MONEY_AFTER = /^\s*(?:eur|euros?|€|usd|gbp|£|chf|sek|nok|dkk|pln|brutto|netto|gross|net|base|salary|a\s+year|per\b|\/|[-\u2013\u2014][ \t]*\d|and\s+\d|to\s+\d)/i;
+const DOTTED_MONEY_BEFORE = /(?:€|\$|£|\b(?:eur|usd|gbp|chf|offer(?:ed)?(?:\s+of)?|salary|pay|paid|base|range|between|from|req|requisition|job|ref|reference|order|ticket|case|id|no\.?|number|#)\s*)$/i;
+const DOTTED_MONEY_NEAR = /\b(?:offers?|offered|salary|salaries|pay|paid|base|range|compensation|comp|bonus|rate|wage|income|eur|euros?|usd|gbp|chf)\b|[€$£]/i;
 const DOTTED = /(?<![\d$€£.,\w-])\d{3}\.\d{3}(?![\d%\w-]|[.,:\/]\d)/g;
 // A code split in two by a space, a line break (\n, \r\n or \r) or a dash ("739 201", "739-201", "739\n201"; Greptile on #566 and #567) after a weak cue: exactly 3+3 digits, and no more digit groups
 // after it (so "415 555 1234" and "415-555-1234" stay phone numbers).
@@ -106,8 +109,11 @@ function tokensIn(sentence: string, carried = false): { start: number; end: numb
   // A code in two 3-digit groups split by a period ("Verification code: 739.201", "Workday sent me 739.201"): never a decimal
   // ("3.85", "$120.50") or a longer dotted run (a version, an IP address); Greptile inventory, separator residuals.
   for (const m of sentence.matchAll(DOTTED)) {
-    const at = m.index ?? 0;
-    if (!near(at, strong) && !near(at, weak)) continue;
+    const at = m.index ?? 0, after = sentence.slice(at + m[0].length), before = sentence.slice(0, at);
+    // Only after a code word or a hand-over ("sent me"), and never money ("120.000 EUR", "an offer of 120.000"), a range ("90.000 - 110.000") or a
+    // named number ("req 739.201"): a European thousands figure has the same shape (review of f62e2033).
+    if ((!near(at, strong) && !near(at, weak)) || COUNT_AFTER.test(after) || DOTTED_MONEY_AFTER.test(after) || DOTTED_MONEY_BEFORE.test(before) || MORE_GROUPS.test(after) || /[-\u2013\u2014]\s*$/.test(before)
+      || DOTTED_MONEY_NEAR.test(before.slice(-80)) || DOTTED_MONEY_NEAR.test(after.slice(0, 30)) || /^\s*(?:and|to|or)\s+(?:\d|\[code removed\])/i.test(after)) continue;
     if (hits.some((h) => at < h.end && at + m[0].length > h.start)) continue;
     hits.push({ start: at, end: at + m[0].length });
   }
@@ -164,8 +170,8 @@ export function noteForCodeTurn(note: string | null): string | null {
 // or a code word followed by "is", ":" or "arrived", right before the token, and never a token followed by a count noun or a
 // year range, so "a customer portal serving 120000 customers", "Verification engineer, 2018-2022" and "raised code coverage
 // across 9500 tests" stay resume lines.
-const HANDOVER_END = /(?:\b(?:sent|texted|emailed|gave|messaged|dm'?d)\s+me(?:\s+(?:a|the|my|this|that|one[- ]time|verification|security|sign[- ]?in|log[- ]?in))*(?:\s+(?:code|passcode|pin|otp))?|\b(?:code|passcode|pass code|pin|otp)\b(?:\s+(?:is|was|arrived|reads|=))?\s*[:=#]?|\bit(?:'s|\s+is|\s+was))\s*$/i;
-const RESUME_COUNT = /^[\s\n]*(?:\+|k\b|%|[-\u2013\u2014]\s*\d|(?:customers?|clients?|orders?|tickets?|tests?|invoices?|requests?|sessions?|shipments?|users?|employees?|accounts?|transactions?|calls?|records?|patients?|students?|members?|units?|items?|cases?|claims?|visits?|views?|downloads?|followers?|subscribers?|leads?|deals?|projects?|hours?|people|staff|sites?|stores?|locations?|vendors?|partners?|applications?|reports?|lines?|files?|events?|messages?|emails?|devices?|servers?|queries|jobs?|candidates?|hires?|sq\s*ft|dollars|usd|per\b|a\s+(?:year|month|week|day)|daily|monthly|weekly|annually)\b)/i;
+const HANDOVER_END = /(?:\b(?:sent|texted|emailed|gave|messaged|dm'?d)\s+me(?:\s+(?:a|the|my|this|that|one[- ]time|verification|security|sign[- ]?in|log[- ]?in))*(?:\s+(?:code|passcode|pin|otp))?|\b(?:code|passcode|pass code|pin|otp)\b(?:\s+(?:is|was|arrived|reads|=))?\s*[:=#]?|\bit(?:'s|\s+is|\s+was)|\b(?:sent|texted|emailed|gave|messaged)\s+me\s*:|\b(?:code|passcode|pass code|otp|pin)\b[^\d\n.]{0,40}?(?::|->|=>|=|\u2192))\s*$/i;
+const RESUME_COUNT = /^[\s\n]*(?:\+|k\b|%|[-\u2013\u2014]\s*\d|(?:customers?|clients?|orders?|tickets?|tests?|invoices?|requests?|sessions?|shipments?|users?|employees?|accounts?|transactions?|calls?|records?|patients?|students?|members?|units?|items?|cases?|claims?|visits?|views?|downloads?|followers?|subscribers?|leads?|deals?|projects?|hours?|people|staff|sites?|stores?|locations?|vendors?|partners?|applications?|reports?|lines?|files?|events?|messages?|emails?|devices?|servers?|queries|jobs?|candidates?|hires?|prs|pull\s+requests?|reviews?|commits?|changes|bugs|issues|lines\s+of\s+code|modules?|repos(?:itories)?|services?|sq\s*ft|dollars|usd|per\b|a\s+(?:year|month|week|day)|daily|monthly|weekly|annually)\b)/i;
 export function fileSharesCode(text: string): boolean {
   const t = normalizeChatText(String(text ?? ""));
   for (const h of codeTokens(t)) {

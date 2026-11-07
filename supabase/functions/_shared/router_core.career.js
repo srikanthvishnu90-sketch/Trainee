@@ -16105,7 +16105,7 @@ const CareerRouter = (() => {
       const offerWord = /\boffer(?:ed|ing|s)?\b|\bproposed\b|\bcame\s+back\b|\bquoted\b/i.test(plain);
       const nonAsk = out.mentions.filter((m) => m.role !== "ask");
       out.ambiguous = currentPhrase && !offerWord && nonAsk.length >= 2 && out.mentions.some((m) => m.role === "employer");
-      const THIRD_WORD = /\b(?:market|competitors?|others|industry|average|median|typical|glassdoor|levels\.fyi|payscale|salary\.com|indeed|employers|companies|other\s+(?:places|firms|roles|jobs|offers)|elsewhere|similar\s+(?:jobs|roles|positions|companies|postings)|(?:jobs|roles|positions)\s+like\s+(?:this|these|mine|it))\b/i;
+      const THIRD_WORD = /\b(?:market|competitors?|others|industry|average|median|typical|glassdoor|levels\.fyi|payscale|salary\.com|indeed|employers|companies|other\s+(?:places|firms|roles|jobs|offers)|elsewhere|similar\s+(?:jobs|roles|positions|companies|postings)|(?:jobs|roles|positions)\s+like\s+(?:this|these|mine|it)|friends?|co-?workers?|colleagues?|peers?|classmates?|roommates?|siblings?|brother|sister|cousin|neighbou?r)\b/i;
       const INCIDENTAL = /\b(?:a|an|the|my|this|that|their|our|his|her|your)\s+market\s+(?:(?:research|data|analytics|access|making|insights|intelligence)(?:\s+(?:senior|junior|staff|principal))?(?:\s+(?:engineer|analyst|researcher|scientist|manager|specialist|associate|lead|designer|developer|coordinator|strategist|consultant))?|(?:(?:senior|junior|staff|principal)\s+)?(?:engineer|analyst|researcher|scientist|manager|specialist|associate|lead|designer|developer|coordinator|strategist|consultant))\s+(?:role|position|job|opening|posting)\b(?!s)/ig;
       const ABBREV = /(?:^|[^A-Za-z])(?:e\.g|i\.e|u\.s|u\.k|approx|vs|etc|mr|mrs|ms|dr|inc|co|corp|ltd|jr|sr)$/i;
       const endsHere = (c, i) => c !== "." || (/^["'\u201d\u2019)\]]*(?:\s|$)/.test(src.slice(i + 1, i + 5)) && !ABBREV.test(src.slice(Math.max(0, i - 8), i))
@@ -16219,9 +16219,16 @@ const CareerRouter = (() => {
 
   function heldFigureTurn(text, ctx, awaiting, intent) {
     const figures = counterFigures(s(text), {}).mentions.map((m) => ({ value: m.thousands ? m.value * 1000 : m.value, unit: m.unit }));
+    const offerBefore = ctx.offer === undefined ? undefined : JSON.parse(JSON.stringify(ctx.offer));
+    const threadBefore = JSON.stringify(negotiationThreadOf(ctx) || {});
     ctx._ambiguousCounter = true;
     let res;
-    try { res = handleNegotiationCore(text, ctx); } finally { ctx._ambiguousCounter = false; }
+    try { res = handleNegotiationCore(text, ctx); } finally {
+      ctx._ambiguousCounter = false;
+      if (offerBefore === undefined) delete ctx.offer; else ctx.offer = offerBefore;
+      const now = negotiationThreadOf(ctx);
+      if (now && typeof now === "object") { for (const key of Object.keys(now)) delete now[key]; Object.assign(now, JSON.parse(threadBefore)); }
+    }
     if (!res || typeof res !== "object") return null;
     delete res.draft; delete res.strategy;
     return Object.assign(res, { intent: intent || (String(res.intent || "").startsWith("negotiation") ? res.intent : "negotiation_advice"), resultStatus: "awaiting_user", counterAmbiguous: true, awaiting, figures, sends: 0 });
@@ -19078,14 +19085,7 @@ const CareerRouter = (() => {
   function handleNegotiation(text, ctx) {
     if (/\bcounter\b|\boffer\b|\bdraft\b/i.test(s(text))) {
       const hintA = offerHint(text, ctx);
-      if (hintA.ambiguous) {
-        const figures = counterFigures(s(text), { recorded: hintA.recorded }).mentions.map((m) => ({ value: m.thousands ? m.value * 1000 : m.value, unit: m.unit }));
-        ctx._ambiguousCounter = true;
-        let res;
-        try { res = handleNegotiationCore(text, ctx); } finally { ctx._ambiguousCounter = false; }
-        if (res && typeof res === "object") { delete res.draft; delete res.strategy; res.counterAmbiguous = true; res.awaiting = "which_figure_is_offer"; res.figures = figures; res.sends = 0; }
-        return res;
-      }
+      if (hintA.ambiguous) return heldFigureTurn(text, ctx, "which_figure_is_offer", null);
     }
     return handleNegotiationCore(text, ctx);
   }
@@ -19146,7 +19146,7 @@ const CareerRouter = (() => {
           if (askFigs.ask) {
             try { const thw = negotiationThreadForWrite(ctx); const pc = (thw.counter && typeof thw.counter === "object") ? thw.counter : {}; thw.counter = Object.assign({}, pc, { hourly: askFigs.ask }); thw.topic = "counter"; } catch {   }
           }
-          const cuedM = askFigs.ask == null ? s(text).match(/\b(?:counter(?:[ -]?offer)?|ask(?:ing)?(?:\s+for)?|meet\s+me\s+at|target|want)\b[^$.!?\n]{0,24}(\$\s?\d[\d,]*(?:\.\d{1,2})?)/i) : null;
+          const cuedM = askFigs.ask == null ? s(text).match(/\b(?:counter(?:[ -]?offer)?\s+(?:at|of|to|for)|ask(?:ing)?\s+for|meet\s+me\s+at|target(?:\s+of)?)\s+(\$\s?\d{1,3}(?:\.\d{1,2})?)(?![\d,]|\s?k\b)/i) : null;
           const cuedFig = cuedM ? cuedM[1].replace(/\s+/g, "") : null;
           let counterFig = askFigs.ask || (cuedFig ? null : (thread.counter && thread.counter.hourly)) || null;
           if (counterFig && hourlyBase && Number(counterFig) <= Number(hourlyBase)) counterFig = null;
@@ -24092,7 +24092,7 @@ const CareerRouter = (() => {
         const hit = pool.find((d) => { const key = lc(d).split(/\s+/).pop(); return key && key.length > 2 && lc(raw).includes(key); });
         if (hit) rec.signingFor = hit;
       }
-      if (rec.firm || rec.amount || rec.hourly || rec.deadline || rec.descriptor || rec.signing || rec.expectation || (Array.isArray(rec.amounts) && rec.amounts.length)) {
+      if (!rawHint.ambiguous && (rec.firm || rec.amount || rec.hourly || rec.deadline || rec.descriptor || rec.signing || rec.expectation || (Array.isArray(rec.amounts) && rec.amounts.length))) {
         const thread = negotiationThreadForWrite(ctx);
         const newReport = !!((rec.firm || rec.descriptor)
           || (thread.fromAccount && sawOfferEvent && (rec.amount != null || rec.hourly || rec.signing))

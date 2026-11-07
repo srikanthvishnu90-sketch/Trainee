@@ -1060,3 +1060,20 @@ Deno.test("CDW a held offer detail hands the brain its figures (counter_ambiguou
     assert(/new offer/.test(routerAnswerBlock(d)), msg);
   }
 });
+
+// Review of f62e2033: a friend's or coworker's pay is a third party's figure; a held turn keeps the standing offer whole; a cued
+// figure that is not an hourly ask never blanks the saved counter or gets an hour unit.
+Deno.test("CDW third-party people hold the turn and the standing offer stays; cued figures need an hourly shape", () => {
+  for (const msg of ["My friend at Acme was offered $35/hour. Draft a counter at $30/hour", "They offered me $30/hour and my coworker makes $34/hour"]) {
+    const ctx = fresh(); host.runTurn(OFFER, ctx);
+    const r = host.runTurn(msg, ctx);
+    eq(recorded(ctx).offer ?? (ctx as any).negotiationThread?.hourly, 24, `${msg}: offer stays 24`);
+    eq((ctx.offer as any)?.hourly_rate, 24, `${msg}: ctx offer stays 24`);
+    eq(r.result?.sends ?? 0, 0, msg);
+    eq(stagedDecision({ env: STAGED, message: msg, ctx, host, structured: false }).reason, "counter_ambiguous_figures", msg);
+  }
+  const c = fresh(); host.runTurn(OFFER, c); host.runTurn("Counter at $26/hour", c);
+  assert(/meet me at \$26/.test(String(host.runTurn("Draft the counter email; I want to mention the $5 shift differential", c).result?.draft?.body)), "saved counter kept");
+  const k = fresh(); host.runTurn(OFFER, k);
+  assert(!/\$70,000 an hour/.test(String(host.runTurn("Draft a counter asking for $70,000", k).reply)), "no hourly unit on $70,000");
+});

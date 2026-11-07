@@ -470,9 +470,10 @@ const TO_USER = /\b(?:you|your|you're|you've)\b|\bshould i\b|\btell me\b/i;
 // A question about the person joined by "and" between two things asked for ("what role and city are you after").
 const CONJOINED = /\b(?:what|which|where|when)\b[^?.!]{0,40}?\b\w+ (?:and|&|plus) (?:the |your |a |an )?\w+\b[^?.!]{0,40}\b(?:you|your)\b|\b(?:your|you have|you have a) \w+(?: \w+)? (?:and|&|plus) (?:your |a |an )?\w+ (?:date|city|location|school|title|salary|number)\b/i;
 // A requested draft (an email, a note, a letter) is the person's text, not the agent's own asks or promises: from its lead-in
-// ("Here's the email:", "Draft:", "Subject:", a salutation such as "Dear" or "Hi Dana," on its own line, a code fence or a quoted
-// block) on, nothing is checked (Greptile record 15).
-const DRAFT_CUE = /(?:^|\n)\s*(?:(?:here(?:'s| is)|below is|i(?:'ve| have) drafted)\b[^\n]{0,60}\b(?:draft|email|e-mail|message|note|letter|reply|text|cover letter|post)\b|(?:draft|email|message|subject|cover letter)\s*:|subject:|dear\b|(?:hi|hello)\s+[A-Za-z][\w.'-]{0,30}\s*,[ \t]*\n|```|>\s)/i;
+// ("Here's the email:", "Draft:", "Subject:", "Dear", a code fence or a quoted block, or a "Hi Dana," line that is NOT the
+// reply's first line) on, nothing is checked (Greptile record 15). A reply that opens "Hi Sam," is the agent greeting the person,
+// and its own promises are still checked (review of f62e2033).
+const DRAFT_CUE = /(?:^|\n)\s*(?:(?:here(?:'s| is)|below is|i(?:'ve| have) drafted)\b[^\n]{0,60}\b(?:draft|email|e-mail|message|note|letter|reply|text|cover letter|post)\b|(?:draft|email|message|subject|cover letter)\s*:|subject:|dear\b|```|>\s)|\n\s*(?:hi|hello)\s+(?!there\b|all\b|everyone\b|again\b|friend\b|team\b)[A-Za-z][\w.'-]{0,30}\s*,[ \t]*\n/i;
 export function beforeDraft(reply: string): string {
   const t = String(reply ?? ""), m = DRAFT_CUE.exec(t);
   return m ? t.slice(0, m.index) : t;

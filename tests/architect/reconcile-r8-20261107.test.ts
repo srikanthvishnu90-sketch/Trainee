@@ -16,13 +16,15 @@ Deno.test("R8R-4 a show-the-draft ask is never an advice question", () => {
 });
 
 // Record 15 (residual): a draft that opens with a salutation line is the person's text; its promises are not the agent's.
-Deno.test("R8R-15 a salutation line opens a requested draft", () => {
-  const draft = "Hi Dana,\nThanks for the chat yesterday. I'll text you the portfolio link tonight.\nBest,\nSam";
+Deno.test("R8R-15 a salutation line after a lead-in opens a requested draft; a reply that greets the person is still checked", () => {
+  const draft = "Here is a note you could send.\n\nHi Dana,\nThanks for the chat yesterday. I'll text you the portfolio link tonight.\nBest,\nSam";
   assertNode.equal(hasDraft(draft), true);
   assertNode.deepEqual(unbackedPromises(draft, []), []);
-  // An ordinary reply that greets inline is still checked.
-  assertNode.equal(hasDraft("Hi Sam, nothing matched today, so I'll text you when a role opens."), false);
-  assertNode.ok(unbackedPromises("Hi Sam, nothing matched today, so I'll text you when a role opens.", []).length > 0);
+  // Review of f62e2033: the agent greeting the person on the first line is not a draft; its promises are checked.
+  for (const r of ["Hi Sam,\nI'll notify you when new roles appear.", "Hello there,\nI'll notify you when new roles appear.", "Hi Sam, nothing matched today, so I'll text you when a role opens."]) {
+    assertNode.equal(hasDraft(r), false, r);
+    assertNode.ok(unbackedPromises(r, []).length > 0, r);
+  }
 });
 
 // The redactor's own marker ("[security code removed]") is not a code word: the next number stays.
@@ -65,7 +67,7 @@ const savedOf = (m: string, pending = false) => {
   return { saved: after ? after.userContent as string : once.userContent as string, reply: after?.reply ?? false };
 };
 Deno.test("R8R-SEP code groups split by any space, dash, minus or period are removed; decimals and phones stay", () => {
-  const seps = [" ", " ", " ", " ", " ", " ", " ", " ", "　", "−", "‐", "‑", "－", "·", "​", "."];
+  const seps = [" ", " ", " ", " ", " ", " ", " ", " ", "　", "−", "‐", "‑", "－", "​", ".", " − ", " ‐ "];
   for (const lead of ["Verification code: ", "My code is ", "Workday sent me "]) {
     for (const sep of seps) {
       const m = `${lead}739${sep}201`;
@@ -78,6 +80,10 @@ Deno.test("R8R-SEP code groups split by any space, dash, minus or period are rem
   for (const m of ["Workday sent me 7392 01", "Workday sent me 4821 9374", "Workday sent me 1234-5678"]) {
     assertNode.ok(!/7392|4821|1234/.test(savedOf(m).saved), `${m}: ${savedOf(m).saved}`);
   }
+  // Review of f62e2033: a European thousands figure is money, never a dotted code; nor is a named number.
+  for (const [m, k] of [["The recruiter sent me an offer of 120.000", "120.000"], ["They emailed me 120.000 EUR base", "120.000"], ["they texted me 120.000 euros", "120.000"],
+    ["Workday sent me 100.000 USD", "100.000"], ["Recruiter sent me salary range 90.000 - 110.000", "90.000 - 110.000"], ["She sent me 2 offers\n120.000 and 130.000", "120.000 and 130.000"],
+    ["Workday sent me req 739.201", "739.201"], ["GPA 3\u00b785", "3\u00b785"]]) assertNode.ok(savedOf(m).saved.includes(k), `${m} keeps ${k}: ${savedOf(m).saved}`);
   for (const [m, k] of [["my GPA is 3.85", "3.85"], ["the recruiter texted me 555 1234", "555 1234"], ["call me at 415 555 1234", "415 555 1234"], ["pay is $120.500 a year", "120.500"], ["the portal runs version 2.345.678", "2.345.678"], ["I made $28.50 an hour", "28.50"]]) {
     assertNode.ok(savedOf(m).saved.includes(k), `${m} keeps ${k}: ${savedOf(m).saved}`);
   }
@@ -98,13 +104,16 @@ Deno.test("R8R-95 code-in-chat removes tokens while a code is pending, without i
 import { fileSharesCode } from "../../supabase/functions/_shared/career_code_in_chat.ts";
 Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless resume numbers are not", () => {
   for (const line of ["Workday sent me 739201", "Workday sent me 739 201", "Workday sent me 739\n201", "My one-time passcode arrived: 739201", "Lever texted me 7392\n01",
-    "The portal sent a code. It is 739201.", "Recruiter texted me 4821", "Workday sent me 739.201", "Workday sent me 739−201", "Verification code: 739.201", "Workday sent me 739 201"]) {
+    "The portal sent a code. It is 739201.", "Recruiter texted me 4821", "Workday sent me 739.201", "Workday sent me 739−201", "Verification code: 739.201", "Workday sent me 739 201",
+    // review of f62e2033
+    "Workday sent me: 739201", "My verification code arrived this morning: 739201", "Here is the code Workday sent: 739201", "Code -> 739201", "Workday sent me:\n739\n201", "The code it sent: 7392\u201101"]) {
     assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), true, line);
   }
   for (const line of ["customer portal serving 120000 customers", "Vendor portal handled 35000 orders a year", "Verification engineer, Acme, 2018-2022", "Security code audits 2018-2022",
     "Raised code coverage across 9500 tests", "Verification of 4500 invoices monthly", "My manager sent me 2500 tickets to triage", "OTP service handled 100000 requests per day",
     "2FA adoption rose from 2000 to 8000 users", "Customer portal: 1200000 sessions", "12000 employees", "(415) 555-0134", "San Francisco, CA 94107", "GPA 3.85", "since 2019",
-    "Employee ID 482913", "2021 – 2024", "Managed 25 employees and 1200 shipments"]) {
+    "Employee ID 482913", "2021 – 2024", "Managed 25 employees and 1200 shipments", "Code review: 4500 PRs merged", "Code coverage: 95% across 9500 tests", "Postal code: 94107",
+    "Security code audits: 2018-2022", "Code quality: cut 1200 bugs"]) {
     assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), false, line);
   }
 });
@@ -137,12 +146,17 @@ Deno.test("R8R-92 handler path: an uploaded DOCX with a handed-over code is refu
 // CI run 42348230248 (shard 6/6): the sign-in battery's "a one-time code on a page" check matched a code's digits inside a
 // random hex token. The check reads the code as a reader sees it, whole or split, and never inside a token.
 import { codeShown } from "./scenarios-file-signin-r4-battery.ts";
-Deno.test("R8R-SIGNIN a code shown on a page is caught whole or split; its digits inside a random token are not the code", () => {
-  // Visible codes fail the invariant: whole, glued to words, split in two groups (independent check of 41afa39f).
-  for (const b of ["Your code is 165736.", "<p>Your code165736</p>", "<p>165736is your code</p>", ">165736<", "<p>x165736</p>", "<p>165 736</p>", "code: 165-736", "165\u2013736", "165\u00a0736"]) assertNode.ok(codeShown(b, "165736"), b);
-  // Only the page's proven random tokens are masked (CI run 42348230248: "165736" inside one).
-  for (const b of ['<input type="hidden" name="t" value="fp1.e3a9b1657361c2f04d9a">', "fs1.0a165736ff9c0a165736ff9c", '<input type="hidden" name="set" value="b2165736e1aa04f1">',
-    '<input type="hidden" name="tag" value="4165736012345678">', '<input type="hidden" name="ref" value="a16573600c4d">', "<dd>7b0f8f8e-6a43-4a49-9d2c-000165736a01</dd>", "<dd>e16573600c4d9e2f1a</dd>"]) assertNode.ok(!codeShown(b, "165736"), b);
+Deno.test("R8R-SIGNIN a code shown on a page is caught; only the page's own random tokens, in their exact formats, are masked", () => {
+  const H = "0123456789abcdef".repeat(4);
+  // Visible codes fail the invariant, including every form the trunk substring check caught (review of f62e2033), and split codes.
+  for (const b of ["Your code is 165736.", "<p>Your code165736</p>", "<p>165736is your code</p>", ">165736<", "<p>x165736</p>", "<p>decade165736</p>", "<p>165736deadbeef</p>",
+    "<p>Code:cafe165736beef</p>", '<a href="/v/a165736b0c1d">', '<script>{"id":"ab165736cd12"}</script>', "<p>7b0f8f8e-6a43-4a49-9d2c-000165736a01</p>",
+    '<input type="hidden" name="t" value="165736">', '<input type="hidden" name="ref" value="165736">', '<input type="hidden" name="set" value="1.165736">', '<input value="165736">',
+    '<p title="165736">', "<p>165 736</p>", "code: 165-736", "165\u2013736", "165\u00a0736"]) assertNode.ok(codeShown(b, "165736"), b);
+  // The page's own random tokens: fp1./fs1. (64 hex), hidden t/set/tag/ref values in their exact lengths, the Application tag.
+  for (const b of [`<input type="hidden" name="t" value="fp1.${H.slice(0, 20)}165736${H.slice(26)}">`, `fs1.${H.slice(0, 30)}165736${H.slice(36)}`,
+    '<input type="hidden" name="set" value="b2165736e1aa04f1">', '<input type="hidden" name="tag" value="4165736012345678">', '<input type="hidden" name="ref" value="a16573600c4d">',
+    "<dt>Application</dt><dd>a1657360b2c3d4e5</dd>"]) assertNode.ok(!codeShown(b, "165736"), b);
 });
 
 // Independent check of 41afa39f: a second code on the next line after a weak cue is removed; a count on the next line after a
@@ -158,6 +172,8 @@ Deno.test("R8R-NEXTLINE a second code on the next line is removed; a count on th
     assertNode.ok(saved.includes(kept) && !/739201|7392|739-201/.test(saved), `${JSON.stringify(m)}: ${JSON.stringify(saved)}`);
     if (/code/.test(m)) assertNode.ok(redactIdentity(m).text.endsWith(kept), `redactIdentity ${JSON.stringify(m)}: ${JSON.stringify(redactIdentity(m).text)}`);
   }
+  // A two-group value before a count is one code: no part of it stays (review of f62e2033).
+  assertNode.ok(!/7392|\b01\b/.test(savedOf("my code is 7392\n01 2 minutes ago").saved), savedOf("my code is 7392\n01 2 minutes ago").saved);
   // Phone groups on separate lines stay a phone; a code split by a line break still goes whole.
   assertNode.ok(savedOf("call me at 415\n555\n1234 the portal").saved.includes("415\n555\n1234"));
   assertNode.ok(!/739|201/.test(savedOf("Verification code: 739\n201").saved));

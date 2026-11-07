@@ -263,3 +263,45 @@ Deno.test("R8G-7 Greptile on #577: UTF-16 and odd-prefix parts, mc:Fallback and 
   const box = await upload(docx([], '<w:p><mc:AlternateContent><mc:Choice Requires="wps"><w:r><w:t>Volunteer, Food Bank, 2018 - 2020</w:t></w:r></mc:Choice><mc:Fallback><w:pict><v:textbox><w:txbxContent><w:p><w:r><w:t>Volunteer, Food Bank, 2018 - 2020</w:t></w:r></w:p></w:txbxContent></v:textbox></w:pict></mc:Fallback></mc:AlternateContent></w:p>'));
   assertNode.ok(box.res.ok && box.stored.length === 1, "a plain text box with its fallback is kept");
 });
+
+Deno.test("R8G-8 Greptile on #579: single-quoted and prefixed values, standalone VML text paths, plain-text and MHTML parts", async () => {
+  const enc = new TextEncoder(), W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  const body = BODY.map((t) => `<w:p><w:r><w:t xml:space="preserve">${t}</w:t></w:r></w:p>`).join("");
+  const types = { name: "[Content_Types].xml", data: enc.encode('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>') };
+  const docx = (extra: { name: string; data: string }[], inBody = "") => zipOf([types,
+    { name: "word/document.xml", data: enc.encode(`<?xml version="1.0" encoding="UTF-8"?><w:document ${W} xmlns:wp="p"><w:body>${body}${inBody}<w:sectPr/></w:body></w:document>`) },
+    ...extra.map((e) => ({ name: e.name, data: enc.encode(e.data) }))]);
+  const upload = async (bytes: Uint8Array) => {
+    const stored: unknown[] = [];
+    const res = await ingestResumeFile({ userId: "TEST-r8g", channel: "telegram", doc: { fileId: "F", uniqueId: crypto.randomUUID(), name: "resume.docx", mime: DOCX, size: bytes.length },
+      fetchFile: async () => ({ ok: true, bytes }), record: async (row) => { stored.push(row); return "id"; } });
+    return { res: res as { ok: boolean; reply?: string }, stored };
+  };
+  const refused = async (bytes: Uint8Array, tag: string) => { const u = await upload(bytes); assertNode.ok(!u.res.ok && u.stored.length === 0 && !String(u.res.reply).includes("482913"), tag); };
+  const kept = async (bytes: Uint8Array, tag: string) => { const u = await upload(bytes); assertNode.ok(u.res.ok && u.stored.length === 1, `${tag}: ${u.res.reply ?? ""}`); };
+  await refused(docx([], `<w:p><w:r><w:drawing><wp:docPr id='1' name='Picture 1' descr='OTP 482913'/></w:drawing></w:r></w:p>`), "single-quoted descr");
+  await refused(docx([{ name: "word/_rels/document.xml.rels", data: `<Relationships xmlns="r"><Relationship Id='rId9' Type='h' Target='https://example.test/?code=482913' TargetMode='External'/></Relationships>` }]), "single-quoted link target");
+  await refused(docx([{ name: "docProps/core.xml", data: `<ns0:coreProperties xmlns:ns0="c" xmlns:ns1="d"><ns1:title>Verification code: 482913</ns1:title></ns0:coreProperties>` }]), "core property under another prefix");
+  await refused(docx([{ name: "docProps/custom.xml", data: `<Properties xmlns="c" xmlns:x="v"><property name="Note"><x:lpwstr>OTP 482913</x:lpwstr></property></Properties>` }]), "custom property under another prefix");
+  await refused(docx([{ name: "word/drawing1.vml", data: `<xml xmlns:v="v"><v:shape><v:textpath string='Login code 482913'/></v:shape></xml>` }]), "standalone VML text path");
+  await refused(docx([{ name: "word/afchunk.txt", data: "Jordan Lee\nMy OTP is 482913\n" }]), "plain-text part with a code");
+  await refused(docx([{ name: "word/afchunk.mht", data: "MIME-Version: 1.0\nContent-Type: text/html\n\n<html><body><p>Verification code: 482913</p></body></html>" }]), "MHTML part with a code");
+  await kept(docx([{ name: "word/afchunk.txt", data: "Volunteer, Food Bank, 2018 - 2020\n" }]), "a plain-text part");
+  await kept(docx([{ name: "word/afchunk.mht", data: "MIME-Version: 1.0\nContent-Type: text/html\n\n<html><body><p>Volunteer, Food Bank, 2018 - 2020</p></body></html>" }]), "an MHTML part with MIME headers");
+  await kept(docx([{ name: "docProps/core.xml", data: `<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="c" xmlns:dc="d" xmlns:dcterms="t"><dc:title>Resume</dc:title><dc:creator>Jordan Lee</dc:creator><cp:lastModifiedBy>Jordan Lee</cp:lastModifiedBy><cp:revision>3</cp:revision><dcterms:created>2026-11-07T17:00:00Z</dcterms:created><dcterms:modified>2026-11-07T17:05:00Z</dcterms:modified></cp:coreProperties>` }]), "ordinary core properties");
+  await kept(docx([], `<w:p><w:r><w:drawing><wp:docPr id='1' name='Picture 1' descr='Headshot of Jordan Lee'/></w:drawing></w:r></w:p>`), "a single-quoted plain description");
+  // Greptile and the bounded review on #580: one property per line, MIME bodies decoded, literal plain text, quote-aware tags.
+  const b64 = (t: string) => btoa(t), mht = (head: string, b: string) => `MIME-Version: 1.0\nContent-Type: text/html\n${head}\n\n${b}`;
+  await refused(docx([{ name: "docProps/custom.xml", data: `<Properties xmlns="c" xmlns:vt="v"><property name="Owner"><vt:lpwstr>Jordan Lee</vt:lpwstr></property><property name="Dept"><vt:lpwstr>Ops</vt:lpwstr></property><property name="Note"><vt:lpwstr>482913</vt:lpwstr></property></Properties>` }]), "a code alone in one custom property");
+  await refused(docx([{ name: "docProps/core.xml", data: `<cp:coreProperties xmlns:cp="c" xmlns:dc="d"><dc:creator>Jordan Lee</dc:creator><dc:title>Resume</dc:title><dc:subject>482913</dc:subject></cp:coreProperties>` }]), "a code alone in one core property");
+  await refused(docx([{ name: "word/afchunk.mht", data: mht("Content-Transfer-Encoding: base64", b64("<p>Verification code: 482913</p>")) }]), "base64 MHTML body");
+  await refused(docx([{ name: "word/afchunk.mht", data: mht("Content-Transfer-Encoding: quoted-printable", "<p>Verification code: 48=\n2913</p>") }]), "quoted-printable MHTML body");
+  await refused(docx([{ name: "word/afchunk.mht", data: mht("Content-Transfer-Encoding: x-uuencode", "begin 644 x") }]), "unknown MHTML transfer encoding");
+  await refused(docx([{ name: "word/afchunk.txt", data: "Jordan Lee\n<Verification code: 482913>\n" }]), "angle brackets in a plain-text part");
+  await refused(docx([{ name: "word/drawing1.vml", data: `<xml xmlns:v="v"><v:shape><v:textpath string="OTP 482913 >"/></v:shape></xml>` }]), "a > inside a quoted text path");
+  await refused(docx([], `<w:p><w:r><w:pict><v:shape><v:textpath style='x' string="OTP 482913 >"/></v:shape></w:pict></w:r></w:p>`), "a > inside a quoted text path in the body");
+  await kept(docx([{ name: "docProps/core.xml", data: `<cp:coreProperties xmlns:cp="c"><cp:revision>1234</cp:revision></cp:coreProperties>` }]), "a revision number");
+  await kept(docx([{ name: "docProps/core.xml", data: `<cp:coreProperties xmlns:cp="c"><cp:version>16.0000</cp:version><cp:revision>3</cp:revision></cp:coreProperties>` }]), "version and revision");
+  await kept(docx([{ name: "word/afchunk.mht", data: 'MIME-Version: 1.0\nContent-Type: multipart/related; boundary="----=_NextPart_01D9"\n\n------=_NextPart_01D9\nContent-Type: text/html; charset="utf-8"\nContent-Transfer-Encoding: quoted-printable\n\n<p>Volunteer, Food Bank, 2018 =\n- 2020</p>\n------=_NextPart_01D9--\n' }]), "a Word-style multipart MHTML part");
+  await kept(docx([{ name: "word/afchunk.mht", data: mht("Content-Transfer-Encoding: base64", b64("<p>Volunteer, Food Bank, 2018 - 2020</p>")) }]), "a base64 MHTML body");
+});

@@ -184,7 +184,13 @@ function mimeText(s: string): string[] {
     const enc = (/content-transfer-encoding\s*:\s*([\w-]+)/i.exec(head)?.[1] ?? "7bit").toLowerCase();
     let text: string;
     // A body is read in its declared charset (UTF-8 when none); a charset the decoder does not know throws.
-    const cs = /charset\s*=\s*"?([\w.:-]+)"?/i.exec(head)?.[1] ?? "utf-8", txt = (b: Uint8Array) => new TextDecoder(cs, { fatal: false }).decode(b);
+    const cs = /charset\s*=\s*"?([\w.:-]+)"?/i.exec(head)?.[1] ?? "utf-8", txt = (b: Uint8Array) => {
+      // A byte-order mark that contradicts the declared charset cannot be read safely: the file is refused.
+      const bom = b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf ? "utf-8" : b[0] === 0xff && b[1] === 0xfe ? "utf-16le" : b[0] === 0xfe && b[1] === 0xff ? "utf-16be" : null;
+      const label = new TextDecoder(cs).encoding;
+      if (bom && !(bom === label || (bom.startsWith("utf-16") && /^utf-16$/i.test(cs)))) throw new Error(`byte-order mark ${bom} contradicts charset ${cs}`);
+      return new TextDecoder(cs, { fatal: false }).decode(b);
+    };
     if (enc === "base64") { const raw = atob(body.replace(/\s+/g, "")); text = txt(Uint8Array.from(raw, (c) => c.charCodeAt(0))); }
     else if (enc === "quoted-printable") { const b = body.replace(/=\r?\n/g, ""); const bytes: number[] = []; for (let i = 0; i < b.length; i++) { const h = b[i] === "=" && /^[0-9a-f]{2}$/i.test(b.slice(i + 1, i + 3)); bytes.push(h ? parseInt(b.slice(i + 1, i + 3), 16) : b.charCodeAt(i)); if (h) i += 2; } text = txt(new Uint8Array(bytes)); }
     // A raw body was read with the part (UTF-8): any other declared charset cannot be read safely here, so the file is refused.

@@ -335,4 +335,13 @@ Deno.test("R8G-9 Greptile on #581: hexadecimal character references in the body,
   await refused(docx([{ name: "word/afchunk.mht", data: `MIME-Version: 1.0\nContent-Type: text/html; charset="windows-1251"\nContent-Transfer-Encoding: 8bit\n\n<p>\u043a\u043e\u0434 482913</p>` }]), "an 8bit windows-1251 body");
   await refused(docx([{ name: "word/afchunk.mht", data: `MIME-Version: 1.0\nContent-Type: text/html; charset="x-unknown-9"\nContent-Transfer-Encoding: 7bit\n\n<p>Jordan</p>` }]), "a 7bit body in an unknown charset");
   await kept(docx([{ name: "word/afchunk.mht", data: `MIME-Version: 1.0\nContent-Type: text/html; charset="utf-8"\nContent-Transfer-Encoding: 8bit\n\n<p>Volunteer, Food Bank, 2018 - 2020</p>` }]), "an 8bit UTF-8 body");
+  // Owner check of e43ac58a: a UTF-8 byte-order mark under a declared UTF-16LE charset (and the reverse) refuses the file.
+  const b64bytes = (b: Uint8Array) => btoa(String.fromCharCode(...b));
+  const bomMht = (cs: string, bytes: Uint8Array) => `MIME-Version: 1.0\r\nContent-Type: text/html; charset="${cs}"\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64bytes(bytes)}`;
+  await refused(docx([{ name: "word/afchunk.mht", data: bomMht("utf-16le", enc.encode("\ufeff<html><body><p>Verification code: 482913</p></body></html>")) }]), "a UTF-8 BOM body declared UTF-16LE");
+  const le = (t: string) => { const b = new Uint8Array(2 + t.length * 2); b[0] = 0xff; b[1] = 0xfe; for (let i = 0; i < t.length; i++) { b[2 + i * 2] = t.charCodeAt(i) & 0xff; b[3 + i * 2] = t.charCodeAt(i) >> 8; } return b; };
+  await refused(docx([{ name: "word/afchunk.mht", data: bomMht("utf-8", le("<p>Verification code: 482913</p>")) }]), "a UTF-16LE BOM body declared UTF-8");
+  await refused(docx([{ name: "word/afchunk.mht", data: bomMht("utf-16be", le("<p>Verification code: 482913</p>")) }]), "a UTF-16LE BOM body declared UTF-16BE");
+  await kept(docx([{ name: "word/afchunk.mht", data: bomMht("utf-8", enc.encode("\ufeff<p>Volunteer, Food Bank, 2018 - 2020</p>")) }]), "a UTF-8 BOM body declared UTF-8");
+  await kept(docx([{ name: "word/afchunk.mht", data: bomMht("utf-16le", le("<p>Volunteer, Food Bank, 2018 - 2020</p>")) }]), "a UTF-16LE BOM body declared UTF-16LE");
 });

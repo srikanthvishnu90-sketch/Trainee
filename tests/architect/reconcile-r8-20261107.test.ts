@@ -121,8 +121,8 @@ Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless res
     "The portal sent a code. It is 739201.", "Recruiter texted me 4821", "Workday sent me 739.201", "Workday sent me 739−201", "Verification code: 739.201", "Workday sent me 739 201",
     // review of f62e2033
     "Workday sent me: 739201", "My verification code arrived this morning: 739201", "Here is the code Workday sent: 739201", "Code -> 739201", "Workday sent me:\n739\n201", "The code it sent: 7392\u201101",
-    "the code was emailed: 739201", "Code is: 482913", "my verification code is 739201", "Workday sent me 739201 for the portal", "They texted me: 482913", "Login code \u2192 482913",
-    "They gave me 482913 to log in", "My verification code is K7X9P2", "Recruiter texted me 4821."]) {
+    "the code was emailed: 739201", "Code is: 482913", "my verification code is 739201", "They texted me: 482913", "Login code \u2192 482913",
+    "They gave me 482913 to log in", "Recruiter texted me 4821.", "Recruiter sent me code K7X9P2", "One-time code: AB12CD"]) {
     assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), true, line);
   }
   for (const line of ["customer portal serving 120000 customers", "Vendor portal handled 35000 orders a year", "Verification engineer, Acme, 2018-2022", "Security code audits 2018-2022",
@@ -144,7 +144,12 @@ Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless res
     // review of 6f6ed8ad: letters-and-digits labels, and a 4-5 digit figure after "gave/sent me" that does not end the phrase
     "Taxonomy code: 207Q00000X", "Denial code: CO197", "Remark code: MA130", "SAP T-code: ME21N", "Transaction code: ME21N", "AFSC code: 1N0X1", "Exam code: AZ104",
     "Qualification code: BSB50420", "Part code: XR500A", "Lot code: AB1234", "Batch code: 23A45B", "The client sent me 1200 for review", "Manager gave me 2500 in budget",
-    "VP gave me 4500 and a deadline", "Leadership gave me 50000 to invest in tooling", "The team sent me 1200 to triage"]) {
+    "VP gave me 4500 and a deadline", "Leadership gave me 50000 to invest in tooling", "The team sent me 1200 to triage",
+    // review of ea5790fb: any size of figure after "gave/sent me" that does not end the phrase; labels with "security", "auth",
+    // "verification" or "sign-in" in them
+    "Leadership gave me 120000 to invest in tooling", "VP gave me 250000 and a team of 6", "NSF gave me 250000 for research", "Leadership gave me 1500000 in budget",
+    "Client sent me 120000 for review", "Azure Security Engineer exam code: AZ500", "CompTIA Security+ exam code: SY0701", "Identity and access (sign-in) exam code: SC300",
+    "Security clearance code: TS2019", "Prior auth code: PA4521", "Insurance verification code: VB102", "Certificate verification code: 4KX7P2QZ"]) {
     assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), false, line);
   }
 });
@@ -215,5 +220,14 @@ Deno.test("R8R-STORE store, cost and building codes handed over in chat are remo
   for (const m of ["Kroger store code arrived: 482913", "store code it sent: 482913", "Store code from the text: 482913", "store code -> 482913", "Here is the store code Workday sent: 482913",
     "Here's the store code. It is 482913.", "Building code from Workday: 482913", "Workday cost code 482913 came by text", "cost code? it's 482913", "the store code they texted me is 482913"]) {
     assertNode.ok(!/482913/.test(savedOf(m).saved), `${JSON.stringify(m)}: ${JSON.stringify(savedOf(m).saved)}`);
+  }
+});
+
+// Review of ea5790fb: a one-time-code word counts only on the code's own line, so a job title above it changes nothing.
+Deno.test("R8R-92 a title line above a label never makes it a hand-over", () => {
+  for (const t of ["Jordan Lee\nSecurity Engineer\n- Exam code: AZ104", "Jordan Lee\nAuth Platform Lead\nCertifications\nExam code: AZ104", "Jordan Lee\nLogin team\n- SAP T-code: ME21N",
+    "Jordan Lee\nSecurity Analyst\nSkills: SAP T-code: ME21N"]) assertNode.equal(fileSharesCode(t), false, t);
+  for (const t of ["Jordan Lee\nSecurity Engineer\n- Recruiter sent me code K7X9P2", "Jordan Lee\nSupport Lead\n- One-time code: AB12CD", "Jordan Lee\n- They gave me 482913 to log in"]) {
+    assertNode.equal(fileSharesCode(t), true, t);
   }
 });

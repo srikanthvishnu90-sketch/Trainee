@@ -185,7 +185,10 @@ const RESUME_COUNT = /^[\s\n]*(?:\+|k\b|%|[-\u2013\u2014]\s*\d|(?:customers?|cli
 const FILE_NAMED = /\b(?:zip|postal|post|area|country|promo|promotional|discount|coupon|referral|course|class|error|status|dial|tax|product|source|job|dress|invite|invitation|gift|reference|ref|airport|naics|sic|cpt|icd|sort|swift|bank|routing|color|colour|style|item|sku|morse|qr|bar|req|requisition|position|posting|role|department|dept|cost|budget|project|program|module|unit|soc|fips|vendor|supplier|ticket|order|voucher|offer|event|building|store|zip\+4)[\s-]+(?:code|pin)\b[^\n]{0,24}$/i;
 // A handed-over code ends its phrase: the line ends, punctuation follows, or a function word ("for the portal", "can you enter
 // it"). A noun after the number ("4500 hospitals", "3500 resumes") is a count, whatever the noun (review of 470e25d9).
-const OTP_WORD = /\b(?:one[- ]time|verification|verify|otp|passcode|pass code|2fa|mfa|two[- ]factor|sign[- ]?in|log[- ]?in|auth(?:entication)?|security)\b/i;
+const OTP_WORD = /\b(?:one[- ]time(?:\s+(?:code|pass(?:code|word)?|pin))?|otp|passcode|pass code|2fa|mfa|two[- ]factor(?:\s+code)?|(?:sign[- ]?in|log[- ]?in|login|verification)\s+code\s+(?:is|was|arrived|:|->))\b|(?:sign[- ]?in|log[- ]?in|login|verification)\s+code\s*(?:->|:|is|was)/i;
+// Letters-and-digits codes: only a one-time-code word itself; "insurance/certificate verification code: VB102" is a label.
+const OTP_STRICT = /\b(?:one[- ]time|otp|passcode|pass code|2fa|mfa|two[- ]factor)\b/i;
+const OTP_AFTER = /^[ \t]*(?:to|so\s+i\s+can|for)\s+(?:log|sign)\s*(?:in|on)\b|^[ \t]*(?:to|so\s+i\s+can)\s+(?:verify|enter\s+it|get\s+in)\b/i;
 const HAND_VERB = /\b(?:sent|texted|emailed|gave|messaged|dm'?d)\s+me\b/i;
 const CODE_ENDS = /^(?:[ \t]*(?:$|\n|[.,;:!?)\]"'\u2019\u201d]|(?:for|from|to|in|on|at|today|tonight|yesterday|this|that|just|now|please|thanks|thank|and|or|but|so|which|can|could|would|will|if|when|by|via|as|again|here|there|it|is|was)\b))/i;
 export function fileSharesCode(text: string): boolean {
@@ -196,9 +199,12 @@ export function fileSharesCode(text: string): boolean {
     // Review of 6f6ed8ad: a letters-and-digits token ("Exam code: AZ104", "Denial code: CO197", "SAP T-code: ME21N") is a
     // hand-over only after a hand-over verb or a one-time-code word; a 4-5 digit number after a hand-over verb alone ("Manager
     // gave me 2500 in budget") only when it ends the phrase.
-    const otpWord = OTP_WORD.test(before), handVerb = HAND_VERB.test(before);
-    if (/[A-Za-z]/.test(token) && !otpWord && !handVerb) continue;
-    if (!otpWord && /^\d{4,5}$/.test(token.replace(/\D/g, "")) && !/^[ \t]*(?:$|\n|[.,;:!?)\]"'\u2019\u201d])/.test(after)) continue;
+    // Same line only, and only a strict one-time-code word: a job title ("Security Engineer") or a label ("exam code") on the
+    // way is not one (review of ea5790fb).
+    const line = before.slice(before.lastIndexOf("\n") + 1);
+    const otpWord = OTP_WORD.test(line) || OTP_AFTER.test(after), handVerb = HAND_VERB.test(line);
+    if (/[A-Za-z]/.test(token) && !OTP_STRICT.test(line) && !handVerb) continue;
+    if (!otpWord && !/^[ \t]*(?:$|\n|[.,;:!?)\]"'\u2019\u201d])/.test(after)) continue;
     if (HANDOVER_END.test(before)) return true;
   }
   return false;

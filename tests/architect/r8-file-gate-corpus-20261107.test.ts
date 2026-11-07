@@ -157,3 +157,63 @@ Deno.test("R8G-5 review of 1c937596: hidden parts fail closed, breaks kept, all 
     assertNode.ok(res.ok && stored.length === 1, JSON.stringify(l));
   }
 });
+
+// Review of 135237e5. Real Word files (python-docx, pandoc, LibreOffice) are kept: their styles, settings, fonts, numbering,
+// theme, app and core properties carry metadata (colours, rsids, panose, nsid, AppVersion, W3CDTF dates), not resume text. Text
+// is read where Word keeps it; every listed part must still be readable. altChunk HTML, VML text boxes and an embedded Word file
+// are read. A profile link's handle is not a value. A sign-in purpose overrides a named label. No-space runs stay linear.
+Deno.test("R8G-6 review of 135237e5: real Word files kept, text-bearing parts only, altChunk/VML/embedded read, links, linear", async () => {
+  const dir = new URL("./fixtures/r8-real-docx/", import.meta.url);
+  const upload = async (bytes: Uint8Array, name = "resume.docx") => {
+    const stored: unknown[] = [];
+    const res = await ingestResumeFile({ userId: "TEST-r8g", channel: "telegram", doc: { fileId: "F", uniqueId: crypto.randomUUID(), name, mime: DOCX, size: bytes.length },
+      fetchFile: async () => ({ ok: true, bytes }), record: async (row) => { stored.push(row); return "id"; } });
+    return { res: res as { ok: boolean; reply?: string }, stored };
+  };
+  for (const f of ["pydocx-plain.docx", "pandoc-plain.docx", "libreoffice-pydocx.docx", "libreoffice-pandoc.docx"]) {
+    const u = await upload(Deno.readFileSync(new URL(f, dir)), f);
+    assertNode.ok(u.res.ok && u.stored.length === 1, `${f}: ${JSON.stringify(u.res).slice(0, 200)}`);
+  }
+  for (const f of ["pydocx-header-code.docx", "pydocx-comment-code.docx"]) {
+    const u = await upload(Deno.readFileSync(new URL(f, dir)), f);
+    assertNode.ok(!u.res.ok && u.stored.length === 0 && !String(u.res.reply).includes("482913"), f);
+  }
+  const enc = new TextEncoder(), W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  const body = BODY.map((t) => `<w:p><w:r><w:rPr><w:color w:val="2E74B5"/></w:rPr><w:t xml:space="preserve">${t}</w:t></w:r></w:p>`).join("");
+  const types = { name: "[Content_Types].xml", data: enc.encode('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>') };
+  const docx = (extra: { name: string; data: Uint8Array | string }[], inBody = "") => zipOf([types,
+    { name: "word/document.xml", data: enc.encode(`<?xml version="1.0" encoding="UTF-8"?><w:document ${W}><w:body>${body}${inBody}<w:sectPr/></w:body></w:document>`) },
+    ...extra.map((e) => ({ name: e.name, data: typeof e.data === "string" ? enc.encode(e.data) : e.data }))]);
+  // The metadata the review found refusing every real file.
+  const metadata = [
+    { name: "word/styles.xml", data: `<w:styles ${W}><w:style w:styleId="Heading1"><w:rPr><w:color w:val="365F91"/></w:rPr><w:rsid w:val="00FC693F"/></w:style></w:styles>` },
+    { name: "word/settings.xml", data: `<w:settings ${W}><w:rsids><w:rsidRoot w:val="00904D0C"/><w:rsid w:val="00FC693F"/></w:rsids></w:settings>` },
+    { name: "word/fontTable.xml", data: `<w:fonts ${W}><w:font w:name="Calibri"><w:panose1 w:val="020F0502020204030204"/><w:sig w:usb0="E0002AFF" w:usb1="C000247B"/></w:font></w:fonts>` },
+    { name: "word/numbering.xml", data: `<w:numbering ${W}><w:abstractNum w:abstractNumId="0"><w:nsid w:val="FFFFFF88"/><w:tmpl w:val="D0A62B40"/></w:abstractNum></w:numbering>` },
+    { name: "docProps/app.xml", data: '<Properties xmlns="x"><Template>Normal.dotm</Template><TotalTime>12</TotalTime><Pages>1</Pages><Words>310</Words><AppVersion>16.0000</AppVersion></Properties>' },
+    { name: "docProps/core.xml", data: '<cp:coreProperties xmlns:cp="c" xmlns:dc="d" xmlns:dcterms="t"><dc:title>Jordan Lee Resume</dc:title><cp:revision>14</cp:revision><dcterms:created>2026-11-07T16:25:11Z</dcterms:created></cp:coreProperties>' },
+    { name: "word/_rels/document.xml.rels", data: '<Relationships xmlns="r"><Relationship Id="rId9" Type="hyperlink" Target="https://www.linkedin.com/in/wei-zhang-4b7a19120/" TargetMode="External"/></Relationships>' },
+    { name: "customXml/item1.xml", data: '<b:Sources xmlns:b="s" SelectedStyle="\\APA.XSL" StyleName="APA" Version="6"/>' },
+    { name: "word/theme/theme1.xml", data: '<a:theme xmlns:a="a" name="Office Theme"><a:srgbClr val="4F81BD"/></a:theme>' }];
+  const meta = await upload(docx(metadata));
+  assertNode.ok(meta.res.ok && meta.stored.length === 1, `metadata: ${JSON.stringify(meta.res).slice(0, 200)}`);
+  const refused = async (bytes: Uint8Array, tag: string) => { const u = await upload(bytes); assertNode.ok(!u.res.ok && u.stored.length === 0 && !String(u.res.reply).includes("482913"), tag); };
+  await refused(docx([...metadata, { name: "word/afchunk.htm", data: "<html><body><p>Jordan Lee</p><p>My verification code is 482913</p></body></html>" }]), "altChunk HTML");
+  await refused(docx([...metadata, { name: "word/vmlDrawing1.vml", data: '<xml><v:shape><v:textbox><div><p>Login code: 482913</p></div></v:textbox></v:shape></xml>' }]), "VML text box");
+  await refused(docx([...metadata, { name: "word/embeddings/Microsoft_Word_Document.docx", data: docx([{ name: "word/header1.xml", data: `<w:hdr ${W}><w:p><w:r><w:t>OTP 482913</w:t></w:r></w:p></w:hdr>` }]) }]), "embedded Word file");
+  await refused(docx([...metadata, { name: "word/_rels/header1.xml.rels", data: '<Relationships xmlns="r"><Relationship Id="rId1" Target="https://login.example.com/verify?code=482913" TargetMode="External"/></Relationships>' }]), "a link's query");
+  const kept = await upload(docx([...metadata, { name: "word/afchunk.htm", data: "<html><body><p>Volunteer, Food Bank, 2018 - 2020</p></body></html>" }]));
+  assertNode.ok(kept.res.ok && kept.stored.length === 1, "a plain altChunk is kept");
+  // Lines.
+  for (const l of ["linkedin.com/in/mariagonzalez123", "linkedin.com/in/priya-raghavan-8a1b2c3d", "+48 501 234 567 | linkedin.com/in/annakowalska", "github.com/jordanlee-42 | gitlab.com/jl42"]) {
+    const { res, stored } = await ingest([...BODY.slice(0, 4), l, ...BODY.slice(4)]);
+    assertNode.ok(res.ok && stored.length === 1, JSON.stringify(l));
+  }
+  const ref = await ingest([...BODY.slice(0, 4), "Ref: 482913 use this to sign in", ...BODY.slice(4)]);
+  assertNode.ok(!ref.res.ok && ref.stored.length === 0, "a sign-in purpose after a named label");
+  const t0 = performance.now();
+  assertNode.deepEqual(fileCodeLines("x\n" + "x".repeat(200000)), []);
+  assertNode.deepEqual(fileCodeLines("负责数据平台建设，覆盖全国用户。".repeat(3000)), []);
+  assertNode.deepEqual(fileCodeLines("x".repeat(150000) + " Verification code: 482913 " + "y".repeat(5000)), [1]);
+  assertNode.ok(performance.now() - t0 < 5000, `no-space runs took ${Math.round(performance.now() - t0)} ms`);
+});

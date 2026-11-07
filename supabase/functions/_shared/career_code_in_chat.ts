@@ -305,7 +305,10 @@ function risingRange(line: string, at: number): boolean {
 }
 // The 1-based line numbers of the text read from the file that hold a suspected code (each once, in order).
 export function fileCodeLines(text: string): number[] {
-  const lines = normalizeChatText(fileText(text)).split("\n"), hits: number[] = [];
+  // A profile link's path (a LinkedIn or GitHub handle such as "linkedin.com/in/wei-zhang-4b7a19120") is the link, not a value:
+  // masked, keeping the line's length; a query string ("?code=482913") is still read.
+  const PROFILE = /\b(?:https?:\/\/)?(?:[\w-]+\.)?(?:linkedin\.com\/(?:in|pub|company)|github\.com|gitlab\.com|behance\.net|dribbble\.com|medium\.com|x\.com|twitter\.com|stackoverflow\.com\/users|orcid\.org|kaggle\.com|scholar\.google\.com\/citations|researchgate\.net\/profile|bitbucket\.org|codepen\.io|leetcode\.com\/(?:u\/)?|hackerrank\.com\/(?:profile\/)?)\/?[^\s?#|,;)]*/gi;
+  const lines = normalizeChatText(fileText(text)).split("\n").map((l) => l.replace(PROFILE, (m) => " ".repeat(m.length))), hits: number[] = [];
   const unbullet = (s: string) => s.replace(/^\s*(?:[-*•▪●>]|\d+[.)])\s+/, "");
   lines.forEach((raw, i) => {
     if (lineCodeAt(raw) >= 0) { hits.push(i + 1); return; }
@@ -485,6 +488,8 @@ export function wrappedCodeAt(raw: string): number {
   }
   return -1;
 }
+// A sign-in purpose after a value: a named label ("Ref:", "Store code:") does not make it safe ("Ref: 482913 use this to sign in").
+const SIGNIN_AFTER = /\b(?:sign[- ]?in|log[- ]?in|login|verify|verification|otp|one[- ]time|passcode|2fa|mfa|authenticate|unlock)\b/i;
 // The index of the first value on the line that the gate refuses, or -1.
 export function gateCodeAt(raw: string, ctx?: boolean): number {
   return windowed(raw, (s) => gateCodeAtOne(s, ctx ?? GATE_CTX.test(s)));
@@ -561,13 +566,13 @@ export function gateCodeAtOne(raw: string, ctx = GATE_CTX.test(raw)): number {
     if (/\b(?:incident|ticket|issue|case|change|request|jira|story|epic|bug|pr|pull\s+request)\s*#?\s*$/i.test(before) && /^[A-Z]{2,10}-\d{1,7}$/.test(val) && !direct) continue;
     if (CERT_SHAPE.test(val) && (!direct || CREDENTIAL_AFTER.test(next))) continue; // a certification exam ("AZ-104")
     if (GATE_STANDARD.test(groups[0]) && groups.length > 1 && groups.slice(1).every((g) => /^\d{1,5}$|^[A-Za-z]{1,6}$/.test(g)) && /\d/.test(groups.slice(1).join(""))) continue; // a standard ("ISO-27001", "NIST-800-53")
-    if (label && NAMED_LABEL.test(label[1].replace(/-\d+$/, ""))) continue;
+    if (label && NAMED_LABEL.test(label[1].replace(/-\d+$/, "")) && !SIGNIN_AFTER.test(after)) continue;
     if (/\b(?:bank|swift|bic|routing|sort)\b/i.test(before) && (/^[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?$/.test(val) || /^\d{2}-\d{2}-\d{2}$/.test(val)) && !STRONG_LABEL.test(before)) continue; // a SWIFT/BIC or sort code
     const clause = /\b([\w'-]+)[ -]+(?:codes?|pins?)\b[^:;.]{0,24}[:#]?\s*(?:[A-Za-z0-9.-]+\s*(?:,|\band\b|&|\/)\s*)*$/i.exec(before);
-    if (clause && NAMED_LABEL.test(clause[1].replace(/-\d+$/, ""))) continue; // "Zip codes covered: 94103", "ICD-10 codes F32.1"
+    if (clause && NAMED_LABEL.test(clause[1].replace(/-\d+$/, "")) && !SIGNIN_AFTER.test(after)) continue; // "Zip codes covered: 94103", "ICD-10 codes F32.1"
     if (/\b(?:icd|cpt|hcpcs|obd|dtc|fault|trouble|diagnostic)\b/i.test(line) && /^[A-Z]\d{2,4}(?:\.\d{1,4})?$/.test(val) && !STRONG_LABEL.test(before)) continue; // a medical or fault code
     if (/\b(?:iso|iec|nist|nfpa|ieee|ansi|astm|osha|rfc|pci|soc|fips|hl7|en|bs|din|ul|mil|cfr|cpt|icd|hcpcs|ndc|drg)\s?$/i.test(before) && /^[\d.:-]{1,12}$/.test(val) && !direct) continue; // "NFPA 72", "ISO 27001:2013"
-    if (bareLabel && NAMED_LABEL.test(bareLabel[1])) continue;
+    if (bareLabel && NAMED_LABEL.test(bareLabel[1]) && !SIGNIN_AFTER.test(after)) continue; // "ref: RQ4821" (not "Ref: 482913 use this to sign in")
     if (/^\d+(?:ms|s|m|h|k|x|gb|mb|kb|tb|hz|ghz|px|pt|yr|yrs|rps|qps|tps)$/i.test(flat) || /^p\d{2,3}$/i.test(flat)) continue;
     if ((money || /\b(?:salary|pay|offer|range|rate)\b/i.test(line)) && /^\d{1,3}(?:\.\d{3})+(?:\s?[-–—]\s?\d{1,3}(?:\.\d{3})+)?$/.test(val) && !direct) continue; // European thousands
     if (ID_LABEL.test(before) || ((COUNT_LABEL.test(before) || COUNT_LABEL2.test(before)) && !direct && !(codeLength && strongCode) && !new RegExp(String.raw`(?:ss|\b(?:${SENDERS}|lastpass|1password|bitwarden|authy|signal|whatsapp|telegram|slack|zoom|bank))\s*[:\-–—]\s*$`, "i").test(before))) continue;
@@ -626,7 +631,7 @@ function windowed(raw: string, f: (s: string) => number): number {
   }
   if (start < raw.length) pieces.push([start, raw.length]);
   for (const [a, b] of pieces) {
-    const from = a === 0 ? 0 : Math.max(0, raw.lastIndexOf(" ", Math.max(0, a - 64)) + 1), at = f(raw.slice(from, b));
+    const sp = a === 0 ? -1 : raw.lastIndexOf(" ", a - 1), from = a === 0 ? 0 : sp >= a - 128 ? sp + 1 : Math.max(0, a - 64), at = f(raw.slice(from, b));
     if (at >= 0) return from + at;
   }
   return -1;

@@ -113,35 +113,57 @@ export async function fileText(kind: FileKind, bytes: Uint8Array): Promise<strin
   return (Array.isArray(lines) ? lines : []).map((l) => String(l).replace(/\s+$/, "")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-// Word parts the reader does not show as resume text, which the stored file carries: every XML part other than the body (headers,
-// footers, notes, comments, glossary, document properties, relationships with their link targets) in full, and from the body its
-// tracked deletions, field instructions and alt text. Breaks and tabs keep their place, so "Jordan Lee" + break + "482913" stays
-// two lines. A listed part that cannot be read (damaged, or past the reader's size cap) throws: the upload fails closed.
-const ENTITY: Record<string, string> = { lt: "<", gt: ">", quot: "\"", apos: "'", amp: "&" };
-const decodeXml = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|lt|gt|quot|apos|amp);/gi, (_m, e: string) =>
+// Word parts the reader does not show as resume text, which the stored file carries. Text is taken only where Word keeps text: the
+// text runs of headers, footers, notes, comments, glossary and text boxes (w:t, a:t, VML), the body's tracked deletions and field
+// instructions, alt text and tooltips, the title, subject, description and keywords of the document properties and custom string
+// properties, the query part of link targets, HTML or text "altChunk" parts, and an embedded Word file one level down. Structural
+// parts (styles, settings, fonts, numbering, theme, app properties) carry no resume text, but every listed part must still be
+// readable: a part the reader cannot read (bad checksum, past the size cap) throws, and the upload fails closed.
+const ENTITY: Record<string, string> = { lt: "<", gt: ">", quot: "\"", apos: "'", amp: "&", nbsp: " " };
+const decodeXml = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|lt|gt|quot|apos|amp|nbsp);/gi, (_m, e: string) =>
   e[0] === "#" ? String.fromCodePoint(e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10)) : ENTITY[e.toLowerCase()] ?? _m);
-function xmlPlain(xml: string, bodyOnlyHidden: boolean): string {
-  const attrs = [...xml.matchAll(/\s(?:descr|title|Target|w:tooltip|tooltip|alt|w:val(?=="[^"]{6,}"))="([^"]*)"/g)].map((m) => decodeXml(m[1]));
-  let t = xml;
-  if (bodyOnlyHidden) t = [...xml.matchAll(/<w:(?:delText|instrText)(?:\s[^>]*)?>([^<]*)<\/w:(?:delText|instrText)>|<\/w:p>|<w:(?:br|cr)\b[^>]*\/?>/g)].map((m) => m[1] ?? "\n").join("");
-  else t = t.replace(/<(?:w:br|w:cr|a:br)\b[^>]*\/?>|<\/(?:w:p|a:p|w:tc|w:tr)>/g, "\n").replace(/<w:tab\b[^>]*\/?>/g, " ").replace(/<\/(?!w:|a:)[\w.:-]+>/g, "\n").replace(/<[^>]*>/g, "");
-  return [decodeXml(t), ...attrs].join("\n").split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean).join("\n");
+const lines = (s: string) => decodeXml(s).split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+// Text runs, one paragraph per line; a break or tab keeps its place.
+function runText(xml: string, tags = "t|delText|instrText"): string[] {
+  const out: string[] = [];
+  for (const para of xml.split(/<\/w:p>|<\/a:p>/)) {
+    let t = "";
+    for (const m of para.matchAll(new RegExp(String.raw`<(?:w|a):(?:${tags})(?:\s[^>]*)?>([^<]*)</(?:w|a):(?:${tags})>|<w:(?:br|cr)\b[^>]*/?>|<a:br\b[^>]*/?>|<w:tab\b[^>]*/?>`, "g"))) {
+      t += m[1] !== undefined ? m[1] : /tab/.test(m[0]) ? " " : "\n";
+    }
+    out.push(...lines(t));
+  }
+  return out;
+}
+const attrText = (xml: string) => [...xml.matchAll(/\s(?:descr|title|w:tooltip)="([^"]*)"/g)].flatMap((m) => lines(m[1]));
+const queryOf = (url: string) => { const q = decodeXml(url).replace(/^[^?#]*/, ""); try { return decodeURIComponent(q); } catch { return q; } };
+const STRUCTURAL = /^(?:word\/(?:styles|stylesWithEffects|settings|webSettings|fontTable|numbering|people|commentsIds|commentsExtensible|commentsExtended)\.xml|word\/theme\/[^/]+\.xml|docProps\/app\.xml|\[Content_Types\]\.xml|customXml\/[^/]+\.xml|word\/(?:glossary\/)?(?:styles|settings|webSettings|fontTable|numbering)\.xml)$/i;
+async function hiddenOf(r: any, buf: any, depth: number): Promise<string[]> {
+  const names: string[] = r.docxPartNames(buf) ?? [];
+  if (!names.includes("word/document.xml")) throw new Error("no document part");
+  const out: string[] = [];
+  for (const n of names) {
+    const text = /\.(?:xml|rels|vml|html?|txt|mht|docx)$/i.test(n), part = text ? r.docxPart(buf, n) : null;
+    if (text && !part) throw new Error(`part not readable: ${n}`);
+    if (!part || STRUCTURAL.test(n)) continue;
+    if (/\.docx$/i.test(n)) { if (depth > 0) throw new Error(`nested file too deep: ${n}`); out.push(...(r.extractDocxLines?.(part) ?? []).map(String), ...(await hiddenOf(r, part, depth + 1))); continue; }
+    const s = part.toString("utf8");
+    if (n === "word/document.xml") { out.push(...runText(s, "delText|instrText"), ...attrText(s)); continue; }
+    if (/\.rels$/i.test(n)) { out.push(...[...s.matchAll(/\sTarget="([^"]*)"/g)].map((m) => queryOf(m[1])).filter((q) => q.length > 1)); continue; }
+    if (/^docProps\/core\.xml$/i.test(n)) { out.push(...[...s.matchAll(/<(?:dc:title|dc:subject|dc:description|cp:keywords|cp:category|cp:contentStatus)(?:\s[^>]*)?>([^<]*)</g)].flatMap((m) => lines(m[1]))); continue; }
+    if (/^docProps\/custom\.xml$/i.test(n)) { out.push(...[...s.matchAll(/<vt:lpw?str>([^<]*)</g)].flatMap((m) => lines(m[1]))); continue; }
+    if (/\.(?:html?|mht|txt)$/i.test(n)) { out.push(...lines(s.replace(/<(?:br|\/p|\/div|\/li|\/tr|\/h\d)[^>]*>/gi, "\n").replace(/<[^>]*>/g, " "))); continue; }
+    if (/\.vml$/i.test(n)) { out.push(...lines(s.replace(/<\/(?:div|p)>|<br\s*\/?>/gi, "\n").replace(/<[^>]*>/g, " "))); continue; }
+    out.push(...runText(s), ...attrText(s));
+  }
+  return out;
 }
 export async function docxHiddenText(bytes: Uint8Array): Promise<string> {
   reader ??= Promise.all([import("node:zlib"), import("node:crypto"), import("node:buffer")])
     // deno-lint-ignore no-explicit-any
     .then(([zlib, crypto, b]) => ({ r: (CareerRender as any).withRuntime({ zlib, crypto, Buffer: b.Buffer }), Buffer: b.Buffer }));
   const { r, Buffer } = await reader;
-  const buf = Buffer.from(bytes);
-  const names: string[] = (r.docxPartNames(buf) ?? []).filter((n: string) => /\.(?:xml|rels)$/i.test(n));
-  if (!names.includes("word/document.xml")) throw new Error("no document part");
-  const out: string[] = [];
-  for (const n of names) {
-    const part = r.docxPart(buf, n);
-    if (!part) throw new Error(`part not readable: ${n}`);
-    out.push(xmlPlain(part.toString("utf8"), n === "word/document.xml"));
-  }
-  return out.filter(Boolean).join("\n");
+  return (await hiddenOf(r, Buffer.from(bytes), 0)).join("\n");
 }
 export const FILE_HIDDEN_CODE_REPLY = "Your file has what looks like a one-time code or another private number in a header, footer, note, comment or tracked change, so I didn't keep the file or read anything from it, and I won't repeat it. Remove it (and accept or reject tracked changes) and send the file again, or paste your resume here.";
 

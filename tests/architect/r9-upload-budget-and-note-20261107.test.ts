@@ -135,4 +135,7 @@ Deno.test("R9B-dup a Word file naming one part twice is refused before any part 
   }
   // one name each still reads
   await docxHiddenText(zipOf([{ name: "word/document.xml", data: doc }, { name: "word/header1.xml", data: hdr("a") }]));
+  // a Word file embedded in a resume is not mistaken for duplicate names (its own headers are data; review of 11a70b71)
+  const inner = zipOf([{ name: "[Content_Types].xml", data: enc.encode("<Types/>") }, { name: "word/document.xml", data: doc }]);
+  await docxHiddenText(zipOf([{ name: "[Content_Types].xml", data: enc.encode("<Types/>") }, { name: "word/document.xml", data: doc }, { name: "word/embeddings/Microsoft_Word_Document.docx", data: inner }]));
 });

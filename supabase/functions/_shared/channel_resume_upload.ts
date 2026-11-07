@@ -256,25 +256,25 @@ const STRUCTURAL = /^(?:word\/(?:styles|stylesWithEffects|settings|webSettings|f
 // One budget per upload for every part the Word checks expand (the hidden reader, the clean copy and an embedded Word file):
 // the zip reader's own size cap starts again at each part read, so a small upload of hundreds of highly compressed parts, each
 // under the per-part cap, expanded to hundreds of MB. Past the budget the read throws and the upload is refused as damaged.
-// A zip that names one entry twice is refused before any part is read: the reader expands every entry with the asked name and
-// returns the last, so repeated large entries behind a small final one escaped the budget (Greptile on #584). Both the local
-// headers and the central directory are checked, by exact name and case-insensitively.
+// A zip that names one entry twice is refused before any part is read: the reader expands every central-directory entry with
+// the asked name and returns the last, so repeated large entries behind a small final one escaped the budget (Greptile on #584).
+// The check walks the same central directory the reader does (end record, then each entry), never the entries' data, so an
+// embedded file's own headers are not read as names (review of 11a70b71). Exact and case-insensitive.
 function zipNamesUnique(b: Uint8Array): void {
-  const dec = new TextDecoder("utf-8", { fatal: false }), seen = new Set<string>(), cd = new Set<string>();
-  const u16 = (i: number) => b[i] | (b[i + 1] << 8);
-  const add = (set: Set<string>, n: string) => { const k = n.toLowerCase(); if (set.has(k)) throw new Damaged(`a part named twice: ${n}`); set.add(k); };
-  for (let i = 0; i + 30 <= b.length; i++) {
-    if (b[i] === 0x50 && b[i + 1] === 0x4b && b[i + 2] === 0x03 && b[i + 3] === 0x04) {
-      const n = u16(i + 26), x = u16(i + 28);
-      if (i + 30 + n > b.length) break;
-      add(seen, dec.decode(b.subarray(i + 30, i + 30 + n)));
-      i += 29 + n + x;
-    } else if (b[i] === 0x50 && b[i + 1] === 0x4b && b[i + 2] === 0x01 && b[i + 3] === 0x02 && i + 46 <= b.length) {
-      const n = u16(i + 28), x = u16(i + 30), c = u16(i + 32);
-      if (i + 46 + n > b.length) break;
-      add(cd, dec.decode(b.subarray(i + 46, i + 46 + n)));
-      i += 45 + n + x + c;
-    }
+  const dec = new TextDecoder("utf-8", { fatal: false }), seen = new Set<string>();
+  const u16 = (i: number) => b[i] | (b[i + 1] << 8), u32 = (i: number) => (b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24)) >>> 0;
+  let eocd = -1;
+  for (let i = b.length - 22; i >= 0 && i >= b.length - 22 - 65536; i--) if (u32(i) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) return; // not a zip the reader can read; the reader fails on its own
+  const count = u16(eocd + 10);
+  let p = u32(eocd + 16);
+  for (let n = 0; n < count && p + 46 <= b.length; n++) {
+    if (u32(p) !== 0x02014b50) break;
+    const nameLen = u16(p + 28), extraLen = u16(p + 30), commentLen = u16(p + 32);
+    const name = dec.decode(b.subarray(p + 46, p + 46 + nameLen)), k = name.toLowerCase();
+    if (seen.has(k)) throw new Damaged(`a part named twice: ${name}`);
+    seen.add(k);
+    p += 46 + nameLen + extraLen + commentLen;
   }
 }
 export const UPLOAD_EXPANDED_MAX = 25 * 1024 * 1024, UPLOAD_PARTS_MAX = 2000;

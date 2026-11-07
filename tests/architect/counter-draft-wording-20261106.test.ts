@@ -26,8 +26,7 @@ const recorded = (ctx: any) => {
 // others, the industry, averages, salary sites, other employers) is not attributed by code. Nothing is saved or drafted and the
 // turn is held for the brain, which asks which figure is the employer's offer. Spec side of that rule:
 const THIRD_SPEC = /\b(?:market|competitors?|others|industry|average|median|typical|glassdoor|levels\.fyi|payscale|salary\.com|indeed|employers|companies|other\s+(?:places|firms|roles|jobs|offers))\b/i;
-const SPEC_OPENER = /^["'\u201d\u2019)\]]*\s+(?:They|The|He|She|I|We|It|My|Our|Their|His|Her|This|That|These|Those|So|But|Then|Now|Also|Today|Yesterday|Last|Can|Could|Please|What|How)\b/;
-const namesThird = (msg: string) => msg.replace(/(?<=(?:^|[^A-Za-z])(?:u\.s|u\.k|etc|inc|co|corp|ltd|jr|sr))\.(?=["'\u201d\u2019)\]]*\s)/gi, (m: string, off: number) => SPEC_OPENER.test(msg.slice(off + 1, off + 16)) ? "\n" : m).split(/[?!;\n]|(?<!(?:^|[^A-Za-z])(?:e\.g|i\.e|u\.s|u\.k|approx|vs|etc|mr|mrs|ms|dr|inc|co|corp|ltd|jr|sr))\.(?=["'\u201d\u2019)\]]*(?:\s|$))/i).some((x) => THIRD_SPEC.test(x.replace(/counter[ -]?offers?/ig, "")) && /\$\s?\d/.test(x));
+const namesThird = (msg: string) => msg.split(/[?!;\n]|(?<!(?:^|[^A-Za-z])(?:e\.g|i\.e|u\.s|u\.k|approx|vs|etc|mr|mrs|ms|dr|inc|co|corp|ltd|jr|sr))\.(?=["'\u201d\u2019)\]]*(?:\s|$))/i).some((x) => THIRD_SPEC.test(x.replace(/counter[ -]?offers?/ig, "")) && /\$\s?\d/.test(x));
 const ASKS: (string | null | undefined)[] = ["outreach_clarification", "career_catchall", null, undefined];
 // Held: no figure from this message is saved (the recorded offer stays, or a different-company thread starts empty), nothing
 // is drafted or sent, and the turn asks: it is flagged for the brain, or routed to a clarifying question.
@@ -934,6 +933,13 @@ Deno.test("CDW market exit: salary-site names with a dot stay in the figure's se
   for (const prior of [OFFER, null]) for (const row of [
     "Salary.com says they offer $28/hour", "Levels.fyi shows $28/hour for this role", "On glassdoor.com they pay $28/hour", "Per salary.com the offer is $28/hour",
     "Competitors, e.g. Acme, offer $28/hour", "The market in the U.S. pays $28/hour",
+    // An abbreviation that may close a sentence ("U.S.", "Inc.") is not split: the words after it usually point back to the third
+    // party it names ("Competitors in the U.S. They offer..."), so a figure there is held for the brain to ask (review of e4b4e392).
+    // Greptile's "...strong in the U.S. They offered $26/hour" is held on purpose: one question, never a wrong save (D-007).
+    "Competitors in the U.S. They offer $28/hour", "Competitors in the U.S. The offers there are $28/hour",
+    "other companies like Acme Inc. Their offer is $28/hour", "Glassdoor lists Acme Inc. The offer there is $28/hour",
+    "The market rate per Acme Inc. The offer is $28/hour", "The market is strong in the U.S. They offered $26/hour",
+    "I checked the job market in the U.S. They offered $26/hour",
   ]) {
     const msg = `${row}. Draft a counter at $30/hour`;
     const ctx = fresh();
@@ -947,9 +953,7 @@ Deno.test("CDW market exit: salary-site names with a dot stay in the figure's se
   eq(recorded(ctx).hourly, 26);
   // a period before a closing quote or bracket still ends the sentence (Greptile on #565)
   for (const msg of ['He said "the market is tight." They offered $26/hour. Draft a counter at $30/hour', "The market said no. They offered $26/hour. Draft a counter at $30/hour",
-                     "(The market is tight.) They offered $26/hour. Draft a counter at $30/hour",
-                     "The market is strong in the U.S. They offered $26/hour. Draft a counter at $30/hour",
-                     "Competitors like Acme Inc. The company offered $26/hour. Draft a counter at $30/hour"]) {
+                     "(The market is tight.) They offered $26/hour. Draft a counter at $30/hour"]) {
     const c2 = fresh(); host.runTurn(OFFER, c2);
     const r = host.runTurn(msg, c2);
     eq(recorded(c2).hourly, 26, msg);

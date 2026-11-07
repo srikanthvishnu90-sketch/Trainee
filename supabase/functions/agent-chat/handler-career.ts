@@ -326,20 +326,19 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // stores it or a model reads it, and the person is told (identity_redact.ts secretLeadIn / redactPending). Read only
     // for a message shaped like a lone value, in a thread the person owns (ownerThread, above).
     if (thread_id && !imageBlocks.length && (looksLikePendingSecret(message, "password") || looksLikePendingSecret(message, "code"))) {
-      // The lead-in is the person's message BEFORE this turn. On a retry of a turn that already committed (same turn_key), the
-      // newest rows are this turn's own (its redacted user text, then an assistant row tagged career_turn_key), so they are skipped:
-      // the split step then runs exactly as on the first attempt and the request hash matches the stored receipt (review of #565).
-      // The lead-in is the person's newest message BEFORE this turn: the user-row lookup stays role-filtered, so assistant-only
-      // rows in between (proactive messages, apply cards) never hide it. A retry of this same turn (its own assistant row,
-      // tagged career_turn_key, is the newest row) skips this turn's own user row, so the redaction and the request hash match
-      // the first attempt (reviews of #565).
-      const prev = await admin.from("agent_messages").select("content").eq("thread_id", tid).eq("role", "user").order("id", { ascending: false }).limit(2);
+      // The lead-in is the person's newest message BEFORE this turn. The user-row lookup is role-filtered, so assistant-only rows
+      // (proactive messages, apply cards) never hide it. On a retry of a turn that already committed (same turn_key), this turn's
+      // own assistant row is found by its career_turn_key wherever it sits, even under later notices, and the lookup reads the user
+      // rows before it, skipping this turn's own redacted user row: the redaction and the request hash match the first attempt and
+      // the stored reply replays (reviews and Greptile on #565).
+      const own = await admin.from("agent_messages").select("id").eq("thread_id", tid).eq("role", "assistant").eq("meta->>career_turn_key", turnKey).order("id", { ascending: false }).limit(1);
+      if (own.error) console.error("split secret check: own reply unreadable:", own.error.message);
+      const ownId = own.data?.[0]?.id ?? null;
+      let prevQ = admin.from("agent_messages").select("content").eq("thread_id", tid).eq("role", "user");
+      if (ownId != null) prevQ = prevQ.lt("id", ownId);
+      const prev = await prevQ.order("id", { ascending: false }).limit(2);
       if (prev.error) console.error("split secret check: previous message unreadable:", prev.error.message);
-      const last = await admin.from("agent_messages").select("role, meta").eq("thread_id", tid).order("id", { ascending: false }).limit(1);
-      if (last.error) console.error("split secret check: last row unreadable:", last.error.message);
-      const lastRow = (last.data?.[0] ?? null) as { role?: string; meta?: Record<string, unknown> | null } | null;
-      const ownRetry = lastRow?.role === "assistant" && lastRow?.meta?.career_turn_key === turnKey;
-      const lead = secretLeadIn(String(prev.data?.[ownRetry ? 1 : 0]?.content ?? ""));
+      const lead = secretLeadIn(String(prev.data?.[ownId != null ? 1 : 0]?.content ?? ""));
       const red = lead ? redactPending(message, lead) : null;
       if (red) {
         message = red.text; userContent = red.text;

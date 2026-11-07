@@ -260,6 +260,20 @@ commit;`);
           for (const images of [[], null]) if (stored.includes(await careerRequestHash(value, images, null))) failures.push(`split secret retry recoverable from the stored hash: ${JSON.stringify(value)}`);
           bump("secrets");
         }
+        // Greptile on #565: the same retry still replays when a proactive row lands after the first attempt's reply.
+        for (const [lead, value] of SPLIT_SECRETS.slice(0, 4)) {
+          const p = person(), c = h!.chat(p.token);
+          await say(c, lead);
+          const key = `retry-late-${crypto.randomUUID()}`;
+          const first = await say(c, value, { turn_key: key });
+          await pg.sql(`insert into public.agent_messages(thread_id, role, content) values ('${c.thread()}', 'assistant', 'A proactive update.')`);
+          const again = await say(c, value, { turn_key: key });
+          if (again.status !== first.status || again.reply !== first.reply) failures.push(`split secret retry after a notice not replayed: ${JSON.stringify(value)} -> ${again.status} ${String(again.reply).slice(0, 120)}`);
+          const stored = await dumpFor(p.id);
+          if (stored.includes(value)) failures.push(`split secret stored on a late retry: ${JSON.stringify(value)}`);
+          for (const images of [[], null]) if (stored.includes(await careerRequestHash(value, images, null))) failures.push(`split secret late retry recoverable from the stored hash: ${JSON.stringify(value)}`);
+          bump("secrets");
+        }
         for (const [lead, value] of [["my zip code is", "60601"], ["I forgot my password", "Chicago"], ["the error code is", "500123"], ["what's a strong password?", "ok"]]) {
           const p = person(), c = h!.chat(p.token);
           await say(c, lead);

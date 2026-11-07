@@ -4014,6 +4014,8 @@ const CareerRouter = (() => {
     if (out.annual) out.annualText = `$${out.annual.toLocaleString()}`;
     // a held turn (ambiguous or market figures) attributes no figure at all: no bonus and no annual amount either
     if (out._held) { out.signing = null; out.signingText = null; out.annual = null; out.annualText = null; }
+    // the hold stays visible to callers, so none of them falls back to reading a figure itself (Greptile on #570)
+    out.held = out._held;
     delete out._held;
     return out;
   }
@@ -4074,6 +4076,10 @@ const CareerRouter = (() => {
     // merges exactly as before.
     const namedFirm = (offeredM && offeredM[1].trim()) || (firmM && !/^(a|an|the)$/i.test(firmM[1].trim()) ? firmM[1].trim() : null);
     const figs = parseOfferFigures(s(text), offerHint(text, ctx));
+    // A held turn (a pay figure sharing a sentence with a third party, or ambiguous figures) records nothing here: no
+    // figure, no fallback "$NNk" read, no "Offer updated". The turn goes on to the brain, which asks (D-007; Greptile on #570:
+    // "The offer is $30/hour, but competitors offer $60k" recorded $60,000 as the offer).
+    if (figs.held) return null;
     const seededPrior = (() => { try { const th = negotiationThreadOf(ctx); return !!(th && th.fromAccount); } catch { return false; } })();
     const merged = (namedFirm || ((figs.signing || figs.hourly || figs.annual) && seededPrior)) ? {} : Object.assign({}, prev);
     if (firmM && !/^(a|an|the)$/i.test(firmM[1].trim())) { merged.company_description = firmM[1].trim(); if (!merged.company) merged.company = firmM[1].trim(); }

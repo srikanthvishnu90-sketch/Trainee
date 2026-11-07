@@ -16150,6 +16150,7 @@ const CareerRouter = (() => {
     else { const mp = work.match(/\$\s?([\d,]{4,})/); if (mp) out.annual = num(mp[1]); }
     if (out.annual) out.annualText = `$${out.annual.toLocaleString()}`;
     if (out._held) { out.signing = null; out.signingText = null; out.annual = null; out.annualText = null; }
+    out.held = out._held;
     delete out._held;
     return out;
   }
@@ -16176,6 +16177,7 @@ const CareerRouter = (() => {
     const offeredM = s(text).match(/\b([A-Z][A-Za-z0-9&.]+(?:\s+[A-Z][A-Za-z0-9&.]+){0,2})(?:\s+(?:just|has|have|had))?\s+offered me\b/);
     const namedFirm = (offeredM && offeredM[1].trim()) || (firmM && !/^(a|an|the)$/i.test(firmM[1].trim()) ? firmM[1].trim() : null);
     const figs = parseOfferFigures(s(text), offerHint(text, ctx));
+    if (figs.held) return null;
     const seededPrior = (() => { try { const th = negotiationThreadOf(ctx); return !!(th && th.fromAccount); } catch { return false; } })();
     const merged = (namedFirm || ((figs.signing || figs.hourly || figs.annual) && seededPrior)) ? {} : Object.assign({}, prev);
     if (firmM && !/^(a|an|the)$/i.test(firmM[1].trim())) { merged.company_description = firmM[1].trim(); if (!merged.company) merged.company = firmM[1].trim(); }

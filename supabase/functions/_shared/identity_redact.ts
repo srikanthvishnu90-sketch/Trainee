@@ -95,15 +95,34 @@ const BARE_CODE = /(?<![\d$€£.,:/#-])\b\d{6,8}\b(?![\d/-]|[.,:]\d|\s*(?:k\b|%
 // ...and, while a code is waiting, the same code split in two 3-digit groups ("739 201", "739\n201", "739-201"; Greptile on #572).
 // A sentence comma, colon or period may follow ("739 201, can you enter it?"); one before more digits may not ("3.85", "1,200").
 // Not a group of a longer run: a phone number ("415 555 1234") or a date keeps its third group, so it never matches.
+const SPLIT_COUNT_AFTER = /^\s*(?:users|people|employees|customers|clients|students|members|subscribers|downloads|visitors|views|followers|patients|accounts|orders|transactions|records|items|units|requests|calls|tickets|miles|km|words|lines|hours|sq|square|eur|euros?|€|gbp|£|chf|usd)\b/i;
+const SPLIT_PAY_BEFORE = /\b(?:i|we|they|she|he)\s+(?:make|makes|made|earn|earns|earned)\s*$|\b(?:salary|income|revenue|budget)\s+(?:of|is|was)?\s*$/i;
 const BARE_SPLIT_CODE = /(?<![\d$€£.,:/#-]|\d(?:[ \t]{1,8}|[ \t]{0,8}[\n\-][ \t]{0,8}))\b\d{3}(?:[ \t]{1,8}|[ \t]{0,8}[\n\-][ \t]{0,8})\d{3}\b(?![\d/-]|[.,:]\d|(?:[ \t]{1,8}|[ \t]{0,8}[\n\-][ \t]{0,8})\d|\s*(?:k\b|%|usd|dollars|a year|per\b|\/))/gi;
 // The one form chat text takes before any redaction or hashing: line endings become "\n", no-break, thin and figure spaces and
 // tabs become a space, and an en or em dash between digits a hyphen, so "739\r\n201", "739\u00a0201" and "739–201" meet the
 // same rules as "739 201". chat_input.ts and channel_resume_upload.ts resumeMessage both use it, so a file's message hash
 // equals the hash of the text the thread stores (Greptile and review on #567).
+// Every Unicode space separator (en, em, thin, hair, ideographic ...) is a space and a zero-width space is nothing; a hyphen,
+// non-breaking hyphen, figure dash, minus sign or fullwidth hyphen between digits, with or without a space either side, is a
+// hyphen ("739\u2212201", "739 \u2212 201",
+// "739\u2002201"; Greptile inventory, separator residuals).
 export function normalizeChatText(text: string): string {
-  return String(text ?? "").replace(/\r\n?/g, "\n").replace(/[\u00a0\u2007\u2009\u202f\t]/g, " ").replace(/(\d)[\u2013\u2014](?=\d)/g, "$1-");
+  return String(text ?? "").replace(/\r\n?/g, "\n").replace(/[\u200b\u2060\ufeff]/g, "").replace(/[^\S\n ]|[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g, " ")
+    .replace(/(\d[ ]?)[\u2010-\u2015\u2212\ufe63\uff0d](?=[ ]?\d)/g, "$1-");
 }
 
+// A code on its own line followed by a count on the next ("my code is 739201\n2 minutes ago"): the count is not part of the
+// code. When the matched value spans a line break, its first line has 4+ digits, and a count word follows the rest, only the
+// first line is the code (Greptile on #575, independent check of 41afa39f).
+const COUNT_TAIL = /^[ \t]*(?:k\b|\+|%|years?|yrs?|months?|weeks?|days?|hours?|hrs?|minutes?|mins?|seconds?|secs?|ago\b|roles?|jobs?|applications?|people|times|am\b|pm\b|\/)/i;
+function countTail(code: string, after: string): string {
+  const i = code.search(/[\r\n]/);
+  if (i < 0) return "";
+  const first = code.slice(0, i).replace(/\D+$/, "");
+  const rest = code.slice(first.length);
+  if (first.replace(/\D/g, "").length < 4 || !/^[ \t]*[\r\n]+[ \t]*[1-9]\d{0,2}$/.test(rest) || !COUNT_TAIL.test(after)) return "";
+  return rest;
+}
 export function redactIdentity(input: string, o: { codePending?: boolean } = {}): Redaction {
   const removed = new Set<Redaction["removed"][number]>();
   let t = String(input ?? "");
@@ -136,8 +155,8 @@ export function redactIdentity(input: string, o: { codePending?: boolean } = {})
     if (/with$/i.test(label) && [u, value.replace(/[.,!?;]+$/, "")].some((x) => SIGN_IN_WAY.test(x))) return m;
     removed.add("password"); return `${label}${gap}${user}[password removed]`;
   });
-  t = t.replace(CODE_LABELED, (_m, label, sep) => { removed.add("code"); return `${label}${sep}[code removed]`; });
-  t = t.replace(CODE_ANY, (m, label, sep, code: string) => { if (DATE_LIKE.test(code)) return m; removed.add("code"); return `${label}${sep}[code removed]`; });
+  t = t.replace(CODE_LABELED, (m, label, sep, code: string, at: number, all: string) => { removed.add("code"); return `${label}${sep}[code removed]${countTail(code, all.slice(at + m.length))}`; });
+  t = t.replace(CODE_ANY, (m, label, sep, code: string, at: number, all: string) => { if (DATE_LIKE.test(code)) return m; removed.add("code"); return `${label}${sep}[code removed]${countTail(code, all.slice(at + m.length))}`; });
   t = t.replace(CODE_LOOSE, (m, lead, code: string) => { if (DATE_LIKE.test(code)) return m; removed.add("code"); return `${lead}[code removed]`; });
   t = t.replace(PASSWORD_BARE, (m, label, sp, value: string, at: number, all: string) => {
     const word = value.replace(/[.,!?;:]+$/, "");
@@ -151,7 +170,11 @@ export function redactIdentity(input: string, o: { codePending?: boolean } = {})
   t = t.replace(CVV_NAMED, (_m, label: string, sep, _digits, more?: string) => { removed.add("card"); return `${label}${sep}[security code removed]${more && /card|digit/i.test(label) ? more : ""}`; });
   t = t.replace(IBAN, (m) => { if (!ibanOk(m)) return m; removed.add("account"); return "[number removed]"; });
   if (o.codePending) t = t.replace(BARE_CODE, () => { removed.add("code"); return "[code removed]"; });
-  if (o.codePending) t = t.replace(BARE_SPLIT_CODE, () => { removed.add("code"); return "[code removed]"; });
+  // A spaced figure that is a count or pay ("120 000 users", "I make 120 000") is not a code (review of d3fd6027).
+  if (o.codePending) t = t.replace(BARE_SPLIT_CODE, (m: string, off: number, all: string) => {
+    if (SPLIT_COUNT_AFTER.test(all.slice(off + m.length)) || SPLIT_PAY_BEFORE.test(all.slice(0, off))) return m;
+    removed.add("code"); return "[code removed]";
+  });
   t = t.replace(KEY_SHAPED, () => { removed.add("key"); return "[key removed]"; });
   return { text: t, removed: [...removed] };
 }

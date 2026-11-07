@@ -13,6 +13,8 @@
 // tool refuses; nothing is stored or linked.
 import { CareerProfile, CareerRender, CareerTailor } from "./router_core.career.js";
 import { documentLines, guardMaterials } from "./career_materials_guard.ts";
+import { type Fit, type LayoutName, renderDesigned, type Swap } from "./career_resume_design.ts";
+import { gapAnalysis, type GapReport, previewText } from "./career_resume_gaps.ts";
 
 export const RESUME_BUCKET = "career-resumes";
 export const LINK_TTL_SECONDS = 7 * 86400;
@@ -253,18 +255,35 @@ export function atsHarness(R: any, resume: any, pdf: Uint8Array): AtsVerdict {
   const check = R.parseCheck({ resume, pdf: buf });
   const reasons = check.reasons.filter((r: any) => r.level === "fail").map((r: any) => `${r.check}: ${r.detail}`);
   const warnings = check.reasons.filter((r: any) => r.level === "warn").map((r: any) => `${r.check}: ${r.detail}`);
+  reasons.push(...contactProblems(R, resume, buf));
+  return { pass: reasons.length === 0, status: reasons.length ? "FAIL" : check.status, reasons, warnings };
+}
+// The name and email come back out of the file as text, and there is at least one entry.
+function contactProblems(R: any, resume: any, buf: any): string[] {
+  const reasons: string[] = [];
   const text = (R.extractPdfLines(buf) as string[]).join("\n").toLowerCase();
   const name = String(resume?.header?.name || ""), email = String(resume?.header?.email || "");
   if (!name || !text.includes(name.toLowerCase())) reasons.push("contact: the name does not come back out of the file");
   if (!email || !text.includes(email.toLowerCase())) reasons.push("contact: the email does not come back out of the file");
   if (!(resume?.sections || []).some((s: any) => s.lines.some((l: any) => l.type === "entry"))) reasons.push("content: no experience, project or education entry");
-  return { pass: reasons.length === 0, status: reasons.length ? "FAIL" : check.status, reasons, warnings };
+  return reasons;
 }
-export type RenderOut = { ok: true; pdf: Uint8Array; sha256: string; filename: string; ats: AtsVerdict; where: string } | { ok: false; reason: string; where: string };
-export type ResumeRenderer = (resume: any) => Promise<RenderOut>;
+// RELEASE 9: a layout (career_resume_design.ts) renders the PDF and the DOCX together; the DOCX, the page fit and the
+// printed lines ride the result. With no layout asked for, the renderer is exactly WO-028's (148's own PDF).
+export interface RenderOpts { layout?: LayoutName | null; ownDocx?: Uint8Array | null; swaps?: Swap[] }
+export type RenderOut = { ok: true; pdf: Uint8Array; sha256: string; filename: string; ats: AtsVerdict; where: string; layout?: LayoutName; docx?: Uint8Array; fit?: Fit; lines?: string[]; replaced?: number; missing?: string[] } | { ok: false; reason: string; where: string };
+export type ResumeRenderer = (resume: any, opts?: RenderOpts) => Promise<RenderOut>;
 export function renderWith(R: any, where: string): ResumeRenderer {
-  return async (resume) => {
+  return async (resume, opts) => {
     if (!R?.runtime?.zlib || !R?.runtime?.crypto) return { ok: false, where, reason: `the PDF renderer needs zlib and crypto, which ${where} does not provide` };
+    if (opts?.layout) {
+      const d = renderDesigned(R, resume, { layout: opts.layout, ownDocx: opts.ownDocx ?? null, swaps: opts.swaps ?? [] });
+      if (!d.ok) return { ok: false, where, reason: d.reason };
+      const buf = R.toBuffer(d.pdf);
+      const reasons = [...d.parseCheck.fails, ...contactProblems(R, resume, buf)];
+      const ats: AtsVerdict = { pass: reasons.length === 0, status: reasons.length ? "FAIL" : d.parseCheck.status, reasons, warnings: d.parseCheck.warnings };
+      return { ok: true, pdf: d.pdf, sha256: R.sha256(buf), filename: R.filenameFor(resume?.header?.name, "pdf"), ats, where, layout: d.layout, docx: d.docx, fit: d.fit, lines: d.lines, ...(d.replaced !== undefined ? { replaced: d.replaced, missing: d.missing } : {}) };
+    }
     const r = R.renderPdf(resume);
     if (!r.ok) return { ok: false, where, reason: r.reason || "the PDF could not be rendered" };
     const pdf = new Uint8Array(r.buffer);
@@ -275,11 +294,11 @@ export function renderWith(R: any, where: string): ResumeRenderer {
 export function edgeRenderer(): ResumeRenderer {
   const where = "the edge function (Deno)";
   let inner: Promise<ResumeRenderer> | null = null;
-  return async (resume) => {
+  return async (resume, opts) => {
     inner ??= Promise.all([import("node:zlib"), import("node:crypto"), import("node:buffer")])
       .then(([zlib, crypto, b]) => renderWith((CareerRender as any).withRuntime({ zlib, crypto, Buffer: b.Buffer }), where))
       .catch((e) => async () => ({ ok: false as const, where, reason: `its node built-ins could not be loaded (${e?.message ?? e})` }));
-    return (await inner)(resume);
+    return (await inner)(resume, opts);
   };
 }
 
@@ -353,12 +372,15 @@ export interface TailorDeps { render: ResumeRenderer; resumes: ResumeStore; tail
 export type TailorOut = {
   ok: true; text: string; link: string; expires_at: string; changelog: string; changes: ChangeItem[]; sha256: string; filename: string;
   persona: string | null; job_id: string | null; company: string | null; ats: { status: string; warnings: string[] };
-  not_on_your_record: string[]; lead_not_picked: string[]; rendered_in: string; ms: number; detail: { doc: any; base: any; diff: any };
+  not_on_your_record: string[]; lead_not_picked: string[]; rendered_in: string; ms: number; detail: { doc: any; base: any; diff: any; docx: Uint8Array | null };
+  // RELEASE 9: the posting against the resume (missing, weak, emphasise) and the top of the file as it prints, both for the
+  // chat before the file is sent; the layout and its page fit when one was asked for.
+  gaps: GapReport; preview: string; layout: LayoutName | "plain"; fit: Fit | null; own_layout?: { replaced: number; missing: string[] };
 } | { ok: false; refused: "no_confirmed_facts" | "no_contact" | "truth_audit" | "render" | "ats_parse" | "link"; reason: string; ms: number };
 
 export async function tailorForPosting(o: {
   userId: string; profile: any; posting: { text: string; job_id?: string | null; company?: string | null };
-  persona?: Persona | null; deps: TailorDeps; now: number;
+  persona?: Persona | null; deps: TailorDeps; now: number; layout?: LayoutName | null; ownDocx?: Uint8Array | null; swaps?: Swap[];
 }): Promise<TailorOut> {
   const t0 = performance.now();
   const ms = () => Math.round(performance.now() - t0);
@@ -381,7 +403,7 @@ export async function tailorForPosting(o: {
   // G5/B2: no skill, employer, title, date or number the person did not confirm, on any printed line.
   const guard = guardMaterials(documentLines(doc), clean);
   if (!guard.ok) return { ok: false, refused: "truth_audit", reason: `the truth check refused it: ${guard.refused.flatMap((x) => x.reasons).slice(0, 3).join("; ")}`, ms: ms() };
-  const r = await o.deps.render(doc);
+  const r = o.layout ? await o.deps.render(doc, { layout: o.layout, ownDocx: o.ownDocx ?? null, swaps: o.swaps ?? [] }) : await o.deps.render(doc);
   if (!r.ok) return { ok: false, refused: "render", reason: `the PDF could not be made: ${r.reason}`, ms: ms() };
   if (!r.ats.pass) return { ok: false, refused: "ats_parse", reason: `it failed the ATS parse check: ${r.ats.reasons.slice(0, 3).join("; ")}`, ms: ms() };
   const path = resumePath(o.userId, r.sha256);
@@ -400,7 +422,9 @@ export async function tailorForPosting(o: {
     ok: true, text, link, expires_at: new Date(o.now + LINK_TTL_SECONDS * 1000).toISOString(), changelog: log.line, changes: log.items,
     sha256: r.sha256, filename: r.filename, persona: persona?.name ?? null, job_id: o.posting.job_id ?? null, company: o.posting.company ?? null,
     ats: { status: r.ats.status, warnings: r.ats.warnings }, not_on_your_record: (t.requiredGaps || []).map((g: any) => g.requirement),
-    lead_not_picked: lead.filter((id) => !selected.has(id)), rendered_in: r.where, ms: ms(), detail: { doc, base, diff },
+    lead_not_picked: lead.filter((id) => !selected.has(id)), rendered_in: r.where, ms: ms(), detail: { doc, base, diff, docx: r.docx ?? null },
+    gaps: gapAnalysis({ jd, profile: clean, doc, gaps: t.gaps || [] }), preview: previewText(r.lines ?? ((CareerRender as any).sourceLines(doc) as { text: string }[]).map((l) => l.text)),
+    layout: r.layout ?? "plain", fit: r.fit ?? null, ...(r.replaced !== undefined ? { own_layout: { replaced: r.replaced, missing: r.missing ?? [] } } : {}),
   };
 }
 

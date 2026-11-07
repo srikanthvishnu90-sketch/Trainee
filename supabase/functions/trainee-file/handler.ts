@@ -33,6 +33,7 @@ import { decodeRowQuestionType } from "../_shared/row_answer.ts";
 import { redactIdentity } from "../_shared/identity_redact.ts";
 import { coverage, countsOf, NOTHING_SENT, NOT_LISTED, renderExport, reqIdOf, roleIds, specOf } from "../_shared/results_spec.ts";
 import type { ListMeta } from "../_shared/telegram_jobs.ts";
+import type { RateRow } from "../_shared/career_resume_outcomes.ts";
 import { fileShellHtml, firstNameOf, freshnessStamp, madeForLine, stateHtml } from "../_shared/file_design.ts";
 import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
 
@@ -55,6 +56,7 @@ export interface FileDeps extends Omit<JobDeps, "store"> {
   fileEffects?: Effects; // what Introduce really does (send); absent, an approved introduction says it was not sent
   logoFetch?: typeof fetch; // TRAINEE_LOGO_URL=self: how the server fetches an employer's own logo (tests pass a fake; default fetch)
   logoCache?: LogoCache; // and where it keeps them (default: one in-memory cache per instance)
+  resumeRates?: (userId: string) => Promise<RateRow[]>; // RELEASE 9: the person's rates by resume version (read only); absent or unreadable, no section
   timeZone?: (userId: string) => Promise<string | null>; // the person's own zone (dates on the page are their day); absent or unknown, Chicago, said
   // The employer's open questions (career_apply_questions): a results card that isn't ready asks them on "A few things first", and
   // answers are checked (checkAnswer) and saved (store.answer) exactly as the chat saves them. Absent: the page asks nothing.
@@ -234,6 +236,7 @@ async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: R
   // The account's stamp, once (apply_trust.ts): a payload prepared under another account state is not offered.
   const account = d.account ? await d.account(claims.u).catch(() => "unreadable" as const) : undefined;
   const tz = d.timeZone ? await d.timeZone(claims.u).catch(() => null) : null;
+  const resumeRates = d.resumeRates ? await d.resumeRates(claims.u).catch(() => null) : null;
   const rows: Row[] = await Promise.all(got.map(async ({ ref, c }) => {
     const job = { ...c!.job }, post = postings.find((p) => p.job_id === job.job_id) ?? null;
     job.company_domain = job.company_domain ?? post?.company_domain ?? null;
@@ -281,7 +284,7 @@ async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: R
   // live on their boards (career_postings.last_seen_at), in the person's zone; none known, the page says the check time is unknown.
   const shown = new Set(rows.map((r) => r.job.job_id));
   const stamp = freshnessStamp("Postings checked", postings.filter((p) => shown.has(p.job_id)).map((p) => p.last_seen_at), { now: d.now(), tz });
-  return { token, rows, setHash, setSize: set.length, top, og, total: all.length, made: madeForLine(firstNameOf(facts), d.now(), tz), stamp };
+  return { token, rows, setHash, setSize: set.length, top, og, total: all.length, made: madeForLine(firstNameOf(facts), d.now(), tz), stamp, resumeRates };
 }
 
 // One Apply = one hash-bound approval through the Telegram Confirm path. Returns a note for the row when it did not go.

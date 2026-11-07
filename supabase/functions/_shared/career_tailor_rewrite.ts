@@ -15,7 +15,8 @@
 // unreadable answer, or the flag off: the select-and-reorder resume ships unchanged (today's behaviour).
 //
 // Behind CAREER_TAILOR_REWRITE=on (default off). One model call per tailoring, metered by the caller's meter.
-import { CareerProfile, CareerRouter, CareerTailor, CareerWriting } from "./router_core.career.js";
+import { CareerProfile, CareerRender, CareerRouter, CareerTailor, CareerWriting } from "./router_core.career.js";
+import { renderDesigned } from "./career_resume_design.ts";
 import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 release flags
 import { baseResume, changelog, confirmedOnly, submissionResume } from "./career_tailor.ts";
 import { claimProblems } from "./person_claims.ts";
@@ -257,6 +258,9 @@ export async function tailorRewriteTurn(o: { out: TurnOut; profile: any; on: boo
 // name on file, for the posting. The router keeps the same artifact object on the profile, so "send me the pdf again"
 // sends this copy. Anything that does not hold (an empty copy, a failed audit, a format that did not render) leaves the
 // router's files exactly as they were.
+// RELEASE 9: the two files are Trainee's designed layout (career_resume_design.ts: the same words, set with a fixed rhythm,
+// dates flush right, fitted to one or two pages at 10 pt or more), verified by 148's two parsers per format and read back
+// to the same words in the same order. When the design does not pass that check, the plain 148 files go, as before.
 export function employerFiles(res: any, doc: any, profile: any): boolean {
   try {
     const sub = submissionResume(doc);
@@ -266,12 +270,21 @@ export function employerFiles(res: any, doc: any, profile: any): boolean {
     if (!rendered?.pdf?.base64 || !rendered?.docx?.base64) return false;
     const company = String(res.artifact?.company || res.tailorPosting?.company || "").replace(/\([^)]*\)/g, " ")
       .replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
-    const named = (ext: string, given: string) => (sub.header?.name ? given : `Resume${company ? `_${company}` : ""}.${ext}`);
+    // Named for the person when they gave Trainee a name for their resume; a name read from their resume file (header.from
+    // "resume") prints on it, and the files keep the posting's name.
+    const named = (ext: string, given: string) => (sub.header?.name && sub.header?.from !== "resume" ? given : `Resume${company ? `_${company}` : ""}.${ext}`);
+    const R = CareerRender as any, d = renderDesigned(R, sub, { layout: "trainee" });
+    const designed = d.ok && d.parseCheck.status !== "FAIL" && d.sameText;
+    const file = (format: "pdf" | "docx", bytes: Uint8Array, contentType: string) =>
+      R.artifact(format, { ok: true, buffer: R.primitives.bytes(bytes), contentType, filename: R.filenameFor(sub.header?.name, format) });
+    const pdf = designed ? file("pdf", d.pdf, R.PDF_CONTENT_TYPE) : rendered.pdf;
+    const docx = designed ? file("docx", d.docx, R.DOCX_CONTENT_TYPE) : rendered.docx;
+    if (!pdf?.base64 || !docx?.base64) return false;
     Object.assign(res.artifact, {
       text: rendered.text || "", markdown: rendered.markdown || "", sha256: CareerRouter.sha256(rendered.text || ""),
-      pdf: { ...rendered.pdf, filename: named("pdf", rendered.pdf.filename) },
-      docx: { ...rendered.docx, filename: named("docx", rendered.docx.filename) },
-      employer_copy: true,
+      pdf: { ...pdf, filename: named("pdf", pdf.filename) },
+      docx: { ...docx, filename: named("docx", docx.filename) },
+      employer_copy: true, layout: designed ? "trainee" : "plain", ...(designed ? { fit: d.fit } : {}),
     });
     return true;
   } catch {

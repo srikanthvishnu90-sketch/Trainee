@@ -26,7 +26,8 @@ const recorded = (ctx: any) => {
 // others, the industry, averages, salary sites, other employers) is not attributed by code. Nothing is saved or drafted and the
 // turn is held for the brain, which asks which figure is the employer's offer. Spec side of that rule:
 const THIRD_SPEC = /\b(?:market|competitors?|others|industry|average|median|typical|glassdoor|levels\.fyi|payscale|salary\.com|indeed|employers|companies|other\s+(?:places|firms|roles|jobs|offers))\b/i;
-const namesThird = (msg: string) => msg.split(/[?!;\n]|(?<!(?:^|[^A-Za-z])(?:e\.g|i\.e|u\.s|u\.k|approx|vs|etc|mr|mrs|ms|dr|inc|co|corp|ltd|jr|sr))\.(?=["'\u201d\u2019)\]]*(?:\s|$))/i).some((x) => THIRD_SPEC.test(x.replace(/counter[ -]?offers?/ig, "")) && /\$\s?\d/.test(x));
+const SPEC_OPENER = /^["'\u201d\u2019)\]]*\s+(?:They|The|He|She|I|We|It|My|Our|Their|His|Her|This|That|These|Those|So|But|Then|Now|Also|Today|Yesterday|Last|Can|Could|Please|What|How)\b/;
+const namesThird = (msg: string) => msg.replace(/(?<=(?:^|[^A-Za-z])(?:u\.s|u\.k|etc|inc|co|corp|ltd|jr|sr))\.(?=["'\u201d\u2019)\]]*\s)/gi, (m: string, off: number) => SPEC_OPENER.test(msg.slice(off + 1, off + 16)) ? "\n" : m).split(/[?!;\n]|(?<!(?:^|[^A-Za-z])(?:e\.g|i\.e|u\.s|u\.k|approx|vs|etc|mr|mrs|ms|dr|inc|co|corp|ltd|jr|sr))\.(?=["'\u201d\u2019)\]]*(?:\s|$))/i).some((x) => THIRD_SPEC.test(x.replace(/counter[ -]?offers?/ig, "")) && /\$\s?\d/.test(x));
 const ASKS: (string | null | undefined)[] = ["outreach_clarification", "career_catchall", null, undefined];
 // Held: no figure from this message is saved (the recorded offer stays, or a different-company thread starts empty), nothing
 // is drafted or sent, and the turn asks: it is flagged for the brain, or routed to a clarifying question.
@@ -946,7 +947,9 @@ Deno.test("CDW market exit: salary-site names with a dot stay in the figure's se
   eq(recorded(ctx).hourly, 26);
   // a period before a closing quote or bracket still ends the sentence (Greptile on #565)
   for (const msg of ['He said "the market is tight." They offered $26/hour. Draft a counter at $30/hour', "The market said no. They offered $26/hour. Draft a counter at $30/hour",
-                     "(The market is tight.) They offered $26/hour. Draft a counter at $30/hour"]) {
+                     "(The market is tight.) They offered $26/hour. Draft a counter at $30/hour",
+                     "The market is strong in the U.S. They offered $26/hour. Draft a counter at $30/hour",
+                     "Competitors like Acme Inc. The company offered $26/hour. Draft a counter at $30/hour"]) {
     const c2 = fresh(); host.runTurn(OFFER, c2);
     const r = host.runTurn(msg, c2);
     eq(recorded(c2).hourly, 26, msg);

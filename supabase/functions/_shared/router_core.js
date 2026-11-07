@@ -40848,8 +40848,13 @@ const CareerRouter = (() => {
       // "levels.fyi", "glassdoor.com") stay inside their sentence (Greptile on #564).
       // ...and not after a common abbreviation ("e.g. Acme", "the U.S. market", "approx. $26"), review of #565.
       const ABBREV = /(?:^|[^A-Za-z])(?:e\.g|i\.e|u\.s|u\.k|approx|vs|etc|mr|mrs|ms|dr|inc|co|corp|ltd|jr|sr)$/i;
+      // ...unless it can also close a sentence ("the U.S.", "Acme Inc.") and a capitalised opener follows ("...in the U.S. They
+      // offered $26/hour"), Greptile on #565.
+      const CAN_END = /(?:^|[^A-Za-z])(?:u\.s|u\.k|etc|inc|co|corp|ltd|jr|sr)$/i;
+      const OPENER = /^["'\u201d\u2019)\]]*\s+(?:They|The|He|She|I|We|It|My|Our|Their|His|Her|This|That|These|Those|So|But|Then|Now|Also|Today|Yesterday|Last|Can|Could|Please|What|How)\b/;
+      const abbrevHere = (i) => ABBREV.test(src.slice(Math.max(0, i - 8), i)) && !(CAN_END.test(src.slice(Math.max(0, i - 8), i)) && OPENER.test(src.slice(i + 1, i + 16)));
       // closing quotes and brackets may sit between the dot and the space ("the market is tight." They offered...), Greptile #565
-      const endsHere = (c, i) => c !== "." || (/^["'\u201d\u2019)\]]*(?:\s|$)/.test(src.slice(i + 1, i + 5)) && !ABBREV.test(src.slice(Math.max(0, i - 8), i)));
+      const endsHere = (c, i) => c !== "." || (/^["'\u201d\u2019)\]]*(?:\s|$)/.test(src.slice(i + 1, i + 5)) && !abbrevHere(i));
       const startOf = (at) => { let a = -1; for (const c of [".", "?", "!", ";", "\n"]) { let i = src.lastIndexOf(c, at - 1); while (i >= 0 && !endsHere(c, i)) i = src.lastIndexOf(c, i - 1); a = Math.max(a, i); } return a + 1; };
       const sentenceOf = (at) => { const a = startOf(at); const ends = [".", "?", "!", ";", "\n"].map((c) => { let i = src.indexOf(c, at); while (i >= 0 && !endsHere(c, i)) i = src.indexOf(c, i + 1); return i; }).filter((i) => i >= 0); return src.slice(a, ends.length ? Math.min(...ends) : src.length).replace(/counter[ -]?offers?/ig, ""); };
       const marketFig = nonAsk.some((m) => !(m.unit === "hour" && m.value === (hint && hint.recorded)) && THIRD_WORD.test(sentenceOf(m.at).replace(INCIDENTAL, " ")));

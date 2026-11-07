@@ -150,6 +150,8 @@ const GAPS: [string, string][] = [
   ["Verification code: 739\n201", "739\n201"], ["The portal sent a code. It is 739201.", "739201"],
   // Greptile on #566: a weak cue, then a code split by a line break (pasted from a text message)
   ["Workday sent me 739\n201", "739\n201"], ["The Workday portal sent me 739\n201, can you enter it?", "739\n201"], ["Lever texted me 739\n201.", "739\n201"],
+  // Greptile on #567: Windows and old-Mac line endings
+  ["Workday sent me 739\r\n201", "739\r\n201"], ["Lever texted me 739\r201.", "739\r201"], ["Verification code: 739\r\n201", "739\r\n201"],
   ["Workday sent a verification code. The code is 739201, please enter it.", "739201"], ["I got a one-time code from Lever. Here's 739201.", "739201"],
 ];
 Deno.test("CRL-5 split codes, a code across a line break and a code in the next sentence are removed, at every length", () => {
@@ -228,5 +230,20 @@ Deno.test("CRL-8 a labeled code or security code is removed whatever follows it:
   for (const m of ["The 3 digits on the back are 123\n2024 was the year I opened the account", "Verification code: 739\n201"]) {
     const n = redactIdentity(m).text;
     assert(!n.includes("123") && !n.includes("739") && !n.includes("201"), n);
+  }
+});
+
+// Greptile on #567: a code pasted with Windows or old-Mac line breaks is removed in every pass, labeled or not.
+Deno.test("CRL-9 \\r\\n and \\r line breaks are removed like \\n", () => {
+  for (const m of ["Workday sent me 739\r\n201", "Verification code: 739\r\n201", "my code is 739\r\n201", "Security code 123\r\n456", "OTP 123456\r\n2024 thanks", "Lever texted me 739\r201."]) {
+    const t = turn(m);
+    for (const g of ["739", "201", "123456"]) if (m.includes(g)) assert(!t.stored.includes(g), `${JSON.stringify(m)}: ${g} stored: ${JSON.stringify(t.stored)}`);
+  }
+  for (const m of ["The portal says call 415\r\n555\r\n1234.", "My number is 415\r\n555\r\n1234."]) eq(turn(m).c, null, m);
+  // the redaction module on its own (other callers pass it raw text): no CRLF code survives
+  for (const [m, gone] of [["Verification code: 739\r\n201", ["739", "201"]], ["Security code 123\r\n456", ["123", "456"]], ["OTP 123456\r\n2024", ["123456"]],
+    ["my one-time code is 482\r\n913", ["482", "913"]], ["my code is 739\r\n201", ["739", "201"]]] as [string, string[]][]) {
+    const r = redactIdentity(m).text;
+    for (const g of gone) assert(!r.includes(g), `${JSON.stringify(m)}: ${g} kept: ${JSON.stringify(r)}`);
   }
 });

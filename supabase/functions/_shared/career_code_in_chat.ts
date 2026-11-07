@@ -202,7 +202,7 @@ const AFTER_FUNC = /^(?:for|from|to|on|in|at|today|tonight|yesterday|this|that|j
 const SIGNIN_PURPOSE = /\b(?:(?:for|on|into|in|at)\s+(?:the|my|your|their)?\s*(?:[a-z]+\s+){0,2}|to\s+(?:the|my|your|their)?\s*)(?:portal|site|website|login|log[- ]?in|sign[- ]?in|account|app|application|form|page|profile|password|verification)\b(?=\s*(?:$|[.,;:!?)]|\s(?:and|so|to|please|now|today|thanks|again)\b))|\bto\s+(?:finish|complete|continue|access|open|unlock|confirm|submit)\s+(?:my|the|your)\s+(?:portal|site|login|account|app|application|form|profile)\b(?=\s*(?:$|[.,;:!?)]|\s(?:and|so|please|now|today|thanks|again)\b))|\b(?:phone|cell|mobile|inbox|e-?mail|text|sms|log\s+in|sign\s+in|verify|enter\s+it)\b/i;
 // Named labels whose numbers are kept (identity_redact.ts NAMED_CODE's words and resume labels): "CPT codes: 99213",
 // "change code: CHG0012345", "exam code: AZ104". Anything else before "code" is read as a code's own label.
-const NAMED_LABEL = /^(?:zip|postal|post|area|country|promo|promotional|discount|coupon|referral|course|class|error|status|dial|tax|product|source|job|dress|gift|reference|ref|airport|naics|sic|cpt|icd|hcpcs|ndc|drg|sort|swift|routing|color|colour|style|item|sku|morse|qr|bar|req|requisition|position|posting|role|department|dept|cost|budget|project|program|module|unit|soc|fips|vendor|supplier|ticket|order|voucher|offer|building|store|exam|certification|cert|change|charge|engagement|release|config|configuration|policy|sop|servicenow|wbs|award|clearance|qualification|lot|batch|part|model|taxonomy|denial|adjustment|remark|activity|transaction|t|school|branch|hs|revenue|gl|cage|hazmat|machine|billing|diagnosis|procedure|location|site|plant|warehouse|accounting|campaign|tracking|hex|paint|booking|reservation|specialty|speciality|subject|flight|room|seat|gate|afsc|mos|nec|rate|rating|grade|series|occupation|occupational|duty|uic|ein|cip|onet|o\*net|isco|esco|noc|anzsco|fund|task|teacher|lesson|engine|fault|diagnostic|alarm|ward|trouble|dtc|obd|harmonized|route|carrier|scac|icao|iata|station|airline|port|hts|expense|labor|labour|payroll|union|district|provider|facility|tariff|commodity|ceeb|un)$/i;
+const NAMED_LABEL = /^(?:zip|postal|post|area|country|promo|promotional|discount|coupon|referral|course|class|error|status|dial|tax|product|source|job|dress|gift|reference|ref|airport|naics|sic|cpt|icd|hcpcs|ndc|drg|sort|swift|routing|color|colour|style|item|sku|morse|qr|bar|req|requisition|position|posting|role|department|dept|cost|budget|project|program|module|unit|soc|fips|vendor|supplier|ticket|order|voucher|offer|building|store|exam|certification|cert|change|charge|engagement|release|config|configuration|policy|sop|servicenow|wbs|award|clearance|qualification|lot|batch|part|model|taxonomy|denial|adjustment|remark|activity|transaction|t|school|branch|hs|revenue|gl|cage|hazmat|machine|billing|diagnosis|procedure|location|site|plant|warehouse|accounting|campaign|tracking|hex|paint|booking|reservation|specialty|speciality|subject|flight|room|seat|gate|afsc|mos|nec|rate|rating|grade|series|occupation|occupational|duty|uic|ein|cip|onet|o\*net|isco|esco|noc|anzsco|fund|task|teacher|lesson|engine|fault|diagnostic|alarm|ward|trouble|dtc|obd|nmc|nhs|gmc|hcpc|harmonized|route|carrier|scac|icao|iata|station|airline|port|hts|expense|labor|labour|payroll|union|district|provider|facility|tariff|commodity|ceeb|un)$/i;
 const COUNT_LABEL2 = /\b(?:codes|pins|tokens|passcodes|otps|attempts|logins|sign[- ]?ins|resets)\s+(?:[a-z]+\s+){0,2}(?:issued|reviewed|delivered|sent|reset|rotated|blocked|processed|handled|generated|verified|validated|revoked|expired|enrolled|migrated|served|per\s+\w+)(?:\s+per\s+\w+)?\s*[:\-–—]\s*$|\b(?:codes|pins|otps|passcodes)\s+(?:issued|reviewed|delivered|sent|reset|rotated|blocked)\b[^:]{0,20}[:\-]\s*$|\b(?:adoption|usage|growth|enrollment|enrolment|coverage|uptime|throughput|capacity|traffic|volume|count|total|reach|downloads|installs|users)\s*[:\-–—]\s*$/i;
 const COUNT_LABEL = /\b(?:(?!(?:codes|pins|tokens|passcodes|otps|digits)\b|sms\s*[:\-\u2013\u2014]|(?:this|his|is|was|has|its|yes|us|plus|bus|less|class|process|address|access|success|business|status|bonus|campus|focus|alias|bias|chaos|series|news|ss)\b)[a-z]{2,}s|total|volume|count|sales|revenue|traffic|headcount|budget)\s*(?:per\s+\w+\s*)?(?:sent|received|processed|handled|delivered|closed|resolved|served|shipped|made|generated|raised|onboarded|hired|managed)?\s*(?:per\s+\w+\s*)?[:\-–—]\s*$/i;
 const ID_LABEL = /\b(?:employee|student|member|badge|staff|license|licence|npi|dea|candidate|requisition|req|job|case|claim|policy|patient|customer|order|invoice|po|cert|certificate|certification|credential|exam)\s*(?:id|no\.?|number|#)\s*[:#]?\s*$/i;
@@ -224,7 +224,7 @@ const isDate = (s: string) => {
 const DIRECT = /\b(?:code|otp|passcode|pin|token|verification|2fa|mfa)\s*(?:(?:is|=)\s*)?[:#=|\-\u2013\u2014]?\s*$/i;
 const COUNT_AFTER_LABEL = /^(?!(?:expires|is|was|this|has|does|goes|works|stays|lasts|remains|always|thanks|minutes|seconds|digits|its|yes|us|plus)$)(?:[a-z]{3,}s|sq|ft|loc|sloc|kloc|rps|qps|tps|ms|gb|tb|mb|kb|k|m|hrs?|mins?)$/i;
 // accents off, zero-width characters as a space, and Cyrillic or Greek letters that look Latin as Latin ("Сode" is "Code").
-const LOOKALIKE: Record<string, string> = { "а": "a", "в": "b", "с": "c", "е": "e", "һ": "h", "і": "i", "ј": "j", "к": "k", "м": "m", "н": "h", "о": "o", "р": "p", "ѕ": "s", "т": "t", "у": "y", "х": "x", "ԁ": "d", "ԛ": "q", "ԝ": "w",
+const LOOKALIKE: Record<string, string> = { "κ": "k", "ε": "e", "ι": "i", "υ": "u", "χ": "x", "а": "a", "в": "b", "с": "c", "е": "e", "һ": "h", "і": "i", "ј": "j", "к": "k", "м": "m", "н": "h", "о": "o", "р": "p", "ѕ": "s", "т": "t", "у": "y", "х": "x", "ԁ": "d", "ԛ": "q", "ԝ": "w",
   "А": "A", "В": "B", "С": "C", "Е": "E", "Н": "H", "І": "I", "Ј": "J", "К": "K", "М": "M", "О": "O", "Р": "P", "Ѕ": "S", "Т": "T", "У": "Y", "Х": "X",
   "α": "a", "ο": "o", "ρ": "p", "τ": "t", "ν": "v", "Α": "A", "Β": "B", "Ε": "E", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T", "Χ": "X", "Υ": "Y", "Ζ": "Z" };
 // The zero of each decimal-digit block (every Unicode Nd run is a whole number of 0-9 blocks), built once on first use.
@@ -249,7 +249,7 @@ export function fileText(text: unknown): string {
   return String(text ?? "").replace(/\r\n?/g, "\n").normalize("NFKD").replace(/\p{M}/gu, "").replace(/[\p{Cf}ㅤᅟᅠﾠ᠎͏]/gu, "")
     .replace(/[❶-➓⓫-⓾]/g, (c) => { const n = c.codePointAt(0)!; return String(n >= 0x24eb && n <= 0x24f4 ? n - 0x24eb + 11 : n >= 0x24f5 ? n - 0x24f5 + 1 : (n - 0x2776) % 10 + 1); })
     .replace(/\p{Nd}/gu, (d) => d <= "9" && d >= "0" ? d : String(digitValue(d.codePointAt(0)!)))
-    .replace(/[Ͱ-ϿЀ-ӿԀ-ԯ]/g, (c) => LOOKALIKE[c] ?? c);
+    .replace(/[\u0370-\u03ff\u0400-\u04ff\u0500-\u052f]/g, (c) => LOOKALIKE[c.toLowerCase()] ?? c.toLowerCase());
 }
 // After a code's own label (code, OTP, PIN, passcode, token, verification, 2FA, MFA; not a named label such as "tariff code"),
 // the value that follows it, past connectors, brackets and quotes, is a code unless it has a safe shape: years, a real date with
@@ -348,14 +348,14 @@ export function fileCodeLines(text: string): number[] {
 // unless it has a strict, context-independent safe shape (years, quarters, dates, times, phones, postal codes, money,
 // percentages, versions, certification exam codes, standards, DOIs, patents, tickets, counts, named labels). A value that
 // stands alone on its line refuses whatever surrounds it. The reply names only the line and the kind.
-const CTX_LATIN = String.raw`codes?|otps?|passcodes?|passkeys?|pins?|tokens?|verification|verify|verified|2fa|mfa|totp|hotp|two[- ]?(?:factor|step)|2[- ]?step|sign[- ]?in|log[- ]?in|login|authenticator|one[- ]?time|single[- ]?use|sms|texted|text(?:\s+message)?|security\s+key|secret(?:\s+key)?|key\s*[:=]|steam\s+guard|magic\s+link|backup\s+codes?|recovery\s+codes?|sent|send|emailed|messaged|gave|got|received|shared|forwarded|pinged|dm'?d|shows|showed|displays|displayed|use|enter|type|paste|key\s+in|try|reply\s+with|respond\s+with|confirm\s+with|here'?s|here\s+is|it'?s|mine(?:\s+is)?\s*:?|number\s*:|(?:the\s+)?number\s+(?:is|was)|digits|follows|below|guard|c[oó]digo|clave|contrase[nñ]a|verificaci[oó]n|acceso|senha|verifica[cç][aã]o|v[eé]rification|mot\s+de\s+passe|codice|best[aä]tigungscode|sicherheitscode|kennwort|passwort|tan|kode|verifikasi|sandi|kod|weryfikacyjny|verificatiecode|bekr[aä]ftelsekod|dogrulama|m[aã]\s+x[aá]c|код|пароль|подтверждени\p{L}*|رمز|التحقق|einmalcode|einmalkennwort|zugangscode|engangskod|engangskode|kertakoodi|vahvistuskoodi|toegangscode|kod\s+dostepu|jednorazowy|codice\s+d'?accesso|code\s+d'?acces|code\s+unique|codigo\s+unico|parola|sifre|chase|authy|steam|1password|lastpass|bitwarden|signal|whatsapp|telegram|paypal|venmo|stripe|twilio|yubikey|slack|discord|teams|zoom|the\s+app|bank|${SENDERS}`;
-const CTX_OTHER_WORDS = ["验证码", "校验码", "认证码", "动态码", "验证", "密码", "驗證碼", "確認碼", "認証コード", "確認コード", "認証番号", "ワンタイム", "パスワード", "인증번호", "인증 코드", "비밀번호", "코드", "सत्यापन कोड", "कोड", "ओटीपी", "код", "код подтверждения", "пароль", "رمز التحقق", "رمز", "کد", "รหัส", "קוד", "κωδικός", "mã xác minh", "mã xác nhận", "mã otp"];
+const CTX_LATIN = String.raw`codes?|otps?|passcodes?|passkeys?|pins?|tokens?|verification|verify|verified|2fa|mfa|totp|hotp|two[- ]?(?:factor|step)|2[- ]?step|sign[- ]?in|log[- ]?in|login|authenticator|one[- ]?time|single[- ]?use|sms|texted|text(?:\s+message)?|security\s+key|secret(?:\s+key)?|key\s*[:=]|steam\s+guard|magic\s+link|backup\s+codes?|recovery\s+codes?|sent|send|emailed|messaged|gave|got|received|shared|forwarded|pinged|dm'?d|shows|showed|displays|displayed|use|enter|type|paste|key\s+in|try|reply\s+with|respond\s+with|confirm\s+with|here'?s|here\s+is|it'?s|mine(?:\s+is)?\s*:?|number\s*:|(?:the\s+)?number\s+(?:is|was)|digits|follows|below|guard|c[oó]digo|clave|contrase[nñ]a|verificaci[oó]n|acceso|senha|verifica[cç][aã]o|v[eé]rification|mot\s+de\s+passe|codice|best[aä]tigungscode|sicherheitscode|kennwort|passwort|tan|kode|verifikasi|sandi|kod|weryfikacyjny|verificatiecode|bekr[aä]ftelsekod|dogrulama|m[aã]\s+x[aá]c|код|пароль|подтверждени\p{L}*|رمز|التحقق|\p{L}{0,14}(?:inlog|inloggnings|verifierings|anmelde|verifizierungs|bestatigungs|bekraeftelses|bekræftelses|engangs|vahvistus|kertakayttoinen\s+|ellenorzo\s+|dogrulama\s+|giris\s+|onay\s+|engångs)(?:code|kod|kode|koodi|kodu)\p{L}{0,6}|kod(?:u\p{L}{0,4}|en|er|i|ot)|koodi\p{L}{0,4}|codul|cod\s+de\s+verificare|nambari\s+ya\s+siri|kodi\s+yako|einmalcode|einmalkennwort|zugangscode|engangskod|engangskode|kertakoodi|vahvistuskoodi|toegangscode|kod\s+dostepu|jednorazowy|codice\s+d'?accesso|code\s+d'?acces|code\s+unique|codigo\s+unico|parola|sifre|chase|authy|steam|1password|lastpass|bitwarden|signal|whatsapp|telegram|paypal|venmo|stripe|twilio|yubikey|slack|discord|teams|zoom|the\s+app|bank|${SENDERS}`;
+const CTX_OTHER_WORDS = ["验证码", "校验码", "认证码", "动态码", "验证", "密码", "驗證碼", "確認碼", "認証コード", "確認コード", "認証番号", "ワンタイム", "パスワード", "인증번호", "인증 코드", "비밀번호", "코드", "सत्यापन कोड", "कोड", "ओटीपी", "код", "код подтверждения", "пароль", "رمز التحقق", "رمز", "کد", "รหัส", "קוד", "κωδικός", "mã xác minh", "mã xác nhận", "mã otp", "mã của bạn", "mã đăng nhập", "登录码", "登錄碼", "动态口令", "口令", "ログインコード", "認証番号", "κωδικός", "κωδικός επαλήθευσης", "κωδικοσ"];
 // The lexicon in the form the check reads (accents off, look-alike letters mapped, Hangul and kana decomposed), so a label is
 // found in the normalised file text.
-const lexForm = (w: string) => w.normalize("NFKD").replace(/\p{M}/gu, "").replace(/[\u0370-\u03ff\u0400-\u04ff\u0500-\u052f]/g, (c) => LOOKALIKE[c] ?? c).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s*");
+const lexForm = (w: string) => w.normalize("NFKD").replace(/\p{M}/gu, "").replace(/[\u0370-\u03ff\u0400-\u04ff\u0500-\u052f]/g, (c) => LOOKALIKE[c.toLowerCase()] ?? c.toLowerCase()).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s*");
 const CTX_CJK = CTX_OTHER_WORDS.map(lexForm).join("|");
 const CTX_CJK_N = CTX_CJK;
-const GATE_CTX = new RegExp(String.raw`(?<![\p{L}\p{N}])(?:${CTX_LATIN})(?![\p{L}])|${CTX_CJK}`, "iu");
+export const GATE_CTX = new RegExp(String.raw`(?<![\p{L}\p{N}])(?:${CTX_LATIN})(?![\p{L}])|${CTX_CJK}`, "iu");
 // A phrase that hands over what follows when it ends a line ("Workday sent me", "Verification code follows", "Code:").
 export const GATE_END = new RegExp(String.raw`(?:(?<![\p{L}\p{N}])(?:codes?|otps?|passcodes?|passkeys?|pins?|tokens?|verification|2fa|mfa|totp|hotp|sms|authenticator|secret|key|c[oó]digo|clave|senha|codice|kode|kod|tan|sent\s+(?:me|us)|texted\s+(?:me|us)|emailed\s+(?:me|us)|messaged\s+(?:me|us)|gave\s+(?:me|us)|shared|forwarded|pinged\s+(?:me|us)|dm'?d\s+(?:me|us)|shows|displays|enter|type|paste|use|reply\s+with|here'?s|here\s+is|it'?s|mine(?:\s+is)?|follows|below|bestätigungscode|sicherheitscode|код|رمز)|${CTX_CJK})[\s\p{P}\p{S}]*$`, "iu");
 const STRICT_VERBS = /^(?:opens|unlocks|verifies|expires|works|logs|signs|grants|gives|lets|gets|allows|activates|confirms|completes|authorizes|authenticates|validates|enables|accesses|is|was|has|does|goes|remains|stays|lasts|its|this|thanks|yes|us|plus|minutes|seconds|digits|texts|logins|messages|sms)$/i;
@@ -364,7 +364,7 @@ const STRICT_VERBS = /^(?:opens|unlocks|verifies|expires|works|logs|signs|grants
 const GATE_SEP = String.raw`(?:\s?[-–—]{1,2}\s?|[.,\/·:#+\x5c;*=~|]{1,2}(?!\s)|(?<=\d)\s{1,2}(?=\d))`;
 const GATE_SEP_LOOSE = String.raw`(?:${GATE_SEP}|(?<=[A-Z0-9])\s{1,2}(?=[A-Z0-9]))`;
 // A code's own label right before the value (any lexicon language).
-const GATE_DIRECT = new RegExp(String.raw`(?:(?<![\p{L}\p{N}])(?:codes?|otps?|passcodes?|passkeys?|pins?|tokens?|verification|2fa|mfa|totp|hotp|secret|key|c[oó]digo(?:\s+de\s+\p{L}+)?|clave|senha|codice(?:\s+di\s+verifica)?|codice\s+d'?accesso|kode(?:\s+verifikasi)?|tan|einmalcode|zugangscode|engangskod|bestatigungscode|sicherheitscode|code\s+d'?acces|kod\s+dostepu|dogrulama\s+kodu|код(?:\s+подтверждения)?|рмз|رمز(?:\s+التحقق)?)|${CTX_CJK})\s*(?:(?:is|=)\s*)?[\s\p{P}\p{S}]*$`, "iu");
+const GATE_DIRECT = new RegExp(String.raw`(?:(?<![\p{L}\p{N}])(?:\p{L}{0,14}(?:inlog|inloggnings|verifierings|anmelde|verifizierungs|bestatigungs|bekraeftelses|bekræftelses|engangs|vahvistus|engångs)(?:code|kod|kode|koodi|kodu)\p{L}{0,6}|(?:kertakayttoinen|ellenorzo|dogrulama|giris|onay)\s+kod\p{L}{0,6}|kod(?:u\p{L}{0,4}|en|er|i|ot)|koodi\p{L}{0,4}|codul(?:\s+\p{L}+){0,3}|cod\s+de\s+verificare|codes?|otps?|passcodes?|passkeys?|pins?|tokens?|verification|2fa|mfa|totp|hotp|secret|key|c[oó]digo(?:\s+de\s+\p{L}+)?|clave|senha|codice(?:\s+di\s+verifica)?|codice\s+d'?accesso|kode(?:\s+verifikasi)?|tan|einmalcode|zugangscode|engangskod|bestatigungscode|sicherheitscode|code\s+d'?acces|kod\s+dostepu|dogrulama\s+kodu|код(?:\s+подтверждения)?|рмз|رمز(?:\s+التحقق)?)|${CTX_CJK})\s*(?:(?:is|=)\s*)?[\s\p{P}\p{S}]*$`, "iu");
 const STRONG_LABEL = /(?:backup|recovery|verification|security|one[- ]?time|otp|2fa|mfa|login|log[- ]?in|sign[- ]?in|authenticator|totp|hotp|access|reset|confirmation)\s+codes?\s*[:=#-]?\s*$/i;
 const TECH_WORDS = /^(?:COBOL|JAVA|HTML|CSS|SQL|PYTHON|REACT|RUST|SWIFT|KOTLIN|SCALA|PERL|RUBY|GOLANG|DART|JSON|YAML|BASH|LINUX|UNIX|MATLAB|FORTRAN|PASCAL|ABAP|APEX|NODE|DOCKER|AZURE|AWS|GCP|SAP|ORACLE|EXCEL|NONE|DONE|OPEN|LIVE|BETA|ALPHA|LEGACY|CLEAN|REVIEW)$/;
 const CERT_SHAPE = /^(?:AZ|SC|MS|MO|DP|PL|AI|MB|MD|DA|AD|SAA|SAP|SOA|DVA|CLF|ANS|DOP|SCS|DAS|MLS|DEA|PCA|PCD|PDE|ACE|SY0|N10|CV0|PK0|XK0|CS0|CAS|PT0|DS0|CY0|220)-?[A-Z]?\d{2,4}$/; // AZ-104, MO-200, SC300, SAA-C03, SY0-701
@@ -380,12 +380,13 @@ function gateLine(raw: string): string {
   return raw.replace(/(?<![A-Za-z0-9])_+|_+(?![A-Za-z0-9])/g, (m) => " ".repeat(m.length))
     .replace(/(?<![A-Za-z0-9])\*+|\*+(?![A-Za-z0-9])/g, (m) => "\u001f".repeat(m.length))
     .replace(/[`«»‹›"'“”‘’„()\[\]{}<>「」【】（）]/g, "\u001f")
-    .replace(/(?<![A-Za-z0-9])(?:p(?:50|75|90|95|99|999)|\d{1,4}(?:\.\d+)?(?:ms|ns|us|s|h|hrs?|GB|MB|KB|TB|PB|gb|mb|kb|tb|pb|Hz|kHz|MHz|GHz|hz|khz|mhz|ghz|px|pt|yrs?|rps|qps|tps|fps|kW|MW|kg|lbs?|km|mi|cm|mm|x))(?![A-Za-z0-9])/g, (m) => " ".repeat(m.length));
+    .replace(/(?<![A-Za-z0-9])(?:p(?:50|75|90|95|99|999)|\d{1,4}(?:\.\d+)?(?:ms|ns|us|s|h|hrs?|GB|MB|KB|TB|PB|gb|mb|kb|tb|pb|Hz|kHz|MHz|GHz|hz|khz|mhz|ghz|px|pt|yrs?|rps|qps|tps|fps|kW|MW|kg|lbs?|km|mi|cm|mm|nm|um|x))(?![A-Za-z0-9])/g, (m) => " ".repeat(m.length))
+    .replace(/(?<![A-Za-z0-9])(?:A3[0-9]{2}(?:neo|ceo)?|B7[0-9]7(?:MAX|-\d{3})?|E1[79]5|CRJ\d{3,4}|ATR\s?[47]2)(?=\s+type\b)/g, (m) => " ".repeat(m.length)); // an aircraft before "type rating"
 }
 // The value straight after a code's label or a hand-over phrase ("PIN: 1z ck cn j0", "My phone shows WFJ073", "The digits are
 // 8669..."), read up to a stop word or a long word, whatever its separators. Figures of 8 digits or fewer with no letters are
 // left to gateCodeAt, which knows counts and money.
-const TAIL_ANCHOR = new RegExp(String.raw`(?:(?<![\p{L}\p{N}])(?:codes?|otps?|passcodes?|passkeys?|pins?|tokens?|verification|2fa|mfa|totp|hotp|secret|key|steam\s+guard|digits|c[oó]digo(?:\s+de\s+\p{L}+)?|clave|senha|codice(?:\s+di\s+verifica)?|codice\s+d'?accesso|kode(?:\s+verifikasi)?|tan|einmalcode|zugangscode|engangskod|bestatigungscode|sicherheitscode|code\s+d'?acces|kod\s+dostepu|dogrulama\s+kodu|(?:the\s+)?(?:number|digits|one)\s+(?:is|was|are))(?![\p{L}])(?:\s+(?:is|are|was|=))?|(?<![\p{L}\p{N}])(?:sent|texted|emailed|messaged|gave|shared|forwarded|pinged|dm'?d)\s+(?:me|us)(?![\p{L}])|(?<![\p{L}\p{N}])(?:(?:phone|app|screen|authenticator|device|watch|sms)\s+(?:shows|showed|displays|displayed|says|said)|enter|type|paste|use|key\s+in|(?:reply|respond|confirm|verify|sign\s+in|log\s+in|login)\s+with|here'?s|here\s+is|it'?s|mine(?:\s+is)?)(?![\p{L}])|${CTX_CJK_N})\s*[:=#\-–—>|~]*\s*`, "giu");
+const TAIL_ANCHOR = new RegExp(String.raw`(?:(?<![\p{L}\p{N}])(?:\p{L}{0,14}(?:inlog|inloggnings|verifierings|anmelde|verifizierungs|bestatigungs|bekraeftelses|bekræftelses|engangs|vahvistus|engångs)(?:code|kod|kode|koodi|kodu)\p{L}{0,6}|(?:kertakayttoinen|ellenorzo|dogrulama|giris|onay)\s+kod\p{L}{0,6}|kod(?:u\p{L}{0,4}|en|er|i|ot)|koodi\p{L}{0,4}|codul(?:\s+\p{L}+){0,3}|cod\s+de\s+verificare|codes?|otps?|passcodes?|passkeys?|pins?|tokens?|verification|2fa|mfa|totp|hotp|secret|key|steam\s+guard|digits|c[oó]digo(?:\s+de\s+\p{L}+)?|clave|senha|codice(?:\s+di\s+verifica)?|codice\s+d'?accesso|kode(?:\s+verifikasi)?|tan|einmalcode|zugangscode|engangskod|bestatigungscode|sicherheitscode|code\s+d'?acces|kod\s+dostepu|dogrulama\s+kodu|(?:the\s+)?(?:number|digits|one)\s+(?:is|was|are))(?![\p{L}])(?:\s+(?:is|are|was|=))?|(?<![\p{L}\p{N}])(?:sent|texted|emailed|messaged|gave|shared|forwarded|pinged|dm'?d)\s+(?:me|us)(?![\p{L}])|(?<![\p{L}\p{N}])(?:(?:phone|app|screen|authenticator|device|watch|sms)\s+(?:shows|showed|displays|displayed|says|said)|enter|type|paste|use|key\s+in|(?:reply|respond|confirm|verify|sign\s+in|log\s+in|login)\s+with|here'?s|here\s+is|it'?s|mine(?:\s+is)?)(?![\p{L}])|${CTX_CJK_N})\s*[:=#\-–—>|~]*\s*`, "giu");
 const TAIL_STOP = /^(?:to|for|via|now|from|valid|expires?|expired|in|on|at|the|an?|is|was|are|my|your|please|mins?|minutes?|ago|do|not|share|and|or|with|sms|it|this|that|if|when|after|before|until|codes?|otp|pin|token|login|sign|verification|app|phone|email|text|texted|sent|me|us|you|here|there|today|tonight|yesterday|seconds?|hours?|days?|by|of|thanks?|ok|okay|asap|again|also|just|only|then|so|but|be|will|can|use|enter|type|was|were)$/i;
 // A value read backwards from "is my code", "- my OTP", "was the verification code" ("KsT6 LBnn kY5 is my code", "jb - 3m - 73 -
 // my OTP"): the same reading as after a label, toward the start of the line.
@@ -393,7 +394,7 @@ const BACK_LABEL = new RegExp(String.raw`[\s\u001f]*(?:[-–—:|]\s*)?(?:(?:is|
 export function beforeLabelCodeAt(raw: string): number {
   const line = gateLine(raw);
   for (const b of line.matchAll(BACK_LABEL)) {
-    const end = b.index ?? 0, parts = line.slice(0, end).split(/(\s+|[-–—.,\/·:#+\x5c;*=~|\u001f]{1,3})/);
+    const end = b.index ?? 0, parts = line.slice(Math.max(0, end - 256), end).split(/(\s+|[-\u2013\u2014.,\/\u00b7:#+\x5c;*=~|\u001f]{1,3})/);
     const got: string[] = [];
     for (let k = parts.length - 1; k >= 0 && got.length < 24; k--) {
       const p = parts[k];
@@ -416,12 +417,12 @@ export function beforeLabelCodeAt(raw: string): number {
 export function tailCodeAt(raw: string): number {
   const back = beforeLabelCodeAt(raw);
   if (back >= 0) return back;
-  const line = gateLine(raw);
+  const line = gateLine(raw).replace(/\u001f/g, " "); // a wrapper is a space to the reader
   for (const a of line.matchAll(TAIL_ANCHOR)) {
     const start = (a.index ?? 0) + a[0].length, before = line.slice(0, start);
     const named = /\b([\w'-]+)[ -]+(?:codes?|pins?)\b[^:;.]{0,24}\s*(?:(?:is|are|was)\s*)?[:#=|\-–—]?\s*$/i.exec(before);
     if (named && NAMED_LABEL.test(named[1].replace(/-\d+$/, ""))) continue; // "Billing codes: 99213, 99214"
-    const parts = line.slice(start).split(/(\s+|[-–—.,\/·:#+\;*=~|]{1,2})/);
+    const parts = line.slice(start, start + 256).split(/(\s+|[-\u2013\u2014.,\/\u00b7:#+\x5c;*=~|]{1,2})/);
     let val = "", n = 0;
     for (let k = 0; k < parts.length && n < 24; k++) {
       const p = parts[k];
@@ -469,6 +470,7 @@ export function wrappedCodeAt(raw: string): number {
       if (!WRAP_BEFORE.test(before) && !WRAP_AFTER.test(after)) continue;
       const words = inner.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
       if (words.some((w) => /^\p{L}{5,}$/u.test(w) && /[aeiouy]/i.test(w) && !/^[A-Z]+$/.test(w))) continue; // words, not a code
+      if (GATE_STANDARD.test(words[0] ?? "") && words.slice(1).every((w) => /^\d{1,5}$|^[A-Za-z]{1,6}$/.test(w))) continue; // "(RFC 6238)", "(ISO 27001)"
       if (words.filter((w) => /^\p{Ll}{3,4}$/u.test(w) && /[aeiou]/.test(w)).length >= 2 && !words.some((w) => /\d/.test(w))) continue;
       const flat = words.join(""), digits = flat.replace(/\D/g, "").length, letters = flat.length - digits;
       if (flat.length < 4 || flat.length > 64 || !(digits >= 4 || (digits >= 1 && letters >= 1))) continue;
@@ -482,7 +484,10 @@ export function wrappedCodeAt(raw: string): number {
   return -1;
 }
 // The index of the first value on the line that the gate refuses, or -1.
-export function gateCodeAt(raw: string, ctx = GATE_CTX.test(raw)): number {
+export function gateCodeAt(raw: string, ctx?: boolean): number {
+  return windowed(raw, (s) => gateCodeAtOne(s, ctx ?? GATE_CTX.test(s)));
+}
+export function gateCodeAtOne(raw: string, ctx = GATE_CTX.test(raw)): number {
   if (!ctx) return -1;
   const wrapped = wrappedCodeAt(raw);
   if (wrapped >= 0) return wrapped;
@@ -578,6 +583,7 @@ export function gateCodeAt(raw: string, ctx = GATE_CTX.test(raw)): number {
     if (letters === 0 && !strictLen && (plural(next) || (/^(?:[A-Z][\w-]*|[A-Z0-9-]{2,})$/.test(next) && plural(next2)) || /^\s*[A-Za-z]+\/(?:day|week|month|year|hr|hour|min|sec|s)\b/i.test(after))) continue;
     if (letters === 0 && rising && (COUNT_NOUNS.test(next) || COUNT_NOUNS.test(next2))) continue;
     if (letters === 0 && /^(?:per|a|an|each|every)$/i.test(next) && !codeLength) continue;
+    if (letters === 0 && /^\s*(?:万|亿|千|百|名|人|个|家|次|元|年|月|件|台|位|项|份|條|万人|万用户|億|人以上)/.test(after) && !direct) continue; // a CJK count ("3000 万用户")
     if (letters > 0 && !direct && CREDENTIAL_AFTER.test(next)) continue;
     if (letters > 0 && !direct && /\b(?:exam|course|subject|model|part|lot|batch|sku|item|product|class|module|unit|room|flight|gate|seat|build|release|version)\s*[:|\-]?\s*$/i.test(before)) continue;
     return at;
@@ -597,7 +603,20 @@ export function standaloneCodeAt(raw: string): number {
   return gateCodeAt(v, true) >= 0 ? raw.indexOf(v[0]) : -1;
 }
 // The index of the first suspected code on a line, or -1.
+// A long line is judged in overlapping windows (512 characters, 64 shared), so the work stays linear in its length; a code is
+// never longer than the overlap, so no code is split away from its label by a window edge.
+function windowed(raw: string, f: (s: string) => number): number {
+  if (raw.length <= 600) return f(raw);
+  for (let s = 0; s < raw.length; s += 448) {
+    const from = Math.max(0, s - 64), at = f(raw.slice(from, s + 512));
+    if (at >= 0) return from + at;
+  }
+  return -1;
+}
 export function lineCodeAt(raw: string): number {
+  return windowed(raw, lineCodeAtOne);
+}
+function lineCodeAtOne(raw: string): number {
   const wrapped = wrappedCodeAt(raw);
   if (wrapped >= 0) return wrapped;
   const strict = gateCodeAt(raw);

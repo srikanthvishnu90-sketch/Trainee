@@ -113,6 +113,24 @@ export async function fileText(kind: FileKind, bytes: Uint8Array): Promise<strin
   return (Array.isArray(lines) ? lines : []).map((l) => String(l).replace(/\s+$/, "")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+// Word parts the reader does not show as resume text (headers, footers, notes, comments) and tracked deletions: the stored file
+// carries them, so the same checks read them first. Their text, one paragraph per line.
+export async function docxHiddenText(bytes: Uint8Array): Promise<string> {
+  reader ??= Promise.all([import("node:zlib"), import("node:crypto"), import("node:buffer")])
+    // deno-lint-ignore no-explicit-any
+    .then(([zlib, crypto, b]) => ({ r: (CareerRender as any).withRuntime({ zlib, crypto, Buffer: b.Buffer }), Buffer: b.Buffer }));
+  const { r, Buffer } = await reader;
+  const buf = Buffer.from(bytes);
+  const names: string[] = (r.docxPartNames(buf) ?? []).filter((n: string) => /^word\/(?:header\d*|footer\d*|footnotes|endnotes|comments\w*)\.xml$/.test(n));
+  const xmlText = (xml: string, tags: string) => xml.split(/<\/w:p>/).map((p) => [...p.matchAll(new RegExp(`<w:(?:${tags})(?:\\s[^>]*)?>([^<]*)</w:(?:${tags})>`, "g"))].map((m) => m[1]).join(""))
+    .map((t) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&apos;/g, "'").replace(/&amp;/g, "&")).filter((t) => t.trim());
+  const out: string[] = [];
+  for (const n of names) out.push(...xmlText(r.docxPart(buf, n)?.toString("utf8") ?? "", "t|delText"));
+  out.push(...xmlText(r.docxPart(buf, "word/document.xml")?.toString("utf8") ?? "", "delText"));
+  return out.join("\n");
+}
+export const FILE_HIDDEN_CODE_REPLY = "Your file has what looks like a one-time code or another private number in a header, footer, note, comment or tracked change, so I didn't keep the file or read anything from it, and I won't repeat it. Remove it (and accept or reject tracked changes) and send the file again, or paste your resume here.";
+
 // ONBOARDING ROUND 2 (2026-10-30, tests/architect/scenarios-onboarding-r2.test.ts): a resume file's lines as the person
 // laid them out. Before this each PDF text run was its own line and each Word paragraph was read with its tabs, line
 // breaks and list bullets dropped, so:
@@ -295,6 +313,14 @@ export async function ingestResumeFile(o: {
     const name: Record<string, string> = { ssn: "a Social Security number", card: "a card number", account: "an account number", password: "a password", code: "a one-time code", key: "a key or token" };
     const kinds = [...new Set(found.map((k) => name[k] ?? "a private number"))];
     return { ok: false, reply: codeLines.length ? fileCodeReply(codeLines, kinds.filter((k) => k !== name.code)) : fileSecretReply(kinds), why: "secret", lines: codeLines };
+  }
+  // The parts of a Word file the reader does not show are read by the same checks before the file is kept.
+  if (kind === "docx") {
+    let hidden = "";
+    try { hidden = await docxHiddenText(got.bytes); } catch (e) { console.error("resume file: hidden parts not read:", (e as Error)?.message ?? e); }
+    if (hidden.trim() && (fileCodeLines(hidden).length || redactIdentity(hidden).removed.length || redactIdentity(codeCheckText(hidden)).removed.length)) {
+      return { ok: false, reply: FILE_HIDDEN_CODE_REPLY, why: "secret", lines: [] };
+    }
   }
   const message = resumeMessage(text);
   if (!readsAsResume(message)) return { ok: false, reply: fileNotResumeReply(text), why: "not_resume" };

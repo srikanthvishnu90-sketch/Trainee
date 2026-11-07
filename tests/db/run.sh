@@ -1062,6 +1062,16 @@ python3 "$HERE/career_claim_deadlock.py" "${PSQL[@]}"
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261031110000_career_outreach_batch_unbounded.sql"
 echo "== career_outreach_batch_unbounded.test.sql (one batch holds drafts 1 to 150; 0 and a repeated number refused; the check is validated)"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_outreach_batch_unbounded.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+# CONTACT OUTREACH (20261107120000, proposal D-042): contacts, cited facts, email evidence, the global suppression list and
+# the daily new-contact limit. Up twice (idempotent), its check, then the owner's rollback and up again.
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261107120000_career_contact_outreach.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261107120000_career_contact_outreach.sql"
+echo "== career_contact_outreach.check.sql (25 facts, scores fixed by method, owner-only, global suppression, daily limit, forget, expiry)"
+"${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_contact_outreach.check.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261107120000_career_contact_outreach.down.sql"
+"${PSQL[@]}" -tAc "select count(*) from pg_class where relname like 'career_contact\_%' and relkind = 'r'" | grep -qx 0 || { echo "FAIL the rollback left contact tables"; exit 1; }
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261107120000_career_contact_outreach.sql"
+echo "  ok   rollback removes every contact table; up again"
 # LAUNCH READINESS B1 (2026-10-26, audit PR #192): the definer lockdown, last, on the schema every phase above left
 # (the card-cloud bridge included). The test applies it (twice) over production's shape, then checks the whole schema:
 # no SECURITY DEFINER function anon can run, none without a fixed search_path.

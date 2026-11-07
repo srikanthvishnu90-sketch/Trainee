@@ -182,10 +182,22 @@ Deno.test({
         let c = formCase(r, 50_000 + k.n);
         for (let tries = 0; c.twist !== "none" || c.lang !== "en"; tries++) c = { ...formCase(r, 50_000 + k.n), n: 50_000 + k.n };
         c = { ...c, twist: "none", after: "thanks", n: 50_000 + k.n };
-        const w = await world(c, root);
-        const engine = inProcessEngine(w, () => NOW + k.n * 60_000);
+        let w = await world(c, root);
+        let engine = inProcessEngine(w, () => NOW + k.n * 60_000);
         const name = () => `#${k.n} ${k.change} via ${k.cloud ? "cloud" : "own computer"}`;
-        const prep = await prepare({ url: c.posting, factsPath: w.factsPath, resumePath: w.resumePath, account: { epoch: 0, version: 0 }, now: NOW, runEngine: engine });
+        let prep = await prepare({ url: c.posting, factsPath: w.factsPath, resumePath: w.resumePath, account: { epoch: 0, version: 0 }, now: NOW, runEngine: engine });
+        if (c.pages > 1) {
+          // Discovery is read-only (docs/architect/DISCOVERY-DEFAULT-DENY-2026-10-24.md): a form with a step before its last page
+          // is not prepared before the approval. It stops, named, with nothing typed, clicked or sent, so there is no approval
+          // to change after. The case is then judged on the same form as one page, which is prepared and approved.
+          check(rep, !prep.ready && (prep.result as any)?.reason === "MULTI_STEP_NEEDS_APPROVAL" && w.posts.length === 0 && w.nexts === 0,
+            "a multi-step form was not stopped, named, with nothing sent or clicked", () => `${name()} -> ${JSON.stringify(prep.result)} (${w.posts.length} bodies, ${w.nexts} nexts)`);
+          await Deno.remove(w.dir, { recursive: true }).catch(() => {});
+          c = { ...c, pages: 1, fields: c.fields.map((f) => ({ ...f, page: 0 })) };
+          w = await world(c, root);
+          engine = inProcessEngine(w, () => NOW + k.n * 60_000);
+          prep = await prepare({ url: c.posting, factsPath: w.factsPath, resumePath: w.resumePath, account: { epoch: 0, version: 0 }, now: NOW, runEngine: engine });
+        }
         if (!prep.ready) { check(rep, false, "a plain form was not prepared", () => `${name()} -> ${JSON.stringify(prep.result)}`); continue; }
         w.phase = "submit";
         const payload: any = structuredClone(prep.payload);

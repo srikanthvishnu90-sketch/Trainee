@@ -297,14 +297,24 @@ async function coverLettersAhead(db: ServiceRpc, model: ModelFn, c: Candidate, a
 // (D-007) and is derived from nothing excluded. A profile naming another owner is nobody's. The name and email the resume
 // prints come from the person's own answers (first name, last name, email), or from a basics block that carries its own
 // confirmation event; else none, and no resume is tailored (career_tailor refuses one without them).
+// The projection's own refusal (typed_profile_fields.ts `denied`, the rule the engine applies to profile facts), kept equal
+// to it by tests/architect/trust-parity.test.ts: a fact flagged unproven, quarantined or rejected, or written by the model.
+// deno-lint-ignore no-explicit-any
+const isObject = (v: any) => v !== null && typeof v === "object" && !Array.isArray(v);
+// deno-lint-ignore no-explicit-any
+const denied = (f: any) => [f, f?.provenance].some((v) => isObject(v) && (v.unproven === true || v.quarantined === true || v.rejected === true)) ||
+  [f?.source, f?.origin].some((v) => typeof v === "string" && /^(agent|assistant|model|llm|generated|(?:agent|assistant|model|ai)[ _-]generated)$/i.test(v.trim()));
 // deno-lint-ignore no-explicit-any
 export function trustedProfile(profile: any, owner: string, rows: TextAnswer[]): any | null {
   if (!profile || typeof profile !== "object" || (profile.user_id !== undefined && profile.user_id !== owner)) return null;
   // deno-lint-ignore no-explicit-any
   const entry = (f: any, id: unknown, value: unknown) => ({
-    value: String(value ?? ""), factId: String(id ?? ""), confirmed: f.status === "confirmed" && f.needs_confirmation === false,
+    value: String(value ?? ""), factId: String(id ?? ""),
+    confirmed: f.status === "confirmed" && f.needs_confirmation === false && !denied(f),
     ...(f.user_id ? { user_id: f.user_id } : {}), provenance: f.provenance, confirmation_event_id: f.confirmation_event_id,
-    ...(Array.isArray(f.derived_from) ? { derived_from: f.derived_from } : {}),
+    // Both spellings, exactly as stored: a malformed one makes the contract drop the fact (factDependencies), never vanishes.
+    ...(Object.hasOwn(f, "derived_from") ? { derived_from: f.derived_from } : {}),
+    ...(Object.hasOwn(f, "derivedFrom") ? { derivedFrom: f.derivedFrom } : {}),
   });
   const facts = Array.isArray(profile.facts) ? profile.facts : [];
   // deno-lint-ignore no-explicit-any

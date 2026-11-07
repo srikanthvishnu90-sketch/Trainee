@@ -114,7 +114,12 @@ Deno.test("1. the router's own reply shows the entries; the person's yes evidenc
   }
   for (const e of events.rows) eq(e.detail.upload.ref, "agent_messages:1", "the event names the upload");
   const kept = trustedProfile({ ...profile, user_id: PERSON }, PERSON, []);
-  eq(kept?.facts.length, n, "the trust contract keeps every one (at 6bf3478e: 0)");
+  // The trust contract keeps every confirmed entry except one flagged `unproven` (a skill no fact evidences): the projection's
+  // own denial, applied equally by the server prepare, the batch path and the engine (trust-parity.test.ts). It may be shown
+  // and confirmed by the person, but is never sent to an employer. (At 6bf3478e the contract kept 0.)
+  const provenFacts = profile.facts.filter((f: any) => f.unproven !== true);
+  eq(kept?.facts.length, provenFacts.length, "the trust contract keeps every confirmed entry that is not flagged unproven");
+  assert(profile.facts.filter((f: any) => f.unproven === true).every((f: any) => f.kind === "skill"), "only skills are ever flagged unproven here");
 });
 
 Deno.test("1a. a yes to a reply that shows a count and no entry evidences nothing: no entry's words were shown", async () => {

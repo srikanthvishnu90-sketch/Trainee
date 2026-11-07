@@ -58,6 +58,13 @@ function session() {
   let closed = false;
   const page = {
     route: async (_p: string, h: any) => { handler = h; },
+    // The engine's discovery guards (default deny, scripts/apply.ts) reach the browser context and the page's sockets. This fake
+    // has no popups, no workers, no sockets and no network of its own: every request goes through page.route (the only route
+    // that matters here), so those guards have nothing to act on and are no-ops. The real guards run in the real-browser tests.
+    context: () => ({
+      grantPermissions: async () => {}, addInitScript: async () => {}, route: async () => {}, setOffline: async () => {},
+    }),
+    routeWebSocket: async () => {},
     evaluate: (fn: any, arg?: unknown) => inPage(doc, fn, arg),
     url: () => doc.url,
     mainFrame: () => MAIN,

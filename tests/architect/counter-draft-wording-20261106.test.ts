@@ -962,3 +962,25 @@ Deno.test("CDW market exit: salary-site names with a dot stay in the figure's se
     assert(/Thank you for the offer — \$26 an hour/.test(String(r.result?.draft?.body ?? "")), `${msg}: drafted`);
   }
 });
+
+// Greptile on #570: an offer-detail statement whose figures are held (a pay figure beside a third party) recorded the
+// third party's "$NNk" as the offer through the old fallback, and said "Offer updated". A held statement records nothing:
+// no stated figure, no hourly rate, no bonus, no thread amount, and no "Offer updated" reply.
+Deno.test("CDW held offer details record no figure, on a fresh thread and with an offer on record", () => {
+  for (const prior of [null, OFFER]) for (const msg of [
+    "The offer is $30/hour, but competitors offer $60k", "The offer is $30/hour. Competitors offer $60k.",
+    "They offered $30/hour and the market average is $65k", "The offer is $30/hour, Glassdoor says $70k for this role",
+  ]) {
+    const ctx = fresh();
+    if (prior) host.runTurn(prior, ctx);
+    const before = JSON.stringify({ o: ctx.offer ?? null, a: (ctx as any).negotiationThread?.amount ?? null });
+    const r = host.runTurn(msg, ctx);
+    const o: any = ctx.offer ?? {};
+    for (const v of [o.stated_figure, o.base_salary, (ctx as any).negotiationThread?.amount]) assert(!/60|65|70/.test(String(v ?? "")) || before.includes(String(v)), `${prior ? "prior" : "fresh"} ${msg}: third-party figure saved (${JSON.stringify(o)})`);
+    assert(!/Offer updated/.test(String(r.reply ?? "")), `${prior ? "prior" : "fresh"} ${msg}: said "Offer updated"`);
+    eq(r.result?.sends ?? 0, 0, msg);
+  }
+  // a plain offer still records
+  const c = fresh(); host.runTurn("The offer is $60k", c); eq((c.offer as any)?.stated_figure, "$60,000");
+  const c2 = fresh(); host.runTurn("They offered me $70k with a $5k signing bonus", c2); eq((c2.offer as any)?.signing_bonus, 5000);
+});

@@ -404,7 +404,9 @@ function marketHtml(d: any): string {
   const list = (xs: any[], sourced: boolean) => `<ul class="rb-list">${xs.filter((f) => sourced ? hasSrc(f) : !!f?.text).map((f) => `<li><span class="rb-t">${esc(f.text)}${cites(f.cite)}</span>${sourced ? src(f.source) : READING}</li>`).join("")}</ul>`;
   const c = d.comparison, opts = (c?.options ?? []).map((o: any) => o.name);
   const cell = (x: any) => hasSrc(x) ? `${esc(x.value)}${cites(x.cite)}<br>${src(x.source)}` : `<span class="meta">Not stated</span>`;
-  const table = c ? `<div class="tbl" tabindex="0" role="region" aria-label="Comparison table"><table><caption class="sr">Comparison</caption><thead><tr><th scope="col"><span class="sr">Item</span></th>${opts.map((o: string) => `<th scope="col">${esc(o)}</th>`).join("")}</tr></thead><tbody>${(c.rows ?? []).map((r: any) => `<tr><th scope="row">${esc(r.label)}</th>${(r.cells ?? []).map((x: any) => `<td>${cell(x)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : "";
+  // Under 560 px each row stacks as a card of option/value pairs (KIND_CSS .rb-tbl): the option name is repeated in each cell as a
+  // visual label (aria-hidden; the table's own headers still name the cell), so no column is ever cut off at phone width.
+  const table = c ? `<div class="tbl rb-tbl" tabindex="0" role="region" aria-label="Comparison table"><table><caption class="sr">Comparison</caption><thead><tr><th scope="col"><span class="sr">Item</span></th>${opts.map((o: string) => `<th scope="col">${esc(o)}</th>`).join("")}</tr></thead><tbody>${(c.rows ?? []).map((r: any) => `<tr><th scope="row">${esc(r.label)}</th>${(r.cells ?? []).map((x: any, i: number) => `<td><span class="rb-k" aria-hidden="true">${esc(opts[i] ?? "")}</span><span class="rb-v">${cell(x)}</span></td>`).join("")}</tr>`).join("")}</tbody></table></div>` : "";
   const srcs = `<ol class="rb-src">${(d.sources ?? []).map((s: any, i: number) => `<li id="src-${i + 1}"><span class="rb-n">[${i + 1}]</span>${linkHtml(s.url, s.title) || esc(s.title)}<span class="meta">${esc(hostOf(s.url))} · Read ${esc(DAY(s.fetched_at))}</span></li>`).join("")}</ol>`;
   return cover + sec("Summary", list(d.summary ?? [], true)) + sec("Comparison", table) + sec("What would have to be true", list(d.conditions ?? [], false)) + sec("Risks", list(d.risks ?? [], false)) + sec("Sources", srcs);
 }
@@ -505,4 +507,15 @@ ul.rb-list{margin:0;padding-left:20px}ul.rb-list li{margin:0 0 12px;overflow-wra
 ol.rb-src{list-style:none;margin:0;padding:0}ol.rb-src li{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:6px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}ol.rb-src li:first-child{border-top:0}
 ol.rb-src a{display:inline-flex;align-items:center;min-height:44px;color:var(--link);font-weight:600}ol.rb-src .meta{display:block;grid-column:2}.rb-n{color:var(--mute);font-variant-numeric:tabular-nums}
 @media (min-width:720px){.rb-cover{padding:24px 26px 20px}.rb-thesis{font-size:28px}}
+/* R9-F: the comparison table at phone width. Under 560 px each row is a card on the warm ground (like the cover), its label on top and
+   one option/value pair per line; wider, it is the plain table and the per-cell option label is hidden. Tokens only. */
+.rb-tbl .rb-k{display:none}
+@media (max-width:559.98px){
+.rb-tbl{overflow-x:visible}.rb-tbl table,.rb-tbl tbody,.rb-tbl tr,.rb-tbl th,.rb-tbl td{display:block;width:auto}
+.rb-tbl thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.rb-tbl tr{margin:0 0 12px;padding:2px 14px 4px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}.rb-tbl tr:last-child{margin-bottom:0}
+.rb-tbl tbody th{padding:12px 0 8px;border-top:0;font-weight:600;overflow-wrap:anywhere}
+.rb-tbl td{display:grid;grid-template-columns:minmax(0,38%) minmax(0,1fr);column-gap:12px;align-items:baseline;padding:10px 0;overflow-wrap:anywhere}
+.rb-tbl .rb-k{display:block;font-size:15px;color:var(--mute)}.rb-tbl .rb-v .src{margin:4px 0 0}
+}
 `;

@@ -168,6 +168,15 @@ const attrText = (xml: string) => [...attrVals(xml, "descr|title|tooltip"),
 // metadata Word writes (revision, version, dates, language). Custom: the string values.
 const leaves = (xml: string, keep: (name: string) => boolean) => [...xml.matchAll(new RegExp(String.raw`<${P}([\w.-]+)(?:\s[^>]*)?>([^<]*)</${P}\1>`, "g"))]
   .filter((m) => keep(m[1])).flatMap((m) => lines(m[2]));
+// Custom properties: each string value on its own line, except system identifiers Office and SharePoint write (sensitivity
+// labels, content types, document ids, templates): a property named for one of them whose value is a GUID, a 0x content-type
+// id, a dotted version, a URL or a template file name. Any other value, or a code-shaped value under those names, is read.
+const SYS_PROP = /^(?:MSIP_Label_|_dlc_|ContentTypeId$|TaxCatchAll|MediaServiceImageTags$|lcf76f155ced4ddcb4097134ff3c332f$|_ExtendedDescription$|Template$|AppVersion$|Version$|ComplianceAsset|_SharedFileIndex$|_SourceUrl$|xd_|TriggerFlowInfo$|Order$|_ColorTag$|_Emoji$)/i;
+const SYS_VALUE = /^(?:\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?|0x[0-9a-f]+|\d+(?:\.\d+){2,}|https?:\/\/\S+|[\w .-]+\.dot[mx]?|true|false|Standard|Privileged|\d+(?:\.\d+)?)$/i;
+const customProps = (xml: string) => [...xml.matchAll(new RegExp(String.raw`<${P}property\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)</${P}property>`, "g"))].flatMap((m) => {
+  const name = attrVals(m[1], "name")[0] ?? "", vals = leaves(m[2], (k) => /^(?:lpw?str|bstr)$/i.test(k));
+  return SYS_PROP.test(name) ? vals.filter((v) => !SYS_VALUE.test(v) || /^\d{4,8}$/.test(v)) : vals;
+}).concat(attrText(xml));
 const CORE_META = /^(?:revision|version|created|modified|lastPrinted|language)$/i;
 // An MHTML part: each MIME body decoded by its transfer encoding (an encoding it cannot read throws: the file is refused),
 // HTML bodies read as text, MIME headers and boundaries left out.
@@ -215,7 +224,7 @@ async function hiddenOf(r: any, buf: any, depth: number): Promise<string[]> {
     if (/\.rels$/i.test(n)) { out.push(...attrVals(s, "Target").map(queryOf).filter((q) => q.length > 1)); continue; }
     // Document properties under any prefix, one property per line (numeric and date metadata left out).
     if (/^docProps\/core\.xml$/i.test(n)) { out.push(...leaves(s, (k) => !CORE_META.test(k)), ...attrText(s)); continue; }
-    if (/^docProps\/custom\.xml$/i.test(n)) { out.push(...leaves(s, (k) => /^(?:lpw?str|bstr)$/i.test(k)), ...attrText(s)); continue; }
+    if (/^docProps\/custom\.xml$/i.test(n)) { out.push(...customProps(s)); continue; }
     if (/\.txt$/i.test(n)) { out.push(...s.split(/\r?\n|\r/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean)); continue; } // literal text
     if (/\.mht$/i.test(n)) { out.push(...mimeText(s)); continue; }
     if (/\.html?$/i.test(n)) { out.push(...lines(s.replace(/<(?:br|\/p|\/div|\/li|\/tr|\/h\d)[^>]*>/gi, "\n").replace(/<[^>]*>/g, " "))); continue; }

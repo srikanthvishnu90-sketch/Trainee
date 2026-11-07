@@ -118,7 +118,7 @@ function countTail(code: string, after: string): string {
   if (i < 0) return "";
   const first = code.slice(0, i).replace(/\D+$/, "");
   const rest = code.slice(first.length);
-  if (first.replace(/\D/g, "").length < 4 || !/^[ \t]*[\r\n]+[ \t]*\d{1,3}$/.test(rest) || !COUNT_TAIL.test(after)) return "";
+  if (first.replace(/\D/g, "").length < 4 || !/^[ \t]*[\r\n]+[ \t]*[1-9]\d{0,2}$/.test(rest) || !COUNT_TAIL.test(after)) return "";
   return rest;
 }
 export function redactIdentity(input: string, o: { codePending?: boolean } = {}): Redaction {

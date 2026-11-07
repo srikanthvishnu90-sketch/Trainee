@@ -1077,3 +1077,23 @@ Deno.test("CDW third-party people hold the turn and the standing offer stays; cu
   const k = fresh(); host.runTurn(OFFER, k);
   assert(!/\$70,000 an hour/.test(String(host.runTurn("Draft a counter asking for $70,000", k).reply)), "no hourly unit on $70,000");
 });
+
+// Review of f609ce7d: another person's pay holds only when that person is tied to the figure; peer roles, sister companies and
+// referrals are offers. A cued figure that is an add-on or out of an hourly range is never asked about as an hourly ask, and
+// never blanks the saved counter.
+Deno.test("CDW person words hold only another person's pay; add-ons and out-of-range figures keep the saved counter", () => {
+  for (const [msg, v] of [["I got an offer of $30/hour for a peer support specialist role", 30], ["I got an offer of $25/hour for a peer mentor role.", 25], ["A friend referred me and they offered $30/hour", 30],
+    ["Acme offered me $30/hour after my colleague referred me", 30], ["My former coworker is the hiring manager and she offered me $28/hour", 28], ["I got an offer from a sister company for $30/hour", 30],
+    ["The hiring manager offered me $30/hour", 30]] as [string, number][]) {
+    const c = fresh(); host.runTurn(msg, c);
+    eq((c.offer as any)?.hourly_rate, v, `${msg}: offer recorded`);
+  }
+  for (const msg of ["Draft the counter; ask for $500 relocation", "Draft the counter; ask for $5 more for night shifts", "Draft the counter; ask for $2 more", "Draft the counter at $120"]) {
+    const c = fresh(); host.runTurn(OFFER, c); host.runTurn("Counter at $26/hour", c);
+    const r = host.runTurn(msg, c);
+    assert(!/Is \$\d[\d,]* an hour the rate/.test(String(r.reply)), `${msg}: ${String(r.reply).slice(-120)}`);
+    assert(/meet me at \$26/.test(String(r.result?.draft?.body)), `${msg}: saved counter kept`);
+  }
+  const e = fresh(); host.runTurn("The market offers $28/hour; make it $30/hour", e);
+  eq((e as any).negotiationThread, undefined, "a held turn leaves no empty thread behind");
+});

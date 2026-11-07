@@ -95,11 +95,13 @@ function tokensIn(sentence: string, carried = false): { start: number; end: numb
       // Weak context, a split token: a 3+3 code, or two groups split by a line break that make 6 to 8 digits ("7392\n01",
       // "1234\n5678"). Otherwise a first line of 4+ digits is the code by itself ("4821\n9"); anything else is skipped (review on #575).
       const groups = tok.split(/\D+/).filter(Boolean), digits = groups.join("").length, broken = /[\r\n]/.test(tok);
-      const phoneLike = !broken && groups.length === 2 && groups[0].length === 3 && groups[1].length === 4;
-      const joined = SPLIT_CODE.test(tok) || (groups.length === 2 && digits >= 6 && digits <= 8 && !phoneLike);
+      // Across a space or a dash only a 3+3 code joins, as on trunk: "2018-2022", "9123 4567" (an 8-digit phone) and "1200 1500"
+      // stay. Across a line break, two groups of 6 to 8 digits join unless both are years ("2024\n2025"; review of f609ce7d).
+      const years = groups.length === 2 && groups.every((g) => YEAR.test(g) || /^\d{2}$/.test(g)) && YEAR.test(groups[0]);
+      const joined = SPLIT_CODE.test(tok) || (broken && groups.length === 2 && digits >= 6 && digits <= 8 && !years);
       if (!joined || MORE_GROUPS.test(after)) {
         const first = firstLine.replace(/\D/g, "");
-        if (!broken || first.length < 4 || first !== firstLine || YEAR.test(first)) continue;
+        if (!broken || years || first.length < 4 || first !== firstLine || YEAR.test(first)) continue;
         tok = firstLine; after = sentence.slice(at + tok.length);
       }
     } else if (!isStrong && YEAR.test(tok)) continue;
@@ -113,7 +115,7 @@ function tokensIn(sentence: string, carried = false): { start: number; end: numb
     // Only after a code word or a hand-over ("sent me"), and never money ("120.000 EUR", "an offer of 120.000"), a range ("90.000 - 110.000") or a
     // named number ("req 739.201"): a European thousands figure has the same shape (review of f62e2033).
     if ((!near(at, strong) && !near(at, weak)) || COUNT_AFTER.test(after) || DOTTED_MONEY_AFTER.test(after) || DOTTED_MONEY_BEFORE.test(before) || MORE_GROUPS.test(after) || /[-\u2013\u2014]\s*$/.test(before)
-      || DOTTED_MONEY_NEAR.test(before.slice(-80)) || DOTTED_MONEY_NEAR.test(after.slice(0, 30)) || /^\s*(?:and|to|or)\s+(?:\d|\[code removed\])/i.test(after)) continue;
+      || (!near(at, strong) && (DOTTED_MONEY_NEAR.test(before.slice(-80)) || DOTTED_MONEY_NEAR.test(after.slice(0, 30)) || /^\s*(?:and|to|or)\s+(?:\d|\[code removed\])/i.test(after)))) continue;
     if (hits.some((h) => at < h.end && at + m[0].length > h.start)) continue;
     hits.push({ start: at, end: at + m[0].length });
   }

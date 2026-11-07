@@ -77,9 +77,21 @@ Deno.test("R8R-SEP code groups split by any space, dash, minus or period are rem
       }
     }
   }
-  for (const m of ["Workday sent me 7392 01", "Workday sent me 4821 9374", "Workday sent me 1234-5678"]) {
-    assertNode.ok(!/7392|4821|1234/.test(savedOf(m).saved), `${m}: ${savedOf(m).saved}`);
+  // Review of f609ce7d: after a weak cue, a space or dash split joins only as a 3+3 code (as on trunk); year ranges, 8-digit
+  // phones and counts split by a space or dash stay. Across a line break, 6-8 digits join unless both groups are years.
+  for (const m of ["Workday sent me 7392\n01", "Workday sent me 1234\n5678", "Workday sent me 739 201", "Workday sent me 739-201"]) {
+    assertNode.ok(!/7392|1234|5678|739|201/.test(savedOf(m).saved), `${m}: ${savedOf(m).saved}`);
   }
+  for (const m of ["The portal lists my dates as 2018-2022, is that right?", "The recruiter emailed me 2025-2026 benefits info.", "they sent me 2024-25 dates", "the portal shows 2019 - 2023",
+    "They emailed me 2024 2025 dates", "the portal shows 2024\n2025", "the recruiter texted me 9123 4567", "the recruiter texted me 1234-5678", "the portal shows 12-3456",
+    "the portal shows 1200 1500", "portal ID 4821-9032", "Workday sent me 7392 01"]) {
+    const r = savedOf(m);
+    assertNode.equal(r.saved, m, `${JSON.stringify(m)} kept: ${JSON.stringify(r.saved)}`); assertNode.equal(r.reply, false, m);
+  }
+  // A strong cue removes a dotted code even near money words; a leading-zero line is not a count.
+  assertNode.ok(!/739\.201/.test(savedOf("Code 739.201 was sent with my offer letter").saved));
+  assertNode.ok(!/7392|015/.test(savedOf("verification code: 7392\n015 days ago").saved), savedOf("verification code: 7392\n015 days ago").saved);
+  assertNode.ok(savedOf("verification code: 7392\n15 days ago").saved.endsWith("\n15 days ago"));
   // Review of f62e2033: a European thousands figure is money, never a dotted code; nor is a named number.
   for (const [m, k] of [["The recruiter sent me an offer of 120.000", "120.000"], ["They emailed me 120.000 EUR base", "120.000"], ["they texted me 120.000 euros", "120.000"],
     ["Workday sent me 100.000 USD", "100.000"], ["Recruiter sent me salary range 90.000 - 110.000", "90.000 - 110.000"], ["She sent me 2 offers\n120.000 and 130.000", "120.000 and 130.000"],

@@ -3952,7 +3952,11 @@ const CareerRouter = (() => {
       // Code saves and drafts nothing; the brain reads the message and asks which figure is the employer's offer (D-007).
       // Only within one sentence: the third party and the figure must share it ("Separate advice from unverified market claims"
       // after the offer is not about any figure).
-      const THIRD_WORD = /\b(?:market|competitors?|others|industry|average|median|typical|glassdoor|levels\.fyi|payscale|salary\.com|indeed|employers|companies|other\s+(?:places|firms|roles|jobs|offers)|elsewhere|similar\s+(?:jobs|roles|positions|companies|postings)|(?:jobs|roles|positions)\s+like\s+(?:this|these|mine|it)|friends?|co-?workers?|colleagues?|peers?|classmates?|roommates?|siblings?|brother|sister|cousin|neighbou?r)\b/i;
+      const THIRD_WORD = /\b(?:market|competitors?|others|industry|average|median|typical|glassdoor|levels\.fyi|payscale|salary\.com|indeed|employers|companies|other\s+(?:places|firms|roles|jobs|offers)|elsewhere|similar\s+(?:jobs|roles|positions|companies|postings)|(?:jobs|roles|positions)\s+like\s+(?:this|these|mine|it))\b/i;
+      // Another person's pay, tied to the figure ("my coworker makes $34/hour", "my friend at Acme was offered $35/hour"): a person
+      // word, a pay verb, then the figure. "A friend referred me and they offered $30/hour", "a peer support role" and "a sister
+      // company" are not (review of f609ce7d).
+      const PERSON_PAY = /\b(?:friends?|co-?workers?|colleagues?|peers?|classmates?|roommates?|siblings?|brother|sister|cousin|neighbou?r|someone|people)\b(?:\s+[\w'-]+){0,4}?\s+(?:makes?|earns?|gets?|got(?:\s+offered)?|is\s+(?:paid|making|earning|getting|on)|was\s+(?:offered|paid)|are\s+(?:paid|making|earning|getting|on)|were\s+(?:offered|paid)|pulls?|took)\b[^.;!?\n]{0,25}$/i;
       // incidental uses that name no third party: only "market" inside one named role ("a market research analyst role").
       // "indeed" is never masked: the adverb and the salary site Indeed cannot be told apart reliably ("it was Indeed that
       // quoted $28"), so a sentence with it and a pay figure is held (Greptile on 76313b47).
@@ -3969,7 +3973,7 @@ const CareerRouter = (() => {
       const sentenceOf = (at) => { const a = startOf(at); const ends = [".", "?", "!", ";", "\n"].map((c) => { let i = src.indexOf(c, at); while (i >= 0 && !endsHere(c, i)) i = src.indexOf(c, i + 1); return i; }).filter((i) => i >= 0); return src.slice(a, ends.length ? Math.min(...ends) : src.length).replace(/counter[ -]?offers?/ig, ""); };
       // A third party's figure holds the turn whatever its value, also when it equals the recorded offer ("Competitors offer
       // $24/hour" with $24 on record): who said it is unknown either way (Greptile record 90).
-      const marketFig = nonAsk.some((m) => THIRD_WORD.test(sentenceOf(m.at).replace(INCIDENTAL, " ")));
+      const marketFig = nonAsk.some((m) => THIRD_WORD.test(sentenceOf(m.at).replace(INCIDENTAL, " ")) || PERSON_PAY.test(src.slice(startOf(m.at), m.at)));
       if (marketFig) { out.ambiguous = true; out.marketAmbiguous = true; }
     }
     return out;
@@ -4151,7 +4155,7 @@ const CareerRouter = (() => {
     // The advice call may capture what it reads ("They offered me $30/hour" names a firm "They"): a held turn saves nothing, so
     // the offer and the negotiation record are put back exactly as they were (review of f62e2033).
     const offerBefore = ctx.offer === undefined ? undefined : JSON.parse(JSON.stringify(ctx.offer));
-    const threadBefore = JSON.stringify(negotiationThreadOf(ctx) || {});
+    const threadBefore = JSON.stringify(negotiationThreadOf(ctx) || {}), hadThread = !!(ctx && ctx.negotiationThread);
     ctx._ambiguousCounter = true;
     let res;
     try { res = handleNegotiationCore(text, ctx); } finally {
@@ -4159,6 +4163,7 @@ const CareerRouter = (() => {
       if (offerBefore === undefined) delete ctx.offer; else ctx.offer = offerBefore;
       const now = negotiationThreadOf(ctx);
       if (now && typeof now === "object") { for (const key of Object.keys(now)) delete now[key]; Object.assign(now, JSON.parse(threadBefore)); }
+      if (!hadThread && ctx && ctx.negotiationThread && !Object.keys(ctx.negotiationThread).length) delete ctx.negotiationThread;
     }
     if (!res || typeof res !== "object") return null;
     delete res.draft; delete res.strategy;
@@ -8324,7 +8329,11 @@ const CareerRouter = (() => {
           // (Greptile records 29 and 35).
           // The cue sits right before the figure ("a counter at $28", "ask for $28"), and the figure can be an hourly rate.
           const cuedM = askFigs.ask == null ? s(text).match(/\b(?:counter(?:[ -]?offer)?\s+(?:at|of|to|for)|ask(?:ing)?\s+for|meet\s+me\s+at|target(?:\s+of)?)\s+(\$\s?\d{1,3}(?:\.\d{1,2})?)(?![\d,]|\s?k\b)/i) : null;
-          const cuedFig = cuedM ? cuedM[1].replace(/\s+/g, "") : null;
+          const cuedVal = cuedM ? Number(cuedM[1].replace(/[^\d.]/g, "")) : null;
+          const cuedTail = cuedM ? s(text).slice((cuedM.index ?? 0) + cuedM[0].length) : "";
+          // An add-on ("$5 more", "$500 relocation") or a figure that cannot be an hourly ask on this offer is not asked about as one.
+          const cuedFig = cuedM && !/^\s*(?:more|extra|additional|relocation|reloc|bonus|stipend|signing|sign-on|allowance|differential|premium|per\s+(?:year|month|week|day)|a\s+(?:year|month|week|day)|for\s+(?:relocation|moving|travel|childcare|equipment|training))\b/i.test(cuedTail)
+            && (!hourlyBase || (cuedVal > Number(hourlyBase) && cuedVal <= 3 * Number(hourlyBase))) ? cuedM[1].replace(/\s+/g, "") : null;
           let counterFig = askFigs.ask || (cuedFig ? null : (thread.counter && thread.counter.hourly)) || null;
           if (counterFig && hourlyBase && Number(counterFig) <= Number(hourlyBase)) counterFig = null;
           // PR-4: no ask figure means no figure in the email. The draft carries a fill-in the person must replace, and the

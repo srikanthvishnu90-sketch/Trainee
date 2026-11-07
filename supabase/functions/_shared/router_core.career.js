@@ -16105,14 +16105,15 @@ const CareerRouter = (() => {
       const offerWord = /\boffer(?:ed|ing|s)?\b|\bproposed\b|\bcame\s+back\b|\bquoted\b/i.test(plain);
       const nonAsk = out.mentions.filter((m) => m.role !== "ask");
       out.ambiguous = currentPhrase && !offerWord && nonAsk.length >= 2 && out.mentions.some((m) => m.role === "employer");
-      const THIRD_WORD = /\b(?:market|competitors?|others|industry|average|median|typical|glassdoor|levels\.fyi|payscale|salary\.com|indeed|employers|companies|other\s+(?:places|firms|roles|jobs|offers)|elsewhere|similar\s+(?:jobs|roles|positions|companies|postings)|(?:jobs|roles|positions)\s+like\s+(?:this|these|mine|it)|friends?|co-?workers?|colleagues?|peers?|classmates?|roommates?|siblings?|brother|sister|cousin|neighbou?r)\b/i;
+      const THIRD_WORD = /\b(?:market|competitors?|others|industry|average|median|typical|glassdoor|levels\.fyi|payscale|salary\.com|indeed|employers|companies|other\s+(?:places|firms|roles|jobs|offers)|elsewhere|similar\s+(?:jobs|roles|positions|companies|postings)|(?:jobs|roles|positions)\s+like\s+(?:this|these|mine|it))\b/i;
+      const PERSON_PAY = /\b(?:friends?|co-?workers?|colleagues?|peers?|classmates?|roommates?|siblings?|brother|sister|cousin|neighbou?r|someone|people)\b(?:\s+[\w'-]+){0,4}?\s+(?:makes?|earns?|gets?|got(?:\s+offered)?|is\s+(?:paid|making|earning|getting|on)|was\s+(?:offered|paid)|are\s+(?:paid|making|earning|getting|on)|were\s+(?:offered|paid)|pulls?|took)\b[^.;!?\n]{0,25}$/i;
       const INCIDENTAL = /\b(?:a|an|the|my|this|that|their|our|his|her|your)\s+market\s+(?:(?:research|data|analytics|access|making|insights|intelligence)(?:\s+(?:senior|junior|staff|principal))?(?:\s+(?:engineer|analyst|researcher|scientist|manager|specialist|associate|lead|designer|developer|coordinator|strategist|consultant))?|(?:(?:senior|junior|staff|principal)\s+)?(?:engineer|analyst|researcher|scientist|manager|specialist|associate|lead|designer|developer|coordinator|strategist|consultant))\s+(?:role|position|job|opening|posting)\b(?!s)/ig;
       const ABBREV = /(?:^|[^A-Za-z])(?:e\.g|i\.e|u\.s|u\.k|approx|vs|etc|mr|mrs|ms|dr|inc|co|corp|ltd|jr|sr)$/i;
       const endsHere = (c, i) => c !== "." || (/^["'\u201d\u2019)\]]*(?:\s|$)/.test(src.slice(i + 1, i + 5)) && !ABBREV.test(src.slice(Math.max(0, i - 8), i))
         && !(/(?:^|[^A-Za-z])no$/i.test(src.slice(Math.max(0, i - 3), i)) && /^\s+#?\d/.test(src.slice(i + 1, i + 6))));
       const startOf = (at) => { let a = -1; for (const c of [".", "?", "!", ";", "\n"]) { let i = src.lastIndexOf(c, at - 1); while (i >= 0 && !endsHere(c, i)) i = src.lastIndexOf(c, i - 1); a = Math.max(a, i); } return a + 1; };
       const sentenceOf = (at) => { const a = startOf(at); const ends = [".", "?", "!", ";", "\n"].map((c) => { let i = src.indexOf(c, at); while (i >= 0 && !endsHere(c, i)) i = src.indexOf(c, i + 1); return i; }).filter((i) => i >= 0); return src.slice(a, ends.length ? Math.min(...ends) : src.length).replace(/counter[ -]?offers?/ig, ""); };
-      const marketFig = nonAsk.some((m) => THIRD_WORD.test(sentenceOf(m.at).replace(INCIDENTAL, " ")));
+      const marketFig = nonAsk.some((m) => THIRD_WORD.test(sentenceOf(m.at).replace(INCIDENTAL, " ")) || PERSON_PAY.test(src.slice(startOf(m.at), m.at)));
       if (marketFig) { out.ambiguous = true; out.marketAmbiguous = true; }
     }
     return out;
@@ -16220,7 +16221,7 @@ const CareerRouter = (() => {
   function heldFigureTurn(text, ctx, awaiting, intent) {
     const figures = counterFigures(s(text), {}).mentions.map((m) => ({ value: m.thousands ? m.value * 1000 : m.value, unit: m.unit }));
     const offerBefore = ctx.offer === undefined ? undefined : JSON.parse(JSON.stringify(ctx.offer));
-    const threadBefore = JSON.stringify(negotiationThreadOf(ctx) || {});
+    const threadBefore = JSON.stringify(negotiationThreadOf(ctx) || {}), hadThread = !!(ctx && ctx.negotiationThread);
     ctx._ambiguousCounter = true;
     let res;
     try { res = handleNegotiationCore(text, ctx); } finally {
@@ -16228,6 +16229,7 @@ const CareerRouter = (() => {
       if (offerBefore === undefined) delete ctx.offer; else ctx.offer = offerBefore;
       const now = negotiationThreadOf(ctx);
       if (now && typeof now === "object") { for (const key of Object.keys(now)) delete now[key]; Object.assign(now, JSON.parse(threadBefore)); }
+      if (!hadThread && ctx && ctx.negotiationThread && !Object.keys(ctx.negotiationThread).length) delete ctx.negotiationThread;
     }
     if (!res || typeof res !== "object") return null;
     delete res.draft; delete res.strategy;
@@ -19147,7 +19149,10 @@ const CareerRouter = (() => {
             try { const thw = negotiationThreadForWrite(ctx); const pc = (thw.counter && typeof thw.counter === "object") ? thw.counter : {}; thw.counter = Object.assign({}, pc, { hourly: askFigs.ask }); thw.topic = "counter"; } catch {   }
           }
           const cuedM = askFigs.ask == null ? s(text).match(/\b(?:counter(?:[ -]?offer)?\s+(?:at|of|to|for)|ask(?:ing)?\s+for|meet\s+me\s+at|target(?:\s+of)?)\s+(\$\s?\d{1,3}(?:\.\d{1,2})?)(?![\d,]|\s?k\b)/i) : null;
-          const cuedFig = cuedM ? cuedM[1].replace(/\s+/g, "") : null;
+          const cuedVal = cuedM ? Number(cuedM[1].replace(/[^\d.]/g, "")) : null;
+          const cuedTail = cuedM ? s(text).slice((cuedM.index ?? 0) + cuedM[0].length) : "";
+          const cuedFig = cuedM && !/^\s*(?:more|extra|additional|relocation|reloc|bonus|stipend|signing|sign-on|allowance|differential|premium|per\s+(?:year|month|week|day)|a\s+(?:year|month|week|day)|for\s+(?:relocation|moving|travel|childcare|equipment|training))\b/i.test(cuedTail)
+            && (!hourlyBase || (cuedVal > Number(hourlyBase) && cuedVal <= 3 * Number(hourlyBase))) ? cuedM[1].replace(/\s+/g, "") : null;
           let counterFig = askFigs.ask || (cuedFig ? null : (thread.counter && thread.counter.hourly)) || null;
           if (counterFig && hourlyBase && Number(counterFig) <= Number(hourlyBase)) counterFig = null;
           const targetSlot = "[your target hourly rate]";

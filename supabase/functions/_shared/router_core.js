@@ -40815,7 +40815,7 @@ const CareerRouter = (() => {
           !thirdPartySays(cs, cs.replace(/counter[ -]?offers?/ig, (x) => " ".repeat(x.length)).search(/\boffer(?:ed|ing|s)?\b/i))) role = "employer";
       }
       prevRole = role;
-      out.mentions.push({ value: v, unit, role, at: start });
+      out.mentions.push({ value: v, unit, role, at: start, thousands: !!mm[2] });
       prevEnd = end;
       if (unit === "hour") {
         if (role === "ask") { if (out.ask == null) out.ask = v; }
@@ -40854,7 +40854,9 @@ const CareerRouter = (() => {
         && !(/(?:^|[^A-Za-z])no$/i.test(src.slice(Math.max(0, i - 3), i)) && /^\s+#?\d/.test(src.slice(i + 1, i + 6))));
       const startOf = (at) => { let a = -1; for (const c of [".", "?", "!", ";", "\n"]) { let i = src.lastIndexOf(c, at - 1); while (i >= 0 && !endsHere(c, i)) i = src.lastIndexOf(c, i - 1); a = Math.max(a, i); } return a + 1; };
       const sentenceOf = (at) => { const a = startOf(at); const ends = [".", "?", "!", ";", "\n"].map((c) => { let i = src.indexOf(c, at); while (i >= 0 && !endsHere(c, i)) i = src.indexOf(c, i + 1); return i; }).filter((i) => i >= 0); return src.slice(a, ends.length ? Math.min(...ends) : src.length).replace(/counter[ -]?offers?/ig, ""); };
-      const marketFig = nonAsk.some((m) => !(m.unit === "hour" && m.value === (hint && hint.recorded)) && THIRD_WORD.test(sentenceOf(m.at).replace(INCIDENTAL, " ")));
+      // A third party's figure holds the turn whatever its value, also when it equals the recorded offer ("Competitors offer
+      // $24/hour" with $24 on record): who said it is unknown either way (Greptile record 90).
+      const marketFig = nonAsk.some((m) => THIRD_WORD.test(sentenceOf(m.at).replace(INCIDENTAL, " ")));
       if (marketFig) { out.ambiguous = true; out.marketAmbiguous = true; }
     }
     return out;
@@ -40965,8 +40967,9 @@ const CareerRouter = (() => {
     const figs = parseOfferFigures(s(text), offerHint(text, ctx));
     // A held turn (a pay figure sharing a sentence with a third party, or ambiguous figures) records nothing here: no
     // figure, no fallback "$NNk" read, no "Offer updated". The turn goes on to the brain, which asks (D-007; Greptile on #570:
-    // "The offer is $30/hour, but competitors offer $60k" recorded $60,000 as the offer).
-    if (figs.held) return null;
+    // "The offer is $30/hour, but competitors offer $60k" recorded $60,000 as the offer). The result carries only structured
+    // state, the figures without roles, so the staged brain asks which one is the new offer (Greptile record 94).
+    if (figs.held) return heldFigureTurn(text, ctx, "which_figure_is_offer");
     const seededPrior = (() => { try { const th = negotiationThreadOf(ctx); return !!(th && th.fromAccount); } catch { return false; } })();
     const merged = (namedFirm || ((figs.signing || figs.hourly || figs.annual) && seededPrior)) ? {} : Object.assign({}, prev);
     if (firmM && !/^(a|an|the)$/i.test(firmM[1].trim())) { merged.company_description = firmM[1].trim(); if (!merged.company) merged.company = firmM[1].trim(); }
@@ -41027,6 +41030,18 @@ const CareerRouter = (() => {
   // negotiation context on record the turn is honestly deflected,
   // naming what is missing — it never falls to the generic fallback
   // (battery t4).
+  // A held pay turn (a figure beside a third party, or figures code cannot attribute): structured state only, like the
+  // offer-ambiguity branch of handleNegotiation. Nothing is saved or drafted; the figures go without roles; the staged brain
+  // asks which one is the new offer or the new ask; without the brain the ordinary negotiation-advice reply stands.
+  function heldFigureTurn(text, ctx, awaiting, intent) {
+    const figures = counterFigures(s(text), {}).mentions.map((m) => ({ value: m.thousands ? m.value * 1000 : m.value, unit: m.unit }));
+    ctx._ambiguousCounter = true;
+    let res;
+    try { res = handleNegotiationCore(text, ctx); } finally { ctx._ambiguousCounter = false; }
+    if (!res || typeof res !== "object") return null;
+    delete res.draft; delete res.strategy;
+    return Object.assign(res, { intent: intent || (String(res.intent || "").startsWith("negotiation") ? res.intent : "negotiation_advice"), resultStatus: "awaiting_user", counterAmbiguous: true, awaiting, figures, sends: 0 });
+  }
   function handleCounterRevision(text, ctx) {
     const t = lc(text);
     const figs = parseOfferFigures(text);
@@ -41038,13 +41053,7 @@ const CareerRouter = (() => {
       if (!figAsk) return null;
       // Structured state only, like the offer-ambiguity branch of handleNegotiation: nothing is saved or drafted, the figures go
       // without roles, and the staged brain asks which one is the new ask; without the brain the ordinary advice reply stands.
-      const figures = counterFigures(s(text), {}).mentions.map((m) => ({ value: m.value, unit: m.unit }));
-      ctx._ambiguousCounter = true;
-      let res;
-      try { res = handleNegotiationCore(text, ctx); } finally { ctx._ambiguousCounter = false; }
-      if (!res || typeof res !== "object") return null;
-      delete res.draft; delete res.strategy;
-      return Object.assign(res, { intent: "negotiation_revision", resultStatus: "awaiting_user", counterAmbiguous: true, awaiting: "which_figure_is_ask", figures, sends: 0 });
+      return heldFigureTurn(text, ctx, "which_figure_is_ask", "negotiation_revision");
     }
     const addAsk = /\badd a request\b|\badd an ask\b|\balso ask\b/.test(t);
     if (!figAsk && !addAsk) return null;
@@ -45087,7 +45096,7 @@ const CareerRouter = (() => {
     if (/\bcounter\b|\boffer\b|\bdraft\b/i.test(s(text))) {
       const hintA = offerHint(text, ctx);
       if (hintA.ambiguous) {
-        const figures = counterFigures(s(text), { recorded: hintA.recorded }).mentions.map((m) => ({ value: m.value, unit: m.unit }));
+        const figures = counterFigures(s(text), { recorded: hintA.recorded }).mentions.map((m) => ({ value: m.thousands ? m.value * 1000 : m.value, unit: m.unit }));
         ctx._ambiguousCounter = true;
         let res;
         try { res = handleNegotiationCore(text, ctx); } finally { ctx._ambiguousCounter = false; }
@@ -50687,6 +50696,12 @@ const CareerRouter = (() => {
       if (cd) return cd;
       const od = handleOfferDetail(text, c);
       if (od) return od;
+      // "They offered $30/hour and the market average is $65k": a held employer figure the offer-detail forms do not read still
+      // reaches the brain with its figures (Greptile record 94).
+      if (/\$\s?\d/.test(s(text)) && /\b(?:offer(?:ed|ing|s)?|pay(?:s|ing)?|proposed|quoted|came\s+back)\b/i.test(s(text)) && parseOfferFigures(s(text), offerHint(text, c)).held) {
+        const hf = heldFigureTurn(text, c, "which_figure_is_offer");
+        if (hf) return hf;
+      }
       const dc = handleDraftContinuation(text, c);
       if (dc) return dc;
       const ds = handlePlanDraftSurgery(text, c);
@@ -52541,6 +52556,8 @@ const CareerRouter = (() => {
       // "received an offer") — the speech act that makes the turn a
       // new offer REPORT rather than a detail about a standing one.
       let sawOfferEvent = false;
+      // The message's hint is computed once: offerHint runs counterFigures over the whole message (Greptile record 91).
+      const rawHint = offerHint(raw, ctx);
       for (const cl of offerClauses) {
         if (!clauseIsNotQuestion(cl)) continue;
         if (/\bgot an offer\b|\bgot the offer\b|\boffered me\b|\boffer came\b|\boffer'?s here\b|\bi have an offer\b|\breceived an offer\b/i.test(cl)) sawOfferEvent = true;
@@ -52565,7 +52582,7 @@ const CareerRouter = (() => {
         // EARLIER in that sentence (a comma split can leave the cue in the previous clause) withholds that
         const sentOf = s(raw).split(/(?<=[.!?])\s+|\n/).find((x) => x.includes(cl)) || "";
         const sentBefore = sentOf.slice(0, Math.max(0, sentOf.indexOf(cl)));
-        const figs0 = parseOfferFigures(clp, { offerSentence: sentOf.replace(/counter[ -]?offers?/ig, "").search(/\boffer(?:ed|ing|s)?\b/i) >= 0 && !/\bask(?:ing)?\b|\bcounter|\bpropos|\bwant|\bmeet\s+me|\btarget|\bneed\b/i.test(sentBefore.replace(/counter[ -]?offers?/ig, "")), recorded: offerHint(raw, ctx).recorded, draft: offerHint(raw, ctx).draft, ambiguous: offerHint(raw, ctx).ambiguous });
+        const figs0 = parseOfferFigures(clp, { offerSentence: sentOf.replace(/counter[ -]?offers?/ig, "").search(/\boffer(?:ed|ing|s)?\b/i) >= 0 && !/\bask(?:ing)?\b|\bcounter|\bpropos|\bwant|\bmeet\s+me|\btarget|\bneed\b/i.test(sentBefore.replace(/counter[ -]?offers?/ig, "")), recorded: rawHint.recorded, draft: rawHint.draft, ambiguous: rawHint.ambiguous });
         const figs = askFramed ? { hourly: null, signing: null, annual: null } : figs0;
         // G3: a counter-drafting request ("draft the counter email at $28/hour", "propose $28/hour") carries the ASK; its hourly
         // figure re-bases the recorded offer only when the same message REPORTS an offer ("they offered $26/hour now").
@@ -52575,7 +52592,7 @@ const CareerRouter = (() => {
         if (figs.signing) rec.signing = figs.signing;
         if (figs.annual) rec.amount = figs.annual;
         // a held turn (ambiguous or market figures) records no amount from the message either
-        const heldTurn = offerHint(raw, ctx).ambiguous;
+        const heldTurn = rawHint.ambiguous;
         if (!heldTurn && (m = cl.match(/\bcame back\s+(?:at\s+)?\$?(\d{2,3})\s?k\b/i))) rec.amount = Number(m[1]) * 1000;
         if (!heldTurn && !figs.annual && !figs.signing && !figs.hourly) {
           if ((m = cl.match(/\boffer\w*\b[^.]*?\$\s?(\d{2,3})\s?k\b/i)) || (m = cl.match(/\b(\d{2,3})\s?k\b[^.]*\boffer/i))) rec.amount = Number(m[1]) * 1000;

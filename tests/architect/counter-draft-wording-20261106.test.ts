@@ -1035,3 +1035,28 @@ Deno.test("CDW a held counter revision adds no prose of its own", () => {
   assert(!/which figure is your new counter|couldn't tell whether/i.test(String(r.reply)), String(r.reply));
   eq(r.result?.counterAmbiguous, true, "held"); eq(r.result?.draft, undefined, "no draft"); eq(recorded(ctx).counter, 27, "counter unchanged");
 });
+
+// Greptile record 90: a third party's figure holds the turn also when it equals the recorded offer.
+// Review of #575: the brain's figures keep their thousands ("$65k" is 65000, not 65).
+Deno.test("CDW a third party's figure equal to the recorded offer still holds; held figures keep their thousands", () => {
+  const ctx = fresh(); host.runTurn(OFFER, ctx);
+  const d = stagedDecision({ env: STAGED, message: "Competitors offer $24/hour. Draft a counter at $30/hour", ctx, host, structured: false });
+  eq(d.brain, true, "held for the brain"); eq(d.reason, "counter_ambiguous_figures", "reason");
+  const r = host.runTurn("Competitors offer $24/hour. Draft a counter at $30/hour", ctx);
+  eq(recorded(ctx).counter ?? null, null, "no counter saved"); eq(r.result?.draft, undefined, "no draft");
+  const c = fresh(); host.runTurn(OFFER, c); host.runTurn("Draft a counter at $27/hour", c);
+  const k = stagedDecision({ env: STAGED, message: "make it $65k; the market pays $60k", ctx: c, host, structured: false });
+  eq(JSON.stringify((k.ambiguousFigures ?? []).map((f) => f.value).sort()), JSON.stringify([60000, 65000]), "thousands kept");
+});
+
+// Greptile record 94: a held offer detail reaches the brain with its figures, and the brain asks which one is the new offer.
+Deno.test("CDW a held offer detail hands the brain its figures (counter_ambiguous_figures)", () => {
+  for (const prior of [null, OFFER]) for (const msg of ["The offer is $30/hour, but competitors offer $60k", "The offer is $30/hour. Competitors offer $60k.",
+    "They offered $30/hour and the market average is $65k", "The offer is $30/hour, Glassdoor says $70k for this role"]) {
+    const ctx = fresh(); if (prior) host.runTurn(prior, ctx);
+    const d = stagedDecision({ env: STAGED, message: msg, ctx, host, structured: false });
+    eq(d.brain, true, `${prior ? "prior" : "fresh"} ${msg}: brain`); eq(d.reason, "counter_ambiguous_figures", `${prior ? "prior" : "fresh"} ${msg}: reason`);
+    assert((d.ambiguousFigures ?? []).some((f) => f.value === 30) && (d.ambiguousFigures ?? []).some((f) => f.value >= 60000), `${msg}: ${JSON.stringify(d.ambiguousFigures)}`);
+    assert(/new offer/.test(routerAnswerBlock(d)), msg);
+  }
+});

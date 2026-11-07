@@ -16090,7 +16090,7 @@ const CareerRouter = (() => {
           !thirdPartySays(cs, cs.replace(/counter[ -]?offers?/ig, (x) => " ".repeat(x.length)).search(/\boffer(?:ed|ing|s)?\b/i))) role = "employer";
       }
       prevRole = role;
-      out.mentions.push({ value: v, unit, role, at: start });
+      out.mentions.push({ value: v, unit, role, at: start, thousands: !!mm[2] });
       prevEnd = end;
       if (unit === "hour") {
         if (role === "ask") { if (out.ask == null) out.ask = v; }
@@ -16112,7 +16112,7 @@ const CareerRouter = (() => {
         && !(/(?:^|[^A-Za-z])no$/i.test(src.slice(Math.max(0, i - 3), i)) && /^\s+#?\d/.test(src.slice(i + 1, i + 6))));
       const startOf = (at) => { let a = -1; for (const c of [".", "?", "!", ";", "\n"]) { let i = src.lastIndexOf(c, at - 1); while (i >= 0 && !endsHere(c, i)) i = src.lastIndexOf(c, i - 1); a = Math.max(a, i); } return a + 1; };
       const sentenceOf = (at) => { const a = startOf(at); const ends = [".", "?", "!", ";", "\n"].map((c) => { let i = src.indexOf(c, at); while (i >= 0 && !endsHere(c, i)) i = src.indexOf(c, i + 1); return i; }).filter((i) => i >= 0); return src.slice(a, ends.length ? Math.min(...ends) : src.length).replace(/counter[ -]?offers?/ig, ""); };
-      const marketFig = nonAsk.some((m) => !(m.unit === "hour" && m.value === (hint && hint.recorded)) && THIRD_WORD.test(sentenceOf(m.at).replace(INCIDENTAL, " ")));
+      const marketFig = nonAsk.some((m) => THIRD_WORD.test(sentenceOf(m.at).replace(INCIDENTAL, " ")));
       if (marketFig) { out.ambiguous = true; out.marketAmbiguous = true; }
     }
     return out;
@@ -16177,7 +16177,7 @@ const CareerRouter = (() => {
     const offeredM = s(text).match(/\b([A-Z][A-Za-z0-9&.]+(?:\s+[A-Z][A-Za-z0-9&.]+){0,2})(?:\s+(?:just|has|have|had))?\s+offered me\b/);
     const namedFirm = (offeredM && offeredM[1].trim()) || (firmM && !/^(a|an|the)$/i.test(firmM[1].trim()) ? firmM[1].trim() : null);
     const figs = parseOfferFigures(s(text), offerHint(text, ctx));
-    if (figs.held) return null;
+    if (figs.held) return heldFigureTurn(text, ctx, "which_figure_is_offer");
     const seededPrior = (() => { try { const th = negotiationThreadOf(ctx); return !!(th && th.fromAccount); } catch { return false; } })();
     const merged = (namedFirm || ((figs.signing || figs.hourly || figs.annual) && seededPrior)) ? {} : Object.assign({}, prev);
     if (firmM && !/^(a|an|the)$/i.test(firmM[1].trim())) { merged.company_description = firmM[1].trim(); if (!merged.company) merged.company = firmM[1].trim(); }
@@ -16217,19 +16217,22 @@ const CareerRouter = (() => {
     return { intent: "negotiation_advice", reply, resultStatus: "awaiting_user", sends: 0, offer: merged };
   }
 
+  function heldFigureTurn(text, ctx, awaiting, intent) {
+    const figures = counterFigures(s(text), {}).mentions.map((m) => ({ value: m.thousands ? m.value * 1000 : m.value, unit: m.unit }));
+    ctx._ambiguousCounter = true;
+    let res;
+    try { res = handleNegotiationCore(text, ctx); } finally { ctx._ambiguousCounter = false; }
+    if (!res || typeof res !== "object") return null;
+    delete res.draft; delete res.strategy;
+    return Object.assign(res, { intent: intent || (String(res.intent || "").startsWith("negotiation") ? res.intent : "negotiation_advice"), resultStatus: "awaiting_user", counterAmbiguous: true, awaiting, figures, sends: 0 });
+  }
   function handleCounterRevision(text, ctx) {
     const t = lc(text);
     const figs = parseOfferFigures(text);
     const figAsk = /\bmake it\s+\$?\s?\d/.test(t) || /\bchange it to\s+\$?\s?\d/.test(t) || /\b(?:raise|lower|drop|bump) it to\s+\$?\s?\d/.test(t);
     if (figs.held) {
       if (!figAsk) return null;
-      const figures = counterFigures(s(text), {}).mentions.map((m) => ({ value: m.value, unit: m.unit }));
-      ctx._ambiguousCounter = true;
-      let res;
-      try { res = handleNegotiationCore(text, ctx); } finally { ctx._ambiguousCounter = false; }
-      if (!res || typeof res !== "object") return null;
-      delete res.draft; delete res.strategy;
-      return Object.assign(res, { intent: "negotiation_revision", resultStatus: "awaiting_user", counterAmbiguous: true, awaiting: "which_figure_is_ask", figures, sends: 0 });
+      return heldFigureTurn(text, ctx, "which_figure_is_ask", "negotiation_revision");
     }
     const addAsk = /\badd a request\b|\badd an ask\b|\balso ask\b/.test(t);
     if (!figAsk && !addAsk) return null;
@@ -19076,7 +19079,7 @@ const CareerRouter = (() => {
     if (/\bcounter\b|\boffer\b|\bdraft\b/i.test(s(text))) {
       const hintA = offerHint(text, ctx);
       if (hintA.ambiguous) {
-        const figures = counterFigures(s(text), { recorded: hintA.recorded }).mentions.map((m) => ({ value: m.value, unit: m.unit }));
+        const figures = counterFigures(s(text), { recorded: hintA.recorded }).mentions.map((m) => ({ value: m.thousands ? m.value * 1000 : m.value, unit: m.unit }));
         ctx._ambiguousCounter = true;
         let res;
         try { res = handleNegotiationCore(text, ctx); } finally { ctx._ambiguousCounter = false; }
@@ -22929,6 +22932,10 @@ const CareerRouter = (() => {
       if (cd) return cd;
       const od = handleOfferDetail(text, c);
       if (od) return od;
+      if (/\$\s?\d/.test(s(text)) && /\b(?:offer(?:ed|ing|s)?|pay(?:s|ing)?|proposed|quoted|came\s+back)\b/i.test(s(text)) && parseOfferFigures(s(text), offerHint(text, c)).held) {
+        const hf = heldFigureTurn(text, c, "which_figure_is_offer");
+        if (hf) return hf;
+      }
       const dc = handleDraftContinuation(text, c);
       if (dc) return dc;
       const ds = handlePlanDraftSurgery(text, c);
@@ -24034,6 +24041,7 @@ const CareerRouter = (() => {
       const rawEmph = s(raw).replace(/(\w)\?{2,}/g, "$1.").replace(/(\w)!{2,}/g, "$1.");
       if (rawEmph !== s(raw)) for (const cl2 of factClausesOf(rawEmph)) if (!offerClauses.includes(cl2)) offerClauses.push(cl2);
       let sawOfferEvent = false;
+      const rawHint = offerHint(raw, ctx);
       for (const cl of offerClauses) {
         if (!clauseIsNotQuestion(cl)) continue;
         if (/\bgot an offer\b|\bgot the offer\b|\boffered me\b|\boffer came\b|\boffer'?s here\b|\bi have an offer\b|\breceived an offer\b/i.test(cl)) sawOfferEvent = true;
@@ -24047,14 +24055,14 @@ const CareerRouter = (() => {
         const clp = cutAt >= 0 && /\$\s?\d{1,3}\s*$/.test(cl) && /^,\d{3}\b/.test(raw.slice(cutAt + cl.length)) ? cl.replace(/\$\s?\d{1,3}\s*$/, "") : cl;
         const sentOf = s(raw).split(/(?<=[.!?])\s+|\n/).find((x) => x.includes(cl)) || "";
         const sentBefore = sentOf.slice(0, Math.max(0, sentOf.indexOf(cl)));
-        const figs0 = parseOfferFigures(clp, { offerSentence: sentOf.replace(/counter[ -]?offers?/ig, "").search(/\boffer(?:ed|ing|s)?\b/i) >= 0 && !/\bask(?:ing)?\b|\bcounter|\bpropos|\bwant|\bmeet\s+me|\btarget|\bneed\b/i.test(sentBefore.replace(/counter[ -]?offers?/ig, "")), recorded: offerHint(raw, ctx).recorded, draft: offerHint(raw, ctx).draft, ambiguous: offerHint(raw, ctx).ambiguous });
+        const figs0 = parseOfferFigures(clp, { offerSentence: sentOf.replace(/counter[ -]?offers?/ig, "").search(/\boffer(?:ed|ing|s)?\b/i) >= 0 && !/\bask(?:ing)?\b|\bcounter|\bpropos|\bwant|\bmeet\s+me|\btarget|\bneed\b/i.test(sentBefore.replace(/counter[ -]?offers?/ig, "")), recorded: rawHint.recorded, draft: rawHint.draft, ambiguous: rawHint.ambiguous });
         const figs = askFramed ? { hourly: null, signing: null, annual: null } : figs0;
         const counterDraftReq = /\b(?:draft|write|compose|prepare)\b[^.?!]*\bcounter\b|\bcounter\s+(?:email|offer|letter|message)\b|\bpropos(?:e|ing)\s+\$|\bask(?:ing)?\s+(?:for\s+)?\$/i.test(cl);
         figs.hourly = figs0.recHourly;
         if (figs.hourly) rec.hourly = figs.hourly;
         if (figs.signing) rec.signing = figs.signing;
         if (figs.annual) rec.amount = figs.annual;
-        const heldTurn = offerHint(raw, ctx).ambiguous;
+        const heldTurn = rawHint.ambiguous;
         if (!heldTurn && (m = cl.match(/\bcame back\s+(?:at\s+)?\$?(\d{2,3})\s?k\b/i))) rec.amount = Number(m[1]) * 1000;
         if (!heldTurn && !figs.annual && !figs.signing && !figs.hourly) {
           if ((m = cl.match(/\boffer\w*\b[^.]*?\$\s?(\d{2,3})\s?k\b/i)) || (m = cl.match(/\b(\d{2,3})\s?k\b[^.]*\boffer/i))) rec.amount = Number(m[1]) * 1000;

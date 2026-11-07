@@ -3959,7 +3959,9 @@ const CareerRouter = (() => {
       const INCIDENTAL = /\b(?:a|an|the|my|this|that|their|our|his|her|your)\s+market\s+(?:(?:research|data|analytics|access|making|insights|intelligence)(?:\s+(?:senior|junior|staff|principal))?(?:\s+(?:engineer|analyst|researcher|scientist|manager|specialist|associate|lead|designer|developer|coordinator|strategist|consultant))?|(?:(?:senior|junior|staff|principal)\s+)?(?:engineer|analyst|researcher|scientist|manager|specialist|associate|lead|designer|developer|coordinator|strategist|consultant))\s+(?:role|position|job|opening|posting)\b(?!s)/ig;
       // A "." ends a sentence only when whitespace or the end follows it: decimals ("$29.50") and site names ("Salary.com",
       // "levels.fyi", "glassdoor.com") stay inside their sentence (Greptile on #564).
-      const endsHere = (c, i) => c !== "." || /\s/.test(src[i + 1] || " ");
+      // ...and not after a common abbreviation ("e.g. Acme", "the U.S. market", "approx. $26"), review of #565.
+      const ABBREV = /(?:^|[^A-Za-z])(?:e\.g|i\.e|u\.s|u\.k|approx|vs|etc|mr|mrs|ms|dr|inc|co|corp|ltd|jr|sr|no)$/i;
+      const endsHere = (c, i) => c !== "." || (/\s/.test(src[i + 1] || " ") && !ABBREV.test(src.slice(Math.max(0, i - 8), i)));
       const startOf = (at) => { let a = -1; for (const c of [".", "?", "!", ";", "\n"]) { let i = src.lastIndexOf(c, at - 1); while (i >= 0 && !endsHere(c, i)) i = src.lastIndexOf(c, i - 1); a = Math.max(a, i); } return a + 1; };
       const sentenceOf = (at) => { const a = startOf(at); const ends = [".", "?", "!", ";", "\n"].map((c) => { let i = src.indexOf(c, at); while (i >= 0 && !endsHere(c, i)) i = src.indexOf(c, i + 1); return i; }).filter((i) => i >= 0); return src.slice(a, ends.length ? Math.min(...ends) : src.length).replace(/counter[ -]?offers?/ig, ""); };
       const marketFig = nonAsk.some((m) => !(m.unit === "hour" && m.value === (hint && hint.recorded)) && THIRD_WORD.test(sentenceOf(m.at).replace(INCIDENTAL, " ")));

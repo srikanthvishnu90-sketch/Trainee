@@ -234,6 +234,19 @@ commit;`);
           if (!/I removed the (?:password|one-time code)/.test(r.reply)) failures.push(`not told what was removed: ${JSON.stringify(value)} -> ${r.reply.slice(0, 160)}`);
           bump("secrets");
         }
+        // Review of #565: a retry of the value turn (same turn_key) replays its stored reply; the split step reads the lead-in
+        // before this turn's own committed rows, so the request hash matches and nothing is refused or re-stored.
+        for (const [lead, value] of SPLIT_SECRETS.slice(0, 4)) {
+          const p = person(), c = h!.chat(p.token);
+          await say(c, lead);
+          const key = `retry-${crypto.randomUUID()}`;
+          const first = await say(c, value, { turn_key: key });
+          const again = await say(c, value, { turn_key: key });
+          if (again.status !== first.status || again.reply !== first.reply) failures.push(`split secret retry not replayed: ${JSON.stringify(value)} -> ${again.status} ${String(again.reply).slice(0, 120)}`);
+          const stored = await dumpFor(p.id);
+          for (const images of [[], null]) if (stored.includes(await careerRequestHash(value, images, null))) failures.push(`split secret retry recoverable from the stored hash: ${JSON.stringify(value)}`);
+          bump("secrets");
+        }
         for (const [lead, value] of [["my zip code is", "60601"], ["I forgot my password", "Chicago"], ["the error code is", "500123"], ["what's a strong password?", "ok"]]) {
           const p = person(), c = h!.chat(p.token);
           await say(c, lead);

@@ -326,9 +326,17 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // stores it or a model reads it, and the person is told (identity_redact.ts secretLeadIn / redactPending). Read only
     // for a message shaped like a lone value, in a thread the person owns (ownerThread, above).
     if (thread_id && !imageBlocks.length && (looksLikePendingSecret(message, "password") || looksLikePendingSecret(message, "code"))) {
-      const prev = await admin.from("agent_messages").select("content").eq("thread_id", tid).eq("role", "user").order("id", { ascending: false }).limit(1);
+      // The lead-in is the person's message BEFORE this turn. On a retry of a turn that already committed (same turn_key), the
+      // newest rows are this turn's own (its redacted user text, then an assistant row tagged career_turn_key), so they are skipped:
+      // the split step then runs exactly as on the first attempt and the request hash matches the stored receipt (review of #565).
+      const prev = await admin.from("agent_messages").select("role, content, meta").eq("thread_id", tid).order("id", { ascending: false }).limit(4);
       if (prev.error) console.error("split secret check: previous message unreadable:", prev.error.message);
-      const lead = secretLeadIn(String(prev.data?.[0]?.content ?? ""));
+      let rows = (prev.data ?? []) as { role: string; content: unknown; meta?: Record<string, unknown> | null }[];
+      if (rows[0]?.role === "assistant" && rows[0]?.meta?.career_turn_key === turnKey) {
+        const own = rows.findIndex((r, i) => i > 0 && r.role === "user");
+        rows = own >= 0 ? rows.slice(own + 1) : [];
+      }
+      const lead = secretLeadIn(String(rows.find((r) => r.role === "user")?.content ?? ""));
       const red = lead ? redactPending(message, lead) : null;
       if (red) {
         message = red.text; userContent = red.text;

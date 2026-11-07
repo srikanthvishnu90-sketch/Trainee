@@ -552,7 +552,7 @@ const pfx = (q: string) => { const k = q.indexOf(":"); return k < 0 ? "" : q.sli
 const loc = (q: string) => q.slice(q.indexOf(":") + 1);
 // A value kept only in its allowlisted shape: short, no control characters, and no word with letters and four or more digits.
 // deno-lint-ignore no-control-regex
-const valueOk = (v: string) => v.length <= 256 && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(v) && !v.split(/\s+/).some((w) => /\p{L}/u.test(w) && /\d{4,}/.test(w));
+const valueOk = (v: string) => v.length <= 256 && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(v) && (/^[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?$/.test(v) || !v.split(/\s+/).some((w) => /\p{L}/u.test(w) && /\d{4,}/.test(w)));
 // A style id is the name pStyle/rStyle/basedOn refer to; one that fails the value shape is renamed, the same way everywhere.
 const styleId = (v: string) => {
   if (valueOk(v) && v.length <= 64) return v;
@@ -564,7 +564,11 @@ const styleId = (v: string) => {
 };
 // The label an attribute value is gated under: its own name, unless that name is itself one of the gate's code words ("type",
 // "key"), when the element's name labels it ("tblStylePr: band1Vert", not "type: band1Vert", which reads like "type 1").
-const gateLabel = (attr: string, element: string) => [attr, loc(element)].find((l) => !GATE_CTX.test(l)) ?? "attribute";
+const gateLabel = (attr: string, element: string) => attr === "type" ? loc(element) : attr;
+// An attribute name kept only as a plain name that is no code word ("w:code", "w:otp482913" are dropped; review of 64c7f13b).
+const attrNameOk = (al: string) => /^[A-Za-z]{1,40}$/.test(al) && (al === "type" || !GATE_CTX.test(al));
+// Fields kept with their instruction: page numbers, dates and links; any other instruction is dropped (its shown result stays).
+const FIELD_OK = /^\s*(?:PAGE|NUMPAGES|SECTIONPAGES|DATE|TIME|HYPERLINK\s+"https?:\/\/[^"\s?#]{1,200}")(?:\s+\\[*@#]\s*(?:"[^"]{0,20}"|[A-Za-z]{1,20}))*\s*$/;
 const STYLE_REF = new Set(["w:pStyle", "w:rStyle", "w:tblStyle", "w:basedOn", "w:next", "w:link", "w:numStyleLink", "w:styleLink"]);
 // Attributes that carry a writer's free text, never a format: dropped wherever they are.
 const W_FREE = new Set(["instr", "anchor", "tooltip", "docLocation", "tgtFrame", "author", "date", "initials", "paraId", "textId"]);
@@ -572,7 +576,7 @@ const W_FREE = new Set(["instr", "anchor", "tooltip", "docLocation", "tgtFrame",
 const SILENT = new Set(["w:del", "w:moveFrom", "w:bookmarkStart", "w:bookmarkEnd", "w:commentRangeStart", "w:commentRangeEnd", "w:permStart", "w:permEnd", "w:proofErr",
   "w:moveFromRangeStart", "w:moveFromRangeEnd", "w:moveToRangeStart", "w:moveToRangeEnd", "w:customXmlInsRangeStart", "w:customXmlInsRangeEnd", "w:customXmlDelRangeStart",
   "w:customXmlDelRangeEnd", "w:customXmlMoveFromRangeStart", "w:customXmlMoveFromRangeEnd", "w:customXmlMoveToRangeStart", "w:customXmlMoveToRangeEnd",
-  "w:lastRenderedPageBreak", "w:fldChar", "w:instrText", "w:delText", "w:delInstrText", "w:commentReference", "w:annotationRef", "w:separator", "w:continuationSeparator",
+  "w:lastRenderedPageBreak", "w:delText", "w:delInstrText", "w:commentReference", "w:annotationRef", "w:separator", "w:continuationSeparator",
   "w:footnoteRef", "w:endnoteRef", "mc:Fallback", "w:sdtPr", "w:sdtEndPr", "w:smartTagPr", "w:customXmlPr", "w:fldData"]);
 // What the person sees but a clean copy cannot keep faithfully: the file is refused as damaged.
 const LOSSY = new Set(["w:altChunk", "m:oMath", "m:oMathPara", "w:subDoc", "w:object", "w:footnoteReference", "w:endnoteReference", "w:ruby", "w:control", "w:contentPart",
@@ -586,7 +590,7 @@ const SETTINGS_KEEP = new Set(["defaultTabStop", "evenAndOddHeaders", "mirrorMar
 const RUN_LEAF = new Set(["w:tab", "w:br", "w:cr", "w:ptab", "w:noBreakHyphen", "w:softHyphen", "w:pgNum", "w:dayShort", "w:monthShort", "w:yearShort", "w:dayLong", "w:monthLong", "w:yearLong"]);
 type PartKind = "document" | "header" | "footer" | "styles" | "numbering" | "settings" | "theme";
 const ROOT: Record<PartKind, string> = { document: "w:document", header: "w:hdr", footer: "w:ftr", styles: "w:styles", numbering: "w:numbering", settings: "w:settings", theme: "a:theme" };
-type Kind = "root" | "block" | "p" | "runc" | "r" | "t" | "props" | "tbl" | "tr" | "dml" | "txbx" | "skip";
+type Kind = "root" | "block" | "p" | "runc" | "r" | "t" | "instr" | "props" | "tbl" | "tr" | "dml" | "txbx" | "skip";
 type Frame = { name: string; keep: boolean; ck: Kind; sp?: "sdt" | "mc" | "sym" | "lvl"; check?: "pict" | "unknown"; body?: boolean; tc?: boolean; lastP?: boolean; chosen?: boolean; leafText?: RegExp };
 type RelFn = (element: string, attr: string, id: string) => string | null;
 class CleanPart implements XmlHandler {
@@ -610,6 +614,7 @@ class CleanPart implements XmlHandler {
         out += ` r:${al}="${nid}"`;
         continue;
       }
+      if (!attrNameOk(al)) continue;
       let val = v;
       if (ap === "w") {
         if (al.startsWith("rsid") || W_FREE.has(al)) continue;
@@ -638,6 +643,7 @@ class CleanPart implements XmlHandler {
     const skip = (check?: "pict" | "unknown"): Frame => ({ name, keep: false, ck: "skip", check });
     const p = pfx(name);
     if (LOSSY.has(name)) throw new Damaged(`${name} cannot be kept`);
+    if (/\d{3,}/.test(loc(name)) || (GATE_CTX.test(loc(name)) && loc(name) !== "type")) return skip("unknown");
     if (SILENT.has(name) || IGNORABLE.test(p)) return skip();
     if (f.sp === "sdt") return name === "w:sdtContent" ? unwrap(f.ck) : skip("unknown");
     if (f.sp === "mc") {
@@ -671,6 +677,8 @@ class CleanPart implements XmlHandler {
       case "r":
         if (name === "w:rPr") return keep("props");
         if (name === "w:t") return keep("t");
+        if (name === "w:fldChar") return keep("props");
+        if (name === "w:instrText") return keep("instr");
         if (RUN_LEAF.has(name)) return keep("props");
         if (name === "w:sym") return keep("props", { sp: "sym" });
         if (name === "w:drawing") return keep("dml");
@@ -725,6 +733,8 @@ class CleanPart implements XmlHandler {
     if (parent.ck === "skip") {
       // A dropped subtree; one that may hold what the person sees is checked, so nothing visible is lost silently.
       if (parent.check === "pict" && attrs.some(([an, v]) => loc(an) === "string" && v.trim())) throw new Damaged("a VML picture with text in it");
+      // A Word "Horizontal Line" is a VML shape the clean copy cannot keep: refused, never dropped silently (review of 64c7f13b).
+      if (parent.check === "pict" && attrs.some(([an, v]) => an === "o:hr" && /^(?:t|true)$/i.test(v))) throw new Damaged("a horizontal line");
       if (parent.check === "unknown" && /^(?:w:drawing|w:pict|a:blip|v:imagedata|w:t)$/.test(name)) throw new Damaged(`an unknown ${parent.name} with content`);
       if (!self) this.stack.push({ name, keep: false, ck: "skip", check: parent.check });
       return;
@@ -762,6 +772,7 @@ class CleanPart implements XmlHandler {
     if (!f) { if (t.trim()) throw new Damaged("text outside the root"); return; }
     if (f.ck === "skip") { if (f.check && t.trim()) throw new Damaged(`text in a dropped ${f.name}`); return; }
     if (f.ck === "t") { this.emit(escText(t)); return; }
+    if (f.ck === "instr") { if (FIELD_OK.test(t)) { this.emit(escText(t)); this.attrLines.add(`field: ${t.trim()}`); } return; }
     if (f.leafText) { const v = t.trim(); if (!f.leafText.test(v)) throw new Damaged(`a ${f.name} value`); this.emit(v); this.attrLines.add(`${loc(f.name)}: ${v}`); return; }
     if (f.sp === "lvl" && t.trim()) throw new Damaged("text in a list label");
   }

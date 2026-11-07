@@ -33,3 +33,10 @@ Deno.test("R8P-3 the person's own offer is still recorded", () => {
     assertNode.equal(hourly(ctx), want, msg);
   }
 });
+
+Deno.test("R8P-4 a revised offer is recorded as the new figure (review of 12de38d7)", () => {
+  for (const msg of ["They initially offered me $26/hour but now they offered $30/hour", "Update: they offered me $26/hour last week and today they offered $30/hour"]) {
+    const ctx = fresh(); host.runTurn(OFFER, ctx); host.runTurn(msg, ctx);
+    assertNode.equal(hourly(ctx), 30, msg);
+  }
+});

@@ -109,7 +109,7 @@ begin
  end if;
  return true;
 end $$;
-revoke all on function public.career_resume_take(uuid, jsonb) from public, anon, authenticated;
+revoke all on function public.career_resume_take(uuid, jsonb) from public, anon, authenticated, service_role;
 
 
 -- One-time recovery of the missing cloud copies (see the header), one person at a time under the same locks career_apply_cloud_optin_as and

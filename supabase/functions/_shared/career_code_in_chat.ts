@@ -95,7 +95,9 @@ function tokensIn(sentence: string, carried = false): { start: number; end: numb
       // Never money after a weak cue: "Workday sent me an offer of 120 000", "HR gave me 125 000 and equity" (a spaced
       // thousands figure), the same guards as the dotted form (review of d3fd6027).
       const pre = sentence.slice(0, at);
-      if (DOTTED_MONEY_AFTER.test(after) || DOTTED_MONEY_BEFORE.test(pre) || DOTTED_MONEY_NEAR.test(pre.slice(-80)) || DOTTED_MONEY_NEAR.test(after.slice(0, 30)) || /^\s*(?:and|to|or)\s+(?:equity|stock|bonus|benefits)\b/i.test(after)) continue;
+      // Only a money word right before it or a currency/unit right after: a money word elsewhere in the sentence is not enough,
+      // since an offer portal sends codes ("Workday sent me 739 201 for the offer portal" is removed; review of 12de38d7).
+      if (DOTTED_MONEY_AFTER.test(after) || DOTTED_MONEY_BEFORE.test(pre) || /^\s*(?:and|plus)\s+(?:equity|stock|bonus|benefits)\b/i.test(after)) continue;
       // Weak context, a split token: a 3+3 code, or two groups split by a line break that make 6 to 8 digits ("7392\n01",
       // "1234\n5678"). Otherwise a first line of 4+ digits is the code by itself ("4821\n9"); anything else is skipped (review on #575).
       const groups = tok.split(/\D+/).filter(Boolean), digits = groups.join("").length, broken = /[\r\n]/.test(tok);

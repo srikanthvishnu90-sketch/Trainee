@@ -3932,9 +3932,9 @@ const CareerRouter = (() => {
       prevEnd = end;
       if (unit === "hour") {
         if (role === "ask") { if (out.ask == null) out.ask = v; }
-        // The first employer figure is the offer: a later one is another offer ("They offered me $26/hour but my other offer is
-        // $30/hour" keeps 26; review of d3fd6027).
-        else if (role === "employer") { if (out.offer == null) out.offer = v; }
+        // "They offered me $26/hour but my other offer is $30/hour" keeps 26 (review of d3fd6027); a revision still wins.
+        // A later employer figure revises the offer, unless it is marked as another offer (review of 12de38d7).
+        else if (role === "employer") { if (out.offer == null || !/\b(?:other|another|second|competing|different|backup|rival)\s+(?:\w+\s+){0,2}?(?:offers?|job|company|employer|place|firm)\b/i.test(src.slice(Math.max(0, start - 60), start))) out.offer = v; }
         else if (role === "current") out.current = v;
         else if (out.unknown == null) out.unknown = v;
       } else if (unit === "none" && role === "ask" && out.askBare == null && unitlessHourly(v, end)) out.askBare = v;

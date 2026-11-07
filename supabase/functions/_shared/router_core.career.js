@@ -16094,7 +16094,7 @@ const CareerRouter = (() => {
       prevEnd = end;
       if (unit === "hour") {
         if (role === "ask") { if (out.ask == null) out.ask = v; }
-        else if (role === "employer") { if (out.offer == null) out.offer = v; }
+        else if (role === "employer") { if (out.offer == null || !/\b(?:other|another|second|competing|different|backup|rival)\s+(?:\w+\s+){0,2}?(?:offers?|job|company|employer|place|firm)\b/i.test(src.slice(Math.max(0, start - 60), start))) out.offer = v; }
         else if (role === "current") out.current = v;
         else if (out.unknown == null) out.unknown = v;
       } else if (unit === "none" && role === "ask" && out.askBare == null && unitlessHourly(v, end)) out.askBare = v;

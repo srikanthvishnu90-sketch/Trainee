@@ -304,6 +304,24 @@ export function careerSwitcherOpenAsk(message: string, intent: string | null, re
 export type StagedDecision = { brain: boolean; mode: BrainMode; intent: string | null; reason: string; router?: RouterAnswer; rules?: RouterAnswer; ambiguousFigures?: { value: number; unit: string }[]; ambiguousRole?: "offer" | "ask" };
 
 // Whether this turn goes to the brain in staged mode. Called only after every code-first turn has passed on it.
+// R9-C MARKET RESEARCH (2026-11-07): with CAREER_RESEARCH_REPLY=on, a market research ask ("what would change the market for X",
+// "compare these 3 companies", "salary for a role in a city") goes to the brain, which has research_market and decides whether the
+// turn needs research and in what format. Off, nothing here applies. Code's own work stays code's: an exact payload, an approval, a
+// write, and a search the person asked for ("find me analyst jobs in Austin"); a pay question is not a job search.
+const MARKET_ASK: RegExp[] = [
+  /\b(?:what|which)\b[^?.!]{0,40}\b(?:would|could|will|might)\s+(?:change|shift|disrupt|move|shape|drive)\b[^?.!]{0,40}\b(?:market|industry|sector)\b/i,
+  /\b(?:market|industry|sector)\s+(?:for|outlook|trends?|size|share|research|analysis|landscape)\b/i,
+  /\bcompare\b[^?.!]{0,80}\b(?:compan(?:y|ies)|firms?|employers?|startups?|businesses)\b|\bcompare\s+(?:these|those|the)\s+(?:\d|two|three|four)\b/i,
+  /\b(?:salary|salaries|pay|compensation|wages?)\s+(?:for|of)\b[^?.!]{1,60}\bin\s+\S/i,
+  /\bhow\s+much\s+(?:do|does|can|would)\b[^?.!]{1,60}\b(?:make|earn|get\s+paid)\b/i,
+];
+const SEARCH_ASK = /\b(?:find|show|search|look\s+for|get|pull|list)\b[^?.!]{0,40}\b(?:jobs?|roles?|openings?|postings?|internships?|positions?)\b/i;
+const SEARCH_INTENTS = new Set(["career_discovery", "career_internship_discovery", "discovery_dead_board"]);
+export function marketResearchAsk(env: Env, message: string, intent: string | null): boolean {
+  if (env.get("CAREER_RESEARCH_REPLY") !== "on" || !MARKET_ASK.some((r) => r.test(message))) return false;
+  if (intent && SEARCH_INTENTS.has(intent)) return !SEARCH_ASK.test(message);
+  return !(intent && CODE_OWNED_INTENTS.has(intent));
+}
 export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock }): StagedDecision {
   const clock = o.clock ?? NO_CLOCK;
   const mode = brainMode(o.env);
@@ -327,6 +345,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   } else intent = probe.intent ?? null;
   if (!intent) return { brain: false, mode, intent: null, reason: "router_claimed" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
+  if (marketResearchAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "market_research" };
   if (SEARCH_LIKE.has(intent) && filePageAsk(o.message, askFor(o.message, { intent, resultStatus: probe.result?.resultStatus }, o.ctx.discovery)?.ask)) return { brain: true, mode, intent, reason: "file_page_ask" };
   if (careerSwitcherOpenAsk(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "career_switcher_open_ask" };
   if (openCareerQuestion(o.env, o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "open_career_question" };

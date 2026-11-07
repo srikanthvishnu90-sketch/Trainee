@@ -123,17 +123,32 @@ const ENTITY: Record<string, string> = { lt: "<", gt: ">", quot: "\"", apos: "'"
 const decodeXml = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|lt|gt|quot|apos|amp|nbsp);/gi, (_m, e: string) =>
   e[0] === "#" ? String.fromCodePoint(e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10)) : ENTITY[e.toLowerCase()] ?? _m);
 const lines = (s: string) => decodeXml(s).split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
-// Text runs, one paragraph per line; a break or tab keeps its place.
+// Text runs, one paragraph per line; a break or tab keeps its place. Any namespace prefix ("w:", "a:", or one a writer chose).
+const P = String.raw`(?:[\w.-]+:)?`;
 function runText(xml: string, tags = "t|delText|instrText"): string[] {
   const out: string[] = [];
-  for (const para of xml.split(/<\/w:p>|<\/a:p>/)) {
+  for (const para of xml.split(new RegExp(String.raw`</${P}p>`))) {
     let t = "";
-    for (const m of para.matchAll(new RegExp(String.raw`<(?:w|a):(?:${tags})(?:\s[^>]*)?>([^<]*)</(?:w|a):(?:${tags})>|<w:(?:br|cr)\b[^>]*/?>|<a:br\b[^>]*/?>|<w:tab\b[^>]*/?>`, "g"))) {
+    for (const m of para.matchAll(new RegExp(String.raw`<${P}(?:${tags})(?:\s[^>]*)?>([^<]*)</${P}(?:${tags})>|<${P}(?:br|cr)\b[^>]*/?>|<${P}tab\b[^>]*/?>`, "g"))) {
       t += m[1] !== undefined ? m[1] : /tab/.test(m[0]) ? " " : "\n";
     }
     out.push(...lines(t));
   }
   return out;
+}
+// All character data of a part, a paragraph, break or closing block per line: text a writer put under any tag name.
+const allText = (xml: string) => lines(xml.replace(new RegExp(String.raw`</${P}(?:p|tc|tr|txbxContent|div|li)>|<${P}(?:br|cr)\b[^>]*/?>`, "g"), "\n").replace(/<[^>]*>/g, " "));
+// A part's text in its declared encoding: a byte-order mark, UTF-16 without one, or the XML declaration's encoding; UTF-8 otherwise.
+function decodePart(part: Uint8Array): string {
+  const b = part;
+  if (b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf) return new TextDecoder("utf-8").decode(b.subarray(3));
+  if (b[0] === 0xff && b[1] === 0xfe) return new TextDecoder("utf-16le").decode(b.subarray(2));
+  if (b[0] === 0xfe && b[1] === 0xff) return new TextDecoder("utf-16be").decode(b.subarray(2));
+  if (b[0] === 0x3c && b[1] === 0x00) return new TextDecoder("utf-16le").decode(b);
+  if (b[0] === 0x00 && b[1] === 0x3c) return new TextDecoder("utf-16be").decode(b);
+  const head = new TextDecoder("latin1").decode(b.subarray(0, 120)), enc = /encoding=["']([\w.:-]+)["']/i.exec(head)?.[1];
+  if (enc && !/^utf-?8$/i.test(enc)) { try { return new TextDecoder(enc).decode(b); } catch { throw new Error(`unknown encoding ${enc}`); } }
+  return new TextDecoder("utf-8").decode(b);
 }
 const attrText = (xml: string) => [...xml.matchAll(/\s(?:descr|title|w:tooltip)="([^"]*)"/g)].flatMap((m) => lines(m[1]));
 const queryOf = (url: string) => { const q = decodeXml(url).replace(/^[^?#]*/, ""); try { return decodeURIComponent(q); } catch { return q; } };
@@ -147,14 +162,18 @@ async function hiddenOf(r: any, buf: any, depth: number): Promise<string[]> {
     if (text && !part) throw new Error(`part not readable: ${n}`);
     if (!part || STRUCTURAL.test(n)) continue;
     if (/\.docx$/i.test(n)) { if (depth > 0) throw new Error(`nested file too deep: ${n}`); out.push(...(r.extractDocxLines?.(part) ?? []).map(String), ...(await hiddenOf(r, part, depth + 1))); continue; }
-    const s = part.toString("utf8");
-    if (n === "word/document.xml") { out.push(...runText(s, "delText|instrText"), ...attrText(s)); continue; }
+    const s = decodePart(new Uint8Array(part));
+    if (n === "word/document.xml") {
+      const fallbacks = [...s.matchAll(new RegExp(String.raw`<${P}Fallback\b[\s\S]*?</${P}Fallback>`, "g"))].flatMap((m) => allText(m[0]));
+      const nonW = [...s.matchAll(new RegExp(String.raw`<(?!w:)[\w.-]+:t(?:\s[^>]*)?>([^<]*)</(?!w:)[\w.-]+:t>`, "g"))].flatMap((m) => lines(m[1]));
+      out.push(...runText(s, "delText|instrText"), ...attrText(s), ...fallbacks, ...nonW); continue;
+    }
     if (/\.rels$/i.test(n)) { out.push(...[...s.matchAll(/\sTarget="([^"]*)"/g)].map((m) => queryOf(m[1])).filter((q) => q.length > 1)); continue; }
     if (/^docProps\/core\.xml$/i.test(n)) { out.push(...[...s.matchAll(/<(?:dc:title|dc:subject|dc:description|cp:keywords|cp:category|cp:contentStatus)(?:\s[^>]*)?>([^<]*)</g)].flatMap((m) => lines(m[1]))); continue; }
     if (/^docProps\/custom\.xml$/i.test(n)) { out.push(...[...s.matchAll(/<vt:lpw?str>([^<]*)</g)].flatMap((m) => lines(m[1]))); continue; }
     if (/\.(?:html?|mht|txt)$/i.test(n)) { out.push(...lines(s.replace(/<(?:br|\/p|\/div|\/li|\/tr|\/h\d)[^>]*>/gi, "\n").replace(/<[^>]*>/g, " "))); continue; }
     if (/\.vml$/i.test(n)) { out.push(...lines(s.replace(/<\/(?:div|p)>|<br\s*\/?>/gi, "\n").replace(/<[^>]*>/g, " "))); continue; }
-    out.push(...runText(s), ...attrText(s));
+    out.push(...runText(s), ...allText(s), ...attrText(s));
   }
   return out;
 }

@@ -222,3 +222,30 @@ Deno.test("R8G-6 review of 135237e5: real Word files kept, text-bearing parts on
   for (const c of hand) for (let k = 360; k <= 460; k += 10) assertNode.ok(fileCodeLines("z".repeat(k) + " " + c + " " + "q".repeat(1500)).length, `${k}: ${c}`);
   assertNode.ok(performance.now() - t0 < 5000, `no-space runs took ${Math.round(performance.now() - t0)} ms`);
 });
+
+// Greptile on #577. A hidden part is read in its declared encoding and under any namespace prefix, and the body's text the
+// visible reader drops (mc:Fallback copies, DrawingML a:t runs) is checked too, so a code there refuses the file.
+Deno.test("R8G-7 Greptile on #577: UTF-16 and odd-prefix parts, mc:Fallback and a:t body text are checked", async () => {
+  const enc = new TextEncoder(), W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  const body = BODY.map((t) => `<w:p><w:r><w:t xml:space="preserve">${t}</w:t></w:r></w:p>`).join("");
+  const types = { name: "[Content_Types].xml", data: enc.encode('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>') };
+  const utf16 = (s: string) => { const out = new Uint8Array(2 + s.length * 2); out[0] = 0xff; out[1] = 0xfe; for (let i = 0; i < s.length; i++) { out[2 + i * 2] = s.charCodeAt(i) & 0xff; out[3 + i * 2] = s.charCodeAt(i) >> 8; } return out; };
+  const docx = (extra: { name: string; data: Uint8Array | string }[], inBody = "") => zipOf([types,
+    { name: "word/document.xml", data: enc.encode(`<?xml version="1.0" encoding="UTF-8"?><w:document ${W} xmlns:mc="m" xmlns:a="a"><w:body>${body}${inBody}<w:sectPr/></w:body></w:document>`) },
+    ...extra.map((e) => ({ name: e.name, data: typeof e.data === "string" ? enc.encode(e.data) : e.data }))]);
+  const upload = async (bytes: Uint8Array) => {
+    const stored: unknown[] = [];
+    const res = await ingestResumeFile({ userId: "TEST-r8g", channel: "telegram", doc: { fileId: "F", uniqueId: crypto.randomUUID(), name: "resume.docx", mime: DOCX, size: bytes.length },
+      fetchFile: async () => ({ ok: true, bytes }), record: async (row) => { stored.push(row); return "id"; } });
+    return { res: res as { ok: boolean; reply?: string }, stored };
+  };
+  const refused = async (bytes: Uint8Array, tag: string) => { const u = await upload(bytes); assertNode.ok(!u.res.ok && u.stored.length === 0 && !String(u.res.reply).includes("482913"), tag); };
+  await refused(docx([{ name: "word/header1.xml", data: utf16(`<?xml version="1.0" encoding="UTF-16"?><w:hdr ${W}><w:p><w:r><w:t>OTP 482913</w:t></w:r></w:p></w:hdr>`) }]), "UTF-16 header");
+  await refused(docx([{ name: "word/header1.xml", data: '<ns0:hdr xmlns:ns0="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><ns0:p><ns0:r><ns0:t>Verification code: 482913</ns0:t></ns0:r></ns0:p></ns0:hdr>' }]), "another prefix");
+  await refused(docx([], '<w:p><mc:AlternateContent><mc:Choice Requires="wps"><w:r><w:t>Text box</w:t></w:r></mc:Choice><mc:Fallback><w:pict><v:textbox><w:txbxContent><w:p><w:r><w:t>Login code 482913</w:t></w:r></w:p></w:txbxContent></v:textbox></w:pict></mc:Fallback></mc:AlternateContent></w:p>'), "mc:Fallback text");
+  await refused(docx([], '<w:p><w:r><w:drawing><a:graphic><a:p><a:r><a:t>My OTP is 482913</a:t></a:r></a:p></a:graphic></w:drawing></w:r></w:p>'), "a:t body text");
+  const plain16 = await upload(docx([{ name: "word/footer1.xml", data: utf16(`<?xml version="1.0" encoding="UTF-16"?><w:ftr ${W}><w:p><w:r><w:t>Jordan Lee · Page 1</w:t></w:r></w:p></w:ftr>`) }]));
+  assertNode.ok(plain16.res.ok && plain16.stored.length === 1, "a plain UTF-16 footer is kept");
+  const box = await upload(docx([], '<w:p><mc:AlternateContent><mc:Choice Requires="wps"><w:r><w:t>Volunteer, Food Bank, 2018 - 2020</w:t></w:r></mc:Choice><mc:Fallback><w:pict><v:textbox><w:txbxContent><w:p><w:r><w:t>Volunteer, Food Bank, 2018 - 2020</w:t></w:r></w:p></w:txbxContent></v:textbox></w:pict></mc:Fallback></mc:AlternateContent></w:p>'));
+  assertNode.ok(box.res.ok && box.stored.length === 1, "a plain text box with its fallback is kept");
+});

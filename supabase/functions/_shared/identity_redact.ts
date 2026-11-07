@@ -100,10 +100,27 @@ const BARE_SPLIT_CODE = /(?<![\d$€£.,:/#-]|\d(?:[ \t]{1,8}|[ \t]{0,8}[\n\-][ 
 // tabs become a space, and an en or em dash between digits a hyphen, so "739\r\n201", "739\u00a0201" and "739–201" meet the
 // same rules as "739 201". chat_input.ts and channel_resume_upload.ts resumeMessage both use it, so a file's message hash
 // equals the hash of the text the thread stores (Greptile and review on #567).
+// Every Unicode space separator (en, em, thin, hair, ideographic ...) is a space and a zero-width space is nothing; a hyphen,
+// non-breaking hyphen, figure dash, minus sign or fullwidth hyphen between digits, with or without a space either side, is a
+// hyphen ("739\u2212201", "739 \u2212 201",
+// "739\u2002201"; Greptile inventory, separator residuals).
 export function normalizeChatText(text: string): string {
-  return String(text ?? "").replace(/\r\n?/g, "\n").replace(/[\u00a0\u2007\u2009\u202f\t]/g, " ").replace(/(\d)[\u2013\u2014](?=\d)/g, "$1-");
+  return String(text ?? "").replace(/\r\n?/g, "\n").replace(/[\u200b\u2060\ufeff]/g, "").replace(/[^\S\n ]|[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g, " ")
+    .replace(/(\d[ ]?)[\u2010-\u2015\u2212\ufe63\uff0d](?=[ ]?\d)/g, "$1-");
 }
 
+// A code on its own line followed by a count on the next ("my code is 739201\n2 minutes ago"): the count is not part of the
+// code. When the matched value spans a line break, its first line has 4+ digits, and a count word follows the rest, only the
+// first line is the code (Greptile on #575, independent check of 41afa39f).
+const COUNT_TAIL = /^[ \t]*(?:k\b|\+|%|years?|yrs?|months?|weeks?|days?|hours?|hrs?|minutes?|mins?|seconds?|secs?|ago\b|roles?|jobs?|applications?|people|times|am\b|pm\b|\/)/i;
+function countTail(code: string, after: string): string {
+  const i = code.search(/[\r\n]/);
+  if (i < 0) return "";
+  const first = code.slice(0, i).replace(/\D+$/, "");
+  const rest = code.slice(first.length);
+  if (first.replace(/\D/g, "").length < 4 || !/^[ \t]*[\r\n]+[ \t]*[1-9]\d{0,2}$/.test(rest) || !COUNT_TAIL.test(after)) return "";
+  return rest;
+}
 export function redactIdentity(input: string, o: { codePending?: boolean } = {}): Redaction {
   const removed = new Set<Redaction["removed"][number]>();
   let t = String(input ?? "");
@@ -136,8 +153,8 @@ export function redactIdentity(input: string, o: { codePending?: boolean } = {})
     if (/with$/i.test(label) && [u, value.replace(/[.,!?;]+$/, "")].some((x) => SIGN_IN_WAY.test(x))) return m;
     removed.add("password"); return `${label}${gap}${user}[password removed]`;
   });
-  t = t.replace(CODE_LABELED, (_m, label, sep) => { removed.add("code"); return `${label}${sep}[code removed]`; });
-  t = t.replace(CODE_ANY, (m, label, sep, code: string) => { if (DATE_LIKE.test(code)) return m; removed.add("code"); return `${label}${sep}[code removed]`; });
+  t = t.replace(CODE_LABELED, (m, label, sep, code: string, at: number, all: string) => { removed.add("code"); return `${label}${sep}[code removed]${countTail(code, all.slice(at + m.length))}`; });
+  t = t.replace(CODE_ANY, (m, label, sep, code: string, at: number, all: string) => { if (DATE_LIKE.test(code)) return m; removed.add("code"); return `${label}${sep}[code removed]${countTail(code, all.slice(at + m.length))}`; });
   t = t.replace(CODE_LOOSE, (m, lead, code: string) => { if (DATE_LIKE.test(code)) return m; removed.add("code"); return `${lead}[code removed]`; });
   t = t.replace(PASSWORD_BARE, (m, label, sp, value: string, at: number, all: string) => {
     const word = value.replace(/[.,!?;:]+$/, "");

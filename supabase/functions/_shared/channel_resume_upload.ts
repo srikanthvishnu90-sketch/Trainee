@@ -14,6 +14,7 @@
 // A file that cannot be downloaded, is not a PDF or DOCX, or has no readable text is said so, plainly; nothing is stored.
 import { CareerProfile, CareerRender } from "./router_core.career.js";
 import { normalizeChatText, redactIdentity } from "./identity_redact.ts";
+import { fileCodeLines, fileText as codeCheckText } from "./career_code_in_chat.ts";
 import type { Upload } from "./career_router_evidence.ts";
 
 export const MAX_RESUME_BYTES = 10 * 1024 * 1024;
@@ -29,6 +30,15 @@ export const FILE_DAMAGED_REPLY = "I couldn't open that file: it looks damaged o
 export const FILE_EMPTY_REPLY = "That file is empty (0 bytes), so there was nothing to read and nothing was saved. Send the resume file again, or paste its text here.";
 export const FILE_LOCKED_REPLY = "That PDF is locked with a password (or protected against copying), so I couldn't read its text and nothing was saved. Save an unlocked copy and send that, or paste your resume here. Never send me the password.";
 export const fileSecretReply = (kinds: string[]) => `Your file has ${kinds.join(" and ")} in it, so I didn't keep the file or read anything from it. Remove ${kinds.length > 1 ? "them" : "it"} from the file and send it again, or paste your resume here without ${kinds.length > 1 ? "them" : "it"}.`;
+// A suspected one-time code in a file: its line number in the text read from the file and its kind only, never the line, so the
+// person can find it, remove or reword it, and send the file again.
+export function fileCodeReply(lines: number[], otherKinds: string[] = []): string {
+  const ls = lines.slice(0, 5), where = ls.length === 1 ? `line ${ls[0]}` : `lines ${ls.slice(0, -1).join(", ")} and ${ls[ls.length - 1]}`;
+  const more = lines.length > 5 ? ` (and ${lines.length - 5} more)` : "";
+  const also = otherKinds.length ? ` It also has ${otherKinds.join(" and ")} in it.` : "";
+  return `Your file has what looks like a one-time code (a sign-in or verification code) on ${where}${more} of the text I read from it, so I didn't keep the file or read anything from it, and I won't repeat ${ls.length > 1 ? "those lines" : "that line"}.${also} ` +
+    `Remove the code and send the file again. If ${ls.length > 1 ? "a line" : "it"} isn't a code (an exam, ticket or part number), reword it, for example by writing what the number is for, and send the file again.`;
+}
 // ONBOARDING ROUND 2: a file whose text is not a resume (a cover letter, a transcript, a page with no sections) was
 // stored as the person's resume upload, and then the chat said "nothing from it was saved". It is checked first by the
 // chat's own proof for a framed resume (142 resumePasteDraftsOf: two entries, work or education among them) and not kept.
@@ -102,6 +112,60 @@ export async function fileText(kind: FileKind, bytes: Uint8Array): Promise<strin
   const lines: string[] = kind === "pdf" ? pdfLayoutLines(r.extractPdfRuns(buf)) : docxResumeLines(r.docxPart(buf, "word/document.xml")?.toString("utf8") ?? "");
   return (Array.isArray(lines) ? lines : []).map((l) => String(l).replace(/\s+$/, "")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
+
+// Word parts the reader does not show as resume text, which the stored file carries. Text is taken only where Word keeps text: the
+// text runs of headers, footers, notes, comments, glossary and text boxes (w:t, a:t, VML), the body's tracked deletions and field
+// instructions, alt text and tooltips, the title, subject, description and keywords of the document properties and custom string
+// properties, the query part of link targets, HTML or text "altChunk" parts, and an embedded Word file one level down. Structural
+// parts (styles, settings, fonts, numbering, theme, app properties) carry no resume text, but every listed part must still be
+// readable: a part the reader cannot read (bad checksum, past the size cap) throws, and the upload fails closed.
+const ENTITY: Record<string, string> = { lt: "<", gt: ">", quot: "\"", apos: "'", amp: "&", nbsp: " " };
+const decodeXml = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|lt|gt|quot|apos|amp|nbsp);/gi, (_m, e: string) =>
+  e[0] === "#" ? String.fromCodePoint(e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10)) : ENTITY[e.toLowerCase()] ?? _m);
+const lines = (s: string) => decodeXml(s).split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+// Text runs, one paragraph per line; a break or tab keeps its place.
+function runText(xml: string, tags = "t|delText|instrText"): string[] {
+  const out: string[] = [];
+  for (const para of xml.split(/<\/w:p>|<\/a:p>/)) {
+    let t = "";
+    for (const m of para.matchAll(new RegExp(String.raw`<(?:w|a):(?:${tags})(?:\s[^>]*)?>([^<]*)</(?:w|a):(?:${tags})>|<w:(?:br|cr)\b[^>]*/?>|<a:br\b[^>]*/?>|<w:tab\b[^>]*/?>`, "g"))) {
+      t += m[1] !== undefined ? m[1] : /tab/.test(m[0]) ? " " : "\n";
+    }
+    out.push(...lines(t));
+  }
+  return out;
+}
+const attrText = (xml: string) => [...xml.matchAll(/\s(?:descr|title|w:tooltip)="([^"]*)"/g)].flatMap((m) => lines(m[1]));
+const queryOf = (url: string) => { const q = decodeXml(url).replace(/^[^?#]*/, ""); try { return decodeURIComponent(q); } catch { return q; } };
+const STRUCTURAL = /^(?:word\/(?:styles|stylesWithEffects|settings|webSettings|fontTable|numbering|people|commentsIds|commentsExtensible|commentsExtended)\.xml|word\/theme\/[^/]+\.xml|docProps\/app\.xml|\[Content_Types\]\.xml|customXml\/[^/]+\.xml|word\/(?:glossary\/)?(?:styles|settings|webSettings|fontTable|numbering)\.xml)$/i;
+async function hiddenOf(r: any, buf: any, depth: number): Promise<string[]> {
+  const names: string[] = r.docxPartNames(buf) ?? [];
+  if (!names.includes("word/document.xml")) throw new Error("no document part");
+  const out: string[] = [];
+  for (const n of names) {
+    const text = /\.(?:xml|rels|vml|html?|txt|mht|docx)$/i.test(n), part = text ? r.docxPart(buf, n) : null;
+    if (text && !part) throw new Error(`part not readable: ${n}`);
+    if (!part || STRUCTURAL.test(n)) continue;
+    if (/\.docx$/i.test(n)) { if (depth > 0) throw new Error(`nested file too deep: ${n}`); out.push(...(r.extractDocxLines?.(part) ?? []).map(String), ...(await hiddenOf(r, part, depth + 1))); continue; }
+    const s = part.toString("utf8");
+    if (n === "word/document.xml") { out.push(...runText(s, "delText|instrText"), ...attrText(s)); continue; }
+    if (/\.rels$/i.test(n)) { out.push(...[...s.matchAll(/\sTarget="([^"]*)"/g)].map((m) => queryOf(m[1])).filter((q) => q.length > 1)); continue; }
+    if (/^docProps\/core\.xml$/i.test(n)) { out.push(...[...s.matchAll(/<(?:dc:title|dc:subject|dc:description|cp:keywords|cp:category|cp:contentStatus)(?:\s[^>]*)?>([^<]*)</g)].flatMap((m) => lines(m[1]))); continue; }
+    if (/^docProps\/custom\.xml$/i.test(n)) { out.push(...[...s.matchAll(/<vt:lpw?str>([^<]*)</g)].flatMap((m) => lines(m[1]))); continue; }
+    if (/\.(?:html?|mht|txt)$/i.test(n)) { out.push(...lines(s.replace(/<(?:br|\/p|\/div|\/li|\/tr|\/h\d)[^>]*>/gi, "\n").replace(/<[^>]*>/g, " "))); continue; }
+    if (/\.vml$/i.test(n)) { out.push(...lines(s.replace(/<\/(?:div|p)>|<br\s*\/?>/gi, "\n").replace(/<[^>]*>/g, " "))); continue; }
+    out.push(...runText(s), ...attrText(s));
+  }
+  return out;
+}
+export async function docxHiddenText(bytes: Uint8Array): Promise<string> {
+  reader ??= Promise.all([import("node:zlib"), import("node:crypto"), import("node:buffer")])
+    // deno-lint-ignore no-explicit-any
+    .then(([zlib, crypto, b]) => ({ r: (CareerRender as any).withRuntime({ zlib, crypto, Buffer: b.Buffer }), Buffer: b.Buffer }));
+  const { r, Buffer } = await reader;
+  return (await hiddenOf(r, Buffer.from(bytes), 0)).join("\n");
+}
+export const FILE_HIDDEN_CODE_REPLY = "Your file has what looks like a one-time code or another private number in a header, footer, note, comment or tracked change, so I didn't keep the file or read anything from it, and I won't repeat it. Remove it (and accept or reject tracked changes) and send the file again, or paste your resume here.";
 
 // ONBOARDING ROUND 2 (2026-10-30, tests/architect/scenarios-onboarding-r2.test.ts): a resume file's lines as the person
 // laid them out. Before this each PDF text run was its own line and each Word paragraph was read with its tabs, line
@@ -250,7 +314,7 @@ export function storedFilename(name: string, kind: FileKind): string {
 }
 export const KIND_MIME: Record<FileKind, string> = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" };
 
-export type ResumeFileResult = { ok: true; message: string; uploadId: string; sha256: string; note?: string } | { ok: false; reply: string; why: string };
+export type ResumeFileResult = { ok: true; message: string; uploadId: string; sha256: string; note?: string } | { ok: false; reply: string; why: string; lines?: number[] };
 export async function ingestResumeFile(o: {
   userId: string; channel: "telegram"; doc: { fileId: string; uniqueId: string; name: string; mime: string; size: number | null };
   fetchFile: (fileId: string, maxBytes: number) => Promise<{ ok: true; bytes: Uint8Array } | { ok: false; error: string }>;
@@ -274,10 +338,26 @@ export async function ingestResumeFile(o: {
   // ONBOARDING ROUND 2: an identity number, a card number or a password in the file. The text the chat reads had it
   // removed, but the file itself was stored as the person's upload (and is the file an application attaches), with the
   // number in it. Now the file is not kept and nothing is read from it; the person is told what to remove.
-  const found = redactIdentity(text).removed;
+  // The identity check also reads the text as the code check does (any script's digits, look-alike letters, no zero-width
+  // characters), so a disguised number is not missed by one check and passed by the other.
+  const found = [...new Set([...redactIdentity(text).removed, ...redactIdentity(codeCheckText(text)).removed])];
+  // A plausible one-time code refuses the file (owner decision on 2de155f0): the reply names only the line and the kind, never
+  // the line itself, and nothing from the file is kept or read.
+  const codeLines = fileCodeLines(text);
+  if (codeLines.length && !found.includes("code")) found.push("code");
   if (found.length) {
     const name: Record<string, string> = { ssn: "a Social Security number", card: "a card number", account: "an account number", password: "a password", code: "a one-time code", key: "a key or token" };
-    return { ok: false, reply: fileSecretReply([...new Set(found.map((k) => name[k] ?? "a private number"))]), why: "secret" };
+    const kinds = [...new Set(found.map((k) => name[k] ?? "a private number"))];
+    return { ok: false, reply: codeLines.length ? fileCodeReply(codeLines, kinds.filter((k) => k !== name.code)) : fileSecretReply(kinds), why: "secret", lines: codeLines };
+  }
+  // The parts of a Word file the reader does not show are read by the same checks before the file is kept.
+  if (kind === "docx") {
+    let hidden = "";
+    // Fail closed: a part that cannot be read may hold anything, so the file is not kept.
+    try { hidden = await docxHiddenText(got.bytes); } catch (e) { console.error("resume file: hidden parts not read:", (e as Error)?.message ?? e); return { ok: false, reply: FILE_DAMAGED_REPLY, why: "damaged" }; }
+    if (hidden.trim() && (fileCodeLines(hidden).length || redactIdentity(hidden).removed.length || redactIdentity(codeCheckText(hidden)).removed.length)) {
+      return { ok: false, reply: FILE_HIDDEN_CODE_REPLY, why: "secret", lines: [] };
+    }
   }
   const message = resumeMessage(text);
   if (!readsAsResume(message)) return { ok: false, reply: fileNotResumeReply(text), why: "not_resume" };

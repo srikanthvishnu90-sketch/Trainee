@@ -285,3 +285,26 @@ Deno.test("CRL-12 a split code is removed while a code is pending; phones and lo
   }
   for (const m of ["call me at 415 555 1234", "my number is 415\n555\n1234", "$120 000 base", "the job id 739 201 7", "zip 94107-1234", "I want 3-5 years", "a GPA of 3.85", "pay is 120000.50", "I have 1,200,000 views", "the ratio 120 300,5"]) eq(pend(m), m, m);
 });
+
+// Greptile on #574: a full code on its own line is its own token; a count on the next line neither hides it nor joins it.
+Deno.test("CRL-13 a code followed by a number on the next line is removed, and the next line is kept", () => {
+  for (const m of ["Workday sent me 739201\n2 minutes ago", "Workday sent me 739201\n3 roles open", "The portal sent 482913\n10 mins ago, enter it?"]) {
+    const t = turn(m);
+    assert(!t.stored.includes("739201") && !t.stored.includes("482913"), `${JSON.stringify(m)}: ${JSON.stringify(t.stored)}`);
+    assert(/\n(?:2 minutes|3 roles|10 mins)/.test(t.stored), `${JSON.stringify(m)}: next line kept: ${JSON.stringify(t.stored)}`);
+  }
+  for (const m of ["Workday sent me 739\n201"]) assert(!turn(m).stored.includes("201"), m);
+  // Review on #575: after a weak cue too, a code split by a line break is removed: whole when the two groups make 6 to 8 digits,
+  // else its 4+ digit first line.
+  for (const [m, gone] of [["Workday sent me 7392\n01", ["7392", "\n01"]], ["Workday sent me 7392\n01 thanks", ["7392", "\n01"]], ["Workday sent me 1234\n5678", ["1234", "5678"]],
+    ["the portal sent me 4821\n9374", ["4821", "9374"]], ["the portal sent me 12345\n678", ["12345", "678"]], ["Workday sent me 4821\n9", ["4821"]],
+    ["Workday sent me 4821\n93 thanks", ["4821", "93"]], ["Workday sent me 7392\n15", ["7392", "\n15"]], ["Workday sent me 7392\n2024", ["7392"]]] as [string, string[]][]) {
+    const t = turn(m);
+    for (const g of gone) assert(!t.stored.includes(g), `${JSON.stringify(m)}: ${JSON.stringify(g)} removed: ${JSON.stringify(t.stored)}`);
+  }
+  // Greptile on #575: a 4- or 5-digit first line whose remaining digits sit on the next line is one code, removed whole.
+  for (const [m, rest] of [["Workday verification sent me 7392\n01", "01"], ["my verification code is 73920\n1", "1"], ["the code is 7392\n01 thanks", "01"]]) {
+    const t = turn(m);
+    assert(!t.stored.includes("7392") && !new RegExp(`\\n\\s*${rest}\\b`).test(t.stored), `${JSON.stringify(m)}: ${JSON.stringify(t.stored)}`);
+  }
+});

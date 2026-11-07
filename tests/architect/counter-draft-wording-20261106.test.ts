@@ -984,3 +984,128 @@ Deno.test("CDW held offer details record no figure, on a fresh thread and with a
   const c = fresh(); host.runTurn("The offer is $60k", c); eq((c.offer as any)?.stated_figure, "$60,000");
   const c2 = fresh(); host.runTurn("They offered me $70k with a $5k signing bonus", c2); eq((c2.offer as any)?.signing_bonus, 5000);
 });
+
+// Greptile on #574: a counter revision whose figures are held (a third party's pay beside the new ask) revises nothing.
+Deno.test("CDW held counter revisions record no counter; plain revisions still revise", () => {
+  for (const msg of ["The market offers $28/hour; make it $30/hour instead", "Competitors pay $29/hour, make it $31/hour", "Glassdoor says $28/hour. make it $30/hour"]) {
+    const ctx = fresh(); host.runTurn(OFFER, ctx); host.runTurn("Draft a counter at $27/hour", ctx);
+    const r = host.runTurn(msg, ctx);
+    eq(recorded(ctx).counter, 27, `${msg}: counter unchanged`);
+    eq(r.result?.sends ?? 0, 0, msg);
+  }
+  const c = fresh(); host.runTurn(OFFER, c); host.runTurn("Draft a counter at $27/hour", c); host.runTurn("make it $30/hour instead", c);
+  eq(recorded(c).counter, 30, "plain revision");
+});
+
+// Review on #575: a held revision carries the figures without roles, so the staged brain asks which one is the new ask.
+Deno.test("CDW a held counter revision hands the brain the figures and asks for the new ask", () => {
+  for (const msg of ["The market offers $28/hour; make it $30/hour instead", "make it $30/hour, the market pays $28/hour"]) {
+    const ctx = fresh(); host.runTurn(OFFER, ctx); host.runTurn("Draft a counter at $27/hour", ctx);
+    const d = stagedDecision({ env: STAGED, message: msg, ctx, host, structured: false });
+    eq(d.brain, true, `${msg}: brain`); eq(d.reason, "counter_ambiguous_figures", msg); eq(d.ambiguousRole, "ask", msg);
+    const vals = (d.ambiguousFigures ?? []).map((f) => f.value).sort();
+    eq(JSON.stringify(vals), JSON.stringify([28, 30]), `${msg}: figures`);
+    assert(/new counter ask/.test(routerAnswerBlock(d)), msg);
+    const r = host.runTurn(msg, ctx);
+    eq(recorded(ctx).counter, 27, `${msg}: counter unchanged`); eq(r.result?.counterAmbiguous, true, msg); eq(r.result?.sends ?? 0, 0, msg);
+  }
+});
+
+// Greptile records 29 and 35: a unitless ask the router cannot read never lets an older saved counter stand in for it.
+Deno.test("CDW a cued unitless ask that is not read keeps the slot blank and never reuses a stale counter", () => {
+  for (const msg of ["Draft a counter at $28 with no relocation allowance", "Draft a counter at $28 for a childcare role"]) {
+    for (const prior of [null, "Counter at $26/hour"]) {
+      const ctx = fresh(); host.runTurn(OFFER, ctx); if (prior) host.runTurn(prior, ctx);
+      const r = host.runTurn(msg, ctx);
+      const draft = String(r.result?.draft?.body ?? r.reply ?? "");
+      assert(!/meet me at \$26/.test(draft), `${msg} / ${prior}: stale $26 reused: ${draft.slice(0, 300)}`);
+      assert(/\$28/.test(String(r.reply)), `${msg} / ${prior}: asks about $28: ${String(r.reply).slice(-200)}`);
+      eq(r.result?.sends ?? 0, 0, msg);
+    }
+  }
+  // No figure this turn: the saved counter is still the draft's ask.
+  const c = fresh(); host.runTurn(OFFER, c); host.runTurn("Counter at $26/hour", c);
+  assert(/meet me at \$26/.test(String(host.runTurn("Draft the counter email", c).result?.draft?.body)), "saved counter reused when no figure is given");
+});
+
+// Review of #575 (inventory record 55's rule): a held revision carries structured state only, no clarification prose of its own.
+Deno.test("CDW a held counter revision adds no prose of its own", () => {
+  const ctx = fresh(); host.runTurn(OFFER, ctx); host.runTurn("Draft a counter at $27/hour", ctx);
+  const r = host.runTurn("The market offers $28/hour; make it $30/hour instead", ctx);
+  assert(!/which figure is your new counter|couldn't tell whether/i.test(String(r.reply)), String(r.reply));
+  eq(r.result?.counterAmbiguous, true, "held"); eq(r.result?.draft, undefined, "no draft"); eq(recorded(ctx).counter, 27, "counter unchanged");
+});
+
+// Greptile record 90: a third party's figure holds the turn also when it equals the recorded offer.
+// Review of #575: the brain's figures keep their thousands ("$65k" is 65000, not 65).
+Deno.test("CDW a third party's figure equal to the recorded offer still holds; held figures keep their thousands", () => {
+  const ctx = fresh(); host.runTurn(OFFER, ctx);
+  const d = stagedDecision({ env: STAGED, message: "Competitors offer $24/hour. Draft a counter at $30/hour", ctx, host, structured: false });
+  eq(d.brain, true, "held for the brain"); eq(d.reason, "counter_ambiguous_figures", "reason");
+  const r = host.runTurn("Competitors offer $24/hour. Draft a counter at $30/hour", ctx);
+  eq(recorded(ctx).counter ?? null, null, "no counter saved"); eq(r.result?.draft, undefined, "no draft");
+  const c = fresh(); host.runTurn(OFFER, c); host.runTurn("Draft a counter at $27/hour", c);
+  const k = stagedDecision({ env: STAGED, message: "make it $65k; the market pays $60k", ctx: c, host, structured: false });
+  eq(JSON.stringify((k.ambiguousFigures ?? []).map((f) => f.value).sort()), JSON.stringify([60000, 65000]), "thousands kept");
+});
+
+// Greptile record 94: a held offer detail reaches the brain with its figures, and the brain asks which one is the new offer.
+Deno.test("CDW a held offer detail hands the brain its figures (counter_ambiguous_figures)", () => {
+  for (const prior of [null, OFFER]) for (const msg of ["The offer is $30/hour, but competitors offer $60k", "The offer is $30/hour. Competitors offer $60k.",
+    "They offered $30/hour and the market average is $65k", "The offer is $30/hour, Glassdoor says $70k for this role"]) {
+    const ctx = fresh(); if (prior) host.runTurn(prior, ctx);
+    const d = stagedDecision({ env: STAGED, message: msg, ctx, host, structured: false });
+    eq(d.brain, true, `${prior ? "prior" : "fresh"} ${msg}: brain`); eq(d.reason, "counter_ambiguous_figures", `${prior ? "prior" : "fresh"} ${msg}: reason`);
+    assert((d.ambiguousFigures ?? []).some((f) => f.value === 30) && (d.ambiguousFigures ?? []).some((f) => f.value >= 60000), `${msg}: ${JSON.stringify(d.ambiguousFigures)}`);
+    assert(/new offer/.test(routerAnswerBlock(d)), msg);
+  }
+});
+
+// Review of f62e2033: a friend's or coworker's pay is a third party's figure; a held turn keeps the standing offer whole; a cued
+// figure that is not an hourly ask never blanks the saved counter or gets an hour unit.
+Deno.test("CDW third-party people hold the turn and the standing offer stays; cued figures need an hourly shape", () => {
+  for (const msg of ["My friend at Acme was offered $35/hour. Draft a counter at $30/hour", "They offered me $30/hour and my coworker makes $34/hour"]) {
+    const ctx = fresh(); host.runTurn(OFFER, ctx);
+    const r = host.runTurn(msg, ctx);
+    eq(recorded(ctx).offer ?? (ctx as any).negotiationThread?.hourly, 24, `${msg}: offer stays 24`);
+    eq((ctx.offer as any)?.hourly_rate, 24, `${msg}: ctx offer stays 24`);
+    eq(r.result?.sends ?? 0, 0, msg);
+    eq(stagedDecision({ env: STAGED, message: msg, ctx, host, structured: false }).reason, "counter_ambiguous_figures", msg);
+  }
+  const c = fresh(); host.runTurn(OFFER, c); host.runTurn("Counter at $26/hour", c);
+  assert(/meet me at \$26/.test(String(host.runTurn("Draft the counter email; I want to mention the $5 shift differential", c).result?.draft?.body)), "saved counter kept");
+  const k = fresh(); host.runTurn(OFFER, k);
+  assert(!/\$70,000 an hour/.test(String(host.runTurn("Draft a counter asking for $70,000", k).reply)), "no hourly unit on $70,000");
+});
+
+// Review of f609ce7d: another person's pay holds only when that person is tied to the figure; peer roles, sister companies and
+// referrals are offers. A cued figure that is an add-on or out of an hourly range is never asked about as an hourly ask, and
+// never blanks the saved counter.
+Deno.test("CDW person words hold only another person's pay; add-ons and out-of-range figures keep the saved counter", () => {
+  for (const [msg, v] of [["I got an offer of $30/hour for a peer support specialist role", 30], ["I got an offer of $25/hour for a peer mentor role.", 25], ["A friend referred me and they offered $30/hour", 30],
+    ["Acme offered me $30/hour after my colleague referred me", 30], ["My former coworker is the hiring manager and she offered me $28/hour", 28], ["I got an offer from a sister company for $30/hour", 30],
+    ["The hiring manager offered me $30/hour", 30]] as [string, number][]) {
+    const c = fresh(); host.runTurn(msg, c);
+    eq((c.offer as any)?.hourly_rate, v, `${msg}: offer recorded`);
+  }
+  for (const msg of ["Draft the counter; ask for $500 relocation", "Draft the counter; ask for $5 more for night shifts", "Draft the counter; ask for $2 more", "Draft the counter at $120"]) {
+    const c = fresh(); host.runTurn(OFFER, c); host.runTurn("Counter at $26/hour", c);
+    const r = host.runTurn(msg, c);
+    assert(!/Is \$\d[\d,]* an hour the rate/.test(String(r.reply)), `${msg}: ${String(r.reply).slice(-120)}`);
+    assert(/meet me at \$26/.test(String(r.result?.draft?.body)), `${msg}: saved counter kept`);
+  }
+  const e = fresh(); host.runTurn("The market offers $28/hour; make it $30/hour", e);
+  eq((e as any).negotiationThread, undefined, "a held turn leaves no empty thread behind");
+});
+
+// Review of 529d1d08: a first-person offer after a referral or a thank-you is the user's own ("I got offered", "got me an offer").
+Deno.test("CDW first-person offers after a person word are recorded", () => {
+  for (const [msg, field, v] of [["My friend referred me and I got offered $32/hour", "hourly_rate", 32], ["My colleague introduced me and I was offered $31/hour", "hourly_rate", 31],
+    ["Thanks to my friend I got an offer of $30/hour from Acme", "hourly_rate", 30], ["My friend at Acme got me an offer of $30/hour", "hourly_rate", 30],
+    ["As a people ops lead I got offered $45/hour", "hourly_rate", 45]] as [string, string, number][]) {
+    const c = fresh(); host.runTurn(msg, c);
+    eq((c.offer as any)?.[field], v, `${msg}: offer recorded`);
+  }
+  const c = fresh(); host.runTurn("My cousin referred me and I got an offer of $85,000 from Acme", c);
+  assert([(c.offer as any)?.base_salary, (c as any).negotiationThread?.amount].includes(85000), "annual offer recorded");
+});

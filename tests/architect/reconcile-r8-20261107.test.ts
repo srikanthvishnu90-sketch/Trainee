@@ -164,7 +164,7 @@ Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless res
     // a hiring system or sign-in service named in an ordinary line is not a sender handing over a code
     "Workday sent me 4500 applications to screen", "Built the Workday portal for 120000 employees", "Integrated Okta sign-in for 4500 users", "Microsoft sent me to Seattle for training in 2019",
     "Google gave me 3 patents", "Taught 1200 students to use the portal", "Workday migration for 4500 employees", "LinkedIn sent me 500 InMails", "Indeed sent me 1200 applicants",
-    "MFA rollout - CHG0012345", "OTP: AZ500 certified", "They gave me the MFA project; charge code: CC4821", "Client sent me requirements, ref: RQ4821", "OTP login for 250000 users",
+    "OTP: AZ500 certified", "They gave me the MFA project; charge code: CC4821", "Client sent me requirements, ref: RQ4821", "OTP login for 250000 users",
     "MFA enforcement for 4500 accounts", "2FA for 120000 customers", "Passcode policy for 3000 devices", "OTP flow redesign in 2023", "One-time bonus 2023"]) {
     assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), false, line);
   }
@@ -273,7 +273,7 @@ Deno.test("R8R-FILE ambiguous codes refuse the file; the reply names the line an
     assertNode.ok(!reply.includes(line) && (!tok || !reply.includes(tok)), `${line}: reply echoes it: ${reply}`);
   }
   for (const line of ["Code migration was completed: 1200 microservices", "Microsoft sent me 2500 for travel", "Workday sent me 2500 for relocation", "Okta gave me admin access", "Processed 739201 applications for the portal",
-    "Migrated 4500 users to the portal", "OTP - 2021", "Rolled out MFA; change code: CHG0012345", "MFA rollout - CHG0012345", "Exam code: AZ104"]) {
+    "Migrated 4500 users to the portal", "OTP - 2021", "Rolled out MFA; change code: CHG0012345", "Exam code: AZ104"]) {
     assertNode.deepEqual(fileCodeLines(`Jordan Lee\nSupport Lead\n- ${line}`), [], line);
   }
   assertNode.ok(/lines 2, 4 and 6 of the text/.test(fileCodeReply([2, 4, 6])));
@@ -295,7 +295,7 @@ Deno.test("R8R-LINE a code is judged on its own line; senders, routes, labels an
     "Leadership gave me 250000 for the website rebuild", "VP gave me 50000 for the portal redesign", "Director gave me 120000 for the account migration", "CEO gave me 500000, a team of 6 and a deadline",
     "Board gave me 1500000 to build the app", "Leadership sent me 40000 to complete the application rollout", "Got 1200 from Workday reports", "Received 4500 from the portal migration", "Workday sent me 1200 - 1500 applications",
     "Microsoft sent me 1000 at year end", "Led OTP-2021 initiative", "Azure Security Engineer exam code: AZ500", "CompTIA Security+ exam code: SY0701", "Exam code: AZ104", "Rolled out MFA; change code: CHG0012345",
-    "MFA rollout - CHG0012345", "Received one-time award code: AW2023", "OTP: AZ500 certified", "Processed 739201 applications for the portal", "(415) 555-0134", "Sent 4500 emails per week", "Received the 2019 award"];
+    "Received one-time award code: AW2023", "OTP: AZ500 certified", "Processed 739201 applications for the portal", "(415) 555-0134", "Sent 4500 emails per week", "Received the 2019 award"];
   for (const nx of nexts) {
     for (const l of refuse) assertNode.ok(fileCodeLines(`Jordan Lee\nSupport Lead\n- ${l}\n${nx}`).includes(3), `${l} / next ${JSON.stringify(nx)}`);
     for (const l of keep) assertNode.deepEqual(fileCodeLines(`Jordan Lee\nSupport Lead\n- ${l}\n${nx}`), [], `${l} / next ${JSON.stringify(nx)}`);
@@ -303,4 +303,12 @@ Deno.test("R8R-LINE a code is judged on its own line; senders, routes, labels an
   // A code split by a line break is joined; a phone split over three lines is not a code.
   assertNode.deepEqual(fileCodeLines("Jordan Lee\n- Workday sent me 739\n201\n- Led a team of 6"), [2]);
   assertNode.deepEqual(fileCodeLines("Jordan Lee\n- Call me at 415\n555\n1234 any time"), []);
+});
+
+// Owner policy (privacy first): a one-time-code word on the same line as a code-shaped value with no named label refuses the
+// file, so "MFA rollout - CHG0012345" (a change ticket after an MFA topic) is refused; with its label ("change code:") it stays.
+Deno.test("R8R-POLICY an MFA topic beside an unlabelled code-shaped value refuses; with a named label it stays", () => {
+  assertNode.deepEqual(fileCodeLines("Jordan Lee\n- MFA rollout - CHG0012345"), [2]);
+  assertNode.deepEqual(fileCodeLines("Jordan Lee\n- Rolled out MFA; change code: CHG0012345"), []);
+  assertNode.deepEqual(fileCodeLines("Jordan Lee\n- OTP service: 50000 QPS at p99 40ms\n- Led a team of 6"), []);
 });

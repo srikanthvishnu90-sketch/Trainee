@@ -53,11 +53,11 @@ const NOT_A_BARE_PASSWORD = /^(?:is|was|for|to|of|on|in|at|and|or|the|a|an|my|yo
 // research / design" are no pair.
 const SIGN_IN_WAY = /^(?:sso|saml|oauth2?|openid|oidc|google|apple|github|gitlab|microsoft|azure|okta|facebook|linkedin|email|phone|sms|passkeys?|face ?id|touch ?id|biometrics?|magic link|ldap|kerberos|face|fingerprint|pin|device|passcode|password|touch|voice)$/i;
 const SIGN_IN_PAIR = /\b(login|log-in|sign[- ]?in with|creds|credentials|user ?name)((?:\s+(?:for|to|on)\s+[^/:\n]{1,30}?)?\s*(?:\bis\b|\bare\b|=|:|-)\s*|(?<=with)\s+)([^\s/:]+\s*\/\s*)([^\s/]{3,})/gi;
-const CODE_LABELED = /\b((?:one[- ]time|verification|security|sign[- ]?in|login|log[- ]in|2fa|mfa|otp|auth(?:entication)?)\s*(?:code|pin|passcode|number)?)(\s*(?:is|=|:|#)?\s*)(\d(?:(?:\r\n|[ \r\n\t\u00a0\u2007\u2009\u202f\-\u2013\u2014])?\d){3,7})\b/gi;
+const CODE_LABELED = /\b((?:one[- ]time|verification|security|sign[- ]?in|login|log[- ]in|2fa|mfa|otp|auth(?:entication)?)\s*(?:code|pin|passcode|number)?)(\s*(?:is|=|:|#)?\s*)(\d(?:(?:[ \t\u00a0\u2007\u2009\u202f]{0,8}(?:(?:\r\n|[\r\n\-\u2013\u2014])[ \t\u00a0\u2007\u2009\u202f]{0,8})?)\d){3,7})\b/gi;
 // "code is 4821", "here's the code: 482 913", "sms code 4821", "pin: 4821", "the code they texted me is 482-913": a code or
 // PIN, unless the code is named as something else (a zip, area, promo, course, error, referral ... code).
 const NAMED_CODE = String.raw`(?<!\b(?:zip|postal|post|area|country|promo|promotional|discount|coupon|referral|course|class|error|status|dial|tax|product|source|job|dress|invite|invitation|gift|reference|ref|airport|naics|sic|cpt|icd|sort|swift|bank|routing|color|colour|style|item|sku|morse|qr|bar|req|requisition|position|posting|role|department|dept|cost|budget|project|program|module|unit|soc|fips|vendor|supplier|ticket|order|voucher|offer|event|building|naics|source|zip\+4)[\s-])`;
-const CODE_ANY = new RegExp(String.raw`${NAMED_CODE}\b(code|pin(?: code| number)?)(\s*(?:\bis\b|=|:|#)\s*|\s+)(\d(?:(?:\r\n|[ \r\n\t\u00a0\u2007\u2009\u202f\-\u2013\u2014])?\d){3,7})\b(?![-.\/]?\d)`, "gi");
+const CODE_ANY = new RegExp(String.raw`${NAMED_CODE}\b(code|pin(?: code| number)?)(\s*(?:\bis\b|=|:|#)\s*|\s+)(\d(?:(?:[ \t\u00a0\u2007\u2009\u202f]{0,8}(?:(?:\r\n|[\r\n\-\u2013\u2014])[ \t\u00a0\u2007\u2009\u202f]{0,8})?)\d){3,7})\b(?![-.\/]?\d)`, "gi");
 const CODE_LOOSE = new RegExp(String.raw`${NAMED_CODE}\b(code\b[^.\n\d]{1,40}?\s(?:is|was|=|:)\s*)(\d(?:[ -]?\d){3,7})\b(?![-.\/]?\d)`, "gi");
 const DATE_LIKE = /^(?:19|20)\d\d-\d\d?-\d\d?$/;
 const CVV_LABELED = /\b(cvv2?|cvc2?|csc|cvn|cid)(\s*(?:code|number)?\s*(?:is|=|:)?\s*)(\d{3,4})\b/gi;

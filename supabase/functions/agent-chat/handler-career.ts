@@ -116,7 +116,7 @@ import { rewriteOn, tailorRewriteTurn } from "../_shared/career_tailor_rewrite.t
 // FEATURE 8: inbox check and follow-ups that can be sent.
 import { careerGrant, followupTurn, gmailReadGrant, gmailReadNow, mailNow, supabaseFollowupStores } from "../_shared/career_inbox_followups.ts";
 import { gmailSender } from "../_shared/career_outreach_gmail.ts";
-import { fileUploadFor } from "../_shared/channel_resume_upload.ts"; // FEATURE 16
+import { fileUploadFor, isUploadedResumeText } from "../_shared/channel_resume_upload.ts"; // FEATURE 16
 import { replacedResumeLines, replacedResumeStops } from "../_shared/career_resume_replace.ts"; // ONBOARDING ROUND 4
 import { outlookAsk, outlookChatTurn } from "../_shared/outlook_connector.ts"; // M4: Outlook
 import { shapeForTurn } from "../_shared/channel_shape.ts"; // REPLY SHAPE
@@ -302,7 +302,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // The thread's title is the first 60 characters of the first message (chat_session.ts ownerThread), and the request hash
     // digests the text: a code-shaped token next to a code word is removed BEFORE both ("The Workday portal sent me 739201"
     // must not become a thread title). The same call runs again below, after the split-secret step, on the redacted text.
-    {
+    // A resume file's own text (its hash is an upload this person made) is not checked for code words: see isUploadedResumeText.
+    const fileText = await isUploadedResumeText(admin, user?.id, userContent);
+    if (!fileText) {
       const early = codeInChat(message, { userContent, removed: removedNow, codePending: codePending(situation), originalLength: originalLen });
       if (early) { message = early.text; userContent = early.userContent; }
     }
@@ -353,7 +355,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // ONE-TIME CODES AND PASSWORDS IN CHAT (_shared/career_code_in_chat.ts; offline registry A23): a code or password the person
     // shared is answered below by code's fixed safety text (codeChatText), and a code-shaped token still next to a code word
     // ("Workday sent me 739201") is removed here like a labeled one, before anything stores the text or a model reads it.
-    const codeShared = codeInChat(message, { userContent, removed: removedNow, codePending: codePending(situation), originalLength: originalLen });
+    const codeShared = fileText ? null : codeInChat(message, { userContent, removed: removedNow, codePending: codePending(situation), originalLength: originalLen });
     if (codeShared) {
       message = codeShared.text; userContent = codeShared.userContent;
       removedNow = [...new Set([...removedNow, ...codeShared.removed])];

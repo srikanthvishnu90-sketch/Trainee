@@ -36,7 +36,9 @@ export const SIGN_ASK = "How do you sign your emails? Send your name the way you
 export interface Attachment { name: string; mime?: string; text: string | null }
 export type Ask =
   | { kind: "who"; firm: string }
-  | { kind: "draft"; target: Target; topic: string | null };
+  // more: further people in one ask ("email Sam at Cobalt and Noah at Fable"); each gets its own draft and its own
+  // exact-payload hash in the one batch (D-MN-2).
+  | { kind: "draft"; target: Target; topic: string | null; more?: Target[] };
 export type Target =
   // surname: the ask named them by an honorific and one name ("Dr. Chen", "Tanaka-san"): matched on the last name.
   | { by: "name"; name: string; firm: string | null; surname?: boolean }
@@ -68,7 +70,9 @@ function firmOf(raw: string): string | null {
 
 // (b) and (c): what the message asks, or null when it is not a networking ask (the rest of the chain answers it).
 export function parseNetworkingAsk(message: string): Ask | null {
-  const t = chatAsk(message).replace(FILLER, "").replace(/[?!.]+$/, "").replace(/,?\s+instead$/i, "").trim();
+  const t = chatAsk(message).replace(FILLER, "").replace(/[?!.]+$/, "").replace(/,?\s+instead$/i, "").trim()
+    // R9-E: "find and email the hiring manager at X": the finding is the drafting's own (from the person's contacts).
+    .replace(/^(?:find|look up|track down|search for)\s*(?:,\s*)?(?:and|&|then|,)\s+(?:then\s+)?(?=(?:email|e-mail|message|reach out|write|draft|send)\b)/i, "");
   if (!t || t.length > 300) return null;
   const who = [
     /^(?:who|which (?:people|contacts|connections))(?: else)? (?:do i know|do i have|in my (?:network|contacts|connections)|(?:are|is) (?:in )?my (?:contacts|connections|network))(?: (?:who |that )?works?| working)? (?:at|from|in) (.+)$/i,
@@ -96,6 +100,15 @@ export function parseNetworkingAsk(message: string): Ask | null {
     rest = rest.slice(0, tm.index).trim();
   }
   rest = rest.replace(/[?.!,;:]+$/, "").trim();
+  // R9-E: several people in one ask, each "<who> at <firm>": one target each.
+  const pair = /^(.+?\s(?:at|from)\s.+?)\s*(?:,\s*and|,|\band\b|&)\s+(.+?\s(?:at|from)\s.+)$/i.exec(rest);
+  if (pair) {
+    const parts = [parseNetworkingAsk(`email ${pair[1]}`), parseNetworkingAsk(`email ${pair[2]}`)];
+    if (parts.every((x) => x?.kind === "draft" && !x.topic)) {
+      const ts = parts.flatMap((x) => { const d = x as Extract<Ask, { kind: "draft" }>; return [d.target, ...(d.more ?? [])]; });
+      return { kind: "draft", topic, target: ts[0], more: ts.slice(1) };
+    }
+  }
   // "my 3 contacts at X", "people at X", "everyone I know at X", "someone at X"
   const g = new RegExp(`^(?:all (?:of )?)?(?:my |the )?(?:${NUMW} )?(?:${GROUP})(?: i (?:know|have))? (?:at|from) (.+)$`, "i").exec(rest);
   if (g) { const firm = firmOf(g[2]); return firm ? { kind: "draft", topic, target: { by: "group", firm, count: numberOf(g[1]) ?? verbCount, role: null } } : null; }
@@ -502,7 +515,7 @@ async function networkingTurnInner(o: NetworkingDeps): Promise<NetworkingResult 
       return { reply: `Who is ${typed.email}? Send their name and firm with the address, for example "email Maya Chen at Stripe about a coffee chat, ${typed.email}", and I'll draft it for your approval. I never make up a name for an address.`, intent: DRAFT_INTENT, status: "needs_name" };
   }
   if (ask?.kind === "who") return await whoTurn(o, ask.firm);
-  if (ask?.kind === "draft") return await draftTurn(o, ask, typed.email);
+  if (ask?.kind === "draft") return await draftAsk(o, ask, typed.email);
   // The answer to "how do you sign your emails?": saved, then the ask that needed it runs.
   if ((await o.store.lastAssistantIntent(o.threadId).catch(() => null)) === SIGNATURE_INTENT) return await signatureTurn(o);
   return null;
@@ -599,7 +612,42 @@ async function whoTurn(o: NetworkingDeps, firmAsked: string): Promise<Networking
   };
 }
 
-async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>, typedEmail: string | null = null): Promise<NetworkingResult> {
+// R9-E: several people in one ask. Each target is picked exactly as alone (the person's own contacts, every hold); all go
+// in one batch, one draft and one exact-payload hash each, so "send all" approves exactly what was shown (D-MN-2).
+interface Sink { pick: ContactRow[]; held: { name: string; why: string }[]; replace: OutreachDraft[] }
+// "the recruiters at Stripe and Acme": a firm as typed with "and", "&" or commas in it is one firm when the person's
+// contacts have it ("Procter & Gamble", "Ernst and Young"); otherwise, for a role, the role at each firm named.
+async function draftAsk(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>, typedEmail: string | null): Promise<NetworkingResult> {
+  const t = ask.target;
+  if (!ask.more?.length && t.by === "group" && t.role && /\s(?:and|&)\s|,/i.test(t.firm) && !(await bookOf(o).atFirm(normalizeFirm(t.firm))).length) {
+    const firms = t.firm.split(/\s*,\s*(?:and\s+)?|\s+(?:and|&)\s+/i).map((f) => f.trim()).filter(Boolean);
+    if (firms.length > 1 && firms.length <= 5) return await manyTurn(o, { ...ask, target: { ...t, firm: firms[0] }, more: firms.slice(1).map((f) => ({ ...t, firm: f })) });
+  }
+  return ask.more?.length ? await manyTurn(o, ask) : await draftTurn(o, ask, typedEmail);
+}
+async function manyTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>): Promise<NetworkingResult> {
+  const sink: Sink = { pick: [], held: [], replace: [] };
+  for (const target of [ask.target, ...(ask.more ?? [])]) {
+    const r = await draftTurn(o, { kind: "draft", topic: ask.topic, target }, null, sink);
+    if (r.status === "no_contacts") return r;
+    if (r.status !== "collected") sink.held.push({ name: target.by === "name" ? target.name : `${target.role ?? "contacts"} at ${target.firm}`, why: r.reply.replace(/\s+/g, " ").slice(0, 200) });
+  }
+  const seen = new Set<string>();
+  sink.pick = sink.pick.filter((r) => { const a = String(r.email ?? "").toLowerCase(); if (a && seen.has(a)) return false; if (a) seen.add(a); return true; });
+  if (!sink.pick.length) return { reply: `Nothing was drafted. ${sink.held.map((h) => `${h.name}: ${h.why}`).join(" ")}`, intent: DRAFT_INTENT, status: "held" };
+  return await finishDraft(o, sink.pick, sink.held, sink.pick.length + sink.held.length, ask.topic, sink.replace);
+}
+async function finishDraft(o: NetworkingDeps, pick: ContactRow[], held: { name: string; why: string }[], considered: number, topic: string | null, replace: OutreachDraft[]): Promise<NetworkingResult> {
+  const heldLine = held.length ? `Not drafted: ${held.map((h) => `${h.name} (${h.why})`).join("; ")}.` : "";
+  const facts = confirmed(((o.state.profile as any)?.facts ?? []) as unknown[]);
+  if (!facts.length) return { reply: `I write only from facts you've confirmed, and there are none on record yet, so nothing was drafted. Paste your resume here and confirm it, then ask again.`, intent: DRAFT_INTENT, status: "no_facts" };
+  if (!o.model) return { reply: `Drafting emails isn't switched on here yet, so nothing was written or sent. From your contacts I would write to: ${pick.map((r) => `${r.name}${r.title ? `, ${r.title}` : ""}${r.firm ? ` at ${r.firm}` : ""} <${r.email}>`).join("; ")}.${heldLine ? ` ${heldLine}` : ""}`, intent: DRAFT_INTENT, status: "drafting_off" };
+  const prefs = await o.store.prefs(o.userId);
+  if (!prefs.signature) return { reply: SIGN_ASK, intent: SIGNATURE_INTENT, status: "needs_signature" };
+  return await writeBatch(o, pick, held, considered, topic, prefs.signature, facts, replace);
+}
+
+async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>, typedEmail: string | null = null, sink?: Sink): Promise<NetworkingResult> {
   if (typedEmail && ask.target.by === "name") await keepTyped(o, ask.target.name.trim(), ask.target.firm, typedEmail);
   const book = bookOf(o), t = ask.target;
   const firmName = t.firm ? normalizeFirm(t.firm) : null;
@@ -632,7 +680,9 @@ async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>
     const here = await book.atFirm(firmName!);
     const rw = t.role ? plain(t.role) : "";
     const isRecruiter = /recruit|talent|hr|people team/.test(rw);
-    pool = !rw ? here : here.filter((r) => { const tt = plain(r.title); return isRecruiter ? /recruit|talent|sourc/.test(tt) : rw.split(" ").every((w) => tt.includes(w.replace(/s$/, ""))); });
+    // R9-E: "the hiring manager" is a manager there (no one's title says "hiring manager").
+    const isHiring = /^hiring (?:manager|lead)$/.test(rw);
+    pool = !rw ? here : here.filter((r) => { const tt = plain(r.title); return isRecruiter ? /recruit|talent|sourc/.test(tt) : isHiring ? /\b(?:manager|head|director|lead)\b/.test(tt) : rw.split(" ").every((w) => tt.includes(w.replace(/s$/, ""))); });
     label = `${t.role ? `${t.role}s` : "your contacts"} at ${firmName}`;
     if (!pool.length) {
       const there = here.length ? ` Your contacts at ${firmName}: ${here.slice(0, 5).map((r) => `${r.name}${r.title ? ` (${r.title})` : ""}`).join(", ")}.` : "";
@@ -677,14 +727,9 @@ async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>
     if (why) held.push({ name: r.name, why }); else { pick.push(r); if (addr) picked.set(addr, r.name); }
   }
   const considered = pick.length + held.length;
-  const heldLine = held.length ? `Not drafted: ${held.map((h) => `${h.name} (${h.why})`).join("; ")}.` : "";
+  if (sink) { sink.pick.push(...pick); sink.held.push(...held); sink.replace.push(...replace); return { reply: "", intent: DRAFT_INTENT, status: "collected" }; }
   if (!pick.length) return { reply: `I can't write to ${label}: ${held.map((h) => `${h.name}: ${h.why}`).join("; ")}. Nothing was drafted. To add an address, send a CSV with Name,Company,Email.`, intent: DRAFT_INTENT, status: "held" };
-  const facts = confirmed(((o.state.profile as any)?.facts ?? []) as unknown[]);
-  if (!facts.length) return { reply: `I write only from facts you've confirmed, and there are none on record yet, so nothing was drafted. Paste your resume here and confirm it, then ask again.`, intent: DRAFT_INTENT, status: "no_facts" };
-  if (!o.model) return { reply: `Drafting emails isn't switched on here yet, so nothing was written or sent. From your contacts I would write to: ${pick.map((r) => `${r.name}${r.title ? `, ${r.title}` : ""}${r.firm ? ` at ${r.firm}` : ""} <${r.email}>`).join("; ")}.${heldLine ? ` ${heldLine}` : ""}`, intent: DRAFT_INTENT, status: "drafting_off" };
-  const prefs = await o.store.prefs(o.userId);
-  if (!prefs.signature) return { reply: SIGN_ASK, intent: SIGNATURE_INTENT, status: "needs_signature" };
-  return await writeBatch(o, pick, held, considered, ask.topic, prefs.signature, facts, replace);
+  return await finishDraft(o, pick, held, considered, ask.topic, replace);
 }
 
 async function writeBatch(o: NetworkingDeps, pick: ContactRow[], held: { name: string; why: string }[], considered: number, topic: string | null, signature: string, facts: unknown[], replace: OutreachDraft[] = []): Promise<NetworkingResult> {
@@ -728,7 +773,7 @@ async function signatureTurn(o: NetworkingDeps): Promise<NetworkingResult | null
   const typed = before ? typedAddress(before) : null;
   const ask = typed ? parseNetworkingAsk(typed.text) : null;
   if (ask?.kind === "draft") {
-    const r = await draftTurn(o, ask, typed?.email ?? null);
+    const r = await draftAsk(o, ask, typed?.email ?? null);
     return { ...r, reply: `Saved your signature.\n\n${r.reply}`, parts: r.parts ? [`Saved your signature.`, ...r.parts] : undefined };
   }
   return { reply: `Saved your signature:\n${sig}\nIt goes at the bottom of every email I draft for you.`, intent: "career_outreach_signature_saved", status: "saved" };

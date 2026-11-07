@@ -63,10 +63,12 @@ export function localFor(f: Format, n: { first: string; last: string }): string 
 export function formatsOf(local: string, n: { first: string; last: string }): Format[] { return FORMATS.filter((f) => localFor(f, n) === local.toLowerCase()); }
 // The domain's format from addresses it publishes with a name beside them: a format seen 2+ times, the most seen.
 export function learnFormat(named: { email: string; name: string }[], domain: string): { format: Format; evidence: number } | null {
-  const count = new Map<Format, number>();
+  const count = new Map<Format, number>(), seen = new Set<string>();
   for (const x of named) {
-    const [local, d] = x.email.toLowerCase().split("@"); const n = nameParts(x.name);
+    const e = x.email.trim().toLowerCase(); if (seen.has(e)) continue; // one address is one piece of evidence, however often it is published
+    const [local, d] = e.split("@"); const n = nameParts(x.name);
     if (d !== domain.toLowerCase() || !n) continue;
+    seen.add(e);
     for (const f of formatsOf(local, n)) count.set(f, (count.get(f) ?? 0) + 1);
   }
   const best = [...count.entries()].sort((a, b) => b[1] - a[1] || FORMATS.indexOf(a[0]) - FORMATS.indexOf(b[0]))[0];
@@ -92,40 +94,51 @@ export interface FindIn {
 const score = (m: EmailMethod | null, mx: EmailEvidence["mx"]) => (m && mx !== "fail" ? SCORE[m] : 0);
 export async function findEmail(i: FindIn): Promise<EmailEvidence> {
   const domain = i.domain.toLowerCase(), probe = i.probe ?? RCPT_PROBE_OFF, at = new Date(i.now).toISOString();
-  const mxr = await i.mx(domain);
-  const hosts = mxr.status === "ok" ? mxr.hosts : [];
-  const mx: EmailEvidence["mx"] = mxr.status === "ok" ? "pass" : mxr.status === "none" ? "fail" : "unknown";
-  const provider: MailProvider = mxr.status === "ok" ? providerOf(hosts) : mxr.status === "none" ? "none" : "unknown";
-  const out = (email: string | null, method: EmailMethod | null, extra: Partial<EmailEvidence> = {}): EmailEvidence => {
+  const check = async (d: string) => {
+    const r = await i.mx(d);
+    return { hosts: r.status === "ok" ? r.hosts : [], mx: (r.status === "ok" ? "pass" : r.status === "none" ? "fail" : "unknown") as EmailEvidence["mx"],
+      provider: (r.status === "ok" ? providerOf(r.hosts) : r.status === "none" ? "none" : "unknown") as MailProvider };
+  };
+  const own = await check(domain), hosts = own.hosts, mx = own.mx, provider = own.provider;
+  // An address is approvable only when its OWN domain has a mail server: a published or GitHub address on another domain
+  // gets that domain's MX and provider looked up, never the employer's borrowed.
+  const out = async (email: string | null, method: EmailMethod | null, extra: Partial<EmailEvidence> = {}): Promise<EmailEvidence> => {
     const syntax = email && SYNTAX.test(email) ? "pass" : "fail";
-    const ownMx = email && email.endsWith(`@${domain}`) ? mx : "unknown"; // a GitHub address on another domain: its own MX not checked here
-    const s = syntax === "pass" ? score(method, ownMx) : 0;
-    return { email, method, score: s, approvable: s >= SEND_MIN_SCORE, why: method ? METHOD_WORDS[method] : "no address found", syntax, mx: ownMx, provider, catch_all: null, rcpt: "not_probed",
+    const addrDomain = email && syntax === "pass" ? email.split("@")[1] : null;
+    const c = addrDomain && addrDomain !== domain ? await check(addrDomain) : { mx: addrDomain ? mx : "unknown" as EmailEvidence["mx"], provider };
+    // The evidence score is about where the address came from; a missing mail server on the employer's own domain zeroes
+    // it (nothing there can receive mail), and on any domain it blocks approval: approvable needs that domain's MX to pass.
+    const s = syntax === "pass" ? score(method, addrDomain === domain ? c.mx : "unknown") : 0;
+    const why = method ? (c.mx === "pass" ? METHOD_WORDS[method] : `${METHOD_WORDS[method]}; no mail server confirmed for ${addrDomain ?? "it"}`) : "no address found";
+    return { email, method, score: s, approvable: s >= SEND_MIN_SCORE && c.mx === "pass", why, syntax, mx: c.mx, provider: c.provider, catch_all: null, rcpt: "not_probed",
       source_url: null, format: null, format_evidence: 0, checked_at: at, ...extra };
   };
   const pub = (i.published ?? []).find((p) => SYNTAX.test(p.email.toLowerCase()));
-  if (pub) return out(pub.email.toLowerCase(), "first_party_published", { source_url: pub.source_url });
-  if (i.github && SYNTAX.test(i.github.email.toLowerCase())) return out(i.github.email.toLowerCase(), "github_public", { source_url: i.github.source_url });
+  if (pub) return await out(pub.email.toLowerCase(), "first_party_published", { source_url: pub.source_url });
+  if (i.github && SYNTAX.test(i.github.email.toLowerCase())) return await out(i.github.email.toLowerCase(), "github_public", { source_url: i.github.source_url });
   const n = nameParts(i.name);
-  if (!n) return out(null, null);
+  if (!n) return await out(null, null);
   const learned = learnFormat(i.domainNamed ?? [], domain);
   let pattern: EmailEvidence | null = null;
   if (learned) {
     const email = `${localFor(learned.format, n)}@${domain}`;
     const fmt = { format: learned.format, format_evidence: learned.evidence };
     if (probe.on && provider === "other" && mx === "pass") {
+      // Catch-all first: only a server that explicitly REJECTS a made-up address can vouch for an accepted one. An
+      // unknown answer leaves catch_all unknown (null) and the person's address unprobed and unverified.
       const rnd = `${(i.random ?? (() => crypto.randomUUID().replace(/-/g, "").slice(0, 16)))()}@${domain}`;
-      const catchAll = (await probe.probe(rnd, hosts)) === "accept";
-      const rcpt = catchAll ? "unknown" as Rcpt : await probe.probe(email, hosts);
-      if (rcpt === "reject") pattern = { ...out(email, "pattern_unverified", { ...fmt, catch_all: catchAll, rcpt }), score: 0, approvable: false, why: "the company's mail server refused this address" };
-      else pattern = out(email, !catchAll && rcpt === "accept" ? "pattern_rcpt_valid" : "pattern_unverified", { ...fmt, catch_all: catchAll, rcpt });
-    } else pattern = out(email, "pattern_unverified", fmt);
+      const r0 = await probe.probe(rnd, hosts);
+      const catchAll = r0 === "accept" ? true : r0 === "reject" ? false : null;
+      const rcpt: Rcpt = catchAll === false ? await probe.probe(email, hosts) : "unknown";
+      if (rcpt === "reject") pattern = { ...(await out(email, "pattern_unverified", { ...fmt, catch_all: catchAll, rcpt })), score: 0, approvable: false, why: "the company's mail server refused this address" };
+      else pattern = await out(email, catchAll === false && rcpt === "accept" ? "pattern_rcpt_valid" : "pattern_unverified", { ...fmt, catch_all: catchAll, rcpt });
+    } else pattern = await out(email, "pattern_unverified", fmt);
     if (pattern.method === "pattern_rcpt_valid") return pattern;
   }
   if (i.finder) {
     const f = await i.finder.find(n.first, n.last, domain).catch(() => null);
-    if (f?.verified && f.email.endsWith(`@${domain}`)) return out(f.email, "finder_verified");
+    if (f?.verified && f.email.endsWith(`@${domain}`)) return await out(f.email, "finder_verified");
   }
   if (pattern) return pattern;
-  return out(`${localFor(sizeFormat(i.employees), n)}@${domain}`, "guess", { format: sizeFormat(i.employees) });
+  return await out(`${localFor(sizeFormat(i.employees), n)}@${domain}`, "guess", { format: sizeFormat(i.employees) });
 }

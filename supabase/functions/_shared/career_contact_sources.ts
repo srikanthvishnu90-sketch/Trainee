@@ -49,13 +49,34 @@ export function pageRule(host: string, org: string, o: { reviewedOn: string; del
     terms_summary: "Public pages read at a polite pace; robots.txt decides every path.", license_note: `Public page on ${host.toLowerCase()}; facts kept with their URL.`,
     min_delay_ms: Math.max(2000, o.delayMs ?? 2000) };
 }
-export function contactGate(o: { fetcher: Fetcher; userAgent: string; domain: string; org: string; hosts?: string[]; now: () => number; sleep?: (ms: number) => Promise<void>; resolver?: Resolver }): WebGate {
+// The pipeline's gate: the hosts it was pointed at up front, plus pages found on the way (a discovery search's results, a
+// GitHub profile's blog) admitted one host at a time through admit(): an https URL, never a never-source, an exact host
+// (precheck still refuses IP literals and internal names), robots.txt per request, and only with a DNS resolver so every
+// admitted host's answers are checked as public (WebGate.publicDns). Without a resolver nothing is admitted.
+export class ContactGate extends WebGate {
+  private admitted: SiteRule[] = [];
+  constructor(o: ConstructorParameters<typeof WebGate>[0], private day: string, private canAdmit: boolean) { super(o); }
+  override ruleFor(host: string): SiteRule | undefined { return super.ruleFor(host) ?? this.admitted.find((r) => r.host === host.toLowerCase()); }
+  admit(urls: string[]): string[] {
+    if (!this.canAdmit) return [];
+    const added: string[] = [];
+    for (const u of urls) {
+      let h = ""; try { const x = new URL(u); if (x.protocol !== "https:") continue; h = x.hostname.toLowerCase(); } catch { continue; }
+      if (!h || neverSource(`https://${h}/`) || this.ruleFor(h)) continue;
+      this.admitted.push(pageRule(h, h, { reviewedOn: this.day })); added.push(h);
+    }
+    return added;
+  }
+}
+export function contactGate(o: { fetcher: Fetcher; userAgent: string; domain: string; org: string; hosts?: string[]; now: () => number; sleep?: (ms: number) => Promise<void>; resolver?: Resolver }): ContactGate {
   const day = new Date(o.now()).toISOString().slice(0, 10);
   const apex = o.domain.toLowerCase().replace(/^www\./, "");
   const hosts = [...new Set([apex, `www.${apex}`, ...(o.hosts ?? []).map((h) => h.toLowerCase())])].filter((h) => !neverSource(`https://${h}/`));
-  return new WebGate({ allowlist: [...hosts.map((h) => pageRule(h, h.endsWith(apex) ? o.org : h, { reviewedOn: day })), ...secRules(day, "architect (EDGAR fair access)")],
-    fetcher: o.fetcher, userAgent: o.userAgent, robotsToken: "TraineeBot", resolver: o.resolver, now: () => new Date(o.now()), sleep: o.sleep });
+  return new ContactGate({ allowlist: [...hosts.map((h) => pageRule(h, h.endsWith(apex) ? o.org : h, { reviewedOn: day })), ...secRules(day, "architect (EDGAR fair access)")],
+    fetcher: o.fetcher, userAgent: o.userAgent, robotsToken: "TraineeBot", resolver: o.resolver, now: () => new Date(o.now()), sleep: o.sleep }, day, !!o.resolver);
 }
+// Pages found on the way are admitted to a ContactGate before they are read (any other gate reads only its own list).
+export const admitFound = (gate: WebGate, urls: string[]) => (gate instanceof ContactGate ? gate.admit(urls) : []);
 const ENT: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", "#39": "'" };
 export const plain = (h: string) => h.replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&(#?\w+);/g, (m, e) => ENT[e] ?? m).replace(/\s+/g, " ").trim();
 const titleOf = (h: string) => plain(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(h)?.[1] ?? "").slice(0, 120);
@@ -164,7 +185,15 @@ export class PoliteApi {
     } catch (e) { return { ok: false, reason: "fetch_error", detail: String((e as Error).message).slice(0, 120) }; }
   }
 }
-const same = (a: unknown, b: unknown) => { const n = (s: unknown) => String(s ?? "").toLowerCase().replace(/^@/, "").replace(/\b(inc|llc|ltd|corp|co)\b\.?/g, "").replace(/[^a-z0-9]+/g, ""); return !!n(a) && !!n(b) && (n(a).includes(n(b)) || n(b).includes(n(a))); };
+// The same name or organisation: equal once case, punctuation, a leading @ and legal suffixes are set aside (never a
+// substring: "Acme" is not "Acme Analytics", "Jane Doe" is not "Jane Doe-Smith").
+const norm = (s: unknown) => String(s ?? "").toLowerCase().replace(/^@/, "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+  .replace(/\b(inc|incorporated|llc|ltd|limited|corp|corporation|co|company|plc|gmbh|ag|sa)\b\.?/g, "").replace(/[^a-z0-9]+/g, "");
+const same = (a: unknown, b: unknown) => !!norm(a) && norm(a) === norm(b);
+// A host on the company's domain: the domain itself or a subdomain of it (never acme.io.other.org for acme.io).
+export const onDomainHost = (host: string, domain: string) => { const h = host.toLowerCase().replace(/\.$/, ""), d = domain.toLowerCase(); return !!d && (h === d || h.endsWith(`.${d}`)); };
+const blogOn = (v: unknown, domain: string) => { const t = String(v ?? "").trim(); if (!t) return false; try { return onDomainHost(new URL(/^https?:\/\//i.test(t) ? t : `https://${t}`).hostname, domain); } catch { return false; } };
+const emailOn = (v: unknown, domain: string) => { const m = /^[^\s@]+@([^\s@]+)$/.exec(String(v ?? "").trim()); return !!m && onDomainHost(m[1], domain); };
 const enc = encodeURIComponent;
 
 // GitHub: a profile counts only when it says it is this person at this company (company field, or a blog/email on the
@@ -176,8 +205,7 @@ export async function githubFacts(api: PoliteApi, name: string, company: string,
     const login = String(it?.login ?? ""); if (!/^[A-Za-z0-9-]{1,39}$/.test(login)) continue;
     const p = await api.json("github", `/users/${login}`); if (!p.ok) continue;
     const u = p.data ?? {};
-    const onDomain = (v: unknown) => String(v ?? "").toLowerCase().includes(domain.toLowerCase());
-    if (!same(u.name, name) || !(same(u.company, company) || onDomain(u.blog) || onDomain(u.email))) continue;
+    if (!same(u.name, name) || !(same(u.company, company) || blogOn(u.blog, domain) || emailOn(u.email, domain))) continue;
     const url = `https://github.com/${login}`;
     const facts: RawFact[] = [];
     if (u.company) facts.push({ claim: `GitHub profile lists ${String(u.company).replace(/^@/, "")} as employer`, source_url: url, source_type: "github", published_at: null, quote: String(u.company), method: "GitHub REST users API", confidence: 0.8 });

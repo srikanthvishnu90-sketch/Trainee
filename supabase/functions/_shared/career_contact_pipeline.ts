@@ -5,14 +5,14 @@
 //   domainOf            the company's own domain from the job post (never an ATS or job board host).
 //   resolveContact      company pages and SEC EDGAR for the person; GitHub, OpenAlex, Semantic Scholar, USPTO, speaker
 //                       pages and the last 24 months of news for facts; findEmail for the address.
-//   ContactStore        kept per person (career_contact_profiles / _facts / _email_evidence, 20261107120000), erasable
+//   ContactStore        kept per person (career_contact_profiles / _facts / _email_evidence, 20261107120200), erasable
 //                       ("forget"), expiring; the suppression list is global (career_contact_suppression).
 import { releaseFlagOn } from "../agent-chat/release_config.ts";
 import { registrable } from "./career_people_gmail.ts";
 import type { MxResolver } from "./career_contacts.ts";
 import type { WebGate } from "./contact_sources/web_gate.ts";
 import {
-  companyPages, discover, type DiscoverySearch, type FoundPerson, githubFacts, neverSource, openAlexFacts, pageFacts, patentFacts, type PoliteApi,
+  admitFound, companyPages, discover, type DiscoverySearch, type FoundPerson, githubFacts, neverSource, openAlexFacts, pageFacts, patentFacts, type PoliteApi,
   type RawFact, readPages, secOfficers, semanticScholarFacts, type SourceRun, speakerFacts,
 } from "./career_contact_sources.ts";
 import { type ContactFact, FACT_TTL_DAYS, keepFacts } from "./career_contact_facts.ts";
@@ -21,9 +21,14 @@ import { type EmailEvidence, findEmail, type Finder, type RcptProbe } from "./ca
 type Env = { get(k: string): string | undefined };
 export const contactOutreachOn = (env: Env) => releaseFlagOn(env, "CAREER_PEOPLE_SEARCH") && releaseFlagOn(env, "CAREER_CONTACT_OUTREACH");
 
-const ATS = ["greenhouse.io", "lever.co", "ashbyhq.com", "myworkdayjobs.com", "workday.com", "smartrecruiters.com", "icims.com", "jobvite.com", "bamboohr.com",
-  "workable.com", "recruitee.com", "breezy.hr", "taleo.net", "successfactors.com", "jazzhr.com", "rippling.com", "dover.com", "wellfound.com"];
-// The employer's own domain: the post's company URL first, else an apply URL that is not an ATS or a job board.
+// Every applicant-tracking system and job board a posting link can sit on: a link on one of these says nothing about the
+// employer (acme.teamtailor.com is Teamtailor's host), so no domain comes from it.
+const ATS = ["greenhouse.io", "greenhouse-mail.io", "lever.co", "ashbyhq.com", "myworkdayjobs.com", "myworkday.com", "workday.com", "smartrecruiters.com",
+  "icims.com", "jobvite.com", "bamboohr.com", "workable.com", "workablemail.com", "recruitee.com", "breezy.hr", "taleo.net", "successfactors.com",
+  "successfactors.eu", "jazzhr.com", "rippling.com", "dover.com", "wellfound.com", "teamtailor.com", "personio.de", "personio.com", "pinpointhq.com",
+  "applytojob.com", "avature.net", "paylocity.com", "ultipro.com", "eightfold.ai", "phenompeople.com", "brassring.com", "dayforcehcm.com", "oraclecloud.com",
+  "adp.com", "gem.com", "join.com", "gupy.io", "welcomekit.co", "softgarden.io", "builtin.com", "remoteok.com", "weworkremotely.com", "dice.com",
+  "monster.com", "simplyhired.com", "careerbuilder.com", "ycombinator.com", "otta.com", "hired.com", "jobs.ashbyhq.com", "amazon.jobs"];
 export function domainOf(post: { company_url?: string | null; url?: string | null; apply_url?: string | null }): string | null {
   for (const u of [post.company_url, post.url, post.apply_url]) {
     let h = ""; try { h = new URL(String(u ?? "")).hostname.toLowerCase(); } catch { continue; }
@@ -60,9 +65,10 @@ export async function resolveContact(ask: ResolveAsk, d: ResolveDeps): Promise<R
   raw.push({ claim: `${who.title ? `${who.title} at ${ask.company}` : `Works at ${ask.company}`}`, source_url: who.source_url, source_type: who.source_type, published_at: null, quote: `${who.name}${who.title ? `, ${who.title}` : ""}`, method: who.source_type === "sec_edgar" ? "SEC EDGAR Form 3/4/5" : "company page card", confidence: 0.95 });
   raw.push(...pageFacts(site.pages, who.name, "company_page"), ...sec.facts(who.name));
   const gh = await githubFacts(d.api, who.name, ask.company, domain); runs.push(gh.run); raw.push(...gh.facts);
-  if (gh.blog) { const own = await readPages(d.gate, [gh.blog]); raw.push(...pageFacts(own.pages, who.name, "personal_page")); }
+  if (gh.blog) { admitFound(d.gate, [gh.blog]); const own = await readPages(d.gate, [gh.blog]); raw.push(...pageFacts(own.pages, who.name, "personal_page")); }
   for (const f of [openAlexFacts, semanticScholarFacts, patentFacts]) { const r = await f(d.api, who.name, ask.company); runs.push(r.run); raw.push(...r.facts); }
   const found = await discover(d.search, who.name, ask.company); runs.push(found.run);
+  admitFound(d.gate, [...(ask.speakerUrls ?? []), ...found.speakers, ...(ask.newsUrls ?? []), ...found.news]); // found pages: robots-governed, public DNS only
   const sp = await speakerFacts(d.gate, [...(ask.speakerUrls ?? []), ...found.speakers], who.name); runs.push(sp.run); raw.push(...sp.facts);
   const news = await readPages(d.gate, [...(ask.newsUrls ?? []), ...found.news]); runs.push({ ...news.run, source: "news" });
   raw.push(...pageFacts(news.pages, who.name, "news"));
@@ -94,7 +100,7 @@ export function memoryContactStore(): ContactStore & { rows(): Map<string, Resol
     async suppress(e, why) { sup.set(await emailHash(e), why); },
   };
 }
-// Over the service role: one RPC per call, one jsonb argument p (20261107120000_career_contact_outreach.sql); service only.
+// Over the service role: one RPC per call, one jsonb argument p (20261107120200_career_contact_outreach.sql); service only.
 export function supabaseContactStore(admin: { rpc: (f: string, a: { p: unknown }) => PromiseLike<{ data: any; error: any }> }): ContactStore {
   const call = async (f: string, a: any) => { const r = await admin.rpc(f, a); if (r.error) throw new Error(`${f}: ${r.error.message ?? r.error}`); return r.data; };
   return {

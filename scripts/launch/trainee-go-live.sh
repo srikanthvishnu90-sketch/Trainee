@@ -285,7 +285,7 @@ MIGRATIONS=(
   20261105180000_career_claim_deadlock.sql
   20261106120000_career_apply_candidates_missing_account_row.sql
   20261106130000_career_resume_cloud_copy_recovery.sql
-  20261107120000_career_contact_outreach.sql
+  20261107120200_career_contact_outreach.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"

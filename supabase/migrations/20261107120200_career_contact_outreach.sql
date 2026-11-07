@@ -1,6 +1,6 @@
 -- CONTACT OUTREACH (release 9 workstream E; proposal D-042; _shared/career_contact_pipeline.ts). Not applied by this PR: the
 -- owner's go-live creates the (empty) tables at the next release (scripts/launch/trainee-go-live.sh lists every migration);
--- nothing reads or writes them while CAREER_PEOPLE_SEARCH and CAREER_CONTACT_OUTREACH are off. Rollback: supabase/rollbacks/20261107120000_career_contact_outreach.down.sql.
+-- nothing reads or writes them while CAREER_PEOPLE_SEARCH and CAREER_CONTACT_OUTREACH are off. Rollback: supabase/rollbacks/20261107120200_career_contact_outreach.down.sql.
 --
 --   career_contact_profiles        one professional a person asked about: name, title, company, domain, the page that named them
 --   career_contact_facts           up to 25 cited professional facts each (claim, source, snippet <= 200, confidence, method), expiring
@@ -54,7 +54,9 @@ create table if not exists public.career_contact_email_evidence (
   -- The score is the method's (95, 90, 80, 75, 50, 30) or 0 (an MX or a mail server refused it): never anything in between.
   score int not null check (score = 0 or score = case method when 'first_party_published' then 95 when 'github_public' then 90 when 'pattern_rcpt_valid' then 80
     when 'finder_verified' then 75 when 'pattern_unverified' then 50 when 'guess' then 30 end),
-  approvable boolean generated always as (score >= 70) stored,
+  -- Approvable only at 70+ AND a mail server confirmed for the address's own domain (career_contact_email.ts findEmail).
+  approvable boolean generated always as (score >= 70 and mx = 'pass') stored,
+  why text not null default '' check (length(why) <= 300),
   syntax text not null check (syntax in ('pass', 'fail')),
   mx text not null check (mx in ('pass', 'fail', 'unknown')),
   provider text not null check (provider in ('google', 'microsoft', 'other', 'none', 'unknown')),
@@ -108,9 +110,9 @@ begin
   select id_, u, f->>'claim', f->>'source_url', f->>'source_type', (f->>'retrieved_at')::timestamptz, nullif(f->>'published_at', '')::timestamptz, f->>'quote_snippet',
     (f->>'confidence')::numeric, f->>'method', (f->>'expires_at')::timestamptz
   from jsonb_array_elements(coalesce(p->'facts', '[]'::jsonb)) with ordinality as x(f, n) where n <= 25;
-  insert into public.career_contact_email_evidence(contact_id, user_id, email, method, score, syntax, mx, provider, catch_all, rcpt, source_url, format, format_evidence, checked_at, expires_at)
+  insert into public.career_contact_email_evidence(contact_id, user_id, email, method, score, syntax, mx, provider, catch_all, rcpt, source_url, format, format_evidence, checked_at, expires_at, why)
   values (id_, u, nullif(e->>'email', ''), nullif(e->>'method', ''), (e->>'score')::int, e->>'syntax', e->>'mx', e->>'provider', (e->>'catch_all')::boolean, e->>'rcpt',
-    nullif(e->>'source_url', ''), nullif(e->>'format', ''), coalesce((e->>'format_evidence')::int, 0), (e->>'checked_at')::timestamptz, exp);
+    nullif(e->>'source_url', ''), nullif(e->>'format', ''), coalesce((e->>'format_evidence')::int, 0), (e->>'checked_at')::timestamptz, exp, left(coalesce(e->>'why', ''), 300));
   return id_;
 end $$;
 

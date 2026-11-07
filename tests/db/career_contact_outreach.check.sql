@@ -1,4 +1,4 @@
--- CONTACT OUTREACH (20261107120000_career_contact_outreach.sql), in the database alone: a contact saves with its facts and
+-- CONTACT OUTREACH (20261107120200_career_contact_outreach.sql), in the database alone: a contact saves with its facts and
 -- evidence in one call; a score that is not its method's is refused; at most 25 facts; another person reads nothing; the
 -- client roles reach nothing; the global suppression list and the rail's opt-outs and bounces all suppress; the daily
 -- new-contact limit holds (follow-ups do not count); forget removes one contact or all; expired rows purge. Rolled back.
@@ -10,7 +10,7 @@ declare
   a uuid := '00000000-0000-4000-8000-00000000c701'; b uuid := '00000000-0000-4000-8000-00000000c702';
   id1 uuid; id2 uuid; j jsonb; facts jsonb := '[]'; hs text[]; r text; n int;
   h1 text := repeat('1', 64); h2 text := repeat('2', 64); h3 text := repeat('3', 64); h4 text := repeat('4', 64);
-  ev jsonb := '{"email":"jane.doe@acme.io","method":"pattern_rcpt_valid","score":80,"syntax":"pass","mx":"pass","provider":"other","catch_all":false,"rcpt":"accept","format":"first.last","format_evidence":2,"checked_at":"2026-11-07T00:00:00Z"}';
+  ev jsonb := '{"email":"jane.doe@acme.io","method":"pattern_rcpt_valid","score":80,"syntax":"pass","mx":"pass","provider":"other","catch_all":false,"rcpt":"accept","format":"first.last","format_evidence":2,"checked_at":"2026-11-07T00:00:00Z","why":"the company's address format (seen 2+ times), accepted by its mail server"}';
 begin
   insert into auth.users(id, email) values (a, 'cc-a@example.test'), (b, 'cc-b@example.test');
   insert into public.profiles(id) values (a), (b) on conflict do nothing;
@@ -25,6 +25,12 @@ begin
   if (j->'email'->>'score')::int <> 80 or (j->'email'->>'approvable')::boolean is not true then raise exception 'FAIL evidence: %', j->'email'; end if;
   if public.career_contact_get(jsonb_build_object('user', b, 'id', id1)) is not null then raise exception 'FAIL another person reads the contact'; end if;
   raise notice 'ok   a contact saves with 25 facts and its evidence; only its owner reads it';
+  if j->'email'->>'why' is distinct from ev->>'why' then raise exception 'FAIL the evidence keeps its explanation: %', j->'email'; end if;
+  id2 := public.career_contact_save(jsonb_build_object('user', a, 'person', j->'person', 'facts', '[]'::jsonb, 'email', ev || '{"method":"github_public","score":90,"mx":"fail","provider":"none","why":"on their public GitHub profile; no mail server confirmed for janedoe.dev"}'));
+  j := public.career_contact_get(jsonb_build_object('user', a, 'id', id2));
+  if (j->'email'->>'approvable')::boolean is not false or j->'email'->>'why' not like '%no mail server%' then raise exception 'FAIL no mail server is never approvable: %', j->'email'; end if;
+  perform public.career_contact_forget(jsonb_build_object('user', a, 'id', id2));
+  raise notice 'ok   the evidence keeps its explanation; an address without a confirmed mail server is never approvable';
 
   begin
     perform public.career_contact_save(jsonb_build_object('user', a, 'person', j->'person', 'facts', '[]'::jsonb, 'email', ev || '{"score":79}'));

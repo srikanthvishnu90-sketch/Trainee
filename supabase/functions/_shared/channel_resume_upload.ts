@@ -139,16 +139,23 @@ function runText(xml: string, tags = "t|delText|instrText"): string[] {
 // All character data of a part, a paragraph, break or closing block per line: text a writer put under any tag name.
 const allText = (xml: string) => lines(xml.replace(new RegExp(String.raw`</${P}(?:p|tc|tr|txbxContent|div|li)>|<${P}(?:br|cr)\b[^>]*/?>`, "g"), "\n").replace(/<[^>]*>/g, " "));
 // A part's text in its declared encoding: a byte-order mark, UTF-16 without one, or the XML declaration's encoding; UTF-8 otherwise.
+// Fail closed: a part that does not then read as XML (starts with "<", no NUL character) throws, so the upload is refused.
 function decodePart(part: Uint8Array): string {
-  const b = part;
-  if (b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf) return new TextDecoder("utf-8").decode(b.subarray(3));
-  if (b[0] === 0xff && b[1] === 0xfe) return new TextDecoder("utf-16le").decode(b.subarray(2));
-  if (b[0] === 0xfe && b[1] === 0xff) return new TextDecoder("utf-16be").decode(b.subarray(2));
-  if (b[0] === 0x3c && b[1] === 0x00) return new TextDecoder("utf-16le").decode(b);
-  if (b[0] === 0x00 && b[1] === 0x3c) return new TextDecoder("utf-16be").decode(b);
-  const head = new TextDecoder("latin1").decode(b.subarray(0, 120)), enc = /encoding=["']([\w.:-]+)["']/i.exec(head)?.[1];
-  if (enc && !/^utf-?8$/i.test(enc)) { try { return new TextDecoder(enc).decode(b); } catch { throw new Error(`unknown encoding ${enc}`); } }
-  return new TextDecoder("utf-8").decode(b);
+  const b = part, dec = (label: string, at = 0) => { try { return new TextDecoder(label, { fatal: false }).decode(b.subarray(at)); } catch { throw new Error(`unknown encoding ${label}`); } };
+  let s: string;
+  if (b[0] === 0xff && b[1] === 0xfe && b[2] === 0 && b[3] === 0) throw new Error("UTF-32 part");
+  if (b[0] === 0 && b[1] === 0 && b[2] === 0xfe && b[3] === 0xff) throw new Error("UTF-32 part");
+  if (b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf) s = dec("utf-8", 3);
+  else if (b[0] === 0xff && b[1] === 0xfe) s = dec("utf-16le", 2);
+  else if (b[0] === 0xfe && b[1] === 0xff) s = dec("utf-16be", 2);
+  else if (b[1] === 0x00 && b[0] !== 0x00) s = dec("utf-16le");
+  else if (b[0] === 0x00 && b[1] !== 0x00) s = dec("utf-16be");
+  else {
+    const head = new TextDecoder("latin1").decode(b.subarray(0, 200)), enc = /encoding\s*=\s*["']([\w.:-]+)["']/i.exec(head)?.[1];
+    s = enc && !/^utf-?8$/i.test(enc) ? dec(enc) : dec("utf-8");
+  }
+  if (!/^\s*</.test(s) || s.includes("\u0000")) throw new Error("part does not read as XML");
+  return s;
 }
 const attrText = (xml: string) => [...xml.matchAll(/\s(?:descr|title|w:tooltip)="([^"]*)"/g)].flatMap((m) => lines(m[1]));
 const queryOf = (url: string) => { const q = decodeXml(url).replace(/^[^?#]*/, ""); try { return decodeURIComponent(q); } catch { return q; } };

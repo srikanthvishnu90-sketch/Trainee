@@ -244,6 +244,12 @@ Deno.test("R8G-7 Greptile on #577: UTF-16 and odd-prefix parts, mc:Fallback and 
   await refused(docx([{ name: "word/header1.xml", data: '<ns0:hdr xmlns:ns0="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><ns0:p><ns0:r><ns0:t>Verification code: 482913</ns0:t></ns0:r></ns0:p></ns0:hdr>' }]), "another prefix");
   await refused(docx([], '<w:p><mc:AlternateContent><mc:Choice Requires="wps"><w:r><w:t>Text box</w:t></w:r></mc:Choice><mc:Fallback><w:pict><v:textbox><w:txbxContent><w:p><w:r><w:t>Login code 482913</w:t></w:r></w:p></w:txbxContent></v:textbox></w:pict></mc:Fallback></mc:AlternateContent></w:p>'), "mc:Fallback text");
   await refused(docx([], '<w:p><w:r><w:drawing><a:graphic><a:p><a:r><a:t>My OTP is 482913</a:t></a:r></a:p></a:graphic></w:drawing></w:r></w:p>'), "a:t body text");
+  // Review of #578: a spaced encoding declaration is honoured; a part that does not read as XML afterwards refuses the file.
+  const hdrX = (decl: string) => `<?xml version="1.0" ${decl}?><w:hdr ${W}><w:p><w:r><w:t>Jordan Lee</w:t></w:r></w:p></w:hdr>`;
+  await refused(docx([{ name: "word/header1.xml", data: hdrX('encoding = "x-bogus-9"') }]), "spaced unknown encoding");
+  await refused(docx([{ name: "word/header1.xml", data: new Uint8Array([0xff, 0xfe, 0, 0, 0x3c, 0, 0, 0]) }]), "UTF-32 part");
+  await refused(docx([{ name: "word/header1.xml", data: new Uint8Array([0x4c, 0x6f, 0xa7, 0x94, 0x93, 0x40]) }]), "EBCDIC-looking part");
+  await refused(docx([{ name: "word/header1.xml", data: utf16(`\n<w:hdr ${W}><w:p><w:r><w:t>OTP 482913</w:t></w:r></w:p></w:hdr>`).subarray(2) }]), "UTF-16 without a mark after a newline");
   const plain16 = await upload(docx([{ name: "word/footer1.xml", data: utf16(`<?xml version="1.0" encoding="UTF-16"?><w:ftr ${W}><w:p><w:r><w:t>Jordan Lee · Page 1</w:t></w:r></w:p></w:ftr>`) }]));
   assertNode.ok(plain16.res.ok && plain16.stored.length === 1, "a plain UTF-16 footer is kept");
   const box = await upload(docx([], '<w:p><mc:AlternateContent><mc:Choice Requires="wps"><w:r><w:t>Volunteer, Food Bank, 2018 - 2020</w:t></w:r></mc:Choice><mc:Fallback><w:pict><v:textbox><w:txbxContent><w:p><w:r><w:t>Volunteer, Food Bank, 2018 - 2020</w:t></w:r></w:p></w:txbxContent></v:textbox></w:pict></mc:Fallback></mc:AlternateContent></w:p>'));

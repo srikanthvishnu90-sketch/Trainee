@@ -83,7 +83,11 @@ function tokensIn(sentence: string, carried = false): { start: number; end: numb
     if (!isStrong && !near(at, weak)) continue;
     // Weak context: only a plain run of 4-8 digits that is not a year.
     // Weak context: a later group of a spaced run ("555 1234" in "415 555 1234") is part of a phone number or a date.
-    if (!isStrong && /\d(?:[ \t\u00a0\u2007\u2009\u202f]{1,8}|[ \t\u00a0\u2007\u2009\u202f]{0,8}(?:\r\n|[\r\n\-\u2013\u2014])[ \t\u00a0\u2007\u2009\u202f]{0,8})$/.test(sentence.slice(0, at))) continue;
+    // ...unless that earlier group is a full code itself, 6+ digits on its own line ("Workday sent me 739201\n482913": two codes;
+    // phone groups have at most 4 digits).
+    const prevGroup = /(\d+)(?:[ \t\u00a0\u2007\u2009\u202f]{1,8}|[ \t\u00a0\u2007\u2009\u202f]{0,8}(?:\r\n|[\r\n\-\u2013\u2014])[ \t\u00a0\u2007\u2009\u202f]{0,8})$/.exec(sentence.slice(0, at));
+    const prevIsCode = !!prevGroup && prevGroup[1].length >= 6 && /[\r\n]/.test(sentence.slice(at - (prevGroup[0].length - prevGroup[1].length), at));
+    if (!isStrong && prevGroup && !prevIsCode) continue;
     if (!isStrong && /[ \r\n\t\u00a0\u2007\u2009\u202f\-\u2013\u2014]/.test(tok)) {
       // Weak context, a split token: a 3+3 code, or two groups split by a line break that make 6 to 8 digits ("7392\n01",
       // "1234\n5678"). Otherwise a first line of 4+ digits is the code by itself ("4821\n9"); anything else is skipped (review on #575).

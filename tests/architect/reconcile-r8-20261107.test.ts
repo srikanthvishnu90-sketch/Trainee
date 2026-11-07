@@ -58,7 +58,7 @@ Deno.test("R8R-51/53 the acknowledgement check reads real acknowledgements and t
 
 // Separator residuals (inventory header; records 83-88 family): every Unicode space, a minus sign, a period and more dash forms
 // between code groups are removed like a plain space or hyphen, typed or pending; harmless numbers stay.
-import { normalizeChatText } from "../../supabase/functions/_shared/identity_redact.ts";
+import { normalizeChatText, redactIdentity } from "../../supabase/functions/_shared/identity_redact.ts";
 const savedOf = (m: string, pending = false) => {
   const once = chatInput(m, [], 10000, { codePending: pending }) as any;
   const after = codeInChat(once.message, { userContent: once.userContent, removed: once.redacted, codePending: pending });
@@ -138,6 +138,27 @@ Deno.test("R8R-92 handler path: an uploaded DOCX with a handed-over code is refu
 // random hex token. The check reads the code as a reader sees it, whole or split, and never inside a token.
 import { codeShown } from "./scenarios-file-signin-r4-battery.ts";
 Deno.test("R8R-SIGNIN a code shown on a page is caught whole or split; its digits inside a random token are not the code", () => {
-  for (const b of ["Your code is 165736.", "<p>165 736</p>", "code: 165-736", ">165736<", "165 736"]) assertNode.ok(codeShown(b, "165736"), b);
-  for (const b of ['<input type="hidden" name="t" value="fp1.e3a9b1657361c2f0">', "fs1.0a165736ff", 'name="set" value="b2165736e1"', "Application e1657360c"]) assertNode.ok(!codeShown(b, "165736"), b);
+  // Visible codes fail the invariant: whole, glued to words, split in two groups (independent check of 41afa39f).
+  for (const b of ["Your code is 165736.", "<p>Your code165736</p>", "<p>165736is your code</p>", ">165736<", "<p>x165736</p>", "<p>165 736</p>", "code: 165-736", "165\u2013736", "165\u00a0736"]) assertNode.ok(codeShown(b, "165736"), b);
+  // Only the page's proven random tokens are masked (CI run 42348230248: "165736" inside one).
+  for (const b of ['<input type="hidden" name="t" value="fp1.e3a9b1657361c2f04d9a">', "fs1.0a165736ff9c0a165736ff9c", '<input type="hidden" name="set" value="b2165736e1aa04f1">',
+    '<input type="hidden" name="tag" value="4165736012345678">', '<input type="hidden" name="ref" value="a16573600c4d">', "<dd>7b0f8f8e-6a43-4a49-9d2c-000165736a01</dd>", "<dd>e16573600c4d9e2f1a</dd>"]) assertNode.ok(!codeShown(b, "165736"), b);
+});
+
+// Independent check of 41afa39f: a second code on the next line after a weak cue is removed; a count on the next line after a
+// labeled code is kept.
+Deno.test("R8R-NEXTLINE a second code on the next line is removed; a count on the next line stays", () => {
+  for (const m of ["Workday sent me 739201\n482913", "my code is 739201\n482913", "Lever texted me 482913\r\n739201"]) {
+    const { saved } = savedOf(m);
+    assertNode.ok(!/739201|482913/.test(saved), `${JSON.stringify(m)}: ${JSON.stringify(saved)}`);
+  }
+  for (const m of ["my code is 739201\n2 minutes ago", "code 7392\n2 minutes ago", "code 739-201\n2 minutes ago", "verification code 739201 \n2 mins ago", "Workday sent me 739201\n2 minutes ago"]) {
+    const kept = m.slice(m.indexOf("\n"));
+    const { saved } = savedOf(m);
+    assertNode.ok(saved.includes(kept) && !/739201|7392|739-201/.test(saved), `${JSON.stringify(m)}: ${JSON.stringify(saved)}`);
+    if (/code/.test(m)) assertNode.ok(redactIdentity(m).text.endsWith(kept), `redactIdentity ${JSON.stringify(m)}: ${JSON.stringify(redactIdentity(m).text)}`);
+  }
+  // Phone groups on separate lines stay a phone; a code split by a line break still goes whole.
+  assertNode.ok(savedOf("call me at 415\n555\n1234 the portal").saved.includes("415\n555\n1234"));
+  assertNode.ok(!/739|201/.test(savedOf("Verification code: 739\n201").saved));
 });

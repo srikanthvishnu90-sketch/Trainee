@@ -32,7 +32,7 @@ import { handleTelegram } from "../../supabase/functions/trainee-telegram/handle
 import { chatThroughAgent, deliverer } from "../../supabase/functions/_shared/channel_runtime.ts";
 import { supabaseInboundStore } from "../../supabase/functions/trainee-inbound/store.ts";
 import { CHANNEL_REPLIES } from "../../supabase/functions/_shared/channel.ts";
-import { FILE_EMPTY_REPLY, FILE_KIND_REPLY, FILE_LOCKED_REPLY, FILE_NO_TEXT_REPLY, FILE_TOO_BIG_REPLY, fileSecretReply, sha256Bytes } from "../../supabase/functions/_shared/channel_resume_upload.ts";
+import { FILE_EMPTY_REPLY, FILE_KIND_REPLY, FILE_LOCKED_REPLY, FILE_NO_TEXT_REPLY, FILE_TOO_BIG_REPLY, cleanDocx, fileKind, fileSecretReply, sha256Bytes } from "../../supabase/functions/_shared/channel_resume_upload.ts";
 import { type Entry, fileFor, type Journey, journeys, linkedinPaste, modelStep, newModel, resumeFile, type ResumeFile, rng, sig, type Step } from "./scenarios/onboarding-r2-generator.ts";
 
 const CI = Deno.env.get("CI") === "true";
@@ -180,7 +180,8 @@ Deno.test({
             const before = bot.to(chat).length;
             let r: { status: number; body: string };
             const f = fileFor(j, s);
-            if (f) { r = await sendFile(chat, f); shaOf.set(f, await sha256Bytes(f.bytes)); }
+            // the stored file is the cleaned copy (owner decision, release 8)
+            if (f) { r = await sendFile(chat, f); shaOf.set(f, await sha256Bytes(fileKind(f.name, f.mime, f.bytes) === "docx" ? await cleanDocx(f.bytes).catch(() => f.bytes) : f.bytes)); }
             else if (s.t === "start") r = await text(chat, "/start");
             else if (s.t === "linkedin") r = await text(chat, linkedinPaste(j.a).text);
             else r = await text(chat, (s as { input: string }).input);
@@ -285,7 +286,8 @@ Deno.test({
             if (JSON.stringify(factSig(conf)) !== JSON.stringify(sig(m.pending))) fail(`person ${i}`, `two yeses at once did not confirm exactly the entries shown: ${JSON.stringify(factSig(conf))}: ${who()}`);
             if (Number(st.events) !== conf.length || conf.some((x) => !x.confirmation_event_id)) fail(`person ${i}`, `${st.events} fact_confirmed events for ${conf.length} entries: ${who()}`);
             const first = fileFor(j, j.steps[0])!;
-            if (!st.on_file || st.record?.kind !== "file" || st.record?.sha256 !== await sha256Bytes(first.bytes)) fail(`person ${i}`, `record and profile disagree: ${JSON.stringify(st.record)}: ${who()}`);
+            // the stored file is the cleaned copy (owner decision, release 8)
+            if (!st.on_file || st.record?.kind !== "file" || st.record?.sha256 !== await sha256Bytes(fileKind(first.name, first.mime, first.bytes) === "docx" ? await cleanDocx(first.bytes).catch(() => first.bytes) : first.bytes)) fail(`person ${i}`, `record and profile disagree: ${JSON.stringify(st.record)}: ${who()}`);
             // deno-lint-ignore no-explicit-any
             if (JSON.stringify(factSig((st.apply as any[]).filter((x) => RESUME_KINDS.has(x.kind)))) !== JSON.stringify(sig(m.pending).filter((x) => RESUME_KINDS.has(x.split("|")[0])))) fail(`person ${i}`, `applications would be prepared from other entries after the race: ${who()}`);
             bump("race-channels");
@@ -301,8 +303,9 @@ Deno.test({
             const facts = (st.facts as any[]).filter((x) => x && x.source === "resume-ingest");
             const conf = factSig(facts.filter((x) => x.needs_confirmation === false)), drafts = factSig(facts.filter((x) => x.needs_confirmation === true));
             const A = sig((first.expect as { entries: Entry[] }).entries), B = sig((newer.expect as { entries: Entry[] }).entries);
-            const okA = JSON.stringify(conf) === JSON.stringify(A) && JSON.stringify(drafts) === JSON.stringify(B) && st.record?.sha256 === await sha256Bytes(first.bytes);
-            const okB = JSON.stringify(conf) === JSON.stringify(B) && drafts.length === 0 && st.record?.sha256 === await sha256Bytes(newer.bytes);
+            // the stored file is the cleaned copy (owner decision, release 8)
+            const okA = JSON.stringify(conf) === JSON.stringify(A) && JSON.stringify(drafts) === JSON.stringify(B) && st.record?.sha256 === await sha256Bytes(fileKind(first.name, first.mime, first.bytes) === "docx" ? await cleanDocx(first.bytes).catch(() => first.bytes) : first.bytes);
+            const okB = JSON.stringify(conf) === JSON.stringify(B) && drafts.length === 0 && st.record?.sha256 === await sha256Bytes(fileKind(newer.name, newer.mime, newer.bytes) === "docx" ? await cleanDocx(newer.bytes).catch(() => newer.bytes) : newer.bytes);
             const okNone = conf.length === 0 && JSON.stringify(drafts) === JSON.stringify(B) && !st.record;
             if (!okA && !okB && !okNone) fail(`person ${i}`, `a newer file and a yes at once left a mixed state: conf ${JSON.stringify(conf)} drafts ${JSON.stringify(drafts)} record ${JSON.stringify(st.record)}: ${who()}`);
             bump(okA ? "race-newer:first-confirmed" : okB ? "race-newer:newer-confirmed" : "race-newer:none");

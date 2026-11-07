@@ -71,6 +71,5 @@ begin
  end if;
  return true;
 end $$;
-revoke all on function public.career_resume_take(uuid, jsonb) from public, anon, authenticated;
-grant execute on function public.career_resume_take(uuid, jsonb) to service_role;
+revoke all on function public.career_resume_take(uuid, jsonb) from public, anon, authenticated, service_role;
 drop function if exists public.career_resume_cloud_copy_recover(uuid);

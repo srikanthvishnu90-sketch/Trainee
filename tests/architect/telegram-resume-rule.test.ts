@@ -8,7 +8,7 @@ import { chatThroughAgent } from "../../supabase/functions/_shared/channel_runti
 import { webhookDeps } from "../../supabase/functions/trainee-telegram/handler.ts";
 import { cardButtons, cardDigest, parseTap, TAP_ANSWERED, TAP_CHANGED, TAP_STALE, TAP_UNKNOWN, tapCard, type TapStore } from "../../supabase/functions/_shared/channel_card_tap.ts";
 import { resumeOnFileReader } from "../../supabase/functions/_shared/career_apply_from_chat.ts";
-import { FILE_KIND_REPLY, FILE_NO_TEXT_REPLY, ingestResumeFile, resumeMessage } from "../../supabase/functions/_shared/channel_resume_upload.ts";
+import { cleanDocx, FILE_KIND_REPLY, FILE_NO_TEXT_REPLY, ingestResumeFile, resumeMessage } from "../../supabase/functions/_shared/channel_resume_upload.ts";
 import { statusAsk, statusReply } from "../../supabase/functions/_shared/career_apply_status.ts";
 import { applyTurn } from "../../supabase/functions/_shared/career_apply_chat.ts";
 import { memoryWantStore } from "../../supabase/functions/_shared/career_apply_want.ts";
@@ -365,7 +365,8 @@ Deno.test("F16 resume file: a Word .docx is read by code too (its paragraphs, in
     fetchFile: async () => ({ ok: true, bytes: docx }), record: async (x) => { rec.push(x); return "id-d"; } });
   assert(r.ok, JSON.stringify(r));
   eq(r.ok && r.message, `here is my resume:\n${paras.join("\n")}`);
-  const hex = [...new Uint8Array(await crypto.subtle.digest("SHA-256", docx))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  // the stored file is the cleaned copy (owner decision, release 8)
+  const hex = [...new Uint8Array(await crypto.subtle.digest("SHA-256", await cleanDocx(docx)))].map((b) => b.toString(16).padStart(2, "0")).join("");
   eq([rec[0].sha256, rec[0].ref, rec[0].mime], [hex, "telegram:UD", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]);
 });
 

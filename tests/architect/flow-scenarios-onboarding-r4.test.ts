@@ -30,7 +30,7 @@ import { fakeBot, plainOf } from "./scenarios/telegram-bot-api.ts";
 import { handleTelegram } from "../../supabase/functions/trainee-telegram/handler.ts";
 import { chatThroughAgent, deliverer } from "../../supabase/functions/_shared/channel_runtime.ts";
 import { supabaseInboundStore } from "../../supabase/functions/trainee-inbound/store.ts";
-import { sha256Bytes } from "../../supabase/functions/_shared/channel_resume_upload.ts";
+import { cleanDocx, sha256Bytes } from "../../supabase/functions/_shared/channel_resume_upload.ts";
 import { DOCX, docxBytes, PDF, pdfBytes } from "./scenarios/onboarding-r2-generator.ts";
 import { entriesOf, linesOf, person, type Person, sig } from "./scenarios/onboarding-r3-generator.ts";
 import { disownPhrase, rng } from "./scenarios/onboarding-r4-generator.ts";
@@ -188,7 +188,8 @@ Deno.test({
             await say("yes, that's my resume");
             const u = await userOfChat(chat);
             const st = await state(u);
-            const shaA = await sha256Bytes(a), shaB = await sha256Bytes(b);
+            // the stored file is the cleaned copy (owner decision, release 8)
+            const shaA = await sha256Bytes(a), shaB = await sha256Bytes(await cleanDocx(b));
             const conf = factSig(confirmed(st));
             const isA = same(conf, sig(entriesOf(p))), isB = same(conf, sig(entriesOf(q)));
             if (st.on_file) {
@@ -221,7 +222,8 @@ Deno.test({
             if (Number(mid0.jobs) !== 1 || Number(mid0.prepared) !== 1 || Number(mid0.driving) !== 1) fail(`person ${i}`, `a newer resume not yet confirmed stopped something: ${JSON.stringify({ jobs: mid0.jobs, prepared: mid0.prepared, driving: mid0.driving })}: ${who()}`);
             const y = await say("yes, that's my resume");
             const st = await state(u);
-            if (st.record?.sha256 !== await sha256Bytes(b)) fail(`person ${i}`, `the new resume is not the record: ${who()}`);
+            // the stored file is the cleaned copy (owner decision, release 8)
+            if (st.record?.sha256 !== await sha256Bytes(await cleanDocx(b))) fail(`person ${i}`, `the new resume is not the record: ${who()}`);
             if (Number(st.jobs) !== 0 || Number(st.prepared) !== 0 || Number(st.driving) !== 1) fail(`person ${i}`, `not exactly the queued and the prepared stopped: ${JSON.stringify({ jobs: st.jobs, prepared: st.prepared, driving: st.driving })}: ${who()}`);
             if (!/1 approved application that hadn't gone out yet was made with your earlier resume, so it is cancelled \(Juniper Bank \(TEST\)\)/.test(y)) fail(`person ${i}`, `the cancelled approval was not said: ${who()}`);
             if (!/1 prepared application made with your earlier resume is discarded/.test(y)) fail(`person ${i}`, `the discarded preparation was not said: ${who()}`);

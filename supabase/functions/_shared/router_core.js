@@ -40819,7 +40819,9 @@ const CareerRouter = (() => {
       prevEnd = end;
       if (unit === "hour") {
         if (role === "ask") { if (out.ask == null) out.ask = v; }
-        else if (role === "employer") out.offer = v;
+        // "They offered me $26/hour but my other offer is $30/hour" keeps 26 (review of d3fd6027); a revision still wins.
+        // A later employer figure revises the offer, unless it is marked as another offer (review of 12de38d7).
+        else if (role === "employer") { if (out.offer == null || !/\b(?:other|another|second|competing|different|backup|rival)\s+(?:\w+\s+){0,2}?(?:offers?|job|company|employer|place|firm)\b/i.test(src.slice(Math.max(0, start - 60), start))) out.offer = v; }
         else if (role === "current") out.current = v;
         else if (out.unknown == null) out.unknown = v;
       } else if (unit === "none" && role === "ask" && out.askBare == null && unitlessHourly(v, end)) out.askBare = v;
@@ -40844,7 +40846,9 @@ const CareerRouter = (() => {
       // word, a pay verb, then the figure. "A friend referred me and they offered $30/hour", "a peer support role" and "a sister
       // company" are not (review of f609ce7d).
       // The pay verb is the person's own: no "I"/"me"/"and" between them, and "got me an offer" is the user's (review of 529d1d08).
-      const PERSON_PAY = /\b(?:friends?|co-?workers?|colleagues?|peers?|classmates?|roommates?|siblings?|brother|sister|cousin|neighbou?r|someone|people)\b(?:\s+(?!(?:i|me|my|and|but|so|then|thanks)\b)[\w'-]+){0,4}?\s+(?:makes?|earns?|gets?(?!\s+me\b)|got(?!\s+me\b)(?:\s+offered)?|is\s+(?:paid|making|earning|getting|on)|was\s+(?:offered|paid)|are\s+(?:paid|making|earning|getting|on)|were\s+(?:offered|paid)|pulls?|took)\b[^.;!?\n]{0,25}$/i;
+      // Also a person's own offer or pay written as a possessive ("My friend's offer was $30/hour") and family members ("My
+      // husband was offered $30/hour"; review of d3fd6027).
+      const PERSON_PAY = /\b(?:friends?|co-?workers?|colleagues?|peers?|classmates?|roommates?|siblings?|brother|sister|cousin|neighbou?r|someone|people|husband|wife|spouse|partner|boyfriend|girlfriend|fianc[eé]e?|mom|mum|dad|mother|father|parents?|son|daughter|uncle|aunt)\b(?:['\u2019]s?\s+(?:[\w-]+\s+){0,2}?(?:offer|pay|rate|salary|wage|comp(?:ensation)?|base)\b[^.;!?\n]{0,25}$|(?:\s+(?!(?:i|me|my|and|but|so|then|thanks)\b)[\w'-]+){0,4}?\s+(?:makes?|earns?|gets?(?!\s+me\b)|got(?!\s+me\b)(?:\s+offered)?|is\s+(?:paid|making|earning|getting|on)|was\s+(?:offered|paid)|are\s+(?:paid|making|earning|getting|on)|were\s+(?:offered|paid)|pulls?|took)\b[^.;!?\n]{0,25}$)/i;
       // incidental uses that name no third party: only "market" inside one named role ("a market research analyst role").
       // "indeed" is never masked: the adverb and the salary site Indeed cannot be told apart reliably ("it was Indeed that
       // quoted $28"), so a sentence with it and a pay figure is held (Greptile on 76313b47).

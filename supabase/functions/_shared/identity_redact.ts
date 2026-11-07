@@ -95,6 +95,8 @@ const BARE_CODE = /(?<![\d$€£.,:/#-])\b\d{6,8}\b(?![\d/-]|[.,:]\d|\s*(?:k\b|%
 // ...and, while a code is waiting, the same code split in two 3-digit groups ("739 201", "739\n201", "739-201"; Greptile on #572).
 // A sentence comma, colon or period may follow ("739 201, can you enter it?"); one before more digits may not ("3.85", "1,200").
 // Not a group of a longer run: a phone number ("415 555 1234") or a date keeps its third group, so it never matches.
+const SPLIT_COUNT_AFTER = /^\s*(?:users|people|employees|customers|clients|students|members|subscribers|downloads|visitors|views|followers|patients|accounts|orders|transactions|records|items|units|requests|calls|tickets|miles|km|words|lines|hours|sq|square|eur|euros?|€|gbp|£|chf|usd)\b/i;
+const SPLIT_PAY_BEFORE = /\b(?:i|we|they|she|he)\s+(?:make|makes|made|earn|earns|earned)\s*$|\b(?:salary|income|revenue|budget)\s+(?:of|is|was)?\s*$/i;
 const BARE_SPLIT_CODE = /(?<![\d$€£.,:/#-]|\d(?:[ \t]{1,8}|[ \t]{0,8}[\n\-][ \t]{0,8}))\b\d{3}(?:[ \t]{1,8}|[ \t]{0,8}[\n\-][ \t]{0,8})\d{3}\b(?![\d/-]|[.,:]\d|(?:[ \t]{1,8}|[ \t]{0,8}[\n\-][ \t]{0,8})\d|\s*(?:k\b|%|usd|dollars|a year|per\b|\/))/gi;
 // The one form chat text takes before any redaction or hashing: line endings become "\n", no-break, thin and figure spaces and
 // tabs become a space, and an en or em dash between digits a hyphen, so "739\r\n201", "739\u00a0201" and "739–201" meet the
@@ -168,7 +170,11 @@ export function redactIdentity(input: string, o: { codePending?: boolean } = {})
   t = t.replace(CVV_NAMED, (_m, label: string, sep, _digits, more?: string) => { removed.add("card"); return `${label}${sep}[security code removed]${more && /card|digit/i.test(label) ? more : ""}`; });
   t = t.replace(IBAN, (m) => { if (!ibanOk(m)) return m; removed.add("account"); return "[number removed]"; });
   if (o.codePending) t = t.replace(BARE_CODE, () => { removed.add("code"); return "[code removed]"; });
-  if (o.codePending) t = t.replace(BARE_SPLIT_CODE, () => { removed.add("code"); return "[code removed]"; });
+  // A spaced figure that is a count or pay ("120 000 users", "I make 120 000") is not a code (review of d3fd6027).
+  if (o.codePending) t = t.replace(BARE_SPLIT_CODE, (m: string, off: number, all: string) => {
+    if (SPLIT_COUNT_AFTER.test(all.slice(off + m.length)) || SPLIT_PAY_BEFORE.test(all.slice(0, off))) return m;
+    removed.add("code"); return "[code removed]";
+  });
   t = t.replace(KEY_SHAPED, () => { removed.add("key"); return "[key removed]"; });
   return { text: t, removed: [...removed] };
 }

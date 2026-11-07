@@ -25,7 +25,7 @@
 import assertNode from "node:assert/strict";
 import * as core from "../../supabase/functions/_shared/router_core.career.js";
 import { CareerHost } from "../../supabase/functions/_shared/career_host.js";
-import { FILE_EMPTY_REPLY, FILE_KIND_REPLY, FILE_LOCKED_REPLY, FILE_NO_TEXT_REPLY, FILE_TOO_BIG_REPLY, fileNotResumeReply, fileSecretReply, ingestResumeFile, resumeMessage, sha256Bytes } from "../../supabase/functions/_shared/channel_resume_upload.ts";
+import { FILE_EMPTY_REPLY, FILE_KIND_REPLY, FILE_LOCKED_REPLY, FILE_NO_TEXT_REPLY, FILE_TOO_BIG_REPLY, cleanDocx, fileKind, fileNotResumeReply, fileSecretReply, ingestResumeFile, resumeMessage, sha256Bytes } from "../../supabase/functions/_shared/channel_resume_upload.ts";
 import { type Entry, FILE_FAMILIES, type FileFamily, fileFor, framed, injectedText, INJECTIONS, inputFor, type Journey, journeys, linkedinPaste, modelStep, newModel, NOW, person, replies, resumeFile, type ResumeFile, rng, sig, type Step } from "./scenarios/onboarding-r2-generator.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -119,7 +119,9 @@ Deno.test(`files: ${FILES.length} resume files sent on Telegram (${FILE_FAMILIES
     }
     check(rep, res.ok, `${f.family}: a readable file was refused`, () => `${name()} -> ${JSON.stringify(res).slice(0, 300)}`);
     if (!res.ok) continue;
-    check(rep, stored.length === 1 && stored[0].sha256 === await sha256Bytes(f.bytes) && stored[0].bytes === f.bytes.length && atob(stored[0].content_b64).length === f.bytes.length,
+    // the stored file is the cleaned copy (owner decision, release 8)
+    const kept = fileKind(f.name, f.mime, f.bytes) === "docx" ? await cleanDocx(f.bytes) : f.bytes;
+    check(rep, stored.length === 1 && stored[0].sha256 === await sha256Bytes(kept) && stored[0].bytes === kept.length && atob(stored[0].content_b64).length === kept.length,
       "the file was not stored once, as received, by its sha256", () => name());
     // The chat's message is the file's text, framed as a pasted resume.
     check(rep, res.message.startsWith("here is my resume:\n"), "the file's text is not framed as a resume", () => name());

@@ -55,6 +55,16 @@ const MORE_GROUPS = /^(?:[ \t\u00a0\u2007\u2009\u202f]{1,8}|[ \t\u00a0\u2007\u20
 // A sentence that hands over the value of a code the previous sentence named: "The portal sent a code. It is 739201."
 const VALUE_LEAD = /^\s*(?:it(?:'s|\s+is|\s+was)|its|that(?:'s|\s+is|\s+was)|the\s+(?:code|number|password|pin)\s+(?:is|was)|here(?:'s|\s+it\s+is)|(?:it|they)\s+said|the\s+digits\s+(?:are|were))\b/i;
 
+// A code label AFTER the token, in the same sentence, within about 40 characters and with only connector words between: "739201 is my
+// verification code", "739 201 is the code Workday sent", "482913 - that's the login code" (r8 leak: a code typed before its label
+// was stored as typed). Strong code words only; the label must close the clause or be followed by who sent it, so "1200 is the
+// code count", "94107 is my zip code", "4500 is the error code" and "2024 is the year I got my code" stay numbers.
+const CONNECT_AFTER = String.raw`[ \t,:]*(?:(?:[-\u2013\u2014]+|is|was|it'?s|it\s+is|that'?s|that\s+(?:is|was)|this\s+(?:is|was)|here'?s)[ \t,:]*)*`;
+const LABEL_WORDS = String.raw`(?:(?:my|the|your|our|a)\s+)?(?:(?:one[- ]time|verification|verify|login|log[- ]?in|sign[- ]?in|security|2fa|mfa|otp|two[- ]factor|auth(?:entication)?)\s+)?(?:code|passcode|pass\s+code|otp|one[- ]time\s+(?:pass(?:code|word)?|pin))`;
+// What may follow the label: the clause ends, or who sent it ("the code Workday sent", "the code from Greenhouse").
+const LABEL_CLOSE = String.raw`(?=[ \t]*(?:$|[.,!?;:)\n\-\u2013\u2014])|[ \t]+(?:(?:that|which)\s+)?(?:[\w'-]+\s+){0,3}(?:sent|texted|emailed|gave|messaged|shared)\b|[ \t]+(?:from|for)\b|[ \t]+i\s+(?:got|received|was\s+sent)\b)`;
+const LABEL_AFTER = new RegExp(String.raw`^(${CONNECT_AFTER})${LABEL_WORDS}${LABEL_CLOSE}`, "i");
+const labelAfter = (after: string) => { const m = LABEL_AFTER.exec(after); return !!m && m[1].length <= 40; };
 function contextEnds(sentence: string, re: RegExp): number[] {
   const out: number[] = [];
   // A redaction marker ("[security code removed]") is not a code word: the code it names is already gone, so the next number
@@ -71,7 +81,8 @@ function contextEnds(sentence: string, re: RegExp): number[] {
 function tokensIn(sentence: string, carried = false): { start: number; end: number }[] {
   const strong = contextEnds(sentence, STRONG), weak = contextEnds(sentence, WEAK);
   if (carried) strong.push(0);
-  if (!strong.length && !weak.length) return [];
+  if (!strong.length && !weak.length && !STRONG.test(sentence)) return [];
+  STRONG.lastIndex = 0;
   const near = (at: number, ends: number[]) => ends.some((e) => at >= e && at - e <= 60);
   const hits: { start: number; end: number }[] = [];
   for (const m of sentence.matchAll(DIGITS)) {
@@ -82,7 +93,11 @@ function tokensIn(sentence: string, carried = false): { start: number; end: numb
     const lineCut = firstLine !== m[0] && firstLine.replace(/\D/g, "").length >= 4 && COUNT_AFTER.test(sentence.slice(at + m[0].length));
     let tok = lineCut ? firstLine : m[0], after = sentence.slice(at + tok.length);
     if (COUNT_AFTER.test(after)) continue;
-    const isStrong = near(at, strong);
+    // A label after the token counts as a strong word before it, for a plain run or a 3+3 split code only, and never a later
+    // group of a spaced number ("1234" of "415 555 1234 is my code").
+    const prevBefore = /\d[ \t\u00a0\u2007\u2009\u202f\-\u2013\u2014]*$/.test(sentence.slice(0, at));
+    const labeled = !near(at, strong) && !prevBefore && (/^\d+$/.test(tok) || SPLIT_CODE.test(tok)) && !MORE_GROUPS.test(after) && !NAMED_BEFORE_CODE.test(sentence.slice(0, at)) && labelAfter(after);
+    const isStrong = near(at, strong) || labeled;
     if (!isStrong && !near(at, weak)) continue;
     // Weak context: only a plain run of 4-8 digits that is not a year.
     // Weak context: a later group of a spaced run ("555 1234" in "415 555 1234") is part of a phone number or a date.
@@ -92,6 +107,12 @@ function tokensIn(sentence: string, carried = false): { start: number; end: numb
     const prevIsCode = !!prevGroup && prevGroup[1].length >= 6 && /[\r\n]/.test(sentence.slice(at - (prevGroup[0].length - prevGroup[1].length), at));
     if (!isStrong && prevGroup && !prevIsCode) continue;
     if (!isStrong && /[ \r\n\t\u00a0\u2007\u2009\u202f\-\u2013\u2014]/.test(tok)) {
+      // Never money after a weak cue: "Workday sent me an offer of 120 000", "HR gave me 125 000 and equity" (a spaced
+      // thousands figure), the same guards as the dotted form (review of d3fd6027).
+      const pre = sentence.slice(0, at);
+      // Only a money word right before it or a currency/unit right after: a money word elsewhere in the sentence is not enough,
+      // since an offer portal sends codes ("Workday sent me 739 201 for the offer portal" is removed; review of 12de38d7).
+      if (DOTTED_MONEY_AFTER.test(after) || DOTTED_MONEY_BEFORE.test(pre) || /^\s*(?:and|plus)\s+(?:equity|stock|bonus|benefits)\b/i.test(after)) continue;
       // Weak context, a split token: a 3+3 code, or two groups split by a line break that make 6 to 8 digits ("7392\n01",
       // "1234\n5678"). Otherwise a first line of 4+ digits is the code by itself ("4821\n9"); anything else is skipped (review on #575).
       const groups = tok.split(/\D+/).filter(Boolean), digits = groups.join("").length, broken = /[\r\n]/.test(tok);
@@ -116,14 +137,15 @@ function tokensIn(sentence: string, carried = false): { start: number; end: numb
     const at = m.index ?? 0, after = sentence.slice(at + m[0].length), before = sentence.slice(0, at);
     // Only after a code word or a hand-over ("sent me"), and never money ("120.000 EUR", "an offer of 120.000"), a range ("90.000 - 110.000") or a
     // named number ("req 739.201"): a European thousands figure has the same shape (review of f62e2033).
-    if ((!near(at, strong) && !near(at, weak)) || COUNT_AFTER.test(after) || DOTTED_MONEY_AFTER.test(after) || DOTTED_MONEY_BEFORE.test(before) || MORE_GROUPS.test(after) || /[-\u2013\u2014]\s*$/.test(before)
+    const dotLabeled = !NAMED_BEFORE_CODE.test(before) && labelAfter(after);
+    if ((!near(at, strong) && !near(at, weak) && !dotLabeled) || COUNT_AFTER.test(after) || DOTTED_MONEY_AFTER.test(after) || DOTTED_MONEY_BEFORE.test(before) || MORE_GROUPS.test(after) || /[-\u2013\u2014]\s*$/.test(before)
       || (!near(at, strong) && (DOTTED_MONEY_NEAR.test(before.slice(-80)) || DOTTED_MONEY_NEAR.test(after.slice(0, 30)) || /^\s*(?:and|to|or)\s+(?:\d|\[code removed\])/i.test(after)))) continue;
     if (hits.some((h) => at < h.end && at + m[0].length > h.start)) continue;
     hits.push({ start: at, end: at + m[0].length });
   }
   for (const m of sentence.matchAll(ALNUM)) {
     const at = m.index ?? 0, tok = m[0];
-    if (UNIT_LIKE.test(tok) || !near(at, strong)) continue;
+    if (UNIT_LIKE.test(tok) || (!near(at, strong) && (NAMED_BEFORE_CODE.test(sentence.slice(0, at)) || !labelAfter(sentence.slice(at + tok.length))))) continue;
     hits.push({ start: at, end: at + tok.length });
   }
   return hits;

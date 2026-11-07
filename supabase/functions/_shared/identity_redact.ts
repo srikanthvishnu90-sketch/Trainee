@@ -92,6 +92,14 @@ function luhn(digits: string) {
 // WO-100: while an employer's emailed code is waiting (career_situation.ts codePending), a bare 6-8 digit number is that
 // code, so it is removed too ("Plaid emailed me a code, it's 482913"). Never otherwise: a bare number stays a number.
 const BARE_CODE = /(?<![\d$€£.,:/#-])\b\d{6,8}\b(?![\d.,:/-]|\s*(?:k\b|%|usd|dollars|a year|per\b|\/))/gi;
+// The one form chat text takes before any redaction or hashing: line endings become "\n", no-break, thin and figure spaces and
+// tabs become a space, and an en or em dash between digits a hyphen, so "739\r\n201", "739\u00a0201" and "739–201" meet the
+// same rules as "739 201". chat_input.ts and channel_resume_upload.ts resumeMessage both use it, so a file's message hash
+// equals the hash of the text the thread stores (Greptile and review on #567).
+export function normalizeChatText(text: string): string {
+  return String(text ?? "").replace(/\r\n?/g, "\n").replace(/[\u00a0\u2007\u2009\u202f\t]/g, " ").replace(/(\d)[\u2013\u2014](?=\d)/g, "$1-");
+}
+
 export function redactIdentity(input: string, o: { codePending?: boolean } = {}): Redaction {
   const removed = new Set<Redaction["removed"][number]>();
   let t = String(input ?? "");

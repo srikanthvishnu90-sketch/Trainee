@@ -41038,7 +41038,7 @@ const CareerRouter = (() => {
       if (!figAsk) return null;
       const figures = counterFigures(s(text), {}).mentions.map((m) => ({ value: m.value, unit: m.unit }));
       return { intent: "negotiation_revision", resultStatus: "awaiting_user", sends: 0, counterAmbiguous: true, awaiting: "which_figure_is_ask", figures,
-        reply: compose({ headline: "Which figure is your new counter?", facts: ["Your message names more than one pay figure, and one of them is someone else's (a market rate, another company, a survey), so the counter on record stays as it is."], nextStep: "Tell me the figure you want to ask for and I'll revise the counter to it." }) };
+        reply: compose({ headline: "Which figure is your new counter?", facts: ["I couldn't tell whether the pay figure in your message is your new ask or someone else's rate (a market rate, another company, a survey), so the counter on record stays as it is."], nextStep: "Tell me the figure you want to ask for and I'll revise the counter to it." }) };
     }
     const addAsk = /\badd a request\b|\badd an ask\b|\balso ask\b/.test(t);
     if (!figAsk && !addAsk) return null;

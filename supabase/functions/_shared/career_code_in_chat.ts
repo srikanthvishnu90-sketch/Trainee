@@ -68,14 +68,24 @@ function tokensIn(sentence: string, carried = false): { start: number; end: numb
     // count neither hides the code nor is removed with it (Greptile on #574 and #575).
     const at = m.index ?? 0, firstLine = m[0].split(/\r\n|[\r\n]/)[0].replace(/[^\d]+$/, "");
     const lineCut = firstLine !== m[0] && firstLine.replace(/\D/g, "").length >= 4 && COUNT_AFTER.test(sentence.slice(at + m[0].length));
-    const tok = lineCut ? firstLine : m[0], after = sentence.slice(at + tok.length);
+    let tok = lineCut ? firstLine : m[0], after = sentence.slice(at + tok.length);
     if (COUNT_AFTER.test(after)) continue;
     const isStrong = near(at, strong);
     if (!isStrong && !near(at, weak)) continue;
     // Weak context: only a plain run of 4-8 digits that is not a year.
     // Weak context: a later group of a spaced run ("555 1234" in "415 555 1234") is part of a phone number or a date.
     if (!isStrong && /\d(?:[ \t\u00a0\u2007\u2009\u202f]{1,8}|[ \t\u00a0\u2007\u2009\u202f]{0,8}(?:\r\n|[\r\n\-\u2013\u2014])[ \t\u00a0\u2007\u2009\u202f]{0,8})$/.test(sentence.slice(0, at))) continue;
-    if (!isStrong && (/[ \r\n\t\u00a0\u2007\u2009\u202f\-\u2013\u2014]/.test(tok) ? !SPLIT_CODE.test(tok) || MORE_GROUPS.test(after) : YEAR.test(tok))) continue;
+    if (!isStrong && /[ \r\n\t\u00a0\u2007\u2009\u202f\-\u2013\u2014]/.test(tok)) {
+      // Weak context, a split token: a 3+3 code, or two groups split by a line break that make 6 to 8 digits ("7392\n01",
+      // "1234\n5678"). Otherwise a first line of 4+ digits is the code by itself ("4821\n9"); anything else is skipped (review on #575).
+      const groups = tok.split(/\D+/).filter(Boolean), digits = groups.join("").length, broken = /[\r\n]/.test(tok);
+      const joined = SPLIT_CODE.test(tok) || (broken && groups.length === 2 && digits >= 6 && digits <= 8);
+      if (!joined || MORE_GROUPS.test(after)) {
+        const first = firstLine.replace(/\D/g, "");
+        if (!broken || first.length < 4 || first !== firstLine || YEAR.test(first)) continue;
+        tok = firstLine; after = sentence.slice(at + tok.length);
+      }
+    } else if (!isStrong && YEAR.test(tok)) continue;
     if (isStrong && YEAR.test(tok) && (carried && !contextEnds(sentence, STRONG).length || /\bin\s+$|\bsince\s+$|\bof\s+$/i.test(sentence.slice(0, at)))) continue;
     hits.push({ start: at, end: at + tok.length });
   }

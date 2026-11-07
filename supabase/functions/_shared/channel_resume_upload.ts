@@ -312,6 +312,21 @@ export function supabaseUploadRecorder(admin: any) {
 // The evidence step's upload, when the person's message that carried the entries was a file's text: the file itself (the
 // person's original upload, by its provider reference and the sha256 of its bytes). Otherwise the message, unchanged.
 // deno-lint-ignore no-explicit-any
+// Whether a chat message is the text of a resume file this person uploaded: its sha256 is the message_sha256 the upload stored
+// (resumeMessage, above). Such a message skips code-in-chat's code-word pass: a resume line like "Built a customer portal
+// serving 120000 customers" is not a one-time code, and removing it changed the stored text so the confirmation lost the
+// file (Greptile on #568). Typed text that only starts like a file message has no matching upload, so it is checked as usual.
+// The file itself was refused at upload if it carried an identity number or a labeled code (ingestResumeFile, above).
+export async function isUploadedResumeText(admin: any, userId: string | null | undefined, text: string): Promise<boolean> {
+  if (!userId || !String(text ?? "").startsWith("here is my resume:\n")) return false;
+  try {
+    const r = await admin.from("career_resume_uploads").select("id").eq("user_id", userId).eq("message_sha256", await sha256Text(text)).limit(1);
+    return !r.error && Array.isArray(r.data) && r.data.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function fileUploadFor(admin: any, userId: string, upload: Upload | null): Promise<Upload | null> {
   if (!upload || upload.kind !== "message") return upload;
   try {

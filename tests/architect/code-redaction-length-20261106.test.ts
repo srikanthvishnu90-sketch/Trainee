@@ -260,3 +260,17 @@ Deno.test("CRL-10 no-break and thin spaces, tabs and en dashes between code grou
   // the same separators in numbers that are not codes stay as they were (after normalising), with and without a weak cue
   for (const m of ["My number is 415\u00a0555\u00a01234.", "The portal says call 415\u2013555\u20131234.", "The pay is $24\u201326 an hour.", "I want 3\u20135 years of growth."]) eq(turn(m).c, null, m);
 });
+
+// Greptile on #568: a code whose groups are split by a run of spaces around a line break or dash ("739\n  201", "739 -  201")
+// is removed like "739 201"; the same runs in a phone number keep it; a long run of spaces stays fast.
+Deno.test("CRL-11 code groups split by up to 8 spaces or tabs around a line break or dash are removed", () => {
+  for (const sep of ["\n  ", "  \n", " \n\t", "   ", "\t\t", " - ", "\r\n    ", " \u2013 "]) for (const pre of ["Workday sent me ", "my code is ", "Verification code: "]) {
+    const m = `${pre}739${sep}201`;
+    const t = turn(m);
+    assert(!t.stored.includes("739") && !t.stored.includes("201"), `${JSON.stringify(m)}: ${JSON.stringify(t.stored)}`);
+  }
+  for (const m of ["My number is 415\n  555\n  1234.", "The portal says call 415   555   1234."]) eq(turn(m).c, null, m);
+  const t0 = performance.now();
+  turn(`Workday sent me 7${" ".repeat(3900)}x`); turn(`my code is 7${"\n ".repeat(1900)}`);
+  assert(performance.now() - t0 < 500, `long whitespace took ${performance.now() - t0} ms`);
+});

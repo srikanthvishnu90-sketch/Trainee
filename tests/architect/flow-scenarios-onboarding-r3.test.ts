@@ -26,7 +26,7 @@ import { fakeBot, plainOf } from "./scenarios/telegram-bot-api.ts";
 import { handleTelegram } from "../../supabase/functions/trainee-telegram/handler.ts";
 import { chatThroughAgent, deliverer } from "../../supabase/functions/_shared/channel_runtime.ts";
 import { supabaseInboundStore } from "../../supabase/functions/trainee-inbound/store.ts";
-import { FILE_DAMAGED_REPLY, sha256Bytes } from "../../supabase/functions/_shared/channel_resume_upload.ts";
+import { cleanDocx, FILE_DAMAGED_REPLY, sha256Bytes } from "../../supabase/functions/_shared/channel_resume_upload.ts";
 import { ENTRY_CORRECTION_VIA } from "../../supabase/functions/_shared/career_router_evidence.ts";
 import { DOCX, docxBytes, PDF, pdfBytes } from "./scenarios/onboarding-r2-generator.ts";
 import { entriesOf, INJECTIONS_R3, linesOf, OTHER_FIRST, person, type Person, rng, sig } from "./scenarios/onboarding-r3-generator.ts";
@@ -252,7 +252,8 @@ Deno.test({
             if (Number(mid.prepared) !== 1 || mid.record?.sha256 !== shaA) fail(`person ${i}`, `a newer resume not yet confirmed moved what is on file: ${JSON.stringify(mid.record)} prepared ${mid.prepared}: ${who()}`);
             await say("yes, that's my resume");
             const st = await state(u);
-            if (st.record?.sha256 !== await sha256Bytes(b)) fail(`person ${i}`, `the new resume is not the record: ${who()}`);
+            // the stored file is the cleaned copy (owner decision, release 8)
+            if (st.record?.sha256 !== await sha256Bytes(await cleanDocx(b))) fail(`person ${i}`, `the new resume is not the record: ${who()}`);
             if (Number(st.prepared) !== 0) fail(`person ${i}`, `an application prepared with the replaced resume is still there to approve: ${who()}`);
             // deno-lint-ignore no-explicit-any
             const apply = factSig((st.apply as any[]).filter((x) => RESUME_KINDS.has(x.kind)));

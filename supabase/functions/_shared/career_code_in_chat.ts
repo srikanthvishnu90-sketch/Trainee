@@ -196,27 +196,41 @@ const CTX_WORDS = String.raw`(?:codes?|passcodes?|pins?|otp|2fa|mfa|one[- ]time|
 const RIGHT_CTX = new RegExp(String.raw`^(?:[\s:,"'\])>-]|\b(?:is|was|my|the|a|your|our|this|that|via|by|sent|from|for)\b|\b[A-Z][\w.'-]*\b)*(?:\b${CTX_WORDS}\b)|^\s*(?:sent\s+)?(?:from|by|via)\s+(?:the\s+)?(?:${SENDERS})\b(?!\s+[a-z]{2,})`, "i");
 const FROM_SENDER = new RegExp(String.raw`^\s*from\s+(?:the\s+)?(?:${SENDERS})\b(?!\s+[a-z]{3,})`, "i");
 // The first word after the number: a function or time word keeps the phrase going; any other word is a count noun.
-const AFTER_FUNC = /^(?:for|from|to|on|in|at|today|tonight|yesterday|this|that|just|now|earlier|already|again|also|too|twice|once|recently|later|soon|please|thanks|thank|and|or|but|so|which|can|could|would|will|if|when|by|via|as|here|there|it|is|was|are|my|the|a|an|asap|immediately|quickly|back|ago|sent|is)$/i;
+const AFTER_FUNC = /^(?:for|from|to|on|in|at|today|tonight|yesterday|this|that|just|now|earlier|already|again|also|too|twice|once|recently|later|soon|please|thanks|thank|and|or|but|so|which|can|could|would|will|if|when|by|via|as|here|there|it|is|was|are|my|the|a|an|asap|immediately|quickly|back|ago|sent)$/i;
 // A sign-in purpose: a login word that ends its phrase ("for the portal", "to finish my application"), or a delivery target
 // ("to my phone", "by text"); "for the portal redesign" or "the application rollout" is a project, not a sign-in.
 const SIGNIN_PURPOSE = /\b(?:(?:for|on|into|in|at)\s+(?:the|my|your|their)?\s*(?:[a-z]+\s+){0,2}|to\s+(?:the|my|your|their)?\s*)(?:portal|site|website|login|log[- ]?in|sign[- ]?in|account|app|application|form|page|profile|password|verification)\b(?=\s*(?:$|[.,;:!?)]|\s(?:and|so|to|please|now|today|thanks|again)\b))|\bto\s+(?:finish|complete|continue|access|open|unlock|confirm|submit)\s+(?:my|the|your)\s+(?:portal|site|login|account|app|application|form|profile)\b(?=\s*(?:$|[.,;:!?)]|\s(?:and|so|please|now|today|thanks|again)\b))|\b(?:phone|cell|mobile|inbox|e-?mail|text|sms|log\s+in|sign\s+in|verify|enter\s+it)\b/i;
 // Named labels whose numbers are kept (identity_redact.ts NAMED_CODE's words and resume labels): "CPT codes: 99213",
 // "change code: CHG0012345", "exam code: AZ104". Anything else before "code" is read as a code's own label.
-const NAMED_LABEL = /^(?:zip|postal|post|area|country|promo|promotional|discount|coupon|referral|course|class|error|status|dial|tax|product|source|job|dress|invite|invitation|gift|reference|ref|airport|naics|sic|cpt|icd|hcpcs|ndc|drg|sort|swift|bank|routing|color|colour|style|item|sku|morse|qr|bar|req|requisition|position|posting|role|department|dept|cost|budget|project|program|module|unit|soc|fips|vendor|supplier|ticket|order|voucher|offer|event|building|store|exam|certification|cert|change|charge|engagement|release|config|configuration|policy|sop|servicenow|wbs|award|clearance|qualification|lot|batch|part|model|taxonomy|denial|adjustment|remark|activity|transaction|t|school|branch|hs|revenue|gl|cage|hazmat|license|licence|machine|billing|diagnosis|procedure|course|location|site|plant|warehouse|accounting|campaign|tracking|hex|paint|booking|reservation|specialty|speciality|subject|flight|room|seat|gate|afsc|mos|nec|rate|rating|grade|series|occupation|occupational|duty|uic|ein|cip|onet|o\*net|isco|esco|noc|anzsco)$/i;
+const NAMED_LABEL = /^(?:zip|postal|post|area|country|promo|promotional|discount|coupon|referral|course|class|error|status|dial|tax|product|source|job|dress|invite|invitation|gift|reference|ref|airport|naics|sic|cpt|icd|hcpcs|ndc|drg|sort|swift|bank|routing|color|colour|style|item|sku|morse|qr|bar|req|requisition|position|posting|role|department|dept|cost|budget|project|program|module|unit|soc|fips|vendor|supplier|ticket|order|voucher|offer|event|building|store|exam|certification|cert|change|charge|engagement|release|config|configuration|policy|sop|servicenow|wbs|award|clearance|qualification|lot|batch|part|model|taxonomy|denial|adjustment|remark|activity|transaction|t|school|branch|hs|revenue|gl|cage|hazmat|license|licence|machine|billing|diagnosis|procedure|location|site|plant|warehouse|accounting|campaign|tracking|hex|paint|booking|reservation|specialty|speciality|subject|flight|room|seat|gate|afsc|mos|nec|rate|rating|grade|series|occupation|occupational|duty|uic|ein|cip|onet|o\*net|isco|esco|noc|anzsco|expense|labor|labour|payroll|union|district|provider|facility|tariff|commodity|ceeb|un)$/i;
 const COUNT_LABEL2 = /\b(?:codes|pins|tokens|passcodes|otps|attempts|logins|sign[- ]?ins|resets)\s+(?:[a-z]+\s+){0,2}(?:issued|reviewed|delivered|sent|reset|rotated|blocked|processed|handled|generated|verified|validated|revoked|expired|enrolled|migrated|served|per\s+\w+)(?:\s+per\s+\w+)?\s*[:\-–—]\s*$|\b(?:codes|pins|otps|passcodes)\s+(?:issued|reviewed|delivered|sent|reset|rotated|blocked)\b[^:]{0,20}[:\-]\s*$|\b(?:adoption|usage|growth|enrollment|enrolment|coverage|uptime|throughput|capacity|traffic|volume|count|total|reach|downloads|installs|users)\s*[:\-–—]\s*$/i;
 const COUNT_LABEL = /\b(?:(?!(?:codes|pins|tokens|passcodes|otps|digits)\b|sms\s*[:\-\u2013\u2014]|(?:this|his|is|was|has|its|yes|us|plus|bus|less|class|process|address|access|success|business|status|bonus|campus|focus|alias|bias|chaos|series|news|ss)\b)[a-z]{2,}s|total|volume|count|sales|revenue|traffic|headcount|budget)\s*(?:per\s+\w+\s*)?(?:sent|received|processed|handled|delivered|closed|resolved|served|shipped|made|generated|raised|onboarded|hired|managed)?\s*(?:per\s+\w+\s*)?[:\-–—]\s*$/i;
 const ID_LABEL = /\b(?:employee|student|member|badge|staff|license|licence|npi|dea|candidate|requisition|req|job|case|claim|policy|patient|customer|order|invoice|po|cert|certificate|certification|credential|exam)\s*(?:id|no\.?|number|#)\s*[:#]?\s*$/i;
 const MONEY_WORDS = /\b(?:credits?|funding|funds|grants?|budget|seed|investment|donations?|revenue|sales|savings|profit|arr|mrr|salary|bonus|stipend|scholarship|award|prize|raise|dollars|usd|eur|gbp)\b/i;
 const PHONE = /(?:\+?\d{1,3}[ .-]?)?(?:\(\d{3}\)|\d{3})[ .-]\d{3}[ .-]\d{4}/g;
-const DATE = /\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b|\b(?:19|20)\d\d[\/.-]\d{1,2}[\/.-]\d{1,2}\b/;
+const DATE = /\b(\d{1,2})[\/.-](\d{1,2})[\/.-]\d{2,4}\b|\b(?:19|20)\d\d[\/.-](\d{1,2})[\/.-](\d{1,2})\b/;
+// A real calendar date: a month (1-12) and a day (1-31) in either order ("12/34/56" is not one).
+const isDate = (s: string) => {
+  const m = DATE.exec(s);
+  if (!m) return false;
+  const [a, b] = (m[1] ? [m[1], m[2]] : [m[3], m[4]]).map(Number);
+  return a >= 1 && b >= 1 && ((a <= 12 && b <= 31) || (b <= 12 && a <= 31));
+};
+// A code's own label right before it ("Verification code 739201", "Your code is", "OTP:"): a following word, a range dash or
+// a date shape does not make it a count, a range or a date.
+const DIRECT = /\b(?:code|otp|passcode|pin|token|verification|2fa|mfa)\s*(?:(?:is|=)\s*)?[:#=|\-\u2013\u2014]?\s*$/i;
+const COUNT_AFTER_LABEL = /^(?!(?:expires|is|was|this|has|does|goes|works|stays|lasts|remains|always|thanks|minutes|seconds|hours|digits|its|yes|us|plus)$)(?:[a-z]{3,}s|sq|ft|rps|qps|tps|ms|gb|tb|mb|kb|k|m|hrs?|mins?)$/i;
 // The 1-based line numbers of the text read from the file that hold a suspected code (each once, in order).
 export function fileCodeLines(text: string): number[] {
-  const lines = normalizeChatText(String(text ?? "")).split("\n"), hits: number[] = [];
+  const lines = normalizeChatText(String(text ?? "").normalize("NFKC").replace(/[\u200b-\u200d\u2060\ufeff]/g, " ")).split("\n"), hits: number[] = [];
   const unbullet = (s: string) => s.replace(/^\s*(?:[-*•▪●>]|\d+[.)])\s+/, "");
   lines.forEach((raw, i) => {
     if (lineCodeAt(raw) >= 0) { hits.push(i + 1); return; }
-    const n1 = unbullet(lines[i + 1] ?? ""), n2 = unbullet(lines[i + 2] ?? "");
-    if (!n1.trim()) return;
+    // The next lines that hold text (up to two blank lines skipped); a line of punctuation alone (":") joins the one after it.
+    const rest = lines.slice(i + 1, i + 6).map(unbullet).filter((l) => l.trim()).slice(0, 3);
+    if (rest.length > 1 && /^[\s:#=|\-\u2013\u2014.]+$/.test(rest[0])) rest.splice(0, 2, `${rest[0].trim()} ${rest[1].trim()}`);
+    const n1 = rest[0] ?? "", n2 = rest[1] ?? "";
+    if (!n1.trim() || !lines.slice(i + 1, i + 4).some((l) => l.trim())) return;
     const ctxEnd = LEFT_CTX.test(raw.replace(/\s*$/, " ")), digitEnd = /(?:^|\D)\d{2,4}\s*$/.test(raw);
     const rightNext = /^\s*(?:is|was|are|=|-|\u2013|\u2014|\()/i.test(n1) && RIGHT_CTX.test(" " + n1.trim());
     if (!ctxEnd && !digitEnd && !rightNext) return;
@@ -234,25 +248,30 @@ export function fileCodeLines(text: string): number[] {
 }
 // The index of the first suspected code on a line, or -1.
 function lineCodeAt(raw: string): number {
+  if (/\b(?:otp|mfa|2fa|code|passcode|pin)(?=\d)(?!(?:19|20)\d\d\b)\d{4,8}\b/i.test(raw)) return 0;
   if (/\b(?:otp|mfa|2fa)-(?!(?:19|20)\d\d\b)(?:\d{4,8}|(?=[A-Za-z0-9]{5,10}\b)(?=(?:[A-Za-z]*\d){2})(?=(?:\d*[A-Za-z]){2})[A-Za-z0-9]{5,10})\b/i.test(raw)) return 0;
+  // A code split by a spaced dash right after its own label ("OTP: 739 - 201"); two years are a range ("Code: 2019 - 2021").
+  const spaced = /\b(?:code|otp|passcode|pin|token|verification|2fa|mfa)\s*(?:(?:is|was|=)\s*)?[:#=|]?\s*(\d{2,4})\s+[-–—]\s+(\d{2,4})(?!\d)/i.exec(raw);
+  if (spaced && (spaced[1] + spaced[2]).length >= 6 && !/^(?:19|20)\d\d$/.test(spaced[1])) return spaced.index;
   const money = MONEY_WORDS.test(raw) || /\bgrants?\b|\bawards?\b/i.test(raw);
   const strongCode = STRONG_CODE.test(money ? raw.replace(/\bone[- ]?time\b/gi, " ") : raw), sender = STRONG_SENDER.test(raw);
   // A code spelled out ("seven three nine two zero one") next to a code word.
   if ((strongCode || sender) && /\b(?:(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)[\s,-]+){3,7}(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)\b/i.test(raw)) return 0;
-  const line = raw.replace(/\((?![^)]*\d{4})[^)]*\)/g, (m) => " ".repeat(m.length)); // a parenthetical without the code is a connector
+  const line = raw.replace(/\((?![^)]*\d[^)]*\d)[^)]*\)/g, (m) => " ".repeat(m.length)); // a parenthetical with no code-shaped value (two digits or more) is a connector
   const phones = [...line.matchAll(PHONE)].map((m) => [m.index ?? 0, (m.index ?? 0) + m[0].length]);
   for (const m of line.matchAll(LINE_TOKEN)) {
     const tok = m[1], at = m.index ?? 0, end = at + tok.length, digits = tok.replace(/\D/g, ""), letters = tok.replace(/[^A-Za-z]/g, "");
     const alnum = letters.length > 0;
     if (alnum ? (digits.length < 2 || letters.length < 2 || !/^[A-Za-z0-9 -]+$/.test(tok) || (/[ -]/.test(tok) && tok.split(/[ -]/).some((g) => !/\d/.test(g) || /^(?:\d+(?:ms|s|m|h|k|x|gb|mb|kb|tb|hz|ghz|px|pt|yr|yrs)|p\d{2,3})$/i.test(g)))) : (digits.length < 4 || digits.length > 8)) continue;
     const before = line.slice(0, at), after = line.slice(end), squashed = tok.replace(/\s+/g, " ").trim();
+    const direct = DIRECT.test(before);
     if (!alnum && (YEAR_RANGE.test(squashed) || /^(?:19|20)\d\d$/.test(digits) || /^(?:19|20)\d\d\D+(?:19|20)?\d\d$/.test(squashed) && /[-–—\/ ]/.test(tok))) continue;
     if (!alnum && /^\d{1,3}(?:,\d{3})+$/.test(tok) && !strongCode && !sender) continue; // a thousands figure
-    if (!alnum && /^\d+\.\d+\.\d+/.test(tok)) continue; // a version or address
+    if (!alnum && !direct && /^\d+\.\d+\.\d+/.test(tok)) continue; // a version or address
     if (phones.some(([p, q]) => at < q && end > p)) continue;
-    if (DATE.test(line.slice(Math.max(0, at - 3), end + 3)) && /[\/.-]/.test(tok)) continue;
+    if (!direct && isDate(line.slice(Math.max(0, at - 3), end + 3)) && /[\/.-]/.test(tok)) continue;
     if (/[$€£]\s*$/.test(before) || /^\s*(?:k\b|%|usd|eur|gbp|dollars|euros|per\b|a\s+(?:year|month|week|day|hour)|\/\s*(?:hr|hour|yr|year|month))/i.test(after)) continue;
-    if (/\s*[-–—]\s*\d/.test(after.slice(0, 4)) || /\d\s*[-–—]\s*$/.test(before)) continue; // a range ("1200 - 1500")
+    if (!direct && (/\s*[-–—]\s*\d/.test(after.slice(0, 4)) || /\d\s*[-–—]\s*$/.test(before))) continue; // a range ("1200 - 1500")
     if (ID_LABEL.test(before) || COUNT_LABEL.test(before) || COUNT_LABEL2.test(before)) continue;
     // A named label right before the code, also in a list ("Billing codes: 99213, 99214", "Exam code | AZ104"), a compound
     // label ("code review:", "code policy:"), or a named word alone ("Microsoft exam AZ104").
@@ -263,7 +282,9 @@ function lineCodeAt(raw: string): number {
     if (alnum && bare && /^(?:exam|course|subject|model|part|lot|batch|sku|item|product|class|module|unit|room|flight|gate|seat|build|release|version)$/i.test(bare[1])) continue;
     if (FILE_NAMED.test(before) && !/\b(?:verification|otp|2fa|mfa|login|sign[- ]?in|one[- ]time|access|security|auth)\b/i.test(before.slice(-30))) continue;
     const next = /^[\s:,.)\-]*([A-Za-z][A-Za-z']*)/.exec(after)?.[1] ?? "";
-    if (next && !AFTER_FUNC.test(next) && !/^(?:codes?|passcodes?|pins?|otps?|tokens?)$/i.test(next)) continue; // a count noun
+    // After a code's own label only a count (a plural noun or a unit: "Code: 4500 builds", "Pin: 4500 sq ft") or a credential
+    // word ("OTP: AZ500 certified") keeps the figure; "valid", "expires", "Workday" or a name after it is a handed-over code.
+    if (next && !(direct && !COUNT_AFTER_LABEL.test(next) && !(alnum && /^(?:certified|certification|certificate|exam|course|badge|credential|holder|compliant|compliance)$/i.test(next))) && !AFTER_FUNC.test(next) && !/^(?:codes?|passcodes?|pins?|otps?|tokens?)$/i.test(next)) continue; // a count noun
     const left = LEFT_CTX.exec(before), right = RIGHT_CTX.test(after);
     const verb = left ? left[0].trim().split(/[\s:,]+/)[0].toLowerCase() : "";
     // A figure with a money purpose: "Client sent me 120000 for review", "VP gave me 4500 and a deadline", "Received 50000 from
@@ -271,6 +292,12 @@ function lineCodeAt(raw: string): number {
     if (!alnum && !strongCode && !right && (money || (/^(?:sent|emailed|messaged|got|received|gave)$/.test(verb) || (sender && /\b(?:sent|emailed|messaged|gave|got|received)\b/i.test(before))))
       && !SIGNIN_PURPOSE.test(after) && (money || (!FROM_SENDER.test(after) && (/^\s*(?:(?:for|to|in|on|at|as|by|from)\s+\S|,\s*(?:a|an|and|plus|with)\b|and\s+(?:a|an|the|\d))/i.test(after) || (verb === "gave" && /\w/.test(after)))))) continue;
     if (strongCode || sender || left || right) return at;
+  }
+  // A long value right after a code's own label ("Code: 123456789", "Verification code: K7X9P2Q8Z1AB"), unless a named label
+  // comes first ("Tariff code: 8471300000").
+  for (const m of line.matchAll(/(?:^|([\w'-]+)[ -]+)(?:code|otp|passcode|pin|token|verification(?:\s+code)?)\s*(?:is\s*)?[:#=]?\s*(?=[A-Za-z]*\d[A-Za-z]*\d)([A-Za-z0-9]{9,16})(?![\w])/gi)) {
+    if (m[1] && NAMED_LABEL.test(m[1])) continue;
+    return (m.index ?? 0) + m[0].length - m[2].length;
   }
   return -1;
 }

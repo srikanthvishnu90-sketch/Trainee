@@ -312,3 +312,27 @@ Deno.test("R8R-POLICY an MFA topic beside an unlabelled code-shaped value refuse
   assertNode.deepEqual(fileCodeLines("Jordan Lee\n- Rolled out MFA; change code: CHG0012345"), []);
   assertNode.deepEqual(fileCodeLines("Jordan Lee\n- OTP service: 50000 QPS at p99 40ms\n- Led a team of 6"), []);
 });
+
+// Review of 61cb7209: a code inside parentheses, after its own label with a word after it, in an impossible date shape, split by
+// a spaced dash, glued to its label, across a blank or punctuation-only line, after a zero-width space, in full-width digits,
+// or longer than 8 characters is a handed-over code; the reply names only the line. Named labels and real dates stay.
+Deno.test("R8R-61 parenthesised, labelled, date-shaped, glued and long codes refuse the file; named labels and real dates stay", () => {
+  const wrap = (l: string) => `Jordan Lee\nSupport Lead\n- Led a team of 6\n- ${l}\n- Managed 4500 tickets a year`;
+  for (const l of ["(code K7X9P2)", "Workday sent me a code (K7X9P2)", "Verification code: (K7X9P2)", "Okta code (AB12CD)", "Okta (code: K7X9P2)",
+    "(code 739 201)", "(code 739-201)", "(code 73 92 01)", "(code K7X-9P2)", "(code K7X 9P2)", "(code 739\u2013201)", "(code 739\u2011201)",
+    "Code: 12/34/56", "Code: 12.34.56", "Verification: 12-34-56", "Verification code: 73-92-01", "Code\u200b739201", "Code: \uff17\uff13\uff19\uff12\uff10\uff11",
+    "Verification code 739201 valid for 10 minutes", "Verification code: 739201 expires in 10 minutes", "Your verification code is 739201. Do not share it.",
+    "Code: 739201 Workday", "Workday code 739201 Jordan", "OTP739201", "OTP: 739 - 201", "Verification code:\n\n739201", "Verification code\n:\n739201",
+    "Code: K7X9P2Q8Z1AB", "Code: 123456789"]) {
+    const lines = fileCodeLines(wrap(l));
+    assertNode.ok(lines.includes(4), `${JSON.stringify(l)} => ${JSON.stringify(lines)}`);
+    const reply = fileCodeReply(lines);
+    assertNode.ok(!reply.includes(l.split("\n")[0]) && !/739|K7X|AB12|123456789/.test(reply), reply);
+  }
+  for (const l of ["Expense code: 6100", "Labor code: 4821", "Payroll code: 4821", "Union code: 4821", "District code: 4821", "Provider code: 4821",
+    "Facility code: 4821", "Tariff code: 847130", "Tariff code: 8471300000", "Commodity code: 847130", "CEEB code: 482913", "UN code: 1203",
+    "Certified on 03/12/2021", "Promoted 12/03/2019", "Code was 1200 microservices", "OTP: AZ500 certified", "Pin: 4500 sq ft retail",
+    "Sign-in code: 4500 users migrated", "MFA - 4500 users", "Team of 8 (4500 users)", "Led 12 people (2019 - 2021)", "Managed (approx. 120) staff"]) {
+    assertNode.deepEqual(fileCodeLines(wrap(l)), [], l);
+  }
+});

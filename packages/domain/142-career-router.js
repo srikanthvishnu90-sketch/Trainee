@@ -3957,8 +3957,16 @@ const CareerRouter = (() => {
       // "indeed" is never masked: the adverb and the salary site Indeed cannot be told apart reliably ("it was Indeed that
       // quoted $28"), so a sentence with it and a pay figure is held (Greptile on 76313b47).
       const INCIDENTAL = /\b(?:a|an|the|my|this|that|their|our|his|her|your)\s+market\s+(?:(?:research|data|analytics|access|making|insights|intelligence)(?:\s+(?:senior|junior|staff|principal))?(?:\s+(?:engineer|analyst|researcher|scientist|manager|specialist|associate|lead|designer|developer|coordinator|strategist|consultant))?|(?:(?:senior|junior|staff|principal)\s+)?(?:engineer|analyst|researcher|scientist|manager|specialist|associate|lead|designer|developer|coordinator|strategist|consultant))\s+(?:role|position|job|opening|posting)\b(?!s)/ig;
-      const startOf = (at) => { let a = -1; for (const c of [".", "?", "!", ";", "\n"]) { let i = src.lastIndexOf(c, at - 1); while (i >= 0 && c === "." && /\d/.test(src[i + 1] || "") && /\d/.test(src[i - 1] || "")) i = src.lastIndexOf(c, i - 1); a = Math.max(a, i); } return a + 1; };
-      const sentenceOf = (at) => { const a = startOf(at); const ends = [".", "?", "!", ";", "\n"].map((c) => { let i = src.indexOf(c, at); while (i >= 0 && c === "." && /\d/.test(src[i + 1] || "")) i = src.indexOf(c, i + 1); return i; }).filter((i) => i >= 0); return src.slice(a, ends.length ? Math.min(...ends) : src.length).replace(/counter[ -]?offers?/ig, ""); };
+      // A "." ends a sentence only when whitespace or the end follows it: decimals ("$29.50") and site names ("Salary.com",
+      // "levels.fyi", "glassdoor.com") stay inside their sentence (Greptile on #564).
+      // ...and not after a common abbreviation ("e.g. Acme", "the U.S. market", "approx. $26"), review of #565.
+      const ABBREV = /(?:^|[^A-Za-z])(?:e\.g|i\.e|u\.s|u\.k|approx|vs|etc|mr|mrs|ms|dr|inc|co|corp|ltd|jr|sr)$/i;
+      // closing quotes and brackets may sit between the dot and the space ("the market is tight." They offered...), Greptile #565
+      const endsHere = (c, i) => c !== "." || (/^["'\u201d\u2019)\]]*(?:\s|$)/.test(src.slice(i + 1, i + 5)) && !ABBREV.test(src.slice(Math.max(0, i - 8), i))
+        // "no." before a number is a reference ("Salary.com report no. 5 says..."), not a sentence end (Greptile on #565)
+        && !(/(?:^|[^A-Za-z])no$/i.test(src.slice(Math.max(0, i - 3), i)) && /^\s+#?\d/.test(src.slice(i + 1, i + 6))));
+      const startOf = (at) => { let a = -1; for (const c of [".", "?", "!", ";", "\n"]) { let i = src.lastIndexOf(c, at - 1); while (i >= 0 && !endsHere(c, i)) i = src.lastIndexOf(c, i - 1); a = Math.max(a, i); } return a + 1; };
+      const sentenceOf = (at) => { const a = startOf(at); const ends = [".", "?", "!", ";", "\n"].map((c) => { let i = src.indexOf(c, at); while (i >= 0 && !endsHere(c, i)) i = src.indexOf(c, i + 1); return i; }).filter((i) => i >= 0); return src.slice(a, ends.length ? Math.min(...ends) : src.length).replace(/counter[ -]?offers?/ig, ""); };
       const marketFig = nonAsk.some((m) => !(m.unit === "hour" && m.value === (hint && hint.recorded)) && THIRD_WORD.test(sentenceOf(m.at).replace(INCIDENTAL, " ")));
       if (marketFig) { out.ambiguous = true; out.marketAmbiguous = true; }
     }

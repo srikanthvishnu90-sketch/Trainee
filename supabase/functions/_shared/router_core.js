@@ -40843,7 +40843,8 @@ const CareerRouter = (() => {
       // Another person's pay, tied to the figure ("my coworker makes $34/hour", "my friend at Acme was offered $35/hour"): a person
       // word, a pay verb, then the figure. "A friend referred me and they offered $30/hour", "a peer support role" and "a sister
       // company" are not (review of f609ce7d).
-      const PERSON_PAY = /\b(?:friends?|co-?workers?|colleagues?|peers?|classmates?|roommates?|siblings?|brother|sister|cousin|neighbou?r|someone|people)\b(?:\s+[\w'-]+){0,4}?\s+(?:makes?|earns?|gets?|got(?:\s+offered)?|is\s+(?:paid|making|earning|getting|on)|was\s+(?:offered|paid)|are\s+(?:paid|making|earning|getting|on)|were\s+(?:offered|paid)|pulls?|took)\b[^.;!?\n]{0,25}$/i;
+      // The pay verb is the person's own: no "I"/"me"/"and" between them, and "got me an offer" is the user's (review of 529d1d08).
+      const PERSON_PAY = /\b(?:friends?|co-?workers?|colleagues?|peers?|classmates?|roommates?|siblings?|brother|sister|cousin|neighbou?r|someone|people)\b(?:\s+(?!(?:i|me|my|and|but|so|then|thanks)\b)[\w'-]+){0,4}?\s+(?:makes?|earns?|gets?(?!\s+me\b)|got(?!\s+me\b)(?:\s+offered)?|is\s+(?:paid|making|earning|getting|on)|was\s+(?:offered|paid)|are\s+(?:paid|making|earning|getting|on)|were\s+(?:offered|paid)|pulls?|took)\b[^.;!?\n]{0,25}$/i;
       // incidental uses that name no third party: only "market" inside one named role ("a market research analyst role").
       // "indeed" is never masked: the adverb and the salary site Indeed cannot be told apart reliably ("it was Indeed that
       // quoted $28"), so a sentence with it and a pay figure is held (Greptile on 76313b47).

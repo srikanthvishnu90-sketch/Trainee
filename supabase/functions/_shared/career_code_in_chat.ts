@@ -98,10 +98,12 @@ function tokensIn(sentence: string, carried = false): { start: number; end: numb
       // Across a space or a dash only a 3+3 code joins, as on trunk: "2018-2022", "9123 4567" (an 8-digit phone) and "1200 1500"
       // stay. Across a line break, two groups of 6 to 8 digits join unless both are years ("2024\n2025"; review of f609ce7d).
       const years = groups.length === 2 && groups.every((g) => YEAR.test(g) || /^\d{2}$/.test(g)) && YEAR.test(groups[0]);
-      const joined = SPLIT_CODE.test(tok) || (broken && groups.length === 2 && digits >= 6 && digits <= 8 && !years);
+      const hhmm = (g: string) => g.length === 4 && Number(g.slice(0, 2)) <= 23 && Number(g.slice(2)) <= 59;
+      const phoneOrTimes = groups.length === 2 && ((groups[0].length === 3 && groups[1].length === 4) || (hhmm(groups[0]) && hhmm(groups[1])));
+      const joined = SPLIT_CODE.test(tok) || (broken && groups.length === 2 && digits >= 6 && digits <= 8 && !years && !phoneOrTimes);
       if (!joined || MORE_GROUPS.test(after)) {
         const first = firstLine.replace(/\D/g, "");
-        if (!broken || years || first.length < 4 || first !== firstLine || YEAR.test(first)) continue;
+        if (!broken || years || phoneOrTimes || first.length < 4 || first !== firstLine || YEAR.test(first)) continue;
         tok = firstLine; after = sentence.slice(at + tok.length);
       }
     } else if (!isStrong && YEAR.test(tok)) continue;
@@ -172,8 +174,8 @@ export function noteForCodeTurn(note: string | null): string | null {
 // or a code word followed by "is", ":" or "arrived", right before the token, and never a token followed by a count noun or a
 // year range, so "a customer portal serving 120000 customers", "Verification engineer, 2018-2022" and "raised code coverage
 // across 9500 tests" stay resume lines.
-const HANDOVER_END = /(?:\b(?:sent|texted|emailed|gave|messaged|dm'?d)\s+me(?:\s+(?:a|the|my|this|that|one[- ]time|verification|security|sign[- ]?in|log[- ]?in))*(?:\s+(?:code|passcode|pin|otp))?|\b(?:code|passcode|pass code|pin|otp)\b(?:\s+(?:is|was|arrived|reads|=))?\s*[:=#]?|\bit(?:'s|\s+is|\s+was)|\b(?:sent|texted|emailed|gave|messaged)\s+me\s*:|\b(?:code|passcode|pass code|otp|pin)\b[^\d\n.]{0,40}?(?::|->|=>|=|\u2192))\s*$/i;
-const RESUME_COUNT = /^[\s\n]*(?:\+|k\b|%|[-\u2013\u2014]\s*\d|(?:customers?|clients?|orders?|tickets?|tests?|invoices?|requests?|sessions?|shipments?|users?|employees?|accounts?|transactions?|calls?|records?|patients?|students?|members?|units?|items?|cases?|claims?|visits?|views?|downloads?|followers?|subscribers?|leads?|deals?|projects?|hours?|people|staff|sites?|stores?|locations?|vendors?|partners?|applications?|reports?|lines?|files?|events?|messages?|emails?|devices?|servers?|queries|jobs?|candidates?|hires?|prs|pull\s+requests?|reviews?|commits?|changes|bugs|issues|lines\s+of\s+code|modules?|repos(?:itories)?|services?|sq\s*ft|dollars|usd|per\b|a\s+(?:year|month|week|day)|daily|monthly|weekly|annually)\b)/i;
+const HANDOVER_END = /(?:\b(?:sent|texted|emailed|gave|messaged|dm'?d)\s+me(?:\s+(?:a|the|my|this|that|one[- ]time|verification|security|sign[- ]?in|log[- ]?in))*(?:\s+(?:code|passcode|pin|otp))?|\b(?:code|passcode|pass code|pin|otp)\b(?:\s+(?:is|was|arrived|reads|=))?\s*[:=#]?|\bit(?:'s|\s+is|\s+was)|\b(?:sent|texted|emailed|gave|messaged)\s+me\s*:|\b(?:code|passcode|pass code|otp|pin)\b[^\d\n.]{0,40}?\b(?:sent|texted|emailed|gave|arrived|came|is|was|reads)\b[^\d\n.]{0,20}?(?::|->|=>|=|\u2192)|\b(?:code|passcode|pass code|otp|pin)\s*(?:->|=>|\u2192))\s*$/i;
+const RESUME_COUNT = /^[\s\n]*(?:\+|k\b|%|[-\u2013\u2014]\s*\d|(?:customers?|clients?|orders?|tickets?|tests?|invoices?|requests?|sessions?|shipments?|users?|employees?|accounts?|transactions?|calls?|records?|patients?|students?|members?|units?|items?|cases?|claims?|visits?|views?|downloads?|followers?|subscribers?|leads?|deals?|projects?|hours?|people|staff|sites?|stores?|locations?|vendors?|partners?|applications?|reports?|lines?|files?|events?|messages?|emails?|devices?|servers?|queries|jobs?|candidates?|hires?|prs|pull\s+requests?|reviews?|commits?|changes|bugs|issues|lines\s+of\s+code|modules?|repos(?:itories)?|services?|endpoints?|rps|qps|tps|loc|sloc|hosts?|nodes?|clusters?|sq\s*ft|dollars|usd|per\b|a\s+(?:year|month|week|day)|daily|monthly|weekly|annually)\b)/i;
 export function fileSharesCode(text: string): boolean {
   const t = normalizeChatText(String(text ?? ""));
   for (const h of codeTokens(t)) {

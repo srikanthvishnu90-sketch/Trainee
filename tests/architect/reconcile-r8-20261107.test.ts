@@ -53,7 +53,7 @@ Deno.test("R8R-51/53 the acknowledgement check reads real acknowledgements and t
   for (const msg of ["How should I describe handling stressful situations in a cover letter?", "I'm not stressed, just curious how long this takes", "How do I answer 'how do you handle stress' in an interview?"]) {
     assertNode.equal(missingAck(msg, "Lead with one concrete example."), false, msg);
   }
-  for (const msg of ["this job search is overwhelming", "honestly burned out on applications", "Overwhelmed. Where do I start?", "I feel so anxious about the offer"]) {
+  for (const msg of ["this job search is overwhelming", "honestly burned out on applications", "Overwhelmed. Where do I start?", "I feel so anxious about the offer", "My stress levels are high"]) {
     assertNode.equal(missingAck(msg, "Lead with one concrete example."), true, msg);
   }
 });
@@ -84,7 +84,9 @@ Deno.test("R8R-SEP code groups split by any space, dash, minus or period are rem
   }
   for (const m of ["The portal lists my dates as 2018-2022, is that right?", "The recruiter emailed me 2025-2026 benefits info.", "they sent me 2024-25 dates", "the portal shows 2019 - 2023",
     "They emailed me 2024 2025 dates", "the portal shows 2024\n2025", "the recruiter texted me 9123 4567", "the recruiter texted me 1234-5678", "the portal shows 12-3456",
-    "the portal shows 1200 1500", "portal ID 4821-9032", "Workday sent me 7392 01"]) {
+    "the portal shows 1200 1500", "portal ID 4821-9032", "Workday sent me 7392 01",
+    // review of 529d1d08: a 3+4 phone and an HHMM pair split by a line break stay
+    "Recruiter texted me her number:\n555\n1234", "The recruiter emailed me the interview times:\n1030\n1400", "Acme sent me the offer: $30/hour, start 0800\n1600 shift"]) {
     const r = savedOf(m);
     assertNode.equal(r.saved, m, `${JSON.stringify(m)} kept: ${JSON.stringify(r.saved)}`); assertNode.equal(r.reply, false, m);
   }
@@ -125,7 +127,7 @@ Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless res
     "Raised code coverage across 9500 tests", "Verification of 4500 invoices monthly", "My manager sent me 2500 tickets to triage", "OTP service handled 100000 requests per day",
     "2FA adoption rose from 2000 to 8000 users", "Customer portal: 1200000 sessions", "12000 employees", "(415) 555-0134", "San Francisco, CA 94107", "GPA 3.85", "since 2019",
     "Employee ID 482913", "2021 – 2024", "Managed 25 employees and 1200 shipments", "Code review: 4500 PRs merged", "Code coverage: 95% across 9500 tests", "Postal code: 94107",
-    "Security code audits: 2018-2022", "Code quality: cut 1200 bugs"]) {
+    "Security code audits: 2018-2022", "Code quality: cut 1200 bugs", "Security code audit: 4500 endpoints", "OTP service: 50000 QPS at p99 40ms", "Built OTP service: 50000 rps"]) {
     assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), false, line);
   }
 });

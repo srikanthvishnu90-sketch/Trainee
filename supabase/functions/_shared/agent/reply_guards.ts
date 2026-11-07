@@ -529,7 +529,7 @@ export function unbackedPromises(reply: string, calls: { name: string; ok: boole
 const ACK = /\bsounds like\b|\bthat sounds\b|\bi (?:understand|can tell|get it|get that)\b|\bunderstandabl[ey]\b|\bthat'?s a lot\b|\ba lot to (?:carry|handle)\b|\bi hear you\b|\bi'?m sorry\b|\byou'?re not alone\b|\btake a breath\b|\b(?:totally|completely) normal\b|\bmakes sense (?:to feel|that you)\b|\b(?:tough|hard|stressful|overwhelming) (?:spot|time|place|search|stretch)\b|\boverwhelm/i;
 // The distress is the person's own feeling ("I'm so stressed", "this search is overwhelming", "burned out"), not a word inside a
 // task ("describe handling stressful situations") and not negated ("I'm not stressed, just curious"); Greptile records 51, 53.
-const OWN_FEEL = /(?:^|\b(?:i'?m|im|i am|i feel|i'?ve been|i have been|feeling|feel|i get|getting|makes me|so|really|very|totally|super|pretty|kinda|kind of|incredibly|honestly|is|it'?s|its|are|feels|been)\s+(?:\w+\s+){0,2})$/i;
+const OWN_FEEL = /(?:^|\b(?:i'?m|im|i am|i feel|i'?ve been|i have been|feeling|feel|i get|getting|makes me|so|really|very|totally|super|pretty|kinda|kind of|incredibly|honestly|is|it'?s|its|are|feels|been|my)\s+(?:\w+\s+){0,2})$/i;
 const NEGATED = /\b(?:not|never|no longer|isn'?t|aren'?t|wasn'?t|am not|i'?m not)\s+(?:\w+\s+){0,1}$|n'?t\s+(?:\w+\s+){0,1}$/i;
 const SELF_STATE = /^(?:overwhelmed|burn(?:ed|t)\s*out|freaking\s+out|drowning|can'?t\s+(?:cope|take|handle)|terrified|panick)/i;
 export function ownDistress(userMessage: string): boolean {

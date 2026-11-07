@@ -1097,3 +1097,15 @@ Deno.test("CDW person words hold only another person's pay; add-ons and out-of-r
   const e = fresh(); host.runTurn("The market offers $28/hour; make it $30/hour", e);
   eq((e as any).negotiationThread, undefined, "a held turn leaves no empty thread behind");
 });
+
+// Review of 529d1d08: a first-person offer after a referral or a thank-you is the user's own ("I got offered", "got me an offer").
+Deno.test("CDW first-person offers after a person word are recorded", () => {
+  for (const [msg, field, v] of [["My friend referred me and I got offered $32/hour", "hourly_rate", 32], ["My colleague introduced me and I was offered $31/hour", "hourly_rate", 31],
+    ["Thanks to my friend I got an offer of $30/hour from Acme", "hourly_rate", 30], ["My friend at Acme got me an offer of $30/hour", "hourly_rate", 30],
+    ["As a people ops lead I got offered $45/hour", "hourly_rate", 45]] as [string, string, number][]) {
+    const c = fresh(); host.runTurn(msg, c);
+    eq((c.offer as any)?.[field], v, `${msg}: offer recorded`);
+  }
+  const c = fresh(); host.runTurn("My cousin referred me and I got an offer of $85,000 from Acme", c);
+  assert([(c.offer as any)?.base_salary, (c as any).negotiationThread?.amount].includes(85000), "annual offer recorded");
+});

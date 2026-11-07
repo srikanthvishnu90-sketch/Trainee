@@ -247,3 +247,16 @@ Deno.test("CRL-9 \\r\\n and \\r line breaks are removed like \\n", () => {
     for (const g of gone) assert(!r.includes(g), `${JSON.stringify(m)}: ${g} kept: ${JSON.stringify(r)}`);
   }
 });
+
+// Review of #567: a no-break, thin or figure space, a tab, or an en/em dash between the groups is a separator like a space.
+Deno.test("CRL-10 no-break and thin spaces, tabs and en dashes between code groups are removed", () => {
+  const seps = ["\u00a0", "\u2007", "\u2009", "\u202f", "\t", "\u2013", "\u2014"];
+  for (const sep of seps) for (const [pre, post] of [["Workday sent me ", ""], ["my code is ", ""], ["My security code is ", ""], ["Verification code: ", " thanks"], ["Your one-time code is ", "."]]) {
+    const m = `${pre}739${sep}201${post}`;
+    const t = turn(m);
+    assert(!t.stored.includes("739") && !t.stored.includes("201"), `chat ${JSON.stringify(m)}: ${JSON.stringify(t.stored)}`);
+    if (!pre.startsWith("Workday")) { const r = redactIdentity(m).text; assert(!r.includes("739") && !r.includes("201"), `raw ${JSON.stringify(m)}: ${JSON.stringify(r)}`); }
+  }
+  // the same separators in numbers that are not codes stay as they were (after normalising), with and without a weak cue
+  for (const m of ["My number is 415\u00a0555\u00a01234.", "The portal says call 415\u2013555\u20131234.", "The pay is $24\u201326 an hour.", "I want 3\u20135 years of growth."]) eq(turn(m).c, null, m);
+});

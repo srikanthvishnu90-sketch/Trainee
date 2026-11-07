@@ -33,7 +33,7 @@ const WEAK = /\b(?:portal|(?:sent|texted|emailed|gave|messaged)\s+me)\b/gi;
 // "zip code", "promo code", "error code", "dress code" ...: a named code is a number to keep (identity_redact.ts NAMED_CODE).
 const NAMED_BEFORE_CODE = /\b(?:zip|postal|post|area|country|promo|promotional|discount|coupon|referral|course|class|error|status|dial|tax|product|source|job|dress|invite|invitation|gift|reference|ref|airport|sort|swift|bank|routing|color|colour|style|item|sku|qr|bar|tracking|order|confirmation|requisition|req|ticket|case|zip\s*\+\s*4)\s+$/i;
 // A digit code: 4 to 8 digits (an optional space or dash inside only after a strong word), not money, a decimal, a time or a count.
-const DIGITS = /(?<![\d$€£.,/#\w-])\d(?:(?:\r\n|[ \r\n-])?\d){3,7}(?![\d%\w-]|[.,:/]\d)/g;
+const DIGITS = /(?<![\d$€£.,/#\w-])\d(?:(?:\r\n|[ \r\n\t\u00a0\u2007\u2009\u202f\-\u2013\u2014])?\d){3,7}(?![\d%\w-]|[.,:/]\d)/g;
 const COUNT_AFTER = /^\s*(?:k\b|\+|%|usd|dollars?|bucks|years?|yrs?|months?|weeks?|days?|hours?|hrs?|minutes?|mins?|lines?|applications?|apps?|jobs?|roles?|people|times|words|characters|chars|employees|users|students|miles|am\b|pm\b|per\b|a\s+(?:year|month|week|day)|an\s+hour|\/)/i;
 // A short letters-and-digits code (K7X9P2, ab12cd34): 5 to 10 characters with at least two digits and two letters, only
 // after a strong word; never a unit ("30min", "401k", "24hr") or a word with a number in it ("Office365" has one letter run).
@@ -42,8 +42,8 @@ const UNIT_LIKE = /^\d+(?:am|pm|min|mins|hr|hrs|h|k|th|st|nd|rd|yrs?|gb|mb|kb|px
 const YEAR = /^(?:19|20)\d\d$/;
 // A code split in two by a space, a line break (\n, \r\n or \r) or a dash ("739 201", "739-201", "739\n201"; Greptile on #566 and #567) after a weak cue: exactly 3+3 digits, and no more digit groups
 // after it (so "415 555 1234" and "415-555-1234" stay phone numbers).
-const SPLIT_CODE = /^\d{3}(?:\r\n|[ \r\n-])\d{3}$/;
-const MORE_GROUPS = /^(?:\r\n|[ \r\n-])\d/;
+const SPLIT_CODE = /^\d{3}(?:\r\n|[ \r\n\t\u00a0\u2007\u2009\u202f\-\u2013\u2014])\d{3}$/;
+const MORE_GROUPS = /^(?:\r\n|[ \r\n\t\u00a0\u2007\u2009\u202f\-\u2013\u2014])\d/;
 // A sentence that hands over the value of a code the previous sentence named: "The portal sent a code. It is 739201."
 const VALUE_LEAD = /^\s*(?:it(?:'s|\s+is|\s+was)|its|that(?:'s|\s+is|\s+was)|the\s+(?:code|number|password|pin)\s+(?:is|was)|here(?:'s|\s+it\s+is)|(?:it|they)\s+said|the\s+digits\s+(?:are|were))\b/i;
 
@@ -69,8 +69,8 @@ function tokensIn(sentence: string, carried = false): { start: number; end: numb
     if (!isStrong && !near(at, weak)) continue;
     // Weak context: only a plain run of 4-8 digits that is not a year.
     // Weak context: a later group of a spaced run ("555 1234" in "415 555 1234") is part of a phone number or a date.
-    if (!isStrong && /\d(?:\r\n|[ \r\n-])$/.test(sentence.slice(0, at))) continue;
-    if (!isStrong && (/[ \r\n-]/.test(tok) ? !SPLIT_CODE.test(tok) || MORE_GROUPS.test(after) : YEAR.test(tok))) continue;
+    if (!isStrong && /\d(?:\r\n|[ \r\n\t\u00a0\u2007\u2009\u202f\-\u2013\u2014])$/.test(sentence.slice(0, at))) continue;
+    if (!isStrong && (/[ \r\n\t\u00a0\u2007\u2009\u202f\-\u2013\u2014]/.test(tok) ? !SPLIT_CODE.test(tok) || MORE_GROUPS.test(after) : YEAR.test(tok))) continue;
     if (isStrong && YEAR.test(tok) && (carried && !contextEnds(sentence, STRONG).length || /\bin\s+$|\bsince\s+$|\bof\s+$/i.test(sentence.slice(0, at)))) continue;
     hits.push({ start: at, end: at + tok.length });
   }

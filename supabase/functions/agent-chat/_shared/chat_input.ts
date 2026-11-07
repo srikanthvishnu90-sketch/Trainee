@@ -17,8 +17,9 @@ export function chatInput(message: unknown, images: unknown, maxLen: number, o: 
   }
   // Identity digits are removed before anything stores the text or sends it to a model (owner rule; testing agent O-20).
   // Line endings are made one form first ("\r\n" and "\r" become "\n"), so a code pasted with Windows or old-Mac line breaks
-  // ("739\r\n201") meets the same redaction as "739\n201" in every pass below and in code-in-chat (Greptile on #567).
-  const red = redactIdentity(typeof message === "string" ? message.replace(/\r\n?/g, "\n").trim() : "");
+  // ("739\r\n201") meets the same redaction as "739\n201" in every pass below and in code-in-chat (Greptile on #567). Likewise a no-break,
+  // thin or figure space or a tab becomes a space, and an en or em dash between digits a hyphen ("739\u00a0201", "739–201"; review of #567).
+  const red = redactIdentity(typeof message === "string" ? message.replace(/\r\n?/g, "\n").replace(/[\u00a0\u2007\u2009\u202f\t]/g, " ").replace(/(\d)[\u2013\u2014](?=\d)/g, "$1-").trim() : "");
   if (o.codePending) { const more = redactIdentity(red.text, o); red.text = more.text; red.removed = [...new Set([...red.removed, ...more.removed])]; }
   const text = red.text;
   if (!text && !imageBlocks.length) return { ok: false, error: "message required" };

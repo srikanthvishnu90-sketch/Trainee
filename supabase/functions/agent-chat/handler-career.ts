@@ -306,7 +306,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     const fileText = await isUploadedResumeText(admin, user?.id, userContent);
     if (!fileText) {
       const early = codeInChat(message, { userContent, removed: removedNow, codePending: codePending(situation), originalLength: originalLen });
-      if (early) { message = early.text; userContent = early.userContent; }
+      // What the early pass removed is recorded too: while a code is pending the later pass finds nothing new and returns null,
+      // so a removal made only here would otherwise be missing from removedNow and the reply's note (Greptile on #583).
+      if (early) {
+        message = early.text; userContent = early.userContent;
+        removedNow = [...new Set([...removedNow, ...early.removed])];
+        flowCtx.note = redactionNote(removedNow);
+        if (flowCtx.note && removedNow.some((r: string) => r === "card" || r === "account")) flowCtx.note = `${flowCtx.note} ${PAY_BY_CHECKOUT}`;
+      }
     }
     // L4: thread_id must be a string when provided (non-string truthy values
     // would otherwise cause a DB error → noisy 500).

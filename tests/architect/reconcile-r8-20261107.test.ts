@@ -382,3 +382,23 @@ Deno.test("R8R-69 label tails, hand-overs and disguised digits refuse the file; 
   const ssn = await ingest([...BODY.slice(0, 4), "SSN: \uff11\uff12\uff13-\uff14\uff15-\uff16\uff17\uff18\uff19", ...BODY.slice(4)]);
   assertNode.equal(ssn.res.ok, false); assertNode.equal((ssn.res as any).why, "secret"); assertNode.equal(ssn.stored.length, 0);
 });
+
+// Review of 837a045e: on a line with a code word, a sign-in service or a hand-over verb anywhere, every code-shaped value is a
+// code unless it has a safe shape; wrappers are dropped and separators joined; a line that ends in such a word is judged with
+// the next text line. Counts, money for a purpose, units, clock times, standards, years and named labels stay.
+Deno.test("R8R-83 strict per-line rule: wrapped, grouped and next-line codes refuse; safe shapes stay", () => {
+  const wrap = (l: string) => `Jane Doe\nEXPERIENCE\n- Built data pipelines at Acme, 2019 - 2021\n- ${l}\n- Led a team of 5 engineers`;
+  for (const l of ["Code: AYTN-2P2P", "OTP: GDJX-X4JG-MG6B", "Okta code: ABCD-1234", "Use 4⁠8⁠2⁠9⁠1⁠3⁠0⁠2⁠1 to sign in",
+    "My phone shows 482913", "The app displays 482913", "4829137560 is my code", "SMS: 4829130217", "Verify with 4829130217", "482913 - sign-in code",
+    "K7X9P2 - sign-in code", "Code: _482913_", "Code: `4829137560`", "Code: `K7X.9P2`", "Code: «4829137560»", "Code: K7X,9P2", "Code: 142,436,370",
+    "Workday sent me 482 - 913", "Use 482 - 913 to sign in", "**482913** is my code", "Workday sent me\n«064-448».", "My phone shows\n[62646] expires soon",
+    "PIN:\n\n`0462`", "Login code:\n\n`J0S6`", "Greenhouse pinged me\n002-886."]) {
+    assertNode.ok(fileCodeLines(wrap(l)).includes(4), JSON.stringify(l));
+  }
+  for (const l of ["OTP service: 50000 QPS at p99 40ms", "Legacy code was ported: 3500 COBOL programs", "Verification code service was: 50000 SMS/day",
+    "The code we shipped was used by 120000 drivers", "CPT code: 99213 and 99214 billing audits", "VP gave me 4500 and a deadline", "Microsoft sent me 2500 for travel",
+    "Client sent me requirements, ref: RQ4821", "Acme sent me the offer: $30/hour, start 0800\n1600 shift", "Recruiter sent me salary range 90.000 - 110.000",
+    "2FA - 2019", "OTP - 2021", "Dashboard shows 4500 users", "Sent 1200 newsletters", "Workday sent me\n- 4500 applications to screen", "Code: ISO-27001-2013 compliance"]) {
+    assertNode.deepEqual(fileCodeLines(wrap(l)), [], l);
+  }
+});

@@ -333,8 +333,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // the stored reply replays (reviews and Greptile on #565).
       // One read, so the user rows and this turn's own reply come from the same snapshot (a commit cannot land between two reads).
       // turnKey is validated as [A-Za-z0-9_-] above, so it is safe inside the or() filter.
+      // 50 rows: a retry still finds its own turn and the lead-in after many later turns (Greptile on #565). Past that, the lookup
+      // misses the lead-in and the load answers turn_key_conflict; nothing is stored.
       const prev = await admin.from("agent_messages").select("role, content").eq("thread_id", tid)
-        .or(`role.eq.user,meta->>career_turn_key.eq.${turnKey}`).order("id", { ascending: false }).limit(6);
+        .or(`role.eq.user,meta->>career_turn_key.eq.${turnKey}`).order("id", { ascending: false }).limit(50);
       if (prev.error) console.error("split secret check: previous message unreadable:", prev.error.message);
       const rows = (prev.data ?? []) as { role: string; content: unknown }[];
       const ownAt = rows.findIndex((r) => r.role === "assistant");

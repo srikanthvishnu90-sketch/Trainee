@@ -1010,3 +1010,20 @@ Deno.test("CDW a held counter revision hands the brain the figures and asks for 
     eq(recorded(ctx).counter, 27, `${msg}: counter unchanged`); eq(r.result?.counterAmbiguous, true, msg); eq(r.result?.sends ?? 0, 0, msg);
   }
 });
+
+// Greptile records 29 and 35: a unitless ask the router cannot read never lets an older saved counter stand in for it.
+Deno.test("CDW a cued unitless ask that is not read keeps the slot blank and never reuses a stale counter", () => {
+  for (const msg of ["Draft a counter at $28 with no relocation allowance", "Draft a counter at $28 for a childcare role"]) {
+    for (const prior of [null, "Counter at $26/hour"]) {
+      const ctx = fresh(); host.runTurn(OFFER, ctx); if (prior) host.runTurn(prior, ctx);
+      const r = host.runTurn(msg, ctx);
+      const draft = String(r.result?.draft?.body ?? r.reply ?? "");
+      assert(!/meet me at \$26/.test(draft), `${msg} / ${prior}: stale $26 reused: ${draft.slice(0, 300)}`);
+      assert(/\$28/.test(String(r.reply)), `${msg} / ${prior}: asks about $28: ${String(r.reply).slice(-200)}`);
+      eq(r.result?.sends ?? 0, 0, msg);
+    }
+  }
+  // No figure this turn: the saved counter is still the draft's ask.
+  const c = fresh(); host.runTurn(OFFER, c); host.runTurn("Counter at $26/hour", c);
+  assert(/meet me at \$26/.test(String(host.runTurn("Draft the counter email", c).result?.draft?.body)), "saved counter reused when no figure is given");
+});

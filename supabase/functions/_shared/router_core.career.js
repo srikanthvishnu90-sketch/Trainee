@@ -19139,7 +19139,9 @@ const CareerRouter = (() => {
           if (askFigs.ask) {
             try { const thw = negotiationThreadForWrite(ctx); const pc = (thw.counter && typeof thw.counter === "object") ? thw.counter : {}; thw.counter = Object.assign({}, pc, { hourly: askFigs.ask }); thw.topic = "counter"; } catch {   }
           }
-          let counterFig = askFigs.ask || (thread.counter && thread.counter.hourly) || null;
+          const cuedM = askFigs.ask == null ? s(text).match(/\b(?:counter(?:[ -]?offer)?|ask(?:ing)?(?:\s+for)?|meet\s+me\s+at|target|want)\b[^$.!?\n]{0,24}(\$\s?\d[\d,]*(?:\.\d{1,2})?)/i) : null;
+          const cuedFig = cuedM ? cuedM[1].replace(/\s+/g, "") : null;
+          let counterFig = askFigs.ask || (cuedFig ? null : (thread.counter && thread.counter.hourly)) || null;
           if (counterFig && hourlyBase && Number(counterFig) <= Number(hourlyBase)) counterFig = null;
           const targetSlot = "[your target hourly rate]";
           const decisionAsk = /\bshould\b[^?.!]{0,40}\bcounter|\bworth\b[^?.!]{0,20}\bcounter|\bcounter\b[^?.!]{0,20}\bor\b[^?.!]{0,20}\b(?:accept|take|not)\b/i.test(s(text));
@@ -19152,7 +19154,7 @@ const CareerRouter = (() => {
             const blank = `${hourlyBase ? `$${Number(hourlyBase)} an hour is the offer, not an ask, so the email does not ask for it. ` : ""}The ask line is a fill-in, ${targetSlot}: it is not ready to send until you give me the hourly rate you want to ask for.`;
             facts.splice(1, 0, decisionAsk ? `Whether to counter is your decision, and I will not guess it for you: ${benchSentence} ${blank}` : blank);
           }
-          const reply = compose({ headline: counterFig ? "The counter email, written out — the real words, held for your approval." : "The counter email is drafted around a blank for your target — held, nothing sent.", facts, nextStep: counterFig ? "Approve it as written, or tell me the figure or the tone to change." : "What hourly rate do you want to ask for?" });
+          const reply = compose({ headline: counterFig ? "The counter email, written out — the real words, held for your approval." : "The counter email is drafted around a blank for your target — held, nothing sent.", facts, nextStep: counterFig ? "Approve it as written, or tell me the figure or the tone to change." : cuedFig ? `Is ${cuedFig} an hour the rate you want to ask for? If it is, say so and it goes in the email.` : "What hourly rate do you want to ask for?" });
           const offerOut = Object.assign({}, offerObj, { hourly_rate: hourlyBase, base_salary: null });
           return Object.assign({ intent: "negotiation_draft", reply, resultStatus: "awaiting_user", sends: 0, draft: { kind: "counter_email", body }, offer: offerOut, payload: offerOut }, counterFig ? {} : { awaiting: "target_hourly_rate", counterDecision: decisionAsk });
         }

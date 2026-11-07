@@ -101,3 +101,59 @@ Deno.test("R8G-4 review of 3896c31c: inflected and compound labels, capital Gree
   const plainHeader = await upload(docx([{ name: "word/footer1.xml", xml: `<w:ftr ${W}><w:p><w:r><w:t>Jordan Lee · Page 1 · 2024</w:t></w:r></w:p></w:ftr>` }]));
   assertNode.ok(plainHeader.res.ok && plainHeader.stored.length === 1, "a plain footer is kept");
 });
+
+// Review of 1c937596. The hidden-part pass fails closed (a part it cannot read refuses the file), keeps breaks and tabs, and reads
+// every XML part; long lines are judged by sentences so a value keeps its label; long-tail languages; three postal look-alikes.
+Deno.test("R8G-5 review of 1c937596: hidden parts fail closed, breaks kept, all parts read, sentence windows, long-tail labels", async () => {
+  const enc = new TextEncoder(), W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  const body = BODY.map((t) => `<w:p><w:r><w:t xml:space="preserve">${t}</w:t></w:r></w:p>`).join("");
+  const types = { name: "[Content_Types].xml", data: enc.encode('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>') };
+  const docx = (extra: { name: string; xml: string }[], inBody = "") => zipOf([types,
+    { name: "word/document.xml", data: enc.encode(`<?xml version="1.0" encoding="UTF-8"?><w:document ${W}><w:body>${body}${inBody}<w:sectPr/></w:body></w:document>`) },
+    ...extra.map((e) => ({ name: e.name, data: enc.encode(e.xml) }))]);
+  const upload = async (bytes: Uint8Array) => {
+    const stored: unknown[] = [];
+    const res = await ingestResumeFile({ userId: "TEST-r8g", channel: "telegram", doc: { fileId: "F", uniqueId: crypto.randomUUID(), name: "resume.docx", mime: DOCX, size: bytes.length },
+      fetchFile: async () => ({ ok: true, bytes }), record: async (row) => { stored.push(row); return "id"; } });
+    return { res: res as { ok: boolean; reply?: string }, stored };
+  };
+  const refused = async (bytes: Uint8Array, tag: string) => { const u = await upload(bytes); assertNode.ok(!u.res.ok && u.stored.length === 0 && !String(u.res.reply).includes("482913"), tag); };
+  const hdr = (inner: string) => `<w:hdr ${W}><w:p>${inner}</w:p></w:hdr>`;
+  await refused(docx([{ name: "word/header1.xml", xml: hdr("<w:r><w:t>Jordan Lee</w:t><w:br/><w:t>482913</w:t></w:r>") }]), "break in a header");
+  await refused(docx([{ name: "word/header1.xml", xml: hdr("<w:r><w:t>jordan.lee@example.com</w:t><w:br/><w:t>OTP 482913</w:t></w:r>") }]), "break then OTP");
+  await refused(docx([{ name: "word/Header1.xml", xml: hdr("<w:r><w:t>Verification code: 482913</w:t></w:r>") }]), "odd header name");
+  await refused(docx([{ name: "word/glossary/document.xml", xml: `<w:glossaryDocument ${W}><w:p><w:r><w:t>Login code 482913</w:t></w:r></w:p></w:glossaryDocument>` }]), "glossary");
+  await refused(docx([{ name: "docProps/core.xml", xml: '<cp:coreProperties xmlns:cp="x" xmlns:dc="y"><dc:description>My verification code is 482913</dc:description></cp:coreProperties>' }]), "document properties");
+  await refused(docx([], '<w:p><w:r><w:instrText xml:space="preserve"> HYPERLINK "https://login.example.com/?code=482913" </w:instrText></w:r></w:p>'), "field instruction");
+  await refused(docx([], `<w:p><w:r><w:drawing><wp:docPr xmlns:wp="z" id="1" name="Picture 1" descr="Verification code 482913"/></w:drawing></w:r></w:p>`), "alt text");
+  // A part the reader cannot read (bad checksum, or past its size cap) refuses the file: it may hold anything.
+  const good = docx([{ name: "word/header1.xml", xml: hdr("<w:r><w:t>Verification code: 482913</w:t></w:r>") }]);
+  const bad = good.slice(), name = enc.encode("word/header1.xml");
+  const at = (() => { for (let k = bad.length - name.length; k >= 0; k--) if (name.every((b, j) => bad[k + j] === b)) return k; return -1; })();
+  bad[at - 46 + 16] ^= 0xff; // the central directory's checksum of the header part
+  await refused(bad, "unreadable header");
+  await refused(docx([{ name: "word/header1.xml", xml: hdr(`<w:r><w:t>Your verification code is 482913${" ".repeat(5_400_000)}</w:t></w:r>`) }]), "header past the size cap");
+  const footer = await upload(docx([{ name: "word/footer1.xml", xml: `<w:ftr ${W}><w:p><w:r><w:t>Jordan Lee</w:t><w:br/><w:t>Page 1 of 2</w:t></w:r></w:p></w:ftr>` }]));
+  assertNode.ok(footer.res.ok && footer.stored.length === 1, "a plain footer with a break is kept");
+  // Long lines: a value keeps its label wherever the sentence falls.
+  const filler = "Partnered with the login team on onboarding flows and reporting across regions. ";
+  for (let k = 0; k < 700; k += 23) {
+    for (const tail of ["Army Infantry Squad Leader, 2008 - 2014, Secret clearance.", "Employee ID 004512 (available on request)."]) assertNode.deepEqual(fileCodeLines(filler.repeat(9).slice(0, k + 600) + " " + tail), [], `${tail} at ${k}`);
+    assertNode.deepEqual(fileCodeLines(filler.repeat(20).slice(0, k + 600) + " Verification code: 482913. " + filler), [1], `code at ${k}`);
+  }
+  for (const c of ["Din bekreftelseskode er 482913", "Hasło: 482913", "Twoje hasło jednorazowe to 482913", "Mã: 482913", "Mật khẩu một lần: 482913", "A kódod: 482913",
+    "Számkód 482913", "El teu codi de verificació és 482913", "Jou verifikasiekode is 482913", "Vaša koda za preverjanje je 482913", "Jūsų patvirtinimo kodas: 482913",
+    "Jūsu verifikācijas kods ir 482913", "Sinu kinnituskood on 482913", "আপনার ওটিপি 482913", "آپ کا کوڈ 482913 ہے",
+    "Nambari yako ya uthibitisho ni 482913", "Staðfestingarkóði: 482913", "Zure kodea: 482913", "Eich cod dilysu yw 482913", "Ikhodi yakho ithi 482913"]) {
+    const { res, stored } = await ingest([...BODY.slice(0, 4), c, ...BODY.slice(4)]);
+    assertNode.ok(!res.ok && stored.length === 0, JSON.stringify(c));
+  }
+  // An Indian postal PIN code: the file gate keeps it; trunk's identity redactor refuses it, as on trunk.
+  const pin = [...BODY.slice(0, 4), "Software Engineer, Infosys, Bengaluru; PIN code 560100", ...BODY.slice(4)].join("\n");
+  assertNode.deepEqual(fileCodeLines(pin), []); assertNode.ok(redactIdentity(pin).removed.length > 0);
+  for (const l of ["Kode pos 12190, Jakarta Selatan", "Led migration of 2FA codes from SMS to authenticator apps.",
+    "Built barcode scanning for 4500 SKUs", "Kodak Alaris, Rochester NY, 2016 - 2019", "Decoded 2500 support tickets"]) {
+    const { res, stored } = await ingest([...BODY.slice(0, 4), l, ...BODY.slice(4)]);
+    assertNode.ok(res.ok && stored.length === 1, JSON.stringify(l));
+  }
+});

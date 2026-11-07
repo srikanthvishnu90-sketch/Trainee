@@ -531,6 +531,7 @@
     "tests/architect/scenarios-file-signin-r4-4.test.ts": 18,
     "tests/architect/scenarios-file-signin-r4-regressions.test.ts": 0.2,
     "tests/architect/flow-scenarios-file-signin-r4.test.ts": 14,
+    "tests/architect/counter-draft-wording-20261106.test.ts": 3.0,
     "tests/architect/code-redaction-length-20261106.test.ts": 10.5
   }
 }

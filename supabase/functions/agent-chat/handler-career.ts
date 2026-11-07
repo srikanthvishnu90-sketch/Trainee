@@ -305,7 +305,6 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const early = codeInChat(message, { userContent, removed: removedNow, codePending: codePending(situation), originalLength: originalLen });
       if (early) { message = early.text; userContent = early.userContent; }
     }
-    const hashedMessage = message;
     // L4: thread_id must be a string when provided (non-string truthy values
     // would otherwise cause a DB error → noisy 500).
     if (thread_id !== undefined && thread_id !== null && typeof thread_id !== "string")
@@ -327,9 +326,22 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // stores it or a model reads it, and the person is told (identity_redact.ts secretLeadIn / redactPending). Read only
     // for a message shaped like a lone value, in a thread the person owns (ownerThread, above).
     if (thread_id && !imageBlocks.length && (looksLikePendingSecret(message, "password") || looksLikePendingSecret(message, "code"))) {
-      const prev = await admin.from("agent_messages").select("content").eq("thread_id", tid).eq("role", "user").order("id", { ascending: false }).limit(1);
+      // The lead-in is the person's newest message BEFORE this turn. The user-row lookup is role-filtered, so assistant-only rows
+      // (proactive messages, apply cards) never hide it. On a retry of a turn that already committed (same turn_key), this turn's
+      // own assistant row is found by its career_turn_key wherever it sits, even under later notices, and the lookup reads the user
+      // rows before it, skipping this turn's own redacted user row: the redaction and the request hash match the first attempt and
+      // the stored reply replays (reviews and Greptile on #565).
+      // One read, so the user rows and this turn's own reply come from the same snapshot (a commit cannot land between two reads).
+      // turnKey is validated as [A-Za-z0-9_-] above, so it is safe inside the or() filter.
+      // 50 rows: a retry still finds its own turn and the lead-in after many later turns (Greptile on #565). Past that, the lookup
+      // misses the lead-in and the load answers turn_key_conflict; nothing is stored.
+      const prev = await admin.from("agent_messages").select("role, content").eq("thread_id", tid)
+        .or(`role.eq.user,meta->>career_turn_key.eq.${turnKey}`).order("id", { ascending: false }).limit(50);
       if (prev.error) console.error("split secret check: previous message unreadable:", prev.error.message);
-      const lead = secretLeadIn(String(prev.data?.[0]?.content ?? ""));
+      const rows = (prev.data ?? []) as { role: string; content: unknown }[];
+      const ownAt = rows.findIndex((r) => r.role === "assistant");
+      const users = (ownAt >= 0 ? rows.slice(ownAt + 1) : rows).filter((r) => r.role === "user");
+      const lead = secretLeadIn(String(users[ownAt >= 0 ? 1 : 0]?.content ?? ""));
       const red = lead ? redactPending(message, lead) : null;
       if (red) {
         message = red.text; userContent = red.text;
@@ -347,6 +359,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       flowCtx.note = redactionNote(removedNow);
       if (flowCtx.note && removedNow.some((r: string) => r === "card" || r === "account")) flowCtx.note = `${flowCtx.note} ${PAY_BY_CHECKOUT}`;
     }
+    // The request hash digests the text after EVERY redaction pass (early code-in-chat, the split-secret step, code-in-chat):
+    // the turn receipt keeps it, and a hash of a bare 6-digit code is recoverable by trying its million values (Greptile, #564).
+    const hashedMessage = message;
 
     // GO-LIVE FLIP (2026-10-13, owner ruling: "the career version is the
     // final switch" — the money version is gone from live). Career is the

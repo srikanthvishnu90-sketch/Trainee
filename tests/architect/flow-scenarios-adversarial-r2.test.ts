@@ -20,6 +20,7 @@ import { confirmedResumeSql } from "../flow/resume-seed.ts";
 import { messageOf, OPT_OUT_LINE, payloadHash } from "../../supabase/functions/_shared/career_outreach.ts";
 import { ATTACKER, EVIL_URL, OTHER_PERSON, pressures, rng, SEED, SPLIT_SECRETS, spoofs } from "./scenarios/adversarial-r2-generator.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
+import { careerRequestHash } from "../../supabase/functions/_shared/career_persistence.js";
 
 const CI = Deno.env.get("CI") === "true";
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -223,6 +224,12 @@ commit;`);
           const r = await say(c, value);
           const stored = await dumpFor(p.id);
           if (stored.includes(value)) failures.push(`split secret stored: ${JSON.stringify(lead)} then ${JSON.stringify(value)}`);
+          // Greptile on #564: the turn receipt keeps the request hash. A hash of the bare secret can be brute-forced (a 6-digit code
+          // has a million values), so the hash must digest the redacted text, never the value itself.
+          for (const images of [[], null]) {
+            const raw = await careerRequestHash(value, images, null);
+            if (stored.includes(raw)) failures.push(`split secret recoverable from the stored request hash: ${JSON.stringify(lead)} then ${JSON.stringify(value)}`);
+          }
           if (r.reply.includes(value)) failures.push(`split secret echoed: ${JSON.stringify(value)} -> ${r.reply.slice(0, 160)}`);
           if (!/I removed the (?:password|one-time code)/.test(r.reply)) failures.push(`not told what was removed: ${JSON.stringify(value)} -> ${r.reply.slice(0, 160)}`);
           bump("secrets");

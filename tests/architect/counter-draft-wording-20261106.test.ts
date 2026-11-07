@@ -26,7 +26,7 @@ const recorded = (ctx: any) => {
 // others, the industry, averages, salary sites, other employers) is not attributed by code. Nothing is saved or drafted and the
 // turn is held for the brain, which asks which figure is the employer's offer. Spec side of that rule:
 const THIRD_SPEC = /\b(?:market|competitors?|others|industry|average|median|typical|glassdoor|levels\.fyi|payscale|salary\.com|indeed|employers|companies|other\s+(?:places|firms|roles|jobs|offers))\b/i;
-const namesThird = (msg: string) => msg.split(/[?!;\n]|\.(?!\d)/).some((x) => THIRD_SPEC.test(x.replace(/counter[ -]?offers?/ig, "")) && /\$\s?\d/.test(x));
+const namesThird = (msg: string) => msg.split(/[?!;\n]|\.(?=\s|$)/).some((x) => THIRD_SPEC.test(x.replace(/counter[ -]?offers?/ig, "")) && /\$\s?\d/.test(x));
 const ASKS: (string | null | undefined)[] = ["outreach_clarification", "career_catchall", null, undefined];
 // Held: no figure from this message is saved (the recorded offer stays, or a different-company thread starts empty), nothing
 // is drafted or sent, and the turn asks: it is flagged for the brain, or routed to a clarifying question.
@@ -926,4 +926,21 @@ Deno.test("CDW market exit: market comparisons are never a job title; 'elsewhere
     host.runTurn(msg, ctx);
     eq(recorded(ctx).hourly, 26, msg);
   }
+});
+
+// Greptile on #564: a dot inside a site name is not a sentence end, so "Salary.com says they offer $28/hour" keeps its source.
+Deno.test("CDW market exit: salary-site names with a dot stay in the figure's sentence", () => {
+  for (const prior of [OFFER, null]) for (const row of [
+    "Salary.com says they offer $28/hour", "Levels.fyi shows $28/hour for this role", "On glassdoor.com they pay $28/hour", "Per salary.com the offer is $28/hour",
+  ]) {
+    const msg = `${row}. Draft a counter at $30/hour`;
+    const ctx = fresh();
+    if (prior) host.runTurn(prior, ctx);
+    const before = recorded(ctx).hourly;
+    heldForBrain(ctx, host.runTurn(msg, ctx), before, msg);
+  }
+  // a real sentence end still separates a market remark from the offer (C04-style)
+  const ctx = fresh(); host.runTurn(OFFER, ctx);
+  host.runTurn("They came back with $26/hour. I checked salary.com later. Draft a counter at $30/hour", ctx);
+  eq(recorded(ctx).hourly, 26);
 });

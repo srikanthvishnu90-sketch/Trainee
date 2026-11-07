@@ -305,7 +305,6 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const early = codeInChat(message, { userContent, removed: removedNow, codePending: codePending(situation), originalLength: originalLen });
       if (early) { message = early.text; userContent = early.userContent; }
     }
-    const hashedMessage = message;
     // L4: thread_id must be a string when provided (non-string truthy values
     // would otherwise cause a DB error → noisy 500).
     if (thread_id !== undefined && thread_id !== null && typeof thread_id !== "string")
@@ -347,6 +346,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       flowCtx.note = redactionNote(removedNow);
       if (flowCtx.note && removedNow.some((r: string) => r === "card" || r === "account")) flowCtx.note = `${flowCtx.note} ${PAY_BY_CHECKOUT}`;
     }
+    // The request hash digests the text after EVERY redaction pass (early code-in-chat, the split-secret step, code-in-chat):
+    // the turn receipt keeps it, and a hash of a bare 6-digit code is recoverable by trying its million values (Greptile, #564).
+    const hashedMessage = message;
 
     // GO-LIVE FLIP (2026-10-13, owner ruling: "the career version is the
     // final switch" — the money version is gone from live). Career is the

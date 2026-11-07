@@ -8,7 +8,8 @@ Deno.test("request hash: captured after the split-secret step and the code-in-ch
   const src = await Deno.readTextFile(new URL("../../supabase/functions/agent-chat/handler-career.ts", import.meta.url));
   const at = (re: RegExp) => { const m = re.exec(src); assertNode.ok(m, `missing: ${re}`); return m!.index; };
   const split = at(/const red = lead \? redactPending\(message, lead\) : null;/);
-  const codePass = at(/const codeShared = codeInChat\(message,/);
+  // #569: the pass is skipped only for a verified uploaded resume's text (fileText); it still runs before the capture.
+  const codePass = at(/const codeShared = (?:fileText \? null : )?codeInChat\(message,/);
   const capture = at(/const hashedMessage = message;/);
   const use = at(/careerRequestHash\(hashedMessage,/);
   assertNode.ok(split < capture, "the hash input is taken after the split-secret redaction");

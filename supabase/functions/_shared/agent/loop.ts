@@ -235,6 +235,13 @@ function missingAnswerBody(reply: string, message: string, receiptOnly = false, 
   return clauses.length > 0 && clauses.every((s) => CLOSING_ONLY.test(s) || (!SOCIAL_MESSAGE.test(message.trim()) && (ACK_ONLY.test(s) || PROGRESS_ONLY.test(s))) || (receiptOnly && claimsIn(s).length > 0));
 }
 // REPLY SHAPE: what the turn staged and which links it may show ride the result, whichever way the turn ended.
+// The flag-only reply checks of a turn (missing_ack, many_asks, unbacked_promise), as the meta the career handler saves with
+// the response and the assistant message. Empty when the turn raised none (Greptile on #566).
+export function replyFlagsMeta(turn: { flags?: unknown } | null | undefined): { reply_flags?: string[] } {
+  const f = Array.isArray(turn?.flags) ? turn!.flags.filter((x): x is string => typeof x === "string" && x.length > 0) : [];
+  return f.length ? { reply_flags: f } : {};
+}
+
 export async function runAgentTurn(o: Parameters<typeof runAgentTurnInner>[0]): Promise<TurnResult> {
   const r = await runAgentTurnInner(o);
   const attachments = o.ctx.turn?.attachments ?? [];

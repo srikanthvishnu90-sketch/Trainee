@@ -148,6 +148,10 @@ const GAPS: [string, string][] = [
   ["The Workday portal sent me 739 201, can you enter it?", "739 201"], ["The Workday portal sent me 739-201, can you enter it?", "739-201"],
   ["Lever texted me 739 201.", "739 201"], ["Plaid emailed me 739-201 just now.", "739-201"],
   ["Verification code: 739\n201", "739\n201"], ["The portal sent a code. It is 739201.", "739201"],
+  // Greptile on #566: a weak cue, then a code split by a line break (pasted from a text message)
+  ["Workday sent me 739\n201", "739\n201"], ["The Workday portal sent me 739\n201, can you enter it?", "739\n201"], ["Lever texted me 739\n201.", "739\n201"],
+  // Greptile on #567: Windows and old-Mac line endings
+  ["Workday sent me 739\r\n201", "739\r\n201"], ["Lever texted me 739\r201.", "739\r201"], ["Verification code: 739\r\n201", "739\r\n201"],
   ["Workday sent a verification code. The code is 739201, please enter it.", "739201"], ["I got a one-time code from Lever. Here's 739201.", "739201"],
 ];
 Deno.test("CRL-5 split codes, a code across a line break and a code in the next sentence are removed, at every length", () => {
@@ -164,7 +168,8 @@ Deno.test("CRL-5 split codes, a code across a line break and a code in the next 
 const KEEP = ["Call me at 415-555-1234.", "My number is 415 555 1234.", "My number is (415) 555-1234.", "The meeting is at 9:30.", "I want 3-5 years of growth.",
   "The pay is $24-26 an hour.", "My zip is 94107-1234.", "The offer letter is dated 11-06-2026.", "The office is in room 739 201.",
   "The portal phone is 415-555-1234.", "The portal says call 415 555 1234.", "The portal lists (415) 555-1234.", "The portal opens at 9:30.", "The portal asked for 3-5 years.",
-  "The portal shows $24-26.", "The portal shows 94107-1234.", "The portal shows 11-06-2026.", "I learned to code. It was 2019.", "I wrote some code. It is 5000 lines.", "My zip code is 94107. It is 94107-1234."];
+  "The portal shows $24-26.", "The portal shows 94107-1234.", "The portal shows 11-06-2026.", "I learned to code. It was 2019.", "I wrote some code. It is 5000 lines.", "My zip code is 94107. It is 94107-1234.",
+  "My number is 415\n555\n1234.", "The portal says call 415\n555\n1234.", "The portal phone is 415\n555-1234."];
 Deno.test("CRL-6 phones, times, ranges, zip+4, dates and years are never redacted, at every length", () => {
   for (const len of [60, 399, 401, 1000, 3900]) for (const where of ["start", "middle", "end"] as Where[]) for (const s of KEEP) {
     const m = len === 60 ? s : place(s, len, where);
@@ -226,4 +231,32 @@ Deno.test("CRL-8 a labeled code or security code is removed whatever follows it:
     const n = redactIdentity(m).text;
     assert(!n.includes("123") && !n.includes("739") && !n.includes("201"), n);
   }
+});
+
+// Greptile on #567: a code pasted with Windows or old-Mac line breaks is removed in every pass, labeled or not.
+Deno.test("CRL-9 \\r\\n and \\r line breaks are removed like \\n", () => {
+  for (const m of ["Workday sent me 739\r\n201", "Verification code: 739\r\n201", "my code is 739\r\n201", "Security code 123\r\n456", "OTP 123456\r\n2024 thanks", "Lever texted me 739\r201."]) {
+    const t = turn(m);
+    for (const g of ["739", "201", "123456"]) if (m.includes(g)) assert(!t.stored.includes(g), `${JSON.stringify(m)}: ${g} stored: ${JSON.stringify(t.stored)}`);
+  }
+  for (const m of ["The portal says call 415\r\n555\r\n1234.", "My number is 415\r\n555\r\n1234."]) eq(turn(m).c, null, m);
+  // the redaction module on its own (other callers pass it raw text): no CRLF code survives
+  for (const [m, gone] of [["Verification code: 739\r\n201", ["739", "201"]], ["Security code 123\r\n456", ["123", "456"]], ["OTP 123456\r\n2024", ["123456"]],
+    ["my one-time code is 482\r\n913", ["482", "913"]], ["my code is 739\r\n201", ["739", "201"]]] as [string, string[]][]) {
+    const r = redactIdentity(m).text;
+    for (const g of gone) assert(!r.includes(g), `${JSON.stringify(m)}: ${g} kept: ${JSON.stringify(r)}`);
+  }
+});
+
+// Review of #567: a no-break, thin or figure space, a tab, or an en/em dash between the groups is a separator like a space.
+Deno.test("CRL-10 no-break and thin spaces, tabs and en dashes between code groups are removed", () => {
+  const seps = ["\u00a0", "\u2007", "\u2009", "\u202f", "\t", "\u2013", "\u2014"];
+  for (const sep of seps) for (const [pre, post] of [["Workday sent me ", ""], ["my code is ", ""], ["My security code is ", ""], ["Verification code: ", " thanks"], ["Your one-time code is ", "."]]) {
+    const m = `${pre}739${sep}201${post}`;
+    const t = turn(m);
+    assert(!t.stored.includes("739") && !t.stored.includes("201"), `chat ${JSON.stringify(m)}: ${JSON.stringify(t.stored)}`);
+    if (!pre.startsWith("Workday")) { const r = redactIdentity(m).text; assert(!r.includes("739") && !r.includes("201"), `raw ${JSON.stringify(m)}: ${JSON.stringify(r)}`); }
+  }
+  // the same separators in numbers that are not codes stay as they were (after normalising), with and without a weak cue
+  for (const m of ["My number is 415\u00a0555\u00a01234.", "The portal says call 415\u2013555\u20131234.", "The pay is $24\u201326 an hour.", "I want 3\u20135 years of growth."]) eq(turn(m).c, null, m);
 });

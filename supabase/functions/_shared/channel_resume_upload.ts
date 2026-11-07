@@ -13,7 +13,7 @@
 //      confirmed entry came from (fileUploadFor below), under the same rules: shown word for word, and in the upload.
 // A file that cannot be downloaded, is not a PDF or DOCX, or has no readable text is said so, plainly; nothing is stored.
 import { CareerProfile, CareerRender } from "./router_core.career.js";
-import { redactIdentity } from "./identity_redact.ts";
+import { normalizeChatText, redactIdentity } from "./identity_redact.ts";
 import type { Upload } from "./career_router_evidence.ts";
 
 export const MAX_RESUME_BYTES = 10 * 1024 * 1024;
@@ -211,7 +211,8 @@ export function docxResumeLines(xml: string): string[] {
 // The message the chat receives for a file's text: framed as a pasted resume, trimmed and with identity digits removed as
 // agent-chat's input step removes them (chat_input.ts), so its sha256 is the sha256 of the message the thread stores.
 export function resumeMessage(text: string): string {
-  let body = String(text ?? "").trim();
+  // normalised exactly as chat_input.ts normalises a message, so this message's sha256 matches the stored text (Greptile on #567)
+  let body = normalizeChatText(String(text ?? "")).trim();
   const head = "here is my resume:\n";
   if (head.length + body.length > MAX_MESSAGE) {
     body = body.slice(0, MAX_MESSAGE - head.length);
@@ -226,7 +227,7 @@ export function resumeMessage(text: string): string {
 // the cut, confirmed them as "your resume", and never learned the rest of their jobs and skills were not read. A pasted
 // message cut the same way is told (channel_inbound.ts longCutNote); a file now is too, with where the reading stopped.
 export function resumeMessageCut(text: string): boolean {
-  return "here is my resume:\n".length + String(text ?? "").trim().length > MAX_MESSAGE;
+  return "here is my resume:\n".length + normalizeChatText(String(text ?? "")).trim().length > MAX_MESSAGE;
 }
 export function fileCutNote(message: string): string {
   const last = String(message ?? "").trim().split("\n").map((l) => l.trim()).filter(Boolean).pop() ?? "";

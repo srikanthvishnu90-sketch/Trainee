@@ -253,15 +253,45 @@ function mimeText(s: string): string[] {
   return out;
 }
 const STRUCTURAL = /^(?:word\/(?:styles|stylesWithEffects|settings|webSettings|fontTable|numbering|people|commentsIds|commentsExtensible|commentsExtended)\.xml|word\/theme\/[^/]+\.xml|docProps\/app\.xml|\[Content_Types\]\.xml|customXml\/[^/]+\.xml|word\/(?:glossary\/)?(?:styles|settings|webSettings|fontTable|numbering)\.xml)$/i;
-async function hiddenOf(r: any, buf: any, depth: number): Promise<string[]> {
-  const names: string[] = r.docxPartNames(buf) ?? [];
+// One budget per upload for every part the Word checks expand (the hidden reader, the clean copy and an embedded Word file):
+// the zip reader's own size cap starts again at each part read, so a small upload of hundreds of highly compressed parts, each
+// under the per-part cap, expanded to hundreds of MB. Past the budget the read throws and the upload is refused as damaged.
+export const UPLOAD_EXPANDED_MAX = 25 * 1024 * 1024, UPLOAD_PARTS_MAX = 2000;
+export class UploadBudget {
+  bytes = 0;
+  parts = 0;
+  constructor(readonly maxBytes = UPLOAD_EXPANDED_MAX, readonly maxParts = UPLOAD_PARTS_MAX) {}
+  // deno-lint-ignore no-explicit-any
+  names(r: any, buf: any): string[] {
+    const names: string[] = r.docxPartNames(buf) ?? [];
+    if (names.length > this.maxParts) throw new Damaged(`too many parts: ${names.length}`);
+    return names;
+  }
+  // deno-lint-ignore no-explicit-any
+  part(r: any, buf: any, name: string): any {
+    if (++this.parts > this.maxParts) throw new Damaged("too many parts read");
+    if (this.bytes >= this.maxBytes) throw new Damaged("expanded size over the upload budget");
+    const p = r.docxPart(buf, name);
+    this.bytes += p?.length ?? 0;
+    if (this.bytes > this.maxBytes) throw new Damaged("expanded size over the upload budget");
+    return p;
+  }
+}
+// deno-lint-ignore no-explicit-any
+async function hiddenOf(r: any, buf: any, depth: number, budget: UploadBudget): Promise<string[]> {
+  const names = budget.names(r, buf);
   if (!names.includes("word/document.xml")) throw new Error("no document part");
   const out: string[] = [];
   for (const n of names) {
-    const text = /\.(?:xml|rels|vml|html?|txt|mht|docx)$/i.test(n), part = text ? r.docxPart(buf, n) : null;
+    const text = /\.(?:xml|rels|vml|html?|txt|mht|docx)$/i.test(n), part = text ? budget.part(r, buf, n) : null;
     if (text && !part) throw new Error(`part not readable: ${n}`);
     if (!part || STRUCTURAL.test(n)) continue;
-    if (/\.docx$/i.test(n)) { if (depth > 0) throw new Error(`nested file too deep: ${n}`); out.push(...(r.extractDocxLines?.(part) ?? []).map(String), ...(await hiddenOf(r, part, depth + 1))); continue; }
+    if (/\.docx$/i.test(n)) {
+      if (depth > 0) throw new Error(`nested file too deep: ${n}`);
+      budget.part(r, part, "word/document.xml"); // the embedded file's document, which its visible reader expands once more
+      out.push(...(r.extractDocxLines?.(part) ?? []).map(String), ...(await hiddenOf(r, part, depth + 1, budget)));
+      continue;
+    }
     const s = decodePart(new Uint8Array(part), !/\.(?:txt|mht)$/i.test(n));
     if (n === "word/document.xml") {
       // (Spans in linear time: an unclosed <mc:Fallback>, <a:p> or <w:p> repeated 80,000 times took 27 s with lazy regexes.)
@@ -293,12 +323,12 @@ async function hiddenOf(r: any, buf: any, depth: number): Promise<string[]> {
   }
   return out;
 }
-export async function docxHiddenText(bytes: Uint8Array): Promise<string> {
+export async function docxHiddenText(bytes: Uint8Array, budget = new UploadBudget()): Promise<string> {
   reader ??= Promise.all([import("node:zlib"), import("node:crypto"), import("node:buffer")])
     // deno-lint-ignore no-explicit-any
     .then(([zlib, crypto, b]) => ({ r: (CareerRender as any).withRuntime({ zlib, crypto, Buffer: b.Buffer }), Buffer: b.Buffer }));
   const { r, Buffer } = await reader;
-  return (await hiddenOf(r, Buffer.from(bytes), 0)).join("\n");
+  return (await hiddenOf(r, Buffer.from(bytes), 0, budget)).join("\n");
 }
 export const FILE_HIDDEN_CODE_REPLY = "Your file has what looks like a one-time code or another private number in a header, footer, note, comment or tracked change, so I didn't keep the file or read anything from it, and I won't repeat it. Remove it (and accept or reject tracked changes) and send the file again, or paste your resume here.";
 
@@ -882,10 +912,10 @@ const PART_CT: Record<string, string> = { document: `${CT}wordprocessingml.docum
   settings: `${CT}wordprocessingml.settings+xml`, theme: `${CT}theme+xml`, header: `${CT}wordprocessingml.header+xml`, footer: `${CT}wordprocessingml.footer+xml` };
 export type CleanDocx = { bytes: Uint8Array; text: string[]; attrs: string[]; urls: string[] };
 // deno-lint-ignore no-explicit-any
-function buildClean(r: any, Buffer: any, zlib: any, bytes: Uint8Array): CleanDocx {
-  const buf = Buffer.from(bytes), names: string[] = r.docxPartNames(buf) ?? [];
+function buildClean(r: any, Buffer: any, zlib: any, bytes: Uint8Array, budget: UploadBudget): CleanDocx {
+  const buf = Buffer.from(bytes), names = budget.names(r, buf);
   const find = (n: string) => names.includes(n) ? n : names.find((x) => x.toLowerCase() === n.toLowerCase());
-  const raw = (n: string): Uint8Array => { const at = find(n); const p = at ? r.docxPart(buf, at) : null; if (!p) throw new Damaged(`part not readable: ${n}`); return new Uint8Array(p); };
+  const raw = (n: string): Uint8Array => { const at = find(n); const p = at ? budget.part(r, buf, at) : null; if (!p) throw new Damaged(`part not readable: ${n}`); return new Uint8Array(p); };
   const dir = (n: string) => n.includes("/") ? n.slice(0, n.lastIndexOf("/") + 1) : "";
   const resolve = (base: string, target: string) => {
     let t = target; try { t = decodeURIComponent(t); } catch { /* as written */ }
@@ -982,12 +1012,12 @@ function buildClean(r: any, Buffer: any, zlib: any, bytes: Uint8Array): CleanDoc
 }
 // deno-lint-ignore no-explicit-any
 let cleanRuntime: Promise<any> | null = null;
-export async function cleanCopy(bytes: Uint8Array): Promise<CleanDocx> {
+export async function cleanCopy(bytes: Uint8Array, budget = new UploadBudget()): Promise<CleanDocx> {
   cleanRuntime ??= Promise.all([import("node:zlib"), import("node:crypto"), import("node:buffer")])
     // deno-lint-ignore no-explicit-any
     .then(([zlib, crypto, b]) => ({ r: (CareerRender as any).withRuntime({ zlib, crypto, Buffer: b.Buffer }), Buffer: b.Buffer, zlib }));
   const { r, Buffer, zlib } = await cleanRuntime;
-  return buildClean(r, Buffer, zlib, bytes);
+  return buildClean(r, Buffer, zlib, bytes, budget);
 }
 // The clean copy of a Word file: the bytes stored for it. Throws when no faithful clean copy can be built.
 export async function cleanDocx(bytes: Uint8Array): Promise<Uint8Array> {
@@ -1037,10 +1067,11 @@ export async function ingestResumeFile(o: {
     return { ok: false, reply: codeLines.length ? fileCodeReply(codeLines, kinds.filter((k) => k !== name.code)) : fileSecretReply(kinds), why: "secret", lines: codeLines };
   }
   // The parts of a Word file the reader does not show are read by the same checks before the file is kept.
+  const budget = new UploadBudget(); // shared by the hidden reader and the clean copy below
   if (kind === "docx") {
     let hidden = "";
     // Fail closed: a part that cannot be read may hold anything, so the file is not kept.
-    try { hidden = await docxHiddenText(got.bytes); } catch (e) { console.error("resume file: hidden parts not read:", (e as Error)?.message ?? e); return { ok: false, reply: FILE_DAMAGED_REPLY, why: "damaged" }; }
+    try { hidden = await docxHiddenText(got.bytes, budget); } catch (e) { console.error("resume file: hidden parts not read:", (e as Error)?.message ?? e); return { ok: false, reply: FILE_DAMAGED_REPLY, why: "damaged" }; }
     if (hidden.trim() && (fileCodeLines(hidden).length || redactIdentity(hidden).removed.length || redactIdentity(codeCheckText(hidden)).removed.length)) {
       return { ok: false, reply: FILE_HIDDEN_CODE_REPLY, why: "secret", lines: [] };
     }
@@ -1050,7 +1081,7 @@ export async function ingestResumeFile(o: {
   let stored = got.bytes;
   if (kind === "docx") {
     let clean: CleanDocx;
-    try { clean = await cleanCopy(got.bytes); } catch (e) { console.error("resume file: no clean copy:", (e as Error)?.message ?? e); return { ok: false, reply: FILE_DAMAGED_REPLY, why: "damaged" }; }
+    try { clean = await cleanCopy(got.bytes, budget); } catch (e) { console.error("resume file: no clean copy:", (e as Error)?.message ?? e); return { ok: false, reply: FILE_DAMAGED_REPLY, why: "damaged" }; }
     if (cleanCopyTrips(clean)) return { ok: false, reply: FILE_HIDDEN_CODE_REPLY, why: "secret", lines: [] };
     stored = clean.bytes;
   }

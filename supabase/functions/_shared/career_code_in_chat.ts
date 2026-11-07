@@ -168,49 +168,9 @@ export function noteForCodeTurn(note: string | null): string | null {
   return note.replace(/\s*Never send passwords or codes in a message:[^.]*\.\s*/, " ").trim() || null;
 }
 
-// A resume FILE is its own text, not a chat message: code-in-chat does not rewrite it (its hash must equal the upload's). But a
-// code the person handed over inside the file ("Workday sent me 739201", "My one-time passcode arrived: 739 201") is refused at
-// upload, like a password or card number in the file (Greptile records 92, 96). Only a hand-over form counts: a hand-over verb,
-// or a code word followed by "is", ":" or "arrived", right before the token, and never a token followed by a count noun or a
-// year range, so "a customer portal serving 120000 customers", "Verification engineer, 2018-2022" and "raised code coverage
-// across 9500 tests" stay resume lines.
-// Only a hand-over, never a heading that happens to hold a code word and a verb (review of d9dfa48f): a hand-over verb to the
-// person ("sent me", "texted me:"); a code word right before "is"/"was"/"arrived" and a colon or an arrow ("Code is: 482913",
-// "Code -> 482913"); "the/my/your code ... sent/arrived/was emailed:" with a determiner ("Here is the code Workday sent:", "My
-// verification code arrived this morning:"); a determiner code word and "is/was" ("my code is 739201"); "it's" after a code word.
-const HANDOVER_END = /(?:\b(?:sent|texted|emailed|gave|messaged|dm'?d)\s+me(?:\s+(?:a|the|my|this|that|one[- ]time|verification|security|sign[- ]?in|log[- ]?in))*(?:\s+(?:code|passcode|pin|otp))?\s*:?|\b(?:code|passcode|pass code|pin|otp)\s*(?:(?:is|was|arrived|reads)\s*)?(?::|->|=>|=|→|#)|\b(?:the|my|your|this|that|a|our)\s+(?:(?:one[- ]time|verification|security|sign[- ]?in|log[- ]?in|2fa|mfa|otp|auth(?:entication)?)\s+)?(?:code|passcode|pass code|pin|otp)\b(?:\s+(?!(?:review|reviews|migration|refactor|quality|owner|owners|coverage|base|audit|audits|service|services|system|flow|vault|of|conduct)\b)[\w'-]+){0,3}?\s+(?:sent|texted|emailed|gave|arrived|came|is|was|reads|was\s+(?:sent|texted|emailed))(?:\s+(?:this|today|yesterday|morning|afternoon|evening|tonight|just|now|earlier|by|via|text|sms|email|mail)){0,3}\s*[:=]?|\bit(?:'s|\s+is|\s+was))\s*$/i;
-const RESUME_COUNT = /^[\s\n]*(?:\+|k\b|%|[-\u2013\u2014]\s*\d|(?:customers?|clients?|orders?|tickets?|tests?|invoices?|requests?|sessions?|shipments?|users?|employees?|accounts?|transactions?|calls?|records?|patients?|students?|members?|units?|items?|cases?|claims?|visits?|views?|downloads?|followers?|subscribers?|leads?|deals?|projects?|hours?|people|staff|sites?|stores?|locations?|vendors?|partners?|applications?|reports?|lines?|files?|events?|messages?|emails?|devices?|servers?|queries|jobs?|candidates?|hires?|prs|pull\s+requests?|reviews?|commits?|changes|bugs|issues|lines\s+of\s+code|modules?|repos(?:itories)?|services?|endpoints?|rps|qps|tps|loc|sloc|hosts?|nodes?|clusters?|sq\s*ft|dollars|usd|per\b|a\s+(?:year|month|week|day)|daily|monthly|weekly|annually)\b)/i;
 // A resume line's named codes are numbers to keep: identity_redact.ts NAMED_CODE's words (CPT, ICD, NAICS, department, cost,
 // building ...) and a store code (review of 470e25d9).
 const FILE_NAMED = /\b(?:zip|postal|post|area|country|promo|promotional|discount|coupon|referral|course|class|error|status|dial|tax|product|source|job|dress|invite|invitation|gift|reference|ref|airport|naics|sic|cpt|icd|sort|swift|bank|routing|color|colour|style|item|sku|morse|qr|bar|req|requisition|position|posting|role|department|dept|cost|budget|project|program|module|unit|soc|fips|vendor|supplier|ticket|order|voucher|offer|event|building|store|zip\+4)[\s-]+(?:code|pin)\b[^\n]{0,24}$/i;
-// A handed-over code ends its phrase: the line ends, punctuation follows, or a function word ("for the portal", "can you enter
-// it"). A noun after the number ("4500 hospitals", "3500 resumes") is a count, whatever the noun (review of 470e25d9).
-const OTP_WORD = /\b(?:one[- ]time(?:\s+(?:code|pass(?:code|word)?|pin))?|otp|passcode|pass code|2fa|mfa|two[- ]factor(?:\s+code)?|(?:sign[- ]?in|log[- ]?in|login|verification)\s+code\s+(?:is|was|arrived|:|->))\b|(?:sign[- ]?in|log[- ]?in|login|verification)\s+code\s*(?:->|:|is|was)/i;
-// Letters-and-digits codes: only a one-time-code word itself; "insurance/certificate verification code: VB102" is a label.
-// Anchored right before the token, like HANDOVER_END: "One-time code: AB12CD", "OTP: K7X9P2", "2FA code is AB12CD". A topic word
-// earlier on the line ("Rolled out MFA; change code: CHG0012345") is not the code's label (review of b805bd0a).
-const OTP_STRICT = /(?:\b(?:one[- ]time|otp|passcode|pass code|2fa|mfa|two[- ]factor)(?:\s+(?:code|passcode|pin|password))?|\b(?:my|the|your|our|this|that|a)\s+(?:new\s+)?(?:verification|sign[- ]?in|log[- ]?in|login|security|auth(?:entication)?|access)\s+code)\s*(?:(?:is|was|arrived)\s*)?(?::|->|=>|=|\u2192|#|-)?\s*$/i;
-// A login purpose after the figure ("for the portal", "to finish my application"), or a hiring system / sign-in service as
-// the sender ("Workday sent me ..."): the figure is a code, whatever follows (owner check of 696f9939).
-const LOGIN_AFTER = /^[ \t]*(?:for|to|on|into|in|at)\s+(?:the|my|your|their|a|an)?\s*(?:portal|site|website|login|log[- ]?in|sign[- ]?in|account|application|app|form|page|verification|candidate\s+(?:portal|home)|careers?\s+(?:site|portal|page))\b|^[ \t]*to\s+(?:finish|complete|continue|submit|access|open|unlock|confirm)\s+(?:the|my|your)?\s*(?:application|account|login|sign[- ]?in|portal|profile|form)\b/i;
-const LOGIN_SENDER = /\b(?:workday|greenhouse|lever|icims|taleo|smartrecruiters|jobvite|ashby|bamboohr|successfactors|oracle\s+recruiting|indeed|linkedin|okta|duo|microsoft|google|apple|amazon|the\s+(?:portal|site|app|system|ats|careers\s+site))\s+(?:just\s+)?(?:sent|texted|emailed|messaged)\s+me(?:\s+(?:a|the|my|this|that|one[- ]time|verification|security|sign[- ]?in|log[- ]?in|otp|new))*(?:\s+(?:code|passcode|pin|otp))?\s*(?::|->|\u2192|-)?\s*$/i;
-const DIRECT_TOKEN = String.raw`((?=[A-Za-z0-9]{5,10}(?![\w-]))(?=(?:[A-Za-z]*\d){2})(?=(?:\d*[A-Za-z]){2})[A-Za-z0-9]{5,10}|\d{3,4}[ -]\d{2,4}(?![\d])|\d{4,8})(?![\w-])`;
-const CODE_WORD = String.raw`(?:verification|verify|sign[- ]?in|log[- ]?in|login|security|access|auth(?:entication)?|confirmation|one[- ]time|otp|2fa|mfa)`;
-const DIRECT_LABEL = new RegExp(String.raw`(?:\b(?:one[- ]time|otp|passcode|pass code|2fa|mfa|two[- ]factor)(?:\s+(?:code|passcode|pin|password))?(?:\s*\((?:otp|2fa|mfa)\))?(?:\s+for\s+[A-Z][\w.-]*)?` +
-  String.raw`|\b(?:(?:my|the|your|our|this|that|a)\s+)?(?:new\s+)?` + CODE_WORD + String.raw`\s+(?:code|pin)` +
-  String.raw`|(?:^|\n)[ \t]*(?:[-*\u2022][ \t]*)?(?:the\s+)?code` +
-  String.raw`|\b(?:the\s+)?(?:otp|code|passcode|pin)\s+(?:[A-Z][\w.-]*|they|it|he|she)\s+(?:sent|texted|emailed|gave)(?:\s+me)?` +
-  String.raw`|\bcode\s+came\s+(?:in\s+)?as` +
-  String.raw`|\b(?:sent|texted|emailed|gave|messaged|dm'?d)\s+me(?:\s+(?:a|the|my|this|that|one[- ]time|verification|security|sign[- ]?in|log[- ]?in|otp|new))*\s+(?:code|passcode|pin|otp)` +
-  String.raw`|\b(?:sent|texted|emailed|messaged|dm'?d)\s+me\s*(?=[:\-\u2013\u2014\u2192])|\b(gave|sent|texted|emailed|messaged)\s+me(?=\s+\d))` +
-  String.raw`[ \t]*,?[ \t]*(?:(?:is|was|arrived)[ \t]*)?(?::|->|=>|=|\u2192|#|-|\u2013|\u2014|,)?[ \t]*` + DIRECT_TOKEN, "gi");
-// A code routed by a sender: "Workday sent 739201 to my phone", "Got 739201 from Workday", "Workday sent me 7392 01".
-const ROUTED_CODE = new RegExp(String.raw`(?:\b(?:workday|greenhouse|lever|icims|taleo|smartrecruiters|jobvite|ashby|okta|duo|they|the\s+(?:portal|site|app|recruiter))\s+(?:sent|texted|emailed)\s+(\d{4,8})\s+to\s+my\s+(?:phone|email|inbox|number|cell)` +
-  String.raw`|\b(?:got|received)\s+(\d{4,8})\s+from\s+(?:workday|greenhouse|lever|icims|taleo|smartrecruiters|jobvite|ashby|okta|duo|the\s+(?:portal|site|app))` +
-  String.raw`|\b(?:workday|greenhouse|lever|icims|taleo|smartrecruiters|jobvite|ashby|okta|duo)\s+(?:sent|texted|emailed|messaged)\s+me\s+(\d{3,4}[ -]\d{2,4}))(?![\d\w])`, "gi");
-const OTP_AFTER = /^[ \t]*(?:to|so\s+i\s+can|for)\s+(?:log|sign)\s*(?:in|on)\b|^[ \t]*(?:to|so\s+i\s+can)\s+(?:verify|enter\s+it|get\s+in)\b/i;
-const HAND_VERB = /\b(?:sent|texted|emailed|gave|messaged|dm'?d)\s+me(?:\s+(?:a|the|my|this|that|one[- ]time|verification|security|sign[- ]?in|log[- ]?in|otp|new))*(?:\s+(?:code|passcode|pin|otp))?\s*(?::|->|\u2192|-)?\s*$/i;
-const CODE_ENDS = /^(?:[ \t]*(?:$|\n|[.,;:!?)\]"'\u2019\u201d]|(?:for|from|to|in|on|at|today|tonight|yesterday|this|that|just|now|please|thanks|thank|and|or|but|so|which|can|could|would|will|if|when|by|via|as|again|here|there|it|is|was)\b))/i;
 // Privacy first for a FILE (owner decision on 2de155f0): text alone cannot always tell a handed-over code from a look-alike
 // ("2FA: AB12CD" / "MFA: SC300", "Verification code: K7X9P2" / "Insurance verification code: VB102", "OTP-4821"), so a
 // plausible code refuses the upload and the reply names only its line and kind, never the line. Resume lines that are clearly
@@ -219,43 +179,68 @@ const CODE_ENDS = /^(?:[ \t]*(?:$|\n|[.,;:!?)\]"'\u2019\u201d]|(?:for|from|to|in
 export function fileSharesCode(text: string): boolean {
   return fileCodeLines(text).length > 0;
 }
-const ENDS_STRICT = /^[ \t]*(?:$|\n|[.,;:!?)\]"'\u2019\u201d])/;
+// The file check reads each line on its own (review of 63e324a0: no rule may read into the next line). A line holds a suspected
+// code when a code-shaped token sits next to a code-context word with only connectors between, and none of the safe shapes
+// applies: a word after the number (a count: "4500 hospitals", "1200 microservices"), a year or range, money, a phone number,
+// a named label ("exam / change / CPT code: ..."), or a figure after "gave/sent me" with a purpose that is not a sign-in.
+const LINE_TOKEN = /(?<![\w$€£.,\/#@-])(\d{3}\.\d{3}(?![\d.])|\d{2,4}[ -]\d{2,4}(?![\d])|\d{4,8}|(?=[A-Za-z0-9]{5,10}(?![\w-]))(?=(?:[A-Za-z]*\d){2})(?=(?:\d*[A-Za-z]){2})[A-Za-z0-9]{5,10})(?![\w%]|[.,]\d|-\d)/g;
+const SENDERS = String.raw`workday|greenhouse|lever|icims|taleo|smartrecruiters|jobvite|ashby|bamboohr|successfactors|indeed|linkedin|okta|duo|microsoft|google|apple|amazon|recruiter|portal`;
+const CTX = String.raw`(?:codes?|passcodes?|pins?|otp|2fa|mfa|one[- ]time|verification|verify|sign[- ]?in|log[- ]?in|login|sms|text(?:ed)?|sent|emailed|messaged|dm'?d|gave|got|received|enter|use|it'?s|it\s+is)`;
+const LINK = String.raw`(?:[\s:,#=\-–—→>]|\b(?:me|my|the|a|an|your|our|this|that|is|was|are|it|its|for|from|said|says|via|by|as|in|came|arrived|new|of|just|here|below|this|morning|afternoon|evening|tonight|today|yesterday|earlier|again|now)\b|\b(?:from|for)\s+(?:the\s+)?[A-Z][\w.'-]*|\b(?:for|from)\s+(?:the|my|your|our)\s+[a-z]+)`;
+const LEFT_CTX = new RegExp(String.raw`\b${CTX}(?:${LINK})*$`, "i");
+const RIGHT_CTX = new RegExp(String.raw`^(?:[\s:,]|\b(?:is|was|my|the|a|your|our|this|that|from|for|via|by)\b|\b[A-Z][\w.'-]*\b)*(?:\b${CTX}\b|\bfrom\s+(?:the\s+)?(?:${SENDERS})\b(?!\s+[a-z]{3,}))`, "i");
+// The first word after the number: a function or time word keeps the phrase going; any other word is a count noun.
+const AFTER_FUNC = /^(?:for|from|to|on|in|at|today|tonight|yesterday|this|that|just|now|earlier|already|again|also|too|twice|once|recently|later|soon|please|thanks|thank|and|or|but|so|which|can|could|would|will|if|when|by|via|as|here|there|it|is|was|is|are|my|the|a|an|to|via|asap|immediately|quickly|back|ago)$/i;
+// A sign-in purpose: a login word that ends its phrase ("for the portal", "to finish my application"), or a delivery target
+// ("to my phone", "by text"); "for the portal redesign" or "the application rollout" is a project, not a sign-in.
+const SIGNIN_PURPOSE = /\b(?:(?:for|on|into|in|at)\s+(?:the|my|your|their)?\s*(?:[a-z]+\s+){0,2}|to\s+(?:the|my|your|their)?\s*)(?:portal|site|website|login|log[- ]?in|sign[- ]?in|account|app|application|form|page|profile|password|verification)\b(?=\s*(?:$|[.,;:!?)]|\s(?:and|so|to|please|now|today|thanks|again)\b))|\bto\s+(?:finish|complete|continue|access|open|unlock|confirm|submit)\s+(?:my|the|your)\s+(?:portal|site|login|account|app|application|form|profile)\b(?=\s*(?:$|[.,;:!?)]|\s(?:and|so|please|now|today|thanks|again)\b))|\b(?:phone|cell|mobile|inbox|e-?mail|text|sms|log\s+in|sign\s+in|verify|enter\s+it)\b/i;
+const OTP_LABEL_WORD = /^(?:verification|verify|sign[- ]?in|signin|log[- ]?in|login|security|access|auth|authentication|confirmation|one[- ]time|time|otp|2fa|mfa|sms|text|my|the|your|our|a|an|this|that|new|their|his|her|me|us|you|them|him|sent|texted|emailed|messaged|got|received|gave|is|was|said|says|its|it's)$/i;
+const PHONE = /(?:\+?\d{1,3}[ .-]?)?(?:\(\d{3}\)|\d{3})[ .-]\d{3}[ .-]\d{4}/g;
 // The 1-based line numbers of the text read from the file that hold a suspected code (each once, in order).
 export function fileCodeLines(text: string): number[] {
-  const t = normalizeChatText(String(text ?? ""));
-  const hits = new Set<number>();
-  const lineOf = (at: number) => t.slice(0, at).split("\n").length;
-  const ok = (tok: string, after: string) => !YEAR_RANGE.test(tok.replace(/\s+/g, " ").trim()) && !RESUME_COUNT.test(after) && (CODE_ENDS.test(after) || LOGIN_AFTER.test(after) || OTP_AFTER.test(after) || /^[ \t]*[(\-]/.test(after));
-  // 1. A code right after its label or a hand-over, with only connectors between.
-  for (const m of t.matchAll(DIRECT_LABEL)) {
-    // Group 1: the bare "gave/sent me" branch (no code word); group 2: the token.
-    const tok = m[2], at = (m.index ?? 0) + m[0].length - tok.length, after = t.slice(at + tok.length);
-    if (!ok(tok, after)) continue;
-    // A bare figure after "gave/sent me" alone is money unless it ends the phrase or a login purpose follows.
-    if (/^[\d\s-]+$/.test(tok) && m[1] && !ENDS_STRICT.test(after) && !LOGIN_AFTER.test(after) && !OTP_AFTER.test(after)) continue;
-    hits.add(lineOf(at));
+  const lines = normalizeChatText(String(text ?? "")).split("\n"), hits: number[] = [];
+  lines.forEach((raw, i) => {
+    // A code split by a line break ("Workday sent me 739" / "201"): the next line's leading group joins this line's last one.
+    const tail = /(?:^|\D)(\d{2,4})\s*$/.exec(raw), head = /^\s*(\d{2,4})(?!\d)/.exec(lines[i + 1] ?? "");
+    const joined = tail && head ? raw.replace(/\s*$/, " ") + head[1] + (lines[i + 1] ?? "").slice(head[0].length) : null;
+    // A line that ends in a code context ("Workday sent me:") takes the code from the next line or two ("739" / "201").
+    const n1 = (lines[i + 1] ?? "").trim(), n2 = (lines[i + 2] ?? "").trim();
+    const carried = LEFT_CTX.test(raw.replace(/\s*$/, " ")) && /^[A-Za-z0-9]{2,10}$/.test(n1)
+      ? `${raw.trimEnd()} ${n1}${/^\d{2,4}$/.test(n1) && /^\d{2,4}$/.test(n2) ? " " + n2 : ""}` : null;
+    if (lineHasCode(raw) || (joined && lineHasCode(joined)) || (carried && lineHasCode(carried))) hits.push(i + 1);
+  });
+  return hits;
+}
+function lineHasCode(raw: string): boolean {
+  // A code joined to its one-time-code word ("OTP-4821", "MFA-482913"): refused, look-alike ticket keys included (owner policy).
+  if (/\b(?:otp|mfa|2fa)-(?!(?:19|20)\d\d\b)(?:\d{4,8}|(?=[A-Za-z0-9]{5,10}\b)(?=(?:[A-Za-z]*\d){2})(?=(?:\d*[A-Za-z]){2})[A-Za-z0-9]{5,10})\b/i.test(raw)) return true;
+  const line = raw.replace(/\((?![^)]*\d{4})[^)]*\)/g, (m) => " ".repeat(m.length)); // a parenthetical without the code is a connector
+  const phones = [...line.matchAll(PHONE)].map((m) => [m.index ?? 0, (m.index ?? 0) + m[0].length]);
+  for (const m of line.matchAll(LINE_TOKEN)) {
+    const tok = m[1], at = m.index ?? 0, end = at + tok.length, digits = tok.replace(/\D/g, "");
+    const alnum = /[A-Za-z]/.test(tok);
+    if (!alnum && (digits.length < 4 || digits.length > 8)) continue;
+    if (YEAR_RANGE.test(tok.replace(/\s+/g, " ").trim()) || /^(?:19|20)\d\d$/.test(digits)) continue;
+    if (phones.some(([p, q]) => at >= p && end <= q)) continue;
+    const before = line.slice(0, at), after = line.slice(end);
+    if (/[$€£]\s*$/.test(before) || /^\s*(?:k\b|%|usd|eur|gbp|dollars|euros|per\b|a\s+(?:year|month|week|day|hour)|\/)/i.test(after)) continue;
+    if (FILE_NAMED.test(before)) continue;
+    // A named label right before the code ("Exam code: AZ104", "change code: CHG0012345", "CPT code: 99213") is kept; a code
+    // word's own label ("Verification code:", "my code is", "OTP code") is not.
+    const label = /\b([\w'-]+)[ -]+(?:code|pin)\s*(?:(?:is|was)\s*)?[:#=\-–—]?\s*$/i.exec(before);
+    if (label && !OTP_LABEL_WORD.test(label[1]) && !/'s$/i.test(label[1])) continue;
+    if (/^\s*[-\u2013\u2014]\s*\d/.test(after) || /\d\s*[-\u2013\u2014]\s*$/.test(before)) continue; // a range ("1200 - 1500")
+    const next = /^[\s:,.)\-]*([A-Za-z][A-Za-z']*)/.exec(after)?.[1] ?? "";
+    if (next && !AFTER_FUNC.test(next) && !/^(?:codes?|passcodes?|pins?|otp)$/i.test(next)) continue; // a count noun ("50000 SMS/day")
+    const left = LEFT_CTX.exec(before), right = RIGHT_CTX.test(after);
+    if (!left && !right) continue;
+    // A figure after "gave/sent me" alone, then a purpose that is not a sign-in ("Client sent me 120000 for review").
+    const verb = left ? left[0].trim().split(/\s+/)[0].toLowerCase() : "";
+    if (left && !right && /^\d+$/.test(tok) && /^(?:sent|emailed|messaged|got|received|gave)$/.test(verb) && !SIGNIN_PURPOSE.test(after)
+      && (/^\s*(?:(?:for|to|in|on|at|as|by|from)\s+\S|,\s*(?:a|an|and|plus|with)\b|and\s+(?:a|an|the|\d))/i.test(after) || (verb === "gave" && /^\s*[,\w]/.test(after) && /\w/.test(after)))) continue;
+    return true;
   }
-  // 2. Letters and digits right after a hand-over verb or a hiring-system sender, with no code word ("They texted me K7X9P2").
-  for (const m of t.matchAll(/(?<![\w-])(?=[A-Za-z0-9]{5,10}(?![\w-]))(?=(?:[A-Za-z]*\d){2})(?=(?:\d*[A-Za-z]){2})[A-Za-z0-9]{5,10}(?![\w-])/g)) {
-    const at = m.index ?? 0, before = t.slice(Math.max(0, at - 80), at), line = before.slice(before.lastIndexOf("\n") + 1), after = t.slice(at + m[0].length);
-    if ((LOGIN_SENDER.test(line) || HAND_VERB.test(line)) && ok(m[0], after)) hits.add(lineOf(at));
-  }
-  // 3. "Workday sent 739201 to my phone", "Got 739201 from Workday", "Workday sent me 7392 01".
-  for (const m of t.matchAll(ROUTED_CODE)) {
-    const tok = m[1] ?? m[2] ?? m[3], at = (m.index ?? 0) + m[0].indexOf(tok);
-    if (!YEAR_RANGE.test(tok) && !RESUME_COUNT.test(t.slice(at + tok.length).replace(/^\s*(?:to|from)\s+\S+(?:\s+\S+)?/, ""))) hits.add(lineOf(at));
-  }
-  // 4. The code-in-chat tokens, under the resume guards.
-  for (const h of codeTokens(t)) {
-    const token = t.slice(h.start, h.end), before = t.slice(Math.max(0, h.start - 60), h.start), after = t.slice(h.end);
-    if (!/\d/.test(token) || YEAR_RANGE.test(token) || RESUME_COUNT.test(after) || !CODE_ENDS.test(after) || FILE_NAMED.test(before)) continue;
-    const line = before.slice(before.lastIndexOf("\n") + 1);
-    const otpWord = OTP_WORD.test(line) || OTP_AFTER.test(after) || LOGIN_AFTER.test(after), handVerb = HAND_VERB.test(line), sender = LOGIN_SENDER.test(line);
-    if (/[A-Za-z]/.test(token) && !OTP_STRICT.test(line) && !handVerb && !sender) continue;
-    if (!otpWord && !ENDS_STRICT.test(after)) continue;
-    if (HANDOVER_END.test(before) || sender) hits.add(lineOf(h.start));
-  }
-  return [...hits].sort((x, y) => x - y);
+  return false;
 }
 // The code-shaped tokens of a whole text, as offsets into it: the same sentence split and token rules as codeInChat.
 export function codeTokens(msg: string): { start: number; end: number }[] {

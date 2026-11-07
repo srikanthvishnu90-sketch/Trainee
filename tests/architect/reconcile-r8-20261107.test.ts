@@ -155,7 +155,7 @@ Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless res
     // review of ea5790fb: any size of figure after "gave/sent me" that does not end the phrase; labels with "security", "auth",
     // "verification" or "sign-in" in them
     "Leadership gave me 120000 to invest in tooling", "VP gave me 250000 and a team of 6", "NSF gave me 250000 for research", "Leadership gave me 1500000 in budget",
-    "Client sent me 120000 for review",
+    "Client sent me 120000 for review", "Azure Security Engineer exam code: AZ500", "CompTIA Security+ exam code: SY0701", "Identity and access (sign-in) exam code: SC300",
     "Security clearance code: TS2019",
     // review of b805bd0a: a topic word earlier on the line is not the code's label
     "Rolled out MFA; change code: CHG0012345", "Led MFA rollout (change code: CHG0012345)", "2FA rollout. Change code: CHG0012345", "Billed MFA work to charge code: CC4821",
@@ -277,4 +277,30 @@ Deno.test("R8R-FILE ambiguous codes refuse the file; the reply names the line an
     assertNode.deepEqual(fileCodeLines(`Jordan Lee\nSupport Lead\n- ${line}`), [], line);
   }
   assertNode.ok(/lines 2, 4 and 6 of the text/.test(fileCodeReply([2, 4, 6])));
+});
+
+// Review of 63e324a0: every rule reads one line (a count word starting the next line never hides a code), except a code split
+// across a line break, which joins; a hiring system's figure followed by more words is a code; the review's phrasings are
+// refused; money with a purpose that is not a sign-in, exam-code controls and topic lines are kept.
+Deno.test("R8R-LINE a code is judged on its own line; senders, routes, labels and phrasings from the review are refused", () => {
+  const nexts = ["- Led a team of 6", "Projects", "Reports", "Services", "Applications", "Customers", "Members of the board", "Hours: 40/week", "Led weekly reporting across four teams.", ""];
+  const refuse = ["Workday sent me 739201 just now", "Workday sent me 739201 via SMS", "Workday sent me 739201 and asked me to enter it", "Greenhouse texted me 482913 again", "Okta texted me 482913 so I could finish",
+    "Lever emailed me 739201 yesterday", "The portal sent me 739201 just now", "My verification code is K7X9P2", "Workday sent me 739201", "Workday sent 739201 to my phone", "2FA code: AB12CD", "Code they sent: 482913",
+    "They texted me K7X9P2", "Got 739201 from Workday", "Received 739201 from Workday", "Workday sent me 73 9201", "Got K7X9P2 from Workday", "Workday sent K7X9P2 to my phone", "Recruiter sent 739201 to my phone",
+    "BambooHR sent 739201 to my phone", "Got 739201 from Greenhouse.", "Got a code from Workday: 739201", "Code from Workday is K7X9P2", "Workday's code is K7X9P2", "Workday's text said 739201", "Workday texted: 739201",
+    "Text from Workday: 739201", "Workday SMS: 739201", "They sent me 739201 earlier", "It's 739201", "my code is K7X9P2", "use 739201", "Enter 739201 to sign in", "739201 is my code", "K7X9P2 is my verification code",
+    "739201 is my Workday code", "One-time code (expires in 10 min): 739201", "Verification code (Workday): 739201", "Verification code for my account: K7X9P2", "Code for the portal: 739201", "one time code AB12CD",
+    "Recruiter gave me 739201 for the portal", "iCIMS sent me 482913 for the candidate portal", "Workday sent me 739.201"];
+  const keep = ["Code migration was completed: 1200 microservices", "Our code is running in 4500 hospitals", "Client sent me 120000 for review", "Microsoft sent me 2500 for travel", "Workday sent me 2500 for relocation",
+    "Leadership gave me 250000 for the website rebuild", "VP gave me 50000 for the portal redesign", "Director gave me 120000 for the account migration", "CEO gave me 500000, a team of 6 and a deadline",
+    "Board gave me 1500000 to build the app", "Leadership sent me 40000 to complete the application rollout", "Got 1200 from Workday reports", "Received 4500 from the portal migration", "Workday sent me 1200 - 1500 applications",
+    "Microsoft sent me 1000 at year end", "Led OTP-2021 initiative", "Azure Security Engineer exam code: AZ500", "CompTIA Security+ exam code: SY0701", "Exam code: AZ104", "Rolled out MFA; change code: CHG0012345",
+    "MFA rollout - CHG0012345", "Received one-time award code: AW2023", "OTP: AZ500 certified", "Processed 739201 applications for the portal", "(415) 555-0134", "Sent 4500 emails per week", "Received the 2019 award"];
+  for (const nx of nexts) {
+    for (const l of refuse) assertNode.ok(fileCodeLines(`Jordan Lee\nSupport Lead\n- ${l}\n${nx}`).includes(3), `${l} / next ${JSON.stringify(nx)}`);
+    for (const l of keep) assertNode.deepEqual(fileCodeLines(`Jordan Lee\nSupport Lead\n- ${l}\n${nx}`), [], `${l} / next ${JSON.stringify(nx)}`);
+  }
+  // A code split by a line break is joined; a phone split over three lines is not a code.
+  assertNode.deepEqual(fileCodeLines("Jordan Lee\n- Workday sent me 739\n201\n- Led a team of 6"), [2]);
+  assertNode.deepEqual(fileCodeLines("Jordan Lee\n- Call me at 415\n555\n1234 any time"), []);
 });

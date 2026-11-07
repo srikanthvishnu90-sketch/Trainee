@@ -151,11 +151,12 @@ function decodePart(part: Uint8Array): string {
   else if (b[1] === 0x00 && b[0] !== 0x00) s = dec("utf-16le");
   else if (b[0] === 0x00 && b[1] !== 0x00) s = dec("utf-16be");
   else {
-    const head = new TextDecoder("latin1").decode(b.subarray(0, 200)), enc = /encoding\s*=\s*["']([\w.:-]+)["']/i.exec(head)?.[1];
+    const head = new TextDecoder("latin1").decode(b.subarray(0, 200)), enc = /^\s*<\?xml\b[^?>]*?\bencoding\s*=\s*["']([\w.:-]+)["']/i.exec(head)?.[1]; // the declaration only
     s = enc && !/^utf-?8$/i.test(enc) ? dec(enc) : dec("utf-8");
   }
   if (!/^\s*</.test(s) || s.includes("\u0000")) throw new Error("part does not read as XML");
-  return s;
+  // CDATA is text: escaped and kept, so the tag-stripping readers see it ("<w:t><![CDATA[OTP 482913]]></w:t>").
+  return s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (_m, c: string) => c.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"));
 }
 const attrText = (xml: string) => [...xml.matchAll(/\s(?:descr|title|w:tooltip)="([^"]*)"/g)].flatMap((m) => lines(m[1]));
 const queryOf = (url: string) => { const q = decodeXml(url).replace(/^[^?#]*/, ""); try { return decodeURIComponent(q); } catch { return q; } };
@@ -172,7 +173,9 @@ async function hiddenOf(r: any, buf: any, depth: number): Promise<string[]> {
     const s = decodePart(new Uint8Array(part));
     if (n === "word/document.xml") {
       const fallbacks = [...s.matchAll(new RegExp(String.raw`<${P}Fallback\b[\s\S]*?</${P}Fallback>`, "g"))].flatMap((m) => allText(m[0]));
-      const nonW = [...s.matchAll(new RegExp(String.raw`<(?!w:)[\w.-]+:t(?:\s[^>]*)?>([^<]*)</(?!w:)[\w.-]+:t>`, "g"))].flatMap((m) => lines(m[1]));
+      // DrawingML and other non-w text, its runs joined per paragraph ("O" "T" "P" ": " "4" ... reads "OTP: 4...").
+      const nonW = [...s.matchAll(/<((?!w:)[\w.-]+):p\b[\s\S]*?<\/\1:p>/g)].flatMap((m) => runText(m[0])).concat(
+        [...s.matchAll(/<((?!w:)[\w.-]+):t(?:\s[^>]*)?>([^<]*)<\/\1:t>/g)].map((m) => m[2]).join("").trim() ? lines([...s.matchAll(/<((?!w:)[\w.-]+):t(?:\s[^>]*)?>([^<]*)<\/\1:t>/g)].map((m) => m[2]).join("")) : []);
       out.push(...runText(s, "delText|instrText"), ...attrText(s), ...fallbacks, ...nonW); continue;
     }
     if (/\.rels$/i.test(n)) { out.push(...[...s.matchAll(/\sTarget="([^"]*)"/g)].map((m) => queryOf(m[1])).filter((q) => q.length > 1)); continue; }

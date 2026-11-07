@@ -250,6 +250,11 @@ Deno.test("R8G-7 Greptile on #577: UTF-16 and odd-prefix parts, mc:Fallback and 
   await refused(docx([{ name: "word/header1.xml", data: new Uint8Array([0xff, 0xfe, 0, 0, 0x3c, 0, 0, 0]) }]), "UTF-32 part");
   await refused(docx([{ name: "word/header1.xml", data: new Uint8Array([0x4c, 0x6f, 0xa7, 0x94, 0x93, 0x40]) }]), "EBCDIC-looking part");
   await refused(docx([{ name: "word/header1.xml", data: utf16(`\n<w:hdr ${W}><w:p><w:r><w:t>OTP 482913</w:t></w:r></w:p></w:hdr>`).subarray(2) }]), "UTF-16 without a mark after a newline");
+  // Greptile on #578: an encoding named in a comment is not the declaration; split DrawingML runs are joined; CDATA is text.
+  await refused(docx([{ name: "word/header1.xml", data: `<?xml version="1.0"?><!-- encoding="utf-16le" --><w:hdr ${W}><w:p><w:r><w:t>OTP 482913</w:t></w:r></w:p></w:hdr>` }]), "encoding in a comment");
+  await refused(docx([], `<w:p><w:r><w:drawing><a:graphic><a:p>${[..."OTP: 482913"].map((c) => `<a:r><a:t>${c}</a:t></a:r>`).join("")}</a:p></a:graphic></w:drawing></w:r></w:p>`), "split a:t runs");
+  await refused(docx([], '<w:p><mc:AlternateContent><mc:Choice Requires="wps"><w:r><w:t>Text box</w:t></w:r></mc:Choice><mc:Fallback><w:pict><v:textbox><w:txbxContent><w:p><w:r><w:t><![CDATA[OTP 482913]]></w:t></w:r></w:p></w:txbxContent></v:textbox></w:pict></mc:Fallback></mc:AlternateContent></w:p>'), "CDATA in a fallback");
+  await refused(docx([{ name: "word/header1.xml", data: `<w:hdr ${W}><w:p><w:r><w:t><![CDATA[Verification code: 482913]]></w:t></w:r></w:p></w:hdr>` }]), "CDATA in a header");
   const plain16 = await upload(docx([{ name: "word/footer1.xml", data: utf16(`<?xml version="1.0" encoding="UTF-16"?><w:ftr ${W}><w:p><w:r><w:t>Jordan Lee · Page 1</w:t></w:r></w:p></w:ftr>`) }]));
   assertNode.ok(plain16.res.ok && plain16.stored.length === 1, "a plain UTF-16 footer is kept");
   const box = await upload(docx([], '<w:p><mc:AlternateContent><mc:Choice Requires="wps"><w:r><w:t>Volunteer, Food Bank, 2018 - 2020</w:t></w:r></mc:Choice><mc:Fallback><w:pict><v:textbox><w:txbxContent><w:p><w:r><w:t>Volunteer, Food Bank, 2018 - 2020</w:t></w:r></w:p></w:txbxContent></v:textbox></w:pict></mc:Fallback></mc:AlternateContent></w:p>'));

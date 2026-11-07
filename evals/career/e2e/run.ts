@@ -33,6 +33,7 @@ import { evalNow, PIN_DB_SQL, pinClock } from "../tasks/clock.ts";
 import { clearOracle, fakeAnthropic, type OracleStep, setOracle } from "../tasks/fake_model.ts";
 import { AREAS, type Area, type E2EState, type Expect, judgeE2E, type ResearchFile, type ResumeDoc } from "./judge.ts";
 import { FakeGmail, htmlText, readPdf, sha256Hex, stubEngine, StubAts } from "./worlds.ts";
+import { isStubWebHost, stubWebFetch } from "./web.ts";
 import type { FileRecord } from "../../../supabase/functions/_shared/file_kinds.ts";
 import { appendRow, type E2EItem, type E2ERun, scoreRow } from "./score_log.ts";
 export type { E2EItem, E2ERun };
@@ -53,8 +54,13 @@ const CONTACT_EMAILS = [...CONTACTS.matchAll(/[^\s,]+@[^\s,]+/g)].map((m) => m[0
 const WORLD_ENV: Record<string, string> = {
   TRAINEE_FILE_BASE_URL: "https://file.e2e.test", TRAINEE_FILE_LINK_SECRET: "e2e-stub-world-file-link-key-not-real",
   TRAINEE_REPORT_BASE: "https://report.e2e.test", TRAINEE_REPORT_SECRET: "e2e-stub-world-report-key-not-real",
+  // R9-F: market research and its brief File, for this eval's run only (the release config keeps both off: RELEASE_NEVER_ON).
+  // With no search key the research tool reads the sites it is given (research_search.ts firstPartyProvider): the stub web.
+  CAREER_RESEARCH_REPLY: "on", CAREER_RESEARCH_BRIEF: "on",
 };
-const ENV_KEYS = ["CAREER_BRAIN", "CAREER_PLANNER", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "CAREER_REPLY_MODEL", ...Object.keys(WORLD_ENV)];
+// Unset for the run, so research never reaches a real search provider or SEC with a declared contact.
+const RESEARCH_UNSET = ["BRAVE_SEARCH_API_KEY", "RESEARCH_SEARCH_PROVIDER", "RESEARCH_SEARCH_ENDPOINT", "RESEARCH_USER_AGENT"];
+const ENV_KEYS = ["CAREER_BRAIN", "CAREER_PLANNER", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "CAREER_REPLY_MODEL", ...RESEARCH_UNSET, ...Object.keys(WORLD_ENV)];
 const q = (s: string) => s.replace(/'/g, "''");
 // The machine's own clock, taken before the pin: the sending rail's database functions stamp next_at with the database's
 // real clock (clock_timestamp; the pin moves only column defaults), so the rail's worker is handed the same clock.
@@ -107,16 +113,18 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
     else if (!Deno.env.get("ANTHROPIC_API_KEY")) throw new Error("NOT RUN: --model claude needs ANTHROPIC_API_KEY");
     for (const [k, v] of Object.entries(WORLD_ENV)) Deno.env.set(k, v);
     Deno.env.delete("MODEL_PROVIDER");
+    for (const k of RESEARCH_UNSET) Deno.env.delete(k);
     Deno.env.delete("CAREER_MODEL");
     Deno.env.set("CAREER_REPLY_MODEL", Deno.env.get("CAREER_REPLY_MODEL") || "claude-haiku-5-5");
     // The outside world: the model (the fake, or Anthropic on a paid run), every *.greenhouse.io host (the stub ATS, over a
-    // real HTTP hop), Gmail (the rail's fake). Nothing else is reachable.
+    // real HTTP hop), Gmail (the rail's fake), and the stub web's own .e2e.test sites (web.ts). Nothing else is reachable.
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
       const url = new URL(req.url);
       if (url.hostname === "api.anthropic.com") return o.model === "fake" ? await fakeAnthropic(req) : await realFetch(req);
       if (/(^|\.)greenhouse\.io$/.test(url.hostname)) return await ats.forward(req, realFetch);
       if (url.hostname === "gmail.googleapis.com") return await gmail.fetch(req);
+      if (isStubWebHost(url.hostname)) return stubWebFetch(req);
       return new Response("not reachable in the e2e eval", { status: 404 });
     }) as typeof fetch;
     h = await careerHandler(pg, people);
@@ -206,15 +214,27 @@ async function worldState(pg: Pg, u: string, w: { ats: any[]; mail: any[]; repli
   for (const m of w.mail) { const d = drafts.find((x) => x.recipient_email.toLowerCase() === String(m.to).toLowerCase()); if (d) hashOf[d.id] = await w.mailHash({ to: String(m.to).toLowerCase(), subject: m.subject, text: m.text }); }
   if (drafts.length || sendQueue.length) stage.push(`outreach: ${drafts.length} drafted (${drafts.map((d) => `${d.recipient_email} ${d.status}`).join(", ")}), ${sendQueue.length} on the sending rail${sendQueue.length ? ` (${sendQueue.map((s) => `${s.state}${s.state === "queued" && s.next_at ? ` until ${String(s.next_at).slice(0, 16)}` : ""}`).join(", ")})` : ""}, ${w.mail.length} delivered`);
   // Research: File pages (tf:file:<id>) and research reports (channel_artifacts HTML), each delivered only if a reply carried its link.
-  const text = w.replies.join("\n");
+  // What reached the person: each reply, and each link the channel sends after it (the reply's shape.links: a File link that
+  // code minted, channel_inbound.ts sends it as its own message).
+  const text = [...w.replies, ...w.bodies.flatMap((b: any) => Array.isArray(b?.shape?.links) ? b.shape.links.map(String) : [])].join("\n");
   const fileRecs: FileRecord[] = (await json(pg, `select json_agg(value) from public.career_watch_kv where user_id = '${u}' and key like 'tf:file:%'`)) ?? [];
   const { fileHtml } = await import("./worlds.ts");
+  // A File link is https://file.e2e.test?t=v1.<claims>.<sig> (file_link.ts): its claims name the File it opens (r).
+  const linkedFiles = new Set([...text.matchAll(/https:\/\/file\.e2e\.test\/?\?t=v1\.([A-Za-z0-9_-]+)\./g)].map((m) => {
+    try { return String(JSON.parse(atob(m[1].replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(m[1].length / 4) * 4, "="))).r ?? ""); } catch { return ""; }
+  }).filter(Boolean));
   const files: ResearchFile[] = [];
   for (const rec of fileRecs.filter((r: any) => ["research_brief", "comparison"].includes(r?.kind))) {
     const d: any = rec.data ?? {}, html = fileHtml(rec);
-    const findings = rec.kind === "research_brief" ? (d.findings ?? []).map((f: any) => ({ text: `${f.label ?? ""} ${f.value ?? f.text ?? ""}`.trim(), source: typeof f.source === "string" && f.source ? f.source : null }))
+    // The market brief (research_brief variant "market"): the summary facts and the comparison cells carry a source label; the
+    // conditions and risks are Trainee's reading, each citing its numbered sources.
+    const market = rec.kind === "research_brief" && d.variant === "market";
+    const findings = market ? [...(d.summary ?? []).map((f: any) => ({ text: String(f?.text ?? ""), source: typeof f?.source === "string" && f.source ? f.source : null })),
+        ...(d.comparison?.rows ?? []).flatMap((r: any) => (r.cells ?? []).filter(Boolean).map((c: any) => ({ text: String(c?.value ?? ""), source: typeof c?.source === "string" && c.source ? c.source : null }))),
+        ...[...(d.conditions ?? []), ...(d.risks ?? [])].map((f: any) => ({ text: String(f?.text ?? ""), source: Array.isArray(f?.cite) && f.cite.length ? `[${f.cite.join("][")}]` : null }))]
+      : rec.kind === "research_brief" ? (d.findings ?? []).map((f: any) => ({ text: `${f.label ?? ""} ${f.value ?? f.text ?? ""}`.trim(), source: typeof f.source === "string" && f.source ? f.source : null }))
       : (d.rows ?? []).flatMap((r: any) => (r.cells ?? []).map((c: any) => ({ text: String(c?.value ?? ""), source: c?.source ?? null })));
-    files.push({ id: rec.id, kind: rec.kind, html, text: htmlText(html), delivered: text.includes(rec.id) || /https:\/\/file\.e2e\.test\//.test(text) && fileRecs.length === 1, findings, sources: (d.sources ?? []).map((s: any) => String(s?.url ?? "")) });
+    files.push({ id: rec.id, kind: rec.kind, html, text: htmlText(html), delivered: text.includes(rec.id) || linkedFiles.has(rec.id) || /https:\/\/file\.e2e\.test[/?]/.test(text) && fileRecs.length === 1, findings, sources: (d.sources ?? []).map((s: any) => String(s?.url ?? "")) });
   }
   const arts: any[] = (await json(pg, `select json_agg(json_build_object('id', id, 'filename', filename, 'mime', mime, 'b64', bytes_b64)) from public.channel_artifacts where user_id = '${u}'`)) ?? [];
   for (const a of arts.filter((x) => /html/.test(x.mime) && /report/i.test(x.filename))) {

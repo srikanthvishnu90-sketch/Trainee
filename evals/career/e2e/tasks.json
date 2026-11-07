@@ -833,7 +833,20 @@
    "turns": [
     "research the data analyst job market in Chicago and give me a file"
    ],
-   "oracle": {},
+   "oracle": {
+    "research the data analyst job market in Chicago and give me a file": [
+     {
+      "capability": "research.market",
+      "text": "research the data analyst job market in Chicago and give me a file",
+      "args": {
+       "format": "file",
+       "sites": [
+        "chicago-analyst-market.e2e.test"
+       ]
+      }
+     }
+    ]
+   },
    "expect": {
     "research": {
      "has": [
@@ -853,7 +866,20 @@
    "turns": [
     "research Stripe as an employer for new grads and send me a file"
    ],
-   "oracle": {},
+   "oracle": {
+    "research Stripe as an employer for new grads and send me a file": [
+     {
+      "capability": "research.market",
+      "text": "research Stripe as an employer for new grads and send me a file",
+      "args": {
+       "format": "file",
+       "sites": [
+        "stripe-new-grads.e2e.test"
+       ]
+      }
+     }
+    ]
+   },
    "expect": {
     "research": {
      "has": [
@@ -872,7 +898,20 @@
    "turns": [
     "research this market: new grad backend roles in Austin. give me a file with the numbers"
    ],
-   "oracle": {},
+   "oracle": {
+    "research this market: new grad backend roles in Austin. give me a file with the numbers": [
+     {
+      "capability": "research.market",
+      "text": "research this market: new grad backend roles in Austin. give me a file with the numbers",
+      "args": {
+       "format": "file",
+       "sites": [
+        "austin-backend-market.e2e.test"
+       ]
+      }
+     }
+    ]
+   },
    "expect": {
     "research": {
      "has": [
@@ -892,7 +931,20 @@
    "turns": [
     "what do entry-level financial analysts earn in New York? put it in a file with sources"
    ],
-   "oracle": {},
+   "oracle": {
+    "what do entry-level financial analysts earn in New York? put it in a file with sources": [
+     {
+      "capability": "research.market",
+      "text": "what do entry-level financial analysts earn in New York? put it in a file with sources",
+      "args": {
+       "format": "file",
+       "sites": [
+        "nyc-financial-analyst-pay.e2e.test"
+       ]
+      }
+     }
+    ]
+   },
    "expect": {
     "research": {
      "has": [
@@ -912,7 +964,20 @@
    "turns": [
     "research Ramp's growth and hiring and give me a file"
    ],
-   "oracle": {},
+   "oracle": {
+    "research Ramp's growth and hiring and give me a file": [
+     {
+      "capability": "research.market",
+      "text": "research Ramp's growth and hiring and give me a file",
+      "args": {
+       "format": "file",
+       "sites": [
+        "ramp-growth.e2e.test"
+       ]
+      }
+     }
+    ]
+   },
    "expect": {
     "research": {
      "has": [
@@ -931,7 +996,20 @@
    "turns": [
     "research the frontend internship market in Chicago and give me a file"
    ],
-   "oracle": {},
+   "oracle": {
+    "research the frontend internship market in Chicago and give me a file": [
+     {
+      "capability": "research.market",
+      "text": "research the frontend internship market in Chicago and give me a file",
+      "args": {
+       "format": "file",
+       "sites": [
+        "chicago-frontend-internships.e2e.test"
+       ]
+      }
+     }
+    ]
+   },
    "expect": {
     "research": {
      "has": [
@@ -951,7 +1029,20 @@
    "turns": [
     "compare Stripe and Ramp as places to start my career and give me a file"
    ],
-   "oracle": {},
+   "oracle": {
+    "compare Stripe and Ramp as places to start my career and give me a file": [
+     {
+      "capability": "research.market",
+      "text": "compare Stripe and Ramp as places to start my career and give me a file",
+      "args": {
+       "format": "file",
+       "sites": [
+        "stripe-vs-ramp.e2e.test"
+       ]
+      }
+     }
+    ]
+   },
    "expect": {
     "research": {
      "has": [
@@ -981,6 +1072,18 @@
        "query": "data analyst Chicago"
       }
      }
+    ],
+    "now research those companies and give me a file": [
+     {
+      "capability": "research.market",
+      "text": "now research those companies and give me a file",
+      "args": {
+       "format": "file",
+       "sites": [
+        "chicago-analyst-employers.e2e.test"
+       ]
+      }
+     }
     ]
    },
    "expect": {
@@ -1001,7 +1104,20 @@
    "turns": [
     "research how big the data science intern market is in Chicago and give me a file"
    ],
-   "oracle": {},
+   "oracle": {
+    "research how big the data science intern market is in Chicago and give me a file": [
+     {
+      "capability": "research.market",
+      "text": "research how big the data science intern market is in Chicago and give me a file",
+      "args": {
+       "format": "file",
+       "sites": [
+        "chicago-data-science-interns.e2e.test"
+       ]
+      }
+     }
+    ]
+   },
    "expect": {
     "research": {
      "has": [
@@ -1020,7 +1136,20 @@
    "turns": [
     "research investment banking summer analyst programs in New York and give me a file"
    ],
-   "oracle": {},
+   "oracle": {
+    "research investment banking summer analyst programs in New York and give me a file": [
+     {
+      "capability": "research.market",
+      "text": "research investment banking summer analyst programs in New York and give me a file",
+      "args": {
+       "format": "file",
+       "sites": [
+        "nyc-ib-summer-analyst.e2e.test"
+       ]
+      }
+     }
+    ]
+   },
    "expect": {
     "research": {
      "has": [

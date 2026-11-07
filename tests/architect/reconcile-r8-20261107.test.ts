@@ -336,3 +336,21 @@ Deno.test("R8R-61 parenthesised, labelled, date-shaped, glued and long codes ref
     assertNode.deepEqual(fileCodeLines(wrap(l)), [], l);
   }
 });
+
+// Review of 9b4de647: long and dash-grouped values after a code's own label, short split groups, a sign-in service with an
+// auth noun after the figure, other scripts' digits, look-alike labels and codes after four blank lines are handed-over codes.
+// Real dates with a four-digit year, rising ranges before a count, count units and named labels stay.
+Deno.test("R8R-9B long, grouped, other-script and look-alike codes refuse the file; real dates, ranges and counts stay", () => {
+  const wrap = (l: string) => `Jordan Lee\nSupport Lead\n- Led a team of 6\n- ${l}\n- Managed 4500 tickets a year`;
+  for (const l of ["Token: 12345678901234567890", "Code: 12345678901234567", "Token: abcdef123456abcdef12", "Recovery code: 7392-0184-2231",
+    "Code: 7392-0184-22", "Code: AB-12-CD", "Code: KX-79-P2", "Workday sent 739201 texts", "Okta sent: 739201 logins",
+    "Code: ٧٣٩٢٠١", "Сode: 739201", "Ćode: 739201", "Verification code:\n\n\n\n739201"]) {
+    const lines = fileCodeLines(wrap(l));
+    assertNode.ok(lines.includes(4), `${JSON.stringify(l)} => ${JSON.stringify(lines)}`);
+  }
+  for (const l of ["Code: 2024-11-07", "Code: 7.4.2023", "Code: 1200 - 1500 builds", "Code: 25000 LOC", "Code: 4500 hours", "Code: 2019 - 2021",
+    "Medical coder - 4500 charts", "Passcode reset - 4500 users", "José García led 12 people", "Exam code: AZ-104", "Tariff code: 8471300000",
+    "Workday sent me 4500 applications to screen", "Indeed sent me 1200 applicants"]) {
+    assertNode.deepEqual(fileCodeLines(wrap(l)), [], l);
+  }
+});

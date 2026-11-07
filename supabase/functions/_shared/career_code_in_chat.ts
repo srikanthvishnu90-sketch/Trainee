@@ -219,10 +219,25 @@ const isDate = (s: string) => {
 // A code's own label right before it ("Verification code 739201", "Your code is", "OTP:"): a following word, a range dash or
 // a date shape does not make it a count, a range or a date.
 const DIRECT = /\b(?:code|otp|passcode|pin|token|verification|2fa|mfa)\s*(?:(?:is|=)\s*)?[:#=|\-\u2013\u2014]?\s*$/i;
-const COUNT_AFTER_LABEL = /^(?!(?:expires|is|was|this|has|does|goes|works|stays|lasts|remains|always|thanks|minutes|seconds|hours|digits|its|yes|us|plus)$)(?:[a-z]{3,}s|sq|ft|rps|qps|tps|ms|gb|tb|mb|kb|k|m|hrs?|mins?)$/i;
+const COUNT_AFTER_LABEL = /^(?!(?:expires|is|was|this|has|does|goes|works|stays|lasts|remains|always|thanks|minutes|seconds|digits|its|yes|us|plus)$)(?:[a-z]{3,}s|sq|ft|loc|sloc|kloc|rps|qps|tps|ms|gb|tb|mb|kb|k|m|hrs?|mins?)$/i;
+// The file's text for the check only (never stored or shown): compatibility forms (full-width), any script's digits as ASCII,
+// accents off, zero-width characters as a space, and Cyrillic or Greek letters that look Latin as Latin ("Сode" is "Code").
+const LOOKALIKE: Record<string, string> = { "а": "a", "в": "b", "с": "c", "е": "e", "һ": "h", "і": "i", "ј": "j", "к": "k", "м": "m", "н": "h", "о": "o", "р": "p", "ѕ": "s", "т": "t", "у": "y", "х": "x", "ԁ": "d", "ԛ": "q", "ԝ": "w",
+  "А": "A", "В": "B", "С": "C", "Е": "E", "Н": "H", "І": "I", "Ј": "J", "К": "K", "М": "M", "О": "O", "Р": "P", "Ѕ": "S", "Т": "T", "У": "Y", "Х": "X",
+  "α": "a", "ο": "o", "ρ": "p", "τ": "t", "ν": "v", "Α": "A", "Β": "B", "Ε": "E", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T", "Χ": "X", "Υ": "Y", "Ζ": "Z" };
+function fileText(text: unknown): string {
+  return String(text ?? "").normalize("NFKD").replace(/\p{M}/gu, "").replace(/[\u200b-\u200d\u2060\ufeff]/g, " ")
+    .replace(/\p{Nd}/gu, (d) => { let z = d.codePointAt(0)!; while (z > 0 && /\p{Nd}/u.test(String.fromCodePoint(z - 1)) && d.codePointAt(0)! - z < 9) z--; return String((d.codePointAt(0)! - z) % 10); })
+    .replace(/[\u0370-\u03ff\u0400-\u04ff\u0500-\u052f]/g, (c) => LOOKALIKE[c] ?? c);
+}
+// After a code's own label, a range stays only as two equal-length numbers that rise before a count ("Code: 1200 - 1500 builds").
+function risingRange(line: string, at: number): boolean {
+  const m = /(\d{3,})\s*[-\u2013\u2014]\s*(\d{3,})[\s:,.)]*([A-Za-z][A-Za-z']*)/.exec(line.slice(Math.max(0, line.lastIndexOf(" ", Math.max(0, at - 4)))));
+  return !!m && m[1].length === m[2].length && Number(m[2]) > Number(m[1]) && COUNT_AFTER_LABEL.test(m[3]);
+}
 // The 1-based line numbers of the text read from the file that hold a suspected code (each once, in order).
 export function fileCodeLines(text: string): number[] {
-  const lines = normalizeChatText(String(text ?? "").normalize("NFKC").replace(/[\u200b-\u200d\u2060\ufeff]/g, " ")).split("\n"), hits: number[] = [];
+  const lines = normalizeChatText(fileText(text)).split("\n"), hits: number[] = [];
   const unbullet = (s: string) => s.replace(/^\s*(?:[-*•▪●>]|\d+[.)])\s+/, "");
   lines.forEach((raw, i) => {
     if (lineCodeAt(raw) >= 0) { hits.push(i + 1); return; }
@@ -230,7 +245,7 @@ export function fileCodeLines(text: string): number[] {
     const rest = lines.slice(i + 1, i + 6).map(unbullet).filter((l) => l.trim()).slice(0, 3);
     if (rest.length > 1 && /^[\s:#=|\-\u2013\u2014.]+$/.test(rest[0])) rest.splice(0, 2, `${rest[0].trim()} ${rest[1].trim()}`);
     const n1 = rest[0] ?? "", n2 = rest[1] ?? "";
-    if (!n1.trim() || !lines.slice(i + 1, i + 4).some((l) => l.trim())) return;
+    if (!n1.trim() || !lines.slice(i + 1, i + 6).some((l) => l.trim())) return;
     const ctxEnd = LEFT_CTX.test(raw.replace(/\s*$/, " ")), digitEnd = /(?:^|\D)\d{2,4}\s*$/.test(raw);
     const rightNext = /^\s*(?:is|was|are|=|-|\u2013|\u2014|\()/i.test(n1) && RIGHT_CTX.test(" " + n1.trim());
     if (!ctxEnd && !digitEnd && !rightNext) return;
@@ -252,7 +267,7 @@ function lineCodeAt(raw: string): number {
   if (/\b(?:otp|mfa|2fa)-(?!(?:19|20)\d\d\b)(?:\d{4,8}|(?=[A-Za-z0-9]{5,10}\b)(?=(?:[A-Za-z]*\d){2})(?=(?:\d*[A-Za-z]){2})[A-Za-z0-9]{5,10})\b/i.test(raw)) return 0;
   // A code split by a spaced dash right after its own label ("OTP: 739 - 201"); two years are a range ("Code: 2019 - 2021").
   const spaced = /\b(?:code|otp|passcode|pin|token|verification|2fa|mfa)\s*(?:(?:is|was|=)\s*)?[:#=|]?\s*(\d{2,4})\s+[-–—]\s+(\d{2,4})(?!\d)/i.exec(raw);
-  if (spaced && (spaced[1] + spaced[2]).length >= 6 && !/^(?:19|20)\d\d$/.test(spaced[1])) return spaced.index;
+  if (spaced && (spaced[1] + spaced[2]).length >= 6 && !/^(?:19|20)\d\d$/.test(spaced[1]) && !risingRange(raw, spaced.index + spaced[0].length - spaced[2].length)) return spaced.index;
   const money = MONEY_WORDS.test(raw) || /\bgrants?\b|\bawards?\b/i.test(raw);
   const strongCode = STRONG_CODE.test(money ? raw.replace(/\bone[- ]?time\b/gi, " ") : raw), sender = STRONG_SENDER.test(raw);
   // A code spelled out ("seven three nine two zero one") next to a code word.
@@ -269,9 +284,9 @@ function lineCodeAt(raw: string): number {
     if (!alnum && /^\d{1,3}(?:,\d{3})+$/.test(tok) && !strongCode && !sender) continue; // a thousands figure
     if (!alnum && !direct && /^\d+\.\d+\.\d+/.test(tok)) continue; // a version or address
     if (phones.some(([p, q]) => at < q && end > p)) continue;
-    if (!direct && isDate(line.slice(Math.max(0, at - 3), end + 3)) && /[\/.-]/.test(tok)) continue;
+    if ((!direct || /(?:19|20)\d\d/.test(tok)) && isDate(line.slice(Math.max(0, at - 3), end + 3)) && /[\/.-]/.test(tok)) continue;
     if (/[$€£]\s*$/.test(before) || /^\s*(?:k\b|%|usd|eur|gbp|dollars|euros|per\b|a\s+(?:year|month|week|day|hour)|\/\s*(?:hr|hour|yr|year|month))/i.test(after)) continue;
-    if (!direct && (/\s*[-–—]\s*\d/.test(after.slice(0, 4)) || /\d\s*[-–—]\s*$/.test(before))) continue; // a range ("1200 - 1500")
+    if ((!direct || risingRange(line, at)) && (/\s*[-–—]\s*\d/.test(after.slice(0, 4)) || /\d\s*[-–—]\s*$/.test(before))) continue; // a range ("1200 - 1500")
     if (ID_LABEL.test(before) || COUNT_LABEL.test(before) || COUNT_LABEL2.test(before)) continue;
     // A named label right before the code, also in a list ("Billing codes: 99213, 99214", "Exam code | AZ104"), a compound
     // label ("code review:", "code policy:"), or a named word alone ("Microsoft exam AZ104").
@@ -284,7 +299,8 @@ function lineCodeAt(raw: string): number {
     const next = /^[\s:,.)\-]*([A-Za-z][A-Za-z']*)/.exec(after)?.[1] ?? "";
     // After a code's own label only a count (a plural noun or a unit: "Code: 4500 builds", "Pin: 4500 sq ft") or a credential
     // word ("OTP: AZ500 certified") keeps the figure; "valid", "expires", "Workday" or a name after it is a handed-over code.
-    if (next && !(direct && !COUNT_AFTER_LABEL.test(next) && !(alnum && /^(?:certified|certification|certificate|exam|course|badge|credential|holder|compliant|compliance)$/i.test(next))) && !AFTER_FUNC.test(next) && !/^(?:codes?|passcodes?|pins?|otps?|tokens?)$/i.test(next)) continue; // a count noun
+    if (next && !(direct && !COUNT_AFTER_LABEL.test(next) && !(alnum && /^(?:certified|certification|certificate|exam|course|badge|credential|holder|compliant|compliance)$/i.test(next))) && !AFTER_FUNC.test(next) && !/^(?:codes?|passcodes?|pins?|otps?|tokens?)$/i.test(next)
+      && !(sender && /^(?:texts?|logins?|sign-?ins?|sms|messages?|verifications?|otps?|digits)$/i.test(next))) continue; // a count noun
     const left = LEFT_CTX.exec(before), right = RIGHT_CTX.test(after);
     const verb = left ? left[0].trim().split(/[\s:,]+/)[0].toLowerCase() : "";
     // A figure with a money purpose: "Client sent me 120000 for review", "VP gave me 4500 and a deadline", "Received 50000 from
@@ -293,11 +309,20 @@ function lineCodeAt(raw: string): number {
       && !SIGNIN_PURPOSE.test(after) && (money || (!FROM_SENDER.test(after) && (/^\s*(?:(?:for|to|in|on|at|as|by|from)\s+\S|,\s*(?:a|an|and|plus|with)\b|and\s+(?:a|an|the|\d))/i.test(after) || (verb === "gave" && /\w/.test(after)))))) continue;
     if (strongCode || sender || left || right) return at;
   }
-  // A long value right after a code's own label ("Code: 123456789", "Verification code: K7X9P2Q8Z1AB"), unless a named label
-  // comes first ("Tariff code: 8471300000").
-  for (const m of line.matchAll(/(?:^|([\w'-]+)[ -]+)(?:code|otp|passcode|pin|token|verification(?:\s+code)?)\s*(?:is\s*)?[:#=]?\s*(?=[A-Za-z]*\d[A-Za-z]*\d)([A-Za-z0-9]{9,16})(?![\w])/gi)) {
+  // A value right after a code's own label, unless a named label comes first ("Tariff code: 8471300000"): one long run
+  // ("Code: 123456789", "Token: 12345678901234567890") or dash-joined groups ("Recovery code: 7392-0184-2231", "Code: AB-12-CD").
+  // A real date with a four-digit year and a rising range of two equal-length numbers before a count stay.
+  for (const m of line.matchAll(/(?:^|([\w'-]+)[ -]+)(?:code|otp|passcode|pin|token|verification(?:\s+code)?)\b\s*(?:is\s*)?[:#=]?\s*([A-Za-z0-9]+(?:\s?[-–—]\s?[A-Za-z0-9]+)*)(?![\w])/gi)) {
     if (m[1] && NAMED_LABEL.test(m[1])) continue;
-    return (m.index ?? 0) + m[0].length - m[2].length;
+    const val = m[2], flat = val.replace(/[\s–—-]/g, ""), digits = flat.replace(/\D/g, "").length, groups = val.split(/\s?[-–—]\s?/);
+    if (digits < 2) continue;
+    if (/^(?:19|20)\d\d[-–—]\d{1,2}[-–—]\d{1,2}$|^\d{1,2}[-–—]\d{1,2}[-–—](?:19|20)\d\d$/.test(val.replace(/\s/g, "")) && isDate(val.replace(/\s/g, "").replace(/[–—]/g, "-"))) continue;
+    if (groups.length === 2 && groups.every((g) => /^\d{3,}$/.test(g)) && groups[0].length === groups[1].length && Number(groups[1]) > Number(groups[0])
+      && COUNT_AFTER_LABEL.test(/^[\s:,.)]*([A-Za-z][A-Za-z']*)/.exec(line.slice((m.index ?? 0) + m[0].length))?.[1] ?? "")) continue;
+    if (/^(?:19|20)\d\d$/.test(groups[0]) && groups.length === 2 && /^(?:(?:19|20)?\d\d|present|now)$/i.test(groups[1])) continue; // years
+    const long = groups.length === 1 && flat.length >= 9 && /\d.*\d/.test(flat);
+    const grouped = groups.length >= 2 && flat.length >= 5 && groups.every((g) => /\d/.test(g) || g.length <= 4) && (digits >= 9 || /[A-Za-z]/.test(flat));
+    if (long || grouped) return (m.index ?? 0) + m[0].length - val.length;
   }
   return -1;
 }

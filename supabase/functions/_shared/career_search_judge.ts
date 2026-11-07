@@ -46,6 +46,9 @@ export function verdictOf(v: unknown): Verdict | null {
 }
 export const verdictRank = (v: Verdict) => JUDGE_SCALE.indexOf(v);
 
+// The most roles one results File holds when the person asks for a number ("find me 50 ..."; many_roles.ts askedCount), and so
+// the most one apply ask prepares at once from it (many roles, one File, 2026-11-06). role_results.ts holds the File to it.
+export const RESULTS_FILE_MAX = 50;
 export const JUDGE_DEFAULT_N = 20, JUDGE_MAX_N = 40, REASON_MAX = 160, CACHE_MAX = 500;
 // Bumped when the prompt or the scale changes, so an old cached verdict is never read as a new one.
 export const JUDGE_VERSION = "f05-1";
@@ -412,6 +415,9 @@ export async function searchJudgeTurn(o: {
   message: string; ask: SearchAsk; userId: string; now: number; profile: any; sources: SearchSources;
   judge: { on: boolean; model?: Model | null; cache?: JudgeCache | null; n?: number; standing?: () => Promise<Standing[]> };
   show?: number;
+  // How many roles the person asked for (many_roles.ts askedCount): the results File's list (picked) then holds up to that many,
+  // at most RESULTS_FILE_MAX, the ranked postings past the judged ones included (each marked not judged), never padded.
+  want?: number | null;
   // D6: the turn's stage clock, so the CPU spent ranking (scoring each posting) is counted as CPU, not as I/O wait.
   clock?: TurnClock;
 }): Promise<SearchJudgeResult | null> {
@@ -511,7 +517,11 @@ export async function searchJudgeTurn(o: {
   if (more > 0) lines.push(`${more} more ${more === 1 ? "is" : "are"} not shown.`);
   lines.push(listed.length ? `Say "apply to these" to queue the ${listed.length === 1 ? "one" : listed.length} listed, or name one to tailor your resume for.` : "Widen the role or the place and I'll search again.");
   const shortlist = listed.map((r) => ({ id: r.h.job_id, title: r.h.title, company: r.h.company || null, location: where(r.h) || null, url: r.h.url || null }));
-  const picked = rows.slice(0, 25).map((r) => ({ hit: r.h, posting: byId.get(r.h.job_id) ?? null }));
+  // The File's list: every row the reply ranks (role_results.ts keeps RESULTS_MAX of them and says when that is fewer); for a
+  // count asked for past them, the ranked postings beyond the judged ones, in fit order, up to that count.
+  const want = o.want ? Math.min(o.want, RESULTS_FILE_MAX) : 0, inRows = new Set(rows.map((r) => r.h.job_id));
+  const beyond = want > rows.length ? hits.filter((h) => !inRows.has(h.job_id) && !top.includes(h)).slice(0, want - rows.length) : [];
+  const picked = [...rows.map((r) => r.h), ...beyond].map((h) => ({ hit: h, posting: byId.get(h.job_id) ?? null }));
   return { reply: lines.join("\n"), status: account ? "judged" : "ranked", source, shortlist, accounting: account, modelCalled, picked };
 }
 

@@ -9,11 +9,12 @@
 import { jobViewOf, refOf, type JobStore, type ListMeta, type PostingRow } from "./telegram_jobs.ts";
 import { type Floor, parsePay, type Pay, payGroup, payText, resultsParts, type What } from "./role_pay.ts";
 import type { SearchHit } from "./career_search.ts";
-import type { SourcePosting } from "./career_search_judge.ts";
+import { RESULTS_FILE_MAX, type SourcePosting } from "./career_search_judge.ts";
 import type { Limits } from "./posting_constraints.ts";
 import { type ApplyAllOffer, offerOf, offerQuestion } from "./apply_all_yes.ts";
 
 export const RESULTS_MAX = 25;
+export { RESULTS_FILE_MAX };
 const hex = async (s: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 // What the person asked for, in their words' shape: "frontend internship(s)", "data analyst role(s)", "... in Chicago", "remote ...".
@@ -31,7 +32,12 @@ export async function resultsFile(o: {
   userId: string; now: number; what: What; floor: Floor | null; picked: Picked[]; store: JobStore;
   name?: string | null; source?: "live" | "snapshot" | null; read?: string | null;
   links: (userId: string, listId: string) => Promise<{ url: string | null }>;
-}): Promise<{ reply: string; parts: string[]; listId: string; url: string; offer: ApplyAllOffer; offerAsk: string; meets: number; unlisted: number; unchecked: number; otherCurrency: number; noPeriod: number; below: number } | null> {
+  // How many roles the person asked for ("find me 50 ..."; many_roles.ts askedCount). The File holds up to that many, at most
+  // RESULTS_FILE_MAX; with no number, RESULTS_MAX. When it holds fewer than were asked for, or fewer than were found, the
+  // reply says how many and why.
+  asked?: number | null;
+}): Promise<{ reply: string; parts: string[]; listId: string; url: string; offer: ApplyAllOffer; offerAsk: string; meets: number; unlisted: number; unchecked: number; otherCurrency: number; noPeriod: number; below: number;
+  shown: number; rows: { job_id: string; title: string; company: string; location: string; url: string }[]; meta: ListMeta } | null> {
   if (!o.store.rememberListMeta) return null;
   const meets: Picked[] = [], unlisted: Picked[] = [], unchecked: Picked[] = [];
   let below = 0;
@@ -43,9 +49,10 @@ export async function resultsFile(o: {
     pays.set(p.hit.job_id, pay);
     (g === "meets" ? meets : g === "unchecked" ? unchecked : unlisted).push(p);
   }
-  const ordered = [...meets, ...unchecked, ...unlisted].slice(0, RESULTS_MAX);
+  const cap = o.asked ? Math.min(o.asked, RESULTS_FILE_MAX) : RESULTS_MAX, found = meets.length + unchecked.length + unlisted.length;
+  const ordered = [...meets, ...unchecked, ...unlisted].slice(0, cap);
   if (!ordered.length) return null;
-  const refs: string[] = [], boards = new Set<string>(), shown: { ref: string; job_id: string }[] = [];
+  const refs: string[] = [], boards = new Set<string>(), shown: { ref: string; job_id: string }[] = [], rows: { job_id: string; title: string; company: string; location: string; url: string }[] = [];
   for (const p of ordered) {
     // A live-board posting is a whole career_postings row (remote, level, provider, its own posted date); a snapshot one is not.
     const live = (p.posting ?? {}) as Partial<PostingRow>;
@@ -57,7 +64,7 @@ export async function resultsFile(o: {
     const ref = await refOf(o.userId, view.job_id);
     await o.store.remember(o.userId, ref, view, "text");
     boards.add(String(view.source ?? row.provider ?? view.job_id.split(":")[0]).toLowerCase());
-    refs.push(ref); shown.push({ ref, job_id: view.job_id });
+    refs.push(ref); shown.push({ ref, job_id: view.job_id }); rows.push({ job_id: view.job_id, title: view.title, company: view.company, location: view.location, url: view.url });
   }
   const listId = (await hex(`${o.userId}|results|${refs.join(",")}|${o.now}`)).slice(0, 10);
   await o.store.rememberList(o.userId, listId, refs);
@@ -71,8 +78,20 @@ export async function resultsFile(o: {
   const otherCurrency = shownUnchecked.filter((p) => pays.get(p.hit.job_id)?.currency !== "USD").length;
   const counts = { meets: Math.min(meets.length, ordered.length), unchecked: shownUnchecked.length, otherCurrency, noPeriod: shownUnchecked.length - otherCurrency, unlisted: ordered.filter((p) => unlisted.includes(p)).length };
   const parts = resultsParts({ what: o.what, floor: o.floor, meets: counts.meets, unlisted: counts.unlisted, otherCurrency: counts.otherCurrency, noPeriod: counts.noPeriod, url });
+  const cut = cutNote({ asked: o.asked ?? null, shown: ordered.length, found });
+  if (cut) parts[0] = `${parts[0]} ${cut}`;
   // The offer a bare yes answers (apply_all_yes.ts): the roles shown, each with the application tag it has right now (none: not prepared).
   // A prepared application that cannot be read leaves its role untagged: a yes never approves what it could not see.
   const offer = offerOf({ list: listId, at: o.now, jobs: await Promise.all(shown.map(async (x) => ({ ...x, payload_hash: (await o.store.prepared(o.userId, x.job_id).catch(() => null))?.payload_hash ?? null }))) });
-  return { reply: parts.join("\n"), parts, listId, url, offer, offerAsk: offerQuestion(offer), below, ...counts };
+  return { reply: parts.join("\n"), parts, listId, url, offer, offerAsk: offerQuestion(offer), below, ...counts, shown: ordered.length, rows, meta };
+}
+// What the File holds against what was asked for and found, said only when it is fewer: the File's own limit, or every match.
+export function cutNote(o: { asked: number | null; shown: number; found: number }): string {
+  if (o.asked && o.shown < o.asked) {
+    return o.asked > RESULTS_FILE_MAX && o.found >= RESULTS_FILE_MAX
+      ? `You asked for ${o.asked}; one File holds at most ${RESULTS_FILE_MAX}, so it has the best ${RESULTS_FILE_MAX} by fit.`
+      : `You asked for ${o.asked}; ${o.shown === 1 ? "that's the only one" : `those ${o.shown} are all`} I found.`;
+  }
+  if (!o.asked && o.found > o.shown) return `That's the best ${o.shown} of the ${o.found} I found; ask for up to ${RESULTS_FILE_MAX} ("find me ${RESULTS_FILE_MAX} ...") to see more.`;
+  return "";
 }

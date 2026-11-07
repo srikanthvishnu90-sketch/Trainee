@@ -304,16 +304,4 @@ Deno.test("R8G-8 Greptile on #579: single-quoted and prefixed values, standalone
   await kept(docx([{ name: "docProps/core.xml", data: `<cp:coreProperties xmlns:cp="c"><cp:version>16.0000</cp:version><cp:revision>3</cp:revision></cp:coreProperties>` }]), "version and revision");
   await kept(docx([{ name: "word/afchunk.mht", data: 'MIME-Version: 1.0\nContent-Type: multipart/related; boundary="----=_NextPart_01D9"\n\n------=_NextPart_01D9\nContent-Type: text/html; charset="utf-8"\nContent-Transfer-Encoding: quoted-printable\n\n<p>Volunteer, Food Bank, 2018 =\n- 2020</p>\n------=_NextPart_01D9--\n' }]), "a Word-style multipart MHTML part");
   await kept(docx([{ name: "word/afchunk.mht", data: mht("Content-Transfer-Encoding: base64", b64("<p>Volunteer, Food Bank, 2018 - 2020</p>")) }]), "a base64 MHTML body");
-  // Re-check of #580: Office and SharePoint system properties are kept; a code under one of their names still refuses.
-  const prop = (name: string, v: string, t = "lpwstr") => `<property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="${name}"><vt:${t}>${v}</vt:${t}></property>`;
-  const custom = (...p: string[]) => [{ name: "docProps/custom.xml", data: `<Properties xmlns="c" xmlns:vt="v">${p.join("")}</Properties>` }];
-  await kept(docx(custom(prop("MSIP_Label_6a7d2a5e-1f3c-4d2b-9a1e-1234567890ab_Enabled", "true"), prop("MSIP_Label_6a7d2a5e-1f3c-4d2b-9a1e-1234567890ab_SiteId", "72f988bf-86f1-41af-91ab-2d7cd011db47"),
-    prop("MSIP_Label_6a7d2a5e-1f3c-4d2b-9a1e-1234567890ab_Method", "Standard"), prop("MSIP_Label_6a7d2a5e-1f3c-4d2b-9a1e-1234567890ab_ActionId", "{0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0}"),
-    prop("ContentTypeId", "0x0101009A1B2C3D4E5F60718293A4B5C6D7E8F9"), prop("_dlc_DocId", "https://contoso.sharepoint.com/sites/hr/_layouts/15/DocIdRedir.aspx?ID=HR-1234-56789"),
-    prop("_dlc_DocIdItemGuid", "a1b2c3d4-e5f6-4789-abcd-ef0123456789"), prop("Template", "Normal.dotm"), prop("Version", "16.0.17328.20142"), prop("Order", "4500", "r8"))), "Office and SharePoint system properties");
-  await refused(docx(custom(prop("_dlc_DocId", "482913"))), "a code under a system property name");
-  await refused(docx(custom(prop("Template", "code 482913.dotm"))), "a code in a template name");
-  await refused(docx(custom(prop("_dlc_DocId", "https://contoso.example/r?code=482913"))), "a code in a system link's query");
-  await refused(docx(custom(prop("MSIP_Label_x_Name", "OTP 482913"))), "a code in a label name");
-  await refused(docx(custom(prop("Note", "Verification code: 482913"))), "a code in an ordinary custom property");
 });

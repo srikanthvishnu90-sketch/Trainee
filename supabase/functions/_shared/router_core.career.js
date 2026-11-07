@@ -16220,6 +16220,7 @@ const CareerRouter = (() => {
   function handleCounterRevision(text, ctx) {
     const t = lc(text);
     const figs = parseOfferFigures(text);
+    if (figs.held) return null;
     const figAsk = /\bmake it\s+\$?\s?\d/.test(t) || /\bchange it to\s+\$?\s?\d/.test(t) || /\b(?:raise|lower|drop|bump) it to\s+\$?\s?\d/.test(t);
     const addAsk = /\badd a request\b|\badd an ask\b|\balso ask\b/.test(t);
     if (!figAsk && !addAsk) return null;

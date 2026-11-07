@@ -984,3 +984,15 @@ Deno.test("CDW held offer details record no figure, on a fresh thread and with a
   const c = fresh(); host.runTurn("The offer is $60k", c); eq((c.offer as any)?.stated_figure, "$60,000");
   const c2 = fresh(); host.runTurn("They offered me $70k with a $5k signing bonus", c2); eq((c2.offer as any)?.signing_bonus, 5000);
 });
+
+// Greptile on #574: a counter revision whose figures are held (a third party's pay beside the new ask) revises nothing.
+Deno.test("CDW held counter revisions record no counter; plain revisions still revise", () => {
+  for (const msg of ["The market offers $28/hour; make it $30/hour instead", "Competitors pay $29/hour, make it $31/hour", "Glassdoor says $28/hour. make it $30/hour"]) {
+    const ctx = fresh(); host.runTurn(OFFER, ctx); host.runTurn("Draft a counter at $27/hour", ctx);
+    const r = host.runTurn(msg, ctx);
+    eq(recorded(ctx).counter, 27, `${msg}: counter unchanged`);
+    eq(r.result?.sends ?? 0, 0, msg);
+  }
+  const c = fresh(); host.runTurn(OFFER, c); host.runTurn("Draft a counter at $27/hour", c); host.runTurn("make it $30/hour instead", c);
+  eq(recorded(c).counter, 30, "plain revision");
+});

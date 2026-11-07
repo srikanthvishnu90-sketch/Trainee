@@ -285,3 +285,13 @@ Deno.test("CRL-12 a split code is removed while a code is pending; phones and lo
   }
   for (const m of ["call me at 415 555 1234", "my number is 415\n555\n1234", "$120 000 base", "the job id 739 201 7", "zip 94107-1234", "I want 3-5 years", "a GPA of 3.85", "pay is 120000.50", "I have 1,200,000 views", "the ratio 120 300,5"]) eq(pend(m), m, m);
 });
+
+// Greptile on #574: a full code on its own line is its own token; a count on the next line neither hides it nor joins it.
+Deno.test("CRL-13 a code followed by a number on the next line is removed, and the next line is kept", () => {
+  for (const m of ["Workday sent me 739201\n2 minutes ago", "Workday sent me 739201\n3 roles open", "The portal sent 482913\n10 mins ago, enter it?"]) {
+    const t = turn(m);
+    assert(!t.stored.includes("739201") && !t.stored.includes("482913"), `${JSON.stringify(m)}: ${JSON.stringify(t.stored)}`);
+    assert(/\n(?:2 minutes|3 roles|10 mins)/.test(t.stored), `${JSON.stringify(m)}: next line kept: ${JSON.stringify(t.stored)}`);
+  }
+  for (const m of ["Workday sent me 739\n201"]) assert(!turn(m).stored.includes("201"), m);
+});

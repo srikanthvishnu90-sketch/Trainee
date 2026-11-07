@@ -4143,6 +4143,9 @@ const CareerRouter = (() => {
   function handleCounterRevision(text, ctx) {
     const t = lc(text);
     const figs = parseOfferFigures(text);
+    // A held turn (a pay figure beside a third party: "The market offers $28/hour; make it $30/hour instead") revises nothing;
+    // the brain asks which figure is the ask (D-007; Greptile on #574).
+    if (figs.held) return null;
     const figAsk = /\bmake it\s+\$?\s?\d/.test(t) || /\bchange it to\s+\$?\s?\d/.test(t) || /\b(?:raise|lower|drop|bump) it to\s+\$?\s?\d/.test(t);
     const addAsk = /\badd a request\b|\badd an ask\b|\balso ask\b/.test(t);
     if (!figAsk && !addAsk) return null;

@@ -122,7 +122,7 @@ Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless res
     // review of f62e2033
     "Workday sent me: 739201", "My verification code arrived this morning: 739201", "Here is the code Workday sent: 739201", "Code -> 739201", "Workday sent me:\n739\n201", "The code it sent: 7392\u201101",
     "the code was emailed: 739201", "Code is: 482913", "my verification code is 739201", "They texted me: 482913", "Login code \u2192 482913",
-    "They gave me 482913 to log in", "Recruiter texted me 4821.", "Recruiter sent me code K7X9P2", "One-time code: AB12CD"]) {
+    "They gave me 482913 to log in", "Recruiter texted me 4821.", "Recruiter sent me code K7X9P2", "One-time code: AB12CD", "OTP: K7X9P2", "2FA code: AB12CD"]) {
     assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), true, line);
   }
   for (const line of ["customer portal serving 120000 customers", "Vendor portal handled 35000 orders a year", "Verification engineer, Acme, 2018-2022", "Security code audits 2018-2022",
@@ -149,7 +149,11 @@ Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless res
     // "verification" or "sign-in" in them
     "Leadership gave me 120000 to invest in tooling", "VP gave me 250000 and a team of 6", "NSF gave me 250000 for research", "Leadership gave me 1500000 in budget",
     "Client sent me 120000 for review", "Azure Security Engineer exam code: AZ500", "CompTIA Security+ exam code: SY0701", "Identity and access (sign-in) exam code: SC300",
-    "Security clearance code: TS2019", "Prior auth code: PA4521", "Insurance verification code: VB102", "Certificate verification code: 4KX7P2QZ"]) {
+    "Security clearance code: TS2019", "Prior auth code: PA4521", "Insurance verification code: VB102", "Certificate verification code: 4KX7P2QZ",
+    // review of b805bd0a: a topic word earlier on the line is not the code's label
+    "Rolled out MFA; change code: CHG0012345", "Led MFA rollout (change code: CHG0012345)", "2FA rollout. Change code: CHG0012345", "Billed MFA work to charge code: CC4821",
+    "Delivered 2FA for client (engagement code: ENG4821)", "OTP module, ServiceNow code: SN4821", "Passcode reset SOP (SOP code: SOP12)", "Built OTP service; release code: R2023A",
+    "Two-factor rollout; charge code: TF2021", "One-time migration, charge code: MIG2021", "Received one-time award code: AW2023", "Client sent me feedback; exam code: AZ104"]) {
     assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), false, line);
   }
 });

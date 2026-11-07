@@ -187,9 +187,11 @@ const FILE_NAMED = /\b(?:zip|postal|post|area|country|promo|promotional|discount
 // it"). A noun after the number ("4500 hospitals", "3500 resumes") is a count, whatever the noun (review of 470e25d9).
 const OTP_WORD = /\b(?:one[- ]time(?:\s+(?:code|pass(?:code|word)?|pin))?|otp|passcode|pass code|2fa|mfa|two[- ]factor(?:\s+code)?|(?:sign[- ]?in|log[- ]?in|login|verification)\s+code\s+(?:is|was|arrived|:|->))\b|(?:sign[- ]?in|log[- ]?in|login|verification)\s+code\s*(?:->|:|is|was)/i;
 // Letters-and-digits codes: only a one-time-code word itself; "insurance/certificate verification code: VB102" is a label.
-const OTP_STRICT = /\b(?:one[- ]time|otp|passcode|pass code|2fa|mfa|two[- ]factor)\b/i;
+// Anchored right before the token, like HANDOVER_END: "One-time code: AB12CD", "OTP: K7X9P2", "2FA code is AB12CD". A topic word
+// earlier on the line ("Rolled out MFA; change code: CHG0012345") is not the code's label (review of b805bd0a).
+const OTP_STRICT = /\b(?:one[- ]time|otp|passcode|pass code|2fa|mfa|two[- ]factor)(?:\s+(?:code|passcode|pin|password))?\s*(?:(?:is|was|arrived)\s*)?(?::|->|=>|=|\u2192|#|-)?\s*$/i;
 const OTP_AFTER = /^[ \t]*(?:to|so\s+i\s+can|for)\s+(?:log|sign)\s*(?:in|on)\b|^[ \t]*(?:to|so\s+i\s+can)\s+(?:verify|enter\s+it|get\s+in)\b/i;
-const HAND_VERB = /\b(?:sent|texted|emailed|gave|messaged|dm'?d)\s+me\b/i;
+const HAND_VERB = /\b(?:sent|texted|emailed|gave|messaged|dm'?d)\s+me(?:\s+(?:a|the|my|this|that|one[- ]time|verification|security|sign[- ]?in|log[- ]?in|otp|new))*(?:\s+(?:code|passcode|pin|otp))?\s*(?::|->|\u2192|-)?\s*$/i;
 const CODE_ENDS = /^(?:[ \t]*(?:$|\n|[.,;:!?)\]"'\u2019\u201d]|(?:for|from|to|in|on|at|today|tonight|yesterday|this|that|just|now|please|thanks|thank|and|or|but|so|which|can|could|would|will|if|when|by|via|as|again|here|there|it|is|was)\b))/i;
 export function fileSharesCode(text: string): boolean {
   const t = normalizeChatText(String(text ?? ""));

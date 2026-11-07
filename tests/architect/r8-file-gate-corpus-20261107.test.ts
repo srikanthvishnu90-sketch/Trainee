@@ -305,3 +305,30 @@ Deno.test("R8G-8 Greptile on #579: single-quoted and prefixed values, standalone
   await kept(docx([{ name: "word/afchunk.mht", data: 'MIME-Version: 1.0\nContent-Type: multipart/related; boundary="----=_NextPart_01D9"\n\n------=_NextPart_01D9\nContent-Type: text/html; charset="utf-8"\nContent-Transfer-Encoding: quoted-printable\n\n<p>Volunteer, Food Bank, 2018 =\n- 2020</p>\n------=_NextPart_01D9--\n' }]), "a Word-style multipart MHTML part");
   await kept(docx([{ name: "word/afchunk.mht", data: mht("Content-Transfer-Encoding: base64", b64("<p>Volunteer, Food Bank, 2018 - 2020</p>")) }]), "a base64 MHTML body");
 });
+
+Deno.test("R8G-9 Greptile on #581: hexadecimal character references in the body, MIME bodies in their declared charset", async () => {
+  const enc = new TextEncoder(), W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  const body = BODY.map((t) => `<w:p><w:r><w:t xml:space="preserve">${t}</w:t></w:r></w:p>`).join("");
+  const types = { name: "[Content_Types].xml", data: enc.encode('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>') };
+  const docx = (extra: { name: string; data: string }[], inBody = "") => zipOf([types,
+    { name: "word/document.xml", data: enc.encode(`<?xml version="1.0" encoding="UTF-8"?><w:document ${W}><w:body>${body}${inBody}<w:sectPr/></w:body></w:document>`) },
+    ...extra.map((e) => ({ name: e.name, data: enc.encode(e.data) }))]);
+  const upload = async (bytes: Uint8Array) => {
+    const stored: unknown[] = [];
+    const res = await ingestResumeFile({ userId: "TEST-r8g", channel: "telegram", doc: { fileId: "F", uniqueId: crypto.randomUUID(), name: "resume.docx", mime: DOCX, size: bytes.length },
+      fetchFile: async () => ({ ok: true, bytes }), record: async (row) => { stored.push(row); return "id"; } });
+    return { res: res as { ok: boolean; reply?: string }, stored };
+  };
+  const refused = async (bytes: Uint8Array, tag: string) => { const u = await upload(bytes); assertNode.ok(!u.res.ok && u.stored.length === 0 && !String(u.res.reply).includes("482913"), tag); };
+  const kept = async (bytes: Uint8Array, tag: string) => { const u = await upload(bytes); assertNode.ok(u.res.ok && u.stored.length === 1, `${tag}: ${u.res.reply ?? ""}`); };
+  const hex = (t: string) => [...t].map((c) => `&#x${c.charCodeAt(0).toString(16)};`).join("");
+  await refused(docx([], `<w:p><w:r><w:t>Verification code: ${hex("482913")}</w:t></w:r></w:p>`), "hexadecimal references in the body");
+  await refused(docx([], `<w:p><w:r><w:t>Verification code: &#52;&#56;&#50;&#57;&#49;&#51;</w:t></w:r></w:p>`), "decimal references in the body");
+  const u16 = (t: string) => { const b = new Uint8Array(t.length * 2); for (let i = 0; i < t.length; i++) { b[i * 2] = t.charCodeAt(i) & 0xff; b[i * 2 + 1] = t.charCodeAt(i) >> 8; } return btoa(String.fromCharCode(...b)); };
+  await refused(docx([{ name: "word/afchunk.mht", data: `MIME-Version: 1.0\nContent-Type: text/html; charset="utf-16le"\nContent-Transfer-Encoding: base64\n\n${u16("<p>Verification code: 482913</p>")}` }]), "a UTF-16LE base64 MHTML body");
+  await refused(docx([{ name: "word/afchunk.mht", data: `MIME-Version: 1.0\nContent-Type: text/html; charset="utf-8"\nContent-Transfer-Encoding: base64\n\n${u16("<p>Verification code: 482913</p>")}` }]), "a UTF-16 body declared as UTF-8");
+  await refused(docx([{ name: "word/afchunk.mht", data: `MIME-Version: 1.0\nContent-Type: text/html; charset="x-unknown-9"\nContent-Transfer-Encoding: base64\n\n${btoa("<p>Jordan</p>")}` }]), "an unknown MIME charset");
+  await kept(docx([{ name: "word/afchunk.mht", data: `MIME-Version: 1.0\nContent-Type: text/html; charset="utf-16le"\nContent-Transfer-Encoding: base64\n\n${u16("<p>Volunteer, Food Bank, 2018 - 2020</p>")}` }]), "a plain UTF-16LE MHTML body");
+  await kept(docx([{ name: "word/afchunk.mht", data: `MIME-Version: 1.0\nContent-Type: text/html; charset="windows-1252"\nContent-Transfer-Encoding: quoted-printable\n\n<p>Caf=E9 manager, 2018 - 2020</p>` }]), "a windows-1252 quoted-printable body");
+  await kept(docx([], `<w:p><w:r><w:t>Caf&#xe9; &#x26; Bakery, Shift Lead, 2019 - 2021</w:t></w:r></w:p>`), "hexadecimal references in ordinary text");
+});

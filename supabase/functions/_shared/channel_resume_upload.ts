@@ -183,10 +183,13 @@ function mimeText(s: string): string[] {
     const head = part.slice(0, at), body = part.slice(at).replace(/^\r?\n\r?\n/, "");
     const enc = (/content-transfer-encoding\s*:\s*([\w-]+)/i.exec(head)?.[1] ?? "7bit").toLowerCase();
     let text: string;
-    if (enc === "base64") { const raw = atob(body.replace(/\s+/g, "")); text = new TextDecoder("utf-8").decode(Uint8Array.from(raw, (c) => c.charCodeAt(0))); }
-    else if (enc === "quoted-printable") { const b = body.replace(/=\r?\n/g, ""); const bytes: number[] = []; for (let i = 0; i < b.length; i++) { const h = b[i] === "=" && /^[0-9a-f]{2}$/i.test(b.slice(i + 1, i + 3)); bytes.push(h ? parseInt(b.slice(i + 1, i + 3), 16) : b.charCodeAt(i)); if (h) i += 2; } text = new TextDecoder("utf-8").decode(new Uint8Array(bytes)); }
+    // A body is read in its declared charset (UTF-8 when none); a charset the decoder does not know throws.
+    const cs = /charset\s*=\s*"?([\w.:-]+)"?/i.exec(head)?.[1] ?? "utf-8", txt = (b: Uint8Array) => new TextDecoder(cs, { fatal: false }).decode(b);
+    if (enc === "base64") { const raw = atob(body.replace(/\s+/g, "")); text = txt(Uint8Array.from(raw, (c) => c.charCodeAt(0))); }
+    else if (enc === "quoted-printable") { const b = body.replace(/=\r?\n/g, ""); const bytes: number[] = []; for (let i = 0; i < b.length; i++) { const h = b[i] === "=" && /^[0-9a-f]{2}$/i.test(b.slice(i + 1, i + 3)); bytes.push(h ? parseInt(b.slice(i + 1, i + 3), 16) : b.charCodeAt(i)); if (h) i += 2; } text = txt(new Uint8Array(bytes)); }
     else if (/^(?:7bit|8bit|binary)$/.test(enc)) text = body;
     else throw new Error(`unknown transfer encoding ${enc}`);
+    if (text.includes("\u0000")) throw new Error("MIME body does not read as text"); // a wrong charset fails closed
     out.push(...(/content-type\s*:\s*text\/plain/i.test(head) ? lines(text) : html(text)));
   }
   return out;
@@ -298,7 +301,7 @@ export function pdfLayoutLines(runs: Run[]): string[] {
   }
   return out;
 }
-const unescXml = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_m, n) => String.fromCodePoint(Number(n))).replace(/&amp;/g, "&");
+const unescXml = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(x[0-9a-f]+|\d+);/gi, (_m, n: string) => { const c = /^x/i.test(n) ? parseInt(n.slice(1), 16) : Number(n); return c <= 0x10ffff ? String.fromCodePoint(c) : _m; }).replace(/&amp;/g, "&");
 export function docxResumeLines(xml: string): string[] {
   // A text box is written twice (the drawing, and a picture fallback for old readers): the fallback is not read.
   const doc = String(xml ?? "").replace(/<mc:Fallback\b[\s\S]*?<\/mc:Fallback>/g, "");

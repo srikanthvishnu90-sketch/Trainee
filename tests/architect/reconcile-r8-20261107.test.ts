@@ -121,7 +121,8 @@ Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless res
     "The portal sent a code. It is 739201.", "Recruiter texted me 4821", "Workday sent me 739.201", "Workday sent me 739−201", "Verification code: 739.201", "Workday sent me 739 201",
     // review of f62e2033
     "Workday sent me: 739201", "My verification code arrived this morning: 739201", "Here is the code Workday sent: 739201", "Code -> 739201", "Workday sent me:\n739\n201", "The code it sent: 7392\u201101",
-    "the code was emailed: 739201", "Code is: 482913", "my verification code is 739201", "Workday sent me 739201 for the portal", "They texted me: 482913", "Login code \u2192 482913"]) {
+    "the code was emailed: 739201", "Code is: 482913", "my verification code is 739201", "Workday sent me 739201 for the portal", "They texted me: 482913", "Login code \u2192 482913",
+    "They gave me 482913 to log in", "My verification code is K7X9P2", "Recruiter texted me 4821."]) {
     assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), true, line);
   }
   for (const line of ["customer portal serving 120000 customers", "Vendor portal handled 35000 orders a year", "Verification engineer, Acme, 2018-2022", "Security code audits 2018-2022",
@@ -139,7 +140,11 @@ Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless res
     "Our code is running in 4500 hospitals", "My code was deployed to 1200 clinics", "The code we shipped was used by 120000 drivers", "The code was sent to 4500 testers",
     "Our code was sent to 4500 merchants for review", "Our OTP is sent to 120000 phones daily", "The code I own is in 4500 trucks", "CPT code: 99213", "Billing - CPT code: 99214",
     "ICD code: 4019", "NAICS code: 541511", "SOC code: 151252", "FIPS code: 06075", "Department code: 4521", "Project code: 2231", "Vendor code: 55120", "Morse code: 1200 wpm",
-    "CPT code: 99213 and 99214 billing audits", "My director gave me 4500 SKUs to rationalize", "Client sent me 3500 resumes to screen", "Our code reads 4500 sensors"]) {
+    "CPT code: 99213 and 99214 billing audits", "My director gave me 4500 SKUs to rationalize", "Client sent me 3500 resumes to screen", "Our code reads 4500 sensors",
+    // review of 6f6ed8ad: letters-and-digits labels, and a 4-5 digit figure after "gave/sent me" that does not end the phrase
+    "Taxonomy code: 207Q00000X", "Denial code: CO197", "Remark code: MA130", "SAP T-code: ME21N", "Transaction code: ME21N", "AFSC code: 1N0X1", "Exam code: AZ104",
+    "Qualification code: BSB50420", "Part code: XR500A", "Lot code: AB1234", "Batch code: 23A45B", "The client sent me 1200 for review", "Manager gave me 2500 in budget",
+    "VP gave me 4500 and a deadline", "Leadership gave me 50000 to invest in tooling", "The team sent me 1200 to triage"]) {
     assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), false, line);
   }
 });

@@ -185,12 +185,20 @@ const RESUME_COUNT = /^[\s\n]*(?:\+|k\b|%|[-\u2013\u2014]\s*\d|(?:customers?|cli
 const FILE_NAMED = /\b(?:zip|postal|post|area|country|promo|promotional|discount|coupon|referral|course|class|error|status|dial|tax|product|source|job|dress|invite|invitation|gift|reference|ref|airport|naics|sic|cpt|icd|sort|swift|bank|routing|color|colour|style|item|sku|morse|qr|bar|req|requisition|position|posting|role|department|dept|cost|budget|project|program|module|unit|soc|fips|vendor|supplier|ticket|order|voucher|offer|event|building|store|zip\+4)[\s-]+(?:code|pin)\b[^\n]{0,24}$/i;
 // A handed-over code ends its phrase: the line ends, punctuation follows, or a function word ("for the portal", "can you enter
 // it"). A noun after the number ("4500 hospitals", "3500 resumes") is a count, whatever the noun (review of 470e25d9).
+const OTP_WORD = /\b(?:one[- ]time|verification|verify|otp|passcode|pass code|2fa|mfa|two[- ]factor|sign[- ]?in|log[- ]?in|auth(?:entication)?|security)\b/i;
+const HAND_VERB = /\b(?:sent|texted|emailed|gave|messaged|dm'?d)\s+me\b/i;
 const CODE_ENDS = /^(?:[ \t]*(?:$|\n|[.,;:!?)\]"'\u2019\u201d]|(?:for|from|to|in|on|at|today|tonight|yesterday|this|that|just|now|please|thanks|thank|and|or|but|so|which|can|could|would|will|if|when|by|via|as|again|here|there|it|is|was)\b))/i;
 export function fileSharesCode(text: string): boolean {
   const t = normalizeChatText(String(text ?? ""));
   for (const h of codeTokens(t)) {
     const token = t.slice(h.start, h.end), before = t.slice(Math.max(0, h.start - 60), h.start), after = t.slice(h.end);
     if (!/\d/.test(token) || YEAR_RANGE.test(token) || RESUME_COUNT.test(after) || !CODE_ENDS.test(after) || FILE_NAMED.test(before)) continue;
+    // Review of 6f6ed8ad: a letters-and-digits token ("Exam code: AZ104", "Denial code: CO197", "SAP T-code: ME21N") is a
+    // hand-over only after a hand-over verb or a one-time-code word; a 4-5 digit number after a hand-over verb alone ("Manager
+    // gave me 2500 in budget") only when it ends the phrase.
+    const otpWord = OTP_WORD.test(before), handVerb = HAND_VERB.test(before);
+    if (/[A-Za-z]/.test(token) && !otpWord && !handVerb) continue;
+    if (!otpWord && /^\d{4,5}$/.test(token.replace(/\D/g, "")) && !/^[ \t]*(?:$|\n|[.,;:!?)\]"'\u2019\u201d])/.test(after)) continue;
     if (HANDOVER_END.test(before)) return true;
   }
   return false;

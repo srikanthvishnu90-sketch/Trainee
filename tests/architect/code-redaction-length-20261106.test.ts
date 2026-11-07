@@ -148,6 +148,8 @@ const GAPS: [string, string][] = [
   ["The Workday portal sent me 739 201, can you enter it?", "739 201"], ["The Workday portal sent me 739-201, can you enter it?", "739-201"],
   ["Lever texted me 739 201.", "739 201"], ["Plaid emailed me 739-201 just now.", "739-201"],
   ["Verification code: 739\n201", "739\n201"], ["The portal sent a code. It is 739201.", "739201"],
+  // Greptile on #566: a weak cue, then a code split by a line break (pasted from a text message)
+  ["Workday sent me 739\n201", "739\n201"], ["The Workday portal sent me 739\n201, can you enter it?", "739\n201"], ["Lever texted me 739\n201.", "739\n201"],
   ["Workday sent a verification code. The code is 739201, please enter it.", "739201"], ["I got a one-time code from Lever. Here's 739201.", "739201"],
 ];
 Deno.test("CRL-5 split codes, a code across a line break and a code in the next sentence are removed, at every length", () => {
@@ -164,7 +166,8 @@ Deno.test("CRL-5 split codes, a code across a line break and a code in the next 
 const KEEP = ["Call me at 415-555-1234.", "My number is 415 555 1234.", "My number is (415) 555-1234.", "The meeting is at 9:30.", "I want 3-5 years of growth.",
   "The pay is $24-26 an hour.", "My zip is 94107-1234.", "The offer letter is dated 11-06-2026.", "The office is in room 739 201.",
   "The portal phone is 415-555-1234.", "The portal says call 415 555 1234.", "The portal lists (415) 555-1234.", "The portal opens at 9:30.", "The portal asked for 3-5 years.",
-  "The portal shows $24-26.", "The portal shows 94107-1234.", "The portal shows 11-06-2026.", "I learned to code. It was 2019.", "I wrote some code. It is 5000 lines.", "My zip code is 94107. It is 94107-1234."];
+  "The portal shows $24-26.", "The portal shows 94107-1234.", "The portal shows 11-06-2026.", "I learned to code. It was 2019.", "I wrote some code. It is 5000 lines.", "My zip code is 94107. It is 94107-1234.",
+  "My number is 415\n555\n1234.", "The portal says call 415\n555\n1234.", "The portal phone is 415\n555-1234."];
 Deno.test("CRL-6 phones, times, ranges, zip+4, dates and years are never redacted, at every length", () => {
   for (const len of [60, 399, 401, 1000, 3900]) for (const where of ["start", "middle", "end"] as Where[]) for (const s of KEEP) {
     const m = len === 60 ? s : place(s, len, where);

@@ -40,10 +40,10 @@ const COUNT_AFTER = /^\s*(?:k\b|\+|%|usd|dollars?|bucks|years?|yrs?|months?|week
 const ALNUM = /(?<![\w$-])(?=[A-Za-z0-9]{5,10}(?![\w-]))(?=(?:[A-Za-z]*\d){2})(?=(?:\d*[A-Za-z]){2})[A-Za-z0-9]{5,10}(?![\w-])/g;
 const UNIT_LIKE = /^\d+(?:am|pm|min|mins|hr|hrs|h|k|th|st|nd|rd|yrs?|gb|mb|kb|px|mph|kg|lbs?)$/i;
 const YEAR = /^(?:19|20)\d\d$/;
-// A code split in two by a space or a dash ("739 201", "739-201") after a weak cue: exactly 3+3 digits, and no more digit groups
+// A code split in two by a space, a line break or a dash (Greptile on #566: "Workday sent me 739\n201") ("739 201", "739-201") after a weak cue: exactly 3+3 digits, and no more digit groups
 // after it (so "415 555 1234" and "415-555-1234" stay phone numbers).
-const SPLIT_CODE = /^\d{3}[ -]\d{3}$/;
-const MORE_GROUPS = /^[ -]\d/;
+const SPLIT_CODE = /^\d{3}[ \n-]\d{3}$/;
+const MORE_GROUPS = /^[ \n-]\d/;
 // A sentence that hands over the value of a code the previous sentence named: "The portal sent a code. It is 739201."
 const VALUE_LEAD = /^\s*(?:it(?:'s|\s+is|\s+was)|its|that(?:'s|\s+is|\s+was)|the\s+(?:code|number|password|pin)\s+(?:is|was)|here(?:'s|\s+it\s+is)|(?:it|they)\s+said|the\s+digits\s+(?:are|were))\b/i;
 
@@ -69,7 +69,7 @@ function tokensIn(sentence: string, carried = false): { start: number; end: numb
     if (!isStrong && !near(at, weak)) continue;
     // Weak context: only a plain run of 4-8 digits that is not a year.
     // Weak context: a later group of a spaced run ("555 1234" in "415 555 1234") is part of a phone number or a date.
-    if (!isStrong && /\d[ -]$/.test(sentence.slice(0, at))) continue;
+    if (!isStrong && /\d[ \n-]$/.test(sentence.slice(0, at))) continue;
     if (!isStrong && (/[ \n-]/.test(tok) ? !SPLIT_CODE.test(tok) || MORE_GROUPS.test(after) : YEAR.test(tok))) continue;
     if (isStrong && YEAR.test(tok) && (carried && !contextEnds(sentence, STRONG).length || /\bin\s+$|\bsince\s+$|\bof\s+$/i.test(sentence.slice(0, at)))) continue;
     hits.push({ start: at, end: at + tok.length });

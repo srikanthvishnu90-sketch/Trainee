@@ -122,7 +122,14 @@ Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless res
     // review of f62e2033
     "Workday sent me: 739201", "My verification code arrived this morning: 739201", "Here is the code Workday sent: 739201", "Code -> 739201", "Workday sent me:\n739\n201", "The code it sent: 7392\u201101",
     "the code was emailed: 739201", "Code is: 482913", "my verification code is 739201", "They texted me: 482913", "Login code \u2192 482913",
-    "They gave me 482913 to log in", "Recruiter texted me 4821.", "Recruiter sent me code K7X9P2", "One-time code: AB12CD", "OTP: K7X9P2", "2FA code: AB12CD"]) {
+    "They gave me 482913 to log in", "Recruiter texted me 4821.", "Recruiter sent me code K7X9P2", "One-time code: AB12CD", "OTP: K7X9P2", "2FA code: AB12CD",
+    // owner check of 696f9939: positive controls restored, and more of the same shapes
+    "Workday sent me 739201 for the portal", "My verification code is K7X9P2", "Recruiter texted me 4821 for the portal", "Workday texted me K7X9P2",
+    "Greenhouse messaged me 739201 for the portal", "Workday sent me 739201 to finish my application", "Your sign-in code is AB12CD", "Lever emailed me 482913 to log in",
+    // review of 696f9939: a code right after its label, with only connectors between
+    "2FA code is AB12CD", "2FA code is 482913", "One-time code - AB12CD", "MFA code - AB12CD", "OTP code is K7X9P2.", "2FA: AB12CD", "One-time passcode (OTP): K7X9P2",
+    "OTP for Workday: K7X9P2", "OTP K7X9P2", "2FA code AB12CD", "Use OTP K7X9P2 to sign in", "Lever sent me a new code - K7X9P2", "iCIMS messaged me K7X9P2 to log in",
+    "Recruiter sent me: K7X9P2", "Greenhouse emailed me K7X9P2", "The OTP Workday sent: K7X9P2", "My OTP is K7X9P2", "texted me the code: 482913"]) {
     assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), true, line);
   }
   for (const line of ["customer portal serving 120000 customers", "Vendor portal handled 35000 orders a year", "Verification engineer, Acme, 2018-2022", "Security code audits 2018-2022",
@@ -153,7 +160,12 @@ Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless res
     // review of b805bd0a: a topic word earlier on the line is not the code's label
     "Rolled out MFA; change code: CHG0012345", "Led MFA rollout (change code: CHG0012345)", "2FA rollout. Change code: CHG0012345", "Billed MFA work to charge code: CC4821",
     "Delivered 2FA for client (engagement code: ENG4821)", "OTP module, ServiceNow code: SN4821", "Passcode reset SOP (SOP code: SOP12)", "Built OTP service; release code: R2023A",
-    "Two-factor rollout; charge code: TF2021", "One-time migration, charge code: MIG2021", "Received one-time award code: AW2023", "Client sent me feedback; exam code: AZ104"]) {
+    "Two-factor rollout; charge code: TF2021", "One-time migration, charge code: MIG2021", "Received one-time award code: AW2023", "Client sent me feedback; exam code: AZ104",
+    // a hiring system or sign-in service named in an ordinary line is not a sender handing over a code
+    "Workday sent me 4500 applications to screen", "Built the Workday portal for 120000 employees", "Integrated Okta sign-in for 4500 users", "Microsoft sent me to Seattle for training in 2019",
+    "Google gave me 3 patents", "Taught 1200 students to use the portal", "Workday migration for 4500 employees", "LinkedIn sent me 500 InMails", "Indeed sent me 1200 applicants",
+    "MFA rollout - CHG0012345", "OTP: AZ500 certified", "They gave me the MFA project; charge code: CC4821", "Client sent me requirements, ref: RQ4821", "OTP login for 250000 users",
+    "MFA enforcement for 4500 accounts", "2FA for 120000 customers", "Passcode policy for 3000 devices", "OTP flow redesign in 2023", "One-time bonus 2023"]) {
     assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), false, line);
   }
 });
@@ -175,8 +187,15 @@ async function ingest(lines: string[]) {
 Deno.test("R8R-92 handler path: an uploaded DOCX with a handed-over code is refused, a plain one is kept intact", async () => {
   const plain = await ingest(BODY);
   assertNode.ok(plain.res.ok, JSON.stringify(plain.res));
+  // Resume labels and headings through the same upload path: kept, stored once, message intact.
+  for (const line of ["Code migration was completed: 1200 microservices", "Insurance verification code: VB102", "Exam code: AZ104", "Client sent me 120000 for review", "Rolled out MFA; change code: CHG0012345"]) {
+    const ok = await ingest([...BODY.slice(0, 4), line, ...BODY.slice(4)]);
+    assertNode.ok(ok.res.ok, `${line}: ${JSON.stringify(ok.res)}`); assertNode.equal(ok.stored.length, 1, line);
+    assertNode.ok((ok.res as any).message.includes(line), line);
+  }
   for (const k of ["120000 customers", "1200 shipments", "2018-2022", "94107", "(415) 555-0134", "3.85"]) assertNode.ok((plain.res as any).message.includes(k), k);
-  for (const line of ["Workday sent me 739201", "Lever texted me 7392", "My one-time passcode arrived: 739 201", "Workday sent me 739.201"]) {
+  for (const line of ["Workday sent me 739201", "Lever texted me 7392", "My one-time passcode arrived: 739 201", "Workday sent me 739.201",
+    "Workday sent me 739201 for the portal", "My verification code is K7X9P2", "Workday texted me K7X9P2"]) {
     const bad = await ingest([...BODY.slice(0, 4), line, ...BODY.slice(4)]);
     assertNode.equal(bad.res.ok, false, line); assertNode.equal((bad.res as any).why, "secret", line); assertNode.equal(bad.stored.length, 0, line);
     assertNode.ok(/one-time code/.test((bad.res as any).reply), `${line}: ${(bad.res as any).reply}`);

@@ -255,6 +255,9 @@ Deno.test("R8G-7 Greptile on #577: UTF-16 and odd-prefix parts, mc:Fallback and 
   await refused(docx([], `<w:p><w:r><w:drawing><a:graphic><a:p>${[..."OTP: 482913"].map((c) => `<a:r><a:t>${c}</a:t></a:r>`).join("")}</a:p></a:graphic></w:drawing></w:r></w:p>`), "split a:t runs");
   await refused(docx([], '<w:p><mc:AlternateContent><mc:Choice Requires="wps"><w:r><w:t>Text box</w:t></w:r></mc:Choice><mc:Fallback><w:pict><v:textbox><w:txbxContent><w:p><w:r><w:t><![CDATA[OTP 482913]]></w:t></w:r></w:p></w:txbxContent></v:textbox></w:pict></mc:Fallback></mc:AlternateContent></w:p>'), "CDATA in a fallback");
   await refused(docx([{ name: "word/header1.xml", data: `<w:hdr ${W}><w:p><w:r><w:t><![CDATA[Verification code: 482913]]></w:t></w:r></w:p></w:hdr>` }]), "CDATA in a header");
+  // Re-check of #578: VML text-path strings and text runs outside a paragraph are read.
+  await refused(docx([], '<w:p><mc:AlternateContent><mc:Choice Requires="wps"><w:r><w:t>Logo</w:t></w:r></mc:Choice><mc:Fallback><w:pict><v:shape><v:textpath string="Login code 482913"/></v:shape></w:pict></mc:Fallback></mc:AlternateContent></w:p>'), "VML text path");
+  await refused(docx([], '<w:sdt><w:sdtContent><w:r><w:t>OTP 482913</w:t></w:r></w:sdtContent></w:sdt>'), "a run outside any paragraph");
   const plain16 = await upload(docx([{ name: "word/footer1.xml", data: utf16(`<?xml version="1.0" encoding="UTF-16"?><w:ftr ${W}><w:p><w:r><w:t>Jordan Lee · Page 1</w:t></w:r></w:p></w:ftr>`) }]));
   assertNode.ok(plain16.res.ok && plain16.stored.length === 1, "a plain UTF-16 footer is kept");
   const box = await upload(docx([], '<w:p><mc:AlternateContent><mc:Choice Requires="wps"><w:r><w:t>Volunteer, Food Bank, 2018 - 2020</w:t></w:r></mc:Choice><mc:Fallback><w:pict><v:textbox><w:txbxContent><w:p><w:r><w:t>Volunteer, Food Bank, 2018 - 2020</w:t></w:r></w:p></w:txbxContent></v:textbox></w:pict></mc:Fallback></mc:AlternateContent></w:p>'));

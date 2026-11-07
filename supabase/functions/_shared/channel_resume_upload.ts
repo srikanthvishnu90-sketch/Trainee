@@ -158,7 +158,7 @@ function decodePart(part: Uint8Array): string {
   // CDATA is text: escaped and kept, so the tag-stripping readers see it ("<w:t><![CDATA[OTP 482913]]></w:t>").
   return s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (_m, c: string) => c.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"));
 }
-const attrText = (xml: string) => [...xml.matchAll(/\s(?:descr|title|w:tooltip)="([^"]*)"/g)].flatMap((m) => lines(m[1]));
+const attrText = (xml: string) => [...xml.matchAll(/\s(?:descr|title|w:tooltip)="([^"]*)"|<[\w.-]*:?textpath\b[^>]*\sstring="([^"]*)"/g)].flatMap((m) => lines(m[1] ?? m[2] ?? ""));
 const queryOf = (url: string) => { const q = decodeXml(url).replace(/^[^?#]*/, ""); try { return decodeURIComponent(q); } catch { return q; } };
 const STRUCTURAL = /^(?:word\/(?:styles|stylesWithEffects|settings|webSettings|fontTable|numbering|people|commentsIds|commentsExtensible|commentsExtended)\.xml|word\/theme\/[^/]+\.xml|docProps\/app\.xml|\[Content_Types\]\.xml|customXml\/[^/]+\.xml|word\/(?:glossary\/)?(?:styles|settings|webSettings|fontTable|numbering)\.xml)$/i;
 async function hiddenOf(r: any, buf: any, depth: number): Promise<string[]> {
@@ -176,7 +176,9 @@ async function hiddenOf(r: any, buf: any, depth: number): Promise<string[]> {
       // DrawingML and other non-w text, its runs joined per paragraph ("O" "T" "P" ": " "4" ... reads "OTP: 4...").
       const nonW = [...s.matchAll(/<((?!w:)[\w.-]+):p\b[\s\S]*?<\/\1:p>/g)].flatMap((m) => runText(m[0])).concat(
         [...s.matchAll(/<((?!w:)[\w.-]+):t(?:\s[^>]*)?>([^<]*)<\/\1:t>/g)].map((m) => m[2]).join("").trim() ? lines([...s.matchAll(/<((?!w:)[\w.-]+):t(?:\s[^>]*)?>([^<]*)<\/\1:t>/g)].map((m) => m[2]).join("")) : []);
-      out.push(...runText(s, "delText|instrText"), ...attrText(s), ...fallbacks, ...nonW); continue;
+      // Text runs outside any paragraph (the visible reader reads paragraphs only).
+      const loose = runText(s.replace(new RegExp(String.raw`<${P}p\b[\s\S]*?</${P}p>`, "g"), "\n"));
+      out.push(...runText(s, "delText|instrText"), ...attrText(s), ...fallbacks, ...nonW, ...loose); continue;
     }
     if (/\.rels$/i.test(n)) { out.push(...[...s.matchAll(/\sTarget="([^"]*)"/g)].map((m) => queryOf(m[1])).filter((q) => q.length > 1)); continue; }
     if (/^docProps\/core\.xml$/i.test(n)) { out.push(...[...s.matchAll(/<(?:dc:title|dc:subject|dc:description|cp:keywords|cp:category|cp:contentStatus)(?:\s[^>]*)?>([^<]*)</g)].flatMap((m) => lines(m[1]))); continue; }

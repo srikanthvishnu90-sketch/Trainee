@@ -163,7 +163,34 @@ function decodePart(part: Uint8Array, xml = true): string {
 const attr = (names: string) => new RegExp(String.raw`\s${P}(?:${names})\s*=\s*(?:"([^"]*)"|'([^']*)')`, "g");
 const attrVals = (xml: string, names: string) => [...xml.matchAll(attr(names))].map((m) => m[1] ?? m[2] ?? "");
 const attrText = (xml: string) => [...attrVals(xml, "descr|title|tooltip"),
-  ...[...xml.matchAll(new RegExp(String.raw`<${P}textpath\b[^>]*>`, "g"))].flatMap((m) => attrVals(m[0], "string"))].flatMap((v) => lines(v));
+  ...[...xml.matchAll(new RegExp(String.raw`<${P}textpath\b(?:[^>"']|"[^"]*"|'[^']*')*>`, "g"))].flatMap((m) => attrVals(m[0], "string"))].flatMap((v) => lines(v));
+// Leaf elements of a properties part, one line each, under any prefix. Core: every text property except the numeric and date
+// metadata Word writes (revision, version, dates, language). Custom: the string values.
+const leaves = (xml: string, keep: (name: string) => boolean) => [...xml.matchAll(new RegExp(String.raw`<${P}([\w.-]+)(?:\s[^>]*)?>([^<]*)</${P}\1>`, "g"))]
+  .filter((m) => keep(m[1])).flatMap((m) => lines(m[2]));
+const CORE_META = /^(?:revision|version|created|modified|lastPrinted|language)$/i;
+// An MHTML part: each MIME body decoded by its transfer encoding (an encoding it cannot read throws: the file is refused),
+// HTML bodies read as text, MIME headers and boundaries left out.
+function mimeText(s: string): string[] {
+  const html = (t: string) => lines(t.replace(/<(?:br|\/p|\/div|\/li|\/tr|\/h\d)[^>]*>/gi, "\n").replace(/<[^>]*>/g, " "));
+  if (/^\s*</.test(s)) return html(s);
+  const bound = /boundary\s*=\s*(?:"([^"]+)"|([^\s;]+))/i.exec(s);
+  const parts = bound ? s.split("--" + (bound[1] ?? bound[2])).slice(1) : [s];
+  const out: string[] = [];
+  for (const part of parts) {
+    const at = part.search(/\r?\n\r?\n/);
+    if (at < 0) { if (part.trim() && part.trim() !== "--") out.push(...lines(part)); continue; }
+    const head = part.slice(0, at), body = part.slice(at).replace(/^\r?\n\r?\n/, "");
+    const enc = (/content-transfer-encoding\s*:\s*([\w-]+)/i.exec(head)?.[1] ?? "7bit").toLowerCase();
+    let text: string;
+    if (enc === "base64") { const raw = atob(body.replace(/\s+/g, "")); text = new TextDecoder("utf-8").decode(Uint8Array.from(raw, (c) => c.charCodeAt(0))); }
+    else if (enc === "quoted-printable") { const b = body.replace(/=\r?\n/g, ""); const bytes: number[] = []; for (let i = 0; i < b.length; i++) { const h = b[i] === "=" && /^[0-9a-f]{2}$/i.test(b.slice(i + 1, i + 3)); bytes.push(h ? parseInt(b.slice(i + 1, i + 3), 16) : b.charCodeAt(i)); if (h) i += 2; } text = new TextDecoder("utf-8").decode(new Uint8Array(bytes)); }
+    else if (/^(?:7bit|8bit|binary)$/.test(enc)) text = body;
+    else throw new Error(`unknown transfer encoding ${enc}`);
+    out.push(...(/content-type\s*:\s*text\/plain/i.test(head) ? lines(text) : html(text)));
+  }
+  return out;
+}
 const queryOf = (url: string) => { const q = decodeXml(url).replace(/^[^?#]*/, ""); try { return decodeURIComponent(q); } catch { return q; } };
 const STRUCTURAL = /^(?:word\/(?:styles|stylesWithEffects|settings|webSettings|fontTable|numbering|people|commentsIds|commentsExtensible|commentsExtended)\.xml|word\/theme\/[^/]+\.xml|docProps\/app\.xml|\[Content_Types\]\.xml|customXml\/[^/]+\.xml|word\/(?:glossary\/)?(?:styles|settings|webSettings|fontTable|numbering)\.xml)$/i;
 async function hiddenOf(r: any, buf: any, depth: number): Promise<string[]> {
@@ -186,9 +213,12 @@ async function hiddenOf(r: any, buf: any, depth: number): Promise<string[]> {
       out.push(...runText(s, "delText|instrText"), ...attrText(s), ...fallbacks, ...nonW, ...loose); continue;
     }
     if (/\.rels$/i.test(n)) { out.push(...attrVals(s, "Target").map(queryOf).filter((q) => q.length > 1)); continue; }
-    // Document properties under any prefix: all their text (title, subject, keywords, creator, custom values).
-    if (/^docProps\/(?:core|custom)\.xml$/i.test(n)) { out.push(...allText(s), ...attrText(s)); continue; }
-    if (/\.(?:html?|mht|txt)$/i.test(n)) { out.push(...lines(s.replace(/<(?:br|\/p|\/div|\/li|\/tr|\/h\d)[^>]*>/gi, "\n").replace(/<[^>]*>/g, " "))); continue; }
+    // Document properties under any prefix, one property per line (numeric and date metadata left out).
+    if (/^docProps\/core\.xml$/i.test(n)) { out.push(...leaves(s, (k) => !CORE_META.test(k)), ...attrText(s)); continue; }
+    if (/^docProps\/custom\.xml$/i.test(n)) { out.push(...leaves(s, (k) => /^(?:lpw?str|bstr)$/i.test(k)), ...attrText(s)); continue; }
+    if (/\.txt$/i.test(n)) { out.push(...s.split(/\r?\n|\r/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean)); continue; } // literal text
+    if (/\.mht$/i.test(n)) { out.push(...mimeText(s)); continue; }
+    if (/\.html?$/i.test(n)) { out.push(...lines(s.replace(/<(?:br|\/p|\/div|\/li|\/tr|\/h\d)[^>]*>/gi, "\n").replace(/<[^>]*>/g, " "))); continue; }
     if (/\.vml$/i.test(n)) { out.push(...lines(s.replace(/<\/(?:div|p)>|<br\s*\/?>/gi, "\n").replace(/<[^>]*>/g, " ")), ...attrText(s)); continue; }
     out.push(...runText(s), ...allText(s), ...attrText(s));
   }

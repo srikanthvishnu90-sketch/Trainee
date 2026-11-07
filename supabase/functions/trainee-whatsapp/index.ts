@@ -13,7 +13,8 @@ serve((req) => {
   const admin = createClient(url, key, { auth: { persistSession: false } });
   const deliverNow = deliverer(admin, Deno.env);
   return handleWhatsApp(req, {
-    env: Deno.env, now: Date.now, store: () => supabaseInboundStore(admin), chat: chatThroughAgent(url, key),
+    // CHANNEL PARITY (2026-11-05): each webhook names its channel, as Telegram's does (connect links, the readiness ask).
+    env: Deno.env, now: Date.now, store: () => supabaseInboundStore(admin), chat: chatThroughAgent(url, key, { channel: "whatsapp" }),
     // Everything due for the person, oldest first: what waited for the window goes out before the answer.
     deliver: (a) => deliverNow({ userId: a.userId, key: a.key, now: a.now, wholeUser: true }),
   });

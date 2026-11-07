@@ -107,6 +107,9 @@ WO-033 wires its outreach batch to `parts`.
 - `trainee-deliver` picks each row's adapter and keeps each provider's cap; with none wired it answers `NOT_WIRED`.
 
 The brain stays channel-blind (P3 asserts agent-chat gets only the person, the thread, the words and a turn key).
+Since CHANNEL PARITY (2026-11-05) each webhook also names its own channel to agent-chat once, when it is composed (Telegram
+already did; WhatsApp and iMessage were left on the web's formatting and connect-link channel), and agent-chat reads it only
+where `tests/edge/channel-parity.test.ts` lists.
 agent-chat is not touched.
 
 ## Where "exactly the same" is impossible, and what the code does instead

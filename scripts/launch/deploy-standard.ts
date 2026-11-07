@@ -48,7 +48,14 @@
 //   S5 scripts/launch/secrets-audit.sh --features: no feature both enabled and NOT_WIRED (a feature without its secrets stays
 //      off; it is never faked). Any non-zero exit of the audit, or no feature lines, is a FAIL.
 //
-//   deno run -A scripts/launch/deploy-standard.ts --sha <40-hex> [--checks S1,S2,S3,S4,S5] [--exclude-run <run id>]
+//   S6 (PROPOSED, release 9 workstream D; OFF unless S6_REQUIRED=1): end-to-end task completion. On ci/brain-eval's
+//      evals/career/SCORE-LOG.md, the E2E section (evals/career/e2e/run.ts) has a row for the candidate SHA (or a first-parent
+//      ancestor within 10 commits with no change under E2E_CODE since) on the full set (>= S6_BAR.minTasks tasks) with the
+//      claude model, not stopped, completion >= S6_BAR.percent (exact integer comparison) and every guard held. The newest
+//      such row decides. Not in ALL_CHECKS: the default run adds it only when S6_REQUIRED=1 (owner's switch, D-042 proposal);
+//      --checks S6 runs it on demand either way. S5 is the secrets audit, so the E2E gate is S6.
+//
+//   deno run -A scripts/launch/deploy-standard.ts --sha <40-hex> [--checks S1,S2,S3,S4,S5,S6] [--exclude-run <run id>]
 //                                                 [--wait-checks <minutes>] [--wait-ledger <minutes>]
 //   deno run -A scripts/launch/deploy-standard.ts --sha <40-hex> --missing-measurement [--exclude-run <run id>]
 //     prints `measure=<sha>` (empty when S3 has both measurements) and writes it to GITHUB_OUTPUT; judges nothing.
@@ -62,8 +69,12 @@ import { parse as parseYaml } from "npm:yaml@2.9.1";
 import { REPLY_CODE as REPLY_CODE_PATHS } from "./reply-code.ts";
 import { parseProductionBrain, parseReleaseFlags, RELEASE_CONFIG_PATH } from "../../supabase/functions/agent-chat/release_config.ts";
 
-export type CheckId = "S1" | "S2" | "S3" | "S4" | "S5";
+export type CheckId = "S1" | "S2" | "S3" | "S4" | "S5" | "S6";
 export const ALL_CHECKS: CheckId[] = ["S1", "S2", "S3", "S4", "S5"];
+// Checks that exist but join the default run only behind their switch (S6: S6_REQUIRED=1).
+export const OPTIONAL_CHECKS: CheckId[] = ["S6"];
+export const s6Required = (env: { get(k: string): string | undefined }) => (env.get("S6_REQUIRED") ?? "0").trim() === "1";
+export const defaultChecks = (env: { get(k: string): string | undefined }): CheckId[] => [...ALL_CHECKS, ...(s6Required(env) ? (["S6"] as CheckId[]) : [])];
 export interface CheckRun { name: string; status: string; conclusion: string | null; id: number; completed_at?: string | null }
 export interface Pull { number: number; merged: boolean; merge_commit_sha: string | null; head_sha: string; base: string; author: string; merged_by: string }
 export interface Review { state: string; commit_id: string; user: string; association: string }
@@ -509,12 +520,54 @@ export async function s5(src: Sources): Promise<Result> {
   return { id: "S5", pass: true, summary: `${lines.length} features: none enabled and NOT_WIRED`, evidence };
 }
 
+// ------------------------------------------------------------------------------------------------ S6 (proposed)
+// The end-to-end bar: the share of the held-out end-to-end tasks Trainee finished in the stub worlds (submitted with proof,
+// delivered as approved, a file delivered with its numbers cited, a tailored PDF returned), measured with the real model.
+export const S6_BAR = { percent: 90, minTasks: 40, model: "claude" } as const;
+// What an E2E measurement stands for: the product (functions, workers, migrations, the shared packages, the apply engine)
+// and the eval itself. A measured ancestor counts for the candidate only when none of these changed since.
+export const E2E_CODE: readonly string[] = ["supabase/", "workers/", "packages/", "extension/src/", "scripts/apply.ts", "scripts/career/", "evals/career/e2e/", "evals/career/tasks/"];
+export interface E2ERow { at: string; commit: string; label: string; brain: string; model: string; tasks: number; completed: number; guardsHeld: number; guardsTotal: number; stopped: string }
+// Rows of the E2E section: | run at | E2E | commit | label | brain | model | tasks | completed | completion | apply | outreach |
+// research | resume | guards held | cost | stopped |. A row whose numbers do not add up is no measurement.
+export function parseE2ELog(text: string): E2ERow[] {
+  const rows: E2ERow[] = [];
+  for (const line of String(text ?? "").split("\n")) {
+    if (!line.startsWith("|")) continue;
+    const c = line.split("|").slice(1, -1).map((x) => x.trim());
+    if (c.length < 16 || c[1] !== "E2E" || !/^[0-9a-f]{7,40}$/.test(c[2])) continue;
+    const tasks = Number(c[6]), completed = Number(c[7]), g = /^(\d+)\/(\d+)$/.exec(c[13]);
+    if (!Number.isInteger(tasks) || !Number.isInteger(completed) || tasks <= 0 || completed < 0 || completed > tasks || !g || Number(g[1]) > Number(g[2])) continue;
+    rows.push({ at: c[0], commit: c[2], label: c[3], brain: c[4], model: c[5], tasks, completed, guardsHeld: Number(g[1]), guardsTotal: Number(g[2]), stopped: c[15] });
+  }
+  return rows;
+}
+export const meetsE2EBar = (r: E2ERow) => r.stopped === "no" && r.model === S6_BAR.model && r.tasks >= S6_BAR.minTasks && r.completed * 100 >= r.tasks * S6_BAR.percent && r.guardsHeld === r.guardsTotal;
+export async function s6(src: Sources, sha: string): Promise<Result> {
+  const log = await src.scoreLog();
+  if (log === null) return { id: "S6", pass: false, summary: "evals/career/SCORE-LOG.md on ci/brain-eval cannot be read", evidence: [] };
+  const rows = parseE2ELog(log).filter((r) => r.stopped === "no" && r.model === S6_BAR.model && r.tasks >= S6_BAR.minTasks);
+  const evidence: string[] = [];
+  // The candidate itself, then its first-parent ancestors (at most 10 back) with no change under E2E_CODE since.
+  let at: string | null = sha;
+  for (let i = 0; at && i <= 10; i++, at = await src.parent(at)) {
+    const mine = rows.filter((r) => at!.startsWith(r.commit) || r.commit.startsWith(at!));
+    if (!mine.length) continue;
+    if (at !== sha && await src.changed(at, sha, E2E_CODE)) { evidence.push(`${short(at)} was measured, but the product or the eval changed between it and ${short(sha)}`); break; }
+    const r = mine[mine.length - 1];
+    evidence.push(`${r.at} ${r.label}: ${r.completed}/${r.tasks} (${((r.completed / r.tasks) * 100).toFixed(1)}%), guards ${r.guardsHeld}/${r.guardsTotal}, brain ${r.brain}, model ${r.model}, measured on ${short(r.commit)}`);
+    const pass = meetsE2EBar(r);
+    return { id: "S6", pass, summary: `end-to-end completion ${r.completed}/${r.tasks} ${r.completed * 100 >= r.tasks * S6_BAR.percent ? ">=" : "<"} ${S6_BAR.percent}%${r.guardsHeld === r.guardsTotal ? "" : `; ${r.guardsTotal - r.guardsHeld} guard(s) broken`}`, evidence };
+  }
+  return { id: "S6", pass: false, summary: `no end-to-end measurement (model ${S6_BAR.model}, >= ${S6_BAR.minTasks} tasks, not stopped) for ${short(sha)}`, evidence };
+}
+
 export async function evaluate(src: Sources, sha: string, checks: CheckId[] = ALL_CHECKS, o: { waitLedger?: LedgerWait } = {}): Promise<{ results: Result[]; deployed: string | null }> {
   const deployed = checks.some((c) => c === "S2" || c === "S3" || c === "S4") ? await src.lastDeployedSha() : null;
   const results: Result[] = [];
   for (const c of checks) {
     try {
-      results.push(c === "S1" ? await s1(src, sha) : c === "S2" ? await s2(src, sha, deployed, o.waitLedger) : c === "S3" ? await s3(src, sha, deployed) : c === "S4" ? await s4(src, sha, deployed) : await s5(src));
+      results.push(c === "S1" ? await s1(src, sha) : c === "S2" ? await s2(src, sha, deployed, o.waitLedger) : c === "S3" ? await s3(src, sha, deployed) : c === "S4" ? await s4(src, sha, deployed) : c === "S5" ? await s5(src) : await s6(src, sha));
     } catch (e) {
       results.push({ id: c, pass: false, summary: `could not be evaluated: ${String((e as Error)?.message ?? e).slice(0, 300)}`, evidence: [] });
     }
@@ -637,9 +690,9 @@ if (import.meta.main) {
   const args = [...Deno.args];
   const opt = (k: string) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : undefined; };
   const sha = opt("--sha") ?? "";
-  const checks = (opt("--checks") ?? ALL_CHECKS.join(",")).split(",").map((s) => s.trim().toUpperCase()) as CheckId[];
-  if (!SHA40.test(sha) || !checks.length || checks.some((c) => !ALL_CHECKS.includes(c))) {
-    console.error("usage: deploy-standard.ts --sha <40-hex> [--checks S1,S2,S3,S4,S5] [--exclude-run <run id>] [--wait-checks <min>] [--wait-ledger <min>] | --missing-measurement");
+  const checks = (opt("--checks") ?? defaultChecks(Deno.env).join(",")).split(",").map((s) => s.trim().toUpperCase()) as CheckId[];
+  if (!SHA40.test(sha) || !checks.length || checks.some((c) => !ALL_CHECKS.includes(c) && !OPTIONAL_CHECKS.includes(c))) {
+    console.error("usage: deploy-standard.ts --sha <40-hex> [--checks S1,S2,S3,S4,S5,S6] [--exclude-run <run id>] [--wait-checks <min>] [--wait-ledger <min>] | --missing-measurement");
     Deno.exit(2);
   }
   const repo = Deno.env.get("GITHUB_REPOSITORY") ?? "", token = Deno.env.get("GITHUB_TOKEN") ?? "";

@@ -2,6 +2,16 @@
 
 One line per eval run, appended by CI; never edited. The bar: 95% on the held-out set, two judges, on the live build.
 
+## End-to-end task completion (release 9, workstream D)
+
+One row per end-to-end run (evals/career/e2e/run.ts), appended, never edited. A task counts only on the real outcome in the stub worlds (submitted with proof matching the approved payload; delivered exactly as approved to a verified address with the opt-out header; a research file delivered with every number cited; a tailored PDF returned that opens, fits the page and carries only confirmed facts). Guards (nothing done that the person did not ask for) are counted apart. The proposed release bar (deploy-standard.ts S6, off until the owner sets S6_REQUIRED=1, D-042): completion >= 90% on the full set with the claude model, every guard held, on the release head. Rows with model fake are the oracle fixture (what the code paths finish when the model plans right), never the bar.
+
+| run at (UTC) | E2E | commit | label | brain | model | tasks | completed | completion | apply | outreach | research | resume | guards held | cost | stopped |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-11-07 23:08:44 | E2E | f6c49cda00e8d42d251f05455c6c5282ac61f823 | e2e-baseline-trunk-f6c49cd | production | fake | 40 | 5 | 12.5% | 0/10 | 5/10 | 0/10 | 0/10 | 6/6 | $0.000 | no |
+
+## Reply quality (WO-061)
+
 | run at (UTC) | brain commit | set | brain | set size | passed | score | judges | stopped | CI run |
 |---|---|---|---|---|---|---|---|---|---|
 | 2026-10-21 04:04:24 | 62aec9e | heldout | agent | 38 | 0 | 0.0% | gpt-5-mini + gpt-4.1-mini | no | 39541224991 |

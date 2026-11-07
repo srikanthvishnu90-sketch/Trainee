@@ -631,7 +631,8 @@ function windowed(raw: string, f: (s: string) => number): number {
   }
   if (start < raw.length) pieces.push([start, raw.length]);
   for (const [a, b] of pieces) {
-    const sp = a === 0 ? -1 : raw.lastIndexOf(" ", a - 1), from = a === 0 ? 0 : sp >= a - 128 ? sp + 1 : Math.max(0, a - 64), at = f(raw.slice(from, b));
+    // At least 64 characters of the text before the piece, from a word start when there is one within 128 more.
+    const sp = a === 0 ? -1 : raw.lastIndexOf(" ", Math.max(0, a - 64)), from = a === 0 ? 0 : sp >= a - 192 ? sp + 1 : Math.max(0, a - 64), at = f(raw.slice(from, b));
     if (at >= 0) return from + at;
   }
   return -1;

@@ -215,5 +215,10 @@ Deno.test("R8G-6 review of 135237e5: real Word files kept, text-bearing parts on
   assertNode.deepEqual(fileCodeLines("x\n" + "x".repeat(200000)), []);
   assertNode.deepEqual(fileCodeLines("负责数据平台建设，覆盖全国用户。".repeat(3000)), []);
   assertNode.deepEqual(fileCodeLines("x".repeat(150000) + " Verification code: 482913 " + "y".repeat(5000)), [1]);
+  // Re-check of 632ca084: a piece keeps at least 64 characters of the text before it, so a value is not cut from its label.
+  assertNode.deepEqual(fileCodeLines("z".repeat(425) + " Login code - 4829130217 " + "q".repeat(1500)), [1]);
+  assertNode.deepEqual(fileCodeLines("z".repeat(431) + " 2FA code = K7X9P2 unlocks my account " + "q".repeat(1500)), [1]);
+  const hand = Object.values(corpus.handover).flat().filter((c) => !c.includes("\n") && fileCodeLines(c).length);
+  for (const c of hand) for (let k = 360; k <= 460; k += 10) assertNode.ok(fileCodeLines("z".repeat(k) + " " + c + " " + "q".repeat(1500)).length, `${k}: ${c}`);
   assertNode.ok(performance.now() - t0 < 5000, `no-space runs took ${Math.round(performance.now() - t0)} ms`);
 });

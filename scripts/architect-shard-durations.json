@@ -28,6 +28,7 @@
     "tests/architect/bound-row-answers.test.ts": 0.1,
     "tests/architect/bound-row-question-roundtrip.test.ts": 0.1,
     "tests/architect/brain-bare-reply-depth.test.ts": 0.1,
+    "tests/architect/brain-reply-quality-20261106.test.ts": 0.3,
     "tests/architect/brain-bound-row-roundtrip.test.ts": 0.1,
     "tests/architect/brain-cloud-approval-preflight.test.ts": 0.1,
     "tests/architect/brain-conversation-capabilities.test.ts": 0.1,
@@ -270,6 +271,7 @@
     "tests/architect/posted-line-date-only.test.ts": 0.1,
     "tests/architect/posting-place-negated-remote.test.ts": 0.1,
     "tests/architect/prepare-candidates-missing-account-row.test.ts": 8,
+    "tests/architect/resume-cloud-copy-recovery.test.ts": 10,
     "tests/architect/prepare-candidates-per-user.test.ts": 8,
     "tests/architect/proof-g6.test.ts": 52.4,
     "tests/architect/qa-legal-name-legacy-manifest.test.ts": 0.1,
@@ -528,6 +530,8 @@
     "tests/architect/scenarios-file-signin-r4-3.test.ts": 18,
     "tests/architect/scenarios-file-signin-r4-4.test.ts": 18,
     "tests/architect/scenarios-file-signin-r4-regressions.test.ts": 0.2,
-    "tests/architect/flow-scenarios-file-signin-r4.test.ts": 14
+    "tests/architect/flow-scenarios-file-signin-r4.test.ts": 14,
+    "tests/architect/counter-draft-wording-20261106.test.ts": 3.0,
+    "tests/architect/code-redaction-length-20261106.test.ts": 10.5
   }
 }

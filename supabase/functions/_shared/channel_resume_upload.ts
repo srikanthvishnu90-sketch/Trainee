@@ -13,7 +13,7 @@
 //      confirmed entry came from (fileUploadFor below), under the same rules: shown word for word, and in the upload.
 // A file that cannot be downloaded, is not a PDF or DOCX, or has no readable text is said so, plainly; nothing is stored.
 import { CareerProfile, CareerRender } from "./router_core.career.js";
-import { redactIdentity } from "./identity_redact.ts";
+import { normalizeChatText, redactIdentity } from "./identity_redact.ts";
 import type { Upload } from "./career_router_evidence.ts";
 
 export const MAX_RESUME_BYTES = 10 * 1024 * 1024;
@@ -211,7 +211,8 @@ export function docxResumeLines(xml: string): string[] {
 // The message the chat receives for a file's text: framed as a pasted resume, trimmed and with identity digits removed as
 // agent-chat's input step removes them (chat_input.ts), so its sha256 is the sha256 of the message the thread stores.
 export function resumeMessage(text: string): string {
-  let body = String(text ?? "").trim();
+  // normalised exactly as chat_input.ts normalises a message, so this message's sha256 matches the stored text (Greptile on #567)
+  let body = normalizeChatText(String(text ?? "")).trim();
   const head = "here is my resume:\n";
   if (head.length + body.length > MAX_MESSAGE) {
     body = body.slice(0, MAX_MESSAGE - head.length);
@@ -226,7 +227,7 @@ export function resumeMessage(text: string): string {
 // the cut, confirmed them as "your resume", and never learned the rest of their jobs and skills were not read. A pasted
 // message cut the same way is told (channel_inbound.ts longCutNote); a file now is too, with where the reading stopped.
 export function resumeMessageCut(text: string): boolean {
-  return "here is my resume:\n".length + String(text ?? "").trim().length > MAX_MESSAGE;
+  return "here is my resume:\n".length + normalizeChatText(String(text ?? "")).trim().length > MAX_MESSAGE;
 }
 export function fileCutNote(message: string): string {
   const last = String(message ?? "").trim().split("\n").map((l) => l.trim()).filter(Boolean).pop() ?? "";
@@ -311,6 +312,21 @@ export function supabaseUploadRecorder(admin: any) {
 // The evidence step's upload, when the person's message that carried the entries was a file's text: the file itself (the
 // person's original upload, by its provider reference and the sha256 of its bytes). Otherwise the message, unchanged.
 // deno-lint-ignore no-explicit-any
+// Whether a chat message is the text of a resume file this person uploaded: its sha256 is the message_sha256 the upload stored
+// (resumeMessage, above). Such a message skips code-in-chat's code-word pass: a resume line like "Built a customer portal
+// serving 120000 customers" is not a one-time code, and removing it changed the stored text so the confirmation lost the
+// file (Greptile on #568). Typed text that only starts like a file message has no matching upload, so it is checked as usual.
+// The file itself was refused at upload if it carried an identity number or a labeled code (ingestResumeFile, above).
+export async function isUploadedResumeText(admin: any, userId: string | null | undefined, text: string): Promise<boolean> {
+  if (!userId || !String(text ?? "").startsWith("here is my resume:\n")) return false;
+  try {
+    const r = await admin.from("career_resume_uploads").select("id").eq("user_id", userId).eq("message_sha256", await sha256Text(text)).limit(1);
+    return !r.error && Array.isArray(r.data) && r.data.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function fileUploadFor(admin: any, userId: string, upload: Upload | null): Promise<Upload | null> {
   if (!upload || upload.kind !== "message") return upload;
   try {

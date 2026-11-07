@@ -53,17 +53,19 @@ const NOT_A_BARE_PASSWORD = /^(?:is|was|for|to|of|on|in|at|and|or|the|a|an|my|yo
 // research / design" are no pair.
 const SIGN_IN_WAY = /^(?:sso|saml|oauth2?|openid|oidc|google|apple|github|gitlab|microsoft|azure|okta|facebook|linkedin|email|phone|sms|passkeys?|face ?id|touch ?id|biometrics?|magic link|ldap|kerberos|face|fingerprint|pin|device|passcode|password|touch|voice)$/i;
 const SIGN_IN_PAIR = /\b(login|log-in|sign[- ]?in with|creds|credentials|user ?name)((?:\s+(?:for|to|on)\s+[^/:\n]{1,30}?)?\s*(?:\bis\b|\bare\b|=|:|-)\s*|(?<=with)\s+)([^\s/:]+\s*\/\s*)([^\s/]{3,})/gi;
-const CODE_LABELED = /\b((?:one[- ]time|verification|security|sign[- ]?in|login|log[- ]in|2fa|mfa|otp|auth(?:entication)?)\s*(?:code|pin|passcode|number)?)(\s*(?:is|=|:|#)?\s*)(\d(?:[ -]?\d){3,7})\b/gi;
+const CODE_LABELED = /\b((?:one[- ]time|verification|security|sign[- ]?in|login|log[- ]in|2fa|mfa|otp|auth(?:entication)?)\s*(?:code|pin|passcode|number)?)(\s*(?:is|=|:|#)?\s*)(\d(?:(?:[ \t\u00a0\u2007\u2009\u202f]{0,8}(?:(?:\r\n|[\r\n\-\u2013\u2014])[ \t\u00a0\u2007\u2009\u202f]{0,8})?)\d){3,7})\b/gi;
 // "code is 4821", "here's the code: 482 913", "sms code 4821", "pin: 4821", "the code they texted me is 482-913": a code or
 // PIN, unless the code is named as something else (a zip, area, promo, course, error, referral ... code).
 const NAMED_CODE = String.raw`(?<!\b(?:zip|postal|post|area|country|promo|promotional|discount|coupon|referral|course|class|error|status|dial|tax|product|source|job|dress|invite|invitation|gift|reference|ref|airport|naics|sic|cpt|icd|sort|swift|bank|routing|color|colour|style|item|sku|morse|qr|bar|req|requisition|position|posting|role|department|dept|cost|budget|project|program|module|unit|soc|fips|vendor|supplier|ticket|order|voucher|offer|event|building|naics|source|zip\+4)[\s-])`;
-const CODE_ANY = new RegExp(String.raw`${NAMED_CODE}\b(code|pin(?: code| number)?)(\s*(?:\bis\b|=|:|#)\s*|\s+)(\d(?:[ -]?\d){3,7})\b(?![-.\/]?\d)`, "gi");
+const CODE_ANY = new RegExp(String.raw`${NAMED_CODE}\b(code|pin(?: code| number)?)(\s*(?:\bis\b|=|:|#)\s*|\s+)(\d(?:(?:[ \t\u00a0\u2007\u2009\u202f]{0,8}(?:(?:\r\n|[\r\n\-\u2013\u2014])[ \t\u00a0\u2007\u2009\u202f]{0,8})?)\d){3,7})\b(?![-.\/]?\d)`, "gi");
 const CODE_LOOSE = new RegExp(String.raw`${NAMED_CODE}\b(code\b[^.\n\d]{1,40}?\s(?:is|was|=|:)\s*)(\d(?:[ -]?\d){3,7})\b(?![-.\/]?\d)`, "gi");
 const DATE_LIKE = /^(?:19|20)\d\d-\d\d?-\d\d?$/;
 const CVV_LABELED = /\b(cvv2?|cvc2?|csc|cvn|cid)(\s*(?:code|number)?\s*(?:is|=|:)?\s*)(\d{3,4})\b/gi;
 // Battery 2026-10-30 (scenarios-billing-cancel.test.ts): a card's security code by its other names ("security code is
 // 123", "the 3 digits on the back are 123"), and an IBAN, were kept word for word.
-const CVV_NAMED = /\b((?:card )?(?:security|verification) code|(?:three|3)[- ]digits? on the back(?: of (?:my|the) card)?)(\s*(?:is|are|=|:)?\s*)(\d{3,4})\b(?![-.\/]?\d)/gi;
+const CVV_NAMED = /\b((?:card )?(?:security|verification) code|(?:three|3)[- ]digits? on the back(?: of (?:my|the) card)?)(\s*(?:is|are|=|:)?\s*)(\d{3,4})\b(?![-.\/]?\d)([ \r\n\t\u00a0\u2007\u2009\u202f]+\d{3,4}\b(?![-.\/]?\d))?/gi;
+// A bare "security code" or "verification code" may be a code in two groups ("739\n201"): the second group goes too Line breaks may be \n, \r\n or \r, spaces may be no-break or thin, and dashes en or em (Greptile and review on #567). Whatever the
+// first regex matched is removed, whatever follows it; a card label ("card security code", "3 digits on the back") keeps the group.
 const IBAN = /\b([A-Za-z]{2}\d{2}(?:[ ]?[A-Za-z0-9]{4}){2,7}(?:[ ]?[A-Za-z0-9]{1,4})?)\b/g;
 function ibanOk(raw: string) {
   const s = raw.replace(/ /g, "").toUpperCase();
@@ -89,7 +91,19 @@ function luhn(digits: string) {
 
 // WO-100: while an employer's emailed code is waiting (career_situation.ts codePending), a bare 6-8 digit number is that
 // code, so it is removed too ("Plaid emailed me a code, it's 482913"). Never otherwise: a bare number stays a number.
-const BARE_CODE = /(?<![\d$€£.,:/#-])\b\d{6,8}\b(?![\d.,:/-]|\s*(?:k\b|%|usd|dollars|a year|per\b|\/))/gi;
+const BARE_CODE = /(?<![\d$€£.,:/#-])\b\d{6,8}\b(?![\d/-]|[.,:]\d|\s*(?:k\b|%|usd|dollars|a year|per\b|\/))/gi;
+// ...and, while a code is waiting, the same code split in two 3-digit groups ("739 201", "739\n201", "739-201"; Greptile on #572).
+// A sentence comma, colon or period may follow ("739 201, can you enter it?"); one before more digits may not ("3.85", "1,200").
+// Not a group of a longer run: a phone number ("415 555 1234") or a date keeps its third group, so it never matches.
+const BARE_SPLIT_CODE = /(?<![\d$€£.,:/#-]|\d(?:[ \t]{1,8}|[ \t]{0,8}[\n\-][ \t]{0,8}))\b\d{3}(?:[ \t]{1,8}|[ \t]{0,8}[\n\-][ \t]{0,8})\d{3}\b(?![\d/-]|[.,:]\d|(?:[ \t]{1,8}|[ \t]{0,8}[\n\-][ \t]{0,8})\d|\s*(?:k\b|%|usd|dollars|a year|per\b|\/))/gi;
+// The one form chat text takes before any redaction or hashing: line endings become "\n", no-break, thin and figure spaces and
+// tabs become a space, and an en or em dash between digits a hyphen, so "739\r\n201", "739\u00a0201" and "739–201" meet the
+// same rules as "739 201". chat_input.ts and channel_resume_upload.ts resumeMessage both use it, so a file's message hash
+// equals the hash of the text the thread stores (Greptile and review on #567).
+export function normalizeChatText(text: string): string {
+  return String(text ?? "").replace(/\r\n?/g, "\n").replace(/[\u00a0\u2007\u2009\u202f\t]/g, " ").replace(/(\d)[\u2013\u2014](?=\d)/g, "$1-");
+}
+
 export function redactIdentity(input: string, o: { codePending?: boolean } = {}): Redaction {
   const removed = new Set<Redaction["removed"][number]>();
   let t = String(input ?? "");
@@ -134,9 +148,10 @@ export function redactIdentity(input: string, o: { codePending?: boolean } = {})
     removed.add("password"); return `${label}${sp}[password removed]`;
   });
   t = t.replace(CVV_LABELED, (_m, label, sep) => { removed.add("card"); return `${label}${sep}[security code removed]`; });
-  t = t.replace(CVV_NAMED, (_m, label, sep) => { removed.add("card"); return `${label}${sep}[security code removed]`; });
+  t = t.replace(CVV_NAMED, (_m, label: string, sep, _digits, more?: string) => { removed.add("card"); return `${label}${sep}[security code removed]${more && /card|digit/i.test(label) ? more : ""}`; });
   t = t.replace(IBAN, (m) => { if (!ibanOk(m)) return m; removed.add("account"); return "[number removed]"; });
   if (o.codePending) t = t.replace(BARE_CODE, () => { removed.add("code"); return "[code removed]"; });
+  if (o.codePending) t = t.replace(BARE_SPLIT_CODE, () => { removed.add("code"); return "[code removed]"; });
   t = t.replace(KEY_SHAPED, () => { removed.add("key"); return "[key removed]"; });
   return { text: t, removed: [...removed] };
 }

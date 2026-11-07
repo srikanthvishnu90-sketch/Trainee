@@ -1027,3 +1027,11 @@ Deno.test("CDW a cued unitless ask that is not read keeps the slot blank and nev
   const c = fresh(); host.runTurn(OFFER, c); host.runTurn("Counter at $26/hour", c);
   assert(/meet me at \$26/.test(String(host.runTurn("Draft the counter email", c).result?.draft?.body)), "saved counter reused when no figure is given");
 });
+
+// Review of #575 (inventory record 55's rule): a held revision carries structured state only, no clarification prose of its own.
+Deno.test("CDW a held counter revision adds no prose of its own", () => {
+  const ctx = fresh(); host.runTurn(OFFER, ctx); host.runTurn("Draft a counter at $27/hour", ctx);
+  const r = host.runTurn("The market offers $28/hour; make it $30/hour instead", ctx);
+  assert(!/which figure is your new counter|couldn't tell whether/i.test(String(r.reply)), String(r.reply));
+  eq(r.result?.counterAmbiguous, true, "held"); eq(r.result?.draft, undefined, "no draft"); eq(recorded(ctx).counter, 27, "counter unchanged");
+});

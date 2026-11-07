@@ -4149,9 +4149,15 @@ const CareerRouter = (() => {
     // review on #574 and #575).
     if (figs.held) {
       if (!figAsk) return null;
+      // Structured state only, like the offer-ambiguity branch of handleNegotiation: nothing is saved or drafted, the figures go
+      // without roles, and the staged brain asks which one is the new ask; without the brain the ordinary advice reply stands.
       const figures = counterFigures(s(text), {}).mentions.map((m) => ({ value: m.value, unit: m.unit }));
-      return { intent: "negotiation_revision", resultStatus: "awaiting_user", sends: 0, counterAmbiguous: true, awaiting: "which_figure_is_ask", figures,
-        reply: compose({ headline: "Which figure is your new counter?", facts: ["I couldn't tell whether the pay figure in your message is your new ask or someone else's rate (a market rate, another company, a survey), so the counter on record stays as it is."], nextStep: "Tell me the figure you want to ask for and I'll revise the counter to it." }) };
+      ctx._ambiguousCounter = true;
+      let res;
+      try { res = handleNegotiationCore(text, ctx); } finally { ctx._ambiguousCounter = false; }
+      if (!res || typeof res !== "object") return null;
+      delete res.draft; delete res.strategy;
+      return Object.assign(res, { intent: "negotiation_revision", resultStatus: "awaiting_user", counterAmbiguous: true, awaiting: "which_figure_is_ask", figures, sends: 0 });
     }
     const addAsk = /\badd a request\b|\badd an ask\b|\balso ask\b/.test(t);
     if (!figAsk && !addAsk) return null;

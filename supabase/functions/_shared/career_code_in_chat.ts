@@ -49,7 +49,11 @@ const VALUE_LEAD = /^\s*(?:it(?:'s|\s+is|\s+was)|its|that(?:'s|\s+is|\s+was)|the
 
 function contextEnds(sentence: string, re: RegExp): number[] {
   const out: number[] = [];
+  // A redaction marker ("[security code removed]") is not a code word: the code it names is already gone, so the next number
+  // ("the zip is 94107", a year on the next line) is kept (reconciliation of Greptile record 22).
+  const marks = [...sentence.matchAll(/\[[A-Za-z][A-Za-z -]{0,40} removed\]/g)].map((k) => [k.index ?? 0, (k.index ?? 0) + k[0].length]);
   for (const m of sentence.matchAll(re)) {
+    if (marks.some(([a, b]) => (m.index ?? 0) >= a && (m.index ?? 0) < b)) continue;
     if (re === STRONG && /^code$/i.test(m[0]) && NAMED_BEFORE_CODE.test(sentence.slice(0, m.index))) continue;
     out.push((m.index ?? 0) + m[0].length);
   }

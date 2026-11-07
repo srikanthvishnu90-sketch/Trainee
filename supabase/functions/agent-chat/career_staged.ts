@@ -222,10 +222,13 @@ const ADVICE_INTENTS = new Set(["outreach_clarification", "prep_brief"]);
 const QUESTION_LEAD = /^\s*(?:(?:so|ok|okay|hey|also|and|but|quick question)[,:]?\s+)?(?:how|what|whats|what's|which|when|why|where|who|should|is|are|do|does|did|would|could|any|tips?\b|advice\b|best way)\b/i;
 const ASK_TO_ACT = /^\s*(?:can|could|would|will)\s+(?:you|u)\s+(?:please\s+)?(?:send|email|message|text|dm|reach|contact|find|build|make|get|pull|list|draft|write|apply|submit|queue|save|set|start|run|mock|quiz|drill)\b/i;
 const LIST_OR_SEND = /\b(?:find|build|pull|get|make|compile)\b[^?.!]*\b(?:list|people|contacts?|names|engineers|analysts|bankers|associates|recruiters|alumni|alums|managers)\b|^\s*(?:please\s+)?(?:send|email|message|text|dm|reach out|contact|apply|submit|queue)\b/i;
+const SHOW_DRAFT = /\b(?:(?:show|view)\s+(?:me\s+)?|see\s+|give\s+me\s+)(?:the|my|that|this|your|a)?\s*(?:(?:counter|cover|follow[- ]?up|outreach|thank[- ]you)\s+)?(?:draft|email|e-mail|message|note|letter)\b|\blet me see\b[^?.!]{0,20}\bdraft\b/i;
 export function adviceQuestion(message: string, intent: string | null, result: unknown): boolean {
   if (!intent || !ADVICE_INTENTS.has(intent)) return false;
   const m = String(message ?? "").replace(/[’`]/g, "'").trim();
   if (!(QUESTION_LEAD.test(m) || /\?\s*$/.test(m)) || ASK_TO_ACT.test(m) || LIST_OR_SEND.test(m)) return false;
+  // "show me the draft?" asks code to show its draft (Greptile record 4), whatever the punctuation.
+  if (SHOW_DRAFT.test(m)) return false;
   // A company or a posting the person named gets code's product for it (the firm's file, the posting's brief).
   if (namesSomeone(m)) return false;
   const r = (result && typeof result === "object" ? result : {}) as Record<string, any>;

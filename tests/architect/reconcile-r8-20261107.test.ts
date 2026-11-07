@@ -120,14 +120,21 @@ Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless res
   for (const line of ["Workday sent me 739201", "Workday sent me 739 201", "Workday sent me 739\n201", "My one-time passcode arrived: 739201", "Lever texted me 7392\n01",
     "The portal sent a code. It is 739201.", "Recruiter texted me 4821", "Workday sent me 739.201", "Workday sent me 739−201", "Verification code: 739.201", "Workday sent me 739 201",
     // review of f62e2033
-    "Workday sent me: 739201", "My verification code arrived this morning: 739201", "Here is the code Workday sent: 739201", "Code -> 739201", "Workday sent me:\n739\n201", "The code it sent: 7392\u201101"]) {
+    "Workday sent me: 739201", "My verification code arrived this morning: 739201", "Here is the code Workday sent: 739201", "Code -> 739201", "Workday sent me:\n739\n201", "The code it sent: 7392\u201101",
+    "the code was emailed: 739201", "Code is: 482913", "my verification code is 739201"]) {
     assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), true, line);
   }
   for (const line of ["customer portal serving 120000 customers", "Vendor portal handled 35000 orders a year", "Verification engineer, Acme, 2018-2022", "Security code audits 2018-2022",
     "Raised code coverage across 9500 tests", "Verification of 4500 invoices monthly", "My manager sent me 2500 tickets to triage", "OTP service handled 100000 requests per day",
     "2FA adoption rose from 2000 to 8000 users", "Customer portal: 1200000 sessions", "12000 employees", "(415) 555-0134", "San Francisco, CA 94107", "GPA 3.85", "since 2019",
     "Employee ID 482913", "2021 – 2024", "Managed 25 employees and 1200 shipments", "Code review: 4500 PRs merged", "Code coverage: 95% across 9500 tests", "Postal code: 94107",
-    "Security code audits: 2018-2022", "Code quality: cut 1200 bugs", "Security code audit: 4500 endpoints", "OTP service: 50000 QPS at p99 40ms", "Built OTP service: 50000 rps"]) {
+    "Security code audits: 2018-2022", "Code quality: cut 1200 bugs", "Security code audit: 4500 endpoints", "OTP service: 50000 QPS at p99 40ms", "Built OTP service: 50000 rps",
+    // review of d9dfa48f: a code word and a verb or a colon in a heading is not a hand-over
+    "Code migration was completed: 1200 microservices", "Legacy code was ported: 3500 COBOL programs", "Legacy code is now: 3500 Java classes", "Code refactor was delivered: 2500 classes",
+    "Verification code service was: 50000 SMS/day", "Passcode vault was rolled out: 3400 laptops", "OTP system was: 45000 branches", "OTP flow was redesigned: 45000 merchants onboarded",
+    "OTP service is live in: 4500 branches", "Security code is open-sourced: 1200 stars", "Code of conduct training was delivered: 2400 associates", "Building code review is: 3200 permits",
+    "Code owner is: 1200 packages", "Code sent to QA: 4800 builds", "Code was emailed: 4800 builds", "Code review came: 4500 comments", "Code review sent: 4500 diffs",
+    "Code quality score is: 4500 points", "Code was 1200 microservices", "Cost code: 482913"]) {
     assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), false, line);
   }
 });

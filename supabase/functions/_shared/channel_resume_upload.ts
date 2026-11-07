@@ -4,8 +4,9 @@
 //   1. the file is downloaded through the Bot API (getFile, then the file; telegram.ts fetchFile), at most 10 MB;
 //   2. its sha256 is taken over the bytes as received, and its text is read by code (CareerRender's own PDF and DOCX
 //      readers, the ones the resume renderer's parse check uses), never by a model;
-//   3. the original file is stored as the person's upload (career_resume_uploads: the provider's file_unique_id, the
-//      name, the type, the bytes and their sha256) together with the sha256 of the message the chat receives;
+//   3. the file is stored as the person's upload (career_resume_uploads: the provider's file_unique_id, the name, the type,
+//      the bytes and their sha256) together with the sha256 of the message the chat receives; a PDF as received, a Word file
+//      as its clean copy (cleanDocx, release 8);
 //   4. the chat receives "here is my resume:\n<the file's text>", exactly as a pasted resume, so the router reads it
 //      into draft entries and shows each one; nothing is confirmed by the upload;
 //   5. on the person's later "yes, that's my resume", the evidence step (career_router_evidence.ts, in handler-career.ts)
@@ -13,7 +14,8 @@
 //      confirmed entry came from (fileUploadFor below), under the same rules: shown word for word, and in the upload.
 // A file that cannot be downloaded, is not a PDF or DOCX, or has no readable text is said so, plainly; nothing is stored.
 import { CareerProfile, CareerRender } from "./router_core.career.js";
-import { redactIdentity } from "./identity_redact.ts";
+import { normalizeChatText, redactIdentity } from "./identity_redact.ts";
+import { fileCodeLines, fileText as codeCheckText, GATE_CTX } from "./career_code_in_chat.ts";
 import type { Upload } from "./career_router_evidence.ts";
 
 export const MAX_RESUME_BYTES = 10 * 1024 * 1024;
@@ -29,6 +31,15 @@ export const FILE_DAMAGED_REPLY = "I couldn't open that file: it looks damaged o
 export const FILE_EMPTY_REPLY = "That file is empty (0 bytes), so there was nothing to read and nothing was saved. Send the resume file again, or paste its text here.";
 export const FILE_LOCKED_REPLY = "That PDF is locked with a password (or protected against copying), so I couldn't read its text and nothing was saved. Save an unlocked copy and send that, or paste your resume here. Never send me the password.";
 export const fileSecretReply = (kinds: string[]) => `Your file has ${kinds.join(" and ")} in it, so I didn't keep the file or read anything from it. Remove ${kinds.length > 1 ? "them" : "it"} from the file and send it again, or paste your resume here without ${kinds.length > 1 ? "them" : "it"}.`;
+// A suspected one-time code in a file: its line number in the text read from the file and its kind only, never the line, so the
+// person can find it, remove or reword it, and send the file again.
+export function fileCodeReply(lines: number[], otherKinds: string[] = []): string {
+  const ls = lines.slice(0, 5), where = ls.length === 1 ? `line ${ls[0]}` : `lines ${ls.slice(0, -1).join(", ")} and ${ls[ls.length - 1]}`;
+  const more = lines.length > 5 ? ` (and ${lines.length - 5} more)` : "";
+  const also = otherKinds.length ? ` It also has ${otherKinds.join(" and ")} in it.` : "";
+  return `Your file has what looks like a one-time code (a sign-in or verification code) on ${where}${more} of the text I read from it, so I didn't keep the file or read anything from it, and I won't repeat ${ls.length > 1 ? "those lines" : "that line"}.${also} ` +
+    `Remove the code and send the file again. If ${ls.length > 1 ? "a line" : "it"} isn't a code (an exam, ticket or part number), reword it, for example by writing what the number is for, and send the file again.`;
+}
 // ONBOARDING ROUND 2: a file whose text is not a resume (a cover letter, a transcript, a page with no sections) was
 // stored as the person's resume upload, and then the chat said "nothing from it was saved". It is checked first by the
 // chat's own proof for a framed resume (142 resumePasteDraftsOf: two entries, work or education among them) and not kept.
@@ -103,6 +114,194 @@ export async function fileText(kind: FileKind, bytes: Uint8Array): Promise<strin
   return (Array.isArray(lines) ? lines : []).map((l) => String(l).replace(/\s+$/, "")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+// Word parts the reader does not show as resume text, which the stored file carries. Text is taken only where Word keeps text: the
+// text runs of headers, footers, notes, comments, glossary and text boxes (w:t, a:t, VML), the body's tracked deletions and field
+// instructions, alt text and tooltips, the title, subject, description and keywords of the document properties and custom string
+// properties, the query part of link targets, HTML or text "altChunk" parts, and an embedded Word file one level down. Structural
+// parts (styles, settings, fonts, numbering, theme, app properties) carry no resume text, but every listed part must still be
+// readable: a part the reader cannot read (bad checksum, past the size cap) throws, and the upload fails closed.
+const ENTITY: Record<string, string> = { lt: "<", gt: ">", quot: "\"", apos: "'", amp: "&", nbsp: " " };
+const decodeXml = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|lt|gt|quot|apos|amp|nbsp);/gi, (_m, e: string) =>
+  e[0] === "#" ? String.fromCodePoint(e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10)) : ENTITY[e.toLowerCase()] ?? _m);
+const lines = (s: string) => decodeXml(s).split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+// Text runs, one paragraph per line; a break or tab keeps its place. Any namespace prefix ("w:", "a:", or one a writer chose).
+const P = String.raw`(?:[\w.-]+:)?`;
+function runText(xml: string, tags = "t|delText|instrText"): string[] {
+  const out: string[] = [];
+  for (const para of xml.split(new RegExp(String.raw`</${P}p>`))) {
+    let t = "";
+    for (const m of para.matchAll(new RegExp(String.raw`<${P}(?:${tags})(?:\s[^>]*)?>([^<]*)</${P}(?:${tags})>|<${P}(?:br|cr)\b[^>]*/?>|<${P}tab\b[^>]*/?>`, "g"))) {
+      t += m[1] !== undefined ? m[1] : /tab/.test(m[0]) ? " " : "\n";
+    }
+    out.push(...lines(t));
+  }
+  return out;
+}
+// All character data of a part, a paragraph, break or closing block per line: text a writer put under any tag name.
+const allText = (xml: string) => lines(xml.replace(new RegExp(String.raw`</${P}(?:p|tc|tr|txbxContent|div|li)>|<${P}(?:br|cr)\b[^>]*/?>`, "g"), "\n").replace(/<[^>]*>/g, " "));
+// A part's text in its declared encoding: a byte-order mark, UTF-16 without one, or the XML declaration's encoding; UTF-8 otherwise.
+// Fail closed: a part that does not then read as XML (starts with "<", no NUL character) throws, so the upload is refused.
+function decodePart(part: Uint8Array, xml = true): string {
+  const b = part, dec = (label: string, at = 0) => { try { return new TextDecoder(label, { fatal: false }).decode(b.subarray(at)); } catch { throw new Error(`unknown encoding ${label}`); } };
+  let s: string;
+  if (b[0] === 0xff && b[1] === 0xfe && b[2] === 0 && b[3] === 0) throw new Error("UTF-32 part");
+  if (b[0] === 0 && b[1] === 0 && b[2] === 0xfe && b[3] === 0xff) throw new Error("UTF-32 part");
+  if (b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf) s = dec("utf-8", 3);
+  else if (b[0] === 0xff && b[1] === 0xfe) s = dec("utf-16le", 2);
+  else if (b[0] === 0xfe && b[1] === 0xff) s = dec("utf-16be", 2);
+  else if (b[1] === 0x00 && b[0] !== 0x00) s = dec("utf-16le");
+  else if (b[0] === 0x00 && b[1] !== 0x00) s = dec("utf-16be");
+  else {
+    const head = new TextDecoder("latin1").decode(b.subarray(0, 200)), enc = /^\s*<\?xml\b[^?>]*?\bencoding\s*=\s*["']([\w.:-]+)["']/i.exec(head)?.[1]; // the declaration only
+    s = enc && !/^utf-?8$/i.test(enc) ? dec(enc) : dec("utf-8");
+  }
+  if (s.includes("\u0000") || (xml && !/^\s*</.test(s))) throw new Error("part does not read as XML");
+  if (!xml) return s; // a plain-text or MHTML part (altChunk) is text, not XML
+  // CDATA is text: escaped and kept, so the tag-stripping readers see it ("<w:t><![CDATA[OTP 482913]]></w:t>"). Found by
+  // indexOf, in linear time (a lazy regex over an unclosed "<![CDATA[" repeated took quadratic time).
+  if (!s.includes("<![CDATA[")) return s;
+  let out = "", at = 0;
+  for (;;) {
+    const i = s.indexOf("<![CDATA[", at), j = i < 0 ? -1 : s.indexOf("]]>", i + 9);
+    if (j < 0) break;
+    out += s.slice(at, i) + s.slice(i + 9, j).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    at = j + 3;
+  }
+  return out + s.slice(at);
+}
+// What a global lazy regex `open[\s\S]*?close` matches (with `keyed`, a close whose first group equals the open's, as a
+// backreference), found in linear time: each open, from the end of the last match, takes the first close after it.
+function lazySpans(s: string, open: RegExp, close: RegExp, keyed = false): [number, number][] {
+  const closes = new Map<string, [number, number][]>();
+  for (const m of s.matchAll(close)) { const k = keyed ? m[1] : "", l = closes.get(k) ?? []; l.push([m.index!, m.index! + m[0].length]); closes.set(k, l); }
+  const ptr = new Map<string, number>(), out: [number, number][] = [];
+  let cursor = 0;
+  for (const m of s.matchAll(open)) {
+    const at = m.index!, k = keyed ? m[1] : "";
+    if (at < cursor) continue;
+    const list = closes.get(k) ?? [], from = at + m[0].length;
+    let p = ptr.get(k) ?? 0;
+    while (p < list.length && list[p][0] < from) p++;
+    ptr.set(k, p);
+    if (p >= list.length) continue;
+    out.push([at, list[p][1]]);
+    cursor = list[p][1];
+  }
+  return out;
+}
+const cutSpans = (s: string, spans: [number, number][], put = "") => {
+  let out = "", at = 0;
+  for (const [a, b] of spans) { out += s.slice(at, a) + put; at = b; }
+  return out + s.slice(at);
+};
+// A link target as the gate reads it: the address without its query as one line, then one "key: value" line per query
+// parameter and the fragment, decoded. A query read whole ("?type=design&node-id=1-2&t=Zx81kQ2HnB-0", a Figma or UTM link)
+// looked like a code to the gate; a parameter on its own line keeps its key as its label ("code: 482913" still refuses).
+export function urlGateLines(url: string, withBase = true): string[] {
+  const dec = (x: string) => { try { return decodeURIComponent(x.replace(/\+/g, " ")); } catch { return x; } };
+  const u = String(url ?? ""), q = u.search(/[?#]/), base = q < 0 ? u : u.slice(0, q), rest = q < 0 ? "" : u.slice(q);
+  const hash = rest.indexOf("#"), query = (hash < 0 ? rest : rest.slice(0, hash)).replace(/^\?/, ""), frag = hash < 0 ? "" : rest.slice(hash + 1);
+  const out = withBase && base.trim() ? [dec(base)] : [];
+  for (const kv of query.split("&")) {
+    if (!kv) continue;
+    const e = kv.indexOf("=");
+    out.push(e < 0 ? `parameter: ${dec(kv)}` : `${dec(kv.slice(0, e))}: ${dec(kv.slice(e + 1))}`);
+  }
+  if (frag) out.push(`fragment: ${dec(frag)}`);
+  return out.map((l) => l.replace(/\s+/g, " ").trim()).filter((l) => l.length > 1);
+}
+// Attribute values by their XML meaning: either quote, any prefix, spaces around "=".
+const attr = (names: string) => new RegExp(String.raw`\s${P}(?:${names})\s*=\s*(?:"([^"]*)"|'([^']*)')`, "g");
+const attrVals = (xml: string, names: string) => [...xml.matchAll(attr(names))].map((m) => m[1] ?? m[2] ?? "");
+const attrText = (xml: string) => [...attrVals(xml, "descr|title|tooltip"),
+  ...[...xml.matchAll(new RegExp(String.raw`<${P}textpath\b(?:[^>"']|"[^"]*"|'[^']*')*>`, "g"))].flatMap((m) => attrVals(m[0], "string"))].flatMap((v) => lines(v));
+// Leaf elements of a properties part, one line each, under any prefix. Core: every text property except the numeric and date
+// metadata Word writes (revision, version, dates, language). Custom: the string values.
+const leaves = (xml: string, keep: (name: string) => boolean) => [...xml.matchAll(new RegExp(String.raw`<${P}([\w.-]+)(?:\s[^>]*)?>([^<]*)</${P}\1>`, "g"))]
+  .filter((m) => keep(m[1])).flatMap((m) => lines(m[2]));
+const CORE_META = /^(?:revision|version|created|modified|lastPrinted|language)$/i;
+// An MHTML part: each MIME body decoded by its transfer encoding (an encoding it cannot read throws: the file is refused),
+// HTML bodies read as text, MIME headers and boundaries left out.
+function mimeText(s: string): string[] {
+  const html = (t: string) => lines(t.replace(/<(?:br|\/p|\/div|\/li|\/tr|\/h\d)[^>]*>/gi, "\n").replace(/<[^>]*>/g, " "));
+  if (/^\s*</.test(s)) return html(s);
+  const bound = /boundary\s*=\s*(?:"([^"]+)"|([^\s;]+))/i.exec(s);
+  const parts = bound ? s.split("--" + (bound[1] ?? bound[2])).slice(1) : [s];
+  const out: string[] = [];
+  for (const part of parts) {
+    const at = part.search(/\r?\n\r?\n/);
+    if (at < 0) { if (part.trim() && part.trim() !== "--") out.push(...lines(part)); continue; }
+    const head = part.slice(0, at), body = part.slice(at).replace(/^\r?\n\r?\n/, "");
+    const enc = (/content-transfer-encoding\s*:\s*([\w-]+)/i.exec(head)?.[1] ?? "7bit").toLowerCase();
+    let text: string;
+    // A body is read in its declared charset (UTF-8 when none); a charset the decoder does not know throws.
+    const cs = /charset\s*=\s*"?([\w.:-]+)"?/i.exec(head)?.[1] ?? "utf-8", txt = (b: Uint8Array) => {
+      // A byte-order mark that contradicts the declared charset cannot be read safely: the file is refused.
+      const bom = b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf ? "utf-8" : b[0] === 0xff && b[1] === 0xfe ? "utf-16le" : b[0] === 0xfe && b[1] === 0xff ? "utf-16be" : null;
+      const label = new TextDecoder(cs).encoding;
+      if (bom && !(bom === label || (bom.startsWith("utf-16") && /^utf-16$/i.test(cs)))) throw new Error(`byte-order mark ${bom} contradicts charset ${cs}`);
+      return new TextDecoder(bom ?? cs, { fatal: false }).decode(b); // a (consistent) mark decides the byte order
+    };
+    if (enc === "base64") { const raw = atob(body.replace(/\s+/g, "")); text = txt(Uint8Array.from(raw, (c) => c.charCodeAt(0))); }
+    else if (enc === "quoted-printable") { const b = body.replace(/=\r?\n/g, ""); const bytes: number[] = []; for (let i = 0; i < b.length; i++) { const h = b[i] === "=" && /^[0-9a-f]{2}$/i.test(b.slice(i + 1, i + 3)); bytes.push(h ? parseInt(b.slice(i + 1, i + 3), 16) : b.charCodeAt(i)); if (h) i += 2; } text = txt(new Uint8Array(bytes)); }
+    // A raw body was read with the part (UTF-8): any other declared charset cannot be read safely here, so the file is refused.
+    else if (/^(?:7bit|8bit|binary)$/.test(enc)) { if (!/^(?:utf-?8|us-ascii|ascii)$/i.test(cs)) throw new Error(`raw MIME body in ${cs}`); text = body; }
+    else throw new Error(`unknown transfer encoding ${enc}`);
+    if (text.includes("\u0000")) throw new Error("MIME body does not read as text"); // a wrong charset fails closed
+    out.push(...(/content-type\s*:\s*text\/plain/i.test(head) ? lines(text) : html(text)));
+  }
+  return out;
+}
+const STRUCTURAL = /^(?:word\/(?:styles|stylesWithEffects|settings|webSettings|fontTable|numbering|people|commentsIds|commentsExtensible|commentsExtended)\.xml|word\/theme\/[^/]+\.xml|docProps\/app\.xml|\[Content_Types\]\.xml|customXml\/[^/]+\.xml|word\/(?:glossary\/)?(?:styles|settings|webSettings|fontTable|numbering)\.xml)$/i;
+async function hiddenOf(r: any, buf: any, depth: number): Promise<string[]> {
+  const names: string[] = r.docxPartNames(buf) ?? [];
+  if (!names.includes("word/document.xml")) throw new Error("no document part");
+  const out: string[] = [];
+  for (const n of names) {
+    const text = /\.(?:xml|rels|vml|html?|txt|mht|docx)$/i.test(n), part = text ? r.docxPart(buf, n) : null;
+    if (text && !part) throw new Error(`part not readable: ${n}`);
+    if (!part || STRUCTURAL.test(n)) continue;
+    if (/\.docx$/i.test(n)) { if (depth > 0) throw new Error(`nested file too deep: ${n}`); out.push(...(r.extractDocxLines?.(part) ?? []).map(String), ...(await hiddenOf(r, part, depth + 1))); continue; }
+    const s = decodePart(new Uint8Array(part), !/\.(?:txt|mht)$/i.test(n));
+    if (n === "word/document.xml") {
+      // (Spans in linear time: an unclosed <mc:Fallback>, <a:p> or <w:p> repeated 80,000 times took 27 s with lazy regexes.)
+      const fallbacks = lazySpans(s, new RegExp(String.raw`<${P}Fallback\b`, "g"), new RegExp(String.raw`</${P}Fallback>`, "g")).flatMap(([a, b]) => allText(s.slice(a, b)));
+      // DrawingML and other non-w text, its runs joined per paragraph ("O" "T" "P" ": " "4" ... reads "OTP: 4...").
+      const nonWt = [...s.matchAll(/<((?!w:)[\w.-]+):t(?:\s[^>]*)?>([^<]*)<\/\1:t>/g)].map((m) => m[2]).join("");
+      const nonW = lazySpans(s, /<((?!w:)[\w.-]+):p\b/g, /<\/([\w.-]+):p>/g, true).flatMap(([a, b]) => runText(s.slice(a, b))).concat(nonWt.trim() ? lines(nonWt) : []);
+      // Text runs outside any paragraph (the visible reader reads paragraphs only).
+      const loose = runText(cutSpans(s, lazySpans(s, new RegExp(String.raw`<${P}p\b`, "g"), new RegExp(String.raw`</${P}p>`, "g")), "\n"));
+      out.push(...runText(s, "delText|instrText"), ...attrText(s), ...fallbacks, ...nonW, ...loose); continue;
+    }
+    // A link target: an external address whole (without its query) and each query parameter as "key: value"; a part's own
+    // target (styles.xml, media/image1.png) by its parameters only.
+    if (/\.rels$/i.test(n)) {
+      for (const m of s.matchAll(new RegExp(String.raw`<${P}Relationship\b(?:[^>"']|"[^"]*"|'[^']*')*>`, "g"))) {
+        const target = decodeXml(attrVals(m[0], "Target")[0] ?? ""), external = /^external$/i.test(attrVals(m[0], "TargetMode")[0] ?? "");
+        out.push(...urlGateLines(target, external));
+      }
+      continue;
+    }
+    // Document properties under any prefix, one property per line (numeric and date metadata left out).
+    if (/^docProps\/core\.xml$/i.test(n)) { out.push(...leaves(s, (k) => !CORE_META.test(k)), ...attrText(s)); continue; }
+    if (/^docProps\/custom\.xml$/i.test(n)) { out.push(...leaves(s, (k) => /^(?:lpw?str|bstr)$/i.test(k)), ...attrText(s)); continue; }
+    if (/\.txt$/i.test(n)) { out.push(...s.split(/\r?\n|\r/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean)); continue; } // literal text
+    if (/\.mht$/i.test(n)) { out.push(...mimeText(s)); continue; }
+    if (/\.html?$/i.test(n)) { out.push(...lines(s.replace(/<(?:br|\/p|\/div|\/li|\/tr|\/h\d)[^>]*>/gi, "\n").replace(/<[^>]*>/g, " "))); continue; }
+    if (/\.vml$/i.test(n)) { out.push(...lines(s.replace(/<\/(?:div|p)>|<br\s*\/?>/gi, "\n").replace(/<[^>]*>/g, " ")), ...attrText(s)); continue; }
+    out.push(...runText(s), ...allText(s), ...attrText(s));
+  }
+  return out;
+}
+export async function docxHiddenText(bytes: Uint8Array): Promise<string> {
+  reader ??= Promise.all([import("node:zlib"), import("node:crypto"), import("node:buffer")])
+    // deno-lint-ignore no-explicit-any
+    .then(([zlib, crypto, b]) => ({ r: (CareerRender as any).withRuntime({ zlib, crypto, Buffer: b.Buffer }), Buffer: b.Buffer }));
+  const { r, Buffer } = await reader;
+  return (await hiddenOf(r, Buffer.from(bytes), 0)).join("\n");
+}
+export const FILE_HIDDEN_CODE_REPLY = "Your file has what looks like a one-time code or another private number in a header, footer, note, comment or tracked change, so I didn't keep the file or read anything from it, and I won't repeat it. Remove it (and accept or reject tracked changes) and send the file again, or paste your resume here.";
+
 // ONBOARDING ROUND 2 (2026-10-30, tests/architect/scenarios-onboarding-r2.test.ts): a resume file's lines as the person
 // laid them out. Before this each PDF text run was its own line and each Word paragraph was read with its tabs, line
 // breaks and list bullets dropped, so:
@@ -168,10 +367,10 @@ export function pdfLayoutLines(runs: Run[]): string[] {
   }
   return out;
 }
-const unescXml = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_m, n) => String.fromCodePoint(Number(n))).replace(/&amp;/g, "&");
+const unescXml = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(x[0-9a-f]+|\d+);/gi, (_m, n: string) => { const c = /^x/i.test(n) ? parseInt(n.slice(1), 16) : Number(n); return c <= 0x10ffff ? String.fromCodePoint(c) : _m; }).replace(/&amp;/g, "&");
 export function docxResumeLines(xml: string): string[] {
   // A text box is written twice (the drawing, and a picture fallback for old readers): the fallback is not read.
-  const doc = String(xml ?? "").replace(/<mc:Fallback\b[\s\S]*?<\/mc:Fallback>/g, "");
+  const src = String(xml ?? ""), doc = cutSpans(src, lazySpans(src, /<mc:Fallback\b/g, /<\/mc:Fallback>/g)); // linear time
   const out: string[] = [];
   const stack: { text: string; list: boolean }[] = [];
   const rows: { cells: string[][]; cell: string[] | null }[] = [];
@@ -211,7 +410,8 @@ export function docxResumeLines(xml: string): string[] {
 // The message the chat receives for a file's text: framed as a pasted resume, trimmed and with identity digits removed as
 // agent-chat's input step removes them (chat_input.ts), so its sha256 is the sha256 of the message the thread stores.
 export function resumeMessage(text: string): string {
-  let body = String(text ?? "").trim();
+  // normalised exactly as chat_input.ts normalises a message, so this message's sha256 matches the stored text (Greptile on #567)
+  let body = normalizeChatText(String(text ?? "")).trim();
   const head = "here is my resume:\n";
   if (head.length + body.length > MAX_MESSAGE) {
     body = body.slice(0, MAX_MESSAGE - head.length);
@@ -226,7 +426,7 @@ export function resumeMessage(text: string): string {
 // the cut, confirmed them as "your resume", and never learned the rest of their jobs and skills were not read. A pasted
 // message cut the same way is told (channel_inbound.ts longCutNote); a file now is too, with where the reading stopped.
 export function resumeMessageCut(text: string): boolean {
-  return "here is my resume:\n".length + String(text ?? "").trim().length > MAX_MESSAGE;
+  return "here is my resume:\n".length + normalizeChatText(String(text ?? "")).trim().length > MAX_MESSAGE;
 }
 export function fileCutNote(message: string): string {
   const last = String(message ?? "").trim().split("\n").map((l) => l.trim()).filter(Boolean).pop() ?? "";
@@ -249,7 +449,558 @@ export function storedFilename(name: string, kind: FileKind): string {
 }
 export const KIND_MIME: Record<FileKind, string> = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" };
 
-export type ResumeFileResult = { ok: true; message: string; uploadId: string; sha256: string; note?: string } | { ok: false; reply: string; why: string };
+// RELEASE 8 (owner decision, 2026-11-07: "store a cleaned copy"). A Word file is never stored as sent. Each review found a new
+// place in the original bytes where a one-time code could sit unread (comments, processing instructions, w:sym digits, field
+// instructions, form-field entries, alt text, unknown namespaces, numbering, settings, app properties, custom XML, odd altChunk
+// parts), and the original bytes, code and all, were stored. Now a CLEAN copy is rebuilt from an allowlist, gated, and only
+// it is stored: the person's resume as Trainee will structure and submit it, so it must also be FAITHFUL.
+//   - Parts kept: the body, the headers and footers it references, styles, numbering, settings (the layout settings only), the
+//     theme (its colours and fonts), the png/jpeg/gif images the kept parts show (metadata chunks removed), and external links.
+//     Every other part (document properties, custom XML, comments, people, notes, glossary, altChunk and embedded files,
+//     macros, fonts, web settings) is left out; the content types and relationships are written afresh.
+//   - Each kept XML part is read by one linear forward tokenizer and written again element by element: WordprocessingML text,
+//     paragraphs, runs, tables, text boxes (wps), pictures, formatting (rPr/pPr/tblPr/tcPr/sectPr and their children) and
+//     their value attributes are kept; tracked deletions, field instructions (a field's displayed result is kept), w:sym's
+//     digits as text (checked), content-control properties, form fields, bookmarks, comment marks, mc:Fallback copies,
+//     VML-only pictures, extension markup, comments and processing instructions are dropped. An attribute is kept only if it
+//     is allowlisted: no rsids, names, descr/title, instr, anchor or tooltip, nothing in another namespace, and no value with
+//     letters and four or more digits in one word.
+//   - Faithfulness first: a construct that cannot be kept without losing what the person sees (an equation, an embedded
+//     object, an altChunk, a footnote, a chart or SmartArt, a VML picture with text in it, an image in another format, an
+//     unreadable part, or any unknown element carrying text) refuses the file as damaged rather than store a lossy copy.
+//   - The clean copy's text (headers, footers and text boxes included), every attribute value ("name: value") and every link
+//     target (urlGateLines) is gated before anything is stored.
+class Damaged extends Error {}
+const NS: Record<string, string> = {
+  w: "http://schemas.openxmlformats.org/wordprocessingml/2006/main", r: "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+  wp: "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing", a: "http://schemas.openxmlformats.org/drawingml/2006/main",
+  pic: "http://schemas.openxmlformats.org/drawingml/2006/picture", wps: "http://schemas.microsoft.com/office/word/2010/wordprocessingShape",
+  wpg: "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup", mc: "http://schemas.openxmlformats.org/markup-compatibility/2006",
+  wp14: "http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing", w14: "http://schemas.microsoft.com/office/word/2010/wordml",
+  a14: "http://schemas.microsoft.com/office/drawing/2010/main",
+};
+const NS_DECL = Object.entries(NS).map(([p, u]) => ` xmlns:${p}="${u}"`).join("");
+const GRAPHIC_URIS = new Set([NS.pic, NS.wps, NS.wpg]);
+const MC_REQUIRES = new Set(["wps", "wpg", "wp14", "w14", "a14"]);
+const DML = new Set(["wp", "a", "pic", "wps", "wpg"]);
+const ENT5: Record<string, string> = { lt: "<", gt: ">", amp: "&", quot: "\"", apos: "'" };
+function xmlDecode(s: string): string {
+  if (!s.includes("&")) return s;
+  return s.replace(/&(?:#x([0-9a-fA-F]{1,6})|#([0-9]{1,7})|(lt|gt|amp|quot|apos));|&/g, (_m, h?: string, d?: string, n?: string) => {
+    if (n) return ENT5[n];
+    if (h === undefined && d === undefined) throw new Damaged("an undefined entity");
+    const cp = h !== undefined ? parseInt(h, 16) : parseInt(d!, 10);
+    if (cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) || (cp < 0x20 && cp !== 9 && cp !== 10 && cp !== 13)) throw new Damaged("a character XML does not allow");
+    return String.fromCodePoint(cp);
+  });
+}
+const escText = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const escAttr = (s: string) => escText(s).replace(/"/g, "&quot;");
+type XmlHandler = { start(name: string, attrs: [string, string][], self: boolean): void; end(name: string): void; text(t: string): void };
+const NAME = /^[A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?$/;
+// One forward pass over the part: every search is an indexOf or a character step from the current position, never a regex
+// over the rest of the document. A malformed part (an unclosed tag, comment or quote, a DOCTYPE) is damaged.
+function scanXml(s: string, h: XmlHandler): void {
+  const n = s.length, ws = (c: number) => c === 32 || c === 9 || c === 10 || c === 13;
+  let i = 0;
+  while (i < n) {
+    const lt = s.indexOf("<", i);
+    if (lt < 0) { h.text(xmlDecode(s.slice(i))); break; }
+    if (lt > i) h.text(xmlDecode(s.slice(i, lt)));
+    if (s.startsWith("<!--", lt)) { const e = s.indexOf("-->", lt + 4); if (e < 0) throw new Damaged("an unclosed comment"); i = e + 3; continue; }
+    if (s.startsWith("<?", lt)) { const e = s.indexOf("?>", lt + 2); if (e < 0) throw new Damaged("an unclosed instruction"); i = e + 2; continue; }
+    if (s.startsWith("<![CDATA[", lt)) { const e = s.indexOf("]]>", lt + 9); if (e < 0) throw new Damaged("unclosed CDATA"); h.text(s.slice(lt + 9, e)); i = e + 3; continue; }
+    if (s.startsWith("<!", lt)) throw new Damaged("a DOCTYPE");
+    let j = lt + 1;
+    const close = s[j] === "/";
+    if (close) j++;
+    const ns = j;
+    while (j < n && !ws(s.charCodeAt(j)) && s[j] !== ">" && s[j] !== "/") j++;
+    const name = s.slice(ns, j);
+    if (!NAME.test(name)) throw new Damaged("a bad element name");
+    if (close) {
+      while (j < n && ws(s.charCodeAt(j))) j++;
+      if (s[j] !== ">") throw new Damaged("a bad end tag");
+      h.end(name); i = j + 1; continue;
+    }
+    const attrs: [string, string][] = [];
+    for (;;) {
+      while (j < n && ws(s.charCodeAt(j))) j++;
+      if (j >= n) throw new Damaged("an unclosed tag");
+      if (s[j] === ">") { h.start(name, attrs, false); i = j + 1; break; }
+      if (s[j] === "/") { if (s[j + 1] !== ">") throw new Damaged("a bad tag"); h.start(name, attrs, true); i = j + 2; break; }
+      const as = j;
+      while (j < n && !ws(s.charCodeAt(j)) && s[j] !== "=" && s[j] !== ">" && s[j] !== "/") j++;
+      const an = s.slice(as, j);
+      if (!NAME.test(an)) throw new Damaged("a bad attribute name");
+      while (j < n && ws(s.charCodeAt(j))) j++;
+      if (s[j] !== "=") throw new Damaged("an attribute with no value");
+      j++;
+      while (j < n && ws(s.charCodeAt(j))) j++;
+      const q = s[j];
+      if (q !== "\"" && q !== "'") throw new Damaged("an unquoted attribute");
+      const e = s.indexOf(q, j + 1);
+      if (e < 0) throw new Damaged("an unclosed attribute");
+      const raw = s.slice(j + 1, e);
+      if (raw.includes("<")) throw new Damaged("a < in an attribute");
+      attrs.push([an, xmlDecode(raw)]);
+      j = e + 1;
+    }
+  }
+}
+const pfx = (q: string) => { const k = q.indexOf(":"); return k < 0 ? "" : q.slice(0, k); };
+const loc = (q: string) => q.slice(q.indexOf(":") + 1);
+// A value kept only in its allowlisted shape: short, no control characters, and no word with letters and four or more digits.
+// deno-lint-ignore no-control-regex
+const valueOk = (v: string) => v.length <= 256 && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(v) && (/^[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?$/.test(v) || !v.split(/\s+/).some((w) => /\p{L}/u.test(w) && /\d{4,}/.test(w)));
+// A style id is the name pStyle/rStyle/basedOn refer to; one that fails the value shape is renamed, the same way everywhere.
+const styleId = (v: string) => {
+  if (valueOk(v) && v.length <= 64) return v;
+  let h = 2166136261;
+  for (let i = 0; i < v.length; i++) h = Math.imul(h ^ v.charCodeAt(i), 16777619) >>> 0;
+  let s = "";
+  for (let k = 0; k < 7; k++) { s += String.fromCharCode(97 + (h % 26)); h = Math.floor(h / 26); }
+  return `Style${s}`;
+};
+// The label an attribute value is gated under: its own name, unless that name is itself one of the gate's code words ("type",
+// "key"), when the element's name labels it ("tblStylePr: band1Vert", not "type: band1Vert", which reads like "type 1").
+const gateLabel = (attr: string, element: string) => attr === "type" ? loc(element) : attr;
+// An attribute name kept only as a plain name that is no code word ("w:code", "w:otp482913" are dropped; review of 64c7f13b).
+const attrNameOk = (al: string) => /^[A-Za-z]{1,40}$/.test(al) && (al === "type" || !GATE_CTX.test(al));
+// Fields kept with their instruction: page numbers, dates and links; any other instruction is dropped (its shown result stays).
+const FIELD_OK = /^\s*(?:PAGE|NUMPAGES|SECTIONPAGES|DATE|TIME|HYPERLINK\s+"https?:\/\/[^"\s?#]{1,200}")(?:\s+\\[*@#]\s*(?:"[^"]{0,20}"|[A-Za-z]{1,20}))*\s*$/;
+const STYLE_REF = new Set(["w:pStyle", "w:rStyle", "w:tblStyle", "w:basedOn", "w:next", "w:link", "w:numStyleLink", "w:styleLink"]);
+// Attributes that carry a writer's free text, never a format: dropped wherever they are.
+const W_FREE = new Set(["instr", "anchor", "tooltip", "docLocation", "tgtFrame", "author", "date", "initials", "paraId", "textId"]);
+// Kept text never goes elsewhere, so these hold nothing the person sees: dropped silently.
+const SILENT = new Set(["w:del", "w:moveFrom", "w:bookmarkStart", "w:bookmarkEnd", "w:commentRangeStart", "w:commentRangeEnd", "w:permStart", "w:permEnd", "w:proofErr",
+  "w:moveFromRangeStart", "w:moveFromRangeEnd", "w:moveToRangeStart", "w:moveToRangeEnd", "w:customXmlInsRangeStart", "w:customXmlInsRangeEnd", "w:customXmlDelRangeStart",
+  "w:customXmlDelRangeEnd", "w:customXmlMoveFromRangeStart", "w:customXmlMoveFromRangeEnd", "w:customXmlMoveToRangeStart", "w:customXmlMoveToRangeEnd",
+  "w:lastRenderedPageBreak", "w:delText", "w:delInstrText", "w:commentReference", "w:annotationRef", "w:separator", "w:continuationSeparator",
+  "w:footnoteRef", "w:endnoteRef", "mc:Fallback", "w:sdtPr", "w:sdtEndPr", "w:smartTagPr", "w:customXmlPr", "w:fldData"]);
+// What the person sees but a clean copy cannot keep faithfully: the file is refused as damaged.
+const LOSSY = new Set(["w:altChunk", "m:oMath", "m:oMathPara", "w:subDoc", "w:object", "w:footnoteReference", "w:endnoteReference", "w:ruby", "w:control", "w:contentPart",
+  "w:embedObject", "w:movie"]);
+const IGNORABLE = /^(?:w1\d\w*|wp1\d|a1\d\w*|asvg|thm1\d|w16\w*|a16\w*|wne)$/; // extension markup a reader may ignore
+const PROPS_DROP = new Set(["ins", "del", "moveFrom", "moveTo", "rsid", "rsids", "rsidRoot", "latentStyles", "aliases", "numPicBullet", "lvlPicBulletId", "nsid", "tmpl",
+  "numIdMacAtCleanup", "docVars", "docVar", "attachedTemplate", "placeholder", "dataBinding"]);
+const SETTINGS_KEEP = new Set(["defaultTabStop", "evenAndOddHeaders", "mirrorMargins", "gutterAtTop", "autoHyphenation", "consecutiveHyphenLimit", "hyphenationZone",
+  "doNotHyphenateCaps", "characterSpacingControl", "compat", "themeFontLang", "decimalSymbol", "listSeparator", "bordersDoNotSurroundHeader", "bordersDoNotSurroundFooter",
+  "defaultTableStyle", "displayBackgroundShape", "noPunctuationKerning", "clrSchemeMapping", "doNotUseHTMLParagraphAutoSpacing"]);
+const RUN_LEAF = new Set(["w:tab", "w:br", "w:cr", "w:ptab", "w:noBreakHyphen", "w:softHyphen", "w:pgNum", "w:dayShort", "w:monthShort", "w:yearShort", "w:dayLong", "w:monthLong", "w:yearLong"]);
+type PartKind = "document" | "header" | "footer" | "styles" | "numbering" | "settings" | "theme";
+const ROOT: Record<PartKind, string> = { document: "w:document", header: "w:hdr", footer: "w:ftr", styles: "w:styles", numbering: "w:numbering", settings: "w:settings", theme: "a:theme" };
+type Kind = "root" | "block" | "p" | "runc" | "r" | "t" | "instr" | "props" | "tbl" | "tr" | "dml" | "txbx" | "skip";
+type Frame = { name: string; keep: boolean; ck: Kind; sp?: "sdt" | "mc" | "sym" | "lvl"; check?: "pict" | "unknown"; body?: boolean; tc?: boolean; lastP?: boolean; chosen?: boolean; leafText?: RegExp };
+type RelFn = (element: string, attr: string, id: string) => string | null;
+class CleanPart implements XmlHandler {
+  out: string[] = []; gate: string[] = []; attrLines = new Set<string>();
+  private stack: Frame[] = []; private done = false;
+  constructor(private part: PartKind, private rel: RelFn) {}
+  private emit(real: string, gate = real) { this.out.push(real); this.gate.push(gate); }
+  private top() { return this.stack[this.stack.length - 1]; }
+  private container() { for (let k = this.stack.length - 1; k >= 0; k--) if (this.stack[k].keep) return this.stack[k]; return undefined; }
+  private attrsOf(name: string, kind: Kind, attrs: [string, string][]): string | null {
+    let out = "";
+    const dml = DML.has(pfx(name)) || pfx(name) === "a";
+    for (const [an, v] of attrs) {
+      const ap = pfx(an), al = loc(an);
+      if (an === "xmlns" || ap === "xmlns") continue;
+      if (an === "xml:space") { if (v === "preserve") out += ` xml:space="preserve"`; continue; }
+      if (ap === "r") {
+        if (al !== "id" && al !== "embed") continue;
+        const nid = this.rel(name, al, v);
+        if (nid === null) { if (name === "w:headerReference" || name === "w:footerReference") return null; continue; }
+        out += ` r:${al}="${nid}"`;
+        continue;
+      }
+      if (!attrNameOk(al)) continue;
+      let val = v;
+      if (ap === "w") {
+        if (al.startsWith("rsid") || W_FREE.has(al)) continue;
+        if ((STYLE_REF.has(name) && al === "val") || (name === "w:style" && al === "styleId")) val = styleId(v);
+        if (name === "w:lvlText" && al === "val") {
+          // A list label: its level numbers (%1) and a bullet glyph or punctuation, never a figure or long text of its own.
+          if (/\p{N}/u.test(v.replace(/%[1-9]/g, "")) || v.length > 12) throw new Damaged("a list label with text in it");
+        }
+      } else if (ap === "" && (dml || pfx(name) === "mc")) {
+        if (al === "descr" || al === "title") continue;
+        if (al === "name") val = /^(?:docPr|cNvPr)$/.test(loc(name)) ? "Shape" : /^(?:theme|clrScheme|fontScheme|fmtScheme)$/.test(loc(name)) ? "Office" : v;
+        if (name === "mc:Choice" && al === "Requires") { if (!v.split(/\s+/).filter(Boolean).every((t) => MC_REQUIRES.has(t))) throw new Damaged(`content that needs ${v}`); }
+        if (name === "a:graphicData" && al === "uri" && !GRAPHIC_URIS.has(v)) throw new Damaged("a chart, diagram or other graphic");
+      } else continue; // any other namespace, or an unprefixed attribute on WordprocessingML
+      if (!valueOk(val)) { if (kind === "props") return null; continue; }
+      out += ` ${an}="${escAttr(val)}"`;
+      this.attrLines.add(`${gateLabel(al, name)}: ${val}`.replace(/\s+/g, " ").trim());
+    }
+    if (name === "a:blip" && !/ r:embed="/.test(out)) throw new Damaged("a linked picture");
+    return out;
+  }
+  // How a child element is kept, from its parent's context.
+  private classify(f: Frame, name: string): Frame {
+    const keep = (ck: Kind, extra: Partial<Frame> = {}): Frame => ({ name, keep: true, ck, ...extra });
+    const unwrap = (ck: Kind, extra: Partial<Frame> = {}): Frame => ({ name, keep: false, ck, ...extra });
+    const skip = (check?: "pict" | "unknown"): Frame => ({ name, keep: false, ck: "skip", check });
+    const p = pfx(name);
+    if (LOSSY.has(name)) throw new Damaged(`${name} cannot be kept`);
+    if (/\d{3,}/.test(loc(name)) || (GATE_CTX.test(loc(name)) && loc(name) !== "type")) return skip("unknown");
+    if (SILENT.has(name) || IGNORABLE.test(p)) return skip();
+    if (f.sp === "sdt") return name === "w:sdtContent" ? unwrap(f.ck) : skip("unknown");
+    if (f.sp === "mc") {
+      if (name !== "mc:Choice") return skip("unknown");
+      if (f.chosen) return skip();
+      f.chosen = true;
+      return keep(f.ck);
+    }
+    switch (f.ck) {
+      case "root":
+        if (this.part === "document") return name === "w:body" ? keep("block", { body: true }) : name === "w:background" ? keep("props") : skip("unknown");
+        if (this.part === "settings") return p === "w" && SETTINGS_KEEP.has(loc(name)) ? keep("props") : skip();
+        return skip("unknown");
+      case "block":
+        if (name === "w:p") return keep("p");
+        if (name === "w:tbl") return keep("tbl");
+        if (name === "w:sectPr" && f.body) return keep("props");
+        if (name === "w:tcPr" && f.tc) return keep("props");
+        if (name === "w:sdt") return unwrap("block", { sp: "sdt" });
+        if (name === "w:customXml" || name === "w:ins" || name === "w:moveTo") return unwrap("block");
+        if (name === "mc:AlternateContent") return keep("block", { sp: "mc" });
+        return skip("unknown");
+      case "p": case "runc":
+        if (name === "w:pPr" && f.ck === "p" && f.keep) return keep("props");
+        if (name === "w:r") return keep("r");
+        if (name === "w:hyperlink" || name === "w:dir" || name === "w:bdo") return keep("runc");
+        if (name === "w:fldSimple" || name === "w:smartTag" || name === "w:customXml" || name === "w:ins" || name === "w:moveTo") return unwrap("runc");
+        if (name === "w:sdt") return unwrap("runc", { sp: "sdt" });
+        if (name === "mc:AlternateContent") return keep("runc", { sp: "mc" });
+        return skip("unknown");
+      case "r":
+        if (name === "w:rPr") return keep("props");
+        if (name === "w:t") return keep("t");
+        if (name === "w:fldChar") return keep("props");
+        if (name === "w:instrText") return keep("instr");
+        if (RUN_LEAF.has(name)) return keep("props");
+        if (name === "w:sym") return keep("props", { sp: "sym" });
+        if (name === "w:drawing") return keep("dml");
+        if (name === "mc:AlternateContent") return keep("r", { sp: "mc" });
+        if (name === "w:pict") return skip("pict");
+        return skip("unknown");
+      case "tbl":
+        if (name === "w:tblPr" || name === "w:tblGrid") return keep("props");
+        if (name === "w:tr") return keep("tr");
+        if (name === "w:sdt") return unwrap("tbl", { sp: "sdt" });
+        if (name === "w:customXml" || name === "w:ins" || name === "w:moveTo") return unwrap("tbl");
+        return skip("unknown");
+      case "tr":
+        if (name === "w:trPr" || name === "w:tblPrEx") return keep("props");
+        if (name === "w:tc") return keep("block", { tc: true });
+        if (name === "w:sdt") return unwrap("tr", { sp: "sdt" });
+        if (name === "w:customXml" || name === "w:ins" || name === "w:moveTo") return unwrap("tr");
+        return skip("unknown");
+      case "props": {
+        const l = loc(name);
+        if (p !== "w" || PROPS_DROP.has(l) || l.endsWith("Change")) return skip();
+        if (this.part === "numbering" && l === "name") return skip();
+        return keep("props", name === "w:lvlText" ? { sp: "lvl" } : {});
+      }
+      case "dml":
+        if (name === "mc:AlternateContent") return keep("dml", { sp: "mc" });
+        if (!DML.has(p)) return skip("unknown");
+        if (/^a:(?:extLst|hlinkClick|hlinkHover|hlinkMouseOver)$/.test(name)) return skip();
+        if (name === "a:txBody") return skip("unknown");
+        if (name === "wps:txbx") return keep("txbx");
+        if (name === "wp:posOffset") return keep("dml", { leafText: /^-?\d{1,10}$/ });
+        if (name === "wp:align") return keep("dml", { leafText: /^[A-Za-z]{1,16}$/ });
+        return keep("dml");
+      case "txbx":
+        return name === "w:txbxContent" ? keep("block") : skip("unknown");
+    }
+    return skip("unknown");
+  }
+  start(name: string, attrs: [string, string][], self: boolean): void {
+    if (this.stack.length > 1500) throw new Damaged("nesting too deep");
+    let f: Frame;
+    const parent = this.top();
+    if (!parent) {
+      if (this.done || name !== ROOT[this.part]) throw new Damaged(`the part's root is ${name}`);
+      f = { name, keep: true, ck: this.part === "header" || this.part === "footer" ? "block" : this.part === "styles" || this.part === "numbering" ? "props" : this.part === "theme" ? "dml" : "root" };
+      const a = this.part === "theme" ? ` name="Office"` : "";
+      this.emit(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<${name}${NS_DECL}${a}${self ? "/" : ""}>`);
+      if (self) { this.done = true; return; }
+      this.stack.push(f);
+      return;
+    }
+    if (parent.ck === "skip") {
+      // A dropped subtree; one that may hold what the person sees is checked, so nothing visible is lost silently.
+      if (parent.check === "pict" && attrs.some(([an, v]) => loc(an) === "string" && v.trim())) throw new Damaged("a VML picture with text in it");
+      // A Word "Horizontal Line" is a VML shape the clean copy cannot keep: refused, never dropped silently (review of 64c7f13b).
+      if (parent.check === "pict" && attrs.some(([an, v]) => an === "o:hr" && /^(?:t|true)$/i.test(v))) throw new Damaged("a horizontal line");
+      if (parent.check === "unknown" && /^(?:w:drawing|w:pict|a:blip|v:imagedata|w:t)$/.test(name)) throw new Damaged(`an unknown ${parent.name} with content`);
+      if (!self) this.stack.push({ name, keep: false, ck: "skip", check: parent.check });
+      return;
+    }
+    f = this.classify(parent, name);
+    if (f.ck === "skip" && f.check === "pict" && attrs.some(([an, v]) => loc(an) === "string" && v.trim())) throw new Damaged("a VML picture with text in it");
+    if (f.keep) {
+      const a = this.attrsOf(name, f.ck, attrs);
+      if (a === null) f = { name, keep: false, ck: "skip" };
+      else {
+        if (name === "w:p" || name === "w:tbl") { const c = this.container(); if (c?.tc || c?.ck === "block") c.lastP = name === "w:p"; }
+        if (f.sp === "sym") {
+          // A symbol is checked as the character it shows (a Symbol-font "F034" is a 4), and kept as a symbol.
+          const ch = attrs.find(([an]) => an === "w:char")?.[1] ?? "", cp = parseInt(ch, 16);
+          const shown = Number.isFinite(cp) && cp > 0 ? String.fromCodePoint(cp >= 0xf000 && cp <= 0xf0ff ? cp - 0xf000 : cp) : "";
+          this.emit(`<${name}${a}/>`, shown ? `<w:t>${escText(shown)}</w:t>` : "");
+          if (!self) this.stack.push({ name, keep: false, ck: "skip" }); // a symbol has no content
+          return;
+        }
+        this.emit(`<${name}${a}${self ? "/" : ""}>`);
+      }
+    }
+    if (!self) this.stack.push(f);
+  }
+  end(name: string): void {
+    const f = this.stack.pop();
+    if (!f || f.name !== name) throw new Damaged(`a ${name} end tag out of place`);
+    if (!f.keep) return;
+    if ((f.tc || (this.stack.length === 0 && (this.part === "header" || this.part === "footer"))) && !f.lastP) this.emit("<w:p/>"); // a cell, header or footer ends in a paragraph
+    this.emit(`</${name}>`);
+    if (this.stack.length === 0) this.done = true;
+  }
+  text(t: string): void {
+    const f = this.top();
+    if (!f) { if (t.trim()) throw new Damaged("text outside the root"); return; }
+    if (f.ck === "skip") { if (f.check && t.trim()) throw new Damaged(`text in a dropped ${f.name}`); return; }
+    if (f.ck === "t") { this.emit(escText(t)); return; }
+    if (f.ck === "instr") { if (FIELD_OK.test(t)) { this.emit(escText(t)); this.attrLines.add(`field: ${t.trim()}`); } return; }
+    if (f.leafText) { const v = t.trim(); if (!f.leafText.test(v)) throw new Damaged(`a ${f.name} value`); this.emit(v); this.attrLines.add(`${loc(f.name)}: ${v}`); return; }
+    if (f.sp === "lvl" && t.trim()) throw new Damaged("text in a list label");
+  }
+  result(): string {
+    if (!this.done || this.stack.length) throw new Damaged("the part ends before its root closes");
+    return this.out.join("");
+  }
+}
+
+// Image bytes without their metadata (PNG text and other ancillary chunks, JPEG EXIF/XMP/comments except the orientation,
+// GIF comment and application blocks): pixels only. An image that does not parse is damaged.
+function cleanPng(b: Uint8Array): Uint8Array {
+  const SIG = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (b.length < 8 || SIG.some((x, i) => b[i] !== x)) throw new Damaged("not a PNG");
+  const KEEP = new Set(["IHDR", "PLTE", "IDAT", "IEND", "tRNS", "gAMA", "cHRM", "sRGB", "sBIT", "pHYs", "bKGD"]), out: Uint8Array[] = [b.subarray(0, 8)];
+  let p = 8, end = false;
+  while (p + 12 <= b.length) {
+    const len = ((b[p] << 24) | (b[p + 1] << 16) | (b[p + 2] << 8) | b[p + 3]) >>> 0, type = String.fromCharCode(b[p + 4], b[p + 5], b[p + 6], b[p + 7]);
+    if (p + 12 + len > b.length) throw new Damaged("a cut-off PNG");
+    if (KEEP.has(type)) out.push(b.subarray(p, p + 12 + len));
+    p += 12 + len;
+    if (type === "IEND") { end = true; break; }
+  }
+  if (!end || out.length < 3) throw new Damaged("a PNG with no end");
+  return concatBytes(out);
+}
+function cleanJpeg(b: Uint8Array): Uint8Array {
+  if (b[0] !== 0xff || b[1] !== 0xd8) throw new Damaged("not a JPEG");
+  const out: Uint8Array[] = [b.subarray(0, 2)];
+  let p = 2;
+  for (;;) {
+    if (p + 1 >= b.length || b[p] !== 0xff) throw new Damaged("a bad JPEG marker");
+    while (b[p + 1] === 0xff) p++;
+    const m = b[p + 1];
+    if (m === 0xd9) { out.push(Uint8Array.of(0xff, 0xd9)); break; }
+    if ((m >= 0xd0 && m <= 0xd7) || m === 0x01) { out.push(b.subarray(p, p + 2)); p += 2; continue; }
+    if (p + 4 > b.length) throw new Damaged("a cut-off JPEG");
+    const len = (b[p + 2] << 8) | b[p + 3], seg = b.subarray(p, p + 2 + len);
+    if (p + 2 + len > b.length || len < 2) throw new Damaged("a cut-off JPEG");
+    if (m === 0xda) {
+      out.push(seg);
+      let q = p + 2 + len;
+      while (q + 1 < b.length && !(b[q] === 0xff && b[q + 1] !== 0 && !(b[q + 1] >= 0xd0 && b[q + 1] <= 0xd7))) q++;
+      if (q + 1 >= b.length) throw new Damaged("a JPEG with no end");
+      out.push(b.subarray(p + 2 + len, q));
+      p = q; continue;
+    }
+    if ((m >= 0xc0 && m <= 0xcf) || m === 0xdb || m === 0xdd || m === 0xee || (m === 0xe0 && String.fromCharCode(...seg.subarray(4, 9)) === "JFIF\u0000")) out.push(seg);
+    else if (m === 0xe1) { const o = exifOrientation(seg.subarray(4)); if (o > 1 && o <= 8) out.push(Uint8Array.of(0xff, 0xe1, 0, 34, 0x45, 0x78, 0x69, 0x66, 0, 0, 0x4d, 0x4d, 0, 0x2a, 0, 0, 0, 8, 0, 1, 1, 0x12, 0, 3, 0, 0, 0, 1, 0, o, 0, 0, 0, 0, 0, 0)); }
+    p += 2 + len;
+  }
+  return concatBytes(out);
+}
+function exifOrientation(d: Uint8Array): number {
+  if (d.length < 14 || String.fromCharCode(...d.subarray(0, 4)) !== "Exif") return 0;
+  const t = d.subarray(6), le = t[0] === 0x49, u16 = (i: number) => (le ? t[i] | (t[i + 1] << 8) : (t[i] << 8) | t[i + 1]);
+  const u32 = (i: number) => (le ? (t[i] | (t[i + 1] << 8) | (t[i + 2] << 16) | (t[i + 3] << 24)) : ((t[i] << 24) | (t[i + 1] << 16) | (t[i + 2] << 8) | t[i + 3])) >>> 0;
+  const ifd = u32(4);
+  if (ifd + 2 > t.length) return 0;
+  for (let k = 0, n = u16(ifd); k < n && ifd + 2 + k * 12 + 12 <= t.length; k++) { const e = ifd + 2 + k * 12; if (u16(e) === 0x0112) return u16(e + 8); }
+  return 0;
+}
+function cleanGif(b: Uint8Array): Uint8Array {
+  const head = String.fromCharCode(...b.subarray(0, 6));
+  if (head !== "GIF87a" && head !== "GIF89a") throw new Damaged("not a GIF");
+  const table = (packed: number) => (packed & 0x80 ? 3 * (1 << ((packed & 7) + 1)) : 0);
+  const blocks = (q: number) => { while (q < b.length && b[q] !== 0) q += b[q] + 1; if (q >= b.length) throw new Damaged("a cut-off GIF"); return q + 1; };
+  let p = 13 + table(b[10]);
+  const out: Uint8Array[] = [b.subarray(0, p)];
+  for (;;) {
+    if (p >= b.length) throw new Damaged("a GIF with no end");
+    if (b[p] === 0x3b) { out.push(Uint8Array.of(0x3b)); break; }
+    if (b[p] === 0x21) { const e = blocks(p + 2); if (b[p + 1] === 0xf9) out.push(b.subarray(p, e)); p = e; continue; }
+    if (b[p] === 0x2c) { const e = blocks(p + 10 + table(b[p + 9]) + 1); out.push(b.subarray(p, e)); p = e; continue; }
+    throw new Damaged("a bad GIF block");
+  }
+  return concatBytes(out);
+}
+function concatBytes(xs: Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(xs.reduce((n, x) => n + x.length, 0));
+  let at = 0;
+  for (const x of xs) { out.set(x, at); at += x.length; }
+  return out;
+}
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = (b: Uint8Array) => { let c = 0xffffffff; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+// A zip of the clean parts, deflated, with fixed dates, so the same file always gives the same clean bytes (and sha256).
+// deno-lint-ignore no-explicit-any
+function zipParts(zlib: any, entries: { name: string; data: Uint8Array }[]): Uint8Array {
+  const chunks: Uint8Array[] = [], central: Uint8Array[] = [];
+  let off = 0;
+  const le = (n: number, w: number) => { const a = new Uint8Array(w); for (let i = 0; i < w; i++) a[i] = (n >>> (8 * i)) & 0xff; return a; };
+  for (const e of entries) {
+    const name = new TextEncoder().encode(e.name), comp = new Uint8Array(zlib.deflateRawSync(e.data)), crc = crc32(e.data);
+    const common = [le(20, 2), le(0x0800, 2), le(8, 2), le(0, 2), le(0x21, 2), le(crc, 4), le(comp.length, 4), le(e.data.length, 4), le(name.length, 2), le(0, 2)];
+    const local = concatBytes([le(0x04034b50, 4), ...common, name]);
+    chunks.push(local, comp);
+    central.push(concatBytes([le(0x02014b50, 4), le(20, 2), ...common, le(0, 2), le(0, 2), le(0, 2), le(0, 4), le(off, 4), name]));
+    off += local.length + comp.length;
+  }
+  const cd = concatBytes(central);
+  return concatBytes([...chunks, cd, le(0x06054b50, 4), le(0, 2), le(0, 2), le(entries.length, 2), le(entries.length, 2), le(cd.length, 4), le(off, 4), le(0, 2)]);
+}
+const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
+const CT = "application/vnd.openxmlformats-officedocument.";
+const PART_CT: Record<string, string> = { document: `${CT}wordprocessingml.document.main+xml`, styles: `${CT}wordprocessingml.styles+xml`, numbering: `${CT}wordprocessingml.numbering+xml`,
+  settings: `${CT}wordprocessingml.settings+xml`, theme: `${CT}theme+xml`, header: `${CT}wordprocessingml.header+xml`, footer: `${CT}wordprocessingml.footer+xml` };
+export type CleanDocx = { bytes: Uint8Array; text: string[]; attrs: string[]; urls: string[] };
+// deno-lint-ignore no-explicit-any
+function buildClean(r: any, Buffer: any, zlib: any, bytes: Uint8Array): CleanDocx {
+  const buf = Buffer.from(bytes), names: string[] = r.docxPartNames(buf) ?? [];
+  const find = (n: string) => names.includes(n) ? n : names.find((x) => x.toLowerCase() === n.toLowerCase());
+  const raw = (n: string): Uint8Array => { const at = find(n); const p = at ? r.docxPart(buf, at) : null; if (!p) throw new Damaged(`part not readable: ${n}`); return new Uint8Array(p); };
+  const dir = (n: string) => n.includes("/") ? n.slice(0, n.lastIndexOf("/") + 1) : "";
+  const resolve = (base: string, target: string) => {
+    let t = target; try { t = decodeURIComponent(t); } catch { /* as written */ }
+    const segs = (t.startsWith("/") ? t.slice(1) : dir(base) + t).split("/"), out: string[] = [];
+    for (const s of segs) { if (s === "..") out.pop(); else if (s && s !== ".") out.push(s); }
+    return out.join("/");
+  };
+  type InRel = { type: string; target: string; external: boolean };
+  const relsOf = (n: string): Map<string, InRel> => {
+    const m = new Map<string, InRel>(), rn = `${dir(n)}_rels/${n.slice(dir(n).length)}.rels`;
+    if (!find(rn)) return m;
+    scanXml(decodePart(raw(rn), true), { start: (name, attrs) => {
+      if (loc(name) !== "Relationship") return;
+      const a = Object.fromEntries(attrs.map(([k, v]) => [loc(k), v]));
+      if (a.Id) m.set(a.Id, { type: String(a.Type ?? "").split("/").pop() ?? "", target: String(a.Target ?? ""), external: /^external$/i.test(String(a.TargetMode ?? "")) });
+    }, end: () => {}, text: () => {} });
+    return m;
+  };
+  const files: { name: string; data: Uint8Array }[] = [], overrides: [string, string][] = [], text: string[] = [], attrs = new Set<string>(), urls: string[] = [];
+  const media = new Map<string, string>(), parts = new Map<string, string>(), count: Record<string, number> = {};
+  const enc = new TextEncoder();
+  const relsXml = (rs: string[]) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rs.join("")}</Relationships>`;
+  const build = (src: string, kind: PartKind, outName: string) => {
+    const inRels = relsOf(src), outRels: string[] = [], byTarget = new Map<string, string>();
+    const add = (type: string, target: string, external = false) => {
+      const key = `${type} ${target}`;
+      if (byTarget.has(key)) return byTarget.get(key)!;
+      const id = `rId${outRels.length + 1}`;
+      outRels.push(`<Relationship Id="${id}" Type="${REL}${type}" Target="${escAttr(target)}"${external ? ` TargetMode="External"` : ""}/>`);
+      byTarget.set(key, id);
+      return id;
+    };
+    const content = kind === "document" || kind === "header" || kind === "footer";
+    if (kind === "document") for (const [, rl] of inRels) {
+      const k = rl.type as PartKind;
+      if (rl.external || !(k === "styles" || k === "numbering" || k === "settings" || k === "theme") || parts.has(k)) continue;
+      const nn = k === "theme" ? "theme/theme1.xml" : `${k}.xml`;
+      parts.set(k, nn);
+      build(resolve(src, rl.target), k, `word/${nn}`);
+      add(k, nn);
+    }
+    const p = new CleanPart(kind, (element, attr, id) => {
+      const rl = inRels.get(id);
+      if (!rl) { if (element === "a:blip") throw new Damaged("a picture with no image"); return null; }
+      if (element === "w:hyperlink" && attr === "id") {
+        if (rl.type !== "hyperlink" || !rl.external) return null;
+        const url = rl.target.trim();
+        if (!/^(?:https?:\/\/|mailto:|tel:)/i.test(url) || url.length > 2048 || /[\s<>"]/.test(url)) return null;
+        urls.push(...urlGateLines(url));
+        return add("hyperlink", url, true);
+      }
+      if ((element === "w:headerReference" || element === "w:footerReference") && kind === "document") {
+        const t = element === "w:headerReference" ? "header" : "footer";
+        if (rl.type !== t || rl.external) return null;
+        const from = resolve(src, rl.target);
+        let nn = parts.get(from);
+        if (!nn) { count[t] = (count[t] ?? 0) + 1; nn = `${t}${count[t]}.xml`; parts.set(from, nn); build(from, t, `word/${nn}`); }
+        return add(t, nn);
+      }
+      if (element === "a:blip" && attr === "embed") {
+        if (rl.type !== "image" || rl.external) throw new Damaged("a linked picture");
+        const from = resolve(src, rl.target);
+        let nn = media.get(from);
+        if (!nn) {
+          const b = raw(from), kindOf = b[0] === 0x89 && b[1] === 0x50 ? "png" : b[0] === 0xff && b[1] === 0xd8 ? "jpeg" : b[0] === 0x47 && b[1] === 0x49 ? "gif" : null;
+          if (!kindOf) throw new Damaged(`a picture the clean copy cannot keep: ${from}`);
+          nn = `media/image${media.size + 1}.${kindOf}`;
+          media.set(from, nn);
+          files.push({ name: `word/${nn}`, data: kindOf === "png" ? cleanPng(b) : kindOf === "jpeg" ? cleanJpeg(b) : cleanGif(b) });
+        }
+        return add("image", nn);
+      }
+      return null;
+    });
+    scanXml(decodePart(raw(src), true), p);
+    const xml = p.result();
+    for (const l of p.attrLines) attrs.add(l);
+    if (content) text.push(docxResumeLines(p.gate.join("")).join("\n"));
+    files.push({ name: outName, data: enc.encode(xml) });
+    overrides.push([`/${outName}`, PART_CT[kind]]);
+    if (outRels.length) files.push({ name: `${dir(outName)}_rels/${outName.slice(dir(outName).length)}.rels`, data: enc.encode(relsXml(outRels)) });
+  };
+  if (!names.includes("word/document.xml")) throw new Damaged("no document part");
+  build("word/document.xml", "document", "word/document.xml");
+  const types = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+    `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>` +
+    `<Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Default Extension="gif" ContentType="image/gif"/>` +
+    overrides.map(([n, t]) => `<Override PartName="${n}" ContentType="${t}"/>`).join("") + `</Types>`;
+  const root = relsXml([`<Relationship Id="rId1" Type="${REL}officeDocument" Target="word/document.xml"/>`]);
+  const order = (n: string) => n === "word/document.xml" ? 0 : 1;
+  const zip = zipParts(zlib, [{ name: "[Content_Types].xml", data: enc.encode(types) }, { name: "_rels/.rels", data: enc.encode(root) },
+    ...files.sort((a, b) => order(a.name) - order(b.name) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))]);
+  return { bytes: zip, text, attrs: [...attrs], urls };
+}
+// deno-lint-ignore no-explicit-any
+let cleanRuntime: Promise<any> | null = null;
+export async function cleanCopy(bytes: Uint8Array): Promise<CleanDocx> {
+  cleanRuntime ??= Promise.all([import("node:zlib"), import("node:crypto"), import("node:buffer")])
+    // deno-lint-ignore no-explicit-any
+    .then(([zlib, crypto, b]) => ({ r: (CareerRender as any).withRuntime({ zlib, crypto, Buffer: b.Buffer }), Buffer: b.Buffer, zlib }));
+  const { r, Buffer, zlib } = await cleanRuntime;
+  return buildClean(r, Buffer, zlib, bytes);
+}
+// The clean copy of a Word file: the bytes stored for it. Throws when no faithful clean copy can be built.
+export async function cleanDocx(bytes: Uint8Array): Promise<Uint8Array> {
+  return (await cleanCopy(bytes)).bytes;
+}
+const gateHit = (t: string) => !!t.trim() && (fileCodeLines(t).length > 0 || redactIdentity(t).removed.length > 0 || redactIdentity(codeCheckText(t)).removed.length > 0);
+// The clean copy is gated as stored: each part's text as a whole (as the visible text is), each attribute value and each link
+// parameter on its own line (a value is judged by its own name, never by its neighbour's).
+export function cleanCopyTrips(c: CleanDocx): boolean {
+  return c.text.some(gateHit) || c.attrs.some(gateHit) || c.urls.some(gateHit);
+}
+
+export type ResumeFileResult ={ ok: true; message: string; uploadId: string; sha256: string; note?: string } | { ok: false; reply: string; why: string; lines?: number[] };
 export async function ingestResumeFile(o: {
   userId: string; channel: "telegram"; doc: { fileId: string; uniqueId: string; name: string; mime: string; size: number | null };
   fetchFile: (fileId: string, maxBytes: number) => Promise<{ ok: true; bytes: Uint8Array } | { ok: false; error: string }>;
@@ -273,18 +1024,43 @@ export async function ingestResumeFile(o: {
   // ONBOARDING ROUND 2: an identity number, a card number or a password in the file. The text the chat reads had it
   // removed, but the file itself was stored as the person's upload (and is the file an application attaches), with the
   // number in it. Now the file is not kept and nothing is read from it; the person is told what to remove.
-  const found = redactIdentity(text).removed;
+  // The identity check also reads the text as the code check does (any script's digits, look-alike letters, no zero-width
+  // characters), so a disguised number is not missed by one check and passed by the other.
+  const found = [...new Set([...redactIdentity(text).removed, ...redactIdentity(codeCheckText(text)).removed])];
+  // A plausible one-time code refuses the file (owner decision on 2de155f0): the reply names only the line and the kind, never
+  // the line itself, and nothing from the file is kept or read.
+  const codeLines = fileCodeLines(text);
+  if (codeLines.length && !found.includes("code")) found.push("code");
   if (found.length) {
     const name: Record<string, string> = { ssn: "a Social Security number", card: "a card number", account: "an account number", password: "a password", code: "a one-time code", key: "a key or token" };
-    return { ok: false, reply: fileSecretReply([...new Set(found.map((k) => name[k] ?? "a private number"))]), why: "secret" };
+    const kinds = [...new Set(found.map((k) => name[k] ?? "a private number"))];
+    return { ok: false, reply: codeLines.length ? fileCodeReply(codeLines, kinds.filter((k) => k !== name.code)) : fileSecretReply(kinds), why: "secret", lines: codeLines };
+  }
+  // The parts of a Word file the reader does not show are read by the same checks before the file is kept.
+  if (kind === "docx") {
+    let hidden = "";
+    // Fail closed: a part that cannot be read may hold anything, so the file is not kept.
+    try { hidden = await docxHiddenText(got.bytes); } catch (e) { console.error("resume file: hidden parts not read:", (e as Error)?.message ?? e); return { ok: false, reply: FILE_DAMAGED_REPLY, why: "damaged" }; }
+    if (hidden.trim() && (fileCodeLines(hidden).length || redactIdentity(hidden).removed.length || redactIdentity(codeCheckText(hidden)).removed.length)) {
+      return { ok: false, reply: FILE_HIDDEN_CODE_REPLY, why: "secret", lines: [] };
+    }
+  }
+  // RELEASE 8: a Word file is stored as its clean copy only (cleanDocx above), gated before it is kept. A file no faithful clean
+  // copy can be built from is refused as damaged; nothing is stored on any refusal.
+  let stored = got.bytes;
+  if (kind === "docx") {
+    let clean: CleanDocx;
+    try { clean = await cleanCopy(got.bytes); } catch (e) { console.error("resume file: no clean copy:", (e as Error)?.message ?? e); return { ok: false, reply: FILE_DAMAGED_REPLY, why: "damaged" }; }
+    if (cleanCopyTrips(clean)) return { ok: false, reply: FILE_HIDDEN_CODE_REPLY, why: "secret", lines: [] };
+    stored = clean.bytes;
   }
   const message = resumeMessage(text);
   if (!readsAsResume(message)) return { ok: false, reply: fileNotResumeReply(text), why: "not_resume" };
-  const sha256 = await sha256Bytes(got.bytes);
+  const sha256 = await sha256Bytes(stored);
   let uploadId: string;
   try {
     uploadId = await o.record({ userId: o.userId, channel: o.channel, ref: `${o.channel}:${o.doc.uniqueId}`, filename: storedFilename(o.doc.name, kind), mime: KIND_MIME[kind],
-      bytes: got.bytes.length, sha256, content_b64: b64(got.bytes), message_sha256: await sha256Text(message) });
+      bytes: stored.length, sha256, content_b64: b64(stored), message_sha256: await sha256Text(message) });
   } catch (e) {
     console.error("resume file: not stored:", (e as Error)?.message ?? e);
     return { ok: false, reply: FILE_SAVE_REPLY, why: "store" };
@@ -311,6 +1087,21 @@ export function supabaseUploadRecorder(admin: any) {
 // The evidence step's upload, when the person's message that carried the entries was a file's text: the file itself (the
 // person's original upload, by its provider reference and the sha256 of its bytes). Otherwise the message, unchanged.
 // deno-lint-ignore no-explicit-any
+// Whether a chat message is the text of a resume file this person uploaded: its sha256 is the message_sha256 the upload stored
+// (resumeMessage, above). Such a message skips code-in-chat's code-word pass: a resume line like "Built a customer portal
+// serving 120000 customers" is not a one-time code, and removing it changed the stored text so the confirmation lost the
+// file (Greptile on #568). Typed text that only starts like a file message has no matching upload, so it is checked as usual.
+// The file itself was refused at upload if it carried an identity number or a labeled code (ingestResumeFile, above).
+export async function isUploadedResumeText(admin: any, userId: string | null | undefined, text: string): Promise<boolean> {
+  if (!userId || !String(text ?? "").startsWith("here is my resume:\n")) return false;
+  try {
+    const r = await admin.from("career_resume_uploads").select("id").eq("user_id", userId).eq("message_sha256", await sha256Text(text)).limit(1);
+    return !r.error && Array.isArray(r.data) && r.data.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function fileUploadFor(admin: any, userId: string, upload: Upload | null): Promise<Upload | null> {
   if (!upload || upload.kind !== "message") return upload;
   try {

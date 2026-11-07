@@ -7,6 +7,7 @@
 //   leaks   no tool name, raw job id, uuid or JSON field name reaches the person.
 // Each finder returns what it found (for the one rewrite the loop asks for) and a fixer applies code's last resort.
 import { DEGREES, factLock, factText, norm, SCALE, TITLES, TOOLS } from "../essay_draft.ts";
+import { DISTRESS } from "./style.ts";
 import { personalSourceDenied as sourceDenied, personalSourceGuard } from "../personal_fact_source.ts";
 
 // ------------------------------------------------------------------------------------------------ sentences
@@ -458,3 +459,90 @@ export function waiverSolicits(reply: string, refuse: (text: string) => string |
 const SAVE_WORDS = /\b(?:sav(?:e|ed|ing)|keep(?:s|ing)?|kept|remember(?:ed|ing)?|stor(?:e|ed|ing)|record(?:ed|ing)?|note (?:it|that|this) down)\b/i;
 const CONFIRM_AFTER_REFUSAL = /^(?:(?:is|does|would|will|are|was)\s+(?:that|this|it|everything|all of that)\b[^?]{0,50}|(?:sounds?|ok|okay|good|alright|all right|fair|agreed|deal)\b[^?]{0,20}|.{0,30}\bwhat you(?:'d| would)? (?:like|want)\b[^?]{0,20})\?$/i;
 
+
+// ------------------------------------------------------------------------------------------------ one ask, no promises
+// BRAIN ONE-ASK (2026-11-06, release 7 S3: H001, H025, H035). FLAG ONLY: these finders never change a reply. The loop puts a
+// flag to the model once (the existing single rewrite request); if the draft still violates, it is kept as written (D: code
+// never cuts the model's answer, #540). They look at the end of the reply only: the final paragraph's trailing questions.
+const LISTLINE = /^\s*(?:[-*•]|\d+[.)])\s+/;
+const unquoted = (t: string) => plainQuotes(t).replace(/"[^"\n]*"/g, " ");
+const TO_USER = /\b(?:you|your|you're|you've)\b|\bshould i\b|\btell me\b/i;
+// A question about the person joined by "and" between two things asked for ("what role and city are you after").
+const CONJOINED = /\b(?:what|which|where|when)\b[^?.!]{0,40}?\b\w+ (?:and|&|plus) (?:the |your |a |an )?\w+\b[^?.!]{0,40}\b(?:you|your)\b|\b(?:your|you have|you have a) \w+(?: \w+)? (?:and|&|plus) (?:your |a |an )?\w+ (?:date|city|location|school|title|salary|number)\b/i;
+// A requested draft (an email, a note, a letter) is the person's text, not the agent's own asks or promises: from its lead-in
+// ("Here's the email:", "Draft:", "Subject:", "Dear", a code fence or a quoted block, or a "Hi Dana," line that is NOT the
+// reply's first line) on, nothing is checked (Greptile record 15). A reply that opens "Hi Sam," is the agent greeting the person,
+// and its own promises are still checked (review of f62e2033).
+const DRAFT_CUE = /(?:^|\n)\s*(?:(?:here(?:'s| is)|below is|i(?:'ve| have) drafted)\b[^\n]{0,60}\b(?:draft|email|e-mail|message|note|letter|reply|text|cover letter|post)\b|(?:draft|email|message|subject|cover letter)\s*:|subject:|dear\b|```|>\s)|\n\s*(?:hi|hello)\s+(?!there\b|all\b|everyone\b|again\b|friend\b|team\b)[A-Za-z][\w.'-]{0,30}\s*,[ \t]*\n/i;
+export function beforeDraft(reply: string): string {
+  const t = String(reply ?? ""), m = DRAFT_CUE.exec(t);
+  return m ? t.slice(0, m.index) : t;
+}
+export const hasDraft = (reply: string): boolean => DRAFT_CUE.test(String(reply ?? ""));
+const QUESTION_LABEL = /\b(?:practi[sc]e|rehearse|drill|mock)\b|\b(?:sample|likely|common|typical|interview|behavioral|behavioural|technical) questions\b|\bthey (?:may|might|could|will|can) ask\b|\btry these\b|\bquestions to (?:practi[sc]e|prepare|expect|rehearse)\b/i;
+export function endAsks(reply: string): { asks: number; conjoined: boolean } {
+  if (hasDraft(reply)) return { asks: 0, conjoined: false };
+  const paras = String(reply ?? "").trim().split(/\n\s*\n/);
+  const last = paras[paras.length - 1] ?? "";
+  // Question lines under a label that introduces practice questions ("Practice out loud:", "They may ask:") are material, not asks.
+  const all = last.trim().split("\n").filter((l) => l.trim());
+  const label = all.findIndex((l) => /:\s*$/.test(l.trim()) && QUESTION_LABEL.test(l));
+  const lines = label >= 0 ? all.slice(0, label) : all;
+  if (!lines.length) return { asks: 0, conjoined: false };
+  // Marked list items, and three or more bare question lines (a practice list), are items, not asks of the person.
+  if (lines.some((l) => LISTLINE.test(l)) || (lines.length >= 3 && lines.every((l) => isQuestion(l)))) return { asks: 0, conjoined: false };
+  const ps = pieces(unquoted(lines.join("\n")));
+  const tail: string[] = [];
+  for (let i = ps.length - 1; i >= 0 && isQuestion(ps[i].text); i--) tail.unshift(ps[i].text);
+  if (tail.length >= 3) return { asks: 0, conjoined: false };
+  const direct = tail.filter((q) => TO_USER.test(q));
+  return { asks: direct.length, conjoined: direct.some((q) => CONJOINED.test(q)) };
+}
+export const multiAsk = (reply: string): boolean => { const a = endAsks(reply); return a.asks >= 2 || a.conjoined; };
+// A promise of an alert or watch this turn did not set: only the plain first-person forms ("I'll set a job alert", "I'll text
+// you", "I'll watch for postings"). A condition or offer before it, and a negation, clear it. Sends are the person's to approve.
+const PROMISE = /\bi(?:'ll| will) (?:also |then |go ahead and |now )?(?:(?:set(?: up)?|create|start|turn on) (?:an? |the |your |new |these |those )?(?:job |daily |instant )?(?:alerts?|watch(?:es)?)\b|(?:text|notify|message) you\b|watch (?:for|the) (?:new |open )?(?:roles?|jobs?|postings?)\b)/i;
+// A condition or offer anywhere before the promise clears it ("if you want, I'll ..."); a negation clears it only in the
+// promise's own clause ("I won't ..."), so "Nothing matched, so I'll set an alert" stands.
+const PROMISE_COND = /\b(?:if|unless|once|when|after|until|want me|should i|shall i|do you want|would you like)\b/i;
+const PROMISE_NEG = /\b(?:not|never|no|nothing)\b|n't\b/i;
+const CLAUSE_START = /(?:,|;|[—–]|\b(?:so|and|but|then|yet)\b)\s*/gi;
+const ownClause = (lead: string): string => { let at = 0; for (const b of lead.matchAll(CLAUSE_START)) at = (b.index ?? 0) + b[0].length; return lead.slice(at); };
+export function unbackedPromises(reply: string, calls: { name: string; ok: boolean }[]): { index: number; kind: string }[] {
+  if (calls.some((t) => t.ok && t.name === "set_job_alerts")) return [];
+  const out: { index: number; kind: string }[] = [];
+  const cut = beforeDraft(reply).length;
+  let pos = 0;
+  pieces(reply).forEach((p, index) => {
+    const start = pos; pos += p.text.length + p.sep.length;
+    if (start >= cut) return;
+    const x = plainQuotes(p.text);
+    const m = isQuestion(x) ? null : PROMISE.exec(x);
+    const lead = m ? x.slice(0, m.index) : "";
+    if (m && !PROMISE_COND.test(lead) && !PROMISE_NEG.test(ownClause(lead))) out.push({ index, kind: "an alert promised" });
+  });
+  return out;
+}
+
+// S3 residual (H025): a person who says they are overwhelmed or stressed is acknowledged in the reply's FIRST sentence.
+// Flag only: the loop asks the model once; a draft that still lacks it is kept and recorded as "missing_ack".
+const ACK = /\bsounds like\b|\bthat sounds\b|\bi (?:understand|can tell|get it|get that)\b|\bunderstandabl[ey]\b|\bthat'?s a lot\b|\ba lot to (?:carry|handle)\b|\bi hear you\b|\bi'?m sorry\b|\byou'?re not alone\b|\btake a breath\b|\b(?:totally|completely) normal\b|\bmakes sense (?:to feel|that you)\b|\b(?:tough|hard|stressful|overwhelming) (?:spot|time|place|search|stretch)\b|\boverwhelm/i;
+// The distress is the person's own feeling ("I'm so stressed", "this search is overwhelming", "burned out"), not a word inside a
+// task ("describe handling stressful situations") and not negated ("I'm not stressed, just curious"); Greptile records 51, 53.
+const OWN_FEEL = /(?:^|\b(?:i'?m|im|i am|i feel|i'?ve been|i have been|feeling|feel|i get|getting|makes me|so|really|very|totally|super|pretty|kinda|kind of|incredibly|honestly|is|it'?s|its|are|feels|been|my)\s+(?:\w+\s+){0,2})$/i;
+const NEGATED = /\b(?:not|never|no longer|isn'?t|aren'?t|wasn'?t|am not|i'?m not)\s+(?:\w+\s+){0,1}$|n'?t\s+(?:\w+\s+){0,1}$/i;
+const SELF_STATE = /^(?:overwhelmed|burn(?:ed|t)\s*out|freaking\s+out|drowning|can'?t\s+(?:cope|take|handle)|terrified|panick)/i;
+export function ownDistress(userMessage: string): boolean {
+  const m = String(userMessage ?? "").replace(/[\u2019`]/g, "'");
+  for (const d of m.matchAll(new RegExp(DISTRESS.source, "gi"))) {
+    const at = d.index ?? 0, lead = m.slice(Math.max(0, at - 40), at);
+    if (NEGATED.test(lead)) continue;
+    if (SELF_STATE.test(d[0]) || OWN_FEEL.test(lead) || !lead.trim()) return true;
+  }
+  return false;
+}
+export const missingAck = (userMessage: string, reply: string): boolean => {
+  if (!ownDistress(userMessage)) return false;
+  const first = pieces(String(reply ?? "").trim())[0]?.text ?? "";
+  return !ACK.test(first);
+};

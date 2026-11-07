@@ -49,6 +49,7 @@ import { linkChecker } from "../_shared/link_check.ts";
 import { knowledgeOn } from "../_shared/agent/knowledge/index.ts";
 import { fileKindPublisher } from "../_shared/agent/research/file_publisher.ts";
 import { modelDerive } from "../_shared/agent/research/derive.ts";
+import { replyFlagsMeta } from "../_shared/agent/loop.ts"; // flag-only reply checks saved with the turn (Greptile on #566)
 import { gatewayGroundSearch, memoryGroundCache } from "../_shared/agent/research/ground.ts";
 const researchCache = memoryGroundCache();
 import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWindow, summaryFor } from "./career_brain.ts";
@@ -115,7 +116,7 @@ import { rewriteOn, tailorRewriteTurn } from "../_shared/career_tailor_rewrite.t
 // FEATURE 8: inbox check and follow-ups that can be sent.
 import { careerGrant, followupTurn, gmailReadGrant, gmailReadNow, mailNow, supabaseFollowupStores } from "../_shared/career_inbox_followups.ts";
 import { gmailSender } from "../_shared/career_outreach_gmail.ts";
-import { fileUploadFor } from "../_shared/channel_resume_upload.ts"; // FEATURE 16
+import { fileUploadFor, isUploadedResumeText } from "../_shared/channel_resume_upload.ts"; // FEATURE 16
 import { replacedResumeLines, replacedResumeStops } from "../_shared/career_resume_replace.ts"; // ONBOARDING ROUND 4
 import { outlookAsk, outlookChatTurn } from "../_shared/outlook_connector.ts"; // M4: Outlook
 import { shapeForTurn } from "../_shared/channel_shape.ts"; // REPLY SHAPE
@@ -296,6 +297,17 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     let removedNow = [...input.redacted];
     // Card or bank details in chat (battery 2026-10-30): removed above, never stored; the person is told where paying goes.
     if (flowCtx.note && input.redacted.some((r: string) => r === "card" || r === "account")) flowCtx.note = `${flowCtx.note} ${PAY_BY_CHECKOUT}`;
+    // The safety reply's 400-character limit counts what the person typed, not the longer text with its removal markers.
+    const originalLen = typeof rawMessage === "string" ? rawMessage.trim().length : 0;
+    // The thread's title is the first 60 characters of the first message (chat_session.ts ownerThread), and the request hash
+    // digests the text: a code-shaped token next to a code word is removed BEFORE both ("The Workday portal sent me 739201"
+    // must not become a thread title). The same call runs again below, after the split-secret step, on the redacted text.
+    // A resume file's own text (its hash is an upload this person made) is not checked for code words: see isUploadedResumeText.
+    const fileText = await isUploadedResumeText(admin, user?.id, userContent);
+    if (!fileText) {
+      const early = codeInChat(message, { userContent, removed: removedNow, codePending: codePending(situation), originalLength: originalLen });
+      if (early) { message = early.text; userContent = early.userContent; }
+    }
     // L4: thread_id must be a string when provided (non-string truthy values
     // would otherwise cause a DB error → noisy 500).
     if (thread_id !== undefined && thread_id !== null && typeof thread_id !== "string")
@@ -317,9 +329,22 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // stores it or a model reads it, and the person is told (identity_redact.ts secretLeadIn / redactPending). Read only
     // for a message shaped like a lone value, in a thread the person owns (ownerThread, above).
     if (thread_id && !imageBlocks.length && (looksLikePendingSecret(message, "password") || looksLikePendingSecret(message, "code"))) {
-      const prev = await admin.from("agent_messages").select("content").eq("thread_id", tid).eq("role", "user").order("id", { ascending: false }).limit(1);
+      // The lead-in is the person's newest message BEFORE this turn. The user-row lookup is role-filtered, so assistant-only rows
+      // (proactive messages, apply cards) never hide it. On a retry of a turn that already committed (same turn_key), this turn's
+      // own assistant row is found by its career_turn_key wherever it sits, even under later notices, and the lookup reads the user
+      // rows before it, skipping this turn's own redacted user row: the redaction and the request hash match the first attempt and
+      // the stored reply replays (reviews and Greptile on #565).
+      // One read, so the user rows and this turn's own reply come from the same snapshot (a commit cannot land between two reads).
+      // turnKey is validated as [A-Za-z0-9_-] above, so it is safe inside the or() filter.
+      // 50 rows: a retry still finds its own turn and the lead-in after many later turns (Greptile on #565). Past that, the lookup
+      // misses the lead-in and the load answers turn_key_conflict; nothing is stored.
+      const prev = await admin.from("agent_messages").select("role, content").eq("thread_id", tid)
+        .or(`role.eq.user,meta->>career_turn_key.eq.${turnKey}`).order("id", { ascending: false }).limit(50);
       if (prev.error) console.error("split secret check: previous message unreadable:", prev.error.message);
-      const lead = secretLeadIn(String(prev.data?.[0]?.content ?? ""));
+      const rows = (prev.data ?? []) as { role: string; content: unknown }[];
+      const ownAt = rows.findIndex((r) => r.role === "assistant");
+      const users = (ownAt >= 0 ? rows.slice(ownAt + 1) : rows).filter((r) => r.role === "user");
+      const lead = secretLeadIn(String(users[ownAt >= 0 ? 1 : 0]?.content ?? ""));
       const red = lead ? redactPending(message, lead) : null;
       if (red) {
         message = red.text; userContent = red.text;
@@ -330,13 +355,16 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // ONE-TIME CODES AND PASSWORDS IN CHAT (_shared/career_code_in_chat.ts; offline registry A23): a code or password the person
     // shared is answered below by code's fixed safety text (codeChatText), and a code-shaped token still next to a code word
     // ("Workday sent me 739201") is removed here like a labeled one, before anything stores the text or a model reads it.
-    const codeShared = codeInChat(message, { userContent, removed: removedNow, codePending: codePending(situation) });
+    const codeShared = fileText ? null : codeInChat(message, { userContent, removed: removedNow, codePending: codePending(situation), originalLength: originalLen });
     if (codeShared) {
       message = codeShared.text; userContent = codeShared.userContent;
       removedNow = [...new Set([...removedNow, ...codeShared.removed])];
       flowCtx.note = redactionNote(removedNow);
       if (flowCtx.note && removedNow.some((r: string) => r === "card" || r === "account")) flowCtx.note = `${flowCtx.note} ${PAY_BY_CHECKOUT}`;
     }
+    // The request hash digests the text after EVERY redaction pass (early code-in-chat, the split-secret step, code-in-chat):
+    // the turn receipt keeps it, and a hash of a bare 6-digit code is recoverable by trying its million values (Greptile, #564).
+    const hashedMessage = message;
 
     // GO-LIVE FLIP (2026-10-13, owner ruling: "the career version is the
     // final switch" — the money version is gone from live). Career is the
@@ -390,7 +418,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     let careerBatch;
     try { careerBatch = normalizeCareerBatchRequest(body.career_batch); }
     catch (_) { return json(cors, { error: "invalid_career_batch", action: null, turn_key: turnKey }, 400); }
-    const requestHash = await careerRequestHash(rawMessage, imageBlocks, careerTask ?? (careerBatch ? { batch: careerBatch } : null));
+    const requestHash = await careerRequestHash(hashedMessage, imageBlocks, careerTask ?? (careerBatch ? { batch: careerBatch } : null));
     const persistence = createCareerPersistence(admin);
     // POOL LOADER (Lane E, Feature Depth Program v2 — closes the gap
     // diagnosed in the Lane D operator checklist §8): ctx.postings is
@@ -554,7 +582,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // "disconnect outlook" (revoke where possible, erase, cancel pending sends, read back), and a task that needs a
       // connector not connected ("check my outlook"): asked once with the link, parked, resumed by the connect callback.
       // A one-time code or a password shared in chat (codeShared) is code's safety turn before every turn here (codeChatText).
-      const codeFirst = !!codeShared && !tapIn && !careerTask && !careerBatch && !host.isHostControlled(message, ctx);
+      const codeFirst = !!codeShared?.reply && !tapIn && !careerTask && !careerBatch && !host.isHostControlled(message, ctx);
       const connAns = !codeFirst && !tapIn && !careerTask && !careerBatch && connectorAsk(message)
         ? await connectorChatTurn({ admin, env: Deno.env, fetch, now: Date.now, message, userId: user.id, threadId: tid, bridge: isBridgeCall })
           .catch((e) => { console.error("connector turn:", e?.message ?? e); return connectorFailure(message); })
@@ -1173,7 +1201,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           turnPostings = Array.isArray(turn.postings) ? turn.postings : [];
           turnAttachments = turn.attachments ?? []; turnLinks = turn.linksSeen ?? []; turnFileLinks = turn.fileLinks ?? [];
           out = { reply: turn.reply, intent: turn.show?.intent ?? "agent", resultStatus: turn.stopped, contained: false, handler: "agent", ...(turn.show?.parts ? { parts: turn.show.parts } : {}) };
-          agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}) };
+          agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}),
+            // flag-only reply checks (loop.ts): saved with the turn so remaining reply problems can be counted (Greptile on #566)
+            ...replyFlagsMeta(turn as { flags?: unknown }) };
         }
       } else if (capHeld) {
         // PR-5 (2026-11-06): the allowance is spent, so the brain is not tried (zero model calls): code's views (cap_views.ts).

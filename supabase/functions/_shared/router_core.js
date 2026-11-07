@@ -40669,7 +40669,217 @@ const CareerRouter = (() => {
   // bonus is a bonus — never the headline amount. The parse masks each
   // figure as it claims it (signing first, hourly second, annual last),
   // so one figure can never be counted as another kind.
-  function parseOfferFigures(text) {
+  // G3 (PR #557): ONE place that decides which money figure in a message is the employer's OFFER and which is the user's ASK.
+  //   1. Every money mention is read with its UNIT (hour | week | month | year | one-time | none) and the words since the
+  //      previous mention. Only an hourly figure can be the hourly offer or ask; a weekly, monthly, yearly (or k) figure, or a
+  //      one-time amount (bonus, allowance, relocation, stipend), is never the rate.
+  //   2. Role: EMPLOYER-REPORTED when the nearer cue is the employer's (they/recruiter offered, proposed, came back with, are
+  //      paying, "the offer is"); USER-ASK when the nearer cue is the user's request (counter at/with/for, ask for, propose,
+  //      I want, meet me at, a rate of); otherwise UNKNOWN. A tie goes to the later cue.
+  //   3. offer = the employer-reported hourly figure (the caller falls back to the recorded offer; a user figure never replaces
+  //      it). ask = the user's hourly figure, the one in the counter request when there are several. An unitless figure after
+  //      an ask cue is `askBare`, used only where an hourly offer is on record. An unknown figure is returned as `unknown`
+  //      and never guessed into either role.
+  function counterFigures(text, hint) {
+    const out = { offer: null, ask: null, unknown: null, askBare: null, current: null, ambiguous: false, mentions: [] };
+    const src = s(text).replace(/\bcounter[ -]?offers?\b/ig, "counter-proposal");
+    const reM = /\$\s?(\d[\d,]*(?:\.\d{1,2})?)(\s?k\b)?/ig;
+    const employer = /\b(?:offer(?:ed|ing|s)?|proposed|came\s+back|(?:is|are|was|were)\s+paying|pay(?:s|ing)|(?:they|company|employer|recruiter|firm)\s+(?:will\s+)?pay|quoted|countered|comes\s+to)\b/ig;
+    const user = /\b(?:counter(?:ing|ed)?(?:\s+(?:email|letter|message|proposal))?(?:\s+(?:at|to|with|for|asking(?:\s+for)?))?|ask(?:ing)?(?:\s+for)?|propos(?:e|ing)(?:\s+(?:a|an|that))?|meet\s+me\s+at|want(?:ing)?|target(?:ing)?|looking\s+for|hop(?:e|ing)\s+for|make\s+it|change\s+(?:it|the\s+\w+)\s+to|need|request(?:ing)?|push\s+for|go\s+for|would\s+like|['’]d\s+like|(?:draft|write|compose|send)\b[^.?!]{0,50}?\b(?:at|with|for))\b/ig;
+    // CURRENT-PAY cues: the text must say it is THEIR pay. A bare "now" / "right now" is a timing word, never a cue.
+    const current = /\b(?:i\s+(?:(?:now|currently)\s+)?(?:make|earn|get\s+paid|am\s+paid)|i['\u2019]m\s+(?:paid|at)|currently\s+(?:(?:make|earn|paid|get|at)\b|\$)|(?:my|the)\s+(?:current|present)\s+(?:\w+\s+)?(?:pay|pays|rate|wage|job\s+pays)|current\s+(?:pay|rate|wage)|(?:my\s+(?:job|work|employer)|they)\s+(?:(?:now|currently)\s+)?pays?\s+me|(?:currently|now)\s+pays?\s+me|my\s+(?:job|work|employer)\s+(?:(?:now|currently)\s+)?pays?)\b/ig;
+    const lastIdx = (re, str) => { let i = -1, mm; re.lastIndex = 0; while ((mm = re.exec(str))) i = mm.index; return i; };
+    // A third party (the market, a salary site, other employers) is the source of a figure only when it is the subject of the
+    // offer or pay word: it comes before the word, within a few words, with no comma or money figure between, and no word
+    // naming this employer anywhere before it ("the market offers $28", "competitors offer $28", "glassdoor says others are
+    // paying $28", "the median offer is $28"). "They offer the market rate of $26", "the company's average offer is $26" and
+    // "the recruiter said the market is tight and offered $26" name the employer: their figure is the employer's.
+    const THIRD_PARTY = /\b(?:market|glassdoor|levels(?:\.fyi)?|salary\.com|payscale|indeed|average|median|typical|others|other\s+(?:companies|employers|firms|places|roles)|competitors?|similar\s+roles?|industry|(?<!\b(?:the|this|that|my|their|our|its)\s+)(?:employers|companies|places|firms))\b/ig;
+    const OWN_EMPLOYER = /\b(?:they|their|them|company|employer|recruiter|firm|hiring\s+manager|hr|we(?=\s+(?:have|are|can|could|would|will|offer|propose|['’](?:d|re|ll|ve)|re\b)))\b/ig;
+    // A comparison with the market ("a below market rate of $26", "an above-average $26 offer") describes the figure; it does
+    // not attribute it to the market. Masked (same length, so indexes hold) before either market check reads the words.
+    const COMPARISON = /\b(?:market|industry)[\s-]+(?:rate|level|standard|competitive)(?=[\s-]+(?:offer|pay|salary|wage|rate|package|base)\b)|\b(?:below|above|under|over|at|near|beneath|beyond|than|vs\.?|versus)[\s-]+(?:the\s+)?(?:market|average|median|typical|industry)(?:[\s-]+(?:rate|range|pay|average|standard|level))?\b/ig;
+    const maskComparison = (t) => t.replace(COMPARISON, (x) => " ".repeat(x.length));
+    // Who the offer or pay word is about, read from the word itself (Greptile and review rounds on #557):
+    //  - a VERB ("competitors offer $28", "the market pays $28", "others are paying $28", "employers offer $28"): the third party is
+    //    the source only when it is the subject, i.e. the word right before the verb (skipping auxiliaries such as are/is/now);
+    //  - a NOUN ("the market-rate offer is $26", "an offer of $26", "their market offer"): a market word in front describes the
+    //    employer's offer; only a statistical word right before it makes it the market's figure ("the median offer is $28",
+    //    "the average pay is $28"), and not when an owner precedes it ("the company's average offer is $26").
+    // Comparisons ("below market", "near the market median") are masked first; they describe a figure, they are not a subject.
+    const thirdPartySays = (text, cueIdx) => {
+      if (cueIdx < 0) return false;
+      const word = (text.slice(cueIdx).match(/^[a-z]+/i) || [""])[0].toLowerCase();
+      const words = maskComparison(text.slice(0, cueIdx)).replace(/[^\w'’-]+/g, " ").trim().split(/\s+/).filter(Boolean).map((w) => w.toLowerCase());
+      const STAT = /^(?:median|average|typical|mean)$/;
+      let i = words.length - 1;
+      const nounUse = /^(?:offer|pay)$/.test(word) && (i < 0 || /^(?:the|a|an|their|our|his|her|its|this|that|new|final|first|starting|initial|written|formal|verbal|best|top|base|hourly|annual|which|whose)$/.test(words[i]) || STAT.test(words[i]) || /-/.test(words[i]) || /^(?:offer|pay)\s+(?:of|is|was|at|:)/i.test(text.slice(cueIdx)));
+      if (nounUse) {
+        if (i < 0 || !STAT.test(words[i])) return false;
+        const owner = words[i - 1] || "";
+        return !(/['’]s$/.test(owner) || /^(?:their|our|its|his|her|my|your)$/.test(owner));
+      }
+      while (i >= 0 && /^(?:are|is|was|were|now|also|typically|usually|currently|generally|all|still|will|would|can|could|often|do|does|did|indeed|really|actually)$/.test(words[i])) i--;
+      if (i < 0) return false;
+      const subj = words[i];
+      if (/^(?:ours|theirs|mine|yours)$/.test(subj)) return false;
+      if (/^(?:employers|companies|places|firms)$/.test(subj)) return !/^(?:the|these|those|my|their|our|its)$/.test(words[i - 1] || "");
+      return /^(?:market|glassdoor|levels|levels\.fyi|salary\.com|payscale|indeed|others|competitors?|industry|median|average|typical|roles)$/.test(subj);
+    };
+    // A unit/purpose word attaches to a figure only as its adjacent noun phrase ("$500 relocation allowance", "$2,000 signing bonus")
+    // or as "<noun> of $X"; a later word in the sentence, a connector, or a negation ("with no relocation allowance") never does.
+    const NOUN = "relocation|moving|signing|sign-on|bonus|allowance|stipend|equity|stock|shares|reimbursement|budget|salary|annual|yearly|days?|equipment|training|tuition|commute|parking|childcare|travel";
+    const BLOCK = /^(?:and|with|plus|no|without|not|or|but|also|to|if|then)$/i;
+    const attached = (after, before) => {
+      const aw = after.trim().split(/\s+/).slice(0, 6);
+      // "for a childcare role" describes the JOB, not a payment purpose: an article right after "for", or a role word right
+      // after the noun, means the figure is not one-time money.
+      const ROLE = /^(?:role|job|position|gig|opening|posting|work|company|family|team|nurse)s?$/i;
+      const NOUN_RE = new RegExp("^(?:" + NOUN + ")$", "i");
+      // After "for", an optional article is skipped; a payment-purpose noun within two words is one-time money, unless a role
+      // word follows it ("for a childcare role", "for a travel nurse role" describe the job).
+      let start = 0;
+      if (/^for$/i.test(aw[0] || "")) start = /^(?:an?|the|my)$/i.test(aw[1] || "") ? 2 : 1;
+      for (let i = start; i < Math.min(aw.length, start + 3); i++) {
+        if (BLOCK.test(aw[i])) break;
+        if (NOUN_RE.test(aw[i])) { if (ROLE.test(aw[i + 1] || "")) break; return true; }
+      }
+      const bm = before.match(new RegExp("(?:^|\\s)((?:" + NOUN + ")(?:\\s+\\w+){0,2})\\s*(?:of|is|at|:|=)?\\s*$", "i"));
+      return !!bm && !/\b(?:no|without|not|zero|never)\b/i.test(before.slice(0, bm.index + bm[0].length - bm[1].length).split(/[,;.]/).pop().slice(-12));
+    };
+    const oneTime = /\b(?:relocation|moving|signing|sign-on|bonus|allowance|stipend|equity|stock|shares|reimbursement|budget)\b/i;
+    // ALLOWLIST (shared by the offer and the ask): a unitless figure may take the recorded offer's hourly unit only when an offer is
+    // recorded, it is within 3x that offer, and nothing but an hourly or filler phrase follows it in its clause. It never inherits a
+    // unit from another figure in the message.
+    const TOK = "(?:an?\\s+hour|\\/\\s?h(?:ou)?r|per\\s+hour|hourly|for\\s+(?:the|this)\\s+(?:role|position|job)|instead|please|if\\s+possible|then|now)";
+    const unitlessHourly = (v, end) => !!(hint && hint.recorded != null && v <= 3 * Number(hint.recorded) && v >= Number(hint.recorded) / 3
+      && new RegExp("^(?:" + TOK + "\\s*)*$", "i").test(src.slice(end).split(/[.,;!?\n]|\band\b|\bbut\b/i)[0].trim()));
+    let prevEnd = 0, prevRole = null, mm;
+    while ((mm = reM.exec(src))) {
+      const start = mm.index, end = start + mm[0].length;
+      const seg = src.slice(prevEnd, start).split(/[.?!;\n]/).pop();
+      const after = src.slice(end, end + 40).split(/[.?!;\n,]/)[0];
+      const before = seg.slice(-40);
+      let unit = "none";
+      if (/^\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour|hourly|\/\s?hr)/i.test(after)) unit = "hour";
+      else if (/^\s*(?:per\s+|an?\s+|\/\s?)(?:week|wk)|^\s*weekly/i.test(after)) unit = "week";
+      else if (/^\s*(?:per\s+|an?\s+|\/\s?)(?:month|mo)\b|^\s*monthly/i.test(after)) unit = "month";
+      else if (mm[2] || /^\s*(?:per\s+|an?\s+|\/\s?)(?:year|yr)|^\s*(?:annual|yearly|salary)/i.test(after) || /,\d{3}/.test(mm[1]) && Number(mm[1].replace(/,/g, "")) >= 1000 && !attached(after, before)) unit = "year";
+      // A unit word BEFORE the amount is an explicit unit only in this exact shape, with the amount immediately after:
+      //   [the|their] (hourly|annual|yearly) (offer|rate|pay|wage|salary|base) [rate] [is|of|at|=|:|was|will be] $X
+      // Anything else between the unit word and the amount ("hourly staff get a $500 bonus") leaves the figure unitless.
+      if (unit === "none") {
+        const pm = seg.match(/(?:^|\b)(?:(?:the|their)\s+)?(hourly|annual|yearly)\s+(?:offer|rate|pay|wage|salary|base)(?:\s+rate)?\s*(?:is|of|at|=|:|was|will\s+be)?\s*$/i);
+        if (pm) unit = /^hourly$/i.test(pm[1]) ? "hour" : "year";
+      }
+      if (unit !== "hour" && attached(after, before)) unit = "one-time";
+      const ci = lastIdx(current, seg);
+      // an employer word inside the current-pay phrase ("my current job pays") is not an employer cue
+      const ui = lastIdx(user, seg), ei = lastIdx(employer, seg.replace(current, (x) => " ".repeat(x.length)));
+      const trailingCurrent = /^[^.?!;,\n]{0,24}?\b(?:at\s+my\s+(?:current\s+|present\s+)?(?:job|employer|company|role)|(?:in|from)\s+my\s+(?:current|present)\b|where\s+i\s+work(?:\s+now)?)\b/i.test(after.split("$")[0]); // the scan stops at the next money figure
+      // an explicit ask cue or an employer offer cue on the figure always beats a current-pay cue
+      let role = (ci >= 0 && ci >= ui && ci >= ei) || (trailingCurrent && ui < 0 && lastIdx(/\b(?:offer(?:ed|ing|s)?|proposed|came\s+back|quoted|countered|comes\s+to)\b/ig, seg) < 0) ? "current" : ui < 0 && ei < 0 ? "unknown" : ui >= ei ? "ask" : "employer";
+      // An offer or pay word whose subject is a third party (thirdPartySays) is a market figure, never this employer's offer.
+      if (role === "employer" && ei >= 0 && thirdPartySays(seg, ei)) role = "unknown";
+      // The offer word belongs to an earlier figure when a comma and a third party follow it ("their $26/hour offer, the market
+      // average is $28/hour"): this figure is the third party's, unless the employer is named again after the comma.
+      // Only that shape: the offer word follows the previous figure in the same sentence, within eight words, with no comma or
+      // joining word between ("their $26/hour starting customer support role offer, the market average is $28/hour").
+      const cueOfPrev = prevEnd > 0 && !/[.?!;\n]/.test(src.slice(prevEnd, start)) &&
+        !/,|\b(?:and|but|while|whereas|though|although|since|because|plus)\b/i.test(seg.slice(0, ei)) &&
+        seg.slice(0, ei).replace(/^\s*(?:\/\s?h(?:ou)?r|\/\s?hr|an?\s+hour|per\s+hour|hourly)/i, "").trim().split(/\s+/).filter(Boolean).length <= 8;
+      if (role === "employer" && ei >= 0 && cueOfPrev) {
+        const post = seg.slice(ei), cut = post.lastIndexOf(",");
+        if (cut >= 0 && lastIdx(THIRD_PARTY, maskComparison(post.slice(cut))) >= 0 && lastIdx(OWN_EMPLOYER, post.slice(cut)) < 0) role = "unknown";
+      }
+      // An ask cue carries across "and" / "plus" / "," inside the same clause ("ask for $500 relocation and $28 an hour").
+      if (role === "unknown" && prevRole === "ask" && !/[.?!;\n]/.test(src.slice(prevEnd, start)) && /(?:\band\b|\bplus\b|&|,)\s*$/i.test(seg)) role = "ask";
+      const v = Number(mm[1].replace(/,/g, ""));
+      // a unitless figure the employer reported ("they offered $24"), in a message that is otherwise about hourly pay, is hourly
+      if (unit === "none" && role === "employer" && unitlessHourly(v, end)) unit = "hour";
+      // the exact pay-noun pattern ("the hourly offer is $24") states the offer itself
+      if (role === "unknown" && unit !== "none" && /(?:hourly|annual|yearly)\s+(?:offer|rate|pay|wage|salary|base)(?:\s+rate)?\s*(?:is|of|at|=|:|was|will\s+be)?\s*$/i.test(seg)) role = "employer";
+      // An EXPLICIT hourly figure whose own words have an offer word (before or after it) is the employer's offer, provided those
+      // words carry no ask, current-pay or market cue. A figure's own words are its clause cut at the neighbouring money figures,
+      // so another figure's cue does not decide it: in "draft a counter at $30/hour against their $26/hour offer" the ask cue
+      // belongs to $30 and $26 is the offer. Unitless figures never become the offer this way.
+      if (role === "unknown" && unit === "hour") {
+        const left = src.slice(prevEnd, start).split(/[.?!;,\n]/).pop();
+        const rest = src.slice(start).split(/[.?!;,\n]/)[0];
+        // The right side also stops at a joining word that starts another thought ("…their $26/hour offer even though the
+        // market offers $28/hour"): the market cue there is the next figure's, not this one's.
+        const tail = rest.slice(mm[0].length);
+        const stop = [tail.search(/\$\s?\d/), tail.search(/\b(?:even\s+though|although|though|but|while|whereas|and|plus|since|because)\b/i)].filter((i) => i >= 0);
+        const cs = left + (stop.length ? rest.slice(0, mm[0].length + Math.min(...stop)) : rest);
+        if ((/\boffer(?:ed|ing|s)?\b/i.test(cs.replace(/counter[ -]?offers?/ig, "")) || (hint && hint.offerSentence)) && lastIdx(user, cs) < 0 && lastIdx(current, cs) < 0 && !/\b(?:market|glassdoor|average|typical|range|says|salary\.com|levels)\b/i.test(maskComparison(cs)) &&
+          !thirdPartySays(cs, cs.replace(/counter[ -]?offers?/ig, (x) => " ".repeat(x.length)).search(/\boffer(?:ed|ing|s)?\b/i))) role = "employer";
+      }
+      prevRole = role;
+      out.mentions.push({ value: v, unit, role, at: start, thousands: !!mm[2] });
+      prevEnd = end;
+      if (unit === "hour") {
+        if (role === "ask") { if (out.ask == null) out.ask = v; }
+        // "They offered me $26/hour but my other offer is $30/hour" keeps 26 (review of d3fd6027); a revision still wins.
+        // A later employer figure revises the offer, unless it is marked as another offer (review of 12de38d7).
+        else if (role === "employer") { if (out.offer == null || !/\b(?:other|another|second|competing|different|backup|rival)\s+(?:\w+\s+){0,2}?(?:offers?|job|company|employer|place|firm)\b/i.test(src.slice(Math.max(0, start - 60), start))) out.offer = v; }
+        else if (role === "current") out.current = v;
+        else if (out.unknown == null) out.unknown = v;
+      } else if (unit === "none" && role === "ask" && out.askBare == null && unitlessHourly(v, end)) out.askBare = v;
+    }
+    // AMBIGUITY EXIT: a current-job phrase, two or more non-ask figures, an employer role that rests only on a generic pay word, and
+    // NO explicit offer word anywhere: code cannot tell which figure is the new offer. It must not save or replace the offer, must not
+    // draft, and hands the turn to the brain, which asks.
+    {
+      const plain = src.replace(/counter[ -]?offers?/ig, "");
+      const currentPhrase = /\bat\s+my\s+(?:current\s+|present\s+)?(?:job|employer|company|role)\b|\bwhere\s+i\s+work(?:\s+now)?\b|\bi\s+(?:(?:now|currently)\s+)?(?:make|earn|get\s+paid|am\s+paid)\b|\bmy\s+(?:job|work|employer)\s+(?:(?:now|currently)\s+)?pays?\b|\bcurrently\b/i.test(plain);
+      const offerWord = /\boffer(?:ed|ing|s)?\b|\bproposed\b|\bcame\s+back\b|\bquoted\b/i.test(plain);
+      const nonAsk = out.mentions.filter((m) => m.role !== "ask");
+      out.ambiguous = currentPhrase && !offerWord && nonAsk.length >= 2 && out.mentions.some((m) => m.role === "employer");
+      // MARKET EXIT: a message that names a third party (the market, competitors, others, the industry, averages, salary sites,
+      // other employers) and carries a pay figure that is not the ask. Who that figure belongs to is a question about the
+      // person's words, which code cannot settle reliably (five review rounds on #557 each found a new phrasing it got wrong).
+      // Code saves and drafts nothing; the brain reads the message and asks which figure is the employer's offer (D-007).
+      // Only within one sentence: the third party and the figure must share it ("Separate advice from unverified market claims"
+      // after the offer is not about any figure).
+      const THIRD_WORD = /\b(?:market|competitors?|others|industry|average|median|typical|glassdoor|levels\.fyi|payscale|salary\.com|indeed|employers|companies|other\s+(?:places|firms|roles|jobs|offers)|elsewhere|similar\s+(?:jobs|roles|positions|companies|postings)|(?:jobs|roles|positions)\s+like\s+(?:this|these|mine|it))\b/i;
+      // Another person's pay, tied to the figure ("my coworker makes $34/hour", "my friend at Acme was offered $35/hour"): a person
+      // word, a pay verb, then the figure. "A friend referred me and they offered $30/hour", "a peer support role" and "a sister
+      // company" are not (review of f609ce7d).
+      // The pay verb is the person's own: no "I"/"me"/"and" between them, and "got me an offer" is the user's (review of 529d1d08).
+      // Also a person's own offer or pay written as a possessive ("My friend's offer was $30/hour") and family members ("My
+      // husband was offered $30/hour"; review of d3fd6027).
+      const PERSON_PAY = /\b(?:friends?|co-?workers?|colleagues?|peers?|classmates?|roommates?|siblings?|brother|sister|cousin|neighbou?r|someone|people|husband|wife|spouse|partner|boyfriend|girlfriend|fianc[eé]e?|mom|mum|dad|mother|father|parents?|son|daughter|uncle|aunt)\b(?:['\u2019]s?\s+(?:[\w-]+\s+){0,2}?(?:offer|pay|rate|salary|wage|comp(?:ensation)?|base)\b[^.;!?\n]{0,25}$|(?:\s+(?!(?:i|me|my|and|but|so|then|thanks)\b)[\w'-]+){0,4}?\s+(?:makes?|earns?|gets?(?!\s+me\b)|got(?!\s+me\b)(?:\s+offered)?|is\s+(?:paid|making|earning|getting|on)|was\s+(?:offered|paid)|are\s+(?:paid|making|earning|getting|on)|were\s+(?:offered|paid)|pulls?|took)\b[^.;!?\n]{0,25}$)/i;
+      // incidental uses that name no third party: only "market" inside one named role ("a market research analyst role").
+      // "indeed" is never masked: the adverb and the salary site Indeed cannot be told apart reliably ("it was Indeed that
+      // quoted $28"), so a sentence with it and a pay figure is held (Greptile on 76313b47).
+      const INCIDENTAL = /\b(?:a|an|the|my|this|that|their|our|his|her|your)\s+market\s+(?:(?:research|data|analytics|access|making|insights|intelligence)(?:\s+(?:senior|junior|staff|principal))?(?:\s+(?:engineer|analyst|researcher|scientist|manager|specialist|associate|lead|designer|developer|coordinator|strategist|consultant))?|(?:(?:senior|junior|staff|principal)\s+)?(?:engineer|analyst|researcher|scientist|manager|specialist|associate|lead|designer|developer|coordinator|strategist|consultant))\s+(?:role|position|job|opening|posting)\b(?!s)/ig;
+      // A "." ends a sentence only when whitespace or the end follows it: decimals ("$29.50") and site names ("Salary.com",
+      // "levels.fyi", "glassdoor.com") stay inside their sentence (Greptile on #564).
+      // ...and not after a common abbreviation ("e.g. Acme", "the U.S. market", "approx. $26"), review of #565.
+      const ABBREV = /(?:^|[^A-Za-z])(?:e\.g|i\.e|u\.s|u\.k|approx|vs|etc|mr|mrs|ms|dr|inc|co|corp|ltd|jr|sr)$/i;
+      // closing quotes and brackets may sit between the dot and the space ("the market is tight." They offered...), Greptile #565
+      const endsHere = (c, i) => c !== "." || (/^["'\u201d\u2019)\]]*(?:\s|$)/.test(src.slice(i + 1, i + 5)) && !ABBREV.test(src.slice(Math.max(0, i - 8), i))
+        // "no." before a number is a reference ("Salary.com report no. 5 says..."), not a sentence end (Greptile on #565)
+        && !(/(?:^|[^A-Za-z])no$/i.test(src.slice(Math.max(0, i - 3), i)) && /^\s+#?\d/.test(src.slice(i + 1, i + 6))));
+      const startOf = (at) => { let a = -1; for (const c of [".", "?", "!", ";", "\n"]) { let i = src.lastIndexOf(c, at - 1); while (i >= 0 && !endsHere(c, i)) i = src.lastIndexOf(c, i - 1); a = Math.max(a, i); } return a + 1; };
+      const sentenceOf = (at) => { const a = startOf(at); const ends = [".", "?", "!", ";", "\n"].map((c) => { let i = src.indexOf(c, at); while (i >= 0 && !endsHere(c, i)) i = src.indexOf(c, i + 1); return i; }).filter((i) => i >= 0); return src.slice(a, ends.length ? Math.min(...ends) : src.length).replace(/counter[ -]?offers?/ig, ""); };
+      // A third party's figure holds the turn whatever its value, also when it equals the recorded offer ("Competitors offer
+      // $24/hour" with $24 on record): who said it is unknown either way (Greptile record 90).
+      const marketFig = nonAsk.some((m) => THIRD_WORD.test(sentenceOf(m.at).replace(INCIDENTAL, " ")) || PERSON_PAY.test(src.slice(startOf(m.at), m.at)));
+      if (marketFig) { out.ambiguous = true; out.marketAmbiguous = true; }
+    }
+    return out;
+  }
+  // The recorded hourly offer and whether the message is a counter-drafting request: the two facts that decide what an
+  // UNLABELLED hourly figure is. Only employer-cued figures replace a recorded offer; an unlabelled one becomes the offer only
+  // when none is recorded and the message is no counter request; in a counter request it is the ask (equal to the offer: ignored).
+  function offerHint(text, ctx) {
+    let recorded = null;
+    try { const th = negotiationThreadOf(ctx); recorded = (th && th.hourly) || (ctx && ctx.offer && typeof ctx.offer === "object" && ctx.offer.hourly_rate) || null; } catch { recorded = null; }
+    const t = s(text);
+    return { recorded, ambiguous: !!counterFigures(t, { recorded }).ambiguous, draft: /\b(?:draft|write|compose|prepare)\b[^.?!]*\bcounter\b|\bcounter\s+(?:email|offer|letter|message)\b/i.test(t) };
+  }
+  function parseOfferFigures(text, hint) {
     const out = { hourly: null, hourlyText: null, annual: null, annualText: null, signing: null, signingText: null };
     let work = s(text);
     const num = (v) => Number(String(v).replace(/,/g, ""));
@@ -40685,22 +40895,26 @@ const CareerRouter = (() => {
     // counter?" names the OFFER, and the counter email asked the employer to "meet me at $24". Every hourly figure is
     // classified by the words before it: an ask cue (counter at, ask for, meet me at, want, target, make it) makes it the
     // ASK; any other hourly figure is the OFFER. `hourly` stays the first figure, for the callers that record an offer.
-    out.askHourly = null; out.offerHourly = null;
     {
-      const reH = /\$\s?(\d{1,3}(?:\.\d{1,2})?)\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)/ig;
-      const askCue = /(?:\bcounter(?:ing|ed)?(?:\s+(?:at|to|with|for))?|\bask(?:ing)?\s+for|\bmeet\s+me\s+at|\bwant(?:ing)?|\btarget(?:ing)?|\blooking\s+for|\bhop(?:e|ing)\s+for|\bmake\s+it|\bchange\s+(?:it|the\s+\w+)\s+to|\bneed|\brequest(?:ing)?|\bpush\s+for|\bgo\s+for|\bwould\s+like|['’]d\s+like)\W{0,3}(?:(?:something\s+like|about|around|at|to|up\s+to)\W{0,3})?$/i;
-      let h;
-      while ((h = reH.exec(work))) {
-        const clause = work.slice(0, h.index).split(/[.?!]/).pop();
-        const v = Number(h[1]);
-        if (askCue.test(clause)) { if (out.askHourly == null) out.askHourly = v; } else if (out.offerHourly == null) out.offerHourly = v;
+      const cf = counterFigures(work, hint);
+      if (hint && hint.draft && cf.unknown != null) {
+        if (hint.recorded != null) { if (Number(cf.unknown) !== Number(hint.recorded) && cf.ask == null && cf.askBare == null) cf.ask = cf.unknown; cf.unknown = null; }
       }
+      // the offer comes ONLY from an employer-role figure: never from an ask-cued or an uncued one
+      out.recHourly = (cf.ambiguous || (hint && hint.ambiguous)) ? null : cf.offer;
+      out._held = !!(cf.ambiguous || (hint && hint.ambiguous));
+      out.askHourly = cf.ask; out.offerHourly = cf.offer; out.reportedHourly = cf.offer; out.unknownHourly = cf.unknown; out.askBare = cf.askBare;
     }
     if (m) { out.hourly = Number(m[1]); out.hourlyText = m[0].replace(/\s+/g, " ").trim(); work = work.replace(m[0], " "); }
     const mk = work.match(/\$\s?(\d{2,3})\s?k\b/i);
     if (mk) out.annual = Number(mk[1]) * 1000;
     else { const mp = work.match(/\$\s?([\d,]{4,})/); if (mp) out.annual = num(mp[1]); }
     if (out.annual) out.annualText = `$${out.annual.toLocaleString()}`;
+    // a held turn (ambiguous or market figures) attributes no figure at all: no bonus and no annual amount either
+    if (out._held) { out.signing = null; out.signingText = null; out.annual = null; out.annualText = null; }
+    // the hold stays visible to callers, so none of them falls back to reading a figure itself (Greptile on #570)
+    out.held = out._held;
+    delete out._held;
     return out;
   }
   // The offer's headline figure in the USER'S OWN units — the phrase
@@ -40759,7 +40973,12 @@ const CareerRouter = (() => {
     // deadline, a role, a detail of the standing offer — still
     // merges exactly as before.
     const namedFirm = (offeredM && offeredM[1].trim()) || (firmM && !/^(a|an|the)$/i.test(firmM[1].trim()) ? firmM[1].trim() : null);
-    const figs = parseOfferFigures(s(text));
+    const figs = parseOfferFigures(s(text), offerHint(text, ctx));
+    // A held turn (a pay figure sharing a sentence with a third party, or ambiguous figures) records nothing here: no
+    // figure, no fallback "$NNk" read, no "Offer updated". The turn goes on to the brain, which asks (D-007; Greptile on #570:
+    // "The offer is $30/hour, but competitors offer $60k" recorded $60,000 as the offer). The result carries only structured
+    // state, the figures without roles, so the staged brain asks which one is the new offer (Greptile record 94).
+    if (figs.held) return heldFigureTurn(text, ctx, "which_figure_is_offer");
     const seededPrior = (() => { try { const th = negotiationThreadOf(ctx); return !!(th && th.fromAccount); } catch { return false; } })();
     const merged = (namedFirm || ((figs.signing || figs.hourly || figs.annual) && seededPrior)) ? {} : Object.assign({}, prev);
     if (firmM && !/^(a|an|the)$/i.test(firmM[1].trim())) { merged.company_description = firmM[1].trim(); if (!merged.company) merged.company = firmM[1].trim(); }
@@ -40779,7 +40998,7 @@ const CareerRouter = (() => {
     // recorded nowhere.) (figs is parsed above, beside the
     // re-base gate, so the gate can weigh the statement's figures.)
     if (figs.signing) merged.signing_bonus = figs.signing;
-    if (figs.hourly) { merged.hourly_rate = figs.hourly; merged.stated_figure = figs.hourlyText; }
+    if (figs.recHourly != null) { merged.hourly_rate = figs.recHourly; merged.stated_figure = figs.recHourly === figs.hourly ? figs.hourlyText : `$${figs.recHourly}/hour`; }
     else if (figs.annual) merged.stated_figure = figs.annualText;
     else { const kM = s(text).match(/\$\s?(\d{2,3})\s?k\b/i); if (kM && !merged.stated_figure) merged.stated_figure = `$${(Number(kM[1]) * 1000).toLocaleString()}`; }
     merged.updated_from_user_words = s(text).slice(0, 240);
@@ -40820,10 +41039,41 @@ const CareerRouter = (() => {
   // negotiation context on record the turn is honestly deflected,
   // naming what is missing — it never falls to the generic fallback
   // (battery t4).
+  // A held pay turn (a figure beside a third party, or figures code cannot attribute): structured state only, like the
+  // offer-ambiguity branch of handleNegotiation. Nothing is saved or drafted; the figures go without roles; the staged brain
+  // asks which one is the new offer or the new ask; without the brain the ordinary negotiation-advice reply stands.
+  function heldFigureTurn(text, ctx, awaiting, intent) {
+    const figures = counterFigures(s(text), {}).mentions.map((m) => ({ value: m.thousands ? m.value * 1000 : m.value, unit: m.unit }));
+    // The advice call may capture what it reads ("They offered me $30/hour" names a firm "They"): a held turn saves nothing, so
+    // the offer and the negotiation record are put back exactly as they were (review of f62e2033).
+    const offerBefore = ctx.offer === undefined ? undefined : JSON.parse(JSON.stringify(ctx.offer));
+    const threadBefore = JSON.stringify(negotiationThreadOf(ctx) || {}), hadThread = !!(ctx && ctx.negotiationThread);
+    ctx._ambiguousCounter = true;
+    let res;
+    try { res = handleNegotiationCore(text, ctx); } finally {
+      ctx._ambiguousCounter = false;
+      if (offerBefore === undefined) delete ctx.offer; else ctx.offer = offerBefore;
+      const now = negotiationThreadOf(ctx);
+      if (now && typeof now === "object") { for (const key of Object.keys(now)) delete now[key]; Object.assign(now, JSON.parse(threadBefore)); }
+      if (!hadThread && ctx && ctx.negotiationThread && !Object.keys(ctx.negotiationThread).length) delete ctx.negotiationThread;
+    }
+    if (!res || typeof res !== "object") return null;
+    delete res.draft; delete res.strategy;
+    return Object.assign(res, { intent: intent || (String(res.intent || "").startsWith("negotiation") ? res.intent : "negotiation_advice"), resultStatus: "awaiting_user", counterAmbiguous: true, awaiting, figures, sends: 0 });
+  }
   function handleCounterRevision(text, ctx) {
     const t = lc(text);
     const figs = parseOfferFigures(text);
     const figAsk = /\bmake it\s+\$?\s?\d/.test(t) || /\bchange it to\s+\$?\s?\d/.test(t) || /\b(?:raise|lower|drop|bump) it to\s+\$?\s?\d/.test(t);
+    // A held turn (a pay figure beside a third party: "The market offers $28/hour; make it $30/hour instead") revises nothing. It
+    // returns only structured state, the figures without roles, so the brain asks which figure is the new ask (D-007; Greptile and
+    // review on #574 and #575).
+    if (figs.held) {
+      if (!figAsk) return null;
+      // Structured state only, like the offer-ambiguity branch of handleNegotiation: nothing is saved or drafted, the figures go
+      // without roles, and the staged brain asks which one is the new ask; without the brain the ordinary advice reply stands.
+      return heldFigureTurn(text, ctx, "which_figure_is_ask", "negotiation_revision");
+    }
     const addAsk = /\badd a request\b|\badd an ask\b|\balso ask\b/.test(t);
     if (!figAsk && !addAsk) return null;
     const th = negotiationThreadOf(ctx);
@@ -40867,8 +41117,12 @@ const CareerRouter = (() => {
   // record) carries a negotiation context; stands down otherwise.
   function handleCounterDraftAsk(text, ctx) {
     const t = lc(text);
-    if (!/\b(draft|write|compose)\b/.test(t)) return null;
-    if (!/\bcounter\b|\bextension\b/.test(t) && !/\b(email|letter)\b/.test(t)) return null;
+    // G3: "counter email asking $28/hour" and "propose $28/hour" ask for the counter with no drafting verb.
+    // A question asking for advice ("should I propose $28/hour?", "would $28 be too much?") is the decision path's, never a draft.
+    const adviceQ = /^\s*(?:what|how|why|when|who|which|explain|tell me|define)\b|\?|\bshould\b|\bis it (?:ok|okay|fine|alright)\b|\bwould\b|\bcould\b|\bdo you think\b|\bcan i\b|\bwhether\b/.test(t);
+    const verbless = !adviceQ && (/\bcounter\s+(?:email|offer|letter|message)\b/.test(t) || /\bpropos(?:e|ing)\s+\$\s?\d/.test(t) || /\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d/.test(t));
+    if (!/\b(draft|write|compose)\b/.test(t) && !verbless) return null;
+    if (!/\bcounter\b|\bextension\b/.test(t) && !/\b(email|letter)\b/.test(t) && !verbless) return null;
     // PROBE D DRAFT-BINDING (LF-02 class; live v229 ad53453 and
     // v230 6bc96af, the custom battery's Probe D verbatim): an ask
     // naming NEITHER the counter nor the extension is not the
@@ -44854,7 +45108,18 @@ const CareerRouter = (() => {
     return { intent: "negotiation_advice", reply, resultStatus: "awaiting_user", sends: 0 };
   }
 
+  // AMBIGUOUS FIGURES (see counterFigures): nothing is saved and nothing is drafted. The result carries only structured state (no
+  // prose of its own): counterAmbiguous, awaiting, and the figures without roles. In staged mode the brain asks which figure is the new
+  // offer (counter_ambiguous_figures); without the brain the turn takes the ordinary negotiation-advice path, with no draft.
   function handleNegotiation(text, ctx) {
+    if (/\bcounter\b|\boffer\b|\bdraft\b/i.test(s(text))) {
+      const hintA = offerHint(text, ctx);
+      // The same structured hold as every held pay turn, and nothing it read is kept (heldFigureTurn).
+      if (hintA.ambiguous) return heldFigureTurn(text, ctx, "which_figure_is_offer", null);
+    }
+    return handleNegotiationCore(text, ctx);
+  }
+  function handleNegotiationCore(text, ctx) {
     const provGate = inheritedOfferGate(text, ctx);
     if (provGate) return provGate;
     // IB-TN-8: plumb the offer + the company file from wherever the
@@ -44893,10 +45158,11 @@ const CareerRouter = (() => {
         // the product itself set — a bare "write it / draft it" are
         // draft asks too; the email is the deliverable either way.
         || (/\b(draft|write|compose)\b/.test(tt) && /\bcounter\b|\bextension\b|\bdecline\b|\breply\b/.test(tt))
+        || (!/^\s*(?:what|how|why|when|who|which|explain|tell me|define)\b|\?|\bshould\b|\bis it (?:ok|okay|fine|alright)\b|\bwould\b|\bcould\b|\bdo you think\b|\bcan i\b|\bwhether\b/.test(tt) && /\bcounter\s+(?:email|offer|letter|message)\b|\bpropos(?:e|ing)\s+\$\s?\d/.test(tt))
         || (/\b(draft|write|compose)\b[^.]{0,40}\b(it|that|this|the email|the letter|an email|a reply)\b/.test(tt) && !!(negotiationThreadOf(ctx).topic || negotiationThreadOf(ctx).amount || negotiationThreadOf(ctx).firm))
         // PR-4: "counter at $27/hour" on a thread that holds an hourly offer names the ask: the email is the deliverable.
-        || (/\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d{1,3}(?:\.\d{1,2})?\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour)/.test(tt) && !!(negotiationThreadOf(ctx).hourly || (ctx.offer && ctx.offer.hourly_rate)));
-      if (wantsDraftText && Negotiation) {
+        || (!/^\s*(?:what|how|why|when|who|which|explain|tell me|define)\b|\?|\bshould\b|\bis it (?:ok|okay|fine|alright)\b|\bwould\b|\bcould\b|\bdo you think\b|\bcan i\b|\bwhether\b/.test(tt) && /\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d{1,3}(?:\.\d{1,2})?(?![\d,]|\s?k\b)(?:\s*(?:an?\s+hour|\/\s?h(?:ou)?r\b|per\s+hour))?(?!\s*(?:per|a|an|\/)\s*(?:week|wk|month|mo|year|yr))/.test(tt) && !!(negotiationThreadOf(ctx).hourly || (ctx.offer && ctx.offer.hourly_rate) || (() => { const f = parseOfferFigures(text); return f.askHourly != null && (f.offerHourly != null || f.unknownHourly != null); })()));
+      if (wantsDraftText && Negotiation && !ctx._ambiguousCounter) {
         const thread = negotiationThreadOf(ctx);
         let offerObj = null;
         if (offerText && Negotiation.parseOffer) { try { offerObj = Negotiation.parseOffer(offerText, {}); } catch { offerObj = null; } }
@@ -44935,13 +45201,14 @@ const CareerRouter = (() => {
         // counter), the signing bonus kept where the user said keep
         // it, and the deadline the record carries.
         if (!extensionContext && (thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || parseOfferFigures(text).hourly)) {
-          const askFigs = parseOfferFigures(text);
+          const askFigs = parseOfferFigures(text, { recorded: thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || null, draft: true });
+          // G3: the offer is the employer-reported figure of this message, else the one on record; a figure the person puts in a
+          // counter request never replaces it. An unlabelled figure is only a base when nothing is on record.
           const hourlyBase = askFigs.offerHourly || thread.hourly || (ctx.offer && ctx.offer.hourly_rate) || null;
-          // PR-4: the ask is the figure the person put after an ask cue ("counter at $27/hour"). An uncued figure that
-          // differs from the offer on record, with no offer figure in this message, is a revision's new number. The
-          // offered figure itself is never the ask: a counter at or below the offer is no counter, so it is dropped.
-          askFigs.ask = askFigs.askHourly != null ? askFigs.askHourly
-            : (askFigs.offerHourly == null && askFigs.hourly && hourlyBase && Number(askFigs.hourly) !== Number(hourlyBase) ? askFigs.hourly : null);
+          // The ask is the user's hourly figure (or a unitless one after an ask cue); an unlabelled figure is never guessed to be
+          // the ask, so the draft keeps its fill-in and the turn asks for the target. A figure at or below the offer is dropped.
+          askFigs.ask = askFigs.askHourly != null ? askFigs.askHourly : askFigs.askBare != null ? askFigs.askBare : null;
+          if (askFigs.offerHourly != null) { try { ctx.offer = Object.assign({}, (ctx.offer && typeof ctx.offer === "object") ? ctx.offer : {}, { hourly_rate: askFigs.offerHourly }); negotiationThreadForWrite(ctx).hourly = askFigs.offerHourly; } catch { /* the draft stands */ } }
           if (askFigs.ask != null && hourlyBase && Number(askFigs.ask) <= Number(hourlyBase)) askFigs.ask = null;
           const company = offerObj.company || thread.descriptor || "the firm";
           const role = offerObj.role || null;
@@ -44949,7 +45216,17 @@ const CareerRouter = (() => {
           if (askFigs.ask) {
             try { const thw = negotiationThreadForWrite(ctx); const pc = (thw.counter && typeof thw.counter === "object") ? thw.counter : {}; thw.counter = Object.assign({}, pc, { hourly: askFigs.ask }); thw.topic = "counter"; } catch { /* the draft stands */ }
           }
-          let counterFig = askFigs.ask || (thread.counter && thread.counter.hourly) || null;
+          // A figure this message puts after an ask cue that could not be read as the hourly ask ("a counter at $28 for a childcare
+          // role") never lets an older saved counter stand in for it: the slot stays blank and the turn asks about that figure
+          // (Greptile records 29 and 35).
+          // The cue sits right before the figure ("a counter at $28", "ask for $28"), and the figure can be an hourly rate.
+          const cuedM = askFigs.ask == null ? s(text).match(/\b(?:counter(?:[ -]?offer)?\s+(?:at|of|to|for)|ask(?:ing)?\s+for|meet\s+me\s+at|target(?:\s+of)?)\s+(\$\s?\d{1,3}(?:\.\d{1,2})?)(?![\d,]|\s?k\b)/i) : null;
+          const cuedVal = cuedM ? Number(cuedM[1].replace(/[^\d.]/g, "")) : null;
+          const cuedTail = cuedM ? s(text).slice((cuedM.index ?? 0) + cuedM[0].length) : "";
+          // An add-on ("$5 more", "$500 relocation") or a figure that cannot be an hourly ask on this offer is not asked about as one.
+          const cuedFig = cuedM && !/^\s*(?:more|extra|additional|relocation|reloc|bonus|stipend|signing|sign-on|allowance|differential|premium|per\s+(?:year|month|week|day)|a\s+(?:year|month|week|day)|for\s+(?:relocation|moving|travel|childcare|equipment|training))\b/i.test(cuedTail)
+            && (!hourlyBase || (cuedVal > Number(hourlyBase) && cuedVal <= 3 * Number(hourlyBase))) ? cuedM[1].replace(/\s+/g, "") : null;
+          let counterFig = askFigs.ask || (cuedFig ? null : (thread.counter && thread.counter.hourly)) || null;
           if (counterFig && hourlyBase && Number(counterFig) <= Number(hourlyBase)) counterFig = null;
           // PR-4: no ask figure means no figure in the email. The draft carries a fill-in the person must replace, and the
           // turn asks for the target; nothing here invents one.
@@ -44964,7 +45241,7 @@ const CareerRouter = (() => {
             const blank = `${hourlyBase ? `$${Number(hourlyBase)} an hour is the offer, not an ask, so the email does not ask for it. ` : ""}The ask line is a fill-in, ${targetSlot}: it is not ready to send until you give me the hourly rate you want to ask for.`;
             facts.splice(1, 0, decisionAsk ? `Whether to counter is your decision, and I will not guess it for you: ${benchSentence} ${blank}` : blank);
           }
-          const reply = compose({ headline: counterFig ? "The counter email, written out — the real words, held for your approval." : "The counter email is drafted around a blank for your target — held, nothing sent.", facts, nextStep: counterFig ? "Approve it as written, or tell me the figure or the tone to change." : "What hourly rate do you want to ask for?" });
+          const reply = compose({ headline: counterFig ? "The counter email, written out — the real words, held for your approval." : "The counter email is drafted around a blank for your target — held, nothing sent.", facts, nextStep: counterFig ? "Approve it as written, or tell me the figure or the tone to change." : cuedFig ? `Is ${cuedFig} an hour the rate you want to ask for? If it is, say so and it goes in the email.` : "What hourly rate do you want to ask for?" });
           const offerOut = Object.assign({}, offerObj, { hourly_rate: hourlyBase, base_salary: null });
           return Object.assign({ intent: "negotiation_draft", reply, resultStatus: "awaiting_user", sends: 0, draft: { kind: "counter_email", body }, offer: offerOut, payload: offerOut }, counterFig ? {} : { awaiting: "target_hourly_rate", counterDecision: decisionAsk });
         }
@@ -45008,7 +45285,7 @@ const CareerRouter = (() => {
     // COMPLEXITY WAVE: "script" was the only dialect the branch heard;
     // the genuine phrasing asks for "the exact words — an email
     // version and a phone version", which is the same ask.
-    if ((/\bcounter scripts?\b|\bscripts?\b[^.]*\bcounter\b/i.test(s(text)) || (/\bcounter\b/i.test(s(text)) && /\b(exact words|word[ -]for[ -]word|email version|phone version|call version)\b/i.test(s(text)))) && Negotiation && Negotiation.counterStrategy) {
+    if (!ctx._ambiguousCounter && (/\bcounter scripts?\b|\bscripts?\b[^.]*\bcounter\b/i.test(s(text)) || (/\bcounter\b/i.test(s(text)) && /\b(exact words|word[ -]for[ -]word|email version|phone version|call version)\b/i.test(s(text)))) && Negotiation && Negotiation.counterStrategy) {
       try {
         const offer = offerText ? Negotiation.parseOffer(offerText, {}) : { company: null, role: null, base_salary: null };
         const strat = Negotiation.counterStrategy(offer, bench, {});
@@ -45224,7 +45501,7 @@ const CareerRouter = (() => {
       }
       // (d) What do I say — the call script, word for word, from
       // 128's counter strategy run on the thread's offer.
-      if (/\bwhat do i say\b|\bwhat should i say\b|\bsay on the call\b|\bwords for\b/.test(t) && Negotiation && Negotiation.counterStrategy) {
+      if (/\bwhat do i say\b|\bwhat should i say\b|\bsay on the call\b|\bwords for\b/.test(t) && Negotiation && Negotiation.counterStrategy && !ctx._ambiguousCounter) {
         let callScript = null, stratTxt = null;
         try {
           const offerObj = { company: th.firm || (ctx.offer && ctx.offer.company) || null, role: th.role || null, base_salary: th.amount || (ctx.offer && ctx.offer.base_salary) || null, signing_bonus: th.signing || null };
@@ -50290,7 +50567,10 @@ const CareerRouter = (() => {
     // recommendations. It takes only host-injected profile/postings; it never
     // falls back to the filesystem corpus or touches alert/browser state.
     const recommendations = typeof CareerRecommendations !== "undefined" ? CareerRecommendations : req("./154-career-recommendations.js");
-    const recommendationIntent = recommendations && recommendations.intentFor(text);
+    // A counter-drafting request that reports an offer ("my current job pays $22/hour; they offered $24; draft a counter at $27/hour")
+    // is the negotiation's, not a "current job" recommendation ask.
+    const counterDraftWithOffer = (/\b(?:draft|write|compose)\b[^.?!]*\bcounter\b/i.test(s(text)) && /\boffer/i.test(s(text))) || /\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d/i.test(s(text));
+    const recommendationIntent = !counterDraftWithOffer && recommendations && recommendations.intentFor(text);
     if (recommendationIntent) {
       const rec = recommendations.recommend(Object.assign({}, c, { recommendationIntent, text: s(text) }));
       return { intent: "career_recommendations", reply: rec.text, resultStatus: "prepared", sends: 0, guidance: rec, payload: rec, artifact: rec };
@@ -50434,6 +50714,12 @@ const CareerRouter = (() => {
       if (cd) return cd;
       const od = handleOfferDetail(text, c);
       if (od) return od;
+      // "They offered $30/hour and the market average is $65k": a held employer figure the offer-detail forms do not read still
+      // reaches the brain with its figures (Greptile record 94).
+      if (/\$\s?\d/.test(s(text)) && /\b(?:offer(?:ed|ing|s)?|pay(?:s|ing)?|proposed|quoted|came\s+back)\b/i.test(s(text)) && parseOfferFigures(s(text), offerHint(text, c)).held) {
+        const hf = heldFigureTurn(text, c, "which_figure_is_offer");
+        if (hf) return hf;
+      }
       const dc = handleDraftContinuation(text, c);
       if (dc) return dc;
       const ds = handlePlanDraftSurgery(text, c);
@@ -52288,6 +52574,8 @@ const CareerRouter = (() => {
       // "received an offer") — the speech act that makes the turn a
       // new offer REPORT rather than a detail about a standing one.
       let sawOfferEvent = false;
+      // The message's hint is computed once: offerHint runs counterFigures over the whole message (Greptile record 91).
+      const rawHint = offerHint(raw, ctx);
       for (const cl of offerClauses) {
         if (!clauseIsNotQuestion(cl)) continue;
         if (/\bgot an offer\b|\bgot the offer\b|\boffered me\b|\boffer came\b|\boffer'?s here\b|\bi have an offer\b|\breceived an offer\b/i.test(cl)) sawOfferEvent = true;
@@ -52305,17 +52593,31 @@ const CareerRouter = (() => {
         // forms the kind parse does not carry (the $-less k forms:
         // "85k", "came back at 120k").
         const askFramed = /\bask(?:ing)? for\s+(?:a\s+|an\s+)?\$?\s?\d|\bcounter\s+(?:at|of|to)\s+\$?\s?\d|\bmake it\s+\$?\s?\d/i.test(cl);
-        const figs = askFramed ? { hourly: null, signing: null, annual: null } : parseOfferFigures(cl);
+        // a comma-split clause that cuts a thousands figure ("$60 an hour plus a $5" of "$5,000 signing bonus") drops only the cut stub
+        const cutAt = raw.indexOf(cl);
+        const clp = cutAt >= 0 && /\$\s?\d{1,3}\s*$/.test(cl) && /^,\d{3}\b/.test(raw.slice(cutAt + cl.length)) ? cl.replace(/\$\s?\d{1,3}\s*$/, "") : cl;
+        // the sentence this clause sits in: an offer word anywhere in it lets an explicit hourly figure be the offer, but an ask cue
+        // EARLIER in that sentence (a comma split can leave the cue in the previous clause) withholds that
+        const sentOf = s(raw).split(/(?<=[.!?])\s+|\n/).find((x) => x.includes(cl)) || "";
+        const sentBefore = sentOf.slice(0, Math.max(0, sentOf.indexOf(cl)));
+        const figs0 = parseOfferFigures(clp, { offerSentence: sentOf.replace(/counter[ -]?offers?/ig, "").search(/\boffer(?:ed|ing|s)?\b/i) >= 0 && !/\bask(?:ing)?\b|\bcounter|\bpropos|\bwant|\bmeet\s+me|\btarget|\bneed\b/i.test(sentBefore.replace(/counter[ -]?offers?/ig, "")), recorded: rawHint.recorded, draft: rawHint.draft, ambiguous: rawHint.ambiguous });
+        const figs = askFramed ? { hourly: null, signing: null, annual: null } : figs0;
+        // G3: a counter-drafting request ("draft the counter email at $28/hour", "propose $28/hour") carries the ASK; its hourly
+        // figure re-bases the recorded offer only when the same message REPORTS an offer ("they offered $26/hour now").
+        const counterDraftReq = /\b(?:draft|write|compose|prepare)\b[^.?!]*\bcounter\b|\bcounter\s+(?:email|offer|letter|message)\b|\bpropos(?:e|ing)\s+\$|\bask(?:ing)?\s+(?:for\s+)?\$/i.test(cl);
+        figs.hourly = figs0.recHourly; // only the employer-role figure is the offer
         if (figs.hourly) rec.hourly = figs.hourly;
         if (figs.signing) rec.signing = figs.signing;
         if (figs.annual) rec.amount = figs.annual;
-        if ((m = cl.match(/\bcame back\s+(?:at\s+)?\$?(\d{2,3})\s?k\b/i))) rec.amount = Number(m[1]) * 1000;
-        if (!figs.annual && !figs.signing && !figs.hourly) {
+        // a held turn (ambiguous or market figures) records no amount from the message either
+        const heldTurn = rawHint.ambiguous;
+        if (!heldTurn && (m = cl.match(/\bcame back\s+(?:at\s+)?\$?(\d{2,3})\s?k\b/i))) rec.amount = Number(m[1]) * 1000;
+        if (!heldTurn && !figs.annual && !figs.signing && !figs.hourly) {
           if ((m = cl.match(/\boffer\w*\b[^.]*?\$\s?(\d{2,3})\s?k\b/i)) || (m = cl.match(/\b(\d{2,3})\s?k\b[^.]*\boffer/i))) rec.amount = Number(m[1]) * 1000;
           else if ((m = cl.match(/\$\s?(\d[\d,]{3,})/))) rec.amount = Number(m[1].replace(/,/g, ""));
         }
-        if (rec.amount == null && !figs.annual && !/\bsigning\b/i.test(cl) && (/\boffer|base|salary|came back\b/i.test(cl) || /\boffer/i.test(raw)) && (m = cl.match(/\b(\d{2,3}(?:\.\d)?)\s?k\b/i))) rec.amount = Number(m[1]) * 1000;
-        if (!figs.signing && ((m = cl.match(/\bsigning(?:\s+bonus)?\s*(?:of\s*)?\$?(\d{1,3})\s?k\b/i)) || (m = cl.match(/\$\s?(\d{1,3})\s?k\s+signing\b/i)))) rec.signing = Number(m[1]) * 1000;
+        if (!heldTurn && rec.amount == null && !figs.annual && !/\bsigning\b/i.test(cl) && (/\boffer|base|salary|came back\b/i.test(cl) || /\boffer/i.test(raw)) && (m = cl.match(/\b(\d{2,3}(?:\.\d)?)\s?k\b/i))) rec.amount = Number(m[1]) * 1000;
+        if (!heldTurn && !figs.signing && ((m = cl.match(/\bsigning(?:\s+bonus)?\s*(?:of\s*)?\$?(\d{1,3})\s?k\b/i)) || (m = cl.match(/\$\s?(\d{1,3})\s?k\s+signing\b/i)))) rec.signing = Number(m[1]) * 1000;
         if ((m = cl.match(/\b([\d,]{3,})\s+shares\b/i))) rec.shares = m[1];
         if ((m = cl.match(/\bstarts?\s+(?:on\s+)?([A-Z][a-z]+\s+\d{1,2})\b/))) rec.start = m[1];
         if ((m = cl.match(/\b(?:said|told them|quoted|gave|expect(?:ed|ing)?)\s+(?:them\s+)?\$?(\d{2,3})\s?[-–]\s?\$?(\d{2,3})\s?k\b/i))) rec.expectation = `${m[1]}-${m[2]}k`;
@@ -52347,7 +52649,9 @@ const CareerRouter = (() => {
         const hit = pool.find((d) => { const key = lc(d).split(/\s+/).pop(); return key && key.length > 2 && lc(raw).includes(key); });
         if (hit) rec.signingFor = hit;
       }
-      if (rec.firm || rec.amount || rec.hourly || rec.deadline || rec.descriptor || rec.signing || rec.expectation || (Array.isArray(rec.amounts) && rec.amounts.length)) {
+      // A held turn (figures code cannot attribute, or a third party's figure) records nothing from the message: no firm read
+      // from "They offered me ...", no deadline, so the standing offer is never replaced by it (review of f62e2033).
+      if (!rawHint.ambiguous && (rec.firm || rec.amount || rec.hourly || rec.deadline || rec.descriptor || rec.signing || rec.expectation || (Array.isArray(rec.amounts) && rec.amounts.length))) {
         const thread = negotiationThreadForWrite(ctx);
         // MI-123 (mechanism 1): a report naming a DIFFERENT offer — a
         // firm the record does not carry, a descriptor against a named

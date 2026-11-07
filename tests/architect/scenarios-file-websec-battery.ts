@@ -40,6 +40,7 @@
 // The oracle is this file's own model (who holds which session, which code is live, what was shown); it never asks the
 // product whether a request was allowed. No network: the phone and its texts are fakes.
 import assertNode from "node:assert/strict";
+import { phoneLeak as sharedPhoneLeak } from "./phone-leak.ts";
 import { handleFile, type AppRow, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
 import { jobViewOf, refOf, type JobView, type PreparedRow } from "../../supabase/functions/_shared/telegram_jobs.ts";
 import { LOGIN_TTL_MS, pageTokenOf, SESSION_TTL_MS, sha256, type PhoneAuth, type SessionStore } from "../../supabase/functions/_shared/file_session.ts";
@@ -91,10 +92,7 @@ const PEOPLE = {
 type Who = "u" | "v";
 const privOf = (p: typeof PEOPLE.u) => [...p.companies, ...p.titles, p.resume, p.first, p.last].map((s) => s.toLowerCase());
 const PRIV: Record<Who, string[]> = { u: privOf(PEOPLE.u), v: privOf(PEOPLE.v) };
-const phoneLeak = (body: string, phone: string) => {
-  const d = phone.replace(/[^0-9]/g, ""), d10 = d.slice(-10);
-  return body.includes(phone) || body.includes(d10) || body.includes(d10.slice(3));
-};
+const phoneLeak = (body: string, phone: string) => sharedPhoneLeak(body, phone);
 // Markup an attacker would like rendered. Escaped, each is harmless text; raw, each is a live tag, handler or link.
 const PAYLOADS = [`<script>alert(1)</script>`, `"><img src=x onerror=alert(2)>`, `'><svg onload=alert(3)>`, `</title><script>alert(4)</script>`, `<iframe src="javascript:alert(5)">`,
   `{{constructor.constructor('alert(6)')()}}`, `<a href="javascript:alert(7)">x</a>`, `‮<b>moc.live</b>`, `</textarea><script>alert(8)</script>`, `<style>@import'//evil.example/x.css'</style>`,

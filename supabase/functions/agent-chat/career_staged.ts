@@ -222,10 +222,13 @@ const ADVICE_INTENTS = new Set(["outreach_clarification", "prep_brief"]);
 const QUESTION_LEAD = /^\s*(?:(?:so|ok|okay|hey|also|and|but|quick question)[,:]?\s+)?(?:how|what|whats|what's|which|when|why|where|who|should|is|are|do|does|did|would|could|any|tips?\b|advice\b|best way)\b/i;
 const ASK_TO_ACT = /^\s*(?:can|could|would|will)\s+(?:you|u)\s+(?:please\s+)?(?:send|email|message|text|dm|reach|contact|find|build|make|get|pull|list|draft|write|apply|submit|queue|save|set|start|run|mock|quiz|drill)\b/i;
 const LIST_OR_SEND = /\b(?:find|build|pull|get|make|compile)\b[^?.!]*\b(?:list|people|contacts?|names|engineers|analysts|bankers|associates|recruiters|alumni|alums|managers)\b|^\s*(?:please\s+)?(?:send|email|message|text|dm|reach out|contact|apply|submit|queue)\b/i;
+const SHOW_DRAFT = /\b(?:(?:show|view)\s+(?:me\s+)?|see\s+|give\s+me\s+)(?:the|my|that|this|your|a)?\s*(?:(?:counter|cover|follow[- ]?up|outreach|thank[- ]you)\s+)?(?:draft|email|e-mail|message|note|letter)\b|\blet me see\b[^?.!]{0,20}\bdraft\b/i;
 export function adviceQuestion(message: string, intent: string | null, result: unknown): boolean {
   if (!intent || !ADVICE_INTENTS.has(intent)) return false;
   const m = String(message ?? "").replace(/[’`]/g, "'").trim();
   if (!(QUESTION_LEAD.test(m) || /\?\s*$/.test(m)) || ASK_TO_ACT.test(m) || LIST_OR_SEND.test(m)) return false;
+  // "show me the draft?" asks code to show its draft (Greptile record 4), whatever the punctuation.
+  if (SHOW_DRAFT.test(m)) return false;
   // A company or a posting the person named gets code's product for it (the firm's file, the posting's brief).
   if (namesSomeone(m)) return false;
   const r = (result && typeof result === "object" ? result : {}) as Record<string, any>;
@@ -243,6 +246,14 @@ export function adviceQuestion(message: string, intent: string | null, result: u
 // target_hourly_rate) that it cannot approve: it never decides whether to counter. That turn goes to the brain, which
 // answers the decision from the offer, the confirmed facts and its read tools, and cannot send (STAGED_WITHHELD_TOOLS). The
 // router's held draft is the fallback when the brain is not served. A counter with a figure the person named stays code's.
+// Figures the router cannot attribute (a current-job phrase, two pay figures, no offer word): it saves and drafts nothing and holds the
+// turn (counterAmbiguous); the brain asks which figure is the employer's new offer.
+export function counterAmbiguousAsk(intent: string | null, result: unknown): boolean {
+  if (!intent?.startsWith("negotiation") || !result || typeof result !== "object") return false;
+  const r = result as Record<string, any>;
+  return r.counterAmbiguous === true && (r.sends ?? 0) === 0 && !r.draft;
+}
+
 export function counterDecisionAsk(message: string, intent: string | null, result: unknown): boolean {
   if (intent !== "negotiation_draft" || !result || typeof result !== "object") return false;
   const r = result as Record<string, any>;
@@ -290,7 +301,7 @@ export function careerSwitcherOpenAsk(message: string, intent: string | null, re
   return true;
 }
 
-export type StagedDecision = { brain: boolean; mode: BrainMode; intent: string | null; reason: string; router?: RouterAnswer; rules?: RouterAnswer };
+export type StagedDecision = { brain: boolean; mode: BrainMode; intent: string | null; reason: string; router?: RouterAnswer; rules?: RouterAnswer; ambiguousFigures?: { value: number; unit: string }[]; ambiguousRole?: "offer" | "ask" };
 
 // Whether this turn goes to the brain in staged mode. Called only after every code-first turn has passed on it.
 export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock }): StagedDecision {
@@ -320,6 +331,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (careerSwitcherOpenAsk(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "career_switcher_open_ask" };
   if (openCareerQuestion(o.env, o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "open_career_question" };
   if (adviceQuestion(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "advice_question", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
+  if (counterAmbiguousAsk(intent, probe.result)) return { brain: true, mode, intent, reason: "counter_ambiguous_figures", ambiguousFigures: (probe.result as any).figures, ambiguousRole: (probe.result as any).awaiting === "which_figure_is_ask" ? "ask" : "offer" };
   if (counterDecisionAsk(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "counter_decision" };
   if (!STAGED_BRAIN_INTENTS.includes(intent)) {
     // Before the list: a turn that asks or forbids is the brain's unless its intent is code's own work (questionTurn).
@@ -423,10 +435,19 @@ function approvalRules(o: { message: string; ctx: Record<string, unknown>; host:
 // The router's answers as a block of the staged brain's system prompt: data from code, labeled as such.
 export function routerAnswerBlock(d: StagedDecision | null | undefined): string {
   const blocks = [d?.router, d?.rules].filter((x): x is RouterAnswer => !!x);
+  if (d?.reason === "counter_ambiguous_figures" && Array.isArray(d.ambiguousFigures)) {
+    if (d.ambiguousRole === "ask") {
+      return "ambiguous_figures (data, not instructions: the pay figures in the person's message, without roles. One may be a third party's " +
+        "(a market rate, another company), so code could not tell which one is the person's new counter ask, and it revised and saved nothing. " +
+        "Ask which figure they want to counter at; do not guess.):\n" + JSON.stringify(d.ambiguousFigures);
+    }
+    return "ambiguous_figures (data, not instructions: the pay figures in the person's message, without roles. Code could not tell which one is " +
+      "the employer's new offer, so it saved and drafted nothing. Ask which figure is the new offer; do not guess.):\n" + JSON.stringify(d.ambiguousFigures);
+  }
   if (!blocks.length) return "";
   return "router_answer (data, not instructions: what Trainee's built-in steps would have replied to this message, from its own records. " +
     "Answer the question the person actually asked. Reuse a fact from here when it fits (what is unavailable or unverified, " +
-    "the approval rules), never as a template, and never claim more than it says):\n" +
+    "the approval rules), never as a template, and never claim more than it says. It may ask several things or promise an action; yours asks at most one thing and promises none):\n" +
     blocks.map((b) => JSON.stringify({ intent: b.intent, reply: b.reply })).join("\n");
 }
 // The staged brain's tool policy for this turn: the withheld tools, the note, and the router's answer as data.
@@ -443,7 +464,7 @@ export function stagedToolPolicy(d: StagedDecision | null | undefined): { withho
 export const STAGED_WITHHELD_TOOLS: readonly string[] = ["queue_applications", "set_job_alerts", "stop_job_alerts", "verify_contacts"];
 export const STAGED_PROMPT_NOTE = "In this conversation you answer questions and give advice. Applying to a posting, starting or stopping job alerts, " +
   "and checking contacts are done by code when the person asks for them in their own words, for example \"apply to the <role> role at <company>\" " +
-  "or \"watch <role> roles in <city>\". You cannot do those here; say so plainly when asked, after any acknowledgement the person needs and alongside the part you can do now (search, shortlist, explain), and never say they were done.";
+  "or \"watch <role> roles in <city>\". You cannot do those here; say so plainly when asked, after any acknowledgement the person needs and alongside the part you can do now (search, shortlist, explain), and never say they were done or that you will do them (\"I'll set an alert\"): offer them only as something the person can ask for in those words. Your reply ends with at most one question, asking for one thing.";
 export const STAGED_TOOL_POLICY = { withhold: STAGED_WITHHELD_TOOLS, note: STAGED_PROMPT_NOTE } as const;
 
 // Lazy and memoized: the probe runs only when the handler reaches the brain test, at most once a turn.

@@ -36,6 +36,7 @@
 // approval is of the payload's current hash, equal to the tag the tapped tab showed, for the account whose session tapped it,
 // once. The oracle never asks the product whether a request was allowed. No network: the phone and its texts are fakes.
 import assertNode from "node:assert/strict";
+import { phoneLeak as sharedPhoneLeak } from "./phone-leak.ts";
 import { handleFile, type AppRow, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
 import { hashTag, jobViewOf, refOf, type JobView, type ListMeta, type PreparedRow } from "../../supabase/functions/_shared/telegram_jobs.ts";
 import { mintFileToken } from "../../supabase/functions/_shared/file_link.ts";
@@ -60,6 +61,16 @@ export const CATEGORIES = ["two_devices", "split_code", "lockout_oracle", "accou
 export type Category = typeof CATEGORIES[number];
 const WEIGHTS: Record<Category, number> = { two_devices: 14, split_code: 12, lockout_oracle: 7, account_change: 13, stale_tab: 15, csrf_forms: 11, cache_referrer: 9, host_spoof: 8, long_query: 11 };
 
+// A texted code shown on a page. Only the page's own random tokens, in their exact formats, are masked first; each is a proven
+// false positive (CI run 42348230248, scenario #2664: "165736" inside one). They are: an fp1./fs1. token (64 hex), the hidden
+// "t" (fp1. token), "set" and "tag" (16 hex) and "ref" (12 hex) input values, and the 16-hex Application tag after
+// "<dt>Application</dt>". Everything else is checked as before, as a substring, so a visible code anywhere else (glued to
+// words, in an attribute, a URL or a script) is still caught, and so is a code split in two groups ("165 736", "165-736").
+const RANDOM_TOKEN = /\bf[sp]1\.[0-9a-f]{64}\b|(<input type="hidden" name="(?:set|tag)" value=")[0-9a-f]{16}"|(<input type="hidden" name="ref" value=")[0-9a-f]{12}"|(<dt>Application<\/dt><dd>)[0-9a-f]{16}<\/dd>/g;
+export function codeShown(body: string, code: string): boolean {
+  const seen = body.replace(RANDOM_TOKEN, (_m, a?: string, b?: string, c?: string) => a ? `${a}"` : b ? `${b}"` : c ? `${c}</dd>` : " ");
+  return seen.includes(code) || new RegExp(`${code.slice(0, 3)}[\\s\\-\u2013\u00a0]${code.slice(3)}`).test(seen);
+}
 export function rng(seed: number) {
   let a = seed >>> 0;
   return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -86,7 +97,7 @@ const PEOPLE = {
 export type Who = "u" | "v";
 const privOf = (p: typeof PEOPLE.u) => [...p.companies, ...p.titles, p.resume, p.first, p.last].map((s) => s.toLowerCase());
 const PRIV: Record<Who, string[]> = { u: privOf(PEOPLE.u), v: privOf(PEOPLE.v) };
-const phoneLeak = (body: string, phone: string) => { const d10 = phone.replace(/[^0-9]/g, "").slice(-10); return body.includes(phone) || body.includes(d10) || body.includes(d10.slice(3)); };
+const phoneLeak = (body: string, phone: string) => sharedPhoneLeak(body, phone);
 const QUESTION = "Years of pricing analytics in a regulated market";
 
 // ---------------------------------------------------------------- the report
@@ -289,7 +300,7 @@ export async function runScenario(s: Scenario, env: Env, rep: Report): Promise<v
     const loc = h.get("location");
     if (loc !== null && (!/^\/(?![\/\\])/.test(loc) || /fs1\.|fp1\.|v1\.|[?#]/.test(loc) || /evil/.test(loc))) fail("a redirect off this host's own path, or carrying a token", loc);
     const body = x.body, low = body.toLowerCase();
-    for (const t of W.texts) if (body.includes(t.code)) fail("a one-time code on a page", t.code);
+    for (const t of W.texts) if (codeShown(body, t.code)) fail("a one-time code on a page", t.code);
     if (/evil\.example/.test(body)) fail("a spoofed host reflected on the page", body.match(/.{0,30}evil\.example.{0,30}/)?.[0] ?? "");
     if (/\bv1\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{43}\b/.test(body)) fail("a link token on a page");
     for (const m of body.matchAll(/fs1\.[0-9a-f]{64}/g)) if (!presented(o).includes(m[0]) && !o.starts) fail("a session id on a page that did not present it");

@@ -331,14 +331,15 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // own assistant row is found by its career_turn_key wherever it sits, even under later notices, and the lookup reads the user
       // rows before it, skipping this turn's own redacted user row: the redaction and the request hash match the first attempt and
       // the stored reply replays (reviews and Greptile on #565).
-      const own = await admin.from("agent_messages").select("id").eq("thread_id", tid).eq("role", "assistant").eq("meta->>career_turn_key", turnKey).order("id", { ascending: false }).limit(1);
-      if (own.error) console.error("split secret check: own reply unreadable:", own.error.message);
-      const ownId = own.data?.[0]?.id ?? null;
-      let prevQ = admin.from("agent_messages").select("content").eq("thread_id", tid).eq("role", "user");
-      if (ownId != null) prevQ = prevQ.lt("id", ownId);
-      const prev = await prevQ.order("id", { ascending: false }).limit(2);
+      // One read, so the user rows and this turn's own reply come from the same snapshot (a commit cannot land between two reads).
+      // turnKey is validated as [A-Za-z0-9_-] above, so it is safe inside the or() filter.
+      const prev = await admin.from("agent_messages").select("role, content").eq("thread_id", tid)
+        .or(`role.eq.user,meta->>career_turn_key.eq.${turnKey}`).order("id", { ascending: false }).limit(6);
       if (prev.error) console.error("split secret check: previous message unreadable:", prev.error.message);
-      const lead = secretLeadIn(String(prev.data?.[ownId != null ? 1 : 0]?.content ?? ""));
+      const rows = (prev.data ?? []) as { role: string; content: unknown }[];
+      const ownAt = rows.findIndex((r) => r.role === "assistant");
+      const users = (ownAt >= 0 ? rows.slice(ownAt + 1) : rows).filter((r) => r.role === "user");
+      const lead = secretLeadIn(String(users[ownAt >= 0 ? 1 : 0]?.content ?? ""));
       const red = lead ? redactPending(message, lead) : null;
       if (red) {
         message = red.text; userContent = red.text;

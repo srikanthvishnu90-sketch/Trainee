@@ -1,33 +1,33 @@
 {
  "version": 1,
  "mode": "deterministic",
- "trunk": "3defbcfb1afd0665b067a57d0cdeec87e268d4a8",
+ "trunk": "f6c49cda00e8d42d251f05455c6c5282ac61f823",
  "scorecard": {
-  "verdict": "FAIL",
+  "verdict": "PASS",
   "overall": {
    "applications": 48,
-   "applications_clean": 25,
+   "applications_clean": 46,
    "fields_graded": 710,
    "fills_expected": 341,
-   "fills_correct": 337,
-   "fills_correct_any": 376,
-   "wrong_answers": 4,
-   "unverifiable_answers": 10,
+   "fills_correct": 340,
+   "fills_correct_any": 386,
+   "wrong_answers": 0,
+   "unverifiable_answers": 0,
    "contested_fills": 1,
-   "questions_asked": 125,
-   "questions_genuinely_unanswerable": 123,
-   "questions_answerable_from_facts": 2,
+   "questions_asked": 129,
+   "questions_genuinely_unanswerable": 128,
+   "questions_answerable_from_facts": 1,
    "optional_missed": 0,
    "required_silent_gaps": 0,
    "knockout_fields": 94,
-   "knockout_correct": 87,
-   "knockout_wrong": 3,
+   "knockout_correct": 92,
+   "knockout_wrong": 0,
    "prepared_state": {
-    "ok": 47,
+    "ok": 48,
     "of": 48
    },
    "preparable_after_answers": 46,
-   "ready_for_card": 7,
+   "ready_for_card": 8,
    "unsafe_ready": 0,
    "hash_honoured": {
     "ok": 44,
@@ -42,7 +42,7 @@
     "of": 1
    },
    "duplicates_refused": {
-    "ok": 30,
+    "ok": 44,
     "of": 44
    },
    "other_role_admitted": {
@@ -73,28 +73,28 @@
   "by_family": {
    "greenhouse": {
     "applications": 16,
-    "applications_clean": 2,
+    "applications_clean": 16,
     "fields_graded": 216,
     "fills_expected": 131,
-    "fills_correct": 129,
-    "fills_correct_any": 137,
-    "wrong_answers": 2,
+    "fills_correct": 130,
+    "fills_correct_any": 138,
+    "wrong_answers": 0,
     "unverifiable_answers": 0,
     "contested_fills": 0,
-    "questions_asked": 48,
-    "questions_genuinely_unanswerable": 46,
-    "questions_answerable_from_facts": 2,
+    "questions_asked": 49,
+    "questions_genuinely_unanswerable": 48,
+    "questions_answerable_from_facts": 1,
     "optional_missed": 0,
     "required_silent_gaps": 0,
     "knockout_fields": 30,
-    "knockout_correct": 27,
-    "knockout_wrong": 2,
+    "knockout_correct": 29,
+    "knockout_wrong": 0,
     "prepared_state": {
-     "ok": 15,
+     "ok": 16,
      "of": 16
     },
     "preparable_after_answers": 16,
-    "ready_for_card": 2,
+    "ready_for_card": 3,
     "unsafe_ready": 0,
     "hash_honoured": {
      "ok": 14,
@@ -109,7 +109,7 @@
      "of": 1
     },
     "duplicates_refused": {
-     "ok": 0,
+     "ok": 14,
      "of": 14
     },
     "other_role_admitted": {
@@ -139,22 +139,22 @@
    },
    "lever": {
     "applications": 16,
-    "applications_clean": 15,
+    "applications_clean": 16,
     "fields_graded": 296,
     "fills_expected": 121,
     "fills_correct": 121,
     "fills_correct_any": 148,
-    "wrong_answers": 1,
+    "wrong_answers": 0,
     "unverifiable_answers": 0,
     "contested_fills": 1,
-    "questions_asked": 49,
-    "questions_genuinely_unanswerable": 49,
+    "questions_asked": 50,
+    "questions_genuinely_unanswerable": 50,
     "questions_answerable_from_facts": 0,
     "optional_missed": 0,
     "required_silent_gaps": 0,
     "knockout_fields": 34,
-    "knockout_correct": 32,
-    "knockout_wrong": 1,
+    "knockout_correct": 33,
+    "knockout_wrong": 0,
     "prepared_state": {
      "ok": 16,
      "of": 16
@@ -205,21 +205,21 @@
    },
    "ashby": {
     "applications": 16,
-    "applications_clean": 8,
+    "applications_clean": 14,
     "fields_graded": 198,
     "fills_expected": 89,
-    "fills_correct": 87,
-    "fills_correct_any": 91,
-    "wrong_answers": 1,
-    "unverifiable_answers": 10,
+    "fills_correct": 89,
+    "fills_correct_any": 100,
+    "wrong_answers": 0,
+    "unverifiable_answers": 0,
     "contested_fills": 0,
-    "questions_asked": 28,
-    "questions_genuinely_unanswerable": 28,
+    "questions_asked": 30,
+    "questions_genuinely_unanswerable": 30,
     "questions_answerable_from_facts": 0,
     "optional_missed": 0,
     "required_silent_gaps": 0,
     "knockout_fields": 30,
-    "knockout_correct": 28,
+    "knockout_correct": 30,
     "knockout_wrong": 0,
     "prepared_state": {
      "ok": 16,
@@ -273,28 +273,28 @@
   "by_persona": {
    "A": {
     "applications": 24,
-    "applications_clean": 12,
+    "applications_clean": 23,
     "fields_graded": 355,
     "fills_expected": 201,
-    "fills_correct": 198,
-    "fills_correct_any": 228,
-    "wrong_answers": 1,
-    "unverifiable_answers": 9,
+    "fills_correct": 200,
+    "fills_correct_any": 238,
+    "wrong_answers": 0,
+    "unverifiable_answers": 0,
     "contested_fills": 0,
     "questions_asked": 47,
-    "questions_genuinely_unanswerable": 45,
-    "questions_answerable_from_facts": 2,
+    "questions_genuinely_unanswerable": 46,
+    "questions_answerable_from_facts": 1,
     "optional_missed": 0,
     "required_silent_gaps": 0,
     "knockout_fields": 47,
-    "knockout_correct": 45,
+    "knockout_correct": 46,
     "knockout_wrong": 0,
     "prepared_state": {
-     "ok": 23,
+     "ok": 24,
      "of": 24
     },
     "preparable_after_answers": 23,
-    "ready_for_card": 6,
+    "ready_for_card": 7,
     "unsafe_ready": 0,
     "hash_honoured": {
      "ok": 21,
@@ -309,7 +309,7 @@
      "of": 1
     },
     "duplicates_refused": {
-     "ok": 15,
+     "ok": 21,
      "of": 21
     },
     "other_role_admitted": {
@@ -339,22 +339,22 @@
    },
    "B": {
     "applications": 24,
-    "applications_clean": 13,
+    "applications_clean": 23,
     "fields_graded": 355,
     "fills_expected": 140,
-    "fills_correct": 139,
+    "fills_correct": 140,
     "fills_correct_any": 148,
-    "wrong_answers": 3,
-    "unverifiable_answers": 1,
+    "wrong_answers": 0,
+    "unverifiable_answers": 0,
     "contested_fills": 1,
-    "questions_asked": 78,
-    "questions_genuinely_unanswerable": 78,
+    "questions_asked": 82,
+    "questions_genuinely_unanswerable": 82,
     "questions_answerable_from_facts": 0,
     "optional_missed": 0,
     "required_silent_gaps": 0,
     "knockout_fields": 47,
-    "knockout_correct": 42,
-    "knockout_wrong": 3,
+    "knockout_correct": 46,
+    "knockout_wrong": 0,
     "prepared_state": {
      "ok": 24,
      "of": 24
@@ -375,7 +375,7 @@
      "of": 0
     },
     "duplicates_refused": {
-     "ok": 15,
+     "ok": 23,
      "of": 23
     },
     "other_role_admitted": {
@@ -418,41 +418,6 @@
   ],
   "failure_classes": [
    {
-    "cls": "wrong answer: work_authorization put on a knockout question it answers wrongly",
-    "stage": "prepare",
-    "count": 2,
-    "applications": 2,
-    "example": "B/greenhouse-datadog-8257324#11 \"Are you legally authorised to work full-time in the country where this\" got \"Yes, no restriction.\"; gold either:Yes, but I will need sponsorship*"
-   },
-   {
-    "cls": "wrong answer: government_employment put on a question no confirmed fact answers",
-    "stage": "prepare",
-    "count": 1,
-    "applications": 1,
-    "example": "A/ashby-saronic-d3ad80db-8508-4677-95d6-93c5d7a33815#7 \"Are you currently, or have you previously served (within the past five\" got \"no\"; gold ask:"
-   },
-   {
-    "cls": "wrong answer: sponsorship put on a knockout question no confirmed fact answers",
-    "stage": "prepare",
-    "count": 1,
-    "applications": 1,
-    "example": "B/greenhouse-doordashusa-8139265#10 \"Will you now require immigration sponsorship by our company to attain \" got \"Yes\"; gold ask:"
-   },
-   {
-    "cls": "a second application to the same greenhouse posting was admitted: employer careers page with gh_jid",
-    "stage": "enqueue",
-    "count": 14,
-    "applications": 14,
-    "example": "A/greenhouse-datadog-8257324 https://careers.example.test/jobs?gh_jid=8257324"
-   },
-   {
-    "cls": "unidentifiable answer: the prepared payload records a value every option shares (Ashby radio \"on\"), so the approved payload does not say which option",
-    "stage": "prepare",
-    "count": 10,
-    "applications": 6,
-    "example": "A/ashby-openai-8fb1615c-34bf-47c4-a1d1-b7b2f836bbd3#12 \"Hispanic or Latino\" value \"on\" (eeo)"
-   },
-   {
     "cls": "never preparable by text: a required question the person can answer (a link) is treated as a never-by-text identity or secret field",
     "stage": "prepare",
     "count": 2,
@@ -460,25 +425,11 @@
     "example": "A/ashby-whoop-1356adce-d85e-41b8-b6fe-14e6866c7aca still held: identity A design portfolio is required"
    },
    {
-    "cls": "asked though a confirmed fact answers it: unknown",
-    "stage": "prepare",
-    "count": 1,
-    "applications": 1,
-    "example": "A/greenhouse-medelitellc-4815180008#10 \"I would like to receive updates from a recruiter about this job and/or\""
-   },
-   {
     "cls": "asked though a confirmed fact answers it: work_authorization",
     "stage": "prepare",
     "count": 1,
     "applications": 1,
     "example": "A/greenhouse-elastic-8148720#11 \"In what countries do you have the unrestricted right to work?\""
-   },
-   {
-    "cls": "held for questions though every required field is answerable from confirmed facts",
-    "stage": "prepare",
-    "count": 1,
-    "applications": 1,
-    "example": "A/greenhouse-medelitellc-4815180008"
    }
   ]
  },
@@ -998,7 +949,7 @@
     "prepared_state": true,
     "preparable_after_answers": true,
     "hash_honoured": true,
-    "duplicates_refused": false,
+    "duplicates_refused": true,
     "other_role_admitted": true,
     "submitted_state": true,
     "resend_guard": true,
@@ -1023,7 +974,7 @@
      {
       "id": "employer careers page with gh_jid",
       "url": "https://careers.example.test/jobs?gh_jid=8257324",
-      "refused": false
+      "refused": true
      },
      {
       "id": "the same link and job id again",
@@ -1190,7 +1141,7 @@
    "checks": {
     "prepared_state": true,
     "hash_honoured": true,
-    "duplicates_refused": false,
+    "duplicates_refused": true,
     "other_role_admitted": true,
     "submitted_state": true,
     "resend_guard": true,
@@ -1214,7 +1165,7 @@
      {
       "id": "employer careers page with gh_jid",
       "url": "https://careers.example.test/jobs?gh_jid=8054004",
-      "refused": false
+      "refused": true
      },
      {
       "id": "the same link and job id again",
@@ -1413,7 +1364,7 @@
     "prepared_state": true,
     "preparable_after_answers": true,
     "hash_honoured": true,
-    "duplicates_refused": false,
+    "duplicates_refused": true,
     "other_role_admitted": true,
     "submitted_state": true,
     "resend_guard": true,
@@ -1436,7 +1387,7 @@
      {
       "id": "employer careers page with gh_jid",
       "url": "https://careers.example.test/jobs?gh_jid=8148720",
-      "refused": false
+      "refused": true
      },
      {
       "id": "the same link and job id again",
@@ -1462,7 +1413,7 @@
    "posting": "greenhouse-medelitellc-4815180008",
    "family": "greenhouse",
    "company": "MedElite",
-   "prepared_state": "over_held",
+   "prepared_state": "ready",
    "fields": [
     {
      "i": 0,
@@ -1552,15 +1503,16 @@
      "required": true,
      "expect": "fill:No",
      "ko": false,
-     "verdict": "unneeded_ask",
-     "product_fact": "unknown"
+     "verdict": "correct_fill",
+     "shown": "No",
+     "fact": "sms_opt_in",
+     "product_fact": "sms_opt_in"
     }
    ],
    "checks": {
-    "prepared_state": false,
-    "preparable_after_answers": true,
+    "prepared_state": true,
     "hash_honoured": true,
-    "duplicates_refused": false,
+    "duplicates_refused": true,
     "other_role_admitted": true,
     "submitted_state": true,
     "resend_guard": true,
@@ -1569,7 +1521,7 @@
    "after_answers": "ready",
    "card": {
     "n": 6,
-    "shown_hash": "201a4217419461c7",
+    "shown_hash": "5fde02ed38d53d33",
     "changed": false,
     "queued": true
    },
@@ -1583,7 +1535,7 @@
      {
       "id": "employer careers page with gh_jid",
       "url": "https://careers.example.test/jobs?gh_jid=4815180008",
-      "refused": false
+      "refused": true
      },
      {
       "id": "the same link and job id again",
@@ -1773,7 +1725,7 @@
     "prepared_state": true,
     "preparable_after_answers": true,
     "hash_honoured": true,
-    "duplicates_refused": false,
+    "duplicates_refused": true,
     "other_role_admitted": true,
     "submitted_state": true,
     "resend_guard": true,
@@ -1796,7 +1748,7 @@
      {
       "id": "employer careers page with gh_jid",
       "url": "https://careers.example.test/jobs?gh_jid=7608993003",
-      "refused": false
+      "refused": true
      },
      {
       "id": "the same link and job id again",
@@ -1962,7 +1914,7 @@
     "prepared_state": true,
     "preparable_after_answers": true,
     "hash_honoured": true,
-    "duplicates_refused": false,
+    "duplicates_refused": true,
     "other_role_admitted": true,
     "submitted_state": true,
     "resend_guard": true,
@@ -1985,7 +1937,7 @@
      {
       "id": "employer careers page with gh_jid",
       "url": "https://careers.example.test/jobs?gh_jid=8615771002",
-      "refused": false
+      "refused": true
      },
      {
       "id": "the same link and job id again",
@@ -4126,8 +4078,8 @@
      "required": false,
      "expect": "either:Decline to self-identify",
      "ko": false,
-     "verdict": "unverifiable_fill",
-     "shown": null,
+     "verdict": "correct_fill",
+     "shown": "Decline to self-identify",
      "fact": "eeo",
      "product_fact": "eeo"
     },
@@ -4137,8 +4089,8 @@
      "required": false,
      "expect": "either:I decline*",
      "ko": false,
-     "verdict": "unverifiable_fill",
-     "shown": null,
+     "verdict": "correct_fill",
+     "shown": "I decline to self-identify for protected veteran status",
      "fact": "eeo",
      "product_fact": "eeo"
     },
@@ -4167,7 +4119,7 @@
    "after_answers": "ready",
    "card": {
     "n": 17,
-    "shown_hash": "937bc2feb254e614",
+    "shown_hash": "77b6473b9814d485",
     "changed": false,
     "queued": true
    },
@@ -4335,8 +4287,8 @@
      "required": false,
      "expect": "either:Decline to self-identify",
      "ko": false,
-     "verdict": "unverifiable_fill",
-     "shown": null,
+     "verdict": "correct_fill",
+     "shown": "Decline to self-identify",
      "fact": "eeo",
      "product_fact": "eeo"
     },
@@ -4346,8 +4298,8 @@
      "required": false,
      "expect": "either:I decline*",
      "ko": false,
-     "verdict": "unverifiable_fill",
-     "shown": null,
+     "verdict": "correct_fill",
+     "shown": "I decline to self-identify for protected veteran status",
      "fact": "eeo",
      "product_fact": "eeo"
     },
@@ -4374,7 +4326,7 @@
    "after_answers": "ready",
    "card": {
     "n": 18,
-    "shown_hash": "0f877aec5b7b150c",
+    "shown_hash": "8e301e6e45e695d1",
     "changed": false,
     "queued": true
    },
@@ -4521,8 +4473,8 @@
      "required": false,
      "expect": "fill:No, I do not require*",
      "ko": true,
-     "verdict": "unverifiable_fill",
-     "shown": null,
+     "verdict": "correct_fill",
+     "shown": "No, I do not require sponsorship to work in the country where this role is locat",
      "fact": "sponsorship",
      "product_fact": "sponsorship"
     },
@@ -4589,7 +4541,7 @@
    "after_answers": "ready",
    "card": {
     "n": 19,
-    "shown_hash": "ccb794e5c793d5bf",
+    "shown_hash": "53a026d93e634590",
     "changed": false,
     "queued": true
    },
@@ -4827,9 +4779,7 @@
      "required": true,
      "expect": "ask",
      "ko": false,
-     "verdict": "wrong",
-     "shown": "no",
-     "fact": "government_employment",
+     "verdict": "correct_ask",
      "product_fact": "government_employment"
     },
     {
@@ -4876,8 +4826,8 @@
      "required": false,
      "expect": "either:Decline to self-identify",
      "ko": false,
-     "verdict": "unverifiable_fill",
-     "shown": null,
+     "verdict": "correct_fill",
+     "shown": "Decline to self-identify",
      "fact": "eeo",
      "product_fact": "eeo"
     },
@@ -4887,8 +4837,8 @@
      "required": false,
      "expect": "either:I decline*",
      "ko": false,
-     "verdict": "unverifiable_fill",
-     "shown": null,
+     "verdict": "correct_fill",
+     "shown": "I decline to self-identify for protected veteran status",
      "fact": "eeo",
      "product_fact": "eeo"
     },
@@ -4915,7 +4865,7 @@
    "after_answers": "ready",
    "card": {
     "n": 21,
-    "shown_hash": "f7164f9e643efa0b",
+    "shown_hash": "69e33ecdafac0c54",
     "changed": false,
     "queued": true
    },
@@ -5347,8 +5297,8 @@
      "required": false,
      "expect": "either:Decline to self-identify",
      "ko": false,
-     "verdict": "unverifiable_fill",
-     "shown": null,
+     "verdict": "correct_fill",
+     "shown": "Decline to self-identify",
      "fact": "eeo",
      "product_fact": "eeo"
     },
@@ -5358,8 +5308,8 @@
      "required": false,
      "expect": "either:I decline*",
      "ko": false,
-     "verdict": "unverifiable_fill",
-     "shown": null,
+     "verdict": "correct_fill",
+     "shown": "I decline to self-identify for protected veteran status",
      "fact": "eeo",
      "product_fact": "eeo"
     },
@@ -5385,7 +5335,7 @@
    "after_answers": "ready",
    "card": {
     "n": 23,
-    "shown_hash": "85cdf69a3dbef1f6",
+    "shown_hash": "51d8c57bc4c82ef4",
     "changed": false,
     "queued": true
    },
@@ -5672,7 +5622,7 @@
     "prepared_state": true,
     "preparable_after_answers": true,
     "hash_honoured": true,
-    "duplicates_refused": false,
+    "duplicates_refused": true,
     "other_role_admitted": true,
     "submitted_state": true,
     "resend_guard": true,
@@ -5697,7 +5647,7 @@
      {
       "id": "employer careers page with gh_jid",
       "url": "https://careers.example.test/jobs?gh_jid=8172510",
-      "refused": false
+      "refused": true
      },
      {
       "id": "the same link and job id again",
@@ -5820,9 +5770,7 @@
      "required": true,
      "expect": "ask",
      "ko": true,
-     "verdict": "wrong",
-     "shown": "Yes",
-     "fact": "sponsorship",
+     "verdict": "correct_ask",
      "product_fact": "sponsorship"
     },
     {
@@ -5868,7 +5816,7 @@
     "prepared_state": true,
     "preparable_after_answers": true,
     "hash_honoured": true,
-    "duplicates_refused": false,
+    "duplicates_refused": true,
     "other_role_admitted": true,
     "submitted_state": true,
     "resend_guard": true,
@@ -5878,7 +5826,7 @@
    "after_answers": "ready",
    "card": {
     "n": 2,
-    "shown_hash": "f3db0d283c04132b",
+    "shown_hash": "85cc7d66fb948a71",
     "changed": false,
     "queued": true
    },
@@ -5892,7 +5840,7 @@
      {
       "id": "employer careers page with gh_jid",
       "url": "https://careers.example.test/jobs?gh_jid=8139265",
-      "refused": false
+      "refused": true
      },
      {
       "id": "the same link and job id again",
@@ -6032,9 +5980,7 @@
      "required": true,
      "expect": "either:Yes, but I will need sponsorship*",
      "ko": true,
-     "verdict": "wrong",
-     "shown": "Yes, no restriction.",
-     "fact": "work_authorization",
+     "verdict": "correct_ask",
      "product_fact": "work_authorization"
     },
     {
@@ -6069,7 +6015,7 @@
     "prepared_state": true,
     "preparable_after_answers": true,
     "hash_honoured": true,
-    "duplicates_refused": false,
+    "duplicates_refused": true,
     "other_role_admitted": true,
     "submitted_state": true,
     "resend_guard": true,
@@ -6078,7 +6024,7 @@
    "after_answers": "ready",
    "card": {
     "n": 3,
-    "shown_hash": "8d1ac3a79f2a071e",
+    "shown_hash": "f549b8fc09a903f8",
     "changed": false,
     "queued": true
    },
@@ -6092,7 +6038,7 @@
      {
       "id": "employer careers page with gh_jid",
       "url": "https://careers.example.test/jobs?gh_jid=8257324",
-      "refused": false
+      "refused": true
      },
      {
       "id": "the same link and job id again",
@@ -6249,7 +6195,7 @@
     "prepared_state": true,
     "preparable_after_answers": true,
     "hash_honoured": true,
-    "duplicates_refused": false,
+    "duplicates_refused": true,
     "other_role_admitted": true,
     "submitted_state": true,
     "resend_guard": true,
@@ -6272,7 +6218,7 @@
      {
       "id": "employer careers page with gh_jid",
       "url": "https://careers.example.test/jobs?gh_jid=8054004",
-      "refused": false
+      "refused": true
      },
      {
       "id": "the same link and job id again",
@@ -6463,7 +6409,7 @@
     "prepared_state": true,
     "preparable_after_answers": true,
     "hash_honoured": true,
-    "duplicates_refused": false,
+    "duplicates_refused": true,
     "other_role_admitted": true,
     "submitted_state": true,
     "resend_guard": true,
@@ -6486,7 +6432,7 @@
      {
       "id": "employer careers page with gh_jid",
       "url": "https://careers.example.test/jobs?gh_jid=8148720",
-      "refused": false
+      "refused": true
      },
      {
       "id": "the same link and job id again",
@@ -6603,14 +6549,14 @@
      "expect": "ask",
      "ko": false,
      "verdict": "correct_ask",
-     "product_fact": "unknown"
+     "product_fact": "sms_opt_in"
     }
    ],
    "checks": {
     "prepared_state": true,
     "preparable_after_answers": true,
     "hash_honoured": true,
-    "duplicates_refused": false,
+    "duplicates_refused": true,
     "other_role_admitted": true,
     "submitted_state": true,
     "resend_guard": true,
@@ -6633,7 +6579,7 @@
      {
       "id": "employer careers page with gh_jid",
       "url": "https://careers.example.test/jobs?gh_jid=4815180008",
-      "refused": false
+      "refused": true
      },
      {
       "id": "the same link and job id again",
@@ -6817,7 +6763,7 @@
     "prepared_state": true,
     "preparable_after_answers": true,
     "hash_honoured": true,
-    "duplicates_refused": false,
+    "duplicates_refused": true,
     "other_role_admitted": true,
     "submitted_state": true,
     "resend_guard": true,
@@ -6840,7 +6786,7 @@
      {
       "id": "employer careers page with gh_jid",
       "url": "https://careers.example.test/jobs?gh_jid=7608993003",
-      "refused": false
+      "refused": true
      },
      {
       "id": "the same link and job id again",
@@ -7004,7 +6950,7 @@
     "prepared_state": true,
     "preparable_after_answers": true,
     "hash_honoured": true,
-    "duplicates_refused": false,
+    "duplicates_refused": true,
     "other_role_admitted": true,
     "submitted_state": true,
     "resend_guard": true,
@@ -7027,7 +6973,7 @@
      {
       "id": "employer careers page with gh_jid",
       "url": "https://careers.example.test/jobs?gh_jid=8615771002",
-      "refused": false
+      "refused": true
      },
      {
       "id": "the same link and job id again",
@@ -7362,9 +7308,7 @@
      "required": true,
      "expect": "either:No",
      "ko": true,
-     "verdict": "wrong",
-     "shown": "Yes",
-     "fact": "work_authorization",
+     "verdict": "correct_ask",
      "product_fact": "work_authorization"
     },
     {
@@ -7418,7 +7362,7 @@
    "after_answers": "ready",
    "card": {
     "n": 10,
-    "shown_hash": "5d3928f883ff9403",
+    "shown_hash": "927026f4e0471198",
     "changed": false,
     "queued": true
    },
@@ -9445,9 +9389,7 @@
      "required": true,
      "expect": "either:Yes",
      "ko": true,
-     "verdict": "correct_fill",
-     "shown": "Yes",
-     "fact": "work_authorization",
+     "verdict": "correct_ask",
      "product_fact": "work_authorization"
     },
     {
@@ -9456,8 +9398,8 @@
      "required": false,
      "expect": "fill:Yes, I will require*",
      "ko": true,
-     "verdict": "unverifiable_fill",
-     "shown": null,
+     "verdict": "correct_fill",
+     "shown": "Yes, I will require Harvey to sponsor my employment",
      "fact": "sponsorship",
      "product_fact": "sponsorship"
     },
@@ -9522,7 +9464,7 @@
    "after_answers": "ready",
    "card": {
     "n": 19,
-    "shown_hash": "d85344b691b1384a",
+    "shown_hash": "a4234546c710f696",
     "changed": false,
     "queued": true
    },
@@ -10422,195 +10364,15 @@
   },
   {
    "stage": "prepare",
-   "cls": "asked though a confirmed fact answers it: unknown",
-   "app": "A/greenhouse-medelitellc-4815180008#10",
-   "detail": "\"I would like to receive updates from a recruiter about this job and/or\""
-  },
-  {
-   "stage": "prepare",
-   "cls": "held for questions though every required field is answerable from confirmed facts",
-   "app": "A/greenhouse-medelitellc-4815180008",
-   "detail": ""
-  },
-  {
-   "stage": "prepare",
-   "cls": "unidentifiable answer: the prepared payload records a value every option shares (Ashby radio \"on\"), so the approved payload does not say which option",
-   "app": "A/ashby-openai-8fb1615c-34bf-47c4-a1d1-b7b2f836bbd3#12",
-   "detail": "\"Hispanic or Latino\" value \"on\" (eeo)"
-  },
-  {
-   "stage": "prepare",
-   "cls": "unidentifiable answer: the prepared payload records a value every option shares (Ashby radio \"on\"), so the approved payload does not say which option",
-   "app": "A/ashby-openai-8fb1615c-34bf-47c4-a1d1-b7b2f836bbd3#13",
-   "detail": "\"I identify as one or more of the classifications of protected veteran \" value \"on\" (eeo)"
-  },
-  {
-   "stage": "prepare",
-   "cls": "unidentifiable answer: the prepared payload records a value every option shares (Ashby radio \"on\"), so the approved payload does not say which option",
-   "app": "A/ashby-crusoe-b1b99030-d393-4329-80fe-5bc2e4c93b03#11",
-   "detail": "\"Hispanic or Latino\" value \"on\" (eeo)"
-  },
-  {
-   "stage": "prepare",
-   "cls": "unidentifiable answer: the prepared payload records a value every option shares (Ashby radio \"on\"), so the approved payload does not say which option",
-   "app": "A/ashby-crusoe-b1b99030-d393-4329-80fe-5bc2e4c93b03#12",
-   "detail": "\"I identify as one or more of the classifications of protected veteran \" value \"on\" (eeo)"
-  },
-  {
-   "stage": "prepare",
-   "cls": "unidentifiable answer: the prepared payload records a value every option shares (Ashby radio \"on\"), so the approved payload does not say which option",
-   "app": "A/ashby-harvey-977e6184-2dc4-422b-8ab3-bc26bb73f778#9",
-   "detail": "\"Yes, I will require Harvey to sponsor my employment\" value \"on\" (sponsorship)"
-  },
-  {
-   "stage": "prepare",
-   "cls": "wrong answer: government_employment put on a question no confirmed fact answers",
-   "app": "A/ashby-saronic-d3ad80db-8508-4677-95d6-93c5d7a33815#7",
-   "detail": "\"Are you currently, or have you previously served (within the past five\" got \"no\"; gold ask:"
-  },
-  {
-   "stage": "prepare",
-   "cls": "unidentifiable answer: the prepared payload records a value every option shares (Ashby radio \"on\"), so the approved payload does not say which option",
-   "app": "A/ashby-saronic-d3ad80db-8508-4677-95d6-93c5d7a33815#12",
-   "detail": "\"Hispanic or Latino\" value \"on\" (eeo)"
-  },
-  {
-   "stage": "prepare",
-   "cls": "unidentifiable answer: the prepared payload records a value every option shares (Ashby radio \"on\"), so the approved payload does not say which option",
-   "app": "A/ashby-saronic-d3ad80db-8508-4677-95d6-93c5d7a33815#13",
-   "detail": "\"I identify as one or more of the classifications of protected veteran \" value \"on\" (eeo)"
-  },
-  {
-   "stage": "prepare",
    "cls": "never preparable by text: a required question the person can answer (a link) is treated as a never-by-text identity or secret field",
    "app": "A/ashby-whoop-1356adce-d85e-41b8-b6fe-14e6866c7aca",
    "detail": "still held: identity A design portfolio is required"
   },
   {
    "stage": "prepare",
-   "cls": "unidentifiable answer: the prepared payload records a value every option shares (Ashby radio \"on\"), so the approved payload does not say which option",
-   "app": "A/ashby-skydio-134f29cc-da9f-4214-9d9c-d044f93af39e#8",
-   "detail": "\"Hispanic or Latino\" value \"on\" (eeo)"
-  },
-  {
-   "stage": "prepare",
-   "cls": "unidentifiable answer: the prepared payload records a value every option shares (Ashby radio \"on\"), so the approved payload does not say which option",
-   "app": "A/ashby-skydio-134f29cc-da9f-4214-9d9c-d044f93af39e#9",
-   "detail": "\"I identify as one or more of the classifications of protected veteran \" value \"on\" (eeo)"
-  },
-  {
-   "stage": "enqueue",
-   "cls": "a second application to the same greenhouse posting was admitted: employer careers page with gh_jid",
-   "app": "A/greenhouse-datadog-8257324",
-   "detail": "https://careers.example.test/jobs?gh_jid=8257324"
-  },
-  {
-   "stage": "enqueue",
-   "cls": "a second application to the same greenhouse posting was admitted: employer careers page with gh_jid",
-   "app": "A/greenhouse-toast-8054004",
-   "detail": "https://careers.example.test/jobs?gh_jid=8054004"
-  },
-  {
-   "stage": "enqueue",
-   "cls": "a second application to the same greenhouse posting was admitted: employer careers page with gh_jid",
-   "app": "A/greenhouse-elastic-8148720",
-   "detail": "https://careers.example.test/jobs?gh_jid=8148720"
-  },
-  {
-   "stage": "enqueue",
-   "cls": "a second application to the same greenhouse posting was admitted: employer careers page with gh_jid",
-   "app": "A/greenhouse-medelitellc-4815180008",
-   "detail": "https://careers.example.test/jobs?gh_jid=4815180008"
-  },
-  {
-   "stage": "enqueue",
-   "cls": "a second application to the same greenhouse posting was admitted: employer careers page with gh_jid",
-   "app": "A/greenhouse-okx-7608993003",
-   "detail": "https://careers.example.test/jobs?gh_jid=7608993003"
-  },
-  {
-   "stage": "enqueue",
-   "cls": "a second application to the same greenhouse posting was admitted: employer careers page with gh_jid",
-   "app": "A/greenhouse-relativity-8615771002",
-   "detail": "https://careers.example.test/jobs?gh_jid=8615771002"
-  },
-  {
-   "stage": "prepare",
-   "cls": "wrong answer: sponsorship put on a knockout question no confirmed fact answers",
-   "app": "B/greenhouse-doordashusa-8139265#10",
-   "detail": "\"Will you now require immigration sponsorship by our company to attain \" got \"Yes\"; gold ask:"
-  },
-  {
-   "stage": "prepare",
-   "cls": "wrong answer: work_authorization put on a knockout question it answers wrongly",
-   "app": "B/greenhouse-datadog-8257324#11",
-   "detail": "\"Are you legally authorised to work full-time in the country where this\" got \"Yes, no restriction.\"; gold either:Yes, but I will need sponsorship*"
-  },
-  {
-   "stage": "prepare",
-   "cls": "wrong answer: work_authorization put on a knockout question it answers wrongly",
-   "app": "B/lever-veeva-9ac55b31-df46-4acb-b305-2c0b7ed56027#8",
-   "detail": "\"Do you have the unrestricted right to work in the United States?\" got \"Yes\"; gold either:No"
-  },
-  {
-   "stage": "prepare",
-   "cls": "unidentifiable answer: the prepared payload records a value every option shares (Ashby radio \"on\"), so the approved payload does not say which option",
-   "app": "B/ashby-harvey-977e6184-2dc4-422b-8ab3-bc26bb73f778#9",
-   "detail": "\"Yes, I will require Harvey to sponsor my employment\" value \"on\" (sponsorship)"
-  },
-  {
-   "stage": "prepare",
    "cls": "never preparable by text: a required question the person can answer (a link) is treated as a never-by-text identity or secret field",
    "app": "B/ashby-whoop-1356adce-d85e-41b8-b6fe-14e6866c7aca",
    "detail": "still held: identity A design portfolio is required"
-  },
-  {
-   "stage": "enqueue",
-   "cls": "a second application to the same greenhouse posting was admitted: employer careers page with gh_jid",
-   "app": "B/greenhouse-stripe-8172510",
-   "detail": "https://careers.example.test/jobs?gh_jid=8172510"
-  },
-  {
-   "stage": "enqueue",
-   "cls": "a second application to the same greenhouse posting was admitted: employer careers page with gh_jid",
-   "app": "B/greenhouse-doordashusa-8139265",
-   "detail": "https://careers.example.test/jobs?gh_jid=8139265"
-  },
-  {
-   "stage": "enqueue",
-   "cls": "a second application to the same greenhouse posting was admitted: employer careers page with gh_jid",
-   "app": "B/greenhouse-datadog-8257324",
-   "detail": "https://careers.example.test/jobs?gh_jid=8257324"
-  },
-  {
-   "stage": "enqueue",
-   "cls": "a second application to the same greenhouse posting was admitted: employer careers page with gh_jid",
-   "app": "B/greenhouse-toast-8054004",
-   "detail": "https://careers.example.test/jobs?gh_jid=8054004"
-  },
-  {
-   "stage": "enqueue",
-   "cls": "a second application to the same greenhouse posting was admitted: employer careers page with gh_jid",
-   "app": "B/greenhouse-elastic-8148720",
-   "detail": "https://careers.example.test/jobs?gh_jid=8148720"
-  },
-  {
-   "stage": "enqueue",
-   "cls": "a second application to the same greenhouse posting was admitted: employer careers page with gh_jid",
-   "app": "B/greenhouse-medelitellc-4815180008",
-   "detail": "https://careers.example.test/jobs?gh_jid=4815180008"
-  },
-  {
-   "stage": "enqueue",
-   "cls": "a second application to the same greenhouse posting was admitted: employer careers page with gh_jid",
-   "app": "B/greenhouse-okx-7608993003",
-   "detail": "https://careers.example.test/jobs?gh_jid=7608993003"
-  },
-  {
-   "stage": "enqueue",
-   "cls": "a second application to the same greenhouse posting was admitted: employer careers page with gh_jid",
-   "app": "B/greenhouse-relativity-8615771002",
-   "detail": "https://careers.example.test/jobs?gh_jid=8615771002"
   }
  ]
 }

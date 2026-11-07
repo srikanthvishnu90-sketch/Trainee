@@ -342,6 +342,10 @@ Deno.test("R8G-9 Greptile on #581: hexadecimal character references in the body,
   const le = (t: string) => { const b = new Uint8Array(2 + t.length * 2); b[0] = 0xff; b[1] = 0xfe; for (let i = 0; i < t.length; i++) { b[2 + i * 2] = t.charCodeAt(i) & 0xff; b[3 + i * 2] = t.charCodeAt(i) >> 8; } return b; };
   await refused(docx([{ name: "word/afchunk.mht", data: bomMht("utf-8", le("<p>Verification code: 482913</p>")) }]), "a UTF-16LE BOM body declared UTF-8");
   await refused(docx([{ name: "word/afchunk.mht", data: bomMht("utf-16be", le("<p>Verification code: 482913</p>")) }]), "a UTF-16LE BOM body declared UTF-16BE");
+  const be = (t: string) => { const b = new Uint8Array(2 + t.length * 2); b[0] = 0xfe; b[1] = 0xff; for (let i = 0; i < t.length; i++) { b[2 + i * 2] = t.charCodeAt(i) >> 8; b[3 + i * 2] = t.charCodeAt(i) & 0xff; } return b; };
+  await refused(docx([{ name: "word/afchunk.mht", data: bomMht("utf-16", be("<p>Verification code: 482913</p>")) }]), "a UTF-16BE BOM body declared UTF-16");
+  await refused(docx([{ name: "word/afchunk.mht", data: bomMht("utf-16", le("<p>Verification code: 482913</p>")) }]), "a UTF-16LE BOM body declared UTF-16");
+  await kept(docx([{ name: "word/afchunk.mht", data: bomMht("utf-16", be("<p>Volunteer, Food Bank, 2018 - 2020</p>")) }]), "a plain UTF-16BE BOM body declared UTF-16");
   await kept(docx([{ name: "word/afchunk.mht", data: bomMht("utf-8", enc.encode("\ufeff<p>Volunteer, Food Bank, 2018 - 2020</p>")) }]), "a UTF-8 BOM body declared UTF-8");
   await kept(docx([{ name: "word/afchunk.mht", data: bomMht("utf-16le", le("<p>Volunteer, Food Bank, 2018 - 2020</p>")) }]), "a UTF-16LE BOM body declared UTF-16LE");
 });

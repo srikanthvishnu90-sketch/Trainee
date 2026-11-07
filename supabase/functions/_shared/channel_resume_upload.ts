@@ -14,6 +14,7 @@
 // A file that cannot be downloaded, is not a PDF or DOCX, or has no readable text is said so, plainly; nothing is stored.
 import { CareerProfile, CareerRender } from "./router_core.career.js";
 import { normalizeChatText, redactIdentity } from "./identity_redact.ts";
+import { fileSharesCode } from "./career_code_in_chat.ts";
 import type { Upload } from "./career_router_evidence.ts";
 
 export const MAX_RESUME_BYTES = 10 * 1024 * 1024;
@@ -275,6 +276,7 @@ export async function ingestResumeFile(o: {
   // removed, but the file itself was stored as the person's upload (and is the file an application attaches), with the
   // number in it. Now the file is not kept and nothing is read from it; the person is told what to remove.
   const found = redactIdentity(text).removed;
+  if (!found.includes("code") && fileSharesCode(text)) found.push("code");
   if (found.length) {
     const name: Record<string, string> = { ssn: "a Social Security number", card: "a card number", account: "an account number", password: "a password", code: "a one-time code", key: "a key or token" };
     return { ok: false, reply: fileSecretReply([...new Set(found.map((k) => name[k] ?? "a private number"))]), why: "secret" };

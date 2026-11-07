@@ -470,8 +470,10 @@ const TO_USER = /\b(?:you|your|you're|you've)\b|\bshould i\b|\btell me\b/i;
 // A question about the person joined by "and" between two things asked for ("what role and city are you after").
 const CONJOINED = /\b(?:what|which|where|when)\b[^?.!]{0,40}?\b\w+ (?:and|&|plus) (?:the |your |a |an )?\w+\b[^?.!]{0,40}\b(?:you|your)\b|\b(?:your|you have|you have a) \w+(?: \w+)? (?:and|&|plus) (?:your |a |an )?\w+ (?:date|city|location|school|title|salary|number)\b/i;
 // A requested draft (an email, a note, a letter) is the person's text, not the agent's own asks or promises: from its lead-in
-// ("Here's the email:", "Draft:", "Subject:", a salutation, a code fence or a quoted block) on, nothing is checked.
-const DRAFT_CUE = /(?:^|\n)\s*(?:(?:here(?:'s| is)|below is|i(?:'ve| have) drafted)\b[^\n]{0,60}\b(?:draft|email|e-mail|message|note|letter|reply|text|cover letter|post)\b|(?:draft|email|message|subject|cover letter)\s*:|subject:|dear\b|```|>\s)/i;
+// ("Here's the email:", "Draft:", "Subject:", "Dear", a code fence or a quoted block, or a "Hi Dana," line that is NOT the
+// reply's first line) on, nothing is checked (Greptile record 15). A reply that opens "Hi Sam," is the agent greeting the person,
+// and its own promises are still checked (review of f62e2033).
+const DRAFT_CUE = /(?:^|\n)\s*(?:(?:here(?:'s| is)|below is|i(?:'ve| have) drafted)\b[^\n]{0,60}\b(?:draft|email|e-mail|message|note|letter|reply|text|cover letter|post)\b|(?:draft|email|message|subject|cover letter)\s*:|subject:|dear\b|```|>\s)|\n\s*(?:hi|hello)\s+(?!there\b|all\b|everyone\b|again\b|friend\b|team\b)[A-Za-z][\w.'-]{0,30}\s*,[ \t]*\n/i;
 export function beforeDraft(reply: string): string {
   const t = String(reply ?? ""), m = DRAFT_CUE.exec(t);
   return m ? t.slice(0, m.index) : t;
@@ -524,9 +526,23 @@ export function unbackedPromises(reply: string, calls: { name: string; ok: boole
 
 // S3 residual (H025): a person who says they are overwhelmed or stressed is acknowledged in the reply's FIRST sentence.
 // Flag only: the loop asks the model once; a draft that still lacks it is kept and recorded as "missing_ack".
-const ACK = /\bsounds like\b|\bthat'?s a lot\b|\ba lot to (?:carry|handle)\b|\bi hear you\b|\bi'?m sorry\b|\byou'?re not alone\b|\btake a breath\b|\b(?:totally|completely) normal\b|\bmakes sense (?:to feel|that you)\b|\b(?:tough|hard|stressful|overwhelming) (?:spot|time|place|search|stretch)\b|\boverwhelm/i;
+const ACK = /\bsounds like\b|\bthat sounds\b|\bi (?:understand|can tell|get it|get that)\b|\bunderstandabl[ey]\b|\bthat'?s a lot\b|\ba lot to (?:carry|handle)\b|\bi hear you\b|\bi'?m sorry\b|\byou'?re not alone\b|\btake a breath\b|\b(?:totally|completely) normal\b|\bmakes sense (?:to feel|that you)\b|\b(?:tough|hard|stressful|overwhelming) (?:spot|time|place|search|stretch)\b|\boverwhelm/i;
+// The distress is the person's own feeling ("I'm so stressed", "this search is overwhelming", "burned out"), not a word inside a
+// task ("describe handling stressful situations") and not negated ("I'm not stressed, just curious"); Greptile records 51, 53.
+const OWN_FEEL = /(?:^|\b(?:i'?m|im|i am|i feel|i'?ve been|i have been|feeling|feel|i get|getting|makes me|so|really|very|totally|super|pretty|kinda|kind of|incredibly|honestly|is|it'?s|its|are|feels|been|my)\s+(?:\w+\s+){0,2})$/i;
+const NEGATED = /\b(?:not|never|no longer|isn'?t|aren'?t|wasn'?t|am not|i'?m not)\s+(?:\w+\s+){0,1}$|n'?t\s+(?:\w+\s+){0,1}$/i;
+const SELF_STATE = /^(?:overwhelmed|burn(?:ed|t)\s*out|freaking\s+out|drowning|can'?t\s+(?:cope|take|handle)|terrified|panick)/i;
+export function ownDistress(userMessage: string): boolean {
+  const m = String(userMessage ?? "").replace(/[\u2019`]/g, "'");
+  for (const d of m.matchAll(new RegExp(DISTRESS.source, "gi"))) {
+    const at = d.index ?? 0, lead = m.slice(Math.max(0, at - 40), at);
+    if (NEGATED.test(lead)) continue;
+    if (SELF_STATE.test(d[0]) || OWN_FEEL.test(lead) || !lead.trim()) return true;
+  }
+  return false;
+}
 export const missingAck = (userMessage: string, reply: string): boolean => {
-  if (!DISTRESS.test(String(userMessage ?? ""))) return false;
+  if (!ownDistress(userMessage)) return false;
   const first = pieces(String(reply ?? "").trim())[0]?.text ?? "";
   return !ACK.test(first);
 };

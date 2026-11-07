@@ -256,6 +256,27 @@ const STRUCTURAL = /^(?:word\/(?:styles|stylesWithEffects|settings|webSettings|f
 // One budget per upload for every part the Word checks expand (the hidden reader, the clean copy and an embedded Word file):
 // the zip reader's own size cap starts again at each part read, so a small upload of hundreds of highly compressed parts, each
 // under the per-part cap, expanded to hundreds of MB. Past the budget the read throws and the upload is refused as damaged.
+// A zip that names one entry twice is refused before any part is read: the reader expands every entry with the asked name and
+// returns the last, so repeated large entries behind a small final one escaped the budget (Greptile on #584). Both the local
+// headers and the central directory are checked, by exact name and case-insensitively.
+function zipNamesUnique(b: Uint8Array): void {
+  const dec = new TextDecoder("utf-8", { fatal: false }), seen = new Set<string>(), cd = new Set<string>();
+  const u16 = (i: number) => b[i] | (b[i + 1] << 8);
+  const add = (set: Set<string>, n: string) => { const k = n.toLowerCase(); if (set.has(k)) throw new Damaged(`a part named twice: ${n}`); set.add(k); };
+  for (let i = 0; i + 30 <= b.length; i++) {
+    if (b[i] === 0x50 && b[i + 1] === 0x4b && b[i + 2] === 0x03 && b[i + 3] === 0x04) {
+      const n = u16(i + 26), x = u16(i + 28);
+      if (i + 30 + n > b.length) break;
+      add(seen, dec.decode(b.subarray(i + 30, i + 30 + n)));
+      i += 29 + n + x;
+    } else if (b[i] === 0x50 && b[i + 1] === 0x4b && b[i + 2] === 0x01 && b[i + 3] === 0x02 && i + 46 <= b.length) {
+      const n = u16(i + 28), x = u16(i + 30), c = u16(i + 32);
+      if (i + 46 + n > b.length) break;
+      add(cd, dec.decode(b.subarray(i + 46, i + 46 + n)));
+      i += 45 + n + x + c;
+    }
+  }
+}
 export const UPLOAD_EXPANDED_MAX = 25 * 1024 * 1024, UPLOAD_PARTS_MAX = 2000;
 export class UploadBudget {
   bytes = 0;
@@ -263,6 +284,7 @@ export class UploadBudget {
   constructor(readonly maxBytes = UPLOAD_EXPANDED_MAX, readonly maxParts = UPLOAD_PARTS_MAX) {}
   // deno-lint-ignore no-explicit-any
   names(r: any, buf: any): string[] {
+    zipNamesUnique(buf instanceof Uint8Array ? buf : new Uint8Array(buf));
     const names: string[] = r.docxPartNames(buf) ?? [];
     if (names.length > this.maxParts) throw new Damaged(`too many parts: ${names.length}`);
     return names;

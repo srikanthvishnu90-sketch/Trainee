@@ -119,3 +119,19 @@ Deno.test("R9-5 while a code is pending, only the early pass removes it; the han
   assertNode.match(block, /PAY_BY_CHECKOUT/, "the card and account sentence is kept, as the later pass does");
   assertNode.ok(at(/const hashedMessage = message;/) > later, "the request hash is still taken after every pass");
 });
+
+Deno.test("R9B-dup a Word file naming one part twice is refused before any part is read (Greptile on #584)", async () => {
+  const { ingestResumeFile } = await import("../../supabase/functions/_shared/channel_resume_upload.ts");
+  const { DOCX, zipOf } = await import("./scenarios/onboarding-r2-generator.ts");
+  const enc = new TextEncoder();
+  const doc = enc.encode('<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Jordan Lee, Operations Analyst, Acme Corp, 2019 - 2024, led weekly reporting across four teams and cut close time by two days.</w:t></w:r></w:p><w:sectPr/></w:body></w:document>');
+  const types = enc.encode('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+  const big = enc.encode("<w:hdr>" + "a".repeat(4 * 1024 * 1024) + "</w:hdr>");
+  const bytes = zipOf([{ name: "[Content_Types].xml", data: types }, { name: "word/header1.xml", data: big }, { name: "word/header1.xml", data: big }, { name: "word/header1.xml", data: enc.encode("<w:hdr/>") }, { name: "word/document.xml", data: doc }]);
+  const stored: unknown[] = [];
+  const t0 = performance.now();
+  const res: any = await ingestResumeFile({ userId: "TEST-r9", channel: "telegram", doc: { fileId: "F", uniqueId: crypto.randomUUID(), name: "resume.docx", mime: DOCX, size: bytes.length },
+    fetchFile: async () => ({ ok: true, bytes }), record: async (row) => { stored.push(row); return "id"; } });
+  if (res.ok || stored.length) throw new Error("a duplicate part name must refuse the upload");
+  if (performance.now() - t0 > 3000) throw new Error("refused slowly");
+});

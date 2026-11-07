@@ -91,7 +91,10 @@ function luhn(digits: string) {
 
 // WO-100: while an employer's emailed code is waiting (career_situation.ts codePending), a bare 6-8 digit number is that
 // code, so it is removed too ("Plaid emailed me a code, it's 482913"). Never otherwise: a bare number stays a number.
-const BARE_CODE = /(?<![\d$€£.,:/#-])\b\d{6,8}\b(?![\d.,:/-]|\s*(?:k\b|%|usd|dollars|a year|per\b|\/))/gi;
+const BARE_CODE = /(?<![\d$€£.,:/#-])\b\d{6,8}\b(?![\d,:/-]|\.\d|\s*(?:k\b|%|usd|dollars|a year|per\b|\/))/gi;
+// ...and, while a code is waiting, the same code split in two 3-digit groups ("739 201", "739\n201", "739-201"; Greptile on #572).
+// Not a group of a longer run: a phone number ("415 555 1234") or a date keeps its third group, so it never matches.
+const BARE_SPLIT_CODE = /(?<![\d$€£.,:/#-]|\d(?:[ \t]{1,8}|[ \t]{0,8}[\n\-][ \t]{0,8}))\b\d{3}(?:[ \t]{1,8}|[ \t]{0,8}[\n\-][ \t]{0,8})\d{3}\b(?![\d,:/-]|\.\d|(?:[ \t]{1,8}|[ \t]{0,8}[\n\-][ \t]{0,8})\d|\s*(?:k\b|%|usd|dollars|a year|per\b|\/))/gi;
 // The one form chat text takes before any redaction or hashing: line endings become "\n", no-break, thin and figure spaces and
 // tabs become a space, and an en or em dash between digits a hyphen, so "739\r\n201", "739\u00a0201" and "739–201" meet the
 // same rules as "739 201". chat_input.ts and channel_resume_upload.ts resumeMessage both use it, so a file's message hash
@@ -147,6 +150,7 @@ export function redactIdentity(input: string, o: { codePending?: boolean } = {})
   t = t.replace(CVV_NAMED, (_m, label: string, sep, _digits, more?: string) => { removed.add("card"); return `${label}${sep}[security code removed]${more && /card|digit/i.test(label) ? more : ""}`; });
   t = t.replace(IBAN, (m) => { if (!ibanOk(m)) return m; removed.add("account"); return "[number removed]"; });
   if (o.codePending) t = t.replace(BARE_CODE, () => { removed.add("code"); return "[code removed]"; });
+  if (o.codePending) t = t.replace(BARE_SPLIT_CODE, () => { removed.add("code"); return "[code removed]"; });
   t = t.replace(KEY_SHAPED, () => { removed.add("key"); return "[key removed]"; });
   return { text: t, removed: [...removed] };
 }

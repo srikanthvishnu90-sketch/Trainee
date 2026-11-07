@@ -274,3 +274,14 @@ Deno.test("CRL-11 code groups split by up to 8 spaces or tabs around a line brea
   turn(`Workday sent me 7${" ".repeat(3900)}x`); turn(`my code is 7${"\n ".repeat(1900)}`);
   assert(performance.now() - t0 < 500, `long whitespace took ${performance.now() - t0} ms`);
 });
+
+// Greptile on #572: while an employer's emailed code is waiting (codePending), code-in-chat steps aside for the situation turn
+// and chat input removes a bare code. A code split in two 3-digit groups is removed then too; phones and longer runs are kept.
+Deno.test("CRL-12 a split code is removed while a code is pending; phones and longer runs are kept", () => {
+  const pend = (m: string) => (chatInput(m, [], 4000, { codePending: true }) as any).userContent as string;
+  for (const m of ["Workday sent me 739\n201", "it's 739 201", "the code is 739-201 thanks", "Plaid emailed 739\n  201", "739 201", "here: 739  201.", "it's 482913."]) {
+    const s = pend(m);
+    assert(!s.includes("739") && !s.includes("201") && s.includes("[code removed]"), `${JSON.stringify(m)}: ${JSON.stringify(s)}`);
+  }
+  for (const m of ["call me at 415 555 1234", "my number is 415\n555\n1234", "$120 000 base", "the job id 739 201 7", "zip 94107-1234", "I want 3-5 years", "a GPA of 3.85", "pay is 120000.50"]) eq(pend(m), m, m);
+});

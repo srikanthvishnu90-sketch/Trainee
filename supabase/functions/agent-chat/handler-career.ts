@@ -329,14 +329,17 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // The lead-in is the person's message BEFORE this turn. On a retry of a turn that already committed (same turn_key), the
       // newest rows are this turn's own (its redacted user text, then an assistant row tagged career_turn_key), so they are skipped:
       // the split step then runs exactly as on the first attempt and the request hash matches the stored receipt (review of #565).
-      const prev = await admin.from("agent_messages").select("role, content, meta").eq("thread_id", tid).order("id", { ascending: false }).limit(4);
+      // The lead-in is the person's newest message BEFORE this turn: the user-row lookup stays role-filtered, so assistant-only
+      // rows in between (proactive messages, apply cards) never hide it. A retry of this same turn (its own assistant row,
+      // tagged career_turn_key, is the newest row) skips this turn's own user row, so the redaction and the request hash match
+      // the first attempt (reviews of #565).
+      const prev = await admin.from("agent_messages").select("content").eq("thread_id", tid).eq("role", "user").order("id", { ascending: false }).limit(2);
       if (prev.error) console.error("split secret check: previous message unreadable:", prev.error.message);
-      let rows = (prev.data ?? []) as { role: string; content: unknown; meta?: Record<string, unknown> | null }[];
-      if (rows[0]?.role === "assistant" && rows[0]?.meta?.career_turn_key === turnKey) {
-        const own = rows.findIndex((r, i) => i > 0 && r.role === "user");
-        rows = own >= 0 ? rows.slice(own + 1) : [];
-      }
-      const lead = secretLeadIn(String(rows.find((r) => r.role === "user")?.content ?? ""));
+      const last = await admin.from("agent_messages").select("role, meta").eq("thread_id", tid).order("id", { ascending: false }).limit(1);
+      if (last.error) console.error("split secret check: last row unreadable:", last.error.message);
+      const lastRow = (last.data?.[0] ?? null) as { role?: string; meta?: Record<string, unknown> | null } | null;
+      const ownRetry = lastRow?.role === "assistant" && lastRow?.meta?.career_turn_key === turnKey;
+      const lead = secretLeadIn(String(prev.data?.[ownRetry ? 1 : 0]?.content ?? ""));
       const red = lead ? redactPending(message, lead) : null;
       if (red) {
         message = red.text; userContent = red.text;

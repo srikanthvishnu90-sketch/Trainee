@@ -234,6 +234,19 @@ commit;`);
           if (!/I removed the (?:password|one-time code)/.test(r.reply)) failures.push(`not told what was removed: ${JSON.stringify(value)} -> ${r.reply.slice(0, 160)}`);
           bump("secrets");
         }
+        // Review of #565: assistant-only rows between the lead-in and the value (proactive messages, apply cards) do not hide the
+        // lead-in; the value is still removed before anything stores it.
+        for (const [lead, value] of SPLIT_SECRETS.slice(0, 4)) {
+          const p = person(), c = h!.chat(p.token);
+          await say(c, lead);
+          for (let k = 0; k < 4; k++) await pg.sql(`insert into public.agent_messages(thread_id, role, content) values ('${c.thread()}', 'assistant', 'A proactive update ${k}.')`);
+          const r = await say(c, value);
+          const stored = await dumpFor(p.id);
+          if (stored.includes(value)) failures.push(`split secret stored after assistant-only rows: ${JSON.stringify(lead)} then ${JSON.stringify(value)}`);
+          if (r.reply.includes(value)) failures.push(`split secret echoed after assistant-only rows: ${JSON.stringify(value)}`);
+          for (const images of [[], null]) if (stored.includes(await careerRequestHash(value, images, null))) failures.push(`split secret hash after assistant-only rows: ${JSON.stringify(value)}`);
+          bump("secrets");
+        }
         // Review of #565: a retry of the value turn (same turn_key) replays its stored reply; the split step reads the lead-in
         // before this turn's own committed rows, so the request hash matches and nothing is refused or re-stored.
         for (const [lead, value] of SPLIT_SECRETS.slice(0, 4)) {

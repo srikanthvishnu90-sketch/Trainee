@@ -187,7 +187,8 @@ function mimeText(s: string): string[] {
     const cs = /charset\s*=\s*"?([\w.:-]+)"?/i.exec(head)?.[1] ?? "utf-8", txt = (b: Uint8Array) => new TextDecoder(cs, { fatal: false }).decode(b);
     if (enc === "base64") { const raw = atob(body.replace(/\s+/g, "")); text = txt(Uint8Array.from(raw, (c) => c.charCodeAt(0))); }
     else if (enc === "quoted-printable") { const b = body.replace(/=\r?\n/g, ""); const bytes: number[] = []; for (let i = 0; i < b.length; i++) { const h = b[i] === "=" && /^[0-9a-f]{2}$/i.test(b.slice(i + 1, i + 3)); bytes.push(h ? parseInt(b.slice(i + 1, i + 3), 16) : b.charCodeAt(i)); if (h) i += 2; } text = txt(new Uint8Array(bytes)); }
-    else if (/^(?:7bit|8bit|binary)$/.test(enc)) text = body;
+    // A raw body was read with the part (UTF-8): any other declared charset cannot be read safely here, so the file is refused.
+    else if (/^(?:7bit|8bit|binary)$/.test(enc)) { if (!/^(?:utf-?8|us-ascii|ascii)$/i.test(cs)) throw new Error(`raw MIME body in ${cs}`); text = body; }
     else throw new Error(`unknown transfer encoding ${enc}`);
     if (text.includes("\u0000")) throw new Error("MIME body does not read as text"); // a wrong charset fails closed
     out.push(...(/content-type\s*:\s*text\/plain/i.test(head) ? lines(text) : html(text)));

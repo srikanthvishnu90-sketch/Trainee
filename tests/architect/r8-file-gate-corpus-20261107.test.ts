@@ -331,4 +331,8 @@ Deno.test("R8G-9 Greptile on #581: hexadecimal character references in the body,
   await kept(docx([{ name: "word/afchunk.mht", data: `MIME-Version: 1.0\nContent-Type: text/html; charset="utf-16le"\nContent-Transfer-Encoding: base64\n\n${u16("<p>Volunteer, Food Bank, 2018 - 2020</p>")}` }]), "a plain UTF-16LE MHTML body");
   await kept(docx([{ name: "word/afchunk.mht", data: `MIME-Version: 1.0\nContent-Type: text/html; charset="windows-1252"\nContent-Transfer-Encoding: quoted-printable\n\n<p>Caf=E9 manager, 2018 - 2020</p>` }]), "a windows-1252 quoted-printable body");
   await kept(docx([], `<w:p><w:r><w:t>Caf&#xe9; &#x26; Bakery, Shift Lead, 2019 - 2021</w:t></w:r></w:p>`), "hexadecimal references in ordinary text");
+  // Greptile on #582: a raw (7bit/8bit/binary) body in a charset other than UTF-8 cannot be read safely: refused.
+  await refused(docx([{ name: "word/afchunk.mht", data: `MIME-Version: 1.0\nContent-Type: text/html; charset="windows-1251"\nContent-Transfer-Encoding: 8bit\n\n<p>\u043a\u043e\u0434 482913</p>` }]), "an 8bit windows-1251 body");
+  await refused(docx([{ name: "word/afchunk.mht", data: `MIME-Version: 1.0\nContent-Type: text/html; charset="x-unknown-9"\nContent-Transfer-Encoding: 7bit\n\n<p>Jordan</p>` }]), "a 7bit body in an unknown charset");
+  await kept(docx([{ name: "word/afchunk.mht", data: `MIME-Version: 1.0\nContent-Type: text/html; charset="utf-8"\nContent-Transfer-Encoding: 8bit\n\n<p>Volunteer, Food Bank, 2018 - 2020</p>` }]), "an 8bit UTF-8 body");
 });

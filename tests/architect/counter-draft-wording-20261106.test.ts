@@ -996,3 +996,17 @@ Deno.test("CDW held counter revisions record no counter; plain revisions still r
   const c = fresh(); host.runTurn(OFFER, c); host.runTurn("Draft a counter at $27/hour", c); host.runTurn("make it $30/hour instead", c);
   eq(recorded(c).counter, 30, "plain revision");
 });
+
+// Review on #575: a held revision carries the figures without roles, so the staged brain asks which one is the new ask.
+Deno.test("CDW a held counter revision hands the brain the figures and asks for the new ask", () => {
+  for (const msg of ["The market offers $28/hour; make it $30/hour instead", "make it $30/hour, the market pays $28/hour"]) {
+    const ctx = fresh(); host.runTurn(OFFER, ctx); host.runTurn("Draft a counter at $27/hour", ctx);
+    const d = stagedDecision({ env: STAGED, message: msg, ctx, host, structured: false });
+    eq(d.brain, true, `${msg}: brain`); eq(d.reason, "counter_ambiguous_figures", msg); eq(d.ambiguousRole, "ask", msg);
+    const vals = (d.ambiguousFigures ?? []).map((f) => f.value).sort();
+    eq(JSON.stringify(vals), JSON.stringify([28, 30]), `${msg}: figures`);
+    assert(/new counter ask/.test(routerAnswerBlock(d)), msg);
+    const r = host.runTurn(msg, ctx);
+    eq(recorded(ctx).counter, 27, `${msg}: counter unchanged`); eq(r.result?.counterAmbiguous, true, msg); eq(r.result?.sends ?? 0, 0, msg);
+  }
+});

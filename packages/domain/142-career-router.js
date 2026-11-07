@@ -4143,10 +4143,16 @@ const CareerRouter = (() => {
   function handleCounterRevision(text, ctx) {
     const t = lc(text);
     const figs = parseOfferFigures(text);
-    // A held turn (a pay figure beside a third party: "The market offers $28/hour; make it $30/hour instead") revises nothing;
-    // the brain asks which figure is the ask (D-007; Greptile on #574).
-    if (figs.held) return null;
     const figAsk = /\bmake it\s+\$?\s?\d/.test(t) || /\bchange it to\s+\$?\s?\d/.test(t) || /\b(?:raise|lower|drop|bump) it to\s+\$?\s?\d/.test(t);
+    // A held turn (a pay figure beside a third party: "The market offers $28/hour; make it $30/hour instead") revises nothing. It
+    // returns only structured state, the figures without roles, so the brain asks which figure is the new ask (D-007; Greptile and
+    // review on #574 and #575).
+    if (figs.held) {
+      if (!figAsk) return null;
+      const figures = counterFigures(s(text), {}).mentions.map((m) => ({ value: m.value, unit: m.unit }));
+      return { intent: "negotiation_revision", resultStatus: "awaiting_user", sends: 0, counterAmbiguous: true, awaiting: "which_figure_is_ask", figures,
+        reply: compose({ headline: "Which figure is your new counter?", facts: ["Your message names more than one pay figure, and one of them is someone else's (a market rate, another company, a survey), so the counter on record stays as it is."], nextStep: "Tell me the figure you want to ask for and I'll revise the counter to it." }) };
+    }
     const addAsk = /\badd a request\b|\badd an ask\b|\balso ask\b/.test(t);
     if (!figAsk && !addAsk) return null;
     const th = negotiationThreadOf(ctx);

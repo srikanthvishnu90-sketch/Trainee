@@ -63,11 +63,12 @@ function tokensIn(sentence: string, carried = false): { start: number; end: numb
   const near = (at: number, ends: number[]) => ends.some((e) => at >= e && at - e <= 60);
   const hits: { start: number; end: number }[] = [];
   for (const m of sentence.matchAll(DIGITS)) {
-    // A token joins digit groups across a line break only when the first line's group is too short to be a code by itself
-    // ("739\n201"). A full code on its own line stays its own token, so a count on the next line ("739201\n2 minutes ago")
-    // neither hides it nor is removed with it (Greptile on #574).
+    // A token joins digit groups across a line break ("7392\n01" is one code). Only when the joined token is followed by a
+    // count ("739201\n2 minutes ago") and the first line's group is a code by itself is the first line its own token, so the
+    // count neither hides the code nor is removed with it (Greptile on #574 and #575).
     const at = m.index ?? 0, firstLine = m[0].split(/\r\n|[\r\n]/)[0].replace(/[^\d]+$/, "");
-    const tok = firstLine !== m[0] && firstLine.replace(/\D/g, "").length >= 4 ? firstLine : m[0], after = sentence.slice(at + tok.length);
+    const lineCut = firstLine !== m[0] && firstLine.replace(/\D/g, "").length >= 4 && COUNT_AFTER.test(sentence.slice(at + m[0].length));
+    const tok = lineCut ? firstLine : m[0], after = sentence.slice(at + tok.length);
     if (COUNT_AFTER.test(after)) continue;
     const isStrong = near(at, strong);
     if (!isStrong && !near(at, weak)) continue;

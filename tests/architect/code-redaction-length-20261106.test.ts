@@ -294,4 +294,9 @@ Deno.test("CRL-13 a code followed by a number on the next line is removed, and t
     assert(/\n(?:2 minutes|3 roles|10 mins)/.test(t.stored), `${JSON.stringify(m)}: next line kept: ${JSON.stringify(t.stored)}`);
   }
   for (const m of ["Workday sent me 739\n201"]) assert(!turn(m).stored.includes("201"), m);
+  // Greptile on #575: a 4- or 5-digit first line whose remaining digits sit on the next line is one code, removed whole.
+  for (const [m, rest] of [["Workday verification sent me 7392\n01", "01"], ["my verification code is 73920\n1", "1"], ["the code is 7392\n01 thanks", "01"]]) {
+    const t = turn(m);
+    assert(!t.stored.includes("7392") && !new RegExp(`\\n\\s*${rest}\\b`).test(t.stored), `${JSON.stringify(m)}: ${JSON.stringify(t.stored)}`);
+  }
 });

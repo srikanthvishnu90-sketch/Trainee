@@ -194,49 +194,68 @@ const OTP_STRICT = /(?:\b(?:one[- ]time|otp|passcode|pass code|2fa|mfa|two[- ]fa
 // the sender ("Workday sent me ..."): the figure is a code, whatever follows (owner check of 696f9939).
 const LOGIN_AFTER = /^[ \t]*(?:for|to|on|into|in|at)\s+(?:the|my|your|their|a|an)?\s*(?:portal|site|website|login|log[- ]?in|sign[- ]?in|account|application|app|form|page|verification|candidate\s+(?:portal|home)|careers?\s+(?:site|portal|page))\b|^[ \t]*to\s+(?:finish|complete|continue|submit|access|open|unlock|confirm)\s+(?:the|my|your)?\s*(?:application|account|login|sign[- ]?in|portal|profile|form)\b/i;
 const LOGIN_SENDER = /\b(?:workday|greenhouse|lever|icims|taleo|smartrecruiters|jobvite|ashby|bamboohr|successfactors|oracle\s+recruiting|indeed|linkedin|okta|duo|microsoft|google|apple|amazon|the\s+(?:portal|site|app|system|ats|careers\s+site))\s+(?:just\s+)?(?:sent|texted|emailed|messaged)\s+me(?:\s+(?:a|the|my|this|that|one[- ]time|verification|security|sign[- ]?in|log[- ]?in|otp|new))*(?:\s+(?:code|passcode|pin|otp))?\s*(?::|->|\u2192|-)?\s*$/i;
-const DIRECT_TOKEN = String.raw`((?=[A-Za-z0-9]{5,10}(?![\w-]))(?=(?:[A-Za-z]*\d){2})(?=(?:\d*[A-Za-z]){2})[A-Za-z0-9]{5,10}|\d{4,8})(?![\w-])`;
+const DIRECT_TOKEN = String.raw`((?=[A-Za-z0-9]{5,10}(?![\w-]))(?=(?:[A-Za-z]*\d){2})(?=(?:\d*[A-Za-z]){2})[A-Za-z0-9]{5,10}|\d{3,4}[ -]\d{2,4}(?![\d])|\d{4,8})(?![\w-])`;
+const CODE_WORD = String.raw`(?:verification|verify|sign[- ]?in|log[- ]?in|login|security|access|auth(?:entication)?|confirmation|one[- ]time|otp|2fa|mfa)`;
 const DIRECT_LABEL = new RegExp(String.raw`(?:\b(?:one[- ]time|otp|passcode|pass code|2fa|mfa|two[- ]factor)(?:\s+(?:code|passcode|pin|password))?(?:\s*\((?:otp|2fa|mfa)\))?(?:\s+for\s+[A-Z][\w.-]*)?` +
-  String.raw`|\b(?:my|the|your|our|this|that|a)\s+(?:new\s+)?(?:verification|sign[- ]?in|log[- ]?in|login|security|auth(?:entication)?|access|one[- ]time|otp)\s+code` +
-  String.raw`|\bthe\s+(?:otp|code|passcode|pin)\s+[A-Z][\w.-]*\s+(?:sent|texted|emailed|gave)(?:\s+me)?` +
+  String.raw`|\b(?:(?:my|the|your|our|this|that|a)\s+)?(?:new\s+)?` + CODE_WORD + String.raw`\s+(?:code|pin)` +
+  String.raw`|(?:^|\n)[ \t]*(?:[-*\u2022][ \t]*)?(?:the\s+)?code` +
+  String.raw`|\b(?:the\s+)?(?:otp|code|passcode|pin)\s+(?:[A-Z][\w.-]*|they|it|he|she)\s+(?:sent|texted|emailed|gave)(?:\s+me)?` +
+  String.raw`|\bcode\s+came\s+(?:in\s+)?as` +
   String.raw`|\b(?:sent|texted|emailed|gave|messaged|dm'?d)\s+me(?:\s+(?:a|the|my|this|that|one[- ]time|verification|security|sign[- ]?in|log[- ]?in|otp|new))*\s+(?:code|passcode|pin|otp)` +
-  String.raw`|\b(?:sent|texted|emailed|gave|messaged|dm'?d)\s+me\s*(?=[:\-\u2013\u2014\u2192]))` +
-  String.raw`[ \t]*(?:(?:is|was|arrived)[ \t]*)?(?::|->|=>|=|\u2192|#|-|\u2013|\u2014)?[ \t]*` + DIRECT_TOKEN, "gi");
+  String.raw`|\b(?:sent|texted|emailed|messaged|dm'?d)\s+me\s*(?=[:\-\u2013\u2014\u2192])|\b(gave|sent|texted|emailed|messaged)\s+me(?=\s+\d))` +
+  String.raw`[ \t]*,?[ \t]*(?:(?:is|was|arrived)[ \t]*)?(?::|->|=>|=|\u2192|#|-|\u2013|\u2014|,)?[ \t]*` + DIRECT_TOKEN, "gi");
+// A code routed by a sender: "Workday sent 739201 to my phone", "Got 739201 from Workday", "Workday sent me 7392 01".
+const ROUTED_CODE = new RegExp(String.raw`(?:\b(?:workday|greenhouse|lever|icims|taleo|smartrecruiters|jobvite|ashby|okta|duo|they|the\s+(?:portal|site|app|recruiter))\s+(?:sent|texted|emailed)\s+(\d{4,8})\s+to\s+my\s+(?:phone|email|inbox|number|cell)` +
+  String.raw`|\b(?:got|received)\s+(\d{4,8})\s+from\s+(?:workday|greenhouse|lever|icims|taleo|smartrecruiters|jobvite|ashby|okta|duo|the\s+(?:portal|site|app))` +
+  String.raw`|\b(?:workday|greenhouse|lever|icims|taleo|smartrecruiters|jobvite|ashby|okta|duo)\s+(?:sent|texted|emailed|messaged)\s+me\s+(\d{3,4}[ -]\d{2,4}))(?![\d\w])`, "gi");
 const OTP_AFTER = /^[ \t]*(?:to|so\s+i\s+can|for)\s+(?:log|sign)\s*(?:in|on)\b|^[ \t]*(?:to|so\s+i\s+can)\s+(?:verify|enter\s+it|get\s+in)\b/i;
 const HAND_VERB = /\b(?:sent|texted|emailed|gave|messaged|dm'?d)\s+me(?:\s+(?:a|the|my|this|that|one[- ]time|verification|security|sign[- ]?in|log[- ]?in|otp|new))*(?:\s+(?:code|passcode|pin|otp))?\s*(?::|->|\u2192|-)?\s*$/i;
 const CODE_ENDS = /^(?:[ \t]*(?:$|\n|[.,;:!?)\]"'\u2019\u201d]|(?:for|from|to|in|on|at|today|tonight|yesterday|this|that|just|now|please|thanks|thank|and|or|but|so|which|can|could|would|will|if|when|by|via|as|again|here|there|it|is|was)\b))/i;
+// Privacy first for a FILE (owner decision on 2de155f0): text alone cannot always tell a handed-over code from a look-alike
+// ("2FA: AB12CD" / "MFA: SC300", "Verification code: K7X9P2" / "Insurance verification code: VB102", "OTP-4821"), so a
+// plausible code refuses the upload and the reply names only its line and kind, never the line. Resume lines that are clearly
+// not a code stay: a count noun after the number, a year or range, trunk's named codes, money after "gave/sent me" with a
+// non-login purpose, and a topic word earlier on the line.
 export function fileSharesCode(text: string): boolean {
+  return fileCodeLines(text).length > 0;
+}
+const ENDS_STRICT = /^[ \t]*(?:$|\n|[.,;:!?)\]"'\u2019\u201d])/;
+// The 1-based line numbers of the text read from the file that hold a suspected code (each once, in order).
+export function fileCodeLines(text: string): number[] {
   const t = normalizeChatText(String(text ?? ""));
-  // A code right after its label, read directly (owner and review checks of 696f9939): "2FA code is AB12CD", "One-time code -
-  // AB12CD", "OTP K7X9P2", "One-time passcode (OTP): K7X9P2", "OTP for Workday: K7X9P2", "The OTP Workday sent: K7X9P2",
-  // "Recruiter sent me: K7X9P2", "Lever sent me a new code - K7X9P2". Only connectors may sit between the label and the code, so a
-  // topic word earlier on the line ("Rolled out MFA; change code: CHG0012345") never reaches it.
+  const hits = new Set<number>();
+  const lineOf = (at: number) => t.slice(0, at).split("\n").length;
+  const ok = (tok: string, after: string) => !YEAR_RANGE.test(tok.replace(/\s+/g, " ").trim()) && !RESUME_COUNT.test(after) && (CODE_ENDS.test(after) || LOGIN_AFTER.test(after) || OTP_AFTER.test(after) || /^[ \t]*[(\-]/.test(after));
+  // 1. A code right after its label or a hand-over, with only connectors between.
   for (const m of t.matchAll(DIRECT_LABEL)) {
-    const tok = m[1], end = (m.index ?? 0) + m[0].length, after = t.slice(end);
-    if (YEAR_RANGE.test(tok) || RESUME_COUNT.test(after) || !(CODE_ENDS.test(after) || LOGIN_AFTER.test(after) || OTP_AFTER.test(after))) continue;
-    if (/^\d+$/.test(tok) && !/^[ \t]*(?:$|\n|[.,;:!?)\]"'\u2019\u201d])/.test(after) && !LOGIN_AFTER.test(after) && !OTP_AFTER.test(after)) continue;
-    return true;
+    // Group 1: the bare "gave/sent me" branch (no code word); group 2: the token.
+    const tok = m[2], at = (m.index ?? 0) + m[0].length - tok.length, after = t.slice(at + tok.length);
+    if (!ok(tok, after)) continue;
+    // A bare figure after "gave/sent me" alone is money unless it ends the phrase or a login purpose follows.
+    if (/^[\d\s-]+$/.test(tok) && m[1] && !ENDS_STRICT.test(after) && !LOGIN_AFTER.test(after) && !OTP_AFTER.test(after)) continue;
+    hits.add(lineOf(at));
   }
-  // "Workday texted me K7X9P2": a letters-and-digits code right after a hiring system or sign-in service, with no code word.
+  // 2. Letters and digits right after a hand-over verb or a hiring-system sender, with no code word ("They texted me K7X9P2").
   for (const m of t.matchAll(/(?<![\w-])(?=[A-Za-z0-9]{5,10}(?![\w-]))(?=(?:[A-Za-z]*\d){2})(?=(?:\d*[A-Za-z]){2})[A-Za-z0-9]{5,10}(?![\w-])/g)) {
-    const at = m.index ?? 0, before = t.slice(Math.max(0, at - 80), at), line = before.slice(before.lastIndexOf("\n") + 1);
-    if (LOGIN_SENDER.test(line) && CODE_ENDS.test(t.slice(at + m[0].length)) && !RESUME_COUNT.test(t.slice(at + m[0].length))) return true;
+    const at = m.index ?? 0, before = t.slice(Math.max(0, at - 80), at), line = before.slice(before.lastIndexOf("\n") + 1), after = t.slice(at + m[0].length);
+    if ((LOGIN_SENDER.test(line) || HAND_VERB.test(line)) && ok(m[0], after)) hits.add(lineOf(at));
   }
+  // 3. "Workday sent 739201 to my phone", "Got 739201 from Workday", "Workday sent me 7392 01".
+  for (const m of t.matchAll(ROUTED_CODE)) {
+    const tok = m[1] ?? m[2] ?? m[3], at = (m.index ?? 0) + m[0].indexOf(tok);
+    if (!YEAR_RANGE.test(tok) && !RESUME_COUNT.test(t.slice(at + tok.length).replace(/^\s*(?:to|from)\s+\S+(?:\s+\S+)?/, ""))) hits.add(lineOf(at));
+  }
+  // 4. The code-in-chat tokens, under the resume guards.
   for (const h of codeTokens(t)) {
     const token = t.slice(h.start, h.end), before = t.slice(Math.max(0, h.start - 60), h.start), after = t.slice(h.end);
     if (!/\d/.test(token) || YEAR_RANGE.test(token) || RESUME_COUNT.test(after) || !CODE_ENDS.test(after) || FILE_NAMED.test(before)) continue;
-    // Review of 6f6ed8ad: a letters-and-digits token ("Exam code: AZ104", "Denial code: CO197", "SAP T-code: ME21N") is a
-    // hand-over only after a hand-over verb or a one-time-code word; a 4-5 digit number after a hand-over verb alone ("Manager
-    // gave me 2500 in budget") only when it ends the phrase.
-    // Same line only, and only a strict one-time-code word: a job title ("Security Engineer") or a label ("exam code") on the
-    // way is not one (review of ea5790fb).
     const line = before.slice(before.lastIndexOf("\n") + 1);
-    const sender = LOGIN_SENDER.test(line), loginAfter = LOGIN_AFTER.test(after);
-    const otpWord = OTP_WORD.test(line) || OTP_AFTER.test(after) || loginAfter || sender, handVerb = HAND_VERB.test(line);
+    const otpWord = OTP_WORD.test(line) || OTP_AFTER.test(after) || LOGIN_AFTER.test(after), handVerb = HAND_VERB.test(line), sender = LOGIN_SENDER.test(line);
     if (/[A-Za-z]/.test(token) && !OTP_STRICT.test(line) && !handVerb && !sender) continue;
-    if (!otpWord && !/^[ \t]*(?:$|\n|[.,;:!?)\]"'\u2019\u201d])/.test(after)) continue;
-    if (HANDOVER_END.test(before)) return true;
+    if (!otpWord && !ENDS_STRICT.test(after)) continue;
+    if (HANDOVER_END.test(before) || sender) hits.add(lineOf(h.start));
   }
-  return false;
+  return [...hits].sort((x, y) => x - y);
 }
 // The code-shaped tokens of a whole text, as offsets into it: the same sentence split and token rules as codeInChat.
 export function codeTokens(msg: string): { start: number; end: number }[] {

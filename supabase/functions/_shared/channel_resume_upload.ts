@@ -14,7 +14,7 @@
 // A file that cannot be downloaded, is not a PDF or DOCX, or has no readable text is said so, plainly; nothing is stored.
 import { CareerProfile, CareerRender } from "./router_core.career.js";
 import { normalizeChatText, redactIdentity } from "./identity_redact.ts";
-import { fileSharesCode } from "./career_code_in_chat.ts";
+import { fileCodeLines } from "./career_code_in_chat.ts";
 import type { Upload } from "./career_router_evidence.ts";
 
 export const MAX_RESUME_BYTES = 10 * 1024 * 1024;
@@ -30,6 +30,15 @@ export const FILE_DAMAGED_REPLY = "I couldn't open that file: it looks damaged o
 export const FILE_EMPTY_REPLY = "That file is empty (0 bytes), so there was nothing to read and nothing was saved. Send the resume file again, or paste its text here.";
 export const FILE_LOCKED_REPLY = "That PDF is locked with a password (or protected against copying), so I couldn't read its text and nothing was saved. Save an unlocked copy and send that, or paste your resume here. Never send me the password.";
 export const fileSecretReply = (kinds: string[]) => `Your file has ${kinds.join(" and ")} in it, so I didn't keep the file or read anything from it. Remove ${kinds.length > 1 ? "them" : "it"} from the file and send it again, or paste your resume here without ${kinds.length > 1 ? "them" : "it"}.`;
+// A suspected one-time code in a file: its line number in the text read from the file and its kind only, never the line, so the
+// person can find it, remove or reword it, and send the file again.
+export function fileCodeReply(lines: number[], otherKinds: string[] = []): string {
+  const ls = lines.slice(0, 5), where = ls.length === 1 ? `line ${ls[0]}` : `lines ${ls.slice(0, -1).join(", ")} and ${ls[ls.length - 1]}`;
+  const more = lines.length > 5 ? ` (and ${lines.length - 5} more)` : "";
+  const also = otherKinds.length ? ` It also has ${otherKinds.join(" and ")} in it.` : "";
+  return `Your file has what looks like a one-time code (a sign-in or verification code) on ${where}${more} of the text I read from it, so I didn't keep the file or read anything from it, and I won't repeat ${ls.length > 1 ? "those lines" : "that line"}.${also} ` +
+    `Remove the code and send the file again. If ${ls.length > 1 ? "a line" : "it"} isn't a code (an exam, ticket or part number), reword it, for example by writing what the number is for, and send the file again.`;
+}
 // ONBOARDING ROUND 2: a file whose text is not a resume (a cover letter, a transcript, a page with no sections) was
 // stored as the person's resume upload, and then the chat said "nothing from it was saved". It is checked first by the
 // chat's own proof for a framed resume (142 resumePasteDraftsOf: two entries, work or education among them) and not kept.
@@ -251,7 +260,7 @@ export function storedFilename(name: string, kind: FileKind): string {
 }
 export const KIND_MIME: Record<FileKind, string> = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" };
 
-export type ResumeFileResult = { ok: true; message: string; uploadId: string; sha256: string; note?: string } | { ok: false; reply: string; why: string };
+export type ResumeFileResult = { ok: true; message: string; uploadId: string; sha256: string; note?: string } | { ok: false; reply: string; why: string; lines?: number[] };
 export async function ingestResumeFile(o: {
   userId: string; channel: "telegram"; doc: { fileId: string; uniqueId: string; name: string; mime: string; size: number | null };
   fetchFile: (fileId: string, maxBytes: number) => Promise<{ ok: true; bytes: Uint8Array } | { ok: false; error: string }>;
@@ -276,10 +285,14 @@ export async function ingestResumeFile(o: {
   // removed, but the file itself was stored as the person's upload (and is the file an application attaches), with the
   // number in it. Now the file is not kept and nothing is read from it; the person is told what to remove.
   const found = redactIdentity(text).removed;
-  if (!found.includes("code") && fileSharesCode(text)) found.push("code");
+  // A plausible one-time code refuses the file (owner decision on 2de155f0): the reply names only the line and the kind, never
+  // the line itself, and nothing from the file is kept or read.
+  const codeLines = fileCodeLines(text);
+  if (codeLines.length && !found.includes("code")) found.push("code");
   if (found.length) {
     const name: Record<string, string> = { ssn: "a Social Security number", card: "a card number", account: "an account number", password: "a password", code: "a one-time code", key: "a key or token" };
-    return { ok: false, reply: fileSecretReply([...new Set(found.map((k) => name[k] ?? "a private number"))]), why: "secret" };
+    const kinds = [...new Set(found.map((k) => name[k] ?? "a private number"))];
+    return { ok: false, reply: codeLines.length ? fileCodeReply(codeLines, kinds.filter((k) => k !== name.code)) : fileSecretReply(kinds), why: "secret", lines: codeLines };
   }
   const message = resumeMessage(text);
   if (!readsAsResume(message)) return { ok: false, reply: fileNotResumeReply(text), why: "not_resume" };

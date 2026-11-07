@@ -155,8 +155,8 @@ Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless res
     // review of ea5790fb: any size of figure after "gave/sent me" that does not end the phrase; labels with "security", "auth",
     // "verification" or "sign-in" in them
     "Leadership gave me 120000 to invest in tooling", "VP gave me 250000 and a team of 6", "NSF gave me 250000 for research", "Leadership gave me 1500000 in budget",
-    "Client sent me 120000 for review", "Azure Security Engineer exam code: AZ500", "CompTIA Security+ exam code: SY0701", "Identity and access (sign-in) exam code: SC300",
-    "Security clearance code: TS2019", "Prior auth code: PA4521", "Insurance verification code: VB102", "Certificate verification code: 4KX7P2QZ",
+    "Client sent me 120000 for review",
+    "Security clearance code: TS2019",
     // review of b805bd0a: a topic word earlier on the line is not the code's label
     "Rolled out MFA; change code: CHG0012345", "Led MFA rollout (change code: CHG0012345)", "2FA rollout. Change code: CHG0012345", "Billed MFA work to charge code: CC4821",
     "Delivered 2FA for client (engagement code: ENG4821)", "OTP module, ServiceNow code: SN4821", "Passcode reset SOP (SOP code: SOP12)", "Built OTP service; release code: R2023A",
@@ -188,7 +188,7 @@ Deno.test("R8R-92 handler path: an uploaded DOCX with a handed-over code is refu
   const plain = await ingest(BODY);
   assertNode.ok(plain.res.ok, JSON.stringify(plain.res));
   // Resume labels and headings through the same upload path: kept, stored once, message intact.
-  for (const line of ["Code migration was completed: 1200 microservices", "Insurance verification code: VB102", "Exam code: AZ104", "Client sent me 120000 for review", "Rolled out MFA; change code: CHG0012345"]) {
+  for (const line of ["Code migration was completed: 1200 microservices", "Exam code: AZ104", "Client sent me 120000 for review", "Rolled out MFA; change code: CHG0012345"]) {
     const ok = await ingest([...BODY.slice(0, 4), line, ...BODY.slice(4)]);
     assertNode.ok(ok.res.ok, `${line}: ${JSON.stringify(ok.res)}`); assertNode.equal(ok.stored.length, 1, line);
     assertNode.ok((ok.res as any).message.includes(line), line);
@@ -253,4 +253,28 @@ Deno.test("R8R-92 a title line above a label never makes it a hand-over", () => 
   for (const t of ["Jordan Lee\nSecurity Engineer\n- Recruiter sent me code K7X9P2", "Jordan Lee\nSupport Lead\n- One-time code: AB12CD", "Jordan Lee\n- They gave me 482913 to log in"]) {
     assertNode.equal(fileSharesCode(t), true, t);
   }
+});
+
+// Owner decision on 2de155f0: privacy first. A plausible code refuses the file even when it may be a look-alike, and the reply
+// names only the line number and the kind, never the line or the code; a clean file is kept with its text intact.
+import { fileCodeLines } from "../../supabase/functions/_shared/career_code_in_chat.ts";
+import { fileCodeReply } from "../../supabase/functions/_shared/channel_resume_upload.ts";
+Deno.test("R8R-FILE ambiguous codes refuse the file; the reply names the line and kind only", async () => {
+  const lookalikes = ["MFA: SC300", "2FA - SY0701", "Closed OTP-4821", "Insurance verification code: VB102", "Prior auth code: PA4521", "Verification code: K7X9P2", "Sign-in code: K7X9P2"];
+  const handovers = ["verification code is K7X9P2", "Login code is K7X9P2", "Verification code K7X9P2", "They texted me K7X9P2", "The recruiter texted me K7X9P2", "Workday sent me a code, 739201, for the portal",
+    "Workday sent 739201 to my phone", "Got 739201 from Workday", "Code: K7X9P2 (from Workday)", "Code they sent: 482913", "code came in as 482913", "Workday sent me 7392 01"];
+  for (const line of [...lookalikes, ...handovers]) {
+    const text = `Jordan Lee\nSupport Lead\n- Led a team of 6\n- ${line}\n- GPA 3.85`;
+    assertNode.deepEqual(fileCodeLines(text), [4], line);
+    const bad = await ingest([...BODY.slice(0, 4), line, ...BODY.slice(4)]);
+    assertNode.equal(bad.res.ok, false, line); assertNode.equal(bad.stored.length, 0, line);
+    const reply = String((bad.res as any).reply), tok = line.match(/[A-Za-z0-9]*\d[A-Za-z0-9]*(?:[ -]\d+)?$|\d{4,8}/)?.[0] ?? "";
+    assertNode.ok(/line \d+ of the text I read/.test(reply), `${line}: ${reply}`);
+    assertNode.ok(!reply.includes(line) && (!tok || !reply.includes(tok)), `${line}: reply echoes it: ${reply}`);
+  }
+  for (const line of ["Code migration was completed: 1200 microservices", "Microsoft sent me 2500 for travel", "Workday sent me 2500 for relocation", "Okta gave me admin access", "Processed 739201 applications for the portal",
+    "Migrated 4500 users to the portal", "OTP - 2021", "Rolled out MFA; change code: CHG0012345", "MFA rollout - CHG0012345", "Exam code: AZ104"]) {
+    assertNode.deepEqual(fileCodeLines(`Jordan Lee\nSupport Lead\n- ${line}`), [], line);
+  }
+  assertNode.ok(/lines 2, 4 and 6 of the text/.test(fileCodeReply([2, 4, 6])));
 });

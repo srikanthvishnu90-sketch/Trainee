@@ -189,3 +189,5 @@
 580 af9a658b5c358f1adb2abada139cfbbfcadc341f independent-review-agent-rv100 risk=medium note=approved-at-74103b70-identical-content-quotes-prefixes-props-per-line-mime-decoded-txt-literal-textpath-quotes-known-limit-sharepoint-props-refused
 582 4efe45772711fbbd44d4ed990693db6029122f83 independent-review-agent-rv102 risk=medium note=prerelease-batch-clean-docx-copy-chat-label-and-salary-counter-revisions-take-revoke-reviewed-by-four-agents
 583 f2c482b9a6adc7596ccb9003d41d9189ad84f4a9 architect-composition-check risk=medium note=release-8-composition-of-reviewed-prs-554-to-582-prerelease-review-by-four-agents-greptile-last
+584 f6239614a8634d4aac61bd0f88a0fec178500fc4 independent-review-agent-rv103 risk=low note=one-expanded-size-budget-per-word-upload-duplicate-central-directory-names-refused-early-code-removal-noted
+586 eb8814b7ee1a15b37120492acd3be304e519fb5f architect-composition-check risk=medium note=release-8-plus-584-composition-of-reviewed-prs-554-to-584-one-deploy-greptile-last

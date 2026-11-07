@@ -202,13 +202,16 @@ const AFTER_FUNC = /^(?:for|from|to|on|in|at|today|tonight|yesterday|this|that|j
 const SIGNIN_PURPOSE = /\b(?:(?:for|on|into|in|at)\s+(?:the|my|your|their)?\s*(?:[a-z]+\s+){0,2}|to\s+(?:the|my|your|their)?\s*)(?:portal|site|website|login|log[- ]?in|sign[- ]?in|account|app|application|form|page|profile|password|verification)\b(?=\s*(?:$|[.,;:!?)]|\s(?:and|so|to|please|now|today|thanks|again)\b))|\bto\s+(?:finish|complete|continue|access|open|unlock|confirm|submit)\s+(?:my|the|your)\s+(?:portal|site|login|account|app|application|form|profile)\b(?=\s*(?:$|[.,;:!?)]|\s(?:and|so|please|now|today|thanks|again)\b))|\b(?:phone|cell|mobile|inbox|e-?mail|text|sms|log\s+in|sign\s+in|verify|enter\s+it)\b/i;
 // Named labels whose numbers are kept (identity_redact.ts NAMED_CODE's words and resume labels): "CPT codes: 99213",
 // "change code: CHG0012345", "exam code: AZ104". Anything else before "code" is read as a code's own label.
-const NAMED_LABEL = /^(?:zip|postal|post|area|country|promo|promotional|discount|coupon|referral|course|class|error|status|dial|tax|product|source|job|dress|invite|invitation|gift|reference|ref|airport|naics|sic|cpt|icd|hcpcs|ndc|drg|sort|swift|bank|routing|color|colour|style|item|sku|morse|qr|bar|req|requisition|position|posting|role|department|dept|cost|budget|project|program|module|unit|soc|fips|vendor|supplier|ticket|order|voucher|offer|event|building|store|exam|certification|cert|change|charge|engagement|release|config|configuration|policy|sop|servicenow|wbs|award|clearance|qualification|lot|batch|part|model|taxonomy|denial|adjustment|remark|activity|transaction|t|school|branch|hs|revenue|gl|cage|hazmat|license|licence|machine|billing|diagnosis|procedure|location|site|plant|warehouse|accounting|campaign|tracking|hex|paint|booking|reservation|specialty|speciality|subject|flight|room|seat|gate|afsc|mos|nec|rate|rating|grade|series|occupation|occupational|duty|uic|ein|cip|onet|o\*net|isco|esco|noc|anzsco|fund|task|teacher|lesson|engine|fault|diagnostic|alarm|ward|trouble|dtc|obd|expense|labor|labour|payroll|union|district|provider|facility|tariff|commodity|ceeb|un)$/i;
+const NAMED_LABEL = /^(?:zip|postal|post|area|country|promo|promotional|discount|coupon|referral|course|class|error|status|dial|tax|product|source|job|dress|gift|reference|ref|airport|naics|sic|cpt|icd|hcpcs|ndc|drg|sort|swift|routing|color|colour|style|item|sku|morse|qr|bar|req|requisition|position|posting|role|department|dept|cost|budget|project|program|module|unit|soc|fips|vendor|supplier|ticket|order|voucher|offer|building|store|exam|certification|cert|change|charge|engagement|release|config|configuration|policy|sop|servicenow|wbs|award|clearance|qualification|lot|batch|part|model|taxonomy|denial|adjustment|remark|activity|transaction|t|school|branch|hs|revenue|gl|cage|hazmat|machine|billing|diagnosis|procedure|location|site|plant|warehouse|accounting|campaign|tracking|hex|paint|booking|reservation|specialty|speciality|subject|flight|room|seat|gate|afsc|mos|nec|rate|rating|grade|series|occupation|occupational|duty|uic|ein|cip|onet|o\*net|isco|esco|noc|anzsco|fund|task|teacher|lesson|engine|fault|diagnostic|alarm|ward|trouble|dtc|obd|harmonized|route|carrier|scac|icao|iata|station|airline|port|hts|expense|labor|labour|payroll|union|district|provider|facility|tariff|commodity|ceeb|un)$/i;
 const COUNT_LABEL2 = /\b(?:codes|pins|tokens|passcodes|otps|attempts|logins|sign[- ]?ins|resets)\s+(?:[a-z]+\s+){0,2}(?:issued|reviewed|delivered|sent|reset|rotated|blocked|processed|handled|generated|verified|validated|revoked|expired|enrolled|migrated|served|per\s+\w+)(?:\s+per\s+\w+)?\s*[:\-–—]\s*$|\b(?:codes|pins|otps|passcodes)\s+(?:issued|reviewed|delivered|sent|reset|rotated|blocked)\b[^:]{0,20}[:\-]\s*$|\b(?:adoption|usage|growth|enrollment|enrolment|coverage|uptime|throughput|capacity|traffic|volume|count|total|reach|downloads|installs|users)\s*[:\-–—]\s*$/i;
 const COUNT_LABEL = /\b(?:(?!(?:codes|pins|tokens|passcodes|otps|digits)\b|sms\s*[:\-\u2013\u2014]|(?:this|his|is|was|has|its|yes|us|plus|bus|less|class|process|address|access|success|business|status|bonus|campus|focus|alias|bias|chaos|series|news|ss)\b)[a-z]{2,}s|total|volume|count|sales|revenue|traffic|headcount|budget)\s*(?:per\s+\w+\s*)?(?:sent|received|processed|handled|delivered|closed|resolved|served|shipped|made|generated|raised|onboarded|hired|managed)?\s*(?:per\s+\w+\s*)?[:\-–—]\s*$/i;
 const ID_LABEL = /\b(?:employee|student|member|badge|staff|license|licence|npi|dea|candidate|requisition|req|job|case|claim|policy|patient|customer|order|invoice|po|cert|certificate|certification|credential|exam)\s*(?:id|no\.?|number|#)\s*[:#]?\s*$/i;
 const MONEY_WORDS = /\b(?:credits?|funding|funds|grants?|budget|seed|investment|donations?|revenue|sales|savings|profit|arr|mrr|salary|bonus|stipend|scholarship|award|prize|raise|dollars|usd|eur|gbp)\b/i;
 const PHONE = /(?:\+?\d{1,3}[ .-]?)?(?:\(\d{3}\)|\d{3})[ .-]\d{3}[ .-]\d{4}/g;
 const DATE = /\b(\d{1,2})[\/.-](\d{1,2})[\/.-]\d{2,4}\b|\b(?:19|20)\d\d[\/.-](\d{1,2})[\/.-](\d{1,2})\b/;
+// A month and year ("05/2025", "2023-06", "6.2021"), or a range of them, possibly open ("05/2025 - present").
+const MY = String.raw`(?:(?:0?[1-9]|1[0-2])[\/.\-](?:19|20)\d\d|(?:19|20)\d\d[\/.\-](?:0?[1-9]|1[0-2]))`;
+const MONTH_YEAR = new RegExp(String.raw`^${MY}(?:\s?[-\u2013\u2014]\s?(?:${MY}|present|now|current|today))?$`, "i");
 // A real calendar date: a month (1-12) and a day (1-31) in either order ("12/34/56" is not one).
 const isDate = (s: string) => {
   const m = DATE.exec(s);
@@ -243,7 +246,8 @@ function digitValue(cp: number): number {
 // The file's text for the check only (never stored or shown): compatibility forms, any script's digits as ASCII, accents off,
 // zero-width characters removed, and Cyrillic or Greek letters that look Latin as Latin ("Сode" is "Code").
 export function fileText(text: unknown): string {
-  return String(text ?? "").normalize("NFKD").replace(/\p{M}/gu, "").replace(/[​-‍⁠﻿­]/g, "")
+  return String(text ?? "").replace(/\r\n?/g, "\n").normalize("NFKD").replace(/\p{M}/gu, "").replace(/[\p{Cf}ㅤᅟᅠﾠ᠎͏]/gu, "")
+    .replace(/[❶-➓⓫-⓾]/g, (c) => { const n = c.codePointAt(0)!; return String(n >= 0x24eb && n <= 0x24f4 ? n - 0x24eb + 11 : n >= 0x24f5 ? n - 0x24f5 + 1 : (n - 0x2776) % 10 + 1); })
     .replace(/\p{Nd}/gu, (d) => d <= "9" && d >= "0" ? d : String(digitValue(d.codePointAt(0)!)))
     .replace(/[Ͱ-ϿЀ-ӿԀ-ԯ]/g, (c) => LOOKALIKE[c] ?? c);
 }
@@ -279,7 +283,8 @@ function labelTailAt(line: string, safe: number[][] = []): number {
     const after = line.slice(vStart + val.length), next = /^[\s:,.)\]"'’”]*([A-Za-z%][A-Za-z']*|%)/.exec(after)?.[1] ?? "";
     const rising = groups.length === 2 && groups.every((g) => /^\d{3,}$/.test(g)) && groups[0].length === groups[1].length && Number(groups[1]) > Number(groups[0]);
     const codeLength = /^\d{6,8}$/.test(flat) && letters === 0 && !rising;
-    const safeShape = groups.every((g) => /^(?:19|20)\d\d$/.test(g)) // years
+    const safeShape = (/\b(?:icd|cpt|hcpcs|obd|dtc|fault|trouble|diagnostic)\b/i.test(line) && /^[A-Z]\d{2,4}(?:\.\d{1,4})?$/.test(val) && !STRONG_LABEL.test(line.slice(0, vStart))) // a medical or fault code
+      || groups.every((g) => /^(?:19|20)\d\d$/.test(g)) // years
       || (groups.length === 2 && /^(?:19|20)\d\d$/.test(groups[0]) && /^(?:\d\d|present|now|current|today)$/i.test(groups[1]))
       || (/(?:19|20)\d\d/.test(val) && isDate(val.replace(/\s/g, "").replace(/[–—]/g, "-"))) // a real date
       || STANDARD.test(groups[0]) // "ISO-27001", "NIST-800-53"
@@ -302,13 +307,18 @@ export function fileCodeLines(text: string): number[] {
   const unbullet = (s: string) => s.replace(/^\s*(?:[-*•▪●>]|\d+[.)])\s+/, "");
   lines.forEach((raw, i) => {
     if (lineCodeAt(raw) >= 0) { hits.push(i + 1); return; }
+    // A value alone on its line, and a line within three text lines after one that ends in a hand-over ("Code:", "Workday
+    // sent me", "Verification code follows"), are judged by the gate whatever their own words are.
+    if (standaloneCodeAt(raw) >= 0) { hits.push(i + 1); return; }
+    const prevText = lines.slice(Math.max(0, i - 6), i).filter((l) => l.trim()).slice(-3);
+    if (prevText.some((l) => GATE_END.test(l)) && gateCodeAt(raw, true) >= 0) { hits.push(i + 1); return; }
     // A line that ends in a code word, a sender or a hand-over verb ("Workday sent me", "My phone shows", "Code:") is judged
     // with the next line that holds text, past blank lines, by the strict rule ("Workday sent me" / "«064-448»").
-    if (STRICT_END.test(raw)) {
+    if (GATE_END.test(raw)) {
       const nextText = lines.slice(i + 1, i + 6).find((l) => l.trim());
       if (nextText !== undefined) {
         const join = `${raw.trimEnd()} ${unbullet(nextText).trim()}`;
-        if (strictCodeAt(join) >= raw.trimEnd().length) { hits.push(i + 1); return; }
+        if (gateCodeAt(join, true) >= raw.trimEnd().length) { hits.push(i + 1); return; }
       }
     }
     // The next lines that hold text (up to two blank lines skipped); a line of punctuation alone (":") joins the one after it.
@@ -316,7 +326,7 @@ export function fileCodeLines(text: string): number[] {
     if (rest.length > 1 && /^[\s:#=|\-\u2013\u2014.]+$/.test(rest[0])) rest.splice(0, 2, `${rest[0].trim()} ${rest[1].trim()}`);
     const n1 = rest[0] ?? "", n2 = rest[1] ?? "";
     if (!n1.trim() || !lines.slice(i + 1, i + 6).some((l) => l.trim())) return;
-    const ctxEnd = LEFT_CTX.test(raw.replace(/\s*$/, " ")) || /\b(?:codes?|otps?|passcodes?|pins?|tokens?|verification|2fa|mfa)[\s:#=|\-\u2013\u2014>"'(\[]*$/i.test(raw), digitEnd = /(?:^|\D)\d{2,4}\s*$/.test(raw);
+    const ctxEnd = LEFT_CTX.test(raw.replace(/\s*$/, " ")) || /\b(?:codes?|otps?|passcodes?|pins?|tokens?|verification|2fa|mfa)[\s:#=|\-\u2013\u2014>"'(\[]*$/i.test(raw), digitEnd = /(?:^|\D)\d{2,4}\s*$/.test(raw) && /^\d/.test(n1.trim()); // a split code continues with digits
     const rightNext = /^\s*(?:is|was|are|=|-|\u2013|\u2014|\()/i.test(n1) && RIGHT_CTX.test(" " + n1.trim());
     if (!ctxEnd && !digitEnd && !rightNext) return;
     // The code or its hand-over continues on the next line or two ("Workday sent me" / "739 201", "739" / "201",
@@ -331,83 +341,266 @@ export function fileCodeLines(text: string): number[] {
   });
   return hits;
 }
-// Privacy first for a file (owner decision on 2de155f0, reviews of 6999fae2 and 837a045e): on a line with a code word, a sign-in
-// service or a hand-over verb anywhere, every code-shaped value is a suspected code unless it has a safe shape. Wrappers (quotes,
-// brackets, backticks, underscores, guillemets) are dropped and separators (dash, dot, slash, comma, spaced dash, a space
-// between digit groups) join a value's groups; a group of lowercase letters is a word and ends the value.
-const STRICT_CTX = new RegExp(String.raw`\b(?:codes?|otps?|passcodes?|pins?|tokens?|verification|verify|verified|2fa|mfa|two[- ]?(?:factor|step)|2[- ]?step|sign[- ]?in|log[- ]?in|login|authenticator|one[- ]?time|single[- ]?use|sms|texted|text(?:\s+message)?|sent|send|emailed|messaged|gave|got|received|shared|forwarded|pinged|dm'?d|shows|showed|displays|displayed|use|enter|${SENDERS})\b`, "i");
-const STRICT_END = new RegExp(String.raw`(?:${STRICT_CTX.source})(?:\s+(?:me|us|you|is|was|are))?[\s:#=|~*>\u2192\u2013\u2014"'\u2018\u2019\u201c\u201d(\[{<\u00ab\x60_-]*$`, "i");
+// The file gate (owner decisions on 2de155f0 and a7b76b6f: privacy first, fail closed, structural). Two keys on each line:
+// CONTEXT, a code word, sign-in service or hand-over phrase from a finite lexicon (English and the main resume languages) on the
+// line itself or ending one of the three text lines before it; and SHAPE, a code-shaped value after normalisation (every
+// invisible format character dropped, wrappers removed, short separators joined). A value with both keys refuses the file
+// unless it has a strict, context-independent safe shape (years, quarters, dates, times, phones, postal codes, money,
+// percentages, versions, certification exam codes, standards, DOIs, patents, tickets, counts, named labels). A value that
+// stands alone on its line refuses whatever surrounds it. The reply names only the line and the kind.
+const CTX_LATIN = String.raw`codes?|otps?|passcodes?|passkeys?|pins?|tokens?|verification|verify|verified|2fa|mfa|totp|hotp|two[- ]?(?:factor|step)|2[- ]?step|sign[- ]?in|log[- ]?in|login|authenticator|one[- ]?time|single[- ]?use|sms|texted|text(?:\s+message)?|security\s+key|secret(?:\s+key)?|key\s*[:=]|steam\s+guard|magic\s+link|backup\s+codes?|recovery\s+codes?|sent|send|emailed|messaged|gave|got|received|shared|forwarded|pinged|dm'?d|shows|showed|displays|displayed|use|enter|type|paste|key\s+in|try|reply\s+with|respond\s+with|confirm\s+with|here'?s|here\s+is|it'?s|mine(?:\s+is)?\s*:?|number\s*:|(?:the\s+)?number\s+(?:is|was)|digits|follows|below|guard|c[oó]digo|clave|contrase[nñ]a|verificaci[oó]n|acceso|senha|verifica[cç][aã]o|v[eé]rification|mot\s+de\s+passe|codice|best[aä]tigungscode|sicherheitscode|kennwort|passwort|tan|kode|verifikasi|sandi|kod|weryfikacyjny|verificatiecode|bekr[aä]ftelsekod|dogrulama|m[aã]\s+x[aá]c|код|пароль|подтверждени\p{L}*|رمز|التحقق|einmalcode|einmalkennwort|zugangscode|engangskod|engangskode|kertakoodi|vahvistuskoodi|toegangscode|kod\s+dostepu|jednorazowy|codice\s+d'?accesso|code\s+d'?acces|code\s+unique|codigo\s+unico|parola|sifre|chase|authy|steam|1password|lastpass|bitwarden|signal|whatsapp|telegram|paypal|venmo|stripe|twilio|yubikey|slack|discord|teams|zoom|the\s+app|bank|${SENDERS}`;
+const CTX_OTHER_WORDS = ["验证码", "校验码", "认证码", "动态码", "验证", "密码", "驗證碼", "確認碼", "認証コード", "確認コード", "認証番号", "ワンタイム", "パスワード", "인증번호", "인증 코드", "비밀번호", "코드", "सत्यापन कोड", "कोड", "ओटीपी", "код", "код подтверждения", "пароль", "رمز التحقق", "رمز", "کد", "รหัส", "קוד", "κωδικός", "mã xác minh", "mã xác nhận", "mã otp"];
+// The lexicon in the form the check reads (accents off, look-alike letters mapped, Hangul and kana decomposed), so a label is
+// found in the normalised file text.
+const lexForm = (w: string) => w.normalize("NFKD").replace(/\p{M}/gu, "").replace(/[\u0370-\u03ff\u0400-\u04ff\u0500-\u052f]/g, (c) => LOOKALIKE[c] ?? c).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s*");
+const CTX_CJK = CTX_OTHER_WORDS.map(lexForm).join("|");
+const CTX_CJK_N = CTX_CJK;
+const GATE_CTX = new RegExp(String.raw`(?<![\p{L}\p{N}])(?:${CTX_LATIN})(?![\p{L}])|${CTX_CJK}`, "iu");
+// A phrase that hands over what follows when it ends a line ("Workday sent me", "Verification code follows", "Code:").
+export const GATE_END = new RegExp(String.raw`(?:(?<![\p{L}\p{N}])(?:codes?|otps?|passcodes?|passkeys?|pins?|tokens?|verification|2fa|mfa|totp|hotp|sms|authenticator|secret|key|c[oó]digo|clave|senha|codice|kode|kod|tan|sent\s+(?:me|us)|texted\s+(?:me|us)|emailed\s+(?:me|us)|messaged\s+(?:me|us)|gave\s+(?:me|us)|shared|forwarded|pinged\s+(?:me|us)|dm'?d\s+(?:me|us)|shows|displays|enter|type|paste|use|reply\s+with|here'?s|here\s+is|it'?s|mine(?:\s+is)?|follows|below|bestätigungscode|sicherheitscode|код|رمز)|${CTX_CJK})[\s\p{P}\p{S}]*$`, "iu");
 const STRICT_VERBS = /^(?:opens|unlocks|verifies|expires|works|logs|signs|grants|gives|lets|gets|allows|activates|confirms|completes|authorizes|authenticates|validates|enables|accesses|is|was|has|does|goes|remains|stays|lasts|its|this|thanks|yes|us|plus|minutes|seconds|digits|texts|logins|messages|sms)$/i;
-const STRICT_GROUP_SEP = String.raw`(?:\s?[-–—]\s?|[.,\/·]|(?<=\d)\s(?=\d))`;
-function strictCodeAt(raw: string): number {
-  if (!STRICT_CTX.test(raw)) return -1;
-  // Units and percentiles ("40ms", "p99", "16GB") are measurements, not code groups: masked before values are read.
-  const line = raw.replace(/[`*_«»‹›"'“”‘’()\[\]{}<>]/g, " ")
-    .replace(/(?<![A-Za-z0-9])(?:p\d{2,3}|\d+(?:\.\d+)?(?:ms|ns|us|s|h|hrs?|gb|mb|kb|tb|pb|hz|khz|mhz|ghz|px|pt|yr|yrs|rps|qps|tps|fps|kw|mw|kg|lbs?|km|mi|cm|mm|x))(?![A-Za-z0-9])/gi, (m) => " ".repeat(m.length));
-  const tokRe = new RegExp(String.raw`(?<![A-Za-z0-9])[A-Za-z0-9]+(?:${STRICT_GROUP_SEP}[A-Za-z0-9]+)*`, "g");
+// Separators that join a value's groups: one or two of - – — . , / · : # + \ ; * = ~ |, optionally spaced, or one or two
+// spaces between digit groups.
+const GATE_SEP = String.raw`(?:\s?[-–—]{1,2}\s?|[.,\/·:#+\x5c;*=~|]{1,2}(?!\s)|(?<=\d)\s{1,2}(?=\d))`;
+const GATE_SEP_LOOSE = String.raw`(?:${GATE_SEP}|(?<=[A-Z0-9])\s{1,2}(?=[A-Z0-9]))`;
+// A code's own label right before the value (any lexicon language).
+const GATE_DIRECT = new RegExp(String.raw`(?:(?<![\p{L}\p{N}])(?:codes?|otps?|passcodes?|passkeys?|pins?|tokens?|verification|2fa|mfa|totp|hotp|secret|key|c[oó]digo(?:\s+de\s+\p{L}+)?|clave|senha|codice(?:\s+di\s+verifica)?|codice\s+d'?accesso|kode(?:\s+verifikasi)?|tan|einmalcode|zugangscode|engangskod|bestatigungscode|sicherheitscode|code\s+d'?acces|kod\s+dostepu|dogrulama\s+kodu|код(?:\s+подтверждения)?|рмз|رمز(?:\s+التحقق)?)|${CTX_CJK})\s*(?:(?:is|=)\s*)?[\s\p{P}\p{S}]*$`, "iu");
+const STRONG_LABEL = /(?:backup|recovery|verification|security|one[- ]?time|otp|2fa|mfa|login|log[- ]?in|sign[- ]?in|authenticator|totp|hotp|access|reset|confirmation)\s+codes?\s*[:=#-]?\s*$/i;
+const TECH_WORDS = /^(?:COBOL|JAVA|HTML|CSS|SQL|PYTHON|REACT|RUST|SWIFT|KOTLIN|SCALA|PERL|RUBY|GOLANG|DART|JSON|YAML|BASH|LINUX|UNIX|MATLAB|FORTRAN|PASCAL|ABAP|APEX|NODE|DOCKER|AZURE|AWS|GCP|SAP|ORACLE|EXCEL|NONE|DONE|OPEN|LIVE|BETA|ALPHA|LEGACY|CLEAN|REVIEW)$/;
+const CERT_SHAPE = /^(?:AZ|SC|MS|MO|DP|PL|AI|MB|MD|DA|AD|SAA|SAP|SOA|DVA|CLF|ANS|DOP|SCS|DAS|MLS|DEA|PCA|PCD|PDE|ACE|SY0|N10|CV0|PK0|XK0|CS0|CAS|PT0|DS0|CY0|220)-?[A-Z]?\d{2,4}$/; // AZ-104, MO-200, SC300, SAA-C03, SY0-701
+const TICKET_SHAPE = /^(?:INC|CHG|REQ|RITM|PRB|TASK|JIRA|CASE|BUG|PR|CR|SR|CVE|GHSA)[- ]?\d{2,8}(?:-\d{2,8})?$/i;
+const GATE_STANDARD = /^(?:iso|iec|nist|soc|erc|eip|rfc|pci|hipaa|itil|cmmi|ieee|ansi|sp|fips|astm|din|en|bs|mil|nfpa|osha|ul|csa|cwe|owasp|hl7|icd|cpt|dsm|iata|icao|gdpr|sox|cis|nerc|ferpa|aws|az|sc|dp|pl|ms|mo|md|ai|ai-?\d)$/i;
+const handedToGate = (before: string) => /\b(?:sent|send|gave|texted|emailed|messaged|dm'?d|got|received|told|shared|issued|forwarded|pinged)\s+(?:me|us)\b/i.test(before)
+  || /^\s*(?:got|received|copied|grabbed|pulled)\s*$/i.test(before)
+  || new RegExp(String.raw`\b(?:${SENDERS}|authy|chase|steam)\b[^.;]{0,30}\b(?:sent|texted|emailed|messaged|gave|shared|forwarded|pinged|dm'?d|shows|displays)\b`, "i").test(before)
+  || GATE_DIRECT.test(before);
+function gateLine(raw: string): string {
+  raw = raw.replace(/(?<=[A-Za-z])['’](?=[A-Za-z])/g, ""); // "it's" reads "its", "DM'd" reads "DMd"
+  // Wrappers become spaces; an underscore inside an identifier joins it ("ftm_v73"), at an edge it is a wrapper ("_482913_").
+  return raw.replace(/(?<![A-Za-z0-9])_+|_+(?![A-Za-z0-9])/g, (m) => " ".repeat(m.length))
+    .replace(/(?<![A-Za-z0-9])\*+|\*+(?![A-Za-z0-9])/g, (m) => "\u001f".repeat(m.length))
+    .replace(/[`«»‹›"'“”‘’„()\[\]{}<>「」【】（）]/g, "\u001f")
+    .replace(/(?<![A-Za-z0-9])(?:p(?:50|75|90|95|99|999)|\d{1,4}(?:\.\d+)?(?:ms|ns|us|s|h|hrs?|GB|MB|KB|TB|PB|gb|mb|kb|tb|pb|Hz|kHz|MHz|GHz|hz|khz|mhz|ghz|px|pt|yrs?|rps|qps|tps|fps|kW|MW|kg|lbs?|km|mi|cm|mm|x))(?![A-Za-z0-9])/g, (m) => " ".repeat(m.length));
+}
+// The value straight after a code's label or a hand-over phrase ("PIN: 1z ck cn j0", "My phone shows WFJ073", "The digits are
+// 8669..."), read up to a stop word or a long word, whatever its separators. Figures of 8 digits or fewer with no letters are
+// left to gateCodeAt, which knows counts and money.
+const TAIL_ANCHOR = new RegExp(String.raw`(?:(?<![\p{L}\p{N}])(?:codes?|otps?|passcodes?|passkeys?|pins?|tokens?|verification|2fa|mfa|totp|hotp|secret|key|steam\s+guard|digits|c[oó]digo(?:\s+de\s+\p{L}+)?|clave|senha|codice(?:\s+di\s+verifica)?|codice\s+d'?accesso|kode(?:\s+verifikasi)?|tan|einmalcode|zugangscode|engangskod|bestatigungscode|sicherheitscode|code\s+d'?acces|kod\s+dostepu|dogrulama\s+kodu|(?:the\s+)?(?:number|digits|one)\s+(?:is|was|are))(?![\p{L}])(?:\s+(?:is|are|was|=))?|(?<![\p{L}\p{N}])(?:sent|texted|emailed|messaged|gave|shared|forwarded|pinged|dm'?d)\s+(?:me|us)(?![\p{L}])|(?<![\p{L}\p{N}])(?:(?:phone|app|screen|authenticator|device|watch|sms)\s+(?:shows|showed|displays|displayed|says|said)|enter|type|paste|use|key\s+in|(?:reply|respond|confirm|verify|sign\s+in|log\s+in|login)\s+with|here'?s|here\s+is|it'?s|mine(?:\s+is)?)(?![\p{L}])|${CTX_CJK_N})\s*[:=#\-–—>|~]*\s*`, "giu");
+const TAIL_STOP = /^(?:to|for|via|now|from|valid|expires?|expired|in|on|at|the|an?|is|was|are|my|your|please|mins?|minutes?|ago|do|not|share|and|or|with|sms|it|this|that|if|when|after|before|until|codes?|otp|pin|token|login|sign|verification|app|phone|email|text|texted|sent|me|us|you|here|there|today|tonight|yesterday|seconds?|hours?|days?|by|of|thanks?|ok|okay|asap|again|also|just|only|then|so|but|be|will|can|use|enter|type|was|were)$/i;
+// A value read backwards from "is my code", "- my OTP", "was the verification code" ("KsT6 LBnn kY5 is my code", "jb - 3m - 73 -
+// my OTP"): the same reading as after a label, toward the start of the line.
+const BACK_LABEL = new RegExp(String.raw`[\s\u001f]*(?:[-–—:|]\s*)?(?:(?:is|was|are|=)\s+)?(?:my|the|your|our|their)\s+(?:[\p{L}'-]+'s\s+)?(?:new\s+|one[- ]time\s+|login\s+|sign[- ]in\s+|verification\s+|security\s+|access\s+)?(?:codes?|otps?|passcodes?|pins?|tokens?|2fa|mfa|totp|key|${CTX_CJK})(?![\p{L}])`, "giu");
+export function beforeLabelCodeAt(raw: string): number {
+  const line = gateLine(raw);
+  for (const b of line.matchAll(BACK_LABEL)) {
+    const end = b.index ?? 0, parts = line.slice(0, end).split(/(\s+|[-–—.,\/·:#+\x5c;*=~|\u001f]{1,3})/);
+    const got: string[] = [];
+    for (let k = parts.length - 1; k >= 0 && got.length < 24; k--) {
+      const p = parts[k];
+      if (k % 2 === 1 || !p) continue;
+      if (TAIL_STOP.test(p) || (/^[a-z]+$/.test(p) && p.length >= 5) || (/^[A-Z][a-z][A-Za-z]{2,}$/.test(p) && !/\d/.test(p))) break;
+      if (/^[a-z]{3,}$/.test(p) && /[aeiouy]/.test(p) && !got.some((g) => /[A-Za-z]\d|\d[A-Za-z]/.test(g))) break;
+      got.unshift(p);
+    }
+    const val = got.join(""), digits = val.replace(/\D/g, "").length, letters = val.length - digits;
+    if (val.length < 4 || val.length > 64 || digits === 0) continue;
+    const mixed = got.filter((g) => /[A-Za-z]/.test(g) && /\d/.test(g));
+    const look = digits >= 4 || mixed.length >= 2 || mixed.some((g) => g.length >= 4) || (got.length >= 2 && got.every((g) => g.length <= 5) && letters >= 2);
+    if (!look) continue;
+    if (letters === 0 && (/^(?:19|20)\d\d$/.test(val) || /^(?:19|20)\d\d(?:19|20)\d\d$/.test(val))) continue;
+    if (CERT_SHAPE.test(val)) continue;
+    return Math.max(0, end - val.length);
+  }
+  return -1;
+}
+export function tailCodeAt(raw: string): number {
+  const back = beforeLabelCodeAt(raw);
+  if (back >= 0) return back;
+  const line = gateLine(raw);
+  for (const a of line.matchAll(TAIL_ANCHOR)) {
+    const start = (a.index ?? 0) + a[0].length, before = line.slice(0, start);
+    const named = /\b([\w'-]+)[ -]+(?:codes?|pins?)\b[^:;.]{0,24}\s*(?:(?:is|are|was)\s*)?[:#=|\-–—]?\s*$/i.exec(before);
+    if (named && NAMED_LABEL.test(named[1].replace(/-\d+$/, ""))) continue; // "Billing codes: 99213, 99214"
+    const parts = line.slice(start).split(/(\s+|[-–—.,\/·:#+\;*=~|]{1,2})/);
+    let val = "", n = 0;
+    for (let k = 0; k < parts.length && n < 24; k++) {
+      const p = parts[k];
+      if (k % 2 === 1) { if ((/^[,;]$/.test(p) && /^\s/.test(parts[k + 1] ?? "")) || /[.!?;,]\s/.test(p) || p === "\u001f") break; continue; }
+      if (!p) continue;
+      if (TAIL_STOP.test(p) || (/^[a-z]+$/.test(p) && p.length >= 5) || (/^[a-z]{3,}$/.test(p) && /[aeiouy]/.test(p) && !/[A-Za-z]\d|\d[A-Za-z]/.test(val) && !STRONG_LABEL.test(before)) || (/^[A-Z][a-z][A-Za-z]{2,}$/.test(p) && !/\d/.test(p)) || (/^\p{L}+$/u.test(p) && !/^[A-Za-z]+$/.test(p))) break;
+      val += p; n++;
+    }
+    const digits = val.replace(/\D/g, "").length, letters = val.length - digits;
+    if (val.length < 4 || val.length > 64) continue;
+    if (letters === 0 && digits <= 8) continue; // gateCodeAt judges counts and money
+    const strongLbl = STRONG_LABEL.test(before) || GATE_DIRECT.test(before);
+    // The read value must look like a code: two or more short letter-and-digit groups or one of 4+ characters, more than 8
+    // digits, or capital letters (or anything after a strong code label) with no digits. "CCNA 200-301", "CMA 2021" do not.
+    const chunks = val.split(/(?<=[A-Za-z])(?=\d)|(?<=\d)(?=[A-Za-z])/).length;
+    const groupsRead = (parts.filter((p, k) => k % 2 === 0 && p).slice(0, n));
+    const mixedGroups = groupsRead.filter((g) => /[A-Za-z]/.test(g) && /\d/.test(g));
+    const randomLook = mixedGroups.length >= 2 || mixedGroups.some((g) => g.length >= 4 && !CERT_SHAPE.test(g) && !/^(?:[A-Z]{1,3}\d{1,2}|\d{1,2}[A-Z]{1,2})$/.test(g)) || (letters === 0 && digits > 8) || (digits === 0 && strongLbl) || chunks >= 4
+      || (strongLbl && groupsRead.length >= 2 && groupsRead.every((g) => g.length <= 5 && !COUNT_NOUNS.test(g) && !/^(?:sq|ft|in|cm|mm|km|kg|lbs?|hrs?|mins?|ms|gb|mb|tb|kb|k|m|x)$/i.test(g)) && groupsRead.some((g) => /[A-Z]/.test(g)) && digits >= 1 && letters >= 2 && !GATE_STANDARD.test(groupsRead[0])); // "Code: HSV MUC 01"
+    const code = randomLook && (digits >= 1 || strongLbl) && !(digits === 0 && TECH_WORDS.test(val)) && !(digits === 0 && !(/^[A-Z]{4,16}$/.test(val) || STRONG_LABEL.test(before)));
+    if (!code) continue;
+    // Safe shapes for a read value.
+    if (CERT_SHAPE.test(val) && !GATE_DIRECT.test(before)) continue;
+    if (/\b(?:icd|cpt|hcpcs|obd|dtc|fault|trouble|diagnostic)\b/i.test(line) && /^[A-Z]\d{2,4}(?:\.\d{1,4})?$/.test(val) && !STRONG_LABEL.test(before)) continue; // a medical or fault code
+    if (/^(?:19|20)\d\d(?:(?:19|20)\d\d)*$/.test(val) || /^(?:Q[1-4]|H[12]|FY)(?:19|20)?\d\d$/i.test(val)) continue;
+    if (GATE_STANDARD.test(val.replace(/\d.*$/, "")) && /^[A-Za-z]{2,6}\d{1,5}$/.test(val) && !GATE_DIRECT.test(before)) continue;
+    if (GATE_STANDARD.test(groupsRead[0] ?? "") && groupsRead.length > 1 && groupsRead.slice(1).every((g) => /^\d{1,5}$|^[A-Za-z]{1,6}$/.test(g))) continue; // "ISO-27001-2013"
+    if ([...raw.matchAll(PHONE)].some((p) => (p.index ?? 0) >= start - 2)) { if (letters === 0) continue; }
+    return start;
+  }
+  return -1;
+}
+// A wrapped value next to a hand-over ("It's `2z.Sf.wC.C8.RB`", "«mx,0p,73» is my code", "OTP: (tR wH zK rX 73)"): the text
+// inside quotes, backticks, brackets, guillemets or markdown is one value, separators and spaces dropped. It is a code unless it
+// reads as words or has a safe shape.
+const WRAP_PAIRS: [string, string][] = [["`", "`"], ["\"", "\""], ["'", "'"], ["«", "»"], ["“", "”"], ["„", "“"], ["‘", "’"], ["[", "]"], ["(", ")"], ["{", "}"], ["<", ">"], ["**", "**"], ["*", "*"], ["_", "_"]];
+const WRAP_AFTER = new RegExp(String.raw`^[\x60"'»”’\])}>*_]*\s*(?:[-–—:]\s*)?(?:is|was|=|are)?\s*(?:my|the|your|our|their)?\s*(?:[\p{L}'-]+'s\s+|[\p{L}]+\s+)?(?:${CTX_LATIN}|key|number|digits|${CTX_CJK})`, "iu");
+const WRAP_BEFORE = new RegExp(String.raw`(?:(?<![\p{L}\p{N}])(?:${CTX_LATIN}|(?:the\s+)?(?:number|digits|one|pin|key)\s+(?:is|was|are))|${CTX_CJK})[\s:=#\-–—>|~\x60"'«“‘\[({<*_]*(?:(?:is|was|are)\s+)?$`, "iu");
+export function wrappedCodeAt(raw: string): number {
+  for (const [open, close] of WRAP_PAIRS) {
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`${esc(open)}([^\\n]{3,90}?)${esc(close)}`, "g");
+    for (const m of raw.matchAll(re)) {
+      const at = m.index ?? 0, inner = m[1], before = raw.slice(Math.max(0, at - 60), at), after = raw.slice(at + m[0].length, at + m[0].length + 60);
+      if (!WRAP_BEFORE.test(before) && !WRAP_AFTER.test(after)) continue;
+      const words = inner.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+      if (words.some((w) => /^\p{L}{5,}$/u.test(w) && /[aeiouy]/i.test(w) && !/^[A-Z]+$/.test(w))) continue; // words, not a code
+      if (words.filter((w) => /^\p{Ll}{3,4}$/u.test(w) && /[aeiou]/.test(w)).length >= 2 && !words.some((w) => /\d/.test(w))) continue;
+      const flat = words.join(""), digits = flat.replace(/\D/g, "").length, letters = flat.length - digits;
+      if (flat.length < 4 || flat.length > 64 || !(digits >= 4 || (digits >= 1 && letters >= 1))) continue;
+      const v = inner.trim();
+      if (CERT_SHAPE.test(v) || /^(?:19|20)\d\d(?:\s*[-–—,]\s*(?:(?:19|20)\d\d|present))?$/i.test(v) || isDate(v) || PHONE.test(v)) { PHONE.lastIndex = 0; continue; }
+      PHONE.lastIndex = 0;
+      if (letters === 0 && digits <= 8 && !WRAP_BEFORE.test(before) && !WRAP_AFTER.test(after)) continue;
+      return at;
+    }
+  }
+  return -1;
+}
+// The index of the first value on the line that the gate refuses, or -1.
+export function gateCodeAt(raw: string, ctx = GATE_CTX.test(raw)): number {
+  if (!ctx) return -1;
+  const wrapped = wrappedCodeAt(raw);
+  if (wrapped >= 0) return wrapped;
+  const tail = tailCodeAt(raw);
+  if (tail >= 0) return tail;
+  const line = gateLine(raw);
   const phones = [...raw.matchAll(PHONE)].map((m) => [m.index ?? 0, (m.index ?? 0) + m[0].length]);
-  const strongCode = STRONG_CODE.test(MONEY_WORDS.test(line) ? line.replace(/\bone[- ]?time\b/gi, " ") : line), sender = STRONG_SENDER.test(line);
-  const money = MONEY_WORDS.test(line);
+  const money = MONEY_WORDS.test(line) || /\b(?:salary|pay|offer|range|rate|budget)\b/i.test(line);
+  const strongCode = STRONG_CODE.test(MONEY_WORDS.test(line) ? line.replace(/\bone[- ]?time\b/gi, " ") : line);
+  const tokRe = new RegExp(String.raw`(?<![A-Za-z0-9_])[A-Za-z0-9_]+(?:${GATE_SEP_LOOSE}[A-Za-z0-9_]+)*`, "g");
   for (const m of line.matchAll(tokRe)) {
-    // Split into groups and cut the value at its first word (a group with two lowercase letters in a row and no digit).
-    const pieces = m[0].split(new RegExp(`(${STRICT_GROUP_SEP})`));
+    // Groups; a word (two lowercase letters in a row and no digit, or a lexicon word) before the value is skipped, after it
+    // ends the value. After a strong code label even a lowercase or all-capital letters value counts ("Backup codes: abcd").
+    const pieces = m[0].split(new RegExp(`(${GATE_SEP_LOOSE})`));
     let val = "", offset = 0, started = false;
     for (let k = 0; k < pieces.length; k += 2) {
-      const g = pieces[k], word = /^(?:otps?|mfa|2fa|sms|pins?|codes?|tokens?|passcodes?|ref|id|no|sku|cpt|icd)$/i.test(g) || (!/\d/.test(g) && /[a-z]{2}/.test(g));
-      if (word) {
-        if (started) break;
-        offset += g.length + (pieces[k + 1]?.length ?? 0); continue;
-      }
+      const g = pieces[k], before0 = line.slice(0, (m.index ?? 0) + offset);
+      const lexWord = /^(?:otps?|mfa|2fa|sms|pins?|codes?|tokens?|passcodes?|ref|id|no|sku|cpt|icd|key|tan|totp|hotp|secret)$/i.test(g);
+      const strong = !started && STRONG_LABEL.test(before0) && !/\d/.test(line.slice((m.index ?? 0) + offset));
+      const prefix = /^[A-Z]{1,6}$/.test(g) && /^\s?[-–—.\/:#]\s?$/.test(pieces[k + 1] ?? "") && /^\d/.test(pieces[k + 2] ?? "");
+      const word = lexWord || (!/\d/.test(g) && /[a-z]/.test(g) && !strong) || (!/\d/.test(g) && /^[A-Z]+$/.test(g) && !GATE_DIRECT.test(before0) && !started && !prefix);
+      if (word) { if (started) break; offset += g.length + (pieces[k + 1]?.length ?? 0); continue; }
       val += (started ? pieces[k - 1] : "") + g; started = true;
     }
     if (!val) continue;
+    // A space join between letter groups stands only when some group mixes letters and digits ("AUS WUK 76V"); otherwise the
+    // value ends at the first such space ("25000 LOC", "3500 COBOL").
+    {
+      const segs = val.split(/(?<=[A-Za-z0-9])\s{1,2}(?=[A-Za-z0-9])(?<!\d\s{1,2}(?=\d))/);
+      if (segs.length > 1 && !segs.some((g) => g.split(/[^A-Za-z0-9]/).some((x) => /[A-Za-z]/.test(x) && /\d/.test(x) && x.length <= 8))) val = segs[0];
+    }
     const at = (m.index ?? 0) + offset, end = at + val.length;
     const flat = val.replace(/[^A-Za-z0-9]/g, ""), digits = flat.replace(/\D/g, "").length, letters = flat.length - digits;
-    if (flat.length > 64 || !(flat.length >= 4 && (digits >= 4 || (digits >= 2 && letters >= 2)))) continue;
-    const groups = val.split(new RegExp(STRICT_GROUP_SEP)).filter(Boolean);
-    const before = line.slice(0, at), after = line.slice(end);
+    const before = line.slice(0, at), after = line.slice(end), direct = GATE_DIRECT.test(before);
+    const lettersOnly = digits === 0 && flat.length >= 4 && flat.length <= 16 && direct && (/^[A-Z]+(?:[^A-Za-z0-9]+[A-Z]+)*$/.test(val) || STRONG_LABEL.test(before)) && !TECH_WORDS.test(flat);
+    if (flat.length > 64 || !(lettersOnly || (flat.length >= 4 && (digits >= 4 || (digits >= 2 && letters >= 2) || (direct && digits >= 1 && letters >= 1))))) continue;
+    const groups = val.split(new RegExp(GATE_SEP_LOOSE)).filter(Boolean);
     const next = /^[\s:,.;!?)\]-]*([A-Za-z%][A-Za-z'-]*|%)/.exec(after)?.[1] ?? "";
-    const direct = DIRECT.test(before);
+    const next2 = /^[\s:,.;!?)\]-]*[A-Za-z0-9%][\w'-]*\s+([A-Za-z][A-Za-z'-]*)/.exec(after)?.[1] ?? "";
     const label = /\b([\w'-]+)[ -]+(?:codes?|pins?)\s*(?:(?:is|was|are)\s*)?[:#=|\-–—]?\s*(?:[A-Za-z0-9-]+\s*(?:,|\band\b|&|\/)\s*)*$/i.exec(before);
     const bareLabel = /\b([\w'-]+)\s*[:#]\s*$/.exec(before);
+    const handed = handedToGate(before);
     const codeLength = letters === 0 && /^\d{6,8}$/.test(flat);
     const rising = groups.length === 2 && groups.every((g) => /^\d{3,}$/.test(g)) && groups[0].length === groups[1].length && Number(groups[1]) > Number(groups[0]);
-    // Safe shapes.
-    if (groups.every((g) => /^(?:19|20)\d\d$/.test(g)) || (groups.length === 2 && /^(?:19|20)\d\d$/.test(groups[0]) && /^(?:\d\d|present|now|current|today)$/i.test(groups[1]))) continue;
-    if (/(?:19|20)\d\d/.test(val) && isDate(val.replace(/\s/g, "").replace(/[–—]/g, "-"))) continue;
+    const compact = val.replace(/\s/g, "").replace(/[–—]/g, "-");
+    // Context-independent safe shapes.
+    if (lettersOnly) { if (!direct || (label && NAMED_LABEL.test(label[1].replace(/-\d+$/, "")))) continue; return at; }
+    if (groups.every((g) => /^(?:19|20)\d\d$/.test(g)) || (groups.length === 2 && /^(?:19|20)\d\d$/.test(groups[0]) && /^(?:\d\d|present|now|current|today)$/i.test(groups[1]))) continue; // years
+    if (/^(?:Q[1-4]|H[12])\s?(?:'?\d{2}|(?:19|20)\d\d)$|^FY\s?'?(?:\d{2}|(?:19|20)\d\d)(?:[-\/]\d{2,4})?$/i.test(val.trim())) continue; // quarters, fiscal years
+    if (/^(?:19|20)\d\d\.\d{1,2}$/.test(val) && !direct) continue; // a year version ("Tableau 2023.1")
+    if (/(?:19|20)\d\d/.test(val) && isDate(compact)) continue; // a real date
+    if (MONTH_YEAR.test(val.trim())) continue; // a month and year, or a range of them ("05/2025 - 08/2025", "2023-06")
     if (!direct && isDate(line.slice(Math.max(0, at - 3), end + 3)) && /[\/.-]/.test(val)) continue;
-    if (STANDARD.test(groups[0]) && groups.length > 1) continue;
-    if (label && NAMED_LABEL.test(label[1])) continue;
-    if (bareLabel && NAMED_LABEL.test(bareLabel[1])) continue; // "ref: RQ4821"
-    if (/^\d{5}-\d{4}$/.test(val)) continue; // a ZIP+4
-    if (/^\d+(?:ms|s|m|h|k|x|gb|mb|kb|tb|hz|ghz|px|pt|yr|yrs|rps|qps|tps)$/i.test(flat) || /^p\d{2,3}$/i.test(flat)) continue; // a unit or percentile
+    if (/^(?:[01]?\d|2[0-3])[:.][0-5]\d$/.test(val) && !direct) continue; // a time
     if (groups.length === 2 && groups.every((g) => /^(?:[01]\d|2[0-3])[0-5]\d$/.test(g))) continue; // two clock times ("0800 1600 shift")
-    if (groups.length === 1 && /^(?:[01]\d|2[0-3])[0-5]\d$/.test(val) && /\b(?:start|starts|starting|at|from|until|till|by|shift|ends?|ending|begins?)\s*$/i.test(before)) continue; // a clock time ("start 0800")
-    if ((money || /\b(?:salary|pay|offer|range|rate)\b/i.test(line)) && /^\d{1,3}(?:\.\d{3})+(?:\s?[-–—]\s?\d{1,3}(?:\.\d{3})+)?$/.test(val)) continue; // European thousands ("90.000 - 110.000")
-    if (ID_LABEL.test(before) || COUNT_LABEL.test(before) || COUNT_LABEL2.test(before)) continue;
+    if (groups.length === 1 && /^(?:[01]\d|2[0-3])[0-5]\d$/.test(val) && /\b(?:start|starts|starting|at|from|until|till|by|shift|ends?|ending|begins?)\s*$/i.test(before)) continue;
     if (phones.some(([p, q]) => at < q && end > p)) continue;
-    if (/[$€£]\s*$/.test(before) || /^(?:%|k|m|bn|usd|eur|gbp|inr|dollars|euros|rupees|percent)$/i.test(next) || /^\s*(?:k|m)\b/i.test(after)) continue;
-    if (!direct && letters === 0 && /^\d{1,3}(?:,\d{3})+$/.test(val) && !codeLength) continue; // a thousands figure
-    if (!direct && letters === 0 && /^\d+(?:\.\d+){2,3}$/.test(val) && !/\b(?:codes?|otps?|passcodes?|pins?|tokens?)\b/i.test(line)) continue; // a version
-    // A figure given for a purpose ("VP gave me 4500 and a deadline", "Microsoft sent me 2500 for travel"), never with a code word.
-    const lc = LEFT_CTX.exec(before), verb = lc ? lc[0].trim().split(/[\s:,]+/)[0].toLowerCase() : "";
+    if (/^\d{5}-\d{4}$/.test(val)) continue; // a ZIP+4
+    if (/,\s*[A-Z]{2}\s*$/.test(before) && /^\d{5}$/.test(val)) continue; // a US ZIP after its state ("Seattle, WA 98109")
+    if (/(?:zip|postal|post\s*code|plz|cep|code\s+postal|c[oó]digo\s+postal|postcode)\s*[:#]?\s*$/i.test(before) && /^\d{4,6}$/.test(flat)) continue; // a postal code
+    if (/\b(?:US|EP|WO|CN|JP)\s?$/.test(before) && /^\d{1,2},\d{3},\d{3}(?:\s?[A-Z]\d?)?$/.test(val)) continue; // a patent number
+    if (/\bpatents?\b|\bpat\.\s*$/i.test(before) && /^\d{1,2},\d{3},\d{3}$/.test(val)) continue;
+    if (/^10\.\d{4,9}$/.test(val) && /^\//.test(raw.slice(end))) continue; // a DOI ("10.1145/...")
+    if (/\bdoi\b/i.test(before) && /^10\./.test(val)) continue;
+    if (/^[A-Z]\d{2}-?[A-Z]{2}\d{6}$/.test(val) && !direct) continue; // a grant number ("R01-CA248291")
+    if (TICKET_SHAPE.test(val) && !direct) continue; // a ticket or advisory ("INC-48291")
+    if (/\b(?:incident|ticket|issue|case|change|request|jira|story|epic|bug|pr|pull\s+request)\s*#?\s*$/i.test(before) && /^[A-Z]{2,10}-\d{1,7}$/.test(val) && !direct) continue;
+    if (CERT_SHAPE.test(val) && (!direct || CREDENTIAL_AFTER.test(next))) continue; // a certification exam ("AZ-104")
+    if (GATE_STANDARD.test(groups[0]) && groups.length > 1 && groups.slice(1).every((g) => /^\d{1,5}$|^[A-Za-z]{1,6}$/.test(g)) && /\d/.test(groups.slice(1).join(""))) continue; // a standard ("ISO-27001", "NIST-800-53")
+    if (label && NAMED_LABEL.test(label[1].replace(/-\d+$/, ""))) continue;
+    if (/\b(?:bank|swift|bic|routing|sort)\b/i.test(before) && (/^[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?$/.test(val) || /^\d{2}-\d{2}-\d{2}$/.test(val)) && !STRONG_LABEL.test(before)) continue; // a SWIFT/BIC or sort code
+    const clause = /\b([\w'-]+)[ -]+(?:codes?|pins?)\b[^:;.]{0,24}[:#]?\s*(?:[A-Za-z0-9.-]+\s*(?:,|\band\b|&|\/)\s*)*$/i.exec(before);
+    if (clause && NAMED_LABEL.test(clause[1].replace(/-\d+$/, ""))) continue; // "Zip codes covered: 94103", "ICD-10 codes F32.1"
+    if (/\b(?:icd|cpt|hcpcs|obd|dtc|fault|trouble|diagnostic)\b/i.test(line) && /^[A-Z]\d{2,4}(?:\.\d{1,4})?$/.test(val) && !STRONG_LABEL.test(before)) continue; // a medical or fault code
+    if (/\b(?:iso|iec|nist|nfpa|ieee|ansi|astm|osha|rfc|pci|soc|fips|hl7|en|bs|din|ul|mil|cfr|cpt|icd|hcpcs|ndc|drg)\s?$/i.test(before) && /^[\d.:-]{1,12}$/.test(val) && !direct) continue; // "NFPA 72", "ISO 27001:2013"
+    if (bareLabel && NAMED_LABEL.test(bareLabel[1])) continue;
+    if (/^\d+(?:ms|s|m|h|k|x|gb|mb|kb|tb|hz|ghz|px|pt|yr|yrs|rps|qps|tps)$/i.test(flat) || /^p\d{2,3}$/i.test(flat)) continue;
+    if ((money || /\b(?:salary|pay|offer|range|rate)\b/i.test(line)) && /^\d{1,3}(?:\.\d{3})+(?:\s?[-–—]\s?\d{1,3}(?:\.\d{3})+)?$/.test(val) && !direct) continue; // European thousands
+    if (ID_LABEL.test(before) || ((COUNT_LABEL.test(before) || COUNT_LABEL2.test(before)) && !(codeLength && strongCode) && !new RegExp(String.raw`(?:ss|\b(?:${SENDERS}|lastpass|1password|bitwarden|authy|signal|whatsapp|telegram|slack|zoom|bank))\s*[:\-–—]\s*$`, "i").test(before))) continue;
+    if (!direct && /\b(?:certificate|certification|license|licence|credential|card|badge|npi|dea|member|registration|permit|grant|award|serial|part|model|lot|batch|naics|cage|uei|duns|ein|tracking|shipment|waybill|invoice|order)\s*(?:no\.?|number|#|id)?\s*[:#]?\s*$/i.test(before)) continue; // an ID after its own label
+    if (!direct && /[$€£¥₹]\s*$/.test(before)) continue; // money (never right after a code's label: "OTP: $482913")
+    if (/^(?:%|k|m|bn|usd|eur|gbp|inr|jpy|cny|dollars|euros|rupees|percent)$/i.test(next) || /^\s*(?:k|m)\b/i.test(after)) { if (!direct) continue; }
+    if (!direct && letters === 0 && /^\d{1,3}(?:,\d{3})+$/.test(val) && !(handed && /^\d{6,8}$/.test(flat) && !COUNT_NOUNS.test(next))) continue; // a thousands figure
+    if (!direct && letters === 0 && /^v?\d+(?:\.\d+){1,3}$/.test(val) && digits < 6) continue; // a version
+    // A figure given for a purpose ("VP gave me 4500 and a deadline"), never with a code word on the line.
+    const lc = LEFT_CTX.exec(before), verb = lc ? lc[0].trim().split(/[\s:,]+/)[0].toLowerCase() : "", sender = STRONG_SENDER.test(line);
     if (!direct && letters === 0 && !strongCode && !RIGHT_CTX.test(after) && (money || /^(?:sent|emailed|messaged|got|received|gave)$/.test(verb) || (sender && /\b(?:sent|emailed|messaged|gave|got|received)\b/i.test(before)))
-      && !SIGNIN_PURPOSE.test(after) && (money || (!FROM_SENDER.test(after) && (/^\s*(?:(?:for|to|in|on|at|as|by|from)\s+\S|,\s*(?:a|an|and|plus|with)\b|and\s+(?:a|an|the|\d))/i.test(after) || (verb === "gave" && /\w/.test(after)))))) continue;
-    const next2 = /^[\s:,.;!?)\]-]*[A-Za-z0-9%][\w'-]*\s+([A-Za-z][A-Za-z'-]*)/.exec(after)?.[1] ?? "";
-    const strictLen = codeLength && (handedTo(before, sender) || direct);
-    const plural = (w: string) => COUNT_NOUNS.test(w) || (/^[a-z][a-z'-]*s$/.test(w) && !STRICT_VERBS.test(w) && !strictLen);
-    if (letters === 0 && (plural(next) || (/^(?:[A-Z][\w-]*|[A-Z0-9-]{2,})$/.test(next) && plural(next2)) || /^\s*[A-Za-z]+\/(?:day|week|month|year|hr|hour|min|sec|s)\b/i.test(after))
-      && (!strictLen || COUNT_NOUNS.test(next) || COUNT_NOUNS.test(next2) || rising)) continue; // a count ("3500 COBOL programs", "50000 SMS/day")
-    if (letters === 0 && /^(?:per|a|an|each|every)$/i.test(next) && !codeLength) continue; // "4500 per week", "4500 a year"
-    if (letters > 0 && CREDENTIAL_AFTER.test(next)) continue;
-    if (letters > 0 && /^(?:exam|course|subject|model|part|lot|batch|sku|item|product|class|module|unit|room|flight|gate|seat|build|release|version)\s*[:|\-]?\s*$/i.test(before.split(/\s+/).slice(-2).join(" "))) continue;
+      && !SIGNIN_PURPOSE.test(after) && !/^\s*(?:from|via|on|in)\s+(?:the\s+|my\s+)?(?:app|authenticator|phone|sms|text|texts|bank|1password|lastpass|bitwarden|signal|whatsapp|telegram|slack|zoom|teams|discord|authy|okta|duo|hr|it|helpdesk|support|admin|recruit\w*|hiring|security)\b/i.test(after) && (money || (!FROM_SENDER.test(after) && (/^\s*(?:(?:for|to|in|on|at|as|by|from)\s+\S|,\s*(?:a|an|and|plus|with)\b|and\s+(?:a|an|the|\d))/i.test(after) || (verb === "gave" && /\w/.test(after)))))) continue;
+    // A count: a plural noun (or a known count noun) after the figure, past one acronym; never a code-length figure handed to
+    // the person or right after a code's label ("Okta sent me 482913 users").
+    const strictLen = codeLength && (handed || direct);
+    const plural = (w: string) => COUNT_NOUNS.test(w) || (/^[a-z][a-z'-]*s$/.test(w) && !STRICT_VERBS.test(w));
+    if (letters === 0 && !strictLen && (plural(next) || (/^(?:[A-Z][\w-]*|[A-Z0-9-]{2,})$/.test(next) && plural(next2)) || /^\s*[A-Za-z]+\/(?:day|week|month|year|hr|hour|min|sec|s)\b/i.test(after))) continue;
+    if (letters === 0 && rising && (COUNT_NOUNS.test(next) || COUNT_NOUNS.test(next2))) continue;
+    if (letters === 0 && /^(?:per|a|an|each|every)$/i.test(next) && !codeLength) continue;
+    if (letters > 0 && !direct && CREDENTIAL_AFTER.test(next)) continue;
+    if (letters > 0 && !direct && /\b(?:exam|course|subject|model|part|lot|batch|sku|item|product|class|module|unit|room|flight|gate|seat|build|release|version)\s*[:|\-]?\s*$/i.test(before)) continue;
     return at;
   }
   return -1;
 }
+// A line that is a value and nothing else ("672480", "`K7X9-P2QM`", "- 7392 0184 2231"): refused unless it is a safe shape,
+// whatever the lines around it say.
+export function standaloneCodeAt(raw: string): number {
+  const plain = raw.replace(/^\s*(?:[-*•▪●>]|\d+[.)])\s+/, "");
+  if ([...plain.matchAll(PHONE)].some((p) => p[0].length >= plain.replace(/[\s.,;:!?]+$/, "").trim().length - 2)) return -1; // a phone number alone
+  const body = gateLine(plain).replace(/[\s.,;:!?]+$/, "");
+  const m = new RegExp(String.raw`^\s*([A-Za-z0-9]+(?:${GATE_SEP_LOOSE}[A-Za-z0-9]+)*)\s*$`).exec(body);
+  if (!m) return -1;
+  const v = m[1], flat = v.replace(/[^A-Za-z0-9]/g, ""), digits = flat.replace(/\D/g, "").length, letters = flat.length - digits;
+  if (flat.length < 4 || flat.length > 24 || !(digits >= 4 || (digits >= 2 && letters >= 2))) return -1;
+  return gateCodeAt(v, true) >= 0 ? raw.indexOf(v[0]) : -1;
+}
 // The index of the first suspected code on a line, or -1.
-function lineCodeAt(raw: string): number {
-  const strict = strictCodeAt(raw);
+export function lineCodeAt(raw: string): number {
+  const wrapped = wrappedCodeAt(raw);
+  if (wrapped >= 0) return wrapped;
+  const strict = gateCodeAt(raw);
   if (strict >= 0) return strict;
   const safeSpans: number[][] = [], tail = labelTailAt(raw, safeSpans);
   if (tail >= 0) return tail;
@@ -446,14 +639,18 @@ function lineCodeAt(raw: string): number {
     const before = line.slice(0, at), after = line.slice(end), squashed = tok.replace(/\s+/g, " ").trim();
     const direct = DIRECT.test(before);
     if (!alnum && (YEAR_RANGE.test(squashed) || /^(?:19|20)\d\d$/.test(digits) || /^(?:19|20)\d\d\D+(?:19|20)?\d\d$/.test(squashed) && /[-–—\/ ]/.test(tok))) continue;
-    if (!alnum && /^\d{1,3}(?:,\d{3})+$/.test(tok) && !strongCode && !sender) continue; // a thousands figure
+    if (!alnum && /^\d{1,3}(?:,\d{3})+$/.test(tok) && !direct && !(handedToGate(before) && /^\d{6,8}$/.test(digits) && !COUNT_NOUNS.test(/^[\s:,.)\-]*([A-Za-z][A-Za-z']*)/.exec(after)?.[1] ?? ""))) continue; // a thousands figure (not "Workday sent me 739,201")
     if (!alnum && !direct && /^\d+\.\d+\.\d+/.test(tok)) continue; // a version or address
+    if (!alnum && /^\d+(?:\.\d+)+$/.test(tok) && /\b(?:release|version|ver|v|ubuntu|ios|android|python|java|node|excel|office|windows|sql|tableau|sap|hl7|ielts|toefl|gpa)\s*$/i.test(before)) continue; // a version or score
     if (phones.some(([p, q]) => at < q && end > p)) continue;
     if (safeSpans.some(([p, q]) => at >= p && end <= q)) continue; // judged safe after its own label
     if ((!direct || /(?:19|20)\d\d/.test(tok)) && isDate(line.slice(Math.max(0, at - 3), end + 3)) && /[\/.-]/.test(tok)) continue;
     if (/[$€£]\s*$/.test(before) || /^\s*(?:k\b|%|usd|eur|gbp|dollars|euros|per\b|a\s+(?:year|month|week|day|hour)|\/\s*(?:hr|hour|yr|year|month))/i.test(after)) continue;
     if ((!direct || risingRange(line, at)) && (/\s*[-–—]\s*\d/.test(after.slice(0, 4)) || /\d\s*[-–—]\s*$/.test(before))) continue; // a range ("1200 - 1500")
     if (ID_LABEL.test(before) || COUNT_LABEL.test(before) || COUNT_LABEL2.test(before)) continue;
+    if (/,\s*[A-Z]{2}\s*$/.test(before) && /^\d{5}$/.test(tok)) continue; // a US ZIP after its state
+    if (/\b(?:icd|cpt|hcpcs|obd|dtc|fault|trouble|diagnostic)\b/i.test(line) && /^[A-Z]\d{2,4}(?:\.\d{1,4})?$/.test(tok) && !STRONG_LABEL.test(before)) continue; // a medical or fault code
+    if (!direct && /\b(?:certificate|certification|license|licence|credential|card|badge|npi|dea|member|registration|permit|grant|award|serial|part|model|lot|batch|naics|cage|uei|duns|ein|tracking|shipment|waybill|invoice|order)\s*(?:no\.?|number|#|id)?\s*[:#]?\s*$/i.test(before)) continue; // an ID after its own label
     // A named label right before the code, also in a list ("Billing codes: 99213, 99214", "Exam code | AZ104"), a compound
     // label ("code review:", "code policy:"), or a named word alone ("Microsoft exam AZ104").
     const label = /\b([\w'-]+)[ -]+(?:codes?|pins?)\s*(?:(?:is|was|are)\s*)?[:#=|\-–—]?\s*(?:[A-Za-z0-9-]+\s*(?:,|\band\b|&|\/)\s*)*$/i.exec(before);
@@ -468,7 +665,7 @@ function lineCodeAt(raw: string): number {
     if (next && !(direct && !COUNT_AFTER_LABEL.test(next) && !(alnum && /^(?:certified|certification|certificate|exam|course|badge|credential|holder|compliant|compliance)$/i.test(next))) && !AFTER_FUNC.test(next) && !/^(?:codes?|passcodes?|pins?|otps?|tokens?)$/i.test(next)
       && !(sender && /^(?:texts?|logins?|sign-?ins?|sms|messages?|verifications?|otps?|digits)$/i.test(next))
       // After a hand-over (a sender, or "sent me", "gave me" ...) only a known count noun makes the figure a count.
-      && !(handedTo(before, sender) && !COUNT_NOUNS.test(next) && !(alnum && CREDENTIAL_AFTER.test(next)))) continue; // a count noun
+      && !(handedToGate(before) && !COUNT_NOUNS.test(next) && !(alnum && CREDENTIAL_AFTER.test(next)))) continue; // a count noun
     const left = LEFT_CTX.exec(before), right = RIGHT_CTX.test(after);
     const verb = left ? left[0].trim().split(/[\s:,]+/)[0].toLowerCase() : "";
     // A figure with a money purpose: "Client sent me 120000 for review", "VP gave me 4500 and a deadline", "Received 50000 from

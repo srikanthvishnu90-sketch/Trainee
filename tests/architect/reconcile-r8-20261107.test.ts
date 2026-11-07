@@ -121,7 +121,7 @@ Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless res
     "The portal sent a code. It is 739201.", "Recruiter texted me 4821", "Workday sent me 739.201", "Workday sent me 739−201", "Verification code: 739.201", "Workday sent me 739 201",
     // review of f62e2033
     "Workday sent me: 739201", "My verification code arrived this morning: 739201", "Here is the code Workday sent: 739201", "Code -> 739201", "Workday sent me:\n739\n201", "The code it sent: 7392\u201101",
-    "the code was emailed: 739201", "Code is: 482913", "my verification code is 739201"]) {
+    "the code was emailed: 739201", "Code is: 482913", "my verification code is 739201", "Workday sent me 739201 for the portal", "They texted me: 482913", "Login code \u2192 482913"]) {
     assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), true, line);
   }
   for (const line of ["customer portal serving 120000 customers", "Vendor portal handled 35000 orders a year", "Verification engineer, Acme, 2018-2022", "Security code audits 2018-2022",
@@ -134,7 +134,12 @@ Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless res
     "Verification code service was: 50000 SMS/day", "Passcode vault was rolled out: 3400 laptops", "OTP system was: 45000 branches", "OTP flow was redesigned: 45000 merchants onboarded",
     "OTP service is live in: 4500 branches", "Security code is open-sourced: 1200 stars", "Code of conduct training was delivered: 2400 associates", "Building code review is: 3200 permits",
     "Code owner is: 1200 packages", "Code sent to QA: 4800 builds", "Code was emailed: 4800 builds", "Code review came: 4500 comments", "Code review sent: 4500 diffs",
-    "Code quality score is: 4500 points", "Code was 1200 microservices", "Cost code: 482913"]) {
+    "Code quality score is: 4500 points", "Code was 1200 microservices", "Cost code: 482913",
+    // review of 470e25d9: a count after the number, and trunk's named codes, are resume lines
+    "Our code is running in 4500 hospitals", "My code was deployed to 1200 clinics", "The code we shipped was used by 120000 drivers", "The code was sent to 4500 testers",
+    "Our code was sent to 4500 merchants for review", "Our OTP is sent to 120000 phones daily", "The code I own is in 4500 trucks", "CPT code: 99213", "Billing - CPT code: 99214",
+    "ICD code: 4019", "NAICS code: 541511", "SOC code: 151252", "FIPS code: 06075", "Department code: 4521", "Project code: 2231", "Vendor code: 55120", "Morse code: 1200 wpm",
+    "CPT code: 99213 and 99214 billing audits", "My director gave me 4500 SKUs to rationalize", "Client sent me 3500 resumes to screen", "Our code reads 4500 sensors"]) {
     assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), false, line);
   }
 });
@@ -198,4 +203,12 @@ Deno.test("R8R-NEXTLINE a second code on the next line is removed; a count on th
   // Phone groups on separate lines stay a phone; a code split by a line break still goes whole.
   assertNode.ok(savedOf("call me at 415\n555\n1234 the portal").saved.includes("415\n555\n1234"));
   assertNode.ok(!/739|201/.test(savedOf("Verification code: 739\n201").saved));
+});
+
+// Review of 470e25d9: chat keeps trunk's named-code list, so a store, cost or building code handed over in chat is removed.
+Deno.test("R8R-STORE store, cost and building codes handed over in chat are removed", () => {
+  for (const m of ["Kroger store code arrived: 482913", "store code it sent: 482913", "Store code from the text: 482913", "store code -> 482913", "Here is the store code Workday sent: 482913",
+    "Here's the store code. It is 482913.", "Building code from Workday: 482913", "Workday cost code 482913 came by text", "cost code? it's 482913", "the store code they texted me is 482913"]) {
+    assertNode.ok(!/482913/.test(savedOf(m).saved), `${JSON.stringify(m)}: ${JSON.stringify(savedOf(m).saved)}`);
+  }
 });

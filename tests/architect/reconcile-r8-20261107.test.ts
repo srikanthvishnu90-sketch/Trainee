@@ -55,3 +55,89 @@ Deno.test("R8R-51/53 the acknowledgement check reads real acknowledgements and t
     assertNode.equal(missingAck(msg, "Lead with one concrete example."), true, msg);
   }
 });
+
+// Separator residuals (inventory header; records 83-88 family): every Unicode space, a minus sign, a period and more dash forms
+// between code groups are removed like a plain space or hyphen, typed or pending; harmless numbers stay.
+import { normalizeChatText } from "../../supabase/functions/_shared/identity_redact.ts";
+const savedOf = (m: string, pending = false) => {
+  const once = chatInput(m, [], 10000, { codePending: pending }) as any;
+  const after = codeInChat(once.message, { userContent: once.userContent, removed: once.redacted, codePending: pending });
+  return { saved: after ? after.userContent as string : once.userContent as string, reply: after?.reply ?? false };
+};
+Deno.test("R8R-SEP code groups split by any space, dash, minus or period are removed; decimals and phones stay", () => {
+  const seps = [" ", " ", " ", " ", " ", " ", " ", " ", "　", "−", "‐", "‑", "－", "·", "​", "."];
+  for (const lead of ["Verification code: ", "My code is ", "Workday sent me "]) {
+    for (const sep of seps) {
+      const m = `${lead}739${sep}201`;
+      for (const pending of [false, true]) {
+        const { saved } = savedOf(m, pending);
+        assertNode.ok(!/739|201/.test(saved), `${JSON.stringify(m)} pending=${pending}: ${JSON.stringify(saved)}`);
+      }
+    }
+  }
+  for (const m of ["Workday sent me 7392 01", "Workday sent me 4821 9374", "Workday sent me 1234-5678"]) {
+    assertNode.ok(!/7392|4821|1234/.test(savedOf(m).saved), `${m}: ${savedOf(m).saved}`);
+  }
+  for (const [m, k] of [["my GPA is 3.85", "3.85"], ["the recruiter texted me 555 1234", "555 1234"], ["call me at 415 555 1234", "415 555 1234"], ["pay is $120.500 a year", "120.500"], ["the portal runs version 2.345.678", "2.345.678"], ["I made $28.50 an hour", "28.50"]]) {
+    assertNode.ok(savedOf(m).saved.includes(k), `${m} keeps ${k}: ${savedOf(m).saved}`);
+  }
+  // The normal form is one form: a resume's hash equals the stored text's hash whatever space it used.
+  assertNode.equal(normalizeChatText("a b　c​d 2021−2024"), "a b cd 2021-2024");
+});
+
+// Record 95: while an employer's code is pending, code-in-chat still removes tokens; only its fixed reply stays off.
+Deno.test("R8R-95 code-in-chat removes tokens while a code is pending, without its fixed reply", () => {
+  for (const m of ["Workday sent me 4821", "Workday sent me 7392\n01", "Verification code: K7X9P2", "The portal sent a code. It is 4821.", "Workday sent me 739 201", "the portal code is K7X9P2", "Lever texted me 1234\n5678", "the portal sent me 12345\n678"]) {
+    const { saved, reply } = savedOf(m, true);
+    assertNode.ok(!/4821|7392|K7X9P2|739|1234|12345/.test(saved), `${JSON.stringify(m)}: ${JSON.stringify(saved)}`);
+    assertNode.equal(reply, false, m);
+  }
+});
+
+// Records 92 and 96: a code handed over inside an uploaded resume file is refused at upload; resume numbers stay a resume.
+import { fileSharesCode } from "../../supabase/functions/_shared/career_code_in_chat.ts";
+Deno.test("R8R-92 a resume file with a handed-over code is refused; harmless resume numbers are not", () => {
+  for (const line of ["Workday sent me 739201", "Workday sent me 739 201", "Workday sent me 739\n201", "My one-time passcode arrived: 739201", "Lever texted me 7392\n01",
+    "The portal sent a code. It is 739201.", "Recruiter texted me 4821", "Workday sent me 739.201", "Workday sent me 739−201", "Verification code: 739.201", "Workday sent me 739 201"]) {
+    assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), true, line);
+  }
+  for (const line of ["customer portal serving 120000 customers", "Vendor portal handled 35000 orders a year", "Verification engineer, Acme, 2018-2022", "Security code audits 2018-2022",
+    "Raised code coverage across 9500 tests", "Verification of 4500 invoices monthly", "My manager sent me 2500 tickets to triage", "OTP service handled 100000 requests per day",
+    "2FA adoption rose from 2000 to 8000 users", "Customer portal: 1200000 sessions", "12000 employees", "(415) 555-0134", "San Francisco, CA 94107", "GPA 3.85", "since 2019",
+    "Employee ID 482913", "2021 – 2024", "Managed 25 employees and 1200 shipments"]) {
+    assertNode.equal(fileSharesCode(`Jordan Lee\nSupport Lead\n- ${line}\n- Led a team of 6`), false, line);
+  }
+});
+
+// Records 92 and 96 through the real upload path: a DOCX with a handed-over code is refused and nothing is stored; the same
+// resume with ordinary numbers is kept, its message carries the numbers word for word.
+import { ingestResumeFile } from "../../supabase/functions/_shared/channel_resume_upload.ts";
+import { DOCX, docxBytes } from "./scenarios/onboarding-r2-generator.ts";
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const docxOf = (lines: string[]) => docxBytes(lines.map((t) => `<w:p><w:r><w:t xml:space="preserve">${esc(t)}</w:t></w:r></w:p>`).join(""));
+const BODY = ["Jordan Lee", "Experience", "Operations Analyst, Acme Corp, 2019 - 2024", "Led weekly reporting across four teams and cut close time by two days.", "Built a customer portal serving 120000 customers.",
+  "Managed 25 employees and 1200 shipments a month.", "Verification engineer work, 2018-2022.", "San Francisco, CA 94107 | (415) 555-0134 | GPA 3.85", "Education", "BS Economics, State University, 2019", "Skills", "SQL, Excel, Tableau"];
+async function ingest(lines: string[]) {
+  const bytes = docxOf(lines), stored: any[] = [];
+  const res = await ingestResumeFile({ userId: "TEST-r8r", channel: "telegram", doc: { fileId: "F", uniqueId: crypto.randomUUID(), name: "resume.docx", mime: DOCX, size: bytes.length },
+    fetchFile: async () => ({ ok: true, bytes }), record: async (row) => { stored.push(row); return "id"; } });
+  return { res, stored };
+}
+Deno.test("R8R-92 handler path: an uploaded DOCX with a handed-over code is refused, a plain one is kept intact", async () => {
+  const plain = await ingest(BODY);
+  assertNode.ok(plain.res.ok, JSON.stringify(plain.res));
+  for (const k of ["120000 customers", "1200 shipments", "2018-2022", "94107", "(415) 555-0134", "3.85"]) assertNode.ok((plain.res as any).message.includes(k), k);
+  for (const line of ["Workday sent me 739201", "Lever texted me 7392", "My one-time passcode arrived: 739 201", "Workday sent me 739.201"]) {
+    const bad = await ingest([...BODY.slice(0, 4), line, ...BODY.slice(4)]);
+    assertNode.equal(bad.res.ok, false, line); assertNode.equal((bad.res as any).why, "secret", line); assertNode.equal(bad.stored.length, 0, line);
+    assertNode.ok(/one-time code/.test((bad.res as any).reply), `${line}: ${(bad.res as any).reply}`);
+  }
+});
+
+// CI run 42348230248 (shard 6/6): the sign-in battery's "a one-time code on a page" check matched a code's digits inside a
+// random hex token. The check reads the code as a reader sees it, whole or split, and never inside a token.
+import { codeShown } from "./scenarios-file-signin-r4-battery.ts";
+Deno.test("R8R-SIGNIN a code shown on a page is caught whole or split; its digits inside a random token are not the code", () => {
+  for (const b of ["Your code is 165736.", "<p>165 736</p>", "code: 165-736", ">165736<", "165 736"]) assertNode.ok(codeShown(b, "165736"), b);
+  for (const b of ['<input type="hidden" name="t" value="fp1.e3a9b1657361c2f0">', "fs1.0a165736ff", 'name="set" value="b2165736e1"', "Application e1657360c"]) assertNode.ok(!codeShown(b, "165736"), b);
+});

@@ -100,8 +100,12 @@ const BARE_SPLIT_CODE = /(?<![\d$€£.,:/#-]|\d(?:[ \t]{1,8}|[ \t]{0,8}[\n\-][ 
 // tabs become a space, and an en or em dash between digits a hyphen, so "739\r\n201", "739\u00a0201" and "739–201" meet the
 // same rules as "739 201". chat_input.ts and channel_resume_upload.ts resumeMessage both use it, so a file's message hash
 // equals the hash of the text the thread stores (Greptile and review on #567).
+// Every Unicode space separator (en, em, thin, hair, ideographic ...) is a space and a zero-width space is nothing; a hyphen,
+// non-breaking hyphen, figure dash, minus sign, fullwidth hyphen or middle dot between digits is a hyphen ("739\u2212201",
+// "739\u2002201"; Greptile inventory, separator residuals).
 export function normalizeChatText(text: string): string {
-  return String(text ?? "").replace(/\r\n?/g, "\n").replace(/[\u00a0\u2007\u2009\u202f\t]/g, " ").replace(/(\d)[\u2013\u2014](?=\d)/g, "$1-");
+  return String(text ?? "").replace(/\r\n?/g, "\n").replace(/[\u200b\u2060\ufeff]/g, "").replace(/[^\S\n ]|[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g, " ")
+    .replace(/(\d)[\u2010-\u2015\u2212\ufe63\uff0d\u00b7](?=\d)/g, "$1-");
 }
 
 export function redactIdentity(input: string, o: { codePending?: boolean } = {}): Redaction {

@@ -11,6 +11,7 @@
 // zip, promo, error or course code. While an employer's emailed code is waiting (WO-100 codePending), the situation turn
 // answers instead (it knows which application waits on it); the code itself is still removed (chat_input.ts).
 
+import { normalizeChatText } from "./identity_redact.ts";
 export const CODE_IN_CHAT_INTENT = "career_code_in_chat";
 // Fixed safety text (ARCHITECTURE §3.1: safety text is code's).
 export const CODE_IN_CHAT_REPLY = "Please don't share one-time codes or passwords in chat, with me or anyone. " +
@@ -40,6 +41,10 @@ const COUNT_AFTER = /^\s*(?:k\b|\+|%|usd|dollars?|bucks|years?|yrs?|months?|week
 const ALNUM = /(?<![\w$-])(?=[A-Za-z0-9]{5,10}(?![\w-]))(?=(?:[A-Za-z]*\d){2})(?=(?:\d*[A-Za-z]){2})[A-Za-z0-9]{5,10}(?![\w-])/g;
 const UNIT_LIKE = /^\d+(?:am|pm|min|mins|hr|hrs|h|k|th|st|nd|rd|yrs?|gb|mb|kb|px|mph|kg|lbs?)$/i;
 const YEAR = /^(?:19|20)\d\d$/;
+// Sentence boundaries, captured, so split() keeps the spaces between sentences: never between two digit groups split by a line
+// break and spaces ("739\n  201" is one token; Greptile on #568).
+const SENTENCE_SPLIT = /((?<=[.!?\n])(?![ \t\u00a0\u2007\u2009\u202f]*\d)\s+|(?<=[.!?]|[^\d\s]\n)\s+)/;
+const DOTTED = /(?<![\d$€£.,\w-])\d{3}\.\d{3}(?![\d%\w-]|[.,:\/]\d)/g;
 // A code split in two by a space, a line break (\n, \r\n or \r) or a dash ("739 201", "739-201", "739\n201"; Greptile on #566 and #567) after a weak cue: exactly 3+3 digits, and no more digit groups
 // after it (so "415 555 1234" and "415-555-1234" stay phone numbers).
 const SPLIT_CODE = /^\d{3}(?:[ \t\u00a0\u2007\u2009\u202f]{1,8}|[ \t\u00a0\u2007\u2009\u202f]{0,8}(?:\r\n|[\r\n\-\u2013\u2014])[ \t\u00a0\u2007\u2009\u202f]{0,8})\d{3}$/;
@@ -83,7 +88,8 @@ function tokensIn(sentence: string, carried = false): { start: number; end: numb
       // Weak context, a split token: a 3+3 code, or two groups split by a line break that make 6 to 8 digits ("7392\n01",
       // "1234\n5678"). Otherwise a first line of 4+ digits is the code by itself ("4821\n9"); anything else is skipped (review on #575).
       const groups = tok.split(/\D+/).filter(Boolean), digits = groups.join("").length, broken = /[\r\n]/.test(tok);
-      const joined = SPLIT_CODE.test(tok) || (broken && groups.length === 2 && digits >= 6 && digits <= 8);
+      const phoneLike = !broken && groups.length === 2 && groups[0].length === 3 && groups[1].length === 4;
+      const joined = SPLIT_CODE.test(tok) || (groups.length === 2 && digits >= 6 && digits <= 8 && !phoneLike);
       if (!joined || MORE_GROUPS.test(after)) {
         const first = firstLine.replace(/\D/g, "");
         if (!broken || first.length < 4 || first !== firstLine || YEAR.test(first)) continue;
@@ -92,6 +98,14 @@ function tokensIn(sentence: string, carried = false): { start: number; end: numb
     } else if (!isStrong && YEAR.test(tok)) continue;
     if (isStrong && YEAR.test(tok) && (carried && !contextEnds(sentence, STRONG).length || /\bin\s+$|\bsince\s+$|\bof\s+$/i.test(sentence.slice(0, at)))) continue;
     hits.push({ start: at, end: at + tok.length });
+  }
+  // A code in two 3-digit groups split by a period ("Verification code: 739.201", "Workday sent me 739.201"): never a decimal
+  // ("3.85", "$120.50") or a longer dotted run (a version, an IP address); Greptile inventory, separator residuals.
+  for (const m of sentence.matchAll(DOTTED)) {
+    const at = m.index ?? 0;
+    if (!near(at, strong) && !near(at, weak)) continue;
+    if (hits.some((h) => at < h.end && at + m[0].length > h.start)) continue;
+    hits.push({ start: at, end: at + m[0].length });
   }
   for (const m of sentence.matchAll(ALNUM)) {
     const at = m.index ?? 0, tok = m[0];
@@ -106,7 +120,9 @@ function tokensIn(sentence: string, carried = false): { start: number; end: numb
 // shares no code or password.
 export function codeInChat(message: string, o: { userContent?: string; removed?: readonly string[]; codePending?: boolean; originalLength?: number } = {}): CodeInChat | null {
   const msg = String(message ?? "");
-  if (!msg.trim() || o.codePending) return null;
+  // While an employer's code is pending the tokens are still removed; only the fixed safety reply is left to the pending-code
+  // turn (Greptile record 95).
+  if (!msg.trim()) return null;
   const removed = new Set<"code" | "password">();
   for (const r of o.removed ?? []) if (r === "code" || r === "password") removed.add(r);
   for (const m of msg.matchAll(MARKER)) removed.add(m[1] as "code" | "password");
@@ -114,7 +130,7 @@ export function codeInChat(message: string, o: { userContent?: string; removed?:
   const values: string[] = [];
   let prevNamedCode = false;
   // ...but not between two digit groups split by a line break and spaces ("739\n  201" is one token; Greptile on #568).
-  const text = msg.split(/((?<=[.!?\n])(?![ \t\u00a0\u2007\u2009\u202f]*\d)\s+|(?<=[.!?]|[^\d\s]\n)\s+)/).map((part, i) => {
+  const text = msg.split(SENTENCE_SPLIT).map((part, i) => {
     if (i % 2) return part; // the space between two sentences
     let s = part;
     const carried = prevNamedCode && VALUE_LEAD.test(part);
@@ -122,11 +138,13 @@ export function codeInChat(message: string, o: { userContent?: string; removed?:
     for (const h of tokensIn(part, carried).sort((a, b) => b.start - a.start)) { values.push(part.slice(h.start, h.end)); s = `${s.slice(0, h.start)}[code removed]${s.slice(h.end)}`; }
     return s;
   }).join("");
+  // While a code is pending, the pending-code turn answers: nothing new removed here means nothing to report.
+  if (o.codePending && !values.length) return null;
   if (values.length) removed.add("code");
   if (!removed.size) return null;
   let userContent = String(o.userContent ?? msg);
   for (const v of values) userContent = userContent.split(v).join("[code removed]");
-  return { text, userContent, removed: [...removed], reply: (o.originalLength ?? msg.length) <= MAX_CHAT_LEN };
+  return { text, userContent, removed: [...removed], reply: !o.codePending && (o.originalLength ?? msg.length) <= MAX_CHAT_LEN };
 }
 
 // redactionNote's own "never send passwords or codes in a message ..." sentence repeats CODE_IN_CHAT_REPLY; on this turn the
@@ -135,3 +153,36 @@ export function noteForCodeTurn(note: string | null): string | null {
   if (!note) return note;
   return note.replace(/\s*Never send passwords or codes in a message:[^.]*\.\s*/, " ").trim() || null;
 }
+
+// A resume FILE is its own text, not a chat message: code-in-chat does not rewrite it (its hash must equal the upload's). But a
+// code the person handed over inside the file ("Workday sent me 739201", "My one-time passcode arrived: 739 201") is refused at
+// upload, like a password or card number in the file (Greptile records 92, 96). Only a hand-over form counts: a hand-over verb,
+// or a code word followed by "is", ":" or "arrived", right before the token, and never a token followed by a count noun or a
+// year range, so "a customer portal serving 120000 customers", "Verification engineer, 2018-2022" and "raised code coverage
+// across 9500 tests" stay resume lines.
+const HANDOVER_END = /(?:\b(?:sent|texted|emailed|gave|messaged|dm'?d)\s+me(?:\s+(?:a|the|my|this|that|one[- ]time|verification|security|sign[- ]?in|log[- ]?in))*(?:\s+(?:code|passcode|pin|otp))?|\b(?:code|passcode|pass code|pin|otp)\b(?:\s+(?:is|was|arrived|reads|=))?\s*[:=#]?|\bit(?:'s|\s+is|\s+was))\s*$/i;
+const RESUME_COUNT = /^[\s\n]*(?:\+|k\b|%|[-\u2013\u2014]\s*\d|(?:customers?|clients?|orders?|tickets?|tests?|invoices?|requests?|sessions?|shipments?|users?|employees?|accounts?|transactions?|calls?|records?|patients?|students?|members?|units?|items?|cases?|claims?|visits?|views?|downloads?|followers?|subscribers?|leads?|deals?|projects?|hours?|people|staff|sites?|stores?|locations?|vendors?|partners?|applications?|reports?|lines?|files?|events?|messages?|emails?|devices?|servers?|queries|jobs?|candidates?|hires?|sq\s*ft|dollars|usd|per\b|a\s+(?:year|month|week|day)|daily|monthly|weekly|annually)\b)/i;
+export function fileSharesCode(text: string): boolean {
+  const t = normalizeChatText(String(text ?? ""));
+  for (const h of codeTokens(t)) {
+    const token = t.slice(h.start, h.end), before = t.slice(Math.max(0, h.start - 60), h.start), after = t.slice(h.end);
+    if (!/\d/.test(token) || YEAR_RANGE.test(token) || RESUME_COUNT.test(after)) continue;
+    if (HANDOVER_END.test(before)) return true;
+  }
+  return false;
+}
+// The code-shaped tokens of a whole text, as offsets into it: the same sentence split and token rules as codeInChat.
+export function codeTokens(msg: string): { start: number; end: number }[] {
+  const out: { start: number; end: number }[] = [];
+  let prevNamedCode = false, off = 0;
+  for (const [i, part] of msg.split(SENTENCE_SPLIT).entries()) {
+    if (i % 2 === 0) {
+      const carried = prevNamedCode && VALUE_LEAD.test(part);
+      prevNamedCode = contextEnds(part, STRONG).length > 0;
+      for (const h of tokensIn(part, carried)) out.push({ start: off + h.start, end: off + h.end });
+    }
+    off += part.length;
+  }
+  return out;
+}
+const YEAR_RANGE = /^(?:19|20)\d\d(?:\s*[-\u2013\u2014]\s*(?:(?:19|20)\d\d|present|now))?$/i;

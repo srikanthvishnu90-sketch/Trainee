@@ -61,6 +61,13 @@ export const CATEGORIES = ["two_devices", "split_code", "lockout_oracle", "accou
 export type Category = typeof CATEGORIES[number];
 const WEIGHTS: Record<Category, number> = { two_devices: 14, split_code: 12, lockout_oracle: 7, account_change: 13, stale_tab: 15, csrf_forms: 11, cache_referrer: 9, host_spoof: 8, long_query: 11 };
 
+// A texted code shown on a page: the code as a number a reader sees, whole or split in two groups ("165736", "165 736",
+// "165-736"). Digits inside a longer letters-and-digits token (a random fp1./fs1. hex token, a form's "set" value) are not the
+// code shown: a 64-hex token contains a given 6-digit run by chance about once in 300,000 tokens, and CI run 42348230248 failed
+// on exactly that (scenario #2664, "165736" inside a token).
+export function codeShown(body: string, code: string): boolean {
+  return new RegExp(`(?<![0-9A-Za-z])${code.slice(0, 3)}[\\s\\-\u2013\u00a0]?${code.slice(3)}(?![0-9A-Za-z])`).test(body);
+}
 export function rng(seed: number) {
   let a = seed >>> 0;
   return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -290,7 +297,7 @@ export async function runScenario(s: Scenario, env: Env, rep: Report): Promise<v
     const loc = h.get("location");
     if (loc !== null && (!/^\/(?![\/\\])/.test(loc) || /fs1\.|fp1\.|v1\.|[?#]/.test(loc) || /evil/.test(loc))) fail("a redirect off this host's own path, or carrying a token", loc);
     const body = x.body, low = body.toLowerCase();
-    for (const t of W.texts) if (body.includes(t.code)) fail("a one-time code on a page", t.code);
+    for (const t of W.texts) if (codeShown(body, t.code)) fail("a one-time code on a page", t.code);
     if (/evil\.example/.test(body)) fail("a spoofed host reflected on the page", body.match(/.{0,30}evil\.example.{0,30}/)?.[0] ?? "");
     if (/\bv1\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{43}\b/.test(body)) fail("a link token on a page");
     for (const m of body.matchAll(/fs1\.[0-9a-f]{64}/g)) if (!presented(o).includes(m[0]) && !o.starts) fail("a session id on a page that did not present it");

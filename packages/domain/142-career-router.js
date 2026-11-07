@@ -3961,7 +3961,8 @@ const CareerRouter = (() => {
       // "levels.fyi", "glassdoor.com") stay inside their sentence (Greptile on #564).
       // ...and not after a common abbreviation ("e.g. Acme", "the U.S. market", "approx. $26"), review of #565.
       const ABBREV = /(?:^|[^A-Za-z])(?:e\.g|i\.e|u\.s|u\.k|approx|vs|etc|mr|mrs|ms|dr|inc|co|corp|ltd|jr|sr|no)$/i;
-      const endsHere = (c, i) => c !== "." || (/\s/.test(src[i + 1] || " ") && !ABBREV.test(src.slice(Math.max(0, i - 8), i)));
+      // closing quotes and brackets may sit between the dot and the space ("the market is tight." They offered...), Greptile #565
+      const endsHere = (c, i) => c !== "." || (/^["'\u201d\u2019)\]]*(?:\s|$)/.test(src.slice(i + 1, i + 5)) && !ABBREV.test(src.slice(Math.max(0, i - 8), i)));
       const startOf = (at) => { let a = -1; for (const c of [".", "?", "!", ";", "\n"]) { let i = src.lastIndexOf(c, at - 1); while (i >= 0 && !endsHere(c, i)) i = src.lastIndexOf(c, i - 1); a = Math.max(a, i); } return a + 1; };
       const sentenceOf = (at) => { const a = startOf(at); const ends = [".", "?", "!", ";", "\n"].map((c) => { let i = src.indexOf(c, at); while (i >= 0 && !endsHere(c, i)) i = src.indexOf(c, i + 1); return i; }).filter((i) => i >= 0); return src.slice(a, ends.length ? Math.min(...ends) : src.length).replace(/counter[ -]?offers?/ig, ""); };
       const marketFig = nonAsk.some((m) => !(m.unit === "hour" && m.value === (hint && hint.recorded)) && THIRD_WORD.test(sentenceOf(m.at).replace(INCIDENTAL, " ")));

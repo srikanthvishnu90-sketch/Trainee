@@ -16094,7 +16094,7 @@ const CareerRouter = (() => {
       prevEnd = end;
       if (unit === "hour") {
         if (role === "ask") { if (out.ask == null) out.ask = v; }
-        else if (role === "employer") out.offer = v;
+        else if (role === "employer") { if (out.offer == null) out.offer = v; }
         else if (role === "current") out.current = v;
         else if (out.unknown == null) out.unknown = v;
       } else if (unit === "none" && role === "ask" && out.askBare == null && unitlessHourly(v, end)) out.askBare = v;
@@ -16106,7 +16106,7 @@ const CareerRouter = (() => {
       const nonAsk = out.mentions.filter((m) => m.role !== "ask");
       out.ambiguous = currentPhrase && !offerWord && nonAsk.length >= 2 && out.mentions.some((m) => m.role === "employer");
       const THIRD_WORD = /\b(?:market|competitors?|others|industry|average|median|typical|glassdoor|levels\.fyi|payscale|salary\.com|indeed|employers|companies|other\s+(?:places|firms|roles|jobs|offers)|elsewhere|similar\s+(?:jobs|roles|positions|companies|postings)|(?:jobs|roles|positions)\s+like\s+(?:this|these|mine|it))\b/i;
-      const PERSON_PAY = /\b(?:friends?|co-?workers?|colleagues?|peers?|classmates?|roommates?|siblings?|brother|sister|cousin|neighbou?r|someone|people)\b(?:\s+(?!(?:i|me|my|and|but|so|then|thanks)\b)[\w'-]+){0,4}?\s+(?:makes?|earns?|gets?(?!\s+me\b)|got(?!\s+me\b)(?:\s+offered)?|is\s+(?:paid|making|earning|getting|on)|was\s+(?:offered|paid)|are\s+(?:paid|making|earning|getting|on)|were\s+(?:offered|paid)|pulls?|took)\b[^.;!?\n]{0,25}$/i;
+      const PERSON_PAY = /\b(?:friends?|co-?workers?|colleagues?|peers?|classmates?|roommates?|siblings?|brother|sister|cousin|neighbou?r|someone|people|husband|wife|spouse|partner|boyfriend|girlfriend|fianc[eé]e?|mom|mum|dad|mother|father|parents?|son|daughter|uncle|aunt)\b(?:['\u2019]s?\s+(?:[\w-]+\s+){0,2}?(?:offer|pay|rate|salary|wage|comp(?:ensation)?|base)\b[^.;!?\n]{0,25}$|(?:\s+(?!(?:i|me|my|and|but|so|then|thanks)\b)[\w'-]+){0,4}?\s+(?:makes?|earns?|gets?(?!\s+me\b)|got(?!\s+me\b)(?:\s+offered)?|is\s+(?:paid|making|earning|getting|on)|was\s+(?:offered|paid)|are\s+(?:paid|making|earning|getting|on)|were\s+(?:offered|paid)|pulls?|took)\b[^.;!?\n]{0,25}$)/i;
       const INCIDENTAL = /\b(?:a|an|the|my|this|that|their|our|his|her|your)\s+market\s+(?:(?:research|data|analytics|access|making|insights|intelligence)(?:\s+(?:senior|junior|staff|principal))?(?:\s+(?:engineer|analyst|researcher|scientist|manager|specialist|associate|lead|designer|developer|coordinator|strategist|consultant))?|(?:(?:senior|junior|staff|principal)\s+)?(?:engineer|analyst|researcher|scientist|manager|specialist|associate|lead|designer|developer|coordinator|strategist|consultant))\s+(?:role|position|job|opening|posting)\b(?!s)/ig;
       const ABBREV = /(?:^|[^A-Za-z])(?:e\.g|i\.e|u\.s|u\.k|approx|vs|etc|mr|mrs|ms|dr|inc|co|corp|ltd|jr|sr)$/i;
       const endsHere = (c, i) => c !== "." || (/^["'\u201d\u2019)\]]*(?:\s|$)/.test(src.slice(i + 1, i + 5)) && !ABBREV.test(src.slice(Math.max(0, i - 8), i))

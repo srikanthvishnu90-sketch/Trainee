@@ -78,6 +78,9 @@ declare u jsonb := p_detail->'upload'; sha text := p_detail->'upload'->>'sha256'
 begin
  if coalesce(p_detail->>'via', '') <> 'router: their yes to the resume entries shown to them' or jsonb_typeof(u) is distinct from 'object'
     or coalesce(sha, '') !~ '^[a-f0-9]{64}$' or coalesce(p_detail->>'confirmation_event_id', '') = '' then return false; end if;
+ -- The per-user lock first (as career_resume_put and the erase path take it): a delete that has not committed cannot be
+ -- read past, so a deleted resume is never written back (review of d3fd6027).
+ perform pg_advisory_xact_lock(hashtextextended(p_user::text, 0));
  if exists (select from public.career_resume_record where user_id = p_user and state = 'confirmed' and sha256 = sha) then
   -- Already their resume: nothing about the record changes, but a missing cloud copy is repaired (career_resume_put's same-hash path).
   perform public.career_resume_put(p_user, sha, (select kind from public.career_resume_record where user_id = p_user), null, null, null, p_detail->>'confirmation_event_id');
@@ -107,7 +110,6 @@ begin
  return true;
 end $$;
 revoke all on function public.career_resume_take(uuid, jsonb) from public, anon, authenticated;
-grant execute on function public.career_resume_take(uuid, jsonb) to service_role;
 
 
 -- One-time recovery of the missing cloud copies (see the header), one person at a time under the same locks career_apply_cloud_optin_as and

@@ -31,7 +31,7 @@ protection):
 | `SUPABASE_DB_URL` | Supabase > Connect (top bar) > Connection string > **Session pooler** URI (port 5432; GitHub's runners have no IPv6, so not the direct `db.<ref>.supabase.co` one), password filled in. A forgotten password: Project Settings > Database > Reset database password |
 | `TRAINEE_INBOUND_SECRET` | the `?secret=` value in LoopMessage's webhook URL. Required unless it is already set on the project (it is never generated here: a new one would break LoopMessage's URL unseen) |
 | `CAREER_INGEST_SECRET`, `CAREER_PROACTIVE_SECRET`, `TRAINEE_DELIVER_SECRET` | the values already live, readable only by you in Supabase > SQL Editor: `select name, decrypted_secret from vault.decrypted_secrets where name like 'trainee_%_secret'`. Leave unset to keep them: a secret already on the project is kept, its pg_cron job and Vault copy untouched, and the smoke skips its gate |
-| `OPENAI_API_KEY` | platform.openai.com > the project > API keys > Create new secret key. Unset keeps the one on the project |
+| `ANTHROPIC_API_KEY` | console.anthropic.com > API keys > Create key. Unset keeps the one on the project (Claude only, D-038a) |
 | `LOOPMESSAGE_API_KEY` | LoopMessage dashboard. Unset keeps the one on the project |
 | optional: `INGEST_CONTACT_EMAIL`, `TRAINEE_ALLOWED_CONTACTS`, `LOOPMESSAGE_DAILY_CONTACTS`, `PDL_API_KEY`, `UPMORE_TEST_JWT`, the `WHATSAPP_*` ones | as in "What you are asked for" below; unset keeps what the project has |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_BOT_USERNAME` | **leave unset** for now (Telegram, below) |
@@ -97,7 +97,7 @@ read from the environment or asked on a hidden prompt; none is echoed, written t
 | `SUPABASE_PROJECT_REF`, `SUPABASE_DB_URL` | the project (20 letters) and its database URI | nowhere (this process only) |
 | `CAREER_INGEST_SECRET`, `CAREER_PROACTIVE_SECRET`, `TRAINEE_DELIVER_SECRET`, `TRAINEE_INBOUND_SECRET` | 32+ characters of `A-Z a-z 0-9 . _ ~ -`; Enter generates 48 (`openssl rand -hex 24`), shown once on the terminal only if you say yes | function secrets; the first three also in Vault for pg_cron; the inbound one in LoopMessage's webhook URL |
 | `TRAINEE_ROTATE_INBOUND=1` | only when replacing the inbound secret on purpose | on a re-run, Enter for `TRAINEE_INBOUND_SECRET` stops the run if one is already set (a new one would silently break LoopMessage's webhook URL); give the same value, or set this and paste the new URL into LoopMessage |
-| `LOOPMESSAGE_API_KEY`, `OPENAI_API_KEY` | Enter keeps the one already set | function secrets (`MODEL_PROVIDER=openai` with the OpenAI key) |
+| `LOOPMESSAGE_API_KEY`, `ANTHROPIC_API_KEY` | Enter keeps the one already set | function secrets (Claude only: the Anthropic key alone, no `MODEL_PROVIDER` is set) |
 | `INGEST_CONTACT_EMAIL` | the contact job boards see in the User-Agent; career-ingest answers 503 without it | function secret |
 | `TRAINEE_ALLOWED_CONTACTS` | comma-separated numbers allowed to sign up (sign-up is closed by default: `TRAINEE_SIGNUP` is not touched) | function secret |
 | `LOOPMESSAGE_DAILY_CONTACTS` | your plan's contacts a day (unset means 300) | function secret |

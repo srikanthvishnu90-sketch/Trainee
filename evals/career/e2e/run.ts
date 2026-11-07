@@ -32,7 +32,8 @@ import { careerHandler, type Chat, SERVICE_KEY, SUPABASE_URL, supabaseParity } f
 import { evalNow, PIN_DB_SQL, pinClock } from "../tasks/clock.ts";
 import { clearOracle, fakeAnthropic, type OracleStep, setOracle } from "../tasks/fake_model.ts";
 import { AREAS, type Area, type E2EState, type Expect, judgeE2E, type ResearchFile, type ResumeDoc } from "./judge.ts";
-import { FakeGmail, htmlText, readPdf, sha256Hex, stubEngine, StubAts } from "./worlds.ts";
+import { FakeGmail, htmlText, PERSON_ANSWERS, readPdf, resumePdf, sha256Hex, stubDryRunEngine, stubEngine, StubAts, stubSubmitEngine } from "./worlds.ts";
+import { askedPart, questionLine } from "../../../tests/helpers/one_question.ts";
 import { isStubWebHost, stubWebFetch } from "./web.ts";
 import type { FileRecord } from "../../../supabase/functions/_shared/file_kinds.ts";
 import { appendRow, type E2EItem, type E2ERun, scoreRow } from "./score_log.ts";
@@ -57,6 +58,17 @@ const WORLD_ENV: Record<string, string> = {
   // R9-F: market research and its brief File, for this eval's run only (the release config keeps both off: RELEASE_NEVER_ON).
   // With no search key the research tool reads the sites it is given (research_search.ts firstPartyProvider): the stub web.
   CAREER_RESEARCH_REPLY: "on", CAREER_RESEARCH_BRIEF: "on",
+  // R9-F: the hosted preparation's door (cloud_runner_http.ts, in this process at a made-up host), so an application queued
+  // from chat is prepared at once and its card shown, as the owner's configured runner does (CAREER_PREPARE_AHEAD_URL).
+  CAREER_PREPARE_AHEAD_URL: "https://runner.e2e.test/functions/v1/career-cloud-runner/prepare", CAREER_PREPARE_AHEAD_TOKEN: "e2e-stub-prepare-door-token-not-real-000",
+};
+// The runner's own settings for the eval's door (its environment, not the chat's): preparation on, sending through the
+// runner on (a card-approved application goes by the card-cloud route: the runner's dispatch and its send sandbox; any other
+// approved application by the eval's cloud worker, restQueue + runCloudJob), made-up secrets for links minted in this process.
+const RUNNER_ENV: Record<string, string> = {
+  CLOUD_RUNNER_SECRET: "e2e-stub-runner-secret-not-real-0123456789abcdef", CLOUD_DISPATCH_SECRET: "e2e-stub-dispatch-secret-not-real-0123456789",
+  CAREER_PREPARE_AHEAD_TOKEN: WORLD_ENV.CAREER_PREPARE_AHEAD_TOKEN, CLOUD_PREPARE_ENABLED: "on", CLOUD_RUNNER_ENABLED: "on",
+  CLOUD_BRIDGE_URL: "https://runner.e2e.test/functions/v1/career-cloud-runner",
 };
 // Unset for the run, so research never reaches a real search provider or SEC with a declared contact.
 const RESEARCH_UNSET = ["BRAVE_SEARCH_API_KEY", "RESEARCH_SEARCH_PROVIDER", "RESEARCH_SEARCH_ENDPOINT", "RESEARCH_USER_AGENT"];
@@ -96,18 +108,36 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
   const realFetch = globalThis.fetch;
   const ats = await new StubAts(POSTINGS.map((p) => ({ board: p.job_id.split(":")[1], job: p.job_id.split(":")[2], title: p.title, company: p.company }))).start();
   const gmail = new FakeGmail();
-  const pg = await startPg();
+  // As production's database: the migrations and the card-cloud bridge go-live applies (apply-rails-and-seed.sh), with its
+  // claim guards reconciled as go-live does (the hosted apply flow test's database, R9-F).
+  const pg = await startPg({ includeBridge: true });
   let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
+  let runner: ((req: Request) => Promise<Response>) | null = null;
   const items: E2EItem[] = [];
   let stopped: string | null = null, unpin: (() => void) | null = null;
   const runAt = new Date().toISOString(), at = evalNow();
   try {
     unpin = pinClock(at);
+    await pg.sql((await Deno.readTextFile(`${ROOT}scripts/launch/verify-claim-guards.sql`)).replace(/^\\.*$/gm, ""));
     await supabaseParity(pg);
     await pg.sql(PIN_DB_SQL(at));
+    // R9-F: the apply pipeline's database functions (the preparation's claim and its 24-hour expiry, the card, the cloud
+    // job's claim and lease) read the database's real clock (clock_timestamp), so its own tables keep their real-clock defaults (now()):
+    // pinned, a request made "3 days ago" by its default is expired by the claim before it is ever prepared.
+    await pg.sql(`do $u$ declare r record; begin for r in select c.relname as t, a.attname as col from pg_attrdef d
+      join pg_attribute a on a.attrelid = d.adrelid and a.attnum = d.adnum join pg_class c on c.oid = d.adrelid join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and c.relkind = 'r' and c.relname like 'career\\_apply\\_%' and pg_get_expr(d.adbin, d.adrelid) ~ 'clock_timestamp\\(\\) - '
+      loop execute format('alter table public.%I alter column %I set default now()', r.t, r.col); end loop; end $u$;`);
     const people: Record<string, string> = {};
     tasks.forEach((t) => { people[`tok-${t.id}`] = uid(TASKS.indexOf(t) + 1); });
     await seed(pg, Object.values(people), at);
+    // R9-F: the database switches as go-live writes them (release-db-switches.sql, D-041: real employer submission on), and the portal gate:
+    // the cloud sends on Greenhouse only after the owner's gate testers proved 3 confirmed applications there, or under the
+    // owner's waiver for one person (career_apply_cloud_gate_waivers: at most 5 sends, at most 7 days; D-010 option (a)).
+    // The eval world has no gate testers, so each person carries the owner's waiver: at most 5 cloud sends each.
+    await pg.sql(`insert into public.career_cloud_settings (key, value) select k, 'on' from unnest(array['CAREER_AGENT_SUBMIT', 'CAREER_CLOUD_APPLY', 'CAREER_CLOUD_TEXT_CARDS', 'APPLY_VM']) k on conflict (key) do update set value = excluded.value;
+      insert into public.career_apply_cloud_gate_waivers (user_id, portal, max_sends, expires_at, note)
+      select u, 'greenhouse', 5, clock_timestamp() + interval '6 days', 'e2e eval world: the owner''s waiver for this synthetic person' from unnest(array[${Object.values(people).map((x) => `'${x}'::uuid`).join(",")}]) u;`);
     for (const k of openaiVars) Deno.env.delete(k);
     if (o.model === "fake") Deno.env.set("ANTHROPIC_API_KEY", "sk-ant-fake-e2e-not-a-key");
     else if (!Deno.env.get("ANTHROPIC_API_KEY")) throw new Error("NOT RUN: --model claude needs ANTHROPIC_API_KEY");
@@ -125,8 +155,47 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
       if (/(^|\.)greenhouse\.io$/.test(url.hostname)) return await ats.forward(req, realFetch);
       if (url.hostname === "gmail.googleapis.com") return await gmail.fetch(req);
       if (isStubWebHost(url.hostname)) return stubWebFetch(req);
+      if (url.hostname === "runner.e2e.test" && runner) return await runner(req);
       return new Response("not reachable in the e2e eval", { status: 404 });
     }) as typeof fetch;
+    // The preparation sandbox host: a stand-in for Vercel that runs prepare-runner.ts's runPrepareRequest in this process,
+    // with only the four values the dispatcher hands it, the production bridge, and the dry-run stand-in for the engine.
+    const { createRunnerHandler } = await import("../../../supabase/functions/_shared/cloud_runner_http.ts");
+    const { prepareBridge, runPrepareRequest } = await import("../../../workers/career-cloud/prepare-runner.ts");
+    const { bridgeQueue } = await import("../../../workers/career-cloud/sandbox-runner.ts");
+    const prepRuns: (() => Promise<unknown>)[] = [], prepWaits: Promise<unknown>[] = [], prepLog: string[] = [];
+    let sandboxes = 0;
+    const host = {
+      create: async () => `sbx_e2e_${++sandboxes}`,
+      run: async (sandbox: string, env: Record<string, string>, script?: string) => {
+        if ((script ?? "workers/career-cloud/sandbox-runner.ts") === "workers/career-cloud/sandbox-runner.ts") {
+          // The send sandbox, as sandbox-runner.ts's runSandboxJob runs it: the job read through the real bridge, the real
+          // authorization before the engine and before the one Submit, and the engine stand-in (worlds.ts stubSubmitEngine).
+          const bridge = bridgeQueue({ url: env.CLOUD_BRIDGE_URL, id: env.CLOUD_JOB_ID, sandbox, token: env.CLOUD_JOB_TOKEN });
+          prepRuns.push(async () => { try { const job = await bridge.job();
+            await runCloudJob(job, { queue: bridge.queue, runEngine: stubSubmitEngine(job, factsFromPayload) as any, log: (l: string) => workerLog.push(l) }); }
+            catch (e: any) { workerLog.push(`send sandbox threw ${String(e?.message ?? e).slice(0, 160)}`); } });
+          return;
+        }
+        if (script !== "workers/career-cloud/prepare-runner.ts") throw new Error(`the eval's sandbox host runs no ${script}`);
+        prepRuns.push(() => runPrepareRequest({ bridge: prepareBridge({ url: env.CLOUD_BRIDGE_URL, id: env.CLOUD_PREPARE_ID, sandbox, token: env.CLOUD_JOB_TOKEN }),
+          runEngine: stubDryRunEngine(), log: (l: string) => prepLog.push(l) }).catch((e: any) => prepLog.push(`prepare threw ${String(e?.message ?? e).slice(0, 160)}`)));
+      },
+      stop: async () => {},
+    };
+    runner = createRunnerHandler({ env: { get: (k: string) => RUNNER_ENV[k] ?? (k === "SUPABASE_URL" ? SUPABASE_URL : k === "SUPABASE_SERVICE_ROLE_KEY" ? SERVICE_KEY : undefined) }, host: host as any, fetch: ((i: any, n?: any) => globalThis.fetch(i, n)) as typeof fetch, waitUntil: (p) => { prepWaits.push(p); } });
+    // A started sandbox runs on its own machine, with that machine's real clock (its card's expiry, its attempts' times),
+    // between the person's turns: the pinned clock is lifted while it runs and pinned again where it stood.
+    const settlePrepare = async () => {
+      for (let i = 0; i < 6 && (prepWaits.length || prepRuns.length); i++) {
+        await Promise.all(prepWaits.splice(0));
+        const runs = prepRuns.splice(0);
+        if (!runs.length) continue;
+        const stood = new Date().toISOString();
+        unpin?.();
+        try { await Promise.all(runs.map((f) => f())); } finally { unpin = pinClock(stood); }
+      }
+    };
     h = await careerHandler(pg, people);
     // The product's own modules, loaded after the handler pointed fetch at the database double.
     const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.117.1");
@@ -141,6 +210,15 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
     const workerLog: string[] = [], sendLog: string[] = [];
     // One scheduler tick: the sending rail (as career-send runs it) and the cloud apply worker (as cloudLoop runs one job).
     const tick = async () => {
+      // The preparation: what the door's kick started, then the minute's prepare-dispatch tick (career-cloud-runner's cron),
+      // each run to its finish (the card shown in the person's thread, or the questions texted).
+      await settlePrepare();
+      // The card-cloud route's minute tick (career-cloud-runner /dispatch): claims card-approved applications, one send sandbox each.
+      await runner!(new Request(`${RUNNER_ENV.CLOUD_BRIDGE_URL}/dispatch`, { method: "POST", headers: { "x-cloud-dispatch-secret": RUNNER_ENV.CLOUD_DISPATCH_SECRET } }))
+        .then(async (r) => { const b = await r.text(); if (!r.ok) prepLog.push(`dispatch ${r.status} ${b.slice(0, 160)}`); });
+      await runner!(new Request(`${RUNNER_ENV.CLOUD_BRIDGE_URL}/prepare-dispatch`, { method: "POST", headers: { "x-cloud-dispatch-secret": RUNNER_ENV.CLOUD_DISPATCH_SECRET } }))
+        .then(async (r) => { const b = await r.text(); if (!r.ok) prepLog.push(`prepare-dispatch ${r.status} ${b.slice(0, 160)}`); });
+      await settlePrepare();
       await runSendWorker({ rpc: (n: string, a: any) => admin.rpc(n, a), fetch: gmail.fetch as typeof fetch, now: machineNow,
         token: (u: string, scope: string) => Promise.resolve(`tok-${scope.endsWith("gmail.send") ? "send" : "read"}-${u}`), drafts: (u: string, ids: string[]) => outreach.drafts!(u, ids) },
         { worker: "e2e-eval", accounts: 20, perAccount: 25, leaseSeconds: 120, deadlineMs: 20_000 })
@@ -155,7 +233,7 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
       if (o.budgetUsd != null && await spent() + 0.05 >= o.budgetUsd) { stopped = `budget: $${(await spent()).toFixed(3)} of $${o.budgetUsd}`; break; }
       const chat: Chat = h.chat(`tok-${t.id}`), u = people[`tok-${t.id}`];
       const sentBefore = gmail.sent.length, postsBefore = ats.posts.length;
-      workerLog.length = 0; sendLog.length = 0;
+      workerLog.length = 0; sendLog.length = 0; prepLog.length = 0;
       const say = async (m: string, extra: Record<string, unknown> = {}) => { const r = await chat.say(m, extra); if (r.status !== 200) throw new Error(`${t.id}: HTTP ${r.status}: ${r.reply.slice(0, 200)}`); return r; };
       brainEnv("setup");
       clearOracle();
@@ -166,13 +244,41 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
       if (t.setup.includes("gmail")) await pg.sql(`insert into public.user_oauth_connections (user_id, provider, vault_name, email, scopes) values ('${u}', 'google_career', 'oauth_google_career_${u}', 'alex.testcase@example.test', 'openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send') on conflict do nothing`);
       // The person turned on cloud applying in their own words (the opt-in's terms, then their yes).
       if (t.setup.includes("cloud")) { await say("turn on cloud"); await say("yes, turn it on"); }
+      // ...and their resume as the file they sent and confirmed (the channel's file upload: career_resume_put, kind file),
+      // which the product keeps for the cloud as is; the hosted preparation sends only that file (R9-F).
+      if (t.setup.includes("cloud") && t.setup.includes("resume")) {
+        const pdf = resumePdf(RESUME); let b = ""; for (const c of pdf) b += String.fromCharCode(c);
+        await pg.sql(`select public.career_resume_put('${u}', '${await sha256Hex(pdf)}', 'file', 'e2e:resume-file', 'Alex_Testcase_Resume.pdf', decode('${btoa(b)}', 'base64'), 'e2e: the person confirmed their resume file')`);
+      }
       const metasBefore = Number(await json(pg, `select count(*) from public.agent_messages m join public.agent_threads th on th.id = m.thread_id where th.user_id = '${u}' and m.role = 'assistant'`));
       brainEnv(o.brain);
       setOracle(t.oracle);
       const replies: string[] = [], intents: (string | null)[] = [], bodies: any[] = [];
-      for (const m of t.turns) { const r = await say(m); replies.push(r.reply); intents.push(r.intent); bodies.push(r.body); await tick(); }
+      // R9-F: a question the product texts (one at a time: the form asks something no confirmed fact answers) is answered by
+      // the person from their own answers (PERSON_ANSWERS), as the hosted flow test's persona does, before their next turn;
+      // a question they have no answer to is left open (the task then fails on its real outcome).
+      // The thread's newest message from Trainee: what the person sees last (a reply, or a question the preparation pushed).
+      const lastShown = async () => String(await json(pg, `select to_json(m.content) from public.agent_messages m join public.agent_threads th on th.id = m.thread_id where th.user_id = '${u}' and m.role = 'assistant' order by m.created_at desc, m.id desc limit 1`) ?? "");
+      const asks = (x: string) => /(?:One question|Question 1 of \d+) only you can answer/.test(askedPart(x));
+      const answerAsked = async (last: string) => {
+        for (let round = 0; round < 4; round++) {
+          const shown = await lastShown();
+          let text = round === 0 && asks(last) ? last : asks(shown) ? shown : "";
+          if (!text) return;
+          for (let n = 0; text && n < 12; n++) {
+            const line = questionLine(text), a = PERSON_ANSWERS.find(([re]) => re.test(line));
+            if (!a) { prepLog.push(`the person has no answer to: ${line.slice(0, 100)}`); return; }
+            const r = await say(a[1]);
+            replies.push(r.reply); intents.push(r.intent); bodies.push(r.body);
+            text = asks(r.reply) ? r.reply : "";
+          }
+          await tick();
+        }
+      };
+      for (const m of t.turns) { const r = await say(m); replies.push(r.reply); intents.push(r.intent); bodies.push(r.body); await tick(); await answerAsked(r.reply); }
       const state = await worldState(pg, u, { ats: ats.posts.slice(postsBefore), mail: gmail.sent.slice(sentBefore), replies, bodies, metasBefore, mailHash, hashApplyPayload });
       state.stage.push(`${t.area}: turns handled as ${intents.map((x) => x ?? "none").join(" > ")}`, ...new Set(sendLog));
+      state.stage.push(...prepLog.map((l) => `apply: prepare ${l.slice(0, 160)}`));
       state.stage.push(...workerLog.filter((l) => !/: (confirmed|submitted_unconfirmed) /.test(l)).map((l) => `apply: worker ${l.slice(0, 160)}`));
       const j = judgeE2E(t.expect, state);
       items.push({ id: t.id, area: t.area, kind: t.kind, pass: j.pass, failed: j.failed, stage: state.stage, replies, intents });
@@ -205,6 +311,9 @@ async function worldState(pg: Pg, u: string, w: { ats: any[]; mail: any[]; repli
   // The confirmed facts: the resume the person confirmed (its text) and every value on their profile's facts.
   const flows: any[] = (await json(pg, `select json_agg(state) from public.agent_flow_state where user_id = '${u}'`)) ?? [];
   const facts = flows.flatMap((f) => (f?.career?.profile?.facts ?? f?.profile?.facts ?? []) as any[]).map((x) => String(x?.value ?? x?.text ?? "")).filter(Boolean);
+  // What the person told Trainee themselves when a form asked (their answered questions): confirmed by them, so an answer
+  // drawn from one is not invented (R9-F).
+  facts.push(...(((await json(pg, `select json_agg(label || ': ' || answer order by answered_at) from public.career_apply_questions where user_id = '${u}' and state = 'answered' and answer is not null`)) ?? []) as string[]));
   // The resume the person confirmed: the product's record of it (career_resume_record, state confirmed), never the payload's own claim.
   const resumeSha: string | null = (await json(pg, `select to_json(sha256) from public.career_resume_record where user_id = '${u}' and state = 'confirmed'`)) ?? null;
   const hasResume = resumeSha !== null || flows.some((f) => JSON.stringify(f ?? {}).includes("Alex Testcase"));

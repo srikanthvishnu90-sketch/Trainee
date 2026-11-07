@@ -169,3 +169,84 @@ export async function readPdf(bytes: Uint8Array): Promise<PdfInfo> {
 // A File page as its reader opens it: the product's own renderer over the stored record (trainee-file serves this body).
 export function fileHtml(rec: FileRecord): string { return bodyHtml(rec, "e2e-token"); }
 export const htmlText = (html: string) => html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
+
+// ------------------------------------------------------------------------------------------------ the dry-run stand-in
+// The eval's engine for the preparation (R9-F; prepare-runner.ts runPrepareRequest's RunEngine): scripts/apply.ts's dry run
+// over HTTP instead of a browser. It reads the posting's form from the stub ATS (the board API's questions, as the browser
+// would see them), then plans with the engine's OWN functions (trustedFacts, planApplication, applicationApprovalHash: the
+// trusted-facts contract, the planner, the approval hash), so the reviewable payload, its sources and its hash are the ones
+// the real engine would make from the same facts and form. A required question no confirmed fact answers is returned as
+// needs_answers (asked once, by text), never guessed. Nothing is filled or sent: a dry run.
+const SCHEMA_TYPE: Record<string, string> = { input_text: "text", input_file: "file", textarea: "textarea", multi_value_single_select: "select", multi_value_multi_select: "checkbox" };
+export function stubDryRunEngine() {
+  return async (args: string[]): Promise<any> => {
+    const { trustedFacts, planApplication, applicationApprovalHash } = await import("../../../scripts/apply.ts");
+    const { hashApplyPayload } = await import("../../../supabase/functions/_shared/career_apply_store.ts");
+    const url = new URL(arg(args, "--url")), facts = JSON.parse(await Deno.readTextFile(arg(args, "--facts")));
+    const resumePath = arg(args, "--resume"), bytes = await Deno.readFile(resumePath);
+    const artifact = { filename: resumePath.split("/").pop() || "resume.pdf", sha256: await sha256Hex(bytes) };
+    const m = /^\/([^/]+)\/jobs\/(\d+)/.exec(url.pathname);
+    if (!/(^|\.)greenhouse\.io$/.test(url.hostname) || !m) return { result: { state: "not_submitted", reason: "DRIVER_HOST_REFUSED" }, evidence: null };
+    const key = `greenhouse:${m[1]}:${m[2]}`, employer = `${url.host}/${m[1]}`;
+    const r = await fetch(`https://boards-api.greenhouse.io/v1/boards/${m[1]}/jobs/${m[2]}?questions=true`);
+    if (!r.ok) { await r.body?.cancel(); return { result: { state: "not_submitted", reason: r.status === 404 ? "POSTING_CLOSED" : `HTTP ${r.status}` }, evidence: null }; }
+    const job = await r.json();
+    const schema = (job.questions ?? []).flatMap((q: any) => (q.fields ?? []).map((f: any) => ({ name: f.name, label: q.label, type: SCHEMA_TYPE[f.type] ?? "text", required: q.required === true,
+      options: (f.values ?? []).map((v: any) => ({ label: String(v.label), value: String(v.value) })) })));
+    const manifest = trustedFacts(facts, artifact);
+    const p = planApplication({ manifest, userId: facts.user_id, jobId: key, employer, schema, artifact, now: Date.now() });
+    if (!p.ready) {
+      const questions = p.needs.map((n: any) => { const f = schema.find((x: any) => n.field_name ? x.name === n.field_name : x.label === n.label) ?? {}; return { label: n.label, type: f.type === "select" ? "select" : "input_text", options: (f.options ?? []).map((o: any) => o.label) }; });
+      return { result: { state: "not_submitted", reason: "needs_answers", posting: key, company: job.company_name ?? employer, fields: p.needs.map((n: any) => n.label), questions }, evidence: null };
+    }
+    const fields = p.fields, before = await hashApplyPayload(schema), destination = String(job.absolute_url ?? url.href);
+    const readback = Object.fromEntries(fields.map((f: any) => { const s = schema.find((x: any) => x.name === f.name); const o = s?.options?.find((x: any) => x.value === String(f.value) || x.label === String(f.value)); return [f.name, o ? o.label : f.name === "resume" ? artifact.filename : String(f.value)]; }));
+    const payload = { user_id: facts.user_id, posting: key, company: facts.posting?.company || job.company_name || employer, destination, fields, resume: artifact, schema_hash: before,
+      facts_sha256: await sha256Hex(new TextEncoder().encode(await Deno.readTextFile(arg(args, "--facts")))), page_fields: {}, verification: [] };
+    const approval_hash = await applicationApprovalHash({ userId: facts.user_id, posting: key, destination, fields, resumeSha256: artifact.sha256, schemaHash: before, pageFieldNames: [], manifest });
+    const evidence = { posting: key, fields, readback, payload, sources: Object.fromEntries(fields.map((f: any) => [f.factId, manifest.byFactId[f.factId]])), replay_sources: Object.values(manifest.byFactId),
+      trust: { quarantine_version: manifest.version, manifest_hash: manifest.hash, excluded: manifest.excluded.slice(0, 200), conflicts: manifest.conflicts.slice(0, 200) },
+      approval_hash, payload_hash: await hashApplyPayload(payload), final_url: url.href };
+    return { result: { state: "not_submitted", reason: "dry_run" }, evidence };
+  };
+}
+
+// The person's resume as the file they send (a one-page PDF of the confirmed resume's text, uncompressed): what the channel
+// keeps for the cloud when a resume file arrives (career_apply_cloud_resume_put_for), so the hosted preparation has the
+// file it sends as is. Built here; nothing in it is not in the resume text.
+export function resumePdf(text: string): Uint8Array {
+  const esc = (s: string) => s.replace(/[^\x20-\x7e]/g, "?").replace(/([\\()])/g, "\\$1");
+  const lines = text.split("\n").slice(0, 60);
+  const stream = `BT /F1 9 Tf 40 760 Td 11 TL ${lines.map((l) => `(${esc(l)}) '`).join(" ")} ET`;
+  const objs = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"];
+  let out = "%PDF-1.4\n";
+  const offs: number[] = [];
+  objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const x = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offs.map((n) => `${String(n).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${x}\n%%EOF\n`;
+  return new TextEncoder().encode(out);
+}
+
+// What the eval's person answers when Trainee texts them a question the form asks (R9-F): their own words, from the
+// confirmed resume's contact line (TEST) and their stated work authorization. Matched by the question's own words.
+export const PERSON_ANSWERS: [RegExp, string][] = [
+  [/\bfirst name\b/i, "Alex"], [/\blast name\b/i, "Testcase"], [/\bemail\b/i, "alex.testcase@example.test"], [/\bphone\b/i, "+1 555-0100"],
+  [/\blegally authori[sz]ed to work\b|\bwork authori[sz]ation\b/i, "Yes"], [/\bsponsorship\b/i, "No"],
+];
+
+// The send stand-in for an application the preparation made (R9-F; the card-cloud route's send sandbox): the real engine
+// at Submit re-plans the form from the facts it is handed and refuses unless that application's approval hash is the one
+// approved (--approved, the payload's engine_approval). This does the same with the dry-run stand-in above, then posts
+// through stubEngine (its own hash check given that verified hash), so what reaches the stub ATS is the approved application.
+export function stubSubmitEngine(job: any, factsFromPayload: (p: any) => any) {
+  return async (args: string[], env?: Record<string, string>, controls?: { beforeEffect?: () => Promise<void> }) => {
+    const approved = arg(args, "--approved");
+    const dry = await stubDryRunEngine()(["--url", arg(args, "--url"), "--facts", arg(args, "--facts"), "--resume", arg(args, "--resume")]);
+    if (!args.includes("--submit") || !dry?.evidence?.approval_hash || dry.evidence.approval_hash !== approved || approved !== job.payload?.engine_approval) {
+      return { result: { state: "not_submitted", reason: "APPROVED_APPLICATION_CHANGED" }, evidence: null };
+    }
+    return await stubEngine(job, async () => approved, factsFromPayload)(args, env, controls);
+  };
+}

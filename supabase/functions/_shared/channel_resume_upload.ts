@@ -140,7 +140,7 @@ function runText(xml: string, tags = "t|delText|instrText"): string[] {
 const allText = (xml: string) => lines(xml.replace(new RegExp(String.raw`</${P}(?:p|tc|tr|txbxContent|div|li)>|<${P}(?:br|cr)\b[^>]*/?>`, "g"), "\n").replace(/<[^>]*>/g, " "));
 // A part's text in its declared encoding: a byte-order mark, UTF-16 without one, or the XML declaration's encoding; UTF-8 otherwise.
 // Fail closed: a part that does not then read as XML (starts with "<", no NUL character) throws, so the upload is refused.
-function decodePart(part: Uint8Array): string {
+function decodePart(part: Uint8Array, xml = true): string {
   const b = part, dec = (label: string, at = 0) => { try { return new TextDecoder(label, { fatal: false }).decode(b.subarray(at)); } catch { throw new Error(`unknown encoding ${label}`); } };
   let s: string;
   if (b[0] === 0xff && b[1] === 0xfe && b[2] === 0 && b[3] === 0) throw new Error("UTF-32 part");
@@ -154,11 +154,16 @@ function decodePart(part: Uint8Array): string {
     const head = new TextDecoder("latin1").decode(b.subarray(0, 200)), enc = /^\s*<\?xml\b[^?>]*?\bencoding\s*=\s*["']([\w.:-]+)["']/i.exec(head)?.[1]; // the declaration only
     s = enc && !/^utf-?8$/i.test(enc) ? dec(enc) : dec("utf-8");
   }
-  if (!/^\s*</.test(s) || s.includes("\u0000")) throw new Error("part does not read as XML");
+  if (s.includes("\u0000") || (xml && !/^\s*</.test(s))) throw new Error("part does not read as XML");
+  if (!xml) return s; // a plain-text or MHTML part (altChunk) is text, not XML
   // CDATA is text: escaped and kept, so the tag-stripping readers see it ("<w:t><![CDATA[OTP 482913]]></w:t>").
   return s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (_m, c: string) => c.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"));
 }
-const attrText = (xml: string) => [...xml.matchAll(/\s(?:descr|title|w:tooltip)="([^"]*)"|<[\w.-]*:?textpath\b[^>]*\sstring="([^"]*)"/g)].flatMap((m) => lines(m[1] ?? m[2] ?? ""));
+// Attribute values by their XML meaning: either quote, any prefix, spaces around "=".
+const attr = (names: string) => new RegExp(String.raw`\s${P}(?:${names})\s*=\s*(?:"([^"]*)"|'([^']*)')`, "g");
+const attrVals = (xml: string, names: string) => [...xml.matchAll(attr(names))].map((m) => m[1] ?? m[2] ?? "");
+const attrText = (xml: string) => [...attrVals(xml, "descr|title|tooltip"),
+  ...[...xml.matchAll(new RegExp(String.raw`<${P}textpath\b[^>]*>`, "g"))].flatMap((m) => attrVals(m[0], "string"))].flatMap((v) => lines(v));
 const queryOf = (url: string) => { const q = decodeXml(url).replace(/^[^?#]*/, ""); try { return decodeURIComponent(q); } catch { return q; } };
 const STRUCTURAL = /^(?:word\/(?:styles|stylesWithEffects|settings|webSettings|fontTable|numbering|people|commentsIds|commentsExtensible|commentsExtended)\.xml|word\/theme\/[^/]+\.xml|docProps\/app\.xml|\[Content_Types\]\.xml|customXml\/[^/]+\.xml|word\/(?:glossary\/)?(?:styles|settings|webSettings|fontTable|numbering)\.xml)$/i;
 async function hiddenOf(r: any, buf: any, depth: number): Promise<string[]> {
@@ -170,7 +175,7 @@ async function hiddenOf(r: any, buf: any, depth: number): Promise<string[]> {
     if (text && !part) throw new Error(`part not readable: ${n}`);
     if (!part || STRUCTURAL.test(n)) continue;
     if (/\.docx$/i.test(n)) { if (depth > 0) throw new Error(`nested file too deep: ${n}`); out.push(...(r.extractDocxLines?.(part) ?? []).map(String), ...(await hiddenOf(r, part, depth + 1))); continue; }
-    const s = decodePart(new Uint8Array(part));
+    const s = decodePart(new Uint8Array(part), !/\.(?:txt|mht)$/i.test(n));
     if (n === "word/document.xml") {
       const fallbacks = [...s.matchAll(new RegExp(String.raw`<${P}Fallback\b[\s\S]*?</${P}Fallback>`, "g"))].flatMap((m) => allText(m[0]));
       // DrawingML and other non-w text, its runs joined per paragraph ("O" "T" "P" ": " "4" ... reads "OTP: 4...").
@@ -180,11 +185,11 @@ async function hiddenOf(r: any, buf: any, depth: number): Promise<string[]> {
       const loose = runText(s.replace(new RegExp(String.raw`<${P}p\b[\s\S]*?</${P}p>`, "g"), "\n"));
       out.push(...runText(s, "delText|instrText"), ...attrText(s), ...fallbacks, ...nonW, ...loose); continue;
     }
-    if (/\.rels$/i.test(n)) { out.push(...[...s.matchAll(/\sTarget="([^"]*)"/g)].map((m) => queryOf(m[1])).filter((q) => q.length > 1)); continue; }
-    if (/^docProps\/core\.xml$/i.test(n)) { out.push(...[...s.matchAll(/<(?:dc:title|dc:subject|dc:description|cp:keywords|cp:category|cp:contentStatus)(?:\s[^>]*)?>([^<]*)</g)].flatMap((m) => lines(m[1]))); continue; }
-    if (/^docProps\/custom\.xml$/i.test(n)) { out.push(...[...s.matchAll(/<vt:lpw?str>([^<]*)</g)].flatMap((m) => lines(m[1]))); continue; }
+    if (/\.rels$/i.test(n)) { out.push(...attrVals(s, "Target").map(queryOf).filter((q) => q.length > 1)); continue; }
+    // Document properties under any prefix: all their text (title, subject, keywords, creator, custom values).
+    if (/^docProps\/(?:core|custom)\.xml$/i.test(n)) { out.push(...allText(s), ...attrText(s)); continue; }
     if (/\.(?:html?|mht|txt)$/i.test(n)) { out.push(...lines(s.replace(/<(?:br|\/p|\/div|\/li|\/tr|\/h\d)[^>]*>/gi, "\n").replace(/<[^>]*>/g, " "))); continue; }
-    if (/\.vml$/i.test(n)) { out.push(...lines(s.replace(/<\/(?:div|p)>|<br\s*\/?>/gi, "\n").replace(/<[^>]*>/g, " "))); continue; }
+    if (/\.vml$/i.test(n)) { out.push(...lines(s.replace(/<\/(?:div|p)>|<br\s*\/?>/gi, "\n").replace(/<[^>]*>/g, " ")), ...attrText(s)); continue; }
     out.push(...runText(s), ...allText(s), ...attrText(s));
   }
   return out;

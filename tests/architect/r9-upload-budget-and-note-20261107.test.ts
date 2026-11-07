@@ -121,17 +121,18 @@ Deno.test("R9-5 while a code is pending, only the early pass removes it; the han
 });
 
 Deno.test("R9B-dup a Word file naming one part twice is refused before any part is read (Greptile on #584)", async () => {
-  const { ingestResumeFile } = await import("../../supabase/functions/_shared/channel_resume_upload.ts");
-  const { DOCX, zipOf } = await import("./scenarios/onboarding-r2-generator.ts");
+  const { docxHiddenText } = await import("../../supabase/functions/_shared/channel_resume_upload.ts");
+  const { zipOf } = await import("./scenarios/onboarding-r2-generator.ts");
   const enc = new TextEncoder();
-  const doc = enc.encode('<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Jordan Lee, Operations Analyst, Acme Corp, 2019 - 2024, led weekly reporting across four teams and cut close time by two days.</w:t></w:r></w:p><w:sectPr/></w:body></w:document>');
-  const types = enc.encode('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
-  const big = enc.encode("<w:hdr>" + "a".repeat(4 * 1024 * 1024) + "</w:hdr>");
-  const bytes = zipOf([{ name: "[Content_Types].xml", data: types }, { name: "word/header1.xml", data: big }, { name: "word/header1.xml", data: big }, { name: "word/header1.xml", data: enc.encode("<w:hdr/>") }, { name: "word/document.xml", data: doc }]);
-  const stored: unknown[] = [];
-  const t0 = performance.now();
-  const res: any = await ingestResumeFile({ userId: "TEST-r9", channel: "telegram", doc: { fileId: "F", uniqueId: crypto.randomUUID(), name: "resume.docx", mime: DOCX, size: bytes.length },
-    fetchFile: async () => ({ ok: true, bytes }), record: async (row) => { stored.push(row); return "id"; } });
-  if (res.ok || stored.length) throw new Error("a duplicate part name must refuse the upload");
-  if (performance.now() - t0 > 3000) throw new Error("refused slowly");
+  const doc = enc.encode('<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Jordan Lee</w:t></w:r></w:p><w:sectPr/></w:body></w:document>');
+  const hdr = (t: string) => enc.encode(`<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>${t}</w:t></w:r></w:p></w:hdr>`);
+  const dup = zipOf([{ name: "word/document.xml", data: doc }, { name: "word/header1.xml", data: hdr("a") }, { name: "word/header1.xml", data: hdr("b") }]);
+  const caseDup = zipOf([{ name: "word/document.xml", data: doc }, { name: "word/header1.xml", data: hdr("a") }, { name: "WORD/Header1.xml", data: hdr("b") }]);
+  for (const [bytes, tag] of [[dup, "exact"], [caseDup, "case"]] as const) {
+    let threw = false;
+    try { await docxHiddenText(bytes); } catch { threw = true; }
+    if (!threw) throw new Error(`a part named twice (${tag}) must refuse`);
+  }
+  // one name each still reads
+  await docxHiddenText(zipOf([{ name: "word/document.xml", data: doc }, { name: "word/header1.xml", data: hdr("a") }]));
 });

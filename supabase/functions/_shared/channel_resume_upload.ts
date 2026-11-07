@@ -14,7 +14,7 @@
 // A file that cannot be downloaded, is not a PDF or DOCX, or has no readable text is said so, plainly; nothing is stored.
 import { CareerProfile, CareerRender } from "./router_core.career.js";
 import { normalizeChatText, redactIdentity } from "./identity_redact.ts";
-import { fileCodeLines } from "./career_code_in_chat.ts";
+import { fileCodeLines, fileText as codeCheckText } from "./career_code_in_chat.ts";
 import type { Upload } from "./career_router_evidence.ts";
 
 export const MAX_RESUME_BYTES = 10 * 1024 * 1024;
@@ -284,7 +284,9 @@ export async function ingestResumeFile(o: {
   // ONBOARDING ROUND 2: an identity number, a card number or a password in the file. The text the chat reads had it
   // removed, but the file itself was stored as the person's upload (and is the file an application attaches), with the
   // number in it. Now the file is not kept and nothing is read from it; the person is told what to remove.
-  const found = redactIdentity(text).removed;
+  // The identity check also reads the text as the code check does (any script's digits, look-alike letters, no zero-width
+  // characters), so a disguised number is not missed by one check and passed by the other.
+  const found = [...new Set([...redactIdentity(text).removed, ...redactIdentity(codeCheckText(text)).removed])];
   // A plausible one-time code refuses the file (owner decision on 2de155f0): the reply names only the line and the kind, never
   // the line itself, and nothing from the file is kept or read.
   const codeLines = fileCodeLines(text);

@@ -354,3 +354,31 @@ Deno.test("R8R-9B long, grouped, other-script and look-alike codes refuse the fi
     assertNode.deepEqual(fileCodeLines(wrap(l)), [], l);
   }
 });
+
+// Review of 6999fae2: after a code's own label the value past any connector, bracket or quote is a code unless it has a safe
+// shape (years, a real date, a standard, money, a count, a certification); after a hand-over ("sent me", a sender) long,
+// short and grouped codes and a figure before a non-count word are codes; both checks read the same normalised text.
+import { fileText } from "../../supabase/functions/_shared/career_code_in_chat.ts";
+Deno.test("R8R-69 label tails, hand-overs and disguised digits refuse the file; standards, years and counts stay", async () => {
+  const wrap = (l: string) => `Jordan Lee\nSupport Lead\n- Led a team of 6\n- ${l}\n- Managed 4500 tickets a year`;
+  for (const l of ["Login code - 4829130217", "Login code - 7392-0184-2231", "Code | 7392-0184-2231", "OTP — 482913021", "Code -> 4829130217",
+    "Code: \"7392-0184-2231\"", "Code: (4829130217)", "Code: 7392.0184.2231", "Code: 7392/0184/2231", "Recovery codes: 7392-0184-2231",
+    "Code ４８２９１３ opens the portal", "Code 482​913 opens the portal", "2FA code = K7X9P2 unlocks my account",
+    "Verification code: K7X9", "Code: AB12", "OTP: (482913) valid for 10 minutes", "Your code is (482913) Workday", "Verification code:\n\n[482913]",
+    "Token:\n\n4829 valid for 10 minutes", "Your Okta code is K7X9P2 — expires soon", "Code: ４８２９１３ hours",
+    "Workday sent me 482913 valid for 10 minutes", "Workday sent me 4829130217", "Workday sent me K7X9", "Workday sent me K7X9P2Q8Z1AB",
+    "Workday sent me 7392 0184 2231", "Workday sent me\n\n482913 unlocks my account"]) {
+    assertNode.ok(fileCodeLines(wrap(l)).includes(4), JSON.stringify(l));
+  }
+  for (const l of ["Code: ISO-27001-2013 compliance", "Code: ERC-721", "Token: ERC-20 and ERC-721 contracts", "Code: NIST-800-53", "Code: 2019-2021-2023",
+    "Code: 2019 - present", "Fault code: P0420", "Engine code: K24A", "Verification of 4500 I-9 forms", "Passcode reset - 4500 users",
+    "Sent 4500 packages a day", "Workday sent me 1200 - 1500 applications", "Microsoft sent me SC300 vouchers", "LinkedIn sent me 500 InMails"]) {
+    assertNode.deepEqual(fileCodeLines(wrap(l)), [], l);
+  }
+  // Every script's decimal digits read as ASCII; zero-width characters are removed, not spaces.
+  assertNode.equal(fileText("٤٨۲३𑛚1​3"), "4823013");
+  // The upload's identity check also reads the normalised text: a full-width SSN is refused through the real DOCX upload path
+  // and nothing is stored.
+  const ssn = await ingest([...BODY.slice(0, 4), "SSN: \uff11\uff12\uff13-\uff14\uff15-\uff16\uff17\uff18\uff19", ...BODY.slice(4)]);
+  assertNode.equal(ssn.res.ok, false); assertNode.equal((ssn.res as any).why, "secret"); assertNode.equal(ssn.stored.length, 0);
+});

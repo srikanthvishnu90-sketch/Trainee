@@ -202,7 +202,7 @@ const AFTER_FUNC = /^(?:for|from|to|on|in|at|today|tonight|yesterday|this|that|j
 const SIGNIN_PURPOSE = /\b(?:(?:for|on|into|in|at)\s+(?:the|my|your|their)?\s*(?:[a-z]+\s+){0,2}|to\s+(?:the|my|your|their)?\s*)(?:portal|site|website|login|log[- ]?in|sign[- ]?in|account|app|application|form|page|profile|password|verification)\b(?=\s*(?:$|[.,;:!?)]|\s(?:and|so|to|please|now|today|thanks|again)\b))|\bto\s+(?:finish|complete|continue|access|open|unlock|confirm|submit)\s+(?:my|the|your)\s+(?:portal|site|login|account|app|application|form|profile)\b(?=\s*(?:$|[.,;:!?)]|\s(?:and|so|please|now|today|thanks|again)\b))|\b(?:phone|cell|mobile|inbox|e-?mail|text|sms|log\s+in|sign\s+in|verify|enter\s+it)\b/i;
 // Named labels whose numbers are kept (identity_redact.ts NAMED_CODE's words and resume labels): "CPT codes: 99213",
 // "change code: CHG0012345", "exam code: AZ104". Anything else before "code" is read as a code's own label.
-const NAMED_LABEL = /^(?:zip|postal|post|area|country|promo|promotional|discount|coupon|referral|course|class|error|status|dial|tax|product|source|job|dress|invite|invitation|gift|reference|ref|airport|naics|sic|cpt|icd|hcpcs|ndc|drg|sort|swift|bank|routing|color|colour|style|item|sku|morse|qr|bar|req|requisition|position|posting|role|department|dept|cost|budget|project|program|module|unit|soc|fips|vendor|supplier|ticket|order|voucher|offer|event|building|store|exam|certification|cert|change|charge|engagement|release|config|configuration|policy|sop|servicenow|wbs|award|clearance|qualification|lot|batch|part|model|taxonomy|denial|adjustment|remark|activity|transaction|t|school|branch|hs|revenue|gl|cage|hazmat|license|licence|machine|billing|diagnosis|procedure|location|site|plant|warehouse|accounting|campaign|tracking|hex|paint|booking|reservation|specialty|speciality|subject|flight|room|seat|gate|afsc|mos|nec|rate|rating|grade|series|occupation|occupational|duty|uic|ein|cip|onet|o\*net|isco|esco|noc|anzsco|expense|labor|labour|payroll|union|district|provider|facility|tariff|commodity|ceeb|un)$/i;
+const NAMED_LABEL = /^(?:zip|postal|post|area|country|promo|promotional|discount|coupon|referral|course|class|error|status|dial|tax|product|source|job|dress|invite|invitation|gift|reference|ref|airport|naics|sic|cpt|icd|hcpcs|ndc|drg|sort|swift|bank|routing|color|colour|style|item|sku|morse|qr|bar|req|requisition|position|posting|role|department|dept|cost|budget|project|program|module|unit|soc|fips|vendor|supplier|ticket|order|voucher|offer|event|building|store|exam|certification|cert|change|charge|engagement|release|config|configuration|policy|sop|servicenow|wbs|award|clearance|qualification|lot|batch|part|model|taxonomy|denial|adjustment|remark|activity|transaction|t|school|branch|hs|revenue|gl|cage|hazmat|license|licence|machine|billing|diagnosis|procedure|location|site|plant|warehouse|accounting|campaign|tracking|hex|paint|booking|reservation|specialty|speciality|subject|flight|room|seat|gate|afsc|mos|nec|rate|rating|grade|series|occupation|occupational|duty|uic|ein|cip|onet|o\*net|isco|esco|noc|anzsco|fund|task|teacher|lesson|engine|fault|diagnostic|alarm|ward|trouble|dtc|obd|expense|labor|labour|payroll|union|district|provider|facility|tariff|commodity|ceeb|un)$/i;
 const COUNT_LABEL2 = /\b(?:codes|pins|tokens|passcodes|otps|attempts|logins|sign[- ]?ins|resets)\s+(?:[a-z]+\s+){0,2}(?:issued|reviewed|delivered|sent|reset|rotated|blocked|processed|handled|generated|verified|validated|revoked|expired|enrolled|migrated|served|per\s+\w+)(?:\s+per\s+\w+)?\s*[:\-–—]\s*$|\b(?:codes|pins|otps|passcodes)\s+(?:issued|reviewed|delivered|sent|reset|rotated|blocked)\b[^:]{0,20}[:\-]\s*$|\b(?:adoption|usage|growth|enrollment|enrolment|coverage|uptime|throughput|capacity|traffic|volume|count|total|reach|downloads|installs|users)\s*[:\-–—]\s*$/i;
 const COUNT_LABEL = /\b(?:(?!(?:codes|pins|tokens|passcodes|otps|digits)\b|sms\s*[:\-\u2013\u2014]|(?:this|his|is|was|has|its|yes|us|plus|bus|less|class|process|address|access|success|business|status|bonus|campus|focus|alias|bias|chaos|series|news|ss)\b)[a-z]{2,}s|total|volume|count|sales|revenue|traffic|headcount|budget)\s*(?:per\s+\w+\s*)?(?:sent|received|processed|handled|delivered|closed|resolved|served|shipped|made|generated|raised|onboarded|hired|managed)?\s*(?:per\s+\w+\s*)?[:\-–—]\s*$/i;
 const ID_LABEL = /\b(?:employee|student|member|badge|staff|license|licence|npi|dea|candidate|requisition|req|job|case|claim|policy|patient|customer|order|invoice|po|cert|certificate|certification|credential|exam)\s*(?:id|no\.?|number|#)\s*[:#]?\s*$/i;
@@ -220,15 +220,76 @@ const isDate = (s: string) => {
 // a date shape does not make it a count, a range or a date.
 const DIRECT = /\b(?:code|otp|passcode|pin|token|verification|2fa|mfa)\s*(?:(?:is|=)\s*)?[:#=|\-\u2013\u2014]?\s*$/i;
 const COUNT_AFTER_LABEL = /^(?!(?:expires|is|was|this|has|does|goes|works|stays|lasts|remains|always|thanks|minutes|seconds|digits|its|yes|us|plus)$)(?:[a-z]{3,}s|sq|ft|loc|sloc|kloc|rps|qps|tps|ms|gb|tb|mb|kb|k|m|hrs?|mins?)$/i;
-// The file's text for the check only (never stored or shown): compatibility forms (full-width), any script's digits as ASCII,
 // accents off, zero-width characters as a space, and Cyrillic or Greek letters that look Latin as Latin ("Сode" is "Code").
 const LOOKALIKE: Record<string, string> = { "а": "a", "в": "b", "с": "c", "е": "e", "һ": "h", "і": "i", "ј": "j", "к": "k", "м": "m", "н": "h", "о": "o", "р": "p", "ѕ": "s", "т": "t", "у": "y", "х": "x", "ԁ": "d", "ԛ": "q", "ԝ": "w",
   "А": "A", "В": "B", "С": "C", "Е": "E", "Н": "H", "І": "I", "Ј": "J", "К": "K", "М": "M", "О": "O", "Р": "P", "Ѕ": "S", "Т": "T", "У": "Y", "Х": "X",
   "α": "a", "ο": "o", "ρ": "p", "τ": "t", "ν": "v", "Α": "A", "Β": "B", "Ε": "E", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T", "Χ": "X", "Υ": "Y", "Ζ": "Z" };
-function fileText(text: unknown): string {
-  return String(text ?? "").normalize("NFKD").replace(/\p{M}/gu, "").replace(/[\u200b-\u200d\u2060\ufeff]/g, " ")
-    .replace(/\p{Nd}/gu, (d) => { let z = d.codePointAt(0)!; while (z > 0 && /\p{Nd}/u.test(String.fromCodePoint(z - 1)) && d.codePointAt(0)! - z < 9) z--; return String((d.codePointAt(0)! - z) % 10); })
-    .replace(/[\u0370-\u03ff\u0400-\u04ff\u0500-\u052f]/g, (c) => LOOKALIKE[c] ?? c);
+// The zero of each decimal-digit block (every Unicode Nd run is a whole number of 0-9 blocks), built once on first use.
+let ND_ZEROS: number[] | null = null;
+function digitValue(cp: number): number {
+  if (!ND_ZEROS) {
+    ND_ZEROS = [];
+    for (let c = 0x30; c <= 0x1ffff; c++) {
+      if (!/\p{Nd}/u.test(String.fromCodePoint(c))) continue;
+      let e = c; while (/\p{Nd}/u.test(String.fromCodePoint(e + 1))) e++;
+      for (let z = c; z <= e; z += 10) ND_ZEROS.push(z);
+      c = e;
+    }
+  }
+  let lo = 0, hi = ND_ZEROS.length - 1, z = ND_ZEROS[0];
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (ND_ZEROS[mid] <= cp) { z = ND_ZEROS[mid]; lo = mid + 1; } else hi = mid - 1; }
+  return cp - z;
+}
+// The file's text for the check only (never stored or shown): compatibility forms, any script's digits as ASCII, accents off,
+// zero-width characters removed, and Cyrillic or Greek letters that look Latin as Latin ("Сode" is "Code").
+export function fileText(text: unknown): string {
+  return String(text ?? "").normalize("NFKD").replace(/\p{M}/gu, "").replace(/[​-‍⁠﻿­]/g, "")
+    .replace(/\p{Nd}/gu, (d) => d <= "9" && d >= "0" ? d : String(digitValue(d.codePointAt(0)!)))
+    .replace(/[Ͱ-ϿЀ-ӿԀ-ԯ]/g, (c) => LOOKALIKE[c] ?? c);
+}
+// After a code's own label (code, OTP, PIN, passcode, token, verification, 2FA, MFA; not a named label such as "tariff code"),
+// the value that follows it, past connectors, brackets and quotes, is a code unless it has a safe shape: years, a real date with
+// a four-digit year, a standard ("ISO-27001", "NIST-800-53"), money, a count noun after a figure that is not code-length, or a
+// credential word after a certification ("OTP: AZ500 certified"). Privacy first: anything else refuses the file.
+const TAIL_LABEL = /(?:^|[^\w])(?:([\w'-]+)[ -]+)?(codes?|otps?|passcodes?|pins?|tokens?|verification|2fa|mfa)(?![\w])/gi;
+const TAIL_LEAD = /^(?:[\s:#=|~*>→–—"'‘’“”()\[\]{}<>-]|\b(?:is|was|are|as)\b)*/i;
+const TAIL_VALUE = /^[A-Za-z0-9]+(?:(?:\s?[-–—]\s?|[.\/·_]|(?<=\d)\s(?=\d))[A-Za-z0-9]+)*/;
+const STANDARD = /^(?:iso|iec|nist|soc|erc|eip|rfc|pci|hipaa|itil|cmmi|ieee|ansi|sp|fips|astm|din|en|bs|mil|nfpa|osha|ul|csa|cwe|cve|owasp|hl7|icd|cpt|dsm|iata|icao)$/i;
+const COUNT_NOUNS = /^(?:users?|customers?|clients?|accounts|devices|builds?|lines|loc|sloc|kloc|hours?|hrs?|days|weeks|months|years|modules|microservices|services|apps|applications|tickets|cases|claims|charts|records|files|pages|tests|prs|pull|commits|repos|repositories|deployments|releases|employees|people|staff|students|patients|members|sites|stores|locations|servers|nodes|endpoints|apis|requests|rps|qps|tps|transactions|orders|sales|calls|merchants|partners|vendors|projects|resets|doors|sq|ft|ms|gb|tb|mb|kb|k|m|per|percent|items|products|skus|units|contracts|reviews|issues|bugs|incidents|alerts|rules|policies|controls|seats|licenses|beds|clinics|hospitals|schools|branches|regions|countries|languages|teams|engineers|developers|agents|installs|downloads|visits|views|sessions|events|jobs|roles|hires|candidates|applicants|interviews|inmails|emails|resumes|profiles|leads|referrals|offers|invites|invitations|documents|reports|laptops|patents|hits|matches|connections|followers|impressions|clicks|signups|registrations|enrollments|new|more|total|additional|extra|questions|invoices|packages|newsletters|signatures|reminders|relocation|bonus|stipend|credits|points|miles|samples|surveys|responses|tasks|assignments|shifts|cards|boxes|units)$/i;
+const CREDENTIAL_AFTER = /^(?:certified|certification|certificate|exam|exams|course|courses|badge|credential|holder|compliant|compliance|standard|contracts?|tokens?|rev|revision|study|practice|vouchers?|results?|materials|prep|training|labs?)$/i;
+// A hand-over to the person: a sender, "sent me", "gave me" ..., or a code's own label right before the figure.
+const handedTo = (before: string, sender: boolean) => sender || /\b(?:sent|send|gave|texted|emailed|messaged|dm'?d|got|received|told|shared|issued)\s+(?:me|us)\b/i.test(before) || DIRECT.test(before);
+function labelTailAt(line: string, safe: number[][] = []): number {
+  for (const m of line.matchAll(TAIL_LABEL)) {
+    if (m[1] && NAMED_LABEL.test(m[1])) continue;
+    const start = (m.index ?? 0) + m[0].length, rest = line.slice(start), lead = TAIL_LEAD.exec(rest)?.[0] ?? "";
+    const v = TAIL_VALUE.exec(rest.slice(lead.length));
+    if (!v) continue;
+    // The value ends before its first word ("K7X9P2 - expires" is "K7X9P2"); a value that starts with a word is a phrase.
+    const parts = v[0].split(/(\s?[-–—]\s?|[.\/·_]|\s)/);
+    let val = "";
+    for (let k = 0; k < parts.length; k += 2) {
+      if (/^[A-Za-z]{5,}$/.test(parts[k]) && !/^(?:present|current|today)$/i.test(parts[k])) break;
+      val += (k ? parts[k - 1] : "") + parts[k];
+    }
+    if (!val || (/^[A-Za-z]{4,}$/.test(parts[0]) && !STANDARD.test(parts[0]))) continue;
+    const vStart = start + lead.length, flat = val.replace(/[^A-Za-z0-9]/g, ""), digits = flat.replace(/\D/g, "").length, letters = flat.length - digits;
+    if (!(flat.length >= 4 && (digits >= 4 || (digits >= 2 && letters >= 2)))) continue;
+    const groups = val.split(/\s?[-–—]\s?|[.\/·_]|\s/).filter(Boolean);
+    const after = line.slice(vStart + val.length), next = /^[\s:,.)\]"'’”]*([A-Za-z%][A-Za-z']*|%)/.exec(after)?.[1] ?? "";
+    const rising = groups.length === 2 && groups.every((g) => /^\d{3,}$/.test(g)) && groups[0].length === groups[1].length && Number(groups[1]) > Number(groups[0]);
+    const codeLength = /^\d{6,8}$/.test(flat) && letters === 0 && !rising;
+    const safeShape = groups.every((g) => /^(?:19|20)\d\d$/.test(g)) // years
+      || (groups.length === 2 && /^(?:19|20)\d\d$/.test(groups[0]) && /^(?:\d\d|present|now|current|today)$/i.test(groups[1]))
+      || (/(?:19|20)\d\d/.test(val) && isDate(val.replace(/\s/g, "").replace(/[–—]/g, "-"))) // a real date
+      || STANDARD.test(groups[0]) // "ISO-27001", "NIST-800-53"
+      || /[$€£]\s*$/.test(line.slice(0, vStart)) || /^(?:%|k|usd|eur|gbp|dollars|euros)$/i.test(next) // money
+      || (letters === 0 && !codeLength && COUNT_NOUNS.test(next)) // a count ("Code: 1200 builds")
+      || (letters > 0 && CREDENTIAL_AFTER.test(next)); // a certification ("OTP: AZ500 certified")
+    if (!safeShape) return vStart;
+    safe.push([vStart, vStart + val.length]);
+  }
+  return -1;
 }
 // After a code's own label, a range stays only as two equal-length numbers that rise before a count ("Code: 1200 - 1500 builds").
 function risingRange(line: string, at: number): boolean {
@@ -246,7 +307,7 @@ export function fileCodeLines(text: string): number[] {
     if (rest.length > 1 && /^[\s:#=|\-\u2013\u2014.]+$/.test(rest[0])) rest.splice(0, 2, `${rest[0].trim()} ${rest[1].trim()}`);
     const n1 = rest[0] ?? "", n2 = rest[1] ?? "";
     if (!n1.trim() || !lines.slice(i + 1, i + 6).some((l) => l.trim())) return;
-    const ctxEnd = LEFT_CTX.test(raw.replace(/\s*$/, " ")), digitEnd = /(?:^|\D)\d{2,4}\s*$/.test(raw);
+    const ctxEnd = LEFT_CTX.test(raw.replace(/\s*$/, " ")) || /\b(?:codes?|otps?|passcodes?|pins?|tokens?|verification|2fa|mfa)[\s:#=|\-\u2013\u2014>"'(\[]*$/i.test(raw), digitEnd = /(?:^|\D)\d{2,4}\s*$/.test(raw);
     const rightNext = /^\s*(?:is|was|are|=|-|\u2013|\u2014|\()/i.test(n1) && RIGHT_CTX.test(" " + n1.trim());
     if (!ctxEnd && !digitEnd && !rightNext) return;
     // The code or its hand-over continues on the next line or two ("Workday sent me" / "739 201", "739" / "201",
@@ -256,13 +317,32 @@ export function fileCodeLines(text: string): number[] {
     const at = lineCodeAt(join), len = raw.trimEnd().length;
     // A split code starts on this line; a carried code is among the next line's first words; a code before "is my ... code"
     // is on this line.
-    const ok = at >= 0 && ((digitEnd || rightNext) && at < len || ctxEnd && at <= len + 1 + (/^(?:\S+\s+){0,2}/.exec(n1.trim())?.[0].length ?? 0));
+    const ok = at >= 0 && ((digitEnd || rightNext) && at < len || ctxEnd && at <= len + 1 + (/^["'\[({<\u201c\u2018]*(?:\S+\s+){0,2}/.exec(n1.trim())?.[0].length ?? 0));
     if (ok) hits.push(i + 1);
   });
   return hits;
 }
 // The index of the first suspected code on a line, or -1.
 function lineCodeAt(raw: string): number {
+  const safeSpans: number[][] = [], tail = labelTailAt(raw, safeSpans);
+  if (tail >= 0) return tail;
+  // A run of 9 or more digits handed to the person ("Workday sent me 4829130217"), which the token rule's 4-8 digits miss.
+  // A run of 9 or more digits, or a letter-and-digit code of 4 or 11+ characters, handed to the person ("Workday sent me 4829130217",
+  // "Okta sent me K7X9"), which the token rule's 4-8 digits and 5-10 characters miss. Labels are judged by labelTailAt.
+  for (const m of raw.matchAll(/(?<![\w$\u20ac\u00a3.,])(?:\d{9,}|(?=[A-Za-z0-9]{4}(?![\w])|[A-Za-z0-9]{11,40}(?![\w]))(?=(?:[A-Za-z]*\d){2})(?=(?:\d*[A-Za-z]){2})[A-Za-z0-9]+)(?![\w%])/g)) {
+    const before = raw.slice(0, m.index);
+    if (STRONG_SENDER.test(raw) || /\b(?:sent|send|gave|texted|emailed|messaged|dm'?d|got|received|told|shared|issued)\s+(?:me|us)\b/i.test(before)) return m.index ?? 0;
+  }
+  // Grouped digits handed to the person ("Workday sent me 7392 0184 2231"): 6 or more digits in 2+ groups that are not a rising
+  // range, a date, years or a phone number.
+  for (const m of raw.matchAll(/\b(?:sent|send|gave|texted|emailed|messaged|dm'?d|got|received|told|shared|issued)\s+(?:me|us)\b[\s:,"'([]*(\d{2,6}(?:\s?[-\u2013\u2014.\/]\s?\d{2,6}|\s\d{2,6})+)(?![\w])/gi)) {
+    const val = m[1], groups = val.split(/\D+/).filter(Boolean), digits = groups.join("").length, at = (m.index ?? 0) + m[0].length - val.length;
+    if (digits < 6) continue;
+    if (groups.length === 2 && groups[0].length === groups[1].length && Number(groups[1]) > Number(groups[0])) continue; // a range
+    if (groups.every((g) => /^(?:19|20)\d\d$/.test(g)) || isDate(val.replace(/\s/g, ""))) continue;
+    if ([...raw.matchAll(PHONE)].some((p) => (p.index ?? 0) <= at && at < (p.index ?? 0) + p[0].length)) continue;
+    return at;
+  }
   if (/\b(?:otp|mfa|2fa|code|passcode|pin)(?=\d)(?!(?:19|20)\d\d\b)\d{4,8}\b/i.test(raw)) return 0;
   if (/\b(?:otp|mfa|2fa)-(?!(?:19|20)\d\d\b)(?:\d{4,8}|(?=[A-Za-z0-9]{5,10}\b)(?=(?:[A-Za-z]*\d){2})(?=(?:\d*[A-Za-z]){2})[A-Za-z0-9]{5,10})\b/i.test(raw)) return 0;
   // A code split by a spaced dash right after its own label ("OTP: 739 - 201"); two years are a range ("Code: 2019 - 2021").
@@ -284,6 +364,7 @@ function lineCodeAt(raw: string): number {
     if (!alnum && /^\d{1,3}(?:,\d{3})+$/.test(tok) && !strongCode && !sender) continue; // a thousands figure
     if (!alnum && !direct && /^\d+\.\d+\.\d+/.test(tok)) continue; // a version or address
     if (phones.some(([p, q]) => at < q && end > p)) continue;
+    if (safeSpans.some(([p, q]) => at >= p && end <= q)) continue; // judged safe after its own label
     if ((!direct || /(?:19|20)\d\d/.test(tok)) && isDate(line.slice(Math.max(0, at - 3), end + 3)) && /[\/.-]/.test(tok)) continue;
     if (/[$€£]\s*$/.test(before) || /^\s*(?:k\b|%|usd|eur|gbp|dollars|euros|per\b|a\s+(?:year|month|week|day|hour)|\/\s*(?:hr|hour|yr|year|month))/i.test(after)) continue;
     if ((!direct || risingRange(line, at)) && (/\s*[-–—]\s*\d/.test(after.slice(0, 4)) || /\d\s*[-–—]\s*$/.test(before))) continue; // a range ("1200 - 1500")
@@ -300,7 +381,9 @@ function lineCodeAt(raw: string): number {
     // After a code's own label only a count (a plural noun or a unit: "Code: 4500 builds", "Pin: 4500 sq ft") or a credential
     // word ("OTP: AZ500 certified") keeps the figure; "valid", "expires", "Workday" or a name after it is a handed-over code.
     if (next && !(direct && !COUNT_AFTER_LABEL.test(next) && !(alnum && /^(?:certified|certification|certificate|exam|course|badge|credential|holder|compliant|compliance)$/i.test(next))) && !AFTER_FUNC.test(next) && !/^(?:codes?|passcodes?|pins?|otps?|tokens?)$/i.test(next)
-      && !(sender && /^(?:texts?|logins?|sign-?ins?|sms|messages?|verifications?|otps?|digits)$/i.test(next))) continue; // a count noun
+      && !(sender && /^(?:texts?|logins?|sign-?ins?|sms|messages?|verifications?|otps?|digits)$/i.test(next))
+      // After a hand-over (a sender, or "sent me", "gave me" ...) only a known count noun makes the figure a count.
+      && !(handedTo(before, sender) && !COUNT_NOUNS.test(next) && !(alnum && CREDENTIAL_AFTER.test(next)))) continue; // a count noun
     const left = LEFT_CTX.exec(before), right = RIGHT_CTX.test(after);
     const verb = left ? left[0].trim().split(/[\s:,]+/)[0].toLowerCase() : "";
     // A figure with a money purpose: "Client sent me 120000 for review", "VP gave me 4500 and a deadline", "Received 50000 from
@@ -308,21 +391,6 @@ function lineCodeAt(raw: string): number {
     if (!alnum && !strongCode && !right && (money || (/^(?:sent|emailed|messaged|got|received|gave)$/.test(verb) || (sender && /\b(?:sent|emailed|messaged|gave|got|received)\b/i.test(before))))
       && !SIGNIN_PURPOSE.test(after) && (money || (!FROM_SENDER.test(after) && (/^\s*(?:(?:for|to|in|on|at|as|by|from)\s+\S|,\s*(?:a|an|and|plus|with)\b|and\s+(?:a|an|the|\d))/i.test(after) || (verb === "gave" && /\w/.test(after)))))) continue;
     if (strongCode || sender || left || right) return at;
-  }
-  // A value right after a code's own label, unless a named label comes first ("Tariff code: 8471300000"): one long run
-  // ("Code: 123456789", "Token: 12345678901234567890") or dash-joined groups ("Recovery code: 7392-0184-2231", "Code: AB-12-CD").
-  // A real date with a four-digit year and a rising range of two equal-length numbers before a count stay.
-  for (const m of line.matchAll(/(?:^|([\w'-]+)[ -]+)(?:code|otp|passcode|pin|token|verification(?:\s+code)?)\b\s*(?:is\s*)?[:#=]?\s*([A-Za-z0-9]+(?:\s?[-–—]\s?[A-Za-z0-9]+)*)(?![\w])/gi)) {
-    if (m[1] && NAMED_LABEL.test(m[1])) continue;
-    const val = m[2], flat = val.replace(/[\s–—-]/g, ""), digits = flat.replace(/\D/g, "").length, groups = val.split(/\s?[-–—]\s?/);
-    if (digits < 2) continue;
-    if (/^(?:19|20)\d\d[-–—]\d{1,2}[-–—]\d{1,2}$|^\d{1,2}[-–—]\d{1,2}[-–—](?:19|20)\d\d$/.test(val.replace(/\s/g, "")) && isDate(val.replace(/\s/g, "").replace(/[–—]/g, "-"))) continue;
-    if (groups.length === 2 && groups.every((g) => /^\d{3,}$/.test(g)) && groups[0].length === groups[1].length && Number(groups[1]) > Number(groups[0])
-      && COUNT_AFTER_LABEL.test(/^[\s:,.)]*([A-Za-z][A-Za-z']*)/.exec(line.slice((m.index ?? 0) + m[0].length))?.[1] ?? "")) continue;
-    if (/^(?:19|20)\d\d$/.test(groups[0]) && groups.length === 2 && /^(?:(?:19|20)?\d\d|present|now)$/i.test(groups[1])) continue; // years
-    const long = groups.length === 1 && flat.length >= 9 && /\d.*\d/.test(flat);
-    const grouped = groups.length >= 2 && flat.length >= 5 && groups.every((g) => /\d/.test(g) || g.length <= 4) && (digits >= 9 || /[A-Za-z]/.test(flat));
-    if (long || grouped) return (m.index ?? 0) + m[0].length - val.length;
   }
   return -1;
 }

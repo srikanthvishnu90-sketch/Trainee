@@ -312,5 +312,8 @@ Deno.test("R8G-8 Greptile on #579: single-quoted and prefixed values, standalone
     prop("ContentTypeId", "0x0101009A1B2C3D4E5F60718293A4B5C6D7E8F9"), prop("_dlc_DocId", "https://contoso.sharepoint.com/sites/hr/_layouts/15/DocIdRedir.aspx?ID=HR-1234-56789"),
     prop("_dlc_DocIdItemGuid", "a1b2c3d4-e5f6-4789-abcd-ef0123456789"), prop("Template", "Normal.dotm"), prop("Version", "16.0.17328.20142"), prop("Order", "4500", "r8"))), "Office and SharePoint system properties");
   await refused(docx(custom(prop("_dlc_DocId", "482913"))), "a code under a system property name");
+  await refused(docx(custom(prop("Template", "code 482913.dotm"))), "a code in a template name");
+  await refused(docx(custom(prop("_dlc_DocId", "https://contoso.example/r?code=482913"))), "a code in a system link's query");
+  await refused(docx(custom(prop("MSIP_Label_x_Name", "OTP 482913"))), "a code in a label name");
   await refused(docx(custom(prop("Note", "Verification code: 482913"))), "a code in an ordinary custom property");
 });

@@ -25,6 +25,7 @@
 // (_shared/model_gateway.ts): the calls it made, zero when it made none, or
 // "unrecorded" when the sink failed. A missing row is never a zero.
 
+import { careerAskCanon } from "../_shared/career_ask_canon.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { chatSwitches, liveSwitches, readSubmitSettings } from "./chat_switches.ts"; // D-036 release flags (each gate below reads one switch)
 import { connectUrlsFor } from "../_shared/connect_link.ts"; // D-037: the send consent link
@@ -432,6 +433,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     try { careerBatch = normalizeCareerBatchRequest(body.career_batch); }
     catch (_) { return json(cors, { error: "invalid_career_batch", action: null, turn_key: turnKey }, 400); }
     const requestHash = await careerRequestHash(hashedMessage, imageBlocks, careerTask ?? (careerBatch ? { batch: careerBatch } : null));
+    // fix/r9-apply-completion (after the request hash, which digests what was typed): an apply or job-search ask as people text it (filler, emoji, a typo, Spanish, romanized Hindi,
+    // "can you apply me to ...?") is routed by its plain English reading (career_ask_canon.ts), so the apply turn and the
+    // router's search read it as they read the plain ask. Only the routing reads it: the stored message is what was typed,
+    // and the brain is given the person's own words (typedMessage).
+    const typedMessage = message;
+    message = careerAskCanon(message) ?? message;
     const persistence = createCareerPersistence(admin);
     // POOL LOADER (Lane E, Feature Depth Program v2 — closes the gap
     // diagnosed in the Lane D operator checklist §8): ctx.postings is
@@ -1256,7 +1263,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const summary = summaryFor(win.cut, recent, now, tz);
         // WO-066: the person's own daily application limit (the queue's SQL holds the same bound); unread, the default.
         const daily = await admin.rpc("career_apply_daily_limit", { p_user: user.id }).then((r: any) => r.error ? undefined : Number(r.data) || undefined, () => undefined);
-        const turn = await agentTurn({ message, history, stores: ctx as unknown as Record<string, unknown>, userId: user.id, threadId: tid, now,
+        const turn = await agentTurn({ message: typedMessage, history, stores: ctx as unknown as Record<string, unknown>, userId: user.id, threadId: tid, now,
           model: (payload) => callModel(cfg, payload, { meter, role: "chat" }), postings: (q) => postingsDb.search(searchWords(q), 150), alerts: alertStore,
           mail: supabaseMailStore(admin), interviews: supabaseInterviewStore(admin), digest: supabaseDigestStore(admin),
           events, tz, summary, hired: hiredSourceFromEnv(Deno.env, admin), confirmations: confirmEvents,

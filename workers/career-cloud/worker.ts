@@ -78,6 +78,10 @@ const BY_DESIGN = new Set([
   // MASS APPLY (2026-11-01): the posting closed after the approval (its page 404/410 at the open, nothing filled): that one
   // posting ends, nothing sent; it is no failure of the site, so it never counts toward pausing the ATS.
   "POSTING_CLOSED",
+  // fix/r9-apply-completion: an approved payload that cannot be hashed again (career_apply_store.ts hashApplyPayload) is
+  // refused before anything is filled or sent. It is this one application's own fault, never the site's: counted as an error
+  // it paused Greenhouse for every person for 6 hours (2 of the last 50 attempts) in the 1,000-task eval.
+  "INVALID_APPLY_PAYLOAD",
 ]);
 const BOT_CHECK = (state: string, reason: string) =>
   (state === "needs_user" && reason === "captcha") || (state === "not_submitted" && reason === "CAPTCHA_AT_SUBMIT");

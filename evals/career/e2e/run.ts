@@ -365,6 +365,8 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
       const j = judgeE2E(t.expect, state);
       items.push({ id: t.id, area: t.area, kind: t.kind, pass: j.pass, failed: j.failed, stage: state.stage, replies, intents,
         ...(loaded.scaled ? { family: t.family, style: t.style, ats: t.ats, heldout: !!t.heldout, est } : {}) });
+      // E2E_TRACE=1: each task's replies, the intent that answered each turn, and where it stopped (for reading a failure by hand).
+      if (Deno.env.get("E2E_TRACE")) console.log(`--- ${t.id} trace\n${replies.map((x, k) => `[${intents[k] ?? "none"}] ${x}`).join("\n---\n")}\nstage: ${state.stage.join(" | ")}\n--- end`);
       if (!o.quiet) console.log(`${t.id} ${j.pass ? "PASS" : "FAIL"} ${t.area}/${t.kind}${j.pass ? "" : `: ${j.failed.join("; ")}`}`);
     }
     const scored = items.filter((x) => x.kind !== "guard"), guards = items.filter((x) => x.kind === "guard");

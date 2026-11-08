@@ -2,7 +2,6 @@
 // career state the CareerHost persists (ctx.state is the host's turn ctx: profile, trackStore, …). Tools return data; the
 // model writes the words. No reply prose lives here.
 import { isAutomatedInbox } from "../automated_inbox.ts";
-import { nameKey } from "../career_networking.ts";
 import { conversationFor, type RepliesStore } from "../career_outreach_replies.ts";
 import { CareerProfile, CareerTrack, CareerPrep, CareerPaths } from "../router_core.career.js";
 import { AskPerson, type ToolSpec, type ToolCtx } from "./loop.ts";
@@ -178,6 +177,9 @@ async function accountContacts(store: OutreachStore, c: ToolCtx, i: { firm?: unk
 }
 // The drafts saved in this turn, by the turn (one batch a turn).
 const TURN_DRAFTS = new WeakMap<object, OutreachDraft[]>();
+// A name's key in any script, accents folded: the same rule as career_networking.ts nameKey (kept here so the brain's
+// tools do not import the networking turn and its whole graph into the brain eval; deploy-evidence S3).
+const nameKey = (s: unknown) => String(s ?? "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[’']/g, "").replace(/&/g, " and ").replace(/[^\p{L}\p{N}@.]+/gu, " ").trim();
 const plainName = (v: unknown) => nameKey(String(v ?? "").trim());
 // "Maya" names "Maya Chen"; "Maya Chen" names "Maya Chen" (and "Maya Chen-Li"), never "Mayan Chen".
 const namedAs = (rowName: unknown, k: string) => { const n = nameKey(rowName); return !!k && (n === k || n.startsWith(`${k} `)); };

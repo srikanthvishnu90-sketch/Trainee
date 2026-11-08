@@ -1,6 +1,6 @@
 // CONTACT OUTREACH (release 9 workstream E, proposal D-043), the contact File page: who the person is and why they are
 // relevant, 5 to 10 cited professional facts with their dates, the address with its confidence and how it was found, and
-// the draft exactly as it would go. Built on the shared File design (file_design.ts) and the brand tokens (brand.ts, PLUM).
+// every email the approval covers (the first and each follow-up) exactly as it would go. Built on the shared File design (file_design.ts) and the brand tokens (brand.ts, PLUM).
 // Nothing private: only the kept professional facts (career_contact_facts.ts already dropped home address, family,
 // health, religion and politics), never the evidence internals (RCPT answers, the probe), never the person's own data
 // beyond their first name. The page carries its expiry and is never indexed.
@@ -28,8 +28,13 @@ export function contactPageHtml(o: { contact: ContactIn; draft: ContactDraft | n
     value: e.approvable && e.email ? stated(`Confidence ${e.score}`, "From Trainee's records") : unknown(`Unconfirmed (${e.score}/100): not sendable`),
   }], e.approvable ? (card?.test_mode ? { title: "Test mode", text: `This email would go to ${card.to} (an owner test address), not to ${e.email}.` } : null)
     : { title: "Unconfirmed", text: "This address can't be confirmed, so it won't be sent to. Try an introduction through someone you know there, or the company's contact form." });
-  const draftHtml = o.draft ? sectionHtml("The email, exactly as it would go", `<p class="dsub">Subject: ${esc(o.draft.subject)}</p><pre class="draft">${esc(card ? card.mails[0].text : o.draft.body)}</pre>`
-    + `<p class="fineprint">Opens with fact ${o.draft.hook}: ${esc(o.draft.hook_fact?.claim ?? "")}. Nothing is sent until you approve this exact email.</p>`) : "";
+  // Every mail the card's hash approves is shown, exactly as it would go (D-MS-1): the first email and each follow-up,
+  // with when it goes. Without a card, the draft's own text.
+  const mails = card ? card.mails : o.draft ? [{ subject: o.draft.subject, text: o.draft.body, after_days: 0 }] : [];
+  const mailHtml = (m: { subject: string; text: string; after_days: number }, i: number) =>
+    `<p class="dsub">${i === 0 ? "" : `Follow-up ${i}, ${m.after_days} days after the first if there is no reply · `}Subject: ${esc(m.subject)}</p><pre class="draft">${esc(m.text)}</pre>`;
+  const draftHtml = o.draft ? sectionHtml(mails.length > 1 ? `The ${mails.length} emails, exactly as they would go` : "The email, exactly as it would go", mails.map(mailHtml).join("")
+    + `<p class="fineprint">Opens with fact ${o.draft.hook}: ${esc(o.draft.hook_fact?.claim ?? "")}. Nothing is sent until you approve ${mails.length > 1 ? `these ${mails.length} exact emails; a reply, a bounce or an opt-out stops the follow-ups` : "this exact email"}.</p>`) : "";
   const body = `<p class="why">${esc(o.why ?? `${p.title ? `${p.title} at ${p.company}` : `Works at ${p.company}`}.`)}</p>`
     + sectionHtml("What's public about their work", factsHtml, { caveat: thin }) + emailRows + draftHtml;
   const inner = fileShellHtml({ made: madeForLine(o.firstName, o.now, o.tz), eyebrow: "Contact", title: p.name, stamp: null, stampMissing: "Read from public pages", intro: null, body });

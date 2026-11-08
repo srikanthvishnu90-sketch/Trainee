@@ -13739,7 +13739,10 @@ const CareerRouter = (() => {
     // A counter-drafting request that reports an offer ("my current job pays $22/hour; they offered $24; draft a counter at $27/hour")
     // is the negotiation's, not a "current job" recommendation ask.
     const counterDraftWithOffer = (/\b(?:draft|write|compose)\b[^.?!]*\bcounter\b/i.test(s(text)) && /\boffer/i.test(s(text))) || /\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d/i.test(s(text));
-    const recommendationIntent = !counterDraftWithOffer && recommendations && recommendations.intentFor(text);
+    // Review of #596 (e2e eval resume.fit, 0/25): "make my resume fit the Data Analyst job at Stripe, one page pdf please" asks
+    // for the file, not for which roles fit the record; the tailor gate below owns it ("make my resume").
+    const tailorAsk = /\b(?:make|get)\s+my\s+(?:resume|cv)\s+(?:fit|match)\b|\b(?:fit|match)\s+my\s+(?:resume|cv)\s+(?:to|for)\b/.test(lc(text));
+    const recommendationIntent = !counterDraftWithOffer && !tailorAsk && recommendations && recommendations.intentFor(text);
     if (recommendationIntent) {
       const rec = recommendations.recommend(Object.assign({}, c, { recommendationIntent, text: s(text) }));
       return { intent: "career_recommendations", reply: rec.text, resultStatus: "prepared", sends: 0, guidance: rec, payload: rec, artifact: rec };

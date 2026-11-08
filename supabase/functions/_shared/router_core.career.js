@@ -22923,7 +22923,8 @@ const CareerRouter = (() => {
     }
     const recommendations = typeof CareerRecommendations !== "undefined" ? CareerRecommendations : req("./154-career-recommendations.js");
     const counterDraftWithOffer = (/\b(?:draft|write|compose)\b[^.?!]*\bcounter\b/i.test(s(text)) && /\boffer/i.test(s(text))) || /\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d/i.test(s(text));
-    const recommendationIntent = !counterDraftWithOffer && recommendations && recommendations.intentFor(text);
+    const tailorAsk = /\b(?:make|get)\s+my\s+(?:resume|cv)\s+(?:fit|match)\b|\b(?:fit|match)\s+my\s+(?:resume|cv)\s+(?:to|for)\b/.test(lc(text));
+    const recommendationIntent = !counterDraftWithOffer && !tailorAsk && recommendations && recommendations.intentFor(text);
     if (recommendationIntent) {
       const rec = recommendations.recommend(Object.assign({}, c, { recommendationIntent, text: s(text) }));
       return { intent: "career_recommendations", reply: rec.text, resultStatus: "prepared", sends: 0, guidance: rec, payload: rec, artifact: rec };

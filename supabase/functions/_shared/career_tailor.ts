@@ -28,7 +28,25 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v ?? null));
 // vouch for a skill name, or be picked.
 export function confirmedOnly(profile: any): any {
   const facts = (CareerProfile.confirmedFacts(profile || {}) as any[]).filter((f) => f.status !== "draft").map(clone);
-  return CareerProfile.createProfile({ id: profile?.id, basics: clone(profile?.basics || {}), facts });
+  return withResumeHeader(CareerProfile.createProfile({ id: profile?.id, basics: clone(profile?.basics || {}), facts }), profile);
+}
+// RELEASE 9: the header the person confirmed with their resume (142 confirmResumeHeader: shown word for word with the
+// entries, recorded only at their yes, with its time) travels with the confirmed record; one never confirmed does not.
+// 123 prints it only where no name was typed for the resume (set_resume_contact wins).
+// deno-lint-ignore no-explicit-any
+function withResumeHeader(p: any, from: any): any {
+  const h = from?.resume_header;
+  if (h && typeof h === "object" && typeof h.name === "string" && h.name.trim() && typeof h.confirmed_at === "string" && h.confirmed_at) p.resume_header = clone(h);
+  return p;
+}
+// The name and email at the top of the file: the ones typed for the resume, else (only when no name was typed) the header
+// the person confirmed with it. 123's headerOf rule, so what is checked here is what prints. contact "typed" takes only the
+// typed ones (prepare-ahead: the form needs the first name, last name and email as answers, and asks for them once).
+// deno-lint-ignore no-explicit-any
+export function resumeContact(p: any, contact: "typed" | "confirmed" = "confirmed"): { name: string | null; email: string | null } {
+  const b = p?.basics || {}, h = contact === "confirmed" ? p?.resume_header : null;
+  if (!b.name && h && h.name) return { name: String(h.name), email: h.email ? String(h.email) : null };
+  return { name: b.name ? String(b.name) : null, email: b.email ? String(b.email) : null };
 }
 
 const HEADING: Record<string, string> = { experience: "Experience", project: "Projects", education: "Education", leadership: "Leadership", certification: "Certifications" };
@@ -380,7 +398,7 @@ export interface TailorDeps { render: ResumeRenderer; resumes: ResumeStore; tail
 export type TailorOut = {
   ok: true; text: string; link: string; expires_at: string; changelog: string; changes: ChangeItem[]; sha256: string; filename: string;
   persona: string | null; job_id: string | null; company: string | null; ats: { status: string; warnings: string[] };
-  not_on_your_record: string[]; lead_not_picked: string[]; rendered_in: string; ms: number; detail: { doc: any; base: any; diff: any; docx: Uint8Array | null };
+  not_on_your_record: string[]; lead_not_picked: string[]; rendered_in: string; ms: number; detail: { doc: any; base: any; diff: any; docx: Uint8Array | null; pdf: Uint8Array };
   // RELEASE 9: the posting against the resume (missing, weak, emphasise) and the top of the file as it prints, both for the
   // chat before the file is sent; the layout and its page fit when one was asked for.
   gaps: GapReport; preview: string; layout: LayoutName | "plain"; fit: FitRecord | null; own_layout?: { replaced: number; missing: string[] };
@@ -389,15 +407,17 @@ export type TailorOut = {
 export async function tailorForPosting(o: {
   userId: string; profile: any; posting: { text: string; job_id?: string | null; company?: string | null };
   persona?: Persona | null; deps: TailorDeps; now: number; layout?: LayoutName | null; ownDocx?: Uint8Array | null; swaps?: Swap[];
+  contact?: "typed" | "confirmed";
 }): Promise<TailorOut> {
   const t0 = performance.now();
   const ms = () => Math.round(performance.now() - t0);
   const clean = confirmedOnly(o.profile);
   if (!(clean.facts || []).some((f: any) => HEADING[f.kind])) return { ok: false, refused: "no_confirmed_facts", reason: "there are no confirmed experience, project or education facts on file to build a resume from", ms: ms() };
-  if (!clean.basics?.name || !clean.basics?.email) return { ok: false, refused: "no_contact", reason: `your name and email are not on your profile yet, and an employer's system reads them from the top of the resume. Ask exactly: "${CONTACT_QUESTION}"`, ms: ms() };
+  const top = resumeContact(clean, o.contact ?? "confirmed");
+  if (!top.name || !top.email) return { ok: false, refused: "no_contact", reason: `your name and email are not on your profile yet, and an employer's system reads them from the top of the resume. Ask exactly: "${CONTACT_QUESTION}"`, ms: ms() };
   const persona = o.persona ?? null;
   const hidden = persona ? persona.hide.filter((id) => CareerProfile.getFact(clean, id)) : [];
-  const picked = hidden.length ? CareerProfile.createProfile({ id: clean.id, basics: clean.basics, facts: clean.facts.filter((f: any) => !hidden.includes(f.id)) }) : clean;
+  const picked = hidden.length ? withResumeHeader(CareerProfile.createProfile({ id: clean.id, basics: clean.basics, facts: clean.facts.filter((f: any) => !hidden.includes(f.id)) }), clean) : clean;
   const jd = CareerTailor.parseJD(o.posting.text);
   const t = (o.deps.tailor ?? CareerTailor.tailorResume)(picked, jd, { jobId: o.posting.job_id ?? null, company: o.posting.company ?? null });
   if (!t.ok) return { ok: false, refused: "truth_audit", reason: `the truth check refused it: ${(t.violations || []).slice(0, 3).map((v: any) => v.reason).join("; ")}`, ms: ms() };
@@ -430,7 +450,7 @@ export async function tailorForPosting(o: {
     ok: true, text, link, expires_at: new Date(o.now + LINK_TTL_SECONDS * 1000).toISOString(), changelog: log.line, changes: log.items,
     sha256: r.sha256, filename: r.filename, persona: persona?.name ?? null, job_id: o.posting.job_id ?? null, company: o.posting.company ?? null,
     ats: { status: r.ats.status, warnings: r.ats.warnings }, not_on_your_record: (t.requiredGaps || []).map((g: any) => g.requirement),
-    lead_not_picked: lead.filter((id) => !selected.has(id)), rendered_in: r.where, ms: ms(), detail: { doc, base, diff, docx: r.docx ?? null },
+    lead_not_picked: lead.filter((id) => !selected.has(id)), rendered_in: r.where, ms: ms(), detail: { doc, base, diff, docx: r.docx ?? null, pdf: r.pdf },
     gaps: gapAnalysis({ jd, profile: clean, doc, gaps: t.gaps || [] }), preview: previewText(r.lines ?? ((CareerRender as any).sourceLines(doc) as { text: string }[]).map((l) => l.text)),
     layout: r.layout ?? "plain", fit: r.fit ? fitRecord(r.fit) : null, ...(r.replaced !== undefined ? { own_layout: { replaced: r.replaced, missing: r.missing ?? [] } } : {}),
   };

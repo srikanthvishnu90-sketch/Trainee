@@ -8,6 +8,8 @@
 //            DOCX); with no name and email at all the router no longer renders a nameless file (it shipped Resume_<co>.pdf
 //            starting at SKILLS) but asks for them, as tailor_resume does; and a confirmed contact line that does not come
 //            back out of the file refuses the file.
+//   tool/1-2 The chat's tailor_resume prints the header the person confirmed (the form path still asks for a typed name and
+//            email) and attaches its PDF and Word files to the reply; route/1 "make my resume fit the X job" is a tailoring.
 //   parity/1-2 The DOCX (Inter) wraps no further than the PDF (Helvetica metrics), so LibreOffice lays it out on the PDF's pages.
 // Offline: everything renders in this process.
 import * as zlib from "node:zlib";
@@ -208,3 +210,50 @@ Deno.test({ name: "parity/2 LibreOffice lays the DOCX out on the PDF's pages, wi
     }
   } finally { await Deno.remove(dir, { recursive: true }); }
 } });
+
+// ------------------------------------------------------------------------------------------------ the chat's tailor_resume
+// e2e eval (full set, 2026-11-08): "make my resume fit ... one page pdf" and the other phrasings the router does not read reached
+// the brain's tailor_resume, which refused a person whose name and email are the header they confirmed with their resume
+// (no_contact), and, when it did make a file, returned only a link: no PDF rode the reply (resume.fit 0/25).
+const { careerTools } = await import("../../supabase/functions/_shared/agent/career_tools.ts");
+const { memoryPersonaStore } = await import("../../supabase/functions/_shared/career_tailor.ts");
+const fromB64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+Deno.test("tool/1 tailor_resume uses the confirmed header and attaches its PDF and Word files to the reply", async () => {
+  const store = memoryResumeStore(), sent: any[] = [];
+  const tools = Object.fromEntries(careerTools({ postings: async () => [], tailor: { posting: async () => null, personas: memoryPersonaStore(), resumes: store, render: edgeRenderer(), deliver: (d) => sent.push(d) } } as any).map((x: any) => [x.name, x]));
+  const ctx = { userId: USER, threadId: "t1", now: NOW, state: { profile: headerOnlyProfile() } as Record<string, any>, turn: { message: "make my resume fit this job, one page pdf please", added: [] as string[] } };
+  const r = await tools.tailor_resume.run({ posting_text: DATA_POSTING, layout: "trainee" }, ctx) as any;
+  assert(r.ok && r.link, JSON.stringify(r).slice(0, 300));
+  eq(sent.map((d) => [d.format, d.mime]), [["pdf", "application/pdf"], ["docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]]);
+  eq(r.attached, [sent[0].filename, sent[1].filename], "the model is told what rides its reply");
+  const pdf = fromB64(sent[0].base64);
+  eq(crypto.createHash("sha256").update(pdf).digest("hex"), r.sha256, "the attached PDF is the stored one, byte for byte");
+  assert(flat(R.extractPdfLines(Buffer.from(pdf))).startsWith(`${NAME} ${CONTACT}`), "it starts with their confirmed name and contact line");
+  assert(flat(R.extractDocxLines(Buffer.from(fromB64(sent[1].base64)))).startsWith(`${NAME} ${CONTACT}`), "and so does the Word copy");
+  eq(r.fit?.pages, 1, "one page");
+  assert(!("detail" in r), "no bytes or internals in what the model reads");
+  // Without a deliverer (another host), the result is as before: the link, nothing attached.
+  const bare = Object.fromEntries(careerTools({ postings: async () => [], tailor: { posting: async () => null, personas: memoryPersonaStore(), resumes: store, render: edgeRenderer() } } as any).map((x: any) => [x.name, x]));
+  const r2 = await bare.tailor_resume.run({ posting_text: DATA_POSTING }, ctx) as any;
+  assert(r2.ok && r2.link && !("attached" in r2), JSON.stringify(r2).slice(0, 200));
+});
+
+Deno.test("tool/2 the form path takes only a typed or answered name and email: a resume header alone asks the contact questions", async () => {
+  const profile = headerOnlyProfile();
+  const chat = await tailorForPosting({ userId: USER, profile, posting: { text: DATA_POSTING }, deps: { render: edgeRenderer(), resumes: memoryResumeStore() }, now: NOW });
+  assert(chat.ok, "the chat makes the file from the confirmed header");
+  const form = await tailorForPosting({ userId: USER, profile, posting: { text: DATA_POSTING }, deps: { render: edgeRenderer(), resumes: memoryResumeStore() }, now: NOW, contact: "typed" });
+  assert(!form.ok && form.refused === "no_contact", JSON.stringify(form));
+  const src = await Deno.readTextFile(new URL("../../workers/career-browser/prepare-ahead.ts", import.meta.url));
+  assert(/tailorForPosting\(\{[\s\S]{0,700}contact: "typed"/.test(src), "prepare-ahead asks for typed contact (SUBMIT-STEER-1130)");
+});
+
+Deno.test("route/1 'make my resume fit the X job at Y' is a tailoring, not a recommendation; 'which roles fit my resume' still is", async () => {
+  const ctx: any = { profile: headerOnlyProfile(), now: NOW, thread: {}, jdText: DATA_POSTING, company: "Acme Analytics" };
+  const r = CareerRouter.handleChat("make my resume fit the Data Analyst job at Acme Analytics, one page pdf please", ctx);
+  assert(r?.intent === "career_tailor" && r.artifact?.pdf?.base64, `${r?.intent}`);
+  await tailorRewriteTurn({ out: { intent: r.intent, result: r } as any, profile: ctx.profile, on: false, model: null as any });
+  eq([r.artifact.layout, r.artifact.fit.pages], ["trainee", 1]);
+  eq(CareerRouter.handleChat("which roles fit my resume", { profile: headerOnlyProfile(), now: NOW, thread: {} } as any)?.intent, "career_recommendations");
+});

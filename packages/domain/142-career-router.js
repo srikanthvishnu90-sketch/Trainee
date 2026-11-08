@@ -713,8 +713,8 @@ const CareerRouter = (() => {
     // Review of #596 (2026-11-08): a resume names the person at its top only with a name and an email they gave: typed for
     // it, or the header they confirmed with it (123 headerOf). With neither, the file still comes back here for their own
     // review (built from their confirmed facts), and the reply says plainly that its top is empty and asks the question
-    // tailor_resume asks (career_tailor.ts CONTACT_QUESTION). It is not an employer copy (career_tailor_rewrite.ts
-    // employerFiles), and the form path asks the three contact questions before anything goes (prepare-ahead).
+    // tailor_resume asks (career_tailor.ts CONTACT_QUESTION). The form path asks the three contact questions before
+    // anything goes to an employer (prepare-ahead, contact "typed").
     const top = tailored.resume && tailored.resume.header;
     const noContact = tailored.mode === "full" && !(top && s(top.name).trim() && s(top.email).trim());
     const rendered = tailored.rendered || {};

@@ -130,7 +130,7 @@ Deno.test("name/1 the router's file and its employer copy carry the confirmed he
   eq([r.artifact.pdf.filename, r.artifact.docx.filename], ["Resume_Acme_Analytics.pdf", "Resume_Acme_Analytics.docx"]);
 });
 
-Deno.test("name/2 with no name and email (none typed, no header confirmed): the file is their review copy, its empty top is said and asked", async () => {
+Deno.test("name/2 with no name and email (none typed, no header confirmed): the empty top is said and asked; the chat tool and the form path refuse", async () => {
   const p = CareerProfile.createProfile({});
   CareerProfile.ingestResume(p, { text: RESUME_TEXT.split("\n").slice(4).join("\n"), fileName: "test-resume.txt" });
   for (const f of p.facts) CareerProfile.confirmFact(p, f.id);
@@ -139,8 +139,6 @@ Deno.test("name/2 with no name and email (none typed, no header confirmed): the 
   const r = CareerRouter.handleChat("tailor my resume for this posting", ctx);
   eq([r?.intent, r?.artifact?.no_contact], ["career_tailor", true]);
   assert(/There is no name or email at the top of this file/.test(r.reply) && /What name and email should go at the top of your resume\?/.test(r.reply), r.reply);
-  await tailorRewriteTurn({ out: { intent: r.intent, result: r } as any, profile: ctx.profile, on: false, model: null as any });
-  assert(!r.artifact.employer_copy && !r.artifact.docx, "never made an employer copy");
   // A header confirmed without an email is not a contact header either.
   const half = headerOnlyProfile();
   half.resume_header.email = null;

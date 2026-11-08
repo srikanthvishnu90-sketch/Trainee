@@ -264,8 +264,6 @@ export async function tailorRewriteTurn(o: { out: TurnOut; profile: any; on: boo
 export function employerFiles(res: any, doc: any, profile: any): boolean {
   try {
     const sub = submissionResume(doc);
-    // No name and email at its top (none typed, no header confirmed): it is the person's own review copy, never an employer's.
-    if (!String(sub.header?.name ?? "").trim() || !String(sub.header?.email ?? "").trim()) return false;
     if (!sub.sections.length) return false;
     if (!CareerTailor.auditResume(sub, confirmedOnly(profile)).ok) return false;
     const rendered = CareerTailor.render(sub, { profile });

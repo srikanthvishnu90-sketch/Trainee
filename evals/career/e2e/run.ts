@@ -188,7 +188,8 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
     // nor mixing families (3 x 5 = 15) can make 20. The world therefore stands where the gate's own rule
     // (career_apply_cloud_open) opens it: the owner's gate tester recorded 3 Greenhouse applications by hand and each employer
     // confirmed it by email. Nothing in production changes: the gate, its rule and every cap are as they are.
-    const tester = uid(999);
+    // uid(999_999): far above any generated set's people (person i+1 is uid(i+1), up to the 1,000-task set), so the tester never collides.
+    const tester = uid(999_999);
     await pg.sql(`insert into auth.users (id, email) values ('${tester}', 'gate-tester@example.test'); insert into public.profiles (id) values ('${tester}');
       insert into public.career_cloud_settings (key, value) values ('gate_user_ids', '{${tester}}') on conflict (key) do update set value = excluded.value;
       do $g$ declare j public.career_apply_jobs; i int; begin

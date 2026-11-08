@@ -15,6 +15,7 @@ import { INT4_MAX, type Limits, PACE_RE } from "./career_apply.ts";
 import { type EmployerAnswer, employerQuestion, type Pick, queueWants, screenPicks, type WantStore } from "./career_apply_want.ts";
 import type { AppRow } from "./career_apply_status.ts";
 import { type FetchFeed, type PostingsDb, searchWords } from "./career_ingest.ts";
+import { careerAskCanon } from "./career_ask_canon.ts";
 import { applyText, linkAsk, type LinkAsk, linksAsk, possessiveAsk, postingForLink, postingsForRole } from "./career_apply_link.ts";
 import { sameCompany, type TrackedApp } from "./career_mail.ts";
 import { fitOf, scoringProfileFor } from "./career_search.ts";
@@ -22,6 +23,7 @@ import { fitOf, scoringProfileFor } from "./career_search.ts";
 // prepare asked for the rows queued, and the coverage line (career_apply_from_chat.ts).
 import { contentOf, type GateResult, gateSummary } from "./career_apply_gate.ts";
 import { checkListed, coverageLine, NO_RESUME_NEXT, NO_RESUME_REASON, NO_RESUME_WAIT, positionsOf, type PrepareKick, prepareSentence } from "./career_apply_from_chat.ts";
+
 
 export const APPLY_QUEUE_INTENT = "career_apply_queue";
 const CO = "([A-Z][A-Za-z0-9&.'’-]*(?:\\s+(?:[A-Z][A-Za-z0-9&.'’-]*|\\d+|of|and|&))*)";
@@ -31,8 +33,10 @@ const BATCH = /\b(these|those|them|all of|the ones|each of|every|\d+\s+(roles?|j
 
 // The ask: a role at a named employer, or a named employer alone. Questions ("how do I apply to X?") and batch shapes
 // are never this ask.
+// R9: the ask is read as people text it (career_ask_canon.ts: typos, filler, emoji, "can you apply to X!"), the same reading
+// the handler gives the turn, so this predicate and the turn that answers never disagree.
 export function applyAsk(message: string): { company: string; role: string | null } | null {
-  const raw = applyText(message);
+  const raw = applyText(careerAskCanon(message) ?? message);
   if (raw === null || !/\bapply\b/i.test(raw) || QUESTION.test(raw) || BATCH.test(raw)) return null;
   let m = raw.match(new RegExp(`\\bapply\\s+(?:me\\s+)?(?:to|for)\\s+(?:the\\s+|that\\s+|this\\s+)?(.+?)\\s+(?:role|position|job|internship|opening)\\s+at\\s+${CO}\\s*[.!]?\\s*$`, "i"));
   if (m) return { role: m[1].trim(), company: m[2].trim() };

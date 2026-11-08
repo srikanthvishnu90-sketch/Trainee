@@ -149,7 +149,8 @@ export function parseSelection(raw: string): { nums: number[]; names: string[] }
     }
     // MASS APPLY END TO END (2026-11-04): "approve the second one", "just the first and third": a card position in words
     // is that number on the card, never an employer called "second" (which matched no item and approved nothing).
-    if (ORDINAL_WORD[piece]) {
+    // Own keys only: "constructor" (an employer) is not a position (S2 review of #614: "only constructor" read as [null]).
+    if (Object.hasOwn(ORDINAL_WORD, piece)) {
       nums.push(ORDINAL_WORD[piece]);
       continue;
     }

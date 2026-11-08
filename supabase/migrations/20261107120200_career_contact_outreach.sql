@@ -8,10 +8,13 @@
 --   career_contact_suppression     GLOBAL: an address (by SHA-256) nobody's outreach may reach again; read together with the
 --                                  rail's opt-outs (career_outreach_dnc) and bounced addresses (career_send_bad_addresses)
 --   career_contact_sends           one row per email the connector queued (first or follow-up), for the daily new-contact limit
+--                                  and the two-follow-up limit: only the person, the address's SHA-256, the step and the day.
+--                                  It is kept when contacts are forgotten (forgetting must never reset either limit); the
+--                                  contact link is cleared, and the rows go with the account.
 --
 -- Row security on, no policies: only the service role reads and writes. Per-person rows go with the account (on delete
 -- cascade), with "forget everything" (career_erase_person finds every career_* table with a user_id), with
--- career_contact_forget (one contact or all), and when they expire (career_contact_purge_expired). The suppression list
+-- career_contact_forget (one contact or all; the send log stays, unlinked), and when they expire (career_contact_purge_expired). The suppression list
 -- has no user_id on purpose: an opt-out outlives the account of whoever wrote to them. Idempotent.
 
 create table if not exists public.career_contact_profiles (
@@ -126,13 +129,17 @@ language sql stable security invoker set search_path = public, pg_temp as $$
   from public.career_contact_profiles c where c.id = (p->>'id')::uuid and c.user_id = (p->>'user')::uuid and c.expires_at > now()
 $$;
 
--- "Forget <contact>" / "forget my contacts": one contact, or all of the person's; returns how many were deleted.
+-- "Forget <contact>" / "forget my contacts": one contact, or all of the person's; returns how many were deleted. The
+-- profile, its facts and its email evidence go. The send log does NOT: it is what the daily new-contact limit and the
+-- two-follow-up limit count, so forgetting (one contact or all) must never hand back the day's sends or restart a
+-- follow-up sequence. Its rows hold no name, address or fact, only the address's SHA-256; the contact link is cleared
+-- (on delete set null) and they go with the account.
 create or replace function public.career_contact_forget(p jsonb) returns int
 language plpgsql security invoker set search_path = public, pg_temp as $$
 declare n int; p_user uuid := (p->>'user')::uuid; p_id uuid := nullif(p->>'id', '')::uuid;
 begin
   if p_user is null then raise exception 'career_contact_forget: user'; end if;
-  delete from public.career_contact_sends where user_id = p_user and (p_id is null or contact_id = p_id);
+  update public.career_contact_sends set contact_id = null where user_id = p_user and contact_id is not null and (p_id is null or contact_id = p_id);
   delete from public.career_contact_profiles where user_id = p_user and (p_id is null or id = p_id);
   get diagnostics n = row_count;
   return n;

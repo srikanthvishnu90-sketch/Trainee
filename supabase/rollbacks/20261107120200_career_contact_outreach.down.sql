@@ -1,6 +1,9 @@
 -- Reverses 20261107120200_career_contact_outreach.sql: the contact outreach tables and functions go, with every row in them
--- (contacts, facts, email evidence, the connector's send log and its global suppression list). The sending rail's own
--- opt-outs (career_outreach_dnc) and bounced addresses (career_send_bad_addresses) are not touched, so a stop still holds.
+-- (contacts, facts, email evidence, the connector's send log and its global suppression list). The send log is the one
+-- table career_contact_forget never empties (the daily new-contact and two-follow-up limits count it); a rollback drops it
+-- with the feature, so run one only with the feature off (nothing can queue a contact email while the send log is gone).
+-- The sending rail's own opt-outs (career_outreach_dnc) and bounced addresses (career_send_bad_addresses) are not
+-- touched, so a stop still holds, and the rail's own queue keeps every email already queued.
 drop function if exists public.career_contact_record_send(jsonb);
 drop function if exists public.career_contact_suppress(jsonb);
 drop function if exists public.career_contact_suppressed(jsonb);

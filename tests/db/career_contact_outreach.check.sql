@@ -1,7 +1,8 @@
 -- CONTACT OUTREACH (20261107120200_career_contact_outreach.sql), in the database alone: a contact saves with its facts and
 -- evidence in one call; a score that is not its method's is refused; at most 25 facts; another person reads nothing; the
 -- client roles reach nothing; the global suppression list and the rail's opt-outs and bounces all suppress; the daily
--- new-contact limit holds (follow-ups do not count); forget removes one contact or all; expired rows purge. Rolled back.
+-- new-contact limit holds (follow-ups do not count); forget removes one contact or all but never the send log, so the
+-- limits survive it; expired rows purge. Rolled back.
 \set ON_ERROR_STOP on
 begin;
 reset role;
@@ -80,8 +81,53 @@ begin
   n := public.career_contact_purge_expired(); -- assigned first: an OR's operands may run in any order
   if n <> 1 or exists (select 1 from public.career_contact_profiles where id = id2) then raise exception 'FAIL purge'; end if;
   n := public.career_contact_forget(jsonb_build_object('user', a));
-  if n <> 0 or exists (select 1 from public.career_contact_sends where user_id = a) then raise exception 'FAIL forget all'; end if;
+  if n <> 0 or exists (select 1 from public.career_contact_profiles where user_id = a) then raise exception 'FAIL forget all'; end if;
+  if (select count(*) from public.career_contact_sends where user_id = a) <> 4 or exists (select 1 from public.career_contact_sends where user_id = a and contact_id is not null)
+    then raise exception 'FAIL forget all keeps the send log, unlinked: %', (select jsonb_agg(to_jsonb(s)) from public.career_contact_sends s where user_id = a); end if;
   if not exists (select 1 from public.career_contact_suppression where email_hash = h1) then raise exception 'FAIL forgetting removed an opt-out'; end if;
   raise notice 'ok   forget one, forget all, expiry purge; an opt-out outlives every forget';
+end $$;
+
+-- Forgetting never resets the limits: the send log the daily new-contact limit and the two-follow-up limit count stays when
+-- one contact or all of them are forgotten (it holds only the address's SHA-256, the step and the day; the contact link is
+-- cleared). Before the fix, career_contact_forget(id = null) deleted every send row of the person, so a "forget my
+-- contacts" handed back the day's 20 and let a follow-up sequence start again.
+do $$
+declare
+  u uuid := '00000000-0000-4000-8000-00000000c703'; id1 uuid; r text; n int;
+  ev jsonb := '{"email":"jane.doe@acme.io","method":"pattern_rcpt_valid","score":80,"syntax":"pass","mx":"pass","provider":"other","catch_all":false,"rcpt":"accept","checked_at":"2026-11-07T00:00:00Z"}';
+  hj text := repeat('a', 64); hk text := repeat('b', 64); hl text := repeat('c', 64);
+begin
+  insert into auth.users(id, email) values (u, 'cc-c@example.test');
+  insert into public.profiles(id) values (u) on conflict do nothing;
+  id1 := public.career_contact_save(jsonb_build_object('user', u, 'person', jsonb_build_object('name', 'Jane Doe', 'title', 'VP Engineering', 'company', 'Acme', 'domain', 'acme.io',
+    'source_url', 'https://acme.io/team', 'source_type', 'company_page'), 'facts', '[]'::jsonb, 'email', ev));
+  -- One send linked to the contact (part 2 may pass it), one without a contact id (part 2's record() today): both count.
+  r := public.career_contact_record_send(jsonb_build_object('user', u, 'contact', id1, 'email_hash', hj, 'step', 0, 'day', '2026-11-09', 'cap', 2));
+  if r <> 'recorded' then raise exception 'FAIL first send: %', r; end if;
+  r := public.career_contact_record_send(jsonb_build_object('user', u, 'email_hash', hk, 'step', 0, 'day', '2026-11-09', 'cap', 2));
+  if r <> 'recorded' then raise exception 'FAIL second send: %', r; end if;
+  r := public.career_contact_record_send(jsonb_build_object('user', u, 'email_hash', hj, 'step', 1, 'day', '2026-11-09', 'cap', 2));
+  r := public.career_contact_record_send(jsonb_build_object('user', u, 'email_hash', hj, 'step', 2, 'day', '2026-11-09', 'cap', 2));
+  if r <> 'recorded' then raise exception 'FAIL second follow-up: %', r; end if;
+
+  n := public.career_contact_forget(jsonb_build_object('user', u, 'id', id1));
+  if n <> 1 then raise exception 'FAIL forget one: %', n; end if;
+  r := public.career_contact_record_send(jsonb_build_object('user', u, 'email_hash', hl, 'step', 0, 'day', '2026-11-09', 'cap', 2));
+  if r <> 'daily_limit' then raise exception 'FAIL forgetting one contact reset the daily limit: %', r; end if;
+
+  n := public.career_contact_forget(jsonb_build_object('user', u));
+  if exists (select 1 from public.career_contact_profiles where user_id = u) then raise exception 'FAIL forget all left a contact'; end if;
+  r := public.career_contact_record_send(jsonb_build_object('user', u, 'email_hash', hl, 'step', 0, 'day', '2026-11-09', 'cap', 2));
+  if r <> 'daily_limit' then raise exception 'FAIL forgetting every contact reset the daily limit: %', r; end if;
+  r := public.career_contact_record_send(jsonb_build_object('user', u, 'email_hash', hj, 'step', 0, 'day', '2026-11-10', 'cap', 2));
+  if r <> 'already_recorded' then raise exception 'FAIL forgetting restarted a sent contact''s sequence: %', r; end if;
+  r := public.career_contact_record_send(jsonb_build_object('user', u, 'email_hash', hj, 'step', 1, 'day', '2026-11-10', 'cap', 2));
+  if r <> 'already_recorded' then raise exception 'FAIL forgetting allowed a third follow-up: %', r; end if;
+  if (select count(*) from public.career_contact_sends where user_id = u) <> 4 or exists (select 1 from public.career_contact_sends where user_id = u and contact_id is not null)
+    then raise exception 'FAIL the send log is kept, unlinked from the forgotten contact'; end if;
+  r := public.career_contact_record_send(jsonb_build_object('user', u, 'email_hash', hl, 'step', 0, 'day', '2026-11-10', 'cap', 2));
+  if r <> 'recorded' then raise exception 'FAIL the next day still starts over: %', r; end if;
+  raise notice 'ok   forgetting one contact or all keeps the send log: the daily limit and the two follow-ups still hold';
 end $$;
 rollback;

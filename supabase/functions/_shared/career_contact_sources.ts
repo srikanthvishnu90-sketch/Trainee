@@ -9,7 +9,8 @@
 //   apis   documented public JSON APIs (GitHub, OpenAlex, Semantic Scholar, USPTO PatentSearch) through PoliteApi: one
 //          request per host at a time, the API's documented pace, a User-Agent naming Trainee with a contact address. An
 //          API's own terms govern it (api.github.com's robots.txt disallows crawlers; its REST API is meant for programs).
-// Never opened, by any door: LinkedIn, Indeed, Handshake, Glassdoor, ZipRecruiter, Google Scholar, Crunchbase, Common Crawl.
+// Never opened, by any door, on any country domain or TLD: LinkedIn, Indeed, Handshake, Glassdoor, ZipRecruiter, Google
+// Scholar, Crunchbase, Common Crawl.
 // A discovery search (workstream C's provider; career_people_provider.ts SearchFn) only proposes URLs to read; what it
 // says is never evidence. Everything a page or an API returns is data: instruction-like text never becomes a fact
 // (career_contact_facts.ts keepFacts).
@@ -29,10 +30,16 @@ export interface FoundPerson { name: string; title: string; email: string | null
 export interface SourceRun { source: string; status: "ok" | "none" | "denied" | "not_wired" | "error"; detail?: string }
 
 // ------------------------------------------------------------------------------------------------ never, and the agent
-const NEVER = ["linkedin.com", "indeed.com", "joinhandshake.com", "glassdoor.com", "ziprecruiter.com", "scholar.google.com", "crunchbase.com", "commoncrawl.org"];
+// Each name is matched as a whole DNS label under ANY public suffix and at any depth, the way career_people_sites.ts
+// neverOpen matches LinkedIn, Indeed and Handshake: glassdoor.co.uk, www.ziprecruiter.ca and crunchbase.co all refuse, and
+// a look-alike that carries the label (glassdoor.com.evil.io) refuses too (it fails closed). Google Scholar is the label
+// pair scholar.google on any suffix (scholar.google.co.uk, scholar.google.de); the rest of Google is not a never-source.
+const NEVER_LABELS = new Set(["linkedin", "lnkd", "licdn", "indeed", "indeedemail", "indeedmail", "joinhandshake", "glassdoor", "ziprecruiter", "crunchbase", "commoncrawl"]);
 export function neverSource(url: string): boolean {
   let h = ""; try { h = new URL(url).hostname.toLowerCase().replace(/\.$/, ""); } catch { return true; }
-  return isBlockedHost(h) || neverOpen(h) || NEVER.some((b) => h === b || h.endsWith(`.${b}`));
+  const labels = h.split(".").filter(Boolean), named = labels.slice(0, -1); // every label but the last (the suffix's end)
+  const scholar = named.some((l, i) => l === "scholar" && named[i + 1] === "google");
+  return isBlockedHost(h) || neverOpen(h) || scholar || named.some((l) => NEVER_LABELS.has(l));
 }
 // The User-Agent every request carries: Trainee by name and a reachable contact (the owner sets CAREER_CONTACT_BOT_EMAIL).
 export function contactUserAgent(contact: string | null | undefined): string {
@@ -193,11 +200,14 @@ const same = (a: unknown, b: unknown) => !!norm(a) && norm(a) === norm(b);
 // A host on the company's domain: the domain itself or a subdomain of it (never acme.io.other.org for acme.io).
 export const onDomainHost = (host: string, domain: string) => { const h = host.toLowerCase().replace(/\.$/, ""), d = domain.toLowerCase(); return !!d && (h === d || h.endsWith(`.${d}`)); };
 const blogOn = (v: unknown, domain: string) => { const t = String(v ?? "").trim(); if (!t) return false; try { return onDomainHost(new URL(/^https?:\/\//i.test(t) ? t : `https://${t}`).hostname, domain); } catch { return false; } };
-const emailOn = (v: unknown, domain: string) => { const m = /^[^\s@]+@([^\s@]+)$/.exec(String(v ?? "").trim()); return !!m && onDomainHost(m[1], domain); };
+// An address on the company's domain (or a subdomain of it): the only GitHub email that can name the recipient.
+export const emailOn = (v: unknown, domain: string) => { const m = /^[^\s@]+@([^\s@]+)$/.exec(String(v ?? "").trim()); return !!m && onDomainHost(m[1], domain); };
 const enc = encodeURIComponent;
 
 // GitHub: a profile counts only when it says it is this person at this company (company field, or a blog/email on the
-// company's domain). Its email is used only as the person published it on the profile (no commit mining, ever).
+// company's domain). Its email is used only as the person published it on the profile (no commit mining, ever), and only
+// when it is on the company's own domain (emailOn): anyone can make a profile with the person's name and "@Acme" in its
+// company field, so the company field alone never vouches for an address; the profile's facts say where they came from.
 export async function githubFacts(api: PoliteApi, name: string, company: string, domain: string): Promise<{ facts: RawFact[]; email: { email: string; source_url: string } | null; blog: string | null; run: SourceRun }> {
   const s = await api.json("github", `/search/users?q=${enc(`${name} in:name`)}&per_page=3`);
   if (!s.ok) return { facts: [], email: null, blog: null, run: { source: "github", status: s.reason === "not_wired" ? "not_wired" : "error", detail: s.detail } };
@@ -214,7 +224,7 @@ export async function githubFacts(api: PoliteApi, name: string, company: string,
     if (repos.ok) for (const r of (Array.isArray(repos.data) ? repos.data : []).filter((r: any) => !r?.fork).slice(0, 3)) {
       facts.push({ claim: `Maintains the ${r.name} repository on GitHub${r.stargazers_count ? ` (${r.stargazers_count} stars)` : ""}${r.description ? `: ${String(r.description).slice(0, 100)}` : ""}`, source_url: String(r.html_url ?? url), source_type: "github", published_at: r.pushed_at ?? null, quote: String(r.description ?? r.name), method: "GitHub REST repos API", confidence: 0.8 });
     }
-    const email = typeof u.email === "string" && u.email.includes("@") ? { email: u.email.toLowerCase(), source_url: url } : null;
+    const email = typeof u.email === "string" && emailOn(u.email, domain) ? { email: u.email.trim().toLowerCase(), source_url: url } : null;
     return { facts, email, blog: typeof u.blog === "string" && /^https:\/\//.test(u.blog) ? u.blog : null, run: { source: "github", status: "ok" } };
   }
   return { facts: [], email: null, blog: null, run: { source: "github", status: "none" } };

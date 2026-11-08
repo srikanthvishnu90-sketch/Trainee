@@ -72,7 +72,7 @@ export async function resolveContact(ask: ResolveAsk, d: ResolveDeps): Promise<R
   const sp = await speakerFacts(d.gate, [...(ask.speakerUrls ?? []), ...found.speakers], who.name); runs.push(sp.run); raw.push(...sp.facts);
   const news = await readPages(d.gate, [...(ask.newsUrls ?? []), ...found.news]); runs.push({ ...news.run, source: "news" });
   raw.push(...pageFacts(news.pages, who.name, "news"));
-  const kept = keepFacts(raw, { now });
+  const kept = keepFacts(raw, { now, employers: [ask.company] }); // the employer's own name is professional (Parish Medical Center)
   const named = [...site.people.filter((p) => p.email).map((p) => ({ email: p.email!, name: p.name }))];
   const published = site.people.filter((p) => p.email && p.name.toLowerCase() === who.name.toLowerCase()).map((p) => ({ email: p.email!, source_url: p.source_url }));
   const email = await findEmail({ name: who.name, domain, now, published, github: gh.email, domainNamed: named, employees: ask.employees, mx: d.mx, probe: d.probe, finder: d.finder });

@@ -1,6 +1,6 @@
 // CONTACT OUTREACH (proposal D-042): a contact's work address, found in evidence order and checked without sending.
 //   1. published   an address on a first-party page for this person (the company's own pages, their own site), or the
-//                  email on their public GitHub profile;
+//                  email on their public GitHub profile when it is on the company's own domain;
 //   2. pattern     the domain's format learned from 2+ addresses the domain itself publishes;
 //   3. finder      a free-tier finder (Hunter or Snov) only with the person's OWN key (default off; Trainee holds none);
 //   4. fallback    a size-based pattern guess.
@@ -11,6 +11,7 @@
 // The score (0-100) is the evidence's; only SEND_MIN_SCORE (70) or more can be approved for sending. Below it the address
 // is shown as unconfirmed, with another channel suggested.
 import { type MxResolver } from "./career_contacts.ts";
+import { emailOn } from "./career_contact_sources.ts";
 
 export type EmailMethod = "first_party_published" | "github_public" | "pattern_rcpt_valid" | "finder_verified" | "pattern_unverified" | "guess";
 export const SCORE: Readonly<Record<EmailMethod, number>> = Object.freeze({
@@ -115,30 +116,39 @@ export async function findEmail(i: FindIn): Promise<EmailEvidence> {
   };
   const pub = (i.published ?? []).find((p) => SYNTAX.test(p.email.toLowerCase()));
   if (pub) return await out(pub.email.toLowerCase(), "first_party_published", { source_url: pub.source_url });
-  if (i.github && SYNTAX.test(i.github.email.toLowerCase())) return await out(i.github.email.toLowerCase(), "github_public", { source_url: i.github.source_url });
-  const n = nameParts(i.name);
-  if (!n) return await out(null, null);
-  const learned = learnFormat(i.domainNamed ?? [], domain);
-  let pattern: EmailEvidence | null = null;
-  if (learned) {
-    const email = `${localFor(learned.format, n)}@${domain}`;
-    const fmt = { format: learned.format, format_evidence: learned.evidence };
-    if (probe.on && provider === "other" && mx === "pass") {
-      // Catch-all first: only a server that explicitly REJECTS a made-up address can vouch for an accepted one. An
-      // unknown answer leaves catch_all unknown (null) and the person's address unprobed and unverified.
-      const rnd = `${(i.random ?? (() => crypto.randomUUID().replace(/-/g, "").slice(0, 16)))()}@${domain}`;
-      const r0 = await probe.probe(rnd, hosts);
-      const catchAll = r0 === "accept" ? true : r0 === "reject" ? false : null;
-      const rcpt: Rcpt = catchAll === false ? await probe.probe(email, hosts) : "unknown";
-      if (rcpt === "reject") pattern = { ...(await out(email, "pattern_unverified", { ...fmt, catch_all: catchAll, rcpt })), score: 0, approvable: false, why: "the company's mail server refused this address" };
-      else pattern = await out(email, catchAll === false && rcpt === "accept" ? "pattern_rcpt_valid" : "pattern_unverified", { ...fmt, catch_all: catchAll, rcpt });
-    } else pattern = await out(email, "pattern_unverified", fmt);
-    if (pattern.method === "pattern_rcpt_valid") return pattern;
+  // A GitHub email names the recipient only on the company's own domain: anyone can publish a profile with the person's
+  // name and the company in its company field, and put their own address on it.
+  const ghEmail = i.github ? i.github.email.trim().toLowerCase() : "";
+  if (ghEmail && SYNTAX.test(ghEmail) && emailOn(ghEmail, domain)) return await out(ghEmail, "github_public", { source_url: i.github!.source_url });
+  // Refused: whatever is found instead says so (why), so the person sees the GitHub address was not trusted, and why.
+  const refusedGh = ghEmail ? `; the GitHub profile's address is not on ${domain}, so it was not used` : "";
+  const rest = await fromPatterns();
+  return refusedGh ? { ...rest, why: `${rest.why}${refusedGh}`.slice(0, 300) } : rest;
+  async function fromPatterns(): Promise<EmailEvidence> {
+    const n = nameParts(i.name);
+    if (!n) return await out(null, null);
+    const learned = learnFormat(i.domainNamed ?? [], domain);
+    let pattern: EmailEvidence | null = null;
+    if (learned) {
+      const email = `${localFor(learned.format, n)}@${domain}`;
+      const fmt = { format: learned.format, format_evidence: learned.evidence };
+      if (probe.on && provider === "other" && mx === "pass") {
+        // Catch-all first: only a server that explicitly REJECTS a made-up address can vouch for an accepted one. An
+        // unknown answer leaves catch_all unknown (null) and the person's address unprobed and unverified.
+        const rnd = `${(i.random ?? (() => crypto.randomUUID().replace(/-/g, "").slice(0, 16)))()}@${domain}`;
+        const r0 = await probe.probe(rnd, hosts);
+        const catchAll = r0 === "accept" ? true : r0 === "reject" ? false : null;
+        const rcpt: Rcpt = catchAll === false ? await probe.probe(email, hosts) : "unknown";
+        if (rcpt === "reject") pattern = { ...(await out(email, "pattern_unverified", { ...fmt, catch_all: catchAll, rcpt })), score: 0, approvable: false, why: "the company's mail server refused this address" };
+        else pattern = await out(email, catchAll === false && rcpt === "accept" ? "pattern_rcpt_valid" : "pattern_unverified", { ...fmt, catch_all: catchAll, rcpt });
+      } else pattern = await out(email, "pattern_unverified", fmt);
+      if (pattern.method === "pattern_rcpt_valid") return pattern;
+    }
+    if (i.finder) {
+      const f = await i.finder.find(n.first, n.last, domain).catch(() => null);
+      if (f?.verified && f.email.endsWith(`@${domain}`)) return await out(f.email, "finder_verified");
+    }
+    if (pattern) return pattern;
+    return await out(`${localFor(sizeFormat(i.employees), n)}@${domain}`, "guess", { format: sizeFormat(i.employees) });
   }
-  if (i.finder) {
-    const f = await i.finder.find(n.first, n.last, domain).catch(() => null);
-    if (f?.verified && f.email.endsWith(`@${domain}`)) return await out(f.email, "finder_verified");
-  }
-  if (pattern) return pattern;
-  return await out(`${localFor(sizeFormat(i.employees), n)}@${domain}`, "guess", { format: sizeFormat(i.employees) });
 }

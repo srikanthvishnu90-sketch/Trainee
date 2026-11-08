@@ -31,7 +31,9 @@ export type MarketResult =
       gaps?: string[]; basis?: string[];
       // The cover thesis: the cited sources every content word of it is on (thesis_cite), else it is marked as a summary of the
       // cited sections below (thesis_summary). Code decides; the model never writes either.
-      thesis_cite?: number[]; thesis_summary?: boolean };
+      thesis_cite?: number[]; thesis_summary?: boolean;
+      // Figures the cited sources give differently for the same thing: each value with its source (disagreementsIn).
+      disagreements?: Disagreement[] };
 
 const squash = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
 const norm = (s: string) => squash(s.normalize("NFC")).toLowerCase().replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
@@ -84,14 +86,63 @@ export function quoteContext(page: string, quote: string): string | null {
   const before = t.slice(0, s0).split(/\s+/).filter(Boolean).slice(-8).join(" ");
   return `${before} ${t.slice(s0, s1)}`.trim();
 }
+// R9 free sources (architect, 2026-11-08): a filing or form code ("10-K", "Form 8-K", "S-1", "DEF 14A") is a name, not a number,
+// for this guard; and a fact needs a predicate beyond names: at least one lowercase content word that is not in its page's title.
+// "Form 10-K Hollow Oak Logistics Inc." is a heading, never a fact.
+export const FORM_CODE = /\b(?:form\s+)?(?:10-K(?:405)?|10-Q|8-K|6-K|11-K|20-F|40-F|S-[1348]|F-[14]|13F(?:-HR)?|13D|13G|DEF\s*14A|424B\d|N-CSR|N-PORT)(?:\/A)?\b/gi;
+export const figuresIn = (s: string) => numbersIn(String(s ?? "").replace(FORM_CODE, " "));
+export function hasPredicate(claim: string, pageTitle = ""): boolean {
+  const lower = (String(claim ?? "").replace(FORM_CODE, " ").match(/(?<![\p{L}\p{N}'-])[a-z][a-z'-]{2,}/gu) ?? []).join(" ");
+  const title = contentWords(pageTitle);
+  return [...contentWords(lower)].some((w) => !title.has(w));
+}
 // Does the claim say only what its quote says? Its numbers are in the quote; its content words are in the quote's context.
 export function agrees(claim: string, quote: string, page: string): boolean {
   const ctx = quoteContext(page, quote);
   if (ctx === null) return false;
-  const qn = numbersIn(quote);
-  if (!numbersIn(claim).every((n) => qn.some((x) => numEq(x, n)))) return false;
+  const qn = figuresIn(quote);
+  if (!figuresIn(claim).every((n) => qn.some((x) => numEq(x, n)))) return false;
   const have = contentWords(ctx);
   return [...contentWords(claim)].every((w) => have.has(w));
+}
+// R9 free sources (architect, 2026-11-08): two cited sources that give different figures for the same thing are both shown, with
+// their sources, and the brief says they differ; Trainee never picks one silently. "The same thing" is narrow on purpose: the same
+// measure (headcount, open roles, pay, revenue, offices, founding year), the figure attached to that measure's words, and the same
+// names (so a national median and a metro median, or two companies' headcounts, are never called a disagreement).
+export interface Disagreement { label: string; values: { value: string; cite: number[] }[] }
+const MEASURES: { label: string; re: RegExp; usd?: boolean; year?: boolean }[] = [
+  { label: "headcount", re: /(?:about|around|nearly|over|roughly)?\s*(\d[\d,.]*\+?)\s+(?:[a-z-]+\s+){0,2}(?:employees|people|staff|workers)\b/i },
+  { label: "open roles", re: /(\d[\d,]*)\s+(?:[a-z-]+\s+){0,2}(?:roles|openings|positions|job\s+openings)\b/i },
+  { label: "pay", re: /(\$\s?\d[\d,.]*(?:\s?[km])?)/i, usd: true },
+  { label: "revenue", re: /revenue[^.]{0,40}?(\$\s?\d[\d,.]*(?:\s?(?:million|billion|[mb]))?)/i },
+  { label: "offices", re: /(\d[\d,]*)\s+(?:[a-z-]+\s+){0,2}(?:offices|locations|centers|sites)\b/i },
+  { label: "founding year", re: /\bfounded\s+in\s+(\d{4})\b/i, year: true },
+];
+// Capitalized only because they start a sentence: not names.
+const CAP_STOP = new Set(["the", "a", "an", "in", "at", "on", "about", "around", "according", "entry-level", "new-grad", "first-year", "its", "their", "this", "these", "employment", "national"]);
+const PAYWORD = /\b(?:salary|salaries|wage|wages|pay|paid|earn|earns|compensation|base)\b/i;
+const namesOf = (s: string) => new Set((s.replace(FORM_CODE, " ").match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}'-]+/gu) ?? []).map((w) => w.toLowerCase()).filter((w) => !CAP_STOP.has(w)));
+const sameSet = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((x) => b.has(x));
+export function disagreementsIn(points: { text: string; cite: number[] }[]): Disagreement[] {
+  const out: Disagreement[] = [];
+  for (const m of MEASURES) {
+    const xs = points.map((p) => { const hit = m.re.exec(p.text); if (!hit || (m.usd && !PAYWORD.test(p.text))) return null; const n = figuresIn(hit[1])[0]; return n ? { p, raw: hit[1].trim(), n, names: namesOf(p.text) } : null; }).filter(Boolean) as { p: { text: string; cite: number[] }; raw: string; n: any; names: Set<string> }[];
+    const done = new Set<number>();
+    for (let i = 0; i < xs.length; i++) {
+      if (done.has(i)) continue;
+      const group = [xs[i]];
+      for (let j = i + 1; j < xs.length; j++) {
+        const a = xs[i], b = xs[j];
+        if (done.has(j) || !sameSet(a.names, b.names) || a.p.cite.some((c) => b.p.cite.includes(c))) continue;
+        if (!numEq(a.n, b.n)) { group.push(b); done.add(j); }
+      }
+      if (group.length > 1) {
+        const who = [...xs[i].names].length ? xs[i].p.text.match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}'-]+(?:\s+\p{Lu}[\p{L}'-]+)*/u)?.[0] ?? "" : "";
+        out.push({ label: `${m.label[0].toUpperCase()}${m.label.slice(1)}${who ? `, ${who}` : ""}`, values: group.map((g) => ({ value: g.raw, cite: g.p.cite })).sort((x, y) => x.cite[0] - y.cite[0]) });
+      }
+    }
+  }
+  return out.slice(0, 4);
 }
 const parse = (raw: string) => { try { return JSON.parse(raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, "")); } catch { return null; } };
 
@@ -109,7 +160,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   const d = parse(await i.deps.draft(marketDraftPayload(i.question, pages)).catch(() => "")) ?? {};
   const byUrl = new Map(pages.map((p) => [normalizeUrl(p.url), p]));
   const pageOf = (u: unknown) => { const g = verifiedLinkGuard([String(u ?? "")], pages); return g.kept.length ? byUrl.get(g.kept[0]) ?? null : null; };
-  const numsOn = (text: string, on: SourcePage[]) => { const pn = on.flatMap((p) => numbersIn(p.text.slice(0, 60000))); return numbersIn(text).every((n) => pn.some((p) => numEq(p, n))); };
+  const numsOn = (text: string, on: SourcePage[]) => { const pn = on.flatMap((p) => figuresIn(p.text.slice(0, 60000))); return figuresIn(text).every((n) => pn.some((p) => numEq(p, n))); };
   const order: string[] = [];
   const num = (p: SourcePage) => { const k = normalizeUrl(p.url); if (!order.includes(k)) order.push(k); return order.indexOf(k) + 1; };
   let dropped = 0;
@@ -119,7 +170,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   // A comparison cell's subject is its column: the quote must speak of that company too, so Acme's "41,000" never fills Globex's cell.
   const fact = (text: unknown, quote: unknown, url: unknown, subject = "") => {
     const t = squash(text), q = squash(quote), p = pageOf(url);
-    if (!t || t.length > 400 || !linkFree(t) || !p || q.length < 8 || !agrees(t, q, p.text) || (subject && !agrees(subject, q, p.text))) { dropped++; return null; }
+    if (!t || t.length > 400 || !linkFree(t) || !p || q.length < 8 || !agrees(t, q, p.text) || (subject && !agrees(subject, q, p.text)) || (!subject && !hasPredicate(t, p.title))) { dropped++; return null; }
     return { text: t, cite: [num(p)] };
   };
   // Trainee's reading: every page it names passed the guard, and every number in it is on one of them.
@@ -141,6 +192,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   }
   const conditions = arr(d.conditions, 6).map(reading).filter(Boolean) as Cited[];
   const risks = arr(d.risks, 6).map(reading).filter(Boolean) as Cited[];
+  const disagreements = disagreementsIn(points);
   if (!points.length && !comparison) return { ...none(), note: "Sources were opened but none supported an answer. Say you couldn't confirm one from what they say; do not guess." };
   const cited = order.map((k) => byUrl.get(k)!);
   const thesis0 = squash(d.thesis), title0 = squash(d.title).slice(0, 80);
@@ -159,17 +211,17 @@ export async function researchMarket(i: { question: string; format: "inline" | "
       const R = "Reported, not verified";
       const data = { variant: "market", title, subject: title, thesis, ...(thesisCite.length ? { thesis_cite: thesisCite } : { thesis_summary: true }), summary: points.map((p) => ({ ...p, source: R })),
         ...(comparison ? { comparison: { options: comparison.options.map((name) => ({ name })), rows: comparison.rows.map((r) => ({ label: r.label, cells: r.cells.map((c) => c ? { value: c.value, source: R, cite: c.cite } : null) })) } } : {}),
-        conditions, risks, ...(basis.length ? { basis } : {}), ...(gaps.length ? { gaps } : {}), sources: sources.map(({ title: t, url, fetched_at }) => ({ title: t, url, fetched_at })) };
+        conditions, risks, ...(disagreements.length ? { disagreements } : {}), ...(basis.length ? { basis } : {}), ...(gaps.length ? { gaps } : {}), sources: sources.map(({ title: t, url, fetched_at }) => ({ title: t, url, fetched_at })) };
       const made = await i.deps.publish(data).catch(() => null);
       if (made && /^https:\/\//.test(made.url)) { file_url = made.url; i.fileLinks?.push(made.url); } else why = "the brief could not be saved";
     }
     if (why) notes.push(`answered inline: ${why}`);
   }
   const format = file_url ? "file" : "inline";
-  return { status: "ok", format, asked: i.format, title, thesis, points, conditions, risks, comparison, sources, file_url, dropped, notes, searched, ...(gaps.length ? { gaps } : {}), ...(basis.length ? { basis } : {}), ...(thesis ? (thesisCite.length ? { thesis_cite: thesisCite } : { thesis_summary: true }) : {}),
+  return { status: "ok", format, asked: i.format, title, thesis, points, conditions, risks, comparison, sources, file_url, dropped, notes, searched, ...(gaps.length ? { gaps } : {}), ...(basis.length ? { basis } : {}), ...(disagreements.length ? { disagreements } : {}), ...(thesis ? (thesisCite.length ? { thesis_cite: thesisCite } : { thesis_summary: true }) : {}),
     note: format === "file"
       ? "Reply in one or two plain sentences: the thesis, then that the full brief with its sources is in the file. Write no link and no figure: code sends the file link."
-      : "Reply in one to three short sentences using only the points above (and the comparison, if any). Put the source number after each claim, like [1]. Write no link: code adds the numbered sources after your reply. Use no figure, name or date that is not in the points." };
+      : `Reply in one to three short sentences using only the points above (and the comparison, if any). Put the source number after each claim, like [1]. Write no link: code adds the numbered sources after your reply. Use no figure, name or date that is not in the points.${disagreements.length ? " The sources differ on a figure (see disagreements): give each value with its source number and say they differ; never pick one." : ""}` };
 }
 
 const SAYS_UNCONFIRMED = /\b(?:couldn['’]?t|could not|can['’]?t|cannot|unable to|wasn['’]?t able|was not able|not able to|don['’]?t have|do not have|no (?:source|page|verified))\b/i;

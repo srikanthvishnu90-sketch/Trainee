@@ -214,6 +214,10 @@ function marketBrief(x: Record<string, any>, v: V) {
     conditions: v.list(x.conditions, "conditions", 1, 6).map((r, i) => line(r, `conditions[${i}]`, false)),
     risks: v.list(x.risks, "risks", 1, 6).map((r, i) => line(r, `risks[${i}]`, false)),
     // R9 free sources: what no free source supplied (code-written from the sources' outcomes, D-007); optional, at most 8.
+    // Where the cited sources give different figures for the same thing (code-detected, agent/research/market.ts disagreementsIn):
+    // every value with the source it came from; Trainee never picks one. Optional, at most 4.
+    ...(x.disagreements !== undefined ? { disagreements: v.list(x.disagreements, "disagreements", 1, 4).map((r, i) => { const q = v.obj(r, `disagreements[${i}]`);
+      return { label: v.str(q.label, `disagreements[${i}].label`, { max: 120, links: false }), values: v.list(q.values, `disagreements[${i}].values`, 2, 4).map((y, j) => { const z = v.obj(y, `disagreements[${i}].values[${j}]`); return { value: v.str(z.value, `disagreements[${i}].values[${j}].value`, { max: 60, links: false }), cite: cite(z.cite, `disagreements[${i}].values[${j}].cite`) }; }) }; }) } : {}),
     // How a source was chosen when the person did not say (a role matched to a BLS occupation), code-written; optional, at most 4.
     ...(x.basis !== undefined ? { basis: v.list(x.basis, "basis", 1, 4).map((g, i) => v.str(g, `basis[${i}]`, { max: 240, links: false })) } : {}),
     ...(x.gaps !== undefined ? { gaps: v.list(x.gaps, "gaps", 1, 8).map((g, i) => v.str(g, `gaps[${i}]`, { max: 240, links: false })) } : {}), sources };
@@ -414,7 +418,7 @@ function marketHtml(d: any): string {
   // visual label (aria-hidden; the table's own headers still name the cell), so no column is ever cut off at phone width.
   const table = c ? `<div class="tbl rb-tbl" tabindex="0" role="region" aria-label="Comparison table"><table><caption class="sr">Comparison</caption><thead><tr><th scope="col"><span class="sr">Item</span></th>${opts.map((o: string) => `<th scope="col">${esc(o)}</th>`).join("")}</tr></thead><tbody>${(c.rows ?? []).map((r: any) => `<tr><th scope="row">${esc(r.label)}</th>${(r.cells ?? []).map((x: any, i: number) => `<td><span class="rb-k" aria-hidden="true">${esc(opts[i] ?? "")}</span><span class="rb-v">${cell(x)}</span></td>`).join("")}</tr>`).join("")}</tbody></table></div>` : "";
   const srcs = `<ol class="rb-src">${(d.sources ?? []).map((s: any, i: number) => `<li id="src-${i + 1}"><span class="rb-n">[${i + 1}]</span>${linkHtml(s.url, s.title) || esc(s.title)}<span class="meta"><span class="rb-host" title="${esc(hostOf(s.url))}">${esc(hostOf(s.url))}</span> · Read ${esc(DAY(s.fetched_at))}</span></li>`).join("")}</ol>`;
-  return cover + sec("Summary", list(d.summary ?? [], true)) + sec("Comparison", table) + sec("What would have to be true", list(d.conditions ?? [], false)) + sec("Risks", list(d.risks ?? [], false))
+  return cover + sec("Summary", list(d.summary ?? [], true)) + sec("Comparison", table) + sec("Where the sources differ", (d.disagreements ?? []).length ? `<ul class="rb-list rb-differ">${d.disagreements.map((x: any) => `<li><span class="rb-t">${esc(x.label)}: ${x.values.map((y: any) => `${esc(y.value)}${cites(y.cite)}`).join(" · ")}. The sources differ; Trainee has not picked one.</span></li>`).join("")}</ul>` : "") + sec("What would have to be true", list(d.conditions ?? [], false)) + sec("Risks", list(d.risks ?? [], false))
     + sec("How the sources were chosen", (d.basis ?? []).length ? `<ul class="rb-list rb-basis-list">${d.basis.map((g: string) => `<li><span class="rb-t">${esc(g)}</span></li>`).join("")}</ul>` : "")
     + sec("Not found in a free source", (d.gaps ?? []).length ? `<ul class="rb-list rb-gaps">${d.gaps.map((g: string) => `<li><span class="rb-t">${esc(g)}</span></li>`).join("")}</ul>` : "") + sec("Sources", srcs);
 }
@@ -427,6 +431,7 @@ function marketText(d: any, L: string[]) {
     const opts = (d.comparison.options ?? []).map((o: any) => o.name);
     L.push("## Comparison"); (d.comparison.rows ?? []).forEach((r: any) => { L.push(`### ${r.label}`); (r.cells ?? []).forEach((x: any, i: number) => L.push(hasSrc(x) ? `- ${opts[i]}: ${x.value}${c(x)} [${x.source}]` : `- ${opts[i]}: Not stated`)); }); L.push("");
   }
+  if ((d.disagreements ?? []).length) { L.push("## Where the sources differ"); d.disagreements.forEach((x: any) => L.push(`- ${x.label}: ${x.values.map((y: any) => `${y.value}${c(y)}`).join(" · ")}. The sources differ; Trainee has not picked one.`)); L.push(""); }
   L.push("## What would have to be true"); (d.conditions ?? []).forEach((f: any) => L.push(`- ${f.text}${c(f)} [Trainee's reading]`)); L.push("");
   L.push("## Risks"); (d.risks ?? []).forEach((f: any) => L.push(`- ${f.text}${c(f)} [Trainee's reading]`)); L.push("");
   if ((d.basis ?? []).length) { L.push("## How the sources were chosen"); d.basis.forEach((g: string) => L.push(`- ${g}`)); L.push(""); }

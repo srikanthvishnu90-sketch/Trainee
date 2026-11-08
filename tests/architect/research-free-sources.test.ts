@@ -6,7 +6,7 @@
 import assertNode from "node:assert/strict";
 import { agentTurn } from "../../supabase/functions/agent-chat/career_brain.ts";
 import { marketResearchAsk, researchAsk } from "../../supabase/functions/agent-chat/career_staged.ts";
-import { type MarketDeps, researchMarket } from "../../supabase/functions/_shared/agent/research/market.ts";
+import { disagreementsIn, figuresIn, hasPredicate, type MarketDeps, researchMarket } from "../../supabase/functions/_shared/agent/research/market.ts";
 import { bodyHtml, textOf, validateKind } from "../../supabase/functions/_shared/file_kinds.ts";
 import { fetchSources, isBlockedHost } from "../../supabase/functions/_shared/research_sources.ts";
 import { boardText, cbsaFor, convertFree, dnsProbe, freeProvider, freeReader, OOH, researchSearchFor, robotsGate, slugsFor, socFor } from "../../supabase/functions/_shared/research_free_sources.ts";
@@ -284,4 +284,55 @@ Deno.test("startup DNS probe: logged once; a runtime without a usable Deno.resol
   const read = freeReader({ fetch: f, now: () => NOW, probe: async () => ({ ok: false, why: "no DNS" }) });
   const got = await read(["https://zentrafin.example/", "https://www.bls.gov/ooh/"]);
   eq([got.verified.length, got.rejected.map((r) => r.why), fetched], [0, ["unreachable", "unreachable"], 0]);
+});
+
+// ---------------------------------------------------------------- architect follow-ups on #615, second round (2026-11-08)
+Deno.test("facts guard: a heading or form name is never a fact; a filing's form code is not a number", async () => {
+  eq(figuresIn("Form 10-K Hollow Oak Logistics Inc."), []);
+  eq(figuresIn("an 8-K filed under DEF 14A and S-1").length, 0);
+  eq(figuresIn("Hollow Oak Logistics had 3,900 employees in its 10-K").map((n: any) => n.v), [3900]);
+  ok(!hasPredicate("Form 10-K Hollow Oak Logistics Inc.", "Hollow Oak Logistics Inc. Form 10-K"));
+  ok(!hasPredicate("Zentrafin Inc.", ""));
+  ok(hasPredicate("Hollow Oak Logistics operates 14 distribution centers.", "Hollow Oak Logistics Inc. Form 10-K"));
+  // End to end: the heading is dropped, the real fact on the same page stands.
+  const page = "https://www.sec.gov/Archives/edgar/data/9990001/000999000126000002/hoak-10k.htm";
+  const f = (async (i: RequestInfo | URL) => String(i) === page ? html("Hollow Oak Logistics Inc. Form 10-K", "Form 10-K Hollow Oak Logistics Inc. Hollow Oak Logistics operates 14 distribution centers in the Midwest.") : nf()) as typeof fetch;
+  const draft = { title: "Hollow Oak", thesis: "", summary: [
+    { text: "Form 10-K Hollow Oak Logistics Inc.", quote: "Form 10-K Hollow Oak Logistics Inc.", url: page },
+    { text: "Hollow Oak Logistics operates 14 distribution centers in the Midwest.", quote: "Hollow Oak Logistics operates 14 distribution centers in the Midwest.", url: page }], conditions: [], risks: [] };
+  const r: any = await researchMarket({ question: "research Hollow Oak Logistics", format: "inline", plan: { queries: ["x"] },
+    deps: { search: { id: "first_party", needsKey: false, search: async () => ({ hits: [{ url: page, title: "t", provider: "sec_edgar", foundAt: NOW }], notes: [], provider: "first_party", searches: 1 }) }, read: (u) => fetchSources(u, { fetch: f, resolver: PUBLIC, now: () => NOW }), draft: async () => JSON.stringify(draft) } });
+  eq([r.points.map((p: any) => p.text), r.dropped], [["Hollow Oak Logistics operates 14 distribution centers in the Midwest."], 1]);
+});
+
+Deno.test("when two cited sources differ on a figure, the brief shows both with their sources and says so; it never picks one", async () => {
+  eq(disagreementsIn([{ text: "Hollow Oak Logistics employs about 600 people across 10 offices.", cite: [1] }, { text: "Hollow Oak Logistics had 3,900 full-time employees at the end of the fiscal year.", cite: [3] }]),
+    [{ label: "Headcount, Hollow Oak Logistics", values: [{ value: "600", cite: [1] }, { value: "3,900", cite: [3] }] }]);
+  // Not a disagreement: the same figure; one source; a national and a metro median; two companies' headcounts.
+  eq(disagreementsIn([{ text: "Zentrafin employs 2,400 people.", cite: [1] }, { text: "Zentrafin had 2,400 employees as of 2025.", cite: [2] }]), []);
+  eq(disagreementsIn([{ text: "Zentrafin employs 2,400 people.", cite: [1] }, { text: "Zentrafin had 900 employees in 2019.", cite: [1] }]), []);
+  eq(disagreementsIn([{ text: "The annual median wage for Software Developers is $131,450.", cite: [1] }, { text: "Software Developers in the New York metro area earn an annual median wage of $158,200.", cite: [2] }]), []);
+  eq(disagreementsIn([{ text: "Acme employs 600 people.", cite: [1] }, { text: "Globex employs 3,900 people.", cite: [2] }]), []);
+  // End to end: both figures stay in the summary, and the brief has a section that names both with their sources.
+  const a = "https://hollowoak.example/", b = "https://www.sec.gov/Archives/edgar/data/9990001/000999000126000002/hoak-10k.htm", published: any[] = [];
+  const f = (async (i: RequestInfo | URL) => String(i) === a ? html("Hollow Oak Logistics", "Hollow Oak Logistics hires new grads every year. Hollow Oak Logistics employs about 600 people across 10 offices.")
+    : String(i) === b ? html("Hollow Oak Logistics Inc. Form 10-K", "Hollow Oak Logistics had 3,900 full-time employees at the end of the fiscal year.") : nf()) as typeof fetch;
+  const draft = { title: "Hollow Oak Logistics", thesis: "Hollow Oak Logistics hires new grads every year.", summary: [
+    { text: "Hollow Oak Logistics employs about 600 people across 10 offices.", quote: "Hollow Oak Logistics employs about 600 people across 10 offices.", url: a },
+    { text: "Hollow Oak Logistics had 3,900 full-time employees at the end of the fiscal year.", quote: "Hollow Oak Logistics had 3,900 full-time employees at the end of the fiscal year.", url: b }],
+    conditions: [{ text: "Hollow Oak Logistics keeps hiring new grads.", urls: [a] }], risks: [{ text: "Hiring could slow at Hollow Oak Logistics.", urls: [a] }] };
+  const r: any = await researchMarket({ question: "research Hollow Oak Logistics and give me a file", format: "file", plan: { queries: ["x"] },
+    deps: { search: { id: "first_party", needsKey: false, search: async () => ({ hits: [a, b].map((url) => ({ url, title: "t", provider: "company_site" as const, foundAt: NOW })), notes: [], provider: "first_party", searches: 1 }) },
+      read: (u) => fetchSources(u, { fetch: f, resolver: PUBLIC, now: () => NOW }), draft: async () => JSON.stringify(draft), publish: async (d) => { published.push(d); return { url: "https://trainee.example/file?t=v1.d" }; } } });
+  eq(r.disagreements, [{ label: "Headcount, Hollow Oak Logistics", values: [{ value: "600", cite: [1] }, { value: "3,900", cite: [2] }] }]);
+  eq(r.points.length, 2, "both figures stay; neither is dropped or chosen");
+  const v: any = validateKind("research_brief", published[0], { now: NOW });
+  ok(v.ok, JSON.stringify(v));
+  const h = bodyHtml({ id: "f", userId: "u", kind: "research_brief", data: v.data, state: {}, tag: null, created_at: NOW, expires_at: NOW + 1, revoked_at: null } as any, "fs1." + "a".repeat(64));
+  ok(h.includes('<h2>Where the sources differ</h2>') && /Headcount, Hollow Oak Logistics: 600 <span class="rb-cite">\[1\]<\/span> · 3,900 <span class="rb-cite">\[2\]<\/span>\. The sources differ; Trainee has not picked one\./.test(h), h.slice(h.indexOf("differ") - 200, h.indexOf("differ") + 300));
+  ok(h.indexOf(">Summary<") < h.indexOf(">Where the sources differ<") && h.indexOf(">Where the sources differ<") < h.indexOf(">What would have to be true<"));
+  // An inline answer is told to give both.
+  const inline: any = await researchMarket({ question: "how many people work at Hollow Oak Logistics", format: "inline", plan: { queries: ["x"] },
+    deps: { search: { id: "first_party", needsKey: false, search: async () => ({ hits: [a, b].map((url) => ({ url, title: "t", provider: "company_site" as const, foundAt: NOW })), notes: [], provider: "first_party", searches: 1 }) }, read: (u) => fetchSources(u, { fetch: f, resolver: PUBLIC, now: () => NOW }), draft: async () => JSON.stringify(draft) } });
+  ok(/give each value with its source number and say they differ; never pick one/.test(inline.note));
 });

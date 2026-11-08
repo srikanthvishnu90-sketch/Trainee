@@ -144,7 +144,7 @@ export function freeFixtureFetch(req: Request): Response {
   if (host === "data.sec.gov" && p === `/submissions/CIK${String(SEC_CO.cik).padStart(10, "0")}.json`) return J({ filings: { recent: { form: ["8-K", "10-K"], accessionNumber: ["0009990001-26-000007", "0009990001-26-000002"], primaryDocument: ["hoak-8k.htm", "hoak-10k.htm"] } } });
   if (host === "efts.sec.gov" && /Hollow Oak Logistics/i.test(u.searchParams.get("q") ?? "")) return J({ hits: { hits: [{ _id: "0009990001-26-000007:hoak-8k.htm", _source: { ciks: ["0009990001"], display_names: ["Hollow Oak Logistics Inc (HOAK) (CIK 0009990001)"], form: "8-K", file_date: "2026-10-14" } }] } });
   if (host === "efts.sec.gov") return J({ hits: { hits: [] } });
-  if (u.href === SEC_10K) return H("Hollow Oak Logistics Inc. Form 10-K", ["Hollow Oak Logistics operates 14 distribution centers in the Midwest " + NOTE + ".", "Hollow Oak Logistics had 3,900 full-time employees at the end of the fiscal year " + NOTE + "."]);
+  if (u.href === SEC_10K) return H("Hollow Oak Logistics Inc. Form 10-K", ["Hollow Oak Logistics had 3,900 full-time employees at the end of the fiscal year " + NOTE + ".", "Hollow Oak Logistics operates 14 distribution centers in the Midwest " + NOTE + "."]);
   if (u.href === SEC_8K) return H("Hollow Oak Logistics Inc. Form 8-K", ["Hollow Oak Logistics announced a new Chicago automation center with 250 roles " + NOTE + "."]);
   const slug = decodeURIComponent(p.split("/")[3] ?? ""), b = BOARDS[slug];
   if (host === "boards-api.greenhouse.io" && b?.ats === "greenhouse" && p.endsWith("/jobs")) return J({ jobs: b.roles.map((r) => ({ title: r.title, location: { name: r.location } })), meta: { total: b.roles.length } });

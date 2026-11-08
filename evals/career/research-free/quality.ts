@@ -41,7 +41,7 @@ const NOW = Date.parse("2026-11-08T15:00:00Z");
 const args = Deno.args, flag = (k: string) => args.includes(k), val = (k: string) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : undefined; };
 const N = Number(val("--n") ?? 30), SHOTS = !flag("--no-shots");
 const FAMILIES = ["research.employer", "research.market", "research.pay", "research.compare"];
-export const SECTION_ORDER = ["Summary", "Comparison", "What would have to be true", "Risks", "How the sources were chosen", "Not found in a free source", "Sources"];
+export const SECTION_ORDER = ["Summary", "Comparison", "Where the sources differ", "What would have to be true", "Risks", "How the sources were chosen", "Not found in a free source", "Sources"];
 const REQUIRED = ["Summary", "What would have to be true", "Risks", "Sources"];
 
 // The eval world's web, as run.ts serves it: the stub sites and the free sources' fixtures answer, every other host 404s; those

@@ -616,7 +616,7 @@ export const batchText = (drafts: OutreachDraft[]) => batchMessages(drafts).join
 
 // ------------------------------------------------------------------------------------------------ the reply
 export type OutreachReply =
-  | { kind: "send"; all: boolean; ns: number[]; except: number[]; it?: boolean }
+  | { kind: "send"; all: boolean; ns: number[]; except: number[]; it?: boolean; both?: boolean }
   | { kind: "skip"; ns: number[]; anytime?: boolean } | { kind: "redo"; n: number } | { kind: "edit"; n: number; text: string }
   | { kind: "none" } | { kind: "show" } | { kind: "lapsed" } | { kind: "bad"; why: string };
 // FAMILY NETWORKING: "send it" / "looks good, send it" names the one draft shown (only when exactly one is waiting), and
@@ -656,6 +656,8 @@ export function parseOutreachReply(text: string): OutreachReply | null {
     const nums = parseNumbers(cancel[1]);
     if (nums?.ok) return { kind: "skip", ns: nums.ns, anytime: true };
   }
+  // "send both" names the whole batch only when exactly two drafts are waiting (outreachTurn checks).
+  if (/^(?:send|approve)(?: them)? both(?: of them)?$/.test(t)) return { kind: "send", all: true, ns: [], except: [], both: true };
   const all = /^(?:send|approve)(?: them)? all(?: of them| \d+)?(?: (?:except|but|minus|without|not)\b(.*))?$/.exec(t) ?? /^send (?:them|everything)(?: (?:except|but|minus|without|not)\b(.*))?$/.exec(t);
   if (all) {
     if (all[1] === undefined) return { kind: "send", all: true, ns: [], except: [] };
@@ -764,7 +766,10 @@ export async function outreachTurn(o: {
   onApproved?: (userId: string, items: ApprovedItem[]) => Promise<void | { draftId: string; reason: string }[]>;
 }): Promise<{ reply: string; status: string; intent: string; parts?: string[]; approved?: ApprovedItem[] } | null> {
   // A batch yes (D-MN-2) counts only while the batch is the thread's last word: the check just below, as for "send all".
-  const r: OutreachReply | null = parseOutreachReply(o.message) ?? parseBatchYes(o.message);
+  // The person's words as an approval reads them (approval_words.ts: "send 1 pls", "snd it", "yes send em all"); any
+  // other text is unchanged.
+  const said = approvalWords(o.message);
+  const r: OutreachReply | null = parseOutreachReply(said) ?? parseBatchYes(said);
   if (!r) return null;
   // D-MN-2: a question ("send them all?", "send 3?") is never an approval; with D-MN-1 an approval now sends.
   if (r.kind === "send" && /\?\s*$/.test(String(o.message ?? "").trim())) return null;
@@ -811,6 +816,10 @@ export async function outreachTurn(o: {
     const waiting = batch.filter((d) => d.status === "shown");
     if (waiting.length !== 1) return open(`Nothing was approved: ${waiting.length ? `${waiting.length} drafts are waiting, so say which by number, e.g. "send ${waiting[0].n}", or "send all"` : "no draft in this batch is waiting for approval"}.`, "bad");
     r.ns = [waiting[0].n];
+  }
+  if (r.kind === "send" && r.both) {
+    const waiting = batch.filter((d) => d.status === "shown");
+    if (waiting.length !== 2) return open(`Nothing was approved: ${waiting.length} draft${waiting.length === 1 ? " is" : "s are"} waiting, not two, so say which by number, e.g. "send ${waiting[0]?.n ?? 1}", or "send all".`, "bad");
   }
   if (r.kind === "bad") return open(`Nothing was approved: ${r.why}. This batch has ${range}.`, "bad");
   if (Date.parse(batch[0].created_at) < o.now - BATCH_TTL_MS) return { reply: `Those drafts are more than 3 days old, so nothing was approved. Ask me to draft them again.`, status: "expired", intent: "career_outreach_answer" };

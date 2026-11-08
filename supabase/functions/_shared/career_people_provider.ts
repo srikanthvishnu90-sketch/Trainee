@@ -18,6 +18,8 @@
 // Trainee sets no volume limit of its own (owner, 2026-10-27 19:55); the only brake is the search service refusing (429,
 // quota), shared through the database so every instance backs off, and said plainly. One company is discovered once for
 // everyone inside the cache window. Docs: docs/architect/PEOPLE-PROVIDER-2026-10-27.md.
+import { writesToSomeone } from "./outreach_ask.ts";
+import { isAutomatedInbox } from "./automated_inbox.ts";
 import { chatAsk, cleanCell, cleanEmail, companyKey, isFormula, readsAsInstruction } from "./career_people_import.ts";
 import { neverOpen } from "./career_people_sites.ts";
 import { formerTitle, type PageRead, readPage, type Resolver } from "./career_people_page.ts";
@@ -158,7 +160,7 @@ export function webProvider(o: { search: SearchFn; fetch: typeof fetch; resolve?
           // works there now. Before, they were listed and drafted to as a current employee.
           if (x.former || formerTitle(x.title) || (x.school && companyKey(x.school) === key)) continue;
           let email = cleanEmail(x.email);
-          if (email && isRoleAddress(email)) {
+          if (email && (isRoleAddress(email) || isAutomatedInbox(email, company))) { // R9: no-reply and ATS/job-board addresses too
             if (x.how === "mailto link") continue; // "Careers Team" <careers@>: an inbox, not a person
             email = null;
           }
@@ -322,6 +324,10 @@ export function parseTargetAsk(message: string): TargetAsk | null {
   m = new RegExp(`${lead}(?:who\\s+(?:works?|is\\s+working)|(?:the\\s+)?(?:people|folks|employees|staff|everyone|anyone|someone)\\s+(?:who\\s+(?:works?|is\\s+working|are\\s+working)|working))\\s+(?:at|for)\\s+(${CO})$`, "iu").exec(t)
     ?? new RegExp(`${lead}(?:the\\s+)?(?:employees|staff)\\s+(?:at|of|from)\\s+(${CO})$`, "iu").exec(t);
   if (m && !/^(?:my|your|our)\b/i.test(m[1])) return { kind: "role_at", titles: [], seniority: [], company: cleanCell(m[1], 120) };
+  // R9 OUTREACH: an ask that goes on to write to them ("find the hiring manager at X and reach out", "... and email them")
+  // is the networking turn's draft, never a search for a company named "X and reach out".
+  const after = /\s(?:and|&|then|,)\s+(?:then\s+)?(\S+(?:\s+\S+)?)/i.exec(t)?.[1] ?? "";
+  if (after && (/^(?:contact|ping|dm)\b/i.test(after) || writesToSomeone(after))) return null;
   m = new RegExp(`${lead}(.+?)\\s+(?:at|from)\\s+(${CO})$`, "iu").exec(t);
   // ROUTING SCENARIOS (2026-10-29): without "find" / "show" / "who are" in front, the words before "at" must name people
   // (a plural, or a role word): "withdraw from Stripe" and "aply to the analyst role at Figma" are not searches for a

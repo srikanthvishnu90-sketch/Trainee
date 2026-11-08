@@ -28,6 +28,7 @@ import { readsAsInstruction } from "./career_people_import.ts";
 // OUTREACH R4: the one set of rules for what comes back on a thread (the rail's reply check reads them too). Functions only:
 // career_send_rail.ts imports this module back, and neither reads the other at load time.
 import { autoReply, deliveryNotice, newText, optedOut } from "./career_send_rail.ts";
+import { AUTOMATED_WHY, automatedInbox } from "./automated_inbox.ts";
 
 export type ModelFn = (payload: any) => Promise<any>;
 export interface Recipient { name: string; firm: string; title: string; school: string; email: string; source: string; prior_firms?: string[]; address?: "published" | "inferred" }
@@ -616,7 +617,8 @@ export const batchText = (drafts: OutreachDraft[]) => batchMessages(drafts).join
 
 // ------------------------------------------------------------------------------------------------ the reply
 export type OutreachReply =
-  | { kind: "send"; all: boolean; ns: number[]; except: number[]; it?: boolean }
+  // `count`: "send all 3" says how many it means; it approves only a batch of exactly that many waiting (as on the card).
+  | { kind: "send"; all: boolean; ns: number[]; except: number[]; it?: boolean; both?: boolean; count?: number }
   | { kind: "skip"; ns: number[]; anytime?: boolean } | { kind: "redo"; n: number } | { kind: "edit"; n: number; text: string }
   | { kind: "none" } | { kind: "show" } | { kind: "lapsed" } | { kind: "bad"; why: string };
 // FAMILY NETWORKING: "send it" / "looks good, send it" names the one draft shown (only when exactly one is waiting), and
@@ -656,7 +658,12 @@ export function parseOutreachReply(text: string): OutreachReply | null {
     const nums = parseNumbers(cancel[1]);
     if (nums?.ok) return { kind: "skip", ns: nums.ns, anytime: true };
   }
-  const all = /^(?:send|approve)(?: them)? all(?: of them| \d+)?(?: (?:except|but|minus|without|not)\b(.*))?$/.exec(t) ?? /^send (?:them|everything)(?: (?:except|but|minus|without|not)\b(.*))?$/.exec(t);
+  // "send both" names the whole batch only when exactly two drafts are waiting (outreachTurn checks).
+  if (/^(?:send|approve)(?: them)? both(?: of them)?$/.test(t)) return { kind: "send", all: true, ns: [], except: [], both: true };
+  // S2 review of #614: "send all 3" threw the 3 away and sent a batch of 5. The count is kept and checked (outreachTurn).
+  const counted = /^(?:send|approve)(?: them)? all (\d+)(?: of them)?$/.exec(t);
+  if (counted) return { kind: "send", all: true, ns: [], except: [], count: Number(counted[1]) };
+  const all = /^(?:send|approve)(?: them)? all(?: of them)?(?: (?:except|but|minus|without|not)\b(.*))?$/.exec(t) ?? /^send (?:them|everything)(?: (?:except|but|minus|without|not)\b(.*))?$/.exec(t);
   if (all) {
     if (all[1] === undefined) return { kind: "send", all: true, ns: [], except: [] };
     const nums = parseNumbers(all[1].replace(/\b(?:numbers?|for)\b/g, " ").trim());
@@ -764,7 +771,10 @@ export async function outreachTurn(o: {
   onApproved?: (userId: string, items: ApprovedItem[]) => Promise<void | { draftId: string; reason: string }[]>;
 }): Promise<{ reply: string; status: string; intent: string; parts?: string[]; approved?: ApprovedItem[] } | null> {
   // A batch yes (D-MN-2) counts only while the batch is the thread's last word: the check just below, as for "send all".
-  const r: OutreachReply | null = parseOutreachReply(o.message) ?? parseBatchYes(o.message);
+  // The person's words as an approval reads them (approval_words.ts: "send 1 pls", "snd it", "yes send em all"); any
+  // other text is unchanged.
+  const said = approvalWords(o.message);
+  const r: OutreachReply | null = parseOutreachReply(said) ?? parseBatchYes(said);
   if (!r) return null;
   // D-MN-2: a question ("send them all?", "send 3?") is never an approval; with D-MN-1 an approval now sends.
   if (r.kind === "send" && /\?\s*$/.test(String(o.message ?? "").trim())) return null;
@@ -809,8 +819,16 @@ export async function outreachTurn(o: {
   if (r.kind === "send" && r.it) {
     // "send it": exactly one draft is waiting, so "it" can mean only that one; otherwise ask for the number, once.
     const waiting = batch.filter((d) => d.status === "shown");
-    if (waiting.length !== 1) return open(`Nothing was approved: ${waiting.length ? `${waiting.length} drafts are waiting, so say which by number, e.g. "send ${waiting[0].n}", or "send all"` : "no draft in this batch is waiting for approval"}.`, "bad");
+    if (waiting.length !== 1) return open(`Nothing was approved: ${waiting.length ? `${waiting.length} drafts are waiting, so say which by number, e.g. "send ${waiting[0].n}", or "send all". Send all ${waiting.length}, or which ones?` : "no draft in this batch is waiting for approval."}`, "bad");
     r.ns = [waiting[0].n];
+  }
+  if (r.kind === "send" && r.count !== undefined) {
+    const waiting = batch.filter((d) => d.status === "shown");
+    if (waiting.length !== r.count) return open(`Nothing was approved: ${waiting.length} draft${waiting.length === 1 ? " is" : "s are"} waiting, not ${r.count}. Send all ${waiting.length}, or which ones? Say "send all" or which by number, e.g. "send ${waiting[0]?.n ?? 1}".`, "bad");
+  }
+  if (r.kind === "send" && r.both) {
+    const waiting = batch.filter((d) => d.status === "shown");
+    if (waiting.length !== 2) return open(`Nothing was approved: ${waiting.length} draft${waiting.length === 1 ? " is" : "s are"} waiting, not two, so say which by number, e.g. "send ${waiting[0]?.n ?? 1}", or "send all".`, "bad");
   }
   if (r.kind === "bad") return open(`Nothing was approved: ${r.why}. This batch has ${range}.`, "bad");
   if (Date.parse(batch[0].created_at) < o.now - BATCH_TTL_MS) return { reply: `Those drafts are more than 3 days old, so nothing was approved. Ask me to draft them again.`, status: "expired", intent: "career_outreach_answer" };
@@ -853,6 +871,9 @@ export async function outreachTurn(o: {
   for (const n of want) {
     const d = byN.get(n)!;
     if (d.status !== "shown") { not.push(`${n} (${d.status})`); continue; }
+    // R9 OUTREACH SAFETY: never approved for a no-reply sender, a role inbox, or an ATS or job-board address.
+    const auto = automatedInbox(d.recipient.email, d.recipient.firm);
+    if (auto) { not.push(`${n} (${d.recipient.email} ${AUTOMATED_WHY[auto]})`); continue; }
     const h = await payloadHash(messageOf(d));
     if (h !== d.hash) { not.push(`${n} (changed since it was shown)`); continue; }
     if (await o.store.update(o.userId, { ...d, status: "approved", approved_hash: h, approved_at: new Date(o.now).toISOString() }, { status: "shown", hash: h })) {
@@ -896,6 +917,7 @@ export async function outreachTurn(o: {
 }
 // Why the sending rail refused an approved draft for good, in the person's words (the reasons career_send_enqueue gives).
 export const RAIL_REFUSED: Record<string, string> = {
+  not_a_person: "that address is an automated or shared inbox, not a person",
   opted_out: "they asked not to be contacted", bad_address: "that address bounced before, so no one emails it again",
   already_emailed: "you already emailed them; Trainee never sends a second first email to the same person",
 };

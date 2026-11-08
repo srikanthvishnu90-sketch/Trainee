@@ -6,6 +6,7 @@
 // Not submitted / Needs you / Unknown) and "applied" is never written; the logo comes only from the employer's own domain, else a
 // lettermark; posting text is untrusted and always escaped (bidi overrides and isolates removed, links only http and https).
 import type { JobView } from "./telegram_jobs.ts";
+import { RATES_CSS, ratesHtml, ratesText, type RateRow } from "./career_resume_outcomes.ts";
 import { reasonWords } from "./career_apply_status.ts";
 import { BODY_FONT, BRAND, DISABLED_CSS, FAVICON, FONT_LINKS, PLUM, TOKENS_CSS } from "./brand.ts";
 import { FILE_CSS, stampHtml, stateHtml } from "./file_design.ts";
@@ -30,7 +31,9 @@ export interface Row {
 // total: how many postings the list holds; the page shows the first rows.length of them and says so when that is fewer.
 // made: "Made for Ada · Nov 1, 2026" above the card; stamp: "Postings checked ..." from the postings' own check times (file_design.ts
 // freshnessStamp), null when none is known (the page then says the check time is unknown, as a value).
-export interface Feed { og?: Og; token: string; rows: Row[]; setHash: string | null; setSize: number; top?: string; botUrl?: string | null; total?: number; made?: string; stamp?: string | null }
+// RELEASE 9: resumeRates, when read, is the person's own response, interview and offer rates by resume version, tailored or not,
+// layout and kind of change (career_resume_outcomes.ts, the view career_apply_outcomes_by_resume): a read-only section.
+export interface Feed { og?: Og; token: string; rows: Row[]; setHash: string | null; setSize: number; top?: string; botUrl?: string | null; total?: number; made?: string; stamp?: string | null; resumeRates?: RateRow[] | null }
 
 // Bidi overrides and isolates (U+202A-E, U+2066-9) in a company, title or location would reverse the text after them on the page,
 // a provenance label included; they are dropped, never rendered.
@@ -237,8 +240,9 @@ export function renderFeed(f: Feed): string {
   const all = f.setHash && f.setSize >= 2 ? `<form method="post" class="ajax all">${hidden(f.token, "applyall", `<input type="hidden" name="set" value="${f.setHash}">`)}<button type="submit">Apply to all ${f.setSize}</button></form>` : "";
   const top = f.top ? `<p class="top-note" role="alert">${esc(f.top)} ${refresh(f.token)}</p>` : "";
   // The File shell (file_design.ts): the wordmark and who it was made for above one card; the title, its freshness stamp, then the rows.
-  const inner = `<div id="root"><header class="fhead">${BRAND}${f.made ? `<p class="made">${esc(f.made)}</p>` : ""}</header><div class="fcard"><h1 class="ftitle">Your jobs</h1>${stampHtml(f.stamp ?? null)}${withLine}${more}${all}<main id="main">${top}${f.rows.length ? `<ul class="rows">${f.rows.map((r) => rowHtml(r, f.token)).join("")}</ul>` : EMPTY_FEED}</main></div>${signOutFoot(f.token)}</div><p id="live" class="sr" role="status" aria-live="polite"></p>`;
-  return layout("Your jobs - Trainee", inner, { script: FEED_SCRIPT, tg: true, og: f.og });
+  const rates = f.resumeRates ? ratesHtml(f.resumeRates, esc) : "";
+  const inner = `<div id="root"><header class="fhead">${BRAND}${f.made ? `<p class="made">${esc(f.made)}</p>` : ""}</header><div class="fcard"><h1 class="ftitle">Your jobs</h1>${stampHtml(f.stamp ?? null)}${withLine}${more}${all}<main id="main">${top}${f.rows.length ? `<ul class="rows">${f.rows.map((r) => rowHtml(r, f.token)).join("")}</ul>` : EMPTY_FEED}${rates}</main></div>${signOutFoot(f.token)}</div><p id="live" class="sr" role="status" aria-live="polite"></p>`;
+  return layout("Your jobs - Trainee", inner, { script: FEED_SCRIPT, tg: true, og: f.og, ...(rates ? { css: RATES_CSS } : {}) });
 }
 // Sign out of this page here, or everywhere it is open (every session of the account ends; each needs a new sign-in).
 export const signOutFoot = (token: string) => `<footer class="foot"><form method="post" style="display:inline">${hidden(token, "signout")}<button type="submit" class="lnk">Sign out</button></form> · <form method="post" style="display:inline">${hidden(token, "signout_all")}<button type="submit" class="lnk">Sign out everywhere</button></form></footer>`;
@@ -277,6 +281,7 @@ function renderTextRaw(f: Feed): string {
     if (r.job.url) L.push(`   Posting: ${r.job.url}`);
     if (r.note) L.push(`   ${r.note}`);
   });
+  if (f.resumeRates) L.push("", ratesText(f.resumeRates));
   L.push("", "To act, open this link in a browser. Apply approves exactly the application prepared for that row.");
   return L.join("\n");
 }

@@ -21,7 +21,7 @@
 // that cannot be written never changes the answer.
 import { type EventStore, recordEvents } from "./agent/timeline.ts";
 import { sameCompany } from "./career_mail.ts";
-import { approvalWords } from "./approval_words.ts";
+import { approvalWords, NEGATIONS } from "./approval_words.ts";
 
 export interface Prepared {
   id: string;
@@ -49,6 +49,8 @@ export interface CardStore {
   // other's card and both approve nothing. Throws card_changed (a hash differs) or invalid card (no longer open to approve).
   confirm?(userId: string, ids: string[], hashes: string[]): Promise<{ card: Card; results: CardResult[] }>;
   latestOpen(userId: string): Promise<Card | null>;
+  // R9-G2: the open card when it was pushed in pages (career_apply_cards.pages), else null.
+  latestOpenPaged?(userId: string): Promise<Card | null>;
   answer(userId: string, cardId: string, approve: number[]): Promise<CardResult[]>;
   lastAssistantIntent(threadId: string): Promise<string | null>;
   // SERIAL-1451: the card this thread's last reply showed (its id in that message's meta), or null. A yes answers that
@@ -68,7 +70,8 @@ export interface CardStore {
 // brain as any other text. Every shape here is checked again against the card itself before anything is approved.
 export type CardReply =
   | { kind: "show" }
-  | { kind: "yes"; except: number[]; exceptNames?: string[]; count?: number }
+  // `it`: the answer names one item ("send it", "send this one", "isko bhejo"): it approves only a card of exactly one.
+  | { kind: "yes"; except: number[]; exceptNames?: string[]; count?: number; it?: boolean }
   | { kind: "only"; only: number[]; onlyNames?: string[] }
   | { kind: "except_only"; except: number[]; exceptNames?: string[] } // "not Acme" with no yes: asked, never approved
   | { kind: "no" }
@@ -146,7 +149,8 @@ export function parseSelection(raw: string): { nums: number[]; names: string[] }
     }
     // MASS APPLY END TO END (2026-11-04): "approve the second one", "just the first and third": a card position in words
     // is that number on the card, never an employer called "second" (which matched no item and approved nothing).
-    if (ORDINAL_WORD[piece]) {
+    // Own keys only: "constructor" (an employer) is not a position (S2 review of #614: "only constructor" read as [null]).
+    if (Object.hasOwn(ORDINAL_WORD, piece)) {
       nums.push(ORDINAL_WORD[piece]);
       continue;
     }
@@ -170,6 +174,7 @@ export function parseSelection(raw: string): { nums: number[]; names: string[] }
   return { nums: [...new Set(nums)], names: [...new Set(names)] };
 }
 
+const NAME_WORDS = new Set(["first", "after", "n", "change", "fix", "edit"]);
 export function parseCardReply(text: string): CardReply | null {
   // A thumbs-up alone, or "yess"/"yse" alone, is "yes" (approval_words.ts).
   const raw = approvalWords(String(text ?? "")).toLowerCase().replace(/[’‘`]/g, "'").replace(/\s+/g, " ").trim();
@@ -194,6 +199,12 @@ export function parseCardReply(text: string): CardReply | null {
   if (/^(?:(?:yes|approve|send)(?: to)?\s+)?#?\d{1,4}(?:\s*(?:,|or)\s*#?\d{1,4})*\s+or\s+#?\d{1,4}$/.test(t)) return { kind: "unclear" };
   const c = t.match(/^change (?:number |#)?(\d+)\b/);
   if (c) return { kind: "change", n: Number(c[1]) };
+  // A yes that also asks for a change ("yes but change 2", "send them, fix the cover letter") is not an answer anyone can
+  // act on: nothing is approved (approval-language review, 2026-11-08: "yes but change X" read as "yes except an employer
+  // named 'change x'").
+  if ((YES_WORD.test(t) || CARD_VERB.test(t)) && /\b(?:change|edit|fix|modify|update|rewrite|redo|tweak|correct)\b/.test(t)) return { kind: "unclear" };
+  // "send both" (approval_words.ts) is the whole card when it has two: a count, checked against the card.
+  if (t === "send both") return { kind: "yes", except: [], count: 2 };
   const yw = YES_WORD.exec(t);
   const softYes = !!yw && /^(?:ok|okay|sure)\b/.test(t);
   const hadYes = !!yw;
@@ -208,6 +219,9 @@ export function parseCardReply(text: string): CardReply | null {
       // A count is read only with "all" ("approve all 60"); "approve 2" may mean number 2 or two of them: unclear.
       if (m[1] && !/\ball\b/.test(body)) return { kind: "unclear" };
       r = m[1] ? { kind: "yes", except: [], count: Number(m[1]) } : { kind: "yes", except: [] };
+      // "send it" / "approve it" / "submit it" names ONE item (S2 review of #605: on a card of 5, "send this one" read as
+      // "yes, send it" approved all 5). cardTurn approves it only on a card of exactly one.
+      if (r.kind === "yes" && /^(?:(?:please|pls)\s+)?(?:approve|send|submit) it\b/.test(body)) r.it = true;
     }
   }
   // "approve, skip 2" / "send all but 3": a yes in other words, then what to leave out.
@@ -259,6 +273,11 @@ export function parseCardReply(text: string): CardReply | null {
     if (s && !s.names.length && s.nums.length >= 2) r = { kind: "only", only: s.nums };
   }
   if (r && asked) return { kind: "unclear" };
+  // An employer "name" that is a negation or a hold in any language ("send them espera", "send all - ruko", "approve
+  // nein") is not a name: the answer is unclear and approves nothing (approval_words.ts NEGATIONS).
+  const named = r?.kind === "only" ? r.onlyNames : r?.kind === "yes" || r?.kind === "except_only" ? r.exceptNames : undefined;
+  // Words that are also common in employer names ("First Republic") are left to the name match.
+  if (named?.some((x) => x.split(/[^\p{L}'’]+/u).some((w) => NEGATIONS.has(w) && !NAME_WORDS.has(w)))) return { kind: "unclear" };
   if (!r && hadYes && /^(?:but|except|only|just|and)\b/.test(body)) return { kind: "unclear" };
   return r;
 }
@@ -438,6 +457,9 @@ const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 export const HOLD_TEXT = (count: number) =>
   `Okay, holding: nothing was approved and nothing was sent. When you're ready, ${lowerFirst(HOW(count))} A text yes counts within 10 minutes of the card; after that, say "show my applications" for a fresh one.`;
 export const UNCLEAR_TEXT = (count: number) => `I couldn't tell which ones you mean, so nothing was approved. ${HOW(count)}`;
+// "send it" on a card of more than one: "it" is one application, so the card asks which (S2 review of #614).
+export const IT_UNCLEAR_TEXT = (count: number) =>
+  `"It" is one application and this card has ${count}, so nothing was approved. Send all ${count}, or which ones? ${HOW(count)}`;
 // The statuses after which the card is still waiting for its answer: the handler keeps it the thread's last word, with
 // its id on the reply, so the next "yes" answers it. "card_outdated" waits only when it carries the current card's id.
 export const CARD_WAITING = ["shown", "not_on_card", "change", "hold", "unclear", "not_named", "count_mismatch", "nothing_left", "confirm_except"];
@@ -461,7 +483,7 @@ export async function cardTurn(
     resumeReady?: () => Promise<boolean | null>;
   },
 ): Promise<{ reply: string; status: string; card_id?: string; parts?: string[] } | null> {
-  const r = parseCardReply(o.message);
+  let r = parseCardReply(o.message);
   if (!r) return null;
   if (r.kind === "show") {
     // Fail closed (review of PR #194): only a confirmed "yes, on file" shows a card; "no" asks for the resume, and a check
@@ -486,6 +508,15 @@ export async function cardTurn(
           `The application to ${c.tooLong.company} is too long to show in a text. Open it in the app to approve it.`,
         status: "too_long",
       };
+    }
+    // R9-G2 (D-MS-1, one card per batch): a PAGED card the preparation pushed for exactly this batch in the last 5 minutes
+    // is shown again as that same card, never replaced by a second card of the same applications; its yes still needs every
+    // pushed page delivered (career_apply_card_answer_for). Any other open card is replaced as before.
+    const ids = c.take.map((p) => p.id);
+    const current = o.store.latestOpenPaged ? await o.store.latestOpenPaged(o.userId).catch(() => null) : null;
+    if (current && current.items.length === ids.length && current.items.every((it, i) => it.prepared_id === ids[i])
+      && Date.parse(current.shown_at) > o.now - 5 * 60_000) {
+      return { reply: c.text, status: "shown", card_id: current.id, ...(c.parts.length ? { parts: c.parts } : {}) };
     }
     let opened: Card;
     try {
@@ -546,8 +577,12 @@ export async function cardTurn(
       "change",
     );
   }
+  // "send 1" / "approve 1" may be a count or a number, but on a card of one they say the same: that one application.
+  if (r.kind === "unclear" && total === 1 && /^(?:send|approve) 1$/.test(approvalWords(o.message).trim().toLowerCase())) r = { kind: "only", only: [1] };
   if (r.kind === "hold") return waiting(HOLD_TEXT(total), "hold");
   if (r.kind === "unclear") return waiting(UNCLEAR_TEXT(total), "unclear");
+  // "it" (one item) on a card of more than one is not an answer anyone can act on: nothing is approved.
+  if (r.kind === "yes" && r.it && total !== 1) return waiting(IT_UNCLEAR_TEXT(total), "unclear");
   // Names ("not Acme", "only Acme and Beta"): each must name at least one application on this card, by its employer.
   const names = r.kind === "yes" || r.kind === "except_only" ? r.exceptNames ?? [] : r.kind === "only" ? r.onlyNames ?? [] : [];
   const byName: number[] = [];
@@ -634,6 +669,14 @@ export async function cardTurn(
     if (/card_answered/.test(msg)) {
       return { reply: CARD_ANSWERED_BEFORE, status: "answered_before" };
     }
+    // R9-G2 (D-MS-1, paged cards): a yes approves a paged card only once every page of it reached them, and only while its
+    // applications are exactly the set it showed.
+    if (/card_pages_undelivered/.test(msg)) {
+      return { reply: `Not every page of that card has reached you yet, so nothing was approved and nothing was sent. Say "show my applications" to see the whole card again.`, status: "pages_undelivered" };
+    }
+    if (/APPROVAL_SET_CHANGED/.test(msg)) {
+      return { reply: `The applications on that card changed after it was shown (APPROVAL_SET_CHANGED), so nothing was approved and nothing was sent. Say "show my applications" for the current card.`, status: "set_changed" };
+    }
     throw e;
   }
 }
@@ -674,6 +717,14 @@ export function supabaseCardStore(admin: any): CardStore {
         "read the open card",
       );
       return rows?.[0] ?? null;
+    },
+    async latestOpenPaged(userId) {
+      // Before 20261108100000 there is no pages column: no paged card can exist, so none is read.
+      const r = await admin.from("career_apply_cards").select("id,items,shown_at,pages").eq("user_id", userId).eq("state", "open")
+        .order("shown_at", { ascending: false }).limit(1);
+      if (r.error) return null;
+      const c = r.data?.[0];
+      return c && Number(c.pages) >= 2 ? { id: c.id, items: c.items, shown_at: c.shown_at } : null;
     },
     async answer(userId, cardId, approve) {
       return must(

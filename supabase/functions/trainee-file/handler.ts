@@ -19,6 +19,7 @@ import { ACCOUNT_MAX_TRIES, checkSession, CLEAR_LOGIN, CLEAR_SESSION, codeOf, LO
 import { verifyInitData } from "../_shared/telegram_webapp.ts";
 import { BOOT_SCRIPT, cut, FEED_SCRIPT, fullOf, hostOf, renderBootstrap, renderFeed, renderLinkState, renderPhoneLogin, renderPreview, renderText, signOutFoot, snippetOf, statusOf, type AppRow, type Feed, type Row } from "../_shared/file_page.ts";
 import { dayOf, BRAND, esc, layout, postedLine, webUrl } from "../_shared/file_page.ts";
+import { researchOgImage } from "../_shared/research_og.ts";
 import { actOn, bodyHtml, COPY_SCRIPT, KIND_CSS, KIND_LABEL, textOf, type Effects, type FileRecord } from "../_shared/file_kinds.ts";
 import type { FileService } from "../_shared/file_service.ts";
 import { fetchLogo, memoryLogoCache, validDomain, type LogoCache } from "../_shared/logo_cache.ts";
@@ -33,6 +34,7 @@ import { decodeRowQuestionType } from "../_shared/row_answer.ts";
 import { redactIdentity } from "../_shared/identity_redact.ts";
 import { coverage, countsOf, NOTHING_SENT, NOT_LISTED, renderExport, reqIdOf, roleIds, specOf } from "../_shared/results_spec.ts";
 import type { ListMeta } from "../_shared/telegram_jobs.ts";
+import type { RateRow } from "../_shared/career_resume_outcomes.ts";
 import { fileShellHtml, firstNameOf, freshnessStamp, madeForLine, stateHtml } from "../_shared/file_design.ts";
 import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
 
@@ -55,6 +57,7 @@ export interface FileDeps extends Omit<JobDeps, "store"> {
   fileEffects?: Effects; // what Introduce really does (send); absent, an approved introduction says it was not sent
   logoFetch?: typeof fetch; // TRAINEE_LOGO_URL=self: how the server fetches an employer's own logo (tests pass a fake; default fetch)
   logoCache?: LogoCache; // and where it keeps them (default: one in-memory cache per instance)
+  resumeRates?: (userId: string) => Promise<RateRow[]>; // RELEASE 9: the person's rates by resume version (read only); absent or unreadable, no section
   timeZone?: (userId: string) => Promise<string | null>; // the person's own zone (dates on the page are their day); absent or unknown, Chicago, said
   // The employer's open questions (career_apply_questions): a results card that isn't ready asks them on "A few things first", and
   // answers are checked (checkAnswer) and saved (store.answer) exactly as the chat saves them. Absent: the page asks nothing.
@@ -172,6 +175,8 @@ function metaOf(job: JobView, post: PostingRow | null): { meta: string; metaSrc:
 }
 
 const ogImage = (env: { get(k: string): string | undefined }) => { const b = (env.get("TRAINEE_FILE_BASE_URL") || "").trim(); return /^https:\/\//.test(b) ? `${new URL(b).origin}/og-file.png` : null; };
+// R9-C: a research brief's link preview is the research card (research_og.ts); it still names only the kind, nothing of the brief.
+const ogImageOf = (kind: string, env: { get(k: string): string | undefined }) => kind === "research_brief" ? researchOgImage(env.get("TRAINEE_FILE_BASE_URL")) : ogImage(env);
 // Every value the application will send, from the real payload the hash covers, in full: the resume, each field (a file by its name),
 // the cover note, the page-set fields, every other key of the payload, and the destination. A secret-looking field or key (the same
 // rule the Telegram card's Confirm uses: telegram_jobs.ts isSecretField / secretKey / secretFields) is shown as "Needs you", never its
@@ -234,6 +239,7 @@ async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: R
   // The account's stamp, once (apply_trust.ts): a payload prepared under another account state is not offered.
   const account = d.account ? await d.account(claims.u).catch(() => "unreadable" as const) : undefined;
   const tz = d.timeZone ? await d.timeZone(claims.u).catch(() => null) : null;
+  const resumeRates = d.resumeRates ? await d.resumeRates(claims.u).catch(() => null) : null;
   const rows: Row[] = await Promise.all(got.map(async ({ ref, c }) => {
     const job = { ...c!.job }, post = postings.find((p) => p.job_id === job.job_id) ?? null;
     job.company_domain = job.company_domain ?? post?.company_domain ?? null;
@@ -281,7 +287,7 @@ async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: R
   // live on their boards (career_postings.last_seen_at), in the person's zone; none known, the page says the check time is unknown.
   const shown = new Set(rows.map((r) => r.job.job_id));
   const stamp = freshnessStamp("Postings checked", postings.filter((p) => shown.has(p.job_id)).map((p) => p.last_seen_at), { now: d.now(), tz });
-  return { token, rows, setHash, setSize: set.length, top, og, total: all.length, made: madeForLine(firstNameOf(facts), d.now(), tz), stamp };
+  return { token, rows, setHash, setSize: set.length, top, og, total: all.length, made: madeForLine(firstNameOf(facts), d.now(), tz), stamp, resumeRates };
 }
 
 // One Apply = one hash-bound approval through the Telegram Confirm path. Returns a note for the row when it did not go.
@@ -381,7 +387,7 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
       // A link preview fetch: the brand card and, for a file of another kind, the kind's name; nothing about the person (not even
       // how many jobs) and the link is not touched.
       const g = d.files ? await d.files.get(c.claims.u, c.claims.r).catch(() => null) : null;
-      if (g && g.state !== "missing") return html(layout("Trainee", `<header>${BRAND}<h1>A file from Trainee</h1></header><main id="main"><p>Open this link in your browser, or from Telegram.</p></main>`, { og: { title: `${KIND_LABEL[g.rec.kind]} from Trainee`, description: "Sign in to open it.", image: ogImage(d.env) } }));
+      if (g && g.state !== "missing") return html(layout("Trainee", `<header>${BRAND}<h1>A file from Trainee</h1></header><main id="main"><p>Open this link in your browser, or from Telegram.</p></main>`, { og: { title: `${KIND_LABEL[g.rec.kind]} from Trainee`, description: "Sign in to open it.", image: ogImageOf(g.rec.kind, d.env) } }));
       return html(renderPreview({ title: "Your jobs from Trainee", description: "Sign in with your phone number to see them.", image: ogImage(d.env) }));
     }
     const cur = await cookieSession();
@@ -651,7 +657,7 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
   let csp = (await headers("text/html", d.env))["content-security-policy"].replace("script-src ", `script-src ${await kindScriptHash} `);
   // A confirmation screenshot is shown inline only from the project's own storage origin; img-src then allows exactly that origin.
   if (shots) csp = csp.replace(/img-src ([^;]+)/, (_m, v: string) => `img-src ${v === "'none'" ? shots : `${v} ${shots}`}`);
-  return o.html(layout(`${String(rec.data?.title ?? KIND_LABEL[rec.kind])} - Trainee`, inner, { script: KIND_SCRIPT, tg: true, css: KIND_CSS, og: { title: `${KIND_LABEL[rec.kind]} from Trainee`, description: "Open in Trainee.", image: ogImage(d.env) } }), 200, { "content-security-policy": csp });
+  return o.html(layout(`${String(rec.data?.title ?? KIND_LABEL[rec.kind])} - Trainee`, inner, { script: KIND_SCRIPT, tg: true, css: KIND_CSS, og: { title: `${KIND_LABEL[rec.kind]} from Trainee`, description: "Open in Trainee.", image: ogImageOf(rec.kind, d.env) } }), 200, { "content-security-policy": csp });
 }
 async function logoOf(want: string, claims: FileClaims, d: FileDeps): Promise<Response> {
   const none = async () => new Response("", { status: 404, headers: await headers("text/plain; charset=utf-8", d.env) });

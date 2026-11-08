@@ -1,6 +1,7 @@
 // The career tools (WO-002): thin wrappers over the domain modules that already work, operating on the same per-person
 // career state the CareerHost persists (ctx.state is the host's turn ctx: profile, trackStore, …). Tools return data; the
 // model writes the words. No reply prose lives here.
+import { isAutomatedInbox } from "../automated_inbox.ts";
 import { conversationFor, type RepliesStore } from "../career_outreach_replies.ts";
 import { CareerProfile, CareerTrack, CareerPrep, CareerPaths } from "../router_core.career.js";
 import { AskPerson, type ToolSpec, type ToolCtx } from "./loop.ts";
@@ -20,13 +21,14 @@ import { extractInvite, INTERVIEWER_NOTE, interviewRow, inviteBrief, isInvite, s
 import { sameCompany } from "../career_mail.ts";
 import type { DigestStore, InterviewStore } from "../career_brief_store.ts";
 import { DAY_NAMES, DEFAULT_DIGEST, validDigest } from "../career_digest.ts";
-import { contactsOf, hunterPass, knownFirm, LIST_TARGET_USD, listCost, listReport, sameFirm, type Verifier, vendorSource } from "../career_contacts.ts";
+import { type ContactRow, contactsOf, firmKey, hunterPass, knownFirm, LIST_TARGET_USD, listCost, listReport, sameFirm, type Verifier, vendorSource } from "../career_contacts.ts";
 import {
   batchMessages, batchText, blockedAddresses, confirmed, draftFor, draftLangOf, emailHash, footerOf, messageOf, type ModelFn, OUTREACH_INTENT, type OutreachDraft,
   type OutreachStore, payloadHash, recordOutreach, SIGNATURE_ASK, guardRecipient,
 } from "../career_outreach.ts";
 import { legacyRows, REFERRAL_ASK, referralMap, targetFirms } from "../career_referrals.ts";
 import { CONTACT_QUESTION, contactFromMessage, namedIn, type PersonaStore, type ResumeRenderer, type ResumeStore, restatePersona, savePersona, tailorForPosting, validPersonaName } from "../career_tailor.ts";
+import { recordVersion, type ResumeVersionLog } from "../career_resume_outcomes.ts";
 import { type OfferPending, offerTurn, saidIn } from "../career_offer.ts";
 import { findFirm, pathAnswer } from "../career_path.ts";
 import type { HiredResult, HiredSource } from "../career_hired.ts";
@@ -35,6 +37,7 @@ import { payFrom, postingTextForModel } from "../posting_pay.ts";
 import type { Limits } from "../career_apply.ts";
 import { type Situation, statusText } from "../career_situation.ts";
 import { researchCareerQuestion, type ResearchDeps } from "./research/index.ts";
+import { type MarketDeps, type MarketResult, researchMarket } from "./research/market.ts";
 
 const obj = (properties: Record<string, unknown> = {}, required: string[] = []) => ({ type: "object" as const, properties, required });
 const str = (description: string) => ({ type: "string", description });
@@ -162,11 +165,39 @@ const FIT_CACHES = new WeakMap<object, FitCache>();
 const fitCacheOf = (c: ToolCtx): FitCache => { let f = FIT_CACHES.get(c); if (!f) FIT_CACHES.set(c, f = newFitCache()); return f; };
 const profileOf = (c: ToolCtx) => ((c.state.profile as any) ??= CareerProfile.createProfile({}));
 const CONTACTS_ASK = "Send me a CSV of the people you want to reach (your LinkedIn connections export, or a list you have) and I'll check every address in it.";
+// R9 OUTREACH: the contacts a draft may be written from: the chat's own rows (a chat that held a list before R1) and the
+// account's (career_account_contacts), read by the firm or the name asked for, never the whole list on a turn.
+async function accountContacts(store: OutreachStore, c: ToolCtx, i: { firm?: unknown; name?: unknown }): Promise<ContactRow[]> {
+  const out = [...contactsOf(c.state)];
+  const firm = String(i.firm ?? "").trim(), name = plainName(i.name);
+  const more = firm && store.contactsAtFirm ? await store.contactsAtFirm(c.userId, firmKey(firm)).catch(() => [])
+    : name && store.contactsNamed ? await store.contactsNamed(c.userId, name).catch(() => []) : [];
+  const seen = new Set(out.map((r) => `${r.file}#${r.row}#${(r.email ?? "").toLowerCase()}`));
+  for (const r of more) { const k = `${r.file}#${r.row}#${(r.email ?? "").toLowerCase()}`; if (!seen.has(k)) { seen.add(k); out.push(r); } }
+  return out;
+}
+// The drafts saved in this turn, by the turn (one batch a turn).
+const TURN_DRAFTS = new WeakMap<object, OutreachDraft[]>();
+// A name's key in any script, accents folded: the same rule as career_networking.ts nameKey (kept here so the brain's
+// tools do not import the networking turn and its whole graph into the brain eval; deploy-evidence S3).
+const nameKey = (s: unknown) => String(s ?? "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[’']/g, "").replace(/&/g, " and ").replace(/[^\p{L}\p{N}@.]+/gu, " ").trim();
+const plainName = (v: unknown) => nameKey(String(v ?? "").trim());
+// "Maya" names "Maya Chen"; "Maya Chen" names "Maya Chen" (and "Maya Chen-Li"), never "Mayan Chen".
+const namedAs = (rowName: unknown, k: string) => { const n = nameKey(rowName); return !!k && (n === k || n.startsWith(`${k} `)); };
 const trackOf = (c: ToolCtx) => ((c.state.trackStore as any) ??= CareerTrack.createMemoryStore([]));
 
 // WO-028: tailoring needs the posting by id (career_postings), where personas are kept, the private resume store and
 // the PDF renderer; without them the resume tools say they are not configured here.
-export interface TailorTools { posting: (jobId: string) => Promise<any | null>; personas: PersonaStore; resumes: ResumeStore; render: ResumeRenderer }
+// RELEASE 9: ownDocx reads the person's own Word file (the release-8 clean copy) for "keep my layout"; versions records which
+// file was made from which tailoring (career_resume_outcomes.ts), so an application sent with it is measured by version.
+export interface TailorTools {
+  posting: (jobId: string) => Promise<any | null>; personas: PersonaStore; resumes: ResumeStore; render: ResumeRenderer;
+  ownDocx?: (userId: string) => Promise<Uint8Array | null>; versions?: ResumeVersionLog | null;
+  // 2026-11-08 (review of #596): the files this turn made ride the reply, as the router's tailored files do (agent-chat
+  // materializes them into the person's artifact store, channel_artifacts.ts). Turn-scoped: nothing is kept in state.
+  deliver?: (doc: { format: "pdf" | "docx"; filename: string; mime: string; base64: string; sha256: string | null }) => void;
+}
+const b64 = (bytes: Uint8Array) => { let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); };
 // `postings(query)` returns candidate open postings: in production a full-text search of career_postings
 // (supabasePostingsDb.search), in tests a fixed pool. search_jobs filters and ranks them either way.
 // `mail` (WO-024) reads the person's applications across the apply queue and every thread's tracker, and the status
@@ -215,6 +246,8 @@ export function careerTools(deps: {
   conversations?: RepliesStore | null;
   // Open career questions (CAREER_KNOWLEDGE=on): cached, capped web research and the brief file. Absent: no such tool.
   research?: ResearchDeps | null;
+  // R9-C market research (CAREER_RESEARCH_REPLY=on): searched, fetched, cited pages; inline or a research brief File. Absent: no such tool.
+  market?: (MarketDeps & { onResult?: (r: MarketResult) => void }) | null;
 }): ToolSpec[] {
   const alertsOf = () => { if (!deps.alerts) throw new Error("job alerts are not configured here"); return deps.alerts; };
   const outreachOf = () => { if (!deps.outreach) throw new Error("outreach is not set up here; say so, never pretend a draft or send happened"); return deps.outreach; };
@@ -227,6 +260,28 @@ export function careerTools(deps: {
     description: "Use for an OPEN career question about any field, stage or situation (\"how do I get hired as an investment banker\", \"can I become an electrician at 40\", \"what does a new grad nurse do first\"), not for a named firm (career_path_answer) and not for job search. Searches current authoritative sources (cached, cost-capped), writes the full plan (stage-by-stage timeline, this-week actions, honest odds, sourced figures, what could not be verified) as a hosted page, and returns the verdict material. ALWAYS call it for such a question, for any field, stage or age, before answering; never answer one from memory. Then answer in ONE short paragraph as the result's note says, and put no plan detail in chat that the page holds. If it returns status need_field, ask its one question and stop.",
     input_schema: obj({ question: str("The person's question, in their words") }, ["question"]),
     run: async (i, c) => researchCareerQuestion({ profile: profileOf(c), message: String(i.question ?? c.turn?.message ?? ""), deps: deps.research!, now: c.now }),
+  }] : [];
+  const strs = (description: string) => ({ type: "array", items: { type: "string" }, description });
+  const marketTools: ToolSpec[] = deps.market ? [{
+    name: "research_market", effect: "read",
+    description: "Use when the person asks for market research that needs current, cited sources: what would change a market or industry, how 2 to 4 companies compare, pay for a role in a place, a company's size or business. Not for job search and not for an open \"how do I become X\" question. It searches, opens each page itself and returns only points that a fetched page states, each with numbered sources. YOU choose the format: \"inline\" for a quick answer (one figure, one fact, a yes or no), \"file\" for a comparison, an outlook, or anything that needs more than about three points. Never answer such a question from memory; write no link (code adds the sources or the file link).",
+    input_schema: obj({
+      question: str("The person's question, in their words"),
+      format: { type: "string", enum: ["inline", "file"], description: "inline: a short answer in chat. file: a research brief page (cover, summary, comparison, what would have to be true, risks, sources)" },
+      queries: strs("Up to 3 web search queries that would find authoritative pages (company filings, government data, the companies' own sites)"),
+      companies: strs("Companies the question names, as the person wrote them (for SEC filings)"),
+      sites: strs("Company website domains the person gave, like acme.com (only ones they wrote or a tool returned)"),
+      soc: str("For a pay question: the BLS occupation code (SOC), like 15-1252 for software developers"),
+      cbsa: str("For a pay question in a city: the metro area's 5-digit CBSA code, like 42660 for Seattle"),
+    }, ["question", "format"]),
+    run: async (i, c) => {
+      const list = (x: unknown) => Array.isArray(x) ? x.map(String).filter(Boolean).slice(0, 4) : [];
+      const q = String(i.question ?? c.turn?.message ?? "");
+      const r = await researchMarket({ question: q, format: i.format === "file" ? "file" : "inline", deps: deps.market!, fileLinks: c.turn ? (c.turn.fileLinks ??= []) : undefined,
+        plan: { queries: list(i.queries).slice(0, 3).concat(list(i.queries).length ? [] : [q]), companies: list(i.companies), sites: list(i.sites), soc: i.soc ? String(i.soc) : null, cbsa: i.cbsa ? String(i.cbsa) : null } });
+      deps.market!.onResult?.(r);
+      return r;
+    },
   }] : [];
   const conversationTools: ToolSpec[] = deps.conversations ? [{
     name: "get_outreach_conversations", effect: "read",
@@ -246,6 +301,7 @@ export function careerTools(deps: {
   return [
     ...conversationTools,
     ...researchTools,
+    ...marketTools,
     {
       name: "remember_instruction", effect: "write_own",
       description: "Keep something the person said must always hold (a need, a must, a never: \"I need visa sponsorship\", \"no staffing agencies\", \"never before 9am\") on their account for every future conversation. quote must be their own words from THIS message; it refuses anything they did not say. Restate it to them after saving.",
@@ -655,8 +711,8 @@ export function careerTools(deps: {
     },
     {
       name: "tailor_resume", effect: "write_own",
-      description: "Make a PDF resume for one posting from the person's CONFIRMED facts only (never drafts, never anything new). It passes the truth check and the ATS parse check or refuses with the reason. Send its text as given: plain words, the 7-day private link alone on its own line. Give job_id from search_jobs, or the posting text.",
-      input_schema: obj({ job_id: str("The posting's job_id from search_jobs"), posting_text: str("The posting's full text, if there is no job_id"), persona: str("A saved persona name, e.g. 'banking'; leave out to use the active one") }),
+      description: "A PDF resume for one posting from CONFIRMED facts only (never drafts or anything new); it passes the truth and ATS checks or refuses with the reason. Send gaps.summary and preview first, then its text as given, the 7-day private link alone on its own line; the files in attached ride your reply. Give job_id from search_jobs, or the posting text. layout: only when asked.",
+      input_schema: obj({ job_id: str("The posting's job_id from search_jobs"), posting_text: str("The posting's full text, if there is no job_id"), persona: str("A saved persona name, e.g. 'banking'; leave out to use the active one"), layout: { type: "string", enum: ["trainee", "own"], description: "Only when asked: 'trainee' (Trainee's design) or 'own' (keep their Word file's layout)" } }),
       run: async (i, c) => {
         const t = tailorOf();
         let text = "", job_id: string | null = null, company: string | null = null;
@@ -670,7 +726,10 @@ export function careerTools(deps: {
         const name = i.persona ? validPersonaName(i.persona) : st.active;
         const persona = name ? st.items.find((p) => p.name === name) ?? null : null;
         if (i.persona && !persona) throw new Error(`no persona named ${String(i.persona)}; saved: ${st.items.map((p) => p.name).join(", ") || "none"}`);
-        const r = await tailorForPosting({ userId: c.userId, profile: profileOf(c), posting: { text, job_id, company }, persona, deps: { render: t.render, resumes: t.resumes }, now: c.now });
+        const layout = i.layout === "trainee" || i.layout === "own" ? i.layout : null;
+        const ownDocx = layout === "own" ? await t.ownDocx?.(c.userId).catch(() => null) ?? null : null;
+        const r = await tailorForPosting({ userId: c.userId, profile: profileOf(c), posting: { text, job_id, company }, persona, deps: { render: t.render, resumes: t.resumes }, now: c.now, layout, ownDocx });
+        if (r.ok && t.versions) await recordVersion(t.versions, { userId: c.userId, out: r, now: c.now });
         // WO-079: facts waiting for the person's yes are named, with the one question to ask (battery T09 ran out of steps
         // trying other tools); with none, ask what to build from. A confirmation can only come from their next message.
         if (!r.ok && r.refused === "no_confirmed_facts") {
@@ -681,7 +740,13 @@ export function careerTools(deps: {
             : `not made: there are no confirmed experience, project or education facts on file. Ask them for their work experience and education in their own words; nothing is invented. Do not call another tool this turn. Nothing was stored or sent.`);
         }
         if (!r.ok) throw new Error(`not made: ${r.reason}. ${r.refused === "link" ? "The file stays private; no link was given." : "Nothing was stored or sent."}`);
-        const { detail: _detail, ...out } = r;
+        const { detail, ...out } = r;
+        // The PDF (and, with a layout, its Word copy) are attached to this reply; the private link stays as well.
+        if (t.deliver) {
+          t.deliver({ format: "pdf", filename: r.filename, mime: "application/pdf", base64: b64(detail.pdf), sha256: r.sha256 });
+          if (detail.docx) t.deliver({ format: "docx", filename: r.filename.replace(/\.pdf$/i, "") + ".docx", mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: b64(detail.docx), sha256: null });
+          return { ...out, attached: [r.filename, ...(detail.docx ? [r.filename.replace(/\.pdf$/i, "") + ".docx"] : [])] };
+        }
         return out;
       },
     },
@@ -804,27 +869,33 @@ export function careerTools(deps: {
     {
       name: "draft_outreach", effect: "write_own",
       description: "Draft cold emails, one per person, as many as the person asks for (all who fit when they give no number), from contacts the person sent (only addresses that passed every check run; never anyone already emailed or on their do-not-contact list). Each uses only their confirmed facts, that person's row and what both share. Code shows the batch in full; nothing is sent until they approve.",
-      input_schema: obj({ firm: str("Only people at this firm, if they said one"), title: str("Only people whose title has these words, e.g. 'analyst'"), count: { type: "number", description: "How many, if they said a number; no limit of Trainee's own" } }),
+      input_schema: obj({ firm: str("Only people at this firm, if they said one"), name: str("Only this person, by the name the person used (a first name is enough), if they named someone"), title: str("Only people whose title has these words, e.g. 'analyst'"), count: { type: "number", description: "How many, if they said a number; no limit of Trainee's own" } }),
       run: async (i, c) => {
         const o = outreachOf();
         const prefs = await o.store.prefs(c.userId);
         if (!prefs.signature) return { drafted: 0, needs: "signature", ask: SIGNATURE_ASK };
         const facts = confirmed(profileOf(c).facts || []);
         if (!facts.length) return { drafted: 0, needs: "facts", note: "No confirmed facts to write from: ask about their school, experience and goal, and confirm them first." };
-        const rows = contactsOf(c.state);
+        // R9 OUTREACH: contacts are the ACCOUNT's (architect ruling R1, career_account_contacts), read by indexed queries;
+        // the chat's own list is only what a chat held before. This tool read the chat's list alone, so a person who sent
+        // their contacts was told they had none whenever the ask reached the brain (64 of 250 outreach tasks in the e2e set).
+        const rows = await accountContacts(o.store, c, i);
         if (!rows.length) return { drafted: 0, needs: "contacts", ask: CONTACTS_ASK };
         if (!o.model) throw new Error("drafting isn't available here right now; nothing was drafted");
         const [dnc, contacted] = await Promise.all([o.store.dnc(c.userId), o.store.contacted(c.userId)]);
-        const held = { no_email: 0, not_verified: 0, already_contacted: 0, do_not_contact: 0 };
+        const held: Record<string, number> = { no_email: 0, not_verified: 0, already_contacted: 0, do_not_contact: 0 };
         const words = String(i.title ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+        const named = plainName(i.name);
         const want = Number.isInteger(Number(i.count)) && Number(i.count) >= 1 ? Number(i.count) : Infinity; // NO LIMITS: never capped by Trainee
         const pick: typeof rows = [];
         for (const r of rows) {
           if (pick.length >= want) break;
           if (i.firm && !sameFirm(r.firm, String(i.firm))) continue;
           if (words.length && !words.every((w) => r.title.toLowerCase().includes(w))) continue;
+          if (named && !namedAs(r.name, named)) continue;
           if (!r.email) { held.no_email++; continue; }
           if (!r.verified) { held.not_verified++; continue; }
+          if (isAutomatedInbox(r.email, r.firm || r.company)) { held.not_a_person = (held.not_a_person ?? 0) + 1; continue; } // R9: a no-reply, role or ATS/job-board inbox
           if (contacted.has(r.email.toLowerCase())) { held.already_contacted++; continue; }
           if (dnc.has(await emailHash(r.email))) { held.do_not_contact++; continue; }
           pick.push(r);
@@ -845,13 +916,21 @@ export function careerTools(deps: {
           ok.push(draft);
         }
         if (!ok.length) return { drafted: 0, not_drafted: notDrafted, held_out: held };
-        const saved = await o.store.saveBatch(c.userId, c.threadId, ok, c.now);
-        for (const d of saved) await recordOutreach(deps.events, c.userId, "outreach_drafted", d, c.now);
+        // R9 OUTREACH: one turn, one batch. A second call in the same turn ("email Ibrahim at X and Lena at Y" drafted one
+        // at a time) saved a second batch numbered from 1 again, so the person saw two drafts both called 1 and "send all"
+        // approved only the newer. The earlier drafts of this turn (not shown yet: code shows the batch when the turn
+        // ends) join this batch, numbered on, each with the hash it already had.
+        const earlier = c.turn ? TURN_DRAFTS.get(c.turn) ?? [] : [];
+        for (const d of earlier) await o.store.update(c.userId, { ...d, status: "skipped", result: "merged_into_batch" }, { status: "shown" });
+        const batch = [...earlier.map(({ id: _i, batch_id: _b, thread_id: _t, ...d }) => d), ...ok].map((d, k) => ({ ...d, n: k + 1 }));
+        const saved = await o.store.saveBatch(c.userId, c.threadId, batch, c.now);
+        if (c.turn) TURN_DRAFTS.set(c.turn, saved);
+        for (const d of saved.slice(earlier.length)) await recordOutreach(deps.events, c.userId, "outreach_drafted", d, c.now);
         const left = notDrafted.length ? `\n\nNot drafted, because I couldn't write to them without making something up: ${notDrafted.map((x) => x.name).join(", ")}.` : "";
         const parts = batchMessages(saved);
         if (left) parts.push(left.trim());
         if (c.turn) c.turn.show = { intent: OUTREACH_INTENT, text: batchText(saved) + left, parts };
-        return { drafted: saved.length, not_drafted: notDrafted, held_out: held, shown: "Code shows the batch to the person in full; do not repeat or change it." };
+        return { drafted: saved.length - earlier.length, in_batch: saved.length, not_drafted: notDrafted, held_out: held, shown: "Code shows the batch to the person in full; do not repeat or change it." };
       },
     },
     {

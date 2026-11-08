@@ -11,7 +11,7 @@
 // (career_apply_card_push_requested_for), which the delivery run sends to their channel within its minute.
 //
 // Nothing here approves, queues or sends an application: the card does, on the person's own tap of its exact contents.
-import { cardFor } from "./career_apply_cards.ts";
+import { batchFor, CARD_HARD_LIMIT, cardFor } from "./career_apply_cards.ts";
 import { type OpenQuestion, questionsText } from "./career_apply_questions.ts";
 import { type Rpc, type SandboxHost, withRetry } from "./cloud_runner.ts";
 import { preparedCardProblem } from "./career_prepared_card.ts";
@@ -131,6 +131,15 @@ export interface PrepareBridgeDeps {
   now?: () => number;
 }
 const refuse = (status: number, error: string) => ({ status, body: { error } });
+// The resume one posting's application sends (R9-G2): the tailored file kept for that posting when there is one (its row
+// names the posting), else the kept resume, as before.
+async function resumeFor(rpc: Rpc, user: string, posting: string | null): Promise<any> {
+  if (posting) {
+    const own = await rpc("career_apply_cloud_resume_for_posting", { p_user: user, p_posting: posting });
+    if (own && typeof own === "object" && typeof own.filename === "string" && own.posting === posting) return own;
+  }
+  return await rpc("career_apply_cloud_resume_kept_for", { p_user: user });
+}
 
 export async function handlePrepareBridge(op: string, body: any, d: PrepareBridgeDeps): Promise<{ status: number; body: unknown }> {
   if (!(PREPARE_OPS as readonly string[]).includes(op)) return refuse(404, "unknown operation");
@@ -146,8 +155,12 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
     switch (op as typeof PREPARE_OPS[number]) {
       case "request":
         return { status: 200, body: { id, user_id: user, job_ids: row.job_ids } };
-      case "resume":
-        return { status: 200, body: await d.rpc("career_apply_cloud_resume_kept_for", { p_user: user }) };
+      case "resume": {
+        // R9-G2 (E09): a posting of this request may have its own tailored resume ("tailor ... and apply with it"):
+        // that file for that posting, else the kept one. A posting not in this request reads the kept one only.
+        const posting = typeof body?.posting === "string" && postings.has(body.posting) ? body.posting : null;
+        return { status: 200, body: await resumeFor(d.rpc, user, posting) };
+      }
       case "rpc": {
         const name = String(body?.name ?? ""), args = body?.args && typeof body.args === "object" && !Array.isArray(body.args) ? body.args : {};
         if (name === "career_apply_prepare_candidates") {
@@ -167,7 +180,8 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
             if (!posting || typeof posting.url !== "string" || !payload || typeof payload !== "object" || payload.url !== posting.url) {
               return refuse(403, "not the application for this request's posting");
             }
-            const kept = await d.rpc("career_apply_cloud_resume_kept_for", { p_user: user });
+            // The card must name the file this posting's application sends: its tailored resume, else the kept one.
+            const kept = await resumeFor(d.rpc, user, String(args.p_posting_job_id));
             const problem = preparedCardProblem(payload, args.p_card_lines, kept && typeof kept.filename === "string" ? { filename: kept.filename } : null);
             if (problem) return refuse(422, `card refused: ${problem}`);
           }
@@ -208,9 +222,34 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
         const partial = !stillAsking && c && "take" in c && c.take.length < fits;
         if (stillAsking) push = "held_for_answers";
         else if (partial) {
-          const told = !!await d.rpc("career_apply_prepare_request_notice", { p_id: id, p_lease: lease,
-            p_text: `All ${fits} applications are ready. Say "show my applications" to see every one on one card and approve them with one tap. Nothing was sent.` });
-          push = told ? "told_ready" : "held";
+          // R9-G2 (E05, D-MS-1 paged): the whole batch as ONE card in numbered pages ("1/3", "2/3", "3/3"), each one text;
+          // the card's one hash covers every application on it, and a yes approves only once every page was delivered
+          // (career_apply_card_push_paged_for, career_apply_card_answer_for). Only when that cannot be built is the person
+          // told to ask for the card instead, as before.
+          const all = (ready as any[]).filter((r: any) => { const one = cardFor([r]); return one !== null && "take" in one; });
+          const b = batchFor(all);
+          const pages = b && !("tooLong" in b) && b.take.length === all.length && !b.skipped.length && b.parts.length >= 2
+            ? b.parts.map((t, i) => `${i + 1}/${b.parts.length}\n${t}`) : [];
+          // The paged push is 20261108100000's: where it is not there yet (the owner has not applied it) or refuses, the
+          // person is told the batch is ready, exactly as before; nothing is half-shown.
+          const paged = pages.length ? await d.rpc("career_apply_card_push_paged_for", { p_user: user, p_request: id, p_ids: (b as any).take.map((p: any) => p.id),
+            p_pages: pages, p_now: new Date(now).toISOString() }).catch((e: unknown) => { console.error("paged card:", (e as Error)?.message ?? e); return undefined; }) : undefined;
+          // fix/r9-apply-completion: the whole batch on ONE page (more than one pushed card's 1,600 characters, at most a
+          // page's 3,800, under a text's 4,000) is pushed as that one card, every application on it: before, it was neither a
+          // one-text card nor two pages, so the person was told to ask for it and their yes approved nothing (e2e F-AP-096:
+          // 8 links, all prepared, never shown). The same push and the same one hash over exactly what the card shows.
+          const onePage = !pages.length && b && !("tooLong" in b) && b.take.length === all.length && !b.skipped.length && b.text.length <= CARD_HARD_LIMIT
+            ? await d.rpc("career_apply_card_push_requested_for", { p_user: user, p_request: id, p_ids: b.take.map((p) => p.id), p_text: b.text,
+              p_now: new Date(now).toISOString() }).catch((e: unknown) => { console.error("one-page card:", (e as Error)?.message ?? e); return undefined; })
+            : undefined;
+          if (typeof paged === "string" && /^[0-9a-f-]{36}$/i.test(paged)) { card = paged; push = "shown_paged"; }
+          else if (typeof onePage === "string" && onePage) { card = onePage; push = "shown"; }
+          else if (paged === null || onePage === null) push = "held";
+          else {
+            const told = !!await d.rpc("career_apply_prepare_request_notice", { p_id: id, p_lease: lease,
+              p_text: `All ${fits} applications are ready. Say "show my applications" to see every one on one card and approve them with one tap. Nothing was sent.` });
+            push = told ? "told_ready" : "held";
+          }
         }
         if (c && "take" in c && !stillAsking && !partial) {
           card = await d.rpc("career_apply_card_push_requested_for", { p_user: user, p_request: id, p_ids: c.take.map((p) => p.id), p_text: c.text,

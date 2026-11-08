@@ -10,7 +10,7 @@ declare
   a uuid := '00000000-0000-4000-8000-00000000c701'; b uuid := '00000000-0000-4000-8000-00000000c702';
   id1 uuid; id2 uuid; j jsonb; facts jsonb := '[]'; hs text[]; r text; n int;
   h1 text := repeat('1', 64); h2 text := repeat('2', 64); h3 text := repeat('3', 64); h4 text := repeat('4', 64);
-  ev jsonb := '{"email":"jane.doe@acme.io","method":"pattern_rcpt_valid","score":80,"syntax":"pass","mx":"pass","provider":"other","catch_all":false,"rcpt":"accept","format":"first.last","format_evidence":2,"checked_at":"2026-11-07T00:00:00Z","why":"the company's address format (seen 2+ times), accepted by its mail server"}';
+  ev jsonb := '{"email":"jane.doe@acme.io","method":"pattern_rcpt_valid","score":80,"syntax":"pass","mx":"pass","provider":"other","catch_all":false,"rcpt":"accept","format":"first.last","format_evidence":2,"checked_at":"2026-11-07T00:00:00Z","why":"the address format of the company (seen 2+ times), accepted by its mail server"}';
 begin
   insert into auth.users(id, email) values (a, 'cc-a@example.test'), (b, 'cc-b@example.test');
   insert into public.profiles(id) values (a), (b) on conflict do nothing;

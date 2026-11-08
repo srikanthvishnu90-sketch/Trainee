@@ -59,6 +59,7 @@ const EN: Record<string, Cls> = {
   number: "num_lead", "#": "num_lead",
 };
 // D-044: Spanish, Hindi/Hinglish (romanized and Devanagari), French, German, Portuguese (not read with { languages: "en" }).
+// German "es" alone is not an object: "y es" (a split "yes") would read as "yes, send it". It is read only in "schick es ab", "mach es".
 const OTHER: Record<string, Cls> = {
   // es
   "sí": "strong", si: "strong", claro: "strong", dale: "action", "envía": "action", envia: "action", enviar: "action", manda: "action",
@@ -79,7 +80,7 @@ const OTHER: Record<string, Cls> = {
   "s'il te plaît": "pad", "s'il vous plaît": "pad", "sil te plait": "pad", "sil vous plait": "pad", stp: "pad", svp: "pad", merci: "pad",
   // de
   ja: "strong", jawohl: "strong", jep: "strong", "in ordnung": "soft", passt: "soft", schick: "action", schicke: "action", "schick es ab": "action",
-  abschicken: "action", senden: "action", sende: "action", "mach es": "action", "mach das": "action", los: "weak", es: "it", das: "it",
+  abschicken: "action", senden: "action", sende: "action", "mach es": "action", "mach das": "action", los: "weak", das: "it",
   alle: "all", alles: "all", beide: "both", bitte: "pad", danke: "pad", jetzt: "pad",
   // pt
   sim: "strong", "beleza": "soft", envie: "action", mande: "action", "pode mandar": "action", "pode enviar": "action", vai: "weak", bora: "action",

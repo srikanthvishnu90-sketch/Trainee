@@ -14,6 +14,7 @@
 // The model writes only when the caller passes one (CAREER_NETWORKING_DRAFT=on, metered); without it the reply names who
 // would be written to and that nothing was drafted.
 import { AUTOMATED_WHY, automatedInbox } from "./automated_inbox.ts";
+import { nearWord } from "./outreach_ask.ts";
 import { type ContactRow, contactsOf, firmKey, importContactsCsv, importContactsFile, MX_NOT_WIRED, type MxResolver, normalizeFirm, sameFirm, verifyRows } from "./career_contacts.ts";
 import { legacyRows } from "./career_referrals.ts";
 import { parsePeopleAsk, type PeopleDeps, type PersonRec, peopleTurn } from "./career_people.ts";
@@ -52,6 +53,7 @@ const plain = (s: unknown) => String(s ?? "").toLowerCase().replace(/[’']/g, "
 // name keys written before this (career_account_contacts.name_key) are still read: legacyNameKey.
 export const nameKey = (s: unknown) => String(s ?? "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[’']/g, "").replace(/&/g, " and ").replace(/[^\p{L}\p{N}@.]+/gu, " ").trim();
 const legacyNameKey = plain;
+const ROLE_WORDS = ["recruiter", "recruiting", "hiring", "manager", "director", "engineer", "analyst", "partner"];
 // Courtesy titles and honorific suffixes are no part of a name: "Dr. Wei Chen" is Wei Chen; "Dr. Chen" and "Tanaka-san"
 // are a last name.
 const HONORIFIC = /^(?:dr|mr|mrs|ms|mx|miss|prof|professor|sir|dame|herr|frau|mme|mlle|madame|monsieur|señor|señora|senor|senora|sr|sra|srta|dott|dottssa)\.?$/iu;
@@ -60,7 +62,9 @@ const NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5
 const numberOf = (w: string | undefined) => (w ? (/^\d+$/.test(w) ? Number(w) : NUM[w.toLowerCase()] ?? null) : null);
 const NUMW = "(\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)";
 const GROUP = "(?:contacts|connections|people|friends|folks|alums|alumni)";
-const FILLER = /^(?:(?:so|ok|okay|hey|hi|and|now|also|please|pls|can you|could you|would you|will you|help me|actually|wait|oh|oops|no|yo|plz|quick\s+q(?:uestion)?:?)[, ]+)+/i;
+const FILLER = /^(?:(?:so|ok|okay|hey|hi|and|now|also|please|pls|can you|could you|would you|will you|can u|could u|would u|help me|actually|wait|oh|oops|no|yo|plz|ngl|tbh|lol|quick\s+q(?:uestion)?:?)[, ]+)+/i;
+// R9 OUTREACH: texting sign-offs after the ask ("... about the new grad program lmk", "... no cap", "... rn"): not the topic.
+const SIGN_OFF = /(?:[\s,]+(?:lmk|no cap|fr|rn|asap|thx|thanks|ty|pls|plz|please|tysm|lol))+$/i;
 // A firm as typed: the words after "at"/"from", up to the topic or the end.
 function firmOf(raw: string): string | null {
   // ROUTING SCENARIOS (2026-10-29): a second ask after the firm ("... at Stripe and apply to Stripe") is not part of it.
@@ -73,7 +77,13 @@ function firmOf(raw: string): string | null {
 export function parseNetworkingAsk(message: string): Ask | null {
   const t = chatAsk(message).replace(FILLER, "").replace(/[?!.]+$/, "").replace(/,?\s+instead$/i, "").trim()
     // R9-E: "find and email the hiring manager at X": the finding is the drafting's own (from the person's contacts).
-    .replace(/^(?:find|look up|track down|search for)\s*(?:,\s*)?(?:and|&|then|,)\s+(?:then\s+)?(?=(?:email|e-mail|message|reach out|write|draft|send)\b)/i, "");
+    .replace(/^(?:find|look up|track down|search for)\s*(?:,\s*)?(?:and|&|then|,)\s+(?:then\s+)?(?=(?:email|e-mail|message|reach out|write|draft|send)\b)/i, "")
+    .replace(SIGN_OFF, "")
+    // R9 OUTREACH: "find the hiring manager at X and reach out", "look up the recruiter at X, then email them": the same
+    // ask as "email the hiring manager at X" (found among the person's contacts, never guessed).
+    .replace(/^(?:find|look up|track down|search for|get)\s+(?:me\s+)?(.+?\s(?:at|from)\s.+?)\s*(?:,\s*)?(?:and|&|then|,)\s+(?:then\s+)?(?:reach out(?:\s+to\s+(?:them|him|her))?|(?:email|e-mail|message|contact|write to|ping)\s+(?:them|him|her))(\s+(?:about|regarding|re|asking about|to ask about)\s.+)?$/i, (_m, who: string, about?: string) => `email ${who}${about ?? ""}`)
+    // R9 OUTREACH: "send Rosa at Corvid Foods a note about X", "drop Maya a quick line about X": write to that person.
+    .replace(/^(?:send|shoot|drop)\s+(?!(?:an?|the|my)\s+(?:quick\s+|short\s+)?(?:note|email|e-mail|message|line|msg|intro)\b)(.+?)\s+an?\s+(?:quick\s+|short\s+)?(?:note|email|e-mail|message|line|msg)\b\s*(.*)$/i, (_m, who: string, rest: string) => `email ${who}${rest ? ` ${rest}` : ""}`);
   if (!t || t.length > 300) return null;
   const who = [
     /^(?:who|which (?:people|contacts|connections))(?: else)? (?:do i know|do i have|in my (?:network|contacts|connections)|(?:are|is) (?:in )?my (?:contacts|connections|network))(?: (?:who |that )?works?| working)? (?:at|from|in) (.+)$/i,
@@ -88,7 +98,7 @@ export function parseNetworkingAsk(message: string): Ask | null {
     const m = rx.exec(t);
     if (m) { const firm = firmOf(m[1]); return firm ? { kind: "who", firm } : null; }
   }
-  const verb = new RegExp(`^(?:email|e-mail|emial|emal|eamil|message|reach out to|intro(?:duce)? me to|write(?: an?)?(?: (?:email|note|intro|message))? to|send(?: an?)?(?: (?:email|intro|note|message))? to|draft(?: me)?(?: an?| some| ${NUMW})?(?: cold| short| quick| networking)?(?: (?:emails?|intros?|introductions?|notes?|messages?|outreach(?: emails?)?))(?: to| for)?) (.+)$`, "i").exec(t);
+  const verb = new RegExp(`^(?:email|e-mail|emial|emal|eamil|emaiil|emaill|emil|message|reach out to|intro(?:duce)? me to|write(?: an?)?(?: (?:email|note|intro|message))? to|send(?: an?)?(?: (?:email|intro|note|message))? to|draft(?: me)?(?: an?| some| ${NUMW})?(?: cold| short| quick| networking)?(?: (?:emails?|intros?|introductions?|notes?|messages?|outreach(?: emails?)?))(?: to| for)?) (.+)$`, "i").exec(t);
   if (!verb) return null;
   // Anything routed through LinkedIn, Indeed or Handshake is never a draft, and "via LinkedIn" is never part of a name
   // (trackTurn refuses it).
@@ -682,7 +692,8 @@ async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>
     }
   } else {
     const here = await book.atFirm(firmName!);
-    const rw = t.role ? plain(t.role) : "";
+    // R9 OUTREACH: a typo in the role ("the recruier", "the hirign mangaer") is the role meant, never a title no one has.
+    const rw = t.role ? plain(t.role).split(" ").map((w) => ROLE_WORDS.find((x) => nearWord(w, x)) ?? w).join(" ") : "";
     const isRecruiter = /recruit|talent|hr|people team/.test(rw);
     // R9-E: "the hiring manager" is a manager there (no one's title says "hiring manager").
     const isHiring = /^hiring (?:manager|lead)$/.test(rw);

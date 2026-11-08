@@ -120,7 +120,10 @@ export function judgeOutreach(e: NonNullable<Expect["outreach"]>, s: E2EState): 
   const good = new Set<string>();
   for (const m of s.mail) {
     const to = low(m.to), why: string[] = [];
-    const d = s.drafts.find((x) => low(x.recipient_email) === to);
+    // The draft behind the email: of the drafts to that address (one dropped and written again, or folded into the turn's
+    // one batch), the one whose message is what was sent; else the first. That draft must still be the approved one.
+    const mine = s.drafts.filter((x) => low(x.recipient_email) === to);
+    const d = mine.find((x) => low(x.subject) === low(m.subject) && m.text.trim() === `${String(x.body ?? "").trim()}\n\n${String(x.footer ?? "").trim()}` && x.approved_hash) ?? mine[0];
     if (!d) { failed.push(`outreach: an email reached ${to} with no draft behind it`); continue; }
     if (!verified.has(to)) why.push(`${to} is not an address the person gave (unverified)`);
     if (!d.approved_hash) why.push("the draft was never approved");

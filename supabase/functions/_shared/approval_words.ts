@@ -44,7 +44,11 @@ export const NEGATIONS = new Set([
   "👎", "❌", "✋", "🤔", "🛑",
 ]);
 
-const EN: Record<string, Cls> = {
+// Every table is built without a prototype (dict below): "constructor", "toString", "__proto__" and the like are not words
+// of any table (S2 review of #614: "send constructor" read as yes; Constructor is an employer).
+const dict = (o: Record<string, Cls>): Record<string, Cls> => Object.assign(Object.create(null), o);
+const own = (t: Record<string, Cls>, w: string) => Object.hasOwn(t, w);
+const EN: Record<string, Cls> = dict({
   yes: "strong", yep: "strong", yeah: "strong", yea: "strong", yup: "strong", ya: "strong", y: "strong", "👍": "strong",
   ok: "soft", okay: "soft", k: "soft", kk: "soft", sure: "soft", alright: "soft", okey: "soft",
   send: "action", submit: "action", approve: "action", approved: "action", confirm: "action", confirmed: "action", lgtm: "action",
@@ -57,19 +61,20 @@ const EN: Record<string, Cls> = {
   asap: "pad", fr: "pad", "for real": "pad", just: "pad", then: "pad", so: "pad", yo: "pad", hey: "pad",
   "🙏": "pad", "🙌": "pad", "🙂": "pad", "😊": "pad", "😄": "pad", "🔥": "pad", "💯": "pad", "🚀": "pad",
   number: "num_lead", "#": "num_lead",
-};
+});
 // D-044: Spanish, Hindi/Hinglish (romanized and Devanagari), French, German, Portuguese (not read with { languages: "en" }).
-// German "es" alone is not an object: "y es" (a split "yes") would read as "yes, send it". It is read only in "schick es ab", "mach es".
+// German "es" alone is not an object: "y es" (a split "yes") would read as "yes, send it". "schick es ab" ("send IT off")
+// names one item, as "mándalo" does; "mach es" / "mach das" are the "do it" idiom, as "hazlo" is.
 // One table per language. A reply is read in ONE of them (or English with one of them, as Hinglish is): words from two
 // other languages together, or the English "y" with any other-language word ("y la", "todos y": Spanish "y" is "and"),
 // are not a clear yes in any language and approve nothing.
-const ES: Record<string, Cls> = {
+const ES: Record<string, Cls> = dict({
   "sí": "strong", si: "strong", claro: "strong", dale: "action", "envía": "action", envia: "action", enviar: "action", manda: "action",
   "mándalo": "send_it", "mándala": "send_it", "envíalo": "send_it", "envíala": "send_it", "mándalos": "send_all", "mándalas": "send_all",
   "envíalos": "send_all", "envíalas": "send_all", adelante: "action", hazlo: "action", vale: "soft", bueno: "soft", todos: "all", todas: "all",
   "los dos": "both", "las dos": "both", ambos: "both", ambas: "both", "por favor": "pad", porfa: "pad", porfis: "pad", gracias: "pad",
-};
-const HI: Record<string, Cls> = {
+});
+const HI: Record<string, Cls> = dict({
   haan: "strong", haa: "strong", han: "strong", haanji: "strong", hanji: "strong", "haan ji": "strong", "ji haan": "strong", bilkul: "strong",
   "theek hai": "soft", "thik hai": "soft", accha: "soft", acha: "soft", achha: "soft", bhejo: "action", "bhej do": "action", bhejdo: "action",
   "bhej dijiye": "action", "kar do": "action", kardo: "action", "kar dijiye": "action", chalo: "weak", sab: "all", sabko: "all", "sab ko": "all",
@@ -77,25 +82,25 @@ const HI: Record<string, Cls> = {
   // hi (Devanagari): हाँ / हां yes, भेजो / भेज दो send, सब all, दोनों both, इसे it, कृपया please
   "हाँ": "strong", "हां": "strong", "हाँ जी": "strong", "जी हाँ": "strong", "भेजो": "action", "भेज दो": "action", "भेज दीजिए": "action", "सब": "all",
   "सबको": "all", "दोनों": "both", "इसे": "it", "कृपया": "pad", "जी": "pad", "धन्यवाद": "pad",
-};
-const FR: Record<string, Cls> = {
+});
+const FR: Record<string, Cls> = dict({
   oui: "strong", ouais: "strong", "d'accord": "soft", daccord: "soft", dac: "soft", envoie: "action", envoyez: "action", envoyer: "action",
   "vas y": "action", "allez y": "action", la: "it", le: "it", "ça": "it", les: "all", tous: "all", toutes: "all", tout: "all", "les deux": "both",
   "s'il te plaît": "pad", "s'il vous plaît": "pad", "sil te plait": "pad", "sil vous plait": "pad", stp: "pad", svp: "pad", merci: "pad",
-};
-const DE: Record<string, Cls> = {
-  ja: "strong", jawohl: "strong", jep: "strong", "in ordnung": "soft", passt: "soft", schick: "action", schicke: "action", "schick es ab": "action",
+});
+const DE: Record<string, Cls> = dict({
+  ja: "strong", jawohl: "strong", jep: "strong", "in ordnung": "soft", passt: "soft", schick: "action", schicke: "action", "schick es ab": "send_it",
   abschicken: "action", senden: "action", sende: "action", "mach es": "action", "mach das": "action", los: "weak", das: "it",
   alle: "all", alles: "all", beide: "both", bitte: "pad", danke: "pad", jetzt: "pad",
-};
-const PT: Record<string, Cls> = {
+});
+const PT: Record<string, Cls> = dict({
   sim: "strong", "beleza": "soft", envie: "action", mande: "action", "pode mandar": "action", "pode enviar": "action", vai: "weak", bora: "action",
   tudo: "all", "os dois": "both", "as duas": "both", obrigado: "pad", obrigada: "pad", valeu: "pad",
   // shared with Spanish
   manda: "action", envia: "action", todos: "all", todas: "all",
-};
+});
 const TABLES: [string, Record<string, Cls>][] = [["es", ES], ["hi", HI], ["fr", FR], ["de", DE], ["pt", PT]];
-const OTHER: Record<string, Cls> = Object.assign({}, ...TABLES.map(([, t]) => t));
+const OTHER: Record<string, Cls> = Object.assign(Object.create(null), ...TABLES.map(([, t]) => t));
 // The languages each other-language word belongs to.
 const LANGS_OF = new Map<string, Set<string>>();
 for (const [lang, t] of TABLES) for (const w of Object.keys(t)) LANGS_OF.set(w, (LANGS_OF.get(w) ?? new Set()).add(lang));
@@ -128,7 +133,7 @@ function damerau1(a: string, b: string): boolean {
 }
 const collapse = (w: string) => w.replace(/(.)\1+/g, "$1");
 function correct(w: string, vocab: Record<string, Cls>): string | null {
-  if (vocab[w]) return w;
+  if (own(vocab, w)) return w;
   if (REAL_WORDS.has(w)) return null;
   // A held letter ("yesss", "pleeease", "allll") is the English word. Only English words are folded: "less" is not the
   // French "les", "loss" not the German "los", "haaa" not "haa", "dass" not "das" (S2 review of #611).
@@ -152,7 +157,7 @@ export function readApproval(text: string, o: ApprovalOptions = {}): Approval | 
   if (/-\s*\p{Nd}|\p{Nd}\s*-/u.test(raw)) return null;
   // An apostrophe only inside a word ("let's", "d'accord"): one around a word is a quote ("'yes'"), never the person's yes.
   if (/(?:^|[^\p{L}])['’]|['’](?:$|[^\p{L}])/u.test(raw)) return null;
-  const vocab: Record<string, Cls> = o.languages === "en" ? EN : { ...EN, ...OTHER };
+  const vocab: Record<string, Cls> = o.languages === "en" ? EN : Object.assign(Object.create(null), EN, OTHER);
   const lower = raw.toLowerCase().replace(/’/g, "'");
   // Words, numbers and listed emoji; separators split. "#3" is "#", "3"; "envoie-la" is "envoie", "la".
   const tokens = lower.replace(/[\u{1F3FB}-\u{1F3FF}\u{FE0F}]/gu, "").match(/[\p{L}ऀ-ॣ०-ॿ']+|\p{Nd}+|#|\p{Extended_Pictographic}/gu) ?? [];
@@ -176,16 +181,17 @@ export function readApproval(text: string, o: ApprovalOptions = {}): Approval | 
     if (hit) { words.push(hit); i += hit.split(" ").length; } else { words.push(fixed[i]); i++; }
   }
   const nums = words.filter((w) => /^\p{Nd}+$/u.test(w));
-  const cls = words.filter((w) => !/^\p{Nd}+$/u.test(w)).map((w) => vocab[w]);
+  const cls = words.filter((w) => !/^\p{Nd}+$/u.test(w)).map((w) => (own(vocab, w) ? vocab[w] : undefined));
   if (cls.some((c) => c === undefined)) return null;
   // ONE language: every other-language word must share a language, and the English "y" never joins one ("y la", "y los").
-  const foreign = words.filter((w) => !/^\p{Nd}+$/u.test(w) && !(w in EN) && LANGS_OF.has(w));
+  const foreign = words.filter((w) => !/^\p{Nd}+$/u.test(w) && !own(EN, w) && LANGS_OF.has(w));
   if (foreign.length) {
     const common = foreign.slice(1).reduce((acc, w) => acc.filter((l) => LANGS_OF.get(w)!.has(l)), [...LANGS_OF.get(foreign[0])!]);
     if (!common.length) return null;
-    if (words.includes("y")) return null;
+    // English "y" / "ya" never join another language: Spanish "y" is "and", Hindi "ya" is "or" ("ya sab": or all).
+    if (words.includes("y") || words.includes("ya")) return null;
     // Unaccented Spanish "si" is also "if" ("si todos": if all): a yes only alone or as "si, claro" / "si por favor".
-    if (words.includes("si") && words.some((w) => w !== "si" && w !== "claro" && vocab[w] !== "pad")) return null;
+    if (words.includes("si") && words.some((w) => w !== "si" && w !== "claro" && !(own(vocab, w) && vocab[w] === "pad"))) return null;
   }
   const has = (c: Cls) => cls.includes(c) || (c === "action" && (cls.includes("send_it") || cls.includes("send_all"))) ||
     (c === "it" && cls.includes("send_it")) || (c === "all" && cls.includes("send_all"));
@@ -201,7 +207,7 @@ export function readApproval(text: string, o: ApprovalOptions = {}): Approval | 
     if (!(n >= 1 && n <= 100000)) return null;
     const verb = words.includes("approve") || words.includes("approved") ? "approve" : "send";
     // The number comes last (padding aside): "send 1", not "1 send".
-    const lastWord = [...words].reverse().find((w) => vocab[w] !== "pad");
+    const lastWord = [...words].reverse().find((w) => !(own(vocab, w) && vocab[w] === "pad"));
     if (lastWord !== nums[0]) return null;
     return { scope: "number", n, verb, marked: has("num_lead") };
   }

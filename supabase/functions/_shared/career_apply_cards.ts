@@ -456,6 +456,9 @@ const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 export const HOLD_TEXT = (count: number) =>
   `Okay, holding: nothing was approved and nothing was sent. When you're ready, ${lowerFirst(HOW(count))} A text yes counts within 10 minutes of the card; after that, say "show my applications" for a fresh one.`;
 export const UNCLEAR_TEXT = (count: number) => `I couldn't tell which ones you mean, so nothing was approved. ${HOW(count)}`;
+// "send it" on a card of more than one: "it" is one application, so the card asks which (S2 review of #614).
+export const IT_UNCLEAR_TEXT = (count: number) =>
+  `"It" is one application and this card has ${count}, so nothing was approved. Send all ${count}, or which ones? ${HOW(count)}`;
 // The statuses after which the card is still waiting for its answer: the handler keeps it the thread's last word, with
 // its id on the reply, so the next "yes" answers it. "card_outdated" waits only when it carries the current card's id.
 export const CARD_WAITING = ["shown", "not_on_card", "change", "hold", "unclear", "not_named", "count_mismatch", "nothing_left", "confirm_except"];
@@ -578,7 +581,7 @@ export async function cardTurn(
   if (r.kind === "hold") return waiting(HOLD_TEXT(total), "hold");
   if (r.kind === "unclear") return waiting(UNCLEAR_TEXT(total), "unclear");
   // "it" (one item) on a card of more than one is not an answer anyone can act on: nothing is approved.
-  if (r.kind === "yes" && r.it && total !== 1) return waiting(UNCLEAR_TEXT(total), "unclear");
+  if (r.kind === "yes" && r.it && total !== 1) return waiting(IT_UNCLEAR_TEXT(total), "unclear");
   // Names ("not Acme", "only Acme and Beta"): each must name at least one application on this card, by its employer.
   const names = r.kind === "yes" || r.kind === "except_only" ? r.exceptNames ?? [] : r.kind === "only" ? r.onlyNames ?? [] : [];
   const byName: number[] = [];

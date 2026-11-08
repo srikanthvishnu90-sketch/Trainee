@@ -315,11 +315,38 @@ const MARKET_ASK: RegExp[] = [
   /\b(?:salary|salaries|pay|compensation|wages?)\s+(?:for|of)\b[^?.!]{1,60}\bin\s+\S/i,
   /\bhow\s+much\s+(?:do|does|can|would)\b[^?.!]{1,60}\b(?:make|earn|get\s+paid)\b/i,
 ];
+// R9-F RESEARCH ROUTING (2026-11-07): the end-to-end eval (evals/career/e2e, research area) found "research the data analyst job
+// market in Chicago and give me a file" claimed as a document delivery ("there is no document file yet") and never researched.
+// A research ask is also: research as the verb ("research Stripe as an employer", "research this market", "now research those
+// companies"), a brief or report asked for about a subject ("make me a brief on X", "a report about Y"), "compare X and Y" or
+// "X vs Y" about anything but the person's own papers, a job, labor or internship market, how big a market is, and what a role
+// earns. "Give me a file" then names the research brief File, not a document: such an ask passes over the document-delivery
+// claim (RESEARCH_OVER) unless it is about the person's own papers ("send me my resume as a file" stays where it was).
+const RESEARCH_ASK: RegExp[] = [
+  /(?:^|[.!?;,]\s*|\b(?:now|please|pls|can\s+you|could\s+you|would\s+you|will\s+you|i\s+(?:want|need)\s+you\s+to|help\s+me|go|and|then|also)\s+)research\s+(?!(?:jobs?|roles?|openings?|postings?)\b)\S/i,
+  /\b(?:do|run|make|need|want)\s+(?:some\s+|a\s+(?:bit\s+of\s+)?)?research\s+(?:on|about|into|for)\b/i,
+  /\b(?:brief|briefing|report|deep[\s-]?dive|analysis|overview|rundown|write[\s-]?up)\s+(?:on|about|of|for|covering)\s+(?!(?:me|my|mine)\b)\S/i,
+  /\b(?:market|industry|sector)\s+(?:brief|report|deep[\s-]?dive|overview|map)\b/i,
+  /\b(?:job|jobs|labou?r|hiring|talent|internship|intern|employment|graduate|grad)\s+market\b/i,
+  /\bhow\s+(?:big|large|competitive|hot|crowded)\b[^?.!]{0,60}\bmarket\b|\bmarket\s+(?:in|across)\s+\S/i,
+  /\bcompare\s+\S[^?.!]{0,60}?\s(?:and|with|to|vs\.?|versus)\s+\S|\b\w+\s+(?:vs\.?|versus)\s+\w+/i,
+  /\bwhat\s+(?:do|does|would|can|will)\b[^?.!]{1,60}\b(?:earn|make|get\s+paid)\b/i,
+];
+// The person's own papers (resume, cover letter, an application, an offer): a file of THOSE is a document, never research.
+const OWN_PAPERS = /\b(?:my|mine|our|the|that|this|these|those)\s+(?:tailored\s+|updated\s+|latest\s+|new\s+|current\s+|last\s+)?(?:r[eé]sum[eé]s?|cvs?|cover\s+letters?|transcripts?|portfolio|applications?|packets?|offers?|offer\s+letters?|essays?|drafts?|pdfs?|documents?|docs?|references?)\b/i;
+const RESEARCH_OVER = new Set(["career_document_delivery", "profile_export"]);
+export function researchAsk(message: string): boolean {
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'");
+  return !OWN_PAPERS.test(m) && (RESEARCH_ASK.some((r) => r.test(m)) || MARKET_ASK.some((r) => r.test(m)));
+}
 const SEARCH_ASK = /\b(?:find|show|search|look\s+for|get|pull|list)\b[^?.!]{0,40}\b(?:jobs?|roles?|openings?|postings?|internships?|positions?)\b/i;
 const SEARCH_INTENTS = new Set(["career_discovery", "career_internship_discovery", "discovery_dead_board"]);
 export function marketResearchAsk(env: Env, message: string, intent: string | null): boolean {
-  if (env.get("CAREER_RESEARCH_REPLY") !== "on" || !MARKET_ASK.some((r) => r.test(message))) return false;
+  if (env.get("CAREER_RESEARCH_REPLY") !== "on") return false;
+  const market = MARKET_ASK.some((r) => r.test(message)), research = researchAsk(message);
+  if (!market && !research) return false;
   if (intent && SEARCH_INTENTS.has(intent)) return !SEARCH_ASK.test(message);
+  if (intent && RESEARCH_OVER.has(intent)) return research;
   return !(intent && CODE_OWNED_INTENTS.has(intent));
 }
 export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock }): StagedDecision {

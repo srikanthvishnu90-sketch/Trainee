@@ -4459,6 +4459,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   var GREENHOUSE = /^(job-boards|boards)(\.eu)?\.greenhouse\.io$/;
   var LEVER = /^jobs(\.eu)?\.lever\.co$/;
   var ASHBY = /^jobs\.ashbyhq\.com$/;
+  var SMARTRECRUITERS = /^jobs\.smartrecruiters\.com$/;
   var WORKDAY = /(^|\.)(myworkdayjobs\.com|myworkdaysite\.com|myworkday\.com)$/;
   function detectPortal(href) {
     let u;
@@ -4481,6 +4482,10 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       family: "ashby",
       embedded: false
     };
+    if (SMARTRECRUITERS.test(h)) return {
+      family: "smartrecruiters",
+      embedded: false
+    };
     if (WORKDAY.test(h)) return {
       family: "workday",
       embedded: false
@@ -4497,6 +4502,10 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     }
     if (p.family === "lever" || p.family === "ashby") {
       return seg[0] && seg[1] && /^[0-9a-f-]{8,}$/i.test(seg[1]) ? `${p.family}:${seg[0]}:${seg[1].toLowerCase()}` : null;
+    }
+    if (p.family === "smartrecruiters") {
+      const id = seg[1]?.match(/^\d+/)?.[0];
+      return seg[0] && id ? `smartrecruiters:${seg[0]}:${id}` : null;
     }
     const at = seg.findIndex((s) => /^apply$/i.test(s));
     const last = at > 0 ? seg[at - 1] : seg.filter((s) => !/^(apply|applyManually|autofillWithResume)$/i.test(s)).at(-1);

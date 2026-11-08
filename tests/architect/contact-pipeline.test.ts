@@ -136,7 +136,8 @@ Deno.test("contact email: the score table, Google/Microsoft never probed, catch-
   const pub = await findEmail({ name: "Jane Doe", domain: "acme.io", now: NOW, published: [{ email: "jane@acme.io", source_url: "https://acme.io/team" }], mx: mx({ "acme.io": ["mx.other.example"] }) });
   eq([pub.email, pub.score, pub.method, pub.approvable], ["jane@acme.io", 95, "first_party_published", true]);
   const gh = await findEmail({ name: "Jane Doe", domain: "acme.io", now: NOW, github: { email: "jane@janedoe.dev", source_url: "https://github.com/janedoe" }, mx: mx({}) });
-  eq([gh.score, gh.method], [90, "github_public"]);
+  ok(gh.method !== "github_public" && gh.email !== "jane@janedoe.dev" && !gh.approvable, `a GitHub email off acme.io is never the corporate address: ${JSON.stringify(gh)}`);
+  ok(/GitHub profile's address is not on acme\.io/.test(gh.why), `and the evidence says why: ${gh.why}`);
   const fin = await findEmail({ name: "Jane Doe", domain: "acme.io", now: NOW, domainNamed: named, mx: mx({ "acme.io": ["aspmx.l.google.com"] }), finder: { name: "hunter", find: async () => ({ email: "jdoe@acme.io", verified: true }) } });
   eq([fin.email, fin.score], ["jdoe@acme.io", 75], "a verified finder result (the person's own key) beats an unverifiable pattern");
   const guess = await findEmail({ name: "Jane Doe", domain: "acme.io", now: NOW, employees: 20, mx: mx({ "acme.io": ["mx.other.example"] }) });

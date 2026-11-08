@@ -102,11 +102,13 @@ Deno.test("contact review 4: GitHub profiles match the same person at the same c
 Deno.test("contact review 5: an address on another domain gets that domain's MX; no mail server means no approval", async () => {
   const gh = { email: "jane@janedoe.dev", source_url: "https://github.com/janedoe" };
   const none = await findEmail({ name: "Jane Doe", domain: "acme.io", now: NOW, github: gh, mx: mx({ "acme.io": ["mx.other.example"] }) });
-  eq([none.mx, none.provider, none.approvable], ["fail", "none", false], `the employer's MX is never borrowed: ${JSON.stringify(none)}`);
+  ok(none.email !== gh.email && none.method !== "github_public" && !none.approvable, `an off-domain GitHub email is never used, the employer's MX never borrowed for it: ${JSON.stringify(none)}`);
+  ok(/not on acme\.io/.test(none.why), `refused with its reason: ${none.why}`);
   const pub = await findEmail({ name: "Jane Doe", domain: "acme.io", now: NOW, published: [{ email: "jane@acme-mail.net", source_url: "https://acme.io/team" }], mx: mx({ "acme.io": ["mx.other.example"] }) });
   eq([pub.mx, pub.approvable], ["fail", false], "a published address on a domain with no mail server is not approvable");
   const good = await findEmail({ name: "Jane Doe", domain: "acme.io", now: NOW, github: gh, mx: mx({ "janedoe.dev": ["aspmx.l.google.com"] }) });
-  eq([good.mx, good.provider, good.score, good.approvable], ["pass", "google", 90, true], "its own domain's mail server, looked up");
+  ok(good.email !== gh.email && good.method !== "github_public" && good.score < 70 && !good.approvable, `a working mail server on another domain still does not make it the corporate address: ${JSON.stringify(good)}`);
+  ok(/not on acme\.io/.test(good.why), `refused with its reason: ${good.why}`);
   const dnsDown = await findEmail({ name: "Jane Doe", domain: "acme.io", now: NOW, github: gh, mx: MX_NOT_WIRED });
   eq([dnsDown.mx, dnsDown.approvable], ["unknown", false], "an MX that could not be checked is not approvable");
 });

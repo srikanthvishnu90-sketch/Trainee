@@ -45,6 +45,9 @@ export const SHARED_REPLY_MODULES = [
   // R9-C (2026-11-07): market research on the reply path: the search provider and what it imports (sources, the research
   // reply, its report store and the artifact it is delivered as).
   "research_search.ts", "research_sources.ts", "research_reply.ts", "research_report_store.ts", "channel_artifacts.ts",
+  // R9 outreach (2026-11-08): who may be written to (no-reply, role and ATS/job-board inboxes never) and the staged route's
+  // reading of an ask to write to someone.
+  "automated_inbox.ts", "outreach_ask.ts",
 ] as const;
 
 // D-036 (release flags, agent-chat/release_config.ts RELEASE_FLAGS): the code behind every flag the release serves ON that

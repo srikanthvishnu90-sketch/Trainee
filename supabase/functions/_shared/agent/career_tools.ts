@@ -871,7 +871,7 @@ export function careerTools(deps: {
         if (!rows.length) return { drafted: 0, needs: "contacts", ask: CONTACTS_ASK };
         if (!o.model) throw new Error("drafting isn't available here right now; nothing was drafted");
         const [dnc, contacted] = await Promise.all([o.store.dnc(c.userId), o.store.contacted(c.userId)]);
-        const held = { no_email: 0, not_verified: 0, not_a_person: 0, already_contacted: 0, do_not_contact: 0 };
+        const held: Record<string, number> = { no_email: 0, not_verified: 0, already_contacted: 0, do_not_contact: 0 };
         const words = String(i.title ?? "").toLowerCase().split(/\s+/).filter(Boolean);
         const named = plainName(i.name);
         const want = Number.isInteger(Number(i.count)) && Number(i.count) >= 1 ? Number(i.count) : Infinity; // NO LIMITS: never capped by Trainee
@@ -882,7 +882,7 @@ export function careerTools(deps: {
           if (words.length && !words.every((w) => r.title.toLowerCase().includes(w))) continue;
           if (named && !namedAs(r.name, named)) continue;
           if (!r.email) { held.no_email++; continue; }
-          if (isAutomatedInbox(r.email)) { held.not_a_person++; continue; } // R9: a no-reply, role or ATS/job-board inbox
+          if (isAutomatedInbox(r.email)) { held.not_a_person = (held.not_a_person ?? 0) + 1; continue; } // R9: a no-reply, role or ATS/job-board inbox
           if (!r.verified) { held.not_verified++; continue; }
           if (contacted.has(r.email.toLowerCase())) { held.already_contacted++; continue; }
           if (dnc.has(await emailHash(r.email))) { held.do_not_contact++; continue; }
@@ -918,7 +918,7 @@ export function careerTools(deps: {
         const parts = batchMessages(saved);
         if (left) parts.push(left.trim());
         if (c.turn) c.turn.show = { intent: OUTREACH_INTENT, text: batchText(saved) + left, parts };
-        return { drafted: saved.length - earlier.length, in_batch: saved.length, not_drafted: notDrafted, held_out: held, shown: "Code shows the batch to the person in full, numbered; do not repeat or change it." };
+        return { drafted: saved.length - earlier.length, in_batch: saved.length, not_drafted: notDrafted, held_out: held, shown: "Code shows the batch to the person in full; do not repeat or change it." };
       },
     },
     {

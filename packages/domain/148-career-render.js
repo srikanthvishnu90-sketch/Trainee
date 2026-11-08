@@ -407,9 +407,10 @@ const CareerRender = (() => {
     const blocks = [];
     const header = (resume && resume.header) || {};
     if (header.name) blocks.push({ style: "name", kind: "name", text: String(header.name) });
-    const contact = [header.email, header.location].filter(Boolean).join(" | ");
+    // RELEASE 9: a header read from the person's confirmed resume carries its contact and links lines verbatim.
+    const contact = header.contactLine ? String(header.contactLine) : [header.email, header.location].filter(Boolean).join(" | ");
     if (contact) blocks.push({ style: "contact", kind: "contact", text: contact });
-    const links = Object.values(header.links || {}).filter(Boolean).join(" | ");
+    const links = header.linksLine ? String(header.linksLine) : Object.values(header.links || {}).filter(Boolean).join(" | ");
     if (links) blocks.push({ style: "links", kind: "links", text: links });
     const addLine = (line) => {
       if (!line || line.text == null || !String(line.text).trim()) return;
@@ -953,6 +954,8 @@ const CareerRender = (() => {
     }
     return out;
   }
+  const MONTH = "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]{0,6}\\.?";
+  const DATE_ONLY_RE = new RegExp(`^(?:${MONTH} )?\\d{4}(?:\\s*[\u2013\u2014-]\\s*(?:(?:${MONTH} )?\\d{4}|Present))?$`, "i");
   function pdfStructure(buf) {
     const s = Bytes.isBuffer(buf) ? buf.toString("latin1") : "";
     const fonts = [...new Set([...s.matchAll(/\/BaseFont\s*\/([A-Za-z0-9-]+)/g)].map((m) => m[1].replace(/^[A-Z]{6}\+/, "")))];
@@ -960,8 +963,11 @@ const CareerRender = (() => {
     const pages = (s.match(/\/Type\s*\/Page(?![a-zA-Z])/g) || []).length;
     const runs = extractPdfRuns(buf);
     const sizes = [...new Set(runs.map((r) => r.size).filter(Boolean))].sort((a, b) => a - b);
-    const xs = [...new Set(runs.map((r) => Math.round(r.x)))];
-    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, pages, fonts, fontSizesPt: sizes, images, singleColumn: runs.length > 0 && xs.every((x) => x <= 100), headings: [] };
+    // RELEASE 9: an entry's dates set flush right on the entry's own baseline (a run that is only a date or a date range,
+    // beside a run that starts at the left margin) are part of that line, not a second column. Anything else past x 100 is.
+    const rightDate = (r) => DATE_ONLY_RE.test(String(r.text).trim()) && runs.some((o) => o !== r && o.page === r.page && Math.abs(o.y - r.y) < 0.5 && o.x <= 100);
+    const xs = [...new Set(runs.filter((r) => r.x <= 100 || !rightDate(r)).map((r) => Math.round(r.x)))];
+    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, pages, fonts, fontSizesPt: sizes, images, singleColumn: runs.length > 0 && xs.every((x) => x <= 100), rightAlignedDates: runs.filter((r) => r.x > 100 && rightDate(r)).length, headings: [] };
   }
   // External parser B (poppler) — used when the caller opts in.
   function extractPdfPoppler(buf) {
@@ -984,7 +990,8 @@ const CareerRender = (() => {
     const xml = xmlBuf.toString("utf8");
     const lines = [];
     for (const pm of xml.matchAll(/<w:p(?:\s[^>]*)?>([\s\S]*?)<\/w:p>/g)) {
-      const runs = [...pm[1].matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)].map((m) => unescXml(m[1]));
+      // RELEASE 9: a run's tab (<w:tab/>, never a tab stop's <w:tab w:val=.../>) reads as a space, as Word and python-docx read it.
+      const runs = [...pm[1].matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:tab\/>/g)].map((m) => (m[1] === undefined ? " " : unescXml(m[1])));
       const text = runs.join("");
       if (text.trim()) lines.push(text);
     }
@@ -998,11 +1005,12 @@ const CareerRender = (() => {
     if (!xmlBuf) return [];
     const xml = xmlBuf.toString("utf8");
     const lines = [];
-    const tokenRe = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<\/w:p>/g;
+    const tokenRe = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<\/w:p>|<w:tab\/>/g;
     let cur = "";
     let m;
     while ((m = tokenRe.exec(xml))) {
       if (m[1] !== undefined) cur += unescXml(m[1]);
+      else if (m[0] === "<w:tab/>") cur += " ";
       else { if (cur.trim()) lines.push(cur); cur = ""; }
     }
     if (cur.trim()) lines.push(cur);
@@ -1068,13 +1076,27 @@ const CareerRender = (() => {
     const resume = inp.resume || null;
     const expected = resume ? sourceLines(resume) : (inp.sourceLines || null);
     const expectedNorm = expected ? normSeq(expected.map((l) => l.text)) : null;
-    const expectedLayoutNorm = resume ? normSeq(layoutLines(resume).map((l) => l.text)) : expectedNorm;
+    let expectedLayoutNorm = resume ? normSeq(layoutLines(resume).map((l) => l.text)) : expectedNorm;
+    let expectedDocxNorm = expectedNorm;
     const expectedHeadings = expected ? expected.filter((l) => l.kind === "heading").map((l) => l.text.toUpperCase()) : null;
     const email = resume && resume.header && resume.header.email ? String(resume.header.email) : null;
     const reasons = [];
     const checks = {};
     const formats = {};
     const add = (check, level, detail) => reasons.push({ check, level, detail });
+    // RELEASE 9: a designed layout (career_resume_design.ts) prints the same words in other lines (an entry's dates set
+    // flush right, a bullet's glyph as its own run), so it hands the printed lines per format. They are trusted only when
+    // their words, in order, are exactly the source's: otherwise layout_text fails and the source lines are kept.
+    const printed = o.expected || null;
+    const wordsOf = (lines) => normSeq(lines).join(" ").split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(" ");
+    if (printed) {
+      const src = expected ? wordsOf(expected.map((l) => l.text)) : null;
+      for (const fmt of ["pdf", "docx"]) {
+        if (!Array.isArray(printed[fmt])) continue;
+        if (src !== null && wordsOf(printed[fmt]) !== src) { add("layout_text", "fail", `${fmt}: the layout's printed lines do not carry exactly the source's words in the source's order`); continue; }
+        if (fmt === "pdf") expectedLayoutNorm = normSeq(printed.pdf); else expectedDocxNorm = normSeq(printed.docx);
+      }
+    }
 
     // BUG-2026-10-14-NDER (brief B6): two source-level FAILs.
     // (1) duplicate_line — a content line belongs in exactly one section;
@@ -1189,7 +1211,7 @@ const CareerRender = (() => {
     };
 
     checkFormat("pdf", inp.pdf || null, extractPdfLines, extractPdfStrings, pdfStructure, expectedLayoutNorm);
-    checkFormat("docx", inp.docx || null, extractDocxLines, extractDocxRuns, docxStructure, expectedNorm);
+    checkFormat("docx", inp.docx || null, extractDocxLines, extractDocxRuns, docxStructure, expectedDocxNorm);
     if (!inp.pdf && !inp.docx) add("no_files", "fail", "no rendered file was supplied to check");
     const status = reasons.some((r) => r.level === "fail") ? "FAIL" : reasons.some((r) => r.level === "warn") ? "WARN" : "PASS";
     return { status, reasons, checks, formats };
@@ -1202,7 +1224,9 @@ const CareerRender = (() => {
   }
 
   const runtime = { zlib: !!rt.zlib, crypto: !!rt.crypto, Buffer: !!Buffer, codec: rt.zlib && rt.crypto ? "platform" : zlib && crypto ? "vendored" : "none" };
-  return { renderPdf, renderDocx, parseCheck, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
+  // RELEASE 9: the byte primitives career_resume_design.ts builds its two layouts with (same codec, same ZIP writer).
+  const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlib.deflateSync(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
+  return { primitives, renderPdf, renderDocx, parseCheck, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
   }
   return make(NODE_RUNTIME);
 })();

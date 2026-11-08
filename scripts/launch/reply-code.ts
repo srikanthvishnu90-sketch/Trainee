@@ -42,6 +42,8 @@ export const SHARED_REPLY_MODULES = [
   "brand.ts", "row_answer.ts", "telegram_jobs.ts", "apply_all_yes.ts", "apply_all_yes_flag.ts", "role_results.ts", "career_resume_replace.ts",
   // 2026-11-06: the staged decision reads the writer's PAYLOAD_INTENTS; the code-in-chat safety turn (handler-career.ts).
   "career_reply_writer.ts", "career_code_in_chat.ts",
+  // 2026-11-07 (release 9 B): tailor_resume's layouts and gap report, and the version record it writes (career_tools.ts).
+  "career_resume_design.ts", "career_resume_gaps.ts", "career_resume_outcomes.ts",
 ] as const;
 
 // D-036 (release flags, agent-chat/release_config.ts RELEASE_FLAGS): the code behind every flag the release serves ON that

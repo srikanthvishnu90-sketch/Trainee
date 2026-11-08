@@ -143,6 +143,13 @@ export function typeset(blocks: Block[], body: number, scale: number, pal: Palet
   return { pages, printed, spacing: sp, body };
 }
 export interface Fit { pages: number; body: number; scale: number; target: 1 | 2; over: boolean }
+// What a file's record keeps of its fit, in whole numbers only: the body size in tenths of a point (105 = 10.5 pt) and the
+// spacing as an integer percent of the loosest step. The router keeps its employer copy on the person's profile, and the
+// hosted apply hashes that profile at prepare and again at send with the apply hash, which takes no fraction
+// (career_apply_store.ts canonical: INVALID_APPLY_PAYLOAD); a decimal there failed every hosted send after a tailor.
+export interface FitRecord { pages: number; target: 1 | 2; over: boolean; body_pt10: number; spacing_pct: number }
+export const fitRecord = (f: Fit): FitRecord =>
+  ({ pages: f.pages, target: f.target, over: f.over, body_pt10: Math.round(f.body * 10), spacing_pct: Math.round(f.scale * 100) });
 export function fit(blocks: Block[], pal: Palette): { fit: Fit; set: Typeset } {
   let last: Typeset | null = null, lastStep = FIT_STEPS[0];
   for (const target of [1, 2] as const) {
@@ -193,6 +200,47 @@ function writePdf(R: any, set: Typeset): Uint8Array {
 }
 
 // ---------------------------------------------------------------- the Trainee DOCX
+// The DOCX is set in Inter, which runs about 6% wider than the Helvetica metrics the PDF and the page fit are measured with
+// (2026-11-08 review of #596: on a wrap-heavy record LibreOffice laid the DOCX out a page longer than its PDF). A paragraph
+// that would wrap onto more lines in Inter than it does in the PDF is set with its letters drawn closer, by the least whole
+// number of twentieths of a point that keeps the PDF's line count (never more than CONDENSE_MAX), so both files keep the
+// same lines per paragraph and the same pages. Every other paragraph is untouched. Inter 4.000's advance widths, per 1000 em,
+// for ASCII 32-126 (read from the font's hmtx table); anything else is taken at its Helvetica width times 1.1.
+const INTER = [281, 288, 466, 633, 642, 982, 644, 300, 365, 365, 501, 662, 288, 460, 288, 360, 631, 407, 610, 618, 646, 608, 620, 566, 619, 620, 288, 302, 662, 662, 662, 511, 966, 690, 654, 730, 722, 601, 590, 746, 743, 269, 571, 672, 565, 903, 753, 765, 639, 765, 644, 642, 646, 744, 690, 985, 682, 679, 629, 365, 360, 365, 471, 456, 323, 562, 612, 571, 612, 583, 370, 613, 591, 242, 242, 549, 242, 876, 591, 600, 612, 612, 376, 528, 327, 591, 562, 818, 546, 562, 552, 426, 333, 426, 662];
+const INTERB = [237, 338, 552, 649, 655, 1016, 672, 339, 377, 377, 559, 679, 334, 468, 334, 388, 674, 431, 630, 646, 676, 639, 649, 582, 651, 649, 334, 343, 679, 679, 679, 560, 1016, 747, 662, 740, 722, 607, 587, 750, 747, 281, 584, 719, 565, 932, 762, 771, 648, 777, 657, 655, 667, 732, 747, 1038, 738, 731, 664, 377, 388, 377, 487, 476, 365, 581, 630, 588, 630, 596, 398, 632, 623, 271, 271, 580, 271, 913, 623, 613, 630, 630, 407, 560, 366, 623, 600, 850, 580, 602, 573, 469, 372, 469, 679];
+export const CONDENSE_MAX = 12; // 0.6 pt
+export function interWidthPt(text: string, bold: boolean, size: number, condense = 0): number {
+  const table = bold ? INTERB : INTER;
+  let em = 0, n = 0;
+  for (const ch of String(text)) {
+    const c = ch.codePointAt(0)!;
+    em += c >= 32 && c <= 126 ? table[c - 32] : Math.round(widthPt(ch, bold ? "F2" : "F1", 1000) * 1.1);
+    n++;
+  }
+  return (em * size) / 1000 - (n * condense) / 20;
+}
+function wrapCount(text: string, width: number, w: (s: string) => number): number {
+  let lines = 0, cur = "";
+  for (const word of String(text).split(/\s+/).filter(Boolean)) {
+    const next = cur ? `${cur} ${word}` : word;
+    if (!cur || w(next) <= width) cur = next;
+    else { lines++; cur = word; }
+  }
+  return Math.max(1, lines + (cur ? 1 : 0));
+}
+// The condensing (twentieths of a point, 0 for none) a block's text needs in Inter to wrap onto no more lines than the PDF's.
+export function docxCondense(b: Block, body: number, pal: Palette): number {
+  if (b.kind === "name") return 0; // one line at 12 pt; Brygada is not measured here, and the name never wraps in practice
+  const bold = b.kind === "heading" || b.kind === "entry";
+  const text = b.kind === "heading" && pal.upperHeadings ? b.text.toUpperCase() : b.text;
+  const font: Font = bold ? "F2" : "F1";
+  const width = b.kind === "bullet" ? PAGE.x1 - TEXT_X : b.right ? COL - widthPt(b.right, "F1", body) - 12 : COL;
+  const pdfLines = wrapCount(text, width, (x) => widthPt(x, font, body));
+  // In the DOCX the date sits at a right tab on the margin: the entry's words must end before the date's Inter width.
+  const docxWidth = b.right ? Math.min(width, COL - interWidthPt(b.right, false, body) - 12) : width;
+  for (let c = 0; c <= CONDENSE_MAX; c++) if (wrapCount(text, docxWidth, (x) => interWidthPt(x, bold, body, c)) <= pdfLines) return c;
+  return CONDENSE_MAX;
+}
 const tw = (pt: number) => Math.round(pt * 20);
 const hex = (c: string) => c.slice(1).toUpperCase();
 const DOCX_NS = `xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"`;
@@ -231,9 +279,10 @@ function traineeDocx(R: any, blocks: Block[], f: Fit, pal: Palette): { buffer: U
     const styleId = b.kind === "name" ? "TraineeName" : header ? "TraineeContact" : b.kind === "heading" ? "Heading1" : b.kind === "entry" ? "TraineeEntry" : b.kind === "bullet" ? "TraineeBullet" : null;
     const ppr = `<w:pPr>${styleId ? `<w:pStyle w:val="${styleId}"/>` : ""}${border}<w:spacing w:before="${tw(before)}" w:after="0" w:line="${tw(lead)}" w:lineRule="exact"/></w:pPr>`;
     let runs: string;
-    if (b.kind === "entry" && b.right) { runs = `<w:r>${t(b.text)}</w:r><w:r><w:rPr><w:b w:val="0"/><w:color w:val="${hex(pal.mute)}"/></w:rPr><w:tab/>${t(b.right)}</w:r>`; printed.push(`${b.text} ${b.right}`); }
-    else if (b.kind === "bullet") { runs = `<w:r>${t("•")}<w:tab/>${t(b.text)}</w:r>`; printed.push(`• ${b.text}`); }
-    else { const text = b.kind === "heading" && pal.upperHeadings ? b.text.toUpperCase() : b.text; runs = `<w:r>${t(text)}</w:r>`; printed.push(text); }
+    const c = docxCondense(b, f.body, pal), cpr = c ? `<w:rPr><w:spacing w:val="-${c}"/></w:rPr>` : "";
+    if (b.kind === "entry" && b.right) { runs = `<w:r>${cpr}${t(b.text)}</w:r><w:r><w:rPr><w:b w:val="0"/><w:color w:val="${hex(pal.mute)}"/></w:rPr><w:tab/>${t(b.right)}</w:r>`; printed.push(`${b.text} ${b.right}`); }
+    else if (b.kind === "bullet") { runs = c ? `<w:r>${t("•")}<w:tab/></w:r><w:r>${cpr}${t(b.text)}</w:r>` : `<w:r>${t("•")}<w:tab/>${t(b.text)}</w:r>`; printed.push(`• ${b.text}`); }
+    else { const text = b.kind === "heading" && pal.upperHeadings ? b.text.toUpperCase() : b.text; runs = `<w:r>${cpr}${t(text)}</w:r>`; printed.push(text); }
     if (b.kind === "heading") seenHeading = true;
     prev = b.kind;
     return `<w:p>${ppr}${runs}</w:p>`;

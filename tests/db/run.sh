@@ -1062,9 +1062,6 @@ python3 "$HERE/career_claim_deadlock.py" "${PSQL[@]}"
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261031110000_career_outreach_batch_unbounded.sql"
 echo "== career_outreach_batch_unbounded.test.sql (one batch holds drafts 1 to 150; 0 and a repeated number refused; the check is validated)"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_outreach_batch_unbounded.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
-# LAUNCH READINESS B1 (2026-10-26, audit PR #192): the definer lockdown, last, on the schema every phase above left
-# (the card-cloud bridge included). The test applies it (twice) over production's shape, then checks the whole schema:
-# no SECURITY DEFINER function anon can run, none without a fixed search_path.
 # RELEASE 9 (20261107120000): each application records the resume version, layout and change kinds of the tailored file it
 # carried (a trigger after WO-028's tag), and career_apply_outcomes_by_resume reports rates by version, tailoring, layout and
 # kind of change. Twice (idempotent), then its test; the rollback removes exactly what it added, then it applies again.
@@ -1077,6 +1074,9 @@ echo "== career_resume_outcomes.test.sql (version, layout and change kinds recor
 [[ "$("${PSQL[@]}" -tAc "select (to_regclass('public.career_apply_outcomes_by_resume') is null and to_regprocedure('public.career_apply_resume_version_tag()') is null and to_regprocedure('public.career_apply_resume_tag()') is not null)::text")" == "true" ]] || { echo "FAIL career_resume_outcomes rollback"; exit 1; }
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261107120000_career_resume_outcomes.sql"
 echo "  ok   career_resume_outcomes rollback removes its columns, trigger and view (WO-028's tag stays), and it applies again"
+# LAUNCH READINESS B1 (2026-10-26, audit PR #192): the definer lockdown, last, on the schema every phase above left
+# (the card-cloud bridge included). The test applies it (twice) over production's shape, then checks the whole schema:
+# no SECURITY DEFINER function anon can run, none without a fixed search_path.
 # Every SECURITY DEFINER function any migration declares (read by scripts/launch/definer-revoke-scan.cjs) exists in this
 # schema, so the lockdown test below covers all of them; a definer-making file the suite does not apply fails here.
 echo "== every definer function a migration declares is built by this suite"

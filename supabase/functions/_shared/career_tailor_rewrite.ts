@@ -16,7 +16,7 @@
 //
 // Behind CAREER_TAILOR_REWRITE=on (default off). One model call per tailoring, metered by the caller's meter.
 import { CareerProfile, CareerRender, CareerRouter, CareerTailor, CareerWriting } from "./router_core.career.js";
-import { renderDesigned } from "./career_resume_design.ts";
+import { fitRecord, renderDesigned } from "./career_resume_design.ts";
 import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 release flags
 import { baseResume, changelog, confirmedOnly, submissionResume } from "./career_tailor.ts";
 import { claimProblems } from "./person_claims.ts";
@@ -284,7 +284,8 @@ export function employerFiles(res: any, doc: any, profile: any): boolean {
       text: rendered.text || "", markdown: rendered.markdown || "", sha256: CareerRouter.sha256(rendered.text || ""),
       pdf: { ...pdf, filename: named("pdf", pdf.filename) },
       docx: { ...docx, filename: named("docx", docx.filename) },
-      employer_copy: true, layout: designed ? "trainee" : "plain", ...(designed ? { fit: d.fit } : {}),
+      // Whole numbers only (fitRecord): this object is kept on the profile, which the hosted apply hashes.
+      employer_copy: true, layout: designed ? "trainee" : "plain", ...(designed ? { fit: fitRecord(d.fit) } : {}),
     });
     return true;
   } catch {

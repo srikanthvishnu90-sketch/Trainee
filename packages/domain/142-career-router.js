@@ -710,6 +710,15 @@ const CareerRouter = (() => {
       const reply = compose({ headline: "The truth check refused that tailoring, so nothing was saved.", facts: ["A tailored resume is only saved when every line traces to a confirmed fact on your profile."], nextStep: "Tell me which facts to confirm and I will run it again." });
       return { intent: "tailor_refused", reply, resultStatus: "blocked", artifact: null, violations: tailored.violations || [] };
     }
+    // Review of #596 (2026-11-08): a resume goes out only with a name and an email at its top, and only ones the person
+    // gave: typed for the resume, or the header they confirmed with it (123 headerOf). With neither, no file is made (it
+    // rendered with no name or contact line, and the employer copy went out as Resume_<company>.pdf); the same question
+    // tailor_resume asks (career_tailor.ts CONTACT_QUESTION).
+    const top = tailored.resume && tailored.resume.header;
+    if (tailored.mode === "full" && !(top && s(top.name).trim() && s(top.email).trim())) {
+      const reply = compose({ headline: "I need your name and email for the top of your resume before I make it.", facts: ["An employer's system reads them from the top of the file, and I put there only what you give me."], nextStep: "What name and email should go at the top of your resume?" });
+      return { intent: "tailor_needs_contact", reply, resultStatus: "awaiting_user", sends: 0, artifact: null };
+    }
     const rendered = tailored.rendered || {};
     const artifact = { kind: "tailored_resume", format: "text", text: rendered.text || "", markdown: rendered.markdown || "", pdf: rendered.pdf == null ? null : rendered.pdf, sha256: sha256(rendered.text || ""), jobId, company, versionId: tailored.version && tailored.version.versionId || null };
     if (profile && typeof profile === "object") { profile._careerRouterArtifacts = [...(profile._careerRouterArtifacts || []), artifact]; }

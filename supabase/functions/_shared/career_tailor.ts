@@ -13,7 +13,7 @@
 // tool refuses; nothing is stored or linked.
 import { CareerProfile, CareerRender, CareerTailor } from "./router_core.career.js";
 import { documentLines, guardMaterials } from "./career_materials_guard.ts";
-import { type Fit, type LayoutName, renderDesigned, type Swap } from "./career_resume_design.ts";
+import { type Fit, type FitRecord, fitRecord, type LayoutName, renderDesigned, type Swap } from "./career_resume_design.ts";
 import { gapAnalysis, type GapReport, previewText } from "./career_resume_gaps.ts";
 
 export const RESUME_BUCKET = "career-resumes";
@@ -258,13 +258,21 @@ export function atsHarness(R: any, resume: any, pdf: Uint8Array): AtsVerdict {
   reasons.push(...contactProblems(R, resume, buf));
   return { pass: reasons.length === 0, status: reasons.length ? "FAIL" : check.status, reasons, warnings };
 }
-// The name and email come back out of the file as text, and there is at least one entry.
+// The name and email come back out of the file as text, and so do the contact and links lines the person confirmed with
+// their resume (RELEASE 9), word for word; and there is at least one entry. Spacing is compared loosely (a line the layout
+// wraps reads back on two lines), the words exactly.
 function contactProblems(R: any, resume: any, buf: any): string[] {
   const reasons: string[] = [];
-  const text = (R.extractPdfLines(buf) as string[]).join("\n").toLowerCase();
+  const norm = (v: string) => v.replace(/\s+/g, " ").trim().toLowerCase();
+  const text = norm((R.extractPdfLines(buf) as string[]).join(" "));
+  const back = (v: string) => text.includes(norm(v));
   const name = String(resume?.header?.name || ""), email = String(resume?.header?.email || "");
-  if (!name || !text.includes(name.toLowerCase())) reasons.push("contact: the name does not come back out of the file");
-  if (!email || !text.includes(email.toLowerCase())) reasons.push("contact: the email does not come back out of the file");
+  if (!name.trim() || !back(name)) reasons.push("contact: the name does not come back out of the file");
+  if (!email.trim() || !back(email)) reasons.push("contact: the email does not come back out of the file");
+  for (const [k, what] of [["contactLine", "contact line"], ["linksLine", "links line"]] as const) {
+    const line = resume?.header?.[k];
+    if (typeof line === "string" && line.trim() && !back(line)) reasons.push(`contact: the ${what} you confirmed does not come back out of the file`);
+  }
   if (!(resume?.sections || []).some((s: any) => s.lines.some((l: any) => l.type === "entry"))) reasons.push("content: no experience, project or education entry");
   return reasons;
 }
@@ -375,7 +383,7 @@ export type TailorOut = {
   not_on_your_record: string[]; lead_not_picked: string[]; rendered_in: string; ms: number; detail: { doc: any; base: any; diff: any; docx: Uint8Array | null };
   // RELEASE 9: the posting against the resume (missing, weak, emphasise) and the top of the file as it prints, both for the
   // chat before the file is sent; the layout and its page fit when one was asked for.
-  gaps: GapReport; preview: string; layout: LayoutName | "plain"; fit: Fit | null; own_layout?: { replaced: number; missing: string[] };
+  gaps: GapReport; preview: string; layout: LayoutName | "plain"; fit: FitRecord | null; own_layout?: { replaced: number; missing: string[] };
 } | { ok: false; refused: "no_confirmed_facts" | "no_contact" | "truth_audit" | "render" | "ats_parse" | "link"; reason: string; ms: number };
 
 export async function tailorForPosting(o: {
@@ -424,7 +432,7 @@ export async function tailorForPosting(o: {
     ats: { status: r.ats.status, warnings: r.ats.warnings }, not_on_your_record: (t.requiredGaps || []).map((g: any) => g.requirement),
     lead_not_picked: lead.filter((id) => !selected.has(id)), rendered_in: r.where, ms: ms(), detail: { doc, base, diff, docx: r.docx ?? null },
     gaps: gapAnalysis({ jd, profile: clean, doc, gaps: t.gaps || [] }), preview: previewText(r.lines ?? ((CareerRender as any).sourceLines(doc) as { text: string }[]).map((l) => l.text)),
-    layout: r.layout ?? "plain", fit: r.fit ?? null, ...(r.replaced !== undefined ? { own_layout: { replaced: r.replaced, missing: r.missing ?? [] } } : {}),
+    layout: r.layout ?? "plain", fit: r.fit ? fitRecord(r.fit) : null, ...(r.replaced !== undefined ? { own_layout: { replaced: r.replaced, missing: r.missing ?? [] } } : {}),
   };
 }
 

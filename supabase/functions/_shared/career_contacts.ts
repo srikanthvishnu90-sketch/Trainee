@@ -261,11 +261,23 @@ export const CHECK_WORDS: Record<string, string> = { syntax: "syntax", mx: "mail
 function verdict(c: Checks): boolean {
   return c.syntax === "pass" && c.mx !== "fail" && c.role === "pass" && c.disposable === "pass" && (c.hunter === undefined || c.hunter === "valid");
 }
+// fix/r9-apply-completion (e2e adversarial A-ATSD-003/006/007): an applicant-tracking system's own sender is never the
+// employer's person, whatever its local part ("notifications@hire.lever.co" is not a role word, so it passed as a person and
+// an outreach email was sent to it). Hosts that only send the system's candidate mail are flagged whole; on a system's own
+// domain, where its staff also have addresses, only its notification senders are.
+const ATS_MAIL_HOSTS = ["greenhouse-mail.io", "hire.lever.co", "jobs.lever.co", "myworkday.com", "myworkdayjobs.com", "workablemail.com", "applytojob.com"];
+const ATS_DOMAINS = ["greenhouse.io", "lever.co", "ashbyhq.com", "smartrecruiters.com", "icims.com", "jobvite.com", "workday.com", "workable.com", "bamboohr.com", "recruitee.com", "teamtailor.com"];
+const SENDER_LOCAL = /^(?:notifications?|alerts?|updates?|mailer|messages?|no-?reply|do-?not-?reply|bounces?|system|automated)$/;
+export function isAtsSender(email: string): boolean {
+  const [local = "", domain = ""] = String(email ?? "").trim().toLowerCase().split("@");
+  const on = (d: string) => domain === d || domain.endsWith(`.${d}`);
+  return ATS_MAIL_HOSTS.some(on) || (ATS_DOMAINS.some(on) && SENDER_LOCAL.test(local.replace(/\+.*$/, "")));
+}
 export async function checkAddress(email: string | null, mx: MxResolver, cache = new Map<string, Promise<MxResult>>()): Promise<{ check: Checks; verified: boolean }> {
   const e = String(email ?? "").trim().toLowerCase();
   const syntax = EMAIL.test(e) && !e.includes("..") && !/^\.|\.@/.test(e) ? "pass" : "fail";
   const [local = "", domain = ""] = e.split("@");
-  const role = syntax === "pass" && (ROLE_LOCALS.has(local) || ROLE_LOCALS.has(local.replace(/[._+-]/g, "")) || isRoleAddress(e)) ? "flagged" : "pass";
+  const role = syntax === "pass" && (ROLE_LOCALS.has(local) || ROLE_LOCALS.has(local.replace(/[._+-]/g, "")) || isRoleAddress(e) || isAtsSender(e)) ? "flagged" : "pass";
   const disposable = syntax === "pass" && DISPOSABLE.has(domain) ? "flagged" : "pass";
   let mxState: Checks["mx"] = "not_run";
   if (syntax === "pass") {

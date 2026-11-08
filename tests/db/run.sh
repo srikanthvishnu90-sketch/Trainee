@@ -1115,6 +1115,17 @@ echo "== career_contact_outreach.check.sql (25 facts, scores fixed by method, ow
 "${PSQL[@]}" -tAc "select count(*) from pg_class where relname like 'career_contact\_%' and relkind = 'r'" | grep -qx 0 || { echo "FAIL the rollback left contact tables"; exit 1; }
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261107120200_career_contact_outreach.sql"
 echo "  ok   rollback removes every contact table; up again"
+# CONTACT OUTREACH, S2 review of #590 (20261108130500): "forget everything" keeps the contact send log, so the daily
+# new-contact and two-follow-up limits survive it. Up twice (idempotent), its check, the rollback (the erase owns the
+# send log again), and up again.
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261108130500_career_contact_erase_keeps_sends.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261108130500_career_contact_erase_keeps_sends.sql"
+echo "== career_contact_erase_keeps_sends.check.sql (forget everything keeps the send log; the caps still hold)"
+"${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_contact_erase_keeps_sends.check.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261108130500_career_contact_erase_keeps_sends.down.sql"
+"${PSQL[@]}" -tAc "select 'public.career_contact_sends' = any(public.career_erase_tables())" | grep -qx t || { echo "FAIL the rollback did not hand the send log back to the erase"; exit 1; }
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261108130500_career_contact_erase_keeps_sends.sql"
+echo "  ok   rollback hands the send log back to the erase; up again"
 # LAUNCH READINESS B1 (2026-10-26, audit PR #192): the definer lockdown, last, on the schema every phase above left
 # (the card-cloud bridge included). The test applies it (twice) over production's shape, then checks the whole schema:
 # no SECURITY DEFINER function anon can run, none without a fixed search_path.

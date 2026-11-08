@@ -65,6 +65,7 @@
 const path = require("node:path");
 
 const Batch = require(path.join(__dirname, "..", "..", "packages", "domain", "155-career-batch-apply.js"));
+const Pace = require(path.join(__dirname, "apply-scheduler.cjs"));
 
 const RUN_VERSION = "career_batch_run/v1";
 const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -83,6 +84,10 @@ function createBatchExecutor(deps) {
   if (typeof d.boardForFor !== "function") throw coded("BATCH_BOARDS_NOT_WIRED", "createBatchExecutor: boardForFor(userId) is required");
   const nowOf = typeof d.now === "function" ? d.now : () => Date.now();
   const track = typeof d.track === "function" ? d.track : null;
+  // R9: d.scheduler = { limits } (apply-scheduler.cjs limitsFromEnv) turns on the paced drive. One scheduler per executor
+  // process, so a person's hour and day windows hold across their batches; each send goes to the run it belongs to.
+  const driving = new Map(); // run id -> the send for that run's keys
+  const pace = d.scheduler ? Pace.createApplyScheduler({ now: nowOf, limits: d.scheduler.limits, submit: (job) => driving.get(job.runId)(job) }) : null;
 
   function recordOf(run) {
     return {
@@ -183,10 +188,71 @@ function createBatchExecutor(deps) {
     if (!ap.ok) return { blocked: ap.code || "APPROVAL_REFUSED", runId: run.id, runStatus: run.status };
     const deps = await buildDeps(intent.userId, []);
     const baseRecords = ((deps.log && deps.log.records) || []).slice();
-    Batch.executeRun(run, deps);
+    if (d.scheduler) await executePaced(run, deps);
+    else Batch.executeRun(run, deps);
     await store.saveRun(recordOf(run));
     await persistLedger(intent.userId, deps.log, baseRecords);
-    return { runId: run.id, runStatus: run.status, submitted: run.summary ? run.summary.submitted : 0, confirmations: run.summary ? run.summary.confirmations : [] };
+    return { runId: run.id, runStatus: run.status, submitted: run.summary ? run.summary.submitted : 0, confirmations: run.summary ? run.summary.confirmations : [],
+      ...(d.scheduler ? { paced: run.summary ? run.summary.deferred.filter((x) => x.code === "PACE_DEFERRED").length : 0 } : {}) };
+  }
+
+  // R9 (2026-11-07): the approved batch at the person's pace (apply-scheduler.cjs: 60 an hour, 200 in any 24 hours, per
+  // employer and per site limits, all set by name in the worker's environment). Each turn drives ONE approved key through
+  // 155 (`only: [key]`), so 149 re-verifies that application's payload at its own click; the run record is saved after
+  // every send, so a crash leaves what was sent recorded. The claim lease is an hour (career_batch_claim_v1), so one
+  // intent drives for at most CAREER_APPLY_DRIVE_BUDGET_MS (50 minutes); what the pace leaves is named in the run as
+  // PACE_DEFERRED, still at its doorstep, never sent and never dropped.
+  async function executePaced(run, deps) {
+    const sleep = typeof d.sleep === "function" ? d.sleep : (ms) => new Promise((r) => setTimeout(r, ms));
+    const budget = Number.isInteger(d.driveBudgetMs) && d.driveBudgetMs > 0 ? d.driveBudgetMs : 50 * 60_000;
+    const start = nowOf();
+    const results = new Map();
+    for (const key of run.selected) {
+      const app = run.apps[key], sha = run.approvals[key];
+      if (!app || !sha || app.stage !== "doorstep") continue;
+      // The scheduler binds the approval record (run, posting, the payload hash the card's yes approved); 149 binds the
+      // payload itself at its click.
+      const payload = { runId: run.id, postingKey: key, approvedPayloadSha256: sha };
+      const h = Pace.payloadSha256(payload);
+      const r = pace.enqueue({ id: `${run.id}:${key}`, runId: run.id, userId: run.userId, jobId: key, company: app.company || "", url: app.url || (run.postings[key] && run.postings[key].url) || "",
+        payload, payloadSha256: h, approvalHash: h, ref: key });
+      if (!r.ok) results.set(key, r.reason);
+    }
+    driving.set(run.id, pacedSubmit(run, deps));
+    const mine = (j) => j.runId === run.id;
+    while (true) {
+      const due = pace.nextDueAt(mine);
+      if (due === null) break;
+      if (due > start + budget) break;
+      const wait = due - nowOf();
+      if (wait > 0) await sleep(wait);
+      await pace.tick(mine);
+    }
+    for (const key of run.selected) pace.withdraw(`${run.id}:${key}`, "drive_budget_spent");
+    driving.delete(run.id);
+    for (const key of run.selected) {
+      const app = run.apps[key];
+      if (app && app.stage === "doorstep" && run.approvals[key]) {
+        run.deferred.push({ postingKey: key, company: app.company || null, role: app.role || null, code: "PACE_DEFERRED",
+          reason: results.get(key) === "duplicate_job" ? "already applied to or on its way" : "approved, and past this hour's or today's pace: it stays approved, at its doorstep, not sent", resumeOn: null });
+      }
+    }
+    Batch.executeRun(run, { ...deps, only: [], final: true });
+  }
+  // The send the scheduler calls: one approved key through 155/149, its outcome in the scheduler's terms.
+  function pacedSubmit(run, deps) {
+    return async (job) => {
+      const key = job.ref;
+      Batch.executeRun(run, { ...deps, only: [key] });
+      await store.saveRun(recordOf(run));
+      const app = run.apps[key];
+      if (app.stage === "submitted") {
+        return app.confirmationId ? { posted: true, outcome: "submitted", proof: { kind: "confirmation_page", ref: String(app.confirmationId) } } : { posted: true, outcome: "submitted", proof: null };
+      }
+      if (app.stage === "captcha_handoff") return { posted: false, outcome: "needs_user", reason: "captcha_handoff" };
+      const code = (app.stop && app.stop.code) || app.stage;
+      return { posted: /UNCERTAIN|UNKNOWN|RECONCILE/.test(String(code)) ? null : false, outcome: "permanent", reason: String(code) };
+    };
   }
 
   async function runBatchPending() {

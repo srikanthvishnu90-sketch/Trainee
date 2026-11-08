@@ -21,9 +21,15 @@
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY               the batch RPCs and the KB pool (supabase-transport.cjs)
 //   UPMORE_CAREER_WORKER_URL, UPMORE_CAREER_WORKER_SECRET the board service (board-service.cjs) this executor drives through
 //   BATCH_EXECUTOR_INTERVAL_MS (default 15000; 0 = drain once and exit)
+//   R9 (2026-11-07) the pace of real submission (workers/career-browser/apply-scheduler.cjs; owner, "200/day", D-R9-1):
+//   CAREER_APPLY_PER_PERSON_HOUR (60), CAREER_APPLY_PER_PERSON_DAY (200), CAREER_APPLY_PER_EMPLOYER_HOUR (30),
+//   CAREER_APPLY_PER_SITE_MINUTE (30), CAREER_APPLY_MAX_ATTEMPTS (4), CAREER_APPLY_BACKOFF_BASE_MS (60000),
+//   CAREER_APPLY_BACKOFF_MAX_MS (3600000), CAREER_APPLY_DRIVE_BUDGET_MS (3000000: one intent's drive inside its hour lease).
+//   Every approved batch is sent at this pace, one application at a time; an unreadable number is its default, never none.
 const path = require("node:path");
 const W = path.join(__dirname, "..", "..", "workers", "career-browser");
 const { createBatchExecutor, createBatchRpcStore } = require(path.join(W, "batch-executor.cjs"));
+const { limitsFromEnv } = require(path.join(W, "apply-scheduler.cjs"));
 
 const NEVER_HOSTS = /(^|\.)(linkedin\.com|indeed\.com|joinhandshake\.com|handshake\.com)$/i;
 const hostOf = (u) => { try { return new URL(String(u || "")).hostname; } catch { return ""; } };
@@ -59,6 +65,9 @@ function assembleBatchExecutor(env, o) {
     profileFor: sources.profileFor,
     boardForFor,
     now: x.now,
+    scheduler: { limits: limitsFromEnv(e) },
+    driveBudgetMs: /^\d{1,9}$/.test(String(e.CAREER_APPLY_DRIVE_BUDGET_MS || "")) && Number(e.CAREER_APPLY_DRIVE_BUDGET_MS) > 0 ? Number(e.CAREER_APPLY_DRIVE_BUDGET_MS) : 50 * 60_000,
+    sleep: x.sleep,
   });
   return { off: false, executor, close: () => { if (http && typeof http.close === "function") http.close(); } };
 }

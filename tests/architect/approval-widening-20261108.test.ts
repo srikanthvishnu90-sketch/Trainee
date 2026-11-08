@@ -119,3 +119,76 @@ Deno.test("WIDENING/3 a yes in ONE language only: English 'y' plus another langu
     eq(approvalWords(m), want, m);
   }
 });
+
+// ------------------------------------------------------------------------------------------------ 4. second review (#614)
+// B1: Object.prototype names are not words of any table ("yes constructor": Constructor is an employer).
+const PROTO = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__", "isPrototypeOf", "propertyIsEnumerable", "toLocaleString",
+  "__defineGetter__", "__lookupGetter__"];
+Deno.test("WIDENING/4 Object.prototype names are not approval words: 'send constructor', 'yes toString' approve nothing", async () => {
+  for (const p of PROTO) {
+    for (const m of [`send ${p}`, `yes ${p}`, `${p}`, `yes, send ${p}`, `sí, mándala ${p}`, `haan ${p}`, `approve ${p}`, `${p} yes`]) {
+      eq(readApproval(m), null, m);
+      eq(readApproval(m, { languages: "en" }), null, `${m} (en)`);
+      eq(approvalWords(m), m, `${m} is passed on unchanged`);
+      eq(await card(5, m), [], `${m}: card of 5 approves nothing`);
+      eq(await outreach(5, m), [], `${m}: five drafts approve nothing`);
+    }
+  }
+});
+// B2 (architect ruling R9): "schick es ab" ("send IT off") names one item, as "mándalo" does; "mach es" stays "do it".
+Deno.test("WIDENING/5 'schick es ab' names one item: a card or batch of one, never of more; 'mach es' is still the batch 'do it'", async () => {
+  for (const m of ["ja, schick es ab", "schick es ab bitte", "schick es ab"]) {
+    eq(readApproval(m)?.scope, "it", m);
+    eq(await card(1, m), [1], `${m}: card of one`);
+    eq(await card(5, m), [], `${m}: card of 5 approves nothing`);
+    eq(await outreach(1, m), [1], `${m}: one draft`);
+    eq(await outreach(5, m), [], `${m}: five drafts approve nothing`);
+  }
+  for (const m of ["mach es", "mach das", "do it", "hazlo"]) eq(readApproval(m)?.scope, "batch", m);
+});
+// N1: "send all 3" approves only a batch of exactly 3 waiting.
+Deno.test("WIDENING/6 outreach 'send all N' approves only a batch of exactly N waiting", async () => {
+  for (const m of ["send all 3", "approve all 3", "send them all 3"]) {
+    eq(await outreach(5, m), [], `${m}: five drafts approve nothing`);
+    eq(await outreach(3, m), all(3), `${m}: three drafts approve exactly the 3`);
+  }
+  eq(await outreach(2, "send all 5"), [], "send all 5 with two waiting approves nothing");
+});
+// N2: Hindi "ya" is "or": "ya" never joins another language.
+Deno.test("WIDENING/7 'ya' (Hindi 'or') never joins another language: 'ya les', 'ya sab', 'ya la' approve nothing", async () => {
+  for (const m of ["ya les", "ya sab", "ya la", "ya todos", "ya bhej do", "sab ya", "ya alle", "ya tudo", "ya, envíalos"]) {
+    eq(readApproval(m), null, m);
+    eq(await card(5, m), [], `${m}: card of 5 approves nothing`);
+    eq(await outreach(5, m), [], `${m}: five drafts approve nothing`);
+  }
+  for (const [m, want] of [["ya", "yes"], ["ya send it", "yes, send it"], ["ya send all", "send all"]]) eq(approvalWords(m), want, m);
+});
+// The reply to an "it" on more than one asks a clear question that names the count.
+Deno.test("WIDENING/8 an 'it' reply on 2+ items asks 'Send all N, or which ones?' and approves nothing", async () => {
+  for (const n of [2, 5]) {
+    const d = cardDb({ n });
+    await d.say("show my applications");
+    for (const m of ["yes send it", "sí, envíala", "isko bhejo", "send this one", "schick es ab"]) {
+      const r = await d.say(m);
+      eq(r?.status, "unclear", `${m}: card of ${n}`);
+      assertNode.ok(r!.reply.includes(`Send all ${n}, or which ones?`), `${m}: the card names the count: ${r!.reply}`);
+      eq(d.queue.length, 0, `${m}: nothing queued`);
+    }
+  }
+  const store = memoryOutreachStore();
+  const ds: any[] = [];
+  for (let i = 1; i <= 5; i++) {
+    const d: any = { n: i, recipient: { name: `P ${i} Synthetic`, firm: "Firm", title: "Analyst", school: "", email: `q${i}@firm.example`, source: `r${i}` }, subject: `Q ${i}`,
+      body: `Hi ${i}.`, footer: `Sam\n\n${OPT_OUT_LINE}`, status: "shown", approved_hash: null, approved_at: null, sent_at: null, gmail_id: null, gmail_thread: null, result: null,
+      created_at: new Date(T0).toISOString(), hash: "", shared: [] };
+    d.hash = await payloadHash(messageOf(d));
+    ds.push(d);
+  }
+  await store.saveBatch("U", "TH", ds, T0);
+  for (const m of ["yes send it", "sí, envíala", "isko bhejo", "send this one", "send all 3"]) {
+    store.setIntent("TH", OUTREACH_INTENT);
+    const r = await outreachTurn({ message: m, userId: "U", threadId: "TH", now: T0 + 60_000, store, gmailConnected: async () => true });
+    assertNode.ok(r && r.reply.includes("Send all 5, or which ones?"), `${m}: the batch names the count: ${r?.reply}`);
+  }
+  eq((await store.latestBatch("U")).filter((d) => d.status === "approved").length, 0, "nothing approved");
+});

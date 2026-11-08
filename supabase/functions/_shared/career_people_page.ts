@@ -11,6 +11,7 @@
 // robots.txt disallows; at most 3 redirects, each checked again; 2 MB, 8 s.
 // DNS rebinding: closed. Each hop connects to the address that was checked (pinnedGet below); nothing resolves the name
 // a second time, so a DNS answer that changes after the check (a near-zero TTL) is never used.
+import { isAutomatedInbox } from "./automated_inbox.ts";
 import { cleanCell, cleanEmail, readsAsInstruction } from "./career_people_import.ts";
 import { neverOpen } from "./career_people_sites.ts";
 import { isRoleAddress, isTeamName } from "./career_contacts.ts";
@@ -328,7 +329,7 @@ export function peopleOnPage(html: string): { people: PagePerson[]; org: string 
         // NETWORKING SCENARIOS (2026-10-29): a role inbox (careers@, recruiting-team@ ...) on a Person is the company's
         // inbox, never that person's address: the person is kept, without it.
         const found = cleanEmail(String(o.email ?? "").replace(/^mailto:/i, ""));
-        const email = found && !isRoleAddress(found) ? found : null;
+        const email = found && !isRoleAddress(found) && !isAutomatedInbox(found) ? found : null;
         // A worksFor that is a dated role (schema.org OrganizationRole / EmployeeRole with an endDate) is a past job; its
         // organization is the one inside it. A company named as their alumniOf is a former employer.
         const roles = (Array.isArray(o.worksFor) ? o.worksFor : [o.worksFor]).filter((x: any) => x && typeof x === "object");

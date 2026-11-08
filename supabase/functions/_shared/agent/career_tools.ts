@@ -1,6 +1,7 @@
 // The career tools (WO-002): thin wrappers over the domain modules that already work, operating on the same per-person
 // career state the CareerHost persists (ctx.state is the host's turn ctx: profile, trackStore, …). Tools return data; the
 // model writes the words. No reply prose lives here.
+import { isAutomatedInbox } from "../automated_inbox.ts";
 import { conversationFor, type RepliesStore } from "../career_outreach_replies.ts";
 import { CareerProfile, CareerTrack, CareerPrep, CareerPaths } from "../router_core.career.js";
 import { AskPerson, type ToolSpec, type ToolCtx } from "./loop.ts";
@@ -841,7 +842,7 @@ export function careerTools(deps: {
         if (!rows.length) return { drafted: 0, needs: "contacts", ask: CONTACTS_ASK };
         if (!o.model) throw new Error("drafting isn't available here right now; nothing was drafted");
         const [dnc, contacted] = await Promise.all([o.store.dnc(c.userId), o.store.contacted(c.userId)]);
-        const held = { no_email: 0, not_verified: 0, already_contacted: 0, do_not_contact: 0 };
+        const held = { no_email: 0, not_verified: 0, not_a_person: 0, already_contacted: 0, do_not_contact: 0 };
         const words = String(i.title ?? "").toLowerCase().split(/\s+/).filter(Boolean);
         const want = Number.isInteger(Number(i.count)) && Number(i.count) >= 1 ? Number(i.count) : Infinity; // NO LIMITS: never capped by Trainee
         const pick: typeof rows = [];
@@ -850,6 +851,7 @@ export function careerTools(deps: {
           if (i.firm && !sameFirm(r.firm, String(i.firm))) continue;
           if (words.length && !words.every((w) => r.title.toLowerCase().includes(w))) continue;
           if (!r.email) { held.no_email++; continue; }
+          if (isAutomatedInbox(r.email)) { held.not_a_person++; continue; } // R9: a no-reply, role or ATS/job-board inbox
           if (!r.verified) { held.not_verified++; continue; }
           if (contacted.has(r.email.toLowerCase())) { held.already_contacted++; continue; }
           if (dnc.has(await emailHash(r.email))) { held.do_not_contact++; continue; }

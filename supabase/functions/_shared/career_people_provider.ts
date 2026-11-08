@@ -18,6 +18,7 @@
 // Trainee sets no volume limit of its own (owner, 2026-10-27 19:55); the only brake is the search service refusing (429,
 // quota), shared through the database so every instance backs off, and said plainly. One company is discovered once for
 // everyone inside the cache window. Docs: docs/architect/PEOPLE-PROVIDER-2026-10-27.md.
+import { isAutomatedInbox } from "./automated_inbox.ts";
 import { chatAsk, cleanCell, cleanEmail, companyKey, isFormula, readsAsInstruction } from "./career_people_import.ts";
 import { neverOpen } from "./career_people_sites.ts";
 import { formerTitle, type PageRead, readPage, type Resolver } from "./career_people_page.ts";
@@ -158,7 +159,7 @@ export function webProvider(o: { search: SearchFn; fetch: typeof fetch; resolve?
           // works there now. Before, they were listed and drafted to as a current employee.
           if (x.former || formerTitle(x.title) || (x.school && companyKey(x.school) === key)) continue;
           let email = cleanEmail(x.email);
-          if (email && isRoleAddress(email)) {
+          if (email && (isRoleAddress(email) || isAutomatedInbox(email))) { // R9: no-reply and ATS/job-board addresses too
             if (x.how === "mailto link") continue; // "Careers Team" <careers@>: an inbox, not a person
             email = null;
           }

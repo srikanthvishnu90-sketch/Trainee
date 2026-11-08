@@ -12,6 +12,7 @@ import { pendingRows, reprepareQueued } from "../_shared/career_hosted_prepare.t
 import { resumeOnFileReader } from "../_shared/career_apply_from_chat.ts";
 import type { FileDeps } from "./handler.ts";
 import { PHONE_STEP_FLOOR_MS, phonePace } from "../_shared/file_session.ts";
+import { supabaseResumeRates } from "../_shared/career_resume_outcomes.ts";
 
 // Supabase's edge runtime keeps a promise handed to EdgeRuntime.waitUntil running after the answer is sent.
 export const edgeBackground = (work: Promise<unknown>) => {
@@ -35,5 +36,7 @@ export function buildFileDeps(admin: any, env: FileDeps["env"], now: () => numbe
     // the queued applications prepared again, and where each one stands.
     questions: supabaseQuestionStore(admin), reprepare: (userId) => reprepareQueued({ admin, userId, env, fetch: globalThis.fetch.bind(globalThis) }),
     resumeOnFile: (userId) => resumeOnFileReader(admin, userId)(),
-    pending: (userId) => pendingRows(admin, userId) };
+    pending: (userId) => pendingRows(admin, userId),
+    // RELEASE 9: the person's own rates by resume version (career_apply_outcomes_by_resume), a read-only section of the page.
+    resumeRates: supabaseResumeRates(admin) };
 }

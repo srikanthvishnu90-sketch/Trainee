@@ -28,6 +28,7 @@ import {
 } from "../career_outreach.ts";
 import { legacyRows, REFERRAL_ASK, referralMap, targetFirms } from "../career_referrals.ts";
 import { CONTACT_QUESTION, contactFromMessage, namedIn, type PersonaStore, type ResumeRenderer, type ResumeStore, restatePersona, savePersona, tailorForPosting, validPersonaName } from "../career_tailor.ts";
+import { recordVersion, type ResumeVersionLog } from "../career_resume_outcomes.ts";
 import { type OfferPending, offerTurn, saidIn } from "../career_offer.ts";
 import { findFirm, pathAnswer } from "../career_path.ts";
 import type { HiredResult, HiredSource } from "../career_hired.ts";
@@ -187,7 +188,16 @@ const trackOf = (c: ToolCtx) => ((c.state.trackStore as any) ??= CareerTrack.cre
 
 // WO-028: tailoring needs the posting by id (career_postings), where personas are kept, the private resume store and
 // the PDF renderer; without them the resume tools say they are not configured here.
-export interface TailorTools { posting: (jobId: string) => Promise<any | null>; personas: PersonaStore; resumes: ResumeStore; render: ResumeRenderer }
+// RELEASE 9: ownDocx reads the person's own Word file (the release-8 clean copy) for "keep my layout"; versions records which
+// file was made from which tailoring (career_resume_outcomes.ts), so an application sent with it is measured by version.
+export interface TailorTools {
+  posting: (jobId: string) => Promise<any | null>; personas: PersonaStore; resumes: ResumeStore; render: ResumeRenderer;
+  ownDocx?: (userId: string) => Promise<Uint8Array | null>; versions?: ResumeVersionLog | null;
+  // 2026-11-08 (review of #596): the files this turn made ride the reply, as the router's tailored files do (agent-chat
+  // materializes them into the person's artifact store, channel_artifacts.ts). Turn-scoped: nothing is kept in state.
+  deliver?: (doc: { format: "pdf" | "docx"; filename: string; mime: string; base64: string; sha256: string | null }) => void;
+}
+const b64 = (bytes: Uint8Array) => { let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); };
 // `postings(query)` returns candidate open postings: in production a full-text search of career_postings
 // (supabasePostingsDb.search), in tests a fixed pool. search_jobs filters and ranks them either way.
 // `mail` (WO-024) reads the person's applications across the apply queue and every thread's tracker, and the status
@@ -701,8 +711,8 @@ export function careerTools(deps: {
     },
     {
       name: "tailor_resume", effect: "write_own",
-      description: "Make a PDF resume for one posting from the person's CONFIRMED facts only (never drafts, never anything new). It passes the truth check and the ATS parse check or refuses with the reason. Send its text as given: plain words, the 7-day private link alone on its own line. Give job_id from search_jobs, or the posting text.",
-      input_schema: obj({ job_id: str("The posting's job_id from search_jobs"), posting_text: str("The posting's full text, if there is no job_id"), persona: str("A saved persona name, e.g. 'banking'; leave out to use the active one") }),
+      description: "A PDF resume for one posting from CONFIRMED facts only (never drafts or anything new); it passes the truth and ATS checks or refuses with the reason. Send gaps.summary and preview first, then its text as given, the 7-day private link alone on its own line; the files in attached ride your reply. Give job_id from search_jobs, or the posting text. layout: only when asked.",
+      input_schema: obj({ job_id: str("The posting's job_id from search_jobs"), posting_text: str("The posting's full text, if there is no job_id"), persona: str("A saved persona name, e.g. 'banking'; leave out to use the active one"), layout: { type: "string", enum: ["trainee", "own"], description: "Only when asked: 'trainee' (Trainee's design) or 'own' (keep their Word file's layout)" } }),
       run: async (i, c) => {
         const t = tailorOf();
         let text = "", job_id: string | null = null, company: string | null = null;
@@ -716,7 +726,10 @@ export function careerTools(deps: {
         const name = i.persona ? validPersonaName(i.persona) : st.active;
         const persona = name ? st.items.find((p) => p.name === name) ?? null : null;
         if (i.persona && !persona) throw new Error(`no persona named ${String(i.persona)}; saved: ${st.items.map((p) => p.name).join(", ") || "none"}`);
-        const r = await tailorForPosting({ userId: c.userId, profile: profileOf(c), posting: { text, job_id, company }, persona, deps: { render: t.render, resumes: t.resumes }, now: c.now });
+        const layout = i.layout === "trainee" || i.layout === "own" ? i.layout : null;
+        const ownDocx = layout === "own" ? await t.ownDocx?.(c.userId).catch(() => null) ?? null : null;
+        const r = await tailorForPosting({ userId: c.userId, profile: profileOf(c), posting: { text, job_id, company }, persona, deps: { render: t.render, resumes: t.resumes }, now: c.now, layout, ownDocx });
+        if (r.ok && t.versions) await recordVersion(t.versions, { userId: c.userId, out: r, now: c.now });
         // WO-079: facts waiting for the person's yes are named, with the one question to ask (battery T09 ran out of steps
         // trying other tools); with none, ask what to build from. A confirmation can only come from their next message.
         if (!r.ok && r.refused === "no_confirmed_facts") {
@@ -727,7 +740,13 @@ export function careerTools(deps: {
             : `not made: there are no confirmed experience, project or education facts on file. Ask them for their work experience and education in their own words; nothing is invented. Do not call another tool this turn. Nothing was stored or sent.`);
         }
         if (!r.ok) throw new Error(`not made: ${r.reason}. ${r.refused === "link" ? "The file stays private; no link was given." : "Nothing was stored or sent."}`);
-        const { detail: _detail, ...out } = r;
+        const { detail, ...out } = r;
+        // The PDF (and, with a layout, its Word copy) are attached to this reply; the private link stays as well.
+        if (t.deliver) {
+          t.deliver({ format: "pdf", filename: r.filename, mime: "application/pdf", base64: b64(detail.pdf), sha256: r.sha256 });
+          if (detail.docx) t.deliver({ format: "docx", filename: r.filename.replace(/\.pdf$/i, "") + ".docx", mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: b64(detail.docx), sha256: null });
+          return { ...out, attached: [r.filename, ...(detail.docx ? [r.filename.replace(/\.pdf$/i, "") + ".docx"] : [])] };
+        }
         return out;
       },
     },

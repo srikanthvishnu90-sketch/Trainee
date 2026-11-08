@@ -676,6 +676,16 @@ const CareerTailor = (() => {
     if (s && e && s !== e) return `${s}–${e}`;
     return s || e || null;
   }
+  // The top of the resume: the name and email typed for it (basics) when there is one; otherwise the header of the resume
+  // the person confirmed (RELEASE 9, 142 confirmResumeHeader: shown word for word with the entries and bound to the same
+  // yes), printed exactly as they wrote it. from: "resume" marks it (the router still names the files for the posting).
+  function headerOf(profile) {
+    const b = profile.basics, rh = profile.resume_header, typed = b.name; // unreadable basics fail here, as they always did
+    if (!typed && rh && typeof rh === "object" && rh.name) {
+      return { name: rh.name, email: rh.email || null, location: rh.location || null, links: rh.links || {}, contactLine: rh.contactLine || null, linksLine: rh.linksLine || null, from: "resume" };
+    }
+    return { name: b.name, email: b.email, location: b.location, links: b.links || {} };
+  }
   function entryTextFor(fact) {
     const title = (fact && fact.title) || "";
     const range = dateRangeFor(fact);
@@ -824,7 +834,7 @@ const CareerTailor = (() => {
     }
     for (let i = sections.length - 1; i >= 0; i--) if (!sections[i].lines.length) sections.splice(i, 1);
     const lines = sections.flatMap((s) => s.lines.map((l) => ({ ...l, section: s.heading })));
-    return { family, familyLabel: fam.label, conventions: fam.conventions, pageLimit: fam.pageLimit, header: { name: profile.basics.name, email: profile.basics.email, location: profile.basics.location, links: profile.basics.links || {} }, sections, lines, deduped, selectedFactIds: selected.map((x) => x.fact.id) };
+    return { family, familyLabel: fam.label, conventions: fam.conventions, pageLimit: fam.pageLimit, header: headerOf(profile), sections, lines, deduped, selectedFactIds: selected.map((x) => x.fact.id) };
   }
 
   // ---- TRUTH AUDIT — hard gate (APPE-002) ----

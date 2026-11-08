@@ -60243,7 +60243,12 @@ const CareerBatchApply = (() => {
     if (run.status !== "approved") {
       return { ok: false, code: "RUN_NOT_APPROVED", reason: "execution requires an approved batch" };
     }
-    for (const key of run.selected) {
+    // R9 (2026-11-07): a paced drive (workers/career-browser/apply-scheduler.cjs through batch-executor.cjs) sends the
+    // approved applications one at a time: `only` names the keys this call drives, and the run stays approved until a
+    // call says `final`. Without `only`, every selected key is driven and the run finishes, as before.
+    const paced = Array.isArray(d.only);
+    const keys = paced ? run.selected.filter((k) => d.only.includes(k)) : run.selected;
+    for (const key of keys) {
       const app = run.apps[key];
       const approvedSha = run.approvals[key];
       if (!app || !approvedSha) continue;
@@ -60284,6 +60289,7 @@ const CareerBatchApply = (() => {
         stopApp(run, app, "EXECUTION_ERROR", `the drive threw: ${err && err.message ? err.message.slice(0, 160) : "unknown error"}`);
       }
     }
+    if (paced && !d.final) return { ok: true, driven: keys.length };
     const anyStopped = run.selected.some((k) => ["stopped", "captcha_handoff", "deferred_refusal"].includes(run.apps[k].stage));
     run.status = anyStopped ? "completed_with_stops" : "completed";
     run.summary = summarizeRun(run);

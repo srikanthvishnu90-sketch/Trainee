@@ -9,7 +9,7 @@ import assertNode from "node:assert/strict";
 import { messageOf, type OutreachDraft, payloadHash } from "../../supabase/functions/_shared/career_outreach.ts";
 import { runSendWorker } from "../../supabase/functions/_shared/career_send_rail.ts";
 import { checkContactDraft, type ContactIn, contactDraftPayload, draftContactEmail } from "../../supabase/functions/_shared/career_contact_draft.ts";
-import { approveContactCard, contactCard, dayIn, memorySendLimits, sendConfig } from "../../supabase/functions/_shared/career_contact_send.ts";
+import { approveContactCard, cardHash, contactCard, dayIn, memorySendLimits, sendConfig } from "../../supabase/functions/_shared/career_contact_send.ts";
 import { contactPageHtml } from "../../supabase/functions/_shared/career_contact_page.ts";
 import { CI, FakeGmail, haveDb, person, railDb, railDeps, rows, uid } from "../flow/send-rail-fixture.ts";
 import { serviceRpc } from "../flow/pgwire.ts";
@@ -119,7 +119,18 @@ Deno.test("contact card: 50 is unconfirmed, suppression, postal address, test mo
   eq(card.to, "jane.doe@acme.io");
   ok(card.mails[0].text.includes(POSTAL) && /reply stop/.test(card.mails[0].text), "postal address and opt-out line on every email");
   eq(card.mails.map((m) => m.after_days), [0, 5, 10], "two follow-ups, 5 days apart");
-  eq(card.hash, await payloadHash(messageOf({ recipient: { email: card.to } as any, subject: card.mails[0].subject, body: card.mails[0].body, footer: card.mails[0].footer })), "the hash is the exact payload's");
+  for (const m of card.mails) eq(m.hash, await payloadHash(messageOf({ recipient: { email: card.to } as any, subject: m.subject, body: m.body, footer: m.footer })), "each mail's hash is its exact payload's");
+  eq(card.hash, await cardHash(card.mails), "the card's hash covers the first email and both follow-ups");
+  const FUS = ["Hi Jane, following up on my note below in case it got buried.", "Hi Jane, one last note: thanks either way."];
+  for (const i of [0, 1]) {
+    const changed = await contactCard({ contact: c, draft: d.draft, signature: "Sam Lee", followups: FUS.map((f, j) => (j === i ? `${f} Thanks.` : f)), config: on, suppressed: noneSuppressed });
+    ok(changed.ok && changed.hash !== card.hash, `changing follow-up ${i + 1} changes the card's hash`);
+    if (!changed.ok) return;
+    let stored = 0;
+    const r = await approveContactCard({ userId: "u-card", card: changed, yesHash: card.hash, contact: c, now: NOW, config: on, limits: memorySendLimits(), suppressed: noneSuppressed,
+      rail: {} as any, store: { saveBatch: async () => { stored++; return []; }, update: async () => true } as any });
+    eq([r.ok, !r.ok && r.why, stored], [false, "changed", 0], `a yes on the old hash approves nothing once follow-up ${i + 1} changed`);
+  }
   const test = await contactCard({ contact: c, draft: d.draft, signature: "Sam Lee", config: sendConfig(env({ CAREER_SENDER_POSTAL_ADDRESS: POSTAL, CAREER_CONTACT_TEST_RECIPIENTS: "owner@trainee.dev" }), true), suppressed: noneSuppressed });
   ok(test.ok && test.to === "owner@trainee.dev" && test.found === "jane.doe@acme.io" && test.test_mode, "test mode: addressed to the owner's allowlisted address");
   const html = contactPageHtml({ contact: c, draft: d.draft, card, firstName: "Sam", now: NOW, tz: "America/Chicago", expiresAt: c.expires_at });

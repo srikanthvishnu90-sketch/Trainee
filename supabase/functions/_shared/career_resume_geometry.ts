@@ -119,6 +119,25 @@ export async function readPdfGeometry(bytes: Uint8Array): Promise<PdfGeometry> {
   await doc.destroy();
   return { kind: "pdf", pages, items, lines: linesOf(items), rules, images, fonts: [...fonts].map(([name, embedded]) => ({ name, embedded })), streamText: items.map((i) => i.str) };
 }
+// RELEASE 10 (architect ruling 2026-11-08): the edge's startup probe. pdf.js is the first npm module the edge loads; if it
+// does not load or cannot read a page there, the rater is skipped (tailoring falls back to the default file, career_tools.ts)
+// and this logs it once per instance, so a staging check sees it. A one-page PDF of one standard-font word is read back.
+const PROBE_PDF = "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj 3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 100]/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>endobj 4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj 5 0 obj<</Length 36>>stream\nBT /F1 12 Tf 10 50 Td (probe) Tj ET\nendstream endobj\ntrailer<</Root 1 0 R>>\n%%EOF";
+export interface PdfjsProbe { evt: "pdfjs_probe"; ok: boolean; ms: number; error: string | null }
+export async function probePdfjs(o: { read?: (b: Uint8Array) => Promise<PdfGeometry>; log?: (line: string) => void; now?: () => number } = {}): Promise<PdfjsProbe> {
+  const now = o.now ?? (() => performance.now()), t0 = now();
+  let out: PdfjsProbe;
+  try {
+    const g = await (o.read ?? readPdfGeometry)(new TextEncoder().encode(PROBE_PDF));
+    const ok = g.items.some((i) => i.str === "probe");
+    out = { evt: "pdfjs_probe", ok, ms: Math.round(now() - t0), error: ok ? null : "pdf.js loaded but did not read the probe page's text" };
+  } catch (e) {
+    out = { evt: "pdfjs_probe", ok: false, ms: Math.round(now() - t0), error: String((e as Error)?.message ?? e).slice(0, 300) };
+  }
+  if (!out.ok) (o.log ?? console.error)(JSON.stringify(out));
+  return out;
+}
+
 // Items on one baseline (within 1 pt) of one page are one line, left to right; lines top to bottom.
 export function linesOf(items: PdfItem[]): PdfLine[] {
   const sorted = [...items].sort((a, b) => a.page - b.page || b.y - a.y || a.x - b.x);

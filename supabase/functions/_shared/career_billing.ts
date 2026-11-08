@@ -244,8 +244,9 @@ const UNSURE = /^(?:maybe|later|wait|hold on|hang on|not now|not yet|not sure|i'
 export function cancelAnswer(message: string): "yes" | "no" | "unsure" | null {
   const raw = String(message ?? "").trim();
   if (raw.includes("?")) return "unsure";
-  // A thumbs-up alone, or "yess"/"yse" alone, is "yes" (approval_words.ts).
-  const t = plain(approvalWords(raw)).replace(/[,.!]+$/, "");
+  // A thumbs-up alone, or "yess"/"yse" alone, is "yes" (approval_words.ts). English only: D-044 covers the card or batch
+  // shown; cancelling a paid plan in another language waits on the owner (billing r2 lang_cancel).
+  const t = plain(approvalWords(raw, { languages: "en" })).replace(/[,.!]+$/, "");
   if (YES.test(t)) return "yes";
   if (NO.test(t)) return "no";
   if (UNSURE.test(t)) return "unsure";

@@ -11,7 +11,7 @@
 // (career_apply_card_push_requested_for), which the delivery run sends to their channel within its minute.
 //
 // Nothing here approves, queues or sends an application: the card does, on the person's own tap of its exact contents.
-import { batchFor, cardFor } from "./career_apply_cards.ts";
+import { batchFor, CARD_HARD_LIMIT, cardFor } from "./career_apply_cards.ts";
 import { type OpenQuestion, questionsText } from "./career_apply_questions.ts";
 import { type Rpc, type SandboxHost, withRetry } from "./cloud_runner.ts";
 import { preparedCardProblem } from "./career_prepared_card.ts";
@@ -234,8 +234,17 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
           // person is told the batch is ready, exactly as before; nothing is half-shown.
           const paged = pages.length ? await d.rpc("career_apply_card_push_paged_for", { p_user: user, p_request: id, p_ids: (b as any).take.map((p: any) => p.id),
             p_pages: pages, p_now: new Date(now).toISOString() }).catch((e: unknown) => { console.error("paged card:", (e as Error)?.message ?? e); return undefined; }) : undefined;
+          // fix/r9-apply-completion: the whole batch on ONE page (more than one pushed card's 1,600 characters, at most a
+          // page's 3,800, under a text's 4,000) is pushed as that one card, every application on it: before, it was neither a
+          // one-text card nor two pages, so the person was told to ask for it and their yes approved nothing (e2e F-AP-096:
+          // 8 links, all prepared, never shown). The same push and the same one hash over exactly what the card shows.
+          const onePage = !pages.length && b && !("tooLong" in b) && b.take.length === all.length && !b.skipped.length && b.text.length <= CARD_HARD_LIMIT
+            ? await d.rpc("career_apply_card_push_requested_for", { p_user: user, p_request: id, p_ids: b.take.map((p) => p.id), p_text: b.text,
+              p_now: new Date(now).toISOString() }).catch((e: unknown) => { console.error("one-page card:", (e as Error)?.message ?? e); return undefined; })
+            : undefined;
           if (typeof paged === "string" && /^[0-9a-f-]{36}$/i.test(paged)) { card = paged; push = "shown_paged"; }
-          else if (paged === null) push = "held";
+          else if (typeof onePage === "string" && onePage) { card = onePage; push = "shown"; }
+          else if (paged === null || onePage === null) push = "held";
           else {
             const told = !!await d.rpc("career_apply_prepare_request_notice", { p_id: id, p_lease: lease,
               p_text: `All ${fits} applications are ready. Say "show my applications" to see every one on one card and approve them with one tap. Nothing was sent.` });

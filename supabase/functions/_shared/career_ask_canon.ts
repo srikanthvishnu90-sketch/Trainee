@@ -60,7 +60,7 @@ function slips2(a: string, b: string): boolean {
   for (let k = 0; k < a.length; k++) if (slip(a.slice(0, k) + a.slice(k + 1), b) || slip(a, b.slice(0, k) + b.slice(k + 1))) return true;
   return false;
 }
-const VERBS = ["apply", "find", "search", "submit", "application", "please", "want"];
+const VERBS = ["apply", "find", "search", "submit", "application", "please", "want", "tailor", "resume"];
 const ROLE_NOUNS = ["role", "roles", "job", "jobs", "position", "positions", "opening", "openings", "internship", "internships"];
 const TITLE_WORDS = ["analyst", "analysts", "analytics", "engineer", "engineers", "engineering", "software", "data", "science", "scientist", "financial",
   "finance", "frontend", "backend", "developer", "designer", "design", "intern", "interns", "internship", "manager", "product", "marketing", "sales",
@@ -83,8 +83,17 @@ const fixWords = (s: string, vocab: readonly string[]) => s.replace(/\b[a-z]+\b/
 const single = (role: string, company: string) => `apply to the ${role.replace(/\s+(?:role|job|position|opening|posting)$/i, "").trim()} role at ${company.trim()}`;
 const PAIR_SEP = /\s+(?:and|y|aur)\s+(?:the\s+|a\s+|al\s+)?/;
 
+// "Tailor my resume for the X role at Y and apply with it": the one shape the tailor-then-apply turn reads
+// (career_compound_ask.ts tailorAndApplyOf).
+const tailorThenApply = (role: string, company: string) => `tailor my resume for the ${role.replace(/\s+(?:role|job|position|opening|posting)$/i, "").trim()} role at ${company.trim()} and apply with it`;
+
 // The English shapes, once filler and typos are gone.
 function english(t: string): string | null {
+  // "tailor and apply: X at Y" / "tailor my resume for the X role at Y and apply with it"
+  let tm = t.match(new RegExp(`^tailor\\s+and\\s+apply(?:\\s+(?:to|for))?:?\\s+(?:the\\s+)?(${PROPER})(?:\\s+(?:role|job|position|opening))?\\s+at\\s+(${PROPER})$`));
+  if (tm) return tailorThenApply(tm[1], tm[2]);
+  tm = t.match(new RegExp(`^tailor\\s+(?:my\\s+)?(?:resume|cv)\\s+(?:for|to)\\s+(?:the\\s+)?(${PROPER})\\s+(?:role|job|position|opening|internship)\\s+at\\s+(${PROPER}),?\\s+and\\s+(?:then\\s+)?apply(?:\\s+(?:with|using)\\s+it)?$`));
+  if (tm) return tailorThenApply(tm[1], tm[2]);
   // "go for the first one, apply" / "apply to the top one" / "the first one, apply"
   let m = t.match(/^(?:go\s+for\s+|take\s+)?the\s+(first|top|1st)\s+one,?\s+(?:and\s+)?apply(?:\s+(?:to|for)\s+(?:it|that))?$/i);
   if (m) return `apply to the ${m[1].toLowerCase() === "top" ? "top" : "first"} one`;
@@ -103,6 +112,9 @@ function english(t: string): string | null {
 }
 
 function spanish(t: string): string | null {
+  // "adapta mi currículum para X en Y y aplica con él"
+  const tm = t.match(new RegExp(`^(?:adapta|ajusta|personaliza)(?:r)?\\s+mi\\s+(?:curr[ií]culum|cv|hoja\\s+de\\s+vida)\\s+(?:para|al\\s+puesto\\s+de)\\s+(${PROPER})\\s+en\\s+(${PROPER})\\s+y\\s+(?:aplica|postula)(?:\\s+con\\s+[eé]l)?$`, "u"));
+  if (tm) return tailorThenApply(tm[1], tm[2]);
   const verb = "(?:aplica(?:me)?|apl[ií]came|aplicar|quiero aplicar|quisiera aplicar|postula(?:me)?|post[uú]lame|quiero postularme)";
   // "aplica a estos 5 por favor: <links>"
   if (URL_IN.test(t) && new RegExp(`^${verb}\\b`, "i").test(t)) {
@@ -128,6 +140,9 @@ function spanish(t: string): string | null {
 }
 
 function hindi(t: string): string | null {
+  // "Y ke X ke liye resume tailor karo aur apply kar do"
+  const tm = t.match(new RegExp(`^(${PROPER})\\s+(?:ke|ki|ka)\\s+(${PROPER})(?:\\s+(?:role|job))?\\s+ke\\s+liye\\s+(?:mera\\s+)?resume\\s+tailor\\s+(?:karo|kar\\s+do|kardo)\\s+aur\\s+apply\\s+(?:kar\\s+do|karo|kardo)$`));
+  if (tm) return tailorThenApply(tm[2], tm[1]);
   const act = "apply\\s+(?:kar\\s*(?:do|o|dijiye|dena|na\\s+hai|ni\\s+hai)|karna\\s+hai|karo|kardo)";
   // "in sab ke liye apply kar do: <links>"
   if (URL_IN.test(t) && new RegExp(`\\b${act}\\b`, "i").test(t.slice(0, Math.max(0, t.search(URL_IN))))) {

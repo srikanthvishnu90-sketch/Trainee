@@ -157,3 +157,52 @@ Deno.test("F: one application's own unhashable payload is not sent and never cou
   assertEquals(settle({ state: "not_submitted", reason: "FORM_DID_NOT_SETTLE" }).outcome, "error");
   assertEquals(settle({ state: "needs_user", reason: "captcha" }).outcome, "bot_check");
 });
+
+Deno.test("G: tailor then apply, as people text it, reads as the tailor-then-apply turn's own shape", async () => {
+  const { tailorAndApplyOf } = await import("../../supabase/functions/_shared/career_compound_ask.ts");
+  const cases: [string, string, string][] = [
+    ["tailor and apply: Data Analyst at Vantage Freight", "Data Analyst", "Vantage Freight"],
+    ["taillor and apply: Machine Learning Engineer, New Grad at Ironleaf Analytics thx", "Machine Learning Engineer, New Grad", "Ironleaf Analytics"],
+    ["tailor my rseume for the Frontend Engineer roel at Granite Insurance and apply with it", "Frontend Engineer", "Granite Insurance"],
+    ["ngl tailor my resume 4 the Software Engineer, New Grad role at Northgate Bio and apply with it lmk", "Software Engineer, New Grad", "Northgate Bio"],
+    ["adapta mi currículum para FP&A Analyst en Hollow Oak Bank y aplica con él", "FP&A Analyst", "Hollow Oak Bank"],
+    ["Upland Health ke Financial Analyst ke liye resume tailor karo aur apply kar do", "Financial Analyst", "Upland Health"],
+  ];
+  for (const [m, role, company] of cases) {
+    const t = tailorAndApplyOf(careerAskCanon(m) ?? m);
+    assertEquals(t && [t.role, t.company], [role, company], m);
+  }
+  // Tailoring alone is not an application.
+  assertEquals(careerAskCanon("tailor my resume for the Data Analyst role at Acme"), null);
+  assertEquals(careerAskCanon("tailr my resume for the Data Analyst role at Acme pls"), null);
+});
+
+Deno.test("H: a batch on ONE page (past one card's 1,600 characters, under a page) is pushed as one card of every application (e2e F-AP-096)", async () => {
+  const { handlePrepareBridge, prepareToken } = await import("../../supabase/functions/_shared/cloud_prepare.ts");
+  const { batchFor, cardFor } = await import("../../supabase/functions/_shared/career_apply_cards.ts");
+  const SECRET = "TEST-r9-one-page-runner-secret-0123456789abcd", U = "7b0f8f8e-6a43-4a49-9d2c-0000000003a1";
+  const RID = "aaaaaaaa-bbbb-4ccc-8ddd-0000000003f1", LEASE = "11111111-2222-4333-8444-0000000003f1";
+  const prepared = (n: number) => ({ id: `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`, company: `Employer ${n}`,
+    card_lines: [`Employer ${n}`, `First Name: Alex`, `Last Name: Testcase`, `Email: alex.testcase@example.test`, `Phone: 312-555-0142`,
+      `Are you legally authorized to work in the United States?: Yes`, `Resume: Alex_Resume.pdf (${"a".repeat(12)})`, `Sends to https://boards.greenhouse.io/employer${n}/jobs/${n}`], resume_sha256: "a".repeat(64) });
+  const ready = Array.from({ length: 8 }, (_, i) => prepared(i + 1));
+  const c = cardFor(ready), b = batchFor(ready);
+  assert(c && "take" in c && c.take.length < 8, "one card text does not hold all eight");
+  assert(b && !("tooLong" in b) && b.parts.length === 0 && b.take.length === 8, "the batch is one page: no paged card");
+  const calls: { name: string; args: any }[] = [];
+  const row = { id: RID, user_id: U, job_ids: ready.map((_, i) => `greenhouse:e${i + 1}:${i + 1}`), lease_token: LEASE, state: "running", claimed_at: new Date().toISOString() };
+  const deps = { secret: SECRET, readRequest: async () => row, rpc: async (name: string, args: any) => {
+    calls.push({ name, args });
+    if (name === "career_apply_prepare_request_ready") return ready;
+    if (name === "career_apply_questions_open_as" || name === "career_apply_prepare_candidates_for") return [];
+    if (name === "career_apply_card_push_requested_for") return "c0000000-0000-4000-8000-000000000003";
+    return { state: "done" };
+  } };
+  const r = await handlePrepareBridge("finish", { id: RID, sandbox: "sbx_1", token: await prepareToken(SECRET, RID, LEASE, "sbx_1"), outcomes: [] }, deps as any);
+  assertEquals((r.body as any).push, "shown");
+  const push = calls.find((x) => x.name === "career_apply_card_push_requested_for")!;
+  assertEquals(push.args.p_ids, ready.map((p) => p.id), "every application on the one card");
+  assert(push.args.p_text.length <= 4000, "one text");
+  for (const p of ready) for (const l of p.card_lines) assert(push.args.p_text.includes(l), l);
+  assert(!calls.some((x) => x.name === "career_apply_prepare_request_notice"), "no 'say show my applications' instead of the card");
+});

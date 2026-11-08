@@ -17,7 +17,7 @@
 //   roundtrip     10 hard  two independent extractions give the same words in the same order, and the text is real text
 // KEEP rule: score >= KEEP_MIN and no hard failure: keep their format and change only the content.
 // deno-lint-ignore-file no-explicit-any
-import { DATE_RANGE, type DocxGeometry, PDFJS, type DocxPara, isGlyph, type PdfGeometry, type PdfLine, readDocxGeometry, readPdfGeometry, wordsOf } from "./career_resume_geometry.ts";
+import { DATE_RANGE, type DocxGeometry, type DocxPara, isGlyph, type PdfGeometry, type PdfLine, readDocxGeometry, readPdfGeometry, wordsOf } from "./career_resume_geometry.ts";
 import { CareerRender } from "./router_core.career.js";
 import { type LibraryId, type Level, type RoleFamily, TEMPLATES, type TemplateSpec } from "./career_resume_templates.ts";
 
@@ -143,7 +143,7 @@ export async function ratePdf(bytes: Uint8Array, o: { R?: any; cv?: boolean } = 
   return total("pdf", F, pages, measured);
 }
 async function textLayer(bytes: Uint8Array): Promise<string[]> {
-  const pdfjs: any = await import(PDFJS);
+  const pdfjs: any = await import("npm:pdfjs-dist@4.10.38/legacy/build/pdf.mjs"); // the same pin as career_resume_geometry.ts PDFJS
   const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), disableFontFace: true, isEvalSupported: false, verbosity: 0 }).promise;
   const out: string[] = [];
   for (let p = 1; p <= doc.numPages; p++) { const page = await doc.getPage(p); for (const it of (await page.getTextContent()).items as any[]) if (typeof it.str === "string") out.push(it.str); }

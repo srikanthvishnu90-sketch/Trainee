@@ -1,6 +1,6 @@
 // CONTACT OUTREACH (proposal D-043): a contact's work address, found in evidence order and checked without sending.
 //   1. published   an address on a first-party page for this person (the company's own pages, their own site), or the
-//                  email on their public GitHub profile when it is on the company's own domain;
+//                  email on their public GitHub profile; either only when it is on the company's own domain;
 //   2. pattern     the domain's format learned from 2+ addresses the domain itself publishes;
 //   3. finder      a free-tier finder (Hunter or Snov) only with the person's OWN key (default off; Trainee holds none);
 //   4. fallback    a size-based pattern guess.
@@ -114,16 +114,27 @@ export async function findEmail(i: FindIn): Promise<EmailEvidence> {
     return { email, method, score: s, approvable: s >= SEND_MIN_SCORE && c.mx === "pass", why, syntax, mx: c.mx, provider: c.provider, catch_all: null, rcpt: "not_probed",
       source_url: null, format: null, format_evidence: 0, checked_at: at, ...extra };
   };
-  const pub = (i.published ?? []).find((p) => SYNTAX.test(p.email.toLowerCase()));
-  if (pub) return await out(pub.email.toLowerCase(), "first_party_published", { source_url: pub.source_url });
+  // A published address names the recipient only on the company's own domain, as a GitHub email does: a team card or a
+  // schema.org Person on acme.io can list jane.doe@gmail.com, and that is no evidence of her work address.
+  const published = (i.published ?? []).map((p) => ({ ...p, email: p.email.trim().toLowerCase() })).filter((p) => SYNTAX.test(p.email));
+  const pub = published.find((p) => emailOn(p.email, domain));
+  if (pub) return await out(pub.email, "first_party_published", { source_url: pub.source_url });
+  const offDomain = published[0] ?? null; // published, but not on the company's domain: refused
+  const refusedPub = offDomain ? `; the published address is not on ${domain}, so it was not used` : "";
   // A GitHub email names the recipient only on the company's own domain: anyone can publish a profile with the person's
   // name and the company in its company field, and put their own address on it.
   const ghEmail = i.github ? i.github.email.trim().toLowerCase() : "";
   if (ghEmail && SYNTAX.test(ghEmail) && emailOn(ghEmail, domain)) return await out(ghEmail, "github_public", { source_url: i.github!.source_url });
   // Refused: whatever is found instead says so (why), so the person sees the GitHub address was not trusted, and why.
   const refusedGh = ghEmail ? `; the GitHub profile's address is not on ${domain}, so it was not used` : "";
-  const rest = await fromPatterns();
-  return refusedGh ? { ...rest, why: `${rest.why}${refusedGh}`.slice(0, 300) } : rest;
+  const rest = await fromPatterns(), refused = `${refusedPub}${refusedGh}`;
+  // Nothing approvable instead of a refused published address: the evidence is that address, refused (method null,
+  // score 0, never approvable, its own domain's mail checks), so the person sees what was found and why it is not used.
+  if (offDomain && !rest.approvable) {
+    const r = await out(offDomain.email, null, { source_url: offDomain.source_url });
+    return { ...r, score: 0, approvable: false, why: `published on ${(() => { try { return new URL(offDomain.source_url).hostname; } catch { return "a page"; } })()} but not on ${domain}, so it is not used as their work address${refusedGh}`.slice(0, 300) };
+  }
+  return refused ? { ...rest, why: `${rest.why}${refused}`.slice(0, 300) } : rest;
   async function fromPatterns(): Promise<EmailEvidence> {
     const n = nameParts(i.name);
     if (!n) return await out(null, null);

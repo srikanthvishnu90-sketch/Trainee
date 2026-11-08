@@ -89,7 +89,7 @@ export const mailHash = (m: Mail) => payloadHash({ to: m.to, subject: m.subject,
 // An application email goes to the employer's own apply address (apply_email.ts picks it; careers@ is one), so for it
 // only a no-reply sender is refused here.
 // `employer`: the recipient's company as stored on the draft (an outreach draft's recipient.firm), so a person who works
-// at LinkedIn or Workday can be written to at linkedin.com or workday.com; with none stored, an ATS or job-board domain
+// at a job board or an ATS company can be written to at their own employer's domain; with none stored, such a domain
 // is refused (fail closed).
 export function notAPerson(kind: Kind | string, to: string, employer?: string | null): string | null {
   const why = automatedInbox(to, employer);

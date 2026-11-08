@@ -2,6 +2,7 @@
 // career state the CareerHost persists (ctx.state is the host's turn ctx: profile, trackStore, …). Tools return data; the
 // model writes the words. No reply prose lives here.
 import { isAutomatedInbox } from "../automated_inbox.ts";
+import { nameKey } from "../career_networking.ts";
 import { conversationFor, type RepliesStore } from "../career_outreach_replies.ts";
 import { CareerProfile, CareerTrack, CareerPrep, CareerPaths } from "../router_core.career.js";
 import { AskPerson, type ToolSpec, type ToolCtx } from "./loop.ts";
@@ -21,7 +22,7 @@ import { extractInvite, INTERVIEWER_NOTE, interviewRow, inviteBrief, isInvite, s
 import { sameCompany } from "../career_mail.ts";
 import type { DigestStore, InterviewStore } from "../career_brief_store.ts";
 import { DAY_NAMES, DEFAULT_DIGEST, validDigest } from "../career_digest.ts";
-import { contactsOf, hunterPass, knownFirm, LIST_TARGET_USD, listCost, listReport, sameFirm, type Verifier, vendorSource } from "../career_contacts.ts";
+import { type ContactRow, contactsOf, firmKey, hunterPass, knownFirm, LIST_TARGET_USD, listCost, listReport, sameFirm, type Verifier, vendorSource } from "../career_contacts.ts";
 import {
   batchMessages, batchText, blockedAddresses, confirmed, draftFor, draftLangOf, emailHash, footerOf, messageOf, type ModelFn, OUTREACH_INTENT, type OutreachDraft,
   type OutreachStore, payloadHash, recordOutreach, SIGNATURE_ASK, guardRecipient,
@@ -164,6 +165,22 @@ const FIT_CACHES = new WeakMap<object, FitCache>();
 const fitCacheOf = (c: ToolCtx): FitCache => { let f = FIT_CACHES.get(c); if (!f) FIT_CACHES.set(c, f = newFitCache()); return f; };
 const profileOf = (c: ToolCtx) => ((c.state.profile as any) ??= CareerProfile.createProfile({}));
 const CONTACTS_ASK = "Send me a CSV of the people you want to reach (your LinkedIn connections export, or a list you have) and I'll check every address in it.";
+// R9 OUTREACH: the contacts a draft may be written from: the chat's own rows (a chat that held a list before R1) and the
+// account's (career_account_contacts), read by the firm or the name asked for, never the whole list on a turn.
+async function accountContacts(store: OutreachStore, c: ToolCtx, i: { firm?: unknown; name?: unknown }): Promise<ContactRow[]> {
+  const out = [...contactsOf(c.state)];
+  const firm = String(i.firm ?? "").trim(), name = plainName(i.name);
+  const more = firm && store.contactsAtFirm ? await store.contactsAtFirm(c.userId, firmKey(firm)).catch(() => [])
+    : name && store.contactsNamed ? await store.contactsNamed(c.userId, name).catch(() => []) : [];
+  const seen = new Set(out.map((r) => `${r.file}#${r.row}#${(r.email ?? "").toLowerCase()}`));
+  for (const r of more) { const k = `${r.file}#${r.row}#${(r.email ?? "").toLowerCase()}`; if (!seen.has(k)) { seen.add(k); out.push(r); } }
+  return out;
+}
+// The drafts saved in this turn, by the turn (one batch a turn).
+const TURN_DRAFTS = new WeakMap<object, OutreachDraft[]>();
+const plainName = (v: unknown) => nameKey(String(v ?? "").trim());
+// "Maya" names "Maya Chen"; "Maya Chen" names "Maya Chen" (and "Maya Chen-Li"), never "Mayan Chen".
+const namedAs = (rowName: unknown, k: string) => { const n = nameKey(rowName); return !!k && (n === k || n.startsWith(`${k} `)); };
 const trackOf = (c: ToolCtx) => ((c.state.trackStore as any) ??= CareerTrack.createMemoryStore([]));
 
 // WO-028: tailoring needs the posting by id (career_postings), where personas are kept, the private resume store and
@@ -831,25 +848,30 @@ export function careerTools(deps: {
     {
       name: "draft_outreach", effect: "write_own",
       description: "Draft cold emails, one per person, as many as the person asks for (all who fit when they give no number), from contacts the person sent (only addresses that passed every check run; never anyone already emailed or on their do-not-contact list). Each uses only their confirmed facts, that person's row and what both share. Code shows the batch in full; nothing is sent until they approve.",
-      input_schema: obj({ firm: str("Only people at this firm, if they said one"), title: str("Only people whose title has these words, e.g. 'analyst'"), count: { type: "number", description: "How many, if they said a number; no limit of Trainee's own" } }),
+      input_schema: obj({ firm: str("Only people at this firm, if they said one"), name: str("Only this person, by the name the person used (a first name is enough), if they named someone"), title: str("Only people whose title has these words, e.g. 'analyst'"), count: { type: "number", description: "How many, if they said a number; no limit of Trainee's own" } }),
       run: async (i, c) => {
         const o = outreachOf();
         const prefs = await o.store.prefs(c.userId);
         if (!prefs.signature) return { drafted: 0, needs: "signature", ask: SIGNATURE_ASK };
         const facts = confirmed(profileOf(c).facts || []);
         if (!facts.length) return { drafted: 0, needs: "facts", note: "No confirmed facts to write from: ask about their school, experience and goal, and confirm them first." };
-        const rows = contactsOf(c.state);
+        // R9 OUTREACH: contacts are the ACCOUNT's (architect ruling R1, career_account_contacts), read by indexed queries;
+        // the chat's own list is only what a chat held before. This tool read the chat's list alone, so a person who sent
+        // their contacts was told they had none whenever the ask reached the brain (64 of 250 outreach tasks in the e2e set).
+        const rows = await accountContacts(o.store, c, i);
         if (!rows.length) return { drafted: 0, needs: "contacts", ask: CONTACTS_ASK };
         if (!o.model) throw new Error("drafting isn't available here right now; nothing was drafted");
         const [dnc, contacted] = await Promise.all([o.store.dnc(c.userId), o.store.contacted(c.userId)]);
         const held = { no_email: 0, not_verified: 0, not_a_person: 0, already_contacted: 0, do_not_contact: 0 };
         const words = String(i.title ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+        const named = plainName(i.name);
         const want = Number.isInteger(Number(i.count)) && Number(i.count) >= 1 ? Number(i.count) : Infinity; // NO LIMITS: never capped by Trainee
         const pick: typeof rows = [];
         for (const r of rows) {
           if (pick.length >= want) break;
           if (i.firm && !sameFirm(r.firm, String(i.firm))) continue;
           if (words.length && !words.every((w) => r.title.toLowerCase().includes(w))) continue;
+          if (named && !namedAs(r.name, named)) continue;
           if (!r.email) { held.no_email++; continue; }
           if (isAutomatedInbox(r.email)) { held.not_a_person++; continue; } // R9: a no-reply, role or ATS/job-board inbox
           if (!r.verified) { held.not_verified++; continue; }
@@ -873,13 +895,21 @@ export function careerTools(deps: {
           ok.push(draft);
         }
         if (!ok.length) return { drafted: 0, not_drafted: notDrafted, held_out: held };
-        const saved = await o.store.saveBatch(c.userId, c.threadId, ok, c.now);
-        for (const d of saved) await recordOutreach(deps.events, c.userId, "outreach_drafted", d, c.now);
+        // R9 OUTREACH: one turn, one batch. A second call in the same turn ("email Ibrahim at X and Lena at Y" drafted one
+        // at a time) saved a second batch numbered from 1 again, so the person saw two drafts both called 1 and "send all"
+        // approved only the newer. The earlier drafts of this turn (not shown yet: code shows the batch when the turn
+        // ends) join this batch, numbered on, each with the hash it already had.
+        const earlier = c.turn ? TURN_DRAFTS.get(c.turn) ?? [] : [];
+        for (const d of earlier) await o.store.update(c.userId, { ...d, status: "skipped", result: "merged_into_batch" }, { status: "shown" });
+        const batch = [...earlier.map(({ id: _i, batch_id: _b, thread_id: _t, ...d }) => d), ...ok].map((d, k) => ({ ...d, n: k + 1 }));
+        const saved = await o.store.saveBatch(c.userId, c.threadId, batch, c.now);
+        if (c.turn) TURN_DRAFTS.set(c.turn, saved);
+        for (const d of saved.slice(earlier.length)) await recordOutreach(deps.events, c.userId, "outreach_drafted", d, c.now);
         const left = notDrafted.length ? `\n\nNot drafted, because I couldn't write to them without making something up: ${notDrafted.map((x) => x.name).join(", ")}.` : "";
         const parts = batchMessages(saved);
         if (left) parts.push(left.trim());
         if (c.turn) c.turn.show = { intent: OUTREACH_INTENT, text: batchText(saved) + left, parts };
-        return { drafted: saved.length, not_drafted: notDrafted, held_out: held, shown: "Code shows the batch to the person in full; do not repeat or change it." };
+        return { drafted: saved.length - earlier.length, in_batch: saved.length, not_drafted: notDrafted, held_out: held, shown: "Code shows the batch to the person in full, numbered; do not repeat or change it." };
       },
     },
     {

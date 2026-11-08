@@ -305,6 +305,9 @@ if [[ -f "$BRIDGE_PATH" ]]; then
     [[ "$(basename "$file")" == 20261106120000_* ]] && continue
     # 20261106130000 (cloud copy recovery) redefines career_resume_put as 20261106120000 leaves it: applied right after it, below, twice.
     [[ "$(basename "$file")" == 20261106130000_* ]] && continue
+    # 20261107120100 (R9: a gh_jid on any host) redefines career_apply_posting_key and rebuilds career_apply_jobs_posting_key,
+    # both from 20261027141000 (deferred above): applied after it, below, twice, with its rollback.
+    [[ "$(basename "$file")" == 20261107120100_* ]] && continue
     # 20261108100000 (paged cards) and 20261108110000 (a tailored resume per posting) redefine the card answer and the kept
     # resume read as the latest migrations leave them: applied last, below, twice, with their tests and rollbacks.
     [[ "$(basename "$file")" == 20261108100000_* || "$(basename "$file")" == 20261108110000_* ]] && continue
@@ -971,6 +974,15 @@ echo "== trainee_file_signin_limits.test.sql (texts and tries capped per account
 # 20261106130000: the same-hash resume re-upload repairs a missing cloud copy; one-time recovery of the copies the account-row gap left missing. Twice (idempotent); its test is tests/architect/resume-cloud-copy-recovery.test.ts.
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261106130000_career_resume_cloud_copy_recovery.sql"
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261106130000_career_resume_cloud_copy_recovery.sql"
+# 20261107120100: a Greenhouse gh_jid on any host is that Greenhouse posting (redefines 20261027141000's career_apply_posting_key
+# and rebuilds the index that reads it). Twice (idempotent); its rollback restores the greenhouse.io-only reading, then it is re-applied.
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261107120100_career_apply_posting_key_any_host.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261107120100_career_apply_posting_key_any_host.sql"
+[[ "$("${PSQL[@]}" -tAc "select public.career_apply_posting_key('https://careers.acme.example/jobs?gh_jid=4012345')")" == "greenhouse.io/jobs/4012345" ]] || { echo "FAIL 20261107120100: gh_jid on an employer host"; exit 1; }
+"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261107120100_career_apply_posting_key_any_host.down.sql"
+[[ "$("${PSQL[@]}" -tAc "select public.career_apply_posting_key('https://careers.acme.example/jobs?gh_jid=4012345')")" == "careers.acme.example/jobs?gh_jid=4012345" ]] || { echo "FAIL 20261107120100 rollback: the old key is not back"; exit 1; }
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261107120100_career_apply_posting_key_any_host.sql"
+echo "  ok   20261107120100: gh_jid on any host keys the Greenhouse posting; its rollback restores the old key; re-applied"
 # 20261102130000: the preparation claim in turns per person (replaces 20261026230017's oldest-first body, which career_cloud_hosted_apply.test.sql
 # above tested as it was). Twice (idempotent), then its test; the rollback is applied and the oldest-first body is proven back, then re-applied.
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261102130000_career_apply_prepare_fair_claim.sql"

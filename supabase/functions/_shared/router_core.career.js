@@ -29591,7 +29591,9 @@ const CareerBatchApply = (() => {
     if (run.status !== "approved") {
       return { ok: false, code: "RUN_NOT_APPROVED", reason: "execution requires an approved batch" };
     }
-    for (const key of run.selected) {
+    const paced = Array.isArray(d.only);
+    const keys = paced ? run.selected.filter((k) => d.only.includes(k)) : run.selected;
+    for (const key of keys) {
       const app = run.apps[key];
       const approvedSha = run.approvals[key];
       if (!app || !approvedSha) continue;
@@ -29620,6 +29622,7 @@ const CareerBatchApply = (() => {
         stopApp(run, app, "EXECUTION_ERROR", `the drive threw: ${err && err.message ? err.message.slice(0, 160) : "unknown error"}`);
       }
     }
+    if (paced && !d.final) return { ok: true, driven: keys.length };
     const anyStopped = run.selected.some((k) => ["stopped", "captcha_handoff", "deferred_refusal"].includes(run.apps[k].stage));
     run.status = anyStopped ? "completed_with_stops" : "completed";
     run.summary = summarizeRun(run);

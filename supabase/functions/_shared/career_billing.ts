@@ -68,7 +68,8 @@ const TYPOS: Record<string, string> = {
   invioces: "invoices", invoces: "invoices", invoics: "invoices", reciepts: "receipts", recipts: "receipts", reciept: "receipt",
   payin: "paying", payng: "paying", paiyng: "paying", refnd: "refund", refud: "refund",
 };
-const typos = (t: string) => t.replace(/[a-z]+/g, (w) => TYPOS[w] ?? w);
+// Own keys only: "constructor" stays "constructor", never a function's source text.
+const typos = (t: string) => t.replace(/[a-z]+/g, (w) => (Object.hasOwn(TYPOS, w) ? TYPOS[w] : w));
 const WHO = "(?:this|trainee|my plan|my subscription|the plan|the subscription)";
 const MONTH = "(?: (?:a|per|each) month| monthly)?";
 const PRICE: RegExp[] = [

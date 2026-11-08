@@ -1,0 +1,1124 @@
+{
+ "label": "r9-trunk-00ce2d36",
+ "brain": "production",
+ "model": "fake",
+ "commit": "00ce2d36a7e9f71f3c9c86dd2f0370a0e8026610",
+ "total": 40,
+ "passed": 30,
+ "rate": 0.75,
+ "areas": {
+  "apply": {
+   "total": 10,
+   "passed": 10
+  },
+  "outreach": {
+   "total": 10,
+   "passed": 10
+  },
+  "research": {
+   "total": 10,
+   "passed": 10
+  },
+  "resume": {
+   "total": 10,
+   "passed": 0
+  }
+ },
+ "guards": {
+  "total": 6,
+  "held": 6
+ },
+ "stopped": null,
+ "cost_usd": 0,
+ "items": [
+  {
+   "id": "E01",
+   "area": "apply",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 1 approved (submitted_unconfirmed), 1 reached the employer",
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "apply: turns handled as career_apply_queue > career_apply_questions > career_apply_questions > career_apply_questions_answer > career_apply_questions_answer > career_apply_card_answer",
+    "apply: prepare ASKED greenhouse:stripe:301 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:stripe:301 (1 question(s) asked)",
+    "apply: prepare READY greenhouse:stripe:301 (prepared for their card)"
+   ],
+   "replies": [
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Data Analyst at Stripe is on your apply list. I've started preparing it now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare it before you ask, from the facts you confirmed and a resume tailored to it; if the form asks something you haven't told me, I'll ask you here. The exact application goes to Stripe only when you approve it on the card that shows it exactly.",
+    "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nLast Name\nJust reply with your answer. I'll ask the next one after you answer this.",
+    "Saved. I won't ask this again:\nLast Name: Testcase\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nFirst Name\nJust reply with your answer.",
+    "Saved. I won't ask this again:\n1. First Name: Alex\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "1 approved exactly as shown. Nothing has gone to an employer yet.\n1. Stripe: approved; it is sent next, from your computer or, if you turned it on, the cloud"
+   ],
+   "intents": [
+    "career_apply_queue",
+    "career_apply_questions",
+    "career_apply_questions",
+    "career_apply_questions_answer",
+    "career_apply_questions_answer",
+    "career_apply_card_answer"
+   ]
+  },
+  {
+   "id": "E02",
+   "area": "apply",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 1 approved (submitted_unconfirmed), 1 reached the employer",
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "apply: turns handled as career_apply_queue > career_apply_questions > career_apply_questions > career_apply_questions_answer > career_apply_questions_answer > career_apply_card_answer",
+    "apply: prepare ASKED greenhouse:ramp:202 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:ramp:202 (1 question(s) asked)",
+    "apply: prepare READY greenhouse:ramp:202 (prepared for their card)"
+   ],
+   "replies": [
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Data Analyst at Ramp is on your apply list. I've started preparing it now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare it before you ask, from the facts you confirmed and a resume tailored to it; if the form asks something you haven't told me, I'll ask you here. The exact application goes to Ramp only when you approve it on the card that shows it exactly.",
+    "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nLast Name\nJust reply with your answer. I'll ask the next one after you answer this.",
+    "Saved. I won't ask this again:\nLast Name: Testcase\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nFirst Name\nJust reply with your answer.",
+    "Saved. I won't ask this again:\n1. First Name: Alex\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "1 approved exactly as shown. Nothing has gone to an employer yet.\n1. Ramp: approved; it is sent next, from your computer or, if you turned it on, the cloud"
+   ],
+   "intents": [
+    "career_apply_queue",
+    "career_apply_questions",
+    "career_apply_questions",
+    "career_apply_questions_answer",
+    "career_apply_questions_answer",
+    "career_apply_card_answer"
+   ]
+  },
+  {
+   "id": "E03",
+   "area": "apply",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 1 approved (submitted_unconfirmed), 1 reached the employer",
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "apply: turns handled as career_apply_queue > career_apply_questions > career_apply_questions > career_apply_questions_answer > career_apply_questions_answer > career_apply_card_answer",
+    "apply: prepare ASKED greenhouse:stripe:302 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:stripe:302 (1 question(s) asked)",
+    "apply: prepare READY greenhouse:stripe:302 (prepared for their card)"
+   ],
+   "replies": [
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Software Engineer, New Grad at Stripe is on your apply list. I've started preparing it now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare it before you ask, from the facts you confirmed and a resume tailored to it; if the form asks something you haven't told me, I'll ask you here. The exact application goes to Stripe only when you approve it on the card that shows it exactly.",
+    "Saved. I won't ask this again:\nFirst Name: Alex\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nEmail\nJust reply with your answer. I'll ask the next one after you answer this.",
+    "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nLast Name\nJust reply with your answer.",
+    "Saved. I won't ask this again:\n1. Last Name: Testcase\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "1 approved exactly as shown. Nothing has gone to an employer yet.\n1. Stripe: approved; it is sent next, from your computer or, if you turned it on, the cloud"
+   ],
+   "intents": [
+    "career_apply_queue",
+    "career_apply_questions",
+    "career_apply_questions",
+    "career_apply_questions_answer",
+    "career_apply_questions_answer",
+    "career_apply_card_answer"
+   ]
+  },
+  {
+   "id": "E04",
+   "area": "apply",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 1 approved (submitted_unconfirmed), 1 reached the employer",
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "apply: turns handled as career_apply_queue > career_apply_questions > career_apply_questions > career_apply_questions_answer > career_apply_questions_answer > career_apply_card_answer",
+    "apply: prepare ASKED greenhouse:harbor:601 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:harbor:601 (1 question(s) asked)",
+    "apply: prepare READY greenhouse:harbor:601 (prepared for their card)"
+   ],
+   "replies": [
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Financial Analyst Intern at Harbor Bank is on your apply list. I've started preparing it now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare it before you ask, from the facts you confirmed and a resume tailored to it; if the form asks something you haven't told me, I'll ask you here. The exact application goes to Harbor Bank only when you approve it on the card that shows it exactly.",
+    "Saved. I won't ask this again:\nLast Name: Testcase\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nEmail\nJust reply with your answer. I'll ask the next one after you answer this.",
+    "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nFirst Name\nJust reply with your answer.",
+    "Saved. I won't ask this again:\n1. First Name: Alex\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "1 approved exactly as shown. Nothing has gone to an employer yet.\n1. Harbor Bank: approved; it is sent next, from your computer or, if you turned it on, the cloud"
+   ],
+   "intents": [
+    "career_apply_queue",
+    "career_apply_questions",
+    "career_apply_questions",
+    "career_apply_questions_answer",
+    "career_apply_questions_answer",
+    "career_apply_card_answer"
+   ]
+  },
+  {
+   "id": "E05",
+   "area": "apply",
+   "kind": "multi",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: 20 on the apply list, 0 card(s) shown, 20 approved (submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed), 20 reached the employer",
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "apply: turns handled as career_apply_queue > career_apply_questions > career_apply_questions > career_apply_questions_answer > career_apply_questions_answer > career_apply_card_answer",
+    "apply: prepare ASKED greenhouse:acme:101 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:brite:102 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:cobalt:103 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:duneworks:104 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:ember:105 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:fable:501 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:gridline:502 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:harbor:601 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:ionic:602 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:juno:701 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:kite:702 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:lumen:801 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:mosaic:802 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:nimbus:803 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:orbit:804 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:plaid:401 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:ramp:201 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:ramp:202 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:stripe:301 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:stripe:302 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:acme:101 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:brite:102 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:cobalt:103 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:duneworks:104 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:ember:105 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:fable:501 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:gridline:502 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:harbor:601 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:ionic:602 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:juno:701 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:kite:702 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:lumen:801 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:mosaic:802 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:nimbus:803 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:orbit:804 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:plaid:401 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:ramp:201 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:ramp:202 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:stripe:301 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:stripe:302 (1 question(s) asked)",
+    "apply: prepare READY greenhouse:acme:101 (prepared for their card)",
+    "apply: prepare READY greenhouse:brite:102 (prepared for their card)",
+    "apply: prepare READY greenhouse:cobalt:103 (prepared for their card)",
+    "apply: prepare READY greenhouse:duneworks:104 (prepared for their card)",
+    "apply: prepare READY greenhouse:ember:105 (prepared for their card)",
+    "apply: prepare READY greenhouse:fable:501 (prepared for their card)",
+    "apply: prepare READY greenhouse:gridline:502 (prepared for their card)",
+    "apply: prepare READY greenhouse:harbor:601 (prepared for their card)",
+    "apply: prepare READY greenhouse:ionic:602 (prepared for their card)",
+    "apply: prepare READY greenhouse:juno:701 (prepared for their card)",
+    "apply: prepare READY greenhouse:kite:702 (prepared for their card)",
+    "apply: prepare READY greenhouse:lumen:801 (prepared for their card)",
+    "apply: prepare READY greenhouse:mosaic:802 (prepared for their card)",
+    "apply: prepare READY greenhouse:nimbus:803 (prepared for their card)",
+    "apply: prepare READY greenhouse:orbit:804 (prepared for their card)",
+    "apply: prepare READY greenhouse:plaid:401 (prepared for their card)",
+    "apply: prepare READY greenhouse:ramp:201 (prepared for their card)",
+    "apply: prepare READY greenhouse:ramp:202 (prepared for their card)",
+    "apply: prepare READY greenhouse:stripe:301 (prepared for their card)",
+    "apply: prepare READY greenhouse:stripe:302 (prepared for their card)"
+   ],
+   "replies": [
+    "20/20 queued; I'll show you each application's exact answers on a card before anything is sent. Queued 20 you asked for: Frontend Engineering Intern at Acme; Frontend Developer Intern at Brite; Software Engineering Intern, Frontend at Cobalt; Frontend Intern (React) at Dune Works; UI Engineering Intern at Ember Health; Software Engineer Intern at Ramp; Data Analyst at Ramp; Data Analyst at Stripe; Software Engineer, New Grad at Stripe; Data Analyst Intern at Plaid; Backend Engineer, New Grad at Fable; Backend Engineering Intern at Gridline; and 8 more. I've started preparing them now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare each one before you ask, from the facts you confirmed and a resume tailored to it; if a form asks something you haven't told me, I'll ask you here. Each application goes to its employer only when you approve it on the card that shows it exactly; once they're prepared, \"show my applications\" shows them all on one card, and one yes to that card approves exactly what it shows.",
+    "Saved. I won't ask this again:\nFirst Name: Alex\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nEmail\nJust reply with your answer. I'll ask the next one after you answer this.",
+    "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nLast Name\nJust reply with your answer.",
+    "Saved. I won't ask this again:\n1. Last Name: Testcase\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "20 approved exactly as shown. Nothing has gone to an employer yet.\n1. Cobalt: approved; it is sent next, from your computer or, if you turned it on, the cloud\n2. Brite: approved; it is sent next, from your computer or, if you turned it on, the cloud\n3. Dune Works: approved; it is sent next, from your computer or, if you turned it on, the cloud\n4. Acme: approved; it is sent next, from your computer or, if you turned it on, the cloud\n5. Fable: approved; it is sent next, from your computer or, if you turned it on, the cloud\n6. Ember Health: approved; it is sent next, from your computer or, if you turned it on, the cloud\n7. Gridline: approved; it is sent next, from your computer or, if you turned it on, the cloud\n8. Harbor Bank: approved; it is sent next, from your computer or, if you turned it on, the cloud\n9. Ionic Capital: approved; it is sent next, from your computer or, if you turned it on, the cloud\n10. Kite: approved; it is sent next, from your computer or, if you turned it on, the cloud\n11. Juno: approved; it is sent next, from your computer or, if you turned it on, the cloud\n12. Lumen: approved; it is sent next, from your computer or, if you turned it on, the cloud\n13. Mosaic: approved; it is sent next, from your computer or, if you turned it on, the cloud\n14. Orbit: approved; it is sent next, from your computer or, if you turned it on, the cloud\n15. Plaid: approved; it is sent next, from your computer or, if you turned it on, the cloud\n16. Nimbus: approved; it is sent next, from your computer or, if you turned it on, the cloud\n17. Stripe: approved; it is sent next, from your computer or, if you turned it on, the cloud\n18. Ramp: approved; it is sent next, from your computer or, if you turned it on, the cloud\n19. Ramp: approved; it is sent next, from your computer or, if you turned it on, the cloud\n20. Stripe: approved; it is sent next, from your computer or, if you turned it on, the cloud"
+   ],
+   "intents": [
+    "career_apply_queue",
+    "career_apply_questions",
+    "career_apply_questions",
+    "career_apply_questions_answer",
+    "career_apply_questions_answer",
+    "career_apply_card_answer"
+   ]
+  },
+  {
+   "id": "E06",
+   "area": "apply",
+   "kind": "multi",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: 5 on the apply list, 0 card(s) shown, 5 approved (submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed, submitted_unconfirmed), 5 reached the employer",
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "apply: turns handled as career_apply_queue > career_apply_questions > career_apply_questions > career_apply_questions_answer > career_apply_questions_answer > career_apply_card_answer",
+    "apply: prepare ASKED greenhouse:acme:101 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:brite:102 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:cobalt:103 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:duneworks:104 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:ember:105 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:acme:101 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:brite:102 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:cobalt:103 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:duneworks:104 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:ember:105 (1 question(s) asked)",
+    "apply: prepare READY greenhouse:acme:101 (prepared for their card)",
+    "apply: prepare READY greenhouse:brite:102 (prepared for their card)",
+    "apply: prepare READY greenhouse:cobalt:103 (prepared for their card)",
+    "apply: prepare READY greenhouse:duneworks:104 (prepared for their card)",
+    "apply: prepare READY greenhouse:ember:105 (prepared for their card)"
+   ],
+   "replies": [
+    "I found 5 open frontend internships postings in Chicago on file. Ranked best fit for your confirmed facts first. 5/5 queued; I'll show you each application's exact answers on a card before anything is sent. Queued 5: Software Engineering Intern, Frontend at Cobalt; Frontend Engineering Intern at Acme; Frontend Developer Intern at Brite; Frontend Intern (React) at Dune Works; UI Engineering Intern at Ember Health. I've started preparing them now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare each one before you ask, from the facts you confirmed and a resume tailored to it; if a form asks something you haven't told me, I'll ask you here. Each application goes to its employer only when you approve it on the card that shows it exactly; once they're prepared, \"show my applications\" shows them all on one card, and one yes to that card approves exactly what it shows.",
+    "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nLast Name\nJust reply with your answer. I'll ask the next one after you answer this.",
+    "Saved. I won't ask this again:\nLast Name: Testcase\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nFirst Name\nJust reply with your answer.",
+    "Saved. I won't ask this again:\n1. First Name: Alex\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "5 approved exactly as shown. Nothing has gone to an employer yet.\n1. Brite: approved; it is sent next, from your computer or, if you turned it on, the cloud\n2. Acme: approved; it is sent next, from your computer or, if you turned it on, the cloud\n3. Dune Works: approved; it is sent next, from your computer or, if you turned it on, the cloud\n4. Cobalt: approved; it is sent next, from your computer or, if you turned it on, the cloud\n5. Ember Health: approved; it is sent next, from your computer or, if you turned it on, the cloud"
+   ],
+   "intents": [
+    "career_apply_queue",
+    "career_apply_questions",
+    "career_apply_questions",
+    "career_apply_questions_answer",
+    "career_apply_questions_answer",
+    "career_apply_card_answer"
+   ]
+  },
+  {
+   "id": "E07",
+   "area": "apply",
+   "kind": "multi",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 1 approved (submitted_unconfirmed), 1 reached the employer",
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "apply: turns handled as career_discovery > career_apply_queue > career_apply_questions > career_apply_questions > career_apply_questions_answer > career_apply_questions_answer > career_apply_card_answer",
+    "apply: prepare ASKED greenhouse:fable:501 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:fable:501 (1 question(s) asked)",
+    "apply: prepare READY greenhouse:fable:501 (prepared for their card)"
+   ],
+   "replies": [
+    "I found 2 backend new grad roles in Austin, but none of them list pay. Here they are by fit, with Apply on each.\nhttps://file.e2e.test?t=v1.eyJ1IjoiN2UyZTAwMDAtNmE0My00YTQ5LTlkMmMtMDAwMDAwMDAwMDA3IiwiciI6Ijc0Y2JjY2UxMTkiLCJrIjoibCIsImoiOiIzM2U1NzIxNjI1OGU2MjExIiwiaSI6MTc5MzgwNDQwNzgwMCwiZSI6MTc5Mzg5MDgwNzgwMH0.M3hNbDctXdKQddkoTg7ZhaiA2NuMQMeAJ8W8y5DqsEQ",
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued 1: Backend Engineer, New Grad at Fable. I've started preparing it now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare each one before you ask, from the facts you confirmed and a resume tailored to it; if a form asks something you haven't told me, I'll ask you here. Each application goes to its employer only when you approve it on the card that shows it exactly; once they're prepared, \"show my applications\" shows them all on one card, and one yes to that card approves exactly what it shows.",
+    "Saved. I won't ask this again:\nLast Name: Testcase\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nFirst Name\nJust reply with your answer. I'll ask the next one after you answer this.",
+    "Saved. I won't ask this again:\nFirst Name: Alex\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nEmail\nJust reply with your answer.",
+    "Saved. I won't ask this again:\n1. Email: alex.testcase@example.test\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "1 approved exactly as shown. Nothing has gone to an employer yet.\n1. Fable: approved; it is sent next, from your computer or, if you turned it on, the cloud"
+   ],
+   "intents": [
+    "career_discovery",
+    "career_apply_queue",
+    "career_apply_questions",
+    "career_apply_questions",
+    "career_apply_questions_answer",
+    "career_apply_questions_answer",
+    "career_apply_card_answer"
+   ]
+  },
+  {
+   "id": "E08",
+   "area": "apply",
+   "kind": "multi",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: 2 on the apply list, 0 card(s) shown, 2 approved (submitted_unconfirmed, submitted_unconfirmed), 2 reached the employer",
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "apply: turns handled as career_apply_queue > career_apply_questions > career_apply_questions > career_apply_questions_answer > career_apply_questions_answer > career_apply_card_answer",
+    "apply: prepare ASKED greenhouse:kite:702 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:plaid:401 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:kite:702 (1 question(s) asked)",
+    "apply: prepare ASKED greenhouse:plaid:401 (1 question(s) asked)",
+    "apply: prepare READY greenhouse:kite:702 (prepared for their card)",
+    "apply: prepare READY greenhouse:plaid:401 (prepared for their card)"
+   ],
+   "replies": [
+    "2/2 queued; I'll show you each application's exact answers on a card before anything is sent. Queued 2 you asked for: Data Science Intern at Kite; Data Analyst Intern at Plaid. I've started preparing them now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare each one before you ask, from the facts you confirmed and a resume tailored to it; if a form asks something you haven't told me, I'll ask you here. Each application goes to its employer only when you approve it on the card that shows it exactly; once they're prepared, \"show my applications\" shows them all on one card, and one yes to that card approves exactly what it shows.",
+    "Saved. I won't ask this again:\nLast Name: Testcase\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nEmail\nJust reply with your answer. I'll ask the next one after you answer this.",
+    "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nFirst Name\nJust reply with your answer.",
+    "Saved. I won't ask this again:\n1. First Name: Alex\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "2 approved exactly as shown. Nothing has gone to an employer yet.\n1. Kite: approved; it is sent next, from your computer or, if you turned it on, the cloud\n2. Plaid: approved; it is sent next, from your computer or, if you turned it on, the cloud"
+   ],
+   "intents": [
+    "career_apply_queue",
+    "career_apply_questions",
+    "career_apply_questions",
+    "career_apply_questions_answer",
+    "career_apply_questions_answer",
+    "career_apply_card_answer"
+   ]
+  },
+  {
+   "id": "E09",
+   "area": "apply",
+   "kind": "multi",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 1 approved (submitted_unconfirmed), 1 reached the employer",
+    "resume: 1 PDF(s) stored, 1 returned in a reply",
+    "apply: turns handled as career_apply_queue > career_apply_questions > career_apply_questions > career_apply_questions_answer > career_apply_questions_answer > career_apply_card_answer",
+    "apply: prepare ASKED greenhouse:lumen:801 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:lumen:801 (1 question(s) asked)",
+    "apply: prepare READY greenhouse:lumen:801 (prepared for their card)"
+   ],
+   "replies": [
+    "Your resume is tailored for Data Analyst at Lumen.\nIt leads with your proven skills for this role: Python, Excel, and every line traces to a fact already on your profile. Skill gap, named plainly: SQL is required by the posting and not on your profile, so it was not added to the resume. Eligibility verdict: this record meets the posting's hard requirements, but some required skills the posting names are not evidenced in the record — they are named in the gap list that travels with this packet.\nSaved as PDF and DOCX files, attached for your review — parse check PASS. Grounded in your own profile record and the posting's own text, as of November 2026. Review the artifact, and I can prepare the Lumen application packet next.\nWhat changed: Led with Software Engineering Intern, TEST Systems Inc, which shows Python from the posting; dropped DeployBoard (TEST project), which this posting doesn't ask for; skills now start with Python, Excel, without JavaScript, React and 5 more. No bullet was reworded this time (the writing model did not answer usably), so every bullet is in your own confirmed words.\n\n1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Data Analyst at Lumen is on your apply list. I've started preparing it now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare it before you ask, from the facts you confirmed and a resume tailored to it; if the form asks something you haven't told me, I'll ask you here. The exact application goes to Lumen only when you approve it on the card that shows it exactly. The application sends this tailored resume (Resume_Lumen_tailored.pdf); its card names that exact file.",
+    "Saved. I won't ask this again:\nLast Name: Testcase\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nFirst Name\nJust reply with your answer. I'll ask the next one after you answer this.",
+    "Saved. I won't ask this again:\nFirst Name: Alex\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nEmail\nJust reply with your answer.",
+    "Saved. I won't ask this again:\n1. Email: alex.testcase@example.test\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "1 approved exactly as shown. Nothing has gone to an employer yet.\n1. Lumen: approved; it is sent next, from your computer or, if you turned it on, the cloud"
+   ],
+   "intents": [
+    "career_apply_queue",
+    "career_apply_questions",
+    "career_apply_questions",
+    "career_apply_questions_answer",
+    "career_apply_questions_answer",
+    "career_apply_card_answer"
+   ]
+  },
+  {
+   "id": "E10",
+   "area": "apply",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 1 approved (submitted_unconfirmed), 1 reached the employer",
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "apply: turns handled as career_apply_queue > career_apply_questions > career_apply_questions > career_apply_questions_answer > career_apply_questions_answer > career_apply_card_answer",
+    "apply: prepare ASKED greenhouse:orbit:804 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:orbit:804 (1 question(s) asked)",
+    "apply: prepare READY greenhouse:orbit:804 (prepared for their card)"
+   ],
+   "replies": [
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Data Analyst Intern at Orbit is on your apply list. I've started preparing it now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare it before you ask, from the facts you confirmed and a resume tailored to it; if the form asks something you haven't told me, I'll ask you here. The exact application goes to Orbit only when you approve it on the card that shows it exactly.",
+    "Saved. I won't ask this again:\nFirst Name: Alex\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nEmail\nJust reply with your answer. I'll ask the next one after you answer this.",
+    "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nLast Name\nJust reply with your answer.",
+    "Saved. I won't ask this again:\n1. Last Name: Testcase\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "1 approved exactly as shown. Nothing has gone to an employer yet.\n1. Orbit: approved; it is sent next, from your computer or, if you turned it on, the cloud"
+   ],
+   "intents": [
+    "career_apply_queue",
+    "career_apply_questions",
+    "career_apply_questions",
+    "career_apply_questions_answer",
+    "career_apply_questions_answer",
+    "career_apply_card_answer"
+   ]
+  },
+  {
+   "id": "G01",
+   "area": "apply",
+   "kind": "guard",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer",
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "apply: turns handled as career_apply_queue > career_apply_questions > career_apply_questions > career_apply_questions_answer > career_apply_questions_answer > career_apply_card_answer",
+    "apply: prepare ASKED greenhouse:acme:101 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:acme:101 (1 question(s) asked)",
+    "apply: prepare READY greenhouse:acme:101 (prepared for their card)"
+   ],
+   "replies": [
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Frontend Engineering Intern at Acme is on your apply list. I've started preparing it now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare it before you ask, from the facts you confirmed and a resume tailored to it; if the form asks something you haven't told me, I'll ask you here. The exact application goes to Acme only when you approve it on the card that shows it exactly.",
+    "Saved. I won't ask this again:\nLast Name: Testcase\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nFirst Name\nJust reply with your answer. I'll ask the next one after you answer this.",
+    "Saved. I won't ask this again:\nFirst Name: Alex\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nEmail\nJust reply with your answer.",
+    "Saved. I won't ask this again:\n1. Email: alex.testcase@example.test\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "Nothing was approved. Nothing went to an employer.\n1. Acme: not sent: you said no"
+   ],
+   "intents": [
+    "career_apply_queue",
+    "career_apply_questions",
+    "career_apply_questions",
+    "career_apply_questions_answer",
+    "career_apply_questions_answer",
+    "career_apply_card_answer"
+   ]
+  },
+  {
+   "id": "G02",
+   "area": "apply",
+   "kind": "guard",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer",
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "apply: turns handled as career_apply_queue > career_apply_questions > career_apply_questions > career_apply_questions_answer > career_apply_questions_answer > career_apply_card",
+    "apply: prepare ASKED greenhouse:ramp:201 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:ramp:201 (1 question(s) asked)",
+    "apply: prepare READY greenhouse:ramp:201 (prepared for their card)"
+   ],
+   "replies": [
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Software Engineer Intern at Ramp is on your apply list. I've started preparing it now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare it before you ask, from the facts you confirmed and a resume tailored to it; if the form asks something you haven't told me, I'll ask you here. The exact application goes to Ramp only when you approve it on the card that shows it exactly.",
+    "Saved. I won't ask this again:\nFirst Name: Alex\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nEmail\nJust reply with your answer. I'll ask the next one after you answer this.",
+    "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nLast Name\nJust reply with your answer.",
+    "Saved. I won't ask this again:\n1. Last Name: Testcase\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "I couldn't tell which ones you mean, so nothing was approved. Reply \"yes\" to send it exactly as shown, or \"no\"."
+   ],
+   "intents": [
+    "career_apply_queue",
+    "career_apply_questions",
+    "career_apply_questions",
+    "career_apply_questions_answer",
+    "career_apply_questions_answer",
+    "career_apply_card"
+   ]
+  },
+  {
+   "id": "G03",
+   "area": "apply",
+   "kind": "guard",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: turns handled as career_apply_queue > conversation_bare_reply"
+   ],
+   "replies": [
+    "0/1 queued. Not queued: Data Analyst at Stripe: no resume on file: I have no confirmed resume to prepare it from. Paste or attach your resume, confirm it, then ask again.",
+    "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs."
+   ],
+   "intents": [
+    "career_apply_queue",
+    "conversation_bare_reply"
+   ]
+  },
+  {
+   "id": "E11",
+   "area": "outreach",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: 1 drafted (maya.chen@stripe.example sent), 1 on the sending rail (sent), 1 delivered",
+    "outreach: turns handled as career_outreach_batch > career_outreach_answer",
+    "outreach: send worker claimed 1, sent 1, retry 0, refused 0, failed 0"
+   ],
+   "replies": [
+    "Drafted 1/1.\n\n1 outreach draft, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Maya Chen, Technical Recruiter, Stripe <maya.chen@stripe.example>\nFrom your list: contacts.csv, row 1\nSubject: A quick question\n\nHi Maya,\n\nI'd be grateful for 15 minutes to ask about the data analyst role. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\".",
+    "Approved 1, exactly as shown: 1 Maya Chen (Stripe). They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. Any not sent within 7 days of your approval lapse unsent; when you next ask I'll say how many, and you can approve them again."
+   ],
+   "intents": [
+    "career_outreach_batch",
+    "career_outreach_answer"
+   ]
+  },
+  {
+   "id": "E12",
+   "area": "outreach",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: 1 drafted (jordan.reyes@ramp.example sent), 1 on the sending rail (sent), 1 delivered",
+    "outreach: turns handled as career_outreach_batch > career_outreach_answer",
+    "outreach: send worker claimed 1, sent 1, retry 0, refused 0, failed 0"
+   ],
+   "replies": [
+    "Drafted 1/1.\n\n1 outreach draft, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Jordan Reyes, University Recruiter, Ramp <jordan.reyes@ramp.example>\nFrom your list: contacts.csv, row 2\nSubject: A quick question\n\nHi Jordan,\n\nI'd be grateful for 15 minutes to ask about the university recruiting timeline. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\".",
+    "Approved 1, exactly as shown: 1 Jordan Reyes (Ramp). They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. Any not sent within 7 days of your approval lapse unsent; when you next ask I'll say how many, and you can approve them again."
+   ],
+   "intents": [
+    "career_outreach_batch",
+    "career_outreach_answer"
+   ]
+  },
+  {
+   "id": "E13",
+   "area": "outreach",
+   "kind": "multi",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: 1 drafted (sam.ortiz@cobalt.example sent), 1 on the sending rail (sent), 1 delivered",
+    "outreach: turns handled as career_outreach_batch > career_outreach_answer",
+    "outreach: send worker claimed 1, sent 1, retry 0, refused 0, failed 0"
+   ],
+   "replies": [
+    "Drafted 1/1.\n\n1 outreach draft, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Sam Ortiz, Engineering Manager, Cobalt <sam.ortiz@cobalt.example>\nFrom your list: contacts.csv, row 4\nSubject: A quick question\n\nHi Sam,\n\nI'd be grateful for 15 minutes to hear how you got started. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\".",
+    "Approved 1, exactly as shown: 1 Sam Ortiz (Cobalt). They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. Any not sent within 7 days of your approval lapse unsent; when you next ask I'll say how many, and you can approve them again."
+   ],
+   "intents": [
+    "career_outreach_batch",
+    "career_outreach_answer"
+   ]
+  },
+  {
+   "id": "E14",
+   "area": "outreach",
+   "kind": "multi",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: 1 drafted (noah.kim@fable.example sent), 1 on the sending rail (sent), 1 delivered",
+    "outreach: turns handled as career_outreach_batch > career_outreach_answer",
+    "outreach: send worker claimed 1, sent 1, retry 0, refused 0, failed 0"
+   ],
+   "replies": [
+    "Drafted 1/1.\n\n1 outreach draft, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Noah Kim, Engineering Manager, Fable <noah.kim@fable.example>\nFrom your list: contacts.csv, row 7\nSubject: A quick question\n\nHi Noah,\n\nI'd be grateful for 15 minutes to hear how you got started. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\".",
+    "Approved 1, exactly as shown: 1 Noah Kim (Fable). They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. Any not sent within 7 days of your approval lapse unsent; when you next ask I'll say how many, and you can approve them again."
+   ],
+   "intents": [
+    "career_outreach_batch",
+    "career_outreach_answer"
+   ]
+  },
+  {
+   "id": "E15",
+   "area": "outreach",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: 1 drafted (priya.shah@plaid.example sent), 1 on the sending rail (sent), 1 delivered",
+    "outreach: turns handled as career_outreach_batch > career_outreach_answer",
+    "outreach: send worker claimed 1, sent 1, retry 0, refused 0, failed 0"
+   ],
+   "replies": [
+    "Drafted 1/1.\n\n1 outreach draft, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Priya Shah, Data Engineer, Plaid <priya.shah@plaid.example>\nFrom your list: contacts.csv, row 3\nSubject: A quick question\n\nHi Priya,\n\nI'd be grateful for 15 minutes to ask about what data engineering looks like there. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\".",
+    "Approved 1, exactly as shown: 1 Priya Shah (Plaid). They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. Any not sent within 7 days of your approval lapse unsent; when you next ask I'll say how many, and you can approve them again."
+   ],
+   "intents": [
+    "career_outreach_batch",
+    "career_outreach_answer"
+   ]
+  },
+  {
+   "id": "E16",
+   "area": "outreach",
+   "kind": "multi",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: 2 drafted (ava.brooks@acme.example sent, maya.chen@stripe.example sent), 2 on the sending rail (sent, sent), 2 delivered",
+    "outreach: turns handled as career_outreach_batch > career_outreach_answer",
+    "outreach: send worker claimed 1, sent 2, retry 0, refused 0, failed 0"
+   ],
+   "replies": [
+    "Drafted 2/2.\n\n2 outreach drafts, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Maya Chen, Technical Recruiter, Stripe <maya.chen@stripe.example>\nFrom your list: contacts.csv, row 1\nSubject: A quick question\n\nHi Maya,\n\nI'd be grateful for 15 minutes to hear how you got started. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\n2. To: Ava Brooks, Recruiter, Acme <ava.brooks@acme.example>\nFrom your list: contacts.csv, row 6\nSubject: A quick question\n\nHi Ava,\n\nI'd be grateful for 15 minutes to hear how you got started. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\".",
+    "Approved 2, exactly as shown: 1 Maya Chen (Stripe), 2 Ava Brooks (Acme). They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. Any not sent within 7 days of your approval lapse unsent; when you next ask I'll say how many, and you can approve them again."
+   ],
+   "intents": [
+    "career_outreach_batch",
+    "career_outreach_answer"
+   ]
+  },
+  {
+   "id": "E17",
+   "area": "outreach",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: 1 drafted (lee.park@stripe.example sent), 1 on the sending rail (sent), 1 delivered",
+    "outreach: turns handled as career_outreach_batch > career_outreach_answer",
+    "outreach: send worker claimed 1, sent 1, retry 0, refused 0, failed 0"
+   ],
+   "replies": [
+    "Drafted 1/1.\n\n1 outreach draft, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Lee Park, Software Engineer, Stripe <lee.park@stripe.example>\nFrom your list: contacts.csv, row 5\nSubject: A quick question\n\nHi Lee,\n\nI'd be grateful for 15 minutes to ask about a referral for the new grad role. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\".",
+    "Approved 1, exactly as shown: 1 Lee Park (Stripe). They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. Any not sent within 7 days of your approval lapse unsent; when you next ask I'll say how many, and you can approve them again."
+   ],
+   "intents": [
+    "career_outreach_batch",
+    "career_outreach_answer"
+   ]
+  },
+  {
+   "id": "E18",
+   "area": "outreach",
+   "kind": "multi",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 1 approved (submitted_unconfirmed), 1 reached the employer",
+    "outreach: 1 drafted (maya.chen@stripe.example sent), 1 on the sending rail (sent), 1 delivered",
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "outreach: turns handled as career_outreach_batch > career_apply_questions > career_apply_questions > career_apply_questions_answer > career_apply_questions_answer > career_outreach_batch > career_outreach_answer",
+    "outreach: send worker claimed 1, sent 1, retry 0, refused 0, failed 0",
+    "apply: prepare ASKED greenhouse:stripe:301 (3 question(s) asked from the board's published form (no browser))",
+    "apply: prepare ASKED greenhouse:stripe:301 (1 question(s) asked)",
+    "apply: prepare READY greenhouse:stripe:301 (prepared for their card)"
+   ],
+   "replies": [
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Data Analyst at Stripe is on your apply list. I've started preparing it now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare it before you ask, from the facts you confirmed and a resume tailored to it; if the form asks something you haven't told me, I'll ask you here. The exact application goes to Stripe only when you approve it on the card that shows it exactly.\n\nDrafted 1/1.\n\n1 outreach draft, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Maya Chen, Technical Recruiter, Stripe <maya.chen@stripe.example>\nFrom your list: contacts.csv, row 1\nSubject: A quick question\n\nHi Maya,\n\nI'd be grateful for 15 minutes to ask about the Data Analyst role. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\".",
+    "Saved. I won't ask this again:\nLast Name: Testcase\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nEmail\nJust reply with your answer. I'll ask the next one after you answer this.",
+    "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nFirst Name\nJust reply with your answer.",
+    "Saved. I won't ask this again:\n1. First Name: Alex\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+    "1 approved exactly as shown. Nothing has gone to an employer yet.\n1. Stripe: approved; it is sent next, from your computer or, if you turned it on, the cloud\n\nThe email you asked for in the same message is still waiting for your approval:\n\n1 outreach draft, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Maya Chen, Technical Recruiter, Stripe <maya.chen@stripe.example>\nFrom your list: contacts.csv, row 1\nSubject: A quick question\n\nHi Maya,\n\nI'd be grateful for 15 minutes to ask about the Data Analyst role. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\".",
+    "Approved 1, exactly as shown: 1 Maya Chen (Stripe). They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. Any not sent within 7 days of your approval lapse unsent; when you next ask I'll say how many, and you can approve them again."
+   ],
+   "intents": [
+    "career_outreach_batch",
+    "career_apply_questions",
+    "career_apply_questions",
+    "career_apply_questions_answer",
+    "career_apply_questions_answer",
+    "career_outreach_batch",
+    "career_outreach_answer"
+   ]
+  },
+  {
+   "id": "E19",
+   "area": "outreach",
+   "kind": "multi",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: 2 drafted (noah.kim@fable.example sent, sam.ortiz@cobalt.example sent), 2 on the sending rail (sent, sent), 2 delivered",
+    "outreach: turns handled as career_outreach_batch > career_outreach_answer",
+    "outreach: send worker claimed 1, sent 2, retry 0, refused 0, failed 0"
+   ],
+   "replies": [
+    "Drafted 2/2.\n\n2 outreach drafts, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Sam Ortiz, Engineering Manager, Cobalt <sam.ortiz@cobalt.example>\nFrom your list: contacts.csv, row 4\nSubject: A quick question\n\nHi Sam,\n\nI'd be grateful for 15 minutes to ask about new grad roles. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\n2. To: Noah Kim, Engineering Manager, Fable <noah.kim@fable.example>\nFrom your list: contacts.csv, row 7\nSubject: A quick question\n\nHi Noah,\n\nI'd be grateful for 15 minutes to ask about new grad roles. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\".",
+    "Approved 2, exactly as shown: 1 Sam Ortiz (Cobalt), 2 Noah Kim (Fable). They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. Any not sent within 7 days of your approval lapse unsent; when you next ask I'll say how many, and you can approve them again."
+   ],
+   "intents": [
+    "career_outreach_batch",
+    "career_outreach_answer"
+   ]
+  },
+  {
+   "id": "E20",
+   "area": "outreach",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: 1 drafted (ava.brooks@acme.example sent), 1 on the sending rail (sent), 1 delivered",
+    "outreach: turns handled as career_outreach_batch > career_outreach_answer",
+    "outreach: send worker claimed 1, sent 1, retry 0, refused 0, failed 0"
+   ],
+   "replies": [
+    "Drafted 1/1.\n\n1 outreach draft, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Ava Brooks, Recruiter, Acme <ava.brooks@acme.example>\nFrom your list: contacts.csv, row 6\nSubject: A quick question\n\nHi Ava,\n\nI'd be grateful for 15 minutes to ask about the frontend internship. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\".",
+    "Approved 1, exactly as shown: 1 Ava Brooks (Acme). They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. Any not sent within 7 days of your approval lapse unsent; when you next ask I'll say how many, and you can approve them again."
+   ],
+   "intents": [
+    "career_outreach_batch",
+    "career_outreach_answer"
+   ]
+  },
+  {
+   "id": "G04",
+   "area": "outreach",
+   "kind": "guard",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: 1 drafted (maya.chen@stripe.example shown), 0 on the sending rail, 0 delivered",
+    "outreach: turns handled as career_outreach_batch"
+   ],
+   "replies": [
+    "Drafted 1/1.\n\n1 outreach draft, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Maya Chen, Technical Recruiter, Stripe <maya.chen@stripe.example>\nFrom your list: contacts.csv, row 1\nSubject: A quick question\n\nHi Maya,\n\nI'd be grateful for 15 minutes to ask about the data analyst role. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\"."
+   ],
+   "intents": [
+    "career_outreach_batch"
+   ]
+  },
+  {
+   "id": "G05",
+   "area": "outreach",
+   "kind": "guard",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: turns handled as career_networking_draft > agent"
+   ],
+   "replies": [
+    "Who is ceo@stripe.example? Send their name and firm with the address, for example \"email Maya Chen at Stripe about a coffee chat, ceo@stripe.example\", and I'll draft it for your approval. I never make up a name for an address.",
+    "Here is where that stands."
+   ],
+   "intents": [
+    "career_networking_draft",
+    "agent"
+   ]
+  },
+  {
+   "id": "E21",
+   "area": "research",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "research: 1 file(s) stored, 1 delivered",
+    "research: turns handled as agent"
+   ],
+   "replies": [
+    "Here is where that stands."
+   ],
+   "intents": [
+    "agent"
+   ]
+  },
+  {
+   "id": "E22",
+   "area": "research",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "research: 1 file(s) stored, 1 delivered",
+    "research: turns handled as agent"
+   ],
+   "replies": [
+    "Here is where that stands."
+   ],
+   "intents": [
+    "agent"
+   ]
+  },
+  {
+   "id": "E23",
+   "area": "research",
+   "kind": "multi",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "research: 1 file(s) stored, 1 delivered",
+    "research: turns handled as agent"
+   ],
+   "replies": [
+    "Here is where that stands."
+   ],
+   "intents": [
+    "agent"
+   ]
+  },
+  {
+   "id": "E24",
+   "area": "research",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "research: 1 file(s) stored, 1 delivered",
+    "research: turns handled as agent"
+   ],
+   "replies": [
+    "Here is where that stands."
+   ],
+   "intents": [
+    "agent"
+   ]
+  },
+  {
+   "id": "E25",
+   "area": "research",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "research: 1 file(s) stored, 1 delivered",
+    "research: turns handled as agent"
+   ],
+   "replies": [
+    "Here is where that stands."
+   ],
+   "intents": [
+    "agent"
+   ]
+  },
+  {
+   "id": "E26",
+   "area": "research",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "research: 1 file(s) stored, 1 delivered",
+    "research: turns handled as agent"
+   ],
+   "replies": [
+    "Here is where that stands."
+   ],
+   "intents": [
+    "agent"
+   ]
+  },
+  {
+   "id": "E27",
+   "area": "research",
+   "kind": "multi",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "research: 1 file(s) stored, 1 delivered",
+    "research: turns handled as agent"
+   ],
+   "replies": [
+    "Here is where that stands."
+   ],
+   "intents": [
+    "agent"
+   ]
+  },
+  {
+   "id": "E28",
+   "area": "research",
+   "kind": "multi",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "research: 1 file(s) stored, 1 delivered",
+    "research: turns handled as career_discovery > agent"
+   ],
+   "replies": [
+    "I found 2 data analyst roles in Chicago, but none of them list pay. Here they are by fit, with Apply on each.\nhttps://file.e2e.test?t=v1.eyJ1IjoiN2UyZTAwMDAtNmE0My00YTQ5LTlkMmMtMDAwMDAwMDAwMDMzIiwiciI6IjZmZmQ2ODU1NTUiLCJrIjoibCIsImoiOiI2ZGI3ZjYyNGVhYjY1NzBjIiwiaSI6MTc5MzgwNDQxNjg3NywiZSI6MTc5Mzg5MDgxNjg3N30.l3zNLPOpgV-qe_JKXDGKbDwwc2PX5YNc2Sdc3AFu-as",
+    "Here is where that stands."
+   ],
+   "intents": [
+    "career_discovery",
+    "agent"
+   ]
+  },
+  {
+   "id": "E29",
+   "area": "research",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "research: 1 file(s) stored, 1 delivered",
+    "research: turns handled as agent"
+   ],
+   "replies": [
+    "Here is where that stands."
+   ],
+   "intents": [
+    "agent"
+   ]
+  },
+  {
+   "id": "E30",
+   "area": "research",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "research: 1 file(s) stored, 1 delivered",
+    "research: turns handled as agent"
+   ],
+   "replies": [
+    "Here is where that stands."
+   ],
+   "intents": [
+    "agent"
+   ]
+  },
+  {
+   "id": "E31",
+   "area": "resume",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "resume: no tailored PDF returned in a reply [stopped at: turns handled as outreach_clarification]"
+   ],
+   "stage": [
+    "resume: turns handled as outreach_clarification"
+   ],
+   "replies": [
+    "Nothing was sent — here is exactly where it stands.\nNothing is built in this conversation to send: no list, no draft, no approved plan — so there is no wave that could go out. Every send in this product is approval-gated: the list's counts return first, you approve the whole plan once, and only then does a wave send. Name the target and I will build the plan the send has to stand on."
+   ],
+   "intents": [
+    "outreach_clarification"
+   ]
+  },
+  {
+   "id": "E32",
+   "area": "resume",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "resume: no tailored PDF returned in a reply [stopped at: turns handled as outreach_clarification]"
+   ],
+   "stage": [
+    "resume: turns handled as outreach_clarification"
+   ],
+   "replies": [
+    "Nothing was sent — here is exactly where it stands.\nNothing is built in this conversation to send: no list, no draft, no approved plan — so there is no wave that could go out. Every send in this product is approval-gated: the list's counts return first, you approve the whole plan once, and only then does a wave send. Name the target and I will build the plan the send has to stand on."
+   ],
+   "intents": [
+    "outreach_clarification"
+   ]
+  },
+  {
+   "id": "E33",
+   "area": "resume",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "resume: Resume_Fable.pdf: does not carry the person's name (a resume they can send names them)"
+   ],
+   "stage": [
+    "resume: 1 PDF(s) stored, 1 returned in a reply",
+    "resume: turns handled as career_tailor"
+   ],
+   "replies": [
+    "Your resume is tailored for Backend Engineer, New Grad at Fable.\nIt leads with your proven skills for this role: Python, Go, PostgreSQL, and every line traces to a fact already on your profile. No skill gap: every skill the posting names is evidenced on your profile. Eligibility verdict: this record evidences every hard requirement and every required skill stated in the posting.\nSaved as PDF and DOCX files, attached for your review — parse check PASS. Grounded in your own profile record and the posting's own text, as of November 2026. Review the artifact, and I can prepare the Fable application packet next.\nWhat changed: Led with Software Engineering Intern, TEST Systems Inc, which shows Python, PostgreSQL from the posting; dropped Finance Intern, Example Capital (TEST) and MarketSim valuation project (TEST), which this posting doesn't ask for. No bullet was reworded this time (the writing model did not answer usably), so every bullet is in your own confirmed words."
+   ],
+   "intents": [
+    "career_tailor"
+   ]
+  },
+  {
+   "id": "E34",
+   "area": "resume",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "resume: no tailored PDF returned in a reply [stopped at: turns handled as outreach_clarification]"
+   ],
+   "stage": [
+    "resume: turns handled as outreach_clarification"
+   ],
+   "replies": [
+    "Nothing was sent — here is exactly where it stands.\nNothing is built in this conversation to send: no list, no draft, no approved plan — so there is no wave that could go out. Every send in this product is approval-gated: the list's counts return first, you approve the whole plan once, and only then does a wave send. Name the target and I will build the plan the send has to stand on."
+   ],
+   "intents": [
+    "outreach_clarification"
+   ]
+  },
+  {
+   "id": "E35",
+   "area": "resume",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "resume: no tailored PDF returned in a reply [stopped at: turns handled as outreach_clarification]"
+   ],
+   "stage": [
+    "resume: turns handled as outreach_clarification"
+   ],
+   "replies": [
+    "Nothing was sent — here is exactly where it stands.\nNothing is built in this conversation to send: no list, no draft, no approved plan — so there is no wave that could go out. Every send in this product is approval-gated: the list's counts return first, you approve the whole plan once, and only then does a wave send. Name the target and I will build the plan the send has to stand on."
+   ],
+   "intents": [
+    "outreach_clarification"
+   ]
+  },
+  {
+   "id": "E36",
+   "area": "resume",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "resume: no tailored PDF returned in a reply [stopped at: turns handled as outreach_clarification]"
+   ],
+   "stage": [
+    "resume: turns handled as outreach_clarification"
+   ],
+   "replies": [
+    "Nothing was sent — here is exactly where it stands.\nNothing is built in this conversation to send: no list, no draft, no approved plan — so there is no wave that could go out. Every send in this product is approval-gated: the list's counts return first, you approve the whole plan once, and only then does a wave send. Name the target and I will build the plan the send has to stand on."
+   ],
+   "intents": [
+    "outreach_clarification"
+   ]
+  },
+  {
+   "id": "E37",
+   "area": "resume",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "resume: Resume_Gridline.pdf: does not carry the person's name (a resume they can send names them)"
+   ],
+   "stage": [
+    "resume: 1 PDF(s) stored, 1 returned in a reply",
+    "resume: turns handled as career_discovery > career_tailor"
+   ],
+   "replies": [
+    "I found 2 backend new grad roles in Austin, but none of them list pay. Here they are by fit, with Apply on each.\nhttps://file.e2e.test?t=v1.eyJ1IjoiN2UyZTAwMDAtNmE0My00YTQ5LTlkMmMtMDAwMDAwMDAwMDQyIiwiciI6IjIzMTYzYzk5ZmYiLCJrIjoibCIsImoiOiI1YjdmMzZhNTFjZWNlZDhhIiwiaSI6MTc5MzgwNDQxODQ4MCwiZSI6MTc5Mzg5MDgxODQ4MH0.ff_B_XAnvGkkKoNoRUMW1iX54QdGjgpfqqWPK1wWGEA",
+    "Your resume is tailored for Backend Engineering Intern at Gridline.\nIt leads with your proven skills for this role: Python, Go, PostgreSQL, and every line traces to a fact already on your profile. No skill gap: every skill the posting names is evidenced on your profile. Eligibility verdict: this record evidences every hard requirement and every required skill stated in the posting.\nSaved as PDF and DOCX files, attached for your review — parse check PASS. Picked first from the 5 roles that fit your profile in the current list — grounded in your profile record and the posting's own text, as of November 2026. Review the artifact, and I can prepare the Gridline application packet next.\nWhat changed: Led with Software Engineering Intern, TEST Systems Inc, which shows Python, PostgreSQL from the posting; dropped Finance Intern, Example Capital (TEST) and MarketSim valuation project (TEST), which this posting doesn't ask for. No bullet was reworded this time (the writing model did not answer usably), so every bullet is in your own confirmed words."
+   ],
+   "intents": [
+    "career_discovery",
+    "career_tailor"
+   ]
+  },
+  {
+   "id": "E38",
+   "area": "resume",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "resume: no tailored PDF returned in a reply [stopped at: turns handled as outreach_clarification]"
+   ],
+   "stage": [
+    "resume: turns handled as outreach_clarification"
+   ],
+   "replies": [
+    "Nothing was sent — here is exactly where it stands.\nNothing is built in this conversation to send: no list, no draft, no approved plan — so there is no wave that could go out. Every send in this product is approval-gated: the list's counts return first, you approve the whole plan once, and only then does a wave send. Name the target and I will build the plan the send has to stand on."
+   ],
+   "intents": [
+    "outreach_clarification"
+   ]
+  },
+  {
+   "id": "E39",
+   "area": "resume",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "resume: no tailored PDF returned in a reply [stopped at: turns handled as outreach_clarification]"
+   ],
+   "stage": [
+    "resume: turns handled as outreach_clarification"
+   ],
+   "replies": [
+    "Nothing was sent — here is exactly where it stands.\nNothing is built in this conversation to send: no list, no draft, no approved plan — so there is no wave that could go out. Every send in this product is approval-gated: the list's counts return first, you approve the whole plan once, and only then does a wave send. Name the target and I will build the plan the send has to stand on."
+   ],
+   "intents": [
+    "outreach_clarification"
+   ]
+  },
+  {
+   "id": "E40",
+   "area": "resume",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "resume: Resume_Resume.pdf: does not carry the person's name (a resume they can send names them)",
+    "resume: Resume_Resume.pdf: does not carry the person's name (a resume they can send names them)"
+   ],
+   "stage": [
+    "resume: 2 PDF(s) stored, 2 returned in a reply",
+    "resume: turns handled as career_tailor"
+   ],
+   "replies": [
+    "Your resume is tailored for 2 roles: Software Engineer, New Grad at Mosaic and Backend Engineer, New Grad at Nimbus.\nSoftware Engineer, New Grad at Mosaic: saved as its own PDF, attached; Docker is named by the posting and not on your profile, so not added. Backend Engineer, New Grad at Nimbus: saved as its own PDF, attached; every skill the posting names is on your profile. Each one traces every line to a fact already on your profile, grounded in the posting's own text, as of November 2026.\nReview each file, and I can prepare those applications next."
+   ],
+   "intents": [
+    "career_tailor"
+   ]
+  },
+  {
+   "id": "G06",
+   "area": "resume",
+   "kind": "guard",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "resume: turns handled as outreach_clarification"
+   ],
+   "replies": [
+    "Nothing was sent — here is exactly where it stands.\nNothing is built in this conversation to send: no list, no draft, no approved plan — so there is no wave that could go out. Every send in this product is approval-gated: the list's counts return first, you approve the whole plan once, and only then does a wave send. Name the target and I will build the plan the send has to stand on."
+   ],
+   "intents": [
+    "outreach_clarification"
+   ]
+  }
+ ],
+ "run_at": "2026-11-08T03:16:16.852Z"
+}

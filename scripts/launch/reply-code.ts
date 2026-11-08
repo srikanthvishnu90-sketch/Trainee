@@ -42,6 +42,9 @@ export const SHARED_REPLY_MODULES = [
   "brand.ts", "row_answer.ts", "telegram_jobs.ts", "apply_all_yes.ts", "apply_all_yes_flag.ts", "role_results.ts", "career_resume_replace.ts",
   // 2026-11-06: the staged decision reads the writer's PAYLOAD_INTENTS; the code-in-chat safety turn (handler-career.ts).
   "career_reply_writer.ts", "career_code_in_chat.ts",
+  // R9-C (2026-11-07): market research on the reply path: the search provider and what it imports (sources, the research
+  // reply, its report store and the artifact it is delivered as).
+  "research_search.ts", "research_sources.ts", "research_reply.ts", "research_report_store.ts", "channel_artifacts.ts",
 ] as const;
 
 // D-036 (release flags, agent-chat/release_config.ts RELEASE_FLAGS): the code behind every flag the release serves ON that

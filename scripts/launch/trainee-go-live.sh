@@ -285,7 +285,10 @@ MIGRATIONS=(
   20261105180000_career_claim_deadlock.sql
   20261106120000_career_apply_candidates_missing_account_row.sql
   20261106130000_career_resume_cloud_copy_recovery.sql
+  20261107120100_career_apply_posting_key_any_host.sql
   20261107120200_career_contact_outreach.sql
+  20261108100000_career_apply_card_pages.sql
+  20261108110000_career_apply_posting_resume.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -440,7 +443,10 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'career_outreach_action_claim' and prosrc like '%career_outreach_action_claim:%' and prosrc like '%ok_threads%')"
   "exists (select 1 from pg_proc where proname = 'career_apply_prepare_candidates_for' and prosrc like '%pk.key = ''career:account''%') and exists (select 1 from pg_proc where proname = 'career_apply_prepare_candidates' and prosrc like '%pk.key = ''career:account''%') and exists (select 1 from pg_proc where proname = 'career_account_row_ensure')"
   "exists (select 1 from pg_proc where proname = 'career_resume_put' and prosrc like '%on conflict (user_id, sha256) do nothing%')"
+  "exists (select 1 from pg_proc where proname = 'career_apply_posting_key' and prosrc like '%jid := substring(p from%')"
   "to_regclass('public.career_contact_suppression') is not null and exists (select 1 from pg_proc where proname = 'career_contact_record_send')"
+  "to_regclass('public.career_apply_card_pages') is not null and exists (select 1 from pg_proc where proname = 'career_apply_card_push_paged_for')"
+  "exists (select 1 from pg_proc where proname = 'career_apply_cloud_resume_for_posting') and exists (select 1 from pg_proc where proname = 'career_apply_posting_resume_put')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql

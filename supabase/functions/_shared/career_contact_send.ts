@@ -5,9 +5,12 @@
 //                      says "unconfirmed" and suggests another channel. A suppressed address (the global list, anyone's
 //                      opt-out, any bounce) never gets a card. Every email ends with the person's signature, the sender's
 //                      postal address (CAREER_SENDER_POSTAL_ADDRESS, owner-set; no address, no card) and the opt-out line.
-//   test mode          CAREER_CONTACT_TEST_RECIPIENTS (the owner's own addresses): every card is addressed to the first of
-//                      them, and nothing goes to any address outside the list. The card shows both, and the hash binds the
-//                      address it will really go to.
+//   test mode          CAREER_CONTACT_TEST_RECIPIENTS (the owner's own addresses, "a@x.dev, Name <b@x.dev>; c@x.dev"):
+//                      every card is addressed to the first of them, and nothing goes to any address outside the list. The
+//                      card shows both, and the hash binds the address it will really go to. It fails closed: set but with
+//                      no address that parses, every card and every approval is refused (never the real address).
+//   card hash          one hash over every mail on the card, in order (the first email and each follow-up, each mail's
+//                      exact-payload hash and the day it goes): a yes approves that whole card and nothing else.
 //   approveContactCard the yes must carry the card's hash; the drafts are stored approved (career_outreach_drafts) and
 //                      queued on the rail. At most `dailyNew` (20) new contacts per person per day, each spread
 //                      `spreadMinutes` after the last; at most 2 follow-ups, 4 to 7 days apart, which the rail stops on a
@@ -18,27 +21,51 @@ import { type ContactDraft, type ContactIn, SPAM_PHRASES } from "./career_contac
 
 export const SEND_MIN_SCORE = 70, DAILY_NEW_DEFAULT = 20, SPREAD_MINUTES_DEFAULT = 20, FOLLOWUPS_MAX = 2, FOLLOWUP_DAYS = 5, FOLLOWUP_MIN_DAYS = 4, FOLLOWUP_MAX_DAYS = 7;
 export const UNCONFIRMED = "I can't confirm this address, so I won't send to it. Try an introduction through someone you know there, or the company's own contact form.";
-export interface SendConfig { on: boolean; dailyNew: number; spreadMinutes: number; followupDays: number; postalAddress: string | null; testRecipients: string[] }
+// testMode: CAREER_CONTACT_TEST_RECIPIENTS is set (anything but blank). testRecipients: the addresses in it that parse.
+export interface SendConfig { on: boolean; dailyNew: number; spreadMinutes: number; followupDays: number; postalAddress: string | null; testMode: boolean; testRecipients: string[] }
 const int = (v: string | undefined, d: number, lo: number, hi: number) => { const n = Number(v); return Number.isInteger(n) && n >= lo && n <= hi ? n : d; };
 const ADDR = /^[a-z0-9._%+-]+@(?:[a-z0-9-]+\.)+[a-z]{2,24}$/;
+// The addresses in CAREER_CONTACT_TEST_RECIPIENTS, in order, once each, lower-cased. Entries are separated by commas,
+// semicolons or whitespace; an entry may carry a display name ("Owner <owner@trainee.dev>", '"Owner, T." <owner@x.dev>'),
+// and then only the address in angle brackets counts: a quoted display name is never read for an address. Anything that
+// does not parse is ignored here; sendConfig keeps testMode on whenever the variable is set, so nothing parsing fails closed.
+export function testRecipients(raw: string | null | undefined): string[] {
+  const out: string[] = [];
+  const add = (a: string) => { const e = a.trim().replace(/^mailto:/i, "").toLowerCase(); if (ADDR.test(e) && !out.includes(e)) out.push(e); };
+  const unquoted = String(raw ?? "").replace(/"(?:[^"\\]|\\.)*"?/g, " "); // display names in quotes say nothing
+  for (const entry of unquoted.split(/[,;]+/)) {
+    const bracketed = [...entry.matchAll(/<([^<>]*)>/g)].map((m) => m[1]);
+    if (bracketed.length) bracketed.forEach(add); // "Name <address>": the address, never the name
+    else entry.split(/\s+/).filter(Boolean).forEach(add);
+  }
+  return out;
+}
 // on: career_contact_pipeline.ts contactOutreachOn (both switches), computed by the caller.
 export function sendConfig(env: (k: string) => string | undefined, on: boolean): SendConfig {
   const postal = String(env("CAREER_SENDER_POSTAL_ADDRESS") ?? "").replace(/\s+/g, " ").trim();
   return { on, dailyNew: int(env("CAREER_CONTACT_DAILY_MAX"), DAILY_NEW_DEFAULT, 0, 200), spreadMinutes: int(env("CAREER_CONTACT_SPREAD_MINUTES"), SPREAD_MINUTES_DEFAULT, 0, 720),
     followupDays: int(env("CAREER_CONTACT_FOLLOWUP_DAYS"), FOLLOWUP_DAYS, FOLLOWUP_MIN_DAYS, FOLLOWUP_MAX_DAYS), postalAddress: postal.length >= 10 && postal.length <= 200 ? postal : null,
-    testRecipients: String(env("CAREER_CONTACT_TEST_RECIPIENTS") ?? "").split(",").map((s) => s.trim().toLowerCase()).filter((s) => ADDR.test(s)) };
+    testMode: String(env("CAREER_CONTACT_TEST_RECIPIENTS") ?? "").trim() !== "", testRecipients: testRecipients(env("CAREER_CONTACT_TEST_RECIPIENTS")) };
 }
 export const footerFor = (signature: string, postal: string) => `${signature.trim()}\n${postal}\n\n${OPT_OUT_LINE}`;
 
 export interface CardMail { subject: string; body: string; footer: string; text: string; hash: string; after_days: number }
 export type ContactCard =
   | { ok: true; to: string; found: string; test_mode: boolean; score: number; method: string; mails: CardMail[]; hash: string }
-  | { ok: false; why: "off" | "unconfirmed" | "suppressed" | "no_postal_address" | "no_signature" | "bad_followup"; reply: string };
+  | { ok: false; why: "off" | "test_mode_misconfigured" | "unconfirmed" | "suppressed" | "no_postal_address" | "no_signature" | "bad_followup"; reply: string };
+// Test mode is set but lists no address that parses: no card, and no approval, ever goes out (fail closed).
+const testModeBroken = (c: SendConfig) => (c.testMode || c.testRecipients.length > 0) && c.testRecipients.length === 0;
+const TEST_MODE_BROKEN = "Test mode is on but CAREER_CONTACT_TEST_RECIPIENTS has no address I can read, so nothing goes to anyone until the owner fixes it.";
+// The card's hash: every mail on it, in order, each by its exact-payload hash and the day it goes.
+export const cardHash = async (mails: Pick<CardMail, "hash" | "after_days">[]) =>
+  [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(["contact-card/1", mails.map((m) => [m.hash, m.after_days])]))))]
+    .map((b) => b.toString(16).padStart(2, "0")).join("");
 // A follow-up's own checks: short, at most one question, no spam phrase, no link.
 const followupOk = (b: string) => b.split(/\s+/).filter(Boolean).length <= 80 && (b.match(/\?/g) ?? []).length <= 1 && !SPAM_PHRASES.some((p) => b.toLowerCase().includes(p)) && !/https?:\/\/|www\./i.test(b);
 export async function contactCard(o: { contact: ContactIn; draft: ContactDraft; signature: string | null; followups?: string[]; config: SendConfig; suppressed: (emails: string[]) => Promise<Set<string>> }): Promise<ContactCard> {
   const c = o.config, e = o.contact.email;
   if (!c.on) return { ok: false, why: "off", reply: "Contact outreach is not switched on." };
+  if (testModeBroken(c)) return { ok: false, why: "test_mode_misconfigured", reply: TEST_MODE_BROKEN };
   if (!e.email || !e.approvable || e.score < SEND_MIN_SCORE) return { ok: false, why: "unconfirmed", reply: `${o.contact.person.name}'s address is unconfirmed (${e.score}/100: ${e.why}). ${UNCONFIRMED}` };
   if (!c.postalAddress) return { ok: false, why: "no_postal_address", reply: "A sender postal address has to be set before any outreach email can go (CAREER_SENDER_POSTAL_ADDRESS)." };
   if (!o.signature?.trim()) return { ok: false, why: "no_signature", reply: "How do you sign your emails? Send your name the way you want it at the bottom." };
@@ -53,7 +80,7 @@ export async function contactCard(o: { contact: ContactIn; draft: ContactDraft; 
     const m = messageOf({ recipient: { email: to } as Recipient, subject: p.subject, body: p.body, footer });
     mails.push({ subject: m.subject, body: p.body, footer, text: m.text, hash: await payloadHash(m), after_days: p.after_days });
   }
-  return { ok: true, to, found, test_mode: to !== found, score: e.score, method: e.method ?? "", mails, hash: mails[0].hash };
+  return { ok: true, to, found, test_mode: to !== found, score: e.score, method: e.method ?? "", mails, hash: await cardHash(mails) };
 }
 
 // The day's limit, per person (PR part 1: career_contact_record_send / career_contact_sends).
@@ -80,8 +107,10 @@ export async function approveContactCard(o: {
   store: Pick<OutreachStore, "saveBatch" | "update">; rail: QueueDeps; limits: SendLimits; suppressed: (emails: string[]) => Promise<Set<string>>;
 }): Promise<Approved> {
   const { card, config: c } = o;
-  if (o.yesHash !== card.hash) return { ok: false, why: "changed", reply: "That yes was for a different version of this email, so nothing was sent. Here it is again to approve." };
-  if (c.testRecipients.length && !c.testRecipients.includes(card.to)) return { ok: false, why: "refused", reply: "Test mode: that address is not on the test list, so nothing was sent." };
+  // The yes must be this card's hash, and the hash must be the one its mails make (a card is never trusted to say its own).
+  if (o.yesHash !== card.hash || card.hash !== await cardHash(card.mails)) return { ok: false, why: "changed", reply: "That yes was for a different version of this email, so nothing was sent. Here it is again to approve." };
+  if (testModeBroken(c)) return { ok: false, why: "refused", reply: TEST_MODE_BROKEN };
+  if (c.testMode && !c.testRecipients.includes(card.to)) return { ok: false, why: "refused", reply: "Test mode: that address is not on the test list, so nothing was sent." };
   if ((await o.suppressed([card.found, card.to])).size) return { ok: false, why: "suppressed", reply: `${o.contact.person.name} can't be emailed any more (they opted out, or the address bounced).` };
   const day = dayIn(o.now, o.tz), emailHash = await hashOf(card.found);
   const slot = await o.limits.countToday(o.userId, day);

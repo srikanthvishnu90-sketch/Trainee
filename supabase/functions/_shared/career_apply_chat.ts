@@ -15,7 +15,7 @@ import { INT4_MAX, type Limits, PACE_RE } from "./career_apply.ts";
 import { type EmployerAnswer, employerQuestion, type Pick, queueWants, screenPicks, type WantStore } from "./career_apply_want.ts";
 import type { AppRow } from "./career_apply_status.ts";
 import { type FetchFeed, type PostingsDb, searchWords } from "./career_ingest.ts";
-import { applyText, linkAsk, possessiveAsk, postingForLink, postingsForRole } from "./career_apply_link.ts";
+import { applyText, linkAsk, type LinkAsk, linksAsk, possessiveAsk, postingForLink, postingsForRole } from "./career_apply_link.ts";
 import { sameCompany, type TrackedApp } from "./career_mail.ts";
 import { fitOf, scoringProfileFor } from "./career_search.ts";
 // FEATURE 1 (2026-10-25): positions in the list, the listed postings checked on file, no resume on file, the server
@@ -44,6 +44,23 @@ export function applyAsk(message: string): { company: string; role: string | nul
   return null;
 }
 
+// R9-G (e2e E08): two or more named roles in one apply ask ("apply to the Data Science Intern role at Kite and the Data
+// Analyst Intern role at Plaid"): each "<role> role at <Company>" the single ask reads, split where one company's name ends
+// and ", " / " and " starts the next. Every part must read as a single ask, or this is not the ask (nothing is guessed).
+const NAMED_SPLIT = /(?<=\bat\s+[A-Z][A-Za-z0-9&.'’-]*(?:\s+(?:[A-Z][A-Za-z0-9&.'’-]*|\d+))*)\s*(?:,\s*and\s+|,\s*|\s+and\s+)(?=(?:the\s+|that\s+)?\S)/;
+export function namedAsks(message: string): { company: string; role: string | null }[] | null {
+  const raw = applyText(message);
+  if (raw === null || !/\bapply\b/i.test(raw) || QUESTION.test(raw)) return null;
+  const m = raw.match(/^(.*?\bapply\s+(?:me\s+)?(?:to|for)\s+)(.+)$/i);
+  if (!m) return null;
+  const parts = m[2].split(new RegExp(NAMED_SPLIT.source, "g"));
+  if (parts.length < 2) return null;
+  const asks = parts.map((p) => applyAsk(`apply to ${p.trim().replace(/^(?:the|that)\s+/i, "the ")}`));
+  if (asks.some((a) => !a || !a.role)) return null;
+  const keys = new Set(asks.map((a) => `${lower(a!.company)}|${lower(a!.role)}`));
+  return keys.size === asks.length ? asks as { company: string; role: string }[] : null;
+}
+
 // The batch ask: the listed postings (all, the first N, the Nth, or N of them). Questions, past tense and a named employer
 // ("apply to the analyst role at Acme": the single ask's) are never this ask.
 // D-MS-2 (2026-10-27): "all" may carry a filter over the listed postings ("apply to all remote ones", "apply to every
@@ -55,7 +72,7 @@ export type ListFilter = { remote: boolean; words: string[]; said: string };
 export interface ManyWhat { role: string; words: string[]; place: string | null; company?: string | null }
 // MASS APPLY END TO END (2026-11-04): `good` is "apply to the good ones": the listed postings their confirmed facts fit
 // (fit bucket Match or Safety, not knocked out), never a guess when their facts can't rank them.
-export type ManyAsk = { kind: "all"; filter?: ListFilter; good?: true } | { kind: "first"; n: number; what?: ManyWhat } | { kind: "nth"; i: number } | { kind: "pick"; is: number[] };
+export type ManyAsk = { kind: "all"; filter?: ListFilter; good?: true; what?: ManyWhat } | { kind: "first"; n: number; what?: ManyWhat } | { kind: "nth"; i: number } | { kind: "pick"; is: number[] };
 // Short forms a person types for a role family, read against the listed titles.
 const ROLE_ALIASES: Record<string, string[]> = {
   swe: ["software engineer", "software engineering", "software developer", "swe"],
@@ -72,6 +89,8 @@ const ROLE_ALIASES: Record<string, string[]> = {
   qa: ["quality assurance", "qa", "test engineer"],
   ai: ["ai", "artificial intelligence", "machine learning"],
   fe: ["frontend", "front end", "front-end"],
+  // R9-G: a UI engineer or UI developer is a frontend engineering role by its title; "UI designer" is not (design, not code).
+  frontend: ["frontend", "front end", "front-end", "ui engineer", "ui engineering", "ui developer", "ui development"],
   be: ["backend", "back end", "back-end"],
   ux: ["ux", "user experience", "designer"],
   intern: ["intern", "internship", "co-op"],
@@ -226,7 +245,18 @@ async function postingsFor(o: ApplyChatDeps, what: ManyWhat): Promise<{ list: Sh
 }
 // "the top N ..." is the batch ask's even with "at <Company>" in it (a company filter, review of #366).
 const TOP_N = /\b(?:top|first|best)\s+(?:\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten)\b/i;
+// R9-G (e2e E06): "find frontend internships in Chicago and apply to all of them": the search and the batch in one message.
+// "them" is what that search finds, so it is searched here exactly as "apply to the top N <role> in <place>" is (postingsFor:
+// every role word in the title, the place in the location), and every match is the batch, at most MANY_MAX.
+const FIND_THEN_ALL = /^(?:(?:can you|could you|please|pls)\s+)?(?:find|search(?:\s+for)?|look\s+(?:for|up)|get)\s+(?:me\s+)?(.+?)\s*(?:,\s*)?(?:\band\s+|\bthen\s+|,\s*)(?:then\s+)?apply(?:\s+me)?\s+(?:to|for)\s+(?:all(?:\s+of)?\s+(?:them|those|these|the\s+ones\s+you\s+find)|them\s+all|each(?:\s+one)?\s+of\s+them|every\s+one(?:\s+of\s+them)?|all|them)(?:\s+please)?\s*[.!]?$/i;
+export function findThenApplyAsk(message: string): ManyWhat | null {
+  const t = String(message ?? "").trim();
+  if (NOT_A_COMMAND.test(t) || QUESTION.test(t) || /\bapplied\b/i.test(t)) return null;
+  const m = FIND_THEN_ALL.exec(t);
+  return m ? manyWhatOf(m[1]) : null;
+}
 export function applyManyAsk(message: string): ManyAsk | null {
+  { const what = findThenApplyAsk(message); if (what) return { kind: "all", what }; }
   if (NOT_A_COMMAND.test(String(message ?? ""))) return null;
   const raw = applyText(message);
   if (raw === null || !/\bapply\b/i.test(raw) || QUESTION.test(raw) || /\bapplied\b/i.test(raw) || (/\bat\s+[A-Z]/.test(raw) && !TOP_N.test(raw))) return null;
@@ -390,9 +420,14 @@ export async function applyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | nul
   // FEATURE E2E: a pasted posting link, or a role named by the company's possessive, read from the ATS on demand
   // (career_apply_link.ts); only with the link deps wired (agent-chat), otherwise as before.
   if (o.link) {
+    const many = linksAsk(o.message);
+    if (many) return await linksApplyTurn(o, many);
     const linked = await linkApplyTurn(o);
     if (linked) return linked;
   }
+  // R9-G: several named roles in one ask: each found on file as the single ask finds it, then one batch.
+  const named = namedAsks(o.message);
+  if (named) return await namedApplyTurn(o, named);
   // The batch ask first: applyAsk's employer grammar is case-blind, so "apply to the top 2" would read as an employer.
   if (applyManyAsk(o.message)) return applyManyTurn(o);
   const ask = applyAsk(o.message);
@@ -400,12 +435,10 @@ export async function applyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | nul
   const intent = APPLY_QUEUE_INTENT;
   // Only an open posting on file (career_postings) is this turn's: when none matches, or the read fails, the turn is
   // not claimed, and the router answers the ask as it always has (its own served list, its honest named stop).
-  let hits: any[];
-  try { hits = await o.postings.search(searchWords(ask.company), 50); }
+  let found: { atCompany: any[]; matching: any[] };
+  try { found = await namedOnFile(o, ask); }
   catch { return null; }
-  const atCompany = hits.filter((p) => sameCompany(p?.company, ask.company) || lower(p?.company) === lower(ask.company));
-  const roleWords = ask.role ? searchWords(ask.role) : [];
-  const matching = roleWords.length ? atCompany.filter((p) => { const t = lower(p?.title); return roleWords.every((w) => t.includes(lower(w))); }) : atCompany;
+  const { atCompany, matching } = found;
   if (!matching.length) {
     // FEATURE E2E: nothing at that employer on file: its registered board, read on demand (career_apply_link.ts).
     if (!atCompany.length) return o.link && ask.role ? await roleFromBoard(o, ask.company, ask.role) : null;
@@ -416,6 +449,33 @@ export async function applyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | nul
     return { reply: `${ask.company} has ${matching.length} open postings on file. Which one? ${matching.slice(0, 5).map((p, i) => `${i + 1}. ${p.title}`).join(" ")} Say "apply to the <role> role at ${ask.company}".`, status: "which", intent };
   }
   return await applyPicked(o, matching[0]);
+}
+
+// The open postings on file at the named employer, and those whose title carries every word of the named role.
+async function namedOnFile(o: ApplyChatDeps, ask: { company: string; role: string | null }): Promise<{ atCompany: any[]; matching: any[] }> {
+  const hits = await o.postings.search(searchWords(ask.company), 50);
+  const atCompany = hits.filter((p) => sameCompany(p?.company, ask.company) || lower(p?.company) === lower(ask.company));
+  const roleWords = ask.role ? searchWords(ask.role) : [];
+  const matching = roleWords.length ? atCompany.filter((p) => { const t = lower(p?.title); return roleWords.every((w) => t.includes(lower(w))); }) : atCompany;
+  return { atCompany, matching };
+}
+// R9-G (e2e E08): each named role found on file exactly as the single ask finds it (one match, the first by the search's
+// order, as applyTurn takes it), then ONE batch through applyManyTurn: one card, each application bound to its own payload
+// hash. A role with no open posting on file is named with that reason and nothing is made up for it.
+async function namedApplyTurn(o: ApplyChatDeps, asks: { company: string; role: string | null }[]): Promise<ApplyChatResult> {
+  const intent = APPLY_QUEUE_INTENT;
+  const list: ShortlistEntry[] = [], missing: Missing[] = [], seen = new Set<string>();
+  for (const ask of asks) {
+    let found: { atCompany: any[]; matching: any[] };
+    try { found = await namedOnFile(o, ask); }
+    catch { return { reply: `I couldn't search the postings just now, so nothing was queued. Ask again in a minute.`, status: "unreadable", intent, queued: [], refused: [] }; }
+    const p = found.matching[0];
+    if (!p) { missing.push({ job_id: null, company: ask.company, title: ask.role ?? "role", reason: `no open posting for it at ${ask.company} is on file` }); continue; }
+    if (seen.has(String(p.job_id))) continue;
+    seen.add(String(p.job_id));
+    list.push({ id: p.job_id ?? null, title: p.title ?? null, company: p.company ?? null, location: p.location ?? null, url: p.url ?? null });
+  }
+  return (await applyManyTurn(o, { list, missing, note: "" }))!;
 }
 
 // One posting the person named, through the same screens, resume check, pace and queue as every single ask.
@@ -494,24 +554,30 @@ const nameOf = (p: { title?: string | null; company?: string | null }) =>
 const listed = (names: string[], max = 12) => names.length <= max ? names.join("; ") : `${names.slice(0, max).join("; ")}; and ${names.length - max} more`;
 
 // The batch ask over the thread's last listed postings: null with no ask, or no list (the router's turn, as before).
-export async function applyManyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | null> {
-  const ask = applyManyAsk(o.message);
+type Missing = { job_id: string | null; company: string; title: string; reason: string; said?: string };
+// `given`: the postings the person's own links named, already read open from their boards (linksApplyTurn): all of them, as
+// one batch, through the same screens, resume check, pace and queue as every batch ask.
+export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistEntry[]; missing: Missing[]; note: string }): Promise<ApplyChatResult | null> {
+  const ask: ManyAsk | null = given ? { kind: "all" } : applyManyAsk(o.message);
   if (!ask) return null;
   const intent = APPLY_QUEUE_INTENT;
   // MASS APPLY: "the top N <role> in <place>" is searched for here, not read from the thread's last list.
-  const what = ask.kind === "first" ? ask.what : undefined;
+  const what = ask.kind === "first" || ask.kind === "all" ? ask.what : undefined;
   let list: ShortlistEntry[], rankedBy: "fit" | "newest" = "newest";
   if (what) {
     try { ({ list, rankedBy } = await postingsFor(o, what)); }
     catch { return { reply: `I couldn't search the postings just now, so nothing was queued. Ask again in a minute.`, status: "unreadable", intent, queued: [], refused: [] }; }
     if (!list.length) return { reply: `I have no open ${what.role || "matching"} postings${what.company ? ` at ${what.company.replace(/\b\w/g, (c) => c.toUpperCase())}` : ""}${what.place ? ` in ${what.place.replace(/\b\w/g, (c) => c.toUpperCase())}` : ""} on file, so nothing was queued. Say "find <role> jobs in <place>" to look wider.`, status: "none", intent, queued: [], refused: [] };
-  } else list = (o.shortlist ?? []).filter((e) => e && (e.url || e.id));
+  } else list = given ? given.list : (o.shortlist ?? []).filter((e) => e && (e.url || e.id));
   // SERIAL-1440 (2): with no list on this thread the ask still gets an answer that says what to say, never a catch-all.
+  if (!list.length && given) {
+    return { reply: `${coverageLine(0, given.missing.length)} Not queued: ${listed(given.missing.map((r) => `${r.title}: ${r.reason}`), 8)}.`, status: "none", intent, queued: [], refused: given.missing, coverage: { queued: 0, total: given.missing.length } };
+  }
   if (!list.length) {
     return { reply: `I haven't listed any postings in this thread yet, so there is nothing for "these" to mean; nothing was queued. Say "find <role> jobs in <place>" first and then "apply to these", or name one: "apply to the <role> role at <Company>".`, status: "no_list", intent, queued: [], refused: [] };
   }
-  let slice: ShortlistEntry[], note = "";
-  const missing: { job_id: string | null; company: string; title: string; reason: string; said?: string }[] = [];
+  let slice: ShortlistEntry[], note = given?.note ?? "";
+  const missing: Missing[] = given ? given.missing.slice() : [];
   if (ask.kind === "nth") {
     if (ask.i > list.length) return { reply: `I listed ${list.length}, so there is no ${["first", "second", "third", "fourth", "fifth"][ask.i - 1] ?? `#${ask.i}`} one; nothing was queued. Say which of the ${list.length} you mean.`, status: "none", intent };
     slice = list.slice(ask.i - 1, ask.i);
@@ -551,12 +617,17 @@ export async function applyManyTurn(o: ApplyChatDeps): Promise<ApplyChatResult |
       return { reply: `None of the ${list.length} I listed ${list.length === 1 ? "is" : "are"} ${ask.filter.said}, so nothing was queued. Say "apply to all of them", or name which ones ("apply to 1 and 3").`, status: "none", intent, queued: [], refused: [] };
     }
     if (slice.length < list.length) note = `${slice.length} of the ${list.length} I listed ${slice.length === 1 ? "is" : "are"} ${ask.filter.said}: those ${slice.length === 1 ? "one" : String(slice.length)}. `;
+  } else if (what) {
+    // R9-G: "find <role> in <place> and apply to all of them": every match, at most MANY_MAX, ranked as the search ranks.
+    slice = list.slice(0, MANY_MAX);
+    const order = rankedBy === "fit" ? "best fit for your confirmed facts first" : "newest first (I couldn't rank them by fit)";
+    note = `I found ${list.length} open ${what.role || "matching"} posting${list.length === 1 ? "" : "s"}${what.place ? ` in ${what.place.replace(/\b\w/g, (c) => c.toUpperCase())}` : ""} on file${list.length > MANY_MAX ? `; one message queues at most ${MANY_MAX}, so I took the first ${MANY_MAX}` : ""}. Ranked ${order}. `;
   } else slice = list.slice();
   let total = slice.length + missing.length;
   const listedPicks: Pick[] = slice.map((e) => ({ job_id: e.id ?? undefined, url: e.url ?? undefined, company: e.company ?? undefined, title: e.title ?? undefined, location: e.location ?? undefined }));
   // FEATURE 1: each listed posting by its record on file; a closed one, or one not found with no link, is refused by name.
   // (A searched ask's postings were just read open from the file: no second read per posting.)
-  const onFile = what ? { ok: listedPicks, refused: [] } : await checkListed(listedPicks, o.posting);
+  const onFile = what || given ? { ok: listedPicks, refused: [] } : await checkListed(listedPicks, o.posting);
   const picks: Pick[] = onFile.ok;
   missing.push(...onFile.refused);
   let apps: TrackedApp[];
@@ -600,7 +671,7 @@ export async function applyManyTurn(o: ApplyChatDeps): Promise<ApplyChatResult |
   const parts: string[] = [coverageLine(queued.length, total, already)];
   // "at <company>": exactly that employer (our company records name no subsidiaries, so none are added); said by name.
   if (what?.company && queued.length) parts.push(`Companies included: ${[...new Set(queued.map((q) => q.company))].join(", ")} (only that employer; no subsidiaries are on record).`);
-  if (queued.length) parts.push(`Queued ${queued.length}${total > queued.length ? ` of the ${total}` : ""}${ask.kind === "all" && !note ? " I listed" : ""}: ${listed(queued.map(nameOf))}.`);
+  if (queued.length) parts.push(`Queued ${queued.length}${total > queued.length ? ` of the ${total}` : ""}${given ? " you asked for" : ask.kind === "all" && !note ? " I listed" : ""}: ${listed(queued.map(nameOf))}.`);
   const ahead = prepareSentence(kick, queued.length);
   if (ahead) parts.push(ahead);
   if (resumeMissing && queued.length) parts.push(NO_RESUME_WAIT);
@@ -765,6 +836,30 @@ async function linkApplyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | null> 
     return { reply: `${coverageLine(0, 1)} Not queued: ${ask.url} is not among the open postings its board lists right now (it may have closed), so there is nothing to apply to.`, status: "none", intent, coverage: { queued: 0, total: 1 } };
   }
   return await applyPicked(o, found.posting);
+}
+
+// R9-G (e2e E05): several posting links in one apply ask ("apply to these 20: <links>"): each posting its link names (on file,
+// or read from its ATS now and stored, as linkApplyTurn does for one), then ONE batch through applyManyTurn: one card of
+// what is prepared, each application bound to its own payload hash when the card is built. At most MANY_MAX per message;
+// a link past that, one no board lists, or one no reader knows is named with its reason, never guessed at.
+async function linksApplyTurn(o: ApplyChatDeps, many: { asks: LinkAsk[]; unread: string[] }): Promise<ApplyChatResult> {
+  const take = many.asks.slice(0, MANY_MAX), over = many.asks.slice(MANY_MAX);
+  const missing: Missing[] = many.unread.map((u) => ({ job_id: null, company: "", title: u, reason: "not a posting link I can read (Greenhouse, Lever or Ashby)" }));
+  for (const a of over) missing.push({ job_id: null, company: "", title: a.url, reason: `one message queues at most ${MANY_MAX}; send it again` });
+  const found = await Promise.all(take.map((ask) => postingForLink({ ask, db: o.link!.db, fetchFeed: o.link!.fetchFeed, now: o.now })
+    .catch((e) => ({ kind: "unreadable" as const, why: String(e?.message ?? e) }))));
+  const list: ShortlistEntry[] = [], seen = new Set<string>();
+  found.forEach((f, i) => {
+    const url = take[i].url;
+    if (f.kind === "unreadable") missing.push({ job_id: null, company: "", title: url, reason: "its board could not be read just now" });
+    else if (f.kind !== "found") missing.push({ job_id: null, company: "", title: url, reason: "not among the open postings its board lists (it may have closed)" });
+    else if (!seen.has(String(f.posting.job_id))) {
+      seen.add(String(f.posting.job_id));
+      list.push({ id: f.posting.job_id, title: f.posting.title, company: f.posting.company, location: f.posting.location ?? null, url: f.posting.url ?? url });
+    }
+  });
+  const note = over.length ? `One message queues at most ${MANY_MAX}, so I took the first ${MANY_MAX} of the ${many.asks.length} links. ` : "";
+  return (await applyManyTurn(o, { list, missing, note }))!;
 }
 
 // A role at a company with nothing on file: the company's registered board (121 BOARD_REGISTRY), read now. Exactly one

@@ -23029,6 +23029,16 @@ const CareerTailor = (() => {
     if (s && e && s !== e) return `${s}–${e}`;
     return s || e || null;
   }
+  // The top of the resume: the name and email typed for it (basics) when there is one; otherwise the header of the resume
+  // the person confirmed (RELEASE 9, 142 confirmResumeHeader: shown word for word with the entries and bound to the same
+  // yes), printed exactly as they wrote it. from: "resume" marks it (the router still names the files for the posting).
+  function headerOf(profile) {
+    const b = profile.basics, rh = profile.resume_header, typed = b.name; // unreadable basics fail here, as they always did
+    if (!typed && rh && typeof rh === "object" && rh.name) {
+      return { name: rh.name, email: rh.email || null, location: rh.location || null, links: rh.links || {}, contactLine: rh.contactLine || null, linksLine: rh.linksLine || null, from: "resume" };
+    }
+    return { name: b.name, email: b.email, location: b.location, links: b.links || {} };
+  }
   function entryTextFor(fact) {
     const title = (fact && fact.title) || "";
     const range = dateRangeFor(fact);
@@ -23177,7 +23187,7 @@ const CareerTailor = (() => {
     }
     for (let i = sections.length - 1; i >= 0; i--) if (!sections[i].lines.length) sections.splice(i, 1);
     const lines = sections.flatMap((s) => s.lines.map((l) => ({ ...l, section: s.heading })));
-    return { family, familyLabel: fam.label, conventions: fam.conventions, pageLimit: fam.pageLimit, header: { name: profile.basics.name, email: profile.basics.email, location: profile.basics.location, links: profile.basics.links || {} }, sections, lines, deduped, selectedFactIds: selected.map((x) => x.fact.id) };
+    return { family, familyLabel: fam.label, conventions: fam.conventions, pageLimit: fam.pageLimit, header: headerOf(profile), sections, lines, deduped, selectedFactIds: selected.map((x) => x.fact.id) };
   }
 
   // ---- TRUTH AUDIT — hard gate (APPE-002) ----
@@ -38846,6 +38856,9 @@ const CareerRouter = (() => {
     if (named && !/^(me|my|the|that|this|a|an)$/.test(named[1])) return false;
     if (/\b(send|email|mail|forward)\b[^.?!]*\bto\s+(?!me\b|this\b)[a-z]/.test(t)) return false;
     return /\b(send|give|share|attach|drop|post|text|email)\b[^.?!]*\b(me|here)\b/.test(t)
+      // RELEASE 9 (e2e eval E31-E39): "tailor my resume ... and send it back" is the file returned in this chat, never a
+      // campaign send ("send it back" / "send both back" / "send them back" name no recipient but the person).
+      || /\b(send|give|text|email)\s+(it|them|both|that|these|those|the files?|the pdfs?)\s+back\b/.test(t)
       || /\bin this chat\b/.test(t)
       || /\b(send|give|share|attach)\s+(me\s+)?(my|the|that|this)\s+(resume|cv|cover letter|packet|brief|pdf|docx|file|document)\b/.test(t);
   }
@@ -39036,7 +39049,13 @@ const CareerRouter = (() => {
     if (nameCheck) facts.push(nameMismatchLine(nameCheck));
     if (Array.isArray(res.replaced_drafts) && res.replaced_drafts.length) facts.push("This replaces the resume you pasted before it, which you had not confirmed.");
     if ((profile.facts || []).some((f) => f && f.source === "resume-ingest" && !f.needs_confirmation)) facts.push("Your confirmed resume stays in use until you confirm this one; then this one replaces it.");
-    const reply = entriesReply("Your resume is on record — as drafts, awaiting your word.", facts, "Here is what I read from it, word for word:", presented.map((f, i) => `${i + 1}. ${f.text}`),
+    // RELEASE 9 (e2e eval: tailored PDFs with no name on them): the name and contact lines at the top of the resume are shown
+    // with the entries, word for word, and bound to the same yes; at the yes they fill the resume header's EMPTY fields only
+    // (a name and email the person typed for it, set_resume_contact, always win). Nothing is guessed: a top line that does
+    // not read as a name is not a name, and an address, a link or a place is taken only as written.
+    const header = resumeHeaderOf(raw);
+    if (mir && mir.resumeIngest) { if (header) mir.resumeIngest.header = { ...header, sha256: sha256(headerLine(header)) }; else delete mir.resumeIngest.header; }
+    const reply = entriesReply("Your resume is on record — as drafts, awaiting your word.", facts, "Here is what I read from it, word for word:", [...(header ? [`At the top: ${headerLine(header)}`] : []), ...presented.map((f, i) => `${i + 1}. ${f.text}`)],
       target ? `Say "yes, that's my resume" and I confirm them and tailor for ${target.label} in the same turn.` : "Say \"yes, that's my resume\" and I confirm them as your facts — then name a role and the tailoring runs on them.");
     return { intent: "career_resume_ingest", reply, resultStatus: "awaiting_user", sends: 0, resume_ingest: { drafts: total, byKind } };
   }
@@ -39060,6 +39079,41 @@ const CareerRouter = (() => {
   // gave in chat. Null when they gave none, the resume has no name line, or the two share a name.
   const NAME_LINE = /^[A-ZÀ-ɏ][\p{L}'’.-]+(?:\s+[A-ZÀ-ɏ][\p{L}'’.-]+){1,3}(?:\s+\(TEST\))?$/u;
   const nameTokens = (v) => s(v).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\(test\)/g, " ").split(/[^\p{L}'’-]+/u).map((x) => x.replace(/^['’-]+|['’-]+$/g, "")).filter((x) => x.length >= 2);
+  // The top of a resume, before its first section: the name (the first line, when it reads as one), and from the lines under
+  // it, the email, the place and the links exactly as written. Null when none of them is there.
+  const HEADER_SECTION = /^(?:education|experience|work experience|employment|projects?|skills|technical skills|leadership|summary|objective|profile|certifications?|activities|awards)\s*:?$/i;
+  function resumeHeaderOf(raw) {
+    const body = s(raw).replace(/^\s*(?:(?:here'?s|here is|this is|attached is|sending)\s+my\s+(?:updated\s+|new\s+|current\s+)?(?:resume|cv|r[ée]sum[ée])|my\s+(?:resume|cv))\s*:?\s*/i, "");
+    const lines = body.split(/\r?\n/).map((l) => l.trim());
+    const top = [];
+    for (const l of lines) { if (HEADER_SECTION.test(l)) break; if (l) top.push(l); if (top.length >= 6) break; }
+    if (!top.length) return null;
+    const nameAt = top.findIndex((l) => l.length <= 60 && NAME_LINE.test(l));
+    if (nameAt < 0) return null; // no name line: the top is not read at all (a banner, a disclaimer or a title is not a name)
+    const h = { name: top[nameAt], email: null, location: null, links: {}, contactLine: null, linksLine: null };
+    for (const l of top.slice(nameAt + 1)) {
+      // The lines themselves, verbatim: the contact line (the one carrying the email) and a line of links print as written.
+      if (!h.contactLine && /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.test(l)) h.contactLine = l;
+      else if (!h.linksLine && /\bhttps?:\/\//i.test(l)) h.linksLine = l;
+      for (const seg of l.split(/\s*[|·•]\s*/).map((x) => x.trim()).filter(Boolean)) {
+        const url = /\bhttps?:\/\/[^\s<>()]+/i.exec(seg);
+        const mail = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.exec(seg);
+        if (mail && !h.email) h.email = mail[0];
+        else if (url) { const key = (/^([A-Za-z]+)\s*:/.exec(seg) || [null, "link"])[1].toLowerCase(); if (!h.links[key]) h.links[key] = url[0].replace(/[.,;]+$/, ""); }
+        else if (!h.location && /^[\p{L} .'-]+,\s*[\p{L} .'-]+(?:\s*\(TEST\))?$/u.test(seg)) h.location = seg;
+      }
+    }
+    return h;
+  }
+  const headerLine = (h) => [h.name, h.contactLine || [h.email, h.location].filter(Boolean).join(" | "), h.linksLine || Object.values(h.links || {}).join(" | ")].filter(Boolean).join(" | ");
+  // At the yes: the header shown becomes the confirmed resume header (profile.resume_header), its own record beside the
+  // name and email typed for the resume (basics, set_resume_contact), which win wherever they are set (123 assemble).
+  function confirmResumeHeader(profile, header, at) {
+    if (!profile || typeof profile !== "object" || !header || !header.name) return false;
+    profile.resume_header = { name: header.name, email: header.email || null, location: header.location || null, links: { ...(header.links || {}) },
+      contactLine: header.contactLine || null, linksLine: header.linksLine || null, confirmed_at: at ? new Date(at).toISOString() : null };
+    return true;
+  }
   function resumeNameMismatch(raw, ctx) {
     const given = statedFactsOf(ctx).find((f) => f && f.kind === "name" && s(f.value).trim());
     if (!given) return null;
@@ -39236,6 +39290,9 @@ const CareerRouter = (() => {
     // resume leaves the profile (before this, the old school and GPA were still read back, tailored and put on forms
     // beside the new ones; "what's my GPA?" answered with the replaced resume's).
     const superseded = presentedIds && confirmed && typeof ProfileMod.supersedeResume === "function" ? ProfileMod.supersedeResume(profile, confirmedIds, { now: nowOf(ctx) }) : [];
+    // RELEASE 9: the header shown with the entries is confirmed by the same yes (only as shown: its digest must match).
+    const shownHeader = mir.resumeIngest.header;
+    if (confirmed && shownHeader && shownHeader.sha256 === sha256(headerLine(shownHeader))) confirmResumeHeader(profile, shownHeader, nowOf(ctx));
     const target = mir.tailorTarget && mir.tailorTarget.company ? mir.tailorTarget : null;
     const wmir = threadMirrorForWrite(ctx);
     if (wmir) delete wmir.resumeIngest;
@@ -55216,9 +55273,10 @@ const CareerRender = (() => {
     const blocks = [];
     const header = (resume && resume.header) || {};
     if (header.name) blocks.push({ style: "name", kind: "name", text: String(header.name) });
-    const contact = [header.email, header.location].filter(Boolean).join(" | ");
+    // RELEASE 9: a header read from the person's confirmed resume carries its contact and links lines verbatim.
+    const contact = header.contactLine ? String(header.contactLine) : [header.email, header.location].filter(Boolean).join(" | ");
     if (contact) blocks.push({ style: "contact", kind: "contact", text: contact });
-    const links = Object.values(header.links || {}).filter(Boolean).join(" | ");
+    const links = header.linksLine ? String(header.linksLine) : Object.values(header.links || {}).filter(Boolean).join(" | ");
     if (links) blocks.push({ style: "links", kind: "links", text: links });
     const addLine = (line) => {
       if (!line || line.text == null || !String(line.text).trim()) return;
@@ -55762,6 +55820,8 @@ const CareerRender = (() => {
     }
     return out;
   }
+  const MONTH = "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]{0,6}\\.?";
+  const DATE_ONLY_RE = new RegExp(`^(?:${MONTH} )?\\d{4}(?:\\s*[\u2013\u2014-]\\s*(?:(?:${MONTH} )?\\d{4}|Present))?$`, "i");
   function pdfStructure(buf) {
     const s = Bytes.isBuffer(buf) ? buf.toString("latin1") : "";
     const fonts = [...new Set([...s.matchAll(/\/BaseFont\s*\/([A-Za-z0-9-]+)/g)].map((m) => m[1].replace(/^[A-Z]{6}\+/, "")))];
@@ -55769,8 +55829,11 @@ const CareerRender = (() => {
     const pages = (s.match(/\/Type\s*\/Page(?![a-zA-Z])/g) || []).length;
     const runs = extractPdfRuns(buf);
     const sizes = [...new Set(runs.map((r) => r.size).filter(Boolean))].sort((a, b) => a - b);
-    const xs = [...new Set(runs.map((r) => Math.round(r.x)))];
-    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, pages, fonts, fontSizesPt: sizes, images, singleColumn: runs.length > 0 && xs.every((x) => x <= 100), headings: [] };
+    // RELEASE 9: an entry's dates set flush right on the entry's own baseline (a run that is only a date or a date range,
+    // beside a run that starts at the left margin) are part of that line, not a second column. Anything else past x 100 is.
+    const rightDate = (r) => DATE_ONLY_RE.test(String(r.text).trim()) && runs.some((o) => o !== r && o.page === r.page && Math.abs(o.y - r.y) < 0.5 && o.x <= 100);
+    const xs = [...new Set(runs.filter((r) => r.x <= 100 || !rightDate(r)).map((r) => Math.round(r.x)))];
+    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, pages, fonts, fontSizesPt: sizes, images, singleColumn: runs.length > 0 && xs.every((x) => x <= 100), rightAlignedDates: runs.filter((r) => r.x > 100 && rightDate(r)).length, headings: [] };
   }
   // External parser B (poppler) — used when the caller opts in.
   function extractPdfPoppler(buf) {
@@ -55793,7 +55856,8 @@ const CareerRender = (() => {
     const xml = xmlBuf.toString("utf8");
     const lines = [];
     for (const pm of xml.matchAll(/<w:p(?:\s[^>]*)?>([\s\S]*?)<\/w:p>/g)) {
-      const runs = [...pm[1].matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)].map((m) => unescXml(m[1]));
+      // RELEASE 9: a run's tab (<w:tab/>, never a tab stop's <w:tab w:val=.../>) reads as a space, as Word and python-docx read it.
+      const runs = [...pm[1].matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:tab\/>/g)].map((m) => (m[1] === undefined ? " " : unescXml(m[1])));
       const text = runs.join("");
       if (text.trim()) lines.push(text);
     }
@@ -55807,11 +55871,12 @@ const CareerRender = (() => {
     if (!xmlBuf) return [];
     const xml = xmlBuf.toString("utf8");
     const lines = [];
-    const tokenRe = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<\/w:p>/g;
+    const tokenRe = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<\/w:p>|<w:tab\/>/g;
     let cur = "";
     let m;
     while ((m = tokenRe.exec(xml))) {
       if (m[1] !== undefined) cur += unescXml(m[1]);
+      else if (m[0] === "<w:tab/>") cur += " ";
       else { if (cur.trim()) lines.push(cur); cur = ""; }
     }
     if (cur.trim()) lines.push(cur);
@@ -55877,13 +55942,27 @@ const CareerRender = (() => {
     const resume = inp.resume || null;
     const expected = resume ? sourceLines(resume) : (inp.sourceLines || null);
     const expectedNorm = expected ? normSeq(expected.map((l) => l.text)) : null;
-    const expectedLayoutNorm = resume ? normSeq(layoutLines(resume).map((l) => l.text)) : expectedNorm;
+    let expectedLayoutNorm = resume ? normSeq(layoutLines(resume).map((l) => l.text)) : expectedNorm;
+    let expectedDocxNorm = expectedNorm;
     const expectedHeadings = expected ? expected.filter((l) => l.kind === "heading").map((l) => l.text.toUpperCase()) : null;
     const email = resume && resume.header && resume.header.email ? String(resume.header.email) : null;
     const reasons = [];
     const checks = {};
     const formats = {};
     const add = (check, level, detail) => reasons.push({ check, level, detail });
+    // RELEASE 9: a designed layout (career_resume_design.ts) prints the same words in other lines (an entry's dates set
+    // flush right, a bullet's glyph as its own run), so it hands the printed lines per format. They are trusted only when
+    // their words, in order, are exactly the source's: otherwise layout_text fails and the source lines are kept.
+    const printed = o.expected || null;
+    const wordsOf = (lines) => normSeq(lines).join(" ").split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(" ");
+    if (printed) {
+      const src = expected ? wordsOf(expected.map((l) => l.text)) : null;
+      for (const fmt of ["pdf", "docx"]) {
+        if (!Array.isArray(printed[fmt])) continue;
+        if (src !== null && wordsOf(printed[fmt]) !== src) { add("layout_text", "fail", `${fmt}: the layout's printed lines do not carry exactly the source's words in the source's order`); continue; }
+        if (fmt === "pdf") expectedLayoutNorm = normSeq(printed.pdf); else expectedDocxNorm = normSeq(printed.docx);
+      }
+    }
 
     // BUG-2026-10-14-NDER (brief B6): two source-level FAILs.
     // (1) duplicate_line — a content line belongs in exactly one section;
@@ -55998,7 +56077,7 @@ const CareerRender = (() => {
     };
 
     checkFormat("pdf", inp.pdf || null, extractPdfLines, extractPdfStrings, pdfStructure, expectedLayoutNorm);
-    checkFormat("docx", inp.docx || null, extractDocxLines, extractDocxRuns, docxStructure, expectedNorm);
+    checkFormat("docx", inp.docx || null, extractDocxLines, extractDocxRuns, docxStructure, expectedDocxNorm);
     if (!inp.pdf && !inp.docx) add("no_files", "fail", "no rendered file was supplied to check");
     const status = reasons.some((r) => r.level === "fail") ? "FAIL" : reasons.some((r) => r.level === "warn") ? "WARN" : "PASS";
     return { status, reasons, checks, formats };
@@ -56011,7 +56090,9 @@ const CareerRender = (() => {
   }
 
   const runtime = { zlib: !!rt.zlib, crypto: !!rt.crypto, Buffer: !!Buffer, codec: rt.zlib && rt.crypto ? "platform" : zlib && crypto ? "vendored" : "none" };
-  return { renderPdf, renderDocx, parseCheck, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
+  // RELEASE 9: the byte primitives career_resume_design.ts builds its two layouts with (same codec, same ZIP writer).
+  const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlib.deflateSync(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
+  return { primitives, renderPdf, renderDocx, parseCheck, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
   }
   return make(NODE_RUNTIME);
 })();

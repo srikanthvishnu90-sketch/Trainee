@@ -45,6 +45,7 @@ export interface JobView {
   pay: string | null; level: string | null; remote: "remote" | "hybrid" | "onsite" | null;
   posted_at: string | null; first_seen_at: string | null; deadline: string | null; source: string | null;
   reasons: string[]; gaps: string[]; company_domain: string | null;
+  logo_url?: string | null; // a logo the ATS itself published for this posting's board (an https image matching a page_csp.ts ATS_LOGO_RULES rule)
   // A results list's role (role_results.ts): the pay the posting states, as numbers, with its period, currency and own words. The
   // page renders from this, never by re-reading `pay` (which is display text).
   pay_parsed?: { min: number; max: number; period: "hour" | "month" | "year" | null; currency: string; text: string; up_to?: boolean } | null;
@@ -52,7 +53,7 @@ export interface JobView {
 export interface PostingRow {
   job_id: string; provider?: string | null; company?: string; title?: string; location?: string | null; url?: string; description?: string | null;
   remote?: string | null; seniority_band?: string | null; posted_at?: string | null; first_seen_at?: string | null; pay?: string | null; closed_at?: string | null;
-  deadline?: string | null; company_domain?: string | null;
+  deadline?: string | null; company_domain?: string | null; logo_url?: string | null;
   last_seen_at?: string | null; // when the ingest last saw the posting live on its board: the File's "Postings checked" stamp
 }
 export interface PreparedRow { id: string; job_id: string; company: string; url: string; payload: Record<string, unknown>; payload_hash: string; card_lines: string[]; state: string }
@@ -216,6 +217,7 @@ export function jobViewOf(hit: any, row: PostingRow | null | undefined): JobView
     posted_at: row?.posted_at ?? null, first_seen_at: row?.first_seen_at ?? hit?.first_seen_at ?? null,
     deadline: row?.deadline ?? hit?.deadline ?? null, source: sourceOf(String(hit?.job_id ?? row?.job_id ?? ""), row?.provider),
     reasons: list(fit.reasons), gaps: list(fit.gaps), company_domain: row?.company_domain ?? hit?.company_domain ?? null,
+    logo_url: row?.logo_url ?? hit?.logo_url ?? null,
   };
 }
 

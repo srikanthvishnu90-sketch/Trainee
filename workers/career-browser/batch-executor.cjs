@@ -65,10 +65,29 @@
 const path = require("node:path");
 
 const Batch = require(path.join(__dirname, "..", "..", "packages", "domain", "155-career-batch-apply.js"));
+const Pace = require(path.join(__dirname, "apply-scheduler.cjs"));
 
 const RUN_VERSION = "career_batch_run/v1";
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const coded = (code, message) => Object.assign(new Error(message || code), { code });
+
+// S2 follow-up (2026-11-08): whether a stopped send may have reached the employer. Only a stop that is known to come
+// BEFORE the click says "nothing was posted" (false), which hands the pace slot back and leaves the posting free to send
+// again. Everything else (EXECUTION_ERROR: a throw anywhere in the drive, the submit included; an unknown or uncertain
+// outcome; any code not named here) is null: it is counted against the pace and never sent again on its own.
+// The before-the-click stops: the prepare drive's own (155: board, questions, the portal drive's throw, the posting's
+// state) and 149's submit gate, which refuses before it arms or clicks (approval, payload, attestation, duplicate,
+// portal refusing); and the stages that were never driven at all.
+const BEFORE_CLICK = new Set([
+  "BOARD_NOT_WIRED", "UNCOVERED_QUESTION", "DRIVER_ERROR", "KNOCKOUT_UNMET", "JOB_CLOSED", "BAD_URL", "AGGREGATOR_APPLY_FORBIDDEN",
+  "UNTESTED_ATS_HOST", "EMAIL_CODE_FILLED", "NOT_PREPARED", "NOT_SUBMITTED",
+  "APPROVAL_REQUIRED", "NO_DOORSTEP", "INCOMPLETE_PAYLOAD", "ALREADY_APPLIED_BY_USER", "APPROVAL_PAYLOAD_MISMATCH", "ATTESTATION_REQUIRED",
+  "DUPLICATE_APPLICATION", "PORTAL_REFUSING",
+  "selected", "doorstep", "excluded_by_user", "deferred_refusal",
+]);
+function postedForStop(code) {
+  return BEFORE_CLICK.has(String(code)) ? false : null;
+}
 
 function createBatchExecutor(deps) {
   const d = deps || {};
@@ -83,6 +102,10 @@ function createBatchExecutor(deps) {
   if (typeof d.boardForFor !== "function") throw coded("BATCH_BOARDS_NOT_WIRED", "createBatchExecutor: boardForFor(userId) is required");
   const nowOf = typeof d.now === "function" ? d.now : () => Date.now();
   const track = typeof d.track === "function" ? d.track : null;
+  // R9: d.scheduler = { limits } (apply-scheduler.cjs limitsFromEnv) turns on the paced drive. One scheduler per executor
+  // process, so a person's hour and day windows hold across their batches; each send goes to the run it belongs to.
+  const driving = new Map(); // run id -> the send for that run's keys
+  const pace = d.scheduler ? Pace.createApplyScheduler({ now: nowOf, limits: d.scheduler.limits, submit: (job) => driving.get(job.runId)(job) }) : null;
 
   function recordOf(run) {
     return {
@@ -183,55 +206,135 @@ function createBatchExecutor(deps) {
     if (!ap.ok) return { blocked: ap.code || "APPROVAL_REFUSED", runId: run.id, runStatus: run.status };
     const deps = await buildDeps(intent.userId, []);
     const baseRecords = ((deps.log && deps.log.records) || []).slice();
-    Batch.executeRun(run, deps);
+    if (d.scheduler) await executePaced(run, deps);
+    else Batch.executeRun(run, deps);
     await store.saveRun(recordOf(run));
     await persistLedger(intent.userId, deps.log, baseRecords);
-    return { runId: run.id, runStatus: run.status, submitted: run.summary ? run.summary.submitted : 0, confirmations: run.summary ? run.summary.confirmations : [] };
+    return { runId: run.id, runStatus: run.status, submitted: run.summary ? run.summary.submitted : 0, confirmations: run.summary ? run.summary.confirmations : [],
+      ...(d.scheduler ? { paced: run.summary ? run.summary.deferred.filter((x) => x.code === "PACE_DEFERRED").length : 0 } : {}) };
+  }
+
+  // R9 (2026-11-07): the approved batch at the person's pace (apply-scheduler.cjs: 60 an hour, 200 in any 24 hours, per
+  // employer and per site limits, all set by name in the worker's environment). Each turn drives ONE approved key through
+  // 155 (`only: [key]`), so 149 re-verifies that application's payload at its own click; the run record is saved after
+  // every send, so a crash leaves what was sent recorded. The claim lease is an hour (career_batch_claim_v1), so one
+  // intent drives for at most CAREER_APPLY_DRIVE_BUDGET_MS (50 minutes); what the pace leaves is named in the run as
+  // PACE_DEFERRED, still at its doorstep, never sent and never dropped.
+  async function executePaced(run, deps) {
+    const sleep = typeof d.sleep === "function" ? d.sleep : (ms) => new Promise((r) => setTimeout(r, ms));
+    const budget = Number.isInteger(d.driveBudgetMs) && d.driveBudgetMs > 0 ? d.driveBudgetMs : 50 * 60_000;
+    const start = nowOf();
+    const results = new Map();
+    for (const key of run.selected) {
+      const app = run.apps[key], sha = run.approvals[key];
+      if (!app || !sha || app.stage !== "doorstep") continue;
+      // The scheduler binds the approval record (run, posting, the payload hash the card's yes approved); 149 binds the
+      // payload itself at its click.
+      const payload = { runId: run.id, postingKey: key, approvedPayloadSha256: sha };
+      const h = Pace.payloadSha256(payload);
+      const r = pace.enqueue({ id: `${run.id}:${key}`, runId: run.id, userId: run.userId, jobId: key, company: app.company || "", url: app.url || (run.postings[key] && run.postings[key].url) || "",
+        payload, payloadSha256: h, approvalHash: h, ref: key });
+      if (!r.ok) results.set(key, r.reason);
+    }
+    driving.set(run.id, pacedSubmit(run, deps));
+    const mine = (j) => j.runId === run.id;
+    while (true) {
+      const due = pace.nextDueAt(mine);
+      if (due === null) break;
+      if (due > start + budget) break;
+      const wait = due - nowOf();
+      if (wait > 0) await sleep(wait);
+      await pace.tick(mine);
+    }
+    for (const key of run.selected) pace.withdraw(`${run.id}:${key}`, "drive_budget_spent");
+    driving.delete(run.id);
+    for (const key of run.selected) {
+      const app = run.apps[key];
+      if (app && app.stage === "doorstep" && run.approvals[key]) {
+        run.deferred.push({ postingKey: key, company: app.company || null, role: app.role || null, code: "PACE_DEFERRED",
+          reason: results.get(key) === "duplicate_job" ? "already applied to or on its way" : "approved, and past this hour's or today's pace: it stays approved, at its doorstep, not sent", resumeOn: null });
+      }
+    }
+    Batch.executeRun(run, { ...deps, only: [], final: true });
+  }
+  // The send the scheduler calls: one approved key through 155/149, its outcome in the scheduler's terms.
+  function pacedSubmit(run, deps) {
+    return async (job) => {
+      const key = job.ref;
+      Batch.executeRun(run, { ...deps, only: [key] });
+      await store.saveRun(recordOf(run));
+      const app = run.apps[key];
+      if (app.stage === "submitted") {
+        return app.confirmationId ? { posted: true, outcome: "submitted", proof: { kind: "confirmation_page", ref: String(app.confirmationId) } } : { posted: true, outcome: "submitted", proof: null };
+      }
+      if (app.stage === "captcha_handoff") return { posted: false, outcome: "needs_user", reason: "captcha_handoff" };
+      const code = (app.stop && app.stop.code) || app.stage;
+      return { posted: postedForStop(code), outcome: "permanent", reason: String(code) };
+    };
   }
 
   async function runBatchPending() {
-    const results = [];
     const intents = await store.pending();
-    for (const intent of intents) {
-      const binding = intent.binding || {};
-      const grant = await store.claim({ userId: intent.userId, intentId: intent.intentId });
-      if (!grant) { results.push({ intentId: intent.intentId, status: "skipped_claimed" }); continue; }
-      if (binding.action === "prepare") {
-        try {
-          const result = await executePrepare(intent);
-          await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "completed", result });
-          results.push({ intentId: intent.intentId, action: "prepare", status: "completed", ...result });
-        } catch (e) {
-          const code = (e && e.code) || "BATCH_PREPARE_FAILED";
-          // BUG-QA-2026-10-21-01: the record keeps the bounded message
-          // alongside the code — a code-only record made cold DRIVER_ERRORs
-          // undiagnosable from every log the seams keep.
-          const message = String((e && e.message) || e).slice(0, 300);
-          await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "blocked", result: { code, message } });
-          results.push({ intentId: intent.intentId, action: "prepare", status: "blocked", code, message });
-        }
-      } else if (binding.action === "approve") {
-        try {
-          const result = await executeApprove(intent);
-          if (result.blocked) {
-            await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "blocked", result });
-            results.push({ intentId: intent.intentId, action: "approve", status: "blocked", ...result });
-          } else {
-            await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "completed", result });
-            results.push({ intentId: intent.intentId, action: "approve", status: "completed", ...result });
-          }
-        } catch (e) {
-          // Claimed once, never re-driven: an execution crash leaves
-          // outcomes unknown by definition (MI-115's posture).
-          const code = (e && e.code) || "BATCH_EXECUTION_UNCERTAIN";
-          const message = String((e && e.message) || e).slice(0, 300);
-          await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "uncertain", result: { code, message } });
-          results.push({ intentId: intent.intentId, action: "approve", status: "uncertain", code, message });
-        }
-      } else {
-        await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "blocked", result: { code: "BATCH_ACTION_UNKNOWN" } });
-        results.push({ intentId: intent.intentId, status: "blocked", code: "BATCH_ACTION_UNKNOWN" });
+    if (!d.scheduler) {
+      const results = [];
+      for (const intent of intents) results.push(...(await runIntent(intent)));
+      return results;
+    }
+    // R9: a paced drive waits between sends (up to driveBudgetMs), so a serial drain would hold every other person's
+    // prepare and approve behind one person's pace, and the service as a whole would send at one person's rate. Each
+    // person's intents run in order, one at a time (their run record and ledger are read, changed and saved by one drive
+    // at a time; their pace is one scheduler window); different people's drives run side by side.
+    const byUser = new Map();
+    intents.forEach((intent, i) => { const k = String(intent.userId); if (!byUser.has(k)) byUser.set(k, []); byUser.get(k).push({ intent, i }); });
+    // Every drive is waited for before this drain returns, even when one throws (a claim or store failure ends that
+    // person's chain, as it ended the serial drain), so the next drain never overlaps a drive still in flight.
+    const out = new Array(intents.length).fill([]);
+    const settled = await Promise.allSettled([...byUser.values()].map(async (mine) => { for (const { intent, i } of mine) out[i] = await runIntent(intent); }));
+    const failed = settled.find((r) => r.status === "rejected");
+    if (failed) throw failed.reason;
+    return out.flat();
+  }
+
+  async function runIntent(intent) {
+    const results = [];
+    const binding = intent.binding || {};
+    const grant = await store.claim({ userId: intent.userId, intentId: intent.intentId });
+    if (!grant) { results.push({ intentId: intent.intentId, status: "skipped_claimed" }); return results; }
+    if (binding.action === "prepare") {
+      try {
+        const result = await executePrepare(intent);
+        await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "completed", result });
+        results.push({ intentId: intent.intentId, action: "prepare", status: "completed", ...result });
+      } catch (e) {
+        const code = (e && e.code) || "BATCH_PREPARE_FAILED";
+        // BUG-QA-2026-10-21-01: the record keeps the bounded message
+        // alongside the code — a code-only record made cold DRIVER_ERRORs
+        // undiagnosable from every log the seams keep.
+        const message = String((e && e.message) || e).slice(0, 300);
+        await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "blocked", result: { code, message } });
+        results.push({ intentId: intent.intentId, action: "prepare", status: "blocked", code, message });
       }
+    } else if (binding.action === "approve") {
+      try {
+        const result = await executeApprove(intent);
+        if (result.blocked) {
+          await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "blocked", result });
+          results.push({ intentId: intent.intentId, action: "approve", status: "blocked", ...result });
+        } else {
+          await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "completed", result });
+          results.push({ intentId: intent.intentId, action: "approve", status: "completed", ...result });
+        }
+      } catch (e) {
+        // Claimed once, never re-driven: an execution crash leaves
+        // outcomes unknown by definition (MI-115's posture).
+        const code = (e && e.code) || "BATCH_EXECUTION_UNCERTAIN";
+        const message = String((e && e.message) || e).slice(0, 300);
+        await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "uncertain", result: { code, message } });
+        results.push({ intentId: intent.intentId, action: "approve", status: "uncertain", code, message });
+      }
+    } else {
+      await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "blocked", result: { code: "BATCH_ACTION_UNKNOWN" } });
+      results.push({ intentId: intent.intentId, status: "blocked", code: "BATCH_ACTION_UNKNOWN" });
     }
     return results;
   }
@@ -328,4 +431,4 @@ if (require.main === module) {
     .catch((e) => { console.error("batch executor failed:", e && e.message); process.exit(1); });
 }
 
-module.exports = { createBatchExecutor, createBatchRpcStore };
+module.exports = { createBatchExecutor, createBatchRpcStore, postedForStop };

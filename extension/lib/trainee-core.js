@@ -1430,9 +1430,10 @@
       "unknown",
       /\b(consent|agree|authori[sz]e|permit|allow)\b.{0,40}\bshar(e|ing)\b.{0,80}\b(with|to)\b/
     ],
+    // R9 (scorecard, MedeliteLLC): "receive updates from a recruiter ... via SMS" names the channel after the updates.
     [
       "sms_opt_in",
-      /\b(text|sms|whatsapp)\b.*\b(message|communication|update|opt|consent|contact)|\bopt[- ]in to (text|receive text)|\bsms consent\b|\bcontact you by text\b/
+      /\b(text|sms|whatsapp)\b.*\b(message|communication|update|opt|consent|contact)|\b(updates?|messages?|notifications?|communications?|alerts?)\b.{0,80}\b(via|by|through|over) (text|sms|whatsapp)\b|\bopt[- ]in to (text|receive text)|\bsms consent\b|\bcontact you by text\b/
     ],
     [
       "marketing_opt_in",
@@ -2802,8 +2803,10 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     const h = m[1].replace(/^www\./, "").replace(/:(80|443)$/, "");
     let p = (m[2] ?? "").replace(/\/+$/, "");
     if (/^\/[^/]+\/.+\/(apply|application)$/.test(p)) p = p.replace(/\/(apply|application)$/, "").replace(/\/+$/, "");
+    const ghJid = /[?&]gh_jid=([0-9]+)/.exec(m[3] ?? "")?.[1];
+    if (ghJid) return "greenhouse.io/jobs/" + ghJid;
     if (/(^|\.)greenhouse\.io$/.test(h)) {
-      const jid = /[?&]gh_jid=([0-9]+)/.exec(m[3] ?? "")?.[1] ?? /\/jobs\/([0-9]+)$/.exec(p)?.[1];
+      const jid = /\/jobs\/([0-9]+)$/.exec(p)?.[1];
       if (jid) return "greenhouse.io/jobs/" + jid;
     }
     const q = (m[3] ?? "").slice(1).split("&").filter((x) => x !== "" && !/^(utm_[a-z_]*|gh_src|src|source|ref|referrer|lever-[a-z-]*)(=|$)/.test(x)).sort((a, b) => a < b ? -1 : a > b ? 1 : 0).join("&");
@@ -3037,6 +3040,14 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     return fact === "sponsorship" || !NAMES_US.test(label);
   }
   var BEYOND_FACT = [
+    // R9 (scorecard, Saronic): "no government employment" says nothing about service in the military, which the same
+    // question may also ask ("... a USG official, employee, or member of the U.S. military?").
+    [
+      [
+        "government_employment"
+      ],
+      /\bmember of the (u\.?s\.? )?(military|armed forces)\b|\bmilitary service\b|\bserved in the (u\.?s\.? )?(military|armed forces)\b/i
+    ],
     // the person's visa type; a sponsorship question that lists OPT among its examples is still the sponsorship question
     [
       [
@@ -3197,6 +3208,35 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     const parts = kept.split(/(?<=[.?!])\s+/).filter((x) => x.trim()).map((x) => x.replace(/\u2024/g, "."));
     return parts.filter((x) => /\?/.test(x)).pop() ?? parts.pop() ?? label;
   };
+  var NOW_ONLY = /\bnow\b/i;
+  var NOT_ONLY_NOW = /\bfuture\b|\bever\b|\bat any (point|time)\b|\blater\b|\beventually\b/i;
+  var UNRESTRICTED = /\bunrestricted\b|\bwithout (any )?restrictions?\b|\bno restrictions?\b|\bfor any employer\b/i;
+  var NO_SPONSOR_OPTION = /\bno restrictions?\b|\bunrestricted\b|\bwithout (the need for |requiring |needing )?(a |any )?(visa |employer |immigration )?sponsor|\b(do not|don'?t|will not|won'?t|never) (need|require) (a |any )?(visa |employer |immigration )?sponsor/i;
+  var NEEDS_SPONSOR_OPTION = /\b(need|needs|require|requires|requiring|needing)( a| any)?( visa| employer| immigration)? sponsorship\b/i;
+  function factFallsShort(facts, f, value, answers) {
+    const auth = facts.some((x) => x === "sponsorship" || x === "work_authorization");
+    if (!auth) return false;
+    const asked = askedPart(f.label);
+    const shown2 = f.options.find((o) => o.value === value)?.label ?? value;
+    const yn = yesNoOf(shown2);
+    const sponsor = yesNoOf(String(answers.sponsorship?.value ?? ""));
+    if (facts.includes("sponsorship") && /\bsponsor/i.test(asked) && yn === "yes" && NOW_ONLY.test(asked) && !NOT_ONLY_NOW.test(asked)) return true;
+    if (UNRESTRICTED.test(asked) && yn === "yes" && sponsor !== "no") return true;
+    if (f.options.length && NO_SPONSOR_OPTION.test(shown2) && sponsor !== "no") return true;
+    if (f.options.length && !NO_SPONSOR_OPTION.test(shown2) && NEEDS_SPONSOR_OPTION.test(shown2) && sponsor === "no") return true;
+    return false;
+  }
+  function distinctOptions(f) {
+    const values = f.options.map((o) => o.value);
+    if (new Set(values).size === values.length) return f;
+    return {
+      ...f,
+      options: f.options.map((o) => values.filter((v) => v === o.value).length > 1 ? {
+        ...o,
+        value: o.label
+      } : o)
+    };
+  }
   function authorizedWithoutSponsorship(answers) {
     const w = answers.work_authorization, sp = answers.sponsorship;
     if (!w || !sp) return null;
@@ -3777,7 +3817,8 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         })), o.answers, p.fields));
       }
       const places = formPlaces(p.fields, p.company), where = postingPlaces(p.location ?? "");
-      for (const f of p.fields) {
+      for (const f0 of p.fields) {
+        const f = distinctOptions(f0);
         if (fileAlternative(f, p.fields)) continue;
         if (f.personal) continue;
         if (f.section || rowPartName(f)) {
@@ -3848,6 +3889,16 @@ ${words}`)}`, wording = `label:${h16(words)}`;
           const code = /\(\s*\+\s*(\d{1,4})\s*\)/.exec(shown2)?.[1];
           const phone = String(o.answers.phone?.value ?? "").trim();
           if (!code || !phone.startsWith("+") || !phone.replace(/\D/g, "").startsWith(code)) value = null;
+        }
+        if (value !== null && a !== own && factFallsShort([
+          key,
+          mapQuestion(f).fact
+        ], f, value, o.answers)) {
+          value = null;
+          if (own) {
+            a = own;
+            value = f.options.length ? matchOption(String(own.value), f.options) : f.type === "checkbox" ? yesNo(String(own.value)) : String(own.value);
+          }
         }
         if (value !== null && a !== own && !f.options.length) value = payShape(f, value, key !== "unknown" ? key : mapQuestion(f).fact, o.answers);
         const shaped = value !== null && value !== "" && fitsField(f, value, a === own) ? canonicalTypedValue(f, value) : null;
@@ -4408,6 +4459,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   var GREENHOUSE = /^(job-boards|boards)(\.eu)?\.greenhouse\.io$/;
   var LEVER = /^jobs(\.eu)?\.lever\.co$/;
   var ASHBY = /^jobs\.ashbyhq\.com$/;
+  var SMARTRECRUITERS = /^jobs\.smartrecruiters\.com$/;
   var WORKDAY = /(^|\.)(myworkdayjobs\.com|myworkdaysite\.com|myworkday\.com)$/;
   function detectPortal(href) {
     let u;
@@ -4430,6 +4482,10 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       family: "ashby",
       embedded: false
     };
+    if (SMARTRECRUITERS.test(h)) return {
+      family: "smartrecruiters",
+      embedded: false
+    };
     if (WORKDAY.test(h)) return {
       family: "workday",
       embedded: false
@@ -4446,6 +4502,10 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     }
     if (p.family === "lever" || p.family === "ashby") {
       return seg[0] && seg[1] && /^[0-9a-f-]{8,}$/i.test(seg[1]) ? `${p.family}:${seg[0]}:${seg[1].toLowerCase()}` : null;
+    }
+    if (p.family === "smartrecruiters") {
+      const id = seg[1]?.match(/^\d+/)?.[0];
+      return seg[0] && id ? `smartrecruiters:${seg[0]}:${id}` : null;
     }
     const at = seg.findIndex((s) => /^apply$/i.test(s));
     const last = at > 0 ? seg[at - 1] : seg.filter((s) => !/^(apply|applyManually|autofillWithResume)$/i.test(s)).at(-1);

@@ -1,0 +1,69 @@
+{
+ "seed": 20261108,
+ "sha256": "cab004271af9aab6543f084436e4fc5b2e4451d91e852ce4fef2449ec63b5f5c",
+ "postings": 714,
+ "full": {
+  "total": 1000,
+  "heldout": 200,
+  "areas": {
+   "apply": 250,
+   "outreach": 250,
+   "research": 250,
+   "resume": 250
+  },
+  "families": {
+   "apply.all": 40,
+   "apply.links": 50,
+   "apply.single": 90,
+   "apply.tailor_then_apply": 25,
+   "apply.top": 25,
+   "apply.two": 20,
+   "outreach.apply_and_email": 15,
+   "outreach.find_hm": 40,
+   "outreach.named": 90,
+   "outreach.research_then_email": 25,
+   "outreach.role": 50,
+   "outreach.two": 30,
+   "research.compare": 35,
+   "research.employer": 50,
+   "research.find_then_research": 35,
+   "research.market": 90,
+   "research.pay": 40,
+   "resume.fit": 25,
+   "resume.link": 25,
+   "resume.single": 120,
+   "resume.top": 40,
+   "resume.two": 40
+  },
+  "styles": {
+   "es": 97,
+   "hi": 122,
+   "plain": 347,
+   "slang": 99,
+   "texting": 200,
+   "typo": 135
+  },
+  "ats": {
+   "ashby": 39,
+   "greenhouse": 147,
+   "lever": 53,
+   "smartrecruiters": 26
+  }
+ },
+ "adversarial": {
+  "total": 162,
+  "heldout": 32,
+  "categories": {
+   "ats_domain": 15,
+   "code_in_chat": 15,
+   "injection": 30,
+   "invent": 20,
+   "it_multi": 12,
+   "linkedin_indeed": 14,
+   "no_approval": 20,
+   "opted_out": 10,
+   "over_cap": 6,
+   "wrong_person": 20
+  }
+ }
+}

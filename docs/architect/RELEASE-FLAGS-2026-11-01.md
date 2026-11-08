@@ -96,12 +96,13 @@ Nothing sends from Trainee's own identity and there is no switch that could. `ve
 | `CAREER_KNOWLEDGE` | knowledge library and grounded web research in the brain | D-037 (3): same rule; not measured yet | the measurement |
 | `CAREER_JUDGE` | model-judged search ranking | D-037 (3): same rule; not measured yet | the measurement |
 | `CAREER_MAIL_MODEL` | the model reads ambiguous mail | sends mail bodies to the model; the Google verification data-use statement (#196) must name it first | owner |
-| `CAREER_PEOPLE_SEARCH` | model web search for people | D-033: Trainee does no web search for people | owner |
+| `CAREER_PEOPLE_SEARCH` | model web search for people | D-033: Trainee does no web search for people; D-043 (proposed) would turn it on for the free-first contact connector | owner |
+| `CAREER_CONTACT_OUTREACH` | the contact connector: public professional facts, a scored work address, a cited draft, sent from the person's Gmail after their yes (`_shared/career_contact_*.ts`) | D-043 is a proposal; read only together with `CAREER_PEOPLE_SEARCH`; migration 20261107120200's tables are empty and unread while it is off | owner (accept D-043, apply the migration, set the postal address) |
 | `CAREER_PEOPLE_SWEEP` | scheduled Gmail people sweeps | the chat never arms a sweep (handler passes no `sweepPush`): half-wired | after the chat side is wired |
 | `CAREER_PDL` | hired-candidate aggregates from People Data Labs | licensed people source (D-018a); needs `PDL_API_KEY` (paid) | owner |
 | `CAREER_VOICE` | voice practice calls | voice minutes cost far more than text; no per-minute ceiling set | owner (spend) |
 | `CAREER_PREPARE_AHEAD`, `CAREER_PREPARE_AHEAD_COVER` | the worker prepares applications ahead | runs on the worker host; needs `CAREER_PREPARE_AHEAD_URL`, `CAREER_PREPARE_AHEAD_TOKEN` | owner (host) |
-| `CAREER_RESEARCH_REPLY`, `CAREER_RESEARCH_BRIEF` | research answer layout | no deployed caller (research_reply.ts is not on the reply path) | when wired |
+| `CAREER_RESEARCH_REPLY`, `CAREER_RESEARCH_BRIEF` | market research on the reply path (R9-C): the staged brain takes market research asks and has `research_market` (Brave with the owner's `BRAVE_SEARCH_API_KEY`, else first-party SEC EDGAR, BLS and company sites; every point cited to a page fetched this turn); `CAREER_RESEARCH_BRIEF` adds the research brief File | wired, not measured: changes reply words (D-037 condition 3); no live eval run yet, and the search key is the owner's decision | after a live eval on `evals/career` research items and the owner's yes |
 | `TRAINEE_LOGO_GUESS` | logo guessed from a company name | can show another company's logo | — |
 | `CHANNEL_UNKNOWN_REPLY` | a "not authorized" text to unknown senders | messages strangers; no gain for signed-up testers | owner |
 | `TRAINEE_SIGNUP` | open sign-up (default `closed`, allowlist `TRAINEE_ALLOWED_CONTACTS`) | who may use the product is the owner's call | owner |

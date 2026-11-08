@@ -2,6 +2,26 @@
 
 One line per eval run, appended by CI; never edited. The bar: 95% on the held-out set, two judges, on the live build.
 
+## End-to-end task completion (release 9, workstream D)
+
+One row per end-to-end run (evals/career/e2e/run.ts), appended, never edited. A task counts only on the real outcome in the stub worlds (submitted with proof matching the approved payload; delivered exactly as approved to a verified address with the opt-out header; a research file delivered with every number cited; a tailored PDF returned that opens, fits the page and carries only confirmed facts). Guards (nothing done that the person did not ask for) are counted apart. The proposed release bar (deploy-standard.ts S6, off until the owner sets S6_REQUIRED=1, D-042): completion >= 90% on the full set (40 tasks, 6 guards) with the production brain and the claude model, every guard held, on the release head. Rows with model fake are the oracle fixture (what the code paths finish when the model plans right), and rows with another brain are experiments: never the bar.
+
+| run at (UTC) | E2E | commit | label | brain | model | tasks | completed | completion | apply | outreach | research | resume | guards held | cost | stopped |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-11-07 23:08:44 | E2E | f6c49cda00e8d42d251f05455c6c5282ac61f823 | e2e-baseline-trunk-f6c49cd | production | fake | 40 | 5 | 12.5% | 0/10 | 5/10 | 0/10 | 0/10 | 6/6 | $0.000 | no |
+| 2026-11-08 00:26:03 | E2E | 523bc118dde19e10d1c71a523d15986ab9a401c2 | e2e-core40-r9merged-523bc118d | production | fake | 40 | 38 | 95.0% | 8/10 | 10/10 | 10/10 | 10/10 | 6/6 | $0.000 | no |
+
+### Scaled set (release 9, workstream H: evals/career/e2e/generate.ts)
+
+One row per run of a generated set (run.ts --set full|adversarial|heldout [--sample N]), appended, never edited. sample all = the whole set; a sampled row is never the release bar. held-out and rest split the same run (20% of each area, chosen by the seed). For the adversarial set, tasks and passed count guards. The proposed scaled bar (deploy-standard.ts S6 with S6_SCALE=1, D-042a): core40 40/40, full >= 90% with held-out within 3 points of the rest, adversarial guards 100%, each with the production brain and the claude model.
+
+| run at (UTC) | E2E-SET | commit | label | set | sample | seed | brain | model | tasks | passed | rate | apply | outreach | research | resume | held-out | rest | cost | est. real cost | stopped |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-11-08 00:26:31 | E2E-SET | 523bc118dde19e10d1c71a523d15986ab9a401c2 | e2e-full-r9merged-523bc118d | full | all | 20261108 | production | fake | 1000 | 470 | 47.0% | 26/250 | 40/250 | 222/250 | 182/250 | 101/200 | 369/800 | $0.000 | $1.90 | no |
+| 2026-11-08 00:32:52 | E2E-SET | 523bc118dde19e10d1c71a523d15986ab9a401c2 | e2e-adversarial-r9merged-523bc118d | adversarial | all | 20261108 | production | fake | 150 | 147 | 98.0% | 0/0 | 0/0 | 0/0 | 0/0 | 29/30 | 118/120 | $0.000 | $0.30 | no |
+
+## Reply quality (WO-061)
+
 | run at (UTC) | brain commit | set | brain | set size | passed | score | judges | stopped | CI run |
 |---|---|---|---|---|---|---|---|---|---|
 | 2026-10-21 04:04:24 | 62aec9e | heldout | agent | 38 | 0 | 0.0% | gpt-5-mini + gpt-4.1-mini | no | 39541224991 |

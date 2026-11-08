@@ -13,6 +13,8 @@
 // Never an invented address: a recipient is a row of the person's own contacts, with the address on that row, or no one.
 // The model writes only when the caller passes one (CAREER_NETWORKING_DRAFT=on, metered); without it the reply names who
 // would be written to and that nothing was drafted.
+import { AUTOMATED_WHY, automatedInbox } from "./automated_inbox.ts";
+import { nearWord } from "./outreach_ask.ts";
 import { type ContactRow, contactsOf, firmKey, importContactsCsv, importContactsFile, MX_NOT_WIRED, type MxResolver, normalizeFirm, sameFirm, verifyRows } from "./career_contacts.ts";
 import { legacyRows } from "./career_referrals.ts";
 import { parsePeopleAsk, type PeopleDeps, type PersonRec, peopleTurn } from "./career_people.ts";
@@ -36,7 +38,9 @@ export const SIGN_ASK = "How do you sign your emails? Send your name the way you
 export interface Attachment { name: string; mime?: string; text: string | null }
 export type Ask =
   | { kind: "who"; firm: string }
-  | { kind: "draft"; target: Target; topic: string | null };
+  // more: further people in one ask ("email Sam at Cobalt and Noah at Fable"); each gets its own draft and its own
+  // exact-payload hash in the one batch (D-MN-2).
+  | { kind: "draft"; target: Target; topic: string | null; more?: Target[] };
 export type Target =
   // surname: the ask named them by an honorific and one name ("Dr. Chen", "Tanaka-san"): matched on the last name.
   | { by: "name"; name: string; firm: string | null; surname?: boolean }
@@ -49,6 +53,7 @@ const plain = (s: unknown) => String(s ?? "").toLowerCase().replace(/[’']/g, "
 // name keys written before this (career_account_contacts.name_key) are still read: legacyNameKey.
 export const nameKey = (s: unknown) => String(s ?? "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[’']/g, "").replace(/&/g, " and ").replace(/[^\p{L}\p{N}@.]+/gu, " ").trim();
 const legacyNameKey = plain;
+const ROLE_WORDS = ["recruiter", "recruiting", "hiring", "manager", "director", "engineer", "analyst", "partner"];
 // Courtesy titles and honorific suffixes are no part of a name: "Dr. Wei Chen" is Wei Chen; "Dr. Chen" and "Tanaka-san"
 // are a last name.
 const HONORIFIC = /^(?:dr|mr|mrs|ms|mx|miss|prof|professor|sir|dame|herr|frau|mme|mlle|madame|monsieur|señor|señora|senor|senora|sr|sra|srta|dott|dottssa)\.?$/iu;
@@ -57,7 +62,9 @@ const NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5
 const numberOf = (w: string | undefined) => (w ? (/^\d+$/.test(w) ? Number(w) : NUM[w.toLowerCase()] ?? null) : null);
 const NUMW = "(\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)";
 const GROUP = "(?:contacts|connections|people|friends|folks|alums|alumni)";
-const FILLER = /^(?:(?:so|ok|okay|hey|hi|and|now|also|please|pls|can you|could you|would you|will you|help me|actually|wait|oh|oops|no|yo|plz|quick\s+q(?:uestion)?:?)[, ]+)+/i;
+const FILLER = /^(?:(?:so|ok|okay|hey|hi|and|now|also|please|pls|can you|could you|would you|will you|can u|could u|would u|help me|actually|wait|oh|oops|no|yo|plz|ngl|tbh|lol|lowkey|quick\s+q(?:uestion)?:?)[, ]+)+/i;
+// R9 OUTREACH: texting sign-offs after the ask ("... about the new grad program lmk", "... no cap", "... rn"): not the topic.
+const SIGN_OFF = /(?:[\s,]+(?:lmk|no cap|fr|rn|asap|thx|thanks|ty|pls|plz|please|tysm|lol))+$/i;
 // A firm as typed: the words after "at"/"from", up to the topic or the end.
 function firmOf(raw: string): string | null {
   // ROUTING SCENARIOS (2026-10-29): a second ask after the firm ("... at Stripe and apply to Stripe") is not part of it.
@@ -67,8 +74,44 @@ function firmOf(raw: string): string | null {
 }
 
 // (b) and (c): what the message asks, or null when it is not a networking ask (the rest of the chain answers it).
+// R9 OUTREACH: the same asks in Hindi (Latin script) and Spanish, read into the English form below: "Quarry Capital ke
+// recruiter ko <topic> ke baare mein email karo", "Truecourse wale Zain ko <topic> ke baare mein email bhejo", "escríbele un
+// email a Sara de Onyx Foods sobre <topic>", "manda un email al reclutador de Lumina sobre <topic>". A role word is the
+// role at that firm ("the recruiter"); a name is that person. Nothing else is read in these languages here.
+const ROLE_IN: Record<string, string> = { recruiter: "the recruiter", reclutador: "the recruiter", reclutadora: "the recruiter", "hiring manager": "the hiring manager", "hiring manager de": "the hiring manager" };
+function translatedAsk(t: string): string | null {
+  const who = (w: string) => ROLE_IN[w.trim().toLowerCase()] ?? w.trim();
+  const hi = /^(.+?)\s+(?:ke|ki|ka|wale|waale|wali)\s+(.+?)\s+ko\s+(.+?)\s+ke\s+(?:baare|bare|baarey)\s+(?:mein|me|mai)\s+(?:email|e-mail|mail|message|msg)\s+(?:karo|kar do|kardo|bhejo|bhej do|bhejdo)$/i.exec(t);
+  if (hi) return `email ${who(hi[2])} at ${hi[1].trim()} about ${hi[3].trim()}`;
+  const es = /^(?:escr[ií]bele|escr[ií]bele un (?:email|correo|mensaje)|manda(?:le)? un (?:email|correo|mensaje)|env[ií]a(?:le)? un (?:email|correo|mensaje))\s+(?:a la|al|a)\s+(.+?)\s+(?:de|en)\s+(.+?)\s+sobre\s+(.+)$/i.exec(t);
+  if (es) return `email ${who(es[1])} at ${es[2].trim()} about ${es[3].trim()}`;
+  return null;
+}
+// A typo in the leading verb ("eail", "emil") or in "about" ("abot", "aboout") is the word meant.
+function mendTypos(t: string): string {
+  const ws = t.split(" ");
+  if (ws.length && /^e[a-z-]+$/i.test(ws[0]) && !/^(?:emails|e-mails|mails|emil[iy]a?|email)$/i.test(ws[0]) && nearWord(ws[0].toLowerCase(), "email")) ws[0] = "email";
+  return ws.map((w, i) => {
+    const lw = w.toLowerCase();
+    if (i > 0 && /^[a-z]+$/i.test(w) && lw !== "abort" && nearWord(lw, "about")) return "about";
+    // "reacch out", "reahc out": reach out (only before "out").
+    if (/^[a-z]+$/i.test(w) && lw !== "reach" && nearWord(lw, "reach") && /^out\b/i.test(ws[i + 1] ?? "")) return "reach";
+    return w;
+  }).join(" ");
+}
 export function parseNetworkingAsk(message: string): Ask | null {
-  const t = chatAsk(message).replace(FILLER, "").replace(/[?!.]+$/, "").replace(/,?\s+instead$/i, "").trim();
+  const t0 = chatAsk(message).replace(FILLER, "").replace(/[?!.]+$/, "").replace(SIGN_OFF, "").trim();
+  const tx = translatedAsk(t0);
+  if (tx) return parseNetworkingAsk(tx);
+  const t = mendTypos(chatAsk(message).replace(FILLER, "").trim()).replace(FILLER, "").replace(/[?!.]+$/, "").replace(/,?\s+instead$/i, "").trim()
+    // R9-E: "find and email the hiring manager at X": the finding is the drafting's own (from the person's contacts).
+    .replace(/^(?:find|look up|track down|search for)\s*(?:,\s*)?(?:and|&|then|,)\s+(?:then\s+)?(?=(?:email|e-mail|message|reach out|write|draft|send)\b)/i, "")
+    .replace(SIGN_OFF, "")
+    // R9 OUTREACH: "find the hiring manager at X and reach out", "look up the recruiter at X, then email them": the same
+    // ask as "email the hiring manager at X" (found among the person's contacts, never guessed).
+    .replace(/^(?:find|look up|track down|search for|get)\s+(?:me\s+)?(.+?\s(?:at|from)\s.+?)\s*(?:,\s*)?(?:and|&|then|,)\s+(?:then\s+)?(?:reach out(?:\s+to\s+(?:them|him|her))?|(?:email|e-mail|message|contact|write to|ping)\s+(?:them|him|her))(\s+(?:about|regarding|re|asking about|to ask about)\s.+)?$/i, (_m, who: string, about?: string) => `email ${who}${about ?? ""}`)
+    // R9 OUTREACH: "send Rosa at Corvid Foods a note about X", "drop Maya a quick line about X": write to that person.
+    .replace(/^(?:send|shoot|drop)\s+(?!(?:an?|the|my)\s+(?:quick\s+|short\s+)?(?:note|email|e-mail|message|line|msg|intro)\b)(.+?)\s+an?\s+(?:quick\s+|short\s+)?(?:note|email|e-mail|message|line|msg)\b\s*(.*)$/i, (_m, who: string, rest: string) => `email ${who}${rest ? ` ${rest}` : ""}`);
   if (!t || t.length > 300) return null;
   const who = [
     /^(?:who|which (?:people|contacts|connections))(?: else)? (?:do i know|do i have|in my (?:network|contacts|connections)|(?:are|is) (?:in )?my (?:contacts|connections|network))(?: (?:who |that )?works?| working)? (?:at|from|in) (.+)$/i,
@@ -83,7 +126,7 @@ export function parseNetworkingAsk(message: string): Ask | null {
     const m = rx.exec(t);
     if (m) { const firm = firmOf(m[1]); return firm ? { kind: "who", firm } : null; }
   }
-  const verb = new RegExp(`^(?:email|e-mail|emial|emal|eamil|message|reach out to|intro(?:duce)? me to|write(?: an?)?(?: (?:email|note|intro|message))? to|send(?: an?)?(?: (?:email|intro|note|message))? to|draft(?: me)?(?: an?| some| ${NUMW})?(?: cold| short| quick| networking)?(?: (?:emails?|intros?|introductions?|notes?|messages?|outreach(?: emails?)?))(?: to| for)?) (.+)$`, "i").exec(t);
+  const verb = new RegExp(`^(?:email|e-mail|emial|emal|eamil|emaiil|emaill|emil|message|reach out to|intro(?:duce)? me to|write(?: an?)?(?: (?:email|note|intro|message))? to|send(?: an?)?(?: (?:email|intro|note|message))? to|draft(?: me)?(?: an?| some| ${NUMW})?(?: cold| short| quick| networking)?(?: (?:emails?|intros?|introductions?|notes?|messages?|outreach(?: emails?)?))(?: to| for)?) (.+)$`, "i").exec(t);
   if (!verb) return null;
   // Anything routed through LinkedIn, Indeed or Handshake is never a draft, and "via LinkedIn" is never part of a name
   // (trackTurn refuses it).
@@ -96,6 +139,15 @@ export function parseNetworkingAsk(message: string): Ask | null {
     rest = rest.slice(0, tm.index).trim();
   }
   rest = rest.replace(/[?.!,;:]+$/, "").trim();
+  // R9-E: several people in one ask, each "<who> at <firm>": one target each.
+  const pair = /^(.+?\s(?:at|from)\s.+?)\s*(?:,\s*and|,|\band\b|&)\s+(.+?\s(?:at|from)\s.+)$/i.exec(rest);
+  if (pair) {
+    const parts = [parseNetworkingAsk(`email ${pair[1]}`), parseNetworkingAsk(`email ${pair[2]}`)];
+    if (parts.every((x) => x?.kind === "draft" && !x.topic)) {
+      const ts = parts.flatMap((x) => { const d = x as Extract<Ask, { kind: "draft" }>; return [d.target, ...(d.more ?? [])]; });
+      return { kind: "draft", topic, target: ts[0], more: ts.slice(1) };
+    }
+  }
   // "my 3 contacts at X", "people at X", "everyone I know at X", "someone at X"
   const g = new RegExp(`^(?:all (?:of )?)?(?:my |the )?(?:${NUMW} )?(?:${GROUP})(?: i (?:know|have))? (?:at|from) (.+)$`, "i").exec(rest);
   if (g) { const firm = firmOf(g[2]); return firm ? { kind: "draft", topic, target: { by: "group", firm, count: numberOf(g[1]) ?? verbCount, role: null } } : null; }
@@ -177,6 +229,9 @@ const CONTACTED = "you already have a draft or email to them";
 // never anyone already written to, never the do-not-contact list).
 async function heldWhy(r: ContactRow, contacted: Set<string>, dnc: Set<string>, blocked: Map<string, "opted_out" | "bounced"> = new Map()): Promise<string | null> {
   if (!r.email) return "no email address in your contacts, and I never guess one";
+  // R9 OUTREACH SAFETY: a no-reply sender, a role inbox, or an address on an ATS's or job board's domain is no person.
+  const auto = automatedInbox(r.email, r.firm || r.company);
+  if (auto) return `${r.email} ${AUTOMATED_WHY[auto]}`;
   if (!r.verified) {
     const c = r.check;
     return c?.syntax === "fail" ? `"${r.email}" is not a valid address` : c?.role === "flagged" ? `${r.email} is a shared inbox, not a person` : c?.disposable === "flagged" ? `${r.email} is a throwaway address` : c?.mx === "fail" ? `${r.email}'s domain has no mail server` : `${r.email} did not pass the address checks`;
@@ -502,7 +557,7 @@ async function networkingTurnInner(o: NetworkingDeps): Promise<NetworkingResult 
       return { reply: `Who is ${typed.email}? Send their name and firm with the address, for example "email Maya Chen at Stripe about a coffee chat, ${typed.email}", and I'll draft it for your approval. I never make up a name for an address.`, intent: DRAFT_INTENT, status: "needs_name" };
   }
   if (ask?.kind === "who") return await whoTurn(o, ask.firm);
-  if (ask?.kind === "draft") return await draftTurn(o, ask, typed.email);
+  if (ask?.kind === "draft") return await draftAsk(o, ask, typed.email);
   // The answer to "how do you sign your emails?": saved, then the ask that needed it runs.
   if ((await o.store.lastAssistantIntent(o.threadId).catch(() => null)) === SIGNATURE_INTENT) return await signatureTurn(o);
   return null;
@@ -599,7 +654,42 @@ async function whoTurn(o: NetworkingDeps, firmAsked: string): Promise<Networking
   };
 }
 
-async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>, typedEmail: string | null = null): Promise<NetworkingResult> {
+// R9-E: several people in one ask. Each target is picked exactly as alone (the person's own contacts, every hold); all go
+// in one batch, one draft and one exact-payload hash each, so "send all" approves exactly what was shown (D-MN-2).
+interface Sink { pick: ContactRow[]; held: { name: string; why: string }[]; replace: OutreachDraft[] }
+// "the recruiters at Stripe and Acme": a firm as typed with "and", "&" or commas in it is one firm when the person's
+// contacts have it ("Procter & Gamble", "Ernst and Young"); otherwise, for a role, the role at each firm named.
+async function draftAsk(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>, typedEmail: string | null): Promise<NetworkingResult> {
+  const t = ask.target;
+  if (!ask.more?.length && t.by === "group" && t.role && /\s(?:and|&)\s|,/i.test(t.firm) && !(await bookOf(o).atFirm(normalizeFirm(t.firm))).length) {
+    const firms = t.firm.split(/\s*,\s*(?:and\s+)?|\s+(?:and|&)\s+/i).map((f) => f.trim()).filter(Boolean);
+    if (firms.length > 1 && firms.length <= 5) return await manyTurn(o, { ...ask, target: { ...t, firm: firms[0] }, more: firms.slice(1).map((f) => ({ ...t, firm: f })) });
+  }
+  return ask.more?.length ? await manyTurn(o, ask) : await draftTurn(o, ask, typedEmail);
+}
+async function manyTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>): Promise<NetworkingResult> {
+  const sink: Sink = { pick: [], held: [], replace: [] };
+  for (const target of [ask.target, ...(ask.more ?? [])]) {
+    const r = await draftTurn(o, { kind: "draft", topic: ask.topic, target }, null, sink);
+    if (r.status === "no_contacts") return r;
+    if (r.status !== "collected") sink.held.push({ name: target.by === "name" ? target.name : `${target.role ?? "contacts"} at ${target.firm}`, why: r.reply.replace(/\s+/g, " ").slice(0, 200) });
+  }
+  const seen = new Set<string>();
+  sink.pick = sink.pick.filter((r) => { const a = String(r.email ?? "").toLowerCase(); if (a && seen.has(a)) return false; if (a) seen.add(a); return true; });
+  if (!sink.pick.length) return { reply: `Nothing was drafted. ${sink.held.map((h) => `${h.name}: ${h.why}`).join(" ")}`, intent: DRAFT_INTENT, status: "held" };
+  return await finishDraft(o, sink.pick, sink.held, sink.pick.length + sink.held.length, ask.topic, sink.replace);
+}
+async function finishDraft(o: NetworkingDeps, pick: ContactRow[], held: { name: string; why: string }[], considered: number, topic: string | null, replace: OutreachDraft[]): Promise<NetworkingResult> {
+  const heldLine = held.length ? `Not drafted: ${held.map((h) => `${h.name} (${h.why})`).join("; ")}.` : "";
+  const facts = confirmed(((o.state.profile as any)?.facts ?? []) as unknown[]);
+  if (!facts.length) return { reply: `I write only from facts you've confirmed, and there are none on record yet, so nothing was drafted. Paste your resume here and confirm it, then ask again.`, intent: DRAFT_INTENT, status: "no_facts" };
+  if (!o.model) return { reply: `Drafting emails isn't switched on here yet, so nothing was written or sent. From your contacts I would write to: ${pick.map((r) => `${r.name}${r.title ? `, ${r.title}` : ""}${r.firm ? ` at ${r.firm}` : ""} <${r.email}>`).join("; ")}.${heldLine ? ` ${heldLine}` : ""}`, intent: DRAFT_INTENT, status: "drafting_off" };
+  const prefs = await o.store.prefs(o.userId);
+  if (!prefs.signature) return { reply: SIGN_ASK, intent: SIGNATURE_INTENT, status: "needs_signature" };
+  return await writeBatch(o, pick, held, considered, topic, prefs.signature, facts, replace);
+}
+
+async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>, typedEmail: string | null = null, sink?: Sink): Promise<NetworkingResult> {
   if (typedEmail && ask.target.by === "name") await keepTyped(o, ask.target.name.trim(), ask.target.firm, typedEmail);
   const book = bookOf(o), t = ask.target;
   const firmName = t.firm ? normalizeFirm(t.firm) : null;
@@ -630,9 +720,12 @@ async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>
     }
   } else {
     const here = await book.atFirm(firmName!);
-    const rw = t.role ? plain(t.role) : "";
+    // R9 OUTREACH: a typo in the role ("the recruier", "the hirign mangaer") is the role meant, never a title no one has.
+    const rw = t.role ? plain(t.role).split(" ").map((w) => ROLE_WORDS.find((x) => nearWord(w, x)) ?? w).join(" ") : "";
     const isRecruiter = /recruit|talent|hr|people team/.test(rw);
-    pool = !rw ? here : here.filter((r) => { const tt = plain(r.title); return isRecruiter ? /recruit|talent|sourc/.test(tt) : rw.split(" ").every((w) => tt.includes(w.replace(/s$/, ""))); });
+    // R9-E: "the hiring manager" is a manager there (no one's title says "hiring manager").
+    const isHiring = /^hiring (?:manager|lead)$/.test(rw);
+    pool = !rw ? here : here.filter((r) => { const tt = plain(r.title); return isRecruiter ? /recruit|talent|sourc/.test(tt) : isHiring ? /\b(?:manager|head|director|lead)\b/.test(tt) : rw.split(" ").every((w) => tt.includes(w.replace(/s$/, ""))); });
     label = `${t.role ? `${t.role}s` : "your contacts"} at ${firmName}`;
     if (!pool.length) {
       const there = here.length ? ` Your contacts at ${firmName}: ${here.slice(0, 5).map((r) => `${r.name}${r.title ? ` (${r.title})` : ""}`).join(", ")}.` : "";
@@ -677,14 +770,9 @@ async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>
     if (why) held.push({ name: r.name, why }); else { pick.push(r); if (addr) picked.set(addr, r.name); }
   }
   const considered = pick.length + held.length;
-  const heldLine = held.length ? `Not drafted: ${held.map((h) => `${h.name} (${h.why})`).join("; ")}.` : "";
+  if (sink) { sink.pick.push(...pick); sink.held.push(...held); sink.replace.push(...replace); return { reply: "", intent: DRAFT_INTENT, status: "collected" }; }
   if (!pick.length) return { reply: `I can't write to ${label}: ${held.map((h) => `${h.name}: ${h.why}`).join("; ")}. Nothing was drafted. To add an address, send a CSV with Name,Company,Email.`, intent: DRAFT_INTENT, status: "held" };
-  const facts = confirmed(((o.state.profile as any)?.facts ?? []) as unknown[]);
-  if (!facts.length) return { reply: `I write only from facts you've confirmed, and there are none on record yet, so nothing was drafted. Paste your resume here and confirm it, then ask again.`, intent: DRAFT_INTENT, status: "no_facts" };
-  if (!o.model) return { reply: `Drafting emails isn't switched on here yet, so nothing was written or sent. From your contacts I would write to: ${pick.map((r) => `${r.name}${r.title ? `, ${r.title}` : ""}${r.firm ? ` at ${r.firm}` : ""} <${r.email}>`).join("; ")}.${heldLine ? ` ${heldLine}` : ""}`, intent: DRAFT_INTENT, status: "drafting_off" };
-  const prefs = await o.store.prefs(o.userId);
-  if (!prefs.signature) return { reply: SIGN_ASK, intent: SIGNATURE_INTENT, status: "needs_signature" };
-  return await writeBatch(o, pick, held, considered, ask.topic, prefs.signature, facts, replace);
+  return await finishDraft(o, pick, held, considered, ask.topic, replace);
 }
 
 async function writeBatch(o: NetworkingDeps, pick: ContactRow[], held: { name: string; why: string }[], considered: number, topic: string | null, signature: string, facts: unknown[], replace: OutreachDraft[] = []): Promise<NetworkingResult> {
@@ -728,7 +816,7 @@ async function signatureTurn(o: NetworkingDeps): Promise<NetworkingResult | null
   const typed = before ? typedAddress(before) : null;
   const ask = typed ? parseNetworkingAsk(typed.text) : null;
   if (ask?.kind === "draft") {
-    const r = await draftTurn(o, ask, typed?.email ?? null);
+    const r = await draftAsk(o, ask, typed?.email ?? null);
     return { ...r, reply: `Saved your signature.\n\n${r.reply}`, parts: r.parts ? [`Saved your signature.`, ...r.parts] : undefined };
   }
   return { reply: `Saved your signature:\n${sig}\nIt goes at the bottom of every email I draft for you.`, intent: "career_outreach_signature_saved", status: "saved" };

@@ -17,6 +17,7 @@
 //              (siteAsk) before every apply, link-read and batch turn (career_networking.ts siteRefusedTurn).
 // The reminder fires from runOutreachFollowups (the scheduled run): once, to the person's outbox, only while no reply is
 // on record. Every record is the person's own (by user id); a name matches only someone they wrote to through Trainee.
+import { careerAskCanon } from "./career_ask_canon.ts";
 import type { Outbox } from "./career_alert_store.ts";
 import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 release flags
 import { neverOpen } from "./career_people_sites.ts";
@@ -123,7 +124,8 @@ export function siteOfLink(url: string): Site | null {
 // Whether the message asks Trainee to do something on LinkedIn, Indeed or Handshake (a link to one of them pasted with
 // no employer link beside it, or an action named on one of them), and which. Their own LinkedIn export stays theirs.
 export function siteAsk(message: string): Site | null {
-  const raw = String(message ?? "").slice(0, 4000);
+  // Read as people text it (career_ask_canon.ts), as the handler reads the turn: "appply to jobs on Indeed" names the site.
+  const raw = String(careerAskCanon(String(message ?? "")) ?? message ?? "").slice(0, 4000);
   if (!lower(raw)) return null;
   const unmailed = raw.replace(/\S+@\S+/g, " ");
   const links = (unmailed.match(LINK) ?? []).map((u) => u.replace(/[.,;:!?)\]>"']+$/, ""));

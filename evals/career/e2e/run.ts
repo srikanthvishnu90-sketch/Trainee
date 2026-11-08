@@ -259,13 +259,9 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
         await Promise.all(prepWaits.splice(0));
         const runs = prepRuns.splice(0);
         if (!runs.length) continue;
-        // fix/r9-apply-completion: pinned again where it stood PLUS the time the sandboxes took, as the person's own clock moves
-        // while the machine works. Re-pinning where it stood dropped that time from the chat's clock only (the database's
-        // pinned defaults, PIN_DB_SQL, keep the real time elapsed), so over a long run the chat's clock fell behind the
-        // database's by every second the preparations ran.
-        const stood = Date.now(), realAt = machineNow();
+        const stood = new Date().toISOString();
         unpin?.();
-        try { await Promise.all(runs.map((f) => f())); } finally { unpin = pinClock(new Date(stood + (machineNow() - realAt)).toISOString()); }
+        try { await Promise.all(runs.map((f) => f())); } finally { unpin = pinClock(stood); }
       }
     };
     h = await careerHandler(pg, people);

@@ -136,3 +136,24 @@ Deno.test("D: the eval's 'find ... and apply to all of them' asks for every post
     assert(t.expect.apply.max >= t.expect.apply.min, t.id);
   }
 });
+
+Deno.test("E: an applicant-tracking system's own sender is never the employer's person (adversarial A-ATSD-003/006/007)", async () => {
+  const { checkAddress, isAtsSender } = await import("../../supabase/functions/_shared/career_contacts.ts");
+  const mx = async () => ({ status: "ok" as const, hosts: ["mx.example"] });
+  for (const e of ["notifications@hire.lever.co", "no-reply@us.greenhouse-mail.io", "no-reply@ashbyhq.com", "jobs@smartrecruiters.com", "alerts@myworkday.com", "updates@lever.co"]) {
+    assert(isAtsSender(e) || (await checkAddress(e, mx)).check.role === "flagged", e);
+    assertEquals((await checkAddress(e, mx)).verified, false, e);
+  }
+  // A person at the ATS company itself, and anyone at an employer, are people.
+  for (const e of ["maya.chen@lever.co", "sam@ashbyhq.com", "dana.lee@acme.io", "notifications.lead@acme.io"]) {
+    assertEquals(isAtsSender(e), false, e);
+  }
+});
+
+Deno.test("F: one application's own unhashable payload is not sent and never counts toward pausing the ATS for everyone", async () => {
+  const { settle } = await import("../../workers/career-cloud/worker.ts");
+  assertEquals(settle({ state: "not_submitted", reason: "INVALID_APPLY_PAYLOAD" }).outcome, "not_sent");
+  // A failure the site can cause still counts.
+  assertEquals(settle({ state: "not_submitted", reason: "FORM_DID_NOT_SETTLE" }).outcome, "error");
+  assertEquals(settle({ state: "needs_user", reason: "captcha" }).outcome, "bot_check");
+});

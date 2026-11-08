@@ -1,9 +1,9 @@
 // APPROVAL LANGUAGE (2026-11-08): how a texted approval is read (supabase/functions/_shared/approval_words.ts).
 // The 1,000-task eval (evals/career/e2e, --set full) showed only a bare "yes" reliably approved: "yes pls", "snd it",
 // "send 1 pls", "yse send it", "send em all" approved nothing. This file holds the reader to:
-//   1. positive tables: each clear approval reads as the one English form the paths parse, in English always, and in
-//      Spanish, Hindi/Hinglish, French, German and Portuguese only with { languages: "all" } (the owner rule of
-//      2026-10-29, tests/architect/scenarios-approvals.test.ts, keeps another language from approving on these paths);
+//   1. positive tables: each clear approval reads as the one English form the paths parse, in English and (D-044, owner
+//      2026-11-08, replacing the 2026-10-29 English-only rule) in Spanish, Hindi/Hinglish, French, German and Portuguese;
+//      with { languages: "en" } only English is read;
 //   2. negative tables, every language, both settings: negated, mixed, hedged, deferred, a question, a quote, a fragment;
 //   3. a seeded fuzz: approval words with any negation anywhere never read as an approval, and never approve through the
 //      card or outreach parsers;
@@ -49,6 +49,8 @@ const OTHER_YES: [string, string, string][] = [
   ["de", "jawohl", "yes"], ["de", "passt, abschicken", "yes"],
   ["pt", "sim", "yes"], ["pt", "sim, manda", "yes"], ["pt", "sim, envia tudo", "send all"], ["pt", "pode mandar", "yes"], ["pt", "bora", "yes"],
   ["pt", "sim, manda os dois", "send both"], ["pt", "sim obrigado", "yes"],
+  ["hi", "हाँ", "yes"], ["hi", "हां", "yes"], ["hi", "हाँ, भेज दो", "yes"], ["hi", "हां भेजो", "yes"], ["hi", "सब भेज दो", "send all"], ["hi", "दोनों भेजो", "send both"],
+  ["hi", "हाँ जी, कृपया भेजो", "yes"],
 ];
 
 Deno.test("approval language/1: English approvals read as the one form every path parses", () => {
@@ -57,11 +59,11 @@ Deno.test("approval language/1: English approvals read as the one form every pat
     eq(approvalWords(text, ALL), want, `${text} (all languages)`);
   }
 });
-Deno.test("approval language/2: Spanish, Hindi, French, German, Portuguese read only with languages: all; by default they approve nothing (owner rule 2026-10-29)", () => {
+Deno.test("approval language/2 (D-044): Spanish, Hindi, French, German, Portuguese read by default; with languages: en they approve nothing", () => {
   for (const [lang, text, want] of OTHER_YES) {
+    eq(approvalWords(text), want, `${lang}: ${text} reads as the English yes by default (D-044)`);
     eq(approvalWords(text, ALL), want, `${lang}: ${text}`);
-    eq(readApproval(text), null, `${lang}: ${text} must not read as an approval by default`);
-    eq(approvalWords(text), text, `${lang}: ${text} is passed on unchanged by default`);
+    eq(readApproval(text, { languages: "en" }), null, `${lang}: ${text} is not read with languages: en`);
   }
   const langs = new Set(OTHER_YES.map((x) => x[0]));
   for (const l of ["es", "hi", "fr", "de", "pt"]) assertNode.ok(langs.has(l), `a table for ${l}`);
@@ -89,6 +91,9 @@ const NOT_APPROVAL: string[] = [
   "non", "pas encore", "attends", "oui mais change le sujet", "oui, demain", "non merci",
   "nein", "noch nicht", "warte", "ja aber später", "nicht senden", "ja, morgen",
   "não", "ainda não", "espera aí", "sim mas muda o assunto", "não manda", "sim, amanhã",
+  "नहीं", "मत भेजो", "अभी नहीं", "हाँ लेकिन बाद में", "रुको", "हाँ?", "कल भेजो",
+  // another language or script, the split "y es"
+  "да", "はい", "是的", "sì, mandali", "ja, stuur maar", "da, trimite", "y es", "y\tes",
 ];
 Deno.test("approval language/3: negated, mixed, hedged and spoofed messages are never an approval, in either setting", () => {
   for (const text of NOT_APPROVAL) {
@@ -192,7 +197,11 @@ Deno.test("approval language/7: outreach: a reworded yes approves exactly the dr
   }
   eq(await outreachApproves(2, "send both"), [1, 2]);
   eq(await outreachApproves(3, "send both"), [], "send both with three waiting approves nothing");
-  for (const m of ["yes but change 2", "send 1 later", "not yet", "yes?", "send all?", "sí, mándala", "haan bhej do", "oui"]) eq(await outreachApproves(3, m), [], m);
+  for (const m of ["yes but change 2", "send 1 later", "not yet", "yes?", "send all?"]) eq(await outreachApproves(3, m), [], m);
+  // D-044: a clear yes in the five languages approves exactly the batch; "it" ("mándala") names one only when one waits.
+  for (const m of ["haan bhej do", "oui", "sí", "ja bitte", "sim, manda", "हाँ, भेज दो"]) eq(await outreachApproves(3, m), [1, 2, 3], `D-044: ${m}`);
+  eq(await outreachApproves(1, "sí, mándala"), [1], "D-044: sí, mándala, one draft");
+  eq(await outreachApproves(3, "sí, mándala"), [], "D-044: sí, mándala, three drafts: 'it' names none of them");
   // Not the thread's last word: a yes approves nothing.
   const store = await shownDrafts(2);
   store.setIntent("TH", "agent");
@@ -216,11 +225,43 @@ Deno.test("approval language/8: cards: a reworded yes approves exactly the card 
   eq(await run(3, "approve #2"), [2]);
   eq(await run(2, "send both"), [1, 2]);
   eq(await run(3, "send both"), [], "a card of three is not both");
-  for (const m of ["yes but change X", "not yet", "wait", "yes? what's in it", "no", "sí", "haan", "oui", "ja", "✅"]) eq(await run(3, m), [], m);
+  for (const m of ["yes but change X", "not yet", "wait", "yes? what's in it", "no", "✅", "ye", "да", "はい"]) eq(await run(3, m), [], m);
+  // D-044: a clear yes in the five languages approves exactly the card.
+  for (const m of ["sí", "haan", "oui", "ja", "sim", "हाँ"]) eq(await run(3, m), [1, 2, 3], `D-044: ${m}`);
   // A changed application is refused at the answer, whatever the wording of the yes.
   const d = cardDb({ n: 2 });
   await d.say("show my applications");
   d.change(2);
   await d.say("yes pls");
   eq(d.queuedCompanies().length, 1, "only the unchanged application is queued");
+});
+
+// ------------------------------------------------------------------------------------------------ 5. D-044, every language
+// Owner ruling D-044 (2026-11-08): each clear yes in the table approves exactly what was shown, on the card and on the
+// outreach batch, each item under its own hash; the same language negated or hedged approves nothing.
+const D044_NEGATED: [string, string][] = [
+  ["es", "no, no la mandes"], ["es", "sí pero espera"], ["es", "todavía no"], ["hi", "nahi"], ["hi", "mat bhejo"], ["hi", "haan par baad mein"], ["hi", "नहीं"],
+  ["hi", "मत भेजो"], ["fr", "non"], ["fr", "pas encore"], ["fr", "oui mais attends"], ["de", "nein"], ["de", "noch nicht"], ["de", "ja aber später"],
+  ["pt", "não"], ["pt", "ainda não"], ["pt", "sim mas espera"],
+];
+Deno.test("approval language/9 (D-044): every clear yes in the five languages approves exactly the card and the batch shown; each negated form approves nothing", async () => {
+  const card = async (n: number, message: string) => {
+    const d = cardDb({ n });
+    await d.say("show my applications");
+    await d.say(message);
+    const c = d.cards[0];
+    for (const q of d.queue) eq(q.approval, c.items.find((i) => i.prepared_id === q.prepared_id)!.payload_hash, `${message}: queued under the hash shown`);
+    return d.queue.map((q) => c.items.find((i) => i.prepared_id === q.prepared_id)!.n).sort((a, b) => a - b);
+  };
+  for (const [lang, text, want] of OTHER_YES) {
+    // "it" names one item: exact on a card of one and a batch of one; a count of two only on two.
+    const n = want === "yes, send it" ? 1 : want === "send both" ? 2 : 3;
+    const all = Array.from({ length: n }, (_, i) => i + 1);
+    eq(await card(n, text), all, `${lang}: ${JSON.stringify(text)} approves exactly the card of ${n}`);
+    eq(await outreachApproves(n, text), all, `${lang}: ${JSON.stringify(text)} approves exactly the ${n} drafts`);
+  }
+  for (const [lang, text] of D044_NEGATED) {
+    eq(await card(3, text), [], `${lang}: ${JSON.stringify(text)} approves nothing on the card`);
+    eq(await outreachApproves(3, text), [], `${lang}: ${JSON.stringify(text)} approves nothing on the batch`);
+  }
 });

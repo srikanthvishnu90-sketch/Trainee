@@ -10,7 +10,8 @@
 //                line of a paragraph that continues on the next page
 //   overflow     text past a margin
 //   docx_text    the DOCX's words not the PDF's words, in the same order
-//   fonts        a font outside the template's two standard faces, an embedded font, or a size outside 10-12 pt
+//   fonts        a font outside the template's two standard faces, an embedded font, or a size outside 10-12 pt (the name:
+//                its template's size, 10-18 pt)
 // deno-lint-ignore-file no-explicit-any
 import { DATE_RANGE, isGlyph, type PdfGeometry, type PdfLine, readDocxGeometry, readPdfGeometry, wordsOf } from "./career_resume_geometry.ts";
 import type { Geometry } from "./career_resume_templates.ts";
@@ -48,7 +49,14 @@ export async function checkTemplatePdf(g: Geometry, pdf: Uint8Array, o: { R?: an
     if (!g.faces.includes(f.name as any)) add("fonts", null, `font ${f.name} is not one of the template's faces (${g.faces.join(", ")})`);
     if (f.embedded) add("fonts", null, `font ${f.name} is embedded`);
   }
-  for (const it of geo.items) if (it.size < 10 - 1e-6 || it.size > 12 + 1e-6) add("fonts", lines.find((l) => l.items.includes(it)) ?? null, `"${it.str.slice(0, 30)}" is ${it.size} pt (10-12 pt only)`);
+  // Sizes: the name (the first line of page one) at the template's name size, 10-18 pt; everything else 10-12 pt (R6, scoped).
+  const nameLine = lines.find((l) => l.page === 0) ?? null;
+  for (const it of geo.items) {
+    const isName = !!nameLine && nameLine.items.includes(it);
+    const [lo, hi] = isName ? [10, 18] : [10, 12];
+    if (it.size < lo - 1e-6 || it.size > hi + 1e-6) add("fonts", lines.find((l) => l.items.includes(it)) ?? null, `"${it.str.slice(0, 30)}" is ${it.size} pt (${lo}-${hi} pt only)`);
+    if (isName && Math.abs(it.size - g.name) > 1e-6) add("fonts", nameLine, `the name is ${it.size} pt, not the template's ${g.name} pt`);
+  }
   for (const p of geo.pages) if (!near(p.w, g.page.w) || !near(p.h, g.page.h)) add("overflow", null, `page is ${p.w}x${p.h}, not ${g.page.w}x${g.page.h}`);
   lines.forEach((l, i) => {
     const k = kinds[i];

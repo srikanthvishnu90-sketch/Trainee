@@ -10,8 +10,8 @@
 //               the entry's last line when its title wraps).
 //   rhythm      one baseline grid per file: unit = half the body leading; every baseline sits a whole number of units
 //               below the top margin, and every gap is a whole number of units (fit steps change units, never fractions).
-//   type        standard faces only (Helvetica or Times, regular and bold, never embedded: rule R6 of 148's parse-check),
-//               every size 10-12 pt (R6 caps the name at 12 too: hierarchy comes from weight, case and space).
+//   type        standard faces only (Helvetica or Times, regular and bold, never embedded: rule R6 of 148's parse-check);
+//               body and headings 10-12 pt, the name 14-18 pt (R6 scoped, architect ruling 2026-11-08).
 //   fit         the loosest step first, then fewer units of space, then a smaller body (never under 10 pt), one page first
 //               and two pages after; a template whose evidence says two pages for its level never squeezes to one.
 //   pages       paragraphs never split across pages (no widow, no orphan); a heading or an entry keeps with its next block.
@@ -49,63 +49,63 @@ const IN = 72;
 export type LibraryId = typeof TEMPLATE_IDS[number];
 export const TEMPLATES: Record<LibraryId, TemplateSpec> = {
   T01: { id: "T01", name: "Foundation", for: "students and new graduates in any field", roles: ["general"], levels: ["student", "early"], pages: 1, face: "sans",
-    margins: { top: 0.75 * IN, right: 0.75 * IN, bottom: 0.75 * IN, left: 0.75 * IN }, body: 10.5, heading: 11, namePt: 12, leadRatio: 1.25,
+    margins: { top: 0.75 * IN, right: 0.75 * IN, bottom: 0.75 * IN, left: 0.75 * IN }, body: 10.5, heading: 11, namePt: 16, leadRatio: 1.25,
     header: "stack", nameCase: "upper", headingCase: "upper", headingRule: "below", bullet: { glyph: "•", x: 2, text: 12 },
     gaps: { header: 2, section: 3, afterHeading: 1, entry: 1 }, order: ["education", "experience", "projects", "leadership", "skills", "awards", "coursework"], evidence: ["E1", "E2", "E5", "E6", "E8"] },
   T02: { id: "T02", name: "Campus Serif", for: "students and new graduates applying to traditional employers", roles: ["general", "business_finance"], levels: ["student", "early"], pages: 1, face: "serif",
-    margins: { top: 0.7 * IN, right: 0.8 * IN, bottom: 0.7 * IN, left: 0.8 * IN }, body: 11, heading: 11, namePt: 12, leadRatio: 1.2,
+    margins: { top: 0.7 * IN, right: 0.8 * IN, bottom: 0.7 * IN, left: 0.8 * IN }, body: 11, heading: 11, namePt: 16, leadRatio: 1.2,
     header: "stack", nameCase: "upper", headingCase: "upper", headingRule: "below", bullet: { glyph: "•", x: 0, text: 11 },
     gaps: { header: 2, section: 2, afterHeading: 1, entry: 1 }, order: ["education", "experience", "leadership", "skills", "awards"], evidence: ["E1", "E5", "E6", "E7", "E8"] },
   T03: { id: "T03", name: "Engineer", for: "software and technical roles, early to mid career", roles: ["engineering"], levels: ["student", "early", "mid"], pages: 1, face: "sans",
-    margins: { top: 0.6 * IN, right: 0.6 * IN, bottom: 0.6 * IN, left: 0.6 * IN }, body: 10, heading: 11, namePt: 12, leadRatio: 1.3,
+    margins: { top: 0.6 * IN, right: 0.6 * IN, bottom: 0.6 * IN, left: 0.6 * IN }, body: 10, heading: 11, namePt: 16, leadRatio: 1.3,
     header: "inline", nameCase: "as-is", headingCase: "title", headingRule: "below", bullet: { glyph: "•", x: 4, text: 14 },
     gaps: { header: 2, section: 2, afterHeading: 1, entry: 1 }, order: ["summary", "skills", "experience", "projects", "education", "awards"], evidence: ["E1", "E2", "E14", "E15"] },
   T04: { id: "T04", name: "Engineer Two-Page", for: "senior and staff engineers with a long record", roles: ["engineering"], levels: ["senior", "executive"], pages: 2, face: "sans",
-    margins: { top: 0.75 * IN, right: 0.75 * IN, bottom: 0.75 * IN, left: 0.75 * IN }, body: 10.5, heading: 11, namePt: 12, leadRatio: 1.3,
+    margins: { top: 0.75 * IN, right: 0.75 * IN, bottom: 0.75 * IN, left: 0.75 * IN }, body: 10.5, heading: 11, namePt: 16, leadRatio: 1.3,
     header: "inline", nameCase: "as-is", headingCase: "title", headingRule: "below", bullet: { glyph: "•", x: 4, text: 14 },
     gaps: { header: 2, section: 3, afterHeading: 1, entry: 2 }, order: ["summary", "experience", "skills", "projects", "education", "certifications"], evidence: ["E1", "E2", "E10", "E14"] },
   T05: { id: "T05", name: "Analyst", for: "data, analytics and quantitative roles", roles: ["data"], levels: ["student", "early", "mid"], pages: 1, face: "sans",
-    margins: { top: 0.7 * IN, right: 0.7 * IN, bottom: 0.7 * IN, left: 0.7 * IN }, body: 10.5, heading: 10.5, namePt: 12, leadRatio: 1.25,
+    margins: { top: 0.7 * IN, right: 0.7 * IN, bottom: 0.7 * IN, left: 0.7 * IN }, body: 10.5, heading: 10.5, namePt: 14, leadRatio: 1.25,
     header: "inline", nameCase: "upper", headingCase: "upper", headingRule: "above", bullet: { glyph: "•", x: 0, text: 10 },
     gaps: { header: 2, section: 3, afterHeading: 1, entry: 1 }, order: ["summary", "experience", "projects", "skills", "education", "certifications"], evidence: ["E1", "E2", "E11", "E15"] },
   T06: { id: "T06", name: "Product & Design", for: "product, UX and design roles (portfolio link in the header)", roles: ["product_design"], levels: ["early", "mid", "senior"], pages: 1, face: "sans",
-    margins: { top: 0.8 * IN, right: 0.8 * IN, bottom: 0.8 * IN, left: 0.8 * IN }, body: 10.5, heading: 11, namePt: 12, leadRatio: 1.35,
+    margins: { top: 0.8 * IN, right: 0.8 * IN, bottom: 0.8 * IN, left: 0.8 * IN }, body: 10.5, heading: 11, namePt: 18, leadRatio: 1.35,
     header: "stack", nameCase: "as-is", headingCase: "title", headingRule: "none", bullet: { glyph: "–", x: 0, text: 11 },
     gaps: { header: 3, section: 3, afterHeading: 1, entry: 2 }, order: ["summary", "experience", "projects", "skills", "education"], evidence: ["E1", "E2", "E16"] },
   T07: { id: "T07", name: "Ledger", for: "finance, banking, consulting and business roles", roles: ["business_finance"], levels: ["early", "mid", "senior"], pages: 1, face: "serif",
-    margins: { top: 0.6 * IN, right: 0.6 * IN, bottom: 0.6 * IN, left: 0.6 * IN }, body: 10.5, heading: 10.5, namePt: 12, leadRatio: 1.2,
+    margins: { top: 0.6 * IN, right: 0.6 * IN, bottom: 0.6 * IN, left: 0.6 * IN }, body: 10.5, heading: 10.5, namePt: 14, leadRatio: 1.2,
     header: "inline", nameCase: "upper", headingCase: "upper", headingRule: "below", bullet: { glyph: "•", x: 4, text: 13 },
     gaps: { header: 2, section: 2, afterHeading: 1, entry: 1 }, order: ["experience", "education", "leadership", "skills", "certifications", "additional"], evidence: ["E1", "E5", "E6", "E17"] },
   T08: { id: "T08", name: "Results", for: "sales, marketing and customer-facing roles (results first)", roles: ["sales_marketing"], levels: ["early", "mid", "senior"], pages: 1, face: "sans",
-    margins: { top: 0.75 * IN, right: 0.75 * IN, bottom: 0.75 * IN, left: 0.75 * IN }, body: 11, heading: 11, namePt: 12, leadRatio: 1.2,
+    margins: { top: 0.75 * IN, right: 0.75 * IN, bottom: 0.75 * IN, left: 0.75 * IN }, body: 11, heading: 11, namePt: 16, leadRatio: 1.2,
     header: "inline", nameCase: "as-is", headingCase: "upper", headingRule: "above", bullet: { glyph: "•", x: 2, text: 12 },
     gaps: { header: 2, section: 3, afterHeading: 1, entry: 1 }, order: ["summary", "experience", "skills", "education", "awards"], evidence: ["E1", "E2", "E9"] },
   T09: { id: "T09", name: "Research CV-lite", for: "research, lab and academic-adjacent roles", roles: ["research"], levels: ["student", "early", "mid", "senior"], pages: 2, face: "serif",
-    margins: { top: 1 * IN, right: 1 * IN, bottom: 1 * IN, left: 1 * IN }, body: 11, heading: 11, namePt: 12, leadRatio: 1.2,
+    margins: { top: 1 * IN, right: 1 * IN, bottom: 1 * IN, left: 1 * IN }, body: 11, heading: 11, namePt: 14, leadRatio: 1.2,
     header: "stack", nameCase: "as-is", headingCase: "title", headingRule: "below", bullet: { glyph: "•", x: 0, text: 11 },
     gaps: { header: 2, section: 3, afterHeading: 1, entry: 1 }, order: ["education", "research", "publications", "experience", "projects", "awards", "skills"], evidence: ["E5", "E12"] },
   T10: { id: "T10", name: "Bridge", for: "career changers (skills first, then the full dated history)", roles: ["career_change"], levels: ["early", "mid", "senior"], pages: 1, face: "sans",
-    margins: { top: 0.75 * IN, right: 0.75 * IN, bottom: 0.75 * IN, left: 0.75 * IN }, body: 10.5, heading: 11, namePt: 12, leadRatio: 1.25,
+    margins: { top: 0.75 * IN, right: 0.75 * IN, bottom: 0.75 * IN, left: 0.75 * IN }, body: 10.5, heading: 11, namePt: 16, leadRatio: 1.25,
     header: "stack", nameCase: "as-is", headingCase: "upper", headingRule: "below", bullet: { glyph: "•", x: 2, text: 12 },
     gaps: { header: 2, section: 3, afterHeading: 1, entry: 1 }, order: ["summary", "skills", "projects", "experience", "education", "certifications"], evidence: ["E1", "E2", "E13"] },
   T11: { id: "T11", name: "Executive", for: "directors, VPs and executives (summary at the top, two pages)", roles: ["general", "business_finance"], levels: ["senior", "executive"], pages: 2, face: "serif",
-    margins: { top: 1 * IN, right: 1 * IN, bottom: 1 * IN, left: 1 * IN }, body: 11, heading: 12, namePt: 12, leadRatio: 1.25,
+    margins: { top: 1 * IN, right: 1 * IN, bottom: 1 * IN, left: 1 * IN }, body: 11, heading: 12, namePt: 18, leadRatio: 1.25,
     header: "stack", nameCase: "upper", headingCase: "upper", headingRule: "below", bullet: { glyph: "•", x: 0, text: 12 },
     gaps: { header: 3, section: 3, afterHeading: 1, entry: 2 }, order: ["summary", "experience", "education", "certifications", "skills", "awards"], evidence: ["E1", "E10", "E18"] },
   T12: { id: "T12", name: "Federal", for: "US federal applications (two-page limit, full month-year dates)", roles: ["federal"], levels: ["early", "mid", "senior", "executive"], pages: 2, face: "serif",
-    margins: { top: 1 * IN, right: 1 * IN, bottom: 1 * IN, left: 1 * IN }, body: 11, heading: 11, namePt: 12, leadRatio: 1.2,
+    margins: { top: 1 * IN, right: 1 * IN, bottom: 1 * IN, left: 1 * IN }, body: 11, heading: 11, namePt: 14, leadRatio: 1.2,
     header: "stack", nameCase: "as-is", headingCase: "upper", headingRule: "none", bullet: { glyph: "•", x: 0, text: 12 },
     gaps: { header: 2, section: 3, afterHeading: 1, entry: 1 }, order: ["summary", "experience", "education", "certifications", "skills", "awards"], evidence: ["E3", "E4", "E19", "E20"] },
   T13: { id: "T13", name: "Compact", for: "mid-career people who need one dense page", roles: ["general"], levels: ["early", "mid"], pages: 1, face: "sans",
-    margins: { top: 0.5 * IN, right: 0.5 * IN, bottom: 0.5 * IN, left: 0.5 * IN }, body: 10, heading: 10.5, namePt: 12, leadRatio: 1.2,
+    margins: { top: 0.5 * IN, right: 0.5 * IN, bottom: 0.5 * IN, left: 0.5 * IN }, body: 10, heading: 10.5, namePt: 14, leadRatio: 1.2,
     header: "inline", nameCase: "upper", headingCase: "upper", headingRule: "below", bullet: { glyph: "•", x: 2, text: 11 },
     gaps: { header: 2, section: 2, afterHeading: 1, entry: 1 }, order: ["summary", "experience", "skills", "projects", "education"], evidence: ["E1", "E5", "E6"] },
   T14: { id: "T14", name: "Two-Page Classic", for: "experienced generalists with 8+ years", roles: ["general"], levels: ["mid", "senior"], pages: 2, face: "sans",
-    margins: { top: 0.9 * IN, right: 0.9 * IN, bottom: 0.9 * IN, left: 0.9 * IN }, body: 11, heading: 11.5, namePt: 12, leadRatio: 1.25,
+    margins: { top: 0.9 * IN, right: 0.9 * IN, bottom: 0.9 * IN, left: 0.9 * IN }, body: 11, heading: 11.5, namePt: 16, leadRatio: 1.25,
     header: "stack", nameCase: "as-is", headingCase: "upper", headingRule: "below", bullet: { glyph: "•", x: 2, text: 13 },
     gaps: { header: 3, section: 3, afterHeading: 1, entry: 2 }, order: ["summary", "experience", "skills", "education", "certifications"], evidence: ["E1", "E10"] },
   T15: { id: "T15", name: "Plain Text-Safe", for: "any role where the safest possible parse matters most", roles: ["general"], levels: ["student", "early", "mid", "senior"], pages: 1, face: "serif",
-    margins: { top: 1 * IN, right: 1 * IN, bottom: 1 * IN, left: 1 * IN }, body: 11, heading: 11, namePt: 12, leadRatio: 1.2,
+    margins: { top: 1 * IN, right: 1 * IN, bottom: 1 * IN, left: 1 * IN }, body: 11, heading: 11, namePt: 14, leadRatio: 1.2,
     header: "stack", nameCase: "as-is", headingCase: "upper", headingRule: "none", bullet: { glyph: "•", x: 0, text: 12 },
     gaps: { header: 2, section: 2, afterHeading: 1, entry: 1 }, order: ["summary", "experience", "education", "skills"], evidence: ["E2", "E3", "E4"] },
 };
@@ -222,8 +222,13 @@ export function typesetTemplate(blocks: TBlock[], spec: TemplateSpec, step: Step
   const M = spec.margins, left = M.left, right = PAGE_W - M.right, col = right - left;
   const bulletX = left + spec.bullet.x, textX = left + spec.bullet.text;
   const gridTop = PAGE_H - M.top, floor = M.bottom;
-  const nameUnits = Math.ceil((spec.namePt * 1.25) / unit), headingUnits = Math.max(2, Math.ceil((spec.heading * 1.15) / unit));
-  const geometry: Geometry = { template: spec.id, branded, page: { w: PAGE_W, h: PAGE_H }, margins: M, x: { left, bullet: bulletX, text: textX, right }, gridTop, unit, lead, body, heading: spec.heading, name: spec.namePt, faces: [f.regular, f.bold], colors: [...new Set([pal.accent, pal.ink, pal.mute])], gaps };
+  // The name at the template's size, a point smaller at a time (never under 14 pt, or the template's own size if smaller)
+  // until it fits the column on one line; a name still too wide at the floor wraps at it.
+  const nameText = blocks.find((b) => b.kind === "name")?.text ?? "";
+  let namePt = spec.namePt;
+  while (namePt - 1 >= Math.min(14, spec.namePt) && textWidth(nameText, f.bold, namePt) > wrapWidth(col)) namePt -= 1;
+  const nameUnits = Math.ceil((namePt * 1.25) / unit), headingUnits = Math.max(2, Math.ceil((spec.heading * 1.15) / unit));
+  const geometry: Geometry = { template: spec.id, branded, page: { w: PAGE_W, h: PAGE_H }, margins: M, x: { left, bullet: bulletX, text: textX, right }, gridTop, unit, lead, body, heading: spec.heading, name: namePt, faces: [f.regular, f.bold], colors: [...new Set([pal.accent, pal.ink, pal.mute])], gaps };
   // Each block as its lines (pieces), its line advance in units and its gap before in units.
   const laid = blocks.map((b, i) => {
     const prev = blocks[i - 1];
@@ -234,12 +239,12 @@ export function typesetTemplate(blocks: TBlock[], spec: TemplateSpec, step: Step
     else if (b.kind === "entry" && prev && !["heading", "name", "contact", "links"].includes(prev.kind)) gap = gaps.entry;
     else if (!header && prev && ["name", "contact", "links"].includes(prev.kind)) gap = gaps.header;
     const face = b.kind === "name" || b.kind === "heading" || b.kind === "entry" ? f.bold : f.regular;
-    const size = b.kind === "name" ? spec.namePt : b.kind === "heading" ? spec.heading : body;
+    const size = b.kind === "name" ? namePt : b.kind === "heading" ? spec.heading : body;
     const adv = b.kind === "name" ? nameUnits : b.kind === "heading" ? headingUnits : 2;
     // An entry with dates wraps short of the date on every line (the date and a 12 pt gap); the DOCX gives the paragraph the
     // same right indent and sets the date at a right tab past it, on the margin (templateDocx), so both wrap identically.
     const width = b.kind === "bullet" ? right - textX : b.right ? col - dateRoom(b.right, f.regular, body) : col;
-    const pieces = b.kind === "name" || b.kind === "heading" ? [b.text] : wrap(b.text, face, size, wrapWidth(width));
+    const pieces = b.kind === "heading" ? [b.text] : wrap(b.text, face, size, wrapWidth(width));
     return { b, i, gap, face, size, adv, pieces, x: b.kind === "bullet" ? textX : left };
   });
   const lines: TLine[] = [], rules: TRule[] = [], printed: string[] = [], pageStarts: number[] = [];
@@ -348,7 +353,7 @@ export function templateDocx(R: any, blocks: TBlock[], spec: TemplateSpec, set: 
   const paras = blocks.map((b, i) => {
     const l = firstLine.get(i)!, prevLine = set.lines.filter((x) => x.block < i && x.page === l.page).pop();
     // Space before, from the PDF's own baselines: this block's first baseline less the last one above it, less one advance.
-    const adv = b.kind === "name" ? Math.ceil((spec.namePt * 1.25) / g.unit) * g.unit : b.kind === "heading" ? Math.max(2, Math.ceil((spec.heading * 1.15) / g.unit)) * g.unit : g.lead;
+    const adv = b.kind === "name" ? Math.ceil((g.name * 1.25) / g.unit) * g.unit : b.kind === "heading" ? Math.max(2, Math.ceil((spec.heading * 1.15) / g.unit)) * g.unit : g.lead;
     // A paragraph border adds its own space (w:space 1 pt plus the 0.625 pt rule) to the paragraph it borders: taken back out
     // of the space before (a rule above: this heading's; a rule below: the next paragraph's), so the baselines stay the PDF's.
     const BORDER = 1.625;
@@ -365,7 +370,7 @@ export function templateDocx(R: any, blocks: TBlock[], spec: TemplateSpec, set: 
     const color = b.kind === "name" || b.kind === "heading" ? pal.accent : ["contact", "links"].includes(b.kind) ? pal.mute : pal.ink;
     const rpr = (bold: boolean, size: number, c: string) => `<w:rPr>${bold ? "<w:b/>" : ""}<w:color w:val="${hexc(c)}"/><w:sz w:val="${sz(size)}"/><w:szCs w:val="${sz(size)}"/></w:rPr>`;
     const bold = b.kind === "name" || b.kind === "heading" || b.kind === "entry";
-    const size = b.kind === "name" ? spec.namePt : b.kind === "heading" ? spec.heading : g.body;
+    const size = b.kind === "name" ? g.name : b.kind === "heading" ? spec.heading : g.body;
     let runs: string;
     if (b.kind === "entry" && b.right) { runs = `<w:r>${rpr(true, size, color)}${t(b.text)}</w:r><w:r>${rpr(false, g.body, pal.mute)}<w:tab/>${t(b.right)}</w:r>`; printed.push(`${b.text} ${b.right}`); }
     else if (b.kind === "bullet") { runs = `<w:r>${rpr(false, size, color)}${t(spec.bullet.glyph)}<w:tab/>${t(b.text)}</w:r>`; printed.push(`${spec.bullet.glyph} ${b.text}`); }

@@ -40,7 +40,8 @@ Deno.test("r10/1 fifteen templates, each exact geometry inside the evidence's bo
   eq(new Set(specs.map((t) => t.name)).size, 15, "fifteen distinct designs");
   for (const t of specs) {
     for (const k of ["top", "right", "bottom", "left"] as const) assert(t.margins[k] >= 36 && t.margins[k] <= 72, `${t.id} ${k} margin ${t.margins[k]} pt is outside 0.5-1 in`);
-    assert(t.body >= 10 && t.body <= 12 && t.heading >= 10 && t.heading <= 12 && t.namePt <= 12, `${t.id}: every size 10-12 pt (R6)`);
+    assert(t.body >= 10 && t.body <= 12 && t.heading >= 10 && t.heading <= 12, `${t.id}: body and headings 10-12 pt (R6)`);
+    assert(t.namePt >= 14 && t.namePt <= 18 && t.namePt > t.heading, `${t.id}: the name 14-18 pt, above the headings (R6 scoped, architect ruling 2026-11-08)`);
     assert(t.bullet.text > t.bullet.x, `${t.id}: a hanging indent`);
     assert(Object.values(t.gaps).every((g) => Number.isInteger(g) && g >= 1), `${t.id}: gaps are whole units of the grid`);
     assert(t.evidence.length >= 2, `${t.id}: names its evidence`);
@@ -177,7 +178,7 @@ Deno.test("r10/6 the rater, on Word files and the PDFs LibreOffice saves from th
   eq(HARD, ["columns", "containers", "contact", "roundtrip"]);
 });
 
-Deno.test("r10/7 our own fifteen templates score as keepable on the rater (PDF and DOCX), and a kept PDF of standard faces can be rebuilt exactly; a 16 pt name cannot", async () => {
+Deno.test("r10/7 our own fifteen templates score as keepable on the rater (PDF and DOCX), and a kept PDF of standard faces can be rebuilt exactly, a 16 pt name included; a 24 pt name cannot", async () => {
   const c = CORPUS[2];
   for (const id of TEMPLATE_IDS) {
     const r = renderTemplate(R, c.doc, { template: id });
@@ -193,9 +194,19 @@ Deno.test("r10/7 our own fifteen templates score as keepable on the rater (PDF a
   assert(spec.ok, JSON.stringify(spec));
   const again = renderDesigned(R, CORPUS[9].doc, { layout: "own", ownPdfSpec: spec.spec });
   assert(again.ok && again.parseCheck.status !== "FAIL" && again.own_source === "pdf", JSON.stringify(again.ok ? again.parseCheck : again));
+  // A Word-made PDF with a 16 pt name (Arial, saved by LibreOffice) is rebuilt with its 16 pt name (R6 scoped), and the rebuild
+  // passes the parse-check and the pixel checker.
   const good = await fixture("good.pdf"), gr = await rateResumeFile(R, good);
-  const no = ownPdfSpec(gr, await pdfNamePt(good));
-  assert(!no.ok && /16 pt/.test(no.reason), JSON.stringify(no));
+  const yes = ownPdfSpec(gr, await pdfNamePt(good));
+  assert(yes.ok && yes.spec.namePt === 16 && yes.spec.face === "sans", JSON.stringify(yes));
+  const rebuilt = renderDesigned(R, CORPUS[9].doc, { layout: "own", ownPdfSpec: yes.spec });
+  assert(rebuilt.ok && rebuilt.parseCheck.status !== "FAIL", JSON.stringify(rebuilt.ok ? rebuilt.parseCheck : rebuilt));
+  const set = renderTemplate(R, CORPUS[9].doc, { template: "OWN" as LibraryId, spec: yes.spec });
+  assert(set.ok);
+  const k = await checkTemplatePdf(set.set.geometry, set.pdf, { R, docx: set.docx });
+  assert(k.pass, JSON.stringify(k.failures.slice(0, 3)));
+  const huge = ownPdfSpec(gr, 24);
+  assert(!huge.ok && /24 pt/.test(huge.reason), JSON.stringify(huge));
 });
 
 Deno.test("r10/8 the recommendation: the best of the fifteen for role and level, in plain words", () => {

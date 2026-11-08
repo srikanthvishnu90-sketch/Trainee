@@ -57,7 +57,7 @@ and no template rests on them alone.
 - **One page for students and early career; two pages for experienced people**: E6, E7 for one page. E10 says two pages are acceptable or preferred for experienced people. E20 caps federal resumes at two pages.
 - **Bold titles over bullets, clear headers, an overview at the top, white space**: E1.
 - **Quantified results**: E9. This is a content matter: Trainee never invents a number (D-007). The templates give results room, nothing more.
-- **Override, R6 of 148's parse-check**: every text run is 10–12 pt, the name included. This repository's rule caps the name at 12 pt, so hierarchy comes from weight, case and space, not size. A larger name would fail the ATS gate every tailored file passes. Changing R6 is the architect's call.
+- **Name size, R6 scoped (architect ruling 2026-11-08)**: 148's R6 rule used to cap every run at 12 pt, the name included. It now applies to body text and headings (10–12 pt). The name may be 10–18 pt: the first line of page one in a PDF, or the first paragraph's own style in a DOCX (its own commit, with `tests/architect/r10-r6-name-size-20261108.test.ts`). The templates set the name at 14–18 pt. A name too wide for the column steps down a point at a time, never under 14 pt, and wraps only if it still does not fit.
 
 ## 2. The fifteen
 
@@ -106,10 +106,11 @@ per week (E19) the person has not confirmed (D-007), and the gap report names it
 
 ### Geometry and fit
 - **x stops**: the left margin (name, contact, headings, entries, lines), the bullet glyph's x, and the bullet text's x. The bullet text x is one hanging indent for every bullet and every wrapped bullet line. The right margin is where every date ends.
-- **Rhythm**: lead = round to the nearest 0.5 of (body × the template's ratio), and unit = lead / 2. The name advances ⌈1.25 × 12 / unit⌉ units; a heading advances at least 2 units; a body line advances 2 units. Gaps (header, section, after heading, entry) are whole units.
+- **Rhythm**: lead = round to the nearest 0.5 of (body × the template's ratio), and unit = lead / 2. The name advances ⌈1.25 × its size / unit⌉ units; a heading advances at least 2 units; a body line advances 2 units. Gaps (header, section, after heading, entry) are whole units.
 - **Fit**: start at the template's body size with its gaps. Then take one unit off each gap (never under its floor). Then go down 0.5 pt at a time, never below 10 pt. Try one page first, then two. A two-page template takes one page only at its loosest step: it is never squeezed. A record that does not fit two pages at the tightest step is set on as many pages as it needs, and that is said.
 - **Pages**: a paragraph never splits across pages, so there are no widows or orphans. A heading keeps with its next block, and with that block's first bullet when the block is an entry. An entry keeps with its next block.
 - **Words**: each printed line is a source line's own text, or a split of it at its dates. Sections follow the template's order. The inline header joins the contact and links lines with " | ". Nothing is added (r10/2 checks this word for word).
+- **Name**: 14–18 pt by template (T05, T07, T09, T12, T13 and T15: 14; T01–T04, T08, T10 and T14: 16; T06 and T11: 18).
 - **Fonts**: the PDF uses the standard faces (Helvetica or Times, regular and bold), never embedded (R6). The DOCX names Arial or Times New Roman, which are metric-compatible, so one width table measures both. A character the standard faces cannot print (Ł, ś, CJK) is refused with a reason, never printed as "?".
 - **DOCX**: the same paragraphs, with the same exact line heights, spacing before taken from the PDF's own baselines, the same hanging indents, and a right tab on the margin. Entries keep the date's room as a right indent, with the tab past it. Each page starts with a page break before the paragraph that opens it in the PDF. Paragraph borders give back their 1.625 pt.
 
@@ -135,7 +136,7 @@ properties for a DOCX. A criterion that cannot be measured is left out, and the 
 A hard criterion fails when it gets under half its points. **KEEP rule: score ≥ 85 and no hard failure** keeps their format
 and changes only the content:
 - a DOCX is the existing "own" path: their Word file with the tailored bullets swapped in;
-- a PDF is rebuilt from its measured geometry (`ownPdfSpec`) only when that rebuild is faithful: a Helvetica/Arial or Times face, body 10–12 pt, a name at 12 pt or less (R6), measurable margins and leading, and flush-right dates;
+- a PDF is rebuilt from its measured geometry (`ownPdfSpec`) only when that rebuild is faithful: a Helvetica/Arial or Times face, body 10–12 pt, a name of 10–18 pt (R6 scoped), measurable margins and leading, and flush-right dates;
 - otherwise their Word copy is used if there is one; otherwise the best of the fifteen is offered with the reason.
 
 Under the rule, tailoring makes the file in the default layout and offers `recommendTemplate(role, level)` with a
@@ -155,7 +156,9 @@ LibreOffice):
 | messy (DOCX) | 67 | not kept |
 | messy (PDF) | 69 | not kept |
 
-Every template's own PDF and DOCX scores ≥ 95 (r10/7).
+Every template's own PDF and DOCX scores ≥ 95 (r10/7). The Word-made good.pdf, with its 16 pt Arial name, is now rebuilt faithfully and passes the parse-check and the checker. A 24 pt name is refused.
+
+**pdf.js on the edge (architect ruling 2026-11-08)**: the rater stays behind a fallback. A failure to load or read is caught, and tailoring makes the default file. The career edge entry probes pdf.js once per instance, off the request path, and logs one JSON line (`evt: pdfjs_probe`) when it fails (`probePdfjs`, `tests/architect/r10-pdfjs-probe-20261108.test.ts`). A staging check reads that log.
 
 ## 4. The pixel checker (career_resume_pixel.ts)
 
@@ -171,7 +174,7 @@ It holds every line to the template's declared geometry and fails on:
 | widow | a page opens with a wrapped line, or closes with a heading or an entry whose content starts the next page |
 | overflow | text runs past any margin |
 | docx_text | the DOCX's words are not the PDF's, in order |
-| fonts | a face is outside the template's two, an embedded font appears, or a size is outside 10–12 pt |
+| fonts | a face is outside the template's two, an embedded font appears, or a size is outside 10–12 pt (the name: its template's size, 10–18 pt) |
 
 r10/4 mutates a clean file once per rule and proves each rule fires: 0.6 pt off-grid, a 1 pt moved glyph, a 0.6 pt moved
 text, a date 1 pt short, one uneven gap, a page break inside a bullet, an overflow, a foreign face, a 9.5 pt run, and a DOCX
@@ -181,13 +184,13 @@ with other words.
 
 | check | result |
 |-------|--------|
-| Pixel checker | **945 / 945** passes (63 corpus resumes × 15 templates; 148 of them two-page). 148's parse-check also passes on all 945, and every PDF and its DOCX carry the same words. |
-| Round trip (945 files) | pdfium 20,550 / 20,550 fields (100%); poppler 20,550 / 20,550 (100%); python-docx 20,550 / 20,550 (100%); pdfminer.six in position order 20,532 / 20,550 (99.91%) |
+| Pixel checker | **945 / 945** passes (63 corpus resumes × 15 templates; 151 of them two-page). 148's parse-check also passes on all 945, and every PDF and its DOCX carry the same words. Before the long-name rule, the checker failed 4 files on a 6 pt name overflow. |
+| Round trip (945 files) | pdfium 20,550 / 20,550 fields (100%); poppler 20,550 / 20,550 (100%); python-docx 20,550 / 20,550 (100%); pdfminer.six in position order 20,530 / 20,550 (99.90%) |
 | pdfminer.six default layout analysis (reported, not asserted) | 18,828 / 20,550 (91.62%) |
 | Dates on their entry's line | 4,305 / 4,305 (poppler -layout and pdfium) |
-| DOCX against PDF in LibreOffice (105 sampled files: 7 resumes × 15) | same page count 105 / 105; same line count 105 / 105; baselines within 4.2 pt (a constant offset of where Word-style exact lines place the text) |
+| DOCX against PDF in LibreOffice (105 sampled files: 7 resumes × 15) | same page count 105 / 105; same line count 105 / 105; baselines within 5.6 pt (a constant offset of where Word-style exact lines place the text) |
 
-The 18 pdfminer.six position-order misses are all entries whose very long title wraps: pdfminer's box grouping puts the
+The 20 pdfminer.six position-order misses are all entries whose very long title wraps: pdfminer's box grouping puts the
 right-aligned date between the two title lines.
 
 pdfminer.six's default layout analysis splits a hanging-indent bullet's wrapped lines into their own text box, and can

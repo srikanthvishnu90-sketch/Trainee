@@ -354,9 +354,9 @@ export function ratingSummary(r: Rating, rec: Recommendation | null): string {
 
 // ---------------------------------------------------------------- keep: the person's own PDF, rebuilt from its geometry
 // A PDF the rater keeps can be set again with the tailored words only when every part of its layout is something the
-// standard-font PDF can reproduce exactly: a Helvetica/Arial or Times face, body 10-12 pt, one column, dates flush right,
-// bullets at one x with one hanging indent, a measurable leading. Anything else (a 16 pt name, a face like Calibri, a
-// sidebar) is not faithful, and the reason says which; then the DOCX is kept where there is one, else a template is offered.
+// standard-font PDF can reproduce exactly: a Helvetica/Arial or Times face, body 10-12 pt, a name of 10-18 pt, one column,
+// dates flush right, bullets at one x with one hanging indent, a measurable leading. Anything else (a 24 pt name, a face like
+// Calibri, a sidebar) is not faithful, and the reason says which; then the DOCX is kept where there is one, else a template is offered.
 export function ownPdfSpec(r: Rating, nameSize: number | null): { ok: true; spec: TemplateSpec } | { ok: false; reason: string } {
   const m = r.measured;
   if (r.kind !== "pdf" || !r.keep) return { ok: false, reason: "only a kept PDF is rebuilt" };
@@ -365,7 +365,7 @@ export function ownPdfSpec(r: Rating, nameSize: number | null): { ok: true; spec
   const why: string[] = [];
   if (!face) why.push(`its face (${m.faces.join(", ")}) is not one the standard PDF fonts reproduce`);
   if (m.bodyPt === null || m.bodyPt < 10 || m.bodyPt > 12) why.push(`its body size (${m.bodyPt} pt) is outside 10-12 pt`);
-  if (nameSize !== null && nameSize > 12) why.push(`its name is ${nameSize} pt, and the standard-font PDF sets every size at 12 pt or less`);
+  if (nameSize !== null && (nameSize > 18 || nameSize < 10)) why.push(`its name is ${nameSize} pt, outside the 10-18 pt a name may be (R6)`);
   if (!m.margins || m.margins.left < 36 || m.margins.left > 72 || m.margins.top < 36 || m.margins.top > 72) why.push("its margins could not be measured within 0.5-1 in");
   if (m.datesFlushRight === false) why.push("its dates are not flush right");
   if (!m.leadPt) why.push("its line spacing could not be measured");
@@ -374,7 +374,7 @@ export function ownPdfSpec(r: Rating, nameSize: number | null): { ok: true; spec
   const bx = m.bulletX !== null ? Math.max(0, Math.round((m.bulletX - left) * 2) / 2) : 0, tx = m.bulletTextX !== null ? Math.max(bx + 6, Math.round((m.bulletTextX - left) * 2) / 2) : bx + 12;
   const spec: TemplateSpec = {
     id: "OWN", name: "Your own layout", for: "you", roles: ["general"], levels: ["early", "mid", "senior"], pages: r.pages >= 2 ? 2 : 1, face: face!,
-    margins: { top, right: left, bottom: Math.max(36, top), left }, body, heading: body, namePt: Math.min(12, Math.max(body, nameSize ?? 12)), leadRatio: Math.max(1.1, Math.min(1.5, m.leadPt! / body)),
+    margins: { top, right: left, bottom: Math.max(36, top), left }, body, heading: body, namePt: Math.min(18, Math.max(body, Math.round((nameSize ?? 12) * 2) / 2)), leadRatio: Math.max(1.1, Math.min(1.5, m.leadPt! / body)),
     header: "stack", nameCase: "as-is", headingCase: m.headingCase ?? "upper", headingRule: m.headingRule ?? "none", bullet: { glyph: "•", x: bx, text: tx },
     gaps: { header: 2, section: 2, afterHeading: 1, entry: 1 }, order: [], evidence: [],
   };

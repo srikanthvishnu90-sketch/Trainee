@@ -13863,10 +13863,7 @@ const CareerRouter = (() => {
       return { intent: "tailor_refused", reply, resultStatus: "blocked", artifact: null, violations: tailored.violations || [] };
     }
     const top = tailored.resume && tailored.resume.header;
-    if (tailored.mode === "full" && !(top && s(top.name).trim() && s(top.email).trim())) {
-      const reply = compose({ headline: "I need your name and email for the top of your resume before I make it.", facts: ["An employer's system reads them from the top of the file, and I put there only what you give me."], nextStep: "What name and email should go at the top of your resume?" });
-      return { intent: "tailor_needs_contact", reply, resultStatus: "awaiting_user", sends: 0, artifact: null };
-    }
+    const noContact = tailored.mode === "full" && !(top && s(top.name).trim() && s(top.email).trim());
     const rendered = tailored.rendered || {};
     const artifact = { kind: "tailored_resume", format: "text", text: rendered.text || "", markdown: rendered.markdown || "", pdf: rendered.pdf == null ? null : rendered.pdf, sha256: sha256(rendered.text || ""), jobId, company, versionId: tailored.version && tailored.version.versionId || null };
     if (profile && typeof profile === "object") { profile._careerRouterArtifacts = [...(profile._careerRouterArtifacts || []), artifact]; }
@@ -13995,6 +13992,7 @@ const CareerRouter = (() => {
         ...(mismatchFact ? [mismatchFact] : []),
       ];
     try { const tm = threadMirrorForWrite(ctx); if (tm) tm.tailor = { company: company || null, title: titleLine, jobId: jobId || null, diff: tailored.diff || null, gaps, at: new Date(nowOf(ctx)).toISOString() }; } catch {   }
+    if (noContact) { facts.push("There is no name or email at the top of this file: none was typed for it and none was confirmed with your resume, so nothing is printed there."); nextStep = "What name and email should go at the top of your resume?"; artifact.no_contact = true; }
     const reply = compose({ headline: headlineOverride || `Your resume is tailored for ${titleLine}.`, facts, nextStep });
     return { intent: "career_tailor", reply, resultStatus: "prepared", artifact, gaps, tailored: { ok: true, mode: tailored.mode, version: tailored.version },
       tailorDoc: tailored.resume || null, tailorJd: jdText, tailorPosting: posting ? { title: posting.title || null, company: posting.company || null } : null };
@@ -14031,7 +14029,7 @@ const CareerRouter = (() => {
 
   function multiTailorTargets(text) {
     const raw = s(text);
-    const re = /(?:\b(?:for|and|,)\s+)(?:the\s+|a\s+)?([A-Za-z][A-Za-z0-9&/+.,' -]*?)\s+(?:role|position|job|internship|posting|opening)\s+at\s+([A-Z][A-Za-z0-9&.'’-]*(?:\s+(?!and\b)[A-Z][A-Za-z0-9&.'’-]*)*)/g;
+    const re = /(?:(?:\b(?:for|4|and|n|plus)|,|&|\+)\s+)(?:the\s+|a\s+)?([A-Za-z](?:[A-Za-z0-9/.,' -]|[&+](?!\s+(?:the|a)\s))*?)\s+(?:role|position|job|internship|posting|opening)\s+(?:at|@)\s+([A-Z][A-Za-z0-9&.'’-]*(?:\s+(?!(?:and|n|plus)\b)[A-Z][A-Za-z0-9&.'’-]*)*)/g;
     const out = [];
     let m;
     while ((m = re.exec(raw))) {
@@ -14052,6 +14050,13 @@ const CareerRouter = (() => {
       else missing.push(tg);
     }
     if (!done.length) return null;
+    const part = (v) => s(v).replace(/\([^)]*\)/g, " ").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
+    for (const d of done) {
+      const pdf = d.r.artifact && d.r.artifact.pdf;
+      if (!pdf || typeof pdf !== "object") continue;
+      const who = d.r.tailorDoc && d.r.tailorDoc.header && d.r.tailorDoc.header.name ? (s(pdf.filename).replace(/_?Resume\.pdf$/i, "") || null) : null;
+      pdf.filename = [who, "Resume", part(d.posting.company), part(d.posting.title)].filter(Boolean).join("_") + ".pdf";
+    }
     const docs = done.map((d) => d.r.artifact && d.r.artifact.pdf).filter(Boolean);
     const named = (d) => `${d.posting.title} at ${d.posting.company}`;
     const facts = done.map((d) => {

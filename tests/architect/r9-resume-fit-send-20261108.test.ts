@@ -10,6 +10,7 @@
 //            back out of the file refuses the file.
 //   tool/1-2 The chat's tailor_resume prints the header the person confirmed (the form path still asks for a typed name and
 //            email) and attaches its PDF and Word files to the reply; route/1 "make my resume fit the X job" is a tailoring.
+//   two/1-2  Two roles in one ask, joined the way people text ("4 the", "n", "&", "+", "plus"): one file each, named for it.
 //   parity/1-2 The DOCX (Inter) wraps no further than the PDF (Helvetica metrics), so LibreOffice lays it out on the PDF's pages.
 // Offline: everything renders in this process.
 import * as zlib from "node:zlib";
@@ -129,23 +130,25 @@ Deno.test("name/1 the router's file and its employer copy carry the confirmed he
   eq([r.artifact.pdf.filename, r.artifact.docx.filename], ["Resume_Acme_Analytics.pdf", "Resume_Acme_Analytics.docx"]);
 });
 
-Deno.test("name/2 with no name and email (none typed, no header confirmed) the router makes no file and asks for them", () => {
+Deno.test("name/2 with no name and email (none typed, no header confirmed): the file is their review copy, its empty top is said and asked", async () => {
   const p = CareerProfile.createProfile({});
   CareerProfile.ingestResume(p, { text: RESUME_TEXT.split("\n").slice(4).join("\n"), fileName: "test-resume.txt" });
   for (const f of p.facts) CareerProfile.confirmFact(p, f.id);
   assert(!p.basics.name && !p.resume_header && p.facts.length > 3, "confirmed entries, no contact");
   const ctx: any = { profile: p, now: NOW, thread: {}, jdText: DATA_POSTING, company: "Acme Analytics" };
   const r = CareerRouter.handleChat("tailor my resume for this posting", ctx);
-  eq([r?.intent, r?.artifact, r?.resultStatus, (ctx.profile._careerRouterArtifacts || []).length], ["tailor_needs_contact", null, "awaiting_user", 0]);
-  assert(/What name and email should go at the top of your resume\?/.test(r.reply), r.reply);
+  eq([r?.intent, r?.artifact?.no_contact], ["career_tailor", true]);
+  assert(/There is no name or email at the top of this file/.test(r.reply) && /What name and email should go at the top of your resume\?/.test(r.reply), r.reply);
+  await tailorRewriteTurn({ out: { intent: r.intent, result: r } as any, profile: ctx.profile, on: false, model: null as any });
+  assert(!r.artifact.employer_copy && !r.artifact.docx, "never made an employer copy");
   // A header confirmed without an email is not a contact header either.
   const half = headerOnlyProfile();
   half.resume_header.email = null;
   const r2 = CareerRouter.handleChat("tailor my resume for this posting", { profile: half, now: NOW, thread: {}, jdText: DATA_POSTING, company: "Acme" } as any);
-  eq(r2?.intent, "tailor_needs_contact");
-  // tailor_resume asks the same question (career_tailor.ts no_contact).
-  return tailorForPosting({ userId: USER, profile: p, posting: { text: DATA_POSTING }, deps: { render: edgeRenderer(), resumes: memoryResumeStore() }, now: NOW })
-    .then((o) => assert(!o.ok && o.refused === "no_contact" && o.reason.includes("What name and email should go at the top of your resume?"), JSON.stringify(o)));
+  eq(r2?.artifact?.no_contact, true);
+  // tailor_resume (chat) and the form path refuse without one, with the same question.
+  const o = await tailorForPosting({ userId: USER, profile: p, posting: { text: DATA_POSTING }, deps: { render: edgeRenderer(), resumes: memoryResumeStore() }, now: NOW });
+  assert(!o.ok && o.refused === "no_contact" && o.reason.includes("What name and email should go at the top of your resume?"), JSON.stringify(o));
 });
 
 Deno.test("name/3 the contact line the person confirmed must come back out of the file, or the file is refused", () => {
@@ -256,4 +259,37 @@ Deno.test("route/1 'make my resume fit the X job at Y' is a tailoring, not a rec
   await tailorRewriteTurn({ out: { intent: r.intent, result: r } as any, profile: ctx.profile, on: false, model: null as any });
   eq([r.artifact.layout, r.artifact.fit.pages], ["trainee", 1]);
   eq(CareerRouter.handleChat("which roles fit my resume", { profile: headerOnlyProfile(), now: NOW, thread: {} } as any)?.intent, "career_recommendations");
+});
+
+// ------------------------------------------------------------------------------------------------ two roles in one ask
+// e2e eval resume.two (13/40): the texting and slang joins ("4 the", "n the", "& the", "plus the") read as one role, and the
+// two files both came back as <Name>_Resume.pdf.
+const { CareerHost } = await import("../../supabase/functions/_shared/career_host.js");
+const core = await import("../../supabase/functions/_shared/router_core.career.js");
+function twoRoleTurn(message: string, profile: any) {
+  const host = (CareerHost as any).createCareerHost(core);
+  const posting = (id: string, company: string, title: string, jd: string) => ({ id, job_id: id, company, title, location: "Chicago, IL", jd_text: jd, url: `https://boards.greenhouse.io/x/jobs/${id}` });
+  const ctx = host.createTurnCtx({ userId: "TEST-r9-two", threadId: "t-two", now: NOW, accountPersistence: true, snapshot: null, account: { epoch: 0, version: 0, paused: false },
+    postings: [posting("gh-901", "Sable Software", "Data Scientist", "Data Scientist. Requirements: Python, SQL, Statistics."),
+      posting("gh-902", "Willow Software", "Financial Analyst", "Financial Analyst. Requirements: Excel, SQL, financial modeling.")] });
+  ctx.profile = profile;
+  return host.runTurn(message, ctx);
+}
+Deno.test("two/1 the texting and slang joins name two roles: one file each, each named for its role, the confirmed name first", () => {
+  for (const join of ["4 the Data Scientist role at Sable Software and", "for the Data Scientist role at Sable Software n", "for the Data Scientist role at Sable Software &", "for the Data Scientist role at Sable Software plus", "for the Data Scientist role at Sable Software +"]) {
+    const m = `tailor my resume ${join} the Financial Analyst role at Willow Software and send both back rn`;
+    const r = twoRoleTurn(m, headerOnlyProfile());
+    const docs = (r.result?.documents ?? []).filter((d: any) => d && d.base64);
+    eq(docs.map((d: any) => d.filename), ["Alex_Testcase_Resume_Sable_Software_Data_Scientist.pdf", "Alex_Testcase_Resume_Willow_Software_Financial_Analyst.pdf"], m);
+    eq(new Set(docs.map((d: any) => d.sha256)).size, 2, "two different files");
+    for (const d of docs) assert(flat(R.extractPdfLines(Buffer.from(d.base64, "base64"))).startsWith(`${NAME} ${CONTACT}`), `${d.filename} starts with the confirmed header`);
+  }
+});
+Deno.test("two/2 the roles are read whole: an ampersand or a plus inside a role or a company is not a join", async () => {
+  const src = await Deno.readTextFile(new URL("../../packages/domain/142-career-router.js", import.meta.url));
+  const body = src.slice(src.indexOf("  function multiTailorTargets(text)"), src.indexOf("  function handleMultiTailor("));
+  const s = (v: unknown) => String(v == null ? "" : v), lc = (v: unknown) => s(v).toLowerCase();
+  const targets = new Function("s", "lc", `${body}; return multiTailorTargets;`)(s, lc);
+  eq(targets("tailor my resume for the R&D Analyst role at AT&T and the C++ Developer role at Nimbus"), [{ role: "R&D Analyst", company: "AT&T" }, { role: "C++ Developer", company: "Nimbus" }]);
+  eq(targets("tailor my resume for the Data Analyst role at Stripe"), null, "one role is the single tailor's");
 });

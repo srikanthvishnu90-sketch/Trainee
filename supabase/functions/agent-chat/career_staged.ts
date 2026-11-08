@@ -25,6 +25,7 @@ type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler:
 
 import { correctedAsk } from "../_shared/search_correction.ts";
 import { askFor } from "../_shared/career_search_judge.ts";
+import { outreachAsk } from "../_shared/outreach_ask.ts";
 export type BrainMode = "router" | "agent" | "staged";
 // The served brain (release_config.ts): the committed PRODUCTION_BRAIN unless CAREER_BRAIN rolls it back to the router.
 // "agent" is never served from here (the full brain stays pinned off in career_brain.ts).
@@ -359,6 +360,8 @@ export function marketResearchAsk(env: Env, message: string, intent: string | nu
   if (intent && RESEARCH_OVER.has(intent)) return research;
   return !(intent && CODE_OWNED_INTENTS.has(intent));
 }
+// The router's own outreach and networking intents (R9 outreach routing leaves them to their rules).
+const OUTREACH_OWN = /^(?:outreach|career_outreach|career_networking|career_people|networking)/;
 export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock }): StagedDecision {
   const clock = o.clock ?? NO_CLOCK;
   const mode = brainMode(o.env);
@@ -389,6 +392,13 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (adviceQuestion(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "advice_question", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
   if (counterAmbiguousAsk(intent, probe.result)) return { brain: true, mode, intent, reason: "counter_ambiguous_figures", ambiguousFigures: (probe.result as any).figures, ambiguousRole: (probe.result as any).awaiting === "which_figure_is_ask" ? "ask" : "offer" };
   if (counterDecisionAsk(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "counter_decision" };
+  // R9 OUTREACH ROUTING (2026-11-08): an ask to write to a person or a role at a firm that code's networking turn could not
+  // read (a typo in the verb, Spanish, Hindi in Latin script), which the router then claimed for something else from a
+  // keyword ("the internship timeline" got the career timeline, "how they got started" the company-intel recipe), is the
+  // brain's: it drafts from the person's own contacts (draft_outreach; nothing is sent until they approve the exact
+  // message). The router's own outreach intents keep their rules (an instruction to email stays code's), and so does code's
+  // own work (an exact payload, a card, the apply queue, a bare yes or no).
+  if (!CODE_OWNED_INTENTS.has(intent) && !OUTREACH_OWN.test(intent) && outreachAsk(o.message)) return { brain: true, mode, intent, reason: "outreach_ask" };
   if (!STAGED_BRAIN_INTENTS.includes(intent)) {
     // Before the list: a turn that asks or forbids is the brain's unless its intent is code's own work (questionTurn).
     if (questionTurn(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "question_shaped", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };

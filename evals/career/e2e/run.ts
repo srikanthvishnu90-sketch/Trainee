@@ -17,7 +17,8 @@
 //   deno run -A evals/career/e2e/run.ts --label <label>                      (fake model: free, deterministic)
 //   deno run -A evals/career/e2e/run.ts --label <label> --model claude --budget-usd 3   (paid: ANTHROPIC_API_KEY, capped)
 //   options: --brain production|router|staged|planner (default production: the release config's brain, D-035, with
-//            the release flags as committed, D-036), --only E01,E11, --out <file>, --no-log (do not append to SCORE-LOG.md)
+//            the release flags as committed, D-036), --only E01,E11, --out <file>, --no-log (do not append to SCORE-LOG.md),
+//            --replies (keep each task's replies and intents in the result file of a generated set)
 //   SETS (release 9, workstream H): --set core40|full|adversarial|heldout (default core40: tasks.json, the 40 tasks and 6
 //            guards, run exactly as before). full is the 1,000 generated completion tasks (generate.ts: about 250 per area),
 //            adversarial the 150 generated guards (must all hold), heldout the 20% of full the seed holds out. --sample N
@@ -544,8 +545,9 @@ if (import.meta.main) {
   const label = opt("--label") || `e2e-${set}-${brain}-${model}-${new Date().toISOString().slice(0, 10)}`;
   const r = await runE2E({ label, brain, model, only: opt("--only")?.split(",").filter(Boolean), budgetUsd, set, sample, seed });
   await Deno.mkdir(new URL("results/", HERE), { recursive: true });
-  // A generated set's result keeps each item's reasons and stage, not the replies (1,000 tasks of replies is megabytes).
-  const out = set === "core40" ? r : { ...r, items: r.items.map(({ replies: _r, intents: _i, ...x }) => x) };
+  // A generated set's result keeps each item's reasons and stage, not the replies (1,000 tasks of replies is megabytes),
+  // unless --replies asks for them (for reading a failure cluster's transcripts; best with --only).
+  const out = set === "core40" || args.includes("--replies") ? r : { ...r, items: r.items.map(({ replies: _r, intents: _i, ...x }) => x) };
   await Deno.writeTextFile(opt("--out") || new URL(`results/${label}.json`, HERE).pathname, JSON.stringify(out, null, 1));
   console.log(set === "core40" ? report(r) : reportScaled(r));
   if (!args.includes("--no-log") && !opt("--only")) {

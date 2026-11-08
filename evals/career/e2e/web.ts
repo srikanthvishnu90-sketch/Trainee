@@ -61,6 +61,8 @@ export const STUB_WEB: Record<string, StubPage> = {
     about: ["Return offers stay common if deal volume in New York holds up.", "A weak year for mergers could cut summer analyst classes at investment banks."],
   },
 };
+// The scaled set's pages (generate.ts): one made-up host per research task, added before the run reads them.
+export function addStubPages(pages: Record<string, StubPage>) { for (const [h, pg] of Object.entries(pages)) if (/\.e2e\.test$/.test(h)) STUB_WEB[h] = pg; }
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const page = (title: string, lines: string[]) => `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title></head><body><main><h1>${esc(title)}</h1>${lines.map((l) => `<p>${esc(l)}</p>`).join("")}</main></body></html>`;
 export const isStubWebHost = (host: string) => Object.prototype.hasOwnProperty.call(STUB_WEB, host);

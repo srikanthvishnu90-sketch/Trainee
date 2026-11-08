@@ -126,6 +126,9 @@ import { shapeForTurn } from "../_shared/channel_shape.ts"; // REPLY SHAPE
 import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a pasted link or "apply to this" -> one line + one Apply button
 import { supabaseFileStore } from "../trainee-file/store.ts";
 import { createFileService, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
+import { researchBriefOn, researchReplyOn } from "../_shared/research_reply.ts"; // R9-C
+import { fetchSources } from "../_shared/research_sources.ts";
+import { declaredFetch, searchProviderFor } from "../_shared/research_search.ts";
 import { prepFileTurn } from "./career_prep_file.ts"; // BETA C03: the interview prep File
 import { factsForTurn, replyWriterOn, rewrites, writable, writeReply, writerChannel } from "../_shared/career_reply_writer.ts"; // V1 TEXTING VOICE
 import { correctedAsk } from "../_shared/search_correction.ts"; // SPEC 2.3
@@ -913,6 +916,38 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // R9-G (e2e E09): "tailor my resume for the <role> role at <Co> and apply with it": the apply half here, the tailor half
       // through the router once the application is queued (below, in the apply answer).
       const tailorApply = hereOut || reach ? null : tailorAndApplyOf(message);
+      // R9-G2 (E09): the tailor half runs FIRST, so its PDF is kept for that posting (career_apply_posting_resume_put) before
+      // the apply half asks for preparation: the hosted preparation then sends that tailored file for that posting, and its
+      // card names it. The router's tailor, then FEATURE 4's rewrite, exactly as every router tailor turn below.
+      let tailorHalf: any = null, tailoredKept: { sha: string; filename: string; jobId: string } | null = null;
+      if (tailorApply && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)) {
+        await ensurePool(tailorApply.tailor);
+        let tr: any = clock.sync("router", () => host.runTurn(tailorApply.tailor, ctx));
+        if (tr?.intent === "career_tailor" && tr.result?.tailorDoc) {
+          const rwMeter = ledger.track(newMeter());
+          const voiceSamples = (ctx as any).outreach?.voiceSamples ?? null;
+          const rw = await tailorRewriteTurn({ out: tr, profile: (ctx as any).profile ?? null, on: rewriteOn(Deno.env),
+            model: (payload) => callModel(careerModelConfig(Deno.env), payload, { meter: rwMeter, role: "chat" }),
+            voice: Array.isArray(voiceSamples) && voiceSamples.length ? CareerWriting.extractVoiceProfile(voiceSamples) : null })
+            .catch((e) => { console.error("tailor rewrite:", e?.message ?? e); return null; });
+          if (rw?.summary) { tr = rw.out; agentMeta = { ...(agentMeta || {}), tailor_rewrite: rw.summary }; }
+          await ledger.record(rwMeter);
+        }
+        if (tr?.intent === "career_tailor" && tr.result?.artifact) {
+          tailorHalf = tr;
+          const art = tr.result.artifact, pdf = art?.pdf;
+          const jobId = typeof art?.jobId === "string" ? art.jobId : null;
+          if (jobId && pdf && typeof pdf.base64 === "string" && pdf.base64) {
+            // Named so the card tells it from their kept file at a glance: "<their file name>_tailored_<Company>.pdf".
+            const co = String(art.company || "").replace(/\([^)]*\)/g, " ").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
+            const stem = String(pdf.filename || "Resume").replace(/\.pdf$/i, "").replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^[._]+/, "").slice(0, 120) || "Resume";
+            const filename = `${stem}${/tailored/i.test(stem) ? "" : "_tailored"}${co && !stem.includes(co) ? `_${co}` : ""}.pdf`;
+            const r = await admin.rpc("career_apply_posting_resume_put", { p_user: user.id, p_posting: jobId, p_filename: filename, p_b64: pdf.base64 });
+            if (r.error) console.error("posting resume:", r.error.message);
+            else if (typeof r.data === "string" && /^[0-9a-f]{64}$/.test(r.data)) tailoredKept = { sha: r.data, filename, jobId };
+          }
+        }
+      }
       const queued: any = hereOut ? { reply: hereOut.reply, intent: APPLY_QUEUE_INTENT, status: hereOut.status } : !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await applyTurn({
           ...feature1.apply,
@@ -1153,24 +1188,19 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         // turn's documents). The application's card names the resume file the application sends, exactly; the hosted
         // application sends the resume file the person keeps for the cloud (prepare-runner.ts keptResume), so the reply says
         // so rather than implying the tailored copy goes with it.
-        if (tailorApply && !asking && (queued.status === "queued" || queued.status === "already")) {
-          await ensurePool(tailorApply.tailor);
-          let tr: any = clock.sync("router", () => host.runTurn(tailorApply.tailor, ctx));
-          // FEATURE 4, as for every router tailor below: the rewrite and its Word copy, so "PDF and DOCX" is what they get.
-          if (tr?.intent === "career_tailor" && tr.result?.tailorDoc) {
-            const rwMeter = ledger.track(newMeter());
-            const voiceSamples = (ctx as any).outreach?.voiceSamples ?? null;
-            const rw = await tailorRewriteTurn({ out: tr, profile: (ctx as any).profile ?? null, on: rewriteOn(Deno.env),
-              model: (payload) => callModel(careerModelConfig(Deno.env), payload, { meter: rwMeter, role: "chat" }),
-              voice: Array.isArray(voiceSamples) && voiceSamples.length ? CareerWriting.extractVoiceProfile(voiceSamples) : null })
-              .catch((e) => { console.error("tailor rewrite:", e?.message ?? e); return null; });
-            if (rw?.summary) { tr = rw.out; agentMeta = { ...(agentMeta || {}), tailor_rewrite: rw.summary }; }
-            await ledger.record(rwMeter);
-          }
-          if (tr?.intent === "career_tailor" && tr.result?.artifact) {
-            const sends = "The application's card names the exact resume file it sends: the hosted application sends the resume file you keep for applying, as you gave it, not this tailored copy.";
-            out = { ...out, reply: `${tr.reply}\n\n${queued.reply} ${sends}`, result: tr.result };
-          }
+        if (tailorApply && !asking && tailorHalf && (queued.status === "queued" || queued.status === "already")) {
+          // R9-G2 (E09): the card names the exact file the application sends. With the tailored copy kept for this posting,
+          // that is the tailored file; without it (no resume kept for the cloud, or another posting was queued), the kept one.
+          const same = tailoredKept && queued.posting?.job_id && String(queued.posting.job_id) === tailoredKept.jobId;
+          const sends = same
+            ? `The application sends this tailored resume (${tailoredKept!.filename}); its card names that exact file.`
+            : "The application's card names the exact resume file it sends: the resume file you keep for applying, as you gave it, not this tailored copy.";
+          out = { ...out, reply: `${tailorHalf.reply}\n\n${queued.reply} ${sends}`, result: tailorHalf.result };
+        } else if (tailorApply && tailorHalf) {
+          // The apply half asked a question or queued nothing: the tailoring stands and is returned, and the reply says
+          // where its copy is kept, so a later application to that posting sending it is never a surprise.
+          const kept = tailoredKept ? ` The tailored copy (${tailoredKept.filename}) is kept for that posting: when its application is prepared, its card names that file.` : "";
+          out = { ...out, reply: `${tailorHalf.reply}\n\n${queued.reply}${kept}`, result: tailorHalf.result };
         }
         // F09: the screen's question for a fact not confirmed rides the reply, so the next message can answer it.
         const sm = screenMeta(queued.screen);
@@ -1251,6 +1281,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           knowledge: knowledgeOn(Deno.env),
           // Open career questions: cached, capped web search. DARK: offered only when the gateway's web search is available (WEB_SEARCH_AVAILABLE, false until a live call proves it). The cache is per instance
           // until a table is approved by the owner; the brief is returned as markdown until PR #280 (file kinds) supplies `publish`.
+          // R9-C market research (CAREER_RESEARCH_REPLY=on; off by default): Brave with the owner's BRAVE_SEARCH_API_KEY, else the
+          // no-key first-party sources (SEC EDGAR, BLS, company sites). The research brief File only with CAREER_RESEARCH_BRIEF=on.
+          market: researchReplyOn(Deno.env) && cfg.apiKey ? {
+            search: searchProviderFor(Deno.env, fetch),
+            read: (urls) => fetchSources(urls, { fetch: declaredFetch(fetch, Deno.env.get("RESEARCH_USER_AGENT")), max: 8 }),
+            draft: async (p) => { const r = await callModel(cfg, { system: p.system, messages: p.messages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: 1800 }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); },
+            publish: researchBriefOn(Deno.env) ? async (data) => { const r = await createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }).create(user.id, "research_brief", data); return r.ok && r.url ? { url: r.url } : null; } : null,
+          } : null,
           research: knowledgeOn(Deno.env) && WEB_SEARCH_AVAILABLE && cfg.apiKey ? { search: gatewayGroundSearch(), cache: researchCache, publish: fileKindPublisher(createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }), user.id), derive: modelDerive(async (system, user) => { const r = await callModel(cfg, { system, messages: [{ role: "user", content: [{ type: "text", text: user }] }], max_tokens: 200 }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); }) } : null,
           known: { standing, alerts: alertRow ? { prefs: alertRow.prefs, tz: alertRow.tz } : null, pipeline: null, situation }, memory });
         await ledger.record(meter);

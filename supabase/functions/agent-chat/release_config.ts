@@ -144,12 +144,16 @@ export const RELEASE_PENDING: Readonly<Record<string, string>> = Object.freeze({
 // Switches the release config does not turn on: reply words no measurement covers yet (D-037 condition 3: each rewriter goes
 // on only after its measurement), or what production does not have or the owner has not decided
 // (docs/architect/RELEASE-FLAGS-2026-11-01.md, "why off"). tests/architect/release-flags.test.ts fails if one of them
-// enters RELEASE_FLAGS. The environment reads them as before. LinkedIn and Indeed automation and any send from Trainee's own
+// enters RELEASE_FLAGS. The environment reads them as before. CAREER_RESEARCH_REPLY and CAREER_RESEARCH_BRIEF (R9-C, 2026-11-07) are
+// wired (market research on the staged brain's reply path) but stay off until a live eval measures them and the owner sets the
+// search key (docs/architect/RELEASE-FLAGS-2026-11-01.md). LinkedIn and Indeed automation and any send from Trainee's own
 // identity have no switch at all: there is no code path to turn on (CLAUDE.md; D-033).
+// CAREER_CONTACT_OUTREACH (release 9 E, proposal D-043): the contact connector (_shared/career_contact_*.ts), read only
+// together with CAREER_PEOPLE_SEARCH; both move into RELEASE_FLAGS in one commit once the owner accepts D-043.
 export const RELEASE_NEVER_ON: readonly string[] = Object.freeze([
   "CAREER_OUTREACH_REPLIES", "CAREER_OUTREACH_REPLIES_MODEL",
   "CAREER_REPLY_WRITER", "CAREER_KNOWLEDGE", "CAREER_JUDGE", "CAREER_MAIL_MODEL",
-  "CAREER_PEOPLE_SEARCH", "CAREER_PEOPLE_SWEEP", "CAREER_PDL", "CAREER_VOICE", "CAREER_PREPARE_AHEAD", "CAREER_PREPARE_AHEAD_COVER",
+  "CAREER_PEOPLE_SEARCH", "CAREER_CONTACT_OUTREACH", "CAREER_PEOPLE_SWEEP", "CAREER_PDL", "CAREER_VOICE", "CAREER_PREPARE_AHEAD", "CAREER_PREPARE_AHEAD_COVER",
   "CAREER_RESEARCH_REPLY", "CAREER_RESEARCH_BRIEF", "TRAINEE_LOGO_GUESS", "CHANNEL_UNKNOWN_REPLY", "TRAINEE_SIGNUP",
   "WHATSAPP_TEMPLATE_UPDATES", "UPMORE_LEGACY_GMAIL_CONNECT",
 ]);

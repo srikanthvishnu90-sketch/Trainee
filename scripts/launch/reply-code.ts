@@ -44,6 +44,9 @@ export const SHARED_REPLY_MODULES = [
   "career_reply_writer.ts", "career_code_in_chat.ts",
   // 2026-11-07 (release 9 B): tailor_resume's layouts and gap report, and the version record it writes (career_tools.ts).
   "career_resume_design.ts", "career_resume_gaps.ts", "career_resume_outcomes.ts",
+  // R9-C (2026-11-07): market research on the reply path: the search provider and what it imports (sources, the research
+  // reply, its report store and the artifact it is delivered as).
+  "research_search.ts", "research_sources.ts", "research_reply.ts", "research_report_store.ts", "channel_artifacts.ts",
 ] as const;
 
 // D-036 (release flags, agent-chat/release_config.ts RELEASE_FLAGS): the code behind every flag the release serves ON that
@@ -76,6 +79,8 @@ export const RELEASE_FLAG_PATHS = [
   "supabase/functions/_shared/career_digest.ts",
   "supabase/functions/_shared/career_people_reminders.ts",
   "supabase/functions/_shared/career_inbox_followups.ts",
+  // Release 9 E (proposal D-043): the contact connector's switches (CAREER_PEOPLE_SEARCH + CAREER_CONTACT_OUTREACH) are read here only.
+  "supabase/functions/_shared/career_contact_pipeline.ts",
 ] as const;
 
 // Every reply-code path, repository-relative, sorted. Git pathspecs: a directory covers everything under it.

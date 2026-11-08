@@ -24,5 +24,12 @@ module.exports = {
       expect_selected: { "Are you legally authorized to work in the United States?": ["Yes"], "Will you require visa sponsorship?": ["No"], "Which office would you work from?": ["Remote"], "Teams of interest": ["Perception", "Platform"] },
       expect_eeo_decline: { "Voluntary self-identification: Veteran status": ["I prefer not to say"], "Gender": ["Decline to self-identify"] },
       must_ask: ["Are you legally authorized to work in the United States?", "Will you require visa sponsorship?", "Which office would you work from?", "Tell us about a project you are proud of"] },
+    // R9 (2026-11-07): SmartRecruiters, whose questions live in its web components' open shadow roots.
+    { id: "smartrecruiters-acme", ats: "smartrecruiters", file: "smartrecruiters-acme.html",
+      answers: { "Are you legally authorized to work in the United States?": "Yes", "Will you now or in the future require sponsorship?": "No", "How many years of SQL experience do you have?": "3-5 years", "Why do you want to work at Acme Robotics?": "Synthetic: I like robots.", "I agree to the Acme Robotics privacy policy": "yes" },
+      must_fill: ["First name", "Last name", "Email", "Confirm your email", "Phone number", "LinkedIn profile", "Resume", "Are you legally authorized to work in the United States?", "Will you now or in the future require sponsorship?", "How many years of SQL experience do you have?", "Why do you want to work at Acme Robotics?", "I agree to the Acme Robotics privacy policy"],
+      expect_selected: { "Are you legally authorized to work in the United States?": ["Yes"], "Will you now or in the future require sponsorship?": ["No"], "How many years of SQL experience do you have?": ["3-5 years"] },
+      expect_eeo_decline: { "Gender": ["Decline to self-identify"], "Veteran status": ["I do not wish to answer"] },
+      must_ask: ["Are you legally authorized to work in the United States?", "Will you now or in the future require sponsorship?", "How many years of SQL experience do you have?", "Why do you want to work at Acme Robotics?", "I agree to the Acme Robotics privacy policy"] },
   ],
 };

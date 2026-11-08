@@ -36,6 +36,7 @@ import { payFrom, postingTextForModel } from "../posting_pay.ts";
 import type { Limits } from "../career_apply.ts";
 import { type Situation, statusText } from "../career_situation.ts";
 import { researchCareerQuestion, type ResearchDeps } from "./research/index.ts";
+import { type MarketDeps, type MarketResult, researchMarket } from "./research/market.ts";
 
 const obj = (properties: Record<string, unknown> = {}, required: string[] = []) => ({ type: "object" as const, properties, required });
 const str = (description: string) => ({ type: "string", description });
@@ -225,6 +226,8 @@ export function careerTools(deps: {
   conversations?: RepliesStore | null;
   // Open career questions (CAREER_KNOWLEDGE=on): cached, capped web research and the brief file. Absent: no such tool.
   research?: ResearchDeps | null;
+  // R9-C market research (CAREER_RESEARCH_REPLY=on): searched, fetched, cited pages; inline or a research brief File. Absent: no such tool.
+  market?: (MarketDeps & { onResult?: (r: MarketResult) => void }) | null;
 }): ToolSpec[] {
   const alertsOf = () => { if (!deps.alerts) throw new Error("job alerts are not configured here"); return deps.alerts; };
   const outreachOf = () => { if (!deps.outreach) throw new Error("outreach is not set up here; say so, never pretend a draft or send happened"); return deps.outreach; };
@@ -237,6 +240,28 @@ export function careerTools(deps: {
     description: "Use for an OPEN career question about any field, stage or situation (\"how do I get hired as an investment banker\", \"can I become an electrician at 40\", \"what does a new grad nurse do first\"), not for a named firm (career_path_answer) and not for job search. Searches current authoritative sources (cached, cost-capped), writes the full plan (stage-by-stage timeline, this-week actions, honest odds, sourced figures, what could not be verified) as a hosted page, and returns the verdict material. ALWAYS call it for such a question, for any field, stage or age, before answering; never answer one from memory. Then answer in ONE short paragraph as the result's note says, and put no plan detail in chat that the page holds. If it returns status need_field, ask its one question and stop.",
     input_schema: obj({ question: str("The person's question, in their words") }, ["question"]),
     run: async (i, c) => researchCareerQuestion({ profile: profileOf(c), message: String(i.question ?? c.turn?.message ?? ""), deps: deps.research!, now: c.now }),
+  }] : [];
+  const strs = (description: string) => ({ type: "array", items: { type: "string" }, description });
+  const marketTools: ToolSpec[] = deps.market ? [{
+    name: "research_market", effect: "read",
+    description: "Use when the person asks for market research that needs current, cited sources: what would change a market or industry, how 2 to 4 companies compare, pay for a role in a place, a company's size or business. Not for job search and not for an open \"how do I become X\" question. It searches, opens each page itself and returns only points that a fetched page states, each with numbered sources. YOU choose the format: \"inline\" for a quick answer (one figure, one fact, a yes or no), \"file\" for a comparison, an outlook, or anything that needs more than about three points. Never answer such a question from memory; write no link (code adds the sources or the file link).",
+    input_schema: obj({
+      question: str("The person's question, in their words"),
+      format: { type: "string", enum: ["inline", "file"], description: "inline: a short answer in chat. file: a research brief page (cover, summary, comparison, what would have to be true, risks, sources)" },
+      queries: strs("Up to 3 web search queries that would find authoritative pages (company filings, government data, the companies' own sites)"),
+      companies: strs("Companies the question names, as the person wrote them (for SEC filings)"),
+      sites: strs("Company website domains the person gave, like acme.com (only ones they wrote or a tool returned)"),
+      soc: str("For a pay question: the BLS occupation code (SOC), like 15-1252 for software developers"),
+      cbsa: str("For a pay question in a city: the metro area's 5-digit CBSA code, like 42660 for Seattle"),
+    }, ["question", "format"]),
+    run: async (i, c) => {
+      const list = (x: unknown) => Array.isArray(x) ? x.map(String).filter(Boolean).slice(0, 4) : [];
+      const q = String(i.question ?? c.turn?.message ?? "");
+      const r = await researchMarket({ question: q, format: i.format === "file" ? "file" : "inline", deps: deps.market!, fileLinks: c.turn ? (c.turn.fileLinks ??= []) : undefined,
+        plan: { queries: list(i.queries).slice(0, 3).concat(list(i.queries).length ? [] : [q]), companies: list(i.companies), sites: list(i.sites), soc: i.soc ? String(i.soc) : null, cbsa: i.cbsa ? String(i.cbsa) : null } });
+      deps.market!.onResult?.(r);
+      return r;
+    },
   }] : [];
   const conversationTools: ToolSpec[] = deps.conversations ? [{
     name: "get_outreach_conversations", effect: "read",
@@ -256,6 +281,7 @@ export function careerTools(deps: {
   return [
     ...conversationTools,
     ...researchTools,
+    ...marketTools,
     {
       name: "remember_instruction", effect: "write_own",
       description: "Keep something the person said must always hold (a need, a must, a never: \"I need visa sponsorship\", \"no staffing agencies\", \"never before 9am\") on their account for every future conversation. quote must be their own words from THIS message; it refuses anything they did not say. Restate it to them after saving.",

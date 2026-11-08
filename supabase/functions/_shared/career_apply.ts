@@ -114,6 +114,8 @@ export const dailyLimit = (l?: Limits): number => {
 // mass-submit-posting-key.test.ts compares them). Lower case; the host without www. and without a default port, any other
 // port kept; the path without trailing slashes, and without a final /apply or /application when two or more segments come
 // before it; the query kept, sorted, without tracking parameters; any Greenhouse link naming a job number is that number.
+// R9 (2026-11-07, 20261107120100): a gh_jid on any host (an employer's own careers page embedding its Greenhouse board)
+// is that Greenhouse job number too: Greenhouse numbers its jobs once across every board, so it is the same posting.
 // Null when it is not a web link.
 export function postingKey(url: unknown): string | null {
   const m = /^https?:\/\/([^/?#@]+)([^?#]*)(\?[^#]*)?/.exec(String(url ?? "").trim().toLowerCase());
@@ -121,8 +123,10 @@ export function postingKey(url: unknown): string | null {
   const h = m[1].replace(/^www\./, "").replace(/:(80|443)$/, "");
   let p = (m[2] ?? "").replace(/\/+$/, "");
   if (/^\/[^/]+\/.+\/(apply|application)$/.test(p)) p = p.replace(/\/(apply|application)$/, "").replace(/\/+$/, "");
+  const ghJid = /[?&]gh_jid=([0-9]+)/.exec(m[3] ?? "")?.[1];
+  if (ghJid) return "greenhouse.io/jobs/" + ghJid;
   if (/(^|\.)greenhouse\.io$/.test(h)) {
-    const jid = /[?&]gh_jid=([0-9]+)/.exec(m[3] ?? "")?.[1] ?? /\/jobs\/([0-9]+)$/.exec(p)?.[1];
+    const jid = /\/jobs\/([0-9]+)$/.exec(p)?.[1];
     if (jid) return "greenhouse.io/jobs/" + jid;
   }
   const q = (m[3] ?? "").slice(1).split("&")
@@ -327,6 +331,9 @@ export function otherCountry(fact: string, label: string, location?: string, hom
 }
 // WO-055 (sample D): a question can name a fact's topic and still ask what the fact does not say. Each is asked.
 const BEYOND_FACT: [string[], RegExp][] = [
+  // R9 (scorecard, Saronic): "no government employment" says nothing about service in the military, which the same
+  // question may also ask ("... a USG official, employee, or member of the U.S. military?").
+  [["government_employment"], /\bmember of the (u\.?s\.? )?(military|armed forces)\b|\bmilitary service\b|\bserved in the (u\.?s\.? )?(military|armed forces)\b/i],
   // the person's visa type; a sponsorship question that lists OPT among its examples is still the sponsorship question
   [["work_authorization"], /\bcpt\b|\bopt\b|curricular practical|optional practical/i],
   [["school"], /\bcurrently (attending|enrolled)\b|\bare you (currently )?(attending|enrolled)\b|\byou are attending\b/i],
@@ -451,6 +458,38 @@ const askedPart = (label: string) => {
   const parts = kept.split(/(?<=[.?!])\s+/).filter((x) => x.trim()).map((x) => x.replace(/\u2024/g, "."));
   return parts.filter((x) => /\?/.test(x)).pop() ?? parts.pop() ?? label;
 };
+// R9 (the mass-apply scorecard's wrong answers, 2026-11-07): a confirmed fact that is right in general and does not answer
+// what this question asks is held and asked (D-007), on every path a value reaches a field (keyword, meaning, option):
+//  - "needs sponsorship" is the person's now-or-later answer; "Will you NOW require sponsorship?" asks only about now, so a
+//    yes is not theirs to give (a no, needing none ever, answers now too);
+//  - an authorization that needs sponsorship (or one whose sponsorship is not confirmed) is no "unrestricted right to
+//    work" and never the option "Yes, no restriction"; a person who needs none never takes an option that says they do.
+const NOW_ONLY = /\bnow\b/i;
+const NOT_ONLY_NOW = /\bfuture\b|\bever\b|\bat any (point|time)\b|\blater\b|\beventually\b/i;
+const UNRESTRICTED = /\bunrestricted\b|\bwithout (any )?restrictions?\b|\bno restrictions?\b|\bfor any employer\b/i;
+const NO_SPONSOR_OPTION = /\bno restrictions?\b|\bunrestricted\b|\bwithout (the need for |requiring |needing )?(a |any )?(visa |employer |immigration )?sponsor|\b(do not|don'?t|will not|won'?t|never) (need|require) (a |any )?(visa |employer |immigration )?sponsor/i;
+const NEEDS_SPONSOR_OPTION = /\b(need|needs|require|requires|requiring|needing)( a| any)?( visa| employer| immigration)? sponsorship\b/i;
+export function factFallsShort(facts: string[], f: FormField, value: string, answers: Record<string, Answer>): boolean {
+  const auth = facts.some((x) => x === "sponsorship" || x === "work_authorization");
+  if (!auth) return false;
+  const asked = askedPart(f.label);
+  const shown = f.options.find((o) => o.value === value)?.label ?? value;
+  const yn = yesNoOf(shown);
+  const sponsor = yesNoOf(String(answers.sponsorship?.value ?? ""));
+  if (facts.includes("sponsorship") && /\bsponsor/i.test(asked) && yn === "yes" && NOW_ONLY.test(asked) && !NOT_ONLY_NOW.test(asked)) return true;
+  if (UNRESTRICTED.test(asked) && yn === "yes" && sponsor !== "no") return true;
+  if (f.options.length && NO_SPONSOR_OPTION.test(shown) && sponsor !== "no") return true;
+  if (f.options.length && !NO_SPONSOR_OPTION.test(shown) && NEEDS_SPONSOR_OPTION.test(shown) && sponsor === "no") return true;
+  return false;
+}
+// R9 (the scorecard's unidentifiable answers): options that all carry one value (Ashby's radios are all "on") cannot say in
+// the approved payload which one was chosen. Such a field is planned by each shared option's own words, which is what the
+// fillers match on (ats-fill.cjs matchOption, the extension's option-by-label fallback).
+export function distinctOptions(f: FormField): FormField {
+  const values = f.options.map((o) => o.value);
+  if (new Set(values).size === values.length) return f;
+  return { ...f, options: f.options.map((o) => (values.filter((v) => v === o.value).length > 1 ? { ...o, value: o.label } : o)) };
+}
 function authorizedWithoutSponsorship(answers: Record<string, Answer>): Answer | null {
   const w = answers.work_authorization, sp = answers.sponsorship;
   if (!w || !sp) return null;
@@ -942,7 +981,8 @@ export function planBatch(o: { userId: string; postings: PlanPosting[]; answers:
       rowsOf.set(kind, assignRows(kind, [...rows].map(([row, anchor]) => ({ row, anchor })), o.answers, p.fields));
     }
     const places = formPlaces(p.fields, p.company), where = postingPlaces(p.location ?? "");
-    for (const f of p.fields) {
+    for (const f0 of p.fields) {
+      const f = distinctOptions(f0);
       if (fileAlternative(f, p.fields)) continue;
       if (f.personal) continue; // the person's own form: never planned (WO-048)
       if (f.section || rowPartName(f)) {
@@ -998,6 +1038,11 @@ export function planBatch(o: { userId: string; postings: PlanPosting[]; answers:
         const code = /\(\s*\+\s*(\d{1,4})\s*\)/.exec(shown)?.[1];
         const phone = String(o.answers.phone?.value ?? "").trim();
         if (!code || !phone.startsWith("+") || !phone.replace(/\D/g, "").startsWith(code)) value = null;
+      }
+      if (value !== null && a !== own && factFallsShort([key, mapQuestion(f).fact], f, value, o.answers)) {
+        // The fact does not answer this question; the person's own answer to this wording (asked once) does.
+        value = null;
+        if (own) { a = own; value = f.options.length ? matchOption(String(own.value), f.options) : f.type === "checkbox" ? yesNo(String(own.value)) : String(own.value); }
       }
       if (value !== null && a !== own && !f.options.length) value = payShape(f, value, key !== "unknown" ? key : mapQuestion(f).fact, o.answers);
       const shaped = value !== null && value !== "" && fitsField(f, value, a === own) ? canonicalTypedValue(f, value) : null;

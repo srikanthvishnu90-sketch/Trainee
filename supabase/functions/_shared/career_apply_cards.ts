@@ -49,6 +49,8 @@ export interface CardStore {
   // other's card and both approve nothing. Throws card_changed (a hash differs) or invalid card (no longer open to approve).
   confirm?(userId: string, ids: string[], hashes: string[]): Promise<{ card: Card; results: CardResult[] }>;
   latestOpen(userId: string): Promise<Card | null>;
+  // R9-G2: the open card when it was pushed in pages (career_apply_cards.pages), else null.
+  latestOpenPaged?(userId: string): Promise<Card | null>;
   answer(userId: string, cardId: string, approve: number[]): Promise<CardResult[]>;
   lastAssistantIntent(threadId: string): Promise<string | null>;
   // SERIAL-1451: the card this thread's last reply showed (its id in that message's meta), or null. A yes answers that
@@ -487,6 +489,15 @@ export async function cardTurn(
         status: "too_long",
       };
     }
+    // R9-G2 (D-MS-1, one card per batch): a PAGED card the preparation pushed for exactly this batch in the last 5 minutes
+    // is shown again as that same card, never replaced by a second card of the same applications; its yes still needs every
+    // pushed page delivered (career_apply_card_answer_for). Any other open card is replaced as before.
+    const ids = c.take.map((p) => p.id);
+    const current = o.store.latestOpenPaged ? await o.store.latestOpenPaged(o.userId).catch(() => null) : null;
+    if (current && current.items.length === ids.length && current.items.every((it, i) => it.prepared_id === ids[i])
+      && Date.parse(current.shown_at) > o.now - 5 * 60_000) {
+      return { reply: c.text, status: "shown", card_id: current.id, ...(c.parts.length ? { parts: c.parts } : {}) };
+    }
     let opened: Card;
     try {
       opened = await o.store.open(o.userId, c.take.map((p) => p.id));
@@ -634,6 +645,14 @@ export async function cardTurn(
     if (/card_answered/.test(msg)) {
       return { reply: CARD_ANSWERED_BEFORE, status: "answered_before" };
     }
+    // R9-G2 (D-MS-1, paged cards): a yes approves a paged card only once every page of it reached them, and only while its
+    // applications are exactly the set it showed.
+    if (/card_pages_undelivered/.test(msg)) {
+      return { reply: `Not every page of that card has reached you yet, so nothing was approved and nothing was sent. Say "show my applications" to see the whole card again.`, status: "pages_undelivered" };
+    }
+    if (/APPROVAL_SET_CHANGED/.test(msg)) {
+      return { reply: `The applications on that card changed after it was shown (APPROVAL_SET_CHANGED), so nothing was approved and nothing was sent. Say "show my applications" for the current card.`, status: "set_changed" };
+    }
     throw e;
   }
 }
@@ -674,6 +693,14 @@ export function supabaseCardStore(admin: any): CardStore {
         "read the open card",
       );
       return rows?.[0] ?? null;
+    },
+    async latestOpenPaged(userId) {
+      // Before 20261108100000 there is no pages column: no paged card can exist, so none is read.
+      const r = await admin.from("career_apply_cards").select("id,items,shown_at,pages").eq("user_id", userId).eq("state", "open")
+        .order("shown_at", { ascending: false }).limit(1);
+      if (r.error) return null;
+      const c = r.data?.[0];
+      return c && Number(c.pages) >= 2 ? { id: c.id, items: c.items, shown_at: c.shown_at } : null;
     },
     async answer(userId, cardId, approve) {
       return must(

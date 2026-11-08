@@ -1,0 +1,146 @@
+// R9-C (2026-11-07): market research on the reply path. The three example requests run through the agent brain (career_brain.ts
+// agentTurn) with a scripted model, a fake web and no spend: the brain calls research_market and picks the format; code reads every
+// page itself, keeps only points whose page passed verifiedLinkGuard, whose quote is on that page and whose numbers are on a page
+// it cites; the inline answer ends with numbered sources appended by code; the File link is minted by code. Off (the flag), no
+// market research reaches the brain. Synthetic companies and figures only (research-web-fixture.ts).
+import assertNode from "node:assert/strict";
+import { agentTurn } from "../../supabase/functions/agent-chat/career_brain.ts";
+import { marketResearchAsk } from "../../supabase/functions/agent-chat/career_staged.ts";
+import { enforceMarketReply, type MarketDeps, researchMarket } from "../../supabase/functions/_shared/agent/research/market.ts";
+import * as kinds from "../../supabase/functions/_shared/file_kinds.ts";
+import { fetchSources } from "../../supabase/functions/_shared/research_sources.ts";
+import { searchProviderFor } from "../../supabase/functions/_shared/research_search.ts";
+import { fakeWeb, NOW, PAGES } from "./research-web-fixture.ts";
+
+const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
+const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
+const KEY = { BRAVE_SEARCH_API_KEY: "test-key-not-real" } as Record<string, string>;
+const ISO = new Date(NOW).toISOString();
+
+function deps(env: Record<string, string>, draft: unknown, o: { publish?: boolean } = {}) {
+  const published: any[] = [], f = fakeWeb();
+  const d: MarketDeps = {
+    search: searchProviderFor({ get: (k) => env[k] }, f, () => NOW),
+    read: (urls) => fetchSources(urls, { fetch: f, now: () => NOW }),
+    draft: async () => JSON.stringify(draft),
+    publish: o.publish === false ? null : async (data) => { published.push(data); return { url: `https://trainee.example/file?t=v1.brief${published.length}` }; },
+  };
+  return { d, published };
+}
+async function turn(message: string, input: Record<string, unknown>, finalText: string, d: MarketDeps) {
+  let step = 0;
+  const model = async () => (++step === 1
+    ? { content: [{ type: "tool_use", id: "m1", name: "research_market", input: { question: message, ...input } }], stop_reason: "tool_use" }
+    : { content: [{ type: "text", text: finalText }], stop_reason: "end_turn" });
+  return await agentTurn({ message, history: [], stores: { profile: {} }, userId: "u1", threadId: "t1", now: NOW, model, market: d } as any);
+}
+// Every citation names a source; every source is a page the fake web served (HTTP 200) this turn, read at NOW; nothing blocked.
+function citationsValid(data: any) {
+  const n = data.sources.length, cites = [...data.summary, ...data.conditions, ...data.risks, ...(data.comparison?.rows ?? []).flatMap((r: any) => r.cells.filter(Boolean))].flatMap((x: any) => x.cite);
+  ok(cites.length && cites.every((c: number) => Number.isInteger(c) && c >= 1 && c <= n), `cites ${cites} within 1..${n}`);
+  for (let i = 1; i <= n; i++) ok(cites.includes(i), `source ${i} is cited`);
+  for (const s of data.sources) { ok(PAGES[s.url], `${s.url} was a fetched page`); eq(s.fetched_at, ISO); ok(!/linkedin|indeed/.test(s.url)); }
+  // With the market File variant on trunk (PR "R9-C 1/2"), the brief is a valid research_brief; before it, this check is skipped.
+  if ("marketReadOn" in kinds) ok(kinds.validateKind("research_brief", data, { now: NOW }).ok, JSON.stringify(kinds.validateKind("research_brief", data, { now: NOW })));
+}
+
+const MARKET_DRAFT = {
+  title: "What would change the market for home batteries", thesis: "Cheaper packs and storage tariffs decide how fast home batteries spread.",
+  summary: [
+    { text: "Battery pack prices fell 20% in 2024.", quote: "Battery pack prices fell 20% in 2024", url: "https://research.example/battery-prices-2024" },
+    { text: "Acme Energy installed 41,000 home batteries in 2025.", quote: "Acme Energy installed 41,000 home batteries in 2025", url: "https://acme.example/annual-report" },
+    { text: "Home batteries will be in 60% of homes by 2030.", quote: "Battery pack prices fell", url: "https://research.example/battery-prices-2024" }, // number on no page: dropped
+    { text: "LinkedIn says demand doubled.", quote: "demand doubled", url: "https://www.linkedin.com/pulse/batteries" }, // never fetched: dropped
+    { text: "Prices keep falling.", quote: "a sentence that is not on the page", url: "https://research.example/battery-prices-2024" }, // quote not on page: dropped
+  ],
+  conditions: [{ text: "Pack prices keep falling.", urls: ["https://research.example/battery-prices-2024"] }, { text: "Utilities keep paying for stored power at peak hours.", urls: ["https://utility.example/tariffs/storage"] }],
+  risks: [{ text: "The state board's yearly tariff review could cut the payments.", urls: ["https://utility.example/tariffs/storage"] }, { text: "See https://evil.example/x", urls: ["https://utility.example/tariffs/storage"] }],
+};
+Deno.test("example 1, 'what would change the market for X': a research brief File, every claim cited to a fetched page", async () => {
+  const { d, published } = deps(KEY, MARKET_DRAFT);
+  const q = "What would change the market for home batteries?";
+  const out = await turn(q, { format: "file", queries: ["home battery market outlook"] }, "Cheaper packs and storage tariffs decide it. Full details: https://evil.example/brief. Prices will drop 90% next year.", d);
+  eq(published.length, 1);
+  const data = published[0];
+  eq(data.summary.map((s: any) => s.text), ["Battery pack prices fell 20% in 2024.", "Acme Energy installed 41,000 home batteries in 2025."]);
+  eq(data.risks.length, 1, "a risk with a link in it is dropped");
+  citationsValid(data);
+  eq(out.fileLinks, ["https://trainee.example/file?t=v1.brief1"], "the File link is code's, sent by the channel");
+  ok(!/https?:|90%/.test(out.reply) && /Cheaper packs/.test(out.reply), `model links and unsourced figures removed: ${out.reply}`);
+});
+
+const COMPARE_DRAFT = {
+  title: "Acme Energy, Globex Power and Initech Grid compared", thesis: "Acme Energy and Globex Power sell to homes; Initech Grid sells software to utilities.",
+  summary: [{ text: "Initech Grid builds grid software for utilities.", quote: "Initech Grid builds grid software for utilities", url: "https://initech.example/about" },
+    { text: "Globex Power sells home batteries, solar panels and EV chargers.", quote: "Globex Power sells home batteries, solar panels and EV chargers", url: "https://globex.example/products" }],
+  comparison: { options: ["Acme Energy", "Globex Power", "Initech Grid"], rows: [
+    { label: "Home batteries installed (2025)", cells: [{ value: "41,000", quote: "installed 41,000 home batteries in 2025", url: "https://acme.example/annual-report" }, null, { value: "500", quote: "does not sell hardware", url: "https://initech.example/about" }] },
+    { label: "Sells to homes", cells: [{ value: "Batteries and solar panels", quote: "sells batteries and solar panels", url: "https://acme.example/annual-report" }, { value: "Batteries, solar, EV chargers", quote: "solar panels and EV chargers", url: "https://globex.example/products" }, { value: "No", quote: "It does not sell hardware to homes", url: "https://initech.example/about" }] },
+  ] },
+  conditions: [{ text: "Homeowners keep buying hardware rather than software.", urls: ["https://globex.example/products", "https://indeed.com/cmp/acme"] }],
+  risks: [{ text: "Initech Grid's utility customers could favour hardware makers.", urls: ["https://initech.example/about"] }],
+};
+Deno.test("example 2, 'compare these 3 companies': a brief with the comparison table; a cell no page supports is left unknown", async () => {
+  const { d, published } = deps(KEY, COMPARE_DRAFT);
+  const out = await turn("Compare these 3 companies: Acme Energy, Globex Power, Initech Grid", { format: "file", queries: ["Acme Energy Globex Power Initech Grid compare"], companies: ["Acme Energy", "Globex Power", "Initech Grid"] }, "Acme Energy and Globex Power sell to homes [1][2].", d);
+  const data = published[0];
+  eq(data.comparison.options.map((o: any) => o.name), ["Acme Energy", "Globex Power", "Initech Grid"]);
+  eq(data.comparison.rows[0].cells.map((c: any) => c?.value ?? null), ["41,000", null, null], "Initech's '500' is on no page: unknown, not guessed");
+  eq(data.conditions[0].cite.length, 1, "the Indeed page is never a source");
+  citationsValid(data);
+  eq(out.fileLinks?.length, 1);
+});
+
+const SALARY_DRAFT = {
+  title: "Software developer pay in Seattle", thesis: "Software developers in the Seattle metro earn more than the national mean.",
+  summary: [{ text: "The annual mean wage for software developers in the Seattle-Tacoma-Bellevue metro area is $180,000.", quote: "Software Developers annual mean wage $180,000 in the Seattle-Tacoma-Bellevue metro area", url: "https://www.bls.gov/oes/current/oes_42660.htm" },
+    { text: "The national annual mean wage is $150,000.", quote: "Annual mean wage: $150,000", url: "https://www.bls.gov/oes/current/oes151252.htm" }],
+  conditions: [], risks: [],
+};
+Deno.test("example 3, 'salary for role Y in city Z' with no search key: first-party BLS pages, an inline answer, numbered sources added by code", async () => {
+  const { d, published } = deps({}, SALARY_DRAFT);
+  const out = await turn("What's the salary for a software developer in Seattle?", { format: "inline", soc: "15-1252", cbsa: "42660" },
+    "Software developers in the Seattle metro average $180,000 a year [1], against $150,000 nationally [2]. Senior people get $400,000 [3]. More at https://levels.example/x", d);
+  eq(published.length, 0, "inline: no file");
+  const [body, list] = out.reply.split("\n\n");
+  ok(/\$180,000 a year \[1\], against \$150,000 nationally \[2\]\./.test(body) && !/400,000|levels\.example|\[3\]/.test(out.reply), out.reply);
+  eq(list.split("\n"), [
+    "[1] Seattle-Tacoma-Bellevue, WA wage estimates: https://www.bls.gov/oes/current/oes_42660.htm (read Nov 7, 2026)",
+    "[2] Software Developers: https://www.bls.gov/oes/current/oes151252.htm (read Nov 7, 2026)",
+  ]);
+});
+
+Deno.test("the format: a File only when the brain asks and a publisher exists (CAREER_RESEARCH_BRIEF); otherwise inline with sources", async () => {
+  const off = deps(KEY, MARKET_DRAFT, { publish: false });
+  const r = await researchMarket({ question: "What would change the market for home batteries?", format: "file", plan: { queries: ["battery market"] }, deps: off.d });
+  ok(r.status === "ok" && r.format === "inline" && r.asked === "file" && r.notes.some((n) => /not switched on/.test(n)));
+  const inl = deps(KEY, MARKET_DRAFT);
+  const r2 = await researchMarket({ question: "battery market?", format: "inline", plan: { queries: ["battery market"] }, deps: inl.d });
+  ok(r2.status === "ok" && r2.format === "inline" && inl.published.length === 0, "the brain chose inline: no file");
+  const thin = deps(KEY, { ...MARKET_DRAFT, risks: [] });
+  const r3 = await researchMarket({ question: "battery market?", format: "file", plan: { queries: ["battery market"] }, deps: thin.d });
+  ok(r3.status === "ok" && r3.format === "inline" && thin.published.length === 0, "a brief without risks is not made");
+  ok(/\n\n\[1\] .+: https:\/\/research\.example\/battery-prices-2024 \(read Nov 7, 2026\)/.test(enforceMarketReply("Packs got cheaper [1].", r)));
+});
+
+Deno.test("no source could be opened, or none supports an answer: the reply says so and carries no figure", async () => {
+  const { d } = deps({}, MARKET_DRAFT);
+  const r = await researchMarket({ question: "What would change the market for home batteries?", format: "file", plan: { queries: ["battery market"] }, deps: d });
+  eq(r.status, "no_sources");
+  eq(enforceMarketReply("Batteries will grow 35% a year. I couldn't open a source for that.", r), "I couldn't open a source for that.");
+  ok(/couldn't find a source/.test(enforceMarketReply("Growth is 35%.", r)));
+  const bad = deps(KEY, { ...MARKET_DRAFT, summary: [{ text: "x 99%", quote: "nowhere on any page", url: "https://acme.example/annual-report" }] });
+  const r2 = await researchMarket({ question: "battery market?", format: "inline", plan: { queries: ["battery market"] }, deps: bad.d });
+  ok(r2.status === "no_sources" && /couldn't confirm/.test(r2.note));
+});
+
+Deno.test("routing: with CAREER_RESEARCH_REPLY=on the three asks go to the brain; off, or a job search or a payload, they do not", () => {
+  const on = { get: (k: string) => k === "CAREER_RESEARCH_REPLY" ? "on" : undefined }, off = { get: () => undefined };
+  for (const m of ["What would change the market for home batteries?", "Compare these 3 companies: Acme, Globex, Initech", "salary for a data analyst in Austin", "How much do nurses make in Denver?", "what's the market outlook for EV chargers"]) {
+    ok(marketResearchAsk(on, m, "question_unclaimed"), m); ok(!marketResearchAsk(off, m, "question_unclaimed"), `off: ${m}`);
+  }
+  ok(marketResearchAsk(on, "salary for a data analyst in Austin", "career_discovery"), "a pay question is not a job search");
+  ok(!marketResearchAsk(on, "find me data analyst jobs in Austin with salary for juniors in Texas", "career_discovery"), "a job search stays code's");
+  ok(!marketResearchAsk(on, "compare these 3 companies and apply to all", "career_batch_apply"), "an apply stays code's");
+  ok(!marketResearchAsk(on, "thanks!", null));
+});

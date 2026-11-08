@@ -25,6 +25,7 @@
 // (_shared/model_gateway.ts): the calls it made, zero when it made none, or
 // "unrecorded" when the sink failed. A missing row is never a zero.
 
+import { careerAskCanon } from "../_shared/career_ask_canon.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { chatSwitches, liveSwitches, readSubmitSettings } from "./chat_switches.ts"; // D-036 release flags (each gate below reads one switch)
 import { connectUrlsFor } from "../_shared/connect_link.ts"; // D-037: the send consent link
@@ -378,6 +379,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // The request hash digests the text after EVERY redaction pass (early code-in-chat, the split-secret step, code-in-chat):
     // the turn receipt keeps it, and a hash of a bare 6-digit code is recoverable by trying its million values (Greptile, #564).
     const hashedMessage = message;
+    // fix/r9-apply-completion: an apply or job-search ask as people text it (filler, emoji, a typo, Spanish, romanized Hindi,
+    // "can you apply me to ...?") is routed by its plain English reading (career_ask_canon.ts), so the apply turn and the
+    // router's search read it as they read the plain ask. Only the routing reads it: the stored message is what was typed,
+    // and the brain is given the person's own words (typedMessage).
+    const typedMessage = message;
+    message = careerAskCanon(message) ?? message;
 
     // GO-LIVE FLIP (2026-10-13, owner ruling: "the career version is the
     // final switch" — the money version is gone from live). Career is the
@@ -1256,7 +1263,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const summary = summaryFor(win.cut, recent, now, tz);
         // WO-066: the person's own daily application limit (the queue's SQL holds the same bound); unread, the default.
         const daily = await admin.rpc("career_apply_daily_limit", { p_user: user.id }).then((r: any) => r.error ? undefined : Number(r.data) || undefined, () => undefined);
-        const turn = await agentTurn({ message, history, stores: ctx as unknown as Record<string, unknown>, userId: user.id, threadId: tid, now,
+        const turn = await agentTurn({ message: typedMessage, history, stores: ctx as unknown as Record<string, unknown>, userId: user.id, threadId: tid, now,
           model: (payload) => callModel(cfg, payload, { meter, role: "chat" }), postings: (q) => postingsDb.search(searchWords(q), 150), alerts: alertStore,
           mail: supabaseMailStore(admin), interviews: supabaseInterviewStore(admin), digest: supabaseDigestStore(admin),
           events, tz, summary, hired: hiredSourceFromEnv(Deno.env, admin), confirmations: confirmEvents,

@@ -1,6 +1,6 @@
 // Which application form a link is, and the one key of its posting (WO-031's, moved here by WO-066 so the chat side
 // keys a posting exactly as the extension does: imported, never copied).
-export type Family = "greenhouse" | "lever" | "ashby" | "workday";
+export type Family = "greenhouse" | "lever" | "ashby" | "smartrecruiters" | "workday";
 export interface Portal { family: Family; embedded: boolean }
 
 // The application forms the extension recognizes, by host. Greenhouse also embeds its form in an employer's own page as an
@@ -9,6 +9,9 @@ export interface Portal { family: Family; embedded: boolean }
 const GREENHOUSE = /^(job-boards|boards)(\.eu)?\.greenhouse\.io$/;
 const LEVER = /^jobs(\.eu)?\.lever\.co$/;
 const ASHBY = /^jobs\.ashbyhq\.com$/;
+// R9 (fix/r9-apply-completion): SmartRecruiters, the fourth open family (D-013 (a)); its form fill is ats-fill.cjs's (#593)
+// and its key is the engine's own (scripts/apply.ts posting(): smartrecruiters:<company>:<the posting id's digits>).
+const SMARTRECRUITERS = /^jobs\.smartrecruiters\.com$/;
 const WORKDAY = /(^|\.)(myworkdayjobs\.com|myworkdaysite\.com|myworkday\.com)$/;
 export function detectPortal(href: string): Portal | null {
   let u: URL;
@@ -22,6 +25,7 @@ export function detectPortal(href: string): Portal | null {
   if (GREENHOUSE.test(h)) return { family: "greenhouse", embedded: /^\/embed\//.test(u.pathname) };
   if (LEVER.test(h)) return { family: "lever", embedded: false };
   if (ASHBY.test(h)) return { family: "ashby", embedded: false };
+  if (SMARTRECRUITERS.test(h)) return { family: "smartrecruiters", embedded: false };
   if (WORKDAY.test(h)) return { family: "workday", embedded: false };
   return null;
 }
@@ -38,6 +42,10 @@ export function postingKey(href: string): string | null {
   }
   if (p.family === "lever" || p.family === "ashby") {
     return seg[0] && seg[1] && /^[0-9a-f-]{8,}$/i.test(seg[1]) ? `${p.family}:${seg[0]}:${seg[1].toLowerCase()}` : null;
+  }
+  if (p.family === "smartrecruiters") {
+    const id = seg[1]?.match(/^\d+/)?.[0];
+    return seg[0] && id ? `smartrecruiters:${seg[0]}:${id}` : null;
   }
   // WO-048: every step of one application is one posting. The posting is the segment before "apply" (a step's own path
   // under it, such as ".../apply/applyManually" or a step page, is not another posting).

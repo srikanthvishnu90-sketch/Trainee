@@ -358,6 +358,7 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
       for (const m of t.turns) { const r = await say(m); replies.push(r.reply); intents.push(r.intent); bodies.push(r.body); await tick(); await answerAsked(r.reply); }
       const state = await worldState(pg, u, { ats: ats.posts.slice(postsBefore), mail: gmail.sent.slice(sentBefore), replies, bodies, metasBefore, mailHash, hashApplyPayload,
         resume: P.resume, name: t.person ? P.name : RESUME_NAME, contacts: t.contacts ? t.contacts.map((c) => c.email.toLowerCase()) : CONTACT_EMAILS, readStored: !!t.expect.secret });
+      state.replies = replies;
       state.requested = [...requested];
       state.stage.push(...refused, `${t.area}: turns handled as ${intents.map((x) => x ?? "none").join(" > ")}`, ...new Set(sendLog));
       state.stage.push(...prepLog.map((l) => `apply: prepare ${l.slice(0, 160)}`));

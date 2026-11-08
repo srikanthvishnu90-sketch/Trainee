@@ -37884,6 +37884,42 @@ const CareerRouter = (() => {
   // A batch tailor: the first match is tailored NOW (a real artifact in
   // hand), the rest stay staged for the review order the user named —
   // nothing submits as a blob (SC-068).
+  // R9-G: the "<role> role at <Company>" targets of one tailor ask, in order; null unless there are two or more.
+  function multiTailorTargets(text) {
+    const raw = s(text);
+    const re = /(?:\b(?:for|and|,)\s+)(?:the\s+|a\s+)?([A-Za-z][A-Za-z0-9&/+.,' -]*?)\s+(?:role|position|job|internship|posting|opening)\s+at\s+([A-Z][A-Za-z0-9&.'’-]*(?:\s+(?!and\b)[A-Z][A-Za-z0-9&.'’-]*)*)/g;
+    const out = [];
+    let m;
+    while ((m = re.exec(raw))) {
+      const role = m[1].replace(/^(?:the|a)\s+/i, "").trim();
+      if (role && !out.some((x) => lc(x.company) === lc(m[2]) && lc(x.role) === lc(role))) out.push({ role, company: m[2].trim() });
+    }
+    return out.length >= 2 ? out : null;
+  }
+  function handleMultiTailor(text, ctx) {
+    if (!/\b(?:tailor|tailored|customi[sz]e)\b/i.test(s(text))) return null;
+    const targets = multiTailorTargets(text);
+    if (!targets) return null;
+    const done = [], missing = [];
+    for (const tg of targets) {
+      const posting = postingByCompanyTitle(ctx, tg.company, tg.role);
+      const r = posting ? handleTailor(text, Object.assign({}, ctx, { posting })) : null;
+      if (r && r.artifact && r.intent === "career_tailor") done.push({ tg, posting, r });
+      else missing.push(tg);
+    }
+    if (!done.length) return null;
+    const docs = done.map((d) => d.r.artifact && d.r.artifact.pdf).filter(Boolean);
+    const named = (d) => `${d.posting.title} at ${d.posting.company}`;
+    const facts = done.map((d) => {
+      const gaps = Array.isArray(d.r.gaps) ? d.r.gaps : [];
+      return `${named(d)}: ${d.r.artifact.pdf ? "saved as its own PDF, attached" : "saved as a rendered text artifact"}; ${gaps.length ? `${gaps.join(", ")} ${gaps.length === 1 ? "is" : "are"} named by the posting and not on your profile, so not added` : "every skill the posting names is on your profile"}.`;
+    });
+    if (missing.length) facts.push(`Not tailored: ${missing.map((m) => `${m.role} at ${m.company}`).join("; ")} — no posting for ${missing.length === 1 ? "it" : "them"} is on record, and I won't tailor against a guess.`);
+    facts.push(`Each one traces every line to a fact already on your profile, grounded in the posting's own text, as of ${asOfMonthYear(ctx)}.`);
+    const reply = compose({ headline: `Your resume is tailored for ${done.length === 1 ? named(done[0]) : `${done.length} roles: ${done.map(named).join(" and ")}`}.`, facts, nextStep: "Review each file, and I can prepare those applications next." });
+    return { intent: "career_tailor", reply, resultStatus: missing.length ? "partial" : "prepared", artifact: done[0].r.artifact, documents: docs, artifacts: done.map((d) => d.r.artifact),
+      gaps: [...new Set(done.flatMap((d) => d.r.gaps || []))], tailored: { ok: true, count: done.length }, chained_from: "multi_target" };
+  }
   function handleBatchTailor(text, ctx) {
     const disc = handleDiscovery(text, ctx, {});
     if (!disc.shortlist || !disc.shortlist.length) return null;
@@ -51115,6 +51151,11 @@ const CareerRouter = (() => {
       // tailor-branch only; archetype files never resolve as a firm.
       // LETTER TARGET (D-007, 2026-10-29): the firm is only one the ask names as a whole name (letterTargetOf); a city,
       // school or skill that opens a firm's name ("tailor my resume, I live in Boston") is no firm.
+      // R9-G (e2e E40): two or more named roles in one tailor ask ("tailor my resume for the X role at A and the Y role at
+      // B and send both back"): each posting found as the single company-targeted tailor finds it, each tailored on its own
+      // through handleTailor (the same truth check), and every PDF rides the turn's documents. A role with no posting on
+      // record is named, never tailored against a guess.
+      { const multi = handleMultiTailor(text, c); if (multi) return multi; }
       const namedTarget = letterTargetOf(text, c);
       const comp = namedTarget ? namedTarget.company : null;
       const compCir = namedTarget ? namedTarget.cir : null;

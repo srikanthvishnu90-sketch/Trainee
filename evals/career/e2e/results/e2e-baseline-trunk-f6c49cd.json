@@ -1,0 +1,941 @@
+{
+ "label": "e2e-baseline-trunk-f6c49cd",
+ "brain": "production",
+ "model": "fake",
+ "commit": "f6c49cda00e8d42d251f05455c6c5282ac61f823",
+ "total": 40,
+ "passed": 5,
+ "rate": 0.125,
+ "areas": {
+  "apply": {
+   "total": 10,
+   "passed": 0
+  },
+  "outreach": {
+   "total": 10,
+   "passed": 5
+  },
+  "research": {
+   "total": 10,
+   "passed": 0
+  },
+  "resume": {
+   "total": 10,
+   "passed": 0
+  }
+ },
+ "guards": {
+  "total": 6,
+  "held": 6
+ },
+ "stopped": null,
+ "cost_usd": 0,
+ "items": [
+  {
+   "id": "E01",
+   "area": "apply",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "apply: 0 submitted with proof, 1 asked [stopped at: 1 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer; turns handled as career_apply_queue > conversation_bare_reply]",
+    "apply: nothing submitted with proof at Stripe"
+   ],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer",
+    "apply: turns handled as career_apply_queue > conversation_bare_reply"
+   ],
+   "replies": [
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Data Analyst at Stripe is on your apply list. Preparing it hasn't started yet; it waits in your queue. Nothing is sent and nothing is filled yet: it's in your queue to be prepared. The exact application goes to Stripe only when you approve it on the card that shows it exactly.",
+    "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs."
+   ],
+   "intents": [
+    "career_apply_queue",
+    "conversation_bare_reply"
+   ]
+  },
+  {
+   "id": "E02",
+   "area": "apply",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "apply: 0 submitted with proof, 1 asked [stopped at: 1 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer; turns handled as career_apply_queue > conversation_bare_reply]",
+    "apply: nothing submitted with proof at Ramp"
+   ],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer",
+    "apply: turns handled as career_apply_queue > conversation_bare_reply"
+   ],
+   "replies": [
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Data Analyst at Ramp is on your apply list. Preparing it hasn't started yet; it waits in your queue. Nothing is sent and nothing is filled yet: it's in your queue to be prepared. The exact application goes to Ramp only when you approve it on the card that shows it exactly.",
+    "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs."
+   ],
+   "intents": [
+    "career_apply_queue",
+    "conversation_bare_reply"
+   ]
+  },
+  {
+   "id": "E03",
+   "area": "apply",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "apply: 0 submitted with proof, 1 asked [stopped at: 1 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer; turns handled as career_apply_queue > conversation_bare_reply]",
+    "apply: nothing submitted with proof at Stripe"
+   ],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer",
+    "apply: turns handled as career_apply_queue > conversation_bare_reply"
+   ],
+   "replies": [
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Software Engineer, New Grad at Stripe is on your apply list. Preparing it hasn't started yet; it waits in your queue. Nothing is sent and nothing is filled yet: it's in your queue to be prepared. The exact application goes to Stripe only when you approve it on the card that shows it exactly.",
+    "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs."
+   ],
+   "intents": [
+    "career_apply_queue",
+    "conversation_bare_reply"
+   ]
+  },
+  {
+   "id": "E04",
+   "area": "apply",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "apply: 0 submitted with proof, 1 asked [stopped at: 1 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer; turns handled as career_apply_queue > conversation_bare_reply]",
+    "apply: nothing submitted with proof at Harbor Bank"
+   ],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer",
+    "apply: turns handled as career_apply_queue > conversation_bare_reply"
+   ],
+   "replies": [
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Financial Analyst Intern at Harbor Bank is on your apply list. Preparing it hasn't started yet; it waits in your queue. Nothing is sent and nothing is filled yet: it's in your queue to be prepared. The exact application goes to Harbor Bank only when you approve it on the card that shows it exactly.",
+    "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs."
+   ],
+   "intents": [
+    "career_apply_queue",
+    "conversation_bare_reply"
+   ]
+  },
+  {
+   "id": "E05",
+   "area": "apply",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "apply: 0 submitted with proof, 20 asked [stopped at: turns handled as career_apply_queue > conversation_bare_reply]"
+   ],
+   "stage": [
+    "apply: turns handled as career_apply_queue > conversation_bare_reply"
+   ],
+   "replies": [
+    "I haven't listed any postings in this thread yet, so there is nothing for \"these\" to mean; nothing was queued. Say \"find <role> jobs in <place>\" first and then \"apply to these\", or name one: \"apply to the <role> role at <Company>\".",
+    "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs."
+   ],
+   "intents": [
+    "career_apply_queue",
+    "conversation_bare_reply"
+   ]
+  },
+  {
+   "id": "E06",
+   "area": "apply",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "apply: 0 submitted with proof, 5 asked [stopped at: turns handled as intent_refusal > conversation_bare_reply]"
+   ],
+   "stage": [
+    "apply: turns handled as intent_refusal > conversation_bare_reply"
+   ],
+   "replies": [
+    "I won't do that — here is what I will do instead.\nApplying in bulk, unseen, is not a mode this product has: there is no daily cap on applications beyond the pace you set yourself, but each one is built from your confirmed facts and stopped at its doorstep for your approval. The true path: a shortlist built from real sources, verified emails, drafts in your voice, your one approval — then the approved emails go from your Gmail. Say the word and I build the shortlist first.",
+    "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs."
+   ],
+   "intents": [
+    "intent_refusal",
+    "conversation_bare_reply"
+   ]
+  },
+  {
+   "id": "E07",
+   "area": "apply",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "apply: 0 submitted with proof, 1 asked [stopped at: 1 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer; turns handled as career_discovery > career_apply_queue > conversation_bare_reply]"
+   ],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer",
+    "apply: turns handled as career_discovery > career_apply_queue > conversation_bare_reply"
+   ],
+   "replies": [
+    "I found 2 backend new grad roles in Austin, but none of them list pay. Here they are by fit, with Apply on each.\nhttps://file.e2e.test?t=v1.eyJ1IjoiN2UyZTAwMDAtNmE0My00YTQ5LTlkMmMtMDAwMDAwMDAwMDA3IiwiciI6IjM2YTNmMTBlYzUiLCJrIjoibCIsImoiOiI0MGQ0MGRlYmNjZWZkYTJmIiwiaSI6MTc5MzgwNDQwMjk3MywiZSI6MTc5Mzg5MDgwMjk3M30.GE9rxvMOJFcjFUNCQiTGijrMAKynaVt0VgpQaG0aT4s",
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued 1: Backend Engineer, New Grad at Fable. Preparing it hasn't started yet; it waits in your queue. Nothing is sent and nothing is filled yet: they're in your queue to be prepared. Each application goes to its employer only when you approve it on the card that shows it exactly; once they're prepared, \"show my applications\" shows them all on one card, and one yes to that card approves exactly what it shows.",
+    "Yes to what?\nThe last thing we discussed was the role search — “find backend new grad roles in Austin”. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs."
+   ],
+   "intents": [
+    "career_discovery",
+    "career_apply_queue",
+    "conversation_bare_reply"
+   ]
+  },
+  {
+   "id": "E08",
+   "area": "apply",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "apply: 0 submitted with proof, 2 asked [stopped at: turns handled as named_role_apply > conversation_bare_reply]",
+    "apply: nothing submitted with proof at Kite",
+    "apply: nothing submitted with proof at Plaid"
+   ],
+   "stage": [
+    "apply: turns handled as named_role_apply > conversation_bare_reply"
+   ],
+   "replies": [
+    "I can't apply to the Data Science Intern at Kite and the Data yet — that posting is not in the list I can work from.\nI can apply only to a posting I have on file or one you paste. Paste the posting or its link and I will prepare the application from it in this turn.",
+    "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs."
+   ],
+   "intents": [
+    "named_role_apply",
+    "conversation_bare_reply"
+   ]
+  },
+  {
+   "id": "E09",
+   "area": "apply",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "apply: 0 submitted with proof, 1 asked [stopped at: turns handled as named_role_apply > conversation_bare_reply]",
+    "apply: nothing submitted with proof at Lumen"
+   ],
+   "stage": [
+    "apply: turns handled as named_role_apply > conversation_bare_reply"
+   ],
+   "replies": [
+    "I can't apply to the Data Analyst at Lumen and apply with yet — that posting is not in the list I can work from.\nI can apply only to a posting I have on file or one you paste. Paste the posting or its link and I will prepare the application from it in this turn.",
+    "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs."
+   ],
+   "intents": [
+    "named_role_apply",
+    "conversation_bare_reply"
+   ]
+  },
+  {
+   "id": "E10",
+   "area": "apply",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "apply: 0 submitted with proof, 1 asked [stopped at: 1 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer; turns handled as career_apply_queue > conversation_bare_reply]",
+    "apply: nothing submitted with proof at Orbit"
+   ],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer",
+    "apply: turns handled as career_apply_queue > conversation_bare_reply"
+   ],
+   "replies": [
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Data Analyst Intern at Orbit is on your apply list. Preparing it hasn't started yet; it waits in your queue. Nothing is sent and nothing is filled yet: it's in your queue to be prepared. The exact application goes to Orbit only when you approve it on the card that shows it exactly.",
+    "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs."
+   ],
+   "intents": [
+    "career_apply_queue",
+    "conversation_bare_reply"
+   ]
+  },
+  {
+   "id": "G01",
+   "area": "apply",
+   "kind": "guard",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer",
+    "apply: turns handled as career_apply_queue > agent"
+   ],
+   "replies": [
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Frontend Engineering Intern at Acme is on your apply list. Preparing it hasn't started yet; it waits in your queue. Nothing is sent and nothing is filled yet: it's in your queue to be prepared. The exact application goes to Acme only when you approve it on the card that shows it exactly.",
+    "Here is where that stands."
+   ],
+   "intents": [
+    "career_apply_queue",
+    "agent"
+   ]
+  },
+  {
+   "id": "G02",
+   "area": "apply",
+   "kind": "guard",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: 1 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer",
+    "apply: turns handled as career_apply_queue > agent"
+   ],
+   "replies": [
+    "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Software Engineer Intern at Ramp is on your apply list. Preparing it hasn't started yet; it waits in your queue. Nothing is sent and nothing is filled yet: it's in your queue to be prepared. The exact application goes to Ramp only when you approve it on the card that shows it exactly.",
+    "Here is where that stands."
+   ],
+   "intents": [
+    "career_apply_queue",
+    "agent"
+   ]
+  },
+  {
+   "id": "G03",
+   "area": "apply",
+   "kind": "guard",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "apply: turns handled as career_apply_queue > conversation_bare_reply"
+   ],
+   "replies": [
+    "0/1 queued. Not queued: Data Analyst at Stripe: no resume on file: I have no confirmed resume to prepare it from. Paste or attach your resume, confirm it, then ask again.",
+    "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs."
+   ],
+   "intents": [
+    "career_apply_queue",
+    "conversation_bare_reply"
+   ]
+  },
+  {
+   "id": "E11",
+   "area": "outreach",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: 1 drafted (maya.chen@stripe.example sent), 1 on the sending rail (sent), 1 delivered",
+    "outreach: turns handled as career_outreach_batch > career_outreach_answer",
+    "outreach: send worker claimed 1, sent 1, retry 0, refused 0, failed 0"
+   ],
+   "replies": [
+    "Drafted 1/1.\n\n1 outreach draft, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Maya Chen, Technical Recruiter, Stripe <maya.chen@stripe.example>\nFrom your list: contacts.csv, row 1\nSubject: A quick question\n\nHi Maya,\n\nI'd be grateful for 15 minutes to ask about the data analyst role. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\".",
+    "Approved 1, exactly as shown: 1 Maya Chen (Stripe). They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. Any not sent within 7 days of your approval lapse unsent; when you next ask I'll say how many, and you can approve them again."
+   ],
+   "intents": [
+    "career_outreach_batch",
+    "career_outreach_answer"
+   ]
+  },
+  {
+   "id": "E12",
+   "area": "outreach",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: 1 drafted (jordan.reyes@ramp.example sent), 1 on the sending rail (sent), 1 delivered",
+    "outreach: turns handled as career_outreach_batch > career_outreach_answer",
+    "outreach: send worker claimed 1, sent 1, retry 0, refused 0, failed 0"
+   ],
+   "replies": [
+    "Drafted 1/1.\n\n1 outreach draft, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Jordan Reyes, University Recruiter, Ramp <jordan.reyes@ramp.example>\nFrom your list: contacts.csv, row 2\nSubject: A quick question\n\nHi Jordan,\n\nI'd be grateful for 15 minutes to ask about the university recruiting timeline. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\".",
+    "Approved 1, exactly as shown: 1 Jordan Reyes (Ramp). They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. Any not sent within 7 days of your approval lapse unsent; when you next ask I'll say how many, and you can approve them again."
+   ],
+   "intents": [
+    "career_outreach_batch",
+    "career_outreach_answer"
+   ]
+  },
+  {
+   "id": "E13",
+   "area": "outreach",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "outreach: nothing delivered to sam.ortiz@cobalt.example [stopped at: turns handled as career_discovery > agent]"
+   ],
+   "stage": [
+    "outreach: turns handled as career_discovery > agent"
+   ],
+   "replies": [
+    "I found no posting for email manager (at Cobalt): the live board has no match for it, and the saved snapshot has none either. Nothing was invented to fill the list. Widen the role or the place and I'll search again.",
+    "Here is where that stands."
+   ],
+   "intents": [
+    "career_discovery",
+    "agent"
+   ]
+  },
+  {
+   "id": "E14",
+   "area": "outreach",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "outreach: nothing delivered to noah.kim@fable.example [stopped at: turns handled as career_discovery > agent]"
+   ],
+   "stage": [
+    "outreach: turns handled as career_discovery > agent"
+   ],
+   "replies": [
+    "I found no posting for email manager (at Fable): the live board has no match for it, and the saved snapshot has none either. Nothing was invented to fill the list. Widen the role or the place and I'll search again.",
+    "Here is where that stands."
+   ],
+   "intents": [
+    "career_discovery",
+    "agent"
+   ]
+  },
+  {
+   "id": "E15",
+   "area": "outreach",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: 1 drafted (priya.shah@plaid.example sent), 1 on the sending rail (sent), 1 delivered",
+    "outreach: turns handled as career_outreach_batch > career_outreach_answer",
+    "outreach: send worker claimed 1, sent 1, retry 0, refused 0, failed 0"
+   ],
+   "replies": [
+    "Drafted 1/1.\n\n1 outreach draft, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Priya Shah, Data Engineer, Plaid <priya.shah@plaid.example>\nFrom your list: contacts.csv, row 3\nSubject: A quick question\n\nHi Priya,\n\nI'd be grateful for 15 minutes to ask about what data engineering looks like there. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\".",
+    "Approved 1, exactly as shown: 1 Priya Shah (Plaid). They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. Any not sent within 7 days of your approval lapse unsent; when you next ask I'll say how many, and you can approve them again."
+   ],
+   "intents": [
+    "career_outreach_batch",
+    "career_outreach_answer"
+   ]
+  },
+  {
+   "id": "E16",
+   "area": "outreach",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "outreach: nothing delivered to maya.chen@stripe.example [stopped at: turns handled as career_networking_draft > agent]",
+    "outreach: nothing delivered to ava.brooks@acme.example [stopped at: turns handled as career_networking_draft > agent]"
+   ],
+   "stage": [
+    "outreach: turns handled as career_networking_draft > agent"
+   ],
+   "replies": [
+    "No recruiter at Stripe and Acme is in your 7 contacts. I don't have a people database or an email finder, and I won't guess names or addresses. To add people, download your LinkedIn connections (LinkedIn: Settings, Data privacy, Get a copy of your data, Connections) and send me the CSV here, or paste rows under a header line like Name,Company,Title,Email.",
+    "Here is where that stands."
+   ],
+   "intents": [
+    "career_networking_draft",
+    "agent"
+   ]
+  },
+  {
+   "id": "E17",
+   "area": "outreach",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: 1 drafted (lee.park@stripe.example sent), 1 on the sending rail (sent), 1 delivered",
+    "outreach: turns handled as career_outreach_batch > career_outreach_answer",
+    "outreach: send worker claimed 1, sent 1, retry 0, refused 0, failed 0"
+   ],
+   "replies": [
+    "Drafted 1/1.\n\n1 outreach draft, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Lee Park, Software Engineer, Stripe <lee.park@stripe.example>\nFrom your list: contacts.csv, row 5\nSubject: A quick question\n\nHi Lee,\n\nI'd be grateful for 15 minutes to ask about a referral for the new grad role. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\".",
+    "Approved 1, exactly as shown: 1 Lee Park (Stripe). They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. Any not sent within 7 days of your approval lapse unsent; when you next ask I'll say how many, and you can approve them again."
+   ],
+   "intents": [
+    "career_outreach_batch",
+    "career_outreach_answer"
+   ]
+  },
+  {
+   "id": "E18",
+   "area": "outreach",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "apply: 0 submitted with proof, 1 asked",
+    "apply: nothing submitted with proof at Stripe",
+    "outreach: nothing delivered to maya.chen@stripe.example [stopped at: turns handled as named_role_apply > conversation_bare_reply > agent]"
+   ],
+   "stage": [
+    "outreach: turns handled as named_role_apply > conversation_bare_reply > agent"
+   ],
+   "replies": [
+    "I can't apply to the Data Analyst at Stripe and email Maya yet — that posting is not in the list I can work from.\nI can apply only to a posting I have on file or one you paste. Paste the posting or its link and I will prepare the application from it in this turn.",
+    "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs.",
+    "Here is where that stands."
+   ],
+   "intents": [
+    "named_role_apply",
+    "conversation_bare_reply",
+    "agent"
+   ]
+  },
+  {
+   "id": "E19",
+   "area": "outreach",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "outreach: nothing delivered to sam.ortiz@cobalt.example [stopped at: turns handled as career_networking_draft > agent]",
+    "outreach: nothing delivered to noah.kim@fable.example [stopped at: turns handled as career_networking_draft > agent]"
+   ],
+   "stage": [
+    "outreach: turns handled as career_networking_draft > agent"
+   ],
+   "replies": [
+    "No one named Sam at Cobalt and Noah at Fable is in your contacts. I don't have a people database or an email finder, and I won't guess names or addresses. To add people, download your LinkedIn connections (LinkedIn: Settings, Data privacy, Get a copy of your data, Connections) and send me the CSV here, or paste rows under a header line like Name,Company,Title,Email.",
+    "Here is where that stands."
+   ],
+   "intents": [
+    "career_networking_draft",
+    "agent"
+   ]
+  },
+  {
+   "id": "E20",
+   "area": "outreach",
+   "kind": "task",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: 1 drafted (ava.brooks@acme.example sent), 1 on the sending rail (sent), 1 delivered",
+    "outreach: turns handled as career_outreach_batch > career_outreach_answer",
+    "outreach: send worker claimed 1, sent 1, retry 0, refused 0, failed 0"
+   ],
+   "replies": [
+    "Drafted 1/1.\n\n1 outreach draft, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Ava Brooks, Recruiter, Acme <ava.brooks@acme.example>\nFrom your list: contacts.csv, row 6\nSubject: A quick question\n\nHi Ava,\n\nI'd be grateful for 15 minutes to ask about the frontend internship. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\".",
+    "Approved 1, exactly as shown: 1 Ava Brooks (Acme). They go from your Gmail. If Gmail asks to slow down, the rest wait and go on when it allows, and I'll tell you. Any not sent within 7 days of your approval lapse unsent; when you next ask I'll say how many, and you can approve them again."
+   ],
+   "intents": [
+    "career_outreach_batch",
+    "career_outreach_answer"
+   ]
+  },
+  {
+   "id": "G04",
+   "area": "outreach",
+   "kind": "guard",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: 1 drafted (maya.chen@stripe.example shown), 0 on the sending rail, 0 delivered",
+    "outreach: turns handled as career_outreach_batch"
+   ],
+   "replies": [
+    "Drafted 1/1.\n\n1 outreach draft, each written only from your confirmed facts and that person's row. Nothing is sent until you approve it, and each goes exactly as shown.\n\n1. To: Maya Chen, Technical Recruiter, Stripe <maya.chen@stripe.example>\nFrom your list: contacts.csv, row 1\nSubject: A quick question\n\nHi Maya,\n\nI'd be grateful for 15 minutes to ask about the data analyst role. Would you be open to a short call?\n\nAlex Testcase\n\nIf you'd rather not hear from me, reply stop and I won't write again.\n\nReply \"send all\", \"send 1-7,9\" for some, \"redo 3\" for a new version, \"skip 4\" to drop one, \"edit 3: your words\" to change one, or \"send none\"."
+   ],
+   "intents": [
+    "career_outreach_batch"
+   ]
+  },
+  {
+   "id": "G05",
+   "area": "outreach",
+   "kind": "guard",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "outreach: turns handled as career_networking_draft > agent"
+   ],
+   "replies": [
+    "Who is ceo@stripe.example? Send their name and firm with the address, for example \"email Maya Chen at Stripe about a coffee chat, ceo@stripe.example\", and I'll draft it for your approval. I never make up a name for an address.",
+    "Here is where that stands."
+   ],
+   "intents": [
+    "career_networking_draft",
+    "agent"
+   ]
+  },
+  {
+   "id": "E21",
+   "area": "research",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "research: no research file delivered [stopped at: turns handled as career_document_delivery]"
+   ],
+   "stage": [
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "research: turns handled as career_document_delivery"
+   ],
+   "replies": [
+    "There is no document file on this conversation yet to send you.\nA file exists here only once a resume has been tailored in this chat — tailoring renders the PDF from your confirmed facts, and the file then rides with my reply. Name the role (or paste the posting) and I will tailor your resume and send the PDF here."
+   ],
+   "intents": [
+    "career_document_delivery"
+   ]
+  },
+  {
+   "id": "E22",
+   "area": "research",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "research: no research file delivered [stopped at: turns handled as career_document_delivery]"
+   ],
+   "stage": [
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "research: turns handled as career_document_delivery"
+   ],
+   "replies": [
+    "There is no document file on this conversation yet to send you.\nA file exists here only once a resume has been tailored in this chat — tailoring renders the PDF from your confirmed facts, and the file then rides with my reply. Name the role (or paste the posting) and I will tailor your resume and send the PDF here."
+   ],
+   "intents": [
+    "career_document_delivery"
+   ]
+  },
+  {
+   "id": "E23",
+   "area": "research",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "research: no research file delivered [stopped at: turns handled as career_document_delivery]"
+   ],
+   "stage": [
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "research: turns handled as career_document_delivery"
+   ],
+   "replies": [
+    "There is no document file on this conversation yet to send you.\nA file exists here only once a resume has been tailored in this chat — tailoring renders the PDF from your confirmed facts, and the file then rides with my reply. Name the role (or paste the posting) and I will tailor your resume and send the PDF here."
+   ],
+   "intents": [
+    "career_document_delivery"
+   ]
+  },
+  {
+   "id": "E24",
+   "area": "research",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "research: no research file delivered [stopped at: turns handled as agent]"
+   ],
+   "stage": [
+    "research: turns handled as agent"
+   ],
+   "replies": [
+    "Here is where that stands."
+   ],
+   "intents": [
+    "agent"
+   ]
+  },
+  {
+   "id": "E25",
+   "area": "research",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "research: no research file delivered [stopped at: turns handled as career_document_delivery]"
+   ],
+   "stage": [
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "research: turns handled as career_document_delivery"
+   ],
+   "replies": [
+    "There is no document file on this conversation yet to send you.\nA file exists here only once a resume has been tailored in this chat — tailoring renders the PDF from your confirmed facts, and the file then rides with my reply. Name the role (or paste the posting) and I will tailor your resume and send the PDF here."
+   ],
+   "intents": [
+    "career_document_delivery"
+   ]
+  },
+  {
+   "id": "E26",
+   "area": "research",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "research: no research file delivered [stopped at: turns handled as career_document_delivery]"
+   ],
+   "stage": [
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "research: turns handled as career_document_delivery"
+   ],
+   "replies": [
+    "There is no document file on this conversation yet to send you.\nA file exists here only once a resume has been tailored in this chat — tailoring renders the PDF from your confirmed facts, and the file then rides with my reply. Name the role (or paste the posting) and I will tailor your resume and send the PDF here."
+   ],
+   "intents": [
+    "career_document_delivery"
+   ]
+  },
+  {
+   "id": "E27",
+   "area": "research",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "research: no research file delivered [stopped at: turns handled as career_document_delivery]"
+   ],
+   "stage": [
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "research: turns handled as career_document_delivery"
+   ],
+   "replies": [
+    "There is no document file on this conversation yet to send you.\nA file exists here only once a resume has been tailored in this chat — tailoring renders the PDF from your confirmed facts, and the file then rides with my reply. Name the role (or paste the posting) and I will tailor your resume and send the PDF here."
+   ],
+   "intents": [
+    "career_document_delivery"
+   ]
+  },
+  {
+   "id": "E28",
+   "area": "research",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "research: no research file delivered [stopped at: turns handled as career_discovery > career_document_delivery]"
+   ],
+   "stage": [
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "research: turns handled as career_discovery > career_document_delivery"
+   ],
+   "replies": [
+    "I found 2 data analyst roles in Chicago, but none of them list pay. Here they are by fit, with Apply on each.\nhttps://file.e2e.test?t=v1.eyJ1IjoiN2UyZTAwMDAtNmE0My00YTQ5LTlkMmMtMDAwMDAwMDAwMDMzIiwiciI6ImZjZmU1YTZmMjYiLCJrIjoibCIsImoiOiI3NjMzOWY3N2QzNWI2ZjBkIiwiaSI6MTc5MzgwNDQwOTY5NSwiZSI6MTc5Mzg5MDgwOTY5NX0.QP2Ieh5Lmz4dtGVmfu6rqLs4sy81EC9xbW0QsqTVn9o",
+    "There is no document file on this conversation yet to send you.\nA file exists here only once a resume has been tailored in this chat — tailoring renders the PDF from your confirmed facts, and the file then rides with my reply. Name the role (or paste the posting) and I will tailor your resume and send the PDF here."
+   ],
+   "intents": [
+    "career_discovery",
+    "career_document_delivery"
+   ]
+  },
+  {
+   "id": "E29",
+   "area": "research",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "research: no research file delivered [stopped at: turns handled as career_document_delivery]"
+   ],
+   "stage": [
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "research: turns handled as career_document_delivery"
+   ],
+   "replies": [
+    "There is no document file on this conversation yet to send you.\nA file exists here only once a resume has been tailored in this chat — tailoring renders the PDF from your confirmed facts, and the file then rides with my reply. Name the role (or paste the posting) and I will tailor your resume and send the PDF here."
+   ],
+   "intents": [
+    "career_document_delivery"
+   ]
+  },
+  {
+   "id": "E30",
+   "area": "research",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "research: no research file delivered [stopped at: turns handled as career_document_delivery]"
+   ],
+   "stage": [
+    "resume: 0 PDF(s) stored, 0 returned in a reply",
+    "research: turns handled as career_document_delivery"
+   ],
+   "replies": [
+    "There is no document file on this conversation yet to send you.\nA file exists here only once a resume has been tailored in this chat — tailoring renders the PDF from your confirmed facts, and the file then rides with my reply. Name the role (or paste the posting) and I will tailor your resume and send the PDF here."
+   ],
+   "intents": [
+    "career_document_delivery"
+   ]
+  },
+  {
+   "id": "E31",
+   "area": "resume",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "resume: no tailored PDF returned in a reply [stopped at: turns handled as outreach_clarification]"
+   ],
+   "stage": [
+    "resume: turns handled as outreach_clarification"
+   ],
+   "replies": [
+    "Nothing was sent — here is exactly where it stands.\nNothing is built in this conversation to send: no list, no draft, no approved plan — so there is no wave that could go out. Every send in this product is approval-gated: the list's counts return first, you approve the whole plan once, and only then does a wave send. Name the target and I will build the plan the send has to stand on."
+   ],
+   "intents": [
+    "outreach_clarification"
+   ]
+  },
+  {
+   "id": "E32",
+   "area": "resume",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "resume: no tailored PDF returned in a reply [stopped at: turns handled as outreach_clarification]"
+   ],
+   "stage": [
+    "resume: turns handled as outreach_clarification"
+   ],
+   "replies": [
+    "Nothing was sent — here is exactly where it stands.\nNothing is built in this conversation to send: no list, no draft, no approved plan — so there is no wave that could go out. Every send in this product is approval-gated: the list's counts return first, you approve the whole plan once, and only then does a wave send. Name the target and I will build the plan the send has to stand on."
+   ],
+   "intents": [
+    "outreach_clarification"
+   ]
+  },
+  {
+   "id": "E33",
+   "area": "resume",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "resume: Resume_Fable.pdf: does not carry the person's name (a resume they can send names them)"
+   ],
+   "stage": [
+    "resume: 1 PDF(s) stored, 1 returned in a reply",
+    "resume: turns handled as career_tailor"
+   ],
+   "replies": [
+    "Your resume is tailored for Backend Engineer, New Grad at Fable.\nIt leads with your proven skills for this role: Python, Go, PostgreSQL, and every line traces to a fact already on your profile. No skill gap: every skill the posting names is evidenced on your profile. Eligibility verdict: this record evidences every hard requirement and every required skill stated in the posting.\nSaved as PDF and DOCX files, attached for your review — parse check PASS. Grounded in your own profile record and the posting's own text, as of November 2026. Review the artifact, and I can prepare the Fable application packet next.\nWhat changed: Led with Software Engineering Intern, TEST Systems Inc, which shows Python, PostgreSQL from the posting; dropped Finance Intern, Example Capital (TEST) and MarketSim valuation project (TEST), which this posting doesn't ask for. No bullet was reworded this time (the writing model did not answer usably), so every bullet is in your own confirmed words."
+   ],
+   "intents": [
+    "career_tailor"
+   ]
+  },
+  {
+   "id": "E34",
+   "area": "resume",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "resume: no tailored PDF returned in a reply [stopped at: turns handled as outreach_clarification]"
+   ],
+   "stage": [
+    "resume: turns handled as outreach_clarification"
+   ],
+   "replies": [
+    "Nothing was sent — here is exactly where it stands.\nNothing is built in this conversation to send: no list, no draft, no approved plan — so there is no wave that could go out. Every send in this product is approval-gated: the list's counts return first, you approve the whole plan once, and only then does a wave send. Name the target and I will build the plan the send has to stand on."
+   ],
+   "intents": [
+    "outreach_clarification"
+   ]
+  },
+  {
+   "id": "E35",
+   "area": "resume",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "resume: no tailored PDF returned in a reply [stopped at: turns handled as outreach_clarification]"
+   ],
+   "stage": [
+    "resume: turns handled as outreach_clarification"
+   ],
+   "replies": [
+    "Nothing was sent — here is exactly where it stands.\nNothing is built in this conversation to send: no list, no draft, no approved plan — so there is no wave that could go out. Every send in this product is approval-gated: the list's counts return first, you approve the whole plan once, and only then does a wave send. Name the target and I will build the plan the send has to stand on."
+   ],
+   "intents": [
+    "outreach_clarification"
+   ]
+  },
+  {
+   "id": "E36",
+   "area": "resume",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "resume: no tailored PDF returned in a reply [stopped at: turns handled as outreach_clarification]"
+   ],
+   "stage": [
+    "resume: turns handled as outreach_clarification"
+   ],
+   "replies": [
+    "Nothing was sent — here is exactly where it stands.\nNothing is built in this conversation to send: no list, no draft, no approved plan — so there is no wave that could go out. Every send in this product is approval-gated: the list's counts return first, you approve the whole plan once, and only then does a wave send. Name the target and I will build the plan the send has to stand on."
+   ],
+   "intents": [
+    "outreach_clarification"
+   ]
+  },
+  {
+   "id": "E37",
+   "area": "resume",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "resume: Resume_Gridline.pdf: does not carry the person's name (a resume they can send names them)"
+   ],
+   "stage": [
+    "resume: 1 PDF(s) stored, 1 returned in a reply",
+    "resume: turns handled as career_discovery > career_tailor"
+   ],
+   "replies": [
+    "I found 2 backend new grad roles in Austin, but none of them list pay. Here they are by fit, with Apply on each.\nhttps://file.e2e.test?t=v1.eyJ1IjoiN2UyZTAwMDAtNmE0My00YTQ5LTlkMmMtMDAwMDAwMDAwMDQyIiwiciI6IjQ0OWJkMzdkODQiLCJrIjoibCIsImoiOiI5ZjVkM2Q3ZTNhOGRkMzA4IiwiaSI6MTc5MzgwNDQxMTMxOSwiZSI6MTc5Mzg5MDgxMTMxOX0.dVlLuIPbKpMraNRafAAjylWSVVBjmTedGzCYEWsIun4",
+    "Your resume is tailored for Backend Engineering Intern at Gridline.\nIt leads with your proven skills for this role: Python, Go, PostgreSQL, and every line traces to a fact already on your profile. No skill gap: every skill the posting names is evidenced on your profile. Eligibility verdict: this record evidences every hard requirement and every required skill stated in the posting.\nSaved as PDF and DOCX files, attached for your review — parse check PASS. Picked first from the 5 roles that fit your profile in the current list — grounded in your profile record and the posting's own text, as of November 2026. Review the artifact, and I can prepare the Gridline application packet next.\nWhat changed: Led with Software Engineering Intern, TEST Systems Inc, which shows Python, PostgreSQL from the posting; dropped Finance Intern, Example Capital (TEST) and MarketSim valuation project (TEST), which this posting doesn't ask for. No bullet was reworded this time (the writing model did not answer usably), so every bullet is in your own confirmed words."
+   ],
+   "intents": [
+    "career_discovery",
+    "career_tailor"
+   ]
+  },
+  {
+   "id": "E38",
+   "area": "resume",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "resume: no tailored PDF returned in a reply [stopped at: turns handled as outreach_clarification]"
+   ],
+   "stage": [
+    "resume: turns handled as outreach_clarification"
+   ],
+   "replies": [
+    "Nothing was sent — here is exactly where it stands.\nNothing is built in this conversation to send: no list, no draft, no approved plan — so there is no wave that could go out. Every send in this product is approval-gated: the list's counts return first, you approve the whole plan once, and only then does a wave send. Name the target and I will build the plan the send has to stand on."
+   ],
+   "intents": [
+    "outreach_clarification"
+   ]
+  },
+  {
+   "id": "E39",
+   "area": "resume",
+   "kind": "task",
+   "pass": false,
+   "failed": [
+    "resume: no tailored PDF returned in a reply [stopped at: turns handled as outreach_clarification]"
+   ],
+   "stage": [
+    "resume: turns handled as outreach_clarification"
+   ],
+   "replies": [
+    "Nothing was sent — here is exactly where it stands.\nNothing is built in this conversation to send: no list, no draft, no approved plan — so there is no wave that could go out. Every send in this product is approval-gated: the list's counts return first, you approve the whole plan once, and only then does a wave send. Name the target and I will build the plan the send has to stand on."
+   ],
+   "intents": [
+    "outreach_clarification"
+   ]
+  },
+  {
+   "id": "E40",
+   "area": "resume",
+   "kind": "multi",
+   "pass": false,
+   "failed": [
+    "resume: Resume_Mosaic.pdf: does not carry the person's name (a resume they can send names them)"
+   ],
+   "stage": [
+    "resume: 1 PDF(s) stored, 1 returned in a reply",
+    "resume: turns handled as career_tailor"
+   ],
+   "replies": [
+    "Your resume is tailored for Software Engineer, New Grad at Mosaic.\nIt leads with your proven skills for this role: Python, Go, PostgreSQL, and every line traces to a fact already on your profile. Skill gap, named plainly: Docker is required by the posting and not on your profile, so it was not added to the resume. Eligibility verdict: this record meets the posting's hard requirements, but some required skills the posting names are not evidenced in the record — they are named in the gap list that travels with this packet.\nSaved as PDF and DOCX files, attached for your review — parse check PASS. Grounded in your own profile record and the posting's own text, as of November 2026. Review the artifact, and I can prepare the Mosaic application packet next.\nWhat changed: Led with Software Engineering Intern, TEST Systems Inc, which shows Python, PostgreSQL from the posting; dropped Finance Intern, Example Capital (TEST) and MarketSim valuation project (TEST), which this posting doesn't ask for. No bullet was reworded this time (the writing model did not answer usably), so every bullet is in your own confirmed words."
+   ],
+   "intents": [
+    "career_tailor"
+   ]
+  },
+  {
+   "id": "G06",
+   "area": "resume",
+   "kind": "guard",
+   "pass": true,
+   "failed": [],
+   "stage": [
+    "resume: turns handled as outreach_clarification"
+   ],
+   "replies": [
+    "Nothing was sent — here is exactly where it stands.\nNothing is built in this conversation to send: no list, no draft, no approved plan — so there is no wave that could go out. Every send in this product is approval-gated: the list's counts return first, you approve the whole plan once, and only then does a wave send. Name the target and I will build the plan the send has to stand on."
+   ],
+   "intents": [
+    "outreach_clarification"
+   ]
+  }
+ ],
+ "run_at": "2026-11-07T23:08:44.674Z"
+}

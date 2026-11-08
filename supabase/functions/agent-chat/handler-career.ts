@@ -59,7 +59,7 @@ let isolateTurns = 0; // D6: turns this isolate has served, so the log can tell 
 import { CRISIS_INTENT, crisisReply } from "./crisis.ts";
 import { CODE_IN_CHAT_INTENT, CODE_IN_CHAT_REPLY, codeInChat, noteForCodeTurn } from "../_shared/career_code_in_chat.ts";
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
-import { CARD_NEEDS_REPLY_STATUS, cardIntent, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
+import { CARD_ANSWER_INTENT, CARD_NEEDS_REPLY_STATUS, cardIntent, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
 import { billingTurn, PAY_BY_CHECKOUT, stripeFromEnv, supabaseBillingStore } from "../_shared/career_billing.ts";
 import { mockTurn, supabaseMockStore as supabaseMockStoreUncapped } from "../_shared/career_mock.ts";
 import { hiredSourceFromEnv } from "../_shared/career_hired.ts";
@@ -108,6 +108,7 @@ import { activityAsk, activityTurn, supabaseActivity } from "../_shared/career_a
 import { redoAsk, redoTurn } from "../_shared/career_redo.ts"; // REQS DOC 1: Q83, Q196
 import { confirmMailAsk, connectorAsk, connectorChatTurn, connectorFailure } from "../_shared/connectors.ts"; // Task 3 (FEATURE GV's disconnect included)
 import { networkingTurn, siteRefusedTurn, supabaseReferralPostings } from "../_shared/career_networking.ts"; // FEATURE 10
+import { applyAndReachOf, compoundOutreachAgain, tailorAndApplyOf } from "../_shared/career_compound_ask.ts"; // R9-G
 import { plannerOn, plannerTurn, type PlannerTurn } from "./career_planner.ts"; // TASK PLANNER
 import { careerTools } from "../_shared/agent/career_tools.ts"; // TASK PLANNER: track_application, remember_instruction
 import { CAREER_READ_SCOPE as PEOPLE_READ_SCOPE, supabasePeopleDeps } from "../_shared/career_people.ts"; // D-033
@@ -903,6 +904,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           .catch((e) => { console.error("apply here:", (e as Error)?.message ?? e); return null; })
         : null;
       if (hereOut?.hits.length) turnPostings = hereOut.hits;
+      // R9-G (e2e E18): "apply to the <role> role at <Co> and email <name> there about it": the apply half goes to the apply
+      // turn and the email half to the networking turn below, each with its own approval (career_compound_ask.ts).
+      const reach = hereOut ? null : applyAndReachOf(message);
+      // R9-G (e2e E09): "tailor my resume for the <role> role at <Co> and apply with it": the apply half here, the tailor half
+      // through the router once the application is queued (below, in the apply answer).
+      const tailorApply = hereOut || reach ? null : tailorAndApplyOf(message);
       const queued: any = hereOut ? { reply: hereOut.reply, intent: APPLY_QUEUE_INTENT, status: hereOut.status } : !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await applyTurn({
           ...feature1.apply,
@@ -910,7 +917,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // and stored as the ingest stores it (career_apply_link.ts). CAREER_APPLY_LINK=off turns the read off.
           link: Deno.env.get("CAREER_APPLY_LINK") === "off" ? null
             : { db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init), { timeoutMs: 8000 }) },
-          message, userId: user.id, now: Date.now(), postings: supabasePostingsDb(admin), wants: supabaseWantStore(admin),
+          message: reach?.apply ?? tailorApply?.apply ?? message, userId: user.id, now: Date.now(), postings: supabasePostingsDb(admin), wants: supabaseWantStore(admin),
           apps: () => supabaseApplications(admin)(user.id),
           facts: screenFacts,
           // The batch ask ("apply to these") reads the postings this thread last listed, as the router kept them.
@@ -969,8 +976,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // Only addresses in the person's own contacts; the model writes only with CAREER_NETWORKING_DRAFT=on (metered).
       // Nothing is sent here: sending stays career-proactive's, behind CAREER_OUTREACH_SEND.
       const netMeter = ledger.track(newMeter());
-      const networking = !emailAsk && !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !queued && !f08 && !stood && !status && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
-        ? await networkingTurn({ message, userId: user.id, threadId: tid, now: Date.now(), state: ctx as unknown as Record<string, unknown>, store: outreachStore, events, postings: supabaseReferralPostings(admin),
+      const networking = !emailAsk && !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && (!queued || (!!reach && !queued.ask?.length)) && !f08 && !stood && !status && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+        ? await networkingTurn({ message: queued && reach ? reach.outreach : message, userId: user.id, threadId: tid, now: Date.now(), state: ctx as unknown as Record<string, unknown>, store: outreachStore, events, postings: supabaseReferralPostings(admin),
             attachments: Array.isArray(body.attachments) ? (body.attachments as any[]).filter((a) => a && typeof a === "object").map((a) => ({ name: String(a.name ?? "contacts.csv"), mime: typeof a.mime === "string" ? a.mime : "", text: typeof a.text === "string" ? a.text : null })) : [],
             model: chatSwitches(Deno.env).networkingDraft ? (payload: any) => callModel(careerModelConfig(Deno.env), payload, { meter: netMeter, role: "chat" }) : null,
             previousAsk: async () => {
@@ -1070,6 +1077,19 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         out = { reply: card.reply, intent: cardIntent(card), resultStatus: card.status, contained: false, handler: "cards", ...(card.parts ? { parts: card.parts } : {}) };
         // SERIAL-1451: the waiting card's id rides the reply, so the next yes in this thread answers this card and no other.
         if (waiting && card.card_id) agentMeta = { card_id: card.card_id };
+        // R9-G (e2e E18): the card answered, and the same message that asked for this application also asked for an email
+        // that is still waiting in this thread: that draft batch is shown again, exactly as drafted, so it is the thread's
+        // last word and "send 1" answers it. Its approval is its own; the card's answer approved nothing in it.
+        if (!waiting && out.intent === CARD_ANSWER_INTENT) {
+          const again = await compoundOutreachAgain({ admin, threadId: tid, now: Date.now(),
+            waiting: async () => (await outreachStore.latestBatch(user.id)).some((d: any) => d.status === "shown" && (!d.thread_id || d.thread_id === tid)),
+            show: () => outreachTurn({ message: "show drafts", userId: user.id, threadId: tid, now: Date.now(), store: outreachStore, events }) })
+            .catch((e) => { console.error("compound outreach:", (e as Error)?.message ?? e); return null; });
+          if (again) {
+            const parts = card.parts || again.parts ? [...(card.parts ?? [card.reply]), ...(again.parts ?? [again.reply])] : null;
+            out = { ...out, reply: `${card.reply}\n\nThe email you asked for in the same message is still waiting for your approval:\n\n${again.reply}`, intent: again.intent, ...(parts ? { parts } : {}) };
+          }
+        }
       } else if (mock) {
         // The mock's own intent: MOCK_INTENT while its question waits, so only then is the next text an answer.
         out = { reply: mock.reply, intent: mock.intent, resultStatus: mock.status, contained: false, handler: "mock" };
@@ -1119,6 +1139,36 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const asking = !!queued.ask?.length;
         out = { reply: queued.reply, intent: asking ? EMPLOYER_ASK_INTENT : queued.intent, resultStatus: queued.status, contained: false, handler: "apply_queue" };
         if (asking) agentMeta = { employer_question: queued.ask };
+        // R9-G: the email half of the same message, drafted by the networking turn: both answers, the draft batch last, so
+        // "send 1" answers it (OUTREACH_INTENT). The application keeps its own card and its own yes.
+        if (reach && networking) {
+          const parts = networking.parts ? [queued.reply, ...networking.parts] : null;
+          out = { reply: `${queued.reply}\n\n${networking.reply}`, intent: networking.intent, resultStatus: networking.status, contained: false, handler: "apply_queue", ...(parts ? { parts } : {}) };
+          agentMeta = { ...(agentMeta ?? {}), compound_outreach: true };
+        }
+        // R9-G (e2e E09): the tailor half of the same message, by the router's own tailor (truth-checked, its PDF rides the
+        // turn's documents). The application's card names the resume file the application sends, exactly; the hosted
+        // application sends the resume file the person keeps for the cloud (prepare-runner.ts keptResume), so the reply says
+        // so rather than implying the tailored copy goes with it.
+        if (tailorApply && !asking && (queued.status === "queued" || queued.status === "already")) {
+          await ensurePool(tailorApply.tailor);
+          let tr: any = clock.sync("router", () => host.runTurn(tailorApply.tailor, ctx));
+          // FEATURE 4, as for every router tailor below: the rewrite and its Word copy, so "PDF and DOCX" is what they get.
+          if (tr?.intent === "career_tailor" && tr.result?.tailorDoc) {
+            const rwMeter = ledger.track(newMeter());
+            const voiceSamples = (ctx as any).outreach?.voiceSamples ?? null;
+            const rw = await tailorRewriteTurn({ out: tr, profile: (ctx as any).profile ?? null, on: rewriteOn(Deno.env),
+              model: (payload) => callModel(careerModelConfig(Deno.env), payload, { meter: rwMeter, role: "chat" }),
+              voice: Array.isArray(voiceSamples) && voiceSamples.length ? CareerWriting.extractVoiceProfile(voiceSamples) : null })
+              .catch((e) => { console.error("tailor rewrite:", e?.message ?? e); return null; });
+            if (rw?.summary) { tr = rw.out; agentMeta = { ...(agentMeta || {}), tailor_rewrite: rw.summary }; }
+            await ledger.record(rwMeter);
+          }
+          if (tr?.intent === "career_tailor" && tr.result?.artifact) {
+            const sends = "The application's card names the exact resume file it sends: the hosted application sends the resume file you keep for applying, as you gave it, not this tailored copy.";
+            out = { ...out, reply: `${tr.reply}\n\n${queued.reply} ${sends}`, result: tr.result };
+          }
+        }
         // F09: the screen's question for a fact not confirmed rides the reply, so the next message can answer it.
         const sm = screenMeta(queued.screen);
         if (sm) agentMeta = { ...(agentMeta ?? {}), ...sm };

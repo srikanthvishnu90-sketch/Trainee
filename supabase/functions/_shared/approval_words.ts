@@ -17,8 +17,10 @@
 //   - a thumbs-up alone (any skin tone, repeated) is "yes"; every other reaction alone (✅ 👌 🙌 ...) approves nothing.
 //   - a fragment ("ye", "approv"), a look-alike letter, an invisible character or a spaced-out word approves nothing:
 //     a typo is corrected only in a word of 3+ plain letters, keeping its first letter, never a cut-off word.
-//   - another language approves nothing on these paths: the other-language table below is read only with
-//     { languages: "all" }, which no path passes until the owner rules on it (approval-language PR, 2026-11-08).
+// D-044 (owner, 2026-11-08, replacing the 2026-10-29 English-only rule): a clear yes in Spanish, Hindi/Hinglish (romanized
+// or Devanagari), French, German or Portuguese reads as the same English yes, under the same hash and last-word rules.
+// Every other language and script still approves nothing. The table is read by default; { languages: "en" } reads
+// English only.
 
 export type ApprovalScope = "batch" | "it" | "all" | "both" | "number";
 // `marked`: the number was said as a position ("#2", "number 2"), which the card reads as clear (one bare number may be a count).
@@ -35,7 +37,7 @@ export const NEGATIONS = new Set([
   // es / pt
   "nunca", "pero", "espera", "luego", "después", "despues", "mañana", "manana", "ninguno", "nada", "não", "nao", "mas", "depois", "amanhã", "amanha",
   // hi
-  "nahi", "nahin", "nai", "mat", "na", "ruko", "baad", "kal",
+  "nahi", "nahin", "nai", "mat", "na", "ruko", "baad", "kal", "नहीं", "नही", "मत", "ना", "रुको", "बाद", "कल", "लेकिन",
   // fr / de
   "non", "pas", "ne", "attends", "attendez", "demain", "mais", "nein", "nicht", "kein", "keine", "warte", "später", "spater", "morgen", "aber",
   // reactions that say no or doubt
@@ -56,7 +58,7 @@ const EN: Record<string, Cls> = {
   "🙏": "pad", "🙌": "pad", "🙂": "pad", "😊": "pad", "😄": "pad", "🔥": "pad", "💯": "pad", "🚀": "pad",
   number: "num_lead", "#": "num_lead",
 };
-// Read only with { languages: "all" } (see the header): Spanish, Hindi/Hinglish, French, German, Portuguese.
+// D-044: Spanish, Hindi/Hinglish (romanized and Devanagari), French, German, Portuguese (not read with { languages: "en" }).
 const OTHER: Record<string, Cls> = {
   // es
   "sí": "strong", si: "strong", claro: "strong", dale: "action", "envía": "action", envia: "action", enviar: "action", manda: "action",
@@ -68,6 +70,9 @@ const OTHER: Record<string, Cls> = {
   "theek hai": "soft", "thik hai": "soft", accha: "soft", acha: "soft", achha: "soft", bhejo: "action", "bhej do": "action", bhejdo: "action",
   "bhej dijiye": "action", "kar do": "action", kardo: "action", "kar dijiye": "action", chalo: "weak", sab: "all", sabko: "all", "sab ko": "all",
   saare: "all", sare: "all", dono: "both", "dono ko": "both", ise: "it", isko: "it", ji: "pad", kripya: "pad", shukriya: "pad",
+  // hi (Devanagari): हाँ / हां yes, भेजो / भेज दो send, सब all, दोनों both, इसे it, कृपया please
+  "हाँ": "strong", "हां": "strong", "हाँ जी": "strong", "जी हाँ": "strong", "भेजो": "action", "भेज दो": "action", "भेज दीजिए": "action", "सब": "all",
+  "सबको": "all", "दोनों": "both", "इसे": "it", "कृपया": "pad", "जी": "pad", "धन्यवाद": "pad",
   // fr
   oui: "strong", ouais: "strong", "d'accord": "soft", daccord: "soft", dac: "soft", envoie: "action", envoyez: "action", envoyer: "action",
   "vas y": "action", "allez y": "action", la: "it", le: "it", "ça": "it", les: "all", tous: "all", toutes: "all", tout: "all", "les deux": "both",
@@ -88,10 +93,11 @@ const REAL_WORDS = new Set(["yet", "yen", "yew", "yer", "yeh", "year", "yeas", "
   "spend", "sena", "summit", "conform", "pleat", "pease"]);
 
 const MAX_LEN = 80, MAX_WORDS = 10;
-// Every character must be a letter, a digit, one of these separators, an apostrophe, a hyphen or one of the listed
+// Every character must be a letter, a digit, one of these separators, an apostrophe, a hyphen, a Devanagari sign (its
+// vowel signs and nasal marks are combining marks; no other script's are allowed), or one of the listed
 // emoji (with skin tones and the emoji variation selector). Anything else (a quote, a ?, an invisible character, a
 // combining mark, a symbol) ends the reading.
-const ALLOWED = /^(?:[\p{L}\p{Nd}\s,.!;:'’#-]|\u{1F44D}|[\u{1F3FB}-\u{1F3FF}]|\u{FE0F}|\u{1F64F}|\u{1F64C}|\u{1F642}|\u{1F60A}|\u{1F604}|\u{1F525}|\u{1F4AF}|\u{1F680}|\u{1F44E}|\u{274C}|\u{270B}|\u{1F914}|\u{1F6D1})+$/u;
+const ALLOWED = /^(?:[\p{L}\p{Nd}\s,.!;:'’#-]|[ऀ-ॿ]|\u{1F44D}|[\u{1F3FB}-\u{1F3FF}]|\u{FE0F}|\u{1F64F}|\u{1F64C}|\u{1F642}|\u{1F60A}|\u{1F604}|\u{1F525}|\u{1F4AF}|\u{1F680}|\u{1F44E}|\u{274C}|\u{270B}|\u{1F914}|\u{1F6D1})+$/u;
 
 function damerau1(a: string, b: string): boolean {
   if (a === b || Math.abs(a.length - b.length) > 1) return false;
@@ -128,10 +134,10 @@ export function readApproval(text: string, o: ApprovalOptions = {}): Approval | 
   if (/-\s*\p{Nd}|\p{Nd}\s*-/u.test(raw)) return null;
   // An apostrophe only inside a word ("let's", "d'accord"): one around a word is a quote ("'yes'"), never the person's yes.
   if (/(?:^|[^\p{L}])['’]|['’](?:$|[^\p{L}])/u.test(raw)) return null;
-  const vocab: Record<string, Cls> = o.languages === "all" ? { ...EN, ...OTHER } : EN;
+  const vocab: Record<string, Cls> = o.languages === "en" ? EN : { ...EN, ...OTHER };
   const lower = raw.toLowerCase().replace(/’/g, "'");
   // Words, numbers and listed emoji; separators split. "#3" is "#", "3"; "envoie-la" is "envoie", "la".
-  const tokens = lower.replace(/[\u{1F3FB}-\u{1F3FF}\u{FE0F}]/gu, "").match(/[\p{L}']+|\p{Nd}+|#|\p{Extended_Pictographic}/gu) ?? [];
+  const tokens = lower.replace(/[\u{1F3FB}-\u{1F3FF}\u{FE0F}]/gu, "").match(/[\p{L}ऀ-ॣ०-ॿ']+|\p{Nd}+|#|\p{Extended_Pictographic}/gu) ?? [];
   if (!tokens.length || tokens.length > MAX_WORDS) return null;
   // A negation anywhere ends it, before any correction.
   if (tokens.some((t) => NEGATIONS.has(t) || NEGATIONS.has(t.replace(/'/g, "")) || NEGATIONS.has(collapse(t)))) return null;

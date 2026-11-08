@@ -873,8 +873,8 @@ export function careerTools(deps: {
           if (words.length && !words.every((w) => r.title.toLowerCase().includes(w))) continue;
           if (named && !namedAs(r.name, named)) continue;
           if (!r.email) { held.no_email++; continue; }
-          if (isAutomatedInbox(r.email)) { held.not_a_person = (held.not_a_person ?? 0) + 1; continue; } // R9: a no-reply, role or ATS/job-board inbox
           if (!r.verified) { held.not_verified++; continue; }
+          if (isAutomatedInbox(r.email)) { held.not_a_person = (held.not_a_person ?? 0) + 1; continue; } // R9: a no-reply, role or ATS/job-board inbox
           if (contacted.has(r.email.toLowerCase())) { held.already_contacted++; continue; }
           if (dnc.has(await emailHash(r.email))) { held.do_not_contact++; continue; }
           pick.push(r);

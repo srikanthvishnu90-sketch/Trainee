@@ -11,7 +11,7 @@
 import { isBlockedHost, isHttps, normalizeUrl, type FetchedSources, type SourcePage, URL_IN_TEXT, verifiedLinkGuard } from "../../research_sources.ts";
 import type { SearchPlan, SearchProvider } from "../../research_search.ts";
 import { NO_SOURCES } from "../../research_reply.ts";
-import { contentWords, numbersIn, numEq } from "./guard.ts";
+import { contentWords, numbersIn, numEq, specifics } from "./guard.ts";
 import { stripUrls } from "./reply.ts";
 
 export interface MarketDeps {
@@ -109,9 +109,10 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   // A fact: its page passed the guard, its quote is on the page, and the claim says what the quote says: every number in the
   // claim is in the quote itself, and every content word of the claim is in the quote's sentence or the few words before it
   // (a heading such as "National estimates."). "Solar panel prices fell 20%" never stands on "Battery pack prices fell 20%".
-  const fact = (text: unknown, quote: unknown, url: unknown) => {
+  // A comparison cell's subject is its column: the quote must speak of that company too, so Acme's "41,000" never fills Globex's cell.
+  const fact = (text: unknown, quote: unknown, url: unknown, subject = "") => {
     const t = squash(text), q = squash(quote), p = pageOf(url);
-    if (!t || t.length > 400 || !linkFree(t) || !p || q.length < 8 || !agrees(t, q, p.text)) { dropped++; return null; }
+    if (!t || t.length > 400 || !linkFree(t) || !p || q.length < 8 || !agrees(t, q, p.text) || (subject && !agrees(subject, q, p.text))) { dropped++; return null; }
     return { text: t, cite: [num(p)] };
   };
   // Trainee's reading: every page it names passed the guard, and every number in it is on one of them.
@@ -126,7 +127,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   if (opts.length >= 2) {
     const rows = arr(d.comparison?.rows, 10).map((r) => ({ label: squash(r?.label).slice(0, 80), cells: opts.map((_, j) => {
       const c = arr(r?.cells, 4)[j];
-      const f = c ? fact(c.value, c.quote, c.url) : null;
+      const f = c ? fact(c.value, c.quote, c.url, opts[j]) : null;
       return f && f.text.length <= 600 ? { value: f.text, cite: f.cite } : null;
     }) })).filter((r) => r.label && linkFree(r.label) && r.cells.some(Boolean));
     if (rows.length) comparison = { options: opts, rows };
@@ -165,8 +166,8 @@ export async function researchMarket(i: { question: string; format: "inline" | "
 const SAYS_UNCONFIRMED = /\b(?:couldn['’]?t|could not|can['’]?t|cannot|unable to|wasn['’]?t able|was not able|not able to|don['’]?t have|do not have|no (?:source|page|verified))\b/i;
 const CLAIM_AFTER = /\b(?:but|however|although|though|yet|still|anyway)\b/i;
 // The reply, enforced in code: every link the model wrote is removed; a citation number with no source is removed; an inline
-// sentence stands only when it cites a source and every figure in it is on a kept point citing that source (a file reply's
-// figures must be on a kept point); the inline answer ends with its numbered sources (each a page fetched this turn, with its
+// sentence stands only when it cites a source, every figure in it is on a kept point citing that source, and every name in it is
+// named by a kept point citing that source (a file reply's figures must be on a kept point); the inline answer ends with its numbered sources (each a page fetched this turn, with its
 // read date). With nothing left, the answer is the kept points themselves; with no source at all, only a sentence saying research
 // could not confirm an answer, else the plain no-source line.
 export function enforceMarketReply(reply: string, r: MarketResult): string {
@@ -178,16 +179,21 @@ export function enforceMarketReply(reply: string, r: MarketResult): string {
   }
   const max = r.sources.length;
   // Every kept point with the sources it cites: a figure in the reply must come from a point that cites what the sentence cites.
-  const items = [...r.points, ...r.conditions, ...r.risks].map((p) => ({ nums: numbersIn(p.text), cite: p.cite }))
-    .concat((r.comparison?.rows ?? []).flatMap((x) => x.cells.flatMap((c) => c ? [{ nums: numbersIn(c.value), cite: c.cite }] : [])));
+  // A comparison cell speaks for its column's company (fact() checked that its quote names it).
+  const items = [...r.points, ...r.conditions, ...r.risks].map((p) => ({ text: p.text, nums: numbersIn(p.text), cite: p.cite }))
+    .concat((r.comparison?.rows ?? []).flatMap((x) => x.cells.flatMap((c, j) => c ? [{ text: `${r.comparison!.options[j]} ${c.value}`, nums: numbersIn(c.value), cite: c.cite }] : [])));
   const citesOf = (s: string) => [...s.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1]));
   const numsOf = (s: string) => numbersIn(s.replace(/\[\d+\]/g, ""));
   // A file reply carries no citations (the brief does): its figures must be on a kept point. An inline sentence must cite a
-  // source, and each figure in it must be on a kept point citing one of the sources that sentence cites.
+  // source, each figure in it must be on a kept point citing one of the sources that sentence cites, and each name in it
+  // (a company, a place) must be in such a point: "Globex Power installed 41,000 [1]" never stands on Acme's point [1].
+  const said = (name: string, text: string) => new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(text);
   const onRecord = (s: string) => numsOf(s).every((n) => items.some((p) => p.nums.some((x) => numEq(x, n))));
   const supported = (s: string) => {
     const cs = citesOf(s);
-    return cs.length > 0 && numsOf(s).every((n) => items.some((p) => p.cite.some((c) => cs.includes(c)) && p.nums.some((x) => numEq(x, n))));
+    const mine = items.filter((p) => p.cite.some((c) => cs.includes(c)));
+    return cs.length > 0 && numsOf(s).every((n) => mine.some((p) => p.nums.some((x) => numEq(x, n))))
+      && specifics(s.replace(/\[\d+\]/g, "")).names.every((w) => mine.some((p) => said(w, p.text)));
   };
   let body = stripUrls(reply).replace(/\[(\d+)\]/g, (m, n) => Number(n) >= 1 && Number(n) <= max ? m : "")
     .split(/(?<=[.!?](?:\s*\[\d+\])*)\s+/).filter((s) => s.trim() && (r.format === "file" ? onRecord(s) : supported(s))).join(" ").trim();

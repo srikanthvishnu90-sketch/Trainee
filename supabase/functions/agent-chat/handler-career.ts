@@ -1190,6 +1190,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             ? `The application sends this tailored resume (${tailoredKept!.filename}); its card names that exact file.`
             : "The application's card names the exact resume file it sends: the resume file you keep for applying, as you gave it, not this tailored copy.";
           out = { ...out, reply: `${tailorHalf.reply}\n\n${queued.reply} ${sends}`, result: tailorHalf.result };
+        } else if (tailorApply && tailorHalf) {
+          // The apply half asked a question or queued nothing: the tailoring stands and is returned, and the reply says
+          // where its copy is kept, so a later application to that posting sending it is never a surprise.
+          const kept = tailoredKept ? ` The tailored copy (${tailoredKept.filename}) is kept for that posting: when its application is prepared, its card names that file.` : "";
+          out = { ...out, reply: `${tailorHalf.reply}\n\n${queued.reply}${kept}`, result: tailorHalf.result };
         }
         // F09: the screen's question for a fact not confirmed rides the reply, so the next message can answer it.
         const sm = screenMeta(queued.screen);

@@ -1073,7 +1073,8 @@ echo "== career_claim_deadlock.py (two claims and a batched finish in the deadlo
 python3 "$HERE/career_claim_deadlock.py" "${PSQL[@]}"
 # R9-G2: 20261108100000 (a batch card in numbered pages; its yes only once every page was delivered and the set is
 # unchanged) and 20261108110000 (a resume tailored for one posting, sent for that posting only). Twice each (idempotent),
-# their tests, then both rollbacks, then both again and their tests again.
+# their tests (and the card tests written before them, under the redefined card answer), then both rollbacks, then both
+# again and their tests again.
 for round in 1 2; do
   for m in 20261108100000_career_apply_card_pages 20261108110000_career_apply_posting_resume; do
     "${QUIET[@]}" -f "$ROOT/supabase/migrations/$m.sql"; "${QUIET[@]}" -f "$ROOT/supabase/migrations/$m.sql"
@@ -1082,11 +1083,50 @@ for round in 1 2; do
   "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_card_pages.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
   echo "== career_apply_posting_resume.test.sql (round $round: a tailored resume kept and read for one posting only)"
   "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_posting_resume.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+  # S2 follow-up: the card answer 20261108100000 redefines, under the card tests written before it.
+  echo "== career_apply_cards.test.sql (round $round, after 20261108100000: prepared, shown on a card, approved by one text)"
+  "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_cards.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+  echo "== career_apply_card_push.test.sql (round $round, after 20261108100000: the scheduled run shows the card in the texting thread)"
+  "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_card_push.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
   if [[ $round == 1 ]]; then
     "${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261108110000_career_apply_posting_resume.down.sql"
     "${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261108100000_career_apply_card_pages.down.sql"
   fi
 done
+# R9 (20261108120000): SmartRecruiters is a cloud portal family. The main loop applies it in order; here, after every
+# later redefinition, it is applied twice (idempotent), its rollback run, and it is applied again. Each time: the claims
+# name the family or do not, the per-family claim matches claim_at (runner_missing is empty), and the waivers' check.
+SR_NAMED="select count(*) from pg_proc p join pg_namespace s on s.oid = p.pronamespace where s.nspname = 'public' and p.proname in ('career_apply_cloud_claim_at', 'career_apply_cloud_claim_portal_at') and pg_get_functiondef(p.oid) ~ 'smartrecruiters'"
+SR_LISTS="select count(*) from pg_proc p join pg_namespace s on s.oid = p.pronamespace where s.nspname = 'public' and p.proname like 'career\_apply\_%' and pg_get_functiondef(p.oid) ~ \$re\$'ashby', ?'smartrecruiters'|''ashby'', ''smartrecruiters''\$re\$"
+SR_WAIVER="select coalesce(bool_or(pg_get_constraintdef(oid) ~ 'smartrecruiters'), false) from pg_constraint where conrelid = 'public.career_apply_cloud_gate_waivers'::regclass and conname = 'career_apply_cloud_gate_waivers_portal_check'"
+SR_MISSING="select coalesce(cardinality(public.career_apply_cloud_runner_missing()), 0)"
+sr_check() { # $1: on|off
+  local named lists waiver missing
+  named="$("${PSQL[@]}" -tAc "$SR_NAMED")"; lists="$("${PSQL[@]}" -tAc "$SR_LISTS")"; waiver="$("${PSQL[@]}" -tAc "$SR_WAIVER")"; missing="$("${PSQL[@]}" -tAc "$SR_MISSING")"
+  if [[ $1 == on ]]; then
+    [[ $named == 2 && $lists -ge 2 && $waiver == t ]] || { echo "FAIL 20261108120000: claim_at and claim_portal_at name smartrecruiters ($named/2, $lists lists, waiver $waiver)"; exit 1; }
+  else
+    [[ $named == 0 && $lists == 0 && $waiver == f ]] || { echo "FAIL 20261108120000 rollback: smartrecruiters still named ($named claims, $lists lists, waiver $waiver)"; exit 1; }
+  fi
+  [[ $missing == 0 ]] || { echo "FAIL 20261108120000 ($1): career_apply_cloud_runner_missing() is not empty ($missing)"; exit 1; }
+}
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261108120000_career_apply_cloud_smartrecruiters.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261108120000_career_apply_cloud_smartrecruiters.sql"
+sr_check on
+"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261108120000_career_apply_cloud_smartrecruiters.down.sql"
+sr_check off
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261108120000_career_apply_cloud_smartrecruiters.sql"
+sr_check on
+echo "  ok   20261108120000: the cloud claims, gate lists and waiver check name SmartRecruiters (twice, idempotent); its rollback names the three again; re-applied; the per-family claim matches claim_at each time"
+# S2 follow-up (20261108130000): the resume-file restart runs only for the person's own resume file, never for a posting's
+# tailored copy (20261108110000) or a linked payload hash. Twice (idempotent), its test; the rollback, then again and the test.
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261108130000_career_apply_resume_restarts_kept_file.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261108130000_career_apply_resume_restarts_kept_file.sql"
+echo "== career_apply_resume_restarts.test.sql (a resume file clears no_resume tries and asks for preparation; a tailored copy or a linked hash restarts nothing; nothing queued or sent)"
+"${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_resume_restarts.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261108130000_career_apply_resume_restarts_kept_file.down.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261108130000_career_apply_resume_restarts_kept_file.sql"
+"${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_resume_restarts.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 # PEOPLE DRAFTS ROUND 3 (20261031110000): an outreach batch is as many drafts as were asked for (NO LIMITS); the table's
 # draft-number check stopped at 10. Twice (idempotent), then its test.
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261031110000_career_outreach_batch_unbounded.sql"

@@ -44,6 +44,8 @@ export const SHARED_REPLY_MODULES = [
   "career_reply_writer.ts", "career_code_in_chat.ts",
   // 2026-11-07 (release 9 B): tailor_resume's layouts and gap report, and the version record it writes (career_tools.ts).
   "career_resume_design.ts", "career_resume_gaps.ts", "career_resume_outcomes.ts",
+  // R10 (2026-11-08): the fifteen templates, their metrics, the format rater and the geometry reader it measures with.
+  "career_resume_templates.ts", "career_resume_metrics.ts", "career_resume_rater.ts", "career_resume_geometry.ts",
   // R9-C (2026-11-07): market research on the reply path: the search provider and what it imports (sources, the research
   // reply, its report store and the artifact it is delivered as).
   "research_search.ts", "research_sources.ts", "research_reply.ts", "research_report_store.ts", "channel_artifacts.ts",

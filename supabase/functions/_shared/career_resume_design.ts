@@ -24,9 +24,13 @@
 // diffs both parsers' extraction against them. Nothing here adds a word.
 import { CareerRender } from "./router_core.career.js";
 import { PLUM, LIGHT } from "./brand.ts";
+import { renderTemplate, type TemplateId, type TemplateSpec } from "./career_resume_templates.ts";
 
 export type LayoutName = "trainee" | "own";
 export const LAYOUTS: LayoutName[] = ["trainee", "own"];
+// RELEASE 10: a third kind of layout, one of the fifteen templates (career_resume_templates.ts), named by its id; and "own"
+// from a PDF, where the rater found the person's own PDF can be rebuilt faithfully (career_resume_rater.ts ownPdfSpec).
+export type DesignLayout = LayoutName | "template";
 export const MIN_BODY_PT = 10;
 // The fit steps, loosest first: [body size, spacing scale].
 export const FIT_STEPS: [number, number][] = [[10.5, 1], [10.5, 0.85], [10, 0.85], [10, 0.7]];
@@ -350,7 +354,8 @@ export function ownDocx(R: any, original: Uint8Array, swaps: Swap[]): { ok: true
 
 // ---------------------------------------------------------------- the whole render
 export interface Designed {
-  ok: true; layout: LayoutName; pdf: Uint8Array; docx: Uint8Array; fit: Fit; sameText: boolean; lines: string[];
+  template?: TemplateId | null; own_source?: "docx" | "pdf";
+  ok: true; layout: DesignLayout; pdf: Uint8Array; docx: Uint8Array; fit: Fit; sameText: boolean; lines: string[];
   parseCheck: { status: string; fails: string[]; warnings: string[] }; replaced?: number; missing?: string[];
 }
 const words = (lines: string[]) => lines.join(" ").replace(/•/g, " ").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(" ");
@@ -360,9 +365,27 @@ export function sameText(R: any, pdf: Uint8Array, docx: Uint8Array): boolean {
   return words(R.extractPdfLines(R.primitives.bytes(pdf))) === words(R.extractDocxLines(R.primitives.bytes(docx)));
 }
 // deno-lint-ignore no-explicit-any
-export function renderDesigned(R: any, resume: any, o: { layout: LayoutName; ownDocx?: Uint8Array | null; swaps?: Swap[] }): Designed | { ok: false; reason: string } {
+export function renderDesigned(R: any, resume: any, o: { layout: DesignLayout; ownDocx?: Uint8Array | null; swaps?: Swap[]; template?: TemplateId | null; branded?: boolean; ownPdfSpec?: TemplateSpec | null }): Designed | { ok: false; reason: string } {
   if (!R?.primitives) return { ok: false, reason: "the renderer has no byte primitives here" };
   if (!resume || resume.ok === false || resume.refused === true) return { ok: false, reason: "the truth check refused the resume; nothing is rendered" };
+  // RELEASE 10: a template, or the person's own PDF layout rebuilt from its measured geometry. The same words (in the
+  // template's section order), the same two parsers per format, the same refusal on any parse failure.
+  if (o.layout === "template" || (o.layout === "own" && o.ownPdfSpec && !o.ownDocx?.length)) {
+    const own = o.layout === "own";
+    if (!own && !o.template) return { ok: false, reason: "name a template (1 to 15)" };
+    const t = renderTemplate(R, resume, own ? { template: o.ownPdfSpec!.id, spec: o.ownPdfSpec!, branded: false } : { template: o.template!, branded: !!o.branded });
+    if (!t.ok) return t;
+    const check = R.parseCheck({ resume: t.source, pdf: R.primitives.bytes(t.pdf), docx: R.primitives.bytes(t.docx) }, { expected: { pdf: t.printedPdf, docx: t.printedDocx } });
+    // deno-lint-ignore no-explicit-any
+    const fails = check.reasons.filter((r: any) => r.level === "fail").map((r: any) => `${r.check}: ${r.detail}`);
+    // deno-lint-ignore no-explicit-any
+    const warnings = check.reasons.filter((r: any) => r.level === "warn").map((r: any) => `${r.check}: ${r.detail}`);
+    if (t.fit.over) warnings.push(`page_fit: the record needs ${t.fit.pages} pages at 10 pt with the tightest spacing; nothing was cut and no text was set smaller`);
+    const same = sameText(R, t.pdf, t.docx);
+    if (!same) fails.push("same_text: the PDF and the DOCX do not carry the same words in the same order");
+    const f: Fit = { pages: t.fit.pages, body: t.fit.body, scale: t.fit.tighten ? 0.85 : 1, target: t.fit.target, over: t.fit.over };
+    return { ok: true, layout: own ? "own" : "template", template: own ? null : t.template, ...(own ? { own_source: "pdf" as const } : {}), pdf: t.pdf, docx: t.docx, fit: f, sameText: same, lines: t.printedDocx, parseCheck: { status: fails.length ? "FAIL" : warnings.length ? "WARN" : "PASS", fails, warnings } };
+  }
   let blocks: Block[], pal: Palette, docx: Uint8Array, docxPrinted: string[] | null, extra: { replaced?: number; missing?: string[] } = {};
   let sourceLines: { text: string; kind: string }[] | null = null;
   if (o.layout === "own") {
@@ -406,5 +429,19 @@ export function supabaseOwnDocx(admin: any): (userId: string) => Promise<Uint8Ar
     const bin = atob(b64), out = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
     return out;
+  };
+}
+
+// RELEASE 10: the format rater reads the person's newest upload, PDF or Word (whichever came last), as stored.
+const PDF_MIME = "application/pdf";
+// deno-lint-ignore no-explicit-any
+export function supabaseNewestUpload(admin: any): (userId: string) => Promise<{ bytes: Uint8Array; kind: "pdf" | "docx" } | null> {
+  return async (u) => {
+    const r = await admin.from("career_resume_uploads").select("content_b64,mime").eq("user_id", u).in("mime", [DOCX_MIME, PDF_MIME]).order("created_at", { ascending: false }).limit(1);
+    const row = r.error ? null : r.data?.[0];
+    if (!row || typeof row.content_b64 !== "string" || !row.content_b64) return null;
+    const bin = atob(row.content_b64), out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return { bytes: out, kind: row.mime === PDF_MIME ? "pdf" : "docx" };
   };
 }

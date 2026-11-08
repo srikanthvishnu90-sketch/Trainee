@@ -29,6 +29,8 @@ import {
 import { legacyRows, REFERRAL_ASK, referralMap, targetFirms } from "../career_referrals.ts";
 import { CONTACT_QUESTION, contactFromMessage, namedIn, type PersonaStore, type ResumeRenderer, type ResumeStore, restatePersona, savePersona, tailorForPosting, validPersonaName } from "../career_tailor.ts";
 import { recordVersion, type ResumeVersionLog } from "../career_resume_outcomes.ts";
+import { planLayout } from "../career_resume_rater.ts"; // RELEASE 10
+import { templateId } from "../career_resume_templates.ts"; // RELEASE 10
 import { type OfferPending, offerTurn, saidIn } from "../career_offer.ts";
 import { findFirm, pathAnswer } from "../career_path.ts";
 import type { HiredResult, HiredSource } from "../career_hired.ts";
@@ -193,6 +195,8 @@ const trackOf = (c: ToolCtx) => ((c.state.trackStore as any) ??= CareerTrack.cre
 export interface TailorTools {
   posting: (jobId: string) => Promise<any | null>; personas: PersonaStore; resumes: ResumeStore; render: ResumeRenderer;
   ownDocx?: (userId: string) => Promise<Uint8Array | null>; versions?: ResumeVersionLog | null;
+  // RELEASE 10: the person's newest resume upload (PDF or Word), for the format rater (career_resume_rater.ts planLayout).
+  upload?: (userId: string) => Promise<{ bytes: Uint8Array; kind: "pdf" | "docx" } | null>;
   // 2026-11-08 (review of #596): the files this turn made ride the reply, as the router's tailored files do (agent-chat
   // materializes them into the person's artifact store, channel_artifacts.ts). Turn-scoped: nothing is kept in state.
   deliver?: (doc: { format: "pdf" | "docx"; filename: string; mime: string; base64: string; sha256: string | null }) => void;
@@ -711,8 +715,8 @@ export function careerTools(deps: {
     },
     {
       name: "tailor_resume", effect: "write_own",
-      description: "A PDF resume for one posting from CONFIRMED facts only (never drafts or anything new); it passes the truth and ATS checks or refuses with the reason. Send gaps.summary and preview first, then its text as given, the 7-day private link alone on its own line; the files in attached ride your reply. Give job_id from search_jobs, or the posting text. layout: only when asked.",
-      input_schema: obj({ job_id: str("The posting's job_id from search_jobs"), posting_text: str("The posting's full text, if there is no job_id"), persona: str("A saved persona name, e.g. 'banking'; leave out to use the active one"), layout: { type: "string", enum: ["trainee", "own"], description: "Only when asked: 'trainee' (Trainee's design) or 'own' (keep their Word file's layout)" } }),
+      description: "A PDF resume for one posting from CONFIRMED facts only (never drafts or anything new); it passes the truth and ATS checks or refuses with the reason. Send gaps.summary and preview first, then its text as given, the 7-day private link alone on its own line; the files in attached ride your reply. job_id from search_jobs, or the posting text. layout: only when asked. Relay format_check.summary.",
+      input_schema: obj({ job_id: str("The posting's job_id from search_jobs"), posting_text: str("The posting's full text, if there is no job_id"), persona: str("A saved persona name, e.g. 'banking'; leave out to use the active one"), layout: { type: "string", enum: ["trainee", "own", "template"], description: "Only when asked: 'trainee' (Trainee's design), 'own' (\"keep mine\": their own file's layout) or 'template' (\"use template N\", with template)" }, template: str("Only with layout 'template': the template number they named, 1 to 15") }),
       run: async (i, c) => {
         const t = tailorOf();
         let text = "", job_id: string | null = null, company: string | null = null;
@@ -726,9 +730,24 @@ export function careerTools(deps: {
         const name = i.persona ? validPersonaName(i.persona) : st.active;
         const persona = name ? st.items.find((p) => p.name === name) ?? null : null;
         if (i.persona && !persona) throw new Error(`no persona named ${String(i.persona)}; saved: ${st.items.map((p) => p.name).join(", ") || "none"}`);
-        const layout = i.layout === "trainee" || i.layout === "own" ? i.layout : null;
-        const ownDocx = layout === "own" ? await t.ownDocx?.(c.userId).catch(() => null) ?? null : null;
-        const r = await tailorForPosting({ userId: c.userId, profile: profileOf(c), posting: { text, job_id, company }, persona, deps: { render: t.render, resumes: t.resumes }, now: c.now, layout, ownDocx });
+        // RELEASE 10: "use template N" takes that template; "keep mine" and no layout at all go through the format rater
+        // (career_resume_rater.ts planLayout), which keeps their layout only when it measures well enough, else offers one.
+        const tid = i.template !== undefined && i.template !== null && String(i.template).trim() ? templateId(i.template) : null;
+        if (i.template !== undefined && i.template !== null && String(i.template).trim() && !tid) throw new Error("not made: templates are numbered 1 to 15; ask which one they want");
+        const asked = tid ? "template" : i.layout === "trainee" || i.layout === "own" ? i.layout : i.layout === "template" ? null : null;
+        if (i.layout === "template" && !tid) throw new Error("not made: say which template, 1 to 15");
+        const ownDocx = asked === "own" || (!asked && t.upload) ? await t.ownDocx?.(c.userId).catch(() => null) ?? null : null;
+        const upload = asked !== "template" && asked !== "trainee" && t.upload ? await t.upload(c.userId).catch(() => null) : null;
+        const plan = await planLayout({ asked, template: tid, upload, ownDocx, roleText: text.slice(0, 300) }).catch((e) => { console.error("format rater:", (e as Error)?.message ?? e); return null; });
+        const base = { userId: c.userId, profile: profileOf(c), posting: { text, job_id, company }, persona, deps: { render: t.render, resumes: t.resumes }, now: c.now };
+        const legacy = asked === "trainee" || (asked === "own" && !plan) ? { layout: asked, ownDocx } : null;
+        let r = await tailorForPosting(legacy ? { ...base, ...legacy } : { ...base, layout: plan?.layout ?? null, template: plan?.template ?? null, ownDocx: plan?.ownDocx ?? null, ownPdfSpec: plan?.ownPdfSpec ?? null });
+        let keptNote = "";
+        // Their own layout picked by the rater (not asked for) that fails a check falls back to the default file, and says so.
+        if (!r.ok && !asked && plan?.layout === "own" && (r.refused === "render" || r.refused === "ats_parse")) {
+          keptNote = `Your own layout could not be kept (${r.reason}); this file uses the standard layout instead.`;
+          r = await tailorForPosting(base);
+        }
         if (r.ok && t.versions) await recordVersion(t.versions, { userId: c.userId, out: r, now: c.now });
         // WO-079: facts waiting for the person's yes are named, with the one question to ask (battery T09 ran out of steps
         // trying other tools); with none, ask what to build from. A confirmation can only come from their next message.
@@ -740,7 +759,11 @@ export function careerTools(deps: {
             : `not made: there are no confirmed experience, project or education facts on file. Ask them for their work experience and education in their own words; nothing is invented. Do not call another tool this turn. Nothing was stored or sent.`);
         }
         if (!r.ok) throw new Error(`not made: ${r.reason}. ${r.refused === "link" ? "The file stays private; no link was given." : "Nothing was stored or sent."}`);
-        const { detail, ...out } = r;
+        const { detail, ...rest } = r;
+        const out = plan?.rating ? { ...rest, format_check: { score: plan.rating.score, keep: plan.rating.keep, kept_layout: r.layout === "own", hard_failures: plan.rating.hardFailures,
+          findings: plan.rating.findings.filter((f) => f.measured && !f.pass).map((f) => ({ criterion: f.criterion, detail: f.detail, where: f.where.slice(0, 3) })),
+          recommended: plan.recommended ? { template: Number(plan.recommended.template.slice(1)), name: plan.recommended.name, why: plan.recommended.why } : null,
+          summary: [plan.summary, keptNote].filter(Boolean).join("\n") } } : rest;
         // The PDF (and, with a layout, its Word copy) are attached to this reply; the private link stays as well.
         if (t.deliver) {
           t.deliver({ format: "pdf", filename: r.filename, mime: "application/pdf", base64: b64(detail.pdf), sha256: r.sha256 });

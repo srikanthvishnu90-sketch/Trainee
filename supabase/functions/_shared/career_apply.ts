@@ -114,7 +114,7 @@ export const dailyLimit = (l?: Limits): number => {
 // mass-submit-posting-key.test.ts compares them). Lower case; the host without www. and without a default port, any other
 // port kept; the path without trailing slashes, and without a final /apply or /application when two or more segments come
 // before it; the query kept, sorted, without tracking parameters; any Greenhouse link naming a job number is that number.
-// R9 (2026-11-07, 20261107120000): a gh_jid on any host (an employer's own careers page embedding its Greenhouse board)
+// R9 (2026-11-07, 20261107120100): a gh_jid on any host (an employer's own careers page embedding its Greenhouse board)
 // is that Greenhouse job number too: Greenhouse numbers its jobs once across every board, so it is the same posting.
 // Null when it is not a web link.
 export function postingKey(url: unknown): string | null {

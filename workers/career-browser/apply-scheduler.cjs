@@ -49,7 +49,7 @@ function mergeLimits(l) {
 }
 
 // The ledger's posting key, rule for rule (supabase/functions/_shared/career_apply.ts postingKey and its SQL twin
-// career_apply_posting_key, 20261107120000; tests/architect/r9-apply-scheduler.test.ts holds them equal).
+// career_apply_posting_key, 20261107120100; tests/architect/r9-apply-scheduler.test.ts holds them equal).
 function postingKey(url) {
   const m = /^https?:\/\/([^/?#@]+)([^?#]*)(\?[^#]*)?/.exec(String(url == null ? "" : url).trim().toLowerCase());
   if (!m) return null;

@@ -71,6 +71,24 @@ const RUN_VERSION = "career_batch_run/v1";
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const coded = (code, message) => Object.assign(new Error(message || code), { code });
 
+// S2 follow-up (2026-11-08): whether a stopped send may have reached the employer. Only a stop that is known to come
+// BEFORE the click says "nothing was posted" (false), which hands the pace slot back and leaves the posting free to send
+// again. Everything else (EXECUTION_ERROR: a throw anywhere in the drive, the submit included; an unknown or uncertain
+// outcome; any code not named here) is null: it is counted against the pace and never sent again on its own.
+// The before-the-click stops: the prepare drive's own (155: board, questions, the portal drive's throw, the posting's
+// state) and 149's submit gate, which refuses before it arms or clicks (approval, payload, attestation, duplicate,
+// portal refusing); and the stages that were never driven at all.
+const BEFORE_CLICK = new Set([
+  "BOARD_NOT_WIRED", "UNCOVERED_QUESTION", "DRIVER_ERROR", "KNOCKOUT_UNMET", "JOB_CLOSED", "BAD_URL", "AGGREGATOR_APPLY_FORBIDDEN",
+  "UNTESTED_ATS_HOST", "EMAIL_CODE_FILLED", "NOT_PREPARED", "NOT_SUBMITTED",
+  "APPROVAL_REQUIRED", "NO_DOORSTEP", "INCOMPLETE_PAYLOAD", "ALREADY_APPLIED_BY_USER", "APPROVAL_PAYLOAD_MISMATCH", "ATTESTATION_REQUIRED",
+  "DUPLICATE_APPLICATION", "PORTAL_REFUSING",
+  "selected", "doorstep", "excluded_by_user", "deferred_refusal",
+]);
+function postedForStop(code) {
+  return BEFORE_CLICK.has(String(code)) ? false : null;
+}
+
 function createBatchExecutor(deps) {
   const d = deps || {};
   const store = d.store;
@@ -251,7 +269,7 @@ function createBatchExecutor(deps) {
       }
       if (app.stage === "captcha_handoff") return { posted: false, outcome: "needs_user", reason: "captcha_handoff" };
       const code = (app.stop && app.stop.code) || app.stage;
-      return { posted: /UNCERTAIN|UNKNOWN|RECONCILE/.test(String(code)) ? null : false, outcome: "permanent", reason: String(code) };
+      return { posted: postedForStop(code), outcome: "permanent", reason: String(code) };
     };
   }
 
@@ -413,4 +431,4 @@ if (require.main === module) {
     .catch((e) => { console.error("batch executor failed:", e && e.message); process.exit(1); });
 }
 
-module.exports = { createBatchExecutor, createBatchRpcStore };
+module.exports = { createBatchExecutor, createBatchRpcStore, postedForStop };

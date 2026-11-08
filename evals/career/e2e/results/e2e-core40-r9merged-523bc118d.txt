@@ -1,0 +1,10 @@
+e2e-core40-r9merged-523bc118d: 38/40 tasks completed end to end (95.0%) · brain production · model fake · cost $0.000
+  apply     8/10 (80.0%)
+  outreach  10/10 (100.0%)
+  research  10/10 (100.0%)
+  resume    10/10 (100.0%)
+  guards    6/6 held (nothing done that the person did not ask for)
+failures:
+  E05 apply/multi: apply: 0 submitted with proof, 20 asked [stopped at: 20 on the apply list, 0 card(s) shown, 0 approved, 0 reached the employer; turns handled as career_apply_queue > career_apply_questions > career_apply_questions > career_apply_questions_answer > career_apply_questions_answer > conversation_]
+  E09 apply/multi: apply: 0 submitted with proof, 1 asked [stopped at: 1 on the apply list, 0 card(s) shown, 1 approved (not_submitted), 0 reached the employer; turns handled as career_apply_queue > career_apply_questions > career_apply_questions > career_apply_questions_answer > career_apply_questions_answer ]; apply: nothing submitted with proof at Lumen; apply: Lumen was approved but never reached the employer (r
+appended to evals/career/SCORE-LOG.md: | 2026-11-08 00:26:03 | E2E | 523bc118dde19e10d1c71a523d15986ab9a401c2 | e2e-core40-r9merged-523bc118d | production | fake | 40 | 38 | 95.0% | 8/10 | 10/10 | 10/10 | 10/10 | 6/6 | $0.000 | no |

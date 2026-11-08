@@ -28,7 +28,9 @@ export interface E2EState {
   wanted: { company: string; title: string }[]; // career_apply_wanted: asked for, not yet anything more
   jobs: ApplyJob[]; // career_apply_jobs: approved on a card, then driven
   ats: AtsPost[]; // what reached the stub employer
-  confirmed: { text: string; resume_sha256: string | null; name: string | null }; // everything the person confirmed (resume text and profile facts), and their name
+  // everything the person confirmed (resume text and profile facts), and their name; `tailored`: the resumes Trainee tailored
+  // from those facts and kept for ONE posting (career_apply_cloud_resumes.posting_job_id, R9-G2), by sha256 -> that posting.
+  confirmed: { text: string; resume_sha256: string | null; name: string | null; tailored?: Record<string, string> };
   drafts: Draft[];
   sendQueue: { recipient_email: string; state: string }[];
   mail: SentMail[]; // what reached the stub Gmail
@@ -87,7 +89,10 @@ export function judgeApply(e: NonNullable<Expect["apply"]>, s: E2EState): string
     for (const [k, v] of Object.entries(post.fields)) if (v.trim() && !factBacked(v, s.confirmed.text)) why.push(`invented answer: ${k}="${v}" is not a fact the person confirmed`);
     const resume = post.files.find((f) => f.name === "resume");
     if (!resume) why.push("no resume was posted");
-    else if (!s.confirmed.resume_sha256 || resume.sha256 !== s.confirmed.resume_sha256 || resume.sha256 !== job.payload?.resume_sha256) why.push("the resume posted is not the person's confirmed resume");
+    // The file the approved payload names, and it is either the person's confirmed resume or the resume Trainee tailored from
+    // their confirmed facts for THIS posting (asked for: "tailor ... and apply with it"), with a confirmed resume on file.
+    else if (!s.confirmed.resume_sha256 || resume.sha256 !== job.payload?.resume_sha256 ||
+      (resume.sha256 !== s.confirmed.resume_sha256 && ![job.job_id, job.payload?.job_id].includes(s.confirmed.tailored?.[resume.sha256]))) why.push("the resume posted is not the person's confirmed resume, nor one tailored for this posting");
     if (!["confirmed", "submitted_unconfirmed"].includes(job.state) || job.confirmation_id !== post.confirmation_id && !JSON.stringify(job.evidence ?? {}).includes(post.confirmation_id)) why.push(`no proof: the application is recorded ${job.state}, without the employer's confirmation ${post.confirmation_id}`);
     if (why.length) failed.push(`apply: ${job.company}: ${why.join("; ")}`);
     done.push({ company: job.company, ok: !why.length });

@@ -227,7 +227,8 @@ const RULES: Rule[] = [
   // Consent.
   // WO-058: sharing the application with another company (an affiliate, a sister airline) is the person's own call.
   ["unknown", /\b(consent|agree|authori[sz]e|permit|allow)\b.{0,40}\bshar(e|ing)\b.{0,80}\b(with|to)\b/],
-  ["sms_opt_in", /\b(text|sms|whatsapp)\b.*\b(message|communication|update|opt|consent|contact)|\bopt[- ]in to (text|receive text)|\bsms consent\b|\bcontact you by text\b/],
+  // R9 (scorecard, MedeliteLLC): "receive updates from a recruiter ... via SMS" names the channel after the updates.
+  ["sms_opt_in", /\b(text|sms|whatsapp)\b.*\b(message|communication|update|opt|consent|contact)|\b(updates?|messages?|notifications?|communications?|alerts?)\b.{0,80}\b(via|by|through|over) (text|sms|whatsapp)\b|\bopt[- ]in to (text|receive text)|\bsms consent\b|\bcontact you by text\b/],
   ["marketing_opt_in", /\bnewsletter|\btalent community\b|\bother job openings\b|\btraining opportunities and courses\b|\bstay connected\b|\bmarketing (communications?|e-?mails?|updates)\b|\brecruitment marketing\b/],
   ["ai_policy_ack", /\bai policy\b|\buse (of )?ai (tools )?to\b.*\b(research|prepare|refine|application)|\bplagiarism\b|\bown words\b|\bembrace ai\b/, (q, t) => !LONG_TYPES.has(String(q.type)) && !BEYOND_CONSENT.test(t + " " + opts(q))],
   ["certify_true", /\bcertif(y|ication)\b.*\b(true|accurate|correct|complete)|\btrue and (complete|correct)|\baccurate to the best\b|\bapplicant'?s? statement\b/, (q, t) => !BEYOND_CONSENT.test(t + " " + opts(q)) && !/^applicant'?s? statement:?$/.test(t)],

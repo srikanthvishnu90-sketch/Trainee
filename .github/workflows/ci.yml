@@ -593,6 +593,19 @@ jobs:
         with: { deno-version: "v2.9.6" }
       - name: The sending rail under load
         run: PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH deno test -A --no-check tests/load/send-rail-load.test.ts
+  apply-throughput-load:
+    name: load (apply throughput)
+    runs-on: ubuntu-24.04
+    # R9 (2026-11-07): real submission at volume against a stub ATS on loopback (never an employer): 60 an hour per person
+    # sustained, the 200-a-day cap, 5,000 in a month across 25 people, no duplicate and no send without its approval hash.
+    # No database; about 5 s. Its numbers are printed (R9 sustained / cap / month).
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: Apply throughput under load
+        run: deno test -A --no-check tests/load/apply-throughput.test.ts
   acceptance-telegram:
     name: acceptance (telegram)
     runs-on: ubuntu-24.04

@@ -1073,7 +1073,7 @@ echo "== career_claim_deadlock.py (two claims and a batched finish in the deadlo
 python3 "$HERE/career_claim_deadlock.py" "${PSQL[@]}"
 # R9-G2: 20261108100000 (a batch card in numbered pages; its yes only once every page was delivered and the set is
 # unchanged) and 20261108110000 (a resume tailored for one posting, sent for that posting only). Twice each (idempotent),
-# their tests (and the card tests written before them, under the redefined card answer), then both rollbacks, then both
+# their tests (and card_confirm, written before them, under the redefined card answer), then both rollbacks, then both
 # again and their tests again.
 for round in 1 2; do
   for m in 20261108100000_career_apply_card_pages 20261108110000_career_apply_posting_resume; do
@@ -1083,11 +1083,12 @@ for round in 1 2; do
   "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_card_pages.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
   echo "== career_apply_posting_resume.test.sql (round $round: a tailored resume kept and read for one posting only)"
   "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_posting_resume.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
-  # S2 follow-up: the card answer 20261108100000 redefines, under the card tests written before it.
-  echo "== career_apply_cards.test.sql (round $round, after 20261108100000: prepared, shown on a card, approved by one text)"
-  "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_cards.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
-  echo "== career_apply_card_push.test.sql (round $round, after 20261108100000: the scheduled run shows the card in the texting thread)"
-  "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_card_push.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+  # S2 follow-up: the card answer 20261108100000 redefines, under the card test written before it that holds at this point:
+  # card_confirm opens, answers and confirms through career_apply_card_open_for / _answer_for / _confirm_for. The older
+  # career_apply_cards and career_apply_card_push tests prepare applications with no resume, which the owner's resume rule
+  # (2026-10-26) refuses once the later migrations are applied, so they run only where they do (above).
+  echo "== career_apply_card_confirm.test.sql (round $round, after 20261108100000: one Confirm opens and answers one card; exactly the hash shown, once)"
+  "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_card_confirm.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
   if [[ $round == 1 ]]; then
     "${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261108110000_career_apply_posting_resume.down.sql"
     "${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261108100000_career_apply_card_pages.down.sql"

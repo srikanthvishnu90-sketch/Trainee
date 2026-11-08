@@ -764,11 +764,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // Gmail or Outlook. Behind CAREER_PEOPLE_SEARCH and CAREER_CONTACT_OUTREACH (RELEASE_NEVER_ON), read at every turn: off, it
       // claims only a yes to a card shown while on, and refuses it. It takes the outreach slot (every later turn stands down).
       const contactAns = !tapIn && !card && !mock && !asked && !which && !emailed && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
-        ? await contactTurn({ message, userId: user.id, now: Date.now(), deps: {
+        ? await (async (now: number) => contactTurn({ message, userId: user.id, now, deps: {
             env: (k) => Deno.env.get(k), contacts: { ...supabaseContactStore(admin), byName: contactsByName(admin) },
             model: outreachModel, senderFacts: () => ((ctx as any).profile?.facts ?? []), signature: outreachSignature(admin),
             mailboxes: async (u) => (await sendProviders(admin, u)).map((x) => ({ id: x.id })), lastCard: () => lastReplyRow(admin, tid),
-            store: outreachStore, rail: { rpc: (name, args) => admin.rpc(name, args) }, limits: supabaseSendLimits(admin) } })
+            store: outreachStore, rail: { rpc: (name, args) => admin.rpc(name, args) }, limits: supabaseSendLimits(admin, { now: () => now }) } }))(Date.now())
           .catch((e) => { console.error("contact turn:", e?.message ?? e); return null; })
         : null;
       const outreachAns = contactAns ? { ...contactAns, parts: undefined } : !tapIn && !card && !mock && !asked && !which && !emailed && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)

@@ -1,0 +1,54 @@
+e2e-full-r9merged-523bc118d: set full · 470/1000 tasks completed end to end (47.0%) · brain production · model fake · cost $0.000
+  apply     26/250 (10.4%)
+  outreach  40/250 (16.0%)
+  research  222/250 (88.8%)
+  resume    182/250 (72.8%)
+  held-out  101/200 (50.5%) · rest 369/800 (46.1%) · gap 4.4 points
+completion by task family:
+  apply.all                         2/40   (  5.0%)  top failure (10): apply: N submitted with proof, N asked [stopped at: turns handled as agent > agent]
+  apply.links                       8/50   ( 16.0%)  top failure (31): apply: N submitted with proof, N asked [stopped at: N on the apply list, N card(s) shown, N approved, N reached the employer; turns handled as career_
+  apply.single                     12/90   ( 13.3%)  top failure (28): apply: N submitted with proof, N asked [stopped at: turns handled as agent > agent]
+  apply.tailor_then_apply           0/25   (  0.0%)  top failure (13): apply: N submitted with proof, N asked [stopped at: turns handled as career_tailor > agent]
+  apply.top                         4/25   ( 16.0%)  top failure (7): apply: N submitted with proof, N asked [stopped at: turns handled as agent > agent > agent]
+  apply.two                         0/20   (  0.0%)  top failure (5): apply: N submitted with proof, N asked [stopped at: N on the apply list, N card(s) shown, N approved (queued, queued), N reached the employer; turns h
+  outreach.apply_and_email          1/15   (  6.7%)  top failure (7): apply: N submitted with proof, N asked
+  outreach.find_hm                  3/40   (  7.5%)  top failure (17): outreach: nothing delivered to <email> [stopped at: turns handled as career_people_targets > agent]
+  outreach.named                   15/90   ( 16.7%)  top failure (23): outreach: nothing delivered to <email> [stopped at: turns handled as agent > agent]
+  outreach.research_then_email      0/25   (  0.0%)  top failure (19): outreach: nothing delivered to <email> [stopped at: turns handled as agent > agent]
+  outreach.role                     9/50   ( 18.0%)  top failure (15): outreach: nothing delivered to <email> [stopped at: N drafted (<email> shown), N on the sending rail, N delivered; turns handled as career_outreach_ba
+  outreach.two                     12/30   ( 40.0%)  top failure (8): outreach: nothing delivered to <email> [stopped at: turns handled as agent > agent]
+  research.compare                 35/35   (100.0%)
+  research.employer                23/50   ( 46.0%)  top failure (27): research: no research file delivered [stopped at: turns handled as career_document_delivery]
+  research.find_then_research      35/35   (100.0%)
+  research.market                  90/90   (100.0%)
+  research.pay                     39/40   ( 97.5%)  top failure (1): research: no research file delivered [stopped at: turns handled as career_document_delivery]
+  resume.fit                        0/25   (  0.0%)  top failure (25): resume: no tailored PDF returned in a reply [stopped at: turns handled as agent]
+  resume.link                      23/25   ( 92.0%)  top failure (2): resume: no tailored PDF returned in a reply [stopped at: turns handled as agent]
+  resume.single                   107/120  ( 89.2%)  top failure (8): resume: no tailored PDF returned in a reply [stopped at: turns handled as agent]
+  resume.top                       39/40   ( 97.5%)  top failure (1): resume: no tailored PDF returned in a reply [stopped at: turns handled as agent > agent]
+  resume.two                       13/40   ( 32.5%)  top failure (23): resume: N good tailored PDF(s), N asked
+apply completion by ATS family (tasks that apply):
+  ashby                             4/39   ( 10.3%)  top failure (8): apply: N submitted with proof, N asked [stopped at: turns handled as agent > agent]
+  greenhouse                       19/147  ( 12.9%)  top failure (26): apply: N submitted with proof, N asked [stopped at: turns handled as agent > agent]
+  lever                             4/53   (  7.5%)  top failure (11): apply: N submitted with proof, N asked [stopped at: N on the apply list, N card(s) shown, N approved, N reached the employer; turns handled as career_
+  smartrecruiters                   0/26   (  0.0%)  top failure (4): apply: N submitted with proof, N asked [stopped at: turns handled as agent > agent]
+completion by phrasing style:
+  es                               31/97   ( 32.0%)  top failure (20): apply: N submitted with proof, N asked [stopped at: turns handled as agent > agent]
+  hi                               46/122  ( 37.7%)  top failure (20): apply: N submitted with proof, N asked [stopped at: turns handled as agent > agent]
+  plain                           207/347  ( 59.7%)  top failure (22): outreach: nothing delivered to <email> [stopped at: N drafted (<email> shown), N on the sending rail, N delivered; turns handled as career_outreach_ba
+  slang                            41/99   ( 41.4%)  top failure (8): research: no research file delivered [stopped at: turns handled as career_document_delivery]
+  texting                          96/200  ( 48.0%)  top failure (11): apply: N submitted with proof, N asked [stopped at: N on the apply list, N card(s) shown, N approved, N reached the employer; turns handled as career_
+  typo                             49/135  ( 36.3%)  top failure (9): outreach: nothing delivered to <email> [stopped at: turns handled as outreach_clarification > agent]
+top 10 failure clusters (530 tasks failed):
+    64 × outreach: nothing delivered to <email> [stopped at: turns handled as agent > agent]
+    48 × apply: N submitted with proof, N asked [stopped at: turns handled as agent > agent]
+    39 × resume: no tailored PDF returned in a reply [stopped at: turns handled as agent]
+    37 × apply: N submitted with proof, N asked [stopped at: N on the apply list, N card(s) shown, N approved, N reached the employer; turns handled as career_apply_queue > career_apply_questions > career_apply_questions > career
+    37 × outreach: nothing delivered to <email> [stopped at: N drafted (<email> shown), N on the sending rail, N delivered; turns handled as career_outreach_batch > agent]
+    28 × research: no research file delivered [stopped at: turns handled as career_document_delivery]
+    23 × resume: N good tailored PDF(s), N asked
+    19 × outreach: nothing delivered to <email> [stopped at: turns handled as career_os_timeline > agent]
+    17 × outreach: nothing delivered to <email> [stopped at: turns handled as career_people_targets > agent]
+    14 × apply: N submitted with proof, N asked [stopped at: turns handled as named_role_apply > agent]
+estimated real-model cost of this run: $1.90 (1835 model calls, 15.32M prompt tokens at 4 characters a token, answers of at most 400 tokens; no prompt caching), $0.0019 a task
+appended to evals/career/SCORE-LOG.md: | 2026-11-08 00:26:31 | E2E-SET | 523bc118dde19e10d1c71a523d15986ab9a401c2 | e2e-full-r9merged-523bc118d | full | all | 20261108 | production | fake | 1000 | 470 | 47.0% | 26/250 | 40/250 | 222/250 | 182/250 | 101/200 | 369/800 | $0.000 | $1.90 | no |

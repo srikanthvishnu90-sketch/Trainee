@@ -1,3 +1,4 @@
+-- definer-scan: dynamic function DDL reviewed (the loop below rewrites installed career_apply_* bodies only by widening their family lists; the claim generator builds claim_portal_at from claim_at, as in 20261026100000)
 -- R9 (fix/r9-apply-completion, 2026-11-08): SmartRecruiters is a cloud portal family like Greenhouse, Lever and Ashby.
 -- D-013 option (a) names the four open families (Greenhouse, Lever, Ashby, SmartRecruiters), the schema has always kept
 -- SmartRecruiters postings (career_postings.provider) and portal pauses, career_apply_portal(url) already names the family,
@@ -45,6 +46,8 @@ begin
   || 'returns setof public.career_apply_jobs language plpgsql security definer set search_path = public, pg_temp as $cr$'
   || body || '$cr$';
 end $$;
+
+revoke all on function public.career_apply_cloud_claim_portal_sql() from public, anon, authenticated;
 
 do $sr$
 declare

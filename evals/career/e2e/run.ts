@@ -239,9 +239,13 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
         await Promise.all(prepWaits.splice(0));
         const runs = prepRuns.splice(0);
         if (!runs.length) continue;
-        const stood = new Date().toISOString();
+        // fix/r9-apply-completion: pinned again where it stood PLUS the time the sandboxes took, as the person's own clock moves
+        // while the machine works. Re-pinning where it stood dropped that time from the chat's clock only (the database's
+        // pinned defaults, PIN_DB_SQL, keep the real time elapsed), so over a long run the chat's clock fell behind the
+        // database's by every second the preparations ran.
+        const stood = Date.now(), realAt = machineNow();
         unpin?.();
-        try { await Promise.all(runs.map((f) => f())); } finally { unpin = pinClock(stood); }
+        try { await Promise.all(runs.map((f) => f())); } finally { unpin = pinClock(new Date(stood + (machineNow() - realAt)).toISOString()); }
       }
     };
     h = await careerHandler(pg, people);
@@ -344,6 +348,8 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
       const j = judgeE2E(t.expect, state);
       items.push({ id: t.id, area: t.area, kind: t.kind, pass: j.pass, failed: j.failed, stage: state.stage, replies, intents,
         ...(loaded.scaled ? { family: t.family, style: t.style, ats: t.ats, heldout: !!t.heldout, est } : {}) });
+      // E2E_TRACE=1: each task's replies, the intent that answered each turn, and where it stopped (for reading a failure by hand).
+      if (Deno.env.get("E2E_TRACE")) console.log(`--- ${t.id} trace\n${replies.map((x, k) => `[${intents[k] ?? "none"}] ${x}`).join("\n---\n")}\nstage: ${state.stage.join(" | ")}\n--- end`);
       if (!o.quiet) console.log(`${t.id} ${j.pass ? "PASS" : "FAIL"} ${t.area}/${t.kind}${j.pass ? "" : `: ${j.failed.join("; ")}`}`);
     }
     const scored = items.filter((x) => x.kind !== "guard"), guards = items.filter((x) => x.kind === "guard");

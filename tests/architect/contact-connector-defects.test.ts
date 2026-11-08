@@ -1,4 +1,4 @@
-// CONTACT OUTREACH (proposal D-042), reproduced defects in PR #590's pipeline. Each test fails on the code before its fix:
+// CONTACT OUTREACH (proposal D-043), reproduced defects in PR #590's pipeline. Each test fails on the code before its fix:
 //   1. a GitHub profile's email is the recipient only when it is on the company's own domain: a profile that copies the
 //      name and puts "@Acme" in its company field cannot choose where the email goes;
 //   2. the never-sources refuse on every public suffix (scholar.google.co.uk, glassdoor.co.uk, ziprecruiter.co.uk, ...),

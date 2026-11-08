@@ -1,4 +1,4 @@
-// CONTACT OUTREACH (proposal D-042), review regressions for PR #590. Each test reproduces one review finding and fails on
+// CONTACT OUTREACH (proposal D-043), review regressions for PR #590. Each test reproduces one review finding and fails on
 // the code before its fix:
 //   1. pages a discovery search found (a news site, a conference site) are read: the gate admits their hosts (robots.txt,
 //      public DNS) instead of refusing every host it was not told about up front;

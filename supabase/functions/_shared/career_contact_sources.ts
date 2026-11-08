@@ -1,4 +1,4 @@
-// CONTACT OUTREACH, release 9 workstream E (proposal D-042): the public sources a contact's professional facts come from.
+// CONTACT OUTREACH, release 9 workstream E (proposal D-043): the public sources a contact's professional facts come from.
 // Behind CAREER_PEOPLE_SEARCH and CAREER_CONTACT_OUTREACH (career_contact_pipeline.ts contactOutreachOn); both off.
 //
 // Two doors, both polite, both behind the Fetcher seam (tests pass fixtures; nothing here calls fetch on its own):
@@ -52,7 +52,7 @@ export function contactUserAgent(contact: string | null | undefined): string {
 // A robots-governed rule for one host the pipeline was pointed at (the employer's own domain, or a page a search returned).
 export function pageRule(host: string, org: string, o: { reviewedOn: string; delayMs?: number }): SiteRule {
   return { host: host.toLowerCase(), org_name: org, terms_url: `https://${host.toLowerCase()}/robots.txt`, terms_reviewed_on: o.reviewedOn,
-    terms_reviewed_by: "robots.txt rule (D-042 proposal): public pages only, robots.txt obeyed per request",
+    terms_reviewed_by: "robots.txt rule (D-043 proposal): public pages only, robots.txt obeyed per request",
     terms_summary: "Public pages read at a polite pace; robots.txt decides every path.", license_note: `Public page on ${host.toLowerCase()}; facts kept with their URL.`,
     min_delay_ms: Math.max(2000, o.delayMs ?? 2000) };
 }

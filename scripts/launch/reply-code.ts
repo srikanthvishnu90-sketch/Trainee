@@ -77,7 +77,7 @@ export const RELEASE_FLAG_PATHS = [
   "supabase/functions/_shared/career_digest.ts",
   "supabase/functions/_shared/career_people_reminders.ts",
   "supabase/functions/_shared/career_inbox_followups.ts",
-  // Release 9 E (proposal D-042): the contact connector's switches (CAREER_PEOPLE_SEARCH + CAREER_CONTACT_OUTREACH) are read here only.
+  // Release 9 E (proposal D-043): the contact connector's switches (CAREER_PEOPLE_SEARCH + CAREER_CONTACT_OUTREACH) are read here only.
   "supabase/functions/_shared/career_contact_pipeline.ts",
 ] as const;
 

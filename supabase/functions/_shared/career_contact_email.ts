@@ -1,4 +1,4 @@
-// CONTACT OUTREACH (proposal D-042): a contact's work address, found in evidence order and checked without sending.
+// CONTACT OUTREACH (proposal D-043): a contact's work address, found in evidence order and checked without sending.
 //   1. published   an address on a first-party page for this person (the company's own pages, their own site), or the
 //                  email on their public GitHub profile when it is on the company's own domain;
 //   2. pattern     the domain's format learned from 2+ addresses the domain itself publishes;

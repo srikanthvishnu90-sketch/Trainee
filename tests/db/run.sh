@@ -1093,7 +1093,7 @@ done
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261031110000_career_outreach_batch_unbounded.sql"
 echo "== career_outreach_batch_unbounded.test.sql (one batch holds drafts 1 to 150; 0 and a repeated number refused; the check is validated)"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_outreach_batch_unbounded.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
-# CONTACT OUTREACH (20261107120200, proposal D-042): contacts, cited facts, email evidence, the global suppression list and
+# CONTACT OUTREACH (20261107120200, proposal D-043): contacts, cited facts, email evidence, the global suppression list and
 # the daily new-contact limit. Up twice (idempotent), its check, then the owner's rollback and up again.
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261107120200_career_contact_outreach.sql"
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261107120200_career_contact_outreach.sql"

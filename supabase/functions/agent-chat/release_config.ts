@@ -148,8 +148,8 @@ export const RELEASE_PENDING: Readonly<Record<string, string>> = Object.freeze({
 // wired (market research on the staged brain's reply path) but stay off until a live eval measures them and the owner sets the
 // search key (docs/architect/RELEASE-FLAGS-2026-11-01.md). LinkedIn and Indeed automation and any send from Trainee's own
 // identity have no switch at all: there is no code path to turn on (CLAUDE.md; D-033).
-// CAREER_CONTACT_OUTREACH (release 9 E, proposal D-042): the contact connector (_shared/career_contact_*.ts), read only
-// together with CAREER_PEOPLE_SEARCH; both move into RELEASE_FLAGS in one commit once the owner accepts D-042.
+// CAREER_CONTACT_OUTREACH (release 9 E, proposal D-043): the contact connector (_shared/career_contact_*.ts), read only
+// together with CAREER_PEOPLE_SEARCH; both move into RELEASE_FLAGS in one commit once the owner accepts D-043.
 export const RELEASE_NEVER_ON: readonly string[] = Object.freeze([
   "CAREER_OUTREACH_REPLIES", "CAREER_OUTREACH_REPLIES_MODEL",
   "CAREER_REPLY_WRITER", "CAREER_KNOWLEDGE", "CAREER_JUDGE", "CAREER_MAIL_MODEL",

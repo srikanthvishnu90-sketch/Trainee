@@ -1,4 +1,4 @@
-// CONTACT OUTREACH (proposal D-042), the pipeline: from a job post to one professional at that company, their public
+// CONTACT OUTREACH (proposal D-043), the pipeline: from a job post to one professional at that company, their public
 // professional facts (up to 25, each cited) and their work address with its evidence score. Nothing here drafts, shows or
 // sends anything (career_contact_send.ts does, after the person approves the exact email).
 //   contactOutreachOn   CAREER_PEOPLE_SEARCH and CAREER_CONTACT_OUTREACH, both: off unless the owner turns both on.

@@ -1,4 +1,4 @@
--- CONTACT OUTREACH (release 9 workstream E; proposal D-042; _shared/career_contact_pipeline.ts). Not applied by this PR: the
+-- CONTACT OUTREACH (release 9 workstream E; proposal D-043; _shared/career_contact_pipeline.ts). Not applied by this PR: the
 -- owner's go-live creates the (empty) tables at the next release (scripts/launch/trainee-go-live.sh lists every migration);
 -- nothing reads or writes them while CAREER_PEOPLE_SEARCH and CAREER_CONTACT_OUTREACH are off. Rollback: supabase/rollbacks/20261107120200_career_contact_outreach.down.sql.
 --

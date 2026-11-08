@@ -1,4 +1,4 @@
-// CONTACT OUTREACH (proposal D-042): which facts about a contact are kept. A fact is a professional claim with the public
+// CONTACT OUTREACH (proposal D-043): which facts about a contact are kept. A fact is a professional claim with the public
 // source it came from, the words there that support it (at most 200 characters), when it was read and published, how sure
 // the source makes it, how it was found, and when it expires (90 days: re-read before it is used again).
 // Kept only: professional facts. Never a home address, family (parents, children, a partner or spouse), health, religion or

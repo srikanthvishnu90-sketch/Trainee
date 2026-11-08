@@ -166,7 +166,7 @@ Deno.test("contact facts and sources: professional only, data never instructions
   eq(contactOutreachOn(env({ CAREER_PEOPLE_SEARCH: "on", CAREER_CONTACT_OUTREACH: "on" })), true);
   ok(RELEASE_NEVER_ON.includes("CAREER_CONTACT_OUTREACH") && !("CAREER_CONTACT_OUTREACH" in RELEASE_FLAGS), "the new flag is off until the owner accepts D-042");
   const decisions = await Deno.readTextFile(new URL("../../docs/architect/DECISIONS.md", import.meta.url));
-  ok(/\| D-042 \|[^\n]*CAREER_PEOPLE_SEARCH[^\n]*proposed/.test(decisions), "D-042 proposes turning CAREER_PEOPLE_SEARCH on, for the owner");
+  ok(/\| D-043 \|[^\n]*CAREER_PEOPLE_SEARCH[^\n]*proposed/.test(decisions), "D-043 proposes turning CAREER_PEOPLE_SEARCH on, for the owner");
 });
 
 Deno.test({ name: "contact store on Postgres: the resolved contact round-trips, another person reads nothing, forget and global suppression", sanitizeResources: false, sanitizeOps: false, async fn() {

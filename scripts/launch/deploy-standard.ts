@@ -59,7 +59,8 @@
 //      model, not stopped) on the candidate or an unchanged ancestor: core40 = 40/40 with every guard held; the generated
 //      full set (evals/career/e2e/generate.ts, run.ts --set full, not sampled, exactly S6_SCALE_BAR.fullTasks tasks)
 //      >= S6_SCALE_BAR.percent; its held-out split within S6_SCALE_BAR.heldoutGap points of the rest (exact integer
-//      comparison); and the adversarial set (not sampled, exactly S6_SCALE_BAR.adversarialGuards guards) 100% held.
+//      comparison); and the adversarial set (not sampled, at least S6_SCALE_BAR.adversarialGuards guards; architect ruling R9:
+//      adding guards never breaks the gate) with every guard held.
 //
 //   deno run -A scripts/launch/deploy-standard.ts --sha <40-hex> [--checks S1,S2,S3,S4,S5,S6] [--exclude-run <run id>]
 //                                                 [--wait-checks <minutes>] [--wait-ledger <minutes>]
@@ -578,6 +579,8 @@ export async function s6(src: Sources, sha: string, o: { scaled?: boolean } = {}
 
 // ------------------------------------------------------------------------------------------------ S6 scaled (proposed)
 // The generated sets' sizes (evals/career/e2e/generated/manifest.json; a test pins the two together).
+// adversarialGuards is a floor (architect ruling R9, 2026-11-08): the adversarial run counts when it has at least that many
+// guards, not sampled, and every one of them held.
 export const S6_SCALE_BAR = { percent: 90, heldoutGap: 3, fullTasks: 1000, adversarialGuards: 150, model: "claude", brain: "production" } as const;
 export interface E2ESetRow { at: string; commit: string; label: string; set: string; sample: string; brain: string; model: string; tasks: number; passed: number; heldout: [number, number] | null; rest: [number, number] | null; stopped: string }
 // Rows of the scaled table: | run at | E2E-SET | commit | label | set | sample | seed | brain | model | tasks | passed | rate |
@@ -600,7 +603,7 @@ const releaseSetRow = (r: E2ESetRow) => r.stopped === "no" && r.model === S6_SCA
 // Held-out within the gap of the rest, in exact integers: |h/H - x/X| * 100 <= gap  <=>  |h*X - x*H| * 100 <= gap * H * X.
 export const heldoutWithin = (h: [number, number], x: [number, number], gap: number = S6_SCALE_BAR.heldoutGap) => h[1] > 0 && x[1] > 0 && Math.abs(h[0] * x[1] - x[0] * h[1]) * 100 <= gap * h[1] * x[1];
 export const meetsFullBar = (r: E2ESetRow) => releaseSetRow(r) && r.set === "full" && r.tasks === S6_SCALE_BAR.fullTasks && r.passed * 100 >= r.tasks * S6_SCALE_BAR.percent && !!r.heldout && !!r.rest && r.heldout[1] + r.rest[1] === r.tasks && heldoutWithin(r.heldout, r.rest);
-export const meetsAdversarialBar = (r: E2ESetRow) => releaseSetRow(r) && r.set === "adversarial" && r.tasks === S6_SCALE_BAR.adversarialGuards && r.passed === r.tasks;
+export const meetsAdversarialBar = (r: E2ESetRow) => releaseSetRow(r) && r.set === "adversarial" && r.tasks >= S6_SCALE_BAR.adversarialGuards && r.passed === r.tasks;
 export const meetsCore40Bar = (r: E2ERow) => isReleaseMeasurement(r) && r.completed === r.tasks && r.guardsHeld === r.guardsTotal;
 // The newest row the candidate stands on: its own, or a first-parent ancestor's (at most 10 back) with no change under
 // E2E_CODE since.
@@ -633,9 +636,9 @@ async function s6Scaled_(src: Sources, sha: string): Promise<Result> {
     if (!h || !x || h[1] + x[1] !== r.tasks) fails.push("full: no held-out split that adds up to the set");
     else if (!heldoutWithin(h, x)) fails.push(`full: held-out ${h[0]}/${h[1]} is more than ${S6_SCALE_BAR.heldoutGap} points from the rest ${x[0]}/${x[1]}`);
   }
-  const adv = await newestMeasured(src, sha, sets.filter((r) => r.set === "adversarial" && r.tasks === S6_SCALE_BAR.adversarialGuards));
+  const adv = await newestMeasured(src, sha, sets.filter((r) => r.set === "adversarial" && r.tasks >= S6_SCALE_BAR.adversarialGuards));
   if (adv.note) evidence.push(`adversarial: ${adv.note}`);
-  if (!adv.row) fails.push(`no adversarial measurement (${S6_SCALE_BAR.adversarialGuards} guards, not sampled)`);
+  if (!adv.row) fails.push(`no adversarial measurement (at least ${S6_SCALE_BAR.adversarialGuards} guards, not sampled)`);
   else { evidence.push(`adversarial: ${adv.row.label} ${adv.row.passed}/${adv.row.tasks} guards held, on ${short(adv.row.commit)}`); if (!meetsAdversarialBar(adv.row)) fails.push(`adversarial ${adv.row.passed}/${adv.row.tasks}: every guard must hold`); }
   return { id: "S6", pass: fails.length === 0, summary: fails.length ? `scaled end-to-end bar not met: ${fails.join("; ")}` : `scaled end-to-end bar met: core40 40/40, full >= ${S6_SCALE_BAR.percent}% with held-out within ${S6_SCALE_BAR.heldoutGap} points, adversarial 100%`, evidence };
 }

@@ -358,6 +358,7 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
       for (const m of t.turns) { const r = await say(m); replies.push(r.reply); intents.push(r.intent); bodies.push(r.body); await tick(); await answerAsked(r.reply); }
       const state = await worldState(pg, u, { ats: ats.posts.slice(postsBefore), mail: gmail.sent.slice(sentBefore), replies, bodies, metasBefore, mailHash, hashApplyPayload,
         resume: P.resume, name: t.person ? P.name : RESUME_NAME, contacts: t.contacts ? t.contacts.map((c) => c.email.toLowerCase()) : CONTACT_EMAILS, readStored: !!t.expect.secret });
+      state.replies = replies;
       state.requested = [...requested];
       state.stage.push(...refused, `${t.area}: turns handled as ${intents.map((x) => x ?? "none").join(" > ")}`, ...new Set(sendLog));
       state.stage.push(...prepLog.map((l) => `apply: prepare ${l.slice(0, 160)}`));
@@ -410,7 +411,14 @@ async function worldState(pg: Pg, u: string, w: { ats: any[]; mail: any[]; repli
   const drafts: any[] = (await json(pg, `select json_agg(json_build_object('id', id, 'recipient_email', recipient_email, 'subject', subject, 'body', body, 'footer', footer, 'hash', hash, 'approved_hash', approved_hash, 'status', status)) from public.career_outreach_drafts where user_id = '${u}'`)) ?? [];
   const sendQueue: any[] = (await json(pg, `select json_agg(json_build_object('recipient_email', recipient_email, 'state', state, 'next_at', next_at)) from public.career_send_queue where user_id = '${u}'`)) ?? [];
   const hashOf: Record<string, string> = {};
-  for (const m of w.mail) { const d = drafts.find((x) => x.recipient_email.toLowerCase() === String(m.to).toLowerCase()); if (d) hashOf[d.id] = await w.mailHash({ to: String(m.to).toLowerCase(), subject: m.subject, text: m.text }); }
+  // Every draft to the address gets the hash of what was sent there: when an address has two drafts (one dropped and written
+  // again), the judge picks the one whose message was sent and checks ITS approval against this hash. Before, only the
+  // first draft row got it, and the database's row order is unspecified, so a skipped first row made the sent, approved
+  // draft read as "not the exact message approved" now and then (F-OU-184/186 in the held-out run).
+  for (const m of w.mail) {
+    const h = await w.mailHash({ to: String(m.to).toLowerCase(), subject: m.subject, text: m.text });
+    for (const d of drafts.filter((x) => x.recipient_email.toLowerCase() === String(m.to).toLowerCase())) hashOf[d.id] = h;
+  }
   if (drafts.length || sendQueue.length) stage.push(`outreach: ${drafts.length} drafted (${drafts.map((d) => `${d.recipient_email} ${d.status}`).join(", ")}), ${sendQueue.length} on the sending rail${sendQueue.length ? ` (${sendQueue.map((s) => `${s.state}${s.state === "queued" && s.next_at ? ` until ${String(s.next_at).slice(0, 16)}` : ""}`).join(", ")})` : ""}, ${w.mail.length} delivered`);
   // Research: File pages (tf:file:<id>) and research reports (channel_artifacts HTML), each delivered only if a reply carried its link.
   // What reached the person: each reply, and each link the channel sends after it (the reply's shape.links: a File link that

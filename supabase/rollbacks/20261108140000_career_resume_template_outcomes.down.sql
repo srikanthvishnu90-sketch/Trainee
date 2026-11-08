@@ -1,4 +1,4 @@
--- Reverses 20261108130000_career_resume_template_outcomes.sql: back to 20261107120000's view, trigger function and layout
+-- Reverses 20261108140000_career_resume_template_outcomes.sql: back to 20261107120000's view, trigger function and layout
 -- check, and the resume_template column dropped. Rows tagged 'template' lose that layout (set to null) so the old check holds.
 update public.career_apply_jobs set resume_layout = null where resume_layout = 'template';
 drop view if exists public.career_apply_outcomes_by_resume;

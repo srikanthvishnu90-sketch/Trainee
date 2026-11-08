@@ -617,7 +617,8 @@ export const batchText = (drafts: OutreachDraft[]) => batchMessages(drafts).join
 
 // ------------------------------------------------------------------------------------------------ the reply
 export type OutreachReply =
-  | { kind: "send"; all: boolean; ns: number[]; except: number[]; it?: boolean; both?: boolean }
+  // `count`: "send all 3" says how many it means; it approves only a batch of exactly that many waiting (as on the card).
+  | { kind: "send"; all: boolean; ns: number[]; except: number[]; it?: boolean; both?: boolean; count?: number }
   | { kind: "skip"; ns: number[]; anytime?: boolean } | { kind: "redo"; n: number } | { kind: "edit"; n: number; text: string }
   | { kind: "none" } | { kind: "show" } | { kind: "lapsed" } | { kind: "bad"; why: string };
 // FAMILY NETWORKING: "send it" / "looks good, send it" names the one draft shown (only when exactly one is waiting), and
@@ -659,7 +660,10 @@ export function parseOutreachReply(text: string): OutreachReply | null {
   }
   // "send both" names the whole batch only when exactly two drafts are waiting (outreachTurn checks).
   if (/^(?:send|approve)(?: them)? both(?: of them)?$/.test(t)) return { kind: "send", all: true, ns: [], except: [], both: true };
-  const all = /^(?:send|approve)(?: them)? all(?: of them| \d+)?(?: (?:except|but|minus|without|not)\b(.*))?$/.exec(t) ?? /^send (?:them|everything)(?: (?:except|but|minus|without|not)\b(.*))?$/.exec(t);
+  // S2 review of #614: "send all 3" threw the 3 away and sent a batch of 5. The count is kept and checked (outreachTurn).
+  const counted = /^(?:send|approve)(?: them)? all (\d+)(?: of them)?$/.exec(t);
+  if (counted) return { kind: "send", all: true, ns: [], except: [], count: Number(counted[1]) };
+  const all = /^(?:send|approve)(?: them)? all(?: of them)?(?: (?:except|but|minus|without|not)\b(.*))?$/.exec(t) ?? /^send (?:them|everything)(?: (?:except|but|minus|without|not)\b(.*))?$/.exec(t);
   if (all) {
     if (all[1] === undefined) return { kind: "send", all: true, ns: [], except: [] };
     const nums = parseNumbers(all[1].replace(/\b(?:numbers?|for)\b/g, " ").trim());
@@ -815,8 +819,12 @@ export async function outreachTurn(o: {
   if (r.kind === "send" && r.it) {
     // "send it": exactly one draft is waiting, so "it" can mean only that one; otherwise ask for the number, once.
     const waiting = batch.filter((d) => d.status === "shown");
-    if (waiting.length !== 1) return open(`Nothing was approved: ${waiting.length ? `${waiting.length} drafts are waiting, so say which by number, e.g. "send ${waiting[0].n}", or "send all"` : "no draft in this batch is waiting for approval"}.`, "bad");
+    if (waiting.length !== 1) return open(`Nothing was approved: ${waiting.length ? `${waiting.length} drafts are waiting, so say which by number, e.g. "send ${waiting[0].n}", or "send all". Send all ${waiting.length}, or which ones?` : "no draft in this batch is waiting for approval."}`, "bad");
     r.ns = [waiting[0].n];
+  }
+  if (r.kind === "send" && r.count !== undefined) {
+    const waiting = batch.filter((d) => d.status === "shown");
+    if (waiting.length !== r.count) return open(`Nothing was approved: ${waiting.length} draft${waiting.length === 1 ? " is" : "s are"} waiting, not ${r.count}. Send all ${waiting.length}, or which ones? Say "send all" or which by number, e.g. "send ${waiting[0]?.n ?? 1}".`, "bad");
   }
   if (r.kind === "send" && r.both) {
     const waiting = batch.filter((d) => d.status === "shown");

@@ -199,7 +199,7 @@ including the Word-made fixture.
 
 ## 6. Outcomes by template (after launch)
 
-`career:resume-versions` entries carry `layout: "template"` and `template: "T05"`. Migration `20261108130000` adds
+`career:resume-versions` entries carry `layout: "template"` and `template: "T05"`. Migration `20261108140000` adds
 `career_apply_jobs.resume_template`, set at apply time only for a template file. The view
 `career_apply_outcomes_by_resume` gains a `template` dimension, and the File page's rates gain a "By template" group. The
 rule is #596's: under 30 applications, a group is too few to compare.

@@ -291,7 +291,9 @@ MIGRATIONS=(
   20261108100000_career_apply_card_pages.sql
   20261108110000_career_apply_posting_resume.sql
   20261108120000_career_apply_cloud_smartrecruiters.sql
-  20261108130000_career_resume_template_outcomes.sql
+  20261108130000_career_apply_resume_restarts_kept_file.sql
+  20261108130500_career_contact_erase_keeps_sends.sql
+  20261108140000_career_resume_template_outcomes.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -452,6 +454,8 @@ MIGRATION_MARK=(
   "to_regclass('public.career_apply_card_pages') is not null and exists (select 1 from pg_proc where proname = 'career_apply_card_push_paged_for')"
   "exists (select 1 from pg_proc where proname = 'career_apply_cloud_resume_for_posting') and exists (select 1 from pg_proc where proname = 'career_apply_posting_resume_put')"
   "exists (select 1 from pg_proc where proname = 'career_apply_cloud_claim_at' and prosrc like '%smartrecruiters%')"
+  "exists (select 1 from pg_proc where proname = 'career_apply_resume_file_restarts' and prosrc like '%posting_job_id%')"
+  "exists (select 1 from pg_proc where proname = 'career_erase_kept_tables' and prosrc like '%career_contact_sends%')"
   "exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'career_apply_jobs' and column_name = 'resume_template')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.

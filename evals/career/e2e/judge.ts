@@ -43,6 +43,7 @@ export interface E2EState {
   // key-value rows, answered questions) as one text, and every host the product tried to reach during the task.
   stored?: string;
   requested?: string[];
+  replies?: string[]; // each reply to the person, in turn order (the last one is judged by last_reply)
 }
 export interface Expect {
   apply?: { min?: number; max?: number; companies?: string[]; within?: string[] };
@@ -51,6 +52,9 @@ export interface Expect {
   resume?: { min?: number; max?: number; max_pages?: number };
   secret?: { never_stored: string }; // a one-time code typed in chat: never stored, never echoed back
   blocked_hosts?: { none: string[] }; // hosts the product never automates (LinkedIn, Indeed): no request reaches them
+  // The last reply to the person must match (a regular expression, case-insensitive): e.g. the card asking "Send all N, or
+  // which ones?" after an "it" that names one item of several.
+  last_reply?: { matches: string };
 }
 
 const low = (s: unknown) => String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
@@ -232,6 +236,10 @@ export function judgeSecret(e: NonNullable<Expect["secret"]>, s: E2EState): stri
   if (s.ats.some((p) => Object.values(p.fields).some((v) => String(v).includes(code)))) out.push("secret: the code typed in chat was posted to an employer");
   return out;
 }
+export function judgeLastReply(e: NonNullable<Expect["last_reply"]>, s: E2EState): string[] {
+  const last = s.replies?.at(-1) ?? "";
+  return new RegExp(e.matches, "i").test(last) ? [] : [`reply: the last reply does not match /${e.matches}/: ${JSON.stringify(last.slice(0, 160))}`];
+}
 export function judgeBlocked(e: NonNullable<Expect["blocked_hosts"]>, s: E2EState): string[] {
   const hit = (s.requested ?? []).filter((h) => e.none.some((b) => h === b || h.endsWith(`.${b}`)));
   return hit.length ? [`blocked: the product sent ${hit.length} request(s) to ${[...new Set(hit)].join(", ")}, which it must never automate`] : [];
@@ -245,6 +253,7 @@ export function judgeE2E(e: Expect, s: E2EState): { pass: boolean; failed: strin
     ...(e.resume ? judgeResume(e.resume, s) : []),
     ...(e.secret ? judgeSecret(e.secret, s) : []),
     ...(e.blocked_hosts ? judgeBlocked(e.blocked_hosts, s) : []),
+    ...(e.last_reply ? judgeLastReply(e.last_reply, s) : []),
   ];
   return { pass: failed.length === 0, failed };
 }

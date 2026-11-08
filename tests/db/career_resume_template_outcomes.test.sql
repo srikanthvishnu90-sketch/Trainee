@@ -1,4 +1,4 @@
--- RELEASE 10 (20261108130000_career_resume_template_outcomes.sql): an application sent with a file set in one of the fifteen
+-- RELEASE 10 (20261108140000_career_resume_template_outcomes.sql): an application sent with a file set in one of the fifteen
 -- templates records which (T01..T15), only when the file's layout is 'template'; the view reports rates by template.
 begin;
 reset role;

@@ -1,0 +1,62 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Synthetic SmartRecruiters application (TEST)</title></head>
+<body>
+<!-- A synthetic SmartRecruiters "oneclick" application form (TEST, 2026-11-07). SmartRecruiters builds its form from the
+     Smart Platform Library's web components (spl-input, spl-select, spl-radio-group, spl-checkbox, spl-dropzone): each
+     question's label and control live inside that component's OPEN shadow root, and a label's `for` resolves only inside it.
+     Nothing here is a real employer; nothing is posted (the dry run stops before Submit). -->
+<main class="c-spl-application">
+<h1>Acme Robotics (TEST): Data Analyst</h1>
+<form id="oneclick-form" action="/never" method="post">
+  <section class="c-spl-section"><h2>Personal information</h2>
+    <spl-input data-id="first-name-input" data-label="First name" data-required></spl-input>
+    <spl-input data-id="last-name-input" data-label="Last name" data-required></spl-input>
+    <spl-input data-id="email-input" data-type="email" data-label="Email" data-required></spl-input>
+    <spl-input data-id="confirm-email-input" data-type="email" data-label="Confirm your email" data-required></spl-input>
+    <spl-input data-id="phone-number-input" data-type="tel" data-label="Phone number" data-required></spl-input>
+    <spl-input data-id="linkedin-input" data-type="url" data-label="LinkedIn profile"></spl-input>
+    <spl-dropzone data-id="resume-input" data-label="Resume" data-required></spl-dropzone>
+    <spl-textarea data-id="hiring-manager-message-input" data-label="Message to the Hiring Team"></spl-textarea>
+  </section>
+  <section class="c-spl-section"><h2>Screening questions</h2>
+    <spl-radio-group data-id="q-auth" data-label="Are you legally authorized to work in the United States?" data-options='["Yes","No"]' data-required></spl-radio-group>
+    <spl-radio-group data-id="q-sponsor" data-label="Will you now or in the future require sponsorship?" data-options='["Yes","No"]' data-required></spl-radio-group>
+    <spl-select data-id="q-years" data-label="How many years of SQL experience do you have?" data-options='["0-2 years","3-5 years","6+ years"]' data-required></spl-select>
+    <spl-textarea data-id="q-why" data-label="Why do you want to work at Acme Robotics?" data-required></spl-textarea>
+  </section>
+  <section class="c-spl-section"><h2>Voluntary self-identification</h2>
+    <spl-select data-id="eeo-gender" data-label="Gender" data-options='["Female","Male","Non-binary","Decline to self-identify"]'></spl-select>
+    <spl-select data-id="eeo-veteran" data-label="Veteran status" data-options='["I am a protected veteran","I am not a protected veteran","I do not wish to answer"]'></spl-select>
+  </section>
+  <spl-checkbox data-id="privacy-consent" data-label="I agree to the Acme Robotics privacy policy" data-required></spl-checkbox>
+  <button type="submit" class="c-spl-button">Submit</button>
+</form>
+</main>
+<script>
+// The components, as SmartRecruiters ships them in shape: an open shadow root holding a label and its native control.
+const css = "label{display:block;margin:6px 0 2px}input,select,textarea{display:block;margin-bottom:8px}";
+function shell(host) {
+  const root = host.attachShadow({ mode: "open" });
+  root.innerHTML = `<style>${css}</style><div class="c-spl-form-field"></div>`;
+  return root.querySelector("div");
+}
+const req = (h) => h.hasAttribute("data-required");
+const star = (h) => (req(h) ? ' <span class="c-spl-form-field__required">*</span>' : "");
+class SplInput extends HTMLElement { connectedCallback() { if (this.shadowRoot) return; const f = shell(this);
+  f.innerHTML = `<label class="c-spl-form-field__label" for="${this.dataset.id}">${this.dataset.label}${star(this)}</label><input id="${this.dataset.id}" name="${this.dataset.id}" type="${this.dataset.type || "text"}" ${req(this) ? "required" : ""}>`; } }
+class SplTextarea extends HTMLElement { connectedCallback() { if (this.shadowRoot) return; const f = shell(this);
+  f.innerHTML = `<label class="c-spl-form-field__label" for="${this.dataset.id}">${this.dataset.label}${star(this)}</label><textarea id="${this.dataset.id}" name="${this.dataset.id}" ${req(this) ? "required" : ""}></textarea>`; } }
+class SplDropzone extends HTMLElement { connectedCallback() { if (this.shadowRoot) return; const f = shell(this);
+  f.innerHTML = `<label class="c-spl-form-field__label" for="${this.dataset.id}">${this.dataset.label}${star(this)}</label><input id="${this.dataset.id}" name="resume" type="file" accept=".pdf,.doc,.docx" ${req(this) ? "required" : ""}>`; } }
+class SplSelect extends HTMLElement { connectedCallback() { if (this.shadowRoot) return; const f = shell(this);
+  const opts = JSON.parse(this.dataset.options).map((o, i) => `<option value="opt-${i}">${o}</option>`).join("");
+  f.innerHTML = `<label class="c-spl-form-field__label" for="${this.dataset.id}">${this.dataset.label}${star(this)}</label><select id="${this.dataset.id}" name="${this.dataset.id}" ${req(this) ? "required" : ""}><option value="">Select an option</option>${opts}</select>`; } }
+class SplRadioGroup extends HTMLElement { connectedCallback() { if (this.shadowRoot) return; const f = shell(this);
+  const opts = JSON.parse(this.dataset.options).map((o, i) => `<label for="${this.dataset.id}-${i}"><input type="radio" id="${this.dataset.id}-${i}" name="${this.dataset.id}" value="${o}" ${req(this) ? "required" : ""}> ${o}</label>`).join("");
+  f.innerHTML = `<fieldset><legend class="c-spl-form-field__label">${this.dataset.label}${star(this)}</legend>${opts}</fieldset>`; } }
+class SplCheckbox extends HTMLElement { connectedCallback() { if (this.shadowRoot) return; const f = shell(this);
+  f.innerHTML = `<input type="checkbox" id="${this.dataset.id}" name="${this.dataset.id}" ${req(this) ? "required" : ""}><label for="${this.dataset.id}">${this.dataset.label}${star(this)}</label>`; } }
+customElements.define("spl-input", SplInput); customElements.define("spl-textarea", SplTextarea); customElements.define("spl-dropzone", SplDropzone);
+customElements.define("spl-select", SplSelect); customElements.define("spl-radio-group", SplRadioGroup); customElements.define("spl-checkbox", SplCheckbox);
+</script>
+</body></html>

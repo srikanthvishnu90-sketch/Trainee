@@ -138,6 +138,25 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
     await pg.sql(`insert into public.career_cloud_settings (key, value) select k, 'on' from unnest(array['CAREER_AGENT_SUBMIT', 'CAREER_CLOUD_APPLY', 'CAREER_CLOUD_TEXT_CARDS', 'APPLY_VM']) k on conflict (key) do update set value = excluded.value;
       insert into public.career_apply_cloud_gate_waivers (user_id, portal, max_sends, expires_at, note)
       select u, 'greenhouse', 5, clock_timestamp() + interval '6 days', 'e2e eval world: the owner''s waiver for this synthetic person' from unnest(array[${Object.values(people).map((x) => `'${x}'::uuid`).join(",")}]) u;`);
+    // R9-G2 (E05): a batch of 20 hosted Greenhouse sends is possible only once the Greenhouse gate is OPEN (D-010): the
+    // waiver above allows at most 5 per person per portal (career_apply_cloud_gate_waivers.max_sends between 1 and 5), and the
+    // cloud sends to three families only (greenhouse, lever, ashby), so neither a bigger waiver (that is the production check)
+    // nor mixing families (3 x 5 = 15) can make 20. The world therefore stands where the gate's own rule
+    // (career_apply_cloud_open) opens it: the owner's gate tester recorded 3 Greenhouse applications by hand and each employer
+    // confirmed it by email. Nothing in production changes: the gate, its rule and every cap are as they are.
+    const tester = uid(999);
+    await pg.sql(`insert into auth.users (id, email) values ('${tester}', 'gate-tester@example.test'); insert into public.profiles (id) values ('${tester}');
+      insert into public.career_cloud_settings (key, value) values ('gate_user_ids', '{${tester}}') on conflict (key) do update set value = excluded.value;
+      do $g$ declare j public.career_apply_jobs; i int; begin
+        perform set_config('request.jwt.claim.sub', '${tester}', true);
+        for i in 1..3 loop
+          select * into j from public.career_apply_record_own('e2e-gate-' || i, 'Gate Employer ' || i, 'https://boards.greenhouse.io/e2egate' || i || '/jobs/' || i, 'submitted_unconfirmed');
+          update public.career_apply_jobs set state = 'confirmed', email_confirmed_at = now(), confirmation_mail_hash = repeat(i::text, 64) where id = j.id;
+          insert into public.career_mail_events (user_id, application_ref, kind, company, evidence, message_hash, mail_at)
+          values ('${tester}', 'job:' || j.id, 'received', j.company, 'received: "thank you for applying" (e2e gate world)', repeat(i::text, 64), now());
+        end loop;
+      end $g$;`);
+    if (await json(pg, "select public.career_apply_cloud_open('greenhouse')") !== true) throw new Error("e2e world: the Greenhouse gate did not open from its own rule");
     for (const k of openaiVars) Deno.env.delete(k);
     if (o.model === "fake") Deno.env.set("ANTHROPIC_API_KEY", "sk-ant-fake-e2e-not-a-key");
     else if (!Deno.env.get("ANTHROPIC_API_KEY")) throw new Error("NOT RUN: --model claude needs ANTHROPIC_API_KEY");
@@ -316,6 +335,7 @@ async function worldState(pg: Pg, u: string, w: { ats: any[]; mail: any[]; repli
   facts.push(...(((await json(pg, `select json_agg(label || ': ' || answer order by answered_at) from public.career_apply_questions where user_id = '${u}' and state = 'answered' and answer is not null`)) ?? []) as string[]));
   // The resume the person confirmed: the product's record of it (career_resume_record, state confirmed), never the payload's own claim.
   const resumeSha: string | null = (await json(pg, `select to_json(sha256) from public.career_resume_record where user_id = '${u}' and state = 'confirmed'`)) ?? null;
+  const tailored: Record<string, string> = (await json(pg, `select json_object_agg(r.sha256, to_jsonb(r)->>'posting_job_id') from public.career_apply_cloud_resumes r where r.user_id = '${u}' and to_jsonb(r)->>'posting_job_id' is not null`)) ?? {};
   const hasResume = resumeSha !== null || flows.some((f) => JSON.stringify(f ?? {}).includes("Alex Testcase"));
   const drafts: any[] = (await json(pg, `select json_agg(json_build_object('id', id, 'recipient_email', recipient_email, 'subject', subject, 'body', body, 'footer', footer, 'hash', hash, 'approved_hash', approved_hash, 'status', status)) from public.career_outreach_drafts where user_id = '${u}'`)) ?? [];
   const sendQueue: any[] = (await json(pg, `select json_agg(json_build_object('recipient_email', recipient_email, 'state', state, 'next_at', next_at)) from public.career_send_queue where user_id = '${u}'`)) ?? [];
@@ -363,7 +383,7 @@ async function worldState(pg: Pg, u: string, w: { ats: any[]; mail: any[]; repli
     documents.push({ filename: a.filename, mime: a.mime, delivered, pdf: await readPdf(bytes), sha256: sha });
   }
   if (arts.some((x) => /pdf/.test(x.mime)) || /tailor/.test(text)) stage.push(`resume: ${documents.length} PDF(s) stored, ${documents.filter((d) => d.delivered).length} returned in a reply`);
-  return { wanted, jobs, ats: w.ats, confirmed: { text: hasResume ? [RESUME, ...facts].join("\n") : facts.join("\n"), resume_sha256: resumeSha, name: hasResume ? RESUME_NAME : null }, drafts, sendQueue, mail: w.mail, contacts: CONTACT_EMAILS,
+  return { wanted, jobs, ats: w.ats, confirmed: { text: hasResume ? [RESUME, ...facts].join("\n") : facts.join("\n"), resume_sha256: resumeSha, name: hasResume ? RESUME_NAME : null, tailored }, drafts, sendQueue, mail: w.mail, contacts: CONTACT_EMAILS,
     hashOf, files, documents, stage };
 }
 

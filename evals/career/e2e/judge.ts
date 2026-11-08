@@ -15,6 +15,7 @@
 // completion and must all hold.
 // deno-lint-ignore-file no-explicit-any
 import type { AtsPost, PdfInfo, SentMail } from "./worlds.ts";
+import { verifyFileToken } from "../../../supabase/functions/_shared/file_link.ts";
 
 export type Area = "apply" | "outreach" | "research" | "resume";
 export const AREAS: Area[] = ["apply", "outreach", "research", "resume"];
@@ -22,7 +23,7 @@ export const AREAS: Area[] = ["apply", "outreach", "research", "resume"];
 export interface ApplyJob { id: string; job_id: string; company: string; url: string; payload: any; payload_hash: string; approval_hash: string; state: string; confirmation_id: string | null; evidence: any; payload_hash_now: string }
 export interface Draft { id: string; recipient_email: string; subject: string; body: string; footer: string; hash: string; approved_hash: string | null; status: string; recipient?: any }
 export interface ResearchFile { id: string; kind: string; html: string; text: string; delivered: boolean; findings: { text: string; source: string | null }[]; sources: string[] }
-export interface ResumeDoc { filename: string; mime: string; delivered: boolean; pdf: PdfInfo }
+export interface ResumeDoc { filename: string; mime: string; delivered: boolean; pdf: PdfInfo; sha256?: string }
 export interface E2EState {
   wanted: { company: string; title: string }[]; // career_apply_wanted: asked for, not yet anything more
   jobs: ApplyJob[]; // career_apply_jobs: approved on a card, then driven
@@ -46,6 +47,20 @@ export interface Expect {
 
 const low = (s: unknown) => String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 const jobNo = (s: string) => /(\d+)\s*$/.exec(String(s ?? "").split(":").pop() ?? "")?.[1] ?? /\/jobs\/(\d+)/.exec(String(s ?? ""))?.[1] ?? "";
+// The Files a reply actually linked for this person: every <base>...?t=<token> link (with or without a path), its token
+// verified with the world's own key (file_link.ts verifyFileToken: signature, span, expiry), and its claims naming this
+// person (u). A link that does not verify, or that opens another person's File, delivers nothing.
+export async function linkedFileIds(text: string, o: { base: string; secret: string; userId: string; now: number }): Promise<Set<string>> {
+  const out = new Set<string>(), esc = o.base.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  for (const m of String(text ?? "").matchAll(new RegExp(`${esc}(?:[/?#][^\\s<>"')\\]]*)?`, "g"))) {
+    // Sentence punctuation after a link is not part of it (a token's signature never ends in one).
+    let t: string | null = null; try { t = new URL(m[0].replace(/[.,;:!?]+$/, "")).searchParams.get("t"); } catch { continue; }
+    if (!t) continue;
+    const v = await verifyFileToken(t, o.secret, o.now);
+    if (v.ok && v.claims.u === o.userId) out.add(v.claims.r);
+  }
+  return out;
+}
 
 // ------------------------------------------------------------------------------------------------ apply
 export function judgeApply(e: NonNullable<Expect["apply"]>, s: E2EState): string[] {
@@ -131,7 +146,7 @@ export function judgeResearch(e: NonNullable<Expect["research"]>, s: E2EState): 
     const uncited = f.findings.filter((x) => NUMBER.test(x.text) && !x.source);
     if (uncited.length) why.push(`${uncited.length} number(s) without a source: "${uncited[0].text.slice(0, 80)}"`);
     if (!f.findings.some((x) => NUMBER.test(x.text))) why.push("no number in it to cite (a market file states its numbers)");
-    if (!f.sources.some((u) => /^https:\/\//.test(u))) why.push("no https source listed");
+    if (!f.sources.some((u) => /^https:\/\//.test(u))) why.push(f.kind === "comparison" ? "a comparison File has no sources field (file_kinds.ts comparison), so it cannot carry research evidence; research is delivered as a research brief with its sources" : "no https source listed");
     if (why.length) failed.push(`research: file ${f.id}: ${why.join("; ")}`);
     return !why.length;
   });
@@ -144,7 +159,11 @@ const SKILLS = ["python", "javascript", "typescript", "react", "kubernetes", "do
 // named skill must appear in what the person confirmed. The posting's own words may shape the order, never add a fact.
 export function inventedIn(text: string, confirmed: string): string[] {
   const t = low(confirmed), out: string[] = [];
-  for (const n of new Set(text.match(/\d+(?:[.,]\d+)?%?/g) ?? [])) if (!t.includes(n.toLowerCase())) out.push(n);
+  // Whole number tokens only: 3.7 (a GPA) never backs "3 years", 2025 never backs 202. A bare number is backed by the same
+  // number with a percent sign, never the other way round.
+  const nums = (x: string) => x.match(/(?<![\d.,])\d+(?:[.,]\d+)*%?(?![\d])/g) ?? [];
+  const have = new Set(nums(t).flatMap((n) => [n, n.replace(/%$/, "")]));
+  for (const n of new Set(nums(text))) if (!have.has(n)) out.push(n);
   for (const a of new Set((text.match(/[^\s<>()]+@[^\s<>()]+\.[a-z]{2,}|https?:\/\/[^\s<>()]+/gi) ?? []).map((x) => x.toLowerCase().replace(/[.,;]+$/, "")))) if (!t.includes(a)) out.push(a);
   const words = ` ${low(text).replace(/[^a-z0-9+.# ]/g, " ")} `, conf = ` ${t.replace(/[^a-z0-9+.# ]/g, " ")} `;
   for (const k of SKILLS) if (words.includes(` ${k} `) && !conf.includes(` ${k} `)) out.push(k);
@@ -161,8 +180,13 @@ export function judgeResume(e: NonNullable<Expect["resume"]>, s: E2EState): stri
   }
   const returned = pdfs.filter((d) => d.delivered);
   if (!returned.length) return [`resume: no tailored PDF returned in a reply${pdfs.length ? " (one was stored but never sent back)" : ""}${stageNote(s, "resume")}`];
+  const seen = new Set<string>();
   const ok = returned.filter((d) => {
     const why: string[] = [];
+    // The person's own confirmed resume sent back unchanged is not a tailored one, and the same PDF twice is one result.
+    if (d.sha256 && s.confirmed.resume_sha256 && d.sha256 === s.confirmed.resume_sha256) why.push("is the confirmed resume unchanged, not tailored");
+    if (d.sha256 && seen.has(d.sha256)) why.push("is the same PDF as another one returned");
+    if (d.sha256) seen.add(d.sha256);
     if (!d.pdf.opens) why.push(`does not open: ${d.pdf.why}`);
     else {
       if (d.pdf.pages > (e.max_pages ?? 1)) why.push(`${d.pdf.pages} pages; it must fit ${e.max_pages ?? 1}`);

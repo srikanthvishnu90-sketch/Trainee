@@ -31,12 +31,12 @@ import { pgBinDir, type Pg, startPg } from "../../../tests/flow/pg.ts";
 import { careerHandler, type Chat, SERVICE_KEY, SUPABASE_URL, supabaseParity } from "../../../tests/flow/handler.ts";
 import { evalNow, PIN_DB_SQL, pinClock } from "../tasks/clock.ts";
 import { clearOracle, fakeAnthropic, type OracleStep, setOracle } from "../tasks/fake_model.ts";
-import { AREAS, type Area, type E2EState, type Expect, judgeE2E, type ResearchFile, type ResumeDoc } from "./judge.ts";
+import { AREAS, type Area, type E2EState, type Expect, judgeE2E, linkedFileIds, type ResearchFile, type ResumeDoc } from "./judge.ts";
 import { FakeGmail, htmlText, PERSON_ANSWERS, readPdf, resumePdf, sha256Hex, stubDryRunEngine, stubEngine, StubAts, stubSubmitEngine } from "./worlds.ts";
 import { askedPart, questionLine } from "../../../tests/helpers/one_question.ts";
 import { isStubWebHost, stubWebFetch } from "./web.ts";
 import type { FileRecord } from "../../../supabase/functions/_shared/file_kinds.ts";
-import { appendRow, type E2EItem, type E2ERun, scoreRow } from "./score_log.ts";
+import { appendRow, type E2EItem, type E2ERun, parseBudgetUsd, scoreRow } from "./score_log.ts";
 export type { E2EItem, E2ERun };
 
 export interface E2ETask { id: string; area: Area; kind: "task" | "multi" | "guard"; setup: string[]; turns: string[]; oracle: Record<string, OracleStep[]>; expect: Expect; note?: string }
@@ -328,10 +328,9 @@ async function worldState(pg: Pg, u: string, w: { ats: any[]; mail: any[]; repli
   const text = [...w.replies, ...w.bodies.flatMap((b: any) => Array.isArray(b?.shape?.links) ? b.shape.links.map(String) : [])].join("\n");
   const fileRecs: FileRecord[] = (await json(pg, `select json_agg(value) from public.career_watch_kv where user_id = '${u}' and key like 'tf:file:%'`)) ?? [];
   const { fileHtml } = await import("./worlds.ts");
-  // A File link is https://file.e2e.test?t=v1.<claims>.<sig> (file_link.ts): its claims name the File it opens (r).
-  const linkedFiles = new Set([...text.matchAll(/https:\/\/file\.e2e\.test\/?\?t=v1\.([A-Za-z0-9_-]+)\./g)].map((m) => {
-    try { return String(JSON.parse(atob(m[1].replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(m[1].length / 4) * 4, "="))).r ?? ""); } catch { return ""; }
-  }).filter(Boolean));
+  // A File link is https://file.e2e.test?t=v1.<claims>.<sig> (file_link.ts), with or without a slash before the query: the
+  // token is verified with the world's key and its claims must name this person (u) and the File (r). Only that delivers.
+  const linkedFiles = await linkedFileIds(text, { base: WORLD_ENV.TRAINEE_FILE_BASE_URL, secret: WORLD_ENV.TRAINEE_FILE_LINK_SECRET, userId: u, now: Date.now() });
   const files: ResearchFile[] = [];
   for (const rec of fileRecs.filter((r: any) => ["research_brief", "comparison"].includes(r?.kind))) {
     const d: any = rec.data ?? {}, html = fileHtml(rec);
@@ -343,7 +342,7 @@ async function worldState(pg: Pg, u: string, w: { ats: any[]; mail: any[]; repli
         ...[...(d.conditions ?? []), ...(d.risks ?? [])].map((f: any) => ({ text: String(f?.text ?? ""), source: Array.isArray(f?.cite) && f.cite.length ? `[${f.cite.join("][")}]` : null }))]
       : rec.kind === "research_brief" ? (d.findings ?? []).map((f: any) => ({ text: `${f.label ?? ""} ${f.value ?? f.text ?? ""}`.trim(), source: typeof f.source === "string" && f.source ? f.source : null }))
       : (d.rows ?? []).flatMap((r: any) => (r.cells ?? []).map((c: any) => ({ text: String(c?.value ?? ""), source: c?.source ?? null })));
-    files.push({ id: rec.id, kind: rec.kind, html, text: htmlText(html), delivered: text.includes(rec.id) || linkedFiles.has(rec.id) || /https:\/\/file\.e2e\.test[/?]/.test(text) && fileRecs.length === 1, findings, sources: (d.sources ?? []).map((s: any) => String(s?.url ?? "")) });
+    files.push({ id: rec.id, kind: rec.kind, html, text: htmlText(html), delivered: linkedFiles.has(rec.id), findings, sources: (d.sources ?? []).map((s: any) => String(s?.url ?? "")) });
   }
   const arts: any[] = (await json(pg, `select json_agg(json_build_object('id', id, 'filename', filename, 'mime', mime, 'b64', bytes_b64)) from public.channel_artifacts where user_id = '${u}'`)) ?? [];
   for (const a of arts.filter((x) => /html/.test(x.mime) && /report/i.test(x.filename))) {
@@ -361,7 +360,7 @@ async function worldState(pg: Pg, u: string, w: { ats: any[]; mail: any[]; repli
     const delivered = docsSent.some((d: any) => d?.ref === a.id || d?.sha256 === sha);
     const dump = Deno.env.get("E2E_DUMP_DIR"); // to look at a returned document by hand
     if (dump) await Deno.writeFile(`${dump}/${u.slice(-6)}-${a.filename}`, bytes);
-    documents.push({ filename: a.filename, mime: a.mime, delivered, pdf: await readPdf(bytes) });
+    documents.push({ filename: a.filename, mime: a.mime, delivered, pdf: await readPdf(bytes), sha256: sha });
   }
   if (arts.some((x) => /pdf/.test(x.mime)) || /tailor/.test(text)) stage.push(`resume: ${documents.length} PDF(s) stored, ${documents.filter((d) => d.delivered).length} returned in a reply`);
   return { wanted, jobs, ats: w.ats, confirmed: { text: hasResume ? [RESUME, ...facts].join("\n") : facts.join("\n"), resume_sha256: resumeSha, name: hasResume ? RESUME_NAME : null }, drafts, sendQueue, mail: w.mail, contacts: CONTACT_EMAILS,
@@ -396,8 +395,11 @@ if (import.meta.main) {
   if (model === "claude" && !Deno.env.get("ANTHROPIC_API_KEY")) { console.log("NOT RUN: --model claude needs ANTHROPIC_API_KEY"); Deno.exit(2); }
   const budgetArg = opt("--budget-usd") ?? Deno.env.get("ANTHROPIC_EVAL_BUDGET_USD") ?? null;
   if (model === "claude" && budgetArg === null) { console.log("NOT RUN: --model claude needs --budget-usd: an uncapped paid run is never started"); Deno.exit(2); }
+  // A budget is a finite positive number of dollars: "3x", "Infinity", "0" or "-1" would silently remove the cap.
+  const budgetUsd = budgetArg === null ? null : parseBudgetUsd(budgetArg);
+  if (budgetArg !== null && budgetUsd === null) { console.log(`NOT RUN: --budget-usd must be a finite positive number of dollars, not "${budgetArg}"`); Deno.exit(2); }
   const label = opt("--label") || `e2e-${brain}-${model}-${new Date().toISOString().slice(0, 10)}`;
-  const r = await runE2E({ label, brain, model, only: opt("--only")?.split(",").filter(Boolean), budgetUsd: budgetArg === null ? null : Number(budgetArg) });
+  const r = await runE2E({ label, brain, model, only: opt("--only")?.split(",").filter(Boolean), budgetUsd });
   await Deno.mkdir(new URL("results/", HERE), { recursive: true });
   await Deno.writeTextFile(opt("--out") || new URL(`results/${label}.json`, HERE).pathname, JSON.stringify(r, null, 1));
   console.log(report(r));

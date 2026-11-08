@@ -50,8 +50,8 @@
 //
 //   S6 (PROPOSED, release 9 workstream D; OFF unless S6_REQUIRED=1): end-to-end task completion. On ci/brain-eval's
 //      evals/career/SCORE-LOG.md, the E2E section (evals/career/e2e/run.ts) has a row for the candidate SHA (or a first-parent
-//      ancestor within 10 commits with no change under E2E_CODE since) on the full set (>= S6_BAR.minTasks tasks) with the
-//      claude model, not stopped, completion >= S6_BAR.percent (exact integer comparison) and every guard held. The newest
+//      ancestor within 10 commits with no change under E2E_CODE since) on the full set (exactly S6_BAR.fullTasks tasks and
+//      S6_BAR.fullGuards guards) with the production brain and the claude model (never router, staged, planner or fake), not stopped, completion >= S6_BAR.percent (exact integer comparison) and every guard held. The newest
 //      such row decides. Not in ALL_CHECKS: the default run adds it only when S6_REQUIRED=1 (owner's switch, D-042 proposal);
 //      --checks S6 runs it on demand either way. S5 is the secrets audit, so the E2E gate is S6.
 //
@@ -523,10 +523,13 @@ export async function s5(src: Sources): Promise<Result> {
 // ------------------------------------------------------------------------------------------------ S6 (proposed)
 // The end-to-end bar: the share of the held-out end-to-end tasks Trainee finished in the stub worlds (submitted with proof,
 // delivered as approved, a file delivered with its numbers cited, a tailored PDF returned), measured with the real model.
-export const S6_BAR = { percent: 90, minTasks: 40, model: "claude" } as const;
+// Only a measurement of what the release serves counts: brain "production" (the release config's brain and flags, D-035,
+// D-036; router, staged and planner runs are experiments), the claude model (fake is the oracle fixture), and the FULL
+// held-out set: exactly fullTasks scored tasks and fullGuards guards (evals/career/e2e/tasks.json; a test pins the two).
+export const S6_BAR = { percent: 90, fullTasks: 40, fullGuards: 6, model: "claude", brain: "production" } as const;
 // What an E2E measurement stands for: the product (functions, workers, migrations, the shared packages, the apply engine)
 // and the eval itself. A measured ancestor counts for the candidate only when none of these changed since.
-export const E2E_CODE: readonly string[] = ["supabase/", "workers/", "packages/", "extension/src/", "scripts/apply.ts", "scripts/career/", "evals/career/e2e/", "evals/career/tasks/"];
+export const E2E_CODE: readonly string[] = ["supabase/", "workers/", "packages/", "extension/src/", "scripts/apply.ts", "scripts/career/", "evals/career/e2e/", "evals/career/tasks/", "tests/flow/"];
 export interface E2ERow { at: string; commit: string; label: string; brain: string; model: string; tasks: number; completed: number; guardsHeld: number; guardsTotal: number; stopped: string }
 // Rows of the E2E section: | run at | E2E | commit | label | brain | model | tasks | completed | completion | apply | outreach |
 // research | resume | guards held | cost | stopped |. A row whose numbers do not add up is no measurement.
@@ -542,11 +545,13 @@ export function parseE2ELog(text: string): E2ERow[] {
   }
   return rows;
 }
-export const meetsE2EBar = (r: E2ERow) => r.stopped === "no" && r.model === S6_BAR.model && r.tasks >= S6_BAR.minTasks && r.completed * 100 >= r.tasks * S6_BAR.percent && r.guardsHeld === r.guardsTotal;
+// A row that measured the release as it ships: not stopped, the production brain, the claude model, the full set.
+export const isReleaseMeasurement = (r: E2ERow) => r.stopped === "no" && r.model === S6_BAR.model && r.brain === S6_BAR.brain && r.tasks === S6_BAR.fullTasks && r.guardsTotal === S6_BAR.fullGuards;
+export const meetsE2EBar = (r: E2ERow) => isReleaseMeasurement(r) && r.completed * 100 >= r.tasks * S6_BAR.percent && r.guardsHeld === r.guardsTotal;
 export async function s6(src: Sources, sha: string): Promise<Result> {
   const log = await src.scoreLog();
   if (log === null) return { id: "S6", pass: false, summary: "evals/career/SCORE-LOG.md on ci/brain-eval cannot be read", evidence: [] };
-  const rows = parseE2ELog(log).filter((r) => r.stopped === "no" && r.model === S6_BAR.model && r.tasks >= S6_BAR.minTasks);
+  const rows = parseE2ELog(log).filter(isReleaseMeasurement);
   const evidence: string[] = [];
   // The candidate itself, then its first-parent ancestors (at most 10 back) with no change under E2E_CODE since.
   let at: string | null = sha;
@@ -559,7 +564,7 @@ export async function s6(src: Sources, sha: string): Promise<Result> {
     const pass = meetsE2EBar(r);
     return { id: "S6", pass, summary: `end-to-end completion ${r.completed}/${r.tasks} ${r.completed * 100 >= r.tasks * S6_BAR.percent ? ">=" : "<"} ${S6_BAR.percent}%${r.guardsHeld === r.guardsTotal ? "" : `; ${r.guardsTotal - r.guardsHeld} guard(s) broken`}`, evidence };
   }
-  return { id: "S6", pass: false, summary: `no end-to-end measurement (model ${S6_BAR.model}, >= ${S6_BAR.minTasks} tasks, not stopped) for ${short(sha)}`, evidence };
+  return { id: "S6", pass: false, summary: `no end-to-end measurement (brain ${S6_BAR.brain}, model ${S6_BAR.model}, the full set of ${S6_BAR.fullTasks} tasks and ${S6_BAR.fullGuards} guards, not stopped) for ${short(sha)}`, evidence };
 }
 
 export async function evaluate(src: Sources, sha: string, checks: CheckId[] = ALL_CHECKS, o: { waitLedger?: LedgerWait } = {}): Promise<{ results: Result[]; deployed: string | null }> {

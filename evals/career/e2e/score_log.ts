@@ -16,7 +16,7 @@ export function scoreRow(r: E2ERun): string {
 }
 // The E2E section sits ABOVE the reply-quality table, so the brain-eval logger (score-log.ts), which appends its rows to the
 // end of the file, keeps landing in its own table. A new E2E row goes right after the last E2E row; no earlier row moves.
-export const E2E_INTRO = "One row per end-to-end run (evals/career/e2e/run.ts), appended, never edited. A task counts only on the real outcome in the stub worlds (submitted with proof matching the approved payload; delivered exactly as approved to a verified address with the opt-out header; a research file delivered with every number cited; a tailored PDF returned that opens, fits the page and carries only confirmed facts). Guards (nothing done that the person did not ask for) are counted apart. The proposed release bar (deploy-standard.ts S6, off until the owner sets S6_REQUIRED=1, D-042): completion >= 90% on the full set with the claude model, every guard held, on the release head. Rows with model fake are the oracle fixture (what the code paths finish when the model plans right), never the bar.";
+export const E2E_INTRO = "One row per end-to-end run (evals/career/e2e/run.ts), appended, never edited. A task counts only on the real outcome in the stub worlds (submitted with proof matching the approved payload; delivered exactly as approved to a verified address with the opt-out header; a research file delivered with every number cited; a tailored PDF returned that opens, fits the page and carries only confirmed facts). Guards (nothing done that the person did not ask for) are counted apart. The proposed release bar (deploy-standard.ts S6, off until the owner sets S6_REQUIRED=1, D-042): completion >= 90% on the full set (40 tasks, 6 guards) with the production brain and the claude model, every guard held, on the release head. Rows with model fake are the oracle fixture (what the code paths finish when the model plans right), and rows with another brain are experiments: never the bar.";
 const REPLY_TABLE = "| run at (UTC) | brain commit |";
 export function appendRow(log: string, row: string): string {
   const lines = String(log ?? "").replace(/\s*$/, "").split("\n");
@@ -27,4 +27,12 @@ export function appendRow(log: string, row: string): string {
   if (at < 0) return `${[...lines, "", ...section.slice(0, -3)].join("\n")}\n`;
   lines.splice(at, 0, ...section);
   return `${lines.join("\n")}\n`;
+}
+// The run's spend cap (--budget-usd): a finite positive number of dollars, or null. "3x", "Infinity", "0" and "-1" are
+// refused before anything starts (a NaN or infinite cap would never trip the stop).
+export function parseBudgetUsd(v: string): number | null {
+  const t = String(v ?? "").trim();
+  if (!/^\d+(?:\.\d+)?$/.test(t)) return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }

@@ -73,6 +73,9 @@ const KEEP = new Set(["the", "to", "for", "at", "in", "and", "of", "me", "my", "
 function fix(word: string, vocab: readonly string[]): string {
   const w = word.toLowerCase();
   if (w.length < 3 || KEEP.has(w) || !/^[a-z]+$/.test(w) || vocab.includes(w)) return word;
+  // A three-letter word becomes a title word only by a letter it dropped ("dta" is "data"), never by a changed one ("now" is
+  // not "new"); an action or a job noun is corrected either way ("fid", "rle").
+  if (w.length === 3) vocab = vocab.filter((v) => VERBS.includes(v) || ROLE_NOUNS.includes(v) || v.length !== 3);
   const hit = vocab.find((v) => v[0] === w[0] && slip(w, v)) ?? vocab.find((v) => slip(w, v) && v.length >= 4) ?? vocab.find((v) => slips2(w, v));
   return hit ?? word;
 }
@@ -191,8 +194,10 @@ export function careerAskCanon(message: string): string | null {
     out = english(t) ?? spanish(t) ?? hindi(t);
     // "find X roles in City (and apply to all of them)" with the filler and slips gone.
     if (!out) {
-      const m = t.match(/^(?:find|search\s+for|search|look\s+for)(?:\s+me)?\s+(.+?)\s+(?:roles|jobs|positions|openings|internships)\s+in\s+(.+?)(\s+and\s+apply\s+(?:me\s+)?to\s+(?:all|all\s+of\s+them|every\s+one|them\s+all))?$/i);
-      if (m) out = `find ${m[1]} roles in ${m[2]}${m[3] ? " and apply to all of them" : ""}`;
+      // The place is only the place: a message that goes on (", tailor ...", "and apply to the top one", "and remind me")
+      // is a compound ask the planner and the router read as typed, so it is not this shape. The noun stays as typed.
+      const m = t.match(/^(?:find|search\s+for|search|look\s+for)(?:\s+me)?\s+(.+?)\s+(roles|jobs|positions|openings|internships)\s+in\s+([^,;]+?)(\s+and\s+apply\s+(?:me\s+)?to\s+(?:all|all\s+of\s+them|every\s+one|them\s+all))?$/i);
+      if (m && !/\b(?:and|then|also|apply|tailor|remind|watch|email|tell|submit|send)\b/i.test(m[3])) out = `find ${m[1]} ${m[2].toLowerCase()} in ${m[3]}${m[4] ? " and apply to all of them" : ""}`;
     }
     // Otherwise any apply ask, only cleaned (the apply turn's own grammar reads it, as typed but without the filler).
     if (!out && /^apply\b/i.test(t)) out = t;

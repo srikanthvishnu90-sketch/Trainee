@@ -379,12 +379,6 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // The request hash digests the text after EVERY redaction pass (early code-in-chat, the split-secret step, code-in-chat):
     // the turn receipt keeps it, and a hash of a bare 6-digit code is recoverable by trying its million values (Greptile, #564).
     const hashedMessage = message;
-    // fix/r9-apply-completion: an apply or job-search ask as people text it (filler, emoji, a typo, Spanish, romanized Hindi,
-    // "can you apply me to ...?") is routed by its plain English reading (career_ask_canon.ts), so the apply turn and the
-    // router's search read it as they read the plain ask. Only the routing reads it: the stored message is what was typed,
-    // and the brain is given the person's own words (typedMessage).
-    const typedMessage = message;
-    message = careerAskCanon(message) ?? message;
 
     // GO-LIVE FLIP (2026-10-13, owner ruling: "the career version is the
     // final switch" — the money version is gone from live). Career is the
@@ -439,6 +433,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     try { careerBatch = normalizeCareerBatchRequest(body.career_batch); }
     catch (_) { return json(cors, { error: "invalid_career_batch", action: null, turn_key: turnKey }, 400); }
     const requestHash = await careerRequestHash(hashedMessage, imageBlocks, careerTask ?? (careerBatch ? { batch: careerBatch } : null));
+    // fix/r9-apply-completion (after the request hash, which digests what was typed): an apply or job-search ask as people text it (filler, emoji, a typo, Spanish, romanized Hindi,
+    // "can you apply me to ...?") is routed by its plain English reading (career_ask_canon.ts), so the apply turn and the
+    // router's search read it as they read the plain ask. Only the routing reads it: the stored message is what was typed,
+    // and the brain is given the person's own words (typedMessage).
+    const typedMessage = message;
+    message = careerAskCanon(message) ?? message;
     const persistence = createCareerPersistence(admin);
     // POOL LOADER (Lane E, Feature Depth Program v2 — closes the gap
     // diagnosed in the Lane D operator checklist §8): ctx.postings is

@@ -1,4 +1,4 @@
-// CONTACT OUTREACH (proposal D-042), reproduced defects in PR #594's send. Each test fails on the code before its fix:
+// CONTACT OUTREACH (proposal D-043), reproduced defects in PR #594's send. Each test fails on the code before its fix:
 //   4. test mode fails closed: CAREER_CONTACT_TEST_RECIPIENTS with a display name ("Owner <owner@trainee.dev>") or with
 //      ";" or whitespace between addresses is parsed; set but with nothing that parses, every card is refused (before the
 //      fix the list came back empty and the card went to the real person's address);

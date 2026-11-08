@@ -1,4 +1,4 @@
-// CONTACT OUTREACH (release 9 workstream E, proposal D-042), the draft: a short email to one professional, with ONE
+// CONTACT OUTREACH (release 9 workstream E, proposal D-043), the draft: a short email to one professional, with ONE
 // specific hook tied to ONE cited public fact about them and ONE question. The person's own claims come only from facts
 // they confirmed (D-007): the outreach fact-lock (career_outreach.ts outreachLock) checks the draft against those facts,
 // the contact's row and the one fact it cites, nothing else. Every check runs BEFORE the person sees the draft:

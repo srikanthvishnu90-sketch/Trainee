@@ -1,4 +1,4 @@
-// CONTACT OUTREACH (release 9 workstream E, proposal D-042), the send: the card the person approves and the hand-off to
+// CONTACT OUTREACH (release 9 workstream E, proposal D-043), the send: the card the person approves and the hand-off to
 // the existing sending rail (career_send_rail.ts: the person's own Gmail, gmail.send only, one recipient, List-Unsubscribe,
 // bounces and stop replies kept forever). Nothing leaves without the person's yes to the exact payload hash (D-MN-2).
 //   contactCard        only an address scoring SEND_MIN_SCORE (70) or more can be put up for approval; below it the card

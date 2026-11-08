@@ -1,4 +1,4 @@
-// CONTACT OUTREACH (release 9 workstream E, proposal D-042), the contact File page: who the person is and why they are
+// CONTACT OUTREACH (release 9 workstream E, proposal D-043), the contact File page: who the person is and why they are
 // relevant, 5 to 10 cited professional facts with their dates, the address with its confidence and how it was found, and
 // the draft exactly as it would go. Built on the shared File design (file_design.ts) and the brand tokens (brand.ts, PLUM).
 // Nothing private: only the kept professional facts (career_contact_facts.ts already dropped home address, family,

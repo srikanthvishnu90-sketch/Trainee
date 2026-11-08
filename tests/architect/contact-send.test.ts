@@ -1,4 +1,4 @@
-// CONTACT OUTREACH (release 9 workstream E, proposal D-042), part 2: the cited draft, the contact File page and the send.
+// CONTACT OUTREACH (release 9 workstream E, proposal D-043), part 2: the cited draft, the contact File page and the send.
 // Driven from a resolved contact exactly as part 1's pipeline returns it (career_contact_pipeline.ts Resolved: the person,
 // cited facts, the address at 80). Drafted by a stub model under every check; put on a card bound to the exact payload's
 // hash; approved by that hash only; stored approved and queued on the real sending rail (every migration, the rail's own

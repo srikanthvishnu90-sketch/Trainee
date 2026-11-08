@@ -162,13 +162,18 @@ export async function researchMarket(i: { question: string; format: "inline" | "
       : "Reply in one to three short sentences using only the points above (and the comparison, if any). Put the source number after each claim, like [1]. Write no link: code adds the numbered sources after your reply. Use no figure, name or date that is not in the points." };
 }
 
+const SAYS_UNCONFIRMED = /\b(?:couldn['’]?t|could not|can['’]?t|cannot|unable to|wasn['’]?t able|was not able|not able to|don['’]?t have|do not have|no (?:source|page|verified))\b/i;
+const CLAIM_AFTER = /\b(?:but|however|although|though|yet|still|anyway)\b/i;
 // The reply, enforced in code: every link the model wrote is removed; a citation number with no source is removed; an inline
 // sentence stands only when it cites a source and every figure in it is on a kept point citing that source (a file reply's
 // figures must be on a kept point); the inline answer ends with its numbered sources (each a page fetched this turn, with its
-// read date). With nothing left, the answer is the kept points themselves; with no source at all, the plain no-source line.
+// read date). With nothing left, the answer is the kept points themselves; with no source at all, only a sentence saying research
+// could not confirm an answer, else the plain no-source line.
 export function enforceMarketReply(reply: string, r: MarketResult): string {
+  // Research found nothing to stand on: a sentence stays only when it says so (no figure, a plain "couldn't confirm", no
+  // "but" carrying a claim after it); anything else is the plain no-source line. "The market is growing rapidly." never stands.
   if (r.status !== "ok") {
-    const kept = stripUrls(reply).split(/(?<=[.!?])\s+/).filter((s) => s && !numbersIn(s).length).join(" ");
+    const kept = stripUrls(reply).split(/(?<=[.!?])\s+/).filter((s) => s && !numbersIn(s).length && SAYS_UNCONFIRMED.test(s) && !CLAIM_AFTER.test(s)).join(" ");
     return kept || NO_SOURCES;
   }
   const max = r.sources.length;

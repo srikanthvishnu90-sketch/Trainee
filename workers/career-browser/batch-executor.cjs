@@ -256,48 +256,67 @@ function createBatchExecutor(deps) {
   }
 
   async function runBatchPending() {
-    const results = [];
     const intents = await store.pending();
-    for (const intent of intents) {
-      const binding = intent.binding || {};
-      const grant = await store.claim({ userId: intent.userId, intentId: intent.intentId });
-      if (!grant) { results.push({ intentId: intent.intentId, status: "skipped_claimed" }); continue; }
-      if (binding.action === "prepare") {
-        try {
-          const result = await executePrepare(intent);
-          await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "completed", result });
-          results.push({ intentId: intent.intentId, action: "prepare", status: "completed", ...result });
-        } catch (e) {
-          const code = (e && e.code) || "BATCH_PREPARE_FAILED";
-          // BUG-QA-2026-10-21-01: the record keeps the bounded message
-          // alongside the code — a code-only record made cold DRIVER_ERRORs
-          // undiagnosable from every log the seams keep.
-          const message = String((e && e.message) || e).slice(0, 300);
-          await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "blocked", result: { code, message } });
-          results.push({ intentId: intent.intentId, action: "prepare", status: "blocked", code, message });
-        }
-      } else if (binding.action === "approve") {
-        try {
-          const result = await executeApprove(intent);
-          if (result.blocked) {
-            await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "blocked", result });
-            results.push({ intentId: intent.intentId, action: "approve", status: "blocked", ...result });
-          } else {
-            await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "completed", result });
-            results.push({ intentId: intent.intentId, action: "approve", status: "completed", ...result });
-          }
-        } catch (e) {
-          // Claimed once, never re-driven: an execution crash leaves
-          // outcomes unknown by definition (MI-115's posture).
-          const code = (e && e.code) || "BATCH_EXECUTION_UNCERTAIN";
-          const message = String((e && e.message) || e).slice(0, 300);
-          await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "uncertain", result: { code, message } });
-          results.push({ intentId: intent.intentId, action: "approve", status: "uncertain", code, message });
-        }
-      } else {
-        await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "blocked", result: { code: "BATCH_ACTION_UNKNOWN" } });
-        results.push({ intentId: intent.intentId, status: "blocked", code: "BATCH_ACTION_UNKNOWN" });
+    if (!d.scheduler) {
+      const results = [];
+      for (const intent of intents) results.push(...(await runIntent(intent)));
+      return results;
+    }
+    // R9: a paced drive waits between sends (up to driveBudgetMs), so a serial drain would hold every other person's
+    // prepare and approve behind one person's pace, and the service as a whole would send at one person's rate. Each
+    // person's intents run in order, one at a time (their run record and ledger are read, changed and saved by one drive
+    // at a time; their pace is one scheduler window); different people's drives run side by side.
+    const byUser = new Map();
+    intents.forEach((intent, i) => { const k = String(intent.userId); if (!byUser.has(k)) byUser.set(k, []); byUser.get(k).push({ intent, i }); });
+    // Every drive is waited for before this drain returns, even when one throws (a claim or store failure ends that
+    // person's chain, as it ended the serial drain), so the next drain never overlaps a drive still in flight.
+    const out = new Array(intents.length).fill([]);
+    const settled = await Promise.allSettled([...byUser.values()].map(async (mine) => { for (const { intent, i } of mine) out[i] = await runIntent(intent); }));
+    const failed = settled.find((r) => r.status === "rejected");
+    if (failed) throw failed.reason;
+    return out.flat();
+  }
+
+  async function runIntent(intent) {
+    const results = [];
+    const binding = intent.binding || {};
+    const grant = await store.claim({ userId: intent.userId, intentId: intent.intentId });
+    if (!grant) { results.push({ intentId: intent.intentId, status: "skipped_claimed" }); return results; }
+    if (binding.action === "prepare") {
+      try {
+        const result = await executePrepare(intent);
+        await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "completed", result });
+        results.push({ intentId: intent.intentId, action: "prepare", status: "completed", ...result });
+      } catch (e) {
+        const code = (e && e.code) || "BATCH_PREPARE_FAILED";
+        // BUG-QA-2026-10-21-01: the record keeps the bounded message
+        // alongside the code — a code-only record made cold DRIVER_ERRORs
+        // undiagnosable from every log the seams keep.
+        const message = String((e && e.message) || e).slice(0, 300);
+        await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "blocked", result: { code, message } });
+        results.push({ intentId: intent.intentId, action: "prepare", status: "blocked", code, message });
       }
+    } else if (binding.action === "approve") {
+      try {
+        const result = await executeApprove(intent);
+        if (result.blocked) {
+          await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "blocked", result });
+          results.push({ intentId: intent.intentId, action: "approve", status: "blocked", ...result });
+        } else {
+          await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "completed", result });
+          results.push({ intentId: intent.intentId, action: "approve", status: "completed", ...result });
+        }
+      } catch (e) {
+        // Claimed once, never re-driven: an execution crash leaves
+        // outcomes unknown by definition (MI-115's posture).
+        const code = (e && e.code) || "BATCH_EXECUTION_UNCERTAIN";
+        const message = String((e && e.message) || e).slice(0, 300);
+        await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "uncertain", result: { code, message } });
+        results.push({ intentId: intent.intentId, action: "approve", status: "uncertain", code, message });
+      }
+    } else {
+      await store.finish({ userId: intent.userId, intentId: intent.intentId, state: "blocked", result: { code: "BATCH_ACTION_UNKNOWN" } });
+      results.push({ intentId: intent.intentId, status: "blocked", code: "BATCH_ACTION_UNKNOWN" });
     }
     return results;
   }

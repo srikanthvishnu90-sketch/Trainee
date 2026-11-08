@@ -87,6 +87,8 @@ function windowFor() {
   const at = [];
   return {
     add: (t) => { at.push(t); },
+    // A reservation taken back (the send it held posted nothing).
+    remove: (t) => { const i = at.lastIndexOf(t); if (i >= 0) at.splice(i, 1); },
     // The earliest time >= now at which fewer than `limit` of the recorded times fall in the last `span`.
     openAt(now, span, limit) {
       while (at.length && at[0] <= now - span - DAY) at.shift(); // keep a day past any span in use
@@ -157,13 +159,18 @@ function createApplyScheduler(o) {
     }
     j.attempts++;
     win(sites, j.site).add(t);
+    // The person's and the employer's slots are taken before the send, not after it: drives for other people (and so for
+    // the same employer) run side by side (batch-executor.cjs), and a slot counted only once the send returned would let
+    // a second drive past the same limit while the first is still on the employer's form. Given back if nothing posted.
+    win(people, j.userId).add(t);
+    if (j.employer) win(employers, j.employer).add(t);
     j.state = "sending";
     let r;
     try { r = await x.submit(j); } catch (e) { r = { posted: null, outcome: "error", reason: String((e && e.message) || e).slice(0, 160) }; }
     const res = r || {};
     const reason = String(res.reason || res.outcome || "unknown").slice(0, 200);
     const reached = res.posted !== false; // anything but a clear "nothing was posted" may have reached the employer
-    if (reached) { win(people, j.userId).add(t); if (j.employer) win(employers, j.employer).add(t); }
+    if (!reached) { win(people, j.userId).remove(t); if (j.employer) win(employers, j.employer).remove(t); }
     if (res.outcome === "submitted" && res.posted === true) {
       const pr = res.proof;
       if (pr && PROOF_KINDS.has(pr.kind) && String(pr.ref || "").trim()) {

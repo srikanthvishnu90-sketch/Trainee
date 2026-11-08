@@ -37907,17 +37907,28 @@ const CareerRouter = (() => {
     const raw = s(text);
     // Review of #596 (e2e resume.two): the texting and slang joins ("4 the", "n the", "& the", "+ the", "plus the") join
     // targets as "for" and "and" do; a company name ends before any of them.
-    const re = /(?:(?:\b(?:for|4|and|n|plus)|,|&|\+)\s+)(?:the\s+|a\s+)?([A-Za-z](?:[A-Za-z0-9/.,' -]|[&+](?!\s+(?:the|a)\s))*?)\s+(?:role|position|job|internship|posting|opening)\s+(?:at|@)\s+([A-Z][A-Za-z0-9&.'’-]*(?:\s+(?!(?:and|n|plus)\b)[A-Z][A-Za-z0-9&.'’-]*)*)/g;
+    const re = /(?:(?:\b(?:for|4|and|n|plus)|,|&|\+)\s+)(?:the\s+|a\s+)?([A-Za-z](?:[A-Za-z0-9/.,' -]|[&+](?!\s+(?:the|a)\s))*?)\s+(?:role|roole|rol|roel|rloe|position|job|internship|posting|opening)\s+(?:at|@)\s+([A-Z][A-Za-z0-9&.'’-]*(?:\s+(?!(?:and|n|plus)\b)[A-Z][A-Za-z0-9&.'’-]*)*)/g;
     const out = [];
+    const add = (role, company) => {
+      role = s(role).replace(/^(?:the|a|el|la)\s+/i, "").trim(); company = s(company).trim();
+      if (role && company && !out.some((x) => lc(x.company) === lc(company) && lc(x.role) === lc(role))) out.push({ role, company });
+    };
     let m;
-    while ((m = re.exec(raw))) {
-      const role = m[1].replace(/^(?:the|a)\s+/i, "").trim();
-      if (role && !out.some((x) => lc(x.company) === lc(m[2]) && lc(x.role) === lc(role))) out.push({ role, company: m[2].trim() });
+    while ((m = re.exec(raw))) add(m[1], m[2]);
+    // Review of #596 (e2e resume.two): the same ask in Spanish ("para <role> en <Company> y para <role> en <Company>") and
+    // in Hinglish ("<Company> ke <role> aur <Company> ke <role> dono ke liye"), each target read whole.
+    if (out.length < 2) {
+      const CO = "[A-Z][A-Za-z0-9&.'’-]*(?:\\s+[A-Z][A-Za-z0-9&.'’-]*)*";
+      const es = new RegExp(`\\bpara\\s+(?:el\\s+|la\\s+)?([A-Za-z][A-Za-z0-9/.,' +&-]*?)\\s+en\\s+(${CO})`, "g");
+      const hi = new RegExp(`(${CO})\\s+ke\\s+([A-Za-z][A-Za-z0-9/.,' +&-]*?)(?=\\s+(?:aur|dono|ke liye)\\b)`, "g");
+      out.length = 0;
+      while ((m = es.exec(raw))) add(m[1], m[2]);
+      if (out.length < 2) { out.length = 0; while ((m = hi.exec(raw))) add(m[2], m[1]); }
     }
     return out.length >= 2 ? out : null;
   }
   function handleMultiTailor(text, ctx) {
-    if (!/\b(?:tailor|tailored|customi[sz]e)\b/i.test(s(text))) return null;
+    if (!/\b(?:tailor|tailored|talior|tialor|tailr|customi[sz]e|adapta|ad[aá]ptame)\b/i.test(s(text))) return null;
     const targets = multiTailorTargets(text);
     if (!targets) return null;
     const done = [], missing = [];
@@ -51144,7 +51155,8 @@ const CareerRouter = (() => {
       const rg = routeResumeGuidance(text, c);
       if (rg) return rg;
     }
-    if (/\btailor\b|\btailored per\b|\bresume variants\b|\bvariants\b[^.]*\bresume\b|\banswer bank\b|\btruth audit\b|\bliving resume\b|\bresume diff\b|\bdiff review\b|\bbans? ai\b|\bai[ -]written\b|\bimpact bullets\b|\b(customi[sz]e|adjust|fit)\b[^.]*\bresume\b|\bresume\b[^.]*\bto this\b|\bmake my resume\b|\b(?:improve|update|fix)\b[^.]*\bresume\b[^.]*\b(?:for|to)\s+(?:a|an|the|this|that)\b/.test(t)) {
+    // Review of #596 (e2e resume.two): the misspelt "talior" and the Spanish "adapta mi currículum" ask the same thing.
+    if (/\btailor\b|\btalior\b|\badapta\b[^.]*\bcurr[ií]cul(?:um|o)\b|\btailored per\b|\bresume variants\b|\bvariants\b[^.]*\bresume\b|\banswer bank\b|\btruth audit\b|\bliving resume\b|\bresume diff\b|\bdiff review\b|\bbans? ai\b|\bai[ -]written\b|\bimpact bullets\b|\b(customi[sz]e|adjust|fit)\b[^.]*\bresume\b|\bresume\b[^.]*\bto this\b|\bmake my resume\b|\b(?:improve|update|fix)\b[^.]*\bresume\b[^.]*\b(?:for|to)\s+(?:a|an|the|this|that)\b/.test(t)) {
       // COMPLEXITY WAVE (BUG-173): profile-less, the chain cannot
       // tailor — but the ask gets its honest answer (target named,
       // the one missing input named) instead of the silent null.

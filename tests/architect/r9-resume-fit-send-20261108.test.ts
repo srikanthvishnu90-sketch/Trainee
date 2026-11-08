@@ -10,7 +10,8 @@
 //            back out of the file refuses the file.
 //   tool/1-2 The chat's tailor_resume prints the header the person confirmed (the form path still asks for a typed name and
 //            email) and attaches its PDF and Word files to the reply; route/1 "make my resume fit the X job" is a tailoring.
-//   two/1-2  Two roles in one ask, joined the way people text ("4 the", "n", "&", "+", "plus"): one file each, named for it.
+//   two/1-3  Two roles in one ask, joined the way people text ("4 the", "n", "&", "+", "plus"), in Spanish, in Hinglish or
+//            misspelt: one file each, named for it.
 //   parity/1-2 The DOCX (Inter) wraps no further than the PDF (Helvetica metrics), so LibreOffice lays it out on the PDF's pages.
 // Offline: everything renders in this process.
 import * as zlib from "node:zlib";
@@ -282,6 +283,16 @@ Deno.test("two/1 the texting and slang joins name two roles: one file each, each
     eq(new Set(docs.map((d: any) => d.sha256)).size, 2, "two different files");
     for (const d of docs) assert(flat(R.extractPdfLines(Buffer.from(d.base64, "base64"))).startsWith(`${NAME} ${CONTACT}`), `${d.filename} starts with the confirmed header`);
   }
+});
+Deno.test("two/3 the same ask in Spanish, in Hinglish and misspelt: two files, each named for its role", () => {
+  for (const m of ["adapta mi currículum para Data Scientist en Sable Software y para Financial Analyst en Willow Software, mándame los dos",
+    "Sable Software ke Data Scientist aur Willow Software ke Financial Analyst dono ke liye resume tailor karke bhejo",
+    "talior my resume for the Data Scientist role at Sable Software and the Financial Analyst roel at Willow Software and send both back"]) {
+    const r = twoRoleTurn(m, headerOnlyProfile());
+    eq((r.result?.documents ?? []).map((d: any) => d.filename), ["Alex_Testcase_Resume_Sable_Software_Data_Scientist.pdf", "Alex_Testcase_Resume_Willow_Software_Financial_Analyst.pdf"], m);
+  }
+  // One role in Spanish is the single tailor's, not a two-role ask.
+  eq(twoRoleTurn("adapta mi currículum para Data Scientist en Sable Software", headerOnlyProfile()).result?.chained_from === "multi_target", false);
 });
 Deno.test("two/2 the roles are read whole: an ampersand or a plus inside a role or a company is not a join", async () => {
   const src = await Deno.readTextFile(new URL("../../packages/domain/142-career-router.js", import.meta.url));

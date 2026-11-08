@@ -634,6 +634,14 @@ export async function cardTurn(
     if (/card_answered/.test(msg)) {
       return { reply: CARD_ANSWERED_BEFORE, status: "answered_before" };
     }
+    // R9-G2 (D-MS-1, paged cards): a yes approves a paged card only once every page of it reached them, and only while its
+    // applications are exactly the set it showed.
+    if (/card_pages_undelivered/.test(msg)) {
+      return { reply: `Not every page of that card has reached you yet, so nothing was approved and nothing was sent. Say "show my applications" to see the whole card again.`, status: "pages_undelivered" };
+    }
+    if (/APPROVAL_SET_CHANGED/.test(msg)) {
+      return { reply: `The applications on that card changed after it was shown (APPROVAL_SET_CHANGED), so nothing was approved and nothing was sent. Say "show my applications" for the current card.`, status: "set_changed" };
+    }
     throw e;
   }
 }

@@ -80,6 +80,13 @@ Deno.test("R9 outreach completion: the networking turn reads 'send X a note', 'f
   eq(draft("ngl email Maya at Acme Analytics about what the team works on lmk")?.target, { by: "name", name: "Maya", firm: "Acme Analytics" });
   eq(draft("ngl email Maya at Acme Analytics about what the team works on lmk")?.topic, "what the team works on");
   eq(draft("emaiil the recruiter at Acme Analytics about the new grad program")?.target, { by: "group", firm: "Acme Analytics", count: 1, role: "recruiter" });
+  eq(draft("eail the recruiter at Acme Analytics abot the new grad program")?.target, { by: "group", firm: "Acme Analytics", count: 1, role: "recruiter" });
+  eq(draft("eail the recruiter at Acme Analytics abot the new grad program")?.topic, "the new grad program");
+  eq(draft("Acme Analytics ke recruiter ko the new grad program ke baare mein email karo")?.target, { by: "group", firm: "Acme Analytics", count: 1, role: "recruiter" });
+  eq(draft("Corvid Labs wale Dana ko the internship timeline ke baare mein email bhejo")?.target, { by: "name", name: "Dana", firm: "Corvid Labs" });
+  eq(draft("escríbele un email a Maya de Acme Analytics sobre how they got started")?.target, { by: "name", name: "Maya", firm: "Acme Analytics" });
+  eq(draft("manda un email al reclutador de Acme Analytics sobre the new grad program")?.target, { by: "group", firm: "Acme Analytics", count: 1, role: "recruiter" });
+  for (const m of ["email status", "emails from Acme Analytics", "email me the file"]) eq(draft(m), null, m);
   // ... and a search for people is never a company named "X and reach out".
   eq(parseTargetAsk("find the hiring manager at Borealis Foods and reach out"), null);
   // A typo in the role word still finds the manager on file there.

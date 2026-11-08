@@ -62,7 +62,7 @@ const NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5
 const numberOf = (w: string | undefined) => (w ? (/^\d+$/.test(w) ? Number(w) : NUM[w.toLowerCase()] ?? null) : null);
 const NUMW = "(\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)";
 const GROUP = "(?:contacts|connections|people|friends|folks|alums|alumni)";
-const FILLER = /^(?:(?:so|ok|okay|hey|hi|and|now|also|please|pls|can you|could you|would you|will you|can u|could u|would u|help me|actually|wait|oh|oops|no|yo|plz|ngl|tbh|lol|quick\s+q(?:uestion)?:?)[, ]+)+/i;
+const FILLER = /^(?:(?:so|ok|okay|hey|hi|and|now|also|please|pls|can you|could you|would you|will you|can u|could u|would u|help me|actually|wait|oh|oops|no|yo|plz|ngl|tbh|lol|lowkey|quick\s+q(?:uestion)?:?)[, ]+)+/i;
 // R9 OUTREACH: texting sign-offs after the ask ("... about the new grad program lmk", "... no cap", "... rn"): not the topic.
 const SIGN_OFF = /(?:[\s,]+(?:lmk|no cap|fr|rn|asap|thx|thanks|ty|pls|plz|please|tysm|lol))+$/i;
 // A firm as typed: the words after "at"/"from", up to the topic or the end.
@@ -74,8 +74,30 @@ function firmOf(raw: string): string | null {
 }
 
 // (b) and (c): what the message asks, or null when it is not a networking ask (the rest of the chain answers it).
+// R9 OUTREACH: the same asks in Hindi (Latin script) and Spanish, read into the English form below: "Quarry Capital ke
+// recruiter ko <topic> ke baare mein email karo", "Truecourse wale Zain ko <topic> ke baare mein email bhejo", "escríbele un
+// email a Sara de Onyx Foods sobre <topic>", "manda un email al reclutador de Lumina sobre <topic>". A role word is the
+// role at that firm ("the recruiter"); a name is that person. Nothing else is read in these languages here.
+const ROLE_IN: Record<string, string> = { recruiter: "the recruiter", reclutador: "the recruiter", reclutadora: "the recruiter", "hiring manager": "the hiring manager", "hiring manager de": "the hiring manager" };
+function translatedAsk(t: string): string | null {
+  const who = (w: string) => ROLE_IN[w.trim().toLowerCase()] ?? w.trim();
+  const hi = /^(.+?)\s+(?:ke|ki|ka|wale|waale|wali)\s+(.+?)\s+ko\s+(.+?)\s+ke\s+(?:baare|bare|baarey)\s+(?:mein|me|mai)\s+(?:email|e-mail|mail|message|msg)\s+(?:karo|kar do|kardo|bhejo|bhej do|bhejdo)$/i.exec(t);
+  if (hi) return `email ${who(hi[2])} at ${hi[1].trim()} about ${hi[3].trim()}`;
+  const es = /^(?:escr[ií]bele|escr[ií]bele un (?:email|correo|mensaje)|manda(?:le)? un (?:email|correo|mensaje)|env[ií]a(?:le)? un (?:email|correo|mensaje))\s+(?:a la|al|a)\s+(.+?)\s+(?:de|en)\s+(.+?)\s+sobre\s+(.+)$/i.exec(t);
+  if (es) return `email ${who(es[1])} at ${es[2].trim()} about ${es[3].trim()}`;
+  return null;
+}
+// A typo in the leading verb ("eail", "emil") or in "about" ("abot", "aboout") is the word meant.
+function mendTypos(t: string): string {
+  const ws = t.split(" ");
+  if (ws.length && /^e[a-z-]+$/i.test(ws[0]) && !/^(?:emails|e-mails|mails|emil[iy]a?|email)$/i.test(ws[0]) && nearWord(ws[0].toLowerCase(), "email")) ws[0] = "email";
+  return ws.map((w, i) => (i > 0 && /^[a-z]+$/i.test(w) && w.toLowerCase() !== "abort" && nearWord(w.toLowerCase(), "about") ? "about" : w)).join(" ");
+}
 export function parseNetworkingAsk(message: string): Ask | null {
-  const t = chatAsk(message).replace(FILLER, "").replace(/[?!.]+$/, "").replace(/,?\s+instead$/i, "").trim()
+  const t0 = chatAsk(message).replace(FILLER, "").replace(/[?!.]+$/, "").replace(SIGN_OFF, "").trim();
+  const tx = translatedAsk(t0);
+  if (tx) return parseNetworkingAsk(tx);
+  const t = mendTypos(chatAsk(message).replace(FILLER, "").trim()).replace(FILLER, "").replace(/[?!.]+$/, "").replace(/,?\s+instead$/i, "").trim()
     // R9-E: "find and email the hiring manager at X": the finding is the drafting's own (from the person's contacts).
     .replace(/^(?:find|look up|track down|search for)\s*(?:,\s*)?(?:and|&|then|,)\s+(?:then\s+)?(?=(?:email|e-mail|message|reach out|write|draft|send)\b)/i, "")
     .replace(SIGN_OFF, "")

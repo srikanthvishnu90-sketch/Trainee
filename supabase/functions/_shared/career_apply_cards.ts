@@ -21,7 +21,7 @@
 // that cannot be written never changes the answer.
 import { type EventStore, recordEvents } from "./agent/timeline.ts";
 import { sameCompany } from "./career_mail.ts";
-import { approvalWords } from "./approval_words.ts";
+import { approvalWords, NEGATIONS } from "./approval_words.ts";
 
 export interface Prepared {
   id: string;
@@ -170,6 +170,7 @@ export function parseSelection(raw: string): { nums: number[]; names: string[] }
   return { nums: [...new Set(nums)], names: [...new Set(names)] };
 }
 
+const NAME_WORDS = new Set(["first", "after", "n", "change", "fix", "edit"]);
 export function parseCardReply(text: string): CardReply | null {
   // A thumbs-up alone, or "yess"/"yse" alone, is "yes" (approval_words.ts).
   const raw = approvalWords(String(text ?? "")).toLowerCase().replace(/[’‘`]/g, "'").replace(/\s+/g, " ").trim();
@@ -194,6 +195,12 @@ export function parseCardReply(text: string): CardReply | null {
   if (/^(?:(?:yes|approve|send)(?: to)?\s+)?#?\d{1,4}(?:\s*(?:,|or)\s*#?\d{1,4})*\s+or\s+#?\d{1,4}$/.test(t)) return { kind: "unclear" };
   const c = t.match(/^change (?:number |#)?(\d+)\b/);
   if (c) return { kind: "change", n: Number(c[1]) };
+  // A yes that also asks for a change ("yes but change 2", "send them, fix the cover letter") is not an answer anyone can
+  // act on: nothing is approved (approval-language review, 2026-11-08: "yes but change X" read as "yes except an employer
+  // named 'change x'").
+  if ((YES_WORD.test(t) || CARD_VERB.test(t)) && /\b(?:change|edit|fix|modify|update|rewrite|redo|tweak|correct)\b/.test(t)) return { kind: "unclear" };
+  // "send both" (approval_words.ts) is the whole card when it has two: a count, checked against the card.
+  if (t === "send both") return { kind: "yes", except: [], count: 2 };
   const yw = YES_WORD.exec(t);
   const softYes = !!yw && /^(?:ok|okay|sure)\b/.test(t);
   const hadYes = !!yw;
@@ -259,6 +266,11 @@ export function parseCardReply(text: string): CardReply | null {
     if (s && !s.names.length && s.nums.length >= 2) r = { kind: "only", only: s.nums };
   }
   if (r && asked) return { kind: "unclear" };
+  // An employer "name" that is a negation or a hold in any language ("send them espera", "send all - ruko", "approve
+  // nein") is not a name: the answer is unclear and approves nothing (approval_words.ts NEGATIONS).
+  const named = r?.kind === "only" ? r.onlyNames : r?.kind === "yes" || r?.kind === "except_only" ? r.exceptNames : undefined;
+  // Words that are also common in employer names ("First Republic") are left to the name match.
+  if (named?.some((x) => x.split(/[^\p{L}'’]+/u).some((w) => NEGATIONS.has(w) && !NAME_WORDS.has(w)))) return { kind: "unclear" };
   if (!r && hadYes && /^(?:but|except|only|just|and)\b/.test(body)) return { kind: "unclear" };
   return r;
 }
@@ -461,7 +473,7 @@ export async function cardTurn(
     resumeReady?: () => Promise<boolean | null>;
   },
 ): Promise<{ reply: string; status: string; card_id?: string; parts?: string[] } | null> {
-  const r = parseCardReply(o.message);
+  let r = parseCardReply(o.message);
   if (!r) return null;
   if (r.kind === "show") {
     // Fail closed (review of PR #194): only a confirmed "yes, on file" shows a card; "no" asks for the resume, and a check
@@ -546,6 +558,8 @@ export async function cardTurn(
       "change",
     );
   }
+  // "send 1" / "approve 1" may be a count or a number, but on a card of one they say the same: that one application.
+  if (r.kind === "unclear" && total === 1 && /^(?:send|approve) 1$/.test(approvalWords(o.message).trim().toLowerCase())) r = { kind: "only", only: [1] };
   if (r.kind === "hold") return waiting(HOLD_TEXT(total), "hold");
   if (r.kind === "unclear") return waiting(UNCLEAR_TEXT(total), "unclear");
   // Names ("not Acme", "only Acme and Beta"): each must name at least one application on this card, by its employer.

@@ -256,7 +256,7 @@ Deno.test("r10/10 with no layout asked: a resume the rater keeps keeps its layou
   const offered = await b.t.tailor_resume.run({ posting_text: POSTING }, b.ctx) as any;
   eq([offered.layout, offered.format_check.keep], ["plain", false]);
   eq(offered.format_check.recommended.template, 5, "a data posting: the Analyst template");
-  assert(/scores \d+\/100/.test(offered.format_check.summary) && /I suggest Analyst \(template 5\)/.test(offered.format_check.summary), offered.format_check.summary);
+  assert(/scores \d+\/100/.test(offered.format_check.summary) && /Suggested: Analyst \(template 5\) is made for data/.test(offered.format_check.summary), offered.format_check.summary);
   assert(offered.format_check.findings.some((f: any) => f.criterion === "margins" && /0\.3 in/.test(f.detail)), "the finding names the measurement");
   // The words on the file are the confirmed record's, whatever the layout.
   const words = wordsOf(String(offered.preview));

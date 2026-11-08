@@ -349,7 +349,7 @@ export function ratingSummary(r: Rating, rec: Recommendation | null): string {
   const fails = r.findings.filter((f) => f.measured && !f.pass).sort((a, b) => (b.max - b.points) - (a.max - a.points));
   const head = r.keep ? `Your resume's format scores ${r.score}/100, so I'll keep your layout and change only the words.` : `Your resume's format scores ${r.score}/100${r.hardFailures.length ? `, and it fails ${r.hardFailures.join(", ")}` : ""}, so I won't reuse it as is.`;
   const lines = fails.slice(0, 4).map((f) => `- ${f.criterion}: ${f.detail}${f.where.length ? ` (${f.where.slice(0, 2).join("; ")})` : ""}`);
-  return [head, ...lines, ...(!r.keep && rec ? [`I suggest ${rec.why}`] : [])].join("\n");
+  return [head, ...lines, ...(!r.keep && rec ? [`Suggested: ${rec.why}`] : [])].join("\n");
 }
 
 // ---------------------------------------------------------------- keep: the person's own PDF, rebuilt from its geometry
@@ -420,7 +420,7 @@ export async function planLayout(o: {
     const spec = ownPdfSpec({ ...rating, keep: true }, await pdfNamePt(o.upload.bytes));
     if (spec.ok) return { ...none, layout: "own", ownPdfSpec: spec.spec, rating, recommended, summary: ratingSummary(rating, recommended), reason: "the rater says keep; the PDF is rebuilt from its measured geometry" };
     if (o.ownDocx?.length) return { ...none, layout: "own", ownDocx: o.ownDocx, rating, recommended, summary: `${ratingSummary(rating, recommended)}\n${spec.reason}, so your Word copy's layout is kept.`, reason: spec.reason };
-    return { ...none, rating, recommended, summary: `${ratingSummary(rating, recommended)}\n${spec.reason}. I suggest ${recommended.why}`, reason: spec.reason };
+    return { ...none, rating, recommended, summary: `${ratingSummary(rating, recommended)}\n${spec.reason}. Suggested: ${recommended.why}`, reason: spec.reason };
   }
   return { ...none, rating, recommended, summary: ratingSummary(rating, recommended), reason: "the rater says not to keep it" };
 }

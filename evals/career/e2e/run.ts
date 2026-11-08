@@ -18,6 +18,14 @@
 //   deno run -A evals/career/e2e/run.ts --label <label> --model claude --budget-usd 3   (paid: ANTHROPIC_API_KEY, capped)
 //   options: --brain production|router|staged|planner (default production: the release config's brain, D-035, with
 //            the release flags as committed, D-036), --only E01,E11, --out <file>, --no-log (do not append to SCORE-LOG.md)
+//   SETS (release 9, workstream H): --set core40|full|adversarial|heldout (default core40: tasks.json, the 40 tasks and 6
+//            guards, run exactly as before). full is the 1,000 generated completion tasks (generate.ts: about 250 per area),
+//            adversarial the 150 generated guards (must all hold), heldout the 20% of full the seed holds out. --sample N
+//            runs a seeded, area-stratified sample (--seed S), --budget-usd caps a paid run as before. A generated set's
+//            world is the product after its cloud gate opened (the gate testers' three confirmations per family: the
+//            gate's function answers open, as tests/architect/flow-scenarios-apply-r4.test.ts does); everything else is
+//            the 40-task world. Its report adds per-family and per-ATS completion, the top 10 failure clusters, guards by
+//            category, the held-out split against the rest, and the estimated cost of the same run on the real model.
 // The import map (tests/flow/supabase-npm.json: supabase-js from npm, where esm.sh is unreachable) is applied by the
 // runner itself: run.ts re-executes itself under it when started without one.
 // Model: fake (evals/career/tasks/fake_model.ts plays each task's oracle: what the code paths complete when the model plans
@@ -30,16 +38,22 @@
 import { pgBinDir, type Pg, startPg } from "../../../tests/flow/pg.ts";
 import { careerHandler, type Chat, SERVICE_KEY, SUPABASE_URL, supabaseParity } from "../../../tests/flow/handler.ts";
 import { evalNow, PIN_DB_SQL, pinClock } from "../tasks/clock.ts";
-import { clearOracle, fakeAnthropic, type OracleStep, setOracle } from "../tasks/fake_model.ts";
+import { addPostings, clearOracle, fakeAnthropic, type OracleStep, setOracle } from "../tasks/fake_model.ts";
 import { AREAS, type Area, type E2EState, type Expect, judgeE2E, linkedFileIds, type ResearchFile, type ResumeDoc } from "./judge.ts";
-import { FakeGmail, htmlText, PERSON_ANSWERS, readPdf, resumePdf, sha256Hex, stubDryRunEngine, stubEngine, StubAts, stubSubmitEngine } from "./worlds.ts";
+import { ATS_HOST, atsRef, FakeGmail, htmlText, personAnswers, readPdf, resumePdf, sha256Hex, stubDryRunEngine, stubEngine, StubAts, stubSubmitEngine } from "./worlds.ts";
+import { type Contact, contactsCsv, generate, type Person, sampleTasks, SEED } from "./generate.ts";
+import { PRICES } from "../../../supabase/functions/_shared/model_gateway.ts";
 import { askedPart, questionLine } from "../../../tests/helpers/one_question.ts";
-import { isStubWebHost, stubWebFetch } from "./web.ts";
+import { addStubPages, isStubWebHost, type StubPage, stubWebFetch } from "./web.ts";
 import type { FileRecord } from "../../../supabase/functions/_shared/file_kinds.ts";
-import { appendRow, type E2EItem, type E2ERun, parseBudgetUsd, scoreRow } from "./score_log.ts";
+import { appendRow, appendSetRow, type CallEstimate, type E2EItem, type E2ERun, parseBudgetUsd, scoreRow, scoreSetRow } from "./score_log.ts";
 export type { E2EItem, E2ERun };
 
-export interface E2ETask { id: string; area: Area; kind: "task" | "multi" | "guard"; setup: string[]; turns: string[]; oracle: Record<string, OracleStep[]>; expect: Expect; note?: string }
+export interface E2ETask { id: string; area: Area; kind: "task" | "multi" | "guard"; setup: string[]; turns: string[]; oracle: Record<string, OracleStep[]>; expect: Expect; note?: string;
+  // A generated task's own world (generate.ts): its person and resume, contacts, opted-out addresses, stub pages, family tags.
+  family?: string; style?: string; ats?: string; heldout?: boolean; person?: Person; contacts?: Contact[]; dnc?: string[]; pages?: Record<string, StubPage>; secret?: string }
+export type SetName = "core40" | "full" | "adversarial" | "heldout";
+export const SETS: SetName[] = ["core40", "full", "adversarial", "heldout"];
 
 const HERE = new URL("./", import.meta.url), ROOT = new URL("../../../", import.meta.url).pathname;
 const SET = JSON.parse(await Deno.readTextFile(new URL("tasks.json", HERE)));
@@ -51,6 +65,27 @@ const RESUME = await Deno.readTextFile(`${ROOT}packages/career-data/fixtures/tes
 const RESUME_NAME = (/^([A-Z][a-z]+ [A-Z][a-z]+) \(TEST\)$/m.exec(RESUME)?.[1]) ?? null;
 const CONTACTS = await Deno.readTextFile(new URL("../tasks/contacts.csv", HERE));
 const CONTACT_EMAILS = [...CONTACTS.matchAll(/[^\s,]+@[^\s,]+/g)].map((m) => m[0].toLowerCase());
+// The 40-task set's one person (the fixture resume): every core40 task runs as them, as before.
+const CORE_PERSON: Person = { first: "Alex", last: "Testcase", name: RESUME_NAME ?? "Alex Testcase", city: "Chicago, IL", email: "alex.testcase@example.test", phone: "+1 555-0100", resume: RESUME, shape: "student", workAuth: false };
+// A set's tasks and the postings its world serves (the generated set is regenerated from its seed on every run).
+export function loadSet(set: SetName, o: { sample?: number | null; seed?: number } = {}): { tasks: E2ETask[]; postings: any[]; scaled: boolean } {
+  if (set === "core40") return { tasks: TASKS, postings: POSTINGS, scaled: false };
+  const g = generate(SEED);
+  const pool = (set === "adversarial" ? g.adversarial : set === "heldout" ? g.full.filter((t) => t.heldout) : g.full) as unknown as E2ETask[];
+  const tasks = o.sample ? sampleTasks(pool as any[], o.sample, o.seed ?? SEED) as E2ETask[] : pool;
+  return { tasks, postings: [...POSTINGS, ...g.postings], scaled: true };
+}
+// The real-model cost of one model request the fake answered: its prompt at four characters a token, an answer of at most
+// 400 tokens, at the product's own prices (an unpriced model at the highest price in the table, as the gateway reserves).
+export function estimateCall(body: any): CallEstimate {
+  const input = Math.ceil(JSON.stringify({ s: body?.system ?? "", m: body?.messages ?? [], t: body?.tools ?? [] }).length / 4);
+  const output = Math.min(Number(body?.max_tokens) || 1024, 400);
+  const p = (PRICES as any)[String(body?.model ?? "")] ?? Object.values(PRICES as any).reduce((a: any, b: any) => (b.input > a.input ? b : a));
+  const x = p.long_context && input > p.long_context.over_tokens ? p.long_context.multiplier : 1;
+  return { calls: 1, input_tokens: input, output_tokens: output, usd: (x * (input * p.input + output * p.output)) / 1e6 };
+}
+const addEst = (a: CallEstimate, b: CallEstimate): CallEstimate => ({ calls: a.calls + b.calls, input_tokens: a.input_tokens + b.input_tokens, output_tokens: a.output_tokens + b.output_tokens, usd: a.usd + b.usd });
+const NO_EST: CallEstimate = { calls: 0, input_tokens: 0, output_tokens: 0, usd: 0 };
 // The stub worlds' own link hosts and keys: made up, for links minted inside this process only (no real host serves them).
 const WORLD_ENV: Record<string, string> = {
   TRAINEE_FILE_BASE_URL: "https://file.e2e.test", TRAINEE_FILE_LINK_SECRET: "e2e-stub-world-file-link-key-not-real",
@@ -80,12 +115,12 @@ const machineNow = Date.now.bind(Date);
 const uid = (i: number) => `7e2e0000-6a43-4a49-9d2c-${String(9_000_000_000_000 + i).slice(-12)}`;
 const json = async (pg: Pg, sql: string): Promise<any> => JSON.parse((await pg.sql(`select coalesce((${sql})::text, 'null')`)).trim() || "null");
 
-async function seed(pg: Pg, ids: string[], at: string) {
+async function seed(pg: Pg, ids: string[], at: string, postings: any[] = POSTINGS) {
   const T = `'${at}'::timestamptz`;
   await pg.sql(`insert into public.career_postings (job_id, provider, board, company, title, location, url, description, first_seen_at, last_seen_at) values
-    ${POSTINGS.map((p) => `('${p.job_id}', 'greenhouse', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', '${q(p.description)}', ${T}, ${T})`).join(",\n")};
+    ${postings.map((p) => `('${p.job_id}', '${p.job_id.split(":")[0]}', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', '${q(p.description)}', ${T}, ${T})`).join(",\n")};
     insert into public.career_kb_postings (posting_key, source, board, company, title, location, url, posted_at, text_excerpt, content_hash) values
-    ${POSTINGS.map((p, i) => `('${p.job_id}', 'greenhouse', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', ${T} - interval '${i} hours', '${q(p.description)}', 'e${i}')`).join(",\n")};`);
+    ${postings.map((p, i) => `('${p.job_id}', '${p.job_id.split(":")[0]}', '${p.job_id.split(":")[1]}', '${q(p.company)}', '${q(p.title)}', '${q(p.location)}', '${p.url}', ${T} - interval '${i} hours', '${q(p.description)}', 'e${i}')`).join(",\n")};`);
   for (const id of ids) {
     await pg.sql(`insert into auth.users (id, email) values ('${id}', '${id}@example.test'); insert into public.profiles (id) values ('${id}');
       insert into public.career_watch_kv (user_id, key, value) values ('${id}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
@@ -101,12 +136,15 @@ function brainEnv(brain: string) {
   // production: nothing set, so the handler serves the committed release config (PRODUCTION_BRAIN, RELEASE_FLAGS).
 }
 
-export async function runE2E(o: { label: string; brain: string; model: "fake" | "claude"; only?: string[]; budgetUsd?: number | null; quiet?: boolean }): Promise<E2ERun> {
-  const tasks = TASKS.filter((t) => !o.only?.length || o.only.includes(t.id));
+export async function runE2E(o: { label: string; brain: string; model: "fake" | "claude"; only?: string[]; budgetUsd?: number | null; quiet?: boolean; set?: SetName; sample?: number | null; seed?: number }): Promise<E2ERun> {
+  const set = o.set ?? "core40", loaded = loadSet(set, { sample: o.sample, seed: o.seed });
+  const tasks = loaded.tasks.filter((t) => !o.only?.length || o.only.includes(t.id));
+  const POSTINGS = loaded.postings;
+  if (loaded.scaled) { addPostings(POSTINGS); for (const t of tasks) if (t.pages) addStubPages(t.pages); }
   const openaiVars = Object.keys(Deno.env.toObject()).filter((k) => /^OPENAI_/.test(k));
   const saved: Record<string, string | undefined> = Object.fromEntries([...ENV_KEYS, ...openaiVars].map((k) => [k, Deno.env.get(k)]));
   const realFetch = globalThis.fetch;
-  const ats = await new StubAts(POSTINGS.map((p) => ({ board: p.job_id.split(":")[1], job: p.job_id.split(":")[2], title: p.title, company: p.company }))).start();
+  const ats = await new StubAts(POSTINGS.map((p) => ({ board: p.job_id.split(":")[1], job: p.job_id.split(":").slice(2).join(":"), title: p.title, company: p.company, family: atsRef(p.url)?.family ?? "greenhouse", url: p.url }))).start();
   const gmail = new FakeGmail();
   // As production's database: the migrations and the card-cloud bridge go-live applies (apply-rails-and-seed.sh), with its
   // claim guards reconciled as go-live does (the hosted apply flow test's database, R9-F).
@@ -115,6 +153,8 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
   let runner: ((req: Request) => Promise<Response>) | null = null;
   const items: E2EItem[] = [];
   let stopped: string | null = null, unpin: (() => void) | null = null;
+  const requested: string[] = [];
+  let est: CallEstimate = NO_EST;
   const runAt = new Date().toISOString(), at = evalNow();
   try {
     unpin = pinClock(at);
@@ -129,8 +169,8 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
       where n.nspname = 'public' and c.relkind = 'r' and c.relname like 'career\\_apply\\_%' and pg_get_expr(d.adbin, d.adrelid) ~ 'clock_timestamp\\(\\) - '
       loop execute format('alter table public.%I alter column %I set default now()', r.t, r.col); end loop; end $u$;`);
     const people: Record<string, string> = {};
-    tasks.forEach((t) => { people[`tok-${t.id}`] = uid(TASKS.indexOf(t) + 1); });
-    await seed(pg, Object.values(people), at);
+    tasks.forEach((t, i) => { people[`tok-${t.id}`] = uid(set === "core40" ? TASKS.indexOf(t) + 1 : i + 1); });
+    await seed(pg, Object.values(people), at, POSTINGS);
     // R9-F: the database switches as go-live writes them (release-db-switches.sql, D-041: real employer submission on), and the portal gate:
     // the cloud sends on Greenhouse only after the owner's gate testers proved 3 confirmed applications there, or under the
     // owner's waiver for one person (career_apply_cloud_gate_waivers: at most 5 sends, at most 7 days; D-010 option (a)).
@@ -138,6 +178,10 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
     await pg.sql(`insert into public.career_cloud_settings (key, value) select k, 'on' from unnest(array['CAREER_AGENT_SUBMIT', 'CAREER_CLOUD_APPLY', 'CAREER_CLOUD_TEXT_CARDS', 'APPLY_VM']) k on conflict (key) do update set value = excluded.value;
       insert into public.career_apply_cloud_gate_waivers (user_id, portal, max_sends, expires_at, note)
       select u, 'greenhouse', 5, clock_timestamp() + interval '6 days', 'e2e eval world: the owner''s waiver for this synthetic person' from unnest(array[${Object.values(people).map((x) => `'${x}'::uuid`).join(",")}]) u;`);
+    // A generated set's world: the product after its gate opened (the owner's gate testers' three confirmed applications on
+    // each family), so a batch is bounded by the product's own rules (pace, the daily cap, the families it sends on), never
+    // by a five-send waiver. Only the gate's answer is the world's; every other check is the product's.
+    if (loaded.scaled) await pg.sql(`create or replace function public.career_apply_cloud_open(p_portal text) returns boolean language sql stable as $g$ select p_portal is not null $g$;`);
     for (const k of openaiVars) Deno.env.delete(k);
     if (o.model === "fake") Deno.env.set("ANTHROPIC_API_KEY", "sk-ant-fake-e2e-not-a-key");
     else if (!Deno.env.get("ANTHROPIC_API_KEY")) throw new Error("NOT RUN: --model claude needs ANTHROPIC_API_KEY");
@@ -151,8 +195,12 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
       const url = new URL(req.url);
-      if (url.hostname === "api.anthropic.com") return o.model === "fake" ? await fakeAnthropic(req) : await realFetch(req);
-      if (/(^|\.)greenhouse\.io$/.test(url.hostname)) return await ats.forward(req, realFetch);
+      requested.push(url.hostname);
+      if (url.hostname === "api.anthropic.com") {
+        if (o.model === "fake") { try { est = addEst(est, estimateCall(await req.clone().json())); } catch { /* not a JSON body */ } return await fakeAnthropic(req); }
+        return await realFetch(req);
+      }
+      if (ATS_HOST.test(url.hostname)) return await ats.forward(req, realFetch);
       if (url.hostname === "gmail.googleapis.com") return await gmail.fetch(req);
       if (isStubWebHost(url.hostname)) return stubWebFetch(req);
       if (url.hostname === "runner.e2e.test" && runner) return await runner(req);
@@ -232,23 +280,27 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
     for (const t of tasks) {
       if (o.budgetUsd != null && await spent() + 0.05 >= o.budgetUsd) { stopped = `budget: $${(await spent()).toFixed(3)} of $${o.budgetUsd}`; break; }
       const chat: Chat = h.chat(`tok-${t.id}`), u = people[`tok-${t.id}`];
+      const P = t.person ?? CORE_PERSON, csv = t.contacts ? contactsCsv(t.contacts) : CONTACTS, answers = personAnswers(P);
       const sentBefore = gmail.sent.length, postsBefore = ats.posts.length;
+      requested.length = 0; est = NO_EST;
       workerLog.length = 0; sendLog.length = 0; prepLog.length = 0;
       const say = async (m: string, extra: Record<string, unknown> = {}) => { const r = await chat.say(m, extra); if (r.status !== 200) throw new Error(`${t.id}: HTTP ${r.status}: ${r.reply.slice(0, 200)}`); return r; };
       brainEnv("setup");
       clearOracle();
-      if (t.setup.includes("resume")) { await say(`here is my resume:\n${RESUME}`); await say("yes, that's my resume"); }
-      if (t.setup.includes("contacts")) await say("here are my contacts", { attachments: [{ name: "contacts.csv", mime: "text/csv", text: CONTACTS }] });
-      if (t.setup.includes("signature")) await pg.sql(`insert into public.career_outreach_prefs (user_id, signature) values ('${u}', 'Alex Testcase') on conflict (user_id) do update set signature = excluded.signature`);
+      if (t.setup.includes("resume")) { await say(`here is my resume:\n${P.resume}`); await say("yes, that's my resume"); }
+      if (t.setup.includes("contacts")) await say("here are my contacts", { attachments: [{ name: "contacts.csv", mime: "text/csv", text: csv }] });
+      if (t.setup.includes("signature")) await pg.sql(`insert into public.career_outreach_prefs (user_id, signature) values ('${u}', '${q(P.name)}') on conflict (user_id) do update set signature = excluded.signature`);
+      // An address that asked this person to stop (the sending rail's opt-out list, as a "stop" reply records it).
+      for (const e of t.dnc ?? []) await pg.sql(`insert into public.career_outreach_dnc (user_id, email_hash) values ('${u}', public.career_send_email_hash('${q(e)}')) on conflict do nothing`);
       // The person connected their own Gmail for sending (the grant row; the fake Gmail stands for the account).
-      if (t.setup.includes("gmail")) await pg.sql(`insert into public.user_oauth_connections (user_id, provider, vault_name, email, scopes) values ('${u}', 'google_career', 'oauth_google_career_${u}', 'alex.testcase@example.test', 'openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send') on conflict do nothing`);
+      if (t.setup.includes("gmail")) await pg.sql(`insert into public.user_oauth_connections (user_id, provider, vault_name, email, scopes) values ('${u}', 'google_career', 'oauth_google_career_${u}', '${q(P.email)}', 'openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send') on conflict do nothing`);
       // The person turned on cloud applying in their own words (the opt-in's terms, then their yes).
       if (t.setup.includes("cloud")) { await say("turn on cloud"); await say("yes, turn it on"); }
       // ...and their resume as the file they sent and confirmed (the channel's file upload: career_resume_put, kind file),
       // which the product keeps for the cloud as is; the hosted preparation sends only that file (R9-F).
       if (t.setup.includes("cloud") && t.setup.includes("resume")) {
-        const pdf = resumePdf(RESUME); let b = ""; for (const c of pdf) b += String.fromCharCode(c);
-        await pg.sql(`select public.career_resume_put('${u}', '${await sha256Hex(pdf)}', 'file', 'e2e:resume-file', 'Alex_Testcase_Resume.pdf', decode('${btoa(b)}', 'base64'), 'e2e: the person confirmed their resume file')`);
+        const pdf = resumePdf(P.resume); let b = ""; for (const c of pdf) b += String.fromCharCode(c);
+        await pg.sql(`select public.career_resume_put('${u}', '${await sha256Hex(pdf)}', 'file', 'e2e:resume-file', '${P.first}_${P.last}_Resume.pdf', decode('${btoa(b)}', 'base64'), 'e2e: the person confirmed their resume file')`);
       }
       const metasBefore = Number(await json(pg, `select count(*) from public.agent_messages m join public.agent_threads th on th.id = m.thread_id where th.user_id = '${u}' and m.role = 'assistant'`));
       brainEnv(o.brain);
@@ -266,7 +318,7 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
           let text = round === 0 && asks(last) ? last : asks(shown) ? shown : "";
           if (!text) return;
           for (let n = 0; text && n < 12; n++) {
-            const line = questionLine(text), a = PERSON_ANSWERS.find(([re]) => re.test(line));
+            const line = questionLine(text), a = answers.find(([re]) => re.test(line));
             if (!a) { prepLog.push(`the person has no answer to: ${line.slice(0, 100)}`); return; }
             const r = await say(a[1]);
             replies.push(r.reply); intents.push(r.intent); bodies.push(r.body);
@@ -276,19 +328,24 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
         }
       };
       for (const m of t.turns) { const r = await say(m); replies.push(r.reply); intents.push(r.intent); bodies.push(r.body); await tick(); await answerAsked(r.reply); }
-      const state = await worldState(pg, u, { ats: ats.posts.slice(postsBefore), mail: gmail.sent.slice(sentBefore), replies, bodies, metasBefore, mailHash, hashApplyPayload });
+      const state = await worldState(pg, u, { ats: ats.posts.slice(postsBefore), mail: gmail.sent.slice(sentBefore), replies, bodies, metasBefore, mailHash, hashApplyPayload,
+        resume: P.resume, name: t.person ? P.name : RESUME_NAME, contacts: t.contacts ? t.contacts.map((c) => c.email.toLowerCase()) : CONTACT_EMAILS, readStored: !!t.expect.secret });
+      state.requested = [...requested];
       state.stage.push(`${t.area}: turns handled as ${intents.map((x) => x ?? "none").join(" > ")}`, ...new Set(sendLog));
       state.stage.push(...prepLog.map((l) => `apply: prepare ${l.slice(0, 160)}`));
       state.stage.push(...workerLog.filter((l) => !/: (confirmed|submitted_unconfirmed) /.test(l)).map((l) => `apply: worker ${l.slice(0, 160)}`));
       const j = judgeE2E(t.expect, state);
-      items.push({ id: t.id, area: t.area, kind: t.kind, pass: j.pass, failed: j.failed, stage: state.stage, replies, intents });
+      items.push({ id: t.id, area: t.area, kind: t.kind, pass: j.pass, failed: j.failed, stage: state.stage, replies, intents,
+        ...(loaded.scaled ? { family: t.family, style: t.style, ats: t.ats, heldout: !!t.heldout, est } : {}) });
       if (!o.quiet) console.log(`${t.id} ${j.pass ? "PASS" : "FAIL"} ${t.area}/${t.kind}${j.pass ? "" : `: ${j.failed.join("; ")}`}`);
     }
     const scored = items.filter((x) => x.kind !== "guard"), guards = items.filter((x) => x.kind === "guard");
     const areas = Object.fromEntries(AREAS.map((a) => [a, { total: scored.filter((x) => x.area === a).length, passed: scored.filter((x) => x.area === a && x.pass).length }])) as E2ERun["areas"];
     const passed = scored.filter((x) => x.pass).length;
+    const split = (h: boolean) => { const xs = (set === "adversarial" ? guards : scored).filter((x) => !!x.heldout === h); return { total: xs.length, passed: xs.filter((x) => x.pass).length }; };
     return { label: o.label, brain: o.brain, model: o.model, commit: await headCommit(), total: scored.length, passed, rate: scored.length ? passed / scored.length : 0, areas,
-      guards: { total: guards.length, held: guards.filter((x) => x.pass).length }, stopped, cost_usd: o.model === "fake" ? 0 : await spent(), items, run_at: runAt };
+      guards: { total: guards.length, held: guards.filter((x) => x.pass).length }, stopped, cost_usd: o.model === "fake" ? 0 : await spent(), items, run_at: runAt,
+      ...(loaded.scaled ? { set, sample: o.sample ?? null, seed: o.seed ?? SEED, heldout: split(true), rest: split(false), est: items.reduce((a, x) => addEst(a, x.est ?? NO_EST), NO_EST) } : {}) };
   } finally {
     unpin?.();
     clearOracle();
@@ -301,7 +358,9 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
 }
 
 // What the worlds received for one person, and the rows that say where each pipeline stopped.
-async function worldState(pg: Pg, u: string, w: { ats: any[]; mail: any[]; replies: string[]; bodies: any[]; metasBefore: number; mailHash: (m: any) => Promise<string>; hashApplyPayload: (x: unknown) => Promise<string> }): Promise<E2EState> {
+async function worldState(pg: Pg, u: string, w: { ats: any[]; mail: any[]; replies: string[]; bodies: any[]; metasBefore: number; mailHash: (m: any) => Promise<string>; hashApplyPayload: (x: unknown) => Promise<string>;
+  resume?: string; name?: string | null; contacts?: string[]; readStored?: boolean }): Promise<E2EState> {
+  const RESUME_TEXT = w.resume ?? RESUME, NAME = w.name === undefined ? RESUME_NAME : w.name;
   const stage: string[] = [];
   const wanted: any[] = (await json(pg, `select json_agg(json_build_object('company', company, 'title', title)) from public.career_apply_wanted where user_id = '${u}'`)) ?? [];
   const jobsRaw: any[] = (await json(pg, `select json_agg(to_jsonb(j)) from public.career_apply_jobs j where user_id = '${u}'`)) ?? [];
@@ -316,7 +375,7 @@ async function worldState(pg: Pg, u: string, w: { ats: any[]; mail: any[]; repli
   facts.push(...(((await json(pg, `select json_agg(label || ': ' || answer order by answered_at) from public.career_apply_questions where user_id = '${u}' and state = 'answered' and answer is not null`)) ?? []) as string[]));
   // The resume the person confirmed: the product's record of it (career_resume_record, state confirmed), never the payload's own claim.
   const resumeSha: string | null = (await json(pg, `select to_json(sha256) from public.career_resume_record where user_id = '${u}' and state = 'confirmed'`)) ?? null;
-  const hasResume = resumeSha !== null || flows.some((f) => JSON.stringify(f ?? {}).includes("Alex Testcase"));
+  const hasResume = resumeSha !== null || flows.some((f) => JSON.stringify(f ?? {}).includes(NAME ?? "Alex Testcase"));
   const drafts: any[] = (await json(pg, `select json_agg(json_build_object('id', id, 'recipient_email', recipient_email, 'subject', subject, 'body', body, 'footer', footer, 'hash', hash, 'approved_hash', approved_hash, 'status', status)) from public.career_outreach_drafts where user_id = '${u}'`)) ?? [];
   const sendQueue: any[] = (await json(pg, `select json_agg(json_build_object('recipient_email', recipient_email, 'state', state, 'next_at', next_at)) from public.career_send_queue where user_id = '${u}'`)) ?? [];
   const hashOf: Record<string, string> = {};
@@ -363,8 +422,14 @@ async function worldState(pg: Pg, u: string, w: { ats: any[]; mail: any[]; repli
     documents.push({ filename: a.filename, mime: a.mime, delivered, pdf: await readPdf(bytes), sha256: sha });
   }
   if (arts.some((x) => /pdf/.test(x.mime)) || /tailor/.test(text)) stage.push(`resume: ${documents.length} PDF(s) stored, ${documents.filter((d) => d.delivered).length} returned in a reply`);
-  return { wanted, jobs, ats: w.ats, confirmed: { text: hasResume ? [RESUME, ...facts].join("\n") : facts.join("\n"), resume_sha256: resumeSha, name: hasResume ? RESUME_NAME : null }, drafts, sendQueue, mail: w.mail, contacts: CONTACT_EMAILS,
-    hashOf, files, documents, stage };
+  // A code-in-chat guard: everything stored for the person (both sides of the thread, flow state, key-value rows, answers).
+  const stored = w.readStored ? String(await json(pg, `select to_json(concat_ws(E'\n',
+      (select string_agg(m.content, E'\n') from public.agent_messages m join public.agent_threads th on th.id = m.thread_id where th.user_id = '${u}'),
+      (select string_agg(f.state::text, E'\n') from public.agent_flow_state f where f.user_id = '${u}'),
+      (select string_agg(k.value::text, E'\n') from public.career_watch_kv k where k.user_id = '${u}'),
+      (select string_agg(coalesce(a.answer, ''), E'\n') from public.career_apply_questions a where a.user_id = '${u}')))`) ?? "") : undefined;
+  return { wanted, jobs, ats: w.ats, confirmed: { text: hasResume ? [RESUME_TEXT, ...facts].join("\n") : facts.join("\n"), resume_sha256: resumeSha, name: hasResume ? NAME : null }, drafts, sendQueue, mail: w.mail, contacts: w.contacts ?? CONTACT_EMAILS,
+    hashOf, files, documents, stage, ...(stored !== undefined ? { stored } : {}) };
 }
 
 async function headCommit(): Promise<string> {
@@ -379,6 +444,47 @@ export function report(r: E2ERun): string {
   const bad = r.items.filter((x) => !x.pass);
   L.push(bad.length ? "failures:" : "failures: none");
   for (const x of bad) L.push(`  ${x.id} ${x.area}/${x.kind}: ${x.failed.join("; ").slice(0, 400)}`);
+  return L.join("\n");
+}
+
+// ------------------------------------------------------------------------------------------------ the scaled report
+// A failure's cluster: its first reason with the particulars taken out (names, addresses, links, numbers, quoted values), so
+// the same breakage at two companies is one cluster. The stage note (where the pipeline stopped) is kept: it is the cause.
+export function failureCluster(x: { area: string; failed: string[] }): string {
+  const f = x.failed[0] ?? "(no reason)";
+  return f.replace(/https?:\/\/\S+/g, "<link>").replace(/[^\s@,;()[\]]+@[^\s,;()[\]]+/g, "<email>").replace(/"[^"]*"/g, '"…"')
+    .replace(/^(\w+): [^:;[]+?: /, "$1: <who>: ").replace(/\b(at|to|for) [A-Z][\w&'.-]*(?: [A-Z][\w&'.-]*)*/g, "$1 <co>")
+    .replace(/\d+(?:[.,]\d+)*/g, "N").replace(/\s+/g, " ").slice(0, 220);
+}
+const top = (xs: string[], n: number) => [...xs.reduce((m, k) => m.set(k, (m.get(k) ?? 0) + 1), new Map<string, number>())].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, n);
+export function reportScaled(r: E2ERun): string {
+  const adv = r.set === "adversarial", xs = r.items.filter((x) => (adv ? x.kind === "guard" : x.kind !== "guard"));
+  const passN = xs.filter((x) => x.pass).length;
+  const L = [`${r.label}: set ${r.set}${r.sample ? ` (sample ${r.sample}, seed ${r.seed})` : ""} · ${adv ? `${passN}/${xs.length} guards held` : `${passN}/${xs.length} tasks completed end to end`} (${pct(passN, xs.length)}) · brain ${r.brain} · model ${r.model} · cost $${r.cost_usd.toFixed(3)}${r.stopped ? ` · STOPPED (${r.stopped}): not a score` : ""}`];
+  if (!adv) for (const a of AREAS) L.push(`  ${a.padEnd(9)} ${r.areas[a].passed}/${r.areas[a].total} (${pct(r.areas[a].passed, r.areas[a].total)})`);
+  if (r.heldout && r.rest) {
+    const h = r.heldout, x = r.rest, gap = h.total && x.total ? Math.abs(h.passed / h.total - x.passed / x.total) * 100 : 0;
+    L.push(`  held-out  ${h.passed}/${h.total} (${pct(h.passed, h.total)}) · rest ${x.passed}/${x.total} (${pct(x.passed, x.total)}) · gap ${gap.toFixed(1)} points`);
+  }
+  const by = (k: (x: E2EItem) => string | undefined, title: string) => {
+    const keys = [...new Set(xs.map(k).filter(Boolean))] as string[];
+    if (!keys.length) return;
+    L.push(`${title}:`);
+    for (const key of keys.sort()) {
+      const g = xs.filter((x) => k(x) === key), ok = g.filter((x) => x.pass).length, bad = g.filter((x) => !x.pass);
+      const c = top(bad.map(failureCluster), 1)[0];
+      L.push(`  ${key.padEnd(30)} ${String(ok).padStart(4)}/${String(g.length).padEnd(4)} (${pct(ok, g.length).padStart(6)})${c ? `  top failure (${c[1]}): ${c[0].slice(0, 150)}` : ""}`);
+    }
+  };
+  by((x) => x.family, adv ? "guards by category" : "completion by task family");
+  if (!adv) { by((x) => x.ats, "apply completion by ATS family (tasks that apply)"); by((x) => x.style, "completion by phrasing style"); }
+  const bad = xs.filter((x) => !x.pass);
+  L.push(bad.length ? `top 10 failure clusters (${bad.length} ${adv ? "guards broken" : "tasks failed"}):` : "failures: none");
+  for (const [k, n] of top(bad.map(failureCluster), 10)) L.push(`  ${String(n).padStart(4)} × ${k}`);
+  if (r.est && r.model === "fake") {
+    const per = xs.length ? r.est.usd / xs.length : 0;
+    L.push(`estimated real-model cost of this run: $${r.est.usd.toFixed(2)} (${r.est.calls} model calls, ${(r.est.input_tokens / 1e6).toFixed(2)}M prompt tokens at 4 characters a token, answers of at most 400 tokens; no prompt caching), $${per.toFixed(4)} a task`);
+  }
   return L.join("\n");
 }
 
@@ -398,15 +504,24 @@ if (import.meta.main) {
   // A budget is a finite positive number of dollars: "3x", "Infinity", "0" or "-1" would silently remove the cap.
   const budgetUsd = budgetArg === null ? null : parseBudgetUsd(budgetArg);
   if (budgetArg !== null && budgetUsd === null) { console.log(`NOT RUN: --budget-usd must be a finite positive number of dollars, not "${budgetArg}"`); Deno.exit(2); }
-  const label = opt("--label") || `e2e-${brain}-${model}-${new Date().toISOString().slice(0, 10)}`;
-  const r = await runE2E({ label, brain, model, only: opt("--only")?.split(",").filter(Boolean), budgetUsd });
+  const set = (opt("--set") || "core40") as SetName;
+  if (!SETS.includes(set)) { console.log(`NOT RUN: --set ${SETS.join("|")}`); Deno.exit(2); }
+  const sampleArg = opt("--sample"), sample = sampleArg === null ? null : Number(sampleArg);
+  if (sample !== null && !(Number.isInteger(sample) && sample > 0)) { console.log(`NOT RUN: --sample must be a positive whole number, not "${sampleArg}"`); Deno.exit(2); }
+  if (sample !== null && set === "core40") { console.log("NOT RUN: --sample is for a generated set (full, adversarial, heldout); core40 runs whole or with --only"); Deno.exit(2); }
+  const seedArg = opt("--seed"), seed = seedArg === null ? undefined : Number(seedArg);
+  if (seed !== undefined && !Number.isInteger(seed)) { console.log(`NOT RUN: --seed must be a whole number`); Deno.exit(2); }
+  const label = opt("--label") || `e2e-${set}-${brain}-${model}-${new Date().toISOString().slice(0, 10)}`;
+  const r = await runE2E({ label, brain, model, only: opt("--only")?.split(",").filter(Boolean), budgetUsd, set, sample, seed });
   await Deno.mkdir(new URL("results/", HERE), { recursive: true });
-  await Deno.writeTextFile(opt("--out") || new URL(`results/${label}.json`, HERE).pathname, JSON.stringify(r, null, 1));
-  console.log(report(r));
+  // A generated set's result keeps each item's reasons and stage, not the replies (1,000 tasks of replies is megabytes).
+  const out = set === "core40" ? r : { ...r, items: r.items.map(({ replies: _r, intents: _i, ...x }) => x) };
+  await Deno.writeTextFile(opt("--out") || new URL(`results/${label}.json`, HERE).pathname, JSON.stringify(out, null, 1));
+  console.log(set === "core40" ? report(r) : reportScaled(r));
   if (!args.includes("--no-log") && !opt("--only")) {
-    const path = new URL("../SCORE-LOG.md", HERE).pathname;
-    await Deno.writeTextFile(path, appendRow(await Deno.readTextFile(path), scoreRow(r)));
-    console.log(`appended to evals/career/SCORE-LOG.md: ${scoreRow(r)}`);
+    const path = new URL("../SCORE-LOG.md", HERE).pathname, row = set === "core40" ? scoreRow(r) : scoreSetRow(r);
+    await Deno.writeTextFile(path, set === "core40" ? appendRow(await Deno.readTextFile(path), row) : appendSetRow(await Deno.readTextFile(path), row));
+    console.log(`appended to evals/career/SCORE-LOG.md: ${row}`);
   }
   if (r.stopped) Deno.exit(3);
 }

@@ -1,6 +1,7 @@
 // The stub worlds of the end-to-end eval (release 9, workstream D). Each stands where a real employer, inbox or reader
 // would be, keeps what reached it, and answers as the real one does; nothing here reaches a real employer, inbox or person.
-//   StubAts     a real HTTP server on 127.0.0.1 that answers for every *.greenhouse.io host the product calls: the job's
+//   StubAts     a real HTTP server on 127.0.0.1 that answers for every ATS host the product calls (Greenhouse, and for the
+//               scaled set Lever, Ashby and SmartRecruiters: ATS_HOST, atsRef): the job's
 //               page and its form schema (GET), and the application form post (POST, multipart), which it RECORDS (every
 //               field, every file's name and SHA-256) and answers with a confirmation id, as Greenhouse does.
 //   FakeGmail   the sending rail's own fake Gmail (tests/flow/send-rail-fixture.ts, reused, never copied): it keeps each
@@ -13,7 +14,30 @@ import { bodyHtml, type FileRecord } from "../../../supabase/functions/_shared/f
 export { FakeGmail, type SentMail } from "../../../tests/flow/send-rail-fixture.ts";
 
 export interface AtsPost { host: string; board: string; job: string; path: string; fields: Record<string, string>; files: { name: string; filename: string; sha256: string; bytes: number }[]; confirmation_id: string; at: number }
-export interface AtsJob { board: string; job: string; title: string; company: string }
+export interface AtsJob { board: string; job: string; title: string; company: string; family?: AtsFamily; url?: string }
+// The four ATS families the scaled set (generate.ts) posts on, and where each one's posting and form live (made-up ids; the
+// stub answers every one of these hosts, so nothing reaches a real ATS). Greenhouse keeps its board API; the others are
+// read and posted at the family's own API host (the eval's engine stand-in reads the form as JSON, as the dry run does).
+export type AtsFamily = "greenhouse" | "lever" | "ashby" | "smartrecruiters";
+export const ATS_HOST = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|smartrecruiters\.com)$/;
+export function atsRef(url: string): { family: AtsFamily; board: string; id: string } | null {
+  let u: URL; try { u = new URL(url); } catch { return null; }
+  const h = u.hostname, seg = u.pathname.split("/").filter(Boolean);
+  if (/(^|\.)greenhouse\.io$/.test(h)) { const m = /^\/(?:v1\/boards\/)?([^/]+)\/jobs\/(\d+)/.exec(u.pathname); return m ? { family: "greenhouse", board: m[1], id: m[2] } : null; }
+  const family: AtsFamily | null = /(^|\.)lever\.co$/.test(h) ? "lever" : /(^|\.)ashbyhq\.com$/.test(h) ? "ashby" : /(^|\.)smartrecruiters\.com$/.test(h) ? "smartrecruiters" : null;
+  if (!family) return null;
+  const rest = h.startsWith("api.") ? seg.slice(2) : seg; // v0/postings, posting-api/application-form, v1/companies
+  const board = rest[0], id = family === "smartrecruiters" && h.startsWith("api.") ? rest[2] : rest[1];
+  return board && id ? { family, board, id } : null;
+}
+export function formApi(ref: { family: AtsFamily; board: string; id: string }): { questions: string; post: string } {
+  if (ref.family === "greenhouse") return { questions: `https://boards-api.greenhouse.io/v1/boards/${ref.board}/jobs/${ref.id}?questions=true`, post: `https://boards-api.greenhouse.io/v1/boards/${ref.board}/jobs/${ref.id}` };
+  if (ref.family === "lever") return { questions: `https://api.lever.co/v0/postings/${ref.board}/${ref.id}?questions=true`, post: `https://api.lever.co/v0/postings/${ref.board}/${ref.id}/apply` };
+  if (ref.family === "ashby") return { questions: `https://api.ashbyhq.com/posting-api/application-form/${ref.board}/${ref.id}`, post: `https://api.ashbyhq.com/posting-api/application-form/${ref.board}/${ref.id}/submit` };
+  return { questions: `https://api.smartrecruiters.com/v1/companies/${ref.board}/postings/${ref.id}`, post: `https://api.smartrecruiters.com/v1/companies/${ref.board}/postings/${ref.id}/candidates` };
+}
+// The id the judge matches a post to its application by (judge.ts jobNo: the trailing digits of the job id or URL).
+const jobNo = (id: string) => /(\d+)$/.exec(id)?.[1] ?? id;
 
 const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 export const sha256Hex = async (b: Uint8Array) => hex(await crypto.subtle.digest("SHA-256", b as BufferSource));
@@ -43,16 +67,16 @@ export class StubAts {
     return this;
   }
   async stop() { await this.server?.shutdown(); this.server = null; }
-  private find(path: string): AtsJob | null {
-    const m = /^\/(?:v1\/boards\/)?([^/]+)\/jobs\/(\d+)/.exec(path);
-    return m ? this.jobs.find((j) => j.board === m[1] && j.job === m[2]) ?? null : null;
+  private find(host: string, path: string): AtsJob | null {
+    const ref = atsRef(`https://${host || "boards.greenhouse.io"}${path}`);
+    return ref ? this.jobs.find((j) => j.board === ref.board && j.job === ref.id && (j.family ?? "greenhouse") === ref.family) ?? null : null;
   }
   private async handle(req: Request): Promise<Response> {
-    const u = new URL(req.url), host = req.headers.get("x-stub-host") ?? "", job = this.find(u.pathname);
+    const u = new URL(req.url), host = req.headers.get("x-stub-host") ?? "", job = this.find(host, u.pathname), api = /^(boards-api|api)\./.test(host);
     if (req.method === "GET") {
       this.gets.push({ host, path: u.pathname });
       if (!job) return new Response("not found", { status: 404 });
-      if (host.startsWith("boards-api.")) return Response.json({ id: Number(job.job), title: job.title, company_name: job.company, absolute_url: `https://boards.greenhouse.io/${job.board}/jobs/${job.job}`, questions: ATS_QUESTIONS });
+      if (api) return Response.json({ id: (job.family ?? "greenhouse") === "greenhouse" ? Number(job.job) : job.job, title: job.title, company_name: job.company, absolute_url: job.url ?? `https://boards.greenhouse.io/${job.board}/jobs/${job.job}`, questions: ATS_QUESTIONS });
       // The page the person's browser would open: the posting and its form.
       const inputs = ATS_QUESTIONS.flatMap((q) => q.fields.map((f) => f.type === "input_file" ? `<label>${q.label}<input type="file" name="${f.name}"></label>`
         : f.values.length ? `<label>${q.label}<select name="${f.name}">${f.values.map((v) => `<option value="${v.value}">${v.label}</option>`).join("")}</select></label>`
@@ -70,14 +94,15 @@ export class StubAts {
       }
       const missing = ATS_QUESTIONS.filter((q) => q.required).flatMap((q) => q.fields).filter((f) => f.type === "input_file" ? !files.some((x) => x.name === f.name) : !String(fields[f.name] ?? "").trim());
       if (missing.length) return Response.json({ error: `required: ${missing.map((f) => f.name).join(", ")}` }, { status: 422 });
-      const confirmation_id = `GH-${job.board}-${job.job}-${++this.seq}`;
-      this.posts.push({ host, board: job.board, job: job.job, path: u.pathname, fields, files, confirmation_id, at: Date.now() });
-      return host.startsWith("boards-api.") ? Response.json({ success: true, confirmation_id })
+      const prefix = { greenhouse: "GH", lever: "LV", ashby: "AB", smartrecruiters: "SR" }[job.family ?? "greenhouse"];
+      const confirmation_id = `${prefix}-${job.board}-${jobNo(job.job)}-${++this.seq}`;
+      this.posts.push({ host, board: job.board, job: jobNo(job.job), path: u.pathname, fields, files, confirmation_id, at: Date.now() });
+      return api ? Response.json({ success: true, confirmation_id })
         : new Response(`<!doctype html><h1>Thank you for applying to ${job.company}.</h1><p>Confirmation: ${confirmation_id}</p>`, { headers: { "content-type": "text/html" } });
     }
     return new Response("method not allowed", { status: 405 });
   }
-  // A fetch that forwards a *.greenhouse.io request to this server (a real HTTP hop, so the post is a real form post).
+  // A fetch that forwards an ATS host's request (ATS_HOST) to this server (a real HTTP hop, so the post is a real form post).
   forward = async (req: Request, realFetch: typeof fetch): Promise<Response> => {
     const u = new URL(req.url);
     const headers = new Headers(req.headers);
@@ -102,16 +127,16 @@ export function stubEngine(job: any, hashOf: (x: unknown) => Promise<string>, fa
       return { result: { state: "not_submitted", reason: "APPROVED_APPLICATION_CHANGED" }, evidence: null };
     }
     const resume = await Deno.readFile(arg(args, "--resume"));
-    const u = new URL(job.payload.destination || job.url), m = /\/([^/]+)\/jobs\/(\d+)/.exec(u.pathname);
-    if (!m) return { result: { state: "not_submitted", reason: "SUBMIT_DESTINATION_NOT_BOUND" }, evidence: null };
-    const open = await fetch(`https://boards-api.greenhouse.io/v1/boards/${m[1]}/jobs/${m[2]}?questions=true`);
+    const ref = atsRef(job.payload.destination || job.url);
+    if (!ref) return { result: { state: "not_submitted", reason: "SUBMIT_DESTINATION_NOT_BOUND" }, evidence: null };
+    const at = formApi(ref), open = await fetch(at.questions);
     if (open.status === 404) return { result: { state: "not_submitted", reason: "POSTING_CLOSED" }, evidence: null };
     await open.body?.cancel();
     try { await controls?.beforeEffect?.(); } catch { return { result: { state: "not_submitted", reason: "CARD_CLOUD_AUTHORIZATION_REFUSED" }, evidence: null }; }
     const form = new FormData();
     for (const f of (job.payload.fields ?? []) as any[]) if (!/file/i.test(String(f?.type ?? "")) && f?.name !== "resume") form.append(String(f.name), String(f.value ?? ""));
     form.append("resume", new Blob([resume], { type: "application/pdf" }), arg(args, "--resume").split("/").pop() || "resume.pdf");
-    const r = await fetch(`https://boards-api.greenhouse.io/v1/boards/${m[1]}/jobs/${m[2]}`, { method: "POST", body: form });
+    const r = await fetch(at.post, { method: "POST", body: form });
     const body = await r.json().catch(() => ({}));
     if (!r.ok) return { result: { state: "failed", reason: String(body?.error ?? `HTTP ${r.status}`).slice(0, 80) }, evidence: { post: { status: r.status, mutations: 1 } } };
     return { result: { state: body.confirmation_id ? "confirmed" : "submitted_unconfirmed", reason: "acknowledged", confirmation_id: body.confirmation_id ?? null, proof: { status: r.status, confirmation_id: body.confirmation_id ?? null } },
@@ -185,10 +210,10 @@ export function stubDryRunEngine() {
     const url = new URL(arg(args, "--url")), facts = JSON.parse(await Deno.readTextFile(arg(args, "--facts")));
     const resumePath = arg(args, "--resume"), bytes = await Deno.readFile(resumePath);
     const artifact = { filename: resumePath.split("/").pop() || "resume.pdf", sha256: await sha256Hex(bytes) };
-    const m = /^\/([^/]+)\/jobs\/(\d+)/.exec(url.pathname);
-    if (!/(^|\.)greenhouse\.io$/.test(url.hostname) || !m) return { result: { state: "not_submitted", reason: "DRIVER_HOST_REFUSED" }, evidence: null };
-    const key = `greenhouse:${m[1]}:${m[2]}`, employer = `${url.host}/${m[1]}`;
-    const r = await fetch(`https://boards-api.greenhouse.io/v1/boards/${m[1]}/jobs/${m[2]}?questions=true`);
+    const ref = atsRef(url.href);
+    if (!ref) return { result: { state: "not_submitted", reason: "DRIVER_HOST_REFUSED" }, evidence: null };
+    const key = `${ref.family}:${ref.board}:${ref.id}`, employer = `${url.host}/${ref.board}`;
+    const r = await fetch(formApi(ref).questions);
     if (!r.ok) { await r.body?.cancel(); return { result: { state: "not_submitted", reason: r.status === 404 ? "POSTING_CLOSED" : `HTTP ${r.status}` }, evidence: null }; }
     const job = await r.json();
     const schema = (job.questions ?? []).flatMap((q: any) => (q.fields ?? []).map((f: any) => ({ name: f.name, label: q.label, type: SCHEMA_TYPE[f.type] ?? "text", required: q.required === true,
@@ -231,10 +256,11 @@ export function resumePdf(text: string): Uint8Array {
 
 // What the eval's person answers when Trainee texts them a question the form asks (R9-F): their own words, from the
 // confirmed resume's contact line (TEST) and their stated work authorization. Matched by the question's own words.
-export const PERSON_ANSWERS: [RegExp, string][] = [
-  [/\bfirst name\b/i, "Alex"], [/\blast name\b/i, "Testcase"], [/\bemail\b/i, "alex.testcase@example.test"], [/\bphone\b/i, "+1 555-0100"],
+export const personAnswers = (p: { first: string; last: string; email: string; phone: string }): [RegExp, string][] => [
+  [/\bfirst name\b/i, p.first], [/\blast name\b/i, p.last], [/\bemail\b/i, p.email], [/\bphone\b/i, p.phone],
   [/\blegally authori[sz]ed to work\b|\bwork authori[sz]ation\b/i, "Yes"], [/\bsponsorship\b/i, "No"],
 ];
+export const PERSON_ANSWERS: [RegExp, string][] = personAnswers({ first: "Alex", last: "Testcase", email: "alex.testcase@example.test", phone: "+1 555-0100" });
 
 // The send stand-in for an application the preparation made (R9-F; the card-cloud route's send sandbox): the real engine
 // at Submit re-plans the form from the facts it is handed and refuses unless that application's approval hash is the one

@@ -9,6 +9,9 @@
 // deno-lint-ignore-file no-explicit-any
 
 const POSTINGS: any[] = JSON.parse(await Deno.readTextFile(new URL("./tasks.json", import.meta.url))).postings;
+// The end-to-end eval's scaled set (e2e/generate.ts) brings its own postings: added before its run, so a pick from a search
+// result is completed from them as from the task eval's own.
+export function addPostings(ps: any[]) { const have = new Set(POSTINGS.map((p) => p.job_id)); for (const p of ps) if (!have.has(p.job_id)) { POSTINGS.push(p); have.add(p.job_id); } }
 export type OracleStep = { capability: string; text: string; args?: Record<string, any> };
 const oracle = new Map<string, OracleStep[]>();
 export const calls: { kind: "plan" | "agent" | "draft" | "other"; user: string }[] = [];

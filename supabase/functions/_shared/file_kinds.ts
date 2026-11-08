@@ -210,7 +210,9 @@ function marketBrief(x: Record<string, any>, v: V) {
   const out = { variant: "market", title: v.str(x.title, "title", { max: 80, links: false }), subject: v.str(x.subject, "subject", { max: 120 }), thesis: v.str(x.thesis, "thesis", { max: 160, links: false }),
     summary: v.list(x.summary, "summary", 1, 5).map((r, i) => line(r, `summary[${i}]`, true)), ...(comparison ? { comparison } : {}),
     conditions: v.list(x.conditions, "conditions", 1, 6).map((r, i) => line(r, `conditions[${i}]`, false)),
-    risks: v.list(x.risks, "risks", 1, 6).map((r, i) => line(r, `risks[${i}]`, false)), sources };
+    risks: v.list(x.risks, "risks", 1, 6).map((r, i) => line(r, `risks[${i}]`, false)),
+    // R9 free sources: what no free source supplied (code-written from the sources' outcomes, D-007); optional, at most 8.
+    ...(x.gaps !== undefined ? { gaps: v.list(x.gaps, "gaps", 1, 8).map((g, i) => v.str(g, `gaps[${i}]`, { max: 200, links: false })) } : {}), sources };
   for (let i = 1; i <= n; i++) if (!used.has(i)) v.err(`sources[${i - 1}]`, "is not cited by any line; leave it out");
   return out;
 }
@@ -408,7 +410,8 @@ function marketHtml(d: any): string {
   // visual label (aria-hidden; the table's own headers still name the cell), so no column is ever cut off at phone width.
   const table = c ? `<div class="tbl rb-tbl" tabindex="0" role="region" aria-label="Comparison table"><table><caption class="sr">Comparison</caption><thead><tr><th scope="col"><span class="sr">Item</span></th>${opts.map((o: string) => `<th scope="col">${esc(o)}</th>`).join("")}</tr></thead><tbody>${(c.rows ?? []).map((r: any) => `<tr><th scope="row">${esc(r.label)}</th>${(r.cells ?? []).map((x: any, i: number) => `<td><span class="rb-k" aria-hidden="true">${esc(opts[i] ?? "")}</span><span class="rb-v">${cell(x)}</span></td>`).join("")}</tr>`).join("")}</tbody></table></div>` : "";
   const srcs = `<ol class="rb-src">${(d.sources ?? []).map((s: any, i: number) => `<li id="src-${i + 1}"><span class="rb-n">[${i + 1}]</span>${linkHtml(s.url, s.title) || esc(s.title)}<span class="meta">${esc(hostOf(s.url))} · Read ${esc(DAY(s.fetched_at))}</span></li>`).join("")}</ol>`;
-  return cover + sec("Summary", list(d.summary ?? [], true)) + sec("Comparison", table) + sec("What would have to be true", list(d.conditions ?? [], false)) + sec("Risks", list(d.risks ?? [], false)) + sec("Sources", srcs);
+  return cover + sec("Summary", list(d.summary ?? [], true)) + sec("Comparison", table) + sec("What would have to be true", list(d.conditions ?? [], false)) + sec("Risks", list(d.risks ?? [], false))
+    + sec("Not found in a free source", (d.gaps ?? []).length ? `<ul class="rb-list rb-gaps">${d.gaps.map((g: string) => `<li><span class="rb-t">${esc(g)}</span></li>`).join("")}</ul>` : "") + sec("Sources", srcs);
 }
 function marketText(d: any, L: string[]) {
   const c = (x: any) => Array.isArray(x?.cite) && x.cite.length ? ` ${x.cite.map((i: number) => `[${i}]`).join("")}` : "";
@@ -421,6 +424,7 @@ function marketText(d: any, L: string[]) {
   }
   L.push("## What would have to be true"); (d.conditions ?? []).forEach((f: any) => L.push(`- ${f.text}${c(f)} [Trainee's reading]`)); L.push("");
   L.push("## Risks"); (d.risks ?? []).forEach((f: any) => L.push(`- ${f.text}${c(f)} [Trainee's reading]`)); L.push("");
+  if ((d.gaps ?? []).length) { L.push("## Not found in a free source"); d.gaps.forEach((g: string) => L.push(`- ${g}`)); L.push(""); }
   L.push("## Sources"); (d.sources ?? []).forEach((s: any, i: number) => L.push(`${i + 1}. ${s.title}: ${s.url} (read ${DAY(s.fetched_at)})`)); L.push("");
 }
 

@@ -128,8 +128,7 @@ import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a paste
 import { supabaseFileStore } from "../trainee-file/store.ts";
 import { createFileService, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
 import { researchBriefOn, researchReplyOn } from "../_shared/research_reply.ts"; // R9-C
-import { fetchSources } from "../_shared/research_sources.ts";
-import { declaredFetch, searchProviderFor } from "../_shared/research_search.ts";
+import { researchSearchFor } from "../_shared/research_free_sources.ts";
 import { prepFileTurn } from "./career_prep_file.ts"; // BETA C03: the interview prep File
 import { factsForTurn, replyWriterOn, rewrites, writable, writeReply, writerChannel } from "../_shared/career_reply_writer.ts"; // V1 TEXTING VOICE
 import { correctedAsk } from "../_shared/search_correction.ts"; // SPEC 2.3
@@ -1289,10 +1288,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // Open career questions: cached, capped web search. DARK: offered only when the gateway's web search is available (WEB_SEARCH_AVAILABLE, false until a live call proves it). The cache is per instance
           // until a table is approved by the owner; the brief is returned as markdown until PR #280 (file kinds) supplies `publish`.
           // R9-C market research (CAREER_RESEARCH_REPLY=on; off by default): Brave with the owner's BRAVE_SEARCH_API_KEY, else the
-          // no-key first-party sources (SEC EDGAR, BLS, company sites). The research brief File only with CAREER_RESEARCH_BRIEF=on.
+          // free first-party sources (research_free_sources.ts: SEC EDGAR, BLS OEWS/OOH, USAJOBS, ATS job boards, Wikipedia/Wikidata,
+          // GitHub, news RSS, company sites). Every page is read through the free reader: the resolved addresses of every hop,
+          // robots.txt, the never-list. The research brief File only with CAREER_RESEARCH_BRIEF=on.
           market: researchReplyOn(Deno.env) && cfg.apiKey ? {
-            search: searchProviderFor(Deno.env, fetch),
-            read: (urls) => fetchSources(urls, { fetch: declaredFetch(fetch, Deno.env.get("RESEARCH_USER_AGENT")), max: 8 }),
+            ...researchSearchFor(Deno.env, fetch),
             draft: async (p) => { const r = await callModel(cfg, { system: p.system, messages: p.messages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: 1800 }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); },
             publish: researchBriefOn(Deno.env) ? async (data) => { const r = await createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }).create(user.id, "research_brief", data); return r.ok && r.url ? { url: r.url } : null; } : null,
           } : null,

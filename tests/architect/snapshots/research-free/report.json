@@ -1,0 +1,773 @@
+{
+ "at": "2026-11-08T15:00:00.000Z",
+ "seed": 20261108,
+ "pass": 30,
+ "total": 30,
+ "rows": [
+  {
+   "id": "F-RE-091",
+   "family": "research.employer",
+   "style": "typo",
+   "question": "is Silverpine Robotics a godo pace to start? give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Silverpine Robotics, so its open roles were not counted.",
+    "Wikipedia has no company article found for Silverpine Robotics.",
+    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+   ],
+   "dropped": 0,
+   "notes": [
+    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "4 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-091-390.png",
+    "tests/architect/snapshots/research-free/F-RE-091-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-001",
+   "family": "research.market",
+   "style": "slang",
+   "question": "yo research the new grad software engineering job market in New York and give me a file no cap",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-001-390.png",
+    "tests/architect/snapshots/research-free/F-RE-001-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-141",
+   "family": "research.pay",
+   "style": "plain",
+   "question": "research software engineer pay in New York and give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No government pay figure: the question did not give an occupation code, so BLS wage data was not read."
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-141-390.png",
+    "tests/architect/snapshots/research-free/F-RE-141-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-181",
+   "family": "research.compare",
+   "style": "typo",
+   "question": "compare Oakridge Media and Kestrel Analytics as placees to start my carer and give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Oakridge Media, so its open roles were not counted.",
+    "Wikipedia has no company article found for Oakridge Media.",
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Kestrel Analytics, so its open roles were not counted.",
+    "Wikipedia has no company article found for Kestrel Analytics.",
+    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+   ],
+   "dropped": 0,
+   "notes": [
+    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "5 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-181-390.png",
+    "tests/architect/snapshots/research-free/F-RE-181-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-092",
+   "family": "research.employer",
+   "style": "es",
+   "question": "investiga Delta Bay Freight como empleador para recién graduados y mándame un archivo",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Delta Bay Freight, so its open roles were not counted.",
+    "Wikipedia has no company article found for Delta Bay Freight.",
+    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+   ],
+   "dropped": 0,
+   "notes": [
+    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "4 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-092-390.png",
+    "tests/architect/snapshots/research-free/F-RE-092-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-002",
+   "family": "research.market",
+   "style": "hi",
+   "question": "Austin mein new grad software engineering ka job market research karke file bhejo",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-002-390.png",
+    "tests/architect/snapshots/research-free/F-RE-002-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-142",
+   "family": "research.pay",
+   "style": "texting",
+   "question": "research software engineer pay in Austin and give me a file pls",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No government pay figure: the question did not give an occupation code, so BLS wage data was not read."
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-142-390.png",
+    "tests/architect/snapshots/research-free/F-RE-142-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-182",
+   "family": "research.compare",
+   "style": "es",
+   "question": "compara Kestrel Media y Ironleaf Software para empezar mi carrera y dame un archivo",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Kestrel Media, so its open roles were not counted.",
+    "Wikipedia has no company article found for Kestrel Media.",
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Ironleaf Software, so its open roles were not counted.",
+    "Wikipedia has no company article found for Ironleaf Software.",
+    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+   ],
+   "dropped": 0,
+   "notes": [
+    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "5 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-182-390.png",
+    "tests/architect/snapshots/research-free/F-RE-182-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-093",
+   "family": "research.employer",
+   "style": "plain",
+   "question": "is Hollow Oak Logistics a good place to start? give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Hollow Oak Logistics, so its open roles were not counted.",
+    "Wikipedia has no company article found for Hollow Oak Logistics.",
+    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+   ],
+   "dropped": 0,
+   "notes": [
+    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "4 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-093-390.png",
+    "tests/architect/snapshots/research-free/F-RE-093-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-003",
+   "family": "research.market",
+   "style": "texting",
+   "question": "make me a file on data science hiring in Denver 🙏",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No government pay figure: the question did not give an occupation code, so BLS wage data was not read."
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-003-390.png",
+    "tests/architect/snapshots/research-free/F-RE-003-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-143",
+   "family": "research.pay",
+   "style": "plain",
+   "question": "what do entry-level financial analysts earn in Atlanta? put it in a file with sources",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No government pay figure: the question did not give an occupation code, so BLS wage data was not read."
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-143-390.png",
+    "tests/architect/snapshots/research-free/F-RE-143-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-183",
+   "family": "research.compare",
+   "style": "plain",
+   "question": "compare Lumina Software and Keystone Labs as places to start my career and give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Lumina Software, so its open roles were not counted.",
+    "Wikipedia has no company article found for Lumina Software.",
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Keystone Labs, so its open roles were not counted.",
+    "Wikipedia has no company article found for Keystone Labs.",
+    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+   ],
+   "dropped": 0,
+   "notes": [
+    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "5 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-183-390.png",
+    "tests/architect/snapshots/research-free/F-RE-183-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-094",
+   "family": "research.employer",
+   "style": "es",
+   "question": "investiga Redwood Capital como empleador para recién graduados y mándame un archivo",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Redwood Capital, so its open roles were not counted.",
+    "Wikipedia has no company article found for Redwood Capital.",
+    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+   ],
+   "dropped": 0,
+   "notes": [
+    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "4 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-094-390.png",
+    "tests/architect/snapshots/research-free/F-RE-094-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-004",
+   "family": "research.market",
+   "style": "plain",
+   "question": "make me a file on financial analyst hiring in Chicago",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No government pay figure: the question did not give an occupation code, so BLS wage data was not read."
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-004-390.png",
+    "tests/architect/snapshots/research-free/F-RE-004-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-144",
+   "family": "research.pay",
+   "style": "texting",
+   "question": "research software engineer pay in Atlanta and give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No government pay figure: the question did not give an occupation code, so BLS wage data was not read."
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-144-390.png",
+    "tests/architect/snapshots/research-free/F-RE-144-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-184",
+   "family": "research.compare",
+   "style": "hi",
+   "question": "Brightline Security aur Corvid Foods ko career start ke liye compare karo, file do",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Brightline Security, so its open roles were not counted.",
+    "Wikipedia has no company article found for Brightline Security.",
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Corvid Foods, so its open roles were not counted.",
+    "Wikipedia has no company article found for Corvid Foods.",
+    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+   ],
+   "dropped": 0,
+   "notes": [
+    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "5 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-184-390.png",
+    "tests/architect/snapshots/research-free/F-RE-184-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-095",
+   "family": "research.employer",
+   "style": "texting",
+   "question": "research Truecourse Systems as an employer 4 new grads and send me a file asap",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Truecourse Systems, so its open roles were not counted.",
+    "Wikipedia has no company article found for Truecourse Systems.",
+    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+   ],
+   "dropped": 0,
+   "notes": [
+    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "4 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-095-390.png",
+    "tests/architect/snapshots/research-free/F-RE-095-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-005",
+   "family": "research.market",
+   "style": "hi",
+   "question": "Seattle mein data analyst ka job market research karke file bhejo",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-005-390.png",
+    "tests/architect/snapshots/research-free/F-RE-005-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-145",
+   "family": "research.pay",
+   "style": "texting",
+   "question": "research software engineer pay in San Francisco and give me a file thx",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No government pay figure: the question did not give an occupation code, so BLS wage data was not read."
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-145-390.png",
+    "tests/architect/snapshots/research-free/F-RE-145-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-185",
+   "family": "research.compare",
+   "style": "texting",
+   "question": "compare Silverpine Labs and Fernhill Bio as places to start my career and give me a file asap",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Silverpine Labs, so its open roles were not counted.",
+    "Wikipedia has no company article found for Silverpine Labs.",
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Fernhill Bio, so its open roles were not counted.",
+    "Wikipedia has no company article found for Fernhill Bio.",
+    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+   ],
+   "dropped": 0,
+   "notes": [
+    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "5 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-185-390.png",
+    "tests/architect/snapshots/research-free/F-RE-185-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-096",
+   "family": "research.employer",
+   "style": "es",
+   "question": "investiga Lumina Insurance como empleador para recién graduados y mándame un archivo",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Lumina Insurance, so its open roles were not counted.",
+    "Wikipedia has no company article found for Lumina Insurance.",
+    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+   ],
+   "dropped": 0,
+   "notes": [
+    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "4 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-096-390.png",
+    "tests/architect/snapshots/research-free/F-RE-096-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-006",
+   "family": "research.market",
+   "style": "plain",
+   "question": "how's the frontend engineering market in Denver? put it in a file with sources",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-006-390.png",
+    "tests/architect/snapshots/research-free/F-RE-006-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-146",
+   "family": "research.pay",
+   "style": "hi",
+   "question": "New York mein entry-level data scientist kitna kamate hain? sources ke saath file do",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-146-390.png",
+    "tests/architect/snapshots/research-free/F-RE-146-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-186",
+   "family": "research.compare",
+   "style": "typo",
+   "question": "compare Quasar Bank and Hollow Oak Freight as placces to start my carreer and give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Quasar Bank, so its open roles were not counted.",
+    "Wikipedia has no company article found for Quasar Bank.",
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Hollow Oak Freight, so its open roles were not counted.",
+    "Wikipedia has no company article found for Hollow Oak Freight.",
+    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+   ],
+   "dropped": 0,
+   "notes": [
+    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "5 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-186-390.png",
+    "tests/architect/snapshots/research-free/F-RE-186-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-097",
+   "family": "research.employer",
+   "style": "plain",
+   "question": "is Quarry Energy a good place to start? give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Quarry Energy, so its open roles were not counted.",
+    "Wikipedia has no company article found for Quarry Energy.",
+    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+   ],
+   "dropped": 0,
+   "notes": [
+    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "4 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-097-390.png",
+    "tests/architect/snapshots/research-free/F-RE-097-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-007",
+   "family": "research.market",
+   "style": "typo",
+   "question": "make me a fiel on financial analyst hirnig in Chicago",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No government pay figure: the question did not give an occupation code, so BLS wage data was not read."
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-007-390.png",
+    "tests/architect/snapshots/research-free/F-RE-007-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-147",
+   "family": "research.pay",
+   "style": "es",
+   "question": "¿cuánto gana un data scientist junior en Atlanta? ponlo en un archivo con fuentes",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-147-390.png",
+    "tests/architect/snapshots/research-free/F-RE-147-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-187",
+   "family": "research.compare",
+   "style": "plain",
+   "question": "compare Willow Energy and Elmstead Health as places to start my career and give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Willow Energy, so its open roles were not counted.",
+    "Wikipedia has no company article found for Willow Energy.",
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Elmstead Health, so its open roles were not counted.",
+    "Wikipedia has no company article found for Elmstead Health.",
+    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+   ],
+   "dropped": 0,
+   "notes": [
+    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "5 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-187-390.png",
+    "tests/architect/snapshots/research-free/F-RE-187-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-098",
+   "family": "research.employer",
+   "style": "texting",
+   "question": "research Delta Bay Insurance as an employer 4 new grads and send me a file 🙏",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Delta Bay Insurance, so its open roles were not counted.",
+    "Wikipedia has no company article found for Delta Bay Insurance.",
+    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+   ],
+   "dropped": 0,
+   "notes": [
+    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "4 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-098-390.png",
+    "tests/architect/snapshots/research-free/F-RE-098-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-008",
+   "family": "research.market",
+   "style": "plain",
+   "question": "research the financial analyst job market in Seattle and give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-008-390.png",
+    "tests/architect/snapshots/research-free/F-RE-008-1280.png"
+   ],
+   "pass": true
+  }
+ ]
+}

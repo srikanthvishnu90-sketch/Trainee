@@ -47,6 +47,9 @@ export const SHARED_REPLY_MODULES = [
   // R9-C (2026-11-07): market research on the reply path: the search provider and what it imports (sources, the research
   // reply, its report store and the artifact it is delivered as).
   "research_search.ts", "research_sources.ts", "research_reply.ts", "research_report_store.ts", "channel_artifacts.ts",
+  // R9 free sources (2026-11-08): the no-key sources, the reader's DNS and robots checks, and the SSRF address and robots.txt
+  // helpers they use (web_gate.ts, with the types it imports).
+  "research_free_sources.ts", "contact_sources/web_gate.ts", "contact_sources/types.ts", "contact_sources/suppression.ts",
   // R9 outreach (2026-11-08): who may be written to (no-reply, role and ATS/job-board inboxes never) and the staged route's
   // reading of an ask to write to someone.
   "automated_inbox.ts", "outreach_ask.ts",

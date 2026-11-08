@@ -16,7 +16,8 @@
 import { isBlockedHost, isHttps, normalizeUrl } from "./research_sources.ts";
 
 type Env = { get(k: string): string | undefined };
-export interface SearchHit { url: string; title: string; provider: "brave" | "sec_edgar" | "bls_oes" | "company_site"; foundAt: number }
+// R9 free sources (2026-11-08): research_free_sources.ts freeProvider proposes the other free kinds.
+export interface SearchHit { url: string; title: string; provider: "brave" | "sec_edgar" | "bls_oes" | "company_site" | "sec_fts" | "bls_ooh" | "usajobs" | "ats_board" | "wikipedia" | "wikidata" | "github" | "news_rss"; foundAt: number }
 // What the turn knows to look for. Free-text queries go to a search engine; the hints go to first-party sources.
 export interface SearchPlan {
   queries: string[]; // at most 3
@@ -25,7 +26,8 @@ export interface SearchPlan {
   soc?: string | null; // a BLS occupation code, "15-1252"
   cbsa?: string | null; // a metro area code, "42660"
 }
-export type SearchOut = { hits: SearchHit[]; notes: string[]; provider: string; searches: number };
+// gaps: what a free source could not supply, in plain words for the brief ("SEC EDGAR has no 10-K for Ramp"), D-007.
+export type SearchOut = { hits: SearchHit[]; notes: string[]; provider: string; searches: number; gaps?: string[] };
 export interface SearchProvider { id: "brave" | "first_party"; needsKey: boolean; search(plan: SearchPlan): Promise<SearchOut> }
 
 export const BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";

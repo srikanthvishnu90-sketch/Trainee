@@ -145,6 +145,7 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
   const openaiVars = Object.keys(Deno.env.toObject()).filter((k) => /^OPENAI_/.test(k));
   const saved: Record<string, string | undefined> = Object.fromEntries([...ENV_KEYS, ...openaiVars].map((k) => [k, Deno.env.get(k)]));
   const realFetch = globalThis.fetch;
+  const realResolveDns = Deno.resolveDns;
   const ats = await new StubAts(POSTINGS.map((p) => ({ board: p.job_id.split(":")[1], job: p.job_id.split(":").slice(2).join(":"), title: p.title, company: p.company, family: atsRef(p.url)?.family ?? "greenhouse", url: p.url }))).start();
   const gmail = new FakeGmail();
   // As production's database: the migrations and the card-cloud bridge go-live applies (apply-rails-and-seed.sh), with its
@@ -213,6 +214,13 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
     Deno.env.set("CAREER_REPLY_MODEL", Deno.env.get("CAREER_REPLY_MODEL") || "claude-haiku-5-5");
     // The outside world: the model (the fake, or Anthropic on a paid run), every *.greenhouse.io host (the stub ATS, over a
     // real HTTP hop), Gmail (the rail's fake), and the stub web's own .e2e.test sites (web.ts). Nothing else is reachable.
+    // R9 free sources: the research reader checks every hop's resolved addresses (research_free_sources.ts systemResolver reads
+    // Deno.resolveDns at call time). The stub web's hosts answer one public documentation address (TEST-NET-3); every other
+    // name has no answer here, as nothing else is reachable.
+    (Deno as any).resolveDns = async (host: string, type: string) => {
+      if (isStubWebHost(String(host).toLowerCase())) return type === "A" ? ["203.0.113.80"] : [];
+      throw new Deno.errors.NotFound(`no records for ${host} in the e2e eval`);
+    };
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
       const url = new URL(req.url);
@@ -382,6 +390,7 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
     for (const [k, v] of Object.entries(saved)) { if (v === undefined) Deno.env.delete(k); else Deno.env.set(k, v); }
     h?.restore();
     globalThis.fetch = realFetch;
+    (Deno as any).resolveDns = realResolveDns;
     await ats.stop();
     await pg.stop();
   }

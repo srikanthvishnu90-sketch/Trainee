@@ -13,6 +13,7 @@
 // Never an invented address: a recipient is a row of the person's own contacts, with the address on that row, or no one.
 // The model writes only when the caller passes one (CAREER_NETWORKING_DRAFT=on, metered); without it the reply names who
 // would be written to and that nothing was drafted.
+import { AUTOMATED_WHY, automatedInbox } from "./automated_inbox.ts";
 import { type ContactRow, contactsOf, firmKey, importContactsCsv, importContactsFile, MX_NOT_WIRED, type MxResolver, normalizeFirm, sameFirm, verifyRows } from "./career_contacts.ts";
 import { legacyRows } from "./career_referrals.ts";
 import { parsePeopleAsk, type PeopleDeps, type PersonRec, peopleTurn } from "./career_people.ts";
@@ -190,6 +191,9 @@ const CONTACTED = "you already have a draft or email to them";
 // never anyone already written to, never the do-not-contact list).
 async function heldWhy(r: ContactRow, contacted: Set<string>, dnc: Set<string>, blocked: Map<string, "opted_out" | "bounced"> = new Map()): Promise<string | null> {
   if (!r.email) return "no email address in your contacts, and I never guess one";
+  // R9 OUTREACH SAFETY: a no-reply sender, a role inbox, or an address on an ATS's or job board's domain is no person.
+  const auto = automatedInbox(r.email);
+  if (auto) return `${r.email} ${AUTOMATED_WHY[auto]}`;
   if (!r.verified) {
     const c = r.check;
     return c?.syntax === "fail" ? `"${r.email}" is not a valid address` : c?.role === "flagged" ? `${r.email} is a shared inbox, not a person` : c?.disposable === "flagged" ? `${r.email} is a throwaway address` : c?.mx === "fail" ? `${r.email}'s domain has no mail server` : `${r.email} did not pass the address checks`;

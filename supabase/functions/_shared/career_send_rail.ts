@@ -23,6 +23,7 @@
 // with a line break or a control character is refused, never cleaned.
 import { messageOf, payloadHash, type OutreachDraft } from "./career_outreach.ts";
 import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036/D-037 release flags
+import { automatedInbox } from "./automated_inbox.ts";
 
 export const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
@@ -83,6 +84,15 @@ export function buildMime(m: Mail, o: { unsubscribe?: Unsubscribe | null } = {})
 export const rawOf = (m: Mail, o: { unsubscribe?: Unsubscribe | null } = {}) => b64(utf8(buildMime(m, o))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 // The approval hash of an exact message: the same SHA-256 the outreach approval binds (career_outreach.ts payloadHash).
 export const mailHash = (m: Mail) => payloadHash({ to: m.to, subject: m.subject, text: m.text });
+// R9 OUTREACH SAFETY: the rail's last check on the recipient (automated_inbox.ts). Outreach and replies are written to a
+// person, so never to a no-reply sender, a role inbox, or an address on an application system's or job board's domain.
+// An application email goes to the employer's own apply address (apply_email.ts picks it; careers@ is one), so for it
+// only a no-reply sender is refused here.
+export function notAPerson(kind: Kind | string, to: string): string | null {
+  const why = automatedInbox(to);
+  if (!why) return null;
+  return kind === "application" && why !== "no_reply" ? null : why;
+}
 
 // ------------------------------------------------------------------------------------------------ queueing
 // Where an address came from (D-MN-3 replaced, 2026-10-27 21:32 CDT), carried so the card can show it: published (on a
@@ -117,6 +127,7 @@ export async function queueApproved(d: QueueDeps, userId: string, items: SendIte
     if (it.provider != null && it.provider !== "gmail" && it.provider !== "outlook") { refuse("invalid"); continue; }
     const m: Mail = { to: String(it.to ?? ""), subject: String(it.subject ?? ""), text: String(it.text ?? "") };
     if (unsafe(m)) { refuse("unsafe_header"); continue; }
+    if (notAPerson(it.kind, m.to)) { refuse("not_a_person"); continue; }
     if ((await mailHash(m)) !== it.approvalHash) { refuse("changed"); continue; }
     if (it.addressType != null && !ADDRESS_TYPES.includes(it.addressType)) { refuse("invalid"); continue; }
     ok.push({ i, p: { kind: it.kind, source_id: it.sourceId, approval_hash: it.approvalHash, to: m.to, subject: m.subject, body: m.text, provider: it.provider ?? chosen,
@@ -358,6 +369,8 @@ async function sendOne(d: WorkerDeps, it: Claimed, stats: WorkerStats, worker: s
   // The payload is exactly what was approved: the queued copy hashes to the approval, and for outreach the draft as it is
   // stored now (read by the claim under its row lock) still says exactly the same thing.
   if (unsafe(m)) { stats.refused++; return out("refused", { detail: "unsafe header" }); }
+  const automated = notAPerson(it.kind, m.to);
+  if (automated) { stats.refused++; return out("refused", { detail: `not a person's address (${automated})` }); }
   if ((await mailHash(m)) !== it.approval_hash) { stats.refused++; return out("refused", { detail: "changed after approval" }); }
   if (it.kind === "outreach") {
     const dr = it.draft ?? (d.drafts ? (await d.drafts(it.user_id, [it.source_id]))[0] : null);

@@ -28,6 +28,7 @@ import { readsAsInstruction } from "./career_people_import.ts";
 // OUTREACH R4: the one set of rules for what comes back on a thread (the rail's reply check reads them too). Functions only:
 // career_send_rail.ts imports this module back, and neither reads the other at load time.
 import { autoReply, deliveryNotice, newText, optedOut } from "./career_send_rail.ts";
+import { AUTOMATED_WHY, automatedInbox } from "./automated_inbox.ts";
 
 export type ModelFn = (payload: any) => Promise<any>;
 export interface Recipient { name: string; firm: string; title: string; school: string; email: string; source: string; prior_firms?: string[]; address?: "published" | "inferred" }
@@ -853,6 +854,9 @@ export async function outreachTurn(o: {
   for (const n of want) {
     const d = byN.get(n)!;
     if (d.status !== "shown") { not.push(`${n} (${d.status})`); continue; }
+    // R9 OUTREACH SAFETY: never approved for a no-reply sender, a role inbox, or an ATS or job-board address.
+    const auto = automatedInbox(d.recipient.email);
+    if (auto) { not.push(`${n} (${d.recipient.email} ${AUTOMATED_WHY[auto]})`); continue; }
     const h = await payloadHash(messageOf(d));
     if (h !== d.hash) { not.push(`${n} (changed since it was shown)`); continue; }
     if (await o.store.update(o.userId, { ...d, status: "approved", approved_hash: h, approved_at: new Date(o.now).toISOString() }, { status: "shown", hash: h })) {
@@ -896,6 +900,7 @@ export async function outreachTurn(o: {
 }
 // Why the sending rail refused an approved draft for good, in the person's words (the reasons career_send_enqueue gives).
 export const RAIL_REFUSED: Record<string, string> = {
+  not_a_person: "that address is an automated or shared inbox, not a person",
   opted_out: "they asked not to be contacted", bad_address: "that address bounced before, so no one emails it again",
   already_emailed: "you already emailed them; Trainee never sends a second first email to the same person",
 };

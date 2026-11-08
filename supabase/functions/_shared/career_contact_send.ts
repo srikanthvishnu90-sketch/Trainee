@@ -14,8 +14,10 @@
 //   approveContactCard the yes must carry the card's hash; the drafts are stored approved (career_outreach_drafts) and
 //                      queued on the rail, only while outreach is still switched on. At most `dailyNew` (20) new contacts
 //                      per person per UTC day (capDay: the server's clock, never the caller's time zone), each spread
-//                      `spreadMinutes` after the last; at most 2 follow-ups, 4 to 7 days apart, which the rail stops on a
-//                      reply, a bounce or an opt-out (career_send_claim reads the thread first).
+//                      `spreadMinutes` after the last; one sequence per address, ever (an address already in the send log,
+//                      which outlives both forgets, is refused before anything is saved or queued); at most 2 follow-ups,
+//                      4 to 7 days apart, which the rail stops on a reply, a bounce or an opt-out (career_send_claim reads
+//                      the thread first).
 import { emailHash as hashOf, messageOf, OPT_OUT_LINE, type OutreachDraft, type OutreachStore, payloadHash, type Recipient } from "./career_outreach.ts";
 import { type AddressType, type QueueDeps, queueApproved, type QueueResult } from "./career_send_rail.ts";
 import { type ContactDraft, type ContactIn, SPAM_PHRASES } from "./career_contact_draft.ts";
@@ -88,11 +90,14 @@ export async function contactCard(o: { contact: ContactIn; draft: ContactDraft; 
 export interface SendLimits {
   countToday(userId: string, day: string): Promise<number>;
   record(p: { user: string; email_hash: string; step: number; day: string; cap: number; queue_id?: string | null }): Promise<"recorded" | "already_recorded" | "daily_limit">;
+  // The earliest day any email of this address's sequence is in the log, or null: one address gets one sequence, ever.
+  sentOn(userId: string, emailHash: string): Promise<string | null>;
 }
 export function memorySendLimits(): SendLimits {
   const rows: { user: string; email_hash: string; step: number; day: string }[] = [];
   return {
     async countToday(u, day) { return rows.filter((r) => r.user === u && r.day === day && r.step === 0).length; },
+    async sentOn(u, h) { return rows.filter((r) => r.user === u && r.email_hash === h).map((r) => r.day).sort()[0] ?? null; },
     async record(p) {
       if (rows.some((r) => r.user === p.user && r.email_hash === p.email_hash && r.step === p.step)) return "already_recorded";
       if (p.step === 0 && rows.filter((r) => r.user === p.user && r.day === p.day && r.step === 0).length >= p.cap) return "daily_limit";
@@ -106,7 +111,7 @@ export const capDay = (now: number) => new Date(now).toISOString().slice(0, 10);
 // A date as the person sees it (their own time zone), for display only; the cap never reads it.
 export const dayIn = (now: number, tz?: string | null) => new Intl.DateTimeFormat("en-CA", { timeZone: tz || "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 
-export type Approved = { ok: true; queued: QueueResult[]; send_at: string[] } | { ok: false; why: "off" | "changed" | "suppressed" | "daily_limit" | "refused"; reply: string; queued?: QueueResult[] };
+export type Approved = { ok: true; queued: QueueResult[]; send_at: string[] } | { ok: false; why: "off" | "changed" | "suppressed" | "daily_limit" | "already_contacted" | "refused"; reply: string; queued?: QueueResult[] };
 export async function approveContactCard(o: {
   userId: string; card: Extract<ContactCard, { ok: true }>; yesHash: string; contact: ContactIn; now: number; config: SendConfig;
   store: Pick<OutreachStore, "saveBatch" | "update">; rail: QueueDeps; limits: SendLimits; suppressed: (emails: string[]) => Promise<Set<string>>;
@@ -120,9 +125,23 @@ export async function approveContactCard(o: {
   if (c.testMode && !c.testRecipients.includes(card.to)) return { ok: false, why: "refused", reply: "Test mode: that address is not on the test list, so nothing was sent." };
   if ((await o.suppressed([card.found, card.to])).size) return { ok: false, why: "suppressed", reply: `${o.contact.person.name} can't be emailed any more (they opted out, or the address bounced).` };
   const day = capDay(o.now), emailHash = await hashOf(card.found);
+  // One address gets one sequence (the first email and at most 2 follow-ups), ever. The send log outlives "forget" and
+  // "forget everything" (20261108130500), while the drafts and the rail's queue do not, so the log decides: an address
+  // already in it, or any step of this card that the log does not newly record, refuses the approval before anything is
+  // saved or queued. Every step is recorded here, up front; the first email's record also takes the day's slot.
+  const already = async (seen?: string | null) => {
+    const on = seen ?? await o.limits.sentOn(o.userId, emailHash);
+    return { ok: false as const, why: "already_contacted" as const, reply: `You already emailed ${o.contact.person.name}${on ? ` on ${on}` : ""}, so I won't email them again.` };
+  };
+  const seen = await o.limits.sentOn(o.userId, emailHash);
+  if (seen) return await already(seen);
   const slot = await o.limits.countToday(o.userId, day);
   const rec = await o.limits.record({ user: o.userId, email_hash: emailHash, step: 0, day, cap: c.dailyNew });
   if (rec === "daily_limit") return { ok: false, why: "daily_limit", reply: `That's ${c.dailyNew} new people today, the most I email in a day. I'll keep this one for tomorrow if you approve it again then.` };
+  if (rec !== "recorded") return await already();
+  for (let i = 1; i < card.mails.length; i++) {
+    if ((await o.limits.record({ user: o.userId, email_hash: emailHash, step: i, day, cap: c.dailyNew })) !== "recorded") return await already();
+  }
   const addressType: AddressType = o.contact.email.method === "first_party_published" || o.contact.email.method === "github_public" ? "published" : "inferred";
   const recipient: Recipient = { name: o.contact.person.name, firm: o.contact.person.company, title: o.contact.person.title, school: "", email: card.to, source: o.contact.person.source_url, address: addressType };
   const drafts = card.mails.map((m, i) => ({ n: i + 1, recipient, subject: m.subject, body: m.body, footer: m.footer, hash: m.hash, status: "shown" as const, shared: [] })) as unknown as Omit<OutreachDraft, "id" | "batch_id" | "thread_id">[];
@@ -139,7 +158,6 @@ export async function approveContactCard(o: {
     const it = item(i, q0.id ?? null);
     const [q] = await queueApproved(o.rail, o.userId, [it]);
     queued.push(q); send_at.push(it.sendAt);
-    await o.limits.record({ user: o.userId, email_hash: emailHash, step: i, day, cap: c.dailyNew, queue_id: q.id ?? null });
   }
   return { ok: true, queued, send_at };
 }

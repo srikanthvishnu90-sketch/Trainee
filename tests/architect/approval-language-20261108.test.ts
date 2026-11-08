@@ -45,7 +45,7 @@ const OTHER_YES: [string, string, string][] = [
   ["hi", "sab bhej do", "send all"], ["hi", "dono bhej do", "send both"], ["hi", "theek hai, bhej do", "yes"], ["hi", "haan isko bhej do", "yes, send it"],
   ["fr", "oui", "yes"], ["fr", "ouais", "yes"], ["fr", "oui, envoie-les", "send all"], ["fr", "envoie-la stp", "yes, send it"], ["fr", "vas-y", "yes"],
   ["fr", "oui, envoie les deux", "send both"], ["fr", "d'accord, envoie", "yes"], ["fr", "oui merci", "yes"],
-  ["de", "ja", "yes"], ["de", "ja bitte", "yes"], ["de", "ja, schick es ab", "yes"], ["de", "schick alle", "send all"], ["de", "ja, beide senden", "send both"],
+  ["de", "ja", "yes"], ["de", "ja bitte", "yes"], ["de", "ja, schick es ab", "yes, send it"], ["de", "schick alle", "send all"], ["de", "ja, beide senden", "send both"],
   ["de", "jawohl", "yes"], ["de", "passt, abschicken", "yes"],
   ["pt", "sim", "yes"], ["pt", "sim, manda", "yes"], ["pt", "sim, envia tudo", "send all"], ["pt", "pode mandar", "yes"], ["pt", "bora", "yes"],
   ["pt", "sim, manda os dois", "send both"], ["pt", "sim obrigado", "yes"],
@@ -217,7 +217,13 @@ Deno.test("approval language/8: cards: a reworded yes approves exactly the card 
     for (const q of d.queue) eq(q.approval, card.items.find((i) => i.prepared_id === q.prepared_id)!.payload_hash, `${message}: queued under the hash shown`);
     return d.queue.map((q) => card.items.find((i) => i.prepared_id === q.prepared_id)!.n).sort((a, b) => a - b);
   };
-  for (const m of ["yes pls", "yep go ahead", "yse", "yes go ahaed", "ok send", "send em all", "yes submit it", "yes send it fr"]) eq(await run(3, m), [1, 2, 3], m);
+  for (const m of ["yes pls", "yep go ahead", "yse", "yes go ahaed", "ok send", "send em all"]) eq(await run(3, m), [1, 2, 3], m);
+  // "it" names one application (S2 review of #605): a card of one, never a card of three
+  // (tests/architect/approval-widening-20261108.test.ts).
+  for (const m of ["yes submit it", "yes send it fr"]) {
+    eq(await run(1, m), [1], `${m}, card of one`);
+    eq(await run(3, m), [], `${m}, card of three: "it" is one, so nothing is approved`);
+  }
   for (const m of ["send 1", "send 1 pls", "approve 1", "snd 1"]) {
     eq(await run(1, m), [1], `${m}, card of one`);
     eq(await run(3, m), [], `${m}, card of three: a count or a number, unclear`);

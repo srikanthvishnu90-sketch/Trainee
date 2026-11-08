@@ -53,6 +53,9 @@ import { modelDerive } from "../_shared/agent/research/derive.ts";
 import { replyFlagsMeta } from "../_shared/agent/loop.ts"; // flag-only reply checks saved with the turn (Greptile on #566)
 import { gatewayGroundSearch, memoryGroundCache } from "../_shared/agent/research/ground.ts";
 const researchCache = memoryGroundCache();
+// R9 free sources: at startup, can this runtime resolve names (Deno.resolveDns)? Logged once (research_dns_probe); when it
+// cannot, the research reader reads nothing (fails closed) instead of fetching without the resolved-address check.
+if (researchReplyOn(Deno.env)) void dnsProbe();
 import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWindow, summaryFor } from "./career_brain.ts";
 import { brainMode, stagedRoute, stagedToolPolicy } from "./career_staged.ts";
 import { turnClock } from "./turn_clock.ts";
@@ -128,7 +131,7 @@ import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a paste
 import { supabaseFileStore } from "../trainee-file/store.ts";
 import { createFileService, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
 import { researchBriefOn, researchReplyOn } from "../_shared/research_reply.ts"; // R9-C
-import { researchSearchFor } from "../_shared/research_free_sources.ts";
+import { dnsProbe, researchSearchFor } from "../_shared/research_free_sources.ts";
 import { prepFileTurn } from "./career_prep_file.ts"; // BETA C03: the interview prep File
 import { factsForTurn, replyWriterOn, rewrites, writable, writeReply, writerChannel } from "../_shared/career_reply_writer.ts"; // V1 TEXTING VOICE
 import { correctedAsk } from "../_shared/search_correction.ts"; // SPEC 2.3

@@ -28,7 +28,10 @@ export type MarketResult =
       comparison: { options: string[]; rows: { label: string; cells: ({ value: string; cite: number[] } | null)[] }[] } | null;
       sources: MarketSource[]; file_url: string | null; dropped: number; notes: string[]; searched: string; note: string;
       // R9 free sources: what no free source could supply, in plain words, shown on the brief (D-007). Empty with a search key.
-      gaps?: string[] };
+      gaps?: string[]; basis?: string[];
+      // The cover thesis: the cited sources every content word of it is on (thesis_cite), else it is marked as a summary of the
+      // cited sections below (thesis_summary). Code decides; the model never writes either.
+      thesis_cite?: number[]; thesis_summary?: boolean };
 
 const squash = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
 const norm = (s: string) => squash(s.normalize("NFC")).toLowerCase().replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
@@ -98,7 +101,8 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   const pages = got.verified.filter((v) => v.status === 200 && isHttps(v.url) && !isBlockedHost(v.url));
   const notes = [...found.notes, ...(got.rejected.length ? [`${got.rejected.length} page(s) could not be opened and were not used`] : [])];
   const searched = found.provider;
-  const gaps = [...new Set((found.gaps ?? []).map(squash).filter((g) => g && g.length <= 200 && linkFree(g)))].slice(0, 8);
+  const lines = (xs: string[] | undefined) => [...new Set((xs ?? []).map(squash).filter((g) => g && g.length <= 240 && linkFree(g)))].slice(0, 8);
+  const gaps = lines(found.gaps), basis = lines(found.basis);
   const none = (): MarketResult => ({ status: "no_sources", format: "inline", notes, searched,
     note: "No source could be opened. Say so plainly in one sentence and give no figure, name or claim from memory. Code adds nothing." });
   if (!pages.length) return none();
@@ -142,6 +146,8 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   const thesis0 = squash(d.thesis), title0 = squash(d.title).slice(0, 80);
   const thesis = thesis0 && thesis0.length <= 160 && linkFree(thesis0) && numsOn(thesis0, cited) ? thesis0 : null;
   const title = title0 && linkFree(title0) && numsOn(title0, cited) ? title0 : squash(i.question).replace(/[?]+$/, "").slice(0, 80);
+  // The thesis's own sources: every cited page that holds all of its content words (and, by numsOn above, its numbers).
+  const thesisCite = thesis ? cited.map((p, k) => ({ p, n: k + 1 })).filter(({ p }) => { const have = contentWords(p.text.slice(0, 60000)); return [...contentWords(thesis)].every((w) => have.has(w)); }).map(({ n }) => n) : [];
   const sources = cited.map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString() }));
 
   // The format: the brain's choice, kept unless a File cannot honestly be made.
@@ -151,16 +157,16 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     else if (!thesis || !points.length || !conditions.length || !risks.length) why = "the sources did not support a full brief";
     else {
       const R = "Reported, not verified";
-      const data = { variant: "market", title, subject: title, thesis, summary: points.map((p) => ({ ...p, source: R })),
+      const data = { variant: "market", title, subject: title, thesis, ...(thesisCite.length ? { thesis_cite: thesisCite } : { thesis_summary: true }), summary: points.map((p) => ({ ...p, source: R })),
         ...(comparison ? { comparison: { options: comparison.options.map((name) => ({ name })), rows: comparison.rows.map((r) => ({ label: r.label, cells: r.cells.map((c) => c ? { value: c.value, source: R, cite: c.cite } : null) })) } } : {}),
-        conditions, risks, ...(gaps.length ? { gaps } : {}), sources: sources.map(({ title: t, url, fetched_at }) => ({ title: t, url, fetched_at })) };
+        conditions, risks, ...(basis.length ? { basis } : {}), ...(gaps.length ? { gaps } : {}), sources: sources.map(({ title: t, url, fetched_at }) => ({ title: t, url, fetched_at })) };
       const made = await i.deps.publish(data).catch(() => null);
       if (made && /^https:\/\//.test(made.url)) { file_url = made.url; i.fileLinks?.push(made.url); } else why = "the brief could not be saved";
     }
     if (why) notes.push(`answered inline: ${why}`);
   }
   const format = file_url ? "file" : "inline";
-  return { status: "ok", format, asked: i.format, title, thesis, points, conditions, risks, comparison, sources, file_url, dropped, notes, searched, ...(gaps.length ? { gaps } : {}),
+  return { status: "ok", format, asked: i.format, title, thesis, points, conditions, risks, comparison, sources, file_url, dropped, notes, searched, ...(gaps.length ? { gaps } : {}), ...(basis.length ? { basis } : {}), ...(thesis ? (thesisCite.length ? { thesis_cite: thesisCite } : { thesis_summary: true }) : {}),
     note: format === "file"
       ? "Reply in one or two plain sentences: the thesis, then that the full brief with its sources is in the file. Write no link and no figure: code sends the file link."
       : "Reply in one to three short sentences using only the points above (and the comparison, if any). Put the source number after each claim, like [1]. Write no link: code adds the numbered sources after your reply. Use no figure, name or date that is not in the points." };

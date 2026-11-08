@@ -11,16 +11,25 @@
    "question": "is Silverpine Robotics a godo pace to start? give me a file",
    "format": "file",
    "file": true,
-   "sources": 2,
-   "summary": 3,
+   "sources": 5,
+   "summary": 5,
    "gaps": [
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Silverpine Robotics, so its open roles were not counted.",
-    "Wikipedia has no company article found for Silverpine Robotics.",
-    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+    "SEC EDGAR has no 10-K for Silverpine Robotics (it may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0116-silverpineroboticsasanemployer.e2e.test/",
+    "https://boards-api.greenhouse.io/v1/boards/silverpinerobotics/jobs",
+    "https://en.wikipedia.org/wiki/Silverpine_Robotics",
+    "https://www.wikidata.org/wiki/Special:EntityData/Q99000101.json",
+    "https://r0116-silverpineroboticsasanemployer.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
-    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "no 10-K on SEC EDGAR for Silverpine Robotics",
     "4 page(s) could not be opened and were not used"
    ],
    "error": null,
@@ -41,6 +50,14 @@
    "sources": 2,
    "summary": 3,
    "gaps": [],
+   "basis": [],
+   "cited": [
+    "https://r0026-newgradsoftwareengineeringjobm.e2e.test/",
+    "https://r0026-newgradsoftwareengineeringjobm.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
    "dropped": 0,
    "notes": [
     "3 page(s) could not be opened and were not used"
@@ -60,10 +77,22 @@
    "question": "research software engineer pay in New York and give me a file",
    "format": "file",
    "file": true,
-   "sources": 2,
-   "summary": 3,
-   "gaps": [
-    "No government pay figure: the question did not give an occupation code, so BLS wage data was not read."
+   "sources": 6,
+   "summary": 5,
+   "gaps": [],
+   "basis": [
+    "Pay figures use BLS occupation 15-1252 (software developers), matched from \"software engineer\" with Trainee's table of BLS job titles, and the New York metro area (CBSA 35620)."
+   ],
+   "cited": [
+    "https://www.bls.gov/oes/current/oes151252.htm",
+    "https://www.bls.gov/oes/current/oes_35620.htm",
+    "https://www.bls.gov/ooh/computer-and-information-technology/software-developers.htm",
+    "https://data.usajobs.gov/api/historicjoa?PositionSeries=2210&StartPositionOpenDate=2026-08-10",
+    "https://r0166-entrylevelsoftwareengineerpayi.e2e.test/",
+    "https://r0166-entrylevelsoftwareengineerpayi.e2e.test/about"
+   ],
+   "thesis_cite": [
+    5
    ],
    "dropped": 0,
    "notes": [
@@ -87,15 +116,22 @@
    "sources": 2,
    "summary": 3,
    "gaps": [
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Oakridge Media, so its open roles were not counted.",
-    "Wikipedia has no company article found for Oakridge Media.",
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Kestrel Analytics, so its open roles were not counted.",
-    "Wikipedia has no company article found for Kestrel Analytics.",
-    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Oakridge Media or Kestrel Analytics, so open roles were not counted.",
+    "Wikipedia has no company article found for Oakridge Media or Kestrel Analytics.",
+    "SEC EDGAR has no 10-K for Oakridge Media or Kestrel Analytics (they may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0206-oakridgemediaandkestrelanalyti.e2e.test/",
+    "https://r0206-oakridgemediaandkestrelanalyti.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
-    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "no 10-K on SEC EDGAR for Oakridge Media",
+    "no 10-K on SEC EDGAR for Kestrel Analytics",
     "5 page(s) could not be opened and were not used"
    ],
    "error": null,
@@ -113,17 +149,27 @@
    "question": "investiga Delta Bay Freight como empleador para recién graduados y mándame un archivo",
    "format": "file",
    "file": true,
-   "sources": 2,
-   "summary": 3,
+   "sources": 5,
+   "summary": 5,
    "gaps": [
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Delta Bay Freight, so its open roles were not counted.",
     "Wikipedia has no company article found for Delta Bay Freight.",
-    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+    "SEC EDGAR has no 10-K for Delta Bay Freight (it may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0117-deltabayfreightasanemployerfor.e2e.test/",
+    "https://api.lever.co/v0/postings/deltabayfreight?mode=json",
+    "https://api.github.com/orgs/deltabayfreight",
+    "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Delta+Bay+Freight%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "https://r0117-deltabayfreightasanemployerfor.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
-    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
-    "4 page(s) could not be opened and were not used"
+    "no 10-K on SEC EDGAR for Delta Bay Freight",
+    "3 page(s) could not be opened and were not used"
    ],
    "error": null,
    "fail": {},
@@ -143,6 +189,14 @@
    "sources": 2,
    "summary": 3,
    "gaps": [],
+   "basis": [],
+   "cited": [
+    "https://r0027-newgradsoftwareengineeringjobm.e2e.test/",
+    "https://r0027-newgradsoftwareengineeringjobm.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
    "dropped": 0,
    "notes": [
     "3 page(s) could not be opened and were not used"
@@ -162,10 +216,22 @@
    "question": "research software engineer pay in Austin and give me a file pls",
    "format": "file",
    "file": true,
-   "sources": 2,
-   "summary": 3,
-   "gaps": [
-    "No government pay figure: the question did not give an occupation code, so BLS wage data was not read."
+   "sources": 6,
+   "summary": 5,
+   "gaps": [],
+   "basis": [
+    "Pay figures use BLS occupation 15-1252 (software developers), matched from \"software engineer\" with Trainee's table of BLS job titles, and the Austin metro area (CBSA 12420)."
+   ],
+   "cited": [
+    "https://www.bls.gov/oes/current/oes151252.htm",
+    "https://www.bls.gov/oes/current/oes_12420.htm",
+    "https://www.bls.gov/ooh/computer-and-information-technology/software-developers.htm",
+    "https://data.usajobs.gov/api/historicjoa?PositionSeries=2210&StartPositionOpenDate=2026-08-10",
+    "https://r0167-entrylevelsoftwareengineerpayi.e2e.test/",
+    "https://r0167-entrylevelsoftwareengineerpayi.e2e.test/about"
+   ],
+   "thesis_cite": [
+    5
    ],
    "dropped": 0,
    "notes": [
@@ -189,15 +255,22 @@
    "sources": 2,
    "summary": 3,
    "gaps": [
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Kestrel Media, so its open roles were not counted.",
-    "Wikipedia has no company article found for Kestrel Media.",
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Ironleaf Software, so its open roles were not counted.",
-    "Wikipedia has no company article found for Ironleaf Software.",
-    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Kestrel Media or Ironleaf Software, so open roles were not counted.",
+    "Wikipedia has no company article found for Kestrel Media or Ironleaf Software.",
+    "SEC EDGAR has no 10-K for Kestrel Media or Ironleaf Software (they may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0207-kestrelmediaandironleafsoftwar.e2e.test/",
+    "https://r0207-kestrelmediaandironleafsoftwar.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
-    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "no 10-K on SEC EDGAR for Kestrel Media",
+    "no 10-K on SEC EDGAR for Ironleaf Software",
     "5 page(s) could not be opened and were not used"
    ],
    "error": null,
@@ -215,16 +288,24 @@
    "question": "is Hollow Oak Logistics a good place to start? give me a file",
    "format": "file",
    "file": true,
-   "sources": 2,
-   "summary": 3,
+   "sources": 5,
+   "summary": 5,
    "gaps": [
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Hollow Oak Logistics, so its open roles were not counted.",
-    "Wikipedia has no company article found for Hollow Oak Logistics.",
-    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+    "Wikipedia has no company article found for Hollow Oak Logistics."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0118-hollowoaklogisticsasanemployer.e2e.test/",
+    "https://api.ashbyhq.com/posting-api/job-board/hollowoaklogistics",
+    "https://www.sec.gov/Archives/edgar/data/9990001/000999000126000002/hoak-10k.htm",
+    "https://www.sec.gov/Archives/edgar/data/9990001/000999000126000007/hoak-8k.htm",
+    "https://r0118-hollowoaklogisticsasanemployer.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
-    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
     "4 page(s) could not be opened and were not used"
    ],
    "error": null,
@@ -244,8 +325,14 @@
    "file": true,
    "sources": 2,
    "summary": 3,
-   "gaps": [
-    "No government pay figure: the question did not give an occupation code, so BLS wage data was not read."
+   "gaps": [],
+   "basis": [],
+   "cited": [
+    "https://r0028-datasciencejobmarketindenver.e2e.test/",
+    "https://r0028-datasciencejobmarketindenver.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
@@ -266,10 +353,22 @@
    "question": "what do entry-level financial analysts earn in Atlanta? put it in a file with sources",
    "format": "file",
    "file": true,
-   "sources": 2,
-   "summary": 3,
-   "gaps": [
-    "No government pay figure: the question did not give an occupation code, so BLS wage data was not read."
+   "sources": 6,
+   "summary": 5,
+   "gaps": [],
+   "basis": [
+    "Pay figures use BLS occupation 13-2051 (financial analysts), matched from \"financial analysts\" with Trainee's table of BLS job titles, and the Atlanta metro area (CBSA 12060)."
+   ],
+   "cited": [
+    "https://www.bls.gov/oes/current/oes132051.htm",
+    "https://www.bls.gov/oes/current/oes_12060.htm",
+    "https://www.bls.gov/ooh/business-and-financial/financial-analysts.htm",
+    "https://data.usajobs.gov/api/historicjoa?PositionSeries=1160&StartPositionOpenDate=2026-08-10",
+    "https://r0168-entrylevelfinancialanalystpayi.e2e.test/",
+    "https://r0168-entrylevelfinancialanalystpayi.e2e.test/about"
+   ],
+   "thesis_cite": [
+    5
    ],
    "dropped": 0,
    "notes": [
@@ -293,15 +392,22 @@
    "sources": 2,
    "summary": 3,
    "gaps": [
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Lumina Software, so its open roles were not counted.",
-    "Wikipedia has no company article found for Lumina Software.",
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Keystone Labs, so its open roles were not counted.",
-    "Wikipedia has no company article found for Keystone Labs.",
-    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Lumina Software or Keystone Labs, so open roles were not counted.",
+    "Wikipedia has no company article found for Lumina Software or Keystone Labs.",
+    "SEC EDGAR has no 10-K for Lumina Software or Keystone Labs (they may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0208-luminasoftwareandkeystonelabsa.e2e.test/",
+    "https://r0208-luminasoftwareandkeystonelabsa.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
-    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "no 10-K on SEC EDGAR for Lumina Software",
+    "no 10-K on SEC EDGAR for Keystone Labs",
     "5 page(s) could not be opened and were not used"
    ],
    "error": null,
@@ -319,16 +425,24 @@
    "question": "investiga Redwood Capital como empleador para recién graduados y mándame un archivo",
    "format": "file",
    "file": true,
-   "sources": 2,
-   "summary": 3,
+   "sources": 3,
+   "summary": 5,
    "gaps": [
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Redwood Capital, so its open roles were not counted.",
     "Wikipedia has no company article found for Redwood Capital.",
-    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+    "SEC EDGAR has no 10-K for Redwood Capital (it may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0119-redwoodcapitalasanemployerforn.e2e.test/",
+    "https://api.smartrecruiters.com/v1/companies/redwoodcapital/postings",
+    "https://r0119-redwoodcapitalasanemployerforn.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
-    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "no 10-K on SEC EDGAR for Redwood Capital",
     "4 page(s) could not be opened and were not used"
    ],
    "error": null,
@@ -348,8 +462,14 @@
    "file": true,
    "sources": 2,
    "summary": 3,
-   "gaps": [
-    "No government pay figure: the question did not give an occupation code, so BLS wage data was not read."
+   "gaps": [],
+   "basis": [],
+   "cited": [
+    "https://r0029-financialanalystjobmarketinchi.e2e.test/",
+    "https://r0029-financialanalystjobmarketinchi.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
@@ -370,10 +490,22 @@
    "question": "research software engineer pay in Atlanta and give me a file",
    "format": "file",
    "file": true,
-   "sources": 2,
-   "summary": 3,
-   "gaps": [
-    "No government pay figure: the question did not give an occupation code, so BLS wage data was not read."
+   "sources": 6,
+   "summary": 5,
+   "gaps": [],
+   "basis": [
+    "Pay figures use BLS occupation 15-1252 (software developers), matched from \"software engineer\" with Trainee's table of BLS job titles, and the Atlanta metro area (CBSA 12060)."
+   ],
+   "cited": [
+    "https://www.bls.gov/oes/current/oes151252.htm",
+    "https://www.bls.gov/oes/current/oes_12060.htm",
+    "https://www.bls.gov/ooh/computer-and-information-technology/software-developers.htm",
+    "https://data.usajobs.gov/api/historicjoa?PositionSeries=2210&StartPositionOpenDate=2026-08-10",
+    "https://r0169-entrylevelsoftwareengineerpayi.e2e.test/",
+    "https://r0169-entrylevelsoftwareengineerpayi.e2e.test/about"
+   ],
+   "thesis_cite": [
+    5
    ],
    "dropped": 0,
    "notes": [
@@ -397,15 +529,22 @@
    "sources": 2,
    "summary": 3,
    "gaps": [
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Brightline Security, so its open roles were not counted.",
-    "Wikipedia has no company article found for Brightline Security.",
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Corvid Foods, so its open roles were not counted.",
-    "Wikipedia has no company article found for Corvid Foods.",
-    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Brightline Security or Corvid Foods, so open roles were not counted.",
+    "Wikipedia has no company article found for Brightline Security or Corvid Foods.",
+    "SEC EDGAR has no 10-K for Brightline Security or Corvid Foods (they may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0209-brightlinesecurityandcorvidfoo.e2e.test/",
+    "https://r0209-brightlinesecurityandcorvidfoo.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
-    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "no 10-K on SEC EDGAR for Brightline Security",
+    "no 10-K on SEC EDGAR for Corvid Foods",
     "5 page(s) could not be opened and were not used"
    ],
    "error": null,
@@ -426,13 +565,21 @@
    "sources": 2,
    "summary": 3,
    "gaps": [
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Truecourse Systems, so its open roles were not counted.",
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Truecourse Systems, so open roles were not counted.",
     "Wikipedia has no company article found for Truecourse Systems.",
-    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+    "SEC EDGAR has no 10-K for Truecourse Systems (it may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0120-truecoursesystemsasanemployerf.e2e.test/",
+    "https://r0120-truecoursesystemsasanemployerf.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
-    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "no 10-K on SEC EDGAR for Truecourse Systems",
     "4 page(s) could not be opened and were not used"
    ],
    "error": null,
@@ -453,6 +600,14 @@
    "sources": 2,
    "summary": 3,
    "gaps": [],
+   "basis": [],
+   "cited": [
+    "https://r0030-dataanalystjobmarketinseattle.e2e.test/",
+    "https://r0030-dataanalystjobmarketinseattle.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
    "dropped": 0,
    "notes": [
     "3 page(s) could not be opened and were not used"
@@ -472,10 +627,22 @@
    "question": "research software engineer pay in San Francisco and give me a file thx",
    "format": "file",
    "file": true,
-   "sources": 2,
-   "summary": 3,
-   "gaps": [
-    "No government pay figure: the question did not give an occupation code, so BLS wage data was not read."
+   "sources": 6,
+   "summary": 5,
+   "gaps": [],
+   "basis": [
+    "Pay figures use BLS occupation 15-1252 (software developers), matched from \"software engineer\" with Trainee's table of BLS job titles, and the San Francisco metro area (CBSA 41860)."
+   ],
+   "cited": [
+    "https://www.bls.gov/oes/current/oes151252.htm",
+    "https://www.bls.gov/oes/current/oes_41860.htm",
+    "https://www.bls.gov/ooh/computer-and-information-technology/software-developers.htm",
+    "https://data.usajobs.gov/api/historicjoa?PositionSeries=2210&StartPositionOpenDate=2026-08-10",
+    "https://r0170-entrylevelsoftwareengineerpayi.e2e.test/",
+    "https://r0170-entrylevelsoftwareengineerpayi.e2e.test/about"
+   ],
+   "thesis_cite": [
+    5
    ],
    "dropped": 0,
    "notes": [
@@ -499,15 +666,22 @@
    "sources": 2,
    "summary": 3,
    "gaps": [
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Silverpine Labs, so its open roles were not counted.",
-    "Wikipedia has no company article found for Silverpine Labs.",
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Fernhill Bio, so its open roles were not counted.",
-    "Wikipedia has no company article found for Fernhill Bio.",
-    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Silverpine Labs or Fernhill Bio, so open roles were not counted.",
+    "Wikipedia has no company article found for Silverpine Labs or Fernhill Bio.",
+    "SEC EDGAR has no 10-K for Silverpine Labs or Fernhill Bio (they may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0210-silverpinelabsandfernhillbioas.e2e.test/",
+    "https://r0210-silverpinelabsandfernhillbioas.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
-    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "no 10-K on SEC EDGAR for Silverpine Labs",
+    "no 10-K on SEC EDGAR for Fernhill Bio",
     "5 page(s) could not be opened and were not used"
    ],
    "error": null,
@@ -528,13 +702,21 @@
    "sources": 2,
    "summary": 3,
    "gaps": [
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Lumina Insurance, so its open roles were not counted.",
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Lumina Insurance, so open roles were not counted.",
     "Wikipedia has no company article found for Lumina Insurance.",
-    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+    "SEC EDGAR has no 10-K for Lumina Insurance (it may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0121-luminainsuranceasanemployerfor.e2e.test/",
+    "https://r0121-luminainsuranceasanemployerfor.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
-    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "no 10-K on SEC EDGAR for Lumina Insurance",
     "4 page(s) could not be opened and were not used"
    ],
    "error": null,
@@ -555,6 +737,14 @@
    "sources": 2,
    "summary": 3,
    "gaps": [],
+   "basis": [],
+   "cited": [
+    "https://r0031-frontendengineeringjobmarketin.e2e.test/",
+    "https://r0031-frontendengineeringjobmarketin.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
    "dropped": 0,
    "notes": [
     "3 page(s) could not be opened and were not used"
@@ -574,9 +764,23 @@
    "question": "New York mein entry-level data scientist kitna kamate hain? sources ke saath file do",
    "format": "file",
    "file": true,
-   "sources": 2,
-   "summary": 3,
+   "sources": 6,
+   "summary": 5,
    "gaps": [],
+   "basis": [
+    "Pay figures use BLS occupation 15-2051 (data scientists), matched from \"data scientist\" with Trainee's table of BLS job titles, and the New York metro area (CBSA 35620)."
+   ],
+   "cited": [
+    "https://www.bls.gov/oes/current/oes152051.htm",
+    "https://www.bls.gov/oes/current/oes_35620.htm",
+    "https://www.bls.gov/ooh/math/data-scientists.htm",
+    "https://data.usajobs.gov/api/historicjoa?PositionSeries=1560&StartPositionOpenDate=2026-08-10",
+    "https://r0171-entryleveldatascientistpayinne.e2e.test/",
+    "https://r0171-entryleveldatascientistpayinne.e2e.test/about"
+   ],
+   "thesis_cite": [
+    5
+   ],
    "dropped": 0,
    "notes": [
     "3 page(s) could not be opened and were not used"
@@ -599,15 +803,22 @@
    "sources": 2,
    "summary": 3,
    "gaps": [
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Quasar Bank, so its open roles were not counted.",
-    "Wikipedia has no company article found for Quasar Bank.",
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Hollow Oak Freight, so its open roles were not counted.",
-    "Wikipedia has no company article found for Hollow Oak Freight.",
-    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Quasar Bank or Hollow Oak Freight, so open roles were not counted.",
+    "Wikipedia has no company article found for Quasar Bank or Hollow Oak Freight.",
+    "SEC EDGAR has no 10-K for Quasar Bank or Hollow Oak Freight (they may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0211-quasarbankandhollowoakfreighta.e2e.test/",
+    "https://r0211-quasarbankandhollowoakfreighta.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
-    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "no 10-K on SEC EDGAR for Quasar Bank",
+    "no 10-K on SEC EDGAR for Hollow Oak Freight",
     "5 page(s) could not be opened and were not used"
    ],
    "error": null,
@@ -628,13 +839,21 @@
    "sources": 2,
    "summary": 3,
    "gaps": [
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Quarry Energy, so its open roles were not counted.",
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Quarry Energy, so open roles were not counted.",
     "Wikipedia has no company article found for Quarry Energy.",
-    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+    "SEC EDGAR has no 10-K for Quarry Energy (it may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0122-quarryenergyasanemployerfornew.e2e.test/",
+    "https://r0122-quarryenergyasanemployerfornew.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
-    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "no 10-K on SEC EDGAR for Quarry Energy",
     "4 page(s) could not be opened and were not used"
    ],
    "error": null,
@@ -654,8 +873,14 @@
    "file": true,
    "sources": 2,
    "summary": 3,
-   "gaps": [
-    "No government pay figure: the question did not give an occupation code, so BLS wage data was not read."
+   "gaps": [],
+   "basis": [],
+   "cited": [
+    "https://r0032-financialanalystjobmarketinchi.e2e.test/",
+    "https://r0032-financialanalystjobmarketinchi.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
@@ -676,9 +901,23 @@
    "question": "¿cuánto gana un data scientist junior en Atlanta? ponlo en un archivo con fuentes",
    "format": "file",
    "file": true,
-   "sources": 2,
-   "summary": 3,
+   "sources": 6,
+   "summary": 5,
    "gaps": [],
+   "basis": [
+    "Pay figures use BLS occupation 15-2051 (data scientists), matched from \"data scientist\" with Trainee's table of BLS job titles, and the Atlanta metro area (CBSA 12060)."
+   ],
+   "cited": [
+    "https://www.bls.gov/oes/current/oes152051.htm",
+    "https://www.bls.gov/oes/current/oes_12060.htm",
+    "https://www.bls.gov/ooh/math/data-scientists.htm",
+    "https://data.usajobs.gov/api/historicjoa?PositionSeries=1560&StartPositionOpenDate=2026-08-10",
+    "https://r0172-entryleveldatascientistpayinat.e2e.test/",
+    "https://r0172-entryleveldatascientistpayinat.e2e.test/about"
+   ],
+   "thesis_cite": [
+    5
+   ],
    "dropped": 0,
    "notes": [
     "3 page(s) could not be opened and were not used"
@@ -701,15 +940,22 @@
    "sources": 2,
    "summary": 3,
    "gaps": [
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Willow Energy, so its open roles were not counted.",
-    "Wikipedia has no company article found for Willow Energy.",
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Elmstead Health, so its open roles were not counted.",
-    "Wikipedia has no company article found for Elmstead Health.",
-    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Willow Energy or Elmstead Health, so open roles were not counted.",
+    "Wikipedia has no company article found for Willow Energy or Elmstead Health.",
+    "SEC EDGAR has no 10-K for Willow Energy or Elmstead Health (they may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0212-willowenergyandelmsteadhealtha.e2e.test/",
+    "https://r0212-willowenergyandelmsteadhealtha.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
-    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "no 10-K on SEC EDGAR for Willow Energy",
+    "no 10-K on SEC EDGAR for Elmstead Health",
     "5 page(s) could not be opened and were not used"
    ],
    "error": null,
@@ -730,13 +976,21 @@
    "sources": 2,
    "summary": 3,
    "gaps": [
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Delta Bay Insurance, so its open roles were not counted.",
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Delta Bay Insurance, so open roles were not counted.",
     "Wikipedia has no company article found for Delta Bay Insurance.",
-    "SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet."
+    "SEC EDGAR has no 10-K for Delta Bay Insurance (it may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0123-deltabayinsuranceasanemployerf.e2e.test/",
+    "https://r0123-deltabayinsuranceasanemployerf.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
    ],
    "dropped": 0,
    "notes": [
-    "SEC EDGAR was not searched: RESEARCH_USER_AGENT (a contact SEC requires) is not set",
+    "no 10-K on SEC EDGAR for Delta Bay Insurance",
     "4 page(s) could not be opened and were not used"
    ],
    "error": null,
@@ -757,6 +1011,14 @@
    "sources": 2,
    "summary": 3,
    "gaps": [],
+   "basis": [],
+   "cited": [
+    "https://r0033-financialanalystjobmarketinsea.e2e.test/",
+    "https://r0033-financialanalystjobmarketinsea.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
    "dropped": 0,
    "notes": [
     "3 page(s) could not be opened and were not used"

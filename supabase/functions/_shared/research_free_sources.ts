@@ -71,6 +71,52 @@ export const OPM_SERIES: Record<string, string> = {
   "17-2051": "0810", "17-2071": "0850", "17-2141": "0830", "29-1141": "0610",
 };
 
+// The role a pay question names, to a SOC code, when the brain passed none (architect, 2026-11-08): Trainee's table of job titles
+// from the BLS SOC 2018 direct-match title list, longest title first. A title with no exact BLS occupation (data analyst) goes to
+// the closest one, and the brief says which code was used and from what words (basis), so the person can judge the match.
+export const SOC_TITLES: [RegExp, string, string][] = [
+  [/\b(?:information\s+security|cyber\s*security|security)\s+analysts?\b/i, "15-1212", "information security analyst"],
+  [/\b(?:computer\s+)?systems?\s+analysts?\b/i, "15-1211", "systems analyst"],
+  [/\bdatabase\s+administrators?\b/i, "15-1242", "database administrator"],
+  [/\b(?:help\s*desk|it\s+support|(?:computer\s+)?support\s+specialists?)\b/i, "15-1232", "IT support specialist"],
+  [/\bweb\s+developers?\b/i, "15-1254", "web developer"],
+  [/\b(?:software|back[\s-]?end|front[\s-]?end|full[\s-]?stack)\s+(?:engineers?|developers?|devs?)\b|\bswes?\b/i, "15-1252", "software engineer"],
+  [/\bdata\s+scientists?\b/i, "15-2051", "data scientist"],
+  [/\bdata\s+analysts?\b/i, "15-2051", "data analyst"],
+  [/\boperations\s+research\s+analysts?\b/i, "15-2031", "operations research analyst"],
+  [/\bstatisticians?\b/i, "15-2041", "statistician"],
+  [/\b(?:market(?:ing)?\s+research|marketing)\s+analysts?\b/i, "13-1161", "market research analyst"],
+  [/\b(?:management\s+(?:analysts?|consultants?)|consultants?)\b/i, "13-1111", "management consultant"],
+  [/\b(?:financial|investment(?:\s+banking)?|equity\s+research)\s+analysts?\b/i, "13-2051", "financial analyst"],
+  [/\b(?:accountants?|auditors?)\b/i, "13-2011", "accountant"],
+  [/\b(?:hr|human\s+resources)\s+(?:specialists?|generalists?)|\brecruiters?\b/i, "13-1071", "human resources specialist"],
+  [/\bmechanical\s+engineers?\b/i, "17-2141", "mechanical engineer"],
+  [/\bcivil\s+engineers?\b/i, "17-2051", "civil engineer"],
+  [/\belectrical\s+engineers?\b/i, "17-2071", "electrical engineer"],
+  [/\b(?:registered\s+)?nurses?\b|\brns?\b/i, "29-1141", "registered nurse"],
+  [/\belectricians?\b/i, "47-2111", "electrician"],
+];
+// Metro areas (OMB CBSA codes, as BLS OEWS uses them) for the cities people name most.
+export const CBSA_CITIES: [RegExp, string, string][] = [
+  [/\b(?:new\s+york|nyc|manhattan|brooklyn)\b/i, "35620", "New York"], [/\bchicago\b/i, "16980", "Chicago"], [/\baustin\b/i, "12420", "Austin"],
+  [/\bseattle\b/i, "42660", "Seattle"], [/\b(?:san\s+francisco|sf|bay\s+area|oakland)\b/i, "41860", "San Francisco"], [/\bsan\s+jose\b/i, "41940", "San Jose"],
+  [/\bboston\b/i, "14460", "Boston"], [/\blos\s+angeles|\bla\b/i, "31080", "Los Angeles"], [/\b(?:washington(?:,?\s+d\.?c\.?)?|dc)\b/i, "47900", "Washington"],
+  [/\batlanta\b/i, "12060", "Atlanta"], [/\bdallas\b/i, "19100", "Dallas"], [/\bdenver\b/i, "19740", "Denver"], [/\bhouston\b/i, "26420", "Houston"],
+  [/\bphiladelphia\b/i, "37980", "Philadelphia"], [/\bmiami\b/i, "33100", "Miami"], [/\bphoenix\b/i, "38060", "Phoenix"], [/\bminneapolis\b/i, "33460", "Minneapolis"],
+  [/\bdetroit\b/i, "19820", "Detroit"], [/\bsan\s+diego\b/i, "41740", "San Diego"], [/\bpittsburgh\b/i, "38300", "Pittsburgh"],
+];
+export function socFor(text: string): { soc: string; title: string; said: string } | null {
+  for (const [re, soc, title] of SOC_TITLES) { const m = re.exec(text); if (m) return { soc, title, said: m[0].trim() }; }
+  return null;
+}
+export function cbsaFor(text: string): { cbsa: string; city: string } | null {
+  for (const [re, cbsa, city] of CBSA_CITIES) if (re.test(text)) return { cbsa, city };
+  return null;
+}
+const PAY = /\b(pay|paid|salary|salaries|earn|earns|earning|wage|wages|comp(ensation)?|gana|kamate|sueldo)\b|\bhow\s+much\b[^?.!]{0,40}\bmake\b/i;
+// "A or B", "A, B or C".
+const orList = (xs: string[]) => xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} or ${xs.at(-1)}`;
+
 // ---------------------------------------------------------------- helpers
 const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\b(inc|corp|corporation|co|ltd|llc|plc|holdings|group|the|company)\b/g, " ").replace(/\s+/g, " ").trim();
 const clean = (s: unknown, n = 200) => String(s ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, n);
@@ -238,6 +284,33 @@ export const systemResolver: Resolver = async (host) => {
   return ips;
 };
 
+// The startup probe (architect, 2026-11-08): can this runtime look a name up at all? Deno.resolveDns missing, or answering
+// "not supported", "not implemented" or a permission error, means it cannot, and the reader then FAILS CLOSED (it reads nothing;
+// every page is unreachable) rather than fetch without the address check. A name with no answer (NotFound), a timeout or any other
+// error is DNS working, so the probe passes. Logged once as one JSON line: research_dns_probe.
+export type DnsProbe = { ok: boolean; why: string };
+let probed: Promise<DnsProbe> | null = null;
+export function dnsProbe(o: { resolve?: ((host: string, type: string) => Promise<unknown>) | null; log?: (line: string) => void; fresh?: boolean } = {}): Promise<DnsProbe> {
+  if (probed && !o.fresh) return probed;
+  const p = (async (): Promise<DnsProbe> => {
+    const D: any = (globalThis as any).Deno, r = o.resolve !== undefined ? o.resolve : D?.resolveDns?.bind(D);
+    let out: DnsProbe;
+    if (typeof r !== "function") out = { ok: false, why: "Deno.resolveDns is not available in this runtime" };
+    else {
+      try { await r("www.bls.gov", "A"); out = { ok: true, why: "resolved" }; }
+      catch (e) {
+        const msg = `${(e as any)?.name ?? ""} ${(e as any)?.message ?? e}`;
+        out = e instanceof TypeError || /not\s+(?:supported|implemented)|unsupported|NotSupported|PermissionDenied|NotCapable|requires\s+net/i.test(msg)
+          ? { ok: false, why: `Deno.resolveDns cannot be used here: ${msg.trim().slice(0, 160)}` } : { ok: true, why: `DNS answered: ${msg.trim().slice(0, 80)}` };
+      }
+    }
+    (o.log ?? ((l: string) => console.log(l)))(JSON.stringify({ evt: "research_dns_probe", ok: out.ok, why: out.why }));
+    return out;
+  })();
+  if (!o.fresh) probed = p;
+  return p;
+}
+
 // ---------------------------------------------------------------- the User-Agent each host is sent
 // SEC and BLS refuse a request without a declared contact; Wikimedia, GitHub and USAJOBS ask for a descriptive one. USAJOBS's
 // search API also takes the owner's free key in its header. Every other site gets the default.
@@ -316,9 +389,20 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
   }
   return {
     id: "first_party", needsKey: false,
-    async search(plan: SearchPlan): Promise<SearchOut> {
+    async search(plan0: SearchPlan): Promise<SearchOut> {
+      let plan = plan0;
+      // A pay question with no occupation code: the role's words to a SOC code (and the city to its metro area), said in basis.
+      const basis: string[] = [], asked = `${plan.queries.join(" ")}`;
+      if (!String(plan.soc ?? "").trim() && PAY.test(asked)) {
+        const m = socFor(asked), c = String(plan.cbsa ?? "").trim() ? null : cbsaFor(asked);
+        if (m) {
+          plan = { ...plan, soc: m.soc, ...(c ? { cbsa: c.cbsa } : {}) };
+          basis.push(`Pay figures use BLS occupation ${m.soc} (${(OOH[m.soc]?.title ?? m.title).toLowerCase()}), matched from "${m.said.toLowerCase()}" with Trainee's table of BLS job titles${c ? `, and the ${c.city} metro area (CBSA ${c.cbsa})` : ""}.`);
+        }
+      }
       const b = await base.search(plan);
       const notes = [...b.notes], gaps: string[] = [];
+      const noBoard: string[] = [], noWiki: string[] = [], noTenK: string[] = [];
       let searches = b.searches;
       const companies = (plan.companies ?? []).map((c) => String(c).trim()).filter(Boolean).slice(0, 3);
       const sites = (plan.sites ?? []).map(siteOf).filter((d) => DOMAIN.test(d)).slice(0, 3);
@@ -337,8 +421,8 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
           const since = new Date(o.now() - 90 * 86400_000).toISOString().slice(0, 10);
           gov.push(hit(`https://data.usajobs.gov/api/historicjoa?PositionSeries=${series}&StartPositionOpenDate=${since}`, `USAJOBS federal announcements, series ${series}`, "usajobs"));
         }
-      } else if (!soc && /\b(pay|salary|salaries|earn|wage|wages|comp(ensation)?|make)\b/i.test(plan.queries.join(" "))) {
-        gaps.push("No government pay figure: the question did not give an occupation code, so BLS wage data was not read.");
+      } else if (!soc && PAY.test(asked)) {
+        gaps.push("No government pay figure: the role in the question is not one Trainee can match to a BLS occupation, so BLS wage data was not read.");
       }
       const tiers: SearchHit[][] = [];
       const put = (t: number, h: SearchHit | null | undefined) => { if (h) (tiers[t] ??= []).push(h); };
@@ -352,8 +436,8 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
           slugs.length ? Promise.any(slugs.map(async (s) => { const r = await board(s); if (!r) throw 0; return r; })).catch(() => null) : null,
           wiki(c), github(c, slugs, sites), o.userAgent ? fts(c) : Promise.resolve([] as SearchHit[]),
         ]);
-        if (bd) put(0, bd); else gaps.push(`No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for ${c.slice(0, 60)}, so its open roles were not counted.`);
-        wk.forEach((h) => put(1, h)); if (!wk.length) gaps.push(`Wikipedia has no company article found for ${c.slice(0, 60)}.`);
+        if (bd) put(0, bd); else noBoard.push(c.slice(0, 60));
+        wk.forEach((h) => put(1, h)); if (!wk.length) noWiki.push(c.slice(0, 60));
         put(3, gh);
         ft.forEach((h) => put(2, h));
         const n = new URL("https://api.gdeltproject.org/api/v2/doc/doc");
@@ -362,7 +446,12 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
       });
       await Promise.all(work);
       if (companies.length && !o.userAgent) gaps.push("SEC filings were not read: SEC asks every reader to declare a contact, and none is set up here yet.");
-      for (const n of b.notes) if (/^no 10-K on SEC EDGAR for /.test(n)) gaps.push(`SEC EDGAR has no 10-K for ${n.replace(/^no 10-K on SEC EDGAR for /, "")} (it may be private).`);
+      for (const n of b.notes) if (/^no 10-K on SEC EDGAR for /.test(n)) noTenK.push(n.replace(/^no 10-K on SEC EDGAR for /, ""));
+      // One line per source, naming every company it had nothing for (keeping the companies in the order asked).
+      const order = (xs: string[]) => companies.map((c) => c.slice(0, 60)).filter((c) => xs.includes(c));
+      if (noBoard.length) gaps.push(`No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for ${orList(order(noBoard))}, so open roles were not counted.`);
+      if (noWiki.length) gaps.push(`Wikipedia has no company article found for ${orList(order(noWiki))}.`);
+      if (noTenK.length) gaps.push(`SEC EDGAR has no 10-K for ${orList(noTenK)} (${noTenK.length > 1 ? "they may be private" : "it may be private"}).`);
       const seen = new Set<string>(), hits: SearchHit[] = [];
       for (const h of [...gov, ...tiers.flat()]) {
         if (isBlockedHost(h.url)) continue;
@@ -370,7 +459,7 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
         if (!seen.has(k)) { seen.add(k); hits.push({ ...h, url: k }); }
       }
       if (hits.length) for (let i = notes.length - 1; i >= 0; i--) if (/no first-party source fits/.test(notes[i])) notes.splice(i, 1);
-      return { hits: hits.slice(0, MAX_FREE_HITS), notes, gaps, provider: "first_party", searches };
+      return { hits: hits.slice(0, MAX_FREE_HITS), notes, gaps, ...(basis.length ? { basis } : {}), provider: "first_party", searches };
     },
   };
 }
@@ -378,10 +467,12 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
 // ---------------------------------------------------------------- the reader
 // The production reader for free research: every hop's resolved addresses checked, robots.txt obeyed, documented JSON and RSS
 // converted, up to MAX_FREE_HITS pages, six at a time (order kept).
-export function freeReader(o: { fetch: typeof fetch; userAgent?: string | null; usajobsKey?: string | null; resolver?: Resolver; now?: () => number }) {
+// With the system resolver (no resolver given), the startup probe must have passed; if it failed, nothing is read.
+export function freeReader(o: { fetch: typeof fetch; userAgent?: string | null; usajobsKey?: string | null; resolver?: Resolver; now?: () => number; probe?: () => Promise<DnsProbe> }) {
   const f = freeFetch(o.fetch, o), robots = robotsGate(f), resolver = o.resolver ?? systemResolver;
   return async (urls: string[]): Promise<FetchedSources> => {
     const list = [...new Set(urls.map(normalizeUrl))].slice(0, MAX_FREE_HITS), out: FetchedSources = { verified: [], rejected: [] };
+    if (!o.resolver && !(await (o.probe ?? dnsProbe)()).ok) return { verified: [], rejected: list.map((url) => ({ url, why: "unreachable" as const })) };
     const parts: FetchedSources[] = new Array(list.length);
     for (let i = 0; i < list.length; i += 6) {
       const batch = list.slice(i, i + 6);

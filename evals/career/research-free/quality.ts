@@ -26,7 +26,7 @@
 // deno-lint-ignore-file no-explicit-any require-await
 import { createRequire } from "node:module";
 import { generate, SEED } from "../e2e/generate.ts";
-import { addStubPages, isStubWebHost, stubWebFetch } from "../e2e/web.ts";
+import { addStubPages, freeFixtureFetch, isFreeFixtureHost, isStubWebHost, stubWebFetch } from "../e2e/web.ts";
 import { marketDraft } from "../tasks/fake_model.ts";
 import { marketDraftPayload, type MarketResult, researchMarket } from "../../../supabase/functions/_shared/agent/research/market.ts";
 import { freeProvider, freeReader } from "../../../supabase/functions/_shared/research_free_sources.ts";
@@ -41,16 +41,17 @@ const NOW = Date.parse("2026-11-08T15:00:00Z");
 const args = Deno.args, flag = (k: string) => args.includes(k), val = (k: string) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : undefined; };
 const N = Number(val("--n") ?? 30), SHOTS = !flag("--no-shots");
 const FAMILIES = ["research.employer", "research.market", "research.pay", "research.compare"];
-export const SECTION_ORDER = ["Summary", "Comparison", "What would have to be true", "Risks", "Not found in a free source", "Sources"];
+export const SECTION_ORDER = ["Summary", "Comparison", "What would have to be true", "Risks", "How the sources were chosen", "Not found in a free source", "Sources"];
 const REQUIRED = ["Summary", "What would have to be true", "Risks", "Sources"];
 
-// The eval world's web, as run.ts serves it: the stub sites answer, every other host 404s; the stub hosts resolve to a public
-// documentation address and every other name has no answer.
+// The eval world's web, as run.ts serves it: the stub sites and the free sources' fixtures answer, every other host 404s; those
+// hosts resolve to a public documentation address and every other name has no answer.
 const web = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const req = input instanceof Request && !init ? input : new Request(input as any, init);
-  return isStubWebHost(new URL(req.url).hostname) ? stubWebFetch(req) : new Response("not reachable in the e2e eval", { status: 404 });
+  const h = new URL(req.url).hostname;
+  return isFreeFixtureHost(h) ? freeFixtureFetch(req) : isStubWebHost(h) ? stubWebFetch(req) : new Response("not reachable in the e2e eval", { status: 404 });
 }) as typeof fetch;
-const resolver = async (h: string) => { if (isStubWebHost(h)) return ["203.0.113.80"]; throw new Error("no answer"); };
+const resolver = async (h: string) => { if (isStubWebHost(h) || isFreeFixtureHost(h)) return ["203.0.113.80"]; throw new Error("no answer"); };
 
 // Thirty tasks, round-robin over the four families in the generated set's order (8, 8, 7, 7).
 export function pickTasks(n = N) {
@@ -74,7 +75,7 @@ export async function makeBrief(t: any): Promise<{ result: MarketResult; record:
   const seenPages: Record<string, string> = {};
   const result = await researchMarket({ question: m, format: "file", plan: { queries: [m], sites: a.sites ?? [], companies },
     deps: {
-      search: freeProvider({ fetch: web, now: () => NOW, userAgent: null }),
+      search: freeProvider({ fetch: web, now: () => NOW, userAgent: "TraineeBot e2e eval (stub world, no real contact)" }),
       read: async (urls) => { const r = await read(urls); for (const p of r.verified) seenPages[p.url] = p.text; return r; },
       draft: async (p) => JSON.stringify(marketDraft(p.messages[0].content)),
       publish: async (data) => {
@@ -167,7 +168,8 @@ if (import.meta.main) {
     for (const t of tasks) {
       const b = await makeBrief(t);
       const row: any = { id: t.id, family: t.family, style: t.style, question: t.turns.at(-1), format: b.result.format, file: !!b.record, sources: b.record?.data?.sources?.length ?? 0,
-        summary: b.record?.data?.summary?.length ?? 0, gaps: b.record?.data?.gaps ?? [], dropped: (b.result as any).dropped ?? null, notes: b.result.notes, error: b.error, fail: {} as Record<string, string[]>, shots: [] as string[] };
+        summary: b.record?.data?.summary?.length ?? 0, gaps: b.record?.data?.gaps ?? [], basis: b.record?.data?.basis ?? [],
+        cited: (b.record?.data?.sources ?? []).map((x: any) => x.url), thesis_cite: b.record?.data?.thesis_cite ?? null, dropped: (b.result as any).dropped ?? null, notes: b.result.notes, error: b.error, fail: {} as Record<string, string[]>, shots: [] as string[] };
       if (!b.record) {
         const why = b.error ?? b.result.notes.find((n) => /answered inline/.test(n)) ?? b.result.status;
         for (const k of ["R1", "R2", "R3", "R4", "R5"]) row.fail[k] = [`no File: ${why}`];
@@ -194,6 +196,11 @@ if (import.meta.main) {
   const pass = rows.filter((r) => r.pass).length;
   const per = (k: string) => rows.filter((r) => !r.fail[k]).length;
   const fam = FAMILIES.map((f) => { const xs = rows.filter((r) => r.family === f); return `| ${f} | ${xs.filter((r) => r.pass).length}/${xs.length} |`; });
+  // Which free source each brief cites (by address), so every source is seen reaching at least one brief.
+  const KIND: [string, RegExp][] = [["stub site (company or market page)", /\.e2e\.test\//], ["BLS OEWS", /bls\.gov\/oes\//], ["BLS OOH", /bls\.gov\/ooh\//], ["USAJOBS", /usajobs\.gov\//],
+    ["SEC EDGAR 10-K", /sec\.gov\/Archives\/.*10k/], ["SEC EDGAR full-text search", /sec\.gov\/Archives\/.*8k/], ["Greenhouse board", /greenhouse\.io\//], ["Lever board", /lever\.co\//],
+    ["Ashby board", /ashbyhq\.com\//], ["SmartRecruiters board", /smartrecruiters\.com\//], ["Wikipedia", /wikipedia\.org\//], ["Wikidata", /wikidata\.org\//], ["GitHub org", /api\.github\.com\//], ["News RSS (GDELT)", /gdeltproject\.org\//]];
+  const coverage = KIND.map(([k, re]) => { const xs = rows.filter((r) => r.cited.some((u: string) => re.test(u))); return `| ${k} | ${xs.length} | ${xs.map((r) => r.id).slice(0, 6).join(", ")} |`; });
   const md = [
     "# Research brief Files from free sources: quality check", "",
     `Generated by \`deno run -A --no-check evals/career/research-free/quality.ts\` on ${new Date(NOW).toISOString().slice(0, 10)} (fake model, $0). ${rows.length} briefs over the e2e eval world (seed ${SEED}), each rendered at 390 px and 1280 px (light, deviceScaleFactor 2).`, "",
@@ -202,6 +209,7 @@ if (import.meta.main) {
     `| R1 every claim cited, no uncited number | ${per("R1")}/${rows.length} |`, `| R2 plum only where brand.ts allows | ${per("R2")}/${rows.length} |`,
     `| R3 fixed section order | ${per("R3")}/${rows.length} |`, `| R4 no overflow, broken layout or empty section | ${per("R4")}/${rows.length} |`, `| R5 readable at 390 px | ${per("R5")}/${rows.length} |`, "",
     "| Family | Pass |", "|---|---|", ...fam, "",
+    "## Free sources cited", "", "| Source | Briefs citing it | Which |", "|---|---|---|", ...coverage, "",
     "## Every brief", "", "| Task | Family | File | Sources | Facts | Gaps shown | Result |", "|---|---|---|---|---|---|---|",
     ...rows.map((r) => `| ${r.id} | ${r.family} | ${r.file ? "yes" : "no"} | ${r.sources} | ${r.summary} | ${r.gaps.length} | ${r.pass ? "pass" : Object.entries(r.fail).map(([k, v]) => `${k}: ${(v as string[]).slice(0, 2).join("; ")}`).join("<br>")} |`), "",
   ].join("\n");

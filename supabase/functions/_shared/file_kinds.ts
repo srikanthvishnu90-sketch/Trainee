@@ -207,12 +207,16 @@ function marketBrief(x: Record<string, any>, v: V) {
     });
     comparison = { options, rows };
   }
-  const out = { variant: "market", title: v.str(x.title, "title", { max: 80, links: false }), subject: v.str(x.subject, "subject", { max: 120 }), thesis: v.str(x.thesis, "thesis", { max: 160, links: false }),
+  // The cover thesis names the sources it stands on (thesis_cite), or says it summarizes the cited sections (thesis_summary).
+  const thesisMark = x.thesis_cite !== undefined ? { thesis_cite: cite(x.thesis_cite, "thesis_cite") } : x.thesis_summary === true ? { thesis_summary: true } : {};
+  const out = { variant: "market", title: v.str(x.title, "title", { max: 80, links: false }), subject: v.str(x.subject, "subject", { max: 120 }), thesis: v.str(x.thesis, "thesis", { max: 160, links: false }), ...thesisMark,
     summary: v.list(x.summary, "summary", 1, 5).map((r, i) => line(r, `summary[${i}]`, true)), ...(comparison ? { comparison } : {}),
     conditions: v.list(x.conditions, "conditions", 1, 6).map((r, i) => line(r, `conditions[${i}]`, false)),
     risks: v.list(x.risks, "risks", 1, 6).map((r, i) => line(r, `risks[${i}]`, false)),
     // R9 free sources: what no free source supplied (code-written from the sources' outcomes, D-007); optional, at most 8.
-    ...(x.gaps !== undefined ? { gaps: v.list(x.gaps, "gaps", 1, 8).map((g, i) => v.str(g, `gaps[${i}]`, { max: 200, links: false })) } : {}), sources };
+    // How a source was chosen when the person did not say (a role matched to a BLS occupation), code-written; optional, at most 4.
+    ...(x.basis !== undefined ? { basis: v.list(x.basis, "basis", 1, 4).map((g, i) => v.str(g, `basis[${i}]`, { max: 240, links: false })) } : {}),
+    ...(x.gaps !== undefined ? { gaps: v.list(x.gaps, "gaps", 1, 8).map((g, i) => v.str(g, `gaps[${i}]`, { max: 240, links: false })) } : {}), sources };
   for (let i = 1; i <= n; i++) if (!used.has(i)) v.err(`sources[${i - 1}]`, "is not cited by any line; leave it out");
   return out;
 }
@@ -402,21 +406,22 @@ const MARK = `<svg class="rb-mark" viewBox="0 0 64 64" aria-hidden="true"><rect 
 function marketHtml(d: any): string {
   const n = (d.sources ?? []).length, read = marketReadOn(d);
   const cover = `<section class="rb-cover" aria-label="Cover"><p class="rb-brand">${MARK}<span>Trainee</span><span class="rb-dot" aria-hidden="true">·</span><span>Research brief</span></p>`
-    + `<p class="rb-thesis">${esc(d.thesis)}</p><p class="rb-date">${read ? `Sources read ${esc(read)} · ` : ""}${n} source${n === 1 ? "" : "s"}</p></section>`;
+    + `<p class="rb-thesis">${esc(d.thesis)}${cites(d.thesis_cite)}</p>${d.thesis_summary ? `<p class="rb-basis">A summary of the cited sections below.</p>` : ""}<p class="rb-date">${read ? `Sources read ${esc(read)} · ` : ""}${n} source${n === 1 ? "" : "s"}</p></section>`;
   const list = (xs: any[], sourced: boolean) => `<ul class="rb-list">${xs.filter((f) => sourced ? hasSrc(f) : !!f?.text).map((f) => `<li><span class="rb-t">${esc(f.text)}${cites(f.cite)}</span>${sourced ? src(f.source) : READING}</li>`).join("")}</ul>`;
   const c = d.comparison, opts = (c?.options ?? []).map((o: any) => o.name);
   const cell = (x: any) => hasSrc(x) ? `${esc(x.value)}${cites(x.cite)}<br>${src(x.source)}` : `<span class="meta">Not stated</span>`;
   // Under 560 px each row stacks as a card of option/value pairs (KIND_CSS .rb-tbl): the option name is repeated in each cell as a
   // visual label (aria-hidden; the table's own headers still name the cell), so no column is ever cut off at phone width.
   const table = c ? `<div class="tbl rb-tbl" tabindex="0" role="region" aria-label="Comparison table"><table><caption class="sr">Comparison</caption><thead><tr><th scope="col"><span class="sr">Item</span></th>${opts.map((o: string) => `<th scope="col">${esc(o)}</th>`).join("")}</tr></thead><tbody>${(c.rows ?? []).map((r: any) => `<tr><th scope="row">${esc(r.label)}</th>${(r.cells ?? []).map((x: any, i: number) => `<td><span class="rb-k" aria-hidden="true">${esc(opts[i] ?? "")}</span><span class="rb-v">${cell(x)}</span></td>`).join("")}</tr>`).join("")}</tbody></table></div>` : "";
-  const srcs = `<ol class="rb-src">${(d.sources ?? []).map((s: any, i: number) => `<li id="src-${i + 1}"><span class="rb-n">[${i + 1}]</span>${linkHtml(s.url, s.title) || esc(s.title)}<span class="meta">${esc(hostOf(s.url))} · Read ${esc(DAY(s.fetched_at))}</span></li>`).join("")}</ol>`;
+  const srcs = `<ol class="rb-src">${(d.sources ?? []).map((s: any, i: number) => `<li id="src-${i + 1}"><span class="rb-n">[${i + 1}]</span>${linkHtml(s.url, s.title) || esc(s.title)}<span class="meta"><span class="rb-host" title="${esc(hostOf(s.url))}">${esc(hostOf(s.url))}</span> · Read ${esc(DAY(s.fetched_at))}</span></li>`).join("")}</ol>`;
   return cover + sec("Summary", list(d.summary ?? [], true)) + sec("Comparison", table) + sec("What would have to be true", list(d.conditions ?? [], false)) + sec("Risks", list(d.risks ?? [], false))
+    + sec("How the sources were chosen", (d.basis ?? []).length ? `<ul class="rb-list rb-basis-list">${d.basis.map((g: string) => `<li><span class="rb-t">${esc(g)}</span></li>`).join("")}</ul>` : "")
     + sec("Not found in a free source", (d.gaps ?? []).length ? `<ul class="rb-list rb-gaps">${d.gaps.map((g: string) => `<li><span class="rb-t">${esc(g)}</span></li>`).join("")}</ul>` : "") + sec("Sources", srcs);
 }
 function marketText(d: any, L: string[]) {
   const c = (x: any) => Array.isArray(x?.cite) && x.cite.length ? ` ${x.cite.map((i: number) => `[${i}]`).join("")}` : "";
   const read = marketReadOn(d);
-  L.push(d.thesis, `${read ? `Sources read ${read}. ` : ""}${(d.sources ?? []).length} source${(d.sources ?? []).length === 1 ? "" : "s"}.`, "", "## Summary");
+  L.push(`${d.thesis}${c({ cite: d.thesis_cite })}${d.thesis_summary ? " (A summary of the cited sections below.)" : ""}`, `${read ? `Sources read ${read}. ` : ""}${(d.sources ?? []).length} source${(d.sources ?? []).length === 1 ? "" : "s"}.`, "", "## Summary");
   Fs(d.summary).forEach((f) => L.push(`- ${f.text}${c(f)} [${f.source}]`)); L.push("");
   if (d.comparison) {
     const opts = (d.comparison.options ?? []).map((o: any) => o.name);
@@ -424,6 +429,7 @@ function marketText(d: any, L: string[]) {
   }
   L.push("## What would have to be true"); (d.conditions ?? []).forEach((f: any) => L.push(`- ${f.text}${c(f)} [Trainee's reading]`)); L.push("");
   L.push("## Risks"); (d.risks ?? []).forEach((f: any) => L.push(`- ${f.text}${c(f)} [Trainee's reading]`)); L.push("");
+  if ((d.basis ?? []).length) { L.push("## How the sources were chosen"); d.basis.forEach((g: string) => L.push(`- ${g}`)); L.push(""); }
   if ((d.gaps ?? []).length) { L.push("## Not found in a free source"); d.gaps.forEach((g: string) => L.push(`- ${g}`)); L.push(""); }
   L.push("## Sources"); (d.sources ?? []).forEach((s: any, i: number) => L.push(`${i + 1}. ${s.title}: ${s.url} (read ${DAY(s.fetched_at)})`)); L.push("");
 }
@@ -505,7 +511,10 @@ textarea{width:100%;min-height:96px;padding:10px 12px;border:1px solid var(--mut
 .rb-cover{margin:16px 0 4px;padding:18px 18px 16px;border:1px solid var(--line);border-radius:16px;background:var(--bg)}
 .rb-brand{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:14px;font-weight:600;color:var(--mute)}.rb-brand span:nth-of-type(1){font-family:'Brygada 1918',Georgia,serif;font-size:17px;color:var(--ink)}
 .rb-mark{width:22px;height:22px;flex:none}.rb-thesis{margin:0;font-family:'Brygada 1918',Georgia,serif;font-size:24px;line-height:1.25;font-weight:500;overflow-wrap:anywhere}
-.rb-date{margin:12px 0 0;font-size:15px;color:var(--mute)}
+.rb-date{margin:12px 0 0;font-size:15px;color:var(--mute)}.rb-basis{margin:8px 0 0;font-size:15px;color:var(--mute)}.rb-thesis .rb-cite{font-family:'Inter',system-ui,sans-serif}
+/* R9 free sources: a source's host never breaks mid-word; a host longer than the line ends in an ellipsis (its full name is the
+   link above and the title attribute). */
+ol.rb-src .rb-host{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
 ul.rb-list{margin:0;padding-left:20px}ul.rb-list li{margin:0 0 12px;overflow-wrap:anywhere}.rb-list .src{display:block;margin:4px 0 0;width:fit-content}
 .rb-cite{font-size:14px;color:var(--mute);white-space:nowrap;font-variant-numeric:tabular-nums}
 ol.rb-src{list-style:none;margin:0;padding:0}ol.rb-src li{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:6px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}ol.rb-src li:first-child{border-top:0}

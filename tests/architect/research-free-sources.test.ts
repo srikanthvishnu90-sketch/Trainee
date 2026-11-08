@@ -9,7 +9,7 @@ import { marketResearchAsk, researchAsk } from "../../supabase/functions/agent-c
 import { type MarketDeps, researchMarket } from "../../supabase/functions/_shared/agent/research/market.ts";
 import { bodyHtml, textOf, validateKind } from "../../supabase/functions/_shared/file_kinds.ts";
 import { fetchSources, isBlockedHost } from "../../supabase/functions/_shared/research_sources.ts";
-import { boardText, convertFree, freeProvider, freeReader, OOH, researchSearchFor, robotsGate, slugsFor } from "../../supabase/functions/_shared/research_free_sources.ts";
+import { boardText, cbsaFor, convertFree, dnsProbe, freeProvider, freeReader, OOH, researchSearchFor, robotsGate, slugsFor, socFor } from "../../supabase/functions/_shared/research_free_sources.ts";
 import { browserChecks, dataChecks } from "../../evals/career/research-free/quality.ts";
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -140,7 +140,7 @@ Deno.test("free provider: every free source is proposed with no search key; the 
   ok(log.filter((l) => /sec\.gov|usajobs/.test(l)).every((l) => l.includes("ua=Trainee research test@example.com")), "SEC and USAJOBS get the declared contact");
   ok(log.every((l) => !/brave|search\.api|serpapi|bing\.com/.test(l)), "no paid or keyed search");
   // A company with no free source: the gaps say so, in plain words, with no link and no env name.
-  const none = await freeProvider({ fetch: freeWeb(), now: () => NOW, userAgent: null }).search({ queries: ["how much does a nurse make at Quillmont"], companies: ["Quillmont"] });
+  const none = await freeProvider({ fetch: freeWeb(), now: () => NOW, userAgent: null }).search({ queries: ["how much does a zookeeper make at Quillmont"], companies: ["Quillmont"] });
   ok(none.gaps!.some((g) => /No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Quillmont/.test(g)));
   ok(none.gaps!.some((g) => /Wikipedia has no company article found for Quillmont/.test(g)));
   ok(none.gaps!.some((g) => /SEC filings were not read/.test(g)));
@@ -225,4 +225,63 @@ Deno.test("quality rubric (evals/career/research-free/quality.ts): each line fai
   ok(c.r5.some((x) => /fact text 15px/.test(x)) && c.r5.some((x) => /text 12px/.test(x)) && c.r5.some((x) => /under AA/.test(x)) && c.r5.some((x) => /tap target 30px/.test(x)));
   const d = dataChecks({ title: "Pay in 2026", thesis: "Pay is $90,000.", summary: [{ text: "a", cite: [] }], conditions: [{ text: "b", cite: [3] }], risks: [], sources: [{ url: "https://a.example/" }] }, { "https://a.example/": "pay in 2026 was 85,000" });
   ok(d.r1.some((x) => /summary\[0\]/.test(x)) && d.r1.some((x) => /conditions\[0\]/.test(x)) && d.r1.some((x) => /90,000/.test(x)) && !d.r1.some((x) => /2026/.test(x)));
+});
+
+// ---------------------------------------------------------------- architect follow-ups on #615 (2026-11-08)
+Deno.test("pay with no SOC: the role is matched to a BLS occupation (and the city to its metro), and the brief says which", async () => {
+  eq(socFor("research software engineer pay in New York")?.soc, "15-1252");
+  eq(socFor("¿cuánto gana un data scientist junior en Atlanta?")?.soc, "15-2051");
+  eq(socFor("what do entry-level financial analysts earn"), { soc: "13-2051", title: "financial analyst", said: "financial analysts" });
+  eq(socFor("what does a zookeeper earn"), null);
+  eq(cbsaFor("pay in New York"), { cbsa: "35620", city: "New York" });
+  const out = await freeProvider({ fetch: freeWeb(), now: () => NOW, userAgent: null }).search({ queries: ["research software engineer pay in Atlanta"] });
+  ok(out.hits.some((h) => h.url === "https://www.bls.gov/oes/current/oes151252.htm") && out.hits.some((h) => h.url === "https://www.bls.gov/oes/current/oes_12060.htm"));
+  eq(out.basis, ['Pay figures use BLS occupation 15-1252 (software developers), matched from "software engineer" with Trainee\'s table of BLS job titles, and the Atlanta metro area (CBSA 12060).']);
+  ok(!(out.gaps ?? []).some((g) => /No government pay figure/.test(g)));
+  // Not a pay question: no occupation is guessed. A code the turn gave is never replaced.
+  eq((await freeProvider({ fetch: freeWeb(), now: () => NOW, userAgent: null }).search({ queries: ["make me a file on data analyst hiring in Denver"] })).basis, undefined);
+  ok((await freeProvider({ fetch: freeWeb(), now: () => NOW, userAgent: null }).search({ queries: ["software engineer pay"], soc: "15-1254" })).hits.some((h) => /oes151254/.test(h.url)));
+});
+
+Deno.test("gap lines are grouped: one line per source naming every company it had nothing for", async () => {
+  const out = await freeProvider({ fetch: freeWeb(), now: () => NOW, userAgent: null }).search({ queries: ["compare Quillmont and Brasswick"], companies: ["Quillmont", "Brasswick"] });
+  eq(out.gaps!.filter((g) => /job board/.test(g)), ["No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Quillmont or Brasswick, so open roles were not counted."]);
+  eq(out.gaps!.filter((g) => /Wikipedia/.test(g)), ["Wikipedia has no company article found for Quillmont or Brasswick."]);
+});
+
+Deno.test("the cover thesis names its sources, or says it summarizes the cited sections; a long host ends in an ellipsis, never mid-word", async () => {
+  const f = freeWeb(), read = freeReader({ fetch: f, resolver: PUBLIC, now: () => NOW });
+  const mk = async (thesis: string) => {
+    const published: any[] = [];
+    const draft = { title: "Zentrafin", thesis, summary: [{ text: "The Greenhouse job board zentrafin lists 4 open roles.", quote: "The Greenhouse job board zentrafin lists 4 open roles.", url: "https://boards-api.greenhouse.io/v1/boards/zentrafin/jobs" }],
+      conditions: [{ text: "Zentrafin keeps hiring new grads into engineering.", urls: ["https://zentrafin.example/careers"] }], risks: [{ text: "Fewer open roles would mean fewer first jobs.", urls: ["https://boards-api.greenhouse.io/v1/boards/zentrafin/jobs"] }] };
+    await researchMarket({ question: "research Zentrafin", format: "file", plan: { queries: ["Zentrafin"], companies: ["Zentrafin"], sites: ["zentrafin.example"] },
+      deps: { search: freeProvider({ fetch: f, now: () => NOW, userAgent: null }), read, draft: async () => JSON.stringify(draft), publish: async (d) => { published.push(d); return { url: "https://trainee.example/file?t=v1.x" }; } } });
+    const v: any = validateKind("research_brief", published[0], { now: NOW });
+    ok(v.ok, JSON.stringify(v));
+    return { d: v.data, h: bodyHtml({ id: "f", userId: "u", kind: "research_brief", data: v.data, state: {}, tag: null, created_at: NOW, expires_at: NOW + 1, revoked_at: null } as any, "fs1." + "a".repeat(64)) };
+  };
+  const a = await mk("Zentrafin hires new grads into engineering.");
+  ok(Array.isArray(a.d.thesis_cite) && a.d.thesis_cite.length >= 1 && !a.d.thesis_summary, JSON.stringify(a.d));
+  ok(/<p class="rb-thesis">Zentrafin hires new grads into engineering\. <span class="rb-cite">\[\d\]/.test(a.h));
+  const b = await mk("Zentrafin is a sensible first employer.");
+  eq([b.d.thesis_cite, b.d.thesis_summary], [undefined, true]);
+  ok(b.h.includes('<p class="rb-basis">A summary of the cited sections below.</p>'));
+  ok(/<span class="rb-host" title="zentrafin\.example">zentrafin\.example<\/span> · Read/.test(a.h));
+  ok(!validateKind("research_brief", { ...a.d, thesis_cite: [9] }, { now: NOW }).ok, "a thesis cite must be a source number");
+});
+
+Deno.test("startup DNS probe: logged once; a runtime without a usable Deno.resolveDns fails closed (nothing is read)", async () => {
+  const lines: string[] = [];
+  eq((await dnsProbe({ resolve: null, log: (l) => lines.push(l), fresh: true })).ok, false);
+  eq((await dnsProbe({ resolve: async () => { throw new Error("Deno.resolveDns is not supported in this context"); }, log: (l) => lines.push(l), fresh: true })).ok, false);
+  eq((await dnsProbe({ resolve: async () => { throw new TypeError("x is not a function"); }, log: (l) => lines.push(l), fresh: true })).ok, false);
+  eq((await dnsProbe({ resolve: async () => { const e = new Error("no records"); e.name = "NotFound"; throw e; }, log: (l) => lines.push(l), fresh: true })).ok, true, "a name with no answer is DNS working");
+  eq((await dnsProbe({ resolve: async () => ["203.0.113.1"], log: (l) => lines.push(l), fresh: true })).ok, true);
+  ok(lines.every((l) => JSON.parse(l).evt === "research_dns_probe") && lines.length === 5);
+  let fetched = 0;
+  const f = (async () => { fetched++; return html("t", "x"); }) as typeof fetch;
+  const read = freeReader({ fetch: f, now: () => NOW, probe: async () => ({ ok: false, why: "no DNS" }) });
+  const got = await read(["https://zentrafin.example/", "https://www.bls.gov/ooh/"]);
+  eq([got.verified.length, got.rejected.map((r) => r.why), fetched], [0, ["unreachable", "unreachable"], 0]);
 });

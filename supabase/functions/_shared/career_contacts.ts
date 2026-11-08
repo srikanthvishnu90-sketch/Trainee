@@ -16,6 +16,7 @@
 // Trainee never probes a mailbox over SMTP itself (RCPT TO): it is abusive to the receiving server and gets the sender's
 // IPs blocked. Hunter runs its own checks on its own servers; that is the one mailbox-level signal, and it is labeled.
 import { CareerProfile } from "./router_core.career.js";
+import { isAutomatedInbox } from "./automated_inbox.ts";
 import { cleanCell, isFormula, readsAsInstruction } from "./career_people_import.ts";
 
 export const MAX_CONTACTS = 3000; // what the per-thread state keeps (the snapshot is at most 1 MB)
@@ -261,23 +262,14 @@ export const CHECK_WORDS: Record<string, string> = { syntax: "syntax", mx: "mail
 function verdict(c: Checks): boolean {
   return c.syntax === "pass" && c.mx !== "fail" && c.role === "pass" && c.disposable === "pass" && (c.hunter === undefined || c.hunter === "valid");
 }
-// fix/r9-apply-completion (e2e adversarial A-ATSD-003/006/007): an applicant-tracking system's own sender is never the
-// employer's person, whatever its local part ("notifications@hire.lever.co" is not a role word, so it passed as a person and
-// an outreach email was sent to it). Hosts that only send the system's candidate mail are flagged whole; on a system's own
-// domain, where its staff also have addresses, only its notification senders are.
-const ATS_MAIL_HOSTS = ["greenhouse-mail.io", "hire.lever.co", "jobs.lever.co", "myworkday.com", "myworkdayjobs.com", "workablemail.com", "applytojob.com"];
-const ATS_DOMAINS = ["greenhouse.io", "lever.co", "ashbyhq.com", "smartrecruiters.com", "icims.com", "jobvite.com", "workday.com", "workable.com", "bamboohr.com", "recruitee.com", "teamtailor.com"];
-const SENDER_LOCAL = /^(?:notifications?|alerts?|updates?|mailer|messages?|no-?reply|do-?not-?reply|bounces?|system|automated)$/;
-export function isAtsSender(email: string): boolean {
-  const [local = "", domain = ""] = String(email ?? "").trim().toLowerCase().split("@");
-  const on = (d: string) => domain === d || domain.endsWith(`.${d}`);
-  return ATS_MAIL_HOSTS.some(on) || (ATS_DOMAINS.some(on) && SENDER_LOCAL.test(local.replace(/\+.*$/, "")));
-}
+// An automated sender (no-reply, notifications, an application system's or job board's address) is never a person: the same
+// rule (automated_inbox.ts) the drafting, approval and send rail use, so the address check and the send rail never disagree.
+// Called only at run time, so the import cycle with automated_inbox.ts (it reads isRoleAddress from here) is safe.
 export async function checkAddress(email: string | null, mx: MxResolver, cache = new Map<string, Promise<MxResult>>()): Promise<{ check: Checks; verified: boolean }> {
   const e = String(email ?? "").trim().toLowerCase();
   const syntax = EMAIL.test(e) && !e.includes("..") && !/^\.|\.@/.test(e) ? "pass" : "fail";
   const [local = "", domain = ""] = e.split("@");
-  const role = syntax === "pass" && (ROLE_LOCALS.has(local) || ROLE_LOCALS.has(local.replace(/[._+-]/g, "")) || isRoleAddress(e) || isAtsSender(e)) ? "flagged" : "pass";
+  const role = syntax === "pass" && (ROLE_LOCALS.has(local) || ROLE_LOCALS.has(local.replace(/[._+-]/g, "")) || isRoleAddress(e) || isAutomatedInbox(e)) ? "flagged" : "pass";
   const disposable = syntax === "pass" && DISPOSABLE.has(domain) ? "flagged" : "pass";
   let mxState: Checks["mx"] = "not_run";
   if (syntax === "pass") {

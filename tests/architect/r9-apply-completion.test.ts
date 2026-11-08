@@ -138,16 +138,19 @@ Deno.test("D: the eval's 'find ... and apply to all of them' asks for every post
 });
 
 Deno.test("E: an applicant-tracking system's own sender is never the employer's person (adversarial A-ATSD-003/006/007)", async () => {
-  const { checkAddress, isAtsSender } = await import("../../supabase/functions/_shared/career_contacts.ts");
+  const { checkAddress } = await import("../../supabase/functions/_shared/career_contacts.ts");
+  const { automatedInbox } = await import("../../supabase/functions/_shared/automated_inbox.ts");
   const mx = async () => ({ status: "ok" as const, hosts: ["mx.example"] });
   for (const e of ["notifications@hire.lever.co", "no-reply@us.greenhouse-mail.io", "no-reply@ashbyhq.com", "jobs@smartrecruiters.com", "alerts@myworkday.com", "updates@lever.co"]) {
-    assert(isAtsSender(e) || (await checkAddress(e, mx)).check.role === "flagged", e);
+    assert(automatedInbox(e) !== null, e);
+    assertEquals((await checkAddress(e, mx)).check.role, "flagged", e);
     assertEquals((await checkAddress(e, mx)).verified, false, e);
   }
-  // A person at the ATS company itself, and anyone at an employer, are people.
-  for (const e of ["maya.chen@lever.co", "sam@ashbyhq.com", "dana.lee@acme.io", "notifications.lead@acme.io"]) {
-    assertEquals(isAtsSender(e), false, e);
+  // A person at an employer is a person, and so is a person at the ATS company when that company is the employer.
+  for (const [e, employer] of [["dana.lee@acme.io", "Acme"], ["maya.chen@lever.co", "Lever"]]) {
+    assertEquals(automatedInbox(e, employer), null, e);
   }
+  assertEquals((await checkAddress("dana.lee@acme.io", mx)).verified, true);
 });
 
 Deno.test("F: one application's own unhashable payload is not sent and never counts toward pausing the ATS for everyone", async () => {

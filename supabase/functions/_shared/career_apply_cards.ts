@@ -70,7 +70,8 @@ export interface CardStore {
 // brain as any other text. Every shape here is checked again against the card itself before anything is approved.
 export type CardReply =
   | { kind: "show" }
-  | { kind: "yes"; except: number[]; exceptNames?: string[]; count?: number }
+  // `it`: the answer names one item ("send it", "send this one", "isko bhejo"): it approves only a card of exactly one.
+  | { kind: "yes"; except: number[]; exceptNames?: string[]; count?: number; it?: boolean }
   | { kind: "only"; only: number[]; onlyNames?: string[] }
   | { kind: "except_only"; except: number[]; exceptNames?: string[] } // "not Acme" with no yes: asked, never approved
   | { kind: "no" }
@@ -217,6 +218,9 @@ export function parseCardReply(text: string): CardReply | null {
       // A count is read only with "all" ("approve all 60"); "approve 2" may mean number 2 or two of them: unclear.
       if (m[1] && !/\ball\b/.test(body)) return { kind: "unclear" };
       r = m[1] ? { kind: "yes", except: [], count: Number(m[1]) } : { kind: "yes", except: [] };
+      // "send it" / "approve it" / "submit it" names ONE item (S2 review of #605: on a card of 5, "send this one" read as
+      // "yes, send it" approved all 5). cardTurn approves it only on a card of exactly one.
+      if (r.kind === "yes" && /^(?:(?:please|pls)\s+)?(?:approve|send|submit) it\b/.test(body)) r.it = true;
     }
   }
   // "approve, skip 2" / "send all but 3": a yes in other words, then what to leave out.
@@ -573,6 +577,8 @@ export async function cardTurn(
   if (r.kind === "unclear" && total === 1 && /^(?:send|approve) 1$/.test(approvalWords(o.message).trim().toLowerCase())) r = { kind: "only", only: [1] };
   if (r.kind === "hold") return waiting(HOLD_TEXT(total), "hold");
   if (r.kind === "unclear") return waiting(UNCLEAR_TEXT(total), "unclear");
+  // "it" (one item) on a card of more than one is not an answer anyone can act on: nothing is approved.
+  if (r.kind === "yes" && r.it && total !== 1) return waiting(UNCLEAR_TEXT(total), "unclear");
   // Names ("not Acme", "only Acme and Beta"): each must name at least one application on this card, by its employer.
   const names = r.kind === "yes" || r.kind === "except_only" ? r.exceptNames ?? [] : r.kind === "only" ? r.onlyNames ?? [] : [];
   const byName: number[] = [];

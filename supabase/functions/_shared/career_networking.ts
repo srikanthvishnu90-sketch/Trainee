@@ -224,7 +224,7 @@ const CONTACTED = "you already have a draft or email to them";
 async function heldWhy(r: ContactRow, contacted: Set<string>, dnc: Set<string>, blocked: Map<string, "opted_out" | "bounced"> = new Map()): Promise<string | null> {
   if (!r.email) return "no email address in your contacts, and I never guess one";
   // R9 OUTREACH SAFETY: a no-reply sender, a role inbox, or an address on an ATS's or job board's domain is no person.
-  const auto = automatedInbox(r.email);
+  const auto = automatedInbox(r.email, r.firm || r.company);
   if (auto) return `${r.email} ${AUTOMATED_WHY[auto]}`;
   if (!r.verified) {
     const c = r.check;

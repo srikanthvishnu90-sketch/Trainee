@@ -855,7 +855,7 @@ export async function outreachTurn(o: {
     const d = byN.get(n)!;
     if (d.status !== "shown") { not.push(`${n} (${d.status})`); continue; }
     // R9 OUTREACH SAFETY: never approved for a no-reply sender, a role inbox, or an ATS or job-board address.
-    const auto = automatedInbox(d.recipient.email);
+    const auto = automatedInbox(d.recipient.email, d.recipient.firm);
     if (auto) { not.push(`${n} (${d.recipient.email} ${AUTOMATED_WHY[auto]})`); continue; }
     const h = await payloadHash(messageOf(d));
     if (h !== d.hash) { not.push(`${n} (changed since it was shown)`); continue; }

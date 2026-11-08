@@ -10,9 +10,10 @@ import assertNode from "node:assert/strict";
 import { networkingTurn } from "../../supabase/functions/_shared/career_networking.ts";
 import { memoryOutreachStore, messageOf, OUTREACH_INTENT, outreachTurn, payloadHash } from "../../supabase/functions/_shared/career_outreach.ts";
 import type { ContactRow } from "../../supabase/functions/_shared/career_contacts.ts";
-import { queueApproved, runSendWorker } from "../../supabase/functions/_shared/career_send_rail.ts";
+import { queueApproved, queueApprovedOutreach, runSendWorker } from "../../supabase/functions/_shared/career_send_rail.ts";
+import { automatedInbox } from "../../supabase/functions/_shared/automated_inbox.ts";
 import { peopleOnPage } from "../../supabase/functions/_shared/career_people_page.ts";
-import { approvedDrafts, CI, FakeGmail, haveDb, person, railDb, railDeps, rows, uid as uidOf } from "../flow/send-rail-fixture.ts";
+import { approvedDrafts, CI, draftsReader, FakeGmail, haveDb, person, railDb, railDeps, rows, uid as uidOf } from "../flow/send-rail-fixture.ts";
 import { serviceRpc } from "../flow/pgwire.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -47,6 +48,30 @@ Deno.test("R9 outreach safety: drafting holds a no-reply, ATS or job-board addre
   const state: Record<string, unknown> = { profile: { facts: FACTS }, contacts: [row("maya.chen@acmeanalytics.com")] };
   const r = await networkingTurn({ message: "email Maya at Acme Analytics about the data analyst role", userId: U, threadId: "t1", now: NOW, state, store, model: null });
   eq(r?.status, "drafting_off", r?.reply);
+});
+
+Deno.test("R9 outreach safety: someone who works AT LinkedIn, Workday or Greenhouse is a person at their employer's own domain", async () => {
+  // The predicate: an ATS or job-board domain is refused unless it is the contact's own employer's domain; a no-reply or
+  // role inbox is refused everywhere; no employer known, the domain is refused (fail closed).
+  eq(automatedInbox("maya@linkedin.com", "LinkedIn"), null);
+  eq(automatedInbox("dana.ruiz@workday.com", "Workday"), null);
+  eq(automatedInbox("lee@greenhouse.io", "Greenhouse"), null);
+  eq(automatedInbox("notifications@hire.lever.co", "Acme Analytics"), "no_reply");
+  eq(automatedInbox("maya.chen@hire.lever.co", "Acme Analytics"), "ats_domain");
+  eq(automatedInbox("no-reply@linkedin.com", "LinkedIn"), "no_reply");
+  eq(automatedInbox("careers@linkedin.com", "LinkedIn"), "role_inbox");
+  eq(automatedInbox("dana@myworkdayjobs.com", "Workday"), "ats_domain", "the system's candidate-mail domain is not the employer's own");
+  eq(automatedInbox("maya@linkedin.com"), "ats_domain", "no employer known: refused");
+  eq(automatedInbox("maya@linkedin.com", "Acme Analytics"), "ats_domain");
+  // Drafting (a chat ask that names LinkedIn is never a draft, by the LinkedIn rule; Workday stands in): a Workday contact at
+  // workday.com reaches drafting (model off here: "drafting_off"); no-reply@ there is held.
+  for (const [email, want] of [["maya@workday.com", "drafting_off"], ["no-reply@workday.com", "held"]] as const) {
+    const store = memoryOutreachStore();
+    await store.setPrefs(U, { signature: "Jordan Lee" });
+    const state: Record<string, unknown> = { profile: { facts: FACTS }, contacts: [row(email, "Maya Chen", "Workday")] };
+    const r = await networkingTurn({ message: "email Maya at Workday about the data analyst role", userId: U, threadId: "t-wd", now: NOW, state, store, model: null });
+    eq(r?.status, want, `${email}: ${r?.reply}`);
+  }
 });
 
 Deno.test("R9 outreach safety: a shown draft to an ATS no-reply address is never approved by \"send 1\"", async () => {
@@ -93,6 +118,17 @@ Deno.test({ name: "R9 outreach safety: the sending rail refuses a no-reply or AT
       eq(q.map((x) => x.status), NOT_A_PERSON.map(() => "refused"), JSON.stringify(q));
       eq(q.map((x) => x.reason), NOT_A_PERSON.map(() => "not_a_person"));
       eq(await rows(db, `select id from public.career_send_queue where user_id = '${u}'`), []);
+    });
+    await t.step("a LinkedIn contact at linkedin.com is queued and sent; no-reply@linkedin.com and hire.lever.co for Acme are not", async () => {
+      const u = uidOf(3, RUN);
+      await person(db, u);
+      const li = await approvedDrafts(db, u, ["maya.r9@linkedin.com", "no-reply@linkedin.com"], { recipient: { firm: "LinkedIn" } });
+      const acme = await approvedDrafts(db, u, ["notifications@hire.lever.co"], { recipient: { firm: "Acme Analytics" } });
+      const q = await queueApprovedOutreach({ ...rpc, drafts: draftsReader(db) }, u, [...li, ...acme]);
+      eq(q.map((x) => [x.status, x.reason ?? null]), [["queued", null], ["refused", "not_a_person"], ["refused", "not_a_person"]], JSON.stringify(q));
+      const gmail = new FakeGmail();
+      await runSendWorker(railDeps(db, await db.conn(), gmail), { worker: "w-r9-li", accounts: 5, perAccount: 5 });
+      eq(gmail.sent.filter((m) => m.account === u).map((m) => m.to), ["maya.r9@linkedin.com"]);
     });
     await t.step("runSendWorker: a row queued without the hand-off still never reaches Gmail", async () => {
       const u = uidOf(2, RUN);

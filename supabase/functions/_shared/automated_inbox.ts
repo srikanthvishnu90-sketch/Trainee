@@ -5,12 +5,18 @@
 //     "no-reply.jobs@" or "notifications-eu@"), on any domain;
 //   - a role inbox (career_contacts.ts isRoleAddress: careers@, jobs@, recruiting-team@, ...), on any domain;
 //   - any address on an applicant tracking system's or a job board's domain, a subdomain included
-//     (no-reply@us.greenhouse-mail.io, notifications@hire.lever.co, someone@ashbyhq.com, jobs@smartrecruiters.com,
-//     x@linkedin.com): mail from those systems speaks for the system, and a reply to it reaches no one at the employer.
+//     (no-reply@us.greenhouse-mail.io, notifications@hire.lever.co, someone@ashbyhq.com, jobs@smartrecruiters.com),
+//     UNLESS that system is the person's own employer: maya@linkedin.com for a contact at LinkedIn, dana@workday.com for
+//     one at Workday, is a person (architect review of #607). The employer is the contact's company as stored on the row,
+//     the draft or the connector's result; an address is on the employer's own domain when its registrable label is the
+//     company's name as a domain label ("LinkedIn" linkedin.com, "Workday" workday.com; never myworkdayjobs.com or
+//     greenhouse-mail.io, the systems' candidate-mail domains). With no employer known, the domain is refused (fail closed).
+//     A no-reply or role inbox is refused on every domain, the employer's own included.
 // One predicate, used where an address is chosen (the contact checks, the people connector, drafting) and again at the
 // sending rail's last check before an email goes (queueApproved, sendOne), so a row stored before this rule or a path
 // that skipped the first check still never sends.
 import { isRoleAddress } from "./career_contacts.ts";
+import { domainLabelOf, registrable } from "./career_people_gmail.ts";
 
 // Application systems (and their candidate-mail domains) and scheduling tools that send for them.
 export const ATS_DOMAINS: readonly string[] = [
@@ -37,8 +43,15 @@ export const isAtsOrBoardDomain = (domain: unknown) => {
 };
 
 export type AutomatedWhy = "no_reply" | "role_inbox" | "ats_domain";
-// Why this address is never written to, or null when it may be a person's.
-export function automatedInbox(email: unknown): AutomatedWhy | null {
+// The address's domain is the employer's own: its registrable label is the company's name as a domain label.
+export function employersOwnDomain(domain: string, employer: unknown): boolean {
+  const name = String(employer ?? "").trim();
+  if (!name) return false;
+  const label = registrable(domain).label.replace(/[^a-z0-9]/g, ""), key = domainLabelOf(name);
+  return label.length >= 2 && label === key;
+}
+// Why this address is never written to, or null when it may be a person's. `employer`: the contact's company, when known.
+export function automatedInbox(email: unknown, employer?: unknown): AutomatedWhy | null {
   const e = String(email ?? "").trim().toLowerCase();
   const at = e.lastIndexOf("@");
   if (at <= 0) return null;
@@ -46,11 +59,11 @@ export function automatedInbox(email: unknown): AutomatedWhy | null {
   if (AUTOMATION_RUN.test(local)) return "no_reply";
   const parts = local.split(/[._-]+/).filter(Boolean);
   if (AUTOMATION_WORDS.has(local.replace(/[._-]+/g, "")) || parts.some((p) => AUTOMATION_WORDS.has(p))) return "no_reply";
-  if (isAtsOrBoardDomain(domain)) return "ats_domain";
   if (isRoleAddress(e)) return "role_inbox";
+  if (isAtsOrBoardDomain(domain) && !employersOwnDomain(domain, employer)) return "ats_domain";
   return null;
 }
-export const isAutomatedInbox = (email: unknown) => automatedInbox(email) !== null;
+export const isAutomatedInbox = (email: unknown, employer?: unknown) => automatedInbox(email, employer) !== null;
 // What the person is told when a contact is held for this.
 export const AUTOMATED_WHY: Record<AutomatedWhy, string> = {
   no_reply: "is an automated no-reply sender, not a person",

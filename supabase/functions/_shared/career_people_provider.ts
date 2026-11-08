@@ -160,7 +160,7 @@ export function webProvider(o: { search: SearchFn; fetch: typeof fetch; resolve?
           // works there now. Before, they were listed and drafted to as a current employee.
           if (x.former || formerTitle(x.title) || (x.school && companyKey(x.school) === key)) continue;
           let email = cleanEmail(x.email);
-          if (email && (isRoleAddress(email) || isAutomatedInbox(email))) { // R9: no-reply and ATS/job-board addresses too
+          if (email && (isRoleAddress(email) || isAutomatedInbox(email, company))) { // R9: no-reply and ATS/job-board addresses too
             if (x.how === "mailto link") continue; // "Careers Team" <careers@>: an inbox, not a person
             email = null;
           }

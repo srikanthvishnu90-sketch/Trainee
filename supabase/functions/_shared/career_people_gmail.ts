@@ -138,7 +138,7 @@ export async function correspondentsStep(d: GmailRead, userId: string, label: st
       for (const a of [...header(g.body, "from"), ...header(g.body, "to"), ...header(g.body, "cc")].flatMap(addresses)) {
         const [local, domain] = a.email.split("@");
         if (a.email === mine || registrable(domain).label !== label) continue;
-        if (ROLE_LOCALS.has(local) || ROLE_LOCALS.has(local.replace(/[._+-]/g, "")) || isRoleAddress(local) || /^(no-?reply|do-?not-?reply|notifications?|mailer|bounce)/.test(local) || isAutomatedInbox(a.email)) continue;
+        if (ROLE_LOCALS.has(local) || ROLE_LOCALS.has(local.replace(/[._+-]/g, "")) || isRoleAddress(local) || /^(no-?reply|do-?not-?reply|notifications?|mailer|bounce)/.test(local) || isAutomatedInbox(a.email, label)) continue;
         items.push({ name: a.name, email: a.email, domain: registrable(domain).full, last_seen_at: at, message_hash: hash });
       }
       return { ok: true, items, refused: false, atMs };

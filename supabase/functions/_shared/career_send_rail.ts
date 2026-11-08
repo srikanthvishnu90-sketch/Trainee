@@ -88,8 +88,11 @@ export const mailHash = (m: Mail) => payloadHash({ to: m.to, subject: m.subject,
 // person, so never to a no-reply sender, a role inbox, or an address on an application system's or job board's domain.
 // An application email goes to the employer's own apply address (apply_email.ts picks it; careers@ is one), so for it
 // only a no-reply sender is refused here.
-export function notAPerson(kind: Kind | string, to: string): string | null {
-  const why = automatedInbox(to);
+// `employer`: the recipient's company as stored on the draft (an outreach draft's recipient.firm), so a person who works
+// at LinkedIn or Workday can be written to at linkedin.com or workday.com; with none stored, an ATS or job-board domain
+// is refused (fail closed).
+export function notAPerson(kind: Kind | string, to: string, employer?: string | null): string | null {
+  const why = automatedInbox(to, employer);
   if (!why) return null;
   return kind === "application" && why !== "no_reply" ? null : why;
 }
@@ -108,6 +111,8 @@ export interface SendItem {
   addressType?: AddressType | null; addressFormat?: string | null;
   // Never accepted: present at all, the item is refused (D-MN-2: nothing the person was not shown).
   cc?: unknown; bcc?: unknown;
+  // The recipient's company as stored on the approved draft (outreach): the rail's last check reads it (notAPerson).
+  employer?: string | null;
 }
 export type QueueResult = { sourceId: string; status: "queued" | "already_queued" | "refused"; reason?: string; id?: string };
 
@@ -127,7 +132,7 @@ export async function queueApproved(d: QueueDeps, userId: string, items: SendIte
     if (it.provider != null && it.provider !== "gmail" && it.provider !== "outlook") { refuse("invalid"); continue; }
     const m: Mail = { to: String(it.to ?? ""), subject: String(it.subject ?? ""), text: String(it.text ?? "") };
     if (unsafe(m)) { refuse("unsafe_header"); continue; }
-    if (notAPerson(it.kind, m.to)) { refuse("not_a_person"); continue; }
+    if (notAPerson(it.kind, m.to, it.employer)) { refuse("not_a_person"); continue; }
     if ((await mailHash(m)) !== it.approvalHash) { refuse("changed"); continue; }
     if (it.addressType != null && !ADDRESS_TYPES.includes(it.addressType)) { refuse("invalid"); continue; }
     ok.push({ i, p: { kind: it.kind, source_id: it.sourceId, approval_hash: it.approvalHash, to: m.to, subject: m.subject, body: m.text, provider: it.provider ?? chosen,
@@ -164,7 +169,7 @@ export async function queueApprovedOutreach(d: OutreachDeps, userId: string, ite
     const label = [rec.address_type, rec.address].find((v) => typeof v === "string" && (ADDRESS_TYPES as readonly string[]).includes(v));
     const addressType = (label ?? x.addressType ?? null) as AddressType | null;
     const addressFormat = (rec.address_format ?? x.addressFormat ?? null) as string | null;
-    send.push({ kind: "outreach", sourceId: r.id, approvalHash: x.approvalHash, to: m.to, subject: m.subject, text: m.text, addressType, addressFormat });
+    send.push({ kind: "outreach", sourceId: r.id, approvalHash: x.approvalHash, to: m.to, subject: m.subject, text: m.text, addressType, addressFormat, employer: typeof rec.firm === "string" ? rec.firm : null });
     at.push(i);
   }
   const got = send.length ? await queueApproved(d, userId, send) : [];
@@ -369,11 +374,12 @@ async function sendOne(d: WorkerDeps, it: Claimed, stats: WorkerStats, worker: s
   // The payload is exactly what was approved: the queued copy hashes to the approval, and for outreach the draft as it is
   // stored now (read by the claim under its row lock) still says exactly the same thing.
   if (unsafe(m)) { stats.refused++; return out("refused", { detail: "unsafe header" }); }
-  const automated = notAPerson(it.kind, m.to);
-  if (automated) { stats.refused++; return out("refused", { detail: `not a person's address (${automated})` }); }
   if ((await mailHash(m)) !== it.approval_hash) { stats.refused++; return out("refused", { detail: "changed after approval" }); }
+  const dr = it.kind === "outreach" ? it.draft ?? (d.drafts ? (await d.drafts(it.user_id, [it.source_id]))[0] : null) : null;
+  // The last check on the recipient: the draft's stored employer decides an ATS or job-board domain (none: refused).
+  const automated = notAPerson(it.kind, m.to, typeof (dr?.recipient as any)?.firm === "string" ? (dr!.recipient as any).firm : null);
+  if (automated) { stats.refused++; return out("refused", { detail: `not a person's address (${automated})` }); }
   if (it.kind === "outreach") {
-    const dr = it.draft ?? (d.drafts ? (await d.drafts(it.user_id, [it.source_id]))[0] : null);
     const cur = dr ? messageOf(dr) : null;
     if (!cur || (await payloadHash(cur)) !== it.approval_hash || cur.to !== m.to || cur.subject !== m.subject || cur.text !== m.text) {
       stats.refused++;

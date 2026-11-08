@@ -12,7 +12,9 @@
 import type { Pg } from "./pg.ts";
 import { type Double, postgrestDouble } from "./postgrest.ts";
 
-export const SUPABASE_URL = "http://supabase.test";
+// https, as a real project URL is (a signed resume link must be https: career_tailor.ts privateLinkProblem). The double
+// answers http://supabase.test too, for tests that hard-code it.
+export const SUPABASE_URL = "https://supabase.test";
 export const SERVICE_KEY = "service-test-key", ANON_KEY = "anon-test-key";
 
 export async function supabaseParity(pg: Pg) {

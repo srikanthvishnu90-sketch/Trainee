@@ -13,9 +13,24 @@ const SPLIT = new RegExp(
 
 export interface ApplyAndReach { apply: string; outreach: string; company: string; role: string }
 
+// R9 OUTREACH: the same ask in Spanish and in Hindi (Latin script), read into the English form above: "aplica al rol de
+// <role> en <Co> y escríbele a <Name> sobre eso", "<Co> ke <role> mein apply karo aur <Name> ko email bhi karo". The email
+// half names the employer the apply half names, and "sobre eso" / no topic is that role; nothing else is read here.
+const ES = new RegExp(`^(?:aplica(?:me)?|postula(?:me)?)\\s+(?:al|a la)\\s+(?:rol|puesto|vacante|trabajo|posici[oó]n)\\s+de\\s+(.+?)\\s+en\\s+${CO}\\s+y\\s+(?:escr[ií]bele|m[aá]ndale un (?:email|correo|mensaje)|env[ií]ale un (?:email|correo|mensaje))\\s+a\\s+(\\p{Lu}[\\p{L}'’-]+)(?:\\s+sobre\\s+(?:eso|esto|el rol|el puesto))?\\s*[.!]?$`, "iu");
+const HI = new RegExp(`^${CO}\\s+(?:ke|ki|ka)\\s+(.+?)\\s+(?:role\\s+|job\\s+)?(?:mein|me|mai)\\s+apply\\s+(?:karo|kar do|kardo)\\s+aur\\s+(\\p{Lu}[\\p{L}'’-]+)\\s+ko\\s+(?:email|e-mail|mail|message)\\s+(?:bhi\\s+)?(?:karo|kar do|kardo|bhejo|bhej do)\\s*[.!]?$`, "iu");
+function translated(raw: string): string | null {
+  const es = ES.exec(raw);
+  if (es) return `apply to the ${es[1].trim()} role at ${es[2].trim()} and email ${es[3]} there about it`;
+  const hi = HI.exec(raw);
+  if (hi) return `apply to the ${hi[2].trim()} role at ${hi[1].trim()} and email ${hi[3]} there about it`;
+  return null;
+}
+// A chat lead before the ask ("hey can u apply to ...", "ngl pls apply me to ..."): not part of what the apply turn reads.
+const LEAD = /^(?:(?:hey|hi|yo|ok|okay|so|ngl|lowkey|pls|plz|please)[, ]+)*(?:(?:can|could|would|will)\s+(?:you|u)\s+(?:please\s+|pls\s+)?)?/i;
 export function applyAndReachOf(message: string): ApplyAndReach | null {
-  const raw = String(message ?? "").trim();
-  if (!raw || /\?\s*$/.test(raw) || /\b(?:don'?t|do not|never|wouldn'?t)\b/i.test(raw)) return null;
+  const raw0 = String(message ?? "").trim();
+  if (!raw0 || /\?\s*$/.test(raw0) || /\b(?:don'?t|do not|never|wouldn'?t)\b/i.test(raw0)) return null;
+  const raw = translated(raw0) ?? raw0;
   const m = SPLIT.exec(raw);
   if (!m) return null;
   const role = m[2].trim(), company = m[3].trim();
@@ -27,7 +42,7 @@ export function applyAndReachOf(message: string): ApplyAndReach | null {
   if (!new RegExp(`\\bat\\s+${company.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(reach)) return null;
   // "about it" / "about the role" / "about that": the role the apply half names.
   reach = reach.replace(/\babout\s+(?:it|that|this|the\s+(?:role|job|application|position))\b/i, `about the ${role} role`);
-  return { apply: m[1].trim(), outreach: reach, company, role };
+  return { apply: m[1].trim().replace(LEAD, "").trim(), outreach: reach, company, role };
 }
 
 // After that application's card is answered: whether this thread still holds the email half's drafts, shown by the same

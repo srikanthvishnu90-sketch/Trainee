@@ -91,7 +91,13 @@ function translatedAsk(t: string): string | null {
 function mendTypos(t: string): string {
   const ws = t.split(" ");
   if (ws.length && /^e[a-z-]+$/i.test(ws[0]) && !/^(?:emails|e-mails|mails|emil[iy]a?|email)$/i.test(ws[0]) && nearWord(ws[0].toLowerCase(), "email")) ws[0] = "email";
-  return ws.map((w, i) => (i > 0 && /^[a-z]+$/i.test(w) && w.toLowerCase() !== "abort" && nearWord(w.toLowerCase(), "about") ? "about" : w)).join(" ");
+  return ws.map((w, i) => {
+    const lw = w.toLowerCase();
+    if (i > 0 && /^[a-z]+$/i.test(w) && lw !== "abort" && nearWord(lw, "about")) return "about";
+    // "reacch out", "reahc out": reach out (only before "out").
+    if (/^[a-z]+$/i.test(w) && lw !== "reach" && nearWord(lw, "reach") && /^out\b/i.test(ws[i + 1] ?? "")) return "reach";
+    return w;
+  }).join(" ");
 }
 export function parseNetworkingAsk(message: string): Ask | null {
   const t0 = chatAsk(message).replace(FILLER, "").replace(/[?!.]+$/, "").replace(SIGN_OFF, "").trim();

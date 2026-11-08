@@ -4,13 +4,23 @@
 // token: authenticated, with their JWT claims), in its own transaction, so RLS, grants, triggers and every RPC are the
 // database's own. Only the request shapes supabase-js sends for the calls the product makes are understood; anything
 // else is answered 400 with "postgrest double: unsupported ...", so an unsupported call fails loudly, never quietly.
+//
+// Storage (/storage/v1, the shapes storage-js and _shared/account_delete.ts send): an in-memory object store, service
+// role only, as the product only ever reaches it with the service key (the private career-resumes bucket): upload
+// (POST, x-upsert; PUT update), sign (POST object/sign -> {signedURL}), download (GET object/<bucket>/<path>, and GET of a
+// signed link with its token, no key needed), list (POST object/list/<bucket>) and remove (DELETE object/<bucket>
+// {prefixes}). The double answers its host over https and http alike, so a handler given the https project URL (as in
+// production, where a signed link must be https) and a test that hard-codes the http URL reach the same double.
 import type { Pg } from "./pg.ts";
 
 export interface Double {
   fetch: (input: Request | URL | string, init?: RequestInit) => Promise<Response>;
   // Every request the handler made, in order (method, path, role), for a test to read.
   log: { method: string; path: string; role: string; status?: number; error?: string }[];
+  // The Storage objects, keyed "<bucket>/<path>", for a test to read.
+  storage: Map<string, StoredObject>;
 }
+export interface StoredObject { bytes: Uint8Array; contentType: string; id: string; created_at: string; updated_at: string }
 
 const ident = (s: string) => {
   if (!/^[a-z_][a-z0-9_]*$/.test(s)) throw new Unsupported(`identifier ${s}`);
@@ -125,6 +135,28 @@ function orderBy(o: string | null): string {
   }).join(", ");
 }
 
+// The file part of a multipart upload. storage-js names it "" (form.append("", blob)), which Deno's own form parser
+// drops, so the body is split by its boundary here.
+function filePart(contentType: string, body: Uint8Array): { bytes: Uint8Array; contentType: string } | null {
+  const boundary = /boundary="?([^";]+)"?/i.exec(contentType)?.[1];
+  if (!boundary) return null;
+  // A single-byte decoding, so a character index is a byte index; the bytes themselves are sliced from the body.
+  const text = new TextDecoder("latin1").decode(body), sep = `--${boundary}`;
+  for (let at = text.indexOf(sep); at >= 0;) {
+    const start = at + sep.length;
+    if (text.startsWith("--", start)) break;
+    const next = text.indexOf(`\r\n${sep}`, start);
+    if (next < 0) break;
+    const head = text.indexOf("\r\n\r\n", start);
+    if (head >= 0 && head < next && /filename=/i.test(text.slice(start, head))) {
+      const type = /content-type:\s*([^\r\n]+)/i.exec(text.slice(start, head))?.[1].trim();
+      return { bytes: body.slice(head + 4, next), contentType: type || "application/octet-stream" };
+    }
+    at = next + 2;
+  }
+  return null;
+}
+
 export function postgrestDouble(pg: Pg, o: { url: string; serviceKey: string; users: Record<string, { id: string; email?: string }> }): Double {
   const log: Double["log"] = [];
   const real = globalThis.fetch.bind(globalThis);
@@ -151,9 +183,101 @@ commit;`);
     return json(e instanceof Unsupported ? 400 : 400, { message: e instanceof Unsupported ? `postgrest double: unsupported ${message}` : message, code, details: null, hint: null });
   };
 
+  const storage = new Map<string, StoredObject>();
+  const signed = new Map<string, { key: string; exp: number }>();
+  // As Storage answers (statusCode is a string in the body).
+  const storageError = (status: number, error: string, message: string) => json(status, { statusCode: String(status), error, message });
+  const objectPath = (rest: string) => {
+    const parts = rest.split("/").map((x) => decodeURIComponent(x));
+    if (parts.length < 2 || parts.some((x) => !x || x === "." || x === "..")) return null;
+    return { bucket: parts[0], path: parts.slice(1).join("/"), key: parts.join("/") };
+  };
+  async function handleStorage(req: Request, url: URL, who: { role: string }): Promise<Response> {
+    const route = url.pathname.slice("/storage/v1/object/".length);
+    // A signed link: the token is the authority, no key.
+    if (req.method === "GET" && route.startsWith("sign/")) {
+      const at = objectPath(route.slice(5)), s = signed.get(url.searchParams.get("token") ?? "");
+      if (!at || !s || s.key !== at.key) return storageError(400, "InvalidSignature", "The signature is invalid");
+      if (Date.now() > s.exp) return storageError(400, "InvalidJWT", "\"exp\" claim timestamp check failed");
+      const obj = storage.get(at.key);
+      if (!obj) return storageError(404, "not_found", "Object not found");
+      return new Response(obj.bytes.slice(), { status: 200, headers: { "content-type": obj.contentType, "content-length": String(obj.bytes.length) } });
+    }
+    if (route.startsWith("public/")) return storageError(400, "not_found", "the bucket is not public");
+    if (who.role !== "service_role") return storageError(403, "Unauthorized", "storage double: service role only");
+    if (req.method === "POST" && route.startsWith("sign/")) {
+      const at = objectPath(route.slice(5));
+      const body = await req.json().catch(() => ({}));
+      const seconds = Number(body?.expiresIn);
+      if (!at) return storageError(400, "InvalidKey", "bad object path");
+      if (!Number.isFinite(seconds) || seconds <= 0) return storageError(400, "InvalidRequest", "expiresIn must be a positive number");
+      if (!storage.has(at.key)) return storageError(404, "not_found", "Object not found");
+      const token = tag();
+      signed.set(token, { key: at.key, exp: Date.now() + seconds * 1000 });
+      return json(200, { signedURL: `/object/sign/${at.key}?token=${token}` });
+    }
+    if (req.method === "POST" && route.startsWith("list/")) {
+      const bucket = decodeURIComponent(route.slice(5));
+      if (!bucket || bucket.includes("/")) return storageError(400, "InvalidKey", "bad bucket");
+      const body = await req.json().catch(() => ({}));
+      const prefix = String(body?.prefix ?? "").replace(/^\/+|\/+$/g, ""), search = String(body?.search ?? "");
+      const limit = Number(body?.limit ?? 100), offset = Number(body?.offset ?? 0);
+      const base = `${bucket}/${prefix ? `${prefix}/` : ""}`;
+      const files = new Map<string, StoredObject | null>();
+      for (const [k, v] of storage) {
+        if (!k.startsWith(base)) continue;
+        const rest = k.slice(base.length), slash = rest.indexOf("/");
+        if (slash < 0) files.set(rest, v);
+        else if (!files.has(rest.slice(0, slash))) files.set(rest.slice(0, slash), null);
+      }
+      const rows = [...files].filter(([n]) => n.startsWith(search)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).slice(offset, offset + limit)
+        .map(([name, v]) => v
+          ? { name, id: v.id, updated_at: v.updated_at, created_at: v.created_at, last_accessed_at: v.updated_at, metadata: { size: v.bytes.length, mimetype: v.contentType } }
+          : { name, id: null, updated_at: null, created_at: null, last_accessed_at: null, metadata: null });
+      return json(200, rows);
+    }
+    if (req.method === "DELETE") {
+      const bucket = decodeURIComponent(route);
+      if (!bucket || bucket.includes("/")) return storageError(400, "InvalidKey", "bad bucket");
+      const body = await req.json().catch(() => ({}));
+      if (!Array.isArray(body?.prefixes)) return storageError(400, "InvalidRequest", "prefixes is required");
+      const gone: unknown[] = [];
+      for (const p of body.prefixes) {
+        const key = `${bucket}/${String(p)}`, v = storage.get(key);
+        if (!v) continue;
+        storage.delete(key);
+        gone.push({ name: String(p), bucket_id: bucket, id: v.id, updated_at: v.updated_at, created_at: v.created_at, metadata: { size: v.bytes.length, mimetype: v.contentType } });
+      }
+      return json(200, gone);
+    }
+    const at = objectPath(route.replace(/^authenticated\//, ""));
+    if (!at) return storageError(400, "InvalidKey", "bad object path");
+    if (req.method === "GET") {
+      const obj = storage.get(at.key);
+      if (!obj) return storageError(404, "not_found", "Object not found");
+      return new Response(obj.bytes.slice(), { status: 200, headers: { "content-type": obj.contentType, "content-length": String(obj.bytes.length) } });
+    }
+    if (req.method === "POST" || req.method === "PUT") {
+      const had = storage.get(at.key);
+      if (req.method === "PUT" && !had) return storageError(404, "not_found", "Object not found");
+      if (req.method === "POST" && had && req.headers.get("x-upsert") !== "true") return storageError(409, "Duplicate", "The resource already exists");
+      let bytes: Uint8Array, contentType = req.headers.get("content-type") ?? "application/octet-stream";
+      if (/^multipart\/form-data/i.test(contentType)) {
+        const file = filePart(contentType, new Uint8Array(await req.arrayBuffer()));
+        if (!file) return storageError(400, "InvalidRequest", "no file in the form");
+        ({ bytes, contentType } = file);
+      } else bytes = new Uint8Array(await req.arrayBuffer());
+      const now = new Date().toISOString(), id = had?.id ?? crypto.randomUUID();
+      storage.set(at.key, { bytes, contentType, id, created_at: had?.created_at ?? now, updated_at: now });
+      return json(200, { Key: at.key, Id: id });
+    }
+    return storageError(400, "InvalidRequest", `storage double: unsupported ${req.method} ${url.pathname}`);
+  }
+
   async function handle(req: Request): Promise<Response> {
     const url = new URL(req.url), who = roleOf(req.headers);
     log.push({ method: req.method, path: url.pathname + url.search, role: who.role });
+    if (url.pathname.startsWith("/storage/v1/object/")) return await handleStorage(req, url, who);
     if (url.pathname === "/auth/v1/user") {
       const tok = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
       const u = o.users[tok];
@@ -242,11 +366,14 @@ commit;`);
       return pgError(e);
     }
   }
+  // The project's host, over https or http (see the header).
+  const home = new URL(o.url), ours = (u: URL) => u.host === home.host && (u.protocol === "https:" || u.protocol === "http:");
   return {
     log,
+    storage,
     fetch: async (input, init) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
-      if (new URL(req.url).origin !== new URL(o.url).origin) return await real(req);
+      if (!ours(new URL(req.url))) return await real(req);
       const res = await handle(req), entry = log.at(-1)!;
       entry.status = res.status;
       if (res.status >= 400) entry.error = (await res.clone().text()).slice(0, 300);

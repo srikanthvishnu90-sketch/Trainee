@@ -1126,6 +1126,10 @@ echo "  ok   20261108120000: the cloud claims, gate lists and waiver check name 
 echo "== career_apply_resume_restarts.test.sql (a resume file clears no_resume tries and asks for preparation; a tailored copy or a linked hash restarts nothing; nothing queued or sent)"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_resume_restarts.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 "${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261108130000_career_apply_resume_restarts_kept_file.down.sql"
+# Under the rolled-back body (20261102140000's: every write restarts) the same test fails: a linked hash asks again.
+if "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_resume_restarts.test.sql" >/dev/null 2>&1; then
+  echo "FAIL 20261108130000 rollback: the restart test passes without the guard (it proves nothing)"; exit 1; fi
+echo "  ok   20261108130000: without the guard the restart test fails (a tailored copy or a linked hash restarts the queue)"
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261108130000_career_apply_resume_restarts_kept_file.sql"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_resume_restarts.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 # PEOPLE DRAFTS ROUND 3 (20261031110000): an outreach batch is as many drafts as were asked for (NO LIMITS); the table's

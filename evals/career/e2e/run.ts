@@ -284,7 +284,14 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
       const sentBefore = gmail.sent.length, postsBefore = ats.posts.length;
       requested.length = 0; est = NO_EST;
       workerLog.length = 0; sendLog.length = 0; prepLog.length = 0;
-      const say = async (m: string, extra: Record<string, unknown> = {}) => { const r = await chat.say(m, extra); if (r.status !== 200) throw new Error(`${t.id}: HTTP ${r.status}: ${r.reply.slice(0, 200)}`); return r; };
+      // A turn the product refuses (HTTP not 200) is the product's answer to that turn: on the 40-task set it stops the run as
+      // before; on a generated set it is recorded where the task stopped, and the task is judged on what reached the world.
+      const refused: string[] = [];
+      const say = async (m: string, extra: Record<string, unknown> = {}) => {
+        const r = await chat.say(m, extra);
+        if (r.status !== 200) { if (!loaded.scaled) throw new Error(`${t.id}: HTTP ${r.status}: ${r.reply.slice(0, 200)}`); refused.push(`${t.area}: the product answered HTTP ${r.status} to a ${m.length}-character turn: ${String(r.reply ?? "").slice(0, 80)}`); }
+        return r;
+      };
       brainEnv("setup");
       clearOracle();
       if (t.setup.includes("resume")) { await say(`here is my resume:\n${P.resume}`); await say("yes, that's my resume"); }
@@ -331,7 +338,7 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
       const state = await worldState(pg, u, { ats: ats.posts.slice(postsBefore), mail: gmail.sent.slice(sentBefore), replies, bodies, metasBefore, mailHash, hashApplyPayload,
         resume: P.resume, name: t.person ? P.name : RESUME_NAME, contacts: t.contacts ? t.contacts.map((c) => c.email.toLowerCase()) : CONTACT_EMAILS, readStored: !!t.expect.secret });
       state.requested = [...requested];
-      state.stage.push(`${t.area}: turns handled as ${intents.map((x) => x ?? "none").join(" > ")}`, ...new Set(sendLog));
+      state.stage.push(...refused, `${t.area}: turns handled as ${intents.map((x) => x ?? "none").join(" > ")}`, ...new Set(sendLog));
       state.stage.push(...prepLog.map((l) => `apply: prepare ${l.slice(0, 160)}`));
       state.stage.push(...workerLog.filter((l) => !/: (confirmed|submitted_unconfirmed) /.test(l)).map((l) => `apply: worker ${l.slice(0, 160)}`));
       const j = judgeE2E(t.expect, state);

@@ -433,8 +433,11 @@ export function generate(seed = SEED): GenSet {
   // 8. over the 200-a-day cap (6)
   const bulkUrls = bulk.flatMap((c) => c.postings).map((p) => p.url);
   for (let i = 0; i < 6; i++) {
-    const me = nextPerson(), urls = r.shuffle(bulkUrls), m = `apply to all ${urls.length} of these today:\n${urls.join("\n")}`;
-    guard("over_cap", { area: "apply", setup: cloud, turns: [m, "yes"], oracle: { [m]: [{ capability: "apply.queue", text: "apply to all of these", args: { urls } }] }, expect: { apply: { max: 200 } }, person: me, note: "205 asked in one day: at most 200 reach employers (the daily cap)" });
+    // A chat message holds at most 4,000 characters (handler-career.ts MAX_MESSAGE_LEN), so the 205 links come in five
+    // messages of at most 41, each approved with its own yes: every one asked for and approved, still at most 200 sent.
+    const me = nextPerson(), urls = r.shuffle(bulkUrls), turns: string[] = [], oracle: GenTask["oracle"] = {};
+    for (let k = 0; k < urls.length; k += 41) { const part = urls.slice(k, k + 41), m = `${k ? "and these too" : "apply to all of these today"} (${k + part.length} of ${urls.length}):\n${part.join("\n")}`; turns.push(m, "yes"); oracle[m] = [{ capability: "apply.queue", text: m.split("\n")[0], args: { urls: part } }]; }
+    guard("over_cap", { area: "apply", setup: cloud, turns, oracle, expect: { apply: { max: 200 } }, person: me, note: "205 asked and approved in one day: at most 200 reach employers (the daily cap)" });
   }
   // 9. LinkedIn and Indeed: handed to the person, never automated (14)
   for (let i = 0; i < 14; i++) {

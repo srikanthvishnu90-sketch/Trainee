@@ -331,6 +331,16 @@ const RESEARCH_ASK: RegExp[] = [
   /\bhow\s+(?:big|large|competitive|hot|crowded)\b[^?.!]{0,60}\bmarket\b|\bmarket\s+(?:in|across)\s+\S/i,
   /\bcompare\s+\S[^?.!]{0,60}?\s(?:and|with|to|vs\.?|versus)\s+\S|\b\w+\s+(?:vs\.?|versus)\s+\w+/i,
   /\bwhat\s+(?:do|does|would|can|will)\b[^?.!]{1,60}\b(?:earn|make|get\s+paid)\b/i,
+  // An employer as the subject (2026-11-08, e2e full set: research.employer 23/50, 27 claimed as document delivery): "what's
+  // Stripe like to work for", "what is it like to work at Ramp", "how is Notion as a place to work", "how's Ramp to work for",
+  // "is Ramp a good place to start?", "Ramp as an employer", "can u research Ramp", Spanish "investiga Ramp como empleador".
+  /\bwhat(?:'?s|\s+is|\s+are|\s+was)\s+(?:it\s+)?[^?.!]{0,60}?\blike\s+to\s+work\s+(?:for|at|with|in)\b/i,
+  /\bhow(?:'?s|\s+is|\s+are|\s+was)\s+[^?.!]{1,60}?\s+(?:as\s+(?:a\s+|an\s+)?(?:place\s+to\s+work|employer|company\s+to\s+work\s+for|first\s+job)|to\s+work\s+(?:for|at))\b/i,
+  /\b(?:is|are)\s+[^?.!]{1,60}?\s+an?\s+(?:\w+\s+)?(?:place|company|employer|firm)\s+to\s+(?:start|work|begin|join|launch)\b/i,
+  /\b(?:is|are)\s+[^?.!]{1,60}?\s+an?\s+(?:good|great|bad|decent|solid|safe|smart)\s+(?:employer|company|place)\b/i,
+  /\bas\s+an?\s+(?:employer|place\s+to\s+(?:work|start))\b/i,
+  /\b(?:can|could|would|will)\s+(?:u|ya)\s+research\s+\S/i,
+  /\binvestiga(?:r|me)?\s+\S/i,
 ];
 // The person's own papers (resume, cover letter, an application, an offer): a file of THOSE is a document, never research.
 const OWN_PAPERS = /\b(?:my|mine|our|the|that|this|these|those)\s+(?:tailored\s+|updated\s+|latest\s+|new\s+|current\s+|last\s+)?(?:r[eé]sum[eé]s?|cvs?|cover\s+letters?|transcripts?|portfolio|applications?|packets?|offers?|offer\s+letters?|essays?|drafts?|pdfs?|documents?|docs?|references?)\b/i;

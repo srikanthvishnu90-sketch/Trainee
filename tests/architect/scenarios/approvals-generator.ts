@@ -6,6 +6,10 @@
 //   - a subset ("1 and 3", "the first two", "all but 2", "2-4") approves only what it states. A path that cannot read a
 //     subset form may approve nothing (and ask); it may never approve anything else;
 //   - anything ambiguous, deferred, negated, a question, a hedge, sarcasm, noise or another language approves NOTHING.
+//   - D-044 (owner, 2026-11-08, replacing the English-only part of the rule above): a clear yes in Spanish, Hindi/Hinglish
+//     (romanized or Devanagari), French, German or Portuguese is a clear yes to a batch (YES_D044, YES_BATCH_D044) and
+//     approves exactly the batch shown (the billing cancel stays English-only); the same languages negated, deferred or hedged (AMBIGUOUS_D044) approve nothing. Every
+//     other language stays NOISE.
 //
 // Expectations are derived per path from `cls` (tests/architect/scenarios-approvals.test.ts). Synthetic only.
 
@@ -51,6 +55,14 @@ const joinList = (xs: string[], sep: string) => (xs.length === 1 ? xs[0] : sep =
 // ------------------------------------------------------------------------------------------------ the bases
 const YES = ["yes", "yep", "yeah", "y", "yes please", "go ahead", "do it", "👍", "👍🏽", "👍👍", "yup", "yes, go ahead", "yes do it", "yess", "yesss", "yse"];
 const YES_BATCH = ["send them", "approve all", "send all", "send them all", "yes, send them", "yes send them all", "approve them all", "yes approve all", "yes to all", "send", "approve"];
+// D-044: the five languages' clear yes. On every batch path (cards, outreach drafts, follow-ups) each one approves exactly the
+// batch shown, as "yes" does; on the single billing cancel (English-only, D-044) it may approve nothing, never anything else.
+const YES_D044 = ["sí", "si", "si, claro", "sí, por favor", "claro", "oui", "ouais", "oui merci", "ja", "ja bitte", "jawohl", "sim", "sim, obrigado",
+  "haan", "haan ji", "haan, bhej do", "bhej do", "हाँ", "हाँ, भेज दो"];
+YES_BATCH.push(...YES_D044);
+// D-044: the five languages' yes worded about a batch ("send them all").
+const YES_BATCH_D044 = ["sí, envíalos", "mándalos todos", "oui, envoie-les", "schick alle", "sim, envia tudo", "sab bhej do", "सब भेज दो"];
+YES_BATCH.push(...YES_BATCH_D044);
 const NO = ["no", "nope", "nah", "no thanks", "no thank you"];
 const NO_BATCH = ["send none", "none", "don't send", "don't send them", "do not send", "cancel", "skip all", "none of them", "no, don't send them"];
 const AMBIGUOUS = [
@@ -70,7 +82,13 @@ const AMBIGUOUS = [
   "yes to none", "yes except all", "don't approve", "do not approve them", "never", "no, don't", "approve all, no wait", "wait yes", "hmm yes",
   "ok fine", "fine", "whatever", "sure why not", "if you want", "yes but let me see them again", "show me them first", "change 2", "redo 3",
 ];
-const NOISE = ["", " ", "\n", "sí, envíalos", "oui, envoie-les", "ja bitte", "да", "😀", "🙏", "👀", "❤️", "🤔", "👎", "🔥🔥", "...", "?", "!!!", "sí", "si", "oui", "ja", "da", "hai", "はい", "是", "sim", "evet", "si, claro"];
+// D-044: the same five languages negated, deferred or hedged: nothing.
+const AMBIGUOUS_D044 = ["no, no la mandes", "sí pero espera", "todavía no", "sí, mañana", "¿sí?", "nahi", "abhi nahi", "mat bhejo", "haan par baad mein",
+  "नहीं", "मत भेजो", "non", "pas encore", "oui mais attends", "nein", "noch nicht", "ja aber später", "não", "ainda não", "sim mas espera"];
+AMBIGUOUS.push(...AMBIGUOUS_D044);
+// D-044 moved "sí", "si", "si, claro", "oui", "ja", "ja bitte", "sim", "sí, envíalos" and "oui, envoie-les" from here to YES /
+// YES_BATCH. Every other language here still approves nothing.
+const NOISE = ["", " ", "\n", "да", "😀", "🙏", "👀", "❤️", "🤔", "👎", "🔥🔥", "...", "?", "!!!", "da", "hai", "はい", "是", "evet"];
 
 // ------------------------------------------------------------------------------------------------ subsets
 type Form = { render: (r: () => number) => { text: string; pick: (n: number) => number[] | null; category: string } };

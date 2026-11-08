@@ -19,6 +19,7 @@ import { ACCOUNT_MAX_TRIES, checkSession, CLEAR_LOGIN, CLEAR_SESSION, codeOf, LO
 import { verifyInitData } from "../_shared/telegram_webapp.ts";
 import { BOOT_SCRIPT, cut, FEED_SCRIPT, fullOf, hostOf, renderBootstrap, renderFeed, renderLinkState, renderPhoneLogin, renderPreview, renderText, signOutFoot, snippetOf, statusOf, type AppRow, type Feed, type Row } from "../_shared/file_page.ts";
 import { dayOf, BRAND, esc, layout, postedLine, webUrl } from "../_shared/file_page.ts";
+import { researchOgImage } from "../_shared/research_og.ts";
 import { actOn, bodyHtml, COPY_SCRIPT, KIND_CSS, KIND_LABEL, textOf, type Effects, type FileRecord } from "../_shared/file_kinds.ts";
 import type { FileService } from "../_shared/file_service.ts";
 import { fetchLogo, memoryLogoCache, validDomain, type LogoCache } from "../_shared/logo_cache.ts";
@@ -172,6 +173,8 @@ function metaOf(job: JobView, post: PostingRow | null): { meta: string; metaSrc:
 }
 
 const ogImage = (env: { get(k: string): string | undefined }) => { const b = (env.get("TRAINEE_FILE_BASE_URL") || "").trim(); return /^https:\/\//.test(b) ? `${new URL(b).origin}/og-file.png` : null; };
+// R9-C: a research brief's link preview is the research card (research_og.ts); it still names only the kind, nothing of the brief.
+const ogImageOf = (kind: string, env: { get(k: string): string | undefined }) => kind === "research_brief" ? researchOgImage(env.get("TRAINEE_FILE_BASE_URL")) : ogImage(env);
 // Every value the application will send, from the real payload the hash covers, in full: the resume, each field (a file by its name),
 // the cover note, the page-set fields, every other key of the payload, and the destination. A secret-looking field or key (the same
 // rule the Telegram card's Confirm uses: telegram_jobs.ts isSecretField / secretKey / secretFields) is shown as "Needs you", never its
@@ -381,7 +384,7 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
       // A link preview fetch: the brand card and, for a file of another kind, the kind's name; nothing about the person (not even
       // how many jobs) and the link is not touched.
       const g = d.files ? await d.files.get(c.claims.u, c.claims.r).catch(() => null) : null;
-      if (g && g.state !== "missing") return html(layout("Trainee", `<header>${BRAND}<h1>A file from Trainee</h1></header><main id="main"><p>Open this link in your browser, or from Telegram.</p></main>`, { og: { title: `${KIND_LABEL[g.rec.kind]} from Trainee`, description: "Sign in to open it.", image: ogImage(d.env) } }));
+      if (g && g.state !== "missing") return html(layout("Trainee", `<header>${BRAND}<h1>A file from Trainee</h1></header><main id="main"><p>Open this link in your browser, or from Telegram.</p></main>`, { og: { title: `${KIND_LABEL[g.rec.kind]} from Trainee`, description: "Sign in to open it.", image: ogImageOf(g.rec.kind, d.env) } }));
       return html(renderPreview({ title: "Your jobs from Trainee", description: "Sign in with your phone number to see them.", image: ogImage(d.env) }));
     }
     const cur = await cookieSession();
@@ -651,7 +654,7 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
   let csp = (await headers("text/html", d.env))["content-security-policy"].replace("script-src ", `script-src ${await kindScriptHash} `);
   // A confirmation screenshot is shown inline only from the project's own storage origin; img-src then allows exactly that origin.
   if (shots) csp = csp.replace(/img-src ([^;]+)/, (_m, v: string) => `img-src ${v === "'none'" ? shots : `${v} ${shots}`}`);
-  return o.html(layout(`${String(rec.data?.title ?? KIND_LABEL[rec.kind])} - Trainee`, inner, { script: KIND_SCRIPT, tg: true, css: KIND_CSS, og: { title: `${KIND_LABEL[rec.kind]} from Trainee`, description: "Open in Trainee.", image: ogImage(d.env) } }), 200, { "content-security-policy": csp });
+  return o.html(layout(`${String(rec.data?.title ?? KIND_LABEL[rec.kind])} - Trainee`, inner, { script: KIND_SCRIPT, tg: true, css: KIND_CSS, og: { title: `${KIND_LABEL[rec.kind]} from Trainee`, description: "Open in Trainee.", image: ogImageOf(rec.kind, d.env) } }), 200, { "content-security-policy": csp });
 }
 async function logoOf(want: string, claims: FileClaims, d: FileDeps): Promise<Response> {
   const none = async () => new Response("", { status: 404, headers: await headers("text/plain; charset=utf-8", d.env) });

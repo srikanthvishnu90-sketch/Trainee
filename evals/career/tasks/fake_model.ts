@@ -9,6 +9,9 @@
 // deno-lint-ignore-file no-explicit-any
 
 const POSTINGS: any[] = JSON.parse(await Deno.readTextFile(new URL("./tasks.json", import.meta.url))).postings;
+// The end-to-end eval's scaled set (e2e/generate.ts) brings its own postings: added before its run, so a pick from a search
+// result is completed from them as from the task eval's own.
+export function addPostings(ps: any[]) { const have = new Set(POSTINGS.map((p) => p.job_id)); for (const p of ps) if (!have.has(p.job_id)) { POSTINGS.push(p); have.add(p.job_id); } }
 export type OracleStep = { capability: string; text: string; args?: Record<string, any> };
 const oracle = new Map<string, OracleStep[]>();
 export const calls: { kind: "plan" | "agent" | "draft" | "other"; user: string }[] = [];
@@ -50,6 +53,9 @@ function agentActions(steps: OracleStep[], results: { name: string; out: any }[]
     else if (s.capability === "tracker.update") acts.push({ name: "track_application", input: { company: a.company, ...(a.role ? { role: a.role } : {}), stage: a.stage ?? "Saved", ...(a.when ? { when: a.when } : {}) } });
     else if (s.capability === "interview.prep") acts.push({ name: "interview_brief", input: { company: a.company ?? "", ...(a.role ? { role: a.role } : {}) } });
     else if (s.capability === "alerts.watch") acts.push({ name: "set_job_alerts", input: { keywords: a.keywords ?? [s.text], locations: a.locations ?? [] } });
+    // research.market (R9-F): the research tool as the brain calls it (career_tools.ts research_market): the person's question,
+    // the format (a File when they asked for one), search queries and the site domains to read.
+    else if (s.capability === "research.market") acts.push({ name: "research_market", input: { question: a.question ?? s.text, format: a.format ?? "file", queries: a.queries ?? [s.text], ...(a.sites ? { sites: a.sites } : {}), ...(a.companies ? { companies: a.companies } : {}) } });
     else if (s.capability === "instruction.remember") acts.push({ name: "remember_instruction", input: { instruction: a.instruction ?? s.text, quote: a.quote ?? s.text } });
     // reminder.set: the agent brain has no reminder tool.
   }
@@ -85,6 +91,13 @@ export async function fakeAnthropic(req: Request): Promise<Response> {
     const next = acts[results.length];
     return next ? tool(body, next.name, next.input) : text(body, "Here is where that stands.");
   }
+  // The research tool's draft (research/market.ts marketDraftPayload): a deterministic reading of the PAGES it was given. A sentence
+  // with a figure becomes a summary fact quoted word for word from its page; the first sentence without one is the thesis, the next
+  // ones the conditions and the risks, each naming its page. Nothing is added that a page does not say.
+  if (/You answer a market research question from the PAGES/.test(Array.isArray(body.system) ? body.system.map((b: any) => b?.text ?? "").join("") : String(body.system ?? ""))) {
+    calls.push({ kind: "other", user });
+    return text(body, JSON.stringify(marketDraft(user)));
+  }
   if (/- name: /.test(user)) {
     calls.push({ kind: "draft", user });
     const first = /- name: (\S+)/.exec(user)?.[1] ?? "there", topic = /ASK ABOUT[^\n]*\n- (.+)/.exec(user)?.[1];
@@ -92,4 +105,14 @@ export async function fakeAnthropic(req: Request): Promise<Response> {
   }
   calls.push({ kind: "other", user });
   return text(body, "Here is what I can tell you.");
+}
+
+export function marketDraft(user: string) {
+  const pages = [...user.matchAll(/^PAGE \d+\nurl: (\S+)\ntitle: ([^\n]*)\n([\s\S]*?)(?=\n\nPAGE \d+\n|(?![\s\S]))/gm)].map((m) => ({ url: m[1], title: m[2].replace(/^About:\s*/, "").trim(), text: m[3] }));
+  const sentences = (t: string) => t.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter((x) => /[.!?]$/.test(x) && x.length >= 12);
+  const facts: { text: string; quote: string; url: string }[] = [], readings: { text: string; url: string }[] = [];
+  for (const p of pages) for (const x of sentences(p.text)) (/\d/.test(x) ? facts.push({ text: x, quote: x, url: p.url }) : readings.push({ text: x, url: p.url }));
+  const [thesis, ...rest] = readings;
+  return { title: pages[0]?.title ?? "", thesis: thesis?.text ?? "", summary: facts.slice(0, 5), comparison: null,
+    conditions: rest.slice(0, 1).map((r) => ({ text: r.text, urls: [r.url] })), risks: rest.slice(1, 3).map((r) => ({ text: r.text, urls: [r.url] })) };
 }

@@ -1,5 +1,5 @@
 "use strict";
-// Form filling for Greenhouse, Lever and Ashby application pages, shared by the apply VM worker (parallel-apply.cjs) and the
+// Form filling for Greenhouse, Lever, Ashby and SmartRecruiters application pages, shared by the apply VM worker (parallel-apply.cjs) and the
 // dry-run harness (dry-run.cjs). It reads the page's own questions (label, kind, required, options), answers each one only from
 // the person's confirmed facts / answers, verifies every fill by reading it back, and NEVER guesses:
 //  - a required question with no confirmed answer is returned in needsUser (the person is asked), never filled with a default;
@@ -10,6 +10,11 @@
 //  - only the question labelled as the resume gets the resume file; a cover letter or other upload is never given it;
 //  - nothing here clicks Submit, solves a verification check, or types a password.
 // The returned `map` lists every question seen, with its decision and outcome (labels and sources only, never values).
+// R9 (2026-11-07), SmartRecruiters: its form is built from web components (spl-input, spl-select, spl-radio-group, ...) whose
+// label and control live in each component's OPEN shadow root, where a label's `for` resolves only inside that root. The
+// page side walks open shadow roots in document order (deepAll) and reads a label from the control's own root; Playwright's
+// CSS locators pierce open shadow roots, so filling and read-back are the same code as for the other three. A closed
+// shadow root is never forced open: its questions are not seen, and a required one shows as still empty (asked).
 
 const norm = (s) => String(s == null ? "" : s).toLowerCase().replace(/[*✱]/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
 
@@ -18,24 +23,28 @@ function EXTRACT() {
   const squash = (s) => String(s || "").replace(/\s+/g, " ").trim();
   const clean = (s) => squash(s).replace(/\(required\)/i, "").replace(/\s*[*✱]+\s*$/, "").replace(/\s*[*✱]+\s*$/, "").trim();
   const scope = document.querySelector("form") || document.body;
+  // Every match under a root, in document order, descending into open shadow roots (SmartRecruiters' components).
+  const deepAll = (root, sel) => { const out = []; const walk = (n) => { for (const c of n.children) { if (c.matches(sel)) out.push(c); if (c.shadowRoot) walk(c.shadowRoot); walk(c); } }; walk(root); return out; };
+  const rootOf = (el) => (el.getRootNode ? el.getRootNode() : document);
+  const up = (a) => a.parentElement || (a.parentNode && a.parentNode.host) || null;
   const shown = (e) => e.type === "file" || !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
   const nodeText = (n) => {
     const c = n.cloneNode(true);
     c.querySelectorAll("input,select,textarea,button,.filename,.default-label,svg,script,style").forEach((x) => x.remove());
     return clean(c.textContent);
   };
-  const LABEL_SEL = "legend, .application-label, .ashby-application-form-question-title, label.label, .select__label";
+  const LABEL_SEL = "legend, .application-label, .ashby-application-form-question-title, label.label, .select__label, .c-spl-form-field__label";
   const groupLabelNode = (el) => {
-    for (let a = el.parentElement, i = 0; a && i < 7; a = a.parentElement, i++) {
+    for (let a = up(el), i = 0; a && i < 7; a = up(a), i++) {
       const n = a.querySelector(LABEL_SEL);
       if (n && !n.contains(el)) return n;
     }
     return null;
   };
   const labelNode = (el) => {
-    if (el.id) { const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`); if (l && nodeText(l)) return l; }
+    if (el.id) { const l = rootOf(el).querySelector(`label[for="${CSS.escape(el.id)}"]`); if (l && nodeText(l)) return l; }
     const lb = el.getAttribute("aria-labelledby");
-    if (lb) { for (const id of lb.split(/\s+/)) { const n = document.getElementById(id); if (n && nodeText(n)) return n; } }
+    if (lb) { for (const id of lb.split(/\s+/)) { const n = rootOf(el).getElementById(id) || document.getElementById(id); if (n && nodeText(n)) return n; } }
     const cl = el.closest("label");
     if (cl && nodeText(cl)) return cl;
     const g = groupLabelNode(el);
@@ -52,7 +61,7 @@ function EXTRACT() {
     !!el.closest(".eeoc__container,[class*='eeo' i],#eeoc_fields,[data-qa*='eeo' i],[class*='demographic' i],[class*='voluntary' i],[class*='self-id' i]") ||
     /\b(gender|race|ethnicity|hispanic|latino|veteran|disabilit|sexual orientation|transgender|protected)\b/i.test(label);
   const optLabel = (inp) => {
-    if (inp.id) { const l = document.querySelector(`label[for="${CSS.escape(inp.id)}"]`); if (l) return nodeText(l); }
+    if (inp.id) { const l = rootOf(inp).querySelector(`label[for="${CSS.escape(inp.id)}"]`); if (l) return nodeText(l); }
     const cl = inp.closest("label");
     if (cl) return nodeText(cl);
     const nx = inp.nextElementSibling || inp.parentElement;
@@ -63,7 +72,7 @@ function EXTRACT() {
   const seen = new Set();
   let qn = 0;
   const push = (d) => { d.q = qn++; out.push(d); return d.q; };
-  const all = [...scope.querySelectorAll("input, select, textarea")];
+  const all = deepAll(scope, "input, select, textarea");
 
   // Yes/No button pairs (Ashby): the hidden checkbox inside them is not a question of its own.
   for (const box of scope.querySelectorAll(".ashby-application-form-input-yesno")) {
@@ -86,7 +95,7 @@ function EXTRACT() {
     // the site's own shortcut, not a question. Neither is a question we fill.
     if (el.closest(".iti__country-container, .iti__flag-container, .iti__dropdown-content") || (el.getAttribute("role") === "combobox" && el.closest(".iti") && !el.classList.contains("iti__tel-input"))) continue;
     if (el.closest("[class*='autofill' i]")) continue;
-    if (type === "radio" || (type === "checkbox" && (el.closest("fieldset") || (el.name && scope.querySelectorAll(`input[type="checkbox"][name="${CSS.escape(el.name)}"]`).length > 1)))) {
+    if (type === "radio" || (type === "checkbox" && (el.closest("fieldset") || (el.name && rootOf(el).querySelectorAll(`input[type="checkbox"][name="${CSS.escape(el.name)}"]`).length > 1)))) {
       const fs = el.closest("fieldset");
       const mates = all.filter((x) => x.type === type && !seen.has(x) && (fs ? x.closest("fieldset") === fs : x.name === el.name));
       mates.forEach((x) => seen.add(x));
@@ -125,8 +134,9 @@ function EXTRACT() {
 // ---- page side: what each tagged question holds right now ------------------------------------------------------------
 function STATE(qs) {
   const squash = (s) => String(s || "").replace(/\s+/g, " ").trim();
+  const deepAll = (root, sel) => { const out = []; const walk = (n) => { for (const c of n.children) { if (c.matches(sel)) out.push(c); if (c.shadowRoot) walk(c.shadowRoot); walk(c); } }; walk(root); return out; };
   return qs.map((d) => {
-    const els = [...document.querySelectorAll(`[data-upmore-q="${d.q}"]`)];
+    const els = deepAll(document, `[data-upmore-q="${d.q}"]`);
     const el = els[0];
     if (!el) return { q: d.q, filled: false, text: "", gone: true };
     switch (d.kind) {
@@ -150,8 +160,9 @@ function STATE(qs) {
 function INVALID() {
   const squash = (s) => String(s || "").replace(/\s+/g, " ").trim();
   // A required checkbox group is "at least one" in the site's own script; the browser marks each box invalid. One ticked is enough.
-  const groupTicked = (e) => e.type === "checkbox" && e.name && [...document.querySelectorAll(`input[type="checkbox"]`)].some((x) => x.name === e.name && x.checked);
-  return [...document.querySelectorAll("input:invalid, select:invalid, textarea:invalid")].filter((e) => !groupTicked(e)).filter((e) => e.type === "file" || e.offsetWidth || e.offsetHeight || e.getClientRects().length).map((e) => ({
+  const deepAll = (root, sel) => { const out = []; const walk = (n) => { for (const c of n.children) { if (c.matches(sel)) out.push(c); if (c.shadowRoot) walk(c.shadowRoot); walk(c); } }; walk(root); return out; };
+  const groupTicked = (e) => e.type === "checkbox" && e.name && deepAll(document, `input[type="checkbox"]`).some((x) => x.name === e.name && x.checked);
+  return deepAll(document, "input:invalid, select:invalid, textarea:invalid").filter((e) => !groupTicked(e)).filter((e) => e.type === "file" || e.offsetWidth || e.offsetHeight || e.getClientRects().length).map((e) => ({
     q: e.getAttribute("data-upmore-q"), name: e.name || e.id || "", message: squash(e.validationMessage).slice(0, 80),
   }));
 }
@@ -163,6 +174,8 @@ const FACT_RULES = [
   [/^preferred (first )?name\b/, "preferred_name"],
   [/^(full |legal |your )?name$|^full legal name\b/, "full_name"],
   [/^e ?mail\b/, "email"],
+  // R9: SmartRecruiters (and others) ask for the address twice; the second box takes the same confirmed address.
+  [/^(confirm|re ?enter|retype|repeat|verify) (your )?e ?mail( address)?$/, "email"],
   [/^(phone|mobile|telephone|cell)\b/, "phone"],
   [/^(current )?(company|employer|organi[sz]ation)\b/, "current_company"],
   [/^(current )?(job )?title\b/, "current_title"],

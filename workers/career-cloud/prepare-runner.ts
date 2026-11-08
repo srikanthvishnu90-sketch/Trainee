@@ -37,9 +37,12 @@ export function prepareBridge(o: { url: string; id: string; sandbox: string; tok
 
 // The resume the person keeps for the cloud, as is, written into the preparation's own folder; null when none is kept
 // (the posting is then recorded no_resume and nothing is prepared: nothing goes out with a resume they did not give).
-export function keptResume(call: (op: string) => Promise<any>) {
-  return async (_c: unknown, dir: string): Promise<PreparedResume | null> => {
-    const r = await call("resume");
+// R9-G2 (E09): asked for the posting it prepares, so a resume tailored for that posting ("tailor ... and apply with it") is
+// the file that goes, and the card names it; any other posting gets the kept resume as before.
+export function keptResume(call: (op: string, extra?: Record<string, unknown>) => Promise<any>) {
+  return async (c: unknown, dir: string): Promise<PreparedResume | null> => {
+    const posting = c && typeof c === "object" && typeof (c as any).job_id === "string" ? (c as any).job_id : null;
+    const r = await call("resume", posting ? { posting } : {});
     if (!r || typeof r.b64 !== "string" || !/^[0-9a-f]{64}$/.test(String(r.sha256)) || !/^[^/\\.][^/\\]{0,199}$/.test(String(r.filename))) return null;
     const bytes = Uint8Array.from(atob(r.b64), (c) => c.charCodeAt(0));
     const sum = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))).map((n) => n.toString(16).padStart(2, "0")).join("");

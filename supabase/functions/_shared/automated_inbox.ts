@@ -37,9 +37,17 @@ const AUTOMATION_WORDS = new Set(["noreply", "donotreply", "dontreply", "notific
 const AUTOMATION_RUN = /^(?:no-?reply|do-?not-?reply|dont-?reply|donotreply|noreply)(?:$|[._+-])/;
 
 const onDomain = (domain: string, list: readonly string[]) => list.some((d) => domain === d || domain.endsWith("." + d));
+// A job board on any public suffix: its name is the registrable label (indeed.de, ziprecruiter.co.uk, uk.indeed.com,
+// monster.co.uk). The never-open boards (career_people_sites.ts NEVER_OPEN_LABELS, plus Glassdoor and ZipRecruiter as in
+// career_contact_sources.ts) match as any label at any depth, failing closed on look-alikes. A board name deeper in an
+// unrelated host (dice.cs.uni.edu, hired.example.org) is not the board.
+const BOARD_LABELS = new Set(JOB_BOARD_DOMAINS.map((d) => registrable(d).label));
+const NEVER_BOARD_LABELS = new Set(["linkedin", "lnkd", "licdn", "indeed", "indeedemail", "indeedmail", "joinhandshake", "glassdoor", "ziprecruiter"]);
+const onBoard = (domain: string) => onDomain(domain, JOB_BOARD_DOMAINS) || BOARD_LABELS.has(registrable(domain).label)
+  || domain.split(".").slice(0, -1).some((l) => NEVER_BOARD_LABELS.has(l));
 export const isAtsOrBoardDomain = (domain: unknown) => {
   const d = String(domain ?? "").trim().toLowerCase().replace(/\.+$/, "");
-  return !!d && (onDomain(d, ATS_DOMAINS) || onDomain(d, JOB_BOARD_DOMAINS));
+  return !!d && d.includes(".") && (onDomain(d, ATS_DOMAINS) || onBoard(d));
 };
 
 export type AutomatedWhy = "no_reply" | "role_inbox" | "ats_domain";

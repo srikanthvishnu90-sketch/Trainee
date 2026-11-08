@@ -12,7 +12,8 @@
 //   card hash          one hash over every mail on the card, in order (the first email and each follow-up, each mail's
 //                      exact-payload hash and the day it goes): a yes approves that whole card and nothing else.
 //   approveContactCard the yes must carry the card's hash; the drafts are stored approved (career_outreach_drafts) and
-//                      queued on the rail. At most `dailyNew` (20) new contacts per person per day, each spread
+//                      queued on the rail, only while outreach is still switched on. At most `dailyNew` (20) new contacts
+//                      per person per UTC day (capDay: the server's clock, never the caller's time zone), each spread
 //                      `spreadMinutes` after the last; at most 2 follow-ups, 4 to 7 days apart, which the rail stops on a
 //                      reply, a bounce or an opt-out (career_send_claim reads the thread first).
 import { emailHash as hashOf, messageOf, OPT_OUT_LINE, type OutreachDraft, type OutreachStore, payloadHash, type Recipient } from "./career_outreach.ts";
@@ -99,20 +100,26 @@ export function memorySendLimits(): SendLimits {
     },
   };
 }
+// The day the daily new-contact cap counts: the UTC calendar day, on the server's clock. Never the caller's time zone: a
+// time zone the request can switch would re-open the cap (UTC+14 and UTC-11 put one instant on three dates).
+export const capDay = (now: number) => new Date(now).toISOString().slice(0, 10);
+// A date as the person sees it (their own time zone), for display only; the cap never reads it.
 export const dayIn = (now: number, tz?: string | null) => new Intl.DateTimeFormat("en-CA", { timeZone: tz || "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 
-export type Approved = { ok: true; queued: QueueResult[]; send_at: string[] } | { ok: false; why: "changed" | "suppressed" | "daily_limit" | "refused"; reply: string; queued?: QueueResult[] };
+export type Approved = { ok: true; queued: QueueResult[]; send_at: string[] } | { ok: false; why: "off" | "changed" | "suppressed" | "daily_limit" | "refused"; reply: string; queued?: QueueResult[] };
 export async function approveContactCard(o: {
-  userId: string; card: Extract<ContactCard, { ok: true }>; yesHash: string; contact: ContactIn; now: number; tz?: string | null; config: SendConfig;
+  userId: string; card: Extract<ContactCard, { ok: true }>; yesHash: string; contact: ContactIn; now: number; config: SendConfig;
   store: Pick<OutreachStore, "saveBatch" | "update">; rail: QueueDeps; limits: SendLimits; suppressed: (emails: string[]) => Promise<Set<string>>;
 }): Promise<Approved> {
   const { card, config: c } = o;
+  // The switch is read again at the yes: a card shown before outreach was switched off is never sent.
+  if (!c.on) return { ok: false, why: "off", reply: "Contact outreach is switched off, so nothing was sent." };
   // The yes must be this card's hash, and the hash must be the one its mails make (a card is never trusted to say its own).
   if (o.yesHash !== card.hash || card.hash !== await cardHash(card.mails)) return { ok: false, why: "changed", reply: "That yes was for a different version of this email, so nothing was sent. Here it is again to approve." };
   if (testModeBroken(c)) return { ok: false, why: "refused", reply: TEST_MODE_BROKEN };
   if (c.testMode && !c.testRecipients.includes(card.to)) return { ok: false, why: "refused", reply: "Test mode: that address is not on the test list, so nothing was sent." };
   if ((await o.suppressed([card.found, card.to])).size) return { ok: false, why: "suppressed", reply: `${o.contact.person.name} can't be emailed any more (they opted out, or the address bounced).` };
-  const day = dayIn(o.now, o.tz), emailHash = await hashOf(card.found);
+  const day = capDay(o.now), emailHash = await hashOf(card.found);
   const slot = await o.limits.countToday(o.userId, day);
   const rec = await o.limits.record({ user: o.userId, email_hash: emailHash, step: 0, day, cap: c.dailyNew });
   if (rec === "daily_limit") return { ok: false, why: "daily_limit", reply: `That's ${c.dailyNew} new people today, the most I email in a day. I'll keep this one for tomorrow if you approve it again then.` };

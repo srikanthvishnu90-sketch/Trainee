@@ -39,8 +39,23 @@ export function linkAsk(message: string): LinkAsk | null {
   if (raw === null || !/\bapply\b/i.test(raw) || /\bapplied\b/i.test(raw) || HOW.test(raw)) return null;
   const links = [...new Set((raw.match(URL_IN) ?? []).map((u) => u.replace(/[.,;:!?)\]]+$/, "")))];
   const asks = links.map(linkOf).filter((x): x is LinkAsk => !!x);
-  // One posting per ask; two different postings in one text is the batch ask's, not this turn's.
+  // One posting per ask; two different postings in one text is the batch ask's (linksAsk), not this turn's.
   return asks.length === 1 ? asks[0] : null;
+}
+// R9-G (e2e E05): "apply to these 20: <link> <link> …": every posting link in one apply ask, in the order pasted, one each.
+// Two or more different postings; one is linkAsk's. A link no ATS reader knows (or LinkedIn, Indeed, Handshake) is named in
+// `unread`, never guessed at.
+export function linksAsk(message: string): { asks: LinkAsk[]; unread: string[] } | null {
+  const raw = applyText(message);
+  if (raw === null || !/\bapply\b/i.test(raw) || /\bapplied\b/i.test(raw) || HOW.test(raw)) return null;
+  const links = [...new Set((raw.match(URL_IN) ?? []).map((u) => u.replace(/[.,;:!?)\]]+$/, "")))];
+  const asks: LinkAsk[] = [], unread: string[] = [], keys = new Set<string>();
+  for (const u of links) {
+    const a = linkOf(u);
+    if (!a) unread.push(u);
+    else if (!keys.has(a.key)) { keys.add(a.key); asks.push(a); }
+  }
+  return asks.length >= 2 ? { asks, unread } : null;
 }
 export function linkOf(url: string): LinkAsk | null {
   // Never LinkedIn, Indeed or Handshake (owner rule), on any suffix or subdomain: the chat declines those before this turn.

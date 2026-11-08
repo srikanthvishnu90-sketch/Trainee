@@ -31,6 +31,7 @@
 // it none is drafted ahead, and the person can still say "draft N" in the chat.
 import { engineFacts, engineRunner, prepare, questionsToStore, type ResumeTag, type RunEngine, type TextAnswer } from "./approve-first.ts";
 import { trustedManifest } from "../../extension/src/apply_core.ts";
+import { approvedTextAnswers } from "./approved_sources.ts";
 import { type ResumeStore, tailorForPosting, type TailorDeps } from "../../supabase/functions/_shared/career_tailor.ts";
 import { draftEssay, type ModelFn } from "../../supabase/functions/_shared/essay_draft.ts";
 import { mapQuestion } from "../../supabase/functions/_shared/question_map.ts";
@@ -145,7 +146,7 @@ export async function prepareOne(d: AheadDeps, c: Candidate): Promise<AheadOutco
   const dir = await Deno.makeTempDir({ prefix: "trainee-ahead-", ...(d.tmpRoot ? { dir: d.tmpRoot } : {}) });
   try {
     // Their own answers to questions they were asked, and their profile's confirmed facts: the trust contract decides.
-    const rows: TextAnswer[] = withFullName(must(await d.db.rpc("career_apply_answers_for", { p_user: c.user_id }), "read their answers") ?? []);
+    const rows: TextAnswer[] = approvedTextAnswers(must(await d.db.rpc("career_apply_answers_for", { p_user: c.user_id }), "read their answers") ?? []);
     const profile = d.profileFor ? trustedProfile(await d.profileFor(c.user_id), c.user_id, rows) : null;
     // The posting's own company (career_postings), which the engine names the application by (else the board's tenant):
     // the 30-day one-company rule and the person's card then count employers, not job boards.
@@ -329,16 +330,9 @@ export function trustedProfile(profile: any, owner: string, rows: TextAnswer[]):
 // kept as they were stored so the engine sends exactly the stored file. Production: supabaseResumeStore(admin) and
 // edgeRenderer(); the store's put is what makes the file "one Trainee stored for this person", which
 // career_apply_resume_tag checks before calling the job tailored.
-// FEATURE E2E (2026-10-26): a form that asks "Name" (fact:full_name) of a person who already answered their first and last
-// name was asked again: the ask-once rule broken by a field's shape. Their full name is exactly their own two answers, in
-// that order, joined by a space; it is added as one more text answer whose id names both (text-answer:<first>+<last>),
-// so the trust contract (trustedManifest) keeps it with that provenance. Never when they answered a full name themselves.
-export function withFullName(rows: TextAnswer[]): TextAnswer[] {
-  const said = (k: string) => (rows || []).find((r) => r && r.key === `fact:${k}` && typeof r.answer === "string" && r.answer.trim());
-  const first = said("first_name"), last = said("last_name");
-  if (!first || !last || said("full_name")) return rows || [];
-  return [...rows, { ...first, id: `${first.id}+${last.id}`, key: "fact:full_name", answer: `${first.answer.trim()} ${last.answer.trim()}` } as TextAnswer];
-}
+// The full name derived from their first and last answers lives in approved_sources.ts, the one definition the send-time
+// check (workers/career-cloud/engine_input.ts) reads too; re-exported here for this file's existing callers.
+export { withFullName } from "./approved_sources.ts";
 
 export function tailoredResume(o: { render: TailorDeps["render"]; resumes: ResumeStore; now?: () => number }) {
   // deno-lint-ignore no-explicit-any

@@ -2162,6 +2162,13 @@ const CareerTailor = (() => {
     if (s && e && s !== e) return `${s}–${e}`;
     return s || e || null;
   }
+  function headerOf(profile) {
+    const b = profile.basics, rh = profile.resume_header, typed = b.name;
+    if (!typed && rh && typeof rh === "object" && rh.name) {
+      return { name: rh.name, email: rh.email || null, location: rh.location || null, links: rh.links || {}, contactLine: rh.contactLine || null, linksLine: rh.linksLine || null, from: "resume" };
+    }
+    return { name: b.name, email: b.email, location: b.location, links: b.links || {} };
+  }
   function entryTextFor(fact) {
     const title = (fact && fact.title) || "";
     const range = dateRangeFor(fact);
@@ -2252,7 +2259,7 @@ const CareerTailor = (() => {
     }
     for (let i = sections.length - 1; i >= 0; i--) if (!sections[i].lines.length) sections.splice(i, 1);
     const lines = sections.flatMap((s) => s.lines.map((l) => ({ ...l, section: s.heading })));
-    return { family, familyLabel: fam.label, conventions: fam.conventions, pageLimit: fam.pageLimit, header: { name: profile.basics.name, email: profile.basics.email, location: profile.basics.location, links: profile.basics.links || {} }, sections, lines, deduped, selectedFactIds: selected.map((x) => x.fact.id) };
+    return { family, familyLabel: fam.label, conventions: fam.conventions, pageLimit: fam.pageLimit, header: headerOf(profile), sections, lines, deduped, selectedFactIds: selected.map((x) => x.fact.id) };
   }
 
   function auditResume(resume, profile) {
@@ -13855,6 +13862,8 @@ const CareerRouter = (() => {
       const reply = compose({ headline: "The truth check refused that tailoring, so nothing was saved.", facts: ["A tailored resume is only saved when every line traces to a confirmed fact on your profile."], nextStep: "Tell me which facts to confirm and I will run it again." });
       return { intent: "tailor_refused", reply, resultStatus: "blocked", artifact: null, violations: tailored.violations || [] };
     }
+    const top = tailored.resume && tailored.resume.header;
+    const noContact = tailored.mode === "full" && !(top && s(top.name).trim() && s(top.email).trim());
     const rendered = tailored.rendered || {};
     const artifact = { kind: "tailored_resume", format: "text", text: rendered.text || "", markdown: rendered.markdown || "", pdf: rendered.pdf == null ? null : rendered.pdf, sha256: sha256(rendered.text || ""), jobId, company, versionId: tailored.version && tailored.version.versionId || null };
     if (profile && typeof profile === "object") { profile._careerRouterArtifacts = [...(profile._careerRouterArtifacts || []), artifact]; }
@@ -13983,6 +13992,7 @@ const CareerRouter = (() => {
         ...(mismatchFact ? [mismatchFact] : []),
       ];
     try { const tm = threadMirrorForWrite(ctx); if (tm) tm.tailor = { company: company || null, title: titleLine, jobId: jobId || null, diff: tailored.diff || null, gaps, at: new Date(nowOf(ctx)).toISOString() }; } catch {   }
+    if (noContact) { facts.push("There is no name or email at the top of this file: none was typed for it and none was confirmed with your resume, so nothing is printed there."); nextStep = "What name and email should go at the top of your resume?"; artifact.no_contact = true; }
     const reply = compose({ headline: headlineOverride || `Your resume is tailored for ${titleLine}.`, facts, nextStep });
     return { intent: "career_tailor", reply, resultStatus: "prepared", artifact, gaps, tailored: { ok: true, mode: tailored.mode, version: tailored.version },
       tailorDoc: tailored.resume || null, tailorJd: jdText, tailorPosting: posting ? { title: posting.title || null, company: posting.company || null } : null };
@@ -14019,17 +14029,26 @@ const CareerRouter = (() => {
 
   function multiTailorTargets(text) {
     const raw = s(text);
-    const re = /(?:\b(?:for|and|,)\s+)(?:the\s+|a\s+)?([A-Za-z][A-Za-z0-9&/+.,' -]*?)\s+(?:role|position|job|internship|posting|opening)\s+at\s+([A-Z][A-Za-z0-9&.'’-]*(?:\s+(?!and\b)[A-Z][A-Za-z0-9&.'’-]*)*)/g;
+    const re = /(?:(?:\b(?:for|4|and|n|plus)|,|&|\+)\s+)(?:the\s+|a\s+)?([A-Za-z](?:[A-Za-z0-9/.,' -]|[&+](?!\s+(?:the|a)\s))*?)\s+(?:role|roole|rol|roel|rloe|position|job|internship|posting|opening)\s+(?:at|@)\s+([A-Z][A-Za-z0-9&.'’-]*(?:\s+(?!(?:and|n|plus)\b)[A-Z][A-Za-z0-9&.'’-]*)*)/g;
     const out = [];
+    const add = (role, company) => {
+      role = s(role).replace(/^(?:the|a|el|la)\s+/i, "").trim(); company = s(company).trim();
+      if (role && company && !out.some((x) => lc(x.company) === lc(company) && lc(x.role) === lc(role))) out.push({ role, company });
+    };
     let m;
-    while ((m = re.exec(raw))) {
-      const role = m[1].replace(/^(?:the|a)\s+/i, "").trim();
-      if (role && !out.some((x) => lc(x.company) === lc(m[2]) && lc(x.role) === lc(role))) out.push({ role, company: m[2].trim() });
+    while ((m = re.exec(raw))) add(m[1], m[2]);
+    if (out.length < 2) {
+      const CO = "[A-Z][A-Za-z0-9&.'’-]*(?:\\s+[A-Z][A-Za-z0-9&.'’-]*)*";
+      const es = new RegExp(`\\bpara\\s+(?:el\\s+|la\\s+)?([A-Za-z][A-Za-z0-9/.,' +&-]*?)\\s+en\\s+(${CO})`, "g");
+      const hi = new RegExp(`(${CO})\\s+ke\\s+([A-Za-z][A-Za-z0-9/.,' +&-]*?)(?=\\s+(?:aur|dono|ke liye)\\b)`, "g");
+      out.length = 0;
+      while ((m = es.exec(raw))) add(m[1], m[2]);
+      if (out.length < 2) { out.length = 0; while ((m = hi.exec(raw))) add(m[2], m[1]); }
     }
     return out.length >= 2 ? out : null;
   }
   function handleMultiTailor(text, ctx) {
-    if (!/\b(?:tailor|tailored|customi[sz]e)\b/i.test(s(text))) return null;
+    if (!/\b(?:tailor|tailored|talior|tialor|tailr|customi[sz]e|adapta|ad[aá]ptame)\b/i.test(s(text))) return null;
     const targets = multiTailorTargets(text);
     if (!targets) return null;
     const done = [], missing = [];
@@ -14040,6 +14059,13 @@ const CareerRouter = (() => {
       else missing.push(tg);
     }
     if (!done.length) return null;
+    const part = (v) => s(v).replace(/\([^)]*\)/g, " ").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
+    for (const d of done) {
+      const pdf = d.r.artifact && d.r.artifact.pdf;
+      if (!pdf || typeof pdf !== "object") continue;
+      const who = d.r.tailorDoc && d.r.tailorDoc.header && d.r.tailorDoc.header.name ? (s(pdf.filename).replace(/_?Resume\.pdf$/i, "") || null) : null;
+      pdf.filename = [who, "Resume", part(d.posting.company), part(d.posting.title)].filter(Boolean).join("_") + ".pdf";
+    }
     const docs = done.map((d) => d.r.artifact && d.r.artifact.pdf).filter(Boolean);
     const named = (d) => `${d.posting.title} at ${d.posting.company}`;
     const facts = done.map((d) => {
@@ -14729,6 +14755,7 @@ const CareerRouter = (() => {
     if (named && !/^(me|my|the|that|this|a|an)$/.test(named[1])) return false;
     if (/\b(send|email|mail|forward)\b[^.?!]*\bto\s+(?!me\b|this\b)[a-z]/.test(t)) return false;
     return /\b(send|give|share|attach|drop|post|text|email)\b[^.?!]*\b(me|here)\b/.test(t)
+      || /\b(send|give|text|email)\s+(it|them|both|that|these|those|the files?|the pdfs?)\s+back\b/.test(t)
       || /\bin this chat\b/.test(t)
       || /\b(send|give|share|attach)\s+(me\s+)?(my|the|that|this)\s+(resume|cv|cover letter|packet|brief|pdf|docx|file|document)\b/.test(t);
   }
@@ -14839,12 +14866,44 @@ const CareerRouter = (() => {
     if (nameCheck) facts.push(nameMismatchLine(nameCheck));
     if (Array.isArray(res.replaced_drafts) && res.replaced_drafts.length) facts.push("This replaces the resume you pasted before it, which you had not confirmed.");
     if ((profile.facts || []).some((f) => f && f.source === "resume-ingest" && !f.needs_confirmation)) facts.push("Your confirmed resume stays in use until you confirm this one; then this one replaces it.");
-    const reply = entriesReply("Your resume is on record — as drafts, awaiting your word.", facts, "Here is what I read from it, word for word:", presented.map((f, i) => `${i + 1}. ${f.text}`),
+    const header = resumeHeaderOf(raw);
+    if (mir && mir.resumeIngest) { if (header) mir.resumeIngest.header = { ...header, sha256: sha256(headerLine(header)) }; else delete mir.resumeIngest.header; }
+    const reply = entriesReply("Your resume is on record — as drafts, awaiting your word.", facts, "Here is what I read from it, word for word:", [...(header ? [`At the top: ${headerLine(header)}`] : []), ...presented.map((f, i) => `${i + 1}. ${f.text}`)],
       target ? `Say "yes, that's my resume" and I confirm them and tailor for ${target.label} in the same turn.` : "Say \"yes, that's my resume\" and I confirm them as your facts — then name a role and the tailoring runs on them.");
     return { intent: "career_resume_ingest", reply, resultStatus: "awaiting_user", sends: 0, resume_ingest: { drafts: total, byKind } };
   }
   const NAME_LINE = /^[A-ZÀ-ɏ][\p{L}'’.-]+(?:\s+[A-ZÀ-ɏ][\p{L}'’.-]+){1,3}(?:\s+\(TEST\))?$/u;
   const nameTokens = (v) => s(v).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\(test\)/g, " ").split(/[^\p{L}'’-]+/u).map((x) => x.replace(/^['’-]+|['’-]+$/g, "")).filter((x) => x.length >= 2);
+  const HEADER_SECTION = /^(?:education|experience|work experience|employment|projects?|skills|technical skills|leadership|summary|objective|profile|certifications?|activities|awards)\s*:?$/i;
+  function resumeHeaderOf(raw) {
+    const body = s(raw).replace(/^\s*(?:(?:here'?s|here is|this is|attached is|sending)\s+my\s+(?:updated\s+|new\s+|current\s+)?(?:resume|cv|r[ée]sum[ée])|my\s+(?:resume|cv))\s*:?\s*/i, "");
+    const lines = body.split(/\r?\n/).map((l) => l.trim());
+    const top = [];
+    for (const l of lines) { if (HEADER_SECTION.test(l)) break; if (l) top.push(l); if (top.length >= 6) break; }
+    if (!top.length) return null;
+    const nameAt = top.findIndex((l) => l.length <= 60 && NAME_LINE.test(l));
+    if (nameAt < 0) return null;
+    const h = { name: top[nameAt], email: null, location: null, links: {}, contactLine: null, linksLine: null };
+    for (const l of top.slice(nameAt + 1)) {
+      if (!h.contactLine && /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.test(l)) h.contactLine = l;
+      else if (!h.linksLine && /\bhttps?:\/\//i.test(l)) h.linksLine = l;
+      for (const seg of l.split(/\s*[|·•]\s*/).map((x) => x.trim()).filter(Boolean)) {
+        const url = /\bhttps?:\/\/[^\s<>()]+/i.exec(seg);
+        const mail = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.exec(seg);
+        if (mail && !h.email) h.email = mail[0];
+        else if (url) { const key = (/^([A-Za-z]+)\s*:/.exec(seg) || [null, "link"])[1].toLowerCase(); if (!h.links[key]) h.links[key] = url[0].replace(/[.,;]+$/, ""); }
+        else if (!h.location && /^[\p{L} .'-]+,\s*[\p{L} .'-]+(?:\s*\(TEST\))?$/u.test(seg)) h.location = seg;
+      }
+    }
+    return h;
+  }
+  const headerLine = (h) => [h.name, h.contactLine || [h.email, h.location].filter(Boolean).join(" | "), h.linksLine || Object.values(h.links || {}).join(" | ")].filter(Boolean).join(" | ");
+  function confirmResumeHeader(profile, header, at) {
+    if (!profile || typeof profile !== "object" || !header || !header.name) return false;
+    profile.resume_header = { name: header.name, email: header.email || null, location: header.location || null, links: { ...(header.links || {}) },
+      contactLine: header.contactLine || null, linksLine: header.linksLine || null, confirmed_at: at ? new Date(at).toISOString() : null };
+    return true;
+  }
   function resumeNameMismatch(raw, ctx) {
     const given = statedFactsOf(ctx).find((f) => f && f.kind === "name" && s(f.value).trim());
     if (!given) return null;
@@ -14990,6 +15049,8 @@ const CareerRouter = (() => {
         reply: compose({ headline: "I did not confirm anything — the resume drafts on the record are not the ones I showed you.", facts: ["That yes binds only to the exact resume content presented for approval; the drafts standing now do not match it, so nothing was confirmed from it."], nextStep: "Paste the resume again and I will show you its drafts for a fresh yes." }) };
     }
     const superseded = presentedIds && confirmed && typeof ProfileMod.supersedeResume === "function" ? ProfileMod.supersedeResume(profile, confirmedIds, { now: nowOf(ctx) }) : [];
+    const shownHeader = mir.resumeIngest.header;
+    if (confirmed && shownHeader && shownHeader.sha256 === sha256(headerLine(shownHeader))) confirmResumeHeader(profile, shownHeader, nowOf(ctx));
     const target = mir.tailorTarget && mir.tailorTarget.company ? mir.tailorTarget : null;
     const wmir = threadMirrorForWrite(ctx);
     if (wmir) delete wmir.resumeIngest;
@@ -22911,7 +22972,8 @@ const CareerRouter = (() => {
     }
     const recommendations = typeof CareerRecommendations !== "undefined" ? CareerRecommendations : req("./154-career-recommendations.js");
     const counterDraftWithOffer = (/\b(?:draft|write|compose)\b[^.?!]*\bcounter\b/i.test(s(text)) && /\boffer/i.test(s(text))) || /\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d/i.test(s(text));
-    const recommendationIntent = !counterDraftWithOffer && recommendations && recommendations.intentFor(text);
+    const tailorAsk = /\b(?:make|get)\s+my\s+(?:resume|cv)\s+(?:fit|match)\b|\b(?:fit|match)\s+my\s+(?:resume|cv)\s+(?:to|for)\b/.test(lc(text));
+    const recommendationIntent = !counterDraftWithOffer && !tailorAsk && recommendations && recommendations.intentFor(text);
     if (recommendationIntent) {
       const rec = recommendations.recommend(Object.assign({}, c, { recommendationIntent, text: s(text) }));
       return { intent: "career_recommendations", reply: rec.text, resultStatus: "prepared", sends: 0, guidance: rec, payload: rec, artifact: rec };
@@ -23177,7 +23239,7 @@ const CareerRouter = (() => {
       const rg = routeResumeGuidance(text, c);
       if (rg) return rg;
     }
-    if (/\btailor\b|\btailored per\b|\bresume variants\b|\bvariants\b[^.]*\bresume\b|\banswer bank\b|\btruth audit\b|\bliving resume\b|\bresume diff\b|\bdiff review\b|\bbans? ai\b|\bai[ -]written\b|\bimpact bullets\b|\b(customi[sz]e|adjust|fit)\b[^.]*\bresume\b|\bresume\b[^.]*\bto this\b|\bmake my resume\b|\b(?:improve|update|fix)\b[^.]*\bresume\b[^.]*\b(?:for|to)\s+(?:a|an|the|this|that)\b/.test(t)) {
+    if (/\btailor\b|\btalior\b|\badapta\b[^.]*\bcurr[ií]cul(?:um|o)\b|\btailored per\b|\bresume variants\b|\bvariants\b[^.]*\bresume\b|\banswer bank\b|\btruth audit\b|\bliving resume\b|\bresume diff\b|\bdiff review\b|\bbans? ai\b|\bai[ -]written\b|\bimpact bullets\b|\b(customi[sz]e|adjust|fit)\b[^.]*\bresume\b|\bresume\b[^.]*\bto this\b|\bmake my resume\b|\b(?:improve|update|fix)\b[^.]*\bresume\b[^.]*\b(?:for|to)\s+(?:a|an|the|this|that)\b/.test(t)) {
       if (!profile) return handleTailorNeedsFacts(text, c);
       if (/\bessays?\b/.test(t)) { const es = handleEssayTailor(text, c); if (es) return es; }
       if (/\bwins? log\b/.test(t)) { const os = handleOS(text, c); if (os) return os; }
@@ -25888,9 +25950,9 @@ const CareerRender = (() => {
     const blocks = [];
     const header = (resume && resume.header) || {};
     if (header.name) blocks.push({ style: "name", kind: "name", text: String(header.name) });
-    const contact = [header.email, header.location].filter(Boolean).join(" | ");
+    const contact = header.contactLine ? String(header.contactLine) : [header.email, header.location].filter(Boolean).join(" | ");
     if (contact) blocks.push({ style: "contact", kind: "contact", text: contact });
-    const links = Object.values(header.links || {}).filter(Boolean).join(" | ");
+    const links = header.linksLine ? String(header.linksLine) : Object.values(header.links || {}).filter(Boolean).join(" | ");
     if (links) blocks.push({ style: "links", kind: "links", text: links });
     const addLine = (line) => {
       if (!line || line.text == null || !String(line.text).trim()) return;
@@ -26388,6 +26450,8 @@ const CareerRender = (() => {
     }
     return out;
   }
+  const MONTH = "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]{0,6}\\.?";
+  const DATE_ONLY_RE = new RegExp(`^(?:${MONTH} )?\\d{4}(?:\\s*[\u2013\u2014-]\\s*(?:(?:${MONTH} )?\\d{4}|Present))?$`, "i");
   function pdfStructure(buf) {
     const s = Bytes.isBuffer(buf) ? buf.toString("latin1") : "";
     const fonts = [...new Set([...s.matchAll(/\/BaseFont\s*\/([A-Za-z0-9-]+)/g)].map((m) => m[1].replace(/^[A-Z]{6}\+/, "")))];
@@ -26395,8 +26459,9 @@ const CareerRender = (() => {
     const pages = (s.match(/\/Type\s*\/Page(?![a-zA-Z])/g) || []).length;
     const runs = extractPdfRuns(buf);
     const sizes = [...new Set(runs.map((r) => r.size).filter(Boolean))].sort((a, b) => a - b);
-    const xs = [...new Set(runs.map((r) => Math.round(r.x)))];
-    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, pages, fonts, fontSizesPt: sizes, images, singleColumn: runs.length > 0 && xs.every((x) => x <= 100), headings: [] };
+    const rightDate = (r) => DATE_ONLY_RE.test(String(r.text).trim()) && runs.some((o) => o !== r && o.page === r.page && Math.abs(o.y - r.y) < 0.5 && o.x <= 100);
+    const xs = [...new Set(runs.filter((r) => r.x <= 100 || !rightDate(r)).map((r) => Math.round(r.x)))];
+    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, pages, fonts, fontSizesPt: sizes, images, singleColumn: runs.length > 0 && xs.every((x) => x <= 100), rightAlignedDates: runs.filter((r) => r.x > 100 && rightDate(r)).length, headings: [] };
   }
   function extractPdfPoppler(buf) {
     if (!cp || !fs || !os) return null;
@@ -26417,7 +26482,7 @@ const CareerRender = (() => {
     const xml = xmlBuf.toString("utf8");
     const lines = [];
     for (const pm of xml.matchAll(/<w:p(?:\s[^>]*)?>([\s\S]*?)<\/w:p>/g)) {
-      const runs = [...pm[1].matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)].map((m) => unescXml(m[1]));
+      const runs = [...pm[1].matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:tab\/>/g)].map((m) => (m[1] === undefined ? " " : unescXml(m[1])));
       const text = runs.join("");
       if (text.trim()) lines.push(text);
     }
@@ -26428,11 +26493,12 @@ const CareerRender = (() => {
     if (!xmlBuf) return [];
     const xml = xmlBuf.toString("utf8");
     const lines = [];
-    const tokenRe = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<\/w:p>/g;
+    const tokenRe = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<\/w:p>|<w:tab\/>/g;
     let cur = "";
     let m;
     while ((m = tokenRe.exec(xml))) {
       if (m[1] !== undefined) cur += unescXml(m[1]);
+      else if (m[0] === "<w:tab/>") cur += " ";
       else { if (cur.trim()) lines.push(cur); cur = ""; }
     }
     if (cur.trim()) lines.push(cur);
@@ -26491,13 +26557,24 @@ const CareerRender = (() => {
     const resume = inp.resume || null;
     const expected = resume ? sourceLines(resume) : (inp.sourceLines || null);
     const expectedNorm = expected ? normSeq(expected.map((l) => l.text)) : null;
-    const expectedLayoutNorm = resume ? normSeq(layoutLines(resume).map((l) => l.text)) : expectedNorm;
+    let expectedLayoutNorm = resume ? normSeq(layoutLines(resume).map((l) => l.text)) : expectedNorm;
+    let expectedDocxNorm = expectedNorm;
     const expectedHeadings = expected ? expected.filter((l) => l.kind === "heading").map((l) => l.text.toUpperCase()) : null;
     const email = resume && resume.header && resume.header.email ? String(resume.header.email) : null;
     const reasons = [];
     const checks = {};
     const formats = {};
     const add = (check, level, detail) => reasons.push({ check, level, detail });
+    const printed = o.expected || null;
+    const wordsOf = (lines) => normSeq(lines).join(" ").split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(" ");
+    if (printed) {
+      const src = expected ? wordsOf(expected.map((l) => l.text)) : null;
+      for (const fmt of ["pdf", "docx"]) {
+        if (!Array.isArray(printed[fmt])) continue;
+        if (src !== null && wordsOf(printed[fmt]) !== src) { add("layout_text", "fail", `${fmt}: the layout's printed lines do not carry exactly the source's words in the source's order`); continue; }
+        if (fmt === "pdf") expectedLayoutNorm = normSeq(printed.pdf); else expectedDocxNorm = normSeq(printed.docx);
+      }
+    }
 
     if (expected) {
       const seenLine = new Set();
@@ -26593,7 +26670,7 @@ const CareerRender = (() => {
     };
 
     checkFormat("pdf", inp.pdf || null, extractPdfLines, extractPdfStrings, pdfStructure, expectedLayoutNorm);
-    checkFormat("docx", inp.docx || null, extractDocxLines, extractDocxRuns, docxStructure, expectedNorm);
+    checkFormat("docx", inp.docx || null, extractDocxLines, extractDocxRuns, docxStructure, expectedDocxNorm);
     if (!inp.pdf && !inp.docx) add("no_files", "fail", "no rendered file was supplied to check");
     const status = reasons.some((r) => r.level === "fail") ? "FAIL" : reasons.some((r) => r.level === "warn") ? "WARN" : "PASS";
     return { status, reasons, checks, formats };
@@ -26606,7 +26683,8 @@ const CareerRender = (() => {
   }
 
   const runtime = { zlib: !!rt.zlib, crypto: !!rt.crypto, Buffer: !!Buffer, codec: rt.zlib && rt.crypto ? "platform" : zlib && crypto ? "vendored" : "none" };
-  return { renderPdf, renderDocx, parseCheck, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
+  const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlib.deflateSync(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
+  return { primitives, renderPdf, renderDocx, parseCheck, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
   }
   return make(NODE_RUNTIME);
 })();

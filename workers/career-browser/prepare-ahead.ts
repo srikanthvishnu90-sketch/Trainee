@@ -347,6 +347,9 @@ export function tailoredResume(o: { render: TailorDeps["render"]; resumes: Resum
     const t = await tailorForPosting({
       userId: c.user_id, profile, posting: { text: `${c.title} at ${c.company}\n\n${c.description ?? ""}`, job_id: c.job_id, company: c.company },
       deps: { render: o.render, resumes: tee }, now: (o.now ?? Date.now)(),
+      // The form path takes only a name and email typed or answered for it: with none, the three contact questions are
+      // asked once (SUBMIT-STEER-1130, contactAsk), never a header read from the resume file in their place.
+      contact: "typed",
     });
     if (!t.ok || !bytes) return null;
     const path = `${dir}/${t.filename.replace(/[^A-Za-z0-9._-]/g, "_") || "resume.pdf"}`;

@@ -710,6 +710,13 @@ const CareerRouter = (() => {
       const reply = compose({ headline: "The truth check refused that tailoring, so nothing was saved.", facts: ["A tailored resume is only saved when every line traces to a confirmed fact on your profile."], nextStep: "Tell me which facts to confirm and I will run it again." });
       return { intent: "tailor_refused", reply, resultStatus: "blocked", artifact: null, violations: tailored.violations || [] };
     }
+    // Review of #596 (2026-11-08): a resume names the person at its top only with a name and an email they gave: typed for
+    // it, or the header they confirmed with it (123 headerOf). With neither, the file still comes back here for their own
+    // review (built from their confirmed facts), and the reply says plainly that its top is empty and asks the question
+    // tailor_resume asks (career_tailor.ts CONTACT_QUESTION). The form path asks the three contact questions before
+    // anything goes to an employer (prepare-ahead, contact "typed").
+    const top = tailored.resume && tailored.resume.header;
+    const noContact = tailored.mode === "full" && !(top && s(top.name).trim() && s(top.email).trim());
     const rendered = tailored.rendered || {};
     const artifact = { kind: "tailored_resume", format: "text", text: rendered.text || "", markdown: rendered.markdown || "", pdf: rendered.pdf == null ? null : rendered.pdf, sha256: sha256(rendered.text || ""), jobId, company, versionId: tailored.version && tailored.version.versionId || null };
     if (profile && typeof profile === "object") { profile._careerRouterArtifacts = [...(profile._careerRouterArtifacts || []), artifact]; }
@@ -932,6 +939,7 @@ const CareerRouter = (() => {
     // what you changed" answers from the record instead of falling
     // back (the battery's follow-up died on the generic fallback).
     try { const tm = threadMirrorForWrite(ctx); if (tm) tm.tailor = { company: company || null, title: titleLine, jobId: jobId || null, diff: tailored.diff || null, gaps, at: new Date(nowOf(ctx)).toISOString() }; } catch { /* the artifact itself stands */ }
+    if (noContact) { facts.push("There is no name or email at the top of this file: none was typed for it and none was confirmed with your resume, so nothing is printed there."); nextStep = "What name and email should go at the top of your resume?"; artifact.no_contact = true; }
     const reply = compose({ headline: headlineOverride || `Your resume is tailored for ${titleLine}.`, facts, nextStep });
     // FEATURE 4 (DIAGNOSIS 2.2): the assembled document, the posting text it was cut against and the posting's name ride
     // the result (never the reply, never the snapshot), so the host can reword its bullets under the truth audit
@@ -1000,17 +1008,30 @@ const CareerRouter = (() => {
   // R9-G: the "<role> role at <Company>" targets of one tailor ask, in order; null unless there are two or more.
   function multiTailorTargets(text) {
     const raw = s(text);
-    const re = /(?:\b(?:for|and|,)\s+)(?:the\s+|a\s+)?([A-Za-z][A-Za-z0-9&/+.,' -]*?)\s+(?:role|position|job|internship|posting|opening)\s+at\s+([A-Z][A-Za-z0-9&.'’-]*(?:\s+(?!and\b)[A-Z][A-Za-z0-9&.'’-]*)*)/g;
+    // Review of #596 (e2e resume.two): the texting and slang joins ("4 the", "n the", "& the", "+ the", "plus the") join
+    // targets as "for" and "and" do; a company name ends before any of them.
+    const re = /(?:(?:\b(?:for|4|and|n|plus)|,|&|\+)\s+)(?:the\s+|a\s+)?([A-Za-z](?:[A-Za-z0-9/.,' -]|[&+](?!\s+(?:the|a)\s))*?)\s+(?:role|roole|rol|roel|rloe|position|job|internship|posting|opening)\s+(?:at|@)\s+([A-Z][A-Za-z0-9&.'’-]*(?:\s+(?!(?:and|n|plus)\b)[A-Z][A-Za-z0-9&.'’-]*)*)/g;
     const out = [];
+    const add = (role, company) => {
+      role = s(role).replace(/^(?:the|a|el|la)\s+/i, "").trim(); company = s(company).trim();
+      if (role && company && !out.some((x) => lc(x.company) === lc(company) && lc(x.role) === lc(role))) out.push({ role, company });
+    };
     let m;
-    while ((m = re.exec(raw))) {
-      const role = m[1].replace(/^(?:the|a)\s+/i, "").trim();
-      if (role && !out.some((x) => lc(x.company) === lc(m[2]) && lc(x.role) === lc(role))) out.push({ role, company: m[2].trim() });
+    while ((m = re.exec(raw))) add(m[1], m[2]);
+    // Review of #596 (e2e resume.two): the same ask in Spanish ("para <role> en <Company> y para <role> en <Company>") and
+    // in Hinglish ("<Company> ke <role> aur <Company> ke <role> dono ke liye"), each target read whole.
+    if (out.length < 2) {
+      const CO = "[A-Z][A-Za-z0-9&.'’-]*(?:\\s+[A-Z][A-Za-z0-9&.'’-]*)*";
+      const es = new RegExp(`\\bpara\\s+(?:el\\s+|la\\s+)?([A-Za-z][A-Za-z0-9/.,' +&-]*?)\\s+en\\s+(${CO})`, "g");
+      const hi = new RegExp(`(${CO})\\s+ke\\s+([A-Za-z][A-Za-z0-9/.,' +&-]*?)(?=\\s+(?:aur|dono|ke liye)\\b)`, "g");
+      out.length = 0;
+      while ((m = es.exec(raw))) add(m[1], m[2]);
+      if (out.length < 2) { out.length = 0; while ((m = hi.exec(raw))) add(m[2], m[1]); }
     }
     return out.length >= 2 ? out : null;
   }
   function handleMultiTailor(text, ctx) {
-    if (!/\b(?:tailor|tailored|customi[sz]e)\b/i.test(s(text))) return null;
+    if (!/\b(?:tailor|tailored|talior|tialor|tailr|customi[sz]e|adapta|ad[aá]ptame)\b/i.test(s(text))) return null;
     const targets = multiTailorTargets(text);
     if (!targets) return null;
     const done = [], missing = [];
@@ -1021,6 +1042,15 @@ const CareerRouter = (() => {
       else missing.push(tg);
     }
     if (!done.length) return null;
+    // One file per role, named for it (<Name>_Resume_<Company>_<Role>.pdf): two files both called <Name>_Resume.pdf could not
+    // be told apart in a chat or a downloads folder. The person's name leads only when the resume carries one.
+    const part = (v) => s(v).replace(/\([^)]*\)/g, " ").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
+    for (const d of done) {
+      const pdf = d.r.artifact && d.r.artifact.pdf;
+      if (!pdf || typeof pdf !== "object") continue;
+      const who = d.r.tailorDoc && d.r.tailorDoc.header && d.r.tailorDoc.header.name ? (s(pdf.filename).replace(/_?Resume\.pdf$/i, "") || null) : null;
+      pdf.filename = [who, "Resume", part(d.posting.company), part(d.posting.title)].filter(Boolean).join("_") + ".pdf";
+    }
     const docs = done.map((d) => d.r.artifact && d.r.artifact.pdf).filter(Boolean);
     const named = (d) => `${d.posting.title} at ${d.posting.company}`;
     const facts = done.map((d) => {
@@ -1995,6 +2025,9 @@ const CareerRouter = (() => {
     if (named && !/^(me|my|the|that|this|a|an)$/.test(named[1])) return false;
     if (/\b(send|email|mail|forward)\b[^.?!]*\bto\s+(?!me\b|this\b)[a-z]/.test(t)) return false;
     return /\b(send|give|share|attach|drop|post|text|email)\b[^.?!]*\b(me|here)\b/.test(t)
+      // RELEASE 9 (e2e eval E31-E39): "tailor my resume ... and send it back" is the file returned in this chat, never a
+      // campaign send ("send it back" / "send both back" / "send them back" name no recipient but the person).
+      || /\b(send|give|text|email)\s+(it|them|both|that|these|those|the files?|the pdfs?)\s+back\b/.test(t)
       || /\bin this chat\b/.test(t)
       || /\b(send|give|share|attach)\s+(me\s+)?(my|the|that|this)\s+(resume|cv|cover letter|packet|brief|pdf|docx|file|document)\b/.test(t);
   }
@@ -2185,7 +2218,13 @@ const CareerRouter = (() => {
     if (nameCheck) facts.push(nameMismatchLine(nameCheck));
     if (Array.isArray(res.replaced_drafts) && res.replaced_drafts.length) facts.push("This replaces the resume you pasted before it, which you had not confirmed.");
     if ((profile.facts || []).some((f) => f && f.source === "resume-ingest" && !f.needs_confirmation)) facts.push("Your confirmed resume stays in use until you confirm this one; then this one replaces it.");
-    const reply = entriesReply("Your resume is on record — as drafts, awaiting your word.", facts, "Here is what I read from it, word for word:", presented.map((f, i) => `${i + 1}. ${f.text}`),
+    // RELEASE 9 (e2e eval: tailored PDFs with no name on them): the name and contact lines at the top of the resume are shown
+    // with the entries, word for word, and bound to the same yes; at the yes they fill the resume header's EMPTY fields only
+    // (a name and email the person typed for it, set_resume_contact, always win). Nothing is guessed: a top line that does
+    // not read as a name is not a name, and an address, a link or a place is taken only as written.
+    const header = resumeHeaderOf(raw);
+    if (mir && mir.resumeIngest) { if (header) mir.resumeIngest.header = { ...header, sha256: sha256(headerLine(header)) }; else delete mir.resumeIngest.header; }
+    const reply = entriesReply("Your resume is on record — as drafts, awaiting your word.", facts, "Here is what I read from it, word for word:", [...(header ? [`At the top: ${headerLine(header)}`] : []), ...presented.map((f, i) => `${i + 1}. ${f.text}`)],
       target ? `Say "yes, that's my resume" and I confirm them and tailor for ${target.label} in the same turn.` : "Say \"yes, that's my resume\" and I confirm them as your facts — then name a role and the tailoring runs on them.");
     return { intent: "career_resume_ingest", reply, resultStatus: "awaiting_user", sends: 0, resume_ingest: { drafts: total, byKind } };
   }
@@ -2209,6 +2248,41 @@ const CareerRouter = (() => {
   // gave in chat. Null when they gave none, the resume has no name line, or the two share a name.
   const NAME_LINE = /^[A-ZÀ-ɏ][\p{L}'’.-]+(?:\s+[A-ZÀ-ɏ][\p{L}'’.-]+){1,3}(?:\s+\(TEST\))?$/u;
   const nameTokens = (v) => s(v).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\(test\)/g, " ").split(/[^\p{L}'’-]+/u).map((x) => x.replace(/^['’-]+|['’-]+$/g, "")).filter((x) => x.length >= 2);
+  // The top of a resume, before its first section: the name (the first line, when it reads as one), and from the lines under
+  // it, the email, the place and the links exactly as written. Null when none of them is there.
+  const HEADER_SECTION = /^(?:education|experience|work experience|employment|projects?|skills|technical skills|leadership|summary|objective|profile|certifications?|activities|awards)\s*:?$/i;
+  function resumeHeaderOf(raw) {
+    const body = s(raw).replace(/^\s*(?:(?:here'?s|here is|this is|attached is|sending)\s+my\s+(?:updated\s+|new\s+|current\s+)?(?:resume|cv|r[ée]sum[ée])|my\s+(?:resume|cv))\s*:?\s*/i, "");
+    const lines = body.split(/\r?\n/).map((l) => l.trim());
+    const top = [];
+    for (const l of lines) { if (HEADER_SECTION.test(l)) break; if (l) top.push(l); if (top.length >= 6) break; }
+    if (!top.length) return null;
+    const nameAt = top.findIndex((l) => l.length <= 60 && NAME_LINE.test(l));
+    if (nameAt < 0) return null; // no name line: the top is not read at all (a banner, a disclaimer or a title is not a name)
+    const h = { name: top[nameAt], email: null, location: null, links: {}, contactLine: null, linksLine: null };
+    for (const l of top.slice(nameAt + 1)) {
+      // The lines themselves, verbatim: the contact line (the one carrying the email) and a line of links print as written.
+      if (!h.contactLine && /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.test(l)) h.contactLine = l;
+      else if (!h.linksLine && /\bhttps?:\/\//i.test(l)) h.linksLine = l;
+      for (const seg of l.split(/\s*[|·•]\s*/).map((x) => x.trim()).filter(Boolean)) {
+        const url = /\bhttps?:\/\/[^\s<>()]+/i.exec(seg);
+        const mail = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.exec(seg);
+        if (mail && !h.email) h.email = mail[0];
+        else if (url) { const key = (/^([A-Za-z]+)\s*:/.exec(seg) || [null, "link"])[1].toLowerCase(); if (!h.links[key]) h.links[key] = url[0].replace(/[.,;]+$/, ""); }
+        else if (!h.location && /^[\p{L} .'-]+,\s*[\p{L} .'-]+(?:\s*\(TEST\))?$/u.test(seg)) h.location = seg;
+      }
+    }
+    return h;
+  }
+  const headerLine = (h) => [h.name, h.contactLine || [h.email, h.location].filter(Boolean).join(" | "), h.linksLine || Object.values(h.links || {}).join(" | ")].filter(Boolean).join(" | ");
+  // At the yes: the header shown becomes the confirmed resume header (profile.resume_header), its own record beside the
+  // name and email typed for the resume (basics, set_resume_contact), which win wherever they are set (123 assemble).
+  function confirmResumeHeader(profile, header, at) {
+    if (!profile || typeof profile !== "object" || !header || !header.name) return false;
+    profile.resume_header = { name: header.name, email: header.email || null, location: header.location || null, links: { ...(header.links || {}) },
+      contactLine: header.contactLine || null, linksLine: header.linksLine || null, confirmed_at: at ? new Date(at).toISOString() : null };
+    return true;
+  }
   function resumeNameMismatch(raw, ctx) {
     const given = statedFactsOf(ctx).find((f) => f && f.kind === "name" && s(f.value).trim());
     if (!given) return null;
@@ -2385,6 +2459,9 @@ const CareerRouter = (() => {
     // resume leaves the profile (before this, the old school and GPA were still read back, tailored and put on forms
     // beside the new ones; "what's my GPA?" answered with the replaced resume's).
     const superseded = presentedIds && confirmed && typeof ProfileMod.supersedeResume === "function" ? ProfileMod.supersedeResume(profile, confirmedIds, { now: nowOf(ctx) }) : [];
+    // RELEASE 9: the header shown with the entries is confirmed by the same yes (only as shown: its digest must match).
+    const shownHeader = mir.resumeIngest.header;
+    if (confirmed && shownHeader && shownHeader.sha256 === sha256(headerLine(shownHeader))) confirmResumeHeader(profile, shownHeader, nowOf(ctx));
     const target = mir.tailorTarget && mir.tailorTarget.company ? mir.tailorTarget : null;
     const wmir = threadMirrorForWrite(ctx);
     if (wmir) delete wmir.resumeIngest;
@@ -13719,7 +13796,10 @@ const CareerRouter = (() => {
     // A counter-drafting request that reports an offer ("my current job pays $22/hour; they offered $24; draft a counter at $27/hour")
     // is the negotiation's, not a "current job" recommendation ask.
     const counterDraftWithOffer = (/\b(?:draft|write|compose)\b[^.?!]*\bcounter\b/i.test(s(text)) && /\boffer/i.test(s(text))) || /\bcounter(?:ing)?\s+(?:at|to|with)\s+\$\s?\d/i.test(s(text));
-    const recommendationIntent = !counterDraftWithOffer && recommendations && recommendations.intentFor(text);
+    // Review of #596 (e2e eval resume.fit, 0/25): "make my resume fit the Data Analyst job at Stripe, one page pdf please" asks
+    // for the file, not for which roles fit the record; the tailor gate below owns it ("make my resume").
+    const tailorAsk = /\b(?:make|get)\s+my\s+(?:resume|cv)\s+(?:fit|match)\b|\b(?:fit|match)\s+my\s+(?:resume|cv)\s+(?:to|for)\b/.test(lc(text));
+    const recommendationIntent = !counterDraftWithOffer && !tailorAsk && recommendations && recommendations.intentFor(text);
     if (recommendationIntent) {
       const rec = recommendations.recommend(Object.assign({}, c, { recommendationIntent, text: s(text) }));
       return { intent: "career_recommendations", reply: rec.text, resultStatus: "prepared", sends: 0, guidance: rec, payload: rec, artifact: rec };
@@ -14178,7 +14258,8 @@ const CareerRouter = (() => {
       const rg = routeResumeGuidance(text, c);
       if (rg) return rg;
     }
-    if (/\btailor\b|\btailored per\b|\bresume variants\b|\bvariants\b[^.]*\bresume\b|\banswer bank\b|\btruth audit\b|\bliving resume\b|\bresume diff\b|\bdiff review\b|\bbans? ai\b|\bai[ -]written\b|\bimpact bullets\b|\b(customi[sz]e|adjust|fit)\b[^.]*\bresume\b|\bresume\b[^.]*\bto this\b|\bmake my resume\b|\b(?:improve|update|fix)\b[^.]*\bresume\b[^.]*\b(?:for|to)\s+(?:a|an|the|this|that)\b/.test(t)) {
+    // Review of #596 (e2e resume.two): the misspelt "talior" and the Spanish "adapta mi currículum" ask the same thing.
+    if (/\btailor\b|\btalior\b|\badapta\b[^.]*\bcurr[ií]cul(?:um|o)\b|\btailored per\b|\bresume variants\b|\bvariants\b[^.]*\bresume\b|\banswer bank\b|\btruth audit\b|\bliving resume\b|\bresume diff\b|\bdiff review\b|\bbans? ai\b|\bai[ -]written\b|\bimpact bullets\b|\b(customi[sz]e|adjust|fit)\b[^.]*\bresume\b|\bresume\b[^.]*\bto this\b|\bmake my resume\b|\b(?:improve|update|fix)\b[^.]*\bresume\b[^.]*\b(?:for|to)\s+(?:a|an|the|this|that)\b/.test(t)) {
       // COMPLEXITY WAVE (BUG-173): profile-less, the chain cannot
       // tailor — but the ask gets its honest answer (target named,
       // the one missing input named) instead of the silent null.

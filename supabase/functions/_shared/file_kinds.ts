@@ -169,10 +169,52 @@ const KINDS: Record<Exclude<KindId, "job_list">, (raw: unknown, v: V) => any> = 
   },
   research_brief(raw, v) {
     const x = v.obj(raw, "data");
+    if (x.variant === "market") return marketBrief(x, v);
     return { title: v.str(x.title, "title", { max: 80 }), subject: v.str(x.subject, "subject", { max: 120 }), findings: v.list(x.findings, "findings", 1, 12).map((f, i) => v.fact(f, `findings[${i}]`)),
       sources: v.list(x.sources, "sources", 1, 10).map((s, i) => { const q = v.obj(s, `sources[${i}]`); return { title: v.str(q.title, `sources[${i}].title`, { max: 120 }), url: v.https(q.url, `sources[${i}].url`, false) }; }) };
   },
 };
+// R9-C (2026-11-07): the market research brief, a variant of research_brief (KIND_IDS stays as it is). Blocks: a cover (title, one-line
+// thesis, the date its sources were read), a summary, an optional comparison table, "what would have to be true", risks, sources. Every
+// summary line and table cell is a sourced fact AND names the numbered sources it stands on; the conditions and risks are Trainee's
+// reading and still name their sources. Every source is an https page with the time it was fetched (never in the future), and every
+// source is cited at least once (no padding). The date on the cover is the newest fetch time: computed, never written by the model.
+function marketBrief(x: Record<string, any>, v: V) {
+  const sources = v.list(x.sources, "sources", 1, 10).map((s, i) => { const q = v.obj(s, `sources[${i}]`); return { title: v.str(q.title, `sources[${i}].title`, { max: 120, links: false }), url: v.https(q.url, `sources[${i}].url`, false), fetched_at: v.time(q.fetched_at, `sources[${i}].fetched_at`, false) }; });
+  const n = sources.length, used = new Set<number>();
+  const cite = (raw: unknown, path: string) => {
+    const xs = v.list(raw, path, 1, 6), ok = xs.filter((i) => Number.isInteger(i) && i >= 1 && i <= n);
+    if (ok.length !== xs.length) v.err(path, `each cite is a source number from 1 to ${n}`);
+    ok.forEach((i) => used.add(i));
+    return [...new Set(ok as number[])];
+  };
+  const line = (r: unknown, path: string, sourced: boolean) => {
+    const q = v.obj(r, path), f = sourced ? v.fact(q, path, { valueKey: "text", labelKey: null }) : { text: v.str(q.text, `${path}.text`, { max: 400, links: false }) };
+    if (sourced && typeof q.text === "string" && URL_RX.test(q.text)) v.err(`${path}.text`, "must not contain links; cite the source number");
+    return { ...f, cite: cite(q.cite, `${path}.cite`) };
+  };
+  let comparison: unknown;
+  if (x.comparison !== undefined) {
+    const c = v.obj(x.comparison, "comparison"), options = v.list(c.options, "comparison.options", 2, 4).map((o, i) => ({ name: v.str(v.obj(o, `comparison.options[${i}]`).name, `comparison.options[${i}].name`, { max: 60 }) }));
+    const rows = v.list(c.rows, "comparison.rows", 1, 10).map((r, i) => {
+      const q = v.obj(r, `comparison.rows[${i}]`), cells = v.list(q.cells, `comparison.rows[${i}].cells`, options.length, options.length).map((c2, j) => {
+        if (c2 === null) return null;
+        const p = `comparison.rows[${i}].cells[${j}]`, f = v.fact(c2, p, { labelKey: null });
+        return { ...f, cite: cite(v.obj(c2, p).cite, `${p}.cite`) };
+      });
+      if (cells.length && cells.every((z) => z === null)) v.err(`comparison.rows[${i}]`, "nothing is known for any option; leave the row out");
+      return { label: v.str(q.label, `comparison.rows[${i}].label`, { max: 80 }), cells };
+    });
+    comparison = { options, rows };
+  }
+  const out = { variant: "market", title: v.str(x.title, "title", { max: 80, links: false }), subject: v.str(x.subject, "subject", { max: 120 }), thesis: v.str(x.thesis, "thesis", { max: 160, links: false }),
+    summary: v.list(x.summary, "summary", 1, 5).map((r, i) => line(r, `summary[${i}]`, true)), ...(comparison ? { comparison } : {}),
+    conditions: v.list(x.conditions, "conditions", 1, 6).map((r, i) => line(r, `conditions[${i}]`, false)),
+    risks: v.list(x.risks, "risks", 1, 6).map((r, i) => line(r, `risks[${i}]`, false)), sources };
+  for (let i = 1; i <= n; i++) if (!used.has(i)) v.err(`sources[${i - 1}]`, "is not cited by any line; leave it out");
+  return out;
+}
+
 // The Trainee-records label is for the kinds that report Trainee's own records.
 const RECORDS_OK = new Set<string>(["application_proof"]); // and only for data built by code from a record (trusted)
 
@@ -338,11 +380,48 @@ export function bodyHtml(rec: FileRecord, token: string, o: { tz?: string | null
         + `<p class="meta">This page cannot send it. To send it, ask Trainee in Telegram; you approve the exact message first.</p>`;
       break;
     case "research_brief":
+      if (d.variant === "market") { main = marketHtml(d); break; }
       main = sec(`What we found about ${d.subject ?? ""}`, dl(Fs(d.findings).map((f) => factHtml(f, f.label)).join("")))
         + sec("Sources", `<ul class="why">${(d.sources ?? []).map((s: any) => `<li>${linkHtml(s.url, s.title) || esc(s.title)}</li>`).join("")}</ul>`);
       break;
   }
   return `${main}${actionsHtml(rec, token)}`;
+}
+
+// ---------------------------------------------------------------- the market research brief (R9-C)
+// The cover echoes the link preview (og-research.png): the warm ground, the mark and name, the serif thesis, the date the sources were
+// read. Citations are plain numbers ("[1]", not tap targets), each matching a numbered source at the end, which is the link.
+const DAY = (t: string | number) => { const n = typeof t === "number" ? t : Date.parse(t); return Number.isNaN(n) ? "" : `${MONTHS[new Date(n).getUTCMonth()]} ${new Date(n).getUTCDate()}, ${new Date(n).getUTCFullYear()}`; };
+export const marketReadOn = (d: any) => { const ts = (d?.sources ?? []).map((s: any) => Date.parse(s?.fetched_at)).filter((t: number) => !Number.isNaN(t)); return ts.length ? DAY(Math.max(...ts)) : ""; };
+const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
+const cites = (c: unknown) => Array.isArray(c) && c.length ? ` <span class="rb-cite">${c.map((i) => `[${esc(i)}]`).join("")}</span>` : "";
+const READING = `<span class="src rb-read">Trainee's reading</span>`;
+const MARK = `<svg class="rb-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="var(--accent)"/><text x="32" y="45" font-family="Georgia,serif" font-size="40" font-weight="700" text-anchor="middle" fill="var(--accent-ink)">T</text></svg>`;
+function marketHtml(d: any): string {
+  const n = (d.sources ?? []).length, read = marketReadOn(d);
+  const cover = `<section class="rb-cover" aria-label="Cover"><p class="rb-brand">${MARK}<span>Trainee</span><span class="rb-dot" aria-hidden="true">·</span><span>Research brief</span></p>`
+    + `<p class="rb-thesis">${esc(d.thesis)}</p><p class="rb-date">${read ? `Sources read ${esc(read)} · ` : ""}${n} source${n === 1 ? "" : "s"}</p></section>`;
+  const list = (xs: any[], sourced: boolean) => `<ul class="rb-list">${xs.filter((f) => sourced ? hasSrc(f) : !!f?.text).map((f) => `<li><span class="rb-t">${esc(f.text)}${cites(f.cite)}</span>${sourced ? src(f.source) : READING}</li>`).join("")}</ul>`;
+  const c = d.comparison, opts = (c?.options ?? []).map((o: any) => o.name);
+  const cell = (x: any) => hasSrc(x) ? `${esc(x.value)}${cites(x.cite)}<br>${src(x.source)}` : `<span class="meta">Not stated</span>`;
+  // Under 560 px each row stacks as a card of option/value pairs (KIND_CSS .rb-tbl): the option name is repeated in each cell as a
+  // visual label (aria-hidden; the table's own headers still name the cell), so no column is ever cut off at phone width.
+  const table = c ? `<div class="tbl rb-tbl" tabindex="0" role="region" aria-label="Comparison table"><table><caption class="sr">Comparison</caption><thead><tr><th scope="col"><span class="sr">Item</span></th>${opts.map((o: string) => `<th scope="col">${esc(o)}</th>`).join("")}</tr></thead><tbody>${(c.rows ?? []).map((r: any) => `<tr><th scope="row">${esc(r.label)}</th>${(r.cells ?? []).map((x: any, i: number) => `<td><span class="rb-k" aria-hidden="true">${esc(opts[i] ?? "")}</span><span class="rb-v">${cell(x)}</span></td>`).join("")}</tr>`).join("")}</tbody></table></div>` : "";
+  const srcs = `<ol class="rb-src">${(d.sources ?? []).map((s: any, i: number) => `<li id="src-${i + 1}"><span class="rb-n">[${i + 1}]</span>${linkHtml(s.url, s.title) || esc(s.title)}<span class="meta">${esc(hostOf(s.url))} · Read ${esc(DAY(s.fetched_at))}</span></li>`).join("")}</ol>`;
+  return cover + sec("Summary", list(d.summary ?? [], true)) + sec("Comparison", table) + sec("What would have to be true", list(d.conditions ?? [], false)) + sec("Risks", list(d.risks ?? [], false)) + sec("Sources", srcs);
+}
+function marketText(d: any, L: string[]) {
+  const c = (x: any) => Array.isArray(x?.cite) && x.cite.length ? ` ${x.cite.map((i: number) => `[${i}]`).join("")}` : "";
+  const read = marketReadOn(d);
+  L.push(d.thesis, `${read ? `Sources read ${read}. ` : ""}${(d.sources ?? []).length} source${(d.sources ?? []).length === 1 ? "" : "s"}.`, "", "## Summary");
+  Fs(d.summary).forEach((f) => L.push(`- ${f.text}${c(f)} [${f.source}]`)); L.push("");
+  if (d.comparison) {
+    const opts = (d.comparison.options ?? []).map((o: any) => o.name);
+    L.push("## Comparison"); (d.comparison.rows ?? []).forEach((r: any) => { L.push(`### ${r.label}`); (r.cells ?? []).forEach((x: any, i: number) => L.push(hasSrc(x) ? `- ${opts[i]}: ${x.value}${c(x)} [${x.source}]` : `- ${opts[i]}: Not stated`)); }); L.push("");
+  }
+  L.push("## What would have to be true"); (d.conditions ?? []).forEach((f: any) => L.push(`- ${f.text}${c(f)} [Trainee's reading]`)); L.push("");
+  L.push("## Risks"); (d.risks ?? []).forEach((f: any) => L.push(`- ${f.text}${c(f)} [Trainee's reading]`)); L.push("");
+  L.push("## Sources"); (d.sources ?? []).forEach((s: any, i: number) => L.push(`${i + 1}. ${s.title}: ${s.url} (read ${DAY(s.fetched_at)})`)); L.push("");
 }
 
 // ---------------------------------------------------------------- plain-text twin (also the .md that can be attached)
@@ -384,6 +463,7 @@ export function textOf(rec: FileRecord, o: { now: number; url?: string }): strin
       L.push("Sending: not from this file. Ask Trainee in Telegram; you approve the exact message first.", "");
       break;
     case "research_brief":
+      if (d.variant === "market") { marketText(d, L); break; }
       h(`What we found about ${d.subject}`); Fs(d.findings).forEach((f) => L.push(factText(f, f.label))); L.push("");
       h("Sources"); (d.sources ?? []).forEach((s: any) => L.push(`- ${s.title}: ${s.url}`)); L.push("");
       break;
@@ -417,4 +497,25 @@ textarea{width:100%;min-height:96px;padding:10px 12px;border:1px solid var(--mut
 .prep .blk{padding:12px 0}.prep .blk h2{margin:0 0 6px}.prep .fact{margin:0 0 8px}.prep .fact:last-child{margin-bottom:0}
 .prep .fact dt{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.prep .fact dt .src{margin-left:0;font-size:13px;padding:0 7px}
 .prep .fact dd{font-size:17px;line-height:1.4}.fcard:has(.prep){padding:20px 14px 20px}
+/* R9-C: the market research brief. Tokens only, no new hue: the cover is the warm ground inside the card, like the link preview. */
+.rb-cover{margin:16px 0 4px;padding:18px 18px 16px;border:1px solid var(--line);border-radius:16px;background:var(--bg)}
+.rb-brand{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:14px;font-weight:600;color:var(--mute)}.rb-brand span:nth-of-type(1){font-family:'Brygada 1918',Georgia,serif;font-size:17px;color:var(--ink)}
+.rb-mark{width:22px;height:22px;flex:none}.rb-thesis{margin:0;font-family:'Brygada 1918',Georgia,serif;font-size:24px;line-height:1.25;font-weight:500;overflow-wrap:anywhere}
+.rb-date{margin:12px 0 0;font-size:15px;color:var(--mute)}
+ul.rb-list{margin:0;padding-left:20px}ul.rb-list li{margin:0 0 12px;overflow-wrap:anywhere}.rb-list .src{display:block;margin:4px 0 0;width:fit-content}
+.rb-cite{font-size:14px;color:var(--mute);white-space:nowrap;font-variant-numeric:tabular-nums}
+ol.rb-src{list-style:none;margin:0;padding:0}ol.rb-src li{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:6px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}ol.rb-src li:first-child{border-top:0}
+ol.rb-src a{display:inline-flex;align-items:center;min-height:44px;color:var(--link);font-weight:600}ol.rb-src .meta{display:block;grid-column:2}.rb-n{color:var(--mute);font-variant-numeric:tabular-nums}
+@media (min-width:720px){.rb-cover{padding:24px 26px 20px}.rb-thesis{font-size:28px}}
+/* R9-F: the comparison table at phone width. Under 560 px each row is a card on the warm ground (like the cover), its label on top and
+   one option/value pair per line; wider, it is the plain table and the per-cell option label is hidden. Tokens only. */
+.rb-tbl .rb-k{display:none}
+@media (max-width:559.98px){
+.rb-tbl{overflow-x:visible}.rb-tbl table,.rb-tbl tbody,.rb-tbl tr,.rb-tbl th,.rb-tbl td{display:block;width:auto}
+.rb-tbl thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.rb-tbl tr{margin:0 0 12px;padding:2px 14px 4px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}.rb-tbl tr:last-child{margin-bottom:0}
+.rb-tbl tbody th{padding:12px 0 8px;border-top:0;font-weight:600;overflow-wrap:anywhere}
+.rb-tbl td{display:grid;grid-template-columns:minmax(0,38%) minmax(0,1fr);column-gap:12px;align-items:baseline;padding:10px 0;overflow-wrap:anywhere}
+.rb-tbl .rb-k{display:block;font-size:15px;color:var(--mute)}.rb-tbl .rb-v .src{margin:4px 0 0}
+}
 `;

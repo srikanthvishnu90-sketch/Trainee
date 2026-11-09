@@ -1,6 +1,7 @@
 {
   "default_s": 5,
   "files": {
+    "tests/architect/r10-wo-d-limits-replay.test.ts": 11,
     "tests/architect/r10-interim-recorded.test.ts": 11,
     "tests/architect/r10-submit-label.test.ts": 0.1,
     "tests/architect/r10-wo-c-search-replay.test.ts": 12.1,
@@ -288,6 +289,7 @@
     "tests/architect/resume-outcomes.test.ts": 0.8,
     "tests/architect/r10-connect-scopes.test.ts": 2,
     "tests/architect/r10-connect-states.test.ts": 0.1,
+    "tests/architect/r10-e56-e59-entry.test.ts": 2,
     "tests/architect/r10-entry-recovery-browser.test.ts": 6,
     "tests/architect/r10-entry-signin-binding.test.ts": 10.1,
     "tests/architect/r9-resume-fit-send-20261108.test.ts": 4.8,
@@ -565,6 +567,7 @@
     "tests/architect/r10-files-browser-live.test.ts": 1.0,
     "tests/architect/r10-files-s2.test.ts": 0.9,
     "tests/architect/r10-no-apply-intake-20261109.test.ts": 13,
-    "tests/architect/r10-resume-task-20261109.test.ts": 15
+    "tests/architect/r10-resume-task-20261109.test.ts": 15,
+    "tests/architect/stop-pause-truth-20261109.test.ts": 13
   }
 }

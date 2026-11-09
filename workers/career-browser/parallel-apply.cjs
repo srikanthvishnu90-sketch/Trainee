@@ -80,15 +80,21 @@ function SHOWN_CHECK() {
     return (token && hiddenSubmit) || (e.matches(".g-recaptcha") && !!document.querySelector(".grecaptcha-badge"));
   };
   const widget = [...document.querySelectorAll(".g-recaptcha, .h-captcha, .cf-turnstile, #challenge-form, #cf-challenge-running")]
-    .find((e) => (e.getAttribute("data-size") || "").toLowerCase() !== "invisible" && !/invisible/i.test(e.getAttribute("data-badge") || "") && !runsInvisibly(e));
-  if (widget) return "widget";
+    .find((e) => (e.getAttribute("data-size") || "").toLowerCase() !== "invisible" && !/invisible/i.test(e.getAttribute("data-badge") || "") && !runsInvisibly(e)
+      // A reCAPTCHA or hCaptcha container is shown only once it has drawn its checkbox: an empty 680x0 box (every live Lever
+      // form, strict benchmark run 42696835430) is not something a person can see or tick.
+      && (!e.matches(".g-recaptcha, .h-captcha") || (e.offsetWidth > 60 && e.offsetHeight > 40)));
+  const desc = (e) => `${e.tagName.toLowerCase()}${e.id ? "#" + e.id : ""}${[...e.classList].slice(0, 3).map((c) => "." + c).join("")} ${e.offsetWidth}x${e.offsetHeight}${e.getAttribute("data-size") ? " size=" + e.getAttribute("data-size") : ""}${e.children.length ? " children=" + e.children.length : ""}`;
+  if (widget) return `widget ${desc(widget)}`;
   const frame = [...document.querySelectorAll("iframe")].find((f) => {
     const src = f.src || "";
     if (!/recaptcha\/(?:api2|enterprise)\/(?:anchor|bframe)|\/recaptcha\/anchor|hcaptcha\.com\/captcha|challenges\.cloudflare\.com/i.test(src)) return false;
     if (/[?&]size=invisible\b/i.test(src)) return false;
     return vis(f) && f.offsetWidth > 60 && f.offsetHeight > 40;
   });
-  return frame ? "frame" : null;
+  if (!frame) return null;
+  let src = ""; try { const u = new URL(frame.src); src = u.host + u.pathname.slice(0, 50); } catch { /* opaque */ }
+  return `frame ${src} ${frame.offsetWidth}x${frame.offsetHeight}`;
 }
 // The needs_user reasons a sign-in or verification wall gives, in every runner (apply-vm.cjs, scripts/apply.ts).
 const HANDOFF_REASONS = ["login_required", "bot_check", "email_code"];
@@ -158,7 +164,7 @@ async function botCheck(page) {
   for (const f of page.frames()) {
     if (f !== page.mainFrame() && /recaptcha|hcaptcha|challenges\.cloudflare\.com|turnstile/i.test(f.url())) continue;
     const shown = await f.evaluate(SHOWN_CHECK).catch(() => null);
-    if (shown) return true;
+    if (shown) return String(shown).slice(0, 160); // what was shown, for the record (truthy)
   }
   return false;
 }
@@ -228,7 +234,7 @@ async function attempt(browser, p, opts, timing) {
     try { resp = await page.goto(p.url, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
     onAllowedHost();
     if (!resp || resp.status() >= 400) throw new Error(`page_load_${resp ? resp.status() : "none"}`);
-    if (await botCheck(page)) throw new NeedsUser("bot_check", p.url);
+    { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
     // An employer that wants the person to sign in first: never signed into, never given a password (the person does that).
     await stopAtWall(page, p.url);
     const hasForm = async () => !!(await page.$("form input, form select, form textarea")) && !!(await page.$('form button[type="submit"]'));
@@ -240,14 +246,14 @@ async function attempt(browser, p, opts, timing) {
         try { await page.goto(direct, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
         onAllowedHost();
         await page.waitForSelector("form input, form textarea", { timeout: 8000 }).catch(() => null);
-        if (await botCheck(page)) throw new NeedsUser("bot_check", p.url);
+        { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
         await stopAtWall(page, p.url);
       }
     }
     // A job page whose form is behind its "Apply" control: opened once, and what it leads to is checked like the first load.
     if (!(await hasForm()) && (await openApply(page, opts.stepTimeoutMs || 15000))) {
       onAllowedHost();
-      if (await botCheck(page)) throw new NeedsUser("bot_check", p.url);
+      { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
       await stopAtWall(page, p.url);
     }
     timing.load = Date.now() - t0;
@@ -272,7 +278,7 @@ async function attempt(browser, p, opts, timing) {
     // Last checks before the click, on what is actually on the page now: still an allowed host, no bot check that appeared
     // while filling, the form posts to an allowed host, and the payload still hashes to what was approved.
     onAllowedHost();
-    if (await botCheck(page)) throw new NeedsUser("bot_check", p.url);
+    { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
     await stopAtWall(page, p.url);
     const action = await page.$eval('form button[type="submit"]', (b) => {
       const a = b.getAttribute("formaction") ?? (b.form && b.form.getAttribute("action"));
@@ -327,7 +333,7 @@ async function applyOne(browser, p, opts = {}) {
       const r = await attempt(browser, p, { ...opts, shotBefore: opts.shotDir && `${opts.shotDir}/${p.id}-1-filled.png`, shotAfter: opts.shotDir && `${opts.shotDir}/${p.id}-2-confirmation.png` }, t);
       return { ...out, ...r, timing: t, ms: Date.now() - started };
     } catch (e) {
-      if (e instanceof NeedsUser && !t.submitClicked) return { ...out, status: HANDOFF_REASONS.includes(e.reason) ? "needs_user" : "not_submitted", reason: e.reason, field: e.field, wall: e.wall || undefined, needs: e.needs || undefined, ms: Date.now() - started };
+      if (e instanceof NeedsUser && !t.submitClicked) return { ...out, ...(e.detail ? { check: e.detail } : {}), status: HANDOFF_REASONS.includes(e.reason) ? "needs_user" : "not_submitted", reason: e.reason, field: e.field, wall: e.wall || undefined, needs: e.needs || undefined, ms: Date.now() - started };
       if (t.submitClicked) return { ...out, status: "unknown_outcome", reason: e.message, ms: Date.now() - started };
       out.lastError = e.message.split("\n")[0];
       if (out.lastError === "page_load_429") break; // the portal said slow down: not asked again by this run

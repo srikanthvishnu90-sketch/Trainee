@@ -40,15 +40,16 @@ test("Lever's invisible hCaptcha (hidden token field and hidden submit) and the 
   assert.equal(await shown(`<form><input name="email"><textarea name="g-recaptcha-response" style="display:none"></textarea><button type="submit">Submit</button></form>
     <div class="grecaptcha-badge" style="width:256px;height:60px;position:fixed;bottom:14px;right:-186px">
     <iframe src="https://www.google.com/recaptcha/enterprise/anchor?k=x&size=invisible" width="256" height="60"></iframe></div>`), false);
+  assert.equal(await shown(`<form><input name="email"><div id="h-captcha" class="h-captcha" data-sitekey="k"></div><button type="submit">Submit</button></form>`), false, "an empty 0-height container (live Lever)");
   assert.equal(await shown(`<script src="https://www.google.com/recaptcha/api.js"></script><p>This site is protected by reCAPTCHA.</p><form><input name="a"><input name="b"><button type="submit">Apply</button></form>`), false);
 });
 
 test("a shown check still stops: checkbox widget, challenge frame, interstitial, Turnstile", { skip }, async () => {
-  assert.equal(await shown(fs.readFileSync(path.join(__dirname, "fixtures/apply-dryrun/lever-acme.html"), "utf8")), true, "the dry-run Lever fixture's bare checkbox container");
-  assert.equal(await shown(`<form><input name="email"><div class="g-recaptcha" data-sitekey="k"></div><button type="submit">Submit</button></form>`), true);
-  assert.equal(await shown(`<iframe src="https://www.google.com/recaptcha/api2/anchor?k=x&size=normal" width="304" height="78"></iframe>`), true);
-  assert.equal(await shown(`<iframe src="https://newassets.hcaptcha.com/captcha/v1/x/static/hcaptcha.html#frame=checkbox" width="303" height="78"></iframe>`), true);
-  assert.equal(await shown(`<title>Just a moment...</title><p>Checking your browser before accessing the site.</p>`), true);
-  assert.equal(await shown(`<p>Verify you are human by completing the action below.</p>`), true);
-  assert.equal(await shown(`<form><div class="cf-turnstile" data-sitekey="k"></div></form>`), true);
+  assert.ok(await shown(fs.readFileSync(path.join(__dirname, "fixtures/apply-dryrun/lever-acme.html"), "utf8")), "the dry-run Lever fixture's drawn checkbox");
+  assert.ok(await shown(`<form><input name="email"><div class="g-recaptcha" data-sitekey="k" style="width:304px;height:78px"></div><button type="submit">Submit</button></form>`));
+  assert.ok(await shown(`<iframe src="https://www.google.com/recaptcha/api2/anchor?k=x&size=normal" width="304" height="78"></iframe>`));
+  assert.ok(await shown(`<iframe src="https://newassets.hcaptcha.com/captcha/v1/x/static/hcaptcha.html#frame=checkbox" width="303" height="78"></iframe>`));
+  assert.ok(await shown(`<title>Just a moment...</title><p>Checking your browser before accessing the site.</p>`));
+  assert.ok(await shown(`<p>Verify you are human by completing the action below.</p>`));
+  assert.ok(await shown(`<form><div class="cf-turnstile" data-sitekey="k"></div></form>`));
 });

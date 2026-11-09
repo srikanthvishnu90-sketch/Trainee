@@ -169,14 +169,17 @@ function INVALID() {
 
 // ---- answers ---------------------------------------------------------------------------------------------------------------
 const FACT_RULES = [
-  [/^first name\b|^given name\b/, "first_name"],
-  [/^last name\b|^surname\b|^family name\b/, "last_name"],
+  [/^first name\b|^given name\b|^vorname\b|^voornaam\b|^pr nom\b|^nombre$/, "first_name"],
+  [/^last name\b|^surname\b|^family name\b|^nachname\b|^achternaam\b|^apellidos?\b|^nom de famille\b/, "last_name"],
   [/^preferred (first )?name\b/, "preferred_name"],
   [/^(full |legal |your )?name$|^full legal name\b/, "full_name"],
-  [/^e ?mail\b/, "email"],
+  // The same question in the languages the benchmark's boards ask it in (German, Dutch, Spanish, French, Portuguese, Swedish).
+  [/^(vor und nachname|vollst ndiger name|volledige naam|nombre completo|nombre y apellidos?|nom complet|nome completo|fullst ndigt namn|namn)$/, "full_name"],
+  [/^e ?mail\b|^(e ?mail adresse|e ?mail adres|correo electr nico|direcci n de correo electr nico|adresse e ?mail|adresse (de )?courriel|e ?post(adress)?)$/, "email"],
   // R9: SmartRecruiters (and others) ask for the address twice; the second box takes the same confirmed address.
   [/^(confirm|re ?enter|retype|repeat|verify) (your )?e ?mail( address)?$/, "email"],
-  [/^(phone|mobile|telephone|cell)\b/, "phone"],
+  [/^(phone|mobile|telephone|cell)\b|^(telefon(nummer)?|telefoonnummer|tel fono|t l phone|handynummer|mobilnummer)$/, "phone"],
+  [/^(country|country of residence|land|pays|pa s)$/, "country"],
   [/^(current )?(company|employer|organi[sz]ation)\b/, "current_company"],
   [/^(current )?(job )?title\b/, "current_title"],
   [/linkedin/, "linkedin_url"], [/github/, "github_url"],

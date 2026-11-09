@@ -151,7 +151,7 @@ function APPLY_CANDIDATES(args) {
 }
 
 // ---------------------------------------------------------------------------------------------------------- one posting
-const TEST_FACTS = { first_name: "Testy", last_name: "Example", full_name: "Testy Example", email: "dry-run@example.invalid", phone: "+1 555 0100", location: "Test City", eeo_policy: "decline" };
+const TEST_FACTS = { first_name: "Testy", last_name: "Example", full_name: "Testy Example", email: "dry-run@example.invalid", phone: "+1 555 0100", location: "Test City", country: "United States", eeo_policy: "decline" };
 function syntheticResume(dir) {
   fs.mkdirSync(dir, { recursive: true });
   const p = path.join(dir, "TEST-synthetic-resume.pdf");

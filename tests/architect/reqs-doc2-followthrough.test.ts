@@ -104,8 +104,8 @@ Deno.test("DOC2/4 any update: confirmed apart from sent-not-confirmed, running, 
     job("h", "Hooli", "needs_user", 4, { reason: "email_code" })] }), T0);
   const o = overviewTurn({ message: "any update?", situation: s, now: T0 })!;
   eq(o.intent, "career_overview");
-  assert(/^Status as of now: 1 confirmed by the employer, 1 sent but not confirmed, 1 in progress, 1 waiting on you\./.test(o.reply), o.reply);
-  assert(/Confirmed by the employer:\n- Acme \(Data Analyst\), confirmation ACME-77/.test(o.reply), o.reply);
+  assert(/^Status as of now: 0 confirmed by the employer, 1 page reference only, 1 sent but not confirmed, 1 in progress, 1 waiting on you\./.test(o.reply), o.reply);
+  assert(/Page reference only \(not the employer's confirmation\):\n- Acme \(Data Analyst\): their page showed ACME-77; Acme has not confirmed it by email yet/.test(o.reply) && !/Confirmed by the employer:/.test(o.reply), o.reply);
   assert(/Sent, not confirmed by the employer yet:\n- Globex \(Data Analyst\): sent .*no confirmation from them yet/.test(o.reply), o.reply);
   assert(!/Globex[^\n]*confirmation [A-Z]/.test(o.reply), "an unconfirmed application is never given a confirmation");
   assert(/Waiting on you:\n- Hooli \(Data Analyst\): the employer emailed a code\. To unblock: type the code/.test(o.reply), o.reply);

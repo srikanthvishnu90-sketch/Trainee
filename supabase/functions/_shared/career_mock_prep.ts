@@ -508,7 +508,7 @@ export function supabaseMockPrep(admin: any, env: { get(k: string): string | und
 }
 
 // ---------- The model judge (CAREER_MOCK_JUDGE=on) ----------
-// Claude only (Anthropic key, whatever MODEL_PROVIDER says), CAREER_MODEL when it names a Claude model (default claude-haiku-5-5). Each
+// Claude only (Anthropic key, whatever MODEL_PROVIDER says), always claude-sonnet-5-5 (readerModel, D-046). Each
 // call is metered and one agent_turn_costs row is written per judged answer. Any failure returns null and the code check
 // stands.
 export const JUDGE_SYSTEM = [

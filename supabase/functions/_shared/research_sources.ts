@@ -16,8 +16,8 @@
 //             What this does NOT close (review of #628): fetch() resolves the name again itself, and the edge runtime cannot pin
 //             a connection to the checked address (no IP with SNI), so a TTL-0 name could answer a private address to fetch()
 //             alone, between the two checks. The second check discards the page whenever its answer differs from the checked
-//             set in any way; a name that flips for exactly fetch()'s lookup and answers the same set before and after can
-//             still reach an internal address once (the request is sent; its body is discarded only if a check catches it).
+//             set in any way. In the window that remains, a name that answers an internal address to fetch()'s own lookup only,
+//             and the same public set to both checks, is reached once: the request is sent, and its body is read and kept.
 //   deadline  a wall-clock time (by `clock`, the machine's real clock) after which no further hop starts: the rest are refused as
 //             time_budget, so a research turn names what it did not read instead of waiting.
 //   robots    may this exact URL be read (robots.txt; research_free_sources.ts robotsGate)? Checked on every hop too.
@@ -45,7 +45,7 @@ export interface FetchedSources { verified: SourcePage[]; rejected: SourceReject
 export { isBlockedHost } from "./research_never.ts";
 export function isPrivateHost(url: string): boolean {
   let host: string;
-  try { host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, ""); } catch { return true; }
+  try { host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, ""); } catch { return true; } // "localhost." is localhost
   // An IPv4 literal is judged by the full address check (CGNAT, multicast, reserved and the rest), not only the common ranges.
   if (/^\d+\.\d+\.\d+\.\d+$/.test(host) && isPrivateIp(host)) return true;
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return true;

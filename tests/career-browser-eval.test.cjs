@@ -43,6 +43,9 @@ const PAGES = {
   "/login/job": `<!doctype html><html><body><h1>Sign in</h1><form action="/login" method="post"><label for="u">Email</label><input id="u" name="email"><label for="p">Password</label><input id="p" type="password" name="password"><button type="submit">Sign in</button></form></body></html>`,
   "/code/job": FORM(`<label for="c">Security code</label><input id="c" name="security_code">`),
   "/private/job": FORM(),
+  // A page whose own script submits its form at once, and an "Apply" control that is a submit button in a form.
+  "/autosubmit/job": FORM(`<script>const f = () => document.getElementById("application-form"); setTimeout(() => f().requestSubmit(), 30); setTimeout(() => HTMLFormElement.prototype.submit.call(f()), 60); setTimeout(() => document.getElementById("submit").click(), 90)</script>`),
+  "/applysubmit/job": `<!doctype html><html><body><h1>Engineer</h1><form action="/submit" method="post"><input type="hidden" name="x" value="1"><button type="submit">Apply</button></form></body></html>`,
 };
 
 let server, base, browser, resumePath;
@@ -162,4 +165,47 @@ test("provider apply URLs and schema keys", () => {
   assert.equal(lib.schemaKeyOf({ kind: "select", label: "Gender", eeo: true }), "eeo");
   assert.equal(lib.schemaKeyOf({ kind: "checkbox", label: "I agree" }), "agreement");
   assert.equal(lib.schemaKeyOf({ kind: "text", label: "Phone number of your reference" }), "custom");
+});
+
+test("a page that submits its own form is stopped in the page: the submit is cancelled and counted, nothing reaches the server", { skip }, async () => {
+  const r = await run("/autosubmit/job");
+  // requestSubmit() and the prototype's submit() are each counted; the button click at 90 ms meets empty required fields, so
+  // the browser's own validation stops it before any submit event (and the request rule would abort its POST anyway).
+  assert.ok(r.submit_attempts >= 2, `submit attempts counted: ${r.submit_attempts}`);
+  assert.equal(r.form_found, true, "still on the form: the submit never navigated");
+  assert.equal(r.submit_clicked, false);
+  assert.deepEqual(sentToServer(), []);
+});
+
+test("an Apply control that is a submit button is never clicked", { skip }, async () => {
+  const r = await run("/applysubmit/job", "bamboohr");
+  assert.ok(!r.hops.some((h) => h.startsWith("click:")), r.hops.join(","));
+  assert.equal(r.submit_attempts, 0);
+  assert.deepEqual(sentToServer(), []);
+});
+
+// The driver has no code path that clicks a submit control: every click in the eval and in the fill engine it uses is on an
+// element it tagged itself (an Apply candidate that is not a submit control, or a question's own option), and nothing calls
+// submit(), requestSubmit() or presses Enter. Read from the source, so a new click anywhere fails this test.
+test("source: the only clicks are on tagged Apply candidates and tagged question options; no submit, requestSubmit or Enter", () => {
+  const read = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
+  const evalSrc = read("scripts/browser-eval/eval-lib.cjs") + read("scripts/browser-eval/run.cjs");
+  const fillSrc = read("workers/career-browser/ats-fill.cjs");
+  const clicks = [...evalSrc.matchAll(/\.click\(([^)]*)\)/g)].map((m) => m[1]);
+  assert.deepEqual(clicks, ["`[data-eval-apply=\"${c[0].i}\"]`, { timeout: 8000 }"], "the eval clicks only the tagged Apply candidate");
+  const trap = evalSrc.slice(evalSrc.indexOf("function SUBMIT_TRAP"), evalSrc.indexOf("const stopWall"));
+  const outsideTrap = evalSrc.replace(trap, "").replace(/\/\/.*$/gm, ""); // code only, comments dropped
+  assert.doesNotMatch(outsideTrap, /\.(requestSubmit|submit)\s*\(/, "no submit() or requestSubmit() call outside the trap that disables them");
+  assert.doesNotMatch(evalSrc + fillSrc, /press\(\s*["'`]Enter/, "Enter is never pressed");
+  assert.doesNotMatch(evalSrc + fillSrc, /keyboard\.(press|type|down)/, "no raw keyboard input");
+  // ats-fill clicks: a question's own buttons (data-upmore-q / data-upmore-o, set by EXTRACT), its combobox input, and its own
+  // listbox options. Nothing else.
+  const fillClicks = [...fillSrc.matchAll(/await ([\w.()]+?)\.click\(/g)].map((m) => m[1]);
+  assert.deepEqual(fillClicks, ["loc", "input", "opts().nth(m.index)"]);
+  assert.match(fillSrc, /const loc = page\.locator\(sel\(d\.q, i\)\)\.first\(\);/);
+  assert.match(fillSrc, /const input = page\.locator\(sel\(d\.q\)\)\.first\(\);/);
+  // The Apply candidate filter itself refuses a submit control, and every candidate's text is checked against NEVER_CLICK.
+  const cand = evalSrc.slice(evalSrc.indexOf("function APPLY_CANDIDATES"), evalSrc.indexOf("// ------", evalSrc.indexOf("function APPLY_CANDIDATES")));
+  assert.match(cand, /\.toLowerCase\(\) === "submit" \|\| \(e\.tagName === "BUTTON" && e\.form && \(e\.type \|\| "submit"\) === "submit"\)\) return;/);
+  assert.match(cand, /NEVER\.test\(t\)\) return;/);
 });

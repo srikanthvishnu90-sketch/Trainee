@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 "use strict";
 // WO-M: the real-site browser DRY-RUN eval (scripts/browser-eval/eval-lib.cjs says exactly what it does and cannot do).
-//   node scripts/browser-eval/run.cjs --sample artifacts/browser-eval/sample.csv --label baseline-2026-11-09
+//   node scripts/browser-eval/run.cjs --sample scripts/browser-eval/sample.csv --label baseline-2026-11-09
+// In CI: .github/workflows/browser-eval.yml (workflow_dispatch only).
 // Options: --max-per-provider N (at most 20), --providers greenhouse,lever, --concurrency N (providers at once, default 4),
 // --shots (keep a screenshot of each filled form), --out DIR (default artifacts/browser-eval/<label>).
-// The sample is `provider,url` lines, a read-only export of open postings (docs/architect/specs/BROWSER-COVERAGE.md has
-// the query). Output: results.jsonl (one line per posting), summary.json, summary.md. Nothing here is committed: artifacts/
+// The sample is `provider,url` lines (scripts/browser-eval/sample.csv, a read-only export of open postings; the query is in
+// docs/architect/specs/BROWSER-COVERAGE.md). Output: results.jsonl (one line per posting), summary.json, summary.md. Nothing here is committed: artifacts/
 // is gitignored. It never submits: see eval-lib.cjs.
 const fs = require("node:fs");
 const path = require("node:path");

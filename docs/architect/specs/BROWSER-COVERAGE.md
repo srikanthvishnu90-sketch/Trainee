@@ -61,16 +61,22 @@ exists for the seven other providers.
 
 ## The dry-run eval (`scripts/browser-eval/`)
 
+The sample is committed: `scripts/browser-eval/sample.csv`, 20 open postings per provider for all 11 providers (public
+posting URLs and the provider only), read-only from `career_postings` on 2026-11-09 with:
+
 ```
-# 1. sample (read-only, 20 open postings per provider, seeded): run in the SQL editor, save as provider,url lines
 select provider, url from (
   select provider, url, row_number() over (partition by provider order by md5(job_id || 'wo-m-2026-11-09')) rn
   from (select * from public.career_postings tablesample system (2) repeatable (20261109)
         where closed_at is null and url is not null) s) r
 where rn <= 20 order by provider, rn;
-# 2. run (needs outbound HTTPS to the boards; artifacts/ is gitignored)
-node scripts/browser-eval/run.cjs --sample artifacts/browser-eval/sample-2026-11-09.csv --label baseline-2026-11-09
 ```
+
+Run it from GitHub Actions (the build sandboxes cannot reach the boards): Actions > **browser-eval** > Run workflow, with a
+label. It runs only by hand, never on a push or a PR, needs no secrets, and uploads `summary.json`, `summary.md` and
+`results.jsonl` for 14 days. Locally, on a machine that reaches the boards:
+`node scripts/browser-eval/run.cjs --sample scripts/browser-eval/sample.csv --label <label>` (output in
+`artifacts/browser-eval/<label>/`, gitignored).
 
 Per posting it records: page opened, form found (and how: on the page, in an embedded frame, at the provider's apply
 URL, or behind the page's Apply link), every question mapped to the approved-answer schema (`fact:<key>`, `resume`,
@@ -81,11 +87,12 @@ stop it, and the time. `summary.md` is the per-provider table.
 
 What it cannot do, by construction (eval-lib.cjs header; `tests/career-browser-eval.test.cjs` proves each on local pages):
 no request other than GET/HEAD/OPTIONS leaves the browser (form posts, uploads, autosaves, beacons are aborted and
-counted; WebSockets closed); no submit control is ever clicked; a visible captcha, a password field or a code field stops
+counted; WebSockets closed); no submit control is ever clicked, and a page that submits its own form is cancelled in the
+page (every submit event, `submit()` and `requestSubmit()`, counted as `submit_attempts`); a visible captcha, a password field or a code field stops
 the posting before anything is typed; robots.txt is read first and obeyed; one request a second per host; images, fonts
 and media are not fetched; at most 20 postings per provider per run.
 
 ## Baseline
 
-Not run yet: this session's network denies every employer host (proxy 403), so the first run must come from a network
-that reaches the boards. The table goes here with the run's date and label, and each fix PR quotes its before/after line.
+Not run yet: the build sessions' network denies every employer host (proxy 403); the first run is the `browser-eval`
+workflow. The table goes here with the run's date and label, and each fix PR quotes its before/after line.

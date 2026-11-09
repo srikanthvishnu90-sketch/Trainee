@@ -179,7 +179,7 @@ async function evalPosting(browser, item, o) {
   const pacer = o.pacer, robotsCache = o.robotsCache || new Map();
   const r = {
     provider: item.provider, url: item.url, dry_run: true, submit_clicked: false, nothing_sent: true,
-    vm_today: atsOf(item.url).refuse || "drivable", robots: null, opened: false, status: null, final_url: null,
+    vm_today: atsOf(item.url).refuse || "drivable", submit_attempts: 0, robots: null, opened: false, status: null, final_url: null,
     form_found: false, hops: [], questions: 0, required: 0, schema: {}, filled: 0, fill_failed: 0,
     required_unanswerable: [], walls: [], runner_bot_re: false, requests: 0, requests_blocked: [], error: null, ms: 0,
   };
@@ -213,6 +213,10 @@ async function evalPosting(browser, item, o) {
     r.requests++;
     return route.continue();
   });
+  // Belt to the request rule's braces: a form cannot be submitted in this page at all. Every submit event is cancelled before
+  // the page's own handlers see it, form.submit() / requestSubmit() do nothing, and each attempt is counted (submit_attempts).
+  await ctx.addInitScript(SUBMIT_TRAP);
+  await ctx.exposeBinding("__evalSubmitAttempt", () => { r.submit_attempts++; });
   if (typeof page.routeWebSocket === "function") await page.routeWebSocket(/.*/, (ws) => ws.close()).catch(() => {});
   const settle = async () => { await page.waitForLoadState("networkidle", { timeout: o.settleMs || 8000 }).catch(() => {}); };
   const walls = async () => {
@@ -284,6 +288,13 @@ async function evalPosting(browser, item, o) {
   }
   return r;
 }
+// Runs before any page script, in every frame.
+function SUBMIT_TRAP() {
+  const hit = () => { try { window.__evalSubmitAttempt(); } catch { /* the binding is per page */ } };
+  window.addEventListener("submit", (e) => { e.preventDefault(); e.stopImmediatePropagation(); hit(); }, true);
+  HTMLFormElement.prototype.submit = function () { hit(); };
+  HTMLFormElement.prototype.requestSubmit = function () { hit(); };
+}
 const stopWall = (w) => w.captcha_challenge || w.password || w.email_code || w.closed;
 
 // ---------------------------------------------------------------------------------------------------------- report
@@ -311,7 +322,7 @@ function summarize(results) {
       walls: Object.fromEntries(["login", "password", "sso", "email_code", "captcha_challenge", "captcha_script", "closed", "robots_disallowed"].map((k) => [k, n((r) => r.walls.includes(k))])),
       runner_bot_re_stops: n((r) => r.runner_bot_re), vm_today: [...new Set(rs.map((r) => r.vm_today))].join("/"),
       errors: n((r) => !!r.error), unreachable: n((r) => r.robots === "unreachable"), posts_blocked: rs.reduce((a, r) => a + r.requests_blocked.filter((b) => !b.startsWith("ROBOTS")).length, 0),
-      submit_clicked: n((r) => r.submit_clicked), ms_median: pctl(rs.map((r) => r.ms), 0.5), ms_p90: pctl(rs.map((r) => r.ms), 0.9),
+      submit_clicked: n((r) => r.submit_clicked), submit_attempts: rs.reduce((a, r) => a + r.submit_attempts, 0), ms_median: pctl(rs.map((r) => r.ms), 0.5), ms_p90: pctl(rs.map((r) => r.ms), 0.9),
     });
   }
   return rows;
@@ -320,8 +331,8 @@ function markdown(rows, meta = {}) {
   const h = "| provider | sampled | opened | form found | guest-fillable | ready if answered | questions (med) | required unanswerable (med) | fill failed | resume attached | login | sso | email code | captcha shown | captcha script | runner BOT_RE stops | closed | robots no | VM today | median s | p90 s |";
   const lines = [`# Browser dry-run eval ${meta.label || ""}`, "", `Run ${meta.started || ""}; ${meta.note || "dry run, nothing submitted"}.`, "", h, "|" + h.split("|").slice(1, -1).map(() => "---").join("|") + "|"];
   for (const x of rows) lines.push(`| ${x.provider} | ${x.sampled} | ${x.opened} | ${x.form_found} | ${x.guest_fillable} | ${x.ready_if_answered} | ${x.questions_median ?? "-"} | ${x.unanswerable_required_median ?? "-"} | ${x.fill_failed_postings} | ${x.resume_attached} | ${x.walls.login + x.walls.password} | ${x.walls.sso} | ${x.walls.email_code} | ${x.walls.captcha_challenge} | ${x.walls.captcha_script} | ${x.runner_bot_re_stops} | ${x.walls.closed} | ${x.robots_disallowed} | ${x.vm_today} | ${x.ms_median == null ? "-" : (x.ms_median / 1000).toFixed(1)} | ${x.ms_p90 == null ? "-" : (x.ms_p90 / 1000).toFixed(1)} |`);
-  lines.push("", `Requests that would have sent something and were aborted in the browser: ${rows.reduce((a, x) => a + x.posts_blocked, 0)}. Submit clicks: ${rows.reduce((a, x) => a + x.submit_clicked, 0)}. Postings whose host could not be reached (not opened, not counted as robots refusals): ${rows.reduce((a, x) => a + x.unreachable, 0)}.`);
+  lines.push("", `Requests that would have sent something and were aborted in the browser: ${rows.reduce((a, x) => a + x.posts_blocked, 0)}. Submit clicks: ${rows.reduce((a, x) => a + x.submit_clicked, 0)}. Form submits the page attempted, cancelled in the page: ${rows.reduce((a, x) => a + x.submit_attempts, 0)}. Postings whose host could not be reached (not opened, not counted as robots refusals): ${rows.reduce((a, x) => a + x.unreachable, 0)}.`);
   return lines.join("\n") + "\n";
 }
 
-module.exports = { MAX_PER_PROVIDER, UA_TOKEN, readSample, parseRobots, robotsAllows, createPacer, applyUrlFor, schemaKeyOf, evalPosting, summarize, markdown, syntheticResume, TEST_FACTS, APPLY_TEXT, NEVER_CLICK };
+module.exports = { SUBMIT_TRAP, MAX_PER_PROVIDER, UA_TOKEN, readSample, parseRobots, robotsAllows, createPacer, applyUrlFor, schemaKeyOf, evalPosting, summarize, markdown, syntheticResume, TEST_FACTS, APPLY_TEXT, NEVER_CLICK };

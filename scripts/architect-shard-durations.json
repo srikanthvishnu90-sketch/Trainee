@@ -1,6 +1,7 @@
 {
   "default_s": 5,
   "files": {
+    "tests/architect/r10-wo-d-limits-replay.test.ts": 11,
     "tests/architect/r10-interim-recorded.test.ts": 11,
     "tests/architect/r10-submit-label.test.ts": 0.1,
     "tests/architect/r10-wo-c-search-replay.test.ts": 12.1,

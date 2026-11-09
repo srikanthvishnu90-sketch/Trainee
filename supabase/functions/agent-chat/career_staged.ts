@@ -345,15 +345,19 @@ const RESEARCH_ASK: RegExp[] = [
 ];
 // The person's own papers (resume, cover letter, an application, an offer): a file of THOSE is a document, never research.
 const OWN_PAPERS = /\b(?:my|mine|our|the|that|this|these|those)\s+(?:tailored\s+|updated\s+|latest\s+|new\s+|current\s+|last\s+)?(?:r[eé]sum[eé]s?|cvs?|cover\s+letters?|transcripts?|portfolio|applications?|packets?|offers?|offer\s+letters?|essays?|drafts?|pdfs?|documents?|docs?|references?)\b/i;
+// Review of #589 (2026-11-08): the person's own record, as a whole ("give me an overview of everything I applied to", "a rundown
+// of all the jobs I've applied for", "a report on all my applications"), is an export, never market research.
+const OWN_RECORD = /\b(?:everything|all(?:\s+of)?(?:\s+(?:the|my))?(?:\s+(?:stuff|things|ones|jobs?|roles?|positions?|places|applications?|apps))?|each|every\s+(?:job|role|application|place))\s+(?:that\s+)?(?:i|we)(?:'ve|\s+have|\s+had|'d)?\s+(?:ever\s+)?(?:applied|sent|submitted|saved|done)\b|\b(?:brief|briefing|report|analysis|overview|rundown|write[\s-]?up|summary)\s+(?:on|about|of|for|covering)\s+(?:everything|all\s+(?:of\s+)?(?:my|mine|it))\b/i;
 const RESEARCH_OVER = new Set(["career_document_delivery", "profile_export"]);
 export function researchAsk(message: string): boolean {
   const m = String(message ?? "").replace(/[\u2019`]/g, "'");
-  return !OWN_PAPERS.test(m) && (RESEARCH_ASK.some((r) => r.test(m)) || MARKET_ASK.some((r) => r.test(m)));
+  return !OWN_PAPERS.test(m) && !OWN_RECORD.test(m) && (RESEARCH_ASK.some((r) => r.test(m)) || MARKET_ASK.some((r) => r.test(m)));
 }
 const SEARCH_ASK = /\b(?:find|show|search|look\s+for|get|pull|list)\b[^?.!]{0,40}\b(?:jobs?|roles?|openings?|postings?|internships?|positions?)\b/i;
 const SEARCH_INTENTS = new Set(["career_discovery", "career_internship_discovery", "discovery_dead_board"]);
 export function marketResearchAsk(env: Env, message: string, intent: string | null): boolean {
   if (env.get("CAREER_RESEARCH_REPLY") !== "on") return false;
+  if (OWN_RECORD.test(String(message ?? "").replace(/[\u2019`]/g, "'"))) return false;
   const market = MARKET_ASK.some((r) => r.test(message)), research = researchAsk(message);
   if (!market && !research) return false;
   if (intent && SEARCH_INTENTS.has(intent)) return !SEARCH_ASK.test(message);

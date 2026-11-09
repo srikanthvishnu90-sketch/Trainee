@@ -26,6 +26,7 @@ type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler:
 import { correctedAsk } from "../_shared/search_correction.ts";
 import { askFor } from "../_shared/career_search_judge.ts";
 import { outreachAsk } from "../_shared/outreach_ask.ts";
+import { researchReplyOn } from "../_shared/research_reply.ts"; // D-047
 export type BrainMode = "router" | "agent" | "staged";
 // The served brain (release_config.ts): the committed PRODUCTION_BRAIN unless CAREER_BRAIN rolls it back to the router.
 // "agent" is never served from here (the full brain stays pinned off in career_brain.ts).
@@ -377,7 +378,7 @@ export function researchAsk(message: string): boolean {
 const SEARCH_ASK = /\b(?:find|show|search|look\s+for|get|pull|list)\b[^?.!]{0,40}\b(?:jobs?|roles?|openings?|postings?|internships?|positions?)\b/i;
 const SEARCH_INTENTS = new Set(["career_discovery", "career_internship_discovery", "discovery_dead_board"]);
 export function marketResearchAsk(env: Env, message: string, intent: string | null): boolean {
-  if (env.get("CAREER_RESEARCH_REPLY") !== "on") return false;
+  if (!researchReplyOn(env)) return false;
   if (OWN_RECORD.test(String(message ?? "").replace(/[\u2019`]/g, "'"))) return false;
   const market = MARKET_ASK.some((r) => r.test(message)), research = researchAsk(message);
   if (!market && !research) return false;
@@ -410,7 +411,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   } else intent = probe.intent ?? null;
   if (!intent) return { brain: false, mode, intent: null, reason: "router_claimed" };
   // Spec F.2: research with a no-action boundary is the brain's research turn, before any rule that keeps the router's intent.
-  if (o.env.get("CAREER_RESEARCH_REPLY") === "on" && researchOverAction(o.message)) return { brain: true, mode, intent, reason: "company_research" };
+  if (researchReplyOn(o.env) && researchOverAction(o.message)) return { brain: true, mode, intent, reason: "company_research" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
   if (marketResearchAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "market_research" };
   if (SEARCH_LIKE.has(intent) && filePageAsk(o.message, askFor(o.message, { intent, resultStatus: probe.result?.resultStatus }, o.ctx.discovery)?.ask)) return { brain: true, mode, intent, reason: "file_page_ask" };

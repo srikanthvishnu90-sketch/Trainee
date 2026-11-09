@@ -8,6 +8,7 @@
 import type { JobView } from "./telegram_jobs.ts";
 import { RATES_CSS, ratesHtml, ratesText, type RateRow } from "./career_resume_outcomes.ts";
 import { reasonWords } from "./career_apply_status.ts";
+import { MAX_CODE_SENDS } from "./file_session.ts";
 import { BODY_FONT, BRAND, DISABLED_CSS, FAVICON, FONT_LINKS, PLUM, TOKENS_CSS } from "./brand.ts";
 import { FILE_CSS, stampHtml, stateHtml } from "./file_design.ts";
 
@@ -281,10 +282,14 @@ export function renderPhoneLogin(o: { step: LoginStep | "phone" | "code"; note?:
   const wrong = step === "wrong_code";
   const note = wrong ? `<div class="notice" role="alert"><strong>That code did not work</strong>${esc(o.note ?? "Check the latest code or request a new one.")}</div>` : o.note ? `<p class="top-note" role="alert">${esc(o.note)}</p>` : "";
   const reset = `<form method="post"><input type="hidden" name="action" value="phone_reset"><button type="submit" class="lnk">Use a different number</button></form>`;
+  // Spec C.23 panel 2: the resend control and its real availability, the link's own limit, the same words for every number (a
+  // per-number count would tell a stranger whether the number is the account's). No countdown is invented.
+  const resend = `<form method="post"><input type="hidden" name="action" value="phone_resend"><button type="submit" class="lnk">Send a new code</button></form>`;
+  const resendRule = `<p class="hint">A link sends at most ${MAX_CODE_SENDS} codes, each replacing the last. After that, open a new link from Trainee.</p>`;
   const tg = o.botUrl ? `<a href="${esc(o.botUrl)}" rel="noopener noreferrer">Open from Telegram</a>` : "";
   const form = step === "phone"
     ? `<form method="post" class="login"><input type="hidden" name="action" value="phone_start"><label for="phone">Phone number</label><input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" required maxlength="32" placeholder="+1 (555) 000-0000"><p class="hint">The number on your Trainee account. We text it a 6-digit code.</p><button type="submit" class="apply">Send code</button></form><div class="alt">${tg}<a href="${HELP_URL}">Get help</a></div>`
-    : `<form method="post" class="login" id="codeform"><input type="hidden" name="action" value="phone_verify"><label for="code">6-digit code</label><input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 -]{6,9}" required maxlength="9"><p id="verifying" class="status" role="status" hidden>${esc(VERIFYING.status)}</p><button type="submit" class="apply">${wrong ? "Try again" : "Sign in"}</button></form><div class="alt">${reset}</div>`;
+    : `<form method="post" class="login" id="codeform"><input type="hidden" name="action" value="phone_verify"><label for="code">6-digit code</label><input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 -]{6,9}" required maxlength="9"><p id="verifying" class="status" role="status" hidden>${esc(VERIFYING.status)}</p><button type="submit" class="apply">${wrong ? "Try again" : "Sign in"}</button></form><div class="alt">${resend}${reset}</div>${resendRule}`;
   const lead = step === "phone" ? "Sign in with your phone number to see your jobs and apply." : wrong ? "" : "If that is the number on your Trainee account, we texted it a code. Type it here.";
   return layout(`${LOGIN_HEADINGS[step]} - Trainee`, `<header>${BRAND}<h1>${LOGIN_HEADINGS[step]}</h1></header><main id="main">${note}${lead ? `<p>${esc(lead)}</p>` : ""}${form}<p class="hint">Trainee never asks for a password, and never asks for this code in chat.</p></main>`, { css: LOGIN_CSS, ...(step === "phone" ? {} : { script: LOGIN_SCRIPT }) });
 }

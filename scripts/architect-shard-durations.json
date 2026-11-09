@@ -289,6 +289,7 @@
     "tests/architect/resume-outcomes.test.ts": 0.8,
     "tests/architect/r10-connect-scopes.test.ts": 2,
     "tests/architect/r10-connect-states.test.ts": 0.1,
+    "tests/architect/r10-e56-e59-entry.test.ts": 2,
     "tests/architect/r10-entry-recovery-browser.test.ts": 6,
     "tests/architect/r10-entry-signin-binding.test.ts": 10.1,
     "tests/architect/r9-resume-fit-send-20261108.test.ts": 4.8,

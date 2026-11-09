@@ -50,10 +50,20 @@ export const q = (s: string) => `'${String(s).replace(/'/g, "''")}'`;
 export const TOKEN = "123456:TEST-r10-acceptance-token-not-real", SECRET = "TEST_r10_acceptance_webhook_secret_0123456789";
 export const FILE_BASE = "https://trainee.test/file", FILE_SECRET = "TEST-r10-file-link-secret-0123456789abcdef";
 export const BRAIN_STUB = "BRAIN_STUB: the fake model made no tool call.";
+// SCRIPTED BRAIN (architect ruling 2026-11-09): only where an order's fix depends on the brain choosing a tool (research through
+// a tool, for one). A fixture, $0 and deterministic: the first step whose pattern matches the person's latest message answers
+// with that tool call (only when the request offers that tool; otherwise it says so in words and the check fails on it); once
+// the tool's result is back, the step's `after` text (or the stub) is the brain's answer. Code-delivered fixes still run with
+// the plain stub; the live replay with the real model is the final check. Evidence labels such a check "scripted brain: <name>".
+export interface BrainScript { name: string; steps: { when: RegExp; tool: string; input: Record<string, unknown>; after?: string }[] }
+const lastUserText = (body: any) => {
+  for (const m of [...(body.messages ?? [])].reverse()) if (m.role === "user") return typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "");
+  return "";
+};
 const enc = new TextEncoder();
 
 // ------------------------------------------------------------------------------------------------ evidence
-export interface Evidence { item: number; test: string; file: string; outcome: "PASS" | "FAIL" | "NOT_RUN"; why?: string; files?: string[]; screenshots?: string[]; reply?: string; turns?: number; scenario?: string; target?: string; model_calls?: number }
+export interface Evidence { item: number; test: string; file: string; outcome: "PASS" | "FAIL" | "NOT_RUN"; brain?: string; why?: string; files?: string[]; screenshots?: string[]; reply?: string; turns?: number; scenario?: string; target?: string; model_calls?: number }
 export async function record(e: Evidence) {
   await Deno.mkdir(EVIDENCE_DIR, { recursive: true });
   await Deno.writeTextFile(`${EVIDENCE_DIR}/evidence.jsonl`, JSON.stringify({ ...e, reply: e.reply?.slice(0, 1200), at: new Date().toISOString() }) + "\n", { append: true });
@@ -67,10 +77,10 @@ export async function check(t: Deno.TestContext, file: string, item: number, nam
     const calls0 = w?.modelCalls() ?? 0;
     try {
       await fn(ev);
-      await record({ item, test: name, file, outcome: "PASS", ...ev, model_calls: (w?.modelCalls() ?? 0) - calls0 });
+      await record({ item, test: name, file, outcome: "PASS", brain: w?.brainLabel ?? "stub", ...ev, model_calls: (w?.modelCalls() ?? 0) - calls0 });
     } catch (e) {
       const why = String((e as Error)?.message ?? e).split("\n").slice(0, 8).join(" | ").slice(0, 900);
-      await record({ item, test: name, file, outcome: "FAIL", why, ...ev, model_calls: (w?.modelCalls() ?? 0) - calls0 });
+      await record({ item, test: name, file, outcome: "FAIL", why, brain: w?.brainLabel ?? "stub", ...ev, model_calls: (w?.modelCalls() ?? 0) - calls0 });
       throw e;
     }
   });
@@ -107,14 +117,14 @@ export interface World {
   // five ML roles, the first being the Reddit manager role), and the original file no longer available.
   observedPerson(chat: number): Promise<string>;
   open(url: string, chat: number): Promise<Opened>;
-  pageChecks: string[]; outbound: string[]; modelCalls(): number; brainCalls(): number; turns(): number; bot: ReturnType<typeof fakeBot>;
+  brainLabel: string; pageChecks: string[]; outbound: string[]; modelCalls(): number; brainCalls(): number; turns(): number; bot: ReturnType<typeof fakeBot>;
   stop(): Promise<void>;
 }
 const KEYS = ["CAREER_BRAIN", "CAREER_NETWORKING_DRAFT", "ANTHROPIC_API_KEY", "CAREER_MODEL", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_BOT_USERNAME", "TRAINEE_SIGNUP",
   "TRAINEE_ALLOWED_CONTACTS", "TRAINEE_DELIVER_SECRET", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "LOOPMESSAGE_API_KEY", "WHATSAPP_TOKEN", "TRAINEE_FILE_BASE_URL",
   "TRAINEE_FILE_LINK_SECRET", "TRAINEE_BOT_URL", "TRAINEE_CONNECT_BASE_URL", "TRAINEE_CONNECT_LINK_SECRET", "CAREER_MODEL_DAILY_USD", "CAREER_MODEL_DAILY_CALLS", "SUPABASE_URL"];
 
-export async function world(o: { chats: number[]; market?: Seeded[] }): Promise<World> {
+export async function world(o: { chats: number[]; market?: Seeded[]; brain?: BrainScript }): Promise<World> {
   const { RELEASE_FLAGS, RELEASE_NEVER_ON, RELEASE_PENDING } = await import("../../../supabase/functions/agent-chat/release_config.ts");
   const keys = [...KEYS, ...Object.keys(RELEASE_FLAGS), ...RELEASE_NEVER_ON, ...Object.keys(RELEASE_PENDING)];
   const saved = Object.fromEntries(keys.map((k) => [k, Deno.env.get(k)]));
@@ -140,7 +150,13 @@ export async function world(o: { chats: number[]; market?: Seeded[] }): Promise<
     modelCalls++;
     if (Array.isArray(body.tools) && body.tools.length) {
       brainCalls++;
-      return Response.json({ id: "chatcmpl-brain", model: body.model, choices: [{ index: 0, message: { role: "assistant", content: BRAIN_STUB }, finish_reason: "stop" }], usage: { prompt_tokens: 400, completion_tokens: 20 } });
+      const say = (content: string, tool_calls?: unknown[]) => Response.json({ id: "chatcmpl-brain", model: body.model, choices: [{ index: 0, message: { role: "assistant", content, ...(tool_calls ? { tool_calls } : {}) }, finish_reason: tool_calls ? "tool_calls" : "stop" }], usage: { prompt_tokens: 400, completion_tokens: 20 } });
+      const step = o.brain?.steps.find((x) => x.when.test(lastUserText(body)));
+      if (!step) return say(BRAIN_STUB);
+      if ((body.messages ?? []).at(-1)?.role === "tool") return say(step.after ?? BRAIN_STUB);
+      const offered = body.tools.map((x: any) => x.function?.name ?? x.name);
+      if (!offered.includes(step.tool)) return say(`SCRIPTED_BRAIN: the tool ${step.tool} is not offered (offered: ${offered.join(", ")})`);
+      return say("", [{ id: `toolu_r10_${brainCalls}`, type: "function", function: { name: step.tool, arguments: JSON.stringify(step.input) } }]);
     }
     // Any other writer (a draft, a rewrite, a judge): a plain sentence that states no fact.
     return Response.json({ id: "chatcmpl-test", model: body.model, choices: [{ index: 0, message: { role: "assistant", content: "MODEL_STUB" }, finish_reason: "stop" }], usage: { prompt_tokens: 300, completion_tokens: 10 } });
@@ -274,7 +290,7 @@ export async function world(o: { chats: number[]; market?: Seeded[] }): Promise<
     try { return await read(url, await globalThis.fetch(url)); } catch (e) { return { url, status: 0, type: "", bytes: new Uint8Array(), html: null, why: (e as Error).message }; }
   };
   return {
-    pg, sql, json, admin, say, upload, personOf, observedPerson, open, pageChecks, outbound, bot,
+    pg, sql, json, admin, say, upload, personOf, observedPerson, open, pageChecks, outbound, bot, brainLabel: o.brain ? `scripted brain: ${o.brain.name}` : "stub",
     modelCalls: () => modelCalls, brainCalls: () => brainCalls, turns: () => turns,
     stop: async () => {
       globalThis.fetch = realFetch;
@@ -289,7 +305,7 @@ export async function world(o: { chats: number[]; market?: Seeded[] }): Promise<
 export const sentences = (s: string) => s.replace(/\s+/g, " ").split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter((x) => x.length >= 30);
 export function repeated(s: string): string[] { const seen = new Set<string>(), dup: string[] = []; for (const x of sentences(s)) { const k = x.toLowerCase(); if (seen.has(k)) dup.push(x); seen.add(k); } return dup; }
 // Internal machinery and template prose the spec names (A.5 patterns 3, 4, 6; E.6 52) that a person should never read.
-export const INTERNAL = [/parse check/i, /\brunner\b/i, /switched on/i, /Eligibility verdict/i, /checked against the record/i, /grounded in your profile record/i, /\bas supplied in context\b/i, /\bnamed in the unknowns\b/i, /What changed: Same as your base resume/i, /BRAIN.STUB|MODEL.STUB/,
+export const INTERNAL = [/parse check/i, /\brunner\b/i, /switched on/i, /Eligibility verdict/i, /checked against the record/i, /grounded in your profile record/i, /\bas supplied in context\b/i, /\bnamed in the unknowns\b/i, /What changed: Same as your base resume/i, /BRAIN.STUB|MODEL.STUB|SCRIPTED.BRAIN/,
   /rides with my reply/i, /A file exists here only once/i, /live board/i, /saved snapshot/i, /Nothing was invented to fill the list/i, /in the current list/i];
 export const internalHits = (s: string) => INTERNAL.filter((r) => r.test(s)).map((r) => r.source);
 // Every number a resume prints must be one the person supplied (years and page furniture aside).
@@ -322,7 +338,7 @@ export async function deliveredFiles(w: World, chat: number, said: Said, label: 
 }
 
 // Runs a suite file: the world, the checks, the cleanup; when the machine cannot run it, every item it covers is NOT_RUN.
-export function suite(file: string, items: number[], chats: number[], body: (t: Deno.TestContext, w: World) => Promise<void>) {
+export function suite(file: string, items: number[], chats: number[], body: (t: Deno.TestContext, w: World) => Promise<void>, brain?: BrainScript) {
   Deno.test({
     name: `R10 acceptance ${file}`,
     sanitizeResources: false,
@@ -330,7 +346,7 @@ export function suite(file: string, items: number[], chats: number[], body: (t: 
     async fn(t) {
       const no = canRun(file);
       if (no) { await notRun(file, items, no); return; }
-      const w = await world({ chats });
+      const w = await world({ chats, brain });
       try { await body(t, w); } finally {
         console.log(`R10 ${file} turns=${w.turns()} model_calls=${w.modelCalls()} brain_calls=${w.brainCalls()} outbound=${w.outbound.length} page_checks=${w.pageChecks.length}`);
         // Item 0 is the run's own count (not one of the fifteen): every message the suite sent, setup included, all in-process.

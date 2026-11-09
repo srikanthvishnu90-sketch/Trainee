@@ -42,7 +42,7 @@ const livePath = opt("--live");
 const jsonOut = opt("--json");
 const only = opt("--only");
 
-interface Rec { item: number; test: string; file: string; outcome: "PASS" | "FAIL" | "NOT_RUN"; why?: string; files?: string[]; screenshots?: string[]; reply?: string; turns?: number; model_calls?: number; scenario?: string; target?: string }
+interface Rec { item: number; test: string; file: string; outcome: "PASS" | "FAIL" | "NOT_RUN"; why?: string; files?: string[]; screenshots?: string[]; reply?: string; turns?: number; model_calls?: number; scenario?: string; target?: string; brain?: string }
 // The owner's post-reset audit (spec F) is a HISTORICAL BASELINE, reported apart from post-fix acceptance (architect, 2026-11-09).
 const BASE_F = { scenarios: 3, turns: 10 };
 const isBaseline = (r: Rec) => r.scenario === "post-reset";
@@ -108,7 +108,7 @@ if (import.meta.main) {
     summary[item] = { status, checks };
     say(`\n[${status}] ${item}. ${ITEMS[item]}   (${passes.length} passed, ${fails.length} failed, ${checks.length - passes.length - fails.length} not run)`);
     for (const c of checks) {
-      say(`  - ${c.outcome.padEnd(7)} ${c.test}   (${c.file})`);
+      say(`  - ${c.outcome.padEnd(7)} ${c.test}   (${c.file}${c.brain && c.brain !== "stub" ? `; ${c.brain}` : ""})`);
       if (c.why) say(`      why: ${clip(c.why, 400)}`);
       for (const f of c.files ?? []) say(`      file opened: ${f}`);
       for (const s of c.screenshots ?? []) say(`      screenshot (390 px, dsf 2): ${s}`);

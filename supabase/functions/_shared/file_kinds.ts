@@ -156,7 +156,7 @@ const KINDS: Record<Exclude<KindId, "job_list">, (raw: unknown, v: V) => any> = 
       if (extra.length) v.err("data", `only application_id is accepted (${extra.slice(0, 4).join(", ")} come from the application record, not from you)`);
       return { application_id: v.str(x.application_id, "application_id", { max: 200 }) };
     }
-    const status = v.one(x.status, "status", ["queued", "prepared", "submitted", "confirmed", "failed"] as const);
+    const status = v.one(x.status, "status", ["queued", "prepared", "submitted", "uncertain", "confirmed", "failed"] as const);
     const c = x.confirmation === undefined ? null : v.obj(x.confirmation, "confirmation");
     const conf = c ? { id: v.str(c.id, "confirmation.id", { max: 120, opt: true }), url: v.https(c.url, "confirmation.url"), screenshot_url: v.https(c.screenshot_url, "confirmation.screenshot_url") } : null;
     const answers = v.list(x.answers ?? [], "answers", 0, 30).map((a, i) => { const f = v.fact(a, `answers[${i}]`, { valueKey: "answer", labelKey: "question" }); return f; });
@@ -335,7 +335,7 @@ const reviewLines = (d: any, tz?: string | null): string[] => {
     "## Conditions - in plain words", ...conditions(r, tz).map((c) => `- ${c}`), "", `What happens after approval. ${AFTER}`, "",
     "## Proof panel", `No submission confirmation. ${PROOF_BODY.none}`, "", APPROVE(r)];
 };
-const STATUS_NOTE: Record<string, string> = { queued: "Queued. Nothing has been submitted yet.", prepared: "Prepared. Nothing has been submitted yet.", submitted: "Submitted. The employer hasn't confirmed it.", confirmed: "Confirmed by the employer.", failed: "Failed. It was not submitted." };
+const STATUS_NOTE: Record<string, string> = { queued: "Queued. Nothing has been submitted yet.", prepared: "Prepared. Nothing has been submitted yet.", submitted: "Submitted. The employer hasn't confirmed it.", uncertain: "Submission may have landed; the employer has not confirmed it.", confirmed: "Confirmed by the employer.", failed: "Failed. It was not submitted." };
 
 // ---------------------------------------------------------------- actions: what each kind offers, in what state
 export function actionsOf(rec: FileRecord): ActionView[] {
@@ -437,13 +437,14 @@ export function bodyHtml(rec: FileRecord, token: string, o: { tz?: string | null
       const c = d.confirmation ?? {};
       const kv = (k: string, v: unknown, s: Source = RECORDS) => v ? factHtml({ value: String(v), source: s }, k) : "";
       const st = d.stage as Stage | undefined, sent = !st || st === "employer_confirmed" || st === "submitted_unconfirmed";
+      const pageOnly = !!st && st !== "employer_confirmed"; // 13-Obs: a page reference alone is never the employer's confirmation
       main = (st ? `<style>${PROOF_CSS}</style><p class="state ${esc(STAGE_CLASS[st] ?? st)}" role="status"><strong>${esc(STAGE_LABEL[st])}.</strong> ${esc(STAGE_NOTE[st])}</p>`
         : `<p class="state ${esc(d.status)}" role="status"><strong>${esc(cap1(d.status))}.</strong> ${esc(STATUS_NOTE[d.status] ?? "")}</p>`)
         + sec(sent ? "What was submitted" : "The application", dl(kv("Company", d.company) + kv("Role", d.role) + kv("Sent to", d.destination) + kv("Resume", d.resume) + kv("Prepared", when(d.prepared_at)) + kv("Submitted", when(d.submitted_at)) + kv("Last updated", when(d.as_of))))
         // The proof rides with the claim (brief P3.7, P6.6): the confirmation as a receipt (its snippet, where it came from and when,
         // the link, and the screenshot inline when the page may show it). Without one, "Not confirmed yet" is the value, said.
         + sec("Confirmation", (c.id || c.url || c.screenshot_url)
-          ? evidenceHtml({ quote: c.id ? `Confirmation ID: ${c.id}` : "The employer's confirmation page", source: RECORDS, at: d.submitted_at ?? d.as_of ?? null, href: c.url, hrefLabel: "Open the confirmation",
+          ? evidenceHtml({ quote: c.id ? (pageOnly ? `Their page showed ${c.id}; this is not the employer's confirmation` : `Confirmation ID: ${c.id}`) : "The employer's confirmation page", source: RECORDS, at: d.submitted_at ?? d.as_of ?? null, href: c.url, hrefLabel: "Open the confirmation",
             image: o.evidenceImage?.(c.screenshot_url) ? c.screenshot_url : null, imageAlt: `${d.company ?? "The employer"}'s confirmation screen` }, o.tz)
             + (c.screenshot_url && !o.evidenceImage?.(c.screenshot_url) ? `<p>${linkHtml(c.screenshot_url, "Open the screenshot")}</p>` : "")
           : d.email_confirmed_at ? `<p>Confirmed by ${esc(d.company ?? "the employer")}'s own email, received ${esc(when(d.email_confirmed_at))}. ${src(RECORDS)}</p>`
@@ -548,7 +549,7 @@ export function textOf(rec: FileRecord, o: { now: number; url?: string }): strin
       h(!st || st === "employer_confirmed" || st === "submitted_unconfirmed" ? "What was submitted" : "The application"); L.push(`- Company: ${d.company} [${RECORDS}]`);
       if (d.role) L.push(`- Role: ${d.role} [${RECORDS}]`);
       for (const [k, v] of [["Sent to", d.destination], ["Resume", d.resume], ["Prepared", when(d.prepared_at)], ["Submitted", when(d.submitted_at)], ["Last updated", when(d.as_of)]]) if (v) L.push(`- ${k}: ${v} [${RECORDS}]`);
-      L.push(""); if (c.id || c.url || c.screenshot_url) { h("Confirmation"); if (c.id) L.push(`- Confirmation ID: ${c.id} [${RECORDS}]`); if (c.url) L.push(`- Confirmation: ${c.url}`); if (c.screenshot_url) L.push(`- Screenshot: ${c.screenshot_url}`); L.push(""); }
+      L.push(""); if (c.id || c.url || c.screenshot_url) { h("Confirmation"); if (c.id) L.push(st && st !== "employer_confirmed" ? `- Their page showed ${c.id}; this is not the employer's confirmation [${RECORDS}]` : `- Confirmation ID: ${c.id} [${RECORDS}]`); if (c.url) L.push(`- Confirmation: ${c.url}`); if (c.screenshot_url) L.push(`- Screenshot: ${c.screenshot_url}`); L.push(""); }
       else if (d.email_confirmed_at) { h("Confirmation"); L.push(`- Confirmed by ${d.company}'s own email, received ${when(d.email_confirmed_at)} [${RECORDS}]`, ""); }
       if (Fs(d.answers, true).length) { h("Answers given"); Fs(d.answers, true).forEach((a) => L.push(factText(a, a.question))); L.push(""); }
       const pr = (d.problems ?? []).filter((p: any) => p?.reason); if (pr.length) { h("Not done"); pr.forEach((p: any) => L.push(`- ${cap1(p.outcome)}: ${p.item}. ${p.reason} [${RECORDS}]`)); L.push(""); }

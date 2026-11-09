@@ -29,13 +29,17 @@ const prepared = (n: number, pad = 0) => ({ id: pid(n), company: `TEST Employer 
 function fakeAdmin(o: { tables: Record<string, any[]>; rpc: Record<string, (args: any) => any> }) {
   const calls: { name: string; args: any }[] = [];
   const q = (table: string) => {
-    let rows = [...(o.tables[table] ??= [])];
+    const down = o.tables[table] === null; // a table that cannot be read just now
+    let rows = down ? [] : [...(o.tables[table] ??= [])];
     const b: any = {
       select: () => b, order: () => b, range: () => b, limit: (n: number) => { rows = rows.slice(0, n); return b; },
       eq: (k: string, v: unknown) => { rows = rows.filter((r) => r[k] === v); return b; }, in: (k: string, v: unknown[]) => { rows = rows.filter((r) => v.includes(r[k])); return b; },
+      overlaps: (k: string, v: unknown[]) => { rows = rows.filter((r) => Array.isArray(r[k]) && r[k].some((x: unknown) => v.includes(x))); return b; },
+      update: (patch: any) => { const u: any = { eq: (k: string, v: unknown) => { rows = rows.filter((r) => r[k] === v); return u; }, in: (k: string, v: unknown[]) => { rows = rows.filter((r) => v.includes(r[k])); return u; },
+        then: (res: any, rej: any) => { for (const r of rows) Object.assign(r, patch); return Promise.resolve({ data: null, error: null }).then(res, rej); } }; return u; },
       upsert: (row: any) => { o.tables[table] = [...o.tables[table].filter((r) => !(r.user_id === row.user_id && r.key === row.key)), row]; return Promise.resolve({ data: null, error: null }); },
       insert: (row: any) => { o.tables[table].push(row); return Promise.resolve({ data: null, error: null }); },
-      then: (res: any, rej: any) => Promise.resolve({ data: rows, error: null }).then(res, rej),
+      then: (res: any, rej: any) => Promise.resolve(down ? { data: null, error: { message: "down" } } : { data: rows, error: null }).then(res, rej),
     };
     return b;
   };
@@ -47,16 +51,20 @@ function fakeAdmin(o: { tables: Record<string, any[]>; rpc: Record<string, (args
   } };
 }
 // The world: prepared applications 1..n (the first with an open required question on its posting), their postings.
-async function world(n: number, o: { openOn?: number[]; openFails?: boolean } = {}) {
-  const prep = await Promise.all(Array.from({ length: n }, async (_, i) => ({ id: pid(i + 1), user_id: U, job_id: job(i + 1), company: `TEST Employer ${i + 1}`,
-    payload: payload(i + 1), payload_hash: await hashApplyPayload(payload(i + 1)), card_lines: lines(i + 1) })));
-  const open = (o.openOn ?? []).map((k) => ({ label: "Will you continue an outside business while employed?", options: ["Yes", "No"], company: `TEST Employer ${k}`, job_ids: [job(k)] }));
+async function world(n: number, o: { openOn?: number[]; openFails?: boolean; others?: number; blankOn?: number[] } = {}) {
+  const pay = (k: number) => (o.blankOn ?? []).includes(k) ? { ...payload(k), fields: [...payload(k).fields, { name: "grad", label: "Expected graduation date", value: "" }] } : payload(k);
+  const prep = await Promise.all(Array.from({ length: n }, async (_, i) => ({ id: pid(i + 1), user_id: U, job_id: job(i + 1), company: `TEST Employer ${i + 1}`, state: "shown",
+    payload: pay(i + 1), payload_hash: await hashApplyPayload(pay(i + 1)), card_lines: lines(i + 1) })));
+  // `others` open questions on other postings first (oldest), so the texting path's 20-row read would never reach these.
+  const open = [...Array.from({ length: o.others ?? 0 }, (_, i) => ({ user_id: U, state: "open", label: `TEST other question ${i}`, options: [], company: "TEST Other", job_ids: [`greenhouse:other:${i}`], created_at: `2026-11-01T00:00:${String(i).padStart(2, "0")}Z` })),
+    ...(o.openOn ?? []).map((k) => ({ user_id: U, state: "open", label: "Will you continue an outside business while employed?", options: ["Yes", "No"], company: `TEST Employer ${k}`, job_ids: [job(k)], created_at: "2026-11-09T00:00:00Z" }))];
   return fakeAdmin({
-    tables: { career_apply_prepared: prep, career_postings: prep.map((p, i) => ({ job_id: p.job_id, title: `TEST Analyst ${i + 1}` })), career_watch_kv: [],
+    tables: { career_apply_prepared: prep, career_postings: prep.map((p, i) => ({ job_id: p.job_id, title: `TEST Analyst ${i + 1}` })), career_watch_kv: [], career_apply_questions: o.openFails ? (null as any) : open,
       career_apply_cards: [{ id: "C1", user_id: U, items: prep.map((p, i) => ({ n: i + 1, prepared_id: p.id, payload_hash: p.payload_hash })) }] },
     rpc: {
-      career_apply_questions_open_as: () => { if (o.openFails) throw Error("down"); return open; },
-      career_apply_card_answer_as: (a: any) => prep.map((p, i) => ({ n: i + 1, company: p.company, result: a.p_approve.includes(i + 1) ? "queued" : "declined" })),
+      career_apply_questions_open_as: () => open.slice(0, 20), // the SQL caps it at 20 (20261020060000)
+      // As the database does: every item not approved is declined and the card closes (20261108100000).
+      career_apply_card_answer_as: (a: any) => prep.map((p, i) => { const q = a.p_approve.includes(i + 1); p.state = q ? "approved" : "declined"; return { n: i + 1, company: p.company, result: q ? "queued" : "declined" }; }),
       career_apply_card_confirm_as: () => ({ card: { id: "C2" }, results: [{ n: 1, company: "TEST Employer 1", result: "queued" }] }),
       career_apply_card_push_as: () => "C9",
     },
@@ -127,7 +135,7 @@ Deno.test("WO-G ruling 3: a card yes (chat) holds back the item whose posting ha
   eq(admin.calls.find((c) => c.name === "career_apply_card_answer_as")!.args.p_approve, [2], "only the resolved item reaches the database as approved");
   eq(results.map((r) => r.result), ["needs_answer", "queued"]);
   const text = answerText(results);
-  assert(text.includes(`1. TEST Employer 1: not approved: a required answer is still missing. For TEST Employer 1, the form asks: "Will you continue an outside business while employed?". I don't have your answer, and I won't pick one for you. What should I enter? The form's choices: Yes / No.`), text);
+  assert(text.includes(`1. TEST Employer 1: not approved yet: a required answer is still missing. For TEST Employer 1, the form asks: "Will you continue an outside business while employed?". I don't have your answer, and I won't pick one for you. What should I enter? The form's choices: Yes / No. It stays ready; once you answer, say "show my applications" to approve it.`), text);
   assert(/^1 approved exactly as shown; 1 of the 2 not sent/.test(text), text);
 });
 
@@ -150,4 +158,40 @@ Deno.test("WO-G ruling 3: the Telegram tap and the one-tap Confirm (jobs page, F
   // The jobs page's Confirm says the narrow question (telegram_jobs.ts tapJob's needs_answer branch).
   const tj = await Deno.readTextFile(`${ROOT}supabase/functions/_shared/telegram_jobs.ts`);
   assert(tj.includes("Nothing was approved: a required answer is still missing. ${m[1]}"), "the Confirm path says the narrow question");
+});
+
+Deno.test("WO-G #632 review 12-Obs: past 20 open questions the guard still finds the posting's own (25 open questions)", async () => {
+  const admin = await world(2, { openOn: [1], others: 25 });
+  const results = await supabaseCardStore(admin).answer(U, "C1", [1, 2]);
+  eq(results.map((r) => r.result), ["needs_answer", "queued"], "the 26th open question, on posting 1, still holds it");
+  eq(admin.calls.find((c) => c.name === "career_apply_card_answer_as")!.args.p_approve, [2]);
+  assert(!admin.calls.some((c) => c.name === "career_apply_questions_open_as"), "the guard reads the table by posting, not the capped texting read");
+  // The review File's unresolved list reads the same way: the question shows on posting 1's review.
+  const text = await supabaseReviewLinks(admin, env)(U, [pid(1)]);
+  assert(LINKS.test(text ?? ""), text ?? "");
+  const kept = (await (admin as any).from("career_watch_kv")).data.map((r: any) => r.value.data.review.unresolved.map((u: any) => u.question));
+  eq(kept, [["Will you continue an outside business while employed?"]]);
+});
+
+Deno.test("WO-G #632 review 12-a: a held item stays open: never declined, and back on the next card under its own hash once answered", async () => {
+  const admin = await world(2, { openOn: [1] });
+  const store = supabaseCardStore(admin);
+  const results = await store.answer(U, "C1", [1, 2]);
+  eq(results.map((r) => r.result), ["needs_answer", "queued"]);
+  const rows = (admin as any).from("career_apply_prepared");
+  eq((await rows).data.map((r: any) => [r.id, r.state]), [[pid(1), "ready"], [pid(2), "approved"]], "the held one is ready again, the approved one approved");
+  assert(/It stays ready; once you answer, say "show my applications" to approve it\./.test(answerText(results)), answerText(results));
+  // The question is answered: the guard no longer holds it, and the same prepared application (its hash unchanged) is approvable.
+  const q = (await (admin as any).from("career_apply_questions")).data;
+  for (const x of q) x.state = "answered";
+  const held = await (await import("../../supabase/functions/_shared/application_review.ts")).unresolvedOf(admin, U, [pid(1)]);
+  eq(held.size, 0, "answered: nothing holds it");
+});
+
+Deno.test("WO-G #632 review 12-b: a blank answer in the payload (the review's 'not approvable') is held by the guard too", async () => {
+  const admin = await world(2, { blankOn: [2] });
+  const results = await supabaseCardStore(admin).answer(U, "C1", [1, 2]);
+  eq(results.map((r) => r.result), ["queued", "needs_answer"]);
+  assert(answerText(results).includes(`2. TEST Employer 2: not approved yet: a required answer is still missing. For TEST Employer 2, the form asks: "Expected graduation date". I don't have your answer, and I won't pick one for you. What should I enter?`), answerText(results));
+  await assertNode.rejects(() => supabaseCardStore(admin).confirm!(U, [pid(2)], ["h"]), /needs_answer: For TEST Employer 2, the form asks: "Expected graduation date"/);
 });

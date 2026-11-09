@@ -61,7 +61,7 @@ Deno.test({ name: "WO-G 13: approve -> send -> uncertain -> no blind retry -> th
     const lit = (x: unknown) => `'${JSON.stringify(x).replace(/'/g, "''")}'::jsonb`;
     eq((await pg.sql(`select career_apply_payload_hash(${lit(payload)})`)).trim(), hash, "the database and the worker hash the approval the same way");
     await pg.sql(`select (career_apply_enqueue(${lit(payload)}, '${hash}', '${hash}')).id`);
-    const row = async () => JSON.parse((await pg.sql(`select row_to_json(x)::text from (select id,state,reason,confirmation_id,email_confirmed_at,created_at,updated_at,claimed_at,company,url,payload,payload->>'title' as title, evidence->>'finished_at' as sent_at from career_apply_jobs where user_id='${U}') x`)).trim());
+    const row = async () => JSON.parse((await pg.sql(`select row_to_json(x)::text from (select id,state,reason,confirmation_id,email_confirmed_at,confirmation_mail_hash,created_at,updated_at,claimed_at,company,url,payload,payload->>'title' as title, evidence->>'finished_at' as sent_at from career_apply_jobs where user_id='${U}') x`)).trim());
     const files = memoryFileStore(), svc = createFileService({ store: files, env: { get: (k) => ENV[k] }, now: () => Date.now(), records: { application: async () => await row() } });
     const fileStatus = async () => {
       const r = await svc.create(U, "application_proof", { application_id: JOB });

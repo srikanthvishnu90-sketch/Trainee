@@ -717,7 +717,12 @@ export async function answerGuarded(admin: any, userId: string, cardId: string, 
     return (r.data?.[0]?.items ?? []) as { n: number; prepared_id: string }[];
   };
   return await guardedAnswer<CardResult>({ approve, items: approve.length ? await items() : [], held: (ids) => unresolvedOf(admin, userId, ids),
-    call: async (go) => { const r = await admin.rpc("career_apply_card_answer_as", { p_user: userId, p_card: cardId, p_approve: go }); if (r.error) throw new Error(`answer the card: ${r.error.message}`); return r.data; } });
+    call: async (go) => { const r = await admin.rpc("career_apply_card_answer_as", { p_user: userId, p_card: cardId, p_approve: go }); if (r.error) throw new Error(`answer the card: ${r.error.message}`); return r.data; },
+    // The held ones back to ready (the database declined them with the rest of the card): they come back on the next card.
+    reopen: async (ids) => {
+      const r = await admin.from("career_apply_prepared").update({ state: "ready", updated_at: new Date().toISOString() }).eq("user_id", userId).in("id", ids).eq("state", "declined");
+      if (r.error) console.error("reopen held applications:", r.error.message);
+    } });
 }
 // deno-lint-ignore no-explicit-any
 export function supabaseCardStore(admin: any): CardStore {

@@ -4,7 +4,7 @@
 // prepare-ahead card (career_prepare_ahead.ts) and the scheduled card push (career-proactive). Each review File is built by
 // code from the prepared payload, the posting's own title and the posting's still-open required questions
 // (application_review.ts reviewOf, file_service.ts createReview). A review that cannot be made never changes the card.
-import { reviewLinksFor, type ReviewDeps, withLinks } from "./application_review.ts";
+import { openQuestionsFor, reviewLinksFor, type ReviewDeps, withLinks } from "./application_review.ts";
 import { createFileService, supabaseFileKindStore } from "./file_service.ts";
 
 export type ReviewLinks = (userId: string, preparedIds: string[]) => Promise<string | null>;
@@ -16,7 +16,7 @@ export function supabaseReviewDeps(admin: any, userId: string, env: { get(k: str
   return {
     prepared: async (ids) => must(await admin.from("career_apply_prepared").select("id,job_id,payload,payload_hash,card_lines").eq("user_id", userId).in("id", ids), "read the prepared applications"),
     titles: async (jobIds) => new Map<string, string>((must(await admin.from("career_postings").select("job_id,title").in("job_id", jobIds), "read the postings") as { job_id: string; title: string }[]).map((r) => [r.job_id, r.title])),
-    open: async () => must(await admin.rpc("career_apply_questions_open_as", { p_user: userId, p_limit: 500 }), "read open questions"),
+    open: (jobIds) => openQuestionsFor(admin, userId, jobIds),
     create: async (item) => { const r = await files.createReview!(userId, item); return r.ok ? { url: r.url ?? r.webApp } : null; },
   };
 }

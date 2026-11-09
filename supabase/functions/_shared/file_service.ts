@@ -2,7 +2,8 @@
 // The link is minted here, in code. The agent tool never sees it and the model never writes it. Tests: tests/architect/file-kinds.test.ts.
 import { feedUrlsFor } from "./file_link.ts";
 import { KIND_LABEL, tagOf, validateKind, type FileRecord, type KindId } from "./file_kinds.ts";
-import { type ReviewItem, stageOf } from "./application_review.ts";
+import { evidenceOf, type ReviewItem, stageOf } from "./application_review.ts";
+import { reasonWords } from "./career_apply_status.ts";
 
 export const DEFAULT_TTL_HOURS = 168; // a week; TRAINEE_FILE_TTL_HOURS sets it (1 to 720)
 // Every read and write is keyed by the user id, so one person can never read, change or revoke another's file.
@@ -15,7 +16,7 @@ export interface FileKindStore {
 }
 export type FileRead = { state: "ok"; rec: FileRecord } | { state: "expired" | "revoked"; rec: FileRecord } | { state: "missing" };
 // A row of the person's own application record (career_apply_jobs). The ONLY place "From Trainee's records" values come from.
-export interface ApplicationRow { state: string; reason: string | null; confirmation_id: string | null; created_at: string; updated_at: string; email_confirmed_at?: string | null; payload: Record<string, unknown>; company: string; url?: string }
+export interface ApplicationRow { state: string; reason: string | null; confirmation_id: string | null; created_at: string; updated_at: string; email_confirmed_at?: string | null; confirmation_mail_hash?: string | null; payload: Record<string, unknown>; company: string; url?: string }
 export interface Records { application(userId: string, id: string): Promise<ApplicationRow | null> }
 export type Env = { get(k: string): string | undefined };
 export interface FileService {
@@ -31,7 +32,7 @@ export interface FileService {
   createReview?(userId: string, item: ReviewItem): Promise<{ ok: true; id: string; url: string | null; webApp: string | null } | { ok: false; error: string }>;
 }
 
-const STATUS: Record<string, string> = { queued: "queued", driving: "prepared", needs_user: "prepared", submitted_unconfirmed: "submitted", unknown_outcome: "submitted", confirmed: "confirmed", failed: "failed", not_submitted: "failed" };
+const STATUS: Record<string, string> = { queued: "queued", driving: "prepared", needs_user: "prepared", submitted_unconfirmed: "submitted", unknown_outcome: "uncertain", confirmed: "confirmed", failed: "failed", not_submitted: "failed" };
 const SECRETISH = /pass(?:word|wd|code)?\b|one[- ]?time|\botp\b|\bssn\b|social security|card number|\bcvv\b|\bpin\b|passport|api[-_ ]?key|secret|\btoken\b/i;
 // Everything on an application proof comes from the record, built here by code. The model supplies only the application id.
 export function proofFromRow(row: ApplicationRow, now: number): { ok: true; data: Record<string, unknown> } | { ok: false; error: string } {
@@ -41,15 +42,17 @@ export function proofFromRow(row: ApplicationRow, now: number): { ok: true; data
   const fields = (Array.isArray((row.payload as any)?.fields) ? (row.payload as any).fields : []) as any[];
   const answers = fields.filter((f) => f && !SECRETISH.test(`${f.name ?? ""} ${f.label ?? ""}`) && !/file/i.test(String(f.type ?? "")) && String(f.value ?? "").trim())
     .slice(0, 30).map((f) => ({ question: String(f.label ?? f.name ?? "Field").replace(/\s+/g, " ").trim().slice(0, 80), answer: String(f.value).replace(/\s+/g, " ").trim().slice(0, 500), source: "From Trainee's records" }));
-  const problems = status === "failed" && reason ? [{ item: "Submitting the application", outcome: "failed", reason: reason.slice(0, 300) }]
-    : row.state === "needs_user" && reason ? [{ item: "Waiting for you", outcome: "skipped", reason: reason.slice(0, 300) }] : [];
+  // 13-e: every reason in the person's words (career_apply_status.ts reasonWords), never the queue's code.
+  const words = reason ? reasonWords(row.state, reason).slice(0, 300) : "";
+  const problems = status === "failed" && words ? [{ item: "Submitting the application", outcome: "failed", reason: words }]
+    : row.state === "needs_user" && words ? [{ item: "Waiting for you", outcome: "skipped", reason: words }] : [];
   const rn = String((row.payload as any)?.resume_name ?? "").replace(/\s+/g, " ").trim().slice(0, 100);
   const dest = (() => { try { return new URL(String(row.url ?? "")).hostname.replace(/^www\./, ""); } catch { return ""; } })();
   // WO-G (fix 13): the one visible stage beside the five status words: sending is not prepared, a queue entry is approved and not
   // sent, and confirmed is said only with the employer's own evidence (their email, or the reference their page returned).
   const stage = stageOf(row);
   return { ok: true, data: { title: `Application to ${row.company}`.slice(0, 80), company: row.company, status, stage, prepared_at: row.created_at, as_of: row.updated_at,
-    ...(row.email_confirmed_at ? { email_confirmed_at: row.email_confirmed_at } : {}),
+    ...(evidenceOf(row) ? { email_confirmed_at: row.email_confirmed_at } : {}),
     // No submit time: the row has none (claimed_at is when the drive started, not when it was sent), so the page says "Last updated".
     ...(status === "confirmed" && row.confirmation_id ? { confirmation: { id: row.confirmation_id } } : {}), ...(dest ? { destination: dest } : {}), ...(rn ? { resume: rn } : {}), answers, problems } };
 }

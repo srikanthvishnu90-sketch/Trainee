@@ -18,7 +18,7 @@ const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a,
 const U = "11111111-1111-4111-8111-111111111111";
 const NOW = Date.parse("2026-11-09T16:00:00Z");
 const ENV: Record<string, string> = { TRAINEE_FILE_LINK_SECRET: "file-link-secret-0123456789-abcdef", TRAINEE_FILE_BASE_URL: "https://trainee.example/file" };
-const SHA = "b".repeat(64);
+const SHA = "b".repeat(64), MAILH = "f".repeat(64);
 // A fictional employer (spec C.21's Lakefront specimen): one answer the person gave, two facts they have not.
 const payload = (why = "I want to use Python and SQL to answer operational questions that lead to concrete decisions.") => ({
   version: 1, user_id: U, job_id: "greenhouse:lakefront:101", company: "TEST Lakefront Transit Analytics", url: "https://boards.greenhouse.io/lakefront/jobs/101",
@@ -113,7 +113,7 @@ Deno.test("WO-G 12: the card shows a review link per application; the review Fil
 
 Deno.test("WO-G 13: the proof File keeps prepared, approved, sending, uncertain, sent-not-confirmed and employer-confirmed apart; confirmed needs the employer's own evidence", async () => {
   const ROW = (o: Record<string, unknown>) => ({ state: "confirmed", reason: null, confirmation_id: null, created_at: "2026-11-09T15:00:00Z", updated_at: "2026-11-09T15:30:00Z", company: "TEST Acme", url: "https://boards.greenhouse.io/acme/jobs/1", payload: { fields: [] }, ...o });
-  const rows: Record<string, unknown> = { q: ROW({ state: "queued" }), d: ROW({ state: "driving" }), s: ROW({ state: "submitted_unconfirmed" }), e: ROW({ state: "confirmed", email_confirmed_at: "2026-11-09T15:20:00Z" }), i: ROW({ state: "confirmed", confirmation_id: "GH-acme-1-7" }) };
+  const rows: Record<string, unknown> = { q: ROW({ state: "queued" }), d: ROW({ state: "driving" }), s: ROW({ state: "submitted_unconfirmed" }), e: ROW({ state: "confirmed", email_confirmed_at: "2026-11-09T15:20:00Z", confirmation_mail_hash: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }), i: ROW({ state: "confirmed", confirmation_id: "GH-acme-1-7" }) };
   const store = memoryFileStore(), svc = createFileService({ store, env: { get: (k) => ENV[k] }, now: () => NOW, records: { application: async (u, id) => (u === U ? rows[id] as never : null) } });
   const seen: Record<string, string> = {};
   for (const id of Object.keys(rows)) {
@@ -122,30 +122,30 @@ Deno.test("WO-G 13: the proof File keeps prepared, approved, sending, uncertain,
     const rec = store.all().find((x) => x.id === (r as { id: string }).id)!;
     seen[id] = textOf(rec, { now: NOW }).split("\n").find((l) => l.startsWith("Status: "))!;
     const html = bodyHtml(rec, "tok");
-    if (id !== "e" && id !== "i") assert(!/class="state (confirmed|submitted)"/.test(html), `${id}: green only with the employer's evidence`);
+    if (id !== "e") assert(!/class="state (confirmed|submitted)"/.test(html), `${id}: green only with the employer's evidence`);
   }
   assert(seen.q.startsWith("Status: Approved, not sent yet."), seen.q);
   assert(seen.d.startsWith("Status: Approved, sending not confirmed."), seen.d);
   assert(seen.s.startsWith("Status: Sent, not confirmed by the employer."), seen.s);
   assert(seen.e.startsWith("Status: Employer confirmation verified."), seen.e);
-  assert(seen.i.startsWith("Status: Employer confirmation verified."), seen.i);
-  eq([stageOf({ state: "unknown_outcome" }), stageOf({ state: "confirmed" }), stageOf({ state: "confirmed", confirmation_id: "security" }), stageOf({ state: "confirmed", confirmation_id: "AB-12345" })],
-    ["uncertain", "submitted_unconfirmed", "submitted_unconfirmed", "employer_confirmed"], "a word is never a receipt; no evidence is never confirmed");
+  assert(seen.i.startsWith("Status: Sent, not confirmed by the employer."), `a page reference alone is not the employer's confirmation: ${seen.i}`);
+  eq([stageOf({ state: "unknown_outcome" }), stageOf({ state: "confirmed" }), stageOf({ state: "confirmed", confirmation_id: "security" }), stageOf({ state: "confirmed", confirmation_id: "AB-12345" }), stageOf({ state: "confirmed", email_confirmed_at: "2026-11-09T15:20:00Z", confirmation_mail_hash: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" })],
+    ["uncertain", "submitted_unconfirmed", "submitted_unconfirmed", "submitted_unconfirmed", "employer_confirmed"], "only the employer's matched email confirms; a page reference or a word never does");
 });
 
 Deno.test("WO-G 13: the closeout has spec B.3's shape from the real outcome only, and never mixes sent and queued", () => {
   const sent = "2026-11-09T16:17:00Z";
   eq(closeoutLine({ state: "confirmed", company: "TEST Acme", title: "TEST Operations Analyst", confirmation_id: "GH-acme-1-7", sent_at: sent }, "America/Chicago"),
-    "Submitted TEST Operations Analyst at TEST Acme at Nov 9, 10:17 AM CST. Confirmation: GH-acme-1-7.");
-  eq(closeoutLine({ state: "confirmed", company: "TEST Acme", title: "TEST Operations Analyst", email_confirmed_at: "2026-11-09T16:40:00Z", sent_at: sent }, "America/Chicago"),
+    "Sent TEST Operations Analyst at TEST Acme at Nov 9, 10:17 AM CST; their page showed GH-acme-1-7, but TEST Acme has not confirmed it by email yet, so it is not confirmed. Their email or status page is the proof.");
+  eq(closeoutLine({ state: "confirmed", company: "TEST Acme", title: "TEST Operations Analyst", email_confirmed_at: "2026-11-09T16:40:00Z", confirmation_mail_hash: MAILH, sent_at: sent }, "America/Chicago"),
     "Submitted TEST Operations Analyst at TEST Acme at Nov 9, 10:17 AM CST. Confirmation: TEST Acme's confirmation email (Nov 9, 10:40 AM CST).");
   const unc = closeoutLine({ state: "unknown_outcome", company: "TEST Beta", title: "TEST Analyst" });
   assert(/may have landed/.test(unc) && /won't send it again/.test(unc) && !/^Submitted/.test(unc) && !/Confirmation:/.test(unc), unc);
   const noEv = closeoutLine({ state: "confirmed", company: "TEST Gamma", title: "TEST Analyst", sent_at: sent }, "UTC");
   assert(/^Sent TEST Analyst at TEST Gamma/.test(noEv) && /not confirmed/.test(noEv) && !/Confirmation:/.test(noEv), `no evidence, no confirmation: ${noEv}`);
   const held = reviewOf({ id: "P2", payload: payload(), payload_hash: "c".repeat(64), card_lines: CARD_LINES, title: "TEST Data Analyst Intern" });
-  const all = closeoutText([{ state: "queued", company: "TEST Delta", title: "TEST Analyst" }, { state: "confirmed", company: "TEST Acme", title: "TEST Operations Analyst", confirmation_id: "GH-acme-1-7", sent_at: sent }], { tz: "America/Chicago", held: [held] }).split("\n");
-  eq(all[0], "Submitted TEST Operations Analyst at TEST Acme at Nov 9, 10:17 AM CST. Confirmation: GH-acme-1-7.");
+  const all = closeoutText([{ state: "queued", company: "TEST Delta", title: "TEST Analyst" }, { state: "confirmed", company: "TEST Acme", title: "TEST Operations Analyst", confirmation_id: "GH-acme-1-7", email_confirmed_at: "2026-11-09T16:40:00Z", confirmation_mail_hash: MAILH, sent_at: sent }], { tz: "America/Chicago", held: [held] }).split("\n");
+  eq(all[0], "Submitted TEST Operations Analyst at TEST Acme at Nov 9, 10:17 AM CST. Confirmation: TEST Acme's confirmation email (Nov 9, 10:40 AM CST); their page showed GH-acme-1-7.");
   eq(all[1], "TEST Analyst at TEST Delta: approved, not sent yet.");
   assert(all[2].startsWith(`TEST Data Analyst Intern at TEST Lakefront Transit Analytics is ready but not submitted because "Expected graduation date" is unanswered.`), all[2]);
 });
@@ -165,4 +165,50 @@ Deno.test("WO-G 13 (acceptance replay): a final click that timed out reads 'subm
   assert(made.ok, JSON.stringify(made));
   const text = textOf(store.all()[0], { now: NOW });
   assert(text.includes("Status: Submission may have landed.") && text.includes("Submission uncertain.") && !/Status: Submitted/.test(text), text);
+});
+
+Deno.test("WO-G #632 review 13-Obs: a pre-WO-032 row (confirmed by a page reference, no email) reads 'their page showed X' on every new surface, never confirmed", async () => {
+  const row = { state: "confirmed", reason: "employer confirmation on the page", confirmation_id: "GH-legacy-4471", created_at: "2026-10-01T15:00:00Z", updated_at: "2026-10-01T15:30:00Z", company: "TEST Legacy", url: "https://boards.greenhouse.io/legacy/jobs/1", payload: { fields: [] } };
+  eq(stageOf(row), "submitted_unconfirmed");
+  const line = closeoutLine(row);
+  assert(line.includes("their page showed GH-legacy-4471, but TEST Legacy has not confirmed it by email yet") && !/^Submitted|Confirmation:/.test(line), line);
+  const store = memoryFileStore(), svc = createFileService({ store, env: { get: (k) => ENV[k] }, now: () => NOW, records: { application: async () => row as never } });
+  assert((await svc.create(U, "application_proof", { application_id: "L1" })).ok);
+  const text = textOf(store.all()[0], { now: NOW }), html = bodyHtml(store.all()[0], "tok");
+  assert(text.includes("Status: Sent, not confirmed by the employer.") && text.includes("Their page showed GH-legacy-4471; this is not the employer's confirmation") && !text.includes("Confirmation ID:"), text);
+  assert(!/class="state confirmed"/.test(html) && html.includes("Their page showed GH-legacy-4471"), "never green, never 'Confirmation ID'");
+});
+
+Deno.test("WO-G #632 review 13-a: the live closeout: 'any update?' ends with spec B.3's closeout, including 'ready but not submitted because …'", async () => {
+  const { overviewTurn } = await import("../../supabase/functions/_shared/career_overview.ts");
+  const { situationFrom } = await import("../../supabase/functions/_shared/career_situation.ts");
+  const base = { wanted: [], card: null, outreach: [], mail_drafts: [], interviews: [], alerts: null, standing: [], threads: [], connections: [], cloud: { enabled: true }, channel: null, last_search: null, unreadable: [] };
+  const s = situationFrom({ ...base,
+    jobs: [{ id: "J1", job_id: "greenhouse:acme:1", company: "TEST Acme", title: "TEST Operations Analyst", state: "confirmed", confirmation_id: null, email_confirmed_at: "2026-11-09T15:40:00Z", confirmation_mail_hash: MAILH, claimed_at: "2026-11-09T15:17:00Z", created_at: "2026-11-09T15:00:00Z", updated_at: "2026-11-09T15:40:00Z" },
+      { id: "J2", job_id: "greenhouse:beta:2", company: "TEST Beta", title: "TEST Analyst", state: "unknown_outcome", reason: "DRIVER_ERROR_AT_SUBMIT", created_at: "2026-11-09T15:00:00Z", updated_at: "2026-11-09T15:05:00Z" }],
+    prepared: [{ id: "P3", job_id: "greenhouse:lake:3", company: "TEST Lakefront", state: "ready", created_at: "2026-11-09T14:00:00Z" }],
+    questions: [{ id: "Q1", company: "TEST Lakefront", label: "Expected graduation date", options: [], job_ids: ["greenhouse:lake:3"], answer: null, misfit: false, created_at: "2026-11-09T14:00:00Z" }] } as any, NOW);
+  const r = overviewTurn({ message: "any update?", situation: s, now: NOW })!;
+  const tail = r.reply.split("Closeout, from the records:\n")[1] ?? "";
+  eq(tail.split("\n").slice(0, 3), [
+    "Submitted TEST Operations Analyst at TEST Acme at Nov 9, 3:17 PM UTC. Confirmation: TEST Acme's confirmation email (Nov 9, 3:40 PM UTC).",
+    "TEST Analyst at TEST Beta: the final step may have landed, but TEST Beta has not confirmed it. I won't send it again; it counts as submitted only once TEST Beta's email or status page shows it.",
+    `TEST Lakefront is ready but not submitted because "Expected graduation date" is unanswered. For TEST Lakefront, the form asks: "Expected graduation date". I don't have your answer, and I won't pick one for you. What should I enter?`,
+  ], r.reply);
+});
+
+Deno.test("WO-G #632 review 13-e: on the proof File an uncertain application's status word is 'uncertain', never 'submitted', and 'Not done' reasons are plain words", async () => {
+  const rows: Record<string, unknown> = {
+    u: { state: "unknown_outcome", reason: "DRIVER_ERROR_AT_SUBMIT", confirmation_id: null, created_at: "2026-11-09T15:00:00Z", updated_at: "2026-11-09T15:05:00Z", company: "TEST Beta", url: "https://boards.greenhouse.io/beta/jobs/1", payload: { fields: [] } },
+    n: { state: "needs_user", reason: "login_required", confirmation_id: null, created_at: "2026-11-09T15:00:00Z", updated_at: "2026-11-09T15:05:00Z", company: "TEST Gamma", url: "https://boards.greenhouse.io/gamma/jobs/1", payload: { fields: [] } },
+    f: { state: "failed", reason: "RESUME_CHANGED", confirmation_id: null, created_at: "2026-11-09T15:00:00Z", updated_at: "2026-11-09T15:05:00Z", company: "TEST Delta", url: "https://boards.greenhouse.io/delta/jobs/1", payload: { fields: [] } },
+  };
+  const store = memoryFileStore(), svc = createFileService({ store, env: { get: (k) => ENV[k] }, now: () => NOW, records: { application: async (_u, id) => rows[id] as never } });
+  const files: Record<string, string> = {};
+  for (const id of Object.keys(rows)) { const r = await svc.create(U, "application_proof", { application_id: id }); assert(r.ok, JSON.stringify(r)); files[id] = textOf(store.all().find((x) => x.id === (r as { id: string }).id)!, { now: NOW }); }
+  eq(store.all().find((x) => x.data.company === "TEST Beta")!.data.status, "uncertain");
+  assert(!/\bsubmitted\b/i.test(files.u.replace(/counts as submitted only once/g, "").replace(/a real approved submission/g, "")), files.u);
+  for (const [id, t] of Object.entries(files)) assert(!/\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b|\blogin_required\b/.test(t), `${id}: no queue code on the File: ${t}`);
+  assert(files.n.includes("the employer's site asks you to sign in first; Trainee never signs in for you"), files.n);
+  assert(files.f.includes("the resume you approved could not be attached exactly as approved"), files.f);
 });

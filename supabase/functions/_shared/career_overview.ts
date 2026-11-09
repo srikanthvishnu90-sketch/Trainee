@@ -10,6 +10,7 @@
 //   waiting   a numbered list of what only the person can do: the item, what is needed, how long it has waited.
 // A source that could not be read is named and never guessed; an empty account says so. Read only: nothing is changed.
 import type { Situation, Task } from "./career_situation.ts";
+import { closeoutText, narrowQuestion, type ReviewItem } from "./application_review.ts";
 
 export const OVERVIEW_INTENT = "career_overview";
 export const WAITING_INTENT = "career_waiting_on_you";
@@ -60,8 +61,23 @@ export function overviewText(s: Situation, now: number): string {
   if (interviews.length) L.push("Interviews coming up:", ...interviews.map((t) => `- ${name(t)}${t.since ? `: ${day(t.since)}` : ": date not on record"}`));
   if (tracked.length) L.push(`On your tracker (what you told me): ${tracked.slice(0, 6).map((t) => `${name(t)}, ${t.evidence.stage ?? "Submitted"}`).join("; ")}${tracked.length > 6 ? `; and ${tracked.length - 6} more` : ""}.`);
   if (!T.length) L.push("Nothing is in flight: no applications, drafts, questions or interviews on your account. Say \"find jobs\" to start a search.");
+  const close = closeoutOf(apps, T);
+  if (close) L.push("Closeout, from the records:", close);
   L.push(...lost(s));
   return L.join("\n");
+}
+// WO-G (#632 review 13-a): spec B.3's closeout, live: each finished application as its record says (confirmed only by the
+// employer's own email, a page reference said as what it is) and each prepared one held by an unanswered required question,
+// named with that question. Nothing here counts a queued or prepared application as submitted.
+const FINISHED = new Set(["confirmed", "submitted_unconfirmed", "unknown_outcome", "needs_user", "failed", "not_submitted"]);
+function closeoutOf(apps: Task[], all: Task[]): string {
+  const rows = apps.filter((t) => FINISHED.has(t.state)).map((t) => ({ state: t.state, company: t.company, title: t.title, reason: t.evidence.reason ?? null,
+    confirmation_id: t.evidence.confirmation_id ?? null, email_confirmed_at: t.evidence.email_confirmed_at ?? null, confirmation_mail_hash: t.evidence.mail_hash ?? null, sent_at: t.evidence.sent_at ?? null }));
+  const held = all.filter((t) => t.state === "awaiting_approval" && t.kind === "application" && (t.evidence.open ?? []).length).map((t) => {
+    const q = t.evidence.open![0], employer = t.company ?? "the employer";
+    return { employer, role: t.title, unresolved: [{ question: q.label, fact: null, ask: narrowQuestion({ label: q.label, company: employer, options: q.options }) }] } as unknown as ReviewItem;
+  });
+  return rows.length || held.length ? closeoutText(rows, { held }) : "";
 }
 
 export function waitingText(s: Situation, now: number): string {

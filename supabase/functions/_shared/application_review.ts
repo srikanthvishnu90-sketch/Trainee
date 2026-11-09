@@ -124,14 +124,19 @@ export const STAGE_NOTE: Record<Stage, string> = {
 };
 export interface RecordRow {
   state: string; reason?: string | null; company?: string | null; title?: string | null;
-  confirmation_id?: string | null; email_confirmed_at?: string | null; sent_at?: string | null;
+  confirmation_id?: string | null; email_confirmed_at?: string | null; confirmation_mail_hash?: string | null; sent_at?: string | null;
 }
-// The employer's own evidence, as recorded: their email (matched by career_apply_confirm.ts), or the reference their page or
-// ATS returned (an id label with a digit in it, career_apply.ts ID). Anything else is no evidence.
-export function evidenceOf(r: RecordRow): { email_at: string } | { id: string } | null {
-  if (r.email_confirmed_at && Number.isFinite(Date.parse(r.email_confirmed_at))) return { email_at: r.email_confirmed_at };
+// The employer's own evidence (architect, #632 review 13-Obs): their email, matched to this application by
+// career_apply_confirm.ts and recorded with the time and the matched message's hash. A reference the page or ATS showed
+// (career_apply.ts ID) is said as what it is, "their page showed X", never as the employer's confirmation.
+export function evidenceOf(r: RecordRow): { email_at: string } | null {
+  return r.email_confirmed_at && Number.isFinite(Date.parse(r.email_confirmed_at)) && /^[0-9a-f]{16,128}$/i.test(String(r.confirmation_mail_hash ?? ""))
+    ? { email_at: r.email_confirmed_at } : null;
+}
+// A reference the employer's page or ATS showed after the send (an id label with a digit in it), or null.
+export function pageReferenceOf(r: RecordRow): string | null {
   const id = one(r.confirmation_id, 80);
-  return /^[A-Z0-9][A-Z0-9-]{4,}$/i.test(id) && /\d/.test(id) ? { id } : null;
+  return /^[A-Z0-9][A-Z0-9-]{4,}$/i.test(id) && /\d/.test(id) ? id : null;
 }
 export function stageOf(r: RecordRow): Stage {
   switch (r.state) {
@@ -160,9 +165,13 @@ export function closeoutLine(r: RecordRow, tz?: string | null): string {
   switch (s) {
     case "employer_confirmed": {
       const ev = evidenceOf(r)!;
-      return `Submitted ${name}${when ? ` at ${when}` : ""}. Confirmation: ${"id" in ev ? ev.id : `${who}'s confirmation email (${at(ev.email_at, tz)})`}.`;
+      const ref = pageReferenceOf(r);
+      return `Submitted ${name}${when ? ` at ${when}` : ""}. Confirmation: ${who}'s confirmation email (${at(ev.email_at, tz)})${ref ? `; their page showed ${ref}` : ""}.`;
     }
-    case "submitted_unconfirmed": return `Sent ${name}${when ? ` at ${when}` : ""}; ${who} has not confirmed it yet, so it is not confirmed. Their email or status page is the proof.`;
+    case "submitted_unconfirmed": {
+      const ref = pageReferenceOf(r);
+      return `Sent ${name}${when ? ` at ${when}` : ""}; ${ref ? `their page showed ${ref}, but ` : ""}${who} has not confirmed it by email yet, so it is not confirmed. Their email or status page is the proof.`;
+    }
     case "uncertain": return `${cap(name)}: the final step may have landed, but ${who} has not confirmed it. I won't send it again; it counts as submitted only once ${who}'s email or status page shows it.`;
     case "sending": return `${cap(name)}: being sent now; not submitted yet.`;
     case "approved": return `${cap(name)}: approved, not sent yet.`;
@@ -190,14 +199,14 @@ export function closeoutText(rows: RecordRow[], o: { tz?: string | null; held?: 
 export interface ReviewDeps {
   prepared(ids: string[]): Promise<{ id: string; job_id?: string | null; payload: any; payload_hash: string; card_lines?: string[] }[]>;
   titles?(jobIds: string[]): Promise<Map<string, string>>;
-  open?(): Promise<{ label: string; options?: string[]; job_ids?: string[] }[]>;
+  open?(jobIds: string[]): Promise<{ label: string; options?: string[]; job_ids?: string[] }[]>;
   create(item: ReviewItem): Promise<{ url: string | null } | null>;
 }
 export async function reviewLinksFor(shown: { id: string }[], d: ReviewDeps): Promise<string | null> {
   const rows = await d.prepared(shown.map((p) => p.id));
   const byId = new Map(rows.map((r) => [r.id, r]));
   const titles = d.titles ? await d.titles(rows.map((r) => String(r.job_id ?? "")).filter(Boolean)).catch(() => new Map<string, string>()) : new Map<string, string>();
-  const open = d.open ? await d.open().catch(() => []) : [];
+  const open = d.open ? await d.open(rows.map((r) => String(r.job_id ?? "")).filter(Boolean)).catch(() => []) : [];
   const lines: string[] = [];
   for (const [i, p] of shown.entries()) {
     const r = byId.get(p.id);
@@ -226,21 +235,46 @@ export async function unresolvedOf(admin: any, userId: string, preparedIds: stri
   const out = new Map<string, string>();
   if (!preparedIds.length) return out;
   const fail = (what: string, r: any) => { if (r.error) throw new Error(`unresolved_unreadable: ${what}: ${r.error.message}`); return r.data ?? []; };
-  const prepared = fail("read the prepared applications", await admin.from("career_apply_prepared").select("id,job_id,company").eq("user_id", userId).in("id", preparedIds)) as { id: string; job_id: string | null; company: string }[];
-  const open = fail("read open questions", await admin.rpc("career_apply_questions_open_as", { p_user: userId, p_limit: 500 })) as { label: string; options?: string[]; company?: string | null; job_ids?: string[] }[];
+  const prepared = fail("read the prepared applications", await admin.from("career_apply_prepared").select("id,job_id,company,payload,payload_hash").eq("user_id", userId).in("id", preparedIds)) as
+    { id: string; job_id: string | null; company: string; payload: any; payload_hash: string }[];
+  const open = await openQuestionsFor(admin, userId, prepared.map((p) => String(p.job_id ?? "")).filter(Boolean)).catch((e) => { throw new Error(`unresolved_unreadable: ${e instanceof Error ? e.message : e}`); });
   for (const p of prepared) {
     const q = p.job_id ? open.find((x) => Array.isArray(x.job_ids) && x.job_ids.includes(String(p.job_id))) : undefined;
-    if (q) out.set(String(p.id), narrowQuestion({ label: q.label, company: p.company || q.company, options: q.options }));
+    if (q) { out.set(String(p.id), narrowQuestion({ label: q.label, company: p.company || q.company, options: q.options })); continue; }
+    // 12-b: what the review says is not approvable (a blank answer in the payload) is not approvable here either.
+    const blank = reviewOf({ id: String(p.id), payload: p.payload, payload_hash: String(p.payload_hash ?? "") }).unresolved[0];
+    if (blank) out.set(String(p.id), blank.ask);
   }
   return out;
 }
+// Every open question naming any of these postings, read straight from the table page by page (the texting path's
+// career_apply_questions_open_as returns at most 20, so past 20 open questions a posting's would be missed).
+// deno-lint-ignore no-explicit-any
+export async function openQuestionsFor(admin: any, userId: string, jobIds: string[]): Promise<{ label: string; options?: string[]; company?: string | null; job_ids?: string[] }[]> {
+  if (!jobIds.length) return [];
+  const out: any[] = [];
+  for (let from = 0; ; from += 1000) {
+    const r = await admin.from("career_apply_questions").select("label,options,company,job_ids").eq("user_id", userId).eq("state", "open")
+      .overlaps("job_ids", [...new Set(jobIds)]).order("created_at", { ascending: true }).range(from, from + 999);
+    if (r.error) throw new Error(`read open questions: ${r.error.message}`);
+    out.push(...(r.data ?? []));
+    if ((r.data ?? []).length < 1000) return out;
+  }
+}
 // The card's answer with every held-back item said as needing its answer; the rest go to the database as approved.
+// 12-a: the database answers a card whole (an item not approved is declined and the card closes), so a held item is put back
+// to ready right after (`reopen`): it is never declined for a question, and once the question is answered it comes back on the
+// next card ("show my applications") under its own hash, approvable then.
 export async function guardedAnswer<R extends { n: number; result: string; said?: string }>(o: {
   approve: number[]; items: { n: number; prepared_id: string }[]; held: (preparedIds: string[]) => Promise<Map<string, string>>; call: (approve: number[]) => Promise<R[]>;
+  reopen?: (preparedIds: string[]) => Promise<void>;
 }): Promise<R[]> {
   const asked = o.items.filter((i) => o.approve.includes(i.n));
   const held = asked.length ? await o.held(asked.map((i) => i.prepared_id)) : new Map<string, string>();
-  const byN = new Map(asked.filter((i) => held.has(i.prepared_id)).map((i) => [i.n, held.get(i.prepared_id)!]));
+  const heldItems = asked.filter((i) => held.has(i.prepared_id));
+  const byN = new Map(heldItems.map((i) => [i.n, held.get(i.prepared_id)!]));
   const results = await o.call(o.approve.filter((n) => !byN.has(n)));
-  return results.map((r) => byN.has(r.n) ? { ...r, result: "needs_answer", said: `not approved: a required answer is still missing. ${byN.get(r.n)}` } : r);
+  if (heldItems.length && o.reopen) await o.reopen(heldItems.map((i) => i.prepared_id));
+  return results.map((r) => byN.has(r.n) ? { ...r, result: "needs_answer",
+    said: `not approved yet: a required answer is still missing. ${byN.get(r.n)} It stays ready; once you answer, say "show my applications" to approve it.` } : r);
 }

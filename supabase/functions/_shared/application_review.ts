@@ -248,8 +248,10 @@ export async function unresolvedOf(admin: any, userId: string, preparedIds: stri
   for (const p of prepared) {
     const q = p.job_id ? open.find((x) => Array.isArray(x.job_ids) && x.job_ids.includes(String(p.job_id))) : undefined;
     if (q) { out.set(String(p.id), narrowQuestion({ label: q.label, company: p.company || q.company, options: q.options })); continue; }
-    // 12-b: what the review says is not approvable (a blank answer in the payload) is not approvable here either.
-    const blank = reviewOf({ id: String(p.id), payload: p.payload, payload_hash: String(p.payload_hash ?? "") }).unresolved[0];
+    // 12-b, narrowed (architect, 2026-11-09): a blank answer is held only when it is a fact the person must supply (a
+    // sensitive or identity question). An optional field the preparer left empty is not a question and does not block the yes;
+    // a missing required answer is an open question, held above.
+    const blank = reviewOf({ id: String(p.id), payload: p.payload, payload_hash: String(p.payload_hash ?? "") }).unresolved.find((u) => u.fact);
     if (blank) out.set(String(p.id), blank.ask);
   }
   return out;

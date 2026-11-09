@@ -202,6 +202,7 @@
     "tests/architect/flow-site-refusal.test.ts": 10,
     "tests/architect/flow-standing.test.ts": 7,
     "tests/architect/flow-telegram-e2e.test.ts": 30,
+    "tests/architect/followup-drafts-20261109.test.ts": 0.1,
     "tests/architect/frs-cover-letter.test.ts": 0.1,
     "tests/architect/frs-gh-widget.test.ts": 0.1,
     "tests/architect/frs-qa-compound-location.test.ts": 0.1,

@@ -36,6 +36,7 @@ export type ResumeTurn = { reply: string; intent: string; resultStatus: string; 
 
 const lc = (s: unknown) => String(s ?? "").toLowerCase().replace(/[’‘]/g, "'");
 const ROLE = "(?:internships?|interns?|analysts?|engineers?|scientists?|developers?|designers?|managers?|associates?|consultants?|specialists?|coordinators?|researchers?|accountants?|roles?|jobs?|positions?)";
+const FIELD = /^(data|business|financial|finance|product|marketing|software|research|operations|ops|sales|analytics|analyst|analysts|machine|learning|ml|ai|engineering|engineer|engineers|scientist|scientists|science|developer|developers|designer|designers|ux|ui|manager|managers|associate|associates|consultant|consultants|specialist|specialists|coordinator|coordinators|researcher|researchers|accountant|accountants|accounting|investment|banking|quantitative|quant|policy|strategy|supply|chain|people|hr|legal|healthcare|health|climate|frontend|front-end|backend|back-end|full-stack|fullstack|web|mobile|cloud|security|devops|qa|test|economics|statistics|reporting|bi|intelligence|junior|senior|entry-level|graduate|summer|fall|spring|remote|hybrid|technical|it|support|customer|success|growth|content|communications|design|venture|capital|equity|private|public|tech|technology|platform)$/;
 const NOT_TARGET = /\b(resume|cv|pdf|docx|file|page|version|draft|that|this|it|one)\b/;
 // What is rejected ("not a machine learning manager job at Reddit") is taken out before the target is read.
 function rejectedOf(message: string): string | null {
@@ -51,6 +52,9 @@ export function targetOf(message: string): Target | null {
     const level = /\bintern/.test(m[1]) ? "internship" : /\b(senior|lead|manager|director|principal|staff)\b/.test(m[1]) ? "senior" : null;
     const role = words.filter((w) => !/^(internships?|interns?|roles?|jobs?|positions?)$/.test(w)).join(" ");
     if (!role) continue;
+    // A general target is made of role and field words only; any other word (an employer: "the Quillstone data analyst
+    // intern role") makes it a posting, which is the posting tailor's.
+    if (!role.split(" ").every((w) => FIELD.test(w))) return null;
     const label = level === "internship" ? `${role} internships` : `${role} roles`;
     return { role, level, label };
   }

@@ -327,6 +327,7 @@ export const FAMILY_CSS = `
 .ff-role .ff-meta2{margin-top:4px!important}.ff-role .ff-fit{margin-top:12px}.ff-role .ff-row-acts{flex-wrap:wrap}
 .ff-fitd>summary{list-style:none}.ff-fitd>summary::-webkit-details-marker{display:none}.ff-fitd[open]{flex-basis:100%}.ff-fitd[open]>:not(summary){margin-top:10px}
 .ff-menul .ff-btn{justify-content:flex-start}.ff-menul .ff-pick{padding:0 4px}
+.ff-role .ff-p a:not(.ff-btn){color:var(--ff-ptext);font-weight:600}.ff-full{margin:8px 0 0}.ff-full>summary{display:inline-flex;align-items:center;min-height:44px;color:var(--ff-ptext);font-weight:600;font-size:15px;cursor:pointer}
 .ff-pick{display:inline-flex;align-items:center;gap:10px;min-height:44px;font-size:16px}.ff-pick input{width:22px;height:22px;accent-color:var(--ff-plum)}
 .ff-act{display:flex;flex-direction:column;gap:4px;margin:0}.ff-off{font-size:14px;color:var(--ff-mute)}
 .ff-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:48px;padding:8px 16px;border-radius:16px;font:inherit;font-size:16px;font-weight:700;text-align:center;text-decoration:none;cursor:pointer}

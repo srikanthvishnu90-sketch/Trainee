@@ -651,11 +651,16 @@ export async function runScheduling(o: { store: RepliesStore; outbox: Outbox; ca
 }
 
 // ------------------------------------------------------------------------------------------------ the action worker
-export async function runOutreachActions(o: { store: RepliesStore; rail: ReplyRail; calendars: Partial<Record<Provider, CalendarProvider>>; now: number; worker: string; limit?: number; perUser?: number; leaseS?: number }) {
-  const stats = { claimed: 0, sent: 0, events: 0, retry: 0, failed: 0, refused: 0 };
+export async function runOutreachActions(o: { store: RepliesStore; rail: ReplyRail; calendars: Partial<Record<Provider, CalendarProvider>>; now: number; worker: string; limit?: number; perUser?: number; leaseS?: number ; quiet?: Quiet}) {
+  const stats = { claimed: 0, sent: 0, events: 0, retry: 0, failed: 0, refused: 0, held: 0 };
   const claimed = await o.store.claimActions(o.worker, o.limit ?? 200, o.perUser ?? 5, o.now, o.leaseS ?? 120);
   stats.claimed = claimed.length;
+  // R10 F.3: a paused, opted-out or erased person (career_quiet_users) gets no approved action carried out, calendar
+  // invites included (they email the contact: sendUpdates=all). The action is handed back still approved, so it goes once
+  // they resume; an unreadable quiet check holds everyone (quietOf).
+  const quiet = await quietOf(o.quiet, claimed.map((a) => a.user_id));
   for (const a of claimed) {
+    if (quiet.has(a.user_id)) { await o.store.finishAction(a.id, o.worker, "retry", null, null, "held: the person paused Trainee"); stats.held++; continue; }
     const t = await o.store.thread(a.user_id, a.thread_id);
     const p = a.payload;
     // Code's last look: the exact payload, the thread's own contact only, never a do-not-contact address.
@@ -683,7 +688,8 @@ export async function runOutreachActions(o: { store: RepliesStore; rail: ReplyRa
       await o.store.finishAction(a.id, o.worker, "done", r.id, null, r.status === "queued" ? "queued on the sending rail" : "sent");
       const conv = mergeTurn(t!, { who: "person", asks: [], commitments: a.kind === "schedule_reply" ? ["share times for a call"] : [], at: new Date(o.now).toISOString(), kind: a.kind });
       const status = a.kind === "schedule_reply" ? "call_proposed" : t!.status;
-      await o.store.personTurn(a.user_id, t!.id, `${r.status}:${a.id}`, new Date(o.now).toISOString(), { summary: a.kind === "followup" ? "You sent the follow-up." : "You sent three times for a call.",
+      await o.store.personTurn(a.user_id, t!.id, `${r.status}:${a.id}`, new Date(o.now).toISOString(), { summary: r.status === "queued" ? (a.kind === "followup" ? "Your follow-up is queued to send; it goes only while Trainee is not paused." : "Your reply with three times for a call is queued to send; it goes only while Trainee is not paused.")
+          : a.kind === "followup" ? "You sent the follow-up." : "You sent three times for a call.",
         conversation: { ...conv, next_step: nextStep({ ...t!, ...conv, status, followup_state: a.kind === "followup" ? "none" : t!.followup_state, followups_sent: (t!.followups_sent ?? 0) + (a.kind === "followup" ? 1 : 0) }, { tz: "UTC" }) } }, true);
       stats.sent++;
     } else if (r.status === "REFUSED") { await o.store.finishAction(a.id, o.worker, "failed", null, null, `refused: ${r.detail}`); stats.refused++; }
@@ -1264,7 +1270,7 @@ export async function runRepliesLane(o: {
   };
   await step("followups", () => runFollowupDrafts({ store, outbox: o.outbox, model: o.model, person, now: o.now, worker, quiet }));
   await step("scheduling", () => runScheduling({ store, outbox: o.outbox, calendars, model: o.model, person, tz, now: o.now, quiet }));
-  await step("actions", () => runOutreachActions({ store, rail, calendars, now: o.now, worker }));
+  await step("actions", () => runOutreachActions({ store, rail, calendars, now: o.now, worker, quiet }));
   return out;
 }
 

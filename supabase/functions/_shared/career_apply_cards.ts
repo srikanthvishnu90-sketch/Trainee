@@ -22,6 +22,7 @@
 import { type EventStore, recordEvents } from "./agent/timeline.ts";
 import { sameCompany } from "./career_mail.ts";
 import { approvalWords, NEGATIONS } from "./approval_words.ts";
+import { guardedAnswer, unresolvedOf } from "./application_review.ts";
 
 export interface Prepared {
   id: string;
@@ -39,6 +40,7 @@ export interface CardResult {
   n: number;
   company: string;
   result: string;
+  said?: string; // WO-G: the narrow question an item held back for a missing answer is said with (application_review.ts guardedAnswer)
 }
 export interface CardStore {
   pending(userId: string): Promise<Prepared[]>; // ready, or shown on a card that closed: oldest first
@@ -80,6 +82,8 @@ export type CardReply =
   | { kind: "change"; n: number };
 
 export const CARD_INTENT = "career_apply_card";
+// "Submit job 2", "send application #3", "apply to job 1": a submit aimed at one numbered application (spec B.4).
+const SUBMIT_REF = /^(?:please\s+)?(?:submit|send|apply(?:\s+to)?|approve)\s+(?:job|application|app|role|posting|#)\s*#?(\d{1,3})[.!]?$/i;
 export const CARD_ANSWER_INTENT = "career_apply_card_answer";
 // The pushed card (career_proactive_run / career_prepare_ahead) is one text of at most 4,000 characters, and the
 // database's push takes at most 8 until builder A's D-MS-2 migration. It is a size for one text, never a limit on what
@@ -399,7 +403,7 @@ export function answerText(results: CardResult[], o: { declined?: "left_out" | "
   // card was shown) has no company in the database's result; it read "1. null: not sent: ...". Said plainly instead.
   const lines = results.map((r) =>
     `${r.n}. ${(r.company === null || r.company === undefined ? "" : String(r.company)).replace(/\s+/g, " ").trim().slice(0, 80) || "An application no longer on file"}: ${
-      r.result === "declined" && o.declined ? RESULT[o.declined] : RESULT[r.result] ?? RESULT.refused
+      r.said ?? (r.result === "declined" && o.declined ? RESULT[o.declined] : RESULT[r.result] ?? RESULT.refused)
     }`
   );
   const changed = results.filter((r) => r.result === "changed").length;
@@ -481,9 +485,25 @@ export async function cardTurn(
     // OWNER RULE (2026-10-26, "never submit applications without a real resume"): whether the person has a confirmed
     // resume on file (career_resume_on_file). false: no card is shown and none is opened; absent: not asked.
     resumeReady?: () => Promise<boolean | null>;
+    // WO-G (fix 12): the review File of each application on the card (application_review.ts, built by code from the prepared
+    // payloads): a line per application with its link, or null. A review that cannot be made never changes the card.
+    review?: (shown: Prepared[]) => Promise<string | null>;
   },
 ): Promise<{ reply: string; status: string; card_id?: string; parts?: string[] } | null> {
+  const withReview = async (c: Batch, out: { reply: string; status: string; card_id?: string; parts?: string[] }) => {
+    const extra = o.review ? await o.review(c.take).catch(() => null) : null;
+    if (!extra) return out;
+    return { ...out, reply: `${out.reply}\n\n${extra}`, ...(out.parts?.length ? { parts: [...out.parts.slice(0, -1), `${out.parts.at(-1)}\n\n${extra}`] } : {}) };
+  };
   let r = parseCardReply(o.message);
+  // WO-G (spec B.4, E-39): "Submit job 2" after a clarification, with no card as this thread's last word, is never an
+  // approval: the card is shown so the exact answers and resume are reviewed first, and nothing is submitted.
+  const ref = SUBMIT_REF.exec(String(o.message ?? "").trim());
+  let lead = "";
+  if (ref && (o.replyTo === undefined || o.replyTo === null || String(o.replyTo) === "") && (await o.store.lastAssistantIntent(o.threadId)) !== CARD_INTENT) {
+    r = { kind: "show" };
+    lead = `Nothing was submitted. Before anything goes to an employer, review #${ref[1]} below: its exact answers and the resume it sends. To approve just that one, reply "only ${ref[1]}".\n\n`;
+  }
   if (!r) return null;
   if (r.kind === "show") {
     // Fail closed (review of PR #194): only a confirmed "yes, on file" shows a card; "no" asks for the resume, and a check
@@ -496,6 +516,9 @@ export async function cardTurn(
     // OWNER RULE (2026-10-26): only applications that send a resume are ever on a card (sendsResume, fail closed).
     const pending = (await o.store.pending(o.userId)).filter(sendsResume);
     let c = batchFor(pending);
+    // E-39 only reviews a card that exists: with none prepared, "apply to #9" / "submit job 2" is another handler's turn
+    // (the job list's own numbering, or the apply queue), never "nothing is ready".
+    if (!c && lead) return null;
     if (!c) {
       return {
         reply: 'Nothing is ready for you to approve yet. Send me a job link with "apply me to" and I\'ll prepare it and send its card here; "where are my applications" says what is being prepared.',
@@ -516,7 +539,7 @@ export async function cardTurn(
     const current = o.store.latestOpenPaged ? await o.store.latestOpenPaged(o.userId).catch(() => null) : null;
     if (current && current.items.length === ids.length && current.items.every((it, i) => it.prepared_id === ids[i])
       && Date.parse(current.shown_at) > o.now - 5 * 60_000) {
-      return { reply: c.text, status: "shown", card_id: current.id, ...(c.parts.length ? { parts: c.parts } : {}) };
+      return await withReview(c, { reply: lead + c.text, status: "shown", card_id: current.id, ...(c.parts.length ? { parts: [lead + c.parts[0], ...c.parts.slice(1)] } : {}) });
     }
     let opened: Card;
     try {
@@ -530,7 +553,7 @@ export async function cardTurn(
       c = smaller;
       opened = await o.store.open(o.userId, c.take.map((p) => p.id));
     }
-    return { reply: c.text, status: "shown", card_id: opened.id, ...(c.parts.length ? { parts: c.parts } : {}) };
+    return await withReview(c, { reply: lead + c.text, status: "shown", card_id: opened.id, ...(c.parts.length ? { parts: [lead + c.parts[0], ...c.parts.slice(1)] } : {}) });
   }
   // Which card the answer is about (D-MS-1). With the channel's reply-to id, the card whose message it replies to; a reply
   // to any other message is not about the card (a yes there approves nothing and says how). Without one (iMessage and
@@ -669,6 +692,9 @@ export async function cardTurn(
     if (/card_answered/.test(msg)) {
       return { reply: CARD_ANSWERED_BEFORE, status: "answered_before" };
     }
+    if (/unresolved_unreadable/.test(msg)) {
+      return { reply: `I couldn't check whether a required question is still open for these, so nothing was approved and nothing was sent. Say "yes" again in a minute.`, status: "unresolved_unreadable" };
+    }
     // R9-G2 (D-MS-1, paged cards): a yes approves a paged card only once every page of it reached them, and only while its
     // applications are exactly the set it showed.
     if (/card_pages_undelivered/.test(msg)) {
@@ -684,6 +710,24 @@ export async function cardTurn(
 // The store over the edge function's service client: every call names the person (the _as functions), and every read is
 // scoped to them.
 const PENDING_PAGE = 1000;
+// WO-G: the card's answer as the database takes it (career_apply_card_answer_as), every item whose posting still has an open
+// required question held back and said with its narrow question. Shared by the chat's yes and the Telegram tap.
+// deno-lint-ignore no-explicit-any
+export async function answerGuarded(admin: any, userId: string, cardId: string, approve: number[]): Promise<CardResult[]> {
+  const items = async () => {
+    const r = await admin.from("career_apply_cards").select("items").eq("id", cardId).eq("user_id", userId).limit(1);
+    if (r.error) throw new Error(`unresolved_unreadable: read the card: ${r.error.message}`);
+    return (r.data?.[0]?.items ?? []) as { n: number; prepared_id: string }[];
+  };
+  return await guardedAnswer<CardResult>({ approve, items: approve.length ? await items() : [], held: (ids) => unresolvedOf(admin, userId, ids),
+    call: async (go) => { const r = await admin.rpc("career_apply_card_answer_as", { p_user: userId, p_card: cardId, p_approve: go }); if (r.error) throw new Error(`answer the card: ${r.error.message}`); return r.data; },
+    // The held ones back to ready (the database declined them with the rest of the card): they come back on the next card.
+    reopen: async (ids) => {
+      const r = await admin.from("career_apply_prepared").update({ state: "ready", updated_at: new Date().toISOString() }).eq("user_id", userId).in("id", ids).eq("state", "declined");
+      if (r.error) console.error("reopen held applications:", r.error.message);
+    } });
+}
+// deno-lint-ignore no-explicit-any
 export function supabaseCardStore(admin: any): CardStore {
   const must = (r: any, what: string) => {
     if (r.error) throw new Error(`${what}: ${r.error.message}`);
@@ -708,6 +752,9 @@ export function supabaseCardStore(admin: any): CardStore {
       return must(await admin.rpc("career_apply_card_open_as", { p_user: userId, p_ids: ids }), "open a card");
     },
     async confirm(userId, ids, hashes) {
+      // WO-G: an application whose posting still has an open required question is never confirmed (application_review.ts).
+      const held = await unresolvedOf(admin, userId, ids);
+      if (held.size) throw new Error(`needs_answer: ${[...held.values()][0]}`);
       return must(await admin.rpc("career_apply_card_confirm_as", { p_user: userId, p_ids: ids, p_hashes: hashes }), "confirm a card");
     },
     async latestOpen(userId) {
@@ -727,10 +774,7 @@ export function supabaseCardStore(admin: any): CardStore {
       return c && Number(c.pages) >= 2 ? { id: c.id, items: c.items, shown_at: c.shown_at } : null;
     },
     async answer(userId, cardId, approve) {
-      return must(
-        await admin.rpc("career_apply_card_answer_as", { p_user: userId, p_card: cardId, p_approve: approve }),
-        "answer the card",
-      );
+      return await answerGuarded(admin, userId, cardId, approve);
     },
     async lastAssistantIntent(threadId) {
       const rows = must(

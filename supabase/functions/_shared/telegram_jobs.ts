@@ -48,6 +48,9 @@ export interface JobView {
   // A results list's role (role_results.ts): the pay the posting states, as numbers, with its period, currency and own words. The
   // page renders from this, never by re-reading `pay` (which is display text).
   pay_parsed?: { min: number; max: number; period: "hour" | "month" | "year" | null; currency: string; text: string; up_to?: boolean } | null;
+  // R10 WO-C: a search result's application-page check (link_check.ts) and when it ran; the results File says it beside the role.
+  checked?: { state: "live" | "unknown" | "unchecked"; at: number } | null;
+  submit?: { can: boolean; reason: string } | null; // R10 owner ruling: whether Trainee can submit it itself (submit_capability.ts)
 }
 export interface PostingRow {
   job_id: string; provider?: string | null; company?: string; title?: string; location?: string | null; url?: string; description?: string | null;
@@ -684,6 +687,8 @@ export async function tapJob(o: { userId: string; data: string; messageId: strin
       let got: { card?: { id: string }; results: CardResult[] };
       try { got = await deps.cards.confirm(userId, [prep.id], [prep.payload_hash]); } catch (e) {
         if (await applied()) return duplicate();
+        const m = /needs_answer: (.+)$/.exec(String((e as Error)?.message ?? e));
+        if (m) { await say(`Nothing was approved: a required answer is still missing. ${m[1]}`); return { toast: "Needs your answer.", status: "needs_answer" }; }
         if (/card_changed|invalid card/.test(String((e as Error)?.message ?? e))) {
           await say(`That application changed after I showed it, so nothing was approved. Tap Apply on the card again.`);
           return { toast: "Changed. Nothing approved.", status: "changed" };

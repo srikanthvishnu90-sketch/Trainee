@@ -16,12 +16,15 @@ export type Effect = "read" | "write_own" | "external";
 // (WO-038's contract): the same text as separate messages, so a texting channel delivers each whole and in order.
 // `before` (WO-091b): the previous turn's reply as the person saw it ("" on a first turn), so a tool can check that "the
 // first one" is a posting that reply showed. Undefined only for a caller that runs a tool without the loop's history.
-export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[] } } }
+export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[] }; typed?: string; askOnly?: boolean } }
 export interface ToolSpec {
   name: string;
   description: string;
   input_schema: { type: "object"; properties: Record<string, unknown>; required: string[] };
   effect: Effect;
+  // The effect a call actually had, from its result, when it depends on what the call did (research_market: "write_own" only
+  // when it published a File). Absent: `effect`.
+  effectOf?: (out: unknown) => Effect;
   run(input: any, ctx: ToolCtx): Promise<unknown>;
 }
 export type ModelFn = (payload: { system: string; messages: any[]; tools: { name: string; description: string; input_schema: unknown }[]; max_tokens: number; tool_choice?: { type: "none" } }) =>
@@ -272,6 +275,8 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
   const said = o.said ?? o.message;
   o.ctx.turn = { message: said, added: [], before, attachments: [], seen, ...(said !== o.message ? { attached: o.message.startsWith(said) ? o.message.slice(said.length).trim() : o.message } : {}) };
   const typed = [said, ...o.history.filter((m: any) => m && m.role === "user").map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))].join("\n");
+  // R10 WO-H: everything the person typed in this conversation, for a draft's check that it states no history they never did.
+  o.ctx.turn.typed = typed;
   const toolNames = o.tools.map((t) => t.name);
   // FILE KINDS: the same fact guard attach_document uses, handed to create_file: what the person never said and no tool returned is refused.
   o.ctx.turn.guard = (t: string) => {
@@ -419,7 +424,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
           if (bad.length) { throw new Error(`not attached: the file states things no tool returned this turn and the person did not say: ${[...new Set(bad)].slice(0, 8).join(", ")}. Remove them or mark them "not verified", then attach again.`); }
           o.ctx.turn!.attachments!.push({ filename: att.filename, content: att.content });
         }
-        tool_calls.push({ name: t.name, ok: true, effect: t.effect });
+        tool_calls.push({ name: t.name, ok: true, effect: t.effectOf ? t.effectOf(out) : t.effect });
         results.push({ type: "tool_result", tool_use_id: u.id, content: resultText(out) });
         seen.push(resultText(out));
         if (u.name === "search_jobs" && out && Array.isArray((out as any).postings)) found = (out as any).postings.slice(0, 50);

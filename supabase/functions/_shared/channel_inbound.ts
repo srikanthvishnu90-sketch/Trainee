@@ -139,6 +139,9 @@ export interface InboundStore {
   setThread(contact: string, threadId: string, userId?: string): Promise<void>; // one thread per person, every channel
   setOptOut(contact: string, out: boolean, at: number): Promise<void>;
   enqueueReply(userId: string, key: string, text: string, at: number, channel?: Channel, part?: { of: string; n: number }, cardId?: string | null): Promise<boolean>;
+  // R10 (2026-11-09, optional): the interim line of a slow turn, sent straight to the chat, recorded as already delivered
+  // (kind 'interim', the exact text sent) so it is never sent again and a replay reads what the person saw.
+  recordInterim?(userId: string, key: string, text: string, at: number, channel?: Channel): Promise<void>;
   // WO-038 (optional, so a store written for WO-013 still runs the LoopMessage path unchanged):
   sawInbound?(contact: string, at: number, o: { alias?: string | null; phone?: string | null }): Promise<void>;
   // optedOut (IDENTITY SCENARIOS, 2026-10-30): the account is stopped (a STOP on any of its contacts), so a question there
@@ -285,8 +288,15 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
   };
   // N12: the one interim line of a slow turn (armed by interim(), at most once per message; stopped before the answer).
   let working: ReturnType<typeof ackOnce> | null = null;
-  const interim = (text: string) => {
-    const w = ackOnce({ afterMs: d.ackAfterMs, ack: () => say(contact, d.render(text)), ...(d.timers ? { setTimer: d.timers.set, clearTimer: d.timers.clear } : {}) });
+  const interim = (text: string, userId: string) => {
+    const ack = async () => {
+      const bubbles = d.render(text);
+      const r = await say(contact, bubbles);
+      // R10: recorded only once it went out; a failed record never stops the turn.
+      if (r.ok && store.recordInterim) await store.recordInterim(userId, `interim:${scoped(msg)}`, bubbles.join("\n\n"), d.now(), msg.channel).catch((e) => console.error("inbound: interim not recorded:", e instanceof Error ? e.message : String(e)));
+      return r;
+    };
+    const w = ackOnce({ afterMs: d.ackAfterMs, ack, ...(d.timers ? { setTimer: d.timers.set, clearTimer: d.timers.clear } : {}) });
     w.start();
     return w;
   };
@@ -520,7 +530,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
     let fileMessage: string | null = null, fileNote: string | null = null;
     if (msg.document) {
       if (!d.resumeFile) return await answer(FILE_NOT_READ_REPLY, { ignored: "a file (not read here)" });
-      working = interim(ackFor("resume"));
+      working = interim(ackFor("resume"), person.userId);
       const got = await d.resumeFile({ userId: person.userId, doc: msg.document, now });
       if (!got.ok) { await working.stop(); return await answer(got.reply, { file: "not read" }); }
       fileMessage = got.message;
@@ -585,7 +595,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       if (fileNote) notes.push(fileNote);
       if (msg.caption && msg.media && !fileMessage) notes.unshift(MEDIA_CAPTION_NOTE);
       // N12: one interim if the turn runs past the budget (already armed when a file was being read: still one).
-      working ??= interim(ackFor(said));
+      working ??= interim(ackFor(said), person.userId);
       // The brain gets the person, the thread, the words and a turn key, and the reply-to id only when the platform gave one.
       const out = await d.chat({ userId: person.userId, threadId: person.threadId, message: fitted.text, turnKey, ...(msg.replyToMessageId ? { replyToMessageId: msg.replyToMessageId } : {}), ...(screenTap ? { screenTap } : {}) });
       reply = out.reply.trim() || CHAT_DOWN_REPLY;

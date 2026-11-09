@@ -53,7 +53,9 @@ export const PAYLOAD_INTENTS: ReadonlySet<string> = new Set([
   "outreach_draft", "negotiation_draft", "career_tailor", "prep_mock_start", "prep_mock_next", "prep_mock_followup",
 ]);
 // results_file: the reply carries the results page's link, minted by code (role_results.ts); its words and link stay as they are.
-const PAYLOAD_META = ["card_id", "email_card", "offer_card", "open_card", "career_approval_card_id", "employer_question", "screen_ask", "results_file", "apply_all_offer", "apply_all_done"];
+const PAYLOAD_META = ["card_id", "email_card", "offer_card", "open_card", "career_approval_card_id", "employer_question", "screen_ask", "results_file", "apply_all_offer", "apply_all_done",
+  // R10: the resume task's rewording preview, whose shown pairs are what a yes approves (hash-bound).
+  "resume_preview"];
 
 export function writable(out: { intent?: string | null; reply?: string; parts?: unknown; handler?: string | null }, meta: Record<string, unknown> | null, o: { structured: boolean }): boolean {
   if (o.structured) return false;
@@ -70,7 +72,8 @@ export function writable(out: { intent?: string | null; reply?: string; parts?: 
 // passed the loop's reply guards (agent/reply_guards.ts); a restate-only checker can only take from it (beta C12). The shape
 // (channel_shape.ts) still uses writable(): a brain reply is still laid out for the channel.
 export const BRAIN_HANDLER = "agent";
-// PR-5: the daily-cap views (agent-chat/cap_views.ts) are fixed safety text; the writer never rewrites them.
+// PR-5: a reply with handler cap_view is fixed safety text; the writer never rewrites it (the per-person cap views were
+// removed with the cap, D-046; the guard stays so no such text is ever rewritten).
 export const CAP_VIEW_HANDLER = "cap_view";
 export function rewrites(out: { intent?: string | null; reply?: string; parts?: unknown; handler?: string | null }, meta: Record<string, unknown> | null, o: { structured: boolean }): boolean {
   return out.handler !== BRAIN_HANDLER && out.handler !== CAP_VIEW_HANDLER && writable(out, meta, o);

@@ -11,6 +11,7 @@
 // (career_apply_card_push_requested_for), which the delivery run sends to their channel within its minute.
 //
 // Nothing here approves, queues or sends an application: the card does, on the person's own tap of its exact contents.
+import { withLinks } from "./application_review.ts";
 import { batchFor, CARD_HARD_LIMIT, cardFor } from "./career_apply_cards.ts";
 import { type OpenQuestion, questionsText } from "./career_apply_questions.ts";
 import { type Rpc, type SandboxHost, withRetry } from "./cloud_runner.ts";
@@ -129,6 +130,8 @@ export interface PrepareBridgeDeps {
   secret: string;
   stop?: (sandbox: string) => Promise<void>;
   now?: () => number;
+  // WO-G: the review File links for a card's applications (application_review_links.ts); absent, the card is as before.
+  review?: (user: string, preparedIds: string[]) => Promise<string | null>;
 }
 const refuse = (status: number, error: string) => ({ status, body: { error } });
 // The resume one posting's application sends (R9-G2): the tailored file kept for that posting when there is one (its row
@@ -230,6 +233,8 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
           const b = batchFor(all);
           const pages = b && !("tooLong" in b) && b.take.length === all.length && !b.skipped.length && b.parts.length >= 2
             ? b.parts.map((t, i) => `${i + 1}/${b.parts.length}\n${t}`) : [];
+          const links = d.review && b && !("tooLong" in b) ? await d.review(user, b.take.map((p) => p.id)).catch(() => null) : null;
+          if (pages.length) pages[pages.length - 1] = withLinks(pages[pages.length - 1], links);
           // The paged push is 20261108100000's: where it is not there yet (the owner has not applied it) or refuses, the
           // person is told the batch is ready, exactly as before; nothing is half-shown.
           const paged = pages.length ? await d.rpc("career_apply_card_push_paged_for", { p_user: user, p_request: id, p_ids: (b as any).take.map((p: any) => p.id),
@@ -239,7 +244,7 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
           // one-text card nor two pages, so the person was told to ask for it and their yes approved nothing (e2e F-AP-096:
           // 8 links, all prepared, never shown). The same push and the same one hash over exactly what the card shows.
           const onePage = !pages.length && b && !("tooLong" in b) && b.take.length === all.length && !b.skipped.length && b.text.length <= CARD_HARD_LIMIT
-            ? await d.rpc("career_apply_card_push_requested_for", { p_user: user, p_request: id, p_ids: b.take.map((p) => p.id), p_text: b.text,
+            ? await d.rpc("career_apply_card_push_requested_for", { p_user: user, p_request: id, p_ids: b.take.map((p) => p.id), p_text: withLinks(b.text, links),
               p_now: new Date(now).toISOString() }).catch((e: unknown) => { console.error("one-page card:", (e as Error)?.message ?? e); return undefined; })
             : undefined;
           if (typeof paged === "string" && /^[0-9a-f-]{36}$/i.test(paged)) { card = paged; push = "shown_paged"; }
@@ -252,7 +257,8 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
           }
         }
         if (c && "take" in c && !stillAsking && !partial) {
-          card = await d.rpc("career_apply_card_push_requested_for", { p_user: user, p_request: id, p_ids: c.take.map((p) => p.id), p_text: c.text,
+          const links = d.review ? await d.review(user, c.take.map((p) => p.id)).catch(() => null) : null;
+          card = await d.rpc("career_apply_card_push_requested_for", { p_user: user, p_request: id, p_ids: c.take.map((p) => p.id), p_text: withLinks(c.text, links),
             p_now: new Date(now).toISOString() });
           push = card ? "shown" : "held";
         }

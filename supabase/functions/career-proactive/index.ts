@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { proactiveSwitches } from "./switches.ts"; // D-036 release flags (each gate below reads one switch)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
+import { supabaseCardPush, supabaseReviewLinks } from "../_shared/application_review_links.ts";
 import { supabaseAlertStore } from "../_shared/career_alert_store.ts";
 import { supabasePostingsDb } from "../_shared/career_ingest.ts";
 import { supabaseMailStore } from "../_shared/career_mail_store.ts";
@@ -18,6 +19,7 @@ import { runOutreachFollowupsGated } from "../_shared/career_outreach_track.ts";
 import { runRepliesLane } from "../_shared/career_outreach_replies.ts";
 import { readerCall } from "../_shared/career_reader_model.ts";
 import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
+import { supabaseBatches } from "../_shared/batch_closeout.ts";
 
 // The career Google grant (vault oauth_google_career_<uid>), read the same way by mail tracking and outreach.
 const grant = (admin: any): TokenDeps => ({
@@ -60,6 +62,7 @@ serve((req) => {
         return { ...r, tz: p?.tz ?? null, quiet_start: p?.prefs?.quiet_start, quiet_end: p?.prefs?.quiet_end };
       });
     },
+    finishedBatches: supabaseBatches(admin),
     readyApplications: async () => {
       const { data, error } = await admin.from("career_apply_prepared").select("id,user_id,company,card_lines,created_at")
         .eq("state", "ready").order("created_at", { ascending: true }).limit(2000);
@@ -74,11 +77,8 @@ serve((req) => {
         return { ...r, tz: p?.tz ?? null, quiet_start: p?.prefs?.quiet_start, quiet_end: p?.prefs?.quiet_end };
       });
     },
-    pushCard: async (userId, ids, text) => {
-      const { data, error } = await admin.rpc("career_apply_card_push_as", { p_user: userId, p_ids: ids, p_text: text });
-      if (error) throw new Error(`push a card: ${error.message}`);
-      return data ?? null;
-    },
+    // WO-G: the review File link of each application on the card, while the card stays one text.
+    pushCard: supabaseCardPush(admin, supabaseReviewLinks(admin, Deno.env)),
     // FEATURE 3 (prepareAhead) is not wired here: preparing runs the engine's dry run in a browser, which an edge function
     // cannot start. The host that has the engine runs the same rail (career_proactive_run.ts runPrepareAhead) with
     // `deno run -A workers/career-browser/prepare-ahead.ts daily` under CAREER_PREPARE_AHEAD=on.

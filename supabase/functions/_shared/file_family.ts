@@ -251,6 +251,7 @@ export interface StateInput {
   state: StateId; family: FamilyId; title?: string; // a state title the caller has from data ("Graduation date needed" is the spec's example)
   prior?: Meta | null; scope?: string | null; next?: Act | null; field?: { name: string; why: string } | null; draft?: KV[]; step?: string | null;
   evidence?: { quote: string; src: Src } | null; target?: KV[]; recover?: Act | null;
+  nothingSent?: boolean; // error: the caller has proof nothing changed and nothing was sent; without it the page does not claim so
 }
 export function familyStateHtml(s: StateInput, c: Ctx): string {
   const t = s.title ?? STATE_TITLE[s.state], kv = (rows?: KV[]) => rows?.length ? partHtml({ p: "kv", rows }, c) : "";
@@ -259,7 +260,7 @@ export function familyStateHtml(s: StateInput, c: Ctx): string {
     case "loading": body = stateHtml({ kind: "loading", title: t, reason: "No result yet.", next: "This page fills in when the check finishes. The action that would repeat this check is off until then." })
       + (s.prior ? `<p class="ff-p ff-mute">${metaHtml(s.prior, c)}</p>` : "") + actHtml({ label: "Check again", effect: "decide", off: "A check is already running." }); break;
     case "empty": body = stateHtml({ kind: "empty", title: t, reason: s.scope ? `Checked: ${s.scope}` : "The scope checked isn't on file.", next: "No roles were added to fill the gap." }) + (s.next ? actHtml(s.next) : ""); break;
-    case "error": body = stateHtml({ kind: "error", title: t, reason: "Nothing was changed and nothing was sent.", next: "Anything you typed here is kept." }) + (s.recover ? actHtml(s.recover, true) : ""); break;
+    case "error": body = stateHtml({ kind: "error", title: t, reason: s.nothingSent ? "Nothing was changed and nothing was sent." : "It is not known yet whether anything changed. Check the status before trying again - nothing is retried by itself.", next: "Anything you typed here is kept." }) + (s.recover ? actHtml(s.recover, true) : ""); break;
     case "expired": body = `<section class="ff-state" role="status"><h2 class="ff-st">${esc(t)}</h2><p class="ff-p">Ask Trainee for a new link to the same task.</p>${s.recover ? actHtml(s.recover, true) : ""}</section>`; break;
     case "needs_input": body = `<section class="ff-state" role="status"><h2 class="ff-st">${esc(t)}</h2>${s.field ? `<aside class="ff-note ff-n-caution" role="note"><strong>${esc(s.field.name)}:</strong> ${esc(s.field.why)}</aside>` : ""}${kv(s.draft)}${s.next ? actHtml(s.next, true) : ""}</section>`; break;
     case "prepared": body = `<section class="ff-state" role="status"><h2 class="ff-st">${esc(t)}</h2>${chipHtml({ label: "Prepared - not submitted", tone: "plum" })}${kv(s.target)}${s.next ? actHtml(s.next) : ""}</section>`; break;

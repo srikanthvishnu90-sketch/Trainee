@@ -51,7 +51,8 @@ export function applicationReviewFile(d: ApplicationReview): FamilyFile {
       ...after,
       ...(d.changed ? [note("danger", "Changed since your review.", `${d.changed}. This returns to review; nothing is submitted on the old approval.`)] : []),
       card("The package", [{ p: "kv", rows: [...d.pkg, { k: "Destination", v: "Employer application page", src: d.destination }] }]),
-      card("Exact answers - sent word for word", [{ p: "kv", rows: d.answers.map((x) => ({ k: x.q, v: x.a, src: x.a ? { label: "You approved this wording" } : null, missing: x.required ? "Not entered - required" : "Not entered - optional" })) }]),
+      // N1: before approval an answer is a draft; "you approved this wording" only once it is approved.
+      card("Exact answers - sent word for word", [{ p: "kv", rows: d.answers.map((x) => ({ k: x.q, v: x.a, src: x.a ? { label: d.after ? "You approved this wording" : "Your draft answer - not approved yet" } : null, missing: x.required ? "Not entered - required" : "Not entered - optional" })) }]),
       card("Conditions - in plain words", [{ p: "check", items: d.conditions.map((t) => ({ state: "met" as const, text: t })) }]),
       note("info", "What happens after approval.", "Trainee fills the reviewed answers on the verified page and submits once. You then see the employer's own confirmation - a click alone never counts as submitted."),
     ],
@@ -61,11 +62,15 @@ export function applicationReviewFile(d: ApplicationReview): FamilyFile {
 
 // ---------------------------------------------------------------- F-10 batch File (C.12)
 export interface BatchRow { rid: string; title: string; key: StateKey; detail: string; evidence?: Src | null; act?: Act; menu?: Act[]; approved: boolean; reviewed?: boolean }
-export interface BatchFile { batch: string; review: string; rows: BatchRow[]; expiresAt: string | null; exclusions: string; pause: Act; check?: Act; updatedAt?: string | null }
+export interface BatchFile { batch: string; review: string; rows: BatchRow[]; expiresAt: string | null; exclusions: string; pause: Act; check?: Act; updatedAt?: string | null;
+  approveAll?: { hash: string; token: string } | null; // "Approve these N": the one hash-bound approval of exactly the approvable rows shown (applyall + set)
+}
 const keyOf = (r: BatchRow): StateKey => r.key === "submitted" && !external(r.evidence) ? "checking" : r.key;
 // The batch's own words (p-69): every row is in exactly one, and the five sum to the batch. A row outside the approved scope is "not
 // approved" whatever else is true of it; the others come from results_spec's state.
-const BUCKET = (r: BatchRow, k: StateKey) => !r.approved ? "not approved" : k === "submitted" ? "confirmed" : k === "uncertain" ? "uncertain" : k === "needs_info" || k === "user_step" ? "needs answer" : k === "blocked" || k === "closed" || k === "excluded" ? "blocked" : "in progress";
+// N2: each state in its own words - only queued, approved and in-progress work is "in progress".
+const BUCKET = (r: BatchRow, k: StateKey) => !r.approved ? "not approved" : k === "submitted" ? "confirmed" : k === "uncertain" ? "uncertain" : k === "needs_info" ? "needs answer"
+  : k === "user_step" ? "needs you" : k === "blocked" ? "blocked" : k === "closed" || k === "excluded" ? "closed" : "in progress";
 // E-72, held on each row: a row not reviewed cannot be approved from here; an uncertain row's submit or retry is off (no blind
 // retry); a row outside this batch's approval never carries an approving control.
 function rowAct(r: BatchRow, k: StateKey): Act | undefined {
@@ -77,9 +82,11 @@ function rowAct(r: BatchRow, k: StateKey): Act | undefined {
 }
 const ROW_WORD: Partial<Record<StateKey, string>> = { needs_info: "Needs answer", user_step: "Needs answer" };
 export function batchFile(d: BatchFile): FamilyFile {
+  // Approvable now: reviewed, inside the approval, ready (prepared), not uncertain - the rows "Approve these N" covers.
+  const approvable = d.rows.filter((r) => r.approved && r.reviewed !== false && keyOf(r) === "ready");
   const keys = d.rows.map(keyOf), approved = d.rows.filter((r) => r.approved).length, buckets = d.rows.map((r, i) => BUCKET(r, keys[i]));
-  const counts = ["confirmed", "in progress", "uncertain", "needs answer", "blocked", "not approved"].map((b) => ({ n: buckets.filter((x) => x === b).length, label: b })).filter((x) => x.n);
-  const needs = buckets.filter((b) => b === "needs answer" || b === "uncertain").length, done = buckets.filter((b) => b === "confirmed").length;
+  const counts = ["confirmed", "in progress", "uncertain", "needs answer", "needs you", "blocked", "closed", "not approved"].map((b) => ({ n: buckets.filter((x) => x === b).length, label: b })).filter((x) => x.n);
+  const needs = buckets.filter((b) => b === "needs answer" || b === "needs you" || b === "uncertain").length, done = buckets.filter((b) => b === "confirmed").length;
   const rows: Block[] = d.rows.map((r, i) => ({ b: "card", parts: [{ p: "item", id: r.rid, chip: { label: ROW_WORD[keys[i]] ?? STATES[keys[i]].label, tone: STATES[keys[i]].tone } as Chip, title: r.title, serif: true,
     text: keys[i] === "checking" && r.key === "submitted" ? "Recorded as submitted; no employer confirmation with a link and time is on file, so it is still being checked." : r.detail,
     src: keys[i] === "submitted" ? r.evidence : null, act: rowAct(r, keys[i]), menu: r.menu }] }));
@@ -92,7 +99,8 @@ export function batchFile(d: BatchFile): FamilyFile {
       ...rows,
       note("info", "Every role accounted once.", `${n(d.rows.length, "role")}, ${d.rows.length} primary states, no double counting. ${d.rows.length - approved === 1 ? "The 1 unapproved row stays visible - it never inherits" : `The ${d.rows.length - approved} unapproved rows stay visible - they never inherit`} this batch's approval.`),
     ],
-    actions: { secondary: [{ ...d.pause, label: "Pause remaining", effect: "decide" }], caption: "Stops new submissions; in-flight steps are reconciled, not undone." },
+    actions: { primary: approvable.length && d.approveAll ? { label: `Approve these ${approvable.length}`, effect: "approve", aria: `Approve these ${approvable.length} applications, each exactly as reviewed`, post: { token: d.approveAll.token, action: "applyall", fields: { set: d.approveAll.hash } } } : null,
+      secondary: [{ ...d.pause, label: "Pause remaining", effect: "decide" }], caption: `${approvable.length && d.approveAll ? `Approves only ${n(approvable.length, "reviewed row")} shown; if the set changes, nothing is approved. ` : ""}Stops new submissions; in-flight steps are reconciled, not undone.` },
   };
 }
 
@@ -133,6 +141,7 @@ export interface MessageReview {
   kind: string; recipient: { initials: string; name: string; basis: string; resolved: boolean; relation?: string | null }; to: string | null; words: string;
   channel: "email" | "copy"; attachments: string | null; followUp: string; approve: Act; acts?: Acts;
   updatedAt?: string | null; optedOut?: boolean; // E-74: an opt-out stops this and every covered follow-up
+  decline?: Act | null; stopFollowUps?: Act | null; // the person's own controls: decline this ask; stop every follow-up to this person
 }
 export function messageReviewFile(d: MessageReview): FamilyFile {
   const ok = d.recipient.resolved && (d.channel === "copy" || !!d.to);
@@ -149,7 +158,7 @@ export function messageReviewFile(d: MessageReview): FamilyFile {
       note("info", "Scope.", `Approval sends this one message to this one person. It does not authorize your network, repeated nudges, or a claim that ${d.recipient.resolved ? d.recipient.name : "anyone"} endorses you.`),
       note("caution", "Relationship strength.", `${d.recipient.relation ? `Labeled "${d.recipient.relation}" as you described it, not inflated.` : "No relationship is claimed."} Closeness is never inferred from a platform connection.`),
     ],
-    actions: { primary: approve, secondary: d.acts?.secondary ?? [] },
+    actions: { primary: approve, secondary: [...(d.acts?.secondary ?? []), ...(d.decline ? [d.decline] : []), ...(d.stopFollowUps && !d.optedOut ? [{ ...d.stopFollowUps, effect: "danger" as const }] : [])] },
   };
 }
 
@@ -160,6 +169,7 @@ export interface InterviewHub {
   // E-75: superseded: earlier times a reschedule replaced (shown, never active); feedback: on the answer the person actually gave;
   // assessment: a request for help on a test the employer prohibits it on is refused, with general learning offered instead.
   updatedAt?: string | null; basis?: string | null;
+  practice?: Act | null; // the mock interview's own control; absent, the tile has no button (no link to a page that does nothing)
   superseded?: string[]; feedback?: { answer: string; note: string } | null; assessment?: { name: string; prohibited: boolean } | null;
 }
 const VOCAL = /\b(tone of voice|vocal|your voice|pace|pitch|confident[- ]sounding|sounded)\b/i;
@@ -178,7 +188,7 @@ export function interviewHubFile(d: InterviewHub): FamilyFile {
       card("Who you're meeting", [{ p: "person", initials: d.person.initials, name: `${d.person.name} - ${d.person.role}`, text: d.person.basis, chip: d.person.verified ? { label: "Verified", tone: "confirmed" } : { label: "Not verified", tone: "attention" } }]),
       card("Preparation - this role, this stage", [{ p: "check", items: d.prep.map((p) => ({ state: p.done ? "done" as const : "todo" as const, lead: p.lead, text: p.text })) }]),
       ...(d.feedback ? [card("Feedback on your answer", [{ p: "quote", text: `"${d.feedback.answer}"` }, { p: "text", text: VOCAL.test(d.feedback.note) ? "Feedback on delivery is not given from text practice." : d.feedback.note }])] : []),
-      { b: "card", parts: [{ p: "tile", icon: "practice", title: "Mock interview", text: "One question at a time, feedback on your actual answer. Text practice never claims to judge your voice.", act: { label: "Practice", effect: "decide", href: "?practice=1" } }] },
+      { b: "card", parts: [{ p: "tile", icon: "practice", title: "Mock interview", text: "One question at a time, feedback on your actual answer. Text practice never claims to judge your voice.", act: d.practice ?? undefined }] },
       note("caution", "Reschedule safety.", "If the time changes, the old event and reminders are superseded - you'll never see two active meetings."),
     ],
     actions: d.acts,

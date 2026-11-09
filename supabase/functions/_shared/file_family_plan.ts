@@ -48,12 +48,13 @@ export function careerBriefFile(d: CareerBrief): FamilyFile {
 }
 
 // ---------------------------------------------------------------- F-02 profile facts (C.4)
-export type FactKind = "confirmed" | "estimate" | "inferred" | "review";
-export interface ProfileFact { k: string; v: string | null; kind: FactKind; src: Src | null; correct?: Act }
+export type FactKind = "confirmed" | "estimate" | "inferred" | "review" | "external";
+// confirm / correct: the person's own controls on this fact (review facts are confirmed or corrected; any fact can be corrected).
+export interface ProfileFact { k: string; v: string | null; kind: FactKind; src: Src | null; correct?: Act; confirm?: Act }
 export interface ProfileFacts { facts: ProfileFact[]; conflict?: { text: string } | null; acts?: Acts; updatedAt?: string | null; basis?: string | null; achievements?: { text: string; date: string; src: Src | null; reuse?: Act }[] }
 // E-64: a category is never silently upgraded. A "confirmed" fact needs a source the person gave or confirmed; without one it is
 // shown under Needs review. An estimate keeps "your estimate" beside its value. A sensitive field is never a stored value here.
-const KIND_WORD: Record<FactKind, string> = { confirmed: "confirmed", estimate: "your estimate", inferred: "inferred", review: "needs review" };
+const KIND_WORD: Record<FactKind, string> = { confirmed: "confirmed", estimate: "your estimate", inferred: "inferred", review: "needs review", external: "external" };
 export function profileFactsFile(d: ProfileFacts): FamilyFile {
   // A sensitive field with an answer on file is never drawn as a reusable value (only "prefer not to say", kept as said); one with no
   // answer is drawn like any missing fact (Unconfirmed). A value without a source is drawn Unconfirmed by the shell, never as a fact.
@@ -64,10 +65,16 @@ export function profileFactsFile(d: ProfileFacts): FamilyFile {
   const kv = (fs: ProfileFact[]): KV[] => fs.filter((f) => !SENSITIVE.test(f.k) || !f.v).map((f) => ({ k: f.k, v: f.v, src: word(f) }));
   return {
     family: "F-02", hero: null, title: "Profile facts", fresh: fresh(d.updatedAt, d.basis), // p-46: segments come straight after the header
-    segments: [{ label: "Confirmed", n: c("confirmed").length, selected: true }, { label: "Estimates", n: c("estimate").length }, { label: "Inferred", n: c("inferred").length }, { label: "Needs review", n: c("review").length }],
+    segments: [{ label: "Confirmed", n: c("confirmed").length, selected: true }, { label: "Estimates", n: c("estimate").length }, { label: "Inferred", n: c("inferred").length }, ...(c("external").length ? [{ label: "External", n: c("external").length }] : []), { label: "Needs review", n: c("review").length }],
     blocks: [
       ...(d.conflict ? [note("danger", "Conflict to resolve.", d.conflict.text)] : []),
-      ...(c("confirmed").length + c("estimate").length ? [card("Confirmed facts - sample", [{ p: "kv", rows: kv([...c("confirmed"), ...c("estimate")]) }])] : []),
+      // Each category in its own place, so an estimate never sits among confirmed facts (E-64).
+      ...(c("confirmed").length ? [card("Confirmed facts - sample", [{ p: "kv", rows: kv(c("confirmed")) }])] : []),
+      ...(c("estimate").length ? [card("Your estimates - not confirmed facts", [{ p: "kv", rows: kv(c("estimate")) }])] : []),
+      ...(c("external").length ? [card("External facts - from their source, with its link and time", [{ p: "kv", rows: kv(c("external")).map((r) => ({ ...r, src: r.src && { ...r.src, external: true } })) }])] : []),
+      // Review facts with a value are listed with Confirm and Correct; a sensitive one stays in the sensitive card (D.4-6).
+      ...(c("review").filter((f) => f.v && !SENSITIVE.test(f.k)).length ? [card("Needs review - not used until you confirm", c("review").filter((f) => f.v && !SENSITIVE.test(f.k)).map((f) => ({ p: "item" as const, chip: { label: "Needs review", tone: "attention" as const }, title: f.k, text: f.v!, src: f.src, act: f.confirm, menu: f.correct ? [f.correct] : undefined })))] : []),
+      ...(d.facts.some((f) => f.kind !== "review" && f.correct && f.kind !== "inferred") ? [card("Correct a fact", d.facts.filter((f) => f.kind !== "review" && f.kind !== "inferred" && f.correct && !SENSITIVE.test(f.k)).map((f) => ({ p: "item" as const, title: f.k, text: f.v ?? "unknown", act: f.correct })))] : []),
       ...(c("inferred").length ? [card("Inferred preferences - not attestations", c("inferred").map((f) => ({ p: "item" as const, title: f.v ?? f.k, text: `Working interpretation from ${f.k} - never sent to employers.`, act: f.correct })))] : []),
       ...(d.achievements?.length ? [card("Achievements - dated, reuse per item", d.achievements.map((a) => ({ p: "item" as const, title: a.text, text: `Dated ${a.date}`, src: a.src, act: a.reuse })))] : []),
       card("Sensitive fields", [{ p: "tile", icon: "lock", title: "Work authorization, veteran status, demographics", text: "Answered per application, only by you. Never guessed, never reused silently. \"Prefer not to say\" is respected." },
@@ -153,6 +160,7 @@ export interface Materials {
   rid: string; docTitle: string; base: string; approved?: string | null; draft: string; updatedAt: string | null;
   changes: { kind: ChangeKind; before?: string | null; after: string; text: string; lead?: string }[]; format: string | null; usedBy: string; download: Act; acts?: Acts;
   portfolio?: { title: string; type: "employment" | "learning" | "draft" }[]; profileEdit?: { site: string; before: string; after: string } | null;
+  downloadVersion?: string | null; // the version the download retrieves; anything but the approved one says so and is never the one used
 }
 const PORTFOLIO: Record<"employment" | "learning" | "draft", Chip> = { employment: { label: "Employment work", tone: "confirmed" }, learning: { label: "Learning project", tone: "info" }, draft: { label: "Draft", tone: "neutral" } };
 export function materialsFile(d: Materials): FamilyFile {
@@ -171,7 +179,8 @@ export function materialsFile(d: Materials): FamilyFile {
       ...(d.profileEdit ? [card(`Profile edit - ${d.profileEdit.site} - you paste it`, [{ p: "diff", before: d.profileEdit.before, after: d.profileEdit.after, text: "Copy the new text and paste it yourself. Drafting this is not permission to touch your public account; Trainee changes nothing there.", chip: { label: "Copy only", tone: "info" } }])] : []),
       { b: "card", parts: [{ p: "kv", rows: [{ k: "Version used", v: d.approved ? `${d.approved} (approved)` : null, src: d.approved ? { label: "the approved version, not the newest" } : null, missing: "none yet - nothing is used until you approve one" }, { k: "Format check", v: d.format, src: d.format ? { label: "checked on the file" } : null, missing: "Not checked yet" }, { k: "Used by", v: d.usedBy, src: { label: "approving here covers no other role" } }] }] },
     ],
-    actions: { ...d.acts, secondary: [...(d.acts?.secondary ?? []), d.download], caption: d.acts?.caption ?? "Downloading never submits. The approved version is the one used - not the newest." },
+    // The download names the version it retrieves; a draft download says it is not the version used (the approved one is).
+    actions: { ...d.acts, secondary: [...(d.acts?.secondary ?? []), d.downloadVersion ? { ...d.download, label: `${d.download.label} ${d.downloadVersion}${d.downloadVersion === d.approved ? " (approved)" : " (draft - not the one used)"}` } : d.download], caption: d.acts?.caption ?? "Downloading never submits. The approved version is the one used - not the newest." },
   };
 }
 

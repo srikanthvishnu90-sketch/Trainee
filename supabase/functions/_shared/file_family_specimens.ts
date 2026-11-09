@@ -7,7 +7,7 @@ import type { AnswerLibrary, CareerBrief, Materials, PathComparison, ProfileFact
 import type { ApplicationReview, BatchFile, InterviewHub, MessageReview, Negotiation, OfferComparison, Pipeline, WeeklyBrief } from "./file_family_apply.ts";
 import type { Src } from "./file_family.ts";
 import type { KindId } from "./file_kinds.ts";
-import { FAMILIES, familyPage, type Act, type Ctx, type FamilyFile, type FamilyId } from "./file_family.ts";
+import { FAMILIES, familyPage, familyStatePage, type Act, type Ctx, type FamilyFile, type FamilyId } from "./file_family.ts";
 import { rolesShortlistPage } from "./file_family_roles.ts";
 import { answerLibraryFile, careerBriefFile, materialsFile, pathComparisonFile, profileFactsFile, roleWorkspaceFile, searchPlanFile } from "./file_family_plan.ts";
 import { applicationReviewFile, batchFile, interviewHubFile, messageReviewFile, negotiationFile, offerComparisonFile, pipelineFile, weeklyBriefFile } from "./file_family_apply.ts";
@@ -202,17 +202,37 @@ export const offers = (): OfferComparison => ({
 // family renderer is not yet what the live page serves for that kind); specimen: the fictional data; page: that data rendered as the
 // family's main state, at SPECIMEN_NOW in SPECIMEN_TZ, with the header's back and overflow controls.
 
-export interface FamilySpecimen { id: FamilyId | "F-14n"; name: string; kind: KindId; specimen: unknown; page: (c?: Ctx) => string }
+// page(view): for the release loop (WO-I, readiness R-5) - the family in a state (ready = the File itself; loading, empty, error = the
+// shared states, C.24) for a width (the caller sets the viewport; the HTML is one responsive page) and a theme (light or dark
+// forced, whatever the device prefers; omitted: the device's own). page(ctx) with a Ctx draws the ready File at that clock.
+export interface SpecimenView { state: "loading" | "empty" | "error" | "ready"; width: 390 | 1280; theme?: "light" | "dark" }
+export interface FamilySpecimen { id: FamilyId | "F-14n"; name: string; kind: KindId; specimen: unknown; page: (c?: Ctx | SpecimenView) => string }
+const isView = (v: unknown): v is SpecimenView => !!v && typeof v === "object" && "state" in v && "width" in v;
+const DARK_Q = "@media (prefers-color-scheme:dark){";
+export function themed(html: string, theme?: "light" | "dark"): string {
+  if (!theme) return html;
+  const out = html.split(DARK_Q).join(theme === "dark" ? "@media all{" : "@media not all{").split("color-scheme:light dark").join(`color-scheme:${theme}`);
+  return out.replace("<html", `<html data-theme="${theme}"`);
+}
+function viewOf(id: FamilyId | "F-14n", ready: (c: Ctx) => string, v?: Ctx | SpecimenView): string {
+  if (!isView(v)) return ready(v ?? CTX0);
+  const family: FamilyId = id === "F-14n" ? "F-14" : id;
+  const html = v.state === "ready" ? ready(CTX0)
+    : v.state === "loading" ? familyStatePage({ state: "loading", family, prior: { label: "Last verified", at: new Date(SPECIMEN_NOW - 3_600_000).toISOString() } }, CTX0)
+    : v.state === "empty" ? familyStatePage({ state: "empty", family, scope: "fictional specimen scope - nothing matched" }, CTX0)
+    : familyStatePage({ state: "error", family, recover: { label: "Try again", effect: "decide", href: "?" } }, CTX0);
+  return themed(html, v.theme);
+}
 const CTX0: Ctx = { now: SPECIMEN_NOW, tz: SPECIMEN_TZ };
 const MENU: Act[] = [{ label: "Export", effect: "download", href: "/files/export.json" }, { label: "Close this File", effect: "navigate", href: "/f" }];
 const nav = (f: FamilyFile): FamilyFile => ({ ...f, back: "/f", menu: f.menu ?? MENU });
 function fam<T>(id: FamilyId | "F-14n", kind: KindId, data: () => T, build: (d: T) => FamilyFile, name?: string): FamilySpecimen {
-  return { id, kind, name: name ?? FAMILIES[id as FamilyId].name, specimen: data(), page: (c = CTX0) => familyPage(nav(build(data())), c) };
+  return { id, kind, name: name ?? FAMILIES[id as FamilyId].name, specimen: data(), page: (v) => viewOf(id, (c) => familyPage(nav(build(data())), c), v) };
 }
 export const FILE_FAMILIES: FamilySpecimen[] = [
   fam("F-01", "plan_review", brief, careerBriefFile), fam("F-02", "plan_review", profile, profileFactsFile), fam("F-03", "comparison", paths, pathComparisonFile),
   fam("F-04", "plan_review", search, searchPlanFile),
-  { id: "F-05", kind: "job_list", name: FAMILIES["F-05"].name, specimen: shortlist(), page: (c = CTX0) => rolesShortlistPage(shortlist(), c) },
+  { id: "F-05", kind: "job_list", name: FAMILIES["F-05"].name, specimen: shortlist(), page: (v) => viewOf("F-05", (c) => rolesShortlistPage(shortlist(), c), v) },
   fam("F-06", "plan_review", workspace, roleWorkspaceFile), fam("F-07", "draft", () => materials(), materialsFile), fam("F-08", "plan_review", answers, answerLibraryFile),
   fam("F-09", "application_proof", () => review(), applicationReviewFile), fam("F-10", "job_list", batch, batchFile), fam("F-11", "plan_review", pipeline, pipelineFile),
   fam("F-12", "introduction", () => message(), messageReviewFile), fam("F-13", "plan_review", () => hub(), interviewHubFile), fam("F-14", "plan_review", () => weekly(), weeklyBriefFile),

@@ -39,6 +39,7 @@ import { planCareerTaskIntent, normalizeCareerTaskRequest, createCareerBoardFor,
 import { CareerHost } from "../_shared/career_host.js";
 import { CareerPool } from "../_shared/career_pool.js";
 import { createCareerPersistence, careerRequestHash } from "../_shared/career_persistence.js";
+import { holdUnsent, notConfirmedReply, pauseReply, readControl, reconcile, resumeReply, storeSentReply, unsavedStopReply, workflowReply, type Hold, type StopControl } from "../_shared/career_stop_truth.ts";
 import { callModel as callModelUncapped, newMeter, turnLedger, WEB_SEARCH_AVAILABLE } from "../_shared/model_gateway.ts";
 import { careerModelConfig } from "./release_model.ts";
 // LAUNCH READINESS (2026-10-26): the per-turn model wrapper (no per-person cap since D-046), the per-person turn order, the pool read only when used.
@@ -485,6 +486,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // LAUNCH READINESS R1: this person's turns run one at a time, in arrival order (_shared/career_turn_gate.ts). The
     // ticket is taken before the thread is read and given back after the commit, on every path (finally, below).
     let gate: TurnGate | null = null;
+    // R10 F.3: a stop, pause or resume turn (career_host.js ctx._stopControl); its reply states only what was read back.
+    let stopTurn: StopControl | null = null;
+    let stopHold: Hold | null = null;
     const poolLoader = CareerPool.createKbPoolLoader({
       readRows: async (spec: any) => {
         let q: any = admin.from(spec.table).select(spec.select)
@@ -609,6 +613,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // skipped for it, so a button is never read as a typed word by whichever consumer happens to be waiting.
       const tapRaw = body.screen_tap && typeof body.screen_tap === "object" ? body.screen_tap as Record<string, unknown> : null;
       const tapIn = tapRaw ? { qid: String(tapRaw.qid ?? ""), answer: String(tapRaw.answer ?? "") } : null;
+      // R10 F.3: a stop in plain words (career_host.js stopControlOf, which also makes it a host turn), and the pause as it
+      // stood before this turn: a narrower stop never leaves a pause behind that the reply would not mention.
+      const stopAsk = !tapIn && !careerTask && !careerBatch ? ((host as any).stopControlOf?.(message) ?? null) as { kind: "account" | "workflow"; workflows: string[]; boundary: boolean; outstanding: string | null } | null : null;
+      const pauseBefore = (ctx as any).globalPause ? JSON.parse(JSON.stringify((ctx as any).globalPause)) : undefined;
+      const accountPausedBefore = (loaded.account as any)?.paused === true;
       // M4: Outlook (Microsoft Graph) as a peer of Gmail, from any channel: "connect my outlook" / "use my work email" makes a
       // one-time link bound to this person, channel and thread; "disconnect outlook" deletes the access and what was read
       // from it and cancels its pending sends (_shared/outlook_connector.ts). Code's, before every other turn.
@@ -1646,7 +1655,36 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // WRITER ROOT CAUSES (beta C12, 2026-11-06): the staged brain's own reply (handler "agent") is never rewritten: it already
       // passed the loop's reply guards, and the restate-only checker could only cut it (rewrites()).
       // The code-in-chat safety text is fixed words (career_code_in_chat.ts): never rewritten either.
-      if (replyWriterOn(Deno.env) && out.handler !== "code_in_chat" && rewrites(out, agentMeta, { structured: !!(careerTask || careerBatch) })) {
+      // R10 F.3 (career_stop_truth.ts): a stop turn's effects are written and read back here, and the reply is built from
+      // what was read: a workflow stop holds unsent outreach and is counted from the real tables; an account pause rides
+      // this turn's commit and is read back after it (below). Never rewritten by the writer: every word is a state claim.
+      {
+        const hp = (ctx as any)._hostPatch as Record<string, unknown> | undefined;
+        stopTurn = out.handler === "CareerHostControl" && hp?.paused === true && !hp.erase ? { kind: "account" }
+          : out.handler === "CareerHostControl" && out.intent === "career_resumed" && hp?.paused === false ? { kind: "resume" }
+          : stopAsk && out.handler !== "agent" ? { ...stopAsk, cancelled: [] } : null;
+      }
+      if (stopTurn?.kind === "account") {
+        // Whatever the chain answered, the pause is the account's: patched onto this turn's commit, read back below.
+        (ctx as any).globalPause = { set: true, at: new Date().toISOString(), source: "account_control" };
+        (ctx as any)._hostPatch = { ...((ctx as any)._hostPatch ?? {}), paused: true };
+        out = { ...out, intent: "career_paused", reply: pauseReply({ counts: await reconcile(admin as any, user.id) }), resultStatus: "completed", parts: undefined };
+      } else if (stopTurn?.kind === "workflow") {
+        // A narrower stop pauses nothing: a pause the chain set in this thread (141's halt) is put back as it was.
+        if (pauseBefore === undefined) delete (ctx as any).globalPause; else (ctx as any).globalPause = pauseBefore;
+        const plan = (ctx as any).plan;
+        if (plan && typeof plan === "object" && plan.kind === "campaign_plan") { delete (ctx as any).plan; stopTurn.cancelled = ["people_list"]; }
+        stopHold = await holdUnsent(admin as any, user.id, Date.now());
+        if (stopHold.error) console.error("career stop: hold failed:", stopHold.error);
+        out = { ...out, intent: "career_stop_workflow", resultStatus: "completed", parts: undefined,
+          reply: workflowReply({ stop: stopTurn, hold: stopHold, counts: await reconcile(admin as any, user.id), accountPaused: accountPausedBefore,
+            // The open ask is named with its blocker, from the release switch itself (research_reply.ts): company research is
+            // not served in this release, or (served) this message does not say which company.
+            researchBlocker: /research/i.test(stopTurn.outstanding ?? "")
+              ? (researchReplyOn(Deno.env) ? "this message doesn't say which company, so tell me the company and I'll research it." : "company research isn't turned on in this version of Trainee yet, so I can't look it up for you. Nothing about it was sent anywhere.")
+              : null }) };
+      } else if (stopTurn?.kind === "resume") out = { ...out, reply: resumeReply, resultStatus: "completed", parts: undefined };
+      if (!stopTurn && replyWriterOn(Deno.env) && out.handler !== "code_in_chat" && rewrites(out, agentMeta, { structured: !!(careerTask || careerBatch) })) {
         const wMeter = ledger.track(newMeter());
         const wCfg = careerModelConfig(Deno.env);
         const written = await writeReply({ on: true, message, handler: out.handler ?? null, channel: writerChannel((body as any)?.channel),
@@ -1670,7 +1708,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       let shapeField: { attachments: { filename: string; content: string }[]; links: string[] } | null = null;
       {
         const sh = shapeForTurn({ on: replyWriterOn(Deno.env), channel: writerChannel((body as any)?.channel), reply: out.reply, attachments: turnAttachments, allowedLinks: turnLinks,
-          writable: writable(out, agentMeta, { structured: !!(careerTask || careerBatch) }) });
+          writable: !stopTurn && writable(out, agentMeta, { structured: !!(careerTask || careerBatch) }) });
         if (sh.reply !== out.reply) out = { ...out, reply: sh.reply };
         if (sh.parts) out = { ...out, parts: sh.parts };
         shapeField = sh.shape;
@@ -1768,12 +1806,30 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         .then((r) => { if (r.action === "refused") console.error("career watch alerts: not saved:", r.reason); })
         .catch((e) => console.error("career watch alerts:", e?.message ?? e));
       flowCtx.note = null;
+      // R10 F.3: the stop's effect, read back from the authoritative state after the commit. The reply above stands only
+      // if the read agrees; otherwise the person is told exactly what is not confirmed.
+      if (stopTurn && !saved.replay) {
+        const rb = await readControl(admin as any, user.id, tid);
+        const why = stopTurn.kind === "account"
+          ? (rb.paused !== true ? (rb.paused === null ? "the account record could not be read back" : "the account record does not show the pause") : rb.quiet !== true ? (rb.quiet === null ? "the send paths' pause check could not be read" : "the send paths' pause check does not show it") : null)
+          : stopTurn.kind === "resume"
+            ? (rb.paused !== false ? (rb.paused === null ? "the account record could not be read back" : "the account record still shows the pause") : null)
+            : (stopTurn.cancelled?.includes("people_list") && rb.planOpen !== false ? (rb.planOpen === null ? "this conversation's record could not be read back" : "this conversation still holds the people list") : null);
+        if (why) {
+          console.error("career stop: read-back disagrees:", stopTurn.kind, why);
+          const sent = { ...saved.response, reply: notConfirmedReply(stopTurn.kind, why), parts: undefined, meta: { ...(saved.response?.meta ?? {}), result_status: "not_confirmed" } };
+          delete (sent as any).parts;
+          // The stored copy is the reply sent (a replay of this turn returns it, and the thread shows it).
+          if (!(await storeSentReply(admin as any, { userId: user.id, threadId: tid, turnKey, response: sent }))) console.error("career stop: the stored copy could not be corrected");
+          return json(cors, sent, 200);
+        }
+      }
       return json(cors, saved.response, 200);
     } catch (error) {
       const code = error && typeof error === "object" && "code" in error ? String(error.code) : "storage_unavailable";
       turnEffects.on = false;
       const conflict = CONFLICT_CODES.includes(code);
-      return json(cors, { error: code, reply: conflict ? refusedSaveReply(code, turnEffects) : UNSAVED_REPLY, action: null, turn_key: turnKey,
+      return json(cors, { error: code, reply: stopTurn ? unsavedStopReply(stopTurn.kind, stopHold) : conflict ? refusedSaveReply(code, turnEffects) : UNSAVED_REPLY, action: null, turn_key: turnKey,
         turn_effects: turnEffects.writes.size > 0 || turnEffects.queued > 0 || turnEffects.sent > 0 || turnEffects.sendUnknown > 0 }, conflict ? 409 : 503);
     } finally {
       await ledger.finish().catch((e) => console.error("turn cost ledger:", e?.message ?? e));

@@ -1,7 +1,7 @@
 // D-047 (architect ruling 2026-11-09, on the owner's order that research work in production): CAREER_RESEARCH_REPLY is served on.
 // With the release value (the key unset, as production leaves it), beta case C11 (a comparison of two career paths that asks to
 // separate general guidance from what needs current research) goes to the research path; with the rollback ("off") it keeps the
-// pre-D-047 route (tests/architect/brain-decides-questions.test.ts BDQ-2). The research brief File stays off.
+// pre-D-047 route (tests/architect/brain-decides-questions.test.ts BDQ-2). D-047 amended: the research brief File ships too.
 import assertNode from "node:assert/strict";
 import * as core from "../../supabase/functions/_shared/router_core.career.js";
 import { CareerHost } from "../../supabase/functions/_shared/career_host.js";
@@ -21,5 +21,6 @@ Deno.test("D-047: with the release value, the C11 comparison goes to market_rese
   eq([on.brain, on.reason], [true, "market_research"]);
   const off = stagedDecision({ env: rolledBack, message: C11, ctx: fresh(), host, structured: false });
   eq([off.brain, off.intent], [true, "career_recommendations"]);
-  eq(researchBriefOn(served), false, "the research brief File stays off");
+  // D-047 amended: the research brief File ships with the reply; "off" rolls it back.
+  eq([researchBriefOn(served), researchBriefOn(env({ CAREER_RESEARCH_BRIEF: "off" }))], [true, false]);
 });

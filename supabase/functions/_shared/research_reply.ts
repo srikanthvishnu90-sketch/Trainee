@@ -331,7 +331,8 @@ export async function researchTurn(o: {
 // briefPublisherFor returns null, so no brief link is claimed, and the flag CAREER_RESEARCH_BRIEF=on only enables a publisher the caller passes.
 export interface ResearchBrief { title: string; facts: { label: string; value: string; source: string }[]; sources: { url: string; title: string }[] }
 export interface BriefPublisher { publish(userId: string, brief: ResearchBrief): Promise<{ url: string } | null> }
-export const researchBriefOn = (env: { get(k: string): string | undefined }) => env.get("CAREER_RESEARCH_BRIEF") === "on";
+// D-047 amended (architect ruling 2026-11-09): the research brief File ships with the reply; a release flag, read through the config.
+export const researchBriefOn = (env: { get(k: string): string | undefined }) => releaseFlagOn(env, "CAREER_RESEARCH_BRIEF");
 export const briefPublisherFor = (env: { get(k: string): string | undefined }, publisher: BriefPublisher | null | undefined): BriefPublisher | null =>
   researchBriefOn(env) && publisher ? publisher : null;
 // The reply with the brief's link as its report link (a verified, stored, read-back link only: the publisher returns what it stored).

@@ -45,8 +45,8 @@ const REAL_SUBMIT = { UPMORE_SCRIPT_SUBMIT_LIVE: "1", CLOUD_RUNNER_ENABLED: "on"
 const SEND_AS_PERSON = { CAREER_EMAIL_SEND: "on", CAREER_OUTREACH_SEND: "on", CAREER_SEND_RAIL: "on" };
 const D037: Record<string, string> = { ...REAL_SUBMIT, ...SEND_AS_PERSON };
 // D-047 (architect ruling 2026-11-09, on the owner's order that research work in production): research answers in chat.
-// The research brief File (CAREER_RESEARCH_BRIEF) stays off.
-const D047: Record<string, string> = { CAREER_RESEARCH_REPLY: "on" };
+// D-047 amended (2026-11-09): the research brief File (CAREER_RESEARCH_BRIEF) ships with the reply.
+const D047: Record<string, string> = { CAREER_RESEARCH_REPLY: "on", CAREER_RESEARCH_BRIEF: "on" };
 const ALL = [...ON, ...Object.keys(D037), ...Object.keys(D047)].sort();
 const UNMEASURED = ["CAREER_REPLY_WRITER", "CAREER_KNOWLEDGE", "CAREER_JUDGE"];
 
@@ -54,7 +54,7 @@ Deno.test("D-036: production serves exactly the release flags on, with the stage
   eq(Object.keys(RELEASE_FLAGS).sort(), ALL);
   for (const [f, v] of Object.entries(D037)) eq(releaseValue(PROD, f), v, `D-037: ${f} is served ${v} in production`);
   for (const [f, v] of Object.entries(D047)) { eq(releaseValue(PROD, f), v, `D-047: ${f} is served ${v} in production`); eq(releaseValue(envOf({ [f]: "off" }), f), "off", `D-047: ${f}=off rolls it back`); }
-  ok(RELEASE_NEVER_ON.includes("CAREER_RESEARCH_BRIEF"), "D-047: the research brief File stays off");
+  ok(!RELEASE_NEVER_ON.includes("CAREER_RESEARCH_BRIEF"), "D-047 amended: the research brief File is a release flag");
   ok(sendRailOn(PROD), "D-037: the sending rail is on");
   eq(sandboxHostOptions((k) => releaseValue(PROD, k) ?? "", fetch).scriptSubmitLive, true, "D-037: the cloud sandbox submits approved applications");
   for (const f of ON) {

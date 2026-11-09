@@ -218,7 +218,7 @@ Deno.test("research answers: the source-list file is not sent by default (the re
 });
 
 Deno.test("research_brief publisher hook: interface only, behind CAREER_RESEARCH_BRIEF; no publisher or no https link = no brief link claimed", async () => {
-  const on = { get: (k: string) => (k === "CAREER_RESEARCH_BRIEF" ? "on" : undefined) }, off = { get: () => undefined };
+  const on = { get: (k: string) => (k === "CAREER_RESEARCH_BRIEF" ? "on" : undefined) }, off = { get: (k: string) => (k === "CAREER_RESEARCH_BRIEF" ? "off" : undefined) }; // D-047 amended: off is the rollback, named explicitly
   const pub = { publish: async () => ({ url: "https://trainee.example/file?t=v1.a.b" }) };
   eq(briefPublisherFor(off, pub), null);
   eq(briefPublisherFor(on, null), null);

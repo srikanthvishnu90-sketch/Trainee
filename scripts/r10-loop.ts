@@ -100,12 +100,29 @@ if (LIVE) {
   } else console.log("   the live replay script is not on this commit yet: every live step is FAIL");
 }
 
-// R-3: every reply this run produced, in one transcript for an independent writing-quality review (spec D, E.6 52, A.5). The review's
-// verdict goes in replies-verdict.md in this run's directory (first line "VERDICT: PASS" or "VERDICT: FAIL"); --verdict <path> names
-// one elsewhere. Without it the row is PENDING_REVIEW.
-const replyLines: string[] = [`# R10 replies, loop run ${RUN}`, "", "In-process replies (fake model, $0), then live replies when --live ran. Review against spec D and the reply-quality criteria (A.5, E.6 52).", ""];
-for (const r of recs.filter((x) => x.reply && x.item !== 0)) replyLines.push(`## ${r.file} :: ${r.test}${r.scenario ? ` [${r.scenario}]` : ""}`, "", "```", String(r.reply).trim(), "```", "");
-for (const t of live?.transcript ?? []) replyLines.push(`## LIVE ${t.turn}: ${t.text.slice(0, 160)}`, "", "```", String(t.reply).trim(), "```", "");
+// R-3: every reply this run produced, in one transcript for an independent writing-quality review (spec D, E.6 52, A.5), each
+// run through WO-N's reply rubric (supabase/functions/_shared/reply_rubric.ts checkReply, #660) with its violation lines under
+// it and its skipped rules named (a skipped rule is never a pass). The review's verdict goes in replies-verdict.md in this run's
+// directory (first line "VERDICT: PASS" or "VERDICT: FAIL"); --verdict <path> names one elsewhere. R-3 is PASS only when the
+// rubric is on this commit, finds no violation in any reply, and the verdict is PASS.
+type Rubric = { checkReply: (i: Record<string, unknown>) => { ok: boolean; violations: unknown[]; skipped: string[] }; describe: (r: unknown) => string[] };
+const rubric: Rubric | null = await import(`${ROOT}/supabase/functions/_shared/reply_rubric.ts`).catch(() => null);
+// The ask each reply answered: the scenario turn when the test is named for one (T1..S2, F1a..F3), else the quoted words in the
+// test's name; otherwise unknown (the rubric then judges against an empty ask, which can only add violations).
+const { SCENARIOS: SC, SCENARIOS_F: SF } = await import(`${ROOT}/tests/architect/helpers/r10_turns.ts`);
+const turnText = new Map<string, string>([...SC.resume, ...SC.search, ...SF.search, ...SF.research].map((x: { id: string; text: string }) => [x.id, x.text]));
+const askOf = (test: string) => { const id = /(?:^|\]\s*|\b)(T[1-3]|S[12]|F1[ab]|F2[ab]|F3)\b/.exec(test)?.[1]; if (id && turnText.has(id)) return turnText.get(id)!; return /['‘“]([^'’”]{3,200})['’”]/.exec(test)?.[1] ?? ""; };
+let rubricViolations = 0, rubricReplies = 0;
+const rubricLines = (reply: string, ask: string) => {
+  if (!rubric) return ["rubric: reply_rubric.ts is not on this commit (WO-N #660): not checked"];
+  const r = rubric.checkReply({ reply, ask, channel: "telegram" });
+  rubricReplies++; rubricViolations += r.violations.length;
+  return [...(r.violations.length ? rubric.describe(r).map((l) => `- VIOLATION ${l}`) : ["- rubric: no violation"]), ...(r.skipped.length ? [`- skipped (not judged, not a pass): ${r.skipped.join(", ")}`] : []), ...(ask ? [] : ["- ask: not recorded for this reply"])];
+};
+const replyLines: string[] = [`# R10 replies, loop run ${RUN}`, "", "In-process replies (fake model, $0), then live replies when --live ran. Each is followed by the reply rubric's lines. Review against spec D and the reply-quality criteria (A.5, E.6 52).", ""];
+for (const r of recs.filter((x) => x.reply && x.item !== 0)) { const reply = String(r.reply).trim(); replyLines.push(`## ${r.file} :: ${r.test}${r.scenario ? ` [${r.scenario}]` : ""}`, "", "```", reply, "```", "", ...rubricLines(reply, askOf(r.test)), ""); }
+for (const t of live?.transcript ?? []) { const reply = String(t.reply).trim(); replyLines.push(`## LIVE ${t.turn}: ${t.text.slice(0, 160)}`, "", "```", reply, "```", "", ...rubricLines(reply, t.text), ""); }
+replyLines.splice(3, 0, rubric ? `Rubric: ${rubricViolations} violation(s) across ${rubricReplies} replies.` : "Rubric: not on this commit (reply_rubric.ts, WO-N #660).", "");
 await Deno.writeTextFile(`${OUT}/replies.md`, replyLines.join("\n"));
 const verdictPath = opt("--verdict") ?? `${OUT}/replies-verdict.md`;
 const reviewVerdict = await Deno.readTextFile(verdictPath).then((t) => (/^\s*VERDICT:\s*(PASS|FAIL)/i.exec(t)?.[1] ?? "").toUpperCase(), () => "");
@@ -145,8 +162,12 @@ for (const [id, crit, , tests, liveCol, status, note] of rows) {
   let verdict: string, why = "";
   if (status === "integrated") { out.push({ id, verdict: "R6", why: "" }); continue; }
   if (status === "review") {
-    verdict = reviewVerdict === "PASS" ? "PASS" : reviewVerdict === "FAIL" ? "FAIL" : "PENDING_REVIEW";
-    why = verdict === "PENDING_REVIEW" ? `transcript: ${OUT}/replies.md; no verdict at ${verdictPath}` : `review verdict ${verdictPath}`;
+    // Both must hold: the reply rubric finds nothing in any reply, and the independent writing review says PASS.
+    if (!rubric) { verdict = "FAIL"; why = "reply_rubric.ts is not on this commit (WO-N #660)"; }
+    else if (rubricViolations > 0) { verdict = "FAIL"; why = `reply rubric: ${rubricViolations} violation(s) across ${rubricReplies} replies (${OUT}/replies.md)`; }
+    else if (reviewVerdict === "FAIL") { verdict = "FAIL"; why = `review verdict FAIL (${verdictPath})`; }
+    else if (reviewVerdict === "PASS") { verdict = "PASS"; why = `rubric clean over ${rubricReplies} replies; review verdict PASS`; }
+    else { verdict = "PENDING_REVIEW"; why = `rubric clean over ${rubricReplies} replies; no review verdict at ${verdictPath} (transcript ${OUT}/replies.md)`; }
   } else if (status === "BLOCKED") { verdict = "BLOCKED"; why = note; }
   else if (status === "GAP") { verdict = "FAIL"; why = `GAP: ${note}`; }
   else {

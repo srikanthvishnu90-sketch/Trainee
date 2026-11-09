@@ -13,6 +13,8 @@
 // read. Taps at once are each judged against the list as it is when they run: an Apply that queued a row first changes the set
 // (the Apply to all then approves nothing and says so); an Apply to all that ran first leaves that Apply "Already in your
 // applications". Either way each posting is approved once.
+import { familyPage } from "../_shared/file_family.ts";
+import { familyOfRecord, fileFamiliesOn, kindRoutes } from "../_shared/file_family_serve.ts";
 import { applyAllYesEnabled } from "../_shared/apply_all_yes_flag.ts";
 import { FILE_TTL_MS, verifyFileToken, type FileClaims } from "../_shared/file_link.ts";
 import { ACCOUNT_MAX_TRIES, checkSession, CLEAR_LOGIN, CLEAR_SESSION, codeOf, LOGIN_TTL_MS, loginCookie, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, PAGE_TOKEN, pageTokenOf, sameToken, SESSION_ID, sessionCookie, sha256, startSession, type PhoneAuth, type SessionCheck, type SessionStore } from "../_shared/file_session.ts";
@@ -646,6 +648,16 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
     rec = again.rec;
   }
   if (req.method === "GET" && fields.get("format") === "text") return o.text(textOf(rec, { now: d.now() }));
+  // R10 fix 9: where the stored record holds what a File family needs, the family page is served (behind TRAINEE_FILE_FAMILIES),
+  // drawn with this record's own actions as its routes so no control on it is dead. Any other record keeps the kind's page below.
+  if (fileFamiliesOn(d.env)) {
+    const fam = familyOfRecord(rec, token);
+    if (fam) {
+      const tz = d.timeZone ? await d.timeZone(u).catch(() => null) : null;
+      const file = note ? { ...fam.file, blocks: [{ b: "html" as const, html: `<p class="ff-note" role="status">${esc(note)}</p>` }, ...fam.file.blocks] } : fam.file;
+      return o.html(familyPage(file, { now: d.now(), tz, routes: kindRoutes(rec) }));
+    }
+  }
   // The shared File shell (file_design.ts): "Made for <first name> · <date>" above one card; the title, then when its facts were read
   // (the moment this File was built from them; an application proof reads the application record), in the person's zone.
   const [tz, facts] = await Promise.all([d.timeZone ? d.timeZone(u).catch(() => null) : null, d.facts ? d.facts(u).then((f) => f ?? [], () => []) : []]);

@@ -25,7 +25,7 @@ const off = (a: Act | undefined, why: string): Act | undefined => a && { ...a, o
 // ---------------------------------------------------------------- F-09 application review (C.11)
 export interface ApplicationReview {
   appId: string; rid: string; title: string; company: string; destination: Src; pkg: KV[]; answers: { q: string; a: string | null; required: boolean }[];
-  conditions: string[]; approve: Act; edit: Act; cancel: Act;
+  conditions: string[]; approve: Act; edit?: Act | null; cancel?: Act | null; extra?: Block[]; // extra: the record's own controls (served pages)
   // E-71: changed: what changed materially since the person reviewed (back to review); now + staleHours: a destination checked
   // longer ago than that is re-checked before anything acts; after: the real state once approved (never an optimistic Submitted).
   changed?: string | null; now?: number; staleHours?: number;
@@ -53,9 +53,10 @@ export function applicationReviewFile(d: ApplicationReview): FamilyFile {
       card("The package", [{ p: "kv", rows: [...d.pkg, { k: "Destination", v: "Employer application page", src: d.destination }] }]),
       card("Exact answers - sent word for word", [{ p: "kv", rows: d.answers.map((x) => ({ k: x.q, v: x.a, src: x.a ? { label: "You approved this wording" } : null, missing: x.required ? "Not entered - required" : "Not entered - optional" })) }]),
       card("Conditions - in plain words", [{ p: "check", items: d.conditions.map((t) => ({ state: "met" as const, text: t })) }]),
+      ...(d.extra ?? []),
       note("info", "What happens after approval.", "Trainee fills the reviewed answers on the verified page and submits once. You then see the employer's own confirmation - a click alone never counts as submitted."),
     ],
-    actions: { primary: approve, secondary: [d.edit, { ...d.cancel, effect: "danger" }] },
+    actions: { primary: approve, secondary: [...(d.edit ? [d.edit] : []), ...(d.cancel ? [{ ...d.cancel, effect: "danger" as const }] : [])] },
   };
 }
 
@@ -133,10 +134,11 @@ export interface MessageReview {
   kind: string; recipient: { initials: string; name: string; basis: string; resolved: boolean; relation?: string | null }; to: string | null; words: string;
   channel: "email" | "copy"; attachments: string | null; followUp: string; approve: Act; acts?: Acts;
   updatedAt?: string | null; optedOut?: boolean; // E-74: an opt-out stops this and every covered follow-up
+  approveOff?: string | null; // the record's own reason the approval cannot be given (already decided, approved but not sent)
 }
 export function messageReviewFile(d: MessageReview): FamilyFile {
   const ok = d.recipient.resolved && (d.channel === "copy" || !!d.to);
-  const approve = d.optedOut ? { ...d.approve, off: "They opted out. Nothing is sent, and no follow-up is scheduled." }
+  const approve = d.approveOff ? { ...d.approve, off: d.approveOff } : d.optedOut ? { ...d.approve, off: "They opted out. Nothing is sent, and no follow-up is scheduled." }
     : ok ? d.approve : { ...d.approve, off: "The recipient is not resolved, so nothing can be approved yet. No address is guessed." };
   return {
     family: "F-12", boundary: `${d.kind} - not sent`, hero: null, title: "Message review", fresh: fresh(d.updatedAt, "your contacts and your words"), // p-74: the recipient card comes first

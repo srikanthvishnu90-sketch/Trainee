@@ -575,6 +575,7 @@
     "tests/architect/research-company-f2-20261109.test.ts": 0.2,
     "tests/architect/research-company-f2-handler.test.ts": 8.0,
     "tests/architect/research-company-review-20261109.test.ts": 0.4,
-    "tests/architect/research-reply-on-d047.test.ts": 0.2
+    "tests/architect/research-reply-on-d047.test.ts": 0.2,
+    "tests/architect/r10-submit-capability.test.ts": 0.1
   }
 }

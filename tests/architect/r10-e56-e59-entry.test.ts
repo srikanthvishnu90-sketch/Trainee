@@ -64,7 +64,10 @@ Deno.test("E-59: a number on no account gets exactly the known number's answer (
   assert(Math.abs(known.ms - unknown.ms) < 60, `known ${known.ms.toFixed(0)} ms vs unknown ${unknown.ms.toFixed(0)} ms`);
 });
 
-Deno.test("E-59: a code that could not be sent is never called sent; a refused text answers exactly as a number on no account", async () => {
+// Architect ruling 2026-11-09 (WO-F caveat 2): for a matched number whose background send fails, the page keeps the conditional
+// "If that is the number on your Trainee account, we texted it a code": not revealing who has an account wins, and that sentence
+// makes no unconditional claim that a code was sent. "We could not send the code" is said only when texting is off for everyone.
+Deno.test("E-59 (architect ruling 2026-11-09): a code that could not be sent is never called sent; texting off says 'We could not send the code'; a refused text for a matched number keeps the conditional words and answers exactly as a number on no account", async () => {
   // texting switched off: said plainly, before the number is compared, so the answer is the same for any number
   const off = world({ textingOn: false });
   const a = await ask(off, U_PHONE), b = await ask(off, NOBODY);

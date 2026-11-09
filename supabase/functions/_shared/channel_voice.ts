@@ -291,7 +291,11 @@ export function imessageNativeRender(text: string): string[] {
 // longer than a few seconds. The ack only says what Trainee is doing now; it never claims a result.
 
 export function ackFor(message: string): string {
-  const m = String(message ?? "").toLowerCase();
+  // F.1/F.2 (2026-11-08): the ack names what this turn is: company research ("what's Stripe like to work for") is not a role
+  // search, a question about why a search found nothing is a check, and "don't apply" or "how to apply" is not an apply.
+  const m = String(message ?? "").toLowerCase().replace(/[’]/g, "'").replace(/\b(?:don't|do not|never|not|without|how to)\s+(?:\w+\s+){0,2}?apply\w*\b/g, " ");
+  if (/\b(?:research|like to work (?:for|at)|what(?:'s| is) it like|tell me about|interview questions?)\b/.test(m)) return "on it — researching that now";
+  if (/\b(?:what(?:'s| is)(?: actually| really)? (?:blocking|stopping)|why (?:is|was|did) (?:the|my) search)\b/.test(m)) return "on it — checking that now";
   if (/\b(find|search|look(ing)? for|show me|any)\b.*\b(jobs?|roles?|openings?|internships?|positions?|postings?)\b|\bjobs?\b.*\bin\b/.test(m)) return "on it — looking for roles now";
   if (/\bapply\b|\bapplications?\b/.test(m) && /\b(status|where|did|go through|heard)\b/.test(m)) return "on it — checking your applications";
   if (/\bapply\b/.test(m)) return "on it — getting that ready";

@@ -106,7 +106,7 @@ import { missingIntegration } from "../_shared/agent/integrations.ts";
 import { documentsOf, materializeArtifacts } from "../_shared/channel_artifacts.ts";
 import { scoredN } from "../_shared/career_search.ts";
 import { askFor, isJudgePromptAsk, judgePromptTurn, searchJudgeTurn, supabaseJudgeCache, supabaseSearchSources } from "../_shared/career_search_judge.ts"; // FEATURE 5
-import { widenedAsk } from "../_shared/search_widen.ts"; // R10 WO-C
+import { blockerAsk, widenedAsk } from "../_shared/search_widen.ts"; // R10 WO-C
 import { wantOf } from "../_shared/search_shortlist.ts"; // R10 WO-C
 import { readPersonZone } from "../_shared/person_zone.ts"; // R10 WO-C
 import { offerChatTurn } from "../_shared/career_offer_chat.ts"; // FEATURE 12
@@ -1104,7 +1104,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // A "judge prompt: ..." instruction is code's (judgePromptTurn), and without a model key the brain is never tried.
       // R10 WO-C: a follow-up that widens the last search ("include business analyst ... plus remote US internships") is a
       // search, code's: it never goes to the brain, and is never answered by a template a word in it happens to match.
-      const f5Widen = widenedAsk(message, (ctx as any).discovery);
+      // F.1: so is "what is actually blocking the search?" (the last search, run again, with its evidenced blocker).
+      const f5Widen = widenedAsk(message, (ctx as any).discovery) ?? blockerAsk(message, (ctx as any).discovery);
       const stagedReady = !isJudgePromptAsk(message) && !!careerModelConfig(Deno.env).apiKey && !f5Widen;
       // FEATURE GV (Google verification, 2026-10-26): "disconnect gmail" is answered by the connector framework above
       // (connAns), through the same _shared/google_disconnect.ts: revoked at Google, tokens, rows and mail rows deleted,
@@ -1352,20 +1353,28 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                 n: Number(Deno.env.get("CAREER_JUDGE_N")) || undefined, standing: () => supabaseMemoryStore(admin).standing(user.id) },
               // R10 WO-C (fix 6): each role's application page is re-checked before it is shown (Greenhouse, Lever, Ashby and
               // SmartRecruiters public boards by id; any other link by fetching it). The checked time is said in the person's zone.
-              openCheck: linkChecker(fetch, { userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
+              // Only when the person asked for open or verified roles (SearchAsk.verify); otherwise each is said to be not re-checked.
+              openCheck: f5Ask.verify ? linkChecker(fetch, { userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }) : null,
               tz: f5Zone?.tz ?? null, want: wantOf(message) }));
+            // F.1: the blocker question gets the evidenced blocker: a source that could not be read is a connection problem.
+            if (!found && f5Said?.explain) out = { ...out, intent: "career_discovery", resultStatus: "blocked", handler: "search_judge",
+              reply: "What blocked it: a search connection problem. The job boards could not be read just now, so this says nothing about whether open roles exist. It is not your resume: listing roles never needs a confirmed resume. Nothing was applied for. Ask again in a few minutes and I'll run the same search." };
             if (found) {
               // ONBOARDING ROUND 2: the router's line that nothing is sent before the resume is confirmed (an apply ask with
               // no confirmed resume) stays with the search's own reply.
               const prof = (ctx as any).profile, facts: any[] = Array.isArray(prof?.facts) && !prof?._fromStatedFacts ? prof.facts : [];
               const confirmedResume = facts.some((f) => f && ["education", "experience", "project", "leadership", "skill"].includes(f.kind) && f.needs_confirmation !== true && (f.status == null || f.status === "confirmed"));
-              const askText = String(message ?? "").toLowerCase();
+              // F.1: "Don't apply to anything" is not an apply ask: a search never needs a confirmed resume to list roles.
+              const askText = String(message ?? "").toLowerCase().replace(/[’]/g, "'").replace(/\b(?:don't|do not|never|not|without|no need to)\s+(?:\w+\s+){0,2}?(?:apply|applying|submit\w*)\b[^.?!]*/g, " ");
               const applyAsk = !/\?\s*$/.test(askText) && /\bapply\s+(?:to|for|at|me|on|now)\b|\bapply\b[^.?!]{0,40}\b(?:jobs?|roles?|postings?|positions?|internships?|openings?)\b|\bsubmit (?:my|an?) applications?\b/.test(askText);
               const resumeLine = f5Said?.append || confirmedResume || !applyAsk || /\bresume\b/i.test(found.reply) ? ""
                 : facts.some((f) => f && f.source === "resume-ingest" && f.needs_confirmation === true)
                 ? "\n\nAnd nothing is sent anywhere before your resume is confirmed: its entries are waiting for your word (reply \"yes, that's my resume\" if they're right)."
                 : "\n\nAnd nothing is sent anywhere before your resume is confirmed: paste or attach it, confirm it, then ask again.";
-              out = { ...out, reply: (f5Said?.append ? `${out.reply}\n\n${found.reply}` : found.reply) + resumeLine, resultStatus: found.status, handler: "search_judge",
+              const why = !f5Said?.explain ? "" : found.blocker === "none"
+                ? `Nothing is blocking it: ${found.shortlist.length} open ${found.shortlist.length === 1 ? "role is" : "roles are"} listed below. Your resume isn't confirmed, and that doesn't block a search: listing roles never needs it, and eligibility isn't decided here.\n`
+                : `What blocked it: ${found.blocker === "all_closed" ? "the matching roles I found were closed when I checked their application pages" : "no open roles were found in the scope I checked"}. It was not a connection problem (the job boards were read), and not your resume (listing roles never needs a confirmed resume).\n`;
+              out = { ...out, reply: why + (f5Said?.append ? `${out.reply}\n\n${found.reply}` : found.reply) + resumeLine, resultStatus: found.status, handler: "search_judge",
                 // R10 WO-C: a widened search is a search, whatever the router took the words for (a graduation-window question).
                 ...(f5Widen ? { intent: "career_discovery" } : {}) };
               const f5Prior = (ctx as any).discovery ?? {};
@@ -1387,7 +1396,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                   links: (u, l) => feedUrlsFor(Deno.env, u, l, Date.now()) })).catch((e) => { console.error("results page: the list stands:", (e as Error)?.message ?? e); return null; });
                 if (made) {
                   // R10 WO-C (fix 8): short and choosable by number; the File holds each role's window, checks and links.
-                  if (found.brief?.length) made.parts[0] = [made.parts[0], found.summary, ...found.brief].filter(Boolean).join("\n");
+                  if (found.brief?.length) made.parts[0] = [why.trim(), made.parts[0], found.summary, ...found.brief].filter(Boolean).join("\n");
                   out = { ...out, reply: [made.parts[0], made.parts[1]].join("\n") + resumeLine, parts: [made.parts[0], ...(resumeLine ? [resumeLine.trim()] : []), made.parts[1]] };
                   agentMeta = { ...(agentMeta || {}), results_file: made.listId };
                   f5Offer = { offer: made.offer, ask: made.offerAsk, resumeLine: !!resumeLine };

@@ -66,7 +66,7 @@ export function nextWidening(ask: { roles?: string[]; role: string; place: strin
 // How many roles the person asked for ("find me 5 data analyst internships"); null when they named no number.
 const WORD_N: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
 export function wantOf(message: string): number | null {
-  const m = /\b(?:find|show|get|give|list|pull up|send)\s+(?:me\s+)?(?:the\s+)?(?:top\s+)?(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten)\b(?:\s+[a-z-]+){0,4}?\s+(?:internships?|interns?|jobs?|roles?|openings?|positions?)\b/i.exec(String(message ?? ""));
+  const m = /\b(?:find|show|get|give|list|pull up|send)\s+(?:me\s+)?(?:the\s+)?(?:top\s+)?(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten)\b(?:\s+[a-z,/-]+){0,9}?\s+(?:internships?|interns?|jobs?|roles?|openings?|positions?)\b/i.exec(String(message ?? ""));
   if (!m) return null;
   const n = WORD_N[m[1].toLowerCase()] ?? Number(m[1]);
   return n >= 1 && n <= 25 ? n : null;

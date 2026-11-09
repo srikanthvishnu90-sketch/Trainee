@@ -33,8 +33,9 @@ export const remoteInUs = (location: string) => /\bremote\b/i.test(location) && 
 const CUE = /\b(?:include|including|add|adding|widen|expand|broaden|plus|as well|too)\b/;
 const NOUN = "(?:internships?|interns?|roles?|jobs?|positions?|openings?)";
 // "business analyst and analytics internships" -> ["business analyst", "analytics"]
-function rolesNamed(s: string): string[] {
-  const m = new RegExp(`\\b(?:include|including|add|adding|also)\\s+(?:the\\s+)?([a-z][a-z ,/&-]{1,80}?)\\s+${NOUN}\\b`).exec(s);
+const COUNT = "(?:\\s+(?:the\\s+)?(?:top\\s+)?(?:\\d{1,2}|two|three|four|five|six|seven|eight|nine|ten))?(?:\\s+(?:verified|open|actually|currently|new|paid|more|other))*";
+function rolesNamed(s: string, fresh = false): string[] {
+  const m = new RegExp(fresh ? `\\b(?:find|show|search for|look for|get|list)(?:\\s+me)?${COUNT}\\s+([a-z][a-z ,/&-]{1,80}?)\\s+${NOUN}\\b` : `\\b(?:include|including|add|adding|also)\\s+(?:the\\s+)?([a-z][a-z ,/&-]{1,80}?)\\s+${NOUN}\\b`).exec(s);
   if (!m) return [];
   return m[1].split(/\s*(?:,|\band\b|\bor\b|\/|&)\s*/).map((x) => x.replace(/\b(?:more|other|some|any|also|remote|paid)\b/g, " ").replace(/\s+/g, " ").trim())
     .filter((x) => x && x.split(" ").length <= 4 && !/\b(?:us|u\.s|usa|area)\b/.test(x));
@@ -54,17 +55,48 @@ export function widenedAsk(message: string, discovery: unknown, now: number = Da
   const roles = [...new Set([...had, ...named].map(lc).filter(Boolean))];
   if (roles.length > had.length) changes.push("roles");
   let place = prev.place ?? null, area = !!prev.area;
-  const AREA = "\\s+(?:area|metro(?:politan)?(?:\\s+area)?|suburbs)\\b";
-  const a = new RegExp(`\\b(?:in|around|near)\\s+(?:the\\s+)?(?:greater\\s+)?([a-z][a-z.'-]*(?:\\s+[a-z][a-z.'-]*){0,2}?)${AREA}`).exec(s)
-    ?? new RegExp(`\\b(?:the\\s+)?([a-z][a-z.'-]*(?:\\s+[a-z][a-z.'-]*)?)${AREA}`).exec(s) ?? /\bgreater\s+([a-z][a-z.'-]*(?:\s+[a-z][a-z.'-]*)?)\b/.exec(s);
-  if (a) { place = a[1].trim(); if (!area) changes.push("area"); area = true; }
+  const ar = areaOf(s);
+  if (ar) { place = ar; if (!area) changes.push("area"); area = true; }
   let remote = !!prev.remote, remoteRegion = prev.remoteRegion ?? null;
   if (/\bremote\b/.test(s)) {
-    const us = /\bremote\s+(?:in\s+(?:the\s+)?)?(?:us|u\.s\.?|usa|united states)\b|\b(?:us|u\.s\.?|usa)[- ]remote\b|\bremote\b[^.]{0,30}\b(?:in|across) the (?:us|united states)\b/.test(s);
+    const us = remoteUsSaid(s);
     if (!remote || (us && remoteRegion !== "us")) changes.push(us ? "remote_us" : "remote");
     remote = true; if (us) remoteRegion = "us";
   }
   if (!changes.length) return null;
   const keep = (d?.lastShortlist ?? []).map((e) => String(e?.id ?? "")).filter(Boolean);
   return { ask: { ...prev, roles, place, area, remote, remoteOnly: false, remoteRegion, keep: [...new Set([...(prev.keep ?? []), ...keep])] }, changes };
+}
+
+// "the Chicago area", "greater Chicago", "Chicago suburbs" -> "chicago"
+function areaOf(s: string): string | null {
+  const AREA = "\\s+(?:area|metro(?:politan)?(?:\\s+area)?|suburbs)\\b";
+  const a = new RegExp(`\\b(?:in|around|near)\\s+(?:the\\s+)?(?:greater\\s+)?([a-z][a-z.'-]*(?:\\s+[a-z][a-z.'-]*){0,2}?)${AREA}`).exec(s)
+    ?? new RegExp(`\\b(?:the\\s+)?([a-z][a-z.'-]*(?:\\s+[a-z][a-z.'-]*)?)${AREA}`).exec(s) ?? /\bgreater\s+([a-z][a-z.'-]*(?:\s+[a-z][a-z.'-]*)?)\b/.exec(s);
+  return a ? a[1].trim() : null;
+}
+const remoteUsSaid = (s: string) => /\bremote\s+(?:in\s+(?:the\s+)?)?(?:us|u\.s\.?|usa|united states)\b|\b(?:us|u\.s\.?|usa)[- ]remote\b|\bremote\b[^.]{0,30}\b(?:in|across) the (?:us|united states)\b/.test(s);
+
+// F.1 (2026-11-08 6:02 pm): one search sentence that names several titles and places at once ("Find 3 verified open data
+// analyst, business analyst or analytics internships in the Chicago area or remote in the US") is that whole scope, not one
+// role made of every word.
+export function withScope(ask: SearchAsk, message: string): SearchAsk {
+  const s = lc(searchSentence(String(message ?? "")));
+  const roles = rolesNamed(s, true), area = areaOf(s), us = /\bremote\b/.test(s) && remoteUsSaid(s);
+  if (roles.length < 2 && !area && !us) return ask;
+  return { ...ask, ...(roles.length >= 2 ? { role: roles[0], roles } : {}), ...(area ? { place: area, area: true } : {}), ...(us ? { remote: true, remoteOnly: false, remoteRegion: "us" as const } : {}) };
+}
+
+// F.1: "What is actually blocking the search: no open roles found, a search connection problem, or my unconfirmed resume?"
+// asks about the last search: it is run again and the reply names the evidenced blocker (never an eligibility lecture).
+export function isBlockerAsk(message: string): boolean {
+  const t = lc(message);
+  return /\b(?:what(?:'s| is)(?: actually| really)? (?:blocking|stopping|holding up)|why (?:is|was|did|does) (?:the|my|this) search|why (?:are there |were there )?(?:no|nothing|zero) (?:roles?|jobs?|postings?|internships?|results?))\b/.test(t)
+    && /\b(?:search|postings?|roles?|jobs?|internships?|results?)\b/.test(t);
+}
+export function blockerAsk(message: string, discovery: unknown, now: number = Date.now()): SearchAsk | null {
+  const d = discovery as { lastAsk?: SearchAsk; lastAskAt?: number } | null;
+  if (!isBlockerAsk(message) || !d?.lastAsk || typeof d.lastAsk.role !== "string") return null;
+  if (typeof d.lastAskAt !== "number" || now - d.lastAskAt > 2 * CORRECTION_WINDOW_MS || now < d.lastAskAt) return null;
+  return d.lastAsk;
 }

@@ -54397,7 +54397,8 @@ const CareerRouter = (() => {
     // about the posting alone ("that posting is not in the list", "I found no posting for apply"), so the person learned
     // only later that nothing can be sent without a confirmed resume. The reply now says so too, and what to do.
     if (res && typeof res.reply === "string" && res.reply && res.intent !== "career_fallback" && res.intent !== "honest_unavailable" && !/\bresume\b/i.test(res.reply) && !resumeOnRecord(c)) {
-      const ask = lc(s(text)).replace(/[’]/g, "'");
+      // R10 F.1 (2026-11-08): "Don't apply to anything" is not an apply ask; listing roles never needs a confirmed resume.
+      const ask = lc(s(text)).replace(/[’]/g, "'").replace(/\b(?:don't|do not|never|not|without|no need to)\s+(?:\w+\s+){0,2}?(?:apply|applying|submit\w*)\b[^.?!]*/g, " ");
       if (!/\?\s*$/.test(ask) && /\bapply\s+(?:to|for|at|me|on|now)\b|\bapply\b[^.?!]{0,40}\b(?:jobs?|roles?|postings?|positions?|internships?|openings?)\b|\bsubmit (?:my|an?) applications?\b/.test(ask)) {
         res.reply = `${res.reply}\n\n${resumeDraftsPending(c).length
           ? "And nothing is sent anywhere before your resume is confirmed: its entries are waiting for your word (reply \"yes, that's my resume\" if they're right)."

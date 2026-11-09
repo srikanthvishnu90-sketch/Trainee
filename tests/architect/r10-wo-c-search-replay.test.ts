@@ -25,11 +25,18 @@ import { checkedAt, studentWindowOf, wantOf } from "../../supabase/functions/_sh
 import { linkChecker } from "../../supabase/functions/_shared/link_check.ts";
 import { personZone } from "../../supabase/functions/_shared/person_zone.ts";
 import { renderFeed } from "../../supabase/functions/_shared/file_page.ts";
+import { ackFor } from "../../supabase/functions/_shared/channel_voice.ts";
+import { isBlockerAsk, withScope } from "../../supabase/functions/_shared/search_widen.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const S1 = "Let's leave the resume for now. Find me 5 data analyst internships in Chicago that are actually open. Show the company, role, location, and application link. Don't apply yet.";
 const S2 = "Okay, include business analyst and analytics internships in the Chicago area, plus remote US internships. Even 2 or 3 verified open roles is useful. Show the real links and any student or graduation requirements.";
-const ME = "7b0f8f8e-6a43-4a49-9d2c-000000c10001", OTHER = "7b0f8f8e-6a43-4a49-9d2c-000000c10002";
+// Spec F.1 (owner, 2026-11-08 6:02 pm CST, production after the limit reset): the two turns, word for word.
+const F1 = "Can you try that search again now? Find 3 verified open data analyst, business analyst or analytics internships in the Chicago area or remote in the US. Include the company, exact role, location, application link and any student or graduation requirements. Don't apply to anything.";
+const F2 = "I already widened the roles and location. What is actually blocking the search: no open roles found, a search connection problem, or my unconfirmed resume? Please tell me which. You can show me open postings and their requirements without deciding whether I'm eligible. Don't apply or confirm my resume for me.";
+const RESEARCH = "Let's leave the job search for now. What's Stripe like to work for as a data analyst intern? Give me a useful company research answer: what its business does, what an analyst might work on, any concerns to investigate, and 5 good questions to ask in an interview. Use real sources and distinguish facts from your interpretation. Don't apply or contact anyone.";
+const RESUME = "TEST Person\n\nEDUCATION\nExample University, BS Statistics, expected May 2027\n\nEXPERIENCE\nData Intern, TEST Example Co, Summer 2025\n- Built weekly SQL reports for the sales team\n\nSKILLS\nPython, SQL, Excel";
+const ME = "7b0f8f8e-6a43-4a49-9d2c-000000c10001", OTHER = "7b0f8f8e-6a43-4a49-9d2c-000000c10002", F1P = "7b0f8f8e-6a43-4a49-9d2c-000000c10003";
 const NB = "3f1c2a4e-5b6d-4e7f-8a9b-0c1d2e3f4a5b", MAPLE = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d", PRAIRIE = "0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
 const lit = (s: string) => `$q$${s}$q$`;
 const BOARD = [
@@ -70,7 +77,16 @@ Deno.test("WO-C units: the S1 role is the asked role; S2 widens the last search;
   assertNode.ok(remoteInUs("Remote - United States") && remoteInUs("Remote") && !remoteInUs("Remote - Canada"));
   assertNode.equal(studentWindowOf("Hybrid. Open to students graduating between December 2026 and June 2028. SQL."), "Open to students graduating between December 2026 and June 2028.");
   assertNode.equal(studentWindowOf("SQL and Python."), null);
-  assertNode.equal(wantOf(S1), 5); assertNode.equal(wantOf(S2), null);
+  assertNode.equal(wantOf(S1), 5); assertNode.equal(wantOf(S2), null); assertNode.equal(wantOf(F1), 3);
+  // F.1: one sentence naming three titles and two places is that whole scope; the blocker question is recognised.
+  const f1 = withScope({ role: "data analyst business analyst analytics", place: null, remote: true }, F1);
+  assertNode.deepEqual([f1.roles, f1.place, f1.area, f1.remoteRegion], [["data analyst", "business analyst", "analytics"], "chicago", true, "us"]);
+  assertNode.ok(isBlockerAsk(F2) && !isBlockerAsk(S1) && !isBlockerAsk(RESEARCH));
+  // F.1/F.2: the ack names the turn's real intent (production said "looking for roles now" to company research).
+  assertNode.equal(ackFor(RESEARCH), "on it — researching that now");
+  assertNode.equal(ackFor(F2), "on it — checking that now");
+  assertNode.equal(ackFor(F1), "on it — looking for roles now");
+  assertNode.equal(ackFor("I'm not asking for an application batch. I only want company research about Stripe. If you can't research it, name the specific blocker instead of explaining how to apply."), "on it — researching that now");
   assertNode.equal(checkedAt(Date.parse("2026-11-08T23:16:00Z"), "America/Chicago").text, "Nov 8, 5:16 PM CST");
   assertNode.deepEqual(checkedAt(Date.parse("2026-11-08T23:16:00Z"), null), { text: "Nov 8, 11:16 PM UTC", zoneKnown: false });
   assertNode.deepEqual(personZone({ alertTz: null, location: "Chicago, IL" }), { tz: "America/Chicago", city: "Chicago" });
@@ -112,13 +128,13 @@ Deno.test({
     try {
       await supabaseParity(pg);
       const prefs = JSON.stringify({ on: false, keywords: ["data analyst"], locations: [], remote_ok: true, report_hour: 8, quiet_start: 22, quiet_end: 7, max_instant_per_day: 3 });
-      await pg.sql(`insert into auth.users (id, email) values ('${ME}', 'c1@example.test'), ('${OTHER}', 'c2@example.test');
-        insert into public.profiles (id) values ('${ME}'), ('${OTHER}');
-        insert into public.career_watch_kv (user_id, key, value) values ('${ME}', 'career:account', '{"epoch":0,"version":0,"paused":false}'), ('${OTHER}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
+      await pg.sql(`insert into auth.users (id, email) values ('${ME}', 'c1@example.test'), ('${OTHER}', 'c2@example.test'), ('${F1P}', 'c3@example.test');
+        insert into public.profiles (id) values ('${ME}'), ('${OTHER}'), ('${F1P}');
+        insert into public.career_watch_kv (user_id, key, value) values ('${ME}', 'career:account', '{"epoch":0,"version":0,"paused":false}'), ('${OTHER}', 'career:account', '{"epoch":0,"version":0,"paused":false}'), ('${F1P}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
         insert into public.career_alert_prefs (user_id, tz, prefs, last_checked_at) values ('${ME}', 'America/Chicago', ${lit(prefs)}::jsonb, now());
         insert into public.career_postings (job_id, provider, board, company, title, location, url, description, first_seen_at, last_seen_at, closed_at) values
         ${BOARD.map((b) => `(${lit(b.id)}, ${lit(b.id.split(":")[0])}, ${lit(b.id.split(":")[1])}, ${lit(b.co)}, ${lit(b.t)}, ${lit(b.loc)}, ${lit(b.url)}, ${lit(b.d)}, now() - interval '2 days', now(), ${(b as any).closed ? "now()" : "null"})`).join(",\n")};`);
-      h = await careerHandler(pg, { me: ME, other: OTHER });
+      h = await careerHandler(pg, { me: ME, other: OTHER, f1: F1P });
       const viaDouble = globalThis.fetch, outbound: string[] = [];
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
@@ -155,9 +171,9 @@ Deno.test({
         assertNode.match(one, /Student window: "Open to students graduating between December 2026 and June 2028"/);
         assertNode.match(two, /Student window: "Applicants must be currently enrolled in a bachelor's program"/);
         for (const b of [one, two]) {
-          assertNode.match(b, /Open: its application page was checked [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d\d [AP]M C[SD]T/, "checked time in the person's zone (Chicago)");
+          assertNode.match(b, /\n   Checked: open on its application page, [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d\d [AP]M C[SD]T\.\n/, "checked time in the person's zone (Chicago)");
           assertNode.match(b, /Apply: https:\/\/boards\.greenhouse\.io\/(acme|lake)\/jobs\/10[12]/);
-          assertNode.match(b, /Uncertain: your graduation date isn't confirmed/, "a missing fact is named beside the role, never an eligibility verdict");
+          assertNode.match(b, /\n   Uncertain: your graduation date isn't confirmed, so eligibility isn't decided\./, "a missing fact is named beside the role, never an eligibility verdict");
         }
         assertNode.match(r.reply, /I did not find 5 within the scope checked/);
         assertNode.match(r.reply, /2 roles were left out: closed when checked/);
@@ -177,8 +193,7 @@ Deno.test({
         const rest = list.slice(2).join("\n");
         for (const want of ["Data Analyst Internship at Motorway Co — Schaumburg, IL", "Business Analyst Intern at Prairie Bank — Evanston, IL, on-site", "Analytics Intern at Northbeam — Remote - United States, remote"]) assertNode.ok(rest.includes(want), `${want} | ${r.reply}`);
         assertNode.equal(list.length, 5, r.reply);
-        assertNode.match(r.reply, /4 in the Chicago area, 1 remote in the US/);
-        assertNode.match(r.reply, /5 of 5 listed were re-checked open just now/);
+        assertNode.match(r.reply, /^I verified 5 open matches\. 4 are in the Chicago area and 1 is remote in the US\./m);
         for (const never of ["Maple Data", "Stale Co", "Quiet Co", "Gone Corp", "Senior Data Analyst", "Fulltime Inc"]) assertNode.ok(!r.reply.includes(never), `${never} is not listed in S2`);
         assertNode.match(r.reply, /Nothing was applied for/);
       });
@@ -190,6 +205,33 @@ Deno.test({
         assertNode.match(r.reply, /The most useful widening is remote roles in the US/);
         assertNode.match(r.reply, /nothing was applied for/);
         assertNode.equal(items(r.reply).length, 0);
+      });
+
+      await t.step("F.1: the post-reset turns: one scope of three titles and two places; no resume tail; the evidenced blocker", async () => {
+        const c = h!.chat("f1");
+        const pasted = await say(c, RESUME);
+        console.log(`--- F.1 resume paste (${pasted.intent})\n${pasted.reply.slice(0, 300)}`);
+        assertNode.equal(pasted.intent, "career_resume_ingest", "the resume is read and waits for the person's word (unconfirmed, as in production)");
+        const r1 = await say(c, F1);
+        console.log(`--- F.1 turn 1 (${r1.intent})\n${r1.reply}`);
+        assertNode.ok(!/nothing is sent anywhere before your resume is confirmed/i.test(r1.reply), "a search never carries the resume-confirmation tail");
+        const list = items(r1.reply);
+        assertNode.ok(list.length >= 3, r1.reply);
+        for (const want of ["Acme Freight", "Prairie Bank", "Northbeam"]) assertNode.ok(r1.reply.includes(want), `${want} | ${r1.reply}`);
+        for (const never of ["Maple Data", "Stale Co", "Quiet Co", "Fulltime Inc"]) assertNode.ok(!r1.reply.includes(never), never);
+        const r2 = await say(c, F2);
+        console.log(`--- F.1 turn 2 (${r2.intent})\n${r2.reply}`);
+        assertNode.ok(!/Eligibility can't be graded|Paste the posting text/.test(r2.reply), "never the eligibility lecture, never asks for a posting");
+        assertNode.match(r2.reply, /^Nothing is blocking it: \d+ open roles are listed below\. Your resume isn't confirmed, and that doesn't block a search/);
+        assertNode.equal(items(r2.reply).length, list.length, "the same listing, shown again");
+        assertNode.ok(!/nothing is sent anywhere before your resume is confirmed/i.test(r2.reply));
+        // The same blocker question after a search that found nothing names that blocker, with its scope.
+        const o = h!.chat("other");
+        await say(o, "Find me 3 economist internships in Peoria. Show the links.");
+        const r3 = await say(o, "What is actually blocking the search: no open roles found, a search connection problem, or my unconfirmed resume?");
+        console.log(`--- F.1 blocker after an empty search (${r3.intent})\n${r3.reply}`);
+        assertNode.match(r3.reply, /^What blocked it: no open roles were found in the scope I checked\. It was not a connection problem \(the job boards were read\), and not your resume/);
+        assertNode.match(r3.reply, /I checked economist internships in Peoria/);
       });
 
       assertNode.deepStrictEqual(await effects(), zero, "nothing applied for, queued or sent");

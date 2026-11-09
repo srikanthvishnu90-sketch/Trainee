@@ -71,13 +71,13 @@ const FOLD = `(() => {
 })()`;
 Deno.env.set("R10_EVIDENCE_DIR", OUT);
 
-type Status = "PASS" | "FAIL" | "NOT_RUN";
+type Status = "PASS" | "FAIL" | "NOT_RUN" | "BLOCKED"; // BLOCKED: a named reason outside the product (not a FAIL)
 interface Check { item: number; turn: string; check: string; status: Status; detail: string }
 const checks: Check[] = [];
 const files: string[] = [], screenshots: string[] = [], modelLog: string[] = [];
 const transcript: { turn: string; text: string; reply: string; artifacts: string[]; links: string[]; usd_micros_after: number; calls_after: number }[] = [];
-const note = (item: number, turn: string, check: string, pass: boolean | null, detail = "") => {
-  const status: Status = pass === null ? "NOT_RUN" : pass ? "PASS" : "FAIL";
+const note = (item: number, turn: string, check: string, pass: boolean | null | "blocked", detail = "") => {
+  const status: Status = pass === "blocked" ? "BLOCKED" : pass === null ? "NOT_RUN" : pass ? "PASS" : "FAIL";
   checks.push({ item, turn, check, status, detail: detail.replace(/\s+/g, " ").slice(0, 400) });
   console.log(`${status.padEnd(7)} [${item}] ${turn}: ${check}${detail && status !== "PASS" ? ` — ${detail.slice(0, 200)}` : ""}`);
 };
@@ -311,12 +311,11 @@ async function main() {
     const CLAIMS_PAUSE = /\bPaused your account\b|\baccount is still paused\b|\bpause is saved\b|global pause|blocks every send path|stopped everything/i;
 
     // R-4, the Telegram document (architect, 2026-11-09): observed from Trainee's side, from the delivery record's sendDocument
-    // response (ok, document.file_id, file_size equal to the PDF's length, then getFile and a sha256 match). Not observable yet,
-    // so this is a FAIL with its reason, never a pass: the delivery record keeps only message_id (_shared/telegram.ts
-    // sendDocument), which is a WO-B change; and Telegram refuses sendDocument to a chat that never started the bot, so the
-    // synthetic id receives no document at all (nothing is sent to anyone; the check needs a test chat that has started the bot).
-    const telegramDocument = () => note(4, "telegram", "the Telegram document is observed: sendDocument ok, file_id, file_size = the PDF's length, getFile sha256 match", false,
-      `not observable: the delivery record keeps only message_id (WO-B), and the synthetic chat never started the bot, so Telegram delivers it nothing; trainee-telegram's own count: ${docsSeen.map((d) => `${d.turn} sent ${d.sent} failed ${d.failed}`).join(", ") || "no document sent in any turn"}`);
+    // response (ok, document.file_id, file_size equal to the PDF's length, then getFile and a sha256 match). BLOCKED, never a
+    // pass: Telegram refuses sendDocument to a chat that never started the bot, so the synthetic id receives no document; it
+    // needs an owner-provided test chat (the architect is asking the owner). WO-B stores file_id and file_size.
+    const telegramDocument = () => note(4, "telegram", "the Telegram document is observed: sendDocument ok, file_id, file_size = the PDF's length, getFile sha256 match", "blocked",
+      `needs an owner-provided test chat; trainee-telegram's own count: ${docsSeen.map((d) => `${d.turn} sent ${d.sent} failed ${d.failed}`).join(", ") || "no document sent in any turn"}`);
     // --smoke (the deploy smoke's R10 step): the File endpoint, a resume PDF link with intact bytes, and the inbound path, each
     // for the synthetic identity only. Then the run ends (no observed-turn replay).
     if (SMOKE) {

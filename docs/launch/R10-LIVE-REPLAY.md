@@ -84,13 +84,14 @@ Telegram update to `trainee-telegram`, with a reply recorded for it (Telegram re
 File endpoint: the list link opens signed out (200 or 303, HTML, its own policy) and signed in; (3) a resume PDF link: 200,
 `application/pdf`, and the same bytes as the stored document.
 
-The full replay (not the smoke, so it never rolls a deploy back) records the R-4 Telegram document step (`telegram`) as a FAIL
-with its reason, never a pass. The detail includes trainee-telegram's own count of documents sent and failed. The architect's
+The full replay records the R-4 Telegram document step (`telegram`) as BLOCKED, "needs an owner-provided test chat", never a
+pass. BLOCKED is a named outside reason, not a FAIL, and the smoke never runs this step. The detail includes trainee-telegram's own
+count of documents sent and failed. The architect's
 design observes it from Trainee's side: the delivery record's `sendDocument` response with `ok`, `document.file_id` and a
 `file_size` equal to the PDF's length, then `getFile` and a sha256 match against the stored PDF. Two things stand in the way
-today. The delivery record keeps only `message_id` (`_shared/telegram.ts`), so storing the response is a WO-B change. And
+today. The delivery record keeps only `message_id` (`_shared/telegram.ts`); WO-B is storing `file_id` and `file_size`. And
 Telegram refuses `sendDocument` to a chat that never started the bot, so the synthetic id gets no document. The step needs a
-test chat that has started the bot.
+test chat that has started the bot, which the owner provides.
 
 ## Not covered
 

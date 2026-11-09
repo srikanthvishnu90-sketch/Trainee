@@ -23,6 +23,9 @@ export const KIND_IDS = ["job_list", "introduction", "application_proof", "plan_
 export type KindId = typeof KIND_IDS[number];
 export const KIND_LABEL: Record<KindId, string> = { job_list: "Your jobs", introduction: "Introduction", application_proof: "Application proof", plan_review: "Plan review", comparison: "Comparison", draft: "Draft", research_brief: "Research brief" };
 export const MODEL_KINDS = KIND_IDS.filter((k) => k !== "job_list");
+// R10 WO-E (architect ruling, 2026-11-09): the fifteen File families, each with the kind that carries it and a fictional specimen of
+// its main state, for the acceptance suite (WO-I). Defined beside the family renderers (file_family_specimens.ts).
+export { FILE_FAMILIES, type FamilySpecimen } from "./file_family_specimens.ts";
 
 export interface FileRecord {
   id: string; userId: string; kind: KindId; data: any; state: Record<string, any>;

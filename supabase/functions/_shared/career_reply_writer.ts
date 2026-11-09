@@ -53,7 +53,9 @@ export const PAYLOAD_INTENTS: ReadonlySet<string> = new Set([
   "outreach_draft", "negotiation_draft", "career_tailor", "prep_mock_start", "prep_mock_next", "prep_mock_followup",
 ]);
 // results_file: the reply carries the results page's link, minted by code (role_results.ts); its words and link stay as they are.
-const PAYLOAD_META = ["card_id", "email_card", "offer_card", "open_card", "career_approval_card_id", "employer_question", "screen_ask", "results_file", "apply_all_offer", "apply_all_done"];
+const PAYLOAD_META = ["card_id", "email_card", "offer_card", "open_card", "career_approval_card_id", "employer_question", "screen_ask", "results_file", "apply_all_offer", "apply_all_done",
+  // R10: the resume task's rewording preview, whose shown pairs are what a yes approves (hash-bound).
+  "resume_preview"];
 
 export function writable(out: { intent?: string | null; reply?: string; parts?: unknown; handler?: string | null }, meta: Record<string, unknown> | null, o: { structured: boolean }): boolean {
   if (o.structured) return false;

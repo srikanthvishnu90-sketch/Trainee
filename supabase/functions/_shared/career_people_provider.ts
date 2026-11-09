@@ -25,7 +25,7 @@ import { neverOpen } from "./career_people_sites.ts";
 import { formerTitle, type PageRead, readPage, type Resolver } from "./career_people_page.ts";
 import { domainLabelOf, registrable } from "./career_people_gmail.ts";
 import { dohMx, isRoleAddress, isTeamName, type MxResolver } from "./career_contacts.ts";
-import { CLAUDE_DEFAULT_MODEL, modelConfig, WEB_SEARCH_AVAILABLE, webSearch } from "./model_gateway.ts";
+import { assertProductModel, CLAUDE_DEFAULT_MODEL, modelConfig, PRODUCT_MODELS, WEB_SEARCH_AVAILABLE, warnIgnoredOnce, webSearch } from "./model_gateway.ts";
 
 export type ProviderName = "web";
 export const LABEL: Record<ProviderName, string> = { web: "web search" };
@@ -51,16 +51,21 @@ export interface PeopleProvider { name: ProviderName; supportsSchool: false; fin
 // ------------------------------------------------------------------------------------------------ config
 export interface ProviderConfig { provider: ProviderName | null; apiKey: string | null; model: string; cacheSeconds: number; leaseSeconds: number; switchedOn: boolean }
 // CAREER_PEOPLE_SEARCH=on switches discovery on (model spend: the owner's to approve); the key is the gateway's own
-// (ANTHROPIC_API_KEY through modelConfig), and nothing runs while the gateway's web search is not available. CAREER_PEOPLE_SEARCH_MODEL picks the model; CAREER_PEOPLE_CACHE_DAYS
+// (ANTHROPIC_API_KEY through modelConfig), and nothing runs while the gateway's web search is not available. The model is
+// claude-sonnet-5-5 only (D-046): CAREER_PEOPLE_SEARCH_MODEL naming anything else is ignored with one log line, and the
+// config goes through assertProductModel, so a stale secret can never switch web search on with another model; CAREER_PEOPLE_CACHE_DAYS
 // (default 30) is how long one company's discovery is reused for everyone.
 export function providerConfig(env: (k: string) => string | undefined): ProviderConfig {
   const switchedOn = (env("CAREER_PEOPLE_SEARCH") ?? "").trim().toLowerCase() === "on";
   const gw = modelConfig({ get: env });
+  const asked = (env("CAREER_PEOPLE_SEARCH_MODEL") ?? "").trim();
+  if (asked && !PRODUCT_MODELS.includes(asked)) warnIgnoredOnce("CAREER_PEOPLE_SEARCH_MODEL", asked, "Trainee serves claude-sonnet-5-5 only (D-046)");
+  const model = assertProductModel({ ...gw, model: DEFAULT_SEARCH_MODEL }).model;
   const key = WEB_SEARCH_AVAILABLE && gw.apiKey ? gw.apiKey : null;
   const days = Number(env("CAREER_PEOPLE_CACHE_DAYS"));
   return {
     provider: switchedOn && key ? "web" : null, apiKey: switchedOn ? key : null, switchedOn,
-    model: (env("CAREER_PEOPLE_SEARCH_MODEL") ?? "").trim() || DEFAULT_SEARCH_MODEL,
+    model,
     cacheSeconds: Math.round((Number.isFinite(days) && days >= 0 && env("CAREER_PEOPLE_CACHE_DAYS") !== undefined ? days : DEFAULT_CACHE_DAYS) * 86400), leaseSeconds: 120,
   };
 }

@@ -168,7 +168,7 @@ export function supabaseCloudOptinStore(admin: any): CloudOptinStore {
     async outboxSince(userId, at) {
       try {
         const r = await admin.from("career_outbox").select("id", { count: "exact", head: true }).eq("user_id", userId)
-          .neq("kind", "reply").gt("created_at", new Date(at).toISOString());
+          .neq("kind", "reply").neq("kind", "interim").gt("created_at", new Date(at).toISOString());
         return r.error || typeof r.count !== "number" ? Infinity : r.count;
       } catch {
         return Infinity;

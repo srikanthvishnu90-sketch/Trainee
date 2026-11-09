@@ -24,7 +24,7 @@ export const REPLY_CODE_DIRS = [
 export const ROUTER_BUNDLE = "supabase/functions/_shared/router_core.career.js";
 
 export const SHARED_REPLY_MODULES = [
-  "ai_policy.ts", "answer_options.ts", "apply_email.ts", "apply_status_summary.ts", "career_search_judge.ts", "posting_constraints.ts", "search_correction.ts", "career_pool.js", "apply_trust.ts", "approval_words.ts", "career_account_memory.ts",
+  "ai_policy.ts", "answer_options.ts", "apply_email.ts", "apply_status_summary.ts", "career_search_judge.ts", "posting_constraints.ts", "search_correction.ts", "search_widen.ts", "search_shortlist.ts", "person_zone.ts", "submit_capability.ts", "limit_stop.ts", "career_pool.js", "apply_trust.ts", "approval_words.ts", "career_account_memory.ts",
   "career_alert_store.ts", "career_alerts.ts", "career_apply.ts", "career_ask_canon.ts", "career_resume_design.ts", "career_resume_gaps.ts", "career_resume_outcomes.ts", "career_apply_cards.ts", "career_apply_gate.ts",
   "career_apply_screen.ts", "career_apply_status.ts", "career_apply_want.ts", "career_brief_store.ts", "career_calendar.ts",
   "career_capabilities.ts", "career_contacts.ts", "career_digest.ts", "career_floor.ts", "career_fresh.ts", "career_hired.ts",
@@ -36,7 +36,7 @@ export const SHARED_REPLY_MODULES = [
   "career_referrals.ts", "career_router_evidence.ts", "career_search.ts", "career_send_rail.ts", "career_situation.ts",
   "career_staffing_agencies.ts", "career_tailor.ts", "career_url_shape.js", "career_voice_link.ts", "channel.ts",
   "channel_adapters.ts", "channel_card_tap.ts", "channel_shape.ts", "channel_text.ts", "conversation.ts", "essay_draft.ts", "essay_draft_baseline.ts",
-  "fact_quarantine.ts", "fact_schema.ts", "file_design.ts", "file_kinds.ts", "file_link.ts", "file_page.ts", "file_service.ts",
+  "fact_quarantine.ts", "fact_schema.ts", "file_design.ts", "file_kinds.ts", "file_link.ts", "file_page.ts", "file_service.ts", "file_session.ts",
   "identity_redact.ts", "length_limit.ts", "link_check.ts", "model_budget.ts", "model_calls.ts", "model_gateway.ts", "person_claims.ts", "person_claims_baseline.ts",
   "personal_fact_source.ts", "posting_key.ts", "posting_pay.ts", "posting_place.ts", "posting_region.ts", "posting_text.ts", "question_map.ts",
   "brand.ts", "row_answer.ts", "telegram_jobs.ts", "apply_all_yes.ts", "apply_all_yes_flag.ts", "role_results.ts", "career_resume_replace.ts",
@@ -44,6 +44,8 @@ export const SHARED_REPLY_MODULES = [
   "career_reply_writer.ts", "career_code_in_chat.ts",
   // 2026-11-07 (release 9 B): tailor_resume's layouts and gap report, and the version record it writes (career_tools.ts).
   "career_resume_design.ts", "career_resume_gaps.ts", "career_resume_outcomes.ts",
+  // R10 (2026-11-08): the fifteen templates, their metrics, the format rater and the geometry reader it measures with.
+  "career_resume_templates.ts", "career_resume_metrics.ts", "career_resume_rater.ts", "career_resume_geometry.ts",
   // R9-C (2026-11-07): market research on the reply path: the search provider and what it imports (sources, the research
   // reply, its report store and the artifact it is delivered as).
   "research_search.ts", "research_sources.ts", "research_reply.ts", "research_report_store.ts", "channel_artifacts.ts",
@@ -55,6 +57,8 @@ export const SHARED_REPLY_MODULES = [
   // R9 outreach (2026-11-08): who may be written to (no-reply, role and ATS/job-board inboxes never) and the staged route's
   // reading of an ask to write to someone.
   "automated_inbox.ts", "outreach_ask.ts",
+  // R10 F.3 (2026-11-09): a stop turn's reply, built from the control state it wrote and read back (handler-career.ts).
+  "career_stop_truth.ts",
 ] as const;
 
 // D-036 (release flags, agent-chat/release_config.ts RELEASE_FLAGS): the code behind every flag the release serves ON that

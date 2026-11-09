@@ -50,6 +50,6 @@ Deno.test("a file on an employer, and the person's own papers, stay documents; t
     assertNode.ok(!researchAsk(m), `not research: ${m}`);
     assertNode.ok(!marketResearchAsk(onOnly, m, "career_document_delivery"), m);
   }
-  for (const m of EMPLOYER) assertNode.ok(!marketResearchAsk(env({}), m, "career_document_delivery"), `off: ${m}`);
+  for (const m of EMPLOYER) assertNode.ok(!marketResearchAsk(env({ CAREER_RESEARCH_REPLY: "off" }), m, "career_document_delivery"), `off: ${m}`);
   assertNode.ok(!marketResearchAsk(onOnly, "is Stripe a good place to start? apply to all their roles", "career_batch_apply"), "an apply stays code's");
 });

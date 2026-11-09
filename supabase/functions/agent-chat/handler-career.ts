@@ -58,7 +58,7 @@ const researchCache = memoryGroundCache();
 // when it cannot, the research reader reads nothing (fails closed) instead of fetching without the resolved-address check.
 if (researchReplyOn(Deno.env)) void dnsProbe();
 import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWindow, summaryFor } from "./career_brain.ts";
-import { brainMode, stagedRoute, stagedToolPolicy } from "./career_staged.ts";
+import { brainMode, researchOverAction, stagedRoute, stagedToolPolicy } from "./career_staged.ts";
 import { turnClock } from "./turn_clock.ts";
 let isolateTurns = 0; // D6: turns this isolate has served, so the log can tell a cold start from a warm one
 import { CRISIS_INTENT, crisisReply } from "./crisis.ts";
@@ -177,6 +177,8 @@ async function careerGrantHas(admin: any, userId: string, scope: string): Promis
 // may or may not have landed. Anything that goes to an employer or a contact still needs their approval of exactly it.
 export { CONFLICT_REPLY, refusedSaveReply };
 
+// R10 WO-H, spec F.2 (d): the specific blocker when company research is asked for while research is switched off on this service.
+export const RESEARCH_OFF_REPLY = "I can't do that company research here yet: research with checked sources is switched off on this service, so I won't give you facts from memory. Nothing was applied for and no one was contacted.";
 export const UNSAVED_REPLY = "I couldn't confirm this reply was saved. Send your message again; nothing goes to an employer or a contact until you approve exactly what is sent.";
 // MASS APPLY END TO END (2026-11-04): the batch stack's executor is not deployed (CAREER_BATCH_EXECUTOR, D-037), so its ask is
 // not started, said plainly; the reply names the ask that does run on the deployed path (the queue, server preparation, the
@@ -740,7 +742,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       else if (cardHold) planned = { claimed: true, reply: "You asked me not to apply, so I haven't approved or sent anything. Do you want me to submit the application on your card, or send you the resume PDF?",
         intent: RESUME_CLARIFY_INTENT, resultStatus: "awaiting_user", parts: undefined, documents: [], meta: null } as unknown as Extract<PlannerTurn, { claimed: true }>;
       // The planner calls the model: without a model key it is never tried (no failing call, no cost row), as the brain.
-      if (!resumeAns && !cardHold && !noApply && !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && plannerOn(Deno.env, user.id) && !!careerModelConfig(Deno.env).apiKey && !host.isHostControlled(message, ctx)) {
+      // Review F2 (item 3): a research ask with a no-action boundary ("don't apply or contact anyone") is research, never a planned task.
+      if (!resumeAns && !cardHold && !noApply && !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && !researchOverAction(message) && plannerOn(Deno.env, user.id) && !!careerModelConfig(Deno.env).apiKey && !host.isHostControlled(message, ctx)) {
         const pMeter = ledger.track(newMeter()), pCfg = careerModelConfig(Deno.env);
         const pModel = (payload: any) => callModel(pCfg, payload, { meter: pMeter, role: "chat" });
         try {
@@ -1118,7 +1121,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // Only addresses in the person's own contacts; the model writes only with CAREER_NETWORKING_DRAFT=on (metered).
       // Nothing is sent here: sending stays career-proactive's, behind CAREER_OUTREACH_SEND.
       const netMeter = ledger.track(newMeter());
-      const networking = !emailAsk && !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && (!queued || (!!reach && !queued.ask?.length)) && !f08 && !stood && !status && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      // Spec F.2: a research ask that says not to contact anyone never starts networking (a people list, intros, outreach).
+      const networking = !researchOverAction(message) && !emailAsk && !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && (!queued || (!!reach && !queued.ask?.length)) && !f08 && !stood && !status && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await networkingTurn({ message: queued && reach ? reach.outreach : message, userId: user.id, threadId: tid, now: Date.now(), state: ctx as unknown as Record<string, unknown>, store: outreachStore, events, postings: supabaseReferralPostings(admin),
             attachments: Array.isArray(body.attachments) ? (body.attachments as any[]).filter((a) => a && typeof a === "object").map((a) => ({ name: String(a.name ?? "contacts.csv"), mime: typeof a.mime === "string" ? a.mime : "", text: typeof a.text === "string" ? a.text : null })) : [],
             model: chatSwitches(Deno.env).networkingDraft ? (payload: any) => callModel(careerModelConfig(Deno.env), payload, { meter: netMeter, role: "chat" }) : null,
@@ -1343,6 +1347,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (offerAns.card) agentMeta = { offer_card: offerAns.card };
       } else if (outreachStatus) {
         out = { reply: outreachStatus.reply, intent: outreachStatus.intent, resultStatus: outreachStatus.status, contained: false, handler: "outreach_status" };
+      } else if (!careerTask && !careerBatch && !researchReplyOn(Deno.env) && researchOverAction(message) && !host.isHostControlled(message, ctx)) {
+        // R10 WO-H, spec F.2 (d): company research asked with a no-action boundary while research is switched off. The specific
+        // blocker, said plainly; never the batch or people-list path the router's keywords pick, and no facts from memory.
+        out = { reply: RESEARCH_OFF_REPLY, intent: "company_research", resultStatus: "not_started", contained: false, handler: "research_off" };
       } else if (!careerTask && !careerBatch && ((AGENT_BRAIN_RELEASED && chooseBrain(Deno.env) === "agent") || (stagedReady && staged.toBrain())) && !host.isHostControlled(message, ctx)) {
         const meter = ledger.track(newMeter());
         const cfg = careerModelConfig(Deno.env);

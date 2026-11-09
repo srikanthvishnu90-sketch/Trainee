@@ -26,6 +26,7 @@ type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler:
 import { correctedAsk } from "../_shared/search_correction.ts";
 import { askFor } from "../_shared/career_search_judge.ts";
 import { outreachAsk } from "../_shared/outreach_ask.ts";
+import { researchReplyOn } from "../_shared/research_reply.ts"; // D-047
 export type BrainMode = "router" | "agent" | "staged";
 // The served brain (release_config.ts): the committed PRODUCTION_BRAIN unless CAREER_BRAIN rolls it back to the router.
 // "agent" is never served from here (the full brain stays pinned off in career_brain.ts).
@@ -349,14 +350,43 @@ const OWN_PAPERS = /\b(?:my|mine|our|the|that|this|these|those)\s+(?:tailored\s+
 // of all the jobs I've applied for", "a report on all my applications"), is an export, never market research.
 const OWN_RECORD = /\b(?:everything|all(?:\s+of)?(?:\s+(?:the|my))?(?:\s+(?:stuff|things|ones|jobs?|roles?|positions?|places|applications?|apps))?|each|every\s+(?:job|role|application|place))\s+(?:that\s+)?(?:i|we)(?:'ve|\s+have|\s+had|'d)?\s+(?:ever\s+)?(?:applied|sent|submitted|saved|done)\b|\b(?:brief|briefing|report|analysis|overview|rundown|write[\s-]?up|summary)\s+(?:on|about|of|for|covering)\s+(?:everything|all\s+(?:of\s+)?(?:my|mine|it))\b/i;
 const RESEARCH_OVER = new Set(["career_document_delivery", "profile_export"]);
+// R10 WO-H fix 14 (spec B.6 continuation 5): "I have a Stripe analyst interview. Tell me what I should know, not a generic company
+// overview." A named company's interview (a capitalized name before "interview") with what to know or ask is company research
+// (research_company), not the router's company-intel recipe. "What should I ask in my interview?" names no company and stays prep.
+const INTERVIEW_AT = /\b(?:have|got|landed)\s+(?:an?\s+)?(.{2,48}?)\s+interviews?\b/i;
+const KNOW_OR_ASK = /\bwhat\s+(?:i\s+should|should\s+i|to|i\s+need\s+to|do\s+i\s+need\s+to)\s+(?:know|ask)\b|\b(?:research|brief\s+me\s+on|tell\s+me\s+about)\b/i;
+// Review F2 (item 6): also "an interview at/with <Name>" ("I have an interview at Stripe next week, what should I know?") and research
+// about a named company before the interview ("Tell me about Stripe's business before my interview, do not apply").
+const INTERVIEW_WITH = /\binterview(?:s|ing)?\s+(?:at|with)\s+(\p{Lu}[\p{L}&.-]+)/u;
+const ABOUT_BEFORE = /\b(?:tell\s+me\s+about|research|brief\s+me\s+on|what\s+should\s+i\s+know\s+about|look\s+into)\s+(\p{Lu}[\p{L}&.-]+)[^?!]{0,80}?\b(?:before|for|ahead\s+of)\s+(?:my|the|an?|this|that)\s+(?:\w+\s+){0,2}interview/iu;
+export function companyInterviewAsk(message: string): boolean {
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'"), hit = INTERVIEW_AT.exec(m);
+  if (hit && /(?<![\p{L}])\p{Lu}[\p{L}&.-]+/u.test(hit[1]) && KNOW_OR_ASK.test(m)) return true;
+  const w = INTERVIEW_WITH.exec(m);
+  if (w && !/^(?:I|My|The|A|An)$/.test(w[1]) && (KNOW_OR_ASK.test(m) || /\b(?:prepare|prep|ready)\b/i.test(m))) return true;
+  const b = ABOUT_BEFORE.exec(m);
+  return !!b && /^\p{Lu}/u.test(b[1]) && !/^(?:I|My|The|A|An)$/.test(b[1]);
+}
+// R10 WO-H, spec F.2 (owner's production turns, 2026-11-08 6:03-6:04 pm): "What's Stripe like to work for as a data analyst intern?
+// Give me a useful company research answer ... Don't apply or contact anyone." was claimed as a batch apply (career_batch_apply ->
+// BATCH_NOT_STARTED_REPLY), and the correction "I'm not asking for an application batch. I only want company research about
+// Stripe ..." as a people list (outreach_clarification -> "Building the list now: 5 analysts at Stripe"). A research ask that sets
+// a no-action boundary ("don't apply or contact anyone", "I'm not asking for an application batch") is research, whatever the
+// router's keywords say: never applications, introductions or outreach. The boundary is the person's own words.
+const NO_ACTION = /\b(?:don'?t|do\s+not|never|without)\s+(?:apply(?:ing)?|contact(?:ing)?|email(?:ing)?|messag(?:e|ing)|reach(?:ing)?\s+out)\b|\bnot\s+asking\s+(?:you\s+)?(?:for|to)\s+(?:an?\s+)?(?:application|apply|batch|list|introductions?|outreach)/i;
+const COMPANY_RESEARCH = /\b(?:[Cc]ompany|[Ee]mployer)\s+research\b|\bresearch\s+(?:about|on|into)\s+\p{Lu}|\bwhat(?:'s|\s+is)\s+\p{Lu}[\p{L}&.-]*\s+like\s+to\s+work\s+(?:for|at)\b/u;
+export function researchOverAction(message: string): boolean {
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'");
+  return NO_ACTION.test(m) && (COMPANY_RESEARCH.test(m) || researchAsk(m));
+}
 export function researchAsk(message: string): boolean {
   const m = String(message ?? "").replace(/[\u2019`]/g, "'");
-  return !OWN_PAPERS.test(m) && !OWN_RECORD.test(m) && (RESEARCH_ASK.some((r) => r.test(m)) || MARKET_ASK.some((r) => r.test(m)));
+  return !OWN_PAPERS.test(m) && !OWN_RECORD.test(m) && (RESEARCH_ASK.some((r) => r.test(m)) || MARKET_ASK.some((r) => r.test(m)) || companyInterviewAsk(m));
 }
 const SEARCH_ASK = /\b(?:find|show|search|look\s+for|get|pull|list)\b[^?.!]{0,40}\b(?:jobs?|roles?|openings?|postings?|internships?|positions?)\b/i;
 const SEARCH_INTENTS = new Set(["career_discovery", "career_internship_discovery", "discovery_dead_board"]);
 export function marketResearchAsk(env: Env, message: string, intent: string | null): boolean {
-  if (env.get("CAREER_RESEARCH_REPLY") !== "on") return false;
+  if (!researchReplyOn(env)) return false;
   if (OWN_RECORD.test(String(message ?? "").replace(/[\u2019`]/g, "'"))) return false;
   const market = MARKET_ASK.some((r) => r.test(message)), research = researchAsk(message);
   if (!market && !research) return false;
@@ -388,6 +418,8 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
     intent = UNCLAIMED;
   } else intent = probe.intent ?? null;
   if (!intent) return { brain: false, mode, intent: null, reason: "router_claimed" };
+  // Spec F.2: research with a no-action boundary is the brain's research turn, before any rule that keeps the router's intent.
+  if (researchReplyOn(o.env) && researchOverAction(o.message)) return { brain: true, mode, intent, reason: "company_research" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
   if (marketResearchAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "market_research" };
   if (SEARCH_LIKE.has(intent) && filePageAsk(o.message, askFor(o.message, { intent, resultStatus: probe.result?.resultStatus }, o.ctx.discovery)?.ask)) return { brain: true, mode, intent, reason: "file_page_ask" };

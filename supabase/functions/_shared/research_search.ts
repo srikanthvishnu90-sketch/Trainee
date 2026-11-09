@@ -35,7 +35,8 @@ export interface SearchPlan {
 }
 // gaps: what a free source could not supply, in plain words for the brief ("SEC EDGAR has no 10-K for Ramp"), D-007.
 // basis: how a free source was chosen when the turn did not say ("Pay figures use BLS occupation 15-1252 ..."), shown on the brief.
-export type SearchOut = { hits: SearchHit[]; notes: string[]; provider: string; searches: number; gaps?: string[]; basis?: string[] };
+// sites: the company's official site(s) a free source found when the turn named none (Wikidata P856, a board's posting host).
+export type SearchOut = { hits: SearchHit[]; notes: string[]; provider: string; searches: number; gaps?: string[]; basis?: string[]; sites?: string[] };
 export interface SearchProvider { id: "brave" | "first_party"; needsKey: boolean; search(plan: SearchPlan): Promise<SearchOut> }
 
 export const BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";

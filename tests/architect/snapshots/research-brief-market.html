@@ -115,6 +115,16 @@ textarea{width:100%;min-height:96px;padding:10px 12px;border:1px solid var(--mut
    link above and the title attribute). */
 ol.rb-src .rb-host{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
 ul.rb-list{margin:0;padding-left:20px}ul.rb-list li{margin:0 0 12px;overflow-wrap:anywhere}.rb-list .src{display:block;margin:4px 0 0;width:fit-content}
+/* R10 WO-H: the company interview brief. Chips sit on their own row under each line and wrap; dates stay with their line. */
+.rb-chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0}.rb-chips .src{margin-left:0;white-space:normal}.rb-day{font-weight:600;white-space:nowrap}
+.rb-limit{border-color:var(--ink);color:var(--ink)}.rb-answer{margin:0;font-family:'Brygada 1918',Georgia,serif;font-size:20px;line-height:1.35;overflow-wrap:anywhere}
+dl.rb-kv{margin:0}dl.rb-kv>div{display:grid;grid-template-columns:minmax(0,190px) minmax(0,1fr);gap:4px 16px;padding:10px 0;border-top:1px solid var(--line)}dl.rb-kv>div:first-child{border-top:0}
+dl.rb-kv dt{color:var(--mute);font-size:15px}dl.rb-kv dd{margin:0;overflow-wrap:anywhere}@media (max-width:560px){dl.rb-kv>div{grid-template-columns:1fr}}/* R10 WO-H: the research brief is a document page (spec C.0/C.19, target p-87..p-89): no card frame, a large serif title, a text
+   column near 640 px, a notice box, serif section heads, grey key-value labels and a thin-rule caution block. */
+.fcard:has(.rb-co){background:transparent;border:0;box-shadow:none;padding:8px 0 28px}.fcard:has(.rb-co) .ftitle{font-size:34px}
+.rb-co{max-width:680px}.rb-sub{margin:6px 0 0}.rb-notice{margin:16px 0 4px;padding:12px 14px;border-radius:6px;background:var(--tint);font-size:15px}.rb-notice b{display:block;margin:0 0 2px}
+.rb-proj{margin:0 0 12px}.rb-proj p{margin:0 0 6px;overflow-wrap:anywhere}
+.rb-co .blk h2{font-family:'Brygada 1918',Georgia,serif;font-size:21px;font-weight:500;line-height:1.25}.rb-caution{margin:12px 0 0;padding-left:12px;border-left:2px solid var(--line);font-size:15px;color:var(--mute)}ol.rb-qs{margin:0;padding-left:22px}ol.rb-qs li{margin:0 0 14px;overflow-wrap:anywhere}ol.rb-src .rb-lim{grid-column:2}
 .rb-cite{font-size:14px;color:var(--mute);white-space:nowrap;font-variant-numeric:tabular-nums}
 ol.rb-src{list-style:none;margin:0;padding:0}ol.rb-src li{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:6px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}ol.rb-src li:first-child{border-top:0}
 ol.rb-src a{display:inline-flex;align-items:center;min-height:44px;color:var(--link);font-weight:600}ol.rb-src .meta{display:block;grid-column:2}.rb-n{color:var(--mute);font-variant-numeric:tabular-nums}

@@ -40,12 +40,13 @@ language sql immutable set search_path = public, pg_temp as $$
 $$;
 revoke all on function public.career_apply_job_history(public.career_apply_jobs) from public, anon, authenticated;
 
--- 2. At most one live row per person and posting: the same predicate as the function above (an index cannot call it).
-create unique index if not exists career_apply_jobs_live_posting_v2 on public.career_apply_jobs (user_id, job_id)
+-- 2. At most one live row per person and posting: the same predicate as the function above (an index cannot call it). The
+-- index keeps its name (career_apply_jobs_live_posting) so earlier rollbacks and checks that name it still find it.
+drop index if exists public.career_apply_jobs_live_posting;
+create unique index career_apply_jobs_live_posting on public.career_apply_jobs (user_id, job_id)
  where not ((state = 'not_submitted' and coalesce(reason, '') = 'needs_answers')
   or (state = 'needs_user' and coalesce(reason, '') in ('login_required', 'bot_check', 'email_code')
    and coalesce(evidence->>'nothing_sent', '') = 'true' and coalesce(evidence->'by_person'->>'outcome', '') = 'not_done'));
-drop index if exists public.career_apply_jobs_live_posting;
 
 -- 3. The person's answer.
 create or replace function public.career_apply_person_finished_as(p_user uuid, p_id uuid, p_outcome text) returns jsonb

@@ -13,10 +13,18 @@
 // Configurable: RESEARCH_SEARCH_PROVIDER (brave | first_party; default brave when the key is set, else first_party),
 // RESEARCH_SEARCH_ENDPOINT (default Brave's web search endpoint), RESEARCH_SEARCH_COUNT (1 to 10, default 5), RESEARCH_USER_AGENT.
 // LinkedIn, Indeed and Handshake are never proposed (isBlockedHost), nor anything but https.
-import { isBlockedHost, isHttps, normalizeUrl } from "./research_sources.ts";
+import { isBlockedHost, isHttps, normalizeUrl, readCapped } from "./research_sources.ts";
+// Review of #628: a provider's JSON answer is read as a stream to 2 MB; over the cap it is not parsed (the call fails as unread).
+const SEARCH_JSON_MAX_BYTES = 2_000_000;
+async function cappedJson(r: Response): Promise<any> {
+  const got = await readCapped(r, SEARCH_JSON_MAX_BYTES);
+  if (got.truncated) throw new Error("answer over 2 MB");
+  return JSON.parse(new TextDecoder().decode(got.bytes));
+}
 
 type Env = { get(k: string): string | undefined };
-export interface SearchHit { url: string; title: string; provider: "brave" | "sec_edgar" | "bls_oes" | "company_site"; foundAt: number }
+// R9 free sources (2026-11-08): research_free_sources.ts freeProvider proposes the other free kinds.
+export interface SearchHit { url: string; title: string; provider: "brave" | "sec_edgar" | "bls_oes" | "company_site" | "sec_fts" | "bls_ooh" | "usajobs" | "ats_board" | "wikipedia" | "wikidata" | "github" | "news_rss"; foundAt: number }
 // What the turn knows to look for. Free-text queries go to a search engine; the hints go to first-party sources.
 export interface SearchPlan {
   queries: string[]; // at most 3
@@ -25,7 +33,10 @@ export interface SearchPlan {
   soc?: string | null; // a BLS occupation code, "15-1252"
   cbsa?: string | null; // a metro area code, "42660"
 }
-export type SearchOut = { hits: SearchHit[]; notes: string[]; provider: string; searches: number };
+// gaps: what a free source could not supply, in plain words for the brief ("SEC EDGAR has no 10-K for Ramp"), D-007.
+// basis: how a free source was chosen when the turn did not say ("Pay figures use BLS occupation 15-1252 ..."), shown on the brief.
+// sites: the company's official site(s) a free source found when the turn named none (Wikidata P856, a board's posting host).
+export type SearchOut = { hits: SearchHit[]; notes: string[]; provider: string; searches: number; gaps?: string[]; basis?: string[]; sites?: string[] };
 export interface SearchProvider { id: "brave" | "first_party"; needsKey: boolean; search(plan: SearchPlan): Promise<SearchOut> }
 
 export const BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
@@ -54,7 +65,7 @@ export function braveProvider(o: { key: string; fetch: typeof fetch; now: () => 
         try {
           const r = await o.fetch(u.toString(), { headers: { accept: "application/json", "x-subscription-token": o.key }, signal: AbortSignal.timeout(10000) });
           if (!r.ok) { await r.body?.cancel().catch(() => {}); notes.push(`a search was not completed (HTTP ${r.status})`); if (r.status === 401 || r.status === 403 || r.status === 429) break; continue; }
-          const j = await r.json();
+          const j = await cappedJson(r);
           for (const x of Array.isArray(j?.web?.results) ? j.web.results : []) if (typeof x?.url === "string") hits.push({ url: x.url, title: String(x.title ?? "").slice(0, 200), provider: "brave", foundAt: o.now() });
         } catch { notes.push("a search was not completed"); }
       }
@@ -73,7 +84,7 @@ export function firstPartyProvider(o: { fetch: typeof fetch; now: () => number; 
     if (!tickers || o.now() - tickers.at > 24 * 3600_000) {
       const r = await get("https://www.sec.gov/files/company_tickers.json");
       if (!r.ok) { await r.body?.cancel().catch(() => {}); return null; }
-      tickers = { at: o.now(), rows: Object.values(await r.json() as Record<string, any>).map((x) => ({ cik: Number(x.cik_str), ticker: String(x.ticker ?? ""), title: String(x.title ?? "") })) };
+      tickers = { at: o.now(), rows: Object.values(await cappedJson(r) as Record<string, any>).map((x) => ({ cik: Number(x.cik_str), ticker: String(x.ticker ?? ""), title: String(x.title ?? "") })) };
     }
     const want = squash(name);
     const row = tickers.rows.find((x) => x.ticker.toLowerCase() === name.trim().toLowerCase()) ?? tickers.rows.find((x) => squash(x.title) === want);
@@ -81,7 +92,7 @@ export function firstPartyProvider(o: { fetch: typeof fetch; now: () => number; 
     const cik = String(row.cik).padStart(10, "0");
     const r = await get(`https://data.sec.gov/submissions/CIK${cik}.json`);
     if (!r.ok) { await r.body?.cancel().catch(() => {}); return null; }
-    const rec = (await r.json())?.filings?.recent ?? {};
+    const rec = (await cappedJson(r))?.filings?.recent ?? {};
     const i = (rec.form ?? []).findIndex((f: string) => f === "10-K");
     if (i < 0 || !rec.accessionNumber?.[i] || !rec.primaryDocument?.[i]) return null;
     return { url: `https://www.sec.gov/Archives/edgar/data/${row.cik}/${String(rec.accessionNumber[i]).replace(/-/g, "")}/${rec.primaryDocument[i]}`, title: `${row.title} 10-K (SEC EDGAR)`, provider: "sec_edgar", foundAt: o.now() };

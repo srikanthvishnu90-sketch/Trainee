@@ -9,7 +9,7 @@
 // The button binds the card: its data is "tca:<card id>:<digest>" (Approve) or "tcd:<card id>:<digest>" (Decline), the
 // digest being the first 16 hex of sha256 over the card's id and each item's number and payload hash. A tap whose card
 // is gone, answered, someone else's, or whose items changed since the buttons were made approves nothing, and says so.
-import { answerText, type CardResult, pagesOf } from "./career_apply_cards.ts";
+import { answerGuarded, answerText, type CardResult, pagesOf } from "./career_apply_cards.ts";
 import { type EventStore, recordEvents } from "./agent/timeline.ts";
 
 export interface TapCard { id: string; user_id?: string; items: { n: number; prepared_id: string; payload_hash: string }[]; state: string; shown_at?: string }
@@ -93,8 +93,9 @@ export function supabaseTapStore(admin: any): TapStore {
       if (!ids.length) return [];
       return must(await admin.from("career_apply_prepared").select("id,payload_hash,company").eq("user_id", userId).in("id", ids), "read the prepared applications") ?? [];
     },
+    // WO-G: an item whose posting still has an open required question is held back (career_apply_cards.ts answerGuarded).
     async answer(userId, cardId, approve) {
-      return must(await admin.rpc("career_apply_card_answer_as", { p_user: userId, p_card: cardId, p_approve: approve }), "answer the card");
+      return await answerGuarded(admin, userId, cardId, approve);
     },
   };
 }

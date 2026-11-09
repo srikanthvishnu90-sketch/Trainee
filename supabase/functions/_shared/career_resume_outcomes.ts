@@ -20,7 +20,8 @@ export const MAX_VERSIONS = 200;
 export const MIN_PER_GROUP = 30; // career_tailor.ts MIN_PER_ARM, the tailored-vs-untailored floor (a test holds them equal)
 export type ChangeKind = "reorder" | "drop" | "skills" | "reword";
 const KIND_OF: Record<string, ChangeKind> = { lead: "reorder", drop: "drop", skills: "skills", reword: "reword" };
-export interface VersionEntry { n: number; layout: "plain" | "trainee" | "own"; changes: ChangeKind[]; at: string; job_id: string | null }
+// RELEASE 10: the layout "template" names which of the fifteen in template (T01..T15), so rates can be read per template.
+export interface VersionEntry { n: number; layout: "plain" | "trainee" | "own" | "template"; template?: string | null; changes: ChangeKind[]; at: string; job_id: string | null }
 export interface VersionState { next: number; files: Record<string, VersionEntry> }
 export interface ResumeVersionLog { get(userId: string): Promise<VersionState>; save(userId: string, s: VersionState): Promise<void> }
 
@@ -28,12 +29,12 @@ export function changeKinds(changes: { kind: string }[]): ChangeKind[] {
   return [...new Set(changes.map((c) => KIND_OF[c.kind]).filter(Boolean))].sort() as ChangeKind[];
 }
 // The same file made again keeps its first number; a new file gets the next one. The oldest entries go past MAX_VERSIONS.
-export function withVersion(s: VersionState, o: { sha256: string; layout: VersionEntry["layout"]; changes: ChangeKind[]; job_id: string | null; now: number }): { state: VersionState; version: string } {
+export function withVersion(s: VersionState, o: { sha256: string; layout: VersionEntry["layout"]; template?: string | null; changes: ChangeKind[]; job_id: string | null; now: number }): { state: VersionState; version: string } {
   if (!/^[a-f0-9]{64}$/.test(o.sha256)) throw new Error("not recorded: bad resume hash");
   const had = s.files[o.sha256];
   if (had) return { state: s, version: `resume-v${had.n}` };
   const n = Math.max(1, s.next);
-  const files = { ...s.files, [o.sha256]: { n, layout: o.layout, changes: o.changes, at: new Date(o.now).toISOString(), job_id: o.job_id } };
+  const files = { ...s.files, [o.sha256]: { n, layout: o.layout, ...(o.template ? { template: o.template } : {}), changes: o.changes, at: new Date(o.now).toISOString(), job_id: o.job_id } };
   const keep = Object.entries(files).sort((a, b) => b[1].n - a[1].n).slice(0, MAX_VERSIONS);
   return { state: { next: n + 1, files: Object.fromEntries(keep) }, version: `resume-v${n}` };
 }
@@ -41,7 +42,7 @@ export function withVersion(s: VersionState, o: { sha256: string; layout: Versio
 export async function recordVersion(log: ResumeVersionLog, o: { userId: string; out: Extract<TailorOut, { ok: true }>; now: number }): Promise<string | null> {
   try {
     const cur = await log.get(o.userId);
-    const { state, version } = withVersion(cur, { sha256: o.out.sha256, layout: o.out.layout, changes: changeKinds(o.out.changes), job_id: o.out.job_id, now: o.now });
+    const { state, version } = withVersion(cur, { sha256: o.out.sha256, layout: o.out.layout, template: o.out.template ?? null, changes: changeKinds(o.out.changes), job_id: o.out.job_id, now: o.now });
     if (state !== cur) await log.save(o.userId, state);
     return version;
   } catch (e) {
@@ -72,7 +73,7 @@ export function supabaseVersionLog(admin: any): ResumeVersionLog {
 
 // ---------------------------------------------------------------- the rates, for the File page
 export interface RateRow {
-  dimension: "version" | "tailoring" | "layout" | "change_type"; bucket: string;
+  dimension: "version" | "tailoring" | "layout" | "template" | "change_type"; bucket: string;
   sent: number; responses: number; interviews: number; offers: number;
   response_per_100: number | null; interview_per_100: number | null; offer_per_100: number | null;
 }
@@ -84,11 +85,11 @@ export function supabaseResumeRates(admin: any): (userId: string) => Promise<Rat
     return (r.data ?? []).map((x: RateRow) => ({ ...x, sent: Number(x.sent), responses: Number(x.responses), interviews: Number(x.interviews), offers: Number(x.offers) }));
   };
 }
-const DIM_TITLE: Record<RateRow["dimension"], string> = { tailoring: "Tailored or not", version: "By resume version", layout: "By layout", change_type: "By kind of change" };
-const BUCKET_WORD: Record<string, string> = { tailored: "Tailored", untailored: "Not tailored", plain: "Plain", trainee: "Trainee layout", own: "Your own layout", reorder: "Reordered", drop: "Left things out", skills: "Skills line changed", reword: "Bullets reworded" };
+const DIM_TITLE: Record<RateRow["dimension"], string> = { tailoring: "Tailored or not", version: "By resume version", layout: "By layout", template: "By template", change_type: "By kind of change" };
+const BUCKET_WORD: Record<string, string> = { tailored: "Tailored", untailored: "Not tailored", plain: "Plain", trainee: "Trainee layout", own: "Your own layout", template: "A Trainee template", reorder: "Reordered", drop: "Left things out", skills: "Skills line changed", reword: "Bullets reworded" };
 const pct = (x: number | null) => (x === null ? "-" : `${Number.isInteger(x) ? x : x.toFixed(1)}%`);
 const nOf = (k: number, n: number) => `${k} of ${n}`;
-const ORDER: RateRow["dimension"][] = ["tailoring", "version", "layout", "change_type"];
+const ORDER: RateRow["dimension"][] = ["tailoring", "version", "layout", "template", "change_type"];
 export interface RateLine { dimension: string; label: string; sent: number; responses: string; interviews: string; offers: string; enough: boolean }
 export function rateLines(rows: RateRow[], min = MIN_PER_GROUP): { title: string; lines: RateLine[] }[] {
   return ORDER.map((dim) => ({

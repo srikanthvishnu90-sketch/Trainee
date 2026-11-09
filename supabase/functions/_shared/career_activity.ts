@@ -139,7 +139,7 @@ export function activityText(rows: ActivityRows, w: ActivityWindow, ask: Activit
     if (sentOpen.length) L.push(`Sent, no confirmation from the employer yet: ${names(sentOpen.map((a) => a.company))}.`);
     if (confirmations.length) L.push(`Employer confirmations received: ${names(confirmations.map((a) => a.company))}.`);
     if (undated.length) L.push(`Sent, but the send time is not on record, so not counted as sent here: ${names(undated.map((a) => a.company))}.`);
-    if (unknown.length) L.push(`Can't tell whether it reached them (it will not be sent again): ${names(unknown.map((a) => a.company))}.`);
+    if (unknown.length) L.push(`Submission may have landed, not confirmed (it will not be sent again): ${names(unknown.map((a) => a.company))}.`);
     if (needsYou.length) L.push(`Stopped, waiting on you: ${names(needsYou.map((a) => a.company))}.`);
     if (notGone.length) L.push(`Did not go through: ${names(notGone.map((a) => a.company))}.`);
     if (pending.length) L.push(`Queued and not sent yet: ${names(pending.map((a) => a.company))}.`);

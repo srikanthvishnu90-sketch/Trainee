@@ -78,6 +78,7 @@ export function sandboxHostOptions(env: (k: string) => string, f: typeof fetch):
 
 export function createRunnerHandler(o: {
   env: RunnerEnv; fetch?: typeof fetch; host?: SandboxHost; waitUntil?: (p: Promise<unknown>) => void; now?: () => number;
+  review?: (user: string, preparedIds: string[]) => Promise<string | null>; // WO-G: review links on the pushed card
 }): (req: Request) => Promise<Response> {
   const f = o.fetch ?? fetch;
   // D-037: the release flags (CLOUD_RUNNER_ENABLED, CLOUD_PREPARE_ENABLED, UPMORE_SCRIPT_SUBMIT_LIVE) are read with
@@ -149,7 +150,7 @@ export function createRunnerHandler(o: {
         if (!r.ok) throw Error(`read ${r.status}`);
         return ((await r.json()) as PrepareRequestRow[])[0] ?? null;
       };
-      const out = await handlePrepareBridge(p[1], body, { rpc, readRequest, secret, stop, now: o.now });
+      const out = await handlePrepareBridge(p[1], body, { rpc, readRequest, secret, stop, now: o.now, review: o.review });
       return json(out.status, out.body);
     }
     const m = /\/job\/([a-z]+)$/.exec(path);

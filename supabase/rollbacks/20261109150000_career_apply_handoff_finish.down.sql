@@ -12,7 +12,8 @@ language sql immutable set search_path = public, pg_temp as $$
  select j.state = 'not_submitted' and coalesce(j.reason, '') = 'needs_answers'
 $$;
 revoke all on function public.career_apply_job_history(public.career_apply_jobs) from public, anon, authenticated;
-create unique index if not exists career_apply_jobs_live_posting on public.career_apply_jobs (user_id, job_id)
+drop index if exists public.career_apply_jobs_live_posting;
+create unique index career_apply_jobs_live_posting on public.career_apply_jobs (user_id, job_id)
  where not (state = 'not_submitted' and coalesce(reason, '') = 'needs_answers');
 drop index if exists public.career_apply_jobs_live_posting_v2;
 drop function if exists public.career_apply_person_finished_as(uuid, uuid, text);

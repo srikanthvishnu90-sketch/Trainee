@@ -19,6 +19,7 @@ import type { EventStore } from "../_shared/agent/timeline.ts";
 import type { DigestStore, InterviewStore } from "../_shared/career_brief_store.ts";
 import { type IntroDueRow, runIntroReminders } from "../_shared/career_people_reminders.ts";
 import { runPeopleSweeps } from "../_shared/career_people_sweep.ts";
+import { type Batch, runBatchCloseouts } from "../_shared/batch_closeout.ts";
 
 export interface ProactiveDeps {
   env: { get(k: string): string | undefined };
@@ -29,6 +30,9 @@ export interface ProactiveDeps {
   finishedApplications?: (sinceIso: string) => Promise<ReceiptDue[]>;
   // Applications prepared on the person's computer, not yet shown, and the push of one card (WO-022 step 3). Absent: no
   // cards this run.
+  // Owner clarification (2026-11-09, D-MS-1): the batches answered since a time (batch_closeout.ts), for one closeout each
+  // once everything its yes queued has finished. Absent: no closeouts this run.
+  finishedBatches?: (sinceIso: string) => Promise<Batch[]>;
   readyApplications?: () => Promise<ReadyRow[]>;
   pushCard?: (userId: string, ids: string[], text: string) => Promise<string | null>;
   // Mail tracking (WO-024): where events, drafts and cursors live, and the read of one person's new mail. Absent: no mail
@@ -111,6 +115,10 @@ export async function handleProactive(req: Request, d: ProactiveDeps): Promise<R
   if (d.finishedApplications) {
     const finished = d.finishedApplications;
     await step("receipts", () => runReceipts({ outbox: store, now: started, finished: async (since) => awake(await finished(since), (r) => r.user_id), events: d.events ? d.events() : null }), (n) => { stats.receipts = n; });
+  }
+  if (d.finishedBatches) {
+    const batches = d.finishedBatches;
+    await step("closeouts", () => runBatchCloseouts({ outbox: store, now: started, batches: async () => awake(await batches(new Date(started - 7 * 86_400_000).toISOString()), (b) => b.userId) }), (n) => { stats.closeouts = n; });
   }
   if (d.readyApplications && d.pushCard) {
     const ready = d.readyApplications;

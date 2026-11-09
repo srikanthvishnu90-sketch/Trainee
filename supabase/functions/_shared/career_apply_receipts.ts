@@ -69,10 +69,9 @@ export function receiptText(
         const when = emailDay(row.email_confirmed_at, row.tz);
         return `Applied to ${company}: confirmed by ${company}'s email${when ? ` on ${when}` : ""}.${tail}`;
       }
+      // Architect ruling 13-Obs (2026-11-09, D-024): a page reference alone is never the employer's confirmation.
       const id = clean(row.confirmation_id, 60);
-      return `Applied to ${company}: the employer confirmed it on their page${
-        id ? ` (confirmation ${id})` : ""
-      }.${tail}`;
+      return `Sent to ${company}: ${id ? `their page showed ${id}; ` : ""}${company} has not confirmed it by email yet.${tail}`;
     }
     case "submitted_unconfirmed":
       if (row.source === "email") return `Emailed your application to ${company} from your Gmail. Their reply is the proof; I'll mark it confirmed when it comes.${tail}`;
@@ -94,7 +93,7 @@ export function receiptText(
       }. Nothing reached the employer.${tail}`;
     }
     case "unknown_outcome":
-      return `${company}: Trainee cannot tell whether it went through, and will not send it again. If they email you a confirmation, it did.${tail}`;
+      return `Submission may have landed at ${company}: Trainee cannot tell whether it went through, and will not send it again. If they email you a confirmation, it did.${tail}`;
     default:
       throw Error("not a finished application: " + row.state);
   }

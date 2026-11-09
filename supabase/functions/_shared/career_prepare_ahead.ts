@@ -10,6 +10,7 @@
 //                 day by this run (work done ahead, not a limit on applying); an unreadable pace prepares nothing
 //   aheadCardText "8/10 applications ready for your yes", the ready ones exactly as the card shows them (cardFor), and
 //                 every one not ready named with its reason
+import { type ReviewLinks, supabaseCardPush } from "./application_review_links.ts";
 import { type AlertPrefs, matchPosting } from "./career_alerts.ts";
 import { freshWhenSeen } from "./career_fresh.ts";
 import { normCompany, paceState } from "./career_apply.ts";
@@ -101,7 +102,7 @@ const dayKey = (u: string) => `career:prepare-ahead:${u}`;
 const COUNTED = ["queued", "driving", "confirmed", "submitted_unconfirmed", "needs_user", "unknown_outcome"];
 
 // deno-lint-ignore no-explicit-any
-export function supabaseAheadStore(admin: any): AheadStore {
+export function supabaseAheadStore(admin: any, review?: ReviewLinks): AheadStore {
   const must = (r: { data: any; error: { message: string } | null }, what: string) => { if (r.error) throw new Error(`${what}: ${r.error.message}`); return r.data; };
   return {
     accounts: async (ids) => {
@@ -154,10 +155,7 @@ export function supabaseAheadStore(admin: any): AheadStore {
       const by = new Map(rows.filter((r: any) => r.state === "ready").map((r: any) => [String(r.id), r]));
       return ids.map((id) => by.get(id)).filter(Boolean).map((r: any) => ({ id: String(r.id), company: String(r.company), card_lines: (r.card_lines ?? []).map(String), created_at: r.created_at }));
     },
-    push: async (u, ids, text) => {
-      const r = await admin.rpc("career_apply_card_push_as", { p_user: u, p_ids: ids, p_text: text });
-      if (r.error) throw new Error(`push the card: ${r.error.message}`);
-      return r.data ?? null;
-    },
+    // WO-G: the review File link of each application on the card, while the card stays one text.
+    push: supabaseCardPush(admin, review),
   };
 }

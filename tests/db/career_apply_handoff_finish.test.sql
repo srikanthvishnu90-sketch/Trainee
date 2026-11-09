@@ -31,7 +31,7 @@ update public.career_apply_jobs set state='needs_user', reason='missing_required
 set local session_replication_role = origin;
 
 -- 0. The index and the function agree; only the one RPC entry, service role only.
-select t.ok(to_regclass('public.career_apply_jobs_live_posting') is null and to_regclass('public.career_apply_jobs_live_posting_v2') is not null, 'the live-posting index is the WO-L one');
+select t.ok(to_regclass('public.career_apply_jobs_live_posting_v2') is null and pg_get_indexdef('public.career_apply_jobs_live_posting'::regclass) like '%login_required%', 'the live-posting index is the WO-L one');
 select t.ok(not has_function_privilege('authenticated', 'public.career_apply_person_finished_as(uuid,uuid,text)', 'execute')
  and not has_function_privilege('anon', 'public.career_apply_person_finished_as(uuid,uuid,text)', 'execute')
  and has_function_privilege('service_role', 'public.career_apply_person_finished_as(uuid,uuid,text)', 'execute'), 'service role only');

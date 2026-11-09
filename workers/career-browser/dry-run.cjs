@@ -32,7 +32,7 @@ async function dryRunForm({ browser, id, ats, url, facts = {}, answers = {}, res
   try {
     const resp = await page.goto(url, { waitUntil: "domcontentloaded" });
     if (!resp || resp.status() >= 400) { log.reason = `page_load_${resp ? resp.status() : "none"}`; return finish(log, outDir, t0); }
-    log.bot_check = await require("./parallel-apply.cjs").botCheck(page); // the runner's own shown-check test
+    { const shown = await require("./parallel-apply.cjs").botCheck(page); log.bot_check = !!shown; if (shown) log.bot_check_shown = shown; } // the runner's own shown-check test
     if (await page.$('input[type="password"]')) { log.outcome = "needs_you"; log.reason = "login_required"; return finish(log, outDir, t0); }
     const r = await fillForm(page, { ats, facts, answers, resumePath });
     log.field_map = r.map; log.needs_you = r.needsUser; log.failed_fields = r.failed; log.invalid_after_fill = r.invalid;

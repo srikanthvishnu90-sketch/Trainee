@@ -57,9 +57,9 @@ export function proofFromRow(row: ApplicationRow, now: number): { ok: true; data
 // WO-G (fix 12, spec C.11 / C.21): the review File of prepared applications, built by code from the prepared payloads only
 // (application_review.ts reviewOf). One File per employer; nothing on it is a success word and nothing on it can submit.
 export function reviewFromItem(r: ReviewItem, now: number): Record<string, unknown> {
-  return { title: `Application review: ${r.employer}`.slice(0, 80), company: r.employer, ...(r.role ? { role: r.role } : {}), ...(r.destination ? { destination: r.destination.slice(0, 120) } : {}),
+  return { title: "Application review", company: r.employer, ...(r.role ? { role: r.role } : {}), ...(r.destination ? { destination: r.destination.slice(0, 120) } : {}),
     status: "prepared", stage: "prepared", prepared_at: new Date(now).toISOString(), as_of: new Date(now).toISOString(), ...(r.resume ? { resume: r.resume.label.slice(0, 100) } : {}), answers: [], problems: [],
-    review: { url: r.url ?? undefined, hash12: r.hash12 || undefined, approvable: r.approvable, files: r.files, covers: r.covers,
+    review: { url: r.url ?? undefined, hash12: r.hash12 || undefined, approvable: r.approvable, letter: r.letter, ...(r.expires_at ? { expires_at: r.expires_at } : {}), files: r.files, covers: r.covers,
       answers: r.answers.map((a) => ({ question: a.question, answer: a.answer, sensitive: !!a.sensitive })), unresolved: r.unresolved.map((u) => ({ question: u.question, ask: u.ask })) } };
 }
 

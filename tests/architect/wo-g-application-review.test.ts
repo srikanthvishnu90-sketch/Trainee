@@ -102,11 +102,13 @@ Deno.test("WO-G 12: the card shows a review link per application; the review Fil
   const rec = store.all()[0];
   eq([store.size(), rec.kind, rec.data.status, rec.data.stage, rec.data.review.approvable], [1, "application_proof", "prepared", "prepared", false]);
   const html = bodyHtml(rec, "tok"), text = textOf(rec, { now: NOW });
-  for (const s of ["Prepared, not submitted", "Application page", "DataAnalyst_Review_v3.pdf", "Exact answers that will be sent", "Expected graduation date: not entered.", "Will you continue an outside business while employed?: not entered.", "Not ready to approve", "No submission confirmation", "Nothing was submitted."]) {
-    assert(html.includes(s.replace("?:", "?:")) || html.includes(s.replace(/: not entered\./, ": not entered.</strong>")), `html: ${s}`);
+  for (const s of ["Ready for review, not submitted", "Destination", "Needs your answer", "Conditions - in plain words", "What happens after approval.", "DataAnalyst_Review_v3.pdf", "Exact answers that will be sent", "Expected graduation date: not entered.", "Will you continue an outside business while employed?: not entered.", "Not ready to approve", "No submission confirmation", "Nothing was submitted."]) {
+    assert(html.includes(s) || html.includes(s.replace(/: not entered\./, ": not entered.</strong>")), `html: ${s}`);
     assert(text.includes(s), `text: ${s}\n${text}`);
   }
   assert(!/state confirmed|state submitted/.test(html), "no green success state on a review");
+  assert(html.includes("Review - not ready to approve") && !html.includes("Final review - approval covers exactly this"), "the hero never offers approval while a fact is unresolved");
+  assert(text.includes("Not ready to approve: answer the facts above first."), text);
 });
 
 Deno.test("WO-G 13: the proof File keeps prepared, approved, sending, uncertain, sent-not-confirmed and employer-confirmed apart; confirmed needs the employer's own evidence", async () => {
@@ -123,10 +125,10 @@ Deno.test("WO-G 13: the proof File keeps prepared, approved, sending, uncertain,
     if (id !== "e" && id !== "i") assert(!/class="state (confirmed|submitted)"/.test(html), `${id}: green only with the employer's evidence`);
   }
   assert(seen.q.startsWith("Status: Approved, not sent yet."), seen.q);
-  assert(seen.d.startsWith("Status: Sending, not confirmed."), seen.d);
+  assert(seen.d.startsWith("Status: Approved, sending not confirmed."), seen.d);
   assert(seen.s.startsWith("Status: Sent, not confirmed by the employer."), seen.s);
-  assert(seen.e.startsWith("Status: Confirmed by the employer."), seen.e);
-  assert(seen.i.startsWith("Status: Confirmed by the employer."), seen.i);
+  assert(seen.e.startsWith("Status: Employer confirmation verified."), seen.e);
+  assert(seen.i.startsWith("Status: Employer confirmation verified."), seen.i);
   eq([stageOf({ state: "unknown_outcome" }), stageOf({ state: "confirmed" }), stageOf({ state: "confirmed", confirmation_id: "security" }), stageOf({ state: "confirmed", confirmation_id: "AB-12345" })],
     ["uncertain", "submitted_unconfirmed", "submitted_unconfirmed", "employer_confirmed"], "a word is never a receipt; no evidence is never confirmed");
 });

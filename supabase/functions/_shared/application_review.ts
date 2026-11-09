@@ -56,7 +56,7 @@ export interface ReviewItem {
   resume: { label: string; sha12: string } | null; files: string[];
   answers: { question: string; answer: string; sensitive: Sensitive | null }[];
   unresolved: { question: string; fact: Sensitive | null; ask: string }[];
-  page_fields: string[]; hash12: string; approvable: boolean; covers: string[];
+  page_fields: string[]; hash12: string; approvable: boolean; covers: string[]; expires_at: string | null; letter: boolean;
 }
 const isResumeField = (f: any, sha: string) => f?.value === sha || /file/i.test(String(f?.type ?? "")) || (f?.value && typeof f.value === "object");
 export function reviewOf(x: ReviewInput): ReviewItem {
@@ -85,7 +85,8 @@ export function reviewOf(x: ReviewInput): ReviewItem {
   const covers = [`the employer: ${employer}`, ...(role ? [`the role: ${role}`] : []), ...(url ? [`the application page: ${url}`] : []),
     ...(destination ? [`where it is sent: ${destination}`] : []), ...(resume ? [`the resume file ${resume.sha12}`] : []),
     `${answers.length} answer${answers.length === 1 ? "" : "s"}, word for word as shown`, ...(page_fields.length ? [`the fields the employer's page sets: ${page_fields.join(", ")}`] : [])];
-  return { id: x.id, employer, role, url, destination, resume, files, answers, unresolved, page_fields, hash12, approvable: !!resume && !unresolved.length, covers };
+  const expires_at = Number.isFinite(Date.parse(String(p.expires_at ?? ""))) ? new Date(Date.parse(p.expires_at)).toISOString() : null;
+  return { id: x.id, employer, role, url, destination, resume, files, answers, unresolved, page_fields, hash12, approvable: !!resume && !unresolved.length, covers, expires_at, letter: !!p.cover_note?.text };
 }
 
 // The review in words: the card's "full review" and the plain-text twin of the review File. Nothing here is a success word.
@@ -108,8 +109,8 @@ export function reviewText(items: ReviewItem[]): string {
 // ------------------------------------------------------------------------------------------------ states
 export type Stage = "prepared" | "approved" | "sending" | "uncertain" | "submitted_unconfirmed" | "employer_confirmed" | "needs_you" | "not_sent" | "failed";
 export const STAGE_LABEL: Record<Stage, string> = {
-  prepared: "Prepared, not submitted", approved: "Approved, not sent yet", sending: "Sending, not confirmed",
-  uncertain: "Submission uncertain", submitted_unconfirmed: "Sent, not confirmed by the employer", employer_confirmed: "Confirmed by the employer",
+  prepared: "Ready for review, not submitted", approved: "Approved, not sent yet", sending: "Approved, sending not confirmed",
+  uncertain: "Submission may have landed", submitted_unconfirmed: "Sent, not confirmed by the employer", employer_confirmed: "Employer confirmation verified",
   needs_you: "Needs you", not_sent: "Not sent", failed: "Not accepted by the employer's form",
 };
 export const STAGE_NOTE: Record<Stage, string> = {

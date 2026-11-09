@@ -84,7 +84,7 @@ Deno.test({ name: "WO-G 13: approve -> send -> uncertain -> no blind retry -> th
     r = await row();
     eq([r.state, stageOf(r)], ["driving", "sending"], "sending");
     const sending = await fileStatus();
-    assert(sending.startsWith("Status: Sending, not confirmed."), `the File says sending, not prepared: ${sending}`);
+    assert(sending.startsWith("Status: Approved, sending not confirmed."), `the File says sending, not prepared: ${sending}`);
     const queue: CloudQueue = {
       claim: async () => [], gatePresent: async () => true, ask: async () => 0,
       authorize: async (j) => { if ((await row()).state !== "driving" || j.payload_hash !== hash) throw Error("invalid apply claim"); },
@@ -128,7 +128,7 @@ Deno.test({ name: "WO-G 13: approve -> send -> uncertain -> no blind retry -> th
     await supabaseConfirmStore(admin).confirm(U, plan[0] as never);
     r = await row();
     eq([r.state, stageOf(r), !!r.email_confirmed_at, r.confirmation_id], ["confirmed", "employer_confirmed", true, null], "confirmed by the employer's email; no id was made up");
-    assert((await fileStatus()).startsWith("Status: Confirmed by the employer."), "the File says confirmed, from the employer's email");
+    assert((await fileStatus()).startsWith("Status: Employer confirmation verified."), "the File says confirmed, from the employer's email");
     const close = closeoutLine(r, "America/Chicago");
     assert(new RegExp(`^Submitted ${ROLE} at ${CO} at [A-Z][a-z]{2} \\d{1,2}, \\d{1,2}:\\d{2} [AP]M C[SD]T\\. Confirmation: ${CO}'s confirmation email \\(`).test(close), close);
     console.log(`closeout: ${close}`);

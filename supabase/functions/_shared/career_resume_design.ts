@@ -47,7 +47,9 @@ export function widthPt(text: string, font: Font, size: number): number {
 }
 
 // ---------------------------------------------------------------- the block model
-export interface Block { kind: "name" | "contact" | "links" | "heading" | "entry" | "bullet" | "line"; text: string; right?: string }
+// flag: a placeholder or a review note (R10 resume task): set in FLAG, so a missing detail can never pass for real data.
+export interface Block { kind: "name" | "contact" | "links" | "heading" | "entry" | "bullet" | "line"; text: string; right?: string; flag?: boolean }
+export const FLAG = "#8A5A00"; // dark amber: the comparator's placeholder colour, readable on white
 const MONTH = "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]{0,6}\\.?";
 const RANGE = `(?:${MONTH} )?\\d{4}(?:\\s*[–—-]\\s*(?:(?:${MONTH} )?\\d{4}|Present))?`;
 const TRAILING_DATES = new RegExp(`^(.*\\S,)\\s*(${RANGE})$`, "i");
@@ -125,7 +127,7 @@ export function typeset(blocks: Block[], body: number, scale: number, pal: Palet
       if (y - L.lead < PAGE.bottom && page().runs.length) newPage();
       y -= L.lead;
       const yy = Math.round(y * 100) / 100;
-      const color = b.kind === "name" || b.kind === "heading" ? pal.accent : header ? pal.mute : pal.ink;
+      const color = b.flag ? FLAG : b.kind === "name" || b.kind === "heading" ? pal.accent : header ? pal.mute : pal.ink;
       if (b.kind === "bullet" && k === 0) { page().runs.push({ text: "•", font: "F1", size: body, x: BULLET_X, y: yy, color: pal.ink }); printed.push("•"); }
       page().runs.push({ text: piece, font: L.font, size: L.size, x: L.x, y: yy, color });
       printed.push(piece);
@@ -279,7 +281,8 @@ function traineeDocx(R: any, blocks: Block[], f: Fit, pal: Palette): { buffer: U
     const styleId = b.kind === "name" ? "TraineeName" : header ? "TraineeContact" : b.kind === "heading" ? "Heading1" : b.kind === "entry" ? "TraineeEntry" : b.kind === "bullet" ? "TraineeBullet" : null;
     const ppr = `<w:pPr>${styleId ? `<w:pStyle w:val="${styleId}"/>` : ""}${border}<w:spacing w:before="${tw(before)}" w:after="0" w:line="${tw(lead)}" w:lineRule="exact"/></w:pPr>`;
     let runs: string;
-    const c = docxCondense(b, f.body, pal), cpr = c ? `<w:rPr><w:spacing w:val="-${c}"/></w:rPr>` : "";
+    const c = docxCondense(b, f.body, pal), flag = b.flag ? `<w:color w:val="${hex(FLAG)}"/>` : "";
+    const cpr = c || flag ? `<w:rPr>${flag}${c ? `<w:spacing w:val="-${c}"/>` : ""}</w:rPr>` : "";
     if (b.kind === "entry" && b.right) { runs = `<w:r>${cpr}${t(b.text)}</w:r><w:r><w:rPr><w:b w:val="0"/><w:color w:val="${hex(pal.mute)}"/></w:rPr><w:tab/>${t(b.right)}</w:r>`; printed.push(`${b.text} ${b.right}`); }
     else if (b.kind === "bullet") { runs = c ? `<w:r>${t("•")}<w:tab/></w:r><w:r>${cpr}${t(b.text)}</w:r>` : `<w:r>${t("•")}<w:tab/>${t(b.text)}</w:r>`; printed.push(`• ${b.text}`); }
     else { const text = b.kind === "heading" && pal.upperHeadings ? b.text.toUpperCase() : b.text; runs = `<w:r>${cpr}${t(text)}</w:r>`; printed.push(text); }
@@ -392,6 +395,15 @@ export function renderDesigned(R: any, resume: any, o: { layout: LayoutName; own
   if (!same) fails.push("same_text: the PDF and the DOCX do not carry the same words in the same order");
   const lines = o.layout === "trainee" ? docxPrinted! : sourceLines!.map((l) => l.text);
   return { ok: true, layout: o.layout, pdf, docx, fit: f, sameText: same, lines, parseCheck: { status: fails.length ? "FAIL" : warnings.length ? "WARN" : "PASS", fails, warnings }, ...extra };
+}
+
+// R10 resume task: blocks a caller built (a general resume for a target, with flagged placeholders) set in the Trainee
+// layout, fitted to one page where the record allows, as a PDF and a DOCX with the same words. The caller reads the words
+// back out of the files itself; nothing here reports a check.
+// deno-lint-ignore no-explicit-any
+export function renderBlocks(R: any, blocks: Block[]): { pdf: Uint8Array; docx: Uint8Array; fit: Fit; printed: string[] } {
+  const { fit: f, set } = fit(blocks, TRAINEE_PALETTE);
+  return { pdf: writePdf(R, set), docx: traineeDocx(R, blocks, f, TRAINEE_PALETTE).buffer, fit: f, printed: set.printed };
 }
 
 // "Keep my layout" reads the person's newest Word upload: the release-8 clean copy, which is what career_resume_uploads stores

@@ -90,6 +90,7 @@ import { supabaseMemoryStore } from "../_shared/agent/memory.ts";
 import { codePending, readSituation } from "../_shared/career_situation.ts";
 import { statusRecordsFrom } from "../_shared/career_capabilities.ts";
 import { edgeRenderer, supabasePersonaStore, supabaseResumeStore } from "../_shared/career_tailor.ts";
+import { resumeTaskTurn } from "../_shared/career_resume_task.ts"; // R10 WO-A/B
 import { supabaseMailStore } from "../_shared/career_mail_store.ts";
 import { CONFIRM_INTENT, confirmWhichTurn, supabaseConfirmStore } from "../_shared/career_apply_confirm.ts";
 import { EMAIL_INTENT, emailTurn, supabaseEmailStore, supabaseResumes } from "../_shared/career_apply_email.ts";
@@ -654,8 +655,17 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const codeChatText = !crisisText && codeFirst && !card && !mock ? CODE_IN_CHAT_REPLY : null;
       let codeTurn = !!codeChatText;
       if (codeChatText) planned = { claimed: true, reply: codeChatText, intent: CODE_IN_CHAT_INTENT, resultStatus: "completed", parts: undefined, documents: [], meta: null } as unknown as Extract<PlannerTurn, { claimed: true }>;
+      // R10 WO-A/B (spec A.2 resume turns 1-3): a resume ask with a target and no posting, a correction to it, a link ask
+      // and "send this one" are the resume task's (career_resume_task.ts), in the planner's slot: every action turn below is
+      // skipped, so "don't apply" can never start an apply or a batch. Its files ride the reply as documents.
+      const resumeAns = !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+        ? await resumeTaskTurn({ message, ctx, userId: user.id, now: Date.now(), deps: { resumes: supabaseResumeStore(admin),
+            uploaded: async () => { const r = await admin.from("career_resume_uploads").select("id").eq("user_id", user.id).limit(1); return !r.error && (r.data ?? []).length > 0; } } })
+          .catch((e) => { console.error("resume task turn:", e?.message ?? e); return null; })
+        : null;
+      if (resumeAns) planned = { claimed: true, reply: resumeAns.reply, intent: resumeAns.intent, resultStatus: resumeAns.resultStatus, parts: undefined, documents: resumeAns.documents, meta: null } as unknown as Extract<PlannerTurn, { claimed: true }>;
       // The planner calls the model: without a model key it is never tried (no failing call, no cost row), as the brain.
-      if (!crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && plannerOn(Deno.env, user.id) && !!careerModelConfig(Deno.env).apiKey && !host.isHostControlled(message, ctx)) {
+      if (!resumeAns && !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && plannerOn(Deno.env, user.id) && !!careerModelConfig(Deno.env).apiKey && !host.isHostControlled(message, ctx)) {
         const pMeter = ledger.track(newMeter()), pCfg = careerModelConfig(Deno.env);
         const pModel = (payload: any) => callModel(pCfg, payload, { meter: pMeter, role: "chat" });
         try {
@@ -1112,7 +1122,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (outlookAns.meta) agentMeta = { ...(agentMeta || {}), ...outlookAns.meta };
       } else if (planned) { // TASK PLANNER: each step's own reply, in order; a waiting prompt a step left is the thread's last word
         if (codeTurn) flowCtx.note = noteForCodeTurn(flowCtx.note); // the safety text says "never in chat" once
-        out = { reply: planned.reply, intent: planned.intent, resultStatus: planned.resultStatus, contained: false, handler: crisisText ? "crisis" : codeTurn ? "code_in_chat" : "planner", parts: planned.parts,
+        out = { reply: planned.reply, intent: planned.intent, resultStatus: planned.resultStatus, contained: false, handler: crisisText ? "crisis" : codeTurn ? "code_in_chat" : resumeAns ? "resume_task" : "planner", parts: planned.parts,
           ...(planned.documents.length ? { result: { documents: planned.documents } } : {}) };
         agentMeta = planned.meta;
       } else if (card) {
@@ -1612,6 +1622,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           if (m.artifacts.length) artifactsField = m.artifacts;
           if (m.failed > 0) artifactNote = "One file from this turn couldn't be attached here — ask me to send it again and I'll rebuild it.";
         }
+      }
+      // R10 WO-B (spec A.5 pattern 3): a parser's own verdict is not evidence for the person ("parse check PASS"); the files and
+      // what they hold are. The posting tailor's (142) line keeps what was saved, without the self-report.
+      if (/\bparse check\b/i.test(out.reply)) {
+        const scrub = (x: string) => x.replace(/\s*(?:—|-|,)\s*(?:the\s+)?parse check (?:PASS|WARN|FAIL|passed|ran)\b/gi, "");
+        out = { ...out, reply: scrub(out.reply), ...(out.parts ? { parts: out.parts.map(scrub) } : {}) };
       }
       // LAUNCH READINESS X7: a model call refused by the daily ceiling (or an unreadable spend) is said, never hidden.
       const spendNote = spend.note();

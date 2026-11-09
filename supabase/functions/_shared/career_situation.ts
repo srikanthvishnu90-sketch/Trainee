@@ -14,7 +14,7 @@ export interface Task {
   kind: "application" | "apply_request" | "question" | "outreach" | "mail_draft" | "interview" | "tracked";
   company: string | null; title: string | null; state: string; since: string | null;
   blocker: { what: string; who: Actor; how: string } | null;
-  evidence: { confirmation_id?: string; reason?: string; url?: string; job_id?: string; stage?: string; when?: string };
+  evidence: { confirmation_id?: string; reason?: string; url?: string; job_id?: string; stage?: string; when?: string; email_confirmed_at?: string; mail_hash?: string; sent_at?: string; open?: { label: string; options?: string[] }[] };
   source: string;
 }
 export interface Situation {
@@ -55,7 +55,8 @@ export function situationFrom(r: SituationRows, now: number): Situation {
   for (const j of r.jobs) {
     // Finished work stays in view for 14 days; work still in flight always.
     if (!ACTIVE.has(j.state) && Date.parse(j.updated_at) < now - 14 * DAY) continue;
-    const ev = { confirmation_id: str(j.confirmation_id) ?? undefined, reason: str(j.reason) ?? undefined, url: str(j.url) ?? undefined, job_id: str(j.job_id) ?? undefined };
+    const ev = { confirmation_id: str(j.confirmation_id) ?? undefined, reason: str(j.reason) ?? undefined, url: str(j.url) ?? undefined, job_id: str(j.job_id) ?? undefined,
+      email_confirmed_at: str(j.email_confirmed_at) ?? undefined, mail_hash: str(j.confirmation_mail_hash) ?? undefined, sent_at: str(j.claimed_at) ?? undefined };
     const need = NEEDS[String(j.reason)];
     const blocker: Task["blocker"] = j.state === "needs_user" ? { what: need?.[0] ?? `help needed: ${j.reason ?? "no reason recorded"}`, who: "person", how: need?.[1] ?? "open the application in your browser" }
       : ["failed", "not_submitted"].includes(j.state) ? { what: `not sent: ${j.reason ?? "no reason recorded"}`, who: "person", how: "decide: fix it and queue it again, or apply on the employer's page yourself" }
@@ -76,7 +77,8 @@ export function situationFrom(r: SituationRows, now: number): Situation {
   for (const p of r.prepared.filter((x) => ["ready", "shown"].includes(x.state))) {
     const n = open.filter((q) => q.company && sameCompany(q.company, p.company)).length;
     add({ id: `prep:${p.id}`, kind: "application", company: str(p.company), title: null, state: "awaiting_approval", since: p.created_at ?? null, source: "career_apply_prepared",
-      evidence: { url: str(p.url) ?? undefined, job_id: str(p.job_id) ?? undefined },
+      evidence: { url: str(p.url) ?? undefined, job_id: str(p.job_id) ?? undefined,
+        open: open.filter((q) => p.job_id && Array.isArray(q.job_ids) && q.job_ids.includes(String(p.job_id))).map((q) => ({ label: String(q.label), options: Array.isArray(q.options) ? q.options.map(String) : [] })) },
       blocker: { what: `prepared, waiting for a yes${n ? `; ${n} open question${n > 1 ? "s" : ""}` : ""}`, who: "person",
         how: p.state === "shown" && r.card && Date.parse(r.card.shown_at) >= now - DAY ? 'answer the card already shown: "yes", "yes but not 2" or "no"' : 'text "show my applications", then yes or no' } });
   }
@@ -154,11 +156,11 @@ export async function readSituation(admin: any, userId: string, now: number): Pr
   const since = new Date(now - 14 * DAY).toISOString(), today = new Date(now - DAY).toISOString();
   const q = (t: string) => admin.from(t);
   const reads: Record<string, PromiseLike<{ data: any; error: any }>> = {
-    jobs: q("career_apply_jobs").select("id,job_id,company,url,state,reason,confirmation_id,created_at,updated_at,title:payload->>title").eq("user_id", userId).or(`updated_at.gte.${since},state.in.(queued,driving,needs_user)`).limit(500),
+    jobs: q("career_apply_jobs").select("id,job_id,company,url,state,reason,confirmation_id,email_confirmed_at,confirmation_mail_hash,claimed_at,created_at,updated_at,title:payload->>title").eq("user_id", userId).or(`updated_at.gte.${since},state.in.(queued,driving,needs_user)`).limit(500),
     wanted: q("career_apply_wanted").select("posting_key,url,company,title,state,queued_at,taken_at").eq("user_id", userId).order("queued_at", { ascending: false }).limit(500),
     prepared: q("career_apply_prepared").select("id,job_id,company,url,state,created_at").eq("user_id", userId).in("state", ["ready", "shown"]).limit(200),
     card: q("career_apply_cards").select("shown_at").eq("user_id", userId).eq("state", "open").order("shown_at", { ascending: false }).limit(1),
-    questions: q("career_apply_questions").select("id,company,label,answer,misfit,created_at").eq("user_id", userId).eq("state", "open").limit(100),
+    questions: q("career_apply_questions").select("id,company,label,options,job_ids,answer,misfit,created_at").eq("user_id", userId).eq("state", "open").limit(100),
     outreach: q("career_outreach_drafts").select("id,n,recipient,status,created_at,sent_at").eq("user_id", userId).or(`status.in.(shown,approved,sending),updated_at.gte.${since}`).limit(100),
     mail_drafts: q("career_mail_drafts").select("id,kind,company,state,created_at").eq("user_id", userId).eq("state", "drafted").limit(50),
     interviews: q("career_interviews").select("id,company,role,starts_at,interview_date").eq("user_id", userId).or(`starts_at.gte.${today},interview_date.gte.${today.slice(0, 10)}`).limit(20),

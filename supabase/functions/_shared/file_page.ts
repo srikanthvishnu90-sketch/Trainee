@@ -124,7 +124,7 @@ export function statusOf(o: { app: AppRow | null; wanted: boolean }): Status | n
         : a.reason ? `Stopped before it was sent: ${reasonWords(a.state, a.reason)}.` : "It stopped and needs you." };
       case "failed": return { word: "failed", detail: `Not sent: ${reasonWords(a.state, a.reason)}.` };
       case "not_submitted": return { word: "not submitted", detail: `Not sent: ${reasonWords(a.state, a.reason)}.` };
-      case "unknown_outcome": return { word: "unknown", detail: `We can't tell whether it reached ${who}. It won't be sent again.` };
+      case "unknown_outcome": return { word: "unknown", detail: `Submission may have landed: we can't tell whether it reached ${who}. It won't be sent again.` };
       default: return { word: "unknown", detail: `Recorded as ${a.state}; not known to be sent.` };
     }
   }

@@ -265,7 +265,7 @@ Deno.test("WO-022/6 the loop: prepared on the computer, card, one text yes appro
   const receipts = planReceipts(finished, T);
   eq(receipts.length, 2);
   assert(
-    receipts.every((r) => /the employer confirmed it on their page \(confirmation TEST-C\)/.test(r.text)),
+    receipts.every((r) => /their page showed TEST-C; .* has not confirmed it by email yet\./.test(r.text)),
     JSON.stringify(receipts),
   );
 });

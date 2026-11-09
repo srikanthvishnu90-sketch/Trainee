@@ -50,7 +50,7 @@ function leaves(x: unknown, out: string[] = []): string[] {
 
 // ================================================================== schema validation per kind
 Deno.test("registry: the seven kinds, the four source labels", () => {
-  eq([...KIND_IDS].sort(), ["application_proof", "comparison", "draft", "introduction", "job_list", "plan_review", "research_brief"]);
+  eq([...KIND_IDS].sort(), ["application_proof", "application_review", "comparison", "draft", "introduction", "job_list", "plan_review", "research_brief"]);
   for (const s of ["From the posting", "From your resume", "From you", "Reported, not verified"]) assert((SOURCES as readonly string[]).includes(s), s);
 });
 Deno.test("schema: every sample is accepted and a missing required part is refused, per kind", () => {

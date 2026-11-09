@@ -352,7 +352,7 @@ test("(c) ROUTER-SIDE wording: with no host writer installed, the reply never cl
 const APP_ROWS = [
   { id: "row-1", company: "TestCo 1", title: "Software Engineering Intern", state: "queued", created_at: "2026-10-24T16:00:00.000Z", updated_at: "2026-10-24T16:00:00.000Z" },
   { id: "row-2", company: "TestCo 2", title: "Data Analyst Intern", state: "submitted_unconfirmed", confirmation_id: "SBX-0002", created_at: "2026-10-24T16:00:00.000Z", updated_at: "2026-10-24T16:00:00.000Z" },
-  { id: "row-3", company: "TestCo 3", title: "Finance Intern", state: "confirmed", confirmation_id: "SBX-0001", created_at: "2026-10-24T16:00:00.000Z", updated_at: "2026-10-24T16:00:00.000Z" },
+  { id: "row-3", company: "TestCo 3", title: "Finance Intern", state: "confirmed", confirmation_id: "SBX-0001", email_confirmed_at: "2026-10-24T17:00:00.000Z", created_at: "2026-10-24T16:00:00.000Z", updated_at: "2026-10-24T16:00:00.000Z" },
 ];
 const readRows = (rows) => async () => clone(rows);
 

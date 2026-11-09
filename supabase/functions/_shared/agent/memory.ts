@@ -224,7 +224,7 @@ export function alertLine(a: { prefs: AlertPrefs; tz: string } | null): string {
 }
 const STATE: Record<string, string> = {
   confirmed: "the employer confirmed it", submitted_unconfirmed: "sent, the employer has not confirmed it yet",
-  failed: "failed before sending", not_submitted: "not sent", unknown_outcome: "outcome unknown, not resent",
+  failed: "failed before sending", not_submitted: "not sent", unknown_outcome: "submission may have landed; not confirmed, never resent",
 };
 
 export const BLOCK_BUDGET = 4500;

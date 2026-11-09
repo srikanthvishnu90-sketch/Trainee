@@ -114,10 +114,10 @@ Deno.test("application_proof is built from the record: every value comes from th
   // the model cannot add or override anything
   assert(!(await w.svc.create(U, "application_proof", { application_id: "job-1", status: "confirmed", company: "Evil" })).ok);
 });
-Deno.test("application_proof: unreadable, unknown, someone else's, unmapped or future records give no file", async () => {
+Deno.test("application_proof: unreadable, someone else's, unmapped or future records give no file", async () => {
   const at = { t: NOW };
   const w = withRecords({ "job-1": ROW(), "job-2": ROW({ state: "unknown_outcome" }), "job-3": ROW({ updated_at: "2026-10-29T10:00:00Z" }), "job-4": ROW({ state: "confirmed", confirmation_id: null }) }, at);
-  for (const id of ["nope", "job-2", "job-3", "job-4", ""]) { const r = await w.svc.create(U, "application_proof", { application_id: id }); assert(!r.ok, id); }
+  for (const id of ["nope", "job-3", "job-4", ""]) { const r = await w.svc.create(U, "application_proof", { application_id: id }); assert(!r.ok, id); }
   eq(w.store.size(), 0);
   assert(!(await w.svc.create("22222222-2222-4222-8222-222222222222", "application_proof", { application_id: "job-1" })).ok, "another person's id");
   const none = createFileService({ store: memoryFileStore(), env: { get: (k) => ENV[k] }, now: () => NOW });

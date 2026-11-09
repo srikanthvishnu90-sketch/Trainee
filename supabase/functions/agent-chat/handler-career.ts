@@ -162,6 +162,7 @@ import { feedUrlsFor } from "../_shared/file_link.ts";
 import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
 import { reminderTurn, supabaseReminderStore } from "../_shared/career_reminders.ts"; // REQS DOC 2: reminders
 import { overviewTurn } from "../_shared/career_overview.ts"; // REQS DOC 2: "any update?", "what's waiting on me?"
+import { supabaseReviewLinks } from "../_shared/application_review_links.ts"; // WO-G: the review File of each application on a card
 
 // WO-033: whether the person's career Google grant carries a scope (gmail.send for outreach). Read failures say "no".
 async function careerGrantHas(admin: any, userId: string, scope: string): Promise<boolean> {
@@ -678,7 +679,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const cardHold = holdsCardApproval((ctx as any).profile, message, Date.now());
       const card0 = !cardHold && !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         // FEATURE 16: OWNER RULE (2026-10-26): no card without a confirmed resume on file (resumeReady).
-        ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id), store: supabaseCardStore(admin), events })
+        ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id),
+          review: (shown) => supabaseReviewLinks(admin, Deno.env)(user.id, shown.map((p) => p.id)), store: supabaseCardStore(admin), events })
         : null;
       const card = card0 && offerLastWord && card0.status === CARD_NEEDS_REPLY_STATUS ? null : card0;
       // WO-025: the text mock interview, code's like the card: "mock me for <role> at <company>", "end mock", and the answers

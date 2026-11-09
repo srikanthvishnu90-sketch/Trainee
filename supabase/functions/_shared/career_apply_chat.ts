@@ -259,6 +259,7 @@ export function findThenApplyAsk(message: string): ManyWhat | null {
   const m = FIND_THEN_ALL.exec(t);
   return m ? manyWhatOf(m[1]) : null;
 }
+const LIST_REFERENT = /^(?:(?:from|on|of|in)\s+(?:that|the|this|my|your|our)\s+(?:short\s*)?list(?:\s+(?:you|we)\s+(?:just\s+)?(?:made|found|listed|showed|sent|agreed(?:\s+on)?)(?:\s+me)?)?|(?:you|we)\s+(?:just\s+)?(?:found|listed|showed|sent)(?:\s+me)?)\b/;
 export function applyManyAsk(message: string): ManyAsk | null {
   { const what = findThenApplyAsk(message); if (what) return { kind: "all", what }; }
   if (NOT_A_COMMAND.test(String(message ?? ""))) return null;
@@ -270,7 +271,9 @@ export function applyManyAsk(message: string): ManyAsk | null {
   let m = after.match(/^(?:the\s+)?(first|second|third|fourth|fifth)\s+one\b/);
   if (m) return { kind: "nth", i: ORD[m[1]] };
   m = after.match(/^(?:the\s+)?(?:top|first|best)\s+(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten)\b\s*(.*)$/);
-  if (m) { const what = manyWhatOf(m[2]); return what ? { kind: "first", n: numOf(m[1]), what } : { kind: "first", n: numOf(m[1]) }; }
+  // WO-G (fix 12): "the top three from that list" names the numbered shortlist this thread showed, never a search for a role
+  // called "from that list": the referent words are dropped before anything is read as a role.
+  if (m) { const what = manyWhatOf(m[2].replace(LIST_REFERENT, "").trim()); return what ? { kind: "first", n: numOf(m[1]), what } : { kind: "first", n: numOf(m[1]) }; }
   // A bare count of the listed postings ("3 roles", "2 of them"). A count with a role family in it ("15 software
   // engineering intern roles") is the broad ask, the batch delegation's (career_batch_apply), never this turn's.
   m = after.match(/^(?:all\s+)?(\d{1,3}|two|three|four|five|six|seven|eight|nine|ten)\s+(?:roles?|jobs?|postings?|positions?|internships?|openings?|of (?:them|these|those))\b/);
@@ -580,7 +583,7 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
   if (!list.length) {
     return { reply: `I haven't listed any postings in this thread yet, so there is nothing for "these" to mean; nothing was queued. Say "find <role> jobs in <place>" first and then "apply to these", or name one: "apply to the <role> role at <Company>".`, status: "no_list", intent, queued: [], refused: [] };
   }
-  let slice: ShortlistEntry[], note = given?.note ?? "";
+  let slice: ShortlistEntry[], note = given?.note ?? "", numbered = "";
   const missing: Missing[] = given ? given.missing.slice() : [];
   if (ask.kind === "nth") {
     if (ask.i > list.length) return { reply: `I listed ${list.length}, so there is no ${["first", "second", "third", "fourth", "fifth"][ask.i - 1] ?? `#${ask.i}`} one; nothing was queued. Say which of the ${list.length} you mean.`, status: "none", intent };
@@ -597,6 +600,9 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
     } else {
       slice = list.slice(0, ask.n);
       if (ask.n > list.length) note = `I listed ${list.length}, not ${ask.n}, so these ${list.length}. `;
+      // WO-G (fix 12): "top" is the order of the numbered list this thread showed; the targets are named by those numbers
+      // before anything is prepared, so the person sees exactly which postings the ask means.
+      if (slice.length <= 8) numbered = `From the list I showed, by its numbers: ${slice.map((e, i) => `#${i + 1} ${nameOf(e)}`).join("; ")}.`;
     }
   } else if (ask.kind === "pick") {
     // FEATURE 1: "apply to 1 and 3": the positions on the list; one past its end is named, never guessed.
@@ -676,6 +682,7 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
   // "at <company>": exactly that employer (our company records name no subsidiaries, so none are added); said by name.
   if (what?.company && queued.length) parts.push(`Companies included: ${[...new Set(queued.map((q) => q.company))].join(", ")} (only that employer; no subsidiaries are on record).`);
   if (queued.length) parts.push(`Queued ${queued.length}${total > queued.length ? ` of the ${total}` : ""}${given ? " you asked for" : ask.kind === "all" && !note ? " I listed" : ""}: ${listed(queued.map(nameOf))}.`);
+  if (numbered && queued.length) parts.push(numbered);
   const ahead = prepareSentence(kick, queued.length);
   if (ahead) parts.push(ahead);
   if (resumeMissing && queued.length) parts.push(NO_RESUME_WAIT);

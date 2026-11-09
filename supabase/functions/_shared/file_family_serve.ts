@@ -88,7 +88,7 @@ export function familyOfRecord(rec: FileRecord, token: string): { family: Family
       appId: "Application", rid: String(d.role ?? d.company ?? "role"), title: String(d.role ?? "Application"), company: String(d.company ?? ""),
       destination: { label: "where it was sent", href: destHref, at: iso(d.as_of) },
       pkg: [{ k: "Company", v: d.company ?? null, src: rec_ }, { k: "Role", v: d.role ?? null, src: rec_ }, { k: "Resume", v: d.resume ?? null, src: rec_ }],
-      answers: sourced(d.answers).map((a) => ({ q: String(a.question ?? a.label ?? "Answer"), a: String(a.value ?? a.answer ?? a.text), required: false })),
+      answers: sourced(d.answers).map((a) => ({ q: String(a.question ?? a.label ?? "Answer"), a: String(a.value ?? a.answer ?? a.text), required: false, source: String(a.source) })),
       conditions: [], approve: { label: "Approve submission", effect: "submit", off: "Already approved - this is the record of what was sent." }, after: { state, evidence },
       edit: views.some((a) => a.id === "status" && a.state === "available") ? { label: "View status", effect: "decide", post: { token, action: "status" } } : null,
       extra: [status, ...notDone, ...flagged, ...flag],

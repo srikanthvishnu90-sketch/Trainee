@@ -24,7 +24,7 @@ const off = (a: Act | undefined, why: string): Act | undefined => a && { ...a, o
 
 // ---------------------------------------------------------------- F-09 application review (C.11)
 export interface ApplicationReview {
-  appId: string; rid: string; title: string; company: string; destination: Src; pkg: KV[]; answers: { q: string; a: string | null; required: boolean }[];
+  appId: string; rid: string; title: string; company: string; destination: Src; pkg: KV[]; answers: { q: string; a: string | null; required: boolean; source?: string | null }[]; // source: the answer's own origin, when the record keeps one
   conditions: string[]; approve: Act; edit?: Act | null; cancel?: Act | null; extra?: Block[]; // extra: the record's own controls (served pages)
   // E-71: changed: what changed materially since the person reviewed (back to review); now + staleHours: a destination checked
   // longer ago than that is re-checked before anything acts; after: the real state once approved (never an optimistic Submitted).
@@ -52,7 +52,7 @@ export function applicationReviewFile(d: ApplicationReview): FamilyFile {
       ...(d.changed ? [note("danger", "Changed since your review.", `${d.changed}. This returns to review; nothing is submitted on the old approval.`)] : []),
       card("The package", [{ p: "kv", rows: [...d.pkg, { k: "Destination", v: "Employer application page", src: d.destination }] }]),
       // N1: before approval an answer is a draft; "you approved this wording" only once it is approved.
-      card("Exact answers - sent word for word", [{ p: "kv", rows: d.answers.map((x) => ({ k: x.q, v: x.a, src: x.a ? { label: d.after ? "You approved this wording" : "Your draft answer - not approved yet" } : null, missing: x.required ? "Not entered - required" : "Not entered - optional" })) }]),
+      card("Exact answers - sent word for word", [{ p: "kv", rows: d.answers.map((x) => ({ k: x.q, v: x.a, src: x.a ? { label: x.source ?? (d.after ? "You approved this wording" : "Your draft answer - not approved yet") } : null, missing: x.required ? "Not entered - required" : "Not entered - optional" })) }]),
       card("Conditions - in plain words", [{ p: "check", items: d.conditions.map((t) => ({ state: "met" as const, text: t })) }]),
       ...(d.extra ?? []),
       note("info", "What happens after approval.", "Trainee fills the reviewed answers on the verified page and submits once. You then see the employer's own confirmation - a click alone never counts as submitted."),

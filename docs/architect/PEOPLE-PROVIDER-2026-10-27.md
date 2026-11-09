@@ -15,8 +15,9 @@ so no code for them is merged and nothing calls them.
 
 ## How a person and an address are found
 
-1. **Search.** Trainee calls OpenAI's `web_search` tool through the Responses API, with the gateway's OpenAI config
-   (`modelConfig`, OpenAI only). The search recipe for a company:
+1. **Search.** Through the gateway's one web-search door (`gatewaySearch` → `webSearch` in `model_gateway.ts`: Claude only,
+   `claude-sonnet-5-5`, D-046). It is dark today: it answers `not_wired` and nothing is sent or spent (owner directive
+   2026-11-02; OpenAI is no longer used). The search recipe for a company:
    - the role asked for, or "team"
    - "team page"
    - "engineering blog author"
@@ -72,7 +73,7 @@ so no code for them is merged and nothing calls them.
   - The shared tables hold no user id.
   - Each person gets their own copy, deduped against what they have (`career_provider_deliver`, one set-based statement).
 - **No volume limit of Trainee's own** (owner, 2026-10-27 19:55). The only brake is the search service refusing:
-  - OpenAI 429 is a rate limit, with its `retry-after`. 429 `insufficient_quota` is out of credit.
+  - A provider 429 is a rate limit, with its `retry-after`. A 429 that says the credit is used up is out of credit.
   - A refusal blocks discovery for every instance (`career_provider_state`). The job waits without spending an attempt.
   - The reply says plainly what happened and when it resumes.
 - **Spend view**: `select * from career_provider_spend(now() - interval '30 days')` (service role). It shows, per day:
@@ -80,7 +81,7 @@ so no code for them is merged and nothing calls them.
   - calls (searches, pages read, MX)
   - results
   - model cost: the gateway's price for the tokens. The web_search tool's own per-call fee is not in `PRICES`, so read
-    it on the OpenAI invoice.
+    it on the provider's invoice.
   - cache hits
   - refusals
 - **Erase**:
@@ -99,10 +100,10 @@ type FindResult = { status: "ok"; people: ProviderPerson[]; company; domain: str
   | { status: "not_wired"; reason; http_calls } | { status: "error"; detail; http_calls };
 interface ProviderPerson { provider: "web"; provider_id; name; email: string | null /* published only */; company; company_key; position; source_ref; source_url: string; profile_text: string | null }
 
-providerConfig(env)                       // CAREER_PEOPLE_SEARCH=on + the gateway's OpenAI key; CAREER_PEOPLE_SEARCH_MODEL (default gpt-4.1-mini)
+providerConfig(env)                       // CAREER_PEOPLE_SEARCH=on + the gateway's Anthropic key; model claude-sonnet-5-5 only (D-046: CAREER_PEOPLE_SEARCH_MODEL naming another is ignored)
 makeProvider(config, fetch, { resolve?, mx?, search? }): PeopleProvider | null   // null: NOT_WIRED, no call
 notWiredReply(config): string             // the plain sentence
-openAiWebSearch({ fetch, apiKey, model }): SearchFn;  searchRecipe(company, titles): string[]
+gatewaySearch(): SearchFn (dark: the gateway's webSearch answers not_wired);  searchRecipe(company, titles): string[]
 webProvider({ search, fetch, resolve?, mx?, read? }): PeopleProvider
 
 parseTargetAsk(message): TargetAsk | null
@@ -123,10 +124,10 @@ studied, so alumni come from the person's own contacts. The reply says so.
 ## Owner steps
 
 1. Approve model spend for discovery. Each company costs 6 searches plus page reads, cached for everyone for 30 days.
-2. Set the function secret `CAREER_PEOPLE_SEARCH=on`. The key is the existing `OPENAI_API_KEY`, and no new key is
-   needed. This is optional:
-   - `CAREER_PEOPLE_SEARCH_MODEL`: a model that supports Responses `web_search`. The default is `gpt-4.1-mini`, which
-     OpenAI's guide lists for it.
+2. Set the function secret `CAREER_PEOPLE_SEARCH=on`. The key is the existing `ANTHROPIC_API_KEY` (Claude only), and no
+   new key is needed. Nothing runs while the gateway's web search is not available. This is optional:
+   - `CAREER_PEOPLE_SEARCH_MODEL`: ignored unless it is `claude-sonnet-5-5`, the only model Trainee serves (D-046); any
+     other value is logged once and Sonnet 5.5 is used.
    - `CAREER_PEOPLE_CACHE_DAYS`
 3. Apply the migration with go-live (it is in `MIGRATIONS` with its `MIGRATION_MARK`).
 

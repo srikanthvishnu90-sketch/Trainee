@@ -176,6 +176,7 @@ Deno.test({
           assertNode.match(b, /\n   Uncertain: your graduation date isn't confirmed, so eligibility isn't decided\./, "a missing fact is named beside the role, never an eligibility verdict");
         }
         assertNode.match(r.reply, /I did not find 5 within the scope checked/);
+        assertNode.ok(!/apply to these|Reply yes and I'll apply/i.test(r.reply), "after \"Don't apply yet\" no offer to apply follows the list (architect ruling 5)");
         assertNode.match(r.reply, /2 roles were left out: closed when checked/);
         assertNode.match(r.reply, /Nothing was applied for/);
         for (const never of ["Stale Co", "Quiet Co", "Gone Corp", "Senior Data Analyst", "Fulltime Inc", "Motorway Co"]) assertNode.ok(!r.reply.includes(never), `${never} is not listed in S1`);

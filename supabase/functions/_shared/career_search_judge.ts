@@ -583,7 +583,9 @@ export async function searchJudgeTurn(o: {
   if (listed.length) lines.push(...listed.map((r, i) => lineOf(r.h, i, r.tail)));
   else lines.push(`None of the ${top.length} judged came out ${[...KEPT_VERDICTS].join(" or ")}, so none is listed.`);
   if (more > 0) lines.push(`${more} more ${more === 1 ? "is" : "are"} not shown.`);
-  lines.push(listed.length ? `Say "apply to these" to queue the ${listed.length === 1 ? "one" : listed.length} listed, or name one to tailor your resume for.` : "Widen the role or the place and I'll search again.");
+  // R10 (architect ruling 5): after "don't apply (yet)" no offer to apply follows the list.
+  const noApply = /\b(?:don'?t|do not|never|not)\s+(?:\w+\s+){0,2}?apply/i.test(String(o.message ?? ""));
+  if (!(listed.length && noApply)) lines.push(listed.length ? `Say "apply to these" to queue the ${listed.length === 1 ? "one" : listed.length} listed, or name one to tailor your resume for.` : "Widen the role or the place and I'll search again.");
   const shortlist = listed.map((r) => ({ id: r.h.job_id, title: r.h.title, company: r.h.company || null, location: where(r.h) || null, url: r.h.url || null }));
   const picked = rows.slice(0, 25).map((r) => ({ hit: r.h, posting: byId.get(r.h.job_id) ?? null, checked: { state: (linkOf.get(r.h.job_id) ?? "unchecked") as "live" | "unknown" | "unchecked", at: o.now } }));
   return { reply: lines.join("\n"), status: account ? "judged" : "ranked", source, shortlist, accounting: account, modelCalled, picked, summary, blocker: "none" };

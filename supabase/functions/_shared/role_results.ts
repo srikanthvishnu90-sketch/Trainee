@@ -39,7 +39,7 @@ export async function resultsFile(o: {
   userId: string; now: number; what: What; floor: Floor | null; picked: Picked[]; store: JobStore;
   name?: string | null; source?: "live" | "snapshot" | null; read?: string | null;
   links: (userId: string, listId: string) => Promise<{ url: string | null }>;
-}): Promise<{ reply: string; parts: string[]; listId: string; url: string; offer: ApplyAllOffer; offerAsk: string; meets: number; unlisted: number; unchecked: number; otherCurrency: number; noPeriod: number; below: number } | null> {
+}): Promise<{ reply: string; parts: string[]; listId: string; url: string; offer: ApplyAllOffer; offerAsk: string; meets: number; unlisted: number; unchecked: number; otherCurrency: number; noPeriod: number; below: number; lines: string[] } | null> {
   if (!o.store.rememberListMeta) return null;
   const meets: Picked[] = [], unlisted: Picked[] = [], unchecked: Picked[] = [];
   let below = 0;
@@ -82,5 +82,8 @@ export async function resultsFile(o: {
   // The offer a bare yes answers (apply_all_yes.ts): the roles shown, each with the application tag it has right now (none: not prepared).
   // A prepared application that cannot be read leaves its role untagged: a yes never approves what it could not see.
   const offer = offerOf({ list: listId, at: o.now, jobs: await Promise.all(shown.map(async (x) => ({ ...x, payload_hash: (await o.store.prepared(o.userId, x.job_id).catch(() => null))?.payload_hash ?? null }))) });
-  return { reply: parts.join("\n"), parts, listId, url, offer, offerAsk: offerQuestion(offer), below, ...counts };
+  // R10 fix 8 (architect ruling 2026-11-09, spec B.2): the chat lists the roles by number, in the page's order, one short line each
+  // (employer, exact title, location, one-word check state); the page holds the rest.
+  const lines = ordered.map((p, i) => `${i + 1}. ${p.posting?.company ?? p.hit.company ?? "Employer not named"} — ${p.posting?.title ?? p.hit.title}, ${p.posting?.location ?? p.hit.location ?? "location not stated"} (${p.checked?.state === "live" ? "open-checked" : "not re-checked"})`);
+  return { reply: parts.join("\n"), parts, listId, url, offer, offerAsk: offerQuestion(offer), below, ...counts, lines };
 }

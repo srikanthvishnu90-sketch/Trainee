@@ -107,6 +107,7 @@ import { documentsOf, materializeArtifacts } from "../_shared/channel_artifacts.
 import { scoredN } from "../_shared/career_search.ts";
 import { askFor, isJudgePromptAsk, judgePromptTurn, searchJudgeTurn, supabaseJudgeCache, supabaseSearchSources } from "../_shared/career_search_judge.ts"; // FEATURE 5
 import { blockerAsk, widenedAsk } from "../_shared/search_widen.ts"; // R10 WO-C
+const NO_APPLY = /\b(?:don'?t|do not|never|not)\s+(?:\w+\s+){0,2}?apply/i; // R10: "Don't apply yet", "do not apply to anything"
 import { wantOf } from "../_shared/search_shortlist.ts"; // R10 WO-C
 import { readPersonZone } from "../_shared/person_zone.ts"; // R10 WO-C
 import { offerChatTurn } from "../_shared/career_offer_chat.ts"; // FEATURE 12
@@ -1398,6 +1399,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                   // F.1: the blocker question's answer leads the results message (the page's own two sentences and link stay as they are;
                   // owner 2026-11-01/02: on every channel the list itself is the hosted page).
                   if (why) made.parts[0] = `${why.trim()}\n${made.parts[0]}`;
+                  // R10 fix 8 (architect ruling 2026-11-09): the roles by number beside the File link, so one can be chosen in chat.
+                  if (made.lines.length) made.parts[0] = [made.parts[0], ...made.lines].join("\n");
                   out = { ...out, reply: [made.parts[0], made.parts[1]].join("\n") + resumeLine, parts: [made.parts[0], ...(resumeLine ? [resumeLine.trim()] : []), made.parts[1]] };
                   agentMeta = { ...(agentMeta || {}), results_file: made.listId };
                   f5Offer = { offer: made.offer, ask: made.offerAsk, resumeLine: !!resumeLine };
@@ -1426,7 +1429,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
               // shown", and the offer it makes (the list, each role's ref and the application tag it has now) is kept in this turn's meta,
               // so a bare yes next approves exactly those. Never when the message already ends with another question (the resume line or a
               // readiness ask): a yes there answers that one. CAREER_APPLY_ALL_YES=off leaves the results message as it was.
-              if (f5Offer && applyAllYesOn(Deno.env) && f5Offer.offer.jobs.some((j) => j.tag) && !f5Offer.resumeLine && (await resumeOnFileReader(admin, user.id)()) === true && !(agentMeta as any)?.readiness_ask) {
+              // R10 (architect ruling 5): no apply offer after the person said not to apply ("don't apply yet").
+              if (f5Offer && !NO_APPLY.test(String(message ?? "")) && applyAllYesOn(Deno.env) && f5Offer.offer.jobs.some((j) => j.tag) && !f5Offer.resumeLine && (await resumeOnFileReader(admin, user.id)()) === true && !(agentMeta as any)?.readiness_ask) {
                 out = { ...out, reply: `${out.reply}\n${f5Offer.ask}`, parts: [...((out as any).parts ?? []), f5Offer.ask] };
                 agentMeta = { ...(agentMeta || {}), apply_all_offer: f5Offer.offer };
               }

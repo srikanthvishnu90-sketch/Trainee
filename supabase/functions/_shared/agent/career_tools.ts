@@ -331,7 +331,7 @@ export function careerTools(deps: {
         document: i.document ? String(i.document) : null, documents: list(i.documents), body: String(i.body ?? ""), tone: i.tone ? String(i.tone) : null },
         { said: c.turn?.typed ?? c.turn?.message ?? "", facts: confirmed(profileOf(c).facts || []).map(factText) });
       if (out.status === "ask" && c.turn) c.turn.askOnly = true;
-      if (out.status === "ok" && c.turn) c.turn.show = { intent: "career_followup_draft", text: `Draft for ${out.to}, not sent:\n\n${out.body}` };
+      if (out.status === "ok" && c.turn) c.turn.show = { intent: "career_followup_draft", text: `Draft for ${out.to}${out.attachment ? `, with ${out.attachment}` : ""}, not sent:\n\n${out.body}` };
       return out;
     },
   }];

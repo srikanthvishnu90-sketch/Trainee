@@ -45,7 +45,7 @@ Deno.test("WO-H/D3 continuation 4 turns 5-7: drafts get warmer without an invent
   const h = [{ role: "user", content: "Now send it to Maya." }, { role: "assistant", content: "Which Maya, and where should I send it?" }, { role: "user", content: "Maya at the company." },
     { role: "assistant", content: "I still need the exact recipient or the conversation you mean. I can draft a short note while you find it." }];
   const five = await turn("What would you say?", h, [{ kind: "note", recipient: "Maya", document: "revised resume", body: "Hi Maya, attaching my revised resume for the data analyst internship. Thanks for taking a look. [Your name]" }]);
-  eq(five.t.reply, "Draft for Maya, not sent:\n\nHi Maya, attaching my revised resume for the data analyst internship. Thanks for taking a look. [Your name]");
+  eq(five.t.reply, "Draft for Maya, with revised resume, not sent:\n\nHi Maya, attaching my revised resume for the data analyst internship. Thanks for taking a look. [Your name]");
   ok(!/@/.test(five.t.reply), "no address is guessed from the company");
   const h2 = [...h, { role: "user", content: "What would you say?" }, { role: "assistant", content: five.t.reply }];
   // "Make it warmer": the first try invents a meeting, a referral and a figure; code refuses it and the model rewrites.

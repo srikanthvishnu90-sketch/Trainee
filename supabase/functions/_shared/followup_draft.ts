@@ -16,7 +16,7 @@ export interface FollowupIn { kind: FollowupKind; recipient: string | null; reci
 export type FollowupOut =
   | { status: "ask"; ask: "document" | "recipient"; options: string[]; note: string }
   | { status: "rewrite"; problems: string[]; note: string }
-  | { status: "ok"; to: string; body: string; note: string };
+  | { status: "ok"; to: string; body: string; attachment: string | null; note: string };
 
 const squash = (s: unknown) => String(s ?? "").replace(/[ \t]+/g, " ").trim();
 const PLACEHOLDER = /\[[^\]\n]{1,40}\]/g;
@@ -50,7 +50,7 @@ export function checkFollowup(i: FollowupIn, o: { said: string; facts: string[] 
   const word = (n: string) => new RegExp(`(?<![\\p{L}\\p{N}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(support);
   for (const n of specifics(plain).names) if (!word(n)) problems.push(`the name "${n}" is not in the person's words or confirmed facts`);
   if (problems.length) return { status: "rewrite", problems: [...new Set(problems)].slice(0, 8), note: "Not shown. Rewrite the draft so it fixes every problem, keeping the tone asked for, and call draft_followup again." };
-  return { status: "ok", to, body, note: "Code shows the draft to the person exactly as written; do not repeat or change it. Nothing is sent." };
+  return { status: "ok", to, body, attachment: squash(i.document).slice(0, 80) || null, note: "Code shows the draft to the person exactly as written; do not repeat or change it. Nothing is sent." };
 }
 
 // The reply when the tool asked: the first question the reply asks, and nothing else (no draft, no second question).

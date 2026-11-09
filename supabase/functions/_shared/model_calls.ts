@@ -5,6 +5,8 @@ export class ModelBudgetError extends Error {
 // header) so the cause is visible in the reply's meta and the logs; "model unavailable" stays in the message.
 export class ModelUnavailableError extends Error {
   readonly detail:string;
+  // R10 WO-D: when the provider said when to retry (its retry-after header), in milliseconds from the refusal; else null.
+  retryAfterMs:number|null=null;
   constructor(readonly status:number,readonly type:string|null,detail:string){
     const d=String(detail||"").replace(/sk-[A-Za-z0-9_*.-]{3,}/g,"[key]").replace(/Bearer\s+\S+/gi,"Bearer [key]").replace(/\s+/g," ").trim().slice(0,240);
     super(`Financial model unavailable (HTTP ${status}${type?" "+type:""}${d?": "+d:""}).`);this.detail=d;
@@ -14,14 +16,19 @@ export class ModelUnavailableError extends Error {
 // The global daily budget said no (limit reached, switched off, or not checkable): no request was made. A model failure
 // to every caller that already handles one; type says which, so the reply can say it in plain words (model_budget.ts).
 export class ModelBudgetBlockedError extends ModelUnavailableError {
-  constructor(readonly block:"limit"|"paused"|"unavailable"|"before"|"after",detail:string){
+  // R10 WO-D: day, when a per-day window's cap (not the $70 total) refused it: that Chicago budget day (YYYY-MM-DD).
+  constructor(readonly block:"limit"|"paused"|"unavailable"|"before"|"after",detail:string,readonly day:string|null=null){
     super(block==="limit"?429:503,{limit:"global_daily_limit",paused:"budget_paused",unavailable:"budget_unavailable",before:"budget_not_open",after:"budget_ended"}[block],detail);
   }
 }
 export async function providerError(res:Response):Promise<ModelUnavailableError> {
   const text=await res.text().catch(()=>"");let type:string|null=null,message="";
   try{const j=JSON.parse(text);type=typeof j?.error?.type==="string"&&j.error.type?j.error.type:typeof j?.error?.code==="string"?j.error.code:null;message=typeof j?.error?.message==="string"?j.error.message:"";}catch(_){message="";}
-  return new ModelUnavailableError(res.status,type,message);
+  const e=new ModelUnavailableError(res.status,type,message);
+  // R10 WO-D: the provider's own retry time (seconds, or an HTTP date), so a reply never invents one.
+  const ra=String(res.headers.get("retry-after")??"").trim();
+  if(ra){const sec=/^\d+(?:\.\d+)?$/.test(ra)?Number(ra)*1000:Date.parse(ra)-Date.now();if(Number.isFinite(sec)&&sec>=0&&sec<86400000)e.retryAfterMs=Math.round(sec);}
+  return e;
 }
 export async function reserveModelCall(admin:any,userId:string,threadId:string,requestId:string,step:number,model:string):Promise<string> {
   const result=await admin.rpc("agent_model_call_reserve",{p_user:userId,p_thread:threadId,p_request:requestId,p_step:step,p_model:model});

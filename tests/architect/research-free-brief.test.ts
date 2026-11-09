@@ -18,7 +18,7 @@ Deno.test("a research brief File from free sources: the ATS count is cited to th
   const f = freeWeb(), read = freeReader({ fetch: f, resolver: PUBLIC, now: () => NOW }), published: any[] = [];
   const draft = { title: "Zentrafin as a first job", thesis: "Zentrafin hires new grads into engineering.",
     summary: [
-      { text: "The Greenhouse job board zentrafin lists 4 open roles.", quote: "The Greenhouse job board zentrafin lists 4 open roles.", url: "https://boards-api.greenhouse.io/v1/boards/zentrafin/jobs" },
+      { text: "The Greenhouse job board with the token zentrafin lists 4 open roles.", quote: "The Greenhouse job board with the token zentrafin lists 4 open roles.", url: "https://boards-api.greenhouse.io/v1/boards/zentrafin/jobs" },
       { text: "Zentrafin had 2,400 employees as of 2025.", quote: "Zentrafin had 2,400 employees as of 2025, according to Wikidata.", url: "https://www.wikidata.org/wiki/Special:EntityData/Q999001.json" },
       { text: "Zentrafin had 9,000 employees.", quote: "Zentrafin had 2,400 employees as of 2025", url: "https://www.wikidata.org/wiki/Special:EntityData/Q999001.json" },
     ],
@@ -45,7 +45,7 @@ Deno.test("the cover thesis names its sources, or says it summarizes the cited s
   const f = freeWeb(), read = freeReader({ fetch: f, resolver: PUBLIC, now: () => NOW });
   const mk = async (thesis: string) => {
     const published: any[] = [];
-    const draft = { title: "Zentrafin", thesis, summary: [{ text: "The Greenhouse job board zentrafin lists 4 open roles.", quote: "The Greenhouse job board zentrafin lists 4 open roles.", url: "https://boards-api.greenhouse.io/v1/boards/zentrafin/jobs" }],
+    const draft = { title: "Zentrafin", thesis, summary: [{ text: "The Greenhouse job board with the token zentrafin lists 4 open roles.", quote: "The Greenhouse job board with the token zentrafin lists 4 open roles.", url: "https://boards-api.greenhouse.io/v1/boards/zentrafin/jobs" }],
       conditions: [{ text: "Zentrafin keeps hiring new grads into engineering.", urls: ["https://zentrafin.example/careers"] }], risks: [{ text: "Fewer open roles would mean fewer first jobs.", urls: ["https://boards-api.greenhouse.io/v1/boards/zentrafin/jobs"] }] };
     await researchMarket({ question: "research Zentrafin", format: "file", plan: { queries: ["Zentrafin"], companies: ["Zentrafin"], sites: ["zentrafin.example"] },
       deps: { search: freeProvider({ fetch: f, now: () => NOW, userAgent: null }), read, draft: async () => JSON.stringify(draft), publish: async (d) => { published.push(d); return { url: "https://trainee.example/file?t=v1.x" }; } } });

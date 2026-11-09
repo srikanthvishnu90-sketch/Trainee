@@ -50,6 +50,8 @@ export const SHARED_REPLY_MODULES = [
   // R9 outreach (2026-11-08): who may be written to (no-reply, role and ATS/job-board inboxes never) and the staged route's
   // reading of an ask to write to someone.
   "automated_inbox.ts", "outreach_ask.ts",
+  // R10 C.2 (D-049): the chat File card a File turn answers with (CAREER_FILE_CARD): its words and the modules they come from.
+  "file_card_reply.ts", "file_family_card.ts", "file_family.ts", "file_family_roles.ts",
 ] as const;
 
 // D-036 (release flags, agent-chat/release_config.ts RELEASE_FLAGS): the code behind every flag the release serves ON that

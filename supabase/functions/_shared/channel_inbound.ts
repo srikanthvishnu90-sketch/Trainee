@@ -178,7 +178,8 @@ export interface CoreDeps {
   // OUTBOX_CHARS; when given with two or more, they are what the person reads, in order, and `reply` is not sent.
   // replyToMessageId (optional): the provider's id of the message the person replied to (SERIAL-1462). cardId (optional,
   // in the answer): the card this reply shows, so the outbox row that carries it is recorded against the card.
-  chat: (a: { userId: string; threadId: string | null; message: string; turnKey: string; replyToMessageId?: string | null; channel?: string; screenTap?: { qid: string; answer: string } | null }) => Promise<{ status: number; reply: string; shape?: { attachments: ShapedFile[]; links: string[]; more?: string[] }; threadId: string | null; parts?: string[]; cardId?: string | null; resultStatus?: string | null; postings?: unknown[]; screenButtons?: boolean; screenQid?: string | null; artifacts?: { ref: string; filename: string; mime: string }[] }>;
+  chat: (a: { userId: string; threadId: string | null; message: string; turnKey: string; replyToMessageId?: string | null; channel?: string; screenTap?: { qid: string; answer: string } | null }) => Promise<{ status: number; reply: string; shape?: { attachments: ShapedFile[]; links: string[]; more?: string[] }; threadId: string | null; parts?: string[]; cardId?: string | null; resultStatus?: string | null; postings?: unknown[]; screenButtons?: boolean; screenQid?: string | null; artifacts?: { ref: string; filename: string; mime: string }[];
+    fileCard?: { text: string; label: string; url: string } | null }>; // R10 C.2: the turn's File as one card; its link rides only the button (Telegram)
   // a head start on the every-minute run; what it did (deliverDue's counts), when the deliverer says (the #301 rest waits for its head)
   deliver: (a: { userId: string; key: string; now: number }) => Promise<unknown>;
   // FEATURE 16 (Telegram; optional, so the other channels run unchanged):
@@ -567,6 +568,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       return await answer(text, { connect: "telegram" });
     }
 
+    let fileCard: { text: string; label: string; url: string } | null = null; // R10 C.2 (CAREER_FILE_CARD)
     let postings: unknown[] = [], cardsShown = 0, screenQidOut: string | null = null, shape: { attachments: ShapedFile[]; links: string[]; more?: string[] } | null = null;
     const notes: string[] = [];
     let reply: string, parts: string[] | null = null, artifacts: { ref: string; filename: string; mime: string }[] = [], turnThread: string | null = person.threadId;
@@ -598,6 +600,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       cardId = typeof out.cardId === "string" && out.cardId ? out.cardId : null;
       artifacts = Array.isArray(out.artifacts) ? out.artifacts : [];
       screenQidOut = out.screenButtons === true && typeof out.screenQid === "string" ? out.screenQid : null;
+      fileCard = out.fileCard && /^https:\/\//.test(out.fileCard.url) ? out.fileCard : null;
       postings = Array.isArray(out.postings) ? out.postings.slice(0, 200) : [];
       turnThread = out.threadId ?? person.threadId;
       if (toBrain && command === "start") {
@@ -643,6 +646,11 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
         if (went && typeof went === "object" && "delivered" in went && !(Number((went as { delivered: unknown }).delivered) > 0)) { headWent = false; break; }
       }
     } catch (e) { headWent = false; console.error("inbound: immediate send failed (the outbox has it):", e instanceof Error ? e.message : String(e)); }
+    // R10 C.2: the File card after the reply's sentences, its one link the inline URL button (Telegram; agent-chat sends the plain
+    // link line on every other channel, so a card arrives here only for Telegram). A failure never changes what was said.
+    if (fileCard && msg.channel === "telegram") {
+      await say(contact, d.render(fileCard.text), { buttons: [[{ text: fileCard.label, url: fileCard.url }]] }).catch((e) => { console.error("inbound: file card failed:", e instanceof Error ? e.message : String(e)); return { ok: false }; });
+    }
     // F09: the screen's yes/no question gets Yes / No buttons where the channel has them (Telegram), else the plain words.
     if (screenQidOut) {
       const buttons = msg.channel === "telegram" ? screenButtons(screenQidOut) : undefined;

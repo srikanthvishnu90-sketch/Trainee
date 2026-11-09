@@ -549,6 +549,8 @@
     "tests/architect/r10-no-dead-buttons.test.ts": 0.2,
     "tests/architect/r10-serve-families.test.ts": 0.3,
     "tests/architect/r10-files-dark.test.ts": 1.0,
+    "tests/architect/r10-chat-card.test.ts": 0.2,
+    "tests/architect/r10-chat-card-handler.test.ts": 9.0,
     "tests/architect/r10-no-dead-links.test.ts": 0.2
   }
 }

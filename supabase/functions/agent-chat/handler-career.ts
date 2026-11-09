@@ -132,6 +132,7 @@ import { fetchSources } from "../_shared/research_sources.ts";
 import { declaredFetch, searchProviderFor } from "../_shared/research_search.ts";
 import { prepFileTurn } from "./career_prep_file.ts"; // BETA C03: the interview prep File
 import { factsForTurn, replyWriterOn, rewrites, writable, writeReply, writerChannel } from "../_shared/career_reply_writer.ts"; // V1 TEXTING VOICE
+import { fileCardOn, type FileCardOut, type FileCardSource, withFileCard } from "../_shared/file_card_reply.ts"; // R10 C.2 chat File card
 import { correctedAsk } from "../_shared/search_correction.ts"; // SPEC 2.3
 import { applyReadiness } from "../_shared/apply_readiness.ts"; // SPEC 2.2
 import { writeReadinessAsk } from "../_shared/readiness_ask.ts";
@@ -578,6 +579,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const turnDocuments: { format: string; filename: string; mime: string; base64: string; sha256: string | null }[] = []; // tailor_resume's files, this turn only
       let turnAttachments: unknown[] = [], turnLinks: string[] | null = null, turnFileLinks: string[] = []; // REPLY SHAPE: what the agent staged; the URLs it may show
       let turnPostings: unknown[] = []; // JOB CARDS: what the turn's search found, for channels that show cards
+      let fileCardSrc: FileCardSource | null = null; // R10 C.2: the File this turn made, for its one chat card (CAREER_FILE_CARD)
       const events = supabaseEventStore(admin);
       // RESUME CONFIRM RACE (2026-10-30) / KNOWN GAPS (2026-10-30): every fact_confirmed event this turn makes (the router's
       // resume confirmation, a fact stated in chat, the brain's confirm_profile_fact) is held here and written by this
@@ -1387,6 +1389,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                 if (made) {
                   out = { ...out, reply: made.reply + resumeLine, parts: [made.parts[0], ...(resumeLine ? [resumeLine.trim()] : []), made.parts[1]] };
                   agentMeta = { ...(agentMeta || {}), results_file: made.listId };
+                  { const total = made.meets + made.unchecked + made.unlisted, what = whatOf(f5Ask).many;
+                    fileCardSrc = { kicker: "Roles File", title: what.charAt(0).toUpperCase() + what.slice(1), url: made.url, updatedAt: new Date().toISOString(),
+                      counts: [`${total} ${total === 1 ? "role" : "roles"} found`, ...(made.unlisted ? [`${made.unlisted} without listed pay`] : [])] }; }
                   f5Offer = { offer: made.offer, ask: made.offerAsk, resumeLine: !!resumeLine };
                 }
               }
@@ -1519,7 +1524,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       if (out.handler !== "agent" && !careerTask && !careerBatch) {
         const pf = await prepFileTurn({ out: out as any, userId: user.id, files: createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }) })
           .catch((e) => { console.error("prep file:", (e as Error)?.message ?? e); return null; });
-        if (pf) { out = pf.out as typeof out; agentMeta = { ...(agentMeta || {}), ...pf.meta }; }
+        if (pf) {
+          out = pf.out as typeof out; agentMeta = { ...(agentMeta || {}), ...pf.meta };
+          const url = Array.isArray((pf.out as any).parts) ? String((pf.out as any).parts.at(-1)) : "";
+          if (/^https:\/\//.test(url)) fileCardSrc = { kicker: "Interview prep", title: String((pf.meta as any).prep_file?.title ?? "Your interview prep"), url, updatedAt: new Date().toISOString(), counts: [] };
+        }
       }
       let taskIntent = null;
       let batchIntent = null;
@@ -1618,6 +1627,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       if (spendNote) {
         out = { ...out, reply: `${out.reply}\n${spendNote}`, ...(out.parts ? { parts: [...out.parts, spendNote] } : {}) };
         agentMeta = { ...(agentMeta || {}), model_limit: spend.refused() };
+      }
+      // R10 C.2 (D-049): the File this turn made goes as ONE card, not the link alone (CAREER_FILE_CARD; off: unchanged).
+      let fileCardOut: FileCardOut | null = null;
+      if (fileCardSrc && fileCardOn(Deno.env)) {
+        const tz = await (async () => { try { const r: any = await admin.from("career_alert_prefs").select("tz").eq("user_id", user.id).maybeSingle(); return r?.data?.tz ?? null; } catch { return null; } })();
+        const fc = withFileCard({ channel: writerChannel((body as any)?.channel), reply: out.reply, parts: out.parts, src: fileCardSrc }, { now: Date.now(), tz });
+        out = { ...out, reply: fc.reply, parts: fc.parts }; fileCardOut = fc.card;
+        if (fc.card) agentMeta = { ...(agentMeta || {}), file_card: fc.card };
       }
       const reminders = Array.isArray(loaded.reminders) ? loaded.reminders : [];
       const reminderLines = reminders.map((r:any) => typeof r.speak_line === "string" ? r.speak_line.slice(0,2000) : "").filter(Boolean);

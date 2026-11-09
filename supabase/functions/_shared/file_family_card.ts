@@ -11,6 +11,7 @@ export interface ChatCard { text: string; button: { label: string; url: string }
 export interface ChatCardInput {
   kicker: string; title: string; updatedAt: string | null; link: string; // link: the File's own private page
   rows: ResultRow[]; // the roles the File holds: the counts are theirs and nothing else's
+  counts?: string[]; // counts the caller computed from the same real items (e.g. by listed pay); used instead of state counts
   decision?: { text: string; ref: string } | null; // the one decision the person owes, and the role it is about (the deep link)
   button?: string;
 }
@@ -18,7 +19,7 @@ const URL_RE = /\bhttps?:\/\/\S+|\bwww\.\S+/gi;
 const words = (s: string) => s.replace(URL_RE, "").replace(/\s{2,}/g, " ").trim(); // a link only ever travels as the button
 
 export function chatFileCard(o: ChatCardInput, c: Ctx): ChatCard {
-  const counts = stateCountsOf(o.rows).filter((x) => x.n > 0).map((x) => `${x.n} ${vocab(x.key).count}`);
+  const counts = o.counts ?? stateCountsOf(o.rows).filter((x) => x.n > 0).map((x) => `${x.n} ${vocab(x.key).count}`);
   const when = timeIn(o.updatedAt, c, { zone: true, cap: true });
   const fresh = [when ? `Updated ${when}` : "Update time unknown", ...counts].join(" - ");
   const ref = o.decision && o.rows.some((r) => r.ref === o.decision!.ref) ? o.decision.ref : null; // only a role this File holds

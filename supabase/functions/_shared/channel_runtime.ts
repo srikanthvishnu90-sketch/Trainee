@@ -56,12 +56,16 @@ export function chatThroughAgent(url: string, key: string, o: { retryDelayMs?: n
     const sb = Array.isArray(meta.screen_buttons) ? meta.screen_buttons : null;
     const screenQid = typeof meta.screen_qid === "string" && /^[0-9a-f]{8}$/.test(meta.screen_qid) ? meta.screen_qid : null;
     const screenButtons = !!sb && sb.length === 2 && sb[0] === "Yes" && sb[1] === "No" && !!screenQid;
+    // R10 C.2: the turn's File card (agent-chat meta.file_card, CAREER_FILE_CARD), only with an https link and its words.
+    const fc = meta.file_card && typeof meta.file_card === "object" ? meta.file_card as Record<string, unknown> : null;
+    const fileCard = fc && typeof fc.text === "string" && fc.text.trim() && typeof fc.label === "string" && typeof fc.url === "string" && /^https:\/\//.test(fc.url)
+      ? { text: fc.text, label: fc.label.slice(0, 60), url: fc.url } : null;
     // REPLY SHAPE: the files and links that follow the reply, clamped again here (names, sizes, counts) before they are sent.
     const sh = body.shape && typeof body.shape === "object" ? body.shape as Record<string, unknown> : null;
     const shaped = sh ? shapeReply({ attachments: sh.attachments, links: sh.links }) : null;
     const more = sh && Array.isArray(sh.more) ? sh.more.map((m) => String(m ?? "").trim()).filter(Boolean).slice(0, 1) : [];
     const shape = shaped && (shaped.attachments.length || shaped.links.length || more.length) ? { attachments: shaped.attachments, links: shaped.links, ...(more.length ? { more } : {}) } : null;
-    return { status: res.status, reply: String(body.reply ?? ""), ...(shape ? { shape } : {}), threadId: typeof body.thread_id === "string" ? body.thread_id : null, ...(parts ? { parts } : {}), ...(cardId ? { cardId } : {}), ...(resultStatus ? { resultStatus } : {}), ...(artifacts.length ? { artifacts } : {}), ...(postings.length ? { postings } : {}), ...(screenButtons ? { screenButtons, screenQid } : {}) };
+    return { status: res.status, reply: String(body.reply ?? ""), ...(shape ? { shape } : {}), threadId: typeof body.thread_id === "string" ? body.thread_id : null, ...(parts ? { parts } : {}), ...(cardId ? { cardId } : {}), ...(resultStatus ? { resultStatus } : {}), ...(artifacts.length ? { artifacts } : {}), ...(postings.length ? { postings } : {}), ...(screenButtons ? { screenButtons, screenQid } : {}), ...(fileCard ? { fileCard } : {}) };
   };
 }
 

@@ -59,10 +59,11 @@ const blank = (s: unknown) => s === null || s === undefined || !String(s).trim()
 const msOf = (t: string | null | undefined) => { const n = t ? Date.parse(t) : NaN; return Number.isNaN(n) ? null : n; };
 const isExternal = (s: Src) => s.external === true || !blank(s.href);
 // A time in the person's zone, or null (a time ahead of the clock is not a check that happened).
-export function timeIn(at: string | null | undefined, c: Ctx, label = "", dateOnly = false): string | null {
+// future: a deadline, an expiry or a meeting, which is meant to be ahead of the clock (never a check time).
+export function timeIn(at: string | null | undefined, c: Ctx, label = "", dateOnly = false, future = false): string | null {
   const t = msOf(at);
-  if (t === null || t > c.now + 60_000) return null;
-  return dateOnly ? `${label ? `${label} ` : ""}${dateIn(t, c.tz)}` : freshnessStamp(label, [t], { now: c.now, tz: c.tz })?.trim() ?? null;
+  if (t === null || (!future && t > c.now + 60_000)) return null;
+  return dateOnly ? `${label ? `${label} ` : ""}${dateIn(t, c.tz)}` : freshnessStamp(label, [t], { now: future ? Math.max(c.now, t) : c.now, tz: c.tz })?.trim() ?? null;
 }
 const timeTag = (at: string, text: string) => `<time datetime="${esc(new Date(Date.parse(at)).toISOString())}">${esc(text)}</time>`;
 // The source line under a value: label · time · link. An external source missing its link or its time is not a source.
@@ -170,7 +171,7 @@ export function blockHtml(x: Block, c: Ctx): string {
 }
 
 // ---------------------------------------------------------------- the File (C.1 anatomy)
-export interface Meta { label: string; at?: string | null; dateOnly?: boolean; value?: string | null }
+export interface Meta { label: string; at?: string | null; dateOnly?: boolean; future?: boolean; value?: string | null }
 export interface FamilyFile {
   family: FamilyId; header?: string; boundary?: string; mono?: string | null; back?: string | null; menu?: Act[]; pause?: Act | null;
   hero: { kicker: string; title: string; meta: Meta[]; counts?: { n: number; label: string }[] };
@@ -179,7 +180,7 @@ export interface FamilyFile {
 }
 // A meta line: a time (in the person's zone; none known: "time unknown", said) or a value (none: Unconfirmed).
 function metaHtml(m: Meta, c: Ctx): string {
-  if ("at" in m) { const t = timeIn(m.at, c, "", m.dateOnly); return `<span class="ff-meta">${esc(m.label)} ${t ? `<b>${timeTag(m.at!, t)}</b>` : `<b data-unconfirmed="1">time unknown</b>`}</span>`; }
+  if ("at" in m) { const t = timeIn(m.at, c, "", m.dateOnly, m.future); return `<span class="ff-meta">${esc(m.label)} ${t ? `<b>${timeTag(m.at!, t)}</b>` : `<b data-unconfirmed="1">time unknown</b>`}</span>`; }
   return `<span class="ff-meta">${esc(m.label)} <b${blank(m.value) ? ` data-unconfirmed="1"` : ""}>${esc(blank(m.value) ? UNCONFIRMED : m.value)}</b></span>`;
 }
 function headHtml(f: Pick<FamilyFile, "family" | "header" | "boundary" | "mono" | "back" | "menu" | "pause">): string {
@@ -273,7 +274,7 @@ export const FAMILY_CSS = `
 .ff-ck-partial .ff-box{border-color:var(--ff-warn);background:var(--ff-warn-bg)}.ff-ck-missing .ff-box,.ff-ck-unknown .ff-box{border-color:var(--ff-bad);background:var(--ff-bad-bg)}
 .ff-ckt{flex:1;min-width:0}
 .ff-item{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--ff-line)}.ff-card>.ff-item:first-of-type,.ff-label+.ff-item{border-top:0;padding-top:0}
-.ff-itb{flex:1;min-width:0}.ff-tiled{flex-wrap:wrap}.ff-tiled>.ff-itb{flex:1 1 200px}.ff-tiled>.ff-ita{flex:1 1 100%;max-width:none;padding-left:52px}.ff-ita{flex:none;max-width:48%}.ff-it{font-weight:700;font-size:17px}.ff-serif{font-family:${DISPLAY_FONT};font-weight:500;font-size:21px;line-height:1.25}
+.ff-itb{flex:1;min-width:0}.ff-tiled,.ff-item:has(>.ff-itb>.ff-idrow){flex-wrap:wrap}.ff-item:has(>.ff-itb>.ff-idrow)>.ff-ita{flex:1 1 100%;max-width:none}.ff-tiled>.ff-itb{flex:1 1 200px}.ff-tiled>.ff-ita{flex:1 1 100%;max-width:none;padding-left:52px}.ff-ita{flex:none;max-width:48%}.ff-it{font-weight:700;font-size:17px}.ff-serif{font-family:${DISPLAY_FONT};font-weight:500;font-size:21px;line-height:1.25}
 .ff-idrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin-bottom:6px!important}
 .ff-id{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:14px;font-weight:600;color:var(--ff-mute)}
 .ff-tile,.ff-avatar{flex:none;display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:var(--ff-lav);color:var(--ff-ptext)}.ff-tile svg{width:22px;height:22px}
@@ -298,7 +299,7 @@ export const FAMILY_CSS = `
 .ff-btn:disabled{border-color:var(--ff-line);background:var(--ff-neu-bg);color:var(--ff-mute);cursor:default}
 .ff-btn:focus-visible,.ff a:focus-visible,.ff summary:focus-visible{outline:3px solid var(--ff-ink);outline-offset:2px}
 .ff-bar{margin:20px 0 0;padding:16px 0 0;border-top:1px solid var(--ff-line);display:flex;flex-direction:column;gap:12px}
-.ff-two{display:grid;grid-template-columns:1fr 1fr;gap:12px}.ff-cap{font-size:14px;color:var(--ff-mute);text-align:center}
+.ff-two{display:grid;grid-template-columns:1fr 1fr;gap:12px}.ff-two:has(>:only-child){grid-template-columns:1fr}.ff-cap{font-size:14px;color:var(--ff-mute);text-align:center}
 .ff-state{padding:20px;border:1px solid var(--ff-line);border-radius:20px;background:var(--ff-card);display:flex;flex-direction:column;gap:12px}
 .ff-st,.ff .fstate-t{margin:0;font-family:${DISPLAY_FONT};font-weight:500;font-size:24px;line-height:1.2}
 .ff .fstate{margin:0 0 12px;padding:20px;border:1px solid var(--ff-line);border-radius:20px;background:var(--ff-card)}.ff .fstate-why,.ff .fstate-next{font-size:16px}

@@ -38,7 +38,7 @@ import { planCareerTaskIntent, normalizeCareerTaskRequest, createCareerBoardFor,
 import { CareerHost } from "../_shared/career_host.js";
 import { CareerPool } from "../_shared/career_pool.js";
 import { createCareerPersistence, careerRequestHash } from "../_shared/career_persistence.js";
-import { holdUnsent, notConfirmedReply, pauseReply, readControl, reconcile, resumeReply, unsavedStopReply, workflowReply, type Hold, type StopControl } from "../_shared/career_stop_truth.ts";
+import { holdUnsent, notConfirmedReply, pauseReply, readControl, reconcile, resumeReply, storeSentReply, unsavedStopReply, workflowReply, type Hold, type StopControl } from "../_shared/career_stop_truth.ts";
 import { callModel as callModelUncapped, newMeter, turnLedger, WEB_SEARCH_AVAILABLE } from "../_shared/model_gateway.ts";
 import { careerModelConfig } from "./release_model.ts";
 // LAUNCH READINESS (2026-10-26): the daily model ceiling, the per-person turn order, the pool read only when used.
@@ -1721,7 +1721,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             : (stopTurn.cancelled?.includes("people_list") && rb.planOpen !== false ? (rb.planOpen === null ? "this conversation's record could not be read back" : "this conversation still holds the people list") : null);
         if (why) {
           console.error("career stop: read-back disagrees:", stopTurn.kind, why);
-          return json(cors, { ...saved.response, reply: notConfirmedReply(stopTurn.kind, why), parts: undefined, meta: { ...(saved.response?.meta ?? {}), result_status: "not_confirmed" } }, 200);
+          const sent = { ...saved.response, reply: notConfirmedReply(stopTurn.kind, why), parts: undefined, meta: { ...(saved.response?.meta ?? {}), result_status: "not_confirmed" } };
+          delete (sent as any).parts;
+          // The stored copy is the reply sent (a replay of this turn returns it, and the thread shows it).
+          if (!(await storeSentReply(admin as any, { userId: user.id, threadId: tid, turnKey, response: sent }))) console.error("career stop: the stored copy could not be corrected");
+          return json(cors, sent, 200);
         }
       }
       return json(cors, saved.response, 200);

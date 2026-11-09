@@ -651,11 +651,16 @@ export async function runScheduling(o: { store: RepliesStore; outbox: Outbox; ca
 }
 
 // ------------------------------------------------------------------------------------------------ the action worker
-export async function runOutreachActions(o: { store: RepliesStore; rail: ReplyRail; calendars: Partial<Record<Provider, CalendarProvider>>; now: number; worker: string; limit?: number; perUser?: number; leaseS?: number }) {
-  const stats = { claimed: 0, sent: 0, events: 0, retry: 0, failed: 0, refused: 0 };
+export async function runOutreachActions(o: { store: RepliesStore; rail: ReplyRail; calendars: Partial<Record<Provider, CalendarProvider>>; now: number; worker: string; limit?: number; perUser?: number; leaseS?: number ; quiet?: Quiet}) {
+  const stats = { claimed: 0, sent: 0, events: 0, retry: 0, failed: 0, refused: 0, held: 0 };
   const claimed = await o.store.claimActions(o.worker, o.limit ?? 200, o.perUser ?? 5, o.now, o.leaseS ?? 120);
   stats.claimed = claimed.length;
+  // R10 F.3: a paused, opted-out or erased person (career_quiet_users) gets no approved action carried out, calendar
+  // invites included (they email the contact: sendUpdates=all). The action is handed back still approved, so it goes once
+  // they resume; an unreadable quiet check holds everyone (quietOf).
+  const quiet = await quietOf(o.quiet, claimed.map((a) => a.user_id));
   for (const a of claimed) {
+    if (quiet.has(a.user_id)) { await o.store.finishAction(a.id, o.worker, "retry", null, null, "held: the person paused Trainee"); stats.held++; continue; }
     const t = await o.store.thread(a.user_id, a.thread_id);
     const p = a.payload;
     // Code's last look: the exact payload, the thread's own contact only, never a do-not-contact address.
@@ -1264,7 +1269,7 @@ export async function runRepliesLane(o: {
   };
   await step("followups", () => runFollowupDrafts({ store, outbox: o.outbox, model: o.model, person, now: o.now, worker, quiet }));
   await step("scheduling", () => runScheduling({ store, outbox: o.outbox, calendars, model: o.model, person, tz, now: o.now, quiet }));
-  await step("actions", () => runOutreachActions({ store, rail, calendars, now: o.now, worker }));
+  await step("actions", () => runOutreachActions({ store, rail, calendars, now: o.now, worker, quiet }));
   return out;
 }
 

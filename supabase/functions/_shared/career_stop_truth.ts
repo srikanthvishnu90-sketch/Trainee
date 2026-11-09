@@ -12,16 +12,16 @@
 // 2026-11-09 against the latest migration of each function. Only the paths that refuse while paused are named as held.
 export const PAUSE_HOLDS = [
   "new applications and cloud applications (enqueue, claim and the check before submit)",
-  "outreach emails (refused when they are claimed to send)",
+  "outreach emails (checked again right before each one goes, so a batch already started stops too)",
   "follow-ups",
+  "calendar invites for meetings you approved from a reply",
   "job alerts, job cards and other messages I send on my own",
   "reminders",
 ] as const;
-// Paths that do NOT read the pause today (blockers; career_send_go 20261031020000:123, runOutreachActions in
-// career_outreach_replies.ts:1267 with sendUpdates=all invites). Said plainly, never claimed as stopped.
+// What the pause cannot reach: an email already handed to the mail provider when the pause lands is out of Trainee's
+// hands (it is recorded as sent). Networking introductions do not read it either, but that connector is not wired.
 export const PAUSE_GAPS = [
-  "an email batch already claimed before the pause (it can finish its next couple of minutes of sends)",
-  "calendar invites for meetings you already approved from a reply",
+  "an email already handed to Gmail at the moment you paused",
 ] as const;
 
 type Admin = { from(t: string): any; rpc(n: string, a: unknown): PromiseLike<{ data: any; error: { message: string } | null }> };
@@ -153,4 +153,21 @@ export function unsavedStopReply(kind: StopControl["kind"], hold: Hold | null = 
   if (kind === "resume") return "I could not save that, so the pause is still on. Nothing was restarted.";
   const held = hold && hold.held ? ` I did hold ${n(hold.held, "approved outreach draft", "approved outreach drafts")} back to waiting, so ${hold.held === 1 ? "it won't" : "they won't"} send without a new yes.` : "";
   return `The stop is not confirmed: I could not save it, so the people list is not cancelled.${held} Your account is not paused. Say "pause everything" to stop all sending.`;
+}
+
+// After a read-back mismatch the person is sent the "not confirmed" reply; the stored copy of the turn (the receipt a
+// replay returns, and the assistant message in the thread) is rewritten to it, so what is stored is what was sent.
+export async function storeSentReply(admin: Admin, o: { userId: string; threadId: string; turnKey: string; response: Record<string, unknown> }): Promise<boolean> {
+  try {
+    const key = `career:turn:${o.threadId}:${o.turnKey}`;
+    const r = await admin.from("career_watch_kv").select("value").eq("user_id", o.userId).eq("key", key).maybeSingle();
+    if (r.error || !r.data?.value) return false;
+    const u = await admin.from("career_watch_kv").update({ value: { ...r.data.value, response: o.response }, updated_at: new Date().toISOString() }).eq("user_id", o.userId).eq("key", key);
+    if (u.error) return false;
+    const m = await admin.from("agent_messages").select("id,meta").eq("thread_id", o.threadId).eq("role", "assistant").order("id", { ascending: false }).limit(10);
+    const row = (m.data ?? []).find((x: any) => x?.meta?.career_turn_key === o.turnKey);
+    if (m.error || !row) return false;
+    const w = await admin.from("agent_messages").update({ content: String(o.response.reply ?? "") }).eq("id", row.id);
+    return !w.error;
+  } catch { return false; }
 }

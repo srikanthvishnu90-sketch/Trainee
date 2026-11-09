@@ -275,6 +275,10 @@ if [[ -f "$BRIDGE_PATH" ]]; then
     # 20261101130000 (re-prepare after needs_answers) rewrites the reconcile and the functions the deferred files above install:
     # applied last, below.
     [[ "$(basename "$file")" == 20261101130000_* ]] && continue
+    # 20261109150000 (WO-L hand-off) redefines career_apply_job_history (20261101130000, deferred above) and rewrites, by
+    # career_apply_mass_submit_rewrite (20261027140000, deferred above), the daily-cap readers and the source guard the
+    # deferred files install: applied last, below, with its test.
+    [[ "$(basename "$file")" == 20261109150000_* ]] && continue
     # 20261102120000 (the per-person candidates) reads career_apply_job_history, which 20261101130000 defines: applied after it, below.
     [[ "$(basename "$file")" == 20261102120000_* ]] && continue
     # 20261102000000 (a corrected entry stops what was made from its old words): applied last, below, twice, with its test.

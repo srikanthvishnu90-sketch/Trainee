@@ -7,7 +7,7 @@ import { stateCountsOf } from "../../supabase/functions/_shared/results_spec.ts"
 import { CTX, NOW, role, shortlist, TOKEN } from "./r10-files-fixtures.ts";
 
 const posting = { label: "From the posting", href: "https://boards.greenhouse.io/examplesolar/jobs/4001", at: "2026-11-09T15:12:00Z" };
-const articles = (html: string) => [...html.matchAll(/<article class="ff-role" id="r-(ref\d+)">([\s\S]*?)<\/article>/g)].map((m) => ({ ref: m[1], html: m[2] }));
+const articles = (html: string) => [...html.matchAll(/<article class="ff-card ff-role" id="r-(ref\d+)">([\s\S]*?)<\/article>/g)].map((m) => ({ ref: m[1], html: m[2] }));
 
 Deno.test("R10 WO-E 1: fifteen families, each with its header and an effect boundary, each mapped to the File kind or renderer it extends", () => {
   const ids = Object.keys(FAMILIES);
@@ -20,8 +20,8 @@ Deno.test("R10 WO-E 1: a sourced claim carries its link and a time in the person
   const ok = claimHtml("$85-98k", posting, CTX);
   assert.match(ok, /data-src="external"/);
   assert.match(ok, /href="https:\/\/boards\.greenhouse\.io\/examplesolar\/jobs\/4001"/);
-  assert.match(ok, /<time datetime="2026-11-09T15:12:00\.000Z">Nov 9, 2026, 9:12 AM CT<\/time>/);
-  assert.match(claimHtml("$85-98k", posting, { now: NOW, tz: "America/Los_Angeles" }), /7:12 AM PT/);
+  assert.match(ok, /\$85-98k<span class="ff-src"> - From the posting <time datetime="2026-11-09T15:12:00\.000Z">9:12 AM today<\/time>/);
+  assert.match(claimHtml("$85-98k", posting, { now: NOW, tz: "America/Los_Angeles" }), /7:12 AM today/);
   for (const broken of [{ ...posting, href: null, external: true }, { ...posting, at: null }, { ...posting, at: "2026-11-10T15:00:00Z" }, { ...posting, href: "http://insecure.example.com/x" }]) {
     const h = claimHtml("$85-98k", broken, CTX);
     assert.match(h, /data-src="unconfirmed"/); assert.match(h, new RegExp(UNCONFIRMED)); assert.doesNotMatch(h, /<time/);
@@ -45,11 +45,12 @@ Deno.test("R10 WO-E 1: F-05 counts come from results_spec states, are exclusive 
   const f = shortlist(), file = rolesShortlistFile(f);
   const counts = file.hero.counts ?? [];
   assert.equal(counts.reduce((a, x) => a + x.n, 0), f.rows.length);
-  assert.deepEqual(counts, stateCountsOf(f.rows).filter((x) => x.n > 0).map((x) => ({ n: x.n, label: x.label })));
+  assert.deepEqual(counts.map((x) => x.n), stateCountsOf(f.rows).filter((x) => x.n > 0).map((x) => x.n));
+  assert.deepEqual(counts.map((x) => x.label), ["ready to prepare", "ready for review", "need you", "need eligibility check"]);
   const html = rolesShortlistPage(f, CTX), tgt = html.slice(html.indexOf("Targets - companies"));
-  assert.ok(tgt.includes("Example Climate Lab") && tgt.includes("not counted as an opportunity"));
+  assert.ok(tgt.includes("Example Climate Lab") && tgt.includes("not counted as an opportunity") && !/ready to prepare/.test(tgt.slice(0, 400)));
   assert.doesNotMatch(tgt.slice(0, tgt.indexOf("ff-bar")), /data-effect="(prepare|submit|approve)"|>Apply</);
-  assert.match(html, /Updated <b><time datetime="2026-11-09T15:40:00\.000Z">Nov 9, 2026, 9:40 AM CT<\/time><\/b>/);
+  assert.match(html, /Updated <b><time datetime="2026-11-09T15:40:00\.000Z">Today 9:40 AM CT<\/time><\/b>/);
   assert.match(html, /Sources checked: <b>9 boards \+ employer pages<\/b>/);
 });
 
@@ -59,11 +60,11 @@ Deno.test("R10 WO-E 1: F-05 posts only existing handler actions, prepares withou
   // Every pick and every single Prepare carries tag "none": the handler's gate prepares those and never sends (handler.ts gate()).
   for (const m of html.matchAll(/name="pick" value="([^"]+)"/g)) assert.match(m[1], /^ref\d+:none$/);
   assert.doesNotMatch(html, /0123456789abcdef/); // the prepared role's real tag never reaches a form here
-  for (const m of html.matchAll(/name="action" value="([^"]+)"/g)) assert.ok(["apply", "applysel", "dismiss"].includes(m[1]), m[1]);
+  for (const m of html.matchAll(/name="action" value="([^"]+)"/g)) assert.ok(["apply", "applysel", "dismiss", "pause"].includes(m[1]), m[1]);
   const [r1, r2, r3, r4, r5] = arts;
-  assert.match(r1.html, /name="ref" value="ref1"><input type="hidden" name="tag" value="none"><button type="submit" class="ff-btn ff-sec"[^>]*data-effect="prepare">Prepare application/);
-  assert.match(r2.html, /Restriction:<\/strong> your state may be excluded/); assert.match(r2.html, /disabled[^>]*data-effect="prepare"/); assert.doesNotMatch(r2.html, /name="action" value="apply"/);
-  assert.match(r3.html, /<summary>Review application<\/summary>[\s\S]*Earliest start[\s\S]*Needs you/); assert.doesNotMatch(r3.html, /name="action" value="apply"/);
+  assert.match(r1.html, /name="ref" value="ref1"><input type="hidden" name="tag" value="none"><button type="submit" class="ff-btn ff-pri"[^>]*data-effect="prepare">Prepare application/);
+  assert.match(r2.html, /Location restriction:<\/strong> your state may be excluded - this must resolve before any preparation\./); assert.doesNotMatch(r2.html, /data-effect="prepare"/); assert.doesNotMatch(r2.html, /name="action" value="apply"/);
+  assert.match(r3.html, /<summary class="ff-btn ff-sec">Review application<\/summary>[\s\S]*Earliest start[\s\S]*Needs you/); assert.doesNotMatch(r3.html, /name="action" value="apply"/);
   assert.match(r4.html, /Student window:<\/strong>[\s\S]*Enrolled undergraduate graduating Dec 2027 to June 2028/);
   assert.match(r4.html, /data-src="unconfirmed"[\s\S]*time read not on file/); // no check time on file: not shown as a sourced fact
   assert.match(r4.html, /Uncertain:<\/strong> The posting does not say/);

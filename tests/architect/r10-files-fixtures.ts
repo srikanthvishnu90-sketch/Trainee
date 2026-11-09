@@ -24,8 +24,8 @@ export function shortlist(): ShortlistInput {
   return {
     token: TOKEN, title: "Climate operations roles", review: "review v1", updatedAt: "2026-11-09T15:40:00Z", sourcesChecked: "9 boards + employer pages", back: "/f",
     rows: [
-      role(1, { payShown: "$85-98k", payGroup: "meets", why: ["Matches your process-rollout record."], gaps: ["Energy-sector experience preferred, not required."] }),
-      role(2, { title: "Program Operations Associate with a deliberately long title that has to wrap on a phone screen", place: "US remote - excludes 3 states", blocked: "your state may be excluded by this posting's location rules." }),
+      role(1, { payShown: "$85-98k", payGroup: "meets", why: ["matches your process-rollout record.", "Customer-facing operations work matches your last 3 years."], gaps: ["energy-sector experience preferred, not required."] }),
+      role(2, { title: "Program Operations Associate with a deliberately long title that has to wrap on a phone screen", place: "US remote - excludes 3 states", restriction: "Location restriction", blocked: "your state may be excluded" }),
       role(3, { company: "Example Carbon Co", title: "Operations Associate", url: "https://jobs.lever.co/examplecarbon/cc-2214", payShown: "$80-90k", payGroup: "meets", tag: "0123456789abcdef", why: ["Uses your confirmed scheduling-tool rollout."],
         send: [{ label: "Resume", value: "Operations v3" }, { label: "Where it goes", value: "jobs.lever.co" }, { label: "Earliest start", value: "", needs: true }] }),
       role(4, { company: "Example Carbon Co", title: "Data Operations Intern, Summer 2027", url: "https://jobs.lever.co/examplecarbon/cc-2290", window: "Enrolled undergraduate graduating Dec 2027 to June 2028",

@@ -135,7 +135,7 @@ Deno.test("no source could be opened, or none supports an answer: the reply says
 });
 
 Deno.test("routing: with CAREER_RESEARCH_REPLY=on the three asks go to the brain; off, or a job search or a payload, they do not", () => {
-  const on = { get: (k: string) => k === "CAREER_RESEARCH_REPLY" ? "on" : undefined }, off = { get: () => undefined };
+  const on = { get: (k: string) => k === "CAREER_RESEARCH_REPLY" ? "on" : undefined }, off = { get: (k: string) => k === "CAREER_RESEARCH_REPLY" ? "off" : undefined }; // D-047: off is the rollback, named explicitly
   for (const m of ["What would change the market for home batteries?", "Compare these 3 companies: Acme, Globex, Initech", "salary for a data analyst in Austin", "How much do nurses make in Denver?", "what's the market outlook for EV chargers"]) {
     ok(marketResearchAsk(on, m, "question_unclaimed"), m); ok(!marketResearchAsk(off, m, "question_unclaimed"), `off: ${m}`);
   }

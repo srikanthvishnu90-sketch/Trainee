@@ -51,7 +51,7 @@ Deno.test({ name: "WO-107: status, inbox and due follow-ups from one read model 
       assert(/Added to your tracker: Vandelay Industries/.test(logged.reply), logged.reply);
       const all = await say(chat, "where are my applications?");
       eq(all.intent, "career_apply_status", all.reply);
-      for (const w of [/Acme confirmed it \(confirmation ACME-1\)/, /Globex has not confirmed it yet/, /can't tell whether it reached Initech/, /Umbrella[^:\n]*: approved, not sent yet/, /Hooli[^:\n]*: not sent/]) assert(w.test(all.reply), `${w}: ${all.reply}`);
+      for (const w of [/Acme[^:\n]*: submitted; their page showed ACME-1; Acme has not confirmed it by email yet\./, /Globex has not confirmed it yet/, /can't tell whether it reached Initech/, /Umbrella[^:\n]*: approved, not sent yet/, /Hooli[^:\n]*: not sent/]) assert(w.test(all.reply), `${w}: ${all.reply}`);
       assert(/Also on your tracker \(what you told Trainee\): Vandelay Industries \([^)]*Data Analyst[^)]*\): you told Trainee you applied on \w+ \d+; stage \w+/.test(all.reply), all.reply);
       assert(/Employer email on record \(last 30 days\): Stark Industries: recruiter reply on/.test(all.reply) && /Globex \(Data Analyst\): interview invitation on/.test(all.reply), all.reply);
       const one = await say(chat, "did my application to Globex go through?");
@@ -93,7 +93,7 @@ Deno.test({ name: "WO-107: status, inbox and due follow-ups from one read model 
       await pg.sql(`revoke select on public.career_mail_events from service_role`);
       try {
         const st = await say(chat, "where are my applications?");
-        assert(/Acme confirmed it/.test(st.reply) && /Your mail events could not be read just now/.test(st.reply) && !/interview invitation|recruiter reply/.test(st.reply), st.reply);
+        assert(/Acme[^:\n]*: submitted; their page showed ACME-1/.test(st.reply) && /Your mail events could not be read just now/ /* architect ruling 13-Obs (2026-11-09): a page reference alone is not "Acme confirmed it" */.test(st.reply) && !/interview invitation|recruiter reply/.test(st.reply), st.reply);
         const who = await say(chat, "who emailed me?");
         assert(/couldn't read your mail events just now/.test(who.reply) && !/Globex|Stark|No employer email/.test(who.reply), who.reply);
         const due = await say(chat, "what follow-ups are due?");

@@ -15,7 +15,7 @@ import { pureRoute } from "../routing-scenarios.ts";
 const host = (CareerHost as any).createCareerHost({ CareerAccess: (core as any).CareerAccess, CareerOnboarding: (core as any).CareerOnboarding, CareerRouter: (core as any).CareerRouter, CareerDoorstep: (core as any).CareerDoorstep, CareerReply: (core as any).CareerReply, CareerContainment: (core as any).CareerContainment });
 const fresh = () => host.createTurnCtx({ userId: "u-rr", threadId: "t-rr", now: Date.UTC(2026, 10, 2, 15), snapshot: null, accountPersistence: true });
 const env = (o: Record<string, string>) => ({ get: (k: string) => o[k] });
-export const STAGED = env({ CAREER_BRAIN: "staged", CAREER_KNOWLEDGE: "on" });
+export const STAGED = env({ CAREER_BRAIN: "staged", CAREER_KNOWLEDGE: "on", CAREER_RESEARCH_REPLY: "off" });
 
 const PRE: Record<string, string> = {
   standing: "status", status: "status", outreach: "outreach", outreach_status: "outreach", outreach_replies: "outreach",

@@ -12,7 +12,7 @@ const env = (v: Record<string, string>) => ({ get: (k: string) => v[k] });
 const host = (CareerHost as any).createCareerHost({ CareerAccess: (core as any).CareerAccess, CareerOnboarding: (core as any).CareerOnboarding, CareerRouter: (core as any).CareerRouter, CareerDoorstep: (core as any).CareerDoorstep, CareerReply: (core as any).CareerReply, CareerContainment: (core as any).CareerContainment });
 const fresh = () => host.createTurnCtx({ userId: "u-rr", threadId: "t-rr", now: Date.UTC(2026, 10, 7, 15), snapshot: null, accountPersistence: true });
 const ON = env({ CAREER_BRAIN: "staged", CAREER_RESEARCH_REPLY: "on", CAREER_RESEARCH_BRIEF: "on" });
-const OFF = env({ CAREER_BRAIN: "staged" });
+const OFF = env({ CAREER_BRAIN: "staged", CAREER_RESEARCH_REPLY: "off" }); // D-047: off is the rollback, named explicitly
 const decide = (e: ReturnType<typeof env>, m: string) => stagedDecision({ env: e, message: m, ctx: fresh(), host, structured: false });
 
 // The research area of evals/career/e2e/tasks.json (E21-E30, last turn of each) and the asks the work order names.
@@ -65,7 +65,7 @@ Deno.test("a research ask passes over a document-delivery claim; the person's ow
 
 Deno.test("CAREER_RESEARCH_REPLY off: routing is as before", () => {
   for (const m of RESEARCH) {
-    assertNode.ok(!marketResearchAsk(env({}), m, "career_document_delivery"), m);
+    assertNode.ok(!marketResearchAsk(env({ CAREER_RESEARCH_REPLY: "off" }), m, "career_document_delivery"), m);
     assertNode.notEqual(decide(OFF, m).reason, "market_research", m);
   }
 });

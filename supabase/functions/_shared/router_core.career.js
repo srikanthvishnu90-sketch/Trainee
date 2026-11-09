@@ -1481,6 +1481,18 @@ const CareerProfile = (() => {
         if (head.skip) { section = null; if (!unread.includes(head.label)) unread.push(head.label); } else section = head.kind;
         continue;
       }
+      const labelled = line.match(/^(?:[-•*]\s*)?(skills?|technical(?: skills)?|tools|technologies|certifications?|certificates?|licen[cs]es?|interests?|hobbies)\s*:\s*(.+)$/i);
+      if (labelled) {
+        flush();
+        lastWasMore = false;
+        const kind = /^(cert|licen)/i.test(labelled[1]) ? "certification" : /^(interest|hobb)/i.test(labelled[1]) ? "interest" : "skill";
+        for (const name of labelled[2].split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
+          if (kind === "skill") drafts.push({ kind: "skill", name, title: name, text: `Skill: ${name}`, skills: [name], evidence: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+          else if (kind === "interest") drafts.push({ kind: "other", section: "interests", name, title: name, text: `Interest: ${name}`, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+          else drafts.push({ kind: "certification", title: name, text: name, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+        }
+        continue;
+      }
       if (!section) continue;
       if (section === "skill") {
         for (const name of line.split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
@@ -10572,7 +10584,7 @@ const CareerDoorstep = (() => {
         global_pause_set: true, pause_flag_set: true, global_pause: pause,
         halted_count: null, sent_count: null, in_flight_count: null, already_stopped_count: null, queue_total: null,
         queue_state: null,
-        reply: "Stopped everything I can reach: the global pause is now set for your account, which blocks every send path this product controls. I could not read the queue's own records in this session, so how many already went out and how many were waiting is unverified. Next step — the moment the queue records load, I reconcile them and report the exact counts here; you do not need to ask again.",
+        reply: "I have not paused your account. I could not read the queue's own records in this session, so what already went out and what is waiting is unverified. Next step: say \"pause everything\" to pause your account, or name the one task to stop.",
       };
     }
     const TERMINAL = new Set(["halted", "suppressed", "cancelled", "canceled", "bounced", "failed", "completed"]);
@@ -10600,7 +10612,7 @@ const CareerDoorstep = (() => {
       sent_count: sentAlready.length, in_flight_count: inFlight.length, in_flight_unconfirmed_count: inFlight.length,
       already_stopped_count: alreadyStopped.length, queue_total: total,
       queue_state: q,
-      reply: `Stopped everything: the global pause is set, and ${pending.length} pending outreach item${pending.length === 1 ? " is" : "s are"} halted — the halt is saved so it survives a restart. Counts: ${sentAlready.length} already out, ${inFlight.length} in flight and unconfirmed, ${pending.length} halted${alreadyStopped.length ? `, ${alreadyStopped.length} already stopped` : ""} — ${total} in total, so every item is accounted for.${sentText}`,
+      reply: `I held the outreach queued in this conversation: ${pending.length} pending outreach item${pending.length === 1 ? " is" : "s are"} held. This is not an account pause; say "pause everything" to pause your account. Counts: ${sentAlready.length} already out, ${inFlight.length} in flight and unconfirmed, ${pending.length} halted${alreadyStopped.length ? `, ${alreadyStopped.length} already stopped` : ""} — ${total} in total, so every item is accounted for.${sentText}`,
     };
   }
   function applyQueueEvent(state, ev) {
@@ -14848,7 +14860,7 @@ const CareerRouter = (() => {
         reply: compose({ headline: "That is the resume already on your record — nothing changed.", facts: [`Its ${n} entr${n === 1 ? "y is" : "ies are"} confirmed as you gave them, so I added nothing and need no new yes.`, ...(Array.isArray(res.replaced_drafts) && res.replaced_drafts.length ? ["The other resume you pasted, which you had not confirmed, is set aside: nothing from it is used."] : [])], nextStep: "To change an entry, tell me what it should say, or paste the updated resume." }) };
     }
     const byKind = {};
-    for (const f of profile.facts || []) if (f && f.source === "resume-ingest" && f.needs_confirmation) byKind[f.kind] = (byKind[f.kind] || 0) + 1;
+    for (const f of profile.facts || []) if (f && f.source === "resume-ingest" && f.needs_confirmation) { const k = f.kind === "other" && /^Interest: /.test(f.text || "") ? "interest" : f.kind; byKind[k] = (byKind[k] || 0) + 1; }
     const total = Object.values(byKind).reduce((a, b) => a + b, 0);
     const counts = Object.entries(byKind).map(([k, n]) => `${n} ${k}`).join(", ");
     const mir = threadMirrorForWrite(ctx);
@@ -23331,6 +23343,10 @@ const CareerRouter = (() => {
         const reply = compose({ headline: "I need the posting to tailor against — Big Law is a category, not a posting.", facts, nextStep: "Paste the firm's posting and the CV cut runs immediately." });
         return { intent: "tailor_needs_posting", reply, resultStatus: "awaiting_user", artifact: null, sends: 0 };
       }
+      if (/^\s*(?:hey,?\s+|ok(?:ay)?,?\s+|so\s+)?(?:please\s+|can you\s+|could you\s+|help me\s+)?tailor\s+(?:my\s+)?(?:resume|cv)(?:\s+(?:please|for me|now|again))?\s*[.!?]*\s*$/i.test(String(text || ""))) {
+        const reply = compose({ headline: "Which role should I tailor your resume for?", nextStep: "Name the role, or paste the posting, and I'll tailor it to that." });
+        return { intent: "tailor_needs_posting", reply, resultStatus: "awaiting_user", artifact: null, sends: 0 };
+      }
       const disc = handleDiscovery(text, c, {});
       if (disc.shortlist && disc.shortlist.length) {
         const topAdapted = postingsFromCtx(c).find((p) => p.corpus_id === disc.shortlist[0].id) || null;
@@ -25251,7 +25267,7 @@ const CareerRouter = (() => {
       if (additions.length) res.reply = `${res.reply}\n\n${additions.join("\n")}`;
     }
     if (res && typeof res.reply === "string" && res.reply && res.intent !== "career_fallback" && res.intent !== "honest_unavailable" && !/\bresume\b/i.test(res.reply) && !resumeOnRecord(c)) {
-      const ask = lc(s(text)).replace(/[’]/g, "'");
+      const ask = lc(s(text)).replace(/[’]/g, "'").replace(/\b(?:don't|do not|never|not|without|no need to)\s+(?:\w+\s+){0,2}?(?:apply|applying|submit\w*)\b[^.?!]*/g, " ");
       if (!/\?\s*$/.test(ask) && /\bapply\s+(?:to|for|at|me|on|now)\b|\bapply\b[^.?!]{0,40}\b(?:jobs?|roles?|postings?|positions?|internships?|openings?)\b|\bsubmit (?:my|an?) applications?\b/.test(ask)) {
         res.reply = `${res.reply}\n\n${resumeDraftsPending(c).length
           ? "And nothing is sent anywhere before your resume is confirmed: its entries are waiting for your word (reply \"yes, that's my resume\" if they're right)."
@@ -26459,9 +26475,14 @@ const CareerRender = (() => {
     const pages = (s.match(/\/Type\s*\/Page(?![a-zA-Z])/g) || []).length;
     const runs = extractPdfRuns(buf);
     const sizes = [...new Set(runs.map((r) => r.size).filter(Boolean))].sort((a, b) => a - b);
+    const first = runs.filter((r) => r.page === 0);
+    const topY = first.length ? Math.max(...first.map((r) => r.y)) : null;
+    const nameRuns = topY === null ? [] : first.filter((r) => Math.abs(r.y - topY) < 0.5);
+    const nameSizes = [...new Set(nameRuns.map((r) => r.size).filter(Boolean))];
+    const bodySizes = [...new Set(runs.filter((r) => !nameRuns.includes(r)).map((r) => r.size).filter(Boolean))].sort((a, b) => a - b);
     const rightDate = (r) => DATE_ONLY_RE.test(String(r.text).trim()) && runs.some((o) => o !== r && o.page === r.page && Math.abs(o.y - r.y) < 0.5 && o.x <= 100);
     const xs = [...new Set(runs.filter((r) => r.x <= 100 || !rightDate(r)).map((r) => Math.round(r.x)))];
-    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, pages, fonts, fontSizesPt: sizes, images, singleColumn: runs.length > 0 && xs.every((x) => x <= 100), rightAlignedDates: runs.filter((r) => r.x > 100 && rightDate(r)).length, headings: [] };
+    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, pages, fonts, fontSizesPt: sizes, bodySizesPt: bodySizes, nameSizesPt: nameSizes, images, singleColumn: runs.length > 0 && xs.every((x) => x <= 100), rightAlignedDates: runs.filter((r) => r.x > 100 && rightDate(r)).length, headings: [] };
   }
   function extractPdfPoppler(buf) {
     if (!cp || !fs || !os) return null;
@@ -26511,12 +26532,23 @@ const CareerRender = (() => {
     const stylesXml = (parts.get("word/styles.xml") || Bytes.alloc(0)).toString("utf8");
     const fonts = [...new Set([...stylesXml.matchAll(/w:ascii="([^"]+)"/g)].map((m) => m[1]))];
     const sizes = [...new Set([...stylesXml.matchAll(/<w:sz w:val="(\d+)"/g)].map((m) => parseInt(m[1], 10) / 2))].sort((a, b) => a - b);
+    const firstStyle = (/<w:p[\s>][\s\S]*?<w:pStyle w:val="([^"]+)"[\s\S]*?<\/w:p>/.exec(docXml.slice(0, (docXml.indexOf("</w:p>") + 6) || 0)) || [])[1] || null;
+    const styleUses = firstStyle ? (docXml.match(new RegExp(`<w:pStyle w:val="${firstStyle.replace(/[^\w-]/g, "")}"`, "g")) || []).length : 0;
+    const styleSz = (id) => { const m = new RegExp(`<w:style\\b[^>]*w:styleId="${id.replace(/[^\w-]/g, "")}"[^>]*>([\\s\\S]*?)<\\/w:style>`).exec(stylesXml); return m ? [...m[1].matchAll(/<w:sz w:val="(\d+)"/g)].map((x) => parseInt(x[1], 10) / 2) : []; };
+    const nameSizes = firstStyle && styleUses === 1 ? [...new Set(styleSz(firstStyle))] : [];
+    const styleDefs = new Map([...stylesXml.matchAll(/<w:style\b([^>]*)>([\s\S]*?)<\/w:style>/g)].map((m) => [(/w:styleId="([^"]+)"/.exec(m[1]) || [])[1], { attrs: m[1], body: m[2] }]).filter(([id]) => id));
+    const used = new Set([...docXml.matchAll(/<w:(?:pStyle|rStyle|tblStyle) w:val="([^"]+)"/g)].map((m) => m[1]));
+    for (const [id, d] of styleDefs) if (/w:default="(?:1|true)"/.test(d.attrs) && /w:type="(?:paragraph|character)"/.test(d.attrs)) used.add(id);
+    for (const id of [...used]) { let cur = id, n = 0; while (cur && n++ < 20) { used.add(cur); const b = styleDefs.get(cur); cur = b ? ((/<w:basedOn w:val="([^"]+)"/.exec(b.body) || [])[1] || null) : null; } }
+    const otherSizes = [...styleDefs].filter(([id]) => used.has(id) && !(nameSizes.length && id === firstStyle)).flatMap(([, d]) => [...d.body.matchAll(/<w:sz w:val="(\d+)"/g)].map((x) => parseInt(x[1], 10) / 2));
+    const defaults = [...(/<w:docDefaults>[\s\S]*?<\/w:docDefaults>/.exec(stylesXml) || [""])[0].matchAll(/<w:sz w:val="(\d+)"/g)].map((x) => parseInt(x[1], 10) / 2);
+    const bodySizes = [...new Set([...defaults, ...otherSizes])].sort((a, b) => a - b);
     const mediaParts = names.filter((k) => k.startsWith("word/media/")).length;
     const images = mediaParts + (docXml.match(/<w:drawing|<a:blip|<w:pict/g) || []).length;
     const tables = (docXml.match(/<w:tbl[\s>]/g) || []).length;
     const textFrames = (docXml.match(/txbxContent/g) || []).length;
     const headerFooterParts = names.filter((k) => /word\/(header|footer)\d*\.xml/.test(k)).length;
-    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, fonts, fontSizesPt: sizes, images, tables, textFrames, headerFooterParts, headings: [] };
+    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, fonts, fontSizesPt: sizes, bodySizesPt: bodySizes, nameSizesPt: nameSizes, images, tables, textFrames, headerFooterParts, headings: [] };
   }
   function extractDocxPython(buf) {
     if (!cp || !fs || !os) return null;
@@ -26626,16 +26658,20 @@ const CareerRender = (() => {
         if (!st.singleColumn) add("single_column", "fail", "PDF text does not start in a single column — R1");
         const badFonts = st.fonts.filter((f) => !["Helvetica", "Helvetica-Bold", "Times-Roman", "Times-Bold", "Courier", "Courier-Bold"].includes(f));
         if (badFonts.length) add("fonts", "fail", `non-standard PDF font(s): ${badFonts.join(", ")} — R6`);
-        const badSizes = st.fontSizesPt.filter((s) => s < 10 || s > 12);
+        const badSizes = st.bodySizesPt.filter((s) => s < 10 || s > 12);
         if (badSizes.length) add("fonts", "fail", `PDF font size(s) outside 10–12pt: ${badSizes.join(", ")} — R6`);
+        const badName = st.nameSizesPt.filter((s) => s < 10 || s > 18);
+        if (badName.length) add("fonts", "fail", `PDF name size(s) outside 10–18pt: ${badName.join(", ")} — R6`);
         if (o.pageLimit && st.pages > o.pageLimit) add("page_count", "warn", `PDF runs ${st.pages} pages; this role family's limit is ${o.pageLimit} (123 conventions)`);
       } else {
         if (st.images > 0) add("images", "fail", `DOCX contains ${st.images} image/media part(s) — R2`);
         if (st.tables > 0) add("tables", "fail", `DOCX uses ${st.tables} layout table(s) — R1: no layout tables`);
         if (st.textFrames > 0) add("text_frames", "fail", `DOCX contains ${st.textFrames} text frame(s) — R1: no text boxes/frames`);
         if (st.headerFooterParts > 0) add("contact_in_body", "warn", `DOCX has ${st.headerFooterParts} header/footer part(s); contact info belongs in the body — R4`);
-        const badSizes = st.fontSizesPt.filter((s) => s < 10 || s > 12);
+        const badSizes = st.bodySizesPt.filter((s) => s < 10 || s > 12);
         if (badSizes.length) add("fonts", "fail", `DOCX font size(s) outside 10–12pt: ${badSizes.join(", ")} — R6`);
+        const badName = st.nameSizesPt.filter((s) => s < 10 || s > 18);
+        if (badName.length) add("fonts", "fail", `DOCX name size(s) outside 10–18pt: ${badName.join(", ")} — R6`);
       }
       const aLines = extractA(buf);
       let bLines = extractB(buf);
@@ -29973,6 +30009,7 @@ const CareerApplyLedger = (() => {
         const rc = receiptFor(t.id);
         entries.push({ source: t.kind === "tracked" ? "tracker" : "queue", company: t.company || null, role: t.title || null, state, since: t.since || null,
           reason: ev.reason || null, confirmation: ev.confirmation_id || (rc && rc.confirmation_id) || null, url: ev.url || null, key: t.id,
+          byEmail: !!ev.email_confirmed_at,
           receipt: !!rc && SENT.has(state), sentAt: rc && SENT.has(state) ? (rc.clicked_at || rc.finished_at || null) : null });
       }
     }
@@ -30004,8 +30041,11 @@ const CareerApplyLedger = (() => {
   function lineOf(e) {
     let w = STATES[e.state] || e.state;
     if (e.state === "needs_you" && e.reason && NEEDS_WORDS[lc(e.reason)]) w = `${w}: ${NEEDS_WORDS[lc(e.reason)]}`;
-    if (e.state === "submitted" || e.state === "confirmed") {
+    if (e.state === "confirmed" && !e.byEmail) w = `submitted; ${e.confirmation ? `their page showed ${e.confirmation}; ` : ""}the employer has not confirmed it by email yet`;
+    else if (e.state === "submitted" || e.state === "confirmed") {
       if (e.confirmation) w = `${w} (confirmation ${e.confirmation})`;
+    }
+    if (e.state === "submitted" || e.state === "confirmed") {
       if (e.source === "queue") w = `${w}; ${e.receipt ? "the receipt is on record" : "no receipt is on record yet"}`;
     }
     return `${nameOf(e)}: ${w}`;
@@ -30018,7 +30058,8 @@ const CareerApplyLedger = (() => {
     if (n.approved) parts.push(`${n.approved} approved, not sent yet`);
     if (n.submitted || n.confirmed) {
       const r = entries.filter((e) => (e.state === "submitted" || e.state === "confirmed") && e.receipt).length;
-      const notes = [n.confirmed ? `${n.confirmed} confirmed by the employer` : null, `${r ? r : "none"} with the receipt on record`].filter(Boolean);
+      const byEmail = entries.filter((e) => e.state === "confirmed" && e.byEmail).length, pageOnly = (n.confirmed || 0) - byEmail;
+      const notes = [byEmail ? `${byEmail} confirmed by the employer` : null, pageOnly ? `${pageOnly} page reference only` : null, `${r ? r : "none"} with the receipt on record`].filter(Boolean);
       parts.push(`${(n.submitted || 0) + (n.confirmed || 0)} submitted (${notes.join(", ")})`);
     }
     if (n.sent_unconfirmed) parts.push(`${n.sent_unconfirmed} sent with no confirmation recorded`);
@@ -30160,7 +30201,7 @@ const CareerApplyLedger = (() => {
       }
       case "prepared_vs_submitted": {
         push("Prepared means built and shown to you for a yes, with nothing sent. Approved means your yes landed on that exact version and it has not gone yet.");
-        push("Submitted means the submit step recorded it as sent, and I say whether its receipt is on record; confirmed means the employer confirmed it too. Without a record of the send I never call it submitted.");
+        push("Submitted means the submit step recorded it as sent, and I say whether its receipt is on record; confirmed means the employer confirmed it too, by their email; a reference shown on their page alone is not their confirmation. Without a record of the send I never call it submitted.");
         push(countsLine(led.entries) || "Nothing is on your record yet in any of those states.");
         push(unreadableFact(led));
         return out("career_status_states", "Yes: prepared, approved and submitted are separate states, and I report each from its record.", "Want the full list with each one's state?");

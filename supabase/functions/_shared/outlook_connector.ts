@@ -298,7 +298,8 @@ export interface OAuthDeps {
   // were waiting for Outlook resume. Its failure never undoes the connection.
   afterConnect?: (a: { userId: string; email: string | null; scopes: string[] }) => Promise<unknown>;
   // The connect page's calm done state, once the owner has switched that page on; absent: this function's own plain pages.
-  landing?: (o: { ok: boolean; denied: boolean; email: string | null }) => Response | Promise<Response> | null;
+  // R10 fix 11: why says a different account or a redirect that came back without a code; userId and scopes only for a stored grant.
+  landing?: (o: { ok: boolean; denied: boolean; email: string | null; why?: "taken" | "incomplete"; userId?: string; scopes?: string[] }) => Response | Promise<Response> | null;
 }
 const HEADERS = { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer", "x-frame-options": "DENY",
   "content-security-policy": `default-src 'none'; style-src 'unsafe-inline' ${FONT_CSP.style}; font-src ${FONT_CSP.font}; img-src data:; form-action 'self' https://login.microsoftonline.com; frame-ancestors 'none'` };
@@ -353,7 +354,7 @@ export async function handleOutlookOAuth(req: Request, d: OAuthDeps): Promise<Re
     if (!link || link.error) return page("This link was already used", [GONE[link?.error] ?? GONE.invalid], 400);
     if (declined) {
       await tell(d, link, linkId, 'Outlook wasn\'t connected: Microsoft\'s page was closed or declined, so nothing changed. Text "connect my outlook" for a new link.', now);
-      return (await d.landing?.({ ok: false, denied: true, email: null })) ?? page("Outlook wasn't connected", ["Nothing changed. You can close this tab and go back to the chat."]);
+      return (await d.landing?.({ ok: false, denied: true, email: null, ...(url.searchParams.has("error") ? {} : { why: "incomplete" as const }) })) ?? page("Outlook wasn't connected", ["Nothing changed. You can close this tab and go back to the chat."]);
     }
     try {
       if (!clientId || !clientSecret) throw new Error("not configured");
@@ -370,7 +371,7 @@ export async function handleOutlookOAuth(req: Request, d: OAuthDeps): Promise<Re
       if (c === "taken") {
         await d.admin.from("career_outlook_links").update({ outcome: "error" }).eq("id", linkId);
         await tell(d, link, linkId, TAKEN_WORDS("Outlook", tok.email ?? null), now);
-        return (await d.landing?.({ ok: false, denied: false, email: null })) ?? page("Outlook wasn't connected", [TAKEN_WORDS("Outlook", tok.email ?? null)], 409);
+        return (await d.landing?.({ ok: false, denied: false, email: tok.email ?? null, why: "taken" })) ?? page("Outlook wasn't connected", [TAKEN_WORDS("Outlook", tok.email ?? null)], 409);
       }
       must(await d.admin.from("career_outlook_state").upsert({ user_id: userId, email: tok.email, token_expires_at: at(tok.expires_at), needs_reconnect_at: null, needs_reconnect_reason: null,
         next_sync_at: at(now), retry_after: null, updated_at: at(now) }, { onConflict: "user_id" }), "record the Outlook state");
@@ -382,7 +383,7 @@ export async function handleOutlookOAuth(req: Request, d: OAuthDeps): Promise<Re
       await tell(d, link, linkId, text, now);
       await d.afterConnect?.({ userId, email: tok.email, scopes: String(tok.scopes ?? "").split(/\s+/).filter(Boolean) })
         .catch((e) => d.log?.(`outlook-oauth: resuming waiting tasks failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`));
-      return (await d.landing?.({ ok: true, denied: false, email: tok.email })) ?? page(`Outlook connected${tok.email ? `: ${tok.email}` : ""}`, ["You can close this tab and go back to the chat."]);
+      return (await d.landing?.({ ok: true, denied: false, email: tok.email, userId, scopes: String(tok.scopes ?? "").split(/\s+/).filter(Boolean) })) ?? page(`Outlook connected${tok.email ? `: ${tok.email}` : ""}`, ["You can close this tab and go back to the chat."]);
     } catch (e) {
       d.log?.(`outlook-oauth callback failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
       await d.admin.from("career_outlook_links").update({ outcome: "error" }).eq("id", linkId);

@@ -179,6 +179,7 @@ browser_node_tests=(
   tests/career-apply-exact-option.test.cjs
   tests/career-apply-vm-needs-answers.test.cjs
   tests/career-approval-card-browser.test.cjs
+  tests/career-browser-eval.test.cjs
   tests/career-dashboard-browser.test.cjs
   tests/career-extension-agent-submits.test.cjs
   tests/career-extension-browser.test.cjs

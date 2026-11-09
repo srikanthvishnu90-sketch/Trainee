@@ -10,6 +10,7 @@
 //   waiting   a numbered list of what only the person can do: the item, what is needed, how long it has waited.
 // A source that could not be read is named and never guessed; an empty account says so. Read only: nothing is changed.
 import type { Situation, Task } from "./career_situation.ts";
+import { closeoutText, narrowQuestion, type ReviewItem } from "./application_review.ts";
 
 export const OVERVIEW_INTENT = "career_overview";
 export const WAITING_INTENT = "career_waiting_on_you";
@@ -40,7 +41,9 @@ const lost = (s: Situation) => (s.unreadable.length ? [`Not read just now, so no
 export function overviewText(s: Situation, now: number): string {
   const T = s.tasks;
   const apps = T.filter((t) => t.kind === "application");
-  const confirmed = apps.filter((t) => t.state === "confirmed");
+  // Architect ruling 13-Obs (2026-11-09, D-024): only the employer's email confirms; a page reference alone has its own bucket.
+  const confirmed = apps.filter((t) => t.state === "confirmed" && !!t.evidence.email_confirmed_at);
+  const pageOnly = apps.filter((t) => t.state === "confirmed" && !t.evidence.email_confirmed_at);
   const unconfirmed = apps.filter((t) => t.state === "submitted_unconfirmed");
   const unknown = apps.filter((t) => t.state === "unknown_outcome");
   const running = T.filter((t) => ["queued", "driving", "waiting_extension"].includes(t.state) || (t.kind === "outreach" && ["approved", "sending"].includes(t.state)));
@@ -49,9 +52,10 @@ export function overviewText(s: Situation, now: number): string {
   const interviews = T.filter((t) => t.kind === "interview");
   const tracked = T.filter((t) => t.kind === "tracked");
   const L: string[] = [];
-  L.push(`Status as of now: ${confirmed.length} confirmed by the employer, ${unconfirmed.length + unknown.length} sent but not confirmed, ${running.length} in progress, ${blocked.length + (questions.length ? 1 : 0)} waiting on you.`);
+  L.push(`Status as of now: ${confirmed.length} confirmed by the employer, ${pageOnly.length ? `${pageOnly.length} page reference only, ` : ""}${unconfirmed.length + unknown.length} sent but not confirmed, ${running.length} in progress, ${blocked.length + (questions.length ? 1 : 0)} waiting on you.`);
   if (confirmed.length) L.push("Confirmed by the employer:", ...confirmed.map((t) => `- ${name(t)}${t.evidence.confirmation_id ? `, confirmation ${t.evidence.confirmation_id}` : ""}${t.since ? ` (${day(t.since)})` : ""}`));
-  if (unconfirmed.length || unknown.length) L.push("Sent, not confirmed by the employer yet:", ...unconfirmed.map((t) => `- ${name(t)}: sent${t.since ? ` ${day(t.since)}` : ""}, no confirmation from them yet`), ...unknown.map((t) => `- ${name(t)}: I can't tell whether it reached them; it will not be sent again`));
+  if (pageOnly.length) L.push("Page reference only (not the employer's confirmation):", ...pageOnly.map((t) => `- ${name(t)}: ${t.evidence.confirmation_id ? `their page showed ${t.evidence.confirmation_id}; ` : "sent; "}${t.company ?? "the employer"} has not confirmed it by email yet`));
+  if (unconfirmed.length || unknown.length) L.push("Sent, not confirmed by the employer yet:", ...unconfirmed.map((t) => `- ${name(t)}: sent${t.since ? ` ${day(t.since)}` : ""}, no confirmation from them yet`), ...unknown.map((t) => `- ${name(t)}: submission may have landed; I can't tell whether it reached them; it will not be sent again`));
   if (running.length) L.push("In progress:", ...running.map((t) => `- ${name(t)}: ${t.state === "driving" ? "being sent now" : t.state === "waiting_extension" ? "asked for, not prepared yet" : t.kind === "outreach" ? "approved, sends on the schedule" : "approved, waiting to run"}${t.blocker && t.blocker.who !== "person" && t.blocker.how !== "nothing for you to do" && t.blocker.how !== "nothing yet" ? ` (${t.blocker.what}; ${t.blocker.how})` : ""}`));
   if (blocked.length || questions.length) {
     L.push("Waiting on you:", ...blocked.map((t) => `- ${name(t)}: ${t.blocker!.what}. To unblock: ${t.blocker!.how}.`));
@@ -60,8 +64,23 @@ export function overviewText(s: Situation, now: number): string {
   if (interviews.length) L.push("Interviews coming up:", ...interviews.map((t) => `- ${name(t)}${t.since ? `: ${day(t.since)}` : ": date not on record"}`));
   if (tracked.length) L.push(`On your tracker (what you told me): ${tracked.slice(0, 6).map((t) => `${name(t)}, ${t.evidence.stage ?? "Submitted"}`).join("; ")}${tracked.length > 6 ? `; and ${tracked.length - 6} more` : ""}.`);
   if (!T.length) L.push("Nothing is in flight: no applications, drafts, questions or interviews on your account. Say \"find jobs\" to start a search.");
+  const close = closeoutOf(apps, T);
+  if (close) L.push("Closeout, from the records:", close);
   L.push(...lost(s));
   return L.join("\n");
+}
+// WO-G (#632 review 13-a): spec B.3's closeout, live: each finished application as its record says (confirmed only by the
+// employer's own email, a page reference said as what it is) and each prepared one held by an unanswered required question,
+// named with that question. Nothing here counts a queued or prepared application as submitted.
+const FINISHED = new Set(["confirmed", "submitted_unconfirmed", "unknown_outcome", "needs_user", "failed", "not_submitted"]);
+function closeoutOf(apps: Task[], all: Task[]): string {
+  const rows = apps.filter((t) => FINISHED.has(t.state)).map((t) => ({ state: t.state, company: t.company, title: t.title, reason: t.evidence.reason ?? null,
+    confirmation_id: t.evidence.confirmation_id ?? null, email_confirmed_at: t.evidence.email_confirmed_at ?? null, confirmation_mail_hash: t.evidence.mail_hash ?? null, sent_at: t.evidence.sent_at ?? null }));
+  const held = all.filter((t) => t.state === "awaiting_approval" && t.kind === "application" && (t.evidence.open ?? []).length).map((t) => {
+    const q = t.evidence.open![0], employer = t.company ?? "the employer";
+    return { employer, role: t.title, unresolved: [{ question: q.label, fact: null, ask: narrowQuestion({ label: q.label, company: employer, options: q.options }) }] } as unknown as ReviewItem;
+  });
+  return rows.length || held.length ? closeoutText(rows, { held }) : "";
 }
 
 export function waitingText(s: Situation, now: number): string {

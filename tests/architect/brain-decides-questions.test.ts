@@ -18,7 +18,8 @@ const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a,
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const host = (CareerHost as any).createCareerHost({ CareerAccess: (core as any).CareerAccess, CareerOnboarding: (core as any).CareerOnboarding, CareerRouter: (core as any).CareerRouter, CareerDoorstep: (core as any).CareerDoorstep, CareerReply: (core as any).CareerReply, CareerContainment: (core as any).CareerContainment });
 const fresh = () => host.createTurnCtx({ userId: "u-bdq", threadId: "t-bdq", now: Date.UTC(2026, 10, 6, 15), accountPersistence: true, snapshot: null, account: { epoch: 0, version: 0, paused: false } });
-const STAGED = { get: (k: string) => ({ CAREER_BRAIN: "staged" } as Record<string, string>)[k] };
+// D-047: CAREER_RESEARCH_REPLY is served on; these cases keep the pre-D-047 routing under test with its rollback named.
+const STAGED = { get: (k: string) => ({ CAREER_BRAIN: "staged", CAREER_RESEARCH_REPLY: "off" } as Record<string, string>)[k] };
 const decide = (m: string, ctx = fresh()) => stagedDecision({ env: STAGED, message: m, ctx, host, structured: false });
 const routerOf = (m: string) => host.runTurn(m, fresh());
 console.error = () => {};

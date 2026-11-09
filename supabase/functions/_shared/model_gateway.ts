@@ -241,7 +241,7 @@ export async function callModel(cfg: ModelConfig, payload: any, o: CallOptions =
   const got = await gate.reserve(worst, { model: cfg.model, role });
   if (!got.ok) {
     console.error(`[model] budget ${got.reason}${got.detail ? `: ${got.detail}` : ""}`);
-    throw new ModelBudgetBlockedError(got.reason, got.reason === "limit" ? "the global model budget is used up" : got.reason === "paused" ? "the model budget is switched off" : got.reason === "before" ? "the model budget window has not opened" : got.reason === "after" ? "the model budget window has ended and no new budget is approved" : `the model budget could not be checked${got.detail ? `: ${got.detail}` : ""}`);
+    throw new ModelBudgetBlockedError(got.reason, got.reason === "limit" ? (got.day ? `the model budget for ${got.day} is used up` : "the global model budget is used up") : got.reason === "paused" ? "the model budget is switched off" : got.reason === "before" ? "the model budget window has not opened" : got.reason === "after" ? "the model budget window has ended and no new budget is approved" : `the model budget could not be checked${got.detail ? `: ${got.detail}` : ""}`, got.reason === "limit" ? got.day ?? null : null);
   }
   // The total is $70: 80% ($56) warns; a reservation that does not fit (above) is refused and, at $70, the database pauses every
   // call. Eval and test runners also refuse new runs at the total (assertRunMayStart).

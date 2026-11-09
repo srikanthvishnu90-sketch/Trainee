@@ -17,7 +17,7 @@ const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 const job = (id: string, company: string, state: string, daysAgo: number, extra: Partial<AppRow> = {}): AppRow =>
   ({ id, company, state, reason: null, confirmation_id: null, email_confirmed_at: null, created_at: iso(NOW - daysAgo * DAY), updated_at: iso(NOW - daysAgo * DAY), title: null, ...extra });
 const JOBS: AppRow[] = [
-  job("j-acme", "Acme", "confirmed", 16, { confirmation_id: "ACME-1", title: "Data Analyst" }),
+  job("j-acme", "Acme", "confirmed", 16, { confirmation_id: "ACME-1", title: "Data Analyst", email_confirmed_at: "2026-10-24T15:00:00Z" }),
   job("j-globex", "Globex", "submitted_unconfirmed", 9, { confirmation_id: "CONF-4242" }),
   job("j-initech", "Initech", "unknown_outcome", 20),
   job("j-umbrella", "Umbrella", "queued", 1),

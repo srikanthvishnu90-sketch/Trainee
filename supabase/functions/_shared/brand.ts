@@ -42,7 +42,11 @@ export const FONT_LINKS = `<link rel="preconnect" href="https://fonts.googleapis
 export const FONT_CSP = { style: "https://fonts.googleapis.com", font: "https://fonts.gstatic.com" };
 
 // The mark and wordmark (Q562, Q563): the name in one face, no mascot, no tagline.
-export const BRAND = `<div class="brand"><svg class="mark" viewBox="0 0 64 64" role="img" aria-label="Trainee"><rect width="64" height="64" rx="14" fill="${PLUM}"/><text x="32" y="45" font-family="Georgia,serif" font-size="40" font-weight="700" text-anchor="middle" fill="#fff">T</text></svg><span class="wm">Trainee</span></div>`;
+// R10 fix 10 (spec C.23): the mark is compact even where no style applies. Without width and height an SVG with only a viewBox
+// fills its container, so a page whose stylesheet did not load (a sandboxing gateway policy, an in-app browser) drew a 350 px "T"
+// above the heading and pushed the invalid-link recovery below a phone's first screen. The size is in the markup now.
+export const MARK_PX = 28;
+export const BRAND = `<div class="brand"><svg class="mark" width="${MARK_PX}" height="${MARK_PX}" viewBox="0 0 64 64" role="img" aria-label="Trainee"><rect width="64" height="64" rx="14" fill="${PLUM}"/><text x="32" y="45" font-family="Georgia,serif" font-size="40" font-weight="700" text-anchor="middle" fill="#fff">T</text></svg><span class="wm">Trainee</span></div>`;
 export const FAVICON = `<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23${PLUM.slice(1)}'/%3E%3Ctext x='32' y='45' font-family='Georgia,serif' font-size='40' font-weight='700' text-anchor='middle' fill='%23fff'%3ET%3C/text%3E%3C/svg%3E">`;
 
 // ---------------------------------------------------------------- WCAG contrast (relative luminance, sRGB)
@@ -80,8 +84,8 @@ export const SYSTEM_CSS = `${TOKENS_CSS}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font:18px/1.5 ${BODY_FONT};-webkit-font-smoothing:antialiased}
 main{max-width:640px;margin:0 auto;padding:calc(20px + env(safe-area-inset-top)) 20px calc(48px + env(safe-area-inset-bottom))}
-.brand{display:flex;align-items:center;gap:10px;margin-bottom:22px}.mark{width:32px;height:32px;flex:none}
-.wm{font-family:${DISPLAY_FONT};font-weight:700;font-size:24px;letter-spacing:-.01em}
+.brand{display:flex;align-items:center;gap:8px;margin-bottom:14px}.mark{width:${MARK_PX}px;height:${MARK_PX}px;flex:none}
+.wm{font-family:${DISPLAY_FONT};font-weight:700;font-size:20px;letter-spacing:-.01em}
 h1{margin:0 0 12px;font-family:${DISPLAY_FONT};font-weight:500;font-size:28px;line-height:1.2;overflow-wrap:anywhere}
 p{overflow-wrap:anywhere}
 .apply{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:6px 20px;border-radius:999px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:600;cursor:pointer}

@@ -239,7 +239,7 @@ Deno.test({
 
       // ---------------------------------------------------------------- the checks, against the database
       const rows: (AppRow & { user_id: string; payload_hash: string; evidence: any })[] = JSON.parse(await sql(`select coalesce(json_agg(json_build_object('id',id,'user_id',user_id,'job_id',job_id,
-        'company',company,'state',state,'reason',reason,'confirmation_id',confirmation_id,'created_at',created_at,'updated_at',updated_at,'payload_hash',payload_hash,'evidence',evidence)),'[]') from career_apply_jobs`));
+        'company',company,'state',state,'reason',reason,'confirmation_id',confirmation_id,'email_confirmed_at',email_confirmed_at,'created_at',created_at,'updated_at',updated_at,'payload_hash',payload_hash,'evidence',evidence)),'[]') from career_apply_jobs`));
       const cloudSha = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(RES))), (b) => b.toString(16).padStart(2, "0")).join("");
       for (const p of people) {
         const mine = rows.filter((r) => r.user_id === p.user), sent = board.filter((b) => b.user === p.user);

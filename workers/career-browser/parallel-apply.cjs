@@ -20,6 +20,11 @@
 //  - hard denylist: linkedin.com, indeed.com, joinhandshake.com and every subdomain are refused before any navigation,
 //    independent of `allowHosts`. Every main-frame navigation (redirects included) and the form action (checked before the
 //    submit click) must be on an allowed host too, else the run is refused.
+//  - sign-in walls (WO-L): an SSO redirect (to an identity provider, or to a sign-in path), a password field, a
+//    create-account or sign-in-to-apply page, on load or after the one "Apply" control is opened, stops the run as
+//    needs_user/login_required; a page asking for a code the employer emailed stops it as needs_user/email_code. Nothing
+//    is typed into such a page (no field at all, so never a credential), nothing is sent, and the person signs in
+//    themselves. The reason words are HANDOFF_REASONS, the same in apply-vm.cjs and scripts/apply.ts.
 //  - at most once: a failure BEFORE the submit click is retried (fresh context); once submit is clicked the run is never
 //    retried: a missing confirmation is unknown_outcome.
 //  - local only by default: only loopback hosts are driven. Real employer hosts need `allowHosts` from the caller
@@ -73,6 +78,60 @@ function SHOWN_CHECK() {
   });
   return frame ? "frame" : null;
 }
+// The needs_user reasons a sign-in or verification wall gives, in every runner (apply-vm.cjs, scripts/apply.ts).
+const HANDOFF_REASONS = ["login_required", "bot_check", "email_code"];
+// Identity providers an employer's SSO sends a candidate to. Any host here, or any path that names a sign-in step, is a
+// sign-in wall, not just a host the run may not drive.
+const IDP_HOSTS = ["accounts.google.com", "login.microsoftonline.com", "login.live.com", "login.windows.net", "appleid.apple.com"];
+const IDP_SUFFIXES = ["okta.com", "oktapreview.com", "okta-emea.com", "auth0.com", "onelogin.com", "pingone.com", "pingidentity.com", "duosecurity.com", "b2clogin.com", "jumpcloud.com"];
+const SIGNIN_PATH = /\/(?:login|log-in|signin|sign-in|sso|saml2?|oauth2?|openid|oidc|authorize)(?:[/?#.;]|$)/i;
+// Is this blocked navigation an SSO sign-in? Never for a denied host (LinkedIn's sign-in stays refused, not handed over).
+function ssoSignIn(u) {
+  let url;
+  try { url = new URL(u); } catch { return false; }
+  const host = normHost(url.hostname);
+  if (isDeniedHost(host)) return false;
+  if (IDP_HOSTS.includes(host) || IDP_SUFFIXES.some((d) => host === d || host.endsWith(`.${d}`))) return true;
+  return SIGNIN_PATH.test(url.pathname);
+}
+// What kind of wall the page in front of the run is, or null. Read only: nothing on the page is touched.
+// A password field anywhere is a wall (as before WO-L). A create-account or sign-in page counts only when the page has no
+// file upload (an application form always asks for the resume), so a form that merely mentions an account is not one.
+async function signInWall(page) {
+  if (await page.$('input[type="password"]')) return "password";
+  return page.evaluate(() => {
+    const seen = (e) => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+    const text = ((document.body && document.body.innerText) || "").replace(/\s+/g, " ");
+    const inputs = [...document.querySelectorAll("input")].filter((i) => seen(i) && !["hidden", "submit", "button"].includes(i.type));
+    const named = (i) => `${i.name} ${i.id} ${i.autocomplete} ${i.getAttribute("aria-label") || ""} ${i.placeholder || ""}`;
+    const codeBox = inputs.some((i) => i.autocomplete === "one-time-code" || /code|otp|one.?time|passcode/i.test(named(i)));
+    if (codeBox && /\b(?:enter|type)\b.{0,40}\bcode\b|\bcode (?:we|that we) (?:sent|emailed)|\b(?:sent|emailed) (?:you )?(?:a|an) (?:\d[- ]digit |verification |security |one-time )?(?:code|passcode)/i.test(text)) return "email_code";
+    if (document.querySelector('input[type="file"]')) return null;
+    const emailBox = inputs.some((i) => i.type === "email" || /e-?mail/i.test(named(i)));
+    if (emailBox && /\bcreate (?:an |your )?(?:candidate )?account\b|\bsign up to apply\b|\bregister to apply\b/i.test(text)) return "create_account";
+    if (/\b(?:sign|log) ?in to (?:apply|continue)\b|\bplease (?:sign|log) ?in\b|\bsign in with (?:your )?(?:sso|company|work|google|microsoft)/i.test(text)) return "sign_in";
+    return null;
+  });
+}
+async function stopAtWall(page, url) {
+  const w = await signInWall(page);
+  if (w) throw new NeedsUser(w === "email_code" ? "email_code" : "login_required", url, w);
+}
+// The one "Apply" control on a job page that has no form yet: opened (never a control inside a form, never a new tab), so
+// the wall or the form behind it can be read. Opening it sends nothing; the same host rules guard where it leads.
+async function openApply(page, timeout) {
+  const h = (await page.evaluateHandle(() => {
+    const re = /^\s*(?:apply|apply now|apply for this (?:job|role|position)|apply to this (?:job|role)|start (?:your |my )?application)\s*$/i;
+    const c = [...document.querySelectorAll("a, button, [role=button]")]
+      .filter((e) => !e.closest("form") && (e.offsetWidth || e.offsetHeight) && re.test(e.innerText || e.getAttribute("aria-label") || ""));
+    if (c.length !== 1) return null;
+    c[0].removeAttribute("target");
+    return c[0];
+  })).asElement();
+  if (!h) return false;
+  await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded", timeout }).catch(() => null), h.click()]);
+  return true;
+}
 async function botCheck(page) {
   // The page and its own frames (an employer's site embedding the ATS form). A captcha provider's frame is judged from its
   // parent, by its iframe's src and rendered size: an invisible badge frame is not a shown check.
@@ -87,7 +146,7 @@ const hasApproval = (p) => !!p.approval && typeof p.approval.approval_id === "st
   && typeof p.approval.hash === "string" && p.approval.hash === payloadHash(p);
 const CONFIRM_RE = /thank you for applying|application (has been )?submitted|we['’]ve received your application/i;
 
-class NeedsUser extends Error { constructor(reason, field) { super(`${reason}${field ? `: ${field}` : ""}`); this.reason = reason; this.field = field; this.needs = null; } }
+class NeedsUser extends Error { constructor(reason, field, wall) { super(`${reason}${field ? `: ${field}` : ""}`); this.reason = reason; this.field = field; this.needs = null; this.wall = wall || null; } }
 
 function checkPayload(p, { allowHosts = [] } = {}) {
   if (!p || !p.url || !p.facts || !p.resume) throw new NeedsUser("invalid_payload");
@@ -105,7 +164,9 @@ async function attempt(browser, p, opts, timing) {
   const page = await ctx.newPage();
   page.setDefaultTimeout(opts.stepTimeoutMs || 15000);
   const allow = opts.allowHosts || [];
-  const blocked = [];
+  const blocked = [], blockedUrls = [];
+  // A new tab (window.open, target=_blank) is never driven: it is closed before it loads.
+  ctx.on("page", (other) => { if (other !== page) other.close().catch(() => {}); });
   // Main-frame navigations (the first load, every redirect hop, any later navigation) to a host that is denied or not allowed
   // are aborted before a request leaves the browser.
   // GET navigations are fetched with redirects off so the Location of each hop is checked BEFORE the browser requests it
@@ -113,15 +174,17 @@ async function attempt(browser, p, opts, timing) {
   // through this same handler.
   await ctx.route("**/*", async (route) => {
     const req = route.request();
-    if (req.isNavigationRequest() && req.frame() === page.mainFrame()) {
+    // Every top-level navigation, of this page or of any tab it tries to open, is checked.
+    if (req.isNavigationRequest() && !req.frame().parentFrame()) {
       const g = urlVerdict(req.url(), allow);
-      if (!g.ok) { blocked.push(g.host); return route.abort("blockedbyclient"); }
+      if (!g.ok) { blocked.push(g.host); blockedUrls.push(req.url()); return route.abort("blockedbyclient"); }
       if (req.method() === "GET") {
         const resp = await route.fetch({ maxRedirects: 0 });
         const loc = resp.status() >= 300 && resp.status() < 400 ? resp.headers().location : null;
         if (loc) {
-          const next = urlVerdict(new URL(loc, req.url()).href, allow);
-          if (!next.ok) { blocked.push(next.host); return route.abort("blockedbyclient"); }
+          const to = new URL(loc, req.url()).href;
+          const next = urlVerdict(to, allow);
+          if (!next.ok) { blocked.push(next.host); blockedUrls.push(to); return route.abort("blockedbyclient"); }
         }
         return route.fulfill({ response: resp });
       }
@@ -129,6 +192,8 @@ async function attempt(browser, p, opts, timing) {
     return route.continue();
   });
   const onAllowedHost = () => {
+    // An employer that sends the candidate to its SSO: a sign-in wall the person finishes themselves, not a refused host.
+    if (blocked.length && ssoSignIn(blockedUrls[0])) throw new NeedsUser("login_required", blocked[0], "sso_redirect");
     if (blocked.length) throw new NeedsUser("redirect_not_allowed", blocked[0]);
     const g = urlVerdict(page.url(), allow);
     if (!g.ok) throw new NeedsUser("redirect_not_allowed", g.host);
@@ -141,10 +206,17 @@ async function attempt(browser, p, opts, timing) {
     if (!resp || resp.status() >= 400) throw new Error(`page_load_${resp ? resp.status() : "none"}`);
     if (await botCheck(page)) throw new NeedsUser("bot_check", p.url);
     // An employer that wants the person to sign in first: never signed into, never given a password (the person does that).
-    if (await page.$('input[type="password"]')) throw new NeedsUser("login_required", p.url);
+    await stopAtWall(page, p.url);
+    const hasForm = async () => !!(await page.$("form input, form select, form textarea")) && !!(await page.$('form button[type="submit"]'));
+    // A job page whose form is behind its "Apply" control: opened once, and what it leads to is checked like the first load.
+    if (!(await hasForm()) && (await openApply(page, opts.stepTimeoutMs || 15000))) {
+      onAllowedHost();
+      if (await botCheck(page)) throw new NeedsUser("bot_check", p.url);
+      await stopAtWall(page, p.url);
+    }
     timing.load = Date.now() - t0;
     const t1 = Date.now();
-    if (!(await page.$("form input, form select, form textarea")) || !(await page.$('form button[type="submit"]'))) throw new NeedsUser("no_application_form_found", p.url);
+    if (!(await hasForm())) throw new NeedsUser("no_application_form_found", p.url);
     // The page's own questions, answered only from the approved facts / answers (ats-fill.cjs), each read back. A required
     // question with no confirmed answer, or one that could not be set and checked, stops the run: the person is asked.
     const fr = await fillForm(page, { ats: p.ats, facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path });
@@ -165,6 +237,7 @@ async function attempt(browser, p, opts, timing) {
     // while filling, the form posts to an allowed host, and the payload still hashes to what was approved.
     onAllowedHost();
     if (await botCheck(page)) throw new NeedsUser("bot_check", p.url);
+    await stopAtWall(page, p.url);
     const action = await page.$eval('form button[type="submit"]', (b) => {
       const a = b.getAttribute("formaction") ?? (b.form && b.form.getAttribute("action"));
       return new URL(a || location.href, document.baseURI).href;
@@ -214,7 +287,7 @@ async function applyOne(browser, p, opts = {}) {
       const r = await attempt(browser, p, { ...opts, shotBefore: opts.shotDir && `${opts.shotDir}/${p.id}-1-filled.png`, shotAfter: opts.shotDir && `${opts.shotDir}/${p.id}-2-confirmation.png` }, t);
       return { ...out, ...r, timing: t, ms: Date.now() - started };
     } catch (e) {
-      if (e instanceof NeedsUser) return { ...out, status: e.reason === "bot_check" || e.reason === "login_required" ? "needs_user" : "not_submitted", reason: e.reason, field: e.field, needs: e.needs || undefined, ms: Date.now() - started };
+      if (e instanceof NeedsUser && !t.submitClicked) return { ...out, status: HANDOFF_REASONS.includes(e.reason) ? "needs_user" : "not_submitted", reason: e.reason, field: e.field, wall: e.wall || undefined, needs: e.needs || undefined, ms: Date.now() - started };
       if (t.submitClicked) return { ...out, status: "unknown_outcome", reason: e.message, ms: Date.now() - started };
       out.lastError = e.message.split("\n")[0];
       if (out.lastError === "page_load_429") break; // the portal said slow down: not asked again by this run
@@ -239,4 +312,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, DENY_HOSTS, NeedsUser };
+module.exports = { applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, HANDOFF_REASONS, NeedsUser };

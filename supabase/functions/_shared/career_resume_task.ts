@@ -77,6 +77,8 @@ function postingNamed(t: string, companies: string[]): boolean {
 }
 export type ResumeAsk = "make" | "correct" | "link" | "ask_send" | "send_pdf" | "explain" | "edit" | "approve_edit" | "why_contact" | "apply_which" | null;
 export function resumeAskOf(message: string, task: ResumeTask | null, view: { companies: string[]; jobs: number; posting: boolean; lastFile?: boolean }): ResumeAsk {
+  // A pasted resume or posting is material, not an ask about the resume task (its own words say "for", "file", "update").
+  if (message.length > 600 || message.split("\n").filter((l) => l.trim()).length > 4 || /^\s*(here'?s|here is|this is|my) (my |the )?(resume|cv)\b/i.test(message)) return null;
   const t = lc(message), rest = t.replace(/\bnot (?:an? |the )?[a-z][a-z0-9 &/+.-]{2,80}?(?=[,.;!?]|$| please| since| and )/g, " ");
   if (task?.pending === "send_choice") {
     if (/\b(submit|apply)\b/.test(t)) return null;

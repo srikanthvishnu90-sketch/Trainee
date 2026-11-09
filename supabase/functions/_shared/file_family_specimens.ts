@@ -188,6 +188,8 @@ export const offers = (): OfferComparison => ({
 });
 
 // ---------------------------------------------------------------- the registry the acceptance suite reads (architect ruling, WO-E)
+// It lives here, not in file_kinds.ts: file_kinds.ts is in the brain eval's import graph (tests/architect/deploy-evidence.test.ts S3),
+// so exporting it there would make every renderer and specimen reply code and owe a reply measurement for modules that never reply.
 // id: the family (F-14n is the negotiation variant); kind: the existing File kind that carries it (file_kinds.ts KIND_IDS; the
 // family renderer is not yet what the live page serves for that kind); specimen: the fictional data; page: that data rendered as the
 // family's main state, at SPECIMEN_NOW in SPECIMEN_TZ, with the header's back and overflow controls.

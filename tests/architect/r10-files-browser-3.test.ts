@@ -73,10 +73,11 @@ const PAGES = Object.fromEntries(Object.entries(FILES).map(([k, f]) => [k, () =>
 Deno.test({ name: "R10 WO-E 3: F-09 to F-15 pass the visual checker at 390 and 1280 px", sanitizeResources: false, sanitizeOps: false,
   async fn(t) { await checkPages(t, PAGES); } });
 
-// Architect ruling (WO-E interface for WO-I): file_kinds.ts exports FILE_FAMILIES, one entry per family and F-14n, each with the
+// Architect ruling (WO-E interface for WO-I): FILE_FAMILIES (file_family_specimens.ts; not file_kinds.ts, which is reply code, S3), one entry per family and F-14n, each with the
 // existing File kind that carries it and a fictional specimen that renders the family's main state.
-Deno.test("R10 WO-E 3: file_kinds.ts exports FILE_FAMILIES: F-01 to F-15 and F-14n, each with a real kind and a specimen that renders", async () => {
-  const { FILE_FAMILIES, KIND_IDS } = await import("../../supabase/functions/_shared/file_kinds.ts");
+Deno.test("R10 WO-E 3: FILE_FAMILIES lists F-01 to F-15 and F-14n, each with a real kind and a specimen that renders", async () => {
+  const { KIND_IDS } = await import("../../supabase/functions/_shared/file_kinds.ts");
+  const { FILE_FAMILIES } = await import("../../supabase/functions/_shared/file_family_specimens.ts");
   assert.deepEqual(FILE_FAMILIES.map((f) => f.id), ["F-01", "F-02", "F-03", "F-04", "F-05", "F-06", "F-07", "F-08", "F-09", "F-10", "F-11", "F-12", "F-13", "F-14", "F-14n", "F-15"]);
   for (const f of FILE_FAMILIES) {
     assert.ok((KIND_IDS as readonly string[]).includes(f.kind), `${f.id}: ${f.kind}`);

@@ -9,6 +9,7 @@
 // Pure functions: data in, string out. Untrusted text is always escaped.
 import { evidenceHtml, unknown, UNKNOWN, valueHtml } from "./file_design.ts";
 import { cap1, esc } from "./file_page.ts";
+import { type Stage, STAGE_LABEL, STAGE_NOTE } from "./application_review.ts";
 
 export const SOURCES = ["From the posting", "From your resume", "From you", "Reported, not verified"] as const;
 export type Source = typeof SOURCES[number] | "From Trainee's records" | "Made by Trainee";
@@ -117,6 +118,26 @@ class V {
   }
 }
 
+// WO-G (fixes 12, 13): code-built proofs carry the one visible stage (application_review.ts stageOf) and, for a prepared
+// application, the review: what the approval covers, every answer word for word, every unresolved required question.
+// Only code builds these (trusted): a model never writes a stage, an answer or a question here.
+const STAGES = ["prepared", "approved", "sending", "uncertain", "submitted_unconfirmed", "employer_confirmed", "needs_you", "not_sent", "failed"] as const;
+function stageAndReview(x: Record<string, any>, v: V) {
+  if (!v.trusted) return {};
+  const stage = v.one(x.stage, "stage", STAGES, true);
+  if (stage === "employer_confirmed" && !x.confirmation && !x.email_confirmed_at) v.err("stage", "confirmed by the employer needs the employer's own evidence");
+  const r = x.review === undefined ? null : v.obj(x.review, "review");
+  const review = r ? {
+    url: v.str(r.url, "review.url", { max: 500, opt: true }), hash12: v.str(r.hash12, "review.hash12", { max: 12, opt: true }), approvable: r.approvable === true,
+    files: v.list(r.files ?? [], "review.files", 0, 6).map((f, i) => v.str(f, `review.files[${i}]`, { max: 160 })),
+    covers: v.list(r.covers ?? [], "review.covers", 0, 12).map((f, i) => v.str(f, `review.covers[${i}]`, { max: 600, templ: true })),
+    answers: v.list(r.answers ?? [], "review.answers", 0, 40).map((a, i) => ({ question: v.str(a?.question, `review.answers[${i}].question`, { max: 200, templ: true }), answer: v.str(a?.answer, `review.answers[${i}].answer`, { max: 4000, multi: true, templ: true }), sensitive: a?.sensitive === true })),
+    unresolved: v.list(r.unresolved ?? [], "review.unresolved", 0, 20).map((u, i) => ({ question: v.str(u?.question, `review.unresolved[${i}].question`, { max: 200, templ: true }), ask: v.str(u?.ask, `review.unresolved[${i}].ask`, { max: 600, templ: true }) })),
+  } : null;
+  if (review && review.approvable && review.unresolved.length) v.err("review", "an application with an unresolved required answer is never approvable");
+  return { ...(stage ? { stage } : {}), ...(x.email_confirmed_at ? { email_confirmed_at: v.time(x.email_confirmed_at, "email_confirmed_at") } : {}), ...(review ? { review } : {}) };
+}
+
 // ---------------------------------------------------------------- schemas (validate -> cleaned data)
 const KINDS: Record<Exclude<KindId, "job_list">, (raw: unknown, v: V) => any> = {
   introduction(raw, v) {
@@ -143,10 +164,11 @@ const KINDS: Record<Exclude<KindId, "job_list">, (raw: unknown, v: V) => any> = 
     if (status === "queued" || status === "prepared") { if (submitted_at || has) v.err("status", `${status} cannot carry a submit time or a confirmation: nothing was submitted`); }
     // A row has no submit time, so code-built data carries none and the page says "Last updated"; a hand-made one must give it.
     if (status === "submitted" && !submitted_at && !v.trusted) v.err("submitted_at", "submitted needs the time it was submitted");
-    if (status === "confirmed") { if (!submitted_at && !v.trusted) v.err("submitted_at", "confirmed needs the time it was submitted"); if (!has) v.err("confirmation", "confirmed needs a confirmation id or link from the employer"); }
+    if (status === "confirmed") { if (!submitted_at && !v.trusted) v.err("submitted_at", "confirmed needs the time it was submitted"); if (!has && !(v.trusted && x.email_confirmed_at)) v.err("confirmation", "confirmed needs a confirmation id or link from the employer"); }
     if (status === "failed" && !problems.some((p) => p.outcome === "failed")) v.err("problems", "failed needs at least one failed item with its reason");
     return { from_record: true, title: v.str(x.title, "title", { max: 80 }), company: v.str(x.company, "company", { max: 100 }), role: v.str(x.role, "role", { max: 120, opt: true }), destination: v.str(x.destination, "destination", { max: 120, opt: true }), status, prepared_at, submitted_at, as_of,
-      ...(has ? { confirmation: { id: conf!.id, url: conf!.url, screenshot_url: conf!.screenshot_url } } : {}), resume: v.str(x.resume, "resume", { max: 100, opt: true }), answers, problems };
+      ...(has ? { confirmation: { id: conf!.id, url: conf!.url, screenshot_url: conf!.screenshot_url } } : {}), resume: v.str(x.resume, "resume", { max: 100, opt: true }), answers, problems,
+      ...stageAndReview(x, v) };
   },
   plan_review(raw, v) {
     const x = v.obj(raw, "data");
@@ -249,6 +271,27 @@ const factText = (f: any, label?: string) => `- ${label ? `${label}: ` : ""}${f.
 const sec = (h: string, inner: string) => inner ? `<section class="blk"><h2>${esc(h)}</h2>${inner}</section>` : "";
 const dl = (xs: string) => xs ? `<dl class="facts">${xs}</dl>` : "";
 const linkHtml = (u: string | undefined, text: string) => u && HTTPS.test(u) ? `<a href="${esc(u)}" rel="noopener noreferrer">${esc(text)}</a>` : "";
+// WO-G: green only for the employer's own confirmation; every other stage keeps its own colour (spec D.4 rule 7).
+const STAGE_CLASS: Partial<Record<Stage, string>> = { employer_confirmed: "confirmed", failed: "failed", not_sent: "failed", needs_you: "needs-you", uncertain: "uncertain" };
+// The proof panel (spec C.21 section 5, C.23 item 10): what is and is not proven, never a made-up receipt.
+const PROOF_HEAD: Record<string, string> = { uncertain: "Submission uncertain", submitted_unconfirmed: "Not confirmed by the employer yet" };
+const PROOF_BODY: Record<string, string> = {
+  none: "Nothing was submitted. An actual receipt, application ID or employer status appears here only after a real approved submission.",
+  uncertain: "The final step may have landed. Trainee checks the employer's status and email before anything else and will not send it again. No receipt or confirmation ID exists yet, and none is made up.",
+  submitted_unconfirmed: "It reached the employer's form. Their confirmation email, application ID or status page is the proof, and it appears here when it exists.",
+  sending: "Being sent now. Nothing is confirmed until the employer's page answers.",
+};
+const reviewHtml = (r: any) =>
+  sec("Target and files", dl([r.url ? `<div class="fact"><dt>Application page</dt><dd>${esc(r.url)}</dd></div>` : "", ...(r.files ?? []).map((f: string) => `<div class="fact"><dt>File</dt><dd>${esc(f)}</dd></div>`)].join("")))
+  + sec("Exact answers that will be sent", dl((r.answers ?? []).map((a: any) => `<div class="fact"><dt>${esc(a.question)}</dt><dd>${esc(a.answer)}${a.sensitive ? ` <span class="src">Your answer</span>` : ""}</dd></div>`).join("")))
+  + sec("Unresolved", (r.unresolved ?? []).length ? `<ul class="why">${r.unresolved.map((u: any) => `<li><strong>${esc(u.question)}: not entered.</strong> ${esc(u.ask)}</li>`).join("")}</ul>` : "")
+  + sec("Before the final click", `<p>${esc(r.approvable ? `Your yes covers exactly this (approval ${r.hash12 ?? ""}): ${(r.covers ?? []).join("; ")}. A different employer, role, resume, answer or a bigger batch needs a new review.` : "Not ready to approve: required answers stay visibly unresolved until you give them, and approving wording never answers them. Nothing can be submitted from here.")}</p>`);
+const reviewLines = (r: any): string[] => [
+  "## Target and files", ...(r.url ? [`- Application page: ${r.url}`] : []), ...(r.files ?? []).map((f: string) => `- ${f}`), "",
+  "## Exact answers that will be sent", ...(r.answers ?? []).map((a: any) => `- ${a.question}: ${a.answer}${a.sensitive ? " (your answer)" : ""}`), "",
+  ...((r.unresolved ?? []).length ? ["## Unresolved", ...r.unresolved.map((u: any) => `- ${u.question}: not entered. ${u.ask}`), ""] : []),
+  "## Before the final click", r.approvable ? `Your yes covers exactly this (approval ${r.hash12 ?? ""}): ${(r.covers ?? []).join("; ")}.` : "Not ready to approve: required answers stay unresolved until you give them. Nothing can be submitted from here.",
+];
 const STATUS_NOTE: Record<string, string> = { queued: "Queued. Nothing has been submitted yet.", prepared: "Prepared. Nothing has been submitted yet.", submitted: "Submitted. The employer hasn't confirmed it.", confirmed: "Confirmed by the employer.", failed: "Failed. It was not submitted." };
 
 // ---------------------------------------------------------------- actions: what each kind offers, in what state
@@ -341,15 +384,20 @@ export function bodyHtml(rec: FileRecord, token: string, o: { tz?: string | null
     case "application_proof": {
       const c = d.confirmation ?? {};
       const kv = (k: string, v: unknown, s: Source = RECORDS) => v ? factHtml({ value: String(v), source: s }, k) : "";
-      main = `<p class="state ${esc(d.status)}" role="status"><strong>${esc(cap1(d.status))}.</strong> ${esc(STATUS_NOTE[d.status] ?? "")}</p>`
-        + sec("What was submitted", dl(kv("Company", d.company) + kv("Role", d.role) + kv("Sent to", d.destination) + kv("Resume", d.resume) + kv("Prepared", when(d.prepared_at)) + kv("Submitted", when(d.submitted_at)) + kv("Last updated", when(d.as_of))))
+      const st = d.stage as Stage | undefined, sent = !st || st === "employer_confirmed" || st === "submitted_unconfirmed";
+      main = (st ? `<p class="state ${esc(STAGE_CLASS[st] ?? st)}" role="status"><strong>${esc(STAGE_LABEL[st])}.</strong> ${esc(STAGE_NOTE[st])}</p>`
+        : `<p class="state ${esc(d.status)}" role="status"><strong>${esc(cap1(d.status))}.</strong> ${esc(STATUS_NOTE[d.status] ?? "")}</p>`)
+        + sec(sent ? "What was submitted" : "The application", dl(kv("Company", d.company) + kv("Role", d.role) + kv("Sent to", d.destination) + kv("Resume", d.resume) + kv("Prepared", when(d.prepared_at)) + kv("Submitted", when(d.submitted_at)) + kv("Last updated", when(d.as_of))))
         // The proof rides with the claim (brief P3.7, P6.6): the confirmation as a receipt (its snippet, where it came from and when,
         // the link, and the screenshot inline when the page may show it). Without one, "Not confirmed yet" is the value, said.
         + sec("Confirmation", (c.id || c.url || c.screenshot_url)
           ? evidenceHtml({ quote: c.id ? `Confirmation ID: ${c.id}` : "The employer's confirmation page", source: RECORDS, at: d.submitted_at ?? d.as_of ?? null, href: c.url, hrefLabel: "Open the confirmation",
             image: o.evidenceImage?.(c.screenshot_url) ? c.screenshot_url : null, imageAlt: `${d.company ?? "The employer"}'s confirmation screen` }, o.tz)
             + (c.screenshot_url && !o.evidenceImage?.(c.screenshot_url) ? `<p>${linkHtml(c.screenshot_url, "Open the screenshot")}</p>` : "")
+          : d.email_confirmed_at ? `<p>Confirmed by ${esc(d.company ?? "the employer")}'s own email, received ${esc(when(d.email_confirmed_at))}. ${src(RECORDS)}</p>`
           : d.status === "submitted" || d.status === "confirmed" ? `<p class="unconf">${valueHtml(unknown(UNKNOWN.notConfirmed))} The employer hasn't sent a confirmation Trainee can show.</p>` : "")
+        + (st && st !== "employer_confirmed" ? sec("Proof", `<p class="notice"><strong>${esc(PROOF_HEAD[st] ?? "No submission confirmation")}.</strong> ${esc(PROOF_BODY[st] ?? PROOF_BODY.none)}</p>`) : "")
+        + (d.review ? reviewHtml(d.review) : "")
         + sec("Answers given", dl(Fs(d.answers, true).map((a) => factHtml(a, a.question)).join("")))
         + sec("Not done", `<ul class="why">${(d.problems ?? []).filter((p: any) => p?.reason).map((p: any) => `<li><strong>${esc(cap1(p.outcome))}:</strong> ${esc(p.item)}. ${esc(p.reason)} ${src(RECORDS)}</li>`).join("")}</ul>`.replace(/^<ul class="why"><\/ul>$/, ""))
 
@@ -438,11 +486,15 @@ export function textOf(rec: FileRecord, o: { now: number; url?: string }): strin
     }
     case "application_proof": {
       const c = d.confirmation ?? {};
-      L.push(`Status: ${cap1(d.status)}. ${STATUS_NOTE[d.status] ?? ""}`, "");
-      h("What was submitted"); L.push(`- Company: ${d.company} [${RECORDS}]`);
+      const st = d.stage as Stage | undefined;
+      L.push(st ? `Status: ${STAGE_LABEL[st]}. ${STAGE_NOTE[st]}` : `Status: ${cap1(d.status)}. ${STATUS_NOTE[d.status] ?? ""}`, "");
+      if (st && st !== "employer_confirmed") { h("Proof"); L.push(`${PROOF_HEAD[st] ?? "No submission confirmation"}. ${PROOF_BODY[st] ?? PROOF_BODY.none}`, ""); }
+      if (d.review) L.push(...reviewLines(d.review), "");
+      h(!st || st === "employer_confirmed" || st === "submitted_unconfirmed" ? "What was submitted" : "The application"); L.push(`- Company: ${d.company} [${RECORDS}]`);
       if (d.role) L.push(`- Role: ${d.role} [${RECORDS}]`);
       for (const [k, v] of [["Sent to", d.destination], ["Resume", d.resume], ["Prepared", when(d.prepared_at)], ["Submitted", when(d.submitted_at)], ["Last updated", when(d.as_of)]]) if (v) L.push(`- ${k}: ${v} [${RECORDS}]`);
       L.push(""); if (c.id || c.url || c.screenshot_url) { h("Confirmation"); if (c.id) L.push(`- Confirmation ID: ${c.id} [${RECORDS}]`); if (c.url) L.push(`- Confirmation: ${c.url}`); if (c.screenshot_url) L.push(`- Screenshot: ${c.screenshot_url}`); L.push(""); }
+      else if (d.email_confirmed_at) { h("Confirmation"); L.push(`- Confirmed by ${d.company}'s own email, received ${when(d.email_confirmed_at)} [${RECORDS}]`, ""); }
       if (Fs(d.answers, true).length) { h("Answers given"); Fs(d.answers, true).forEach((a) => L.push(factText(a, a.question))); L.push(""); }
       const pr = (d.problems ?? []).filter((p: any) => p?.reason); if (pr.length) { h("Not done"); pr.forEach((p: any) => L.push(`- ${cap1(p.outcome)}: ${p.item}. ${p.reason} [${RECORDS}]`)); L.push(""); }
       const fl = Array.isArray(rec.state?.flags) ? rec.state.flags : []; if (fl.length) { h("Flagged by you"); fl.forEach((f: any) => L.push(`- ${when(f.at)}: ${f.note}`)); L.push(""); }
@@ -481,7 +533,7 @@ dl.facts{margin:0}.fact{margin:0 0 10px}.fact dt{font-size:15px;color:var(--mute
 .src{display:inline-block;margin-left:4px;padding:1px 8px;border:1px solid var(--line);border-radius:999px;font-size:14px;color:var(--mute);white-space:nowrap}
 ul.why{margin:0;padding-left:20px}ul.why li{margin:0 0 8px;overflow-wrap:anywhere}
 .msg{margin:8px 0;padding:12px 14px;border-left:3px solid var(--accent);background:transparent;white-space:pre-wrap;overflow-wrap:anywhere}
-.meta{margin:2px 0;font-size:15px;color:var(--mute)}.unconf{font-size:16px}.unconf .v{display:inline;max-width:none}.state{margin:0 0 8px;font-size:18px}.state.failed{color:var(--bad)}.state.confirmed,.state.submitted{color:var(--good)}
+.meta{margin:2px 0;font-size:15px;color:var(--mute)}.unconf{font-size:16px}.unconf .v{display:inline;max-width:none}.state{margin:0 0 8px;font-size:18px}.state.failed{color:var(--bad)}.state.confirmed,.state.submitted{color:var(--good)}.state.uncertain,.state.needs-you{color:var(--warn)}.notice{margin:0;padding:12px 14px;border-radius:10px;background:var(--panel)}
 .note-top{margin:8px 0 14px;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
 .tbl{overflow-x:auto}.tbl:focus-visible{outline:3px solid var(--accent)}table{border-collapse:collapse;width:100%;font-size:16px}th,td{padding:10px 8px;border-top:1px solid var(--line);text-align:left;vertical-align:top}thead th{border-top:0;font-weight:600}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}

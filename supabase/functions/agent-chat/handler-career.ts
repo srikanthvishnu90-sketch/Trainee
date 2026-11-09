@@ -145,6 +145,7 @@ import { feedUrlsFor } from "../_shared/file_link.ts";
 import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
 import { reminderTurn, supabaseReminderStore } from "../_shared/career_reminders.ts"; // REQS DOC 2: reminders
 import { overviewTurn } from "../_shared/career_overview.ts"; // REQS DOC 2: "any update?", "what's waiting on me?"
+import { reviewLinksFor } from "../_shared/application_review.ts"; // WO-G: the review File of each application on a card
 
 // WO-033: whether the person's career Google grant carries a scope (gmail.send for outreach). Read failures say "no".
 async function careerGrantHas(admin: any, userId: string, scope: string): Promise<boolean> {
@@ -171,6 +172,21 @@ export const BATCH_NOT_STARTED_REPLY = "I haven't started that batch: nothing wa
 // MASS APPLY STATE (review of #496): the receipts the database wrote when each application finished (career_apply_receipts),
 // for the ledger's proof and send time: "submitted with the receipt on record" only with one, and "sent today" only by its
 // click or finish time, never by a row's updated_at. null when the read fails (said, never guessed).
+// WO-G (fix 12): what the card's review Files read, all of it the person's own rows: the prepared payloads shown, the postings'
+// titles and their still-open required questions. Each review File is built by code (file_service.ts createReview).
+// deno-lint-ignore no-explicit-any
+function cardReviewDeps(admin: any, userId: string) {
+  // deno-lint-ignore no-explicit-any
+  const must = (r: any, what: string) => { if (r.error) throw new Error(`${what}: ${r.error.message}`); return r.data ?? []; };
+  const files = createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now });
+  return {
+    prepared: async (ids: string[]) => must(await admin.from("career_apply_prepared").select("id,job_id,payload,payload_hash,card_lines").eq("user_id", userId).in("id", ids), "read the prepared applications"),
+    titles: async (jobIds: string[]) => new Map<string, string>((must(await admin.from("career_postings").select("job_id,title").in("job_id", jobIds), "read the postings") as { job_id: string; title: string }[]).map((r) => [r.job_id, r.title])),
+    open: () => supabaseQuestionStore(admin).open(userId, 50),
+    create: async (item: Parameters<NonNullable<typeof files.createReview>>[1]) => { const r = await files.createReview!(userId, item); return r.ok ? { url: r.url ?? r.webApp } : null; },
+  };
+}
+
 export async function readLedgerReceipts(admin: { from(t: string): any }, userId: string): Promise<{ application_id: string; reached_employer: string; clicked_at: string | null; finished_at: string; confirmation_id: string | null }[] | null> {
   try {
     const r = await admin.from("career_apply_receipts").select("application_id,reached_employer,clicked_at,finished_at,confirmation_id").eq("user_id", userId).order("finished_at", { ascending: false }).limit(500);
@@ -627,7 +643,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         ? readOffer((await liveOfferRow(admin, tid).catch(() => null))?.meta) : null;
       const card0 = !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         // FEATURE 16: OWNER RULE (2026-10-26): no card without a confirmed resume on file (resumeReady).
-        ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id), store: supabaseCardStore(admin), events })
+        ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id), store: supabaseCardStore(admin), events,
+          review: (shown) => reviewLinksFor(shown, cardReviewDeps(admin, user.id)) })
         : null;
       const card = card0 && offerLastWord && card0.status === CARD_NEEDS_REPLY_STATUS ? null : card0;
       // WO-025: the text mock interview, code's like the card: "mock me for <role> at <company>", "end mock", and the answers

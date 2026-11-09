@@ -481,8 +481,16 @@ export async function cardTurn(
     // OWNER RULE (2026-10-26, "never submit applications without a real resume"): whether the person has a confirmed
     // resume on file (career_resume_on_file). false: no card is shown and none is opened; absent: not asked.
     resumeReady?: () => Promise<boolean | null>;
+    // WO-G (fix 12): the review File of each application on the card (application_review.ts, built by code from the prepared
+    // payloads): a line per application with its link, or null. A review that cannot be made never changes the card.
+    review?: (shown: Prepared[]) => Promise<string | null>;
   },
 ): Promise<{ reply: string; status: string; card_id?: string; parts?: string[] } | null> {
+  const withReview = async (c: Batch, out: { reply: string; status: string; card_id?: string; parts?: string[] }) => {
+    const extra = o.review ? await o.review(c.take).catch(() => null) : null;
+    if (!extra) return out;
+    return { ...out, reply: `${out.reply}\n\n${extra}`, ...(out.parts?.length ? { parts: [...out.parts.slice(0, -1), `${out.parts.at(-1)}\n\n${extra}`] } : {}) };
+  };
   let r = parseCardReply(o.message);
   if (!r) return null;
   if (r.kind === "show") {
@@ -516,7 +524,7 @@ export async function cardTurn(
     const current = o.store.latestOpenPaged ? await o.store.latestOpenPaged(o.userId).catch(() => null) : null;
     if (current && current.items.length === ids.length && current.items.every((it, i) => it.prepared_id === ids[i])
       && Date.parse(current.shown_at) > o.now - 5 * 60_000) {
-      return { reply: c.text, status: "shown", card_id: current.id, ...(c.parts.length ? { parts: c.parts } : {}) };
+      return await withReview(c, { reply: c.text, status: "shown", card_id: current.id, ...(c.parts.length ? { parts: c.parts } : {}) });
     }
     let opened: Card;
     try {
@@ -530,7 +538,7 @@ export async function cardTurn(
       c = smaller;
       opened = await o.store.open(o.userId, c.take.map((p) => p.id));
     }
-    return { reply: c.text, status: "shown", card_id: opened.id, ...(c.parts.length ? { parts: c.parts } : {}) };
+    return await withReview(c, { reply: c.text, status: "shown", card_id: opened.id, ...(c.parts.length ? { parts: c.parts } : {}) });
   }
   // Which card the answer is about (D-MS-1). With the channel's reply-to id, the card whose message it replies to; a reply
   // to any other message is not about the card (a yes there approves nothing and says how). Without one (iMessage and

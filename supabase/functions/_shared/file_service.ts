@@ -2,6 +2,7 @@
 // The link is minted here, in code. The agent tool never sees it and the model never writes it. Tests: tests/architect/file-kinds.test.ts.
 import { feedUrlsFor } from "./file_link.ts";
 import { KIND_LABEL, tagOf, validateKind, type FileRecord, type KindId } from "./file_kinds.ts";
+import { type ReviewItem, stageOf } from "./application_review.ts";
 
 export const DEFAULT_TTL_HOURS = 168; // a week; TRAINEE_FILE_TTL_HOURS sets it (1 to 720)
 // Every read and write is keyed by the user id, so one person can never read, change or revoke another's file.
@@ -26,6 +27,8 @@ export interface FileService {
   revoke(userId: string, id: string): Promise<boolean>;
   ttlHours(): number;
   claim(userId: string, id: string, name: string): Promise<boolean>;
+  // WO-G: the review File of one prepared application, from code-built data only (reviewFromItem). Never reachable from a model.
+  createReview?(userId: string, item: ReviewItem): Promise<{ ok: true; id: string; url: string | null; webApp: string | null } | { ok: false; error: string }>;
 }
 
 const STATUS: Record<string, string> = { queued: "queued", driving: "prepared", needs_user: "prepared", submitted_unconfirmed: "submitted", confirmed: "confirmed", failed: "failed", not_submitted: "failed" };
@@ -42,9 +45,22 @@ export function proofFromRow(row: ApplicationRow, now: number): { ok: true; data
     : row.state === "needs_user" && reason ? [{ item: "Waiting for you", outcome: "skipped", reason: reason.slice(0, 300) }] : [];
   const rn = String((row.payload as any)?.resume_name ?? "").replace(/\s+/g, " ").trim().slice(0, 100);
   const dest = (() => { try { return new URL(String(row.url ?? "")).hostname.replace(/^www\./, ""); } catch { return ""; } })();
-  return { ok: true, data: { title: `Application to ${row.company}`.slice(0, 80), company: row.company, status, prepared_at: row.created_at, as_of: row.updated_at,
+  // WO-G (fix 13): the one visible stage beside the five status words: sending is not prepared, a queue entry is approved and not
+  // sent, and confirmed is said only with the employer's own evidence (their email, or the reference their page returned).
+  const stage = stageOf(row);
+  return { ok: true, data: { title: `Application to ${row.company}`.slice(0, 80), company: row.company, status, stage, prepared_at: row.created_at, as_of: row.updated_at,
+    ...(row.email_confirmed_at ? { email_confirmed_at: row.email_confirmed_at } : {}),
     // No submit time: the row has none (claimed_at is when the drive started, not when it was sent), so the page says "Last updated".
     ...(status === "confirmed" && row.confirmation_id ? { confirmation: { id: row.confirmation_id } } : {}), ...(dest ? { destination: dest } : {}), ...(rn ? { resume: rn } : {}), answers, problems } };
+}
+
+// WO-G (fix 12, spec C.11 / C.21): the review File of prepared applications, built by code from the prepared payloads only
+// (application_review.ts reviewOf). One File per employer; nothing on it is a success word and nothing on it can submit.
+export function reviewFromItem(r: ReviewItem, now: number): Record<string, unknown> {
+  return { title: `Application review: ${r.employer}`.slice(0, 80), company: r.employer, ...(r.role ? { role: r.role } : {}), ...(r.destination ? { destination: r.destination.slice(0, 120) } : {}),
+    status: "prepared", stage: "prepared", prepared_at: new Date(now).toISOString(), as_of: new Date(now).toISOString(), ...(r.resume ? { resume: r.resume.label.slice(0, 100) } : {}), answers: [], problems: [],
+    review: { url: r.url ?? undefined, hash12: r.hash12 || undefined, approvable: r.approvable, files: r.files, covers: r.covers,
+      answers: r.answers.map((a) => ({ question: a.question, answer: a.answer, sensitive: !!a.sensitive })), unresolved: r.unresolved.map((u) => ({ question: u.question, ask: u.ask })) } };
 }
 
 export function createFileService(o: { store: FileKindStore; env: Env; now: () => number; records?: Records | null }): FileService {
@@ -80,6 +96,16 @@ export function createFileService(o: { store: FileKindStore; env: Env; now: () =
     },
     patchState: (userId, id, state) => o.store.patch(userId, id, state),
     claim: (userId, id, name) => o.store.claim(userId, id, name, o.now()),
+    async createReview(userId, item) {
+      if (!userId) return { ok: false, error: "not created: no person to make it for" };
+      const now = o.now(), v = validateKind("application_proof", reviewFromItem(item, now), { trusted: true, now });
+      if (!v.ok) return { ok: false, error: `not created: ${v.errors.join("; ")}` };
+      const id = [...crypto.getRandomValues(new Uint8Array(5))].map((b) => b.toString(16).padStart(2, "0")).join("");
+      const links = await feedUrlsFor(o.env, userId, id, now);
+      if (!links.url && !links.webApp) return { ok: false, error: "not created: file links aren't set up yet" };
+      await o.store.put({ id, userId, kind: "application_proof", data: v.data, state: {}, tag: null, created_at: now, expires_at: now + ttlHours() * 3600_000, revoked_at: null });
+      return { ok: true, id, url: links.url, webApp: links.webApp };
+    },
     revoke: (userId, id) => o.store.revoke(userId, id, o.now()),
   };
 }

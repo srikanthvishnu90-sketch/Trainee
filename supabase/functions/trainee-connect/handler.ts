@@ -19,7 +19,7 @@ export interface ProviderState { state: PState; email: string | null }
 export interface ConnectDeps {
   env: { get(k: string): string | undefined };
   now: () => number;
-  providers(): Record<ProviderId, ProviderInfo>;
+  providers(purpose?: string): Record<ProviderId, ProviderInfo>; // the scopes each consent asks for this purpose (store.ts consentScopes)
   status(userId: string): Promise<Record<ProviderId, ProviderState>>;
   start(provider: ProviderId, userId: string, channel: string, reason?: string): Promise<string | null>; // the provider's consent URL for this person, or null when it can't be made
   disconnect(provider: ProviderId, userId: string): Promise<{ ok: boolean; reply: string }>;
@@ -110,7 +110,7 @@ export async function handleConnect(req: Request, d: ConnectDeps): Promise<Respo
       if (action !== "refresh" && !PROVIDERS.includes(provider as ProviderId)) return state("Not done", ["That is not something this page can do. Nothing was changed."], 400);
       const p = provider as ProviderId;
       if (action === "start") {
-        if (!d.providers()[p].configured) return unavailable();
+        if (!d.providers(reasonKey(claims.w))[p].configured) return unavailable();
         const to = await d.start(p, u, claims.ch, claims.w); // D-037: reason "send" is the incremental gmail.send consent
         if (!to) return unavailable();
         // R10 fix 11: remember that this consent was started, so coming back without finishing it shows "Connecting didn't finish".
@@ -127,7 +127,7 @@ export async function handleConnect(req: Request, d: ConnectDeps): Promise<Respo
         return html(renderDone({ outcome: "disconnected", provider: p, email: null, botUrl: bot, message: r.reply }));
       }
     }
-    const info = d.providers(), st = await d.status(u);
+    const info = d.providers(reasonKey(claims.w)), st = await d.status(u);
     const pending = cookieOf(req, PENDING) as ProviderId;
     if (!action && PROVIDERS.includes(pending) && info[pending].configured && st[pending].state === "not_connected") return html(renderUnfinished({ token, provider: pending, botUrl: bot }));
     const providers: ProviderView[] = PROVIDERS.map((id) => ({ id, configured: info[id].configured, state: st[id].state, email: st[id].email, scopes: info[id].scopes }));

@@ -118,7 +118,9 @@ export function renderConnect(m: ConnectModel): string {
   if (connected.length) {
     return page("Your email is connected", `${connected.map(acct).join("")}<div class="actions">${back(m.botUrl)}</div>`, { script: CONNECT_SCRIPT, tg: true });
   }
-  const [one, two] = scopeLines(open[0].scopes);
+  // The intro speaks for every provider offered (the union of their scopes), so it can never contradict a provider's own rows
+  // (owner readiness review: "It can't send" above an Outlook row that allows sending).
+  const [one, two] = scopeLines(open.flatMap((p) => p.scopes));
   const buttons = open.map((p, i) => {
     const n = NAMES[p.id];
     const extra = i > 0 ? extraReach(p.scopes, open[0].scopes) : null;

@@ -84,7 +84,10 @@ function startMockAts({ port = 0 } = {}) {
         const kind = job.split("-")[1];
         const extra = { recaptcha: '<div class="g-recaptcha" data-sitekey="TEST-NEVER-SOLVED"></div>',
           hcaptcha: '<script src="/static/hcaptcha/api.js"></script>', turnstile: '<div class="cf-turnstile" data-sitekey="TEST-NEVER-SOLVED"></div>',
-          text: "<p>Please verify you are human before applying.</p>", iframe: '<iframe src="/static/recaptcha/anchor" title="check"></iframe>' }[kind] || "";
+          text: "<p>Please verify you are human before applying.</p>", iframe: '<iframe src="/static/recaptcha/anchor" title="check"></iframe>',
+          // WO-M: what Greenhouse and Ashby forms carry: an invisible reCAPTCHA (its script, an invisible widget and its badge frame).
+          // Nothing is shown to the person; it is not a check to stop at.
+          invisible: '<script src="/static/recaptcha/api.js"></script><div class="g-recaptcha" data-size="invisible" data-sitekey="TEST-NEVER-SOLVED"></div><iframe src="/static/recaptcha/api2/anchor?k=TEST&size=invisible" title="reCAPTCHA" width="256" height="60"></iframe>' }[kind] || "";
         return send(200, GH(job, { extra }));
       }
       if (job.startsWith("login")) return send(200, page("Sign in", `<h1>Sign in to apply</h1><form method="post" action="/${ats}/${job}/login"><input type="text" name="user"><input type="password" name="pw"><button type="submit">Sign in</button></form>`));

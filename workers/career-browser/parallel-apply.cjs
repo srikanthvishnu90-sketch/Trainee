@@ -13,8 +13,9 @@
 //    application was prepared with); it is the only file ever uploaded.
 //  - no invented facts: a field is filled only from payload.facts / payload.answers. A required field with no value stops
 //    the run as needs_user naming the field. An optional field with no value is left blank.
-//  - no bot-check work: a captcha/"verify you are human" (recaptcha/hcaptcha/turnstile iframes, scripts, widgets or text)
-//    stops the run as needs_user/bot_check whether or not the page has a form, on load and again right before submit.
+//  - no bot-check work: a SHOWN check (a reCAPTCHA / hCaptcha / Turnstile widget or challenge frame, or "verify you are
+//    human" in the visible text; SHOWN_CHECK below) stops the run as needs_user/bot_check whether or not the page has a
+//    form, on load and again right before submit. A captcha script alone (invisible reCAPTCHA) is not a stop.
 //    Never solved, never submitted past.
 //  - hard denylist: linkedin.com, indeed.com, joinhandshake.com and every subdomain are refused before any navigation,
 //    independent of `allowHosts`. Every main-frame navigation (redirects included) and the form action (checked before the
@@ -39,7 +40,6 @@ function payloadHash(p) {
   return sha256(canonical({ url: p.url, ats: p.ats, facts: p.facts, answers: p.answers || {}, resume: p.resume && p.resume.sha256 }));
 }
 
-const BOT_RE = /verify\s+(?:that\s+)?you(?:\s+are|(?:'|\u2019|&#0*39;|&rsquo;|&apos;)re)\s+(?:a\s+)?(?:human|not a robot)|captcha|turnstile|challenges\.cloudflare\.com|are you a robot|not a robot/i;
 const DENY_HOSTS = ["linkedin.com", "indeed.com", "joinhandshake.com"];
 const LOOPBACK = ["127.0.0.1", "localhost", "::1", "[::1]"];
 const normHost = (h) => String(h || "").toLowerCase().replace(/\.+$/, "");
@@ -53,6 +53,30 @@ function urlVerdict(u, allowHosts = []) {
   if (!/^https?:$/.test(url.protocol)) return { ok: false, reason: "host_not_allowed", host: url.protocol };
   if (!LOOPBACK.includes(host) && !allowHosts.map(normHost).includes(host)) return { ok: false, reason: "host_not_allowed", host };
   return { ok: true, host };
+}
+// WO-M (architect, 2026-11-09): stop only when a check is actually SHOWN, never because a page loads a captcha script. An
+// invisible reCAPTCHA / hCaptcha script (Greenhouse, Ashby load one on every form) put the word "captcha" in the page source,
+// and the old test (BOT_RE over page.content()) stopped every such form before it was filled. Shown means one of:
+//  - an explicit widget the person must complete (.g-recaptcha, .h-captcha, .cf-turnstile, not data-size="invisible");
+//  - a challenge frame rendered on the page at a real size (reCAPTCHA anchor/bframe that is not size=invisible, hCaptcha,
+//    Cloudflare challenges / Turnstile);
+//  - the challenge's words in the text a person sees (innerText, never the source), or a Cloudflare interstitial page.
+// Still never solved, never submitted past: a shown check stops the run as needs_user / bot_check.
+function SHOWN_CHECK() {
+  const vis = (e) => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  const text = ((document.body && document.body.innerText) || "").slice(0, 20000);
+  if (/verify\s+(?:that\s+)?you(?:\s+are|['\u2019]re)\s+(?:a\s+)?(?:human|not a robot)|are you a robot|i['\u2019]?m not a robot|complete the (security )?check|press (and|&) hold/i.test(text)) return "text";
+  if (/^(just a moment|attention required)/i.test(document.title || "")) return "interstitial";
+  const widget = [...document.querySelectorAll(".g-recaptcha, .h-captcha, .cf-turnstile, #challenge-form, #cf-challenge-running")]
+    .find((e) => (e.getAttribute("data-size") || "").toLowerCase() !== "invisible" && !/invisible/i.test(e.getAttribute("data-badge") || ""));
+  if (widget) return "widget";
+  const frame = [...document.querySelectorAll("iframe")].find((f) => {
+    const src = f.src || "";
+    if (!/recaptcha\/(?:api2|enterprise)\/(?:anchor|bframe)|\/recaptcha\/anchor|hcaptcha\.com\/captcha|challenges\.cloudflare\.com/i.test(src)) return false;
+    if (/[?&]size=invisible\b/i.test(src)) return false;
+    return vis(f) && f.offsetWidth > 60 && f.offsetHeight > 40;
+  });
+  return frame ? "frame" : null;
 }
 // The needs_user reasons a sign-in or verification wall gives, in every runner (apply-vm.cjs, scripts/apply.ts).
 const HANDOFF_REASONS = ["login_required", "bot_check", "email_code"];
@@ -109,8 +133,14 @@ async function openApply(page, timeout) {
   return true;
 }
 async function botCheck(page) {
-  if (BOT_RE.test(await page.content())) return true;
-  return page.frames().some((f) => BOT_RE.test(f.url()));
+  // The page and its own frames (an employer's site embedding the ATS form). A captcha provider's frame is judged from its
+  // parent, by its iframe's src and rendered size: an invisible badge frame is not a shown check.
+  for (const f of page.frames()) {
+    if (f !== page.mainFrame() && /recaptcha|hcaptcha|challenges\.cloudflare\.com|turnstile/i.test(f.url())) continue;
+    const shown = await f.evaluate(SHOWN_CHECK).catch(() => null);
+    if (shown) return true;
+  }
+  return false;
 }
 const hasApproval = (p) => !!p.approval && typeof p.approval.approval_id === "string" && p.approval.approval_id.trim() !== ""
   && typeof p.approval.hash === "string" && p.approval.hash === payloadHash(p);
@@ -193,7 +223,7 @@ async function attempt(browser, p, opts, timing) {
     if (fr.needsUser.length) {
       const first = fr.needsUser[0];
       const e = new NeedsUser(first.reason === "no_confirmed_answer" || /^(agreement|eeo|upload)_/.test(first.reason) || first.reason === "no_resume" ? "missing_required_answer" : "field_not_filled", first.label);
-      e.needs = fr.needsUser.map((n) => ({ label: n.label, reason: n.reason }));
+      e.needs = fr.needsUser.map((n) => ({ label: n.label, reason: n.reason, ...(Array.isArray(n.options) ? { options: n.options.slice(0, 60) } : {}) }));
       throw e;
     }
     if (fr.invalid.length) { const e = new NeedsUser("field_not_filled", fr.invalid[0].name); e.needs = fr.invalid.map((n) => ({ label: n.name, reason: "form_rejects_value" })); throw e; }

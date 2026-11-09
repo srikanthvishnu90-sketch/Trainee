@@ -190,10 +190,20 @@ function createWorker(o) {
     }
     if (res.status === "unknown_outcome") return void (await complete(row, "unknown_outcome", "application outcome unknown: " + String(res.reason || "").slice(0, 80), ev));
     // not_submitted
-    // A required question the person has not answered (or one that could not be set and read back): handed back by name, never guessed.
-    if (res.reason === "missing_required_answer" || res.reason === "field_not_filled") {
+    // WO-M fix a: a required question the person has not answered ends exactly as the cloud runner ends it (scripts/apply.ts):
+    // not_submitted / needs_answers, nothing sent. That is the one state the database re-prepares from
+    // (career_apply_reprepare_on_needs_answers, 20261101130000): the posting goes back in the person's queue, the question is
+    // asked, and the new answer goes only on a NEW card and a NEW approval. The questions travel in the evidence, in the form's
+    // own words and options, never in the reason (the trigger matches the reason exactly).
+    if (res.reason === "missing_required_answer") {
+      const needs = Array.isArray(res.needs) && res.needs.length ? res.needs : [{ label: res.field || "" }];
+      const questions = needs.map((n) => ({ label: String(n.label || "").replace(/\s+/g, " ").slice(0, 200), ...(Array.isArray(n.options) && n.options.length ? { options: n.options.map(String).slice(0, 60) } : {}) }));
+      return void (await complete(row, "not_submitted", "needs_answers", { ...ev, nothing_sent: true, field: res.field, fields: questions.map((q) => q.label), questions, needs: res.needs || null, handed_back: "a required question has no confirmed answer" }));
+    }
+    // One that could not be set and read back: handed back by name, never guessed.
+    if (res.reason === "field_not_filled") {
       const q = String(res.field || "").replace(/\s+/g, " ").slice(0, 80);
-      return void (await complete(row, "needs_user", `${res.reason}${q ? ": " + q : ""}`, { ...ev, nothing_sent: true, field: res.field, needs: res.needs || null, handed_back: res.reason === "missing_required_answer" ? "a required question has no confirmed answer" : "a required question could not be filled in and checked" }));
+      return void (await complete(row, "needs_user", `${res.reason}${q ? ": " + q : ""}`, { ...ev, nothing_sent: true, field: res.field, needs: res.needs || null, handed_back: "a required question could not be filled in and checked" }));
     }
     if (res.reason === "retries_exhausted") {
       if (res.error === "page_load_429") await refused(row, "rate_limited", null);

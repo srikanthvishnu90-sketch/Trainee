@@ -108,9 +108,13 @@ import { documentsOf, materializeArtifacts } from "../_shared/channel_artifacts.
 import { scoredN } from "../_shared/career_search.ts";
 import { askFor, isJudgePromptAsk, judgePromptTurn, searchJudgeTurn, supabaseJudgeCache, supabaseSearchSources } from "../_shared/career_search_judge.ts"; // FEATURE 5
 import { blockerAsk, widenedAsk } from "../_shared/search_widen.ts"; // R10 WO-C
+// R10 WO-D: router outcomes that are not an answer to the message (its catch-alls and the company-intel fallback that sent the
+// graduation-window template on production): at a limit these are replaced by the held reply.
+const NOT_AN_ANSWER_AT_LIMIT = new Set(["unclaimed", "career_catchall", "career_fallback", "company_intel", "honest_unavailable"]);
 const NO_APPLY = /\b(?:don'?t|do not|never|not)\s+(?:\w+\s+){0,2}?apply/i; // R10: "Don't apply yet", "do not apply to anything"
 import { wantOf } from "../_shared/search_shortlist.ts"; // R10 WO-C
-import { readPersonZone } from "../_shared/person_zone.ts"; // R10 WO-C
+import { readPersonZone } from "../_shared/person_zone.ts"; // R10 WO-C/WO-D
+import { HELD_INTENT, heldReply as limitHeldReply, isResume, type LimitStop, resumedTask, retryAtOf, stopOfError } from "../_shared/limit_stop.ts"; // R10 WO-D
 import { offerChatTurn } from "../_shared/career_offer_chat.ts"; // FEATURE 12
 import { activityAsk, activityTurn, supabaseActivity } from "../_shared/career_activity.ts"; // REQS DOC 1: Q21, Q249, Q34
 import { redoAsk, redoTurn } from "../_shared/career_redo.ts"; // REQS DOC 1: Q83, Q196
@@ -468,7 +472,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // cap; the wrapper only remembers a refusal by the GLOBAL budget (the gateway's reservation) so the reply says so. The
     // name callModel is shadowed here on purpose, so every call site below is seen by that one wrapper.
     const spend = spendCap({ call: callModelUncapped, env: Deno.env });
-    const callModel = spend.call;
+    // R10 WO-D: the first real limit a model call met this turn (the global budget, its pause or window, the provider's rate
+    // limit), so a turn the AI could not finish says what stopped and keeps the task instead of falling to a template (limit_stop.ts).
+    let limitStop: LimitStop | null = null, limitRetryAt: number | null = null;
+    const callModel: typeof spend.call = async (...a) => {
+      try { return await spend.call(...a); } catch (e) { if (!limitStop) { limitStop = stopOfError(e); limitRetryAt = retryAtOf(e, Date.now()); } throw e; }
+    };
     // 2026-10-28: this turn's cost row, always (see turnLedger): calls made, zero, or unrecorded. Written in finally, below.
     const ledger = turnLedger(admin, user.id, tid);
     // The mock-interview judge's model call goes through the same ceiling (shadowed like callModel).
@@ -561,6 +570,20 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       };
       // WO-100: module 120's "what's connected" reads the live grants, the extension and the phone link (no address).
       if (situation) ctx.statusRecords = statusRecordsFrom(situation.capabilities);
+      // R10 WO-D: a task a limit stopped is picked up by "continue" once the limit can have cleared: this turn is that task.
+      let resumedNote = "", resumedTaskNote = "";
+      {
+        const held = !careerTask && !careerBatch ? resumedTask((ctx as any).discovery, message, Date.now()) : null;
+        if (held) {
+          // Routing reads the kept task; the brain keeps the person's own words ("continue") with the thread, whose last reply
+          // quotes the kept task (r9-apply-completion: the brain always reads what was typed).
+          message = careerAskCanon(held.message) ?? held.message;
+          resumedNote = `Picking up what the limit stopped: "${held.message.length > 100 ? `${held.message.slice(0, 97).replace(/\s+\S*$/, "")}...` : held.message}"`;
+          (ctx as any).discovery = { ...((ctx as any).discovery ?? {}), heldAtLimit: null };
+          // Architect ruling 2 (2026-11-09): the brain reads what was typed ("continue"), with the kept ask as a labelled note.
+          resumedTaskNote = `The person's unfinished ask from ${new Date(held.at).toISOString().slice(0, 16).replace("T", " ")} UTC (kept when a limit stopped it; they have now said "continue", so answer this ask): "${held.message.slice(0, 1000)}"`;
+        }
+      }
       // MASS APPLY STATE (2026-11-04; packages/domain/157-career-apply-ledger.js): the router's approval and submission
       // answers ("show my pending approvals", "was it actually submitted?") read the records this turn already read (the
       // queue, the prepared applications, every thread's tracker), and say only what the live switches serve. Runtime
@@ -1276,7 +1299,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const turn = await agentTurn({ message: typedMessage, history, stores: ctx as unknown as Record<string, unknown>, userId: user.id, threadId: tid, now,
           model: (payload) => callModel(cfg, payload, { meter, role: "chat" }), postings: (q) => postingsDb.search(searchWords(q), 150), alerts: alertStore,
           mail: supabaseMailStore(admin), interviews: supabaseInterviewStore(admin), digest: supabaseDigestStore(admin),
-          events, tz, summary, hired: hiredSourceFromEnv(Deno.env, admin), confirmations: confirmEvents,
+          events, tz, summary: [summary, resumedTaskNote].filter(Boolean).join("\n\n") || summary, hired: hiredSourceFromEnv(Deno.env, admin), confirmations: confirmEvents,
           // WO-033: drafts from the person's lists (the model writes, the fact-lock checks), and Hunter when its key is set.
           outreach: { store: outreachStore, model: (payload) => callModel(cfg, payload, { meter, role: "chat" }) },
           conversations: repliesStore,
@@ -1310,7 +1333,27 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           research: knowledgeOn(Deno.env) && WEB_SEARCH_AVAILABLE && cfg.apiKey ? { search: gatewayGroundSearch(), cache: researchCache, publish: fileKindPublisher(createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }), user.id), derive: modelDerive(async (system, user) => { const r = await callModel(cfg, { system, messages: [{ role: "user", content: [{ type: "text", text: user }] }], max_tokens: 200 }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); }) } : null,
           known: { standing, alerts: alertRow ? { prefs: alertRow.prefs, tz: alertRow.tz } : null, pipeline: null, situation }, memory });
         await ledger.record(meter);
-        if (turn.stopped === "model_error" && !turn.tool_calls.some((t) => t.ok && t.effect === "write_own")) {
+        // Architect ruling 3 (2026-11-09): at a limit, the router's own answer stands when it chose a specific intent for THIS message
+        // ("what should I wear to a video interview?" -> its interview prep); only its catch-alls and fallback templates are replaced.
+        let routedAtLimit: typeof out | null = null;
+        if (turn.stopped === "model_error" && limitStop && !turn.tool_calls.some((t) => t.ok && t.effect === "write_own")) {
+          await ensurePool();
+          const routed = clock.sync("router", () => host.runTurn(message, ctx));
+          if (routed.intent && !NOT_AN_ANSWER_AT_LIMIT.has(routed.intent)) routedAtLimit = routed;
+        }
+        if (routedAtLimit) {
+          out = routedAtLimit;
+          agentMeta = { brain: staged.chosen ? "staged" : "agent", stopped: turn.stopped, limit_stop: limitStop, limit_answer: "router", ...replyFlagsMeta(turn as { flags?: unknown }) };
+        } else if (turn.stopped === "model_error" && limitStop && !turn.tool_calls.some((t) => t.ok && t.effect === "write_own")) {
+          // R10 WO-D: a limit, not an outage: what stopped, the task kept for "continue", the next step in the person's zone.
+          // "continue" while the limit still holds keeps the task it already holds.
+          const kept = (ctx as any).discovery?.heldAtLimit;
+          const task = kept?.message && isResume(typedMessage) ? String(kept.message) : String(typedMessage);
+          const zone = await readPersonZone(admin, user.id, (ctx as any).profile ?? null);
+          out = { reply: limitHeldReply(task, limitStop, zone, limitRetryAt), intent: HELD_INTENT, resultStatus: "held", contained: false, handler: "limit_held" };
+          (ctx as any).discovery = { ...((ctx as any).discovery ?? {}), heldAtLimit: { message: task.slice(0, 1000), at: Date.now(), stop: limitStop } };
+          agentMeta = { brain: staged.chosen ? "staged" : "agent", stopped: turn.stopped, limit_stop: limitStop, ...replyFlagsMeta(turn as { flags?: unknown }) };
+        } else if (turn.stopped === "model_error" && !turn.tool_calls.some((t) => t.ok && t.effect === "write_own")) {
           console.error("agent brain: model unavailable, answering with the router");
           await ensurePool();
           out = clock.sync("router", () => host.runTurn(message, ctx));
@@ -1633,7 +1676,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         }
       }
       // A model call refused by the global budget (D-038a; no per-person cap since D-046) is said, never hidden.
-      const spendNote = spend.note();
+      // R10 WO-D: a held reply already says what stopped; the note is not repeated under it.
+      const spendNote = out.handler === "limit_held" ? null : spend.note();
+      if (out.handler === "limit_held") agentMeta = { ...(agentMeta || {}), model_limit: spend.refused() ?? limitStop };
+      if (resumedNote) out = { ...out, reply: `${resumedNote}\n${out.reply}`, ...(out.parts ? { parts: [resumedNote, ...out.parts] } : {}) };
       if (spendNote) {
         out = { ...out, reply: `${out.reply}\n${spendNote}`, ...(out.parts ? { parts: [...out.parts, spendNote] } : {}) };
         agentMeta = { ...(agentMeta || {}), model_limit: spend.refused() };

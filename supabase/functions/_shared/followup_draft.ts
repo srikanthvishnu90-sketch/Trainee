@@ -30,6 +30,23 @@ export const HISTORY: { kind: string; claim: RegExp; said: RegExp }[] = [
   { kind: "a relationship", claim: /\b(?:my\s+(?:friend|former\s+(?:manager|colleague|boss|teammate)|old\s+(?:colleague|classmate|friend)|mentor|classmate)|we\s+(?:worked|studied)\s+together|(?:long|good)\s+time\s+no\s+see|(?:as\s+)?(?:old|good)\s+friends?)\b/i, said: /\b(?:friend|colleague|manager|boss|classmate|mentor|teammate|worked\s+together|studied\s+together)\b/i },
 ];
 
+// Review F2 (item 7): a thank-you for, or a recollection of, a meeting or an interview needs that event to be in the past and with
+// this recipient: a sentence of the person's (or a confirmed fact) that names the event, reads as past ("after my interview", "we
+// met", "yesterday"), not upcoming ("next week", "tomorrow", "I have an interview"), and names the recipient or no other person.
+const TIED = new Set(["a meeting or conversation", "an interview"]);
+const PAST = /\b(?:after|had|met|spoke|talked|chatted|called|interviewed|went|was|were|yesterday|earlier|last|ago|this\s+morning|following|thanks?\s+for)\b/i;
+const FUTURE = /\b(?:next|tomorrow|upcoming|coming\s+up|will|going\s+to|gonna|before\s+(?:my|our|the)|later\s+(?:today|this)|(?:have|got)\s+an?\s+(?:interview|call|meeting|chat))\b/i;
+const WITH_WHO = /\b(?:with|met|meet|to|and|called|by)\s+(\p{Lu}[\p{L}'-]+)/gu;
+function pastWith(event: RegExp, to: string, texts: string[]): boolean {
+  const mine = to.toLowerCase().split(/[\s.]+/).filter((w) => w.length > 1);
+  return texts.flatMap((t) => String(t ?? "").split(/(?<=[.!?])\s+|\n+/)).some((s) => {
+    if (!event.test(s) || !PAST.test(s) || FUTURE.test(s)) return false;
+    const names = [...s.matchAll(WITH_WHO)].map((x) => x[1].toLowerCase());
+    const named = mine.some((w) => new RegExp(`(?<![\\p{L}])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}])`, "iu").test(s));
+    return named || !names.some((n) => !mine.includes(n));
+  });
+}
+
 // The draft, checked. `said` is everything the person typed in this conversation; `facts` their confirmed facts as text.
 export function checkFollowup(i: FollowupIn, o: { said: string; facts: string[] }): FollowupOut {
   const docs = [...new Set(i.documents.map(squash).filter(Boolean))].slice(0, 4), opts = [...new Set(i.recipient_options.map(squash).filter(Boolean))].slice(0, 4);
@@ -44,7 +61,12 @@ export function checkFollowup(i: FollowupIn, o: { said: string; facts: string[] 
   if (body.length > 1500) problems.push("the draft is over 1,500 characters; keep it short");
   for (const e of body.match(EMAIL) ?? []) if (!low.includes(e.toLowerCase())) problems.push(`it writes the address ${e}, which the person never gave; never guess an address`);
   const plain = body.replace(PLACEHOLDER, " ");
-  for (const h of HISTORY) { const m = h.claim.exec(plain); if (m && !h.said.test(o.said) && !o.facts.some((f) => h.said.test(f))) problems.push(`"${m[0]}" states ${h.kind} the person never mentioned; remove it, do not invent history`); }
+  for (const h of HISTORY) {
+    const m = h.claim.exec(plain);
+    if (!m) continue;
+    if (!h.said.test(o.said) && !o.facts.some((f) => h.said.test(f))) problems.push(`"${m[0]}" states ${h.kind} the person never mentioned; remove it, do not invent history`);
+    else if (TIED.has(h.kind) && !pastWith(h.said, to, [o.said, ...o.facts])) problems.push(`"${m[0]}" states ${h.kind} with ${to} that has not happened yet or was with someone else; thank or recall only a past event the person had with ${to}`);
+  }
   const sNums = numbersIn(support);
   for (const n of numbersIn(plain)) if (!sNums.some((x) => numEq(x, n))) problems.push(`the figure "${n.raw}" is not in the person's words or confirmed facts`);
   const word = (n: string) => new RegExp(`(?<![\\p{L}\\p{N}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(support);

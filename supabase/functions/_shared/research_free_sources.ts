@@ -25,7 +25,7 @@
 // URL-encoded) only decide what to propose; the page shown is always the one the reader fetched.
 // deno-lint-ignore-file no-explicit-any require-await
 import { braveProvider, BRAVE_ENDPOINT, firstPartyProvider, type SearchHit, type SearchOut, type SearchPlan, type SearchProvider } from "./research_search.ts";
-import { type Convert, fetchSources, type FetchedSources, isBlockedHost, normalizeUrl, readCapped, type Resolver, type RobotsCheck } from "./research_sources.ts";
+import { type Convert, fetchSources, type FetchedSources, isBlockedHost, isPrivateHost, normalizeUrl, readCapped, resolveAfter, resolveBefore, type Resolver, type RobotsCheck } from "./research_sources.ts";
 import { parseRobots, robotsAllows } from "./contact_sources/web_gate.ts";
 import { dnsProbe, type DnsProbe, RESEARCH_BUDGET_MS, systemResolver } from "./research_dns.ts";
 
@@ -266,7 +266,9 @@ export const convertFree: Convert = (url, type, body) => {
 // One robots.txt read per host per reader: 200 parsed for TraineeBot (or *), 404/410 no rules, anything else (3xx, 401, 403,
 // 429, 5xx, unreachable) no read. Documented APIs are governed by their terms instead.
 export type FreeRobots = RobotsCheck & { delayMs(url: string): Promise<number> };
-export function robotsGate(f: typeof fetch, o: { timeoutMs?: number } = {}): FreeRobots {
+// Every robots.txt hop (review of #628, B3) passes the page reader's checks: http(s), not never-listed, not a private host, and with
+// a resolver the before- and after-fetch lookups. A hop that fails any of them is no read, and no request is sent to a private one.
+export function robotsGate(f: typeof fetch, o: { timeoutMs?: number; resolver?: Resolver } = {}): FreeRobots {
   const cache = new Map<string, Promise<ReturnType<typeof parseRobots> | "deny">>();
   const load = (origin: string) => {
     let p = cache.get(origin);
@@ -276,11 +278,15 @@ export function robotsGate(f: typeof fetch, o: { timeoutMs?: number } = {}): Fre
           // Up to 5 redirects (RFC 9309 2.3.1.2), each to an http(s) address on a host that is not never-listed; the body capped.
           let url = `${origin}/robots.txt`;
           for (let hop = 0; hop <= ROBOTS_MAX_REDIRECTS; hop++) {
+            if (!/^https?:$/.test(new URL(url).protocol) || isBlockedHost(url) || isPrivateHost(url)) return "deny";
+            let checked: Set<string> | null = null;
+            if (o.resolver) { const b = await resolveBefore(url, o.resolver); if ("why" in b) return "deny"; checked = b.ips; }
             const r = await f(url, { redirect: "manual", headers: { accept: "text/plain" }, signal: AbortSignal.timeout(o.timeoutMs ?? 8000) });
+            if (o.resolver && checked && (await resolveAfter(url, o.resolver, checked)) !== true) { await r.body?.cancel().catch(() => {}); return "deny"; }
             if (r.status >= 300 && r.status < 400) {
               const loc = r.headers.get("location"); await r.body?.cancel().catch(() => {});
               let next: URL; try { next = new URL(loc ?? "", url); } catch { return "deny"; }
-              if (!loc || !/^https?:$/.test(next.protocol) || isBlockedHost(next.toString())) return "deny";
+              if (!loc) return "deny"; // the next hop's own checks run at the top of the loop, before any request to it
               url = next.toString(); continue;
             }
             if (r.status === 200) return parseRobots(new TextDecoder().decode((await readCapped(r, ROBOTS_MAX_BYTES)).bytes), ROBOTS_TOKEN);
@@ -469,7 +475,7 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
 // converted, up to MAX_FREE_HITS pages, six at a time (order kept).
 // With the system resolver (no resolver given), the startup probe must have passed; if it failed, nothing is read.
 export function freeReader(o: { fetch: typeof fetch; userAgent?: string | null; usajobsKey?: string | null; resolver?: Resolver; now?: () => number; probe?: () => Promise<DnsProbe>; budgetMs?: number; clock?: () => number; sleep?: (ms: number) => Promise<void> }) {
-  const base = freeFetch(o.fetch, o), robots = robotsGate(base), resolver = o.resolver ?? systemResolver, clock = o.clock ?? Date.now;
+  const resolver = o.resolver ?? systemResolver, base = freeFetch(o.fetch, o), robots = robotsGate(base, { resolver }), clock = o.clock ?? Date.now;
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   // Crawl-delay, per host, serially (review of #628): each request to a host waits until its previous one plus the delay robots.txt
   // asks for. Page fetches only; robots.txt itself and documented APIs are not delayed.

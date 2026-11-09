@@ -122,3 +122,45 @@ Deno.test("robots.txt: up to 5 redirects are followed (RFC 9309), a sixth is no 
   eq(got.verified.length, 3);
   eq(waits, [3000], "one wait, the delay robots.txt asked for, on the slow host only");
 });
+
+// ---------------------------------------------------------------- second review of #628 (B1-B3)
+Deno.test("B1/B2: after the fetch, a newly added PUBLIC address, NXDOMAIN, an error or an empty answer discards the page unread", async () => {
+  let bodyRead = 0;
+  const f = (async () => new Response(new ReadableStream({ pull(c) { bodyRead++; c.enqueue(new TextEncoder().encode("<p>x</p>")); c.close(); } }, { highWaterMark: 0 }), { headers: { "content-type": "text/html" } })) as typeof fetch;
+  const seq = (...answers: (string[] | Error)[]) => { let i = 0; return async () => { const a = answers[Math.min(i++, answers.length - 1)]; if (a instanceof Error) throw a; return a; }; };
+  const cases: [string, ReturnType<typeof seq>][] = [
+    ["a new public address", seq(["203.0.113.10"], ["203.0.113.10", "198.51.100.7"])],
+    ["NXDOMAIN", seq(["203.0.113.10"], new Error("NXDOMAIN"))],
+    ["an empty answer", seq(["203.0.113.10"], [])],
+    ["a different public address", seq(["203.0.113.10"], ["198.51.100.7"])],
+  ];
+  for (const [what, resolver] of cases) eq((await fetchSources(["https://flip.example/"], { fetch: f, resolver, now: () => NOW })).rejected.map((r) => r.why), ["address_changed"], what);
+  eq(bodyRead, 0, "no body was read");
+  // The same set again (in any order) keeps the page.
+  eq((await fetchSources(["https://same.example/"], { fetch: f, resolver: seq(["203.0.113.10", "203.0.113.11"], ["203.0.113.11", "203.0.113.10"]), now: () => NOW })).verified.length, 1);
+});
+
+Deno.test("B3: a robots.txt redirect to 169.254.169.254 or 10.0.0.1 is no read, and no request is sent there; a private-resolving hop neither", async () => {
+  for (const target of ["http://169.254.169.254/latest/meta-data/", "http://10.0.0.1/robots.txt", "https://[::1]/robots.txt", "https://100.64.0.9/robots.txt"]) {
+    const asked: string[] = [];
+    const f = (async (i: RequestInfo | URL) => { asked.push(String(i)); return String(i).startsWith("https://site.example/") ? new Response(null, { status: 301, headers: { location: target } }) : new Response("User-agent: *\nAllow: /\n", { status: 200 }); }) as typeof fetch;
+    ok(!(await robotsGate(f, { resolver: PUBLIC })("https://site.example/page")), target);
+    eq(asked, ["https://site.example/robots.txt"], `no request to ${target}`);
+  }
+  // A public-looking name that resolves private on a robots hop: no request to it.
+  const asked: string[] = [];
+  const f = (async (i: RequestInfo | URL) => { asked.push(String(i)); return String(i).startsWith("https://site.example/") ? new Response(null, { status: 302, headers: { location: "https://rebind.example/robots.txt" } }) : new Response("", { status: 200 }); }) as typeof fetch;
+  const res = async (h: string) => (h === "rebind.example" ? ["10.9.8.7"] : ["203.0.113.10"]);
+  ok(!(await robotsGate(f, { resolver: res })("https://site.example/page")));
+  eq(asked, ["https://site.example/robots.txt"]);
+  // The reader hands its resolver to the robots gate: a robots.txt whose name answers private is never requested.
+  const seen: string[] = [];
+  const g = (async (i: RequestInfo | URL) => { seen.push(String(i)); return new Response("<p>x</p>", { headers: { "content-type": "text/html" } }); }) as typeof fetch;
+  const got = await freeReader({ fetch: g, resolver: async (h) => (h === "inner.example" ? ["192.168.1.1"] : ["203.0.113.10"]), now: () => NOW })(["https://inner.example/page"]);
+  eq([got.verified.length, seen], [0, []]);
+});
+
+Deno.test("isPrivateIp also refuses 2001:db8::/32 (documentation) and 100::/64 (discard-only)", () => {
+  for (const ip of ["2001:db8::1", "2001:0db8:85a3::8a2e:370:7334", "100::1", "100::ffff:1"]) ok(isPrivateIp(ip), ip);
+  ok(!isPrivateIp("100:1::1") && !isPrivateIp("2001:db9::1"));
+});

@@ -8,14 +8,16 @@
 //
 // Review of #589 (DNS rebinding) and R9 free sources (2026-11-08): fetchSources also takes, per call,
 //   resolver  the host's A/AAAA answers, checked on EVERY hop (the first request and each redirect) BEFORE the fetch and again
-//             right AFTER it: one private, loopback, link-local, CGNAT or reserved answer either time and the page is refused or
-//             discarded as private_address. No answer before the fetch is unreachable. research_dns.ts systemResolver is the
+//             right AFTER it. Before: one private, loopback, link-local, CGNAT or reserved answer refuses the hop (private_address);
+//             no answer is unreachable. After: the body is kept only if the name answers again, every answer is public, and every
+//             answer was in the set checked before; otherwise it is discarded unread (private_address for a private answer,
+//             address_changed for a new address or for no answer, an error, a timeout or NXDOMAIN: it fails closed). research_dns.ts systemResolver is the
 //             production one (Deno.resolveDns, read at call time so the eval can stand in a stub).
 //             What this does NOT close (review of #628): fetch() resolves the name again itself, and the edge runtime cannot pin
 //             a connection to the checked address (no IP with SNI), so a TTL-0 name could answer a private address to fetch()
-//             alone, between the two checks. The second check discards the page whenever the name answers a private address
-//             again right after; a name that flips for exactly one lookup can still reach an internal address once. The page
-//             is then discarded only if the second lookup catches it; its body is never read past MAX_BYTES either way.
+//             alone, between the two checks. The second check discards the page whenever its answer differs from the checked
+//             set in any way; a name that flips for exactly fetch()'s lookup and answers the same set before and after can
+//             still reach an internal address once (the request is sent; its body is discarded only if a check catches it).
 //   deadline  a wall-clock time (by `clock`, the machine's real clock) after which no further hop starts: the rest are refused as
 //             time_budget, so a research turn names what it did not read instead of waiting.
 //   robots    may this exact URL be read (robots.txt; research_free_sources.ts robotsGate)? Checked on every hop too.
@@ -31,7 +33,7 @@ export interface SourcePage {
   text: string; // the page's readable text (tags, scripts and styles removed), capped
   fetchedAt: number;
 }
-export interface SourceRejection { url: string; why: "blocked_site" | "not_http" | "private_address" | "robots_disallow" | "http_status" | "not_text" | "too_many_redirects" | "unreachable" | "empty" | "time_budget" }
+export interface SourceRejection { url: string; why: "blocked_site" | "not_http" | "private_address" | "robots_disallow" | "http_status" | "not_text" | "too_many_redirects" | "unreachable" | "empty" | "time_budget" | "address_changed" }
 export type Resolver = (host: string) => Promise<string[]>;
 export type RobotsCheck = (url: string) => Promise<boolean>;
 export type Convert = (url: string, contentType: string, body: string) => { title: string; text: string } | null;
@@ -51,9 +53,11 @@ export function isBlockedHost(url: string): boolean {
   if (named.some((l) => NEVER_LABELS.has(l)) || named.some((l, i) => l === "scholar" && named[i + 1] === "google")) return true;
   return /(^|\.)indeed\.(co\.)?[a-z]{2,3}$/.test(host);
 }
-function isPrivateHost(url: string): boolean {
+export function isPrivateHost(url: string): boolean {
   let host: string;
   try { host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, ""); } catch { return true; }
+  // An IPv4 literal is judged by the full address check (CGNAT, multicast, reserved and the rest), not only the common ranges.
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host) && isPrivateIp(host)) return true;
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return true;
   if (/^(127\.|10\.|0\.|169\.254\.|192\.168\.)/.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
   if (host.includes(":")) return true; // IPv6 literals: none are needed for public sources
@@ -127,12 +131,23 @@ export async function fetchSources(urls: string[], o: { fetch?: typeof fetch; ti
   return out;
 }
 
-// The host's resolved addresses, all public? (no answer: unreachable; any private answer: private_address)
-async function resolvedPublic(url: string, resolver: Resolver): Promise<true | SourceRejection["why"]> {
+// The host's resolved addresses before a fetch: all public (the set, kept), else why not (no answer: unreachable; any private
+// answer: private_address).
+export async function resolveBefore(url: string, resolver: Resolver): Promise<{ ips: Set<string> } | { why: SourceRejection["why"] }> {
   let ips: string[];
-  try { ips = await resolver(new URL(url).hostname.toLowerCase().replace(/\.$/, "")); } catch { return "unreachable"; }
-  if (!Array.isArray(ips) || !ips.length) return "unreachable";
-  return ips.every((ip) => !isPrivateIp(String(ip))) ? true : "private_address";
+  try { ips = await resolver(new URL(url).hostname.toLowerCase().replace(/\.$/, "")); } catch { return { why: "unreachable" }; }
+  if (!Array.isArray(ips) || !ips.length) return { why: "unreachable" };
+  return ips.every((ip) => !isPrivateIp(String(ip))) ? { ips: new Set(ips.map((ip) => String(ip).toLowerCase())) } : { why: "private_address" };
+}
+// The same name looked up again right after the fetch (review of #628, B1 and B2). The body is kept ONLY when this lookup answers,
+// every answer is public, and every answer was already in the set checked before the fetch. A private answer is private_address;
+// a new address (public too), no answer, an error, a timeout or NXDOMAIN is address_changed. Fails closed.
+export async function resolveAfter(url: string, resolver: Resolver, before: Set<string>): Promise<true | SourceRejection["why"]> {
+  let ips: string[];
+  try { ips = await resolver(new URL(url).hostname.toLowerCase().replace(/\.$/, "")); } catch { return "address_changed"; }
+  if (!Array.isArray(ips) || !ips.length) return "address_changed";
+  if (ips.some((ip) => isPrivateIp(String(ip)))) return "private_address";
+  return ips.every((ip) => before.has(String(ip).toLowerCase())) ? true : "address_changed";
 }
 async function readOne(start: string, f: typeof fetch, timeout: number, o: ReadOpts = {}): Promise<{ url: string; title: string; text: string } | { why: SourceRejection["why"] }> {
   let url = start;
@@ -144,15 +159,17 @@ async function readOne(start: string, f: typeof fetch, timeout: number, o: ReadO
     if (isPrivateHost(url)) return { why: "private_address" };
     const clock = o.clock ?? Date.now, left = () => (o.deadline === undefined ? Infinity : o.deadline - clock());
     if (left() <= 0) return { why: "time_budget" };
-    if (o.resolver) { const r = await resolvedPublic(url, o.resolver); if (r !== true) return { why: r }; }
+    let checked: Set<string> | null = null;
+    if (o.resolver) { const r = await resolveBefore(url, o.resolver); if ("why" in r) return { why: r.why }; checked = r.ips; }
     if (o.robots) { let yes = false; try { yes = await o.robots(url); } catch { yes = false; } if (!yes) return { why: "robots_disallow" }; }
     if (left() <= 0) return { why: "time_budget" };
     let res: Response;
     try {
       res = await f(url, { method: "GET", redirect: "manual", headers: { accept: "text/html,text/plain;q=0.9" }, signal: AbortSignal.timeout(Math.max(1, Math.min(timeout, left()))) });
     } catch { return { why: left() <= 0 ? "time_budget" : "unreachable" }; }
-    // Re-resolved right after the fetch: a name that now answers a private address (or one more in its set) is discarded unread.
-    if (o.resolver && (await resolvedPublic(url, o.resolver)) === "private_address") { await res.body?.cancel().catch(() => {}); return { why: "private_address" }; }
+    // Re-resolved right after the fetch (resolveAfter): the body is discarded unread unless the name still answers, every answer
+    // is public, and every answer was in the set checked before the fetch. Any other outcome, a lookup error included, discards it.
+    if (o.resolver && checked) { const after = await resolveAfter(url, o.resolver, checked); if (after !== true) { await res.body?.cancel().catch(() => {}); return { why: after }; } }
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
       await res.body?.cancel().catch(() => {});

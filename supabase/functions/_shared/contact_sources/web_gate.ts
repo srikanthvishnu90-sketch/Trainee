@@ -95,7 +95,8 @@ function v6Groups(h: string): number[] | null {
 }
 // Review of #628 (2026-11-09): IPv6 by its groups, not by its spelling. Refused: unspecified and loopback, IPv4-mapped (::ffff:0:0/96)
 // and IPv4-compatible (::a.b.c.d), NAT64 (64:ff9b::/96), unique-local (fc00::/7), link-local (fe80::/10), site-local (fec0::/10),
-// multicast (ff00::/8), Teredo (2001:0::/32, its IPv4 is hidden), and 6to4 (2002::/16) whenever the IPv4 it embeds is private.
+// multicast (ff00::/8), Teredo (2001:0::/32, its IPv4 is hidden), documentation (2001:db8::/32), discard-only (100::/64), and 6to4
+// (2002::/16) whenever the IPv4 it embeds is private.
 export function isPrivateIp(ip: string): boolean {
   const h = ip.replace(/^\[|\]$/g, "").toLowerCase();
   const m4 = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
@@ -108,6 +109,8 @@ export function isPrivateIp(ip: string): boolean {
   if (g[0] === 0x64 && g[1] === 0xff9b) return true; // NAT64
   if ((g[0] & 0xfe00) === 0xfc00 || (g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xffc0) === 0xfec0 || (g[0] & 0xff00) === 0xff00) return true;
   if (g[0] === 0x2001 && g[1] === 0) return true; // Teredo
+  if (g[0] === 0x2001 && g[1] === 0x0db8) return true; // documentation (2001:db8::/32), never a real host
+  if (g[0] === 0x0100 && g[1] === 0 && g[2] === 0 && g[3] === 0) return true; // discard-only (100::/64)
   if (g[0] === 0x2002) return privateV4(g[1] >> 8, g[1] & 0xff); // 6to4: the IPv4 in groups 1-2
   return false;
 }

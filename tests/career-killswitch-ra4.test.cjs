@@ -40,7 +40,7 @@ test("R-A4 unreadable queue (no queue state in ctx): global pause is set, reply 
   assert.equal(r.counts_verified, false, "counts are explicitly UNVERIFIED when the queue cannot be read");
   assert.doesNotMatch(r.reply, NO_OP, "the old no-op wording is gone");
   // architect ruling F.3 (2026-11-09): the reply never claims an account pause it did not write; it says so and names "pause everything".
-  assert.doesNotMatch(r.reply, /pause is (now )?set|paused your account/i, "no claim of an account pause");
+  assert.doesNotMatch(r.reply, /pause is (now )?set|(?<!not )paused your account/i, "no claim of an account pause");
   assert.match(r.reply, /pause everything/i, "names how to pause the account");
   // MI-048 triage (2026-10-15): the halt sentence was reworded ("blocks
   // every send path this product controls"); every semantic element of
@@ -61,7 +61,7 @@ test("R-A4 missing-file queueStatePath: same honest halt, and loadQueueState nev
   assert.equal(r.resultStatus, "completed");
   assert.equal(r.counts_verified, false);
   assert.doesNotMatch(r.reply, NO_OP);
-  assert.doesNotMatch(r.reply, /pause is (now )?set|paused your account/i); // architect ruling F.3 (2026-11-09)
+  assert.doesNotMatch(r.reply, /pause is (now )?set|(?<!not )paused your account/i); // architect ruling F.3 (2026-11-09)
   assert.match(r.reply, /pause everything/i);
 });
 

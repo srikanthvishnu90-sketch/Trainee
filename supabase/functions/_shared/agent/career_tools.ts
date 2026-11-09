@@ -734,7 +734,7 @@ export function careerTools(deps: {
         // (career_resume_rater.ts planLayout), which keeps their layout only when it measures well enough, else offers one.
         const tid = i.template !== undefined && i.template !== null && String(i.template).trim() ? templateId(i.template) : null;
         if (i.template !== undefined && i.template !== null && String(i.template).trim() && !tid) throw new Error("not made: templates are numbered 1 to 15; ask which one they want");
-        const asked = tid ? "template" : i.layout === "trainee" || i.layout === "own" ? i.layout : i.layout === "template" ? null : null;
+        const asked = tid ? "template" : i.layout === "trainee" || i.layout === "own" ? i.layout : null;
         if (i.layout === "template" && !tid) throw new Error("not made: say which template, 1 to 15");
         const ownDocx = asked === "own" || (!asked && t.upload) ? await t.ownDocx?.(c.userId).catch(() => null) ?? null : null;
         const upload = asked !== "template" && asked !== "trainee" && t.upload ? await t.upload(c.userId).catch(() => null) : null;
@@ -743,10 +743,13 @@ export function careerTools(deps: {
         const legacy = asked === "trainee" || (asked === "own" && !plan) ? { layout: asked, ownDocx } : null;
         let r = await tailorForPosting(legacy ? { ...base, ...legacy } : { ...base, layout: plan?.layout ?? null, template: plan?.template ?? null, ownDocx: plan?.ownDocx ?? null, ownPdfSpec: plan?.ownPdfSpec ?? null });
         let keptNote = "";
-        // Their own layout picked by the rater (not asked for) that fails a check falls back to the default file, and says so.
-        if (!r.ok && !asked && plan?.layout === "own" && (r.refused === "render" || r.refused === "ats_parse")) {
-          keptNote = `Your own layout could not be kept (${r.reason}); this file uses the standard layout instead.`;
-          r = await tailorForPosting(base);
+        // Their own layout picked by the rater (not asked for) that cannot carry the tailored resume exactly (a line with no
+        // place, a line on no record, a failed check on what prints) is not used: the file is made in the best of the fifteen
+        // for them instead, and the reply says which and why.
+        if (!r.ok && !asked && plan?.layout === "own" && (r.refused === "render" || r.refused === "ats_parse" || r.refused === "truth_audit")) {
+          const rec = plan.recommended;
+          keptNote = `Your own layout was not used: ${r.reason}.${rec ? ` This file uses ${rec.name} (template ${Number(rec.template.slice(1))}) instead.` : " This file uses the standard layout instead."}`;
+          r = rec ? await tailorForPosting({ ...base, layout: "template", template: rec.template }) : await tailorForPosting(base);
         }
         if (r.ok && t.versions) await recordVersion(t.versions, { userId: c.userId, out: r, now: c.now });
         // WO-079: facts waiting for the person's yes are named, with the one question to ask (battery T09 ran out of steps
@@ -763,7 +766,8 @@ export function careerTools(deps: {
         const out = plan?.rating ? { ...rest, format_check: { score: plan.rating.score, keep: plan.rating.keep, kept_layout: r.layout === "own", hard_failures: plan.rating.hardFailures,
           findings: plan.rating.findings.filter((f) => f.measured && !f.pass).map((f) => ({ criterion: f.criterion, detail: f.detail, where: f.where.slice(0, 3) })),
           recommended: plan.recommended ? { template: Number(plan.recommended.template.slice(1)), name: plan.recommended.name, why: plan.recommended.why } : null,
-          summary: [plan.summary, keptNote].filter(Boolean).join("\n") } } : rest;
+          // When their layout was not used after all, the reply says that (never "I'll keep your layout").
+          summary: keptNote ? `Your resume's format scores ${plan.rating.score}/100. ${keptNote}` : plan.summary } } : rest;
         // The PDF (and, with a layout, its Word copy) are attached to this reply; the private link stays as well.
         if (t.deliver) {
           t.deliver({ format: "pdf", filename: r.filename, mime: "application/pdf", base64: b64(detail.pdf), sha256: r.sha256 });

@@ -92,9 +92,32 @@ def messy():
     d.add_paragraph("SQL, Python, R, Tableau")
     return d
 
+def own_match():
+    """The test profile's own resume (packages/career-data/fixtures/test-resume.txt) as a Word file made the usual way: the
+    name and email are the profile's, every line is one the profile was read from. The keep path's fixture."""
+    d = base(Document())
+    p = d.add_paragraph(); r = p.add_run("Alex Testcase"); r.bold = True; r.font.size = Pt(16)
+    d.add_paragraph("Chicago, IL | alex.testcase@example.test")
+    src = open("packages/career-data/fixtures/test-resume.txt", encoding="utf8").read().split("\n")
+    body = src[src.index("EDUCATION"):]
+    first = True
+    for line in body:
+        t = line.strip()
+        if not t:
+            continue
+        if t.isupper() and len(t) < 30:
+            heading(d, t); first = True
+        elif t.startswith("- "):
+            bullet(d, t[2:])
+        elif t.startswith("SKILLS") is False and "," in t and t.split(",")[0].strip() in ("Python",):
+            d.add_paragraph(t)
+        else:
+            q = d.add_paragraph(); q.paragraph_format.space_before = Pt(0 if first else 6); q.add_run(t).bold = True; first = False
+    return d
+
 def main():
     os.makedirs(OUT, exist_ok=True)
-    made = {"good": good(), "two-column": two_column(), "header-contact": header_contact(), "messy": messy()}
+    made = {"good": good(), "two-column": two_column(), "header-contact": header_contact(), "messy": messy(), "own-match": own_match()}
     for name, d in made.items():
         # python-docx stamps the save time into docProps/core.xml; fixed so the fixtures are reproducible byte for byte.
         import datetime

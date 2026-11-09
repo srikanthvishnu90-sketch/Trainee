@@ -14,7 +14,7 @@ import { HARD, KEEP_MIN, levelOf, ownPdfSpec, pdfNamePt, POINTS, rateResumeFile,
 import { readPdfGeometry, wordsOf } from "../../supabase/functions/_shared/career_resume_geometry.ts";
 import { renderDesigned, sameText } from "../../supabase/functions/_shared/career_resume_design.ts";
 import { careerTools } from "../../supabase/functions/_shared/agent/career_tools.ts";
-import { edgeRenderer, memoryPersonaStore, memoryResumeStore } from "../../supabase/functions/_shared/career_tailor.ts";
+import { edgeRenderer, memoryPersonaStore, memoryResumeStore, tailorForPosting } from "../../supabase/functions/_shared/career_tailor.ts";
 import { memoryVersionLog } from "../../supabase/functions/_shared/career_resume_outcomes.ts";
 import { LIGHT, PLUM } from "../../supabase/functions/_shared/brand.ts";
 import { corpus } from "../helpers/resume_corpus.ts";
@@ -238,11 +238,12 @@ function fixtureProfile() {
 const POSTING = `Data Analyst, Acme Analytics (TEST posting)\nRequirements:\n- Experience with SQL and PostgreSQL, Python, and Tableau\n- Build dashboards for internal users`;
 const NOW = Date.UTC(2026, 10, 8, 15), USER = "00000000-0000-4000-8000-0000000010a1";
 function tools(upload: { bytes: Uint8Array; kind: "pdf" | "docx" } | null, ownDocx: Uint8Array | null = null) {
-  const versions = memoryVersionLog(), store = memoryResumeStore();
-  const t = Object.fromEntries(careerTools({ postings: async () => [], tailor: { posting: async () => null, personas: memoryPersonaStore(), resumes: store, render: edgeRenderer(), versions, upload: async () => upload, ownDocx: async () => ownDocx } }).map((x) => [x.name, x]));
+  const versions = memoryVersionLog(), store = memoryResumeStore(), delivered: { format: string; base64: string }[] = [];
+  const t = Object.fromEntries(careerTools({ postings: async () => [], tailor: { posting: async () => null, personas: memoryPersonaStore(), resumes: store, render: edgeRenderer(), versions, upload: async () => upload, ownDocx: async () => ownDocx, deliver: (d) => { delivered.push(d); } } }).map((x) => [x.name, x]));
   const ctx = { userId: USER, threadId: "t1", now: NOW, state: { profile: fixtureProfile() } as Record<string, any>, turn: { message: "make me a resume for this one", added: [] as string[] } };
-  return { t, ctx, versions, store };
+  return { t, ctx, versions, store, delivered };
 }
+const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 Deno.test("r10/9 'use template 5' makes the file in template 5 and records it by template; a number outside 1-15 is refused", async () => {
   const { t, ctx, versions } = tools(null);
@@ -255,13 +256,47 @@ Deno.test("r10/9 'use template 5' makes the file in template 5 and records it by
   assert(/1 to 15/.test(err), err);
 });
 
-Deno.test("r10/10 with no layout asked: a resume the rater keeps keeps its layout; one it does not is made in the default and the best template is offered with why; nothing is invented", async () => {
+Deno.test("r10/10 a kept Word file carries the tailored resume: its layout, the tailored lines in it, the replaced and dropped originals gone, exactly the audited lines printed", async () => {
+  // own-match.docx: the test profile's own resume as a Word file (scripts/resume-rater-fixtures.py), name and email the profile's.
+  const mine = await fixture("own-match.docx");
+  const a = tools({ bytes: mine, kind: "docx" }, mine);
+  const kept = await a.t.tailor_resume.run({ posting_text: POSTING }, a.ctx) as any;
+  eq([kept.layout, kept.format_check?.keep, kept.format_check?.kept_layout], ["own", true, true], JSON.stringify(kept.format_check));
+  assert(kept.own_layout.replaced > 0 && kept.own_layout.missing.length === 0, JSON.stringify(kept.own_layout));
+  const docx = a.delivered.find((d) => d.format === "docx"), pdf = a.delivered.find((d) => d.format === "pdf");
+  assert(docx && pdf, "both files ride the reply");
+  const printed = (R.extractDocxLines(Buffer.from(unb64(docx.base64))) as string[]).map((l) => l.replace(/^[•\s-]+/, "").trim()).filter(Boolean);
+  // What the tailoring made for the same posting (its audited document): exactly its lines are what the kept file prints,
+  // after the header, headings aside.
+  const ref = await tailorForPosting({ userId: USER, profile: fixtureProfile(), posting: { text: POSTING }, deps: { render: edgeRenderer(), resumes: memoryResumeStore() }, now: NOW });
+  assert(ref.ok);
+  const want = (ref.detail.doc.sections as any[]).flatMap((x: any) => x.lines.map((l: any) => String(l.text))).sort();
+  const got = printed.slice(2).filter((l) => !/^[A-Z ]+$/.test(l)).sort();
+  eq(got, want, "the kept file prints exactly the tailored resume's lines");
+  const original = (R.extractDocxLines(Buffer.from(mine)) as string[]).map((l) => l.trim()).filter(Boolean);
+  const skills = printed.find((l) => /^Python,/.test(l))!, oldSkills = original.find((l) => /^Python,/.test(l))!;
+  assert(skills && oldSkills && skills !== oldSkills, `the skills line is the tailored one: ${skills}`);
+  assert(!printed.includes(oldSkills), "the replaced skills line is gone");
+  const dropped = original.filter((l) => !printed.includes(l) && l !== oldSkills);
+  assert(dropped.length > 0, "the tailoring dropped lines, and they are gone from the kept file");
+  for (const l of printed.slice(2)) assert(original.includes(l) || l === skills, `every printed line is the file's own or the tailored skills line: ${l}`);
+  assert(eq2(new Set(printed.slice(0, 2)), new Set(["Alex Testcase", "Chicago, IL | alex.testcase@example.test"])), "the header is theirs, with the profile's name and email");
+  assert(sameTextBytes(unb64(pdf.base64), unb64(docx.base64)), "the PDF carries the same words as the kept Word file");
+});
+const eq2 = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((x) => b.has(x));
+const sameTextBytes = (pdf: Uint8Array, docx: Uint8Array) => sameText(R, pdf, docx);
+
+Deno.test("r10/10b a kept-rated file that cannot carry the tailored resume exactly is not used: the best template is used instead and the reply says why", async () => {
+  // good.docx rates keep (and passes 148's parse-check), but it is someone else's record: its lines are on no confirmed fact.
   const good = await fixture("good.docx");
   const a = tools({ bytes: good, kind: "docx" }, good);
-  const kept = await a.t.tailor_resume.run({ posting_text: POSTING }, a.ctx) as any;
-  assert(kept.format_check?.keep === true && kept.format_check.score >= KEEP_MIN, JSON.stringify(kept.format_check));
-  // Their layout is kept, or (when their own file fails a check once it carries the tailored words) the default is used and said.
-  assert(kept.layout === "own" || /could not be kept/.test(kept.format_check.summary), `${kept.layout} ${kept.format_check.summary}`);
+  const r = await a.t.tailor_resume.run({ posting_text: POSTING }, a.ctx) as any;
+  eq([r.layout, r.template, r.format_check.keep, r.format_check.kept_layout], ["template", "T05", true, false], JSON.stringify(r.format_check));
+  assert(/Your own layout was not used: .*not on your confirmed record.* This file uses Analyst \(template 5\) instead\./.test(r.format_check.summary), r.format_check.summary);
+  assert(!/keep your layout/.test(r.format_check.summary), "never says it kept their layout");
+});
+
+Deno.test("r10/10c with no layout asked, a file the rater does not keep is made in the default and the best template is offered with why", async () => {
   const messy = await fixture("messy.docx");
   const b = tools({ bytes: messy, kind: "docx" }, messy);
   const offered = await b.t.tailor_resume.run({ posting_text: POSTING }, b.ctx) as any;
@@ -269,9 +304,20 @@ Deno.test("r10/10 with no layout asked: a resume the rater keeps keeps its layou
   eq(offered.format_check.recommended.template, 5, "a data posting: the Analyst template");
   assert(/scores \d+\/100/.test(offered.format_check.summary) && /Suggested: Analyst \(template 5\) is made for data/.test(offered.format_check.summary), offered.format_check.summary);
   assert(offered.format_check.findings.some((f: any) => f.criterion === "margins" && /0\.3 in/.test(f.detail)), "the finding names the measurement");
-  // The words on the file are the confirmed record's, whatever the layout.
   const words = wordsOf(String(offered.preview));
   assert(!words.includes("journey"), "nothing from the messy file's own headings is carried into the content");
+});
+
+Deno.test("r10/10d a real Word file whose template carries unused built-in style sizes (Title 26, footnote 8 ...) is kept, and 148's parse-check agrees", async () => {
+  const good = await fixture("good.docx");
+  const pc = R.parseCheck({ docx: Buffer.from(good) }, {});
+  assert(pc.checks.docx.fontSizesPt.includes(26) && pc.checks.docx.fontSizesPt.includes(8), "the unused styles are in the file");
+  eq(pc.reasons.filter((x: any) => x.level === "fail"), [], "148's parse-check passes it (only the styles in use count)");
+  const r = await rateResumeFile(R, good);
+  eq([r.keep, r.parseCheckFails], [true, []]);
+  // And a file whose used style is 9 pt: the rater does not keep what the parse-check refuses.
+  const messy = await rateResumeFile(R, await fixture("messy.docx"));
+  assert(!messy.keep && messy.parseCheckFails.some((f) => /10–12pt/.test(f)), JSON.stringify(messy.parseCheckFails));
 });
 
 // ------------------------------------------------------------------------------------------------ the real-world round trip

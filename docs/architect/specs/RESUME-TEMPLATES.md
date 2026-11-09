@@ -133,9 +133,18 @@ properties for a DOCX. A criterion that cannot be measured is left out, and the 
 | contact | 8 | yes | name, email and phone in the body's first lines; a header/footer-only contact is named |
 | roundtrip | 10 | yes | PDF: pdf.js's text layer equals the operator walk, word for word, with no unreadable runs. DOCX: the paragraph walk equals 148's DOCX parser |
 
-A hard criterion fails when it gets under half its points. **KEEP rule: score ≥ 85 and no hard failure** keeps their format
+A hard criterion fails when it gets under half its points. **KEEP rule: score ≥ 85, no hard failure, and (for a DOCX) 148's own parse-check passes the file as it is** keeps their format
 and changes only the content:
-- a DOCX is the existing "own" path: their Word file with the tailored bullets swapped in;
+- a DOCX is the "own" path, with the tailored resume put into their file (review of #620; `planOwnEdits`, `verifyOwnPrinted` in `career_resume_design.ts`):
+  - Each paragraph after the header is mapped to the person's confirmed record: a fact's title, one of its original bullets, or the skills line.
+  - Within an entry, the tailored bullets take that entry's bullet paragraphs in order, reworded and re-ordered, each keeping the paragraph's own formatting.
+  - The skills paragraph takes the tailored skills line.
+  - Bullets and entries the tailoring dropped are removed, and a heading left with nothing under it goes too.
+  - The plan is refused when anything cannot be placed exactly: a paragraph that is on no confirmed record, or a tailored line with no paragraph to go in.
+  - After the file is made, its printed content lines must be exactly the tailored resume's audited lines, and its header must carry the profile's name and email.
+  - The printed lines then pass the same materials guard as the tailored document.
+  - If any of this fails, their layout is not used: the file is made in the recommended template and the reply says why.
+  - The DOCX side of 148's R6 counts only the styles the document uses (its defaults, the styles its paragraphs and runs name, and their basedOn chains), so a real Word file's unused built-in sizes no longer fail it. The rater requires the same parse-check before it keeps a DOCX, so the two agree;
 - a PDF is rebuilt from its measured geometry (`ownPdfSpec`) only when that rebuild is faithful: a Helvetica/Arial or Times face, body 10–12 pt, a name of 10–18 pt (R6 scoped), measurable margins and leading, and flush-right dates;
 - otherwise their Word copy is used if there is one; otherwise the best of the fifteen is offered with the reason.
 

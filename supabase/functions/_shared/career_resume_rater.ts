@@ -27,7 +27,9 @@ export type Criterion = "columns" | "headings" | "type" | "margins" | "edges" | 
 export const POINTS: Record<Criterion, number> = { columns: 15, headings: 8, type: 10, margins: 8, edges: 10, dates: 8, gaps: 7, containers: 10, length: 6, contact: 8, roundtrip: 10 };
 export const HARD: Criterion[] = ["columns", "containers", "contact", "roundtrip"];
 export interface Finding { criterion: Criterion; points: number; max: number; pass: boolean; hard: boolean; measured: boolean; detail: string; where: string[] }
-export interface Rating { kind: "pdf" | "docx"; score: number; findings: Finding[]; hardFailures: Criterion[]; keep: boolean; pages: number; measured: Measured }
+// parseCheckFails (DOCX only): what 148's parse-check refuses in the file as it is. A kept Word file goes out as their own file,
+// so the rater keeps one only when the gate every sent file passes would pass it too (review of #620: the two must agree).
+export interface Rating { kind: "pdf" | "docx"; score: number; findings: Finding[]; hardFailures: Criterion[]; keep: boolean; pages: number; measured: Measured; parseCheckFails: string[] }
 export interface Measured { margins: { top: number; right: number; bottom: number; left: number } | null; bodyPt: number | null; faces: string[]; bulletX: number | null; bulletTextX: number | null; leadPt: number | null; headingCase: "upper" | "title" | null; headingRule: "below" | "above" | "none" | null; datesFlushRight: boolean | null; years: number | null; entries: number }
 
 const STANDARD_HEADING = /^(summary|professional summary|profile|objective|skills|technical skills|core skills|experience|work experience|professional experience|relevant experience|employment|employment history|work history|projects|education|research|research experience|publications|leadership|activities|leadership (?:&|and) activities|certifications|licenses|awards|honors|honors (?:&|and) awards|coursework|relevant coursework|volunteer(?: experience)?|additional|additional information|languages|interests)$/i;
@@ -272,7 +274,10 @@ export function rateDocx(R: any, bytes: Uint8Array, o: { cv?: boolean } = {}): R
   F.push(finding("roundtrip", ours === theirs && !textBoxWords ? 1 : similarity(ours, theirs) >= 0.98 && !textBoxWords ? 0.5 : 0,
     ours === theirs && !textBoxWords ? "two independent parsers read the same words in the same order" : textBoxWords ? `${textBoxWords} word(s) sit in text boxes a parser may skip or misplace` : `two parsers disagree: ${firstDiff(ours, theirs)}`));
   const headCase = std.length ? (std.every((p) => /^[^a-z]+$/.test(p.text) || p.caps) ? "upper" : "title") : null;
-  return total("docx", F, pages, { margins: M, bodyPt: body, faces, bulletX: hangs.length && lefts.length ? lefts[0][0] - hangs[0][0] : null, bulletTextX: lefts[0]?.[0] ?? null, leadPt: null, headingCase: headCase, headingRule: std.length ? (std.every((p) => p.border) ? "below" : std.some((p) => p.border) ? null : "none") : null, datesFlushRight: dated.length ? rightTab.length === dated.length : null, years, entries: dated.length });
+  // 148's own gate on the file as it is (structure: sizes of the styles in use, tables, text frames, images; both parsers).
+  const pc = R.parseCheck({ docx: R.toBuffer(bytes) }, {});
+  const parseCheckFails = (pc.reasons as any[]).filter((x) => x.level === "fail").map((x) => `${x.check}: ${x.detail}`);
+  return total("docx", F, pages, { margins: M, bodyPt: body, faces, bulletX: hangs.length && lefts.length ? lefts[0][0] - hangs[0][0] : null, bulletTextX: lefts[0]?.[0] ?? null, leadPt: null, headingCase: headCase, headingRule: std.length ? (std.every((p) => p.border) ? "below" : std.some((p) => p.border) ? null : "none") : null, datesFlushRight: dated.length ? rightTab.length === dated.length : null, years, entries: dated.length }, parseCheckFails);
 }
 
 // ---------------------------------------------------------------- shared
@@ -302,11 +307,11 @@ function firstDiff(a: string, b: string): string {
   let n = 0; while (n < A.length && A[n] === B[n]) n++;
   return `from word ${n + 1}: "${A.slice(n, n + 6).join(" ")}" vs "${B.slice(n, n + 6).join(" ")}"`;
 }
-function total(kind: "pdf" | "docx", F: Finding[], pages: number, measured: Measured): Rating {
+function total(kind: "pdf" | "docx", F: Finding[], pages: number, measured: Measured, parseCheckFails: string[] = []): Rating {
   const counted = F.filter((f) => f.measured), max = counted.reduce((s, f) => s + f.max, 0), got = counted.reduce((s, f) => s + f.points, 0);
   const score = max ? Math.round((got / max) * 100) : 0;
   const hardFailures = F.filter((f) => f.hard && f.measured && f.points < f.max * 0.5).map((f) => f.criterion);
-  return { kind, score, findings: F, hardFailures, keep: score >= KEEP_MIN && hardFailures.length === 0, pages, measured };
+  return { kind, score, findings: F, hardFailures, keep: score >= KEEP_MIN && hardFailures.length === 0 && parseCheckFails.length === 0, pages, measured, parseCheckFails };
 }
 export async function rateResumeFile(R: any, bytes: Uint8Array, o: { cv?: boolean } = {}): Promise<Rating> {
   const pdf = bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
@@ -347,7 +352,8 @@ export function recommendTemplate(o: { role: RoleFamily; level: Level; careerCha
 // What the person reads about their own file: the score, the failures in plain words with the exact line, and the decision.
 export function ratingSummary(r: Rating, rec: Recommendation | null): string {
   const fails = r.findings.filter((f) => f.measured && !f.pass).sort((a, b) => (b.max - b.points) - (a.max - a.points));
-  const head = r.keep ? `Your resume's format scores ${r.score}/100, so I'll keep your layout and change only the words.` : `Your resume's format scores ${r.score}/100${r.hardFailures.length ? `, and it fails ${r.hardFailures.join(", ")}` : ""}, so I won't reuse it as is.`;
+  const gate = r.parseCheckFails.length ? `, and the applicant-tracking check refuses it (${r.parseCheckFails.slice(0, 2).join("; ")})` : "";
+  const head = r.keep ? `Your resume's format scores ${r.score}/100, so I'll keep your layout and change only the words.` : `Your resume's format scores ${r.score}/100${r.hardFailures.length ? `, and it fails ${r.hardFailures.join(", ")}` : ""}${gate}, so I won't reuse it as is.`;
   const lines = fails.slice(0, 4).map((f) => `- ${f.criterion}: ${f.detail}${f.where.length ? ` (${f.where.slice(0, 2).join("; ")})` : ""}`);
   return [head, ...lines, ...(!r.keep && rec ? [`Suggested: ${rec.why}`] : [])].join("\n");
 }

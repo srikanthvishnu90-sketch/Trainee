@@ -516,6 +516,9 @@ export async function cardTurn(
     // OWNER RULE (2026-10-26): only applications that send a resume are ever on a card (sendsResume, fail closed).
     const pending = (await o.store.pending(o.userId)).filter(sendsResume);
     let c = batchFor(pending);
+    // E-39 only reviews a card that exists: with none prepared, "apply to #9" / "submit job 2" is another handler's turn
+    // (the job list's own numbering, or the apply queue), never "nothing is ready".
+    if (!c && lead) return null;
     if (!c) {
       return {
         reply: 'Nothing is ready for you to approve yet. Send me a job link with "apply me to" and I\'ll prepare it and send its card here; "where are my applications" says what is being prepared.',

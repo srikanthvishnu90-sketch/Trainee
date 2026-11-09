@@ -83,7 +83,7 @@ Deno.test({
         await finish(P, 2, `state = 'submitted_unconfirmed', confirmation_id = 'BE-2002'`);
         await finish(P, 3, `state = 'unknown_outcome', reason = 'DRIVER_ERROR'`);
         await finish(P, 4, `state = 'needs_user', reason = 'login_required'`);
-        await finish(P, 5, `state = 'driving'`);
+        await finish(P, 5, `state = 'driving', attempts = 1, lease_token = gen_random_uuid()`);
         await receipts();
         eq(await closeouts(), 0, "one still in flight: no closeout");
         eq((await outbox(P, "status:closeout:")).length, 0);

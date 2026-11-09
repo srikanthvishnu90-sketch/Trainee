@@ -356,5 +356,8 @@ its rows is a separate decision of yours, never part of a rollback.
   write `[functions.agent-chat]` / `verify_jwt = true` to `/tmp/rb/supabase/config.toml`, then
   `cd /tmp/rb && supabase functions deploy agent-chat --project-ref <ref>`.
 - **The router brain back**: `supabase secrets unset CAREER_BRAIN --project-ref <ref>`.
+- **Never `scripts/launch/rollback/agent-chat-v203/`**: that is the Upmore-era agent-chat (frozen archive, D-006). It
+  calls Anthropic directly, outside Trainee's gateway and budget, on a Haiku default, so it is not a Trainee rollback. On
+  a project that holds Trainee's secrets it answers every request with 503 `not_a_trainee_rollback` (D-046).
 - **Remove the new functions** (after unscheduling): `supabase functions delete <name> --project-ref <ref>` for
   `career-ingest`, `career-proactive`, `trainee-deliver`, `trainee-inbound`, `trainee-telegram`, `trainee-whatsapp`.

@@ -117,7 +117,7 @@ const onTrunk = !!head && head === trunkTip;
 // Rows.
 const matrix = matrixText;
 const rows = matrix.split("\n").filter((l) => /^\| [A-Z]/.test(l) && !/^\| id \|/.test(l)).map((l) => l.slice(1, -1).split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|")));
-type Verdict = { v: "PASS" | "FAIL" | "NOT_RUN" | "PENDING_LIVE"; why: string };
+type Verdict = { v: "PASS" | "FAIL" | "NOT_RUN" | "PENDING_LIVE" | "BLOCKED"; why: string };
 function testRef(ref: string): Verdict {
   if (ref.startsWith("run:")) { const r = runResult.get(ref.slice(4)); return r === 0 ? { v: "PASS", why: "" } : { v: "FAIL", why: r === "absent" ? `${ref}: not on this commit` : `${ref}: exit ${r}` }; }
   if (ref === "docx:render") return docxRender.v === "PASS" ? { v: "PASS", why: "" } : { v: docxRender.v === "BLOCKED" ? "NOT_RUN" : "FAIL", why: `docx:render ${docxRender.v}: ${docxRender.why}` };
@@ -134,8 +134,10 @@ function liveRef(ref: string): Verdict {
   const turn = ref.slice(5);
   const hits = turn === "all" ? live.checks : live.checks.filter((c) => c.turn === turn);
   if (!hits.length) return { v: "FAIL", why: `${ref}: the live replay ran no such step` };
-  const bad = hits.filter((c) => c.status !== "PASS");
-  return bad.length ? { v: "FAIL", why: `${ref}: ${bad[0].status} ${bad[0].check} ${bad[0].detail.slice(0, 120)}` } : { v: "PASS", why: "" };
+  // A live step the replay marks BLOCKED (a named outside reason, e.g. R-4's owner-provided test chat) blocks the row, never passes it.
+  const bad = hits.filter((c) => c.status !== "PASS" && c.status !== "BLOCKED"), blocked = hits.filter((c) => c.status === "BLOCKED");
+  if (bad.length) return { v: "FAIL", why: `${ref}: ${bad[0].status} ${bad[0].check} ${bad[0].detail.slice(0, 120)}` };
+  return blocked.length ? { v: "BLOCKED", why: `${ref}: BLOCKED ${blocked[0].check}: ${blocked[0].detail.slice(0, 120)}` } : { v: "PASS", why: "" };
 }
 const out: { id: string; verdict: string; why: string }[] = [];
 for (const [id, crit, , tests, liveCol, status, note] of rows) {
@@ -155,6 +157,7 @@ for (const [id, crit, , tests, liveCol, status, note] of rows) {
     else if (first("FAIL")) { verdict = "FAIL"; why = first("FAIL")!.why; }
     else if (first("NOT_RUN")) { verdict = "FAIL"; why = first("NOT_RUN")!.why; }
     // CM-3: a row with a live step is never PASS without --live, however its in-process checks went.
+    else if (first("BLOCKED")) { verdict = "BLOCKED"; why = first("BLOCKED")!.why; }
     else if (first("PENDING_LIVE")) { verdict = "PENDING_LIVE"; why = tests ? `in-process PASS; ${first("PENDING_LIVE")!.why}` : first("PENDING_LIVE")!.why; }
     else { verdict = "PASS"; }
   }

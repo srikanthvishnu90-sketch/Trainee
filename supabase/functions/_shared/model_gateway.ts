@@ -44,9 +44,17 @@ export const resetIgnoredWarnings = () => ignoredSeen.clear();
 export function modelConfig(env: Env, _role: ModelRole = "chat"): ModelConfig {
   const mp = (env.get("MODEL_PROVIDER") ?? "").trim();
   if (mp && mp.toLowerCase() !== "anthropic") warnIgnoredOnce("MODEL_PROVIDER", mp, "Claude is the only provider");
-  return modelConfigFor(env, CLAUDE_DEFAULT_MODEL);
+  return assertProductModel(modelConfigFor(env, CLAUDE_DEFAULT_MODEL));
 }
 export const providerName = (c: ModelConfig) => PROVIDER_NAME[c.provider];
+// D-046 runtime guard at the product doors (modelConfig here; careerModelConfig, readerModelConfig and readerCall): a config
+// for any model but Sonnet 5.5 is refused, with no exemption and no fallback. The raw callModel / modelConfigFor stay the eval
+// door (the judges name their own Claude models); tests/architect/d046-sonnet-only-no-person-cap.test.ts fails on any product
+// file that reaches them with a model of its own.
+export function assertProductModel(cfg: ModelConfig): ModelConfig {
+  if (PRODUCT_MODELS.includes(String(cfg?.model || ""))) return cfg;
+  throw new ModelUnavailableError(0, "not_product_model", `model "${String(cfg?.model || "").slice(0, 60)}" is not served: Trainee uses ${TRAINEE_MODEL} only (D-046)`);
+}
 // The provider a model name belongs to. Only Claude model ids are served; any other id is refused, never routed elsewhere.
 export function providerFor(model: string): Provider {
   const id = String(model || "");

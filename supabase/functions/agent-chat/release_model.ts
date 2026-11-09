@@ -15,7 +15,7 @@
 // budget caps it) and ANTHROPIC_API_KEY is configured; anything else (a Haiku id, a typo, an unknown id, a non-Claude id, no
 // key) is ignored with one log line and serves the default. Every model here is a Claude model (providerFor refuses any other id).
 // The rollback is temporary; the lasting change is a reviewed commit to CAREER_MODEL_DEFAULT that passes the deploy standard.
-import { type ModelConfig, modelConfigFor, PRICES, PRODUCT_MODELS, warnIgnoredOnce } from "../_shared/model_gateway.ts";
+import { assertProductModel, type ModelConfig, modelConfigFor, PRICES, PRODUCT_MODELS, warnIgnoredOnce } from "../_shared/model_gateway.ts";
 
 type Env = { get(k: string): string | undefined };
 
@@ -37,5 +37,5 @@ export function careerModel(env: Env): string {
 
 // The full config (provider, key, effort) for the career reply model. Every career call site reads this one function.
 export function careerModelConfig(env: Env): ModelConfig {
-  return modelConfigFor(env, careerModel(env));
+  return assertProductModel(modelConfigFor(env, careerModel(env))); // D-046 guard: Sonnet 5.5 or nothing
 }

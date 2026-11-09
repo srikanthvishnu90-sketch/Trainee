@@ -4,7 +4,7 @@
 // (modelConfigFor). Sonnet only (D-046): CAREER_MODEL naming anything but claude-sonnet-5-5 (a Haiku id, a gpt id left in a
 // secret) is ignored with one log line, so a stale secret can never move a reader off Sonnet 5.5.
 //
-import { callModel, type ModelConfig, modelConfigFor, readerModel, TRAINEE_MODEL } from "./model_gateway.ts";
+import { assertProductModel, callModel, type ModelConfig, modelConfigFor, readerModel, TRAINEE_MODEL } from "./model_gateway.ts";
 export { readerModel };
 
 type Env = { get(k: string): string | undefined };
@@ -13,10 +13,10 @@ export const READER_MODEL_DEFAULT = TRAINEE_MODEL;
 
 // Provider "anthropic", ANTHROPIC_API_KEY, effort per ANTHROPIC_EFFORT: a complete config for callModel.
 export function readerModelConfig(env: Env): ModelConfig {
-  return modelConfigFor(env, readerModel(env));
+  return assertProductModel(modelConfigFor(env, readerModel(env))); // D-046 guard: Sonnet 5.5 or nothing
 }
 
 // A reader's model call: the gateway's callModel (budget reserved first, metered, timed out) on the reader config. `request`
 // is only for tests (a fake Anthropic Messages wire); production passes nothing and the gateway uses fetch.
 export const readerCall = (env: Env, request?: typeof fetch) => (payload: any): Promise<any> =>
-  callModel(readerModelConfig(env), payload, { role: "chat", ...(request ? { request } : {}) });
+  callModel(assertProductModel(readerModelConfig(env)), payload, { role: "chat", ...(request ? { request } : {}) });

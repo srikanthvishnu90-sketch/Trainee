@@ -233,3 +233,30 @@ Deno.test("D-046 pricing: Sonnet 5.5 is priced (Anthropic's page; re-read 2026-1
   console.log(`[d046] Sonnet 5.5 per step $${(step / 1e6).toFixed(4)}; typical staged turn $${(staged / 1e6).toFixed(4)}; agent turn $${(agent / 1e6).toFixed(4)}`);
   eq(step, 26_000, "11,000 in x $2 + 400 out x $10 = $0.026 a step");
 });
+
+// ---- Part 6: the runtime guard at the product doors (architect, 2026-11-09, option b) ----------------------------------------
+// The doors the product picks its model through refuse anything but Sonnet 5.5, with no exemption. The raw gateway stays the
+// eval door; Part 2's registry is the CI catch for a product file that reaches it with a model of its own.
+Deno.test("D-046 guard: assertProductModel passes Sonnet 5.5 and refuses every other model, with no exemption", () => {
+  const cfg = (model: string): Gateway.ModelConfig => ({ provider: "anthropic", model, apiKey: "k", reasoningEffort: "low" });
+  eq(Gateway.assertProductModel(cfg(SONNET)).model, SONNET);
+  for (const m of ["claude-haiku-5-5", "claude-haiku-4-5-20251001", "claude-opus-5-5", "claude-sonnet-5", "gpt-5-mini", "", "claude-sonnet-5-5 "]) {
+    let err: any = null;
+    try { Gateway.assertProductModel(cfg(m)); } catch (e) { err = e; }
+    assert(err instanceof ModelUnavailableError && err.type === "not_product_model", `${JSON.stringify(m)} is refused`);
+  }
+});
+
+Deno.test("D-046 guard: every product door runs the guard on the config it returns or sends", async () => {
+  const code = async (p: string) => (await Deno.readTextFile(new URL(p, ROOT))).replace(/^\s*\/\/.*$/gm, "");
+  const gw = await code("supabase/functions/_shared/model_gateway.ts");
+  assert(/export function modelConfig\([^)]*\)[^{]*\{[\s\S]*?return assertProductModel\(modelConfigFor\(env, CLAUDE_DEFAULT_MODEL\)\);\s*\}/.test(gw), "modelConfig");
+  const rm = await code("supabase/functions/agent-chat/release_model.ts");
+  assert(/export function careerModelConfig\(env: Env\): ModelConfig \{\s*return assertProductModel\(modelConfigFor\(env, careerModel\(env\)\)\);/.test(rm), "careerModelConfig");
+  const rd = await code("supabase/functions/_shared/career_reader_model.ts");
+  assert(/export function readerModelConfig\(env: Env\): ModelConfig \{\s*return assertProductModel\(modelConfigFor\(env, readerModel\(env\)\)\);/.test(rd), "readerModelConfig");
+  assert(/callModel\(assertProductModel\(readerModelConfig\(env\)\), payload,/.test(rd), "readerCall");
+  // and the doors still give Sonnet under every stale setting (the guard never fires on a resolver's own result)
+  const stale = env({ ...KEY, CAREER_MODEL: "claude-haiku-5-5", CAREER_REPLY_MODEL: "claude-haiku-5-5", MODEL_PROVIDER: "openai" });
+  eq([careerModelConfig(stale).model, readerModelConfig(stale).model, Gateway.modelConfig(stale, "router").model], [SONNET, SONNET, SONNET]);
+});

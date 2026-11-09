@@ -76,10 +76,12 @@ export function familyOfRecord(rec: FileRecord, token: string): { family: Family
       { k: "Status", v: STATUS_WORDS[String(d.status)] ?? null, src: rec_ },
       ...(c.id ? [{ k: "Confirmation ID", v: String(c.id), src: rec_ }] : []),
       { k: "Last updated", v: iso(d.as_of) ? String(d.as_of).slice(0, 10) : null, src: rec_, missing: "unknown" }] }] };
-    const problems = (Array.isArray(d.problems) ? d.problems : []).filter((x: any) => x?.reason);
-    const notDone: Block[] = problems.length ? [{ b: "card", label: "Not done", parts: problems.map((x: any) => ({ p: "text" as const, lead: `${String(x.outcome ?? "").charAt(0).toUpperCase()}${String(x.outcome ?? "").slice(1)}:`, text: `${x.item}. ${x.reason}` })) }] : [];
-    const flags = (Array.isArray(rec.state?.flags) ? rec.state.flags : []).filter((x: any) => x?.note);
-    const flagged: Block[] = flags.length ? [{ b: "card", label: "Flagged by you", parts: flags.map((x: any) => ({ p: "text" as const, lead: `${iso(x.at)?.slice(0, 10) ?? "unknown"}:`, text: String(x.note) })) }] : [];
+    type Problem = { item?: unknown; outcome?: unknown; reason?: unknown };
+    const problems: Problem[] = (Array.isArray(d.problems) ? d.problems : []).filter((x: Problem) => x?.reason);
+    const notDone: Block[] = problems.length ? [{ b: "card", label: "Not done", parts: problems.map((x) => ({ p: "text" as const, lead: `${String(x.outcome ?? "").charAt(0).toUpperCase()}${String(x.outcome ?? "").slice(1)}:`, text: `${x.item}. ${x.reason}` })) }] : [];
+    type Flag = { at?: unknown; note?: unknown };
+    const flags: Flag[] = (Array.isArray(rec.state?.flags) ? rec.state.flags : []).filter((x: Flag) => x?.note);
+    const flagged: Block[] = flags.length ? [{ b: "card", label: "Flagged by you", parts: flags.map((x) => ({ p: "text" as const, lead: `${iso(x.at)?.slice(0, 10) ?? "unknown"}:`, text: String(x.note) })) }] : [];
     const flag: Block[] = views.some((a) => a.id === "flag" && a.state === "available")
       ? [{ b: "html", html: `<section class="ff-card"><h2 class="ff-label">Flag a problem</h2><form method="post" class="ff-act"><input type="hidden" name="t" value="${esc(token)}"><input type="hidden" name="action" value="flag"><label for="ff-flag" class="ff-p">What looks wrong</label><textarea id="ff-flag" name="note" rows="3" maxlength="500" class="ff-ta"></textarea><button type="submit" class="ff-btn ff-sec" data-effect="decide">Flag a problem</button></form></section>` }] : [];
     return { family: "F-09", file: applicationReviewFile({

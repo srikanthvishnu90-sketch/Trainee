@@ -22,6 +22,7 @@
 import { type EventStore, recordEvents } from "./agent/timeline.ts";
 import { sameCompany } from "./career_mail.ts";
 import { approvalWords, NEGATIONS } from "./approval_words.ts";
+import { guardedAnswer, unresolvedOf } from "./application_review.ts";
 
 export interface Prepared {
   id: string;
@@ -39,6 +40,7 @@ export interface CardResult {
   n: number;
   company: string;
   result: string;
+  said?: string; // WO-G: the narrow question an item held back for a missing answer is said with (application_review.ts guardedAnswer)
 }
 export interface CardStore {
   pending(userId: string): Promise<Prepared[]>; // ready, or shown on a card that closed: oldest first
@@ -399,7 +401,7 @@ export function answerText(results: CardResult[], o: { declined?: "left_out" | "
   // card was shown) has no company in the database's result; it read "1. null: not sent: ...". Said plainly instead.
   const lines = results.map((r) =>
     `${r.n}. ${(r.company === null || r.company === undefined ? "" : String(r.company)).replace(/\s+/g, " ").trim().slice(0, 80) || "An application no longer on file"}: ${
-      r.result === "declined" && o.declined ? RESULT[o.declined] : RESULT[r.result] ?? RESULT.refused
+      r.said ?? (r.result === "declined" && o.declined ? RESULT[o.declined] : RESULT[r.result] ?? RESULT.refused)
     }`
   );
   const changed = results.filter((r) => r.result === "changed").length;
@@ -677,6 +679,9 @@ export async function cardTurn(
     if (/card_answered/.test(msg)) {
       return { reply: CARD_ANSWERED_BEFORE, status: "answered_before" };
     }
+    if (/unresolved_unreadable/.test(msg)) {
+      return { reply: `I couldn't check whether a required question is still open for these, so nothing was approved and nothing was sent. Say "yes" again in a minute.`, status: "unresolved_unreadable" };
+    }
     // R9-G2 (D-MS-1, paged cards): a yes approves a paged card only once every page of it reached them, and only while its
     // applications are exactly the set it showed.
     if (/card_pages_undelivered/.test(msg)) {
@@ -692,6 +697,19 @@ export async function cardTurn(
 // The store over the edge function's service client: every call names the person (the _as functions), and every read is
 // scoped to them.
 const PENDING_PAGE = 1000;
+// WO-G: the card's answer as the database takes it (career_apply_card_answer_as), every item whose posting still has an open
+// required question held back and said with its narrow question. Shared by the chat's yes and the Telegram tap.
+// deno-lint-ignore no-explicit-any
+export async function answerGuarded(admin: any, userId: string, cardId: string, approve: number[]): Promise<CardResult[]> {
+  const items = async () => {
+    const r = await admin.from("career_apply_cards").select("items").eq("id", cardId).eq("user_id", userId).limit(1);
+    if (r.error) throw new Error(`unresolved_unreadable: read the card: ${r.error.message}`);
+    return (r.data?.[0]?.items ?? []) as { n: number; prepared_id: string }[];
+  };
+  return await guardedAnswer<CardResult>({ approve, items: approve.length ? await items() : [], held: (ids) => unresolvedOf(admin, userId, ids),
+    call: async (go) => { const r = await admin.rpc("career_apply_card_answer_as", { p_user: userId, p_card: cardId, p_approve: go }); if (r.error) throw new Error(`answer the card: ${r.error.message}`); return r.data; } });
+}
+// deno-lint-ignore no-explicit-any
 export function supabaseCardStore(admin: any): CardStore {
   const must = (r: any, what: string) => {
     if (r.error) throw new Error(`${what}: ${r.error.message}`);
@@ -716,6 +734,9 @@ export function supabaseCardStore(admin: any): CardStore {
       return must(await admin.rpc("career_apply_card_open_as", { p_user: userId, p_ids: ids }), "open a card");
     },
     async confirm(userId, ids, hashes) {
+      // WO-G: an application whose posting still has an open required question is never confirmed (application_review.ts).
+      const held = await unresolvedOf(admin, userId, ids);
+      if (held.size) throw new Error(`needs_answer: ${[...held.values()][0]}`);
       return must(await admin.rpc("career_apply_card_confirm_as", { p_user: userId, p_ids: ids, p_hashes: hashes }), "confirm a card");
     },
     async latestOpen(userId) {
@@ -735,10 +756,7 @@ export function supabaseCardStore(admin: any): CardStore {
       return c && Number(c.pages) >= 2 ? { id: c.id, items: c.items, shown_at: c.shown_at } : null;
     },
     async answer(userId, cardId, approve) {
-      return must(
-        await admin.rpc("career_apply_card_answer_as", { p_user: userId, p_card: cardId, p_approve: approve }),
-        "answer the card",
-      );
+      return await answerGuarded(admin, userId, cardId, approve);
     },
     async lastAssistantIntent(threadId) {
       const rows = must(

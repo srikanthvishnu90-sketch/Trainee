@@ -31,7 +31,7 @@ export interface FileService {
   createReview?(userId: string, item: ReviewItem): Promise<{ ok: true; id: string; url: string | null; webApp: string | null } | { ok: false; error: string }>;
 }
 
-const STATUS: Record<string, string> = { queued: "queued", driving: "prepared", needs_user: "prepared", submitted_unconfirmed: "submitted", confirmed: "confirmed", failed: "failed", not_submitted: "failed" };
+const STATUS: Record<string, string> = { queued: "queued", driving: "prepared", needs_user: "prepared", submitted_unconfirmed: "submitted", unknown_outcome: "submitted", confirmed: "confirmed", failed: "failed", not_submitted: "failed" };
 const SECRETISH = /pass(?:word|wd|code)?\b|one[- ]?time|\botp\b|\bssn\b|social security|card number|\bcvv\b|\bpin\b|passport|api[-_ ]?key|secret|\btoken\b/i;
 // Everything on an application proof comes from the record, built here by code. The model supplies only the application id.
 export function proofFromRow(row: ApplicationRow, now: number): { ok: true; data: Record<string, unknown> } | { ok: false; error: string } {
@@ -57,7 +57,9 @@ export function proofFromRow(row: ApplicationRow, now: number): { ok: true; data
 // WO-G (fix 12, spec C.11 / C.21): the review File of prepared applications, built by code from the prepared payloads only
 // (application_review.ts reviewOf). One File per employer; nothing on it is a success word and nothing on it can submit.
 export function reviewFromItem(r: ReviewItem, now: number): Record<string, unknown> {
-  return { title: "Application review", company: r.employer, ...(r.role ? { role: r.role } : {}), ...(r.destination ? { destination: r.destination.slice(0, 120) } : {}),
+  // The p-67 mono ids: this application (A-, its prepared id) and the posting (R-, its board's own id).
+  const ids = [`A-${r.id.replace(/[^0-9a-z]/gi, "").slice(0, 6).toUpperCase()}`, ...(r.job_id ? [`R-${(r.job_id.split(":").pop() ?? "").replace(/[^0-9a-z-]/gi, "").slice(0, 12)}`] : [])].join(" \u00B7 ");
+  return { title: "Application review", ids, company: r.employer, ...(r.role ? { role: r.role } : {}), ...(r.destination ? { destination: r.destination.slice(0, 120) } : {}),
     status: "prepared", stage: "prepared", prepared_at: new Date(now).toISOString(), as_of: new Date(now).toISOString(), ...(r.resume ? { resume: r.resume.label.slice(0, 100) } : {}), answers: [], problems: [],
     review: { url: r.url ?? undefined, hash12: r.hash12 || undefined, approvable: r.approvable, letter: r.letter, ...(r.expires_at ? { expires_at: r.expires_at } : {}), files: r.files, covers: r.covers,
       answers: r.answers.map((a) => ({ question: a.question, answer: a.answer, sensitive: !!a.sensitive })), unresolved: r.unresolved.map((u) => ({ question: u.question, ask: u.ask })) } };
@@ -90,7 +92,7 @@ export function createFileService(o: { store: FileKindStore; env: Env; now: () =
     },
     async get(userId, id) {
       const rec = userId && /^[0-9a-f]{10}$/.test(id) ? await o.store.get(userId, id) : null;
-      if (!rec || rec.userId !== userId || (rec.kind === "application_proof" && rec.data?.from_record !== true)) return { state: "missing" };
+      if (!rec || rec.userId !== userId || (rec.kind === "application_proof" && rec.data?.from_record !== true) || (rec.kind === "application_review" && rec.data?.from_prepared !== true)) return { state: "missing" };
       if (rec.revoked_at !== null) return { state: "revoked", rec };
       return o.now() >= rec.expires_at ? { state: "expired", rec } : { state: "ok", rec };
     },
@@ -98,12 +100,12 @@ export function createFileService(o: { store: FileKindStore; env: Env; now: () =
     claim: (userId, id, name) => o.store.claim(userId, id, name, o.now()),
     async createReview(userId, item) {
       if (!userId) return { ok: false, error: "not created: no person to make it for" };
-      const now = o.now(), v = validateKind("application_proof", reviewFromItem(item, now), { trusted: true, now });
+      const now = o.now(), v = validateKind("application_review", reviewFromItem(item, now), { trusted: true, now });
       if (!v.ok) return { ok: false, error: `not created: ${v.errors.join("; ")}` };
       const id = [...crypto.getRandomValues(new Uint8Array(5))].map((b) => b.toString(16).padStart(2, "0")).join("");
       const links = await feedUrlsFor(o.env, userId, id, now);
       if (!links.url && !links.webApp) return { ok: false, error: "not created: file links aren't set up yet" };
-      await o.store.put({ id, userId, kind: "application_proof", data: v.data, state: {}, tag: null, created_at: now, expires_at: now + ttlHours() * 3600_000, revoked_at: null });
+      await o.store.put({ id, userId, kind: "application_review", data: v.data, state: {}, tag: null, created_at: now, expires_at: now + ttlHours() * 3600_000, revoked_at: null });
       return { ok: true, id, url: links.url, webApp: links.webApp };
     },
     revoke: (userId, id) => o.store.revoke(userId, id, o.now()),

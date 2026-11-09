@@ -52,7 +52,7 @@ export interface ReviewInput {
   open?: { label: string; options?: string[] }[]; // the employer's required questions still unanswered for this posting
 }
 export interface ReviewItem {
-  id: string; employer: string; role: string | null; url: string | null; destination: string | null;
+  id: string; job_id: string | null; employer: string; role: string | null; url: string | null; destination: string | null;
   resume: { label: string; sha12: string } | null; files: string[];
   answers: { question: string; answer: string; sensitive: Sensitive | null }[];
   unresolved: { question: string; fact: Sensitive | null; ask: string }[];
@@ -86,7 +86,7 @@ export function reviewOf(x: ReviewInput): ReviewItem {
     ...(destination ? [`where it is sent: ${destination}`] : []), ...(resume ? [`the resume file ${resume.sha12}`] : []),
     `${answers.length} answer${answers.length === 1 ? "" : "s"}, word for word as shown`, ...(page_fields.length ? [`the fields the employer's page sets: ${page_fields.join(", ")}`] : [])];
   const expires_at = Number.isFinite(Date.parse(String(p.expires_at ?? ""))) ? new Date(Date.parse(p.expires_at)).toISOString() : null;
-  return { id: x.id, employer, role, url, destination, resume, files, answers, unresolved, page_fields, hash12, approvable: !!resume && !unresolved.length, covers, expires_at, letter: !!p.cover_note?.text };
+  return { id: x.id, job_id: one(p.job_id, 200) || null, employer, role, url, destination, resume, files, answers, unresolved, page_fields, hash12, approvable: !!resume && !unresolved.length, covers, expires_at, letter: !!p.cover_note?.text };
 }
 
 // The review in words: the card's "full review" and the plain-text twin of the review File. Nothing here is a success word.
@@ -208,4 +208,39 @@ export async function reviewLinksFor(shown: { id: string }[], d: ReviewDeps): Pr
     if (made?.url) lines.push(`${i + 1}. ${item.employer}${item.role ? `, ${item.role}` : ""}: ${made.url}`);
   }
   return lines.length ? `The full review of each, with the application page, the resume file and exactly what your yes covers:\n${lines.join("\n")}` : null;
+}
+
+// A card text with its review links after it, only while the whole stays one text (the outbox and the card push take at most
+// `max` characters); a card that would not fit keeps its exact text and the links are left out, never the card cut.
+export function withLinks(text: string, links: string | null, max = 4000): string {
+  return links && text.length + 2 + links.length <= max ? `${text}\n\n${links}` : text;
+}
+
+// ------------------------------------------------------------------------------------------------ the approval guard
+// Architect ruling (R10 fix 12): an unresolved fact is never approvable through any path. Every approval of prepared
+// applications (a text yes, a Telegram tap, the jobs page's Apply, the File's Confirm) reaches the database through a card
+// store's answer or confirm; there, before the database is asked, each item whose posting still has an open required question
+// is held back and the narrow question is said instead. A check that cannot be read approves nothing (fail closed).
+// deno-lint-ignore no-explicit-any
+export async function unresolvedOf(admin: any, userId: string, preparedIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!preparedIds.length) return out;
+  const fail = (what: string, r: any) => { if (r.error) throw new Error(`unresolved_unreadable: ${what}: ${r.error.message}`); return r.data ?? []; };
+  const prepared = fail("read the prepared applications", await admin.from("career_apply_prepared").select("id,job_id,company").eq("user_id", userId).in("id", preparedIds)) as { id: string; job_id: string | null; company: string }[];
+  const open = fail("read open questions", await admin.rpc("career_apply_questions_open_as", { p_user: userId, p_limit: 500 })) as { label: string; options?: string[]; company?: string | null; job_ids?: string[] }[];
+  for (const p of prepared) {
+    const q = p.job_id ? open.find((x) => Array.isArray(x.job_ids) && x.job_ids.includes(String(p.job_id))) : undefined;
+    if (q) out.set(String(p.id), narrowQuestion({ label: q.label, company: p.company || q.company, options: q.options }));
+  }
+  return out;
+}
+// The card's answer with every held-back item said as needing its answer; the rest go to the database as approved.
+export async function guardedAnswer<R extends { n: number; result: string; said?: string }>(o: {
+  approve: number[]; items: { n: number; prepared_id: string }[]; held: (preparedIds: string[]) => Promise<Map<string, string>>; call: (approve: number[]) => Promise<R[]>;
+}): Promise<R[]> {
+  const asked = o.items.filter((i) => o.approve.includes(i.n));
+  const held = asked.length ? await o.held(asked.map((i) => i.prepared_id)) : new Map<string, string>();
+  const byN = new Map(asked.filter((i) => held.has(i.prepared_id)).map((i) => [i.n, held.get(i.prepared_id)!]));
+  const results = await o.call(o.approve.filter((n) => !byN.has(n)));
+  return results.map((r) => byN.has(r.n) ? { ...r, result: "needs_answer", said: `not approved: a required answer is still missing. ${byN.get(r.n)}` } : r);
 }

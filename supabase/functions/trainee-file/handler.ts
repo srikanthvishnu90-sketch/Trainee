@@ -649,10 +649,10 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
   // The shared File shell (file_design.ts): "Made for <first name> · <date>" above one card; the title, then when its facts were read
   // (the moment this File was built from them; an application proof reads the application record), in the person's zone.
   const [tz, facts] = await Promise.all([d.timeZone ? d.timeZone(u).catch(() => null) : null, d.facts ? d.facts(u).then((f) => f ?? [], () => []) : []]);
-  const stampLabel = rec.kind === "application_proof" ? "Application record read" : "Facts as of";
+  const stampLabel = rec.kind === "application_proof" ? "Application record read" : rec.kind === "application_review" ? "Prepared" : "Facts as of";
   const shots = evidenceOrigin(d.env);
   const body = `${note ? `<p class="note-top" role="status">${esc(note)}</p>` : ""}${bodyHtml(rec, token, { tz, evidenceImage: (x) => !!shots && originOf(x) === shots })}`;
-  const inner = `<div id="root">${fileShellHtml({ made: madeForLine(firstNameOf(facts), rec.created_at, tz), eyebrow: KIND_LABEL[rec.kind], title: String(rec.data?.title ?? KIND_LABEL[rec.kind]), stamp: freshnessStamp(stampLabel, [rec.created_at], { now: d.now(), tz }), body })}`
+  const inner = `<div id="root">${fileShellHtml({ made: madeForLine(firstNameOf(facts), rec.created_at, tz), eyebrow: rec.kind === "application_review" ? null : KIND_LABEL[rec.kind], title: String(rec.data?.title ?? KIND_LABEL[rec.kind]), stamp: freshnessStamp(stampLabel, [rec.created_at], { now: d.now(), tz }), body })}`
     + `<footer class="foot"><p>Expires ${esc(new Date(rec.expires_at).toISOString().slice(0, 16).replace("T", " "))} UTC. <a href="?format=text">Plain text version</a></p><form method="post"><input type="hidden" name="t" value="${esc(token)}"><input type="hidden" name="action" value="remove"><button type="submit" class="lnk">Remove this file</button></form></footer></div>`;
   let csp = (await headers("text/html", d.env))["content-security-policy"].replace("script-src ", `script-src ${await kindScriptHash} `);
   // A confirmation screenshot is shown inline only from the project's own storage origin; img-src then allows exactly that origin.

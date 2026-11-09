@@ -100,7 +100,7 @@ Deno.test("WO-G 12: the card shows a review link per application; the review Fil
   const plain = await cardTurn({ message: "show my applications", userId: CARD_U, threadId: "TH", now: NOW, store: db({ n: 2 }).store });
   assert(!/full review/.test(plain!.reply), "without the review reader the card is as before");
   const rec = store.all()[0];
-  eq([store.size(), rec.kind, rec.data.status, rec.data.stage, rec.data.review.approvable], [1, "application_proof", "prepared", "prepared", false]);
+  eq([store.size(), rec.kind, rec.data.status, rec.data.stage, rec.data.review.approvable, rec.data.ids], [1, "application_review", "prepared", "prepared", false, "A-P1 \u00B7 R-101"]);
   const html = bodyHtml(rec, "tok"), text = textOf(rec, { now: NOW });
   for (const s of ["Ready for review, not submitted", "Destination", "Needs your answer", "Conditions - in plain words", "What happens after approval.", "DataAnalyst_Review_v3.pdf", "Exact answers that will be sent", "Expected graduation date: not entered.", "Will you continue an outside business while employed?: not entered.", "Not ready to approve", "No submission confirmation", "Nothing was submitted."]) {
     assert(html.includes(s) || html.includes(s.replace(/: not entered\./, ": not entered.</strong>")), `html: ${s}`);

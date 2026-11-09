@@ -684,6 +684,8 @@ export async function tapJob(o: { userId: string; data: string; messageId: strin
       let got: { card?: { id: string }; results: CardResult[] };
       try { got = await deps.cards.confirm(userId, [prep.id], [prep.payload_hash]); } catch (e) {
         if (await applied()) return duplicate();
+        const m = /needs_answer: (.+)$/.exec(String((e as Error)?.message ?? e));
+        if (m) { await say(`Nothing was approved: a required answer is still missing. ${m[1]}`); return { toast: "Needs your answer.", status: "needs_answer" }; }
         if (/card_changed|invalid card/.test(String((e as Error)?.message ?? e))) {
           await say(`That application changed after I showed it, so nothing was approved. Tap Apply on the card again.`);
           return { toast: "Changed. Nothing approved.", status: "changed" };

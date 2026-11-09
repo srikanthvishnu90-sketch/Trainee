@@ -503,6 +503,7 @@ if (import.meta.main) {
     const { supabaseAlertStore } = await import("../../supabase/functions/_shared/career_alert_store.ts");
     const { supabasePostingsDb } = await import("../../supabase/functions/_shared/career_ingest.ts");
     const { supabaseAheadStore } = await import("../../supabase/functions/_shared/career_prepare_ahead.ts");
+    const { supabaseReviewLinks } = await import("../../supabase/functions/_shared/application_review_links.ts"); // WO-G: review links on the card
     const { runPrepareAhead } = await import("../../supabase/functions/_shared/career_proactive_run.ts");
     const alerts = supabaseAlertStore(admin), postings = supabasePostingsDb(admin);
     const prepareFor = aheadPrepare({
@@ -511,7 +512,7 @@ if (import.meta.main) {
       cover: Deno.env.get("CAREER_PREPARE_AHEAD_COVER") === "on" ? { newMeter, call: (payload, meter) => callModel(cfg, payload, { meter, role: "chat" }) } : undefined,
     });
     const stats = await runPrepareAhead({
-      now: Date.now(), recentPostings: (since) => postings.newSince(since), ahead: supabaseAheadStore(admin),
+      now: Date.now(), recentPostings: (since) => postings.newSince(since), ahead: supabaseAheadStore(admin, supabaseReviewLinks(admin, Deno.env)),
       // Paused, opted out or erased: nothing is prepared for them (career_quiet_users, as the scheduled run filters).
       store: { ...alerts, active: async () => {
         const rows = await alerts.active();

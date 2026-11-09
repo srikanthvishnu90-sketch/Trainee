@@ -105,6 +105,8 @@ Deno.test({ name: "WO-G 13: approve -> send -> uncertain -> no blind retry -> th
     // uncertain: said as uncertain everywhere, with no confirmation id
     r = await row();
     eq([r.state, stageOf(r), r.confirmation_id], ["unknown_outcome", "uncertain", null], "uncertain");
+    const uncFile = await fileStatus();
+    assert(uncFile.startsWith("Status: Submission may have landed."), `the proof File shows the uncertain state (architect ruling, fix 13): ${uncFile}`);
     const unc = closeoutLine(r, "America/Chicago");
     assert(/may have landed/.test(unc) && /won't send it again/.test(unc) && !/^Submitted|Confirmation:/.test(unc), unc);
     assert(!/\bsubmitted\b(?! only once)/i.test(statusLine(r).replace(/not submitted/i, "")) && /will not be sent again/.test(statusLine(r)), statusLine(r));

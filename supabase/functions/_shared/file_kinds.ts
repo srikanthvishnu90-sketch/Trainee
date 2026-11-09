@@ -20,10 +20,11 @@ const RECORDS: Source = "From Trainee's records";
 // Accepted only on trusted (code-built) plan reviews: a model's create_file can never label its own text this way.
 export const MADE: Source = "Made by Trainee";
 const MADE_OK = new Set<string>(["plan_review"]);
-export const KIND_IDS = ["job_list", "introduction", "application_proof", "plan_review", "comparison", "draft", "research_brief"] as const;
+export const KIND_IDS = ["job_list", "introduction", "application_proof", "application_review", "plan_review", "comparison", "draft", "research_brief"] as const;
 export type KindId = typeof KIND_IDS[number];
-export const KIND_LABEL: Record<KindId, string> = { job_list: "Your jobs", introduction: "Introduction", application_proof: "Application proof", plan_review: "Plan review", comparison: "Comparison", draft: "Draft", research_brief: "Research brief" };
-export const MODEL_KINDS = KIND_IDS.filter((k) => k !== "job_list");
+export const KIND_LABEL: Record<KindId, string> = { job_list: "Your jobs", introduction: "Introduction", application_proof: "Application proof", application_review: "Application review", plan_review: "Plan review", comparison: "Comparison", draft: "Draft", research_brief: "Research brief" };
+// WO-G: the application review (spec C.11 F-09) is built by code from a prepared application only, never by a model.
+export const MODEL_KINDS = KIND_IDS.filter((k) => k !== "job_list" && k !== "application_review");
 
 export interface FileRecord {
   id: string; userId: string; kind: KindId; data: any; state: Record<string, any>;
@@ -171,6 +172,13 @@ const KINDS: Record<Exclude<KindId, "job_list">, (raw: unknown, v: V) => any> = 
       ...(has ? { confirmation: { id: conf!.id, url: conf!.url, screenshot_url: conf!.screenshot_url } } : {}), resume: v.str(x.resume, "resume", { max: 100, opt: true }), answers, problems,
       ...stageAndReview(x, v) };
   },
+  application_review(raw, v) {
+    const x = v.obj(raw, "data");
+    if (!v.trusted || !x.review) { v.err("data", "an application review is built by Trainee from a prepared application only"); return {}; }
+    return { from_prepared: true, title: v.str(x.title, "title", { max: 80 }), company: v.str(x.company, "company", { max: 100 }), role: v.str(x.role, "role", { max: 120, opt: true }),
+      destination: v.str(x.destination, "destination", { max: 120, opt: true }), resume: v.str(x.resume, "resume", { max: 100, opt: true }), ids: v.str(x.ids, "ids", { max: 60, opt: true }),
+      status: "prepared", prepared_at: v.time(x.prepared_at, "prepared_at"), as_of: v.time(x.as_of, "as_of", false), ...stageAndReview(x, v) };
+  },
   plan_review(raw, v) {
     const x = v.obj(raw, "data");
     const sections = v.list(x.sections, "sections", 1, 8).map((s, i) => { const q = v.obj(s, `sections[${i}]`); return { heading: v.str(q.heading, `sections[${i}].heading`, { max: 80 }), items: v.list(q.items, `sections[${i}].items`, 1, 12).map((f, j) => v.fact(f, `sections[${i}].items[${j}]`)) }; });
@@ -279,7 +287,7 @@ const PROOF_CSS = `.state.uncertain,.state.needs-you{color:var(--warn)}.notice{m
 .r-rows{margin:0}.r-row{display:flex;justify-content:space-between;gap:16px;padding:10px 0;border-top:1px solid var(--line)}.r-row:first-child{border-top:0}.r-row dt{color:var(--mute)}.r-row dd{margin:0;font-weight:600;text-align:right;overflow-wrap:anywhere;min-width:0}
 .r-ans{margin:0}.r-ans>div{padding:8px 0;border-top:1px solid var(--line)}.r-ans>div:first-child{border-top:0}.r-ans dt{font-size:15px;color:var(--mute)}.r-ans dd{margin:2px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .r-need,.r-checks{list-style:none;margin:0;padding:0}.r-need li{padding:8px 0;border-top:1px solid var(--line)}.r-need li:first-child{border-top:0}.r-checks li{position:relative;padding:6px 0 6px 34px}.r-checks li::before{content:"\\2713";position:absolute;left:0;top:7px;width:22px;height:22px;border-radius:6px;background:var(--good);color:#fff;font-size:14px;line-height:22px;text-align:center}
-.r-after{margin:14px 0;padding:14px 16px;border:1px solid var(--line);border-radius:16px;background:var(--tint)}.r-approve{margin:14px 0 0;padding:12px 14px;border-radius:12px;background:var(--panel);font-weight:500}`;
+.r-after{margin:14px 0;padding:14px 16px;border:1px solid var(--line);border-radius:16px;background:var(--tint)}.r-approve{margin:14px 0 0;padding:12px 14px;border-radius:12px;background:var(--panel);font-weight:500}.rv-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:-4px 0 12px}.rv-ids{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:16px;letter-spacing:.06em;color:var(--mute)}.rv-more{position:relative;margin-left:auto}.rv-more summary{list-style:none;display:flex;align-items:center;justify-content:center;width:44px;height:44px;border:1px solid var(--line);border-radius:12px;cursor:pointer;font-size:22px}.rv-more summary::-webkit-details-marker{display:none}.rv-more[open] a{display:block;min-height:44px;padding:10px 12px;color:var(--link)}.rv-more[open]{background:var(--card)}`;
 // WO-G: green only for the employer's own confirmation; every other stage keeps its own colour (spec D.4 rule 7).
 const STAGE_CLASS: Partial<Record<Stage, string>> = { employer_confirmed: "confirmed", failed: "failed", not_sent: "failed", needs_you: "needs-you", uncertain: "uncertain" };
 // The proof panel (spec C.21 section 5, C.23 item 10): what is and is not proven, never a made-up receipt.
@@ -342,7 +350,7 @@ export function actionsOf(rec: FileRecord): ActionView[] {
       : c ? { id: "pass", label: "Pass", state: "unavailable", note: "Already decided." } : { id: "pass", label: "Pass", state: "available", note: "Skips this introduction. Nothing is sent." };
     return [pass, intro];
   }
-  if (rec.kind === "application_proof") {
+  if (rec.kind === "application_proof" || rec.kind === "application_review") {
     const flags = Array.isArray(st.flags) ? st.flags.length : 0;
     return [{ id: "status", label: "View status", state: "available", note: `Shows what is recorded as of ${when(rec.data?.as_of)}.` },
       { id: "flag", label: "Flag a problem", state: "available", note: flags ? `${flags} flagged.` : "Saves your note on this file." }];
@@ -373,7 +381,7 @@ export async function actOn(rec: FileRecord, action: string, form: URLSearchPara
     const reason = String(r.reason ?? "it could not be sent").replace(/[.\s]+$/, "").slice(0, 140);
     return { ok: true, status: 200, note: `Approved. Not sent: ${reason}.`, patch: { choice: "approved", at: now, tag, reason } };
   }
-  if (action === "status") return { ok: true, status: 200, note: `Status as recorded on ${when(rec.data?.as_of)}: ${cap1(String(rec.data?.status))}.` };
+  if (action === "status") return { ok: true, status: 200, note: `Status as recorded on ${when(rec.data?.as_of)}: ${rec.data?.stage && STAGE_LABEL[rec.data.stage as Stage] ? STAGE_LABEL[rec.data.stage as Stage] : cap1(String(rec.data?.status))}.` };
   const note = clean(form.get("note") ?? "").slice(0, 500);
   if (!note) return { ok: false, status: 200, note: "Write what looks wrong in the note box, then tap Flag a problem." };
   const flags = [...(Array.isArray(rec.state?.flags) ? rec.state.flags : []), { at: now, note }].slice(-10);
@@ -416,6 +424,11 @@ export function bodyHtml(rec: FileRecord, token: string, o: { tz?: string | null
         + sec("The exact message", `<p class="meta">${esc([m.channel === "email" ? "By email" : "By text", m.to ? `to ${m.to}` : ""].filter(Boolean).join(" "))}</p>${m.subject ? `<p class="meta">Subject: ${esc(m.subject)}</p>` : ""}<blockquote class="msg">${esc(m.body)}</blockquote><p class="meta">Approval code ${esc(rec.tag ?? "")}</p>`);
       break;
     }
+    case "application_review":
+      // The p-67 header's mono ids and its overflow menu (the plain-text version); the shell above carries the title.
+      main = `<style>${PROOF_CSS}</style><div class="rv-top">${d.ids ? `<p class="rv-ids">${esc(d.ids)}</p>` : ""}<details class="rv-more"><summary aria-label="More">\u22EE</summary><a href="?format=text">Plain text version</a></details></div>`
+        + reviewPageHtml(d, o.tz) + sec("Flagged by you", `<ul class="why">${(Array.isArray(rec.state?.flags) ? rec.state.flags : []).map((f: any) => `<li>${esc(when(f.at))}: ${esc(f.note)}</li>`).join("")}</ul>`.replace(/^<ul class="why"><\/ul>$/, ""));
+      break;
     case "application_proof": {
       if (d.review) {
         main = `<style>${PROOF_CSS}</style>` + reviewPageHtml(d, o.tz) + sec("Flagged by you", `<ul class="why">${(Array.isArray(rec.state?.flags) ? rec.state.flags : []).map((f: any) => `<li>${esc(when(f.at))}: ${esc(f.note)}</li>`).join("")}</ul>`.replace(/^<ul class="why"><\/ul>$/, ""));
@@ -522,6 +535,10 @@ export function textOf(rec: FileRecord, o: { now: number; url?: string }): strin
       h("The exact message"); L.push(`${m.channel === "email" ? "By email" : "By text"}${m.to ? ` to ${m.to}` : ""}`); if (m.subject) L.push(`Subject: ${m.subject}`); L.push("", m.body, "", `Approval code: ${rec.tag}`, "");
       break;
     }
+    case "application_review":
+      if (d.ids) L.push(d.ids, "");
+      L.push(...reviewLines(d), "");
+      break;
     case "application_proof": {
       const c = d.confirmation ?? {};
       if (d.review) { L.push(...reviewLines(d), ""); break; }

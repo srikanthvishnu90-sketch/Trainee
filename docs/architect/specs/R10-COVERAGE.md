@@ -6,11 +6,13 @@ the post-reset findings (F). `scripts/r10-coverage-check.ts` fails if a spec id 
 prints PASS / FAIL / BLOCKED / PENDING_LIVE per row.
 
 Tests column: `file::name prefix` is an R10 check (tests/architect/pending/r10-app-layer/ or, once its order lands, tests/architect/; the row
-passes when every check it names passed); `gate:path` is an existing gate test (passes when the gate passes); `live:<turn>` is a step of
+passes when every check it names passed); `gate:path` is an existing gate test (passes when the gate passes); `run:path` is a test the loop runs itself (passes when it exits 0;
+a tests/db SQL test runs through tests/db/run.sh); `docx:render` is the loop's LibreOffice render of the delivered DOCX; `live:<turn>` is a step of
 `scripts/launch/r10-live-replay.ts` (`all` = every live check; `smoke` = `--smoke`; `entry` = the bare /file and /connect pages). Status:
 `covered` (a test or check names it), `live-only`, `BLOCKED` (named reason; not a FAIL), `GAP` (nothing checks it: a FAIL in the loop),
-`review` (R-3: PENDING_REVIEW until a review verdict exists) or `integrated` (R-6: the full run on the trunk tip). Rows R-1..R-6 come from the
-owner's readiness review ("Trainee readiness findings", 2026-11-08 8:55 pm CST), relayed by the architect.
+`review` (R-3: PENDING_REVIEW until a review verdict exists) or `integrated` (R-6: the full run on the trunk tip). Rows R-1..R-8 come from the
+owner's readiness review ("Trainee readiness findings", 2026-11-08 8:55 pm CST), relayed by the architect (R-7 and R-8 on 2026-11-09).
+A row with a live step is PENDING_LIVE until the loop runs with --live.
 
 | id | criterion | order | tests | live | status | note |
 |---|---|---|---|---|---|---|
@@ -149,7 +151,7 @@ owner's readiness review ("Trainee readiness findings", 2026-11-08 8:55 pm CST),
 | D.4-12 | Charts only when sourced numbers support one; no decorative imagery. | WO-E |  |  | GAP | no test that a File shows no chart without sourced numbers |
 | F.1 | Post-reset search: checked open postings with links, or one evidenced blocker | WO-C | r10-post-reset-replay.test.ts::F1a; r10-post-reset-replay.test.ts::F1b | live:F1a; live:F1b | covered |  |
 | F.2 | Post-reset research and its correction: research or the named blocker; never applications or outreach | WO-H | r10-post-reset-replay.test.ts::F2a; r10-post-reset-replay.test.ts::F2b; r10-fix-14-research.test.ts::F2a with sources reachable; r10-fix-14-research.test.ts::F2b (the correction) | live:F2a; live:F2b | covered |  |
-| F.3 | Stop: claims only what the control state shows; no unscheduled reconciliation; no automatic unpause | WO-K | r10-post-reset-replay.test.ts::F3 | live:F3 | covered | reads career_user_quiet until WO-K documents the control contract |
+| F.3 | Stop: claims only what the control state shows; no unscheduled reconciliation; no automatic unpause | WO-K | r10-post-reset-replay.test.ts::F3; run:tests/architect/stop-pause-truth-20261109.test.ts; run:tests/db/career_send_queue.test.sql | live:F3 | covered | reads career_user_quiet until WO-K documents the control contract; the loop runs the stop/pause truth test (#650) and the send-path DB test itself, not only through the gate; the truth test FAILs as absent until #650 merges |
 | R-1 | Permission copy is consistent: the intro never contradicts a provider row, and the scopes shown equal the scopes requested (owner readiness review 2026-11-08) | WO-F | r10-fix-11-connections.test.ts::before connecting |  | GAP | r10-fix-11 checks purpose, plain-words permissions and the account; no test yet compares the rendered scopes with the scopes the consent URL requests, or the intro with each provider row |
 | R-2.1 | Third-party sign-in: the wall is detected (apply-vm.cjs and the cloud worker stop at needs_user / login_required) | WO-G | gate:tests/career-apply-vm.test.cjs; gate:tests/architect/flow-scenarios-apply.test.ts |  | covered |  |
 | R-2.2 | Third-party sign-in: the person picks the right account (the account the application is for) | WO-G |  |  | GAP | no code or test names which account to sign in with; the hand-back says only "finish this one yourself at this link"; assigned to WO-G after the resumption analysis (architect 2026-11-09) |
@@ -161,5 +163,7 @@ owner's readiness review ("Trainee readiness findings", 2026-11-08 8:55 pm CST),
 | R-4 | Delivered artifacts on the real channel: the Telegram document arrives, the signed File link opens for its owner, the DOCX layout renders | WO-B | docx:render | live:smoke; live:T1; live:telegram | covered | architect 2026-11-09: the DOCX is rendered with LibreOffice headless in the loop (one page, the person's name), BLOCKED (the owner opens it) where soffice is missing; the File link is opened signed in and the PDF's bytes are checked against the stored document; the Telegram document is observed from Trainee's side (the sendDocument response for the synthetic identity: ok, document.file_id, file_size equal to the PDF's length, then getFile and a sha256 match), but the delivery record keeps only message_id today (telegram.ts sendDocument), so live:telegram FAILs until WO-B stores that response, and Telegram delivers nothing to a chat that never started the bot, so the step also needs a test chat that has (not a synthetic id) |
 | R-5 | Every File family shown as actual output at 390 and 1280 px, with its loading, empty and error states | WO-E | r10-fix-09-file-families.test.ts::F- |  | GAP | r10-fix-09 renders each family at 390 px light and dark; 1280 px and the loading, empty and error states are not rendered yet; the test builds to WO-E's page(ctx) with ctx.state loading, empty, error or ready and a width (architect 2026-11-09), and the row stays GAP until WO-E confirms that interface |
 | R-6 | Integrated revision: the loop's full run on trunk after every R10 PR merges is the pre-release gate | WO-I |  |  | integrated | PASS only when scripts/r10-loop.ts runs on the trunk tip, with the gate, and every other row is PASS or BLOCKED |
+| R-7 | Production check (readiness PDF): the deployed sha equals the release ledger's (trainee-go-live.sh --verify), and the platform versions are recorded | WO-I |  | live:verify | live-only | the live replay checks out inputs.sha and FAILs on any mismatch the verify step reports; it records the deployed function versions |
+| R-8 | Browser benchmark (readiness PDF) | owner |  |  | BLOCKED | no equal-access comparison defined |
 
-Rows: 147. Covered: 126. Live-only: 1. BLOCKED: 4. GAP: 14 (E-34, E-39, E-40, E-59, E-87, D.1, D.4-1, D.4-2, D.4-5, D.4-12, R-1, R-2.2, R-2.6, R-5). Review: 1 (R-3). Integrated: 1 (R-6).
+Rows: 149. Covered: 126. Live-only: 2. BLOCKED: 5. GAP: 14 (E-34, E-39, E-40, E-59, E-87, D.1, D.4-1, D.4-2, D.4-5, D.4-12, R-1, R-2.2, R-2.6, R-5). Review: 1 (R-3). Integrated: 1 (R-6).

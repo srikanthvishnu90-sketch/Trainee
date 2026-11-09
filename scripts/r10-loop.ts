@@ -11,8 +11,8 @@
 // Then one line per row: PASS, FAIL (with why), BLOCKED (the row's named reason: not a failure), PENDING_LIVE (a live-only row,
 // or a row's live step, without --live) or PENDING_REVIEW (R-3, until replies-verdict.md says PASS or FAIL). A GAP row is a FAIL:
 // nothing checks it. R-6 (the integrated pre-release run) is PASS only on the trunk tip, with the gate, when every other row is
-// PASS or BLOCKED. Every run writes replies.md (every reply it produced) for the R-3 review. Exit 0 only when every row is PASS
-// or BLOCKED.
+// PASS or BLOCKED. Every run writes replies.md (every reply it produced) for the R-3 review. A row with a live step is
+// PENDING_LIVE without --live. Exit 0 only when the suite exited 0 and every row is PASS or BLOCKED.
 // The loop: run it, fix each FAIL, run it again.
 //   deno run -A scripts/r10-loop.ts [--no-gate] [--live --sha <sha>] [--only <id,id>]
 const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
@@ -44,6 +44,19 @@ for (const dir of ["tests/architect/pending/r10-app-layer", "tests/architect/r10
   try { for await (const e of Deno.readDir(`${ROOT}/${dir}`)) if (e.isFile && /^r10-.*\.test\.ts$/.test(e.name)) files.push(`${dir}/${e.name}`); } catch { /* not there */ }
 }
 const evidenceDir = `${OUT}/evidence`;
+// Rows can cite a non-R10 test with `run:<path>` (CM-2: F.3 cites the stop/pause truth test and the send-path DB test). The loop
+// runs each such file itself, not only through the gate: a .ts by deno test, a .cjs by node --test, a tests/db/*.sql through
+// tests/db/run.sh (which runs every SQL test; once per loop). A cited file that is not on this commit is a FAIL.
+const matrixText = await Deno.readTextFile(`${ROOT}/docs/architect/specs/R10-COVERAGE.md`);
+const runRefs = [...new Set([...matrixText.matchAll(/\brun:([\w./-]+)/g)].map((m) => m[1]))];
+const runResult = new Map<string, number | "absent">();
+let dbRun: number | undefined;
+for (const f of runRefs) {
+  if (!(await Deno.stat(`${ROOT}/${f}`).then(() => true, () => false))) { runResult.set(f, "absent"); continue; }
+  if (/^tests\/db\/.+\.sql$/.test(f)) { dbRun ??= await sh("db tests", ["bash", "tests/db/run.sh"], { PGBIN: (await import("../tests/flow/pg.ts")).pgBinDir() ?? "" }); runResult.set(f, dbRun); }
+  else if (f.endsWith(".cjs")) runResult.set(f, await sh(`run ${f}`, ["node", "--test", f]));
+  else runResult.set(f, await sh(`run ${f}`, [Deno.execPath(), "test", "-A", "--no-check", "--import-map=tests/flow/supabase-npm.json", f]));
+}
 const suite = files.length ? await sh("R10 acceptance suite", [Deno.execPath(), "test", "-A", "--no-check", "--import-map=tests/flow/supabase-npm.json", ...files.sort()], { R10_EVIDENCE_DIR: evidenceDir }) : -1;
 interface Rec { item: number; test: string; file: string; outcome: string; why?: string; reply?: string; scenario?: string }
 const recs: Rec[] = await Deno.readTextFile(`${evidenceDir}/evidence.jsonl`).then((t) => t.split("\n").filter(Boolean).map((l) => JSON.parse(l)), () => []);
@@ -102,10 +115,11 @@ const head = await git("rev-parse", "HEAD"), trunkTip = await git("rev-parse", "
 const onTrunk = !!head && head === trunkTip;
 
 // Rows.
-const matrix = await Deno.readTextFile(`${ROOT}/docs/architect/specs/R10-COVERAGE.md`);
+const matrix = matrixText;
 const rows = matrix.split("\n").filter((l) => /^\| [A-Z]/.test(l) && !/^\| id \|/.test(l)).map((l) => l.slice(1, -1).split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|")));
 type Verdict = { v: "PASS" | "FAIL" | "NOT_RUN" | "PENDING_LIVE"; why: string };
 function testRef(ref: string): Verdict {
+  if (ref.startsWith("run:")) { const r = runResult.get(ref.slice(4)); return r === 0 ? { v: "PASS", why: "" } : { v: "FAIL", why: r === "absent" ? `${ref}: not on this commit` : `${ref}: exit ${r}` }; }
   if (ref === "docx:render") return docxRender.v === "PASS" ? { v: "PASS", why: "" } : { v: docxRender.v === "BLOCKED" ? "NOT_RUN" : "FAIL", why: `docx:render ${docxRender.v}: ${docxRender.why}` };
   if (ref.startsWith("gate:")) return gate === "PASS" ? { v: "PASS", why: "" } : { v: gate === "FAIL" ? "FAIL" : "NOT_RUN", why: `gate ${gate} (${ref.slice(5)})` };
   const [file, prefix = ""] = ref.split("::");
@@ -140,7 +154,8 @@ for (const [id, crit, , tests, liveCol, status, note] of rows) {
     if (status === "live-only" && !LIVE) { verdict = "PENDING_LIVE"; why = liveCol; }
     else if (first("FAIL")) { verdict = "FAIL"; why = first("FAIL")!.why; }
     else if (first("NOT_RUN")) { verdict = "FAIL"; why = first("NOT_RUN")!.why; }
-    else if (first("PENDING_LIVE")) { verdict = tests ? "PASS" : "PENDING_LIVE"; why = tests ? `in-process PASS; ${first("PENDING_LIVE")!.why}` : first("PENDING_LIVE")!.why; }
+    // CM-3: a row with a live step is never PASS without --live, however its in-process checks went.
+    else if (first("PENDING_LIVE")) { verdict = "PENDING_LIVE"; why = tests ? `in-process PASS; ${first("PENDING_LIVE")!.why}` : first("PENDING_LIVE")!.why; }
     else { verdict = "PASS"; }
   }
   out.push({ id, verdict, why });
@@ -160,4 +175,5 @@ console.log(`\nR10 loop ${RUN}: ${out.length} rows: ${count("PASS")} PASS, ${cou
 console.log(`replies for the R-3 review: ${OUT}/replies.md`);
 console.log(`coverage check exit ${coverage}; gate ${gate}; suite exit ${suite} (${files.length} files); live ${LIVE ? live?.outcome ?? "no report" : "not run"}; evidence ${OUT}`);
 await Deno.writeTextFile(`${OUT}/loop.json`, JSON.stringify({ run: RUN, sha: SHA || null, gate, coverage, suite, live: live?.outcome ?? null, rows: out }, null, 2));
-Deno.exit(coverage === 0 && out.every((o) => o.verdict === "PASS" || o.verdict === "BLOCKED") ? 0 : 1);
+if (suite !== 0) console.log(`FAIL the R10 suite exited ${suite}: the loop fails whatever the rows say`);
+Deno.exit(coverage === 0 && suite === 0 && out.every((o) => o.verdict === "PASS" || o.verdict === "BLOCKED") ? 0 : 1);

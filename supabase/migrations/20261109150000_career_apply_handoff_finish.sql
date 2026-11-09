@@ -97,3 +97,4 @@ begin
   where id = j.id;
  return jsonb_build_object('ok', true);
 end $$;
+revoke all on function public.career_apply_vm_handoff_requeue(uuid, text) from public, anon, authenticated;

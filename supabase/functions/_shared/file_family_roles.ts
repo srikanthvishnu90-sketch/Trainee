@@ -110,7 +110,8 @@ export function rolesShortlistFile(f0: ShortlistInput): FamilyFile {
   for (const r of f.rows) groups.set(r.job.company, [...(groups.get(r.job.company) ?? []), r]);
   const blocks: Block[] = [];
   for (const [co, rs] of groups) {
-    const open = rs.filter((r) => specOf(r).key !== "closed").length;
+    // "Open" is a role you could still act on: closed, blocked, excluded and submission-uncertain roles are never counted as open.
+    const open = rs.filter((r) => !["closed", "blocked", "excluded", "uncertain"].includes(specOf(r).key)).length;
     blocks.push({ b: "group", label: `${co} - ${open} open ${open === 1 ? "role" : "roles"}` }, { b: "fn", html: (c) => rs.map((r) => roleCard(r, r.rid ?? ids.get(r.ref) ?? "", f, c)).join("") });
   }
   if (f.targets?.length) blocks.push({ b: "group", label: "Targets - companies, no verified opening" },

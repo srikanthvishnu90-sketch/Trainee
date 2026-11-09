@@ -144,6 +144,7 @@ export interface MessageReview {
   updatedAt?: string | null; optedOut?: boolean; // E-74: an opt-out stops this and every covered follow-up
   approveOff?: string | null; // the record's own reason the approval cannot be given (already decided, approved but not sent)
   decline?: Act | null; stopFollowUps?: Act | null; // the person's own controls: decline this ask; stop every follow-up to this person
+  code?: string | null; // the approval code that binds an approval to these exact words (the record's tag)
 }
 export function messageReviewFile(d: MessageReview): FamilyFile {
   const ok = d.recipient.resolved && (d.channel === "copy" || !!d.to);
@@ -156,7 +157,8 @@ export function messageReviewFile(d: MessageReview): FamilyFile {
       card(d.channel === "email" ? "Exact words - sent as you, from your account" : "Exact words - you copy and send them", [{ p: "quote", text: `"${d.words}"` },
         { p: "kv", rows: [{ k: "Channel", v: d.channel === "email" ? "Email from your connected account" : "You send it yourself (copy the text)", src: { label: "The only channels this File can use" } },
           { k: "To", v: d.channel === "email" ? d.to : "Whoever you choose", src: d.to ? { label: "From your contacts" } : null, missing: "Not resolved" },
-          { k: "Attachments", v: d.attachments ?? "None", src: { label: "Exactly what is listed" } }, { k: "Follow-up", v: d.optedOut ? "None - they opted out" : d.followUp, src: { label: "Your setting" } }, { k: "If no reply", v: "The ask ends. Silence is never read as a yes.", src: { label: "Always" } }] }]),
+          { k: "Attachments", v: d.attachments ?? "None", src: { label: "Exactly what is listed" } }, { k: "Follow-up", v: d.optedOut ? "None - they opted out" : d.followUp, src: { label: "Your setting" } }, { k: "If no reply", v: "The ask ends. Silence is never read as a yes.", src: { label: "Always" } },
+          ...(d.code ? [{ k: "Approval code", v: d.code, src: { label: "binds your approval to these exact words" } }] : [])] }]),
       note("info", "Scope.", `Approval sends this one message to this one person. It does not authorize your network, repeated nudges, or a claim that ${d.recipient.resolved ? d.recipient.name : "anyone"} endorses you.`),
       note("caution", "Relationship strength.", `${d.recipient.relation ? `Labeled "${d.recipient.relation}" as you described it, not inflated.` : "No relationship is claimed."} Closeness is never inferred from a platform connection.`),
     ],

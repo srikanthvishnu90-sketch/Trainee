@@ -70,3 +70,17 @@ Deno.test("serve families: every family names its data source today, or why it h
   for (const [id, s] of Object.entries(FAMILY_SOURCES)) assert.ok(s.source || (s.why && s.why.length > 20), id);
   assert.deepEqual(Object.entries(FAMILY_SOURCES).filter(([, s]) => s.source).map(([id]) => id), ["F-05", "F-09", "F-12"]);
 });
+
+Deno.test("serve families: nothing the kind page showed is lost - the record's status, confirmation, not-done items, flags and approval code", async () => {
+  const w = await world("on");
+  const v = validateKind("application_proof", { ...PROOF, status: "confirmed", confirmation: { id: "GH-4471" }, problems: [{ item: "Portfolio link", outcome: "skipped", reason: "The form had no field for it." }] }, { trusted: true, now: NOW }) as { ok: true; data: unknown };
+  await w.store.put({ id: "1b2c3d4e5f", userId: U, kind: "application_proof", data: v.data, state: { flags: [{ at: NOW, note: "They never got my resume." }] }, tag: null, created_at: NOW, expires_at: NOW + 3600_000, revoked_at: null } as FileRecord);
+  const p = await (await w.open("1b2c3d4e5f")).text();
+  for (const s of ["Confirmed by the employer.", "GH-4471", "Portfolio link", "Skipped:", "They never got my resume."]) assert.ok(p.includes(s), s);
+  assert.match(p, /disabled data-effect="submit">Approve submission<\/button><span class="ff-off">Already approved/);
+  const i = await (await w.open(w.intro)).text(), rec = (await w.svc.get(U, w.intro)) as { state: "ok"; rec: FileRecord };
+  assert.match(i, new RegExp(`Approval code</dt><dd><span class="ff-v" data-claim="1" data-src="personal">${rec.rec.tag}`));
+  // An introduction with no stored address keeps its kind page: F-12 never approves an email it cannot address.
+  const noTo = await w.svc.create(U, "introduction", { ...structuredClone(INTRO), message: { ...INTRO.message, to: undefined } }) as { ok: true; id: string };
+  assert.doesNotMatch(await (await w.open(noTo.id)).text(), /data-family=/);
+});

@@ -781,9 +781,10 @@ async function writeBatch(o: NetworkingDeps, pick: ContactRow[], held: { name: s
   const footer = footerOf(signature), ok: Omit<OutreachDraft, "id" | "batch_id" | "thread_id">[] = [];
   const failed: { name: string; why: string }[] = [], limited: string[] = [];
   for (const [k, d] of results.entries()) {
-    // PEOPLE DRAFTS R3: a draft the day's AI limit stopped (career_spend_cap.ts: no request was made) is said as that, once
-    // for all of them; before, each read "the writing model didn't answer", as if the model had failed.
-    if (!d.ok && d.why === "model" && /daily_limit|global_daily_limit|budget_paused|budget_not_open|budget_ended/.test(d.detail.join(" "))) { limited.push(pick[k].name); continue; }
+    // PEOPLE DRAFTS R3: a draft the GLOBAL AI budget stopped (model_budget.ts: no request was made) is said as that, once
+    // for all of them; before, each read "the writing model didn't answer", as if the model had failed. There is no
+    // per-person daily limit (D-046).
+    if (!d.ok && d.why === "model" && /global_daily_limit|budget_paused|budget_not_open|budget_ended/.test(d.detail.join(" "))) { limited.push(pick[k].name); continue; }
     if (!d.ok) { failed.push({ name: pick[k].name, why: d.why === "unverified" ? `I couldn't write it without saying something not on record (${d.detail.slice(0, 2).join("; ")})` : d.why === "model" ? "the writing model didn't answer" : d.detail.join("; ") }); continue; }
     const draft = { n: ok.length + 1, recipient: recipientOf(pick[k]), subject: d.subject, body: d.body, footer, shared: d.shared, status: "shown" as const, hash: "",
       approved_hash: null, approved_at: null, sent_at: null, gmail_id: null, gmail_thread: null, result: null, created_at: new Date(o.now).toISOString() };
@@ -791,7 +792,7 @@ async function writeBatch(o: NetworkingDeps, pick: ContactRow[], held: { name: s
     ok.push(draft);
   }
   const notDone = [...held, ...failed];
-  const limitLine = limited.length ? `Not drafted yet: ${limited.length} (${limited.slice(0, LIST_MAX).join(", ")}${limited.length > LIST_MAX ? ` and ${limited.length - LIST_MAX} more` : ""}): you've reached today's limit on AI-written drafts, which resets at midnight UTC; ask again then and I'll write the rest.` : "";
+  const limitLine = limited.length ? `Not drafted yet: ${limited.length} (${limited.slice(0, LIST_MAX).join(", ")}${limited.length > LIST_MAX ? ` and ${limited.length - LIST_MAX} more` : ""}): Trainee's AI budget stopped them before any request was made; ask again once it's back and I'll write the rest.` : "";
   const notLine = [notDone.length ? `Not drafted: ${notDone.map((h) => `${h.name} (${h.why})`).join("; ")}.` : "", limitLine].filter(Boolean).join(" ");
   if (!ok.length) return { reply: `Nothing was drafted (0/${considered}). ${notLine}`, intent: DRAFT_INTENT, status: "not_drafted" };
   const saved = await o.store.saveBatch(o.userId, o.threadId, ok, o.now);

@@ -111,7 +111,7 @@ Deno.test("config: off unless switched on AND the gateway has a key AND web sear
   assert(/isn't available right now/.test(notWiredReply(nokey)));
   assert(!/NOT_WIRED|ANTHROPIC|secret|key/i.test(notWiredReply(nokey) + notWiredReply(off)), "plain words, no codes or secret names");
   const dark = providerConfig(env({ CAREER_PEOPLE_SEARCH: "on", ANTHROPIC_API_KEY: "x" }));
-  eq([dark.provider, dark.apiKey, dark.model], [null, null, "claude-haiku-5-5"], "switched on and keyed, still dark: Claude web search is not available yet");
+  eq([dark.provider, dark.apiKey, dark.model], [null, null, "claude-sonnet-5-5"], "switched on and keyed, still dark: Claude web search is not available yet");
   const { f, calls } = fakeNet(() => null);
   eq(makeProvider(nokey, f), null);
   eq(calls.length, 0);

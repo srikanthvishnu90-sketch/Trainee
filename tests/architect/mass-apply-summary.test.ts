@@ -24,7 +24,7 @@ Deno.test("one application: no counts line, as before", () => {
 
 Deno.test("every row is counted once: failed and any other state counted, the counts add up to the total", () => {
   const rows = [row(1, "submitted_unconfirmed"), row(2, "failed", "Invalid phone"), row(3, "unknown_outcome"), row(4, "confirmed"), row(5, "some_new_state")];
-  eq(countsLine(rows as any), "5 applications: 1 confirmed by the employer, 1 submitted, 1 may have gone (unknown), 1 turned down by the employer's form, 1 other.");
+  eq(countsLine(rows as any), "5 applications: 1 page reference only, 1 submitted, 1 may have gone (unknown), 1 turned down by the employer's form, 1 other.");
 });
 
 Deno.test("a closed posting is said in words, never its code", () => {

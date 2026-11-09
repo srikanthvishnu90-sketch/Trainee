@@ -81,11 +81,11 @@ Deno.test({ name: "results (handler): iMessage 'frontend internships that pay $3
   const lines = t.reply.split("\n");
   eq(lines.length, 5, t.reply);
   eq(lines[0], "I found 2 frontend internships that list pay of $30/hr or more, plus 1 that doesn't list pay, so I couldn't check it. Here they are by fit, with Apply on each.");
-  assert(lines.slice(1, 4).every((l, i) => new RegExp(`^${i + 1}\\. TEST Pay \\w+ — [^()]+, [^()]+ \\((?:open-checked|not re-checked)\\)$`).test(l)), t.reply);
+  assert(lines.slice(1, 4).every((l, i) => new RegExp(`^${i + 1}\\. TEST Pay \\w+ — [^()]+, [^()]+ \\((?:open-checked|not re-checked)\\) https://\\S+$`).test(l)), t.reply);
   eq(t.body.parts, [lines.slice(0, 4).join("\n"), lines[4]], "sent as two messages: the sentences with the numbered roles, then the link alone");
   assert(/^https:\/\/trainee\.example\/file\?t=v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/.test(lines[4]), `the link alone on its own line: ${lines[4]}`);
   assert(!MARKDOWN.test(t.reply), "no markdown on iMessage");
-  assert(!/Pay \$|listed on the posting|https?:/.test(lines.slice(1, 4).join("\n")), "the numbered lines are short: no pay, no posting text, no links");
+  assert(!/Pay \$|listed on the posting/.test(lines.slice(1, 4).join("\n")), "the numbered lines are short: no pay, no posting text (each carries its posting link, E.2 #18)");
   // The page: the link opens a sign-in (one per link); a session for this account then reads the list from the database.
   const link = new URL(lines[4]).searchParams.get("t")!;
   const claims = await verifyFileToken(link, SECRET, Date.now());
@@ -124,10 +124,11 @@ Deno.test({ name: "results (handler): the same ask on Telegram or the web, and a
     eq(t.status, 200);
     const parts = t.body.parts as string[];
     assert(Array.isArray(parts) && parts.length === 2, `${channel ?? "web"}: ${t.reply}`);
-    assert(/^https:\/\/trainee\.example\/file\?t=v1\./.test(parts[1]) && !/https?:/.test(parts[0]), `${channel ?? "web"}: the link is its own message`);
+    // Architect ruling (R10 E.2 #18): each numbered role carries its posting link; the File link is its own message.
+    assert(/^https:\/\/trainee\.example\/file\?t=v1\./.test(parts[1]) && !/trainee\.example\/file/.test(parts[0]), `${channel ?? "web"}: the File link is its own message`);
     // Architect ruling (R10 fix 8): the roles by number, short (no pay, no posting text), no markdown.
     const listed = parts[0].split("\n").slice(1);
-    assert(listed.length >= 1 && listed.every((l, i) => l.startsWith(`${i + 1}. `) && /\((?:open-checked|not re-checked)\)$/.test(l) && !/Pay \$|https?:/.test(l)) && !MARKDOWN.test(t.reply), `${channel ?? "web"}: numbered short roles, no markdown: ${t.reply}`);
+    assert(listed.length >= 1 && listed.every((l, i) => l.startsWith(`${i + 1}. `) && /\((?:open-checked|not re-checked)\) https:\/\/\S+$/.test(l) && !/Pay \$/.test(l)) && !MARKDOWN.test(t.reply), `${channel ?? "web"}: numbered short roles with their links, no markdown: ${t.reply}`);
   }
   });
 } });

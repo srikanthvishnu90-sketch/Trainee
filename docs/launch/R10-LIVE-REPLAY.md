@@ -18,8 +18,9 @@ checks out that commit, and the script runs its code. It runs `scripts/launch/r1
    Telegram signs it, so the whole channel layer runs (outbox, bubble splitting, the document send). These are the old
    machine-learning search, the five observed turns of spec A.2 (T1-T3, S1-S2), the five post-reset turns of spec F, then
    "pause everything" and "resume career work". Each reply is read back from `career_outbox` (`reply:tg:<update>`). The interim
-   ack a slow turn gets goes straight to Telegram and is not recorded anywhere, so it is computed with the deployed `ackFor`
-   and checked against the observed failures;
+   ack a slow turn gets is read from `career_outbox` (`interim:tg:<update>`, which WO-C #636 records). When there is no such row
+   (before that deploy, or for a fast turn that needed no ack), it is computed with the deployed `ackFor` and labelled computed.
+   Either way it is checked against the observed failures;
 3. downloads every delivered file (attachments by their owner-scoped ref, and every link in the reply), opens each one (page
    count, text, target), fetches each File page signed in as the test person and screenshots it at 390 px (deviceScaleFactor 2),
    and screenshots the bare `/file` and `/connect` pages on the deployed site;

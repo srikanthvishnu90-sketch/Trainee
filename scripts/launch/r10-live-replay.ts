@@ -198,12 +198,14 @@ async function main() {
     };
     const docsSeen: { turn: string; sent: number; failed: number }[] = [];
     let upd = 0;
+    const updates = new Map<string, number>(); // turn id -> its Telegram update id (the outbox keys)
     const tg = async (text: string, id: string) => {
       guard(id);
       const at = psql(db, "select now()::text"), u = Number(crypto.getRandomValues(new Uint32Array(1))[0]) * 64 + (++upd % 64);
       const r = await fetch(`${url}/functions/v1/trainee-telegram`, { method: "POST", signal: AbortSignal.timeout(170_000), headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": hook },
         body: JSON.stringify({ update_id: u, message: { message_id: upd, date: Math.floor(Date.now() / 1000), chat: { id: TG_ID, type: "private" }, from: { id: TG_ID, is_bot: false, first_name: "R10 replay" }, text } }) });
       const body = await r.json().catch(() => ({})) as Record<string, any>;
+      updates.set(id, u);
       const rows = JSON.parse(psql(db, `select coalesce(json_agg(text order by id), '[]') from public.career_outbox where user_id = ${lit(person)} and key like ${lit(`reply:tg:${u}%`)}`)) as string[];
       const reply = rows.join("\n\n");
       const links: string[] = [...new Set([...reply.matchAll(/https?:\/\/[^\s)<>"\]]+/g)].map((m) => m[0].replace(/[.,;:]+$/, "")))];
@@ -291,10 +293,13 @@ async function main() {
     const quality = (id: string, reply: string) => {
       note(8, id, "no internal process language", !/parse check|\brunner\b|switched on|checked against the record|live board|saved snapshot|Nothing was invented to fill the list/i.test(reply), reply.slice(0, 200));
       for (const r of OBSERVED_FAILURES[id] ?? []) note(15, id, `the observed failure is gone (${r.source.slice(0, 50)})`, !r.test(reply), reply.slice(0, 200));
-      // F.2: the interim line a slow turn gets is sent straight to Telegram and not recorded anywhere, so it is computed here by
-      // the deployed code's own ackFor (this checkout is the deployed sha), not observed.
-      const ack = ackFor(transcript.findLast((x) => x.turn === id)?.text ?? "");
-      note(15, id, "the interim ack (computed by the deployed ackFor; not recorded by the product) is not the observed failure", !(OBSERVED_FAILURES[id] ?? []).some((r) => r.test(ack)), ack);
+      // F.2: the interim line a slow turn gets. Observed from career_outbox (interim:tg:<update>, recorded once WO-C #636 is
+      // deployed); before that, or when the turn was fast enough to need none, computed by the deployed code's own ackFor
+      // (this checkout is the deployed sha) and labelled so.
+      const u = updates.get(id);
+      const seen = u === undefined ? "" : psql(db, `select coalesce((select text from public.career_outbox where user_id = ${lit(person)} and key like ${lit(`interim:tg:${u}%`)} order by id limit 1), '')`);
+      const ack = seen || ackFor(transcript.findLast((x) => x.turn === id)?.text ?? "");
+      note(15, id, `the interim ack (${seen ? "observed: career_outbox interim:tg" : "computed by the deployed ackFor: no interim:tg row for this turn"}) is not the observed failure`, !(OBSERVED_FAILURES[id] ?? []).some((r) => r.test(ack)), ack);
     };
     // F.3 / #650: what a stop or pause reply counts must equal the tables (career_stop_truth.ts reconcile's own grouping).
     const tally = (table: string, col: string, states: string[]) => Number(psql(db, `select count(*) from public.${table} where user_id = ${lit(person)} and ${col} in (${states.map(lit).join(", ")})`));

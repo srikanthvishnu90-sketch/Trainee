@@ -13,7 +13,7 @@
 // read. Taps at once are each judged against the list as it is when they run: an Apply that queued a row first changes the set
 // (the Apply to all then approves nothing and says so); an Apply to all that ran first leaves that Apply "Already in your
 // applications". Either way each posting is approved once.
-import { familyPage } from "../_shared/file_family.ts";
+import { FAMILY_CSS, familyBodyHtml } from "../_shared/file_family.ts";
 import { familyOfRecord, fileFamiliesOn, KIND_LINKS, kindRoutes } from "../_shared/file_family_serve.ts";
 import { applyAllYesEnabled } from "../_shared/apply_all_yes_flag.ts";
 import { FILE_TTL_MS, verifyFileToken, type FileClaims } from "../_shared/file_link.ts";
@@ -655,7 +655,12 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
     if (fam) {
       const tz = d.timeZone ? await d.timeZone(u).catch(() => null) : null;
       const file = note ? { ...fam.file, blocks: [{ b: "html" as const, html: `<p class="ff-note" role="status">${esc(note)}</p>` }, ...fam.file.blocks] } : fam.file;
-      return o.html(familyPage(file, { now: d.now(), tz, routes: kindRoutes(rec), links: KIND_LINKS }));
+      // Served exactly as a kind page is: the kind's script (its hash in script-src) and Telegram's WebApp script, so the family page
+      // works as a Mini App (initData sign-in) and under the same Content-Security-Policy (D-049).
+      const fcsp = (await headers("text/html", d.env))["content-security-policy"].replace("script-src ", `script-src ${await kindScriptHash} `);
+      const title = `${String(rec.data?.title ?? KIND_LABEL[rec.kind])} - Trainee`; // the File's own title, as its kind page names it
+      return o.html(layout(title, familyBodyHtml(file, { now: d.now(), tz, routes: kindRoutes(rec), links: KIND_LINKS }), { script: KIND_SCRIPT, tg: true, css: FAMILY_CSS,
+        og: { title: `${KIND_LABEL[rec.kind]} from Trainee`, description: "Open in Trainee.", image: ogImageOf(rec.kind, d.env) } }), 200, { "content-security-policy": fcsp });
     }
   }
   // The shared File shell (file_design.ts): "Made for <first name> · <date>" above one card; the title, then when its facts were read

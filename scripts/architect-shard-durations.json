@@ -303,6 +303,8 @@
     "tests/architect/reqs-doc1-activity.test.ts": 9,
     "tests/architect/reqs-doc1-redo.test.ts": 12,
     "tests/architect/reqs-doc2-followthrough.test.ts": 9.1,
+    "tests/architect/research-free-sources.test.ts": 0.1,
+    "tests/architect/research-hardening-628.test.ts": 3.2,
     "tests/architect/research-review-fixes-589.test.ts": 0.1,
     "tests/architect/results-batch-file.test.ts": 0.1,
     "tests/architect/results-page-design.test.ts": 0.1,

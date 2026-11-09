@@ -23,10 +23,11 @@ Deno.test("DNS rebinding: the resolved address is checked on every fetch and eve
   // The redirect target's name resolves to a private address: refused at that hop, never fetched.
   const res1 = async (h: string) => { asked.push(h); return h === "rebind.example" ? ["93.184.216.34", "10.0.0.5"] : ["203.0.113.10"]; };
   eq((await fetchSources(["https://start.example/"], { fetch: f, resolver: res1 })).rejected.map((r) => r.why), ["private_address"]);
-  eq(asked, ["start.example", "rebind.example"], "every hop resolves");
-  // The same name answers public, then private (a rebinding server): the second fetch of it is refused.
+  // Review of #628: every hop resolves before its fetch and again right after it.
+  eq(asked, ["start.example", "start.example", "rebind.example"], "every hop resolves, before and after its fetch");
+  // The same name answers public for one read (its two lookups), then private (a rebinding server): the second read is refused.
   let n = 0;
-  const flip = async () => (n++ === 0 ? ["203.0.113.10"] : ["127.0.0.1"]);
+  const flip = async () => (n++ < 2 ? ["203.0.113.10"] : ["127.0.0.1"]);
   eq((await fetchSources(["https://flip.example/a"], { fetch: f, resolver: flip })).verified.length, 1);
   eq((await fetchSources(["https://flip.example/b"], { fetch: f, resolver: flip })).rejected.map((r) => r.why), ["private_address"]);
   // Metadata, CGNAT, IPv6 loopback, link-local and v4-mapped answers all refuse; no answer at all is unreachable.

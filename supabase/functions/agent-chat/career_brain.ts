@@ -12,6 +12,7 @@ import { alertLine, type MemoryStore, type Pipeline, personBlock, type Standing 
 import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/index.ts";
 import { enforceResearchReply, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
 import { enforceMarketReply, type MarketDeps, type MarketResult } from "../_shared/agent/research/market.ts";
+import { type CompanyResult, enforceCompanyReply } from "../_shared/agent/research/company.ts";
 import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.ts";
 import { styleBlock } from "../_shared/agent/style.ts";
 import type { AlertStore } from "../_shared/career_alert_store.ts";
@@ -135,7 +136,7 @@ export async function agentTurn(o: {
   const know: Knowledge | null = o.knowledge
     ? knowledgeFor({ profile: o.stores.profile, standing: o.known?.standing, alertsLine: o.known ? alertLine(o.known.alerts) : null, situation: o.known?.situation ?? null, history: o.history, message: o.message })
     : null;
-  const trace: { r?: Extract<ResearchResult, { status: "ok" }>; m?: MarketResult } = {};
+  const trace: { r?: Extract<ResearchResult, { status: "ok" }>; m?: MarketResult | CompanyResult } = {};
   let result = await runAgentTurn({
     system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
@@ -156,7 +157,8 @@ export async function agentTurn(o: {
     result = { ...result, reply: fixed.reply };
   }
   // Market research: the sources or the file link come from code; the model's links and unsourced figures do not reach the person.
-  if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: enforceMarketReply(result.reply, trace.m) };
+  // R10 WO-H: company research has its own rules (one role question when the role is unknown; a focus keeps that area only).
+  if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult) };
   // Not an open career question: any link the model wrote that the turn never saw is removed (links not on the turn's allow-list).
   else if (!trace.r && result.reply && result.stopped === "final") result = { ...result, reply: stripUnseenLinks(result.reply, [...(result.linksSeen ?? []), ...(result.fileLinks ?? [])]) };
   return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;

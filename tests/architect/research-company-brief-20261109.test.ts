@@ -63,7 +63,8 @@ Deno.test("WO-H/2 the brief: facts, reading and unknowns separate; dated develop
   eq(r.unknowns, ["Which team the role sits on and how it is measured."], "an unknown with an invented figure is dropped");
   eq(r.role_asks.length, 2);
   ok(r.frame && r.frame.cite.length === 2, "the reading names its sources");
-  eq(r.dropped, 6, "revenue-for-volume, forecast-as-result, undated, Square, crypto initiative, invented 3%");
+  eq(r.dropped, 7, "revenue-for-volume, forecast-as-result, undated, Square, crypto initiative, invented 3%, the product Atlas");
+  eq(r.products.map((x: any) => x.name), ["Billing", "Radar"]);
   // E.47: paywalled and outdated sources are marked; an unopened source is named with why.
   const by = Object.fromEntries(r.sources.map((s: any) => [s.url, s]));
   eq([by[U.paywall].limit, by[U.update].by, by[U.rivals].by], ["paywalled", "company", "reported"]);
@@ -74,7 +75,9 @@ Deno.test("WO-H/2 the brief: facts, reading and unknowns separate; dated develop
   const { html, text } = render(w.published[0]);
   const heads = [...html.matchAll(/<h2>([^<]+)<\/h2>/g)].map((m) => m[1]);
   // The order of the owner's target pages (app-layer-visuals p-88/p-89) and spec C.22.
-  eq(heads, ["The short answer", "How the business works", "Evidence versus interpretation", "Recent developments", "Competitors and tradeoffs", "What the role page asks for", "Questions worth asking", "What this brief cannot tell you", "Sources"]);
+  eq(heads, ["The short answer", "How the business works", "Evidence versus interpretation", "Billing: the revenue lifecycle", "Radar: fraudulent payments and good payments", "Recent developments", "Competitors and tradeoffs", "What the role page asks for",
+    "How to use your project without overstating it", "Questions worth asking", "Five minutes before the interview", "What this brief cannot tell you", "Sources"]);
+  ok(/No confirmed facts about your projects yet/.test(html), "with no confirmed facts the section says what is missing");
   ok(/<dt>Reported fact<\/dt><dd>Feb 24, 2026: Businesses on Stripe generated \$1\.9 trillion/.test(html) && /<dt>Interpretation<\/dt>/.test(html) && /<dt>Unknown<\/dt>/.test(html) && /<dt>Source state<\/dt><dd>7 sources read Nov 9, 2026; 1 paywalled; 1 outdated; 1 could not be opened<\/dd>/.test(html), "evidence versus interpretation, as on p-89");
   ok(html.includes('<span class="src rb-measure">Volume, not revenue</span>') && html.includes("A forecast at the time, not a result"));
   ok(/Stripe signed more enterprise customers this year\.[^]*?<span class="src rb-limit">\[\d+\] paywalled<\/span>/.test(html), "the paywall mark sits beside the claim it affects");
@@ -124,4 +127,22 @@ Deno.test("WO-H/5 guards on their own: dates, metric meaning, source limits, rep
   eq(pageLimit("Posted October 2, 2026.", NOW), {});
   const r: any = { kind: "company", status: "ok", company: "Stripe", role: null, ask: "role", focus: "all", audience: null, frame: null, business: [{ text: "Stripe Billing handles subscriptions.", cite: [1] }], developments: [], competitors: [], role_asks: [], questions: [], unknowns: [], sources: [], unread: [] };
   eq(enforceCompanyReply("Stripe grew 80% last year. Billing handles subscriptions. Which role is it for? What date is the interview?", r), "Billing handles subscriptions. Which role is it for?");
+});
+
+Deno.test("WO-H/6 the person's side: confirmed facts tie to what the role page asks, never stretched; five minutes before the interview", async () => {
+  const { FACTS } = await import("../helpers/research_company_web.ts");
+  const w = world();
+  const r: any = await researchCompany({ company: "Stripe", role: "Data analyst internship", question: T1, facts: FACTS, plan: { queries: ["Stripe"], companies: ["Stripe"], sites: ["stripe.example"] }, deps: w.deps, now: NOW });
+  eq(r.project.ties.map((t: any) => t.fact), ["skill: SQL and dashboards in Tableau"], "only the fact that shares what the role page asks");
+  eq(r.project.missing, null);
+  eq(r.five.map((f: any) => f.label), ["The frame", "One number, correctly named", "Your example", "Your first question"]);
+  ok(/That is volume, not revenue\.$/.test(r.five[1].text) && r.five[2].text === "skill: SQL and dashboards in Tableau");
+  const { html, text } = render(w.published[0]);
+  ok(/<b>Your confirmed fact:<\/b> skill: SQL and dashboards in Tableau/.test(html) && /The role page asks:<\/b> The Data Analyst Intern will define metrics and build reports and dashboards/.test(html));
+  ok(html.includes("Say only what the fact says: no scale, result, tool or title it does not name."));
+  ok(text.includes("## Five minutes before the interview") && text.includes("- Your example: skill: SQL and dashboards in Tableau"));
+  // Facts that tie to nothing are named as such; the brief never stretches one to fit.
+  const w2 = world();
+  const r2: any = await researchCompany({ company: "Stripe", role: "Data analyst internship", question: T1, facts: ["hobby: marathon running"], plan: { queries: ["Stripe"], companies: ["Stripe"], sites: ["stripe.example"] }, deps: w2.deps, now: NOW });
+  ok(/None of your confirmed facts matches what the role page asks for/.test(r2.project.missing) && r2.five[2].text.startsWith("Not confirmed yet"));
 });

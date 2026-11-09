@@ -193,7 +193,13 @@ function companyBrief(x: Record<string, any>, v: V) {
     ...(x.focus !== undefined ? { focus: v.one(x.focus, "focus", ["business", "developments", "competitors", "role", "questions"] as const) } : {}),
     ...(x.audience !== undefined ? { audience: v.str(x.audience, "audience", { max: 40, links: false }) } : {}),
     ...(x.frame !== undefined ? { frame: (() => { const q = v.obj(x.frame, "frame"); return { text: text(q, "frame", 300), cite: cite(q.cite, "frame.cite") }; })() } : {}),
-    business: lines(x.business, "business", 5), role_asks: lines(x.role_asks, "role_asks", 5),
+    business: lines(x.business, "business", 6, (q, p) => (q.product !== undefined ? { product: v.str(q.product, `${p}.product`, { max: 40, links: false }) } : {})), role_asks: lines(x.role_asks, "role_asks", 5),
+    ...(x.products !== undefined ? { products: v.list(x.products, "products", 1, 3).map((r, i) => { const q = v.obj(r, `products[${i}]`); return { name: v.str(q.name, `products[${i}].name`, { max: 40, links: false }), angle: v.str(q.angle, `products[${i}].angle`, { max: 60, links: false }) }; }) } : {}),
+    // The person's side, from their confirmed facts only (code-built, agent/research/company.ts): fact text, and the role lines it ties to.
+    ...(x.project !== undefined ? { project: (() => { const q = v.obj(x.project, "project"); return { ties: v.list(q.ties ?? [], "project.ties", 0, 3).map((t, i) => { const z = v.obj(t, `project.ties[${i}]`);
+      return { fact: v.str(z.fact, `project.ties[${i}].fact`, { max: 300, links: false }), ties: v.list(z.ties, `project.ties[${i}].ties`, 1, 2).map((y, j) => { const w = v.obj(y, `project.ties[${i}].ties[${j}]`); return { text: v.str(w.text, `project.ties[${i}].ties[${j}].text`, { max: 400, links: false }), cite: cite(w.cite, `project.ties[${i}].ties[${j}].cite`) }; }) }; }),
+      ...(q.missing !== undefined ? { missing: v.str(q.missing, "project.missing", { max: 240, links: false }) } : {}) }; })() } : {}),
+    ...(x.five !== undefined ? { five: v.list(x.five, "five", 1, 4).map((r, i) => { const q = v.obj(r, `five[${i}]`); return { label: v.str(q.label, `five[${i}].label`, { max: 40, links: false }), text: v.str(q.text, `five[${i}].text`, { max: 400, links: false }), ...(q.cite !== undefined ? { cite: cite(q.cite, `five[${i}].cite`) } : {}) }; }) } : {}),
     developments: lines(x.developments, "developments", 5, (q, p) => ({ date: v.str(q.date, `${p}.date`, { max: 20, links: false }), ...(q.measure ? { measure: v.one(q.measure, `${p}.measure`, ["volume", "forecast"] as const) } : {}) })),
     competitors: lines(x.competitors, "competitors", 4, (q, p) => ({ name: v.str(q.name, `${p}.name`, { max: 60, links: false }) })),
     questions: v.list(x.questions ?? [], "questions", 0, 6).map((r, i) => { const q = v.obj(r, `questions[${i}]`); return { text: v.str(q.text, `questions[${i}].text`, { max: 400, links: false }), cite: cite(q.cite, `questions[${i}].cite`) }; }),
@@ -460,7 +466,9 @@ const MEASURE_WORD: Record<string, string> = { volume: "Volume, not revenue", fo
 // Headings and order follow the owner's target pages (app-layer-visuals p-88/p-89, the interview brief specimen, and spec C.22's
 // sourced Stripe brief): the short answer, how the business works, evidence versus interpretation, then the dated and sourced detail.
 const COMPANY_HEADS = { answer: "The short answer", business: "How the business works", evidence: "Evidence versus interpretation", developments: "Recent developments", competitors: "Competitors and tradeoffs",
-  role_asks: "What the role page asks for", questions: "Questions worth asking", unknowns: "What this brief cannot tell you", sources: "Sources" } as const;
+  role_asks: "What the role page asks for", project: "How to use your project without overstating it", questions: "Questions worth asking", five: "Five minutes before the interview",
+  unknowns: "What this brief cannot tell you", sources: "Sources" } as const;
+const OVERSTATE = "Say only what the fact says: no scale, result, tool or title it does not name.";
 // The evidence-versus-interpretation rows (p-89): one reported fact, Trainee's reading, one unknown, and the state of the sources.
 function companyEvidence(d: any): [string, string][] {
   const S = d.sources ?? [], f = (d.developments ?? [])[0] ?? (d.business ?? [])[0];
@@ -482,12 +490,19 @@ function companyHtml(d: any): string {
   const qs = (d.questions ?? []).length ? `<ol class="rb-qs">${d.questions.map((q: any) => `<li><span class="rb-t">${esc(q.text)}</span><span class="rb-chips"><span class="src">Grounded in ${q.cite.map((i: number) => `[${esc(i)}]`).join("")}</span>${limits(q.cite)}</span></li>`).join("")}</ol>` : "";
   const cannot = [...(d.unknowns ?? []), ...(d.unread ?? [])];
   const srcs = `<ol class="rb-src">${S.map((s: any, i: number) => `<li id="src-${i + 1}"><span class="rb-n">[${i + 1}]</span>${linkHtml(s.url, s.title) || esc(s.title)}<span class="meta">Source: <span class="rb-host" title="${esc(hostOf(s.url))}">${esc(hostOf(s.url))}</span> · ${s.by === "company" ? "The company's own page" : "Reported elsewhere"} · Read ${esc(DAY(s.fetched_at))}</span>${s.limit === "paywalled" ? `<span class="meta rb-lim">Paywalled: only the part shown without a subscription was read.</span>` : s.limit === "outdated" ? `<span class="meta rb-lim">Outdated: the newest date on this page is ${esc(s.dated ?? "old")}.</span>` : ""}</li>`).join("")}</ol>`;
-  return `<div class="rb-co">` + head + sec(COMPANY_HEADS.answer, answer) + sec(COMPANY_HEADS.business, ul(d.business ?? [], (x) => li(x)))
+  const prods = (d.products ?? []) as { name: string; angle: string }[], inProd = (x: any) => !!x.product && prods.some((p) => p.name.toLowerCase() === String(x.product).toLowerCase());
+  const pj = d.project, proj = pj ? `${(pj.ties ?? []).map((t: any) => `<div class="rb-proj"><p class="rb-t"><b>Your confirmed fact:</b> ${esc(t.fact)}</p><ul class="rb-list">${t.ties.map((y: any) => li(y, "<b>The role page asks:</b> ")).join("")}</ul></div>`).join("")}${(pj.ties ?? []).length ? `<p class="rb-caution">${OVERSTATE}</p>` : ""}${pj.missing ? `<p class="rb-caution">${esc(pj.missing)}</p>` : ""}` : "";
+  const five = (d.five ?? []).length ? `<dl class="rb-kv">${d.five.map((f: any) => `<div><dt>${esc(f.label)}</dt><dd>${esc(f.text)}${cites(f.cite)}</dd></div>`).join("")}</dl>` : "";
+  return `<div class="rb-co">` + head + `<aside class="rb-notice"><b>Sourced research, not a verdict</b><span>Each fact names the page it came from; Trainee's reading is labelled; what no source says is listed as unknown.</span></aside>`
+    + sec(COMPANY_HEADS.answer, answer) + sec(COMPANY_HEADS.business, ul((d.business ?? []).filter((x: any) => !inProd(x)), (x) => li(x)))
     + sec(COMPANY_HEADS.evidence, evidence)
+    + prods.map((p) => sec(`${p.name}: ${p.angle}`, ul((d.business ?? []).filter((x: any) => String(x.product ?? "").toLowerCase() === p.name.toLowerCase()), (x) => li(x)))).join("")
     + sec(COMPANY_HEADS.developments, ul(d.developments ?? [], (x) => li(x, `<span class="rb-day">${esc(x.date)}</span> `, x.measure ? `<span class="src rb-measure">${esc(MEASURE_WORD[x.measure])}</span>` : "")))
     + sec(COMPANY_HEADS.competitors, ul(d.competitors ?? [], (x) => li(x, `<b>${esc(x.name)}</b>: `)))
     + sec(COMPANY_HEADS.role_asks, ul(d.role_asks ?? [], (x) => li(x)))
+    + sec(COMPANY_HEADS.project, proj)
     + sec(COMPANY_HEADS.questions, qs)
+    + sec(COMPANY_HEADS.five, five)
     + sec(COMPANY_HEADS.unknowns, cannot.length ? `<ul class="rb-list rb-gaps">${cannot.map((g: string) => `<li><span class="rb-t">${esc(g)}</span><span class="rb-chips"><span class="src">Unknown</span></span></li>`).join("")}</ul>` : "")
     + sec(COMPANY_HEADS.sources, srcs) + `</div>`;
 }
@@ -498,12 +513,16 @@ function companyText(d: any, L: string[]) {
   if (d.frame) L.push(`## ${COMPANY_HEADS.answer}`, `${d.frame.text}${c(d.frame)} [Trainee's reading]${lim(d.frame)}`, "");
   L.push(`${marketReadOn(d) ? `Sources read ${marketReadOn(d)}. ` : ""}Research only: nothing was sent or applied for.`, "");
   const block = (h: string, xs: any[], f: (x: any) => string) => { if (!xs?.length) return; L.push(`## ${h}`); xs.forEach((x) => L.push(f(x))); L.push(""); };
-  block(COMPANY_HEADS.business, d.business, (x) => `- ${x.text}${c(x)}${lim(x)}`);
+  const prods = (d.products ?? []) as { name: string; angle: string }[], inProd = (x: any) => !!x.product && prods.some((p) => p.name.toLowerCase() === String(x.product).toLowerCase());
+  block(COMPANY_HEADS.business, (d.business ?? []).filter((x: any) => !inProd(x)), (x) => `- ${x.text}${c(x)}${lim(x)}`);
   if (!d.focus) block(COMPANY_HEADS.evidence, companyEvidence(d), ([k, v]) => `- ${k}: ${v}`);
+  prods.forEach((p) => block(`${p.name}: ${p.angle}`, (d.business ?? []).filter((x: any) => String(x.product ?? "").toLowerCase() === p.name.toLowerCase()), (x) => `- ${x.text}${c(x)}${lim(x)}`));
   block(COMPANY_HEADS.developments, d.developments, (x) => `- ${x.date}: ${x.text}${c(x)}${x.measure ? ` (${MEASURE_WORD[x.measure]})` : ""}${lim(x)}`);
   block(COMPANY_HEADS.competitors, d.competitors, (x) => `- ${x.name}: ${x.text}${c(x)}${lim(x)}`);
   block(COMPANY_HEADS.role_asks, d.role_asks, (x) => `- ${x.text}${c(x)}${lim(x)}`);
+  if (d.project) { L.push(`## ${COMPANY_HEADS.project}`); (d.project.ties ?? []).forEach((t: any) => { L.push(`- Your confirmed fact: ${t.fact}`); t.ties.forEach((y: any) => L.push(`  - The role page asks: ${y.text}${c(y)}`)); }); if ((d.project.ties ?? []).length) L.push(OVERSTATE); if (d.project.missing) L.push(d.project.missing); L.push(""); }
   block(COMPANY_HEADS.questions, d.questions, (x) => `- ${x.text} (grounded in${c(x)})${lim(x)}`);
+  block(COMPANY_HEADS.five, d.five, (f) => `- ${f.label}: ${f.text}${c(f)}`);
   block(COMPANY_HEADS.unknowns, [...(d.unknowns ?? []), ...(d.unread ?? [])], (g) => `- ${g} [Unknown]`);
   L.push(`## ${COMPANY_HEADS.sources}`); S.forEach((s: any, i: number) => L.push(`${i + 1}. ${s.title}: ${s.url} (${s.by === "company" ? "the company's own page" : "reported elsewhere"}; read ${DAY(s.fetched_at)}${s.limit ? `; ${LIMIT_WORD[s.limit]}${s.dated ? ` ${s.dated}` : ""}` : ""})`)); L.push("");
 }
@@ -611,7 +630,12 @@ ul.rb-list{margin:0;padding-left:20px}ul.rb-list li{margin:0 0 12px;overflow-wra
 .rb-chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0}.rb-chips .src{margin-left:0;white-space:normal}.rb-day{font-weight:600;white-space:nowrap}
 .rb-limit{border-color:var(--ink);color:var(--ink)}.rb-answer{margin:0;font-family:'Brygada 1918',Georgia,serif;font-size:20px;line-height:1.35;overflow-wrap:anywhere}
 dl.rb-kv{margin:0}dl.rb-kv>div{display:grid;grid-template-columns:minmax(0,190px) minmax(0,1fr);gap:4px 16px;padding:10px 0;border-top:1px solid var(--line)}dl.rb-kv>div:first-child{border-top:0}
-dl.rb-kv dt{color:var(--mute);font-size:15px}dl.rb-kv dd{margin:0;overflow-wrap:anywhere}@media (max-width:560px){dl.rb-kv>div{grid-template-columns:1fr}}.rb-co .blk h2{font-family:'Brygada 1918',Georgia,serif;font-size:21px;font-weight:500;line-height:1.25}.rb-caution{margin:12px 0 0;padding-left:12px;border-left:2px solid var(--line);font-size:15px;color:var(--mute)}ol.rb-qs{margin:0;padding-left:22px}ol.rb-qs li{margin:0 0 14px;overflow-wrap:anywhere}ol.rb-src .rb-lim{grid-column:2}
+dl.rb-kv dt{color:var(--mute);font-size:15px}dl.rb-kv dd{margin:0;overflow-wrap:anywhere}@media (max-width:560px){dl.rb-kv>div{grid-template-columns:1fr}}/* R10 WO-H: the research brief is a document page (spec C.0/C.19, target p-87..p-89): no card frame, a large serif title, a text
+   column near 640 px, a notice box, serif section heads, grey key-value labels and a thin-rule caution block. */
+.fcard:has(.rb-co){background:transparent;border:0;box-shadow:none;padding:8px 0 28px}.fcard:has(.rb-co) .ftitle{font-size:34px}
+.rb-co{max-width:680px}.rb-sub{margin:6px 0 0}.rb-notice{margin:16px 0 4px;padding:12px 14px;border-radius:6px;background:var(--tint);font-size:15px}.rb-notice b{display:block;margin:0 0 2px}
+.rb-proj{margin:0 0 12px}.rb-proj p{margin:0 0 6px;overflow-wrap:anywhere}
+.rb-co .blk h2{font-family:'Brygada 1918',Georgia,serif;font-size:21px;font-weight:500;line-height:1.25}.rb-caution{margin:12px 0 0;padding-left:12px;border-left:2px solid var(--line);font-size:15px;color:var(--mute)}ol.rb-qs{margin:0;padding-left:22px}ol.rb-qs li{margin:0 0 14px;overflow-wrap:anywhere}ol.rb-src .rb-lim{grid-column:2}
 .rb-cite{font-size:14px;color:var(--mute);white-space:nowrap;font-variant-numeric:tabular-nums}
 ol.rb-src{list-style:none;margin:0;padding:0}ol.rb-src li{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:6px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}ol.rb-src li:first-child{border-top:0}
 ol.rb-src a{display:inline-flex;align-items:center;min-height:44px;color:var(--link);font-weight:600}ol.rb-src .meta{display:block;grid-column:2}.rb-n{color:var(--mute);font-variant-numeric:tabular-nums}

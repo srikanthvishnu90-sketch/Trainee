@@ -295,6 +295,7 @@ MIGRATIONS=(
   20261108130500_career_contact_erase_keeps_sends.sql
   20261108140000_career_resume_template_outcomes.sql
   20261109120000_career_pause_send_paths.sql
+  20261109130000_career_outbox_interim.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -459,6 +460,7 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'career_erase_kept_tables' and prosrc like '%career_contact_sends%')"
   "exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'career_apply_jobs' and column_name = 'resume_template')"
   "exists (select 1 from pg_proc where proname = 'career_outreach_action_claim' and prosrc like '%career_user_quiet%') and exists (select 1 from pg_proc where proname = 'career_send_go' and prosrc like '%career_user_quiet%')"
+  "exists (select 1 from pg_constraint where conname = 'career_outbox_kind_check' and pg_get_constraintdef(oid) like '%interim%')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql

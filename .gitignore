@@ -25,3 +25,7 @@ tools/node_modules/
 
 # P0 proven loop receipts (scripts/career/prove-loop.cjs): synthetic TEST persona runs, local only
 /tmp/prove-loop/
+
+# R10 acceptance evidence (scripts/r10-acceptance-report.ts) and the live replay report (scripts/launch/r10-live-replay.ts): never committed.
+artifacts/r10-acceptance/
+artifacts/r10-live-replay/

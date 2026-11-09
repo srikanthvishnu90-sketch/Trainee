@@ -33,7 +33,7 @@ export const BUDGET_WARN_FRACTION = 0.8;
 export const BUDGET_TIME_ZONE = "America/Chicago";
 
 // before / after: the budget window is not open (nothing is spent early; nothing is spent after it until the owner approves a new budget).
-export type ReserveResult = { ok: true; id: string; warn?: boolean; overTarget?: boolean } | { ok: false; reason: "limit" | "paused" | "unavailable" | "before" | "after"; detail?: string };
+export type ReserveResult = { ok: true; id: string; warn?: boolean; overTarget?: boolean } | { ok: false; reason: "limit" | "paused" | "unavailable" | "before" | "after"; detail?: string; day?: string };
 export interface BudgetMeta { model: string; role: string }
 export interface BudgetGate {
   reserve(micros: number, meta: BudgetMeta): Promise<ReserveResult>;
@@ -100,7 +100,8 @@ export function rpcBudgetGate(rpc: Rpc, limits: BudgetLimits = { target: DEFAULT
         if (r.error) return { ok: false, reason: "unavailable", detail: String(r.error.message ?? r.error).slice(0, 200) };
         const d = r.data;
         if (d && d.ok === true && isUuid(d.id)) return { ok: true, id: d.id, ...(d.warn === true ? { warn: true } : {}), ...(d.over_target === true ? { overTarget: true } : {}) };
-        if (d && d.ok === false && d.state === "limit") return { ok: false, reason: "limit" };
+        // R10 WO-D: a refusal that names a day is that budget day's own cap (its window is open); the $70 total names none.
+        if (d && d.ok === false && d.state === "limit") return { ok: false, reason: "limit", ...(typeof d.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.day) ? { day: d.day } : {}) };
         if (d && d.ok === false && d.state === "paused") return { ok: false, reason: "paused" };
         if (d && d.ok === false && d.state === "before_window") return { ok: false, reason: "before" };
         if (d && d.ok === false && (d.state === "after_window" || d.state === "no_budget")) return { ok: false, reason: "after" };

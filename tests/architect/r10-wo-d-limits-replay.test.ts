@@ -58,6 +58,51 @@ Deno.test("WO-D units: which refusals are limits; the next step in the person's 
   assertNode.equal(stopOfError(new ModelUnavailableError(429, "daily_limit", "")), "rate_limit", "a 429 from anywhere is a rate limit, never a person's daily cap");
 });
 
+// Architect (2026-11-09): a day window's cap resets when the budget day turns, which is the America/Chicago date in SQL
+// (model_budget_day, 20261028070000:88). The reply says that moment in the person's own zone, or "midnight US Central";
+// never "midnight UTC". The boundary comes from the day function itself (chicagoDay, the SQL twin), checked here against
+// Postgres across both DST changes; the $70 total (no day) still needs the owner and gives no time.
+Deno.test({ name: "WO-D: a day window's cap resets at midnight US Central (the SQL budget day), said in the person's zone, across DST", sanitizeOps: false, sanitizeResources: false }, async () => {
+  const { budgetDayEnd } = await import("../../supabase/functions/_shared/limit_stop.ts");
+  const { rpcBudgetGate } = await import("../../supabase/functions/_shared/model_budget.ts");
+  const { ModelBudgetBlockedError } = await import("../../supabase/functions/_shared/model_calls.ts");
+  // The database's refusal shapes: a day row's cap names its day; the total names none.
+  const gate = (data: unknown) => rpcBudgetGate(async () => ({ data, error: null }), { target: 70e6, hard: 70e6 });
+  const day = await gate({ ok: false, state: "limit", day: "2026-11-08", spent: 5, reserved: 0, limit: 5, total: 9 }).reserve(1, { model: "m", role: "r" });
+  assertNode.deepEqual(day, { ok: false, reason: "limit", day: "2026-11-08" });
+  const total = await gate({ ok: false, state: "limit", total: 70e6, target: 70e6, limit: 70e6 }).reserve(1, { model: "m", role: "r" });
+  assertNode.deepEqual(total, { ok: false, reason: "limit" });
+  const at = Date.parse("2026-11-08T23:17:00Z"); // 5:17 PM in Chicago
+  const dayErr = new ModelBudgetBlockedError("limit", "the model budget for 2026-11-08 is used up", "2026-11-08");
+  assertNode.equal(stopOfError(dayErr), "budget_day");
+  assertNode.equal(stopOfError(new ModelBudgetBlockedError("limit", "the global model budget is used up")), "global");
+  const reset = retryAtOf(dayErr, at)!;
+  assertNode.equal(new Date(reset).toISOString(), "2026-11-09T06:00:00.000Z", "the next midnight in Chicago (CST)");
+  assertNode.match(heldReply(S2, "budget_day", null, reset), /resets at midnight US Central; say "continue" after that/);
+  assertNode.match(heldReply(S2, "budget_day", CHI, reset), /resets at midnight Chicago time/);
+  assertNode.match(heldReply(S2, "budget_day", { tz: "America/New_York", city: "New York" }, reset), /resets at midnight US Central, which is 1 AM New York time/);
+  assertNode.match(heldReply(S2, "budget_day", { tz: "America/Los_Angeles", city: "Los Angeles" }, reset), /which is 10 PM Los Angeles time/);
+  for (const z of [null, CHI, { tz: "Europe/Berlin", city: null }]) assertNode.doesNotMatch(heldReply(S2, "budget_day", z, reset), /UTC/);
+  assertNode.equal(retryAtOf(new ModelBudgetBlockedError("limit", "the global model budget is used up"), at), null, "the total gives no time");
+  assertNode.doesNotMatch(heldReply(S2, "global", CHI, null), /midnight|resets/);
+  // Across DST: 2026-11-01 (fall back) has 25 hours, 2026-03-08 (spring forward) 23; the end is where the day turns.
+  const cases: [string, string][] = [["2026-10-31T23:30:00Z", "2026-11-01T05:00:00.000Z"], ["2026-11-01T12:00:00Z", "2026-11-02T06:00:00.000Z"],
+    ["2026-03-07T12:00:00Z", "2026-03-08T06:00:00.000Z"], ["2026-03-08T12:00:00Z", "2026-03-09T05:00:00.000Z"]];
+  for (const [now, want] of cases) assertNode.equal(new Date(budgetDayEnd(Date.parse(now))).toISOString(), want, `budget day after ${now}`);
+  assertNode.equal(budgetDayEnd(Date.parse("2026-11-02T06:00:00Z") - 1), Date.parse("2026-11-02T06:00:00Z"), "one millisecond before the turn");
+  // The same boundary in Postgres's own model_budget_day: the day differs at the end and not one millisecond before it.
+  if (!pgBinDir()) { if (CI) throw new Error("Postgres 16 is needed in CI"); return; }
+  const pg = await startPg();
+  try {
+    for (const [now] of cases) {
+      const end = budgetDayEnd(Date.parse(now)), sec = (ms: number) => `to_timestamp(${ms / 1000})`;
+      const row = (await pg.sql(`select public.model_budget_day(${sec(Date.parse(now))})::text || ',' || public.model_budget_day(${sec(end - 1)})::text || ',' || public.model_budget_day(${sec(end)})::text`)).trim().split(",");
+      assertNode.equal(row[0], row[1], `the SQL day is unchanged just before ${new Date(end).toISOString()}`);
+      assertNode.notEqual(row[1], row[2], `the SQL day turns at ${new Date(end).toISOString()}`);
+    }
+  } finally { await pg.stop(); }
+});
+
 Deno.test({
   name: "WO-D replay: at real limits (global pause, global budget, provider 429) through the real handler on real Postgres",
   sanitizeResources: false,

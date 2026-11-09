@@ -6,23 +6,25 @@
 //
 // The limits, from the model call's own refusal (model_calls.ts ModelUnavailableError types):
 //   global        the product's AI budget is used up (model_budget.ts, $70 for the cycle): the owner must approve more
+//   budget_day    an approved day window's own cap is used up: it resets when the budget day turns, midnight US Central
+//                 (model_budget_day: the America/Chicago date; chicagoDay is its twin), said in the person's own zone
 //   budget_after  the budget window ended: the owner must approve more
 //   budget_before the budget window has not opened
 //   paused        the owner switched the AI off for a while (MODEL_BUDGET_PAUSED or its database twin)
 //   unchecked     the budget could not be read, so no call was made
 //   rate_limit    the AI provider refused for rate (HTTP 429) or was overloaded (529); its retry-after, when it gave one
 // Any other model failure is an outage, not a limit, and is answered as before. Nothing here changes any limit.
-import { ModelUnavailableError } from "./model_calls.ts";
-import { BUDGET_ERROR_TYPE } from "./model_budget.ts";
+import { ModelBudgetBlockedError, ModelUnavailableError } from "./model_calls.ts";
+import { BUDGET_ERROR_TYPE, BUDGET_TIME_ZONE, chicagoDay } from "./model_budget.ts";
 import type { PersonZone } from "./person_zone.ts";
 
-export type LimitStop = "global" | "budget_after" | "budget_before" | "paused" | "unchecked" | "rate_limit";
+export type LimitStop = "global" | "budget_day" | "budget_after" | "budget_before" | "paused" | "unchecked" | "rate_limit";
 export const HELD_INTENT = "career_limit_held";
 
 export function stopOfError(e: unknown): LimitStop | null {
   if (!(e instanceof ModelUnavailableError)) return null;
   const t = String(e.type ?? "");
-  if (t === BUDGET_ERROR_TYPE.limit) return "global";
+  if (t === BUDGET_ERROR_TYPE.limit) return e instanceof ModelBudgetBlockedError && e.day ? "budget_day" : "global";
   if (t === BUDGET_ERROR_TYPE.after) return "budget_after";
   if (t === BUDGET_ERROR_TYPE.before) return "budget_before";
   if (t === BUDGET_ERROR_TYPE.paused) return "paused";
@@ -31,8 +33,26 @@ export function stopOfError(e: unknown): LimitStop | null {
   return null;
 }
 // When the provider said the call may be retried (its retry-after), as an instant; null when it did not say.
+// A day window's cap: the moment its budget day ends (the next one starts), read from the same day function as enforcement.
 export const retryAtOf = (e: unknown, now: number): number | null =>
-  e instanceof ModelUnavailableError && typeof e.retryAfterMs === "number" ? now + e.retryAfterMs : null;
+  e instanceof ModelBudgetBlockedError && e.block === "limit" && e.day ? budgetDayEnd(now)
+    : e instanceof ModelUnavailableError && typeof e.retryAfterMs === "number" ? now + e.retryAfterMs : null;
+
+// The first instant after `now` whose budget day (chicagoDay, the twin of SQL model_budget_day) differs: the next midnight
+// America/Chicago, 23, 24 or 25 hours after the last one across a DST change. Found by search on the day function itself, so
+// copy and enforcement cannot drift.
+export function budgetDayEnd(now: number): number {
+  const today = chicagoDay(now);
+  let lo = now, hi = now + 26 * 3600000;
+  while (hi - lo > 1) { const mid = Math.floor((lo + hi) / 2); if (chicagoDay(mid) === today) lo = mid; else hi = mid; }
+  return hi;
+}
+// "midnight US Central", in the person's own words for their zone when they stated one (never UTC).
+function resetWords(ms: number, zone: PersonZone | null): string {
+  if (!zone) return "midnight US Central";
+  if (zone.tz === BUDGET_TIME_ZONE) return "midnight Chicago time";
+  return `midnight US Central, which is ${timeIn(ms, zone)}`;
+}
 
 // "6:44 PM Chicago time" / "6:44 PM CST"; UTC (said) when the zone is unknown.
 function timeIn(ms: number, zone: PersonZone | null): string {
@@ -49,6 +69,9 @@ export function nextStepOf(stop: LimitStop, zone: PersonZone | null, retryAt: nu
     case "rate_limit": return retryAt
       ? `The AI service is turning requests away for now. Say "continue" after ${timeIn(retryAt, zone)} and I'll pick it up.`
       : `The AI service is turning requests away for now and didn't say when it will take them again. Say "continue" later and I'll pick it up.`;
+    case "budget_day": return retryAt
+      ? `Trainee's AI budget for today is used up. It resets at ${resetWords(retryAt, zone)}; say "continue" after that and I'll pick it up.`
+      : `Trainee's AI budget for today is used up. It resets at midnight US Central; say "continue" after that and I'll pick it up.`;
     case "global": return `Trainee's AI budget is used up, and more needs the owner's approval. Once it is approved, say "continue" and I'll pick it up.`;
     case "budget_after": return `Trainee's AI budget period has ended, and a new one needs the owner's approval. Once it is approved, say "continue" and I'll pick it up.`;
     case "budget_before": return `Trainee's AI budget hasn't opened yet. Once it opens, say "continue" and I'll pick it up.`;

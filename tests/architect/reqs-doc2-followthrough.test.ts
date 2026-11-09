@@ -267,8 +267,8 @@ Deno.test({ name: "DOC2/5 the real handler on real Postgres: reminders set, list
         set session_replication_role = origin;`);
       const up = await say(c1, "any update?");
       eq(up.intent, "career_overview", up.reply);
-      assert(/^Status as of now: 1 confirmed by the employer, 1 sent but not confirmed, 0 in progress, 1 waiting on you\./.test(up.reply), up.reply);
-      assert(/Acme \(Data Analyst\), confirmation ACME-77/.test(up.reply) && /Globex \(Data Analyst\): sent .*no confirmation from them yet/.test(up.reply), up.reply);
+      assert(/^Status as of now: 0 confirmed by the employer, 1 page reference only, 1 sent but not confirmed, 0 in progress, 1 waiting on you\./.test(up.reply), up.reply);
+      assert(/Acme \(Data Analyst\): their page showed ACME-77; Acme has not confirmed it by email yet/.test(up.reply) && /Globex \(Data Analyst\): sent .*no confirmation from them yet/.test(up.reply), up.reply);
       assert(/Hooli \(Data Analyst\): the employer emailed a code\. To unblock:/.test(up.reply), up.reply);
       const w = await say(c1, "what's waiting on me?");
       eq(w.intent, "career_waiting_on_you", w.reply);

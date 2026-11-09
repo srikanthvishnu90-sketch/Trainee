@@ -45,7 +45,7 @@ import { ATS_HOST, atsRef, FakeGmail, htmlText, personAnswers, readPdf, resumePd
 import { type Contact, contactsCsv, generate, type Person, sampleTasks, SEED } from "./generate.ts";
 import { PRICES } from "../../../supabase/functions/_shared/model_gateway.ts";
 import { askedPart, questionLine } from "../../../tests/helpers/one_question.ts";
-import { addStubPages, isStubWebHost, type StubPage, stubWebFetch } from "./web.ts";
+import { addStubPages, freeFixtureFetch, isFreeFixtureHost, isStubWebHost, servesFreeFixture, type StubPage, stubWebFetch } from "./web.ts";
 import type { FileRecord } from "../../../supabase/functions/_shared/file_kinds.ts";
 import { appendRow, appendSetRow, type CallEstimate, type E2EItem, type E2ERun, parseBudgetUsd, scoreRow, scoreSetRow } from "./score_log.ts";
 export type { E2EItem, E2ERun };
@@ -93,7 +93,7 @@ const WORLD_ENV: Record<string, string> = {
   TRAINEE_REPORT_BASE: "https://report.e2e.test", TRAINEE_REPORT_SECRET: "e2e-stub-world-report-key-not-real",
   // R9-F: market research and its brief File, for this eval's run only (the release config keeps both off: RELEASE_NEVER_ON).
   // With no search key the research tool reads the sites it is given (research_search.ts firstPartyProvider): the stub web.
-  CAREER_RESEARCH_REPLY: "on", CAREER_RESEARCH_BRIEF: "on",
+  CAREER_RESEARCH_REPLY: "on", CAREER_RESEARCH_BRIEF: "on", RESEARCH_USER_AGENT: "TraineeBot e2e eval (stub world, no real contact)",
   // R9-F: the hosted preparation's door (cloud_runner_http.ts, in this process at a made-up host), so an application queued
   // from chat is prepared at once and its card shown, as the owner's configured runner does (CAREER_PREPARE_AHEAD_URL).
   CAREER_PREPARE_AHEAD_URL: "https://runner.e2e.test/functions/v1/career-cloud-runner/prepare", CAREER_PREPARE_AHEAD_TOKEN: "e2e-stub-prepare-door-token-not-real-000",
@@ -106,8 +106,9 @@ const RUNNER_ENV: Record<string, string> = {
   CAREER_PREPARE_AHEAD_TOKEN: WORLD_ENV.CAREER_PREPARE_AHEAD_TOKEN, CLOUD_PREPARE_ENABLED: "on", CLOUD_RUNNER_ENABLED: "on",
   CLOUD_BRIDGE_URL: "https://runner.e2e.test/functions/v1/career-cloud-runner",
 };
-// Unset for the run, so research never reaches a real search provider or SEC with a declared contact.
-const RESEARCH_UNSET = ["BRAVE_SEARCH_API_KEY", "RESEARCH_SEARCH_PROVIDER", "RESEARCH_SEARCH_ENDPOINT", "RESEARCH_USER_AGENT"];
+// Unset for the run, so research never reaches a real search provider. RESEARCH_USER_AGENT is the eval's own made-up contact
+// (WORLD_ENV), so the SEC fixtures are read; no real SEC host is reachable in the eval.
+const RESEARCH_UNSET = ["BRAVE_SEARCH_API_KEY", "RESEARCH_SEARCH_PROVIDER", "RESEARCH_SEARCH_ENDPOINT", "USAJOBS_API_KEY"];
 const ENV_KEYS = ["CAREER_BRAIN", "CAREER_PLANNER", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "CAREER_REPLY_MODEL", ...RESEARCH_UNSET, ...Object.keys(WORLD_ENV)];
 const q = (s: string) => s.replace(/'/g, "''");
 // The machine's own clock, taken before the pin: the sending rail's database functions stamp next_at with the database's
@@ -212,15 +213,15 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
     for (const k of RESEARCH_UNSET) Deno.env.delete(k);
     Deno.env.delete("CAREER_MODEL");
     Deno.env.set("CAREER_REPLY_MODEL", Deno.env.get("CAREER_REPLY_MODEL") || "claude-haiku-5-5");
-    // Review of #589: the research reader checks every hop's resolved addresses (research_dns.ts systemResolver reads
+    // The outside world: the model (the fake, or Anthropic on a paid run), every *.greenhouse.io host (the stub ATS, over a
+    // real HTTP hop), Gmail (the rail's fake), and the stub web's own .e2e.test sites (web.ts). Nothing else is reachable.
+    // Review of #589 and R9 free sources: the research reader checks every hop's resolved addresses (research_dns.ts systemResolver reads
     // Deno.resolveDns at call time). The stub web's hosts answer one public documentation address (TEST-NET-3); every other
     // name has no answer here, as nothing else is reachable.
     (Deno as any).resolveDns = async (host: string, type: string) => {
-      if (isStubWebHost(String(host).toLowerCase())) return type === "A" ? ["203.0.113.80"] : [];
+      if (isStubWebHost(String(host).toLowerCase()) || isFreeFixtureHost(String(host))) return type === "A" ? ["203.0.113.80"] : [];
       throw new Deno.errors.NotFound(`no records for ${host} in the e2e eval`);
     };
-    // The outside world: the model (the fake, or Anthropic on a paid run), every *.greenhouse.io host (the stub ATS, over a
-    // real HTTP hop), Gmail (the rail's fake), and the stub web's own .e2e.test sites (web.ts). Nothing else is reachable.
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
       const url = new URL(req.url);
@@ -229,6 +230,8 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
         if (o.model === "fake") { try { est = addEst(est, estimateCall(await req.clone().json())); } catch { /* not a JSON body */ } return await fakeAnthropic(req); }
         return await realFetch(req);
       }
+      // The free research sources' fixtures (web.ts), before the stub ATS: boards-api.greenhouse.io is a research source here.
+      if (servesFreeFixture(url)) return freeFixtureFetch(req);
       if (ATS_HOST.test(url.hostname)) return await ats.forward(req, realFetch);
       if (url.hostname === "gmail.googleapis.com") return await gmail.fetch(req);
       if (isStubWebHost(url.hostname)) return stubWebFetch(req);

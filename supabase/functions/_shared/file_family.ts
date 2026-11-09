@@ -61,6 +61,11 @@ export const UNKNOWN = "unknown";
 const blank = (s: unknown) => s === null || s === undefined || !String(s).trim();
 const msOf = (t: string | null | undefined) => { const n = t ? Date.parse(t) : NaN; return Number.isNaN(n) ? null : n; };
 const isExternal = (s: Src) => s.external === true || !blank(s.href);
+// A link a File may carry: an http(s) URL, or this site's own path, query or anchor. Never javascript:, data: or any other scheme,
+// and never a protocol-relative "//host" (it would leave the site while looking like a path).
+export const safeHref = (h: string | null | undefined): string | null => !h ? null : webUrl(h) ? h : /^(\?|#|\/(?!\/))/.test(h) ? h : null;
+// The test claimHtml uses before an external source counts: an https link and a time it was read. A green "confirmed" needs it too.
+const proven = (s: Src | null | undefined, c: Ctx) => !!s && isExternal(s) && /^https:/i.test((s.href && webUrl(s.href)) || "") && !!timeIn(s.at, c, { dateOnly: s.dateOnly });
 // A time in the person's zone (Chicago's when none is on file), as the library writes it (C.1, D.4.1): "Today 9:40 AM" (a header),
 // "9:12 AM today" (inline),
 // "Oct 28", "Nov 8, 2:00 PM", a deadline "Fri Nov 13, 5:00 PM"; zone: the zone's short name after it ("CT"), for headers.
@@ -127,7 +132,7 @@ export function actHtml(a: Act, primary = false): string {
     const f = { t: a.post.token, action: a.post.action, ...(a.post.fields ?? {}) };
     return `<form method="post" class="ff-act"${a.post.id ? ` id="${esc(a.post.id)}"` : ""}>${Object.entries(f).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join("")}<button type="submit" class="${cls}"${aria}${data}>${label}</button></form>`;
   }
-  const href = a.href && (webUrl(a.href) || /^(\?|#|\/)/.test(a.href)) ? a.href : null;
+  const href = safeHref(a.href);
   if (!href) return `<span class="ff-act"><button type="button" class="${cls}" disabled${aria}${data}>${label}</button><span class="ff-off">Not available: no link is on file.</span></span>`;
   const ext = a.effect === "open" ? ` rel="noopener noreferrer"` : "";
   return `<a class="${cls}" href="${esc(href)}"${a.effect === "download" ? " download" : ""}${ext}${aria}${data}>${label}</a>`;
@@ -222,7 +227,8 @@ function metaHtml(m: Meta, c: Ctx): string {
 }
 function headHtml(f: Pick<FamilyFile, "family" | "header" | "boundary" | "mono" | "back" | "menu" | "pause">): string {
   const meta = FAMILIES[f.family];
-  const back = f.back ? `<a class="ff-sq" href="${esc(f.back)}" aria-label="Back"><span aria-hidden="true">←</span></a>` : "";
+  const backHref = safeHref(f.back);
+  const back = backHref ? `<a class="ff-sq" href="${esc(backHref)}" aria-label="Back"><span aria-hidden="true">←</span></a>` : "";
   const menu = f.pause ? actHtml({ ...f.pause, label: "❚❚", aria: f.pause.aria ?? f.pause.label })
     : f.menu?.length ? menuHtml(f.menu) : "";
   // The subtitle is the effect boundary, or (F-06, F-09, F-10: p-58, p-67, p-69) the File's ids alone.
@@ -233,7 +239,7 @@ export function familyBodyHtml(f: FamilyFile, c: Ctx): string {
   const h = f.hero;
   const hero = !h ? `<h1 class="ff-sr">${esc(f.title ?? FAMILIES[f.family].header)}</h1>${f.fresh?.length ? `<p class="ff-metas ff-fresh">${f.fresh.map((m) => metaHtml(m, c)).join("")}</p>` : ""}` : `<section class="ff-hero" aria-label="Summary"><p class="ff-kick">${esc(h.kicker)}</p><h1 class="ff-h1">${esc(h.title)}</h1><p class="ff-metas">${h.meta.map((m) => metaHtml(m, c)).join("")}</p>`
     + (h.counts?.length ? `<ul class="ff-counts" aria-label="Counts">${h.counts.map((x) => `<li><b>${x.n}</b> ${esc(x.label)}</li>`).join("")}</ul>` : "") + `</section>`;
-  const seg = f.segments?.length ? `<nav class="ff-seg" aria-label="Show">${f.segments.map((s) => { const t = `${esc(s.label)}${s.n === undefined ? "" : ` <b>${s.n}</b>`}`; return s.href ? `<a href="${esc(s.href)}"${s.selected ? ` aria-current="page" class="on"` : ""}>${t}</a>` : `<span${s.selected ? ` aria-current="page" class="on"` : ""}>${t}</span>`; }).join("")}</nav>` : "";
+  const seg = f.segments?.length ? `<nav class="ff-seg" aria-label="Show">${f.segments.map((s) => { const t = `${esc(s.label)}${s.n === undefined ? "" : ` <b>${s.n}</b>`}`; const sh = safeHref(s.href); return sh ? `<a href="${esc(sh)}"${s.selected ? ` aria-current="page" class="on"` : ""}>${t}</a>` : `<span${s.selected ? ` aria-current="page" class="on"` : ""}>${t}</span>`; }).join("")}</nav>` : "";
   const a = f.actions, sec = a?.secondary ?? [];
   const bar = a && (a.primary || sec.length) ? `<div class="ff-bar">${a.primary ? actHtml(a.primary, true) : ""}${sec.length ? `<div class="ff-two">${sec.map((x) => actHtml(x)).join("")}</div>` : ""}${a.caption ? `<p class="ff-cap">${esc(a.caption)}</p>` : ""}</div>` : "";
   return `<div class="ff" data-family="${f.family}">${headHtml(f)}<main id="main">${hero}${seg}${f.blocks.map((b) => blockHtml(b, c)).join("")}${bar}</main></div>`;
@@ -260,13 +266,13 @@ export function familyStateHtml(s: StateInput, c: Ctx): string {
     case "loading": body = stateHtml({ kind: "loading", title: t, reason: "No result yet.", next: "This page fills in when the check finishes. The action that would repeat this check is off until then." })
       + (s.prior ? `<p class="ff-p ff-mute">${metaHtml(s.prior, c)}</p>` : "") + actHtml({ label: "Check again", effect: "decide", off: "A check is already running." }); break;
     case "empty": body = stateHtml({ kind: "empty", title: t, reason: s.scope ? `Checked: ${s.scope}` : "The scope checked isn't on file.", next: "No roles were added to fill the gap." }) + (s.next ? actHtml(s.next) : ""); break;
-    case "error": body = stateHtml({ kind: "error", title: t, reason: s.nothingSent ? "Nothing was changed and nothing was sent." : "It is not known yet whether anything changed. Check the status before trying again - nothing is retried by itself.", next: "Anything you typed here is kept." }) + (s.recover ? actHtml(s.recover, true) : ""); break;
+    case "error": body = stateHtml({ kind: "error", title: t, reason: s.nothingSent ? "Nothing was changed and nothing was sent." : "It is not known yet whether anything changed. Check the status before trying again - nothing is retried by itself.", next: s.nothingSent ? "Anything you typed here is kept." : "Anything you typed may need entering again." }) + (s.recover ? actHtml(s.recover, true) : ""); break;
     case "expired": body = `<section class="ff-state" role="status"><h2 class="ff-st">${esc(t)}</h2><p class="ff-p">Ask Trainee for a new link to the same task.</p>${s.recover ? actHtml(s.recover, true) : ""}</section>`; break;
     case "needs_input": body = `<section class="ff-state" role="status"><h2 class="ff-st">${esc(t)}</h2>${s.field ? `<aside class="ff-note ff-n-caution" role="note"><strong>${esc(s.field.name)}:</strong> ${esc(s.field.why)}</aside>` : ""}${kv(s.draft)}${s.next ? actHtml(s.next, true) : ""}</section>`; break;
     case "prepared": body = `<section class="ff-state" role="status"><h2 class="ff-st">${esc(t)}</h2>${chipHtml({ label: "Prepared - not submitted", tone: "plum" })}${kv(s.target)}${s.next ? actHtml(s.next) : ""}</section>`; break;
     case "in_progress": body = `<section class="ff-state" role="status"><h2 class="ff-st">${esc(t)}</h2>${chipHtml({ label: "In progress", tone: "info" })}<p class="ff-p">${s.step ? `<strong>Step reached:</strong> ${esc(s.step)}` : "The step reached isn't on file."}</p>${kv(s.target)}</section>`; break;
     case "uncertain": body = `<section class="ff-state" role="status"><h2 class="ff-st">${esc(t)}</h2>${chipHtml({ label: "Submission uncertain", tone: "risk" })}<p class="ff-p">The previous attempt is kept. Retrying is off until the employer's status is checked.</p>${kv(s.target)}${s.next ? actHtml(s.next, true) : ""}${actHtml({ label: "Submit again", effect: "submit", off: "Off until the employer's status is checked: the first attempt may have landed." })}</section>`; break;
-    case "confirmed": body = `<section class="ff-state" role="status"><h2 class="ff-st">${esc(t)}</h2>${s.evidence && isExternal(s.evidence.src) ? `${chipHtml({ label: "Submitted - confirmed", tone: "confirmed" })}<figure class="ff-ev"><blockquote class="ff-quote">${esc(s.evidence.quote)}</blockquote><figcaption>${claimHtml("Employer confirmation", s.evidence.src, c)}</figcaption></figure>` : `${chipHtml({ label: "Not confirmed yet", tone: "attention" })}<p class="ff-p">No employer evidence is on file, so this is not shown as confirmed.</p>`}${kv(s.target)}</section>`; break;
+    case "confirmed": body = `<section class="ff-state" role="status"><h2 class="ff-st">${esc(t)}</h2>${s.evidence && proven(s.evidence.src, c) ? `${chipHtml({ label: "Submitted - confirmed", tone: "confirmed" })}<figure class="ff-ev"><blockquote class="ff-quote">${esc(s.evidence.quote)}</blockquote><figcaption>${claimHtml("Employer confirmation", s.evidence.src, c)}</figcaption></figure>` : `${chipHtml({ label: "Not confirmed yet", tone: "attention" })}<p class="ff-p">No employer evidence is on file, so this is not shown as confirmed.</p>`}${kv(s.target)}</section>`; break;
   }
   return `<div class="ff" data-family="${s.family}" data-state="${s.state}">${headHtml({ family: s.family })}<main id="main">${body}</main></div>`;
 }
@@ -310,7 +316,8 @@ export const FAMILY_CSS = `
 .ff-sa{display:inline-flex;align-items:center;min-height:44px;color:var(--ff-ptext);text-underline-offset:3px}
 .ff-check{list-style:none;margin:0;padding:0}.ff-ck{display:flex;gap:12px;align-items:flex-start;padding:8px 0}
 .ff-box{flex:none;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid var(--ff-mute);background:var(--ff-card)}
-.ff-ck-met .ff-box,.ff-ck-done .ff-box{border-color:var(--ff-good);background:var(--ff-good) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='m5 10 3 3 7-7' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E") center/16px no-repeat}
+.ff-ck-met .ff-box,.ff-ck-done .ff-box{position:relative;border-color:var(--ff-good);background:var(--ff-good)}
+.ff-ck-met .ff-box::after,.ff-ck-done .ff-box::after{content:"";position:absolute;left:6px;top:2px;width:5px;height:10px;border:solid #FFFFFF;border-width:0 2.5px 2.5px 0;transform:rotate(45deg)}
 .ff-ck-partial .ff-box{border-color:var(--ff-warn);background:var(--ff-warn-bg)}.ff-ck-missing .ff-box,.ff-ck-unknown .ff-box{border-color:var(--ff-bad);background:var(--ff-bad-bg)}
 .ff-ckt{flex:1;min-width:0}
 .ff-item{display:flex;gap:12px;align-items:flex-start;padding:14px 0;border-top:1px solid var(--ff-line)}.ff-card>.ff-item:first-child,.ff-label+.ff-item{border-top:0;padding-top:0}.ff-card>.ff-item:last-child{padding-bottom:0}

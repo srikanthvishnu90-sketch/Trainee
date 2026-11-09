@@ -1,8 +1,8 @@
 // R10 fix 9 (spec E.10 9; C.1-C.18, C.24, C.25, D; E.8 63-80): one coherent visual system for the fifteen File families.
-// ASSUMED INTERFACE (the architect names it here; WO-E may rename it with the architect's yes): supabase/functions/_shared/
-// file_kinds.ts exports FILE_FAMILIES, one entry per family F-01 ... F-15 (spec C.3-C.18):
-//   { id: "F-01", name: "Career brief", kind: <a KIND_IDS kind>, specimen: <data that validateKind accepts, trusted> }
-// plus { id: "F-14-negotiation", ... } for the negotiation variant (spec C.17). Each page is also diffed against its target's
+// INTERFACE (architect, 2026-11-09): supabase/functions/_shared/file_family_specimens.ts exports FILE_FAMILIES, one entry per
+// family F-01 ... F-15 plus "F-14n", the negotiation variant (spec C.3-C.18):
+//   { id: "F-01", name: "Career brief", kind: <a KIND_IDS kind>, specimen: <data that validateKind accepts, trusted>,
+//     page(ctx?): <the main state's page, rendered at a fixed clock in America/Chicago> } Each page is also diffed against its target's
 // structure (TARGETS below) and its screenshot is reported beside the owner's target pages.
 // Each specimen is created through the real file service on Postgres and opened through the real trainee-file handler, signed
 // in from Telegram, then rendered in Chromium at 390 x 844 (deviceScaleFactor 2, light and dark) and checked against the shared
@@ -35,7 +35,7 @@ const TARGETS: Record<string, { spec: string; pages: number[]; header: string[] 
   "F-12": {"spec": "C.14", "pages": [74, 75], "header": ["Message review", "Referral request - not sent"], "sections": ["EXACT WORDS - SENT AS YOU, FROM YOUR ACCOUNT"], "actions": ["Approve send", "Edit wording", "Change recipient"]},
   "F-13": {"spec": "C.15", "pages": [76, 77, 78], "header": ["Interview hub", "Example Grid Co - stage 2 of 3"], "sections": ["CONFIRMED LOGISTICS", "WHO YOU'RE MEETING", "PREPARATION - THIS ROLE, THIS STAGE"], "actions": ["Open prep brief", "Propose new time", "Draft follow-up"]},
   "F-14": {"spec": "C.16", "pages": [79, 80, 81], "header": null, "sections": ["WHAT ACTUALLY CHANGED", "DECISIONS ONLY YOU CAN MAKE", "BLOCKERS, STATED PLAINLY"], "actions": ["Adjust plan", "Pause search"]},
-  "F-14-negotiation": {"spec": "C.17", "pages": [84, 85, 86], "header": null, "sections": ["YOUR POSITION - CONFIRMED WITH YOU", "TERM HISTORY - VERSIONS KEPT SEPARATE", "THE ASK - DRAFTED, AWAITING YOUR APPROVAL"], "actions": ["Review the counter draft", "Adjust priorities", "Prepare decision"]},
+  "F-14n": {"spec": "C.17", "pages": [84, 85, 86], "header": null, "sections": ["YOUR POSITION - CONFIRMED WITH YOU", "TERM HISTORY - VERSIONS KEPT SEPARATE", "THE ASK - DRAFTED, AWAITING YOUR APPROVAL"], "actions": ["Review the counter draft", "Adjust priorities", "Prepare decision"]},
   "F-15": {"spec": "C.18", "pages": [82, 83], "header": ["Offer comparison", "Decision support - nothing accepted"], "sections": [], "actions": ["Negotiate", "Mark preference"]}
 };
 const BOUNDARY = /private|only you|nothing (is |was )?(sent|submitted|accepted|applied)|not applying|decision support|review(ed)? before|until you approve/i;
@@ -49,22 +49,29 @@ const PROBE = `(() => {
 R.suite(FILE, [9], [CHAT], async (t: Deno.TestContext, w: any) => {
   const person = await w.observedPerson(CHAT);
   const kinds = await import(`${helper}../../../supabase/functions/_shared/file_kinds.ts`);
+  const specimens = await import(`${helper}../../../supabase/functions/_shared/file_family_specimens.ts`).catch((e) => ({ FILE_FAMILIES: null, error: String(e?.message ?? e).slice(0, 200) }));
   const { createFileService, supabaseFileKindStore } = await import(`${helper}../../../supabase/functions/_shared/file_service.ts`);
   const svc = createFileService({ store: supabaseFileKindStore(w.admin), env: Deno.env, now: Date.now });
-  const fam: any[] = Array.isArray(kinds.FILE_FAMILIES) ? kinds.FILE_FAMILIES : [];
+  const fam: any[] = Array.isArray(specimens.FILE_FAMILIES) ? specimens.FILE_FAMILIES : [];
   await check(t, FILE, 9, "the fifteen File families are registered (F-01 ... F-15, spec C.3-C.18)", async (ev: any) => {
-    ev.reply = `FILE_FAMILIES: ${fam.map((f: any) => `${f.id} ${f.name}`).join("; ") || "(not exported)"}; KIND_IDS: ${kinds.KIND_IDS.join(", ")}`;
-    ok(fam.length === 15, `fifteen families, one per spec family (${fam.length}): ${FAMILIES.join(", ")}`);
+    ev.reply = `FILE_FAMILIES (file_family_specimens.ts): ${fam.map((f: any) => `${f.id} ${f.name}`).join("; ") || `(not exported${(specimens as any).error ? `: ${(specimens as any).error}` : ""})`}; KIND_IDS: ${kinds.KIND_IDS.join(", ")}`;
+    ok(fam.length === 16, `fifteen families plus F-14n, one per spec family (${fam.length}): ${FAMILIES.join(", ")}`);
+    ok(fam.some((f: any) => f.id === "F-14n"), "F-14n (the negotiation variant) is registered");
     for (let i = 1; i <= 15; i++) ok(fam.some((f: any) => f.id === `F-${String(i).padStart(2, "0")}`), `F-${String(i).padStart(2, "0")} is registered`);
   }, w);
   // The fifteen families, then the F-14 negotiation variant (spec C.17, Screen 16), registered as id "F-14-negotiation".
   for (let i = 0; i < 16; i++) {
-    const id = i < 15 ? `F-${String(i + 1).padStart(2, "0")}` : "F-14-negotiation";
+    const id = i < 15 ? `F-${String(i + 1).padStart(2, "0")}` : "F-14n";
     if (i === 15) FAMILIES.push("Negotiation plan (F-14 variant)");
     await check(t, FILE, 9, `${id} ${FAMILIES[i]}: opens on a phone with the shared anatomy (390 px, light and dark)`, async (ev: any) => {
       ev.target = TARGETS[id].pages.map((n) => `docs/architect/specs/app-layer-visuals/p-${n}.png`).join(" ");
       const f = fam.find((x: any) => x.id === id);
       ok(f, `${id} is registered (target ${ev.target})`);
+      // page(): the family's own render of its main state at a fixed clock (America/Chicago); it must be a page, and it is what
+      // the File service serves for the specimen.
+      ok(typeof f.page === "function", `${id}: page() is exported`);
+      const own = await f.page();
+      ok(typeof own === "string" && /<h1/i.test(own), `${id}: page() renders a page with a title`);
       const made = await svc.create(person, f.kind, f.specimen, { trusted: true });
       ok(made.ok, `${id}: the specimen is accepted: ${made.error}`);
       ok(made.url, `${id}: a File link was made`);

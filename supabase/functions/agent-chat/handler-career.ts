@@ -92,7 +92,7 @@ import { supabaseMemoryStore } from "../_shared/agent/memory.ts";
 import { codePending, readSituation } from "../_shared/career_situation.ts";
 import { statusRecordsFrom } from "../_shared/career_capabilities.ts";
 import { edgeRenderer, supabasePersonaStore, supabaseResumeStore } from "../_shared/career_tailor.ts";
-import { noApplyAsk, parseCheckWords, resumeTaskTurn } from "../_shared/career_resume_task.ts"; // R10 WO-A/B
+import { holdsCardApproval, noApplyAsk, parseCheckWords, RESUME_CLARIFY_INTENT, resumeTaskTurn } from "../_shared/career_resume_task.ts"; // R10 WO-A/B
 import { supabaseMailStore } from "../_shared/career_mail_store.ts";
 import { CONFIRM_INTENT, confirmWhichTurn, supabaseConfirmStore } from "../_shared/career_apply_confirm.ts";
 import { EMAIL_INTENT, emailTurn, supabaseEmailStore, supabaseResumes } from "../_shared/career_apply_email.ts";
@@ -630,7 +630,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // reply to a card still goes to the card).
       const offerLastWord = applyAllYesOn(Deno.env) && (isApplyAllYes(message) || isConditionalYes(message)) && !tapIn
         ? readOffer((await liveOfferRow(admin, tid).catch(() => null))?.meta) : null;
-      const card0 = !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      // CodeRabbit #1 on #634 (architect, round 5): after "don't apply" is the resume task's limit, "Send this one" or a bare yes
+      // never approves an open card here; the resume task (or the held reply below) asks which is meant.
+      const cardHold = holdsCardApproval((ctx as any).profile, message, Date.now());
+      const card0 = !cardHold && !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         // FEATURE 16: OWNER RULE (2026-10-26): no card without a confirmed resume on file (resumeReady).
         ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id), store: supabaseCardStore(admin), events })
         : null;
@@ -689,9 +692,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             uploaded: async () => { const r = await admin.from("career_resume_uploads").select("id").eq("user_id", user.id).limit(1); return !r.error && (r.data ?? []).length > 0; } } })
           .catch((e) => { console.error("resume task turn:", e?.message ?? e); return null; })
         : null;
-      if (resumeAns) planned = { claimed: true, reply: resumeAns.reply, intent: resumeAns.intent, resultStatus: resumeAns.resultStatus, parts: undefined, documents: resumeAns.documents, meta: null } as unknown as Extract<PlannerTurn, { claimed: true }>;
+      // CodeRabbit #2 (architect, round 5): a pending rewording preview is an exact payload (its pairs are hashed for the yes), so
+      // the reply writer and the channel shape leave it as shown (career_reply_writer.ts PAYLOAD_META).
+      if (resumeAns) planned = { claimed: true, reply: resumeAns.reply, intent: resumeAns.intent, resultStatus: resumeAns.resultStatus, parts: undefined, documents: resumeAns.documents,
+        meta: resumeAns.task?.proposed?.length ? { resume_preview: resumeAns.task.proposedHash ?? true } : null } as unknown as Extract<PlannerTurn, { claimed: true }>;
+      else if (cardHold) planned = { claimed: true, reply: "You asked me not to apply, so I haven't approved or sent anything. Do you want me to submit the application on your card, or send you the resume PDF?",
+        intent: RESUME_CLARIFY_INTENT, resultStatus: "awaiting_user", parts: undefined, documents: [], meta: null } as unknown as Extract<PlannerTurn, { claimed: true }>;
       // The planner calls the model: without a model key it is never tried (no failing call, no cost row), as the brain.
-      if (!resumeAns && !noApply && !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && plannerOn(Deno.env, user.id) && !!careerModelConfig(Deno.env).apiKey && !host.isHostControlled(message, ctx)) {
+      if (!resumeAns && !cardHold && !noApply && !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && plannerOn(Deno.env, user.id) && !!careerModelConfig(Deno.env).apiKey && !host.isHostControlled(message, ctx)) {
         const pMeter = ledger.track(newMeter()), pCfg = careerModelConfig(Deno.env);
         const pModel = (payload: any) => callModel(pCfg, payload, { meter: pMeter, role: "chat" });
         try {

@@ -187,7 +187,7 @@ export function resumeAskOf(message: string, task: ResumeTask | null, view: { co
     if (/\b(submit|apply)\b/.test(t)) return null;
     if (/\b(pdf|resume|to me|the file|download|send it to me)\b/.test(t)) return "send_pdf";
   }
-  if (AMBIGUOUS.test(t) && task?.file) return view.jobs > 0 ? "ask_send" : "send_pdf";
+  if (AMBIGUOUS.test(t) && task?.file) return view.jobs > 0 || task.limits.includes("no_apply") ? "ask_send" : "send_pdf";
   if (task?.proposed && (task.lastAsk === "edit" || task.lastAsk === "restyle") && view.resumeShown && /\b(fine|good|ok(ay)?|yes|use (it|that)|approve)\b/.test(t) && !/\b(no|not|don'?t)\b/.test(t)) return "approve_edit";
   if (task?.file && /\bbullet\b/.test(t) && /\b(less wordy|shorter|shorten|tighten|trim|concise|simplify)\b/.test(t)) return "edit";
   // A bare follow-up ("Make it warmer.") right after the resume was shown is about that resume, never a fresh tailor.
@@ -343,8 +343,29 @@ const b64 = (u: Uint8Array) => { let s = ""; for (let i = 0; i < u.length; i += 
 const hex = async (u: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(u)))].map((x) => x.toString(16).padStart(2, "0")).join("");
 
 // deno-lint-ignore no-explicit-any
+// CodeRabbit #1 on #634 (architect, round 5): after "don't apply" is a limit of this task, "Send this one" or a bare yes is never an
+// approval of an open card: the card step is held and the resume task asks which one is meant.
+const CARD_YES = /^\s*(?:yes|yep|yeah|ok(?:ay)?|sure|approve(?: it)?|send it|submit it|go(?: ahead)?|do it)\s*[.!]*\s*$/;
+export function holdsCardApproval(profile: any, message: string, now: number): boolean {
+  const task = profile?._resumeTask;
+  if (!task || typeof task !== "object" || !(now - Date.parse(task.at) < TASK_TTL_MS)) return false;
+  return Array.isArray(task.limits) && task.limits.includes("no_apply") && (AMBIGUOUS.test(lc(message)) || CARD_YES.test(lc(message)));
+}
+// CodeRabbit #8 (architect, round 5): an error once the message is the resume task's is a contained reply, never a fall-through
+// to the planner or an apply step.
+// deno-lint-ignore no-explicit-any
 export async function resumeTaskTurn(o: { message: string; ctx: any; userId: string; now: number;
-  deps: { file?: (data: Record<string, unknown>) => Promise<{ url: string } | { error: string }>; uploaded: () => Promise<boolean>; rewrite?: (bullet: string, ask: string) => Promise<string | null>; lastIntent?: () => Promise<string | null>; loadPool?: () => Promise<void> } }): Promise<ResumeTurn | null> {
+  deps: Parameters<typeof resumeTaskTurnInner>[0]["deps"] }): Promise<ResumeTurn | null> {
+  let claimed = false;
+  try { return await resumeTaskTurnInner(o, () => { claimed = true; }); } catch (e) {
+    if (!claimed) throw e;
+    const reason = String((e as Error)?.message ?? e).replace(/\s+/g, " ").slice(0, 160);
+    const task = (o.ctx?.profile?._resumeTask ?? null) as ResumeTask;
+    return { reply: `I couldn't finish the resume step: ${reason}. Nothing was applied or sent.`, intent: RESUME_TASK_INTENT, resultStatus: "failed", documents: [], link: null, task };
+  }
+}
+async function resumeTaskTurnInner(o: { message: string; ctx: any; userId: string; now: number;
+  deps: { file?: (data: Record<string, unknown>) => Promise<{ url: string } | { error: string }>; uploaded: () => Promise<boolean>; rewrite?: (bullet: string, ask: string) => Promise<string | null>; lastIntent?: () => Promise<string | null>; loadPool?: () => Promise<void> } }, claim: () => void = () => {}): Promise<ResumeTurn | null> {
   const profile = o.ctx?.profile;
   if (!profile || typeof profile !== "object" || !(profile.facts || []).some((f: Fact) => f && SECTION[f.kind])) return null;
   // The task lapses after a day without a turn of its own (review of #634): an old target is never carried into a new day's asks.
@@ -373,6 +394,7 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
   if (ask === "target_field" && !prior?.which) ask = null;
   const named = unclear?.kind === "ask" ? null : ask === "target_field" ? prior!.which!.target : targetOf(o.message, hints);
   if (!ask || !named && !prior && unclear?.kind !== "ask") { if (prior) { prior.pending = null; prior.proposed = null; } return null; }
+  claim();
   const target = named ?? prior?.target ?? (unclear as { target: Target }).target;
   const task: ResumeTask = { target, limits: [...new Set([...(prior?.limits ?? []), ...limitsOf(o.message)])], rejected: rejectedOf(o.message) ?? prior?.rejected ?? null,
     said: prior && prior.target.label === target.label ? [...prior.said] : [], asked: [...(prior?.asked ?? [])], file: prior?.file ?? null, pending: null, at: new Date(o.now).toISOString(),
@@ -474,8 +496,9 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
     task.pending = "send_choice";
     profile._resumeTask = task;
     const n = shortlist.length;
-    const which = n === 1 ? "the job I listed" : `one of the ${n} jobs I listed`;
-    return { reply: `Do you mean submit an application for ${which}, or send you the resume PDF for ${task.file!.label}? Nothing is sent until you say.`, intent: RESUME_CLARIFY_INTENT, resultStatus: "awaiting_user", documents: [], link: null, task };
+    const which = n === 0 ? "the application on your card" : n === 1 ? "the job I listed" : `one of the ${n} jobs I listed`;
+    const held = task.limits.includes("no_apply") ? " You asked me not to apply, so I haven't approved anything." : "";
+    return { reply: `Do you mean submit ${n === 0 ? which : `an application for ${which}`}, or send you the resume PDF for ${task.file!.label}?${held} Nothing is sent until you say.`, intent: RESUME_CLARIFY_INTENT, resultStatus: "awaiting_user", documents: [], link: null, task };
   }
   // The last resume file this person was given, by its target: ours, or the posting tailor's (142 _careerRouterArtifacts).
   const lastWasOther = ask === "correct" && (routerLast && (!prior?.file || Date.parse(routerLast.at || routerLast.created_at || "") > Date.parse(prior.at)) || (prior?.file && prior.file.label !== target.label));

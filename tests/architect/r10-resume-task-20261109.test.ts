@@ -22,7 +22,7 @@ import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, SUPABASE_URL, supabaseParity, type Turn } from "../flow/handler.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
 import { CareerProfile } from "../../supabase/functions/_shared/router_core.career.js";
-import { buildResume, jobNumberOf, parseCheckWords, readTarget, resumeAskOf, resumeTaskTurn, targetOf, titleShaped } from "../../supabase/functions/_shared/career_resume_task.ts";
+import { buildResume, holdsCardApproval, jobNumberOf, parseCheckWords, readTarget, resumeAskOf, resumeTaskTurn, targetOf, titleShaped } from "../../supabase/functions/_shared/career_resume_task.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -120,7 +120,7 @@ Deno.test({
         ${OLD.map((p, i) => `('${p.key}', 'greenhouse', '${p.board}', '${p.company}', '${p.title}', '${p.location}', '${p.url}', now() - interval '${i} hours', '${desc}', 'r10old${i}')`).join(",")};`);
       h = await careerHandler(pg, { "tok-a": A, "tok-b": B });
       const viaDouble = globalThis.fetch, outbound: string[] = [];
-      let modelCalls = 0;
+      let modelCalls = 0, otherCalls = 0;
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         // deno-lint-ignore no-explicit-any
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
@@ -131,6 +131,7 @@ Deno.test({
           modelCalls++;
           const sys = String(chat.messages?.find((m: { role: string }) => m.role === "system")?.content ?? "");
           const asked = String(chat.messages?.find((m: { role: string }) => m.role === "user")?.content ?? "");
+          if (!/Rewrite one resume bullet/.test(sys)) otherCalls++;
           const content = !/Rewrite one resume bullet/.test(sys) ? "{}" : /warmer/i.test(asked) && asked.includes(SHORTER) ? WARMER : SHORTER;
           return new Response(JSON.stringify({ id: "chatcmpl-test", model: chat.model, choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }], usage: { prompt_tokens: 10, completion_tokens: 1 } }), { headers: { "content-type": "application/json" } });
         });
@@ -298,12 +299,23 @@ Deno.test({
         assertNode.ok(!(await swaps()).includes(WARMER), "the shown rewording was not approved by the answer to another question");
         const facts = await pg.sql(`select (state->'career'->'stores'->'profile'->'facts')::text from public.agent_flow_state where user_id = '${A}' and thread_id = '${a.chat.thread()}'`);
         assertNode.ok(/New job at Acme \(TEST\): Analyst since May/.test(facts) && /"status": "draft"/.test(facts), "the title is kept with the fact, unconfirmed");
+        // CodeRabbit #2 (architect, round 5): with the reply writer on, the preview is an exact payload: no writer or shape call,
+        // and the person sees exactly the hashed pairs.
+        Deno.env.set("CAREER_REPLY_WRITER", "on");
+        const before = otherCalls;
         const again = await a.say("Make it warmer.");
-        assertNode.ok(/^New: /m.test(again.reply), `shown again: ${again.reply}`);
+        const writerCalls = otherCalls - before;
+        Deno.env.delete("CAREER_REPLY_WRITER");
+        assertNode.ok(/^New: /m.test(again.reply) && again.reply.includes(`New: ${WARMER}`), `shown again, exactly: ${again.reply}`);
+        assertNode.equal(writerCalls, 0, "the writer never touches the preview");
+        assertNode.ok(again.body.meta?.resume_preview && !again.body.meta?.reply_writer && !again.body.meta?.reply_shape, `marked as an exact payload: ${JSON.stringify(again.body.meta)}`);
         const fixed = await a.say(T3);
         assertNode.equal(fixed.intent, "career_resume_task", "the correction is the task's");
         const yesAfter = await a.say("yes");
         assertNode.ok(yesAfter.intent !== "career_resume_task" && !(await swaps()).includes(WARMER), `a yes after a target correction approves no old rewording: ${yesAfter.intent}: ${yesAfter.reply}`);
+        // CodeRabbit #1 (architect, round 5): T3 said "don't apply", so a bare yes is never a card approval: it is asked about.
+        assertNode.ok(yesAfter.intent === "career_resume_clarify" && /haven't approved or sent anything/.test(yesAfter.reply), `held, asked: ${yesAfter.intent}: ${yesAfter.reply}`);
+        await nothingApplied(A);
         // Review of #634 (b): a shown rewording answers only the very next turn. Another reply comes between; a plain yes is then
         // that reply's, never an approval of the old rewording, and no file is made.
         eq((await a.say("send me the resume PDF again")).intent, "career_resume_task");
@@ -625,6 +637,28 @@ Deno.test("fact_detail/1 a search, a question and a bare yes are never stored as
   for (const t of ["Thanks", "Perfect", "Great", "Cool", "Hello", "Wait", "LOL"]) assertNode.equal(titleShaped(t), false, t);
   assertNode.ok(titleShaped("Analyst"), "Analyst");
   for (const t of ["ok, Analyst since May", "Data Analyst, started June 2026", "Sous Chef", "Junior Software Engineer"]) { assertNode.equal(resumeAskOf(t, task, view), "fact_detail", t); assertNode.ok(titleShaped(t), t); }
+});
+
+// CodeRabbit #1 and #8 on #634 (architect, round 5): after "don't apply", "Send this one" or a bare yes is held from the card step
+// and asked about; an error once the message is the task's is a contained reply.
+Deno.test("hold/1 'don't apply' holds a card approval; a resume-step error is a contained reply", async () => {
+  const p = intake("", true);
+  const at = Date.parse("2026-11-09T12:00:00Z");
+  const turn = (message: string) => resumeTaskTurn({ message, ctx: { profile: p }, userId: "u-r10", now: at, deps: { uploaded: async () => false, lastIntent: async () => "career_resume_task" } });
+  assertNode.ok((await turn(T1))?.task.file, "the resume is made");
+  for (const m of ["Send this one.", "yes", "approve"]) assertNode.equal(holdsCardApproval(p, m, at), false, `${m}: no limit yet`);
+  assertNode.ok((await turn(T3))?.task.limits.includes("no_apply"), "T3 keeps 'don't apply'");
+  for (const m of ["Send this one.", "send it", "yes", "Yes.", "approve"]) assertNode.equal(holdsCardApproval(p, m, at), true, `${m}: held`);
+  for (const m of ["send me the resume PDF", "find data analyst jobs"]) assertNode.equal(holdsCardApproval(p, m, at), false, `${m}: not an approval`);
+  assertNode.equal(holdsCardApproval(p, "yes", at + 25 * 3600_000), false, "a lapsed task holds nothing");
+  const send = await turn("Send this one.");
+  assertNode.ok(send && send.intent === "career_resume_clarify" && /haven't approved anything/.test(send.reply) && !send.documents.length, `asked, with no job list: ${send?.reply}`);
+  // An error after the message is the task's: a contained reply, not a fall-through to the planner or an apply step.
+  // (An unreadable clock throws inside the step once T1 has claimed the message.)
+  const boom = await resumeTaskTurn({ message: T1, ctx: { profile: intake("", true) }, userId: "u-r10", now: Number.NaN, deps: { uploaded: async () => false } });
+  assertNode.ok(boom && /^I couldn't finish the resume step: Invalid time value\. Nothing was applied or sent\.$/.test(boom.reply) && boom.resultStatus === "failed" && !boom.documents.length, `contained: ${boom?.reply}`);
+  // A message that is not the task's still falls through as before.
+  assertNode.equal(await resumeTaskTurn({ message: "what's the weather", ctx: { profile: p }, userId: "u-r10", now: at, deps: { uploaded: async () => false } }), null);
 });
 
 // Re-review of #644 (7): a number is a job number only with a cue.
